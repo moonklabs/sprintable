@@ -3,7 +3,8 @@ import { NextResponse } from 'next/server';
 import { createSupabaseServerClient } from '@/lib/supabase/server';
 import { getMyTeamMember } from '@/lib/auth-helpers';
 import { handleApiError } from '@/lib/api-error';
-import { apiSuccess, ApiErrors } from '@/lib/api-response';
+import { apiSuccess, apiError, ApiErrors } from '@/lib/api-response';
+import { isOssMode } from '@/lib/storage/factory';
 import {
   buildSlackConnectUrl,
   isExpiredIsoTimestamp,
@@ -51,6 +52,7 @@ function buildConnectUrl(orgId: string, projectId: string) {
 }
 
 export async function GET() {
+  if (isOssMode()) return apiError('NOT_AVAILABLE', 'Not available in OSS mode.', 503);
   try {
     const ctx = await requireAdminContext();
     if ('error' in ctx) return ctx.error;
@@ -140,6 +142,7 @@ export async function GET() {
 }
 
 export async function PUT(request: Request) {
+  if (isOssMode()) return apiError('NOT_AVAILABLE', 'Not available in OSS mode.', 503);
   try {
     const ctx = await requireAdminContext();
     if ('error' in ctx) return ctx.error;

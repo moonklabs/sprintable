@@ -1,4 +1,6 @@
 import { createClient, type SupabaseClient } from '@supabase/supabase-js';
+import { apiError } from '@/lib/api-response';
+import { isOssMode } from '@/lib/storage/factory';
 import { BridgeInboundService } from '@/services/bridge-inbound';
 import { AgentHitlService, HitlConflictError } from '@/services/agent-hitl';
 import { syncSlackHitlRequestState, type SlackHitlRequestContext } from '@/services/slack-hitl';
@@ -64,6 +66,7 @@ async function loadHitlRequest(supabase: Pick<SupabaseClient, 'from'>, requestId
 }
 
 export async function POST(request: Request) {
+  if (isOssMode()) return apiError('NOT_AVAILABLE', 'Not available in OSS mode.', 503);
   const signingSecret = process.env['SLACK_SIGNING_SECRET'];
   if (!signingSecret) {
     return Response.json({ text: 'Slack signing secret missing' }, { status: 500 });

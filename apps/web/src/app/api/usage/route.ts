@@ -1,10 +1,12 @@
 import { createSupabaseServerClient } from '@/lib/supabase/server';
 import { handleApiError } from '@/lib/api-error';
 import { apiSuccess, ApiErrors } from '@/lib/api-response';
+import { isOssMode } from '@/lib/storage/factory';
 import { getMyTeamMember } from '@/lib/auth-helpers';
 
 /** GET /api/usage — AC5: 조직의 현재 월 usage meters */
 export async function GET() {
+  if (isOssMode()) return apiSuccess([]);
   try {
     const supabase = await createSupabaseServerClient();
     const { data: { user } } = await supabase.auth.getUser();

@@ -1,5 +1,6 @@
 import { createClient } from '@supabase/supabase-js';
 import { apiError, apiSuccess } from '@/lib/api-response';
+import { isOssMode } from '@/lib/storage/factory';
 import { BridgeInboundService } from '@/services/bridge-inbound';
 import {
   normalizeSlackEvent,
@@ -11,6 +12,7 @@ import {
 } from '@/services/slack-inbound';
 
 export async function POST(request: Request) {
+  if (isOssMode()) return apiError('NOT_AVAILABLE', 'Not available in OSS mode.', 503);
   const signingSecret = process.env['SLACK_SIGNING_SECRET'];
   if (!signingSecret) {
     return apiError('CONFIGURATION_ERROR', 'Slack signing secret not configured', 500);

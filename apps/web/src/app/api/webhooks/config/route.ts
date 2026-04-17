@@ -1,10 +1,12 @@
 import { createSupabaseServerClient } from '@/lib/supabase/server';
 import { handleApiError } from '@/lib/api-error';
-import { apiSuccess, ApiErrors } from '@/lib/api-response';
+import { apiSuccess, apiError, ApiErrors } from '@/lib/api-response';
+import { isOssMode } from '@/lib/storage/factory';
 import { getMyTeamMember } from '@/lib/auth-helpers';
 
 /** GET — 내 웹훅 설정 목록 */
 export async function GET() {
+  if (isOssMode()) return apiError('NOT_AVAILABLE', 'Not available in OSS mode.', 503);
   try {
     const supabase = await createSupabaseServerClient();
     const { data: { user } } = await supabase.auth.getUser();
@@ -26,6 +28,7 @@ export async function GET() {
 
 /** PUT — 웹훅 설정 upsert */
 export async function PUT(request: Request) {
+  if (isOssMode()) return apiError('NOT_AVAILABLE', 'Not available in OSS mode.', 503);
   try {
     const supabase = await createSupabaseServerClient();
     const { data: { user } } = await supabase.auth.getUser();

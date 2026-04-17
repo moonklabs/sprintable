@@ -1,5 +1,6 @@
 import { createClient } from '@supabase/supabase-js';
 import { apiSuccess, apiError } from '@/lib/api-response';
+import { isOssMode } from '@/lib/storage/factory';
 import { AgentRetryService } from '@/services/agent-retry';
 import { fireWebhooks } from '@/services/webhook-notify';
 
@@ -16,6 +17,7 @@ const CRON_SECRET = process.env.CRON_SECRET;
  * GET /api/cron/retry-agent-runs?secret=CRON_SECRET
  */
 export async function GET(request: Request) {
+  if (isOssMode()) return apiSuccess({ ok: true, skipped: true });
   // cron 인증
   const authHeader = request.headers.get('authorization');
   if (CRON_SECRET && authHeader !== `Bearer ${CRON_SECRET}`) {
