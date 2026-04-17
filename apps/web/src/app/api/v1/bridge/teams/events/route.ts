@@ -1,8 +1,11 @@
 import { createClient } from '@supabase/supabase-js';
+import { apiError } from '@/lib/api-response';
+import { isOssMode } from '@/lib/storage/factory';
 import { BridgeInboundService } from '@/services/bridge-inbound';
 import { getTeamsSourceChannelId, normalizeTeamsActivity, resolveTeamsInboundConfig, shouldIgnoreTeamsActivity, verifyTeamsRequest, type TeamsActivity } from '@/services/teams-inbound';
 
 export async function POST(request: Request) {
+  if (isOssMode()) return apiError('NOT_AVAILABLE', 'Not available in OSS mode.', 503);
   const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL;
   const serviceRoleKey = process.env.SUPABASE_SERVICE_ROLE_KEY;
   if (!supabaseUrl || !serviceRoleKey) {

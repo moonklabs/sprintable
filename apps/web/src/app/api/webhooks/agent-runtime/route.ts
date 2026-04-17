@@ -1,6 +1,7 @@
 import { createClient, type SupabaseClient } from '@supabase/supabase-js';
 import { z } from 'zod';
 import { apiError, apiSuccess } from '@/lib/api-response';
+import { isOssMode } from '@/lib/storage/factory';
 import { AgentExecutionLoop } from '@/services/agent-execution-loop';
 
 const routingSchema = z.object({
@@ -136,6 +137,7 @@ async function validateWebhookSecret(
 }
 
 export async function POST(request: Request) {
+  if (isOssMode()) return apiError('NOT_AVAILABLE', 'Not available in OSS mode.', 503);
   const supabase = createClient(
     process.env.NEXT_PUBLIC_SUPABASE_URL!,
     process.env.SUPABASE_SERVICE_ROLE_KEY!,
