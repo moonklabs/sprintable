@@ -115,6 +115,7 @@ function createSupabaseStub(options?: {
 
 afterEach(() => {
   delete process.env.SLACK_BOT_TOKEN;
+  delete process.env.APP_BASE_URL;
   delete process.env.VERCEL_PROJECT_PRODUCTION_URL;
   delete process.env.VERCEL_URL;
   vi.restoreAllMocks();
@@ -140,10 +141,10 @@ describe('slack outbound helpers', () => {
     expect(text).toContain('전체 내용은 Sprintable에서 확인하세요 https://app.example.com/memos?id=memo-1');
   });
 
-  it('falls back to the production app URL when explicit appUrl is missing', () => {
-    process.env.VERCEL_PROJECT_PRODUCTION_URL = 'sprintable.vercel.app';
+  it('falls back to APP_BASE_URL when explicit appUrl is missing', () => {
+    process.env.APP_BASE_URL = 'https://myapp.example.com';
 
-    expect(buildSlackMemoLink(undefined, 'memo-1')).toBe('https://sprintable.vercel.app/memos?id=memo-1');
+    expect(buildSlackMemoLink(undefined, 'memo-1')).toBe('https://myapp.example.com/memos?id=memo-1');
   });
 });
 

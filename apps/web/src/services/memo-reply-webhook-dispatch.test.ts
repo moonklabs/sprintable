@@ -72,6 +72,7 @@ function createSupabaseStub(options?: {
 }
 
 afterEach(() => {
+  delete process.env.APP_BASE_URL;
   delete process.env.VERCEL_PROJECT_PRODUCTION_URL;
   delete process.env.VERCEL_URL;
 });
@@ -84,7 +85,7 @@ describe('dispatchWorkflowMemoReplyWebhooks', () => {
     const result = await dispatchWorkflowMemoReplyWebhooks({
       supabase,
       fetchFn: fetchFn as typeof fetch,
-      appUrl: 'https://sprintable.vercel.app',
+      appUrl: 'https://app.example.com',
       memo: {
         id: 'memo-1',
         org_id: 'org-1',
@@ -118,11 +119,11 @@ describe('dispatchWorkflowMemoReplyWebhooks', () => {
     const firstPayload = JSON.parse(String(fetchFn.mock.calls[0]?.[1]?.body));
     expect(firstPayload.embeds?.[0]?.title).toBe('💬 답장: 까심 아르야');
     expect(String(firstPayload.embeds?.[0]?.description)).toContain('Sprintable reply lane fix');
-    expect(String(firstPayload.embeds?.[0]?.description)).toContain('https://sprintable.vercel.app/memos?id=memo-1');
+    expect(String(firstPayload.embeds?.[0]?.description)).toContain('https://app.example.com/memos?id=memo-1');
   });
 
-  it('falls back to the production app URL when appUrl is omitted', async () => {
-    process.env.VERCEL_PROJECT_PRODUCTION_URL = 'sprintable.vercel.app';
+  it('falls back to APP_BASE_URL when appUrl is omitted', async () => {
+    process.env.APP_BASE_URL = 'https://app.example.com';
     const fetchFn = vi.fn<typeof fetch>().mockResolvedValue(new Response(null, { status: 204 }));
     const supabase = createSupabaseStub();
 
@@ -147,7 +148,7 @@ describe('dispatchWorkflowMemoReplyWebhooks', () => {
     });
 
     const firstPayload = JSON.parse(String(fetchFn.mock.calls[0]?.[1]?.body));
-    expect(String(firstPayload.embeds?.[0]?.description)).toContain('https://sprintable.vercel.app/memos?id=memo-1');
+    expect(String(firstPayload.embeds?.[0]?.description)).toContain('https://app.example.com/memos?id=memo-1');
   });
 
   it('skips Discord source memos because bridge-based reply handling owns that path', async () => {

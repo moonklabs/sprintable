@@ -312,29 +312,29 @@ describe('BackgroundRuntimeWorker', () => {
     });
   });
 
-  it('falls back to the production Vercel URL when NEXT_PUBLIC_APP_URL is missing', () => {
+  it('falls back to the Vercel URL when APP_BASE_URL is missing', () => {
     createClientMock.mockReturnValue({ tag: 'supabase-client' });
 
     createBackgroundRuntimeWorkerFromEnv({
       NODE_ENV: 'production',
       NEXT_PUBLIC_SUPABASE_URL: 'https://supabase.example.com',
       SUPABASE_SERVICE_ROLE_KEY: 'service-role-key',
-      VERCEL_PROJECT_PRODUCTION_URL: 'sprintable.vercel.app',
+      VERCEL_PROJECT_PRODUCTION_URL: 'myapp.vercel.app',
       SPRINTABLE_RUNTIME_ROLE: 'worker',
     } as NodeJS.ProcessEnv);
 
     expect(slackCtorMock).toHaveBeenCalledWith({
       supabase: { tag: 'supabase-client' },
-      appUrl: 'https://sprintable.vercel.app',
+      appUrl: 'https://myapp.vercel.app',
     });
     expect(discordCtorMock).toHaveBeenCalledWith({
       supabase: { tag: 'supabase-client' },
-      appUrl: 'https://sprintable.vercel.app',
+      appUrl: 'https://myapp.vercel.app',
       pollingIntervalMs: DEFAULT_PRODUCTION_BACKGROUND_POLLING_INTERVAL_MS,
     });
     expect(teamsCtorMock).toHaveBeenCalledWith({
       supabase: { tag: 'supabase-client' },
-      appUrl: 'https://sprintable.vercel.app',
+      appUrl: 'https://myapp.vercel.app',
       pollingIntervalMs: DEFAULT_PRODUCTION_BACKGROUND_POLLING_INTERVAL_MS,
     });
   });
