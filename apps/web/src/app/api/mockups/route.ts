@@ -6,9 +6,11 @@ import { apiSuccess, ApiErrors } from '@/lib/api-response';
 import { getMyTeamMember } from '@/lib/auth-helpers';
 import { checkResourceLimit } from '@/lib/check-feature';
 import { apiError } from '@/lib/api-response';
+import { isOssMode } from '@/lib/storage/factory';
 
 /** GET — 목업 목록 (페이지네이션) */
 export async function GET(request: Request) {
+  if (isOssMode()) return apiSuccess([]);
   try {
     const supabase = await createSupabaseServerClient();
     const { data: { user } } = await supabase.auth.getUser();
@@ -29,6 +31,7 @@ export async function GET(request: Request) {
 
 /** POST — 목업 생성 */
 export async function POST(request: Request) {
+  if (isOssMode()) return apiError('NOT_IMPLEMENTED', 'Mockups are not available in OSS mode.', 501);
   try {
     const supabase = await createSupabaseServerClient();
     const { data: { user } } = await supabase.auth.getUser();

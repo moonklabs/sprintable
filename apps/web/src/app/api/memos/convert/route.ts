@@ -2,9 +2,11 @@ import { createSupabaseServerClient } from '@/lib/supabase/server';
 import { handleApiError } from '@/lib/api-error';
 import { apiSuccess, apiError, ApiErrors } from '@/lib/api-response';
 import { getMyTeamMember } from '@/lib/auth-helpers';
+import { isOssMode } from '@/lib/storage/factory';
 
 /** POST — 메모를 스토리로 전환 */
 export async function POST(request: Request) {
+  if (isOssMode()) return apiError('NOT_IMPLEMENTED', 'Memo conversion is not available in OSS mode.', 501);
   try {
     const supabase = await createSupabaseServerClient();
     const { data: { user } } = await supabase.auth.getUser();
