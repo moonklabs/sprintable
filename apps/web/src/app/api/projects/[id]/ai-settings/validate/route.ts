@@ -7,6 +7,8 @@ import { requireOrgAdmin } from '@/lib/admin-check';
 import { validateCustomEndpoint } from '@/lib/llm/config';
 import type { LLMProvider } from '@/lib/llm';
 
+import { isOssMode } from '@/lib/storage/factory';
+
 type RouteParams = { params: Promise<{ id: string }> };
 
 const validateKeySchema = z.object({
@@ -25,6 +27,16 @@ const validateKeySchema = z.object({
 
 /** POST — validate a BYOM API key by making a lightweight provider call */
 export async function POST(request: Request, { params }: RouteParams) {
+  if (isOssMode()) {
+    const { id } = await params;
+    const rawBody = await request.json().catch(() => null);
+    const parsed = validateKeySchema.safeParse(rawBody);
+    if (!parsed.success) return ApiErrors.badRequest(parsed.error.issues.map((i) => i.message).join(', '));
+    const { provider, api_key, base_url } = parsed.data;
+    const normalizedBaseUrl = base_url?.trim() ? validateCustomEndpoint(base_url, provider) : undefined;
+    const valid = await testProviderKey(provider, api_key, normalizedBaseUrl);
+    return apiSuccess({ valid, project_id: id });
+  }
   try {
     const { id } = await params;
     const supabase = await createSupabaseServerClient();
