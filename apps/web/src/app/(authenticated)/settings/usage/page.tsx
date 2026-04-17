@@ -6,7 +6,11 @@ import { UsageDashboard } from '@/components/settings/usage-dashboard';
 
 export default async function UsagePage() {
   if (isOssMode()) {
-    return <UsageDashboard />;
+    return (
+      <div className="p-6 text-muted-foreground">
+        Usage tracking is disabled in OSS mode.
+      </div>
+    );
   }
 
   const supabase = await createSupabaseServerClient();
