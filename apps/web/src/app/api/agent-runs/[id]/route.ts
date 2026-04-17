@@ -1,4 +1,4 @@
-import { z } from 'zod/v4';
+import { z } from 'zod';
 import type { SupabaseClient } from '@supabase/supabase-js';
 import { createSupabaseServerClient } from '@/lib/supabase/server';
 import { createSupabaseAdminClient } from '@/lib/supabase/admin';
@@ -44,7 +44,7 @@ export async function PATCH(request: Request, { params }: RouteParams) {
 
     const parsed = updateAgentRunSchema.safeParse(rawBody);
     if (!parsed.success) {
-      const issues = parsed.error.issues.map((i) => ({ path: i.path.join('.'), message: i.message }));
+      const issues = parsed.error.issues.map((i: z.core.$ZodIssue) => ({ path: i.path.join('.'), message: i.message }));
       return ApiErrors.validationFailed(issues);
     }
     const body = parsed.data;
