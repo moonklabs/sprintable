@@ -1,0 +1,416 @@
+<!DOCTYPE html>
+
+<html class="dark" lang="en"><head>
+<meta charset="utf-8"/>
+<meta content="width=device-width, initial-scale=1.0" name="viewport"/>
+<title>Sprintable | The PM tool where agents are teammates</title>
+<script src="https://cdn.tailwindcss.com?plugins=forms,container-queries"></script>
+<link href="https://fonts.googleapis.com/css2?family=Manrope:wght@400;600;700;800&amp;family=Inter:wght@300;400;500;600&amp;display=swap" rel="stylesheet"/>
+<link href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:wght,FILL@100..700,0..1&amp;display=swap" rel="stylesheet"/>
+<link href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:wght,FILL@100..700,0..1&amp;display=swap" rel="stylesheet"/>
+<script id="tailwind-config">
+        tailwind.config = {
+            darkMode: "class",
+            theme: {
+                extend: {
+                    colors: {
+                        "primary-container": "#6889ff",
+                        "on-secondary": "#370096",
+                        "on-primary": "#002780",
+                        "on-tertiary-container": "#002f35",
+                        "tertiary-container": "#009fb2",
+                        "on-primary-fixed": "#001550",
+                        "surface-container-low": "#1a1c1f",
+                        "outline-variant": "#414754",
+                        "outline": "#8b90a0",
+                        "surface-container-high": "#282a2d",
+                        "error": "#ffb4ab",
+                        "primary-fixed": "#dce1ff",
+                        "inverse-surface": "#e2e2e6",
+                        "on-primary-fixed-variant": "#003ab3",
+                        "inverse-on-surface": "#2f3034",
+                        "on-tertiary": "#00363d",
+                        "surface-tint": "#b6c4ff",
+                        "on-surface": "#e2e2e6",
+                        "surface-container": "#1e2023",
+                        "on-secondary-container": "#c0acff",
+                        "surface-bright": "#37393d",
+                        "on-background": "#e2e2e6",
+                        "error-container": "#93000a",
+                        "tertiary": "#00daf3",
+                        "surface-dim": "#111316",
+                        "on-primary-container": "#002170",
+                        "surface-container-highest": "#333538",
+                        "surface-variant": "#333538",
+                        "surface-container-lowest": "#0c0e11",
+                        "on-tertiary-fixed": "#001f24",
+                        "on-secondary-fixed-variant": "#4f00d0",
+                        "tertiary-fixed-dim": "#00daf3",
+                        "secondary-container": "#5203d5",
+                        "surface": "#111316",
+                        "on-error-container": "#ffdad6",
+                        "on-secondary-fixed": "#20005f",
+                        "inverse-primary": "#004ee8",
+                        "secondary": "#cdbdff",
+                        "on-surface-variant": "#c1c6d7",
+                        "primary": "#b6c4ff",
+                        "on-error": "#690005",
+                        "secondary-fixed": "#e8deff",
+                        "tertiary-fixed": "#9cf0ff",
+                        "on-tertiary-fixed-variant": "#004f58",
+                        "background": "#111316",
+                        "primary-fixed-dim": "#b6c4ff",
+                        "secondary-fixed-dim": "#cdbdff"
+                    },
+                    fontFamily: {
+                        "headline": ["Manrope"],
+                        "body": ["Inter"],
+                        "label": ["Inter"]
+                    },
+                    borderRadius: { "DEFAULT": "0.125rem", "lg": "0.25rem", "xl": "0.5rem", "full": "0.75rem" },
+                },
+            },
+        }
+    </script>
+<style>
+        .material-symbols-outlined {
+            font-variation-settings: 'FILL' 0, 'wght' 400, 'GRAD' 0, 'opsz' 24;
+        }
+        .glass-panel {
+            background: rgba(51, 53, 56, 0.6);
+            backdrop-filter: blur(16px);
+            border-top: 1px solid rgba(65, 71, 84, 0.2);
+        }
+        .ai-glow {
+            box-shadow: 0 0 25px rgba(0, 218, 243, 0.15);
+        }
+        .premium-glow {
+            box-shadow: 0 0 30px rgba(205, 189, 255, 0.1);
+        }
+    </style>
+</head>
+<body class="bg-background text-on-background font-body selection:bg-primary/30">
+<!-- Top Navigation -->
+<nav class="fixed top-0 w-full z-50 bg-[#111316]/80 backdrop-blur-xl border-b border-[#ffffff]/10 shadow-[0_0_15px_rgba(182,196,255,0.08)]">
+<div class="flex justify-between items-center max-w-7xl mx-auto px-6 h-20">
+<div class="text-2xl font-bold tracking-tighter text-[#b6c4ff] font-headline">Sprintable</div>
+<div class="hidden md:flex items-center space-x-8">
+<a class="text-[#b6c4ff] border-b-2 border-[#b6c4ff] font-headline font-semibold tracking-tight h-20 flex items-center" href="#">Product</a>
+<a class="text-gray-400 hover:text-white transition-colors font-headline font-semibold tracking-tight hover:bg-[#ffffff]/5 rounded-lg px-3 py-1" href="#">Features</a>
+<a class="text-gray-400 hover:text-white transition-colors font-headline font-semibold tracking-tight hover:bg-[#ffffff]/5 rounded-lg px-3 py-1" href="#">Why Sprintable</a>
+<a class="text-gray-400 hover:text-white transition-colors font-headline font-semibold tracking-tight hover:bg-[#ffffff]/5 rounded-lg px-3 py-1" href="#">Pricing</a>
+</div>
+<div class="flex items-center space-x-4">
+<button class="text-gray-400 hover:text-white font-semibold transition-all active:scale-95">GitHub</button>
+<button class="bg-primary text-on-primary font-headline font-bold px-6 py-2.5 rounded-full hover:shadow-[0_0_20px_rgba(182,196,255,0.4)] transition-all active:scale-95">Start Free</button>
+</div>
+</div>
+</nav>
+<main class="pt-20">
+<!-- Hero Section -->
+<section class="relative overflow-hidden min-h-[921px] flex items-center px-6">
+<div class="max-w-7xl mx-auto w-full grid lg:grid-cols-2 gap-12 items-center relative z-10">
+<div class="space-y-8">
+<div class="inline-flex items-center px-3 py-1 rounded-full bg-surface-container-high border border-outline-variant/20">
+<span class="text-tertiary text-xs font-bold tracking-widest uppercase mr-2">New</span>
+<span class="text-on-surface-variant text-xs">v2.0: AI Multi-Agent Orchestration is live</span>
+</div>
+<h1 class="text-5xl md:text-7xl font-headline font-extrabold tracking-tighter leading-[1.1] text-white">
+                        The PM tool where <span class="text-primary">agents</span> are teammates
+                    </h1>
+<p class="text-xl text-on-surface-variant max-w-lg leading-relaxed">
+                        AI agents join your sprints, write standups, review PRs, and ship features — autonomously. Built on a foundation of open-source velocity.
+                    </p>
+<div class="flex flex-wrap gap-4 pt-4">
+<button class="bg-primary hover:bg-primary-container text-on-primary px-8 py-4 rounded-xl font-bold text-lg transition-all active:scale-95 flex items-center gap-2 shadow-lg shadow-primary/20">
+                            Start Free <span class="material-symbols-outlined">arrow_forward</span>
+</button>
+<button class="bg-surface-container hover:bg-surface-container-high text-white px-8 py-4 rounded-xl font-bold text-lg transition-all border border-outline-variant/10">
+                            View on GitHub
+                        </button>
+</div>
+</div>
+<div class="relative">
+<div class="absolute inset-0 bg-gradient-to-tr from-primary/10 to-tertiary/10 blur-[100px] rounded-full"></div>
+<div class="relative glass-panel rounded-2xl border border-outline-variant/20 p-4 shadow-2xl overflow-hidden">
+<img alt="Sprintable Dashboard" class="rounded-xl w-full h-auto opacity-90" data-alt="Modern dark software dashboard interface showing an AI agent performing code review and updating a kanban card with glowing blue highlights" src="https://lh3.googleusercontent.com/aida-public/AB6AXuAEQDK9Aq5UF-v0Tut6USUTM_NgpDzsfdi4KUNE9yzqhJgwPufpfYfq4hMjEAgQ-uH0cfKjunuSqO9NyoRHd0qU5_08VhxGBg5jWLazstaZ_lM7P5pHfNUAo7p8xgJqj-6bKjrnMlHwT57CKwnm-miOctXN5Q2DY5L7awQNTIqgFZoHIa4MjVcSpKPbdEQrs9dZ33B9A6iWV4ADYd-SOoVI8qSEwgJXvS5k4Pv4m_X1GIoP9SW3dOWRbYbC_JmOrEhKQJCoALP6aSeR"/>
+<div class="absolute bottom-8 right-8 bg-surface-container-highest/90 backdrop-blur-md border border-tertiary/30 p-4 rounded-xl ai-glow max-w-xs">
+<div class="flex items-center gap-3 mb-2">
+<div class="w-2 h-2 rounded-full bg-tertiary animate-pulse"></div>
+<span class="text-xs font-bold text-tertiary font-headline uppercase tracking-tighter">AI Agent: Sentinel</span>
+</div>
+<p class="text-sm text-on-surface font-medium italic">"I've analyzed Sprint #42. Based on current velocity, I recommend moving Task-802 to 'In Review' and assigned myself to the PR."</p>
+</div>
+</div>
+</div>
+</div>
+<!-- Ambient Background Elements -->
+<div class="absolute top-[-10%] right-[-10%] w-[500px] h-[500px] bg-secondary/5 rounded-full blur-[120px]"></div>
+<div class="absolute bottom-[-5%] left-[-5%] w-[400px] h-[400px] bg-primary/5 rounded-full blur-[100px]"></div>
+</section>
+<!-- Three-Layer Architecture -->
+<section class="py-24 px-6 bg-surface-container-lowest">
+<div class="max-w-7xl mx-auto">
+<div class="text-center mb-20">
+<span class="text-primary font-headline font-bold tracking-[0.2em] uppercase text-sm">System Architecture</span>
+<h2 class="text-4xl md:text-5xl font-headline font-bold mt-4 text-white">Three Layers of Intelligence</h2>
+</div>
+<div class="grid lg:grid-cols-3 gap-8">
+<!-- Layer 01 -->
+<div class="group relative bg-surface-container-low rounded-2xl p-8 border border-outline-variant/10 transition-all hover:translate-y-[-8px]">
+<div class="text-outline text-7xl font-headline font-black opacity-10 absolute top-4 right-8">01</div>
+<div class="inline-flex items-center px-2 py-0.5 rounded bg-surface-variant text-[10px] font-bold text-on-surface-variant uppercase mb-6">Open Source</div>
+<h3 class="text-2xl font-headline font-bold text-white mb-4">MCP Server</h3>
+<p class="text-on-surface-variant mb-6 leading-relaxed">The foundation. 65+ integrated tools. Connect any AI agent via standard protocol (stdio or SSE).</p>
+<ul class="space-y-3">
+<li class="flex items-center gap-2 text-sm text-on-surface/80"><span class="material-symbols-outlined text-primary text-sm">check_circle</span> Universal Connectivity</li>
+<li class="flex items-center gap-2 text-sm text-on-surface/80"><span class="material-symbols-outlined text-primary text-sm">check_circle</span> Real-time SSE streaming</li>
+</ul>
+</div>
+<!-- Layer 02 -->
+<div class="group relative bg-surface-container rounded-2xl p-8 border border-primary/20 transition-all hover:translate-y-[-8px]">
+<div class="text-primary text-7xl font-headline font-black opacity-10 absolute top-4 right-8">02</div>
+<div class="inline-flex items-center px-2 py-0.5 rounded bg-primary/20 text-[10px] font-bold text-primary uppercase mb-6">Open Source</div>
+<h3 class="text-2xl font-headline font-bold text-white mb-4">PM Platform</h3>
+<p class="text-on-surface-variant mb-6 leading-relaxed">Full-stack project management. Kanban boards, team memos, standups, and retrospectives.</p>
+<ul class="space-y-3">
+<li class="flex items-center gap-2 text-sm text-on-surface/80"><span class="material-symbols-outlined text-primary text-sm">check_circle</span> Supabase Realtime Sync</li>
+<li class="flex items-center gap-2 text-sm text-on-surface/80"><span class="material-symbols-outlined text-primary text-sm">check_circle</span> Markdown Documentation</li>
+</ul>
+</div>
+<!-- Layer 03 -->
+<div class="group relative bg-surface-container-high rounded-2xl p-8 border border-secondary/30 premium-glow transition-all hover:translate-y-[-8px]">
+<div class="text-secondary text-7xl font-headline font-black opacity-10 absolute top-4 right-8">03</div>
+<div class="inline-flex items-center px-2 py-0.5 rounded bg-secondary/20 text-[10px] font-bold text-secondary uppercase mb-6">Premium</div>
+<h3 class="text-2xl font-headline font-bold text-white mb-4">Agent Serving</h3>
+<p class="text-on-surface-variant mb-6 leading-relaxed">The orchestration layer. Multi-agent workflows, auto-task assignment, and velocity predictions.</p>
+<ul class="space-y-3">
+<li class="flex items-center gap-2 text-sm text-on-surface/80"><span class="material-symbols-outlined text-secondary text-sm">auto_awesome</span> Multi-agent orchestration</li>
+<li class="flex items-center gap-2 text-sm text-on-surface/80"><span class="material-symbols-outlined text-secondary text-sm">auto_awesome</span> Predictive Delivery</li>
+</ul>
+</div>
+</div>
+</div>
+</section>
+<!-- Features Grid -->
+<section class="py-24 px-6">
+<div class="max-w-7xl mx-auto">
+<div class="flex flex-col md:flex-row justify-between items-end mb-16 gap-6">
+<div class="max-w-2xl">
+<p class="text-tertiary font-headline font-bold tracking-[0.2em] uppercase text-sm mb-2">Capabilities</p>
+<h2 class="text-4xl font-headline font-bold text-white">Everything your team needs to ship faster</h2>
+</div>
+<button class="text-primary hover:text-white transition-colors flex items-center gap-2 font-bold">
+                        Explore all features <span class="material-symbols-outlined">north_east</span>
+</button>
+</div>
+<div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
+<!-- Feature Cards -->
+<div class="p-8 rounded-2xl bg-surface-container-lowest border border-outline-variant/5 hover:bg-surface-container transition-all">
+<span class="material-symbols-outlined text-primary text-3xl mb-6">view_kanban</span>
+<h4 class="text-xl font-headline font-bold text-white mb-3">Kanban Board</h4>
+<p class="text-on-surface-variant text-sm leading-relaxed">Drag &amp; drop user stories seamlessly across sprints with AI-assisted story point estimation.</p>
+</div>
+<div class="p-8 rounded-2xl bg-surface-container-lowest border border-outline-variant/5 hover:bg-surface-container transition-all">
+<span class="material-symbols-outlined text-secondary text-3xl mb-6">edit_note</span>
+<h4 class="text-xl font-headline font-bold text-white mb-3">Team Memos</h4>
+<p class="text-on-surface-variant text-sm leading-relaxed">Collaborative, real-time documentation powered by Supabase. Shared knowledge that stays in sync.</p>
+</div>
+<div class="p-8 rounded-2xl bg-surface-container-lowest border border-outline-variant/5 hover:bg-surface-container transition-all">
+<span class="material-symbols-outlined text-tertiary text-3xl mb-6">forum</span>
+<h4 class="text-xl font-headline font-bold text-white mb-3">Daily Standups</h4>
+<p class="text-on-surface-variant text-sm leading-relaxed">Structured check-ins where AI agents summarize progress and identify blockers before they hit.</p>
+</div>
+<div class="p-8 rounded-2xl bg-surface-container-lowest border border-outline-variant/5 hover:bg-surface-container transition-all">
+<span class="material-symbols-outlined text-primary text-3xl mb-6">history</span>
+<h4 class="text-xl font-headline font-bold text-white mb-3">Sprint Retros</h4>
+<p class="text-on-surface-variant text-sm leading-relaxed">Collect feedback, vote on priorities, and automatically generate action items for the next sprint.</p>
+</div>
+<div class="p-8 rounded-2xl bg-surface-container-lowest border border-outline-variant/5 hover:bg-surface-container transition-all">
+<span class="material-symbols-outlined text-secondary text-3xl mb-6">hub</span>
+<h4 class="text-xl font-headline font-bold text-white mb-3">MCP Server</h4>
+<p class="text-on-surface-variant text-sm leading-relaxed">Connect 65+ industrial tools directly to your agents for a fully integrated dev-ops cycle.</p>
+</div>
+<div class="p-8 rounded-2xl bg-surface-container-lowest border border-outline-variant/5 hover:bg-surface-container transition-all">
+<span class="material-symbols-outlined text-tertiary text-3xl mb-6">description</span>
+<h4 class="text-xl font-headline font-bold text-white mb-3">Documentation</h4>
+<p class="text-on-surface-variant text-sm leading-relaxed">Living specifications that stay in sync with your codebase via automated AI documentation agents.</p>
+</div>
+</div>
+</div>
+</section>
+<!-- Why Sprintable? -->
+<section class="py-24 px-6 bg-surface-container">
+<div class="max-w-7xl mx-auto flex flex-col lg:flex-row items-center gap-16">
+<div class="lg:w-1/2">
+<img alt="Team Collaboration" class="rounded-3xl shadow-2xl border border-outline-variant/20" data-alt="Close-up of a high-tech holographic interface showing team members connected to an central AI hub in a futuristic workspace" src="https://lh3.googleusercontent.com/aida-public/AB6AXuCmwmxnumUie2TszgwFSY_UcatnXRQATNUad7KJeZQtP38gI9pTMwBSaBx1R_vfFEvbH8X4PTUjOdmEzgT99FHlREMWS681pYTsNmPSNNQUms_frPUuwYSc1uoPdvmMc0jo_js1_1NrgpJls-UJKgETwZ-ackM93GBZ7oNpt7fGZtK1v1HDF8rCudjFUnPTKfxBZWay5gMbqKE7wrUAkYAIBwjg_FsS1ZDQuQgpi0zHFP5wc8V3eLH_KniAND1yMU0h5G3u-8qofFPC"/>
+</div>
+<div class="lg:w-1/2 space-y-10">
+<div>
+<p class="text-primary font-headline font-bold tracking-[0.2em] uppercase text-sm mb-2">Differentiation</p>
+<h2 class="text-4xl font-headline font-bold text-white">Why build with Sprintable?</h2>
+</div>
+<div class="space-y-6">
+<div class="flex items-start gap-4">
+<div class="w-10 h-10 rounded-full bg-primary/10 flex items-center justify-center shrink-0">
+<span class="material-symbols-outlined text-primary">verified</span>
+</div>
+<div>
+<h5 class="text-lg font-bold text-white mb-1">AI agents as first-class team members</h5>
+<p class="text-on-surface-variant">Not just a chatbot. Agents have identities, permissions, and responsibilities in your org chart.</p>
+</div>
+</div>
+<div class="flex items-start gap-4">
+<div class="w-10 h-10 rounded-full bg-primary/10 flex items-center justify-center shrink-0">
+<span class="material-symbols-outlined text-primary">verified</span>
+</div>
+<div>
+<h5 class="text-lg font-bold text-white mb-1">MCP-native: connect any AI tool</h5>
+<p class="text-on-surface-variant">Seamlessly plug into the Model Context Protocol ecosystem to leverage 65+ specialized agent tools.</p>
+</div>
+</div>
+<div class="flex items-start gap-4">
+<div class="w-10 h-10 rounded-full bg-primary/10 flex items-center justify-center shrink-0">
+<span class="material-symbols-outlined text-primary">verified</span>
+</div>
+<div>
+<h5 class="text-lg font-bold text-white mb-1">Command chain: PO → Dev → QA</h5>
+<p class="text-on-surface-variant">Structured automated workflows that take a product vision to tested code with minimal human overhead.</p>
+</div>
+</div>
+<div class="flex items-start gap-4">
+<div class="w-10 h-10 rounded-full bg-primary/10 flex items-center justify-center shrink-0">
+<span class="material-symbols-outlined text-primary">verified</span>
+</div>
+<div>
+<h5 class="text-lg font-bold text-white mb-1">Open source core, self-hostable</h5>
+<p class="text-on-surface-variant">Ownership matters. Run the core PM platform and MCP server on your own infrastructure.</p>
+</div>
+</div>
+</div>
+</div>
+</div>
+</section>
+<!-- Pricing Section -->
+<section class="py-24 px-6 bg-surface-container-lowest">
+<div class="max-w-7xl mx-auto">
+<div class="text-center mb-16">
+<p class="text-secondary font-headline font-bold tracking-[0.2em] uppercase text-sm mb-2">Pricing Plans</p>
+<h2 class="text-4xl md:text-5xl font-headline font-bold text-white">Simple, transparent pricing</h2>
+</div>
+<div class="grid md:grid-cols-3 gap-8">
+<!-- Free Plan -->
+<div class="bg-surface-container-low rounded-2xl p-8 border border-outline-variant/10 flex flex-col">
+<div class="mb-8">
+<h3 class="text-xl font-bold text-white mb-2">Free</h3>
+<div class="text-4xl font-headline font-extrabold text-white">$0<span class="text-base font-normal text-on-surface-variant">/mo</span></div>
+</div>
+<ul class="space-y-4 mb-10 flex-grow">
+<li class="flex items-center gap-3 text-sm text-on-surface-variant"><span class="material-symbols-outlined text-outline text-lg">check</span> Up to 3 members</li>
+<li class="flex items-center gap-3 text-sm text-on-surface-variant"><span class="material-symbols-outlined text-outline text-lg">check</span> 1 active project</li>
+<li class="flex items-center gap-3 text-sm text-on-surface-variant"><span class="material-symbols-outlined text-outline text-lg">check</span> MCP server integration</li>
+<li class="flex items-center gap-3 text-sm text-on-surface-variant"><span class="material-symbols-outlined text-outline text-lg">check</span> Community support</li>
+</ul>
+<button class="w-full py-3 rounded-lg bg-surface-variant text-on-surface font-bold hover:bg-outline-variant transition-all">Get Started</button>
+</div>
+<!-- Team Plan (Popular) -->
+<div class="bg-surface-container rounded-2xl p-8 border border-primary/30 premium-glow flex flex-col relative scale-105 z-10 shadow-2xl">
+<div class="absolute top-0 right-8 -translate-y-1/2 bg-primary text-on-primary text-[10px] font-black uppercase px-3 py-1 rounded-full tracking-widest">Most Popular</div>
+<div class="mb-8">
+<h3 class="text-xl font-bold text-white mb-2">Team</h3>
+<div class="text-4xl font-headline font-extrabold text-white">$12<span class="text-base font-normal text-on-surface-variant">/member/mo</span></div>
+</div>
+<ul class="space-y-4 mb-10 flex-grow">
+<li class="flex items-center gap-3 text-sm text-on-surface"><span class="material-symbols-outlined text-primary text-lg">check_circle</span> Unlimited members</li>
+<li class="flex items-center gap-3 text-sm text-on-surface"><span class="material-symbols-outlined text-primary text-lg">check_circle</span> Unlimited projects</li>
+<li class="flex items-center gap-3 text-sm text-on-surface"><span class="material-symbols-outlined text-primary text-lg">check_circle</span> Agent orchestration</li>
+<li class="flex items-center gap-3 text-sm text-on-surface"><span class="material-symbols-outlined text-primary text-lg">check_circle</span> Priority support</li>
+<li class="flex items-center gap-3 text-sm text-on-surface"><span class="material-symbols-outlined text-primary text-lg">check_circle</span> Team analytics</li>
+</ul>
+<button class="w-full py-3 rounded-lg bg-primary text-on-primary font-bold shadow-lg shadow-primary/20 hover:scale-[1.02] active:scale-95 transition-all">Start 14-day Trial</button>
+</div>
+<!-- Pro Plan -->
+<div class="bg-surface-container-low rounded-2xl p-8 border border-outline-variant/10 flex flex-col">
+<div class="mb-8">
+<h3 class="text-xl font-bold text-white mb-2">Pro</h3>
+<div class="text-4xl font-headline font-extrabold text-white">$29<span class="text-base font-normal text-on-surface-variant">/member/mo</span></div>
+</div>
+<ul class="space-y-4 mb-10 flex-grow">
+<li class="flex items-center gap-3 text-sm text-on-surface-variant"><span class="material-symbols-outlined text-outline text-lg">check</span> Everything in Team</li>
+<li class="flex items-center gap-3 text-sm text-on-surface-variant"><span class="material-symbols-outlined text-outline text-lg">check</span> SSO / SAML integration</li>
+<li class="flex items-center gap-3 text-sm text-on-surface-variant"><span class="material-symbols-outlined text-outline text-lg">check</span> Advanced Audit logs</li>
+<li class="flex items-center gap-3 text-sm text-on-surface-variant"><span class="material-symbols-outlined text-outline text-lg">check</span> Custom SLA &amp; Onboarding</li>
+</ul>
+<button class="w-full py-3 rounded-lg bg-surface-variant text-on-surface font-bold hover:bg-outline-variant transition-all">Contact Sales</button>
+</div>
+</div>
+</div>
+</section>
+<!-- Final CTA -->
+<section class="py-24 px-6 relative overflow-hidden">
+<div class="max-w-4xl mx-auto text-center relative z-10">
+<h2 class="text-4xl md:text-5xl font-headline font-extrabold text-white mb-8">Ready to welcome your newest teammates?</h2>
+<p class="text-xl text-on-surface-variant mb-12">Join 1,200+ engineering teams scaling with Sprintable's Kinetic Intelligence Framework.</p>
+<div class="flex flex-col sm:flex-row gap-4 justify-center">
+<button class="bg-primary text-on-primary px-10 py-4 rounded-xl font-bold text-lg shadow-xl shadow-primary/10">Deploy to Vercel</button>
+<button class="bg-white/5 backdrop-blur-sm border border-white/10 text-white px-10 py-4 rounded-xl font-bold text-lg">Read Documentation</button>
+</div>
+</div>
+<div class="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 w-[800px] h-[800px] bg-primary/10 rounded-full blur-[150px] -z-0"></div>
+</section>
+</main>
+<!-- Footer -->
+<footer class="w-full py-16 border-t border-[#ffffff]/5 bg-[#111316]">
+<div class="grid grid-cols-2 md:grid-cols-4 lg:grid-cols-6 gap-8 max-w-7xl mx-auto px-6">
+<div class="col-span-2">
+<div class="text-lg font-bold text-white mb-4 font-headline">Sprintable</div>
+<p class="text-sm text-gray-500 mb-6 max-w-xs leading-relaxed">
+                    Kinetic Intelligence Framework for the next generation of software delivery. Open source at the core.
+                </p>
+<div class="flex gap-4">
+<a class="text-gray-500 hover:text-white transition-colors" href="#"><span class="material-symbols-outlined">brand_family</span></a>
+<a class="text-gray-500 hover:text-white transition-colors" href="#"><span class="material-symbols-outlined">terminal</span></a>
+</div>
+</div>
+<div>
+<h6 class="text-white font-bold text-xs uppercase tracking-widest mb-6">Product</h6>
+<ul class="space-y-4">
+<li><a class="text-gray-500 hover:text-[#cdbdff] transition-colors text-sm font-body" href="#">Features</a></li>
+<li><a class="text-gray-500 hover:text-[#cdbdff] transition-colors text-sm font-body" href="#">Pricing</a></li>
+<li><a class="text-gray-500 hover:text-[#cdbdff] transition-colors text-sm font-body" href="#">Changelog</a></li>
+</ul>
+</div>
+<div>
+<h6 class="text-white font-bold text-xs uppercase tracking-widest mb-6">Company</h6>
+<ul class="space-y-4">
+<li><a class="text-gray-500 hover:text-[#cdbdff] transition-colors text-sm font-body" href="#">About</a></li>
+<li><a class="text-gray-500 hover:text-[#cdbdff] transition-colors text-sm font-body" href="#">Careers</a></li>
+<li><a class="text-gray-500 hover:text-[#cdbdff] transition-colors text-sm font-body" href="#">Blog</a></li>
+</ul>
+</div>
+<div>
+<h6 class="text-white font-bold text-xs uppercase tracking-widest mb-6">Resources</h6>
+<ul class="space-y-4">
+<li><a class="text-gray-500 hover:text-[#cdbdff] transition-colors text-sm font-body" href="#">Documentation</a></li>
+<li><a class="text-gray-500 hover:text-[#cdbdff] transition-colors text-sm font-body" href="#">Help Center</a></li>
+<li><a class="text-gray-500 hover:text-[#cdbdff] transition-colors text-sm font-body" href="#">Community</a></li>
+</ul>
+</div>
+<div>
+<h6 class="text-white font-bold text-xs uppercase tracking-widest mb-6">Legal</h6>
+<ul class="space-y-4">
+<li><a class="text-gray-500 hover:text-[#cdbdff] transition-colors text-sm font-body" href="#">Privacy</a></li>
+<li><a class="text-gray-500 hover:text-[#cdbdff] transition-colors text-sm font-body" href="#">Terms</a></li>
+<li><a class="text-gray-500 hover:text-[#cdbdff] transition-colors text-sm font-body" href="#">Cookie Policy</a></li>
+</ul>
+</div>
+</div>
+<div class="max-w-7xl mx-auto px-6 mt-16 pt-8 border-t border-white/5 flex flex-col md:flex-row justify-between items-center gap-4">
+<p class="text-sm text-gray-500 font-body opacity-80">© 2024 Sprintable. Kinetic Intelligence Framework.</p>
+<div class="flex items-center gap-2 text-xs text-primary bg-primary/5 px-3 py-1 rounded-full border border-primary/10">
+<span class="w-1.5 h-1.5 rounded-full bg-primary animate-pulse"></span>
+                Systems Operational
+            </div>
+</div>
+</footer>
+</body></html>

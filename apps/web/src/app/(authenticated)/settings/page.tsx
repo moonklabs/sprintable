@@ -1,0 +1,743 @@
+'use client';
+
+import { useEffect, useMemo, useState } from 'react';
+import Link from 'next/link';
+import { useRouter } from 'next/navigation';
+import { useTranslations } from 'next-intl';
+import { AgentApiKeysSection } from '@/components/settings/agent-api-keys-section';
+import { AiSettingsSection } from '@/components/settings/ai-settings';
+import { MyProfileSection } from '@/components/settings/my-profile-section';
+import { ByomKeyManagement } from '@/components/settings/byom-key-management';
+import { McpConnectionSettings } from '@/components/settings/mcp-connection-settings';
+import { SlackIntegrationSettingsSection } from '@/components/settings/slack-integration-settings';
+import { ThemeSettings } from '@/components/settings/theme-settings';
+import { Badge } from '@/components/ui/badge';
+import { Button } from '@/components/ui/button';
+import { OperatorInput, OperatorSelect } from '@/components/ui/operator-control';
+import { SectionCard, SectionCardBody, SectionCardHeader } from '@/components/ui/section-card';
+
+interface NotificationSetting {
+  id: string;
+  channel: string;
+  event_type: string;
+  enabled: boolean;
+}
+
+interface WebhookConfig {
+  id: string;
+  url: string;
+  project_id: string | null;
+  projects?: { name: string };
+}
+
+interface ProjectOption {
+  id: string;
+  name: string;
+  description?: string | null;
+}
+
+interface InvitationItem {
+  id: string;
+  email: string;
+  accepted_at: string | null;
+  expires_at: string;
+  project_id: string | null;
+  projects: { id: string; name: string } | null;
+}
+
+interface ProjectMember {
+  id: string;
+  name: string;
+  type: 'human' | 'agent';
+  role: string;
+  user_id: string | null;
+  project_id: string;
+  is_active: boolean;
+}
+
+const EVENT_TYPES = ['story_assigned', 'memo_received', 'reward_granted', 'story_status_changed'];
+
+export default function SettingsPage() {
+  const t = useTranslations('settings');
+  const tc = useTranslations('common');
+  const router = useRouter();
+
+  const [orgId, setOrgId] = useState<string | null>(null);
+  const [currentProjectId, setCurrentProjectId] = useState<string | null>(null);
+  const [projectMemberships, setProjectMemberships] = useState<Array<{ projectId: string; projectName: string }>>([]);
+  const [settings, setSettings] = useState<NotificationSetting[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [showDeleteConfirm, setShowDeleteConfirm] = useState(false);
+  const [deleting, setDeleting] = useState(false);
+  const [webhooks, setWebhooks] = useState<WebhookConfig[]>([]);
+  const [projects, setProjects] = useState<ProjectOption[]>([]);
+  const [createdProjectMembership, setCreatedProjectMembership] = useState<{ projectId: string; projectName: string } | null>(null);
+  const [newWebhookUrl, setNewWebhookUrl] = useState('');
+  const [newWebhookProjectId, setNewWebhookProjectId] = useState('');
+  const [newProjectName, setNewProjectName] = useState('');
+  const [newProjectDescription, setNewProjectDescription] = useState('');
+  const [creatingProject, setCreatingProject] = useState(false);
+  const [projectActionMessage, setProjectActionMessage] = useState<{ type: 'success' | 'error'; text: string } | null>(null);
+  const [inviteEmail, setInviteEmail] = useState('');
+  const [inviting, setInviting] = useState(false);
+  const [inviteResult, setInviteResult] = useState<string | null>(null);
+  const [invitations, setInvitations] = useState<InvitationItem[]>([]);
+  const [inviteProjectId, setInviteProjectId] = useState('');
+  const [memberProjectId, setMemberProjectId] = useState('');
+  const [projectMembers, setProjectMembers] = useState<ProjectMember[]>([]);
+  const [orgMembers, setOrgMembers] = useState<ProjectMember[]>([]);
+  const [selectedOrgMemberUserId, setSelectedOrgMemberUserId] = useState('');
+  const [memberActionMessage, setMemberActionMessage] = useState<{ type: 'success' | 'error'; text: string } | null>(null);
+  const [addingMember, setAddingMember] = useState(false);
+  const [removingMemberId, setRemovingMemberId] = useState<string | null>(null);
+  const [isAdmin, setIsAdmin] = useState(false);
+  const [adminChecked, setAdminChecked] = useState(false);
+
+  const refreshProjects = async () => {
+    const endpoint = orgId ? `/api/projects?org_id=${encodeURIComponent(orgId)}` : '/api/projects';
+    const res = await fetch(endpoint);
+    if (!res.ok) return;
+
+    const json = await res.json();
+    if (!json?.data) return;
+
+    const nextProjects = (json.data as ProjectOption[]).slice().sort((a, b) => a.name.localeCompare(b.name));
+    setProjects(nextProjects);
+    setMemberProjectId((current) => current || currentProjectId || nextProjects[0]?.id || '');
+  };
+
+  const refreshInvitations = async () => {
+    const res = await fetch('/api/invitations');
+    if (res.ok) {
+      const json = await res.json();
+      setIsAdmin(true);
+      setAdminChecked(true);
+      setInvitations(json.data ?? []);
+      return;
+    }
+
+    if (res.status === 403) {
+      setIsAdmin(false);
+      setAdminChecked(true);
+    }
+  };
+
+  const refreshMemberData = async (projectId: string) => {
+    if (!projectId) return;
+
+    const [projectMemberRes, orgMemberRes] = await Promise.all([
+      fetch(`/api/team-members?project_id=${projectId}`),
+      fetch('/api/team-members?include_inactive=true'),
+    ]);
+
+    if (projectMemberRes.ok) {
+      const json = await projectMemberRes.json();
+      setProjectMembers((json.data ?? []) as ProjectMember[]);
+    }
+
+    if (orgMemberRes.ok) {
+      const json = await orgMemberRes.json();
+      setOrgMembers((json.data ?? []) as ProjectMember[]);
+    }
+  };
+
+  // Fetch org and project context
+  useEffect(() => {
+    async function loadContext() {
+      // Get current project
+      const projectRes = await fetch('/api/current-project');
+      if (projectRes.ok) {
+        const projectJson = await projectRes.json();
+        setCurrentProjectId(projectJson.data?.project_id ?? null);
+        setOrgId(projectJson.data?.org_id ?? null);
+      }
+
+      // Get project memberships
+      const membershipsRes = await fetch('/api/projects');
+      if (membershipsRes.ok) {
+        const membershipsJson = await membershipsRes.json();
+        const memberships = (membershipsJson.data ?? []).map((p: ProjectOption) => ({
+          projectId: p.id,
+          projectName: p.name,
+        }));
+        setProjectMemberships(memberships);
+      }
+    }
+
+    void loadContext();
+  }, []);
+
+  useEffect(() => {
+    async function load() {
+      const res = await fetch('/api/notification-settings');
+      if (res.ok) {
+        const json = await res.json();
+        setSettings(json.data ?? []);
+      }
+      setLoading(false);
+    }
+
+    void load();
+
+    fetch('/api/webhooks/config')
+      .then((r) => (r.ok ? r.json() : null))
+      .then((json) => {
+        if (json?.data) setWebhooks(json.data);
+      })
+      .catch(() => {});
+
+    void refreshProjects().catch(() => {});
+
+    void refreshInvitations().catch(() => {});
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [currentProjectId, orgId]);
+
+  useEffect(() => {
+    if (!isAdmin || !memberProjectId) return;
+    void refreshMemberData(memberProjectId).catch(() => {});
+  }, [isAdmin, memberProjectId]);
+
+  const toggleSetting = async (eventType: string, currentEnabled: boolean) => {
+    const newEnabled = !currentEnabled;
+    await fetch('/api/notification-settings', {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ channel: 'web', event_type: eventType, enabled: newEnabled }),
+    });
+    setSettings((prev) => {
+      const existing = prev.find((s) => s.event_type === eventType && s.channel === 'web');
+      if (existing) return prev.map((s) => (s.id === existing.id ? { ...s, enabled: newEnabled } : s));
+      return [...prev, { id: `temp-${eventType}`, channel: 'web', event_type: eventType, enabled: newEnabled }];
+    });
+  };
+
+  const getEnabled = (eventType: string) => {
+    const setting = settings.find((s) => s.event_type === eventType && s.channel === 'web');
+    return setting?.enabled ?? true;
+  };
+
+  const assignableMembers = useMemo(() => {
+    const assignedUserIds = new Set(
+      projectMembers
+        .filter((member) => member.type === 'human' && member.user_id)
+        .map((member) => member.user_id as string),
+    );
+
+    const deduped = new Map<string, ProjectMember>();
+    for (const member of orgMembers) {
+      if (member.type !== 'human' || !member.user_id || assignedUserIds.has(member.user_id)) continue;
+      if (!deduped.has(member.user_id)) deduped.set(member.user_id, member);
+    }
+
+    return Array.from(deduped.values()).sort((a, b) => a.name.localeCompare(b.name));
+  }, [orgMembers, projectMembers]);
+
+  const handleCreateProject = async () => {
+    if (!newProjectName.trim()) return;
+    if (!orgId) {
+      setProjectActionMessage({ type: 'error', text: t('projectCreateOrgMissing') });
+      return;
+    }
+
+    setCreatingProject(true);
+    setProjectActionMessage(null);
+
+    const res = await fetch('/api/projects', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        org_id: orgId,
+        name: newProjectName.trim(),
+        description: newProjectDescription.trim() || null,
+      }),
+    });
+
+    const json = await res.json().catch(() => null);
+
+    if (!res.ok) {
+      setProjectActionMessage({
+        type: 'error',
+        text: json?.error?.message ?? t('projectCreateFailed'),
+      });
+      setCreatingProject(false);
+      return;
+    }
+
+    const project = json?.data as ProjectOption | null;
+    if (!project) {
+      setProjectActionMessage({ type: 'error', text: t('projectCreateFailed') });
+      setCreatingProject(false);
+      return;
+    }
+
+    setCreatedProjectMembership({ projectId: project.id, projectName: project.name });
+    setProjects((prev) => {
+      const next = prev.some((item) => item.id === project.id) ? prev : [...prev, project];
+      return next.slice().sort((a, b) => a.name.localeCompare(b.name));
+    });
+    setInviteProjectId(project.id);
+    setMemberProjectId(project.id);
+    setNewWebhookProjectId(project.id);
+    setNewProjectName('');
+    setNewProjectDescription('');
+    setProjectActionMessage({ type: 'success', text: t('projectCreated', { name: project.name }) });
+
+    await refreshProjects().catch(() => {});
+    router.refresh();
+    setCreatingProject(false);
+  };
+
+  const handleAddProjectMember = async () => {
+    if (!memberProjectId || !selectedOrgMemberUserId) return;
+    const member = assignableMembers.find((item) => item.user_id === selectedOrgMemberUserId);
+    if (!member) return;
+
+    setAddingMember(true);
+    setMemberActionMessage(null);
+
+    const res = await fetch('/api/team-members', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        project_id: memberProjectId,
+        user_id: selectedOrgMemberUserId,
+        type: 'human',
+        name: member.name,
+        role: member.role ?? 'member',
+      }),
+    });
+
+    if (res.ok) {
+      await refreshMemberData(memberProjectId);
+      setSelectedOrgMemberUserId('');
+      setMemberActionMessage({ type: 'success', text: t('memberAdded') });
+    } else {
+      const json = await res.json().catch(() => null);
+      setMemberActionMessage({ type: 'error', text: json?.error?.message ?? t('memberActionFailed') });
+    }
+
+    setAddingMember(false);
+  };
+
+  const handleRemoveProjectMember = async (memberId: string) => {
+    setRemovingMemberId(memberId);
+    setMemberActionMessage(null);
+
+    const res = await fetch(`/api/team-members/${memberId}`, { method: 'DELETE' });
+    if (res.ok) {
+      await refreshMemberData(memberProjectId);
+      setMemberActionMessage({ type: 'success', text: t('memberRemoved') });
+    } else {
+      const json = await res.json().catch(() => null);
+      const errorCode = json?.error?.code;
+      setMemberActionMessage({
+        type: 'error',
+        text: errorCode === 'LAST_PROJECT_MEMBERSHIP' ? t('lastProjectMembership') : json?.error?.message ?? t('memberActionFailed'),
+      });
+    }
+
+    setRemovingMemberId(null);
+  };
+
+  return (
+    <div className="space-y-6">
+      <section id="profile">
+        <MyProfileSection />
+      </section>
+
+      <section id="theme">
+        <ThemeSettings />
+      </section>
+
+      <section id="notifications">
+        <SectionCard>
+          <SectionCardHeader>
+            <div className="space-y-1">
+              <h2 className="text-base font-semibold text-[color:var(--operator-foreground)]">🔔 {t('notifications')}</h2>
+            <p className="text-sm text-[color:var(--operator-muted)]">{t('notificationDescription')}</p>
+          </div>
+        </SectionCardHeader>
+        <SectionCardBody>
+          {loading ? (
+            <div className="space-y-3">{[1, 2, 3].map((i) => <div key={i} className="h-12 animate-pulse rounded-2xl bg-[color:var(--operator-surface-soft)]" />)}</div>
+          ) : (
+            <div className="space-y-3">
+              {EVENT_TYPES.map((eventType) => (
+                <div key={eventType} className="flex items-center justify-between rounded-2xl border border-white/8 bg-[color:var(--operator-surface-soft)]/55 p-3">
+                  <span className="text-sm text-[color:var(--operator-foreground)]">{t(`event_${eventType}`)}</span>
+                  <button
+                    onClick={() => toggleSetting(eventType, getEnabled(eventType))}
+                    className={`relative h-6 w-11 rounded-full transition ${getEnabled(eventType) ? 'bg-[color:var(--operator-primary)]' : 'bg-white/15'}`}
+                    type="button"
+                  >
+                    <span className={`absolute top-0.5 h-5 w-5 rounded-full bg-white shadow transition ${getEnabled(eventType) ? 'left-[22px]' : 'left-0.5'}`} />
+                  </button>
+                </div>
+              ))}
+            </div>
+          )}
+        </SectionCardBody>
+      </SectionCard>
+      </section>
+
+      <section id="webhooks">
+        <SectionCard>
+          <SectionCardHeader>
+            <div className="space-y-1">
+              <h2 className="text-base font-semibold text-[color:var(--operator-foreground)]">🔗 {t('webhooks')}</h2>
+            <p className="text-sm text-[color:var(--operator-muted)]">{t('webhookDescription')}</p>
+          </div>
+        </SectionCardHeader>
+        <SectionCardBody className="space-y-4">
+          <div className="space-y-2">
+            {webhooks.map((webhook) => (
+              <div key={webhook.id} className="flex items-center justify-between gap-3 rounded-2xl border border-white/8 bg-[color:var(--operator-surface-soft)]/55 px-3 py-3 text-xs">
+                <span className="truncate text-[color:var(--operator-foreground)]">{webhook.url}</span>
+                <span className="shrink-0 text-[color:var(--operator-muted)]">{webhook.projects?.name ?? t('defaultWebhook')}</span>
+              </div>
+            ))}
+          </div>
+          <div className="grid gap-3 lg:grid-cols-[minmax(0,1fr)_220px_auto]">
+            <OperatorInput
+              type="url"
+              value={newWebhookUrl}
+              onChange={(e) => setNewWebhookUrl(e.target.value)}
+              placeholder={t('webhookUrlPlaceholder')}
+            />
+            <OperatorSelect value={newWebhookProjectId} onChange={(e) => setNewWebhookProjectId(e.target.value)}>
+              <option value="">{t('defaultWebhook')}</option>
+              {projects.map((project) => <option key={project.id} value={project.id}>{project.name}</option>)}
+            </OperatorSelect>
+            <Button
+              variant="hero"
+              size="lg"
+              onClick={async () => {
+                if (!newWebhookUrl.trim()) return;
+                await fetch('/api/webhooks/config', {
+                  method: 'PUT',
+                  headers: { 'Content-Type': 'application/json' },
+                  body: JSON.stringify({ url: newWebhookUrl.trim(), project_id: newWebhookProjectId || null }),
+                });
+                setNewWebhookUrl('');
+                setNewWebhookProjectId('');
+                const res = await fetch('/api/webhooks/config');
+                if (res.ok) {
+                  const j = await res.json();
+                  setWebhooks(j.data ?? []);
+                }
+              }}
+            >
+              {tc('save')}
+            </Button>
+          </div>
+        </SectionCardBody>
+      </SectionCard>
+      </section>
+
+      <section id="projects">
+        <SectionCard>
+          <SectionCardHeader>
+            <div className="space-y-1">
+              <h2 className="text-base font-semibold text-[color:var(--operator-foreground)]">🗂️ {t('projectManagement')}</h2>
+            <p className="text-sm text-[color:var(--operator-muted)]">{t('projectManagementDescription')}</p>
+          </div>
+        </SectionCardHeader>
+        <SectionCardBody className="space-y-4">
+          <div className="space-y-2">
+            {projects.length > 0 ? (
+              projects.map((project) => (
+                <div key={project.id} className="flex items-start justify-between gap-3 rounded-2xl border border-white/8 bg-[color:var(--operator-surface-soft)]/55 px-4 py-3">
+                  <div className="min-w-0">
+                    <div className="font-medium text-[color:var(--operator-foreground)]">{project.name}</div>
+                    {project.description ? (
+                      <div className="mt-1 text-sm text-[color:var(--operator-muted)]">{project.description}</div>
+                    ) : null}
+                  </div>
+                  {project.id === currentProjectId ? <Badge variant="info">{t('currentProjectBadge')}</Badge> : null}
+                </div>
+              ))
+            ) : (
+              <div className="rounded-2xl border border-dashed border-white/10 px-3 py-6 text-sm text-[color:var(--operator-muted)]">
+                {t('projectListEmpty')}
+              </div>
+            )}
+          </div>
+
+          {projectActionMessage ? (
+            <div className={`rounded-2xl border p-3 text-xs ${projectActionMessage.type === 'success' ? 'border-emerald-400/20 bg-emerald-400/10 text-emerald-200' : 'border-rose-400/20 bg-rose-500/10 text-rose-200'}`}>
+              {projectActionMessage.text}
+            </div>
+          ) : null}
+
+          {isAdmin ? (
+            <div className="grid gap-3 lg:grid-cols-[minmax(0,1fr)_minmax(0,1fr)_auto]">
+              <OperatorInput
+                value={newProjectName}
+                onChange={(event) => setNewProjectName(event.target.value)}
+                placeholder={t('projectNamePlaceholder')}
+              />
+              <OperatorInput
+                value={newProjectDescription}
+                onChange={(event) => setNewProjectDescription(event.target.value)}
+                placeholder={t('projectDescriptionPlaceholder')}
+              />
+              <Button variant="hero" size="lg" onClick={handleCreateProject} disabled={!newProjectName.trim() || creatingProject}>
+                {creatingProject ? '...' : t('createProjectAction')}
+              </Button>
+            </div>
+          ) : adminChecked ? (
+            <div className="rounded-2xl border border-amber-400/20 bg-amber-400/10 px-4 py-3 text-sm text-amber-100">
+              {t('projectAdminRequired')}
+            </div>
+          ) : null}
+        </SectionCardBody>
+      </SectionCard>
+      </section>
+
+      <section id="slack">
+        <SlackIntegrationSettingsSection />
+      </section>
+
+      {isAdmin ? (
+        <section id="invitations">
+          <SectionCard>
+            <SectionCardHeader>
+              <div className="space-y-1">
+                <h2 className="text-base font-semibold text-[color:var(--operator-foreground)]">👥 {t('inviteMembers')}</h2>
+              <p className="text-sm text-[color:var(--operator-muted)]">{t('inviteDescription')}</p>
+            </div>
+          </SectionCardHeader>
+          <SectionCardBody className="space-y-4">
+            <div className="flex flex-col gap-3 md:flex-row">
+              <OperatorInput
+                type="email"
+                value={inviteEmail}
+                onChange={(e) => setInviteEmail(e.target.value)}
+                placeholder={t('emailPlaceholder')}
+              />
+              <OperatorSelect value={inviteProjectId} onChange={(e) => setInviteProjectId(e.target.value)}>
+                <option value="">{t('orgWideInvite')}</option>
+                {projects.map((project) => <option key={project.id} value={project.id}>{project.name}</option>)}
+              </OperatorSelect>
+              <Button
+                variant="hero"
+                size="lg"
+                onClick={async () => {
+                  if (!inviteEmail.trim()) return;
+                  setInviting(true);
+                  const res = await fetch('/api/invitations', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ email: inviteEmail.trim(), ...(inviteProjectId ? { project_id: inviteProjectId } : {}) }),
+                  });
+                  if (res.ok) {
+                    const json = await res.json();
+                    setInviteResult(json.data.invite_url);
+                    setInviteEmail('');
+                    setInviteProjectId('');
+                    await refreshInvitations();
+                  }
+                  setInviting(false);
+                }}
+                disabled={inviting}
+              >
+                {inviting ? '...' : t('invite')}
+              </Button>
+            </div>
+
+            {inviteResult ? (
+              <div className="rounded-2xl border border-emerald-400/20 bg-emerald-400/10 p-3 text-xs text-emerald-200 break-all">
+                {t('inviteLinkCopied')}: {inviteResult}
+              </div>
+            ) : null}
+
+            {invitations.length > 0 ? (
+              <div className="space-y-2">
+                {invitations.map((invitation) => (
+                  <div key={invitation.id} className="flex items-center justify-between gap-2 rounded-2xl border border-white/8 bg-[color:var(--operator-surface-soft)]/55 px-3 py-3 text-xs">
+                    <span className="text-[color:var(--operator-foreground)]">{invitation.email}</span>
+                    <span className="shrink-0 text-[color:var(--operator-muted)]">
+                      {invitation.projects?.name ?? t('orgWide')}
+                    </span>
+                    <span className={`shrink-0 ${invitation.accepted_at ? 'text-emerald-300' : new Date(invitation.expires_at) < new Date() ? 'text-rose-300' : 'text-amber-200'}`}>
+                      {invitation.accepted_at ? t('accepted') : new Date(invitation.expires_at) < new Date() ? t('expired') : t('pending')}
+                    </span>
+                  </div>
+                ))}
+              </div>
+            ) : null}
+          </SectionCardBody>
+        </SectionCard>
+        </section>
+      ) : null}
+
+      {isAdmin ? (
+        <section id="members">
+          <SectionCard>
+            <SectionCardHeader>
+              <div className="space-y-1">
+                <h2 className="text-base font-semibold text-[color:var(--operator-foreground)]">🧩 {t('memberManagement')}</h2>
+              <p className="text-sm text-[color:var(--operator-muted)]">{t('memberManagementDescription')}</p>
+            </div>
+          </SectionCardHeader>
+          <SectionCardBody className="space-y-4">
+            <div className="grid gap-3 lg:grid-cols-[220px_minmax(0,1fr)_auto]">
+              <OperatorSelect value={memberProjectId} onChange={(e) => setMemberProjectId(e.target.value)}>
+                <option value="">{t('selectProject')}</option>
+                {projects.map((project) => <option key={project.id} value={project.id}>{project.name}</option>)}
+              </OperatorSelect>
+              <OperatorSelect value={selectedOrgMemberUserId} onChange={(e) => setSelectedOrgMemberUserId(e.target.value)} disabled={!memberProjectId || assignableMembers.length === 0}>
+                <option value="">{assignableMembers.length ? t('chooseMember') : t('noAssignableMembers')}</option>
+                {assignableMembers.map((member) => <option key={member.user_id} value={member.user_id ?? ''}>{member.name}</option>)}
+              </OperatorSelect>
+              <Button variant="hero" size="lg" onClick={handleAddProjectMember} disabled={!memberProjectId || !selectedOrgMemberUserId || addingMember}>
+                {addingMember ? '...' : t('addToProject')}
+              </Button>
+            </div>
+
+            {memberActionMessage ? (
+              <div className={`rounded-2xl border p-3 text-xs ${memberActionMessage.type === 'success' ? 'border-emerald-400/20 bg-emerald-400/10 text-emerald-200' : 'border-rose-400/20 bg-rose-500/10 text-rose-200'}`}>
+                {memberActionMessage.text}
+              </div>
+            ) : null}
+
+            <div className="space-y-2">
+              <div className="text-xs font-medium uppercase tracking-[0.18em] text-[color:var(--operator-muted)]">{t('projectMembers')}</div>
+              {projectMembers.length > 0 ? (
+                projectMembers.map((member) => (
+                  <div key={member.id} className="flex items-center justify-between gap-3 rounded-2xl border border-white/8 bg-[color:var(--operator-surface-soft)]/55 px-3 py-3 text-sm">
+                    <div className="min-w-0">
+                      <div className="font-medium text-[color:var(--operator-foreground)]">{member.name}</div>
+                      <div className="mt-1 flex flex-wrap items-center gap-2">
+                        <Badge variant={member.type === 'agent' ? 'secondary' : 'info'}>{member.type === 'agent' ? t('agentMember') : t('humanMember')}</Badge>
+                        <Badge variant="outline">{member.role}</Badge>
+                      </div>
+                    </div>
+                    <Button variant="glass" size="sm" onClick={() => handleRemoveProjectMember(member.id)} disabled={removingMemberId === member.id}>
+                      {removingMemberId === member.id ? '...' : t('removeFromProject')}
+                    </Button>
+                  </div>
+                ))
+              ) : (
+                <div className="rounded-2xl border border-dashed border-white/10 px-3 py-6 text-sm text-[color:var(--operator-muted)]">
+                  {t('noProjectMembers')}
+                </div>
+              )}
+            </div>
+          </SectionCardBody>
+        </SectionCard>
+        </section>
+      ) : null}
+
+      {currentProjectId ? (
+        <section id="ai">
+          <div className="rounded-3xl border border-white/10 bg-[color:var(--operator-panel)]/82 p-1 shadow-[0_18px_50px_rgba(0,0,0,0.24)] backdrop-blur-xl">
+            <AiSettingsSection projectId={currentProjectId} />
+          </div>
+        </section>
+      ) : null}
+
+      {currentProjectId ? (
+        <section id="mcp">
+          <McpConnectionSettings projectId={currentProjectId} />
+        </section>
+      ) : null}
+
+      {currentProjectId ? (
+        <section id="byom">
+          <ByomKeyManagement projectId={currentProjectId} />
+        </section>
+      ) : null}
+
+      {isAdmin ? (
+        <section id="subscription">
+          <SectionCard>
+            <SectionCardHeader>
+              <div className="space-y-1">
+                <h2 className="text-base font-semibold text-[color:var(--operator-foreground)]">💳 {t('manageSubscription')}</h2>
+              <p className="text-sm text-[color:var(--operator-muted)]">{t('subscriptionDescription')}</p>
+            </div>
+          </SectionCardHeader>
+          <SectionCardBody>
+            <Button
+              variant="glass"
+              size="lg"
+              onClick={async () => {
+                try {
+                  const res = await fetch('/api/subscription/portal', { method: 'POST' });
+                  if (res.ok) {
+                    const json = await res.json() as { data: { portalUrl: string } };
+                    window.open(json.data.portalUrl, '_blank');
+                  }
+                } catch {
+                  // noop
+                }
+              }}
+            >
+              {t('manageSubscriptionBtn')}
+            </Button>
+          </SectionCardBody>
+        </SectionCard>
+        </section>
+      ) : null}
+
+      <section id="danger-zone">
+        <SectionCard className="border-rose-400/20 bg-rose-500/10">
+          <SectionCardHeader className="border-b border-rose-400/15">
+            <div className="space-y-1">
+              <h2 className="text-base font-semibold text-rose-100">{t('dangerZone')}</h2>
+            <p className="text-sm text-rose-200/80">{t('dangerDescription')}</p>
+          </div>
+        </SectionCardHeader>
+        <SectionCardBody>
+          <p className="mb-4 text-sm text-rose-100/80">{t('deleteAccountDesc')}</p>
+          <Button variant="destructive" size="lg" onClick={() => setShowDeleteConfirm(true)}>
+            {t('deleteAccount')}
+          </Button>
+        </SectionCardBody>
+      </SectionCard>
+      </section>
+
+      {showDeleteConfirm ? (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 p-4">
+          <div className="w-full max-w-sm rounded-3xl border border-white/10 bg-[color:var(--operator-panel)] p-6 shadow-xl backdrop-blur-xl">
+            <h3 className="text-lg font-semibold text-rose-100">{t('deleteConfirmTitle')}</h3>
+            <p className="mt-2 text-sm text-[color:var(--operator-muted)]">{t('deleteConfirmDesc')}</p>
+            <div className="mt-6 flex gap-3">
+              <Button variant="glass" className="flex-1" onClick={() => setShowDeleteConfirm(false)}>
+                {tc('cancel')}
+              </Button>
+              <Button
+                variant="destructive"
+                className="flex-1"
+                onClick={async () => {
+                  setDeleting(true);
+                  const res = await fetch('/api/account/delete', { method: 'POST' });
+                  if (res.ok) {
+                    router.push('/login');
+                  } else {
+                    const json = await res.json().catch(() => null);
+                    if (json?.error?.code === 'REAUTHENTICATION_REQUIRED') {
+                      alert(t('reauthRequired'));
+                    }
+                    setDeleting(false);
+                    setShowDeleteConfirm(false);
+                  }
+                }}
+                disabled={deleting}
+              >
+                {deleting ? '...' : t('confirmDelete')}
+              </Button>
+            </div>
+          </div>
+        </div>
+      ) : null}
+
+      {currentProjectId && isAdmin && (
+        <section id="agent-api-keys">
+          <AgentApiKeysSection projectId={currentProjectId} />
+        </section>
+      )}
+    </div>
+  );
+}

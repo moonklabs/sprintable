@@ -1,0 +1,104 @@
+import type { SupabaseClient } from '@supabase/supabase-js';
+import { createSupabaseServerClient } from '@/lib/supabase/server';
+import { createSupabaseAdminClient } from '@/lib/supabase/admin';
+import { handleApiError } from '@/lib/api-error';
+import { apiSuccess, ApiErrors } from '@/lib/api-response';
+import { getAuthContext } from '@/lib/auth-helpers';
+import { attachNotificationHrefs } from '@/services/notification-navigation';
+import { parseBody, updateNotificationSchema } from '@sprintable/shared';
+
+/** GET — 알림 목록 (안읽음 우선, 최신순) */
+export async function GET(request: Request) {
+  try {
+    const supabase = await createSupabaseServerClient();
+    const me = await getAuthContext(supabase, request);
+    if (!me) return ApiErrors.unauthorized();
+    if (me.rateLimitExceeded) return ApiErrors.tooManyRequests(me.rateLimitRemaining, me.rateLimitResetAt);
+    const dbClient: SupabaseClient = me.type === 'agent' ? createSupabaseAdminClient() : supabase;
+
+    const { searchParams } = new URL(request.url);
+    const typeFilter = searchParams.get('type');
+    const unreadOnly = searchParams.get('unread') === 'true';
+
+    let query = dbClient
+      .from('notifications')
+      .select('*')
+      .eq('user_id', me.id)
+      .order('is_read', { ascending: true })
+      .order('created_at', { ascending: false })
+      .limit(50);
+
+    if (typeFilter) query = query.eq('type', typeFilter);
+    if (unreadOnly) query = query.eq('is_read', false);
+
+    const { data, error } = await query;
+    if (error) throw error;
+
+    // 안읽음 카운트 - 병렬 처리
+    let countQuery = dbClient
+      .from('notifications')
+      .select('id', { count: 'exact', head: true })
+      .eq('user_id', me.id)
+      .eq('is_read', false);
+
+    if (typeFilter) countQuery = countQuery.eq('type', typeFilter);
+
+    const [countResult, notifications] = await Promise.all([
+      countQuery,
+      attachNotificationHrefs(dbClient, data ?? []),
+    ]);
+
+    const { count } = countResult;
+
+    return apiSuccess(notifications, { unreadCount: count ?? 0 });
+  } catch (err: unknown) {
+    return handleApiError(err);
+  }
+}
+
+/** PATCH — 읽음 처리 (단일 또는 전체) */
+export async function PATCH(request: Request) {
+  try {
+    const supabase = await createSupabaseServerClient();
+    const me = await getAuthContext(supabase, request);
+    if (!me) return ApiErrors.unauthorized();
+    if (me.rateLimitExceeded) return ApiErrors.tooManyRequests(me.rateLimitRemaining, me.rateLimitResetAt);
+    const dbClient: SupabaseClient = me.type === 'agent' ? createSupabaseAdminClient() : supabase;
+
+    const parsed = await parseBody(request, updateNotificationSchema);
+    if (!parsed.success) return parsed.response;
+    const body = parsed.data;
+
+    if (body.markAllRead) {
+      // 전체 읽음 (type 필터 optional)
+      let query = dbClient
+        .from('notifications')
+        .update({ is_read: true })
+        .eq('user_id', me.id)
+        .eq('is_read', false);
+
+      if (body.type) query = query.eq('type', body.type);
+
+      const { error } = await query;
+
+      if (error) throw error;
+      return apiSuccess({ ok: true });
+    }
+
+    if (body.id) {
+      // 단일 읽음 토글
+      const { error } = await dbClient
+        .from('notifications')
+        .update({ is_read: body.is_read ?? true })
+        .eq('id', body.id)
+        .eq('user_id', me.id);
+
+      if (error) throw error;
+      return apiSuccess({ ok: true });
+    }
+
+    return ApiErrors.badRequest('id or markAllRead required');
+  } catch (err: unknown) {
+    return handleApiError(err);
+  }
+}

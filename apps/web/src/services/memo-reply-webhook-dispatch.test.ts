@@ -1,0 +1,180 @@
+import { afterEach, describe, expect, it, vi } from 'vitest';
+import type { SupabaseClient } from '@supabase/supabase-js';
+import { dispatchWorkflowMemoReplyWebhooks } from './memo-reply-webhook-dispatch';
+
+function createSupabaseStub(options?: {
+  priorReplies?: Array<Record<string, unknown>>;
+  members?: Array<Record<string, unknown>>;
+  webhookConfigs?: Array<Record<string, unknown>>;
+}) {
+  const priorReplies = options?.priorReplies ?? [
+    { created_by: 'member-3', content: 'Earlier note from @Paulo Ortega' },
+  ];
+  const members = options?.members ?? [
+    { id: 'member-1', name: 'Paulo Ortega', webhook_url: 'https://discord.com/api/webhooks/member-1/direct', is_active: true },
+    { id: 'member-2', name: '까심 아르야', webhook_url: 'https://discord.com/api/webhooks/member-2/direct', is_active: true },
+    { id: 'member-3', name: '디디 은와추쿠', webhook_url: null, is_active: true },
+  ];
+  const webhookConfigs = options?.webhookConfigs ?? [
+    { org_id: 'org-1', member_id: 'member-1', project_id: 'project-1', is_active: true, url: 'https://discord.com/api/webhooks/member-1/project', secret: null },
+    { org_id: 'org-1', member_id: 'member-3', project_id: null, is_active: true, url: 'https://discord.com/api/webhooks/member-3/default', secret: null },
+  ];
+
+  const supabase = {
+    from(table: string) {
+      if (table === 'team_members') {
+        return {
+          select() { return this; },
+          eq() { return this; },
+          then(resolve: (value: { data: unknown[]; error: null }) => unknown) {
+            return Promise.resolve({ data: members, error: null }).then(resolve);
+          },
+        };
+      }
+
+      if (table === 'memo_replies') {
+        return {
+          select() { return this; },
+          eq() { return this; },
+          then(resolve: (value: { data: unknown[]; error: null }) => unknown) {
+            return Promise.resolve({ data: priorReplies, error: null }).then(resolve);
+          },
+        };
+      }
+
+      if (table === 'webhook_configs') {
+        const filters = new Map<string, unknown>();
+        return {
+          select() { return this; },
+          eq(column: string, value: unknown) {
+            filters.set(column, value);
+            return this;
+          },
+          is(column: string, value: unknown) {
+            filters.set(column, value);
+            return this;
+          },
+          limit() { return this; },
+          maybeSingle: async () => {
+            const data = webhookConfigs.find((config) => {
+              return Array.from(filters.entries()).every(([column, value]) => (config as Record<string, unknown>)[column] === value);
+            }) ?? null;
+            return { data, error: null };
+          },
+        };
+      }
+
+      throw new Error(`Unexpected table: ${table}`);
+    },
+  } as unknown as SupabaseClient;
+
+  return supabase;
+}
+
+afterEach(() => {
+  delete process.env.VERCEL_PROJECT_PRODUCTION_URL;
+  delete process.env.VERCEL_URL;
+});
+
+describe('dispatchWorkflowMemoReplyWebhooks', () => {
+  it('sends direct webhooks to workflow participants with project/default fallback', async () => {
+    const fetchFn = vi.fn<typeof fetch>().mockResolvedValue(new Response(null, { status: 204 }));
+    const supabase = createSupabaseStub();
+
+    const result = await dispatchWorkflowMemoReplyWebhooks({
+      supabase,
+      fetchFn: fetchFn as typeof fetch,
+      appUrl: 'https://sprintable.vercel.app',
+      memo: {
+        id: 'memo-1',
+        org_id: 'org-1',
+        project_id: 'project-1',
+        title: 'Sprintable reply lane fix',
+        created_by: 'member-1',
+        assigned_to: 'member-2',
+        metadata: { source: 'workflow-restart' },
+      },
+      reply: {
+        id: 'reply-1',
+        memo_id: 'memo-1',
+        content: '재기록 완료. @디디 은와추쿠',
+        created_by: 'member-2',
+      },
+    });
+
+    expect(result).toEqual({ status: 'sent', sentCount: 2, failedRecipientCount: 0 });
+    expect(fetchFn).toHaveBeenCalledTimes(2);
+    expect(fetchFn).toHaveBeenNthCalledWith(
+      1,
+      'https://discord.com/api/webhooks/member-1/project',
+      expect.objectContaining({ method: 'POST' }),
+    );
+    expect(fetchFn).toHaveBeenNthCalledWith(
+      2,
+      'https://discord.com/api/webhooks/member-3/default',
+      expect.objectContaining({ method: 'POST' }),
+    );
+
+    const firstPayload = JSON.parse(String(fetchFn.mock.calls[0]?.[1]?.body));
+    expect(firstPayload.embeds?.[0]?.title).toBe('💬 답장: 까심 아르야');
+    expect(String(firstPayload.embeds?.[0]?.description)).toContain('Sprintable reply lane fix');
+    expect(String(firstPayload.embeds?.[0]?.description)).toContain('https://sprintable.vercel.app/memos?id=memo-1');
+  });
+
+  it('falls back to the production app URL when appUrl is omitted', async () => {
+    process.env.VERCEL_PROJECT_PRODUCTION_URL = 'sprintable.vercel.app';
+    const fetchFn = vi.fn<typeof fetch>().mockResolvedValue(new Response(null, { status: 204 }));
+    const supabase = createSupabaseStub();
+
+    await dispatchWorkflowMemoReplyWebhooks({
+      supabase,
+      fetchFn: fetchFn as typeof fetch,
+      memo: {
+        id: 'memo-1',
+        org_id: 'org-1',
+        project_id: 'project-1',
+        title: 'Sprintable reply lane fix',
+        created_by: 'member-1',
+        assigned_to: 'member-2',
+        metadata: { source: 'workflow-restart' },
+      },
+      reply: {
+        id: 'reply-1',
+        memo_id: 'memo-1',
+        content: '재기록 완료',
+        created_by: 'member-2',
+      },
+    });
+
+    const firstPayload = JSON.parse(String(fetchFn.mock.calls[0]?.[1]?.body));
+    expect(String(firstPayload.embeds?.[0]?.description)).toContain('https://sprintable.vercel.app/memos?id=memo-1');
+  });
+
+  it('skips Discord source memos because bridge-based reply handling owns that path', async () => {
+    const fetchFn = vi.fn<typeof fetch>();
+    const supabase = createSupabaseStub();
+
+    const result = await dispatchWorkflowMemoReplyWebhooks({
+      supabase,
+      fetchFn: fetchFn as typeof fetch,
+      memo: {
+        id: 'memo-1',
+        org_id: 'org-1',
+        project_id: 'project-1',
+        title: 'Inbound Discord memo',
+        created_by: 'member-1',
+        assigned_to: 'member-2',
+        metadata: { source: 'discord', channel_id: 'channel-1' },
+      },
+      reply: {
+        id: 'reply-1',
+        memo_id: 'memo-1',
+        content: '답장',
+        created_by: 'member-2',
+      },
+    });
+
+    expect(result).toEqual({ status: 'skipped', reason: 'discord_source_memo' });
+    expect(fetchFn).not.toHaveBeenCalled();
+  });
+});

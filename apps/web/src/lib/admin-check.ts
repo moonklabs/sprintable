@@ -1,0 +1,22 @@
+import type { SupabaseClient } from '@supabase/supabase-js';
+import { ForbiddenError } from '@/services/sprint';
+
+/**
+ * 현재 auth user가 org admin인지 체크
+ * soft delete 시 기존 DELETE 정책(admin 전용) 권한 보존용
+ */
+export async function requireOrgAdmin(supabase: SupabaseClient, orgId: string) {
+  const { data: { user } } = await supabase.auth.getUser();
+  if (!user) throw new ForbiddenError('Not authenticated');
+
+  const { data } = await supabase
+    .from('org_members')
+    .select('role')
+    .eq('org_id', orgId)
+    .eq('user_id', user.id)
+    .single();
+
+  if (!data || !['owner', 'admin'].includes(data.role as string)) {
+    throw new ForbiddenError('Admin access required for delete operations');
+  }
+}

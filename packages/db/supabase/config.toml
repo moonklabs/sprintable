@@ -1,0 +1,19 @@
+# Supabase local development config
+project_id = "sprintable-local"
+
+[db]
+port = 54322
+shadow_port = 54320
+major_version = 15
+
+[db.seed]
+enabled = true
+sql_paths = ["./seed.sql"]
+
+[auth]
+enabled = true
+site_url = "http://localhost:3000"
+
+[api]
+enabled = true
+port = 54321
