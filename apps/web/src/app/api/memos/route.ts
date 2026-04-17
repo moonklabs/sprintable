@@ -6,7 +6,7 @@ import { getAuthContext } from '@/lib/auth-helpers';
 import { parseBody, createMemoSchema } from '@sprintable/shared';
 import { apiSuccess, ApiErrors } from '@/lib/api-response';
 import { buildCursorPageMeta, parseCursorPageInput } from '@/lib/pagination';
-import { createMemoRepository, createTeamMemberRepository, isOssMode } from '@/lib/storage/factory';
+import { createMemoRepository, createTeamMemberRepository, createProjectRepository, isOssMode } from '@/lib/storage/factory';
 import type { SupabaseClient } from '@supabase/supabase-js';
 
 export async function POST(request: Request) {
@@ -37,7 +37,8 @@ export async function POST(request: Request) {
     const dbClient = isOssMode() ? undefined : (me.type === 'agent' ? createSupabaseAdminClient() : supabase);
     const repo = await createMemoRepository(dbClient);
     const teamMemberRepo = isOssMode() ? await createTeamMemberRepository() : undefined;
-    const service = new MemoService(repo, dbClient as SupabaseClient | undefined, teamMemberRepo);
+    const projectRepo = isOssMode() ? await createProjectRepository() : undefined;
+    const service = new MemoService(repo, dbClient as SupabaseClient | undefined, teamMemberRepo, projectRepo);
     const memo = await service.create({
       ...body,
       org_id: me.org_id,

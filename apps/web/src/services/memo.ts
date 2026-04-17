@@ -1,5 +1,5 @@
 import type { SupabaseClient } from '@supabase/supabase-js';
-import type { IMemoRepository, ITeamMemberRepository, Memo, MemoReply } from '@sprintable/core-storage';
+import type { IMemoRepository, ITeamMemberRepository, IProjectRepository, Memo, MemoReply } from '@sprintable/core-storage';
 import { SupabaseMemoRepository } from '@sprintable/storage-supabase';
 import { dispatchMemoAssignmentImmediately, type DispatchableMemo } from './memo-assignment-dispatch';
 import { dispatchWorkflowMemoReplyWebhooks } from './memo-reply-webhook-dispatch';
@@ -53,15 +53,18 @@ export class MemoService {
   private readonly repo: IMemoRepository;
   private readonly supabase: SupabaseClient | null;
   private readonly teamMemberRepo: ITeamMemberRepository | null;
+  private readonly projectRepo: IProjectRepository | null;
 
   constructor(
     repo: IMemoRepository,
     supabase?: SupabaseClient,
     teamMemberRepo?: ITeamMemberRepository,
+    projectRepo?: IProjectRepository,
   ) {
     this.repo = repo;
     this.supabase = supabase ?? null;
     this.teamMemberRepo = teamMemberRepo ?? null;
+    this.projectRepo = projectRepo ?? null;
   }
 
   static fromSupabase(supabase: SupabaseClient): MemoService {
@@ -380,6 +383,26 @@ export class MemoService {
           .eq('project_id', input.project_id)
           .single();
         if (!prevMemo) throw new Error('supersedes_id must reference a memo in the same project');
+      }
+    } else if (this.projectRepo && this.teamMemberRepo) {
+      const project = await this.projectRepo.getById(input.project_id).catch(() => null);
+      if (!project || project.org_id !== input.org_id) throw new Error('project_id must belong to the same organization');
+
+      const author = await this.teamMemberRepo.getById(input.created_by).catch(() => null);
+      if (!author || author.org_id !== input.org_id || author.project_id !== input.project_id || !author.is_active) {
+        throw new Error('created_by must be an active team member in the same project');
+      }
+
+      if (assigneeIds.length > 0) {
+        const resolvedAssignees = await Promise.all(
+          assigneeIds.map((id) => this.teamMemberRepo!.getById(id).catch(() => null)),
+        );
+        const valid = resolvedAssignees.filter(
+          (m) => m && m.org_id === input.org_id && m.project_id === input.project_id,
+        );
+        if (valid.length !== assigneeIds.length) {
+          throw new Error('All assigned_to_ids must be team members in the same project');
+        }
       }
     }
 
