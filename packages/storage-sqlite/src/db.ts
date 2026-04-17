@@ -4,11 +4,17 @@ import path from 'node:path';
 
 let _db: DatabaseSync | null = null;
 
+// Fixed UUIDs for OSS single-user seed — stable across restarts
+export const OSS_ORG_ID = '00000000-0000-0000-0000-000000000001';
+export const OSS_PROJECT_ID = '00000000-0000-0000-0000-000000000002';
+export const OSS_MEMBER_ID = '00000000-0000-0000-0000-000000000003';
+
 export function getDb(): DatabaseSync {
   if (!_db) {
     const dbPath = process.env['SQLITE_PATH'] ?? path.join(process.cwd(), 'sprintable.db');
     _db = new DatabaseSync(dbPath);
     initSchema(_db);
+    seedOssDefaults(_db);
   }
   return _db;
 }
@@ -185,5 +191,33 @@ function initSchema(db: DatabaseSync): void {
     CREATE INDEX IF NOT EXISTS idx_notifications_user_id ON notifications(user_id);
     CREATE INDEX IF NOT EXISTS idx_team_members_org_id ON team_members(org_id);
     CREATE INDEX IF NOT EXISTS idx_team_members_user_id ON team_members(user_id);
+  `);
+}
+
+function seedOssDefaults(db: DatabaseSync): void {
+  const now = new Date().toISOString();
+
+  db.exec(`
+    INSERT OR IGNORE INTO projects (id, org_id, name, created_at, updated_at)
+    VALUES (
+      '${OSS_PROJECT_ID}',
+      '${OSS_ORG_ID}',
+      'My Project',
+      '${now}',
+      '${now}'
+    );
+
+    INSERT OR IGNORE INTO team_members (id, org_id, project_id, name, role, type, is_active, created_at, updated_at)
+    VALUES (
+      '${OSS_MEMBER_ID}',
+      '${OSS_ORG_ID}',
+      '${OSS_PROJECT_ID}',
+      'Admin',
+      'owner',
+      'human',
+      1,
+      '${now}',
+      '${now}'
+    );
   `);
 }
