@@ -5,8 +5,18 @@ import { getMyTeamMember } from '@/lib/auth-helpers';
 import { checkMemberLimit } from '@/lib/check-feature';
 import { parseBody, createTeamMemberSchema } from '@sprintable/shared';
 import { managedAgentRegistrationConfigSchema } from '@/lib/managed-agent-contract';
+import { isOssMode, createTeamMemberRepository } from '@/lib/storage/factory';
 
 export async function GET(request: Request) {
+  if (isOssMode()) {
+    const { OSS_PROJECT_ID } = await import('@sprintable/storage-sqlite');
+    const { searchParams } = new URL(request.url);
+    const projectId = searchParams.get('project_id') ?? OSS_PROJECT_ID;
+    const repo = await createTeamMemberRepository();
+    const { OSS_ORG_ID } = await import('@sprintable/storage-sqlite');
+    const members = await repo.list({ org_id: OSS_ORG_ID, project_id: projectId });
+    return apiSuccess(members);
+  }
   try {
     const supabase = await createSupabaseServerClient();
     const { data: { user } } = await supabase.auth.getUser();
@@ -51,6 +61,7 @@ export async function GET(request: Request) {
 
 /** POST — 프로젝트 멤버 추가/재활성화 */
 export async function POST(request: Request) {
+  if (isOssMode()) return apiError('NOT_IMPLEMENTED', 'Member management is not supported in OSS mode.', 501);
   try {
     const supabase = await createSupabaseServerClient();
     const { data: { user } } = await supabase.auth.getUser();

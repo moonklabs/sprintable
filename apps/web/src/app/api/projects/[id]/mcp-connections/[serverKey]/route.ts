@@ -2,7 +2,7 @@ import { z } from 'zod';
 import { createSupabaseServerClient } from '@/lib/supabase/server';
 import { createSupabaseAdminClient } from '@/lib/supabase/admin';
 import { handleApiError } from '@/lib/api-error';
-import { apiSuccess, ApiErrors } from '@/lib/api-response';
+import { apiSuccess, apiError, ApiErrors } from '@/lib/api-response';
 import { getMyTeamMember } from '@/lib/auth-helpers';
 import { requireOrgAdmin } from '@/lib/admin-check';
 import { AgentDeploymentLifecycleService } from '@/services/agent-deployment-lifecycle';
@@ -10,6 +10,7 @@ import {
   deleteProjectMcpConnection,
   upsertProjectMcpConnection,
 } from '@/services/project-mcp';
+import { isOssMode } from '@/lib/storage/factory';
 
 type RouteParams = { params: Promise<{ id: string; serverKey: string }> };
 
@@ -35,6 +36,7 @@ async function requireAdminContext(projectId: string) {
 }
 
 export async function PUT(request: Request, { params }: RouteParams) {
+  if (isOssMode()) return apiError('NOT_IMPLEMENTED', 'MCP connection management is not supported in OSS mode.', 501);
   try {
     const { id, serverKey } = await params;
     const ctx = await requireAdminContext(id);
@@ -62,6 +64,7 @@ export async function PUT(request: Request, { params }: RouteParams) {
 }
 
 export async function DELETE(_request: Request, { params }: RouteParams) {
+  if (isOssMode()) return apiError('NOT_IMPLEMENTED', 'MCP connection management is not supported in OSS mode.', 501);
   try {
     const { id, serverKey } = await params;
     const ctx = await requireAdminContext(id);

@@ -4,8 +4,13 @@ import { handleApiError } from '@/lib/api-error';
 import { apiSuccess, ApiErrors } from '@/lib/api-response';
 import { CURRENT_PROJECT_COOKIE } from '@/lib/auth-helpers';
 import { parseBody, setCurrentProjectSchema } from '@sprintable/shared';
+import { isOssMode } from '@/lib/storage/factory';
 
 export async function POST(request: Request) {
+  if (isOssMode()) {
+    const { OSS_PROJECT_ID } = await import('@sprintable/storage-sqlite');
+    return apiSuccess({ project_id: OSS_PROJECT_ID, project_name: 'My Project' });
+  }
   try {
     const supabase = await createSupabaseServerClient();
     const { data: { user } } = await supabase.auth.getUser();

@@ -23,6 +23,8 @@ import {
 } from '@/lib/llm/project-ai-settings';
 import type { LLMProvider } from '@/lib/llm';
 
+import { isOssMode } from '@/lib/storage/factory';
+
 type RouteParams = { params: Promise<{ id: string }> };
 
 const legacyMcpFields = ['mcp_servers', 'mcpServers', 'github_mcp'] as const;
@@ -72,6 +74,7 @@ const updateAiSettingsSchema = z.object({
 
 /** GET — 프로젝트 AI 설정 조회 (api_key 마스킹 + persisted llm_config) */
 export async function GET(_request: Request, { params }: RouteParams) {
+  if (isOssMode()) return apiSuccess(null);
   try {
     const { id } = await params;
     const supabase = await createSupabaseServerClient();
@@ -99,6 +102,7 @@ export async function GET(_request: Request, { params }: RouteParams) {
 
 /** PUT — 프로젝트 AI 설정 저장 (admin only, 기존 api_key 유지 허용) */
 export async function PUT(request: Request, { params }: RouteParams) {
+  if (isOssMode()) return apiError('NOT_IMPLEMENTED', 'AI settings persistence is not supported in OSS mode. Set API keys via environment variables.', 501);
   try {
     const { id } = await params;
     const supabase = await createSupabaseServerClient();
@@ -165,6 +169,7 @@ export async function PUT(request: Request, { params }: RouteParams) {
 
 /** DELETE — 프로젝트 AI 설정(BYOM 키 포함) 삭제 (admin only) */
 export async function DELETE(_request: Request, { params }: RouteParams) {
+  if (isOssMode()) return apiError('NOT_IMPLEMENTED', 'AI settings are not supported in OSS mode.', 501);
   try {
     const { id } = await params;
     const supabase = await createSupabaseServerClient();

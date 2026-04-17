@@ -2,8 +2,13 @@ import { createSupabaseServerClient } from '@/lib/supabase/server';
 import { handleApiError } from '@/lib/api-error';
 import { apiSuccess, apiError, ApiErrors } from '@/lib/api-response';
 import { getMyTeamMember } from '@/lib/auth-helpers';
+import { isOssMode } from '@/lib/storage/factory';
 
 export async function GET() {
+  if (isOssMode()) {
+    const { OSS_MEMBER_ID } = await import('@sprintable/storage-sqlite');
+    return apiSuccess({ id: OSS_MEMBER_ID, name: 'OSS User', type: 'human', role: 'owner', is_active: true, email: null });
+  }
   try {
     const supabase = await createSupabaseServerClient();
     const { data: { user } } = await supabase.auth.getUser();
@@ -28,6 +33,14 @@ export async function GET() {
 }
 
 export async function PATCH(request: Request) {
+  if (isOssMode()) {
+    const { OSS_MEMBER_ID } = await import('@sprintable/storage-sqlite');
+    let body: unknown;
+    try { body = await request.json(); } catch { return apiError('BAD_REQUEST', 'Invalid JSON body', 400); }
+    const { name } = (body as Record<string, unknown>) ?? {};
+    if (typeof name !== 'string' || !name.trim()) return apiError('VALIDATION_ERROR', 'name is required', 400);
+    return apiSuccess({ id: OSS_MEMBER_ID, name: name.trim(), type: 'human', role: 'owner', is_active: true, email: null });
+  }
   try {
     const supabase = await createSupabaseServerClient();
     const { data: { user } } = await supabase.auth.getUser();
