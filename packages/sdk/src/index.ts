@@ -14,8 +14,7 @@ export type { ApiResponse, Story, Task, Memo, MemoSummary, MemoReply, MemoListFi
 
 export interface SprintableClientOptions {
   /**
-   * Base URL for Sprintable API
-   * @default "https://sprintable.vercel.app"
+   * Base URL for Sprintable API (e.g., "https://your-domain.example.com")
    */
   baseURL?: string;
 
@@ -88,7 +87,7 @@ export function createSprintableClient(
   options: SprintableClientOptions = {}
 ): SprintableClient {
   const {
-    baseURL = 'https://sprintable.vercel.app',
+    baseURL = '',
     axiosConfig = {},
   } = options;
 

@@ -95,7 +95,7 @@ Creates a configured Sprintable API client.
 **Parameters:**
 - `apiKey` (string): Your Sprintable API key (e.g., `sk_live_...`)
 - `options` (SprintableClientOptions, optional):
-  - `baseURL` (string): Base URL for API requests. Default: `https://sprintable.vercel.app`
+  - `baseURL` (string): Base URL for API requests. Required — your Sprintable deployment URL (e.g., `https://your-domain.example.com`)
   - `axiosConfig` (AxiosRequestConfig): Additional axios configuration
 
 **Returns:**
