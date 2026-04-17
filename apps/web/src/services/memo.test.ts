@@ -9,7 +9,8 @@ describe('MemoService.getByIdWithDetails', () => {
           return {
             select() { return this; },
             eq() { return this; },
-            single: async () => ({
+            is() { return this; },
+          single: async () => ({
               data: {
                 id: 'memo-1',
                 project_id: 'project-1',
@@ -115,7 +116,7 @@ describe('MemoService.getByIdWithDetails', () => {
       },
     } as unknown as import('@supabase/supabase-js').SupabaseClient;
 
-    const service = new MemoService(supabase);
+    const service = MemoService.fromSupabase(supabase);
     const memo = await service.getByIdWithDetails('memo-1');
 
     expect(memo.reply_count).toBe(2);
@@ -168,12 +169,13 @@ describe('MemoService.create', () => {
         return {
           select() { return this; },
           eq() { return this; },
+          is() { return this; },
           single: async () => ({ data: null, error: null }),
         };
       },
     } as unknown as import('@supabase/supabase-js').SupabaseClient;
 
-    const service = new MemoService(supabase);
+    const service = MemoService.fromSupabase(supabase);
 
     await expect(service.create({
       project_id: 'project-1',
@@ -195,7 +197,8 @@ describe('MemoService.linkDoc and markRead', () => {
           return {
             select() { return this; },
             eq() { return this; },
-            single: async () => ({
+            is() { return this; },
+          single: async () => ({
               data: {
                 id: 'memo-1',
                 project_id: 'project-1',
@@ -253,7 +256,7 @@ describe('MemoService.linkDoc and markRead', () => {
       },
     } as unknown as import('@supabase/supabase-js').SupabaseClient;
 
-    const service = new MemoService(supabase);
+    const service = MemoService.fromSupabase(supabase);
 
     await expect(service.linkDoc('memo-1', 'doc-1', 'author-1')).resolves.toMatchObject({ doc_id: 'doc-1', memo_id: 'memo-1' });
     await expect(service.markRead('memo-1', 'author-1')).resolves.toMatchObject({ memo_id: 'memo-1', team_member_id: 'author-1' });
@@ -268,7 +271,8 @@ describe('MemoService.linkDoc and markRead', () => {
           return {
             select() { return this; },
             eq() { return this; },
-            single: async () => ({
+            is() { return this; },
+          single: async () => ({
               data: {
                 id: 'memo-1',
                 org_id: 'org-1',
@@ -310,7 +314,7 @@ describe('MemoService.linkDoc and markRead', () => {
       },
     } as unknown as import('@supabase/supabase-js').SupabaseClient;
 
-    const service = new MemoService(supabase);
+    const service = MemoService.fromSupabase(supabase);
     await expect(service.markRead('memo-1', 'author-1')).resolves.toMatchObject({
       memo_id: 'memo-1',
       team_member_id: 'author-1',
@@ -327,7 +331,8 @@ describe('MemoService.list', () => {
           return {
             select() { return this; },
             eq() { return this; },
-            order() { return this; },
+            is() { return this; },
+          order() { return this; },
             then: (resolve: (value: { data: unknown[]; error: null }) => void) => Promise.resolve({
               data: [
                 {
@@ -386,7 +391,7 @@ describe('MemoService.list', () => {
       },
     } as unknown as import('@supabase/supabase-js').SupabaseClient;
 
-    const service = new MemoService(supabase);
+    const service = MemoService.fromSupabase(supabase);
     const memos = await service.list({ project_id: 'project-1' });
 
     expect(memos).toEqual([
@@ -407,7 +412,8 @@ describe('MemoService.list', () => {
           return {
             select() { return this; },
             eq() { return this; },
-            order() { return this; },
+            is() { return this; },
+          order() { return this; },
             then: (resolve: (value: { data: unknown[]; error: null }) => void) => Promise.resolve({
               data: [
                 {
@@ -483,7 +489,7 @@ describe('MemoService.list', () => {
       },
     } as unknown as import('@supabase/supabase-js').SupabaseClient;
 
-    const service = new MemoService(supabase);
+    const service = MemoService.fromSupabase(supabase);
     const memos = await service.list({ project_id: 'project-1' });
 
     expect(memos).toEqual([

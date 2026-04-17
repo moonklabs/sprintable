@@ -5,6 +5,8 @@ import { MemoService } from '@/services/memo';
 import { handleApiError } from '@/lib/api-error';
 import { getAuthContext } from '@/lib/auth-helpers';
 import { apiSuccess, ApiErrors } from '@/lib/api-response';
+import { createMemoRepository, createTeamMemberRepository, isOssMode } from '@/lib/storage/factory';
+import type { SupabaseClient } from '@supabase/supabase-js';
 
 type RouteParams = { params: Promise<{ id: string }> };
 
@@ -30,9 +32,10 @@ export async function POST(request: Request, { params }: RouteParams) {
     }
 
     const parsed = await parseBody(request, createMemoReplySchema); if (!parsed.success) return parsed.response; const body = parsed.data;
-    // API Key 인증시 RLS 우회를 위해 admin client 사용
-    const dbClient = me.type === 'agent' ? createSupabaseAdminClient() : supabase;
-    const service = new MemoService(dbClient);
+    const dbClient = isOssMode() ? undefined : (me.type === 'agent' ? createSupabaseAdminClient() : supabase);
+    const repo = await createMemoRepository(dbClient);
+    const teamMemberRepo = isOssMode() ? await createTeamMemberRepository() : undefined;
+    const service = new MemoService(repo, dbClient as SupabaseClient | undefined, teamMemberRepo);
     const reply = await service.addReply(id, body.content, me.id);
     return apiSuccess(reply, undefined, 201);
   } catch (err: unknown) {

@@ -239,7 +239,7 @@ export class BridgeInboundService {
 
     const unknownUserLabel = userMapping ? null : (input.unknownUserLabel ?? `${input.platform} 연동 미설정 사용자`);
     const metadata = normalizeBridgeMetadata(input.platform, input.event);
-    const memoService = new MemoService(this.supabase);
+    const memoService = MemoService.fromSupabase(this.supabase);
 
     try {
       const memo = await memoService.create({

@@ -6,6 +6,8 @@ import { handleApiError } from '@/lib/api-error';
 import { getAuthContext } from '@/lib/auth-helpers';
 import { apiSuccess, ApiErrors } from '@/lib/api-response';
 import { parseBody, createMemoLinkedDocSchema } from '@sprintable/shared';
+import { createMemoRepository, isOssMode } from '@/lib/storage/factory';
+import type { SupabaseClient } from '@supabase/supabase-js';
 
 type RouteParams = { params: Promise<{ id: string }> };
 
@@ -30,9 +32,9 @@ export async function POST(request: Request, { params }: RouteParams) {
     if (!parsed.success) return parsed.response;
     const body = parsed.data;
 
-    // API Key 인증시 RLS 우회를 위해 admin client 사용
-    const dbClient = me.type === 'agent' ? createSupabaseAdminClient() : supabase;
-    const memoService = new MemoService(dbClient);
+    const dbClient = isOssMode() ? undefined : (me.type === 'agent' ? createSupabaseAdminClient() : supabase);
+    const repo = await createMemoRepository(dbClient);
+    const memoService = new MemoService(repo, dbClient as SupabaseClient | undefined);
     let linkedDocId = body.doc_id ?? null;
     let createdDoc: Awaited<ReturnType<DocsService['createDoc']>> | null = null;
 
@@ -40,7 +42,7 @@ export async function POST(request: Request, { params }: RouteParams) {
       const memo = await memoService.getById(id);
       const title = body.title?.trim() || memo.title || memo.content.slice(0, 80) || 'Untitled doc';
       const slug = slugify(title) || `memo-${id.slice(0, 8)}`;
-      const docsService = new DocsService(dbClient);
+      const docsService = new DocsService(dbClient as SupabaseClient);
       createdDoc = await docsService.createDoc({
         org_id: me.org_id,
         project_id: me.project_id,
