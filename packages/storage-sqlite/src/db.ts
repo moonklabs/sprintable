@@ -191,6 +191,40 @@ function initSchema(db: DatabaseSync): void {
     CREATE INDEX IF NOT EXISTS idx_notifications_user_id ON notifications(user_id);
     CREATE INDEX IF NOT EXISTS idx_team_members_org_id ON team_members(org_id);
     CREATE INDEX IF NOT EXISTS idx_team_members_user_id ON team_members(user_id);
+
+    CREATE TABLE IF NOT EXISTS agent_runs (
+      id TEXT PRIMARY KEY,
+      org_id TEXT NOT NULL,
+      project_id TEXT NOT NULL,
+      agent_id TEXT,
+      session_id TEXT,
+      memo_id TEXT,
+      story_id TEXT,
+      trigger TEXT,
+      status TEXT NOT NULL DEFAULT 'pending',
+      duration_ms INTEGER,
+      input_tokens INTEGER,
+      output_tokens INTEGER,
+      result_summary TEXT,
+      error_message TEXT,
+      started_at TEXT,
+      finished_at TEXT,
+      created_at TEXT NOT NULL
+    );
+
+    CREATE TABLE IF NOT EXISTS agent_api_keys (
+      id TEXT PRIMARY KEY,
+      team_member_id TEXT NOT NULL,
+      key_prefix TEXT NOT NULL,
+      key_hash TEXT NOT NULL,
+      created_at TEXT NOT NULL,
+      revoked_at TEXT,
+      last_used_at TEXT
+    );
+
+    CREATE INDEX IF NOT EXISTS idx_agent_runs_org_project ON agent_runs(org_id, project_id);
+    CREATE INDEX IF NOT EXISTS idx_agent_runs_created_at ON agent_runs(created_at);
+    CREATE INDEX IF NOT EXISTS idx_agent_api_keys_team_member ON agent_api_keys(team_member_id);
   `);
 }
 

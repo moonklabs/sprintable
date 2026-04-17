@@ -10,6 +10,7 @@ import {
 import { buildDeploymentCards } from '@/services/agent-dashboard';
 import { requireAgentOrchestration } from '@/lib/require-agent-orchestration';
 import { createManagedAgentDeploymentSchema } from '@/lib/managed-agent-contract';
+import { isOssMode } from '@/lib/storage/factory';
 import {
   getProjectAiSettingsWithIntegration,
   hasProjectAiCredential,
@@ -18,6 +19,8 @@ import {
 } from '@/lib/llm/project-ai-settings';
 
 export async function GET() {
+  if (isOssMode()) return apiError('NOT_IMPLEMENTED', 'Not available in OSS mode.', 501);
+
   try {
     const supabase = await createSupabaseServerClient();
     const { data: { user } } = await supabase.auth.getUser();
@@ -62,6 +65,8 @@ async function assertByomDeploymentAllowed(supabase: Awaited<ReturnType<typeof c
 }
 
 export async function POST(request: Request) {
+  if (isOssMode()) return apiError('NOT_IMPLEMENTED', 'Not available in OSS mode.', 501);
+
   try {
     const supabase = await createSupabaseServerClient();
     const { data: { user } } = await supabase.auth.getUser();

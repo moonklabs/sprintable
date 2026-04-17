@@ -7,4 +7,6 @@ export { SqliteProjectRepository } from './SqliteProjectRepository';
 export { SqliteSprintRepository } from './SqliteSprintRepository';
 export { SqliteNotificationRepository } from './SqliteNotificationRepository';
 export { SqliteTeamMemberRepository } from './SqliteTeamMemberRepository';
+export { SqliteAgentRunRepository } from './SqliteAgentRunRepository';
+export { SqliteAgentApiKeyRepository } from './SqliteAgentApiKeyRepository';
 export { getDb, OSS_ORG_ID, OSS_PROJECT_ID, OSS_MEMBER_ID } from './db';

@@ -2,7 +2,8 @@ import { createSupabaseServerClient } from '@/lib/supabase/server';
 import { handleApiError } from '@/lib/api-error';
 import { getAuthContext } from '@/lib/auth-helpers';
 import { generateApiKey } from '@/lib/auth-api-key';
-import { apiSuccess, ApiErrors } from '@/lib/api-response';
+import { apiSuccess, apiError, ApiErrors } from '@/lib/api-response';
+import { isOssMode, createAgentApiKeyRepository } from '@/lib/storage/factory';
 
 type RouteParams = { params: Promise<{ id: string }> };
 
@@ -13,6 +14,15 @@ type RouteParams = { params: Promise<{ id: string }> };
  * Admin만 가능
  */
 export async function POST(request: Request, { params }: RouteParams) {
+  if (isOssMode()) {
+    try {
+      const { id: teamMemberId } = await params;
+      const { apiKey, keyPrefix, keyHash } = generateApiKey();
+      const repo = await createAgentApiKeyRepository();
+      const row = await repo.create({ teamMemberId, keyPrefix, keyHash });
+      return apiSuccess({ ...row, api_key: apiKey }, undefined, 201);
+    } catch (err: unknown) { return handleApiError(err); }
+  }
   try {
     const { id: teamMemberId } = await params;
     const supabase = await createSupabaseServerClient();
@@ -84,6 +94,13 @@ export async function POST(request: Request, { params }: RouteParams) {
  * Admin만 가능
  */
 export async function GET(request: Request, { params }: RouteParams) {
+  if (isOssMode()) {
+    try {
+      const { id: teamMemberId } = await params;
+      const repo = await createAgentApiKeyRepository();
+      return apiSuccess(await repo.list(teamMemberId));
+    } catch (err: unknown) { return handleApiError(err); }
+  }
   try {
     const { id: teamMemberId } = await params;
     const supabase = await createSupabaseServerClient();

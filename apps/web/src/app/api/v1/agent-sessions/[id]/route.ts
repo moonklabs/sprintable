@@ -8,6 +8,7 @@ import { handleApiError } from '@/lib/api-error';
 import { requireAgentOrchestration } from '@/lib/require-agent-orchestration';
 import { AgentSessionLifecycleError, AgentSessionLifecycleService } from '@/services/agent-session-lifecycle';
 import { resumeSessionCandidates } from '@/services/agent-session-resume';
+import { isOssMode } from '@/lib/storage/factory';
 
 type RouteParams = { params: Promise<{ id: string }> };
 
@@ -17,6 +18,8 @@ const patchSchema = z.object({
 });
 
 export async function PATCH(request: Request, { params }: RouteParams) {
+  if (isOssMode()) return apiError('NOT_IMPLEMENTED', 'Not available in OSS mode.', 501);
+
   try {
     const { id } = await params;
     const supabase = await createSupabaseServerClient();

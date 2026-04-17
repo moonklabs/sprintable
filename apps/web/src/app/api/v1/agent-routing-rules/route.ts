@@ -1,11 +1,12 @@
 import { z } from 'zod';
 import { createSupabaseServerClient } from '@/lib/supabase/server';
 import { getMyTeamMember } from '@/lib/auth-helpers';
-import { ApiErrors, apiSuccess } from '@/lib/api-response';
+import { apiError, ApiErrors, apiSuccess } from '@/lib/api-response';
 import { handleApiError } from '@/lib/api-error';
 import { requireOrgAdmin } from '@/lib/admin-check';
 import { AgentRoutingRuleService, getRoutingPolicyIssues, normalizeRoutingAction } from '@/services/agent-routing-rule';
 import { requireAgentOrchestration } from '@/lib/require-agent-orchestration';
+import { isOssMode } from '@/lib/storage/factory';
 
 const conditionsSchema = z.object({
   memo_type: z.array(z.string().trim().min(1)).optional(),
@@ -85,6 +86,8 @@ const disableAllSchema = z.object({
 });
 
 export async function GET(request: Request) {
+  if (isOssMode()) return apiError('NOT_IMPLEMENTED', 'Not available in OSS mode.', 501);
+
   try {
     const supabase = await createSupabaseServerClient();
     const { data: { user } } = await supabase.auth.getUser();
@@ -112,6 +115,8 @@ export async function GET(request: Request) {
 }
 
 export async function POST(request: Request) {
+  if (isOssMode()) return apiError('NOT_IMPLEMENTED', 'Not available in OSS mode.', 501);
+
   try {
     const supabase = await createSupabaseServerClient();
     const { data: { user } } = await supabase.auth.getUser();
@@ -147,6 +152,8 @@ export async function POST(request: Request) {
 }
 
 export async function PUT(request: Request) {
+  if (isOssMode()) return apiError('NOT_IMPLEMENTED', 'Not available in OSS mode.', 501);
+
   try {
     const supabase = await createSupabaseServerClient();
     const { data: { user } } = await supabase.auth.getUser();
@@ -204,6 +211,8 @@ export async function PUT(request: Request) {
 }
 
 export async function PATCH(request: Request) {
+  if (isOssMode()) return apiError('NOT_IMPLEMENTED', 'Not available in OSS mode.', 501);
+
   try {
     const supabase = await createSupabaseServerClient();
     const { data: { user } } = await supabase.auth.getUser();
@@ -248,6 +257,8 @@ export async function PATCH(request: Request) {
 }
 
 export async function DELETE(request: Request) {
+  if (isOssMode()) return apiError('NOT_IMPLEMENTED', 'Not available in OSS mode.', 501);
+
   try {
     const supabase = await createSupabaseServerClient();
     const { data: { user } } = await supabase.auth.getUser();

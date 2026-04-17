@@ -6,6 +6,7 @@ import { apiError, apiSuccess, ApiErrors } from '@/lib/api-response';
 import { handleApiError } from '@/lib/api-error';
 import { requireAgentOrchestration } from '@/lib/require-agent-orchestration';
 import { AgentHitlService, HitlConflictError } from '@/services/agent-hitl';
+import { isOssMode } from '@/lib/storage/factory';
 
 type RouteParams = { params: Promise<{ id: string }> };
 
@@ -21,6 +22,8 @@ const resolveHitlSchema = z.discriminatedUnion('action', [
 ]);
 
 export async function PATCH(request: Request, { params }: RouteParams) {
+  if (isOssMode()) return apiError('NOT_IMPLEMENTED', 'Not available in OSS mode.', 501);
+
   try {
     const { id } = await params;
     const supabase = await createSupabaseServerClient();

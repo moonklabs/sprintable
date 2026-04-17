@@ -6,6 +6,7 @@ import { checkFeatureLimit } from '@/lib/check-feature';
 import { AgentPersonaService } from '@/services/agent-persona';
 import { resolveAutoRoutingPersonaRole } from '@/services/agent-routing-template';
 import { AgentOrchestrationUpgradeState } from '@/components/agents/agent-orchestration-gate';
+import { isOssMode } from '@/lib/storage/factory';
 import {
   AgentDeploymentWizard,
   type WizardDefaults,
@@ -23,6 +24,14 @@ function getBasePersonaId(config: unknown): string | null {
 }
 
 export default async function AgentDeployPage() {
+  if (isOssMode()) {
+    return (
+      <div className="flex flex-col items-center justify-center py-20 text-center space-y-2">
+        <h2 className="text-xl font-semibold">OSS 버전 미제공 기능인.</h2>
+        <p className="text-muted-foreground">에이전트 배포 관리는 SaaS 버전에서 이용 가능한.</p>
+      </div>
+    );
+  }
   const supabase = await createSupabaseServerClient();
   const { data: { user } } = await supabase.auth.getUser();
   if (!user) redirect('/login');
