@@ -8,11 +8,11 @@ describe('createSprintableClient', () => {
     vi.clearAllMocks();
   });
 
-  it('creates client with default baseURL', () => {
+  it('creates client with default empty baseURL', () => {
     const client = createSprintableClient(TEST_API_KEY);
 
     expect(client.apiKey).toBe(TEST_API_KEY);
-    expect(client.axios.defaults.baseURL).toBe('https://sprintable.vercel.app');
+    expect(client.axios.defaults.baseURL).toBe('');
   });
 
   it('creates client with custom baseURL', () => {

@@ -649,7 +649,7 @@ export default function SettingsPage() {
         </section>
       ) : null}
 
-      {isAdmin ? (
+      {isAdmin && process.env.NEXT_PUBLIC_OSS_MODE !== 'true' ? (
         <section id="subscription">
           <SectionCard>
             <SectionCardHeader>

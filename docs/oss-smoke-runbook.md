@@ -10,11 +10,21 @@
 
 ## 환경 변수
 
+`.env.example`을 복사하여 시작하는 것을 권장한다:
+
 ```bash
+cp .env.example .env.local
+# 필요 시 값 수정 후 dev server 기동
+```
+
+수동 설정 시:
+
+```bash
+export APP_BASE_URL=http://localhost:3000
 export OSS_MODE=true
-export SQLITE_PATH=./sprintable.db
-export NEXT_PUBLIC_SUPABASE_URL=http://localhost:3000        # placeholder (OSS 모드에서 미사용)
-export NEXT_PUBLIC_SUPABASE_ANON_KEY=oss-placeholder
+export NEXT_PUBLIC_OSS_MODE=true
+export SQLITE_PATH=./.data/sprintable.db
+export AGENT_API_KEY_SECRET=change-me-in-development
 ```
 
 ## 실행
@@ -79,4 +89,5 @@ Repository/Factory는 모두 존재하므로 후속 스토리에서 점진적으
 
 - `node:sqlite not found` → Node 22.5+ 필요
 - `SQLITE_BUSY` → 다른 프로세스가 DB 점유. dev server 재시작
-- `/settings` 500 → 로그 확인. OSS 모드에서 SubscriptionService가 아직 supabase 경로 사용 중인 경우 NullSubscriptionRepository로 수정 필요 (후속)
+- `/settings` 500 → `OSS_MODE=true` + `NEXT_PUBLIC_OSS_MODE=true` 확인. `/settings/usage`는 OSS_MODE 조기 분기로 Supabase 호출 없이 200 반환
+- `/settings` 결제 UI 표시됨 → `NEXT_PUBLIC_OSS_MODE=true` 설정 확인 (클라이언트 env)

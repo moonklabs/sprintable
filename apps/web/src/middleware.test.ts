@@ -17,7 +17,7 @@ describe('middleware', () => {
   });
 
   it('bypasses Supabase auth for internal dogfood public paths', async () => {
-    const request = new NextRequest('https://sprintable.vercel.app/internal-dogfood');
+    const request = new NextRequest('https://app.example.com/internal-dogfood');
 
     const response = await middleware(request);
 
@@ -39,7 +39,7 @@ describe('middleware', () => {
 
     for (const path of apiPaths) {
       createServerClient.mockReset();
-      const request = new NextRequest(`https://sprintable.vercel.app${path}`);
+      const request = new NextRequest(`https://app.example.com${path}`);
       const response = await middleware(request);
 
       expect(response.status).toBe(200);
@@ -56,11 +56,11 @@ describe('middleware', () => {
       },
     });
 
-    const request = new NextRequest('https://sprintable.vercel.app/dashboard');
+    const request = new NextRequest('https://app.example.com/dashboard');
     const response = await middleware(request);
 
     expect(response.status).toBe(307);
-    expect(response.headers.get('location')).toBe('https://sprintable.vercel.app/login');
+    expect(response.headers.get('location')).toBe('https://app.example.com/login');
     expect(createServerClient).toHaveBeenCalledTimes(1);
   });
 });

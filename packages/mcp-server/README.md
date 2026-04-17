@@ -8,7 +8,7 @@ Sprintable MCP (Model Context Protocol) 서버 — Sprintable PM/Docs/Meeting/Re
 
 | 변수                         | 필수 | 설명                                                          |
 |------------------------------|------|---------------------------------------------------------------|
-| `PM_API_URL`                 | Yes  | Sprintable PM API base URL (예: `https://sprintable.vercel.app`) |
+| `PM_API_URL`                 | Yes  | Sprintable PM API base URL (예: `https://your-sprintable-url.example.com`) |
 | `AGENT_API_KEY`              | Yes  | 에이전트 API Key — PM API 인증용 (`sk_live_…`)               |
 | `MCP_API_KEY`                | No   | SSE 엔드포인트 Bearer 인증 키 (선택)                         |
 | `MCP_MODE`                   | No   | `stdio` (기본) 또는 `sse`                                     |
@@ -19,7 +19,7 @@ Sprintable MCP (Model Context Protocol) 서버 — Sprintable PM/Docs/Meeting/Re
 pnpm run build
 
 # stdio mode (Claude Code / Codex / local harness)
-PM_API_URL=https://sprintable.vercel.app AGENT_API_KEY=sk_live_... node dist/index.js
+PM_API_URL=https://your-sprintable-url.example.com AGENT_API_KEY=sk_live_... node dist/index.js
 
 # SSE mode
 MCP_MODE=sse MCP_PORT=3100 MCP_API_KEY=... PM_API_URL=... AGENT_API_KEY=... node dist/index.js

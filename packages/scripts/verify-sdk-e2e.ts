@@ -8,10 +8,15 @@
 import { createSprintableClient } from '@sprintable/sdk';
 
 const API_KEY = process.env.SPRINTABLE_API_KEY;
-const BASE_URL = process.env.SPRINTABLE_API_URL || 'https://sprintable.vercel.app';
+const BASE_URL = process.env.SPRINTABLE_API_URL;
 
 if (!API_KEY) {
   console.error('Error: SPRINTABLE_API_KEY environment variable is required');
+  process.exit(1);
+}
+
+if (!BASE_URL) {
+  console.error('Error: SPRINTABLE_API_URL environment variable is required');
   process.exit(1);
 }
 

@@ -1,9 +1,14 @@
 import { redirect } from 'next/navigation';
+import { isOssMode } from '@/lib/storage/factory';
 import { createSupabaseServerClient } from '@/lib/supabase/server';
 import { getMyMembershipContext } from '@/lib/auth-helpers';
 import { UsageDashboard } from '@/components/settings/usage-dashboard';
 
 export default async function UsagePage() {
+  if (isOssMode()) {
+    return <UsageDashboard />;
+  }
+
   const supabase = await createSupabaseServerClient();
   const { data: { user } } = await supabase.auth.getUser();
 

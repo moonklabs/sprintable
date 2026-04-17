@@ -192,6 +192,7 @@ function createSupabaseStub(options?: {
 
 afterEach(() => {
   delete process.env.DISCORD_BOT_TOKEN;
+  delete process.env.APP_BASE_URL;
   delete process.env.VERCEL_PROJECT_PRODUCTION_URL;
   delete process.env.VERCEL_URL;
   vi.restoreAllMocks();
@@ -212,10 +213,10 @@ describe('discord outbound helpers', () => {
     expect(chunks.every((chunk) => chunk.length <= 2000)).toBe(true);
   });
 
-  it('falls back to the production app URL when explicit appUrl is missing', () => {
-    process.env.VERCEL_PROJECT_PRODUCTION_URL = 'sprintable.vercel.app';
+  it('falls back to APP_BASE_URL when explicit appUrl is missing', () => {
+    process.env.APP_BASE_URL = 'https://myapp.example.com';
 
-    expect(buildDiscordMemoLink(undefined, 'memo-1')).toBe('https://sprintable.vercel.app/memos?id=memo-1');
+    expect(buildDiscordMemoLink(undefined, 'memo-1')).toBe('https://myapp.example.com/memos?id=memo-1');
   });
 });
 

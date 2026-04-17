@@ -1,5 +1,4 @@
 const LOCAL_APP_URL = 'http://localhost:3000';
-const PRODUCTION_APP_URL = 'https://sprintable.vercel.app';
 
 function normalizeUrl(value: string | null | undefined) {
   const trimmed = value?.trim();
@@ -18,23 +17,24 @@ function normalizeHostAsUrl(value: string | null | undefined) {
 }
 
 export function resolveAppUrl(appUrl: string | null | undefined, env: NodeJS.ProcessEnv = process.env) {
-  // 명시적으로 전달된 appUrl이 있으면 사용
-  const explicit = normalizeUrl(appUrl) ?? normalizeUrl(env['NEXT_PUBLIC_APP_URL']);
+  // 1. 명시적으로 전달된 appUrl
+  const explicit = normalizeUrl(appUrl);
   if (explicit) return explicit;
 
-  // Vercel 환경 감지 - runtime에서 env var 미노출될 수 있으므로 여러 방식으로 체크
-  const isVercel = Boolean(env['VERCEL'])
-    || Boolean(env['VERCEL_ENV'])
-    || Boolean(env['VERCEL_URL'])
-    || Boolean(env['VERCEL_PROJECT_PRODUCTION_URL']);
-  if (isVercel) {
-    // Vercel URL이 있으면 사용, 없으면 하드코딩된 production URL
-    return normalizeHostAsUrl(env['VERCEL_PROJECT_PRODUCTION_URL'])
-      ?? normalizeHostAsUrl(env['VERCEL_URL'])
-      ?? PRODUCTION_APP_URL;
-  }
+  // 2. APP_BASE_URL — Amplify/custom 배포 시 직접 설정 (최우선 env)
+  const appBaseUrl = normalizeUrl(env['APP_BASE_URL']);
+  if (appBaseUrl) return appBaseUrl;
 
-  // 로컬 개발 환경
+  // 3. NEXT_PUBLIC_APP_URL
+  const nextPublicAppUrl = normalizeUrl(env['NEXT_PUBLIC_APP_URL']);
+  if (nextPublicAppUrl) return nextPublicAppUrl;
+
+  // 4. Vercel auto env
+  const vercelUrl = normalizeHostAsUrl(env['VERCEL_PROJECT_PRODUCTION_URL'])
+    ?? normalizeHostAsUrl(env['VERCEL_URL']);
+  if (vercelUrl) return vercelUrl;
+
+  // 5. 로컬 개발 환경 fallback
   return LOCAL_APP_URL;
 }
 

@@ -12,7 +12,7 @@ This document establishes performance baselines for core Sprintable surfaces and
 ## Methodology
 
 - **Tool**: Lighthouse CLI (Chrome DevTools)
-- **Environment**: Production (https://sprintable.vercel.app)
+- **Environment**: Production (https://your-sprintable-url.example.com)
 - **Device**: Desktop (simulated)
 - **Network**: Fast 3G throttling
 - **Runs**: 3 iterations per page, median values reported
