@@ -4,7 +4,7 @@
       "command": "node",
       "args": ["./packages/mcp-server/dist/index.js"],
       "env": {
-        "SUPABASE_URL": "https://hcweddmbfyfjgbqcondh.supabase.co",
+        "SUPABASE_URL": "https://YOUR_SUPABASE_PROJECT_REF.supabase.co",
         "SUPABASE_SERVICE_ROLE_KEY": "your-service-role-key",
         "MCP_API_KEY": "your-mcp-api-key (SSE mode auth)",
         "MCP_REPLY_WEBHOOKS_ENABLED": "false"

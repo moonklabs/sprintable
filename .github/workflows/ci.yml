@@ -44,5 +44,5 @@ jobs:
       - name: Build
         run: pnpm build
         env:
-          NEXT_PUBLIC_SUPABASE_URL: https://hcweddmbfyfjgbqcondh.supabase.co
+          NEXT_PUBLIC_SUPABASE_URL: https://YOUR_SUPABASE_PROJECT_REF.supabase.co
           NEXT_PUBLIC_SUPABASE_ANON_KEY: ci-placeholder
