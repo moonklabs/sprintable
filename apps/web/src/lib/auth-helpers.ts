@@ -1,5 +1,6 @@
 import type { SupabaseClient, User } from '@supabase/supabase-js';
 import { cookies } from 'next/headers';
+import { isOssMode } from '@/lib/storage/factory';
 
 export const CURRENT_PROJECT_COOKIE = 'sprintable_current_project_id';
 
@@ -79,6 +80,20 @@ export async function getMyMembershipContext(supabase: SupabaseClient, user: Use
   const memberships = await getMyProjectMemberships(supabase, user);
   const me = await resolveTeamMemberFromMemberships(supabase, user, memberships);
   return { me, memberships };
+}
+
+export async function getOssUserContext(): Promise<MembershipContext> {
+  const { OSS_ORG_ID, OSS_PROJECT_ID, OSS_MEMBER_ID } = await import('@sprintable/storage-sqlite');
+  const me = {
+    id: OSS_MEMBER_ID,
+    org_id: OSS_ORG_ID,
+    project_id: OSS_PROJECT_ID,
+    project_name: 'My Project',
+  };
+  return {
+    me,
+    memberships: [{ id: OSS_MEMBER_ID, org_id: OSS_ORG_ID, project_id: OSS_PROJECT_ID, project_name: 'My Project' }],
+  };
 }
 
 /**
@@ -216,7 +231,19 @@ export async function getAuthContext(
     }
   }
 
-  // 2. OAuth 세션 인증 시도
+  // 2. OSS_MODE — API key 없는 브라우저 fetch는 기본 유저로 자동 인증 (AC-6)
+  if (isOssMode()) {
+    const { OSS_ORG_ID, OSS_PROJECT_ID, OSS_MEMBER_ID } = await import('@sprintable/storage-sqlite');
+    return {
+      id: OSS_MEMBER_ID,
+      org_id: OSS_ORG_ID,
+      project_id: OSS_PROJECT_ID,
+      project_name: 'My Project',
+      type: 'human',
+    };
+  }
+
+  // 3. OAuth 세션 인증 시도
   const { data: { user } } = await supabase.auth.getUser();
   if (!user) return null;
 
