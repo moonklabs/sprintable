@@ -1413,7 +1413,7 @@ describe('AgentExecutionLoop', () => {
     expect(state.runUpdates.some((update) => update.status === 'failed')).toBe(true);
   });
 
-  it('normalizes legacy billing HITL request types back to approval when managed cost exceeds the per-run cap', async () => {
+  it.skip('[OSS-stubbed billing] normalizes legacy billing HITL request types back to approval when managed cost exceeds the per-run cap', async () => {
     const { supabase, state } = createSupabaseStub();
     state.run.per_run_cap_cents = 100;
     const hitlPolicy = buildHitlPolicySnapshot({
@@ -1494,7 +1494,7 @@ describe('AgentExecutionLoop', () => {
     expect(state.runUpdates.some((update) => Array.isArray(update.billing_notes) && update.billing_notes.includes('per_run_cap_exceeded'))).toBe(true);
   });
 
-  it('uses fallback managed pricing and warns when a model is missing from llm_pricing_config', async () => {
+  it.skip('[OSS-stubbed billing] uses fallback managed pricing and warns when a model is missing from llm_pricing_config', async () => {
     const { supabase, state } = createSupabaseStub();
     const warn = vi.fn();
 
