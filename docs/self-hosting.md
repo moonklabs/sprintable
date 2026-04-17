@@ -2,45 +2,64 @@
 
 Deploy Sprintable on your own infrastructure.
 
-## Prerequisites
+## OSS Mode (Default — No Database Required)
 
-- Docker 24+ and Docker Compose v2
-- Domain with SSL (recommended)
-- For SaaS mode only: Supabase project (cloud or self-hosted)
+Run Sprintable locally with SQLite in minutes.
 
-## Quick Start (Local — OSS Mode)
+### Prerequisites
+
+- Node.js >=22.5.0
+- pnpm 9+
+
+### Quick Start
 
 ```bash
 # Clone the repo
 git clone https://github.com/moonklabs/sprintable.git
 cd sprintable
 
-# Copy env file (defaults work for local OSS setup)
-cp .env.example .env
+# Install dependencies
+pnpm install
 
-# Start
-docker compose up
+# Copy env file (OSS defaults work out of the box)
+cp .env.example apps/web/.env.local
+
+# Start dev server
+pnpm dev
 ```
 
-Visit `http://localhost:3000`. In OSS mode, data is stored in SQLite — no external database needed.
+Visit `http://localhost:3000`. Data is stored in SQLite at `.data/sprintable.db` — no external database needed.
 
-## Production Deployment
+### Environment Variables (OSS)
 
-### 1. Configure Environment
+| Variable | Description |
+|----------|-------------|
+| `APP_BASE_URL` | Public URL of this deployment (e.g. `http://localhost:3000`) |
+| `OSS_MODE` | Set to `true` for OSS mode |
+| `NEXT_PUBLIC_OSS_MODE` | Set to `true` (must match `OSS_MODE`) |
+| `SQLITE_PATH` | Path to SQLite database file (e.g. `./.data/sprintable.db`) |
+| `AGENT_API_KEY_SECRET` | Secret for agent API authentication |
+| `PM_API_URL` | Internal URL used by MCP server to reach the web app |
+
+---
+
+## SaaS / Advanced Mode (Supabase + Docker)
+
+For production deployments with Supabase, multi-user auth, and billing.
+
+### Prerequisites
+
+- Docker 24+ and Docker Compose v2
+- Domain with SSL (recommended)
+- Supabase project (cloud or self-hosted)
+
+### Configure Environment
 
 ```bash
 cp .env.example .env
+# Set OSS_MODE=false and fill in Supabase variables
 ```
 
-Required variables (OSS mode):
-| Variable | Description |
-|----------|-------------|
-| `APP_BASE_URL` | Your app's public URL (used in webhook links) |
-| `OSS_MODE` | Set to `true` for OSS self-hosting |
-| `SQLITE_PATH` | Path to SQLite database file |
-| `AGENT_API_KEY_SECRET` | Secret for agent API authentication |
-
-Optional (SaaS mode — set `OSS_MODE=false`):
 | Variable | Description |
 |----------|-------------|
 | `NEXT_PUBLIC_SUPABASE_URL` | Your Supabase project URL |
@@ -49,38 +68,27 @@ Optional (SaaS mode — set `OSS_MODE=false`):
 | `OPENAI_API_KEY` | For AI features (STT, summarization) |
 | `ANTHROPIC_API_KEY` | Alternative AI provider |
 
-### 2. Database Migrations
+### Database Migrations
 
-Migrations run **automatically** on container startup when `DATABASE_URL` is set in `.env`.
-
-```bash
-# .env
-DATABASE_URL=postgresql://postgres:password@db-host:5432/postgres
-```
-
-Alternatively, run manually:
 ```bash
 # Using Supabase CLI
 supabase db push --db-url postgresql://...
-
-# Or using the migration script
-./scripts/run-migrations.sh "postgresql://..."
 ```
 
-### 3. Deploy
+### Deploy
 
 ```bash
 docker compose -f docker-compose.prod.yml up -d
 ```
 
-### 4. Verify
+### Verify
 
 ```bash
 curl http://localhost:3000/api/health
 # Expected: {"status":"ok","timestamp":"..."}
 ```
 
-## Multi-Platform Build (ARM64 + AMD64)
+### Multi-Platform Build (ARM64 + AMD64)
 
 ```bash
 docker buildx build --platform linux/amd64,linux/arm64 \
@@ -88,20 +96,25 @@ docker buildx build --platform linux/amd64,linux/arm64 \
   --push .
 ```
 
-## Updating
+### Updating
 
 ```bash
 git pull origin main
 docker compose -f docker-compose.prod.yml up -d --build
 ```
 
+---
+
 ## Troubleshooting
 
-### Missing environment variables
-The container validates required env vars at startup. If any are missing, it will print a clear error message and exit.
+### `node:sqlite not found`
+Upgrade to Node.js >=22.5.0. The `node:sqlite` module is built-in starting from that version.
 
-### Database connection issues
-Ensure your `NEXT_PUBLIC_SUPABASE_URL` and `SUPABASE_SERVICE_ROLE_KEY` are correct and the Supabase project is accessible.
+### Missing environment variables
+Check that all [OSS required] variables from `.env.example` are set in `apps/web/.env.local`.
+
+### Database connection issues (SaaS)
+Verify `NEXT_PUBLIC_SUPABASE_URL` and `SUPABASE_SERVICE_ROLE_KEY` are correct and the Supabase project is accessible.
 
 ### Health check failing
 Check logs: `docker compose logs web`

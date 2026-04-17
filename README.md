@@ -10,8 +10,6 @@ Sprintable combines agile project management with AI agents to automate standups
   <img src="docs/screenshots/pricing.svg" width="250" alt="Pricing" />
 </p>
 
-> 📸 **Note**: Replace placeholder images with actual screenshots after first deployment. Run `pnpm dev` and capture the kanban board, meeting notes, and pricing pages.
-
 ## ✨ Features
 
 - **📋 Kanban Board** — Stories, epics, sprints with drag-and-drop
@@ -24,12 +22,25 @@ Sprintable combines agile project management with AI agents to automate standups
 - **🏆 Rewards** — Gamified team recognition
 - **🔌 MCP Server** — AI agent integration via Model Context Protocol
 
+## 🤖 Bring Your Own Agent (BYOA)
+
+Sprintable is designed to work with any AI coding agent. Connect Claude Code, Codex, Windsurf, Cursor, or any MCP-compatible agent with three values:
+
+| Value | Where to find it |
+|-------|-----------------|
+| **MCP URL** | `http://localhost:3000/api/mcp` (or your deployed URL) |
+| **API Key** | Generate in Settings → Agents |
+| **Webhook URL** | `http://localhost:3000/api/webhooks/agent-runtime` |
+
+Once connected, your agent can read and write stories, memos, standups, and docs directly through the MCP tools.
+
 ## 🛠 Tech Stack
 
 | Layer | Technology |
 |-------|-----------|
 | **Frontend** | Next.js 15, React 19, Tailwind CSS, next-intl |
-| **Backend** | Next.js API Routes, Supabase (Postgres + Auth + Storage) |
+| **Backend (OSS)** | Next.js API Routes, SQLite (Node built-in `node:sqlite`) |
+| **Backend (SaaS)** | Next.js API Routes, Supabase (Postgres + Auth + Storage) |
 | **AI** | OpenAI GPT-4o-mini, Anthropic Claude, Whisper STT |
 | **MCP** | @modelcontextprotocol/sdk |
 | **Monorepo** | pnpm workspaces, Turborepo |
@@ -40,7 +51,9 @@ Sprintable combines agile project management with AI agents to automate standups
 sprintable/
 ├── apps/web/              # Next.js frontend + API routes
 ├── packages/
-│   ├── db/                # Supabase migrations + types
+│   ├── core-storage/      # Storage interfaces (repository contracts)
+│   ├── storage-sqlite/    # SQLite adapter (OSS default)
+│   ├── db/                # Supabase migrations + types (SaaS)
 │   ├── mcp-server/        # MCP tool server (stdio/SSE)
 │   └── shared/            # Shared schemas + utilities
 └── docs/                  # Documentation
@@ -50,7 +63,12 @@ sprintable/
 
 ### Prerequisites
 
-- Node.js 20+
+**OSS path** (default — no external database needed):
+- Node.js >=22.5.0 (required for built-in `node:sqlite`)
+- pnpm 9+
+
+**SaaS path** (Supabase-backed):
+- Node.js >=22.5.0
 - pnpm 9+
 - Supabase project (local or cloud)
 
@@ -64,26 +82,38 @@ cd sprintable
 # Install dependencies
 pnpm install
 
-# Copy environment variables
+# Copy environment variables (OSS defaults work out of the box)
 cp .env.example apps/web/.env.local
-
-# Run database migrations
-pnpm --filter @sprintable/db migrate
 
 # Start development server
 pnpm dev
 ```
 
-Visit `http://localhost:3000` to get started.
+Visit `http://localhost:3000` — in OSS mode, data is stored in SQLite and no external database is required.
+
+For a detailed walkthrough, see [docs/quickstart-oss.md](docs/quickstart-oss.md).
 
 ### MCP Server
 
+```
+Agent (Claude Code / Codex / Cursor)
+  │  stdio / SSE
+  ▼
+MCP Server  ──(pm-api HTTP)──▶  Sprintable Web App
+                                      │
+                                      ▼ webhook
+                                  Discord / Slack
+```
+
 ```bash
 # stdio mode (for Claude Desktop, Codex, etc.)
+PM_API_URL=http://localhost:3000 \
 pnpm --filter @sprintable/mcp-server start
 
 # SSE mode (for web clients)
-MCP_MODE=sse MCP_PORT=3100 pnpm --filter @sprintable/mcp-server start
+PM_API_URL=http://localhost:3000 \
+MCP_MODE=sse MCP_PORT=3100 \
+pnpm --filter @sprintable/mcp-server start
 ```
 
 ## 🧪 Development
@@ -97,6 +127,8 @@ pnpm build         # Production build
 
 ## 📖 Documentation
 
+- [OSS Quick Start](docs/quickstart-oss.md)
+- [Self-Hosting Guide](docs/self-hosting.md)
 - [Contributing Guide](CONTRIBUTING.md)
 - [Security Policy](SECURITY.md)
 - [License](LICENSE)
