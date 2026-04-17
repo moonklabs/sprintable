@@ -317,7 +317,7 @@ export class AgentExecutionLoop {
     this.getManagedPricingRowFn = deps.getManagedPricingRowFn ?? getManagedPricingRow;
     this.retryService = deps.retryService ?? new AgentRetryService(supabase);
     this.fireWebhooksFn = deps.fireWebhooksFn ?? fireWebhooks;
-    this.memoService = deps.memoService ?? new MemoService(supabase);
+    this.memoService = deps.memoService ?? MemoService.fromSupabase(supabase);
     this.projectContextLoader = deps.projectContextLoader ?? new ProjectContextLoader(supabase);
     this.toolExecutionEngine = deps.toolExecutionEngine ?? new AgentToolExecutionEngine(supabase, {
       auditLogger: (eventType, severity, payload) => this.logAudit(

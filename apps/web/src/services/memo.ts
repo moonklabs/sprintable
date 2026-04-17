@@ -1,6 +1,9 @@
 import type { SupabaseClient } from '@supabase/supabase-js';
+import type { IMemoRepository, ITeamMemberRepository, Memo, MemoReply } from '@sprintable/core-storage';
+import { SupabaseMemoRepository } from '@sprintable/storage-supabase';
 import { dispatchMemoAssignmentImmediately, type DispatchableMemo } from './memo-assignment-dispatch';
 import { dispatchWorkflowMemoReplyWebhooks } from './memo-reply-webhook-dispatch';
+import { buildAbsoluteMemoLink } from './app-url';
 import { NotFoundError, ForbiddenError } from './sprint';
 
 export interface CreateMemoInput {
@@ -47,9 +50,26 @@ interface MemoListRow {
 const MEMO_LIST_BATCH_SIZE = 100;
 
 export class MemoService {
-  constructor(private readonly supabase: SupabaseClient) {}
+  private readonly repo: IMemoRepository;
+  private readonly supabase: SupabaseClient | null;
+  private readonly teamMemberRepo: ITeamMemberRepository | null;
+
+  constructor(
+    repo: IMemoRepository,
+    supabase?: SupabaseClient,
+    teamMemberRepo?: ITeamMemberRepository,
+  ) {
+    this.repo = repo;
+    this.supabase = supabase ?? null;
+    this.teamMemberRepo = teamMemberRepo ?? null;
+  }
+
+  static fromSupabase(supabase: SupabaseClient): MemoService {
+    return new MemoService(new SupabaseMemoRepository(supabase), supabase);
+  }
 
   private async ensureActiveTeamMember(orgId: string, projectId: string, memberId: string, message: string) {
+    if (!this.supabase) return; // OSS: skip — API key auth already validated caller
     const { data: member } = await this.supabase
       .from('team_members')
       .select('id')
@@ -67,16 +87,34 @@ export class MemoService {
     return error?.code === 'PGRST205' && error.message?.includes(`public.${table}`);
   }
 
-  private async enrichMemo<T extends Record<string, unknown>>(memo: T) {
-    const memoId = memo.id as string;
-    const projectId = memo.project_id as string;
+  private async enrichMemo(memo: Memo) {
+    const memoId = memo.id;
+    const projectId = memo.project_id;
 
-    const [repliesResult, projectResult, linksResult, readsResult] = await Promise.all([
-      this.supabase
-        .from('memo_replies')
-        .select('id, memo_id, content, created_by, review_type, created_at')
-        .eq('memo_id', memoId)
-        .order('created_at'),
+    const replies = await this.repo.getReplies(memoId);
+
+    const latestReplyAt = replies.length ? replies[replies.length - 1]?.created_at ?? null : null;
+    const latestReplyAuthor = replies.length ? replies[replies.length - 1]?.created_by : undefined;
+
+    const timeline = [
+      { label: 'created', at: memo.created_at, by: memo.created_by as string | undefined },
+      ...(latestReplyAt ? [{ label: 'latest reply', at: latestReplyAt, by: latestReplyAuthor as string | undefined }] : []),
+    ];
+
+    if (!this.supabase) {
+      return {
+        ...memo,
+        reply_count: replies.length,
+        latest_reply_at: latestReplyAt,
+        project_name: null,
+        timeline,
+        linked_docs: [],
+        readers: [],
+        replies,
+      };
+    }
+
+    const [projectResult, linksResult, readsResult] = await Promise.all([
       this.supabase
         .from('projects')
         .select('id, name')
@@ -94,14 +132,9 @@ export class MemoService {
         .order('read_at', { ascending: false }),
     ]);
 
-    if (repliesResult.error) throw repliesResult.error;
     if (projectResult.error) throw projectResult.error;
     if (linksResult.error && !this.isMissingOptionalMemoTableError(linksResult.error, 'memo_doc_links')) throw linksResult.error;
     if (readsResult.error && !this.isMissingOptionalMemoTableError(readsResult.error, 'memo_reads')) throw readsResult.error;
-
-    const replies = repliesResult.data ?? [];
-    const latestReplyAt = replies.length ? replies[replies.length - 1]?.created_at ?? null : null;
-    const latestReplyAuthor = replies.length ? replies[replies.length - 1]?.created_by : undefined;
 
     const linkedRows = this.isMissingOptionalMemoTableError(linksResult.error, 'memo_doc_links') ? [] : (linksResult.data ?? []);
     const linkedDocIds = [...new Set(linkedRows.map((row: LinkedDocRow) => row.doc_id))];
@@ -113,11 +146,6 @@ export class MemoService {
     const readers = readRows.length
       ? await this.loadReaders(readRows as MemoReadRow[])
       : [];
-
-    const timeline = [
-      { label: 'created', at: memo.created_at as string, by: memo.created_by as string | undefined },
-      ...(latestReplyAt ? [{ label: 'latest reply', at: latestReplyAt, by: latestReplyAuthor as string | undefined }] : []),
-    ];
 
     return {
       ...memo,
@@ -132,6 +160,7 @@ export class MemoService {
   }
 
   private async loadLinkedDocs(linkedDocIds: string[], projectId: string) {
+    if (!this.supabase) return [];
     const { data: docs, error } = await this.supabase
       .from('docs')
       .select('id, title, slug')
@@ -148,6 +177,7 @@ export class MemoService {
   }
 
   private async loadReaders(readRows: MemoReadRow[]) {
+    if (!this.supabase) return [];
     const readerIds = [...new Set(readRows.map((row) => row.team_member_id))];
     if (!readerIds.length) return [];
 
@@ -177,6 +207,7 @@ export class MemoService {
   }
 
   private async loadMemoReplyRows(memoIds: string[]) {
+    if (!this.supabase) return [];
     const rows: Array<{ memo_id: string; created_at: string }> = [];
 
     for (const chunk of this.chunkValues(memoIds)) {
@@ -194,6 +225,7 @@ export class MemoService {
   }
 
   private async loadMemoReadRows(memoIds: string[]) {
+    if (!this.supabase) return [];
     const rows: MemoReadRow[] = [];
 
     for (const chunk of this.chunkValues(memoIds)) {
@@ -225,6 +257,16 @@ export class MemoService {
     readers: Array<{ id: string; name: string; read_at: string }>;
   }>> {
     if (!memos.length) return [];
+
+    if (!this.supabase) {
+      return memos.map((memo) => ({
+        ...memo,
+        reply_count: 0,
+        latest_reply_at: null,
+        project_name: null,
+        readers: [],
+      }));
+    }
 
     const memoIds = memos.map((memo) => memo.id as string).filter(Boolean);
     const projectIds = [...new Set(memos.map((memo) => memo.project_id as string).filter(Boolean))];
@@ -283,25 +325,6 @@ export class MemoService {
     if (!input.org_id) throw new Error('org_id is required');
     if (!input.created_by) throw new Error('created_by is required');
 
-    const { data: project } = await this.supabase
-      .from('projects')
-      .select('id, org_id')
-      .eq('id', input.project_id)
-      .eq('org_id', input.org_id)
-      .single();
-    if (!project) throw new Error('project_id must belong to the same organization');
-
-    const { data: author } = await this.supabase
-      .from('team_members')
-      .select('id')
-      .eq('id', input.created_by)
-      .eq('org_id', input.org_id)
-      .eq('project_id', input.project_id)
-      .eq('is_active', true)
-      .single();
-    if (!author) throw new Error('created_by must be an active team member in the same project');
-
-    // Normalize assignees: prefer assigned_to_ids over assigned_to
     const assigneeIds = input.assigned_to_ids?.length
       ? input.assigned_to_ids
       : input.assigned_to
@@ -316,57 +339,65 @@ export class MemoService {
       }));
     }
 
-    // Validate all assignees
-    if (assigneeIds.length > 0) {
-      const { data: assignees } = await this.supabase
+    if (this.supabase) {
+      const { data: project } = await this.supabase
+        .from('projects')
+        .select('id, org_id')
+        .eq('id', input.project_id)
+        .eq('org_id', input.org_id)
+        .single();
+      if (!project) throw new Error('project_id must belong to the same organization');
+
+      const { data: author } = await this.supabase
         .from('team_members')
         .select('id')
+        .eq('id', input.created_by)
         .eq('org_id', input.org_id)
         .eq('project_id', input.project_id)
-        .in('id', assigneeIds);
+        .eq('is_active', true)
+        .single();
+      if (!author) throw new Error('created_by must be an active team member in the same project');
 
-      if (!assignees || assignees.length !== assigneeIds.length) {
-        throw new Error('All assigned_to_ids must be team members in the same project');
+      if (assigneeIds.length > 0) {
+        const { data: assignees } = await this.supabase
+          .from('team_members')
+          .select('id')
+          .eq('org_id', input.org_id)
+          .eq('project_id', input.project_id)
+          .in('id', assigneeIds);
+
+        if (!assignees || assignees.length !== assigneeIds.length) {
+          throw new Error('All assigned_to_ids must be team members in the same project');
+        }
+      }
+
+      if (input.supersedes_id) {
+        const { data: prevMemo } = await this.supabase
+          .from('memos')
+          .select('id')
+          .eq('id', input.supersedes_id)
+          .eq('org_id', input.org_id)
+          .eq('project_id', input.project_id)
+          .single();
+        if (!prevMemo) throw new Error('supersedes_id must reference a memo in the same project');
       }
     }
 
-    if (input.supersedes_id) {
-      const { data: prevMemo } = await this.supabase
-        .from('memos')
-        .select('id')
-        .eq('id', input.supersedes_id)
-        .eq('org_id', input.org_id)
-        .eq('project_id', input.project_id)
-        .single();
-      if (!prevMemo) throw new Error('supersedes_id must reference a memo in the same project');
-    }
+    const data = await this.repo.create({
+      project_id: input.project_id,
+      org_id: input.org_id,
+      title: input.title ?? null,
+      content: input.content.trim(),
+      memo_type: input.memo_type ?? 'memo',
+      assigned_to: assigneeIds[0] ?? null,
+      supersedes_id: input.supersedes_id ?? null,
+      created_by: input.created_by,
+      metadata: input.metadata ?? {},
+    });
 
-    // Insert memo with assigned_to set to first assignee for backward compatibility
-    const { data, error } = await this.supabase
-      .from('memos')
-      .insert({
-        project_id: input.project_id,
-        org_id: input.org_id,
-        title: input.title ?? null,
-        content: input.content.trim(),
-        memo_type: input.memo_type ?? 'memo',
-        assigned_to: assigneeIds[0] ?? null,
-        supersedes_id: input.supersedes_id ?? null,
-        created_by: input.created_by,
-        metadata: input.metadata ?? {},
-      })
-      .select()
-      .single();
-
-    if (error) {
-      if (error.code === '42501') throw new ForbiddenError('Permission denied');
-      throw error;
-    }
-
-    // Insert into memo_assignees join table
-    if (assigneeIds.length > 0) {
+    if (this.supabase && assigneeIds.length > 0) {
       const assigneeRows = assigneeIds.map((memberId) => ({
-        memo_id: data.id as string,
+        memo_id: data.id,
         member_id: memberId,
         assigned_by: input.created_by,
       }));
@@ -381,14 +412,17 @@ export class MemoService {
     }
 
     if (input.supersedes_id) {
-      await this.supabase
-        .from('memos')
-        .update({ status: 'resolved', resolved_by: input.created_by, resolved_at: new Date().toISOString() })
-        .eq('id', input.supersedes_id)
-        .eq('org_id', input.org_id);
+      if (this.supabase) {
+        await this.supabase
+          .from('memos')
+          .update({ status: 'resolved', resolved_by: input.created_by, resolved_at: new Date().toISOString() })
+          .eq('id', input.supersedes_id)
+          .eq('org_id', input.org_id);
+      } else {
+        await this.repo.resolve(input.supersedes_id, input.created_by);
+      }
     }
 
-    // Dispatch webhooks for all assignees
     for (const assigneeId of assigneeIds) {
       await dispatchMemoAssignmentImmediately({
         ...data,
@@ -400,61 +434,37 @@ export class MemoService {
   }
 
   async list(filters: { org_id?: string; project_id?: string; assigned_to?: string; status?: string; limit?: number; cursor?: string | null; q?: string }) {
-    let query = this.supabase
-      .from('memos')
-      .select('id, project_id, title, content, status, memo_type, created_by, assigned_to, created_at')
-      .order('created_at', { ascending: false });
-
-    // Workspace-wide: filter by org_id if project_id not specified
-    if (filters.org_id && !filters.project_id) {
-      query = query.eq('org_id', filters.org_id);
-    }
-
-    // Project-specific: filter by project_id
-    if (filters.project_id) query = query.eq('project_id', filters.project_id);
-
-    if (filters.assigned_to) query = query.eq('assigned_to', filters.assigned_to);
-    if (filters.status) query = query.eq('status', filters.status);
-    if (filters.q?.trim()) query = query.or(`title.ilike.%${filters.q.trim()}%,content.ilike.%${filters.q.trim()}%`);
-    if (filters.cursor) query = query.lt('created_at', filters.cursor);
-    if (filters.limit) query = query.limit(filters.limit + 1);
-
-    const { data, error } = await query;
-    if (error) throw error;
-    return this.buildListSummaries((data ?? []) as MemoListRow[]);
+    const memos = await this.repo.list({
+      org_id: filters.org_id,
+      project_id: filters.project_id,
+      assigned_to: filters.assigned_to,
+      status: filters.status,
+      q: filters.q,
+      cursor: filters.cursor ?? undefined,
+      limit: filters.limit,
+    });
+    return this.buildListSummaries(memos as MemoListRow[]);
   }
 
   async getById(id: string) {
-    const { data, error } = await this.supabase
-      .from('memos')
-      .select('*')
-      .eq('id', id)
-      .single();
-
-    if (error) {
-      if (error.code === 'PGRST116') throw new NotFoundError('Memo not found');
-      if (error.code === '42501') throw new ForbiddenError('Permission denied');
-      throw error;
-    }
-    return data;
+    return this.repo.getById(id);
   }
 
   async getByIdWithDetails(id: string) {
-    const memo = await this.getById(id);
+    const memo = await this.repo.getById(id);
     const enriched = await this.enrichMemo(memo);
 
     const chain: unknown[] = [];
-    let currentId: string | null = memo.supersedes_id as string | null;
+    let currentId: string | null = memo.supersedes_id ?? null;
     let depth = 0;
     while (currentId && depth < 10) {
-      const { data: prev } = await this.supabase
-        .from('memos')
-        .select('id, title, status, supersedes_id, created_at')
-        .eq('id', currentId)
-        .single();
-      if (!prev) break;
-      chain.push(prev);
-      currentId = (prev as { supersedes_id?: string | null }).supersedes_id ?? null;
+      try {
+        const prev = await this.repo.getById(currentId);
+        chain.push({ id: prev.id, title: prev.title, status: prev.status, supersedes_id: prev.supersedes_id, created_at: prev.created_at });
+        currentId = (prev.supersedes_id as string | null) ?? null;
+      } catch {
+        break;
+      }
       depth++;
     }
 
@@ -464,78 +474,117 @@ export class MemoService {
   async addReply(memoId: string, content: string, createdBy: string, reviewType = 'comment') {
     if (!content?.trim()) throw new Error('content is required');
 
-    const memo = await this.getById(memoId);
+    const memo = await this.repo.getById(memoId);
 
-    const { data, error } = await this.supabase
-      .from('memo_replies')
-      .insert({
+    let data: MemoReply;
+    try {
+      data = await this.repo.addReply({
         memo_id: memoId,
         content: content.trim(),
         created_by: createdBy,
         review_type: reviewType,
-      })
-      .select()
-      .single();
-
-    if (error) {
-      if (error.code === '42501') throw new ForbiddenError('Permission denied');
+      });
+    } catch (error: unknown) {
+      const err = error as { code?: string };
+      if (err?.code === '42501') throw new ForbiddenError('Permission denied');
       throw error;
     }
 
     if (data) {
-      try {
-        await dispatchWorkflowMemoReplyWebhooks({
-          supabase: this.supabase,
-          memo: {
-            id: memo.id as string,
-            org_id: memo.org_id as string,
-            project_id: memo.project_id as string,
-            title: (memo.title as string | null | undefined) ?? null,
-            created_by: memo.created_by as string,
-            assigned_to: (memo.assigned_to as string | null | undefined) ?? null,
-            metadata: (memo.metadata as Record<string, unknown> | null | undefined) ?? null,
-          },
-          reply: {
-            id: data.id as string,
-            memo_id: data.memo_id as string,
-            content: data.content as string,
-            created_by: data.created_by as string,
-          },
-          appUrl: process.env.NEXT_PUBLIC_APP_URL,
-        });
-      } catch (dispatchError) {
-        console.warn('[MemoService.addReply] workflow reply webhook dispatch failed', dispatchError);
+      if (this.supabase) {
+        try {
+          await dispatchWorkflowMemoReplyWebhooks({
+            supabase: this.supabase,
+            memo: {
+              id: memo.id,
+              org_id: memo.org_id,
+              project_id: memo.project_id,
+              title: memo.title ?? null,
+              created_by: memo.created_by,
+              assigned_to: memo.assigned_to ?? null,
+              metadata: (memo.metadata as Record<string, unknown> | null | undefined) ?? null,
+            },
+            reply: {
+              id: data.id,
+              memo_id: data.memo_id,
+              content: data.content,
+              created_by: data.created_by,
+            },
+            appUrl: process.env.NEXT_PUBLIC_APP_URL,
+          });
+        } catch (dispatchError) {
+          console.warn('[MemoService.addReply] workflow reply webhook dispatch failed', dispatchError);
+        }
+      } else if (this.teamMemberRepo) {
+        try {
+          await this.dispatchOssReplyWebhooks(memo, data);
+        } catch (dispatchError) {
+          console.warn('[MemoService.addReply] OSS reply webhook dispatch failed', dispatchError);
+        }
       }
     }
 
     return data;
   }
 
-  async resolve(id: string, resolvedBy: string) {
-    const memo = await this.getById(id);
-    if (memo.status === 'resolved') throw new Error('Memo is already resolved');
+  private async dispatchOssReplyWebhooks(memo: Memo, reply: MemoReply) {
+    if (!this.teamMemberRepo) return;
 
-    const { data, error } = await this.supabase
-      .from('memos')
-      .update({
-        status: 'resolved',
-        resolved_by: resolvedBy,
-        resolved_at: new Date().toISOString(),
-      })
-      .eq('id', id)
-      .select()
-      .single();
+    const members = await this.teamMemberRepo.list({ org_id: memo.org_id, project_id: memo.project_id, is_active: true });
+    const priorReplies = await this.repo.getReplies(memo.id);
 
-    if (error) {
-      if (error.code === '42501') throw new ForbiddenError('Permission denied');
-      throw error;
+    const participants = new Set<string>([memo.created_by]);
+    if (memo.assigned_to) participants.add(memo.assigned_to);
+    for (const r of priorReplies) participants.add(r.created_by);
+    participants.delete(reply.created_by);
+
+    const memberById = new Map(members.map((m) => [m.id, m]));
+    const authorName = memberById.get(reply.created_by)?.name ?? reply.created_by;
+    const memoLabel = memo.title?.trim() ? `"${memo.title.trim()}"` : `#${memo.id}`;
+    const memoLink = buildAbsoluteMemoLink(memo.id, process.env.NEXT_PUBLIC_APP_URL);
+    const preview = reply.content.replace(/\s+/g, ' ').trim().slice(0, 50);
+    const title = `💬 답장: ${authorName}`;
+    const description = `메모 ${memoLabel}에 답장\n${preview}\n\n${memoLink}`;
+
+    for (const participantId of participants) {
+      const member = memberById.get(participantId);
+      if (!member?.is_active || !member.webhook_url) continue;
+
+      try {
+        const format = this.detectWebhookFormat(member.webhook_url);
+        const body = format === 'discord'
+          ? JSON.stringify({ content: `${title}\n${description.substring(0, 500)}`, embeds: [{ title, description, color: 0x3B82F6 }] })
+          : JSON.stringify({ text: `*${title}*\n${description}` });
+
+        await fetch(member.webhook_url, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body,
+          signal: AbortSignal.timeout(10_000),
+        });
+      } catch (error) {
+        console.warn('[MemoService.dispatchOssReplyWebhooks] failed for member', participantId, error instanceof Error ? error.message : String(error));
+      }
     }
-    return data;
+  }
+
+  private detectWebhookFormat(url: string): 'discord' | 'other' {
+    if (url.includes('/api/webhooks') && (url.includes('discord.com') || url.includes('discordapp.com'))) {
+      return 'discord';
+    }
+    return 'other';
+  }
+
+  async resolve(id: string, resolvedBy: string) {
+    const memo = await this.repo.getById(id);
+    if (memo.status === 'resolved') throw new Error('Memo is already resolved');
+    return this.repo.resolve(id, resolvedBy);
   }
 
   async linkDoc(memoId: string, docId: string, createdBy: string) {
-    const memo = await this.getById(memoId);
-    await this.ensureActiveTeamMember(memo.org_id, memo.project_id, createdBy, 'created_by must be an active team member in the same project');
+    if (!this.supabase) throw new Error('linkDoc requires Supabase');
+    const memo = await this.repo.getById(memoId);
+    await this.ensureActiveTeamMember(memo.org_id, memo.project_id as string, createdBy, 'created_by must be an active team member in the same project');
 
     const { data: doc } = await this.supabase
       .from('docs')
@@ -564,8 +613,9 @@ export class MemoService {
   }
 
   async markRead(memoId: string, teamMemberId: string) {
-    const memo = await this.getById(memoId);
-    await this.ensureActiveTeamMember(memo.org_id, memo.project_id, teamMemberId, 'team_member_id must be an active team member in the same project');
+    if (!this.supabase) return { memo_id: memoId, team_member_id: teamMemberId, read_at: new Date().toISOString() };
+    const memo = await this.repo.getById(memoId);
+    await this.ensureActiveTeamMember(memo.org_id, memo.project_id as string, teamMemberId, 'team_member_id must be an active team member in the same project');
 
     const { data, error } = await this.supabase
       .from('memo_reads')

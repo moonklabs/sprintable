@@ -6,6 +6,8 @@ import { getAuthContext } from '@/lib/auth-helpers';
 import { parseBody, createMemoSchema } from '@sprintable/shared';
 import { apiSuccess, ApiErrors } from '@/lib/api-response';
 import { buildCursorPageMeta, parseCursorPageInput } from '@/lib/pagination';
+import { createMemoRepository, createTeamMemberRepository, isOssMode } from '@/lib/storage/factory';
+import type { SupabaseClient } from '@supabase/supabase-js';
 
 export async function POST(request: Request) {
   try {
@@ -32,9 +34,10 @@ export async function POST(request: Request) {
     const body = parsed.data;
     // [DIAG] Track assigned_to_ids propagation through schema parsing
     console.warn('[POST /api/memos] parsed assigned_to_ids:', JSON.stringify(body.assigned_to_ids));
-    // API Key 인증시 RLS 우회를 위해 admin client 사용
-    const dbClient = me.type === 'agent' ? createSupabaseAdminClient() : supabase;
-    const service = new MemoService(dbClient);
+    const dbClient = isOssMode() ? undefined : (me.type === 'agent' ? createSupabaseAdminClient() : supabase);
+    const repo = await createMemoRepository(dbClient);
+    const teamMemberRepo = isOssMode() ? await createTeamMemberRepository() : undefined;
+    const service = new MemoService(repo, dbClient as SupabaseClient | undefined, teamMemberRepo);
     const memo = await service.create({
       ...body,
       org_id: me.org_id,
@@ -72,11 +75,11 @@ export async function GET(request: Request) {
       limit: searchParams.get('limit') ? Number(searchParams.get('limit')) : undefined,
       cursor: searchParams.get('cursor'),
     }, { defaultLimit: 30, maxLimit: 100 });
-    // API Key 인증시 RLS 우회를 위해 admin client 사용
-    const dbClient = me.type === 'agent' ? createSupabaseAdminClient() : supabase;
-    const service = new MemoService(dbClient);
+    const dbClient = isOssMode() ? undefined : (me.type === 'agent' ? createSupabaseAdminClient() : supabase);
+    const repo = await createMemoRepository(dbClient);
+    const service = new MemoService(repo, dbClient as SupabaseClient | undefined);
     const memos = await service.list({
-      org_id: me.org_id, // Support workspace-wide view
+      org_id: me.org_id,
       project_id: searchParams.get('project_id') ?? undefined,
       assigned_to: searchParams.get('assigned_to') ?? undefined,
       status: searchParams.get('status') ?? undefined,

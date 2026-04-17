@@ -523,7 +523,7 @@ export class TeamsOutboundDispatcher {
       reason,
     });
 
-    const memoService = new MemoService(this.options.supabase);
+    const memoService = MemoService.fromSupabase(this.options.supabase);
     await memoService.addReply(
       reply.memo_id,
       `${FAILURE_COMMENT_PREFIX}\n- reply_id: ${reply.id}\n- reason: ${reason}`,

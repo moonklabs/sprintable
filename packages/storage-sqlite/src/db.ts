@@ -178,6 +178,7 @@ function initSchema(db: DatabaseSync): void {
       role TEXT NOT NULL DEFAULT 'member',
       type TEXT NOT NULL DEFAULT 'human',
       is_active INTEGER NOT NULL DEFAULT 1,
+      webhook_url TEXT,
       created_at TEXT NOT NULL,
       updated_at TEXT NOT NULL,
       deleted_at TEXT

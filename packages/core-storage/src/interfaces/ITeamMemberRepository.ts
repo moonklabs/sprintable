@@ -10,6 +10,7 @@ export interface TeamMember {
   role: string;
   type: 'human' | 'agent';
   is_active: boolean;
+  webhook_url?: string | null;
   created_at: string;
   updated_at: string;
 }
@@ -30,6 +31,7 @@ export interface UpdateTeamMemberInput {
   email?: string | null;
   role?: string;
   is_active?: boolean;
+  webhook_url?: string | null;
 }
 
 export interface TeamMemberListFilters extends PaginationOptions {

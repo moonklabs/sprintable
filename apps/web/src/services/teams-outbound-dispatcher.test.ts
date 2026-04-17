@@ -63,6 +63,7 @@ function createSupabaseStub(options?: {
         return {
           select() { return this; },
           eq() { return this; },
+          is() { return this; },
           maybeSingle: async () => ({ data: memoRow, error: null }),
           single: async () => ({ data: memoRow, error: null }),
         };

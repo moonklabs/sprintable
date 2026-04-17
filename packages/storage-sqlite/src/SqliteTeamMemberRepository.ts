@@ -55,17 +55,18 @@ export class SqliteTeamMemberRepository implements ITeamMemberRepository {
     const id = randomUUID();
     const now = new Date().toISOString();
     this.db.prepare(`
-      INSERT INTO team_members (id, org_id, project_id, user_id, name, email, role, type, is_active, created_at, updated_at)
-      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+      INSERT INTO team_members (id, org_id, project_id, user_id, name, email, role, type, is_active, webhook_url, created_at, updated_at)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
     `).run(
       id, input.org_id, input.project_id, input.user_id ?? null, input.name, input.email ?? null,
-      input.role ?? 'member', input.type ?? 'human', (input.is_active ?? true) ? 1 : 0, now, now,
+      input.role ?? 'member', input.type ?? 'human', (input.is_active ?? true) ? 1 : 0,
+      (input as { webhook_url?: string | null }).webhook_url ?? null, now, now,
     );
     return this.getById(id);
   }
 
   async update(id: string, input: UpdateTeamMemberInput): Promise<TeamMember> {
-    const ALLOWED: (keyof UpdateTeamMemberInput)[] = ['name', 'email', 'role', 'is_active'];
+    const ALLOWED: (keyof UpdateTeamMemberInput)[] = ['name', 'email', 'role', 'is_active', 'webhook_url'];
     const sets: string[] = [];
     const params: SqlParam[] = [];
     for (const key of ALLOWED) {
