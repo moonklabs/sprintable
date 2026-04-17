@@ -56,6 +56,27 @@ test(stories): add validation tests
 - **Bug Report**: Use the bug report template
 - **Feature Request**: Use the feature request template
 
+## OSS Stub Files (SaaS Overlay Boundary)
+
+The following files are intentional **OSS stubs** that return always-allow /
+no-op / zero values. They exist so OSS single-user builds compile without
+the proprietary `@moonklabs/sprintable-saas` overlay. In a SaaS-composed
+build, a submodule overlay replaces the runtime behavior via the DI
+registry (see `apps/web/src/lib/storage/factory.ts` —
+`registerSubscriptionRepository` / `registerAgentRunBillingRepository`).
+
+| Stub file | OSS behavior |
+|---|---|
+| `apps/web/src/lib/check-feature.ts` | all feature gates return `{ allowed: true }` |
+| `apps/web/src/lib/usage-check.ts` | usage always zero, `incrementUsage` no-op |
+| `apps/web/src/services/agent-run-billing.ts` | cost=0, `billingNotes: ['oss_no_charge']` |
+| `apps/web/src/services/billing-limit-enforcer.ts` | `enforceBeforeRun` always `allow`, `enforceAfterRun` no-op |
+| `apps/web/src/components/settings/usage-dashboard.tsx` | shows "disabled in OSS mode" notice |
+
+Contributors should **not** reimplement billing logic in these files — if
+you need feature gating, add an optional Repository via the registry
+pattern and keep the public surface BYOA-neutral.
+
 ## Code of Conduct
 
 Be respectful. Be constructive. We're all here to build something great.
