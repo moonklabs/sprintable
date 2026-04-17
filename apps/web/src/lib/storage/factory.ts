@@ -106,22 +106,40 @@ export async function createTeamMemberRepository(supabase?: unknown): Promise<IT
   return new SupabaseTeamMemberRepository(supabase as any);
 }
 
-export async function createSubscriptionRepository(_supabase?: unknown): Promise<ISubscriptionRepository> {
-  if (isOssMode()) {
-    const { NullSubscriptionRepository } = await import('@sprintable/core-storage');
-    return new NullSubscriptionRepository();
-  }
-  // SaaS 모드: Phase C에서 sprintable-saas에 구현 예정. 현재 호출 시 명시적 에러.
-  const { NotImplementedError } = await import('@sprintable/core-storage');
-  throw new NotImplementedError('SubscriptionRepository — implement in sprintable-saas (Phase C)');
+// ============================================================================
+// SaaS-only Repository Registry (DI pattern)
+// ----------------------------------------------------------------------------
+// OSS 코드는 절대 @moonklabs/storage-saas 를 직접 import 하지 않는다 (BYOA 원칙).
+// 기본값은 Null stub. SaaS 결합 빌드에서는 부트스트랩(예: instrumentation hook)이
+// registerSubscriptionRepository / registerAgentRunBillingRepository 로
+// 실제 Supabase 구현체를 주입한다. OSS 단독 모드에서는 Null 그대로 작동.
+// ============================================================================
+
+type SubscriptionFactory = (supabase?: unknown) => Promise<ISubscriptionRepository>;
+type AgentRunBillingFactory = (supabase?: unknown) => Promise<IAgentRunBillingRepository>;
+
+let _subscriptionFactory: SubscriptionFactory = async () => {
+  const { NullSubscriptionRepository } = await import('@sprintable/core-storage');
+  return new NullSubscriptionRepository();
+};
+
+let _agentRunBillingFactory: AgentRunBillingFactory = async () => {
+  const { NullAgentRunBillingRepository } = await import('@sprintable/core-storage');
+  return new NullAgentRunBillingRepository();
+};
+
+export function registerSubscriptionRepository(factory: SubscriptionFactory): void {
+  _subscriptionFactory = factory;
 }
 
-export async function createAgentRunBillingRepository(_supabase?: unknown): Promise<IAgentRunBillingRepository> {
-  if (isOssMode()) {
-    const { NullAgentRunBillingRepository } = await import('@sprintable/core-storage');
-    return new NullAgentRunBillingRepository();
-  }
-  // SaaS 모드: Phase C에서 sprintable-saas에 구현 예정. 현재 호출 시 명시적 에러.
-  const { NotImplementedError } = await import('@sprintable/core-storage');
-  throw new NotImplementedError('AgentRunBillingRepository — implement in sprintable-saas (Phase C)');
+export function registerAgentRunBillingRepository(factory: AgentRunBillingFactory): void {
+  _agentRunBillingFactory = factory;
+}
+
+export async function createSubscriptionRepository(supabase?: unknown): Promise<ISubscriptionRepository> {
+  return _subscriptionFactory(supabase);
+}
+
+export async function createAgentRunBillingRepository(supabase?: unknown): Promise<IAgentRunBillingRepository> {
+  return _agentRunBillingFactory(supabase);
 }
