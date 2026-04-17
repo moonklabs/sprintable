@@ -3,8 +3,32 @@ import { createSupabaseServerClient } from '@/lib/supabase/server';
 import { getMyTeamMember } from '@/lib/auth-helpers';
 import { requireOrgAdmin } from '@/lib/admin-check';
 import { AgentApiKeyManager } from '@/components/agents/agent-api-key-manager';
+import { isOssMode, createTeamMemberRepository } from '@/lib/storage/factory';
 
 export default async function ApiKeysPage() {
+  if (isOssMode()) {
+    const { OSS_ORG_ID, OSS_PROJECT_ID } = await import('@sprintable/storage-sqlite');
+    const repo = await createTeamMemberRepository();
+    const agents = await repo.list({ org_id: OSS_ORG_ID, project_id: OSS_PROJECT_ID });
+    const agentMembers = agents.filter((m) => m.type === 'agent' && m.is_active);
+    return (
+      <div className="container mx-auto py-8 space-y-8">
+        <div>
+          <h1 className="text-3xl font-bold">Agent API Keys</h1>
+          <p className="text-muted-foreground mt-2">Manage API keys for agent authentication</p>
+        </div>
+        {agentMembers.length === 0 ? (
+          <p className="text-muted-foreground">No agents found in this project</p>
+        ) : (
+          <div className="space-y-6">
+            {agentMembers.map((agent) => (
+              <AgentApiKeyManager key={agent.id} agentId={agent.id} agentName={agent.name} />
+            ))}
+          </div>
+        )}
+      </div>
+    );
+  }
   const supabase = await createSupabaseServerClient();
   const { data: { user } } = await supabase.auth.getUser();
   if (!user) redirect('/login');

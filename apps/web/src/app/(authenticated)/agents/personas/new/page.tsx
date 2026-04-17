@@ -12,8 +12,17 @@ import { PageHeader } from '@/components/ui/page-header';
 import { buttonVariants } from '@/components/ui/button';
 import { AgentPersonaService, MANAGED_SAFETY_LAYER_NOTICE } from '@/services/agent-persona';
 import { listProjectPersonaToolOptions } from '@/services/persona-composer';
+import { isOssMode } from '@/lib/storage/factory';
 
 export default async function NewAgentPersonaPage() {
+  if (isOssMode()) {
+    return (
+      <div className="flex flex-col items-center justify-center py-20 text-center space-y-2">
+        <h2 className="text-xl font-semibold">OSS 버전 미제공 기능인.</h2>
+        <p className="text-muted-foreground">에이전트 배포 관리는 SaaS 버전에서 이용 가능한.</p>
+      </div>
+    );
+  }
   const t = await getTranslations('agents');
   const supabase = await createSupabaseServerClient();
   const { data: { user } } = await supabase.auth.getUser();

@@ -5,8 +5,12 @@ import { requireOrgAdmin } from '@/lib/admin-check';
 import { checkFeatureLimit } from '@/lib/check-feature';
 import { AgentOrchestrationUpgradeState } from '@/components/agents/agent-orchestration-gate';
 import { AgentRunsList } from '@/components/agents/agent-runs-list';
+import { isOssMode } from '@/lib/storage/factory';
 
 export default async function AgentRunsPage() {
+  if (isOssMode()) {
+    return <AgentRunsList />;
+  }
   const supabase = await createSupabaseServerClient();
   const { data: { user } } = await supabase.auth.getUser();
   if (!user) redirect('/login');

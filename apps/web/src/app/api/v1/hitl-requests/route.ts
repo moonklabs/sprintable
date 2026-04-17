@@ -1,13 +1,16 @@
 import { z } from 'zod';
 import { createSupabaseServerClient } from '@/lib/supabase/server';
 import { getMyTeamMember } from '@/lib/auth-helpers';
-import { apiSuccess, ApiErrors } from '@/lib/api-response';
+import { apiError, apiSuccess, ApiErrors } from '@/lib/api-response';
 import { handleApiError } from '@/lib/api-error';
 import { requireAgentOrchestration } from '@/lib/require-agent-orchestration';
+import { isOssMode } from '@/lib/storage/factory';
 
 const hitlStatusSchema = z.enum(['pending', 'approved', 'rejected', 'expired', 'cancelled', 'resolved']);
 
 export async function GET(request: Request) {
+  if (isOssMode()) return apiError('NOT_IMPLEMENTED', 'Not available in OSS mode.', 501);
+
   try {
     const supabase = await createSupabaseServerClient();
     const { data: { user } } = await supabase.auth.getUser();

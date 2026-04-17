@@ -1,11 +1,12 @@
 import { z } from 'zod';
 import { createSupabaseServerClient } from '@/lib/supabase/server';
 import { getMyTeamMember } from '@/lib/auth-helpers';
-import { apiSuccess, ApiErrors } from '@/lib/api-response';
+import { apiError, apiSuccess, ApiErrors } from '@/lib/api-response';
 import { handleApiError } from '@/lib/api-error';
 import { requireOrgAdmin } from '@/lib/admin-check';
 import { AgentPersonaService } from '@/services/agent-persona';
 import { requireAgentOrchestration } from '@/lib/require-agent-orchestration';
+import { isOssMode } from '@/lib/storage/factory';
 
 const createPersonaSchema = z.object({
   agent_id: z.string().min(1),
@@ -21,6 +22,8 @@ const createPersonaSchema = z.object({
 });
 
 export async function GET(request: Request) {
+  if (isOssMode()) return apiError('NOT_IMPLEMENTED', 'Not available in OSS mode.', 501);
+
   try {
     const supabase = await createSupabaseServerClient();
     const { data: { user } } = await supabase.auth.getUser();
@@ -51,6 +54,8 @@ export async function GET(request: Request) {
 }
 
 export async function POST(request: Request) {
+  if (isOssMode()) return apiError('NOT_IMPLEMENTED', 'Not available in OSS mode.', 501);
+
   try {
     const supabase = await createSupabaseServerClient();
     const { data: { user } } = await supabase.auth.getUser();

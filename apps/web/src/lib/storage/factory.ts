@@ -10,6 +10,8 @@ import type {
   ITeamMemberRepository,
   ISubscriptionRepository,
   IAgentRunBillingRepository,
+  IAgentRunRepository,
+  IAgentApiKeyRepository,
 } from '@sprintable/core-storage';
 
 export function isOssMode(): boolean {
@@ -142,4 +144,14 @@ export async function createSubscriptionRepository(supabase?: unknown): Promise<
 
 export async function createAgentRunBillingRepository(supabase?: unknown): Promise<IAgentRunBillingRepository> {
   return _agentRunBillingFactory(supabase);
+}
+
+export async function createAgentRunRepository(): Promise<IAgentRunRepository> {
+  const { SqliteAgentRunRepository, getDb } = await import('@sprintable/storage-sqlite');
+  return new SqliteAgentRunRepository(getDb());
+}
+
+export async function createAgentApiKeyRepository(): Promise<IAgentApiKeyRepository> {
+  const { SqliteAgentApiKeyRepository, getDb } = await import('@sprintable/storage-sqlite');
+  return new SqliteAgentApiKeyRepository(getDb());
 }

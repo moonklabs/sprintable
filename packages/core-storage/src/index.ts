@@ -90,5 +90,18 @@ export type {
   AgentRunBillingSummary,
 } from './interfaces/IAgentRunBillingRepository';
 
+export type {
+  IAgentRunRepository,
+  AgentRun,
+  AgentRunListFilters,
+  AgentRunListResult,
+} from './interfaces/IAgentRunRepository';
+
+export type {
+  IAgentApiKeyRepository,
+  AgentApiKey,
+  CreateAgentApiKeyInput,
+} from './interfaces/IAgentApiKeyRepository';
+
 export { NullSubscriptionRepository } from './null/NullSubscriptionRepository';
 export { NullAgentRunBillingRepository } from './null/NullAgentRunBillingRepository';

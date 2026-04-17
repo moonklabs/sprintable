@@ -1,7 +1,7 @@
 import { createSupabaseServerClient } from '@/lib/supabase/server';
 import { getMyTeamMember } from '@/lib/auth-helpers';
 import { requireOrgAdmin } from '@/lib/admin-check';
-import { apiSuccess, ApiErrors } from '@/lib/api-response';
+import { apiError, apiSuccess, ApiErrors } from '@/lib/api-response';
 import { handleApiError } from '@/lib/api-error';
 import { requireAgentOrchestration } from '@/lib/require-agent-orchestration';
 import { createManagedAgentDeploymentSchema } from '@/lib/managed-agent-contract';
@@ -11,6 +11,7 @@ import {
   matchesProjectAiCredentialProvider,
   resolveProjectAiCredentialProvider,
 } from '@/lib/llm/project-ai-settings';
+import { isOssMode } from '@/lib/storage/factory';
 import {
   AgentDeploymentLifecycleService,
   DeploymentLifecycleError,
@@ -50,6 +51,8 @@ function mergeBlockingReason(preflight: DeploymentPreflightResult, reason: strin
 }
 
 export async function POST(request: Request) {
+  if (isOssMode()) return apiError('NOT_IMPLEMENTED', 'Not available in OSS mode.', 501);
+
   try {
     const supabase = await createSupabaseServerClient();
     const { data: { user } } = await supabase.auth.getUser();

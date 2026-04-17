@@ -6,8 +6,12 @@ import { checkFeatureLimit } from '@/lib/check-feature';
 import { AgentsDashboard } from '@/components/agents/agents-dashboard';
 import { buildDeploymentCards } from '@/services/agent-dashboard';
 import { AgentOrchestrationUpgradeState } from '@/components/agents/agent-orchestration-gate';
+import { isOssMode } from '@/lib/storage/factory';
 
 export default async function AgentsPage() {
+  if (isOssMode()) {
+    return <AgentsDashboard deployments={[]} />;
+  }
   const supabase = await createSupabaseServerClient();
   const { data: { user } } = await supabase.auth.getUser();
   if (!user) redirect('/login');

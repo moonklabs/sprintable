@@ -8,10 +8,13 @@ import {
   DeploymentLifecycleError,
 } from '@/services/agent-deployment-lifecycle';
 import { requireAgentOrchestration } from '@/lib/require-agent-orchestration';
+import { isOssMode } from '@/lib/storage/factory';
 
 type RouteParams = { params: Promise<{ id: string }> };
 
 export async function POST(_request: Request, { params }: RouteParams) {
+  if (isOssMode()) return apiError('NOT_IMPLEMENTED', 'Not available in OSS mode.', 501);
+
   try {
     const { id } = await params;
     const supabase = await createSupabaseServerClient();

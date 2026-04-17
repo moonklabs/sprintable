@@ -1,11 +1,12 @@
 import { z } from 'zod';
 import { createSupabaseServerClient } from '@/lib/supabase/server';
 import { getMyTeamMember } from '@/lib/auth-helpers';
-import { apiSuccess, ApiErrors } from '@/lib/api-response';
+import { apiError, apiSuccess, ApiErrors } from '@/lib/api-response';
 import { handleApiError } from '@/lib/api-error';
 import { requireOrgAdmin } from '@/lib/admin-check';
 import { requireAgentOrchestration } from '@/lib/require-agent-orchestration';
 import { AgentPersonaService } from '@/services/agent-persona';
+import { isOssMode } from '@/lib/storage/factory';
 
 const updatePersonaSchema = z.object({
   name: z.string().trim().min(1).optional(),
@@ -22,6 +23,8 @@ const updatePersonaSchema = z.object({
 type RouteParams = { params: Promise<{ id: string }> };
 
 export async function GET(_request: Request, { params }: RouteParams) {
+  if (isOssMode()) return apiError('NOT_IMPLEMENTED', 'Not available in OSS mode.', 501);
+
   try {
     const { id } = await params;
     const supabase = await createSupabaseServerClient();
@@ -47,6 +50,8 @@ export async function GET(_request: Request, { params }: RouteParams) {
 }
 
 export async function PATCH(request: Request, { params }: RouteParams) {
+  if (isOssMode()) return apiError('NOT_IMPLEMENTED', 'Not available in OSS mode.', 501);
+
   try {
     const { id } = await params;
     const supabase = await createSupabaseServerClient();
@@ -84,6 +89,8 @@ export async function PATCH(request: Request, { params }: RouteParams) {
 }
 
 export async function DELETE(_request: Request, { params }: RouteParams) {
+  if (isOssMode()) return apiError('NOT_IMPLEMENTED', 'Not available in OSS mode.', 501);
+
   try {
     const { id } = await params;
     const supabase = await createSupabaseServerClient();

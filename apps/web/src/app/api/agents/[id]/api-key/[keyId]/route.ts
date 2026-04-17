@@ -2,6 +2,7 @@ import { createSupabaseServerClient } from '@/lib/supabase/server';
 import { handleApiError } from '@/lib/api-error';
 import { getAuthContext } from '@/lib/auth-helpers';
 import { apiSuccess, ApiErrors } from '@/lib/api-response';
+import { isOssMode, createAgentApiKeyRepository } from '@/lib/storage/factory';
 
 type RouteParams = { params: Promise<{ id: string; keyId: string }> };
 
@@ -12,6 +13,14 @@ type RouteParams = { params: Promise<{ id: string; keyId: string }> };
  * Admin만 가능
  */
 export async function DELETE(request: Request, { params }: RouteParams) {
+  if (isOssMode()) {
+    try {
+      const { keyId } = await params;
+      const repo = await createAgentApiKeyRepository();
+      await repo.revoke(keyId);
+      return apiSuccess({ message: 'API key revoked' });
+    } catch (err: unknown) { return handleApiError(err); }
+  }
   try {
     const { keyId } = await params;
     const supabase = await createSupabaseServerClient();
