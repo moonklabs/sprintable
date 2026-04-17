@@ -38,7 +38,7 @@ interface WebhookConfigRow {
 type Logger = Pick<Console, 'warn' | 'error'>;
 
 export interface DispatchWorkflowMemoReplyWebhooksOptions {
-  supabase: SupabaseClient;
+  supabase?: SupabaseClient;
   memo: MemoReplyDispatchMemo;
   reply: MemoReplyDispatchReply;
   logger?: Logger;
@@ -182,6 +182,8 @@ export async function dispatchWorkflowMemoReplyWebhooks(
   const logger = options.logger ?? console;
   const fetchFn = options.fetchFn ?? fetch;
   const { memo, reply, supabase } = options;
+
+  if (!supabase) return { status: 'skipped', reason: 'oss_mode' };
 
   if (isSystemFailureReply(reply.content)) {
     return { status: 'skipped', reason: 'system_failure_comment' };
