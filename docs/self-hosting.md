@@ -5,24 +5,24 @@ Deploy Sprintable on your own infrastructure.
 ## Prerequisites
 
 - Docker 24+ and Docker Compose v2
-- Supabase project (cloud or self-hosted)
 - Domain with SSL (recommended)
+- For SaaS mode only: Supabase project (cloud or self-hosted)
 
-## Quick Start (Local)
+## Quick Start (Local — OSS Mode)
 
 ```bash
 # Clone the repo
 git clone https://github.com/moonklabs/sprintable.git
 cd sprintable
 
-# Copy env file (defaults work for local docker setup)
+# Copy env file (defaults work for local OSS setup)
 cp .env.example .env
 
-# Start everything (web + Supabase DB/API/Auth)
+# Start
 docker compose up
 ```
 
-Visit `http://localhost:3000`. Supabase services run inside Docker — no external CLI needed. Migrations run automatically on startup.
+Visit `http://localhost:3000`. In OSS mode, data is stored in SQLite — no external database needed.
 
 ## Production Deployment
 
@@ -32,21 +32,22 @@ Visit `http://localhost:3000`. Supabase services run inside Docker — no extern
 cp .env.example .env
 ```
 
-Required variables:
+Required variables (OSS mode):
+| Variable | Description |
+|----------|-------------|
+| `APP_BASE_URL` | Your app's public URL (used in webhook links) |
+| `OSS_MODE` | Set to `true` for OSS self-hosting |
+| `SQLITE_PATH` | Path to SQLite database file |
+| `AGENT_API_KEY_SECRET` | Secret for agent API authentication |
+
+Optional (SaaS mode — set `OSS_MODE=false`):
 | Variable | Description |
 |----------|-------------|
 | `NEXT_PUBLIC_SUPABASE_URL` | Your Supabase project URL |
 | `NEXT_PUBLIC_SUPABASE_ANON_KEY` | Supabase anon/public key |
 | `SUPABASE_SERVICE_ROLE_KEY` | Supabase service role key |
-| `NEXT_PUBLIC_APP_URL` | Your app's public URL |
-
-Optional:
-| Variable | Description |
-|----------|-------------|
 | `OPENAI_API_KEY` | For AI features (STT, summarization) |
 | `ANTHROPIC_API_KEY` | Alternative AI provider |
-| `PAYMENT_PROVIDER` | `paddle` or `toss` |
-| `PADDLE_API_KEY` | Paddle Billing API key |
 
 ### 2. Database Migrations
 
