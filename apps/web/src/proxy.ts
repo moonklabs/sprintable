@@ -13,8 +13,34 @@ const PUBLIC_PREFIX = [
   '/internal-dogfood',
 ];
 
-export async function middleware(request: NextRequest) {
+function isOssMode(): boolean {
+  return process.env['OSS_MODE'] === 'true';
+}
+
+export async function proxy(request: NextRequest) {
   const pathname = request.nextUrl.pathname;
+
+  // OSS_MODE: bypass Supabase auth entirely (AC-1, AC-4, AC-5)
+  if (isOssMode()) {
+    // / → /dashboard (AC-4)
+    if (pathname === '/') {
+      const url = request.nextUrl.clone();
+      url.pathname = '/dashboard';
+      return NextResponse.redirect(url);
+    }
+
+    // /login, /auth/callback → /dashboard (AC-5)
+    if (pathname === '/login' || pathname.startsWith('/auth/callback')) {
+      const url = request.nextUrl.clone();
+      url.pathname = '/dashboard';
+      url.search = '';
+      return NextResponse.redirect(url);
+    }
+
+    // all other paths pass through — no Supabase auth check
+    return NextResponse.next({ request });
+  }
+
   const isPublicPath =
     PUBLIC_EXACT.includes(pathname) ||
     PUBLIC_PREFIX.some((prefix) => pathname.startsWith(prefix));
@@ -80,7 +106,7 @@ export async function middleware(request: NextRequest) {
   return supabaseResponse;
 }
 
-export const config = {
+export const proxyConfig = {
   matcher: [
     '/((?!_next/static|_next/image|favicon.ico|.*\\.(?:svg|png|jpg|jpeg|gif|webp)$).*)',
   ],
