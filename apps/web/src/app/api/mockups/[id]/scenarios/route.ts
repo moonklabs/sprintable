@@ -1,11 +1,13 @@
 import { createSupabaseServerClient } from '@/lib/supabase/server';
 import { handleApiError } from '@/lib/api-error';
 import { apiSuccess, apiError, ApiErrors } from '@/lib/api-response';
+import { isOssMode } from '@/lib/storage/factory';
 
 type RouteParams = { params: Promise<{ id: string }> };
 
 /** GET — 시나리오 목록 */
 export async function GET(_request: Request, { params }: RouteParams) {
+  if (isOssMode()) return apiSuccess([]);
   try {
     const { id } = await params;
     const supabase = await createSupabaseServerClient();
@@ -25,6 +27,7 @@ export async function GET(_request: Request, { params }: RouteParams) {
 
 /** POST — 시나리오 생성 */
 export async function POST(request: Request, { params }: RouteParams) {
+  if (isOssMode()) return apiError('NOT_IMPLEMENTED', 'Mockups are not available in OSS mode.', 501);
   try {
     const { id } = await params;
     const supabase = await createSupabaseServerClient();
@@ -45,6 +48,7 @@ export async function POST(request: Request, { params }: RouteParams) {
 
 /** PATCH — 시나리오 수정 */
 export async function PATCH(request: Request, { params }: RouteParams) {
+  if (isOssMode()) return apiError('NOT_IMPLEMENTED', 'Mockups are not available in OSS mode.', 501);
   try {
     const { id } = await params;
     const supabase = await createSupabaseServerClient();
@@ -67,6 +71,7 @@ export async function PATCH(request: Request, { params }: RouteParams) {
 
 /** DELETE — 시나리오 삭제 (default 불가) */
 export async function DELETE(request: Request, { params }: RouteParams) {
+  if (isOssMode()) return apiError('NOT_IMPLEMENTED', 'Mockups are not available in OSS mode.', 501);
   try {
     const { id } = await params;
     const supabase = await createSupabaseServerClient();

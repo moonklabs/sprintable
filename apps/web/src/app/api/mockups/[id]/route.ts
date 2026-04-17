@@ -2,12 +2,14 @@ import { parseBody, updateMockupPageSchema } from '@sprintable/shared';
 import { createSupabaseServerClient } from '@/lib/supabase/server';
 import { MockupService } from '@/services/mockup';
 import { handleApiError } from '@/lib/api-error';
-import { apiSuccess, ApiErrors } from '@/lib/api-response';
+import { apiSuccess, apiError, ApiErrors } from '@/lib/api-response';
+import { isOssMode } from '@/lib/storage/factory';
 
 type RouteParams = { params: Promise<{ id: string }> };
 
 /** GET — 목업 상세 (컴포넌트 포함) */
 export async function GET(_request: Request, { params }: RouteParams) {
+  if (isOssMode()) return apiError('NOT_IMPLEMENTED', 'Mockups are not available in OSS mode.', 501);
   try {
     const { id } = await params;
     const supabase = await createSupabaseServerClient();
@@ -22,6 +24,7 @@ export async function GET(_request: Request, { params }: RouteParams) {
 
 /** PUT — 목업 수정 (컴포넌트 트리 일괄 교체) */
 export async function PUT(request: Request, { params }: RouteParams) {
+  if (isOssMode()) return apiError('NOT_IMPLEMENTED', 'Mockups are not available in OSS mode.', 501);
   try {
     const { id } = await params;
     const supabase = await createSupabaseServerClient();
@@ -39,6 +42,7 @@ export async function PUT(request: Request, { params }: RouteParams) {
 
 /** DELETE — 목업 소프트 삭제 */
 export async function DELETE(_request: Request, { params }: RouteParams) {
+  if (isOssMode()) return apiError('NOT_IMPLEMENTED', 'Mockups are not available in OSS mode.', 501);
   try {
     const { id } = await params;
     const supabase = await createSupabaseServerClient();

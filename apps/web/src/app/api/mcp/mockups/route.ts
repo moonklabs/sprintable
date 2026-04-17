@@ -5,6 +5,7 @@ import { apiSuccess, apiError, ApiErrors } from '@/lib/api-response';
 import { MockupService } from '@/services/mockup';
 import { getMyTeamMember } from '@/lib/auth-helpers';
 import { checkResourceLimit } from '@/lib/check-feature';
+import { isOssMode } from '@/lib/storage/factory';
 
 // MCP tool action schemas
 const ListMockupsSchema = z.object({
@@ -68,6 +69,7 @@ const McpRequestSchema = z.discriminatedUnion('action', [
 ]);
 
 export async function POST(request: Request) {
+  if (isOssMode()) return apiError('NOT_IMPLEMENTED', 'Mockups are not available in OSS mode.', 501);
   try {
     const supabase = await createSupabaseServerClient();
     const { data: { user } } = await supabase.auth.getUser();
