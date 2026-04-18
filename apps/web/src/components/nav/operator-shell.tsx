@@ -236,18 +236,18 @@ export function OperatorShell({
 
         <div className="flex min-h-screen min-w-0 flex-1 flex-col px-2 pt-2 sm:px-4 lg:px-5 lg:pb-5" style={{ paddingBottom: 'max(5rem, calc(env(safe-area-inset-bottom) + 4rem))' }}>
           <GlassPanel className="sticky top-3 z-30 mb-4 flex items-center justify-between gap-4 px-4 py-3">
-            <div className="min-w-0">
-              <div className="text-[10px] font-semibold uppercase tracking-[0.24em] text-[color:var(--operator-muted)]">{shellT('projectLabel')}</div>
+            <div className="flex min-w-0 flex-1 items-center gap-2">
+              <div className="shrink-0 whitespace-nowrap text-[10px] font-semibold uppercase tracking-[0.24em] text-[color:var(--operator-muted)]">{shellT('projectLabel')}</div>
               {projectMemberships.length > 0 ? (
-                <div className="mt-0.5 lg:hidden">
+                <div className="min-w-0 flex-1 lg:hidden">
                   <ProjectSwitcher
                     projects={projectMemberships}
                     currentProjectId={projectId}
-                    className="min-h-[44px] max-w-[180px]"
+                    className="min-h-[44px] w-full"
                   />
                 </div>
               ) : null}
-              <div className={`truncate font-heading text-sm font-bold text-[color:var(--operator-foreground)]${projectMemberships.length > 0 ? ' hidden lg:block' : ''}`}>{projectName ?? (projectId ? shellT('projectAttached') : shellT('projectPending'))}</div>
+              <div className={cn('truncate font-heading text-sm font-bold text-[color:var(--operator-foreground)]', projectMemberships.length > 0 && 'hidden lg:block')}>{projectName ?? (projectId ? shellT('projectAttached') : shellT('projectPending'))}</div>
             </div>
             <div className="hidden max-w-xl flex-1 items-center gap-3 lg:flex">
               {projectMemberships.length > 0 ? (
@@ -261,7 +261,7 @@ export function OperatorShell({
                 {shellT('searchPlaceholder')}
               </div>
             </div>
-            <div className="flex items-center gap-2">
+            <div className="flex shrink-0 items-center gap-2">
               <OperatorIconButton
                 onClick={() => {
                   const searchInput = document.querySelector<HTMLInputElement>('[data-search-input]');
