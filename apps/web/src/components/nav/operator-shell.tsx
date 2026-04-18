@@ -238,7 +238,16 @@ export function OperatorShell({
           <GlassPanel className="sticky top-3 z-30 mb-4 flex items-center justify-between gap-4 px-4 py-3">
             <div className="min-w-0">
               <div className="text-[10px] font-semibold uppercase tracking-[0.24em] text-[color:var(--operator-muted)]">{shellT('projectLabel')}</div>
-              <div className="truncate font-heading text-sm font-bold text-[color:var(--operator-foreground)]">{projectName ?? (projectId ? shellT('projectAttached') : shellT('projectPending'))}</div>
+              {projectMemberships.length > 0 ? (
+                <div className="mt-0.5 lg:hidden">
+                  <ProjectSwitcher
+                    projects={projectMemberships}
+                    currentProjectId={projectId}
+                    className="min-h-[44px] max-w-[180px]"
+                  />
+                </div>
+              ) : null}
+              <div className={`truncate font-heading text-sm font-bold text-[color:var(--operator-foreground)]${projectMemberships.length > 0 ? ' hidden lg:block' : ''}`}>{projectName ?? (projectId ? shellT('projectAttached') : shellT('projectPending'))}</div>
             </div>
             <div className="hidden max-w-xl flex-1 items-center gap-3 lg:flex">
               {projectMemberships.length > 0 ? (
