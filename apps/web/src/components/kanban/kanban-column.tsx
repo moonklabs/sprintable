@@ -43,7 +43,7 @@ export function KanbanColumn({ id, label, stories, epicMap, memberMap, dragStatu
   return (
     <div
       ref={setNodeRef}
-      className={`flex min-h-[320px] w-full min-w-[280px] flex-col rounded-3xl border p-4 transition md:w-[320px] ${
+      className={`flex min-h-[320px] w-full flex-col rounded-3xl border p-4 transition md:w-[320px] md:min-w-[280px] ${
         isOver && isValidTarget
           ? 'border-[color:var(--operator-primary)]/40 bg-[color:var(--operator-primary)]/12 shadow-[0_0_0_1px_rgba(182,196,255,0.2)]'
           : isValidTarget

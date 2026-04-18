@@ -75,7 +75,7 @@ export function KanbanBoard({ projectId }: KanbanBoardProps) {
   const [storyTasks, setStoryTasks] = useState<Task[]>([]);
   const [activeId, setActiveId] = useState<string | null>(null);
 
-  const sensors = useSensors(useSensor(PointerSensor, { activationConstraint: { distance: 5 } }));
+  const sensors = useSensors(useSensor(PointerSensor, { activationConstraint: { distance: 8 } }));
 
   const epicMap: Record<string, string> = {};
   for (const e of epics) epicMap[e.id] = e.title;
@@ -337,7 +337,7 @@ export function KanbanBoard({ projectId }: KanbanBoardProps) {
       />
 
       <DndContext sensors={sensors} onDragStart={handleDragStart} onDragEnd={handleDragEnd}>
-        <div className="flex flex-col gap-4 md:flex-row md:overflow-x-auto md:pb-4">
+        <div className="flex flex-col gap-3 md:flex-row md:gap-4 md:overflow-x-auto md:pb-4">
           {COLUMNS.map((col) => (
             <KanbanColumn
               key={col.id}
