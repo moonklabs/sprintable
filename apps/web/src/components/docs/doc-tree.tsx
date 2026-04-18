@@ -147,7 +147,7 @@ function TreeNode({
               ? 'bg-[color:var(--operator-primary)]/14 text-[color:var(--operator-primary-soft)] shadow-[inset_0_0_0_1px_rgba(182,196,255,0.14)]'
               : 'text-[color:var(--operator-foreground)]/88 hover:bg-white/6 hover:text-[color:var(--operator-foreground)]',
           )}
-          style={{ paddingLeft: `${depth * 18 + 12}px` }}
+          style={{ paddingLeft: `${Math.min(depth * 14 + 8, 72)}px` }}
           {...attributes}
           {...listeners}
         >
@@ -206,7 +206,7 @@ function TreeNode({
           ) : (
             <p
               className="py-1 text-[11px] italic text-[color:var(--operator-muted)]"
-              style={{ paddingLeft: `${(depth + 1) * 18 + 28}px` }}
+              style={{ paddingLeft: `${Math.min((depth + 1) * 14 + 24, 88)}px` }}
             >
               {emptyFolderLabel}
             </p>
