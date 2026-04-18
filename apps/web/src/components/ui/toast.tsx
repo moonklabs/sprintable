@@ -70,7 +70,7 @@ export function ToastContainer({
   if (toasts.length === 0) return null;
 
   return (
-    <div className="fixed bottom-4 right-4 z-50 flex flex-col gap-2">
+    <div className="fixed right-4 z-50 flex flex-col gap-2" style={{ bottom: 'max(1rem, calc(env(safe-area-inset-bottom) + 1rem))' }}>
       {toasts.map((t) => (
         <Toast key={t.id} item={t} onDismiss={onDismiss} />
       ))}
