@@ -234,7 +234,7 @@ export function OperatorShell({
           </GlassPanel>
         </aside>
 
-        <div className="flex min-h-screen min-w-0 flex-1 flex-col px-3 pt-3 sm:px-4 lg:px-5 lg:pb-5" style={{ paddingBottom: 'max(5rem, calc(env(safe-area-inset-bottom) + 4rem))' }}>
+        <div className="flex min-h-screen min-w-0 flex-1 flex-col px-2 pt-2 sm:px-4 lg:px-5 lg:pb-5" style={{ paddingBottom: 'max(5rem, calc(env(safe-area-inset-bottom) + 4rem))' }}>
           <GlassPanel className="sticky top-3 z-30 mb-4 flex items-center justify-between gap-4 px-4 py-3">
             <div className="min-w-0">
               <div className="text-[10px] font-semibold uppercase tracking-[0.24em] text-[color:var(--operator-muted)]">{shellT('projectLabel')}</div>

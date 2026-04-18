@@ -436,7 +436,7 @@ export function DocsShellClient({ projectId }: DocsShellClientProps) {
         </div>
         {showCreate ? (
           <div className="flex h-full flex-col">
-            <div className="flex-shrink-0 border-b border-gray-800 px-6 py-4">
+            <div className="flex-shrink-0 border-b border-gray-800 px-3 py-2 md:px-6 md:py-4">
               <div className="flex items-center justify-between">
                 <h2 className="text-2xl font-semibold">{t('newDoc')}</h2>
                 <Button variant="ghost" size="sm" onClick={() => {
@@ -447,7 +447,7 @@ export function DocsShellClient({ projectId }: DocsShellClientProps) {
                 </Button>
               </div>
             </div>
-            <div className="flex-1 overflow-y-auto px-6 py-6">
+            <div className="flex-1 overflow-y-auto px-3 py-3 md:px-6 md:py-6">
               <div className="space-y-4 max-w-3xl">
                 <div>
                   <label className="text-sm font-medium mb-2 block">{t('titleLabel')}</label>
@@ -491,7 +491,7 @@ export function DocsShellClient({ projectId }: DocsShellClientProps) {
         ) : selectedDoc ? (
           <>
             {/* Header */}
-            <div className="flex-shrink-0 border-b border-gray-800 px-6 py-4">
+            <div className="flex-shrink-0 border-b border-gray-800 px-3 py-2 md:px-6 md:py-4">
               <div className="flex items-center justify-between gap-4">
                 <div className="flex-1 min-w-0">
                   <Input
@@ -514,7 +514,7 @@ export function DocsShellClient({ projectId }: DocsShellClientProps) {
             </div>
 
             {/* Content — always-editable tiptap */}
-            <div className="flex-1 overflow-y-auto px-6 py-6">
+            <div className="flex-1 overflow-y-auto px-3 py-3 md:px-6 md:py-6">
               <DocEditor
                 value={content}
                 contentFormat={contentFormat}
