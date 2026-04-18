@@ -1,3 +1,4 @@
+import type { SupabaseClient } from '@supabase/supabase-js';
 import { parseBody, createDocSchema } from '@sprintable/shared';
 import { createSupabaseServerClient } from '@/lib/supabase/server';
 import { createSupabaseAdminClient } from '@/lib/supabase/admin';
@@ -7,6 +8,7 @@ import { getAuthContext } from '@/lib/auth-helpers';
 import { apiSuccess, apiError, ApiErrors } from '@/lib/api-response';
 import { buildCursorPageMeta, parseCursorPageInput } from '@/lib/pagination';
 import { checkResourceLimit } from '@/lib/check-feature';
+import { isOssMode, createDocRepository } from '@/lib/storage/factory';
 
 export async function GET(request: Request) {
   try {
@@ -14,11 +16,13 @@ export async function GET(request: Request) {
     const me = await getAuthContext(supabase, request);
     if (!me) return ApiErrors.unauthorized();
     if (me.rateLimitExceeded) return ApiErrors.tooManyRequests(me.rateLimitRemaining, me.rateLimitResetAt);
-    const dbClient = me.type === 'agent' ? createSupabaseAdminClient() : supabase;
+    const ossMode = isOssMode();
+    const dbClient = ossMode ? undefined : (me.type === 'agent' ? createSupabaseAdminClient() : supabase);
     const { searchParams } = new URL(request.url);
     const projectId = searchParams.get('project_id');
     if (!projectId) return ApiErrors.badRequest('project_id required');
-    const service = new DocsService(dbClient);
+    const repo = await createDocRepository(dbClient);
+    const service = new DocsService(repo, dbClient as SupabaseClient | undefined);
     const slug = searchParams.get('slug');
     if (slug) return apiSuccess(await service.getDoc(projectId, slug));
 
@@ -48,11 +52,15 @@ export async function POST(request: Request) {
     const me = await getAuthContext(supabase, request);
     if (!me) return ApiErrors.unauthorized();
     if (me.rateLimitExceeded) return ApiErrors.tooManyRequests(me.rateLimitRemaining, me.rateLimitResetAt);
-    const dbClient = me.type === 'agent' ? createSupabaseAdminClient() : supabase;
-    const check = await checkResourceLimit(dbClient, me.org_id, 'max_docs', 'docs');
-    if (!check.allowed) return apiError('UPGRADE_REQUIRED', check.reason ?? 'Document limit reached. Upgrade to Team.', 403);
+    const ossMode = isOssMode();
+    const dbClient = ossMode ? undefined : (me.type === 'agent' ? createSupabaseAdminClient() : supabase);
+    if (!ossMode) {
+      const check = await checkResourceLimit(dbClient!, me.org_id, 'max_docs', 'docs');
+      if (!check.allowed) return apiError('UPGRADE_REQUIRED', check.reason ?? 'Document limit reached. Upgrade to Team.', 403);
+    }
     const parsed = await parseBody(request, createDocSchema); if (!parsed.success) return parsed.response; const body = parsed.data;
-    const service = new DocsService(dbClient);
+    const repo = await createDocRepository(dbClient);
+    const service = new DocsService(repo, dbClient as SupabaseClient | undefined);
     const doc = await service.createDoc({
       org_id: me.org_id, project_id: me.project_id,
       title: body.title, slug: body.slug ?? '', content: body.content ?? '', content_format: body.content_format ?? 'markdown',

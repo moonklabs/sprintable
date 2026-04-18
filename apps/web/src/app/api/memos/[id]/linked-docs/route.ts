@@ -42,7 +42,9 @@ export async function POST(request: Request, { params }: RouteParams) {
       const memo = await memoService.getById(id);
       const title = body.title?.trim() || memo.title || memo.content.slice(0, 80) || 'Untitled doc';
       const slug = slugify(title) || `memo-${id.slice(0, 8)}`;
-      const docsService = new DocsService(dbClient as SupabaseClient);
+      const { createDocRepository } = await import('@/lib/storage/factory');
+      const docRepo = await createDocRepository(dbClient);
+      const docsService = new DocsService(docRepo, dbClient as SupabaseClient | undefined);
       createdDoc = await docsService.createDoc({
         org_id: me.org_id,
         project_id: me.project_id,

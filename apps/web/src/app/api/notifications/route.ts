@@ -6,6 +6,7 @@ import { apiSuccess, ApiErrors } from '@/lib/api-response';
 import { getAuthContext } from '@/lib/auth-helpers';
 import { attachNotificationHrefs } from '@/services/notification-navigation';
 import { parseBody, updateNotificationSchema } from '@sprintable/shared';
+import { isOssMode, createNotificationRepository } from '@/lib/storage/factory';
 
 /** GET — 알림 목록 (안읽음 우선, 최신순) */
 export async function GET(request: Request) {
@@ -14,13 +15,25 @@ export async function GET(request: Request) {
     const me = await getAuthContext(supabase, request);
     if (!me) return ApiErrors.unauthorized();
     if (me.rateLimitExceeded) return ApiErrors.tooManyRequests(me.rateLimitRemaining, me.rateLimitResetAt);
-    const dbClient: SupabaseClient = me.type === 'agent' ? createSupabaseAdminClient() : supabase;
+    const ossMode = isOssMode();
+    const dbClient: SupabaseClient | undefined = ossMode ? undefined : (me.type === 'agent' ? createSupabaseAdminClient() : supabase);
 
     const { searchParams } = new URL(request.url);
     const typeFilter = searchParams.get('type');
     const unreadOnly = searchParams.get('unread') === 'true';
 
-    let query = dbClient
+    if (ossMode) {
+      const repo = await createNotificationRepository();
+      const notifications = await repo.list({
+        user_id: me.id,
+        is_read: unreadOnly ? false : undefined,
+        limit: 50,
+      });
+      const unreadCount = notifications.filter((n) => !n.is_read).length;
+      return apiSuccess(notifications, { unreadCount });
+    }
+
+    let query = dbClient!
       .from('notifications')
       .select('*')
       .eq('user_id', me.id)
@@ -34,8 +47,7 @@ export async function GET(request: Request) {
     const { data, error } = await query;
     if (error) throw error;
 
-    // 안읽음 카운트 - 병렬 처리
-    let countQuery = dbClient
+    let countQuery = dbClient!
       .from('notifications')
       .select('id', { count: 'exact', head: true })
       .eq('user_id', me.id)
@@ -45,11 +57,10 @@ export async function GET(request: Request) {
 
     const [countResult, notifications] = await Promise.all([
       countQuery,
-      attachNotificationHrefs(dbClient, data ?? []),
+      attachNotificationHrefs(dbClient!, data ?? []),
     ]);
 
     const { count } = countResult;
-
     return apiSuccess(notifications, { unreadCount: count ?? 0 });
   } catch (err: unknown) {
     return handleApiError(err);
@@ -63,36 +74,44 @@ export async function PATCH(request: Request) {
     const me = await getAuthContext(supabase, request);
     if (!me) return ApiErrors.unauthorized();
     if (me.rateLimitExceeded) return ApiErrors.tooManyRequests(me.rateLimitRemaining, me.rateLimitResetAt);
-    const dbClient: SupabaseClient = me.type === 'agent' ? createSupabaseAdminClient() : supabase;
+    const ossMode = isOssMode();
+    const dbClient: SupabaseClient | undefined = ossMode ? undefined : (me.type === 'agent' ? createSupabaseAdminClient() : supabase);
 
     const parsed = await parseBody(request, updateNotificationSchema);
     if (!parsed.success) return parsed.response;
     const body = parsed.data;
 
+    if (ossMode) {
+      const repo = await createNotificationRepository();
+      if (body.markAllRead) {
+        await repo.markAllRead(me.id);
+        return apiSuccess({ ok: true });
+      }
+      if (body.id) {
+        await repo.markRead(body.id, me.id);
+        return apiSuccess({ ok: true });
+      }
+      return ApiErrors.badRequest('id or markAllRead required');
+    }
+
     if (body.markAllRead) {
-      // 전체 읽음 (type 필터 optional)
-      let query = dbClient
+      let query = dbClient!
         .from('notifications')
         .update({ is_read: true })
         .eq('user_id', me.id)
         .eq('is_read', false);
-
       if (body.type) query = query.eq('type', body.type);
-
       const { error } = await query;
-
       if (error) throw error;
       return apiSuccess({ ok: true });
     }
 
     if (body.id) {
-      // 단일 읽음 토글
-      const { error } = await dbClient
+      const { error } = await dbClient!
         .from('notifications')
         .update({ is_read: body.is_read ?? true })
         .eq('id', body.id)
         .eq('user_id', me.id);
-
       if (error) throw error;
       return apiSuccess({ ok: true });
     }

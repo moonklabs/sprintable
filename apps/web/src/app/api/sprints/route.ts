@@ -1,3 +1,4 @@
+import type { SupabaseClient } from '@supabase/supabase-js';
 import { createSupabaseServerClient } from '@/lib/supabase/server';
 import { createSupabaseAdminClient } from '@/lib/supabase/admin';
 import { SprintService, type CreateSprintInput } from '@/services/sprint';
@@ -5,6 +6,7 @@ import { handleApiError } from '@/lib/api-error';
 import { apiSuccess, ApiErrors } from '@/lib/api-response';
 import { getAuthContext } from '@/lib/auth-helpers';
 import { parseBody, createSprintSchema } from '@sprintable/shared';
+import { isOssMode, createSprintRepository } from '@/lib/storage/factory';
 
 // POST /api/sprints — 생성
 export async function POST(request: Request) {
@@ -13,11 +15,13 @@ export async function POST(request: Request) {
     const me = await getAuthContext(supabase, request);
     if (!me) return ApiErrors.unauthorized();
     if (me.rateLimitExceeded) return ApiErrors.tooManyRequests(me.rateLimitRemaining, me.rateLimitResetAt);
-    const dbClient = me.type === 'agent' ? createSupabaseAdminClient() : supabase;
+    const ossMode = isOssMode();
+    const dbClient = ossMode ? undefined : (me.type === 'agent' ? createSupabaseAdminClient() : supabase);
 
     const parsed = await parseBody(request, createSprintSchema);
     if (!parsed.success) return parsed.response;
-    const service = new SprintService(dbClient);
+    const repo = await createSprintRepository(dbClient);
+    const service = new SprintService(repo, dbClient as SupabaseClient | undefined);
     const sprint = await service.create(parsed.data as CreateSprintInput);
     return apiSuccess(sprint, undefined, 201);
   } catch (err: unknown) {
@@ -32,10 +36,12 @@ export async function GET(request: Request) {
     const me = await getAuthContext(supabase, request);
     if (!me) return ApiErrors.unauthorized();
     if (me.rateLimitExceeded) return ApiErrors.tooManyRequests(me.rateLimitRemaining, me.rateLimitResetAt);
-    const dbClient = me.type === 'agent' ? createSupabaseAdminClient() : supabase;
+    const ossMode = isOssMode();
+    const dbClient = ossMode ? undefined : (me.type === 'agent' ? createSupabaseAdminClient() : supabase);
 
     const { searchParams } = new URL(request.url);
-    const service = new SprintService(dbClient);
+    const repo = await createSprintRepository(dbClient);
+    const service = new SprintService(repo, dbClient as SupabaseClient | undefined);
     const sprints = await service.list({
       project_id: searchParams.get('project_id') ?? undefined,
       status: searchParams.get('status') ?? undefined,

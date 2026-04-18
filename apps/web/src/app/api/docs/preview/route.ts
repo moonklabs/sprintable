@@ -1,10 +1,11 @@
+import type { SupabaseClient } from '@supabase/supabase-js';
 import { createSupabaseServerClient } from '@/lib/supabase/server';
 import { createSupabaseAdminClient } from '@/lib/supabase/admin';
 import { DocsService } from '@/services/docs';
 import { getAuthContext } from '@/lib/auth-helpers';
 import { apiSuccess, ApiErrors } from '@/lib/api-response';
 import { handleApiError } from '@/lib/api-error';
-import type { SupabaseClient } from '@supabase/supabase-js';
+import { isOssMode, createDocRepository } from '@/lib/storage/factory';
 
 /**
  * Extract all doc IDs referenced by page-embed nodes from an HTML string.
@@ -63,14 +64,6 @@ async function collectTransitiveEmbeds(
 
 /**
  * GET /api/docs/preview?q=<slug-or-uuid>
- *
- * Returns the minimal preview fields needed by page-embed blocks:
- *   { id, title, icon, slug, embedChain }
- *
- * `embedChain` lists all doc IDs transitively embedded by the target doc.
- * Clients use this to detect indirect circular embeds (A→B→A).
- *
- * Accepts both UUID and slug via the `q` parameter.
  */
 export async function GET(request: Request) {
   try {
@@ -79,17 +72,20 @@ export async function GET(request: Request) {
     if (!me) return ApiErrors.unauthorized();
     if (me.rateLimitExceeded)
       return ApiErrors.tooManyRequests(me.rateLimitRemaining, me.rateLimitResetAt);
-    const dbClient = me.type === 'agent' ? createSupabaseAdminClient() : supabase;
+    const ossMode = isOssMode();
+    const dbClient = ossMode ? undefined : (me.type === 'agent' ? createSupabaseAdminClient() : supabase);
 
     const { searchParams } = new URL(request.url);
     const q = searchParams.get('q')?.trim();
     if (!q) return ApiErrors.badRequest('q is required');
 
-    const service = new DocsService(dbClient);
+    const repo = await createDocRepository(dbClient);
+    const service = new DocsService(repo, dbClient as SupabaseClient | undefined);
     const doc = await service.getDocPreview(me.project_id, q);
     if (!doc) return ApiErrors.notFound('Document not found');
 
-    const embedChain = await collectTransitiveEmbeds(dbClient, me.project_id, doc.id);
+    // OSS: skip embed chain traversal (no raw Supabase client available)
+    const embedChain = dbClient ? await collectTransitiveEmbeds(dbClient, me.project_id, doc.id) : [];
 
     return apiSuccess({
       id: doc.id,

@@ -1,9 +1,11 @@
+import type { SupabaseClient } from '@supabase/supabase-js';
 import { createSupabaseServerClient } from '@/lib/supabase/server';
 import { createSupabaseAdminClient } from '@/lib/supabase/admin';
 import { StoryService } from '@/services/story';
 import { handleApiError } from '@/lib/api-error';
 import { getAuthContext } from '@/lib/auth-helpers';
 import { apiSuccess, ApiErrors } from '@/lib/api-response';
+import { isOssMode, createStoryRepository } from '@/lib/storage/factory';
 
 type RouteParams = { params: Promise<{ id: string }> };
 
@@ -14,13 +16,15 @@ export async function GET(request: Request, { params }: RouteParams) {
     const me = await getAuthContext(supabase, request);
     if (!me) return ApiErrors.unauthorized();
     if (me.rateLimitExceeded) return ApiErrors.tooManyRequests(me.rateLimitRemaining, me.rateLimitResetAt);
-    const dbClient = me.type === 'agent' ? createSupabaseAdminClient() : supabase;
+    const ossMode = isOssMode();
+    const dbClient = ossMode ? undefined : (me.type === 'agent' ? createSupabaseAdminClient() : supabase);
 
     const url = new URL(request.url);
     const limit = url.searchParams.get('limit');
     const cursor = url.searchParams.get('cursor');
 
-    const service = new StoryService(dbClient);
+    const repo = await createStoryRepository(dbClient);
+    const service = new StoryService(repo, dbClient as SupabaseClient | undefined);
     const comments = await service.getComments(id, {
       limit: limit ? parseInt(limit, 10) : 20,
       cursor: cursor ?? undefined,
@@ -43,14 +47,16 @@ export async function POST(request: Request, { params }: RouteParams) {
     const me = await getAuthContext(supabase, request);
     if (!me) return ApiErrors.unauthorized();
     if (me.rateLimitExceeded) return ApiErrors.tooManyRequests(me.rateLimitRemaining, me.rateLimitResetAt);
-    const dbClient = me.type === 'agent' ? createSupabaseAdminClient() : supabase;
+    const ossMode = isOssMode();
+    const dbClient = ossMode ? undefined : (me.type === 'agent' ? createSupabaseAdminClient() : supabase);
 
     const body = await request.json();
     if (!body.content || typeof body.content !== 'string') {
       return ApiErrors.badRequest('content is required');
     }
 
-    const service = new StoryService(dbClient);
+    const repo = await createStoryRepository(dbClient);
+    const service = new StoryService(repo, dbClient as SupabaseClient | undefined);
     const comment = await service.addComment({
       story_id: id,
       content: body.content,

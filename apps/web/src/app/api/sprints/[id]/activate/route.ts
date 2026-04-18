@@ -1,9 +1,11 @@
+import type { SupabaseClient } from '@supabase/supabase-js';
 import { createSupabaseServerClient } from '@/lib/supabase/server';
 import { createSupabaseAdminClient } from '@/lib/supabase/admin';
 import { SprintService } from '@/services/sprint';
 import { handleApiError } from '@/lib/api-error';
 import { apiSuccess, ApiErrors } from '@/lib/api-response';
 import { getAuthContext } from '@/lib/auth-helpers';
+import { isOssMode, createSprintRepository } from '@/lib/storage/factory';
 
 type RouteParams = { params: Promise<{ id: string }> };
 
@@ -15,9 +17,11 @@ export async function POST(request: Request, { params }: RouteParams) {
     const me = await getAuthContext(supabase, request);
     if (!me) return ApiErrors.unauthorized();
     if (me.rateLimitExceeded) return ApiErrors.tooManyRequests(me.rateLimitRemaining, me.rateLimitResetAt);
-    const dbClient = me.type === 'agent' ? createSupabaseAdminClient() : supabase;
+    const ossMode = isOssMode();
+    const dbClient = ossMode ? undefined : (me.type === 'agent' ? createSupabaseAdminClient() : supabase);
 
-    const service = new SprintService(dbClient);
+    const repo = await createSprintRepository(dbClient);
+    const service = new SprintService(repo, dbClient as SupabaseClient | undefined);
     const sprint = await service.activate(id);
     return apiSuccess(sprint);
   } catch (err: unknown) {
