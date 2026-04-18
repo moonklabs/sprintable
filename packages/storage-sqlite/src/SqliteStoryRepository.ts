@@ -15,7 +15,7 @@ export class SqliteStoryRepository implements IStoryRepository {
     this.db.prepare(`
       INSERT INTO stories (id, org_id, project_id, epic_id, sprint_id, assignee_id, title, status, priority, story_points, description, meeting_id, created_at, updated_at)
       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-    `).run(id, input.org_id, input.project_id, input.epic_id ?? null, input.sprint_id ?? null, input.assignee_id ?? null, input.title.trim(), input.status ?? 'todo', input.priority ?? 'medium', input.story_points ?? null, input.description ?? null, input.meeting_id ?? null, now, now);
+    `).run(id, input.org_id, input.project_id, input.epic_id ?? null, input.sprint_id ?? null, input.assignee_id ?? null, input.title.trim(), input.status ?? 'backlog', input.priority ?? 'medium', input.story_points ?? null, input.description ?? null, input.meeting_id ?? null, now, now);
     return this.getById(id);
   }
 
