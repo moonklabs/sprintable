@@ -255,7 +255,7 @@ export class AgentBuiltinToolService {
     } = {},
   ) {
     this.memoService = options.memoService ?? MemoService.fromSupabase(supabase);
-    this.storyService = options.storyService ?? new StoryService(supabase);
+    this.storyService = options.storyService ?? StoryService.fromSupabase(supabase);
     this._epicService = options.epicService ?? null;
     this.auditLogger = options.auditLogger;
     this.fetchFn = options.fetchFn ?? fetch;

@@ -191,7 +191,7 @@ function createSupabaseStub(seed?: Partial<Tables>) {
         limit(count: number) { state.limitCount = count; return query; },
         async maybeSingle() {
           if (state.pendingInsert) {
-            const row = { id: makeId(tables[table].length + 1), created_at: '2026-04-07T00:00:00.000Z', updated_at: '2026-04-07T00:00:00.000Z', ...state.pendingInsert };
+            const row = { id: makeId(tables[table].length + 1), created_at: '2026-04-07T00:00:00.000Z', updated_at: '2026-04-07T00:00:00.000Z', deleted_at: null, ...state.pendingInsert };
             tables[table].push(row);
             return { data: row, error: null };
           }
@@ -200,7 +200,7 @@ function createSupabaseStub(seed?: Partial<Tables>) {
         },
         async single() {
           if (state.pendingInsert) {
-            const row = { id: makeId(tables[table].length + 1), created_at: '2026-04-07T00:00:00.000Z', updated_at: '2026-04-07T00:00:00.000Z', ...state.pendingInsert };
+            const row = { id: makeId(tables[table].length + 1), created_at: '2026-04-07T00:00:00.000Z', updated_at: '2026-04-07T00:00:00.000Z', deleted_at: null, ...state.pendingInsert };
             tables[table].push(row);
             return { data: row, error: null };
           }

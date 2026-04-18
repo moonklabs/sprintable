@@ -21,6 +21,10 @@ function createQueryStub(rows: Record<string, unknown>[] = [], opts: { singleNot
   const chain = () => q;
   q.select = vi.fn(chain);
   q.eq = vi.fn(chain);
+  q.is = vi.fn(chain);
+  q.order = vi.fn(chain);
+  q.limit = vi.fn(chain);
+  q.lt = vi.fn(chain);
   q.insert = vi.fn(() => (opts.insertOk !== false ? Promise.resolve({ error: null }) : Promise.resolve({ error: { message: 'insert failed' } })));
   q.single = vi.fn(() =>
     opts.singleNotFound

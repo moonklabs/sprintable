@@ -47,7 +47,7 @@ describe('DocsService.updateDoc', () => {
 
   it('applies optimistic concurrency when expected_updated_at is provided', async () => {
     const { supabase, updateBuilder } = createDocsSupabase();
-    const service = new DocsService(supabase as never);
+    const service = new DocsService({} as never, supabase as never);
 
     const result = await service.updateDoc('doc-1', {
       content: 'updated',
@@ -68,7 +68,7 @@ describe('DocsService.updateDoc', () => {
       currentUpdatedAt: '2026-04-09T15:21:00.000Z',
     });
     updateBuilder.maybeSingle.mockResolvedValue({ data: null, error: null });
-    const service = new DocsService(supabase as never);
+    const service = new DocsService({} as never, supabase as never);
 
     await expect(service.updateDoc('doc-1', {
       content: 'stale update',
@@ -85,7 +85,7 @@ describe('DocsService.updateDoc', () => {
 
   it('allows explicit overwrite after a conflict acknowledgement', async () => {
     const { supabase, updateBuilder } = createDocsSupabase();
-    const service = new DocsService(supabase as never);
+    const service = new DocsService({} as never, supabase as never);
 
     await service.updateDoc('doc-1', {
       content: 'overwrite me',
