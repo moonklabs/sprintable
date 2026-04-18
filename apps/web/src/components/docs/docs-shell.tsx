@@ -21,7 +21,7 @@ export function DocsShell({
         <GlassPanel className="hidden min-w-0 overflow-y-auto border-white/8 bg-[color:var(--operator-surface-soft)]/75 md:block">
           {sidebar}
         </GlassPanel>
-        <GlassPanel className="min-w-0 overflow-hidden">
+        <GlassPanel className="flex min-h-0 flex-1 flex-col overflow-hidden">
           {children}
         </GlassPanel>
       </div>
@@ -34,7 +34,7 @@ export function DocsShell({
             className="absolute inset-0 bg-black/55 backdrop-blur-[2px]"
             onClick={() => onMobileSidebarOpenChange?.(false)}
           />
-          <div className="absolute inset-y-0 left-0 w-[min(88vw,22rem)] p-3">
+          <div className="absolute inset-y-0 left-0 w-[min(85vw,20rem)] p-3">
             <GlassPanel className="flex h-full min-h-0 overflow-y-auto border-white/8 bg-[color:var(--operator-surface-soft)]/92 shadow-[0_24px_80px_rgba(0,0,0,0.42)]">
               {sidebar}
             </GlassPanel>
