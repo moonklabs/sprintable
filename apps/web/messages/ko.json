@@ -103,7 +103,8 @@
     "editStory": "스토리 수정",
     "changeStatus": "상태 변경",
     "assignMember": "담당자 변경",
-    "deleteStory": "스토리 삭제"
+    "deleteStory": "스토리 삭제",
+    "validDrop": "이동 가능"
   },
   "memos": {
     "title": "메모",

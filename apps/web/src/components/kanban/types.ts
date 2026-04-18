@@ -27,6 +27,14 @@ export interface KanbanMember {
   type: string;
 }
 
+export const VALID_TRANSITIONS: Record<string, string[]> = {
+  backlog: ['ready-for-dev'],
+  'ready-for-dev': ['in-progress', 'backlog'],
+  'in-progress': ['in-review', 'ready-for-dev'],
+  'in-review': ['done', 'in-progress'],
+  done: [],
+};
+
 export const COLUMNS = [
   { id: 'backlog', i18nKey: 'backlog' },
   { id: 'ready-for-dev', i18nKey: 'readyForDev' },

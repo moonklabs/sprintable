@@ -103,7 +103,8 @@
     "editStory": "Edit Story",
     "changeStatus": "Change Status",
     "assignMember": "Assign Member",
-    "deleteStory": "Delete Story"
+    "deleteStory": "Delete Story",
+    "validDrop": "Drop here"
   },
   "memos": {
     "title": "Memos",
