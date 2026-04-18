@@ -5,6 +5,26 @@ import type { ChangeEvent, ClipboardEvent, DragEvent, KeyboardEvent } from 'reac
 import { useTranslations } from 'next-intl';
 import { useMemoPresence } from '@/components/memos/use-memo-presence';
 
+function getMentionQuery(value: string, cursorPos: number): string | null {
+  const before = value.slice(0, cursorPos);
+  const m = before.match(/@([\w가-힣]*)$/);
+  return m ? m[1] : null;
+}
+
+function applyMention(value: string, cursorPos: number, name: string): { text: string; caretPos: number } {
+  const before = value.slice(0, cursorPos);
+  const m = before.match(/@([\w가-힣]*)$/);
+  if (!m) return { text: value, caretPos: cursorPos };
+  const start = cursorPos - m[0].length;
+  const replacement = `@${name} `;
+  return { text: value.slice(0, start) + replacement + value.slice(cursorPos), caretPos: start + replacement.length };
+}
+
+interface MentionMember {
+  id: string;
+  name: string;
+}
+
 interface MemoComposerProps {
   collaboration?: ReturnType<typeof useMemoPresence>;
   value: string;
@@ -50,9 +70,33 @@ export function MemoComposer({
   const valueRef = useRef(value);
   const [uploading, setUploading] = useState(false);
   const [uploadError, setUploadError] = useState<string | null>(null);
+
+  const [mentionQuery, setMentionQuery] = useState<string | null>(null);
+  const [mentionMembers, setMentionMembers] = useState<MentionMember[]>([]);
+  const [mentionIndex, setMentionIndex] = useState(0);
+
   useEffect(() => {
     valueRef.current = value;
   }, [value]);
+
+  useEffect(() => {
+    if (mentionQuery === null) {
+      setMentionMembers([]);
+      return;
+    }
+    let cancelled = false;
+    fetch('/api/team-members')
+      .then((r) => r.json())
+      .then((json) => {
+        if (cancelled) return;
+        const all: MentionMember[] = (json.data ?? []).map((m: { id: string; name: string }) => ({ id: m.id, name: m.name }));
+        const q = mentionQuery.toLowerCase();
+        setMentionMembers(q ? all.filter((m) => m.name.toLowerCase().includes(q)) : all);
+        setMentionIndex(0);
+      })
+      .catch(() => {});
+    return () => { cancelled = true; };
+  }, [mentionQuery]);
 
   const localCollaboration = useMemoPresence({
     memoId,
@@ -138,9 +182,25 @@ export function MemoComposer({
     event.target.value = '';
   }, [uploadFiles]);
 
-  const handleChange = useCallback((nextValue: string) => {
+  const selectMention = useCallback((member: MentionMember) => {
+    const textarea = textareaRef.current;
+    const cursorPos = textarea?.selectionStart ?? value.length;
+    const { text, caretPos } = applyMention(value, cursorPos, member.name);
+    onChange(text);
+    setMentionQuery(null);
+    setMentionMembers([]);
+    requestAnimationFrame(() => {
+      textarea?.focus();
+      textarea?.setSelectionRange(caretPos, caretPos);
+    });
+  }, [onChange, value]);
+
+  const handleChange = useCallback((nextValue: string, cursorPos: number) => {
     onChange(nextValue);
     collaboration.setTyping(Boolean(nextValue.trim()));
+    const q = getMentionQuery(nextValue, cursorPos);
+    setMentionQuery(q);
+    if (q === null) setMentionMembers([]);
   }, [collaboration, onChange]);
 
   const handleSubmit = useCallback(async () => {
@@ -156,11 +216,33 @@ export function MemoComposer({
   }, [collaboration, value]);
 
   const handleKeyDown = useCallback((event: KeyboardEvent<HTMLTextAreaElement>) => {
+    if (mentionMembers.length > 0) {
+      if (event.key === 'ArrowDown') {
+        event.preventDefault();
+        setMentionIndex((i) => (i + 1) % mentionMembers.length);
+        return;
+      }
+      if (event.key === 'ArrowUp') {
+        event.preventDefault();
+        setMentionIndex((i) => (i - 1 + mentionMembers.length) % mentionMembers.length);
+        return;
+      }
+      if (event.key === 'Enter' || event.key === 'Tab') {
+        event.preventDefault();
+        selectMention(mentionMembers[mentionIndex]);
+        return;
+      }
+      if (event.key === 'Escape') {
+        setMentionQuery(null);
+        setMentionMembers([]);
+        return;
+      }
+    }
     if ((event.metaKey || event.ctrlKey) && event.key === 'Enter') {
       event.preventDefault();
       void handleSubmit();
     }
-  }, [handleSubmit]);
+  }, [handleSubmit, mentionMembers, mentionIndex, selectMention]);
 
   const presenceSummary = useMemo(() => {
     const viewers = collaboration.viewers.map((entry) => entry.name);
@@ -178,19 +260,43 @@ export function MemoComposer({
         {helperText ? <span>{helperText}</span> : null}
       </div>
 
-      <textarea
-        ref={textareaRef}
-        value={value}
-        onChange={(event) => handleChange(event.target.value)}
-        onPaste={handlePaste}
-        onDrop={handleDrop}
-        onKeyDown={handleKeyDown}
-        onBlur={() => collaboration.setTyping(false)}
-        placeholder={placeholder}
-        rows={rows}
-        disabled={disabled}
-        className="w-full rounded-xl border border-input px-3 py-2 text-sm focus:border-ring focus:outline-none disabled:cursor-not-allowed disabled:opacity-50"
-      />
+      <div className="relative">
+        <textarea
+          ref={textareaRef}
+          value={value}
+          onChange={(event) => handleChange(event.target.value, event.target.selectionStart ?? event.target.value.length)}
+          onPaste={handlePaste}
+          onDrop={handleDrop}
+          onKeyDown={handleKeyDown}
+          onBlur={() => {
+            collaboration.setTyping(false);
+            // Delay close so click on dropdown item fires first
+            window.setTimeout(() => {
+              setMentionQuery(null);
+              setMentionMembers([]);
+            }, 150);
+          }}
+          placeholder={placeholder}
+          rows={rows}
+          disabled={disabled}
+          className="w-full rounded-xl border border-input px-3 py-2 text-sm focus:border-ring focus:outline-none disabled:cursor-not-allowed disabled:opacity-50"
+        />
+        {mentionMembers.length > 0 && (
+          <ul className="absolute bottom-full left-0 z-50 mb-1 max-h-48 w-64 overflow-y-auto rounded-xl border border-white/12 bg-[color:var(--operator-surface)] shadow-lg">
+            {mentionMembers.map((member, idx) => (
+              <li key={member.id}>
+                <button
+                  type="button"
+                  onMouseDown={(e) => { e.preventDefault(); selectMention(member); }}
+                  className={`w-full px-3 py-2 text-left text-sm transition ${idx === mentionIndex ? 'bg-[color:var(--operator-primary)]/20 text-foreground' : 'text-muted-foreground hover:bg-white/6 hover:text-foreground'}`}
+                >
+                  <span className="font-medium text-[color:var(--operator-primary)]">@</span>{member.name}
+                </button>
+              </li>
+            ))}
+          </ul>
+        )}
+      </div>
 
       <div className="flex flex-wrap items-center justify-between gap-2">
         <div className="flex items-center gap-2">
