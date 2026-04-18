@@ -9,7 +9,7 @@ import { useDocSync, type SaveStatus } from '@/components/docs/use-doc-sync';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { ToastContainer, useToast } from '@/components/ui/toast';
-import { Plus, X, Trash2 } from 'lucide-react';
+import { Plus, X, Trash2, Copy, Check } from 'lucide-react';
 
 interface Doc {
   id: string;
@@ -85,6 +85,19 @@ export function DocsShellClient({ projectId }: DocsShellClientProps) {
   const [title, setTitle] = useState('');
   const [content, setContent] = useState('');
   const [contentFormat, setContentFormat] = useState<'markdown' | 'html'>('markdown');
+  const [mdCopied, setMdCopied] = useState(false);
+
+  const handleCopyMarkdown = useCallback(async () => {
+    try {
+      if (typeof navigator !== 'undefined' && navigator.clipboard?.writeText) {
+        await navigator.clipboard.writeText(content);
+      }
+    } catch {
+      // clipboard unavailable
+    }
+    setMdCopied(true);
+    window.setTimeout(() => setMdCopied(false), 1600);
+  }, [content]);
 
   // Create form states
   const [showCreate, setShowCreate] = useState(false);
@@ -466,6 +479,9 @@ export function DocsShellClient({ projectId }: DocsShellClientProps) {
                 </div>
                 <div className="flex items-center gap-3">
                   <SaveStatusIndicator status={saveStatus} t={t} />
+                  <Button variant="ghost" size="sm" onClick={handleCopyMarkdown} title="마크다운 복사">
+                    {mdCopied ? <Check className="h-4 w-4 text-emerald-500" /> : <Copy className="h-4 w-4" />}
+                  </Button>
                   <Button variant="ghost" size="sm" onClick={handleDelete}>
                     <Trash2 className="h-4 w-4" />
                   </Button>

@@ -13,6 +13,7 @@ import Placeholder from '@tiptap/extension-placeholder';
 import { CalloutNode } from './extensions/callout-node';
 import { SlashCommandExtension } from './extensions/slash-command';
 import { PageEmbedExtension } from './extensions/page-embed-node';
+import { CodeBlockWithCopy } from './extensions/code-block-copy';
 import { markdownToHtml, htmlToMarkdown } from './lib/content-converter';
 
 type ContentFormat = 'markdown' | 'html';
@@ -57,7 +58,8 @@ export function DocEditor({
 
   const editor = useEditor({
     extensions: [
-      StarterKit,
+      StarterKit.configure({ codeBlock: false }),
+      CodeBlockWithCopy,
       Link.configure({ openOnClick: false }),
       Image,
       Table.configure({ resizable: true }),
