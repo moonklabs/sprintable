@@ -1,0 +1,65 @@
+name: Docker Smoke Test (OSS)
+
+on:
+  pull_request:
+    paths:
+      - Dockerfile.oss
+      - docker-compose.oss.yml
+      - apps/web/**
+      - packages/**
+      - .github/workflows/docker-smoke-test.yml
+
+jobs:
+  smoke-test:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Build OSS image (amd64 only, no push)
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: Dockerfile.oss
+          platforms: linux/amd64
+          push: false
+          load: true
+          tags: sprintable-oss:smoke
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+      - name: Run container and verify health
+        run: |
+          docker run -d \
+            --name sprintable-smoke \
+            -p 3000:3000 \
+            -e OSS_MODE=true \
+            -e NEXT_PUBLIC_OSS_MODE=true \
+            -e NEXTAUTH_SECRET=smoke-test-secret-at-least-32-chars \
+            -e NEXTAUTH_URL=http://localhost:3000 \
+            -e APP_BASE_URL=http://localhost:3000 \
+            -e NEXT_PUBLIC_APP_URL=http://localhost:3000 \
+            sprintable-oss:smoke
+
+          echo "Waiting for container to be healthy..."
+          for i in $(seq 1 30); do
+            STATUS=$(docker inspect --format='{{.State.Health.Status}}' sprintable-smoke 2>/dev/null || echo "starting")
+            echo "Attempt $i: $STATUS"
+            if [ "$STATUS" = "healthy" ]; then
+              echo "Container is healthy!"
+              exit 0
+            fi
+            sleep 2
+          done
+
+          echo "Container failed to become healthy. Logs:"
+          docker logs sprintable-smoke
+          exit 1
+
+      - name: Cleanup
+        if: always()
+        run: docker rm -f sprintable-smoke 2>/dev/null || true

@@ -31,3 +31,4 @@ Thumbs.db
 
 # Test
 coverage/
+.omx/
