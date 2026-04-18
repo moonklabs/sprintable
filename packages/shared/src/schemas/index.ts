@@ -87,8 +87,8 @@ export const createMemoLinkedDocSchema = z.object({
 
 // ─── Epic ────────────────────────────────────
 export const createEpicSchema = z.object({
-  project_id: z.string().min(1),
-  org_id: z.string().min(1),
+  project_id: z.string().min(1).optional(),
+  org_id: z.string().min(1).optional(),
   title: z.string().min(1),
   status: z.string().optional(),
   priority: z.string().optional(),
@@ -104,8 +104,8 @@ export const updateEpicSchema = z.object({
 
 // ─── Sprint ──────────────────────────────────
 export const createSprintSchema = z.object({
-  project_id: z.string().min(1),
-  org_id: z.string().min(1),
+  project_id: z.string().min(1).optional(),
+  org_id: z.string().min(1).optional(),
   title: z.string().min(1),
   start_date: z.string().min(1),
   end_date: z.string().min(1),
