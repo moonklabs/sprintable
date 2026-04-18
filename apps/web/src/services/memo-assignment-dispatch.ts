@@ -1,7 +1,6 @@
 import { createSupabaseAdminClient } from '@/lib/supabase/admin';
 import { MemoEventDispatcher } from './memo-event-dispatcher';
 import { buildAbsoluteMemoLink } from './app-url';
-import { isOssMode } from '@/lib/storage/factory';
 
 export interface DispatchableMemo {
   id: string;
@@ -21,9 +20,10 @@ export interface DispatchableMemo {
 export async function dispatchMemoAssignmentImmediately(memo: DispatchableMemo) {
   if (!memo.assigned_to || memo.status !== 'open') return;
 
+  const { isOssMode, createTeamMemberRepository } = await import('@/lib/storage/factory');
+
   if (isOssMode()) {
     try {
-      const { createTeamMemberRepository } = await import('@/lib/storage/factory');
       const teamMemberRepo = await createTeamMemberRepository();
       const member = await teamMemberRepo.getById(memo.assigned_to).catch(() => null);
       if (!member?.webhook_url) return;
