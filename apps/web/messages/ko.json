@@ -220,7 +220,9 @@
     "repliesCountBadge": "{count}개 답글",
     "sidebarTitle": "메모 사이드바",
     "sidebarSubtitle": "모든 페이지에서 메모를 바로 확인하고 답글할 수 있습니다",
-    "closeSidebar": "메모 사이드바 닫기"
+    "closeSidebar": "메모 사이드바 닫기",
+    "expandReplies": "이전 답글 {count}건 보기",
+    "collapseReplies": "답글 접기"
   },
   "login": {
     "title": "Sprintable",
