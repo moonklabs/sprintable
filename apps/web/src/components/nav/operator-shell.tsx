@@ -17,6 +17,7 @@ import {
   LayoutDashboard,
   MessageSquareMore,
   PenTool,
+  Search,
   Settings,
   Trophy,
   Users,
@@ -233,7 +234,7 @@ export function OperatorShell({
           </GlassPanel>
         </aside>
 
-        <div className="flex min-h-screen min-w-0 flex-1 flex-col px-3 pb-24 pt-3 sm:px-4 lg:px-5 lg:pb-5">
+        <div className="flex min-h-screen min-w-0 flex-1 flex-col px-3 pt-3 sm:px-4 lg:px-5 lg:pb-5" style={{ paddingBottom: 'max(5rem, calc(env(safe-area-inset-bottom) + 4rem))' }}>
           <GlassPanel className="sticky top-3 z-30 mb-4 flex items-center justify-between gap-4 px-4 py-3">
             <div className="min-w-0">
               <div className="text-[10px] font-semibold uppercase tracking-[0.24em] text-[color:var(--operator-muted)]">{shellT('projectLabel')}</div>
@@ -252,6 +253,16 @@ export function OperatorShell({
               </div>
             </div>
             <div className="flex items-center gap-2">
+              <OperatorIconButton
+                onClick={() => {
+                  const searchInput = document.querySelector<HTMLInputElement>('[data-search-input]');
+                  searchInput?.focus();
+                }}
+                aria-label={shellT('searchPlaceholder')}
+                className="lg:hidden"
+              >
+                <Search className="size-4" />
+              </OperatorIconButton>
               <div className="lg:hidden">
                 <LocaleSwitcher />
               </div>
@@ -279,7 +290,7 @@ export function OperatorShell({
         </div>
       </div>
 
-      <div className="fixed inset-x-3 bottom-3 z-40 lg:hidden">
+      <div className="fixed inset-x-3 bottom-3 z-40 lg:hidden" style={{ paddingBottom: 'env(safe-area-inset-bottom)' }}>
         <GlassPanel className="grid grid-cols-5 gap-1 px-2 py-2">
           {MOBILE_NAV_ITEMS.map((item) => {
             const Icon = item.icon;
