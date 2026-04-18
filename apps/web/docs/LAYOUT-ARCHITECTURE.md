@@ -28,7 +28,7 @@ S2~S7 코드 수정 시 이 문서를 기준으로 삼는.
   - `--operator-foreground` / `--operator-muted`
   - `--operator-surface-soft` / `--operator-surface`
   - `--operator-primary` / `--operator-primary-soft`
-  - `--operator-border`
+  - `border-white/10` (border 전용 — `--operator-border` 미정의)
 
 ### 패딩 규칙
 
@@ -141,7 +141,7 @@ OperatorShell 패딩과 중첩 금지
 |------|------|
 | `text-[color:var(--operator-foreground)]` | `text-gray-900` |
 | `bg-[color:var(--operator-surface-soft)]` | `bg-gray-50` / `bg-white` |
-| `border-[color:var(--operator-border)]` | `border-gray-200` / `border-gray-800` |
+| `border-white/10` | `border-gray-200` / `border-gray-800` |
 | `text-[color:var(--operator-muted)]` | `text-gray-400` / `text-gray-500` |
 
 예외: `internal-dogfood` 페이지는 internal 전용이므로 gray-* 허용.
