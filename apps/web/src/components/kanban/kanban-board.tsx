@@ -11,7 +11,7 @@ import { KanbanFilters } from './kanban-filters';
 import { KanbanSkeleton } from './kanban-skeleton';
 import { StoryDetailPanel } from './story-detail-panel';
 import { StoryCard } from './story-card';
-import { COLUMNS, type KanbanStory, type KanbanSprint, type KanbanEpic, type KanbanMember, type ColumnId } from './types';
+import { COLUMNS, VALID_TRANSITIONS, type KanbanStory, type KanbanSprint, type KanbanEpic, type KanbanMember, type ColumnId } from './types';
 
 type DragOverlayCompatProps = {
   children?: React.ReactNode;
@@ -53,15 +53,29 @@ export function KanbanBoard({ projectId }: KanbanBoardProps) {
   const [loadingMoreEpics, setLoadingMoreEpics] = useState(false);
   const [loadingMoreStoryTasks, setLoadingMoreStoryTasks] = useState(false);
 
-  const [selectedSprintId, setSelectedSprintId] = useState('');
-  const [selectedEpicId, setSelectedEpicId] = useState('');
+  const [selectedSprintId, setSelectedSprintId] = useState(() => searchParams.get('sprint_id') ?? '');
+  const [selectedEpicId, setSelectedEpicId] = useState(() => searchParams.get('epic_id') ?? '');
   const [selectedAssigneeId, setSelectedAssigneeId] = useState('');
+
+  // Sync epic_id to URL
+  useEffect(() => {
+    const params = new URLSearchParams(searchParams.toString());
+    if (selectedEpicId) {
+      params.set('epic_id', selectedEpicId);
+    } else {
+      params.delete('epic_id');
+    }
+    const storyId = searchParams.get('story');
+    if (!storyId) {
+      router.replace(params.toString() ? `?${params.toString()}` : window.location.pathname, { scroll: false });
+    }
+  }, [selectedEpicId]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const [selectedStory, setSelectedStory] = useState<KanbanStory | null>(null);
   const [storyTasks, setStoryTasks] = useState<Task[]>([]);
   const [activeId, setActiveId] = useState<string | null>(null);
 
-  const sensors = useSensors(useSensor(PointerSensor, { activationConstraint: { distance: 5 } }));
+  const sensors = useSensors(useSensor(PointerSensor, { activationConstraint: { distance: 8 } }));
 
   const epicMap: Record<string, string> = {};
   for (const e of epics) epicMap[e.id] = e.title;
@@ -180,6 +194,14 @@ export function KanbanBoard({ projectId }: KanbanBoardProps) {
     const story = stories.find((s) => s.id === storyId);
     if (!story || story.status === newStatus) return;
 
+    // 유효하지 않은 전이 사전 차단 — API 호출 없이 즉시 피드백
+    const validNext = VALID_TRANSITIONS[story.status] ?? [];
+    if (!validNext.includes(newStatus)) {
+      setTransitionError(t('invalidTransition'));
+      setTimeout(() => setTransitionError(null), 4000);
+      return;
+    }
+
     // 낙관적 업데이트
     setStories((prev) =>
       prev.map((s) => (s.id === storyId ? { ...s, status: newStatus } : s)),
@@ -291,6 +313,7 @@ export function KanbanBoard({ projectId }: KanbanBoardProps) {
   }, [fetchData]);
 
   const activeStory = activeId ? stories.find((s) => s.id === activeId) : null;
+  const dragStatus = activeStory?.status ?? null;
 
   if (loading) return <KanbanSkeleton />;
 
@@ -314,7 +337,7 @@ export function KanbanBoard({ projectId }: KanbanBoardProps) {
       />
 
       <DndContext sensors={sensors} onDragStart={handleDragStart} onDragEnd={handleDragEnd}>
-        <div className="flex flex-col gap-4 md:flex-row md:overflow-x-auto md:pb-4">
+        <div className="flex flex-col gap-3 md:flex-row md:gap-4 md:overflow-x-auto md:pb-4">
           {COLUMNS.map((col) => (
             <KanbanColumn
               key={col.id}
@@ -323,6 +346,7 @@ export function KanbanBoard({ projectId }: KanbanBoardProps) {
               stories={storiesByColumn(col.id)}
               epicMap={epicMap}
               memberMap={memberMap}
+              dragStatus={dragStatus}
               onStoryClick={handleStoryClick}
               onEditStory={handleEditStory}
               onChangeStatus={handleChangeStatus}

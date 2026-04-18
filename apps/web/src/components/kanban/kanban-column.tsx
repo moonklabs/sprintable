@@ -6,6 +6,7 @@ import { SortableContext, verticalListSortingStrategy } from '@dnd-kit/sortable'
 import { useTranslations } from 'next-intl';
 import { StoryCard } from './story-card';
 import type { KanbanStory } from './types';
+import { VALID_TRANSITIONS } from './types';
 import { Badge } from '@/components/ui/badge';
 
 
@@ -23,6 +24,7 @@ interface KanbanColumnProps {
   stories: KanbanStory[];
   epicMap: Record<string, string>;
   memberMap: Record<string, string>;
+  dragStatus?: string | null;
   onStoryClick: (story: KanbanStory) => void;
   onEditStory?: (storyId: string) => void;
   onChangeStatus?: (storyId: string, newStatus: string) => void;
@@ -30,18 +32,32 @@ interface KanbanColumnProps {
   onDeleteStory?: (storyId: string) => void;
 }
 
-export function KanbanColumn({ id, label, stories, epicMap, memberMap, onStoryClick, onEditStory, onChangeStatus, onAssignStory, onDeleteStory }: KanbanColumnProps) {
+export function KanbanColumn({ id, label, stories, epicMap, memberMap, dragStatus, onStoryClick, onEditStory, onChangeStatus, onAssignStory, onDeleteStory }: KanbanColumnProps) {
   const { setNodeRef, isOver } = useDroppable({ id });
   const t = useTranslations('board');
+
+  const isDragging = dragStatus != null;
+  const isValidTarget = isDragging && (VALID_TRANSITIONS[dragStatus] ?? []).includes(id);
+  const isInvalidTarget = isDragging && !isValidTarget && dragStatus !== id;
 
   return (
     <div
       ref={setNodeRef}
-      className={`flex min-h-[320px] w-full min-w-[280px] flex-col rounded-3xl border p-4 transition md:w-[320px] ${isOver
-        ? 'border-[color:var(--operator-primary)]/30 bg-[color:var(--operator-primary)]/10 shadow-[0_0_0_1px_rgba(182,196,255,0.16)]'
-        : 'border-white/8 bg-[color:var(--operator-surface-soft)]/55'
+      className={`flex min-h-[320px] w-full flex-col rounded-3xl border p-4 transition md:w-[320px] md:min-w-[280px] ${
+        isOver && isValidTarget
+          ? 'border-[color:var(--operator-primary)]/40 bg-[color:var(--operator-primary)]/12 shadow-[0_0_0_1px_rgba(182,196,255,0.2)]'
+          : isValidTarget
+          ? 'border-emerald-400/25 bg-emerald-400/5'
+          : isInvalidTarget
+          ? 'border-white/5 bg-[color:var(--operator-surface-soft)]/30 opacity-45'
+          : 'border-white/8 bg-[color:var(--operator-surface-soft)]/55'
       }`}
     >
+      {isDragging && isValidTarget && (
+        <div className="mb-2 rounded-xl border border-emerald-400/20 bg-emerald-400/8 px-2 py-1 text-center text-[10px] font-medium uppercase tracking-widest text-emerald-400/70">
+          {t('validDrop')}
+        </div>
+      )}
       <div className="mb-3 flex items-center justify-between gap-2">
         <h3 className="text-sm font-semibold text-[color:var(--operator-foreground)]">{label}</h3>
         <Badge variant="info">{stories.length}</Badge>
