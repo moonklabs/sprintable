@@ -20,13 +20,13 @@ export function MemoFeed({ memos, onSelectMemo, selectedMemoId }: MemoFeedProps)
   if (memos.length === 0) {
     return (
       <div className="flex flex-col items-center justify-center py-12 text-center">
-        <p className="text-sm text-gray-400">{t('noMemos')}</p>
+        <p className="text-sm text-[color:var(--operator-muted)]">{t('noMemos')}</p>
       </div>
     );
   }
 
   return (
-    <div className="flex flex-col divide-y divide-gray-800">
+    <div className="flex flex-col divide-y divide-white/10">
       {memos.map((memo) => (
         <MemoFeedItem
           key={memo.id}
@@ -54,19 +54,19 @@ function MemoFeedItem({ memo, isSelected, onClick }: MemoFeedItemProps) {
       onClick={onClick}
       className={`
         flex w-full flex-col gap-2 px-4 py-3 text-left transition-colors
-        hover:bg-gray-800/50
-        ${isSelected ? 'bg-gray-800' : ''}
+        hover:bg-white/5
+        ${isSelected ? 'bg-[color:var(--operator-primary)]/14' : ''}
         ${hasUnread ? 'font-semibold' : ''}
       `}
     >
       <div className="flex items-start justify-between gap-2">
         <div className="flex-1 min-w-0">
           {memo.title && (
-            <div className="text-sm text-gray-100 truncate">
+            <div className="text-sm text-[color:var(--operator-foreground)] truncate">
               {memo.title}
             </div>
           )}
-          <div className="text-sm text-gray-400 line-clamp-2 mt-1">
+          <div className="text-sm text-[color:var(--operator-muted)] line-clamp-2 mt-1">
             {memo.content}
           </div>
         </div>
@@ -78,7 +78,7 @@ function MemoFeedItem({ memo, isSelected, onClick }: MemoFeedItemProps) {
           </div>
         )}
       </div>
-      <div className="flex items-center gap-2 text-xs text-gray-500">
+      <div className="flex items-center gap-2 text-xs text-[color:var(--operator-muted)]">
         <span>{new Date(memo.created_at).toLocaleDateString()}</span>
         {(memo.reply_count ?? 0) > 0 && (
           <>

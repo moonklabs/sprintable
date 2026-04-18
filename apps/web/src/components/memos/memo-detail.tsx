@@ -444,7 +444,7 @@ export function MemoDetail({
         </div>
       </div>
 
-      <div className="sticky bottom-0 border-t border-border/60 bg-white p-4">
+      <div className="sticky bottom-0 border-t border-white/10 bg-[color:var(--operator-panel)] p-4">
         <MemoComposer
           collaboration={collaboration}
           value={replyContent}
