@@ -289,7 +289,7 @@ export function OperatorShell({
                 key={item.href}
                 href={item.href}
                 className={cn(
-                  'flex flex-col items-center gap-1 rounded-2xl px-2 py-2 text-[11px] font-medium',
+                  'flex min-h-[44px] flex-col items-center justify-center gap-1 rounded-2xl px-2 py-2 text-[11px] font-medium',
                   isActive ? 'bg-[color:var(--operator-primary)]/14 text-[color:var(--operator-primary-soft)]' : 'text-[color:var(--operator-muted)]',
                 )}
               >
