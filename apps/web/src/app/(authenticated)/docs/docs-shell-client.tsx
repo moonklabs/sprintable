@@ -7,6 +7,7 @@ import { DocTree } from '@/components/docs/doc-tree';
 import { DocEditor } from '@/components/docs/doc-editor';
 import { useDocSync, type SaveStatus } from '@/components/docs/use-doc-sync';
 import { Button } from '@/components/ui/button';
+import { GlassPanel } from '@/components/ui/glass-panel';
 import { Input } from '@/components/ui/input';
 import { ToastContainer, useToast } from '@/components/ui/toast';
 import { Plus, X, Trash2, Copy, Check, Menu } from 'lucide-react';
@@ -421,7 +422,7 @@ export function DocsShellClient({ projectId }: DocsShellClientProps) {
       </div>
 
       {/* Right: Doc Content or Create Form */}
-      <div className="flex-1 flex flex-col bg-[color:var(--operator-surface)] min-w-0">
+      <GlassPanel className="flex-1 flex flex-col min-w-0 rounded-none md:rounded-2xl">
         {/* Mobile header with hamburger */}
         <div className="flex items-center gap-2 border-b border-white/10 px-3 py-2 md:hidden">
           <button
@@ -547,7 +548,7 @@ export function DocsShellClient({ projectId }: DocsShellClientProps) {
             <p className="text-sm text-[color:var(--operator-muted)]">{t('selectDoc')}</p>
           </div>
         )}
-      </div>
+      </GlassPanel>
       <ToastContainer toasts={toasts} onDismiss={dismissToast} />
     </div>
   );

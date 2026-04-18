@@ -3,6 +3,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useTranslations } from 'next-intl';
 import { Button } from '@/components/ui/button';
+import { GlassPanel } from '@/components/ui/glass-panel';
 import { MemoList } from '@/components/memos/memo-list';
 import { MemoDetail } from '@/components/memos/memo-detail';
 import { MemoCreateForm } from '@/components/memos/memo-create-form';
@@ -195,10 +196,11 @@ export function MemoSidebar({ open, onClose, currentTeamMemberId, projectId }: M
   return (
     <>
       <button className="fixed inset-0 z-40 bg-black/30" aria-label={t('closeSidebar')} onClick={onClose} />
-      <aside
+      <GlassPanel
         ref={panelRef}
-        className="fixed inset-0 z-50 flex flex-col bg-[color:var(--operator-panel)] shadow-2xl md:inset-auto md:right-0 md:top-0 md:h-full md:w-[88vw] md:max-w-5xl"
+        className="fixed inset-0 z-50 flex flex-col rounded-none md:inset-auto md:right-0 md:top-0 md:h-full md:w-[88vw] md:max-w-5xl md:rounded-2xl"
         aria-label={t('sidebarTitle')}
+        role="complementary"
       >
         <div className="flex items-center justify-between border-b border-white/10 px-4 py-3">
           <div className="flex items-center gap-2">
@@ -282,7 +284,7 @@ export function MemoSidebar({ open, onClose, currentTeamMemberId, projectId }: M
             )}
           </section>
         </div>
-      </aside>
+      </GlassPanel>
     </>
   );
 }
