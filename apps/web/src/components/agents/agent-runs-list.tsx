@@ -184,18 +184,20 @@ export function AgentRunsList() {
 
       <SectionCard>
         <SectionCardHeader>
-          <div className="flex flex-wrap items-center gap-2">
-            {STATUS_FILTERS.map((s) => (
-              <Button
-                key={s}
-                variant={statusFilter === s ? 'hero' : 'glass'}
-                size="sm"
-                onClick={() => setStatusFilter(s)}
-              >
-                {s === ALL_RUN_STATUS_FILTER ? t('filterAll') : t(`status_${s}`)}
-              </Button>
-            ))}
-            <div className="ml-auto flex items-center gap-2">
+          <div className="flex flex-col gap-2 sm:flex-row sm:flex-wrap sm:items-center">
+            <div className="flex flex-wrap items-center gap-2">
+              {STATUS_FILTERS.map((s) => (
+                <Button
+                  key={s}
+                  variant={statusFilter === s ? 'hero' : 'glass'}
+                  size="sm"
+                  onClick={() => setStatusFilter(s)}
+                >
+                  {s === ALL_RUN_STATUS_FILTER ? t('filterAll') : t(`status_${s}`)}
+                </Button>
+              ))}
+            </div>
+            <div className="flex items-center gap-2 sm:ml-auto">
               <input
                 type="date"
                 value={fromDate}
