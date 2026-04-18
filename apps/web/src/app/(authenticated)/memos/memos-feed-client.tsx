@@ -180,7 +180,7 @@ export function MemosFeedClient({ currentTeamMemberId, projectId }: MemosFeedCli
   if (loading) {
     return (
       <div className="flex h-screen items-center justify-center">
-        <p className="text-sm text-gray-400">{t('loading')}</p>
+        <p className="text-sm text-[color:var(--operator-muted)]">{t('loading')}</p>
       </div>
     );
   }
@@ -188,8 +188,8 @@ export function MemosFeedClient({ currentTeamMemberId, projectId }: MemosFeedCli
   return (
     <div className="flex h-screen">
       {/* Left: Message Feed */}
-      <div className="w-80 flex-shrink-0 border-r border-gray-800 flex flex-col">
-        <div className="flex-shrink-0 border-b border-gray-800 px-4 py-3">
+      <div className="w-80 flex-shrink-0 border-r border-white/10 flex flex-col">
+        <div className="flex-shrink-0 border-b border-white/10 px-4 py-3">
           <div className="flex items-center justify-between">
             <h1 className="text-lg font-semibold">{t('title')}</h1>
             <Button
@@ -210,10 +210,10 @@ export function MemosFeedClient({ currentTeamMemberId, projectId }: MemosFeedCli
       </div>
 
       {/* Right: Thread View or Create Form */}
-      <div className="flex-1 flex flex-col bg-gray-900">
+      <div className="flex-1 flex flex-col bg-[color:var(--operator-surface)]">
         {showCreate ? (
           <div className="flex h-full flex-col">
-            <div className="flex-shrink-0 border-b border-gray-800 px-4 py-3">
+            <div className="flex-shrink-0 border-b border-white/10 px-4 py-3">
               <div className="flex items-center justify-between">
                 <h2 className="text-lg font-semibold">{t('createTitle')}</h2>
                 <Button
@@ -242,7 +242,7 @@ export function MemosFeedClient({ currentTeamMemberId, projectId }: MemosFeedCli
           />
         ) : (
           <div className="flex h-full items-center justify-center">
-            <p className="text-sm text-gray-400">{t('selectMemo')}</p>
+            <p className="text-sm text-[color:var(--operator-muted)]">{t('selectMemo')}</p>
           </div>
         )}
       </div>
