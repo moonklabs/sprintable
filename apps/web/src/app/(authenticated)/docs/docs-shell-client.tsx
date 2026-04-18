@@ -7,10 +7,10 @@ import { DocTree } from '@/components/docs/doc-tree';
 import { DocEditor } from '@/components/docs/doc-editor';
 import { useDocSync, type SaveStatus } from '@/components/docs/use-doc-sync';
 import { Button } from '@/components/ui/button';
-import { GlassPanel } from '@/components/ui/glass-panel';
 import { Input } from '@/components/ui/input';
 import { ToastContainer, useToast } from '@/components/ui/toast';
 import { Plus, X, Trash2, Copy, Check, Menu } from 'lucide-react';
+import { DocsShell } from '@/components/docs/docs-shell';
 
 interface Doc {
   id: string;
@@ -377,54 +377,49 @@ export function DocsShellClient({ projectId }: DocsShellClientProps) {
     );
   }
 
-  return (
-    <div className="flex h-screen">
-      {/* Mobile sidebar overlay */}
-      {mobileSidebarOpen && (
-        <button
-          type="button"
-          className="fixed inset-0 z-40 bg-black/50 md:hidden"
-          aria-label="Close sidebar"
-          onClick={() => setMobileSidebarOpen(false)}
-        />
-      )}
-
-      {/* Left: Doc Tree */}
-      <div className={`fixed inset-y-0 left-0 z-50 w-80 flex-shrink-0 border-r border-white/10 flex flex-col bg-[color:var(--operator-surface)] transition-transform md:static md:translate-x-0 md:z-auto md:bg-transparent ${mobileSidebarOpen ? 'translate-x-0' : '-translate-x-full md:translate-x-0'}`}>
-        <div className="flex-shrink-0 border-b border-white/10 px-4 py-3">
-          <div className="flex items-center justify-between">
-            <h1 className="text-lg font-semibold">{t('title')}</h1>
-            <Button size="sm" onClick={() => {
-              setShowCreate(true);
-              setNewTitle('');
-              setNewSlug('');
-              setNewContent('');
-              setNewParentId(null);
-              setSlugManuallyEdited(false);
-            }}>
-              <Plus className="h-4 w-4" />
-            </Button>
-          </div>
-        </div>
-        <div className="flex-1 overflow-y-auto p-2">
-          <DocTree
-            docs={tree}
-            selectedSlug={selectedDoc?.slug || null}
-            onSelect={handleSelectDoc}
-            onReorder={handleReorder}
-            onMove={handleMove}
-            onMoveDenied={handleMoveDenied}
-            onRename={handleRename}
-            onDelete={handleDeleteDoc}
-            onAddChild={handleAddChild}
-          />
+  const sidebarContent = (
+    <>
+      <div className="flex-shrink-0 border-b border-white/10 px-4 py-3">
+        <div className="flex items-center justify-between">
+          <h1 className="text-lg font-semibold">{t('title')}</h1>
+          <Button size="sm" onClick={() => {
+            setShowCreate(true);
+            setNewTitle('');
+            setNewSlug('');
+            setNewContent('');
+            setNewParentId(null);
+            setSlugManuallyEdited(false);
+          }}>
+            <Plus className="h-4 w-4" />
+          </Button>
         </div>
       </div>
+      <div className="flex-1 overflow-y-auto p-2">
+        <DocTree
+          docs={tree}
+          selectedSlug={selectedDoc?.slug || null}
+          onSelect={(doc) => { handleSelectDoc(doc); setMobileSidebarOpen(false); }}
+          onReorder={handleReorder}
+          onMove={handleMove}
+          onMoveDenied={handleMoveDenied}
+          onRename={handleRename}
+          onDelete={handleDeleteDoc}
+          onAddChild={handleAddChild}
+        />
+      </div>
+    </>
+  );
 
-      {/* Right: Doc Content or Create Form */}
-      <GlassPanel className="flex-1 flex flex-col min-w-0 rounded-none md:rounded-2xl">
+  return (
+    <>
+      <DocsShell
+        sidebar={sidebarContent}
+        mobileSidebarOpen={mobileSidebarOpen}
+        onMobileSidebarOpenChange={setMobileSidebarOpen}
+        className="min-h-[calc(100vh-8rem)]"
+      >
         {/* Mobile header with hamburger */}
-        <div className="flex items-center gap-2 border-b border-white/10 px-3 py-2 md:hidden">
+        <div className="flex flex-shrink-0 items-center gap-2 border-b border-white/10 px-3 py-2 md:hidden">
           <button
             type="button"
             onClick={() => setMobileSidebarOpen(true)}
@@ -548,8 +543,8 @@ export function DocsShellClient({ projectId }: DocsShellClientProps) {
             <p className="text-sm text-[color:var(--operator-muted)]">{t('selectDoc')}</p>
           </div>
         )}
-      </GlassPanel>
+      </DocsShell>
       <ToastContainer toasts={toasts} onDismiss={dismissToast} />
-    </div>
+    </>
   );
 }
