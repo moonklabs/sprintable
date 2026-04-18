@@ -12,7 +12,7 @@ export function UpgradeModal({ message, onClose }: UpgradeModalProps) {
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50">
-      <div className="w-full max-w-sm rounded-2xl bg-white p-6 shadow-xl">
+      <div className="w-full max-w-[calc(100%-2rem)] rounded-2xl bg-white p-6 shadow-xl sm:max-w-sm">
         <div className="text-center">
           <div className="mb-3 text-4xl">🚀</div>
           <h3 className="text-lg font-semibold text-gray-900">{t('upgradeRequired')}</h3>

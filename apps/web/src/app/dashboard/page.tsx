@@ -167,7 +167,7 @@ export default async function DashboardPage() {
             </SectionCardHeader>
             <SectionCardBody className="space-y-4">
               {/* Story Status Counts */}
-              <div className="grid grid-cols-2 gap-3 md:grid-cols-4">
+              <div className="grid grid-cols-1 gap-3 min-[360px]:grid-cols-2 md:grid-cols-4">
                 <div className="rounded-2xl border border-white/8 bg-white/4 px-4 py-3">
                   <div className="text-2xl font-bold text-[color:var(--operator-primary-soft)]">{storyCounts.inProgress}</div>
                   <div className="text-xs text-[color:var(--operator-muted)]">{t('inProgress')}</div>
