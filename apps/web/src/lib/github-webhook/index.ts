@@ -46,6 +46,7 @@ export async function verifyGitHubSignature(
 
   const expected = Buffer.from(
     createHmac('sha256', secret).update(rawBody, 'utf8').digest('hex'),
+    'hex',
   );
   const received = Buffer.from(signatureHeader.slice('sha256='.length), 'hex');
 
