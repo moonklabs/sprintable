@@ -13,8 +13,10 @@ import { GlassPanel } from '@/components/ui/glass-panel';
 import { Button } from '@/components/ui/button';
 import { OperatorStatCard } from '@/components/ui/operator-stat-card';
 import { formatLocaleDateOnly, formatLocaleDateTime } from '@/lib/i18n';
+import { WidgetRefreshTime } from '@/components/ui/widget-refresh-time';
 
 export default async function DashboardPage() {
+  const fetchedAt = new Date().toISOString();
   const supabase = await createSupabaseServerClient();
   const { data: { user } } = await supabase.auth.getUser();
   if (!user) redirect('/login');
@@ -204,6 +206,7 @@ export default async function DashboardPage() {
                   <div className="text-sm text-[color:var(--operator-muted)]">{t('noAssignedStories')}</div>
                 </div>
               )}
+              <div className="pt-1"><WidgetRefreshTime fetchedAt={fetchedAt} /></div>
             </SectionCardBody>
           </SectionCard>
 
@@ -211,12 +214,17 @@ export default async function DashboardPage() {
             <SectionCardHeader><div className="text-sm font-semibold text-[color:var(--operator-foreground)]">{t('sprintHealth')}</div></SectionCardHeader>
             <SectionCardBody className="space-y-3">
               {(activeSprints ?? []).length ? activeSprints!.map((s) => (
-                <div key={s.id} className="rounded-2xl border border-white/8 bg-white/4 p-3">
+                <Link
+                  key={s.id}
+                  href={`/board?sprint_id=${s.id}`}
+                  className="block rounded-2xl border border-white/8 bg-white/4 p-3 transition hover:border-white/16 hover:bg-white/8"
+                >
                   <div className="font-medium text-[color:var(--operator-foreground)]">{s.title}</div>
                   <div className="mt-1 text-xs text-[color:var(--operator-muted)]">{formatLocaleDateOnly(s.start_date, locale)} ~ {formatLocaleDateOnly(s.end_date, locale)}</div>
                   <div className="mt-2"><StatusBadge status={s.status} label={getSprintStatusLabel(s.status)} /></div>
-                </div>
+                </Link>
               )) : <EmptyState title={t('noActiveSprints')} description={t('noActiveSprintsDescription')} />}
+              <div className="pt-1"><WidgetRefreshTime fetchedAt={fetchedAt} /></div>
             </SectionCardBody>
           </SectionCard>
 
@@ -229,6 +237,7 @@ export default async function DashboardPage() {
                   <div className="text-xs text-[color:var(--operator-muted)]">/{doc.slug}</div>
                 </div>
               )) : <EmptyState title={t('noDocsYet')} description={t('noDocsYetDescription')} />}
+              <div className="pt-1"><WidgetRefreshTime fetchedAt={fetchedAt} /></div>
             </SectionCardBody>
           </SectionCard>
 
@@ -241,6 +250,7 @@ export default async function DashboardPage() {
                   <div className="text-xs text-[color:var(--operator-muted)]">{formatLocaleDateTime(doc.created_at, locale)}</div>
                 </div>
               )) : <EmptyState title={t('noPolicyDocs')} description={t('noPolicyDocsDescription')} />}
+              <div className="pt-1"><WidgetRefreshTime fetchedAt={fetchedAt} /></div>
             </SectionCardBody>
           </SectionCard>
 
@@ -258,6 +268,7 @@ export default async function DashboardPage() {
                   <div className="text-xs text-[color:var(--operator-muted)]">{formatLocaleDateTime(memo.created_at, locale)}</div>
                 </div>
               )) : <EmptyState title={t('noOpenMemos')} description={t('noOpenMemosDescription')} />}
+              <div className="pt-1"><WidgetRefreshTime fetchedAt={fetchedAt} /></div>
             </SectionCardBody>
           </SectionCard>
         </div>

@@ -53,7 +53,7 @@ export function KanbanBoard({ projectId }: KanbanBoardProps) {
   const [loadingMoreEpics, setLoadingMoreEpics] = useState(false);
   const [loadingMoreStoryTasks, setLoadingMoreStoryTasks] = useState(false);
 
-  const [selectedSprintId, setSelectedSprintId] = useState('');
+  const [selectedSprintId, setSelectedSprintId] = useState(() => searchParams.get('sprint_id') ?? '');
   const [selectedEpicId, setSelectedEpicId] = useState(() => searchParams.get('epic_id') ?? '');
   const [selectedAssigneeId, setSelectedAssigneeId] = useState('');
 
