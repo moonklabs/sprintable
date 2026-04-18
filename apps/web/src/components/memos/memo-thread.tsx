@@ -17,10 +17,19 @@ interface MemoThreadProps {
  * Thread-based conversation view for memo
  * Replaces traditional detail panel with messaging UX
  */
+const REPLY_COLLAPSE_THRESHOLD = 3;
+
 export function MemoThread({ memo, currentUserId, onReply, onResolve }: MemoThreadProps) {
   const t = useTranslations('memos');
   const [replyContent, setReplyContent] = useState('');
   const [isSubmitting, setIsSubmitting] = useState(false);
+  const [repliesExpanded, setRepliesExpanded] = useState(false);
+
+  const allReplies = memo.replies ?? [];
+  const hiddenCount = Math.max(0, allReplies.length - REPLY_COLLAPSE_THRESHOLD);
+  const visibleReplies = repliesExpanded || hiddenCount === 0
+    ? allReplies
+    : allReplies.slice(allReplies.length - REPLY_COLLAPSE_THRESHOLD);
 
   const handleSubmitReply = async () => {
     if (!replyContent.trim() || isSubmitting) return;
@@ -81,8 +90,19 @@ export function MemoThread({ memo, currentUserId, onReply, onResolve }: MemoThre
             isCurrentUser={memo.created_by === currentUserId}
           />
 
-          {/* Replies */}
-          {memo.replies?.map((reply) => (
+          {/* Replies — collapse when > 3 */}
+          {hiddenCount > 0 && (
+            <button
+              type="button"
+              onClick={() => setRepliesExpanded((v) => !v)}
+              className="w-full rounded-xl border border-white/8 bg-white/4 py-2 text-center text-xs font-medium text-gray-400 transition hover:bg-white/8 hover:text-gray-200"
+            >
+              {repliesExpanded
+                ? t('collapseReplies')
+                : t('expandReplies', { count: hiddenCount })}
+            </button>
+          )}
+          {visibleReplies.map((reply) => (
             <ThreadMessage
               key={reply.id}
               content={reply.content}
