@@ -397,7 +397,7 @@ export default function SettingsPage() {
               </div>
             ))}
           </div>
-          <div className="grid gap-3 lg:grid-cols-[minmax(0,1fr)_220px_auto]">
+          <div className="grid gap-3 md:grid-cols-[minmax(0,1fr)_220px_auto]">
             <OperatorInput
               type="url"
               value={newWebhookUrl}
@@ -470,7 +470,7 @@ export default function SettingsPage() {
           ) : null}
 
           {isAdmin ? (
-            <div className="grid gap-3 lg:grid-cols-[minmax(0,1fr)_minmax(0,1fr)_auto]">
+            <div className="grid gap-3 md:grid-cols-[minmax(0,1fr)_minmax(0,1fr)_auto]">
               <OperatorInput
                 value={newProjectName}
                 onChange={(event) => setNewProjectName(event.target.value)}
@@ -581,7 +581,7 @@ export default function SettingsPage() {
             </div>
           </SectionCardHeader>
           <SectionCardBody className="space-y-4">
-            <div className="grid gap-3 lg:grid-cols-[220px_minmax(0,1fr)_auto]">
+            <div className="grid gap-3 md:grid-cols-[220px_minmax(0,1fr)_auto]">
               <OperatorSelect value={memberProjectId} onChange={(e) => setMemberProjectId(e.target.value)}>
                 <option value="">{t('selectProject')}</option>
                 {projects.map((project) => <option key={project.id} value={project.id}>{project.name}</option>)}
