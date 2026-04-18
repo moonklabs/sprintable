@@ -205,7 +205,19 @@ export async function getAuthContext(
   rateLimitRemaining?: number;
   rateLimitResetAt?: number;
 } | null> {
-  // 1. API Key 인증 시도 (admin client로 RLS 우회)
+  // 1. OSS_MODE — Supabase 없이 고정 멤버 반환 (Bearer 포함 모든 경로)
+  if (isOssMode()) {
+    const { OSS_ORG_ID, OSS_PROJECT_ID, OSS_MEMBER_ID } = await import('@sprintable/storage-sqlite');
+    return {
+      id: OSS_MEMBER_ID,
+      org_id: OSS_ORG_ID,
+      project_id: OSS_PROJECT_ID,
+      project_name: 'My Project',
+      type: 'human',
+    };
+  }
+
+  // 2. API Key 인증 시도 (admin client로 RLS 우회, SaaS 전용)
   const authHeader = request.headers.get('Authorization');
   if (authHeader?.startsWith('Bearer ')) {
     const { getTeamMemberFromRequest } = await import('./auth-api-key');
@@ -229,18 +241,6 @@ export async function getAuthContext(
         rateLimitResetAt: resetAt,
       };
     }
-  }
-
-  // 2. OSS_MODE — API key 없는 브라우저 fetch는 기본 유저로 자동 인증 (AC-6)
-  if (isOssMode()) {
-    const { OSS_ORG_ID, OSS_PROJECT_ID, OSS_MEMBER_ID } = await import('@sprintable/storage-sqlite');
-    return {
-      id: OSS_MEMBER_ID,
-      org_id: OSS_ORG_ID,
-      project_id: OSS_PROJECT_ID,
-      project_name: 'My Project',
-      type: 'human',
-    };
   }
 
   // 3. OAuth 세션 인증 시도
