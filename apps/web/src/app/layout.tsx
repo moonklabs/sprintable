@@ -1,4 +1,4 @@
-import type { Metadata } from "next";
+import type { Metadata, Viewport } from "next";
 import { Geist, Geist_Mono } from "next/font/google";
 import { NextIntlClientProvider } from 'next-intl';
 import { getLocale, getMessages } from 'next-intl/server';
@@ -18,6 +18,10 @@ const geistMono = Geist_Mono({
 export const metadata: Metadata = {
   title: "Sprintable — The PM tool where agents are teammates",
   description: "AI-powered sprint management. Kanban, memos, standups, retros, MCP server — with AI agents as first-class team members.",
+};
+
+export const viewport: Viewport = {
+  viewportFit: 'cover',
 };
 
 export default async function RootLayout({
