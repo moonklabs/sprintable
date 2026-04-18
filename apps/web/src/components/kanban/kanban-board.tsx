@@ -8,6 +8,7 @@ import { DndContext, DragEndEvent, PointerSensor, useSensor, useSensors, DragOve
 import { Button } from '@/components/ui/button';
 import { KanbanColumn } from './kanban-column';
 import { KanbanFilters } from './kanban-filters';
+import { KanbanListView } from './kanban-list-view';
 import { KanbanSkeleton } from './kanban-skeleton';
 import { StoryDetailPanel } from './story-detail-panel';
 import { StoryCard } from './story-card';
@@ -336,38 +337,52 @@ export function KanbanBoard({ projectId }: KanbanBoardProps) {
         onAssigneeChange={setSelectedAssigneeId}
       />
 
-      <DndContext sensors={sensors} onDragStart={handleDragStart} onDragEnd={handleDragEnd}>
-        <div className="flex flex-col gap-3 md:flex-row md:gap-4 md:overflow-x-auto md:pb-4">
-          {COLUMNS.map((col) => (
-            <KanbanColumn
-              key={col.id}
-              id={col.id}
-              label={t(col.i18nKey)}
-              stories={storiesByColumn(col.id)}
-              epicMap={epicMap}
-              memberMap={memberMap}
-              dragStatus={dragStatus}
-              onStoryClick={handleStoryClick}
-              onEditStory={handleEditStory}
-              onChangeStatus={handleChangeStatus}
-              onAssignStory={handleAssignStory}
-              onDeleteStory={handleDeleteStory}
-            />
-          ))}
-        </div>
-        <DragOverlayCompat adjustScale={false} className="cursor-grabbing">
-          {activeStory && (
-            <div className="rotate-3 scale-105">
-              <StoryCard
-                story={activeStory}
-                epicName={activeStory.epic_id ? epicMap[activeStory.epic_id] : undefined}
-                assigneeName={activeStory.assignee_id ? memberMap[activeStory.assignee_id] : undefined}
-                onClick={() => {}}
+      {/* Mobile list view (hidden on md+) */}
+      <div className="md:hidden">
+        <KanbanListView
+          stories={filteredStories}
+          epicMap={epicMap}
+          memberMap={memberMap}
+          onStoryClick={handleStoryClick}
+          onChangeStatus={handleChangeStatus}
+        />
+      </div>
+
+      {/* Desktop kanban (hidden below md) */}
+      <div className="hidden md:block">
+        <DndContext sensors={sensors} onDragStart={handleDragStart} onDragEnd={handleDragEnd}>
+          <div className="flex flex-row gap-4 overflow-x-auto pb-4">
+            {COLUMNS.map((col) => (
+              <KanbanColumn
+                key={col.id}
+                id={col.id}
+                label={t(col.i18nKey)}
+                stories={storiesByColumn(col.id)}
+                epicMap={epicMap}
+                memberMap={memberMap}
+                dragStatus={dragStatus}
+                onStoryClick={handleStoryClick}
+                onEditStory={handleEditStory}
+                onChangeStatus={handleChangeStatus}
+                onAssignStory={handleAssignStory}
+                onDeleteStory={handleDeleteStory}
               />
-            </div>
-          )}
-        </DragOverlayCompat>
-      </DndContext>
+            ))}
+          </div>
+          <DragOverlayCompat adjustScale={false} className="cursor-grabbing">
+            {activeStory && (
+              <div className="rotate-3 scale-105">
+                <StoryCard
+                  story={activeStory}
+                  epicName={activeStory.epic_id ? epicMap[activeStory.epic_id] : undefined}
+                  assigneeName={activeStory.assignee_id ? memberMap[activeStory.assignee_id] : undefined}
+                  onClick={() => {}}
+                />
+              </div>
+            )}
+          </DragOverlayCompat>
+        </DndContext>
+      </div>
 
       {nextCursor || epicsNextCursor ? (
         <div className="flex flex-wrap items-center justify-center gap-2">
