@@ -1,5 +1,6 @@
 'use client';
 
+import type React from 'react';
 import { useState } from 'react';
 import { useTranslations } from 'next-intl';
 import { Button } from '@/components/ui/button';
@@ -132,6 +133,20 @@ interface ThreadMessageProps {
   reviewType?: string;
 }
 
+function renderWithMentions(text: string, isCurrentUser: boolean): React.ReactNode {
+  const parts = text.split(/(@[\w가-힣]+)/g);
+  return parts.map((part, i) => {
+    if (/^@[\w가-힣]+$/.test(part)) {
+      return (
+        <span key={i} className={`font-semibold ${isCurrentUser ? 'text-blue-200' : 'text-[color:var(--operator-primary)]'}`}>
+          {part}
+        </span>
+      );
+    }
+    return part;
+  });
+}
+
 function ThreadMessage({ content, authorId, timestamp, isCurrentUser, reviewType }: ThreadMessageProps) {
   return (
     <div className={`flex ${isCurrentUser ? 'justify-end' : 'justify-start'}`}>
@@ -144,7 +159,7 @@ function ThreadMessage({ content, authorId, timestamp, isCurrentUser, reviewType
         `}
       >
         <div className="whitespace-pre-wrap break-words text-sm">
-          {content}
+          {renderWithMentions(content, isCurrentUser)}
         </div>
         <div className={`mt-2 text-xs ${isCurrentUser ? 'text-blue-200' : 'text-gray-500'}`}>
           {new Date(timestamp).toLocaleTimeString()}
