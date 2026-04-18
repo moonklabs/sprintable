@@ -179,10 +179,10 @@ export function PolicyDocBrowser({ projectId, t }: PolicyDocBrowserProps) {
         drawerOpen={policyPanelDrawerOpen}
         onDrawerOpenChange={setPolicyPanelDrawerOpen}
         drawerAriaLabel={t('openPolicySprints')}
-        className="min-h-[70vh]"
+        className="min-h-0 flex-1"
         inlineColumnsClassName="2xl:grid-cols-[280px_minmax(0,1fr)]"
       >
-        <div className="grid min-h-[70vh] gap-4 p-4 xl:grid-cols-[320px_minmax(0,1fr)]">
+        <div className="grid gap-4 p-4 xl:grid-cols-[320px_minmax(0,1fr)]">
         <SectionCard className="border-white/8 bg-white/4">
           <SectionCardHeader>
             <div className="space-y-3">

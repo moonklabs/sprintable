@@ -9,7 +9,7 @@ import { useDocSync, type SaveStatus } from '@/components/docs/use-doc-sync';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { ToastContainer, useToast } from '@/components/ui/toast';
-import { Plus, X, Trash2, Copy, Check } from 'lucide-react';
+import { Plus, X, Trash2, Copy, Check, Menu } from 'lucide-react';
 
 interface Doc {
   id: string;
@@ -80,6 +80,7 @@ export function DocsShellClient({ projectId }: DocsShellClientProps) {
   const [tree, setTree] = useState<Doc[]>([]);
   const [selectedDoc, setSelectedDoc] = useState<DocDetail | null>(null);
   const [loading, setLoading] = useState(true);
+  const [mobileSidebarOpen, setMobileSidebarOpen] = useState(false);
 
   // Always-editable content states
   const [title, setTitle] = useState('');
@@ -161,6 +162,7 @@ export function DocsShellClient({ projectId }: DocsShellClientProps) {
     const params = new URLSearchParams(searchParams);
     params.set('slug', slug);
     router.replace(`?${params.toString()}`);
+    setMobileSidebarOpen(false);
   }, [fetchDoc, router, searchParams]);
 
   const handleReorder = useCallback(async (docId: string, newSortOrder: number, siblings: Doc[]) => {
@@ -376,8 +378,18 @@ export function DocsShellClient({ projectId }: DocsShellClientProps) {
 
   return (
     <div className="flex h-screen">
+      {/* Mobile sidebar overlay */}
+      {mobileSidebarOpen && (
+        <button
+          type="button"
+          className="fixed inset-0 z-40 bg-black/50 md:hidden"
+          aria-label="Close sidebar"
+          onClick={() => setMobileSidebarOpen(false)}
+        />
+      )}
+
       {/* Left: Doc Tree */}
-      <div className="w-80 flex-shrink-0 border-r border-gray-800 flex flex-col">
+      <div className={`fixed inset-y-0 left-0 z-50 w-80 flex-shrink-0 border-r border-gray-800 flex flex-col bg-gray-900 transition-transform md:static md:translate-x-0 md:z-auto md:bg-transparent ${mobileSidebarOpen ? 'translate-x-0' : '-translate-x-full md:translate-x-0'}`}>
         <div className="flex-shrink-0 border-b border-gray-800 px-4 py-3">
           <div className="flex items-center justify-between">
             <h1 className="text-lg font-semibold">{t('title')}</h1>
@@ -409,7 +421,19 @@ export function DocsShellClient({ projectId }: DocsShellClientProps) {
       </div>
 
       {/* Right: Doc Content or Create Form */}
-      <div className="flex-1 flex flex-col bg-gray-900">
+      <div className="flex-1 flex flex-col bg-gray-900 min-w-0">
+        {/* Mobile header with hamburger */}
+        <div className="flex items-center gap-2 border-b border-gray-800 px-3 py-2 md:hidden">
+          <button
+            type="button"
+            onClick={() => setMobileSidebarOpen(true)}
+            className="flex min-h-[44px] min-w-[44px] items-center justify-center rounded-xl text-gray-400 hover:bg-gray-800"
+            aria-label={t('title')}
+          >
+            <Menu className="size-5" />
+          </button>
+          <span className="truncate text-sm font-medium text-gray-300">{selectedDoc?.title ?? t('title')}</span>
+        </div>
         {showCreate ? (
           <div className="flex h-full flex-col">
             <div className="flex-shrink-0 border-b border-gray-800 px-6 py-4">
