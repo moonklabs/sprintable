@@ -3,9 +3,9 @@ import { createSupabaseServerClient } from '@/lib/supabase/server';
 import { createSupabaseAdminClient } from '@/lib/supabase/admin';
 import { SprintService, type CreateSprintInput } from '@/services/sprint';
 import { handleApiError } from '@/lib/api-error';
-import { apiSuccess, ApiErrors } from '@/lib/api-response';
+import { apiSuccess, apiError, ApiErrors } from '@/lib/api-response';
 import { getAuthContext } from '@/lib/auth-helpers';
-import { parseBody, createSprintSchema } from '@sprintable/shared';
+import { createSprintSchema } from '@sprintable/shared';
 import { isOssMode, createSprintRepository } from '@/lib/storage/factory';
 
 // POST /api/sprints — 생성
@@ -18,8 +18,14 @@ export async function POST(request: Request) {
     const ossMode = isOssMode();
     const dbClient = ossMode ? undefined : (me.type === 'agent' ? createSupabaseAdminClient() : supabase);
 
-    const parsed = await parseBody(request, createSprintSchema);
-    if (!parsed.success) return parsed.response;
+    let rawBody: unknown;
+    try { rawBody = await request.json(); } catch { return apiError('BAD_REQUEST', 'Invalid JSON body', 400); }
+    if (!rawBody || typeof rawBody !== 'object') return apiError('BAD_REQUEST', 'Body must be an object', 400);
+    const body = rawBody as Record<string, unknown>;
+    if (!body.project_id) body.project_id = me.project_id;
+    if (!body.org_id) body.org_id = me.org_id;
+    const parsed = createSprintSchema.safeParse(body);
+    if (!parsed.success) return apiError('VALIDATION_ERROR', JSON.stringify(parsed.error.issues), 400);
     const repo = await createSprintRepository(dbClient);
     const service = new SprintService(repo, dbClient as SupabaseClient | undefined);
     const sprint = await service.create(parsed.data as CreateSprintInput);
