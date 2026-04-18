@@ -7,6 +7,7 @@ import { DocTree } from '@/components/docs/doc-tree';
 import { DocEditor } from '@/components/docs/doc-editor';
 import { useDocSync, type SaveStatus } from '@/components/docs/use-doc-sync';
 import { Button } from '@/components/ui/button';
+import { GlassPanel } from '@/components/ui/glass-panel';
 import { Input } from '@/components/ui/input';
 import { ToastContainer, useToast } from '@/components/ui/toast';
 import { Plus, X, Trash2, Copy, Check, Menu } from 'lucide-react';
@@ -371,7 +372,7 @@ export function DocsShellClient({ projectId }: DocsShellClientProps) {
   if (loading) {
     return (
       <div className="flex h-screen items-center justify-center">
-        <p className="text-sm text-gray-400">{t('loading')}</p>
+        <p className="text-sm text-[color:var(--operator-muted)]">{t('loading')}</p>
       </div>
     );
   }
@@ -389,8 +390,8 @@ export function DocsShellClient({ projectId }: DocsShellClientProps) {
       )}
 
       {/* Left: Doc Tree */}
-      <div className={`fixed inset-y-0 left-0 z-50 w-80 flex-shrink-0 border-r border-gray-800 flex flex-col bg-gray-900 transition-transform md:static md:translate-x-0 md:z-auto md:bg-transparent ${mobileSidebarOpen ? 'translate-x-0' : '-translate-x-full md:translate-x-0'}`}>
-        <div className="flex-shrink-0 border-b border-gray-800 px-4 py-3">
+      <div className={`fixed inset-y-0 left-0 z-50 w-80 flex-shrink-0 border-r border-white/10 flex flex-col bg-[color:var(--operator-surface)] transition-transform md:static md:translate-x-0 md:z-auto md:bg-transparent ${mobileSidebarOpen ? 'translate-x-0' : '-translate-x-full md:translate-x-0'}`}>
+        <div className="flex-shrink-0 border-b border-white/10 px-4 py-3">
           <div className="flex items-center justify-between">
             <h1 className="text-lg font-semibold">{t('title')}</h1>
             <Button size="sm" onClick={() => {
@@ -421,22 +422,22 @@ export function DocsShellClient({ projectId }: DocsShellClientProps) {
       </div>
 
       {/* Right: Doc Content or Create Form */}
-      <div className="flex-1 flex flex-col bg-gray-900 min-w-0">
+      <GlassPanel className="flex-1 flex flex-col min-w-0 rounded-none md:rounded-2xl">
         {/* Mobile header with hamburger */}
-        <div className="flex items-center gap-2 border-b border-gray-800 px-3 py-2 md:hidden">
+        <div className="flex items-center gap-2 border-b border-white/10 px-3 py-2 md:hidden">
           <button
             type="button"
             onClick={() => setMobileSidebarOpen(true)}
-            className="flex min-h-[44px] min-w-[44px] items-center justify-center rounded-xl text-gray-400 hover:bg-gray-800"
+            className="flex min-h-[44px] min-w-[44px] items-center justify-center rounded-xl text-[color:var(--operator-muted)] hover:bg-[color:var(--operator-surface-soft)]"
             aria-label={t('title')}
           >
             <Menu className="size-5" />
           </button>
-          <span className="truncate text-sm font-medium text-gray-300">{selectedDoc?.title ?? t('title')}</span>
+          <span className="truncate text-sm font-medium text-[color:var(--operator-foreground)]">{selectedDoc?.title ?? t('title')}</span>
         </div>
         {showCreate ? (
           <div className="flex h-full flex-col">
-            <div className="flex-shrink-0 border-b border-gray-800 px-3 py-2 md:px-6 md:py-4">
+            <div className="flex-shrink-0 border-b border-white/10 px-3 py-2 md:px-6 md:py-4">
               <div className="flex items-center justify-between">
                 <h2 className="text-2xl font-semibold">{t('newDoc')}</h2>
                 <Button variant="ghost" size="sm" onClick={() => {
@@ -471,7 +472,7 @@ export function DocsShellClient({ projectId }: DocsShellClientProps) {
                     value={newContent}
                     onChange={(e) => setNewContent(e.target.value)}
                     placeholder={t('editorPlaceholder')}
-                    className="w-full min-h-[200px] rounded-lg border border-gray-700 bg-gray-800 px-3 py-2 text-sm resize-none"
+                    className="w-full min-h-[200px] rounded-lg border border-white/10 bg-[color:var(--operator-surface-soft)] px-3 py-2 text-sm resize-none"
                   />
                 </div>
                 <div className="flex gap-2">
@@ -491,7 +492,7 @@ export function DocsShellClient({ projectId }: DocsShellClientProps) {
         ) : selectedDoc ? (
           <>
             {/* Header */}
-            <div className="flex-shrink-0 border-b border-gray-800 px-3 py-2 md:px-6 md:py-4">
+            <div className="flex-shrink-0 border-b border-white/10 px-3 py-2 md:px-6 md:py-4">
               <div className="flex items-center justify-between gap-4">
                 <div className="flex-1 min-w-0">
                   <Input
@@ -544,10 +545,10 @@ export function DocsShellClient({ projectId }: DocsShellClientProps) {
           </>
         ) : (
           <div className="flex h-full items-center justify-center">
-            <p className="text-sm text-gray-400">{t('selectDoc')}</p>
+            <p className="text-sm text-[color:var(--operator-muted)]">{t('selectDoc')}</p>
           </div>
         )}
-      </div>
+      </GlassPanel>
       <ToastContainer toasts={toasts} onDismiss={dismissToast} />
     </div>
   );
