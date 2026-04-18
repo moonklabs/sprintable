@@ -30,6 +30,7 @@ export function MemoSidebar({ open, onClose, currentTeamMemberId, projectId }: M
   const [loading, setLoading] = useState(false);
   const [loadingMore, setLoadingMore] = useState(false);
   const [nextCursor, setNextCursor] = useState<string | null>(null);
+  const [mobileView, setMobileView] = useState<'list' | 'detail'>('list');
   const panelRef = useRef<HTMLDivElement | null>(null);
   const { clear, suppress, shouldIgnore } = useMemoRefreshGuard();
 
@@ -131,6 +132,7 @@ export function MemoSidebar({ open, onClose, currentTeamMemberId, projectId }: M
 
   const handleSelectMemo = useCallback(async (memo: MemoSummaryState) => {
     await fetchMemoDetail(memo.id);
+    setMobileView('detail');
   }, [fetchMemoDetail]);
 
   const handleReply = useCallback(async (memoId: string, content: string) => {
@@ -195,13 +197,24 @@ export function MemoSidebar({ open, onClose, currentTeamMemberId, projectId }: M
       <button className="fixed inset-0 z-40 bg-black/30" aria-label={t('closeSidebar')} onClick={onClose} />
       <aside
         ref={panelRef}
-        className="fixed right-0 top-0 z-50 flex h-full w-full max-w-5xl flex-col bg-white shadow-2xl md:w-[88vw]"
+        className="fixed inset-0 z-50 flex flex-col bg-white shadow-2xl md:inset-auto md:right-0 md:top-0 md:h-full md:w-[88vw] md:max-w-5xl"
         aria-label={t('sidebarTitle')}
       >
         <div className="flex items-center justify-between border-b border-gray-200 px-4 py-3">
-          <div>
-            <h2 className="text-lg font-semibold text-gray-900">{t('sidebarTitle')}</h2>
-            <p className="text-xs text-gray-500">{t('sidebarSubtitle')}</p>
+          <div className="flex items-center gap-2">
+            {mobileView === 'detail' && selectedMemo && (
+              <button
+                onClick={() => setMobileView('list')}
+                className="flex min-h-[44px] min-w-[44px] items-center justify-center rounded-lg text-gray-600 hover:bg-gray-100 md:hidden"
+                aria-label="Back to list"
+              >
+                ←
+              </button>
+            )}
+            <div>
+              <h2 className="text-lg font-semibold text-gray-900">{t('sidebarTitle')}</h2>
+              <p className="hidden text-xs text-gray-500 sm:block">{t('sidebarSubtitle')}</p>
+            </div>
           </div>
           <div className="flex items-center gap-2">
             <button
@@ -210,7 +223,12 @@ export function MemoSidebar({ open, onClose, currentTeamMemberId, projectId }: M
             >
               {t('newMemo')}
             </button>
-            <button onClick={onClose} className="rounded-lg px-3 py-1.5 text-sm text-gray-600 hover:bg-gray-100">✕</button>
+            <button
+              onClick={onClose}
+              className="flex min-h-[44px] min-w-[44px] items-center justify-center rounded-lg text-gray-600 hover:bg-gray-100"
+            >
+              ✕
+            </button>
           </div>
         </div>
 
@@ -221,7 +239,7 @@ export function MemoSidebar({ open, onClose, currentTeamMemberId, projectId }: M
         )}
 
         <div className="grid min-h-0 flex-1 md:grid-cols-[320px_minmax(0,1fr)]">
-          <section className="min-h-0 overflow-y-auto border-r border-gray-200 bg-white">
+          <section className={`min-h-0 overflow-y-auto border-r border-gray-200 bg-white ${mobileView === 'detail' ? 'hidden md:block' : 'block'}`}>
             {loading ? (
               <div className="p-4 text-sm text-gray-400">{tc('loading')}</div>
             ) : (
@@ -247,7 +265,7 @@ export function MemoSidebar({ open, onClose, currentTeamMemberId, projectId }: M
               </div>
             )}
           </section>
-          <section className="min-h-0 overflow-y-auto bg-white">
+          <section className={`min-h-0 overflow-y-auto bg-white ${mobileView === 'list' && !selectedMemo ? 'hidden md:flex' : 'block'}`}>
             {selectedMemo ? (
               <MemoDetail
                 memo={selectedMemo}
