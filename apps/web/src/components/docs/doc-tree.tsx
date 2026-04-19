@@ -144,43 +144,50 @@ function TreeNode({
           className={cn(
             'flex w-full items-center gap-2 rounded-2xl px-3 py-2 text-left text-sm transition-all',
             isSelected
-              ? 'bg-[color:var(--operator-primary)]/14 text-[color:var(--operator-primary-soft)] shadow-[inset_0_0_0_1px_rgba(182,196,255,0.14)]'
-              : 'text-[color:var(--operator-foreground)]/88 hover:bg-white/6 hover:text-[color:var(--operator-foreground)]',
+              ? 'bg-primary/10 text-primary'
+              : 'text-foreground/88 hover:bg-muted hover:text-foreground',
           )}
           style={{ paddingLeft: `${Math.min(depth * 14 + 8, 72)}px` }}
           {...attributes}
           {...listeners}
         >
           {isFolder ? (
-            expanded ? <ChevronDown className="size-3.5 shrink-0 text-[color:var(--operator-muted)]" /> : <ChevronRight className="size-3.5 shrink-0 text-[color:var(--operator-muted)]" />
+            expanded ? <ChevronDown className="size-3.5 shrink-0 text-muted-foreground" /> : <ChevronRight className="size-3.5 shrink-0 text-muted-foreground" />
           ) : (
             <span className="w-3 shrink-0" />
           )}
           {doc.icon ? (
             <span className="shrink-0 text-sm">{doc.icon}</span>
           ) : isFolder ? (
-            expanded ? <FolderOpen className="size-4 shrink-0 text-[color:var(--operator-tertiary)]" /> : <Folder className="size-4 shrink-0 text-[color:var(--operator-tertiary)]" />
+            expanded ? <FolderOpen className="size-4 shrink-0 text-muted-foreground" /> : <Folder className="size-4 shrink-0 text-muted-foreground" />
           ) : (
-            <FileText className="size-4 shrink-0 text-[color:var(--operator-primary-soft)]" />
+            <FileText className="size-4 shrink-0 text-muted-foreground" />
           )}
           <span className="flex-1 truncate">{doc.title}</span>
-          <button
-            onClick={(e) => {
-              e.stopPropagation();
-              setContextMenuOpen(true);
-            }}
-            className="opacity-0 transition group-hover:opacity-100"
-          >
-            <MoreVertical className="size-3.5 text-[color:var(--operator-muted)]" />
-          </button>
         </button>
-        {contextMenuOpen && (
-          <div ref={menuRef} className="absolute left-0 top-full z-50 mt-1 w-48 rounded-xl border border-white/10 bg-[color:var(--operator-panel)] p-1 shadow-lg">
-            <button onClick={handleRename} className="w-full rounded-lg px-3 py-2 text-left text-sm hover:bg-white/8">Rename</button>
-            {isFolder && <button onClick={handleAddChild} className="w-full rounded-lg px-3 py-2 text-left text-sm hover:bg-white/8">Add child</button>}
-            <button onClick={handleDelete} className="w-full rounded-lg px-3 py-2 text-left text-sm text-rose-400 hover:bg-rose-500/10">Delete</button>
-          </div>
-        )}
+        <div
+          role="button"
+          tabIndex={0}
+          onClick={(e) => {
+            e.stopPropagation();
+            setContextMenuOpen(true);
+          }}
+          onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.stopPropagation(); setContextMenuOpen(true); } }}
+          className="absolute right-2 top-1/2 -translate-y-1/2 opacity-0 transition group-hover:opacity-100"
+        >
+          <MoreVertical className="size-3.5 text-muted-foreground" />
+        </div>
+        <div
+          ref={menuRef}
+          className={cn(
+            'absolute left-0 top-full z-50 mt-1 w-48 rounded-lg border border-border bg-popover p-1 shadow-md',
+            contextMenuOpen ? 'block' : 'hidden',
+          )}
+        >
+          <button onClick={handleRename} className="w-full rounded-md px-3 py-2 text-left text-sm hover:bg-muted">Rename</button>
+          {isFolder && <button onClick={handleAddChild} className="w-full rounded-md px-3 py-2 text-left text-sm hover:bg-muted">Add child</button>}
+          <button onClick={handleDelete} className="w-full rounded-md px-3 py-2 text-left text-sm text-destructive hover:bg-destructive/10">Delete</button>
+        </div>
       </div>
 
       {isFolder && expanded && (

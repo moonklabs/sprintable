@@ -155,7 +155,7 @@ export function OperatorShell({
                         className={cn(
                           'group flex w-full items-center justify-between rounded-2xl px-3 py-2.5 text-sm font-medium transition-all duration-200',
                           hasActiveChild
-                            ? 'bg-[color:var(--operator-primary)]/14 text-[color:var(--operator-primary-soft)] shadow-[inset_0_0_0_1px_rgba(182,196,255,0.12)]'
+                            ? 'bg-primary/10 text-primary font-semibold'
                             : 'text-[color:var(--operator-muted)] hover:bg-white/5 hover:text-[color:var(--operator-foreground)]',
                         )}
                       >
@@ -182,7 +182,7 @@ export function OperatorShell({
                                 className={cn(
                                   'group flex items-center gap-3 rounded-2xl px-3 py-2 text-sm font-medium transition-all duration-200',
                                   isChildActive
-                                    ? 'bg-[color:var(--operator-primary)]/14 text-[color:var(--operator-primary-soft)] shadow-[inset_0_0_0_1px_rgba(182,196,255,0.12)]'
+                                    ? 'bg-primary/10 text-primary font-semibold'
                                     : 'text-[color:var(--operator-muted)] hover:bg-white/5 hover:text-[color:var(--operator-foreground)]',
                                 )}
                               >
@@ -206,7 +206,7 @@ export function OperatorShell({
                     className={cn(
                       'group flex items-center justify-between rounded-2xl px-3 py-2.5 text-sm font-medium transition-all duration-200',
                       isActive
-                        ? 'bg-[color:var(--operator-primary)]/14 text-[color:var(--operator-primary-soft)] shadow-[inset_0_0_0_1px_rgba(182,196,255,0.12)]'
+                        ? 'bg-primary/10 text-primary font-semibold'
                         : 'text-[color:var(--operator-muted)] hover:bg-white/5 hover:text-[color:var(--operator-foreground)]',
                     )}
                   >
@@ -221,11 +221,11 @@ export function OperatorShell({
 
             <div className="space-y-3 border-t border-white/8 pt-4">
               <LocaleSwitcher className="px-1" />
-              <Button variant="hero" size="lg" className="w-full justify-start" render={<Link href="/board" />}>
+              <Button variant="hero" size="lg" className="w-full justify-start" render={<Link href="/board" />} nativeButton={false}>
                 <Gift className="size-4" />
                 {shellT('primaryCta')}
               </Button>
-              <Button variant="glass" size="lg" className="w-full justify-start" render={<Link href="/dashboard/settings" />}>
+              <Button variant="glass" size="lg" className="w-full justify-start" render={<Link href="/dashboard/settings" />} nativeButton={false}>
                 <Settings className="size-4" />
                 {t('settings')}
               </Button>
@@ -272,10 +272,10 @@ export function OperatorShell({
                 <MessageSquareMore className="size-4" />
                 {memoUnreadCount > 0 ? <Badge variant="counter" className="absolute -right-1 -top-1 h-5 min-w-5 px-1.5 text-[10px]">{memoUnreadCount > 9 ? '9+' : memoUnreadCount}</Badge> : null}
               </OperatorIconButton>
-              <OperatorIconButton render={<Link href="/inbox" />} aria-label={t('inbox')} className="hidden lg:flex">
+              <OperatorIconButton render={<Link href="/inbox" />} nativeButton={false} aria-label={t('inbox')} className="hidden lg:flex">
                 <Inbox className="size-4" />
               </OperatorIconButton>
-              <OperatorIconButton render={<Link href="/dashboard/settings" />} aria-label={t('settings')} className="hidden lg:flex">
+              <OperatorIconButton render={<Link href="/dashboard/settings" />} nativeButton={false} aria-label={t('settings')} className="hidden lg:flex">
                 <Settings className="size-4" />
               </OperatorIconButton>
             </div>
@@ -296,7 +296,7 @@ export function OperatorShell({
                 href={item.href}
                 className={cn(
                   'flex min-h-[44px] flex-col items-center justify-center gap-1 rounded-2xl px-2 py-2 text-[11px] font-medium',
-                  isActive ? 'bg-[color:var(--operator-primary)]/14 text-[color:var(--operator-primary-soft)]' : 'text-[color:var(--operator-muted)]',
+                  isActive ? 'bg-primary/10 text-primary' : 'text-muted-foreground',
                 )}
               >
                 <Icon className="size-4" />
