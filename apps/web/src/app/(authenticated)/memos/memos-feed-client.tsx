@@ -276,6 +276,7 @@ export function MemosFeedClient({ currentTeamMemberId, projectId }: MemosFeedCli
               onSelectMemo={handleSelectMemo}
               selectedMemoId={selectedMemo?.id ?? null}
               memberMap={memberMap}
+              onNewMemo={handleNewMemo}
             />
           </div>
         </div>

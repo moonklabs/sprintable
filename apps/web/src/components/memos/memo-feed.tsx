@@ -58,6 +58,7 @@ interface MemoFeedItemProps {
 }
 
 function MemoFeedItem({ memo, isSelected, onClick, memberMap }: MemoFeedItemProps) {
+  const t = useTranslations('memos');
   const hasUnread = (memo.unread_count ?? 0) > 0;
   const senderName = memo.created_by ? (memberMap[memo.created_by] ?? memo.created_by) : '—';
 
@@ -97,7 +98,7 @@ function MemoFeedItem({ memo, isSelected, onClick, memberMap }: MemoFeedItemProp
       {((memo.reply_count ?? 0) > 0 || hasUnread) && (
         <div className="flex items-center gap-2">
           {(memo.reply_count ?? 0) > 0 && (
-            <span className="text-[10px] text-[color:var(--operator-muted)]">{memo.reply_count === 1 ? '1 reply' : `${memo.reply_count} replies`}</span>
+            <span className="text-[10px] text-[color:var(--operator-muted)]">{t('repliesCountBadge', { count: memo.reply_count ?? 0 })}</span>
           )}
           {hasUnread && (
             <div className="flex h-4 w-4 items-center justify-center rounded-full bg-blue-500 text-[10px] text-white">
