@@ -3,7 +3,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useRouter, useSearchParams } from 'next/navigation';
 import { useTranslations } from 'next-intl';
-import { ChevronDown, Menu, X } from 'lucide-react';
+import { ChevronDown, ChevronLeft, Menu, X } from 'lucide-react';
 import { Input } from '@/components/ui/input';
 import { MemoList } from '@/components/memos/memo-list';
 import { MemoDetail } from '@/components/memos/memo-detail';
@@ -112,6 +112,7 @@ export function MemosClient({ currentTeamMemberId, projectId }: MemosClientProps
   const [workspaceReady, setWorkspaceReady] = useState(false);
   const [nextCursor, setNextCursor] = useState<string | null>(null);
   const [loadingMore, setLoadingMore] = useState(false);
+  const [mobileView, setMobileView] = useState<'list' | 'detail'>('list');
 
   const selectedMemoIdRef = useRef(selectedMemo?.id);
   const loadedWorkspaceKeyRef = useRef<string | null>(null);
@@ -448,6 +449,7 @@ export function MemosClient({ currentTeamMemberId, projectId }: MemosClientProps
 
   const handleSelectMemo = useCallback(async (memo: MemoSummaryState) => {
     await selectMemoById(memo.id, { updateUrl: true });
+    setMobileView('detail');
     if (!memoQueueSupportsInlinePanel) {
       closeMemoQueueDrawer();
     }
@@ -682,7 +684,29 @@ export function MemosClient({ currentTeamMemberId, projectId }: MemosClientProps
   return (
     <div className="min-h-screen bg-background p-4 md:p-6">
       <div className="mx-auto max-w-7xl space-y-4">
-        <SectionCard>
+
+        {/* ── Mobile header + compact stats (< md) ───────── */}
+        <div className="md:hidden">
+          <div className="mb-3 flex items-center justify-between">
+            <h1 className="text-lg font-semibold text-foreground">{t('title')}</h1>
+            <button
+              type="button"
+              onClick={handleNewMemoClick}
+              className="rounded-xl bg-primary px-3 py-1.5 text-xs font-medium text-primary-foreground"
+            >
+              {t('newMemo')}
+            </button>
+          </div>
+          <div className="flex items-center gap-4 overflow-x-auto rounded-xl bg-muted/30 px-3 py-2">
+            <span className="shrink-0 text-xs text-muted-foreground">{t('statsOpen')} <strong className="text-foreground">{stats.open}</strong></span>
+            <span className="shrink-0 text-xs text-muted-foreground">{t('statsAssigned')} <strong className="text-foreground">{stats.assigned}</strong></span>
+            <span className="shrink-0 text-xs text-muted-foreground">{t('statsReplies')} <strong className="text-foreground">{stats.replies}</strong></span>
+            <span className="shrink-0 text-xs text-muted-foreground">{t('statsSavedViews')} <strong className="text-foreground">{stats.views}</strong></span>
+          </div>
+        </div>
+
+        {/* ── Desktop stats 4-card grid (md+) ─────────────── */}
+        <SectionCard className="hidden md:block">
           <SectionCardHeader>
             <div className="flex flex-wrap items-start justify-between gap-3">
               <div className="space-y-1">
@@ -714,7 +738,31 @@ export function MemosClient({ currentTeamMemberId, projectId }: MemosClientProps
           </SectionCardBody>
         </SectionCard>
 
-        <SectionCard>
+        {/* ── Mobile compact channel filter (< md, list view only) ── */}
+        {mobileView === 'list' && (
+          <div className="space-y-2 md:hidden">
+            <div className="flex gap-2 overflow-x-auto pb-1">
+              {CHANNEL_ORDER.map((id) => {
+                const active = channel === id;
+                const count = channelCounts[id];
+                return (
+                  <button
+                    key={id}
+                    type="button"
+                    onClick={() => handleChannelChange(id)}
+                    className={`shrink-0 rounded-full border px-3 py-1 text-xs font-medium transition ${active ? 'border-primary bg-primary text-primary-foreground' : 'border-input bg-muted/50 text-foreground hover:bg-muted'}`}
+                  >
+                    {channelLabelMap[id]} <span className="opacity-70">{count}</span>
+                  </button>
+                );
+              })}
+            </div>
+            <Input value={searchQuery} onChange={(event) => handleSearchChange(event.target.value)} placeholder={t('searchMemosPlaceholder')} />
+          </div>
+        )}
+
+        {/* ── Desktop full filter section (md+) ─────────────── */}
+        <SectionCard className="hidden md:block">
           <SectionCardBody className="space-y-4">
             <div className="grid gap-4 xl:grid-cols-[minmax(0,1fr)_240px_240px_280px]">
               <div className="space-y-2 min-w-0">
@@ -830,69 +878,155 @@ export function MemosClient({ currentTeamMemberId, projectId }: MemosClientProps
           </SectionCardBody>
         </SectionCard>
 
-        {showCreate ? (
-          <MemoCreateForm
-            members={members}
-            onSubmit={handleCreate}
-            onCancel={handleCancelCreate}
-            initialTitle={searchParams.get('title') ?? undefined}
-            draftStorageKey={draftStorageKey}
-          />
-        ) : null}
+        {/* ── Desktop: create form + queue toggle + contextual panel (md+) ── */}
+        <div className="hidden md:block">
+          <div className="space-y-4">
+            {showCreate ? (
+              <MemoCreateForm
+                members={members}
+                onSubmit={handleCreate}
+                onCancel={handleCancelCreate}
+                initialTitle={searchParams.get('title') ?? undefined}
+                draftStorageKey={draftStorageKey}
+              />
+            ) : null}
 
-        <div className="flex flex-wrap items-center justify-between gap-3">
-          <div className="flex flex-wrap items-center gap-2">
-            <Button type="button" variant="glass" size="sm" onClick={toggleMemoQueuePanel}>
-              <Menu />
-              {queueToggleLabel}
-            </Button>
-            <div className="rounded-full border border-white/8 bg-white/5 px-3 py-1.5 text-xs text-muted-foreground">
-              {channelLabelMap[channel]}
+            <div className="flex flex-wrap items-center justify-between gap-3">
+              <div className="flex flex-wrap items-center gap-2">
+                <Button type="button" variant="glass" size="sm" onClick={toggleMemoQueuePanel}>
+                  <Menu />
+                  {queueToggleLabel}
+                </Button>
+                <div className="rounded-full border border-white/8 bg-white/5 px-3 py-1.5 text-xs text-muted-foreground">
+                  {channelLabelMap[channel]}
+                </div>
+                <div className="rounded-full border border-white/8 bg-white/5 px-3 py-1.5 text-xs text-muted-foreground">
+                  {t('queueSummary', { count: visibleMemos.length })}
+                </div>
+              </div>
+              <Button type="button" variant="glass" size="sm" onClick={() => setShowCreate((prev) => !prev)}>
+                {showCreate ? t('hideCreateForm') : t('showCreateForm')}
+              </Button>
             </div>
-            <div className="rounded-full border border-white/8 bg-white/5 px-3 py-1.5 text-xs text-muted-foreground">
-              {t('queueSummary', { count: visibleMemos.length })}
-            </div>
+
+            <ContextualPanelLayout
+              renderPanel={renderMemoQueuePanel}
+              inlinePanelOpen={memoQueueInlinePanelOpen}
+              drawerOpen={memoQueueDrawerOpen}
+              onDrawerOpenChange={setMemoQueueDrawerOpen}
+              drawerAriaLabel={t('openQueue')}
+              inlineColumnsClassName="2xl:grid-cols-[340px_minmax(0,1fr)]"
+              panelClassName="min-h-[36rem]"
+              contentClassName="min-h-[36rem]"
+            >
+              <SectionCard className="min-h-[36rem]">
+                {selectedMemo ? (
+                  <div className="flex h-full flex-col">
+                    {!selectedMemoIsVisible ? (
+                      <div className="border-b border-border/60 px-4 py-2 text-xs text-muted-foreground">{t('selectedMemoOutsideView')}</div>
+                    ) : null}
+                    <MemoDetail
+                      memo={selectedMemo}
+                      memberMap={memberMap}
+                      projectId={projectId}
+                      currentTeamMemberId={currentTeamMemberId}
+                      currentTeamMemberName={currentTeamMemberName}
+                      onReply={handleReply}
+                      onResolve={handleResolve}
+                      onConvertToStory={handleConvertToStory}
+                      onMemoChange={handleMemoChange}
+                    />
+                  </div>
+                ) : (
+                  <SectionCardBody className="flex min-h-[36rem] items-center justify-center">
+                    <EmptyState title={t('selectMemo')} description={t('detailDescription')} />
+                  </SectionCardBody>
+                )}
+              </SectionCard>
+            </ContextualPanelLayout>
           </div>
-          <Button type="button" variant="glass" size="sm" onClick={() => setShowCreate((prev) => !prev)}>
-            {showCreate ? t('hideCreateForm') : t('showCreateForm')}
-          </Button>
         </div>
 
-        <ContextualPanelLayout
-          renderPanel={renderMemoQueuePanel}
-          inlinePanelOpen={memoQueueInlinePanelOpen}
-          drawerOpen={memoQueueDrawerOpen}
-          onDrawerOpenChange={setMemoQueueDrawerOpen}
-          drawerAriaLabel={t('openQueue')}
-          inlineColumnsClassName="2xl:grid-cols-[340px_minmax(0,1fr)]"
-          panelClassName="min-h-[36rem]"
-          contentClassName="min-h-[36rem]"
-        >
-          <SectionCard className="min-h-[36rem]">
-            {selectedMemo ? (
-              <div className="flex h-full flex-col">
-                {!selectedMemoIsVisible ? (
-                  <div className="border-b border-border/60 px-4 py-2 text-xs text-muted-foreground">{t('selectedMemoOutsideView')}</div>
-                ) : null}
-                <MemoDetail
-                  memo={selectedMemo}
-                  memberMap={memberMap}
-                  projectId={projectId}
-                  currentTeamMemberId={currentTeamMemberId}
-                  currentTeamMemberName={currentTeamMemberName}
-                  onReply={handleReply}
-                  onResolve={handleResolve}
-                  onConvertToStory={handleConvertToStory}
-                  onMemoChange={handleMemoChange}
-                />
-              </div>
-            ) : (
-              <SectionCardBody className="flex min-h-[36rem] items-center justify-center">
-                <EmptyState title={t('selectMemo')} description={t('detailDescription')} />
-              </SectionCardBody>
-            )}
-          </SectionCard>
-        </ContextualPanelLayout>
+        {/* ── Mobile: full-screen list ↔ detail (< md) ─────── */}
+        <div className="md:hidden">
+          {showCreate ? (
+            <div className="space-y-3">
+              <button
+                type="button"
+                onClick={handleCancelCreate}
+                className="flex items-center gap-1 text-sm text-muted-foreground hover:text-foreground"
+              >
+                <ChevronLeft className="size-4" />
+                {t('title')}
+              </button>
+              <MemoCreateForm
+                members={members}
+                onSubmit={handleCreate}
+                onCancel={handleCancelCreate}
+                initialTitle={searchParams.get('title') ?? undefined}
+                draftStorageKey={draftStorageKey}
+              />
+            </div>
+          ) : mobileView === 'detail' && selectedMemo ? (
+            <div className="space-y-3">
+              <button
+                type="button"
+                onClick={() => setMobileView('list')}
+                className="flex items-center gap-1 text-sm text-muted-foreground hover:text-foreground"
+              >
+                <ChevronLeft className="size-4" />
+                {t('title')}
+              </button>
+              <SectionCard>
+                <div className="flex h-full flex-col">
+                  {!selectedMemoIsVisible ? (
+                    <div className="border-b border-border/60 px-4 py-2 text-xs text-muted-foreground">{t('selectedMemoOutsideView')}</div>
+                  ) : null}
+                  <MemoDetail
+                    memo={selectedMemo}
+                    memberMap={memberMap}
+                    projectId={projectId}
+                    currentTeamMemberId={currentTeamMemberId}
+                    currentTeamMemberName={currentTeamMemberName}
+                    onReply={handleReply}
+                    onResolve={handleResolve}
+                    onConvertToStory={handleConvertToStory}
+                    onMemoChange={handleMemoChange}
+                  />
+                </div>
+              </SectionCard>
+            </div>
+          ) : loading ? (
+            <div className="space-y-3">
+              {[1, 2, 3].map((i) => <div key={i} className="h-16 animate-pulse rounded-2xl bg-muted/60" />)}
+            </div>
+          ) : fetchError ? (
+            <EmptyState title={fetchError} />
+          ) : visibleMemos.length === 0 ? (
+            <EmptyState title={t('noMemos')} description={searchQuery.trim() ? t('noMatchingMemos') : t('selectMemo')} />
+          ) : (
+            <>
+              <MemoList memos={visibleMemos} memberMap={memberMap} onSelect={handleSelectMemo} selectedId={selectedMemo?.id} />
+              {nextCursor ? (
+                <div className="mt-3 text-center">
+                  <Button
+                    type="button"
+                    variant="glass"
+                    size="sm"
+                    disabled={loadingMore}
+                    onClick={() => {
+                      setLoadingMore(true);
+                      void fetchMemos({ cursor: nextCursor, append: true, query: searchQuery.trim() }).finally(() => setLoadingMore(false));
+                    }}
+                  >
+                    <ChevronDown className="mr-1 size-4" />
+                    {loadingMore ? tc('loading') : t('loadMore')}
+                  </Button>
+                </div>
+              ) : null}
+            </>
+          )}
+        </div>
       </div>
 
       {convertForm ? (
