@@ -279,18 +279,18 @@ export function MemoComposer({
           placeholder={placeholder}
           rows={rows}
           disabled={disabled}
-          className="w-full rounded-xl border border-input px-3 py-2 text-sm focus:border-ring focus:outline-none disabled:cursor-not-allowed disabled:opacity-50"
+          className="w-full rounded-md border border-input px-3 py-2 text-sm focus:border-ring focus:outline-none disabled:cursor-not-allowed disabled:opacity-50"
         />
         {mentionMembers.length > 0 && (
-          <ul className="absolute bottom-full left-0 z-50 mb-1 max-h-48 w-64 overflow-y-auto rounded-xl border border-white/12 bg-[color:var(--operator-surface)] shadow-lg">
+          <ul className="absolute bottom-full left-0 z-50 mb-1 max-h-48 w-64 overflow-y-auto rounded-md border border-border bg-popover shadow-md">
             {mentionMembers.map((member, idx) => (
               <li key={member.id}>
                 <button
                   type="button"
                   onMouseDown={(e) => { e.preventDefault(); selectMention(member); }}
-                  className={`w-full px-3 py-2 text-left text-sm transition ${idx === mentionIndex ? 'bg-[color:var(--operator-primary)]/20 text-foreground' : 'text-muted-foreground hover:bg-white/6 hover:text-foreground'}`}
+                  className={`w-full px-3 py-2 text-left text-sm transition ${idx === mentionIndex ? 'bg-primary/10 text-primary font-medium' : 'text-muted-foreground hover:bg-muted hover:text-foreground'}`}
                 >
-                  <span className="font-medium text-[color:var(--operator-primary)]">@</span>{member.name}
+                  <span className="font-medium text-primary">@</span>{member.name}
                 </button>
               </li>
             ))}
@@ -304,7 +304,7 @@ export function MemoComposer({
             type="button"
             onClick={() => fileInputRef.current?.click()}
             disabled={disabled || submitting || uploading}
-            className="rounded-xl border border-input px-3 py-2 text-sm text-muted-foreground hover:bg-muted disabled:cursor-not-allowed disabled:opacity-50"
+            className="rounded-md border border-input px-3 py-2 text-sm text-muted-foreground hover:bg-muted disabled:cursor-not-allowed disabled:opacity-50"
           >
             {t('imageUpload')}
           </button>
@@ -313,7 +313,7 @@ export function MemoComposer({
               type="button"
               onClick={handleSubmit}
               disabled={disabled || submitting || uploading || !value.trim()}
-              className="rounded-xl bg-primary px-4 py-2 text-sm font-medium text-primary-foreground hover:opacity-90 disabled:cursor-not-allowed disabled:opacity-50"
+              className="rounded-md bg-primary px-4 py-2 text-sm font-medium text-primary-foreground hover:opacity-90 disabled:cursor-not-allowed disabled:opacity-50"
             >
               {submitting ? t('submitting') : submitLabel}
             </button>

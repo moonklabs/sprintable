@@ -121,8 +121,8 @@ export default function RetroPage() {
       <SectionCard>
         <SectionCardHeader>
           <div className="space-y-1">
-            <h2 className="text-base font-semibold text-[color:var(--operator-foreground)]">{t('newSession')}</h2>
-            <p className="text-sm text-[color:var(--operator-muted)]">{t('surfaceDescription')}</p>
+            <h2 className="text-base font-semibold text-foreground">{t('newSession')}</h2>
+            <p className="text-sm text-muted-foreground">{t('surfaceDescription')}</p>
           </div>
         </SectionCardHeader>
         <SectionCardBody>
@@ -144,22 +144,22 @@ export default function RetroPage() {
       <SectionCard>
         <SectionCardHeader>
           <div className="space-y-1">
-            <h2 className="text-base font-semibold text-[color:var(--operator-foreground)]">{t('sessionList')}</h2>
-            <p className="text-sm text-[color:var(--operator-muted)]">{t('surfaceDescription')}</p>
+            <h2 className="text-base font-semibold text-foreground">{t('sessionList')}</h2>
+            <p className="text-sm text-muted-foreground">{t('surfaceDescription')}</p>
           </div>
         </SectionCardHeader>
         <SectionCardBody>
           {loading ? (
-            <div className="space-y-3">{[1, 2].map((i) => <div key={i} className="h-20 animate-pulse rounded-2xl bg-[color:var(--operator-surface-soft)]" />)}</div>
+            <div className="space-y-3">{[1, 2].map((i) => <div key={i} className="h-20 animate-pulse rounded-md bg-muted" />)}</div>
           ) : sessions.length === 0 ? (
             <EmptyState title={t('noSessions')} description={t('surfaceDescription')} />
           ) : (
             <div className="space-y-3">
               {sessions.map((session) => (
-                <div key={session.id} className="flex flex-col gap-3 rounded-2xl border border-white/8 bg-[color:var(--operator-surface-soft)]/55 p-4 md:flex-row md:items-center md:justify-between">
+                <div key={session.id} className="flex flex-col gap-3 rounded-md border border-border bg-card p-4 shadow-sm md:flex-row md:items-center md:justify-between">
                   <div className="space-y-1">
-                    <p className="text-sm font-semibold text-[color:var(--operator-foreground)]">{session.title}</p>
-                    <p className="text-xs text-[color:var(--operator-muted)]">{new Date(session.created_at).toLocaleDateString()}</p>
+                    <p className="text-sm font-semibold text-foreground">{session.title}</p>
+                    <p className="text-xs text-muted-foreground">{new Date(session.created_at).toLocaleDateString()}</p>
                   </div>
                   <Badge variant={PHASE_VARIANTS[session.phase] ?? 'outline'}>
                     {PHASE_KEYS[session.phase] ? t(PHASE_KEYS[session.phase] as 'phaseCollect') : session.phase}

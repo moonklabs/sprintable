@@ -250,11 +250,11 @@ export function AgentsDashboard({ deployments: initialDeployments }: { deploymen
           <SectionCardHeader>
             <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
               <div className="space-y-1">
-                <h2 className="text-base font-semibold text-[color:var(--operator-foreground)]">{t('statusListTitle')}</h2>
-                <p className="text-sm text-[color:var(--operator-muted)]">{t('statusListBody')}</p>
+                <h2 className="text-base font-semibold text-foreground">{t('statusListTitle')}</h2>
+                <p className="text-sm text-muted-foreground">{t('statusListBody')}</p>
               </div>
               <div className="flex items-center gap-3">
-                <span className="text-xs text-[color:var(--operator-muted)]">
+                <span className="text-xs text-muted-foreground">
                   {t('lastRefreshed', { time: lastRefreshed.toLocaleTimeString() })}
                 </span>
                 <Badge variant="chip" className="inline-flex items-center gap-1">
@@ -267,10 +267,10 @@ export function AgentsDashboard({ deployments: initialDeployments }: { deploymen
           </SectionCardHeader>
           <SectionCardBody className="space-y-3">
             {deployments.length === 0 ? (
-              <div className="rounded-3xl border border-dashed border-white/12 bg-white/4 px-5 py-10 text-center">
-                <Bot className="mx-auto size-10 text-[color:var(--operator-primary-soft)]" />
-                <h3 className="mt-4 text-lg font-semibold text-[color:var(--operator-foreground)]">{t('emptyDeploymentsTitle')}</h3>
-                <p className="mt-2 text-sm text-[color:var(--operator-muted)]">{t('emptyDeploymentsBody')}</p>
+              <div className="rounded-md border border-dashed border-border bg-muted/30 px-5 py-10 text-center">
+                <Bot className="mx-auto size-10 text-primary" />
+                <h3 className="mt-4 text-lg font-semibold text-foreground">{t('emptyDeploymentsTitle')}</h3>
+                <p className="mt-2 text-sm text-muted-foreground">{t('emptyDeploymentsBody')}</p>
                 <div className="mt-5 flex flex-wrap justify-center gap-2">
                   <Link href="/agents/workflow" className={buttonVariants({ variant: 'glass', size: 'lg' })}>{t('workflowEditorCta')}</Link>
                   <Link href="/agents/deploy" className={buttonVariants({ variant: 'hero', size: 'lg' })}>{t('openWizard')}</Link>
@@ -282,11 +282,11 @@ export function AgentsDashboard({ deployments: initialDeployments }: { deploymen
               const latestFailure = hasActiveFailureSignal(deployment) ? deployment.latest_failed_run : null;
 
               return (
-                <div key={deployment.id} className="rounded-3xl border border-white/8 bg-white/4 px-4 py-4">
+                <div key={deployment.id} className="rounded-md border border-border bg-muted/30 px-4 py-4">
                   <div className="flex flex-col gap-3 lg:flex-row lg:items-start lg:justify-between">
                     <div className="min-w-0 flex-1 space-y-2">
                       <div className="flex flex-wrap items-center gap-2">
-                        <h3 className="text-sm font-semibold text-[color:var(--operator-foreground)]">{deployment.name}</h3>
+                        <h3 className="text-sm font-semibold text-foreground">{deployment.name}</h3>
                         <Badge variant={statusBadgeVariant(deployment.status)}>
                           {statusLabel(deployment.status, t)}
                         </Badge>
@@ -296,12 +296,12 @@ export function AgentsDashboard({ deployments: initialDeployments }: { deploymen
                           </Badge>
                         )}
                       </div>
-                      <p className="text-sm text-[color:var(--operator-muted)]">
+                      <p className="text-sm text-muted-foreground">
                         {deployment.persona_name
                           ? t('statusPersonaLine', { agent: deployment.agent_name, persona: deployment.persona_name })
                           : t('statusAgentLine', { agent: deployment.agent_name })}
                       </p>
-                      <div className="grid gap-2 text-xs text-[color:var(--operator-muted)] sm:grid-cols-2 xl:grid-cols-4">
+                      <div className="grid gap-2 text-xs text-muted-foreground sm:grid-cols-2 xl:grid-cols-4">
                         <span>{t('statusRuntime', { runtime: deployment.runtime })}</span>
                         <span>{t('statusModel', { model: deployment.model ?? t('statusModelUnknown') })}</span>
                         <span className="inline-flex items-center gap-1">
@@ -343,7 +343,7 @@ export function AgentsDashboard({ deployments: initialDeployments }: { deploymen
                           {t('resumeBtn')}
                         </Button>
                       )}
-                      <div className="flex items-center gap-2 text-xs text-[color:var(--operator-muted)]">
+                      <div className="flex items-center gap-2 text-xs text-muted-foreground">
                         {deployment.status === 'DEPLOY_FAILED' ? <TriangleAlert className="size-4 text-amber-300" /> : <Clock3 className="size-4" />}
                         <span>
                           {deployment.last_run_at
@@ -351,35 +351,35 @@ export function AgentsDashboard({ deployments: initialDeployments }: { deploymen
                             : t('lastRunEmpty')}
                         </span>
                       </div>
-                      <span className="text-[11px] text-[color:var(--operator-muted)]">
+                      <span className="text-[11px] text-muted-foreground">
                         {t('statusUpdatedAt', { time: formatLocalTime(deployment.updated_at) })}
                       </span>
                     </div>
                   </div>
 
                   <div className="mt-4 grid gap-3 xl:grid-cols-[minmax(0,1.3fr)_minmax(0,1fr)]">
-                    <div className="rounded-2xl border border-white/8 bg-black/10 px-4 py-4">
+                    <div className="rounded-md border border-border bg-muted/30 px-4 py-4">
                       <div className="flex flex-wrap items-start justify-between gap-3">
                         <div>
-                          <h4 className="text-sm font-semibold text-[color:var(--operator-foreground)]">{t('healthSummaryTitle')}</h4>
-                          <p className="mt-1 text-xs text-[color:var(--operator-muted)]">{t('healthSummaryBody')}</p>
+                          <h4 className="text-sm font-semibold text-foreground">{t('healthSummaryTitle')}</h4>
+                          <p className="mt-1 text-xs text-muted-foreground">{t('healthSummaryBody')}</p>
                         </div>
                         <Badge variant={healthBadgeVariant(healthState)}>
                           {t(`healthStateLabel_${healthState}`)}
                         </Badge>
                       </div>
-                      <p className="mt-3 text-sm text-[color:var(--operator-foreground)]">{t(`healthStateBody_${healthState}`)}</p>
+                      <p className="mt-3 text-sm text-foreground">{t(`healthStateBody_${healthState}`)}</p>
 
                       {latestFailure ? (
-                        <div className="mt-3 rounded-2xl border border-white/8 bg-white/4 px-3 py-3">
-                          <p className="text-[11px] font-medium uppercase tracking-[0.12em] text-[color:var(--operator-muted)]">{t('recentFailureTitle')}</p>
-                          <p className="mt-1 text-sm font-medium text-[color:var(--operator-foreground)]">
+                        <div className="mt-3 rounded-md border border-border bg-muted/30 px-3 py-3">
+                          <p className="text-[11px] font-medium uppercase tracking-[0.12em] text-muted-foreground">{t('recentFailureTitle')}</p>
+                          <p className="mt-1 text-sm font-medium text-foreground">
                             {getFailureHeadline(latestFailure) ?? t('recentFailureFallback')}
                           </p>
                           {latestFailure.result_summary && (
-                            <p className="mt-1 text-xs text-[color:var(--operator-muted)]">{latestFailure.result_summary}</p>
+                            <p className="mt-1 text-xs text-muted-foreground">{latestFailure.result_summary}</p>
                           )}
-                          <div className="mt-2 flex flex-wrap items-center gap-2 text-xs text-[color:var(--operator-muted)]">
+                          <div className="mt-2 flex flex-wrap items-center gap-2 text-xs text-muted-foreground">
                             <span>{t('recentFailureAt', { time: formatLocalTime(latestFailure.failed_at) })}</span>
                             {latestFailure.last_error_code && <Badge variant="outline">{latestFailure.last_error_code}</Badge>}
                             {latestFailure.failure_disposition && (
@@ -391,23 +391,23 @@ export function AgentsDashboard({ deployments: initialDeployments }: { deploymen
                           </div>
                         </div>
                       ) : (
-                        <p className="mt-3 text-xs text-[color:var(--operator-muted)]">{t('recentFailureEmpty')}</p>
+                        <p className="mt-3 text-xs text-muted-foreground">{t('recentFailureEmpty')}</p>
                       )}
                     </div>
 
-                    <div className="rounded-2xl border border-white/8 bg-black/10 px-4 py-4">
-                      <h4 className="text-sm font-semibold text-[color:var(--operator-foreground)]">{t('recoveryCuesTitle')}</h4>
-                      <p className="mt-1 text-xs text-[color:var(--operator-muted)]">{t('recoveryCuesBody')}</p>
+                    <div className="rounded-md border border-border bg-muted/30 px-4 py-4">
+                      <h4 className="text-sm font-semibold text-foreground">{t('recoveryCuesTitle')}</h4>
+                      <p className="mt-1 text-xs text-muted-foreground">{t('recoveryCuesBody')}</p>
 
                       {recoveryCues.length === 0 ? (
-                        <div className="mt-3 rounded-2xl border border-dashed border-white/10 bg-white/4 px-3 py-3">
-                          <p className="text-sm font-medium text-[color:var(--operator-foreground)]">{t('recoveryNoneTitle')}</p>
-                          <p className="mt-1 text-xs text-[color:var(--operator-muted)]">{t('recoveryNoneBody')}</p>
+                        <div className="mt-3 rounded-md border border-dashed border-border bg-muted/30 px-3 py-3">
+                          <p className="text-sm font-medium text-foreground">{t('recoveryNoneTitle')}</p>
+                          <p className="mt-1 text-xs text-muted-foreground">{t('recoveryNoneBody')}</p>
                         </div>
                       ) : (
                         <div className="mt-3 space-y-2">
                           {recoveryCues.map((cue) => (
-                            <div key={`${deployment.id}-${cue}`} className="rounded-2xl border border-white/8 bg-white/4 px-3 py-3">
+                            <div key={`${deployment.id}-${cue}`} className="rounded-md border border-border bg-muted/30 px-3 py-3">
                               <div className="flex flex-wrap items-start justify-between gap-2">
                                 <div className="min-w-0 flex-1">
                                   <div className="flex items-center gap-2">
@@ -415,7 +415,7 @@ export function AgentsDashboard({ deployments: initialDeployments }: { deploymen
                                       {t(`recoveryCueTitle_${cue}`)}
                                     </Badge>
                                   </div>
-                                  <p className="mt-2 text-xs text-[color:var(--operator-muted)]">{t(`recoveryCueBody_${cue}`)}</p>
+                                  <p className="mt-2 text-xs text-muted-foreground">{t(`recoveryCueBody_${cue}`)}</p>
                                 </div>
                                 <div className="flex flex-wrap gap-2">
                                   {cue === 'hitl' && (

@@ -43,8 +43,8 @@ const NAV_GROUPS: NavGroup[] = [
       { key: 'webhooks', labelKey: 'webhooks', hash: '#webhooks' },
       { key: 'ai', labelKey: 'aiSettings', hash: '#ai', projectOnly: true },
       { key: 'mcp', labelKey: 'mcpConnectionsLabel', hash: '#mcp', projectOnly: true },
-      { key: 'byom', labelKey: 'byomKeys', hash: '#byom', projectOnly: true },
-      { key: 'slack', labelKey: 'slackIntegration', hash: '#slack' },
+      { key: 'byom', labelKey: 'byomKeys.title', hash: '#byom', projectOnly: true },
+      { key: 'slack', labelKey: 'slackIntegration.title', hash: '#slack' },
     ],
   },
   {
@@ -104,7 +104,7 @@ export function SettingsSidebar({ isAdmin, currentProjectId }: SettingsSidebarPr
           <div key={group.key}>
             <button
               onClick={() => toggleGroup(group.key)}
-              className="flex w-full items-center justify-between text-xs font-medium uppercase tracking-[0.18em] text-[color:var(--operator-muted)] hover:text-[color:var(--operator-foreground)] transition"
+              className="flex w-full items-center justify-between text-xs font-medium uppercase tracking-[0.18em] text-muted-foreground hover:text-foreground transition"
             >
               {t(group.titleKey)}
               {isExpanded ? (
@@ -125,10 +125,10 @@ export function SettingsSidebar({ isAdmin, currentProjectId }: SettingsSidebarPr
                         key={item.key}
                         href={item.hash}
                         className={cn(
-                          'block rounded-lg px-3 py-2 text-sm transition',
+                          'block rounded-md px-3 py-2 text-sm transition',
                           active
-                            ? 'bg-[color:var(--operator-primary)]/14 text-[color:var(--operator-primary-soft)] shadow-[inset_0_0_0_1px_rgba(182,196,255,0.14)]'
-                            : 'text-[color:var(--operator-foreground)]/88 hover:bg-white/6 hover:text-[color:var(--operator-foreground)]'
+                            ? 'bg-primary/10 text-primary font-medium'
+                            : 'text-muted-foreground hover:bg-muted hover:text-foreground'
                         )}
                       >
                         {t(item.labelKey)}
@@ -141,10 +141,10 @@ export function SettingsSidebar({ isAdmin, currentProjectId }: SettingsSidebarPr
                       key={item.key}
                       href={item.hash}
                       className={cn(
-                        'block rounded-lg px-3 py-2 text-sm transition',
+                        'block rounded-md px-3 py-2 text-sm transition',
                         active
-                          ? 'bg-[color:var(--operator-primary)]/14 text-[color:var(--operator-primary-soft)] shadow-[inset_0_0_0_1px_rgba(182,196,255,0.14)]'
-                          : 'text-[color:var(--operator-foreground)]/88 hover:bg-white/6 hover:text-[color:var(--operator-foreground)]'
+                          ? 'bg-primary/10 text-primary font-medium'
+                          : 'text-muted-foreground hover:bg-muted hover:text-foreground'
                       )}
                       onClick={(e) => {
                         e.preventDefault();

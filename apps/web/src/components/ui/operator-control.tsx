@@ -2,10 +2,10 @@ import * as React from 'react';
 import { cn } from '@/lib/utils';
 import { Input } from '@/components/ui/input';
 
-const operatorControlClassName = 'rounded-2xl border border-white/10 bg-[color:var(--operator-surface-soft)] px-3 py-2 text-sm text-[color:var(--operator-foreground)] placeholder:text-[color:var(--operator-muted)] outline-none transition focus:border-[color:var(--operator-primary)]/35';
+const operatorControlClassName = 'flex w-full rounded-md border border-input bg-background px-3 py-2 text-sm ring-offset-background file:border-0 file:bg-transparent file:text-sm file:font-medium placeholder:text-muted-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 disabled:cursor-not-allowed disabled:opacity-50 transition-colors';
 
 export function OperatorInput({ className, ...props }: React.ComponentProps<typeof Input>) {
-  return <Input className={cn(operatorControlClassName, 'h-11 bg-[color:var(--operator-surface-soft)]', className)} {...props} />;
+  return <Input className={cn(operatorControlClassName, 'h-10', className)} {...props} />;
 }
 
 export function OperatorTextarea({ className, ...props }: React.ComponentProps<'textarea'>) {
@@ -20,7 +20,7 @@ export function OperatorTextarea({ className, ...props }: React.ComponentProps<'
 export function OperatorSelect({ className, ...props }: React.ComponentProps<'select'>) {
   return (
     <select
-      className={cn(operatorControlClassName, 'h-11 w-full pr-8', className)}
+      className={cn(operatorControlClassName, 'h-10 pr-8 appearance-none', className)}
       {...props}
     />
   );

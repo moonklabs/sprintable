@@ -146,7 +146,7 @@ export function AgentApiKeyManager({ agentId, agentName }: AgentApiKeyManagerPro
           {apiKeys.map((key) => (
             <div
               key={key.id}
-              className="flex items-center justify-between p-3 border rounded-lg"
+              className="flex items-center justify-between p-3 border rounded-md"
             >
               <div>
                 <p className="font-mono text-sm">{key.key_prefix}...</p>

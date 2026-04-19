@@ -51,7 +51,7 @@ function mergeReaderName(memo: MemoDetailState, readerId: string, readerName: st
   };
 }
 
-const markdownClassName = 'prose prose-sm max-w-none text-foreground/90 [&_img]:mt-2 [&_img]:max-h-96 [&_img]:max-w-full [&_img]:rounded-xl [&_a]:break-all';
+const markdownClassName = 'prose prose-sm max-w-none text-foreground/90 [&_img]:mt-2 [&_img]:max-h-96 [&_img]:max-w-full [&_img]:rounded-md [&_a]:break-all';
 
 export function mergeReply(memo: MemoDetailState, reply: MemoReply) {
   const replies = memo.replies ?? [];
@@ -288,12 +288,12 @@ export function MemoDetail({
             </div>
             <div className="flex gap-2">
               {onConvertToStory ? (
-                <button onClick={() => onConvertToStory(memoState.id)} className="rounded-xl bg-muted px-3 py-2 text-xs font-medium text-foreground hover:bg-muted/80">
+                <button onClick={() => onConvertToStory(memoState.id)} className="rounded-md bg-muted px-3 py-2 text-xs font-medium text-foreground hover:bg-muted/80">
                   {t('convertToStory')}
                 </button>
               ) : null}
               {memoState.status === 'open' ? (
-                <button onClick={handleResolve} className="rounded-xl bg-emerald-600 px-3 py-2 text-xs font-medium text-white hover:bg-emerald-700">
+                <button onClick={handleResolve} className="rounded-md bg-emerald-600 px-3 py-2 text-xs font-medium text-white hover:bg-emerald-700">
                   {t('resolve')}
                 </button>
               ) : null}
@@ -329,7 +329,7 @@ export function MemoDetail({
             </SectionCardHeader>
             <SectionCardBody className="space-y-3">
               {memoState.replies?.length ? memoState.replies.map((r) => (
-                <div key={r.id} className="rounded-xl border border-border/60 bg-muted/30 p-3">
+                <div key={r.id} className="rounded-md border border-border/60 bg-muted/30 p-3">
                   <div className="flex flex-wrap items-center gap-2 text-xs text-muted-foreground">
                     <span className="font-medium text-foreground">{r.created_by ? (memberMap[r.created_by] ?? tc('unknown')) : tc('deletedUser')}</span>
                     <span>{formatLocaleDateTime(r.created_at, locale)}</span>
@@ -367,7 +367,7 @@ export function MemoDetail({
               {memoState.linked_docs?.length ? (
                 <div className="space-y-2">
                   {memoState.linked_docs.map((doc) => (
-                    <div key={doc.id} className="rounded-xl border border-border/60 px-3 py-2 text-sm">
+                    <div key={doc.id} className="rounded-md border border-border/60 px-3 py-2 text-sm">
                       <div className="font-medium">{doc.slug ? <a href={`/docs?slug=${encodeURIComponent(doc.slug)}`} className="hover:underline">{doc.title}</a> : doc.title}</div>
                       {doc.slug ? <div className="text-xs text-muted-foreground">/{doc.slug}</div> : null}
                     </div>
@@ -376,13 +376,13 @@ export function MemoDetail({
               ) : <p className="text-sm text-muted-foreground">{t('noLinkedDocs')}</p>}
 
               {projectId || memoState.project_id ? (
-                <div className="mt-4 space-y-3 rounded-2xl border border-border/60 bg-muted/20 p-3">
+                <div className="mt-4 space-y-3 rounded-md border border-border/60 bg-muted/20 p-3">
                   <div className="flex items-center justify-between gap-2">
                     <div className="text-sm font-semibold text-foreground">{t('docLinkTools')}</div>
                     <button
                       type="button"
                       onClick={() => setShowCreateDoc((prev) => !prev)}
-                      className="rounded-xl border border-input px-3 py-1.5 text-xs text-muted-foreground hover:bg-muted"
+                      className="rounded-md border border-input px-3 py-1.5 text-xs text-muted-foreground hover:bg-muted"
                     >
                       {showCreateDoc ? t('hideCreateDoc') : t('createDocFromMemo')}
                     </button>
@@ -394,12 +394,12 @@ export function MemoDetail({
                       value={docSearch}
                       onChange={(event) => setDocSearch(event.target.value)}
                       placeholder={t('searchDocs')}
-                      className="w-full rounded-xl border border-input px-3 py-2 text-sm focus:border-ring focus:outline-none"
+                      className="w-full rounded-md border border-input px-3 py-2 text-sm focus:border-ring focus:outline-none"
                     />
                     <select
                       value={selectedDocId}
                       onChange={(event) => setSelectedDocId(event.target.value)}
-                      className="w-full rounded-xl border border-input px-3 py-2 text-sm focus:border-ring focus:outline-none"
+                      className="w-full rounded-md border border-input px-3 py-2 text-sm focus:border-ring focus:outline-none"
                     >
                       <option value="">{t('selectDocToLink')}</option>
                       {filteredDocs.map((doc) => (
@@ -410,26 +410,26 @@ export function MemoDetail({
                       type="button"
                       onClick={handleLinkExistingDoc}
                       disabled={!selectedDocId || linkingDoc}
-                      className="w-full rounded-xl bg-primary px-4 py-2 text-sm font-medium text-primary-foreground hover:opacity-90 disabled:cursor-not-allowed disabled:opacity-50"
+                      className="w-full rounded-md bg-primary px-4 py-2 text-sm font-medium text-primary-foreground hover:opacity-90 disabled:cursor-not-allowed disabled:opacity-50"
                     >
                       {linkingDoc ? t('linkingDoc') : t('linkSelectedDoc')}
                     </button>
                   </div>
 
                   {showCreateDoc ? (
-                    <div className="space-y-2 rounded-2xl border border-border/60 bg-background p-3">
+                    <div className="space-y-2 rounded-md border border-border/60 bg-background p-3">
                       <input
                         type="text"
                         value={newDocTitle}
                         onChange={(event) => setNewDocTitle(event.target.value)}
                         placeholder={t('docTitlePlaceholder')}
-                        className="w-full rounded-xl border border-input px-3 py-2 text-sm focus:border-ring focus:outline-none"
+                        className="w-full rounded-md border border-input px-3 py-2 text-sm focus:border-ring focus:outline-none"
                       />
                       <button
                         type="button"
                         onClick={handleCreateDoc}
                         disabled={creatingDoc}
-                        className="w-full rounded-xl bg-emerald-600 px-4 py-2 text-sm font-medium text-white hover:bg-emerald-700 disabled:cursor-not-allowed disabled:opacity-50"
+                        className="w-full rounded-md bg-emerald-600 px-4 py-2 text-sm font-medium text-white hover:bg-emerald-700 disabled:cursor-not-allowed disabled:opacity-50"
                       >
                         {creatingDoc ? t('creatingDoc') : t('createAndLinkDoc')}
                       </button>

@@ -1,0 +1,1 @@
+- [Decision] Final QA report generated in .sisyphus/notepads/full-usability-browser-qa/final-report.md summarizing critical Supabase blockers and functional gaps in OSS mode.

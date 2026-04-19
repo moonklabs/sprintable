@@ -169,7 +169,7 @@ export function MemoCreateForm({ members, onSubmit, onCancel, initialTitle, draf
           <select
             value={memoType}
             onChange={(e) => setMemoType(e.target.value)}
-            className="rounded-xl border border-input px-3 py-2 text-sm"
+            className="rounded-md border border-input px-3 py-2 text-sm"
           >
             <option value="memo">{t('typeMemo')}</option>
             <option value="task">{t('typeTask')}</option>
@@ -180,7 +180,7 @@ export function MemoCreateForm({ members, onSubmit, onCancel, initialTitle, draf
           </select>
           <div className="space-y-2">
             <div className="text-xs font-medium uppercase tracking-wide text-muted-foreground">{t('assignees')}</div>
-            <div className="max-h-32 space-y-1 overflow-y-auto rounded-xl border border-input p-2">
+            <div className="max-h-32 space-y-1 overflow-y-auto rounded-md border border-input p-2">
               {members.length === 0 ? (
                 <div className="text-xs text-muted-foreground">{t('noMembers')}</div>
               ) : (
@@ -207,10 +207,10 @@ export function MemoCreateForm({ members, onSubmit, onCancel, initialTitle, draf
         </div>
 
         <div className="flex justify-end gap-2">
-          <button onClick={onCancel} className="rounded-xl border border-input px-4 py-2 text-sm text-muted-foreground hover:bg-muted">
+          <button onClick={onCancel} className="rounded-md border border-input px-4 py-2 text-sm text-muted-foreground hover:bg-muted">
             {tc('cancel')}
           </button>
-          <button onClick={handleSubmit} disabled={!content.trim() || submitting} className="rounded-xl bg-primary px-4 py-2 text-sm font-medium text-primary-foreground hover:opacity-90 disabled:opacity-50">
+          <button onClick={handleSubmit} disabled={!content.trim() || submitting} className="rounded-md bg-primary px-4 py-2 text-sm font-medium text-primary-foreground hover:opacity-90 disabled:opacity-50">
             {submitting ? t('submitting') : tc('create')}
           </button>
         </div>

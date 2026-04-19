@@ -202,15 +202,15 @@ export function AgentRunsList() {
                 type="date"
                 value={fromDate}
                 onChange={(e) => setFromDate(e.target.value)}
-                className="rounded-xl border border-white/12 bg-white/5 px-3 py-1.5 text-sm text-[color:var(--operator-foreground)] outline-none"
+                className="rounded-md border border-input bg-background px-3 py-1.5 text-sm text-foreground outline-none"
                 aria-label={t('fromDate')}
               />
-              <span className="text-xs text-[color:var(--operator-muted)]">~</span>
+              <span className="text-xs text-muted-foreground">~</span>
               <input
                 type="date"
                 value={toDate}
                 onChange={(e) => setToDate(e.target.value)}
-                className="rounded-xl border border-white/12 bg-white/5 px-3 py-1.5 text-sm text-[color:var(--operator-foreground)] outline-none"
+                className="rounded-md border border-input bg-background px-3 py-1.5 text-sm text-foreground outline-none"
                 aria-label={t('toDate')}
               />
             </div>
@@ -220,7 +220,7 @@ export function AgentRunsList() {
           {loading ? (
             <div className="space-y-3">
               {[1, 2, 3, 4, 5].map((i) => (
-                <div key={i} className="h-20 animate-pulse rounded-2xl bg-[color:var(--operator-surface-soft)]" />
+                <div key={i} className="h-20 animate-pulse rounded-md bg-muted" />
               ))}
             </div>
           ) : runs.length === 0 ? (
@@ -230,12 +230,12 @@ export function AgentRunsList() {
               {runs.map((run) => (
                 <div
                   key={run.id}
-                  className="rounded-2xl border border-white/8 bg-white/4 px-4 py-4 transition hover:border-[color:var(--operator-primary)]/20 hover:bg-white/5"
+                  className="rounded-md border border-border bg-muted/30 px-4 py-4 transition hover:border-primary/20 hover:bg-muted"
                 >
                   <div className="flex flex-col gap-3 lg:flex-row lg:items-start lg:justify-between">
                     <div className="space-y-2">
                       <div className="flex flex-wrap items-center gap-2">
-                        <h3 className="text-sm font-semibold text-[color:var(--operator-foreground)]">
+                        <h3 className="text-sm font-semibold text-foreground">
                           {run.agent_name ?? t('unknownAgent')}
                         </h3>
                         <Badge variant={STATUS_BADGE_VARIANT[run.status] ?? 'outline'}>
@@ -252,13 +252,13 @@ export function AgentRunsList() {
                         {run.memo_id && (
                           <Link
                             href={getTriggerMemoHref(run.memo_id)}
-                            className="inline-flex items-center rounded-full border border-white/12 bg-white/6 px-2.5 py-1 text-[11px] font-medium text-[color:var(--operator-foreground)] transition hover:border-[color:var(--operator-primary)]/25 hover:text-[color:var(--operator-primary-soft)]"
+                            className="inline-flex items-center rounded-full border border-border bg-muted/30 px-2.5 py-1 text-[11px] font-medium text-foreground transition hover:border-primary/25 hover:text-primary"
                           >
                             {t('openMemo')}
                           </Link>
                         )}
                       </div>
-                      <div className="flex flex-wrap items-center gap-4 text-xs text-[color:var(--operator-muted)]">
+                      <div className="flex flex-wrap items-center gap-4 text-xs text-muted-foreground">
                         <span className="flex items-center gap-1">
                           <Clock3 className="size-3.5" />
                           {formatDuration(run.duration_ms)}
@@ -278,7 +278,7 @@ export function AgentRunsList() {
                       </div>
                     </div>
                     <div className="flex flex-col items-start gap-3 lg:items-end">
-                      <div className="flex items-center gap-2 text-xs text-[color:var(--operator-muted)]">
+                      <div className="flex items-center gap-2 text-xs text-muted-foreground">
                         <Activity className="size-3.5" />
                         <span>{toLocaleDateStr(run.created_at, locale)}</span>
                       </div>

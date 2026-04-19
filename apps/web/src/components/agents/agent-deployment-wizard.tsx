@@ -454,24 +454,24 @@ export function AgentDeploymentWizard({
   const renderStep = () => {
     if (!agent) {
       return (
-        <GlassPanel className="border-dashed border-white/14 bg-[color:var(--operator-surface-soft)]/28 p-6 text-center">
+        <div className="rounded-md border border-dashed border-border bg-muted/30 p-6 text-center">
           <AlertTriangle className="mx-auto size-9 text-amber-300" />
-          <h3 className="mt-4 text-lg font-semibold text-[color:var(--operator-foreground)]">{t('noAgentTitle')}</h3>
-          <p className="mt-2 text-sm text-[color:var(--operator-muted)]">{t('noAgentBody')}</p>
-        </GlassPanel>
+          <h3 className="mt-4 text-lg font-semibold text-foreground">{t('noAgentTitle')}</h3>
+          <p className="mt-2 text-sm text-muted-foreground">{t('noAgentBody')}</p>
+        </div>
       );
     }
 
     if (!personas.length) {
       return (
-        <GlassPanel className="border-dashed border-white/14 bg-[color:var(--operator-surface-soft)]/28 p-6 text-center">
-          <Sparkles className="mx-auto size-9 text-[color:var(--operator-primary-soft)]" />
-          <h3 className="mt-4 text-lg font-semibold text-[color:var(--operator-foreground)]">{t('emptyPersonasTitle')}</h3>
-          <p className="mt-2 text-sm text-[color:var(--operator-muted)]">{t('emptyPersonasBody')}</p>
+        <div className="rounded-md border border-dashed border-border bg-muted/30 p-6 text-center">
+          <Sparkles className="mx-auto size-9 text-primary" />
+          <h3 className="mt-4 text-lg font-semibold text-foreground">{t('emptyPersonasTitle')}</h3>
+          <p className="mt-2 text-sm text-muted-foreground">{t('emptyPersonasBody')}</p>
           <div className="mt-5">
             <Link href="/agents/personas/new" className={buttonVariants({ variant: 'hero', size: 'lg' })}>{t('createCustomPersona')}</Link>
           </div>
-        </GlassPanel>
+        </div>
       );
     }
 
@@ -480,17 +480,17 @@ export function AgentDeploymentWizard({
         <div className="space-y-4">
           <div className="flex items-center justify-between gap-3">
             <div>
-              <p className="text-sm font-medium text-[color:var(--operator-foreground)]">{t('personaStepTitle')}</p>
-              <p className="text-sm text-[color:var(--operator-muted)]">{t('personaStepBody')}</p>
+              <p className="text-sm font-medium text-foreground">{t('personaStepTitle')}</p>
+              <p className="text-sm text-muted-foreground">{t('personaStepBody')}</p>
             </div>
             <Link href="/agents/personas/new" className={buttonVariants({ variant: 'glass', size: 'lg' })}>{t('createCustomPersona')}</Link>
           </div>
           {[{ label: t('builtInPersonas'), personas: builtinPersonas }, { label: t('customPersonas'), personas: customPersonas }].map((group) => (
             <div key={group.label} className="space-y-3">
-              <div className="text-xs uppercase tracking-[0.2em] text-[color:var(--operator-muted)]">{group.label}</div>
+              <div className="text-xs uppercase tracking-[0.2em] text-muted-foreground">{group.label}</div>
               <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-3">
                 {group.personas.length === 0 ? (
-                  <div className="rounded-3xl border border-dashed border-white/12 bg-white/4 px-4 py-5 text-sm text-[color:var(--operator-muted)]">
+                  <div className="rounded-md border border-dashed border-border bg-muted/30 px-4 py-5 text-sm text-muted-foreground">
                     {t('emptyPersonaGroup')}
                   </div>
                 ) : group.personas.map((persona) => {
@@ -503,23 +503,23 @@ export function AgentDeploymentWizard({
                         setSelectedPersonaId(persona.id);
                         setDeploymentName(`${persona.name} deployment`);
                       }}
-                      className={`rounded-3xl border px-4 py-4 text-left transition ${selected ? 'border-[color:var(--operator-primary)]/45 bg-[color:var(--operator-primary)]/12 shadow-[0_18px_40px_rgba(102,102,255,0.16)]' : 'border-white/10 bg-white/4 hover:bg-white/8'}`}
+                      className={`rounded-md border px-4 py-4 text-left transition ${selected ? 'border-primary/40 bg-primary/10 shadow-sm' : 'border-border bg-muted/30 hover:bg-muted'}`}
                     >
                       <div className="flex items-start justify-between gap-3">
                         <div className="space-y-2">
                           <div className="flex flex-wrap items-center gap-2">
-                            <h3 className="text-sm font-semibold text-[color:var(--operator-foreground)]">{persona.name}</h3>
+                            <h3 className="text-sm font-semibold text-foreground">{persona.name}</h3>
                             <Badge variant={persona.is_builtin ? 'success' : 'outline'}>{persona.is_builtin ? t('builtInBadge') : t('customBadge')}</Badge>
                           </div>
-                          <p className="text-sm leading-6 text-[color:var(--operator-muted)]">{persona.description ?? t('personaDescriptionFallback')}</p>
+                          <p className="text-sm leading-6 text-muted-foreground">{persona.description ?? t('personaDescriptionFallback')}</p>
                           {!persona.is_builtin && (persona.project_name || persona.agent_name) ? (
-                            <div className="flex flex-wrap items-center gap-2 text-xs text-[color:var(--operator-muted)]">
+                            <div className="flex flex-wrap items-center gap-2 text-xs text-muted-foreground">
                               {persona.project_name ? <Badge variant="outline">{t('personaProjectBadge', { project: persona.project_name })}</Badge> : null}
                               {persona.agent_name ? <Badge variant="outline">{t('personaAgentBadge', { agent: persona.agent_name })}</Badge> : null}
                             </div>
                           ) : null}
                         </div>
-                        {selected ? <CheckCircle2 className="size-5 text-[color:var(--operator-primary-soft)]" /> : null}
+                        {selected ? <CheckCircle2 className="size-5 text-primary" /> : null}
                       </div>
                     </button>
                   );
@@ -535,8 +535,8 @@ export function AgentDeploymentWizard({
       return (
         <div className="space-y-5">
           <div>
-            <p className="text-sm font-medium text-[color:var(--operator-foreground)]">{t('modelStepTitle')}</p>
-            <p className="text-sm text-[color:var(--operator-muted)]">{t('modelStepBody')}</p>
+            <p className="text-sm font-medium text-foreground">{t('modelStepTitle')}</p>
+            <p className="text-sm text-muted-foreground">{t('modelStepBody')}</p>
           </div>
 
           <div className="grid gap-3 md:grid-cols-2">
@@ -547,14 +547,14 @@ export function AgentDeploymentWizard({
                   key={mode}
                   type="button"
                   onClick={() => setModelMode(mode)}
-                  className={`rounded-3xl border px-4 py-4 text-left transition ${selected ? 'border-[color:var(--operator-primary)]/45 bg-[color:var(--operator-primary)]/12' : 'border-white/10 bg-white/4 hover:bg-white/8'}`}
+                  className={`rounded-md border px-4 py-4 text-left transition ${selected ? 'border-primary/40 bg-primary/10' : 'border-border bg-muted/30 hover:bg-muted'}`}
                 >
                   <div className="flex items-center justify-between gap-3">
                     <div>
-                      <p className="text-sm font-semibold text-[color:var(--operator-foreground)]">{mode === 'managed' ? t('modeManaged') : t('modeByom')}</p>
-                      <p className="mt-1 text-sm text-[color:var(--operator-muted)]">{mode === 'managed' ? t('modeManagedBody') : t('modeByomBody')}</p>
+                      <p className="text-sm font-semibold text-foreground">{mode === 'managed' ? t('modeManaged') : t('modeByom')}</p>
+                      <p className="mt-1 text-sm text-muted-foreground">{mode === 'managed' ? t('modeManagedBody') : t('modeByomBody')}</p>
                     </div>
-                    {selected ? <CheckCircle2 className="size-5 text-[color:var(--operator-primary-soft)]" /> : null}
+                    {selected ? <CheckCircle2 className="size-5 text-primary" /> : null}
                   </div>
                 </button>
               );
@@ -563,18 +563,18 @@ export function AgentDeploymentWizard({
 
           <div className="grid gap-4 lg:grid-cols-3">
             <div className="space-y-2 lg:col-span-1">
-              <label className="text-xs uppercase tracking-[0.18em] text-[color:var(--operator-muted)]">{t('providerLabel')}</label>
+              <label className="text-xs uppercase tracking-[0.18em] text-muted-foreground">{t('providerLabel')}</label>
               <OperatorSelect value={deploymentProvider} onChange={(event) => setProvider(event.target.value as LLMProvider)} disabled={Boolean(lockedByomProvider)}>
                 {(['openai', 'anthropic', 'google', 'groq', 'openai-compatible'] as LLMProvider[]).map((option) => (
                   <option key={option} value={option}>{PROVIDER_LABELS[option]}</option>
                 ))}
               </OperatorSelect>
               {lockedByomProvider ? (
-                <p className="text-xs text-[color:var(--operator-muted)]">{t('byomProviderLockedHint', { provider: deploymentProviderLabel })}</p>
+                <p className="text-xs text-muted-foreground">{t('byomProviderLockedHint', { provider: deploymentProviderLabel })}</p>
               ) : null}
             </div>
             <div className="space-y-2 lg:col-span-1">
-              <label className="text-xs uppercase tracking-[0.18em] text-[color:var(--operator-muted)]">{t('modelLabel')}</label>
+              <label className="text-xs uppercase tracking-[0.18em] text-muted-foreground">{t('modelLabel')}</label>
               {modelOptions.length > 0 ? (
                 <OperatorSelect value={model} onChange={(event) => setModel(event.target.value)}>
                   {modelOptions.map((option) => <option key={option} value={option}>{option}</option>)}
@@ -584,13 +584,13 @@ export function AgentDeploymentWizard({
               )}
             </div>
             <div className="space-y-2 lg:col-span-1">
-              <label className="text-xs uppercase tracking-[0.18em] text-[color:var(--operator-muted)]">{t('deploymentNameLabel')}</label>
+              <label className="text-xs uppercase tracking-[0.18em] text-muted-foreground">{t('deploymentNameLabel')}</label>
               <OperatorInput value={deploymentName} onChange={(event) => setDeploymentName(event.target.value)} placeholder={t('deploymentNamePlaceholder')} />
             </div>
           </div>
 
           {modelMode === 'byom' ? (
-            <div className={`rounded-2xl border px-4 py-3 text-sm ${defaults.hasProjectApiKey ? 'border-sky-400/16 bg-sky-400/10 text-sky-100' : 'border-amber-400/18 bg-amber-400/10 text-amber-100'}`}>
+            <div className={`rounded-md border px-4 py-3 text-sm ${defaults.hasProjectApiKey ? 'border-sky-500/20 bg-sky-500/10 text-sky-600 dark:text-sky-400' : 'border-amber-500/20 bg-amber-500/10 text-amber-600 dark:text-amber-400'}`}>
               <p>{defaults.hasProjectApiKey ? t('byomHintWithDefaults', { provider: deploymentProviderLabel }) : t('byomHintWithoutDefaults')}</p>
               {!defaults.hasProjectApiKey ? (
                 <div className="mt-3">
@@ -599,7 +599,7 @@ export function AgentDeploymentWizard({
               ) : null}
             </div>
           ) : (
-            <div className="rounded-2xl border border-emerald-400/16 bg-emerald-400/10 px-4 py-3 text-sm text-emerald-100">
+            <div className="rounded-md border border-emerald-500/20 bg-emerald-500/10 px-4 py-3 text-sm text-emerald-600 dark:text-emerald-400">
               {t('managedHint')}
             </div>
           )}
@@ -611,8 +611,8 @@ export function AgentDeploymentWizard({
       return (
         <div className="space-y-5">
           <div>
-            <p className="text-sm font-medium text-[color:var(--operator-foreground)]">{t('scopeStepTitle')}</p>
-            <p className="text-sm text-[color:var(--operator-muted)]">{t('scopeStepBody')}</p>
+            <p className="text-sm font-medium text-foreground">{t('scopeStepTitle')}</p>
+            <p className="text-sm text-muted-foreground">{t('scopeStepBody')}</p>
           </div>
           <div className="grid gap-3 md:grid-cols-2">
             {(['org', 'projects'] as ScopeMode[]).map((mode) => {
@@ -622,14 +622,14 @@ export function AgentDeploymentWizard({
                   key={mode}
                   type="button"
                   onClick={() => setScopeMode(mode)}
-                  className={`rounded-3xl border px-4 py-4 text-left transition ${selected ? 'border-[color:var(--operator-primary)]/45 bg-[color:var(--operator-primary)]/12' : 'border-white/10 bg-white/4 hover:bg-white/8'}`}
+                  className={`rounded-md border px-4 py-4 text-left transition ${selected ? 'border-primary/40 bg-primary/10' : 'border-border bg-muted/30 hover:bg-muted'}`}
                 >
                   <div className="flex items-center justify-between gap-3">
                     <div>
-                      <p className="text-sm font-semibold text-[color:var(--operator-foreground)]">{mode === 'org' ? t('scopeAllProjects') : t('scopeSpecificProjects')}</p>
-                      <p className="mt-1 text-sm text-[color:var(--operator-muted)]">{mode === 'org' ? t('scopeAllProjectsBody') : t('scopeSpecificProjectsBody')}</p>
+                      <p className="text-sm font-semibold text-foreground">{mode === 'org' ? t('scopeAllProjects') : t('scopeSpecificProjects')}</p>
+                      <p className="mt-1 text-sm text-muted-foreground">{mode === 'org' ? t('scopeAllProjectsBody') : t('scopeSpecificProjectsBody')}</p>
                     </div>
-                    {selected ? <CheckCircle2 className="size-5 text-[color:var(--operator-primary-soft)]" /> : null}
+                    {selected ? <CheckCircle2 className="size-5 text-primary" /> : null}
                   </div>
                 </button>
               );
@@ -645,21 +645,21 @@ export function AgentDeploymentWizard({
                     key={project.id}
                     type="button"
                     onClick={() => toggleProject(project.id)}
-                    className={`rounded-3xl border px-4 py-4 text-left transition ${selected ? 'border-[color:var(--operator-primary)]/45 bg-[color:var(--operator-primary)]/12' : 'border-white/10 bg-white/4 hover:bg-white/8'}`}
+                    className={`rounded-md border px-4 py-4 text-left transition ${selected ? 'border-primary/40 bg-primary/10' : 'border-border bg-muted/30 hover:bg-muted'}`}
                   >
                     <div className="flex items-center justify-between gap-3">
                       <div>
-                        <p className="text-sm font-semibold text-[color:var(--operator-foreground)]">{project.name}</p>
-                        <p className="mt-1 text-xs text-[color:var(--operator-muted)]">{project.id === currentProjectId ? t('scopeCurrentProject') : t('scopeAdditionalProject')}</p>
+                        <p className="text-sm font-semibold text-foreground">{project.name}</p>
+                        <p className="mt-1 text-xs text-muted-foreground">{project.id === currentProjectId ? t('scopeCurrentProject') : t('scopeAdditionalProject')}</p>
                       </div>
-                      {selected ? <CheckCircle2 className="size-5 text-[color:var(--operator-primary-soft)]" /> : null}
+                      {selected ? <CheckCircle2 className="size-5 text-primary" /> : null}
                     </div>
                   </button>
                 );
               })}
             </div>
           ) : (
-            <div className="rounded-2xl border border-white/10 bg-white/4 px-4 py-3 text-sm text-[color:var(--operator-muted)]">
+            <div className="rounded-md border border-border bg-muted/30 px-4 py-3 text-sm text-muted-foreground">
               {t('scopeAllProjectsHint', { count: projects.length })}
             </div>
           )}
@@ -671,23 +671,23 @@ export function AgentDeploymentWizard({
       return (
         <div className="space-y-5">
           <div>
-            <p className="text-sm font-medium text-[color:var(--operator-foreground)]">{t('reviewStepTitle')}</p>
-            <p className="text-sm text-[color:var(--operator-muted)]">{t('reviewStepBody')}</p>
+            <p className="text-sm font-medium text-foreground">{t('reviewStepTitle')}</p>
+            <p className="text-sm text-muted-foreground">{t('reviewStepBody')}</p>
           </div>
           <div className="grid gap-3 md:grid-cols-2">
             {summaryItems.map((item) => (
-              <GlassPanel key={item.label} className="border-white/8 bg-[color:var(--operator-surface-soft)]/35 p-4">
-                <div className="text-xs uppercase tracking-[0.18em] text-[color:var(--operator-muted)]">{item.label}</div>
-                <div className="mt-2 text-sm font-medium text-[color:var(--operator-foreground)]">{item.value}</div>
-              </GlassPanel>
+              <div key={item.label} className="rounded-md border border-border bg-muted/30 p-4">
+                <div className="text-xs uppercase tracking-[0.18em] text-muted-foreground">{item.label}</div>
+                <div className="mt-2 text-sm font-medium text-foreground">{item.value}</div>
+              </div>
             ))}
           </div>
 
-          <GlassPanel className="border-white/8 bg-[color:var(--operator-surface-soft)]/35 p-5">
+          <div className="rounded-md border border-border bg-muted/30 p-5">
             <div className="flex flex-col gap-2 md:flex-row md:items-start md:justify-between">
               <div>
-                <p className="text-sm font-medium text-[color:var(--operator-foreground)]">{t('autoRoutingPreviewTitle')}</p>
-                <p className="text-sm text-[color:var(--operator-muted)]">{t('autoRoutingPreviewBody')}</p>
+                <p className="text-sm font-medium text-foreground">{t('autoRoutingPreviewTitle')}</p>
+                <p className="text-sm text-muted-foreground">{t('autoRoutingPreviewBody')}</p>
               </div>
               <Badge variant="chip">{autoRoutingPreviewLabel}</Badge>
             </div>
@@ -695,24 +695,24 @@ export function AgentDeploymentWizard({
             {autoRoutingPreview.rules.length > 0 ? (
               <div className="mt-4 space-y-3">
                 {autoRoutingPreview.rules.map((rule) => (
-                  <div key={`${rule.agent_id}-${rule.priority}`} className="rounded-2xl border border-white/8 bg-white/4 px-4 py-3">
-                    <div className="text-sm font-semibold text-[color:var(--operator-foreground)]">{rule.name}</div>
-                    <div className="mt-1 text-sm text-[color:var(--operator-muted)]">{formatAutoRoutingMemoTypes(rule.conditions.memo_type)}</div>
+                  <div key={`${rule.agent_id}-${rule.priority}`} className="rounded-md border border-border bg-muted/30 px-4 py-3">
+                    <div className="text-sm font-semibold text-foreground">{rule.name}</div>
+                    <div className="mt-1 text-sm text-muted-foreground">{formatAutoRoutingMemoTypes(rule.conditions.memo_type)}</div>
                   </div>
                 ))}
               </div>
             ) : autoRoutingPreview.templateId === 'solo-dev' ? (
-              <div className="mt-4 rounded-2xl border border-white/8 bg-white/4 px-4 py-3 text-sm text-[color:var(--operator-muted)]">
+              <div className="mt-4 rounded-md border border-border bg-muted/30 px-4 py-3 text-sm text-muted-foreground">
                 {t('autoRoutingPreviewSoloBody')}
               </div>
             ) : (
-              <div className="mt-4 rounded-2xl border border-white/8 bg-white/4 px-4 py-3 text-sm text-[color:var(--operator-muted)]">
+              <div className="mt-4 rounded-md border border-border bg-muted/30 px-4 py-3 text-sm text-muted-foreground">
                 {t('autoRoutingPreviewNoneBody')}
               </div>
             )}
 
             {autoRoutingPreview.requiresOverwriteConfirmation && autoRoutingPreview.rules.length > 0 ? (
-              <div className="mt-4 rounded-2xl border border-amber-400/16 bg-amber-400/10 px-4 py-4 text-sm text-amber-100">
+              <div className="mt-4 rounded-md border border-amber-500/20 bg-amber-500/10 px-4 py-4 text-sm text-amber-600 dark:text-amber-400">
                 <div className="flex items-start gap-3">
                   <AlertTriangle className="mt-0.5 size-4 shrink-0" />
                   <div className="space-y-3">
@@ -730,13 +730,13 @@ export function AgentDeploymentWizard({
                 </div>
               </div>
             ) : null}
-          </GlassPanel>
+          </div>
 
-          <GlassPanel className="border-white/8 bg-[color:var(--operator-surface-soft)]/35 p-5">
+          <div className="rounded-md border border-border bg-muted/30 p-5">
             <div className="flex flex-col gap-3 md:flex-row md:items-start md:justify-between">
               <div>
-                <p className="text-sm font-medium text-[color:var(--operator-foreground)]">{t('deployPreflightTitle')}</p>
-                <p className="text-sm text-[color:var(--operator-muted)]">{t('deployPreflightBody')}</p>
+                <p className="text-sm font-medium text-foreground">{t('deployPreflightTitle')}</p>
+                <p className="text-sm text-muted-foreground">{t('deployPreflightBody')}</p>
               </div>
               <Badge variant={preflight ? (preflight.ok ? 'success' : 'destructive') : 'outline'}>
                 {preflight ? (preflight.ok ? t('deployPreflightReadyBadge') : t('deployPreflightBlockedBadge')) : t('deployPreflightPendingBadge')}
@@ -744,23 +744,23 @@ export function AgentDeploymentWizard({
             </div>
 
             <div className="mt-4 grid gap-3 md:grid-cols-3">
-              <div className="rounded-2xl border border-white/8 bg-white/4 px-4 py-3">
-                <div className="text-xs uppercase tracking-[0.18em] text-[color:var(--operator-muted)]">{t('deployPreflightScopeLabel')}</div>
-                <div className="mt-2 text-sm font-medium text-[color:var(--operator-foreground)]">{verificationScopeSummary}</div>
+              <div className="rounded-md border border-border bg-muted/30 px-4 py-3">
+                <div className="text-xs uppercase tracking-[0.18em] text-muted-foreground">{t('deployPreflightScopeLabel')}</div>
+                <div className="mt-2 text-sm font-medium text-foreground">{verificationScopeSummary}</div>
               </div>
-              <div className="rounded-2xl border border-white/8 bg-white/4 px-4 py-3">
-                <div className="text-xs uppercase tracking-[0.18em] text-[color:var(--operator-muted)]">{t('deployPreflightRoutingLabel')}</div>
-                <div className="mt-2 text-sm font-medium text-[color:var(--operator-foreground)]">{t('deployPreflightRoutingValue', { template: autoRoutingPreviewLabel, count: autoRoutingPreview.rules.length })}</div>
+              <div className="rounded-md border border-border bg-muted/30 px-4 py-3">
+                <div className="text-xs uppercase tracking-[0.18em] text-muted-foreground">{t('deployPreflightRoutingLabel')}</div>
+                <div className="mt-2 text-sm font-medium text-foreground">{t('deployPreflightRoutingValue', { template: autoRoutingPreviewLabel, count: autoRoutingPreview.rules.length })}</div>
               </div>
-              <div className="rounded-2xl border border-white/8 bg-white/4 px-4 py-3">
-                <div className="text-xs uppercase tracking-[0.18em] text-[color:var(--operator-muted)]">{t('deployPreflightCheckedAtLabel')}</div>
-                <div className="mt-2 text-sm font-medium text-[color:var(--operator-foreground)]">{preflight ? new Date(preflight.checked_at).toLocaleString() : t('deployPreflightNotRun')}</div>
+              <div className="rounded-md border border-border bg-muted/30 px-4 py-3">
+                <div className="text-xs uppercase tracking-[0.18em] text-muted-foreground">{t('deployPreflightCheckedAtLabel')}</div>
+                <div className="mt-2 text-sm font-medium text-foreground">{preflight ? new Date(preflight.checked_at).toLocaleString() : t('deployPreflightNotRun')}</div>
               </div>
             </div>
 
             {preflight ? (
               preflight.ok ? (
-                <div className="mt-4 rounded-2xl border border-emerald-400/18 bg-emerald-400/10 px-4 py-4 text-sm text-emerald-100">
+                <div className="mt-4 rounded-md border border-emerald-500/20 bg-emerald-500/10 px-4 py-4 text-sm text-emerald-600 dark:text-emerald-400">
                   <div className="flex items-start gap-3">
                     <CheckCircle2 className="mt-0.5 size-4 shrink-0" />
                     <div className="space-y-1">
@@ -770,7 +770,7 @@ export function AgentDeploymentWizard({
                   </div>
                 </div>
               ) : (
-                <div className="mt-4 space-y-3 rounded-2xl border border-amber-400/16 bg-amber-400/10 px-4 py-4 text-sm text-amber-100">
+                <div className="mt-4 space-y-3 rounded-md border border-amber-500/20 bg-amber-500/10 px-4 py-4 text-sm text-amber-600 dark:text-amber-400">
                   <div className="flex items-start gap-3">
                     <AlertTriangle className="mt-0.5 size-4 shrink-0" />
                     <div className="space-y-3">
@@ -795,7 +795,7 @@ export function AgentDeploymentWizard({
                 </div>
               )
             ) : (
-              <div className="mt-4 rounded-2xl border border-dashed border-white/12 bg-white/4 px-4 py-4 text-sm text-[color:var(--operator-muted)]">
+              <div className="mt-4 rounded-md border border-dashed border-border bg-muted/30 px-4 py-4 text-sm text-muted-foreground">
                 {t('deployPreflightPendingBody')}
               </div>
             )}
@@ -810,7 +810,7 @@ export function AgentDeploymentWizard({
           </GlassPanel>
 
           {deploying ? (
-            <div className="rounded-2xl border border-[color:var(--operator-primary)]/18 bg-[color:var(--operator-primary)]/10 px-4 py-4 text-sm text-[color:var(--operator-primary-soft)]">
+            <div className="rounded-md border border-primary/20 bg-primary/10 px-4 py-4 text-sm text-primary">
               <div className="flex items-center gap-3">
                 <Loader2 className="size-4 animate-spin" />
                 <span>{deploymentStatus === 'ACTIVE' ? t('deploySuccessToastBody', { name: deploymentName }) : t('deployingBody', { status: deploymentStatus ?? 'DEPLOYING' })}</span>
@@ -818,7 +818,7 @@ export function AgentDeploymentWizard({
             </div>
           ) : null}
         </div>
-      );
+      </div>
     }
 
     return (
@@ -857,14 +857,14 @@ export function AgentDeploymentWizard({
                 const active = index === step;
                 const complete = index < step;
                 return (
-                  <div key={key} className={`rounded-3xl border px-4 py-3 transition ${active ? 'border-[color:var(--operator-primary)]/45 bg-[color:var(--operator-primary)]/12' : complete ? 'border-emerald-400/20 bg-emerald-400/10' : 'border-white/8 bg-white/4'}`}>
+                  <div key={key} className={`rounded-md border px-4 py-3 transition ${active ? 'border-primary/40 bg-primary/10' : complete ? 'border-emerald-500/20 bg-emerald-500/10' : 'border-border bg-muted/30'}`}>
                     <div className="flex items-center gap-3">
-                      <div className={`flex size-9 items-center justify-center rounded-2xl ${active ? 'bg-[color:var(--operator-primary)]/20 text-[color:var(--operator-primary-soft)]' : complete ? 'bg-emerald-400/20 text-emerald-200' : 'bg-white/8 text-[color:var(--operator-muted)]'}`}>
+                      <div className={`flex size-9 items-center justify-center rounded-md ${active ? 'bg-primary/20 text-primary' : complete ? 'bg-emerald-500/20 text-emerald-600 dark:text-emerald-400' : 'bg-muted text-muted-foreground'}`}>
                         {complete ? <CheckCircle2 className="size-4" /> : <Icon className="size-4" />}
                       </div>
                       <div>
-                        <div className="text-xs uppercase tracking-[0.18em] text-[color:var(--operator-muted)]">{t(`steps.${key}.eyebrow`)}</div>
-                        <div className="text-sm font-semibold text-[color:var(--operator-foreground)]">{t(`steps.${key}.title`)}</div>
+                        <div className="text-xs uppercase tracking-[0.18em] text-muted-foreground">{t(`steps.${key}.eyebrow`)}</div>
+                        <div className="text-sm font-semibold text-foreground">{t(`steps.${key}.title`)}</div>
                       </div>
                     </div>
                   </div>
@@ -880,9 +880,9 @@ export function AgentDeploymentWizard({
 
       {step < STEP_KEYS.length - 1 ? (
         <div className="fixed inset-x-3 bottom-6 z-40 lg:static lg:inset-auto lg:z-auto">
-          <GlassPanel className="border-white/12 bg-[color:var(--operator-panel)]/92 p-3 shadow-[0_24px_60px_rgba(0,0,0,0.42)]">
+          <div className="rounded-md border border-border bg-card p-3 shadow-sm">
             <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
-              <div className="text-sm text-[color:var(--operator-muted)]">
+              <div className="text-sm text-muted-foreground">
                 {t('stepProgress', { step: step + 1, total: STEP_KEYS.length })}
               </div>
               <div className="flex items-center gap-2">
@@ -914,23 +914,23 @@ export function AgentDeploymentWizard({
                 )}
               </div>
             </div>
-          </GlassPanel>
+          </div>
         </div>
       ) : null}
 
       <Dialog open={Boolean(failureMessage)} onOpenChange={(open) => { if (!open) setFailureMessage(null); }}>
-        <DialogContent className="max-w-lg rounded-3xl border border-white/10 bg-[color:var(--operator-panel)] text-[color:var(--operator-foreground)] shadow-[0_30px_80px_rgba(0,0,0,0.42)]">
+        <DialogContent className="max-w-lg rounded-md border border-border bg-card text-card-foreground shadow-md">
           <DialogHeader>
             <DialogTitle>{t('deployFailedTitle')}</DialogTitle>
-            <DialogDescription className="text-[color:var(--operator-muted)]">{failureMessage ?? t('deployFailedBody')}</DialogDescription>
+            <DialogDescription className="text-muted-foreground">{failureMessage ?? t('deployFailedBody')}</DialogDescription>
           </DialogHeader>
-          <div className="rounded-2xl border border-amber-400/16 bg-amber-400/10 px-4 py-3 text-sm text-amber-100">
+          <div className="rounded-md border border-amber-500/20 bg-amber-500/10 px-4 py-3 text-sm text-amber-600 dark:text-amber-400">
             <div className="flex items-start gap-3">
               <AlertTriangle className="mt-0.5 size-4 shrink-0" />
               <p>{t('deployFailedHint')}</p>
             </div>
           </div>
-          <DialogFooter className="border-t border-white/8 bg-transparent">
+          <DialogFooter className="border-t border-border bg-transparent">
             <Button variant="glass" onClick={() => setFailureMessage(null)}>{tc('close')}</Button>
           </DialogFooter>
         </DialogContent>

@@ -107,8 +107,8 @@ export function AgentHitlRequestsList() {
         <SectionCardHeader>
           <div className="flex items-center justify-between gap-3">
             <div>
-              <h2 className="text-base font-semibold text-[color:var(--operator-foreground)]">{t('sectionTitle')}</h2>
-              <p className="text-sm text-[color:var(--operator-muted)]">{t('sectionBody')}</p>
+              <h2 className="text-base font-semibold text-foreground">{t('sectionTitle')}</h2>
+              <p className="text-sm text-muted-foreground">{t('sectionBody')}</p>
             </div>
             <Badge variant="chip">{t('pendingCount', { count: requests.length })}</Badge>
           </div>
@@ -117,7 +117,7 @@ export function AgentHitlRequestsList() {
           {loading ? (
             <div className="space-y-3">
               {[1, 2, 3].map((i) => (
-                <div key={i} className="h-32 animate-pulse rounded-2xl bg-[color:var(--operator-surface-soft)]" />
+                <div key={i} className="h-32 animate-pulse rounded-md bg-muted" />
               ))}
             </div>
           ) : requests.length === 0 ? (
@@ -127,12 +127,12 @@ export function AgentHitlRequestsList() {
               {requests.map((request) => (
                 <div
                   key={request.id}
-                  className="rounded-3xl border border-white/8 bg-white/4 px-4 py-4"
+                  className="rounded-md border border-border bg-muted/30 px-4 py-4"
                 >
                   <div className="flex flex-col gap-3 lg:flex-row lg:items-start lg:justify-between">
                     <div className="min-w-0 flex-1 space-y-3">
                       <div className="flex flex-wrap items-center gap-2">
-                        <h3 className="text-sm font-semibold text-[color:var(--operator-foreground)]">{request.title}</h3>
+                        <h3 className="text-sm font-semibold text-foreground">{request.title}</h3>
                         <Badge variant="counter">{t('pendingBadge')}</Badge>
                         <Badge variant="secondary">
                           {request.request_type === 'approval'
@@ -146,8 +146,8 @@ export function AgentHitlRequestsList() {
                                   : t('requestType_unknown')}
                         </Badge>
                       </div>
-                      <p className="whitespace-pre-wrap text-sm text-[color:var(--operator-muted)]">{request.prompt}</p>
-                      <div className="grid gap-2 text-xs text-[color:var(--operator-muted)] sm:grid-cols-2">
+                      <p className="whitespace-pre-wrap text-sm text-muted-foreground">{request.prompt}</p>
+                      <div className="grid gap-2 text-xs text-muted-foreground sm:grid-cols-2">
                         <span className="inline-flex items-center gap-1">
                           <Bot className="size-3.5" />
                           {t('agentLine', { agent: request.agent_name ?? t('unknownAgent') })}

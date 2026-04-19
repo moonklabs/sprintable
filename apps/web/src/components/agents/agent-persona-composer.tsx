@@ -186,7 +186,7 @@ export function AgentPersonaComposer({
       <EmptyState
         title={t('personaComposerNoAgentsTitle')}
         description={t('personaComposerNoAgentsDescription')}
-        action={<Link href="/agents/deploy" className="text-sm text-[color:var(--operator-primary)] underline-offset-4 hover:underline">{t('backToWizard')}</Link>}
+        action={<Link href="/agents/deploy" className="text-sm text-primary underline-offset-4 hover:underline">{t('backToWizard')}</Link>}
       />
     );
   }
@@ -197,14 +197,14 @@ export function AgentPersonaComposer({
         <SectionCard>
           <SectionCardHeader>
             <div className="space-y-1">
-              <h2 className="text-base font-semibold text-[color:var(--operator-foreground)]">{t('personaComposerSectionTitle')}</h2>
-              <p className="text-sm text-[color:var(--operator-muted)]">{t('personaComposerSectionBody')}</p>
+              <h2 className="text-base font-semibold text-foreground">{t('personaComposerSectionTitle')}</h2>
+              <p className="text-sm text-muted-foreground">{t('personaComposerSectionBody')}</p>
             </div>
           </SectionCardHeader>
           <SectionCardBody className="space-y-4">
             <div className="grid gap-4 md:grid-cols-2">
               <label className="space-y-2 text-sm">
-                <span className="font-medium text-[color:var(--operator-foreground)]">{t('personaComposerAgentLabel')}</span>
+                <span className="font-medium text-foreground">{t('personaComposerAgentLabel')}</span>
                 <OperatorSelect value={selectedAgentId} onChange={(event) => setSelectedAgentId(event.target.value)}>
                   {agents.map((agent) => (
                     <option key={agent.id} value={agent.id}>{agent.name}</option>
@@ -212,7 +212,7 @@ export function AgentPersonaComposer({
                 </OperatorSelect>
               </label>
               <label className="space-y-2 text-sm">
-                <span className="font-medium text-[color:var(--operator-foreground)]">{t('personaComposerBaseLabel')}</span>
+                <span className="font-medium text-foreground">{t('personaComposerBaseLabel')}</span>
                 <OperatorSelect value={selectedBasePersonaId} onChange={(event) => setSelectedBasePersonaId(event.target.value)}>
                   <optgroup label={t('builtInPersonas')}>
                     {personas.filter((persona) => persona.is_builtin).map((persona) => (
@@ -229,22 +229,22 @@ export function AgentPersonaComposer({
             </div>
 
             <label className="space-y-2 text-sm">
-              <span className="font-medium text-[color:var(--operator-foreground)]">{t('personaComposerNameLabel')}</span>
+              <span className="font-medium text-foreground">{t('personaComposerNameLabel')}</span>
               <OperatorInput value={name} onChange={(event) => setName(event.target.value)} placeholder={t('personaComposerNamePlaceholder')} />
             </label>
 
             <label className="space-y-2 text-sm">
-              <span className="font-medium text-[color:var(--operator-foreground)]">{t('personaComposerDescriptionLabel')}</span>
+              <span className="font-medium text-foreground">{t('personaComposerDescriptionLabel')}</span>
               <OperatorTextarea value={description} onChange={(event) => setDescription(event.target.value)} placeholder={t('personaComposerDescriptionPlaceholder')} className="min-h-[88px]" />
             </label>
 
             <label className="space-y-2 text-sm">
-              <span className="font-medium text-[color:var(--operator-foreground)]">{t('personaComposerSystemPromptLabel')}</span>
+              <span className="font-medium text-foreground">{t('personaComposerSystemPromptLabel')}</span>
               <OperatorTextarea value={systemPrompt} onChange={(event) => setSystemPrompt(event.target.value)} placeholder={t('personaComposerSystemPromptPlaceholder')} className="min-h-[180px]" />
             </label>
 
             <label className="space-y-2 text-sm">
-              <span className="font-medium text-[color:var(--operator-foreground)]">{t('personaComposerBehaviorRulesLabel')}</span>
+              <span className="font-medium text-foreground">{t('personaComposerBehaviorRulesLabel')}</span>
               <OperatorTextarea value={behaviorRules} onChange={(event) => setBehaviorRules(event.target.value)} placeholder={t('personaComposerBehaviorRulesPlaceholder')} className="min-h-[140px]" />
             </label>
           </SectionCardBody>
@@ -253,37 +253,37 @@ export function AgentPersonaComposer({
         <SectionCard>
           <SectionCardHeader>
             <div className="space-y-1">
-              <h2 className="text-base font-semibold text-[color:var(--operator-foreground)]">{t('personaComposerToolsTitle')}</h2>
-              <p className="text-sm text-[color:var(--operator-muted)]">{t('personaComposerToolsBody')}</p>
+              <h2 className="text-base font-semibold text-foreground">{t('personaComposerToolsTitle')}</h2>
+              <p className="text-sm text-muted-foreground">{t('personaComposerToolsBody')}</p>
             </div>
           </SectionCardHeader>
           <SectionCardBody className="space-y-4">
             <div className="flex flex-wrap gap-2">
-              <button type="button" onClick={() => handleCustomizeToolsChange(false)} className={`rounded-full border px-3 py-1 text-sm ${!customizeTools ? 'border-[color:var(--operator-primary)]/35 bg-[color:var(--operator-primary)]/12 text-[color:var(--operator-primary-soft)]' : 'border-white/10 bg-white/4 text-[color:var(--operator-muted)]'}`}>
+              <button type="button" onClick={() => handleCustomizeToolsChange(false)} className={`rounded-full border px-3 py-1 text-sm ${!customizeTools ? 'border-primary/40 bg-primary/10 text-primary' : 'border-border bg-muted/30 text-muted-foreground'}`}>
                 {t('personaComposerToolsInherit')}
               </button>
-              <button type="button" onClick={() => handleCustomizeToolsChange(true)} className={`rounded-full border px-3 py-1 text-sm ${customizeTools ? 'border-[color:var(--operator-primary)]/35 bg-[color:var(--operator-primary)]/12 text-[color:var(--operator-primary-soft)]' : 'border-white/10 bg-white/4 text-[color:var(--operator-muted)]'}`}>
+              <button type="button" onClick={() => handleCustomizeToolsChange(true)} className={`rounded-full border px-3 py-1 text-sm ${customizeTools ? 'border-primary/40 bg-primary/10 text-primary' : 'border-border bg-muted/30 text-muted-foreground'}`}>
                 {t('personaComposerToolsCustom')}
               </button>
             </div>
 
             {!customizeTools ? (
-              <div className="rounded-2xl border border-white/10 bg-white/4 p-4">
-                <p className="text-sm text-[color:var(--operator-muted)]">{t('personaComposerToolsInheritedHelp')}</p>
+              <div className="rounded-md border border-border bg-muted/30 p-4">
+                <p className="text-sm text-muted-foreground">{t('personaComposerToolsInheritedHelp')}</p>
                 <div className="mt-3 flex flex-wrap gap-2">
                   {effectiveToolNames.length > 0 ? effectiveToolNames.map((toolName) => (
                     <Badge key={toolName} variant="chip">{toolName}</Badge>
-                  )) : <p className="text-sm text-[color:var(--operator-muted)]">{t('personaComposerToolsEmpty')}</p>}
+                  )) : <p className="text-sm text-muted-foreground">{t('personaComposerToolsEmpty')}</p>}
                 </div>
               </div>
             ) : (
               <div className="space-y-4">
                 {Object.entries(groupedToolOptions).map(([groupId, options]) => (
-                  <div key={groupId} className="space-y-2 rounded-2xl border border-white/10 bg-white/4 p-4">
+                  <div key={groupId} className="space-y-2 rounded-md border border-border bg-muted/30 p-4">
                     <div className="flex items-center justify-between gap-2">
                       <div>
-                        <h3 className="text-sm font-semibold text-[color:var(--operator-foreground)]">{getToolGroupLabel(t, groupId, options[0])}</h3>
-                        <p className="text-xs text-[color:var(--operator-muted)]">{options[0]?.source === 'mcp' ? t('personaComposerMcpGroupHint') : t('personaComposerBuiltInGroupHint')}</p>
+                        <h3 className="text-sm font-semibold text-foreground">{getToolGroupLabel(t, groupId, options[0])}</h3>
+                        <p className="text-xs text-muted-foreground">{options[0]?.source === 'mcp' ? t('personaComposerMcpGroupHint') : t('personaComposerBuiltInGroupHint')}</p>
                       </div>
                       <Badge variant={options[0]?.source === 'mcp' ? 'info' : 'outline'}>{options.length}</Badge>
                     </div>
@@ -291,11 +291,11 @@ export function AgentPersonaComposer({
                       {options.map((option) => {
                         const checked = selectedToolNames.includes(option.name);
                         return (
-                          <label key={option.name} className={`flex items-start gap-3 rounded-2xl border px-3 py-3 text-sm ${checked ? 'border-[color:var(--operator-primary)]/35 bg-[color:var(--operator-primary)]/10' : 'border-white/8 bg-black/10'}`}>
+                          <label key={option.name} className={`flex items-start gap-3 rounded-md border px-3 py-3 text-sm ${checked ? 'border-primary/40 bg-primary/10' : 'border-border bg-muted/30'}`}>
                             <input type="checkbox" checked={checked} onChange={() => handleToggleTool(option.name)} className="mt-1 h-4 w-4 accent-[color:var(--operator-primary)]" />
                             <span className="space-y-1">
-                              <span className="block font-medium text-[color:var(--operator-foreground)]">{option.name}</span>
-                              <span className="block text-xs text-[color:var(--operator-muted)]">{option.source === 'mcp' ? t('personaComposerMcpToolHint') : t('personaComposerBuiltInToolHint')}</span>
+                              <span className="block font-medium text-foreground">{option.name}</span>
+                              <span className="block text-xs text-muted-foreground">{option.source === 'mcp' ? t('personaComposerMcpToolHint') : t('personaComposerBuiltInToolHint')}</span>
                             </span>
                           </label>
                         );
@@ -303,16 +303,16 @@ export function AgentPersonaComposer({
                     </div>
                   </div>
                 ))}
-                {mcpToolCount === 0 ? <p className="text-sm text-[color:var(--operator-muted)]">{t('personaComposerNoMcpTools')}</p> : null}
+                {mcpToolCount === 0 ? <p className="text-sm text-muted-foreground">{t('personaComposerNoMcpTools')}</p> : null}
               </div>
             )}
           </SectionCardBody>
         </SectionCard>
 
-        <div className="flex flex-wrap items-center justify-between gap-3 rounded-2xl border border-white/10 bg-[color:var(--operator-surface-soft)] px-4 py-4">
+        <div className="flex flex-wrap items-center justify-between gap-3 rounded-md border border-border bg-card px-4 py-4 shadow-sm">
           <div className="space-y-1">
-            <p className="text-sm font-medium text-[color:var(--operator-foreground)]">{t('personaComposerSubmitTitle')}</p>
-            <p className="text-sm text-[color:var(--operator-muted)]">{t('personaComposerSubmitBody')}</p>
+            <p className="text-sm font-medium text-foreground">{t('personaComposerSubmitTitle')}</p>
+            <p className="text-sm text-muted-foreground">{t('personaComposerSubmitBody')}</p>
           </div>
           <Button variant="hero" size="lg" disabled={submitting || !name.trim() || !selectedAgentId || !selectedBasePersonaId} onClick={handleCreatePersona}>
             {submitting ? t('personaComposerSubmitting') : t('personaComposerSubmit')}
@@ -320,13 +320,13 @@ export function AgentPersonaComposer({
         </div>
 
         {errorMessage ? (
-          <div className="rounded-2xl border border-[color:var(--operator-danger)]/30 bg-[color:var(--operator-danger)]/12 px-4 py-3 text-sm text-[color:var(--operator-danger-soft)]">
+          <div className="rounded-md border border-destructive/30 bg-destructive/10 px-4 py-3 text-sm text-destructive">
             {errorMessage}
           </div>
         ) : null}
 
         {createdPersona ? (
-          <div className="rounded-2xl border border-emerald-400/20 bg-emerald-400/12 px-4 py-4 text-sm text-emerald-100">
+          <div className="rounded-md border border-emerald-500/20 bg-emerald-500/10 px-4 py-4 text-sm text-emerald-600 dark:text-emerald-400">
             <p className="font-semibold">{t('personaComposerSuccessTitle', { name: createdPersona.name })}</p>
             <p className="mt-1 text-emerald-200/90">{t('personaComposerSuccessBody', { slug: createdPersona.slug })}</p>
             <div className="mt-3 flex flex-wrap gap-3">
@@ -341,61 +341,61 @@ export function AgentPersonaComposer({
         <SectionCard>
           <SectionCardHeader>
             <div className="space-y-1">
-              <h2 className="text-base font-semibold text-[color:var(--operator-foreground)]">{t('personaComposerPreviewTitle')}</h2>
-              <p className="text-sm text-[color:var(--operator-muted)]">{t('personaComposerPreviewBody')}</p>
+              <h2 className="text-base font-semibold text-foreground">{t('personaComposerPreviewTitle')}</h2>
+              <p className="text-sm text-muted-foreground">{t('personaComposerPreviewBody')}</p>
             </div>
           </SectionCardHeader>
           <SectionCardBody className="space-y-4">
-            <div className="rounded-2xl border border-white/10 bg-white/4 p-4">
+            <div className="rounded-md border border-border bg-muted/30 p-4">
               <div className="flex flex-wrap items-center gap-2">
-                <p className="text-sm font-semibold text-[color:var(--operator-foreground)]">{basePersona?.name ?? t('personaComposerBaseMissing')}</p>
+                <p className="text-sm font-semibold text-foreground">{basePersona?.name ?? t('personaComposerBaseMissing')}</p>
                 {basePersona?.is_builtin ? <Badge variant="success">{t('builtInPersonas')}</Badge> : <Badge variant="chip">{t('customPersonas')}</Badge>}
                 {basePersona?.is_default ? <Badge variant="info">{t('personaComposerDefaultSuffix')}</Badge> : null}
               </div>
-              {basePersona?.description ? <p className="mt-2 text-sm text-[color:var(--operator-muted)]">{basePersona.description}</p> : null}
+              {basePersona?.description ? <p className="mt-2 text-sm text-muted-foreground">{basePersona.description}</p> : null}
             </div>
 
             {basePersona ? (
               <div className="grid gap-3 sm:grid-cols-3">
-                <div className="rounded-2xl border border-white/10 bg-white/4 p-4">
-                  <p className="text-xs uppercase tracking-[0.24em] text-[color:var(--operator-muted)]">{t('personaComposerVersionLabel')}</p>
-                  <p className="mt-2 text-2xl font-semibold text-[color:var(--operator-foreground)]">v{basePersona.version_metadata.version_number}</p>
+                <div className="rounded-md border border-border bg-muted/30 p-4">
+                  <p className="text-xs uppercase tracking-[0.24em] text-muted-foreground">{t('personaComposerVersionLabel')}</p>
+                  <p className="mt-2 text-2xl font-semibold text-foreground">v{basePersona.version_metadata.version_number}</p>
                 </div>
-                <div className="rounded-2xl border border-white/10 bg-white/4 p-4">
-                  <p className="text-xs uppercase tracking-[0.24em] text-[color:var(--operator-muted)]">{t('personaComposerPublishedAtLabel')}</p>
-                  <p className="mt-2 text-sm font-medium text-[color:var(--operator-foreground)]">{formatPersonaTimestamp(basePersona.version_metadata.published_at)}</p>
+                <div className="rounded-md border border-border bg-muted/30 p-4">
+                  <p className="text-xs uppercase tracking-[0.24em] text-muted-foreground">{t('personaComposerPublishedAtLabel')}</p>
+                  <p className="mt-2 text-sm font-medium text-foreground">{formatPersonaTimestamp(basePersona.version_metadata.published_at)}</p>
                 </div>
-                <div className="rounded-2xl border border-white/10 bg-white/4 p-4">
-                  <p className="text-xs uppercase tracking-[0.24em] text-[color:var(--operator-muted)]">{t('personaComposerRollbackLabel')}</p>
-                  <p className="mt-2 text-sm font-medium text-[color:var(--operator-foreground)]">{basePersona.version_metadata.rollback_target_version_number != null ? `v${basePersona.version_metadata.rollback_target_version_number}` : t('personaComposerRollbackEmpty')}</p>
+                <div className="rounded-md border border-border bg-muted/30 p-4">
+                  <p className="text-xs uppercase tracking-[0.24em] text-muted-foreground">{t('personaComposerRollbackLabel')}</p>
+                  <p className="mt-2 text-sm font-medium text-foreground">{basePersona.version_metadata.rollback_target_version_number != null ? `v${basePersona.version_metadata.rollback_target_version_number}` : t('personaComposerRollbackEmpty')}</p>
                 </div>
               </div>
             ) : null}
 
             {basePersona ? (
-              <div className="space-y-3 rounded-2xl border border-white/10 bg-white/4 p-4">
+              <div className="space-y-3 rounded-md border border-border bg-muted/30 p-4">
                 <div className="space-y-1">
-                  <p className="text-sm font-medium text-[color:var(--operator-foreground)]">{t('personaComposerBoundaryTitle')}</p>
-                  <p className="text-sm text-[color:var(--operator-muted)]">{t('personaComposerBoundaryBody')}</p>
+                  <p className="text-sm font-medium text-foreground">{t('personaComposerBoundaryTitle')}</p>
+                  <p className="text-sm text-muted-foreground">{t('personaComposerBoundaryBody')}</p>
                 </div>
                 <div className="space-y-2">
-                  <p className="text-xs uppercase tracking-[0.24em] text-[color:var(--operator-muted)]">{t('personaComposerBoundaryToolsLabel')}</p>
+                  <p className="text-xs uppercase tracking-[0.24em] text-muted-foreground">{t('personaComposerBoundaryToolsLabel')}</p>
                   <div className="flex flex-wrap gap-2">
                     {basePersona.permission_boundary.allowed_tool_names.length > 0 ? basePersona.permission_boundary.allowed_tool_names.map((toolName) => (
                       <Badge key={toolName} variant="chip">{toolName}</Badge>
-                    )) : <p className="text-sm text-[color:var(--operator-muted)]">{t('personaComposerToolsEmpty')}</p>}
+                    )) : <p className="text-sm text-muted-foreground">{t('personaComposerToolsEmpty')}</p>}
                   </div>
                 </div>
                 <div className="space-y-2">
-                  <p className="text-xs uppercase tracking-[0.24em] text-[color:var(--operator-muted)]">{t('personaComposerBoundaryServersLabel')}</p>
+                  <p className="text-xs uppercase tracking-[0.24em] text-muted-foreground">{t('personaComposerBoundaryServersLabel')}</p>
                   <div className="flex flex-wrap gap-2">
                     {basePersona.permission_boundary.mcp_server_names.length > 0 ? basePersona.permission_boundary.mcp_server_names.map((serverName) => (
                       <Badge key={serverName} variant="outline">{serverName}</Badge>
-                    )) : <p className="text-sm text-[color:var(--operator-muted)]">{t('personaComposerBoundaryServersEmpty')}</p>}
+                    )) : <p className="text-sm text-muted-foreground">{t('personaComposerBoundaryServersEmpty')}</p>}
                   </div>
                 </div>
                 <div className="space-y-2">
-                  <p className="text-xs uppercase tracking-[0.24em] text-[color:var(--operator-muted)]">{t('personaComposerBoundaryLayersLabel')}</p>
+                  <p className="text-xs uppercase tracking-[0.24em] text-muted-foreground">{t('personaComposerBoundaryLayersLabel')}</p>
                   <div className="flex flex-wrap gap-2">
                     {basePersona.permission_boundary.enforcement_layers.map((layer) => (
                       <Badge key={layer} variant="info">{layer}</Badge>
@@ -407,44 +407,44 @@ export function AgentPersonaComposer({
 
             <div className="grid gap-3 sm:grid-cols-2">
               {tokenStats.map((stat) => (
-                <div key={stat.label} className="rounded-2xl border border-white/10 bg-white/4 p-4">
-                  <p className="text-xs uppercase tracking-[0.24em] text-[color:var(--operator-muted)]">{stat.label}</p>
-                  <p className="mt-2 text-2xl font-semibold text-[color:var(--operator-foreground)]">{stat.value}</p>
+                <div key={stat.label} className="rounded-md border border-border bg-muted/30 p-4">
+                  <p className="text-xs uppercase tracking-[0.24em] text-muted-foreground">{stat.label}</p>
+                  <p className="mt-2 text-2xl font-semibold text-foreground">{stat.value}</p>
                 </div>
               ))}
             </div>
 
             <div className="space-y-2">
-              <p className="text-sm font-medium text-[color:var(--operator-foreground)]">{t('personaComposerSafetyLabel')}</p>
+              <p className="text-sm font-medium text-foreground">{t('personaComposerSafetyLabel')}</p>
               <OperatorTextarea readOnly value={safetyLayerNotice} className="min-h-[112px] opacity-80" />
             </div>
 
             <div className="space-y-2">
-              <p className="text-sm font-medium text-[color:var(--operator-foreground)]">{t('personaComposerResolvedPromptLabel')}</p>
+              <p className="text-sm font-medium text-foreground">{t('personaComposerResolvedPromptLabel')}</p>
               <OperatorTextarea readOnly value={runtimePromptPreview || t('personaComposerResolvedPromptEmpty')} className="min-h-[280px] opacity-80" />
             </div>
 
             {basePersona ? (
-              <div className="space-y-3 rounded-2xl border border-white/10 bg-white/4 p-4">
+              <div className="space-y-3 rounded-md border border-border bg-muted/30 p-4">
                 <div className="space-y-1">
-                  <p className="text-sm font-medium text-[color:var(--operator-foreground)]">{t('personaComposerHistoryTitle')}</p>
-                  <p className="text-sm text-[color:var(--operator-muted)]">{t('personaComposerHistoryBody')}</p>
+                  <p className="text-sm font-medium text-foreground">{t('personaComposerHistoryTitle')}</p>
+                  <p className="text-sm text-muted-foreground">{t('personaComposerHistoryBody')}</p>
                 </div>
                 {basePersona.change_history.length > 0 ? (
                   <div className="space-y-2">
                     {basePersona.change_history.map((entry) => (
-                      <div key={`${entry.event_type}-${entry.created_at}`} className="rounded-2xl border border-white/8 bg-black/10 p-3">
+                      <div key={`${entry.event_type}-${entry.created_at}`} className="rounded-md border border-border bg-muted/30 p-3">
                         <div className="flex flex-wrap items-center gap-2">
-                          <p className="text-sm font-medium text-[color:var(--operator-foreground)]">{entry.summary}</p>
+                          <p className="text-sm font-medium text-foreground">{entry.summary}</p>
                           {entry.version_number != null ? <Badge variant="outline">{t('personaComposerHistoryVersion', { version: entry.version_number })}</Badge> : null}
                           {entry.rollback_target_version_number != null ? <Badge variant="chip">{t('personaComposerHistoryRollback', { version: entry.rollback_target_version_number })}</Badge> : null}
                         </div>
-                        {entry.change_summary ? <p className="mt-1 text-sm text-[color:var(--operator-muted)]">{entry.change_summary}</p> : null}
-                        <p className="mt-2 text-xs text-[color:var(--operator-muted)]">{formatPersonaTimestamp(entry.created_at)}</p>
+                        {entry.change_summary ? <p className="mt-1 text-sm text-muted-foreground">{entry.change_summary}</p> : null}
+                        <p className="mt-2 text-xs text-muted-foreground">{formatPersonaTimestamp(entry.created_at)}</p>
                       </div>
                     ))}
                   </div>
-                ) : <p className="text-sm text-[color:var(--operator-muted)]">{t('personaComposerHistoryEmpty')}</p>}
+                ) : <p className="text-sm text-muted-foreground">{t('personaComposerHistoryEmpty')}</p>}
               </div>
             ) : null}
           </SectionCardBody>

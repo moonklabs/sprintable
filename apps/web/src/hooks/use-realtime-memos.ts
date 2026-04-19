@@ -44,13 +44,14 @@ export function useRealtimeMemos({ currentTeamMemberId, onNewMemo, onNewReply, o
   useEffect(() => { currentTeamMemberIdRef.current = currentTeamMemberId; }, [currentTeamMemberId]);
 
   useEffect(() => {
-    let supabase: ReturnType<typeof createSupabaseBrowserClient>;
-    try {
-      supabase = createSupabaseBrowserClient();
-    } catch (err) {
-      console.error('[Realtime] Failed to create Supabase client:', err);
-      return;
-    }
+    if (process.env['NEXT_PUBLIC_OSS_MODE'] === 'true') return;
+let supabase: ReturnType<typeof createSupabaseBrowserClient>;
+try {
+supabase = createSupabaseBrowserClient();
+} catch (err) {
+console.error('[Realtime] Failed to create Supabase client:', err);
+return;
+}
 
     function subscribe() {
       if (channelRef.current) {

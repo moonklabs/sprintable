@@ -517,7 +517,7 @@ export default function StandupPage() {
                       {storyPickerStories.map((story) => {
                         const checked = planStoryIds.includes(story.id);
                         return (
-                          <label key={story.id} className="flex cursor-pointer items-start gap-3 rounded-2xl border border-white/8 bg-white/5 p-3 transition hover:bg-white/10">
+                          <label key={story.id} className="flex cursor-pointer items-start gap-3 rounded-md border border-border bg-muted/30 p-3 transition hover:bg-muted">
                             <input
                               type="checkbox"
                               checked={checked}
@@ -528,14 +528,14 @@ export default function StandupPage() {
                                     : [...current, story.id]
                                 ));
                               }}
-                              className="mt-1 h-4 w-4 rounded border-white/20 bg-transparent text-[color:var(--operator-primary)]"
+                              className="mt-1 h-4 w-4 rounded border-input bg-transparent text-primary"
                             />
                             <div className="min-w-0 flex-1 space-y-1">
                               <div className="flex flex-wrap items-center justify-between gap-2">
-                                <p className="text-sm font-medium text-[color:var(--operator-foreground)]">{story.title}</p>
+                                <p className="text-sm font-medium text-foreground">{story.title}</p>
                                 <Badge variant="outline">{story.status}</Badge>
                               </div>
-                              <div className="flex flex-wrap items-center gap-2 text-xs text-[color:var(--operator-muted)]">
+                              <div className="flex flex-wrap items-center gap-2 text-xs text-muted-foreground">
                                 <Badge variant="chip">{story.assignee_name ?? t('unknown')}</Badge>
                                 <span>{t('taskProgress', { done: story.done_task_count, total: story.task_count })}</span>
                               </div>

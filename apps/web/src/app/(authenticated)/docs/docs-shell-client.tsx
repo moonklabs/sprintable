@@ -52,7 +52,7 @@ export function getDocSaveStatusText(status: SaveStatus, t: (key: string) => str
 }
 
 const SAVE_STATUS_CLASS: Partial<Record<SaveStatus, string>> = {
-  saving: 'text-[color:var(--operator-muted)]',
+  saving: 'text-muted-foreground',
   saved: 'text-emerald-500/70',
   unsaved: 'text-amber-500/70',
   error: 'text-rose-500',
@@ -372,7 +372,7 @@ export function DocsShellClient({ projectId }: DocsShellClientProps) {
   if (loading) {
     return (
       <div className="flex h-screen items-center justify-center">
-        <p className="text-sm text-[color:var(--operator-muted)]">{t('loading')}</p>
+        <p className="text-sm text-muted-foreground">{t('loading')}</p>
       </div>
     );
   }
@@ -423,12 +423,12 @@ export function DocsShellClient({ projectId }: DocsShellClientProps) {
           <button
             type="button"
             onClick={() => setMobileSidebarOpen(true)}
-            className="flex min-h-[44px] min-w-[44px] items-center justify-center rounded-xl text-[color:var(--operator-muted)] hover:bg-[color:var(--operator-surface-soft)]"
+            className="flex min-h-[44px] min-w-[44px] items-center justify-center rounded-md text-muted-foreground hover:bg-muted"
             aria-label={t('title')}
           >
             <Menu className="size-5" />
           </button>
-          <span className="truncate text-sm font-medium text-[color:var(--operator-foreground)]">{selectedDoc?.title ?? t('title')}</span>
+          <span className="truncate text-sm font-medium text-foreground">{selectedDoc?.title ?? t('title')}</span>
         </div>
         {showCreate ? (
           <div className="flex h-full flex-col">
@@ -467,7 +467,7 @@ export function DocsShellClient({ projectId }: DocsShellClientProps) {
                     value={newContent}
                     onChange={(e) => setNewContent(e.target.value)}
                     placeholder={t('editorPlaceholder')}
-                    className="w-full min-h-[200px] rounded-lg border border-white/10 bg-[color:var(--operator-surface-soft)] px-3 py-2 text-sm resize-none"
+                    className="w-full min-h-[200px] rounded-md border border-input bg-background px-3 py-2 text-sm resize-none"
                   />
                 </div>
                 <div className="flex gap-2">
@@ -540,7 +540,7 @@ export function DocsShellClient({ projectId }: DocsShellClientProps) {
           </>
         ) : (
           <div className="flex h-full items-center justify-center">
-            <p className="text-sm text-[color:var(--operator-muted)]">{t('selectDoc')}</p>
+            <p className="text-sm text-muted-foreground">{t('selectDoc')}</p>
           </div>
         )}
       </DocsShell>

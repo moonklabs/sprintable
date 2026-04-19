@@ -20,6 +20,7 @@
     "@dnd-kit/core": "^6.3.1",
     "@dnd-kit/sortable": "^10.0.0",
     "@dnd-kit/utilities": "^3.2.2",
+    "@radix-ui/react-slot": "^1.2.4",
     "@sprintable/core-storage": "workspace:*",
     "@sprintable/storage-supabase": "workspace:*",
     "@supabase/ssr": "^0.10.0",
