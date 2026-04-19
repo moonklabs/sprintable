@@ -7,7 +7,7 @@ RUN corepack enable && corepack prepare pnpm@9.15.0 --activate
 # Build deps for native modules (better-sqlite3)
 RUN apk add --no-cache python3 make g++
 WORKDIR /app
-COPY pnpm-lock.yaml pnpm-workspace.yaml package.json ./
+COPY pnpm-lock.yaml pnpm-workspace.yaml package.json .npmrc ./
 COPY apps/web/package.json apps/web/package.json
 COPY packages/core-storage/package.json packages/core-storage/package.json
 COPY packages/db/package.json packages/db/package.json
