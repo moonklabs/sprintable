@@ -46,9 +46,9 @@ function ListStoryRow({ story, epicMap, memberMap, onStoryClick, onChangeStatus 
   const currentColumn = COLUMNS.find((c) => c.id === story.status);
 
   return (
-    <div className="relative flex items-center gap-3 rounded-2xl border border-white/6 bg-[color:var(--operator-surface-soft)] px-4 py-3 transition-all hover:bg-white/6">
+    <div className="relative flex min-w-0 items-center gap-3 overflow-hidden rounded-2xl border border-white/6 bg-[color:var(--operator-surface-soft)] px-4 py-3 transition-all hover:bg-white/6">
       <button
-        className="min-h-[44px] flex-1 text-left"
+        className="min-h-[44px] min-w-0 flex-1 text-left"
         onClick={() => onStoryClick(story)}
       >
         <div className="flex flex-wrap items-center gap-2">
