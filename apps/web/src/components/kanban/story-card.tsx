@@ -134,7 +134,7 @@ export function StoryCard({ story, epicName, assigneeName, onClick, onEdit, onCh
       {...listeners}
       onClick={onClick}
       onContextMenu={handleContextMenu}
-      className="group relative cursor-pointer overflow-hidden rounded-2xl border border-white/8 bg-[color:var(--operator-panel)]/78 p-3 shadow-[0_10px_30px_rgba(0,0,0,0.18)] transition hover:border-[color:var(--operator-primary)]/18 hover:bg-white/8"
+      className="group relative w-full cursor-pointer overflow-hidden rounded-2xl border border-white/8 bg-[color:var(--operator-panel)]/78 p-3 shadow-[0_10px_30px_rgba(0,0,0,0.18)] transition hover:border-[color:var(--operator-primary)]/18 hover:bg-white/8"
     >
       {epicName && story.epic_id ? (
         <Badge variant={getEpicColor(story.epic_id)} className="mb-2 max-w-full truncate">
