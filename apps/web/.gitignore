@@ -12,6 +12,7 @@
 
 # testing
 /coverage
+/.data
 /playwright-report
 /test-results
 /blob-report
