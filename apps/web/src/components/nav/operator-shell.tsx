@@ -17,7 +17,6 @@ import {
   LayoutDashboard,
   MessageSquareMore,
   PenTool,
-  Search,
   Settings,
   Trophy,
   Users,
@@ -235,7 +234,7 @@ export function OperatorShell({
         </aside>
 
         <div className="flex min-h-screen min-w-0 flex-1 flex-col px-2 sm:px-4 lg:px-5 lg:pb-5" style={{ paddingBottom: 'max(5rem, calc(env(safe-area-inset-bottom) + 4rem))' }}>
-          <GlassPanel className="sticky top-0 z-30 mb-4 -mx-2 rounded-none sm:-mx-4 lg:-mx-5 flex items-center justify-between gap-4 px-4 py-3">
+          <GlassPanel className="sticky top-0 z-30 mb-4 -mx-2 rounded-none sm:-mx-4 lg:-mx-5 flex items-center justify-between gap-4 px-4 py-2 lg:py-3">
             <div className="flex min-w-0 flex-1 items-center gap-2">
               <div className="shrink-0 whitespace-nowrap text-[10px] font-semibold uppercase tracking-[0.24em] text-[color:var(--operator-muted)]">{shellT('projectLabel')}</div>
               {projectMemberships.length > 0 ? (
@@ -264,32 +263,19 @@ export function OperatorShell({
             <div className="flex shrink-0 items-center gap-2">
               <OperatorIconButton
                 onClick={() => {
-                  const searchInput = document.querySelector<HTMLInputElement>('[data-search-input]');
-                  searchInput?.focus();
-                }}
-                aria-label={shellT('searchPlaceholder')}
-                className="lg:hidden"
-              >
-                <Search className="size-4" />
-              </OperatorIconButton>
-              <div className="lg:hidden">
-                <LocaleSwitcher />
-              </div>
-              <OperatorIconButton
-                onClick={() => {
                   setMemoSidebarOpen(true);
                   setMemoUnreadCount(0);
                 }}
                 aria-label={t('memos')}
-                className="relative"
+                className="relative hidden lg:flex"
               >
                 <MessageSquareMore className="size-4" />
                 {memoUnreadCount > 0 ? <Badge variant="counter" className="absolute -right-1 -top-1 h-5 min-w-5 px-1.5 text-[10px]">{memoUnreadCount > 9 ? '9+' : memoUnreadCount}</Badge> : null}
               </OperatorIconButton>
-              <OperatorIconButton render={<Link href="/inbox" />} aria-label={t('inbox')}>
+              <OperatorIconButton render={<Link href="/inbox" />} aria-label={t('inbox')} className="hidden lg:flex">
                 <Inbox className="size-4" />
               </OperatorIconButton>
-              <OperatorIconButton render={<Link href="/dashboard/settings" />} aria-label={t('settings')}>
+              <OperatorIconButton render={<Link href="/dashboard/settings" />} aria-label={t('settings')} className="hidden lg:flex">
                 <Settings className="size-4" />
               </OperatorIconButton>
             </div>
