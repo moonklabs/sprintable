@@ -9,8 +9,9 @@ import { useDocSync, type SaveStatus } from '@/components/docs/use-doc-sync';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { ToastContainer, useToast } from '@/components/ui/toast';
-import { Plus, X, Trash2, Copy, Check, Menu } from 'lucide-react';
+import { ChevronLeft, Plus, X, Trash2, Copy, Check } from 'lucide-react';
 import { DocsShell } from '@/components/docs/docs-shell';
+import { GlassPanel } from '@/components/ui/glass-panel';
 
 interface Doc {
   id: string;
@@ -81,7 +82,7 @@ export function DocsShellClient({ projectId }: DocsShellClientProps) {
   const [tree, setTree] = useState<Doc[]>([]);
   const [selectedDoc, setSelectedDoc] = useState<DocDetail | null>(null);
   const [loading, setLoading] = useState(true);
-  const [mobileSidebarOpen, setMobileSidebarOpen] = useState(false);
+  const [mobileView, setMobileView] = useState<'list' | 'detail'>('list');
 
   // Always-editable content states
   const [title, setTitle] = useState('');
@@ -163,7 +164,7 @@ export function DocsShellClient({ projectId }: DocsShellClientProps) {
     const params = new URLSearchParams(searchParams);
     params.set('slug', slug);
     router.replace(`?${params.toString()}`);
-    setMobileSidebarOpen(false);
+    setMobileView('detail');
   }, [fetchDoc, router, searchParams]);
 
   const handleReorder = useCallback(async (docId: string, newSortOrder: number, siblings: Doc[]) => {
@@ -382,33 +383,23 @@ export function DocsShellClient({ projectId }: DocsShellClientProps) {
       <div className="flex-shrink-0 border-b border-white/10 px-4 py-3">
         <div className="flex items-center justify-between gap-2">
           <h1 className="text-lg font-semibold">{t('title')}</h1>
-          <div className="flex items-center gap-1">
-            <Button size="sm" onClick={() => {
-              setShowCreate(true);
-              setNewTitle('');
-              setNewSlug('');
-              setNewContent('');
-              setNewParentId(null);
-              setSlugManuallyEdited(false);
-            }}>
-              <Plus className="h-4 w-4" />
-            </Button>
-            <button
-              type="button"
-              className="flex min-h-[36px] min-w-[36px] items-center justify-center rounded-xl text-[color:var(--operator-muted)] hover:bg-[color:var(--operator-surface-soft)] md:hidden"
-              onClick={() => setMobileSidebarOpen(false)}
-              aria-label="Close sidebar"
-            >
-              <X className="size-4" />
-            </button>
-          </div>
+          <Button size="sm" onClick={() => {
+            setShowCreate(true);
+            setNewTitle('');
+            setNewSlug('');
+            setNewContent('');
+            setNewParentId(null);
+            setSlugManuallyEdited(false);
+          }}>
+            <Plus className="h-4 w-4" />
+          </Button>
         </div>
       </div>
       <div className="flex-1 overflow-y-auto p-2">
         <DocTree
           docs={tree}
           selectedSlug={selectedDoc?.slug || null}
-          onSelect={(doc) => { handleSelectDoc(doc); setMobileSidebarOpen(false); }}
+          onSelect={(doc) => { handleSelectDoc(doc); }}
           onReorder={handleReorder}
           onMove={handleMove}
           onMoveDenied={handleMoveDenied}
@@ -420,27 +411,7 @@ export function DocsShellClient({ projectId }: DocsShellClientProps) {
     </>
   );
 
-  return (
-    <>
-      <DocsShell
-        sidebar={sidebarContent}
-        mobileSidebarOpen={mobileSidebarOpen}
-        onMobileSidebarOpenChange={setMobileSidebarOpen}
-        className="min-h-[calc(100vh-8rem)]"
-      >
-        {/* Mobile header with hamburger */}
-        <div className="flex flex-shrink-0 items-center gap-2 border-b border-white/10 px-3 py-2 md:hidden">
-          <button
-            type="button"
-            onClick={() => setMobileSidebarOpen(true)}
-            className="flex min-h-[44px] min-w-[44px] items-center justify-center rounded-xl text-[color:var(--operator-muted)] hover:bg-[color:var(--operator-surface-soft)]"
-            aria-label={t('title')}
-          >
-            <Menu className="size-5" />
-          </button>
-          <span className="truncate text-sm font-medium text-[color:var(--operator-foreground)]">{selectedDoc?.title ?? t('title')}</span>
-        </div>
-        {showCreate ? (
+  const editorContent = showCreate ? (
           <div className="flex h-full flex-col">
             <div className="flex-shrink-0 border-b border-white/10 px-3 py-2 md:px-6 md:py-4">
               <div className="flex items-center justify-between">
@@ -548,12 +519,44 @@ export function DocsShellClient({ projectId }: DocsShellClientProps) {
               />
             </div>
           </>
-        ) : (
-          <div className="flex h-full items-center justify-center">
-            <p className="text-sm text-[color:var(--operator-muted)]">{t('selectDoc')}</p>
+  ) : (
+    <div className="flex h-full items-center justify-center">
+      <p className="text-sm text-[color:var(--operator-muted)]">{t('selectDoc')}</p>
+    </div>
+  );
+
+  return (
+    <>
+      {/* Desktop layout (md+) — unchanged 2-panel DocsShell */}
+      <div className="hidden md:block">
+        <DocsShell sidebar={sidebarContent} className="min-h-[calc(100vh-8rem)]">
+          {editorContent}
+        </DocsShell>
+      </div>
+
+      {/* Mobile layout (< md) — list ↔ detail full-screen */}
+      <div className="md:hidden">
+        {mobileView === 'detail' ? (
+          <div className="space-y-2">
+            <button
+              type="button"
+              onClick={() => setMobileView('list')}
+              className="flex items-center gap-1 py-1 text-sm text-[color:var(--operator-muted)] hover:text-[color:var(--operator-foreground)]"
+            >
+              <ChevronLeft className="size-4" />
+              {t('title')}
+            </button>
+            <GlassPanel className="flex min-h-0 flex-col overflow-hidden">
+              {editorContent}
+            </GlassPanel>
           </div>
+        ) : (
+          <GlassPanel className="flex flex-col border-white/8 bg-[color:var(--operator-surface-soft)]/75">
+            {sidebarContent}
+          </GlassPanel>
         )}
-      </DocsShell>
+      </div>
+
       <ToastContainer toasts={toasts} onDismiss={dismissToast} />
     </>
   );
