@@ -1,6 +1,6 @@
 'use client';
 
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useMemo, useState } from 'react';
 import { useTranslations } from 'next-intl';
 import { ChevronLeft, Plus, X } from 'lucide-react';
 import { MemoFeed } from '@/components/memos/memo-feed';
@@ -32,6 +32,11 @@ export function MemosFeedClient({ currentTeamMemberId, projectId }: MemosFeedCli
   const [loading, setLoading] = useState(true);
   const [showCreate, setShowCreate] = useState(false);
   const [mobileView, setMobileView] = useState<'list' | 'detail'>('list');
+
+  const memberMap = useMemo(
+    () => Object.fromEntries(members.map((m) => [m.id, m.name])),
+    [members],
+  );
 
   const fetchMemos = useCallback(async () => {
     if (!projectId) return;
@@ -232,6 +237,7 @@ export function MemosFeedClient({ currentTeamMemberId, projectId }: MemosFeedCli
       currentUserId={currentTeamMemberId}
       onReply={handleReply}
       onResolve={handleResolve}
+      memberMap={memberMap}
     />
   ) : (
     <div className="flex h-full items-center justify-center">
@@ -249,6 +255,7 @@ export function MemosFeedClient({ currentTeamMemberId, projectId }: MemosFeedCli
             memos={memos}
             onSelectMemo={handleSelectMemo}
             selectedMemoId={selectedMemo?.id ?? null}
+            memberMap={memberMap}
           />
         </div>
       </div>

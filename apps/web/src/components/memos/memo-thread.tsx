@@ -12,6 +12,7 @@ interface MemoThreadProps {
   currentUserId: string;
   onReply: (content: string) => Promise<void>;
   onResolve: () => Promise<void>;
+  memberMap?: Record<string, string>;
 }
 
 /**
@@ -20,8 +21,9 @@ interface MemoThreadProps {
  */
 const REPLY_COLLAPSE_THRESHOLD = 3;
 
-export function MemoThread({ memo, currentUserId, onReply, onResolve }: MemoThreadProps) {
+export function MemoThread({ memo, currentUserId, onReply, onResolve, memberMap = {} }: MemoThreadProps) {
   const t = useTranslations('memos');
+  const tc = useTranslations('common');
   const [replyContent, setReplyContent] = useState('');
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [repliesExpanded, setRepliesExpanded] = useState(false);
@@ -31,6 +33,9 @@ export function MemoThread({ memo, currentUserId, onReply, onResolve }: MemoThre
   const visibleReplies = repliesExpanded || hiddenCount === 0
     ? allReplies
     : allReplies.slice(allReplies.length - REPLY_COLLAPSE_THRESHOLD);
+
+  const senderName = memo.created_by ? (memberMap[memo.created_by] ?? tc('unknown')) : tc('deletedUser');
+  const assigneeName = memo.assigned_to ? (memberMap[memo.assigned_to] ?? tc('unknown')) : null;
 
   const handleSubmitReply = async () => {
     if (!replyContent.trim() || isSubmitting) return;
@@ -49,7 +54,7 @@ export function MemoThread({ memo, currentUserId, onReply, onResolve }: MemoThre
   const handleKeyDown = (e: React.KeyboardEvent<HTMLTextAreaElement>) => {
     if (e.key === 'Enter' && (e.metaKey || e.ctrlKey)) {
       e.preventDefault();
-      handleSubmitReply();
+      void handleSubmitReply();
     }
   };
 
@@ -58,22 +63,23 @@ export function MemoThread({ memo, currentUserId, onReply, onResolve }: MemoThre
       {/* Thread header */}
       <div className="flex-shrink-0 border-b border-white/10 px-4 py-3">
         <div className="flex items-start justify-between gap-4">
-          <div className="flex-1 min-w-0">
+          <div className="min-w-0 flex-1 space-y-1">
             {memo.title && (
-              <h2 className="text-lg font-semibold text-[color:var(--operator-foreground)] truncate">
+              <h2 className="truncate text-lg font-semibold text-[color:var(--operator-foreground)]">
                 {memo.title}
               </h2>
             )}
-            <div className="mt-1 text-sm text-[color:var(--operator-muted)]">
-              {new Date(memo.created_at).toLocaleString()}
+            {/* Slack-style: sender → assignee + date */}
+            <div className="flex flex-wrap items-center gap-1.5 text-xs">
+              <span className="font-semibold text-[color:var(--operator-foreground)]">{senderName}</span>
+              {assigneeName ? (
+                <span className="text-[color:var(--operator-muted)]">→ {assigneeName}</span>
+              ) : null}
+              <span className="text-[color:var(--operator-muted)]">{new Date(memo.created_at).toLocaleString()}</span>
             </div>
           </div>
           {memo.status === 'open' && (
-            <Button
-              variant="outline"
-              size="sm"
-              onClick={onResolve}
-            >
+            <Button variant="outline" size="sm" onClick={onResolve}>
               {t('resolve')}
             </Button>
           )}
@@ -86,9 +92,10 @@ export function MemoThread({ memo, currentUserId, onReply, onResolve }: MemoThre
           {/* Original message */}
           <ThreadMessage
             content={memo.content}
-            authorId={memo.created_by}
+            authorId={memo.created_by ?? null}
             timestamp={memo.created_at}
             isCurrentUser={memo.created_by === currentUserId}
+            memberMap={memberMap}
           />
 
           {/* Replies — collapse when > 3 */}
@@ -111,6 +118,7 @@ export function MemoThread({ memo, currentUserId, onReply, onResolve }: MemoThre
               timestamp={reply.created_at}
               isCurrentUser={reply.created_by === currentUserId}
               reviewType={reply.review_type}
+              memberMap={memberMap}
             />
           ))}
         </div>
@@ -129,7 +137,7 @@ export function MemoThread({ memo, currentUserId, onReply, onResolve }: MemoThre
               disabled={isSubmitting}
             />
             <Button
-              onClick={handleSubmitReply}
+              onClick={() => void handleSubmitReply()}
               disabled={!replyContent.trim() || isSubmitting}
               className="self-end"
             >
@@ -151,6 +159,7 @@ interface ThreadMessageProps {
   timestamp: string;
   isCurrentUser: boolean;
   reviewType?: string;
+  memberMap: Record<string, string>;
 }
 
 function renderWithMentions(text: string, isCurrentUser: boolean): React.ReactNode {
@@ -167,7 +176,9 @@ function renderWithMentions(text: string, isCurrentUser: boolean): React.ReactNo
   });
 }
 
-function ThreadMessage({ content, authorId, timestamp, isCurrentUser, reviewType }: ThreadMessageProps) {
+function ThreadMessage({ content, authorId, timestamp, isCurrentUser, reviewType, memberMap }: ThreadMessageProps) {
+  const authorName = authorId ? (memberMap[authorId] ?? authorId) : '—';
+
   return (
     <div className={`flex ${isCurrentUser ? 'justify-end' : 'justify-start'}`}>
       <div
@@ -178,6 +189,12 @@ function ThreadMessage({ content, authorId, timestamp, isCurrentUser, reviewType
           ${reviewType === 'request_changes' ? 'border-2 border-red-500' : ''}
         `}
       >
+        {/* Author name above message */}
+        {!isCurrentUser && (
+          <div className="mb-1 text-xs font-semibold text-[color:var(--operator-foreground)]">
+            {authorName}
+          </div>
+        )}
         <div className="whitespace-pre-wrap break-words text-sm">
           {renderWithMentions(content, isCurrentUser)}
         </div>
