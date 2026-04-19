@@ -63,29 +63,36 @@ export function MemoList({ memos, memberMap, onSelect, selectedId }: MemoListPro
             selectedId === m.id && 'bg-primary/5',
           )}
         >
-          <div className="flex items-start justify-between gap-3">
-            <div className="min-w-0 flex-1 space-y-1">
-              <p className="truncate text-sm font-semibold text-foreground">
-                {m.title || m.content.slice(0, 72)}
-              </p>
-              <p className="line-clamp-2 text-xs text-muted-foreground">
-                {m.project_name ? `${m.project_name} · ` : ''}{m.content.slice(0, 120)}
-              </p>
+          {/* Slack-style: sender + date header */}
+          <div className="mb-1 flex items-center justify-between gap-2">
+            <div className="flex min-w-0 items-center gap-1.5">
+              <span className="truncate text-xs font-semibold text-foreground">
+                {m.created_by ? (memberMap[m.created_by] ?? tc('unknown')) : tc('deletedUser')}
+              </span>
+              {m.assigned_to ? (
+                <span className="shrink-0 text-xs text-muted-foreground">→ {memberMap[m.assigned_to] || tc('unknown')}</span>
+              ) : null}
+              <Badge variant="outline" className="shrink-0 text-[10px]">{getMemoTypeLabel(m.memo_type)}</Badge>
             </div>
-            <StatusBadge status={m.status} label={getMemoStatusLabel(m.status)} />
+            <span className="shrink-0 text-[10px] text-muted-foreground">{formatLocaleDateOnly(m.created_at, locale)}</span>
           </div>
 
-          <div className="mt-3 flex flex-wrap items-center gap-2 text-xs text-muted-foreground">
-            <Badge variant="outline">{getMemoTypeLabel(m.memo_type)}</Badge>
-            {m.reply_count ? <Badge variant="secondary">{t('repliesCountBadge', { count: m.reply_count })}</Badge> : null}
-            <span>{m.created_by ? (memberMap[m.created_by] ?? tc('unknown')) : tc('deletedUser')}</span>
-            {m.assigned_to ? (
-              <>
-                <span>→</span>
-                <span>{memberMap[m.assigned_to] || tc('unknown')}</span>
-              </>
-            ) : null}
-            <span className="ml-auto">{formatLocaleDateOnly(m.created_at, locale)}</span>
+          {/* Title / content preview */}
+          <p className="truncate text-sm font-medium text-foreground">
+            {m.title || m.content.slice(0, 72)}
+          </p>
+          {m.title && (
+            <p className="mt-0.5 line-clamp-1 text-xs text-muted-foreground">
+              {m.project_name ? `${m.project_name} · ` : ''}{m.content.slice(0, 80)}
+            </p>
+          )}
+
+          {/* Compact footer: reply count + status */}
+          <div className="mt-1.5 flex items-center justify-between gap-2">
+            <span className="text-[10px] text-muted-foreground">
+              {m.reply_count ? t('repliesCountBadge', { count: m.reply_count }) : ''}
+            </span>
+            <StatusBadge status={m.status} label={getMemoStatusLabel(m.status)} />
           </div>
         </button>
       ))}

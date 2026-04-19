@@ -697,11 +697,9 @@ export function MemosClient({ currentTeamMemberId, projectId }: MemosClientProps
               {t('newMemo')}
             </button>
           </div>
-          <div className="flex items-center gap-4 overflow-x-auto rounded-xl bg-muted/30 px-3 py-2">
-            <span className="shrink-0 text-xs text-muted-foreground">{t('statsOpen')} <strong className="text-foreground">{stats.open}</strong></span>
-            <span className="shrink-0 text-xs text-muted-foreground">{t('statsAssigned')} <strong className="text-foreground">{stats.assigned}</strong></span>
-            <span className="shrink-0 text-xs text-muted-foreground">{t('statsReplies')} <strong className="text-foreground">{stats.replies}</strong></span>
-            <span className="shrink-0 text-xs text-muted-foreground">{t('statsSavedViews')} <strong className="text-foreground">{stats.views}</strong></span>
+          <div className="flex items-center gap-4 rounded-xl bg-muted/30 px-3 py-2">
+            <span className="text-xs text-muted-foreground">{t('statsOpen')} <strong className="text-foreground">{stats.open}</strong></span>
+            <span className="text-xs text-muted-foreground">{t('statsAssigned')} <strong className="text-foreground">{stats.assigned}</strong></span>
           </div>
         </div>
 
@@ -741,22 +739,15 @@ export function MemosClient({ currentTeamMemberId, projectId }: MemosClientProps
         {/* ── Mobile compact channel filter (< md, list view only) ── */}
         {mobileView === 'list' && (
           <div className="space-y-2 md:hidden">
-            <div className="flex gap-2 overflow-x-auto pb-1">
-              {CHANNEL_ORDER.map((id) => {
-                const active = channel === id;
-                const count = channelCounts[id];
-                return (
-                  <button
-                    key={id}
-                    type="button"
-                    onClick={() => handleChannelChange(id)}
-                    className={`shrink-0 rounded-full border px-3 py-1 text-xs font-medium transition ${active ? 'border-primary bg-primary text-primary-foreground' : 'border-input bg-muted/50 text-foreground hover:bg-muted'}`}
-                  >
-                    {channelLabelMap[id]} <span className="opacity-70">{count}</span>
-                  </button>
-                );
-              })}
-            </div>
+            <select
+              value={channel}
+              onChange={(e) => handleChannelChange(e.target.value as WorkspaceChannel)}
+              className="w-full rounded-xl border border-input bg-[color:var(--operator-surface-soft)] px-3 py-2 text-sm text-foreground"
+            >
+              {CHANNEL_ORDER.map((id) => (
+                <option key={id} value={id}>{channelLabelMap[id]} ({channelCounts[id]})</option>
+              ))}
+            </select>
             <Input value={searchQuery} onChange={(event) => handleSearchChange(event.target.value)} placeholder={t('searchMemosPlaceholder')} />
           </div>
         )}
