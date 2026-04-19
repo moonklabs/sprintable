@@ -112,7 +112,7 @@ export function MemosClient({ currentTeamMemberId, projectId }: MemosClientProps
   const [workspaceReady, setWorkspaceReady] = useState(false);
   const [nextCursor, setNextCursor] = useState<string | null>(null);
   const [loadingMore, setLoadingMore] = useState(false);
-  const [mobileView, setMobileView] = useState<'list' | 'detail'>('list');
+  const [mobileView, setMobileView] = useState<'list' | 'detail'>(searchParams.get('id') ? 'detail' : 'list');
 
   const selectedMemoIdRef = useRef(selectedMemo?.id);
   const loadedWorkspaceKeyRef = useRef<string | null>(null);
@@ -440,6 +440,7 @@ export function MemosClient({ currentTeamMemberId, projectId }: MemosClientProps
     (async () => {
       if (cancelled) return;
       await selectMemoById(target?.id ?? deepId, { updateUrl: false });
+      if (!cancelled) setMobileView('detail');
     })().catch(() => {});
 
     return () => {
@@ -682,11 +683,11 @@ export function MemosClient({ currentTeamMemberId, projectId }: MemosClientProps
   );
 
   return (
-    <div className="min-h-screen bg-background p-4 md:p-6">
+    <div className="bg-background p-4 lg:p-6">
       <div className="mx-auto max-w-7xl space-y-4">
 
-        {/* ── Mobile header + compact stats (< md) ───────── */}
-        <div className="md:hidden">
+        {/* ── Mobile header + compact stats (< lg) ───────── */}
+        <div className="lg:hidden">
           <div className="mb-3 flex items-center justify-between">
             <h1 className="text-lg font-semibold text-foreground">{t('title')}</h1>
             <button
@@ -703,8 +704,8 @@ export function MemosClient({ currentTeamMemberId, projectId }: MemosClientProps
           </div>
         </div>
 
-        {/* ── Desktop stats 4-card grid (md+) ─────────────── */}
-        <SectionCard className="hidden md:block">
+        {/* ── Desktop stats 4-card grid (lg+) ─────────────── */}
+        <SectionCard className="hidden lg:block">
           <SectionCardHeader>
             <div className="flex flex-wrap items-start justify-between gap-3">
               <div className="space-y-1">
@@ -716,7 +717,7 @@ export function MemosClient({ currentTeamMemberId, projectId }: MemosClientProps
               </button>
             </div>
           </SectionCardHeader>
-          <SectionCardBody className="grid gap-3 md:grid-cols-2 xl:grid-cols-4">
+          <SectionCardBody className="grid gap-3 lg:grid-cols-2 xl:grid-cols-4">
             <div className="rounded-xl bg-muted/40 p-3">
               <div className="text-xs text-muted-foreground">{t('statsOpen')}</div>
               <div className="text-2xl font-semibold">{stats.open}</div>
@@ -736,9 +737,9 @@ export function MemosClient({ currentTeamMemberId, projectId }: MemosClientProps
           </SectionCardBody>
         </SectionCard>
 
-        {/* ── Mobile compact channel filter (< md, list view only) ── */}
+        {/* ── Mobile compact channel filter (< lg, list view only) ── */}
         {mobileView === 'list' && (
-          <div className="space-y-2 md:hidden">
+          <div className="space-y-2 lg:hidden">
             <select
               value={channel}
               onChange={(e) => handleChannelChange(e.target.value as WorkspaceChannel)}
@@ -752,8 +753,8 @@ export function MemosClient({ currentTeamMemberId, projectId }: MemosClientProps
           </div>
         )}
 
-        {/* ── Desktop full filter section (md+) ─────────────── */}
-        <SectionCard className="hidden md:block">
+        {/* ── Desktop full filter section (lg+) ─────────────── */}
+        <SectionCard className="hidden lg:block">
           <SectionCardBody className="space-y-4">
             <div className="grid gap-4 xl:grid-cols-[minmax(0,1fr)_240px_240px_280px]">
               <div className="space-y-2 min-w-0">
@@ -869,8 +870,8 @@ export function MemosClient({ currentTeamMemberId, projectId }: MemosClientProps
           </SectionCardBody>
         </SectionCard>
 
-        {/* ── Desktop: create form + queue toggle + contextual panel (md+) ── */}
-        <div className="hidden md:block">
+        {/* ── Desktop: create form + queue toggle + contextual panel (lg+) ── */}
+        <div className="hidden lg:block">
           <div className="space-y-4">
             {showCreate ? (
               <MemoCreateForm
@@ -938,8 +939,8 @@ export function MemosClient({ currentTeamMemberId, projectId }: MemosClientProps
           </div>
         </div>
 
-        {/* ── Mobile: full-screen list ↔ detail (< md) ─────── */}
-        <div className="md:hidden">
+        {/* ── Mobile: full-screen list ↔ detail (< lg) ─────── */}
+        <div className="lg:hidden">
           {showCreate ? (
             <div className="space-y-3">
               <button
