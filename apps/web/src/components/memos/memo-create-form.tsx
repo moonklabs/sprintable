@@ -165,7 +165,7 @@ export function MemoCreateForm({ members, onSubmit, onCancel, initialTitle, draf
           showSubmitButton={false}
         />
 
-        <div className="grid gap-3 md:grid-cols-2">
+        <div className="grid gap-3 lg:grid-cols-2">
           <select
             value={memoType}
             onChange={(e) => setMemoType(e.target.value)}

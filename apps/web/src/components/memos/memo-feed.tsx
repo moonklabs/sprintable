@@ -8,19 +8,29 @@ interface MemoFeedProps {
   onSelectMemo: (memoId: string) => void;
   selectedMemoId: string | null;
   memberMap?: Record<string, string>;
+  onNewMemo?: () => void;
 }
 
 /**
  * Message feed style memo list
  * Replaces traditional list view with conversation-style feed
  */
-export function MemoFeed({ memos, onSelectMemo, selectedMemoId, memberMap = {} }: MemoFeedProps) {
+export function MemoFeed({ memos, onSelectMemo, selectedMemoId, memberMap = {}, onNewMemo }: MemoFeedProps) {
   const t = useTranslations('memos');
 
   if (memos.length === 0) {
     return (
-      <div className="flex flex-col items-center justify-center py-12 text-center">
+      <div className="flex flex-col items-center justify-center gap-3 py-12 text-center">
         <p className="text-sm text-[color:var(--operator-muted)]">{t('noMemos')}</p>
+        {onNewMemo ? (
+          <button
+            type="button"
+            onClick={onNewMemo}
+            className="rounded-xl bg-[color:var(--operator-primary)]/20 px-4 py-2 text-xs font-medium text-[color:var(--operator-primary-soft)] hover:bg-[color:var(--operator-primary)]/30"
+          >
+            {t('newMemo')}
+          </button>
+        ) : null}
       </div>
     );
   }
@@ -87,7 +97,7 @@ function MemoFeedItem({ memo, isSelected, onClick, memberMap }: MemoFeedItemProp
       {((memo.reply_count ?? 0) > 0 || hasUnread) && (
         <div className="flex items-center gap-2">
           {(memo.reply_count ?? 0) > 0 && (
-            <span className="text-[10px] text-[color:var(--operator-muted)]">{memo.reply_count} replies</span>
+            <span className="text-[10px] text-[color:var(--operator-muted)]">{memo.reply_count === 1 ? '1 reply' : `${memo.reply_count} replies`}</span>
           )}
           {hasUnread && (
             <div className="flex h-4 w-4 items-center justify-center rounded-full bg-blue-500 text-[10px] text-white">
