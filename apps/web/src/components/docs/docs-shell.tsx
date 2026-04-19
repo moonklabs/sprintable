@@ -17,8 +17,8 @@ export function DocsShell({
 }) {
   return (
     <>
-      <div className={cn('grid gap-2 md:gap-4 md:grid-cols-[280px_minmax(0,1fr)]', className)}>
-        <GlassPanel className="hidden min-w-0 overflow-y-auto border-white/8 bg-[color:var(--operator-surface-soft)]/75 md:block">
+      <div className={cn('grid gap-2 lg:gap-4 lg:grid-cols-[280px_minmax(0,1fr)]', className)}>
+        <GlassPanel className="hidden min-w-0 overflow-y-auto border-white/8 bg-[color:var(--operator-surface-soft)]/75 lg:block">
           {sidebar}
         </GlassPanel>
         <GlassPanel className="flex min-h-0 flex-1 flex-col overflow-hidden">

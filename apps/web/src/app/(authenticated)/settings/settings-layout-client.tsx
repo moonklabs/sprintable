@@ -18,14 +18,14 @@ export function SettingsLayoutClient({ children, isAdmin, currentProjectId }: Se
 
   return (
     <div className="flex flex-1">
-      {/* Desktop sidebar (md+) */}
-      <div className="hidden md:block">
+      {/* Desktop sidebar (lg+) */}
+      <div className="hidden lg:block">
         <SettingsSidebar isAdmin={isAdmin} currentProjectId={currentProjectId} />
       </div>
 
-      {/* Mobile list view (< md) */}
+      {/* Mobile list view (< lg) */}
       {mobileView === 'list' && (
-        <div className="flex-1 p-3 md:hidden">
+        <div className="flex-1 p-3 lg:hidden">
           <GlassPanel className="flex flex-col">
             <SettingsSidebar
               isAdmin={isAdmin}
@@ -40,9 +40,9 @@ export function SettingsLayoutClient({ children, isAdmin, currentProjectId }: Se
       )}
 
       {/* Settings content: desktop always, mobile only in detail view */}
-      <main className={cn('min-w-0 flex-1 p-4 md:p-6', mobileView === 'list' && 'hidden md:block')}>
+      <main className={cn('min-w-0 flex-1 p-4 lg:p-6', mobileView === 'list' && 'hidden lg:block')}>
         {/* Mobile detail back button */}
-        <div className="mb-4 flex items-center gap-2 md:hidden">
+        <div className="mb-4 flex items-center gap-2 lg:hidden">
           <button
             type="button"
             onClick={() => setMobileView('list')}
