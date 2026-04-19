@@ -380,18 +380,28 @@ export function DocsShellClient({ projectId }: DocsShellClientProps) {
   const sidebarContent = (
     <>
       <div className="flex-shrink-0 border-b border-white/10 px-4 py-3">
-        <div className="flex items-center justify-between">
+        <div className="flex items-center justify-between gap-2">
           <h1 className="text-lg font-semibold">{t('title')}</h1>
-          <Button size="sm" onClick={() => {
-            setShowCreate(true);
-            setNewTitle('');
-            setNewSlug('');
-            setNewContent('');
-            setNewParentId(null);
-            setSlugManuallyEdited(false);
-          }}>
-            <Plus className="h-4 w-4" />
-          </Button>
+          <div className="flex items-center gap-1">
+            <Button size="sm" onClick={() => {
+              setShowCreate(true);
+              setNewTitle('');
+              setNewSlug('');
+              setNewContent('');
+              setNewParentId(null);
+              setSlugManuallyEdited(false);
+            }}>
+              <Plus className="h-4 w-4" />
+            </Button>
+            <button
+              type="button"
+              className="flex min-h-[36px] min-w-[36px] items-center justify-center rounded-xl text-[color:var(--operator-muted)] hover:bg-[color:var(--operator-surface-soft)] md:hidden"
+              onClick={() => setMobileSidebarOpen(false)}
+              aria-label="Close sidebar"
+            >
+              <X className="size-4" />
+            </button>
+          </div>
         </div>
       </div>
       <div className="flex-1 overflow-y-auto p-2">

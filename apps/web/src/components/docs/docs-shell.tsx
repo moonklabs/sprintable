@@ -35,7 +35,7 @@ export function DocsShell({
             onClick={() => onMobileSidebarOpenChange?.(false)}
           />
           <div className="absolute inset-y-0 left-0 w-[min(85vw,20rem)] p-3">
-            <GlassPanel className="flex h-full min-h-0 overflow-y-auto border-white/8 bg-[color:var(--operator-surface-soft)]/92 shadow-[0_24px_80px_rgba(0,0,0,0.42)]">
+            <GlassPanel className="flex h-full min-h-0 flex-col border-white/8 bg-[color:var(--operator-surface-soft)]/92 shadow-[0_24px_80px_rgba(0,0,0,0.42)]">
               {sidebar}
             </GlassPanel>
           </div>
