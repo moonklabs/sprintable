@@ -47,7 +47,7 @@ export default async function DashboardPage() {
           <PageHeader
             eyebrow={shellT('workspaceLabel')}
             title={t('title')}
-            description={`${me.project_name} · OSS mode`}
+            description={`${me?.project_name ?? ''} · OSS mode`}
           />
 
           <GlassPanel className="overflow-hidden border-[color:var(--operator-primary)]/10 bg-[radial-gradient(circle_at_top_left,rgba(182,196,255,0.18),transparent_40%),linear-gradient(135deg,rgba(0,218,243,0.08),transparent_42%),color-mix(in_srgb,var(--operator-panel)_78%,transparent)] p-1">
