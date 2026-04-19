@@ -45,18 +45,17 @@ jobs:
             -e NEXT_PUBLIC_APP_URL=http://localhost:3000 \
             sprintable-oss:smoke
 
-          echo "Waiting for container to be healthy..."
+          echo "Waiting for server to respond..."
           for i in $(seq 1 30); do
-            STATUS=$(docker inspect --format='{{.State.Health.Status}}' sprintable-smoke 2>/dev/null || echo "starting")
-            echo "Attempt $i: $STATUS"
-            if [ "$STATUS" = "healthy" ]; then
-              echo "Container is healthy!"
+            if curl -sf http://localhost:3000/api/health > /dev/null 2>&1; then
+              echo "Server is healthy!"
               exit 0
             fi
+            echo "Attempt $i: not ready yet"
             sleep 2
           done
 
-          echo "Container failed to become healthy. Logs:"
+          echo "Server failed to start. Logs:"
           docker logs sprintable-smoke
           exit 1
 
