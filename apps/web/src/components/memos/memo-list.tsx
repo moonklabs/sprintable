@@ -63,29 +63,47 @@ export function MemoList({ memos, memberMap, onSelect, selectedId }: MemoListPro
             selectedId === m.id && 'bg-primary/5',
           )}
         >
-          <div className="flex items-start justify-between gap-3">
-            <div className="min-w-0 flex-1 space-y-1">
-              <p className="truncate text-sm font-semibold text-foreground">
-                {m.title || m.content.slice(0, 72)}
-              </p>
-              <p className="line-clamp-2 text-xs text-muted-foreground">
-                {m.project_name ? `${m.project_name} · ` : ''}{m.content.slice(0, 120)}
-              </p>
+          {/* Mobile (< lg): Slack conversation style — no badges */}
+          <div className="lg:hidden">
+            <div className="mb-1 flex items-center justify-between gap-2">
+              <span className="truncate text-xs font-semibold text-foreground">
+                {m.created_by ? (memberMap[m.created_by] ?? tc('unknown')) : tc('deletedUser')}
+              </span>
+              <span className="shrink-0 text-[10px] text-muted-foreground">{formatLocaleDateOnly(m.created_at, locale)}</span>
             </div>
-            <StatusBadge status={m.status} label={getMemoStatusLabel(m.status)} />
+            <p className="line-clamp-2 text-sm text-foreground">
+              {m.title || m.content.slice(0, 120)}
+            </p>
+            {m.reply_count ? (
+              <p className="mt-1 text-[10px] text-muted-foreground">{t('repliesCountBadge', { count: m.reply_count })}</p>
+            ) : null}
           </div>
 
-          <div className="mt-3 flex flex-wrap items-center gap-2 text-xs text-muted-foreground">
-            <Badge variant="outline">{getMemoTypeLabel(m.memo_type)}</Badge>
-            {m.reply_count ? <Badge variant="secondary">{t('repliesCountBadge', { count: m.reply_count })}</Badge> : null}
-            <span>{m.created_by ? (memberMap[m.created_by] ?? tc('unknown')) : tc('deletedUser')}</span>
-            {m.assigned_to ? (
-              <>
-                <span>→</span>
-                <span>{memberMap[m.assigned_to] || tc('unknown')}</span>
-              </>
-            ) : null}
-            <span className="ml-auto">{formatLocaleDateOnly(m.created_at, locale)}</span>
+          {/* Desktop (lg+): full info — title + status + badges */}
+          <div className="hidden lg:block">
+            <div className="flex items-start justify-between gap-3">
+              <div className="min-w-0 flex-1 space-y-1">
+                <p className="truncate text-sm font-semibold text-foreground">
+                  {m.title || m.content.slice(0, 72)}
+                </p>
+                <p className="line-clamp-2 text-xs text-muted-foreground">
+                  {m.project_name ? `${m.project_name} · ` : ''}{m.content.slice(0, 120)}
+                </p>
+              </div>
+              <StatusBadge status={m.status} label={getMemoStatusLabel(m.status)} />
+            </div>
+            <div className="mt-3 flex flex-wrap items-center gap-2 text-xs text-muted-foreground">
+              <Badge variant="outline">{getMemoTypeLabel(m.memo_type)}</Badge>
+              {m.reply_count ? <Badge variant="secondary">{t('repliesCountBadge', { count: m.reply_count })}</Badge> : null}
+              <span>{m.created_by ? (memberMap[m.created_by] ?? tc('unknown')) : tc('deletedUser')}</span>
+              {m.assigned_to ? (
+                <>
+                  <span>→</span>
+                  <span>{memberMap[m.assigned_to] || tc('unknown')}</span>
+                </>
+              ) : null}
+              <span className="ml-auto">{formatLocaleDateOnly(m.created_at, locale)}</span>
+            </div>
           </div>
         </button>
       ))}

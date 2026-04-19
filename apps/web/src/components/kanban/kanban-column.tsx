@@ -63,7 +63,7 @@ export function KanbanColumn({ id, label, stories, epicMap, memberMap, dragStatu
         <Badge variant="secondary" className="font-mono text-xs">{stories.length}</Badge>
       </div>
       <SortableContextCompat items={stories.map((s) => s.id)} strategy={verticalListSortingStrategy}>
-        <div className="flex flex-1 flex-col gap-3">
+        <div className="flex min-w-0 flex-1 flex-col gap-3">
           {stories.length === 0 ? (
             <p className="rounded-md border border-dashed border-border px-3 py-8 text-center text-xs text-muted-foreground">{t('noStories')}</p>
           ) : null}

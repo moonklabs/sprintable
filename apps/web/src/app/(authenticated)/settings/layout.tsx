@@ -2,8 +2,8 @@ import { ReactNode } from 'react';
 import { cookies } from 'next/headers';
 import { createServerClient } from '@supabase/ssr';
 import { isOssMode } from '@/lib/storage/factory';
-import { SettingsSidebar } from '@/components/settings/settings-sidebar';
 import { PageHeader } from '@/components/ui/page-header';
+import { SettingsLayoutClient } from './settings-layout-client';
 
 export default async function SettingsLayout({ children }: { children: ReactNode }) {
   if (isOssMode()) {
@@ -14,12 +14,9 @@ export default async function SettingsLayout({ children }: { children: ReactNode
           title="Settings"
           description="Manage your account, projects, and preferences"
         />
-        <div className="flex flex-1">
-          <SettingsSidebar isAdmin={true} currentProjectId={OSS_PROJECT_ID} />
-          <main className="flex-1 p-6">
-            {children}
-          </main>
-        </div>
+        <SettingsLayoutClient isAdmin={true} currentProjectId={OSS_PROJECT_ID}>
+          {children}
+        </SettingsLayoutClient>
       </div>
     );
   }
@@ -61,12 +58,9 @@ export default async function SettingsLayout({ children }: { children: ReactNode
         title="Settings"
         description="Manage your account, projects, and preferences"
       />
-      <div className="flex flex-1">
-        <SettingsSidebar isAdmin={isAdmin} currentProjectId={currentProject?.project_id} />
-        <main className="flex-1 p-6">
-          {children}
-        </main>
-      </div>
+      <SettingsLayoutClient isAdmin={isAdmin} currentProjectId={currentProject?.project_id}>
+        {children}
+      </SettingsLayoutClient>
     </div>
   );
 }

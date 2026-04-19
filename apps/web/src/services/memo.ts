@@ -559,6 +559,16 @@ export class MemoService {
     const participants = new Set<string>([memo.created_by]);
     if (memo.assigned_to) participants.add(memo.assigned_to);
     for (const r of priorReplies) participants.add(r.created_by);
+
+    // Parse @mentions from current and prior replies — add to notification recipients
+    const allContents = [reply.content, ...priorReplies.map((r) => r.content ?? '')];
+    for (const member of members) {
+      const name = (member as { id: string; name?: string; is_active?: boolean; webhook_url?: string }).name?.trim();
+      if (name && allContents.some((c) => c.includes(`@${name}`))) {
+        participants.add(member.id);
+      }
+    }
+
     participants.delete(reply.created_by);
 
     const memberById = new Map(members.map((m) => [m.id, m]));

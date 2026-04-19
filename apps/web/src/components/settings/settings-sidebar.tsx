@@ -10,6 +10,7 @@ import { cn } from '@/lib/utils';
 interface SettingsSidebarProps {
   isAdmin: boolean;
   currentProjectId?: string;
+  onItemClick?: () => void;
 }
 
 interface NavGroup {
@@ -60,7 +61,7 @@ const NAV_GROUPS: NavGroup[] = [
   },
 ];
 
-export function SettingsSidebar({ isAdmin, currentProjectId }: SettingsSidebarProps) {
+export function SettingsSidebar({ isAdmin, currentProjectId, onItemClick }: SettingsSidebarProps) {
   const t = useTranslations('settings');
   const pathname = usePathname();
   const searchParams = useSearchParams();
@@ -124,6 +125,7 @@ export function SettingsSidebar({ isAdmin, currentProjectId }: SettingsSidebarPr
                       <Link
                         key={item.key}
                         href={item.hash}
+                        onClick={onItemClick}
                         className={cn(
                           'block rounded-md px-3 py-2 text-sm transition',
                           active
@@ -153,6 +155,7 @@ export function SettingsSidebar({ isAdmin, currentProjectId }: SettingsSidebarPr
                           target.scrollIntoView({ behavior: 'smooth', block: 'start' });
                           window.history.replaceState(null, '', item.hash);
                         }
+                        onItemClick?.();
                       }}
                     >
                       {t(item.labelKey)}

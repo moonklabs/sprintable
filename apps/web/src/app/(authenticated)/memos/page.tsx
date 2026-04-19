@@ -11,7 +11,7 @@ export default function MemosPage() {
   if (!currentTeamMemberId) {
     return (
       <div className="flex min-h-screen items-center justify-center">
-        <p className="text-sm text-gray-400">{t('noTeamMember')}</p>
+        <p className="text-sm text-[color:var(--operator-muted)]">{t('noTeamMember')}</p>
       </div>
     );
   }

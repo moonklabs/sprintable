@@ -17,7 +17,6 @@ import {
   LayoutDashboard,
   MessageSquareMore,
   PenTool,
-  Search,
   Settings,
   Trophy,
   Users,
@@ -112,10 +111,10 @@ export function OperatorShell({
   }, []);
 
   return (
-    <div className="min-h-screen bg-background text-foreground">
+    <div className="min-h-screen bg-[color:var(--operator-bg)] text-[color:var(--operator-foreground)]">
       <div className="flex min-h-screen">
-        <aside className="hidden w-64 shrink-0 border-r border-border bg-muted/30 lg:block">
-          <div className="flex h-full flex-col gap-6 px-4 py-6">
+        <aside className="hidden w-72 shrink-0 p-4 lg:block">
+          <GlassPanel className="flex h-[calc(100vh-2rem)] flex-col gap-6 px-4 py-6">
             <div className="px-2">
               <div className="space-y-1.5">
                 <Link href="/dashboard" className="inline-flex">
@@ -154,10 +153,10 @@ export function OperatorShell({
                           setExpandedMenus(next);
                         }}
                         className={cn(
-                          'group flex w-full items-center justify-between rounded-md px-3 py-2 text-sm font-medium transition-colors',
+                          'group flex w-full items-center justify-between rounded-2xl px-3 py-2.5 text-sm font-medium transition-all duration-200',
                           hasActiveChild
-                            ? 'bg-primary/10 text-primary font-semibold'
-                            : 'text-muted-foreground hover:bg-muted hover:text-foreground',
+                            ? 'bg-[color:var(--operator-primary)]/14 text-[color:var(--operator-primary-soft)] shadow-[inset_0_0_0_1px_rgba(182,196,255,0.12)]'
+                            : 'text-[color:var(--operator-muted)] hover:bg-white/5 hover:text-[color:var(--operator-foreground)]',
                         )}
                       >
                         <span className="flex items-center gap-3">
@@ -172,7 +171,7 @@ export function OperatorShell({
                       </button>
 
                       {isExpanded && (
-                        <div className="ml-6 space-y-1 border-l border-border pl-3">
+                        <div className="ml-6 space-y-1 border-l border-white/8 pl-3">
                           {item.children.map((child) => {
                             const ChildIcon = child.icon;
                             const isChildActive = pathname === child.href || pathname.startsWith(child.href);
@@ -181,10 +180,10 @@ export function OperatorShell({
                                 key={child.href}
                                 href={child.href}
                                 className={cn(
-                                  'group flex items-center gap-3 rounded-md px-3 py-2 text-sm font-medium transition-colors',
+                                  'group flex items-center gap-3 rounded-2xl px-3 py-2 text-sm font-medium transition-all duration-200',
                                   isChildActive
-                                    ? 'bg-primary/10 text-primary font-semibold'
-                                    : 'text-muted-foreground hover:bg-muted hover:text-foreground',
+                                    ? 'bg-[color:var(--operator-primary)]/14 text-[color:var(--operator-primary-soft)] shadow-[inset_0_0_0_1px_rgba(182,196,255,0.12)]'
+                                    : 'text-[color:var(--operator-muted)] hover:bg-white/5 hover:text-[color:var(--operator-foreground)]',
                                 )}
                               >
                                 <ChildIcon className="size-4" />
@@ -205,10 +204,10 @@ export function OperatorShell({
                     key={item.href}
                     href={item.href!}
                     className={cn(
-                      'group flex items-center justify-between rounded-md px-3 py-2 text-sm font-medium transition-colors',
+                      'group flex items-center justify-between rounded-2xl px-3 py-2.5 text-sm font-medium transition-all duration-200',
                       isActive
-                        ? 'bg-primary/10 text-primary font-semibold'
-                        : 'text-muted-foreground hover:bg-muted hover:text-foreground',
+                        ? 'bg-[color:var(--operator-primary)]/14 text-[color:var(--operator-primary-soft)] shadow-[inset_0_0_0_1px_rgba(182,196,255,0.12)]'
+                        : 'text-[color:var(--operator-muted)] hover:bg-white/5 hover:text-[color:var(--operator-foreground)]',
                     )}
                   >
                     <span className="flex items-center gap-3">
@@ -220,38 +219,34 @@ export function OperatorShell({
               })}
             </nav>
 
-            <div className="space-y-3 border-t border-border pt-4">
+            <div className="space-y-3 border-t border-white/8 pt-4">
               <LocaleSwitcher className="px-1" />
-              <Button asChild variant="hero" size="lg" className="w-full justify-start">
-                <Link href="/board">
-                  <Gift className="size-4" />
-                  {shellT('primaryCta')}
-                </Link>
+              <Button variant="hero" size="lg" className="w-full justify-start" render={<Link href="/board" />}>
+                <Gift className="size-4" />
+                {shellT('primaryCta')}
               </Button>
-              <Button asChild variant="glass" size="lg" className="w-full justify-start">
-                <Link href="/dashboard/settings">
-                  <Settings className="size-4" />
-                  {t('settings')}
-                </Link>
+              <Button variant="glass" size="lg" className="w-full justify-start" render={<Link href="/dashboard/settings" />}>
+                <Settings className="size-4" />
+                {t('settings')}
               </Button>
-</div>
-          </div>
+            </div>
+          </GlassPanel>
         </aside>
 
-        <div className="flex min-h-screen min-w-0 flex-1 flex-col">
-          <header className="sticky top-0 z-30 flex h-14 items-center justify-between gap-4 border-b border-border bg-background/95 px-4 backdrop-blur supports-[backdrop-filter]:bg-background/60">
-            <div className="min-w-0">
-              <div className="text-[10px] font-semibold uppercase tracking-[0.24em] text-[color:var(--operator-muted)]">{shellT('projectLabel')}</div>
+        <div className="flex min-h-screen min-w-0 flex-1 flex-col px-2 sm:px-4 lg:px-5 lg:pb-5" style={{ paddingBottom: 'max(5rem, calc(env(safe-area-inset-bottom) + 4rem))' }}>
+          <GlassPanel className="sticky top-0 z-30 mb-4 -mx-2 rounded-none sm:-mx-4 lg:-mx-5 flex items-center justify-between gap-4 px-4 py-2 lg:py-3">
+            <div className="flex min-w-0 flex-1 items-center gap-2">
+              <div className="shrink-0 whitespace-nowrap text-[10px] font-semibold uppercase tracking-[0.24em] text-[color:var(--operator-muted)]">{shellT('projectLabel')}</div>
               {projectMemberships.length > 0 ? (
-                <div className="mt-0.5 lg:hidden">
+                <div className="min-w-0 flex-1 lg:hidden">
                   <ProjectSwitcher
                     projects={projectMemberships}
                     currentProjectId={projectId}
-                    className="min-h-[44px] max-w-[180px]"
+                    className="min-h-[44px] w-full"
                   />
                 </div>
               ) : null}
-              <div className={`truncate font-heading text-sm font-bold text-foreground${projectMemberships.length > 0 ? ' hidden lg:block' : ''}`}>{projectName ?? (projectId ? shellT('projectAttached') : shellT('projectPending'))}</div>
+              <div className={cn('truncate font-heading text-sm font-bold text-[color:var(--operator-foreground)]', projectMemberships.length > 0 && 'hidden lg:block')}>{projectName ?? (projectId ? shellT('projectAttached') : shellT('projectPending'))}</div>
             </div>
             <div className="hidden max-w-xl flex-1 items-center gap-3 lg:flex">
               {projectMemberships.length > 0 ? (
@@ -261,54 +256,37 @@ export function OperatorShell({
                   className="w-[240px]"
                 />
               ) : null}
-              <div className="rounded-md border border-border bg-muted/50 px-4 py-1.5 text-sm text-muted-foreground">
+              <div className="rounded-full border border-white/8 bg-[color:var(--operator-surface-soft)] px-4 py-2 text-sm text-[color:var(--operator-muted)]">
                 {shellT('searchPlaceholder')}
               </div>
             </div>
-            <div className="flex items-center gap-2">
-              <OperatorIconButton
-                onClick={() => {
-                  const searchInput = document.querySelector<HTMLInputElement>('[data-search-input]');
-                  searchInput?.focus();
-                }}
-                aria-label={shellT('searchPlaceholder')}
-                className="lg:hidden"
-              >
-                <Search className="size-4" />
-              </OperatorIconButton>
-              <div className="lg:hidden">
-                <LocaleSwitcher />
-              </div>
+            <div className="flex shrink-0 items-center gap-2">
               <OperatorIconButton
                 onClick={() => {
                   setMemoSidebarOpen(true);
                   setMemoUnreadCount(0);
                 }}
                 aria-label={t('memos')}
-                className="relative"
+                className="relative hidden lg:flex"
               >
                 <MessageSquareMore className="size-4" />
                 {memoUnreadCount > 0 ? <Badge variant="counter" className="absolute -right-1 -top-1 h-5 min-w-5 px-1.5 text-[10px]">{memoUnreadCount > 9 ? '9+' : memoUnreadCount}</Badge> : null}
               </OperatorIconButton>
-              <OperatorIconButton asChild aria-label={t('inbox')}>
-                <Link href="/inbox">
-                  <Inbox className="size-4" />
-                </Link>
+              <OperatorIconButton render={<Link href="/inbox" />} aria-label={t('inbox')} className="hidden lg:flex">
+                <Inbox className="size-4" />
               </OperatorIconButton>
-              <OperatorIconButton asChild aria-label={t('settings')}>
-                <Link href="/dashboard/settings">
-                  <Settings className="size-4" />
-                </Link>
+              <OperatorIconButton render={<Link href="/dashboard/settings" />} aria-label={t('settings')} className="hidden lg:flex">
+                <Settings className="size-4" />
               </OperatorIconButton>
             </div>
-          </header>
+          </GlassPanel>
 
-          <main className="min-w-0 flex-1 p-4 lg:p-6">{children}</main>
+          <div className="min-w-0 flex-1">{children}</div>
         </div>
       </div>
 
-      <div className="fixed inset-x-0 bottom-0 z-40 border-t border-border bg-background/95 backdrop-blur supports-[backdrop-filter]:bg-background/60 lg:hidden" style={{ paddingBottom: 'env(safe-area-inset-bottom)' }}>
-        <div className="grid grid-cols-5 gap-1 px-2 py-2">
+      <div className="fixed inset-x-0 bottom-0 z-40 lg:hidden">
+        <GlassPanel className="grid grid-cols-5 gap-1 rounded-none px-2 py-2 pb-[max(0.5rem,env(safe-area-inset-bottom))]">
           {MOBILE_NAV_ITEMS.map((item) => {
             const Icon = item.icon;
             const isActive = pathname === item.href || pathname.startsWith(item.href);
@@ -317,8 +295,8 @@ export function OperatorShell({
                 key={item.href}
                 href={item.href}
                 className={cn(
-                  'flex min-h-[44px] flex-col items-center justify-center gap-1 rounded-md px-2 py-2 text-[11px] font-medium',
-                  isActive ? 'text-primary' : 'text-muted-foreground',
+                  'flex min-h-[44px] flex-col items-center justify-center gap-1 rounded-2xl px-2 py-2 text-[11px] font-medium',
+                  isActive ? 'bg-[color:var(--operator-primary)]/14 text-[color:var(--operator-primary-soft)]' : 'text-[color:var(--operator-muted)]',
                 )}
               >
                 <Icon className="size-4" />
@@ -326,7 +304,7 @@ export function OperatorShell({
               </Link>
             );
           })}
-        </div>
+        </GlassPanel>
       </div>
 
       <MemoSidebar open={memoSidebarOpen} onClose={() => setMemoSidebarOpen(false)} currentTeamMemberId={currentTeamMemberId} projectId={projectId} />
