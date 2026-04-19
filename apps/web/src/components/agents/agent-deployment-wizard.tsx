@@ -807,7 +807,7 @@ export function AgentDeploymentWizard({
               </Button>
               <Link href="/dashboard/settings" className={buttonVariants({ variant: 'glass', size: 'lg' })}>{t('deployPreflightSettingsCta')}</Link>
             </div>
-          </GlassPanel>
+          </div>
 
           {deploying ? (
             <div className="rounded-md border border-primary/20 bg-primary/10 px-4 py-4 text-sm text-primary">

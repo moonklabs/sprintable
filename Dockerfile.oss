@@ -30,6 +30,7 @@ COPY . .
 ENV OSS_MODE=true
 ENV NEXT_PUBLIC_OSS_MODE=true
 ENV NODE_ENV=production
+ENV PATH="/app/node_modules/.bin:$PATH"
 
 RUN pnpm --filter web build
 
