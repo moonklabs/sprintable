@@ -275,15 +275,23 @@ export function MemoDetail({
       <SectionCard className="rounded-none border-0 border-b">
         <SectionCardHeader className="space-y-3">
           <div className="flex items-start justify-between gap-4">
-            <div className="min-w-0 space-y-2">
+            <div className="min-w-0 space-y-1.5">
               <h2 className="truncate text-lg font-semibold text-foreground">
                 {memoState.title || memoState.content.slice(0, 60)}
               </h2>
+              <div className="flex flex-wrap items-center gap-2 text-xs">
+                <span className="font-semibold text-foreground">
+                  {memoState.created_by ? (memberMap[memoState.created_by] ?? tc('unknown')) : tc('deletedUser')}
+                </span>
+                {memoState.assigned_to ? (
+                  <span className="text-muted-foreground">→ {memberMap[memoState.assigned_to] ?? tc('unknown')}</span>
+                ) : null}
+                <span className="text-muted-foreground">{formatLocaleDateTime(memoState.created_at, locale)}</span>
+              </div>
               <div className="flex flex-wrap items-center gap-2 text-xs text-muted-foreground">
                 <StatusBadge status={memoState.status} label={getMemoStatusLabel(memoState.status)} />
                 <Badge variant="outline">{getMemoTypeLabel(memoState.memo_type)}</Badge>
                 {memoState.project_name ? <span>{memoState.project_name}</span> : null}
-                <span>{formatLocaleDateTime(memoState.created_at, locale)}</span>
               </div>
             </div>
             <div className="flex gap-2">
@@ -300,8 +308,6 @@ export function MemoDetail({
             </div>
           </div>
           <div className="flex flex-wrap gap-3 text-xs text-muted-foreground">
-            <span>{t('author')}: {memoState.created_by ? (memberMap[memoState.created_by] ?? tc('unknown')) : tc('deletedUser')}</span>
-            {memoState.assigned_to ? <span>{t('assigneeLabel')}: {memberMap[memoState.assigned_to] ?? tc('unknown')}</span> : null}
             {memoState.reply_count !== undefined ? <span>{t('replyCount')}: {memoState.reply_count}</span> : null}
             {memoState.latest_reply_at ? <span>{t('latestReply')}: {formatLocaleDateTime(memoState.latest_reply_at, locale)}</span> : null}
             {currentReaders.length ? <span>{t('readBy')}: {stringifyNames(currentReaders)}</span> : null}
