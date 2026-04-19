@@ -819,6 +819,7 @@ export function AgentDeploymentWizard({
           ) : null}
         </div>
       </div>
+      );
     }
 
     return (
