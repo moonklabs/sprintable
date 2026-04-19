@@ -191,6 +191,7 @@
     "author": "Author",
     "assigneeLabel": "Assignee",
     "replyCount": "Reply count",
+    "repliesCountBadge": "{count, plural, one {1 reply} other {# replies}}",
     "latestReply": "Latest reply",
     "timeline": "Timeline",
     "noTimelineEvents": "No timeline events yet.",

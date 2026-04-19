@@ -191,6 +191,7 @@
     "author": "작성자",
     "assigneeLabel": "담당자",
     "replyCount": "답글 수",
+    "repliesCountBadge": "{count, plural, other {답글 #개}}",
     "latestReply": "최근 답글",
     "timeline": "타임라인",
     "noTimelineEvents": "타임라인 이벤트가 아직 없습니다.",
