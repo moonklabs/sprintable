@@ -2,11 +2,11 @@
 
 import { useCallback, useEffect, useState } from 'react';
 import { useTranslations } from 'next-intl';
+import { ChevronLeft, Plus, X } from 'lucide-react';
 import { MemoFeed } from '@/components/memos/memo-feed';
 import { MemoThread } from '@/components/memos/memo-thread';
 import { MemoCreateForm } from '@/components/memos/memo-create-form';
 import { Button } from '@/components/ui/button';
-import { Plus, X } from 'lucide-react';
 import { summarizeMemo, mergeMemoDetailIntoList, type MemoDetailState, type MemoSummaryState } from '@/components/memos/memo-state';
 
 interface MemosFeedClientProps {
@@ -31,6 +31,7 @@ export function MemosFeedClient({ currentTeamMemberId, projectId }: MemosFeedCli
   const [selectedMemo, setSelectedMemo] = useState<MemoDetailState | null>(null);
   const [loading, setLoading] = useState(true);
   const [showCreate, setShowCreate] = useState(false);
+  const [mobileView, setMobileView] = useState<'list' | 'detail'>('list');
 
   const fetchMemos = useCallback(async () => {
     if (!projectId) return;
@@ -92,6 +93,21 @@ export function MemosFeedClient({ currentTeamMemberId, projectId }: MemosFeedCli
     }
   }, [markMemoRead]);
 
+  const handleSelectMemo = useCallback(async (memoId: string) => {
+    await fetchMemoDetail(memoId);
+    setMobileView('detail');
+  }, [fetchMemoDetail]);
+
+  const handleNewMemo = useCallback(() => {
+    setShowCreate(true);
+    setMobileView('detail');
+  }, []);
+
+  const handleCancelCreate = useCallback(() => {
+    setShowCreate(false);
+    setMobileView('list');
+  }, []);
+
   const handleReply = useCallback(async (content: string) => {
     if (!selectedMemo) return;
 
@@ -105,7 +121,6 @@ export function MemosFeedClient({ currentTeamMemberId, projectId }: MemosFeedCli
 
     const { data: reply } = await res.json();
 
-    // Update selected memo with new reply
     setSelectedMemo((prev) => {
       if (!prev) return null;
       return {
@@ -114,7 +129,6 @@ export function MemosFeedClient({ currentTeamMemberId, projectId }: MemosFeedCli
       };
     });
 
-    // Update memo list
     setMemos((prev) =>
       prev.map((m) =>
         m.id === selectedMemo.id
@@ -142,7 +156,6 @@ export function MemosFeedClient({ currentTeamMemberId, projectId }: MemosFeedCli
   const handleCreate = useCallback(async (data: { title: string; content: string; memo_type: string; assigned_to_ids: string[] }) => {
     if (!projectId) return false;
 
-    // [DIAG] Warn if assigned_to_ids is empty before dispatching
     if (data.assigned_to_ids.length === 0) {
       console.error('[MemosFeedClient.handleCreate] assigned_to_ids is empty', { title: data.title });
     }
@@ -161,7 +174,6 @@ export function MemosFeedClient({ currentTeamMemberId, projectId }: MemosFeedCli
 
       const { data: newMemo } = await res.json();
 
-      // Add to list and select it
       setMemos((prev) => [summarizeMemo(newMemo), ...prev]);
       setSelectedMemo(newMemo);
       setShowCreate(false);
@@ -179,73 +191,105 @@ export function MemosFeedClient({ currentTeamMemberId, projectId }: MemosFeedCli
 
   if (loading) {
     return (
-      <div className="flex h-screen items-center justify-center">
+      <div className="flex h-64 items-center justify-center">
         <p className="text-sm text-[color:var(--operator-muted)]">{t('loading')}</p>
       </div>
     );
   }
 
-  return (
-    <div className="flex h-screen">
-      {/* Left: Message Feed */}
-      <div className="w-80 flex-shrink-0 border-r border-white/10 flex flex-col">
-        <div className="flex-shrink-0 border-b border-white/10 px-4 py-3">
-          <div className="flex items-center justify-between">
-            <h1 className="text-lg font-semibold">{t('title')}</h1>
-            <Button
-              size="sm"
-              onClick={() => setShowCreate(true)}
-            >
-              <Plus className="h-4 w-4" />
-            </Button>
-          </div>
+  const feedHeader = (
+    <div className="flex-shrink-0 border-b border-white/10 px-4 py-3">
+      <div className="flex items-center justify-between">
+        <h1 className="text-lg font-semibold">{t('title')}</h1>
+        <Button size="sm" onClick={handleNewMemo}>
+          <Plus className="h-4 w-4" />
+        </Button>
+      </div>
+    </div>
+  );
+
+  const detailContent = showCreate ? (
+    <div className="flex h-full flex-col">
+      <div className="flex-shrink-0 border-b border-white/10 px-4 py-3">
+        <div className="flex items-center justify-between">
+          <h2 className="text-lg font-semibold">{t('createTitle')}</h2>
+          <Button variant="ghost" size="sm" onClick={handleCancelCreate}>
+            <X className="h-4 w-4" />
+          </Button>
         </div>
+      </div>
+      <div className="flex-1 overflow-y-auto p-4">
+        <MemoCreateForm
+          members={members}
+          onSubmit={handleCreate}
+          onCancel={handleCancelCreate}
+        />
+      </div>
+    </div>
+  ) : selectedMemo ? (
+    <MemoThread
+      memo={selectedMemo}
+      currentUserId={currentTeamMemberId}
+      onReply={handleReply}
+      onResolve={handleResolve}
+    />
+  ) : (
+    <div className="flex h-full items-center justify-center">
+      <p className="text-sm text-[color:var(--operator-muted)]">{t('selectMemo')}</p>
+    </div>
+  );
+
+  return (
+    <div className="flex min-h-0 flex-1 flex-col lg:h-full lg:flex-row">
+      {/* Desktop: left feed panel (lg+) */}
+      <div className="hidden w-80 flex-shrink-0 flex-col border-r border-white/10 lg:flex">
+        {feedHeader}
         <div className="flex-1 overflow-y-auto">
           <MemoFeed
             memos={memos}
-            onSelectMemo={fetchMemoDetail}
-            selectedMemoId={selectedMemo?.id || null}
+            onSelectMemo={handleSelectMemo}
+            selectedMemoId={selectedMemo?.id ?? null}
           />
         </div>
       </div>
 
-      {/* Right: Thread View or Create Form */}
-      <div className="flex-1 flex flex-col bg-[color:var(--operator-surface)]">
-        {showCreate ? (
-          <div className="flex h-full flex-col">
-            <div className="flex-shrink-0 border-b border-white/10 px-4 py-3">
-              <div className="flex items-center justify-between">
-                <h2 className="text-lg font-semibold">{t('createTitle')}</h2>
-                <Button
-                  variant="ghost"
-                  size="sm"
-                  onClick={() => setShowCreate(false)}
-                >
-                  <X className="h-4 w-4" />
-                </Button>
-              </div>
-            </div>
-            <div className="flex-1 overflow-y-auto p-4">
-              <MemoCreateForm
-                members={members}
-                onSubmit={handleCreate}
-                onCancel={() => setShowCreate(false)}
-              />
-            </div>
-          </div>
-        ) : selectedMemo ? (
-          <MemoThread
-            memo={selectedMemo}
-            currentUserId={currentTeamMemberId}
-            onReply={handleReply}
-            onResolve={handleResolve}
-          />
-        ) : (
-          <div className="flex h-full items-center justify-center">
-            <p className="text-sm text-[color:var(--operator-muted)]">{t('selectMemo')}</p>
-          </div>
-        )}
+      {/* Desktop: right thread panel (lg+) */}
+      <div className="hidden flex-1 flex-col bg-[color:var(--operator-surface)] lg:flex">
+        {detailContent}
       </div>
+
+      {/* Mobile: list view (< lg) */}
+      {mobileView === 'list' && (
+        <div className="flex flex-1 flex-col lg:hidden">
+          {feedHeader}
+          <div className="flex-1 overflow-y-auto">
+            <MemoFeed
+              memos={memos}
+              onSelectMemo={handleSelectMemo}
+              selectedMemoId={selectedMemo?.id ?? null}
+            />
+          </div>
+        </div>
+      )}
+
+      {/* Mobile: detail view (< lg) */}
+      {mobileView === 'detail' && (
+        <div className="flex flex-1 flex-col lg:hidden">
+          <div className="flex-shrink-0 border-b border-white/10 px-4 py-2">
+            <button
+              type="button"
+              onClick={() => { setMobileView('list'); setShowCreate(false); }}
+              className="flex items-center gap-1 py-1 text-sm text-[color:var(--operator-muted)] hover:text-[color:var(--operator-foreground)]"
+            >
+              <ChevronLeft className="size-4" />
+              {t('title')}
+            </button>
+          </div>
+          <div className="flex-1 overflow-hidden bg-[color:var(--operator-surface)]">
+            {detailContent}
+          </div>
+        </div>
+      )}
     </div>
   );
 }
