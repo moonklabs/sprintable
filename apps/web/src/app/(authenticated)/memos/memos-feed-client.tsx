@@ -256,6 +256,7 @@ export function MemosFeedClient({ currentTeamMemberId, projectId }: MemosFeedCli
             onSelectMemo={handleSelectMemo}
             selectedMemoId={selectedMemo?.id ?? null}
             memberMap={memberMap}
+            onNewMemo={handleNewMemo}
           />
         </div>
       </div>
@@ -287,7 +288,7 @@ export function MemosFeedClient({ currentTeamMemberId, projectId }: MemosFeedCli
             <button
               type="button"
               onClick={() => { setMobileView('list'); setShowCreate(false); }}
-              className="flex items-center gap-1 py-1 text-sm text-[color:var(--operator-muted)] hover:text-[color:var(--operator-foreground)]"
+              className="flex min-h-[44px] items-center gap-1 px-1 text-sm text-[color:var(--operator-muted)] hover:text-[color:var(--operator-foreground)]"
             >
               <ChevronLeft className="size-4" />
               {t('title')}
