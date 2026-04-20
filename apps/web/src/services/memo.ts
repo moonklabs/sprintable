@@ -431,6 +431,7 @@ export class MemoService {
 
       if (assigneeError) {
         console.warn('[MemoService.create] Failed to insert memo_assignees:', assigneeError.message);
+        (data as unknown as Record<string, unknown>)._assignee_warning = `memo_assignees insert failed: ${assigneeError.message}`;
       }
     }
 
