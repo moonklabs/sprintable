@@ -196,26 +196,26 @@ export function MemoSidebar({ open, onClose, currentTeamMemberId, projectId }: M
   return (
     <>
       <button className="fixed inset-0 z-40 bg-black/30" aria-label={t('closeSidebar')} onClick={onClose} />
-      <GlassPanel
+      <div
         ref={panelRef}
-        className="fixed inset-0 z-50 flex flex-col rounded-none md:inset-auto md:right-0 md:top-0 md:h-full md:w-[88vw] md:max-w-5xl md:rounded-2xl"
+        className="fixed inset-0 z-50 flex flex-col bg-background shadow-xl md:inset-y-0 md:left-auto md:right-0 md:w-[88vw] md:max-w-5xl md:border-l md:border-border"
         aria-label={t('sidebarTitle')}
         role="complementary"
       >
-        <div className="flex items-center justify-between border-b border-white/10 px-4 py-3">
+        <div className="flex items-center justify-between border-b border-border px-4 py-3">
           <div className="flex items-center gap-2">
             {mobileView === 'detail' && selectedMemo && (
               <button
                 onClick={() => setMobileView('list')}
-                className="flex min-h-[44px] min-w-[44px] items-center justify-center rounded-lg text-[color:var(--operator-muted)] hover:bg-[color:var(--operator-surface-soft)] md:hidden"
+                className="flex min-h-[44px] min-w-[44px] items-center justify-center rounded-md text-muted-foreground hover:bg-muted md:hidden"
                 aria-label="Back to list"
               >
                 ←
               </button>
             )}
             <div>
-              <h2 className="text-lg font-semibold text-[color:var(--operator-foreground)]">{t('sidebarTitle')}</h2>
-              <p className="hidden text-xs text-[color:var(--operator-muted)] sm:block">{t('sidebarSubtitle')}</p>
+              <h2 className="text-lg font-semibold text-foreground">{t('sidebarTitle')}</h2>
+              <p className="hidden text-xs text-muted-foreground sm:block">{t('sidebarSubtitle')}</p>
             </div>
           </div>
           <div className="flex items-center gap-2">
@@ -227,7 +227,7 @@ export function MemoSidebar({ open, onClose, currentTeamMemberId, projectId }: M
             </button>
             <button
               onClick={onClose}
-              className="flex min-h-[44px] min-w-[44px] items-center justify-center rounded-lg text-[color:var(--operator-muted)] hover:bg-[color:var(--operator-surface-soft)]"
+              className="flex min-h-[44px] min-w-[44px] items-center justify-center rounded-md text-muted-foreground hover:bg-muted"
             >
               ✕
             </button>
@@ -235,22 +235,22 @@ export function MemoSidebar({ open, onClose, currentTeamMemberId, projectId }: M
         </div>
 
         {showCreate && (
-          <div className="border-b border-white/10 bg-[color:var(--operator-surface-soft)] p-4">
+          <div className="border-b border-border bg-muted/30 p-4">
             <MemoCreateForm members={members} onSubmit={handleCreate} onCancel={() => setShowCreate(false)} draftStorageKey={createMemoDraftStorageKey(projectId, currentTeamMemberId)} />
           </div>
         )}
 
         <div className="grid min-h-0 flex-1 md:grid-cols-[320px_minmax(0,1fr)]">
-          <section className={`min-h-0 overflow-y-auto border-r border-white/10 bg-[color:var(--operator-panel)] ${mobileView === 'detail' ? 'hidden md:block' : 'block'}`}>
+          <section className={`min-h-0 overflow-y-auto border-r border-border bg-muted/10 ${mobileView === 'detail' ? 'hidden md:block' : 'block'}`}>
             {loading ? (
-              <div className="p-4 text-sm text-[color:var(--operator-muted)]">{tc('loading')}</div>
+              <div className="p-4 text-sm text-muted-foreground">{tc('loading')}</div>
             ) : (
               <div className="space-y-3 p-0">
                 <MemoList memos={memos} memberMap={memberMap} onSelect={handleSelectMemo} selectedId={selectedMemo?.id} />
                 {nextCursor ? (
                   <div className="px-4 pb-4 text-center">
                     <Button
-                      variant="glass"
+                      variant="outline"
                       size="sm"
                       disabled={loadingMore}
                       onClick={async () => {
@@ -267,7 +267,7 @@ export function MemoSidebar({ open, onClose, currentTeamMemberId, projectId }: M
               </div>
             )}
           </section>
-          <section className={`min-h-0 overflow-y-auto bg-[color:var(--operator-panel)] ${mobileView === 'list' && !selectedMemo ? 'hidden md:flex' : 'block'}`}>
+          <section className={`min-h-0 overflow-y-auto bg-background ${mobileView === 'list' && !selectedMemo ? 'hidden md:flex' : 'block'}`}>
             {selectedMemo ? (
               <MemoDetail
                 memo={selectedMemo}
@@ -280,11 +280,11 @@ export function MemoSidebar({ open, onClose, currentTeamMemberId, projectId }: M
                 onMemoChange={handleMemoChange}
               />
             ) : (
-              <div className="flex h-full items-center justify-center text-sm text-[color:var(--operator-muted)]">{t('selectMemo')}</div>
+              <div className="flex h-full items-center justify-center text-sm text-muted-foreground">{t('selectMemo')}</div>
             )}
           </section>
         </div>
-      </GlassPanel>
+      </div>
     </>
   );
 }

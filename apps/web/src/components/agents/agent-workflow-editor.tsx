@@ -532,7 +532,7 @@ export function AgentWorkflowEditor({ initialMembers, initialRules, projectName 
           strokeWidth={18}
         />
         <foreignObject x={midX - 62} y={midY - 16} width={124} height={32}>
-          <div className={`flex h-8 items-center justify-center rounded-full border px-2 text-[11px] font-medium ${isSelected ? 'border-violet-400 bg-violet-500/20 text-violet-100' : 'border-white/10 bg-slate-900/80 text-slate-100'}`}>
+          <div className={`flex h-8 items-center justify-center rounded-full border px-2 text-[11px] font-medium ${isSelected ? 'border-primary bg-primary/20 text-primary' : 'border-border bg-muted/80 text-muted-foreground'}`}>
             #{index + 1} · {formatMemoTypes(edge.memoTypes)}
           </div>
         </foreignObject>
@@ -546,9 +546,9 @@ export function AgentWorkflowEditor({ initialMembers, initialRules, projectName 
         <PageHeader eyebrow={t('statusEyebrow')} title={t('workflowEditorTitle')} description={t('workflowEditorDescription', { project: projectName })} />
         <SectionCard>
           <SectionCardBody className="py-12 text-center">
-            <Bot className="mx-auto size-10 text-[color:var(--operator-primary-soft)]" />
-            <h2 className="mt-4 text-lg font-semibold text-[color:var(--operator-foreground)]">{t('workflowNoAgentsTitle')}</h2>
-            <p className="mt-2 text-sm text-[color:var(--operator-muted)]">{t('workflowNoAgentsBody')}</p>
+            <Bot className="mx-auto size-10 text-primary" />
+            <h2 className="mt-4 text-lg font-semibold text-foreground">{t('workflowNoAgentsTitle')}</h2>
+            <p className="mt-2 text-sm text-muted-foreground">{t('workflowNoAgentsBody')}</p>
           </SectionCardBody>
         </SectionCard>
       </div>
@@ -579,8 +579,8 @@ export function AgentWorkflowEditor({ initialMembers, initialRules, projectName 
               <div className="flex items-start gap-3">
                 <TriangleAlert className="mt-0.5 size-4 text-amber-300" />
                 <div>
-                  <p className="text-sm font-semibold text-[color:var(--operator-foreground)]">{t('workflowCycleWarningTitle')}</p>
-                  <p className="mt-1 text-sm text-[color:var(--operator-muted)]">{t('workflowCycleWarningBody', { cycles: cycleWarnings.join(' · ') })}</p>
+                  <p className="text-sm font-semibold text-foreground">{t('workflowCycleWarningTitle')}</p>
+                  <p className="mt-1 text-sm text-muted-foreground">{t('workflowCycleWarningBody', { cycles: cycleWarnings.join(' · ') })}</p>
                 </div>
               </div>
               <Badge variant="outline">{t('workflowCycleWarningAllowsSave')}</Badge>
@@ -592,10 +592,10 @@ export function AgentWorkflowEditor({ initialMembers, initialRules, projectName 
           <SectionCard>
             <SectionCardHeader>
               <div className="flex items-center gap-2">
-                <Route className="size-4 text-[color:var(--operator-primary-soft)]" />
+                <Route className="size-4 text-primary" />
                 <div>
-                  <h2 className="text-base font-semibold text-[color:var(--operator-foreground)]">{t('workflowDryRunTitle')}</h2>
-                  <p className="text-sm text-[color:var(--operator-muted)]">{t('workflowDryRunBody')}</p>
+                  <h2 className="text-base font-semibold text-foreground">{t('workflowDryRunTitle')}</h2>
+                  <p className="text-sm text-muted-foreground">{t('workflowDryRunBody')}</p>
                 </div>
               </div>
             </SectionCardHeader>
@@ -610,11 +610,11 @@ export function AgentWorkflowEditor({ initialMembers, initialRules, projectName 
               </div>
 
               <div className="space-y-2">
-                <label className="text-xs font-semibold uppercase tracking-[0.2em] text-[color:var(--operator-muted)]">{t('workflowDryRunMemoTypeLabel')}</label>
+                <label className="text-xs font-semibold uppercase tracking-[0.2em] text-muted-foreground">{t('workflowDryRunMemoTypeLabel')}</label>
                 <select
                   value={dryRunMemoType}
                   onChange={(event) => setDryRunMemoType(event.target.value as (typeof WORKFLOW_MEMO_TYPE_OPTIONS)[number])}
-                  className="w-full rounded-2xl border border-white/10 bg-slate-950/60 px-3 py-2 text-sm text-[color:var(--operator-foreground)]"
+                  className="w-full rounded-md border border-input bg-background px-3 py-2 text-sm text-foreground"
                 >
                   {WORKFLOW_MEMO_TYPE_OPTIONS.map((memoType) => (
                     <option key={memoType} value={memoType}>{memoTypeLabels[memoType]}</option>
@@ -623,11 +623,11 @@ export function AgentWorkflowEditor({ initialMembers, initialRules, projectName 
               </div>
 
               {dryRunSurface === 'draft' && draftWorkflow.error ? (
-                <div className="rounded-2xl border border-amber-400/30 bg-amber-500/10 px-4 py-3 text-sm text-amber-100">
+                <div className="rounded-md border border-amber-500/30 bg-amber-500/10 px-4 py-3 text-sm text-amber-600 dark:text-amber-400">
                   {t('workflowDraftInvalidBody', { error: draftWorkflow.error })}
                 </div>
               ) : (
-                <div className="space-y-3 rounded-3xl border border-white/10 bg-white/4 p-4">
+                <div className="space-y-3 rounded-md border border-border bg-muted/30 p-4">
                   <div className="flex flex-wrap items-center justify-between gap-2">
                     <Badge variant={activeDryRunPreview.result === 'forward' ? 'info' : activeDryRunPreview.result === 'report' ? 'chip' : 'outline'}>
                       {getPreviewOutcomeLabel(activeDryRunPreview.result)}
@@ -635,10 +635,10 @@ export function AgentWorkflowEditor({ initialMembers, initialRules, projectName 
                     <Badge variant="outline">{memoTypeLabels[dryRunMemoType]}</Badge>
                   </div>
                   <div>
-                    <p className="text-xs font-semibold uppercase tracking-[0.2em] text-[color:var(--operator-muted)]">{t('workflowDryRunPathLabel')}</p>
-                    <p className="mt-2 text-sm font-semibold text-[color:var(--operator-foreground)]">{formatPreviewPath(activeDryRunPreview.steps)}</p>
+                    <p className="text-xs font-semibold uppercase tracking-[0.2em] text-muted-foreground">{t('workflowDryRunPathLabel')}</p>
+                    <p className="mt-2 text-sm font-semibold text-foreground">{formatPreviewPath(activeDryRunPreview.steps)}</p>
                   </div>
-                  <div className="rounded-2xl border border-white/10 bg-slate-950/40 px-3 py-3 text-sm text-[color:var(--operator-muted)]">
+                  <div className="rounded-md border border-border bg-muted/30 px-3 py-3 text-sm text-muted-foreground">
                     {activeDryRunPreview.matchedRuleName
                       ? t('workflowDryRunMatchedRule', { name: activeDryRunPreview.matchedRuleName })
                       : t('workflowDryRunNoRule')}
@@ -651,10 +651,10 @@ export function AgentWorkflowEditor({ initialMembers, initialRules, projectName 
           <SectionCard>
             <SectionCardHeader>
               <div className="flex items-center gap-2">
-                <ClipboardCheck className="size-4 text-[color:var(--operator-primary-soft)]" />
+                <ClipboardCheck className="size-4 text-primary" />
                 <div>
-                  <h2 className="text-base font-semibold text-[color:var(--operator-foreground)]">{t('workflowExpectedPathsTitle')}</h2>
-                  <p className="text-sm text-[color:var(--operator-muted)]">{t('workflowExpectedPathsBody')}</p>
+                  <h2 className="text-base font-semibold text-foreground">{t('workflowExpectedPathsTitle')}</h2>
+                  <p className="text-sm text-muted-foreground">{t('workflowExpectedPathsBody')}</p>
                 </div>
               </div>
             </SectionCardHeader>
@@ -671,20 +671,20 @@ export function AgentWorkflowEditor({ initialMembers, initialRules, projectName 
                       setDryRunMemoType(memoType);
                       setDryRunSurface('draft');
                     }}
-                    className={`w-full rounded-3xl border px-4 py-3 text-left transition ${changed ? 'border-violet-400/30 bg-violet-500/10' : 'border-white/10 bg-white/4 hover:bg-white/6'}`}
+                    className={`w-full rounded-md border px-4 py-3 text-left transition ${changed ? 'border-primary/30 bg-primary/10' : 'border-border bg-muted/30 hover:bg-muted'}`}
                   >
                     <div className="flex flex-wrap items-center justify-between gap-2">
-                      <p className="text-sm font-semibold text-[color:var(--operator-foreground)]">{memoTypeLabels[memoType]}</p>
+                      <p className="text-sm font-semibold text-foreground">{memoTypeLabels[memoType]}</p>
                       {changed ? <Badge variant="info">{t('workflowExpectedPathsChanged')}</Badge> : <Badge variant="outline">{t('workflowExpectedPathsUnchanged')}</Badge>}
                     </div>
                     <div className="mt-3 grid gap-3 md:grid-cols-2">
                       <div>
-                        <p className="text-[11px] font-semibold uppercase tracking-[0.2em] text-[color:var(--operator-muted)]">{t('workflowDryRunLive')}</p>
-                        <p className="mt-2 text-sm text-[color:var(--operator-foreground)]">{formatPreviewPath(livePreview.steps)}</p>
+                        <p className="text-[11px] font-semibold uppercase tracking-[0.2em] text-muted-foreground">{t('workflowDryRunLive')}</p>
+                        <p className="mt-2 text-sm text-foreground">{formatPreviewPath(livePreview.steps)}</p>
                       </div>
                       <div>
-                        <p className="text-[11px] font-semibold uppercase tracking-[0.2em] text-[color:var(--operator-muted)]">{t('workflowDryRunDraft')}</p>
-                        <p className="mt-2 text-sm text-[color:var(--operator-foreground)]">{draftWorkflow.rules ? formatPreviewPath(draftPreview.steps) : t('workflowDraftInvalidShort')}</p>
+                        <p className="text-[11px] font-semibold uppercase tracking-[0.2em] text-muted-foreground">{t('workflowDryRunDraft')}</p>
+                        <p className="mt-2 text-sm text-foreground">{draftWorkflow.rules ? formatPreviewPath(draftPreview.steps) : t('workflowDraftInvalidShort')}</p>
                       </div>
                     </div>
                   </button>
@@ -696,10 +696,10 @@ export function AgentWorkflowEditor({ initialMembers, initialRules, projectName 
           <SectionCard>
             <SectionCardHeader>
               <div className="flex items-center gap-2">
-                <ShieldCheck className="size-4 text-[color:var(--operator-primary-soft)]" />
+                <ShieldCheck className="size-4 text-primary" />
                 <div>
-                  <h2 className="text-base font-semibold text-[color:var(--operator-foreground)]">{t('workflowRolloutChecklistTitle')}</h2>
-                  <p className="text-sm text-[color:var(--operator-muted)]">{t('workflowRolloutChecklistBody')}</p>
+                  <h2 className="text-base font-semibold text-foreground">{t('workflowRolloutChecklistTitle')}</h2>
+                  <p className="text-sm text-muted-foreground">{t('workflowRolloutChecklistBody')}</p>
                 </div>
               </div>
             </SectionCardHeader>
@@ -711,36 +711,36 @@ export function AgentWorkflowEditor({ initialMembers, initialRules, projectName 
               </div>
 
               {draftWorkflow.error ? (
-                <div className="rounded-2xl border border-amber-400/30 bg-amber-500/10 px-4 py-3 text-sm text-amber-100">
+                <div className="rounded-md border border-amber-500/30 bg-amber-500/10 px-4 py-3 text-sm text-amber-600 dark:text-amber-400">
                   {t('workflowDraftInvalidBody', { error: draftWorkflow.error })}
                 </div>
               ) : !hasDraftChanges ? (
-                <div className="rounded-2xl border border-white/10 bg-white/4 px-4 py-3 text-sm text-[color:var(--operator-muted)]">
+                <div className="rounded-md border border-border bg-muted/30 px-4 py-3 text-sm text-muted-foreground">
                   {t('workflowRolloutNoChanges')}
                 </div>
               ) : (
                 <>
-                  <label className="flex items-start gap-3 rounded-2xl border border-white/10 bg-white/4 px-4 py-3 text-sm text-[color:var(--operator-foreground)]">
+                  <label className="flex items-start gap-3 rounded-md border border-border bg-muted/30 px-4 py-3 text-sm text-foreground">
                     <input type="checkbox" className="mt-0.5 size-4" checked={rolloutChecklist.dryRun} onChange={(event) => setRolloutChecklist((prev) => ({ ...prev, dryRun: event.target.checked }))} />
                     <span>{t('workflowRolloutChecklistDryRun')}</span>
                   </label>
-                  <label className="flex items-start gap-3 rounded-2xl border border-white/10 bg-white/4 px-4 py-3 text-sm text-[color:var(--operator-foreground)]">
+                  <label className="flex items-start gap-3 rounded-md border border-border bg-muted/30 px-4 py-3 text-sm text-foreground">
                     <input type="checkbox" className="mt-0.5 size-4" checked={rolloutChecklist.expectedPaths} onChange={(event) => setRolloutChecklist((prev) => ({ ...prev, expectedPaths: event.target.checked }))} />
                     <span>{t('workflowRolloutChecklistExpectedPaths')}</span>
                   </label>
-                  <label className="flex items-start gap-3 rounded-2xl border border-white/10 bg-white/4 px-4 py-3 text-sm text-[color:var(--operator-foreground)]">
+                  <label className="flex items-start gap-3 rounded-md border border-border bg-muted/30 px-4 py-3 text-sm text-foreground">
                     <input type="checkbox" className="mt-0.5 size-4" checked={rolloutChecklist.recoveryPlan} onChange={(event) => setRolloutChecklist((prev) => ({ ...prev, recoveryPlan: event.target.checked }))} />
                     <span>{t('workflowRolloutChecklistRecovery')}</span>
                   </label>
                 </>
               )}
 
-              <div className="rounded-2xl border border-dashed border-white/10 px-4 py-3 text-sm text-[color:var(--operator-muted)]">
+              <div className="rounded-md border border-dashed border-border px-4 py-3 text-sm text-muted-foreground">
                 {rollbackSnapshot?.items.length
                   ? t('workflowRolloutRollbackReady')
                   : t('workflowRolloutRollbackMissing')}
               </div>
-              <div className="rounded-2xl border border-dashed border-white/10 px-4 py-3 text-sm text-[color:var(--operator-muted)]">
+              <div className="rounded-md border border-dashed border-border px-4 py-3 text-sm text-muted-foreground">
                 {savedRules.length > 0 ? t('workflowRolloutDisableReady') : t('workflowRolloutDisableEmpty')}
               </div>
               <Badge variant={canRollout ? 'info' : 'outline'}>{canRollout ? t('workflowRolloutReady') : t('workflowRolloutBlocked')}</Badge>
@@ -753,8 +753,8 @@ export function AgentWorkflowEditor({ initialMembers, initialRules, projectName 
             <div className="flex items-center gap-2">
               <Ban className="size-4 text-amber-300" />
               <div>
-                <h2 className="text-base font-semibold text-[color:var(--operator-foreground)]">{t('workflowEmergencyTitle')}</h2>
-                <p className="text-sm text-[color:var(--operator-muted)]">{t('workflowEmergencyBody')}</p>
+                <h2 className="text-base font-semibold text-foreground">{t('workflowEmergencyTitle')}</h2>
+                <p className="text-sm text-muted-foreground">{t('workflowEmergencyBody')}</p>
               </div>
             </div>
           </SectionCardHeader>
@@ -774,31 +774,31 @@ export function AgentWorkflowEditor({ initialMembers, initialRules, projectName 
           <SectionCard>
             <SectionCardHeader>
               <div className="flex items-center gap-2">
-                <Smartphone className="size-4 text-[color:var(--operator-primary-soft)]" />
-                <h2 className="text-base font-semibold text-[color:var(--operator-foreground)]">{t('workflowMobileTitle')}</h2>
+                <Smartphone className="size-4 text-primary" />
+                <h2 className="text-base font-semibold text-foreground">{t('workflowMobileTitle')}</h2>
               </div>
             </SectionCardHeader>
             <SectionCardBody className="space-y-3">
-              <p className="text-sm text-[color:var(--operator-muted)]">{t('workflowMobileBody')}</p>
-              <p className="text-sm text-[color:var(--operator-muted)]">{t('workflowDesktopHint')}</p>
+              <p className="text-sm text-muted-foreground">{t('workflowMobileBody')}</p>
+              <p className="text-sm text-muted-foreground">{t('workflowDesktopHint')}</p>
             </SectionCardBody>
           </SectionCard>
 
           <SectionCard>
             <SectionCardHeader>
-              <h2 className="text-base font-semibold text-[color:var(--operator-foreground)]">{t('workflowPriorityTitle')}</h2>
+              <h2 className="text-base font-semibold text-foreground">{t('workflowPriorityTitle')}</h2>
             </SectionCardHeader>
             <SectionCardBody className="space-y-3">
               {edges.length === 0 ? (
-                <p className="text-sm text-[color:var(--operator-muted)]">{t('workflowPriorityEmpty')}</p>
+                <p className="text-sm text-muted-foreground">{t('workflowPriorityEmpty')}</p>
               ) : edges.map((edge, index) => {
                 const summary = getEdgeSummary(edge, graph, members);
                 return (
-                  <div key={edge.id} className="rounded-2xl border border-white/10 bg-white/4 px-4 py-3">
+                  <div key={edge.id} className="rounded-md border border-border bg-muted/30 px-4 py-3">
                     <div className="flex items-center justify-between gap-3">
                       <div>
-                        <p className="text-sm font-semibold text-[color:var(--operator-foreground)]">#{index + 1} {getMemberLabel(summary.source)} → {getMemberLabel(summary.target)}</p>
-                        <p className="mt-1 text-xs text-[color:var(--operator-muted)]">
+                        <p className="text-sm font-semibold text-foreground">#{index + 1} {getMemberLabel(summary.source)} → {getMemberLabel(summary.target)}</p>
+                        <p className="mt-1 text-xs text-muted-foreground">
                           {formatMemoTypes(summary.memoTypes)}
                           {' · '}
                           {getActionLabel(edge.action)}
@@ -817,8 +817,8 @@ export function AgentWorkflowEditor({ initialMembers, initialRules, projectName 
           <div className="space-y-4">
             <SectionCard>
               <SectionCardHeader>
-                <h2 className="text-base font-semibold text-[color:var(--operator-foreground)]">{t('workflowTemplatesTitle')}</h2>
-                <p className="text-sm text-[color:var(--operator-muted)]">{t('workflowTemplatesBody')}</p>
+                <h2 className="text-base font-semibold text-foreground">{t('workflowTemplatesTitle')}</h2>
+                <p className="text-sm text-muted-foreground">{t('workflowTemplatesBody')}</p>
               </SectionCardHeader>
               <SectionCardBody className="space-y-2">
                 <button className={buttonVariants({ variant: 'glass', size: 'lg', className: 'w-full justify-start' })} onClick={() => applyTemplate('standard-dev')}>
@@ -835,12 +835,12 @@ export function AgentWorkflowEditor({ initialMembers, initialRules, projectName 
 
             <SectionCard>
               <SectionCardHeader>
-                <h2 className="text-base font-semibold text-[color:var(--operator-foreground)]">{t('workflowMembersTitle')}</h2>
-                <p className="text-sm text-[color:var(--operator-muted)]">{t('workflowMembersBody')}</p>
+                <h2 className="text-base font-semibold text-foreground">{t('workflowMembersTitle')}</h2>
+                <p className="text-sm text-muted-foreground">{t('workflowMembersBody')}</p>
               </SectionCardHeader>
               <SectionCardBody className="space-y-4">
                 <div>
-                  <div className="mb-2 flex items-center gap-2 text-xs font-semibold uppercase tracking-[0.2em] text-[color:var(--operator-muted)]">
+                  <div className="mb-2 flex items-center gap-2 text-xs font-semibold uppercase tracking-[0.2em] text-muted-foreground">
                     <Bot className="size-3.5" /> {t('workflowMembersAgents')}
                   </div>
                   <div className="space-y-2">
@@ -850,14 +850,14 @@ export function AgentWorkflowEditor({ initialMembers, initialRules, projectName 
                         draggable
                         onDragStart={(event) => event.dataTransfer.setData(EDGE_DATA_MIME, member.id)}
                         onClick={() => addMemberNode(member.id)}
-                        className="w-full rounded-2xl border border-white/10 bg-white/4 px-3 py-3 text-left transition hover:bg-white/8"
+                        className="w-full rounded-md border border-border bg-muted/30 px-3 py-3 text-left transition hover:bg-muted"
                       >
                         <div className="flex items-center justify-between gap-2">
                           <div>
-                            <p className="text-sm font-semibold text-[color:var(--operator-foreground)]">{member.name}</p>
-                            <p className="text-xs text-[color:var(--operator-muted)]">{member.role ?? t('workflowMembersAgents')}</p>
+                            <p className="text-sm font-semibold text-foreground">{member.name}</p>
+                            <p className="text-xs text-muted-foreground">{member.role ?? t('workflowMembersAgents')}</p>
                           </div>
-                          <Plus className="size-4 text-[color:var(--operator-primary-soft)]" />
+                          <Plus className="size-4 text-primary" />
                         </div>
                       </button>
                     ))}
@@ -865,33 +865,33 @@ export function AgentWorkflowEditor({ initialMembers, initialRules, projectName 
                 </div>
 
                 <div>
-                  <div className="mb-2 flex items-center gap-2 text-xs font-semibold uppercase tracking-[0.2em] text-[color:var(--operator-muted)]">
+                  <div className="mb-2 flex items-center gap-2 text-xs font-semibold uppercase tracking-[0.2em] text-muted-foreground">
                     <User className="size-3.5" /> {t('workflowMembersHumans')}
                   </div>
                   <div className="space-y-2">
                     {humanMembers.length === 0 ? (
-                      <p className="rounded-2xl border border-dashed border-white/10 px-3 py-3 text-sm text-[color:var(--operator-muted)]">{t('workflowNoHumans')}</p>
+                      <p className="rounded-md border border-dashed border-border px-3 py-3 text-sm text-muted-foreground">{t('workflowNoHumans')}</p>
                     ) : humanMembers.map((member) => (
                       <button
                         key={member.id}
                         draggable
                         onDragStart={(event) => event.dataTransfer.setData(EDGE_DATA_MIME, member.id)}
                         onClick={() => addMemberNode(member.id)}
-                        className="w-full rounded-2xl border border-white/10 bg-white/4 px-3 py-3 text-left transition hover:bg-white/8"
+                        className="w-full rounded-md border border-border bg-muted/30 px-3 py-3 text-left transition hover:bg-muted"
                       >
                         <div className="flex items-center justify-between gap-2">
                           <div>
-                            <p className="text-sm font-semibold text-[color:var(--operator-foreground)]">{member.name}</p>
-                            <p className="text-xs text-[color:var(--operator-muted)]">{member.role ?? t('workflowHumanBadge')}</p>
+                            <p className="text-sm font-semibold text-foreground">{member.name}</p>
+                            <p className="text-xs text-muted-foreground">{member.role ?? t('workflowHumanBadge')}</p>
                           </div>
-                          <Plus className="size-4 text-[color:var(--operator-primary-soft)]" />
+                          <Plus className="size-4 text-primary" />
                         </div>
                       </button>
                     ))}
                   </div>
                 </div>
 
-                <div className="rounded-2xl border border-dashed border-white/10 px-3 py-3 text-xs text-[color:var(--operator-muted)]">
+                <div className="rounded-md border border-dashed border-border px-3 py-3 text-xs text-muted-foreground">
                   {t('workflowDragHint')}
                 </div>
               </SectionCardBody>
@@ -902,8 +902,8 @@ export function AgentWorkflowEditor({ initialMembers, initialRules, projectName 
             <SectionCardHeader>
               <div className="flex items-center justify-between gap-3">
                 <div>
-                  <h2 className="text-base font-semibold text-[color:var(--operator-foreground)]">{t('workflowCanvasTitle')}</h2>
-                  <p className="text-sm text-[color:var(--operator-muted)]">{t('workflowCanvasBody')}</p>
+                  <h2 className="text-base font-semibold text-foreground">{t('workflowCanvasTitle')}</h2>
+                  <p className="text-sm text-muted-foreground">{t('workflowCanvasBody')}</p>
                 </div>
                 {connectionSourceId ? (
                   <Button variant="glass" size="sm" onClick={() => setConnectionSourceId(null)}>{tc('cancel')}</Button>
@@ -915,7 +915,7 @@ export function AgentWorkflowEditor({ initialMembers, initialRules, projectName 
                 ref={canvasRef}
                 onDragOver={(event) => event.preventDefault()}
                 onDrop={onCanvasDrop}
-                className="relative min-h-[620px] overflow-hidden rounded-[28px] border border-dashed border-white/10 bg-[radial-gradient(circle_at_top,_rgba(104,137,255,0.18),_transparent_48%),linear-gradient(180deg,rgba(15,23,42,0.98),rgba(15,23,42,0.9))]"
+                className="relative min-h-[620px] overflow-hidden rounded-xl border border-dashed border-border bg-muted/10"
               >
                 <svg className="absolute inset-0 h-full w-full">
                   <defs>
@@ -929,13 +929,13 @@ export function AgentWorkflowEditor({ initialMembers, initialRules, projectName 
                 {nodes.length === 0 ? (
                   <div className="absolute inset-0 flex flex-col items-center justify-center gap-3 text-center">
                     <Badge variant="chip">{t('workflowEmptyBadge')}</Badge>
-                    <h3 className="text-lg font-semibold text-white">{t('workflowEmptyTitle')}</h3>
-                    <p className="max-w-md text-sm text-slate-300">{t('workflowEmptyBody')}</p>
+                    <h3 className="text-lg font-semibold text-foreground">{t('workflowEmptyTitle')}</h3>
+                    <p className="max-w-md text-sm text-muted-foreground">{t('workflowEmptyBody')}</p>
                   </div>
                 ) : null}
 
                 {connectionSourceId ? (
-                  <div className="absolute left-4 top-4 z-20 rounded-2xl border border-violet-400/30 bg-violet-500/15 px-4 py-2 text-sm text-violet-100 backdrop-blur">
+                  <div className="absolute left-4 top-4 z-20 rounded-md border border-primary/30 bg-primary/10 px-4 py-2 text-sm text-primary backdrop-blur">
                     {t('workflowConnectMode')}
                   </div>
                 ) : null}
@@ -949,7 +949,7 @@ export function AgentWorkflowEditor({ initialMembers, initialRules, projectName 
                       key={node.id}
                       role="button"
                       tabIndex={0}
-                      className={`absolute w-44 rounded-3xl border px-4 py-3 text-left shadow-2xl transition ${isConnectionSource ? 'border-violet-400 bg-violet-500/20 text-white' : 'border-white/12 bg-slate-900/85 text-slate-100'} ${!node.locked ? 'cursor-grab active:cursor-grabbing' : ''}`}
+                      className={`absolute w-44 rounded-md border px-4 py-3 text-left shadow-md transition ${isConnectionSource ? 'border-primary bg-primary/20 text-foreground' : 'border-border bg-card text-card-foreground'} ${!node.locked ? 'cursor-grab active:cursor-grabbing' : ''}`}
                       style={{ left: node.x, top: node.y }}
                       onClick={() => handleNodeSelect(node.id)}
                       onPointerDown={(event) => (!node.locked ? startDragging(event, node.id) : undefined)}
@@ -963,19 +963,19 @@ export function AgentWorkflowEditor({ initialMembers, initialRules, projectName 
                       <div className="flex items-start justify-between gap-3">
                         <div>
                           <div className="flex items-center gap-2">
-                            {member.type === 'agent' ? <Bot className="size-4 text-[color:var(--operator-primary-soft)]" /> : <User className="size-4 text-emerald-300" />}
+                            {member.type === 'agent' ? <Bot className="size-4 text-primary" /> : <User className="size-4 text-emerald-500" />}
                             <p className="text-sm font-semibold">{member.isSynthetic ? t('workflowOriginalAssignee') : member.name}</p>
                           </div>
-                          <p className="mt-2 text-xs text-slate-300">{member.isSynthetic ? t('workflowOriginalAssigneeHint') : member.role ?? (member.type === 'agent' ? t('workflowMembersAgents') : t('workflowHumanBadge'))}</p>
+                          <p className="mt-2 text-xs text-muted-foreground">{member.isSynthetic ? t('workflowOriginalAssigneeHint') : member.role ?? (member.type === 'agent' ? t('workflowMembersAgents') : t('workflowHumanBadge'))}</p>
                         </div>
                         {!node.locked ? (
-                          <button data-node-action="true" type="button" className="rounded-full p-1 text-slate-300 transition hover:bg-white/10 hover:text-white" onClick={(event) => { event.stopPropagation(); removeNode(node.id); }}>
+                          <button data-node-action="true" type="button" className="rounded-full p-1 text-muted-foreground transition hover:bg-muted hover:text-foreground" onClick={(event) => { event.stopPropagation(); removeNode(node.id); }}>
                             <Trash2 className="size-4" />
                           </button>
                         ) : null}
                       </div>
-                      <div className="mt-3 flex items-center justify-between gap-2 border-t border-white/10 pt-3 text-xs">
-                        <button data-node-action="true" type="button" className="inline-flex items-center gap-1 rounded-full border border-white/10 px-2 py-1 transition hover:bg-white/10" onClick={(event) => { event.stopPropagation(); startConnection(node.id); }}>
+                      <div className="mt-3 flex items-center justify-between gap-2 border-t border-border pt-3 text-xs">
+                        <button data-node-action="true" type="button" className="inline-flex items-center gap-1 rounded-full border border-border px-2 py-1 transition hover:bg-muted" onClick={(event) => { event.stopPropagation(); startConnection(node.id); }}>
                           <Link2 className="size-3.5" /> {t('workflowNodeConnect')}
                         </button>
                         <Badge variant={isAgent ? 'info' : 'chip'}>{isAgent ? t('workflowMembersAgents') : t('workflowHumanBadge')}</Badge>
@@ -990,12 +990,12 @@ export function AgentWorkflowEditor({ initialMembers, initialRules, projectName 
           <div className="space-y-4">
             <SectionCard>
               <SectionCardHeader>
-                <h2 className="text-base font-semibold text-[color:var(--operator-foreground)]">{t('workflowPriorityTitle')}</h2>
-                <p className="text-sm text-[color:var(--operator-muted)]">{t('workflowPriorityBody')}</p>
+                <h2 className="text-base font-semibold text-foreground">{t('workflowPriorityTitle')}</h2>
+                <p className="text-sm text-muted-foreground">{t('workflowPriorityBody')}</p>
               </SectionCardHeader>
               <SectionCardBody className="space-y-2">
                 {edges.length === 0 ? (
-                  <p className="rounded-2xl border border-dashed border-white/10 px-3 py-3 text-sm text-[color:var(--operator-muted)]">{t('workflowPriorityEmpty')}</p>
+                  <p className="rounded-md border border-dashed border-border px-3 py-3 text-sm text-muted-foreground">{t('workflowPriorityEmpty')}</p>
                 ) : edges.map((edge, index) => {
                   const summary = getEdgeSummary(edge, graph, members);
                   const isSelected = edge.id === selectedEdgeId;
@@ -1011,22 +1011,22 @@ export function AgentWorkflowEditor({ initialMembers, initialRules, projectName 
                           focusEdge(edge.id);
                         }
                       }}
-                      className={`w-full rounded-2xl border px-3 py-3 text-left transition ${isSelected ? 'border-violet-400/40 bg-violet-500/12' : 'border-white/10 bg-white/4 hover:bg-white/7'}`}
+                      className={`w-full rounded-md border px-3 py-3 text-left transition ${isSelected ? 'border-primary/40 bg-primary/10' : 'border-border bg-muted/30 hover:bg-muted'}`}
                     >
                       <div className="flex items-start justify-between gap-3">
                         <div>
-                          <p className="text-sm font-semibold text-[color:var(--operator-foreground)]">#{index + 1} {getMemberLabel(summary.source)} → {getMemberLabel(summary.target)}</p>
-                          <p className="mt-1 text-xs text-[color:var(--operator-muted)]">
+                          <p className="text-sm font-semibold text-foreground">#{index + 1} {getMemberLabel(summary.source)} → {getMemberLabel(summary.target)}</p>
+                          <p className="mt-1 text-xs text-muted-foreground">
                             {formatMemoTypes(summary.memoTypes)}
                             {' · '}
                             {getActionLabel(edge.action)}
                           </p>
                         </div>
                         <div className="flex items-center gap-1">
-                          <button type="button" className="rounded-full p-1 text-[color:var(--operator-muted)] transition hover:bg-white/10 hover:text-[color:var(--operator-foreground)]" onClick={(event) => { event.stopPropagation(); moveEdge(edge.id, -1); }}>
+                          <button type="button" className="rounded-full p-1 text-muted-foreground transition hover:bg-muted hover:text-foreground" onClick={(event) => { event.stopPropagation(); moveEdge(edge.id, -1); }}>
                             <ArrowUp className="size-4" />
                           </button>
-                          <button type="button" className="rounded-full p-1 text-[color:var(--operator-muted)] transition hover:bg-white/10 hover:text-[color:var(--operator-foreground)]" onClick={(event) => { event.stopPropagation(); moveEdge(edge.id, 1); }}>
+                          <button type="button" className="rounded-full p-1 text-muted-foreground transition hover:bg-muted hover:text-foreground" onClick={(event) => { event.stopPropagation(); moveEdge(edge.id, 1); }}>
                             <ArrowDown className="size-4" />
                           </button>
                         </div>
@@ -1039,23 +1039,23 @@ export function AgentWorkflowEditor({ initialMembers, initialRules, projectName 
 
             <SectionCard>
               <SectionCardHeader>
-                <h2 className="text-base font-semibold text-[color:var(--operator-foreground)]">{t('workflowEdgeConfigTitle')}</h2>
-                <p className="text-sm text-[color:var(--operator-muted)]">{selectedEdge ? t('workflowEdgeConfigBody') : t('workflowNoEdgeSelected')}</p>
+                <h2 className="text-base font-semibold text-foreground">{t('workflowEdgeConfigTitle')}</h2>
+                <p className="text-sm text-muted-foreground">{selectedEdge ? t('workflowEdgeConfigBody') : t('workflowNoEdgeSelected')}</p>
               </SectionCardHeader>
               <SectionCardBody className="space-y-4">
                 {selectedEdge && selectedEdgeSummary ? (
                   <>
-                    <div className="rounded-2xl border border-white/10 bg-white/4 px-3 py-3">
-                      <p className="text-sm font-semibold text-[color:var(--operator-foreground)]">{getMemberLabel(selectedEdgeSummary.source)} → {getMemberLabel(selectedEdgeSummary.target)}</p>
-                      <p className="mt-1 text-xs text-[color:var(--operator-muted)]">{selectedEdgeSummary.target?.type === 'agent' ? t('workflowForwardAgentHint') : t('workflowHumanTargetHint')}</p>
+                    <div className="rounded-md border border-border bg-muted/30 px-3 py-3">
+                      <p className="text-sm font-semibold text-foreground">{getMemberLabel(selectedEdgeSummary.source)} → {getMemberLabel(selectedEdgeSummary.target)}</p>
+                      <p className="mt-1 text-xs text-muted-foreground">{selectedEdgeSummary.target?.type === 'agent' ? t('workflowForwardAgentHint') : t('workflowHumanTargetHint')}</p>
                     </div>
 
                     <div className="space-y-2">
-                      <label className="text-xs font-semibold uppercase tracking-[0.2em] text-[color:var(--operator-muted)]">{t('workflowActionLabel')}</label>
+                      <label className="text-xs font-semibold uppercase tracking-[0.2em] text-muted-foreground">{t('workflowActionLabel')}</label>
                       <select
                         value={selectedEdge.action}
                         onChange={(event) => updateSelectedEdge({ action: event.target.value as WorkflowEdge['action'] })}
-                        className="w-full rounded-2xl border border-white/10 bg-slate-950/60 px-3 py-2 text-sm text-[color:var(--operator-foreground)]"
+                        className="w-full rounded-md border border-input bg-background px-3 py-2 text-sm text-foreground"
                       >
                         <option value="process_and_report">{t('workflowActionReport')}</option>
                         <option value="process_and_forward">{t('workflowActionForward')}</option>
@@ -1064,17 +1064,17 @@ export function AgentWorkflowEditor({ initialMembers, initialRules, projectName 
 
                     <div className="space-y-2">
                       <div className="flex items-center justify-between gap-3">
-                        <label className="text-xs font-semibold uppercase tracking-[0.2em] text-[color:var(--operator-muted)]">{t('workflowMemoTypesLabel')}</label>
-                        <button type="button" className="text-xs text-[color:var(--operator-primary-soft)] hover:underline" onClick={() => updateSelectedEdge({ memoTypes: [] })}>{t('workflowAllMemoTypes')}</button>
+                        <label className="text-xs font-semibold uppercase tracking-[0.2em] text-muted-foreground">{t('workflowMemoTypesLabel')}</label>
+                        <button type="button" className="text-xs text-primary hover:underline" onClick={() => updateSelectedEdge({ memoTypes: [] })}>{t('workflowAllMemoTypes')}</button>
                       </div>
                       <div className="grid grid-cols-2 gap-2">
                         {WORKFLOW_MEMO_TYPE_OPTIONS.map((memoType) => {
                           const checked = selectedEdge.memoTypes.includes(memoType);
                           return (
-                            <label key={memoType} className={`flex items-center gap-2 rounded-2xl border px-3 py-2 text-sm transition ${checked ? 'border-violet-400/40 bg-violet-500/12 text-[color:var(--operator-foreground)]' : 'border-white/10 bg-white/4 text-[color:var(--operator-muted)]'}`}>
+                            <label key={memoType} className={`flex items-center gap-2 rounded-md border px-3 py-2 text-sm transition ${checked ? 'border-primary/40 bg-primary/10 text-foreground' : 'border-border bg-muted/30 text-muted-foreground'}`}>
                               <input
                                 type="checkbox"
-                                className="size-4 rounded border-white/10"
+                                className="size-4 rounded border-input"
                                 checked={checked}
                                 onChange={() => updateSelectedEdge({
                                   memoTypes: checked

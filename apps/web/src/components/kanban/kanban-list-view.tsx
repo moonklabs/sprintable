@@ -5,7 +5,7 @@ import { useTranslations } from 'next-intl';
 import { ChevronDown, ChevronRight } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { Badge } from '@/components/ui/badge';
-import { COLUMNS, VALID_TRANSITIONS, type KanbanStory } from './types';
+import { COLUMNS, VALID_TRANSITIONS, type KanbanStory, type KanbanMember } from './types';
 
 const PRIORITY_BADGE: Record<string, 'default' | 'info' | 'success' | 'destructive' | 'outline'> = {
   critical: 'destructive',
@@ -17,7 +17,7 @@ const PRIORITY_BADGE: Record<string, 'default' | 'info' | 'success' | 'destructi
 interface KanbanListViewProps {
   stories: KanbanStory[];
   epicMap: Record<string, string>;
-  memberMap: Record<string, string>;
+  memberMap: Record<string, KanbanMember>;
   onStoryClick: (story: KanbanStory) => void;
   onChangeStatus: (storyId: string, newStatus: string) => Promise<void>;
 }
@@ -25,7 +25,7 @@ interface KanbanListViewProps {
 interface ListStoryRowProps {
   story: KanbanStory;
   epicMap: Record<string, string>;
-  memberMap: Record<string, string>;
+  memberMap: Record<string, KanbanMember>;
   onStoryClick: (story: KanbanStory) => void;
   onChangeStatus: (storyId: string, newStatus: string) => Promise<void>;
 }
@@ -46,9 +46,16 @@ function ListStoryRow({ story, epicMap, memberMap, onStoryClick, onChangeStatus 
   const currentColumn = COLUMNS.find((c) => c.id === story.status);
 
   return (
-    <div className="relative flex min-w-0 items-center gap-3 overflow-hidden rounded-2xl border border-white/6 bg-[color:var(--operator-surface-soft)] px-4 py-3 transition-all hover:bg-white/6">
+    <div className={`relative flex items-center gap-3 rounded-lg border px-4 py-3 transition-all ${
+      story.assignee_id && memberMap[story.assignee_id]?.type === 'agent'
+        ? 'border-cyan-500/50 bg-background shadow-[0_0_15px_rgba(6,182,212,0.15)] hover:border-cyan-400 hover:shadow-[0_0_20px_rgba(6,182,212,0.25)]'
+        : 'border-border bg-background hover:border-primary/30 hover:bg-muted/50'
+    }`}>
+      {story.assignee_id && memberMap[story.assignee_id]?.type === 'agent' && (
+        <div className="absolute inset-0 pointer-events-none rounded-lg border border-transparent bg-gradient-to-r from-cyan-500/10 to-purple-500/10 opacity-50" />
+      )}
       <button
-        className="min-h-[44px] min-w-0 flex-1 text-left"
+        className="min-h-[44px] flex-1 text-left"
         onClick={() => onStoryClick(story)}
       >
         <div className="flex flex-wrap items-center gap-2">
@@ -62,15 +69,26 @@ function ListStoryRow({ story, epicMap, memberMap, onStoryClick, onChangeStatus 
             <span className="text-[10px] text-[color:var(--operator-muted)]">{t('storyPointsBadge', { count: story.story_points })}</span>
           )}
         </div>
-        <p className="mt-1 text-sm font-medium text-[color:var(--operator-foreground)] line-clamp-2">{story.title}</p>
+        <p className="mt-1 text-sm font-medium text-foreground line-clamp-2 relative z-10">{story.title}</p>
         {story.assignee_id && memberMap[story.assignee_id] && (
-          <p className="mt-1 text-xs text-[color:var(--operator-muted)]">{memberMap[story.assignee_id]}</p>
+          <div className="mt-1 flex items-center gap-2 relative z-10">
+            <p className="text-xs text-muted-foreground">{memberMap[story.assignee_id].name}</p>
+            {memberMap[story.assignee_id].type === 'agent' && (
+              <div className="flex items-center gap-1.5 text-[10px] font-mono text-cyan-600 dark:text-cyan-400">
+                <span className="relative flex h-1.5 w-1.5">
+                  <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-cyan-400 opacity-75"></span>
+                  <span className="relative inline-flex rounded-full h-1.5 w-1.5 bg-cyan-500"></span>
+                </span>
+                <span>&gt; Agent active</span>
+              </div>
+            )}
+          </div>
         )}
       </button>
 
       <div className="relative shrink-0">
         <button
-          className="flex min-h-[44px] min-w-[44px] items-center justify-center rounded-xl border border-white/10 bg-white/5 px-2 text-xs text-[color:var(--operator-muted)] transition hover:bg-white/10"
+          className="flex min-h-[44px] min-w-[44px] items-center justify-center rounded-md border border-border bg-muted/50 px-2 text-xs text-muted-foreground transition hover:bg-muted relative z-10"
           onClick={(e) => {
             e.stopPropagation();
             setStatusOpen((prev) => !prev);
@@ -81,14 +99,14 @@ function ListStoryRow({ story, epicMap, memberMap, onStoryClick, onChangeStatus 
         </button>
 
         {statusOpen && validNext.length > 0 && (
-          <div className="absolute right-0 top-full z-50 mt-1 min-w-[140px] rounded-xl border border-white/10 bg-[color:var(--operator-panel)] p-1 shadow-lg">
+          <div className="absolute right-0 top-full z-50 mt-1 min-w-[140px] rounded-md border border-border bg-popover p-1 text-popover-foreground shadow-md">
             {validNext.map((nextStatus) => {
               const col = COLUMNS.find((c) => c.id === nextStatus);
               if (!col) return null;
               return (
                 <button
                   key={nextStatus}
-                  className="w-full rounded-lg px-3 py-2 text-left text-sm text-[color:var(--operator-foreground)] hover:bg-white/8"
+                  className="w-full rounded-sm px-3 py-2 text-left text-sm hover:bg-muted"
                   onClick={() => void handleStatusChange(nextStatus)}
                 >
                   {t(col.i18nKey)}
@@ -107,7 +125,7 @@ interface StatusGroupProps {
   label: string;
   stories: KanbanStory[];
   epicMap: Record<string, string>;
-  memberMap: Record<string, string>;
+  memberMap: Record<string, KanbanMember>;
   onStoryClick: (story: KanbanStory) => void;
   onChangeStatus: (storyId: string, newStatus: string) => Promise<void>;
 }
@@ -118,18 +136,18 @@ function StatusGroup({ columnId, label, stories, epicMap, memberMap, onStoryClic
   return (
     <div>
       <button
-        className="flex w-full items-center gap-2 rounded-2xl px-3 py-2.5 text-sm font-semibold text-[color:var(--operator-foreground)] hover:bg-white/5"
+        className="flex w-full items-center gap-2 rounded-md px-3 py-2.5 text-sm font-semibold text-foreground hover:bg-muted/50"
         onClick={() => setExpanded((p) => !p)}
       >
         {expanded ? <ChevronDown className="size-4 shrink-0" /> : <ChevronRight className="size-4 shrink-0" />}
         <span>{label}</span>
-        <span className="ml-auto rounded-full bg-white/8 px-2 py-0.5 text-xs text-[color:var(--operator-muted)]">{stories.length}</span>
+        <span className="ml-auto rounded-full bg-muted px-2 py-0.5 text-xs text-muted-foreground">{stories.length}</span>
       </button>
 
       {expanded && (
         <div className={cn('mt-1 space-y-2 pl-2', stories.length === 0 && 'pb-2')}>
           {stories.length === 0 ? (
-            <p className="px-3 text-xs text-[color:var(--operator-muted)]">—</p>
+            <p className="px-3 text-xs text-muted-foreground">—</p>
           ) : (
             stories.map((story) => (
               <ListStoryRow

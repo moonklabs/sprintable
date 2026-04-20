@@ -118,3 +118,65 @@ Verify `NEXT_PUBLIC_SUPABASE_URL` and `SUPABASE_SERVICE_ROLE_KEY` are correct an
 
 ### Health check failing
 Check logs: `docker compose logs web`
+
+---
+
+## OSS 모드 트러블슈팅
+
+### `connection refused` (포트 충돌 또는 Docker 미실행)
+
+```bash
+# Docker daemon 실행 확인
+docker info
+
+# 3000 포트 점유 프로세스 확인
+lsof -i :3000
+# 또는 Linux:
+ss -tlnp | grep 3000
+
+# 점유 프로세스 종료 후 재시작
+docker compose -f docker-compose.oss.yml up
+```
+
+### `localhost:3000` 응답 없음 (Mac Docker Desktop bridge 문제)
+
+Mac에서 Docker Desktop 사용 시 bridge 네트워크 문제로 타임아웃이 발생할 수 있습니다.
+
+```bash
+# 방법 1: Docker Desktop 재시작
+# Docker Desktop 메뉴 → Restart
+
+# 방법 2: 네트워크 초기화
+docker compose -f docker-compose.oss.yml down
+docker network prune -f
+docker compose -f docker-compose.oss.yml up
+
+# 방법 3: 대안 포트 사용
+# docker-compose.oss.yml에서 ports를 "3001:3000"으로 변경 후 http://localhost:3001 접속
+```
+
+### `permission denied` on volume mount (Linux UID 불일치)
+
+Linux에서 volume mount 시 컨테이너 내부 UID(1000)와 호스트 UID가 다를 경우 발생합니다.
+
+```bash
+# 데이터 디렉토리 소유권 변경
+sudo chown -R 1000:1000 ./data
+
+# 또는 docker-compose.oss.yml에 user 추가:
+# user: "${UID}:${GID}"
+```
+
+### GitHub Webhook Secret 불일치
+
+```bash
+# 컨테이너 로그에서 확인
+docker compose -f docker-compose.oss.yml logs web | grep "github-webhook"
+# "Invalid signature" → .env의 GITHUB_WEBHOOK_SECRET과 GitHub webhook secret이 다름
+
+# 재설정 방법:
+# 1. openssl rand -hex 32 로 새 secret 생성
+# 2. .env의 GITHUB_WEBHOOK_SECRET 업데이트
+# 3. GitHub 저장소 Settings → Webhooks → 해당 webhook 수정 → Secret 업데이트
+# 4. docker compose -f docker-compose.oss.yml restart
+```

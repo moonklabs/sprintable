@@ -80,8 +80,8 @@ export function KanbanBoard({ projectId }: KanbanBoardProps) {
 
   const epicMap: Record<string, string> = {};
   for (const e of epics) epicMap[e.id] = e.title;
-  const memberMap: Record<string, string> = {};
-  for (const m of members) memberMap[m.id] = m.name;
+  const memberMap: Record<string, KanbanMember> = {};
+  for (const m of members) memberMap[m.id] = m;
 
   const fetchData = useCallback(async () => {
     setLoading(true);
@@ -321,7 +321,7 @@ export function KanbanBoard({ projectId }: KanbanBoardProps) {
   return (
     <div className="space-y-4">
       {transitionError && (
-        <div className="fixed bottom-4 right-4 z-50 rounded-2xl border border-rose-400/20 bg-rose-500/90 px-4 py-3 text-sm text-white shadow-lg backdrop-blur-xl">
+        <div className="fixed bottom-4 right-4 z-50 rounded-md border border-destructive bg-destructive px-4 py-3 text-sm text-destructive-foreground shadow-md">
           ⚠️ {transitionError}
         </div>
       )}
@@ -375,7 +375,7 @@ export function KanbanBoard({ projectId }: KanbanBoardProps) {
                 <StoryCard
                   story={activeStory}
                   epicName={activeStory.epic_id ? epicMap[activeStory.epic_id] : undefined}
-                  assigneeName={activeStory.assignee_id ? memberMap[activeStory.assignee_id] : undefined}
+                  assignee={activeStory.assignee_id ? memberMap[activeStory.assignee_id] : undefined}
                   onClick={() => {}}
                 />
               </div>

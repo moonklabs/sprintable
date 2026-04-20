@@ -195,7 +195,7 @@ export function StandupReviewCard({
   }
 
   return (
-    <div className="rounded-3xl border border-white/8 bg-[color:var(--operator-surface-soft)]/55 p-4 shadow-[0_16px_40px_rgba(0,0,0,0.08)] backdrop-blur-xl">
+    <div className="rounded-md border border-border bg-card p-4 shadow-sm">
       <div className="flex flex-wrap items-start justify-between gap-3">
         <div className="min-w-0 space-y-2">
           <div className="flex flex-wrap items-center gap-2">
@@ -222,19 +222,19 @@ export function StandupReviewCard({
         {entry ? (
           <>
             <div className="grid gap-3 md:grid-cols-3">
-              <div className="rounded-2xl border border-white/8 bg-black/10 p-3">
+              <div className="rounded-md border border-border bg-muted/30 p-3">
                 <div className="text-xs font-medium uppercase tracking-[0.18em] text-emerald-300">{t('doneLabel')}</div>
                 <p className={cn('mt-2 whitespace-pre-wrap text-sm text-[color:var(--operator-foreground)]/90', !entry.done && 'text-[color:var(--operator-muted)]')}>
                   {entry.done || t('emptySection')}
                 </p>
               </div>
-              <div className="rounded-2xl border border-white/8 bg-black/10 p-3">
+              <div className="rounded-md border border-border bg-muted/30 p-3">
                 <div className="text-xs font-medium uppercase tracking-[0.18em] text-[color:var(--operator-primary-soft)]">{t('planLabel')}</div>
                 <p className={cn('mt-2 whitespace-pre-wrap text-sm text-[color:var(--operator-foreground)]/90', !entry.plan && 'text-[color:var(--operator-muted)]')}>
                   {entry.plan || t('emptySection')}
                 </p>
               </div>
-              <div className="rounded-2xl border border-white/8 bg-black/10 p-3">
+              <div className="rounded-md border border-border bg-muted/30 p-3">
                 <div className="text-xs font-medium uppercase tracking-[0.18em] text-rose-300">{t('blockersLabel')}</div>
                 <p className={cn('mt-2 whitespace-pre-wrap text-sm text-[color:var(--operator-foreground)]/90', !entry.blockers && 'text-[color:var(--operator-muted)]')}>
                   {entry.blockers || t('emptySection')}
@@ -242,7 +242,7 @@ export function StandupReviewCard({
               </div>
             </div>
 
-            <div className="rounded-2xl border border-white/8 bg-black/10 p-3">
+            <div className="rounded-md border border-border bg-muted/30 p-3">
               <div className="flex flex-wrap items-center justify-between gap-2">
                 <div>
                   <p className="text-xs font-medium uppercase tracking-[0.18em] text-[color:var(--operator-muted)]">{t('linkedStories')}</p>
@@ -253,7 +253,7 @@ export function StandupReviewCard({
               {linkedStories.length > 0 ? (
                 <div className="mt-3 space-y-2">
                   {linkedStories.map((story) => (
-                    <div key={story.id} className="rounded-2xl border border-white/8 bg-white/5 p-3">
+                    <div key={story.id} className="rounded-md border border-border bg-muted/30 p-3">
                       <div className="flex flex-wrap items-center justify-between gap-2">
                         <p className="text-sm font-medium text-[color:var(--operator-foreground)]">{story.title}</p>
                         <Badge variant="outline">{story.status}</Badge>
@@ -262,9 +262,9 @@ export function StandupReviewCard({
                         <Badge variant="chip">{story.assignee_name ?? t('unknown')}</Badge>
                         <span>{t('taskProgress', { done: story.done_task_count, total: story.task_count })}</span>
                       </div>
-                      <div className="mt-2 h-2 overflow-hidden rounded-full bg-white/10">
+                      <div className="mt-2 h-2 overflow-hidden rounded-full bg-muted">
                         <div
-                          className="h-full rounded-full bg-[linear-gradient(135deg,var(--operator-primary),var(--operator-primary-strong))]"
+                          className="h-full rounded-full bg-primary"
                           style={{ width: `${story.task_count > 0 ? Math.round((story.done_task_count / story.task_count) * 100) : 0}%` }}
                         />
                       </div>
@@ -288,7 +288,7 @@ export function StandupReviewCard({
           />
         )}
 
-        <div className="rounded-2xl border border-white/8 bg-black/10 p-3">
+        <div className="rounded-md border border-border bg-muted/30 p-3">
           <div className="flex flex-wrap items-center justify-between gap-2">
             <div>
               <p className="text-xs font-medium uppercase tracking-[0.18em] text-[color:var(--operator-muted)]">{t('feedback')}</p>
@@ -310,7 +310,7 @@ export function StandupReviewCard({
                 const isAuthor = currentMemberId === item.feedback_by_id;
                 const isEditing = editingFeedbackId === item.id;
                 return (
-                  <div key={item.id} className="rounded-2xl border border-white/8 bg-white/5 p-3">
+                  <div key={item.id} className="rounded-md border border-border bg-muted/30 p-3">
                     <div className="flex flex-wrap items-center justify-between gap-2">
                       <div className="flex flex-wrap items-center gap-2">
                         <Badge variant={getReviewTypeVariant(item.review_type)}>{t(`reviewType_${item.review_type}`)}</Badge>
@@ -359,7 +359,7 @@ export function StandupReviewCard({
           )}
 
           {showFeedbackForm ? (
-            <div className="mt-3 space-y-3 rounded-2xl border border-dashed border-white/12 p-3">
+            <div className="mt-3 space-y-3 rounded-md border border-dashed border-border p-3">
               <OperatorSelect value={reviewType} onChange={(e) => setReviewType(e.target.value as StandupReviewType)}>
                 {REVIEW_TYPE_OPTIONS.map((option) => (
                   <option key={option} value={option}>{t(`reviewType_${option}`)}</option>

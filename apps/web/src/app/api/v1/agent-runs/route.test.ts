@@ -147,7 +147,7 @@ describe('GET /api/v1/agent-runs', () => {
       }),
     });
 
-    const response = await GET(new Request('http://localhost/api/v1/agent-runs?status=completed&limit=5'));
+    const response = await GET(new Request('http://localhost/api/v1/agent-runs?status=completed&limit=5&from=2026-04-01T00:00:00.000Z'));
 
     expect(response.status).toBe(200);
     expect(requireAgentOrchestration).toHaveBeenCalledWith(expect.anything(), 'org-1');

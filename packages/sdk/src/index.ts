@@ -8,88 +8,103 @@ import type {
   MemoReply,
   MemoListFilters,
   CreateMemoReplyInput,
+  CreateStoryInput,
+  UpdateStoryInput,
+  StoryListFilters,
+  CreateTaskInput,
+  UpdateTaskInput,
+  TaskListFilters,
 } from './types';
 
-export type { ApiResponse, Story, Task, Memo, MemoSummary, MemoReply, MemoListFilters, CreateMemoReplyInput } from './types';
+export type {
+  ApiResponse,
+  Story,
+  Task,
+  Memo,
+  MemoSummary,
+  MemoReply,
+  MemoListFilters,
+  CreateMemoReplyInput,
+  CreateStoryInput,
+  UpdateStoryInput,
+  StoryListFilters,
+  CreateTaskInput,
+  UpdateTaskInput,
+  TaskListFilters,
+} from './types';
 
 export interface SprintableClientOptions {
-  /**
-   * Base URL for Sprintable API (e.g., "https://your-domain.example.com")
-   */
+  /** Base URL for Sprintable API (e.g., "https://your-domain.example.com") */
   baseURL?: string;
-
-  /**
-   * Additional axios configuration
-   */
+  /** Additional axios configuration */
   axiosConfig?: AxiosRequestConfig;
 }
 
 export interface SprintableClient {
-  /**
-   * Axios instance with pre-configured authentication
-   */
+  /** Axios instance with pre-configured authentication */
   axios: AxiosInstance;
-
-  /**
-   * API Key used for authentication
-   */
+  /** API Key used for authentication */
   apiKey: string;
 
-  /**
-   * Story API methods
-   */
   stories: {
-    /**
-     * Get a story by ID
-     */
+    /** Get a story by ID */
     get: (id: string) => Promise<Story>;
+    /** List stories with optional filters */
+    list: (filters?: StoryListFilters) => Promise<Story[]>;
+    /** Create a new story */
+    create: (input: CreateStoryInput) => Promise<Story>;
+    /** Update a story */
+    update: (id: string, input: UpdateStoryInput) => Promise<Story>;
   };
 
-  /**
-   * Memo API methods
-   */
+  tasks: {
+    /** List tasks with optional filters */
+    list: (filters?: TaskListFilters) => Promise<Task[]>;
+    /** Create a new task */
+    create: (input: CreateTaskInput) => Promise<Task>;
+    /** Update a task */
+    update: (id: string, input: UpdateTaskInput) => Promise<Task>;
+  };
+
   memos: {
-    /**
-     * Get a memo by ID
-     */
+    /** Get a memo by ID */
     get: (id: string) => Promise<Memo>;
-
-    /**
-     * List memos with optional filters
-     */
+    /** List memos with optional filters */
     list: (filters?: MemoListFilters) => Promise<MemoSummary[]>;
-
-    /**
-     * Reply to a memo
-     */
+    /** Reply to a memo */
     reply: (id: string, content: string | CreateMemoReplyInput) => Promise<MemoReply>;
   };
 }
 
+function buildParams(filters: Record<string, string | number | undefined>): string {
+  const params = new URLSearchParams();
+  for (const [key, value] of Object.entries(filters)) {
+    if (value !== undefined) params.append(key, String(value));
+  }
+  return `?${params.toString()}`;
+}
+
 /**
- * Create a Sprintable API client with automatic Bearer token authentication
- *
- * @param apiKey - Sprintable API key (e.g., sk_live_...)
- * @param options - Client configuration options
- * @returns Configured Sprintable client
+ * Create a Sprintable API client with automatic Bearer token authentication.
  *
  * @example
  * ```typescript
- * const client = createSprintableClient('sk_live_xxxxx');
+ * const client = createSprintableClient('sk_live_xxxxx', {
+ *   baseURL: 'http://localhost:3000',
+ * });
  *
- * // Use the axios instance
- * const { data } = await client.axios.get('/api/memos');
- * console.log(data);
+ * // Create a story
+ * const story = await client.stories.create({ title: 'SPR-1: Auth flow' });
+ *
+ * // Close it
+ * await client.stories.update(story.id, { status: 'done' });
  * ```
  */
 export function createSprintableClient(
   apiKey: string,
-  options: SprintableClientOptions = {}
+  options: SprintableClientOptions = {},
 ): SprintableClient {
-  const {
-    baseURL = '',
-    axiosConfig = {},
-  } = options;
+  const { baseURL = '', axiosConfig = {} } = options;
 
   const instance = axios.create({
     baseURL,
@@ -100,15 +115,12 @@ export function createSprintableClient(
     },
   });
 
-  // Add request interceptor to inject Bearer token
   instance.interceptors.request.use(
     (config) => {
       config.headers.Authorization = `Bearer ${apiKey}`;
       return config;
     },
-    (error) => {
-      return Promise.reject(error);
-    }
+    (error) => Promise.reject(error),
   );
 
   return {
@@ -116,41 +128,68 @@ export function createSprintableClient(
     apiKey,
 
     stories: {
-      async get(id: string): Promise<Story> {
-        const response = await instance.get<ApiResponse<Story>>(`/api/stories/${id}`);
-        return response.data.data;
+      async get(id) {
+        const res = await instance.get<ApiResponse<Story>>(`/api/stories/${id}`);
+        return res.data.data;
+      },
+
+      async list(filters = {}) {
+        const res = await instance.get<ApiResponse<Story[]>>(
+          `/api/stories${buildParams(filters as Record<string, string | number | undefined>)}`,
+        );
+        return res.data.data;
+      },
+
+      async create(input) {
+        const res = await instance.post<ApiResponse<Story>>('/api/stories', input);
+        return res.data.data;
+      },
+
+      async update(id, input) {
+        const res = await instance.patch<ApiResponse<Story>>(`/api/stories/${id}`, input);
+        return res.data.data;
+      },
+    },
+
+    tasks: {
+      async list(filters = {}) {
+        const res = await instance.get<ApiResponse<Task[]>>(
+          `/api/tasks${buildParams(filters as Record<string, string | number | undefined>)}`,
+        );
+        return res.data.data;
+      },
+
+      async create(input) {
+        const res = await instance.post<ApiResponse<Task>>('/api/tasks', input);
+        return res.data.data;
+      },
+
+      async update(id, input) {
+        const res = await instance.patch<ApiResponse<Task>>(`/api/tasks/${id}`, input);
+        return res.data.data;
       },
     },
 
     memos: {
-      async get(id: string): Promise<Memo> {
-        const response = await instance.get<ApiResponse<Memo>>(`/api/memos/${id}`);
-        return response.data.data;
+      async get(id) {
+        const res = await instance.get<ApiResponse<Memo>>(`/api/memos/${id}`);
+        return res.data.data;
       },
 
-      async list(filters: MemoListFilters = {}): Promise<MemoSummary[]> {
-        const params = new URLSearchParams();
-        if (filters.project_id) params.append('project_id', filters.project_id);
-        if (filters.assigned_to) params.append('assigned_to', filters.assigned_to);
-        if (filters.status) params.append('status', filters.status);
-        if (filters.q) params.append('q', filters.q);
-        if (filters.limit) params.append('limit', String(filters.limit));
-        if (filters.cursor) params.append('cursor', filters.cursor);
-
-        const response = await instance.get<ApiResponse<MemoSummary[]>>(`/api/memos?${params.toString()}`);
-        return response.data.data;
-      },
-
-      async reply(id: string, content: string | CreateMemoReplyInput): Promise<MemoReply> {
-        const payload = typeof content === 'string'
-          ? { content }
-          : content;
-
-        const response = await instance.post<ApiResponse<MemoReply>>(
-          `/api/memos/${id}/replies`,
-          payload
+      async list(filters = {}) {
+        const res = await instance.get<ApiResponse<MemoSummary[]>>(
+          `/api/memos${buildParams(filters as Record<string, string | number | undefined>)}`,
         );
-        return response.data.data;
+        return res.data.data;
+      },
+
+      async reply(id, content) {
+        const payload = typeof content === 'string' ? { content } : content;
+        const res = await instance.post<ApiResponse<MemoReply>>(
+          `/api/memos/${id}/replies`,
+          payload,
+        );
+        return res.data.data;
       },
     },
   };

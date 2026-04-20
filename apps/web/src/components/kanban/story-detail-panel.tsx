@@ -204,31 +204,31 @@ export function StoryDetailPanel({ story, tasks, nextTasksCursor = null, loading
       />
 
       {/* Panel */}
-      <div className="fixed inset-0 z-50 bg-[color:var(--operator-panel)] shadow-xl backdrop-blur-xl lg:inset-y-0 lg:left-auto lg:right-0 lg:w-full lg:max-w-md lg:border-l lg:border-white/10">
+      <div className="fixed inset-0 z-50 bg-background shadow-xl backdrop-blur-xl lg:inset-y-0 lg:left-auto lg:right-0 lg:w-full lg:max-w-md lg:border-l lg:border-border">
       <div className="flex h-full flex-col">
-        <div className="flex items-center justify-between border-b border-white/10 p-5">
+        <div className="flex items-center justify-between border-b border-border p-5">
           <div className="space-y-2">
-            <h2 className="text-lg font-semibold text-[color:var(--operator-foreground)]">{story.title}</h2>
+            <h2 className="text-lg font-semibold text-foreground">{story.title}</h2>
             <StatusBadge status={story.status} label={statusLabel} />
           </div>
-          <button onClick={onClose} className="rounded-2xl border border-white/10 px-3 py-2 text-[color:var(--operator-muted)] transition hover:text-[color:var(--operator-foreground)]">✕</button>
+          <button onClick={onClose} className="rounded-md border border-border px-3 py-2 text-muted-foreground transition hover:text-foreground hover:bg-muted/50">✕</button>
         </div>
         <div className="flex-1 overflow-y-auto p-5">
           <div className="space-y-5">
             <div>
-              <span className="text-xs font-medium uppercase tracking-[0.18em] text-[color:var(--operator-muted)]">{t('status')}</span>
-              <p className="mt-1 text-sm text-[color:var(--operator-foreground)]">{statusLabel}</p>
+              <span className="text-[10px] font-mono uppercase tracking-wider text-muted-foreground">{t('status')}</span>
+              <p className="mt-1 text-sm text-foreground">{statusLabel}</p>
             </div>
             {story.story_points != null ? (
               <div>
-                <span className="text-xs font-medium uppercase tracking-[0.18em] text-[color:var(--operator-muted)]">{t('storyPoints')}</span>
-                <p className="mt-1 text-sm text-[color:var(--operator-foreground)]">{t('storyPointsBadge', { count: story.story_points })}</p>
+                <span className="text-[10px] font-mono uppercase tracking-wider text-muted-foreground">{t('storyPoints')}</span>
+                <p className="mt-1 text-sm text-foreground">{t('storyPointsBadge', { count: story.story_points })}</p>
               </div>
             ) : null}
             {story.description ? (
               <div>
-                <span className="text-xs font-medium uppercase tracking-[0.18em] text-[color:var(--operator-muted)]">{t('description')}</span>
-                <p className="mt-2 whitespace-pre-wrap text-sm text-[color:var(--operator-muted)]">{story.description}</p>
+                <span className="text-[10px] font-mono uppercase tracking-wider text-muted-foreground">{t('description')}</span>
+                <p className="mt-2 whitespace-pre-wrap text-sm text-muted-foreground">{story.description}</p>
               </div>
             ) : null}
 
@@ -247,15 +247,15 @@ export function StoryDetailPanel({ story, tasks, nextTasksCursor = null, loading
                   <>
                     <ul className="space-y-2">
                       {tasks.map((task) => (
-                        <li key={task.id} className="flex items-center gap-3 rounded-2xl border border-white/8 bg-[color:var(--operator-surface-soft)]/55 px-3 py-2 text-sm">
+                        <li key={task.id} className="flex items-center gap-3 rounded-md border border-border bg-muted/30 px-3 py-2 text-sm">
                           <span className={`h-2.5 w-2.5 rounded-full ${taskTone(task.status)}`} />
-                          <span className={task.status === 'done' ? 'text-[color:var(--operator-muted)] line-through' : 'text-[color:var(--operator-foreground)]'}>{task.title}</span>
+                          <span className={task.status === 'done' ? 'text-muted-foreground line-through' : 'text-foreground'}>{task.title}</span>
                         </li>
                       ))}
                     </ul>
                     {nextTasksCursor ? (
                       <div className="mt-3 text-center">
-                        <Button variant="glass" size="sm" onClick={onLoadMoreTasks} disabled={loadingMoreTasks || !onLoadMoreTasks}>
+                        <Button variant="outline" size="sm" onClick={onLoadMoreTasks} disabled={loadingMoreTasks || !onLoadMoreTasks}>
                           {loadingMoreTasks ? t('loading') : t('loadMore')}
                         </Button>
                       </div>
@@ -298,9 +298,9 @@ export function StoryDetailPanel({ story, tasks, nextTasksCursor = null, loading
                   <>
                     <ul className="space-y-3">
                       {comments.map((comment) => (
-                        <li key={comment.id} className="rounded-2xl border border-white/8 bg-[color:var(--operator-surface-soft)]/55 p-3">
-                          <p className="whitespace-pre-wrap text-sm text-[color:var(--operator-foreground)]">{comment.content}</p>
-                          <p className="mt-2 text-xs text-[color:var(--operator-muted)]">
+                        <li key={comment.id} className="rounded-md border border-border bg-muted/30 p-3">
+                          <p className="whitespace-pre-wrap text-sm text-foreground">{comment.content}</p>
+                          <p className="mt-2 text-[10px] font-mono text-muted-foreground">
                             {new Date(comment.created_at).toLocaleString()}
                           </p>
                         </li>
@@ -308,7 +308,7 @@ export function StoryDetailPanel({ story, tasks, nextTasksCursor = null, loading
                     </ul>
                     {nextCommentsCursor ? (
                       <div className="text-center">
-                        <Button variant="glass" size="sm" onClick={handleLoadMoreComments} disabled={loadingMoreComments}>
+                        <Button variant="outline" size="sm" onClick={handleLoadMoreComments} disabled={loadingMoreComments}>
                           {loadingMoreComments ? t('loading') : t('loadMore')}
                         </Button>
                       </div>
@@ -326,9 +326,9 @@ export function StoryDetailPanel({ story, tasks, nextTasksCursor = null, loading
                   <>
                     <ul className="space-y-2">
                       {activities.map((activity) => (
-                        <li key={activity.id} className="rounded-2xl border border-white/8 bg-[color:var(--operator-surface-soft)]/55 p-3">
-                          <p className="text-sm text-[color:var(--operator-foreground)]">{formatActivityMessage(activity)}</p>
-                          <p className="mt-1 text-xs text-[color:var(--operator-muted)]">
+                        <li key={activity.id} className="rounded-md border border-border bg-muted/30 p-3">
+                          <p className="text-sm text-foreground">{formatActivityMessage(activity)}</p>
+                          <p className="mt-1 text-[10px] font-mono text-muted-foreground">
                             {new Date(activity.created_at).toLocaleString()}
                           </p>
                         </li>
@@ -336,7 +336,7 @@ export function StoryDetailPanel({ story, tasks, nextTasksCursor = null, loading
                     </ul>
                     {nextActivitiesCursor ? (
                       <div className="text-center">
-                        <Button variant="glass" size="sm" onClick={handleLoadMoreActivities} disabled={loadingMoreActivities}>
+                        <Button variant="outline" size="sm" onClick={handleLoadMoreActivities} disabled={loadingMoreActivities}>
                           {loadingMoreActivities ? t('loading') : t('loadMore')}
                         </Button>
                       </div>

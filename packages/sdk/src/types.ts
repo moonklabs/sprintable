@@ -38,6 +38,8 @@ export type StoryStatus =
   | 'in-review'
   | 'done';
 
+export type StoryPriority = 'critical' | 'high' | 'medium' | 'low';
+
 export interface Task {
   id: string;
   story_id: string;
@@ -60,11 +62,75 @@ export interface Story {
   sprint_id?: string;
   assignee_id?: string | null;
   story_points?: number;
-  priority: string;
+  priority: StoryPriority;
   meeting_id?: string | null;
   created_at: string;
   updated_at: string;
   tasks: Task[];
+}
+
+export interface CreateStoryInput {
+  title: string;
+  project_id?: string;
+  description?: string;
+  status?: StoryStatus;
+  priority?: StoryPriority;
+  epic_id?: string;
+  sprint_id?: string;
+  assignee_id?: string;
+  story_points?: number;
+}
+
+export interface UpdateStoryInput {
+  title?: string;
+  description?: string;
+  status?: StoryStatus;
+  priority?: StoryPriority;
+  epic_id?: string;
+  sprint_id?: string;
+  assignee_id?: string | null;
+  story_points?: number;
+}
+
+export interface StoryListFilters {
+  project_id?: string;
+  sprint_id?: string;
+  epic_id?: string;
+  assignee_id?: string;
+  status?: StoryStatus;
+  q?: string;
+  limit?: number;
+  cursor?: string;
+}
+
+/**
+ * Task types
+ */
+
+export type TaskStatus = 'todo' | 'in_progress' | 'done';
+
+export interface CreateTaskInput {
+  title: string;
+  story_id: string;
+  status?: TaskStatus;
+  assignee_id?: string;
+  story_points?: number;
+}
+
+export interface UpdateTaskInput {
+  title?: string;
+  status?: TaskStatus;
+  assignee_id?: string | null;
+  story_points?: number | null;
+}
+
+export interface TaskListFilters {
+  story_id?: string;
+  project_id?: string;
+  assignee_id?: string;
+  status?: string;
+  limit?: number;
+  cursor?: string;
 }
 
 /**

@@ -353,21 +353,21 @@ export default function SettingsPage() {
         <SectionCard>
           <SectionCardHeader>
             <div className="space-y-1">
-              <h2 className="text-base font-semibold text-[color:var(--operator-foreground)]">🔔 {t('notifications')}</h2>
-            <p className="text-sm text-[color:var(--operator-muted)]">{t('notificationDescription')}</p>
+              <h2 className="text-base font-semibold text-foreground">🔔 {t('notifications')}</h2>
+            <p className="text-sm text-muted-foreground">{t('notificationDescription')}</p>
           </div>
         </SectionCardHeader>
         <SectionCardBody>
           {loading ? (
-            <div className="space-y-3">{[1, 2, 3].map((i) => <div key={i} className="h-12 animate-pulse rounded-2xl bg-[color:var(--operator-surface-soft)]" />)}</div>
+            <div className="space-y-3">{[1, 2, 3].map((i) => <div key={i} className="h-12 animate-pulse rounded-md bg-muted" />)}</div>
           ) : (
             <div className="space-y-3">
               {EVENT_TYPES.map((eventType) => (
-                <div key={eventType} className="flex items-center justify-between rounded-2xl border border-white/8 bg-[color:var(--operator-surface-soft)]/55 p-3">
-                  <span className="text-sm text-[color:var(--operator-foreground)]">{t(`event_${eventType}`)}</span>
+                <div key={eventType} className="flex items-center justify-between rounded-md border border-border bg-muted/30 p-3">
+                  <span className="text-sm text-foreground">{t(`event_${eventType}`)}</span>
                   <button
                     onClick={() => toggleSetting(eventType, getEnabled(eventType))}
-                    className={`relative h-6 w-11 rounded-full transition ${getEnabled(eventType) ? 'bg-[color:var(--operator-primary)]' : 'bg-white/15'}`}
+                    className={`relative h-6 w-11 rounded-full transition ${getEnabled(eventType) ? 'bg-primary' : 'bg-muted'}`}
                     type="button"
                   >
                     <span className={`absolute top-0.5 h-5 w-5 rounded-full bg-white shadow transition ${getEnabled(eventType) ? 'left-[22px]' : 'left-0.5'}`} />
@@ -384,16 +384,16 @@ export default function SettingsPage() {
         <SectionCard>
           <SectionCardHeader>
             <div className="space-y-1">
-              <h2 className="text-base font-semibold text-[color:var(--operator-foreground)]">🔗 {t('webhooks')}</h2>
-            <p className="text-sm text-[color:var(--operator-muted)]">{t('webhookDescription')}</p>
+              <h2 className="text-base font-semibold text-foreground">🔗 {t('webhooks')}</h2>
+            <p className="text-sm text-muted-foreground">{t('webhookDescription')}</p>
           </div>
         </SectionCardHeader>
         <SectionCardBody className="space-y-4">
           <div className="space-y-2">
             {webhooks.map((webhook) => (
-              <div key={webhook.id} className="flex items-center justify-between gap-3 rounded-2xl border border-white/8 bg-[color:var(--operator-surface-soft)]/55 px-3 py-3 text-xs">
-                <span className="truncate text-[color:var(--operator-foreground)]">{webhook.url}</span>
-                <span className="shrink-0 text-[color:var(--operator-muted)]">{webhook.projects?.name ?? t('defaultWebhook')}</span>
+              <div key={webhook.id} className="flex items-center justify-between gap-3 rounded-md border border-border bg-muted/30 px-3 py-3 text-xs">
+                <span className="truncate text-foreground">{webhook.url}</span>
+                <span className="shrink-0 text-muted-foreground">{webhook.projects?.name ?? t('defaultWebhook')}</span>
               </div>
             ))}
           </div>
@@ -438,33 +438,33 @@ export default function SettingsPage() {
         <SectionCard>
           <SectionCardHeader>
             <div className="space-y-1">
-              <h2 className="text-base font-semibold text-[color:var(--operator-foreground)]">🗂️ {t('projectManagement')}</h2>
-            <p className="text-sm text-[color:var(--operator-muted)]">{t('projectManagementDescription')}</p>
+              <h2 className="text-base font-semibold text-foreground">🗂️ {t('projectManagement')}</h2>
+            <p className="text-sm text-muted-foreground">{t('projectManagementDescription')}</p>
           </div>
         </SectionCardHeader>
         <SectionCardBody className="space-y-4">
           <div className="space-y-2">
             {projects.length > 0 ? (
               projects.map((project) => (
-                <div key={project.id} className="flex items-start justify-between gap-3 rounded-2xl border border-white/8 bg-[color:var(--operator-surface-soft)]/55 px-4 py-3">
+                <div key={project.id} className="flex items-start justify-between gap-3 rounded-md border border-border bg-muted/30 px-4 py-3">
                   <div className="min-w-0">
-                    <div className="font-medium text-[color:var(--operator-foreground)]">{project.name}</div>
+                    <div className="font-medium text-foreground">{project.name}</div>
                     {project.description ? (
-                      <div className="mt-1 text-sm text-[color:var(--operator-muted)]">{project.description}</div>
+                      <div className="mt-1 text-sm text-muted-foreground">{project.description}</div>
                     ) : null}
                   </div>
                   {project.id === currentProjectId ? <Badge variant="info">{t('currentProjectBadge')}</Badge> : null}
                 </div>
               ))
             ) : (
-              <div className="rounded-2xl border border-dashed border-white/10 px-3 py-6 text-sm text-[color:var(--operator-muted)]">
+              <div className="rounded-md border border-dashed border-border px-3 py-6 text-sm text-muted-foreground">
                 {t('projectListEmpty')}
               </div>
             )}
           </div>
 
           {projectActionMessage ? (
-            <div className={`rounded-2xl border p-3 text-xs ${projectActionMessage.type === 'success' ? 'border-emerald-400/20 bg-emerald-400/10 text-emerald-200' : 'border-rose-400/20 bg-rose-500/10 text-rose-200'}`}>
+            <div className={`rounded-md border p-3 text-xs ${projectActionMessage.type === 'success' ? 'border-emerald-500/20 bg-emerald-500/10 text-emerald-600 dark:text-emerald-400' : 'border-destructive/20 bg-destructive/10 text-destructive'}`}>
               {projectActionMessage.text}
             </div>
           ) : null}
@@ -486,7 +486,7 @@ export default function SettingsPage() {
               </Button>
             </div>
           ) : adminChecked ? (
-            <div className="rounded-2xl border border-amber-400/20 bg-amber-400/10 px-4 py-3 text-sm text-amber-100">
+            <div className="rounded-md border border-amber-500/20 bg-amber-500/10 px-4 py-3 text-sm text-amber-600 dark:text-amber-400">
               {t('projectAdminRequired')}
             </div>
           ) : null}
@@ -503,8 +503,8 @@ export default function SettingsPage() {
           <SectionCard>
             <SectionCardHeader>
               <div className="space-y-1">
-                <h2 className="text-base font-semibold text-[color:var(--operator-foreground)]">👥 {t('inviteMembers')}</h2>
-              <p className="text-sm text-[color:var(--operator-muted)]">{t('inviteDescription')}</p>
+                <h2 className="text-base font-semibold text-foreground">👥 {t('inviteMembers')}</h2>
+              <p className="text-sm text-muted-foreground">{t('inviteDescription')}</p>
             </div>
           </SectionCardHeader>
           <SectionCardBody className="space-y-4">
@@ -546,7 +546,7 @@ export default function SettingsPage() {
             </div>
 
             {inviteResult ? (
-              <div className="rounded-2xl border border-emerald-400/20 bg-emerald-400/10 p-3 text-xs text-emerald-200 break-all">
+              <div className="rounded-md border border-emerald-500/20 bg-emerald-500/10 p-3 text-xs text-emerald-600 dark:text-emerald-400 break-all">
                 {t('inviteLinkCopied')}: {inviteResult}
               </div>
             ) : null}
@@ -554,9 +554,9 @@ export default function SettingsPage() {
             {invitations.length > 0 ? (
               <div className="space-y-2">
                 {invitations.map((invitation) => (
-                  <div key={invitation.id} className="flex items-center justify-between gap-2 rounded-2xl border border-white/8 bg-[color:var(--operator-surface-soft)]/55 px-3 py-3 text-xs">
-                    <span className="text-[color:var(--operator-foreground)]">{invitation.email}</span>
-                    <span className="shrink-0 text-[color:var(--operator-muted)]">
+                  <div key={invitation.id} className="flex items-center justify-between gap-2 rounded-md border border-border bg-muted/30 px-3 py-3 text-xs">
+                    <span className="text-foreground">{invitation.email}</span>
+                    <span className="shrink-0 text-muted-foreground">
                       {invitation.projects?.name ?? t('orgWide')}
                     </span>
                     <span className={`shrink-0 ${invitation.accepted_at ? 'text-emerald-300' : new Date(invitation.expires_at) < new Date() ? 'text-rose-300' : 'text-amber-200'}`}>
@@ -576,8 +576,8 @@ export default function SettingsPage() {
           <SectionCard>
             <SectionCardHeader>
               <div className="space-y-1">
-                <h2 className="text-base font-semibold text-[color:var(--operator-foreground)]">🧩 {t('memberManagement')}</h2>
-              <p className="text-sm text-[color:var(--operator-muted)]">{t('memberManagementDescription')}</p>
+                <h2 className="text-base font-semibold text-foreground">🧩 {t('memberManagement')}</h2>
+              <p className="text-sm text-muted-foreground">{t('memberManagementDescription')}</p>
             </div>
           </SectionCardHeader>
           <SectionCardBody className="space-y-4">
@@ -596,18 +596,18 @@ export default function SettingsPage() {
             </div>
 
             {memberActionMessage ? (
-              <div className={`rounded-2xl border p-3 text-xs ${memberActionMessage.type === 'success' ? 'border-emerald-400/20 bg-emerald-400/10 text-emerald-200' : 'border-rose-400/20 bg-rose-500/10 text-rose-200'}`}>
+              <div className={`rounded-md border p-3 text-xs ${memberActionMessage.type === 'success' ? 'border-emerald-500/20 bg-emerald-500/10 text-emerald-600 dark:text-emerald-400' : 'border-destructive/20 bg-destructive/10 text-destructive'}`}>
                 {memberActionMessage.text}
               </div>
             ) : null}
 
             <div className="space-y-2">
-              <div className="text-xs font-medium uppercase tracking-[0.18em] text-[color:var(--operator-muted)]">{t('projectMembers')}</div>
+              <div className="text-xs font-medium uppercase tracking-[0.18em] text-muted-foreground">{t('projectMembers')}</div>
               {projectMembers.length > 0 ? (
                 projectMembers.map((member) => (
-                  <div key={member.id} className="flex items-center justify-between gap-3 rounded-2xl border border-white/8 bg-[color:var(--operator-surface-soft)]/55 px-3 py-3 text-sm">
+                  <div key={member.id} className="flex items-center justify-between gap-3 rounded-md border border-border bg-muted/30 px-3 py-3 text-sm">
                     <div className="min-w-0">
-                      <div className="font-medium text-[color:var(--operator-foreground)]">{member.name}</div>
+                      <div className="font-medium text-foreground">{member.name}</div>
                       <div className="mt-1 flex flex-wrap items-center gap-2">
                         <Badge variant={member.type === 'agent' ? 'secondary' : 'info'}>{member.type === 'agent' ? t('agentMember') : t('humanMember')}</Badge>
                         <Badge variant="outline">{member.role}</Badge>
@@ -619,7 +619,7 @@ export default function SettingsPage() {
                   </div>
                 ))
               ) : (
-                <div className="rounded-2xl border border-dashed border-white/10 px-3 py-6 text-sm text-[color:var(--operator-muted)]">
+                <div className="rounded-md border border-dashed border-border px-3 py-6 text-sm text-muted-foreground">
                   {t('noProjectMembers')}
                 </div>
               )}
@@ -631,7 +631,7 @@ export default function SettingsPage() {
 
       {currentProjectId ? (
         <section id="ai">
-          <div className="rounded-3xl border border-white/10 bg-[color:var(--operator-panel)]/82 p-1 shadow-[0_18px_50px_rgba(0,0,0,0.24)] backdrop-blur-xl">
+          <div className="rounded-xl border border-border bg-card p-1 shadow-sm">
             <AiSettingsSection projectId={currentProjectId} />
           </div>
         </section>
@@ -654,8 +654,8 @@ export default function SettingsPage() {
           <SectionCard>
             <SectionCardHeader>
               <div className="space-y-1">
-                <h2 className="text-base font-semibold text-[color:var(--operator-foreground)]">💳 {t('manageSubscription')}</h2>
-              <p className="text-sm text-[color:var(--operator-muted)]">{t('subscriptionDescription')}</p>
+                <h2 className="text-base font-semibold text-foreground">💳 {t('manageSubscription')}</h2>
+              <p className="text-sm text-muted-foreground">{t('subscriptionDescription')}</p>
             </div>
           </SectionCardHeader>
           <SectionCardBody>
@@ -682,15 +682,15 @@ export default function SettingsPage() {
       ) : null}
 
       <section id="danger-zone">
-        <SectionCard className="border-rose-400/20 bg-rose-500/10">
-          <SectionCardHeader className="border-b border-rose-400/15">
+        <SectionCard className="border-destructive/20 bg-destructive/10">
+          <SectionCardHeader className="border-b border-destructive/20">
             <div className="space-y-1">
-              <h2 className="text-base font-semibold text-rose-100">{t('dangerZone')}</h2>
-            <p className="text-sm text-rose-200/80">{t('dangerDescription')}</p>
+              <h2 className="text-base font-semibold text-destructive">{t('dangerZone')}</h2>
+            <p className="text-sm text-destructive/80">{t('dangerDescription')}</p>
           </div>
         </SectionCardHeader>
         <SectionCardBody>
-          <p className="mb-4 text-sm text-rose-100/80">{t('deleteAccountDesc')}</p>
+          <p className="mb-4 text-sm text-destructive/80">{t('deleteAccountDesc')}</p>
           <Button variant="destructive" size="lg" onClick={() => setShowDeleteConfirm(true)}>
             {t('deleteAccount')}
           </Button>
@@ -700,9 +700,9 @@ export default function SettingsPage() {
 
       {showDeleteConfirm ? (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 p-4">
-          <div className="w-full max-w-sm rounded-3xl border border-white/10 bg-[color:var(--operator-panel)] p-6 shadow-xl backdrop-blur-xl">
-            <h3 className="text-lg font-semibold text-rose-100">{t('deleteConfirmTitle')}</h3>
-            <p className="mt-2 text-sm text-[color:var(--operator-muted)]">{t('deleteConfirmDesc')}</p>
+          <div className="w-full max-w-sm rounded-xl border border-border bg-card p-6 shadow-md">
+            <h3 className="text-lg font-semibold text-destructive">{t('deleteConfirmTitle')}</h3>
+            <p className="mt-2 text-sm text-muted-foreground">{t('deleteConfirmDesc')}</p>
             <div className="mt-6 flex gap-3">
               <Button variant="glass" className="flex-1" onClick={() => setShowDeleteConfirm(false)}>
                 {tc('cancel')}

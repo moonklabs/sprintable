@@ -1,4 +1,4 @@
-import { BackgroundRuntimeWorker, createBackgroundRuntimeWorkerFromEnv, shouldStartBackgroundRuntime } from '@/services/background-runtime';
+import type { BackgroundRuntimeWorker } from '@/services/background-runtime';
 
 declare global {
   var __backgroundRuntimeWorker: BackgroundRuntimeWorker | undefined;
@@ -6,12 +6,19 @@ declare global {
 
 export async function register() {
   if (process.env.NODE_ENV === 'test') return;
-  if (!shouldStartBackgroundRuntime(process.env)) return;
   if (globalThis.__backgroundRuntimeWorker) return;
 
-  const backgroundRuntimeWorker = createBackgroundRuntimeWorkerFromEnv(process.env);
-  if (!backgroundRuntimeWorker) return;
+  if (process.env.NEXT_RUNTIME === 'nodejs') {
+    const { createBackgroundRuntimeWorkerFromEnv, shouldStartBackgroundRuntime } = await import(
+      '@/services/background-runtime'
+    );
 
-  backgroundRuntimeWorker.start();
-  globalThis.__backgroundRuntimeWorker = backgroundRuntimeWorker;
+    if (!shouldStartBackgroundRuntime(process.env)) return;
+
+    const backgroundRuntimeWorker = createBackgroundRuntimeWorkerFromEnv(process.env);
+    if (!backgroundRuntimeWorker) return;
+
+    backgroundRuntimeWorker.start();
+    globalThis.__backgroundRuntimeWorker = backgroundRuntimeWorker;
+  }
 }

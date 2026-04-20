@@ -9,13 +9,20 @@ on:
 jobs:
   lighthouse:
     runs-on: ubuntu-latest
+    env:
+      OSS_MODE: true
+      NEXT_PUBLIC_OSS_MODE: true
+      NEXTAUTH_SECRET: lighthouse-ci-test-secret-32chars-min
+      NEXTAUTH_URL: http://localhost:3000
+      APP_BASE_URL: http://localhost:3000
+      NEXT_PUBLIC_APP_URL: http://localhost:3000
     steps:
       - uses: actions/checkout@v4
 
       - name: Setup Node.js
         uses: actions/setup-node@v4
         with:
-          node-version: '20'
+          node-version: '22'
 
       - name: Install pnpm
         uses: pnpm/action-setup@v4
@@ -27,6 +34,12 @@ jobs:
         run: pnpm build
         env:
           SKIP_ENV_VALIDATION: true
+          OSS_MODE: true
+          NEXT_PUBLIC_OSS_MODE: true
+          NEXTAUTH_SECRET: lighthouse-ci-test-secret-32chars-min
+          NEXTAUTH_URL: http://localhost:3000
+          APP_BASE_URL: http://localhost:3000
+          NEXT_PUBLIC_APP_URL: http://localhost:3000
 
       - name: Run Lighthouse CI
         uses: treosh/lighthouse-ci-action@v11
@@ -45,6 +58,7 @@ jobs:
 
       - name: Comment PR with Lighthouse results
         if: github.event_name == 'pull_request'
+        continue-on-error: true
         uses: actions/github-script@v7
         with:
           script: |

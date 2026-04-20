@@ -23,6 +23,7 @@ describe('instrumentation.register', () => {
 
   beforeEach(() => {
     Object.assign(process.env, {
+      NEXT_RUNTIME: 'nodejs',
       NODE_ENV: 'development',
     });
     shouldStartBackgroundRuntimeMock.mockReset();
@@ -36,6 +37,7 @@ describe('instrumentation.register', () => {
   });
 
   afterEach(() => {
+    delete process.env.NEXT_RUNTIME;
     Object.assign(process.env, {
       NODE_ENV: originalNodeEnv,
     });

@@ -31,3 +31,7 @@ Thumbs.db
 
 # Test
 coverage/
+.omx/
+.gstack/
+.omc/
+.sisyphus/

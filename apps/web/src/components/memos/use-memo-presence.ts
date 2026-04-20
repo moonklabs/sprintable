@@ -88,7 +88,7 @@ export function useMemoPresence({ memoId, currentTeamMemberId, currentTeamMember
   }, [currentTeamMemberId, currentTeamMemberName, enabled, memoId, syncFromChannel]);
 
   useEffect(() => {
-    if (!enabled || !memoId || !currentTeamMemberId) {
+    if (!enabled || !memoId || !currentTeamMemberId || process.env['NEXT_PUBLIC_OSS_MODE'] === 'true') {
       const resetTimer = setTimeout(() => {
         setState({ connected: false, viewers: [], typingUsers: [] });
       }, 0);
