@@ -6,10 +6,11 @@
   "main": "./dist/index.js",
   "types": "./dist/index.d.ts",
   "bin": {
-    "sprintable-mcp": "./dist/index.js"
+    "sprintable-mcp": "./bin/sprintable-mcp.js"
   },
   "scripts": {
     "build": "tsc",
+    "prepare": "tsc",
     "dev": "node --env-file=../../.env --import tsx src/index.ts",
     "type-check": "tsc --noEmit"
   },
