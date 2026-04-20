@@ -10,6 +10,7 @@
   },
   "scripts": {
     "build": "tsc",
+    "prepare": "tsc",
     "dev": "node --env-file=../../.env --import tsx src/index.ts",
     "type-check": "tsc --noEmit"
   },
