@@ -656,17 +656,32 @@ describe('memos tools via pmApi', () => {
     expect(result).toEqual({ data: { id: 'memo-new', content: 'Hello world' } });
   });
 
-  it('send_memo calls POST /api/memos', async () => {
+  it('send_memo — assigned_to 단일 ID는 assigned_to_ids 배열로 변환', async () => {
     stubFetch((url, init) => {
       expect(url).toBe('http://test-pm-api/api/memos');
       expect(init?.method).toBe('POST');
       const body = JSON.parse(init?.body as string);
-      expect(body).toMatchObject({ content: 'Kickoff memo', assigned_to: 'member-alpha' });
+      expect(body).toMatchObject({ content: 'Kickoff memo', assigned_to_ids: ['member-alpha'] });
+      expect(body).not.toHaveProperty('assigned_to');
       return new Response(JSON.stringify({ data: { id: 'memo-sent', content: 'Kickoff memo' } }), { status: 200 });
     });
 
     const result = await harness.invoke('send_memo', { content: 'Kickoff memo', assigned_to: 'member-alpha' });
     expect(result).toEqual({ data: { id: 'memo-sent', content: 'Kickoff memo' } });
+  });
+
+  it('send_memo — assigned_to_ids 멀티 assignee 직접 전달', async () => {
+    stubFetch((url, init) => {
+      expect(url).toBe('http://test-pm-api/api/memos');
+      expect(init?.method).toBe('POST');
+      const body = JSON.parse(init?.body as string);
+      expect(body).toMatchObject({ content: 'Multi memo', assigned_to_ids: ['id1', 'id2'] });
+      expect(body).not.toHaveProperty('assigned_to');
+      return new Response(JSON.stringify({ data: { id: 'memo-multi', content: 'Multi memo' } }), { status: 200 });
+    });
+
+    const result = await harness.invoke('send_memo', { content: 'Multi memo', assigned_to_ids: ['id1', 'id2'] });
+    expect(result).toEqual({ data: { id: 'memo-multi', content: 'Multi memo' } });
   });
 
   it('list_my_memos calls GET /api/memos with assigned_to filter', async () => {
