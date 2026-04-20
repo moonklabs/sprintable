@@ -5,7 +5,7 @@ import { getMyTeamMember } from '@/lib/auth-helpers';
 import { checkMemberLimit } from '@/lib/check-feature';
 import { parseBody, createTeamMemberSchema } from '@sprintable/shared';
 import { managedAgentRegistrationConfigSchema } from '@/lib/managed-agent-contract';
-import { isOssMode, createTeamMemberRepository } from '@/lib/storage/factory';
+import { isOssMode, createTeamMemberRepository, createMemberRepository, createProjectPermissionsRepository } from '@/lib/storage/factory';
 
 export async function GET(request: Request) {
   if (isOssMode()) {
@@ -129,6 +129,18 @@ export async function POST(request: Request) {
           .single();
 
         if (reactivateError) throw reactivateError;
+
+        // org-level member도 재활성화
+        const memberRepo = await createMemberRepository(supabase);
+        const orgMemberRecord = await memberRepo.getByUserId(body.user_id!, me.org_id);
+        if (orgMemberRecord && !orgMemberRecord.is_active) {
+          await memberRepo.update(orgMemberRecord.id, { is_active: true });
+        }
+        if (orgMemberRecord) {
+          const permRepo = await createProjectPermissionsRepository(supabase);
+          await permRepo.upsert({ member_id: orgMemberRecord.id, project_id: projectId, role: body.role ?? 'member' });
+        }
+
         return apiSuccess(reactivated, undefined, 201);
       }
 
@@ -146,6 +158,20 @@ export async function POST(request: Request) {
       const name = body.name ?? profile?.name;
       if (!name) return ApiErrors.badRequest('name required');
 
+      // 1. org-level members upsert
+      const memberRepo = await createMemberRepository(supabase);
+      const orgMember = await memberRepo.getOrCreate({
+        org_id: me.org_id,
+        user_id: body.user_id!,
+        name,
+        type: 'human',
+      });
+
+      // 2. project_permissions upsert
+      const permRepo = await createProjectPermissionsRepository(supabase);
+      await permRepo.upsert({ member_id: orgMember.id, project_id: projectId, role: body.role ?? 'member' });
+
+      // 3. team_members insert (member_id 연결)
       const { data, error } = await supabase
         .from('team_members')
         .insert({
@@ -155,6 +181,7 @@ export async function POST(request: Request) {
           name,
           role: body.role ?? 'member',
           user_id: body.user_id,
+          member_id: orgMember.id,
         })
         .select('id, name, type, role, user_id, project_id, is_active')
         .single();
@@ -173,6 +200,20 @@ export async function POST(request: Request) {
       return ApiErrors.badRequest(parsedAgentConfig.error.issues.map((issue) => issue.message).join(', '));
     }
 
+    // 1. agent org-level member 생성
+    const agentMemberRepo = await createMemberRepository(supabase);
+    const agentOrgMember = await agentMemberRepo.getOrCreate({
+      org_id: me.org_id,
+      name: body.name!,
+      type: 'agent',
+      agent_config: parsedAgentConfig.data as Record<string, unknown>,
+    });
+
+    // 2. project_permissions
+    const agentPermRepo = await createProjectPermissionsRepository(supabase);
+    await agentPermRepo.upsert({ member_id: agentOrgMember.id, project_id: projectId, role: body.role ?? 'member' });
+
+    // 3. team_members insert (member_id 연결)
     const { data, error } = await supabase
       .from('team_members')
       .insert({
@@ -183,6 +224,7 @@ export async function POST(request: Request) {
         role: body.role ?? 'member',
         user_id: body.user_id ?? null,
         agent_config: parsedAgentConfig.data,
+        member_id: agentOrgMember.id,
       })
       .select('id, name, type, role, user_id, project_id, is_active')
       .single();

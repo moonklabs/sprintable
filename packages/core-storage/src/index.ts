@@ -78,6 +78,21 @@ export type {
 } from './interfaces/ITeamMemberRepository';
 
 export type {
+  IMemberRepository,
+  Member,
+  CreateMemberInput,
+  UpdateMemberInput,
+  MemberListFilters,
+} from './interfaces/IMemberRepository';
+
+export type {
+  IProjectPermissionsRepository,
+  ProjectPermissions,
+  UpsertProjectPermissionsInput,
+  ProjectPermissionKey,
+} from './interfaces/IProjectPermissionsRepository';
+
+export type {
   ISubscriptionRepository,
   Subscription,
   UpdateSubscriptionInput,

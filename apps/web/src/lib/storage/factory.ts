@@ -8,6 +8,8 @@ import type {
   ISprintRepository,
   INotificationRepository,
   ITeamMemberRepository,
+  IMemberRepository,
+  IProjectPermissionsRepository,
   ISubscriptionRepository,
   IAgentRunBillingRepository,
   IAgentRunRepository,
@@ -106,6 +108,18 @@ export async function createTeamMemberRepository(supabase?: unknown): Promise<IT
   const { SupabaseTeamMemberRepository } = await import('@sprintable/storage-supabase');
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   return new SupabaseTeamMemberRepository(supabase as any);
+}
+
+export async function createMemberRepository(supabase?: unknown): Promise<IMemberRepository> {
+  const { SupabaseMemberRepository } = await import('@sprintable/storage-supabase');
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  return new SupabaseMemberRepository(supabase as any);
+}
+
+export async function createProjectPermissionsRepository(supabase?: unknown): Promise<IProjectPermissionsRepository> {
+  const { SupabaseProjectPermissionsRepository } = await import('@sprintable/storage-supabase');
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  return new SupabaseProjectPermissionsRepository(supabase as any);
 }
 
 // ============================================================================

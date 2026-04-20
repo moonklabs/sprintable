@@ -36,9 +36,10 @@ async function getCurrentProjectIdCookie() {
 }
 
 export async function getMyProjectMemberships(supabase: SupabaseClient, user: User): Promise<ProjectMembership[]> {
+  // team_members.is_active (project-level) + members.is_active (org-level) 모두 체크
   const { data, error } = await supabase
     .from('team_members')
-    .select('id, org_id, project_id, projects(id, name)')
+    .select('id, org_id, project_id, is_active, member_id, members!member_id(is_active), projects(id, name)')
     .eq('user_id', user.id)
     .eq('type', 'human')
     .eq('is_active', true)
@@ -47,6 +48,14 @@ export async function getMyProjectMemberships(supabase: SupabaseClient, user: Us
   if (error || !data) return [];
 
   return data
+    .filter((membership) => {
+      // org-level is_active 체크 (member_id가 연결된 경우)
+      const member = Array.isArray(membership.members)
+        ? membership.members[0]
+        : membership.members;
+      if (member && (member as { is_active: boolean }).is_active === false) return false;
+      return Boolean(membership.project_id);
+    })
     .map((membership) => {
       const project = Array.isArray(membership.projects)
         ? membership.projects.find(Boolean)
@@ -58,8 +67,7 @@ export async function getMyProjectMemberships(supabase: SupabaseClient, user: Us
         project_id: membership.project_id as string,
         project_name: (project as { id: string; name: string } | null)?.name ?? 'Untitled Project',
       };
-    })
-    .filter((membership) => Boolean(membership.project_id));
+    });
 }
 
 export interface MembershipContext {
