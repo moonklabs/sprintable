@@ -91,7 +91,7 @@ export async function POST(request: Request) {
     if (type === 'human') {
       if (!body.user_id) return ApiErrors.badRequest('user_id required for human member');
 
-      const { data: orgMember, error: orgMemberError } = await supabase
+      const { data: orgMembership, error: orgMemberError } = await supabase
         .from('org_members')
         .select('id')
         .eq('org_id', me.org_id)
@@ -99,7 +99,7 @@ export async function POST(request: Request) {
         .maybeSingle();
 
       if (orgMemberError) throw orgMemberError;
-      if (!orgMember) return ApiErrors.badRequest('User is not a member of this organization');
+      if (!orgMembership) return ApiErrors.badRequest('User is not a member of this organization');
 
       const { data: existing, error: existingError } = await supabase
         .from('team_members')
@@ -138,7 +138,7 @@ export async function POST(request: Request) {
         }
         if (orgMemberRecord) {
           const permRepo = await createProjectPermissionsRepository(supabase);
-          await permRepo.upsert({ member_id: orgMemberRecord.id, project_id: projectId, role: body.role ?? 'member' });
+          await permRepo.upsert({ member_id: orgMemberRecord.id, project_id: projectId, role: (body.role ?? 'member') as 'owner' | 'admin' | 'member' | 'viewer' });
         }
 
         return apiSuccess(reactivated, undefined, 201);
@@ -169,7 +169,7 @@ export async function POST(request: Request) {
 
       // 2. project_permissions upsert
       const permRepo = await createProjectPermissionsRepository(supabase);
-      await permRepo.upsert({ member_id: orgMember.id, project_id: projectId, role: body.role ?? 'member' });
+      await permRepo.upsert({ member_id: orgMember.id, project_id: projectId, role: (body.role ?? 'member') as 'owner' | 'admin' | 'member' | 'viewer' });
 
       // 3. team_members insert (member_id 연결)
       const { data, error } = await supabase
@@ -211,7 +211,7 @@ export async function POST(request: Request) {
 
     // 2. project_permissions
     const agentPermRepo = await createProjectPermissionsRepository(supabase);
-    await agentPermRepo.upsert({ member_id: agentOrgMember.id, project_id: projectId, role: body.role ?? 'member' });
+    await agentPermRepo.upsert({ member_id: agentOrgMember.id, project_id: projectId, role: (body.role ?? 'member') as 'owner' | 'admin' | 'member' | 'viewer' });
 
     // 3. team_members insert (member_id 연결)
     const { data, error } = await supabase
