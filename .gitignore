@@ -33,3 +33,5 @@ Thumbs.db
 coverage/
 .omx/
 .gstack/
+.omc/
+.sisyphus/
