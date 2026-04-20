@@ -44,10 +44,13 @@ export function registerMemosTools(server: McpServer) {
     title: z.string().optional(),
     content: z.string(),
     memo_type: z.string().optional(),
-    assigned_to: z.string().optional().describe('Team member ID to assign'),
-  }, async (body) => {
+    assigned_to: z.string().optional().describe('Single team member ID (legacy, use assigned_to_ids for multiple)'),
+    assigned_to_ids: z.array(z.string()).optional().describe('Team member IDs to assign (supports multiple assignees)'),
+  }, async ({ assigned_to, assigned_to_ids, ...rest }) => {
     try {
-      const data = await pmApi('/api/memos', { method: 'POST', body: JSON.stringify(body) });
+      const resolvedIds = assigned_to_ids ?? (assigned_to ? [assigned_to] : undefined);
+      const payload = { ...rest, ...(resolvedIds ? { assigned_to_ids: resolvedIds } : {}) };
+      const data = await pmApi('/api/memos', { method: 'POST', body: JSON.stringify(payload) });
       return ok(data);
     } catch (e) { return handleError(e); }
   });
