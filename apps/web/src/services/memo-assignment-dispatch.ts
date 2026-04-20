@@ -60,10 +60,17 @@ export async function dispatchMemoAssignmentImmediately(memo: DispatchableMemo) 
       logger: console,
     });
 
-    await dispatcher.dispatchMemoIfNeeded(memo, 'realtime');
+    const result = await dispatcher.dispatchMemoIfNeeded(memo, 'realtime');
     await dispatcher.stop();
+
+    if (result.status === 'skipped') {
+      console.error(
+        '[MemoDispatch] dispatch skipped:',
+        result.reason ?? 'unknown_reason',
+      );
+    }
   } catch (error) {
-    console.warn(
+    console.error(
       '[MemoDispatch] immediate assignment dispatch failed:',
       error instanceof Error ? error.message : String(error),
     );

@@ -409,6 +409,11 @@ export class MemoEventDispatcher {
 
     const agent = await this.getAgentById(memo, routing.dispatchAgentId);
     if (!agent) {
+      await this.postSystemReply(
+        memo,
+        routing.dispatchAgentId,
+        `⚠️ 에이전트(${routing.dispatchAgentId})가 비활성 상태이거나 배포가 구성되지 않아 웹훅 발송이 스킵되었습니다.`,
+      );
       return { status: 'skipped', reason: 'assignee_not_active_agent' };
     }
 
@@ -767,6 +772,15 @@ export class MemoEventDispatcher {
       run_id: runId,
       details,
     });
+  }
+
+  private async postSystemReply(memo: MemoRow, createdBy: string, content: string) {
+    const { error } = await this.options.supabase
+      .from('memo_replies')
+      .insert({ memo_id: memo.id, content, created_by: createdBy, review_type: 'system' });
+    if (error) {
+      this.logger.warn('[MemoEventDispatcher] Failed to post system reply:', error.message);
+    }
   }
 
   private async logAudit(
