@@ -10,11 +10,12 @@ export async function requireOrgAdmin(supabase: SupabaseClient, orgId: string) {
   if (!user) throw new ForbiddenError('Not authenticated');
 
   const { data } = await supabase
-    .from('org_members')
+    .from('team_members')
     .select('role')
     .eq('org_id', orgId)
     .eq('user_id', user.id)
-    .single();
+    .limit(1)
+    .maybeSingle();
 
   if (!data || !['owner', 'admin'].includes(data.role as string)) {
     throw new ForbiddenError('Admin access required for delete operations');
