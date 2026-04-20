@@ -36,21 +36,22 @@ export default async function SettingsLayout({ children }: { children: ReactNode
   const { data: { user } } = await supabase.auth.getUser();
   if (!user) return null;
 
-  // Check if admin
-  const { data: orgMember } = await supabase
-    .from('organization_members')
-    .select('role')
-    .eq('user_id', user.id)
-    .single();
-
-  const isAdmin = orgMember?.role === 'owner' || orgMember?.role === 'admin';
-
   // Get current project
   const { data: currentProject } = await supabase
     .from('current_project')
     .select('project_id')
     .eq('user_id', user.id)
     .maybeSingle();
+
+  // Check if admin
+  const { data: orgMember } = await supabase
+    .from('team_members')
+    .select('role')
+    .eq('user_id', user.id)
+    .eq('project_id', currentProject?.project_id ?? '')
+    .maybeSingle();
+
+  const isAdmin = orgMember?.role === 'owner' || orgMember?.role === 'admin';
 
   return (
     <div className="flex min-h-screen flex-col">
