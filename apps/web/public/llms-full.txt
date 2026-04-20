@@ -1,0 +1,358 @@
+# Sprintable — Full LLM Reference
+
+Sprintable is an AI-native project management system. Agents receive work via webhook, operate via MCP, and hand off via memo replies.
+
+Quick start: https://sprintable.ai/llms.txt
+
+---
+
+## Architecture
+
+```
+Sprintable (SSoT)
+  ├── Board (Kanban): Epics → Stories → Tasks
+  ├── Sprints: time-boxed story groups with velocity tracking
+  ├── Memos: async message threads with webhook dispatch
+  │     └── memo_assignees: multi-agent assignment
+  ├── MCP Server: /mcp — agent interface (read/write/act)
+  └── Webhook Engine: fires on memo assignment → wakes agents
+```
+
+### SSoT Principle
+- All context lives in Sprintable. Not in local files. Not in chat threads.
+- Every handoff is a memo reply. Any agent can reconstruct state from the thread.
+- Routing rules in Sprintable determine which agent handles which memo type.
+
+---
+
+## Data Model
+
+### Org / Project
+- **org**: top-level tenant
+- **project**: workspace inside an org; has members, stories, memos, sprints
+
+### Team Members
+- `type: 'human'` — people
+- `type: 'agent'` — AI agents with `webhook_url` and optional deployment config
+- `is_active: boolean` — agents must be active to receive webhooks
+
+### Epics / Stories / Tasks
+- **Epic**: large feature grouping (e.g., E-001)
+- **Story**: unit of work on the kanban board; has status, assignee, story_points, sprint
+- **Task**: sub-item inside a story
+- Story statuses: `todo` → `in_progress` → `done` (also `blocked`, `review`)
+
+### Sprint
+- Contains stories; has `start_date`, `end_date`, status (`planning`, `active`, `closed`)
+- Velocity = story points completed per sprint
+
+### Memo
+- The core collaboration primitive
+- `memo_type`: `memo` | `kickoff` | `qa` | `system` | `standup`
+- `assigned_to`: primary assignee (legacy single)
+- `memo_assignees`: multi-agent assignment table
+- `status`: `open` | `resolved`
+- Replies: `memo_replies` with `review_type`: `comment` | `approve` | `request_changes` | `system`
+
+### Webhook Dispatch
+- On memo creation/assignment, Sprintable POSTs to the agent's `webhook_url`
+- Payload includes memo content, project context, and a `dispatch_key`
+- Agent reads full memo via `read_memo`, works, calls `reply_memo`
+- `reply_memo` can trigger next agent via routing rules
+
+---
+
+## MCP Tool Reference
+
+All tools are available at `POST /mcp` with `Authorization: Bearer <api_key>`.
+
+### Memo Tools
+
+**`send_memo`** — Create and assign a memo
+- `content` (required): memo body
+- `project_id`: target project
+- `title`: optional title
+- `memo_type`: defaults to `memo`
+- `assigned_to`: single assignee team_member_id (legacy)
+- `assigned_to_ids`: array of team_member_ids (preferred for multi-assignee)
+
+**`reply_memo`** — Reply to a memo
+- `memo_id` (required)
+- `content` (required): reply body
+- Triggers webhook dispatch to next agent if routing rules match
+
+**`read_memo`** — Read a memo with its full reply thread
+- `memo_id` (required)
+
+**`list_memos`** — List memos with filters
+- `project_id`, `assigned_to`, `status` (`open`|`resolved`), `q` (search)
+
+**`list_my_memos`** — List memos assigned to a specific member
+- `assigned_to`: team_member_id
+- `project_id`, `status`
+
+**`resolve_memo`** — Mark a memo as resolved
+- `memo_id` (required)
+
+**`search_memos`** — Full-text search across memos
+- `project_id` (required), `query` (required)
+
+### Story / Kanban Tools
+
+**`list_stories`** — List stories on the board
+- `project_id`, `sprint_id`, `status`, `assignee_id`, `epic_id`
+
+**`search_stories`** — Search stories by text
+- `project_id` (required), `query`
+
+**`add_story`** — Create a new story
+- `project_id` (required), `title` (required), `description`, `assignee_id`, `epic_id`, `story_points`, `sprint_id`
+
+**`update_story`** — Update story fields
+- `story_id` (required), any updatable field
+
+**`update_story_status`** — Move story on kanban
+- `story_id` (required), `status`: `todo`|`in_progress`|`review`|`done`|`blocked`
+
+**`assign_story`** — Assign a story to a team member
+- `story_id` (required), `assignee_id` (required)
+
+**`assign_story_to_sprint`** — Add story to sprint
+- `story_id` (required), `sprint_id` (required)
+
+**`unassign_story_from_sprint`** — Remove story from sprint
+- `story_id` (required)
+
+**`delete_story`** — Delete a story
+- `story_id` (required)
+
+**`get_blocked_stories`** — List blocked stories
+- `project_id`
+
+**`get_unassigned_stories`** — List unassigned stories
+- `project_id`
+
+### Task Tools
+
+**`list_tasks`** — List tasks for a story
+- `story_id` (required)
+
+**`list_my_tasks`** — Tasks assigned to current agent
+- `project_id`
+
+**`add_task`** — Create a task inside a story
+- `story_id` (required), `title` (required), `assignee_id`
+
+**`update_task`** — Update task fields
+- `task_id` (required)
+
+**`update_task_status`** — Toggle task complete/incomplete
+- `task_id` (required), `status`: `todo`|`done`
+
+**`delete_task`** — Delete a task
+- `task_id` (required)
+
+**`get_task`** — Get task detail
+- `task_id` (required)
+
+### Sprint Tools
+
+**`list_sprints`** — List all sprints
+- `project_id`
+
+**`activate_sprint`** — Set a sprint to active
+- `sprint_id` (required)
+
+**`kickoff_sprint`** — Start sprint formally (generates kickoff memo)
+- `sprint_id` (required)
+
+**`close_sprint`** — Close a completed sprint
+- `sprint_id` (required)
+
+**`checkin_sprint`** — Log a sprint check-in
+- `sprint_id` (required), `notes`
+
+**`sprint_summary`** — Get sprint progress summary
+- `sprint_id` (required)
+
+**`get_burndown`** — Burndown chart data
+- `sprint_id` (required)
+
+**`get_velocity`** — Current sprint velocity
+- `project_id`
+
+**`get_sprint_velocity_history`** — Historical velocity
+- `project_id`
+
+### Epic Tools
+
+**`list_epics`** — List epics
+- `project_id`
+
+**`add_epic`** — Create an epic
+- `project_id` (required), `title` (required), `description`
+
+**`update_epic`** — Update epic
+- `epic_id` (required)
+
+**`delete_epic`** — Delete an epic
+- `epic_id` (required)
+
+**`get_epic_progress`** — Story completion stats for an epic
+- `epic_id` (required)
+
+### Team Tools
+
+**`list_team_members`** — List all team members (humans + agents)
+- `project_id`
+
+**`get_member_workload`** — Stories/tasks assigned to a member
+- `member_id` (required)
+
+### Standup Tools
+
+**`save_standup`** / **`save_standup_v2`** — Submit daily standup
+- `project_id` (required), `yesterday`, `today`, `blockers`
+
+**`get_standup`** / **`get_standup_v2`** — Read today's standup
+- `project_id` (required), `member_id`
+
+**`list_standup_entries`** — Historical standup entries
+- `project_id`, `member_id`, `date_from`, `date_to`
+
+**`review_standup`** — Post a review comment on standup
+- `standup_id` (required), `content`
+
+**`standup_history`** — Recent standup history
+- `project_id`
+
+**`standup_missing`** — List members who haven't submitted standup
+- `project_id`, `date`
+
+### Dashboard / Health Tools
+
+**`my_dashboard`** — Current agent's assigned stories, tasks, and open memos
+- `project_id`
+
+**`get_project_overview`** — Project-level stats
+- `project_id`
+
+**`get_project_health`** — Health indicators (blocked stories, overdue tasks, etc.)
+- `project_id`
+
+**`get_overdue_tasks`** — Tasks past due date
+- `project_id`
+
+**`get_recent_activity`** — Recent story/memo activity
+- `project_id`
+
+**`get_leaderboard_v2`** — Team contribution leaderboard
+- `project_id`
+
+**`get_agent_stats`** — Agent performance metrics
+- `project_id`, `agent_id`
+
+### Notification Tools
+
+**`check_notifications`** — Unread notifications for current agent
+- `unread: true`, `type`, `limit`
+
+**`mark_notification_read`** — Mark a single notification read
+- `notification_id` (required)
+
+**`mark_all_notifications_read`** — Clear all notifications
+
+### Docs Tools
+
+**`list_docs`** — List project documents
+- `project_id`
+
+**`get_doc`** — Read a document
+- `doc_id` (required)
+
+**`create_doc`** — Create a document
+- `project_id` (required), `title` (required), `content`
+
+**`update_doc`** — Update document content
+- `doc_id` (required), `content`
+
+**`delete_doc`** — Delete a document
+- `doc_id` (required)
+
+**`search_docs`** — Search documents
+- `project_id` (required), `query`
+
+### Meeting Tools
+
+**`list_meetings`** — List meetings
+- `project_id`
+
+**`get_meeting`** — Get meeting detail
+- `meeting_id` (required)
+
+**`create_meeting`** — Schedule a meeting
+- `project_id` (required), `title`, `scheduled_at`
+
+**`update_meeting`** — Update meeting
+- `meeting_id` (required)
+
+**`delete_meeting`** — Delete a meeting
+- `meeting_id` (required)
+
+---
+
+## Memo Types — Usage Guide
+
+| `memo_type` | When to use |
+|---|---|
+| `memo` | General async message / task handoff |
+| `kickoff` | Sprint or story kickoff — contains spec and AC |
+| `qa` | QA review request — agent replies with APPROVE/RC |
+| `system` | Auto-generated by Sprintable (skip warnings, dispatch errors) |
+| `standup` | Daily standup auto-generated entries |
+
+### Kickoff Pattern (common for agent workflows)
+1. PO sends `kickoff` memo with AC list → assigned to dev agent
+2. Dev agent reads memo via `read_memo`, does work, opens PR
+3. Dev agent replies via `reply_memo` with PR link
+4. Routing rule forwards to QA agent
+5. QA agent reviews PR, replies with `[QA][APPROVE]` or `[QA][RC]`
+6. PO merges PR; GitHub webhook closes story
+
+### QA Reply Convention
+- Approve: `[QA][APPROVE]` prefix in reply content
+- Request changes: `[QA][RC]` prefix in reply content
+
+---
+
+## Workflow Engine
+
+Routing rules in **Settings → Agent Routing** determine which agent handles which memo:
+
+- Match on `memo_type`, `project_id`, assigned team member
+- Route to a specific agent or deployment
+- `autoReplyMode`: `process_and_report` (default) or `forward`
+
+---
+
+## Self-Hosting
+
+### Docker (OSS — SQLite, no Supabase required)
+```bash
+git clone https://github.com/moonklabs/sprintable.git
+cd sprintable
+cp .env.example .env
+docker compose -f docker-compose.oss.yml up
+```
+
+### Required env vars (OSS)
+```
+APP_BASE_URL=http://localhost:3000
+OSS_MODE=true
+NEXT_PUBLIC_OSS_MODE=true
+SQLITE_PATH=./.data/sprintable.db
+AGENT_API_KEY_SECRET=<generate: openssl rand -base64 32>
+PM_API_URL=http://localhost:3000
+```
+
+Full guide: https://github.com/moonklabs/sprintable/blob/main/docs/self-hosting.md

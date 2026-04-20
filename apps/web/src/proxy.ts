@@ -3,6 +3,8 @@ import { NextResponse, type NextRequest } from 'next/server';
 
 const PUBLIC_EXACT = [
   '/',
+  '/llms.txt',
+  '/llms-full.txt',
 ];
 
 const PUBLIC_PREFIX = [
