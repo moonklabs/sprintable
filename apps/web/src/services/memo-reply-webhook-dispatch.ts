@@ -1,5 +1,6 @@
 import type { SupabaseClient } from '@supabase/supabase-js';
 import { buildAbsoluteMemoLink } from './app-url';
+import { hasExactMemberMention } from './doc-comment-notifications';
 
 interface MemoReplyDispatchMemo {
   id: string;
@@ -99,15 +100,38 @@ function buildPreview(content: string, maxLength = 50) {
   return `${normalized.slice(0, maxLength)}…`;
 }
 
+// Korean honorific suffixes that may follow a first-name mention (e.g. "@까심군" for "까심 아르야")
+const KOREAN_HONORIFIC_RE = /^(군|신|쿤|님|씨)/u;
+
+function hasMentionWithHonorific(content: string, namePart: string): boolean {
+  const token = `@${namePart}`;
+  let idx = content.indexOf(token);
+  while (idx !== -1) {
+    const pre = idx > 0 ? content[idx - 1] : undefined;
+    const after = content.slice(idx + token.length);
+    const prefixOk = !pre || /[\s([{<'""']/u.test(pre);
+    const suffixOk = !after || /[\s)\]}>,'""'.!?;:]/.test(after[0]) || KOREAN_HONORIFIC_RE.test(after);
+    if (prefixOk && suffixOk) return true;
+    idx = content.indexOf(token, idx + token.length);
+  }
+  return false;
+}
+
 function extractMentionedMemberIds(contents: string[], members: TeamMemberRow[]) {
   const targets = new Set<string>();
 
   for (const member of members) {
     const name = member.name?.trim();
     if (!name) continue;
-    if (contents.some((content) => content.includes(`@${name}`))) {
-      targets.add(member.id);
-    }
+
+    const firstName = name.includes(' ') ? name.split(/\s+/)[0] : null;
+
+    const matched = contents.some((content) =>
+      hasExactMemberMention(content, name) ||
+      (firstName !== null && hasMentionWithHonorific(content, firstName)),
+    );
+
+    if (matched) targets.add(member.id);
   }
 
   return targets;
@@ -193,7 +217,7 @@ export async function dispatchWorkflowMemoReplyWebhooks(
     return { status: 'skipped', reason: 'discord_source_memo' };
   }
 
-  const [membersResult, priorRepliesResult] = await Promise.all([
+  const [membersResult, priorRepliesResult, assigneesResult] = await Promise.all([
     supabase
       .from('team_members')
       .select('id, name, webhook_url, is_active')
@@ -203,6 +227,10 @@ export async function dispatchWorkflowMemoReplyWebhooks(
     supabase
       .from('memo_replies')
       .select('created_by, content')
+      .eq('memo_id', memo.id),
+    supabase
+      .from('memo_assignees')
+      .select('member_id')
       .eq('memo_id', memo.id),
   ]);
 
@@ -216,6 +244,9 @@ export async function dispatchWorkflowMemoReplyWebhooks(
   const participants = new Set<string>();
   participants.add(memo.created_by);
   if (memo.assigned_to) participants.add(memo.assigned_to);
+  for (const row of (assigneesResult.data ?? [])) {
+    participants.add((row as { member_id: string }).member_id);
+  }
   for (const priorReply of priorReplies) {
     participants.add(priorReply.created_by);
   }

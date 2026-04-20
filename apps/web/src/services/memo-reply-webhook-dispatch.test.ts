@@ -6,6 +6,7 @@ function createSupabaseStub(options?: {
   priorReplies?: Array<Record<string, unknown>>;
   members?: Array<Record<string, unknown>>;
   webhookConfigs?: Array<Record<string, unknown>>;
+  memoAssignees?: Array<Record<string, unknown>>;
 }) {
   const priorReplies = options?.priorReplies ?? [
     { created_by: 'member-3', content: 'Earlier note from @Paulo Ortega' },
@@ -19,6 +20,7 @@ function createSupabaseStub(options?: {
     { org_id: 'org-1', member_id: 'member-1', project_id: 'project-1', is_active: true, url: 'https://discord.com/api/webhooks/member-1/project', secret: null },
     { org_id: 'org-1', member_id: 'member-3', project_id: null, is_active: true, url: 'https://discord.com/api/webhooks/member-3/default', secret: null },
   ];
+  const memoAssignees = options?.memoAssignees ?? [];
 
   const supabase = {
     from(table: string) {
@@ -38,6 +40,16 @@ function createSupabaseStub(options?: {
           eq() { return this; },
           then(resolve: (value: { data: unknown[]; error: null }) => unknown) {
             return Promise.resolve({ data: priorReplies, error: null }).then(resolve);
+          },
+        };
+      }
+
+      if (table === 'memo_assignees') {
+        return {
+          select() { return this; },
+          eq() { return this; },
+          then(resolve: (value: { data: unknown[]; error: null }) => unknown) {
+            return Promise.resolve({ data: memoAssignees, error: null }).then(resolve);
           },
         };
       }
@@ -177,5 +189,70 @@ describe('dispatchWorkflowMemoReplyWebhooks', () => {
 
     expect(result).toEqual({ status: 'skipped', reason: 'discord_source_memo' });
     expect(fetchFn).not.toHaveBeenCalled();
+  });
+
+  it('dispatches to first-name mention with Korean honorific (e.g. @까심군)', async () => {
+    const fetchFn = vi.fn<typeof fetch>().mockResolvedValue(new Response(null, { status: 204 }));
+    const supabase = createSupabaseStub();
+
+    const result = await dispatchWorkflowMemoReplyWebhooks({
+      supabase,
+      fetchFn: fetchFn as typeof fetch,
+      appUrl: 'https://app.example.com',
+      memo: {
+        id: 'memo-1',
+        org_id: 'org-1',
+        project_id: 'project-1',
+        title: 'QA 요청',
+        created_by: 'member-1',
+        assigned_to: null,
+        metadata: null,
+      },
+      reply: {
+        id: 'reply-2',
+        memo_id: 'memo-1',
+        content: '@까심군 QA 검증 바라는.',
+        created_by: 'member-3',
+      },
+    });
+
+    expect(result.status).toBe('sent');
+    const calledUrls = fetchFn.mock.calls.map((call) => call[0]);
+    expect(calledUrls).toContain('https://discord.com/api/webhooks/member-1/project');
+    expect(calledUrls).toContain('https://discord.com/api/webhooks/member-2/direct');
+  });
+
+  it('includes memo_assignees in participant set', async () => {
+    const fetchFn = vi.fn<typeof fetch>().mockResolvedValue(new Response(null, { status: 204 }));
+    const supabase = createSupabaseStub({
+      memoAssignees: [{ member_id: 'member-2' }],
+      priorReplies: [],
+    });
+
+    const result = await dispatchWorkflowMemoReplyWebhooks({
+      supabase,
+      fetchFn: fetchFn as typeof fetch,
+      appUrl: 'https://app.example.com',
+      memo: {
+        id: 'memo-1',
+        org_id: 'org-1',
+        project_id: 'project-1',
+        title: 'Assignee test',
+        created_by: 'member-1',
+        assigned_to: null,
+        metadata: null,
+      },
+      reply: {
+        id: 'reply-3',
+        memo_id: 'memo-1',
+        content: '작업 완료 보고.',
+        created_by: 'member-3',
+      },
+    });
+
+    expect(result.status).toBe('sent');
+    const calledUrls = fetchFn.mock.calls.map((call) => call[0]);
+    expect(calledUrls).toContain('https://discord.com/api/webhooks/member-1/project');
+    expect(calledUrls).toContain('https://discord.com/api/webhooks/member-2/direct');
   });
 });
