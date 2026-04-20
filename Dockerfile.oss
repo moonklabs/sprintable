@@ -16,7 +16,7 @@ COPY packages/sdk/package.json packages/sdk/package.json
 COPY packages/shared/package.json packages/shared/package.json
 COPY packages/storage-sqlite/package.json packages/storage-sqlite/package.json
 COPY packages/storage-supabase/package.json packages/storage-supabase/package.json
-RUN pnpm install --frozen-lockfile
+RUN pnpm install --frozen-lockfile --ignore-scripts
 
 # ─── Stage 2: Build ───
 FROM node:22-alpine AS builder
