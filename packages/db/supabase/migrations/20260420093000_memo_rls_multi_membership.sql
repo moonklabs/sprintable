@@ -13,7 +13,7 @@ STABLE
 SET search_path = public
 AS $$
   SELECT id FROM public.team_members
-  WHERE user_id = auth.uid() AND type = 'human' AND org_id = _org_id;
+  WHERE user_id = auth.uid() AND type = 'human' AND org_id = _org_id AND is_active = true;
 $$;
 
 -- ============================================================
