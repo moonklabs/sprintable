@@ -20,7 +20,7 @@ export async function GET(request: Request) {
     const dbClient: SupabaseClient = me.type === 'agent' ? createSupabaseAdminClient() : supabase;
     const { data, error } = await dbClient
       .from('team_members')
-      .select('id, name, type, role, is_active')
+      .select('id, name, type, role, is_active, webhook_url')
       .eq('project_id', projectId)
       .eq('is_active', true)
       .order('name');

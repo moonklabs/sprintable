@@ -56,7 +56,7 @@ describe('GET /api/members', () => {
 
   it('returns 200 with team members list', async () => {
     const members = [
-      { id: 'member-alpha', name: 'Alpha Owner', type: 'human', role: 'owner', is_active: true },
+      { id: 'member-alpha', name: 'Alpha Owner', type: 'human', role: 'owner', is_active: true, webhook_url: null },
     ];
     const supabase = { from: vi.fn(() => createQueryStub(members)) };
     createSupabaseServerClient.mockResolvedValue(supabase);

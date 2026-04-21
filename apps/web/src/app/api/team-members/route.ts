@@ -45,7 +45,7 @@ export async function GET(request: Request) {
 
     let query = supabase
       .from('team_members')
-      .select('id, name, type, role, user_id, project_id, is_active')
+      .select('id, name, type, role, user_id, project_id, is_active, webhook_url')
       .order('name');
 
     if (!includeInactive) query = query.eq('is_active', true);
