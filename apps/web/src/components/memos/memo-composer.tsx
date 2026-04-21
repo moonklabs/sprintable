@@ -23,6 +23,7 @@ function applyMention(value: string, cursorPos: number, name: string): { text: s
 interface MentionMember {
   id: string;
   name: string;
+  role?: string | null;
 }
 
 interface MemoComposerProps {
@@ -89,7 +90,7 @@ export function MemoComposer({
       .then((r) => r.json())
       .then((json) => {
         if (cancelled) return;
-        const all: MentionMember[] = (json.data ?? []).map((m: { id: string; name: string }) => ({ id: m.id, name: m.name }));
+        const all: MentionMember[] = (json.data ?? []).map((m: { id: string; name: string; role?: string | null }) => ({ id: m.id, name: m.name, role: m.role }));
         const q = mentionQuery.toLowerCase();
         setMentionMembers(q ? all.filter((m) => m.name.toLowerCase().includes(q)) : all);
         setMentionIndex(0);
@@ -282,7 +283,7 @@ export function MemoComposer({
           className="w-full rounded-md border border-input px-3 py-2 text-sm focus:border-ring focus:outline-none disabled:cursor-not-allowed disabled:opacity-50"
         />
         {mentionMembers.length > 0 && (
-          <ul className="absolute bottom-full left-0 z-50 mb-1 max-h-48 w-64 overflow-y-auto rounded-md border border-border bg-popover shadow-md">
+          <ul className="absolute bottom-full left-0 z-50 mb-1 max-h-48 w-[min(16rem,100%)] overflow-y-auto rounded-md border border-border bg-popover shadow-md">
             {mentionMembers.map((member, idx) => (
               <li key={member.id}>
                 <button
@@ -291,6 +292,7 @@ export function MemoComposer({
                   className={`w-full px-3 py-2 text-left text-sm transition ${idx === mentionIndex ? 'bg-primary/10 text-primary font-medium' : 'text-muted-foreground hover:bg-muted hover:text-foreground'}`}
                 >
                   <span className="font-medium text-primary">@</span>{member.name}
+                  {member.role ? <span className="ml-2 text-xs opacity-60">{member.role}</span> : null}
                 </button>
               </li>
             ))}
