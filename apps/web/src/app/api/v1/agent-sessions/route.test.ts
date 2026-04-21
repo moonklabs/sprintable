@@ -61,14 +61,14 @@ describe('GET /api/v1/agent-sessions', () => {
       error: { code: 'UPGRADE_REQUIRED', message: 'Upgrade required' },
     }), { status: 403, headers: { 'Content-Type': 'application/json' } }));
 
-    const response = await GET(new Request('http://localhost:3000/api/v1/agent-sessions?status=active&limit=5'));
+    const response = await GET(new Request('http://localhost:3108/api/v1/agent-sessions?status=active&limit=5'));
 
     expect(response.status).toBe(403);
     expect(listSessionsMock).not.toHaveBeenCalled();
   });
 
   it('lists project sessions for org admins', async () => {
-    const response = await GET(new Request('http://localhost:3000/api/v1/agent-sessions?status=active&limit=5'));
+    const response = await GET(new Request('http://localhost:3108/api/v1/agent-sessions?status=active&limit=5'));
     const payload = await response.json();
 
     expect(response.status).toBe(200);

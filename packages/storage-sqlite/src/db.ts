@@ -14,6 +14,7 @@ export function getDb(): DatabaseSync {
     const dbPath = process.env['SQLITE_PATH'] ?? path.join(process.cwd(), 'sprintable.db');
     _db = new DatabaseSync(dbPath);
     initSchema(_db);
+    migrateLegacyStoryStatuses(_db);
     seedOssDefaults(_db);
   }
   return _db;
@@ -42,7 +43,7 @@ function initSchema(db: DatabaseSync): void {
       sprint_id TEXT,
       assignee_id TEXT,
       title TEXT NOT NULL,
-      status TEXT NOT NULL DEFAULT 'todo',
+      status TEXT NOT NULL DEFAULT 'backlog',
       priority TEXT NOT NULL DEFAULT 'medium',
       story_points INTEGER,
       description TEXT,
@@ -226,6 +227,14 @@ function initSchema(db: DatabaseSync): void {
     CREATE INDEX IF NOT EXISTS idx_agent_runs_org_project ON agent_runs(org_id, project_id);
     CREATE INDEX IF NOT EXISTS idx_agent_runs_created_at ON agent_runs(created_at);
     CREATE INDEX IF NOT EXISTS idx_agent_api_keys_team_member ON agent_api_keys(team_member_id);
+  `);
+}
+
+function migrateLegacyStoryStatuses(db: DatabaseSync): void {
+  db.exec(`
+    UPDATE stories SET status = 'backlog' WHERE status = 'todo';
+    UPDATE stories SET status = 'in-progress' WHERE status = 'in_progress';
+    UPDATE stories SET status = 'in-review' WHERE status = 'review';
   `);
 }
 

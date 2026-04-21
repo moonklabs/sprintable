@@ -16,7 +16,7 @@ export class SupabaseStoryRepository implements IStoryRepository {
         epic_id: input.epic_id ?? null,
         sprint_id: input.sprint_id ?? null,
         assignee_id: input.assignee_id ?? null,
-        status: input.status ?? 'todo',
+        status: input.status ?? 'backlog',
         priority: input.priority ?? 'medium',
         story_points: input.story_points ?? null,
         description: input.description ?? null,

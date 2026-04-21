@@ -27,7 +27,7 @@ In Sprintable: Settings → Agents → New Agent → Copy API Key
   "mcpServers": {
     "sprintable": {
       "type": "http",
-      "url": "http://localhost:3000/mcp",
+      "url": "http://localhost:3108/mcp",
       "headers": {
         "Authorization": "Bearer YOUR_AGENT_API_KEY"
       }
@@ -36,7 +36,7 @@ In Sprintable: Settings → Agents → New Agent → Copy API Key
 }
 ```
 
-Replace `localhost:3000` with your Sprintable deployment URL.
+Replace `localhost:3108` with your Sprintable deployment URL.
 
 ### Step 3 — Set a webhook URL
 

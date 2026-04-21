@@ -69,7 +69,7 @@ const reply2 = await client.memos.reply('memo-id', {
 
 ```typescript
 const client = createSprintableClient('sk_live_your_api_key', {
-  baseURL: 'http://localhost:3000',
+  baseURL: 'http://localhost:3108',
 });
 ```
 

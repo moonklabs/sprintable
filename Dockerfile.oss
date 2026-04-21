@@ -45,7 +45,8 @@ WORKDIR /app
 ENV NODE_ENV=production
 ENV OSS_MODE=true
 ENV NEXT_PUBLIC_OSS_MODE=true
-ENV PORT=3000
+ENV PORT=3108
+ENV HOSTNAME=0.0.0.0
 
 # Standalone output
 COPY --from=builder /app/apps/web/.next/standalone ./
@@ -55,10 +56,10 @@ COPY --from=builder /app/apps/web/public ./apps/web/public
 # SQLite data directory
 RUN mkdir -p /app/data && chmod 755 /app/data
 
-EXPOSE 3000
+EXPOSE 3108
 
 HEALTHCHECK --interval=30s --timeout=5s --start-period=10s \
-  CMD wget -qO- http://localhost:3000/api/health || exit 1
+  CMD wget -qO- http://127.0.0.1:3108/api/health || exit 1
 
 # Graceful shutdown: trap SIGTERM so SQLite can fsync before exit
 ENTRYPOINT ["/bin/sh", "-c", "trap 'exit 0' SIGTERM; node apps/web/server.js & wait"]

@@ -3,8 +3,11 @@ name: Docker Smoke Test (OSS)
 on:
   pull_request:
     paths:
+      - Dockerfile
       - Dockerfile.oss
+      - docker-compose.yml
       - docker-compose.oss.yml
+      - docker-compose.prod.yml
       - apps/web/**
       - packages/**
       - .github/workflows/docker-smoke-test.yml
@@ -36,18 +39,18 @@ jobs:
         run: |
           docker run -d \
             --name sprintable-smoke \
-            -p 3000:3000 \
+            -p 3108:3108 \
             -e OSS_MODE=true \
             -e NEXT_PUBLIC_OSS_MODE=true \
             -e NEXTAUTH_SECRET=smoke-test-secret-at-least-32-chars \
-            -e NEXTAUTH_URL=http://localhost:3000 \
-            -e APP_BASE_URL=http://localhost:3000 \
-            -e NEXT_PUBLIC_APP_URL=http://localhost:3000 \
+            -e NEXTAUTH_URL=http://localhost:3108 \
+            -e APP_BASE_URL=http://localhost:3108 \
+            -e NEXT_PUBLIC_APP_URL=http://localhost:3108 \
             sprintable-oss:smoke
 
           echo "Waiting for server to respond..."
           for i in $(seq 1 30); do
-            if curl -sf http://localhost:3000/api/health > /dev/null 2>&1; then
+            if curl -sf http://localhost:3108/api/health > /dev/null 2>&1; then
               echo "Server is healthy!"
               exit 0
             fi

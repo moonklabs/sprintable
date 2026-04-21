@@ -3,11 +3,43 @@ import type { SupabaseClient } from '@supabase/supabase-js';
 import { createSupabaseServerClient } from '@/lib/supabase/server';
 import { createSupabaseAdminClient } from '@/lib/supabase/admin';
 import { TaskService, type CreateTaskInput } from '@/services/task';
-import { createTaskRepository } from '@/lib/storage/factory';
+import { createTaskRepository, isOssMode } from '@/lib/storage/factory';
 import { handleApiError } from '@/lib/api-error';
 import { apiSuccess, ApiErrors } from '@/lib/api-response';
 import { getAuthContext } from '@/lib/auth-helpers';
 import { buildCursorPageMeta, parseCursorPageInput } from '@/lib/pagination';
+
+async function getStoryTaskCounts(
+  service: TaskService,
+  storyId: string,
+  dbClient: SupabaseClient | undefined,
+  ossMode: boolean,
+) {
+  if (ossMode || !dbClient) {
+    const [allTasks, doneTasks] = await Promise.all([
+      service.list({ story_id: storyId }),
+      service.list({ story_id: storyId, status: 'done' }),
+    ]);
+
+    return {
+      totalCount: allTasks.length,
+      doneCount: doneTasks.length,
+    };
+  }
+
+  const [totalResult, doneResult] = await Promise.all([
+    dbClient.from('tasks').select('id', { count: 'exact', head: true }).eq('story_id', storyId),
+    dbClient.from('tasks').select('id', { count: 'exact', head: true }).eq('story_id', storyId).eq('status', 'done'),
+  ]);
+
+  if (totalResult.error) throw totalResult.error;
+  if (doneResult.error) throw doneResult.error;
+
+  return {
+    totalCount: totalResult.count,
+    doneCount: doneResult.count,
+  };
+}
 
 export async function GET(request: Request) {
   try {
@@ -15,7 +47,8 @@ export async function GET(request: Request) {
     const me = await getAuthContext(supabase, request);
     if (!me) return ApiErrors.unauthorized();
     if (me.rateLimitExceeded) return ApiErrors.tooManyRequests(me.rateLimitRemaining, me.rateLimitResetAt);
-    const dbClient: SupabaseClient = me.type === 'agent' ? createSupabaseAdminClient() : supabase;
+    const ossMode = isOssMode();
+    const dbClient: SupabaseClient | undefined = ossMode ? undefined : (me.type === 'agent' ? createSupabaseAdminClient() : supabase);
 
     const { searchParams } = new URL(request.url);
     const storyId = searchParams.get('story_id') ?? undefined;
@@ -47,18 +80,12 @@ export async function GET(request: Request) {
       return apiSuccess(page, meta);
     }
 
-    const [totalResult, doneResult] = await Promise.all([
-      dbClient.from('tasks').select('id', { count: 'exact', head: true }).eq('story_id', storyId),
-      dbClient.from('tasks').select('id', { count: 'exact', head: true }).eq('story_id', storyId).eq('status', 'done'),
-    ]);
-
-    if (totalResult.error) throw totalResult.error;
-    if (doneResult.error) throw doneResult.error;
+    const counts = await getStoryTaskCounts(service, storyId, dbClient, ossMode);
 
     return apiSuccess(page, {
       ...meta,
-      totalCount: totalResult.count ?? page.length,
-      doneCount: doneResult.count ?? (page as Array<{ status: string }>).filter((t) => t.status === 'done').length,
+      totalCount: counts.totalCount ?? page.length,
+      doneCount: counts.doneCount ?? (page as Array<{ status: string }>).filter((t) => t.status === 'done').length,
     });
   } catch (err: unknown) { return handleApiError(err); }
 }

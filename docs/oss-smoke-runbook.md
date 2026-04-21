@@ -20,7 +20,7 @@ cp .env.example .env.local
 수동 설정 시:
 
 ```bash
-export APP_BASE_URL=http://localhost:3000
+export APP_BASE_URL=http://localhost:3108
 export OSS_MODE=true
 export NEXT_PUBLIC_OSS_MODE=true
 export SQLITE_PATH=./.data/sprintable.db
@@ -48,7 +48,7 @@ bash scripts/oss-smoke.sh
 
 ### 3. Web UI (수동)
 
-1. http://localhost:3000 로그인
+1. http://localhost:3108 로그인
 2. 프로젝트/에픽/스토리/태스크/메모/문서 CRUD 각 1회 이상
 3. 500 에러 없음 확인
 

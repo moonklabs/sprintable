@@ -16,7 +16,7 @@ describe('createSprintableClient', () => {
   });
 
   it('creates client with custom baseURL', () => {
-    const customBaseURL = 'http://localhost:3000';
+    const customBaseURL = 'http://localhost:3108';
     const client = createSprintableClient(TEST_API_KEY, {
       baseURL: customBaseURL,
     });

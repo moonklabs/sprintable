@@ -1,4 +1,4 @@
-const LOCAL_APP_URL = 'http://localhost:3000';
+const LOCAL_APP_URL = 'http://localhost:3108';
 
 function normalizeUrl(value: string | null | undefined) {
   const trimmed = value?.trim();

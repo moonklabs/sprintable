@@ -12,10 +12,11 @@ jobs:
     env:
       OSS_MODE: true
       NEXT_PUBLIC_OSS_MODE: true
+      PORT: 3108
       NEXTAUTH_SECRET: lighthouse-ci-test-secret-32chars-min
-      NEXTAUTH_URL: http://localhost:3000
-      APP_BASE_URL: http://localhost:3000
-      NEXT_PUBLIC_APP_URL: http://localhost:3000
+      NEXTAUTH_URL: http://localhost:3108
+      APP_BASE_URL: http://localhost:3108
+      NEXT_PUBLIC_APP_URL: http://localhost:3108
     steps:
       - uses: actions/checkout@v4
 
@@ -37,21 +38,21 @@ jobs:
           OSS_MODE: true
           NEXT_PUBLIC_OSS_MODE: true
           NEXTAUTH_SECRET: lighthouse-ci-test-secret-32chars-min
-          NEXTAUTH_URL: http://localhost:3000
-          APP_BASE_URL: http://localhost:3000
-          NEXT_PUBLIC_APP_URL: http://localhost:3000
+          NEXTAUTH_URL: http://localhost:3108
+          APP_BASE_URL: http://localhost:3108
+          NEXT_PUBLIC_APP_URL: http://localhost:3108
 
       - name: Run Lighthouse CI
         uses: treosh/lighthouse-ci-action@v11
         with:
           urls: |
-            http://localhost:3000
-            http://localhost:3000/memos
-            http://localhost:3000/board
-            http://localhost:3000/inbox
-            http://localhost:3000/standup
-            http://localhost:3000/docs
-          budgetPath: ./lighthouserc.json
+            http://localhost:3108
+            http://localhost:3108/memos
+            http://localhost:3108/board
+            http://localhost:3108/inbox
+            http://localhost:3108/standup
+            http://localhost:3108/docs
+          configPath: ./lighthouserc.json
           uploadArtifacts: true
           temporaryPublicStorage: true
           runs: 3

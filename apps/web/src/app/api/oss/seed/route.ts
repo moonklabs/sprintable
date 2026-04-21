@@ -3,8 +3,8 @@ import { apiSuccess, apiError } from '@/lib/api-response';
 import { OSS_PROJECT_ID, OSS_ORG_ID } from '@sprintable/storage-sqlite';
 
 const SAMPLE_STORIES = [
-  { title: 'SPR-1: GitHub Webhook 연동하기', status: 'todo' as const, priority: 'high' as const },
-  { title: 'SPR-2: 첫 번째 스프린트 계획', status: 'in_progress' as const, priority: 'medium' as const },
+  { title: 'SPR-1: GitHub Webhook 연동하기', status: 'backlog' as const, priority: 'high' as const },
+  { title: 'SPR-2: 첫 번째 스프린트 계획', status: 'in-progress' as const, priority: 'medium' as const },
   { title: 'SPR-3: Hello Sprintable!', status: 'done' as const, priority: 'low' as const },
 ];
 

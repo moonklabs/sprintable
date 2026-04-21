@@ -28,13 +28,13 @@ cp .env.example apps/web/.env.local
 pnpm dev
 ```
 
-Visit `http://localhost:3000`. Data is stored in SQLite at `.data/sprintable.db` — no external database needed.
+Visit `http://localhost:3108`. Data is stored in SQLite at `.data/sprintable.db` — no external database needed.
 
 ### Environment Variables (OSS)
 
 | Variable | Description |
 |----------|-------------|
-| `APP_BASE_URL` | Public URL of this deployment (e.g. `http://localhost:3000`) |
+| `APP_BASE_URL` | Public URL of this deployment (e.g. `http://localhost:3108`) |
 | `OSS_MODE` | Set to `true` for OSS mode |
 | `NEXT_PUBLIC_OSS_MODE` | Set to `true` (must match `OSS_MODE`) |
 | `SQLITE_PATH` | Path to SQLite database file (e.g. `./.data/sprintable.db`) |
@@ -84,7 +84,7 @@ docker compose -f docker-compose.prod.yml up -d
 ### Verify
 
 ```bash
-curl http://localhost:3000/api/health
+curl http://localhost:3108/api/health
 # Expected: {"status":"ok","timestamp":"..."}
 ```
 
@@ -129,16 +129,16 @@ Check logs: `docker compose logs web`
 # Docker daemon 실행 확인
 docker info
 
-# 3000 포트 점유 프로세스 확인
-lsof -i :3000
+# 3108 포트 점유 프로세스 확인
+lsof -i :3108
 # 또는 Linux:
-ss -tlnp | grep 3000
+ss -tlnp | grep 3108
 
 # 점유 프로세스 종료 후 재시작
 docker compose -f docker-compose.oss.yml up
 ```
 
-### `localhost:3000` 응답 없음 (Mac Docker Desktop bridge 문제)
+### `localhost:3108` 응답 없음 (Mac Docker Desktop bridge 문제)
 
 Mac에서 Docker Desktop 사용 시 bridge 네트워크 문제로 타임아웃이 발생할 수 있습니다.
 
@@ -152,7 +152,7 @@ docker network prune -f
 docker compose -f docker-compose.oss.yml up
 
 # 방법 3: 대안 포트 사용
-# docker-compose.oss.yml에서 ports를 "3001:3000"으로 변경 후 http://localhost:3001 접속
+# docker-compose.oss.yml에서 ports를 "3001:3108"으로 변경 후 http://localhost:3001 접속
 ```
 
 ### `permission denied` on volume mount (Linux UID 불일치)

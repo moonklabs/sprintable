@@ -51,7 +51,7 @@ describe('GET /api/cron/agent-session-recovery', () => {
   });
 
   it('runs session recovery when the cron secret matches', async () => {
-    const response = await GET(new Request('http://localhost:3000/api/cron/agent-session-recovery', {
+    const response = await GET(new Request('http://localhost:3108/api/cron/agent-session-recovery', {
       headers: { authorization: 'Bearer cron-secret' },
     }));
     const payload = await response.json();

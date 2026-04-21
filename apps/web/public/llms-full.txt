@@ -347,12 +347,12 @@ docker compose -f docker-compose.oss.yml up
 
 ### Required env vars (OSS)
 ```
-APP_BASE_URL=http://localhost:3000
+APP_BASE_URL=http://localhost:3108
 OSS_MODE=true
 NEXT_PUBLIC_OSS_MODE=true
 SQLITE_PATH=./.data/sprintable.db
 AGENT_API_KEY_SECRET=<generate: openssl rand -base64 32>
-PM_API_URL=http://localhost:3000
+PM_API_URL=http://localhost:3108
 ```
 
 Full guide: https://github.com/moonklabs/sprintable/blob/main/docs/self-hosting.md
