@@ -52,6 +52,7 @@ export interface MemoListFilters extends PaginationOptions {
   org_id?: string;
   project_id?: string;
   assigned_to?: string;
+  created_by?: string;
   status?: string;
   q?: string;
 }

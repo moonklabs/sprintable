@@ -83,6 +83,7 @@ export async function GET(request: Request) {
       org_id: me.org_id,
       project_id: searchParams.get('project_id') ?? undefined,
       assigned_to: searchParams.get('assigned_to') ?? undefined,
+      created_by: searchParams.get('created_by') ?? undefined,
       status: searchParams.get('status') ?? undefined,
       q: searchParams.get('q') ?? undefined,
       limit: pageInput.limit,

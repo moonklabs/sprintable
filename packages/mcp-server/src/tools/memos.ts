@@ -56,14 +56,16 @@ export function registerMemosTools(server: McpServer) {
   });
 
   server.tool('list_my_memos', 'List memos assigned to or created by a member', {
-    assigned_to: z.string().optional().describe('Team member ID'),
+    assigned_to: z.string().optional().describe('Filter by assigned team member ID'),
+    created_by: z.string().optional().describe('Filter by creator team member ID'),
     project_id: z.string().optional(),
     status: z.string().optional(),
-  }, async ({ assigned_to, project_id, status }) => {
+  }, async ({ assigned_to, created_by, project_id, status }) => {
     try {
       const params = new URLSearchParams();
       if (project_id) params.set('project_id', project_id);
       if (assigned_to) params.set('assigned_to', assigned_to);
+      if (created_by) params.set('created_by', created_by);
       if (status) params.set('status', status);
       const qs = params.toString();
       const data = await pmApi(`/api/memos${qs ? `?${qs}` : ''}`);

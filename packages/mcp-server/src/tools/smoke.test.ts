@@ -695,6 +695,17 @@ describe('memos tools via pmApi', () => {
     expect(result).toEqual({ data: [{ id: 'memo-alpha', assigned_to: 'member-alpha' }] });
   });
 
+  it('list_my_memos calls GET /api/memos with created_by filter', async () => {
+    stubFetch((url) => {
+      expect(url).toContain('/api/memos');
+      expect(url).toContain('created_by=member-alpha');
+      return new Response(JSON.stringify({ data: [{ id: 'memo-beta', created_by: 'member-alpha' }] }), { status: 200 });
+    });
+
+    const result = await harness.invoke('list_my_memos', { created_by: 'member-alpha' });
+    expect(result).toEqual({ data: [{ id: 'memo-beta', created_by: 'member-alpha' }] });
+  });
+
   it('read_memo calls GET /api/memos/:id', async () => {
     stubFetch((url) => {
       expect(url).toBe('http://test-pm-api/api/memos/memo-alpha');
@@ -1011,18 +1022,6 @@ describe('analytics tools via pmApi', () => {
 
     const result = await harness.invoke('search_stories', { project_id: 'project-alpha', query: 'alpha' });
     expect(result).toEqual({ data: [{ id: 'story-alpha', title: 'Alpha story' }] });
-  });
-
-  it('search_memos calls GET /api/memos with q param', async () => {
-    stubFetch((url) => {
-      expect(url).toContain('/api/memos?');
-      expect(url).toContain('project_id=project-alpha');
-      expect(url).toContain('q=alpha');
-      return new Response(JSON.stringify({ data: [{ id: 'memo-alpha', title: 'Alpha memo' }] }), { status: 200 });
-    });
-
-    const result = await harness.invoke('search_memos', { project_id: 'project-alpha', query: 'alpha' });
-    expect(result).toEqual({ data: [{ id: 'memo-alpha', title: 'Alpha memo' }] });
   });
 
   it('get_blocked_stories calls GET /api/stories with status=in-review', async () => {

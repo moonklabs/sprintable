@@ -46,6 +46,7 @@ export class SupabaseMemoRepository implements IMemoRepository {
     if (filters.org_id && !filters.project_id) query = query.eq('org_id', filters.org_id);
     if (filters.project_id) query = query.eq('project_id', filters.project_id);
     if (filters.assigned_to) query = query.eq('assigned_to', filters.assigned_to);
+    if (filters.created_by) query = query.eq('created_by', filters.created_by);
     if (filters.status) query = query.eq('status', filters.status);
     if (filters.q?.trim()) query = query.or(`title.ilike.%${filters.q.trim()}%,content.ilike.%${filters.q.trim()}%`);
     if (filters.cursor) query = query.lt('created_at', filters.cursor);
