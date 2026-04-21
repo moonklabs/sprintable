@@ -157,6 +157,18 @@ function createReplaceRulesSupabaseStub({
         };
       }
 
+      if (table === 'workflow_versions') {
+        return {
+          insert: async () => ({ error: null }),
+          select() { return this; },
+          eq() { return this; },
+          order() { return this; },
+          then(resolve: (value: { data: unknown[]; error: null }) => unknown) {
+            return Promise.resolve({ data: [], error: null }).then(resolve);
+          },
+        };
+      }
+
       throw new Error(`Unexpected table ${table}`);
     },
   };
