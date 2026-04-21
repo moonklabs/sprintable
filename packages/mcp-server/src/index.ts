@@ -25,6 +25,7 @@ import { registerMemosTools } from './tools/memos.js';
 import { registerNotificationsTools } from './tools/notifications.js';
 import { registerStandupsTools } from './tools/standups.js';
 import { registerAgentRunsTools } from './tools/agent-runs.js';
+import { registerWorkflowTools } from './tools/workflow.js';
 
 const PM_API_URL = process.env['PM_API_URL'] ?? '';
 const AGENT_API_KEY = process.env['AGENT_API_KEY'] ?? '';
@@ -60,6 +61,7 @@ registerMemosTools(server);
 registerNotificationsTools(server);
 registerStandupsTools(server);
 registerAgentRunsTools(server);
+registerWorkflowTools(server);
 
 async function main() {
   if (MODE === 'sse') {
