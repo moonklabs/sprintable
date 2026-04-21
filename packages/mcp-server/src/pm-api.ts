@@ -46,6 +46,7 @@ export async function pmApi<T = unknown>(path: string, init: PmApiInit = {}): Pr
   const url = `${_pmApiUrl}${path}`;
   const headers: Record<string, string> = {
     Authorization: `Bearer ${_agentApiKey}`,
+    'x-api-key': _agentApiKey, // fallback for environments where Authorization header is stripped by CDN
     'Content-Type': 'application/json',
     ...init.headers,
   };

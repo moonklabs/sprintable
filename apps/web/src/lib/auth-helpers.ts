@@ -218,12 +218,15 @@ export async function getAuthContext(
   }
 
   // 2. API Key 인증 시도 (admin client로 RLS 우회, SaaS 전용)
+  // x-api-key 헤더는 Authorization 헤더가 CDN에서 strip될 때를 위한 fallback
   const authHeader = request.headers.get('Authorization');
-  if (authHeader?.startsWith('Bearer ')) {
-    const { getTeamMemberFromRequest } = await import('./auth-api-key');
+  const xApiKey = request.headers.get('x-api-key');
+  const rawApiKey = authHeader?.startsWith('Bearer ') ? authHeader.slice(7) : (xApiKey ?? null);
+  if (rawApiKey) {
+    const { getTeamMemberFromApiKey } = await import('./auth-api-key');
     const { createSupabaseAdminClient } = await import('./supabase/admin');
     const adminClient = createSupabaseAdminClient();
-    const apiKeyMember = await getTeamMemberFromRequest(adminClient, request);
+    const apiKeyMember = await getTeamMemberFromApiKey(adminClient, rawApiKey);
 
     if (apiKeyMember) {
       // Rate limiting (에이전트만)
