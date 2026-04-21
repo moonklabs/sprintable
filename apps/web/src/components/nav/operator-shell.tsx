@@ -212,7 +212,7 @@ export function OperatorShell({
               </nav>
             </div>
 
-            <div className="shrink-0 space-y-2.5 border-t border-border/80 pt-4">
+            <div className="shrink-0 space-y-4 border-t border-border/80 pt-4">
               <div className="rounded-xl border border-border/70 bg-[color:var(--operator-surface-soft)]/65 px-3 py-2.5">
                 <div className="space-y-1.5">
                   <div className="text-[10px] font-semibold uppercase tracking-[0.22em] text-[color:var(--operator-muted)]">

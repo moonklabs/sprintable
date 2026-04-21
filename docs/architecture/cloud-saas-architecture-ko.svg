@@ -1,0 +1,265 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1400 1200" font-family="'Pretendard', 'Apple SD Gothic Neo', 'Noto Sans KR', -apple-system, sans-serif">
+  <defs>
+    <linearGradient id="bgGrad" x1="0%" y1="0%" x2="0%" y2="100%">
+      <stop offset="0%" stop-color="#0f172a"/>
+      <stop offset="100%" stop-color="#1e293b"/>
+    </linearGradient>
+    <linearGradient id="edgeGrad" x1="0%" y1="0%" x2="100%" y2="0%">
+      <stop offset="0%" stop-color="#0ea5e9"/>
+      <stop offset="100%" stop-color="#6366f1"/>
+    </linearGradient>
+    <linearGradient id="appGrad" x1="0%" y1="0%" x2="100%" y2="0%">
+      <stop offset="0%" stop-color="#7c3aed"/>
+      <stop offset="100%" stop-color="#a855f7"/>
+    </linearGradient>
+    <linearGradient id="dataGrad" x1="0%" y1="0%" x2="100%" y2="0%">
+      <stop offset="0%" stop-color="#059669"/>
+      <stop offset="100%" stop-color="#10b981"/>
+    </linearGradient>
+    <linearGradient id="saasGrad" x1="0%" y1="0%" x2="100%" y2="0%">
+      <stop offset="0%" stop-color="#dc2626"/>
+      <stop offset="100%" stop-color="#f59e0b"/>
+    </linearGradient>
+    <marker id="arrow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse">
+      <path d="M 0 0 L 10 5 L 0 10 z" fill="#94a3b8"/>
+    </marker>
+    <marker id="arrowBlue" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse">
+      <path d="M 0 0 L 10 5 L 0 10 z" fill="#38bdf8"/>
+    </marker>
+    <marker id="arrowPink" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse">
+      <path d="M 0 0 L 10 5 L 0 10 z" fill="#ec4899"/>
+    </marker>
+    <filter id="shadow" x="-20%" y="-20%" width="140%" height="140%">
+      <feGaussianBlur in="SourceAlpha" stdDeviation="3"/>
+      <feOffset dx="0" dy="2"/>
+      <feComponentTransfer><feFuncA type="linear" slope="0.3"/></feComponentTransfer>
+      <feMerge><feMergeNode/><feMergeNode in="SourceGraphic"/></feMerge>
+    </filter>
+  </defs>
+
+  <!-- Title -->
+  <text x="700" y="40" text-anchor="middle" fill="#0f172a" font-size="32" font-weight="700">Sprintable — 클라우드 SaaS 아키텍처</text>
+  <text x="700" y="64" text-anchor="middle" fill="#475569" font-size="17">Next.js 15 · Supabase · MCP · Paddle · AWS Amplify · 오픈코어</text>
+
+  <!-- ============ 사용자 & 에이전트 ============ -->
+  <g>
+    <rect x="40" y="90" width="1320" height="120" rx="12" fill="#1e293b" stroke="#334155" stroke-width="1.5"/>
+    <text x="60" y="114" fill="#cbd5e1" font-size="17" font-weight="600" letter-spacing="1.5">사용자 &amp; 에이전트</text>
+
+    <g filter="url(#shadow)">
+      <rect x="80" y="130" width="220" height="64" rx="8" fill="#0ea5e9" opacity="0.15" stroke="#0ea5e9" stroke-width="1.5"/>
+      <text x="190" y="154" text-anchor="middle" fill="#e0f2fe" font-size="18" font-weight="700">웹 브라우저</text>
+      <text x="190" y="174" text-anchor="middle" fill="#bae6fd" font-size="14">PM · 리뷰어 · 관리자</text>
+    </g>
+
+    <g filter="url(#shadow)">
+      <rect x="420" y="130" width="220" height="64" rx="8" fill="#8b5cf6" opacity="0.15" stroke="#8b5cf6" stroke-width="1.5"/>
+      <text x="530" y="154" text-anchor="middle" fill="#ede9fe" font-size="18" font-weight="700">Claude Code</text>
+      <text x="530" y="174" text-anchor="middle" fill="#ddd6fe" font-size="14">MCP 클라이언트 · 웹훅 수신</text>
+    </g>
+
+    <g filter="url(#shadow)">
+      <rect x="760" y="130" width="220" height="64" rx="8" fill="#ec4899" opacity="0.15" stroke="#ec4899" stroke-width="1.5"/>
+      <text x="870" y="154" text-anchor="middle" fill="#fce7f3" font-size="18" font-weight="700">OpenClaw 런타임</text>
+      <text x="870" y="174" text-anchor="middle" fill="#fbcfe8" font-size="14">관리형 에이전트 실행기</text>
+    </g>
+
+    <g filter="url(#shadow)">
+      <rect x="1100" y="130" width="220" height="64" rx="8" fill="#f59e0b" opacity="0.15" stroke="#f59e0b" stroke-width="1.5"/>
+      <text x="1210" y="154" text-anchor="middle" fill="#fef3c7" font-size="18" font-weight="700">외부 에이전트</text>
+      <text x="1210" y="174" text-anchor="middle" fill="#fde68a" font-size="14">Hermes · 커스텀 HTTP 에이전트</text>
+    </g>
+  </g>
+
+  <line x1="190" y1="200" x2="190" y2="236" stroke="#38bdf8" stroke-width="2" marker-end="url(#arrowBlue)"/>
+  <text x="200" y="222" fill="#0369a1" font-size="13" font-weight="600">HTTPS</text>
+  <line x1="530" y1="200" x2="530" y2="236" stroke="#38bdf8" stroke-width="2" marker-end="url(#arrowBlue)"/>
+  <text x="540" y="222" fill="#0369a1" font-size="13" font-weight="600">MCP/HTTP</text>
+  <line x1="870" y1="200" x2="870" y2="236" stroke="#ec4899" stroke-width="2" marker-end="url(#arrowPink)"/>
+  <text x="880" y="222" fill="#be185d" font-size="13" font-weight="600">웹훅 (양방향)</text>
+  <line x1="1210" y1="200" x2="1210" y2="236" stroke="#ec4899" stroke-width="2" marker-end="url(#arrowPink)"/>
+  <text x="1220" y="222" fill="#be185d" font-size="13" font-weight="600">웹훅</text>
+
+  <!-- 엣지 계층 -->
+  <g>
+    <rect x="40" y="240" width="1320" height="64" rx="10" fill="#0c4a6e" stroke="#0ea5e9" stroke-width="1.5"/>
+    <text x="60" y="264" fill="#e0f2fe" font-size="17" font-weight="600" letter-spacing="1.5">엣지 계층</text>
+    <text x="700" y="280" text-anchor="middle" fill="#f0f9ff" font-size="19" font-weight="700">CloudFront / Amplify CDN</text>
+    <text x="700" y="297" text-anchor="middle" fill="#bae6fd" font-size="14">TLS 종단 · WAF · DDoS 방어 · 정적 자산 캐시 · 지리적 라우팅</text>
+  </g>
+
+  <line x1="700" y1="310" x2="700" y2="336" stroke="#94a3b8" stroke-width="2" marker-end="url(#arrow)"/>
+
+  <!-- 앱 계층 -->
+  <g>
+    <rect x="40" y="340" width="1320" height="220" rx="12" fill="#1e293b" stroke="#a855f7" stroke-width="1.5"/>
+    <text x="60" y="364" fill="#ede9fe" font-size="17" font-weight="600" letter-spacing="1.5">앱 계층 — Next.js 15 on AWS Amplify (SSR + API 라우트)</text>
+
+    <g filter="url(#shadow)">
+      <rect x="70" y="380" width="300" height="80" rx="8" fill="#1e1b4b" stroke="#8b5cf6" stroke-width="1.5"/>
+      <text x="220" y="404" text-anchor="middle" fill="#ede9fe" font-size="18" font-weight="700">/app (화면 · SSR)</text>
+      <text x="220" y="424" text-anchor="middle" fill="#c4b5fd" font-size="14">칸반 · 메모 · 문서</text>
+      <text x="220" y="440" text-anchor="middle" fill="#c4b5fd" font-size="14">스탠드업 · 설정 · 관리자</text>
+    </g>
+
+    <g filter="url(#shadow)">
+      <rect x="400" y="380" width="300" height="80" rx="8" fill="#1e1b4b" stroke="#8b5cf6" stroke-width="1.5"/>
+      <text x="550" y="404" text-anchor="middle" fill="#ede9fe" font-size="18" font-weight="700">/api (REST)</text>
+      <text x="550" y="424" text-anchor="middle" fill="#c4b5fd" font-size="14">스토리 · 메모 · 에픽</text>
+      <text x="550" y="440" text-anchor="middle" fill="#c4b5fd" font-size="14">에이전트 · 결제 · 웹훅</text>
+    </g>
+
+    <g filter="url(#shadow)">
+      <rect x="730" y="380" width="300" height="80" rx="8" fill="#1e1b4b" stroke="#8b5cf6" stroke-width="1.5"/>
+      <text x="880" y="404" text-anchor="middle" fill="#ede9fe" font-size="18" font-weight="700">/mcp (MCP HTTP 서버)</text>
+      <text x="880" y="424" text-anchor="middle" fill="#c4b5fd" font-size="14">send_memo · reply_memo</text>
+      <text x="880" y="440" text-anchor="middle" fill="#c4b5fd" font-size="14">query_board · 툴 ACL</text>
+    </g>
+
+    <g filter="url(#shadow)">
+      <rect x="1060" y="380" width="270" height="80" rx="8" fill="#1e1b4b" stroke="#8b5cf6" stroke-width="1.5"/>
+      <text x="1195" y="404" text-anchor="middle" fill="#ede9fe" font-size="18" font-weight="700">웹훅 디스패처</text>
+      <text x="1195" y="424" text-anchor="middle" fill="#c4b5fd" font-size="14">외부 POST · HMAC 서명</text>
+      <text x="1195" y="440" text-anchor="middle" fill="#c4b5fd" font-size="14">재시도 · 멱등성 키</text>
+    </g>
+
+    <g filter="url(#shadow)">
+      <rect x="70" y="478" width="1260" height="68" rx="8" fill="#312e81" stroke="#6366f1" stroke-width="1.5"/>
+      <text x="700" y="502" text-anchor="middle" fill="#e0e7ff" font-size="18" font-weight="700">미들웨어: 인증(JWT) · 엔타이틀먼트 · 쿼터 · 속도 제한 · 감사 로그 · 툴 ACL</text>
+      <text x="700" y="522" text-anchor="middle" fill="#c7d2fe" font-size="14">플랜 게이트 (Free · Pro · Enterprise) · 조직 RLS · 기능 플래그 · 페르소나 해석</text>
+      <text x="700" y="538" text-anchor="middle" fill="#a5b4fc" font-size="13">apps/web/src/middleware.ts · proxy.ts · instrumentation.ts</text>
+    </g>
+  </g>
+
+  <line x1="220" y1="560" x2="220" y2="596" stroke="#94a3b8" stroke-width="2" marker-end="url(#arrow)"/>
+  <line x1="550" y1="560" x2="550" y2="596" stroke="#94a3b8" stroke-width="2" marker-end="url(#arrow)"/>
+  <line x1="880" y1="560" x2="880" y2="596" stroke="#94a3b8" stroke-width="2" marker-end="url(#arrow)"/>
+  <line x1="1195" y1="560" x2="1195" y2="596" stroke="#94a3b8" stroke-width="2" marker-end="url(#arrow)"/>
+
+  <!-- 데이터 계층 -->
+  <g>
+    <rect x="40" y="600" width="1320" height="180" rx="12" fill="#1e293b" stroke="#10b981" stroke-width="1.5"/>
+    <text x="60" y="624" fill="#d1fae5" font-size="17" font-weight="600" letter-spacing="1.5">데이터 계층</text>
+
+    <g filter="url(#shadow)">
+      <rect x="70" y="640" width="300" height="120" rx="8" fill="#064e3b" stroke="#10b981" stroke-width="1.5"/>
+      <text x="220" y="666" text-anchor="middle" fill="#d1fae5" font-size="18" font-weight="700">Supabase 인증</text>
+      <text x="220" y="688" text-anchor="middle" fill="#a7f3d0" font-size="14">JWT 세션 · OAuth</text>
+      <text x="220" y="706" text-anchor="middle" fill="#a7f3d0" font-size="14">GitHub · Google · 이메일</text>
+      <text x="220" y="724" text-anchor="middle" fill="#a7f3d0" font-size="14">RLS 정책 클레임</text>
+      <text x="220" y="746" text-anchor="middle" fill="#6ee7b7" font-size="13">org_id · role · plan</text>
+    </g>
+
+    <g filter="url(#shadow)">
+      <rect x="400" y="640" width="300" height="120" rx="8" fill="#064e3b" stroke="#10b981" stroke-width="1.5"/>
+      <text x="550" y="666" text-anchor="middle" fill="#d1fae5" font-size="18" font-weight="700">Supabase Postgres</text>
+      <text x="550" y="688" text-anchor="middle" fill="#a7f3d0" font-size="14">스토리 · 메모 · 에픽</text>
+      <text x="550" y="706" text-anchor="middle" fill="#a7f3d0" font-size="14">팀원 · 에이전트</text>
+      <text x="550" y="724" text-anchor="middle" fill="#a7f3d0" font-size="14">배포 · 로그</text>
+      <text x="550" y="746" text-anchor="middle" fill="#6ee7b7" font-size="13">행 수준 보안 · 마이그레이션</text>
+    </g>
+
+    <g filter="url(#shadow)">
+      <rect x="730" y="640" width="300" height="120" rx="8" fill="#064e3b" stroke="#10b981" stroke-width="1.5"/>
+      <text x="880" y="666" text-anchor="middle" fill="#d1fae5" font-size="18" font-weight="700">Supabase 리얼타임</text>
+      <text x="880" y="688" text-anchor="middle" fill="#a7f3d0" font-size="14">WebSocket 브로드캐스트</text>
+      <text x="880" y="706" text-anchor="middle" fill="#a7f3d0" font-size="14">칸반 보드 동기화</text>
+      <text x="880" y="724" text-anchor="middle" fill="#a7f3d0" font-size="14">메모 스레드 실시간 업데이트</text>
+      <text x="880" y="746" text-anchor="middle" fill="#6ee7b7" font-size="13">프레즌스 · 타이핑 · 커서</text>
+    </g>
+
+    <g filter="url(#shadow)">
+      <rect x="1060" y="640" width="270" height="120" rx="8" fill="#064e3b" stroke="#10b981" stroke-width="1.5"/>
+      <text x="1195" y="666" text-anchor="middle" fill="#d1fae5" font-size="18" font-weight="700">SQS + Lambda</text>
+      <text x="1195" y="688" text-anchor="middle" fill="#a7f3d0" font-size="14">웹훅 재시도 큐</text>
+      <text x="1195" y="706" text-anchor="middle" fill="#a7f3d0" font-size="14">DLQ · 지수 백오프</text>
+      <text x="1195" y="724" text-anchor="middle" fill="#a7f3d0" font-size="14">정기 스탠드업</text>
+      <text x="1195" y="746" text-anchor="middle" fill="#6ee7b7" font-size="13">EventBridge 크론</text>
+    </g>
+  </g>
+
+  <!-- 상업 SaaS 모듈 -->
+  <g>
+    <rect x="40" y="800" width="1320" height="160" rx="12" fill="#1e293b" stroke="#f59e0b" stroke-width="1.5" stroke-dasharray="6 3"/>
+    <text x="60" y="824" fill="#fef3c7" font-size="17" font-weight="600" letter-spacing="1.5">상업 SaaS 모듈 — 서브모듈: sprintable-saas (오픈코어 경계)</text>
+
+    <g filter="url(#shadow)">
+      <rect x="70" y="840" width="300" height="100" rx="8" fill="#451a03" stroke="#f59e0b" stroke-width="1.5"/>
+      <text x="220" y="866" text-anchor="middle" fill="#fef3c7" font-size="18" font-weight="700">결제 (Paddle)</text>
+      <text x="220" y="886" text-anchor="middle" fill="#fde68a" font-size="14">체크아웃 · 구독</text>
+      <text x="220" y="902" text-anchor="middle" fill="#fde68a" font-size="14">/api/webhooks/payment</text>
+      <text x="220" y="922" text-anchor="middle" fill="#fcd34d" font-size="13">인보이스 · 세금 (MoR)</text>
+    </g>
+
+    <g filter="url(#shadow)">
+      <rect x="400" y="840" width="300" height="100" rx="8" fill="#451a03" stroke="#f59e0b" stroke-width="1.5"/>
+      <text x="550" y="866" text-anchor="middle" fill="#fef3c7" font-size="18" font-weight="700">엔타이틀먼트 리졸버</text>
+      <text x="550" y="886" text-anchor="middle" fill="#fde68a" font-size="14">플랜 게이트 · 기능 플래그</text>
+      <text x="550" y="902" text-anchor="middle" fill="#fde68a" font-size="14">쿼터 · 사용량 미터링</text>
+      <text x="550" y="922" text-anchor="middle" fill="#fcd34d" font-size="13">agent_runs · 일일 메모</text>
+    </g>
+
+    <g filter="url(#shadow)">
+      <rect x="730" y="840" width="300" height="100" rx="8" fill="#451a03" stroke="#f59e0b" stroke-width="1.5"/>
+      <text x="880" y="866" text-anchor="middle" fill="#fef3c7" font-size="18" font-weight="700">관리형 에이전트 런타임</text>
+      <text x="880" y="886" text-anchor="middle" fill="#fde68a" font-size="14">웹훅 · openclaw 모드</text>
+      <text x="880" y="902" text-anchor="middle" fill="#fde68a" font-size="14">배포중 → 활성 → …</text>
+      <text x="880" y="922" text-anchor="middle" fill="#fcd34d" font-size="13">BYOM vs 관리형 LLM</text>
+    </g>
+
+    <g filter="url(#shadow)">
+      <rect x="1060" y="840" width="270" height="100" rx="8" fill="#451a03" stroke="#f59e0b" stroke-width="1.5"/>
+      <text x="1195" y="866" text-anchor="middle" fill="#fef3c7" font-size="18" font-weight="700">관리자 / 운영</text>
+      <text x="1195" y="886" text-anchor="middle" fill="#fde68a" font-size="14">조직 관리</text>
+      <text x="1195" y="902" text-anchor="middle" fill="#fde68a" font-size="14">대리 로그인 · 환불</text>
+      <text x="1195" y="922" text-anchor="middle" fill="#fcd34d" font-size="13">비용 추적</text>
+    </g>
+  </g>
+
+  <!-- 외부 연동 -->
+  <g>
+    <rect x="40" y="980" width="1320" height="170" rx="12" fill="#1e293b" stroke="#475569" stroke-width="1.5"/>
+    <text x="60" y="1004" fill="#cbd5e1" font-size="17" font-weight="600" letter-spacing="1.5">외부 연동 &amp; 관측</text>
+
+    <g filter="url(#shadow)">
+      <rect x="70" y="1020" width="300" height="112" rx="8" fill="#0f172a" stroke="#64748b" stroke-width="1.5"/>
+      <text x="220" y="1046" text-anchor="middle" fill="#f1f5f9" font-size="18" font-weight="700">LLM 공급자</text>
+      <text x="220" y="1068" text-anchor="middle" fill="#cbd5e1" font-size="14">관리형: Anthropic · OpenAI</text>
+      <text x="220" y="1084" text-anchor="middle" fill="#cbd5e1" font-size="14">Gemini · Bedrock</text>
+      <text x="220" y="1104" text-anchor="middle" fill="#cbd5e1" font-size="14">BYOM: 사용자 제공 키</text>
+      <text x="220" y="1122" text-anchor="middle" fill="#94a3b8" font-size="13">KMS 암호화 자격증명</text>
+    </g>
+
+    <g filter="url(#shadow)">
+      <rect x="400" y="1020" width="300" height="112" rx="8" fill="#0f172a" stroke="#64748b" stroke-width="1.5"/>
+      <text x="550" y="1046" text-anchor="middle" fill="#f1f5f9" font-size="18" font-weight="700">GitHub 연동</text>
+      <text x="550" y="1068" text-anchor="middle" fill="#cbd5e1" font-size="14">웹훅: PR → 자동 종료</text>
+      <text x="550" y="1084" text-anchor="middle" fill="#cbd5e1" font-size="14">앱 설치</text>
+      <text x="550" y="1104" text-anchor="middle" fill="#cbd5e1" font-size="14">HMAC 서명 검증</text>
+      <text x="550" y="1122" text-anchor="middle" fill="#94a3b8" font-size="13">/api/webhooks/github</text>
+    </g>
+
+    <g filter="url(#shadow)">
+      <rect x="730" y="1020" width="300" height="112" rx="8" fill="#0f172a" stroke="#64748b" stroke-width="1.5"/>
+      <text x="880" y="1046" text-anchor="middle" fill="#f1f5f9" font-size="18" font-weight="700">오브젝트 스토리지 (S3)</text>
+      <text x="880" y="1068" text-anchor="middle" fill="#cbd5e1" font-size="14">첨부파일 · 내보내기</text>
+      <text x="880" y="1084" text-anchor="middle" fill="#cbd5e1" font-size="14">로그 아카이브 · 백업</text>
+      <text x="880" y="1104" text-anchor="middle" fill="#cbd5e1" font-size="14">서명 URL (짧은 TTL)</text>
+      <text x="880" y="1122" text-anchor="middle" fill="#94a3b8" font-size="13">Supabase Storage 래퍼</text>
+    </g>
+
+    <g filter="url(#shadow)">
+      <rect x="1060" y="1020" width="270" height="112" rx="8" fill="#0f172a" stroke="#64748b" stroke-width="1.5"/>
+      <text x="1195" y="1046" text-anchor="middle" fill="#f1f5f9" font-size="18" font-weight="700">관측 (Observability)</text>
+      <text x="1195" y="1068" text-anchor="middle" fill="#cbd5e1" font-size="14">CloudWatch · Sentry</text>
+      <text x="1195" y="1084" text-anchor="middle" fill="#cbd5e1" font-size="14">OpenTelemetry 트레이스</text>
+      <text x="1195" y="1104" text-anchor="middle" fill="#cbd5e1" font-size="14">감사 로그 · 비용 추적</text>
+      <text x="1195" y="1122" text-anchor="middle" fill="#94a3b8" font-size="13">Grafana 대시보드</text>
+    </g>
+  </g>
+
+  <text x="700" y="1180" text-anchor="middle" fill="#334155" font-size="14">
+    메모-웹훅 사이클: 사용자 → /api → Postgres → 리얼타임 + SQS → 웹훅 디스패처 → 에이전트 → MCP /mcp → reply_memo → 라우팅 규칙 → 다음 에이전트
+  </text>
+</svg>

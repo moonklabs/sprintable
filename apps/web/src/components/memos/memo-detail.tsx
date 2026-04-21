@@ -1,6 +1,6 @@
 'use client';
 
-import { useCallback, useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import ReactMarkdown from 'react-markdown';
 import { useLocale, useTranslations } from 'next-intl';
 import { Badge } from '@/components/ui/badge';
@@ -93,6 +93,7 @@ export function MemoDetail({
   const [showCreateDoc, setShowCreateDoc] = useState(false);
   const [newDocTitle, setNewDocTitle] = useState('');
   const [creatingDoc, setCreatingDoc] = useState(false);
+  const shouldNotifyParentRef = useRef(false);
   const collaboration = useMemoPresence({
     memoId: memoState.id,
     currentTeamMemberId,
@@ -101,16 +102,20 @@ export function MemoDetail({
   });
 
   const applyMemoState = useCallback((updater: (current: MemoDetailState) => MemoDetailState) => {
-    setMemoState((current) => {
-      const next = updater(current);
-      onMemoChange?.(next);
-      return next;
-    });
-  }, [onMemoChange]);
+    shouldNotifyParentRef.current = true;
+    setMemoState((current) => updater(current));
+  }, []);
 
   useEffect(() => {
+    shouldNotifyParentRef.current = false;
     setMemoState(memo);
   }, [memo]);
+
+  useEffect(() => {
+    if (!onMemoChange || !shouldNotifyParentRef.current) return;
+    shouldNotifyParentRef.current = false;
+    onMemoChange(memoState);
+  }, [memoState, onMemoChange]);
 
   useEffect(() => {
     setReplyContent('');
@@ -209,8 +214,8 @@ export function MemoDetail({
       }
       const json = await res.json();
       if (json.data?.memo) {
+        shouldNotifyParentRef.current = true;
         setMemoState(json.data.memo);
-        onMemoChange?.(json.data.memo);
       }
       setSelectedDocId('');
     } catch (error) {
@@ -236,8 +241,8 @@ export function MemoDetail({
       }
       const json = await res.json();
       if (json.data?.memo) {
+        shouldNotifyParentRef.current = true;
         setMemoState(json.data.memo);
-        onMemoChange?.(json.data.memo);
       }
       if (json.data?.doc) {
         setAvailableDocs((prev) => [...prev, json.data.doc]);
