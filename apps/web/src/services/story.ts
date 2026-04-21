@@ -153,6 +153,32 @@ export class StoryService {
   }
 
   async bulkUpdate(items: BulkUpdateItem[]) {
+    // status 변경 item에 대해 전이 검증 (bulk 경로 우회 방지)
+    const statusItems = items.filter((item) => item.status !== undefined);
+    if (statusItems.length > 0) {
+      await Promise.all(
+        statusItems.map(async (item) => {
+          const existing = await this.getById(item.id);
+          const currentStatus = existing.status as string;
+          const targetStatus = item.status as string;
+          if (targetStatus === currentStatus) return;
+
+          const adminReverseToBacklog =
+            targetStatus === 'backlog' &&
+            (this.isAdminContext || (!!this.supabase && await isOrgAdmin(this.supabase, existing.org_id as string)));
+
+          if (!adminReverseToBacklog) {
+            const validNext = VALID_TRANSITIONS[currentStatus];
+            if (!validNext || !validNext.includes(targetStatus)) {
+              if (targetStatus === 'backlog') {
+                throw new ForbiddenError('Admin permission required to move story back to backlog');
+              }
+              throw new InvalidTransitionError(currentStatus, targetStatus);
+            }
+          }
+        }),
+      );
+    }
     return this.repo.bulkUpdate(items);
   }
 
