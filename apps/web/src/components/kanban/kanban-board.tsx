@@ -73,7 +73,8 @@ export function KanbanBoard({ projectId }: KanbanBoardProps) {
   }, [selectedEpicId]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const [selectedStory, setSelectedStory] = useState<KanbanStory | null>(null);
-  const isClosingStoryRef = useRef(false);
+  const selectedStoryRef = useRef<KanbanStory | null>(null);
+  selectedStoryRef.current = selectedStory;
   const [storyTasks, setStoryTasks] = useState<Task[]>([]);
   const [activeId, setActiveId] = useState<string | null>(null);
 
@@ -139,7 +140,6 @@ export function KanbanBoard({ projectId }: KanbanBoardProps) {
   }, [searchParams, router]);
 
   const handleCloseStory = useCallback(() => {
-    isClosingStoryRef.current = true;
     setSelectedStory(null);
 
     // URL에서 스토리 ID 제거
@@ -149,21 +149,19 @@ export function KanbanBoard({ projectId }: KanbanBoardProps) {
   }, [searchParams, router]);
 
   // URL에서 스토리 ID 읽어서 자동으로 패널 열기
+  // selectedStory를 deps에서 제외: setSelectedStory(null) 호출 시 effect가 재발화하면
+  // searchParams에 ?story= 가 아직 남아있어 패널이 즉시 재오픈되는 race condition ���생.
+  // selectedStoryRef(항상 최신값)로 비교해 중복 오픈만 방지한다.
   useEffect(() => {
     const storyId = searchParams.get('story');
-    // closing 중에는 effect 스킵 — setSelectedStory(null) 직후 searchParams가 아직
-    // ?story= 를 포함한 상태로 effect가 재발화해 패널이 재오픈되는 race condition 방지
-    if (isClosingStoryRef.current) {
-      if (!storyId) isClosingStoryRef.current = false;
-      return;
-    }
     if (storyId && stories.length > 0) {
       const story = stories.find((s) => s.id === storyId);
-      if (story && (!selectedStory || selectedStory.id !== storyId)) {
+      if (story && (!selectedStoryRef.current || selectedStoryRef.current.id !== storyId)) {
         void handleStoryClick(story);
       }
     }
-  }, [searchParams, stories, selectedStory, handleStoryClick]);
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [searchParams, stories, handleStoryClick]);
 
   const filteredStories = stories.filter((s) => {
     if (selectedEpicId && s.epic_id !== selectedEpicId) return false;
