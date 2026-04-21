@@ -5,6 +5,7 @@ const {
   createSupabaseAdminClient,
   getTeamMemberFromRequest,
   getMyTeamMember,
+  getAuthContext,
   requireOrgAdmin,
   requireAgentOrchestration,
   listRules,
@@ -20,6 +21,7 @@ const {
   createSupabaseAdminClient: vi.fn(),
   getTeamMemberFromRequest: vi.fn(),
   getMyTeamMember: vi.fn(),
+  getAuthContext: vi.fn(),
   requireOrgAdmin: vi.fn(),
   requireAgentOrchestration: vi.fn(),
   listRules: vi.fn(),
@@ -49,6 +51,7 @@ vi.mock('@/lib/auth-helpers', async () => {
   return {
     ...actual,
     getMyTeamMember,
+    getAuthContext,
   };
 });
 
@@ -85,6 +88,7 @@ describe('/api/v1/agent-routing-rules', () => {
     createSupabaseAdminClient.mockReset();
     getTeamMemberFromRequest.mockReset();
     getMyTeamMember.mockReset();
+    getAuthContext.mockReset();
     requireOrgAdmin.mockReset();
     requireAgentOrchestration.mockReset();
     listRules.mockReset();
@@ -109,6 +113,14 @@ describe('/api/v1/agent-routing-rules', () => {
       id: 'member-1',
       org_id: 'org-1',
       project_id: 'project-1',
+    });
+
+    getAuthContext.mockResolvedValue({
+      id: 'member-1',
+      org_id: 'org-1',
+      project_id: 'project-1',
+      project_name: 'test',
+      type: 'human',
     });
 
     requireAgentOrchestration.mockResolvedValue(null);
