@@ -176,6 +176,15 @@ export class StoryService {
               throw new InvalidTransitionError(currentStatus, targetStatus);
             }
           }
+
+          // done → in-review는 admin만 (단건 update()와 동일)
+          if (currentStatus === 'done' && targetStatus !== 'backlog' && this.supabase) {
+            try {
+              await requireOrgAdmin(this.supabase, existing.org_id as string);
+            } catch {
+              throw new ForbiddenError('Admin permission required to reopen done stories');
+            }
+          }
         }),
       );
     }
