@@ -85,25 +85,6 @@ export function registerAnalyticsTools(server: McpServer) {
     },
   );
 
-  // GET /api/memos?q=
-  server.tool(
-    'search_memos',
-    'Search memos by title or content',
-    {
-      project_id: z.string().describe('Project ID'),
-      query: z.string().describe('Search query'),
-    },
-    async ({ project_id, query }) => {
-      try {
-        const params = new URLSearchParams({ project_id, q: query });
-        const data = await pmApi(`/api/memos?${params.toString()}`);
-        return ok(data);
-      } catch (e) {
-        return err(e instanceof PmApiError ? e.message : String(e));
-      }
-    },
-  );
-
   // GET /api/stories?status=in-review
   server.tool(
     'get_blocked_stories',

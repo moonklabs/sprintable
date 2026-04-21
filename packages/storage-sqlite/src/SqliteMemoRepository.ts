@@ -44,6 +44,7 @@ export class SqliteMemoRepository implements IMemoRepository {
     if (filters.org_id && !filters.project_id) { sql += ' AND org_id = ?'; params.push(filters.org_id); }
     if (filters.project_id) { sql += ' AND project_id = ?'; params.push(filters.project_id); }
     if (filters.assigned_to) { sql += ' AND assigned_to = ?'; params.push(filters.assigned_to); }
+    if (filters.created_by) { sql += ' AND created_by = ?'; params.push(filters.created_by); }
     if (filters.status) { sql += ' AND status = ?'; params.push(filters.status); }
     if (filters.q?.trim()) {
       sql += ' AND (title LIKE ? OR content LIKE ?)';

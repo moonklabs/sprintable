@@ -457,11 +457,12 @@ export class MemoService {
     return data;
   }
 
-  async list(filters: { org_id?: string; project_id?: string; assigned_to?: string; status?: string; limit?: number; cursor?: string | null; q?: string }) {
+  async list(filters: { org_id?: string; project_id?: string; assigned_to?: string; created_by?: string; status?: string; limit?: number; cursor?: string | null; q?: string }) {
     const memos = await this.repo.list({
       org_id: filters.org_id,
       project_id: filters.project_id,
       assigned_to: filters.assigned_to,
+      created_by: filters.created_by,
       status: filters.status,
       q: filters.q,
       cursor: filters.cursor ?? undefined,
