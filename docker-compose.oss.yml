@@ -8,12 +8,12 @@ services:
       context: .
       dockerfile: Dockerfile.oss
     ports:
-      - "3000:3000"
+      - "3108:3000"
     environment:
       OSS_MODE: "true"
       NEXT_PUBLIC_OSS_MODE: "true"
-      APP_BASE_URL: ${APP_BASE_URL:-http://localhost:3000}
-      NEXT_PUBLIC_APP_URL: ${NEXT_PUBLIC_APP_URL:-http://localhost:3000}
+      APP_BASE_URL: ${APP_BASE_URL:-http://localhost:3108}
+      NEXT_PUBLIC_APP_URL: ${NEXT_PUBLIC_APP_URL:-http://localhost:3108}
       AGENT_API_KEY_SECRET: ${AGENT_API_KEY_SECRET:-changeme-agent-api-key-secret}
       CRON_SECRET: ${CRON_SECRET:-changeme-cron-secret}
       GITHUB_WEBHOOK_SECRET: ${GITHUB_WEBHOOK_SECRET:-}

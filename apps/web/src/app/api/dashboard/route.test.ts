@@ -60,7 +60,7 @@ describe('GET /api/dashboard', () => {
   });
 
   it('returns 200 with dashboard data when project_id provided', async () => {
-    const stories = [{ id: 'story-1', title: 'S1', status: 'todo', story_points: 5 }];
+    const stories = [{ id: 'story-1', title: 'S1', status: 'backlog', story_points: 5 }];
     const tasks = [{ id: 'task-1', title: 'T1', status: 'todo' }];
     const memos = [{ id: 'memo-1', title: 'M1', status: 'open' }];
 

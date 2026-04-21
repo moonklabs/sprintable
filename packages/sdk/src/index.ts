@@ -90,7 +90,7 @@ function buildParams(filters: Record<string, string | number | undefined>): stri
  * @example
  * ```typescript
  * const client = createSprintableClient('sk_live_xxxxx', {
- *   baseURL: 'http://localhost:3000',
+ *   baseURL: 'http://localhost:3108',
  * });
  *
  * // Create a story

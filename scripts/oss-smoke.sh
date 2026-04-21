@@ -3,14 +3,14 @@
 # 실행: OSS_MODE=true SQLITE_PATH=./sprintable.db bash scripts/oss-smoke.sh
 #
 # 4경로 검증:
-# 1. Web UI CRUD (localhost:3000)           — curl로 세션 쿠키 경유 검증 (수동 로그인 가정)
+# 1. Web UI CRUD (localhost:3108)           — curl로 세션 쿠키 경유 검증 (수동 로그인 가정)
 # 2. MCP stdio 클라이언트 CRUD              — packages/mcp-server의 stdio 모드로 동등 CRUD
 # 3. Agent API key curl CRUD                — sk_live_* API key로 /api/* 호출
 # 4. /settings human 세션 허용 + agent key 403 차단
 
 set -euo pipefail
 
-BASE_URL="${BASE_URL:-http://localhost:3000}"
+BASE_URL="${BASE_URL:-http://localhost:3108}"
 AGENT_API_KEY="${AGENT_API_KEY:-}"
 HUMAN_SESSION_COOKIE_FILE="${HUMAN_SESSION_COOKIE_FILE:-./.oss-smoke-session.txt}"
 ORG_ID="${ORG_ID:-}"
@@ -115,7 +115,7 @@ smoke_settings_auth() {
 smoke_web_ui_checklist() {
   info "Path 1 — Web UI CRUD (수동 체크리스트)"
   cat <<'EOF'
-  [ ] http://localhost:3000 접속 → 로그인
+  [ ] http://localhost:3108 접속 → 로그인
   [ ] 프로젝트 생성/조회/수정/삭제
   [ ] Epic 생성/조회
   [ ] Story 생성/조회

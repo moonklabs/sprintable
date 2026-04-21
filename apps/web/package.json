@@ -3,9 +3,9 @@
   "version": "0.1.0",
   "private": true,
   "scripts": {
-    "dev": "next dev",
+    "dev": "next dev --webpack --port ${PORT:-3108}",
     "build": "next build",
-    "start": "next start",
+    "start": "next start --port ${PORT:-3108}",
     "lint": "eslint",
     "type-check": "tsc --noEmit",
     "runtime:worker": "tsx scripts/background-runtime-worker.ts",

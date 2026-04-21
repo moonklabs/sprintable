@@ -61,7 +61,7 @@ cp .env.example .env
 docker compose -f docker-compose.oss.yml up
 ```
 
-Open [http://localhost:3000](http://localhost:3000).
+Open [http://localhost:3108](http://localhost:3108).
 
 On first run, a sample project with 3 stories is created automatically.
 
@@ -85,7 +85,7 @@ The MCP server lets your agent read and reply to memos, manage tasks, and naviga
   "mcpServers": {
     "sprintable": {
       "type": "http",
-      "url": "http://localhost:3000/mcp",
+      "url": "http://localhost:3108/mcp",
       "headers": {
         "Authorization": "Bearer YOUR_AGENT_API_KEY"
       }
@@ -135,7 +135,7 @@ When a PR merges, the linked ticket moves to **Done** automatically.
 **1. Get your webhook endpoint**
 
 ```
-http://localhost:3000/api/webhooks/github
+http://localhost:3108/api/webhooks/github
 ```
 
 **2. Add the webhook in GitHub**
@@ -144,7 +144,7 @@ GitHub repo → **Settings** → **Webhooks** → **Add webhook**
 
 | Field | Value |
 |---|---|
-| Payload URL | `http://localhost:3000/api/webhooks/github` |
+| Payload URL | `http://localhost:3108/api/webhooks/github` |
 | Content type | `application/json` |
 | Secret | Your `GITHUB_WEBHOOK_SECRET` from `.env` |
 | Events | Pull requests only |
@@ -209,11 +209,11 @@ Copy `.env.example` to `.env` and edit as needed.
 
 | Variable | Default | Description |
 |---|---|---|
-| `APP_BASE_URL` | `http://localhost:3000` | Public URL (used in webhook links) |
+| `APP_BASE_URL` | `http://localhost:3108` | Public URL (used in webhook links) |
 | `OSS_MODE` | `true` | Enable OSS/SQLite mode |
 | `SQLITE_PATH` | `./.data/sprintable.db` | SQLite file path |
 | `AGENT_API_KEY_SECRET` | — | Signs agent API keys — change before production |
-| `PM_API_URL` | `http://localhost:3000` | Internal URL for MCP server → web app |
+| `PM_API_URL` | `http://localhost:3108` | Internal URL for MCP server → web app |
 | `GITHUB_WEBHOOK_SECRET` | — | Optional: auto-close tickets on PR merge |
 
 Supabase variables are only needed when `OSS_MODE=false` (Cloud/SaaS deployment).
@@ -224,8 +224,8 @@ Supabase variables are only needed when `OSS_MODE=false` (Cloud/SaaS deployment)
 
 | Symptom | Cause | Fix |
 |---|---|---|
-| `connection refused` on port 3000 | Docker not running | Start Docker Desktop |
-| Port 3000 already in use | Port conflict | `lsof -i :3000` and kill the process |
+| `connection refused` on port 3108 | Docker not running | Start Docker Desktop |
+| Port 3108 already in use | Port conflict | `lsof -i :3108` and kill the process |
 | `permission denied` on volume (Linux) | UID mismatch | `sudo chown -R 1000:1000 ./data` then restart |
 | Webhook not received by agent | Local URL unreachable | Use [ngrok](https://ngrok.com/) to expose the port |
 | No "GitHub Connected" badge | Secret not set | Add `GITHUB_WEBHOOK_SECRET` to `.env` and restart |

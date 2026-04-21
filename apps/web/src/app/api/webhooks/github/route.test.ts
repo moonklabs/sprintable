@@ -73,7 +73,7 @@ describe('POST /api/webhooks/github', () => {
   });
 
   it('closes matching story on PR merge', async () => {
-    mockList.mockResolvedValue([{ id: 'story-1', title: 'SPR-1: Auth', status: 'in_progress' }]);
+    mockList.mockResolvedValue([{ id: 'story-1', title: 'SPR-1: Auth', status: 'in-progress' }]);
 
     const res = await POST(makeRequest(mergedPrPayload));
     expect(res.status).toBe(200);
