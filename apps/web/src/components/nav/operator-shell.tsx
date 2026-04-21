@@ -9,16 +9,14 @@ import {
   Bot,
   ChevronDown,
   ChevronRight,
-  ClipboardList,
   FolderKanban,
   Gauge,
   Gift,
   Inbox,
-  LayoutDashboard,
   MessageSquareMore,
   PenTool,
+  Search,
   Settings,
-  Trophy,
   Users,
 } from 'lucide-react';
 import { SprintableLogo } from '@/components/brand/sprintable-logo';
@@ -80,7 +78,6 @@ export function OperatorShell({
   const pathname = usePathname();
   const t = useTranslations('nav');
   const shellT = useTranslations('shell');
-  const [unreadCount, setUnreadCount] = useState(0);
   const [memoUnreadCount, setMemoUnreadCount] = useState(0);
   const [memoSidebarOpen, setMemoSidebarOpen] = useState(false);
   const [expandedMenus, setExpandedMenus] = useState<Set<string>>(new Set(['sprintManagement']));
@@ -88,14 +85,9 @@ export function OperatorShell({
   useEffect(() => {
     async function fetchUnread() {
       try {
-        const [inboxRes, memoRes] = await Promise.all([
-          fetch('/api/notifications?unread=true'),
+        const [memoRes] = await Promise.all([
           fetch('/api/notifications?unread=true&type=memo'),
         ]);
-        if (inboxRes.ok) {
-          const json = await inboxRes.json();
-          setUnreadCount(json.meta?.unreadCount ?? 0);
-        }
         if (memoRes.ok) {
           const json = await memoRes.json();
           setMemoUnreadCount(json.meta?.unreadCount ?? 0);
@@ -246,7 +238,11 @@ export function OperatorShell({
                   />
                 </div>
               ) : null}
-              <div className={cn('truncate font-heading text-sm font-bold text-[color:var(--operator-foreground)]', projectMemberships.length > 0 && 'hidden lg:block')}>{projectName ?? (projectId ? shellT('projectAttached') : shellT('projectPending'))}</div>
+              {projectMemberships.length === 0 ? (
+                <div className="truncate font-heading text-sm font-bold text-[color:var(--operator-foreground)]">
+                  {projectName ?? (projectId ? shellT('projectAttached') : shellT('projectPending'))}
+                </div>
+              ) : null}
             </div>
             <div className="hidden max-w-xl flex-1 items-center gap-3 lg:flex">
               {projectMemberships.length > 0 ? (
@@ -256,8 +252,9 @@ export function OperatorShell({
                   className="w-[240px]"
                 />
               ) : null}
-              <div className="rounded-full border border-white/8 bg-[color:var(--operator-surface-soft)] px-4 py-2 text-sm text-[color:var(--operator-muted)]">
-                {shellT('searchPlaceholder')}
+              <div className="flex min-w-0 flex-1 items-center gap-2 rounded-full border border-white/8 bg-[color:var(--operator-surface-soft)] px-4 py-2 text-sm text-[color:var(--operator-muted)]">
+                <Search className="size-4 shrink-0" />
+                <span className="truncate">{shellT('searchPlaceholder')}</span>
               </div>
             </div>
             <div className="flex shrink-0 items-center gap-2">

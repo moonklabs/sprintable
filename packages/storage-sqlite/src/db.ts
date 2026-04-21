@@ -13,10 +13,10 @@ export function getDb(): DatabaseSync {
   if (!_db) {
     const dbPath = process.env['SQLITE_PATH'] ?? path.join(process.cwd(), 'sprintable.db');
     _db = new DatabaseSync(dbPath);
-    initSchema(_db);
-    migrateLegacyStoryStatuses(_db);
-    seedOssDefaults(_db);
   }
+  initSchema(_db);
+  migrateLegacyStoryStatuses(_db);
+  seedOssDefaults(_db);
   return _db;
 }
 
@@ -193,6 +193,45 @@ function initSchema(db: DatabaseSync): void {
     CREATE INDEX IF NOT EXISTS idx_notifications_user_id ON notifications(user_id);
     CREATE INDEX IF NOT EXISTS idx_team_members_org_id ON team_members(org_id);
     CREATE INDEX IF NOT EXISTS idx_team_members_user_id ON team_members(user_id);
+
+    CREATE TABLE IF NOT EXISTS standup_entries (
+      id TEXT PRIMARY KEY,
+      org_id TEXT NOT NULL,
+      project_id TEXT NOT NULL,
+      sprint_id TEXT,
+      author_id TEXT NOT NULL REFERENCES team_members(id) ON DELETE CASCADE,
+      date TEXT NOT NULL,
+      done TEXT,
+      plan TEXT,
+      blockers TEXT,
+      plan_story_ids TEXT NOT NULL DEFAULT '[]',
+      created_at TEXT NOT NULL,
+      updated_at TEXT NOT NULL,
+      UNIQUE(project_id, author_id, date)
+    );
+
+    CREATE INDEX IF NOT EXISTS idx_standup_entries_project ON standup_entries(project_id);
+    CREATE INDEX IF NOT EXISTS idx_standup_entries_author ON standup_entries(author_id);
+    CREATE INDEX IF NOT EXISTS idx_standup_entries_date ON standup_entries(date);
+
+    CREATE TABLE IF NOT EXISTS standup_feedback (
+      id TEXT PRIMARY KEY,
+      org_id TEXT NOT NULL,
+      project_id TEXT NOT NULL,
+      sprint_id TEXT,
+      standup_entry_id TEXT NOT NULL REFERENCES standup_entries(id) ON DELETE CASCADE,
+      feedback_by_id TEXT NOT NULL REFERENCES team_members(id) ON DELETE CASCADE,
+      review_type TEXT NOT NULL DEFAULT 'comment',
+      feedback_text TEXT NOT NULL,
+      created_at TEXT NOT NULL,
+      updated_at TEXT NOT NULL,
+      CHECK (review_type IN ('comment', 'approve', 'request_changes'))
+    );
+
+    CREATE INDEX IF NOT EXISTS idx_standup_feedback_project ON standup_feedback(project_id);
+    CREATE INDEX IF NOT EXISTS idx_standup_feedback_entry ON standup_feedback(standup_entry_id);
+    CREATE INDEX IF NOT EXISTS idx_standup_feedback_author ON standup_feedback(feedback_by_id);
+    CREATE INDEX IF NOT EXISTS idx_standup_feedback_sprint ON standup_feedback(sprint_id);
 
     CREATE TABLE IF NOT EXISTS agent_runs (
       id TEXT PRIMARY KEY,

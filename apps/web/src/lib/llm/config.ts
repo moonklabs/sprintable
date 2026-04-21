@@ -10,7 +10,7 @@ import {
   matchesProjectAiCredentialProvider,
 } from './project-ai-settings';
 import { LLMAuthError, LLMConfigurationError } from './errors';
-import type { LLMConfig, LLMProvider, PersistedLLMConfig } from './types';
+import { providerSwitchRequiresNewApiKey, type LLMConfig, type LLMProvider, type PersistedLLMConfig } from './types';
 
 const DEFAULT_MODEL: Record<LLMProvider, string> = {
   anthropic: 'claude-sonnet-4',
@@ -94,9 +94,7 @@ export function parsePersistedLLMConfig(rawConfig: unknown, provider: LLMProvide
   };
 }
 
-export function providerSwitchRequiresNewApiKey(currentProvider: LLMProvider | null | undefined, nextProvider: LLMProvider): boolean {
-  return Boolean(currentProvider && currentProvider !== nextProvider);
-}
+export { providerSwitchRequiresNewApiKey };
 
 function ensureProviderBaseUrl(provider: LLMProvider, baseUrl?: string): string | undefined {
   const normalized = validateCustomEndpoint(baseUrl, provider);

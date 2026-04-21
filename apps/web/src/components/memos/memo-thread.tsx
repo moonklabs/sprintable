@@ -3,9 +3,11 @@
 import type React from 'react';
 import { useState } from 'react';
 import { useTranslations } from 'next-intl';
+import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
+import { StatusBadge } from '@/components/ui/status-badge';
 import { Textarea } from '@/components/ui/textarea';
-import type { MemoDetailState, MemoReply } from './memo-state';
+import type { MemoDetailState } from './memo-state';
 
 interface MemoThreadProps {
   memo: MemoDetailState;
@@ -36,6 +38,12 @@ export function MemoThread({ memo, currentUserId, onReply, onResolve, memberMap 
 
   const senderName = memo.created_by ? (memberMap[memo.created_by] ?? tc('unknown')) : tc('deletedUser');
   const assigneeName = memo.assigned_to ? (memberMap[memo.assigned_to] ?? tc('unknown')) : null;
+  const memoTypeLabel = memo.memo_type
+    ? (() => {
+        const key = `type${memo.memo_type.charAt(0).toUpperCase()}${memo.memo_type.slice(1)}`;
+        return t.has(key) ? t(key as 'typeMemo') : memo.memo_type;
+      })()
+    : t('typeMemo');
 
   const handleSubmitReply = async () => {
     if (!replyContent.trim() || isSubmitting) return;
@@ -61,14 +69,18 @@ export function MemoThread({ memo, currentUserId, onReply, onResolve, memberMap 
   return (
     <div className="flex h-full flex-col">
       {/* Thread header */}
-      <div className="flex-shrink-0 border-b border-white/10 px-4 py-3">
+      <div className="flex-shrink-0 border-b border-white/10 px-4 py-4">
         <div className="flex items-start justify-between gap-4">
-          <div className="min-w-0 flex-1 space-y-1">
+          <div className="min-w-0 flex-1 space-y-2">
             {memo.title && (
               <h2 className="truncate text-lg font-semibold text-[color:var(--operator-foreground)]">
                 {memo.title}
               </h2>
             )}
+            <div className="flex flex-wrap items-center gap-2">
+              <Badge variant="outline">{memoTypeLabel}</Badge>
+              <StatusBadge status={memo.status} />
+            </div>
             {/* Slack-style: sender → assignee + date */}
             <div className="flex flex-wrap items-center gap-1.5 text-xs">
               <span className="font-semibold text-[color:var(--operator-foreground)]">{senderName}</span>
@@ -87,7 +99,7 @@ export function MemoThread({ memo, currentUserId, onReply, onResolve, memberMap 
       </div>
 
       {/* Thread messages */}
-      <div className="flex-1 overflow-y-auto px-4 py-4">
+      <div className="flex-1 overflow-y-auto bg-[color:var(--operator-surface-soft)]/20 px-4 py-4">
         <div className="space-y-4">
           {/* Original message */}
           <ThreadMessage
@@ -126,14 +138,14 @@ export function MemoThread({ memo, currentUserId, onReply, onResolve, memberMap 
 
       {/* Reply input */}
       {memo.status === 'open' && (
-        <div className="flex-shrink-0 border-t border-white/10 px-4 py-3">
+        <div className="flex-shrink-0 border-t border-white/10 bg-background px-4 py-4">
           <div className="flex gap-2">
             <Textarea
               value={replyContent}
               onChange={(e) => setReplyContent(e.target.value)}
               onKeyDown={handleKeyDown}
               placeholder={t('replyPlaceholder')}
-              className="flex-1 min-h-[80px] resize-none"
+              className="flex-1 min-h-[88px] resize-none rounded-xl bg-background"
               disabled={isSubmitting}
             />
             <Button
@@ -183,8 +195,8 @@ function ThreadMessage({ content, authorId, timestamp, isCurrentUser, reviewType
     <div className={`flex ${isCurrentUser ? 'justify-end' : 'justify-start'}`}>
       <div
         className={`
-          max-w-[80%] rounded-lg px-4 py-3
-          ${isCurrentUser ? 'bg-blue-600 text-white' : 'bg-[color:var(--operator-surface-soft)] text-[color:var(--operator-foreground)]'}
+          max-w-[80%] rounded-2xl px-4 py-3 shadow-sm
+          ${isCurrentUser ? 'bg-blue-600 text-white' : 'border border-white/8 bg-background text-[color:var(--operator-foreground)]'}
           ${reviewType === 'approve' ? 'border-2 border-green-500' : ''}
           ${reviewType === 'request_changes' ? 'border-2 border-red-500' : ''}
         `}

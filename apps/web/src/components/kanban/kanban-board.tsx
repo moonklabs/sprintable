@@ -160,7 +160,6 @@ export function KanbanBoard({ projectId }: KanbanBoardProps) {
         void handleStoryClick(story);
       }
     }
-  // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [searchParams, stories, handleStoryClick]);
 
   const filteredStories = stories.filter((s) => {
@@ -357,7 +356,7 @@ export function KanbanBoard({ projectId }: KanbanBoardProps) {
       {/* Desktop kanban (hidden below md) */}
       <div className="hidden md:block">
         <DndContext sensors={sensors} onDragStart={handleDragStart} onDragEnd={handleDragEnd}>
-          <div className="flex flex-row gap-4 overflow-x-auto pb-4">
+          <div className="flex flex-row gap-5 overflow-x-auto pb-4">
             {COLUMNS.map((col) => (
               <KanbanColumn
                 key={col.id}

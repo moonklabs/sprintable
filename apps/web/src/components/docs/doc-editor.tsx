@@ -57,6 +57,7 @@ export function DocEditor({
   const suppressUpdateRef = useRef(false);
 
   const editor = useEditor({
+    immediatelyRender: false,
     extensions: [
       StarterKit.configure({ codeBlock: false }),
       CodeBlockWithCopy,

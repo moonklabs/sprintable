@@ -1,6 +1,8 @@
 'use client';
 
 import { useTranslations } from 'next-intl';
+import { EmptyState } from '@/components/ui/empty-state';
+import { Button } from '@/components/ui/button';
 import type { MemoSummaryState } from './memo-state';
 
 interface MemoFeedProps {
@@ -20,17 +22,21 @@ export function MemoFeed({ memos, onSelectMemo, selectedMemoId, memberMap = {}, 
 
   if (memos.length === 0) {
     return (
-      <div className="flex flex-col items-center justify-center gap-3 py-12 text-center">
-        <p className="text-sm text-[color:var(--operator-muted)]">{t('noMemos')}</p>
-        {onNewMemo ? (
-          <button
-            type="button"
-            onClick={onNewMemo}
-            className="rounded-xl bg-[color:var(--operator-primary)]/20 px-4 py-2 text-xs font-medium text-[color:var(--operator-primary-soft)] hover:bg-[color:var(--operator-primary)]/30"
-          >
-            {t('newMemo')}
-          </button>
-        ) : null}
+      <div className="p-4">
+        <EmptyState
+          title={t('noMemos')}
+          description={t('selectMemo')}
+          action={onNewMemo ? (
+            <Button
+              type="button"
+              size="sm"
+              onClick={onNewMemo}
+            >
+              {t('newMemo')}
+            </Button>
+          ) : null}
+          className="bg-background/70"
+        />
       </div>
     );
   }

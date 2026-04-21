@@ -43,29 +43,31 @@ export function KanbanColumn({ id, label, stories, epicMap, memberMap, dragStatu
   return (
     <div
       ref={setNodeRef}
-      className={`flex min-h-[320px] w-full flex-col rounded-lg border p-3 transition md:w-[320px] md:min-w-[280px] ${
+      className={`flex min-h-[360px] w-full flex-col rounded-2xl border p-4 transition md:w-[340px] md:min-w-[300px] ${
         isOver && isValidTarget
           ? 'border-primary/40 bg-primary/5 shadow-[0_0_0_1px_rgba(var(--primary),0.2)]'
           : isValidTarget
           ? 'border-emerald-400/25 bg-emerald-400/5'
           : isInvalidTarget
           ? 'border-border/50 bg-muted/30 opacity-45'
-          : 'border-border bg-background shadow-sm'
+          : 'border-border/80 bg-card shadow-sm'
       }`}
     >
       {isDragging && isValidTarget && (
-        <div className="mb-2 rounded-xl border border-emerald-400/20 bg-emerald-400/8 px-2 py-1 text-center text-[10px] font-medium uppercase tracking-widest text-emerald-400/70">
+        <div className="mb-3 rounded-xl border border-emerald-400/20 bg-emerald-400/8 px-2 py-1 text-center text-[10px] font-medium uppercase tracking-widest text-emerald-400/70">
           {t('validDrop')}
         </div>
       )}
-      <div className="mb-3 flex items-center justify-between gap-2">
-        <h3 className="text-sm font-semibold text-foreground">{label}</h3>
-        <Badge variant="secondary" className="font-mono text-xs">{stories.length}</Badge>
+      <div className="mb-4 flex items-center justify-between gap-3 border-b border-border/70 pb-3">
+        <h3 className="text-sm font-semibold tracking-tight text-foreground">{label}</h3>
+        <Badge variant="secondary" className="rounded-full px-2.5 font-mono text-[11px] shadow-sm">{stories.length}</Badge>
       </div>
       <SortableContextCompat items={stories.map((s) => s.id)} strategy={verticalListSortingStrategy}>
         <div className="flex min-w-0 flex-1 flex-col gap-3">
           {stories.length === 0 ? (
-            <p className="rounded-md border border-dashed border-border px-3 py-8 text-center text-xs text-muted-foreground">{t('noStories')}</p>
+            <div className="flex min-h-[124px] items-center justify-center rounded-xl border border-dashed border-border/80 bg-muted/10 px-4 text-center">
+              <p className="text-xs font-medium text-muted-foreground">{t('noStories')}</p>
+            </div>
           ) : null}
           {stories.map((story) => (
             <StoryCard

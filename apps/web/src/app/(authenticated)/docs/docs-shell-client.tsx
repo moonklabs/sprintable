@@ -7,6 +7,7 @@ import { DocTree } from '@/components/docs/doc-tree';
 import { DocEditor } from '@/components/docs/doc-editor';
 import { useDocSync, type SaveStatus } from '@/components/docs/use-doc-sync';
 import { Button } from '@/components/ui/button';
+import { EmptyState } from '@/components/ui/empty-state';
 import { Input } from '@/components/ui/input';
 import { ToastContainer, useToast } from '@/components/ui/toast';
 import { ChevronLeft, Plus, X, Trash2, Copy, Check } from 'lucide-react';
@@ -167,7 +168,7 @@ export function DocsShellClient({ projectId }: DocsShellClientProps) {
     setMobileView('detail');
   }, [fetchDoc, router, searchParams]);
 
-  const handleReorder = useCallback(async (docId: string, newSortOrder: number, siblings: Doc[]) => {
+  const handleReorder = useCallback(async (docId: string, newSortOrder: number) => {
     setTree((prev) =>
       prev.map((doc) => (doc.id === docId ? { ...doc, sort_order: newSortOrder } : doc))
     );
@@ -380,9 +381,12 @@ export function DocsShellClient({ projectId }: DocsShellClientProps) {
 
   const sidebarContent = (
     <>
-      <div className="flex-shrink-0 border-b border-white/10 px-4 py-3">
+      <div className="flex-shrink-0 border-b border-white/10 px-4 py-4">
         <div className="flex items-center justify-between gap-2">
-          <h1 className="text-lg font-semibold">{t('title')}</h1>
+          <div className="space-y-1">
+            <p className="text-[11px] font-semibold uppercase tracking-[0.2em] text-muted-foreground">Knowledge Base</p>
+            <h1 className="text-lg font-semibold">{t('title')}</h1>
+          </div>
           <Button size="sm" onClick={() => {
             setShowCreate(true);
             setNewTitle('');
@@ -396,26 +400,53 @@ export function DocsShellClient({ projectId }: DocsShellClientProps) {
         </div>
       </div>
       <div className="flex-1 overflow-y-auto p-2">
-        <DocTree
-          docs={tree}
-          selectedSlug={selectedDoc?.slug || null}
-          onSelect={(doc) => { handleSelectDoc(doc); }}
-          onReorder={handleReorder}
-          onMove={handleMove}
-          onMoveDenied={handleMoveDenied}
-          onRename={handleRename}
-          onDelete={handleDeleteDoc}
-          onAddChild={handleAddChild}
-        />
+        {tree.length === 0 ? (
+          <EmptyState
+            title={t('title')}
+            description={t('selectDoc')}
+            className="mt-2 bg-background/70"
+            action={
+              <Button
+                size="sm"
+                onClick={() => {
+                  setShowCreate(true);
+                  setNewTitle('');
+                  setNewSlug('');
+                  setNewContent('');
+                  setNewParentId(null);
+                  setSlugManuallyEdited(false);
+                }}
+              >
+                <Plus className="mr-1 h-4 w-4" />
+                {t('newDoc')}
+              </Button>
+            }
+          />
+        ) : (
+          <DocTree
+            docs={tree}
+            selectedSlug={selectedDoc?.slug || null}
+            onSelect={(doc) => { handleSelectDoc(doc); }}
+            onReorder={handleReorder}
+            onMove={handleMove}
+            onMoveDenied={handleMoveDenied}
+            onRename={handleRename}
+            onDelete={handleDeleteDoc}
+            onAddChild={handleAddChild}
+          />
+        )}
       </div>
     </>
   );
 
   const editorContent = showCreate ? (
           <div className="flex h-full flex-col">
-            <div className="flex-shrink-0 border-b border-white/10 px-3 py-2 lg:px-6 lg:py-4">
+            <div className="flex-shrink-0 border-b border-white/10 px-4 py-3 lg:px-6 lg:py-5">
               <div className="flex items-center justify-between">
-                <h2 className="text-2xl font-semibold">{t('newDoc')}</h2>
+                <div className="space-y-1">
+                  <p className="text-[11px] font-semibold uppercase tracking-[0.2em] text-muted-foreground">Draft</p>
+                  <h2 className="text-2xl font-semibold">{t('newDoc')}</h2>
+                </div>
                 <Button variant="ghost" size="sm" onClick={() => {
                   setShowCreate(false);
                   setNewParentId(null);
@@ -424,8 +455,8 @@ export function DocsShellClient({ projectId }: DocsShellClientProps) {
                 </Button>
               </div>
             </div>
-            <div className="flex-1 overflow-y-auto px-3 py-3 lg:px-6 lg:py-6">
-              <div className="space-y-4 max-w-3xl">
+            <div className="flex-1 overflow-y-auto px-4 py-4 lg:px-6 lg:py-6">
+              <div className="max-w-3xl space-y-5">
                 <div>
                   <label className="text-sm font-medium mb-2 block">{t('titleLabel')}</label>
                   <Input
@@ -448,7 +479,7 @@ export function DocsShellClient({ projectId }: DocsShellClientProps) {
                     value={newContent}
                     onChange={(e) => setNewContent(e.target.value)}
                     placeholder={t('editorPlaceholder')}
-                    className="w-full min-h-[200px] rounded-lg border border-white/10 bg-[color:var(--operator-surface-soft)] px-3 py-2 text-sm resize-none"
+                    className="w-full min-h-[220px] rounded-xl border border-white/10 bg-[color:var(--operator-surface-soft)] px-4 py-3 text-sm resize-none"
                   />
                 </div>
                 <div className="flex gap-2">
@@ -468,13 +499,13 @@ export function DocsShellClient({ projectId }: DocsShellClientProps) {
         ) : selectedDoc ? (
           <>
             {/* Header */}
-            <div className="flex-shrink-0 border-b border-white/10 px-3 py-2 lg:px-6 lg:py-4">
+            <div className="flex-shrink-0 border-b border-white/10 px-4 py-3 lg:px-6 lg:py-5">
               <div className="flex items-center justify-between gap-4">
                 <div className="flex-1 min-w-0">
                   <Input
                     value={title}
                     onChange={(e) => setTitle(e.target.value)}
-                    className="text-2xl font-semibold border-none bg-transparent px-0 focus-visible:ring-0"
+                    className="border-none bg-transparent px-0 text-2xl font-semibold focus-visible:ring-0"
                     placeholder={t('titlePlaceholder')}
                   />
                 </div>
@@ -491,7 +522,7 @@ export function DocsShellClient({ projectId }: DocsShellClientProps) {
             </div>
 
             {/* Content — always-editable tiptap */}
-            <div className="flex-1 overflow-y-auto px-3 py-3 lg:px-6 lg:py-6">
+            <div className="flex-1 overflow-y-auto px-4 py-4 lg:px-6 lg:py-6">
               <DocEditor
                 value={content}
                 contentFormat={contentFormat}
@@ -520,8 +551,28 @@ export function DocsShellClient({ projectId }: DocsShellClientProps) {
             </div>
           </>
   ) : (
-    <div className="flex h-full items-center justify-center">
-      <p className="text-sm text-[color:var(--operator-muted)]">{t('selectDoc')}</p>
+    <div className="flex h-full items-center justify-center p-4 lg:p-6">
+      <EmptyState
+        title={t('title')}
+        description={t('selectDoc')}
+        className="w-full max-w-lg bg-background/70"
+        action={
+          <Button
+            size="sm"
+            onClick={() => {
+              setShowCreate(true);
+              setNewTitle('');
+              setNewSlug('');
+              setNewContent('');
+              setNewParentId(null);
+              setSlugManuallyEdited(false);
+            }}
+          >
+            <Plus className="mr-1 h-4 w-4" />
+            {t('newDoc')}
+          </Button>
+        }
+      />
     </div>
   );
 
@@ -546,12 +597,12 @@ export function DocsShellClient({ projectId }: DocsShellClientProps) {
               <ChevronLeft className="size-4" />
               {t('title')}
             </button>
-            <GlassPanel className="flex min-h-0 flex-col overflow-hidden">
+            <GlassPanel className="flex min-h-0 flex-col overflow-hidden shadow-sm">
               {editorContent}
             </GlassPanel>
           </div>
         ) : (
-          <GlassPanel className="flex flex-col border-white/8 bg-[color:var(--operator-surface-soft)]/75">
+          <GlassPanel className="flex flex-col border-white/8 bg-[color:var(--operator-surface-soft)]/75 shadow-sm">
             {sidebarContent}
           </GlassPanel>
         )}

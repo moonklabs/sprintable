@@ -3,9 +3,11 @@ import type { SupabaseClient } from '@supabase/supabase-js';
 import { createSupabaseServerClient } from '@/lib/supabase/server';
 import { createSupabaseAdminClient } from '@/lib/supabase/admin';
 import { StandupService } from '@/services/standup';
+import { isOssMode } from '@/lib/storage/factory';
 import { handleApiError } from '@/lib/api-error';
 import { getAuthContext } from '@/lib/auth-helpers';
 import { apiSuccess, ApiErrors } from '@/lib/api-response';
+import { getOssStandupEntryForUser, listOssStandupEntries, saveOssStandupEntry } from '@/lib/oss-standup';
 
 // GET /api/standup?project_id=...&date=YYYY-MM-DD[&member_id=...]
 export async function GET(request: Request) {
@@ -20,6 +22,13 @@ export async function GET(request: Request) {
     const date = searchParams.get('date');
     const memberId = searchParams.get('member_id');
     if (!projectId || !date) return ApiErrors.badRequest('project_id and date required');
+
+    if (isOssMode()) {
+      if (memberId) {
+        return apiSuccess(getOssStandupEntryForUser(projectId, memberId, date));
+      }
+      return apiSuccess(listOssStandupEntries(projectId, date));
+    }
 
     const dbClient: SupabaseClient = me.type === 'agent' ? createSupabaseAdminClient() : supabase;
     const service = new StandupService(dbClient);
@@ -41,6 +50,7 @@ export async function POST(request: Request) {
     const me = await getAuthContext(supabase, request);
     if (!me) return ApiErrors.unauthorized();
     if (me.rateLimitExceeded) return ApiErrors.tooManyRequests(me.rateLimitRemaining, me.rateLimitResetAt);
+    const ossMode = isOssMode();
 
     const dbClient: SupabaseClient = me.type === 'agent' ? createSupabaseAdminClient() : supabase;
 
@@ -52,19 +62,34 @@ export async function POST(request: Request) {
         ? (rawBody as Record<string, unknown>).author_id as string
         : me.id;
 
-    const { data: member, error: memberError } = await dbClient
-      .from('team_members')
-      .select('project_id, org_id')
-      .eq('id', authorId)
-      .single();
-    if (memberError || !member) return ApiErrors.forbidden('Team member not found');
-
     const parsed = saveStandupSchema.safeParse(rawBody);
     if (!parsed.success) {
       const issues = parsed.error.issues.map((i) => ({ path: i.path.join('.'), message: i.message }));
       return ApiErrors.validationFailed(issues);
     }
     const body = parsed.data;
+
+    if (ossMode) {
+      const entry = saveOssStandupEntry({
+        project_id: me.project_id,
+        org_id: me.org_id,
+        author_id: authorId,
+        date: body.date || new Date().toISOString().slice(0, 10),
+        done: body.done ?? null,
+        plan: body.plan ?? null,
+        blockers: body.blockers ?? null,
+        sprint_id: body.sprint_id ?? null,
+        plan_story_ids: body.plan_story_ids ?? [],
+      });
+      return apiSuccess(entry);
+    }
+
+    const { data: member, error: memberError } = await dbClient
+      .from('team_members')
+      .select('project_id, org_id')
+      .eq('id', authorId)
+      .single();
+    if (memberError || !member) return ApiErrors.forbidden('Team member not found');
 
     const service = new StandupService(dbClient);
     const entry = await service.save({
@@ -91,6 +116,32 @@ export async function PUT(request: Request) {
     const me = await getAuthContext(supabase, request);
     if (!me) return ApiErrors.unauthorized();
     if (me.rateLimitExceeded) return ApiErrors.tooManyRequests(me.rateLimitRemaining, me.rateLimitResetAt);
+    const ossMode = isOssMode();
+
+    if (ossMode) {
+      let rawBody: unknown;
+      try { rawBody = await request.json(); } catch { return ApiErrors.badRequest('Invalid JSON body'); }
+
+      const parsed = saveStandupSchema.safeParse(rawBody);
+      if (!parsed.success) {
+        const issues = parsed.error.issues.map((i) => ({ path: i.path.join('.'), message: i.message }));
+        return ApiErrors.validationFailed(issues);
+      }
+      const body = parsed.data;
+
+      const entry = saveOssStandupEntry({
+        project_id: me.project_id,
+        org_id: me.org_id,
+        author_id: me.id,
+        date: body.date || new Date().toISOString().slice(0, 10),
+        done: body.done ?? null,
+        plan: body.plan ?? null,
+        blockers: body.blockers ?? null,
+        sprint_id: body.sprint_id ?? null,
+        plan_story_ids: body.plan_story_ids ?? [],
+      });
+      return apiSuccess(entry);
+    }
 
     const { data: member, error: memberError } = await supabase
       .from('team_members')

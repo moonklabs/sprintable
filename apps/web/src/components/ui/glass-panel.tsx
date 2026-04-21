@@ -6,7 +6,7 @@ export function GlassPanel({ className, ...props }: React.ComponentProps<'div'>)
     <div
       data-slot="glass-panel"
       className={cn(
-        'rounded-xl border border-border bg-card text-card-foreground shadow-sm',
+        'rounded-2xl border border-border/80 bg-card/95 text-card-foreground shadow-sm backdrop-blur supports-[backdrop-filter]:bg-card/88',
         className,
       )}
       {...props}

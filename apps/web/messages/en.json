@@ -157,6 +157,7 @@
     "replies": "Replies",
     "noReplies": "No replies",
     "replyPlaceholder": "Write a reply...",
+    "replyHint": "Press Cmd/Ctrl + Enter to send quickly.",
     "send": "Send",
     "createTitle": "New Memo",
     "titlePlaceholder": "Title (optional)",

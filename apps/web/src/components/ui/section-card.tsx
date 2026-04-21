@@ -5,16 +5,16 @@ export function SectionCard({ className, ...props }: React.ComponentProps<'secti
   return (
     <section
       data-slot="section-card"
-      className={cn('rounded-xl border border-border bg-card text-card-foreground shadow-sm', className)}
+      className={cn('rounded-2xl border border-border/80 bg-card text-card-foreground shadow-sm', className)}
       {...props}
     />
   );
 }
 
 export function SectionCardHeader({ className, ...props }: React.ComponentProps<'div'>) {
-  return <div className={cn('border-b border-border px-5 py-4', className)} {...props} />;
+  return <div className={cn('border-b border-border/80 px-5 py-4 sm:px-6', className)} {...props} />;
 }
 
 export function SectionCardBody({ className, ...props }: React.ComponentProps<'div'>) {
-  return <div className={cn('px-5 py-4', className)} {...props} />;
+  return <div className={cn('px-5 py-4 sm:px-6', className)} {...props} />;
 }
