@@ -7,6 +7,7 @@ import { requireOrgAdmin } from '@/lib/admin-check';
 import { AgentRoutingRuleService, getRoutingPolicyIssues, normalizeRoutingAction } from '@/services/agent-routing-rule';
 import { requireAgentOrchestration } from '@/lib/require-agent-orchestration';
 import { isOssMode } from '@/lib/storage/factory';
+import { notifyWorkflowChange } from '@/services/workflow-change-notifier';
 
 const conditionsSchema = z.object({
   memo_type: z.array(z.string().trim().min(1)).optional(),
@@ -184,6 +185,13 @@ export async function PUT(request: Request) {
         actorId: me.id,
         items: parsed.data.items,
       });
+
+      notifyWorkflowChange(supabase, {
+        orgId: me.org_id,
+        projectId: me.project_id,
+        actorId: me.id,
+        newRules: rules,
+      }).catch((err) => console.warn('[PUT /agent-routing-rules] notifyWorkflowChange failed:', err));
 
       return apiSuccess(rules);
     }
