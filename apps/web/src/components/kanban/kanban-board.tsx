@@ -1,7 +1,7 @@
 'use client';
 
 import type { ComponentType } from 'react';
-import { useState, useEffect, useCallback } from 'react';
+import { useState, useEffect, useCallback, useRef } from 'react';
 import { useRouter, useSearchParams } from 'next/navigation';
 import { useTranslations } from 'next-intl';
 import { DndContext, DragEndEvent, PointerSensor, useSensor, useSensors, DragOverlay } from '@dnd-kit/core';
@@ -73,6 +73,7 @@ export function KanbanBoard({ projectId }: KanbanBoardProps) {
   }, [selectedEpicId]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const [selectedStory, setSelectedStory] = useState<KanbanStory | null>(null);
+  const isClosingStoryRef = useRef(false);
   const [storyTasks, setStoryTasks] = useState<Task[]>([]);
   const [activeId, setActiveId] = useState<string | null>(null);
 
@@ -138,6 +139,7 @@ export function KanbanBoard({ projectId }: KanbanBoardProps) {
   }, [searchParams, router]);
 
   const handleCloseStory = useCallback(() => {
+    isClosingStoryRef.current = true;
     setSelectedStory(null);
 
     // URL에서 스토리 ID 제거
@@ -149,6 +151,12 @@ export function KanbanBoard({ projectId }: KanbanBoardProps) {
   // URL에서 스토리 ID 읽어서 자동으로 패널 열기
   useEffect(() => {
     const storyId = searchParams.get('story');
+    // closing 중에는 effect 스킵 — setSelectedStory(null) 직후 searchParams가 아직
+    // ?story= 를 포함한 상태로 effect가 재발화해 패널이 재오픈되는 race condition 방지
+    if (isClosingStoryRef.current) {
+      if (!storyId) isClosingStoryRef.current = false;
+      return;
+    }
     if (storyId && stories.length > 0) {
       const story = stories.find((s) => s.id === storyId);
       if (story && (!selectedStory || selectedStory.id !== storyId)) {
