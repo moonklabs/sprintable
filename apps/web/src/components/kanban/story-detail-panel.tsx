@@ -211,7 +211,7 @@ export function StoryDetailPanel({ story, tasks, nextTasksCursor = null, loading
             <h2 className="text-lg font-semibold text-foreground">{story.title}</h2>
             <StatusBadge status={story.status} label={statusLabel} />
           </div>
-          <button onClick={onClose} className="rounded-md border border-border px-3 py-2 text-muted-foreground transition hover:text-foreground hover:bg-muted/50">✕</button>
+          <button type="button" onClick={onClose} className="rounded-md border border-border px-3 py-2 text-muted-foreground transition hover:text-foreground hover:bg-muted/50">✕</button>
         </div>
         <div className="flex-1 overflow-y-auto p-5">
           <div className="space-y-5">
