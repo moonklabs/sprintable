@@ -1,9 +1,7 @@
 import { createSupabaseServerClient } from '@/lib/supabase/server';
-import { createSupabaseAdminClient } from '@/lib/supabase/admin';
-import { getTeamMemberFromRequest } from '@/lib/auth-api-key';
 import { handleApiError } from '@/lib/api-error';
 import { apiSuccess, apiError, ApiErrors } from '@/lib/api-response';
-import { getMyTeamMember } from '@/lib/auth-helpers';
+import { getAuthContext } from '@/lib/auth-helpers';
 import { isOssMode } from '@/lib/storage/factory';
 
 export async function GET(request: Request) {
@@ -12,25 +10,25 @@ export async function GET(request: Request) {
     return apiSuccess({ id: OSS_MEMBER_ID, name: 'OSS User', type: 'human', role: 'owner', is_active: true, email: null });
   }
   try {
-    const adminClient = createSupabaseAdminClient();
-    const apiKeyMe = await getTeamMemberFromRequest(adminClient, request);
-    if (apiKeyMe) {
+    const supabase = await createSupabaseServerClient();
+    const me = await getAuthContext(supabase, request);
+    if (!me) return ApiErrors.unauthorized();
+
+    if (me.type === 'agent') {
+      const { createSupabaseAdminClient } = await import('@/lib/supabase/admin');
+      const adminClient = createSupabaseAdminClient();
       const { data: member, error } = await adminClient
         .from('team_members')
         .select('id, name, type, role, is_active')
-        .eq('id', apiKeyMe.id)
+        .eq('id', me.id)
         .maybeSingle();
       if (error) throw error;
       if (!member) return ApiErrors.notFound('Member not found');
       return apiSuccess({ ...member, email: null });
     }
 
-    const supabase = await createSupabaseServerClient();
     const { data: { user } } = await supabase.auth.getUser();
     if (!user) return ApiErrors.unauthorized();
-
-    const me = await getMyTeamMember(supabase, user);
-    if (!me) return ApiErrors.forbidden('Team member not found');
 
     const { data: member, error } = await supabase
       .from('team_members')
@@ -61,6 +59,7 @@ export async function PATCH(request: Request) {
     const { data: { user } } = await supabase.auth.getUser();
     if (!user) return ApiErrors.unauthorized();
 
+    const { getMyTeamMember } = await import('@/lib/auth-helpers');
     const me = await getMyTeamMember(supabase, user);
     if (!me) return ApiErrors.forbidden('Team member not found');
 
