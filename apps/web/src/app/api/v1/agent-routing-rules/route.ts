@@ -1,5 +1,7 @@
 import { z } from 'zod';
 import { createSupabaseServerClient } from '@/lib/supabase/server';
+import { createSupabaseAdminClient } from '@/lib/supabase/admin';
+import { getTeamMemberFromRequest } from '@/lib/auth-api-key';
 import { getMyTeamMember } from '@/lib/auth-helpers';
 import { apiError, ApiErrors, apiSuccess } from '@/lib/api-response';
 import { handleApiError } from '@/lib/api-error';
@@ -90,17 +92,28 @@ export async function GET(request: Request) {
   if (isOssMode()) return apiError('NOT_IMPLEMENTED', 'Not available in OSS mode.', 501);
 
   try {
-    const supabase = await createSupabaseServerClient();
-    const { data: { user } } = await supabase.auth.getUser();
-    if (!user) return ApiErrors.unauthorized();
+    let me: { id: string; org_id: string; project_id: string; type?: string };
+    let supabaseForService: Awaited<ReturnType<typeof createSupabaseServerClient>> | ReturnType<typeof createSupabaseAdminClient>;
 
-    const me = await getMyTeamMember(supabase, user);
-    if (!me) return ApiErrors.forbidden();
+    const adminClient = createSupabaseAdminClient();
+    const apiKeyMe = await getTeamMemberFromRequest(adminClient, request);
+    if (apiKeyMe) {
+      me = apiKeyMe;
+      supabaseForService = adminClient;
+    } else {
+      const supabase = await createSupabaseServerClient();
+      const { data: { user } } = await supabase.auth.getUser();
+      if (!user) return ApiErrors.unauthorized();
+      const sessionMe = await getMyTeamMember(supabase, user);
+      if (!sessionMe) return ApiErrors.forbidden();
+      me = sessionMe;
+      supabaseForService = supabase;
+    }
 
-    const gateResponse = await requireAgentOrchestration(supabase, me.org_id);
+    const gateResponse = await requireAgentOrchestration(supabaseForService, me.org_id);
     if (gateResponse) return gateResponse;
 
-    const service = new AgentRoutingRuleService(supabase);
+    const service = new AgentRoutingRuleService(supabaseForService);
     const { searchParams } = new URL(request.url);
     const id = searchParams.get('id');
     if (id) {
@@ -156,19 +169,30 @@ export async function PUT(request: Request) {
   if (isOssMode()) return apiError('NOT_IMPLEMENTED', 'Not available in OSS mode.', 501);
 
   try {
-    const supabase = await createSupabaseServerClient();
-    const { data: { user } } = await supabase.auth.getUser();
-    if (!user) return ApiErrors.unauthorized();
+    let me: { id: string; org_id: string; project_id: string; type?: string };
+    let supabaseForService: Awaited<ReturnType<typeof createSupabaseServerClient>> | ReturnType<typeof createSupabaseAdminClient>;
 
-    const me = await getMyTeamMember(supabase, user);
-    if (!me) return ApiErrors.forbidden();
-    await requireOrgAdmin(supabase, me.org_id);
+    const adminClient = createSupabaseAdminClient();
+    const apiKeyMe = await getTeamMemberFromRequest(adminClient, request);
+    if (apiKeyMe) {
+      me = apiKeyMe;
+      supabaseForService = adminClient;
+    } else {
+      const supabase = await createSupabaseServerClient();
+      const { data: { user } } = await supabase.auth.getUser();
+      if (!user) return ApiErrors.unauthorized();
+      const sessionMe = await getMyTeamMember(supabase, user);
+      if (!sessionMe) return ApiErrors.forbidden();
+      me = sessionMe;
+      supabaseForService = supabase;
+      await requireOrgAdmin(supabase, me.org_id);
+    }
 
-    const gateResponse = await requireAgentOrchestration(supabase, me.org_id);
+    const gateResponse = await requireAgentOrchestration(supabaseForService, me.org_id);
     if (gateResponse) return gateResponse;
 
     const body = await request.json();
-    const service = new AgentRoutingRuleService(supabase);
+    const service = new AgentRoutingRuleService(supabaseForService);
 
     if (body && typeof body === 'object' && 'items' in body) {
       const parsed = replaceRulesSchema.safeParse(body);
@@ -186,7 +210,7 @@ export async function PUT(request: Request) {
         items: parsed.data.items,
       });
 
-      notifyWorkflowChange(supabase, {
+      notifyWorkflowChange(supabaseForService, {
         orgId: me.org_id,
         projectId: me.project_id,
         actorId: me.id,
