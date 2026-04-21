@@ -1556,7 +1556,21 @@
     "workflowDisableSuccessTitle": "라이브 라우팅 비활성화 완료",
     "workflowDisableSuccessBody": "모든 라이브 라우팅 규칙을 현재 상태 그대로 비활성화했습니다.",
     "workflowDisableErrorTitle": "전체 비활성화 실패",
-    "workflowDisableErrorBody": "라이브 라우팅 규칙을 비활성화하지 못했습니다."
+    "workflowDisableErrorBody": "라이브 라우팅 규칙을 비활성화하지 못했습니다.",
+    "workflowMatchTypeLabel": "트리거 조건",
+    "workflowMatchTypeEvent": "이벤트 수신 시",
+    "workflowForwardTargetLabel": "전달 에이전트",
+    "workflowVersionHistoryTitle": "버전 이력",
+    "workflowVersionHistoryEmpty": "저장된 버전이 없는",
+    "workflowVersionRollbackButton": "이 버전으로 롤백",
+    "workflowVersionRollbackConfirmTitle": "롤백 확인",
+    "workflowVersionRollbackConfirmBody": "현재 라이브 워크플로우를 선택한 버전으로 되돌리는. 이 작업은 되돌릴 수 없는.",
+    "workflowVersionRollbackConfirm": "롤백 실행",
+    "workflowVersionRollbackCancel": "취소",
+    "workflowVersionPreviewTitle": "버전 {version} 스냅샷",
+    "workflowVersionAddedRules": "추가 {count}",
+    "workflowVersionRemovedRules": "삭제 {count}",
+    "workflowVersionChangedRules": "변경 {count}"
   },
   "agentRuns": {
     "eyebrow": "실행 기록",

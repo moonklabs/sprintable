@@ -30,7 +30,7 @@ import { Button, buttonVariants } from '@/components/ui/button';
 import { PageHeader } from '@/components/ui/page-header';
 import { SectionCard, SectionCardBody, SectionCardHeader } from '@/components/ui/section-card';
 import { ToastContainer, useToast } from '@/components/ui/toast';
-import { getRollbackSnapshotFromRules, type RoutingRuleSummary } from '@/services/agent-routing-rule';
+import { getRollbackSnapshotFromRules, type RoutingRuleSummary, type WorkflowVersionSummary } from '@/services/agent-routing-rule';
 import {
   WORKFLOW_MEMO_TYPE_OPTIONS,
   WORKFLOW_ORIGINAL_ASSIGNEE_ID,
@@ -278,6 +278,9 @@ function AgentWorkflowEditorInner({ initialMembers, initialRules, projectName }:
   );
   const [saving, setSaving] = useState(false);
   const [savedRules, setSavedRules] = useState(initialRules);
+  const [versions, setVersions] = useState<WorkflowVersionSummary[]>([]);
+  const [selectedVersionId, setSelectedVersionId] = useState<string | null>(null);
+  const [rollbackConfirmId, setRollbackConfirmId] = useState<string | null>(null);
   const [dryRunMemoType, setDryRunMemoType] = useState<(typeof WORKFLOW_MEMO_TYPE_OPTIONS)[number]>('task');
   const [dryRunSurface, setDryRunSurface] = useState<'draft' | 'live'>('draft');
   const [rolloutChecklist, setRolloutChecklist] = useState({
@@ -511,6 +514,15 @@ function AgentWorkflowEditorInner({ initialMembers, initialRules, projectName }:
     addToast({ title: t('workflowEdgeDeletedTitle'), body: t('workflowEdgeDeletedBody'), type: 'info' });
   }, [addToast, selectedEdge, setRfEdges, t]);
 
+  const updateSelectedEdgeTarget = useCallback((targetNodeId: string) => {
+    if (!selectedEdge) return;
+    setRfEdges((prev) => prev.map((e) =>
+      e.id === selectedEdge.id
+        ? { ...e, target: targetNodeId, data: { ...e.data!, targetNodeId } }
+        : e,
+    ));
+  }, [selectedEdge, setRfEdges]);
+
   const moveEdge = useCallback((edgeId: string, direction: -1 | 1) => {
     setRfEdges((prev) => {
       const index = prev.findIndex((e) => e.id === edgeId);
@@ -609,6 +621,31 @@ function AgentWorkflowEditorInner({ initialMembers, initialRules, projectName }:
       setSaving(false);
     }
   }, [addToast, rollbackSnapshot, syncCanvasFromRules, t]);
+
+  useEffect(() => {
+    fetch('/api/v1/workflow-versions')
+      .then((r) => r.json())
+      .then((json: { data?: WorkflowVersionSummary[] }) => { if (Array.isArray(json.data)) setVersions(json.data); })
+      .catch(() => null);
+  }, [savedRules]);
+
+  const rollbackToVersion = useCallback(async (versionId: string) => {
+    setSaving(true);
+    try {
+      const response = await fetch(`/api/v1/workflow-versions/${versionId}/rollback`, { method: 'POST' });
+      const json = await response.json().catch(() => null) as { data?: RoutingRuleSummary[] } | null;
+      if (!response.ok || !json?.data || !Array.isArray(json.data)) throw new Error(t('workflowRollbackErrorBody'));
+      setSavedRules(json.data);
+      syncCanvasFromRules(json.data);
+      setRollbackConfirmId(null);
+      addToast({ title: t('workflowRollbackSuccessTitle'), body: t('workflowRollbackSuccessBody'), type: 'success' });
+    } catch (error) {
+      const message = error instanceof Error ? error.message : t('workflowRollbackErrorBody');
+      addToast({ title: t('workflowRollbackErrorTitle'), body: message, type: 'warning' });
+    } finally {
+      setSaving(false);
+    }
+  }, [addToast, syncCanvasFromRules, t]);
 
   const disableWorkflow = useCallback(async () => {
     if (savedRules.length === 0) return;
@@ -1100,16 +1137,47 @@ function AgentWorkflowEditorInner({ initialMembers, initialRules, projectName }:
                       <p className="mt-1 text-xs text-muted-foreground">{selectedEdgeSummary.target?.type === 'agent' ? t('workflowForwardAgentHint') : t('workflowHumanTargetHint')}</p>
                     </div>
                     <div className="space-y-2">
-                      <label className="text-xs font-semibold uppercase tracking-[0.2em] text-muted-foreground">{t('workflowActionLabel')}</label>
+                      <label className="text-xs font-semibold uppercase tracking-[0.2em] text-muted-foreground">{t('workflowMatchTypeLabel')}</label>
                       <select
-                        value={selectedEdge.action}
-                        onChange={(event) => updateSelectedEdge({ action: event.target.value as WorkflowEdge['action'] })}
+                        value={selectedEdge.matchType ?? 'event'}
+                        onChange={(event) => updateSelectedEdge({ matchType: event.target.value })}
                         className="w-full rounded-md border border-input bg-background px-3 py-2 text-sm text-foreground"
                       >
-                        <option value="process_and_report">{t('workflowActionReport')}</option>
-                        <option value="process_and_forward">{t('workflowActionForward')}</option>
+                        <option value="event">{t('workflowMatchTypeEvent')}</option>
                       </select>
                     </div>
+                    <div className="space-y-2">
+                      <label className="text-xs font-semibold uppercase tracking-[0.2em] text-muted-foreground">{t('workflowActionLabel')}</label>
+                      <div className="flex flex-col gap-2">
+                        {(['process_and_report', 'process_and_forward'] as const).map((mode) => (
+                          <label key={mode} className={`flex cursor-pointer items-center gap-3 rounded-md border px-3 py-2 text-sm transition ${selectedEdge.action === mode ? 'border-primary/40 bg-primary/10 text-foreground' : 'border-border bg-muted/30 text-muted-foreground'}`}>
+                            <input
+                              type="radio"
+                              name={`action-${selectedEdge.id}`}
+                              value={mode}
+                              checked={selectedEdge.action === mode}
+                              onChange={() => updateSelectedEdge({ action: mode })}
+                              className="size-4"
+                            />
+                            <span>{mode === 'process_and_report' ? t('workflowActionReport') : t('workflowActionForward')}</span>
+                          </label>
+                        ))}
+                      </div>
+                    </div>
+                    {selectedEdge.action === 'process_and_forward' && (
+                      <div className="space-y-2">
+                        <label className="text-xs font-semibold uppercase tracking-[0.2em] text-muted-foreground">{t('workflowForwardTargetLabel')}</label>
+                        <select
+                          value={selectedEdge.targetNodeId}
+                          onChange={(event) => updateSelectedEdgeTarget(event.target.value)}
+                          className="w-full rounded-md border border-input bg-background px-3 py-2 text-sm text-foreground"
+                        >
+                          {agentMembers.filter((m) => m.id !== selectedEdge.sourceNodeId).map((m) => (
+                            <option key={m.id} value={m.id}>{getMemberLabel(m)}</option>
+                          ))}
+                        </select>
+                      </div>
+                    )}
                     <div className="space-y-2">
                       <div className="flex items-center justify-between gap-3">
                         <label className="text-xs font-semibold uppercase tracking-[0.2em] text-muted-foreground">{t('workflowMemoTypesLabel')}</label>
@@ -1142,6 +1210,78 @@ function AgentWorkflowEditorInner({ initialMembers, initialRules, projectName }:
                     </Button>
                   </>
                 ) : null}
+              </SectionCardBody>
+            </SectionCard>
+
+            <SectionCard>
+              <SectionCardHeader>
+                <h2 className="text-base font-semibold text-foreground">{t('workflowVersionHistoryTitle')}</h2>
+              </SectionCardHeader>
+              <SectionCardBody className="space-y-3">
+                {versions.length === 0 ? (
+                  <p className="text-sm text-muted-foreground">{t('workflowVersionHistoryEmpty')}</p>
+                ) : versions.map((ver) => {
+                  const isSelected = ver.id === selectedVersionId;
+                  const isConfirming = ver.id === rollbackConfirmId;
+                  const cs = ver.change_summary;
+                  return (
+                    <div
+                      key={ver.id}
+                      className={`cursor-pointer rounded-md border px-3 py-3 transition ${isSelected ? 'border-primary/40 bg-primary/10' : 'border-border bg-muted/30 hover:border-primary/20 hover:bg-muted/50'}`}
+                      onClick={() => setSelectedVersionId(isSelected ? null : ver.id)}
+                    >
+                      <div className="flex items-center justify-between gap-2">
+                        <div className="min-w-0">
+                          <p className="text-sm font-semibold text-foreground">v{ver.version}</p>
+                          <p className="mt-0.5 text-xs text-muted-foreground">
+                            {new Date(ver.created_at).toLocaleString('ko-KR', { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' })}
+                            {cs && (
+                              <span className="ml-2 gap-1 inline-flex">
+                                {cs.added_rules > 0 && <span className="text-emerald-500">+{cs.added_rules}</span>}
+                                {cs.removed_rules > 0 && <span className="text-destructive">-{cs.removed_rules}</span>}
+                                {cs.changed_rules > 0 && <span className="text-amber-500">~{cs.changed_rules}</span>}
+                              </span>
+                            )}
+                          </p>
+                        </div>
+                        <RotateCcw className="size-4 shrink-0 text-muted-foreground" />
+                      </div>
+                      {isSelected && (
+                        <div className="mt-3 space-y-2 border-t border-border pt-3">
+                          {ver.snapshot.length > 0 ? (
+                            <ul className="space-y-1">
+                              {ver.snapshot.map((rule, i) => (
+                                <li key={`${rule.name}-${i}`} className="text-xs text-muted-foreground">
+                                  {rule.name}
+                                </li>
+                              ))}
+                            </ul>
+                          ) : (
+                            <p className="text-xs text-muted-foreground">{t('workflowVersionHistoryEmpty')}</p>
+                          )}
+                          {isConfirming ? (
+                            <div className="space-y-2 rounded-md border border-destructive/30 bg-destructive/10 p-3">
+                              <p className="text-xs text-foreground">{t('workflowVersionRollbackConfirmBody')}</p>
+                              <div className="flex gap-2">
+                                <Button variant="destructive" size="sm" className="flex-1" disabled={saving} onClick={() => rollbackToVersion(ver.id)}>
+                                  {t('workflowVersionRollbackConfirm')}
+                                </Button>
+                                <Button variant="ghost" size="sm" className="flex-1" onClick={() => setRollbackConfirmId(null)}>
+                                  {t('workflowVersionRollbackCancel')}
+                                </Button>
+                              </div>
+                            </div>
+                          ) : (
+                            <Button variant="glass" size="sm" className="w-full" onClick={(e) => { e.stopPropagation(); setRollbackConfirmId(ver.id); }}>
+                              <RotateCcw className="mr-2 size-3" />
+                              {t('workflowVersionRollbackButton')}
+                            </Button>
+                          )}
+                        </div>
+                      )}
+                    </div>
+                  );
+                })}
               </SectionCardBody>
             </SectionCard>
           </div>

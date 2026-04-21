@@ -1556,7 +1556,21 @@
     "workflowDisableSuccessTitle": "Live routing disabled",
     "workflowDisableSuccessBody": "All live routing rules were disabled in place.",
     "workflowDisableErrorTitle": "Disable all failed",
-    "workflowDisableErrorBody": "Live routing rules could not be disabled."
+    "workflowDisableErrorBody": "Live routing rules could not be disabled.",
+    "workflowMatchTypeLabel": "Trigger condition",
+    "workflowMatchTypeEvent": "On event received",
+    "workflowForwardTargetLabel": "Forward to agent",
+    "workflowVersionHistoryTitle": "Version history",
+    "workflowVersionHistoryEmpty": "No saved versions yet",
+    "workflowVersionRollbackButton": "Rollback to this version",
+    "workflowVersionRollbackConfirmTitle": "Confirm rollback",
+    "workflowVersionRollbackConfirmBody": "This will replace the current live workflow with the selected version. This action cannot be undone.",
+    "workflowVersionRollbackConfirm": "Execute rollback",
+    "workflowVersionRollbackCancel": "Cancel",
+    "workflowVersionPreviewTitle": "Version {version} snapshot",
+    "workflowVersionAddedRules": "+{count}",
+    "workflowVersionRemovedRules": "-{count}",
+    "workflowVersionChangedRules": "~{count}"
   },
   "agentRuns": {
     "eyebrow": "RUN HISTORY",
