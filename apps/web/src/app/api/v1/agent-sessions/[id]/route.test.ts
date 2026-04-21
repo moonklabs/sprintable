@@ -85,7 +85,7 @@ describe('PATCH /api/v1/agent-sessions/[id]', () => {
     }), { status: 403, headers: { 'Content-Type': 'application/json' } }));
 
     const response = await PATCH(
-      new Request('http://localhost:3000/api/v1/agent-sessions/session-1', {
+      new Request('http://localhost:3108/api/v1/agent-sessions/session-1', {
         method: 'PATCH',
         body: JSON.stringify({ status: 'suspended', reason: 'manual_pause' }),
       }),
@@ -98,7 +98,7 @@ describe('PATCH /api/v1/agent-sessions/[id]', () => {
 
   it('transitions a session for project admins', async () => {
     const response = await PATCH(
-      new Request('http://localhost:3000/api/v1/agent-sessions/session-1', {
+      new Request('http://localhost:3108/api/v1/agent-sessions/session-1', {
         method: 'PATCH',
         body: JSON.stringify({ status: 'suspended', reason: 'manual_pause' }),
       }),
@@ -127,7 +127,7 @@ describe('PATCH /api/v1/agent-sessions/[id]', () => {
     });
 
     const response = await PATCH(
-      new Request('http://localhost:3000/api/v1/agent-sessions/session-1', {
+      new Request('http://localhost:3108/api/v1/agent-sessions/session-1', {
         method: 'PATCH',
         body: JSON.stringify({ status: 'active', reason: 'resume' }),
       }),

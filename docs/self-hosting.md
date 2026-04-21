@@ -129,7 +129,7 @@ Check logs: `docker compose logs web`
 # Docker daemon 실행 확인
 docker info
 
-# 3000 포트 점유 프로세스 확인
+# 3108 포트 점유 프로세스 확인
 lsof -i :3108
 # 또는 Linux:
 ss -tlnp | grep 3108
@@ -152,7 +152,7 @@ docker network prune -f
 docker compose -f docker-compose.oss.yml up
 
 # 방법 3: 대안 포트 사용
-# docker-compose.oss.yml에서 ports를 "3001:3000"으로 변경 후 http://localhost:3001 접속
+# docker-compose.oss.yml에서 ports를 "3001:3108"으로 변경 후 http://localhost:3001 접속
 ```
 
 ### `permission denied` on volume mount (Linux UID 불일치)

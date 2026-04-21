@@ -11,7 +11,7 @@ services:
         NEXT_PUBLIC_SUPABASE_ANON_KEY: ${NEXT_PUBLIC_SUPABASE_ANON_KEY}
         NEXT_PUBLIC_APP_URL: ${NEXT_PUBLIC_APP_URL:-https://app.example.com}
     ports:
-      - "3000:3000"
+      - "3108:3108"
     env_file:
       - .env
     environment:

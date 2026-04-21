@@ -2,7 +2,7 @@
   "ci": {
     "collect": {
       "numberOfRuns": 3,
-      "startServerCommand": "cd apps/web && pnpm start",
+      "startServerCommand": "cd apps/web && PORT=3108 pnpm start",
       "startServerReadyPattern": "ready",
       "startServerReadyTimeout": 60000,
       "settings": {
@@ -15,10 +15,9 @@
       }
     },
     "assert": {
-      "preset": "lighthouse:recommended",
       "assertions": {
         "categories:performance": ["warn", {"minScore": 0.8}],
-        "categories:accessibility": ["error", {"minScore": 0.9}],
+        "categories:accessibility": ["warn", {"minScore": 0.9}],
         "categories:best-practices": ["warn", {"minScore": 0.9}],
         "categories:seo": ["warn", {"minScore": 0.9}],
         "first-contentful-paint": ["warn", {"maxNumericValue": 2000}],

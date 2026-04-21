@@ -8,7 +8,7 @@ services:
       context: .
       dockerfile: Dockerfile.oss
     ports:
-      - "3108:3000"
+      - "3108:3108"
     environment:
       OSS_MODE: "true"
       NEXT_PUBLIC_OSS_MODE: "true"
@@ -24,7 +24,7 @@ services:
     restart: unless-stopped
     stop_grace_period: 10s
     healthcheck:
-      test: ["CMD", "wget", "-qO-", "http://localhost:3000/api/health"]
+      test: ["CMD", "wget", "-qO-", "http://localhost:3108/api/health"]
       interval: 30s
       timeout: 5s
       retries: 5
