@@ -3,6 +3,7 @@
 import { useTranslations } from 'next-intl';
 import { EmptyState } from '@/components/ui/empty-state';
 import { Button } from '@/components/ui/button';
+import { cn } from '@/lib/utils';
 import type { MemoSummaryState } from './memo-state';
 
 interface MemoFeedProps {
@@ -72,15 +73,23 @@ function MemoFeedItem({ memo, isSelected, onClick, memberMap }: MemoFeedItemProp
     <button
       type="button"
       onClick={onClick}
-      className={`
-        flex w-full flex-col gap-1.5 px-4 py-3 text-left transition-colors
-        hover:bg-white/5
-        ${isSelected ? 'bg-[color:var(--operator-primary)]/14' : ''}
-      `}
+      className={cn(
+        'mx-2 my-1 flex w-[calc(100%-1rem)] cursor-pointer flex-col gap-1.5 rounded-2xl px-4 py-3 text-left transition-colors',
+        isSelected
+          ? 'bg-primary/10 text-primary'
+          : 'hover:bg-muted hover:text-foreground',
+      )}
     >
       {/* Slack-style header: sender + date */}
       <div className="flex items-center justify-between gap-2">
-        <span className={`truncate text-xs ${hasUnread ? 'font-bold text-[color:var(--operator-foreground)]' : 'font-semibold text-[color:var(--operator-foreground)]'}`}>
+        <span className={cn(
+          'truncate text-xs',
+          isSelected
+            ? 'text-primary'
+            : hasUnread
+              ? 'font-bold text-[color:var(--operator-foreground)]'
+              : 'font-semibold text-[color:var(--operator-foreground)]',
+        )}>
           {senderName}
         </span>
         <span className="shrink-0 text-[10px] text-[color:var(--operator-muted)]">
@@ -91,7 +100,14 @@ function MemoFeedItem({ memo, isSelected, onClick, memberMap }: MemoFeedItemProp
       {/* Title + content preview */}
       <div className="min-w-0">
         {memo.title && (
-          <div className={`truncate text-sm ${hasUnread ? 'font-semibold' : ''} text-[color:var(--operator-foreground)]`}>
+          <div className={cn(
+            'truncate text-sm',
+            isSelected
+              ? 'font-semibold text-primary'
+              : hasUnread
+                ? 'font-semibold text-[color:var(--operator-foreground)]'
+                : 'text-[color:var(--operator-foreground)]',
+          )}>
             {memo.title}
           </div>
         )}

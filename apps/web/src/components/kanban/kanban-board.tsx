@@ -324,23 +324,25 @@ export function KanbanBoard({ projectId }: KanbanBoardProps) {
   if (loading) return <KanbanSkeleton />;
 
   return (
-    <div className="space-y-4">
+    <div className="space-y-5">
       {transitionError && (
         <div className="fixed bottom-4 right-4 z-50 rounded-md border border-destructive bg-destructive px-4 py-3 text-sm text-destructive-foreground shadow-md">
           ⚠️ {transitionError}
         </div>
       )}
-      <KanbanFilters
-        sprints={sprints}
-        epics={epics}
-        members={members}
-        selectedSprintId={selectedSprintId}
-        selectedEpicId={selectedEpicId}
-        selectedAssigneeId={selectedAssigneeId}
-        onSprintChange={setSelectedSprintId}
-        onEpicChange={setSelectedEpicId}
-        onAssigneeChange={setSelectedAssigneeId}
-      />
+      <div className="rounded-2xl border border-border/70 bg-muted/10 p-3 shadow-sm">
+        <KanbanFilters
+          sprints={sprints}
+          epics={epics}
+          members={members}
+          selectedSprintId={selectedSprintId}
+          selectedEpicId={selectedEpicId}
+          selectedAssigneeId={selectedAssigneeId}
+          onSprintChange={setSelectedSprintId}
+          onEpicChange={setSelectedEpicId}
+          onAssigneeChange={setSelectedAssigneeId}
+        />
+      </div>
 
       {/* Mobile list view (hidden on md+) */}
       <div className="md:hidden">
@@ -356,7 +358,8 @@ export function KanbanBoard({ projectId }: KanbanBoardProps) {
       {/* Desktop kanban (hidden below md) */}
       <div className="hidden md:block">
         <DndContext sensors={sensors} onDragStart={handleDragStart} onDragEnd={handleDragEnd}>
-          <div className="flex flex-row gap-5 overflow-x-auto pb-4">
+          <div className="rounded-2xl border border-border/70 bg-card p-4 shadow-sm">
+            <div className="flex flex-row gap-5 overflow-x-auto pb-1">
             {COLUMNS.map((col) => (
               <KanbanColumn
                 key={col.id}
@@ -373,6 +376,7 @@ export function KanbanBoard({ projectId }: KanbanBoardProps) {
                 onDeleteStory={handleDeleteStory}
               />
             ))}
+            </div>
           </div>
           <DragOverlayCompat adjustScale={false} className="cursor-grabbing">
             {activeStory && (

@@ -23,7 +23,7 @@ export function LocaleSwitcher({ className = '' }: { className?: string }) {
 
   return (
     <div className={`flex items-center gap-1 ${className}`.trim()}>
-      <Globe className="h-4 w-4 text-gray-500" />
+      <Globe className="h-4 w-4 text-[color:var(--operator-muted)]" />
       {LOCALE_CODES.map((code) => {
         const isActive = locale === code;
         return (
@@ -32,7 +32,11 @@ export function LocaleSwitcher({ className = '' }: { className?: string }) {
             type="button"
             onClick={() => handleChange(code)}
             aria-pressed={isActive}
-            className={`rounded px-2 py-1 text-xs transition ${isActive ? 'bg-gray-900 text-white dark:bg-white dark:text-gray-900' : 'text-gray-600 hover:bg-gray-100 dark:text-gray-300 dark:hover:bg-white/10'}`}
+            className={`rounded-xl px-2.5 py-1.5 text-xs font-medium transition ${
+              isActive
+                ? 'bg-primary text-primary-foreground shadow-sm'
+                : 'text-[color:var(--operator-muted)] hover:bg-[color:var(--operator-surface-soft)] hover:text-[color:var(--operator-foreground)]'
+            }`}
           >
             {t(`locale_${code}`)}
           </button>

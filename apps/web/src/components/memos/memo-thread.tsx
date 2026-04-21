@@ -69,20 +69,20 @@ export function MemoThread({ memo, currentUserId, onReply, onResolve, memberMap 
   return (
     <div className="flex h-full flex-col">
       {/* Thread header */}
-      <div className="flex-shrink-0 border-b border-white/10 px-4 py-4">
-        <div className="flex items-start justify-between gap-4">
-          <div className="min-w-0 flex-1 space-y-2">
+      <div className="flex-shrink-0 border-b border-white/10 px-4 py-3 lg:px-5">
+        <div className="mx-auto flex w-full max-w-4xl items-start justify-between gap-3">
+          <div className="min-w-0 flex-1 space-y-1.5">
             {memo.title && (
               <h2 className="truncate text-lg font-semibold text-[color:var(--operator-foreground)]">
                 {memo.title}
               </h2>
             )}
-            <div className="flex flex-wrap items-center gap-2">
+            <div className="flex flex-wrap items-center gap-1.5">
               <Badge variant="outline">{memoTypeLabel}</Badge>
               <StatusBadge status={memo.status} />
             </div>
             {/* Slack-style: sender → assignee + date */}
-            <div className="flex flex-wrap items-center gap-1.5 text-xs">
+            <div className="flex flex-wrap items-center gap-1.5 text-[11px]">
               <span className="font-semibold text-[color:var(--operator-foreground)]">{senderName}</span>
               {assigneeName ? (
                 <span className="text-[color:var(--operator-muted)]">→ {assigneeName}</span>
@@ -99,8 +99,8 @@ export function MemoThread({ memo, currentUserId, onReply, onResolve, memberMap 
       </div>
 
       {/* Thread messages */}
-      <div className="flex-1 overflow-y-auto bg-[color:var(--operator-surface-soft)]/20 px-4 py-4">
-        <div className="space-y-4">
+      <div className="flex-1 overflow-y-auto bg-[color:var(--operator-surface-soft)]/20 px-4 py-3 lg:px-5">
+        <div className="mx-auto w-full max-w-4xl space-y-3">
           {/* Original message */}
           <ThreadMessage
             content={memo.content}
@@ -115,7 +115,7 @@ export function MemoThread({ memo, currentUserId, onReply, onResolve, memberMap 
             <button
               type="button"
               onClick={() => setRepliesExpanded((v) => !v)}
-              className="w-full rounded-xl border border-white/8 bg-white/4 py-2 text-center text-xs font-medium text-[color:var(--operator-muted)] transition hover:bg-white/8 hover:text-[color:var(--operator-foreground)]"
+              className="w-full rounded-xl border border-white/8 bg-white/4 py-1.5 text-center text-[11px] font-medium text-[color:var(--operator-muted)] transition hover:bg-white/8 hover:text-[color:var(--operator-foreground)]"
             >
               {repliesExpanded
                 ? t('collapseReplies')
@@ -138,25 +138,26 @@ export function MemoThread({ memo, currentUserId, onReply, onResolve, memberMap 
 
       {/* Reply input */}
       {memo.status === 'open' && (
-        <div className="flex-shrink-0 border-t border-white/10 bg-background px-4 py-4">
-          <div className="flex gap-2">
+        <div className="flex-shrink-0 border-t border-white/10 bg-background px-4 py-3 lg:px-5">
+          <div className="mx-auto flex w-full max-w-4xl gap-2">
             <Textarea
               value={replyContent}
               onChange={(e) => setReplyContent(e.target.value)}
               onKeyDown={handleKeyDown}
               placeholder={t('replyPlaceholder')}
-              className="flex-1 min-h-[88px] resize-none rounded-xl bg-background"
+              className="flex-1 min-h-[72px] resize-none rounded-xl bg-background"
               disabled={isSubmitting}
             />
             <Button
               onClick={() => void handleSubmitReply()}
               disabled={!replyContent.trim() || isSubmitting}
+              size="sm"
               className="self-end"
             >
               {isSubmitting ? t('sending') : t('send')}
             </Button>
           </div>
-          <div className="mt-2 text-xs text-[color:var(--operator-muted)]">
+          <div className="mx-auto mt-1.5 w-full max-w-4xl text-[11px] text-[color:var(--operator-muted)]">
             {t('replyHint')}
           </div>
         </div>
@@ -195,7 +196,7 @@ function ThreadMessage({ content, authorId, timestamp, isCurrentUser, reviewType
     <div className={`flex ${isCurrentUser ? 'justify-end' : 'justify-start'}`}>
       <div
         className={`
-          max-w-[80%] rounded-2xl px-4 py-3 shadow-sm
+          max-w-[86%] rounded-xl px-4 py-2.5 shadow-sm lg:max-w-[64%]
           ${isCurrentUser ? 'bg-blue-600 text-white' : 'border border-white/8 bg-background text-[color:var(--operator-foreground)]'}
           ${reviewType === 'approve' ? 'border-2 border-green-500' : ''}
           ${reviewType === 'request_changes' ? 'border-2 border-red-500' : ''}
@@ -203,14 +204,14 @@ function ThreadMessage({ content, authorId, timestamp, isCurrentUser, reviewType
       >
         {/* Author name above message */}
         {!isCurrentUser && (
-          <div className="mb-1 text-xs font-semibold text-[color:var(--operator-foreground)]">
+          <div className="mb-1 text-[11px] font-semibold text-[color:var(--operator-foreground)]">
             {authorName}
           </div>
         )}
-        <div className="whitespace-pre-wrap break-words text-sm">
+        <div className="whitespace-pre-wrap break-words text-[14px] leading-6">
           {renderWithMentions(content, isCurrentUser)}
         </div>
-        <div className={`mt-2 text-xs ${isCurrentUser ? 'text-blue-200' : 'text-[color:var(--operator-muted)]'}`}>
+        <div className={`mt-1.5 text-[11px] ${isCurrentUser ? 'text-blue-200' : 'text-[color:var(--operator-muted)]'}`}>
           {new Date(timestamp).toLocaleTimeString()}
         </div>
       </div>
