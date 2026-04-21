@@ -2,6 +2,8 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 const {
   createSupabaseServerClient,
+  createSupabaseAdminClient,
+  getTeamMemberFromRequest,
   getMyTeamMember,
   requireOrgAdmin,
   requireAgentOrchestration,
@@ -15,6 +17,8 @@ const {
   deleteRule,
 } = vi.hoisted(() => ({
   createSupabaseServerClient: vi.fn(),
+  createSupabaseAdminClient: vi.fn(),
+  getTeamMemberFromRequest: vi.fn(),
   getMyTeamMember: vi.fn(),
   requireOrgAdmin: vi.fn(),
   requireAgentOrchestration: vi.fn(),
@@ -30,6 +34,14 @@ const {
 
 vi.mock('@/lib/supabase/server', () => ({
   createSupabaseServerClient,
+}));
+
+vi.mock('@/lib/supabase/admin', () => ({
+  createSupabaseAdminClient,
+}));
+
+vi.mock('@/lib/auth-api-key', () => ({
+  getTeamMemberFromRequest,
 }));
 
 vi.mock('@/lib/auth-helpers', async () => {
@@ -70,6 +82,8 @@ import { DELETE, GET, PATCH, POST, PUT } from './route';
 describe('/api/v1/agent-routing-rules', () => {
   beforeEach(() => {
     createSupabaseServerClient.mockReset();
+    createSupabaseAdminClient.mockReset();
+    getTeamMemberFromRequest.mockReset();
     getMyTeamMember.mockReset();
     requireOrgAdmin.mockReset();
     requireAgentOrchestration.mockReset();
@@ -81,6 +95,9 @@ describe('/api/v1/agent-routing-rules', () => {
     reorderPriorities.mockReset();
     disableRules.mockReset();
     deleteRule.mockReset();
+
+    createSupabaseAdminClient.mockReturnValue({});
+    getTeamMemberFromRequest.mockResolvedValue(null); // default: no API key
 
     createSupabaseServerClient.mockResolvedValue({
       auth: {
