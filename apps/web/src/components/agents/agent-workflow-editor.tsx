@@ -1,8 +1,30 @@
 'use client';
 
-import { useCallback, useEffect, useMemo, useRef, useState, type DragEvent as ReactDragEvent, type PointerEvent as ReactPointerEvent } from 'react';
+import '@xyflow/react/dist/style.css';
+import {
+  ReactFlow,
+  ReactFlowProvider,
+  Background,
+  Controls,
+  Handle,
+  Position,
+  BaseEdge,
+  EdgeLabelRenderer,
+  getBezierPath,
+  useNodesState,
+  useEdgesState,
+  type Node,
+  type Edge,
+  type NodeProps,
+  type EdgeProps,
+  type Connection,
+} from '@xyflow/react';
+import { useCallback, useEffect, useMemo, useState, type DragEvent as ReactDragEvent } from 'react';
 import { useTranslations } from 'next-intl';
-import { ArrowDown, ArrowUp, Ban, Bot, ClipboardCheck, Link2, Plus, RotateCcw, Route, Save, ShieldCheck, Smartphone, Trash2, TriangleAlert, User } from 'lucide-react';
+import {
+  ArrowDown, ArrowUp, Ban, Bot, ClipboardCheck,
+  Route, Save, ShieldCheck, Smartphone, Trash2, TriangleAlert, User, RotateCcw,
+} from 'lucide-react';
 import { Badge } from '@/components/ui/badge';
 import { Button, buttonVariants } from '@/components/ui/button';
 import { PageHeader } from '@/components/ui/page-header';
@@ -17,8 +39,6 @@ import {
   buildWorkflowTemplate,
   detectWorkflowCycles,
   getEdgeSummary,
-  getNodeCenter,
-  getNodeSize,
   getWorkflowMembers,
   serializeWorkflowGraph,
   simulateWorkflowRoute,
@@ -26,21 +46,116 @@ import {
   type WorkflowEdge,
   type WorkflowGraph,
   type WorkflowMember,
+  type WorkflowNode,
   type WorkflowTemplateId,
 } from '@/services/agent-workflow-editor';
 
-interface AgentWorkflowEditorProps {
-  initialMembers: WorkflowMember[];
-  initialRules: RoutingRuleSummary[];
-  projectName: string;
+// ─── Types ────────────────────────────────────────────────────────────────────
+
+type WFNodeData = {
+  member: WorkflowMember;
+  locked: boolean;
+  onRemove: (nodeId: string) => void;
+};
+
+type WFRFNode = Node<WFNodeData>;
+type WFEdgeData = WorkflowEdge & Record<string, unknown>;
+type WFRFEdge = Edge<WFEdgeData>;
+
+// ─── Custom Node ──────────────────────────────────────────────────────────────
+
+function WorkflowNodeComponent({ id, data }: NodeProps<WFRFNode>) {
+  const { member, locked, onRemove } = data;
+  const isAgent = member.type === 'agent';
+
+  return (
+    <div className={`w-44 rounded-md border border-border bg-card px-4 py-3 shadow-md ${!locked ? 'cursor-grab active:cursor-grabbing' : ''}`}>
+      <Handle
+        type="target"
+        position={Position.Top}
+        className="!border-primary/50 !bg-primary/20"
+      />
+      <div className="flex items-start justify-between gap-3">
+        <div className="min-w-0">
+          <div className="flex items-center gap-2">
+            {isAgent ? <Bot className="size-4 shrink-0 text-primary" /> : <User className="size-4 shrink-0 text-emerald-500" />}
+            <p className="truncate text-sm font-semibold text-foreground">
+              {member.isSynthetic ? 'Original assignee' : member.name}
+            </p>
+          </div>
+          <p className="mt-2 truncate text-xs text-muted-foreground">
+            {member.isSynthetic ? 'Fallback target' : (member.role ?? (isAgent ? 'Agent' : 'Human'))}
+          </p>
+        </div>
+        {!locked ? (
+          <button
+            type="button"
+            className="shrink-0 rounded-full p-1 text-muted-foreground transition hover:bg-muted hover:text-foreground"
+            onClick={(event) => { event.stopPropagation(); onRemove(id); }}
+          >
+            <Trash2 className="size-4" />
+          </button>
+        ) : null}
+      </div>
+      <div className="mt-3 flex items-center justify-between gap-2 border-t border-border pt-3 text-xs">
+        <Badge variant={isAgent ? 'info' : 'chip'}>{isAgent ? 'Agent' : 'Human'}</Badge>
+        <p className="text-[10px] text-muted-foreground">drag handle to connect</p>
+      </div>
+      <Handle
+        type="source"
+        position={Position.Bottom}
+        className="!border-primary/50 !bg-primary/20"
+      />
+    </div>
+  );
 }
 
-interface ApiResponse<T> {
-  data: T;
-  error: null | { code: string; message: string };
+// ─── Custom Edge ──────────────────────────────────────────────────────────────
+
+function WorkflowEdgeComponent({ id, sourceX, sourceY, targetX, targetY, data, selected }: EdgeProps<WFRFEdge>) {
+  const [edgePath, labelX, labelY] = getBezierPath({ sourceX, sourceY, targetX, targetY });
+  const wfEdge = data as WorkflowEdge | undefined;
+  const memoLabel = wfEdge?.memoTypes && wfEdge.memoTypes.length > 0
+    ? wfEdge.memoTypes.join(', ')
+    : 'all';
+  const edgeIndex = id;
+
+  return (
+    <>
+      <BaseEdge
+        id={id}
+        path={edgePath}
+        style={{
+          stroke: selected ? '#7c3aed' : '#94a3b8',
+          strokeWidth: selected ? 3 : 2,
+        }}
+        markerEnd={selected ? 'url(#workflow-arrow-selected)' : 'url(#workflow-arrow)'}
+      />
+      <EdgeLabelRenderer>
+        <div
+          style={{
+            position: 'absolute',
+            transform: `translate(-50%, -50%) translate(${labelX}px,${labelY}px)`,
+            pointerEvents: 'all',
+          }}
+          className={`nodrag nopan cursor-pointer rounded-full border px-2 py-0.5 text-[11px] font-medium ${
+            selected
+              ? 'border-primary bg-primary/20 text-primary'
+              : 'border-border bg-muted/80 text-muted-foreground'
+          }`}
+          data-edge-id={edgeIndex}
+        >
+          {memoLabel}
+        </div>
+      </EdgeLabelRenderer>
+    </>
+  );
 }
 
-const EDGE_DATA_MIME = 'application/x-sprintable-workflow-member';
+const nodeTypes = { 'workflow-node': WorkflowNodeComponent };
+const edgeTypes = { 'workflow-edge': WorkflowEdgeComponent };
+
+// ─── Helpers ──────────────────────────────────────────────────────────────────
 
 function createLocalEdgeId() {
   return `edge-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
@@ -69,13 +184,76 @@ function createWorkflowGraphFingerprint(graph: WorkflowGraph) {
   });
 }
 
-export function AgentWorkflowEditor({ initialMembers, initialRules, projectName }: AgentWorkflowEditorProps) {
+function wfNodesToRF(
+  wfNodes: WorkflowNode[],
+  memberMap: Map<string, WorkflowMember>,
+  fallbackMember: WorkflowMember,
+  onRemove: (nodeId: string) => void,
+): WFRFNode[] {
+  return wfNodes.map((node) => ({
+    id: node.id,
+    type: 'workflow-node',
+    position: { x: node.x, y: node.y },
+    draggable: !node.locked,
+    data: {
+      member: memberMap.get(node.memberId) ?? fallbackMember,
+      locked: node.locked ?? false,
+      onRemove,
+    },
+  }));
+}
+
+function wfEdgesToRF(wfEdges: WorkflowEdge[], selectedEdgeId: string | null): WFRFEdge[] {
+  return wfEdges.map((edge) => ({
+    id: edge.id,
+    source: edge.sourceNodeId,
+    target: edge.targetNodeId,
+    type: 'workflow-edge',
+    selected: edge.id === selectedEdgeId,
+    data: edge as WFEdgeData,
+  }));
+}
+
+function rfNodesToWF(rfNodes: WFRFNode[]): WorkflowNode[] {
+  return rfNodes.map((node) => ({
+    id: node.id,
+    memberId: node.data.member.id,
+    x: node.position.x,
+    y: node.position.y,
+    locked: node.data.locked,
+  }));
+}
+
+function rfEdgesToWF(rfEdges: WFRFEdge[]): WorkflowEdge[] {
+  return rfEdges.map((e) => ({
+    ...(e.data as WorkflowEdge),
+    sourceNodeId: e.source,
+    targetNodeId: e.target,
+  }));
+}
+
+// ─── Props ────────────────────────────────────────────────────────────────────
+
+interface AgentWorkflowEditorProps {
+  initialMembers: WorkflowMember[];
+  initialRules: RoutingRuleSummary[];
+  projectName: string;
+}
+
+interface ApiResponse<T> {
+  data: T;
+  error: null | { code: string; message: string };
+}
+
+const EDGE_DATA_MIME = 'application/x-sprintable-workflow-member';
+const NODE_WIDTH = 176;
+
+// ─── Main Component ───────────────────────────────────────────────────────────
+
+function AgentWorkflowEditorInner({ initialMembers, initialRules, projectName }: AgentWorkflowEditorProps) {
   const t = useTranslations('agents');
   const tc = useTranslations('common');
   const { toasts, addToast, dismissToast } = useToast();
-  const canvasRef = useRef<HTMLDivElement | null>(null);
-  const dragRef = useRef<{ nodeId: string; offsetX: number; offsetY: number } | null>(null);
-  const nodeSize = getNodeSize();
 
   const members = useMemo(() => getWorkflowMembers(initialMembers), [initialMembers]);
   const fallbackMember = useMemo(
@@ -87,18 +265,19 @@ export function AgentWorkflowEditor({ initialMembers, initialRules, projectName 
     () => members.filter((member) => member.type === 'human' && !member.isSynthetic),
     [members],
   );
+  const memberMap = useMemo(() => new Map(members.map((member) => [member.id, member])), [members]);
 
   const initialGraph = useMemo(
     () => buildWorkflowGraphFromRules(initialRules, members),
-    [initialRules, members],
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [],
   );
 
-  const [nodes, setNodes] = useState(initialGraph.nodes);
-  const [edges, setEdges] = useState(initialGraph.edges);
-  const [savedRules, setSavedRules] = useState(initialRules);
-  const [selectedEdgeId, setSelectedEdgeId] = useState<string | null>(initialGraph.edges[0]?.id ?? null);
-  const [connectionSourceId, setConnectionSourceId] = useState<string | null>(null);
+  const [selectedEdgeId, setSelectedEdgeId] = useState<string | null>(
+    () => initialGraph.edges[0]?.id ?? null,
+  );
   const [saving, setSaving] = useState(false);
+  const [savedRules, setSavedRules] = useState(initialRules);
   const [dryRunMemoType, setDryRunMemoType] = useState<(typeof WORKFLOW_MEMO_TYPE_OPTIONS)[number]>('task');
   const [dryRunSurface, setDryRunSurface] = useState<'draft' | 'live'>('draft');
   const [rolloutChecklist, setRolloutChecklist] = useState({
@@ -107,10 +286,42 @@ export function AgentWorkflowEditor({ initialMembers, initialRules, projectName 
     recoveryPlan: false,
   });
 
-  const graph = useMemo<WorkflowGraph>(() => ({ nodes, edges }), [nodes, edges]);
-  const memberMap = useMemo(() => new Map(members.map((member) => [member.id, member])), [members]);
-  const nodeMap = useMemo(() => new Map(nodes.map((node) => [node.id, node])), [nodes]);
-  const selectedEdge = useMemo(() => edges.find((edge) => edge.id === selectedEdgeId) ?? null, [edges, selectedEdgeId]);
+  // ─── RF state ──────────────────────────────────────────────────────────────
+
+  const removeNode = useCallback((nodeId: string) => {
+    if (nodeId === WORKFLOW_ORIGINAL_ASSIGNEE_ID) return;
+    setRfNodes((prev) => prev.filter((n) => n.id !== nodeId));
+    setRfEdges((prev) => prev.filter((e) => e.source !== nodeId && e.target !== nodeId));
+    setSelectedEdgeId((prev) => {
+      const edge = prev ? undefined : undefined; // clear if affected
+      void edge;
+      return null;
+    });
+  }, []);
+
+  const [rfNodes, setRfNodes, onNodesChange] = useNodesState<WFRFNode>(
+    wfNodesToRF(initialGraph.nodes, memberMap, fallbackMember, removeNode),
+  );
+  const [rfEdges, setRfEdges, onEdgesChange] = useEdgesState<WFRFEdge>(
+    wfEdgesToRF(initialGraph.edges, initialGraph.edges[0]?.id ?? null),
+  );
+
+  // Sync onRemove callback into node data whenever removeNode changes
+  useEffect(() => {
+    setRfNodes((prev) => prev.map((n) => ({ ...n, data: { ...n.data, onRemove: removeNode } })));
+  }, [removeNode, setRfNodes]);
+
+  // ─── Derived state ─────────────────────────────────────────────────────────
+
+  const graph = useMemo<WorkflowGraph>(() => ({
+    nodes: rfNodesToWF(rfNodes),
+    edges: rfEdgesToWF(rfEdges),
+  }), [rfNodes, rfEdges]);
+
+  const selectedEdge = useMemo(
+    () => graph.edges.find((edge) => edge.id === selectedEdgeId) ?? null,
+    [graph.edges, selectedEdgeId],
+  );
   const selectedEdgeSummary = useMemo(
     () => (selectedEdge ? getEdgeSummary(selectedEdge, graph, members) : null),
     [selectedEdge, graph, members],
@@ -123,24 +334,14 @@ export function AgentWorkflowEditor({ initialMembers, initialRules, projectName 
   );
   const draftWorkflow = useMemo(() => {
     try {
-      return {
-        rules: serializeWorkflowGraph(graph, members, savedRules),
-        error: null,
-      };
+      return { rules: serializeWorkflowGraph(graph, members, savedRules), error: null };
     } catch (error) {
-      return {
-        rules: null,
-        error: error instanceof Error ? error.message : 'workflow_invalid',
-      };
+      return { rules: null, error: error instanceof Error ? error.message : 'workflow_invalid' };
     }
   }, [graph, members, savedRules]);
   const workflowDiff = useMemo(
     () => (draftWorkflow.rules ? summarizeWorkflowDiff(savedRules, draftWorkflow.rules) : {
-      hasChanges: hasDraftChanges,
-      addedRules: 0,
-      removedRules: 0,
-      changedRules: 0,
-      impactedMemoTypes: [],
+      hasChanges: hasDraftChanges, addedRules: 0, removedRules: 0, changedRules: 0, impactedMemoTypes: [],
     }),
     [draftWorkflow.rules, hasDraftChanges, savedRules],
   );
@@ -149,11 +350,11 @@ export function AgentWorkflowEditor({ initialMembers, initialRules, projectName 
     () => (draftWorkflow.rules ? buildWorkflowPreviewCatalog(draftWorkflow.rules, members) : []),
     [draftWorkflow.rules, members],
   );
-  const livePreviewMap = useMemo(() => new Map(livePreviewCatalog.map((preview) => [preview.memoType, preview])), [livePreviewCatalog]);
-  const draftPreviewMap = useMemo(() => new Map(draftPreviewCatalog.map((preview) => [preview.memoType, preview])), [draftPreviewCatalog]);
+  const livePreviewMap = useMemo(() => new Map(livePreviewCatalog.map((p) => [p.memoType, p])), [livePreviewCatalog]);
+  const draftPreviewMap = useMemo(() => new Map(draftPreviewCatalog.map((p) => [p.memoType, p])), [draftPreviewCatalog]);
   const visiblePreviewMemoTypes = useMemo(() => {
     if (workflowDiff.impactedMemoTypes.length === 0) return [...WORKFLOW_MEMO_TYPE_OPTIONS];
-    return WORKFLOW_MEMO_TYPE_OPTIONS.filter((memoType) => workflowDiff.impactedMemoTypes.includes(memoType));
+    return WORKFLOW_MEMO_TYPE_OPTIONS.filter((mt) => workflowDiff.impactedMemoTypes.includes(mt));
   }, [workflowDiff.impactedMemoTypes]);
   const activeDryRunPreview = useMemo(() => {
     if (dryRunSurface === 'draft' && draftWorkflow.rules) {
@@ -177,6 +378,8 @@ export function AgentWorkflowEditor({ initialMembers, initialRules, projectName 
     review: t('workflowMemoTypeReview'),
   }), [t]);
 
+  // ─── Helpers ───────────────────────────────────────────────────────────────
+
   const getMemberLabel = useCallback((member: WorkflowMember | null | undefined) => {
     if (!member) return '';
     return member.isSynthetic ? t('workflowOriginalAssignee') : member.name;
@@ -184,19 +387,21 @@ export function AgentWorkflowEditor({ initialMembers, initialRules, projectName 
 
   const formatMemoTypes = useCallback((memoTypes: string[]) => {
     if (memoTypes.length === 0) return t('workflowAllMemoTypes');
-    return memoTypes.map((memoType) => memoTypeLabels[memoType as keyof typeof memoTypeLabels] ?? memoType).join(', ');
+    return memoTypes.map((mt) => memoTypeLabels[mt as keyof typeof memoTypeLabels] ?? mt).join(', ');
   }, [memoTypeLabels, t]);
 
   const getActionLabel = useCallback((action: WorkflowEdge['action']) => {
     return action === 'process_and_forward' ? t('workflowActionForward') : t('workflowActionReport');
   }, [t]);
 
-  const formatPreviewPath = useCallback((steps: WorkflowMember[]) => steps.map((step) => getMemberLabel(step)).join(' → '), [getMemberLabel]);
+  const formatPreviewPath = useCallback((steps: WorkflowMember[]) => steps.map((s) => getMemberLabel(s)).join(' → '), [getMemberLabel]);
   const getPreviewOutcomeLabel = useCallback((result: 'fallback' | 'report' | 'forward') => {
     if (result === 'forward') return t('workflowDryRunOutcomeForward');
     if (result === 'report') return t('workflowDryRunOutcomeReport');
     return t('workflowDryRunOutcomeFallback');
   }, [t]);
+
+  // ─── Effects ───────────────────────────────────────────────────────────────
 
   useEffect(() => {
     if (!visiblePreviewMemoTypes.includes(dryRunMemoType)) {
@@ -205,163 +410,110 @@ export function AgentWorkflowEditor({ initialMembers, initialRules, projectName 
   }, [dryRunMemoType, visiblePreviewMemoTypes]);
 
   useEffect(() => {
-    if (!hasDraftChanges) {
-      setDryRunSurface('live');
-    }
+    if (!hasDraftChanges) setDryRunSurface('live');
   }, [hasDraftChanges]);
 
   useEffect(() => {
-    setRolloutChecklist({
-      dryRun: false,
-      expectedPaths: false,
-      recoveryPlan: false,
-    });
+    setRolloutChecklist({ dryRun: false, expectedPaths: false, recoveryPlan: false });
   }, [hasDraftChanges, draftWorkflow.error, workflowDiff.changedRules]);
 
-  const clampPosition = useCallback((x: number, y: number) => {
-    const canvasRect = canvasRef.current?.getBoundingClientRect();
-    if (!canvasRect) return { x, y };
-    return {
-      x: Math.max(12, Math.min(x, canvasRect.width - nodeSize.width - 12)),
-      y: Math.max(12, Math.min(y, canvasRect.height - nodeSize.height - 12)),
-    };
-  }, [nodeSize.height, nodeSize.width]);
-
-  const moveNode = useCallback((nodeId: string, x: number, y: number) => {
-    const next = clampPosition(x, y);
-    setNodes((prev) => prev.map((node) => (node.id === nodeId ? { ...node, ...next } : node)));
-  }, [clampPosition]);
-
-  const handlePointerMove = useCallback((event: PointerEvent) => {
-    const current = dragRef.current;
-    if (!current || !canvasRef.current) return;
-    const rect = canvasRef.current.getBoundingClientRect();
-    moveNode(current.nodeId, event.clientX - rect.left - current.offsetX, event.clientY - rect.top - current.offsetY);
-  }, [moveNode]);
-
-  const stopDragging = useCallback(() => {
-    dragRef.current = null;
-    window.removeEventListener('pointermove', handlePointerMove);
-    window.removeEventListener('pointerup', stopDragging);
-  }, [handlePointerMove]);
-
-  const startDragging = useCallback((event: ReactPointerEvent, nodeId: string) => {
-    if ((event.target as HTMLElement).closest('[data-node-action="true"]')) return;
-    const node = nodeMap.get(nodeId);
-    const rect = canvasRef.current?.getBoundingClientRect();
-    if (!node || !rect) return;
-
-    dragRef.current = {
-      nodeId,
-      offsetX: event.clientX - rect.left - node.x,
-      offsetY: event.clientY - rect.top - node.y,
-    };
-
-    window.addEventListener('pointermove', handlePointerMove);
-    window.addEventListener('pointerup', stopDragging);
-  }, [handlePointerMove, nodeMap, stopDragging]);
+  // ─── Canvas actions ────────────────────────────────────────────────────────
 
   const focusEdge = useCallback((edgeId: string) => {
     setSelectedEdgeId(edgeId);
-    setConnectionSourceId(null);
-  }, []);
+    setRfEdges((prev) => prev.map((e) => ({ ...e, selected: e.id === edgeId })));
+  }, [setRfEdges]);
 
   const addMemberNode = useCallback((memberId: string, x?: number, y?: number) => {
     const member = memberMap.get(memberId);
     if (!member) return;
 
-    const existing = nodeMap.get(memberId);
+    const existing = rfNodes.find((n) => n.id === memberId);
     if (existing) {
-      if (typeof x === 'number' && typeof y === 'number') moveNode(existing.id, x, y);
-      const existingEdgeId = edges.find((edge) => edge.sourceNodeId === existing.id || edge.targetNodeId === existing.id)?.id ?? selectedEdgeId;
+      if (typeof x === 'number' && typeof y === 'number') {
+        setRfNodes((prev) => prev.map((n) => n.id === memberId ? { ...n, position: { x, y } } : n));
+      }
+      const existingEdgeId = rfEdges.find((e) => e.source === existing.id || e.target === existing.id)?.id ?? selectedEdgeId;
       if (existingEdgeId) focusEdge(existingEdgeId);
       addToast({ title: t('workflowNodeAlreadyPlacedTitle'), body: t('workflowNodeAlreadyPlacedBody', { name: getMemberLabel(member) }), type: 'info' });
       return;
     }
 
-    const nextPosition = typeof x === 'number' && typeof y === 'number'
-      ? clampPosition(x, y)
-      : clampPosition(24 + (nodes.length % 3) * 220, 24 + Math.floor(nodes.length / 3) * 148);
+    const position = typeof x === 'number' && typeof y === 'number'
+      ? { x, y }
+      : { x: 24 + (rfNodes.length % 3) * 220, y: 24 + Math.floor(rfNodes.length / 3) * 148 };
 
-    setNodes((prev) => [...prev, {
+    setRfNodes((prev) => [...prev, {
       id: member.id,
-      memberId: member.id,
-      x: nextPosition.x,
-      y: nextPosition.y,
-      locked: member.isSynthetic,
+      type: 'workflow-node',
+      position,
+      draggable: !member.isSynthetic,
+      data: { member, locked: !!member.isSynthetic, onRemove: removeNode },
     }]);
-
     addToast({ title: t('workflowNodeAddedTitle'), body: t('workflowNodeAddedBody', { name: getMemberLabel(member) }), type: 'success' });
-  }, [addToast, clampPosition, edges, focusEdge, getMemberLabel, memberMap, moveNode, nodeMap, nodes.length, selectedEdgeId, t]);
+  }, [addToast, focusEdge, getMemberLabel, memberMap, rfEdges, rfNodes, removeNode, selectedEdgeId, setRfNodes, t]);
 
-  const removeNode = useCallback((nodeId: string) => {
-    if (nodeId === WORKFLOW_ORIGINAL_ASSIGNEE_ID) return;
-    setNodes((prev) => prev.filter((node) => node.id !== nodeId));
-    setEdges((prev) => prev.filter((edge) => edge.sourceNodeId !== nodeId && edge.targetNodeId !== nodeId));
-    if (selectedEdge && (selectedEdge.sourceNodeId === nodeId || selectedEdge.targetNodeId === nodeId)) {
-      setSelectedEdgeId(null);
-    }
-  }, [selectedEdge]);
+  const onConnect = useCallback((connection: Connection) => {
+    const { source, target } = connection;
+    if (!source || !target) return;
 
-  const startConnection = useCallback((nodeId: string) => {
-    const node = nodeMap.get(nodeId);
-    const member = node ? memberMap.get(node.memberId) : null;
-    if (!node || !member) return;
-    if (member.type !== 'agent') {
-      addToast({ title: t('workflowHumanSourceTitle'), body: t('workflowHumanSourceBody'), type: 'warning' });
+    if (source === target) {
+      addToast({ title: t('workflowSelfLoopTitle'), body: t('workflowSelfLoopBody'), type: 'warning' });
       return;
     }
-    setConnectionSourceId(nodeId);
-  }, [addToast, memberMap, nodeMap, t]);
 
-  const createEdge = useCallback((sourceNodeId: string, targetNodeId: string) => {
-    if (sourceNodeId === targetNodeId) {
-      addToast({ title: t('workflowSelfLoopTitle'), body: t('workflowSelfLoopBody'), type: 'warning' });
-    }
-
-    const existing = edges.find((edge) => edge.sourceNodeId === sourceNodeId && edge.targetNodeId === targetNodeId);
+    const existing = rfEdges.find((e) => e.source === source && e.target === target);
     if (existing) {
       focusEdge(existing.id);
       return;
     }
 
-    const targetNode = nodeMap.get(targetNodeId);
-    const targetMember = targetNode ? memberMap.get(targetNode.memberId) : null;
+    const targetNode = rfNodes.find((n) => n.id === target);
+    const targetMember = targetNode?.data.member;
     const action = targetMember?.type === 'agent' ? 'process_and_forward' : 'process_and_report';
-    const edge: WorkflowEdge = {
+
+    const wfEdge: WorkflowEdge = {
       id: createLocalEdgeId(),
       ruleId: null,
-      sourceNodeId,
-      targetNodeId,
+      sourceNodeId: source,
+      targetNodeId: target,
       memoTypes: [],
       action,
     };
-    setEdges((prev) => [...prev, edge]);
-    focusEdge(edge.id);
-    addToast({ title: t('workflowEdgeCreatedTitle'), body: t('workflowEdgeCreatedBody'), type: 'success' });
-  }, [addToast, edges, focusEdge, memberMap, nodeMap, t]);
 
-  const handleNodeSelect = useCallback((nodeId: string) => {
-    if (!connectionSourceId) return;
-    createEdge(connectionSourceId, nodeId);
-    setConnectionSourceId(null);
-  }, [connectionSourceId, createEdge]);
+    setRfEdges((prev) => [...prev, {
+      id: wfEdge.id,
+      source,
+      target,
+      type: 'workflow-edge',
+      selected: true,
+      data: wfEdge as WFEdgeData,
+    }]);
+    setSelectedEdgeId(wfEdge.id);
+    addToast({ title: t('workflowEdgeCreatedTitle'), body: t('workflowEdgeCreatedBody'), type: 'success' });
+  }, [addToast, focusEdge, rfEdges, rfNodes, setRfEdges, t]);
+
+  const handleEdgeClick = useCallback((_: unknown, edge: WFRFEdge) => {
+    focusEdge(edge.id);
+  }, [focusEdge]);
 
   const updateSelectedEdge = useCallback((patch: Partial<WorkflowEdge>) => {
     if (!selectedEdge) return;
-    setEdges((prev) => prev.map((edge) => edge.id === selectedEdge.id ? { ...edge, ...patch } : edge));
-  }, [selectedEdge]);
+    setRfEdges((prev) => prev.map((e) =>
+      e.id === selectedEdge.id ? { ...e, data: { ...e.data!, ...patch } } : e,
+    ));
+  }, [selectedEdge, setRfEdges]);
 
   const removeSelectedEdge = useCallback(() => {
     if (!selectedEdge) return;
-    setEdges((prev) => prev.filter((edge) => edge.id !== selectedEdge.id));
+    setRfEdges((prev) => prev.filter((e) => e.id !== selectedEdge.id));
     setSelectedEdgeId(null);
     addToast({ title: t('workflowEdgeDeletedTitle'), body: t('workflowEdgeDeletedBody'), type: 'info' });
-  }, [addToast, selectedEdge, t]);
+  }, [addToast, selectedEdge, setRfEdges, t]);
 
   const moveEdge = useCallback((edgeId: string, direction: -1 | 1) => {
-    setEdges((prev) => {
-      const index = prev.findIndex((edge) => edge.id === edgeId);
+    setRfEdges((prev) => {
+      const index = prev.findIndex((e) => e.id === edgeId);
       if (index === -1) return prev;
       const nextIndex = index + direction;
       if (nextIndex < 0 || nextIndex >= prev.length) return prev;
@@ -370,31 +522,29 @@ export function AgentWorkflowEditor({ initialMembers, initialRules, projectName 
       next.splice(nextIndex, 0, edge);
       return next;
     });
-  }, []);
+  }, [setRfEdges]);
 
   const applyTemplate = useCallback((templateId: WorkflowTemplateId) => {
     const template = buildWorkflowTemplate(templateId, members);
-    setNodes(template.nodes);
-    setEdges(template.edges);
+    setRfNodes(wfNodesToRF(template.nodes, memberMap, fallbackMember, removeNode));
+    setRfEdges(wfEdgesToRF(template.edges, template.edges[0]?.id ?? null));
     setSelectedEdgeId(template.edges[0]?.id ?? null);
-    setConnectionSourceId(null);
     addToast({ title: t('workflowTemplateAppliedTitle'), body: t(`workflowTemplateAppliedBody_${templateId}`), type: 'success' });
-  }, [addToast, members, t]);
+  }, [addToast, fallbackMember, memberMap, members, removeNode, setRfEdges, setRfNodes, t]);
 
   const syncCanvasFromRules = useCallback((rules: RoutingRuleSummary[]) => {
     const nextGraph = buildWorkflowGraphFromRules(rules, members);
-    setNodes(nextGraph.nodes);
-    setEdges(nextGraph.edges);
+    setRfNodes(wfNodesToRF(nextGraph.nodes, memberMap, fallbackMember, removeNode));
+    setRfEdges(wfEdgesToRF(nextGraph.edges, nextGraph.edges[0]?.id ?? null));
     setSelectedEdgeId(nextGraph.edges[0]?.id ?? null);
-    setConnectionSourceId(null);
-  }, [members]);
+  }, [fallbackMember, memberMap, members, removeNode, setRfEdges, setRfNodes]);
+
+  // ─── API actions ───────────────────────────────────────────────────────────
 
   const saveWorkflow = useCallback(async () => {
     setSaving(true);
     try {
-      if (!draftWorkflow.rules) {
-        throw new Error(draftWorkflow.error ?? t('workflowSaveErrorBody'));
-      }
+      if (!draftWorkflow.rules) throw new Error(draftWorkflow.error ?? t('workflowSaveErrorBody'));
 
       const desired = draftWorkflow.rules;
       const response = await fetch('/api/v1/agent-routing-rules', {
@@ -418,15 +568,16 @@ export function AgentWorkflowEditor({ initialMembers, initialRules, projectName 
         }),
       });
       const json = await response.json().catch(() => null) as ApiResponse<RoutingRuleSummary[]> | null;
-      if (!response.ok || !json?.data || !Array.isArray(json.data)) {
-        throw new Error(parseApiError(json));
-      }
+      if (!response.ok || !json?.data || !Array.isArray(json.data)) throw new Error(parseApiError(json));
 
       const finalRules = json.data;
       const edgeRuleIdMap = new Map(desired.map((rule, index) => [rule.edgeId, finalRules[index]?.id ?? rule.id ?? null]));
 
       setSavedRules(finalRules);
-      setEdges((prev) => prev.map((edge) => ({ ...edge, ruleId: edgeRuleIdMap.get(edge.id) ?? null })));
+      setRfEdges((prev) => prev.map((e) => {
+        const ruleId = edgeRuleIdMap.get(e.id) ?? (e.data as WorkflowEdge | undefined)?.ruleId ?? null;
+        return { ...e, data: { ...(e.data as WorkflowEdge), ruleId } };
+      }));
       setRolloutChecklist({ dryRun: false, expectedPaths: false, recoveryPlan: false });
       addToast({ title: t('workflowSaveSuccessTitle'), body: t('workflowSaveSuccessBody'), type: 'success' });
     } catch (error) {
@@ -435,11 +586,10 @@ export function AgentWorkflowEditor({ initialMembers, initialRules, projectName 
     } finally {
       setSaving(false);
     }
-  }, [addToast, draftWorkflow.error, draftWorkflow.rules, t]);
+  }, [addToast, draftWorkflow.error, draftWorkflow.rules, setRfEdges, t]);
 
   const rollbackWorkflow = useCallback(async () => {
     if (!rollbackSnapshot?.items.length) return;
-
     setSaving(true);
     try {
       const response = await fetch('/api/v1/agent-routing-rules', {
@@ -448,10 +598,7 @@ export function AgentWorkflowEditor({ initialMembers, initialRules, projectName 
         body: JSON.stringify({ items: rollbackSnapshot.items }),
       });
       const json = await response.json().catch(() => null) as ApiResponse<RoutingRuleSummary[]> | null;
-      if (!response.ok || !json?.data || !Array.isArray(json.data)) {
-        throw new Error(parseApiError(json));
-      }
-
+      if (!response.ok || !json?.data || !Array.isArray(json.data)) throw new Error(parseApiError(json));
       setSavedRules(json.data);
       syncCanvasFromRules(json.data);
       addToast({ title: t('workflowRollbackSuccessTitle'), body: t('workflowRollbackSuccessBody'), type: 'success' });
@@ -465,7 +612,6 @@ export function AgentWorkflowEditor({ initialMembers, initialRules, projectName 
 
   const disableWorkflow = useCallback(async () => {
     if (savedRules.length === 0) return;
-
     setSaving(true);
     try {
       const response = await fetch('/api/v1/agent-routing-rules', {
@@ -474,10 +620,7 @@ export function AgentWorkflowEditor({ initialMembers, initialRules, projectName 
         body: JSON.stringify({ disable_all: true }),
       });
       const json = await response.json().catch(() => null) as ApiResponse<RoutingRuleSummary[]> | null;
-      if (!response.ok || !json?.data || !Array.isArray(json.data)) {
-        throw new Error(parseApiError(json));
-      }
-
+      if (!response.ok || !json?.data || !Array.isArray(json.data)) throw new Error(parseApiError(json));
       setSavedRules(json.data);
       syncCanvasFromRules(json.data);
       addToast({ title: t('workflowDisableSuccessTitle'), body: t('workflowDisableSuccessBody'), type: 'success' });
@@ -497,48 +640,16 @@ export function AgentWorkflowEditor({ initialMembers, initialRules, projectName 
   const onCanvasDrop = useCallback((event: ReactDragEvent<HTMLDivElement>) => {
     event.preventDefault();
     const memberId = event.dataTransfer.getData(EDGE_DATA_MIME);
-    if (!memberId || !canvasRef.current) return;
-    const rect = canvasRef.current.getBoundingClientRect();
-    addMemberNode(memberId, event.clientX - rect.left - nodeSize.width / 2, event.clientY - rect.top - nodeSize.height / 2);
-  }, [addMemberNode, nodeSize.height, nodeSize.width]);
+    if (!memberId) return;
+    const rect = (event.target as HTMLElement).closest('.react-flow')?.getBoundingClientRect();
+    if (!rect) {
+      addMemberNode(memberId);
+      return;
+    }
+    addMemberNode(memberId, event.clientX - rect.left - NODE_WIDTH / 2, event.clientY - rect.top - 46);
+  }, [addMemberNode]);
 
-  const renderEdgeLabel = (edge: WorkflowEdge, index: number) => {
-    const sourceNode = nodeMap.get(edge.sourceNodeId);
-    const targetNode = nodeMap.get(edge.targetNodeId);
-    if (!sourceNode || !targetNode) return null;
-    const source = getNodeCenter(sourceNode);
-    const target = getNodeCenter(targetNode);
-    const midX = (source.x + target.x) / 2;
-    const midY = (source.y + target.y) / 2;
-    const isSelected = edge.id === selectedEdgeId;
-
-    return (
-      <g key={edge.id} className="cursor-pointer" onClick={() => focusEdge(edge.id)}>
-        <line
-          x1={source.x}
-          y1={source.y}
-          x2={target.x}
-          y2={target.y}
-          stroke={isSelected ? '#7c3aed' : '#94a3b8'}
-          strokeWidth={isSelected ? 3 : 2}
-          markerEnd="url(#workflow-arrow)"
-        />
-        <line
-          x1={source.x}
-          y1={source.y}
-          x2={target.x}
-          y2={target.y}
-          stroke="transparent"
-          strokeWidth={18}
-        />
-        <foreignObject x={midX - 62} y={midY - 16} width={124} height={32}>
-          <div className={`flex h-8 items-center justify-center rounded-full border px-2 text-[11px] font-medium ${isSelected ? 'border-primary bg-primary/20 text-primary' : 'border-border bg-muted/80 text-muted-foreground'}`}>
-            #{index + 1} · {formatMemoTypes(edge.memoTypes)}
-          </div>
-        </foreignObject>
-      </g>
-    );
-  };
+  // ─── No agents guard ────────────────────────────────────────────────────────
 
   if (agentMembers.length === 0) {
     return (
@@ -555,6 +666,8 @@ export function AgentWorkflowEditor({ initialMembers, initialRules, projectName 
     );
   }
 
+  // ─── Render ─────────────────────────────────────────────────────────────────
+
   return (
     <>
       <div className="space-y-4">
@@ -564,7 +677,7 @@ export function AgentWorkflowEditor({ initialMembers, initialRules, projectName 
           description={t('workflowEditorDescription', { project: projectName })}
           actions={(
             <div className="flex flex-wrap items-center gap-2">
-              <Badge variant="chip">{t('workflowRuleCount', { count: edges.length })}</Badge>
+              <Badge variant="chip">{t('workflowRuleCount', { count: rfEdges.length })}</Badge>
               <Button variant="hero" size="lg" disabled={!canRollout} onClick={handleSave}>
                 <Save className="mr-2 size-4" />
                 {saving ? t('workflowSaving') : tc('save')}
@@ -588,6 +701,7 @@ export function AgentWorkflowEditor({ initialMembers, initialRules, projectName 
           </SectionCard>
         ) : null}
 
+        {/* ── Dry run / Expected paths / Rollout checklist ── */}
         <div className="grid gap-4 xl:grid-cols-[minmax(0,1.05fr)_minmax(0,1.2fr)_minmax(0,1fr)]">
           <SectionCard>
             <SectionCardHeader>
@@ -608,7 +722,6 @@ export function AgentWorkflowEditor({ initialMembers, initialRules, projectName 
                   {t('workflowDryRunLive')}
                 </Button>
               </div>
-
               <div className="space-y-2">
                 <label className="text-xs font-semibold uppercase tracking-[0.2em] text-muted-foreground">{t('workflowDryRunMemoTypeLabel')}</label>
                 <select
@@ -616,12 +729,11 @@ export function AgentWorkflowEditor({ initialMembers, initialRules, projectName 
                   onChange={(event) => setDryRunMemoType(event.target.value as (typeof WORKFLOW_MEMO_TYPE_OPTIONS)[number])}
                   className="w-full rounded-md border border-input bg-background px-3 py-2 text-sm text-foreground"
                 >
-                  {WORKFLOW_MEMO_TYPE_OPTIONS.map((memoType) => (
-                    <option key={memoType} value={memoType}>{memoTypeLabels[memoType]}</option>
+                  {WORKFLOW_MEMO_TYPE_OPTIONS.map((mt) => (
+                    <option key={mt} value={mt}>{memoTypeLabels[mt]}</option>
                   ))}
                 </select>
               </div>
-
               {dryRunSurface === 'draft' && draftWorkflow.error ? (
                 <div className="rounded-md border border-amber-500/30 bg-amber-500/10 px-4 py-3 text-sm text-amber-600 dark:text-amber-400">
                   {t('workflowDraftInvalidBody', { error: draftWorkflow.error })}
@@ -667,10 +779,7 @@ export function AgentWorkflowEditor({ initialMembers, initialRules, projectName 
                   <button
                     key={memoType}
                     type="button"
-                    onClick={() => {
-                      setDryRunMemoType(memoType);
-                      setDryRunSurface('draft');
-                    }}
+                    onClick={() => { setDryRunMemoType(memoType); setDryRunSurface('draft'); }}
                     className={`w-full rounded-md border px-4 py-3 text-left transition ${changed ? 'border-primary/30 bg-primary/10' : 'border-border bg-muted/30 hover:bg-muted'}`}
                   >
                     <div className="flex flex-wrap items-center justify-between gap-2">
@@ -709,7 +818,6 @@ export function AgentWorkflowEditor({ initialMembers, initialRules, projectName 
                 <Badge variant="outline">{t('workflowRolloutAddedRules', { count: workflowDiff.addedRules })}</Badge>
                 <Badge variant="outline">{t('workflowRolloutRemovedRules', { count: workflowDiff.removedRules })}</Badge>
               </div>
-
               {draftWorkflow.error ? (
                 <div className="rounded-md border border-amber-500/30 bg-amber-500/10 px-4 py-3 text-sm text-amber-600 dark:text-amber-400">
                   {t('workflowDraftInvalidBody', { error: draftWorkflow.error })}
@@ -721,24 +829,21 @@ export function AgentWorkflowEditor({ initialMembers, initialRules, projectName 
               ) : (
                 <>
                   <label className="flex items-start gap-3 rounded-md border border-border bg-muted/30 px-4 py-3 text-sm text-foreground">
-                    <input type="checkbox" className="mt-0.5 size-4" checked={rolloutChecklist.dryRun} onChange={(event) => setRolloutChecklist((prev) => ({ ...prev, dryRun: event.target.checked }))} />
+                    <input type="checkbox" className="mt-0.5 size-4" checked={rolloutChecklist.dryRun} onChange={(e) => setRolloutChecklist((prev) => ({ ...prev, dryRun: e.target.checked }))} />
                     <span>{t('workflowRolloutChecklistDryRun')}</span>
                   </label>
                   <label className="flex items-start gap-3 rounded-md border border-border bg-muted/30 px-4 py-3 text-sm text-foreground">
-                    <input type="checkbox" className="mt-0.5 size-4" checked={rolloutChecklist.expectedPaths} onChange={(event) => setRolloutChecklist((prev) => ({ ...prev, expectedPaths: event.target.checked }))} />
+                    <input type="checkbox" className="mt-0.5 size-4" checked={rolloutChecklist.expectedPaths} onChange={(e) => setRolloutChecklist((prev) => ({ ...prev, expectedPaths: e.target.checked }))} />
                     <span>{t('workflowRolloutChecklistExpectedPaths')}</span>
                   </label>
                   <label className="flex items-start gap-3 rounded-md border border-border bg-muted/30 px-4 py-3 text-sm text-foreground">
-                    <input type="checkbox" className="mt-0.5 size-4" checked={rolloutChecklist.recoveryPlan} onChange={(event) => setRolloutChecklist((prev) => ({ ...prev, recoveryPlan: event.target.checked }))} />
+                    <input type="checkbox" className="mt-0.5 size-4" checked={rolloutChecklist.recoveryPlan} onChange={(e) => setRolloutChecklist((prev) => ({ ...prev, recoveryPlan: e.target.checked }))} />
                     <span>{t('workflowRolloutChecklistRecovery')}</span>
                   </label>
                 </>
               )}
-
               <div className="rounded-md border border-dashed border-border px-4 py-3 text-sm text-muted-foreground">
-                {rollbackSnapshot?.items.length
-                  ? t('workflowRolloutRollbackReady')
-                  : t('workflowRolloutRollbackMissing')}
+                {rollbackSnapshot?.items.length ? t('workflowRolloutRollbackReady') : t('workflowRolloutRollbackMissing')}
               </div>
               <div className="rounded-md border border-dashed border-border px-4 py-3 text-sm text-muted-foreground">
                 {savedRules.length > 0 ? t('workflowRolloutDisableReady') : t('workflowRolloutDisableEmpty')}
@@ -748,6 +853,7 @@ export function AgentWorkflowEditor({ initialMembers, initialRules, projectName 
           </SectionCard>
         </div>
 
+        {/* ── Emergency controls ── */}
         <SectionCard>
           <SectionCardHeader>
             <div className="flex items-center gap-2">
@@ -770,6 +876,7 @@ export function AgentWorkflowEditor({ initialMembers, initialRules, projectName 
           </SectionCardBody>
         </SectionCard>
 
+        {/* ── Mobile fallback ── */}
         <div className="space-y-4 lg:hidden">
           <SectionCard>
             <SectionCardHeader>
@@ -783,26 +890,22 @@ export function AgentWorkflowEditor({ initialMembers, initialRules, projectName 
               <p className="text-sm text-muted-foreground">{t('workflowDesktopHint')}</p>
             </SectionCardBody>
           </SectionCard>
-
           <SectionCard>
             <SectionCardHeader>
               <h2 className="text-base font-semibold text-foreground">{t('workflowPriorityTitle')}</h2>
             </SectionCardHeader>
             <SectionCardBody className="space-y-3">
-              {edges.length === 0 ? (
+              {rfEdges.length === 0 ? (
                 <p className="text-sm text-muted-foreground">{t('workflowPriorityEmpty')}</p>
-              ) : edges.map((edge, index) => {
-                const summary = getEdgeSummary(edge, graph, members);
+              ) : rfEdges.map((rfEdge, index) => {
+                const wfEdge = rfEdge.data as WorkflowEdge;
+                const summary = getEdgeSummary(wfEdge, graph, members);
                 return (
-                  <div key={edge.id} className="rounded-md border border-border bg-muted/30 px-4 py-3">
+                  <div key={rfEdge.id} className="rounded-md border border-border bg-muted/30 px-4 py-3">
                     <div className="flex items-center justify-between gap-3">
                       <div>
                         <p className="text-sm font-semibold text-foreground">#{index + 1} {getMemberLabel(summary.source)} → {getMemberLabel(summary.target)}</p>
-                        <p className="mt-1 text-xs text-muted-foreground">
-                          {formatMemoTypes(summary.memoTypes)}
-                          {' · '}
-                          {getActionLabel(edge.action)}
-                        </p>
+                        <p className="mt-1 text-xs text-muted-foreground">{formatMemoTypes(summary.memoTypes)} · {getActionLabel(wfEdge.action)}</p>
                       </div>
                       <Badge variant="chip">{summary.target?.type === 'agent' ? t('workflowMembersAgents') : t('workflowHumanBadge')}</Badge>
                     </div>
@@ -813,7 +916,9 @@ export function AgentWorkflowEditor({ initialMembers, initialRules, projectName 
           </SectionCard>
         </div>
 
+        {/* ── Desktop: Templates + Canvas + Edge config ── */}
         <div className="hidden gap-4 lg:grid lg:grid-cols-[280px_minmax(0,1fr)_320px]">
+          {/* Templates + Members */}
           <div className="space-y-4">
             <SectionCard>
               <SectionCardHeader>
@@ -857,13 +962,11 @@ export function AgentWorkflowEditor({ initialMembers, initialRules, projectName 
                             <p className="text-sm font-semibold text-foreground">{member.name}</p>
                             <p className="text-xs text-muted-foreground">{member.role ?? t('workflowMembersAgents')}</p>
                           </div>
-                          <Plus className="size-4 text-primary" />
                         </div>
                       </button>
                     ))}
                   </div>
                 </div>
-
                 <div>
                   <div className="mb-2 flex items-center gap-2 text-xs font-semibold uppercase tracking-[0.2em] text-muted-foreground">
                     <User className="size-3.5" /> {t('workflowMembersHumans')}
@@ -884,13 +987,11 @@ export function AgentWorkflowEditor({ initialMembers, initialRules, projectName 
                             <p className="text-sm font-semibold text-foreground">{member.name}</p>
                             <p className="text-xs text-muted-foreground">{member.role ?? t('workflowHumanBadge')}</p>
                           </div>
-                          <Plus className="size-4 text-primary" />
                         </div>
                       </button>
                     ))}
                   </div>
                 </div>
-
                 <div className="rounded-md border border-dashed border-border px-3 py-3 text-xs text-muted-foreground">
                   {t('workflowDragHint')}
                 </div>
@@ -898,95 +999,52 @@ export function AgentWorkflowEditor({ initialMembers, initialRules, projectName 
             </SectionCard>
           </div>
 
+          {/* ReactFlow Canvas */}
           <SectionCard>
             <SectionCardHeader>
-              <div className="flex items-center justify-between gap-3">
-                <div>
-                  <h2 className="text-base font-semibold text-foreground">{t('workflowCanvasTitle')}</h2>
-                  <p className="text-sm text-muted-foreground">{t('workflowCanvasBody')}</p>
-                </div>
-                {connectionSourceId ? (
-                  <Button variant="glass" size="sm" onClick={() => setConnectionSourceId(null)}>{tc('cancel')}</Button>
-                ) : null}
+              <div>
+                <h2 className="text-base font-semibold text-foreground">{t('workflowCanvasTitle')}</h2>
+                <p className="text-sm text-muted-foreground">{t('workflowCanvasBody')}</p>
               </div>
             </SectionCardHeader>
             <SectionCardBody>
               <div
-                ref={canvasRef}
+                className="h-[620px] overflow-hidden rounded-xl border border-dashed border-border bg-muted/10"
                 onDragOver={(event) => event.preventDefault()}
                 onDrop={onCanvasDrop}
-                className="relative min-h-[620px] overflow-hidden rounded-xl border border-dashed border-border bg-muted/10"
               >
-                <svg className="absolute inset-0 h-full w-full">
-                  <defs>
-                    <marker id="workflow-arrow" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse">
-                      <path d="M 0 0 L 10 5 L 0 10 z" fill="#94a3b8" />
-                    </marker>
-                  </defs>
-                  {edges.map((edge, index) => renderEdgeLabel(edge, index))}
-                </svg>
-
-                {nodes.length === 0 ? (
-                  <div className="absolute inset-0 flex flex-col items-center justify-center gap-3 text-center">
-                    <Badge variant="chip">{t('workflowEmptyBadge')}</Badge>
-                    <h3 className="text-lg font-semibold text-foreground">{t('workflowEmptyTitle')}</h3>
-                    <p className="max-w-md text-sm text-muted-foreground">{t('workflowEmptyBody')}</p>
-                  </div>
-                ) : null}
-
-                {connectionSourceId ? (
-                  <div className="absolute left-4 top-4 z-20 rounded-md border border-primary/30 bg-primary/10 px-4 py-2 text-sm text-primary backdrop-blur">
-                    {t('workflowConnectMode')}
-                  </div>
-                ) : null}
-
-                {nodes.map((node) => {
-                  const member = memberMap.get(node.memberId) ?? fallbackMember;
-                  const isConnectionSource = connectionSourceId === node.id;
-                  const isAgent = member.type === 'agent';
-                  return (
-                    <div
-                      key={node.id}
-                      role="button"
-                      tabIndex={0}
-                      className={`absolute w-44 rounded-md border px-4 py-3 text-left shadow-md transition ${isConnectionSource ? 'border-primary bg-primary/20 text-foreground' : 'border-border bg-card text-card-foreground'} ${!node.locked ? 'cursor-grab active:cursor-grabbing' : ''}`}
-                      style={{ left: node.x, top: node.y }}
-                      onClick={() => handleNodeSelect(node.id)}
-                      onPointerDown={(event) => (!node.locked ? startDragging(event, node.id) : undefined)}
-                      onKeyDown={(event) => {
-                        if (event.key === 'Enter' || event.key === ' ') {
-                          event.preventDefault();
-                          handleNodeSelect(node.id);
-                        }
-                      }}
-                    >
-                      <div className="flex items-start justify-between gap-3">
-                        <div>
-                          <div className="flex items-center gap-2">
-                            {member.type === 'agent' ? <Bot className="size-4 text-primary" /> : <User className="size-4 text-emerald-500" />}
-                            <p className="text-sm font-semibold">{member.isSynthetic ? t('workflowOriginalAssignee') : member.name}</p>
-                          </div>
-                          <p className="mt-2 text-xs text-muted-foreground">{member.isSynthetic ? t('workflowOriginalAssigneeHint') : member.role ?? (member.type === 'agent' ? t('workflowMembersAgents') : t('workflowHumanBadge'))}</p>
-                        </div>
-                        {!node.locked ? (
-                          <button data-node-action="true" type="button" className="rounded-full p-1 text-muted-foreground transition hover:bg-muted hover:text-foreground" onClick={(event) => { event.stopPropagation(); removeNode(node.id); }}>
-                            <Trash2 className="size-4" />
-                          </button>
-                        ) : null}
-                      </div>
-                      <div className="mt-3 flex items-center justify-between gap-2 border-t border-border pt-3 text-xs">
-                        <button data-node-action="true" type="button" className="inline-flex items-center gap-1 rounded-full border border-border px-2 py-1 transition hover:bg-muted" onClick={(event) => { event.stopPropagation(); startConnection(node.id); }}>
-                          <Link2 className="size-3.5" /> {t('workflowNodeConnect')}
-                        </button>
-                        <Badge variant={isAgent ? 'info' : 'chip'}>{isAgent ? t('workflowMembersAgents') : t('workflowHumanBadge')}</Badge>
-                      </div>
-                    </div>
-                  );
-                })}
+                <ReactFlow
+                  nodes={rfNodes}
+                  edges={rfEdges}
+                  nodeTypes={nodeTypes}
+                  edgeTypes={edgeTypes}
+                  onNodesChange={onNodesChange}
+                  onEdgesChange={onEdgesChange}
+                  onConnect={onConnect}
+                  onEdgeClick={handleEdgeClick}
+                  fitView
+                  fitViewOptions={{ padding: 0.2 }}
+                  deleteKeyCode={null}
+                  className="bg-transparent"
+                >
+                  <Background color="#94a3b820" gap={24} />
+                  <Controls className="!border-border !bg-card !shadow-sm" />
+                  <svg style={{ position: 'absolute', width: 0, height: 0 }}>
+                    <defs>
+                      <marker id="workflow-arrow" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse">
+                        <path d="M 0 0 L 10 5 L 0 10 z" fill="#94a3b8" />
+                      </marker>
+                      <marker id="workflow-arrow-selected" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse">
+                        <path d="M 0 0 L 10 5 L 0 10 z" fill="#7c3aed" />
+                      </marker>
+                    </defs>
+                  </svg>
+                </ReactFlow>
               </div>
             </SectionCardBody>
           </SectionCard>
 
+          {/* Edge config */}
           <div className="space-y-4">
             <SectionCard>
               <SectionCardHeader>
@@ -994,39 +1052,31 @@ export function AgentWorkflowEditor({ initialMembers, initialRules, projectName 
                 <p className="text-sm text-muted-foreground">{t('workflowPriorityBody')}</p>
               </SectionCardHeader>
               <SectionCardBody className="space-y-2">
-                {edges.length === 0 ? (
+                {rfEdges.length === 0 ? (
                   <p className="rounded-md border border-dashed border-border px-3 py-3 text-sm text-muted-foreground">{t('workflowPriorityEmpty')}</p>
-                ) : edges.map((edge, index) => {
-                  const summary = getEdgeSummary(edge, graph, members);
-                  const isSelected = edge.id === selectedEdgeId;
+                ) : rfEdges.map((rfEdge, index) => {
+                  const wfEdge = rfEdge.data as WorkflowEdge;
+                  const summary = getEdgeSummary(wfEdge, graph, members);
+                  const isSelected = rfEdge.id === selectedEdgeId;
                   return (
                     <div
-                      key={edge.id}
+                      key={rfEdge.id}
                       role="button"
                       tabIndex={0}
-                      onClick={() => focusEdge(edge.id)}
-                      onKeyDown={(event) => {
-                        if (event.key === 'Enter' || event.key === ' ') {
-                          event.preventDefault();
-                          focusEdge(edge.id);
-                        }
-                      }}
+                      onClick={() => focusEdge(rfEdge.id)}
+                      onKeyDown={(event) => { if (event.key === 'Enter' || event.key === ' ') { event.preventDefault(); focusEdge(rfEdge.id); } }}
                       className={`w-full rounded-md border px-3 py-3 text-left transition ${isSelected ? 'border-primary/40 bg-primary/10' : 'border-border bg-muted/30 hover:bg-muted'}`}
                     >
                       <div className="flex items-start justify-between gap-3">
                         <div>
                           <p className="text-sm font-semibold text-foreground">#{index + 1} {getMemberLabel(summary.source)} → {getMemberLabel(summary.target)}</p>
-                          <p className="mt-1 text-xs text-muted-foreground">
-                            {formatMemoTypes(summary.memoTypes)}
-                            {' · '}
-                            {getActionLabel(edge.action)}
-                          </p>
+                          <p className="mt-1 text-xs text-muted-foreground">{formatMemoTypes(summary.memoTypes)} · {getActionLabel(wfEdge.action)}</p>
                         </div>
                         <div className="flex items-center gap-1">
-                          <button type="button" className="rounded-full p-1 text-muted-foreground transition hover:bg-muted hover:text-foreground" onClick={(event) => { event.stopPropagation(); moveEdge(edge.id, -1); }}>
+                          <button type="button" className="rounded-full p-1 text-muted-foreground transition hover:bg-muted hover:text-foreground" onClick={(e) => { e.stopPropagation(); moveEdge(rfEdge.id, -1); }}>
                             <ArrowUp className="size-4" />
                           </button>
-                          <button type="button" className="rounded-full p-1 text-muted-foreground transition hover:bg-muted hover:text-foreground" onClick={(event) => { event.stopPropagation(); moveEdge(edge.id, 1); }}>
+                          <button type="button" className="rounded-full p-1 text-muted-foreground transition hover:bg-muted hover:text-foreground" onClick={(e) => { e.stopPropagation(); moveEdge(rfEdge.id, 1); }}>
                             <ArrowDown className="size-4" />
                           </button>
                         </div>
@@ -1049,7 +1099,6 @@ export function AgentWorkflowEditor({ initialMembers, initialRules, projectName 
                       <p className="text-sm font-semibold text-foreground">{getMemberLabel(selectedEdgeSummary.source)} → {getMemberLabel(selectedEdgeSummary.target)}</p>
                       <p className="mt-1 text-xs text-muted-foreground">{selectedEdgeSummary.target?.type === 'agent' ? t('workflowForwardAgentHint') : t('workflowHumanTargetHint')}</p>
                     </div>
-
                     <div className="space-y-2">
                       <label className="text-xs font-semibold uppercase tracking-[0.2em] text-muted-foreground">{t('workflowActionLabel')}</label>
                       <select
@@ -1061,7 +1110,6 @@ export function AgentWorkflowEditor({ initialMembers, initialRules, projectName 
                         <option value="process_and_forward">{t('workflowActionForward')}</option>
                       </select>
                     </div>
-
                     <div className="space-y-2">
                       <div className="flex items-center justify-between gap-3">
                         <label className="text-xs font-semibold uppercase tracking-[0.2em] text-muted-foreground">{t('workflowMemoTypesLabel')}</label>
@@ -1078,7 +1126,7 @@ export function AgentWorkflowEditor({ initialMembers, initialRules, projectName 
                                 checked={checked}
                                 onChange={() => updateSelectedEdge({
                                   memoTypes: checked
-                                    ? selectedEdge.memoTypes.filter((value) => value !== memoType)
+                                    ? selectedEdge.memoTypes.filter((v) => v !== memoType)
                                     : [...selectedEdge.memoTypes, memoType],
                                 })}
                               />
@@ -1088,7 +1136,6 @@ export function AgentWorkflowEditor({ initialMembers, initialRules, projectName 
                         })}
                       </div>
                     </div>
-
                     <Button variant="destructive" size="lg" className="w-full" onClick={removeSelectedEdge}>
                       <Trash2 className="mr-2 size-4" />
                       {t('workflowDeleteEdge')}
@@ -1102,5 +1149,15 @@ export function AgentWorkflowEditor({ initialMembers, initialRules, projectName 
       </div>
       <ToastContainer toasts={toasts} onDismiss={dismissToast} />
     </>
+  );
+}
+
+// ─── Export (wrapped with ReactFlowProvider) ──────────────────────────────────
+
+export function AgentWorkflowEditor(props: AgentWorkflowEditorProps) {
+  return (
+    <ReactFlowProvider>
+      <AgentWorkflowEditorInner {...props} />
+    </ReactFlowProvider>
   );
 }
