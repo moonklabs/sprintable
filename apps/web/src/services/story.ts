@@ -2,7 +2,7 @@ import type { SupabaseClient } from '@supabase/supabase-js';
 import type { IStoryRepository, CreateStoryInput, UpdateStoryInput, BulkUpdateItem, StoryListFilters } from '@sprintable/core-storage';
 import { SupabaseStoryRepository } from '@sprintable/storage-supabase';
 import { NotFoundError, ForbiddenError } from './sprint';
-import { requireOrgAdmin } from '@/lib/admin-check';
+import { requireOrgAdmin, isOrgAdmin } from '@/lib/admin-check';
 
 export type { CreateStoryInput, UpdateStoryInput, BulkUpdateItem };
 
@@ -107,12 +107,27 @@ export class StoryService {
     // 상태 전이 검증 (SID:357)
     if (input.status && input.status !== existing.status) {
       const currentStatus = existing.status as string;
-      const validNext = VALID_TRANSITIONS[currentStatus];
-      if (!validNext || !validNext.includes(input.status)) {
-        throw new InvalidTransitionError(currentStatus, input.status);
+      const targetStatus = input.status;
+
+      // admin/owner는 어떤 상태에서든 backlog로 역전이 허용 (AC1)
+      const adminReverseToBacklog =
+        targetStatus === 'backlog' &&
+        this.supabase &&
+        (await isOrgAdmin(this.supabase, existing.org_id as string));
+
+      if (!adminReverseToBacklog) {
+        const validNext = VALID_TRANSITIONS[currentStatus];
+        if (!validNext || !validNext.includes(targetStatus)) {
+          // 비관리자의 역방향 전이 시도 (AC2)
+          if (targetStatus === 'backlog') {
+            throw new ForbiddenError('Admin permission required to move story back to backlog');
+          }
+          throw new InvalidTransitionError(currentStatus, targetStatus);
+        }
       }
+
       // done → in-review는 admin만 (OSS: single user = always admin)
-      if (currentStatus === 'done' && this.supabase) {
+      if (currentStatus === 'done' && targetStatus !== 'backlog' && this.supabase) {
         try {
           await requireOrgAdmin(this.supabase, existing.org_id as string);
         } catch {
