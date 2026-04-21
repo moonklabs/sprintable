@@ -407,7 +407,11 @@ export class MemoEventDispatcher {
       return { status: 'skipped', reason: 'self_loop_prevented' };
     }
 
-    const agent = await this.getAgentById(memo, routing.dispatchAgentId);
+    // managed agent 조회 → 없으면 BYOA fallback (webhook_url 있는 팀 멤버)
+    let agent = await this.getAgentById(memo, routing.dispatchAgentId);
+    if (!agent) {
+      agent = await this.getByoaMember(memo, routing.dispatchAgentId);
+    }
     if (!agent) {
       await this.postSystemReply(
         memo,
@@ -649,6 +653,21 @@ export class MemoEventDispatcher {
     const member = data as TeamMemberRow;
     if (member.type !== 'agent' || !member.is_active) return null;
     return member;
+  }
+
+  /** BYOA fallback: deployment 없어도 webhook_url이 있는 팀 멤버 반환 */
+  private async getByoaMember(memo: MemoRow, memberId: string): Promise<TeamMemberRow | null> {
+    const { data, error } = await this.options.supabase
+      .from('team_members')
+      .select('id, org_id, project_id, type, name, webhook_url, is_active')
+      .eq('id', memberId)
+      .eq('org_id', memo.org_id)
+      .eq('project_id', memo.project_id)
+      .not('webhook_url', 'is', null)
+      .single();
+
+    if (error || !data) return null;
+    return data as TeamMemberRow;
   }
 
   private async getDeploymentById(memo: MemoRow, agentId: string, deploymentId: string): Promise<AgentDeploymentRow | null> {
