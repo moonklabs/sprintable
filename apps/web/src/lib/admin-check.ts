@@ -21,3 +21,19 @@ export async function requireOrgAdmin(supabase: SupabaseClient, orgId: string) {
     throw new ForbiddenError('Admin access required for delete operations');
   }
 }
+
+/** 현재 auth user가 org admin(owner/admin)인지 여부 반환 — 예외 없음 */
+export async function isOrgAdmin(supabase: SupabaseClient, orgId: string): Promise<boolean> {
+  const { data: { user } } = await supabase.auth.getUser();
+  if (!user) return false;
+
+  const { data } = await supabase
+    .from('team_members')
+    .select('role')
+    .eq('org_id', orgId)
+    .eq('user_id', user.id)
+    .limit(1)
+    .maybeSingle();
+
+  return !!data && ['owner', 'admin'].includes(data.role as string);
+}

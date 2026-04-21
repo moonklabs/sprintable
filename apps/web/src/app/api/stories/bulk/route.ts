@@ -24,7 +24,7 @@ export async function PATCH(request: Request) {
     }
 
     const repo = await createStoryRepository(dbClient);
-    const service = new StoryService(repo, dbClient as SupabaseClient | undefined);
+    const service = new StoryService(repo, dbClient as SupabaseClient | undefined, { isAdminContext: me.type === 'agent' });
     const results = await service.bulkUpdate(body.items);
     return apiSuccess(results);
   } catch (err: unknown) {

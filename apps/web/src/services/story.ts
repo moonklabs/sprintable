@@ -2,7 +2,7 @@ import type { SupabaseClient } from '@supabase/supabase-js';
 import type { IStoryRepository, CreateStoryInput, UpdateStoryInput, BulkUpdateItem, StoryListFilters } from '@sprintable/core-storage';
 import { SupabaseStoryRepository } from '@sprintable/storage-supabase';
 import { NotFoundError, ForbiddenError } from './sprint';
-import { requireOrgAdmin } from '@/lib/admin-check';
+import { requireOrgAdmin, isOrgAdmin } from '@/lib/admin-check';
 
 export type { CreateStoryInput, UpdateStoryInput, BulkUpdateItem };
 
@@ -25,10 +25,12 @@ export class InvalidTransitionError extends Error {
 export class StoryService {
   private readonly repo: IStoryRepository;
   private readonly supabase: SupabaseClient | null;
+  private readonly isAdminContext: boolean;
 
-  constructor(repo: IStoryRepository, supabase?: SupabaseClient) {
+  constructor(repo: IStoryRepository, supabase?: SupabaseClient, options?: { isAdminContext?: boolean }) {
     this.repo = repo;
     this.supabase = supabase ?? null;
+    this.isAdminContext = options?.isAdminContext ?? false;
   }
 
   static fromSupabase(supabase: SupabaseClient): StoryService {
@@ -107,12 +109,27 @@ export class StoryService {
     // 상태 전이 검증 (SID:357)
     if (input.status && input.status !== existing.status) {
       const currentStatus = existing.status as string;
-      const validNext = VALID_TRANSITIONS[currentStatus];
-      if (!validNext || !validNext.includes(input.status)) {
-        throw new InvalidTransitionError(currentStatus, input.status);
+      const targetStatus = input.status;
+
+      // admin/owner 또는 agent context는 어떤 상태에서든 backlog로 역전이 허용 (AC1)
+      // isAdminContext: agent API key 경유 시 service_role client는 auth.getUser()가 null이므로 플래그로 우회
+      const adminReverseToBacklog =
+        targetStatus === 'backlog' &&
+        (this.isAdminContext || (!!this.supabase && await isOrgAdmin(this.supabase, existing.org_id as string)));
+
+      if (!adminReverseToBacklog) {
+        const validNext = VALID_TRANSITIONS[currentStatus];
+        if (!validNext || !validNext.includes(targetStatus)) {
+          // 비관리자의 역방향 전이 시도 (AC2)
+          if (targetStatus === 'backlog') {
+            throw new ForbiddenError('Admin permission required to move story back to backlog');
+          }
+          throw new InvalidTransitionError(currentStatus, targetStatus);
+        }
       }
+
       // done → in-review는 admin만 (OSS: single user = always admin)
-      if (currentStatus === 'done' && this.supabase) {
+      if (currentStatus === 'done' && targetStatus !== 'backlog' && this.supabase) {
         try {
           await requireOrgAdmin(this.supabase, existing.org_id as string);
         } catch {
@@ -136,6 +153,41 @@ export class StoryService {
   }
 
   async bulkUpdate(items: BulkUpdateItem[]) {
+    // status 변경 item에 대해 전이 검증 (bulk 경로 우회 방지)
+    const statusItems = items.filter((item) => item.status !== undefined);
+    if (statusItems.length > 0) {
+      await Promise.all(
+        statusItems.map(async (item) => {
+          const existing = await this.getById(item.id);
+          const currentStatus = existing.status as string;
+          const targetStatus = item.status as string;
+          if (targetStatus === currentStatus) return;
+
+          const adminReverseToBacklog =
+            targetStatus === 'backlog' &&
+            (this.isAdminContext || (!!this.supabase && await isOrgAdmin(this.supabase, existing.org_id as string)));
+
+          if (!adminReverseToBacklog) {
+            const validNext = VALID_TRANSITIONS[currentStatus];
+            if (!validNext || !validNext.includes(targetStatus)) {
+              if (targetStatus === 'backlog') {
+                throw new ForbiddenError('Admin permission required to move story back to backlog');
+              }
+              throw new InvalidTransitionError(currentStatus, targetStatus);
+            }
+          }
+
+          // done → in-review는 admin만 (단건 update()와 동일)
+          if (currentStatus === 'done' && targetStatus !== 'backlog' && this.supabase) {
+            try {
+              await requireOrgAdmin(this.supabase, existing.org_id as string);
+            } catch {
+              throw new ForbiddenError('Admin permission required to reopen done stories');
+            }
+          }
+        }),
+      );
+    }
     return this.repo.bulkUpdate(items);
   }
 
