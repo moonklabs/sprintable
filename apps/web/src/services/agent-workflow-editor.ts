@@ -26,6 +26,7 @@ export interface WorkflowEdge {
   targetNodeId: string;
   memoTypes: string[];
   action: RoutingAutoReplyMode;
+  matchType?: string;
 }
 
 export interface WorkflowGraph {
@@ -125,6 +126,7 @@ function createEdge(
   action: RoutingAutoReplyMode,
   memoTypes: string[],
   ruleId: string | null = null,
+  matchType = 'event',
 ): WorkflowEdge {
   return {
     id: `${sourceNodeId}:${targetNodeId}:${action}:${normalizeMemoTypes(memoTypes).join('-') || 'all'}`,
@@ -133,6 +135,7 @@ function createEdge(
     targetNodeId,
     memoTypes: normalizeMemoTypes(memoTypes),
     action,
+    matchType,
   };
 }
 
@@ -164,6 +167,7 @@ export function buildWorkflowGraphFromRules(
         rule.action.auto_reply_mode,
         rule.conditions.memo_type,
         rule.id,
+        rule.match_type ?? 'event',
       );
     });
 
@@ -354,7 +358,7 @@ export function serializeWorkflowGraph(
       deployment_id: existingRule?.deployment_id ?? null,
       name: `${sourceMember.name} → ${targetMember.name}`,
       priority: (index + 1) * 10,
-      match_type: 'event',
+      match_type: (edge.matchType ?? 'event') as 'event',
       conditions: { memo_type: memoTypes },
       action: {
         auto_reply_mode: edge.action,
