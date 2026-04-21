@@ -25,10 +25,12 @@ export class InvalidTransitionError extends Error {
 export class StoryService {
   private readonly repo: IStoryRepository;
   private readonly supabase: SupabaseClient | null;
+  private readonly isAdminContext: boolean;
 
-  constructor(repo: IStoryRepository, supabase?: SupabaseClient) {
+  constructor(repo: IStoryRepository, supabase?: SupabaseClient, options?: { isAdminContext?: boolean }) {
     this.repo = repo;
     this.supabase = supabase ?? null;
+    this.isAdminContext = options?.isAdminContext ?? false;
   }
 
   static fromSupabase(supabase: SupabaseClient): StoryService {
@@ -109,11 +111,11 @@ export class StoryService {
       const currentStatus = existing.status as string;
       const targetStatus = input.status;
 
-      // admin/owner는 어떤 상태에서든 backlog로 역전이 허용 (AC1)
+      // admin/owner 또는 agent context는 어떤 상태에서든 backlog로 역전이 허용 (AC1)
+      // isAdminContext: agent API key 경유 시 service_role client는 auth.getUser()가 null이므로 플래그로 우회
       const adminReverseToBacklog =
         targetStatus === 'backlog' &&
-        this.supabase &&
-        (await isOrgAdmin(this.supabase, existing.org_id as string));
+        (this.isAdminContext || (!!this.supabase && await isOrgAdmin(this.supabase, existing.org_id as string)));
 
       if (!adminReverseToBacklog) {
         const validNext = VALID_TRANSITIONS[currentStatus];

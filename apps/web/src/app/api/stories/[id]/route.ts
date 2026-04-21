@@ -47,7 +47,7 @@ export async function PATCH(request: Request, { params }: RouteParams) {
 
     const parsed = await parseBody(request, updateStorySchema); if (!parsed.success) return parsed.response; const body = parsed.data;
     const repo = await createStoryRepository(dbClient);
-    const service = new StoryService(repo, dbClient as SupabaseClient | undefined);
+    const service = new StoryService(repo, dbClient as SupabaseClient | undefined, { isAdminContext: me.type === 'agent' });
     const story = await service.update(id, body);
     return apiSuccess(story);
   } catch (err: unknown) {
