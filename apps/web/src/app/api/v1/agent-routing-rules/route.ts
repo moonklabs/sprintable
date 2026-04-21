@@ -95,11 +95,16 @@ export async function GET(request: Request) {
     let me: { id: string; org_id: string; project_id: string; type?: string };
     let supabaseForService: Awaited<ReturnType<typeof createSupabaseServerClient>> | ReturnType<typeof createSupabaseAdminClient>;
 
-    const adminClient = createSupabaseAdminClient();
-    const apiKeyMe = await getTeamMemberFromRequest(adminClient, request);
-    if (apiKeyMe) {
+    let apiKeyMe: Awaited<ReturnType<typeof getTeamMemberFromRequest>> = null;
+    let adminClientRef: ReturnType<typeof createSupabaseAdminClient> | null = null;
+    try {
+      adminClientRef = createSupabaseAdminClient();
+      apiKeyMe = await getTeamMemberFromRequest(adminClientRef, request);
+    } catch { /* SUPABASE_SERVICE_ROLE_KEY 미설정 시 세션 fallback */ }
+
+    if (apiKeyMe && adminClientRef) {
       me = apiKeyMe;
-      supabaseForService = adminClient;
+      supabaseForService = adminClientRef;
     } else {
       const supabase = await createSupabaseServerClient();
       const { data: { user } } = await supabase.auth.getUser();
@@ -172,11 +177,16 @@ export async function PUT(request: Request) {
     let me: { id: string; org_id: string; project_id: string; type?: string };
     let supabaseForService: Awaited<ReturnType<typeof createSupabaseServerClient>> | ReturnType<typeof createSupabaseAdminClient>;
 
-    const adminClient = createSupabaseAdminClient();
-    const apiKeyMe = await getTeamMemberFromRequest(adminClient, request);
-    if (apiKeyMe) {
+    let apiKeyMe: Awaited<ReturnType<typeof getTeamMemberFromRequest>> = null;
+    let adminClientRef: ReturnType<typeof createSupabaseAdminClient> | null = null;
+    try {
+      adminClientRef = createSupabaseAdminClient();
+      apiKeyMe = await getTeamMemberFromRequest(adminClientRef, request);
+    } catch { /* SUPABASE_SERVICE_ROLE_KEY 미설정 시 세션 fallback */ }
+
+    if (apiKeyMe && adminClientRef) {
       me = apiKeyMe;
-      supabaseForService = adminClient;
+      supabaseForService = adminClientRef;
     } else {
       const supabase = await createSupabaseServerClient();
       const { data: { user } } = await supabase.auth.getUser();

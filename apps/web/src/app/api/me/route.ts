@@ -12,8 +12,11 @@ export async function GET(request: Request) {
     return apiSuccess({ id: OSS_MEMBER_ID, name: 'OSS User', type: 'human', role: 'owner', is_active: true, email: null });
   }
   try {
-    const adminClient = createSupabaseAdminClient();
-    const apiKeyMe = await getTeamMemberFromRequest(adminClient, request);
+    let apiKeyMe: Awaited<ReturnType<typeof getTeamMemberFromRequest>> = null;
+    try {
+      const adminClient = createSupabaseAdminClient();
+      apiKeyMe = await getTeamMemberFromRequest(adminClient, request);
+    } catch { /* SUPABASE_SERVICE_ROLE_KEY 미설정 시 세션 fallback */ }
     if (apiKeyMe) {
       const { data: member, error } = await adminClient
         .from('team_members')
