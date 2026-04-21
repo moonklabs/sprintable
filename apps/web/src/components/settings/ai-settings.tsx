@@ -14,7 +14,7 @@ import {
   type LLMProvider,
   type OpenAIModel,
   type PersistedLLMConfig,
-} from '@/lib/llm';
+} from '@/lib/llm/types';
 
 interface AiSettings {
   provider: LLMProvider;

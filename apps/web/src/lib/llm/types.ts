@@ -13,6 +13,13 @@ export const ANTHROPIC_MODELS: AnthropicModel[] = ['claude-sonnet-4', 'claude-op
 export const GOOGLE_MODELS: GoogleModel[] = ['gemini-2.5-flash', 'gemini-2.5-pro'];
 export const GROQ_MODELS: GroqModel[] = ['llama-3.1-8b-instant', 'llama-3.3-70b-versatile'];
 
+export function providerSwitchRequiresNewApiKey(
+  currentProvider: LLMProvider | null | undefined,
+  nextProvider: LLMProvider,
+): boolean {
+  return Boolean(currentProvider && currentProvider !== nextProvider);
+}
+
 export interface ExternalMcpAuthConfig {
   token_ref: string;
   header_name?: string;

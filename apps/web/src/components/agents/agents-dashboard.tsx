@@ -2,7 +2,7 @@
 
 import Link from 'next/link';
 import { useCallback, useEffect, useRef, useState } from 'react';
-import { useTranslations } from 'next-intl';
+import { useLocale, useTranslations } from 'next-intl';
 import { Bot, Clock3, GitBranch, History, Pause, Play, RefreshCw, Rocket, TriangleAlert, Zap } from 'lucide-react';
 import { Badge } from '@/components/ui/badge';
 import { Button, buttonVariants } from '@/components/ui/button';
@@ -69,8 +69,8 @@ function statusLabel(status: string, t: ReturnType<typeof useTranslations<'agent
   }
 }
 
-function formatLocalTime(isoString: string) {
-  return new Date(isoString).toLocaleString(undefined, {
+function formatLocalTime(isoString: string, locale: string) {
+  return new Date(isoString).toLocaleString(locale, {
     year: 'numeric',
     month: 'short',
     day: 'numeric',
@@ -112,17 +112,22 @@ function getFailureHeadline(failure: AgentDeploymentCard['latest_failed_run']) {
 const AUTO_REFRESH_INTERVAL = 30_000;
 
 export function AgentsDashboard({ deployments: initialDeployments }: { deployments: AgentDeploymentCard[] }) {
+  const locale = useLocale();
   const t = useTranslations('agents');
   const tr = useTranslations('agentRuns');
   const tc = useTranslations('common');
   const { toasts, addToast, dismissToast } = useToast();
 
   const [deployments, setDeployments] = useState(initialDeployments);
-  const [lastRefreshed, setLastRefreshed] = useState<Date>(new Date());
+  const [lastRefreshed, setLastRefreshed] = useState<Date | null>(null);
   const [isRefreshing, setIsRefreshing] = useState(false);
   const [pendingAction, setPendingAction] = useState<TransitionAction | null>(null);
   const [transitioning, setTransitioning] = useState(false);
   const intervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
+
+  useEffect(() => {
+    setLastRefreshed(new Date());
+  }, []);
 
   // Show deploy success toast from sessionStorage (S462 compat)
   useEffect(() => {
@@ -255,7 +260,11 @@ export function AgentsDashboard({ deployments: initialDeployments }: { deploymen
               </div>
               <div className="flex items-center gap-3">
                 <span className="text-xs text-muted-foreground">
-                  {t('lastRefreshed', { time: lastRefreshed.toLocaleTimeString() })}
+                  {t('lastRefreshed', {
+                    time: lastRefreshed
+                      ? lastRefreshed.toLocaleTimeString(locale, { hour: '2-digit', minute: '2-digit' })
+                      : '—',
+                  })}
                 </span>
                 <Badge variant="chip" className="inline-flex items-center gap-1">
                   <RefreshCw className={isRefreshing ? 'size-3 animate-spin' : 'size-3'} />
@@ -347,12 +356,12 @@ export function AgentsDashboard({ deployments: initialDeployments }: { deploymen
                         {deployment.status === 'DEPLOY_FAILED' ? <TriangleAlert className="size-4 text-amber-300" /> : <Clock3 className="size-4" />}
                         <span>
                           {deployment.last_run_at
-                            ? t('lastRunAt', { time: formatLocalTime(deployment.last_run_at) })
+                            ? t('lastRunAt', { time: formatLocalTime(deployment.last_run_at, locale) })
                             : t('lastRunEmpty')}
                         </span>
                       </div>
                       <span className="text-[11px] text-muted-foreground">
-                        {t('statusUpdatedAt', { time: formatLocalTime(deployment.updated_at) })}
+                        {t('statusUpdatedAt', { time: formatLocalTime(deployment.updated_at, locale) })}
                       </span>
                     </div>
                   </div>
@@ -380,13 +389,13 @@ export function AgentsDashboard({ deployments: initialDeployments }: { deploymen
                             <p className="mt-1 text-xs text-muted-foreground">{latestFailure.result_summary}</p>
                           )}
                           <div className="mt-2 flex flex-wrap items-center gap-2 text-xs text-muted-foreground">
-                            <span>{t('recentFailureAt', { time: formatLocalTime(latestFailure.failed_at) })}</span>
+                            <span>{t('recentFailureAt', { time: formatLocalTime(latestFailure.failed_at, locale) })}</span>
                             {latestFailure.last_error_code && <Badge variant="outline">{latestFailure.last_error_code}</Badge>}
                             {latestFailure.failure_disposition && (
                               <Badge variant="chip">{tr(`failureDisposition_${latestFailure.failure_disposition}`)}</Badge>
                             )}
                             {latestFailure.next_retry_at && (
-                              <span>{t('recoveryNextRetryAt', { time: formatLocalTime(latestFailure.next_retry_at) })}</span>
+                              <span>{t('recoveryNextRetryAt', { time: formatLocalTime(latestFailure.next_retry_at, locale) })}</span>
                             )}
                           </div>
                         </div>

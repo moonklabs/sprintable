@@ -5,6 +5,8 @@ import { createSupabaseAdminClient } from '@/lib/supabase/admin';
 import { handleApiError } from '@/lib/api-error';
 import { getAuthContext } from '@/lib/auth-helpers';
 import { apiSuccess, ApiErrors } from '@/lib/api-response';
+import { isOssMode } from '@/lib/storage/factory';
+import { createOssStandupFeedback, listOssStandupFeedbackByDate } from '@/lib/oss-standup';
 import { StandupFeedbackService } from '@/services/standup';
 
 export async function GET(request: Request) {
@@ -18,6 +20,10 @@ export async function GET(request: Request) {
     const projectId = searchParams.get('project_id');
     const date = searchParams.get('date');
     if (!projectId || !date) return ApiErrors.badRequest('project_id and date required');
+
+    if (isOssMode()) {
+      return apiSuccess(listOssStandupFeedbackByDate(projectId, date));
+    }
 
     const dbClient: SupabaseClient = me.type === 'agent' ? createSupabaseAdminClient() : supabase;
     const service = new StandupFeedbackService(dbClient);
@@ -34,8 +40,25 @@ export async function POST(request: Request) {
     const me = await getAuthContext(supabase, request);
     if (!me) return ApiErrors.unauthorized();
     if (me.rateLimitExceeded) return ApiErrors.tooManyRequests(me.rateLimitRemaining, me.rateLimitResetAt);
+    const ossMode = isOssMode();
 
     const dbClient: SupabaseClient = me.type === 'agent' ? createSupabaseAdminClient() : supabase;
+
+    const parsed = await parseBody(request, createStandupFeedbackSchema);
+    if (!parsed.success) return parsed.response;
+    const body = parsed.data;
+
+    if (ossMode) {
+      const feedback = createOssStandupFeedback({
+        project_id: me.project_id,
+        org_id: me.org_id,
+        standup_entry_id: body.standup_entry_id,
+        feedback_by_id: me.id,
+        review_type: body.review_type ?? 'comment',
+        feedback_text: body.feedback_text,
+      });
+      return apiSuccess(feedback, undefined, 201);
+    }
 
     const { data: member, error: memberError } = await dbClient
       .from('team_members')
@@ -43,10 +66,6 @@ export async function POST(request: Request) {
       .eq('id', me.id)
       .single();
     if (memberError || !member) return ApiErrors.forbidden('Team member not found');
-
-    const parsed = await parseBody(request, createStandupFeedbackSchema);
-    if (!parsed.success) return parsed.response;
-    const body = parsed.data;
 
     const service = new StandupFeedbackService(dbClient);
     const feedback = await service.create({

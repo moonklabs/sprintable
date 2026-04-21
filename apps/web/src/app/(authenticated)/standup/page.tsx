@@ -148,7 +148,7 @@ export default function StandupPage() {
     setPlan(currentEntry?.plan ?? '');
     setBlockers(currentEntry?.blockers ?? '');
     setPlanStoryIds(currentEntry?.plan_story_ids ?? []);
-  }, [currentEntry?.id, currentEntry?.updated_at]);
+  }, [currentEntry?.id, currentEntry?.updated_at, currentEntry?.done, currentEntry?.plan, currentEntry?.blockers, currentEntry?.plan_story_ids]);
 
   useEffect(() => {
     let cancelled = false;
@@ -337,7 +337,7 @@ export default function StandupPage() {
   }
 
   return (
-    <div className="space-y-4">
+    <div className="space-y-5">
       <PageHeader
         eyebrow={tc('operatorSurface')}
         title={t('title')}
@@ -390,7 +390,7 @@ export default function StandupPage() {
               <div className="space-y-3">
                 <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-3">
                   {stories.map((story) => (
-                    <div key={story.id} className="rounded-2xl border border-white/8 bg-black/10 p-3">
+                    <div key={story.id} className="rounded-2xl border border-border/70 bg-background p-4 shadow-sm">
                       <div className="flex flex-wrap items-center justify-between gap-2">
                         <p className="text-sm font-medium text-[color:var(--operator-foreground)]">{story.title}</p>
                         <Badge variant="outline">{story.status}</Badge>
@@ -471,13 +471,13 @@ export default function StandupPage() {
                 ))}
               </div>
             ) : (
-              <div className="space-y-4">
+              <div className="space-y-5">
                 <div className="flex flex-wrap items-center gap-2">
                   <Badge variant="chip">{t('myStoryCount', { count: currentUserStories.length })}</Badge>
                   <Badge variant="outline">{t('linkedStoryCount', { count: planStoryIds.length })}</Badge>
                 </div>
                 <div>
-                  <label className="block text-xs font-medium uppercase tracking-[0.18em] text-[color:var(--operator-muted)]">{t('done')}</label>
+                  <label className="mb-2 block text-xs font-medium uppercase tracking-[0.18em] text-[color:var(--operator-muted)]">{t('done')}</label>
                   <OperatorTextarea
                     value={done}
                     onChange={(event) => setDone(event.target.value)}
@@ -486,7 +486,7 @@ export default function StandupPage() {
                   />
                 </div>
                 <div>
-                  <label className="block text-xs font-medium uppercase tracking-[0.18em] text-[color:var(--operator-muted)]">{t('plan')}</label>
+                  <label className="mb-2 block text-xs font-medium uppercase tracking-[0.18em] text-[color:var(--operator-muted)]">{t('plan')}</label>
                   <OperatorTextarea
                     value={plan}
                     onChange={(event) => setPlan(event.target.value)}
@@ -495,7 +495,7 @@ export default function StandupPage() {
                   />
                 </div>
                 <div>
-                  <label className="block text-xs font-medium uppercase tracking-[0.18em] text-[color:var(--operator-muted)]">{t('blockers')}</label>
+                  <label className="mb-2 block text-xs font-medium uppercase tracking-[0.18em] text-[color:var(--operator-muted)]">{t('blockers')}</label>
                   <OperatorTextarea
                     value={blockers}
                     onChange={(event) => setBlockers(event.target.value)}
@@ -504,7 +504,7 @@ export default function StandupPage() {
                   />
                 </div>
 
-                <div className="space-y-3 rounded-3xl border border-white/8 bg-black/10 p-4">
+                <div className="space-y-4 rounded-2xl border border-border/70 bg-muted/10 p-4">
                   <div className="flex flex-wrap items-center justify-between gap-2">
                     <div>
                       <p className="text-xs font-medium uppercase tracking-[0.18em] text-[color:var(--operator-muted)]">{t('linkedStories')}</p>
@@ -517,7 +517,7 @@ export default function StandupPage() {
                       {storyPickerStories.map((story) => {
                         const checked = planStoryIds.includes(story.id);
                         return (
-                          <label key={story.id} className="flex cursor-pointer items-start gap-3 rounded-md border border-border bg-muted/30 p-3 transition hover:bg-muted">
+                          <label key={story.id} className="flex cursor-pointer items-start gap-3 rounded-xl border border-border/70 bg-background p-3.5 transition hover:bg-muted/40">
                             <input
                               type="checkbox"
                               checked={checked}
@@ -549,7 +549,7 @@ export default function StandupPage() {
                   )}
                 </div>
 
-                <div className="space-y-2">
+                <div className="space-y-2 pt-1">
                   <Button variant="hero" size="lg" onClick={() => void handleSave()} disabled={saving} className="w-full sm:w-auto">
                     {saving ? t('saving') : t('save')}
                   </Button>

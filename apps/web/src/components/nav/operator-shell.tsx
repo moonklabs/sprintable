@@ -9,16 +9,14 @@ import {
   Bot,
   ChevronDown,
   ChevronRight,
-  ClipboardList,
   FolderKanban,
   Gauge,
   Gift,
   Inbox,
-  LayoutDashboard,
   MessageSquareMore,
   PenTool,
+  Search,
   Settings,
-  Trophy,
   Users,
 } from 'lucide-react';
 import { SprintableLogo } from '@/components/brand/sprintable-logo';
@@ -80,7 +78,6 @@ export function OperatorShell({
   const pathname = usePathname();
   const t = useTranslations('nav');
   const shellT = useTranslations('shell');
-  const [unreadCount, setUnreadCount] = useState(0);
   const [memoUnreadCount, setMemoUnreadCount] = useState(0);
   const [memoSidebarOpen, setMemoSidebarOpen] = useState(false);
   const [expandedMenus, setExpandedMenus] = useState<Set<string>>(new Set(['sprintManagement']));
@@ -88,14 +85,9 @@ export function OperatorShell({
   useEffect(() => {
     async function fetchUnread() {
       try {
-        const [inboxRes, memoRes] = await Promise.all([
-          fetch('/api/notifications?unread=true'),
+        const [memoRes] = await Promise.all([
           fetch('/api/notifications?unread=true&type=memo'),
         ]);
-        if (inboxRes.ok) {
-          const json = await inboxRes.json();
-          setUnreadCount(json.meta?.unreadCount ?? 0);
-        }
         if (memoRes.ok) {
           const json = await memoRes.json();
           setMemoUnreadCount(json.meta?.unreadCount ?? 0);
@@ -113,10 +105,10 @@ export function OperatorShell({
   return (
     <div className="min-h-screen bg-[color:var(--operator-bg)] text-[color:var(--operator-foreground)]">
       <div className="flex min-h-screen">
-        <aside className="hidden w-72 shrink-0 p-4 lg:block">
-          <GlassPanel className="flex h-[calc(100vh-2rem)] flex-col gap-6 px-4 py-6">
-            <div className="px-2">
-              <div className="space-y-1.5">
+        <aside className="hidden h-screen w-72 shrink-0 border-r border-border/80 bg-[color:var(--operator-surface)] lg:fixed lg:inset-y-0 lg:left-0 lg:block">
+          <div className="flex h-full flex-col overflow-hidden px-4 pb-5">
+            <div className="-mx-4 shrink-0 border-b border-border/80 px-6">
+              <div className="flex h-[68px] items-center">
                 <Link href="/dashboard" className="inline-flex">
                   <SprintableLogo
                     variant="horizontal"
@@ -125,118 +117,131 @@ export function OperatorShell({
                     wordmarkClassName="text-[0.88rem] tracking-[0.14em]"
                   />
                 </Link>
-                <div className="text-[10px] font-semibold uppercase tracking-[0.24em] text-[color:var(--operator-muted)]">{shellT('workspaceLabel')}</div>
               </div>
             </div>
 
-            <nav className="flex-1 space-y-1">
-              {NAV_ITEMS.map((item) => {
-                const Icon = item.icon;
+            <div className="min-h-0 flex-1 overflow-y-auto px-1 pb-4 pt-5">
+              <nav className="space-y-1.5">
+                {NAV_ITEMS.map((item) => {
+                  const Icon = item.icon;
 
-                if (item.children) {
-                  // 하위 메뉴가 있는 그룹 (e.g. Sprint Management)
-                  const isExpanded = expandedMenus.has(item.key);
-                  const hasActiveChild = item.children.some(
-                    (child) => pathname === child.href || pathname.startsWith(child.href)
-                  );
+                  if (item.children) {
+                    // 하위 메뉴가 있는 그룹 (e.g. Sprint Management)
+                    const isExpanded = expandedMenus.has(item.key);
+                    const hasActiveChild = item.children.some(
+                      (child) => pathname === child.href || pathname.startsWith(child.href)
+                    );
 
+                    return (
+                      <div key={item.key} className="space-y-1.5">
+                        <button
+                          onClick={() => {
+                            const next = new Set(expandedMenus);
+                            if (isExpanded) {
+                              next.delete(item.key);
+                            } else {
+                              next.add(item.key);
+                            }
+                            setExpandedMenus(next);
+                          }}
+                          className={cn(
+                            'group flex w-full items-center justify-between rounded-2xl px-3 py-2.5 text-sm font-medium transition-all duration-200',
+                            hasActiveChild
+                              ? 'bg-primary/10 text-primary font-semibold'
+                              : 'text-[color:var(--operator-muted)] hover:bg-[color:var(--operator-surface-soft)] hover:text-[color:var(--operator-foreground)]',
+                          )}
+                        >
+                          <span className="flex items-center gap-3">
+                            <Icon className="size-4.5" />
+                            <span>{t(item.key)}</span>
+                          </span>
+                          {isExpanded ? (
+                            <ChevronDown className="size-3.5" />
+                          ) : (
+                            <ChevronRight className="size-3.5" />
+                          )}
+                        </button>
+
+                        {isExpanded && (
+                          <div className="ml-6 space-y-1.5 border-l border-border/70 pl-3">
+                            {item.children.map((child) => {
+                              const ChildIcon = child.icon;
+                              const isChildActive = pathname === child.href || pathname.startsWith(child.href);
+                              return (
+                                <Link
+                                  key={child.href}
+                                  href={child.href}
+                                  className={cn(
+                                    'group flex items-center gap-3 rounded-2xl px-3 py-2 text-sm font-medium transition-all duration-200',
+                                    isChildActive
+                                      ? 'bg-primary/10 text-primary font-semibold'
+                                      : 'text-[color:var(--operator-muted)] hover:bg-[color:var(--operator-surface-soft)] hover:text-[color:var(--operator-foreground)]',
+                                  )}
+                                >
+                                  <ChildIcon className="size-4" />
+                                  <span>{t(child.key)}</span>
+                                </Link>
+                              );
+                            })}
+                          </div>
+                        )}
+                      </div>
+                    );
+                  }
+
+                  // 하위 메뉴가 없는 일반 링크
+                  const isActive = pathname === item.href || (item.href !== '/dashboard' && pathname.startsWith(item.href!));
                   return (
-                    <div key={item.key} className="space-y-1">
-                      <button
-                        onClick={() => {
-                          const next = new Set(expandedMenus);
-                          if (isExpanded) {
-                            next.delete(item.key);
-                          } else {
-                            next.add(item.key);
-                          }
-                          setExpandedMenus(next);
-                        }}
-                        className={cn(
-                          'group flex w-full items-center justify-between rounded-2xl px-3 py-2.5 text-sm font-medium transition-all duration-200',
-                          hasActiveChild
-                            ? 'bg-primary/10 text-primary font-semibold'
-                            : 'text-[color:var(--operator-muted)] hover:bg-white/5 hover:text-[color:var(--operator-foreground)]',
-                        )}
-                      >
-                        <span className="flex items-center gap-3">
-                          <Icon className="size-4.5" />
-                          <span>{t(item.key)}</span>
-                        </span>
-                        {isExpanded ? (
-                          <ChevronDown className="size-3.5" />
-                        ) : (
-                          <ChevronRight className="size-3.5" />
-                        )}
-                      </button>
-
-                      {isExpanded && (
-                        <div className="ml-6 space-y-1 border-l border-white/8 pl-3">
-                          {item.children.map((child) => {
-                            const ChildIcon = child.icon;
-                            const isChildActive = pathname === child.href || pathname.startsWith(child.href);
-                            return (
-                              <Link
-                                key={child.href}
-                                href={child.href}
-                                className={cn(
-                                  'group flex items-center gap-3 rounded-2xl px-3 py-2 text-sm font-medium transition-all duration-200',
-                                  isChildActive
-                                    ? 'bg-primary/10 text-primary font-semibold'
-                                    : 'text-[color:var(--operator-muted)] hover:bg-white/5 hover:text-[color:var(--operator-foreground)]',
-                                )}
-                              >
-                                <ChildIcon className="size-4" />
-                                <span>{t(child.key)}</span>
-                              </Link>
-                            );
-                          })}
-                        </div>
+                    <Link
+                      key={item.href}
+                      href={item.href!}
+                      className={cn(
+                        'group flex items-center justify-between rounded-2xl px-3 py-2.5 text-sm font-medium transition-all duration-200',
+                        isActive
+                          ? 'bg-primary/10 text-primary font-semibold'
+                          : 'text-[color:var(--operator-muted)] hover:bg-[color:var(--operator-surface-soft)] hover:text-[color:var(--operator-foreground)]',
                       )}
-                    </div>
+                    >
+                      <span className="flex items-center gap-3">
+                        <Icon className="size-4.5" />
+                        <span>{t(item.key)}</span>
+                      </span>
+                    </Link>
                   );
-                }
+                })}
+              </nav>
+            </div>
 
-                // 하위 메뉴가 없는 일반 링크
-                const isActive = pathname === item.href || (item.href !== '/dashboard' && pathname.startsWith(item.href!));
-                return (
-                  <Link
-                    key={item.href}
-                    href={item.href!}
-                    className={cn(
-                      'group flex items-center justify-between rounded-2xl px-3 py-2.5 text-sm font-medium transition-all duration-200',
-                      isActive
-                        ? 'bg-primary/10 text-primary font-semibold'
-                        : 'text-[color:var(--operator-muted)] hover:bg-white/5 hover:text-[color:var(--operator-foreground)]',
-                    )}
-                  >
-                    <span className="flex items-center gap-3">
-                      <Icon className="size-4.5" />
-                      <span>{t(item.key)}</span>
-                    </span>
-                  </Link>
-                );
-              })}
-            </nav>
-
-            <div className="space-y-3 border-t border-white/8 pt-4">
+            <div className="shrink-0 space-y-4 border-t border-border/80 pt-4">
+              <div className="rounded-xl border border-border/70 bg-[color:var(--operator-surface-soft)]/65 px-3 py-2.5">
+                <div className="space-y-1.5">
+                  <div className="text-[10px] font-semibold uppercase tracking-[0.22em] text-[color:var(--operator-muted)]">
+                    Workspace
+                  </div>
+                  <div className="truncate text-sm font-semibold text-[color:var(--operator-foreground)]">
+                    {projectName ?? (projectId ? shellT('projectAttached') : shellT('projectPending'))}
+                  </div>
+                  <div className="text-xs text-[color:var(--operator-muted)]">
+                    Settings and account controls stay anchored here.
+                  </div>
+                </div>
+              </div>
               <LocaleSwitcher className="px-1" />
-              <Button variant="hero" size="lg" className="w-full justify-start" render={<Link href="/board" />} nativeButton={false}>
+              <Button variant="hero" size="sm" className="w-full justify-start" render={<Link href="/board" />} nativeButton={false}>
                 <Gift className="size-4" />
                 {shellT('primaryCta')}
               </Button>
-              <Button variant="glass" size="lg" className="w-full justify-start" render={<Link href="/dashboard/settings" />} nativeButton={false}>
+              <Button variant="glass" size="sm" className="w-full justify-start" render={<Link href="/dashboard/settings" />} nativeButton={false}>
                 <Settings className="size-4" />
                 {t('settings')}
               </Button>
             </div>
-          </GlassPanel>
+          </div>
         </aside>
 
-        <div className="flex min-h-screen min-w-0 flex-1 flex-col px-2 sm:px-4 lg:px-5 lg:pb-5" style={{ paddingBottom: 'max(5rem, calc(env(safe-area-inset-bottom) + 4rem))' }}>
-          <GlassPanel className="sticky top-0 z-30 mb-4 -mx-2 rounded-none sm:-mx-4 lg:-mx-5 flex items-center justify-between gap-4 px-4 py-2 lg:py-3">
+        <div className="flex min-h-screen min-w-0 flex-1 flex-col px-2 sm:px-4 lg:pl-[19rem] lg:pr-5 lg:pb-5" style={{ paddingBottom: 'max(5rem, calc(env(safe-area-inset-bottom) + 4rem))' }}>
+          <GlassPanel className="sticky top-0 z-30 mb-3 -mx-2 rounded-none border-x-0 border-t-0 border-b border-border/80 bg-[color:var(--operator-surface)]/96 shadow-none sm:-mx-4 lg:-mx-5 flex min-h-[69px] items-center justify-between gap-3 px-4 py-2">
             <div className="flex min-w-0 flex-1 items-center gap-2">
-              <div className="shrink-0 whitespace-nowrap text-[10px] font-semibold uppercase tracking-[0.24em] text-[color:var(--operator-muted)]">{shellT('projectLabel')}</div>
               {projectMemberships.length > 0 ? (
                 <div className="min-w-0 flex-1 lg:hidden">
                   <ProjectSwitcher
@@ -246,21 +251,27 @@ export function OperatorShell({
                   />
                 </div>
               ) : null}
-              <div className={cn('truncate font-heading text-sm font-bold text-[color:var(--operator-foreground)]', projectMemberships.length > 0 && 'hidden lg:block')}>{projectName ?? (projectId ? shellT('projectAttached') : shellT('projectPending'))}</div>
+              {projectMemberships.length === 0 ? (
+                <div className="truncate font-heading text-sm font-bold text-[color:var(--operator-foreground)]">
+                  {projectName ?? (projectId ? shellT('projectAttached') : shellT('projectPending'))}
+                </div>
+              ) : null}
             </div>
             <div className="hidden max-w-xl flex-1 items-center gap-3 lg:flex">
               {projectMemberships.length > 0 ? (
                 <ProjectSwitcher
                   projects={projectMemberships}
                   currentProjectId={projectId}
-                  className="w-[240px]"
+                  className="w-[220px]"
                 />
               ) : null}
-              <div className="rounded-full border border-white/8 bg-[color:var(--operator-surface-soft)] px-4 py-2 text-sm text-[color:var(--operator-muted)]">
-                {shellT('searchPlaceholder')}
+              <div className="flex min-w-0 flex-1 items-center gap-2 rounded-full border border-border/70 bg-[color:var(--operator-surface-soft)] px-3 py-1.5 text-sm text-[color:var(--operator-muted)]">
+                <Search className="size-3.5 shrink-0" />
+                <span className="truncate">{shellT('searchPlaceholder')}</span>
               </div>
             </div>
             <div className="flex shrink-0 items-center gap-2">
+              <div className="hidden h-6 w-px bg-border/70 lg:block" />
               <OperatorIconButton
                 onClick={() => {
                   setMemoSidebarOpen(true);

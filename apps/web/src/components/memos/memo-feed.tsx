@@ -1,6 +1,9 @@
 'use client';
 
 import { useTranslations } from 'next-intl';
+import { EmptyState } from '@/components/ui/empty-state';
+import { Button } from '@/components/ui/button';
+import { cn } from '@/lib/utils';
 import type { MemoSummaryState } from './memo-state';
 
 interface MemoFeedProps {
@@ -20,17 +23,21 @@ export function MemoFeed({ memos, onSelectMemo, selectedMemoId, memberMap = {}, 
 
   if (memos.length === 0) {
     return (
-      <div className="flex flex-col items-center justify-center gap-3 py-12 text-center">
-        <p className="text-sm text-[color:var(--operator-muted)]">{t('noMemos')}</p>
-        {onNewMemo ? (
-          <button
-            type="button"
-            onClick={onNewMemo}
-            className="rounded-xl bg-[color:var(--operator-primary)]/20 px-4 py-2 text-xs font-medium text-[color:var(--operator-primary-soft)] hover:bg-[color:var(--operator-primary)]/30"
-          >
-            {t('newMemo')}
-          </button>
-        ) : null}
+      <div className="p-4">
+        <EmptyState
+          title={t('noMemos')}
+          description={t('selectMemo')}
+          action={onNewMemo ? (
+            <Button
+              type="button"
+              size="sm"
+              onClick={onNewMemo}
+            >
+              {t('newMemo')}
+            </Button>
+          ) : null}
+          className="bg-background/70"
+        />
       </div>
     );
   }
@@ -66,15 +73,23 @@ function MemoFeedItem({ memo, isSelected, onClick, memberMap }: MemoFeedItemProp
     <button
       type="button"
       onClick={onClick}
-      className={`
-        flex w-full flex-col gap-1.5 px-4 py-3 text-left transition-colors
-        hover:bg-white/5
-        ${isSelected ? 'bg-[color:var(--operator-primary)]/14' : ''}
-      `}
+      className={cn(
+        'mx-2 my-1 flex w-[calc(100%-1rem)] cursor-pointer flex-col gap-1.5 rounded-2xl px-4 py-3 text-left transition-colors',
+        isSelected
+          ? 'bg-primary/10 text-primary'
+          : 'hover:bg-muted hover:text-foreground',
+      )}
     >
       {/* Slack-style header: sender + date */}
       <div className="flex items-center justify-between gap-2">
-        <span className={`truncate text-xs ${hasUnread ? 'font-bold text-[color:var(--operator-foreground)]' : 'font-semibold text-[color:var(--operator-foreground)]'}`}>
+        <span className={cn(
+          'truncate text-xs',
+          isSelected
+            ? 'text-primary'
+            : hasUnread
+              ? 'font-bold text-[color:var(--operator-foreground)]'
+              : 'font-semibold text-[color:var(--operator-foreground)]',
+        )}>
           {senderName}
         </span>
         <span className="shrink-0 text-[10px] text-[color:var(--operator-muted)]">
@@ -85,7 +100,14 @@ function MemoFeedItem({ memo, isSelected, onClick, memberMap }: MemoFeedItemProp
       {/* Title + content preview */}
       <div className="min-w-0">
         {memo.title && (
-          <div className={`truncate text-sm ${hasUnread ? 'font-semibold' : ''} text-[color:var(--operator-foreground)]`}>
+          <div className={cn(
+            'truncate text-sm',
+            isSelected
+              ? 'font-semibold text-primary'
+              : hasUnread
+                ? 'font-semibold text-[color:var(--operator-foreground)]'
+                : 'text-[color:var(--operator-foreground)]',
+          )}>
             {memo.title}
           </div>
         )}

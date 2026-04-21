@@ -7,6 +7,7 @@ import { MemoFeed } from '@/components/memos/memo-feed';
 import { MemoThread } from '@/components/memos/memo-thread';
 import { MemoCreateForm } from '@/components/memos/memo-create-form';
 import { Button } from '@/components/ui/button';
+import { EmptyState } from '@/components/ui/empty-state';
 import { summarizeMemo, mergeMemoDetailIntoList, type MemoDetailState, type MemoSummaryState } from '@/components/memos/memo-state';
 
 interface MemosFeedClientProps {
@@ -203,9 +204,12 @@ export function MemosFeedClient({ currentTeamMemberId, projectId }: MemosFeedCli
   }
 
   const feedHeader = (
-    <div className="flex-shrink-0 border-b border-white/10 px-4 py-3">
+    <div className="flex-shrink-0 border-b border-white/10 px-4 py-4">
       <div className="flex items-center justify-between">
-        <h1 className="text-lg font-semibold">{t('title')}</h1>
+        <div className="space-y-1">
+          <p className="text-[11px] font-semibold uppercase tracking-[0.2em] text-muted-foreground">Message Feed</p>
+          <h1 className="text-lg font-semibold">{t('title')}</h1>
+        </div>
         <Button size="sm" onClick={handleNewMemo}>
           <Plus className="h-4 w-4" />
         </Button>
@@ -240,15 +244,25 @@ export function MemosFeedClient({ currentTeamMemberId, projectId }: MemosFeedCli
       memberMap={memberMap}
     />
   ) : (
-    <div className="flex h-full items-center justify-center">
-      <p className="text-sm text-[color:var(--operator-muted)]">{t('selectMemo')}</p>
+    <div className="flex h-full items-center justify-center p-4">
+      <EmptyState
+        title={t('title')}
+        description={t('selectMemo')}
+        className="w-full max-w-lg bg-background/70"
+        action={
+          <Button size="sm" onClick={handleNewMemo}>
+            <Plus className="mr-1 h-4 w-4" />
+            {t('newMemo')}
+          </Button>
+        }
+      />
     </div>
   );
 
   return (
-    <div className="flex min-h-0 flex-1 flex-col lg:h-full lg:flex-row">
+    <div className="flex min-h-0 flex-1 flex-col lg:h-full lg:flex-row lg:overflow-hidden lg:rounded-2xl lg:border lg:border-border/80 lg:bg-card lg:shadow-sm">
       {/* Desktop: left feed panel (lg+) */}
-      <div className="hidden w-80 flex-shrink-0 flex-col border-r border-white/10 lg:flex">
+      <div className="hidden w-[340px] flex-shrink-0 flex-col border-r border-border/80 bg-[color:var(--operator-surface-soft)]/35 lg:flex">
         {feedHeader}
         <div className="flex-1 overflow-y-auto">
           <MemoFeed
@@ -262,7 +276,7 @@ export function MemosFeedClient({ currentTeamMemberId, projectId }: MemosFeedCli
       </div>
 
       {/* Desktop: right thread panel (lg+) */}
-      <div className="hidden flex-1 flex-col bg-[color:var(--operator-surface)] lg:flex">
+      <div className="hidden min-w-0 flex-1 flex-col bg-background lg:flex">
         {detailContent}
       </div>
 

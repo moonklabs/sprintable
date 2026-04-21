@@ -1,0 +1,224 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1400 1100" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif">
+  <defs>
+    <radialGradient id="bg" cx="50%" cy="40%" r="70%">
+      <stop offset="0%" stop-color="#1e1b4b"/>
+      <stop offset="100%" stop-color="#0f172a"/>
+    </radialGradient>
+    <linearGradient id="coreGrad" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#8b5cf6"/>
+      <stop offset="100%" stop-color="#6366f1"/>
+    </linearGradient>
+    <linearGradient id="humanGrad" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#0ea5e9"/>
+      <stop offset="100%" stop-color="#0284c7"/>
+    </linearGradient>
+    <linearGradient id="agentGrad" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#ec4899"/>
+      <stop offset="100%" stop-color="#be185d"/>
+    </linearGradient>
+    <linearGradient id="outcomeGrad" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#10b981"/>
+      <stop offset="100%" stop-color="#059669"/>
+    </linearGradient>
+    <marker id="cArrow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+      <path d="M 0 0 L 10 5 L 0 10 z" fill="#c7d2fe"/>
+    </marker>
+    <marker id="cArrowPink" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+      <path d="M 0 0 L 10 5 L 0 10 z" fill="#f9a8d4"/>
+    </marker>
+    <marker id="cArrowGreen" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+      <path d="M 0 0 L 10 5 L 0 10 z" fill="#6ee7b7"/>
+    </marker>
+    <filter id="gl" x="-50%" y="-50%" width="200%" height="200%">
+      <feGaussianBlur stdDeviation="6" result="blur"/>
+      <feMerge><feMergeNode in="blur"/><feMergeNode in="SourceGraphic"/></feMerge>
+    </filter>
+    <filter id="sh" x="-20%" y="-20%" width="140%" height="140%">
+      <feGaussianBlur in="SourceAlpha" stdDeviation="4"/>
+      <feOffset dx="0" dy="3"/>
+      <feComponentTransfer><feFuncA type="linear" slope="0.4"/></feComponentTransfer>
+      <feMerge><feMergeNode/><feMergeNode in="SourceGraphic"/></feMerge>
+    </filter>
+  </defs>
+
+  <!-- Decorative grid -->
+  <g opacity="0.06" stroke="#6366f1" stroke-width="0.5">
+    <line x1="0" y1="200" x2="1400" y2="200"/>
+    <line x1="0" y1="400" x2="1400" y2="400"/>
+    <line x1="0" y1="600" x2="1400" y2="600"/>
+    <line x1="0" y1="800" x2="1400" y2="800"/>
+  </g>
+
+  <!-- Title -->
+  <text x="700" y="50" text-anchor="middle" fill="#0f172a" font-size="40" font-weight="800">Sprintable — 서비스 개념도</text>
+  <text x="700" y="78" text-anchor="middle" fill="#5b21b6" font-size="19" font-style="italic">"Agents run the sprint. You review."</text>
+  <text x="700" y="100" text-anchor="middle" fill="#475569" font-size="15">AI 에이전트 팀을 위한 단일 진실 공급원(SSoT) 기반 프로젝트 관리</text>
+
+  <!-- ============ LEFT: INPUT (HUMAN) ============ -->
+  <g>
+    <g filter="url(#sh)">
+      <rect x="60" y="180" width="260" height="180" rx="16" fill="url(#humanGrad)" opacity="0.9"/>
+      <text x="190" y="216" text-anchor="middle" fill="#ffffff" font-size="26" font-weight="700">👤 You (PM / Reviewer)</text>
+      <line x1="90" y1="232" x2="290" y2="232" stroke="#bae6fd" stroke-width="1" opacity="0.5"/>
+      <text x="190" y="258" text-anchor="middle" fill="#e0f2fe" font-size="17">• 목표 · 스펙 정의</text>
+      <text x="190" y="280" text-anchor="middle" fill="#e0f2fe" font-size="17">• 라우팅 규칙 설정</text>
+      <text x="190" y="302" text-anchor="middle" fill="#e0f2fe" font-size="17">• 메모 작성 · 지시</text>
+      <text x="190" y="324" text-anchor="middle" fill="#e0f2fe" font-size="17">• 결과 리뷰 · 머지</text>
+      <text x="190" y="350" text-anchor="middle" fill="#bae6fd" font-size="14" font-style="italic">룰 세팅 → 스프린트는 스스로 돈다</text>
+    </g>
+
+    <!-- Human inputs list -->
+    <g filter="url(#sh)">
+      <rect x="60" y="400" width="260" height="160" rx="12" fill="#0c4a6e" opacity="0.6" stroke="#38bdf8" stroke-width="1"/>
+      <text x="190" y="424" text-anchor="middle" fill="#e0f2fe" font-size="17" font-weight="700">INPUTS</text>
+      <text x="80" y="452" fill="#bae6fd" font-size="15">📝  에픽 · 스토리 · 스프린트</text>
+      <text x="80" y="474" fill="#bae6fd" font-size="15">💬  메모 (assign to agent)</text>
+      <text x="80" y="496" fill="#bae6fd" font-size="15">⚙️  라우팅 규칙 · 페르소나</text>
+      <text x="80" y="518" fill="#bae6fd" font-size="15">🔑  API 키 · 웹훅 URL</text>
+      <text x="80" y="540" fill="#bae6fd" font-size="15">📐  툴 ACL · 권한 경계</text>
+    </g>
+  </g>
+
+  <!-- ============ CENTER: SPRINTABLE CORE (SSoT) ============ -->
+  <g>
+    <!-- Glow background -->
+    <circle cx="700" cy="470" r="240" fill="url(#coreGrad)" opacity="0.15" filter="url(#gl)"/>
+
+    <!-- Core hexagon -->
+    <g filter="url(#sh)">
+      <polygon points="700,260 880,365 880,575 700,680 520,575 520,365" fill="url(#coreGrad)" opacity="0.95"/>
+      <polygon points="700,260 880,365 880,575 700,680 520,575 520,365" fill="none" stroke="#c4b5fd" stroke-width="2"/>
+    </g>
+
+    <!-- Core label -->
+    <text x="700" y="340" text-anchor="middle" fill="#ffffff" font-size="40" font-weight="800">Sprintable</text>
+    <text x="700" y="368" text-anchor="middle" fill="#ede9fe" font-size="18" letter-spacing="2" font-weight="600">SINGLE SOURCE OF TRUTH</text>
+
+    <!-- Core components -->
+    <g>
+      <rect x="570" y="390" width="260" height="34" rx="6" fill="#312e81" opacity="0.8" stroke="#a5b4fc" stroke-width="1"/>
+      <text x="700" y="412" text-anchor="middle" fill="#e0e7ff" font-size="17" font-weight="600">📋  Kanban · Epics · Stories</text>
+
+      <rect x="570" y="430" width="260" height="34" rx="6" fill="#312e81" opacity="0.8" stroke="#a5b4fc" stroke-width="1"/>
+      <text x="700" y="452" text-anchor="middle" fill="#e0e7ff" font-size="17" font-weight="600">💬  Memo Threads (hand-off)</text>
+
+      <rect x="570" y="470" width="260" height="34" rx="6" fill="#312e81" opacity="0.8" stroke="#a5b4fc" stroke-width="1"/>
+      <text x="700" y="492" text-anchor="middle" fill="#e0e7ff" font-size="17" font-weight="600">🔌  MCP Server (agent API)</text>
+
+      <rect x="570" y="510" width="260" height="34" rx="6" fill="#312e81" opacity="0.8" stroke="#a5b4fc" stroke-width="1"/>
+      <text x="700" y="532" text-anchor="middle" fill="#e0e7ff" font-size="17" font-weight="600">📡  Webhook Dispatcher</text>
+
+      <rect x="570" y="550" width="260" height="34" rx="6" fill="#312e81" opacity="0.8" stroke="#a5b4fc" stroke-width="1"/>
+      <text x="700" y="572" text-anchor="middle" fill="#e0e7ff" font-size="17" font-weight="600">🧭  Routing Rules Engine</text>
+
+      <rect x="570" y="590" width="260" height="34" rx="6" fill="#312e81" opacity="0.8" stroke="#a5b4fc" stroke-width="1"/>
+      <text x="700" y="612" text-anchor="middle" fill="#e0e7ff" font-size="17" font-weight="600">🛡️  Entitlement · Quota · ACL</text>
+    </g>
+
+    <text x="700" y="660" text-anchor="middle" fill="#fef3c7" font-size="14" font-style="italic">모든 의사결정은 메모 스레드에 남는다</text>
+  </g>
+
+  <!-- ============ RIGHT: AGENT TEAM ============ -->
+  <g>
+    <g filter="url(#sh)">
+      <rect x="1080" y="180" width="260" height="180" rx="16" fill="url(#agentGrad)" opacity="0.9"/>
+      <text x="1210" y="216" text-anchor="middle" fill="#ffffff" font-size="26" font-weight="700">🤖 Agent Team</text>
+      <line x1="1110" y1="232" x2="1310" y2="232" stroke="#fbcfe8" stroke-width="1" opacity="0.5"/>
+      <text x="1210" y="258" text-anchor="middle" fill="#fce7f3" font-size="17">• Backend Agent</text>
+      <text x="1210" y="280" text-anchor="middle" fill="#fce7f3" font-size="17">• Frontend Agent</text>
+      <text x="1210" y="302" text-anchor="middle" fill="#fce7f3" font-size="17">• QA / Review Agent</text>
+      <text x="1210" y="324" text-anchor="middle" fill="#fce7f3" font-size="17">• Docs · Ops · Custom Agent</text>
+      <text x="1210" y="350" text-anchor="middle" fill="#fbcfe8" font-size="14" font-style="italic">HTTP webhook만 받으면 OK</text>
+    </g>
+
+    <!-- Agent outputs -->
+    <g filter="url(#sh)">
+      <rect x="1080" y="400" width="260" height="160" rx="12" fill="#831843" opacity="0.6" stroke="#ec4899" stroke-width="1"/>
+      <text x="1210" y="424" text-anchor="middle" fill="#fce7f3" font-size="17" font-weight="700">AGENT ACTIONS</text>
+      <text x="1100" y="452" fill="#fbcfe8" font-size="15">🔍  MCP로 메모 읽기</text>
+      <text x="1100" y="474" fill="#fbcfe8" font-size="15">💻  코드 · 문서 작성</text>
+      <text x="1100" y="496" fill="#fbcfe8" font-size="15">🔗  PR 생성 · 링크</text>
+      <text x="1100" y="518" fill="#fbcfe8" font-size="15">↩️  reply_memo 로 응답</text>
+      <text x="1100" y="540" fill="#fbcfe8" font-size="15">🔄  다음 에이전트 깨우기</text>
+    </g>
+  </g>
+
+  <!-- Connection arrows (Human → Core → Agents) -->
+  <path d="M 320 270 Q 420 270 520 360" fill="none" stroke="#c7d2fe" stroke-width="2.5" marker-end="url(#cArrow)"/>
+  <text x="400" y="252" fill="#3730a3" font-size="15" font-weight="700">① 메모 작성 · 할당</text>
+
+  <path d="M 880 360 Q 980 270 1080 270" fill="none" stroke="#f9a8d4" stroke-width="2.5" marker-end="url(#cArrowPink)"/>
+  <text x="940" y="252" fill="#9d174d" font-size="15" font-weight="700">② 웹훅 발사 → 에이전트 기동</text>
+
+  <!-- Agent → Core (MCP) -->
+  <path d="M 1080 480 Q 980 480 880 470" fill="none" stroke="#f9a8d4" stroke-width="2.5" marker-end="url(#cArrowPink)" stroke-dasharray="6 3"/>
+  <text x="925" y="470" fill="#9d174d" font-size="15" font-weight="700">③ MCP 조회 · reply</text>
+
+  <!-- Core → Human (review) -->
+  <path d="M 520 470 Q 420 490 320 480" fill="none" stroke="#c7d2fe" stroke-width="2.5" marker-end="url(#cArrow)" stroke-dasharray="6 3"/>
+  <text x="360" y="510" fill="#3730a3" font-size="15" font-weight="700">④ 결과 알림 · 리뷰</text>
+
+  <!-- Cycle indicator -->
+  <g opacity="0.7">
+    <path d="M 1080 510 Q 900 640 700 680 Q 500 640 320 510" fill="none" stroke="#fcd34d" stroke-width="1.5" stroke-dasharray="4 4"/>
+    <text x="700" y="715" text-anchor="middle" fill="#92400e" font-size="15" font-weight="700" font-style="italic">✨ Memo-Webhook Cycle — 에이전트 간 자동 핸드오프</text>
+  </g>
+
+  <!-- ============ BOTTOM: OUTCOMES & INTEGRATIONS ============ -->
+  <g>
+    <rect x="60" y="760" width="1280" height="280" rx="16" fill="#064e3b" opacity="0.3" stroke="#10b981" stroke-width="1.5"/>
+    <text x="80" y="786" fill="#d1fae5" font-size="18" font-weight="700" letter-spacing="1.5">OUTCOMES · 외부 연동</text>
+
+    <!-- Outcome boxes -->
+    <g filter="url(#sh)">
+      <rect x="90" y="810" width="230" height="200" rx="12" fill="url(#outcomeGrad)" opacity="0.85"/>
+      <text x="205" y="842" text-anchor="middle" fill="#ffffff" font-size="19" font-weight="700">🚀 Shipped Work</text>
+      <text x="205" y="870" text-anchor="middle" fill="#d1fae5" font-size="15">• GitHub PR 머지</text>
+      <text x="205" y="890" text-anchor="middle" fill="#d1fae5" font-size="15">• 스토리 자동 Done</text>
+      <text x="205" y="910" text-anchor="middle" fill="#d1fae5" font-size="15">• 배포 링크</text>
+      <text x="205" y="940" text-anchor="middle" fill="#a7f3d0" font-size="14" font-style="italic">SPR-42 [close]</text>
+    </g>
+
+    <g filter="url(#sh)">
+      <rect x="340" y="810" width="230" height="200" rx="12" fill="#064e3b" opacity="0.7" stroke="#10b981" stroke-width="1.5"/>
+      <text x="455" y="842" text-anchor="middle" fill="#d1fae5" font-size="19" font-weight="700">📊 Visibility</text>
+      <text x="455" y="870" text-anchor="middle" fill="#a7f3d0" font-size="15">• 실시간 칸반 보드</text>
+      <text x="455" y="890" text-anchor="middle" fill="#a7f3d0" font-size="15">• Standup 요약</text>
+      <text x="455" y="910" text-anchor="middle" fill="#a7f3d0" font-size="15">• 메모 스레드 타임라인</text>
+      <text x="455" y="940" text-anchor="middle" fill="#6ee7b7" font-size="14" font-style="italic">사람 조율 없이 진행 추적</text>
+    </g>
+
+    <g filter="url(#sh)">
+      <rect x="590" y="810" width="230" height="200" rx="12" fill="#064e3b" opacity="0.7" stroke="#10b981" stroke-width="1.5"/>
+      <text x="705" y="842" text-anchor="middle" fill="#d1fae5" font-size="19" font-weight="700">🔗 Integrations</text>
+      <text x="705" y="870" text-anchor="middle" fill="#a7f3d0" font-size="15">GitHub · Paddle · Slack</text>
+      <text x="705" y="890" text-anchor="middle" fill="#a7f3d0" font-size="15">Claude · OpenAI · Gemini</text>
+      <text x="705" y="910" text-anchor="middle" fill="#a7f3d0" font-size="15">OpenClaw · Hermes</text>
+      <text x="705" y="940" text-anchor="middle" fill="#6ee7b7" font-size="14" font-style="italic">MCP + Webhook = 무엇이든 연결</text>
+    </g>
+
+    <g filter="url(#sh)">
+      <rect x="840" y="810" width="230" height="200" rx="12" fill="#064e3b" opacity="0.7" stroke="#10b981" stroke-width="1.5"/>
+      <text x="955" y="842" text-anchor="middle" fill="#d1fae5" font-size="19" font-weight="700">💳 Monetization</text>
+      <text x="955" y="870" text-anchor="middle" fill="#a7f3d0" font-size="15">Free · Pro · Enterprise</text>
+      <text x="955" y="890" text-anchor="middle" fill="#a7f3d0" font-size="15">Agent runs · 쿼터</text>
+      <text x="955" y="910" text-anchor="middle" fill="#a7f3d0" font-size="15">BYOM vs Managed LLM</text>
+      <text x="955" y="940" text-anchor="middle" fill="#6ee7b7" font-size="14" font-style="italic">OSS (AGPL) + 상업 라이선스</text>
+    </g>
+
+    <g filter="url(#sh)">
+      <rect x="1090" y="810" width="230" height="200" rx="12" fill="#064e3b" opacity="0.7" stroke="#10b981" stroke-width="1.5"/>
+      <text x="1205" y="842" text-anchor="middle" fill="#d1fae5" font-size="19" font-weight="700">🎯 User Value</text>
+      <text x="1205" y="870" text-anchor="middle" fill="#a7f3d0" font-size="15">• 코디네이션 제거</text>
+      <text x="1205" y="890" text-anchor="middle" fill="#a7f3d0" font-size="15">• 컨텍스트 유실 제로</text>
+      <text x="1205" y="910" text-anchor="middle" fill="#a7f3d0" font-size="15">• 24/7 자동 진행</text>
+      <text x="1205" y="940" text-anchor="middle" fill="#6ee7b7" font-size="14" font-style="italic">일이 줄어든다</text>
+    </g>
+  </g>
+
+  <!-- Footer -->
+  <text x="700" y="1075" text-anchor="middle" fill="#334155" font-size="14">
+    핵심 원칙: 로컬 마크다운 · 채팅 스레드로 컨텍스트 전달 금지 → 모든 핸드오프는 Sprintable 메모 스레드에 기록
+  </text>
+</svg>

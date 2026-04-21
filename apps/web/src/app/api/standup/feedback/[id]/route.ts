@@ -5,6 +5,12 @@ import { createSupabaseAdminClient } from '@/lib/supabase/admin';
 import { handleApiError } from '@/lib/api-error';
 import { getAuthContext } from '@/lib/auth-helpers';
 import { apiSuccess, ApiErrors } from '@/lib/api-response';
+import { isOssMode } from '@/lib/storage/factory';
+import {
+  deleteOssStandupFeedback,
+  listOssStandupFeedbackForEntry,
+  updateOssStandupFeedback,
+} from '@/lib/oss-standup';
 import { StandupFeedbackService } from '@/services/standup';
 
 type RouteParams = { params: Promise<{ id: string }> };
@@ -17,6 +23,10 @@ export async function GET(request: Request, { params }: RouteParams) {
     const me = await getAuthContext(supabase, request);
     if (!me) return ApiErrors.unauthorized();
     if (me.rateLimitExceeded) return ApiErrors.tooManyRequests(me.rateLimitRemaining, me.rateLimitResetAt);
+
+    if (isOssMode()) {
+      return apiSuccess(listOssStandupFeedbackForEntry(entryId));
+    }
 
     const dbClient: SupabaseClient = me.type === 'agent' ? createSupabaseAdminClient() : supabase;
     const { data, error } = await dbClient
@@ -45,6 +55,10 @@ export async function PATCH(request: Request, { params }: RouteParams) {
     if (!parsed.success) return parsed.response;
     const body = parsed.data;
 
+    if (isOssMode()) {
+      return apiSuccess(updateOssStandupFeedback(id, body, me.id));
+    }
+
     const service = new StandupFeedbackService(dbClient);
     const feedback = await service.update(id, body, me.id);
     return apiSuccess(feedback);
@@ -60,6 +74,11 @@ export async function DELETE(request: Request, { params }: RouteParams) {
     const me = await getAuthContext(supabase, request);
     if (!me) return ApiErrors.unauthorized();
     if (me.rateLimitExceeded) return ApiErrors.tooManyRequests(me.rateLimitRemaining, me.rateLimitResetAt);
+
+    if (isOssMode()) {
+      deleteOssStandupFeedback(id, me.id);
+      return apiSuccess({ ok: true });
+    }
 
     const dbClient: SupabaseClient = me.type === 'agent' ? createSupabaseAdminClient() : supabase;
     const service = new StandupFeedbackService(dbClient);

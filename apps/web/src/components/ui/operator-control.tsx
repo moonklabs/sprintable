@@ -20,7 +20,11 @@ export function OperatorTextarea({ className, ...props }: React.ComponentProps<'
 export function OperatorSelect({ className, ...props }: React.ComponentProps<'select'>) {
   return (
     <select
-      className={cn(operatorControlClassName, 'h-10 pr-8 appearance-none', className)}
+      className={cn(
+        operatorControlClassName,
+        "h-10 cursor-pointer appearance-none rounded-xl border-border/80 bg-[image:linear-gradient(45deg,transparent_50%,currentColor_50%),linear-gradient(135deg,currentColor_50%,transparent_50%)] bg-[position:calc(100%-18px)_calc(50%-2px),calc(100%-12px)_calc(50%-2px)] bg-[size:6px_6px,6px_6px] bg-no-repeat pr-10 text-foreground shadow-sm hover:border-primary/40 hover:bg-muted/30",
+        className,
+      )}
       {...props}
     />
   );

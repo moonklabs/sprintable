@@ -10,7 +10,7 @@ describe('DocsShell', () => {
       </DocsShell>,
     );
 
-    expect(markup).toContain('lg:grid-cols-[280px_minmax(0,1fr)]');
+    expect(markup).toContain('lg:grid-cols-[300px_minmax(0,1fr)]');
     expect(markup).toContain('lg:block');
     expect(markup).toContain('fixed inset-0 z-50 md:hidden');
     expect(markup).toContain('Close docs sidebar');

@@ -14,9 +14,9 @@ export function OperatorStatCard({
 }) {
   return (
     <div className={cn('rounded-md border border-border bg-muted/30 p-4', className)}>
-      <div className="text-xs text-muted-foreground">{label}</div>
-      <div className="mt-1 text-3xl font-semibold text-foreground">{value}</div>
-      {hint ? <div className="mt-2 text-xs text-muted-foreground">{hint}</div> : null}
+      <div className="text-xs font-medium text-muted-foreground">{label}</div>
+      <div className="mt-0.5 text-3xl font-bold tracking-tight text-foreground">{value}</div>
+      {hint ? <div className="mt-1.5 text-xs text-muted-foreground">{hint}</div> : null}
     </div>
   );
 }
