@@ -419,6 +419,45 @@ function matchesMemoType(conditions: RoutingRuleConditions, memoType: string): b
   return conditions.memo_type.includes(memoType.trim().toLowerCase());
 }
 
+export interface WorkflowVersionSummary {
+  id: string;
+  org_id: string;
+  project_id: string;
+  version: number;
+  snapshot: RoutingRuleSnapshotItem[];
+  change_summary: {
+    added_rules: number;
+    removed_rules: number;
+    changed_rules: number;
+  };
+  created_by: string | null;
+  created_at: string;
+}
+
+interface WorkflowVersionRow {
+  id: string;
+  org_id: string;
+  project_id: string;
+  version: number;
+  snapshot: unknown;
+  change_summary: unknown;
+  created_by: string | null;
+  created_at: string;
+}
+
+function presentVersion(row: WorkflowVersionRow): WorkflowVersionSummary {
+  return {
+    id: row.id,
+    org_id: row.org_id,
+    project_id: row.project_id,
+    version: row.version,
+    snapshot: (row.snapshot as RoutingRuleSnapshotItem[]) ?? [],
+    change_summary: (row.change_summary as WorkflowVersionSummary['change_summary']) ?? { added_rules: 0, removed_rules: 0, changed_rules: 0 },
+    created_by: row.created_by,
+    created_at: row.created_at,
+  };
+}
+
 export class AgentRoutingRuleService {
   constructor(private readonly supabase: SupabaseClient) {}
 
@@ -600,7 +639,103 @@ export class AgentRoutingRuleService {
     });
 
     if (error) throw error;
-    return this.listRules(scope);
+
+    const newRules = await this.listRules(scope);
+    await this.saveVersion({
+      orgId: input.orgId,
+      projectId: input.projectId,
+      actorId: input.actorId,
+      currentRules,
+      newRules,
+    });
+
+    return newRules;
+  }
+
+  private async saveVersion(input: {
+    orgId: string;
+    projectId: string;
+    actorId: string;
+    currentRules: RoutingRuleSummary[];
+    newRules: RoutingRuleSummary[];
+  }): Promise<void> {
+    const { data: versionData } = await this.supabase.rpc('next_workflow_version', {
+      p_project_id: input.projectId,
+    });
+
+    const currentSet = new Map(input.currentRules.map((r) => [r.id, r]));
+    const newSet = new Map(input.newRules.map((r) => [r.id, r]));
+    const addedRules = input.newRules.filter((r) => !currentSet.has(r.id)).length;
+    const removedRules = input.currentRules.filter((r) => !newSet.has(r.id)).length;
+    const changedRules = input.newRules.filter((r) => {
+      const prev = currentSet.get(r.id);
+      return prev && JSON.stringify(createRoutingRuleSnapshotItem(prev)) !== JSON.stringify(createRoutingRuleSnapshotItem(r));
+    }).length;
+
+    const actorMember = await this.supabase
+      .from('team_members')
+      .select('id')
+      .eq('id', input.actorId)
+      .single();
+
+    const createdBy = actorMember.data?.id ?? null;
+
+    await this.supabase.from('workflow_versions').insert({
+      org_id: input.orgId,
+      project_id: input.projectId,
+      version: versionData ?? 1,
+      snapshot: input.newRules.map((r) => createRoutingRuleSnapshotItem(r)),
+      change_summary: { added_rules: addedRules, removed_rules: removedRules, changed_rules: changedRules },
+      created_by: createdBy,
+    });
+  }
+
+  async listVersions(scope: RoutingScope): Promise<WorkflowVersionSummary[]> {
+    const { data, error } = await this.supabase
+      .from('workflow_versions')
+      .select('*')
+      .eq('org_id', scope.orgId)
+      .eq('project_id', scope.projectId)
+      .order('version', { ascending: false });
+
+    if (error) throw error;
+    return (data ?? []).map((row) => presentVersion(row as WorkflowVersionRow));
+  }
+
+  async rollbackToVersion(
+    versionId: string,
+    scope: RoutingScope,
+    actorId: string,
+  ): Promise<RoutingRuleSummary[]> {
+    const { data, error } = await this.supabase
+      .from('workflow_versions')
+      .select('*')
+      .eq('id', versionId)
+      .eq('org_id', scope.orgId)
+      .eq('project_id', scope.projectId)
+      .single();
+
+    if (error || !data) throw new NotFoundError('Workflow version not found');
+
+    const version = presentVersion(data as WorkflowVersionRow);
+    return this.replaceRules({
+      orgId: scope.orgId,
+      projectId: scope.projectId,
+      actorId,
+      items: version.snapshot.map((item) => ({
+        agent_id: item.agent_id,
+        persona_id: item.persona_id,
+        deployment_id: item.deployment_id,
+        name: item.name,
+        priority: item.priority,
+        match_type: item.match_type,
+        conditions: item.conditions,
+        action: item.action,
+        target_runtime: item.target_runtime,
+        target_model: item.target_model,
+        is_enabled: item.is_enabled,
+      })),
+    });
   }
 
   async deleteRule(id: string, scope: RoutingScope): Promise<{ ok: true; id: string }> {
