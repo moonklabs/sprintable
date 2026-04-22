@@ -18,7 +18,35 @@ export async function GET() {
 
     const cookieStore = await cookies();
     const projectId = cookieStore.get(CURRENT_PROJECT_COOKIE)?.value ?? null;
-    if (!projectId) return apiSuccess({ project_id: null, project_name: null, org_id: null });
+
+    if (!projectId) {
+      const { data: firstMembership } = await supabase
+        .from('team_members')
+        .select('project_id, org_id, projects(name)')
+        .eq('user_id', user.id)
+        .eq('type', 'human')
+        .eq('is_active', true)
+        .limit(1)
+        .maybeSingle();
+
+      if (!firstMembership) return apiSuccess({ project_id: null, project_name: null, org_id: null });
+
+      cookieStore.set(CURRENT_PROJECT_COOKIE, firstMembership.project_id, {
+        path: '/',
+        sameSite: 'lax',
+        maxAge: 60 * 60 * 24 * 365,
+      });
+
+      const firstProject = Array.isArray(firstMembership.projects)
+        ? firstMembership.projects.find(Boolean)
+        : firstMembership.projects;
+
+      return apiSuccess({
+        project_id: firstMembership.project_id,
+        project_name: (firstProject as { name: string } | null)?.name ?? null,
+        org_id: firstMembership.org_id,
+      });
+    }
 
     const { data: membership } = await supabase
       .from('team_members')
