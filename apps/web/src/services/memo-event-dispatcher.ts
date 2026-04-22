@@ -404,7 +404,15 @@ export class MemoEventDispatcher {
     }
 
     if (memo.created_by === routing.dispatchAgentId) {
-      return { status: 'skipped', reason: 'self_loop_prevented' };
+      if (routing.forwardToAgentId) {
+        routing = { ...routing, dispatchAgentId: routing.forwardToAgentId, forwardToAgentId: null };
+      } else {
+        return { status: 'skipped', reason: 'self_loop_prevented' };
+      }
+    }
+
+    if (!routing.dispatchAgentId) {
+      return { status: 'skipped', reason: 'routing_target_missing' };
     }
 
     // managed agent 조회 → 없으면 BYOA fallback (webhook_url 있는 팀 멤버)
