@@ -5,6 +5,7 @@ const PUBLIC_EXACT = [
   '/',
   '/llms.txt',
   '/llms-full.txt',
+  '/llms-baos.txt',
 ];
 
 const PUBLIC_PREFIX = [
