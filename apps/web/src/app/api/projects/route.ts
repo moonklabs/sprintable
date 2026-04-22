@@ -2,7 +2,6 @@ import { createSupabaseServerClient } from '@/lib/supabase/server';
 import { handleApiError } from '@/lib/api-error';
 import { apiSuccess, apiError, ApiErrors } from '@/lib/api-response';
 import { checkProjectLimit } from '@/lib/check-feature';
-import { checkEntitlement } from '@/lib/entitlement';
 import { parseBody, createProjectSchema } from '@sprintable/shared';
 import { isOssMode, createProjectRepository } from '@/lib/storage/factory';
 
@@ -102,8 +101,6 @@ export async function POST(request: Request) {
     if (!projectCheck.allowed) {
       return apiError('UPGRADE_REQUIRED', projectCheck.reason ?? 'Project limit reached. Upgrade to Team.', 403);
     }
-    const ent = await checkEntitlement(supabase, orgId, 'projects');
-    if (!ent.allowed) return apiError('quota_exceeded', `Project quota exceeded (${ent.current}/${ent.limit})`, 402, { resource: 'projects', current: ent.current, limit: ent.limit, upgradeUrl: ent.upgradeUrl });
 
     const creatorName = user.user_metadata?.name
       || user.user_metadata?.full_name
