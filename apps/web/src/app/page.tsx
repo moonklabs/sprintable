@@ -1,5 +1,16 @@
-import { LandingPage } from '@/components/landing/landing-page';
+import { redirect } from 'next/navigation';
+import { isOssMode } from '@/lib/storage/factory';
+import { createSupabaseServerClient } from '@/lib/supabase/server';
 
-export default function RootPage() {
-  return <LandingPage />;
+export default async function RootPage() {
+  if (isOssMode()) {
+    redirect('/dashboard');
+  }
+
+  const supabase = await createSupabaseServerClient();
+  const {
+    data: { user },
+  } = await supabase.auth.getUser();
+
+  redirect(user ? '/dashboard' : '/login');
 }
