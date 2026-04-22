@@ -30,6 +30,30 @@ describe('markdownToHtml', () => {
     expect(result).toContain('<td>didi</td>');
   });
 
+  it('renders escaped pipe inside table cell as literal |', () => {
+    const result = markdownToHtml('| expr | value |\n| --- | --- |\n| a \\| b | 1 |');
+    expect(result).toContain('<table>');
+    expect(result).toContain('a | b');
+    // should not create an extra column for the escaped pipe
+    const cellMatches = result.match(/<td>/g) ?? [];
+    expect(cellMatches.length).toBe(2);
+  });
+
+  it('escapes raw HTML open-tags outside code blocks', () => {
+    const result = markdownToHtml('<bold>text</bold> and **md**');
+    // '<' is escaped so no live <bold> element; '>' preserved for blockquote compat
+    expect(result).not.toContain('<bold>');
+    expect(result).toContain('&lt;bold>');
+    expect(result).toContain('<strong>md</strong>');
+  });
+
+  it('does not escape html inside fenced code blocks', () => {
+    const result = markdownToHtml('```\n<div>raw</div>\n```');
+    // code blocks use escapeHtml so < becomes &lt; but is inside <pre><code>
+    expect(result).toContain('<pre><code>');
+    expect(result).not.toContain('<div>raw</div>');
+  });
+
   it('converts ordered lists into ol blocks', () => {
     const result = markdownToHtml('1. one\n2. two');
     expect(result).toContain('<ol>');
@@ -60,6 +84,15 @@ describe('markdownToHtml', () => {
   it('returns empty string for empty input', () => {
     expect(markdownToHtml('')).toBe('');
     expect(markdownToHtml('   ')).toBe('');
+  });
+
+  it('preserves page-embed atoms through html escape pass', () => {
+    const embed = '<div data-page-embed data-doc-id="abc" data-title="Doc" data-icon="" data-slug="doc"></div>';
+    const md = `\n${embed}\n`;
+    const result = markdownToHtml(md);
+    expect(result).toContain('data-page-embed');
+    expect(result).toContain('data-doc-id="abc"');
+    expect(result).not.toContain('&lt;div');
   });
 });
 

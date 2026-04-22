@@ -86,6 +86,22 @@ export function markdownToHtml(md: string): string {
     return `\x00CODEBLOCK${idx}\x00`;
   });
 
+  // Protect page-embed atoms — they are written as raw HTML by htmlToMarkdown() and
+  // must survive the HTML-escape pass below intact.
+  const atomPlaceholders: string[] = [];
+  html = html.replace(/<div\s+data-page-embed[^>]*><\/div>/g, (m) => {
+    const idx = atomPlaceholders.length;
+    atomPlaceholders.push(m);
+    return `\x00ATOM${idx}\x00`;
+  });
+
+  // Escape raw HTML in non-codeblock, non-atom regions so user-typed tags like
+  // <bold> or <div> don't get parsed as real HTML elements by the browser.
+  // '>' is intentionally excluded to preserve blockquote markers (^> pattern below).
+  html = html.split(/(\x00CODEBLOCK\d+\x00|\x00ATOM\d+\x00)/g).map((seg, i) =>
+    i % 2 === 1 ? seg : seg.replace(/&/g, '&amp;').replace(/</g, '&lt;'),
+  ).join('');
+
   // Headings
   html = html.replace(/^### (.+)$/gm, '<h3>$1</h3>');
   html = html.replace(/^## (.+)$/gm, '<h2>$1</h2>');
@@ -170,11 +186,14 @@ export function markdownToHtml(md: string): string {
     return `<ul>${items.map((item) => `<li>${item}</li>`).join('')}</ul>`;
   });
 
-  // Paragraphs - wrap remaining plain-text lines (exclude HTML tags and code block placeholders)
-  html = html.replace(/^(?!<[a-z/])(?!\x00CODEBLOCK)(.*\S.*)$/gm, '<p>$1</p>');
+  // Paragraphs - wrap remaining plain-text lines (exclude HTML tags and code block/atom placeholders)
+  html = html.replace(/^(?!<[a-z/])(?!\x00CODEBLOCK)(?!\x00ATOM)(.*\S.*)$/gm, '<p>$1</p>');
 
   // Clean up extra whitespace
   html = html.replace(/\n{3,}/g, '\n\n');
+
+  // Restore page-embed atoms before code blocks (order matters — CODEBLOCK restore must be last)
+  html = html.replace(/\x00ATOM(\d+)\x00/g, (_, i) => atomPlaceholders[Number(i)] ?? '');
 
   // Restore fenced code blocks (must be last to avoid double-processing)
   html = html.replace(/\x00CODEBLOCK(\d+)\x00/g, (_, i) => codeBlockPlaceholders[Number(i)] ?? '');
@@ -198,9 +217,16 @@ function isTableSeparatorLine(line: string): boolean {
     .every((cell) => /^:?-{3,}:?$/.test(cell.trim()));
 }
 
+const ESCAPED_PIPE = '\x01PIPE\x01';
+
 function parseTableCells(line: string): string[] {
   const trimmed = line.trim().replace(/^\|/, '').replace(/\|$/, '');
   if (!trimmed) return [];
 
-  return trimmed.split('|').map((cell) => cell.trim());
+  // Replace escaped pipes (\|) with a placeholder before splitting,
+  // then restore them in each cell so they render as literal '|'.
+  return trimmed
+    .replace(/\\\|/g, ESCAPED_PIPE)
+    .split('|')
+    .map((cell) => cell.trim().replace(new RegExp(ESCAPED_PIPE, 'g'), '|'));
 }
