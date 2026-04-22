@@ -16,8 +16,12 @@ export async function createSupabaseServerClient() {
         },
         setAll(cookiesToSet: Array<{ name: string; value: string; options: Record<string, unknown> }>) {
           try {
+            const cookieDomain = process.env['NEXT_PUBLIC_COOKIE_DOMAIN'];
             for (const { name, value, options } of cookiesToSet) {
-              cookieStore.set(name, value, options as Parameters<typeof cookieStore.set>[2]);
+              cookieStore.set(name, value, {
+                ...(options as Parameters<typeof cookieStore.set>[2]),
+                ...(cookieDomain ? { domain: cookieDomain } : {}),
+              });
             }
           } catch {
             // Server Component에서는 set 불가 — 무시
