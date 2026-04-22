@@ -88,6 +88,7 @@ function createDispatcherSupabaseStub(options?: {
             if (column === 'id') idFilter = String(value);
             return builder;
           }),
+          not: vi.fn(() => builder),
           single: vi.fn(async () => {
             const member = teamMembers.find((row) => !idFilter || row.id === idFilter) ?? null;
             return member ? { data: member, error: null } : { data: null, error: { message: 'not found' } };
@@ -913,5 +914,45 @@ describe('MemoEventDispatcher', () => {
     await dispatcher.pollOnce();
 
     expect(fetchFn).toHaveBeenCalledTimes(60);
+  });
+
+  it('dispatches to BYOA member webhook_url directly without creating agent_runs', async () => {
+    const fetchFn = vi.fn().mockResolvedValue(new Response('OK', { status: 200 }));
+    const byoaMember = {
+      id: 'byoa-member-1',
+      org_id: 'org-1',
+      project_id: 'project-1',
+      type: 'human',
+      name: 'Jay',
+      webhook_url: 'https://discord.com/api/webhooks/123/abc',
+      is_active: true,
+    };
+    const { supabase, state } = createDispatcherSupabaseStub({
+      teamMembers: [byoaMember],
+      deployment: null,
+    });
+    const dispatcher = new MemoEventDispatcher({ supabase: supabase as never, fetchFn: fetchFn as never });
+
+    const result = await dispatcher.dispatchMemoIfNeeded({
+      id: 'memo-byoa-1',
+      org_id: 'org-1',
+      project_id: 'project-1',
+      title: 'BYOA task',
+      content: 'hello BYOA',
+      memo_type: 'task',
+      status: 'open',
+      assigned_to: 'byoa-member-1',
+      created_by: 'human-sender',
+      updated_at: '2026-04-22T10:00:00.000Z',
+      created_at: '2026-04-22T10:00:00.000Z',
+    }, 'realtime');
+
+    expect(result).toEqual({ status: 'dispatched' });
+    expect(state.insertedRuns).toHaveLength(0);
+    expect(fetchFn).toHaveBeenCalledTimes(1);
+    expect(fetchFn).toHaveBeenCalledWith(
+      'https://discord.com/api/webhooks/123/abc',
+      expect.objectContaining({ method: 'POST' }),
+    );
   });
 });
