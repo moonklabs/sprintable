@@ -20,7 +20,9 @@ export async function GET(request: Request) {
 
     const dbClient: SupabaseClient = me.type === 'agent' ? createSupabaseAdminClient() : supabase;
     const service = new AnalyticsService(dbClient);
+    const t0 = Date.now();
     const data = await service.getProjectHealth(projectId);
+    console.log(`[perf] GET /api/analytics/health project=${projectId} ${Date.now() - t0}ms`);
     return apiSuccess(data);
   } catch (err: unknown) {
     return handleApiError(err);
