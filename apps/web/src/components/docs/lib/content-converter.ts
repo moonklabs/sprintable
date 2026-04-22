@@ -86,6 +86,13 @@ export function markdownToHtml(md: string): string {
     return `\x00CODEBLOCK${idx}\x00`;
   });
 
+  // Escape raw HTML in non-codeblock regions so user-typed tags like <bold> or <div>
+  // don't get parsed as real HTML elements by the browser.
+  // '>' is intentionally excluded to preserve blockquote markers (^> pattern below).
+  html = html.split(/(\x00CODEBLOCK\d+\x00)/g).map((seg, i) =>
+    i % 2 === 1 ? seg : seg.replace(/&/g, '&amp;').replace(/</g, '&lt;'),
+  ).join('');
+
   // Headings
   html = html.replace(/^### (.+)$/gm, '<h3>$1</h3>');
   html = html.replace(/^## (.+)$/gm, '<h2>$1</h2>');
@@ -198,9 +205,16 @@ function isTableSeparatorLine(line: string): boolean {
     .every((cell) => /^:?-{3,}:?$/.test(cell.trim()));
 }
 
+const ESCAPED_PIPE = '\x01PIPE\x01';
+
 function parseTableCells(line: string): string[] {
   const trimmed = line.trim().replace(/^\|/, '').replace(/\|$/, '');
   if (!trimmed) return [];
 
-  return trimmed.split('|').map((cell) => cell.trim());
+  // Replace escaped pipes (\|) with a placeholder before splitting,
+  // then restore them in each cell so they render as literal '|'.
+  return trimmed
+    .replace(/\\\|/g, ESCAPED_PIPE)
+    .split('|')
+    .map((cell) => cell.trim().replace(new RegExp(ESCAPED_PIPE, 'g'), '|'));
 }
