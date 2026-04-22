@@ -77,11 +77,13 @@ export function htmlToMarkdown(html: string): string {
 export function markdownToHtml(md: string): string {
   if (!md.trim()) return '';
 
-  let html = md;
-
-  // Code blocks (fenced)
-  html = html.replace(/```(\w*)\n([\s\S]*?)```/g, (_m, _lang, code) => {
-    return `<pre><code>${escapeHtml(code.trimEnd())}</code></pre>`;
+  // Extract fenced code blocks first to prevent other transforms from modifying their content.
+  // Subsequent regex passes use gm flags which would otherwise corrupt multi-line code blocks.
+  const codeBlockPlaceholders: string[] = [];
+  let html = md.replace(/```(\w*)\n([\s\S]*?)```/g, (_m, _lang, code) => {
+    const idx = codeBlockPlaceholders.length;
+    codeBlockPlaceholders.push(`<pre><code>${escapeHtml(code.trimEnd())}</code></pre>`);
+    return `\x00CODEBLOCK${idx}\x00`;
   });
 
   // Headings
@@ -168,11 +170,14 @@ export function markdownToHtml(md: string): string {
     return `<ul>${items.map((item) => `<li>${item}</li>`).join('')}</ul>`;
   });
 
-  // Paragraphs - wrap remaining plain-text lines
-  html = html.replace(/^(?!<[a-z/])(.*\S.*)$/gm, '<p>$1</p>');
+  // Paragraphs - wrap remaining plain-text lines (exclude HTML tags and code block placeholders)
+  html = html.replace(/^(?!<[a-z/])(?!\x00CODEBLOCK)(.*\S.*)$/gm, '<p>$1</p>');
 
   // Clean up extra whitespace
   html = html.replace(/\n{3,}/g, '\n\n');
+
+  // Restore fenced code blocks (must be last to avoid double-processing)
+  html = html.replace(/\x00CODEBLOCK(\d+)\x00/g, (_, i) => codeBlockPlaceholders[Number(i)] ?? '');
 
   return html.trim();
 }
