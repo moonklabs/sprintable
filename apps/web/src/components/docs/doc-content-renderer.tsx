@@ -182,7 +182,7 @@ function sanitizeDocHtml(content: string): string {
   };
 
   const sanitize = maybePurifier.sanitize ?? maybePurifier.default?.sanitize;
-  return sanitize ? sanitize(content) : content;
+  return sanitize ? sanitize(content) : '';
 }
 
 function decorateHtmlContent(content: string, headings: ReturnType<typeof extractDocHeadings>, codeCopyLabel: string): string {
@@ -192,8 +192,7 @@ function decorateHtmlContent(content: string, headings: ReturnType<typeof extrac
     const heading = headings[headingIndex++];
     if (!heading) return match;
 
-    const withoutId = String(attrs).replace(/\s+id=(['"]).*?\1/i, '');
-    return `<h${level}${withoutId} id="${escapeHtmlAttribute(heading.id)}">${sanitizeHeadingInner(inner)}</h${level}>`;
+    return `<h${level} id="${escapeHtmlAttribute(heading.id)}">${sanitizeHeadingInner(inner)}</h${level}>`;
   });
 
   const withTableShells = withHeadingIds.replace(/<table\b[\s\S]*?<\/table>/gi, (tableMarkup) => {
