@@ -1,5 +1,13 @@
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 import { renderToStaticMarkup } from 'react-dom/server';
+
+// DOMPurify runs only in browser environments. Mock it as an identity function so
+// the server-side heading sanitisation logic (attrs removal + sanitizeHeadingInner)
+// is exercised without needing a real DOM.
+vi.mock('dompurify', () => ({
+  default: { sanitize: (html: string) => html },
+}));
+
 import { DocContentRenderer } from './doc-content-renderer';
 
 describe('DocContentRenderer', () => {
@@ -42,5 +50,21 @@ describe('DocContentRenderer', () => {
     expect(markup).toContain('data-doc-copy-button="true"');
     expect(markup).toContain('overflow-x-auto');
     expect(markup).toContain('SELECT 1;');
+  });
+
+  it('sanitizes dangerous heading attributes and inner tags', () => {
+    const markup = renderToStaticMarkup(
+      <DocContentRenderer
+        content={'<h1 onclick="alert(1)">제목</h1><h2><img src=x onerror="alert(2)"><strong>ok</strong></h2>'}
+        contentFormat="html"
+      />,
+    );
+
+    // heading element itself must not carry event-handler attributes
+    expect(markup).not.toContain(' onclick=');
+    // dangerous inner tags must be escaped — no live <img> element in output
+    expect(markup).not.toContain('<img ');
+    // safe inline tags inside heading inner are preserved by sanitizeHeadingInner
+    expect(markup).toContain('<strong>ok</strong>');
   });
 });
