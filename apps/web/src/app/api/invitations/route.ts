@@ -14,16 +14,12 @@ export async function GET() {
     const { data: { user } } = await supabase.auth.getUser();
     if (!user) return ApiErrors.unauthorized();
 
-    const me = await getMyTeamMember(supabase, user);
-    if (!me) return ApiErrors.forbidden('Team member not found');
-
-    // admin 권한 체크
+    // org_members 직접 조회 — project context 불필요, 다중 프로젝트 membership 안전
     const { data: orgMember } = await supabase
       .from('org_members')
-      .select('role')
-      .eq('org_id', me.org_id)
+      .select('org_id, role')
       .eq('user_id', user.id)
-      .single();
+      .maybeSingle();
 
     if (!orgMember || !['owner', 'admin'].includes(orgMember.role as string)) {
       return ApiErrors.forbidden('Admin access required');
@@ -32,7 +28,7 @@ export async function GET() {
     const { data, error } = await supabase
       .from('invitations')
       .select('*, projects(id, name)')
-      .eq('org_id', me.org_id)
+      .eq('org_id', orgMember.org_id)
       .order('created_at', { ascending: false });
 
     if (error) throw error;
