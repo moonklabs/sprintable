@@ -404,7 +404,13 @@ export class MemoEventDispatcher {
     }
 
     if (memo.created_by === routing.dispatchAgentId) {
-      if (routing.forwardToAgentId) {
+      // forwardToAgentId가 있고 redirect target도 self-loop가 아닌 경우에만 redirect
+      if (routing.forwardToAgentId && routing.forwardToAgentId !== memo.created_by) {
+        await this.logAudit(routing.dispatchAgentId, memo, 'memo_dispatch.self_loop_redirect', 'info', {
+          dispatch_key: dispatchKey,
+          from_agent_id: routing.dispatchAgentId,
+          to_agent_id: routing.forwardToAgentId,
+        });
         routing = { ...routing, dispatchAgentId: routing.forwardToAgentId, forwardToAgentId: null };
       } else {
         return { status: 'skipped', reason: 'self_loop_prevented' };
