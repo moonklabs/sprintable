@@ -3,6 +3,7 @@ import { handleApiError } from '@/lib/api-error';
 import { apiSuccess, apiError, ApiErrors } from '@/lib/api-response';
 import { getMyTeamMember } from '@/lib/auth-helpers';
 import { checkMemberLimit } from '@/lib/check-feature';
+import { checkMemberEntitlement } from '@/lib/entitlement';
 import { parseBody, createInvitationSchema } from '@sprintable/shared';
 import { isOssMode } from '@/lib/storage/factory';
 
@@ -65,6 +66,8 @@ export async function POST(request: Request) {
       if (!memberCheck.allowed) {
         return apiError('UPGRADE_REQUIRED', memberCheck.reason ?? 'Member limit reached', 403);
       }
+      const ent = await checkMemberEntitlement(supabase, me.org_id);
+      if (!ent.allowed) return apiError('quota_exceeded', `Member quota exceeded (${ent.current}/${ent.limit})`, 402, { resource: 'members', current: ent.current, limit: ent.limit, upgradeUrl: ent.upgradeUrl });
     }
 
     // project_id가 지정된 경우 해당 프로젝트가 org에 속하는지 검증

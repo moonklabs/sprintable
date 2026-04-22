@@ -8,6 +8,7 @@ import { getAuthContext } from '@/lib/auth-helpers';
 import { apiSuccess, apiError, ApiErrors } from '@/lib/api-response';
 import { buildCursorPageMeta, parseCursorPageInput } from '@/lib/pagination';
 import { checkResourceLimit } from '@/lib/check-feature';
+import { checkEntitlement } from '@/lib/entitlement';
 import { isOssMode, createDocRepository } from '@/lib/storage/factory';
 
 export async function GET(request: Request) {
@@ -57,6 +58,8 @@ export async function POST(request: Request) {
     if (!ossMode) {
       const check = await checkResourceLimit(dbClient!, me.org_id, 'max_docs', 'docs');
       if (!check.allowed) return apiError('UPGRADE_REQUIRED', check.reason ?? 'Document limit reached. Upgrade to Team.', 403);
+      const ent = await checkEntitlement(supabase, me.org_id, 'docs');
+      if (!ent.allowed) return apiError('quota_exceeded', `Doc quota exceeded (${ent.current}/${ent.limit})`, 402, { resource: 'docs', current: ent.current, limit: ent.limit, upgradeUrl: ent.upgradeUrl });
     }
     const parsed = await parseBody(request, createDocSchema); if (!parsed.success) return parsed.response; const body = parsed.data;
     const repo = await createDocRepository(dbClient);
