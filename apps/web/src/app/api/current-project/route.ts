@@ -6,6 +6,45 @@ import { CURRENT_PROJECT_COOKIE } from '@/lib/auth-helpers';
 import { parseBody, setCurrentProjectSchema } from '@sprintable/shared';
 import { isOssMode } from '@/lib/storage/factory';
 
+export async function GET() {
+  if (isOssMode()) {
+    const { OSS_PROJECT_ID, OSS_ORG_ID } = await import('@sprintable/storage-sqlite');
+    return apiSuccess({ project_id: OSS_PROJECT_ID, project_name: 'My Project', org_id: OSS_ORG_ID });
+  }
+  try {
+    const supabase = await createSupabaseServerClient();
+    const { data: { user } } = await supabase.auth.getUser();
+    if (!user) return ApiErrors.unauthorized();
+
+    const cookieStore = await cookies();
+    const projectId = cookieStore.get(CURRENT_PROJECT_COOKIE)?.value ?? null;
+    if (!projectId) return apiSuccess({ project_id: null, project_name: null, org_id: null });
+
+    const { data: membership } = await supabase
+      .from('team_members')
+      .select('id, project_id, org_id, projects(name)')
+      .eq('user_id', user.id)
+      .eq('type', 'human')
+      .eq('is_active', true)
+      .eq('project_id', projectId)
+      .maybeSingle();
+
+    if (!membership) return apiSuccess({ project_id: null, project_name: null, org_id: null });
+
+    const project = Array.isArray(membership.projects)
+      ? membership.projects.find(Boolean)
+      : membership.projects;
+
+    return apiSuccess({
+      project_id: membership.project_id,
+      project_name: (project as { name: string } | null)?.name ?? null,
+      org_id: membership.org_id,
+    });
+  } catch (err: unknown) {
+    return handleApiError(err);
+  }
+}
+
 export async function POST(request: Request) {
   if (isOssMode()) {
     const { OSS_PROJECT_ID } = await import('@sprintable/storage-sqlite');

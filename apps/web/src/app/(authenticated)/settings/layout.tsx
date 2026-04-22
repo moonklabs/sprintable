@@ -43,12 +43,11 @@ export default async function SettingsLayout({ children }: { children: ReactNode
     .eq('user_id', user.id)
     .maybeSingle();
 
-  // Check if admin
+  // Check if admin — org_members 직접 조회 (project context 불필요, 다중 프로젝트 안전)
   const { data: orgMember } = await supabase
-    .from('team_members')
+    .from('org_members')
     .select('role')
     .eq('user_id', user.id)
-    .eq('project_id', currentProject?.project_id ?? '')
     .maybeSingle();
 
   const isAdmin = orgMember?.role === 'owner' || orgMember?.role === 'admin';
