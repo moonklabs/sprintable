@@ -955,4 +955,94 @@ describe('MemoEventDispatcher', () => {
       expect.objectContaining({ method: 'POST' }),
     );
   });
+
+  it('redirects to forwardToAgentId when self-loop is detected', async () => {
+    const fetchFn = vi.fn().mockResolvedValue(new Response('{}', { status: 200, headers: { 'content-type': 'application/json' } }));
+    const routingRuleService = {
+      evaluateMemo: vi.fn(async () => ({
+        matchedRule: { id: 'rule-kickoff', agent_id: 'agent-po' },
+        dispatchAgentId: 'agent-po',
+        originalAssignedTo: 'agent-po',
+        autoReplyMode: 'process_and_forward',
+        forwardToAgentId: 'agent-dev',
+      })),
+    };
+    const { supabase, state } = createDispatcherSupabaseStub({
+      teamMembers: [
+        {
+          id: 'agent-dev',
+          org_id: 'org-1',
+          project_id: 'project-1',
+          type: 'agent',
+          name: 'Nwachukwu',
+          webhook_url: 'https://agent-dev.example.com/webhook',
+          is_active: true,
+        },
+      ],
+    });
+    const dispatcher = new MemoEventDispatcher({
+      supabase: supabase as never,
+      fetchFn: fetchFn as never,
+      routingRuleService: routingRuleService as never,
+    });
+
+    const result = await dispatcher.dispatchMemoIfNeeded({
+      id: 'memo-kickoff-1',
+      org_id: 'org-1',
+      project_id: 'project-1',
+      title: '[킥오프] self-loop redirect',
+      content: 'kickoff from PO',
+      memo_type: 'kickoff',
+      status: 'open',
+      assigned_to: 'agent-po',
+      created_by: 'agent-po',
+      updated_at: '2026-04-22T10:00:00.000Z',
+      created_at: '2026-04-22T10:00:00.000Z',
+    }, 'realtime');
+
+    expect(result).toMatchObject({ status: 'dispatched' });
+    expect(fetchFn).toHaveBeenCalledTimes(1);
+    expect(fetchFn).toHaveBeenCalledWith(
+      'https://agent-dev.example.com/webhook',
+      expect.objectContaining({ method: 'POST' }),
+    );
+    expect(state.insertedRuns).toHaveLength(1);
+    expect(state.insertedRuns[0]).toMatchObject({ agent_id: 'agent-dev' });
+  });
+
+  it('returns self_loop_prevented when self-loop detected and no forwardToAgentId', async () => {
+    const fetchFn = vi.fn();
+    const routingRuleService = {
+      evaluateMemo: vi.fn(async () => ({
+        matchedRule: { id: 'rule-no-forward' },
+        dispatchAgentId: 'agent-1',
+        originalAssignedTo: 'agent-1',
+        autoReplyMode: 'process_and_report',
+        forwardToAgentId: null,
+      })),
+    };
+    const { supabase } = createDispatcherSupabaseStub();
+    const dispatcher = new MemoEventDispatcher({
+      supabase: supabase as never,
+      fetchFn: fetchFn as never,
+      routingRuleService: routingRuleService as never,
+    });
+
+    const result = await dispatcher.dispatchMemoIfNeeded({
+      id: 'memo-self-loop-1',
+      org_id: 'org-1',
+      project_id: 'project-1',
+      title: 'self loop no forward',
+      content: 'self loop',
+      memo_type: 'task',
+      status: 'open',
+      assigned_to: 'agent-1',
+      created_by: 'agent-1',
+      updated_at: '2026-04-22T10:00:00.000Z',
+      created_at: '2026-04-22T10:00:00.000Z',
+    }, 'realtime');
+
+    expect(result).toEqual({ status: 'skipped', reason: 'self_loop_prevented' });
+    expect(fetchFn).not.toHaveBeenCalled();
+  });
 });
