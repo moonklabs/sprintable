@@ -8,7 +8,6 @@ import { AudioRecorder } from '@/components/meetings/audio-recorder';
 import { AiSummarizeButton } from '@/components/meetings/ai-summarize-button';
 import { RouteErrorState } from '@/components/ui/route-error-state';
 import { PageSkeleton } from '@/components/ui/page-skeleton';
-import { UpgradeModal } from '@/components/upgrade-modal';
 import { useUpgradeGuard } from '@/hooks/use-upgrade-guard';
 import { readApiClientError } from '@/lib/api-client-error';
 
@@ -48,13 +47,7 @@ export default function MeetingDetailPage() {
   const [editingSummary, setEditingSummary] = useState(false);
   const [summaryDraft, setSummaryDraft] = useState('');
   const [savingSummary, setSavingSummary] = useState(false);
-  const {
-    guardedFetch,
-    showModal: showUpgradeModal,
-    meterType: upgradeMeterType,
-    closeModal: closeUpgradeModal,
-    triggerUpgrade,
-  } = useUpgradeGuard();
+  const { guardedFetch, triggerUpgrade } = useUpgradeGuard();
 
   const updateMeeting = useCallback(async (patch: Partial<MeetingDetail>, fallbackMessage: string) => {
     const response = await fetch(`/api/meetings/${meetingId}`, {
@@ -377,8 +370,6 @@ export default function MeetingDetailPage() {
         </section>
       )}
 
-      {/* AC4: UpgradeModal */}
-      {showUpgradeModal && <UpgradeModal meterType={upgradeMeterType} onClose={closeUpgradeModal} />}
     </div>
   );
 }

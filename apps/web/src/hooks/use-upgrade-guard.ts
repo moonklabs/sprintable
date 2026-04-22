@@ -1,39 +1,40 @@
 'use client';
 
-import { useState, useCallback } from 'react';
+import { useCallback } from 'react';
 import { readApiClientError } from '@/lib/api-client-error';
+import { dispatchQuotaExceeded } from '@/components/upgrade-modal';
 
 /**
- * AC4: API 403 + UPGRADE_REQUIRED 감지 → UpgradeModal 표시
+ * Wraps fetch calls and detects 402 quota_exceeded / 403 UPGRADE_REQUIRED,
+ * dispatching a global 'quota-exceeded' event to trigger UpgradeModal.
  */
 export function useUpgradeGuard() {
-  const [showModal, setShowModal] = useState(false);
-  const [meterType, setMeterType] = useState('');
-
   const guardedFetch = useCallback(async (input: RequestInfo | URL, init?: RequestInit) => {
     const res = await fetch(input, init);
 
-    if (res.status === 403) {
+    if (res.status === 402 || res.status === 403) {
       try {
         const payload = await readApiClientError(res.clone(), `Request failed (${res.status})`);
-        if (payload.code === 'UPGRADE_REQUIRED') {
-          setMeterType(payload.meterType ?? '');
-          setShowModal(true);
+        if (payload.code === 'quota_exceeded' || payload.code === 'UPGRADE_REQUIRED') {
+          dispatchQuotaExceeded({
+            resource: (payload.details?.['resource'] as string) ?? payload.meterType ?? 'unknown',
+            current: (payload.details?.['current'] as number) ?? 0,
+            limit: (payload.details?.['limit'] as number) ?? 0,
+            upgradeUrl: (payload.details?.['upgradeUrl'] as string) ?? '/upgrade',
+          });
         }
       } catch {
-        // not JSON
+        // not JSON — ignore
       }
     }
 
     return res;
   }, []);
 
-  const closeModal = useCallback(() => setShowModal(false), []);
-
+  // Legacy compat: meetings page calls triggerUpgrade manually
   const triggerUpgrade = useCallback((meter: string) => {
-    setMeterType(meter);
-    setShowModal(true);
+    dispatchQuotaExceeded({ resource: meter, current: 0, limit: 0 });
   }, []);
 
-  return { guardedFetch, showModal, meterType, closeModal, triggerUpgrade };
+  return { guardedFetch, triggerUpgrade };
 }
