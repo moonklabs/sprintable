@@ -252,10 +252,13 @@ export class AnalyticsService {
       .single();
     if (mb.error) throw new Error('Agent not found in project');
 
+    // Cap at 1000 recent runs to avoid unbounded fetch on high-volume agents
     const { data } = await this.supabase
       .from('agent_runs')
       .select('status, input_tokens, output_tokens, cost_usd, duration_ms')
-      .eq('agent_id', agentId);
+      .eq('agent_id', agentId)
+      .order('created_at', { ascending: false })
+      .limit(1000);
 
     const runs = (data ?? []) as AgentRunRow[];
     const completed = runs.filter((r) => r.status === 'completed');
@@ -273,12 +276,30 @@ export class AnalyticsService {
   }
 
   async getProjectHealth(projectId: string): Promise<ProjectHealth> {
-    const { data: activeSprint } = await this.supabase
-      .from('sprints')
-      .select('id, title, start_date, end_date')
-      .eq('project_id', projectId)
-      .eq('status', 'active')
-      .single();
+    // Run sprint lookup + count-only queries in parallel to avoid sequential round trips
+    const [sprintResult, memosResult, unassignedResult] = await Promise.all([
+      this.supabase
+        .from('sprints')
+        .select('id, title, start_date, end_date')
+        .eq('project_id', projectId)
+        .eq('status', 'active')
+        .single(),
+      this.supabase
+        .from('memos')
+        .select('*', { count: 'exact', head: true })
+        .eq('project_id', projectId)
+        .eq('status', 'open'),
+      this.supabase
+        .from('stories')
+        .select('*', { count: 'exact', head: true })
+        .eq('project_id', projectId)
+        .is('assignee_id', null)
+        .neq('status', 'done'),
+    ]);
+
+    const activeSprint = sprintResult.data;
+    const openMemoCount = memosResult.count ?? 0;
+    const unassignedCount = unassignedResult.count ?? 0;
 
     const stories = activeSprint
       ? await this.supabase.from('stories').select('status, story_points').eq('sprint_id', activeSprint.id)
@@ -287,22 +308,6 @@ export class AnalyticsService {
     const storyRows = (stories.data ?? []) as StoryRow[];
     const total = storyRows.length;
     const done = storyRows.filter((s) => s.status === 'done').length;
-
-    const { data: openMemos } = await this.supabase
-      .from('memos')
-      .select('id')
-      .eq('project_id', projectId)
-      .eq('status', 'open');
-
-    const { data: unassigned } = await this.supabase
-      .from('stories')
-      .select('id')
-      .eq('project_id', projectId)
-      .is('assignee_id', null)
-      .neq('status', 'done');
-
-    const openMemoCount = openMemos?.length ?? 0;
-    const unassignedCount = unassigned?.length ?? 0;
 
     return {
       active_sprint: activeSprint ?? null,
