@@ -34,7 +34,7 @@ const PLANS: Plan[] = [
     description: '성장하는 팀을 위한 협업 플랜',
     monthly: { price: '$49', productId: SANDBOX_PRODUCTS.team_monthly },
     yearly: { price: '$490', productId: SANDBOX_PRODUCTS.team_yearly, savings: '17% 절약' },
-    features: ['무제한 스프린트', '팀 멤버 10명', 'AI 에이전트 협업', 'Slack 연동'],
+    features: ['무제한 스프린트', '팀 멤버 20명', 'AI 에이전트 협업', 'Slack 연동'],
   },
   {
     key: 'pro',

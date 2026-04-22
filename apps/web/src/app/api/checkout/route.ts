@@ -20,6 +20,12 @@ export async function POST(request: Request) {
     const parsed = bodySchema.safeParse(body);
     if (!parsed.success) return ApiErrors.badRequest('Invalid product_id');
 
+    const { data: orgMember } = await supabase
+      .from('org_members')
+      .select('org_id')
+      .eq('user_id', user.id)
+      .maybeSingle();
+
     const polar = new Polar({
       accessToken: process.env['POLAR_ACCESS_TOKEN'] ?? '',
       serverURL: process.env['POLAR_SERVER_URL'] ?? 'https://api.polar.sh',
@@ -30,6 +36,8 @@ export async function POST(request: Request) {
       products: [parsed.data.product_id],
       successUrl: `${appUrl}/upgrade/success`,
       embedOrigin: appUrl,
+      customerEmail: user.email ?? undefined,
+      metadata: orgMember?.org_id ? { org_id: orgMember.org_id } : undefined,
     });
 
     return apiSuccess({ url: checkout.url });
