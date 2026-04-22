@@ -7,6 +7,8 @@ import { handleApiError } from '@/lib/api-error';
 import { apiSuccess, apiError, ApiErrors } from '@/lib/api-response';
 import { getAuthContext } from '@/lib/auth-helpers';
 import { checkResourceLimit } from '@/lib/check-feature';
+import { checkEntitlement } from '@/lib/entitlement';
+import { incrementUsage } from '@/lib/usage-tracker';
 import { buildCursorPageMeta, parseCursorPageInput } from '@/lib/pagination';
 import { isOssMode, createStoryRepository } from '@/lib/storage/factory';
 
@@ -22,6 +24,8 @@ export async function POST(request: Request) {
     if (!ossMode) {
       const check = await checkResourceLimit(dbClient!, me.org_id, 'max_stories', 'stories');
       if (!check.allowed) return apiError('UPGRADE_REQUIRED', check.reason ?? 'Story limit reached. Upgrade to Team.', 403);
+      const ent = await checkEntitlement(supabase, me.org_id, 'stories');
+      if (!ent.allowed) return apiError('quota_exceeded', `Story quota exceeded (${ent.current}/${ent.limit})`, 402, { resource: 'stories', current: ent.current, limit: ent.limit, upgradeUrl: ent.upgradeUrl });
     }
 
     const rawBody = await request.json();
@@ -32,6 +36,7 @@ export async function POST(request: Request) {
     const repo = await createStoryRepository(dbClient);
     const service = new StoryService(repo, dbClient as SupabaseClient | undefined);
     const story = await service.create(parsed.data as CreateStoryInput);
+    void incrementUsage(me.org_id, 'stories');
     return apiSuccess(story, undefined, 201);
   } catch (err: unknown) {
     return handleApiError(err);

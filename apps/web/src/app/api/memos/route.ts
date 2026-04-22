@@ -7,7 +7,10 @@ import { parseBody, createMemoSchema } from '@sprintable/shared';
 import { apiSuccess, ApiErrors } from '@/lib/api-response';
 import { buildCursorPageMeta, parseCursorPageInput } from '@/lib/pagination';
 import { createMemoRepository, createTeamMemberRepository, createProjectRepository, isOssMode } from '@/lib/storage/factory';
+import { checkEntitlement } from '@/lib/entitlement';
+import { incrementUsage } from '@/lib/usage-tracker';
 import type { SupabaseClient } from '@supabase/supabase-js';
+import { apiError } from '@/lib/api-response';
 
 export async function POST(request: Request) {
   try {
@@ -29,6 +32,11 @@ export async function POST(request: Request) {
       );
     }
 
+    if (!isOssMode()) {
+      const ent = await checkEntitlement(supabase, me.org_id, 'memos');
+      if (!ent.allowed) return apiError('quota_exceeded', `Memo quota exceeded (${ent.current}/${ent.limit})`, 402, { resource: 'memos', current: ent.current, limit: ent.limit, upgradeUrl: ent.upgradeUrl });
+    }
+
     const parsed = await parseBody(request, createMemoSchema);
     if (!parsed.success) return parsed.response;
     const body = parsed.data;
@@ -45,6 +53,7 @@ export async function POST(request: Request) {
       project_id: me.project_id,
       created_by: me.id,
     } as CreateMemoInput);
+    void incrementUsage(me.org_id, 'memos');
     return apiSuccess(memo, undefined, 201);
   } catch (err: unknown) {
     return handleApiError(err);
