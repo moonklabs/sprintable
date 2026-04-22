@@ -180,7 +180,7 @@ function renderWithMentions(text: string, isCurrentUser: boolean): React.ReactNo
   return parts.map((part, i) => {
     if (/^@[\w가-힣]+$/.test(part)) {
       return (
-        <span key={i} className={`font-semibold ${isCurrentUser ? 'text-blue-200' : 'text-[color:var(--operator-primary)]'}`}>
+        <span key={`${part}-${i}`} className={`font-semibold ${isCurrentUser ? 'text-blue-200' : 'text-[color:var(--operator-primary)]'}`}>
           {part}
         </span>
       );
