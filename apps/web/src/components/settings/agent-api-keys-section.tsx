@@ -4,6 +4,7 @@ import { useCallback, useEffect, useState } from 'react';
 import { Button } from '@/components/ui/button';
 import { SectionCard, SectionCardBody, SectionCardHeader } from '@/components/ui/section-card';
 import { Badge } from '@/components/ui/badge';
+import { useToast } from '@/components/ui/toast';
 
 interface AgentMember {
   id: string;
@@ -34,6 +35,9 @@ export function AgentApiKeysSection({ projectId }: { projectId: string }) {
   const [loading, setLoading] = useState(true);
   const [issuing, setIssuing] = useState<string | null>(null);
   const [revoking, setRevoking] = useState<string | null>(null);
+  const [newAgentName, setNewAgentName] = useState('');
+  const [adding, setAdding] = useState(false);
+  const { addToast } = useToast();
 
   const fetchAgents = useCallback(async () => {
     setLoading(true);
@@ -78,6 +82,28 @@ export function AgentApiKeysSection({ projectId }: { projectId: string }) {
     }
   }, [fetchAgents]);
 
+  const handleAddAgent = useCallback(async () => {
+    const name = newAgentName.trim();
+    if (!name) return;
+    setAdding(true);
+    try {
+      const res = await fetch('/api/team-members', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ project_id: projectId, name, type: 'agent' }),
+      });
+      const json = await res.json().catch(() => null) as { error?: { message?: string } } | null;
+      if (!res.ok) {
+        addToast({ type: 'error', title: '에이전트 추가 실패', body: json?.error?.message ?? 'Failed to add agent' });
+        return;
+      }
+      setNewAgentName('');
+      await fetchAgents();
+    } finally {
+      setAdding(false);
+    }
+  }, [newAgentName, projectId, fetchAgents, addToast]);
+
   if (loading) return <div className="text-sm text-muted-foreground">Loading...</div>;
 
   return (
@@ -89,6 +115,24 @@ export function AgentApiKeysSection({ projectId }: { projectId: string }) {
         </div>
       </SectionCardHeader>
       <SectionCardBody>
+        <div className="mb-6 flex gap-2">
+          <input
+            type="text"
+            value={newAgentName}
+            onChange={(e) => setNewAgentName(e.target.value)}
+            onKeyDown={(e) => { if (e.key === 'Enter') void handleAddAgent(); }}
+            placeholder="에이전트 이름"
+            className="flex-1 rounded-md border border-border bg-muted/30 px-3 py-2 text-sm text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-1 focus:ring-ring"
+          />
+          <Button
+            size="sm"
+            variant="outline"
+            disabled={!newAgentName.trim() || adding}
+            onClick={() => void handleAddAgent()}
+          >
+            {adding ? '추가 중...' : '+ 에이전트 추가'}
+          </Button>
+        </div>
         {agents.length === 0 && (
           <p className="text-sm text-muted-foreground">No agent team members in this project.</p>
         )}
