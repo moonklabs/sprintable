@@ -1,93 +1,114 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
-const {
-  createSupabaseAdminClient,
-  dispatchMemoIfNeeded,
-  stop,
-  MemoEventDispatcher,
-} = vi.hoisted(() => {
-  const createSupabaseAdminClient = vi.fn(() => ({ tag: 'admin-supabase' }));
-  const dispatchMemoIfNeeded = vi.fn();
-  const stop = vi.fn();
-  const MemoEventDispatcher = vi.fn(function MemoEventDispatcher() {
-    return {
-      dispatchMemoIfNeeded,
-      stop,
-    };
-  });
-
-  return {
-    createSupabaseAdminClient,
-    dispatchMemoIfNeeded,
-    stop,
-    MemoEventDispatcher,
-  };
-});
-
-vi.mock('@/lib/supabase/admin', () => ({
-  createSupabaseAdminClient,
+const { createSupabaseAdminClient } = vi.hoisted(() => ({
+  createSupabaseAdminClient: vi.fn(),
 }));
 
-vi.mock('./memo-event-dispatcher', () => ({
-  MemoEventDispatcher,
+vi.mock('@/lib/supabase/admin', () => ({ createSupabaseAdminClient }));
+
+vi.mock('@/lib/storage/factory', () => ({
+  isOssMode: vi.fn(() => false),
+  createTeamMemberRepository: vi.fn(),
 }));
 
 import { dispatchMemoAssignmentImmediately } from './memo-assignment-dispatch';
 
+const baseMemo = {
+  id: 'memo-1',
+  org_id: 'org-1',
+  project_id: 'proj-1',
+  title: 'Test Memo',
+  content: 'Please review',
+  memo_type: 'task',
+  status: 'open',
+  assigned_to: 'agent-1',
+  created_by: 'human-1',
+  metadata: null,
+  updated_at: '2026-04-22T00:00:00.000Z',
+  created_at: '2026-04-22T00:00:00.000Z',
+};
+
+function makeSupabase(results: Record<string, unknown>) {
+  return {
+    from: vi.fn((table: string) => {
+      const payload = results[table] ?? { data: null, error: null };
+      return {
+        select: vi.fn().mockReturnThis(),
+        eq: vi.fn().mockReturnThis(),
+        is: vi.fn().mockReturnThis(),
+        limit: vi.fn().mockReturnThis(),
+        maybeSingle: vi.fn().mockResolvedValue(payload),
+      };
+    }),
+  };
+}
+
 describe('dispatchMemoAssignmentImmediately', () => {
+  const mockFetch = vi.fn();
+
   beforeEach(() => {
-    createSupabaseAdminClient.mockClear();
-    dispatchMemoIfNeeded.mockReset();
-    stop.mockReset();
-    MemoEventDispatcher.mockClear();
+    vi.clearAllMocks();
+    vi.stubGlobal('fetch', mockFetch);
+    mockFetch.mockResolvedValue({ ok: true, status: 200 });
   });
 
-  it('dispatches assigned open memos immediately through the memo dispatcher', async () => {
-    await dispatchMemoAssignmentImmediately({
-      id: 'memo-1',
-      org_id: 'org-1',
-      project_id: 'project-1',
-      title: 'Urgent memo',
-      content: 'Please review',
-      memo_type: 'task',
-      status: 'open',
-      assigned_to: 'agent-1',
-      created_by: 'human-1',
-      metadata: { source: 'discord' },
-      updated_at: '2026-04-10T09:00:00.000Z',
-      created_at: '2026-04-10T09:00:00.000Z',
-    });
-
-    expect(createSupabaseAdminClient).toHaveBeenCalledTimes(1);
-    expect(MemoEventDispatcher).toHaveBeenCalledWith({
-      supabase: { tag: 'admin-supabase' },
-      logger: console,
-    });
-    expect(dispatchMemoIfNeeded).toHaveBeenCalledWith(
-      expect.objectContaining({ id: 'memo-1', assigned_to: 'agent-1' }),
-      'realtime',
-    );
-    expect(stop).toHaveBeenCalledTimes(1);
-  });
-
-  it('skips unassigned memos', async () => {
-    await dispatchMemoAssignmentImmediately({
-      id: 'memo-2',
-      org_id: 'org-1',
-      project_id: 'project-1',
-      title: null,
-      content: 'FYI',
-      memo_type: 'memo',
-      status: 'open',
-      assigned_to: null,
-      created_by: 'human-1',
-      metadata: null,
-      updated_at: '2026-04-10T09:00:00.000Z',
-      created_at: '2026-04-10T09:00:00.000Z',
-    });
-
+  it('skips unassigned memos without calling supabase', async () => {
+    await dispatchMemoAssignmentImmediately({ ...baseMemo, assigned_to: null });
     expect(createSupabaseAdminClient).not.toHaveBeenCalled();
-    expect(dispatchMemoIfNeeded).not.toHaveBeenCalled();
-    expect(stop).not.toHaveBeenCalled();
+    expect(mockFetch).not.toHaveBeenCalled();
+  });
+
+  it('skips non-open memos without calling supabase', async () => {
+    await dispatchMemoAssignmentImmediately({ ...baseMemo, status: 'resolved' });
+    expect(createSupabaseAdminClient).not.toHaveBeenCalled();
+    expect(mockFetch).not.toHaveBeenCalled();
+  });
+
+  it('sends webhook via team_members.webhook_url when webhook_configs is empty', async () => {
+    const supabase = makeSupabase({
+      webhook_configs: { data: null, error: null },
+      team_members: { data: { webhook_url: 'https://discord.com/api/webhooks/1/token' }, error: null },
+    });
+    createSupabaseAdminClient.mockReturnValue(supabase);
+
+    await dispatchMemoAssignmentImmediately(baseMemo);
+
+    expect(mockFetch).toHaveBeenCalledWith(
+      'https://discord.com/api/webhooks/1/token',
+      expect.objectContaining({ method: 'POST' }),
+    );
+  });
+
+  it('prefers webhook_configs url over team_members.webhook_url', async () => {
+    const supabase = makeSupabase({
+      webhook_configs: { data: { url: 'https://discord.com/api/webhooks/2/config', secret: null }, error: null },
+      team_members: { data: { webhook_url: 'https://discord.com/api/webhooks/1/fallback' }, error: null },
+    });
+    createSupabaseAdminClient.mockReturnValue(supabase);
+
+    await dispatchMemoAssignmentImmediately(baseMemo);
+
+    expect(mockFetch).toHaveBeenCalledWith(
+      'https://discord.com/api/webhooks/2/config',
+      expect.objectContaining({ method: 'POST' }),
+    );
+  });
+
+  it('logs console.error and skips fetch when no webhook url found', async () => {
+    const errorSpy = vi.spyOn(console, 'error').mockImplementation(() => {});
+    const supabase = makeSupabase({
+      webhook_configs: { data: null, error: null },
+      team_members: { data: null, error: null },
+    });
+    createSupabaseAdminClient.mockReturnValue(supabase);
+
+    await dispatchMemoAssignmentImmediately(baseMemo);
+
+    expect(mockFetch).not.toHaveBeenCalled();
+    expect(errorSpy).toHaveBeenCalledWith(
+      expect.stringContaining('[MemoDispatch]'),
+      expect.anything(),
+    );
+    errorSpy.mockRestore();
   });
 });
