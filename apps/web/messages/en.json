@@ -20,7 +20,10 @@
     "locale_ko": "한국어",
     "upgradeRequired": "Upgrade Required",
     "upgradePlan": "Upgrade Plan",
-    "operatorSurface": "Operator surface"
+    "operatorSurface": "Operator surface",
+    "back": "Back",
+    "next": "Next",
+    "close": "Close"
   },
   "nav": {
     "dashboard": "Dashboard",
@@ -671,6 +674,7 @@
   },
   "standup": {
     "title": "Daily Standup",
+    "cancel": "Cancel",
     "surfaceDescription": "Update your standup and review the team state on one operator surface.",
     "entryDate": "Date",
     "myStandupDescription": "Capture what you did, what you will do, and what is blocked.",
@@ -763,6 +767,7 @@
     "title": "Documentation",
     "searchPlaceholder": "Search docs...",
     "noDocs": "No documents",
+    "noProject": "No project selected",
     "selectDoc": "Select a document",
     "lastUpdated": "Last updated",
     "newDoc": "New Document",
