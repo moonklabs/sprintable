@@ -409,6 +409,7 @@ export class MemoEventDispatcher {
 
     // managed agent 조회 → 없으면 BYOA fallback (webhook_url 있는 팀 멤버)
     let agent = await this.getAgentById(memo, routing.dispatchAgentId);
+    const isByoa = !agent;
     if (!agent) {
       agent = await this.getByoaMember(memo, routing.dispatchAgentId);
     }
@@ -419,6 +420,64 @@ export class MemoEventDispatcher {
         `⚠️ 에이전트(${routing.dispatchAgentId})가 비활성 상태이거나 배포가 구성되지 않아 웹훅 발송이 스킵되었습니다.`,
       );
       return { status: 'skipped', reason: 'assignee_not_active_agent' };
+    }
+
+    // BYOA: agent_runs 레코드 없이 webhook_url로 직접 발송
+    // createRun()은 agent_id가 type='agent'인 팀원이어야 하는 제약이 있어
+    // BYOA 멤버(human + webhook_url)는 insert 실패 후 dispatch가 abort됨.
+    if (isByoa) {
+      const webhook = await this.resolveWebhook(agent, memo.project_id);
+      if (!webhook) {
+        await this.logAudit(agent.id, memo, 'memo_dispatch.byoa_webhook_missing', 'warn', {
+          dispatch_key: dispatchKey,
+        });
+        return { status: 'skipped', reason: 'byoa_webhook_missing' };
+      }
+      try {
+        const outbound = this.buildWebhookPayload({
+          webhookUrl: webhook.url,
+          memo,
+          agent,
+          deploymentId: null,
+          runId: dispatchKey,
+          source,
+          dispatchKey,
+          routing,
+        });
+        const response = await fetchWithTimeout(
+          this.fetchFn,
+          webhook.url,
+          {
+            method: 'POST',
+            redirect: 'manual',
+            headers: {
+              'Content-Type': 'application/json',
+              ...(webhook.secret ? { 'X-Webhook-Secret': webhook.secret } : {}),
+            },
+            body: JSON.stringify(outbound.body),
+          },
+          this.webhookTimeoutMs,
+        );
+        if (!response.ok) {
+          const body = await response.text();
+          this.logger.warn('[MemoEventDispatcher] BYOA webhook dispatch failed', {
+            agent_id: agent.id,
+            memo_id: memo.id,
+            status: response.status,
+            body: body.slice(0, 200),
+          });
+          return { status: 'failed', reason: `byoa_webhook_${response.status}` };
+        }
+        return { status: 'dispatched' };
+      } catch (error) {
+        const message = error instanceof Error ? error.message : 'unknown_dispatch_error';
+        this.logger.error('[MemoEventDispatcher] BYOA webhook exception', {
+          agent_id: agent.id,
+          memo_id: memo.id,
+          error: message,
+        });
+        return { status: 'failed', reason: 'byoa_webhook_exception' };
+      }
     }
 
     const deployment = routing.matchedRule?.deployment_id
