@@ -8,7 +8,6 @@ import { AudioRecorder } from '@/components/meetings/audio-recorder';
 import { AiSummarizeButton } from '@/components/meetings/ai-summarize-button';
 import { RouteErrorState } from '@/components/ui/route-error-state';
 import { PageSkeleton } from '@/components/ui/page-skeleton';
-import { UpgradeModal } from '@/components/upgrade-modal';
 import { useUpgradeGuard } from '@/hooks/use-upgrade-guard';
 import { readApiClientError } from '@/lib/api-client-error';
 
@@ -48,13 +47,7 @@ export default function MeetingDetailPage() {
   const [editingSummary, setEditingSummary] = useState(false);
   const [summaryDraft, setSummaryDraft] = useState('');
   const [savingSummary, setSavingSummary] = useState(false);
-  const {
-    guardedFetch,
-    showModal: showUpgradeModal,
-    meterType: upgradeMeterType,
-    closeModal: closeUpgradeModal,
-    triggerUpgrade,
-  } = useUpgradeGuard();
+  const { guardedFetch, triggerUpgrade } = useUpgradeGuard();
 
   const updateMeeting = useCallback(async (patch: Partial<MeetingDetail>, fallbackMessage: string) => {
     const response = await fetch(`/api/meetings/${meetingId}`, {
@@ -106,7 +99,6 @@ export default function MeetingDetailPage() {
     }
   }, []);
 
-  // AC1/AC4: AI 결과 반영 (useCallback으로 참조 안정화 → effect loop 방지)
   const handleAiResult = useCallback((result: {
     summary: string;
     decisions: Array<{ id: string; text: string; owner?: string }>;
@@ -265,14 +257,14 @@ export default function MeetingDetailPage() {
           }} className="text-xs text-blue-500 hover:text-blue-700">+ {t('addDecision')}</button>
         </div>
         <div className="space-y-2">
-          {meeting.decisions.map((d, i) => (
+          {meeting.decisions.map((d) => (
             <div key={d.id} className="flex items-start gap-2 rounded-lg border p-3">
               <span className="text-sm">📌</span>
               <div className="flex-1 space-y-1">
-                <input value={d.text} onChange={e => { const arr = [...meeting.decisions]; arr[i] = { ...arr[i], text: e.target.value }; setMeeting(prev => prev ? { ...prev, decisions: arr } : null); }} className="w-full rounded border-0 bg-transparent px-0 text-sm text-gray-800 focus:outline-none focus:ring-0" placeholder={t('decisions')} />
-                <input value={d.owner ?? ''} onChange={e => { const arr = [...meeting.decisions]; arr[i] = { ...arr[i], owner: e.target.value }; setMeeting(prev => prev ? { ...prev, decisions: arr } : null); }} className="w-full rounded border-0 bg-transparent px-0 text-[10px] text-gray-400 focus:outline-none" placeholder="Owner" />
+                <input value={d.text} onChange={e => { setMeeting(prev => prev ? { ...prev, decisions: prev.decisions.map(item => item.id === d.id ? { ...item, text: e.target.value } : item) } : null); }} className="w-full rounded border-0 bg-transparent px-0 text-sm text-gray-800 focus:outline-none focus:ring-0" placeholder={t('decisions')} />
+                <input value={d.owner ?? ''} onChange={e => { setMeeting(prev => prev ? { ...prev, decisions: prev.decisions.map(item => item.id === d.id ? { ...item, owner: e.target.value } : item) } : null); }} className="w-full rounded border-0 bg-transparent px-0 text-[10px] text-gray-400 focus:outline-none" placeholder="Owner" />
               </div>
-              <button onClick={async () => { const arr = meeting.decisions.filter((_, j) => j !== i); setMeeting(prev => prev ? { ...prev, decisions: arr } : null); await fetch(`/api/meetings/${meetingId}`, { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ decisions: arr }) }); }} className="text-xs text-red-400 hover:text-red-600">✕</button>
+              <button onClick={async () => { const arr = meeting.decisions.filter(item => item.id !== d.id); setMeeting(prev => prev ? { ...prev, decisions: arr } : null); await fetch(`/api/meetings/${meetingId}`, { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ decisions: arr }) }); }} className="text-xs text-red-400 hover:text-red-600">✕</button>
               <button onClick={async () => { await fetch(`/api/meetings/${meetingId}`, { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ decisions: meeting.decisions }) }); }} className="rounded bg-gray-100 px-2 py-1 text-[10px] text-gray-500 hover:bg-gray-200">{t('save')}</button>
             </div>
           ))}
@@ -289,17 +281,17 @@ export default function MeetingDetailPage() {
           }} className="text-xs text-blue-500 hover:text-blue-700">+ {t('addActionItem')}</button>
         </div>
         <div className="space-y-2">
-          {meeting.action_items.map((ai, i) => (
+          {meeting.action_items.map((ai) => (
             <div key={ai.id} className="flex items-center gap-2 rounded-lg border p-3">
               <span className={`h-2 w-2 shrink-0 rounded-full ${ai.status === 'done' ? 'bg-green-500' : 'bg-yellow-500'}`} />
               <div className="flex-1 space-y-1">
-                <input value={ai.text} onChange={e => { const arr = [...meeting.action_items]; arr[i] = { ...arr[i], text: e.target.value }; setMeeting(prev => prev ? { ...prev, action_items: arr } : null); }} className="w-full rounded border-0 bg-transparent px-0 text-sm text-gray-800 focus:outline-none" placeholder={t('actionItems')} />
+                <input value={ai.text} onChange={e => { setMeeting(prev => prev ? { ...prev, action_items: prev.action_items.map(item => item.id === ai.id ? { ...item, text: e.target.value } : item) } : null); }} className="w-full rounded border-0 bg-transparent px-0 text-sm text-gray-800 focus:outline-none" placeholder={t('actionItems')} />
                 <div className="flex gap-2">
-                  <input value={ai.assignee ?? ''} onChange={e => { const arr = [...meeting.action_items]; arr[i] = { ...arr[i], assignee: e.target.value }; setMeeting(prev => prev ? { ...prev, action_items: arr } : null); }} className="w-24 rounded border-0 bg-transparent px-0 text-[10px] text-gray-400 focus:outline-none" placeholder={t('assigneeLabel')} />
-                  <input type="date" value={ai.due_date ?? ''} onChange={e => { const arr = [...meeting.action_items]; arr[i] = { ...arr[i], due_date: e.target.value }; setMeeting(prev => prev ? { ...prev, action_items: arr } : null); }} className="rounded border-0 bg-transparent px-0 text-[10px] text-gray-400 focus:outline-none" />
+                  <input value={ai.assignee ?? ''} onChange={e => { setMeeting(prev => prev ? { ...prev, action_items: prev.action_items.map(item => item.id === ai.id ? { ...item, assignee: e.target.value } : item) } : null); }} className="w-24 rounded border-0 bg-transparent px-0 text-[10px] text-gray-400 focus:outline-none" placeholder={t('assigneeLabel')} />
+                  <input type="date" value={ai.due_date ?? ''} onChange={e => { setMeeting(prev => prev ? { ...prev, action_items: prev.action_items.map(item => item.id === ai.id ? { ...item, due_date: e.target.value } : item) } : null); }} className="rounded border-0 bg-transparent px-0 text-[10px] text-gray-400 focus:outline-none" />
                 </div>
               </div>
-              <button onClick={async () => { const arr = meeting.action_items.filter((_, j) => j !== i); setMeeting(prev => prev ? { ...prev, action_items: arr } : null); await fetch(`/api/meetings/${meetingId}`, { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ action_items: arr }) }); }} className="text-xs text-red-400 hover:text-red-600">✕</button>
+              <button onClick={async () => { const arr = meeting.action_items.filter(item => item.id !== ai.id); setMeeting(prev => prev ? { ...prev, action_items: arr } : null); await fetch(`/api/meetings/${meetingId}`, { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ action_items: arr }) }); }} className="text-xs text-red-400 hover:text-red-600">✕</button>
               <button onClick={async () => { await fetch(`/api/meetings/${meetingId}`, { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ action_items: meeting.action_items }) }); }} className="rounded bg-gray-100 px-2 py-1 text-[10px] text-gray-500 hover:bg-gray-200">{t('save')}</button>
               <button
                 disabled={creatingStoryId === ai.id}
@@ -376,9 +368,6 @@ export default function MeetingDetailPage() {
           )}
         </section>
       )}
-
-      {/* AC4: UpgradeModal */}
-      {showUpgradeModal && <UpgradeModal meterType={upgradeMeterType} onClose={closeUpgradeModal} />}
     </div>
   );
 }
