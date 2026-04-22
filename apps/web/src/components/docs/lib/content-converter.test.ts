@@ -85,6 +85,15 @@ describe('markdownToHtml', () => {
     expect(markdownToHtml('')).toBe('');
     expect(markdownToHtml('   ')).toBe('');
   });
+
+  it('preserves page-embed atoms through html escape pass', () => {
+    const embed = '<div data-page-embed data-doc-id="abc" data-title="Doc" data-icon="" data-slug="doc"></div>';
+    const md = `\n${embed}\n`;
+    const result = markdownToHtml(md);
+    expect(result).toContain('data-page-embed');
+    expect(result).toContain('data-doc-id="abc"');
+    expect(result).not.toContain('&lt;div');
+  });
 });
 
 describe('htmlToMarkdown', () => {
