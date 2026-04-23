@@ -10,6 +10,7 @@ export interface Sprint {
   start_date: string;
   end_date: string;
   team_size: number | null;
+  velocity: number | null;
   created_at: string;
   updated_at: string;
 }
@@ -29,6 +30,7 @@ export interface UpdateSprintInput {
   end_date?: string;
   team_size?: number;
   status?: string;
+  velocity?: number | null;
 }
 
 export interface SprintListFilters extends PaginationOptions {

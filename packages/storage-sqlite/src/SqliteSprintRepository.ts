@@ -47,7 +47,7 @@ export class SqliteSprintRepository implements ISprintRepository {
   }
 
   async update(id: string, input: UpdateSprintInput): Promise<Sprint> {
-    const ALLOWED: (keyof UpdateSprintInput)[] = ['title', 'start_date', 'end_date', 'team_size', 'status'];
+    const ALLOWED: (keyof UpdateSprintInput)[] = ['title', 'start_date', 'end_date', 'team_size', 'status', 'velocity'];
     const sets: string[] = [];
     const params: SqlParam[] = [];
     for (const key of ALLOWED) {

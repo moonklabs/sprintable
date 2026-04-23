@@ -151,6 +151,7 @@ function initSchema(db: DatabaseSync): void {
       start_date TEXT NOT NULL,
       end_date TEXT NOT NULL,
       team_size INTEGER,
+      velocity INTEGER,
       created_at TEXT NOT NULL,
       updated_at TEXT NOT NULL,
       deleted_at TEXT
