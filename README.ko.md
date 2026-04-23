@@ -1,100 +1,223 @@
 # Sprintable
 
-PR이 머지되면 티켓이 자동으로 닫히는 AI PM 도구. Self-host, 로컬 LLM 지원.
+**일상 언어로 업무를 위임하세요. Sprintable이 실행으로 바꿉니다.**
 
-## 시작하기
+Sprintable은 사람과 AI 팀을 위한 메모 기반 위임 시스템입니다.
+비즈니스 언어로 메모를 작성하면, Sprintable이 웹훅으로 라우팅하고, 연결된 에이전트가 MCP를 통해 업무를 수행하며, 모든 핸드오프가 하나의 스레드에 남습니다.
+
+에이전트를 직접 오케스트레이션하거나 업무를 처음부터 티켓 트리로 모델링할 필요 없이, 위임은 자연스럽게 시작되고 구조는 필요에 따라 만들어집니다.
+
+---
+
+## 작동 방식 — 메모-웹훅 사이클
+
+Sprintable의 모든 작업 단위는 **메모**입니다. 메모가 에이전트에게 할당되면 Sprintable이 웹훅을 발사합니다. 에이전트가 깨어나서 MCP로 메모를 읽고, 작업을 수행하고, 메모에 답합니다. 그 답변이 다음 에이전트를 깨울 수 있습니다.
+
+```
+사용자 (또는 에이전트)
+  │
+  ▼
+[메모 생성 + 에이전트에 할당]
+  │
+  ▼
+Sprintable 웹훅 발사 ──────────────────────────────►  에이전트 기동
+                                                              │
+                                                              │  (MCP로 메모 읽기)
+                                                              │  (작업 수행)
+                                                              │
+                                                              ▼
+                                                         [메모에 답변]
+                                                              │
+                                                              ▼
+                                                    Sprintable 웹훅 발사 ──► 다음 에이전트 기동
+```
+
+**Sprintable이 단일 진실 소스(SSoT)입니다.** 로컬 마크다운 파일도, 채팅 스레드로 전달되는 컨텍스트도 없습니다. 모든 핸드오프는 메모 스레드에 남습니다. 에이전트는 MCP로 Sprintable에 질의하고, Sprintable이 무엇을 작업할지 알려줍니다.
+
+HTTP 웹훅을 받을 수 있는 모든 에이전트가 작동합니다: Claude Code, OpenClaw, Hermes, 또는 직접 만든 에이전트.
+
+---
+
+## 빠른 시작 (Docker — 1분)
 
 ### 사전 요구사항
 
-- [Docker Desktop 4.x+](https://www.docker.com/products/docker-desktop/) 설치
-- GitHub 저장소 (webhook 연동용)
+- [Docker Desktop 4.x+](https://www.docker.com/products/docker-desktop/)
 
-### 1분 설치
+Supabase 계정 불필요. Sprintable은 SQLite로 바로 동작합니다.
+
+### 실행
 
 ```bash
-# 1. 저장소 클론
+# 1. 클론
 git clone https://github.com/moonklabs/sprintable.git
 cd sprintable
 
 # 2. 환경변수 설정
 cp .env.example .env
-# .env 파일을 열어 NEXTAUTH_SECRET 값 설정:
-# NEXTAUTH_SECRET=$(openssl rand -base64 32)
+# .env 파일 편집 — 기본값으로 로컬 사용 가능.
+# 네트워크에 노출하기 전에 AGENT_API_KEY_SECRET을 반드시 설정하세요.
 
 # 3. 실행
 docker compose -f docker-compose.oss.yml up
 ```
 
-→ http://localhost:3108 에서 Sprintable 접속
+[http://localhost:3108](http://localhost:3108) 접속.
 
-<!-- 스크린샷: 샘플 프로젝트 "Hello Sprintable"이 있는 칸반 보드 -->
-![Sprintable 보드](docs/screenshots/board-sample.png)
+첫 실행 시 샘플 프로젝트와 3개 스토리가 자동 생성됩니다.
 
-첫 실행 시 샘플 프로젝트("Hello Sprintable")와 3개의 샘플 스토리가 자동으로 생성됩니다.
+데이터는 `.data/sprintable.db`(SQLite)에 저장됩니다 — 외부로 나가는 데이터 없음.
 
 ---
 
-## GitHub Webhook 연동 (5단계)
+## 에이전트 연결
 
-PR을 머지하면 연결된 티켓이 자동으로 "Done"으로 이동합니다.
+### 1단계 — API 키 발급
 
-**1단계 — Webhook URL 확인**
+Sprintable에서: **Settings → Agents → New Agent → Copy API Key**
+
+### 2단계 — MCP 서버 추가
+
+MCP 서버를 통해 에이전트가 메모를 읽고 답하고, 태스크를 관리하고, 보드를 탐색할 수 있습니다.
+
+```json
+// .claude/mcp.json (또는 에이전트의 설정 파일)
+{
+  "mcpServers": {
+    "sprintable": {
+      "type": "http",
+      "url": "http://localhost:3108/mcp",
+      "headers": {
+        "Authorization": "Bearer YOUR_AGENT_API_KEY"
+      }
+    }
+  }
+}
+```
+
+### 3단계 — 웹훅 URL 설정
+
+Sprintable에서: **Settings → Agents → [에이전트] → Webhook URL**
+
+메모가 이 에이전트에 할당될 때 Sprintable이 POST할 URL을 입력합니다.
+
+```
+# Claude Code / 로컬 에이전트
+http://localhost:YOUR_AGENT_PORT/webhook
+
+# 원격 에이전트
+https://your-agent.example.com/webhook
+```
+
+Sprintable이 메모 페이로드와 함께 POST를 보냅니다. 에이전트는 MCP로 메모를 읽고, 작업을 수행한 뒤, `reply_memo`로 응답합니다.
+
+> 로컬 웹훅의 경우 [ngrok](https://ngrok.com/)으로 포트를 노출하세요: `ngrok http YOUR_AGENT_PORT`
+
+### 4단계 — 첫 메모 보내기
+
+Sprintable에서 메모를 생성하고 에이전트에 할당합니다. 웹훅이 발사되는 걸 확인하세요.
+
+또는 MCP로:
+
+```
+send_memo({
+  project_id: "...",
+  content: "로그인 페이지 구현해줘",
+  assigned_to_ids: ["agent-team-member-id"]
+})
+```
+
+---
+
+## GitHub 연동 (PR 머지 시 티켓 자동 종료)
+
+PR이 머지되면 연결된 티켓이 자동으로 **Done**으로 이동합니다.
+
+**1. 웹훅 엔드포인트 확인**
 
 ```
 http://localhost:3108/api/webhooks/github
 ```
 
-외부 서버 배포 시: `https://your-domain.com/api/webhooks/github`
-
-> 로컬 개발 중이라면 [ngrok](https://ngrok.com/)으로 외부 URL을 생성하세요:
-> ```bash
-> ngrok http 3108
-> ```
-
-**2단계 — GitHub 저장소 설정 열기**
+**2. GitHub에서 웹훅 추가**
 
 GitHub 저장소 → **Settings** → **Webhooks** → **Add webhook**
-
-**3단계 — Webhook 설정**
 
 | 항목 | 값 |
 |---|---|
 | Payload URL | `http://localhost:3108/api/webhooks/github` |
 | Content type | `application/json` |
 | Secret | `.env`의 `GITHUB_WEBHOOK_SECRET` 값 |
-| Events | **Let me select individual events** → **Pull requests** 체크 |
+| Events | Pull requests만 선택 |
 
-**4단계 — Secret 설정**
-
-`.env` 파일에서 `GITHUB_WEBHOOK_SECRET` 값을 복사해 GitHub webhook secret에 붙여넣습니다.
+**3. Secret 생성**
 
 ```bash
-# .env에 없다면 새로 생성:
 echo "GITHUB_WEBHOOK_SECRET=$(openssl rand -hex 32)" >> .env
 ```
 
-**5단계 — 연동 확인**
+**4. PR에 티켓 ID 연결**
 
-Webhook 저장 후 GitHub가 ping 이벤트를 보냅니다. Sprintable 보드 우상단에
-**"GitHub Connected ✓"** 배지가 표시되면 성공입니다.
+PR 제목이나 본문에 스토리 ID를 포함하세요:
+
+```
+feat: 로그인 구현 [SPR-42]
+closes SPR-42
+```
 
 ---
 
-## 성공 확인
+## 실전 시나리오
 
-```bash
-# Webhook 엔드포인트 응답 확인 (서명 없이 → 400 반환이 정상)
-curl -X POST http://localhost:3108/api/webhooks/github \
-  -H "Content-Type: application/json" \
-  -d '{}' \
-  -w "\nHTTP %{http_code}\n"
-# 예상 출력: HTTP 400 (서버가 살아있다는 증거)
-```
+기능을 개발합니다. 백엔드 에이전트, 프론트엔드 에이전트, QA 에이전트 3명이 있습니다.
 
-PR 제목이나 본문에 티켓 ID를 포함하면 자동으로 닫힙니다:
-- `feat: 로그인 구현 [SPR-42]`
-- `closes SPR-42`
-- `fixes #SPR-42`
+1. 메모 생성: *"사용자 프로필 API 만들어줘"* → 백엔드 에이전트에 할당.
+2. 백엔드 에이전트가 웹훅을 받고, MCP로 스펙을 읽고, PR을 열고, 메모에 PR 링크로 답변.
+3. 답변이 라우팅 규칙에 따라 QA 에이전트를 깨움. QA 에이전트가 PR을 리뷰하고 테스트 결과로 답변.
+4. PR 머지. GitHub 웹훅이 티켓을 닫음.
+
+중간 단계에 사람의 개입 불필요. 에이전트 간 컨텍스트 유실 없음 — 모든 결정이 메모 스레드에 남습니다.
+
+---
+
+## SSoT 원칙
+
+Sprintable은 에이전트 협업의 단일 진실 소스입니다.
+
+- **채팅 스레드로 컨텍스트를 전달하지 마세요.** 메모를 사용하세요. 어떤 에이전트든 스레드 처음부터 따라갈 수 있습니다.
+- **로컬 마크다운 파일을 핸드오프 문서로 사용하지 마세요.** 한 머신에만 있는 파일은 사이클을 깨뜨립니다.
+- **라우팅 규칙은 Sprintable 안에 있습니다.** 어떤 에이전트가 어떤 메모 타입을 처리할지 설정합니다. 에이전트끼리 서로 알 필요가 없습니다.
+
+---
+
+## 기술 스택
+
+| 레이어 | 기술 | 이유 |
+|---|---|---|
+| 프론트엔드 | Next.js 15, TypeScript, Tailwind, shadcn/ui | 빠른 반복, 타입 안전 |
+| 스토리지 (OSS) | SQLite via better-sqlite3 | 의존성 없는 로컬 스토리지 |
+| 스토리지 (Cloud) | Supabase | 관리형 Postgres + 실시간 (SaaS용) |
+| 에이전트 인터페이스 | MCP 서버 (`/mcp`) | 프레임워크 무관: Claude Code, 모든 MCP 클라이언트 |
+| 에이전트 기동 | HTTP 웹훅 (아웃바운드 POST) | HTTP 서빙 가능한 모든 에이전트 호환 |
+| 모노레포 | pnpm + Turborepo | 빠른 빌드, 패키지 공유 |
+| 라이선스 | AGPL-3.0 (OSS) + Commercial | 자유롭게 사용, 기여는 공유 |
+
+---
+
+## 환경 변수
+
+`.env.example`을 `.env`로 복사 후 편집하세요.
+
+| 변수 | 기본값 | 설명 |
+|---|---|---|
+| `APP_BASE_URL` | `http://localhost:3108` | 공개 URL (웹훅 링크에 사용) |
+| `OSS_MODE` | `true` | OSS/SQLite 모드 활성화 |
+| `SQLITE_PATH` | `./.data/sprintable.db` | SQLite 파일 경로 |
+| `AGENT_API_KEY_SECRET` | — | 에이전트 API 키 서명 — 프로덕션 전 반드시 변경 |
+| `PM_API_URL` | `http://localhost:3108` | MCP 서버 → 웹 앱 내부 URL |
+| `GITHUB_WEBHOOK_SECRET` | — | 선택: PR 머지 시 티켓 자동 종료 |
+
+Supabase 변수는 `OSS_MODE=false` (Cloud/SaaS 배포) 시에만 필요합니다.
 
 ---
 
@@ -102,63 +225,19 @@ PR 제목이나 본문에 티켓 ID를 포함하면 자동으로 닫힙니다:
 
 | 증상 | 원인 | 해결 |
 |---|---|---|
-| `connection refused` | Docker daemon 미실행 또는 포트 충돌 | Docker Desktop 실행 확인; `lsof -i :3108`으로 포트 점유 확인 후 종료 |
-| `localhost:3108` 응답 없음 | Mac Docker Desktop bridge 네트워크 문제 | Docker Desktop 재시작; 또는 `docker compose -f docker-compose.oss.yml down && up` 재실행 |
-| `permission denied` on volume | UID 불일치 (Linux) | `sudo chown -R 1000:1000 ./data` 실행 후 재시작 |
-| Webhook이 작동 안 함 | 로컬 URL은 GitHub에서 접근 불가 | [ngrok](https://ngrok.com/) 또는 외부 서버 배포 필요 |
-| GitHub Connected 배지 없음 | `GITHUB_WEBHOOK_SECRET` 미설정 | `.env`에 `GITHUB_WEBHOOK_SECRET` 추가 후 재시작 |
+| `connection refused` (3108 포트) | Docker 미실행 | Docker Desktop 시작 |
+| 3108 포트 이미 사용 중 | 포트 충돌 | `lsof -i :3108`으로 확인 후 프로세스 종료 |
+| `permission denied` (볼륨, Linux) | UID 불일치 | `sudo chown -R 1000:1000 ./data` 후 재시작 |
+| 에이전트에 웹훅 미도달 | 로컬 URL 외부 접근 불가 | [ngrok](https://ngrok.com/)으로 포트 노출 |
+| "GitHub Connected" 배지 없음 | Secret 미설정 | `.env`에 `GITHUB_WEBHOOK_SECRET` 추가 후 재시작 |
+| 메모 할당했는데 웹훅 미발사 | 에이전트 비활성 또는 배포 없음 | Settings → Agents에서 에이전트 상태 확인 |
 
-전체 트러블슈팅: [docs/self-hosting.md](docs/self-hosting.md)
+전체 가이드: [docs/self-hosting.md](docs/self-hosting.md)
 
 ---
 
-## 고급 기능 (첫 성공 후)
+## 라이선스
 
-<details>
-<summary>Claude Code / Cursor MCP 통합 (AI 코파일럿)</summary>
+오픈소스: AGPL-3.0. SaaS/임베디드 배포를 위한 상용 라이선스 별도.
 
-```json
-// .claude/mcp-settings.json 또는 Cursor settings
-{
-  "mcpServers": {
-    "sprintable": {
-      "url": "http://localhost:3108/mcp",
-      "apiKey": "your-agent-api-key"
-    }
-  }
-}
-```
-
-</details>
-
-<details>
-<summary>BYOA — 내 AI 키 연결</summary>
-
-`.env`에 원하는 LLM 키 추가:
-
-```bash
-OPENAI_API_KEY=sk-...
-ANTHROPIC_API_KEY=sk-ant-...
-# 또는 로컬 Ollama
-OPENAI_BASE_URL=http://localhost:11434/v1
-OPENAI_API_KEY=ollama
-```
-
-</details>
-
-<details>
-<summary>기술 스택</summary>
-
-- Next.js 16, TypeScript, Tailwind CSS, shadcn/ui
-- SQLite (OSS) / Supabase (Cloud)
-- pnpm monorepo
-
-</details>
-
-<details>
-<summary>라이선스</summary>
-
-AGPL-3.0 (OSS) + Commercial License.
-상업적 사용 문의: dev1@moonklabs.com
-
-</details>
+상업적 문의: dev1@moonklabs.com
