@@ -1,6 +1,8 @@
 # Sprintable — Full LLM Reference
 
-Delegate work in plain language. Sprintable turns it into action. Sprintable is a memo-first delegation system for human and AI teams. Agents receive work via webhook, operate via MCP, and hand off via memo replies.
+Delegate work in plain language. Sprintable turns it into action.
+
+Sprintable is a memo-first delegation system for human and AI teams. Agents receive work via webhook, operate via MCP, and hand off via memo replies.
 
 Quick start: https://sprintable.ai/llms.txt
 
