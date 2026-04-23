@@ -48,9 +48,9 @@ export class DocsService {
   ) {
     const { expected_updated_at, force_overwrite, created_by: _created_by, ...fields } = input;
 
-    if (this.supabase) {
-      // AC4: parent_id가 UUID면 해당 폴더 존재 여부 검증
-      if (fields.parent_id != null) {
+    // AC4: parent_id가 UUID면 해당 폴더 존재 여부 검증 (Supabase + OSS 공통)
+    if (fields.parent_id != null) {
+      if (this.supabase) {
         const { data: parentDoc, error: parentErr } = await this.supabase
           .from('docs')
           .select('id, is_folder')
@@ -59,8 +59,15 @@ export class DocsService {
         if (parentErr) throw parentErr;
         if (!parentDoc) throw Object.assign(new Error(`Parent folder not found: ${fields.parent_id}`), { code: 'NOT_FOUND' });
         if (!parentDoc.is_folder) throw Object.assign(new Error(`Target is not a folder: ${fields.parent_id}`), { code: 'BAD_REQUEST' });
+      } else {
+        let parentDoc: { is_folder?: boolean } | null = null;
+        try { parentDoc = await this.repo.getById(fields.parent_id); } catch { /* not found */ }
+        if (!parentDoc) throw Object.assign(new Error(`Parent folder not found: ${fields.parent_id}`), { code: 'NOT_FOUND' });
+        if (!parentDoc.is_folder) throw Object.assign(new Error(`Target is not a folder: ${fields.parent_id}`), { code: 'BAD_REQUEST' });
       }
+    }
 
+    if (this.supabase) {
       let query = this.supabase.from('docs').update(fields).eq('id', id);
       if (expected_updated_at && !force_overwrite) query = query.eq('updated_at', expected_updated_at);
       const { data, error } = await query.select().maybeSingle();
