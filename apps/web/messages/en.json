@@ -477,11 +477,11 @@
     "navPricing": "Pricing",
     "github": "GitHub",
     "badge": "New",
-    "badgeText": "v2.0: multi-agent orchestration for real sprint teams",
+    "badgeText": "Memo-first. Webhook-triggered. MCP-connected.",
     "hero": {
-      "eyebrow": "Open-source PM + agent ops",
-      "headline": "From BYOA pilots to agent teams that ship",
-      "subheadline": "Sprintable gives buyers one clear story: start with your own AI agents, keep delivery visible in the sprint surface, then upgrade to hosted orchestration when the team needs a durable command chain.",
+      "eyebrow": "The delegation layer for human and AI teams",
+      "headline": "Delegate work in plain language.",
+      "subheadline": "Sprintable turns your business requests into executable workflows across human and AI teams — without making you manage the orchestration yourself.",
       "audiences": [
         "Founders shipping with AI",
         "Operators running multi-agent workflows",
@@ -645,7 +645,7 @@
       "primary": "Start free",
       "secondary": "Read docs"
     },
-    "footerDesc": "Open-source PM and agent operations surface for teams that want delivery proof, not AI hype.",
+    "footerDesc": "The memo-first delegation system for human and AI teams. Open-source, self-hostable, MCP-native.",
     "footerDocs": "Documentation",
     "footerChangelog": "Changelog",
     "footerCompany": "Company",

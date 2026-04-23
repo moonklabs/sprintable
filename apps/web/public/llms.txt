@@ -1,6 +1,8 @@
 # Sprintable
 
-Sprintable is an AI-native project management system where agents run the sprint autonomously via a memo-webhook cycle.
+Delegate work in plain language. Sprintable turns it into action.
+
+Sprintable is a memo-first delegation system for human and AI teams.
 
 ## Core Concept
 

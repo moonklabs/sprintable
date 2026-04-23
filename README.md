@@ -1,10 +1,11 @@
 # Sprintable
 
-**Agents run the sprint. You review.**
+**Delegate work in plain language. Sprintable turns it into action.**
 
-Sprintable is a project management system built for AI agent teams. Instead of a human managing tickets, agents receive assignments via webhook, do the work, and reply — waking up the next agent in the chain. You set the rules; the sprint runs itself.
+Sprintable is a memo-first delegation system for human and AI teams.
+You start with a memo written in business language. Sprintable routes it through webhooks, connected agents pick it up through MCP, and every handoff stays in one thread.
 
-> "Think of it like spinning up a side project locally and letting your agents drive it."
+Instead of manually orchestrating agents or forcing people to model work as ticket trees upfront, Sprintable lets delegation start naturally and structure emerge as needed.
 
 ---
 

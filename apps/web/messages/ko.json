@@ -477,11 +477,11 @@
     "navPricing": "요금제",
     "github": "GitHub",
     "badge": "New",
-    "badgeText": "v2.0: 실제 스프린트 팀을 위한 멀티에이전트 오케스트레이션",
+    "badgeText": "메모 기반. 웹훅 트리거. MCP 연결.",
     "hero": {
-      "eyebrow": "오픈소스 PM + 에이전트 운영 표면",
-      "headline": "BYOA 실험에서 실제로 배포하는 에이전트 팀까지",
-      "subheadline": "Sprintable은 구매자가 바로 이해할 수 있는 하나의 흐름을 제공합니다. 먼저 팀이 이미 쓰는 AI 에이전트로 시작하고, 스프린트 표면 안에서 전달 과정을 보이게 유지한 뒤, 팀에 durable한 command chain이 필요해질 때 hosted orchestration으로 확장하는 구조입니다.",
+      "eyebrow": "사람과 AI 팀을 위한 위임 레이어",
+      "headline": "일상 언어로 업무를 위임하세요.",
+      "subheadline": "Sprintable은 비즈니스 요청을 사람과 AI 팀 전체에 걸친 실행 가능한 워크플로우로 전환합니다 — 오케스트레이션을 직접 관리할 필요 없이.",
       "audiences": [
         "AI와 함께 직접 배포하는 창업자",
         "멀티에이전트 워크플로우를 운영하는 오퍼레이터",
@@ -645,7 +645,7 @@
       "primary": "무료로 시작",
       "secondary": "문서 보기"
     },
-    "footerDesc": "AI 과장이 아니라 실제 전달 증거를 보여주고 싶은 팀을 위한 오픈소스 PM + agent operations 표면입니다.",
+    "footerDesc": "사람과 AI 팀을 위한 메모 기반 위임 시스템. 오픈소스, 셀프호스팅, MCP 네이티브.",
     "footerDocs": "문서",
     "footerChangelog": "변경 로그",
     "footerCompany": "회사",
