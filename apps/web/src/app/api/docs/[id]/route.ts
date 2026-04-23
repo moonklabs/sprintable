@@ -30,10 +30,10 @@ export async function PATCH(request: Request, { params }: RouteParams) {
     });
     return apiSuccess(doc);
   } catch (err: unknown) {
-    const maybeConflict = err as Error & { code?: string };
-    if (maybeConflict.code === 'CONFLICT') {
-      return apiError('CONFLICT', maybeConflict.message, 409);
-    }
+    const e = err as Error & { code?: string };
+    if (e.code === 'CONFLICT') return apiError('CONFLICT', e.message, 409);
+    if (e.code === 'NOT_FOUND') return apiError('NOT_FOUND', e.message, 404);
+    if (e.code === 'BAD_REQUEST') return apiError('BAD_REQUEST', e.message, 400);
     return handleApiError(err);
   }
 }

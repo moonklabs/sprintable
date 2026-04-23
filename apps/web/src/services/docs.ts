@@ -40,6 +40,7 @@ export class DocsService {
       icon?: string | null;
       tags?: string[];
       sort_order?: number;
+      parent_id?: string | null;
       created_by?: string;
       expected_updated_at?: string;
       force_overwrite?: boolean;
@@ -48,6 +49,18 @@ export class DocsService {
     const { expected_updated_at, force_overwrite, created_by: _created_by, ...fields } = input;
 
     if (this.supabase) {
+      // AC4: parent_id가 UUID면 해당 폴더 존재 여부 검증
+      if (fields.parent_id != null) {
+        const { data: parentDoc, error: parentErr } = await this.supabase
+          .from('docs')
+          .select('id, is_folder')
+          .eq('id', fields.parent_id)
+          .maybeSingle();
+        if (parentErr) throw parentErr;
+        if (!parentDoc) throw Object.assign(new Error(`Parent folder not found: ${fields.parent_id}`), { code: 'NOT_FOUND' });
+        if (!parentDoc.is_folder) throw Object.assign(new Error(`Target is not a folder: ${fields.parent_id}`), { code: 'BAD_REQUEST' });
+      }
+
       let query = this.supabase.from('docs').update(fields).eq('id', id);
       if (expected_updated_at && !force_overwrite) query = query.eq('updated_at', expected_updated_at);
       const { data, error } = await query.select().maybeSingle();
