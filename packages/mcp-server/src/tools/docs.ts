@@ -42,13 +42,14 @@ export function registerDocsTools(server: McpServer) {
     } catch (e) { return handleError(e); }
   });
 
-  server.tool('update_doc', 'Update doc content/title', {
+  server.tool('update_doc', 'Update doc content/title/parent folder', {
     doc_id: z.string(),
     title: z.string().optional(),
     content: z.string().optional(),
     content_format: z.enum(['markdown', 'html']).optional(),
     icon: z.string().optional(),
     tags: z.array(z.string()).optional(),
+    parent_id: z.string().nullable().optional().describe('Folder doc ID to move into, or null to move to root'),
     expected_updated_at: z.string().optional().describe('ISO timestamp for optimistic concurrency check'),
     force_overwrite: z.boolean().optional().describe('Skip conflict check and force write'),
   }, async ({ doc_id, ...updates }) => {

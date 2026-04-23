@@ -18,6 +18,7 @@ export const updateDocSchema = z.object({
   icon: z.string().optional().nullable(),
   tags: z.array(z.string()).optional(),
   sort_order: z.number().optional(),
+  parent_id: z.string().nullable().optional(),
 });
 
 export const docCommentSchema = z.object({
