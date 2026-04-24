@@ -276,6 +276,9 @@ function initSchema(db: DatabaseSync): void {
     CREATE INDEX IF NOT EXISTS idx_agent_runs_org_project ON agent_runs(org_id, project_id);
     CREATE INDEX IF NOT EXISTS idx_agent_runs_created_at ON agent_runs(created_at);
     CREATE INDEX IF NOT EXISTS idx_agent_api_keys_team_member ON agent_api_keys(team_member_id);
+
+    CREATE UNIQUE INDEX IF NOT EXISTS sprints_active_unique
+      ON sprints(project_id) WHERE status = 'active' AND deleted_at IS NULL;
   `);
 }
 
