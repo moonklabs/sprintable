@@ -17,8 +17,10 @@ export async function POST(request: Request, { params }: RouteParams) {
   if (isOssMode()) {
     try {
       const { id: teamMemberId } = await params;
+      const body = await request.json().catch(() => ({})) as { expires_at?: string };
       const { apiKey, keyPrefix, keyHash } = generateApiKey();
-      const expiresAt = new Date(Date.now() + 90 * 24 * 60 * 60 * 1000).toISOString();
+      const defaultExpiry = new Date(Date.now() + 90 * 24 * 60 * 60 * 1000).toISOString();
+      const expiresAt = body.expires_at ?? defaultExpiry;
       const repo = await createAgentApiKeyRepository();
       const row = await repo.create({ teamMemberId, keyPrefix, keyHash, expiresAt });
       return apiSuccess({ ...row, api_key: apiKey }, undefined, 201);
@@ -59,8 +61,10 @@ export async function POST(request: Request, { params }: RouteParams) {
     }
 
     // API Key 생성
+    const body = await request.json().catch(() => ({})) as { expires_at?: string };
     const { apiKey, keyPrefix, keyHash } = generateApiKey();
-    const expiresAt = new Date(Date.now() + 90 * 24 * 60 * 60 * 1000).toISOString();
+    const defaultExpiry = new Date(Date.now() + 90 * 24 * 60 * 60 * 1000).toISOString();
+    const expiresAt = body.expires_at ?? defaultExpiry;
 
     // DB에 저장
     const { data: apiKeyRow, error: insertError } = await supabase
@@ -124,7 +128,7 @@ export async function GET(request: Request, { params }: RouteParams) {
     // API Key 목록 조회
     const { data: keys, error } = await supabase
       .from('agent_api_keys')
-      .select('id, team_member_id, key_prefix, created_at, revoked_at, last_used_at')
+      .select('id, team_member_id, key_prefix, created_at, revoked_at, last_used_at, expires_at')
       .eq('team_member_id', teamMemberId);
 
     if (error) throw error;
