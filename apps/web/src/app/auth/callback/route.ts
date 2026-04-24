@@ -5,14 +5,30 @@ import { resolveAppUrl } from '@/services/app-url';
 export async function GET(request: Request) {
   const { searchParams } = new URL(request.url);
   const code = searchParams.get('code');
-  const next = searchParams.get('next') ?? '/dashboard';
+  const next = searchParams.get('next');
   const origin = resolveAppUrl(null);
 
   if (code) {
     const supabase = await createSupabaseServerClient();
     const { error } = await supabase.auth.exchangeCodeForSession(code);
     if (!error) {
-      return NextResponse.redirect(`${origin}${next}`);
+      // next 파라미터가 있으면 (초대 플로우 등) 그대로 리다이렉트
+      if (next) return NextResponse.redirect(`${origin}${next}`);
+
+      // next 없으면 (직접 가입) org 소속 여부로 온보딩/대시보드 분기
+      const { data: { user } } = await supabase.auth.getUser();
+      if (user) {
+        const { data: membership } = await supabase
+          .from('org_members')
+          .select('org_id')
+          .eq('user_id', user.id)
+          .limit(1)
+          .maybeSingle();
+
+        return NextResponse.redirect(membership ? `${origin}/dashboard` : `${origin}/onboarding`);
+      }
+
+      return NextResponse.redirect(`${origin}/dashboard`);
     }
   }
 
