@@ -250,6 +250,7 @@ export default function SettingsPage() {
       setProjects((prev) => prev.map((p) => p.id === editingProjectId ? { ...p, name: json.data.name, description: json.data.description } : p));
       setEditingProjectId(null);
       setProjectActionMessage({ type: 'success', text: t('projectUpdated') });
+      router.refresh();
     } else {
       const json = await res.json().catch(() => null);
       setProjectActionMessage({ type: 'error', text: json?.error?.message ?? t('projectUpdateFailed') });
