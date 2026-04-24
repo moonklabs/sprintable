@@ -14,7 +14,8 @@ export async function GET(request: Request) {
     if (me.rateLimitExceeded) return ApiErrors.tooManyRequests(me.rateLimitRemaining, me.rateLimitResetAt);
     const dbClient = me.type === 'agent' ? createSupabaseAdminClient() : supabase;
     const { searchParams } = new URL(request.url);
-    const projectId = searchParams.get('project_id');
+    // AC1: agent 요청 시 me.project_id 강제 — cross-project 조회 차단
+    const projectId = me.type === 'agent' ? me.project_id : searchParams.get('project_id');
     if (!projectId) return ApiErrors.badRequest('project_id required');
     const service = new RewardsService(dbClient);
     const type = searchParams.get('type');
@@ -31,6 +32,10 @@ export async function POST(request: Request) {
     const me = await getAuthContext(supabase, request);
     if (!me) return ApiErrors.unauthorized();
     if (me.rateLimitExceeded) return ApiErrors.tooManyRequests(me.rateLimitRemaining, me.rateLimitResetAt);
+    // AC2: agent 요청 시 admin scope 필요 (requireOrgAdmin은 OAuth 전용이므로 scope 체크로 대체)
+    if (me.type === 'agent' && !me.scope?.includes('admin')) {
+      return ApiErrors.insufficientScope('admin');
+    }
     const dbClient = me.type === 'agent' ? createSupabaseAdminClient() : supabase;
     const parsed = await parseBody(request, createRewardSchema); if (!parsed.success) return parsed.response; const body = parsed.data;
     const service = new RewardsService(dbClient);
