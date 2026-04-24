@@ -79,6 +79,7 @@ export default function SettingsPage() {
   const [creatingProject, setCreatingProject] = useState(false);
   const [projectActionMessage, setProjectActionMessage] = useState<{ type: 'success' | 'error'; text: string } | null>(null);
   const [inviteEmail, setInviteEmail] = useState('');
+  const [inviteRole, setInviteRole] = useState<'member' | 'admin'>('member');
   const [inviting, setInviting] = useState(false);
   const [inviteResult, setInviteResult] = useState<string | null>(null);
   const [invitations, setInvitations] = useState<InvitationItem[]>([]);
@@ -519,6 +520,10 @@ export default function SettingsPage() {
                 <option value="">{t('orgWideInvite')}</option>
                 {projects.map((project) => <option key={project.id} value={project.id}>{project.name}</option>)}
               </OperatorSelect>
+              <OperatorSelect value={inviteRole} onChange={(e) => setInviteRole(e.target.value as 'member' | 'admin')}>
+                <option value="member">Member</option>
+                <option value="admin">Admin</option>
+              </OperatorSelect>
               <Button
                 variant="hero"
                 size="lg"
@@ -528,13 +533,14 @@ export default function SettingsPage() {
                   const res = await fetch('/api/invitations', {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({ email: inviteEmail.trim(), ...(inviteProjectId ? { project_id: inviteProjectId } : {}) }),
+                    body: JSON.stringify({ email: inviteEmail.trim(), role: inviteRole, ...(inviteProjectId ? { project_id: inviteProjectId } : {}) }),
                   });
                   if (res.ok) {
                     const json = await res.json();
                     setInviteResult(json.data.invite_url);
                     setInviteEmail('');
                     setInviteProjectId('');
+                    setInviteRole('member');
                     await refreshInvitations();
                   }
                   setInviting(false);
