@@ -1797,6 +1797,8 @@
     "doneStories": "Done Stories",
     "totalStories": "Total Stories",
     "backToList": "Back",
-    "notAssigned": "Not assigned"
+    "notAssigned": "Not assigned",
+    "spExceeded": "SP Over",
+    "spExceededDetail": "{total}SP / target {target}SP exceeded"
   }
 }
