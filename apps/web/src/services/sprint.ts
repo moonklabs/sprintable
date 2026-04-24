@@ -2,6 +2,7 @@ import type { SupabaseClient } from '@supabase/supabase-js';
 import type { ISprintRepository, CreateSprintInput, UpdateSprintInput } from '@sprintable/core-storage';
 import { SupabaseSprintRepository } from '@sprintable/storage-supabase';
 import { requireOrgAdmin } from '@/lib/admin-check';
+import { NotificationService } from './notification.service';
 
 export { CreateSprintInput, UpdateSprintInput };
 
@@ -124,16 +125,13 @@ export class SprintService {
     const notifications = (members ?? []).map((member) => ({
       org_id: project?.org_id as string,
       user_id: member.id as string,
-      type: 'info',
+      type: 'info' as const,
       title: `🚀 ${sprint.title as string} 킥오프!`,
       body: message ?? `${sprint.title as string}가 시작되었습니다.`,
       reference_type: 'sprint',
       reference_id: id,
     }));
-    if (notifications.length) {
-      const { error } = await this.supabase.from('notifications').insert(notifications);
-      if (error) throw error;
-    }
+    await new NotificationService(this.supabase).createMany(notifications);
     return { notified: notifications.length };
   }
 

@@ -1,5 +1,6 @@
 import type { SupabaseClient } from '@supabase/supabase-js';
 import { isExpiredIsoTimestamp, resolveMessagingBridgeSecretRef } from './slack-channel-mapping';
+import { NotificationService } from './notification.service';
 
 interface OrgAuthRow {
   org_id: string;
@@ -76,14 +77,12 @@ export async function notifyDiscordAuthFailed(
   const notifications = recipients.map((recipient) => ({
     org_id: orgId,
     user_id: recipient.id,
-    type: 'warning',
+    type: 'warning' as const,
     title: 'Discord bridge auth_failed',
     body: `Discord 브릿지 인증이 유효하지 않아 처리가 중단된. reason=${reason}`,
     reference_type: 'integration',
-    reference_id: 'discord',
   }));
 
-  const { error } = await supabase.from('notifications').insert(notifications);
-  if (error) throw error;
+  await new NotificationService(supabase).createMany(notifications);
   return notifications.length;
 }

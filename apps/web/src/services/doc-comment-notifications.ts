@@ -1,4 +1,5 @@
 import type { SupabaseClient } from '@supabase/supabase-js';
+import { NotificationService } from './notification.service';
 
 export interface MentionableProjectMember {
   id: string;
@@ -99,15 +100,14 @@ export async function notifyDocCommentMentions({
   const notifications = mentionedMembers.map((member) => ({
     org_id: doc.org_id,
     user_id: member.id,
-    type: 'info',
+    type: 'info' as const,
     title: '문서 댓글 멘션',
     body: buildDocCommentNotificationBody(doc.title, content),
     reference_type: 'doc_comment',
     reference_id: commentId,
   }));
 
-  const { error } = await adminSupabase.from('notifications').insert(notifications);
-  if (error) throw error;
+  await new NotificationService(adminSupabase).createMany(notifications);
 
   return notifications.length;
 }
