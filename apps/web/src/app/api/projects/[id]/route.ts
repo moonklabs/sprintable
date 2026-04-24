@@ -89,3 +89,37 @@ export async function PATCH(request: Request, { params }: RouteParams) {
     return handleApiError(err);
   }
 }
+
+// DELETE /api/projects/:id — soft delete (owner/admin only)
+export async function DELETE(_request: Request, { params }: RouteParams) {
+  try {
+    const { id } = await params;
+    const supabase = await createSupabaseServerClient();
+    const { data: { user } } = await supabase.auth.getUser();
+    if (!user) return ApiErrors.unauthorized();
+
+    const { data: project } = await supabase
+      .from('projects')
+      .select('org_id')
+      .eq('id', id)
+      .is('deleted_at', null)
+      .maybeSingle();
+
+    if (!project) return ApiErrors.notFound('Project not found');
+
+    const role = await resolveOrgRole(supabase, project.org_id as string, user.id);
+    if (!role || !['owner', 'admin'].includes(role)) {
+      return ApiErrors.forbidden('Admin access required');
+    }
+
+    const { error } = await supabase
+      .from('projects')
+      .update({ deleted_at: new Date().toISOString() })
+      .eq('id', id);
+
+    if (error) throw error;
+    return apiSuccess({ id });
+  } catch (err: unknown) {
+    return handleApiError(err);
+  }
+}

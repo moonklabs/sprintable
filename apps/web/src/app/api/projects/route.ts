@@ -63,11 +63,18 @@ export async function GET(request: Request) {
     if (orgAccess?.error) return orgAccess.error;
     if (!orgAccess) return ApiErrors.forbidden('Organization membership not found');
 
-    const { data, error } = await supabase
+    const includeDeleted = searchParams.get('include_deleted') === 'true';
+
+    let query = supabase
       .from('projects')
-      .select('id, name, description, created_at')
-      .eq('org_id', orgAccess.orgId)
-      .order('created_at', { ascending: true });
+      .select('id, name, description, created_at, deleted_at')
+      .eq('org_id', orgAccess.orgId);
+
+    if (!includeDeleted) {
+      query = query.is('deleted_at', null);
+    }
+
+    const { data, error } = await query.order('created_at', { ascending: true });
 
     if (error) throw error;
     return apiSuccess(data ?? []);
