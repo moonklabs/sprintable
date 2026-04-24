@@ -13,6 +13,7 @@ export interface Story {
   priority: string;
   story_points: number | null;
   description: string | null;
+  acceptance_criteria: string | null;
   created_at: string;
   updated_at: string;
   deleted_at: string | null;
@@ -29,6 +30,7 @@ export interface CreateStoryInput {
   priority?: string;
   story_points?: number | null;
   description?: string | null;
+  acceptance_criteria?: string | null;
   meeting_id?: string | null;
 }
 
@@ -38,6 +40,7 @@ export interface UpdateStoryInput {
   priority?: string;
   story_points?: number | null;
   description?: string | null;
+  acceptance_criteria?: string | null;
   epic_id?: string | null;
   sprint_id?: string | null;
   assignee_id?: string | null;

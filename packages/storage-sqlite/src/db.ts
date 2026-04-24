@@ -16,6 +16,7 @@ export function getDb(): DatabaseSync {
   }
   initSchema(_db);
   migrateLegacyStoryStatuses(_db);
+  migrateStorySchema(_db);
   migrateEpicSchema(_db);
   seedOssDefaults(_db);
   return _db;
@@ -52,6 +53,7 @@ function initSchema(db: DatabaseSync): void {
       priority TEXT NOT NULL DEFAULT 'medium',
       story_points INTEGER,
       description TEXT,
+      acceptance_criteria TEXT,
       meeting_id TEXT,
       created_at TEXT NOT NULL,
       updated_at TEXT NOT NULL,
@@ -283,6 +285,22 @@ function migrateLegacyStoryStatuses(db: DatabaseSync): void {
     UPDATE stories SET status = 'in-progress' WHERE status = 'in_progress';
     UPDATE stories SET status = 'in-review' WHERE status = 'review';
   `);
+}
+
+function migrateStorySchema(db: DatabaseSync): void {
+  try { db.exec(`ALTER TABLE stories ADD COLUMN acceptance_criteria TEXT`); } catch { /* already exists */ }
+  // 비표준 priority → 'medium'
+  db.exec(`UPDATE stories SET priority = 'medium' WHERE priority NOT IN ('critical','high','medium','low')`);
+  // 비표준 story_points → 가장 가까운 피보나치
+  db.exec(`UPDATE stories SET story_points = CASE
+    WHEN story_points <= 1  THEN 1
+    WHEN story_points <= 2  THEN 2
+    WHEN story_points <= 3  THEN 3
+    WHEN story_points <= 6  THEN 5
+    WHEN story_points <= 10 THEN 8
+    WHEN story_points <= 17 THEN 13
+    ELSE 21
+  END WHERE story_points IS NOT NULL AND story_points NOT IN (1,2,3,5,8,13,21)`);
 }
 
 function migrateEpicSchema(db: DatabaseSync): void {

@@ -41,8 +41,9 @@ export function registerStoriesTools(server: McpServer) {
     sprint_id: z.string().optional(),
     assignee_id: z.string().optional(),
     priority: z.enum(['low', 'medium', 'high', 'critical']).optional(),
-    story_points: z.number().optional(),
+    story_points: z.union([z.literal(1), z.literal(2), z.literal(3), z.literal(5), z.literal(8), z.literal(13), z.literal(21)]).optional(),
     description: z.string().optional(),
+    acceptance_criteria: z.string().optional(),
   }, async (body) => {
     try {
       const data = await pmApi('/api/stories', { method: 'POST', body: JSON.stringify(body) });
@@ -53,9 +54,10 @@ export function registerStoriesTools(server: McpServer) {
   server.tool('update_story', 'Update story', {
     story_id: z.string(),
     title: z.string().optional(),
-    priority: z.string().optional(),
-    story_points: z.number().optional(),
+    priority: z.enum(['low', 'medium', 'high', 'critical']).optional(),
+    story_points: z.union([z.literal(1), z.literal(2), z.literal(3), z.literal(5), z.literal(8), z.literal(13), z.literal(21)]).optional(),
     description: z.string().optional(),
+    acceptance_criteria: z.string().optional(),
     assignee_id: z.string().optional(),
     epic_id: z.string().optional(),
   }, async ({ story_id, ...updates }) => {
