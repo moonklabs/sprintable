@@ -13,6 +13,10 @@ export interface Epic {
   status: string;
   priority: string;
   description: string | null;
+  objective: string | null;
+  success_criteria: string | null;
+  target_sp: number | null;
+  target_date: string | null;
   created_at: string;
   updated_at: string;
   deleted_at: string | null;
@@ -25,6 +29,10 @@ export interface CreateEpicInput {
   status?: string;
   priority?: string;
   description?: string | null;
+  objective?: string | null;
+  success_criteria?: string | null;
+  target_sp?: number | null;
+  target_date?: string | null;
 }
 
 export interface UpdateEpicInput {
@@ -32,6 +40,10 @@ export interface UpdateEpicInput {
   status?: string;
   priority?: string;
   description?: string | null;
+  objective?: string | null;
+  success_criteria?: string | null;
+  target_sp?: number | null;
+  target_date?: string | null;
 }
 
 export interface EpicListFilters extends PaginationOptions {
