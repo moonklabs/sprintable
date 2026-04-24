@@ -207,17 +207,17 @@ export default function SettingsPage() {
     await fetch('/api/notification-settings', {
       method: 'PUT',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ channel: 'web', event_type: eventType, enabled: newEnabled }),
+      body: JSON.stringify({ channel: 'in_app', event_type: eventType, enabled: newEnabled }),
     });
     setSettings((prev) => {
-      const existing = prev.find((s) => s.event_type === eventType && s.channel === 'web');
+      const existing = prev.find((s) => s.event_type === eventType && s.channel === 'in_app');
       if (existing) return prev.map((s) => (s.id === existing.id ? { ...s, enabled: newEnabled } : s));
-      return [...prev, { id: `temp-${eventType}`, channel: 'web', event_type: eventType, enabled: newEnabled }];
+      return [...prev, { id: `temp-${eventType}`, channel: 'in_app', event_type: eventType, enabled: newEnabled }];
     });
   };
 
   const getEnabled = (eventType: string) => {
-    const setting = settings.find((s) => s.event_type === eventType && s.channel === 'web');
+    const setting = settings.find((s) => s.event_type === eventType && s.channel === 'in_app');
     return setting?.enabled ?? true;
   };
 
