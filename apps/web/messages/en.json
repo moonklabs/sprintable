@@ -469,7 +469,16 @@
       }
     },
     "projectUpdated": "Project updated.",
-    "projectUpdateFailed": "Failed to update project."
+    "projectUpdateFailed": "Failed to update project.",
+    "deleteProject": "Delete",
+    "projectDeleted": "Project deleted.",
+    "projectDeleteFailed": "Failed to delete project.",
+    "projectDeleteConfirmTitle": "Delete this project?",
+    "projectDeleteConfirmDesc": "This action cannot be undone. The project and its data will be deactivated.",
+    "projectInviteTitle": "Invite to Project",
+    "projectInviteDescription": "Invite a team member directly to a specific project by email.",
+    "projectInviteSent": "Invitation link generated.",
+    "projectInviteFailed": "Failed to send project invitation."
   },
   "landing": {
     "navProduct": "Overview",

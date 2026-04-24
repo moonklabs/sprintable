@@ -97,6 +97,12 @@ export default function SettingsPage() {
   const [removingMemberId, setRemovingMemberId] = useState<string | null>(null);
   const [isAdmin, setIsAdmin] = useState(false);
   const [adminChecked, setAdminChecked] = useState(false);
+  const [deletingProjectId, setDeletingProjectId] = useState<string | null>(null);
+  const [deleteProjectConfirmId, setDeleteProjectConfirmId] = useState<string | null>(null);
+  const [projectInviteEmail, setProjectInviteEmail] = useState('');
+  const [projectInviteProjectId, setProjectInviteProjectId] = useState('');
+  const [projectInviting, setProjectInviting] = useState(false);
+  const [projectInviteResult, setProjectInviteResult] = useState<{ type: 'success' | 'error'; text: string } | null>(null);
 
   const refreshProjects = async () => {
     const endpoint = orgId ? `/api/projects?org_id=${encodeURIComponent(orgId)}` : '/api/projects';
@@ -345,6 +351,47 @@ export default function SettingsPage() {
     setAddingMember(false);
   };
 
+  const handleDeleteProject = async (projectId: string) => {
+    setDeletingProjectId(projectId);
+    setProjectActionMessage(null);
+
+    const res = await fetch(`/api/projects/${projectId}`, { method: 'DELETE' });
+    if (res.ok) {
+      setProjects((prev) => prev.filter((p) => p.id !== projectId));
+      setProjectActionMessage({ type: 'success', text: t('projectDeleted') });
+      router.refresh();
+    } else {
+      const json = await res.json().catch(() => null);
+      setProjectActionMessage({ type: 'error', text: json?.error?.message ?? t('projectDeleteFailed') });
+    }
+
+    setDeletingProjectId(null);
+    setDeleteProjectConfirmId(null);
+  };
+
+  const handleProjectInvite = async () => {
+    if (!projectInviteEmail.trim() || !projectInviteProjectId) return;
+    setProjectInviting(true);
+    setProjectInviteResult(null);
+
+    const res = await fetch(`/api/projects/${projectInviteProjectId}/invitations`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ email: projectInviteEmail.trim(), role: 'member' }),
+    });
+
+    if (res.ok) {
+      const json = await res.json();
+      setProjectInviteResult({ type: 'success', text: `${t('projectInviteSent')} ${json.data.invite_url}` });
+      setProjectInviteEmail('');
+    } else {
+      const json = await res.json().catch(() => null);
+      setProjectInviteResult({ type: 'error', text: json?.error?.message ?? t('projectInviteFailed') });
+    }
+
+    setProjectInviting(false);
+  };
+
   const handleRemoveProjectMember = async (memberId: string) => {
     setRemovingMemberId(memberId);
     setMemberActionMessage(null);
@@ -505,13 +552,24 @@ export default function SettingsPage() {
                       <div className="flex shrink-0 items-center gap-2">
                         {project.id === currentProjectId ? <Badge variant="info">{t('currentProjectBadge')}</Badge> : null}
                         {isAdmin ? (
-                          <Button variant="ghost" size="sm" onClick={() => {
-                            setEditingProjectId(project.id);
-                            setEditProjectName(project.name);
-                            setEditProjectDescription(project.description ?? '');
-                          }}>
-                            {tc('edit')}
-                          </Button>
+                          <>
+                            <Button variant="ghost" size="sm" onClick={() => {
+                              setEditingProjectId(project.id);
+                              setEditProjectName(project.name);
+                              setEditProjectDescription(project.description ?? '');
+                            }}>
+                              {tc('edit')}
+                            </Button>
+                            <Button
+                              variant="ghost"
+                              size="sm"
+                              className="text-destructive hover:bg-destructive/10 hover:text-destructive"
+                              onClick={() => setDeleteProjectConfirmId(project.id)}
+                              disabled={deletingProjectId === project.id}
+                            >
+                              {deletingProjectId === project.id ? '...' : t('deleteProject')}
+                            </Button>
+                          </>
                         ) : null}
                       </div>
                     </div>
@@ -635,6 +693,46 @@ export default function SettingsPage() {
             ) : null}
           </SectionCardBody>
         </SectionCard>
+        </section>
+      ) : null}
+
+      {isAdmin ? (
+        <section id="project-invitations">
+          <SectionCard>
+            <SectionCardHeader>
+              <div className="space-y-1">
+                <h2 className="text-base font-semibold text-foreground">📨 {t('projectInviteTitle')}</h2>
+                <p className="text-sm text-muted-foreground">{t('projectInviteDescription')}</p>
+              </div>
+            </SectionCardHeader>
+            <SectionCardBody className="space-y-4">
+              <div className="flex flex-col gap-3 md:flex-row">
+                <OperatorInput
+                  type="email"
+                  value={projectInviteEmail}
+                  onChange={(e) => setProjectInviteEmail(e.target.value)}
+                  placeholder={t('emailPlaceholder')}
+                />
+                <OperatorSelect value={projectInviteProjectId} onChange={(e) => setProjectInviteProjectId(e.target.value)}>
+                  <option value="">{t('selectProject')}</option>
+                  {projects.map((project) => <option key={project.id} value={project.id}>{project.name}</option>)}
+                </OperatorSelect>
+                <Button
+                  variant="hero"
+                  size="lg"
+                  onClick={handleProjectInvite}
+                  disabled={projectInviting || !projectInviteEmail.trim() || !projectInviteProjectId}
+                >
+                  {projectInviting ? '...' : t('invite')}
+                </Button>
+              </div>
+              {projectInviteResult ? (
+                <div className={`rounded-md border p-3 text-xs break-all ${projectInviteResult.type === 'success' ? 'border-emerald-500/20 bg-emerald-500/10 text-emerald-600 dark:text-emerald-400' : 'border-destructive/20 bg-destructive/10 text-destructive'}`}>
+                  {projectInviteResult.text}
+                </div>
+              ) : null}
+            </SectionCardBody>
+          </SectionCard>
         </section>
       ) : null}
 
@@ -794,6 +892,28 @@ export default function SettingsPage() {
                 disabled={deleting}
               >
                 {deleting ? '...' : t('confirmDelete')}
+              </Button>
+            </div>
+          </div>
+        </div>
+      ) : null}
+
+      {deleteProjectConfirmId ? (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 p-4">
+          <div className="w-full max-w-sm rounded-xl border border-border bg-card p-6 shadow-md">
+            <h3 className="text-lg font-semibold text-destructive">{t('projectDeleteConfirmTitle')}</h3>
+            <p className="mt-2 text-sm text-muted-foreground">{t('projectDeleteConfirmDesc')}</p>
+            <div className="mt-6 flex gap-3">
+              <Button variant="glass" className="flex-1" onClick={() => setDeleteProjectConfirmId(null)}>
+                {tc('cancel')}
+              </Button>
+              <Button
+                variant="destructive"
+                className="flex-1"
+                onClick={() => handleDeleteProject(deleteProjectConfirmId)}
+                disabled={deletingProjectId === deleteProjectConfirmId}
+              >
+                {deletingProjectId === deleteProjectConfirmId ? '...' : t('deleteProject')}
               </Button>
             </div>
           </div>

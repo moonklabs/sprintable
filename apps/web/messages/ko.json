@@ -469,7 +469,16 @@
       }
     },
     "projectUpdated": "프로젝트가 업데이트되었습니다.",
-    "projectUpdateFailed": "프로젝트 업데이트에 실패했습니다."
+    "projectUpdateFailed": "프로젝트 업데이트에 실패했습니다.",
+    "deleteProject": "삭제",
+    "projectDeleted": "프로젝트를 삭제했습니다.",
+    "projectDeleteFailed": "프로젝트 삭제에 실패했습니다.",
+    "projectDeleteConfirmTitle": "프로젝트를 삭제하시겠습니까?",
+    "projectDeleteConfirmDesc": "이 작업은 되돌릴 수 없습니다. 프로젝트와 관련 데이터가 비활성화됩니다.",
+    "projectInviteTitle": "프로젝트 초대",
+    "projectInviteDescription": "이메일로 특정 프로젝트에 바로 초대합니다.",
+    "projectInviteSent": "초대 링크가 생성되었습니다.",
+    "projectInviteFailed": "프로젝트 초대에 실패했습니다."
   },
   "landing": {
     "navProduct": "개요",
