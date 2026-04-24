@@ -366,6 +366,16 @@ export class AgentBuiltinToolService {
           .select('id, org_id, project_id, title, content, memo_type, status, assigned_to, created_by, created_at, updated_at')
           .single();
 
+        // memo_assignees upsert — trg_memo_assignees_notify 발동하여 알림 보장
+        if (!error && data && args.assigned_to) {
+          await this.supabase
+            .from('memo_assignees')
+            .upsert(
+              { memo_id: memo.id, member_id: args.assigned_to, assigned_by: ctx.memo.created_by },
+              { onConflict: 'memo_id,member_id', ignoreDuplicates: true },
+            );
+        }
+
         if (error || !data) throw error ?? new Error('memo update failed');
         return { memo: this.presentMemo(data as MemoScope) };
       }
