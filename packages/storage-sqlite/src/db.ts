@@ -262,7 +262,8 @@ function initSchema(db: DatabaseSync): void {
       created_at TEXT NOT NULL,
       revoked_at TEXT,
       last_used_at TEXT,
-      expires_at TEXT
+      expires_at TEXT,
+      scope TEXT DEFAULT '["read","write"]'
     );
 
     CREATE INDEX IF NOT EXISTS idx_agent_runs_org_project ON agent_runs(org_id, project_id);

@@ -7,6 +7,7 @@ export interface TeamMemberContext {
   project_id: string;
   name: string;
   type: 'human' | 'agent';
+  scope?: string[];
 }
 
 /**
@@ -58,7 +59,7 @@ export async function getTeamMemberFromApiKey(
   // RLS 우회 필요 - admin client 사용
   const { data: apiKeyRow, error: keyError } = await adminClient
     .from('agent_api_keys')
-    .select('id, team_member_id, revoked_at, expires_at')
+    .select('id, team_member_id, revoked_at, expires_at, scope')
     .eq('key_hash', keyHash)
     .is('revoked_at', null)
     .maybeSingle();
@@ -67,10 +68,13 @@ export async function getTeamMemberFromApiKey(
     return null;
   }
 
-  // AC3: 만료 키 거부 (expires_at=NULL이면 무기한 유효)
+  // 만료 키 거부 (expires_at=NULL이면 무기한 유효)
   if (apiKeyRow.expires_at && new Date(apiKeyRow.expires_at) < new Date()) {
     return null;
   }
+
+  // AC6: scope=NULL이면 ['read','write'] 기본값 적용 (admin 제외 하위호환)
+  const scope: string[] = (apiKeyRow.scope as string[] | null) ?? ['read', 'write'];
 
   // 2. team_member 조회
   // RLS 우회 필요 - admin client 사용
@@ -97,6 +101,7 @@ export async function getTeamMemberFromApiKey(
     project_id: member.project_id as string,
     name: member.name as string,
     type: member.type as 'human' | 'agent',
+    scope,
   };
 }
 

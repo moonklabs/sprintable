@@ -1,16 +1,22 @@
 import { createSupabaseServerClient } from '@/lib/supabase/server';
 import { handleApiError } from '@/lib/api-error';
 import { apiSuccess, apiError, ApiErrors } from '@/lib/api-response';
-import { getMyTeamMember } from '@/lib/auth-helpers';
+import { getMyTeamMember, getAuthContext } from '@/lib/auth-helpers';
 import { isOssMode } from '@/lib/storage/factory';
 
 export async function DELETE(
-  _request: Request,
+  request: Request,
   context: { params: Promise<{ id: string }> },
 ) {
   if (isOssMode()) return apiError('NOT_IMPLEMENTED', 'Member management is not supported in OSS mode.', 501);
   try {
     const supabase = await createSupabaseServerClient();
+    // AC4: API Key로 접근하는 에이전트는 admin scope 필요
+    const meScope = await getAuthContext(supabase, request);
+    if (meScope?.type === 'agent' && !meScope.scope?.includes('admin')) {
+      return ApiErrors.insufficientScope('admin');
+    }
+
     const { data: { user } } = await supabase.auth.getUser();
     if (!user) return ApiErrors.unauthorized();
 

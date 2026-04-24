@@ -13,16 +13,21 @@ export class SqliteAgentApiKeyRepository implements IAgentApiKeyRepository {
     const id = randomUUID();
     const now = new Date().toISOString();
     const expiresAt = input.expiresAt ?? null;
+    const scope = JSON.stringify(input.scope ?? ['read', 'write']);
     this.db.prepare(
-      'INSERT INTO agent_api_keys (id, team_member_id, key_prefix, key_hash, created_at, expires_at) VALUES (?, ?, ?, ?, ?, ?)'
-    ).run(id, input.teamMemberId, input.keyPrefix, input.keyHash, now, expiresAt);
+      'INSERT INTO agent_api_keys (id, team_member_id, key_prefix, key_hash, created_at, expires_at, scope) VALUES (?, ?, ?, ?, ?, ?, ?)'
+    ).run(id, input.teamMemberId, input.keyPrefix, input.keyHash, now, expiresAt, scope);
     return { id, key_prefix: input.keyPrefix, created_at: now };
   }
 
   async list(teamMemberId: string): Promise<AgentApiKey[]> {
-    return this.db.prepare(
+    const rows = this.db.prepare(
       'SELECT * FROM agent_api_keys WHERE team_member_id = ? ORDER BY created_at DESC'
-    ).all(teamMemberId) as unknown as AgentApiKey[];
+    ).all(teamMemberId) as Array<Record<string, unknown>>;
+    return rows.map((row) => ({
+      ...row,
+      scope: row.scope ? JSON.parse(row.scope as string) as string[] : ['read', 'write'],
+    })) as unknown as AgentApiKey[];
   }
 
   async revoke(keyId: string): Promise<void> {

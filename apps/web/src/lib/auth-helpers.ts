@@ -201,6 +201,7 @@ export async function getAuthContext(
   project_id: string;
   project_name: string;
   type?: 'human' | 'agent';
+  scope?: string[];
   rateLimitExceeded?: boolean;
   rateLimitRemaining?: number;
   rateLimitResetAt?: number;
@@ -239,6 +240,7 @@ export async function getAuthContext(
         project_id: apiKeyMember.project_id,
         project_name: '', // API Key 인증은 project_name이 없음 (필요시 별도 조회)
         type: apiKeyMember.type,
+        scope: apiKeyMember.scope,
         rateLimitExceeded: !allowed,
         rateLimitRemaining: remaining,
         rateLimitResetAt: resetAt,

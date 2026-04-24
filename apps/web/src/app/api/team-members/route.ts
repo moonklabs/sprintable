@@ -80,6 +80,13 @@ export async function POST(request: Request) {
   }
   try {
     const supabase = await createSupabaseServerClient();
+    // AC4: API Key로 접근하는 에이전트는 admin scope 필요
+    const { getAuthContext } = await import('@/lib/auth-helpers');
+    const meScope = await getAuthContext(supabase, request);
+    if (meScope?.type === 'agent' && !meScope.scope?.includes('admin')) {
+      return ApiErrors.insufficientScope('admin');
+    }
+
     const { data: { user } } = await supabase.auth.getUser();
     if (!user) return ApiErrors.unauthorized();
 

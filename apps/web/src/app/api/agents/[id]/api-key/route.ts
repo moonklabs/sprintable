@@ -17,12 +17,13 @@ export async function POST(request: Request, { params }: RouteParams) {
   if (isOssMode()) {
     try {
       const { id: teamMemberId } = await params;
-      const body = await request.json().catch(() => ({})) as { expires_at?: string };
+      const body = await request.json().catch(() => ({})) as { expires_at?: string; scope?: string[] };
       const { apiKey, keyPrefix, keyHash } = generateApiKey();
       const defaultExpiry = new Date(Date.now() + 90 * 24 * 60 * 60 * 1000).toISOString();
       const expiresAt = body.expires_at ?? defaultExpiry;
+      const scope = body.scope ?? ['read', 'write'];
       const repo = await createAgentApiKeyRepository();
-      const row = await repo.create({ teamMemberId, keyPrefix, keyHash, expiresAt });
+      const row = await repo.create({ teamMemberId, keyPrefix, keyHash, expiresAt, scope });
       return apiSuccess({ ...row, api_key: apiKey }, undefined, 201);
     } catch (err: unknown) { return handleApiError(err); }
   }
@@ -31,6 +32,11 @@ export async function POST(request: Request, { params }: RouteParams) {
     const supabase = await createSupabaseServerClient();
     const me = await getAuthContext(supabase, request);
     if (!me) return ApiErrors.unauthorized();
+
+    // AC4: API Key로 접근 시 admin scope 필요
+    if (me.type === 'agent' && !me.scope?.includes('admin')) {
+      return ApiErrors.insufficientScope('admin');
+    }
 
     // Admin 권한 확인
     const { data: myMember } = await supabase
@@ -61,10 +67,11 @@ export async function POST(request: Request, { params }: RouteParams) {
     }
 
     // API Key 생성
-    const body = await request.json().catch(() => ({})) as { expires_at?: string };
+    const body = await request.json().catch(() => ({})) as { expires_at?: string; scope?: string[] };
     const { apiKey, keyPrefix, keyHash } = generateApiKey();
     const defaultExpiry = new Date(Date.now() + 90 * 24 * 60 * 60 * 1000).toISOString();
     const expiresAt = body.expires_at ?? defaultExpiry;
+    const scope = body.scope ?? ['read', 'write'];
 
     // DB에 저장
     const { data: apiKeyRow, error: insertError } = await supabase
@@ -74,8 +81,9 @@ export async function POST(request: Request, { params }: RouteParams) {
         key_prefix: keyPrefix,
         key_hash: keyHash,
         expires_at: expiresAt,
+        scope,
       })
-      .select('id, key_prefix, created_at, expires_at')
+      .select('id, key_prefix, created_at, expires_at, scope')
       .single();
 
     if (insertError || !apiKeyRow) {
