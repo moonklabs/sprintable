@@ -36,7 +36,7 @@ export async function POST(request: Request, { params }: RouteParams) {
       .eq('id', me.id)
       .single();
 
-    if (!myMember || myMember.role !== 'admin') {
+    if (!myMember || !['owner', 'admin'].includes(myMember.role)) {
       return ApiErrors.forbidden('Admin only');
     }
 
@@ -114,7 +114,7 @@ export async function GET(request: Request, { params }: RouteParams) {
       .eq('id', me.id)
       .single();
 
-    if (!myMember || myMember.role !== 'admin') {
+    if (!myMember || !['owner', 'admin'].includes(myMember.role)) {
       return ApiErrors.forbidden('Admin only');
     }
 

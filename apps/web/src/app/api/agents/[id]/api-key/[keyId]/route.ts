@@ -34,7 +34,7 @@ export async function DELETE(request: Request, { params }: RouteParams) {
       .eq('id', me.id)
       .single();
 
-    if (!myMember || myMember.role !== 'admin') {
+    if (!myMember || !['owner', 'admin'].includes(myMember.role)) {
       return ApiErrors.forbidden('Admin only');
     }
 
