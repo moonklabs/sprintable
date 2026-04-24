@@ -4,6 +4,18 @@ export const STORY_STATUSES = ['backlog', 'ready-for-dev', 'in-progress', 'in-re
 export const STORY_PRIORITIES = ['critical', 'high', 'medium', 'low'] as const;
 export const STORY_SP_VALUES = [1, 2, 3, 5, 8, 13, 21] as const;
 
+/**
+ * 유효한 스토리 상태 전이 맵 (단일 소스)
+ * done→in-review는 admin만 허용 — 백엔드 StoryService에서 별도 체크
+ */
+export const VALID_STORY_TRANSITIONS: Record<string, string[]> = {
+  backlog: ['ready-for-dev'],
+  'ready-for-dev': ['in-progress', 'backlog'],
+  'in-progress': ['in-review', 'ready-for-dev'],
+  'in-review': ['done', 'in-progress'],
+  done: ['in-review'],
+};
+
 const storyStatusEnum = z.enum(STORY_STATUSES);
 const storyPriorityEnum = z.enum(STORY_PRIORITIES);
 const storySpSchema = z.union([

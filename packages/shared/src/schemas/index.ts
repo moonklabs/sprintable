@@ -120,7 +120,7 @@ export const updateSprintSchema = z.object({
 });
 
 // ─── Story ───────────────────────────────────
-export { createStorySchema, updateStorySchema, bulkUpdateStoriesSchema as bulkUpdateStorySchema } from './stories';
+export { createStorySchema, updateStorySchema, bulkUpdateStoriesSchema as bulkUpdateStorySchema, VALID_STORY_TRANSITIONS, STORY_STATUSES, STORY_PRIORITIES, STORY_SP_VALUES } from './stories';
 
 // ─── Task ────────────────────────────────────
 export const createTaskSchema = z.object({

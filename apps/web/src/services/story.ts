@@ -3,17 +3,11 @@ import type { IStoryRepository, CreateStoryInput, UpdateStoryInput, BulkUpdateIt
 import { SupabaseStoryRepository } from '@sprintable/storage-supabase';
 import { NotFoundError, ForbiddenError } from './sprint';
 import { requireOrgAdmin, isOrgAdmin } from '@/lib/admin-check';
+import { VALID_STORY_TRANSITIONS } from '@sprintable/shared';
 
 export type { CreateStoryInput, UpdateStoryInput, BulkUpdateItem };
 
-/** 유효한 상태 전이 맵 (SID:357) */
-const VALID_TRANSITIONS: Record<string, string[]> = {
-  'backlog': ['ready-for-dev'],
-  'ready-for-dev': ['in-progress', 'backlog'],
-  'in-progress': ['in-review', 'ready-for-dev'],
-  'in-review': ['done', 'in-progress'],
-  'done': ['in-review'], // admin만
-};
+const VALID_TRANSITIONS = VALID_STORY_TRANSITIONS;
 
 export class InvalidTransitionError extends Error {
   constructor(from: string, to: string) {
@@ -95,7 +89,7 @@ export class StoryService {
 
   async update(id: string, input: UpdateStoryInput) {
     const ALLOWED_FIELDS: (keyof UpdateStoryInput)[] = [
-      'title', 'status', 'priority', 'story_points', 'description',
+      'title', 'status', 'priority', 'story_points', 'description', 'acceptance_criteria',
       'epic_id', 'sprint_id', 'assignee_id',
     ];
     const sanitized: Record<string, unknown> = {};
