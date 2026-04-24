@@ -23,17 +23,16 @@ export async function POST(request: Request) {
     }
     const { name, slug } = parsed.data;
 
-    // slug 유니크 검증
-    const { data: existingSlug } = await supabase
+    // admin client — slug 유니크 검증 시 RLS가 다른 org를 숨기는 것을 방지
+    const admin = createSupabaseAdminClient();
+
+    const { data: existingSlug } = await admin
       .from('organizations')
       .select('id')
       .eq('slug', slug)
       .maybeSingle();
 
     if (existingSlug) return apiError('CONFLICT', 'Slug is already taken', 409);
-
-    // service_role로 INSERT (RLS bypass — 인증 확인은 위에서 완료)
-    const admin = createSupabaseAdminClient();
 
     const { data: org, error: orgError } = await admin
       .from('organizations')
