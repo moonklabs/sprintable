@@ -77,6 +77,7 @@ export const ApiErrors = {
         'X-RateLimit-Limit': '300',
         'X-RateLimit-Remaining': String(remaining),
         'X-RateLimit-Reset': String(resetAt),
+        'Retry-After': String(Math.max(0, Math.ceil((resetAt - Date.now()) / 1000))),
       },
     }),
 } as const;
