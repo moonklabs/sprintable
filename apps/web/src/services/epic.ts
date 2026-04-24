@@ -1,5 +1,6 @@
 import type { IEpicRepository, CreateEpicInput, UpdateEpicInput, RepositoryScopeContext } from '@sprintable/core-storage';
 export type { CreateEpicInput, UpdateEpicInput } from '@sprintable/core-storage';
+import { validateStatusTransition } from '@/lib/epic-permissions';
 
 export class EpicService {
   constructor(private readonly repository: IEpicRepository) {}
@@ -23,7 +24,11 @@ export class EpicService {
     return this.repository.getByIdWithStories(id, scope);
   }
 
-  async update(id: string, input: UpdateEpicInput) {
+  async update(id: string, input: UpdateEpicInput, scope?: RepositoryScopeContext) {
+    if (input.status) {
+      const current = await this.repository.getById(id, scope);
+      validateStatusTransition(current.status, input.status);
+    }
     return this.repository.update(id, input);
   }
 

@@ -5,7 +5,8 @@ import { EpicService } from '@/services/epic';
 import { handleApiError } from '@/lib/api-error';
 import { apiSuccess, apiError, ApiErrors } from '@/lib/api-response';
 import { getAuthContext } from '@/lib/auth-helpers';
-import { createEpicRepository } from '@/lib/storage/factory';
+import { createEpicRepository, isOssMode } from '@/lib/storage/factory';
+import { getEpicActorRole, hasEpicRole } from '@/lib/epic-permissions';
 
 type RouteParams = { params: Promise<{ id: string }> };
 
@@ -40,7 +41,13 @@ export async function PATCH(request: Request, { params }: RouteParams) {
 
     const repo = await createEpicRepository(dbClient);
     const service = new EpicService(repo);
-    return apiSuccess(await service.update(id, parsed.data));
+    try {
+      return apiSuccess(await service.update(id, parsed.data, { org_id: me.org_id, project_id: me.project_id }));
+    } catch (e: unknown) {
+      const err = e as Error & { code?: string };
+      if (err.code === 'INVALID_TRANSITION') return apiError('BAD_REQUEST', err.message, 400);
+      throw e;
+    }
   } catch (err: unknown) { return handleApiError(err); }
 }
 
@@ -51,6 +58,15 @@ export async function DELETE(request: Request, { params }: RouteParams) {
     const me = await getAuthContext(supabase, request);
     if (!me) return ApiErrors.unauthorized();
     if (me.rateLimitExceeded) return ApiErrors.tooManyRequests(me.rateLimitRemaining, me.rateLimitResetAt);
+
+    // 권한 체크: admin/owner만 에픽 삭제 가능
+    if (!isOssMode() && me.type !== 'agent') {
+      const role = await getEpicActorRole(supabase, me.id);
+      if (!role || !hasEpicRole(role, 'admin')) {
+        return apiError('FORBIDDEN', 'Epic deletion requires admin or owner role', 403);
+      }
+    }
+
     const dbClient = me.type === 'agent' ? createSupabaseAdminClient() : supabase;
     const repo = await createEpicRepository(dbClient);
     const service = new EpicService(repo);
