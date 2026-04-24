@@ -2,6 +2,7 @@ import type { SupabaseClient } from '@supabase/supabase-js';
 import { buildAbsoluteMemoLink } from './app-url';
 import { hasExactMemberMention } from './doc-comment-notifications';
 import { buildWebhookSignatureHeaders } from '@/lib/webhook-signature';
+import { WebhookDeliveryService } from './webhook-delivery.service';
 
 interface MemoReplyDispatchMemo {
   id: string;
@@ -33,6 +34,7 @@ interface MemoReplyParticipantRow {
 }
 
 interface WebhookConfigRow {
+  id: string;
   url: string;
   secret: string | null;
 }
@@ -138,14 +140,20 @@ function extractMentionedMemberIds(contents: string[], members: TeamMemberRow[])
   return targets;
 }
 
+interface ResolvedWebhook {
+  id: string | null;
+  url: string;
+  secret: string | null;
+}
+
 async function resolveWebhook(
   supabase: SupabaseClient,
   memo: MemoReplyDispatchMemo,
   member: TeamMemberRow,
-): Promise<WebhookConfigRow | { url: string; secret: null } | null> {
+): Promise<ResolvedWebhook | null> {
   const { data: projectConfig } = await supabase
     .from('webhook_configs')
-    .select('url, secret')
+    .select('id, url, secret')
     .eq('org_id', memo.org_id)
     .eq('member_id', member.id)
     .eq('project_id', memo.project_id)
@@ -157,7 +165,7 @@ async function resolveWebhook(
 
   const { data: defaultConfig } = await supabase
     .from('webhook_configs')
-    .select('url, secret')
+    .select('id, url, secret')
     .eq('org_id', memo.org_id)
     .eq('member_id', member.id)
     .is('project_id', null)
@@ -166,13 +174,15 @@ async function resolveWebhook(
     .maybeSingle();
 
   if (defaultConfig?.url) return defaultConfig as WebhookConfigRow;
-  if (member.webhook_url) return { url: member.webhook_url, secret: null };
+  if (member.webhook_url) return { id: null, url: member.webhook_url, secret: null };
   return null;
 }
 
 async function postWebhook(
+  supabase: SupabaseClient,
   fetchFn: typeof fetch,
-  webhook: WebhookConfigRow | { url: string; secret: null },
+  orgId: string,
+  webhook: ResolvedWebhook,
   title: string,
   description: string,
 ) {
@@ -191,14 +201,15 @@ async function postWebhook(
     ...buildWebhookSignatureHeaders(webhook.secret, body),
   };
 
-  const response = await fetchFn(webhook.url, {
-    method: 'POST',
+  return new WebhookDeliveryService(supabase).dispatch({
+    org_id: orgId,
+    webhook_config_id: webhook.id,
+    event_type: 'memo.reply',
+    url: webhook.url,
     headers,
     body,
-    signal: AbortSignal.timeout(10_000),
+    fetchFn,
   });
-
-  return response.ok;
 }
 
 export async function dispatchWorkflowMemoReplyWebhooks(
@@ -280,7 +291,7 @@ export async function dispatchWorkflowMemoReplyWebhooks(
     if (!webhook) continue;
 
     try {
-      const sent = await postWebhook(fetchFn, webhook, title, description);
+      const sent = await postWebhook(supabase, fetchFn, memo.org_id, webhook, title, description);
       if (sent) {
         sentCount += 1;
       } else {

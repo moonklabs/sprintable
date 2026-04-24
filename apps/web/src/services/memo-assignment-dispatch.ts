@@ -1,6 +1,7 @@
 import { createSupabaseAdminClient } from '@/lib/supabase/admin';
 import { buildAbsoluteMemoLink } from './app-url';
 import { buildWebhookSignatureHeaders } from '@/lib/webhook-signature';
+import { WebhookDeliveryService } from './webhook-delivery.service';
 
 export interface DispatchableMemo {
   id: string;
@@ -62,7 +63,7 @@ export async function dispatchMemoAssignmentImmediately(memo: DispatchableMemo) 
     // webhook_configs: project_id 기준 우선
     const { data: projectConfig } = await supabase
       .from('webhook_configs')
-      .select('url, secret')
+      .select('id, url, secret')
       .eq('org_id', memo.org_id)
       .eq('member_id', assigneeId)
       .eq('project_id', memo.project_id)
@@ -72,15 +73,17 @@ export async function dispatchMemoAssignmentImmediately(memo: DispatchableMemo) 
 
     let webhookUrl: string | null = null;
     let webhookSecret: string | null = null;
+    let webhookConfigId: string | null = null;
 
     if (projectConfig?.url) {
       webhookUrl = projectConfig.url as string;
       webhookSecret = (projectConfig.secret as string | null) ?? null;
+      webhookConfigId = projectConfig.id as string;
     } else {
       // webhook_configs: org 기본값
       const { data: defaultConfig } = await supabase
         .from('webhook_configs')
-        .select('url, secret')
+        .select('id, url, secret')
         .eq('org_id', memo.org_id)
         .eq('member_id', assigneeId)
         .is('project_id', null)
@@ -91,8 +94,9 @@ export async function dispatchMemoAssignmentImmediately(memo: DispatchableMemo) 
       if (defaultConfig?.url) {
         webhookUrl = defaultConfig.url as string;
         webhookSecret = (defaultConfig.secret as string | null) ?? null;
+        webhookConfigId = defaultConfig.id as string;
       } else {
-        // fallback: team_members.webhook_url
+        // fallback: team_members.webhook_url (config_id 없음)
         const { data: member } = await supabase
           .from('team_members')
           .select('webhook_url')
@@ -127,15 +131,17 @@ export async function dispatchMemoAssignmentImmediately(memo: DispatchableMemo) 
       ...buildWebhookSignatureHeaders(webhookSecret, body),
     };
 
-    const response = await fetch(webhookUrl, {
-      method: 'POST',
+    const ok = await new WebhookDeliveryService(supabase).dispatch({
+      org_id: memo.org_id,
+      webhook_config_id: webhookConfigId,
+      event_type: 'memo.assigned',
+      url: webhookUrl,
       headers,
       body,
-      signal: AbortSignal.timeout(10_000),
     });
 
-    if (!response.ok) {
-      console.error('[MemoDispatch] webhook responded with HTTP', response.status, 'for assignee:', assigneeId);
+    if (!ok) {
+      console.error('[MemoDispatch] webhook delivery failed for assignee:', assigneeId);
     }
   } catch (error) {
     console.error(

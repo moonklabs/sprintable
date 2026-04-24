@@ -17,8 +17,8 @@ function createSupabaseStub(options?: {
     { id: 'member-3', name: '디디 은와추쿠', webhook_url: null, is_active: true },
   ];
   const webhookConfigs = options?.webhookConfigs ?? [
-    { org_id: 'org-1', member_id: 'member-1', project_id: 'project-1', is_active: true, url: 'https://discord.com/api/webhooks/member-1/project', secret: null },
-    { org_id: 'org-1', member_id: 'member-3', project_id: null, is_active: true, url: 'https://discord.com/api/webhooks/member-3/default', secret: null },
+    { id: 'config-1', org_id: 'org-1', member_id: 'member-1', project_id: 'project-1', is_active: true, url: 'https://discord.com/api/webhooks/member-1/project', secret: null },
+    { id: 'config-3', org_id: 'org-1', member_id: 'member-3', project_id: null, is_active: true, url: 'https://discord.com/api/webhooks/member-3/default', secret: null },
   ];
   const memoAssignees = options?.memoAssignees ?? [];
 
@@ -73,6 +73,19 @@ function createSupabaseStub(options?: {
             }) ?? null;
             return { data, error: null };
           },
+        };
+      }
+
+      if (table === 'webhook_deliveries') {
+        return {
+          insert: vi.fn().mockReturnValue({
+            select: vi.fn().mockReturnValue({
+              single: vi.fn().mockResolvedValue({ data: { id: 'delivery-1' }, error: null }),
+            }),
+          }),
+          update: vi.fn().mockReturnValue({
+            eq: vi.fn().mockResolvedValue({ data: [], error: null }),
+          }),
         };
       }
 
