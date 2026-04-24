@@ -5,4 +5,6 @@ ALTER TABLE public.reward_ledger
   ADD CONSTRAINT chk_reward_currency
     CHECK (currency IN ('TJSB')),
   ADD CONSTRAINT chk_reward_reference_type
-    CHECK (reference_type IS NULL OR reference_type IN ('story', 'sprint', 'epic', 'manual'));
+    CHECK (reference_type IS NULL OR reference_type IN ('story', 'sprint', 'epic', 'manual')),
+  ADD CONSTRAINT chk_reward_amount_nonzero
+    CHECK (amount <> 0);
