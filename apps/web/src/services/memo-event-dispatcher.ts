@@ -1,5 +1,6 @@
 import type { RealtimeChannel, SupabaseClient } from '@supabase/supabase-js';
 import { AgentRoutingRuleService, RoutingPolicyError, type RoutingEvaluationResult, type RoutingRuleSummary } from './agent-routing-rule';
+import { buildWebhookSignatureHeaders } from '@/lib/webhook-signature';
 
 type DispatchSource = 'realtime' | 'polling';
 
@@ -466,7 +467,7 @@ export class MemoEventDispatcher {
             redirect: 'manual',
             headers: {
               'Content-Type': 'application/json',
-              ...(webhook.secret ? { 'X-Webhook-Secret': webhook.secret } : {}),
+              ...buildWebhookSignatureHeaders(webhook.secret, JSON.stringify(outbound.body)),
             },
             body: JSON.stringify(outbound.body),
           },

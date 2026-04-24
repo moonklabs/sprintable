@@ -1,4 +1,5 @@
 import type { SupabaseClient } from '@supabase/supabase-js';
+import { buildWebhookSignatureHeaders } from '@/lib/webhook-signature';
 
 interface WebhookPayload {
   event: string;
@@ -28,13 +29,16 @@ export async function fireWebhooks(
 
   await Promise.allSettled(
     matching.map(async (config) => {
-      const headers: Record<string, string> = { 'Content-Type': 'application/json' };
-      if (config.secret) headers['X-Webhook-Secret'] = config.secret;
+      const body = JSON.stringify(payload);
+      const headers: Record<string, string> = {
+        'Content-Type': 'application/json',
+        ...buildWebhookSignatureHeaders(config.secret, body),
+      };
 
       await fetch(config.url, {
         method: 'POST',
         headers,
-        body: JSON.stringify(payload),
+        body,
         signal: AbortSignal.timeout(10_000),
       });
     }),
