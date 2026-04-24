@@ -21,6 +21,10 @@ export function registerEpicsTools(server: McpServer) {
     title: z.string(),
     priority: z.enum(['low', 'medium', 'high', 'critical']).optional(),
     description: z.string().optional(),
+    objective: z.string().optional(),
+    success_criteria: z.string().optional(),
+    target_sp: z.number().int().positive().optional(),
+    target_date: z.string().optional(),
   }, async (body) => {
     try {
       const data = await pmApi('/api/epics', { method: 'POST', body: JSON.stringify(body) });
@@ -31,9 +35,13 @@ export function registerEpicsTools(server: McpServer) {
   server.tool('update_epic', 'Update epic', {
     epic_id: z.string(),
     title: z.string().optional(),
-    status: z.string().optional(),
+    status: z.enum(['draft', 'active', 'done', 'archived']).optional(),
     priority: z.string().optional(),
     description: z.string().optional(),
+    objective: z.string().optional(),
+    success_criteria: z.string().optional(),
+    target_sp: z.number().int().positive().optional(),
+    target_date: z.string().optional(),
   }, async ({ epic_id, ...updates }) => {
     try {
       const data = await pmApi(`/api/epics/${encodeURIComponent(epic_id)}`, {

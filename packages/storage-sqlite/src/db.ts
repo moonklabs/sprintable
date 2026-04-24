@@ -16,6 +16,7 @@ export function getDb(): DatabaseSync {
   }
   initSchema(_db);
   migrateLegacyStoryStatuses(_db);
+  migrateEpicSchema(_db);
   seedOssDefaults(_db);
   return _db;
 }
@@ -27,9 +28,13 @@ function initSchema(db: DatabaseSync): void {
       org_id TEXT NOT NULL,
       project_id TEXT NOT NULL,
       title TEXT NOT NULL,
-      status TEXT NOT NULL DEFAULT 'open',
+      status TEXT NOT NULL DEFAULT 'active',
       priority TEXT NOT NULL DEFAULT 'medium',
       description TEXT,
+      objective TEXT,
+      success_criteria TEXT,
+      target_sp INTEGER,
+      target_date TEXT,
       created_at TEXT NOT NULL,
       updated_at TEXT NOT NULL,
       deleted_at TEXT
@@ -278,6 +283,21 @@ function migrateLegacyStoryStatuses(db: DatabaseSync): void {
     UPDATE stories SET status = 'in-progress' WHERE status = 'in_progress';
     UPDATE stories SET status = 'in-review' WHERE status = 'review';
   `);
+}
+
+function migrateEpicSchema(db: DatabaseSync): void {
+  // 기존 DB에 새 컬럼 추가 (없으면 추가, 이미 있으면 무시)
+  const newColumns: [string, string][] = [
+    ['objective', 'TEXT'],
+    ['success_criteria', 'TEXT'],
+    ['target_sp', 'INTEGER'],
+    ['target_date', 'TEXT'],
+  ];
+  for (const [col, type] of newColumns) {
+    try { db.exec(`ALTER TABLE epics ADD COLUMN ${col} ${type}`); } catch { /* already exists */ }
+  }
+  // 기존 'open' status → 'active' 정리
+  db.exec(`UPDATE epics SET status = 'active' WHERE status = 'open'`);
 }
 
 function seedOssDefaults(db: DatabaseSync): void {

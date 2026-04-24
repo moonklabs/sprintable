@@ -12,9 +12,9 @@ export class SqliteEpicRepository implements IEpicRepository {
     const id = randomUUID();
     const now = new Date().toISOString();
     this.db.prepare(`
-      INSERT INTO epics (id, org_id, project_id, title, status, priority, description, created_at, updated_at)
-      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
-    `).run(id, input.org_id, input.project_id, input.title.trim(), input.status ?? 'open', input.priority ?? 'medium', input.description ?? null, now, now);
+      INSERT INTO epics (id, org_id, project_id, title, status, priority, description, objective, success_criteria, target_sp, target_date, created_at, updated_at)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    `).run(id, input.org_id, input.project_id, input.title.trim(), input.status ?? 'active', input.priority ?? 'medium', input.description ?? null, input.objective ?? null, input.success_criteria ?? null, input.target_sp ?? null, input.target_date ?? null, now, now);
     return this.getById(id);
   }
 
@@ -45,7 +45,7 @@ export class SqliteEpicRepository implements IEpicRepository {
   }
 
   async update(id: string, input: UpdateEpicInput): Promise<Epic> {
-    const ALLOWED: (keyof UpdateEpicInput)[] = ['title', 'status', 'priority', 'description'];
+    const ALLOWED: (keyof UpdateEpicInput)[] = ['title', 'status', 'priority', 'description', 'objective', 'success_criteria', 'target_sp', 'target_date'];
     const sets: string[] = [];
     const params: SqlParam[] = [];
     for (const key of ALLOWED) {
