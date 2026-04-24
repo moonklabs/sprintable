@@ -467,8 +467,8 @@
         "api_token": "API 토큰"
       }
     },
-    "projectUpdated": "프로젝트가 업데이트됐인.",
-    "projectUpdateFailed": "프로젝트 업데이트에 실패했인."
+    "projectUpdated": "프로젝트가 업데이트되었습니다.",
+    "projectUpdateFailed": "프로젝트 업데이트에 실패했습니다."
   },
   "landing": {
     "navProduct": "개요",
