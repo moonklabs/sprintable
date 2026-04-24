@@ -63,7 +63,7 @@ export async function dispatchMemoAssignmentImmediately(memo: DispatchableMemo) 
     // webhook_configs: project_id 기준 우선
     const { data: projectConfig } = await supabase
       .from('webhook_configs')
-      .select('id, url, secret')
+      .select('id, url, secret, channel')
       .eq('org_id', memo.org_id)
       .eq('member_id', assigneeId)
       .eq('project_id', memo.project_id)
@@ -74,16 +74,18 @@ export async function dispatchMemoAssignmentImmediately(memo: DispatchableMemo) 
     let webhookUrl: string | null = null;
     let webhookSecret: string | null = null;
     let webhookConfigId: string | null = null;
+    let webhookChannel: string | null = null;
 
     if (projectConfig?.url) {
       webhookUrl = projectConfig.url as string;
       webhookSecret = (projectConfig.secret as string | null) ?? null;
       webhookConfigId = projectConfig.id as string;
+      webhookChannel = (projectConfig.channel as string | null) ?? null;
     } else {
       // webhook_configs: org 기본값
       const { data: defaultConfig } = await supabase
         .from('webhook_configs')
-        .select('id, url, secret')
+        .select('id, url, secret, channel')
         .eq('org_id', memo.org_id)
         .eq('member_id', assigneeId)
         .is('project_id', null)
@@ -95,6 +97,7 @@ export async function dispatchMemoAssignmentImmediately(memo: DispatchableMemo) 
         webhookUrl = defaultConfig.url as string;
         webhookSecret = (defaultConfig.secret as string | null) ?? null;
         webhookConfigId = defaultConfig.id as string;
+        webhookChannel = (defaultConfig.channel as string | null) ?? null;
       } else {
         // fallback: team_members.webhook_url (config_id 없음)
         const { data: member } = await supabase
@@ -121,7 +124,7 @@ export async function dispatchMemoAssignmentImmediately(memo: DispatchableMemo) 
     const memoLink = buildAbsoluteMemoLink(memo.id, process.env.NEXT_PUBLIC_APP_URL);
     const description = `${preview}\n\n${memoLink}`;
 
-    const isDiscord = webhookUrl.includes('discord.com') || webhookUrl.includes('discordapp.com');
+    const isDiscord = webhookChannel === 'discord' || (!webhookChannel && (webhookUrl.includes('discord.com') || webhookUrl.includes('discordapp.com')));
     const body = isDiscord
       ? JSON.stringify({ content: `${title}\n${description.substring(0, 500)}` })
       : JSON.stringify({ text: `*${title}*\n${description}` });

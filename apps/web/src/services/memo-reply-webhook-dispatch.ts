@@ -37,6 +37,7 @@ interface WebhookConfigRow {
   id: string;
   url: string;
   secret: string | null;
+  channel: 'discord' | 'slack' | 'google' | 'generic';
 }
 
 type Logger = Pick<Console, 'warn' | 'error'>;
@@ -144,6 +145,7 @@ interface ResolvedWebhook {
   id: string | null;
   url: string;
   secret: string | null;
+  channel: 'discord' | 'slack' | 'google' | 'generic' | null;
 }
 
 async function resolveWebhook(
@@ -153,7 +155,7 @@ async function resolveWebhook(
 ): Promise<ResolvedWebhook | null> {
   const { data: projectConfig } = await supabase
     .from('webhook_configs')
-    .select('id, url, secret')
+    .select('id, url, secret, channel')
     .eq('org_id', memo.org_id)
     .eq('member_id', member.id)
     .eq('project_id', memo.project_id)
@@ -165,7 +167,7 @@ async function resolveWebhook(
 
   const { data: defaultConfig } = await supabase
     .from('webhook_configs')
-    .select('id, url, secret')
+    .select('id, url, secret, channel')
     .eq('org_id', memo.org_id)
     .eq('member_id', member.id)
     .is('project_id', null)
@@ -174,7 +176,7 @@ async function resolveWebhook(
     .maybeSingle();
 
   if (defaultConfig?.url) return defaultConfig as WebhookConfigRow;
-  if (member.webhook_url) return { id: null, url: member.webhook_url, secret: null };
+  if (member.webhook_url) return { id: null, url: member.webhook_url, secret: null, channel: null };
   return null;
 }
 
@@ -186,7 +188,7 @@ async function postWebhook(
   title: string,
   description: string,
 ) {
-  const format = detectWebhookFormat(webhook.url);
+  const format = webhook.channel ?? detectWebhookFormat(webhook.url);
   const body = format === 'discord'
     ? JSON.stringify({
         content: `${title}\n${description.substring(0, 500)}`,
