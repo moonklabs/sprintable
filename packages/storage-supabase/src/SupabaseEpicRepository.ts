@@ -63,7 +63,7 @@ export class SupabaseEpicRepository implements IEpicRepository {
   }
 
   async update(id: string, input: UpdateEpicInput): Promise<Epic> {
-    const ALLOWED: (keyof UpdateEpicInput)[] = ['title', 'status', 'priority', 'description'];
+    const ALLOWED: (keyof UpdateEpicInput)[] = ['title', 'status', 'priority', 'description', 'target_date', 'objective', 'success_criteria', 'target_sp'];
     const patch: Record<string, unknown> = {};
     for (const key of ALLOWED) {
       if (key in input) patch[key] = input[key];
