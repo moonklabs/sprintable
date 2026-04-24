@@ -161,21 +161,18 @@ export class RetroService {
     return this.addItem({ session_id: session.id, category, text, author_id: authorId });
   }
 
-  async vote(itemId: string, _voterId: string): Promise<RetroItem> {
-    const { data: current } = await this.supabase
-      .from('retro_items')
-      .select('vote_count')
-      .eq('id', itemId)
-      .single();
-    const newCount = ((current?.vote_count as number) ?? 0) + 1;
-    const { data, error } = await this.supabase
-      .from('retro_items')
-      .update({ vote_count: newCount })
-      .eq('id', itemId)
-      .select()
-      .single();
-    if (error) throw error;
-    return data as RetroItem;
+  // AC1: retro_votes INSERT 경유, AC2: 중복 투표 시 CONFLICT 에러
+  async vote(itemId: string, voterId: string): Promise<{ voted: boolean }> {
+    const { error } = await this.supabase
+      .from('retro_votes')
+      .insert({ item_id: itemId, voter_id: voterId });
+    if (error) {
+      if (error.code === '23505') {
+        throw Object.assign(new Error('Already voted on this item'), { code: 'CONFLICT' });
+      }
+      throw error;
+    }
+    return { voted: true };
   }
 
   async getActions(sessionId: string): Promise<RetroAction[]> {

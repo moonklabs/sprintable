@@ -132,7 +132,12 @@ export class RetroSessionService {
     const { error } = await this.supabase
       .from('retro_votes')
       .insert({ item_id: itemId, voter_id: voterId });
-    if (error) throw error;
+    if (error) {
+      if (error.code === '23505') {
+        throw Object.assign(new Error('Already voted on this item'), { code: 'CONFLICT' });
+      }
+      throw error;
+    }
     return { voted: true };
   }
 
