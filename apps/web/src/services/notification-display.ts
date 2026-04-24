@@ -10,6 +10,9 @@ export const NOTIFICATION_TYPE_ICONS: Record<string, string> = {
   system: '🔧',
   memo_reply: '💬',
   memo_mention: '@',
+  task_assigned: '📋',
+  task_completed: '✅',
+  sprint_closed: '🏁',
 };
 
 export const INBOX_FILTER_TYPES = ['', ...NOTIFICATION_TYPES] as const;
@@ -37,6 +40,12 @@ export function getInboxNotificationLabel(
       return t('filter_memo_reply');
     case 'memo_mention':
       return t('filter_memo_mention');
+    case 'task_assigned':
+      return t('filter_task_assigned');
+    case 'task_completed':
+      return t('filter_task_completed');
+    case 'sprint_closed':
+      return t('filter_sprint_closed');
     default:
       return type;
   }

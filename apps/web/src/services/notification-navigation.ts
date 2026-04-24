@@ -75,6 +75,14 @@ export async function attachNotificationHrefs<T extends NotificationReference>(
       return { ...notification, href: buildMemoHref(referenceId) };
     }
 
+    if (notification.reference_type === 'task') {
+      return { ...notification, href: '/boards' };
+    }
+
+    if (notification.reference_type === 'sprint') {
+      return { ...notification, href: '/sprints' };
+    }
+
     if (notification.reference_type === 'doc') {
       const slug = docSlugMap.get(referenceId);
       return { ...notification, href: slug ? buildDocHref(slug) : '/docs' };
