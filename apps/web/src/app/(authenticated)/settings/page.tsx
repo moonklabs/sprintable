@@ -206,14 +206,14 @@ export default function SettingsPage() {
       body: JSON.stringify({ channel: 'in_app', event_type: eventType, enabled: newEnabled }),
     });
     setSettings((prev) => {
-      const existing = prev.find((s) => s.event_type === eventType && s.channel === 'web');
+      const existing = prev.find((s) => s.event_type === eventType && s.channel === 'in_app');
       if (existing) return prev.map((s) => (s.id === existing.id ? { ...s, enabled: newEnabled } : s));
       return [...prev, { id: `temp-${eventType}`, channel: 'in_app', event_type: eventType, enabled: newEnabled }];
     });
   };
 
   const getEnabled = (eventType: string) => {
-    const setting = settings.find((s) => s.event_type === eventType && s.channel === 'web');
+    const setting = settings.find((s) => s.event_type === eventType && s.channel === 'in_app');
     return setting?.enabled ?? true;
   };
 
