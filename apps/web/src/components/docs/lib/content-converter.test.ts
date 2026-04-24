@@ -94,6 +94,23 @@ describe('markdownToHtml', () => {
     expect(result).toContain('data-doc-id="abc"');
     expect(result).not.toContain('&lt;div');
   });
+
+  it('neutralizes XSS in heading text (E-MINOR-BUGS regression guard)', () => {
+    const result = markdownToHtml('# <script>alert("xss")</script>Title');
+    expect(result).not.toContain('<script>');
+    expect(result).toContain('&lt;script>');
+  });
+
+  it('neutralizes XSS in inline content', () => {
+    const result = markdownToHtml('Hello <img src=x onerror=alert(1)> world');
+    expect(result).not.toContain('<img src=x');
+    expect(result).toContain('&lt;img');
+  });
+
+  it('neutralizes javascript: href in links', () => {
+    const result = markdownToHtml('[click](javascript:alert(1))');
+    expect(result).not.toContain('javascript:alert');
+  });
 });
 
 describe('htmlToMarkdown', () => {
