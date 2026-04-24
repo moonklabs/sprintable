@@ -879,6 +879,7 @@
     "filterAll": "All",
     "filter_story": "Story",
     "filter_memo": "Memo",
+    "filter_task": "Task",
     "filter_reward": "Reward",
     "filter_info": "Info",
     "filter_warning": "Warning",
