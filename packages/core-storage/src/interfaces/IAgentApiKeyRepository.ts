@@ -7,6 +7,7 @@ export interface AgentApiKey {
   revoked_at: string | null;
   last_used_at: string | null;
   expires_at: string | null;
+  scope: string[] | null;
 }
 
 export interface CreateAgentApiKeyInput {
@@ -14,6 +15,7 @@ export interface CreateAgentApiKeyInput {
   keyPrefix: string;
   keyHash: string;
   expiresAt?: string | null;
+  scope?: string[];
 }
 
 export interface IAgentApiKeyRepository {

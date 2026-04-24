@@ -60,6 +60,7 @@ export function apiUpgradeRequired(message: string, meterType: string, status = 
 export const ApiErrors = {
   unauthorized: () => apiError('UNAUTHORIZED', 'Unauthorized', 401),
   forbidden: (msg = 'Forbidden') => apiError('FORBIDDEN', msg, 403),
+  insufficientScope: (required: string) => apiError('FORBIDDEN', 'Insufficient scope', 403, { error: 'insufficient_scope', required }),
   notFound: (msg = 'Not found') => apiError('NOT_FOUND', msg, 404),
   badRequest: (msg: string) => apiError('BAD_REQUEST', msg, 400),
   validationFailed: (issues: Array<{ path: string; message: string }>) =>

@@ -15,6 +15,9 @@ import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { useToast } from '@/components/ui/toast';
 
+const SCOPES = ['read', 'write', 'admin'] as const;
+type Scope = typeof SCOPES[number];
+
 interface ApiKey {
   id: string;
   key_prefix: string;
@@ -22,6 +25,7 @@ interface ApiKey {
   last_used_at: string | null;
   revoked_at: string | null;
   expires_at: string | null;
+  scope: string[] | null;
 }
 
 interface AgentApiKeyManagerProps {
@@ -34,6 +38,7 @@ export function AgentApiKeyManager({ agentId, agentName }: AgentApiKeyManagerPro
   const [loading, setLoading] = useState(false);
   const [newKeyDialog, setNewKeyDialog] = useState(false);
   const [generatedKey, setGeneratedKey] = useState<string | null>(null);
+  const [selectedScopes, setSelectedScopes] = useState<Scope[]>(['read', 'write']);
   const { addToast } = useToast();
 
   // Load API keys on mount
@@ -64,6 +69,8 @@ export function AgentApiKeyManager({ agentId, agentName }: AgentApiKeyManagerPro
     try {
       const response = await fetch(`/api/agents/${agentId}/api-key`, {
         method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ scope: selectedScopes }),
       });
       if (!response.ok) throw new Error('Failed to generate API key');
       const result = await response.json();
@@ -138,6 +145,26 @@ export function AgentApiKeyManager({ agentId, agentName }: AgentApiKeyManagerPro
             Generate API Key
           </Button>
         </div>
+        <div className="flex gap-4 mt-3">
+          <p className="text-xs text-muted-foreground self-center">Scope:</p>
+          {SCOPES.map((scope) => (
+            <label key={scope} className="flex items-center gap-1.5 text-xs cursor-pointer">
+              <input
+                type="checkbox"
+                checked={selectedScopes.includes(scope)}
+                onChange={(e) => {
+                  if (e.target.checked) {
+                    setSelectedScopes((prev) => [...prev, scope]);
+                  } else {
+                    setSelectedScopes((prev) => prev.filter((s) => s !== scope));
+                  }
+                }}
+                className="h-3 w-3"
+              />
+              <span className={scope === 'admin' ? 'text-orange-500 font-medium' : ''}>{scope}</span>
+            </label>
+          ))}
+        </div>
       </div>
 
       {apiKeys.length === 0 ? (
@@ -150,7 +177,12 @@ export function AgentApiKeyManager({ agentId, agentName }: AgentApiKeyManagerPro
               className="flex items-center justify-between p-3 border rounded-md"
             >
               <div>
-                <p className="font-mono text-sm">{key.key_prefix}...</p>
+                <div className="flex items-center gap-2">
+                  <p className="font-mono text-sm">{key.key_prefix}...</p>
+                  {(key.scope ?? ['read', 'write']).map((s) => (
+                    <span key={s} className={`text-xs px-1.5 py-0.5 rounded font-medium ${s === 'admin' ? 'bg-orange-100 text-orange-700' : 'bg-muted text-muted-foreground'}`}>{s}</span>
+                  ))}
+                </div>
                 <p className="text-xs text-muted-foreground">
                   Created: {new Date(key.created_at).toLocaleDateString()}
                   {key.last_used_at &&
