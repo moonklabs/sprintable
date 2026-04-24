@@ -124,8 +124,11 @@ export function markdownToHtml(md: string): string {
   // Images (before links — both use []() syntax)
   html = html.replace(/!\[([^\]]*)\]\(([^)]+)\)/g, '<img src="$2" alt="$1">');
 
-  // Links
-  html = html.replace(/\[([^\]]+)\]\(([^)]+)\)/g, '<a href="$2">$1</a>');
+  // Links — sanitize javascript: hrefs
+  html = html.replace(/\[([^\]]+)\]\(([^)]+)\)/g, (_m, text, href) => {
+    const safeHref = /^javascript:/i.test(href.trim()) ? '#' : href;
+    return `<a href="${safeHref}">${text}</a>`;
+  });
 
   // GFM tables
   html = html.replace(/(?:^\|.*\|\s*$\n?){2,}/gm, (tableBlock) => {

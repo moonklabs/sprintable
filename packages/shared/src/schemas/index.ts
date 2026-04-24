@@ -130,17 +130,19 @@ export const updateSprintSchema = z.object({
 export { createStorySchema, updateStorySchema, bulkUpdateStoriesSchema as bulkUpdateStorySchema, VALID_STORY_TRANSITIONS, STORY_STATUSES, STORY_PRIORITIES, STORY_SP_VALUES } from './stories';
 
 // ─── Task ────────────────────────────────────
+export const TASK_STATUSES = ['todo', 'in-progress', 'done'] as const;
+
 export const createTaskSchema = z.object({
   story_id: z.string().min(1),
   title: z.string().min(1),
   assignee_id: z.string().optional().nullable(),
-  status: z.string().optional(),
+  status: z.enum(TASK_STATUSES).optional(),
   story_points: z.number().optional().nullable(),
 });
 
 export const updateTaskSchema = z.object({
   title: z.string().min(1).optional(),
-  status: z.string().optional(),
+  status: z.enum(TASK_STATUSES).optional(),
   assignee_id: z.string().optional().nullable(),
   story_points: z.number().optional().nullable(),
 });
