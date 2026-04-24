@@ -40,7 +40,10 @@ export async function POST(request: Request) {
       .select('id, name, slug')
       .single();
 
-    if (orgError) throw orgError;
+    if (orgError) {
+      if (orgError.code === '23505') return apiError('CONFLICT', 'Slug is already taken', 409);
+      throw orgError;
+    }
 
     // 생성자를 org_members에 owner로 등록
     const { error: memberError } = await admin
