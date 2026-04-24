@@ -6,12 +6,14 @@ export interface AgentApiKey {
   created_at: string;
   revoked_at: string | null;
   last_used_at: string | null;
+  expires_at: string | null;
 }
 
 export interface CreateAgentApiKeyInput {
   teamMemberId: string;
   keyPrefix: string;
   keyHash: string;
+  expiresAt?: string | null;
 }
 
 export interface IAgentApiKeyRepository {
