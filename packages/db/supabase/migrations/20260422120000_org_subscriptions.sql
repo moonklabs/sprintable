@@ -1,7 +1,7 @@
 -- org_subscriptions: tracks Polar billing state per org
 CREATE TABLE IF NOT EXISTS org_subscriptions (
   id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-  org_id UUID NOT NULL REFERENCES orgs(id) ON DELETE CASCADE,
+  org_id UUID NOT NULL REFERENCES organizations(id) ON DELETE CASCADE,
   polar_customer_id TEXT NOT NULL,
   polar_subscription_id TEXT,
   tier TEXT NOT NULL DEFAULT 'free',

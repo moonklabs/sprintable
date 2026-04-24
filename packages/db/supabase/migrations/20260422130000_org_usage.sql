@@ -1,7 +1,7 @@
 -- org_usage: monthly resource counters per org
 CREATE TABLE IF NOT EXISTS org_usage (
   id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-  org_id UUID NOT NULL REFERENCES orgs(id) ON DELETE CASCADE,
+  org_id UUID NOT NULL REFERENCES organizations(id) ON DELETE CASCADE,
   period TEXT NOT NULL,  -- 'YYYY-MM' for monthly resources
   stories INT NOT NULL DEFAULT 0,
   memos INT NOT NULL DEFAULT 0,
