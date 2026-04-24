@@ -13,9 +13,9 @@ export class SqliteStoryRepository implements IStoryRepository {
     const id = randomUUID();
     const now = new Date().toISOString();
     this.db.prepare(`
-      INSERT INTO stories (id, org_id, project_id, epic_id, sprint_id, assignee_id, title, status, priority, story_points, description, meeting_id, created_at, updated_at)
-      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-    `).run(id, input.org_id, input.project_id, input.epic_id ?? null, input.sprint_id ?? null, input.assignee_id ?? null, input.title.trim(), input.status ?? 'backlog', input.priority ?? 'medium', input.story_points ?? null, input.description ?? null, input.meeting_id ?? null, now, now);
+      INSERT INTO stories (id, org_id, project_id, epic_id, sprint_id, assignee_id, title, status, priority, story_points, description, acceptance_criteria, meeting_id, created_at, updated_at)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    `).run(id, input.org_id, input.project_id, input.epic_id ?? null, input.sprint_id ?? null, input.assignee_id ?? null, input.title.trim(), input.status ?? 'backlog', input.priority ?? 'medium', input.story_points ?? null, input.description ?? null, input.acceptance_criteria ?? null, input.meeting_id ?? null, now, now);
     return this.getById(id);
   }
 
@@ -56,7 +56,7 @@ export class SqliteStoryRepository implements IStoryRepository {
   }
 
   async update(id: string, input: UpdateStoryInput): Promise<Story> {
-    const ALLOWED: (keyof UpdateStoryInput)[] = ['title', 'status', 'priority', 'story_points', 'description', 'epic_id', 'sprint_id', 'assignee_id'];
+    const ALLOWED: (keyof UpdateStoryInput)[] = ['title', 'status', 'priority', 'story_points', 'description', 'acceptance_criteria', 'epic_id', 'sprint_id', 'assignee_id'];
     const sets: string[] = [];
     const params: SqlParam[] = [];
     for (const key of ALLOWED) {
