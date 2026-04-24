@@ -78,6 +78,10 @@ export default function SettingsPage() {
   const [newProjectDescription, setNewProjectDescription] = useState('');
   const [creatingProject, setCreatingProject] = useState(false);
   const [projectActionMessage, setProjectActionMessage] = useState<{ type: 'success' | 'error'; text: string } | null>(null);
+  const [editingProjectId, setEditingProjectId] = useState<string | null>(null);
+  const [editProjectName, setEditProjectName] = useState('');
+  const [editProjectDescription, setEditProjectDescription] = useState('');
+  const [savingProject, setSavingProject] = useState(false);
   const [inviteEmail, setInviteEmail] = useState('');
   const [inviteRole, setInviteRole] = useState<'member' | 'admin'>('member');
   const [inviting, setInviting] = useState(false);
@@ -232,6 +236,27 @@ export default function SettingsPage() {
 
     return Array.from(deduped.values()).sort((a, b) => a.name.localeCompare(b.name));
   }, [orgMembers, projectMembers]);
+
+  const handleUpdateProject = async () => {
+    if (!editingProjectId || !editProjectName.trim()) return;
+    setSavingProject(true);
+    const res = await fetch(`/api/projects/${editingProjectId}`, {
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ name: editProjectName.trim(), description: editProjectDescription.trim() || null }),
+    });
+    if (res.ok) {
+      const json = await res.json();
+      setProjects((prev) => prev.map((p) => p.id === editingProjectId ? { ...p, name: json.data.name, description: json.data.description } : p));
+      setEditingProjectId(null);
+      setProjectActionMessage({ type: 'success', text: t('projectUpdated') });
+      router.refresh();
+    } else {
+      const json = await res.json().catch(() => null);
+      setProjectActionMessage({ type: 'error', text: json?.error?.message ?? t('projectUpdateFailed') });
+    }
+    setSavingProject(false);
+  };
 
   const handleCreateProject = async () => {
     if (!newProjectName.trim()) return;
@@ -447,14 +472,50 @@ export default function SettingsPage() {
           <div className="space-y-2">
             {projects.length > 0 ? (
               projects.map((project) => (
-                <div key={project.id} className="flex items-start justify-between gap-3 rounded-md border border-border bg-muted/30 px-4 py-3">
-                  <div className="min-w-0">
-                    <div className="font-medium text-foreground">{project.name}</div>
-                    {project.description ? (
-                      <div className="mt-1 text-sm text-muted-foreground">{project.description}</div>
-                    ) : null}
-                  </div>
-                  {project.id === currentProjectId ? <Badge variant="info">{t('currentProjectBadge')}</Badge> : null}
+                <div key={project.id} className="rounded-md border border-border bg-muted/30 px-4 py-3">
+                  {editingProjectId === project.id ? (
+                    <div className="space-y-2">
+                      <OperatorInput
+                        value={editProjectName}
+                        onChange={(e) => setEditProjectName(e.target.value)}
+                        placeholder={t('projectNamePlaceholder')}
+                      />
+                      <OperatorInput
+                        value={editProjectDescription}
+                        onChange={(e) => setEditProjectDescription(e.target.value)}
+                        placeholder={t('projectDescriptionPlaceholder')}
+                      />
+                      <div className="flex gap-2">
+                        <Button variant="hero" size="sm" onClick={handleUpdateProject} disabled={!editProjectName.trim() || savingProject}>
+                          {savingProject ? '...' : tc('save')}
+                        </Button>
+                        <Button variant="ghost" size="sm" onClick={() => setEditingProjectId(null)}>
+                          {tc('cancel')}
+                        </Button>
+                      </div>
+                    </div>
+                  ) : (
+                    <div className="flex items-start justify-between gap-3">
+                      <div className="min-w-0">
+                        <div className="font-medium text-foreground">{project.name}</div>
+                        {project.description ? (
+                          <div className="mt-1 text-sm text-muted-foreground">{project.description}</div>
+                        ) : null}
+                      </div>
+                      <div className="flex shrink-0 items-center gap-2">
+                        {project.id === currentProjectId ? <Badge variant="info">{t('currentProjectBadge')}</Badge> : null}
+                        {isAdmin ? (
+                          <Button variant="ghost" size="sm" onClick={() => {
+                            setEditingProjectId(project.id);
+                            setEditProjectName(project.name);
+                            setEditProjectDescription(project.description ?? '');
+                          }}>
+                            {tc('edit')}
+                          </Button>
+                        ) : null}
+                      </div>
+                    </div>
+                  )}
                 </div>
               ))
             ) : (

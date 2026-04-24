@@ -196,7 +196,7 @@
     "author": "Author",
     "assigneeLabel": "Assignee",
     "replyCount": "Reply count",
-    "repliesCountBadge": "{count, plural, one {1 reply} other {# replies}}",
+    "repliesCountBadge": "{count} replies",
     "latestReply": "Latest reply",
     "timeline": "Timeline",
     "noTimelineEvents": "No timeline events yet.",
@@ -223,7 +223,6 @@
     "createAndLinkDoc": "Create and link doc",
     "createDocFailed": "Failed to create doc.",
     "linkDocFailed": "Failed to link doc.",
-    "repliesCountBadge": "{count} replies",
     "sidebarTitle": "Memo Sidebar",
     "sidebarSubtitle": "Open memos, reply, and create new ones from anywhere",
     "closeSidebar": "Close memo sidebar",
@@ -467,7 +466,9 @@
         "api_key": "API key",
         "api_token": "API token"
       }
-    }
+    },
+    "projectUpdated": "Project updated.",
+    "projectUpdateFailed": "Failed to update project."
   },
   "landing": {
     "navProduct": "Overview",

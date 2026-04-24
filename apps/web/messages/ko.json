@@ -196,7 +196,7 @@
     "author": "작성자",
     "assigneeLabel": "담당자",
     "replyCount": "답글 수",
-    "repliesCountBadge": "{count, plural, other {답글 #개}}",
+    "repliesCountBadge": "{count}개 답글",
     "latestReply": "최근 답글",
     "timeline": "타임라인",
     "noTimelineEvents": "타임라인 이벤트가 아직 없습니다.",
@@ -223,7 +223,6 @@
     "createAndLinkDoc": "문서 생성 후 연결",
     "createDocFailed": "문서 생성에 실패했습니다.",
     "linkDocFailed": "문서 연결에 실패했습니다.",
-    "repliesCountBadge": "{count}개 답글",
     "sidebarTitle": "메모 사이드바",
     "sidebarSubtitle": "모든 페이지에서 메모를 바로 확인하고 답글할 수 있습니다",
     "closeSidebar": "메모 사이드바 닫기",
@@ -467,7 +466,9 @@
         "api_key": "API 키",
         "api_token": "API 토큰"
       }
-    }
+    },
+    "projectUpdated": "프로젝트가 업데이트되었습니다.",
+    "projectUpdateFailed": "프로젝트 업데이트에 실패했습니다."
   },
   "landing": {
     "navProduct": "개요",
