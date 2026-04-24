@@ -674,18 +674,6 @@ export class MemoEventDispatcher {
         format,
         body: {
           content: `${title}\n${description.substring(0, 500)}`,
-          embeds: [
-            {
-              title,
-              description,
-              color: 0x3B82F6,
-              fields: [
-                { name: 'Agent', value: truncateText(agent.name, 1024, 'Unknown agent'), inline: true },
-                { name: 'Type', value: truncateText(memo.memo_type, 1024, 'memo'), inline: true },
-              ],
-              timestamp: memo.created_at,
-            },
-          ],
         },
       };
     }

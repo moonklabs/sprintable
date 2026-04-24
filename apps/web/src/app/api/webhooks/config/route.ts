@@ -3,6 +3,7 @@ import { handleApiError } from '@/lib/api-error';
 import { apiSuccess, apiError, ApiErrors } from '@/lib/api-response';
 import { isOssMode } from '@/lib/storage/factory';
 import { getMyTeamMember } from '@/lib/auth-helpers';
+import { requireOrgAdmin } from '@/lib/admin-check';
 
 /** GET — 내 웹훅 설정 목록 */
 export async function GET() {
@@ -77,6 +78,34 @@ export async function PUT(request: Request) {
       if (error) throw error;
     }
 
+    return apiSuccess({ ok: true });
+  } catch (err: unknown) { return handleApiError(err); }
+}
+
+/** DELETE — 웹훅 설정 삭제 (admin만) */
+export async function DELETE(request: Request) {
+  if (isOssMode()) return apiError('NOT_AVAILABLE', 'Not available in OSS mode.', 503);
+  try {
+    const supabase = await createSupabaseServerClient();
+    const { data: { user } } = await supabase.auth.getUser();
+    if (!user) return ApiErrors.unauthorized();
+
+    const me = await getMyTeamMember(supabase, user);
+    if (!me) return ApiErrors.forbidden('Team member not found');
+
+    await requireOrgAdmin(supabase, me.org_id);
+
+    const { searchParams } = new URL(request.url);
+    const id = searchParams.get('id');
+    if (!id) return ApiErrors.badRequest('id required');
+
+    const { error } = await supabase
+      .from('webhook_configs')
+      .delete()
+      .eq('id', id)
+      .eq('org_id', me.org_id);
+
+    if (error) throw error;
     return apiSuccess({ ok: true });
   } catch (err: unknown) { return handleApiError(err); }
 }

@@ -36,7 +36,7 @@ export async function dispatchMemoAssignmentImmediately(memo: DispatchableMemo) 
 
       const isDiscord = member.webhook_url.includes('discord.com') || member.webhook_url.includes('discordapp.com');
       const body = isDiscord
-        ? JSON.stringify({ content: `${title}\n${description.substring(0, 500)}`, embeds: [{ title, description, color: 0x3B82F6 }] })
+        ? JSON.stringify({ content: `${title}\n${description.substring(0, 500)}` })
         : JSON.stringify({ text: `*${title}*\n${description}` });
 
       await fetch(member.webhook_url, {
@@ -119,7 +119,7 @@ export async function dispatchMemoAssignmentImmediately(memo: DispatchableMemo) 
 
     const isDiscord = webhookUrl.includes('discord.com') || webhookUrl.includes('discordapp.com');
     const body = isDiscord
-      ? JSON.stringify({ content: `${title}\n${description.substring(0, 500)}`, embeds: [{ title, description, color: 0x3B82F6 }] })
+      ? JSON.stringify({ content: `${title}\n${description.substring(0, 500)}` })
       : JSON.stringify({ text: `*${title}*\n${description}` });
 
     const headers: Record<string, string> = {
