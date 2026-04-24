@@ -74,6 +74,22 @@ export class SprintService {
   async activate(id: string) {
     const sprint = await this.getById(id);
     if (sprint.status !== 'planning') throw new Error(`Cannot activate sprint with status: ${sprint.status}`);
+
+    // 프로젝트당 active 스프린트 1개 강제 (DB UNIQUE INDEX와 이중 검증)
+    if (this.supabase) {
+      const { data: active } = await this.supabase
+        .from('sprints')
+        .select('id, title')
+        .eq('project_id', sprint.project_id as string)
+        .eq('status', 'active')
+        .is('deleted_at', null)
+        .limit(1)
+        .maybeSingle();
+      if (active) {
+        throw new ForbiddenError(`Active sprint already exists: "${active.title}". Close it before activating another.`);
+      }
+    }
+
     return this.repo.update(id, { status: 'active' });
   }
 
@@ -151,11 +167,46 @@ export class SprintService {
     if (sprint.status !== 'active') throw new Error(`Cannot close sprint with status: ${sprint.status}`);
 
     let velocity = 0;
+    let rolledOver = 0;
+
     if (this.supabase) {
+      // velocity 계산
       const { data: doneStories } = await this.supabase.from('stories').select('story_points').eq('sprint_id', id).eq('status', 'done');
       velocity = (doneStories ?? []).reduce((sum, s) => sum + (s.story_points ?? 0), 0);
+
+      // rollover: 미완료 스토리(status != 'done') 처리
+      const { data: incomplete } = await this.supabase
+        .from('stories')
+        .select('id')
+        .eq('sprint_id', id)
+        .neq('status', 'done');
+
+      if (incomplete && incomplete.length > 0) {
+        const incompleteIds = incomplete.map((s) => s.id as string);
+
+        // 다음 active 또는 planning 스프린트 탐색 (같은 프로젝트, 시작일 오름차순)
+        const { data: nextSprint } = await this.supabase
+          .from('sprints')
+          .select('id')
+          .eq('project_id', sprint.project_id as string)
+          .in('status', ['active', 'planning'])
+          .neq('id', id)
+          .is('deleted_at', null)
+          .order('start_date', { ascending: true })
+          .limit(1)
+          .maybeSingle();
+
+        const nextSprintId = nextSprint?.id ?? null;
+        await this.supabase
+          .from('stories')
+          .update({ sprint_id: nextSprintId })
+          .in('id', incompleteIds);
+
+        rolledOver = incompleteIds.length;
+      }
     }
 
-    return this.repo.update(id, { status: 'closed', velocity } as UpdateSprintInput);
+    const closed = await this.repo.update(id, { status: 'closed', velocity } as UpdateSprintInput);
+    return { ...closed, rolled_over: rolledOver };
   }
 }
