@@ -395,6 +395,8 @@ function EpicRow({ epic, isSelected, onClick }: EpicRowProps) {
   const stories = epic.stories ?? [];
   const { done, total } = calcStoryProgress(stories);
   const pct = total > 0 ? Math.round((done / total) * 100) : 0;
+  const spProgress = calcSpProgress(stories);
+  const spExceeded = typeof epic.target_sp === 'number' && epic.target_sp > 0 && spProgress.total > epic.target_sp;
 
   const statusLabel: Record<EpicStatus, string> = {
     draft: t('statusDraft'),
@@ -434,6 +436,11 @@ function EpicRow({ epic, isSelected, onClick }: EpicRowProps) {
             <span>{t('targetDate')}: {formatDate(epic.target_date)}</span>
           ) : null}
           <span>{done}/{total} {t('stories')}</span>
+          {spExceeded ? (
+            <span className="rounded-full bg-destructive/10 px-1.5 py-0.5 text-[10px] font-semibold text-destructive">
+              {t('spExceeded')}
+            </span>
+          ) : null}
         </div>
 
         {total > 0 ? (
@@ -464,6 +471,7 @@ function EpicDetailPanel({ epic, onUpdate, onClose }: EpicDetailPanelProps) {
   const stories = epic.stories ?? [];
   const storyProgress = calcStoryProgress(stories);
   const spProgress = calcSpProgress(stories);
+  const spExceeded = typeof epic.target_sp === 'number' && epic.target_sp > 0 && spProgress.total > epic.target_sp;
 
   const statusLabel: Record<EpicStatus, string> = {
     draft: t('statusDraft'),
@@ -536,7 +544,12 @@ function EpicDetailPanel({ epic, onUpdate, onClose }: EpicDetailPanelProps) {
               </div>
               <div className="rounded-xl bg-[color:var(--operator-surface-soft,hsl(var(--muted)))] px-3 py-2.5">
                 <p className="text-[10px] font-semibold uppercase tracking-[0.18em] text-[color:var(--operator-muted)]">{t('targetSp')}</p>
-                <p className="mt-1 text-sm font-medium text-[color:var(--operator-foreground)]">{epic.target_sp !== undefined ? epic.target_sp : '—'}</p>
+                <div className="mt-1 flex items-center gap-1.5">
+                  <p className="text-sm font-medium text-[color:var(--operator-foreground)]">{epic.target_sp !== undefined ? epic.target_sp : '—'}</p>
+                  {spExceeded ? (
+                    <span className="rounded-full bg-destructive/10 px-1.5 py-0.5 text-[10px] font-semibold text-destructive">{t('spExceeded')}</span>
+                  ) : null}
+                </div>
               </div>
             </div>
 
@@ -554,7 +567,14 @@ function EpicDetailPanel({ epic, onUpdate, onClose }: EpicDetailPanelProps) {
               <ProgressBar done={storyProgress.done} total={storyProgress.total} label={`${t('doneStories')} / ${t('totalStories')}`} />
               {spProgress.total > 0 ? (
                 <>
-                  <p className="text-[10px] font-semibold uppercase tracking-[0.18em] text-[color:var(--operator-muted)]">{t('spProgress')}</p>
+                  <div className="flex items-center gap-2">
+                    <p className="text-[10px] font-semibold uppercase tracking-[0.18em] text-[color:var(--operator-muted)]">{t('spProgress')}</p>
+                    {spExceeded ? (
+                      <span className="rounded-full bg-destructive/10 px-1.5 py-0.5 text-[10px] font-semibold text-destructive">
+                        {t('spExceededDetail', { total: spProgress.total, target: epic.target_sp ?? 0 })}
+                      </span>
+                    ) : null}
+                  </div>
                   <ProgressBar done={spProgress.done} total={spProgress.total} label={`${t('doneSp')} / ${t('totalSp')}`} />
                 </>
               ) : null}

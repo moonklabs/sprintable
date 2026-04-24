@@ -1797,6 +1797,8 @@
     "doneStories": "완료 스토리",
     "totalStories": "전체 스토리",
     "backToList": "목록으로",
-    "notAssigned": "미지정"
+    "notAssigned": "미지정",
+    "spExceeded": "SP 초과",
+    "spExceededDetail": "{total}SP / 목표 {target}SP 초과"
   }
 }
