@@ -68,14 +68,13 @@ export async function GET(request: Request) {
     let query = supabase
       .from('projects')
       .select('id, name, description, created_at, deleted_at')
-      .eq('org_id', orgAccess.orgId)
-      .order('created_at', { ascending: true });
+      .eq('org_id', orgAccess.orgId);
 
     if (!includeDeleted) {
       query = query.is('deleted_at', null);
     }
 
-    const { data, error } = await query;
+    const { data, error } = await query.order('created_at', { ascending: true });
 
     if (error) throw error;
     return apiSuccess(data ?? []);

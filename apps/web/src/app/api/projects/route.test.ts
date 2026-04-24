@@ -26,13 +26,14 @@ interface ProjectRow {
   name: string;
   description?: string | null;
   created_at?: string;
+  deleted_at?: string | null;
 }
 
 function createSupabaseStub({
   user = { id: 'user-1', email: 'owner@sprintable.app', user_metadata: { name: 'Owner' } },
   orgMemberships = [{ org_id: 'org-1', role: 'admin' }],
   projects = [
-    { id: 'project-1', org_id: 'org-1', name: 'Alpha', description: 'First project', created_at: '2026-04-13T00:00:00.000Z' },
+    { id: 'project-1', org_id: 'org-1', name: 'Alpha', description: 'First project', created_at: '2026-04-13T00:00:00.000Z', deleted_at: null },
   ],
   createdProject,
   createProjectError = null,
@@ -70,8 +71,9 @@ function createSupabaseStub({
       if (column === 'org_id') orgIdFilter = value;
       return projectsListQuery;
     }),
+    is: vi.fn(() => projectsListQuery),
     order: vi.fn(() => Promise.resolve({
-      data: projects.filter((project) => (orgIdFilter ? project.org_id === orgIdFilter : true)),
+      data: projects.filter((project) => (orgIdFilter ? project.org_id === orgIdFilter : true) && project.deleted_at == null),
       error: null,
     })),
   };
