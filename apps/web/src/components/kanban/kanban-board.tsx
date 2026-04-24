@@ -6,6 +6,7 @@ import { useRouter, useSearchParams } from 'next/navigation';
 import { useTranslations } from 'next-intl';
 import { DndContext, DragEndEvent, PointerSensor, useSensor, useSensors, DragOverlay } from '@dnd-kit/core';
 import { Button } from '@/components/ui/button';
+import { Input } from '@/components/ui/input';
 import { KanbanColumn } from './kanban-column';
 import { KanbanFilters } from './kanban-filters';
 import { KanbanListView } from './kanban-list-view';
@@ -37,6 +38,28 @@ interface KanbanBoardProps {
   projectId?: string;
 }
 
+// WIP limit localStorage 키
+function wipLimitKey(projectId: string | undefined, status: string): string {
+  return `wip_limit_${projectId ?? 'default'}_${status}`;
+}
+
+function loadWipLimit(projectId: string | undefined, status: string): number | null {
+  if (typeof window === 'undefined') return null;
+  const raw = localStorage.getItem(wipLimitKey(projectId, status));
+  if (raw === null) return null;
+  const n = parseInt(raw, 10);
+  return isNaN(n) ? null : n;
+}
+
+function saveWipLimit(projectId: string | undefined, status: string, limit: number | null): void {
+  if (typeof window === 'undefined') return;
+  if (limit === null) {
+    localStorage.removeItem(wipLimitKey(projectId, status));
+  } else {
+    localStorage.setItem(wipLimitKey(projectId, status), String(limit));
+  }
+}
+
 export function KanbanBoard({ projectId }: KanbanBoardProps) {
   const router = useRouter();
   const searchParams = useSearchParams();
@@ -57,6 +80,30 @@ export function KanbanBoard({ projectId }: KanbanBoardProps) {
   const [selectedSprintId, setSelectedSprintId] = useState(() => searchParams.get('sprint_id') ?? '');
   const [selectedEpicId, setSelectedEpicId] = useState(() => searchParams.get('epic_id') ?? '');
   const [selectedAssigneeId, setSelectedAssigneeId] = useState('');
+
+  // AC2: 검색 쿼리
+  const [searchQuery, setSearchQuery] = useState('');
+
+  // AC1/AC5: WIP limit 상태 — 컬럼별 { limit: number|null, editing: boolean, draft: string }
+  const [wipLimits, setWipLimits] = useState<Record<string, { limit: number | null; editing: boolean; draft: string }>>(() => {
+    const initial: Record<string, { limit: number | null; editing: boolean; draft: string }> = {};
+    for (const col of COLUMNS) {
+      initial[col.id] = { limit: null, editing: false, draft: '' };
+    }
+    return initial;
+  });
+
+  // 클라이언트 마운트 후 localStorage에서 WIP limit 로드
+  useEffect(() => {
+    setWipLimits((prev) => {
+      const next = { ...prev };
+      for (const col of COLUMNS) {
+        const stored = loadWipLimit(projectId, col.id);
+        next[col.id] = { limit: stored, editing: false, draft: stored !== null ? String(stored) : '' };
+      }
+      return next;
+    });
+  }, [projectId]);
 
   // Sync epic_id to URL
   useEffect(() => {
@@ -149,9 +196,6 @@ export function KanbanBoard({ projectId }: KanbanBoardProps) {
   }, [searchParams, router]);
 
   // URL에서 스토리 ID 읽어서 자동으로 패널 열기
-  // selectedStory를 deps에서 제외: setSelectedStory(null) 호출 시 effect가 재발화하면
-  // searchParams에 ?story= 가 아직 남아있어 패널이 즉시 재오픈되는 race condition ���생.
-  // selectedStoryRef(항상 최신값)로 비교해 중복 오픈만 방지한다.
   useEffect(() => {
     const storyId = searchParams.get('story');
     if (storyId && stories.length > 0) {
@@ -162,14 +206,29 @@ export function KanbanBoard({ projectId }: KanbanBoardProps) {
     }
   }, [searchParams, stories, handleStoryClick]);
 
+  // AC2: 검색 + 기존 필터 조합
   const filteredStories = stories.filter((s) => {
     if (selectedEpicId && s.epic_id !== selectedEpicId) return false;
     if (selectedAssigneeId && s.assignee_id !== selectedAssigneeId) return false;
+    if (searchQuery) {
+      const q = searchQuery.toLowerCase();
+      const titleMatch = s.title?.toLowerCase().includes(q);
+      const assigneeName = s.assignee_id ? memberMap[s.assignee_id]?.name?.toLowerCase() : '';
+      const assigneeMatch = assigneeName?.includes(q);
+      if (!titleMatch && !assigneeMatch) return false;
+    }
     return true;
   });
 
-  const storiesByColumn = (columnId: string) =>
-    filteredStories.filter((s) => s.status === columnId);
+  // position 기준으로 정렬
+  const storiesByColumn = (columnId: string): KanbanStory[] => {
+    const col = filteredStories.filter((s) => s.status === columnId);
+    return [...col].sort((a, b) => {
+      const pa = a.position ?? 0;
+      const pb = b.position ?? 0;
+      return pa - pb;
+    });
+  };
 
   const handleDragStart = (event: { active: { id: string | number } }) => {
     setActiveId(String(event.active.id));
@@ -187,33 +246,83 @@ export function KanbanBoard({ projectId }: KanbanBoardProps) {
     return null;
   };
 
+  // AC4: 드래그 완료 후 position gap 계산
+  const computeNewPosition = (
+    columnStories: KanbanStory[],
+    storyId: string,
+    overId: string,
+    newStatus: ColumnId,
+  ): number => {
+    // 같은 컬럼 내 재정렬: over.id가 story id인 경우
+    const overStory = columnStories.find((s) => s.id === overId);
+    if (!overStory) {
+      // 빈 컬럼이거나 컬럼 자체에 드롭 — 마지막에 추가
+      const sorted = [...columnStories].sort((a, b) => (a.position ?? 0) - (b.position ?? 0));
+      const last = sorted[sorted.length - 1];
+      return last ? (last.position ?? 0) + 1000 : 1000;
+    }
+
+    const sorted = [...columnStories.filter((s) => s.id !== storyId && s.status === newStatus)]
+      .sort((a, b) => (a.position ?? 0) - (b.position ?? 0));
+
+    const overIdx = sorted.findIndex((s) => s.id === overId);
+    if (overIdx === -1) {
+      const last = sorted[sorted.length - 1];
+      return last ? (last.position ?? 0) + 1000 : 1000;
+    }
+
+    const prev = sorted[overIdx - 1];
+    const next = sorted[overIdx];
+    const prevPos = prev?.position ?? (next.position ?? 0) - 2000;
+    const nextPos = next?.position ?? prevPos + 2000;
+    return Math.round((prevPos + nextPos) / 2);
+  };
+
   const handleDragEnd = async (event: DragEndEvent) => {
     setActiveId(null);
     const { active, over } = event;
     if (!over) return;
 
     const storyId = String(active.id);
-    const newStatus = resolveColumnId(String(over.id));
+    const overId = String(over.id);
+    const newStatus = resolveColumnId(overId);
     if (!newStatus) return;
 
-    // 같은 컬럼이면 무시
     const story = stories.find((s) => s.id === storyId);
-    if (!story || story.status === newStatus) return;
+    if (!story) return;
 
-    // 유효하지 않은 전이 사전 차단 — API 호출 없이 즉시 피드백
-    const validNext = VALID_TRANSITIONS[story.status] ?? [];
-    if (!validNext.includes(newStatus)) {
-      setTransitionError(t('invalidTransition'));
-      setTimeout(() => setTransitionError(null), 4000);
-      return;
+    const isSameColumn = story.status === newStatus;
+
+    // 다른 컬럼으로 이동 시 유효성 검사
+    if (!isSameColumn) {
+      const validNext = VALID_TRANSITIONS[story.status] ?? [];
+      if (!validNext.includes(newStatus)) {
+        setTransitionError(t('invalidTransition'));
+        setTimeout(() => setTransitionError(null), 4000);
+        return;
+      }
     }
+
+    // AC4: 새 position 계산
+    const targetColumnStories = stories.filter((s) => s.status === newStatus);
+    const newPosition = computeNewPosition(targetColumnStories, storyId, overId, newStatus);
 
     // 낙관적 업데이트
     setStories((prev) =>
-      prev.map((s) => (s.id === storyId ? { ...s, status: newStatus } : s)),
+      prev.map((s) => (s.id === storyId ? { ...s, status: newStatus, position: newPosition } : s)),
     );
 
-    // API 호출
+    if (isSameColumn) {
+      // 같은 컬럼 내 재정렬 — position만 PATCH (fire-and-forget)
+      void fetch(`/api/stories/${storyId}`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ position: newPosition }),
+      });
+      return;
+    }
+
+    // 다른 컬럼으로 이동 — status + position PATCH
     try {
       const res = await fetch('/api/stories/bulk', {
         method: 'PATCH',
@@ -223,9 +332,8 @@ export function KanbanBoard({ projectId }: KanbanBoardProps) {
       if (!res.ok) {
         // 롤백
         setStories((prev) =>
-          prev.map((s) => (s.id === storyId ? { ...s, status: story.status } : s)),
+          prev.map((s) => (s.id === storyId ? { ...s, status: story.status, position: story.position } : s)),
         );
-        // 에러 토스트 (i18n)
         const errJson = await res.json().catch(() => null);
         const code = errJson?.error?.code;
         if (code === 'INVALID_TRANSITION') {
@@ -235,11 +343,18 @@ export function KanbanBoard({ projectId }: KanbanBoardProps) {
           setTransitionError(t('transitionDenied'));
           setTimeout(() => setTransitionError(null), 4000);
         }
+        return;
       }
+      // status 성공 후 position fire-and-forget
+      void fetch(`/api/stories/${storyId}`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ position: newPosition }),
+      });
     } catch {
       // 롤백
       setStories((prev) =>
-        prev.map((s) => (s.id === storyId ? { ...s, status: story.status } : s)),
+        prev.map((s) => (s.id === storyId ? { ...s, status: story.status, position: story.position } : s)),
       );
     }
   };
@@ -318,6 +433,46 @@ export function KanbanBoard({ projectId }: KanbanBoardProps) {
     }
   }, [fetchData]);
 
+  // AC1/AC5: WIP limit 핸들러
+  const handleWipLimitEdit = useCallback((columnId: string) => {
+    setWipLimits((prev) => ({
+      ...prev,
+      [columnId]: {
+        ...prev[columnId],
+        editing: true,
+        draft: prev[columnId]?.limit !== null ? String(prev[columnId]?.limit) : '',
+      },
+    }));
+  }, []);
+
+  const handleWipLimitSave = useCallback((columnId: string) => {
+    setWipLimits((prev) => {
+      const draft = prev[columnId]?.draft ?? '';
+      const n = parseInt(draft, 10);
+      const limit = !isNaN(n) && n > 0 ? n : null;
+      saveWipLimit(projectId, columnId, limit);
+      return {
+        ...prev,
+        [columnId]: { limit, editing: false, draft: limit !== null ? String(limit) : '' },
+      };
+    });
+  }, [projectId]);
+
+  const handleWipLimitRemove = useCallback((columnId: string) => {
+    saveWipLimit(projectId, columnId, null);
+    setWipLimits((prev) => ({
+      ...prev,
+      [columnId]: { limit: null, editing: false, draft: '' },
+    }));
+  }, [projectId]);
+
+  const handleWipLimitDraftChange = useCallback((columnId: string, value: string) => {
+    setWipLimits((prev) => ({
+      ...prev,
+      [columnId]: { ...prev[columnId], draft: value },
+    }));
+  }, []);
+
   const activeStory = activeId ? stories.find((s) => s.id === activeId) : null;
   const dragStatus = activeStory?.status ?? null;
 
@@ -342,6 +497,16 @@ export function KanbanBoard({ projectId }: KanbanBoardProps) {
           onEpicChange={setSelectedEpicId}
           onAssigneeChange={setSelectedAssigneeId}
         />
+        {/* AC2: 검색 input */}
+        <div className="mt-2">
+          <Input
+            type="search"
+            placeholder={t('searchPlaceholder')}
+            value={searchQuery}
+            onChange={(e) => setSearchQuery(e.target.value)}
+            className="h-8 text-sm"
+          />
+        </div>
       </div>
 
       {/* Mobile list view (hidden on md+) */}
@@ -360,22 +525,35 @@ export function KanbanBoard({ projectId }: KanbanBoardProps) {
         <DndContext sensors={sensors} onDragStart={handleDragStart} onDragEnd={handleDragEnd}>
           <div className="rounded-2xl border border-border/70 bg-card p-4 shadow-sm">
             <div className="flex flex-row gap-5 overflow-x-auto pb-1">
-            {COLUMNS.map((col) => (
-              <KanbanColumn
-                key={col.id}
-                id={col.id}
-                label={t(col.i18nKey)}
-                stories={storiesByColumn(col.id)}
-                epicMap={epicMap}
-                memberMap={memberMap}
-                dragStatus={dragStatus}
-                onStoryClick={handleStoryClick}
-                onEditStory={handleEditStory}
-                onChangeStatus={handleChangeStatus}
-                onAssignStory={handleAssignStory}
-                onDeleteStory={handleDeleteStory}
-              />
-            ))}
+            {COLUMNS.map((col) => {
+              const colStories = storiesByColumn(col.id);
+              const wipState = wipLimits[col.id] ?? { limit: null, editing: false, draft: '' };
+              const isExceeded = wipState.limit !== null && colStories.length > wipState.limit;
+              return (
+                <KanbanColumn
+                  key={col.id}
+                  id={col.id}
+                  label={t(col.i18nKey)}
+                  stories={colStories}
+                  epicMap={epicMap}
+                  memberMap={memberMap}
+                  dragStatus={dragStatus}
+                  onStoryClick={handleStoryClick}
+                  onEditStory={handleEditStory}
+                  onChangeStatus={handleChangeStatus}
+                  onAssignStory={handleAssignStory}
+                  onDeleteStory={handleDeleteStory}
+                  wipLimit={wipState.limit}
+                  wipExceeded={isExceeded}
+                  wipEditing={wipState.editing}
+                  wipDraft={wipState.draft}
+                  onWipLimitEdit={() => handleWipLimitEdit(col.id)}
+                  onWipLimitSave={() => handleWipLimitSave(col.id)}
+                  onWipLimitRemove={() => handleWipLimitRemove(col.id)}
+                  onWipDraftChange={(v) => handleWipLimitDraftChange(col.id, v)}
+                />
+              );
+            })}
             </div>
           </div>
           <DragOverlayCompat adjustScale={false} className="cursor-grabbing">

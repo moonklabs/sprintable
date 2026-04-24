@@ -8,6 +8,7 @@ export interface KanbanStory {
   epic_id: string | null;
   sprint_id: string | null;
   description: string | null;
+  position: number | null;
 }
 
 export interface KanbanEpic {

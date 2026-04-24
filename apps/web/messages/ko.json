@@ -108,7 +108,13 @@
     "changeStatus": "상태 변경",
     "assignMember": "담당자 변경",
     "deleteStory": "스토리 삭제",
-    "validDrop": "이동 가능"
+    "validDrop": "이동 가능",
+    "searchPlaceholder": "제목 또는 담당자 검색...",
+    "wipLimitLabel": "WIP 한도",
+    "wipLimitSet": "WIP 한도 설정",
+    "wipLimitExceeded": "WIP 한도 초과",
+    "wipLimitSave": "저장",
+    "wipLimitRemove": "한도 제거"
   },
   "memos": {
     "title": "메모",

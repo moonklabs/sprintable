@@ -82,7 +82,7 @@ export class SupabaseStoryRepository implements IStoryRepository {
   }
 
   async update(id: string, input: UpdateStoryInput): Promise<Story> {
-    const ALLOWED: (keyof UpdateStoryInput)[] = ['title', 'status', 'priority', 'story_points', 'description', 'epic_id', 'sprint_id', 'assignee_id'];
+    const ALLOWED: (keyof UpdateStoryInput)[] = ['title', 'status', 'priority', 'story_points', 'description', 'epic_id', 'sprint_id', 'assignee_id', 'position'];
     const patch: Record<string, unknown> = {};
     for (const key of ALLOWED) {
       if (key in input) patch[key] = input[key];

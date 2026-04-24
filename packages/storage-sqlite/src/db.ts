@@ -292,6 +292,9 @@ function migrateLegacyStoryStatuses(db: DatabaseSync): void {
 
 function migrateStorySchema(db: DatabaseSync): void {
   try { db.exec(`ALTER TABLE stories ADD COLUMN acceptance_criteria TEXT`); } catch { /* already exists */ }
+  try { db.exec(`ALTER TABLE stories ADD COLUMN position INTEGER`); } catch { /* already exists */ }
+  // position 초기값: created_at epoch * 1000
+  db.exec(`UPDATE stories SET position = CAST(strftime('%s', created_at) AS INTEGER) * 1000 WHERE position IS NULL`);
   // 비표준 priority → 'medium'
   db.exec(`UPDATE stories SET priority = 'medium' WHERE priority NOT IN ('critical','high','medium','low')`);
   // 비표준 story_points → 가장 가까운 피보나치

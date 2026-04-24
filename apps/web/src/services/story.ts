@@ -90,7 +90,7 @@ export class StoryService {
   async update(id: string, input: UpdateStoryInput) {
     const ALLOWED_FIELDS: (keyof UpdateStoryInput)[] = [
       'title', 'status', 'priority', 'story_points', 'description', 'acceptance_criteria',
-      'epic_id', 'sprint_id', 'assignee_id',
+      'epic_id', 'sprint_id', 'assignee_id', 'position',
     ];
     const sanitized: Record<string, unknown> = {};
     for (const key of ALLOWED_FIELDS) {
