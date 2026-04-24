@@ -31,6 +31,18 @@ const baseMemo = {
 function makeSupabase(results: Record<string, unknown>) {
   return {
     from: vi.fn((table: string) => {
+      if (table === 'webhook_deliveries') {
+        return {
+          insert: vi.fn().mockReturnValue({
+            select: vi.fn().mockReturnValue({
+              single: vi.fn().mockResolvedValue({ data: { id: 'delivery-1' }, error: null }),
+            }),
+          }),
+          update: vi.fn().mockReturnValue({
+            eq: vi.fn().mockResolvedValue({ data: [], error: null }),
+          }),
+        };
+      }
       const payload = results[table] ?? { data: null, error: null };
       return {
         select: vi.fn().mockReturnThis(),
@@ -81,7 +93,7 @@ describe('dispatchMemoAssignmentImmediately', () => {
 
   it('prefers webhook_configs url over team_members.webhook_url', async () => {
     const supabase = makeSupabase({
-      webhook_configs: { data: { url: 'https://discord.com/api/webhooks/2/config', secret: null }, error: null },
+      webhook_configs: { data: { id: 'config-1', url: 'https://discord.com/api/webhooks/2/config', secret: null }, error: null },
       team_members: { data: { webhook_url: 'https://discord.com/api/webhooks/1/fallback' }, error: null },
     });
     createSupabaseAdminClient.mockReturnValue(supabase);
