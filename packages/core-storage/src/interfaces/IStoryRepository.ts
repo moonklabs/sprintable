@@ -14,6 +14,7 @@ export interface Story {
   story_points: number | null;
   description: string | null;
   acceptance_criteria: string | null;
+  position: number | null;
   created_at: string;
   updated_at: string;
   deleted_at: string | null;
@@ -44,6 +45,7 @@ export interface UpdateStoryInput {
   epic_id?: string | null;
   sprint_id?: string | null;
   assignee_id?: string | null;
+  position?: number | null;
 }
 
 export interface BulkUpdateItem {

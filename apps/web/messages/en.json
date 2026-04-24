@@ -108,7 +108,13 @@
     "changeStatus": "Change Status",
     "assignMember": "Assign Member",
     "deleteStory": "Delete Story",
-    "validDrop": "Drop here"
+    "validDrop": "Drop here",
+    "searchPlaceholder": "Search by title or assignee...",
+    "wipLimitLabel": "WIP Limit",
+    "wipLimitSet": "Set WIP Limit",
+    "wipLimitExceeded": "WIP limit exceeded",
+    "wipLimitSave": "Save",
+    "wipLimitRemove": "Remove limit"
   },
   "memos": {
     "title": "Memos",

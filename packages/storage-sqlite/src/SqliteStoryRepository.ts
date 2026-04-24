@@ -56,7 +56,7 @@ export class SqliteStoryRepository implements IStoryRepository {
   }
 
   async update(id: string, input: UpdateStoryInput): Promise<Story> {
-    const ALLOWED: (keyof UpdateStoryInput)[] = ['title', 'status', 'priority', 'story_points', 'description', 'acceptance_criteria', 'epic_id', 'sprint_id', 'assignee_id'];
+    const ALLOWED: (keyof UpdateStoryInput)[] = ['title', 'status', 'priority', 'story_points', 'description', 'acceptance_criteria', 'epic_id', 'sprint_id', 'assignee_id', 'position'];
     const sets: string[] = [];
     const params: SqlParam[] = [];
     for (const key of ALLOWED) {

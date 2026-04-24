@@ -48,6 +48,7 @@ export const updateStorySchema = z.object({
   epic_id: z.string().optional().nullable(),
   sprint_id: z.string().optional().nullable(),
   assignee_id: z.string().optional().nullable(),
+  position: z.number().int().optional().nullable(),
 });
 
 const bulkUpdateItemSchema = z.object({
