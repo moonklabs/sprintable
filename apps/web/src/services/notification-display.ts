@@ -8,6 +8,8 @@ export const NOTIFICATION_TYPE_ICONS: Record<string, string> = {
   info: 'ℹ️',
   warning: '⚠️',
   system: '🔧',
+  memo_reply: '💬',
+  memo_mention: '@',
 };
 
 export const INBOX_FILTER_TYPES = ['', ...NOTIFICATION_TYPES] as const;
@@ -31,6 +33,10 @@ export function getInboxNotificationLabel(
       return t('filter_warning');
     case 'system':
       return t('filter_system');
+    case 'memo_reply':
+      return t('filter_memo_reply');
+    case 'memo_mention':
+      return t('filter_memo_mention');
     default:
       return type;
   }

@@ -885,6 +885,8 @@
     "filter_info": "안내",
     "filter_warning": "경고",
     "filter_system": "시스템",
+    "filter_memo_reply": "메모 답장",
+    "filter_memo_mention": "멘션",
     "noNotifications": "알림이 없습니다",
     "justNow": "방금",
     "minutesAgo": "분 전",

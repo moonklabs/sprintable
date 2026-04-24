@@ -885,6 +885,8 @@
     "filter_info": "Info",
     "filter_warning": "Warning",
     "filter_system": "System",
+    "filter_memo_reply": "Memo Reply",
+    "filter_memo_mention": "Mention",
     "noNotifications": "No notifications",
     "justNow": "Just now",
     "minutesAgo": "m ago",
