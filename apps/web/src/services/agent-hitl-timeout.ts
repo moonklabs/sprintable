@@ -1,6 +1,7 @@
 import type { SupabaseClient } from '@supabase/supabase-js';
 import { dispatchMemoAssignmentImmediately, type DispatchableMemo } from './memo-assignment-dispatch';
 import { syncSlackHitlRequestState } from './slack-hitl';
+import { NotificationService } from './notification.service';
 
 const DEFAULT_REMINDER_WINDOW_MINUTES = 60;
 const MAX_REMINDER_WINDOW_MINUTES = 24 * 60;
@@ -123,7 +124,7 @@ export class AgentHitlTimeoutService {
       return {
         org_id: request.org_id,
         user_id: request.requested_for,
-        type: 'warning',
+        type: 'warning' as const,
         title: 'HITL 요청 만료 임박',
         body: `${request.title} 요청의 응답 기한이 ${reminderLeadLabel} 이내로 남았습니다.`,
         reference_type: 'memo',
@@ -131,13 +132,14 @@ export class AgentHitlTimeoutService {
       };
     });
 
-    const { error } = await this.supabase.from('notifications').insert(notifications);
-    if (error) {
+    try {
+      await new NotificationService(this.supabase).createMany(notifications);
+    } catch (notifError) {
       await this.supabase
         .from('agent_hitl_requests')
         .update({ reminder_sent_at: null })
         .in('id', claimed.map((request) => request.id));
-      throw error;
+      throw notifError;
     }
 
     return {

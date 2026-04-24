@@ -5,6 +5,7 @@ import { apiSuccess, apiUpgradeRequired, ApiErrors } from '@/lib/api-response';
 import { getAuthContext } from '@/lib/auth-helpers';
 import { checkFeatureLimit } from '@/lib/check-feature';
 import { checkUsage, incrementUsage, getThresholdAlert } from '@/lib/usage-check';
+import { NotificationService } from '@/services/notification.service';
 
 export const maxDuration = 60;
 
@@ -145,14 +146,14 @@ export async function POST(request: Request, { params }: RouteParams) {
     const postUsage = await checkUsage(dbClient, me.org_id, 'stt_minutes');
     const alert = getThresholdAlert(postUsage.percentage);
     if (alert) {
-      await dbClient.from('notifications').insert({
+      new NotificationService(dbClient).create({
         org_id: me.org_id,
         user_id: me.id,
         type: 'warning',
         title: alert === 'limit_reached' ? 'STT limit reached' : `STT usage at ${postUsage.percentage}%`,
         body: `${postUsage.currentValue}/${postUsage.limitValue} min used`,
         reference_type: 'usage',
-      }).then(() => {});
+      }).catch(() => {});
     }
 
     return apiSuccess({

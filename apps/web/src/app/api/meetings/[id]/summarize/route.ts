@@ -4,6 +4,7 @@ import { handleApiError } from '@/lib/api-error';
 import { apiUpgradeRequired, ApiErrors } from '@/lib/api-response';
 import { getAuthContext } from '@/lib/auth-helpers';
 import { checkUsage, incrementUsage, getThresholdAlert } from '@/lib/usage-check';
+import { NotificationService } from '@/services/notification.service';
 import {
   createLLMClient,
   LLMAuthError,
@@ -118,14 +119,14 @@ export async function POST(request: Request, { params }: RouteParams) {
           const postUsage = await checkUsage(dbClient, me.org_id, 'ai_calls');
           const alert = getThresholdAlert(postUsage.percentage);
           if (alert) {
-            await dbClient.from('notifications').insert({
+            new NotificationService(dbClient).create({
               org_id: me.org_id,
               user_id: me.id,
               type: 'warning',
               title: alert === 'limit_reached' ? 'AI calls limit reached' : `AI calls at ${postUsage.percentage}%`,
               body: `${postUsage.currentValue}/${postUsage.limitValue} used`,
               reference_type: 'usage',
-            }).then(() => {});
+            }).catch(() => {});
           }
 
           controller.enqueue(encoder.encode(
