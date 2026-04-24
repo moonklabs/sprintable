@@ -93,7 +93,7 @@ describe('dispatchMemoAssignmentImmediately', () => {
 
   it('prefers webhook_configs url over team_members.webhook_url', async () => {
     const supabase = makeSupabase({
-      webhook_configs: { data: { id: 'config-1', url: 'https://discord.com/api/webhooks/2/config', secret: null }, error: null },
+      webhook_configs: { data: { id: 'config-1', url: 'https://discord.com/api/webhooks/2/config', secret: null, channel: 'discord' }, error: null },
       team_members: { data: { webhook_url: 'https://discord.com/api/webhooks/1/fallback' }, error: null },
     });
     createSupabaseAdminClient.mockReturnValue(supabase);

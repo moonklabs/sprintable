@@ -51,6 +51,7 @@ interface RoutingPayload {
 interface WebhookConfigRow {
   url: string;
   secret: string | null;
+  channel: OutboundWebhookFormat;
 }
 
 type OutboundWebhookFormat = 'discord' | 'google' | 'slack' | 'generic';
@@ -451,6 +452,7 @@ export class MemoEventDispatcher {
       try {
         const outbound = this.buildWebhookPayload({
           webhookUrl: webhook.url,
+          webhookChannel: webhook.channel,
           memo,
           agent,
           deploymentId: null,
@@ -562,6 +564,7 @@ export class MemoEventDispatcher {
     try {
       const outbound = this.buildWebhookPayload({
         webhookUrl: webhook.url,
+        webhookChannel: webhook.channel,
         memo,
         agent,
         deploymentId: deployment?.id ?? null,
@@ -631,6 +634,7 @@ export class MemoEventDispatcher {
 
   private buildWebhookPayload(input: {
     webhookUrl: string;
+    webhookChannel?: OutboundWebhookFormat | null;
     memo: MemoRow;
     agent: TeamMemberRow;
     deploymentId: string | null;
@@ -639,8 +643,8 @@ export class MemoEventDispatcher {
     dispatchKey: string;
     routing: RoutingEvaluationResult;
   }): { format: OutboundWebhookFormat; body: Record<string, unknown> } {
-    const { webhookUrl, memo, agent, deploymentId, runId, source, dispatchKey, routing } = input;
-    const format = detectWebhookFormat(webhookUrl);
+    const { webhookUrl, webhookChannel, memo, agent, deploymentId, runId, source, dispatchKey, routing } = input;
+    const format = webhookChannel ?? detectWebhookFormat(webhookUrl);
     const title = truncateText(memo.title, 256, 'New assigned memo');
     const description = truncateText(memo.content, 4000, '(no content)');
     const internalPayload = {
@@ -762,11 +766,11 @@ export class MemoEventDispatcher {
     return (data as AgentDeploymentRow | null) ?? null;
   }
 
-  private async resolveWebhook(agent: TeamMemberRow, projectId: string): Promise<WebhookConfigRow | { url: string; secret: null } | null> {
+  private async resolveWebhook(agent: TeamMemberRow, projectId: string): Promise<WebhookConfigRow | { url: string; secret: null; channel: null } | null> {
     const supabase = this.options.supabase;
     const { data: projectConfig } = await supabase
       .from('webhook_configs')
-      .select('url, secret')
+      .select('url, secret, channel')
       .eq('org_id', agent.org_id)
       .eq('member_id', agent.id)
       .eq('project_id', projectId)
@@ -778,7 +782,7 @@ export class MemoEventDispatcher {
 
     const { data: defaultConfig } = await supabase
       .from('webhook_configs')
-      .select('url, secret')
+      .select('url, secret, channel')
       .eq('org_id', agent.org_id)
       .eq('member_id', agent.id)
       .is('project_id', null)
@@ -787,7 +791,7 @@ export class MemoEventDispatcher {
       .maybeSingle();
 
     if (defaultConfig?.url) return defaultConfig as WebhookConfigRow;
-    if (agent.webhook_url) return { url: agent.webhook_url, secret: null };
+    if (agent.webhook_url) return { url: agent.webhook_url, secret: null, channel: null };
     return null;
   }
 

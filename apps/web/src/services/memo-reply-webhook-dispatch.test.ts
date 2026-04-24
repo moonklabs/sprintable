@@ -17,8 +17,8 @@ function createSupabaseStub(options?: {
     { id: 'member-3', name: '디디 은와추쿠', webhook_url: null, is_active: true },
   ];
   const webhookConfigs = options?.webhookConfigs ?? [
-    { id: 'config-1', org_id: 'org-1', member_id: 'member-1', project_id: 'project-1', is_active: true, url: 'https://discord.com/api/webhooks/member-1/project', secret: null },
-    { id: 'config-3', org_id: 'org-1', member_id: 'member-3', project_id: null, is_active: true, url: 'https://discord.com/api/webhooks/member-3/default', secret: null },
+    { id: 'config-1', org_id: 'org-1', member_id: 'member-1', project_id: 'project-1', is_active: true, url: 'https://discord.com/api/webhooks/member-1/project', secret: null, channel: 'discord' },
+    { id: 'config-3', org_id: 'org-1', member_id: 'member-3', project_id: null, is_active: true, url: 'https://discord.com/api/webhooks/member-3/default', secret: null, channel: 'discord' },
   ];
   const memoAssignees = options?.memoAssignees ?? [];
 
