@@ -5,6 +5,8 @@ import { dispatchMemoAssignmentImmediately, type DispatchableMemo } from './memo
 import { dispatchWorkflowMemoReplyWebhooks } from './memo-reply-webhook-dispatch';
 import { buildAbsoluteMemoLink } from './app-url';
 import { NotFoundError, ForbiddenError } from './sprint';
+import { NotificationService } from './notification.service';
+import { hasExactMemberMention } from './doc-comment-notifications';
 
 export interface CreateMemoInput {
   project_id: string;
@@ -540,6 +542,9 @@ export class MemoService {
         } catch (dispatchError) {
           console.warn('[MemoService.addReply] workflow reply webhook dispatch failed', dispatchError);
         }
+
+        // In-app notifications: memo_reply + memo_mention
+        this._sendReplyNotifications(memo, data).catch(() => {});
       } else if (this.teamMemberRepo) {
         try {
           await this.dispatchOssReplyWebhooks(memo, data);
@@ -550,6 +555,47 @@ export class MemoService {
     }
 
     return data;
+  }
+
+  private async _sendReplyNotifications(memo: Memo, reply: MemoReply) {
+    if (!this.supabase) return;
+    const notifService = new NotificationService(this.supabase);
+    const replyAuthor = reply.created_by;
+
+    // memo_reply: 원 메모 작성자에게 (자기 자신 제외)
+    if (memo.created_by !== replyAuthor) {
+      await notifService.create({
+        org_id: memo.org_id,
+        user_id: memo.created_by,
+        type: 'memo_reply',
+        title: '메모에 답장이 달렸습니다',
+        body: reply.content.slice(0, 100),
+        reference_type: 'memo',
+        reference_id: memo.id,
+      });
+    }
+
+    // memo_mention: @멘션 대상자 (자기 자신 제외)
+    const { data: members } = await this.supabase
+      .from('team_members')
+      .select('id, name')
+      .eq('org_id', memo.org_id)
+      .eq('project_id', memo.project_id)
+      .eq('is_active', true);
+
+    for (const member of (members ?? []) as Array<{ id: string; name: string | null }>) {
+      if (!member.name?.trim() || member.id === replyAuthor) continue;
+      if (!hasExactMemberMention(reply.content, member.name.trim())) continue;
+      await notifService.create({
+        org_id: memo.org_id,
+        user_id: member.id,
+        type: 'memo_mention',
+        title: '메모에서 멘션되었습니다',
+        body: reply.content.slice(0, 100),
+        reference_type: 'memo',
+        reference_id: memo.id,
+      });
+    }
   }
 
   private async dispatchOssReplyWebhooks(memo: Memo, reply: MemoReply) {
