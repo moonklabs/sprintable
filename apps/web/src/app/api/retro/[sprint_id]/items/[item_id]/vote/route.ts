@@ -2,7 +2,7 @@ import type { SupabaseClient } from '@supabase/supabase-js';
 import { createSupabaseServerClient } from '@/lib/supabase/server';
 import { createSupabaseAdminClient } from '@/lib/supabase/admin';
 import { handleApiError } from '@/lib/api-error';
-import { apiSuccess, ApiErrors } from '@/lib/api-response';
+import { apiSuccess, apiError, ApiErrors } from '@/lib/api-response';
 import { getAuthContext } from '@/lib/auth-helpers';
 import { RetroService } from '@/services/retro';
 
@@ -22,6 +22,8 @@ export async function POST(request: Request, { params }: RouteParams) {
     const data = await service.vote(item_id, me.id);
     return apiSuccess(data);
   } catch (err: unknown) {
+    const e = err as Error & { code?: string };
+    if (e.code === 'CONFLICT') return apiError('CONFLICT', e.message, 409);
     return handleApiError(err);
   }
 }

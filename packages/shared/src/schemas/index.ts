@@ -189,7 +189,7 @@ export const updateStandupFeedbackSchema = z.object({
 
 // ─── Retro ───────────────────────────────────
 export const createRetroSchema = z.object({
-  sprint_id: z.string().min(1),
+  sprint_id: z.string().min(1).optional().nullable(),
   title: z.string().min(1),
 });
 

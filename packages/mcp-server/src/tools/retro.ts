@@ -57,12 +57,13 @@ export function registerRetroTools(server: McpServer) {
     }
   });
 
-  server.tool('vote_retro_item', 'Vote on retro item', {
-    sprint_id: z.string(),
+  server.tool('vote_retro_item', 'Vote on retro item (uses retro_votes for duplicate protection)', {
+    session_id: z.string().describe('Retro session ID (use get_retro_session to obtain)'),
     item_id: z.string(),
-  }, async ({ sprint_id, item_id }) => {
+    project_id: z.string(),
+  }, async ({ session_id, item_id, project_id }) => {
     try {
-      const data = await pmApi(`/api/retro/${sprint_id}/items/${item_id}/vote`, {
+      const data = await pmApi(`/api/retro-sessions/${session_id}/items/${item_id}/vote?project_id=${encodeURIComponent(project_id)}`, {
         method: 'POST',
         body: JSON.stringify({}),
       });
