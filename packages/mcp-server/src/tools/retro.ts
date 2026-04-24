@@ -57,15 +57,16 @@ export function registerRetroTools(server: McpServer) {
     }
   });
 
-  server.tool('vote_retro_item', 'Vote on retro item (uses retro_votes for duplicate protection)', {
+  server.tool('vote_retro_item', 'Vote on retro item via retro-sessions endpoint (retro_votes, duplicate-protected). voter_id defaults to caller identity.', {
     session_id: z.string().describe('Retro session ID (use get_retro_session to obtain)'),
     item_id: z.string(),
     project_id: z.string(),
-  }, async ({ session_id, item_id, project_id }) => {
+    voter_id: z.string().optional().describe('Explicit voter ID; omit to use caller identity'),
+  }, async ({ session_id, item_id, project_id, voter_id }) => {
     try {
       const data = await pmApi(`/api/retro-sessions/${session_id}/items/${item_id}/vote?project_id=${encodeURIComponent(project_id)}`, {
         method: 'POST',
-        body: JSON.stringify({}),
+        body: JSON.stringify(voter_id ? { voter_id } : {}),
       });
       return ok(data);
     } catch (e) {
