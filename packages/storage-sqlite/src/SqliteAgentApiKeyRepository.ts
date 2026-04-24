@@ -12,9 +12,10 @@ export class SqliteAgentApiKeyRepository implements IAgentApiKeyRepository {
   async create(input: CreateAgentApiKeyInput): Promise<Pick<AgentApiKey, 'id' | 'key_prefix' | 'created_at'>> {
     const id = randomUUID();
     const now = new Date().toISOString();
+    const expiresAt = input.expiresAt ?? null;
     this.db.prepare(
-      'INSERT INTO agent_api_keys (id, team_member_id, key_prefix, key_hash, created_at) VALUES (?, ?, ?, ?, ?)'
-    ).run(id, input.teamMemberId, input.keyPrefix, input.keyHash, now);
+      'INSERT INTO agent_api_keys (id, team_member_id, key_prefix, key_hash, created_at, expires_at) VALUES (?, ?, ?, ?, ?, ?)'
+    ).run(id, input.teamMemberId, input.keyPrefix, input.keyHash, now, expiresAt);
     return { id, key_prefix: input.keyPrefix, created_at: now };
   }
 

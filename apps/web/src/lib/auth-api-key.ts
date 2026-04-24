@@ -58,12 +58,17 @@ export async function getTeamMemberFromApiKey(
   // RLS 우회 필요 - admin client 사용
   const { data: apiKeyRow, error: keyError } = await adminClient
     .from('agent_api_keys')
-    .select('id, team_member_id, revoked_at')
+    .select('id, team_member_id, revoked_at, expires_at')
     .eq('key_hash', keyHash)
     .is('revoked_at', null)
     .maybeSingle();
 
   if (keyError || !apiKeyRow) {
+    return null;
+  }
+
+  // AC3: 만료 키 거부 (expires_at=NULL이면 무기한 유효)
+  if (apiKeyRow.expires_at && new Date(apiKeyRow.expires_at) < new Date()) {
     return null;
   }
 

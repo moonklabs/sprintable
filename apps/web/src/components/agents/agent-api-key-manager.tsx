@@ -21,6 +21,7 @@ interface ApiKey {
   created_at: string;
   last_used_at: string | null;
   revoked_at: string | null;
+  expires_at: string | null;
 }
 
 interface AgentApiKeyManagerProps {
@@ -156,6 +157,21 @@ export function AgentApiKeyManager({ agentId, agentName }: AgentApiKeyManagerPro
                     ` • Last used: ${new Date(key.last_used_at).toLocaleDateString()}`}
                   {key.revoked_at && ` • Revoked: ${new Date(key.revoked_at).toLocaleDateString()}`}
                 </p>
+                {key.expires_at && !key.revoked_at && (() => {
+                  const expiresDate = new Date(key.expires_at);
+                  const daysLeft = Math.ceil((expiresDate.getTime() - Date.now()) / (1000 * 60 * 60 * 24));
+                  const isExpired = daysLeft <= 0;
+                  const isWarning = daysLeft > 0 && daysLeft <= 7;
+                  return (
+                    <p className={`text-xs mt-0.5 ${isExpired ? 'text-destructive font-medium' : isWarning ? 'text-orange-500 font-medium' : 'text-muted-foreground'}`}>
+                      {isExpired
+                        ? `Expired ${expiresDate.toLocaleDateString()}`
+                        : isWarning
+                          ? `⚠ Expires in ${daysLeft} day${daysLeft === 1 ? '' : 's'} (${expiresDate.toLocaleDateString()})`
+                          : `Expires: ${expiresDate.toLocaleDateString()}`}
+                    </p>
+                  );
+                })()}
               </div>
               {!key.revoked_at && (
                 <Button
