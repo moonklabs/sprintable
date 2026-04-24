@@ -40,19 +40,20 @@ export function OnboardingForm() {
     setLoading(true);
     setError('');
 
-    const { data, error: insertError } = await supabase
-      .from('organizations')
-      .insert({ name: orgName.trim(), slug: orgSlug.trim() })
-      .select('id')
-      .single();
+    const res = await fetch('/api/organizations', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ name: orgName.trim(), slug: orgSlug.trim() }),
+    });
+    const json = await res.json();
 
-    if (insertError) {
-      setError(insertError.message);
+    if (!res.ok) {
+      setError(json?.error?.message ?? t('createOrgFailed'));
       setLoading(false);
       return;
     }
 
-    setOrgId(data.id);
+    setOrgId(json.data.id);
     setStep('project');
     setLoading(false);
   };
