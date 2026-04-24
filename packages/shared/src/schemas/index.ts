@@ -1,10 +1,17 @@
 import { z } from 'zod/v4';
 
 // ─── Memo ────────────────────────────────────
+export const MEMO_TYPES = [
+  'memo', 'task', 'checklist', 'decision', 'request', 'handoff',
+  'feedback', 'announcement', 'general', 'system_workflow_update',
+] as const;
+
+export const MEMO_TYPES_REQUIRING_ASSIGNEE = ['task', 'request', 'feedback'] as const;
+
 export const createMemoSchema = z.object({
   title: z.string().optional().nullable(),
   content: z.string().min(1),
-  memo_type: z.string().optional(),
+  memo_type: z.enum(MEMO_TYPES).optional(),
   assigned_to: z.string().optional().nullable(), // DEPRECATED: use assigned_to_ids
   assigned_to_ids: z.array(z.string()).optional(), // New: supports multiple assignees
   supersedes_id: z.string().optional().nullable(),

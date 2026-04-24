@@ -3,7 +3,7 @@ import { createSupabaseAdminClient } from '@/lib/supabase/admin';
 import { MemoService, type CreateMemoInput } from '@/services/memo';
 import { handleApiError } from '@/lib/api-error';
 import { getAuthContext } from '@/lib/auth-helpers';
-import { parseBody, createMemoSchema } from '@sprintable/shared';
+import { parseBody, createMemoSchema, MEMO_TYPES_REQUIRING_ASSIGNEE } from '@sprintable/shared';
 import { apiSuccess, ApiErrors } from '@/lib/api-response';
 import { buildCursorPageMeta, parseCursorPageInput } from '@/lib/pagination';
 import { createMemoRepository, createTeamMemberRepository, createProjectRepository, isOssMode } from '@/lib/storage/factory';
@@ -33,8 +33,14 @@ export async function POST(request: Request) {
     const parsed = await parseBody(request, createMemoSchema);
     if (!parsed.success) return parsed.response;
     const body = parsed.data;
-    // [DIAG] Track assigned_to_ids propagation through schema parsing
-    console.warn('[POST /api/memos] parsed assigned_to_ids:', JSON.stringify(body.assigned_to_ids));
+
+    // task/request/feedback 타입은 assigned_to 필수
+    if (body.memo_type && (MEMO_TYPES_REQUIRING_ASSIGNEE as readonly string[]).includes(body.memo_type)) {
+      const hasAssignee = (body.assigned_to_ids && body.assigned_to_ids.length > 0) || body.assigned_to;
+      if (!hasAssignee) {
+        return apiError('BAD_REQUEST', `memo_type '${body.memo_type}' requires at least one assignee`, 400);
+      }
+    }
     const dbClient = isOssMode() ? undefined : (me.type === 'agent' ? createSupabaseAdminClient() : supabase);
     const repo = await createMemoRepository(dbClient);
     const teamMemberRepo = isOssMode() ? await createTeamMemberRepository() : undefined;
