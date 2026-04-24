@@ -2,10 +2,11 @@ import { parseBody, updateTaskSchema } from '@sprintable/shared';
 import { createSupabaseServerClient } from '@/lib/supabase/server';
 import { createSupabaseAdminClient } from '@/lib/supabase/admin';
 import { TaskService } from '@/services/task';
-import { createTaskRepository } from '@/lib/storage/factory';
+import { createTaskRepository, isOssMode } from '@/lib/storage/factory';
 import { handleApiError } from '@/lib/api-error';
 import { apiSuccess, ApiErrors } from '@/lib/api-response';
 import { getAuthContext } from '@/lib/auth-helpers';
+import { NotificationService } from '@/services/notification.service';
 
 type RouteParams = { params: Promise<{ id: string }> };
 
@@ -34,8 +35,41 @@ export async function PATCH(request: Request, { params }: RouteParams) {
     const parsed = await parseBody(request, updateTaskSchema); if (!parsed.success) return parsed.response; const body = parsed.data;
     const repo = await createTaskRepository(dbClient);
     const service = new TaskService(repo);
-    await service.getById(id, { org_id: me.org_id, project_id: me.project_id });
-    return apiSuccess(await service.update(id, body));
+    const before = await service.getById(id, { org_id: me.org_id, project_id: me.project_id });
+    const result = await service.update(id, body);
+
+    if (!isOssMode()) {
+      const notifService = new NotificationService(dbClient);
+      if (body.assignee_id && body.assignee_id !== before.assignee_id) {
+        notifService.create({
+          org_id: me.org_id,
+          user_id: body.assignee_id,
+          type: 'task_assigned',
+          title: '태스크가 배정되었습니다',
+          body: before.title ?? '',
+          reference_type: 'task',
+          reference_id: id,
+        }).catch(() => {});
+      }
+      if (body.status === 'done' && before.status !== 'done' && before.story_id) {
+        (async () => {
+          const { data } = await dbClient.from('stories').select('assignee_id').eq('id', before.story_id).maybeSingle();
+          if (data?.assignee_id) {
+            await notifService.create({
+              org_id: me.org_id,
+              user_id: data.assignee_id as string,
+              type: 'task_completed',
+              title: '태스크가 완료되었습니다',
+              body: before.title ?? '',
+              reference_type: 'task',
+              reference_id: id,
+            });
+          }
+        })().catch(() => {});
+      }
+    }
+
+    return apiSuccess(result);
   } catch (err: unknown) { return handleApiError(err); }
 }
 
