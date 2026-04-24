@@ -27,11 +27,11 @@ export interface KanbanMember {
   type: string;
 }
 
+import { VALID_STORY_TRANSITIONS } from '@sprintable/shared';
+
+// done→in-review는 admin만 허용 (백엔드 검증) — 프론트엔드에서는 done 드래그 허용 안 함
 export const VALID_TRANSITIONS: Record<string, string[]> = {
-  backlog: ['ready-for-dev'],
-  'ready-for-dev': ['in-progress', 'backlog'],
-  'in-progress': ['in-review', 'ready-for-dev'],
-  'in-review': ['done', 'in-progress'],
+  ...VALID_STORY_TRANSITIONS,
   done: [],
 };
 
