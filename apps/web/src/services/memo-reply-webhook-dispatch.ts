@@ -1,6 +1,7 @@
 import type { SupabaseClient } from '@supabase/supabase-js';
 import { buildAbsoluteMemoLink } from './app-url';
 import { hasExactMemberMention } from './doc-comment-notifications';
+import { buildWebhookSignatureHeaders } from '@/lib/webhook-signature';
 
 interface MemoReplyDispatchMemo {
   id: string;
@@ -175,11 +176,6 @@ async function postWebhook(
   title: string,
   description: string,
 ) {
-  const headers: Record<string, string> = { 'Content-Type': 'application/json' };
-  if (webhook.secret) {
-    headers['X-Webhook-Secret'] = webhook.secret;
-  }
-
   const format = detectWebhookFormat(webhook.url);
   const body = format === 'discord'
     ? JSON.stringify({
@@ -189,6 +185,11 @@ async function postWebhook(
     : format === 'google' || format === 'slack'
       ? JSON.stringify({ text: `*${title}*\n${description}` })
       : JSON.stringify({ title, description });
+
+  const headers: Record<string, string> = {
+    'Content-Type': 'application/json',
+    ...buildWebhookSignatureHeaders(webhook.secret, body),
+  };
 
   const response = await fetchFn(webhook.url, {
     method: 'POST',

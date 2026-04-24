@@ -1,5 +1,6 @@
 import { createSupabaseAdminClient } from '@/lib/supabase/admin';
 import { buildAbsoluteMemoLink } from './app-url';
+import { buildWebhookSignatureHeaders } from '@/lib/webhook-signature';
 
 export interface DispatchableMemo {
   id: string;
@@ -117,12 +118,14 @@ export async function dispatchMemoAssignmentImmediately(memo: DispatchableMemo) 
     const description = `${preview}\n\n${memoLink}`;
 
     const isDiscord = webhookUrl.includes('discord.com') || webhookUrl.includes('discordapp.com');
-    const headers: Record<string, string> = { 'Content-Type': 'application/json' };
-    if (webhookSecret) headers['X-Webhook-Secret'] = webhookSecret;
-
     const body = isDiscord
       ? JSON.stringify({ content: `${title}\n${description.substring(0, 500)}`, embeds: [{ title, description, color: 0x3B82F6 }] })
       : JSON.stringify({ text: `*${title}*\n${description}` });
+
+    const headers: Record<string, string> = {
+      'Content-Type': 'application/json',
+      ...buildWebhookSignatureHeaders(webhookSecret, body),
+    };
 
     const response = await fetch(webhookUrl, {
       method: 'POST',
