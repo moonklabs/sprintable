@@ -13,6 +13,7 @@ import {
   Gauge,
   Gift,
   Inbox,
+  Layers,
   MessageSquareMore,
   PenTool,
   Search,
@@ -42,6 +43,7 @@ const NAV_ITEMS: NavItem[] = [
     icon: FolderKanban,
     children: [
       { key: 'board', href: '/board', icon: FolderKanban },
+      { key: 'epics', href: '/epics', icon: Layers },
       { key: 'standup', href: '/standup', icon: Users },
       { key: 'retro', href: '/retro', icon: Gauge },
     ],
