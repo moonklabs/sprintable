@@ -13,7 +13,7 @@ export class SupabaseEpicRepository implements IEpicRepository {
         project_id: input.project_id,
         org_id: input.org_id,
         title: input.title.trim(),
-        status: input.status ?? 'open',
+        status: input.status ?? 'draft',
         priority: input.priority ?? 'medium',
         description: input.description ?? null,
       })
