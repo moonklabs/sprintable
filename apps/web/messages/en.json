@@ -489,7 +489,10 @@
     "projectInviteFailed": "Failed to send project invitation.",
     "standupSettings": "Standup Settings",
     "standupSettingsDesc": "Set the daily standup deadline time.",
-    "standupDeadline": "Deadline"
+    "standupDeadline": "Deadline",
+    "revoked": "Revoked",
+    "revoke": "Revoke",
+    "resend": "Resend"
   },
   "landing": {
     "navProduct": "Overview",

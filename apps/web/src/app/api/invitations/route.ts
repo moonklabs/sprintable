@@ -84,6 +84,7 @@ export async function POST(request: Request) {
       .select('id')
       .eq('org_id', me.org_id)
       .eq('email', email)
+      .eq('status', 'pending')
       .is('accepted_at', null)
       .gt('expires_at', new Date().toISOString());
 
