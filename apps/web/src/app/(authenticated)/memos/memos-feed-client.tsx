@@ -1,8 +1,8 @@
 'use client';
 
-import { useCallback, useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useTranslations } from 'next-intl';
-import { ChevronLeft, Plus, X } from 'lucide-react';
+import { ChevronLeft, Plus, Search, X } from 'lucide-react';
 import { MemoFeed } from '@/components/memos/memo-feed';
 import { MemoThread } from '@/components/memos/memo-thread';
 import { MemoCreateForm } from '@/components/memos/memo-create-form';
@@ -33,19 +33,29 @@ export function MemosFeedClient({ currentTeamMemberId, projectId }: MemosFeedCli
   const [loading, setLoading] = useState(true);
   const [showCreate, setShowCreate] = useState(false);
   const [mobileView, setMobileView] = useState<'list' | 'detail'>('list');
+  const [searchQuery, setSearchQuery] = useState('');
+  const [debouncedQuery, setDebouncedQuery] = useState('');
+  const debounceTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  const handleSearchChange = (value: string) => {
+    setSearchQuery(value);
+    if (debounceTimer.current) clearTimeout(debounceTimer.current);
+    debounceTimer.current = setTimeout(() => setDebouncedQuery(value), 300);
+  };
 
   const memberMap = useMemo(
     () => Object.fromEntries(members.map((m) => [m.id, m.name])),
     [members],
   );
 
-  const fetchMemos = useCallback(async () => {
+  const fetchMemos = useCallback(async (q?: string) => {
     if (!projectId) return;
 
     try {
       const params = new URLSearchParams();
       params.append('project_id', projectId);
       params.append('limit', '50');
+      if (q?.trim()) params.append('q', q.trim());
 
       const res = await fetch(`/api/memos?${params.toString()}`);
       if (!res.ok) throw new Error('Failed to fetch memos');
@@ -195,6 +205,10 @@ export function MemosFeedClient({ currentTeamMemberId, projectId }: MemosFeedCli
     void Promise.all([fetchMemos(), fetchMembers()]);
   }, [fetchMemos, fetchMembers]);
 
+  useEffect(() => {
+    void fetchMemos(debouncedQuery);
+  }, [debouncedQuery, fetchMemos]);
+
   if (loading) {
     return (
       <div className="flex h-64 items-center justify-center">
@@ -213,6 +227,25 @@ export function MemosFeedClient({ currentTeamMemberId, projectId }: MemosFeedCli
         <Button size="sm" onClick={handleNewMemo}>
           <Plus className="h-4 w-4" />
         </Button>
+      </div>
+      <div className="relative mt-3">
+        <Search className="absolute left-2.5 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-muted-foreground" />
+        <input
+          type="text"
+          value={searchQuery}
+          onChange={(e) => handleSearchChange(e.target.value)}
+          placeholder={t('searchPlaceholder')}
+          className="w-full rounded-md border border-border bg-muted/30 py-1.5 pl-8 pr-3 text-sm text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-1 focus:ring-primary"
+        />
+        {searchQuery ? (
+          <button
+            type="button"
+            onClick={() => handleSearchChange('')}
+            className="absolute right-2.5 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground"
+          >
+            <X className="h-3.5 w-3.5" />
+          </button>
+        ) : null}
       </div>
     </div>
   );
