@@ -5,6 +5,7 @@ import { handleApiError } from '@/lib/api-error';
 import { apiSuccess, ApiErrors } from '@/lib/api-response';
 import { getAuthContext } from '@/lib/auth-helpers';
 import { isOssMode } from '@/lib/storage/factory';
+import { requireRole, EDIT_ROLES } from '@/lib/role-guard';
 
 // GET /api/project-settings?project_id=
 export async function GET(request: Request) {
@@ -32,6 +33,11 @@ export async function PATCH(request: Request) {
     if (!me) return ApiErrors.unauthorized();
     if (me.rateLimitExceeded) return ApiErrors.tooManyRequests(me.rateLimitRemaining, me.rateLimitResetAt);
     if (isOssMode()) return ApiErrors.notFound('Not supported in OSS mode');
+
+    if (me.type !== 'agent') {
+      const denied = await requireRole(supabase, me.org_id, EDIT_ROLES, 'Admin or PO access required to update project settings');
+      if (denied) return denied;
+    }
 
     const body = await request.json() as { project_id?: string; standup_deadline?: string };
     const projectId = body.project_id ?? me.project_id;
