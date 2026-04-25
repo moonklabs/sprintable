@@ -487,7 +487,17 @@
     "projectInviteTitle": "Invite to Project",
     "projectInviteDescription": "Invite a team member directly to a specific project by email.",
     "projectInviteSent": "Invitation link generated.",
-    "projectInviteFailed": "Failed to send project invitation."
+    "projectInviteFailed": "Failed to send project invitation.",
+    "myAccount": "My Account",
+    "tabProfile": "Profile",
+    "tabAppearance": "Appearance",
+    "tabApiKeys": "API Keys",
+    "tabNotifications": "Notifications",
+    "tabAiAgents": "AI & Agents",
+    "tabProjects": "Projects",
+    "tabMembers": "Members",
+    "tabIntegrations": "Integrations",
+    "tabSubscription": "Subscription"
   },
   "landing": {
     "navProduct": "Overview",

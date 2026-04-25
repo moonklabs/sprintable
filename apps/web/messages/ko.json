@@ -487,7 +487,17 @@
     "projectInviteTitle": "프로젝트 초대",
     "projectInviteDescription": "이메일로 특정 프로젝트에 바로 초대합니다.",
     "projectInviteSent": "초대 링크가 생성되었습니다.",
-    "projectInviteFailed": "프로젝트 초대에 실패했습니다."
+    "projectInviteFailed": "프로젝트 초대에 실패했습니다.",
+    "myAccount": "내 계정",
+    "tabProfile": "프로필",
+    "tabAppearance": "테마",
+    "tabApiKeys": "API 키",
+    "tabNotifications": "알림",
+    "tabAiAgents": "AI & 에이전트",
+    "tabProjects": "프로젝트",
+    "tabMembers": "멤버",
+    "tabIntegrations": "연동",
+    "tabSubscription": "구독"
   },
   "landing": {
     "navProduct": "개요",
