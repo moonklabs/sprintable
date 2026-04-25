@@ -49,6 +49,7 @@ export class SupabaseMemoRepository implements IMemoRepository {
     if (filters.created_by) query = query.eq('created_by', filters.created_by);
     if (filters.status) query = query.eq('status', filters.status);
     if (filters.q?.trim()) query = query.textSearch('search_vector', filters.q.trim(), { type: 'websearch', config: 'simple' });
+    if (!filters.include_archived) query = query.is('archived_at', null);
     if (filters.cursor) query = query.lt('created_at', filters.cursor);
     if (filters.limit) query = query.limit(filters.limit + 1);
     const { data, error } = await query;
@@ -93,6 +94,18 @@ export class SupabaseMemoRepository implements IMemoRepository {
         resolved_at: new Date().toISOString(),
       })
       .eq('id', id)
+      .select()
+      .single();
+    if (error) throw mapSupabaseError(error);
+    return data as Memo;
+  }
+
+  async archive(id: string, archivedAt: string | null): Promise<Memo> {
+    const { data, error } = await this.supabase
+      .from('memos')
+      .update({ archived_at: archivedAt })
+      .eq('id', id)
+      .is('deleted_at', null)
       .select()
       .single();
     if (error) throw mapSupabaseError(error);

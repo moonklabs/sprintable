@@ -1,0 +1,31 @@
+import { createSupabaseServerClient } from '@/lib/supabase/server';
+import { createSupabaseAdminClient } from '@/lib/supabase/admin';
+import { handleApiError } from '@/lib/api-error';
+import { apiSuccess, ApiErrors } from '@/lib/api-response';
+import { getAuthContext } from '@/lib/auth-helpers';
+import { createMemoRepository, isOssMode } from '@/lib/storage/factory';
+
+type RouteParams = { params: Promise<{ id: string }> };
+
+// PATCH /api/memos/:id/archive — archived_at 설정/해제 토글
+export async function PATCH(request: Request, { params }: RouteParams) {
+  try {
+    const { id } = await params;
+    const supabase = await createSupabaseServerClient();
+    const me = await getAuthContext(supabase, request);
+    if (!me) return ApiErrors.unauthorized();
+    if (me.rateLimitExceeded) return ApiErrors.tooManyRequests(me.rateLimitRemaining, me.rateLimitResetAt);
+
+    if (isOssMode()) return ApiErrors.notFound('Archive not supported in OSS mode');
+
+    const dbClient = me.type === 'agent' ? createSupabaseAdminClient() : supabase;
+    const repo = await createMemoRepository(dbClient);
+    const memo = await repo.getById(id);
+
+    const archivedAt = memo.archived_at ? null : new Date().toISOString();
+    const updated = await repo.archive(id, archivedAt);
+    return apiSuccess(updated);
+  } catch (err: unknown) {
+    return handleApiError(err);
+  }
+}
