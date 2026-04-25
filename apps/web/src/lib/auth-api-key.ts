@@ -1,6 +1,13 @@
 import type { SupabaseClient } from '@supabase/supabase-js';
 import { createHash } from 'crypto';
 
+export class RevokedApiKeyError extends Error {
+  constructor(message = 'API key has been revoked') {
+    super(message);
+    this.name = 'RevokedApiKeyError';
+  }
+}
+
 export interface TeamMemberContext {
   id: string;
   org_id: string;
@@ -8,6 +15,7 @@ export interface TeamMemberContext {
   name: string;
   type: 'human' | 'agent';
   scope?: string[];
+  apiKeyId?: string;
 }
 
 /**
@@ -51,33 +59,30 @@ export function extractBearerToken(authHeader: string | null): string | null {
  */
 export async function getTeamMemberFromApiKey(
   adminClient: SupabaseClient,
-  apiKey: string
+  apiKey: string,
+  logContext?: { endpoint: string; ip?: string | null },
 ): Promise<TeamMemberContext | null> {
   const keyHash = hashApiKey(apiKey);
 
-  // 1. API Key 조회 (revoked 되지 않은 것만)
-  // RLS 우회 필요 - admin client 사용
+  // 1. API Key 조회 (revoked 포함 — 명시적 오류 반환 위해)
   const { data: apiKeyRow, error: keyError } = await adminClient
     .from('agent_api_keys')
     .select('id, team_member_id, revoked_at, expires_at, scope')
     .eq('key_hash', keyHash)
-    .is('revoked_at', null)
     .maybeSingle();
 
-  if (keyError || !apiKeyRow) {
-    return null;
-  }
+  if (keyError || !apiKeyRow) return null;
+
+  // revoked 키 명시적 거부
+  if (apiKeyRow.revoked_at) throw new RevokedApiKeyError();
 
   // 만료 키 거부 (expires_at=NULL이면 무기한 유효)
-  if (apiKeyRow.expires_at && new Date(apiKeyRow.expires_at) < new Date()) {
-    return null;
-  }
+  if (apiKeyRow.expires_at && new Date(apiKeyRow.expires_at) < new Date()) return null;
 
   // AC6: scope=NULL이면 ['read','write'] 기본값 적용 (admin 제외 하위호환)
   const scope: string[] = (apiKeyRow.scope as string[] | null) ?? ['read', 'write'];
 
   // 2. team_member 조회
-  // RLS 우회 필요 - admin client 사용
   const { data: member, error: memberError } = await adminClient
     .from('team_members')
     .select('id, org_id, project_id, name, type, is_active')
@@ -85,15 +90,19 @@ export async function getTeamMemberFromApiKey(
     .eq('is_active', true)
     .maybeSingle();
 
-  if (memberError || !member) {
-    return null;
-  }
+  if (memberError || !member) return null;
 
-  // 3. last_used_at 업데이트 (비동기, 결과 무시)
-  void adminClient
-    .from('agent_api_keys')
-    .update({ last_used_at: new Date().toISOString() })
-    .eq('id', apiKeyRow.id);
+  // 3. last_used_at 업데이트 + 사용 로그 (fire-and-forget)
+  const now = new Date().toISOString();
+  void adminClient.from('agent_api_keys').update({ last_used_at: now }).eq('id', apiKeyRow.id);
+  if (logContext) {
+    void adminClient.from('api_key_logs').insert({
+      api_key_id: apiKeyRow.id as string,
+      org_id: member.org_id as string,
+      endpoint: logContext.endpoint,
+      ip_address: logContext.ip ?? null,
+    });
+  }
 
   return {
     id: member.id as string,
@@ -102,6 +111,7 @@ export async function getTeamMemberFromApiKey(
     name: member.name as string,
     type: member.type as 'human' | 'agent',
     scope,
+    apiKeyId: apiKeyRow.id as string,
   };
 }
 

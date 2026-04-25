@@ -1,8 +1,12 @@
 import { NotFoundError, ForbiddenError } from '@/services/sprint';
 import { InvalidTransitionError } from '@/services/story';
+import { RevokedApiKeyError } from './auth-api-key';
 import { apiError } from './api-response';
 
 export function handleApiError(err: unknown) {
+  if (err instanceof RevokedApiKeyError) {
+    return apiError('REVOKED_API_KEY', err.message, 401);
+  }
   if (err instanceof NotFoundError) {
     return apiError('NOT_FOUND', err.message, 404);
   }

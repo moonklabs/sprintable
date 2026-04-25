@@ -261,7 +261,9 @@ export async function getAuthContext(
     const { getTeamMemberFromApiKey } = await import('./auth-api-key');
     const { createSupabaseAdminClient } = await import('./supabase/admin');
     const adminClient = createSupabaseAdminClient();
-    const apiKeyMember = await getTeamMemberFromApiKey(adminClient, rawApiKey);
+    const endpoint = new URL(request.url).pathname;
+    const ip = request.headers.get('x-forwarded-for') ?? request.headers.get('x-real-ip');
+    const apiKeyMember = await getTeamMemberFromApiKey(adminClient, rawApiKey, { endpoint, ip });
 
     if (apiKeyMember) {
       // Rate limiting (에이전트만)
