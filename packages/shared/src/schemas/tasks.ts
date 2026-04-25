@@ -5,12 +5,10 @@ export const createTaskSchema = z.object({
   title: z.string().min(1),
   assignee_id: z.string().optional().nullable(),
   status: z.string().optional(),
-  story_points: z.number().optional().nullable(),
 });
 
 export const updateTaskSchema = z.object({
   title: z.string().min(1).optional(),
   status: z.string().optional(),
   assignee_id: z.string().optional().nullable(),
-  story_points: z.number().optional().nullable(),
 });

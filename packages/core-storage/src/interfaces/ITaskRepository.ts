@@ -19,14 +19,12 @@ export interface CreateTaskInput {
   title: string;
   assignee_id?: string | null;
   status?: string;
-  story_points?: number | null;
 }
 
 export interface UpdateTaskInput {
   title?: string;
   status?: string;
   assignee_id?: string | null;
-  story_points?: number | null;
 }
 
 export interface TaskListFilters extends PaginationOptions {
