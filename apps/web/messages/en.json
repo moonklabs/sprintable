@@ -235,7 +235,8 @@
     "sidebarSubtitle": "Open memos, reply, and create new ones from anywhere",
     "closeSidebar": "Close memo sidebar",
     "expandReplies": "Show {count} earlier replies",
-    "collapseReplies": "Hide earlier replies"
+    "collapseReplies": "Hide earlier replies",
+    "searchPlaceholder": "Search memos..."
   },
   "login": {
     "title": "Sprintable",
