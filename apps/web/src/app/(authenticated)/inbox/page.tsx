@@ -160,7 +160,7 @@ export default function InboxPage() {
   };
 
   return (
-    <div className="space-y-4">
+    <>
       <TopBarSlot
         title={<h1 className="text-sm font-medium">{t('title')}</h1>}
         actions={
@@ -173,7 +173,7 @@ export default function InboxPage() {
         }
       />
 
-      <div>
+      <div className="flex min-h-0 flex-1 flex-col overflow-hidden">
         <div className="flex items-center border-b border-border/80 px-4 py-3">
           <div className="flex flex-wrap gap-2">
             {INBOX_FILTER_TYPES.map((type) => {
@@ -261,6 +261,6 @@ export default function InboxPage() {
       </div>
 
       <ToastContainer toasts={toasts} onDismiss={dismissToast} />
-    </div>
+    </>
   );
 }
