@@ -102,4 +102,8 @@ export class SqliteStoryRepository implements IStoryRepository {
     if (options?.limit) { sql += ` LIMIT ${options.limit}`; }
     return this.db.prepare(sql).all(...params);
   }
+
+  async addActivity(_input: { story_id: string; org_id: string; actor_id: string; action_type: string; old_value?: string | null; new_value?: string | null }): Promise<void> {
+    // OSS SQLite mode: activity logs not persisted
+  }
 }

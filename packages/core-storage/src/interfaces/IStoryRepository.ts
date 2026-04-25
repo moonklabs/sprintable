@@ -85,4 +85,5 @@ export interface IStoryRepository {
   addComment(input: { story_id: string; content: string; created_by: string }): Promise<StoryComment>;
   getComments(storyId: string, options?: PaginationOptions): Promise<StoryComment[]>;
   getActivities(storyId: string, options?: PaginationOptions): Promise<unknown[]>;
+  addActivity(input: { story_id: string; org_id: string; actor_id: string; action_type: string; old_value?: string | null; new_value?: string | null }): Promise<void>;
 }
