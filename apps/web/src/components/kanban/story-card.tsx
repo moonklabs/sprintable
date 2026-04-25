@@ -134,10 +134,10 @@ export function StoryCard({ story, epicName, assignee, onClick, onEdit, onChange
       {...listeners}
       onClick={onClick}
       onContextMenu={handleContextMenu}
-      className={`group relative cursor-pointer overflow-hidden rounded-xl border p-4 transition ${
+      className={`group relative cursor-pointer overflow-hidden rounded-lg p-3 transition ${
         assignee?.type === 'agent'
-          ? 'border-cyan-500/45 bg-[linear-gradient(135deg,rgba(6,182,212,0.08),rgba(168,85,247,0.04))] shadow-[0_0_15px_rgba(6,182,212,0.12)] hover:border-cyan-400 hover:shadow-[0_0_22px_rgba(6,182,212,0.18)]'
-          : 'border-border/80 bg-background shadow-sm hover:border-primary/30 hover:shadow-md'
+          ? 'bg-[linear-gradient(135deg,rgba(6,182,212,0.08),rgba(168,85,247,0.04))] ring-1 ring-cyan-500/30 hover:ring-cyan-400/60'
+          : 'bg-background shadow-sm hover:shadow-md hover:bg-background'
       }`}
     >
       {assignee?.type === 'agent' && (
@@ -148,8 +148,8 @@ export function StoryCard({ story, epicName, assignee, onClick, onEdit, onChange
           {epicName}
         </Badge>
       ) : null}
-      <p className="relative z-10 line-clamp-2 text-[15px] font-semibold leading-5 text-foreground">{story.title}</p>
-      <div className="relative z-10 mt-4 flex items-center justify-between gap-2 border-t border-border/60 pt-3">
+      <p className="relative z-10 line-clamp-2 text-sm font-medium leading-5 text-foreground">{story.title}</p>
+      <div className="relative z-10 mt-3 flex items-center justify-between gap-2">
         <div className="flex items-center gap-2">
           {assignee ? (
             <div className={`flex h-6 w-6 items-center justify-center rounded-full border text-[10px] font-medium ${

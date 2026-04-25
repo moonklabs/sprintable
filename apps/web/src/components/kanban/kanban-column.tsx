@@ -58,21 +58,21 @@ export function KanbanColumn({
   const isValidTarget = isDragging && (VALID_TRANSITIONS[dragStatus] ?? []).includes(id);
   const isInvalidTarget = isDragging && !isValidTarget && dragStatus !== id;
 
-  // AC1: WIP 초과 시 빨간 테두리
-  const borderClass = wipExceeded
-    ? 'border-destructive/70 shadow-[0_0_0_1px_rgba(var(--destructive),0.25)]'
+  // AC1: WIP 초과 시 빨간 강조
+  const colClass = wipExceeded
+    ? 'bg-destructive/5 ring-1 ring-destructive/30'
     : isOver && isValidTarget
-      ? 'border-primary/40 bg-primary/5 shadow-[0_0_0_1px_rgba(var(--primary),0.2)]'
+      ? 'bg-primary/5 ring-1 ring-primary/20'
       : isValidTarget
-        ? 'border-emerald-400/25 bg-emerald-400/5'
+        ? 'bg-emerald-400/5'
         : isInvalidTarget
-          ? 'border-border/50 bg-muted/30 opacity-45'
-          : 'border-border/80 bg-card shadow-sm';
+          ? 'bg-muted/20 opacity-45'
+          : 'bg-muted/40';
 
   return (
     <div
       ref={setNodeRef}
-      className={`flex min-h-[360px] w-full flex-col rounded-2xl border p-4 transition md:w-[340px] md:min-w-[300px] ${borderClass}`}
+      className={`flex min-h-[360px] w-full flex-col rounded-xl p-3 transition md:w-[300px] md:min-w-[260px] ${colClass}`}
     >
       {isDragging && isValidTarget && (
         <div className="mb-3 rounded-xl border border-emerald-400/20 bg-emerald-400/8 px-2 py-1 text-center text-[10px] font-medium uppercase tracking-widest text-emerald-400/70">
@@ -81,9 +81,9 @@ export function KanbanColumn({
       )}
 
       {/* 컬럼 헤더 */}
-      <div className="mb-4 flex flex-col gap-2 border-b border-border/70 pb-3">
+      <div className="mb-3 flex flex-col gap-2">
         <div className="flex items-center justify-between gap-3">
-          <h3 className="text-sm font-semibold tracking-tight text-foreground">{label}</h3>
+          <h3 className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">{label}</h3>
           <div className="flex items-center gap-1.5">
             {/* AC1: WIP 초과 배지 */}
             {wipExceeded && (
@@ -149,8 +149,8 @@ export function KanbanColumn({
       <SortableContextCompat items={stories.map((s) => s.id)} strategy={verticalListSortingStrategy}>
         <div className="flex min-w-0 flex-1 flex-col gap-3">
           {stories.length === 0 ? (
-            <div className="flex min-h-[124px] items-center justify-center rounded-xl border border-dashed border-border/80 bg-muted/10 px-4 text-center">
-              <p className="text-xs font-medium text-muted-foreground">{t('noStories')}</p>
+            <div className="flex min-h-[100px] items-center justify-center px-4 text-center">
+              <p className="text-xs text-muted-foreground/60">{t('noStories')}</p>
             </div>
           ) : null}
           {stories.map((story) => (

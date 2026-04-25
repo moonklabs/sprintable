@@ -479,13 +479,14 @@ export function KanbanBoard({ projectId }: KanbanBoardProps) {
   if (loading) return <KanbanSkeleton />;
 
   return (
-    <div className="space-y-5">
+    <div className="flex flex-col gap-0">
       {transitionError && (
         <div className="fixed bottom-4 right-4 z-50 rounded-md border border-destructive bg-destructive px-4 py-3 text-sm text-destructive-foreground shadow-md">
           ⚠️ {transitionError}
         </div>
       )}
-      <div className="rounded-2xl border border-border/70 bg-muted/10 p-3 shadow-sm">
+      {/* Filters — flat strip */}
+      <div className="flex-shrink-0 border-b border-border/80 px-3 py-2.5">
         <KanbanFilters
           sprints={sprints}
           epics={epics}
@@ -497,7 +498,6 @@ export function KanbanBoard({ projectId }: KanbanBoardProps) {
           onEpicChange={setSelectedEpicId}
           onAssigneeChange={setSelectedAssigneeId}
         />
-        {/* AC2: 검색 input */}
         <div className="mt-2">
           <Input
             type="search"
@@ -523,8 +523,8 @@ export function KanbanBoard({ projectId }: KanbanBoardProps) {
       {/* Desktop kanban (hidden below md) */}
       <div className="hidden md:block">
         <DndContext sensors={sensors} onDragStart={handleDragStart} onDragEnd={handleDragEnd}>
-          <div className="rounded-2xl border border-border/70 bg-card p-4 shadow-sm">
-            <div className="flex flex-row gap-5 overflow-x-auto pb-1">
+          <div className="px-3 py-3">
+            <div className="flex flex-row gap-3 overflow-x-auto pb-1">
             {COLUMNS.map((col) => {
               const colStories = storiesByColumn(col.id);
               const wipState = wipLimits[col.id] ?? { limit: null, editing: false, draft: '' };
