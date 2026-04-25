@@ -300,7 +300,7 @@ export function MemosFeedClient({ currentTeamMemberId, projectId }: MemosFeedCli
     />
     <div className="flex min-h-0 flex-1 flex-col lg:h-full lg:flex-row lg:overflow-hidden">
       {/* Desktop: left feed panel (lg+) */}
-      <div className="hidden w-[340px] flex-shrink-0 flex-col border-r border-border/80 bg-[color:var(--operator-surface-soft)]/35 lg:flex">
+      <div className="hidden w-[340px] flex-shrink-0 flex-col border-r border-border/80 bg-background lg:flex">
         {feedHeader}
         <div className="flex-1 overflow-y-auto">
           <MemoFeed

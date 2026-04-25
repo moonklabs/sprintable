@@ -618,7 +618,7 @@ export function DocsShellClient({ projectId }: DocsShellClientProps) {
             </div>
           </div>
         ) : (
-          <div className="flex flex-1 flex-col bg-[color:var(--operator-surface-soft)]/35 overflow-y-auto">
+          <div className="flex flex-1 flex-col bg-background overflow-y-auto">
             {sidebarContent}
           </div>
         )}
