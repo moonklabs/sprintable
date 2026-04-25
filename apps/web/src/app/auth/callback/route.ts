@@ -12,6 +12,12 @@ export async function GET(request: Request) {
     const supabase = await createSupabaseServerClient();
     const { error } = await supabase.auth.exchangeCodeForSession(code);
     if (!error) {
+      // MFA 검증 필요 여부 확인 (AAL1 → AAL2 required)
+      const { data: aal } = await supabase.auth.mfa.getAuthenticatorAssuranceLevel();
+      if (aal?.nextLevel === 'aal2' && aal?.currentLevel !== 'aal2') {
+        return NextResponse.redirect(`${origin}/mfa`);
+      }
+
       // next 파라미터가 있으면 (초대 플로우 등) 그대로 리다이렉트
       if (next) return NextResponse.redirect(`${origin}${next}`);
 

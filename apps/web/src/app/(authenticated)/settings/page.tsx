@@ -12,6 +12,7 @@ import { McpConnectionSettings } from '@/components/settings/mcp-connection-sett
 import { SlackIntegrationSettingsSection } from '@/components/settings/slack-integration-settings';
 import { ThemeSettings } from '@/components/settings/theme-settings';
 import { StandupDeadlineSection } from '@/components/settings/standup-deadline-section';
+import { TwoFactorSection } from '@/components/settings/two-factor-section';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { OperatorInput, OperatorSelect } from '@/components/ui/operator-control';
@@ -450,6 +451,10 @@ export default function SettingsPage() {
 
       <section id="theme">
         <ThemeSettings />
+      </section>
+
+      <section id="two-factor">
+        <TwoFactorSection />
       </section>
 
       <section id="notifications">
