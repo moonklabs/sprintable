@@ -142,7 +142,7 @@ function TreeNode({
           onClick={handleClick}
           onContextMenu={handleContextMenu}
           className={cn(
-            'flex w-full items-center gap-2 rounded-2xl px-3 py-2 text-left text-sm transition-all',
+            'flex w-full items-center gap-2 rounded-2xl pl-3 pr-7 py-2 text-left text-[13px] transition-all',
             isSelected
               ? 'bg-primary/10 text-primary'
               : 'text-foreground/88 hover:bg-muted hover:text-foreground',
@@ -180,7 +180,7 @@ function TreeNode({
         <div
           ref={menuRef}
           className={cn(
-            'absolute left-0 top-full z-50 mt-1 w-48 rounded-lg border border-border bg-popover p-1 shadow-md',
+            'absolute right-0 top-full z-50 mt-1 w-48 rounded-lg border border-border bg-popover p-1 shadow-md',
             contextMenuOpen ? 'block' : 'hidden',
           )}
         >

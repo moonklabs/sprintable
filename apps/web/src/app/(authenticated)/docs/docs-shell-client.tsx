@@ -93,6 +93,7 @@ export function DocsShellClient({ projectId }: DocsShellClientProps) {
   const [content, setContent] = useState('');
   const [contentFormat, setContentFormat] = useState<'markdown' | 'html'>('markdown');
   const [mdCopied, setMdCopied] = useState(false);
+  const [autosave, setAutosave] = useState(true);
 
   const handleCopyMarkdown = useCallback(async () => {
     try {
@@ -126,6 +127,7 @@ export function DocsShellClient({ projectId }: DocsShellClientProps) {
     savePayload: { title, content, content_format: contentFormat },
     serverUpdatedAt: selectedDoc?.updated_at ?? null,
     editing: selectedDoc !== null,
+    autosave,
     onSaved: handleDocSaved,
   });
 
@@ -511,7 +513,7 @@ export function DocsShellClient({ projectId }: DocsShellClientProps) {
             </div>
           </div>
         ) : selectedDoc ? (
-          <>
+          <div className="flex h-full flex-col overflow-hidden">
             {/* Header */}
             <div className="flex-shrink-0 border-b border-white/10 px-4 py-3 lg:px-6 lg:py-5">
               <div className="flex items-center justify-between gap-4">
@@ -537,8 +539,8 @@ export function DocsShellClient({ projectId }: DocsShellClientProps) {
               </div>
             </div>
 
-            {/* Content — always-editable tiptap */}
-            <div className="flex-1 overflow-y-auto px-4 py-4 lg:px-6 lg:py-6">
+            {/* Content — fills remaining height */}
+            <div className="flex min-h-0 flex-1 flex-col overflow-hidden px-4 py-4 lg:px-6 lg:py-6">
               <DocEditor
                 value={content}
                 contentFormat={contentFormat}
@@ -549,6 +551,8 @@ export function DocsShellClient({ projectId }: DocsShellClientProps) {
                 onContentFormatChange={setContentFormat}
                 isDirty={isDirty}
                 onSave={save}
+                autosave={autosave}
+                onAutosaveToggle={setAutosave}
                 labels={{
                   contentFormat: t('contentFormat'),
                   markdown: t('formatMarkdown'),
@@ -564,10 +568,11 @@ export function DocsShellClient({ projectId }: DocsShellClientProps) {
                   quote: t('toolbarQuote'),
                   code: t('toolbarCode'),
                   link: t('toolbarLink'),
+                  autosave: t('autosave'),
                 }}
               />
             </div>
-          </>
+          </div>
   ) : (
     <div className="flex h-full items-center justify-center p-4 lg:p-6">
       <EmptyState

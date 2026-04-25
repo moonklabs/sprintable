@@ -888,6 +888,7 @@
     "revisionPreview": "미리보기",
     "revisionRestore": "이 버전으로 복원",
     "revisionClosePreview": "미리보기 닫기",
+    "autosave": "자동저장",
     "autosaveOn": "자동 저장 활성",
     "tocSection": "목차",
     "tocEmpty": "표시할 헤딩이 없습니다",

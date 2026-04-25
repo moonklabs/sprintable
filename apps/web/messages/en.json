@@ -888,6 +888,7 @@
     "revisionPreview": "Preview",
     "revisionRestore": "Restore this version",
     "revisionClosePreview": "Close preview",
+    "autosave": "Autosave",
     "autosaveOn": "Autosave on",
     "tocSection": "Table of contents",
     "tocEmpty": "No headings to show yet",
