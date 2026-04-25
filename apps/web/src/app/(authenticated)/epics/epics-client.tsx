@@ -771,7 +771,7 @@ export function EpicsClient({ projectId, orgId }: EpicsClientProps) {
       />
 
       {/* Desktop layout: list + slide-in detail panel */}
-      <div className="hidden lg:flex lg:gap-0 lg:items-stretch lg:min-h-[calc(100vh-9rem)]">
+      <div className="hidden min-h-0 flex-1 overflow-hidden lg:flex lg:items-stretch lg:gap-0">
         <div className={`transition-all duration-300 ${selectedEpic ? 'w-[380px] shrink-0 border-r border-border/80' : 'w-full'}`}>
           {listPanel}
         </div>
@@ -787,7 +787,7 @@ export function EpicsClient({ projectId, orgId }: EpicsClientProps) {
       </div>
 
       {/* Mobile layout */}
-      <div className="flex flex-col lg:hidden">
+      <div className="flex flex-1 flex-col overflow-hidden lg:hidden">
         {mobileView === 'list' ? (
           <div className="flex-1">{listPanel}</div>
         ) : (
