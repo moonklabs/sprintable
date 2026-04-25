@@ -893,7 +893,11 @@
     "unknown": "Unknown",
     "adminOnly": "Admin access required",
     "grantFailed": "Grant failed",
-    "adminOnlyHint": "Only org admin/owner can grant rewards"
+    "adminOnlyHint": "Only org admin/owner can grant rewards",
+    "periodAll": "All",
+    "periodDaily": "Daily",
+    "periodWeekly": "Weekly",
+    "periodMonthly": "Monthly"
   },
   "inbox": {
     "title": "Inbox",
