@@ -118,7 +118,11 @@
     "wipLimitSet": "WIP 한도 설정",
     "wipLimitExceeded": "WIP 한도 초과",
     "wipLimitSave": "저장",
-    "wipLimitRemove": "한도 제거"
+    "wipLimitRemove": "한도 제거",
+    "filters": "필터",
+    "sprints": "스프린트",
+    "epics": "에픽",
+    "assignees": "담당자"
   },
   "memos": {
     "title": "메모",

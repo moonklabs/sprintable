@@ -8,7 +8,6 @@ import { DndContext, DragEndEvent, PointerSensor, useSensor, useSensors, DragOve
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { KanbanColumn } from './kanban-column';
-import { KanbanFilters } from './kanban-filters';
 import { KanbanListView } from './kanban-list-view';
 import { KanbanSkeleton } from './kanban-skeleton';
 import { StoryDetailPanel } from './story-detail-panel';
@@ -77,9 +76,9 @@ export function KanbanBoard({ projectId }: KanbanBoardProps) {
   const [loadingMoreEpics, setLoadingMoreEpics] = useState(false);
   const [loadingMoreStoryTasks, setLoadingMoreStoryTasks] = useState(false);
 
-  const [selectedSprintId, setSelectedSprintId] = useState(() => searchParams.get('sprint_id') ?? '');
-  const [selectedEpicId, setSelectedEpicId] = useState(() => searchParams.get('epic_id') ?? '');
-  const [selectedAssigneeId, setSelectedAssigneeId] = useState('');
+  const selectedSprintId = searchParams.get('sprint_id') ?? '';
+  const selectedEpicId = searchParams.get('epic_id') ?? '';
+  const selectedAssigneeId = searchParams.get('assignee_id') ?? '';
 
   // AC2: 검색 쿼리
   const [searchQuery, setSearchQuery] = useState('');
@@ -104,20 +103,6 @@ export function KanbanBoard({ projectId }: KanbanBoardProps) {
       return next;
     });
   }, [projectId]);
-
-  // Sync epic_id to URL
-  useEffect(() => {
-    const params = new URLSearchParams(searchParams.toString());
-    if (selectedEpicId) {
-      params.set('epic_id', selectedEpicId);
-    } else {
-      params.delete('epic_id');
-    }
-    const storyId = searchParams.get('story');
-    if (!storyId) {
-      router.replace(params.toString() ? `?${params.toString()}` : window.location.pathname, { scroll: false });
-    }
-  }, [selectedEpicId]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const [selectedStory, setSelectedStory] = useState<KanbanStory | null>(null);
   const selectedStoryRef = useRef<KanbanStory | null>(null);
@@ -485,28 +470,15 @@ export function KanbanBoard({ projectId }: KanbanBoardProps) {
           ⚠️ {transitionError}
         </div>
       )}
-      {/* Filters — flat strip */}
-      <div className="flex-shrink-0 border-b border-border/80 px-3 py-2.5">
-        <KanbanFilters
-          sprints={sprints}
-          epics={epics}
-          members={members}
-          selectedSprintId={selectedSprintId}
-          selectedEpicId={selectedEpicId}
-          selectedAssigneeId={selectedAssigneeId}
-          onSprintChange={setSelectedSprintId}
-          onEpicChange={setSelectedEpicId}
-          onAssigneeChange={setSelectedAssigneeId}
+      {/* Search — flat strip */}
+      <div className="flex-shrink-0 border-b border-border/80 px-3 py-2">
+        <Input
+          type="search"
+          placeholder={t('searchPlaceholder')}
+          value={searchQuery}
+          onChange={(e) => setSearchQuery(e.target.value)}
+          className="h-8 text-sm"
         />
-        <div className="mt-2">
-          <Input
-            type="search"
-            placeholder={t('searchPlaceholder')}
-            value={searchQuery}
-            onChange={(e) => setSearchQuery(e.target.value)}
-            className="h-8 text-sm"
-          />
-        </div>
       </div>
 
       {/* Mobile list view (hidden on md+) */}
