@@ -13,6 +13,10 @@ export async function GET(request: Request) {
     const { error } = await supabase.auth.exchangeCodeForSession(code);
     if (error) {
       console.error('[auth/callback] exchangeCodeForSession failed:', error.message, error.status);
+      // Mobile PKCE fallback: server couldn't read code_verifier cookie — retry in browser
+      const params = new URLSearchParams({ code });
+      if (next) params.set('next', next);
+      return NextResponse.redirect(`${origin}/auth/callback/fallback?${params.toString()}`);
     }
     if (!error) {
       // MFA 검증 필요 여부 확인 (AAL1 → AAL2 required)
