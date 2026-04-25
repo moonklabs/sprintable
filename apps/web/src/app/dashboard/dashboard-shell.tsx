@@ -5,6 +5,7 @@ import { usePathname } from 'next/navigation';
 import { RealtimeProvider } from '@/components/realtime-provider';
 import { AppSidebar } from '@/components/nav/app-sidebar';
 import { TopBar } from '@/components/nav/top-bar';
+import { TopBarProvider } from '@/components/nav/top-bar-context';
 import { SidebarProvider, SidebarInset } from '@/components/ui/sidebar';
 
 export interface DashboardProjectOption {
@@ -44,20 +45,22 @@ export function DashboardShell({
   return (
     <DashboardCtx.Provider value={{ currentTeamMemberId, orgId, projectId, projectName, projectMemberships }}>
       <RealtimeProvider currentTeamMemberId={currentTeamMemberId}>
-        <SidebarProvider className="h-svh">
-          <AppSidebar
-            currentTeamMemberId={currentTeamMemberId}
-            projectId={projectId}
-            projectName={projectName}
-            projectMemberships={projectMemberships}
-          />
-          <SidebarInset className="relative flex flex-col overflow-hidden">
-            {showTopBar && <TopBar />}
-            <div className="flex flex-1 min-h-0 flex-col overflow-y-auto">
-              {children}
-            </div>
-          </SidebarInset>
-        </SidebarProvider>
+        <TopBarProvider>
+          <SidebarProvider className="h-svh">
+            <AppSidebar
+              currentTeamMemberId={currentTeamMemberId}
+              projectId={projectId}
+              projectName={projectName}
+              projectMemberships={projectMemberships}
+            />
+            <SidebarInset className="relative flex flex-col overflow-hidden">
+              {showTopBar && <TopBar />}
+              <div className="flex flex-1 min-h-0 flex-col overflow-y-auto">
+                {children}
+              </div>
+            </SidebarInset>
+          </SidebarProvider>
+        </TopBarProvider>
       </RealtimeProvider>
     </DashboardCtx.Provider>
   );
