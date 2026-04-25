@@ -4,7 +4,7 @@ import type { ComponentType } from 'react';
 import { useState, useEffect, useCallback, useRef } from 'react';
 import { useRouter, useSearchParams } from 'next/navigation';
 import { useTranslations } from 'next-intl';
-import { Check, ChevronDown, LayoutGrid, LayoutList, Search } from 'lucide-react';
+import { Check, ChevronDown, LayoutGrid, LayoutList, Search, SlidersHorizontal } from 'lucide-react';
 import { DndContext, DragEndEvent, PointerSensor, useSensor, useSensors, DragOverlay } from '@dnd-kit/core';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
@@ -92,6 +92,8 @@ export function KanbanBoard({ projectId }: KanbanBoardProps) {
 
   const [searchQuery, setSearchQuery] = useState('');
   const [showSearch, setShowSearch] = useState(false);
+  const [filterPanelOpen, setFilterPanelOpen] = useState(false);
+  const filterPanelRef = useRef<HTMLDivElement>(null);
   const [assigneeTypeFilter, setAssigneeTypeFilter] = useState<'' | 'human' | 'agent'>('');
   const [viewMode, setViewMode] = useState<'board' | 'list'>('board');
 
@@ -169,6 +171,17 @@ export function KanbanBoard({ projectId }: KanbanBoardProps) {
   }, [selectedSprintId, projectId]);
 
   useEffect(() => { void fetchData(); }, [fetchData]);
+
+  useEffect(() => {
+    if (!filterPanelOpen) return;
+    const handler = (e: MouseEvent) => {
+      if (filterPanelRef.current && !filterPanelRef.current.contains(e.target as Node)) {
+        setFilterPanelOpen(false);
+      }
+    };
+    document.addEventListener('mousedown', handler);
+    return () => document.removeEventListener('mousedown', handler);
+  }, [filterPanelOpen]);
 
   const handleStoryClick = useCallback(async (story: KanbanStory) => {
     setSelectedStory(story);
@@ -520,115 +533,8 @@ export function KanbanBoard({ projectId }: KanbanBoardProps) {
           ))}
         </div>
 
-        {/* Right: filter dropdowns + view toggle */}
-        <div className="flex items-center gap-1.5">
-          {/* Sprint dropdown */}
-          <DropdownMenu>
-            <DropdownMenuTrigger
-              render={
-                <button
-                  type="button"
-                  className={`flex h-7 items-center gap-1 rounded-md px-2.5 text-xs font-medium transition-colors ${
-                    selectedSprintId ? 'bg-primary/10 text-primary' : 'text-muted-foreground hover:bg-muted/60 hover:text-foreground'
-                  }`}
-                >
-                  <span className="max-w-[96px] truncate">
-                    {sprints.find((s) => s.id === selectedSprintId)?.title ?? t('allSprints')}
-                  </span>
-                  <ChevronDown className="size-3 shrink-0 opacity-60" />
-                </button>
-              }
-            />
-            <DropdownMenuContent align="end" className="w-52">
-              <DropdownMenuGroup>
-                <DropdownMenuLabel className="text-xs text-muted-foreground">{t('sprints')}</DropdownMenuLabel>
-                <DropdownMenuSeparator />
-                <DropdownMenuItem onClick={() => updateFilter('sprint_id', '')}>
-                  <span className="flex-1">{t('allSprints')}</span>
-                  {!selectedSprintId && <Check className="size-3.5 text-primary" />}
-                </DropdownMenuItem>
-                {sprints.map((s) => (
-                  <DropdownMenuItem key={s.id} onClick={() => updateFilter('sprint_id', s.id)}>
-                    <span className="flex-1 truncate">{s.title}</span>
-                    {s.id === selectedSprintId && <Check className="size-3.5 text-primary" />}
-                  </DropdownMenuItem>
-                ))}
-              </DropdownMenuGroup>
-            </DropdownMenuContent>
-          </DropdownMenu>
-
-          {/* Epic dropdown */}
-          <DropdownMenu>
-            <DropdownMenuTrigger
-              render={
-                <button
-                  type="button"
-                  className={`flex h-7 items-center gap-1 rounded-md px-2.5 text-xs font-medium transition-colors ${
-                    selectedEpicId ? 'bg-primary/10 text-primary' : 'text-muted-foreground hover:bg-muted/60 hover:text-foreground'
-                  }`}
-                >
-                  <span className="max-w-[96px] truncate">
-                    {epics.find((e) => e.id === selectedEpicId)?.title ?? t('allEpics')}
-                  </span>
-                  <ChevronDown className="size-3 shrink-0 opacity-60" />
-                </button>
-              }
-            />
-            <DropdownMenuContent align="end" className="w-52">
-              <DropdownMenuGroup>
-                <DropdownMenuLabel className="text-xs text-muted-foreground">{t('epics')}</DropdownMenuLabel>
-                <DropdownMenuSeparator />
-                <DropdownMenuItem onClick={() => updateFilter('epic_id', '')}>
-                  <span className="flex-1">{t('allEpics')}</span>
-                  {!selectedEpicId && <Check className="size-3.5 text-primary" />}
-                </DropdownMenuItem>
-                {epics.map((e) => (
-                  <DropdownMenuItem key={e.id} onClick={() => updateFilter('epic_id', e.id)}>
-                    <span className="flex-1 truncate">{e.title}</span>
-                    {e.id === selectedEpicId && <Check className="size-3.5 text-primary" />}
-                  </DropdownMenuItem>
-                ))}
-              </DropdownMenuGroup>
-            </DropdownMenuContent>
-          </DropdownMenu>
-
-          {/* Assignee dropdown */}
-          <DropdownMenu>
-            <DropdownMenuTrigger
-              render={
-                <button
-                  type="button"
-                  className={`flex h-7 items-center gap-1 rounded-md px-2.5 text-xs font-medium transition-colors ${
-                    selectedAssigneeId ? 'bg-primary/10 text-primary' : 'text-muted-foreground hover:bg-muted/60 hover:text-foreground'
-                  }`}
-                >
-                  <span className="max-w-[96px] truncate">
-                    {members.find((m) => m.id === selectedAssigneeId)?.name ?? t('allAssignees')}
-                  </span>
-                  <ChevronDown className="size-3 shrink-0 opacity-60" />
-                </button>
-              }
-            />
-            <DropdownMenuContent align="end" className="w-52">
-              <DropdownMenuGroup>
-                <DropdownMenuLabel className="text-xs text-muted-foreground">{t('assignees')}</DropdownMenuLabel>
-                <DropdownMenuSeparator />
-                <DropdownMenuItem onClick={() => updateFilter('assignee_id', '')}>
-                  <span className="flex-1">{t('allAssignees')}</span>
-                  {!selectedAssigneeId && <Check className="size-3.5 text-primary" />}
-                </DropdownMenuItem>
-                {members.map((m) => (
-                  <DropdownMenuItem key={m.id} onClick={() => updateFilter('assignee_id', m.id)}>
-                    <span className="flex-1 truncate">{m.name}</span>
-                    {m.id === selectedAssigneeId && <Check className="size-3.5 text-primary" />}
-                  </DropdownMenuItem>
-                ))}
-              </DropdownMenuGroup>
-            </DropdownMenuContent>
-          </DropdownMenu>
-
-          <div className="mx-1 h-4 w-px bg-border/60" />
-
+        {/* Right: filter icon + view toggle */}
+        <div className="flex items-center gap-1">
           {/* Search toggle */}
           {showSearch ? (
             <Input
@@ -652,6 +558,110 @@ export function KanbanBoard({ projectId }: KanbanBoardProps) {
               <Search className="size-3.5" />
             </button>
           )}
+
+          {/* Filter panel */}
+          <div className="relative" ref={filterPanelRef}>
+            <button
+              type="button"
+              title={t('filterTitle')}
+              onClick={() => setFilterPanelOpen((v) => !v)}
+              className={`flex h-7 w-7 items-center justify-center rounded-md transition-colors ${
+                filterPanelOpen || selectedSprintId || selectedEpicId || selectedAssigneeId
+                  ? 'bg-primary/10 text-primary'
+                  : 'text-muted-foreground hover:bg-muted/60 hover:text-foreground'
+              }`}
+            >
+              <SlidersHorizontal className="size-3.5" />
+            </button>
+
+            {filterPanelOpen && (
+              <div className="absolute right-0 top-8 z-50 w-56 rounded-xl border border-border bg-popover p-2 shadow-lg">
+                {/* Sprint */}
+                <DropdownMenu>
+                  <DropdownMenuTrigger
+                    render={
+                      <button type="button" className={`flex w-full items-center gap-2 rounded-lg px-2.5 py-1.5 text-xs font-medium transition-colors ${selectedSprintId ? 'text-primary' : 'text-muted-foreground hover:bg-muted/60 hover:text-foreground'}`}>
+                        <span className="flex-1 truncate text-left">{sprints.find((s) => s.id === selectedSprintId)?.title ?? t('allSprints')}</span>
+                        <ChevronDown className="size-3 shrink-0 opacity-60" />
+                      </button>
+                    }
+                  />
+                  <DropdownMenuContent side="left" align="start" className="w-52">
+                    <DropdownMenuGroup>
+                      <DropdownMenuLabel className="text-xs text-muted-foreground">{t('sprints')}</DropdownMenuLabel>
+                      <DropdownMenuSeparator />
+                      <DropdownMenuItem onClick={() => updateFilter('sprint_id', '')}>
+                        <span className="flex-1">{t('allSprints')}</span>
+                        {!selectedSprintId && <Check className="size-3.5 text-primary" />}
+                      </DropdownMenuItem>
+                      {sprints.map((s) => (
+                        <DropdownMenuItem key={s.id} onClick={() => updateFilter('sprint_id', s.id)}>
+                          <span className="flex-1 truncate">{s.title}</span>
+                          {s.id === selectedSprintId && <Check className="size-3.5 text-primary" />}
+                        </DropdownMenuItem>
+                      ))}
+                    </DropdownMenuGroup>
+                  </DropdownMenuContent>
+                </DropdownMenu>
+
+                {/* Epic */}
+                <DropdownMenu>
+                  <DropdownMenuTrigger
+                    render={
+                      <button type="button" className={`flex w-full items-center gap-2 rounded-lg px-2.5 py-1.5 text-xs font-medium transition-colors ${selectedEpicId ? 'text-primary' : 'text-muted-foreground hover:bg-muted/60 hover:text-foreground'}`}>
+                        <span className="flex-1 truncate text-left">{epics.find((e) => e.id === selectedEpicId)?.title ?? t('allEpics')}</span>
+                        <ChevronDown className="size-3 shrink-0 opacity-60" />
+                      </button>
+                    }
+                  />
+                  <DropdownMenuContent side="left" align="start" className="w-52">
+                    <DropdownMenuGroup>
+                      <DropdownMenuLabel className="text-xs text-muted-foreground">{t('epics')}</DropdownMenuLabel>
+                      <DropdownMenuSeparator />
+                      <DropdownMenuItem onClick={() => updateFilter('epic_id', '')}>
+                        <span className="flex-1">{t('allEpics')}</span>
+                        {!selectedEpicId && <Check className="size-3.5 text-primary" />}
+                      </DropdownMenuItem>
+                      {epics.map((e) => (
+                        <DropdownMenuItem key={e.id} onClick={() => updateFilter('epic_id', e.id)}>
+                          <span className="flex-1 truncate">{e.title}</span>
+                          {e.id === selectedEpicId && <Check className="size-3.5 text-primary" />}
+                        </DropdownMenuItem>
+                      ))}
+                    </DropdownMenuGroup>
+                  </DropdownMenuContent>
+                </DropdownMenu>
+
+                {/* Assignee */}
+                <DropdownMenu>
+                  <DropdownMenuTrigger
+                    render={
+                      <button type="button" className={`flex w-full items-center gap-2 rounded-lg px-2.5 py-1.5 text-xs font-medium transition-colors ${selectedAssigneeId ? 'text-primary' : 'text-muted-foreground hover:bg-muted/60 hover:text-foreground'}`}>
+                        <span className="flex-1 truncate text-left">{members.find((m) => m.id === selectedAssigneeId)?.name ?? t('allAssignees')}</span>
+                        <ChevronDown className="size-3 shrink-0 opacity-60" />
+                      </button>
+                    }
+                  />
+                  <DropdownMenuContent side="left" align="start" className="w-52">
+                    <DropdownMenuGroup>
+                      <DropdownMenuLabel className="text-xs text-muted-foreground">{t('assignees')}</DropdownMenuLabel>
+                      <DropdownMenuSeparator />
+                      <DropdownMenuItem onClick={() => updateFilter('assignee_id', '')}>
+                        <span className="flex-1">{t('allAssignees')}</span>
+                        {!selectedAssigneeId && <Check className="size-3.5 text-primary" />}
+                      </DropdownMenuItem>
+                      {members.map((m) => (
+                        <DropdownMenuItem key={m.id} onClick={() => updateFilter('assignee_id', m.id)}>
+                          <span className="flex-1 truncate">{m.name}</span>
+                          {m.id === selectedAssigneeId && <Check className="size-3.5 text-primary" />}
+                        </DropdownMenuItem>
+                      ))}
+                    </DropdownMenuGroup>
+                  </DropdownMenuContent>
+                </DropdownMenu>
+              </div>
+            )}
+          </div>
 
           {/* Board/List toggle */}
           <div className="flex items-center overflow-hidden rounded-md border border-border/60">
