@@ -298,7 +298,7 @@ export function MemosFeedClient({ currentTeamMemberId, projectId }: MemosFeedCli
         </Button>
       }
     />
-    <div className="flex min-h-0 flex-1 flex-col lg:h-full lg:flex-row lg:overflow-hidden lg:rounded-2xl lg:border lg:border-border/80 lg:bg-card lg:shadow-sm">
+    <div className="flex min-h-0 flex-1 flex-col lg:h-full lg:flex-row lg:overflow-hidden">
       {/* Desktop: left feed panel (lg+) */}
       <div className="hidden w-[340px] flex-shrink-0 flex-col border-r border-border/80 bg-[color:var(--operator-surface-soft)]/35 lg:flex">
         {feedHeader}

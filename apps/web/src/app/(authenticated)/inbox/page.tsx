@@ -6,7 +6,6 @@ import { useTranslations } from 'next-intl';
 import { createSupabaseBrowserClient } from '@/lib/supabase/client';
 import { Button } from '@/components/ui/button';
 import { TopBarSlot } from '@/components/nav/top-bar-slot';
-import { SectionCard, SectionCardBody, SectionCardHeader } from '@/components/ui/section-card';
 import { Badge } from '@/components/ui/badge';
 import { EmptyState } from '@/components/ui/empty-state';
 import { useDashboardContext } from '../../dashboard/dashboard-shell';
@@ -174,8 +173,8 @@ export default function InboxPage() {
         }
       />
 
-      <SectionCard>
-        <SectionCardHeader>
+      <div>
+        <div className="flex items-center border-b border-border/80 px-4 py-3">
           <div className="flex flex-wrap gap-2">
             {INBOX_FILTER_TYPES.map((type) => {
               const active = typeFilter === type;
@@ -192,8 +191,8 @@ export default function InboxPage() {
               );
             })}
           </div>
-        </SectionCardHeader>
-        <SectionCardBody>
+        </div>
+        <div className="px-4 py-3">
           {loading ? (
             <div className="space-y-3">
               {[1, 2, 3, 4, 5].map((i) => (
@@ -258,8 +257,8 @@ export default function InboxPage() {
               ))}
             </div>
           )}
-        </SectionCardBody>
-      </SectionCard>
+        </div>
+      </div>
 
       <ToastContainer toasts={toasts} onDismiss={dismissToast} />
     </div>

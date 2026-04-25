@@ -3,7 +3,6 @@
 import { useEffect, useMemo, useState } from 'react';
 import ReactMarkdown from 'react-markdown';
 import { Menu, X } from 'lucide-react';
-import { SectionCard, SectionCardBody, SectionCardHeader } from '@/components/ui/section-card';
 import { Button } from '@/components/ui/button';
 import { ContextualPanelLayout, useContextualPanelState } from '@/components/ui/contextual-panel-layout';
 import { GlassPanel } from '@/components/ui/glass-panel';
@@ -183,75 +182,75 @@ export function PolicyDocBrowser({ projectId, t }: PolicyDocBrowserProps) {
         inlineColumnsClassName="2xl:grid-cols-[280px_minmax(0,1fr)]"
       >
         <div className="grid gap-4 p-4 xl:grid-cols-[320px_minmax(0,1fr)]">
-        <SectionCard className="border-white/8 bg-white/4">
-          <SectionCardHeader>
-            <div className="space-y-3">
-              <div>
-                <div className="text-sm font-semibold text-[color:var(--operator-foreground)]">{t('policyEpics')}</div>
-                <div className="mt-1 text-sm text-[color:var(--operator-muted)]">{t('policyEpicsDescription')}</div>
+          <div className="flex flex-col min-h-0">
+            <div className="border-b border-white/8 px-4 py-4">
+              <div className="space-y-3">
+                <div>
+                  <div className="text-sm font-semibold text-[color:var(--operator-foreground)]">{t('policyEpics')}</div>
+                  <div className="mt-1 text-sm text-[color:var(--operator-muted)]">{t('policyEpicsDescription')}</div>
+                </div>
+                <input
+                  type="text"
+                  value={query}
+                  onChange={(event) => setQuery(event.target.value)}
+                  placeholder={t('policySearchPlaceholder')}
+                  className="w-full rounded-2xl border border-white/8 bg-[color:var(--operator-surface-soft)]/90 px-4 py-2.5 text-sm text-[color:var(--operator-foreground)] placeholder:text-[color:var(--operator-muted)] focus:border-[color:var(--operator-primary)]/20 focus:outline-none"
+                />
               </div>
-              <input
-                type="text"
-                value={query}
-                onChange={(event) => setQuery(event.target.value)}
-                placeholder={t('policySearchPlaceholder')}
-                className="w-full rounded-2xl border border-white/8 bg-[color:var(--operator-surface-soft)]/90 px-4 py-2.5 text-sm text-[color:var(--operator-foreground)] placeholder:text-[color:var(--operator-muted)] focus:border-[color:var(--operator-primary)]/20 focus:outline-none"
-              />
             </div>
-          </SectionCardHeader>
-          <SectionCardBody>
-            {loading ? (
-              <p className="text-sm text-[color:var(--operator-muted)]">{t('loading')}</p>
-            ) : docs.length === 0 ? (
-              <p className="text-sm text-[color:var(--operator-muted)]">{t('noPolicyEpics')}</p>
-            ) : (
-              <div className="space-y-2">
-                {docs.map((doc) => {
-                  const isSelected = doc.id === selectedDocId;
-                  return (
-                    <button
-                      key={doc.id}
-                      onClick={() => {
-                        setSelectedDocId(doc.id);
-                        setPolicyPanelDrawerOpen(false);
-                      }}
-                      className={cn(
-                        'w-full rounded-2xl border px-3 py-3 text-left text-sm transition-all',
-                        isSelected
-                          ? 'border-[color:var(--operator-primary)]/20 bg-[color:var(--operator-primary)]/14 text-[color:var(--operator-primary-soft)]'
-                          : 'border-white/8 bg-white/5 text-[color:var(--operator-foreground)]/88 hover:bg-white/8',
-                      )}
-                    >
-                      <div className="font-medium">{doc.title || doc.epic?.title || t('untitledPolicyDoc')}</div>
-                    </button>
-                  );
-                })}
-              </div>
-            )}
-          </SectionCardBody>
-        </SectionCard>
+            <div className="px-4 py-4">
+              {loading ? (
+                <p className="text-sm text-[color:var(--operator-muted)]">{t('loading')}</p>
+              ) : docs.length === 0 ? (
+                <p className="text-sm text-[color:var(--operator-muted)]">{t('noPolicyEpics')}</p>
+              ) : (
+                <div className="space-y-2">
+                  {docs.map((doc) => {
+                    const isSelected = doc.id === selectedDocId;
+                    return (
+                      <button
+                        key={doc.id}
+                        onClick={() => {
+                          setSelectedDocId(doc.id);
+                          setPolicyPanelDrawerOpen(false);
+                        }}
+                        className={cn(
+                          'w-full rounded-2xl border px-3 py-3 text-left text-sm transition-all',
+                          isSelected
+                            ? 'border-[color:var(--operator-primary)]/20 bg-[color:var(--operator-primary)]/14 text-[color:var(--operator-primary-soft)]'
+                            : 'border-white/8 bg-white/5 text-[color:var(--operator-foreground)]/88 hover:bg-white/8',
+                        )}
+                      >
+                        <div className="font-medium">{doc.title || doc.epic?.title || t('untitledPolicyDoc')}</div>
+                      </button>
+                    );
+                  })}
+                </div>
+              )}
+            </div>
+          </div>
 
-        <SectionCard className="border-white/8 bg-white/4">
-          <SectionCardHeader>
-            <div className="flex items-center justify-between gap-3">
-              <div>
-                <div className="text-sm font-semibold text-[color:var(--operator-foreground)]">{selectedDoc?.title || selectedDoc?.epic?.title || t('selectPolicyEpic')}</div>
-                {selectedDoc ? <div className="mt-1 text-xs text-[color:var(--operator-muted)]">{t('lastUpdated')}: {new Date(selectedDoc.updated_at).toLocaleString()}</div> : null}
+          <div className="flex flex-col min-h-0">
+            <div className="border-b border-white/8 px-4 py-4">
+              <div className="flex items-center justify-between gap-3">
+                <div>
+                  <div className="text-sm font-semibold text-[color:var(--operator-foreground)]">{selectedDoc?.title || selectedDoc?.epic?.title || t('selectPolicyEpic')}</div>
+                  {selectedDoc ? <div className="mt-1 text-xs text-[color:var(--operator-muted)]">{t('lastUpdated')}: {new Date(selectedDoc.updated_at).toLocaleString()}</div> : null}
+                </div>
               </div>
             </div>
-          </SectionCardHeader>
-          <SectionCardBody>
-            {selectedDoc ? (
-              <div className="prose prose-invert prose-sm max-w-none text-[color:var(--operator-foreground)]">
-                <ReactMarkdown>{selectedDoc.content?.trim() || t('emptyPolicyEpic')}</ReactMarkdown>
-              </div>
-            ) : (
-              <div className="flex min-h-[280px] items-center justify-center text-sm text-[color:var(--operator-muted)]">
-                {t('selectPolicyEpic')}
-              </div>
-            )}
-          </SectionCardBody>
-        </SectionCard>
+            <div className="px-4 py-4">
+              {selectedDoc ? (
+                <div className="prose prose-invert prose-sm max-w-none text-[color:var(--operator-foreground)]">
+                  <ReactMarkdown>{selectedDoc.content?.trim() || t('emptyPolicyEpic')}</ReactMarkdown>
+                </div>
+              ) : (
+                <div className="flex min-h-[280px] items-center justify-center text-sm text-[color:var(--operator-muted)]">
+                  {t('selectPolicyEpic')}
+                </div>
+              )}
+            </div>
+          </div>
         </div>
       </ContextualPanelLayout>
     </div>

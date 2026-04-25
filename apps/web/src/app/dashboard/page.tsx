@@ -10,7 +10,6 @@ import { SectionCard, SectionCardBody, SectionCardHeader } from '@/components/ui
 import { EmptyState } from '@/components/ui/empty-state';
 import { StatusBadge } from '@/components/ui/status-badge';
 import { TopBarSlot } from '@/components/nav/top-bar-slot';
-import { GlassPanel } from '@/components/ui/glass-panel';
 import { Button } from '@/components/ui/button';
 import { OperatorStatCard } from '@/components/ui/operator-stat-card';
 import { formatLocaleDateOnly, formatLocaleDateTime } from '@/lib/i18n';
@@ -46,8 +45,7 @@ export default async function DashboardPage() {
         <div className="mx-auto max-w-7xl space-y-6">
           <TopBarSlot title={<h1 className="text-sm font-medium">{t('title')}</h1>} />
 
-          <GlassPanel className="overflow-hidden border-[color:var(--operator-primary)]/10 bg-[radial-gradient(circle_at_top_left,rgba(182,196,255,0.18),transparent_40%),linear-gradient(135deg,rgba(0,218,243,0.08),transparent_42%),color-mix(in_srgb,var(--operator-panel)_78%,transparent)] p-1">
-            <SectionCard className="border-0 bg-transparent shadow-none backdrop-blur-none">
+          <SectionCard className="bg-[radial-gradient(circle_at_top_left,rgba(182,196,255,0.18),transparent_40%),linear-gradient(135deg,rgba(0,218,243,0.08),transparent_42%),color-mix(in_srgb,var(--operator-panel)_78%,transparent)]">
               <SectionCardHeader>
                 <div className="flex items-center justify-between gap-3">
                   <div>
@@ -62,8 +60,7 @@ export default async function DashboardPage() {
                 <OperatorStatCard label={t('activeSprints')} value={0} hint={t('activeSprintsHint')} />
                 <OperatorStatCard label={t('openMemos')} value={0} hint={t('openMemosHint')} />
               </SectionCardBody>
-            </SectionCard>
-          </GlassPanel>
+          </SectionCard>
 
           <div className="grid gap-4 xl:grid-cols-3">
             <SectionCard className="xl:col-span-2">
