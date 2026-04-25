@@ -486,7 +486,10 @@
     "projectInviteTitle": "프로젝트 초대",
     "projectInviteDescription": "이메일로 특정 프로젝트에 바로 초대합니다.",
     "projectInviteSent": "초대 링크가 생성되었습니다.",
-    "projectInviteFailed": "프로젝트 초대에 실패했습니다."
+    "projectInviteFailed": "프로젝트 초대에 실패했습니다.",
+    "standupSettings": "스탠드업 설정",
+    "standupSettingsDesc": "일일 스탠드업 마감 시간을 설정합니다.",
+    "standupDeadline": "마감 시간"
   },
   "landing": {
     "navProduct": "개요",

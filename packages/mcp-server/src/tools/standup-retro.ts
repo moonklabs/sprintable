@@ -6,7 +6,7 @@ function err(msg: string) { return { content: [{ type: 'text' as const, text: `E
 function ok(data: unknown) { return { content: [{ type: 'text' as const, text: JSON.stringify(data, null, 2) }] }; }
 
 export function registerStandupRetroTools(server: McpServer) {
-  server.tool('get_standup_v2', 'Get standup entry for member+date', {
+  server.tool('get_standup', 'Get standup entry for member+date', {
     project_id: z.string().optional().describe('Explicit project ID'),
     member_id: z.string(),
     date: z.string().describe('YYYY-MM-DD'),
@@ -21,7 +21,7 @@ export function registerStandupRetroTools(server: McpServer) {
     }
   });
 
-  server.tool('save_standup_v2', 'Save/update standup entry (DB table)', {
+  server.tool('save_standup', 'Save/update standup entry (DB table)', {
     project_id: z.string().optional(),
     author_id: z.string(),
     date: z.string().describe('YYYY-MM-DD'),
@@ -42,7 +42,7 @@ export function registerStandupRetroTools(server: McpServer) {
     }
   });
 
-  server.tool('list_standup_entries_v2', 'List standup entries for date (DB)', {
+  server.tool('list_standup_entries', 'List standup entries for date (DB)', {
     project_id: z.string().optional(),
     current_member_id: z.string().optional(),
     date: z.string().describe('YYYY-MM-DD'),

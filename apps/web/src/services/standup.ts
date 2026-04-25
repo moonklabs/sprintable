@@ -89,6 +89,24 @@ export class StandupService {
   }
 
   async getMissing(projectId: string, date: string) {
+    // deadline 조회: 오늘 날짜면 마감 전 여부 체크
+    const today = new Date().toISOString().slice(0, 10);
+    if (date === today) {
+      const { data: settings } = await this.supabase
+        .from('project_settings')
+        .select('standup_deadline')
+        .eq('project_id', projectId)
+        .maybeSingle();
+      const deadline = (settings?.standup_deadline as string | null) ?? '09:00';
+      const [dh, dm] = deadline.split(':').map(Number);
+      const now = new Date();
+      const deadlineTime = new Date(now);
+      deadlineTime.setHours(dh, dm, 0, 0);
+      if (now < deadlineTime) {
+        return { submitted_count: 0, missing: [], deadline_not_reached: true };
+      }
+    }
+
     const { data: members } = await this.supabase
       .from('team_members')
       .select('id, name')
