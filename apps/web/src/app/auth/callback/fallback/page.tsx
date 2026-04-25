@@ -34,19 +34,34 @@ function FallbackHandler() {
     if (!code) { router.replace('/login?error=auth_failed'); return; }
 
     const ssrClient = createSupabaseBrowserClient();
+    const timeout = setTimeout(() => router.replace('/login?error=auth_failed'), 15000);
 
-    // 1차: @supabase/ssr 정상 교환 시도
-    ssrClient.auth.exchangeCodeForSession(code).then(async ({ data, error }) => {
-      if (!error && data.session) {
+    (async () => {
+      // createBrowserClient._initialize() may have already auto-exchanged the code
+      // via detectSessionInUrl. getSession() awaits initializePromise, so if the
+      // auto-exchange already succeeded we skip the explicit call entirely.
+      const { data: { session: existingSession } } = await ssrClient.auth.getSession();
+      if (existingSession) {
+        clearTimeout(timeout);
         localStorage.removeItem('__pkce_cv_backup');
-        redirectAfterLogin(ssrClient, router, next);
+        await redirectAfterLogin(ssrClient, router, next);
         return;
       }
 
-      // 2차: localStorage 백업으로 REST API 직접 교환 (쿠키 리다이렉트 중 소실 대응)
+      // No session yet (auto-exchange failed, e.g. incognito with no PKCE cookie) →
+      // try explicit exchange using the code from URL.
+      const { data, error } = await ssrClient.auth.exchangeCodeForSession(code);
+      if (!error && data.session) {
+        clearTimeout(timeout);
+        localStorage.removeItem('__pkce_cv_backup');
+        await redirectAfterLogin(ssrClient, router, next);
+        return;
+      }
+
+      // 2차: PKCE 쿠키 유실 → localStorage 백업으로 REST API 직접 교환
       if (error?.code === 'pkce_code_verifier_not_found') {
         const backup = localStorage.getItem('__pkce_cv_backup');
-        if (!backup) { router.replace('/login?error=auth_failed'); return; }
+        if (!backup) { clearTimeout(timeout); router.replace('/login?error=auth_failed'); return; }
 
         // base64url 디코딩 (base64- prefix 제거)
         let codeVerifier = backup;
@@ -69,23 +84,25 @@ function FallbackHandler() {
             body: JSON.stringify({ auth_code: code, code_verifier: codeVerifier }),
           });
           const tokenData = await res.json();
-          if (!res.ok) { router.replace('/login?error=auth_failed'); return; }
+          if (!res.ok) { clearTimeout(timeout); router.replace('/login?error=auth_failed'); return; }
 
           await ssrClient.auth.setSession({
             access_token: tokenData.access_token,
             refresh_token: tokenData.refresh_token,
           });
+          clearTimeout(timeout);
           localStorage.removeItem('__pkce_cv_backup');
-          redirectAfterLogin(ssrClient, router, next);
+          await redirectAfterLogin(ssrClient, router, next);
         } catch {
+          clearTimeout(timeout);
           router.replace('/login?error=auth_failed');
         }
       } else {
+        clearTimeout(timeout);
         router.replace('/login?error=auth_failed');
       }
-    });
+    })();
 
-    const timeout = setTimeout(() => router.replace('/login?error=auth_failed'), 15000);
     return () => clearTimeout(timeout);
   }, [router, searchParams]);
 
