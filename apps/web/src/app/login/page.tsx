@@ -3,6 +3,7 @@
 import { useSearchParams } from 'next/navigation';
 import { SprintableLogo } from '@/components/brand/sprintable-logo';
 import { createSupabaseBrowserClient } from '@/lib/supabase/client';
+import { createClient } from '@supabase/supabase-js';
 
 export default function LoginPage() {
   const supabase = createSupabaseBrowserClient();
@@ -13,8 +14,13 @@ export default function LoginPage() {
     const callbackUrl = returnTo
       ? `${window.location.origin}/auth/callback?next=${encodeURIComponent(returnTo)}`
       : `${window.location.origin}/auth/callback`;
-    await supabase.auth.signOut(); // stale auth 쿠키 정리 (PKCE code verifier 충돌 방지)
-    await supabase.auth.signInWithOAuth({
+    await supabase.auth.signOut(); // stale auth 쿠키 정리
+    // vanilla client — code-verifier를 localStorage에 저장 (cookie 기반 SSR client는 redirect chain에서 소실)
+    const pkceClient = createClient(
+      process.env.NEXT_PUBLIC_SUPABASE_URL!,
+      process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!,
+    );
+    await pkceClient.auth.signInWithOAuth({
       provider,
       options: {
         redirectTo: callbackUrl,
