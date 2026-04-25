@@ -456,7 +456,54 @@ export class MemoService {
       } as DispatchableMemo);
     }
 
+    // @멘션 파싱 + DB 저장 + 알림 (fire-and-forget)
+    if (this.supabase) {
+      this._processMemoMentions(data.id, input.content.trim(), input.org_id, input.project_id, input.created_by).catch(() => {});
+    }
+
     return data;
+  }
+
+  private async _processMemoMentions(memoId: string, content: string, orgId: string, projectId: string, authorId: string): Promise<void> {
+    if (!this.supabase) return;
+    const notifService = new NotificationService(this.supabase);
+
+    const { data: members } = await this.supabase
+      .from('team_members')
+      .select('id, name')
+      .eq('org_id', orgId)
+      .eq('project_id', projectId)
+      .eq('is_active', true);
+
+    const mentionedIds: string[] = [];
+    for (const member of (members ?? []) as Array<{ id: string; name: string | null }>) {
+      if (!member.name?.trim() || member.id === authorId) continue;
+      if (!hasExactMemberMention(content, member.name.trim())) continue;
+      mentionedIds.push(member.id);
+    }
+
+    if (mentionedIds.length === 0) return;
+
+    // memo_mentions DB 저장 (ON CONFLICT DO NOTHING)
+    await this.supabase
+      .from('memo_mentions')
+      .upsert(
+        mentionedIds.map((uid) => ({ memo_id: memoId, mentioned_user_id: uid })),
+        { onConflict: 'memo_id,mentioned_user_id', ignoreDuplicates: true },
+      );
+
+    // 멘션 알림
+    for (const userId of mentionedIds) {
+      await notifService.create({
+        org_id: orgId,
+        user_id: userId,
+        type: 'memo_mention',
+        title: '메모에서 멘션되었습니다',
+        body: content.slice(0, 100),
+        reference_type: 'memo',
+        reference_id: memoId,
+      });
+    }
   }
 
   async list(filters: { org_id?: string; project_id?: string; assigned_to?: string; created_by?: string; status?: string; limit?: number; cursor?: string | null; q?: string }) {
