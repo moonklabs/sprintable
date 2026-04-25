@@ -8,6 +8,7 @@ import { MemoThread } from '@/components/memos/memo-thread';
 import { MemoCreateForm } from '@/components/memos/memo-create-form';
 import { Button } from '@/components/ui/button';
 import { EmptyState } from '@/components/ui/empty-state';
+import { TopBarSlot } from '@/components/nav/top-bar-slot';
 import { summarizeMemo, mergeMemoDetailIntoList, type MemoDetailState, type MemoSummaryState } from '@/components/memos/memo-state';
 
 interface MemosFeedClientProps {
@@ -211,30 +212,24 @@ export function MemosFeedClient({ currentTeamMemberId, projectId }: MemosFeedCli
 
   if (loading) {
     return (
-      <div className="flex h-64 items-center justify-center">
-        <p className="text-sm text-[color:var(--operator-muted)]">{t('loading')}</p>
-      </div>
+      <>
+        <TopBarSlot title={<h1 className="text-sm font-medium">{t('title')}</h1>} />
+        <div className="flex h-64 items-center justify-center">
+          <p className="text-sm text-[color:var(--operator-muted)]">{t('loading')}</p>
+        </div>
+      </>
     );
   }
 
   const feedHeader = (
-    <div className="flex-shrink-0 border-b border-white/10 px-4 py-4">
-      <div className="flex items-center justify-between">
-        <div className="space-y-1">
-          <p className="text-[11px] font-semibold uppercase tracking-[0.2em] text-muted-foreground">Message Feed</p>
-          <h1 className="text-lg font-semibold">{t('title')}</h1>
-        </div>
-        <Button size="sm" onClick={handleNewMemo}>
-          <Plus className="h-4 w-4" />
-        </Button>
-      </div>
-      <div className="relative mt-3">
+    <div className="flex-shrink-0 border-b border-border/80 px-3 py-2">
+      <div className="relative">
         <Search className="absolute left-2.5 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-muted-foreground" />
         <input
           type="text"
           value={searchQuery}
           onChange={(e) => handleSearchChange(e.target.value)}
-          placeholder={t('searchPlaceholder')}
+          placeholder={t('searchMemosPlaceholder')}
           className="w-full rounded-md border border-border bg-muted/30 py-1.5 pl-8 pr-3 text-sm text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-1 focus:ring-primary"
         />
         {searchQuery ? (
@@ -293,6 +288,16 @@ export function MemosFeedClient({ currentTeamMemberId, projectId }: MemosFeedCli
   );
 
   return (
+    <>
+    <TopBarSlot
+      title={<h1 className="text-sm font-medium">{t('title')}</h1>}
+      actions={
+        <Button size="sm" variant="outline" onClick={handleNewMemo}>
+          <Plus className="mr-1.5 h-3.5 w-3.5" />
+          {t('newMemo')}
+        </Button>
+      }
+    />
     <div className="flex min-h-0 flex-1 flex-col lg:h-full lg:flex-row lg:overflow-hidden lg:rounded-2xl lg:border lg:border-border/80 lg:bg-card lg:shadow-sm">
       {/* Desktop: left feed panel (lg+) */}
       <div className="hidden w-[340px] flex-shrink-0 flex-col border-r border-border/80 bg-[color:var(--operator-surface-soft)]/35 lg:flex">
@@ -348,5 +353,6 @@ export function MemosFeedClient({ currentTeamMemberId, projectId }: MemosFeedCli
         </div>
       )}
     </div>
+    </>
   );
 }
