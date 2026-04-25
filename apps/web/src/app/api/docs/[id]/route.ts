@@ -7,22 +7,7 @@ import { handleApiError } from '@/lib/api-error';
 import { getAuthContext } from '@/lib/auth-helpers';
 import { apiSuccess, apiError, ApiErrors } from '@/lib/api-response';
 import { isOssMode, createDocRepository } from '@/lib/storage/factory';
-
-const EDIT_ROLES = ['owner', 'admin', 'po'] as const;
-const ADMIN_ROLES = ['owner', 'admin'] as const;
-
-async function getCallerRole(supabase: SupabaseClient, orgId: string): Promise<string | null> {
-  const { data: { user } } = await supabase.auth.getUser();
-  if (!user) return null;
-  const { data } = await supabase
-    .from('team_members')
-    .select('role')
-    .eq('org_id', orgId)
-    .eq('user_id', user.id)
-    .limit(1)
-    .maybeSingle();
-  return (data?.role as string) ?? null;
-}
+import { requireRole, EDIT_ROLES, ADMIN_ROLES } from '@/lib/role-guard';
 
 type RouteParams = { params: Promise<{ id: string }> };
 
@@ -44,8 +29,8 @@ export async function PATCH(request: Request, { params }: RouteParams) {
       const docType = (existing as unknown as { doc_type?: string }).doc_type ?? 'page';
       if (docType === 'sprint_report') return apiError('FORBIDDEN', 'sprint_report documents are read-only', 403);
       if (docType === 'policy') {
-        const role = await getCallerRole(dbClient as SupabaseClient, existing.org_id);
-        if (!role || !(EDIT_ROLES as readonly string[]).includes(role)) return ApiErrors.forbidden('Admin or PO access required to edit policy documents');
+        const denied = await requireRole(dbClient as SupabaseClient, existing.org_id, EDIT_ROLES, 'Admin or PO access required to edit policy documents');
+        if (denied) return denied;
       }
     }
 
@@ -97,8 +82,8 @@ export async function DELETE(request: Request, { params }: RouteParams) {
       const docType = (existing as unknown as { doc_type?: string }).doc_type ?? 'page';
       if (docType === 'sprint_report') return apiError('FORBIDDEN', 'sprint_report documents cannot be deleted', 403);
       if (docType === 'policy') {
-        const role = await getCallerRole(dbClient as SupabaseClient, existing.org_id);
-        if (!role || !(ADMIN_ROLES as readonly string[]).includes(role)) return ApiErrors.forbidden('Admin access required to delete policy documents');
+        const denied = await requireRole(dbClient as SupabaseClient, existing.org_id, ADMIN_ROLES, 'Admin access required to delete policy documents');
+        if (denied) return denied;
       }
     }
 

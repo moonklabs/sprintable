@@ -8,6 +8,7 @@ import { getAuthContext } from '@/lib/auth-helpers';
 import { isOssMode, createSprintRepository, createDocRepository } from '@/lib/storage/factory';
 import { NotificationService } from '@/services/notification.service';
 import { DocsService } from '@/services/docs';
+import { requireRole, EDIT_ROLES } from '@/lib/role-guard';
 
 type RouteParams = { params: Promise<{ id: string }> };
 
@@ -21,6 +22,11 @@ export async function POST(request: Request, { params }: RouteParams) {
     if (me.rateLimitExceeded) return ApiErrors.tooManyRequests(me.rateLimitRemaining, me.rateLimitResetAt);
     const ossMode = isOssMode();
     const dbClient = ossMode ? undefined : (me.type === 'agent' ? createSupabaseAdminClient() : supabase);
+
+    if (!ossMode && dbClient && me.type !== 'agent') {
+      const denied = await requireRole(supabase, me.org_id, EDIT_ROLES, 'Admin or PO access required to close sprint');
+      if (denied) return denied;
+    }
 
     const repo = await createSprintRepository(dbClient);
     const service = new SprintService(repo, dbClient as SupabaseClient | undefined);
