@@ -18,6 +18,7 @@ import {
   PenTool,
   Search,
   Settings,
+  Timer,
   Users,
 } from 'lucide-react';
 import { SprintableLogo } from '@/components/brand/sprintable-logo';
@@ -44,6 +45,7 @@ const NAV_ITEMS: NavItem[] = [
     children: [
       { key: 'board', href: '/board', icon: FolderKanban },
       { key: 'epics', href: '/epics', icon: Layers },
+      { key: 'sprints', href: '/sprints', icon: Timer },
       { key: 'standup', href: '/standup', icon: Users },
       { key: 'retro', href: '/retro', icon: Gauge },
     ],

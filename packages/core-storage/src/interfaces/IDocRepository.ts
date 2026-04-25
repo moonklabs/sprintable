@@ -14,6 +14,7 @@ export interface Doc {
   tags: string[] | null;
   sort_order: number;
   is_folder: boolean;
+  doc_type: string;
   created_by: string;
   created_at: string;
   updated_at: string;
@@ -42,6 +43,7 @@ export interface CreateDocInput {
   parent_id?: string | null;
   is_folder?: boolean;
   sort_order?: number;
+  doc_type?: string;
   created_by: string;
 }
 
