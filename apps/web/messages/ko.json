@@ -39,7 +39,10 @@
     "mockup": "목업",
     "meetings": "회의록",
     "agents": "에이전트",
-    "epics": "에픽"
+    "epics": "에픽",
+    "sprint": "스프린트",
+    "workspace": "워크스페이스",
+    "configure": "환경설정"
   },
   "dashboard": {
     "title": "대시보드",
@@ -683,6 +686,7 @@
     "projectLabel": "프로젝트",
     "projectAttached": "현재 프로젝트 연결됨",
     "projectPending": "프로젝트 컨텍스트 연결 대기",
+    "projects": "프로젝트",
     "projectSelectPrompt": "현재 프로젝트 선택",
     "projectSelectDescription": "헤더의 프로젝트 스위처에서 현재 프로젝트를 선택하면 이 화면이 활성화됩니다.",
     "searchPlaceholder": "작업, 문서, 운영 표면 검색 준비 중...",

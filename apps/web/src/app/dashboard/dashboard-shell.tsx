@@ -2,7 +2,9 @@
 
 import { createContext, useContext } from 'react';
 import { RealtimeProvider } from '@/components/realtime-provider';
-import { OperatorShell } from '@/components/nav/operator-shell';
+import { AppSidebar } from '@/components/nav/app-sidebar';
+import { TopBar } from '@/components/nav/top-bar';
+import { SidebarProvider, SidebarInset } from '@/components/ui/sidebar';
 
 export interface DashboardProjectOption {
   projectId: string;
@@ -27,18 +29,29 @@ interface DashboardShellProps extends DashboardContext {
   children: React.ReactNode;
 }
 
-export function DashboardShell({ currentTeamMemberId, orgId, projectId, projectName, projectMemberships, children }: DashboardShellProps) {
+export function DashboardShell({
+  currentTeamMemberId,
+  orgId,
+  projectId,
+  projectName,
+  projectMemberships,
+  children,
+}: DashboardShellProps) {
   return (
     <DashboardCtx.Provider value={{ currentTeamMemberId, orgId, projectId, projectName, projectMemberships }}>
       <RealtimeProvider currentTeamMemberId={currentTeamMemberId}>
-        <OperatorShell
-          currentTeamMemberId={currentTeamMemberId}
-          projectId={projectId}
-          projectName={projectName}
-          projectMemberships={projectMemberships}
-        >
-          {children}
-        </OperatorShell>
+        <SidebarProvider className="h-svh">
+          <AppSidebar
+            currentTeamMemberId={currentTeamMemberId}
+            projectId={projectId}
+            projectName={projectName}
+            projectMemberships={projectMemberships}
+          />
+          <SidebarInset className="relative overflow-hidden">
+            <TopBar />
+            {children}
+          </SidebarInset>
+        </SidebarProvider>
       </RealtimeProvider>
     </DashboardCtx.Provider>
   );

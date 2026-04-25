@@ -39,7 +39,10 @@
     "mockup": "Mockups",
     "meetings": "Meetings",
     "agents": "Agents",
-    "epics": "Epics"
+    "epics": "Epics",
+    "sprint": "Sprint",
+    "workspace": "Workspace",
+    "configure": "Configure"
   },
   "dashboard": {
     "title": "Dashboard",
@@ -683,6 +686,7 @@
     "projectLabel": "Project",
     "projectAttached": "Current project connected",
     "projectPending": "Project context pending",
+    "projects": "Projects",
     "projectSelectPrompt": "Select current project",
     "projectSelectDescription": "Choose the current project from the header switcher to activate this surface.",
     "searchPlaceholder": "Search tasks, docs, and operator surfaces...",
