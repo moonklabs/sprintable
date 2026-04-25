@@ -1,4 +1,5 @@
 import { NextResponse } from 'next/server';
+import { cookies } from 'next/headers';
 import { createSupabaseServerClient } from '@/lib/supabase/server';
 import { resolveAppUrl } from '@/services/app-url';
 
@@ -9,6 +10,18 @@ export async function GET(request: Request) {
   const origin = resolveAppUrl(null);
 
   if (code) {
+    const fallbackParams = new URLSearchParams({ code });
+    if (next) fallbackParams.set('next', next);
+    const fallbackUrl = `${origin}/auth/callback/fallback?${fallbackParams.toString()}`;
+
+    // code_verifier 쿠키 없으면 서버 교환 skip — OAuth code는 일회용이라
+    // 서버 교환이 실패하면 code가 소비되어 fallback에서 재사용 불가
+    const cookieStore = await cookies();
+    const hasCodeVerifier = cookieStore.getAll().some(c => c.name.includes('code-verifier'));
+    if (!hasCodeVerifier) {
+      return NextResponse.redirect(fallbackUrl);
+    }
+
     const supabase = await createSupabaseServerClient();
     const { error } = await supabase.auth.exchangeCodeForSession(code);
 
@@ -36,11 +49,8 @@ export async function GET(request: Request) {
       return NextResponse.redirect(`${origin}/dashboard`);
     }
 
-    // 서버 교환 실패 (CloudFront→Lambda 경유 시 code_verifier 쿠키 유실, 모바일 bounce tracking 등)
-    // 클라이언트 fallback으로 전달하여 브라우저 쿠키에서 직접 교환 시도
-    const params = new URLSearchParams({ code });
-    if (next) params.set('next', next);
-    return NextResponse.redirect(`${origin}/auth/callback/fallback?${params.toString()}`);
+    // 서버 교환 실패 → 클라이언트 fallback에서 브라우저 쿠키로 재시도
+    return NextResponse.redirect(fallbackUrl);
   }
 
   return NextResponse.redirect(`${origin}/login?error=auth_failed`);

@@ -20,7 +20,10 @@ function FallbackHandler() {
       const { error } = await supabase.auth.exchangeCodeForSession(code);
       if (error) {
         setStatus('인증 실패. 다시 시도해주세요.');
-        setTimeout(() => router.replace('/login?error=auth_failed'), 2000);
+        const params = new URLSearchParams({ error: 'auth_failed' });
+        if (error.code) params.set('error_code', error.code);
+        if (error.message) params.set('error_message', error.message);
+        setTimeout(() => router.replace(`/login?${params.toString()}`), 2000);
         return;
       }
 
