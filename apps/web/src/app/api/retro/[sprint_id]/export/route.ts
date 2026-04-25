@@ -1,31 +1,6 @@
-import type { SupabaseClient } from '@supabase/supabase-js';
-import { createSupabaseServerClient } from '@/lib/supabase/server';
-import { createSupabaseAdminClient } from '@/lib/supabase/admin';
-import { handleApiError } from '@/lib/api-error';
-import { apiSuccess, ApiErrors } from '@/lib/api-response';
-import { getAuthContext } from '@/lib/auth-helpers';
-import { RetroService } from '@/services/retro';
+const GONE = Response.json({ error: { code: 'GONE', message: 'v1 retro API is removed. Use /api/retro-sessions/:id instead.' } }, { status: 410 });
 
-type RouteParams = { params: Promise<{ sprint_id: string }> };
-
-// GET /api/retro/:sprint_id/export?project_id=X
-export async function GET(request: Request, { params }: RouteParams) {
-  try {
-    const { sprint_id } = await params;
-    const supabase = await createSupabaseServerClient();
-    const me = await getAuthContext(supabase, request);
-    if (!me) return ApiErrors.unauthorized();
-    if (me.rateLimitExceeded) return ApiErrors.tooManyRequests(me.rateLimitRemaining, me.rateLimitResetAt);
-
-    const { searchParams } = new URL(request.url);
-    const projectId = searchParams.get('project_id');
-    if (!projectId) return ApiErrors.badRequest('project_id required');
-
-    const dbClient: SupabaseClient = me.type === 'agent' ? createSupabaseAdminClient() : supabase;
-    const service = new RetroService(dbClient);
-    const data = await service.exportBySprintId(projectId, sprint_id);
-    return apiSuccess(data);
-  } catch (err: unknown) {
-    return handleApiError(err);
-  }
-}
+export async function GET() { return GONE; }
+export async function POST() { return GONE; }
+export async function PATCH() { return GONE; }
+export async function DELETE() { return GONE; }
