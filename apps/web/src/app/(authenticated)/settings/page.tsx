@@ -109,6 +109,7 @@ export default function SettingsPage() {
   const [revokingInviteId, setRevokingInviteId] = useState<string | null>(null);
   const [resendingInviteId, setResendingInviteId] = useState<string | null>(null);
   const [resendResult, setResendResult] = useState<{ id: string; url: string } | null>(null);
+  const [graceUntil, setGraceUntil] = useState<string | null>(null);
 
   const refreshProjects = async () => {
     const endpoint = orgId ? `/api/projects?org_id=${encodeURIComponent(orgId)}` : '/api/projects';
@@ -130,6 +131,12 @@ export default function SettingsPage() {
       setIsAdmin(true);
       setAdminChecked(true);
       setInvitations(json.data ?? []);
+      // grace period 정보 조회
+      const statusRes = await fetch('/api/subscription/status');
+      if (statusRes.ok) {
+        const statusJson = await statusRes.json() as { data?: { grace_until?: string | null } };
+        setGraceUntil(statusJson.data?.grace_until ?? null);
+      }
       return;
     }
 
@@ -883,7 +890,12 @@ export default function SettingsPage() {
               <p className="text-sm text-muted-foreground">{t('subscriptionDescription')}</p>
             </div>
           </SectionCardHeader>
-          <SectionCardBody>
+          <SectionCardBody className="space-y-3">
+            {graceUntil && new Date(graceUntil) > new Date() && (
+              <p className="rounded-md border border-amber-500/30 bg-amber-500/10 px-3 py-2 text-sm text-amber-300">
+                {t('gracePeriodNotice', { date: new Date(graceUntil).toLocaleDateString('ko-KR') })}
+              </p>
+            )}
             <Button
               variant="glass"
               size="lg"

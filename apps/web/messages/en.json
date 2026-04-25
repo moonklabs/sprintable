@@ -492,7 +492,8 @@
     "standupDeadline": "Deadline",
     "revoked": "Revoked",
     "revoke": "Revoke",
-    "resend": "Resend"
+    "resend": "Resend",
+    "gracePeriodNotice": "Your current plan will remain active until {date}."
   },
   "landing": {
     "navProduct": "Overview",

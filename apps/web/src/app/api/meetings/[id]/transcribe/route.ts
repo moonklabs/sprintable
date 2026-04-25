@@ -53,41 +53,10 @@ export async function POST(request: Request, { params }: RouteParams) {
       (usageRows ?? []).reduce((sum: number, r: { duration_sec: number }) => sum + r.duration_sec, 0) / 60,
     );
 
-    // AC9: STT minute quota—checkFeatureLimit로 free tier 폴백 포함 조회
+    // AC9: STT minute quota — checkFeatureLimit 경유 (SaaS overlay에서 org_subscriptions 기반 검증)
     const quotaCheck = await checkFeatureLimit(dbClient, me.org_id, 'max_stt_minutes');
     if (!quotaCheck.allowed) {
       return apiUpgradeRequired(`Monthly STT limit reached (${monthlyMinutes} min)`, 'stt_minutes');
-    }
-    const { data: sub } = await dbClient
-      .from('subscriptions')
-      .select('tier_id')
-      .eq('org_id', me.org_id)
-      .eq('status', 'active')
-      .maybeSingle();
-
-    let tierId = sub?.tier_id ?? null;
-    if (!tierId) {
-      const { data: freeTier } = await dbClient
-        .from('plan_tiers')
-        .select('id')
-        .eq('name', 'free')
-        .single();
-      tierId = freeTier?.id ?? null;
-    }
-
-    if (tierId) {
-      const { data: feature } = await dbClient
-        .from('plan_features')
-        .select('limit_value')
-        .eq('tier_id', tierId)
-        .eq('feature_key', 'max_stt_minutes')
-        .single();
-      if (feature?.limit_value != null && monthlyMinutes >= feature.limit_value) {
-        return apiUpgradeRequired(
-          `Monthly STT limit reached (${monthlyMinutes}/${feature.limit_value} min)`,
-          'stt_minutes',
-        );
-      }
     }
 
     const formData = await request.formData();
