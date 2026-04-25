@@ -35,6 +35,12 @@ export async function GET(request: Request) {
 
       return NextResponse.redirect(`${origin}/dashboard`);
     }
+
+    // 서버 교환 실패 (CloudFront→Lambda 경유 시 code_verifier 쿠키 유실, 모바일 bounce tracking 등)
+    // 클라이언트 fallback으로 전달하여 브라우저 쿠키에서 직접 교환 시도
+    const params = new URLSearchParams({ code });
+    if (next) params.set('next', next);
+    return NextResponse.redirect(`${origin}/auth/callback/fallback?${params.toString()}`);
   }
 
   return NextResponse.redirect(`${origin}/login?error=auth_failed`);
