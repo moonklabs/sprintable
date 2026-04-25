@@ -7,7 +7,6 @@ import { Bot, Clock3, GitBranch, History, Pause, Play, RefreshCw, Rocket, Triang
 import { Badge } from '@/components/ui/badge';
 import { Button, buttonVariants } from '@/components/ui/button';
 import { TopBarSlot } from '@/components/nav/top-bar-slot';
-import { SectionCard, SectionCardBody, SectionCardHeader } from '@/components/ui/section-card';
 import { ToastContainer, useToast } from '@/components/ui/toast';
 import {
   Dialog,
@@ -224,8 +223,7 @@ export function AgentsDashboard({ deployments: initialDeployments }: { deploymen
 
   return (
     <>
-      <div className="space-y-4">
-        <TopBarSlot
+      <TopBarSlot
           title={<h1 className="text-sm font-medium">{t('statusTitle')}</h1>}
           actions={
             <Link href="/agents/deploy" className={buttonVariants({ variant: 'outline', size: 'sm' })}>
@@ -234,31 +232,29 @@ export function AgentsDashboard({ deployments: initialDeployments }: { deploymen
             </Link>
           }
         />
-
-        <SectionCard>
-          <SectionCardHeader>
-            <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
-              <div className="space-y-1">
-                <h2 className="text-base font-semibold text-foreground">{t('statusListTitle')}</h2>
-                <p className="text-sm text-muted-foreground">{t('statusListBody')}</p>
-              </div>
-              <div className="flex items-center gap-3">
-                <span className="text-xs text-muted-foreground">
-                  {t('lastRefreshed', {
-                    time: lastRefreshed
-                      ? lastRefreshed.toLocaleTimeString(locale, { hour: '2-digit', minute: '2-digit' })
-                      : '—',
-                  })}
-                </span>
-                <Badge variant="chip" className="inline-flex items-center gap-1">
-                  <RefreshCw className={isRefreshing ? 'size-3 animate-spin' : 'size-3'} />
-                  {t('autoRefreshLabel')}
-                </Badge>
-                <Badge variant="chip">{t('deploymentCount', { count: deployments.length })}</Badge>
-              </div>
+      <div className="flex min-h-0 flex-1 flex-col overflow-y-auto p-6">
+        <div className="rounded-xl border border-border bg-background">
+          <div className="flex flex-col gap-3 border-b border-border/60 px-4 py-3 sm:flex-row sm:items-center sm:justify-between">
+            <div className="space-y-1">
+              <h2 className="text-base font-semibold text-foreground">{t('statusListTitle')}</h2>
+              <p className="text-sm text-muted-foreground">{t('statusListBody')}</p>
             </div>
-          </SectionCardHeader>
-          <SectionCardBody className="space-y-3">
+            <div className="flex items-center gap-3">
+              <span className="text-xs text-muted-foreground">
+                {t('lastRefreshed', {
+                  time: lastRefreshed
+                    ? lastRefreshed.toLocaleTimeString(locale, { hour: '2-digit', minute: '2-digit' })
+                    : '—',
+                })}
+              </span>
+              <Badge variant="chip" className="inline-flex items-center gap-1">
+                <RefreshCw className={isRefreshing ? 'size-3 animate-spin' : 'size-3'} />
+                {t('autoRefreshLabel')}
+              </Badge>
+              <Badge variant="chip">{t('deploymentCount', { count: deployments.length })}</Badge>
+            </div>
+          </div>
+          <div className="space-y-3 p-4">
             {deployments.length === 0 ? (
               <div className="rounded-md border border-dashed border-border bg-muted/30 px-5 py-10 text-center">
                 <Bot className="mx-auto size-10 text-primary" />
@@ -455,8 +451,8 @@ export function AgentsDashboard({ deployments: initialDeployments }: { deploymen
                 </div>
               );
             })}
-          </SectionCardBody>
-        </SectionCard>
+          </div>
+        </div>
       </div>
 
       {/* Suspend / Resume confirmation dialog */}
