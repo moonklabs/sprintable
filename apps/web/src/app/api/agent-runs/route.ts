@@ -6,6 +6,7 @@ import { handleApiError } from '@/lib/api-error';
 import { getAuthContext } from '@/lib/auth-helpers';
 import { apiSuccess, ApiErrors } from '@/lib/api-response';
 import { AgentRunService } from '@/services/agent-run';
+import { requireAgentScope } from '@/lib/auth-api-key';
 
 const createAgentRunSchema = z.object({
   agent_id: z.string().min(1),
@@ -29,6 +30,8 @@ export async function POST(request: Request) {
     const me = await getAuthContext(supabase, request);
     if (!me) return ApiErrors.unauthorized();
     if (me.rateLimitExceeded) return ApiErrors.tooManyRequests(me.rateLimitRemaining, me.rateLimitResetAt);
+
+    if (!requireAgentScope(me, 'write')) return ApiErrors.insufficientScope('write');
 
     const dbClient: SupabaseClient = me.type === 'agent' ? createSupabaseAdminClient() : supabase;
 
@@ -84,10 +87,12 @@ export async function GET(request: Request) {
     const projectId = searchParams.get('project_id');
     if (!projectId) return ApiErrors.badRequest('project_id required');
     const limit = searchParams.get('limit');
+    const agentId = searchParams.get('agent_id') ?? undefined;
+    const cursor = searchParams.get('cursor') ?? undefined;
 
     const dbClient: SupabaseClient = me.type === 'agent' ? createSupabaseAdminClient() : supabase;
     const service = new AgentRunService(dbClient);
-    const runs = await service.list(projectId, limit ? Number(limit) : undefined);
+    const runs = await service.list(projectId, limit ? Number(limit) : undefined, agentId, cursor);
     return apiSuccess(runs);
   } catch (err: unknown) {
     return handleApiError(err);

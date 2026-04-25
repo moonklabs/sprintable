@@ -111,6 +111,18 @@ export async function getTeamMemberFromApiKey(
  * @param adminClient - Service role client (RLS 우회용)
  * @param request - HTTP Request
  */
+/**
+ * Scope 검증 헬퍼 — agent API key의 scope가 required를 포함하는지 확인
+ * 사람(human) 인증에는 scope 제한 없음
+ */
+export function requireAgentScope(
+  me: { type?: string; scope?: string[] } | null | undefined,
+  required: string,
+): boolean {
+  if (!me || me.type !== 'agent') return true; // 사람 또는 미인증은 caller가 별도 처리
+  return (me.scope ?? ['read', 'write']).includes(required);
+}
+
 export async function getTeamMemberFromRequest(
   adminClient: SupabaseClient,
   request: Request
