@@ -117,7 +117,7 @@ export function registerStandupRetroTools(server: McpServer) {
     }
   });
 
-  server.tool('change_retro_phase_v2', 'Change retro session phase', {
+  server.tool('change_retro_phase', 'Change retro session phase', {
     project_id: z.string(),
     session_id: z.string(),
     phase: z.enum(['collect', 'group', 'vote', 'discuss', 'action', 'closed']),
@@ -133,7 +133,7 @@ export function registerStandupRetroTools(server: McpServer) {
     }
   });
 
-  server.tool('add_retro_item_v2', 'Add retro item', {
+  server.tool('add_retro_item', 'Add retro item', {
     project_id: z.string(),
     session_id: z.string(),
     category: z.enum(['good', 'bad', 'improve']),
@@ -151,7 +151,7 @@ export function registerStandupRetroTools(server: McpServer) {
     }
   });
 
-  server.tool('vote_retro_item_v2', 'Vote on retro item', {
+  server.tool('vote_retro_item', 'Vote on retro item', {
     project_id: z.string(),
     session_id: z.string(),
     item_id: z.string(),
@@ -168,7 +168,7 @@ export function registerStandupRetroTools(server: McpServer) {
     }
   });
 
-  server.tool('add_retro_action_v2', 'Add retro action item', {
+  server.tool('add_retro_action', 'Add retro action item', {
     project_id: z.string(),
     session_id: z.string(),
     title: z.string(),
@@ -187,7 +187,7 @@ export function registerStandupRetroTools(server: McpServer) {
     }
   });
 
-  server.tool('export_retro_v2', 'Export retro as markdown', {
+  server.tool('export_retro', 'Export retro as markdown', {
     project_id: z.string(),
     session_id: z.string(),
   }, async ({ project_id, session_id }) => {

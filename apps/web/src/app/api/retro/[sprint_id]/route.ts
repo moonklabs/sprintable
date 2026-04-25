@@ -40,26 +40,7 @@ export async function GET(request: Request, { params }: RouteParams) {
 }
 
 // PATCH /api/retro/:sprint_id — change phase
-export async function PATCH(request: Request, { params }: RouteParams) {
-  try {
-    const { sprint_id } = await params;
-    const supabase = await createSupabaseServerClient();
-    const me = await getAuthContext(supabase, request);
-    if (!me) return ApiErrors.unauthorized();
-    if (me.rateLimitExceeded) return ApiErrors.tooManyRequests(me.rateLimitRemaining, me.rateLimitResetAt);
-
-    const { searchParams } = new URL(request.url);
-    const projectId = searchParams.get('project_id');
-    if (!projectId) return ApiErrors.badRequest('project_id required');
-
-    const body = await request.json() as { phase?: RetroPhase };
-    if (!body.phase) return ApiErrors.badRequest('phase required');
-
-    const dbClient: SupabaseClient = me.type === 'agent' ? createSupabaseAdminClient() : supabase;
-    const service = new RetroService(dbClient);
-    const data = await service.changePhaseBySprintId(projectId, sprint_id, body.phase);
-    return apiSuccess(data);
-  } catch (err: unknown) {
-    return handleApiError(err);
-  }
+// PATCH /api/retro/:sprint_id — deprecated (use PATCH /api/retro-sessions/:id/phase)
+export async function PATCH(_request: Request, _params: RouteParams) {
+  return Response.json({ error: { code: 'GONE', message: 'v1 retro API is removed. Use /api/retro-sessions/:id instead.' } }, { status: 410 });
 }
