@@ -34,6 +34,8 @@ interface DocDetail {
   parent_id?: string | null;
   icon?: string | null;
   is_folder?: boolean;
+  doc_type?: string;
+  org_id?: string;
 }
 
 interface DocsShellClientProps {
@@ -542,9 +544,11 @@ export function DocsShellClient({ projectId }: DocsShellClientProps) {
                   <Button variant="ghost" size="sm" onClick={handleCopyMarkdown} title="마크다운 복사">
                     {mdCopied ? <Check className="h-4 w-4 text-emerald-500" /> : <Copy className="h-4 w-4" />}
                   </Button>
-                  <Button variant="ghost" size="sm" onClick={handleDelete}>
-                    <Trash2 className="h-4 w-4" />
-                  </Button>
+                  {selectedDoc.doc_type !== 'sprint_report' && (
+                    <Button variant="ghost" size="sm" onClick={handleDelete}>
+                      <Trash2 className="h-4 w-4" />
+                    </Button>
+                  )}
                 </div>
               </div>
             </div>
@@ -554,7 +558,7 @@ export function DocsShellClient({ projectId }: DocsShellClientProps) {
               <DocEditor
                 value={content}
                 contentFormat={contentFormat}
-                editable={true} // TODO: pass per-doc permission when RBAC is introduced (e.g. canEdit ?? true)
+                editable={selectedDoc.doc_type !== 'sprint_report'}
                 currentDocId={selectedDoc.id}
                 onNavigate={handleSelectDoc}
                 onChange={setContent}
