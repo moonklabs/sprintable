@@ -21,6 +21,10 @@ export async function createSupabaseServerClient() {
               cookieStore.set(name, value, {
                 ...(options as Parameters<typeof cookieStore.set>[2]),
                 ...(cookieDomain ? { domain: cookieDomain } : {}),
+                sameSite: 'lax',
+                secure: true,
+                path: '/',
+                maxAge: 3600,
               });
             }
           } catch {
