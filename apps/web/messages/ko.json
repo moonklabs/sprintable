@@ -492,7 +492,8 @@
     "standupDeadline": "마감 시간",
     "revoked": "취소됨",
     "revoke": "취소",
-    "resend": "재발송"
+    "resend": "재발송",
+    "gracePeriodNotice": "{date}까지 현재 플랜이 유지됩니다."
   },
   "landing": {
     "navProduct": "개요",
