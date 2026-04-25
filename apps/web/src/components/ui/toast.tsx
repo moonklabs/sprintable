@@ -22,21 +22,21 @@ function Toast({ item, onDismiss }: ToastProps) {
   }, [item.id, onDismiss]);
 
   const borderColor = item.isHighlight
-    ? 'border-l-4 border-l-blue-500'
-    : 'border-l-4 border-l-gray-300';
+    ? 'border-l-4 border-l-primary'
+    : 'border-l-4 border-l-border';
 
   return (
-    <div className={`animate-slide-in rounded-lg bg-white p-4 shadow-lg ${borderColor}`}>
+    <div className={`animate-slide-in rounded-lg border border-border bg-popover p-4 shadow-lg ${borderColor}`}>
       <div className="flex items-start justify-between">
         <div>
-          <p className="text-sm font-semibold text-gray-900">{item.title}</p>
+          <p className="text-sm font-semibold text-popover-foreground">{item.title}</p>
           {item.body && (
-            <p className="mt-1 text-xs text-gray-500">{item.body}</p>
+            <p className="mt-1 text-xs text-muted-foreground">{item.body}</p>
           )}
         </div>
         <button
           onClick={() => onDismiss(item.id)}
-          className="ml-3 text-gray-400 hover:text-gray-600"
+          className="ml-3 text-muted-foreground hover:text-foreground"
         >
           ✕
         </button>

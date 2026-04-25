@@ -306,7 +306,7 @@ export default async function DashboardPage() {
                   <div className="text-xs text-muted-foreground">{t('inProgress')}</div>
                 </div>
                 <div className="rounded-md border border-border bg-muted/30 px-4 py-3">
-                  <div className="text-2xl font-bold text-blue-500">{storyCounts.inReview}</div>
+                  <div className="text-2xl font-bold text-primary">{storyCounts.inReview}</div>
                   <div className="text-xs text-muted-foreground">{t('inReview')}</div>
                 </div>
                 <div className="rounded-md border border-border bg-muted/30 px-4 py-3">

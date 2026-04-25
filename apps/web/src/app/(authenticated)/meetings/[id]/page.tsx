@@ -169,7 +169,7 @@ export default function MeetingDetailPage() {
       {actionError ? (
         <div className="mb-6 flex items-center justify-between gap-3 rounded-lg border border-destructive/30 bg-destructive/5 px-4 py-3 text-sm text-destructive">
           <span>{actionError}</span>
-          <button onClick={() => void loadMeeting()} className="shrink-0 rounded bg-white px-3 py-1 text-xs font-medium text-destructive">
+          <button onClick={() => void loadMeeting()} className="shrink-0 rounded bg-background border border-border px-3 py-1 text-xs font-medium text-destructive">
             {tc('retry')}
           </button>
         </div>
@@ -237,7 +237,7 @@ export default function MeetingDetailPage() {
           </div>
           {editingSummary ? (
             <div className="space-y-2">
-              <textarea value={summaryDraft} onChange={e => setSummaryDraft(e.target.value)} rows={6} className="w-full rounded border bg-white px-3 py-2 text-xs" />
+              <textarea value={summaryDraft} onChange={e => setSummaryDraft(e.target.value)} rows={6} className="w-full rounded border bg-background px-3 py-2 text-xs" />
               <div className="flex gap-2">
                 <button
                   disabled={savingSummary}
@@ -280,7 +280,7 @@ export default function MeetingDetailPage() {
                 <input value={d.text} onChange={e => { setMeeting(prev => prev ? { ...prev, decisions: prev.decisions.map(item => item.id === d.id ? { ...item, text: e.target.value } : item) } : null); }} className="w-full rounded border-0 bg-transparent px-0 text-sm text-foreground focus:outline-none focus:ring-0" placeholder={t('decisions')} />
                 <input value={d.owner ?? ''} onChange={e => { setMeeting(prev => prev ? { ...prev, decisions: prev.decisions.map(item => item.id === d.id ? { ...item, owner: e.target.value } : item) } : null); }} className="w-full rounded border-0 bg-transparent px-0 text-[10px] text-muted-foreground focus:outline-none" placeholder="Owner" />
               </div>
-              <button onClick={async () => { const arr = meeting.decisions.filter(item => item.id !== d.id); setMeeting(prev => prev ? { ...prev, decisions: arr } : null); await fetch(`/api/meetings/${meetingId}`, { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ decisions: arr }) }); }} className="text-xs text-red-400 hover:text-red-600">✕</button>
+              <button onClick={async () => { const arr = meeting.decisions.filter(item => item.id !== d.id); setMeeting(prev => prev ? { ...prev, decisions: arr } : null); await fetch(`/api/meetings/${meetingId}`, { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ decisions: arr }) }); }} className="text-xs text-muted-foreground hover:text-destructive">✕</button>
               <button onClick={async () => { await fetch(`/api/meetings/${meetingId}`, { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ decisions: meeting.decisions }) }); }} className="rounded bg-muted px-2 py-1 text-[10px] text-muted-foreground hover:bg-muted/70">{t('save')}</button>
             </div>
           ))}
@@ -307,7 +307,7 @@ export default function MeetingDetailPage() {
                   <input type="date" value={ai.due_date ?? ''} onChange={e => { setMeeting(prev => prev ? { ...prev, action_items: prev.action_items.map(item => item.id === ai.id ? { ...item, due_date: e.target.value } : item) } : null); }} className="rounded border-0 bg-transparent px-0 text-[10px] text-muted-foreground focus:outline-none" />
                 </div>
               </div>
-              <button onClick={async () => { const arr = meeting.action_items.filter(item => item.id !== ai.id); setMeeting(prev => prev ? { ...prev, action_items: arr } : null); await fetch(`/api/meetings/${meetingId}`, { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ action_items: arr }) }); }} className="text-xs text-red-400 hover:text-red-600">✕</button>
+              <button onClick={async () => { const arr = meeting.action_items.filter(item => item.id !== ai.id); setMeeting(prev => prev ? { ...prev, action_items: arr } : null); await fetch(`/api/meetings/${meetingId}`, { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ action_items: arr }) }); }} className="text-xs text-muted-foreground hover:text-destructive">✕</button>
               <button onClick={async () => { await fetch(`/api/meetings/${meetingId}`, { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ action_items: meeting.action_items }) }); }} className="rounded bg-muted px-2 py-1 text-[10px] text-muted-foreground hover:bg-muted/70">{t('save')}</button>
               <button
                 disabled={creatingStoryId === ai.id}
@@ -357,7 +357,7 @@ export default function MeetingDetailPage() {
             <div className="mt-2 rounded-lg border bg-gray-50 p-4">
               {editingTranscript ? (
                 <div className="space-y-2">
-                  <textarea value={transcriptDraft} onChange={e => setTranscriptDraft(e.target.value)} rows={8} className="w-full rounded border bg-white px-3 py-2 text-xs" />
+                  <textarea value={transcriptDraft} onChange={e => setTranscriptDraft(e.target.value)} rows={8} className="w-full rounded border bg-background px-3 py-2 text-xs" />
                   <div className="flex gap-2">
                     <button
                       disabled={savingTranscript}
