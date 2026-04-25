@@ -14,6 +14,7 @@ export interface AgentRunRecord {
   project_id: string;
   agent_id: string;
   trigger: string;
+  metadata: Record<string, unknown>;
   model: string | null;
   story_id: string | null;
   memo_id: string | null;
@@ -37,6 +38,7 @@ export interface CreateAgentRunInput {
   project_id: string;
   agent_id: string;
   trigger: string;
+  metadata?: Record<string, unknown>;
   model?: string | null;
   story_id?: string | null;
   memo_id?: string | null;
@@ -80,6 +82,7 @@ export class AgentRunService {
         project_id: input.project_id,
         agent_id: input.agent_id,
         trigger: input.trigger,
+        metadata: input.metadata ?? {},
         model: input.model ?? null,
         story_id: input.story_id ?? null,
         memo_id: input.memo_id ?? null,
@@ -143,14 +146,18 @@ export class AgentRunService {
     return data as AgentRunRecord;
   }
 
-  async list(projectId: string, limit = 20): Promise<AgentRunRecord[]> {
-    const { data, error } = await this.supabase
+  async list(projectId: string, limit = 20, agentId?: string, cursor?: string): Promise<AgentRunRecord[]> {
+    let query = this.supabase
       .from('agent_runs')
       .select('*')
       .eq('project_id', projectId)
       .order('created_at', { ascending: false })
       .limit(limit);
 
+    if (agentId) query = query.eq('agent_id', agentId);
+    if (cursor) query = query.lt('created_at', cursor);
+
+    const { data, error } = await query;
     if (error) throw error;
     return (data ?? []) as AgentRunRecord[];
   }

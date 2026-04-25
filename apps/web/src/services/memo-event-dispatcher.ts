@@ -1,6 +1,7 @@
 import type { RealtimeChannel, SupabaseClient } from '@supabase/supabase-js';
 import { AgentRoutingRuleService, RoutingPolicyError, type RoutingEvaluationResult, type RoutingRuleSummary } from './agent-routing-rule';
 import { buildWebhookSignatureHeaders } from '@/lib/webhook-signature';
+import { WebhookDeliveryService } from './webhook-delivery.service';
 
 type DispatchSource = 'realtime' | 'polling';
 
@@ -438,9 +439,7 @@ export class MemoEventDispatcher {
       return { status: 'skipped', reason: 'assignee_not_active_agent' };
     }
 
-    // BYOA: agent_runs 레코드 없이 webhook_url로 직접 발송
-    // createRun()은 agent_id가 type='agent'인 팀원이어야 하는 제약이 있어
-    // BYOA 멤버(human + webhook_url)는 insert 실패 후 dispatch가 abort됨.
+    // BYOA: webhook_url로 직접 발송 + agent_run 경량 추적 + webhook_deliveries 재시도 큐
     if (isByoa) {
       const webhook = await this.resolveWebhook(agent, memo.project_id);
       if (!webhook) {
@@ -449,6 +448,18 @@ export class MemoEventDispatcher {
         });
         return { status: 'skipped', reason: 'byoa_webhook_missing' };
       }
+
+      // agent_run 경량 기록 (fire-and-forget)
+      void this.options.supabase.from('agent_runs').insert({
+        org_id: memo.org_id,
+        project_id: memo.project_id,
+        agent_id: agent.id,
+        trigger: 'webhook',
+        memo_id: memo.id,
+        status: 'running',
+        metadata: { source, dispatch_key: dispatchKey },
+      });
+
       try {
         const outbound = this.buildWebhookPayload({
           webhookUrl: webhook.url,
@@ -461,29 +472,27 @@ export class MemoEventDispatcher {
           dispatchKey,
           routing,
         });
-        const response = await fetchWithTimeout(
-          this.fetchFn,
-          webhook.url,
-          {
-            method: 'POST',
-            redirect: 'manual',
-            headers: {
-              'Content-Type': 'application/json',
-              ...buildWebhookSignatureHeaders(webhook.secret, JSON.stringify(outbound.body)),
-            },
-            body: JSON.stringify(outbound.body),
+        const bodyStr = JSON.stringify(outbound.body);
+        // webhook_deliveries 재시도 큐 경유 발송
+        const deliveryService = new WebhookDeliveryService(this.options.supabase);
+        const success = await deliveryService.dispatch({
+          org_id: memo.org_id,
+          webhook_config_id: null,
+          event_type: 'memo.received',
+          url: webhook.url,
+          headers: {
+            'Content-Type': 'application/json',
+            ...buildWebhookSignatureHeaders(webhook.secret, bodyStr),
           },
-          this.webhookTimeoutMs,
-        );
-        if (!response.ok) {
-          const body = await response.text();
-          this.logger.warn('[MemoEventDispatcher] BYOA webhook dispatch failed', {
+          body: bodyStr,
+          fetchFn: this.fetchFn,
+        });
+        if (!success) {
+          this.logger.warn('[MemoEventDispatcher] BYOA webhook dispatch failed after retries', {
             agent_id: agent.id,
             memo_id: memo.id,
-            status: response.status,
-            body: body.slice(0, 200),
           });
-          return { status: 'failed', reason: `byoa_webhook_${response.status}` };
+          return { status: 'failed', reason: 'byoa_webhook_failed' };
         }
         return { status: 'dispatched' };
       } catch (error) {
