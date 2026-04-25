@@ -26,6 +26,7 @@ export interface DocSummary {
   title: string;
   slug: string;
   icon: string | null;
+  tags: string[] | null;
   sort_order: number;
   is_folder: boolean;
   updated_at: string;
@@ -59,6 +60,7 @@ export interface UpdateDocInput {
 
 export interface DocListFilters extends PaginationOptions {
   project_id: string;
+  tags?: string[];
 }
 
 export interface IDocRepository {

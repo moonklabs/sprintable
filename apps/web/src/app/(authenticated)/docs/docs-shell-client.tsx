@@ -84,6 +84,7 @@ export function DocsShellClient({ projectId }: DocsShellClientProps) {
   const [selectedDoc, setSelectedDoc] = useState<DocDetail | null>(null);
   const [loading, setLoading] = useState(true);
   const [mobileView, setMobileView] = useState<'list' | 'detail'>('list');
+  const [selectedTags, setSelectedTags] = useState<string[]>([]);
 
   // Always-editable content states
   const [title, setTitle] = useState('');
@@ -126,11 +127,14 @@ export function DocsShellClient({ projectId }: DocsShellClientProps) {
     onSaved: handleDocSaved,
   });
 
-  const fetchTree = useCallback(async () => {
+  const fetchTree = useCallback(async (tags?: string[]) => {
     if (!projectId) return;
 
     try {
-      const res = await fetch(`/api/docs?project_id=${projectId}&view=tree`);
+      const params = new URLSearchParams({ project_id: projectId });
+      if (tags?.length) params.set('tags', tags.join(','));
+      else params.set('view', 'tree');
+      const res = await fetch(`/api/docs?${params.toString()}`);
       if (!res.ok) throw new Error('Failed to fetch tree');
 
       const { data } = await res.json();
@@ -363,8 +367,8 @@ export function DocsShellClient({ projectId }: DocsShellClientProps) {
   }, [selectedDoc, projectId, router, t]);
 
   useEffect(() => {
-    fetchTree();
-  }, [fetchTree]);
+    void fetchTree(selectedTags.length ? selectedTags : undefined);
+  }, [fetchTree, selectedTags]);
 
   useEffect(() => {
     const slug = searchParams.get('slug');
@@ -399,6 +403,30 @@ export function DocsShellClient({ projectId }: DocsShellClientProps) {
           </Button>
         </div>
       </div>
+      {/* Tag filter chips */}
+      {(() => {
+        const allTags = [...new Set(tree.flatMap((d) => (d as unknown as { tags?: string[] | null }).tags ?? []))];
+        if (allTags.length === 0) return null;
+        return (
+          <div className="flex flex-wrap gap-1.5 border-b border-white/10 px-4 py-2">
+            {allTags.map((tag) => (
+              <button
+                key={tag}
+                type="button"
+                onClick={() => setSelectedTags((prev) => prev.includes(tag) ? prev.filter((t) => t !== tag) : [...prev, tag])}
+                className={`rounded-full px-2.5 py-0.5 text-[11px] font-medium transition ${selectedTags.includes(tag) ? 'bg-primary text-primary-foreground' : 'bg-muted/60 text-muted-foreground hover:bg-muted'}`}
+              >
+                #{tag}
+              </button>
+            ))}
+            {selectedTags.length > 0 && (
+              <button type="button" onClick={() => setSelectedTags([])} className="text-[11px] text-muted-foreground hover:text-foreground underline">
+                {t('clearFilter')}
+              </button>
+            )}
+          </div>
+        );
+      })()}
       <div className="flex-1 overflow-y-auto p-2">
         {tree.length === 0 ? (
           <EmptyState
