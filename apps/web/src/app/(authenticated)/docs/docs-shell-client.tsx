@@ -121,7 +121,7 @@ export function DocsShellClient({ projectId }: DocsShellClientProps) {
     );
   }, []);
 
-  const { status: saveStatus } = useDocSync<DocDetail>({
+  const { status: saveStatus, isDirty, save } = useDocSync<DocDetail>({
     docId: selectedDoc?.id ?? null,
     savePayload: { title, content, content_format: contentFormat },
     serverUpdatedAt: selectedDoc?.updated_at ?? null,
@@ -547,12 +547,14 @@ export function DocsShellClient({ projectId }: DocsShellClientProps) {
                 onNavigate={handleSelectDoc}
                 onChange={setContent}
                 onContentFormatChange={setContentFormat}
+                isDirty={isDirty}
+                onSave={save}
                 labels={{
                   contentFormat: t('contentFormat'),
                   markdown: t('formatMarkdown'),
-                  html: t('formatHtml'),
+                  preview: t('formatPreview'),
+                  save: t('save'),
                   toolbar: t('toolbar'),
-                  hint: t('toolbarHint'),
                   placeholder: t('editorPlaceholder'),
                   h1: t('toolbarH1'),
                   h2: t('toolbarH2'),

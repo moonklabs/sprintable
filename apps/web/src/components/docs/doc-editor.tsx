@@ -26,6 +26,8 @@ export function DocEditor({
   onNavigate,
   onChange,
   onContentFormatChange,
+  onSave,
+  isDirty = false,
   labels,
 }: {
   value: string;
@@ -37,12 +39,14 @@ export function DocEditor({
   onNavigate?: (slug: string) => void;
   onChange: (value: string) => void;
   onContentFormatChange: (format: ContentFormat) => void;
+  onSave?: () => Promise<boolean>;
+  isDirty?: boolean;
   labels: {
     contentFormat: string;
     markdown: string;
-    html: string;
+    preview: string;
+    save: string;
     toolbar: string;
-    hint: string;
     placeholder: string;
     h1: string;
     h2: string;
@@ -126,27 +130,27 @@ export function DocEditor({
   }, [editor]);
 
   return (
-    <div className="space-y-4">
-      <div className="flex flex-wrap items-center gap-3 rounded-2xl border border-border/60 bg-muted/20 p-3">
-        <span className="text-xs font-medium text-muted-foreground">{labels.contentFormat}</span>
-        <div className="inline-flex rounded-xl border border-border bg-background p-1">
-          {(['markdown', 'html'] as const).map((format) => (
-            <button
-              key={format}
-              type="button"
-              onClick={() => onContentFormatChange(format)}
-              className={`rounded-lg px-3 py-1 text-xs font-medium ${contentFormat === format ? 'bg-primary text-primary-foreground' : 'text-muted-foreground hover:text-foreground'}`}
-            >
-              {format === 'markdown' ? labels.markdown : labels.html}
-            </button>
-          ))}
-        </div>
-      </div>
+    <div className="flex flex-col gap-0 overflow-hidden rounded-2xl border border-border/60 bg-background">
+      {editor ? (
+        <>
+          {/* Tab bar + toolbar */}
+          <div className="flex flex-wrap items-center justify-between gap-2 border-b border-border/60 px-3 py-2">
+            {/* Format tabs */}
+            <div className="inline-flex rounded-lg border border-border bg-muted/30 p-0.5">
+              {(['html', 'markdown'] as const).map((format) => (
+                <button
+                  key={format}
+                  type="button"
+                  onClick={() => onContentFormatChange(format)}
+                  className={`rounded-md px-3 py-1 text-xs font-medium transition-colors ${contentFormat === format ? 'bg-background text-foreground shadow-sm' : 'text-muted-foreground hover:text-foreground'}`}
+                >
+                  {format === 'html' ? labels.preview : labels.markdown}
+                </button>
+              ))}
+            </div>
 
-      <div className="rounded-2xl border border-border/60 bg-background">
-        {editor ? (
-          <>
-            <div className="flex flex-wrap items-center gap-1.5 border-b border-border/60 px-3 py-2">
+            {/* Toolbar */}
+            <div className="flex flex-wrap items-center gap-1.5">
               <ToolbarButton
                 active={editor.isActive('heading', { level: 1 })}
                 onClick={() => editor.chain().focus().toggleHeading({ level: 1 }).run()}
@@ -202,12 +206,27 @@ export function DocEditor({
                 ⊞
               </ToolbarButton>
             </div>
-            <div className="tiptap-editor-wrapper p-3">
-              <EditorContent editor={editor} className="tiptap-content min-h-[420px] outline-none" />
+          </div>
+
+          {/* Editor content */}
+          <div className="tiptap-editor-wrapper p-3">
+            <EditorContent editor={editor} className="tiptap-content min-h-[420px] outline-none" />
+          </div>
+
+          {/* Dirty save bar */}
+          {isDirty && onSave ? (
+            <div className="flex items-center justify-end border-t border-border/60 bg-muted/20 px-4 py-2.5">
+              <button
+                type="button"
+                onClick={() => void onSave()}
+                className="rounded-lg bg-primary px-3 py-1.5 text-xs font-semibold text-primary-foreground transition-colors hover:bg-primary/90"
+              >
+                {labels.save}
+              </button>
             </div>
-          </>
-        ) : null}
-      </div>
+          ) : null}
+        </>
+      ) : null}
     </div>
   );
 }

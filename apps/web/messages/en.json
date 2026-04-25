@@ -861,6 +861,7 @@
     "contentFormat": "Content format",
     "formatMarkdown": "Markdown",
     "formatHtml": "HTML",
+    "formatPreview": "Preview",
     "editorMode": "Editor mode",
     "writeTab": "Write",
     "previewTab": "Preview",
