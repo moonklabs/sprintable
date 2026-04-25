@@ -92,6 +92,12 @@ export class SqliteMemoRepository implements IMemoRepository {
     return this.getById(id);
   }
 
+  async archive(id: string, archivedAt: string | null): Promise<Memo> {
+    const now = new Date().toISOString();
+    this.db.prepare('UPDATE memos SET archived_at = ?, updated_at = ? WHERE id = ? AND deleted_at IS NULL').run(archivedAt, now, id);
+    return this.getById(id);
+  }
+
   async addReply(input: { memo_id: string; content: string; created_by: string; review_type?: string }): Promise<MemoReply> {
     const id = randomUUID();
     const now = new Date().toISOString();

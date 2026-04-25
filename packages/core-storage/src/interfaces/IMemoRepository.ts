@@ -14,6 +14,7 @@ export interface Memo {
   created_by: string;
   resolved_by: string | null;
   resolved_at: string | null;
+  archived_at: string | null;
   metadata: Record<string, unknown> | null;
   created_at: string;
   updated_at: string;
@@ -55,6 +56,7 @@ export interface MemoListFilters extends PaginationOptions {
   created_by?: string;
   status?: string;
   q?: string;
+  include_archived?: boolean;
 }
 
 // Memo has no generic delete; lifecycle is resolve/archive handled by MemoService
@@ -64,6 +66,7 @@ export interface IMemoRepository {
   getById(id: string, scope?: RepositoryScopeContext): Promise<Memo>;
   update(id: string, input: UpdateMemoInput): Promise<Memo>;
   resolve(id: string, resolvedBy: string): Promise<Memo>;
+  archive(id: string, archivedAt: string | null): Promise<Memo>;
   addReply(input: { memo_id: string; content: string; created_by: string; review_type?: string }): Promise<MemoReply>;
   getReplies(memoId: string): Promise<MemoReply[]>;
 }

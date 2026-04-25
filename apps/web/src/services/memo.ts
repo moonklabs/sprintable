@@ -506,7 +506,7 @@ export class MemoService {
     }
   }
 
-  async list(filters: { org_id?: string; project_id?: string; assigned_to?: string; created_by?: string; status?: string; limit?: number; cursor?: string | null; q?: string }) {
+  async list(filters: { org_id?: string; project_id?: string; assigned_to?: string; created_by?: string; status?: string; limit?: number; cursor?: string | null; q?: string; include_archived?: boolean }) {
     const memos = await this.repo.list({
       org_id: filters.org_id,
       project_id: filters.project_id,
@@ -514,6 +514,7 @@ export class MemoService {
       created_by: filters.created_by,
       status: filters.status,
       q: filters.q,
+      include_archived: filters.include_archived,
       cursor: filters.cursor ?? undefined,
       limit: filters.limit,
     });

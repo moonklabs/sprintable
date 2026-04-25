@@ -12,13 +12,15 @@ export function registerMemosTools(server: McpServer) {
     assigned_to: z.string().optional().describe('Filter by assigned team member ID'),
     status: z.string().optional().describe('Filter by status (open/resolved)'),
     q: z.string().optional().describe('Search query'),
-  }, async ({ project_id, assigned_to, status, q }) => {
+    include_archived: z.boolean().optional().describe('Include archived memos (default: false)'),
+  }, async ({ project_id, assigned_to, status, q, include_archived }) => {
     try {
       const params = new URLSearchParams();
       if (project_id) params.set('project_id', project_id);
       if (assigned_to) params.set('assigned_to', assigned_to);
       if (status) params.set('status', status);
       if (q) params.set('q', q);
+      if (include_archived) params.set('include_archived', 'true');
       const qs = params.toString();
       const data = await pmApi(`/api/memos${qs ? `?${qs}` : ''}`);
       return ok(data);

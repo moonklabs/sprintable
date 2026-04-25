@@ -93,6 +93,7 @@ export async function GET(request: Request) {
       created_by: searchParams.get('created_by') ?? undefined,
       status: searchParams.get('status') ?? undefined,
       q: searchParams.get('q') ?? undefined,
+      include_archived: searchParams.get('include_archived') === 'true',
       limit: pageInput.limit,
       cursor: pageInput.cursor,
     });
