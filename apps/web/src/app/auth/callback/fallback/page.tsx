@@ -21,7 +21,7 @@ function FallbackHandler() {
 
     const { data: { subscription } } = pkceClient.auth.onAuthStateChange(
       async (event, session) => {
-        if ((event === 'SIGNED_IN' || event === 'INITIAL_SESSION') && session) {
+        if (event === 'SIGNED_IN' && session) {
           // SSR client(cookie)에 세션 bridge — 이후 서버 사이드 인증 유지
           const ssrClient = createSupabaseBrowserClient();
           await ssrClient.auth.setSession({
