@@ -4,9 +4,18 @@ import type { ComponentType } from 'react';
 import { useState, useEffect, useCallback, useRef } from 'react';
 import { useRouter, useSearchParams } from 'next/navigation';
 import { useTranslations } from 'next-intl';
+import { Check, ChevronDown, LayoutGrid, LayoutList, Search } from 'lucide-react';
 import { DndContext, DragEndEvent, PointerSensor, useSensor, useSensors, DragOverlay } from '@dnd-kit/core';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuLabel,
+  DropdownMenuSeparator,
+  DropdownMenuTrigger,
+} from '@/components/ui/dropdown-menu';
 import { KanbanColumn } from './kanban-column';
 import { KanbanListView } from './kanban-list-view';
 import { KanbanSkeleton } from './kanban-skeleton';
@@ -80,8 +89,19 @@ export function KanbanBoard({ projectId }: KanbanBoardProps) {
   const selectedEpicId = searchParams.get('epic_id') ?? '';
   const selectedAssigneeId = searchParams.get('assignee_id') ?? '';
 
-  // AC2: 검색 쿼리
   const [searchQuery, setSearchQuery] = useState('');
+  const [showSearch, setShowSearch] = useState(false);
+  const [assigneeTypeFilter, setAssigneeTypeFilter] = useState<'' | 'human' | 'agent'>('');
+  const [viewMode, setViewMode] = useState<'board' | 'list'>('board');
+
+  const updateFilter = useCallback((key: string, value: string) => {
+    const params = new URLSearchParams(searchParams.toString());
+    if (value) params.set(key, value);
+    else params.delete(key);
+    const storyId = searchParams.get('story');
+    if (storyId) params.set('story', storyId);
+    router.replace(`/board${params.size > 0 ? `?${params.toString()}` : ''}`, { scroll: false });
+  }, [router, searchParams]);
 
   // AC1/AC5: WIP limit 상태 — 컬럼별 { limit: number|null, editing: boolean, draft: string }
   const [wipLimits, setWipLimits] = useState<Record<string, { limit: number | null; editing: boolean; draft: string }>>(() => {
@@ -191,10 +211,14 @@ export function KanbanBoard({ projectId }: KanbanBoardProps) {
     }
   }, [searchParams, stories, handleStoryClick]);
 
-  // AC2: 검색 + 기존 필터 조합
   const filteredStories = stories.filter((s) => {
     if (selectedEpicId && s.epic_id !== selectedEpicId) return false;
     if (selectedAssigneeId && s.assignee_id !== selectedAssigneeId) return false;
+    if (assigneeTypeFilter) {
+      const assignee = s.assignee_id ? memberMap[s.assignee_id] : null;
+      if (assigneeTypeFilter === 'agent' && assignee?.type !== 'agent') return false;
+      if (assigneeTypeFilter === 'human' && assignee?.type === 'agent') return false;
+    }
     if (searchQuery) {
       const q = searchQuery.toLowerCase();
       const titleMatch = s.title?.toLowerCase().includes(q);
@@ -464,87 +488,254 @@ export function KanbanBoard({ projectId }: KanbanBoardProps) {
   if (loading) return <KanbanSkeleton />;
 
   return (
-    <div className="flex flex-col gap-0">
+    <div className="flex h-full flex-col overflow-hidden">
       {transitionError && (
         <div className="fixed bottom-4 right-4 z-50 rounded-md border border-destructive bg-destructive px-4 py-3 text-sm text-destructive-foreground shadow-md">
           ⚠️ {transitionError}
         </div>
       )}
-      {/* Search — flat strip */}
-      <div className="flex-shrink-0 border-b border-border/80 px-3 py-2">
-        <Input
-          type="search"
-          placeholder={t('searchPlaceholder')}
-          value={searchQuery}
-          onChange={(e) => setSearchQuery(e.target.value)}
-          className="h-8 text-sm"
-        />
-      </div>
 
-      {/* Mobile list view (hidden on md+) */}
-      <div className="md:hidden">
-        <KanbanListView
-          stories={filteredStories}
-          epicMap={epicMap}
-          memberMap={memberMap}
-          onStoryClick={handleStoryClick}
-          onChangeStatus={handleChangeStatus}
-        />
-      </div>
+      {/* Board header */}
+      <div className="flex h-11 flex-shrink-0 items-center justify-between gap-3 border-b border-border/80 px-4">
+        {/* Left: assignee type tabs */}
+        <div className="flex items-center gap-0.5">
+          {([
+            { id: '' as const, label: t('filterAll') },
+            { id: 'human' as const, label: t('filterMembers') },
+            { id: 'agent' as const, label: t('filterAgents') },
+          ]).map(({ id, label }) => (
+            <button
+              key={id || 'all'}
+              type="button"
+              onClick={() => setAssigneeTypeFilter(id)}
+              className={`rounded-md px-3 py-1.5 text-xs font-medium transition-colors ${
+                assigneeTypeFilter === id
+                  ? 'bg-foreground/10 text-foreground'
+                  : 'text-muted-foreground hover:bg-muted/60 hover:text-foreground'
+              }`}
+            >
+              {label}
+            </button>
+          ))}
+        </div>
 
-      {/* Desktop kanban (hidden below md) */}
-      <div className="hidden md:block">
-        <DndContext sensors={sensors} onDragStart={handleDragStart} onDragEnd={handleDragEnd}>
-          <div className="px-3 py-3">
-            <div className="flex flex-row gap-3 overflow-x-auto pb-1">
-            {COLUMNS.map((col) => {
-              const colStories = storiesByColumn(col.id);
-              const wipState = wipLimits[col.id] ?? { limit: null, editing: false, draft: '' };
-              const isExceeded = wipState.limit !== null && colStories.length > wipState.limit;
-              return (
-                <KanbanColumn
-                  key={col.id}
-                  id={col.id}
-                  label={t(col.i18nKey)}
-                  stories={colStories}
-                  epicMap={epicMap}
-                  memberMap={memberMap}
-                  dragStatus={dragStatus}
-                  onStoryClick={handleStoryClick}
-                  onEditStory={handleEditStory}
-                  onChangeStatus={handleChangeStatus}
-                  onAssignStory={handleAssignStory}
-                  onDeleteStory={handleDeleteStory}
-                  wipLimit={wipState.limit}
-                  wipExceeded={isExceeded}
-                  wipEditing={wipState.editing}
-                  wipDraft={wipState.draft}
-                  onWipLimitEdit={() => handleWipLimitEdit(col.id)}
-                  onWipLimitSave={() => handleWipLimitSave(col.id)}
-                  onWipLimitRemove={() => handleWipLimitRemove(col.id)}
-                  onWipDraftChange={(v) => handleWipLimitDraftChange(col.id, v)}
-                />
-              );
-            })}
-            </div>
+        {/* Right: filter dropdowns + view toggle */}
+        <div className="flex items-center gap-1.5">
+          {/* Sprint dropdown */}
+          <DropdownMenu>
+            <DropdownMenuTrigger
+              render={
+                <button
+                  type="button"
+                  className={`flex h-7 items-center gap-1 rounded-md px-2.5 text-xs font-medium transition-colors ${
+                    selectedSprintId ? 'bg-primary/10 text-primary' : 'text-muted-foreground hover:bg-muted/60 hover:text-foreground'
+                  }`}
+                >
+                  <span className="max-w-[96px] truncate">
+                    {sprints.find((s) => s.id === selectedSprintId)?.title ?? t('allSprints')}
+                  </span>
+                  <ChevronDown className="size-3 shrink-0 opacity-60" />
+                </button>
+              }
+            />
+            <DropdownMenuContent align="end" className="w-52">
+              <DropdownMenuLabel className="text-xs text-muted-foreground">{t('sprints')}</DropdownMenuLabel>
+              <DropdownMenuSeparator />
+              <DropdownMenuItem onClick={() => updateFilter('sprint_id', '')}>
+                <span className="flex-1">{t('allSprints')}</span>
+                {!selectedSprintId && <Check className="size-3.5 text-primary" />}
+              </DropdownMenuItem>
+              {sprints.map((s) => (
+                <DropdownMenuItem key={s.id} onClick={() => updateFilter('sprint_id', s.id)}>
+                  <span className="flex-1 truncate">{s.title}</span>
+                  {s.id === selectedSprintId && <Check className="size-3.5 text-primary" />}
+                </DropdownMenuItem>
+              ))}
+            </DropdownMenuContent>
+          </DropdownMenu>
+
+          {/* Epic dropdown */}
+          <DropdownMenu>
+            <DropdownMenuTrigger
+              render={
+                <button
+                  type="button"
+                  className={`flex h-7 items-center gap-1 rounded-md px-2.5 text-xs font-medium transition-colors ${
+                    selectedEpicId ? 'bg-primary/10 text-primary' : 'text-muted-foreground hover:bg-muted/60 hover:text-foreground'
+                  }`}
+                >
+                  <span className="max-w-[96px] truncate">
+                    {epics.find((e) => e.id === selectedEpicId)?.title ?? t('allEpics')}
+                  </span>
+                  <ChevronDown className="size-3 shrink-0 opacity-60" />
+                </button>
+              }
+            />
+            <DropdownMenuContent align="end" className="w-52">
+              <DropdownMenuLabel className="text-xs text-muted-foreground">{t('epics')}</DropdownMenuLabel>
+              <DropdownMenuSeparator />
+              <DropdownMenuItem onClick={() => updateFilter('epic_id', '')}>
+                <span className="flex-1">{t('allEpics')}</span>
+                {!selectedEpicId && <Check className="size-3.5 text-primary" />}
+              </DropdownMenuItem>
+              {epics.map((e) => (
+                <DropdownMenuItem key={e.id} onClick={() => updateFilter('epic_id', e.id)}>
+                  <span className="flex-1 truncate">{e.title}</span>
+                  {e.id === selectedEpicId && <Check className="size-3.5 text-primary" />}
+                </DropdownMenuItem>
+              ))}
+            </DropdownMenuContent>
+          </DropdownMenu>
+
+          {/* Assignee dropdown */}
+          <DropdownMenu>
+            <DropdownMenuTrigger
+              render={
+                <button
+                  type="button"
+                  className={`flex h-7 items-center gap-1 rounded-md px-2.5 text-xs font-medium transition-colors ${
+                    selectedAssigneeId ? 'bg-primary/10 text-primary' : 'text-muted-foreground hover:bg-muted/60 hover:text-foreground'
+                  }`}
+                >
+                  <span className="max-w-[96px] truncate">
+                    {members.find((m) => m.id === selectedAssigneeId)?.name ?? t('allAssignees')}
+                  </span>
+                  <ChevronDown className="size-3 shrink-0 opacity-60" />
+                </button>
+              }
+            />
+            <DropdownMenuContent align="end" className="w-52">
+              <DropdownMenuLabel className="text-xs text-muted-foreground">{t('assignees')}</DropdownMenuLabel>
+              <DropdownMenuSeparator />
+              <DropdownMenuItem onClick={() => updateFilter('assignee_id', '')}>
+                <span className="flex-1">{t('allAssignees')}</span>
+                {!selectedAssigneeId && <Check className="size-3.5 text-primary" />}
+              </DropdownMenuItem>
+              {members.map((m) => (
+                <DropdownMenuItem key={m.id} onClick={() => updateFilter('assignee_id', m.id)}>
+                  <span className="flex-1 truncate">{m.name}</span>
+                  {m.id === selectedAssigneeId && <Check className="size-3.5 text-primary" />}
+                </DropdownMenuItem>
+              ))}
+            </DropdownMenuContent>
+          </DropdownMenu>
+
+          <div className="mx-1 h-4 w-px bg-border/60" />
+
+          {/* Search toggle */}
+          {showSearch ? (
+            <Input
+              type="search"
+              autoFocus
+              value={searchQuery}
+              onChange={(e) => setSearchQuery(e.target.value)}
+              onBlur={() => { if (!searchQuery) setShowSearch(false); }}
+              placeholder={t('searchPlaceholder')}
+              className="h-7 w-36 text-xs"
+            />
+          ) : (
+            <button
+              type="button"
+              title={t('searchPlaceholder')}
+              onClick={() => setShowSearch(true)}
+              className={`flex h-7 w-7 items-center justify-center rounded-md transition-colors ${
+                searchQuery ? 'bg-primary/10 text-primary' : 'text-muted-foreground hover:bg-muted/60 hover:text-foreground'
+              }`}
+            >
+              <Search className="size-3.5" />
+            </button>
+          )}
+
+          {/* Board/List toggle */}
+          <div className="flex items-center overflow-hidden rounded-md border border-border/60">
+            <button
+              type="button"
+              onClick={() => setViewMode('board')}
+              title="Board view"
+              className={`flex h-7 w-7 items-center justify-center transition-colors ${
+                viewMode === 'board' ? 'bg-muted text-foreground' : 'text-muted-foreground hover:bg-muted/50'
+              }`}
+            >
+              <LayoutGrid className="size-3.5" />
+            </button>
+            <button
+              type="button"
+              onClick={() => setViewMode('list')}
+              title="List view"
+              className={`flex h-7 w-7 items-center justify-center transition-colors ${
+                viewMode === 'list' ? 'bg-muted text-foreground' : 'text-muted-foreground hover:bg-muted/50'
+              }`}
+            >
+              <LayoutList className="size-3.5" />
+            </button>
           </div>
-          <DragOverlayCompat adjustScale={false} className="cursor-grabbing">
-            {activeStory && (
-              <div className="rotate-3 scale-105">
-                <StoryCard
-                  story={activeStory}
-                  epicName={activeStory.epic_id ? epicMap[activeStory.epic_id] : undefined}
-                  assignee={activeStory.assignee_id ? memberMap[activeStory.assignee_id] : undefined}
-                  onClick={() => {}}
-                />
-              </div>
-            )}
-          </DragOverlayCompat>
-        </DndContext>
+        </div>
       </div>
 
+      {/* Content area */}
+      <div className="min-h-0 flex-1 overflow-hidden">
+        {viewMode === 'list' ? (
+          <div className="h-full overflow-y-auto">
+            <KanbanListView
+              stories={filteredStories}
+              epicMap={epicMap}
+              memberMap={memberMap}
+              onStoryClick={handleStoryClick}
+              onChangeStatus={handleChangeStatus}
+            />
+          </div>
+        ) : (
+          <DndContext sensors={sensors} onDragStart={handleDragStart} onDragEnd={handleDragEnd}>
+            <div className="flex h-full gap-3 overflow-x-auto px-3 py-3">
+              {COLUMNS.map((col) => {
+                const colStories = storiesByColumn(col.id);
+                const wipState = wipLimits[col.id] ?? { limit: null, editing: false, draft: '' };
+                const isExceeded = wipState.limit !== null && colStories.length > wipState.limit;
+                return (
+                  <KanbanColumn
+                    key={col.id}
+                    id={col.id}
+                    label={t(col.i18nKey)}
+                    stories={colStories}
+                    epicMap={epicMap}
+                    memberMap={memberMap}
+                    dragStatus={dragStatus}
+                    onStoryClick={handleStoryClick}
+                    onEditStory={handleEditStory}
+                    onChangeStatus={handleChangeStatus}
+                    onAssignStory={handleAssignStory}
+                    onDeleteStory={handleDeleteStory}
+                    wipLimit={wipState.limit}
+                    wipExceeded={isExceeded}
+                    wipEditing={wipState.editing}
+                    wipDraft={wipState.draft}
+                    onWipLimitEdit={() => handleWipLimitEdit(col.id)}
+                    onWipLimitSave={() => handleWipLimitSave(col.id)}
+                    onWipLimitRemove={() => handleWipLimitRemove(col.id)}
+                    onWipDraftChange={(v) => handleWipLimitDraftChange(col.id, v)}
+                  />
+                );
+              })}
+            </div>
+            <DragOverlayCompat adjustScale={false} className="cursor-grabbing">
+              {activeStory && (
+                <div className="rotate-3 scale-105">
+                  <StoryCard
+                    story={activeStory}
+                    epicName={activeStory.epic_id ? epicMap[activeStory.epic_id] : undefined}
+                    assignee={activeStory.assignee_id ? memberMap[activeStory.assignee_id] : undefined}
+                    onClick={() => {}}
+                  />
+                </div>
+              )}
+            </DragOverlayCompat>
+          </DndContext>
+        )}
+      </div>
+
+      {/* Load more */}
       {nextCursor || epicsNextCursor ? (
-        <div className="flex flex-wrap items-center justify-center gap-2">
+        <div className="flex flex-shrink-0 flex-wrap items-center justify-center gap-2 border-t border-border/80 p-2">
           {nextCursor ? (
             <Button
               variant="glass"

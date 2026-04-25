@@ -120,6 +120,10 @@
     "wipLimitSave": "Save",
     "wipLimitRemove": "Remove limit",
     "filters": "Filters",
+    "filterTitle": "Filter",
+    "filterAll": "All",
+    "filterMembers": "Members",
+    "filterAgents": "Agents",
     "sprints": "Sprints",
     "epics": "Epics",
     "assignees": "Assignees"

@@ -120,6 +120,10 @@
     "wipLimitSave": "저장",
     "wipLimitRemove": "한도 제거",
     "filters": "필터",
+    "filterTitle": "필터",
+    "filterAll": "전체",
+    "filterMembers": "멤버",
+    "filterAgents": "에이전트",
     "sprints": "스프린트",
     "epics": "에픽",
     "assignees": "담당자"

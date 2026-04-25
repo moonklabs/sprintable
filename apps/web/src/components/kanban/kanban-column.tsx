@@ -72,7 +72,7 @@ export function KanbanColumn({
   return (
     <div
       ref={setNodeRef}
-      className={`flex min-h-[360px] w-full flex-col rounded-xl p-3 transition md:w-[300px] md:min-w-[260px] ${colClass}`}
+      className={`flex h-full w-[280px] min-w-[240px] flex-col rounded-xl p-3 transition ${colClass}`}
     >
       {isDragging && isValidTarget && (
         <div className="mb-3 rounded-xl border border-emerald-400/20 bg-emerald-400/8 px-2 py-1 text-center text-[10px] font-medium uppercase tracking-widest text-emerald-400/70">
@@ -147,7 +147,7 @@ export function KanbanColumn({
       </div>
 
       <SortableContextCompat items={stories.map((s) => s.id)} strategy={verticalListSortingStrategy}>
-        <div className="flex min-w-0 flex-1 flex-col gap-3">
+        <div className="flex min-h-0 min-w-0 flex-1 flex-col gap-2 overflow-y-auto">
           {stories.length === 0 ? (
             <div className="flex min-h-[100px] items-center justify-center px-4 text-center">
               <p className="text-xs text-muted-foreground/60">{t('noStories')}</p>

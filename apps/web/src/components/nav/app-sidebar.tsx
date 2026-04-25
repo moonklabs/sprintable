@@ -16,7 +16,6 @@ import {
 } from 'lucide-react';
 import { LocaleSwitcher } from '@/components/locale-switcher';
 import { ProjectSwitcher } from '@/components/nav/project-switcher';
-import { BoardSidebarFilters } from '@/components/kanban/board-sidebar-filters';
 import {
   Sidebar,
   SidebarContent,
@@ -86,8 +85,6 @@ export function AppSidebar({
       </SidebarHeader>
 
       <SidebarContent>
-        <BoardSidebarFilters projectId={projectId} />
-
         <SidebarGroup>
           <SidebarGroupLabel>{t('sprint')}</SidebarGroupLabel>
           <SidebarGroupContent>
