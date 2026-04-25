@@ -6,7 +6,7 @@ import { useLocale, useTranslations } from 'next-intl';
 import { Bot, Clock3, GitBranch, History, Pause, Play, RefreshCw, Rocket, TriangleAlert, Zap } from 'lucide-react';
 import { Badge } from '@/components/ui/badge';
 import { Button, buttonVariants } from '@/components/ui/button';
-import { PageHeader } from '@/components/ui/page-header';
+import { TopBarSlot } from '@/components/nav/top-bar-slot';
 import { SectionCard, SectionCardBody, SectionCardHeader } from '@/components/ui/section-card';
 import { ToastContainer, useToast } from '@/components/ui/toast';
 import {
@@ -225,30 +225,14 @@ export function AgentsDashboard({ deployments: initialDeployments }: { deploymen
   return (
     <>
       <div className="space-y-4">
-        <PageHeader
-          eyebrow={t('statusEyebrow')}
-          title={t('statusTitle')}
-          description={t('statusDescription')}
-          actions={(
-            <div className="flex flex-wrap items-center gap-2">
-              <Link href="/agents/workflow" className={buttonVariants({ variant: 'glass', size: 'lg' })}>
-                <GitBranch className="mr-2 size-4" />
-                {t('workflowEditorCta')}
-              </Link>
-              <Link href="/agents/hitl" className={buttonVariants({ variant: 'glass', size: 'lg' })}>
-                <TriangleAlert className="mr-2 size-4" />
-                {t('hitlQueueCta')}
-              </Link>
-              <Link href="/agents/runs" className={buttonVariants({ variant: 'glass', size: 'lg' })}>
-                <History className="mr-2 size-4" />
-                {tr('runHistory')}
-              </Link>
-              <Link href="/agents/deploy" className={buttonVariants({ variant: 'hero', size: 'lg' })}>
-                <Rocket className="mr-2 size-4" />
-                {t('openWizard')}
-              </Link>
-            </div>
-          )}
+        <TopBarSlot
+          title={<h1 className="text-sm font-medium">{t('statusTitle')}</h1>}
+          actions={
+            <Link href="/agents/deploy" className={buttonVariants({ variant: 'outline', size: 'sm' })}>
+              <Rocket className="mr-1.5 size-3.5" />
+              {t('openWizard')}
+            </Link>
+          }
         />
 
         <SectionCard>

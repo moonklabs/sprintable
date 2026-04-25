@@ -6,7 +6,7 @@ import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { EmptyState } from '@/components/ui/empty-state';
 import { OperatorInput, OperatorTextarea } from '@/components/ui/operator-control';
-import { PageHeader } from '@/components/ui/page-header';
+import { TopBarSlot } from '@/components/nav/top-bar-slot';
 import { SectionCard, SectionCardBody, SectionCardHeader } from '@/components/ui/section-card';
 import { formatSeoulDate } from '@/lib/date';
 import { useDashboardContext } from '../../dashboard/dashboard-shell';
@@ -88,7 +88,6 @@ function buildStorySummary(
 
 export default function StandupPage() {
   const t = useTranslations('standup');
-  const tc = useTranslations('common');
   const shellT = useTranslations('shell');
   const { currentTeamMemberId, projectId } = useDashboardContext();
 
@@ -322,11 +321,7 @@ export default function StandupPage() {
   if (!projectId) {
     return (
       <div className="space-y-4">
-        <PageHeader
-          eyebrow={tc('operatorSurface')}
-          title={t('title')}
-          description={t('surfaceDescription')}
-        />
+        <TopBarSlot title={<h1 className="text-sm font-medium">{t('title')}</h1>} />
         <SectionCard>
           <SectionCardBody>
             <EmptyState title={shellT('projectSelectPrompt')} description={shellT('projectSelectDescription')} />
@@ -338,24 +333,24 @@ export default function StandupPage() {
 
   return (
     <div className="space-y-5">
-      <PageHeader
-        eyebrow={tc('operatorSurface')}
-        title={t('title')}
-        description={t('surfaceDescription')}
+      <TopBarSlot
+        title={<h1 className="text-sm font-medium">{t('title')}</h1>}
         actions={
-          <div className="flex flex-wrap items-center gap-2">
-            {headerBadges.map((badge) => (
-              <Badge key={badge.label} variant={badge.variant}>{badge.label}</Badge>
-            ))}
-            <OperatorInput
-              type="date"
-              value={date}
-              onChange={(event) => setDate(event.target.value)}
-              className="w-auto"
-            />
-          </div>
+          <OperatorInput
+            type="date"
+            value={date}
+            onChange={(event) => setDate(event.target.value)}
+            className="w-auto"
+          />
         }
       />
+      {headerBadges.length > 0 ? (
+        <div className="flex flex-wrap items-center gap-2 px-1">
+          {headerBadges.map((badge) => (
+            <Badge key={badge.label} variant={badge.variant}>{badge.label}</Badge>
+          ))}
+        </div>
+      ) : null}
 
       {loadError ? (
         <SectionCard>

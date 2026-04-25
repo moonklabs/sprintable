@@ -7,7 +7,7 @@ import { Activity, ArrowLeft, ChevronDown, Clock3, Cpu, Hash, Zap } from 'lucide
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { EmptyState } from '@/components/ui/empty-state';
-import { PageHeader } from '@/components/ui/page-header';
+import { TopBarSlot } from '@/components/nav/top-bar-slot';
 import { SectionCard, SectionCardBody, SectionCardHeader } from '@/components/ui/section-card';
 import {
   ALL_RUN_STATUS_FILTER,
@@ -168,19 +168,7 @@ export function AgentRunsList() {
 
   return (
     <div className="space-y-4">
-      <PageHeader
-        eyebrow={t('eyebrow')}
-        title={t('title')}
-        description={t('description')}
-        actions={
-          <Link href="/agents">
-            <Button variant="glass" size="lg">
-              <ArrowLeft className="mr-2 size-4" />
-              {t('backToAgents')}
-            </Button>
-          </Link>
-        }
-      />
+      <TopBarSlot title={<h1 className="text-sm font-medium">{t('title')}</h1>} />
 
       <SectionCard>
         <SectionCardHeader>

@@ -9,7 +9,7 @@ import { LogoutButton } from './logout-button';
 import { SectionCard, SectionCardBody, SectionCardHeader } from '@/components/ui/section-card';
 import { EmptyState } from '@/components/ui/empty-state';
 import { StatusBadge } from '@/components/ui/status-badge';
-import { PageHeader } from '@/components/ui/page-header';
+import { TopBarSlot } from '@/components/nav/top-bar-slot';
 import { GlassPanel } from '@/components/ui/glass-panel';
 import { Button } from '@/components/ui/button';
 import { OperatorStatCard } from '@/components/ui/operator-stat-card';
@@ -44,11 +44,7 @@ export default async function DashboardPage() {
     return (
       <div className="min-h-full p-4 md:p-6">
         <div className="mx-auto max-w-7xl space-y-6">
-          <PageHeader
-            eyebrow={shellT('workspaceLabel')}
-            title={t('title')}
-            description={`${me?.project_name ?? ''} · OSS mode`}
-          />
+          <TopBarSlot title={<h1 className="text-sm font-medium">{t('title')}</h1>} />
 
           <GlassPanel className="overflow-hidden border-[color:var(--operator-primary)]/10 bg-[radial-gradient(circle_at_top_left,rgba(182,196,255,0.18),transparent_40%),linear-gradient(135deg,rgba(0,218,243,0.08),transparent_42%),color-mix(in_srgb,var(--operator-panel)_78%,transparent)] p-1">
             <SectionCard className="border-0 bg-transparent shadow-none backdrop-blur-none">
@@ -208,15 +204,9 @@ export default async function DashboardPage() {
     return (
       <div className="min-h-full p-4 md:p-6">
         <div className="mx-auto max-w-7xl space-y-6">
-          <PageHeader
-            eyebrow={shellT('workspaceLabel')}
-            title={t('title')}
-            description={`${org?.name ?? t('orgFallback')} · ${user.email}`}
-            actions={(
-              <div className="min-w-[120px]">
-                <LogoutButton />
-              </div>
-            )}
+          <TopBarSlot
+            title={<h1 className="text-sm font-medium">{t('title')}</h1>}
+            actions={<LogoutButton />}
           />
 
           <SectionCard>
@@ -233,15 +223,9 @@ export default async function DashboardPage() {
     return (
       <div className="min-h-full p-4 md:p-6">
         <div className="mx-auto max-w-7xl space-y-6">
-          <PageHeader
-            eyebrow={shellT('workspaceLabel')}
-            title={t('title')}
-            description={`${org?.name ?? t('orgFallback')} · ${user.email}`}
-            actions={(
-              <div className="min-w-[120px]">
-                <LogoutButton />
-              </div>
-            )}
+          <TopBarSlot
+            title={<h1 className="text-sm font-medium">{t('title')}</h1>}
+            actions={<LogoutButton />}
           />
 
           <SectionCard>
@@ -277,22 +261,16 @@ export default async function DashboardPage() {
   return (
     <div className="min-h-full p-4 md:p-6">
       <div className="mx-auto max-w-7xl space-y-6">
-        <PageHeader
-          eyebrow={shellT('workspaceLabel')}
-          title={t('title')}
-          description={`${org?.name ?? t('orgFallback')} · ${currentMembership.project_name}`}
-          actions={(
-            <>
-              <Button asChild variant="glass" size="lg">
-                <Link href="/memos">
-                  {shellT('openMemosCta')}
-                </Link>
+        <TopBarSlot
+          title={<h1 className="text-sm font-medium">{t('title')}</h1>}
+          actions={
+            <div className="flex items-center gap-2">
+              <Button asChild variant="outline" size="sm">
+                <Link href="/memos">{shellT('openMemosCta')}</Link>
               </Button>
-              <div className="min-w-[120px]">
-                <LogoutButton />
-              </div>
-            </>
-          )}
+              <LogoutButton />
+            </div>
+          }
         />
 
         <div className="grid gap-4 md:grid-cols-3">

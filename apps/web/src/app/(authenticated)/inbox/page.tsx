@@ -5,7 +5,7 @@ import { useRouter } from 'next/navigation';
 import { useTranslations } from 'next-intl';
 import { createSupabaseBrowserClient } from '@/lib/supabase/client';
 import { Button } from '@/components/ui/button';
-import { PageHeader } from '@/components/ui/page-header';
+import { TopBarSlot } from '@/components/nav/top-bar-slot';
 import { SectionCard, SectionCardBody, SectionCardHeader } from '@/components/ui/section-card';
 import { Badge } from '@/components/ui/badge';
 import { EmptyState } from '@/components/ui/empty-state';
@@ -46,7 +46,6 @@ async function fetchInboxNotifications(typeFilter: string) {
 export default function InboxPage() {
   const router = useRouter();
   const t = useTranslations('inbox');
-  const tc = useTranslations('common');
   const { currentTeamMemberId } = useDashboardContext();
   const [notifications, setNotifications] = useState<Notification[]>([]);
   const [unreadCount, setUnreadCount] = useState(0);
@@ -163,14 +162,12 @@ export default function InboxPage() {
 
   return (
     <div className="space-y-4">
-      <PageHeader
-        eyebrow={tc('operatorSurface')}
-        title={t('title')}
-        description={t('surfaceDescription')}
+      <TopBarSlot
+        title={<h1 className="text-sm font-medium">{t('title')}</h1>}
         actions={
           <div className="flex flex-wrap items-center gap-2">
             {unreadCount > 0 ? <Badge variant="info">{unreadCount}</Badge> : null}
-            <Button variant="glass" size="lg" onClick={markAllRead} disabled={unreadCount === 0}>
+            <Button variant="glass" size="sm" onClick={markAllRead} disabled={unreadCount === 0}>
               {t('markAllRead')}
             </Button>
           </div>

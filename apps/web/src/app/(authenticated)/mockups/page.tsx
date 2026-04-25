@@ -7,7 +7,7 @@ import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { OperatorInput } from '@/components/ui/operator-control';
 import { EmptyState } from '@/components/ui/empty-state';
-import { PageHeader } from '@/components/ui/page-header';
+import { TopBarSlot } from '@/components/nav/top-bar-slot';
 import { SectionCard, SectionCardBody, SectionCardHeader } from '@/components/ui/section-card';
 import { PageSkeleton } from '@/components/ui/page-skeleton';
 import { UpgradeModal } from '@/components/ui/upgrade-modal';
@@ -69,14 +69,13 @@ export default function MockupsPage() {
 
   return (
     <div className="space-y-4">
-      <PageHeader
-        eyebrow={tc('operatorSurface')}
-        title={t('title')}
-        actions={(
-          <Button variant="hero" size="lg" onClick={() => setShowCreate(true)}>
+      <TopBarSlot
+        title={<h1 className="text-sm font-medium">{t('title')}</h1>}
+        actions={
+          <Button variant="outline" size="sm" onClick={() => setShowCreate(true)}>
             {t('newMockup')}
           </Button>
-        )}
+        }
       />
 
       {showCreate ? (

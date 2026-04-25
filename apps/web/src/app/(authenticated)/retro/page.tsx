@@ -6,7 +6,7 @@ import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { EmptyState } from '@/components/ui/empty-state';
 import { OperatorInput } from '@/components/ui/operator-control';
-import { PageHeader } from '@/components/ui/page-header';
+import { TopBarSlot } from '@/components/nav/top-bar-slot';
 import { SectionCard, SectionCardBody, SectionCardHeader } from '@/components/ui/section-card';
 import { useDashboardContext } from '../../dashboard/dashboard-shell';
 
@@ -28,7 +28,6 @@ const PHASE_VARIANTS: Record<string, 'success' | 'info' | 'outline' | 'secondary
 
 export default function RetroPage() {
   const t = useTranslations('retro');
-  const tc = useTranslations('common');
   const shellT = useTranslations('shell');
   const { projectId } = useDashboardContext();
   const [sessions, setSessions] = useState<RetroSession[]>([]);
@@ -96,11 +95,7 @@ export default function RetroPage() {
   if (!projectId) {
     return (
       <div className="space-y-4">
-        <PageHeader
-          eyebrow={tc('operatorSurface')}
-          title={t('title')}
-          description={t('surfaceDescription')}
-        />
+        <TopBarSlot title={<h1 className="text-sm font-medium">{t('title')}</h1>} />
         <SectionCard>
           <SectionCardBody>
             <EmptyState title={shellT('projectSelectPrompt')} description={shellT('projectSelectDescription')} />
@@ -112,11 +107,7 @@ export default function RetroPage() {
 
   return (
     <div className="space-y-4">
-      <PageHeader
-        eyebrow={tc('operatorSurface')}
-        title={t('title')}
-        description={t('surfaceDescription')}
-      />
+      <TopBarSlot title={<h1 className="text-sm font-medium">{t('title')}</h1>} />
 
       <SectionCard>
         <SectionCardHeader>
