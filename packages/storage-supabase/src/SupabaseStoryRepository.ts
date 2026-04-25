@@ -136,4 +136,9 @@ export class SupabaseStoryRepository implements IStoryRepository {
     if (error) throw error;
     return data ?? [];
   }
+
+  async addActivity(input: { story_id: string; org_id: string; actor_id: string; action_type: string; old_value?: string | null; new_value?: string | null }): Promise<void> {
+    const { error } = await this.supabase.from('story_activities').insert(input);
+    if (error) throw mapSupabaseError(error);
+  }
 }

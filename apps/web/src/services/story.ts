@@ -197,4 +197,8 @@ export class StoryService {
   async getActivities(storyId: string, options?: { limit?: number; cursor?: string }) {
     return this.repo.getActivities(storyId, options);
   }
+
+  async logActivity(input: { story_id: string; org_id: string; actor_id: string; action_type: string; old_value?: string | null; new_value?: string | null }): Promise<void> {
+    await this.repo.addActivity(input);
+  }
 }
