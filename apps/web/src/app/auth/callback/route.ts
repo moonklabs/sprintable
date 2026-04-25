@@ -1,6 +1,7 @@
 import { createSupabaseServerClient } from '@/lib/supabase/server';
 import { NextResponse } from 'next/server';
 import { resolveAppUrl } from '@/services/app-url';
+import { cookies } from 'next/headers';
 
 export async function GET(request: Request) {
   const { searchParams } = new URL(request.url);
@@ -9,6 +10,14 @@ export async function GET(request: Request) {
   const origin = resolveAppUrl(null);
 
   if (code) {
+    const cookieStore = await cookies();
+    const hasCodeVerifier = cookieStore.getAll().some(c => c.name.includes('code-verifier'));
+    if (!hasCodeVerifier) {
+      const params = new URLSearchParams({ code });
+      if (next) params.set('next', next);
+      return NextResponse.redirect(`${origin}/auth/callback/fallback?${params.toString()}`);
+    }
+
     const supabase = await createSupabaseServerClient();
     const { error } = await supabase.auth.exchangeCodeForSession(code);
     if (error) {
