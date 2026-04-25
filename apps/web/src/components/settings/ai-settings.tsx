@@ -1,6 +1,7 @@
 'use client';
 
 import { useEffect, useMemo, useState } from 'react';
+import { OperatorDropdownSelect } from '@/components/ui/operator-dropdown-select';
 import { useTranslations } from 'next-intl';
 import {
   ANTHROPIC_MODELS,
@@ -166,15 +167,11 @@ export function AiSettingsSection({ projectId }: { projectId: string }) {
       <div className="space-y-3">
         <div>
           <label className="mb-1 block text-xs font-medium text-gray-600">{t('aiProvider')}</label>
-          <select
+          <OperatorDropdownSelect
             value={provider}
-            onChange={(e) => setProvider(e.target.value as LLMProvider)}
-            className="w-full rounded border px-3 py-2 text-sm"
-          >
-            {Object.entries(PROVIDER_LABELS).map(([value, label]) => (
-              <option key={value} value={value}>{label}</option>
-            ))}
-          </select>
+            onValueChange={(v) => setProvider(v as LLMProvider)}
+            options={Object.entries(PROVIDER_LABELS).map(([v, label]) => ({ value: v, label }))}
+          />
         </div>
 
         <div>
@@ -188,15 +185,11 @@ export function AiSettingsSection({ projectId }: { projectId: string }) {
               className="w-full rounded border px-3 py-2 text-sm"
             />
           ) : (
-            <select
-              value={model}
-              onChange={(e) => setModel(e.target.value)}
-              className="w-full rounded border px-3 py-2 text-sm"
-            >
-              {modelOptions.map((option) => (
-                <option key={option} value={option}>{option}</option>
-              ))}
-            </select>
+            <OperatorDropdownSelect
+              value={model as string}
+              onValueChange={(v) => setModel(v)}
+              options={modelOptions.map((o) => ({ value: o, label: o }))}
+            />
           )}
         </div>
 

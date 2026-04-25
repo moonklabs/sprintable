@@ -16,7 +16,8 @@ import { StandupDeadlineSection } from '@/components/settings/standup-deadline-s
 import { TwoFactorSection } from '@/components/settings/two-factor-section';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
-import { OperatorInput, OperatorSelect } from '@/components/ui/operator-control';
+import { OperatorInput } from '@/components/ui/operator-control';
+import { OperatorDropdownSelect } from '@/components/ui/operator-dropdown-select';
 import { SectionCard, SectionCardBody, SectionCardHeader } from '@/components/ui/section-card';
 import { Tabs, TabsList, TabsTrigger, TabsContent } from '@/components/ui/tabs';
 
@@ -720,14 +721,22 @@ export default function SettingsPage() {
                         onChange={(e) => setInviteEmail(e.target.value)}
                         placeholder={t('emailPlaceholder')}
                       />
-                      <OperatorSelect value={inviteProjectId} onChange={(e) => setInviteProjectId(e.target.value)}>
-                        <option value="">{t('orgWideInvite')}</option>
-                        {projects.map((project) => <option key={project.id} value={project.id}>{project.name}</option>)}
-                      </OperatorSelect>
-                      <OperatorSelect value={inviteRole} onChange={(e) => setInviteRole(e.target.value as 'member' | 'admin')}>
-                        <option value="member">Member</option>
-                        <option value="admin">Admin</option>
-                      </OperatorSelect>
+                      <OperatorDropdownSelect
+                        value={inviteProjectId}
+                        onValueChange={(v) => setInviteProjectId(v)}
+                        options={[
+                          { value: '', label: t('orgWideInvite') },
+                          ...projects.map((project) => ({ value: project.id, label: project.name })),
+                        ]}
+                      />
+                      <OperatorDropdownSelect
+                        value={inviteRole}
+                        onValueChange={(v) => setInviteRole(v as 'member' | 'admin')}
+                        options={[
+                          { value: 'member', label: 'Member' },
+                          { value: 'admin', label: 'Admin' },
+                        ]}
+                      />
                       <Button
                         variant="hero"
                         size="lg"
@@ -819,10 +828,14 @@ export default function SettingsPage() {
                         onChange={(e) => setProjectInviteEmail(e.target.value)}
                         placeholder={t('emailPlaceholder')}
                       />
-                      <OperatorSelect value={projectInviteProjectId} onChange={(e) => setProjectInviteProjectId(e.target.value)}>
-                        <option value="">{t('selectProject')}</option>
-                        {projects.map((project) => <option key={project.id} value={project.id}>{project.name}</option>)}
-                      </OperatorSelect>
+                      <OperatorDropdownSelect
+                        value={projectInviteProjectId}
+                        onValueChange={(v) => setProjectInviteProjectId(v)}
+                        options={[
+                          { value: '', label: t('selectProject') },
+                          ...projects.map((project) => ({ value: project.id, label: project.name })),
+                        ]}
+                      />
                       <Button
                         variant="hero"
                         size="lg"
@@ -849,14 +862,23 @@ export default function SettingsPage() {
                   </SectionCardHeader>
                   <SectionCardBody className="space-y-4">
                     <div className="grid gap-3 md:grid-cols-[220px_minmax(0,1fr)_auto]">
-                      <OperatorSelect value={memberProjectId} onChange={(e) => setMemberProjectId(e.target.value)}>
-                        <option value="">{t('selectProject')}</option>
-                        {projects.map((project) => <option key={project.id} value={project.id}>{project.name}</option>)}
-                      </OperatorSelect>
-                      <OperatorSelect value={selectedOrgMemberUserId} onChange={(e) => setSelectedOrgMemberUserId(e.target.value)} disabled={!memberProjectId || assignableMembers.length === 0}>
-                        <option value="">{assignableMembers.length ? t('chooseMember') : t('noAssignableMembers')}</option>
-                        {assignableMembers.map((member) => <option key={member.user_id} value={member.user_id ?? ''}>{member.name}</option>)}
-                      </OperatorSelect>
+                      <OperatorDropdownSelect
+                        value={memberProjectId}
+                        onValueChange={(v) => setMemberProjectId(v)}
+                        options={[
+                          { value: '', label: t('selectProject') },
+                          ...projects.map((project) => ({ value: project.id, label: project.name })),
+                        ]}
+                      />
+                      <OperatorDropdownSelect
+                        value={selectedOrgMemberUserId}
+                        onValueChange={(v) => setSelectedOrgMemberUserId(v)}
+                        disabled={!memberProjectId || assignableMembers.length === 0}
+                        options={[
+                          { value: '', label: assignableMembers.length ? t('chooseMember') : t('noAssignableMembers') },
+                          ...assignableMembers.map((member) => ({ value: member.user_id ?? '', label: member.name })),
+                        ]}
+                      />
                       <Button variant="hero" size="lg" onClick={handleAddProjectMember} disabled={!memberProjectId || !selectedOrgMemberUserId || addingMember}>
                         {addingMember ? '...' : t('addToProject')}
                       </Button>
@@ -922,10 +944,14 @@ export default function SettingsPage() {
                         onChange={(e) => setNewWebhookUrl(e.target.value)}
                         placeholder={t('webhookUrlPlaceholder')}
                       />
-                      <OperatorSelect value={newWebhookProjectId} onChange={(e) => setNewWebhookProjectId(e.target.value)}>
-                        <option value="">{t('defaultWebhook')}</option>
-                        {projects.map((project) => <option key={project.id} value={project.id}>{project.name}</option>)}
-                      </OperatorSelect>
+                      <OperatorDropdownSelect
+                        value={newWebhookProjectId}
+                        onValueChange={(v) => setNewWebhookProjectId(v)}
+                        options={[
+                          { value: '', label: t('defaultWebhook') },
+                          ...projects.map((project) => ({ value: project.id, label: project.name })),
+                        ]}
+                      />
                       <Button
                         variant="hero"
                         size="lg"

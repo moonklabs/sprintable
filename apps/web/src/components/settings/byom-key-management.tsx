@@ -3,7 +3,8 @@
 import { useCallback, useEffect, useState } from 'react';
 import { useTranslations } from 'next-intl';
 import { Button } from '@/components/ui/button';
-import { OperatorInput, OperatorSelect } from '@/components/ui/operator-control';
+import { OperatorInput } from '@/components/ui/operator-control';
+import { OperatorDropdownSelect } from '@/components/ui/operator-dropdown-select';
 import { SectionCard, SectionCardBody, SectionCardHeader } from '@/components/ui/section-card';
 import { Badge } from '@/components/ui/badge';
 import type { LLMProvider } from '@/lib/llm';
@@ -235,19 +236,16 @@ export function ByomKeyManagement({ projectId }: { projectId: string }) {
               <label className="mb-1.5 block text-xs font-medium uppercase tracking-[0.18em] text-[color:var(--operator-muted)]">
                 {t('providerLabel')}
               </label>
-              <OperatorSelect
+              <OperatorDropdownSelect
                 value={provider}
-                onChange={(e) => {
-                  setProvider(e.target.value as LLMProvider);
+                onValueChange={(v) => {
+                  setProvider(v as LLMProvider);
                   setValidationResult(null);
                   setSaveResult(null);
                   setDeleteMessage(null);
                 }}
-              >
-                {Object.entries(PROVIDER_LABELS).map(([value, label]) => (
-                  <option key={value} value={value}>{label}</option>
-                ))}
-              </OperatorSelect>
+                options={Object.entries(PROVIDER_LABELS).map(([v, label]) => ({ value: v, label }))}
+              />
             </div>
 
             <div>
