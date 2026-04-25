@@ -894,7 +894,11 @@
     "unknown": "알 수 없음",
     "adminOnly": "관리자 권한 필요",
     "grantFailed": "지급 실패",
-    "adminOnlyHint": "조직 관리자/소유자만 리워드 지급 가능"
+    "adminOnlyHint": "조직 관리자/소유자만 리워드 지급 가능",
+    "periodAll": "전체",
+    "periodDaily": "일간",
+    "periodWeekly": "주간",
+    "periodMonthly": "월간"
   },
   "inbox": {
     "title": "인박스",

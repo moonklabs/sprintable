@@ -38,11 +38,16 @@ export function registerRewardsTools(server: McpServer) {
     }
   });
 
-  server.tool('get_leaderboard_v2', 'Get reward leaderboard for project', {
+  server.tool('get_leaderboard_v2', 'Get reward leaderboard for project with optional period filter', {
     project_id: z.string(),
-  }, async ({ project_id }) => {
+    period: z.enum(['all', 'daily', 'weekly', 'monthly']).optional().describe('Time period (default: all)'),
+    limit: z.number().int().min(1).max(100).optional().describe('Max results (default: 50)'),
+  }, async ({ project_id, period, limit }) => {
     try {
-      const data = await pmApi(`/api/rewards?project_id=${project_id}&type=leaderboard`);
+      const params = new URLSearchParams({ project_id });
+      if (period) params.set('period', period);
+      if (limit !== undefined) params.set('limit', String(limit));
+      const data = await pmApi(`/api/rewards/leaderboard?${params.toString()}`);
       return ok(data);
     } catch (e) {
       return err(e instanceof PmApiError ? e.message : String(e));

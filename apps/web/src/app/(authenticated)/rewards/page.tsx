@@ -17,6 +17,7 @@ export default function RewardsPage() {
   const [ledger, setLedger] = useState<LedgerEntry[]>([]);
   const [members, setMembers] = useState<Member[]>([]);
   const [loading, setLoading] = useState(true);
+  const [period, setPeriod] = useState<'all' | 'daily' | 'weekly' | 'monthly'>('all');
   const [memberId, setMemberId] = useState('');
   const [amount, setAmount] = useState('');
   const [reason, setReason] = useState('');
@@ -42,20 +43,19 @@ export default function RewardsPage() {
       setLoading(true);
       try {
         const [lbRes, ledgerRes, membersRes] = await Promise.all([
-          fetch(`/api/rewards?project_id=${projectId}&type=leaderboard`),
+          fetch(`/api/rewards/leaderboard?project_id=${projectId}&period=${period}`),
           fetch(`/api/rewards?project_id=${projectId}`),
           fetch(`/api/team-members?project_id=${projectId}`),
         ]);
         if (lbRes.ok && !cancelled) { const j = await lbRes.json(); setLeaderboard(j.data); }
         if (ledgerRes.ok && !cancelled) { const j = await ledgerRes.json(); setLedger(j.data); }
         if (membersRes.ok && !cancelled) { const j = await membersRes.json(); setMembers(j.data); }
-        // 간단 admin 판별은 생략 — grant 실패 시 에러 표시로 대응
       } catch { /* silent */ }
       if (!cancelled) setLoading(false);
     }
     void load();
     return () => { cancelled = true; };
-  }, [projectId]);
+  }, [projectId, period]);
 
   const handleGrant = async () => {
     if (!memberId || !amount || !reason.trim()) return;
@@ -69,7 +69,7 @@ export default function RewardsPage() {
       if (res.ok) {
         setMemberId(''); setAmount(''); setReason('');
         const [lbRes, ledgerRes] = await Promise.all([
-          fetch(`/api/rewards?project_id=${projectId}&type=leaderboard`),
+          fetch(`/api/rewards/leaderboard?project_id=${projectId}&period=${period}`),
           fetch(`/api/rewards?project_id=${projectId}`),
         ]);
         if (lbRes.ok) { const j = await lbRes.json(); setLeaderboard(j.data); }
@@ -104,7 +104,20 @@ export default function RewardsPage() {
 
         {/* 리더보드 */}
         <div className="rounded-xl bg-white p-5 shadow-sm">
-          <h2 className="mb-3 text-sm font-semibold text-gray-700">🏆 {t('leaderboard')}</h2>
+          <div className="mb-3 flex items-center justify-between">
+            <h2 className="text-sm font-semibold text-gray-700">🏆 {t('leaderboard')}</h2>
+            <div className="flex gap-1 rounded-lg bg-gray-100 p-1 text-xs">
+              {(['all', 'monthly', 'weekly', 'daily'] as const).map((p) => (
+                <button
+                  key={p}
+                  onClick={() => setPeriod(p)}
+                  className={`rounded-md px-2 py-1 transition-colors ${period === p ? 'bg-white font-medium shadow-sm text-gray-900' : 'text-gray-500 hover:text-gray-700'}`}
+                >
+                  {p === 'all' ? t('periodAll') : p === 'monthly' ? t('periodMonthly') : p === 'weekly' ? t('periodWeekly') : t('periodDaily')}
+                </button>
+              ))}
+            </div>
+          </div>
           {loading ? (
             <div className="space-y-2">{[1,2,3].map(i => <div key={i} className="h-8 animate-pulse rounded bg-gray-100" />)}</div>
           ) : leaderboard.length === 0 ? (
