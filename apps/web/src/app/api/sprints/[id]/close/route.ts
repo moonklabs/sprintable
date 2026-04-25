@@ -90,6 +90,52 @@ export async function POST(request: Request, { params }: RouteParams) {
         const sprintRepo = await createSprintRepository(db);
         await sprintRepo.update(id, { report_doc_id: doc.id });
       })().catch(() => {});
+
+      // 미완료 회고 액션 이월 (fire-and-forget)
+      (async () => {
+        // 1. 현재 스프린트 retro session 조회
+        const { data: closedSession } = await db
+          .from('retro_sessions')
+          .select('id')
+          .eq('sprint_id', id)
+          .maybeSingle();
+        if (!closedSession) return;
+
+        // 2. 미완료 액션 조회
+        const { data: openActions } = await db
+          .from('retro_actions')
+          .select('title, assignee_id')
+          .eq('session_id', closedSession.id)
+          .neq('status', 'done');
+        if (!openActions?.length) return;
+
+        // 3. 다음 active 스프린트 조회
+        const { data: nextSprint } = await db
+          .from('sprints')
+          .select('id')
+          .eq('project_id', sprint.project_id)
+          .eq('status', 'active')
+          .maybeSingle();
+        if (!nextSprint) return;
+
+        // 4. 다음 스프린트 retro session 조회
+        const { data: nextSession } = await db
+          .from('retro_sessions')
+          .select('id')
+          .eq('sprint_id', nextSprint.id)
+          .maybeSingle();
+        if (!nextSession) return;
+
+        // 5. 이월 INSERT
+        await db.from('retro_actions').insert(
+          openActions.map((a) => ({
+            session_id: nextSession.id,
+            title: `[이월] ${a.title}`,
+            assignee_id: a.assignee_id,
+            status: 'open',
+          })),
+        );
+      })().catch(() => {});
     }
 
     return apiSuccess(sprint);
