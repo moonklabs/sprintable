@@ -7,6 +7,13 @@ export function createSupabaseBrowserClient() {
   return createBrowserClient(
     process.env['NEXT_PUBLIC_SUPABASE_URL']!,
     process.env['NEXT_PUBLIC_SUPABASE_ANON_KEY']!,
-    cookieDomain ? { cookieOptions: { domain: cookieDomain } } : undefined,
+    {
+      cookieOptions: {
+        ...(cookieDomain ? { domain: cookieDomain } : {}),
+        sameSite: 'lax',
+        secure: true,
+        path: '/',
+      },
+    },
   );
 }
