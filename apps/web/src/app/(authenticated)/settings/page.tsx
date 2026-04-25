@@ -11,6 +11,7 @@ import { ByomKeyManagement } from '@/components/settings/byom-key-management';
 import { McpConnectionSettings } from '@/components/settings/mcp-connection-settings';
 import { SlackIntegrationSettingsSection } from '@/components/settings/slack-integration-settings';
 import { ThemeSettings } from '@/components/settings/theme-settings';
+import { StandupDeadlineSection } from '@/components/settings/standup-deadline-section';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { OperatorInput, OperatorSelect } from '@/components/ui/operator-control';
@@ -845,6 +846,8 @@ export default function SettingsPage() {
         </SectionCard>
         </section>
       ) : null}
+
+      <StandupDeadlineSection projectId={currentProjectId ?? undefined} />
 
       <section id="danger-zone">
         <SectionCard className="border-destructive/20 bg-destructive/10">

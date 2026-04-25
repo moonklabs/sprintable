@@ -486,7 +486,10 @@
     "projectInviteTitle": "Invite to Project",
     "projectInviteDescription": "Invite a team member directly to a specific project by email.",
     "projectInviteSent": "Invitation link generated.",
-    "projectInviteFailed": "Failed to send project invitation."
+    "projectInviteFailed": "Failed to send project invitation.",
+    "standupSettings": "Standup Settings",
+    "standupSettingsDesc": "Set the daily standup deadline time.",
+    "standupDeadline": "Deadline"
   },
   "landing": {
     "navProduct": "Overview",
