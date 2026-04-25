@@ -40,6 +40,7 @@ interface ProjectOption {
 interface InvitationItem {
   id: string;
   email: string;
+  status: 'pending' | 'accepted' | 'revoked';
   accepted_at: string | null;
   expires_at: string;
   project_id: string | null;
@@ -104,6 +105,9 @@ export default function SettingsPage() {
   const [projectInviteProjectId, setProjectInviteProjectId] = useState('');
   const [projectInviting, setProjectInviting] = useState(false);
   const [projectInviteResult, setProjectInviteResult] = useState<{ type: 'success' | 'error'; text: string } | null>(null);
+  const [revokingInviteId, setRevokingInviteId] = useState<string | null>(null);
+  const [resendingInviteId, setResendingInviteId] = useState<string | null>(null);
+  const [resendResult, setResendResult] = useState<{ id: string; url: string } | null>(null);
 
   const refreshProjects = async () => {
     const endpoint = orgId ? `/api/projects?org_id=${encodeURIComponent(orgId)}` : '/api/projects';
@@ -131,6 +135,31 @@ export default function SettingsPage() {
     if (res.status === 403) {
       setIsAdmin(false);
       setAdminChecked(true);
+    }
+  };
+
+  const handleRevokeInvite = async (inviteId: string) => {
+    setRevokingInviteId(inviteId);
+    try {
+      const res = await fetch(`/api/invitations/${inviteId}`, { method: 'DELETE' });
+      if (res.ok) await refreshInvitations();
+    } finally {
+      setRevokingInviteId(null);
+    }
+  };
+
+  const handleResendInvite = async (inviteId: string) => {
+    setResendingInviteId(inviteId);
+    setResendResult(null);
+    try {
+      const res = await fetch(`/api/invitations/${inviteId}/resend`, { method: 'POST' });
+      if (res.ok) {
+        const json = await res.json();
+        setResendResult({ id: inviteId, url: json.data?.invite_url ?? '' });
+        await refreshInvitations();
+      }
+    } finally {
+      setResendingInviteId(null);
     }
   };
 
@@ -680,14 +709,39 @@ export default function SettingsPage() {
             {invitations.length > 0 ? (
               <div className="space-y-2">
                 {invitations.map((invitation) => (
-                  <div key={invitation.id} className="flex items-center justify-between gap-2 rounded-md border border-border bg-muted/30 px-3 py-3 text-xs">
-                    <span className="text-foreground">{invitation.email}</span>
-                    <span className="shrink-0 text-muted-foreground">
-                      {invitation.projects?.name ?? t('orgWide')}
-                    </span>
-                    <span className={`shrink-0 ${invitation.accepted_at ? 'text-emerald-300' : new Date(invitation.expires_at) < new Date() ? 'text-rose-300' : 'text-amber-200'}`}>
-                      {invitation.accepted_at ? t('accepted') : new Date(invitation.expires_at) < new Date() ? t('expired') : t('pending')}
-                    </span>
+                  <div key={invitation.id}>
+                    <div className="flex items-center justify-between gap-2 rounded-md border border-border bg-muted/30 px-3 py-3 text-xs">
+                      <span className="text-foreground">{invitation.email}</span>
+                      <span className="shrink-0 text-muted-foreground">
+                        {invitation.projects?.name ?? t('orgWide')}
+                      </span>
+                      <span className={`shrink-0 ${invitation.status === 'accepted' ? 'text-emerald-300' : invitation.status === 'revoked' ? 'text-muted-foreground line-through' : new Date(invitation.expires_at) < new Date() ? 'text-rose-300' : 'text-amber-200'}`}>
+                        {invitation.status === 'accepted' ? t('accepted') : invitation.status === 'revoked' ? t('revoked') : new Date(invitation.expires_at) < new Date() ? t('expired') : t('pending')}
+                      </span>
+                      {invitation.status === 'pending' && (
+                        <div className="flex shrink-0 gap-1">
+                          <button
+                            type="button"
+                            className="rounded px-2 py-0.5 text-xs text-muted-foreground hover:text-foreground border border-border hover:border-foreground/30 transition-colors disabled:opacity-50"
+                            disabled={resendingInviteId === invitation.id}
+                            onClick={() => handleResendInvite(invitation.id)}
+                          >
+                            {resendingInviteId === invitation.id ? '...' : t('resend')}
+                          </button>
+                          <button
+                            type="button"
+                            className="rounded px-2 py-0.5 text-xs text-rose-400 hover:text-rose-300 border border-rose-400/30 hover:border-rose-300/50 transition-colors disabled:opacity-50"
+                            disabled={revokingInviteId === invitation.id}
+                            onClick={() => handleRevokeInvite(invitation.id)}
+                          >
+                            {revokingInviteId === invitation.id ? '...' : t('revoke')}
+                          </button>
+                        </div>
+                      )}
+                    </div>
+                    {resendResult?.id === invitation.id && (
+                      <p className="mt-1 break-all px-1 text-xs text-amber-200">{t('inviteLinkCopied')}: {resendResult.url}</p>
+                    )}
                   </div>
                 ))}
               </div>
