@@ -21,6 +21,7 @@ export async function POST(request: Request) {
     const { data, error } = await supabase.rpc('accept_invitation', { _token: token });
 
     if (error) {
+      if (error.message.includes('revoked')) return apiError('INVITATION_REVOKED', error.message, 400);
       if (error.message.includes('expired')) return apiError('INVITATION_EXPIRED', error.message, 400);
       if (error.message.includes('mismatch')) return apiError('EMAIL_MISMATCH', error.message, 403);
       if (error.message.includes('not found')) return ApiErrors.notFound(error.message);

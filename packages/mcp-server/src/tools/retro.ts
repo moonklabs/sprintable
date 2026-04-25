@@ -23,74 +23,6 @@ export function registerRetroTools(server: McpServer) {
     }
   });
 
-  server.tool('change_retro_phase', 'Change retro session phase', {
-    project_id: z.string(),
-    sprint_id: z.string(),
-    phase: z.enum(['collect', 'vote', 'discuss', 'action', 'closed']),
-  }, async ({ project_id, sprint_id, phase }) => {
-    try {
-      const data = await pmApi(`/api/retro/${sprint_id}?project_id=${project_id}`, {
-        method: 'PATCH',
-        body: JSON.stringify({ phase }),
-      });
-      return ok(data);
-    } catch (e) {
-      return err(e instanceof PmApiError ? e.message : String(e));
-    }
-  });
-
-  server.tool('add_retro_item', 'Add item to retro session', {
-    project_id: z.string(),
-    sprint_id: z.string(),
-    category: z.enum(['good', 'bad', 'improve']),
-    text: z.string(),
-    author_id: z.string(),
-  }, async ({ project_id, sprint_id, category, text, author_id }) => {
-    try {
-      const data = await pmApi(`/api/retro/${sprint_id}/items?project_id=${project_id}`, {
-        method: 'POST',
-        body: JSON.stringify({ category, text, author_id }),
-      });
-      return ok(data);
-    } catch (e) {
-      return err(e instanceof PmApiError ? e.message : String(e));
-    }
-  });
-
-  server.tool('vote_retro_item', 'Vote on retro item via retro-sessions endpoint (retro_votes, duplicate-protected). voter_id defaults to caller identity.', {
-    session_id: z.string().describe('Retro session ID (use get_retro_session to obtain)'),
-    item_id: z.string(),
-    project_id: z.string(),
-    voter_id: z.string().optional().describe('Explicit voter ID; omit to use caller identity'),
-  }, async ({ session_id, item_id, project_id, voter_id }) => {
-    try {
-      const data = await pmApi(`/api/retro-sessions/${session_id}/items/${item_id}/vote?project_id=${encodeURIComponent(project_id)}`, {
-        method: 'POST',
-        body: JSON.stringify(voter_id ? { voter_id } : {}),
-      });
-      return ok(data);
-    } catch (e) {
-      return err(e instanceof PmApiError ? e.message : String(e));
-    }
-  });
-
-  server.tool('add_retro_action', 'Add action item to retro session', {
-    project_id: z.string(),
-    sprint_id: z.string(),
-    title: z.string(),
-    assignee_id: z.string(),
-  }, async ({ project_id, sprint_id, title, assignee_id }) => {
-    try {
-      const data = await pmApi(`/api/retro/${sprint_id}/actions?project_id=${project_id}`, {
-        method: 'POST',
-        body: JSON.stringify({ title, assignee_id }),
-      });
-      return ok(data);
-    } catch (e) {
-      return err(e instanceof PmApiError ? e.message : String(e));
-    }
-  });
-
   server.tool('update_retro_action_status', 'Update retro action status', {
     action_id: z.string(),
     status: z.enum(['open', 'done']),
@@ -100,18 +32,6 @@ export function registerRetroTools(server: McpServer) {
         method: 'PATCH',
         body: JSON.stringify({ status }),
       });
-      return ok(data);
-    } catch (e) {
-      return err(e instanceof PmApiError ? e.message : String(e));
-    }
-  });
-
-  server.tool('export_retro', 'Export retro as markdown', {
-    project_id: z.string(),
-    sprint_id: z.string(),
-  }, async ({ project_id, sprint_id }) => {
-    try {
-      const data = await pmApi(`/api/retro/${sprint_id}/export?project_id=${project_id}`);
       return ok(data);
     } catch (e) {
       return err(e instanceof PmApiError ? e.message : String(e));

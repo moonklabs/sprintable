@@ -15,8 +15,8 @@ export class DocsService {
     return new DocsService(new SupabaseDocRepository(supabase), supabase);
   }
 
-  async list(projectId: string, input?: { limit?: number; cursor?: string | null }) {
-    return this.repo.list({ project_id: projectId, limit: input?.limit, cursor: input?.cursor ?? undefined });
+  async list(projectId: string, input?: { limit?: number; cursor?: string | null; tags?: string[] }) {
+    return this.repo.list({ project_id: projectId, limit: input?.limit, cursor: input?.cursor ?? undefined, tags: input?.tags });
   }
 
   async getTree(projectId: string) {
@@ -154,7 +154,7 @@ export class DocsService {
     }
   }
 
-  async search(projectId: string, query: string, input?: { limit?: number; cursor?: string | null }) {
+  async search(projectId: string, query: string, input?: { limit?: number; cursor?: string | null; tags?: string[] }) {
     if (this.supabase) {
       let builder = this.supabase
         .from('docs')
@@ -162,6 +162,7 @@ export class DocsService {
         .eq('project_id', projectId)
         .or(`title.ilike.%${query}%,content.ilike.%${query}%`)
         .order('updated_at', { ascending: false });
+      if (input?.tags?.length) builder = (builder as unknown as { contains: (col: string, val: string[]) => typeof builder }).contains('tags', input.tags);
       if (input?.cursor) builder = builder.lt('updated_at', input.cursor);
       if (input?.limit) builder = builder.limit(input.limit + 1);
       const { data, error } = await builder;

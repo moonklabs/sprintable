@@ -6,7 +6,7 @@ import { handleApiError } from '@/lib/api-error';
 import { apiSuccess, apiError, ApiErrors } from '@/lib/api-response';
 import { getAuthContext } from '@/lib/auth-helpers';
 import { createEpicRepository, isOssMode } from '@/lib/storage/factory';
-import { getEpicActorRole, hasEpicRole } from '@/lib/epic-permissions';
+import { requireRole, ADMIN_ROLES } from '@/lib/role-guard';
 
 type RouteParams = { params: Promise<{ id: string }> };
 
@@ -59,12 +59,9 @@ export async function DELETE(request: Request, { params }: RouteParams) {
     if (!me) return ApiErrors.unauthorized();
     if (me.rateLimitExceeded) return ApiErrors.tooManyRequests(me.rateLimitRemaining, me.rateLimitResetAt);
 
-    // 권한 체크: admin/owner만 에픽 삭제 가능
     if (!isOssMode() && me.type !== 'agent') {
-      const role = await getEpicActorRole(supabase, me.id);
-      if (!role || !hasEpicRole(role, 'admin')) {
-        return apiError('FORBIDDEN', 'Epic deletion requires admin or owner role', 403);
-      }
+      const denied = await requireRole(supabase, me.org_id, ADMIN_ROLES, 'Epic deletion requires admin or owner role');
+      if (denied) return denied;
     }
 
     const dbClient = me.type === 'agent' ? createSupabaseAdminClient() : supabase;

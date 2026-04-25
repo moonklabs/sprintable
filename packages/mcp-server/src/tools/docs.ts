@@ -7,11 +7,15 @@ function ok(data: unknown) { return { content: [{ type: 'text' as const, text: J
 function handleError(e: unknown) { return err(e instanceof PmApiError ? e.message : String(e)); }
 
 export function registerDocsTools(server: McpServer) {
-  server.tool('list_docs', 'List docs tree for project', {
+  server.tool('list_docs', 'List docs for project (tree or flat with optional tag filter)', {
     project_id: z.string().describe('Project ID'),
-  }, async ({ project_id }) => {
+    tags: z.array(z.string()).optional().describe('Filter by tags — AND match (all tags must be present)'),
+  }, async ({ project_id, tags }) => {
     try {
-      const data = await pmApi(`/api/docs?project_id=${encodeURIComponent(project_id)}&view=tree`);
+      const params = new URLSearchParams({ project_id });
+      if (tags?.length) params.set('tags', tags.join(','));
+      else params.set('view', 'tree');
+      const data = await pmApi(`/api/docs?${params.toString()}`);
       return ok(data);
     } catch (e) { return handleError(e); }
   });
@@ -71,12 +75,15 @@ export function registerDocsTools(server: McpServer) {
     } catch (e) { return handleError(e); }
   });
 
-  server.tool('search_docs', 'Search docs by title/content', {
+  server.tool('search_docs', 'Search docs by title/content with optional tag filter', {
     project_id: z.string().describe('Project ID'),
     query: z.string(),
-  }, async ({ project_id, query }) => {
+    tags: z.array(z.string()).optional().describe('Filter by tags — AND match'),
+  }, async ({ project_id, query, tags }) => {
     try {
-      const data = await pmApi(`/api/docs?project_id=${encodeURIComponent(project_id)}&q=${encodeURIComponent(query)}`);
+      const params = new URLSearchParams({ project_id, q: query });
+      if (tags?.length) params.set('tags', tags.join(','));
+      const data = await pmApi(`/api/docs?${params.toString()}`);
       return ok(data);
     } catch (e) { return handleError(e); }
   });

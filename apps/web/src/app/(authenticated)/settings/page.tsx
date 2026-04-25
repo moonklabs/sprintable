@@ -3,7 +3,8 @@
 import { useEffect, useMemo, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import { useTranslations } from 'next-intl';
-import { Bell, Bot, CreditCard, FolderKanban, Key, Palette, Trash2, User, Users, Zap } from 'lucide-react';
+import { BarChart2, Bell, Bot, CreditCard, FolderKanban, Key, Palette, Trash2, User, Users, Zap } from 'lucide-react';
+import { UsageDashboard } from '@/components/settings/usage-dashboard';
 import { AgentApiKeysSection } from '@/components/settings/agent-api-keys-section';
 import { AiSettingsSection } from '@/components/settings/ai-settings';
 import { MyProfileSection } from '@/components/settings/my-profile-section';
@@ -11,6 +12,8 @@ import { ByomKeyManagement } from '@/components/settings/byom-key-management';
 import { McpConnectionSettings } from '@/components/settings/mcp-connection-settings';
 import { SlackIntegrationSettingsSection } from '@/components/settings/slack-integration-settings';
 import { ThemeSettings } from '@/components/settings/theme-settings';
+import { StandupDeadlineSection } from '@/components/settings/standup-deadline-section';
+import { TwoFactorSection } from '@/components/settings/two-factor-section';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { OperatorInput, OperatorSelect } from '@/components/ui/operator-control';
@@ -40,6 +43,7 @@ interface ProjectOption {
 interface InvitationItem {
   id: string;
   email: string;
+  status: 'pending' | 'accepted' | 'revoked';
   accepted_at: string | null;
   expires_at: string;
   project_id: string | null;
@@ -104,6 +108,10 @@ export default function SettingsPage() {
   const [projectInviteProjectId, setProjectInviteProjectId] = useState('');
   const [projectInviting, setProjectInviting] = useState(false);
   const [projectInviteResult, setProjectInviteResult] = useState<{ type: 'success' | 'error'; text: string } | null>(null);
+  const [revokingInviteId, setRevokingInviteId] = useState<string | null>(null);
+  const [resendingInviteId, setResendingInviteId] = useState<string | null>(null);
+  const [resendResult, setResendResult] = useState<{ id: string; url: string } | null>(null);
+  const [graceUntil, setGraceUntil] = useState<string | null>(null);
 
   const refreshProjects = async () => {
     const endpoint = orgId ? `/api/projects?org_id=${encodeURIComponent(orgId)}` : '/api/projects';
@@ -125,12 +133,42 @@ export default function SettingsPage() {
       setIsAdmin(true);
       setAdminChecked(true);
       setInvitations(json.data ?? []);
+      const statusRes = await fetch('/api/subscription/status');
+      if (statusRes.ok) {
+        const statusJson = await statusRes.json() as { data?: { grace_until?: string | null } };
+        setGraceUntil(statusJson.data?.grace_until ?? null);
+      }
       return;
     }
 
     if (res.status === 403) {
       setIsAdmin(false);
       setAdminChecked(true);
+    }
+  };
+
+  const handleRevokeInvite = async (inviteId: string) => {
+    setRevokingInviteId(inviteId);
+    try {
+      const res = await fetch(`/api/invitations/${inviteId}`, { method: 'DELETE' });
+      if (res.ok) await refreshInvitations();
+    } finally {
+      setRevokingInviteId(null);
+    }
+  };
+
+  const handleResendInvite = async (inviteId: string) => {
+    setResendingInviteId(inviteId);
+    setResendResult(null);
+    try {
+      const res = await fetch(`/api/invitations/${inviteId}/resend`, { method: 'POST' });
+      if (res.ok) {
+        const json = await res.json();
+        setResendResult({ id: inviteId, url: json.data?.invite_url ?? '' });
+        await refreshInvitations();
+      }
+    } finally {
+      setResendingInviteId(null);
     }
   };
 
@@ -404,8 +442,8 @@ export default function SettingsPage() {
   void projectMemberships;
 
   return (
-    <div className="flex h-full">
-      <Tabs defaultValue="profile" orientation="vertical" className="flex flex-1 min-h-0 gap-0">
+    <>
+      <Tabs defaultValue="profile" orientation="vertical" className="flex-1 min-h-0 gap-0">
         {/* Left nav */}
         <div className="w-52 shrink-0 border-r overflow-y-auto p-4">
           <h1 className="mb-4 px-2 text-sm font-semibold">{t('title')}</h1>
@@ -461,6 +499,12 @@ export default function SettingsPage() {
                     {t('tabSubscription')}
                   </TabsTrigger>
                 ) : null}
+                {process.env.NEXT_PUBLIC_OSS_MODE !== 'true' ? (
+                  <TabsTrigger value="usage">
+                    <BarChart2 className="h-4 w-4" />
+                    {t('tabUsage')}
+                  </TabsTrigger>
+                ) : null}
               </>
             ) : null}
 
@@ -480,7 +524,10 @@ export default function SettingsPage() {
           <div className="w-full max-w-3xl mx-auto p-6">
 
             <TabsContent value="profile">
-              <MyProfileSection />
+              <div className="space-y-6">
+                <MyProfileSection />
+                {process.env.NEXT_PUBLIC_OSS_MODE !== 'true' ? <TwoFactorSection /> : null}
+              </div>
             </TabsContent>
 
             <TabsContent value="appearance">
@@ -526,6 +573,11 @@ export default function SettingsPage() {
                   )}
                 </SectionCardBody>
               </SectionCard>
+              {currentProjectId ? (
+                <div className="mt-6">
+                  <StandupDeadlineSection projectId={currentProjectId} />
+                </div>
+              ) : null}
             </TabsContent>
 
             <TabsContent value="ai">
@@ -712,14 +764,39 @@ export default function SettingsPage() {
                     {invitations.length > 0 ? (
                       <div className="space-y-2">
                         {invitations.map((invitation) => (
-                          <div key={invitation.id} className="flex items-center justify-between gap-2 rounded-md border border-border bg-muted/30 px-3 py-3 text-xs">
-                            <span className="text-foreground">{invitation.email}</span>
-                            <span className="shrink-0 text-muted-foreground">
-                              {invitation.projects?.name ?? t('orgWide')}
-                            </span>
-                            <span className={`shrink-0 ${invitation.accepted_at ? 'text-emerald-300' : new Date(invitation.expires_at) < new Date() ? 'text-rose-300' : 'text-amber-200'}`}>
-                              {invitation.accepted_at ? t('accepted') : new Date(invitation.expires_at) < new Date() ? t('expired') : t('pending')}
-                            </span>
+                          <div key={invitation.id}>
+                            <div className="flex items-center justify-between gap-2 rounded-md border border-border bg-muted/30 px-3 py-3 text-xs">
+                              <span className="text-foreground">{invitation.email}</span>
+                              <span className="shrink-0 text-muted-foreground">
+                                {invitation.projects?.name ?? t('orgWide')}
+                              </span>
+                              <span className={`shrink-0 ${invitation.status === 'accepted' ? 'text-emerald-300' : invitation.status === 'revoked' ? 'text-muted-foreground line-through' : new Date(invitation.expires_at) < new Date() ? 'text-rose-300' : 'text-amber-200'}`}>
+                                {invitation.status === 'accepted' ? t('accepted') : invitation.status === 'revoked' ? t('revoked') : new Date(invitation.expires_at) < new Date() ? t('expired') : t('pending')}
+                              </span>
+                              {invitation.status === 'pending' ? (
+                                <div className="flex shrink-0 gap-1">
+                                  <button
+                                    type="button"
+                                    className="rounded border border-border px-2 py-0.5 text-xs text-muted-foreground transition-colors hover:border-foreground/30 hover:text-foreground disabled:opacity-50"
+                                    disabled={resendingInviteId === invitation.id}
+                                    onClick={() => handleResendInvite(invitation.id)}
+                                  >
+                                    {resendingInviteId === invitation.id ? '...' : t('resend')}
+                                  </button>
+                                  <button
+                                    type="button"
+                                    className="rounded border border-rose-400/30 px-2 py-0.5 text-xs text-rose-400 transition-colors hover:border-rose-300/50 hover:text-rose-300 disabled:opacity-50"
+                                    disabled={revokingInviteId === invitation.id}
+                                    onClick={() => handleRevokeInvite(invitation.id)}
+                                  >
+                                    {revokingInviteId === invitation.id ? '...' : t('revoke')}
+                                  </button>
+                                </div>
+                              ) : null}
+                            </div>
+                            {resendResult?.id === invitation.id ? (
+                              <p className="mt-1 break-all px-1 text-xs text-amber-200">{t('inviteLinkCopied')}: {resendResult.url}</p>
+                            ) : null}
                           </div>
                         ))}
                       </div>
@@ -885,7 +962,12 @@ export default function SettingsPage() {
                       <p className="text-sm text-muted-foreground">{t('subscriptionDescription')}</p>
                     </div>
                   </SectionCardHeader>
-                  <SectionCardBody>
+                  <SectionCardBody className="space-y-3">
+                    {graceUntil && new Date(graceUntil) > new Date() ? (
+                      <p className="rounded-md border border-amber-500/30 bg-amber-500/10 px-3 py-2 text-sm text-amber-300">
+                        {t('gracePeriodNotice', { date: new Date(graceUntil).toLocaleDateString('ko-KR') })}
+                      </p>
+                    ) : null}
                     <Button
                       variant="glass"
                       size="lg"
@@ -905,6 +987,17 @@ export default function SettingsPage() {
                     </Button>
                   </SectionCardBody>
                 </SectionCard>
+              </TabsContent>
+            ) : null}
+
+            {process.env.NEXT_PUBLIC_OSS_MODE !== 'true' && adminChecked && isAdmin ? (
+              <TabsContent value="usage">
+                <UsageDashboard
+                  orgId={orgId ?? undefined}
+                  currentProjectId={currentProjectId}
+                  projects={projects}
+                  defaultMonth={new Date().toISOString().slice(0, 7)}
+                />
               </TabsContent>
             ) : null}
 
@@ -985,6 +1078,6 @@ export default function SettingsPage() {
           </div>
         </div>
       ) : null}
-    </div>
+    </>
   );
 }

@@ -14,9 +14,9 @@ export class SqliteTaskRepository implements ITaskRepository {
     const id = randomUUID();
     const now = new Date().toISOString();
     this.db.prepare(`
-      INSERT INTO tasks (id, org_id, story_id, title, status, assignee_id, story_points, created_at, updated_at)
-      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
-    `).run(id, story.org_id, input.story_id, input.title.trim(), input.status ?? 'todo', input.assignee_id ?? null, input.story_points ?? null, now, now);
+      INSERT INTO tasks (id, org_id, story_id, title, status, assignee_id, created_at, updated_at)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+    `).run(id, story.org_id, input.story_id, input.title.trim(), input.status ?? 'todo', input.assignee_id ?? null, now, now);
     return this.getById(id);
   }
 
@@ -60,7 +60,7 @@ export class SqliteTaskRepository implements ITaskRepository {
   }
 
   async update(id: string, input: UpdateTaskInput): Promise<Task> {
-    const ALLOWED: (keyof UpdateTaskInput)[] = ['title', 'status', 'assignee_id', 'story_points'];
+    const ALLOWED: (keyof UpdateTaskInput)[] = ['title', 'status', 'assignee_id'];
     const sets: string[] = [];
     const params: SqlParam[] = [];
     for (const key of ALLOWED) {

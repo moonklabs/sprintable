@@ -17,10 +17,11 @@ export class SupabaseDocRepository implements IDocRepository {
   async list(filters: DocListFilters): Promise<DocSummary[]> {
     let query = this.supabase
       .from('docs')
-      .select('id, parent_id, title, slug, icon, sort_order, is_folder, updated_at')
+      .select('id, parent_id, title, slug, icon, tags, sort_order, is_folder, updated_at')
       .eq('project_id', filters.project_id)
       .is('deleted_at', null)
       .order('updated_at', { ascending: false });
+    if (filters.tags?.length) query = (query as unknown as { contains: (col: string, val: string[]) => typeof query }).contains('tags', filters.tags);
     if (filters.cursor) query = query.lt('updated_at', filters.cursor);
     if (filters.limit) query = query.limit(filters.limit + 1);
     const { data, error } = await query;
@@ -31,7 +32,7 @@ export class SupabaseDocRepository implements IDocRepository {
   async getTree(projectId: string): Promise<DocSummary[]> {
     const { data, error } = await this.supabase
       .from('docs')
-      .select('id, parent_id, title, slug, icon, sort_order, is_folder, updated_at')
+      .select('id, parent_id, title, slug, icon, tags, sort_order, is_folder, updated_at')
       .eq('project_id', projectId)
       .is('deleted_at', null)
       .order('sort_order');
@@ -75,6 +76,7 @@ export class SupabaseDocRepository implements IDocRepository {
         tags: input.tags ?? [],
         sort_order: input.sort_order ?? 0,
         is_folder: input.is_folder ?? false,
+        doc_type: input.doc_type ?? 'page',
         created_by: input.created_by,
       })
       .select()

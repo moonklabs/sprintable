@@ -2,6 +2,8 @@ import { createSupabaseServerClient } from '@/lib/supabase/server';
 import { handleApiError } from '@/lib/api-error';
 import { apiSuccess, apiError, ApiErrors } from '@/lib/api-response';
 import { getAuthContext } from '@/lib/auth-helpers';
+import { isOssMode } from '@/lib/storage/factory';
+import { requireRole, ADMIN_ROLES } from '@/lib/role-guard';
 import { z } from 'zod/v4';
 
 type RouteParams = { params: Promise<{ id: string }> };
@@ -10,16 +12,6 @@ const updateProjectSchema = z.object({
   name: z.string().trim().min(1).optional(),
   description: z.string().optional().nullable(),
 });
-
-async function resolveOrgRole(supabase: Awaited<ReturnType<typeof createSupabaseServerClient>>, orgId: string, userId: string) {
-  const { data } = await supabase
-    .from('org_members')
-    .select('role')
-    .eq('org_id', orgId)
-    .eq('user_id', userId)
-    .maybeSingle();
-  return data?.role as string | undefined;
-}
 
 // GET /api/projects/:id
 export async function GET(request: Request, { params }: RouteParams) {
@@ -50,8 +42,9 @@ export async function PATCH(request: Request, { params }: RouteParams) {
   try {
     const { id } = await params;
     const supabase = await createSupabaseServerClient();
-    const { data: { user } } = await supabase.auth.getUser();
-    if (!user) return ApiErrors.unauthorized();
+    const me = await getAuthContext(supabase, request);
+    if (!me) return ApiErrors.unauthorized();
+    if (me.rateLimitExceeded) return ApiErrors.tooManyRequests(me.rateLimitRemaining, me.rateLimitResetAt);
 
     const { data: project } = await supabase
       .from('projects')
@@ -61,9 +54,9 @@ export async function PATCH(request: Request, { params }: RouteParams) {
 
     if (!project) return ApiErrors.notFound('Project not found');
 
-    const role = await resolveOrgRole(supabase, project.org_id as string, user.id);
-    if (!role || !['owner', 'admin'].includes(role)) {
-      return ApiErrors.forbidden('Admin access required');
+    if (!isOssMode() && me.type !== 'agent') {
+      const denied = await requireRole(supabase, project.org_id as string, ADMIN_ROLES, 'Admin access required');
+      if (denied) return denied;
     }
 
     let body: unknown;
@@ -91,12 +84,13 @@ export async function PATCH(request: Request, { params }: RouteParams) {
 }
 
 // DELETE /api/projects/:id — soft delete (owner/admin only)
-export async function DELETE(_request: Request, { params }: RouteParams) {
+export async function DELETE(request: Request, { params }: RouteParams) {
   try {
     const { id } = await params;
     const supabase = await createSupabaseServerClient();
-    const { data: { user } } = await supabase.auth.getUser();
-    if (!user) return ApiErrors.unauthorized();
+    const me = await getAuthContext(supabase, request);
+    if (!me) return ApiErrors.unauthorized();
+    if (me.rateLimitExceeded) return ApiErrors.tooManyRequests(me.rateLimitRemaining, me.rateLimitResetAt);
 
     const { data: project } = await supabase
       .from('projects')
@@ -107,9 +101,9 @@ export async function DELETE(_request: Request, { params }: RouteParams) {
 
     if (!project) return ApiErrors.notFound('Project not found');
 
-    const role = await resolveOrgRole(supabase, project.org_id as string, user.id);
-    if (!role || !['owner', 'admin'].includes(role)) {
-      return ApiErrors.forbidden('Admin access required');
+    if (!isOssMode() && me.type !== 'agent') {
+      const denied = await requireRole(supabase, project.org_id as string, ADMIN_ROLES, 'Admin access required');
+      if (denied) return denied;
     }
 
     const { error } = await supabase

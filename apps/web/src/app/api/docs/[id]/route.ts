@@ -7,6 +7,7 @@ import { handleApiError } from '@/lib/api-error';
 import { getAuthContext } from '@/lib/auth-helpers';
 import { apiSuccess, apiError, ApiErrors } from '@/lib/api-response';
 import { isOssMode, createDocRepository } from '@/lib/storage/factory';
+import { requireRole, EDIT_ROLES, ADMIN_ROLES } from '@/lib/role-guard';
 
 type RouteParams = { params: Promise<{ id: string }> };
 
@@ -22,6 +23,17 @@ export async function PATCH(request: Request, { params }: RouteParams) {
     const parsed = await parseBody(request, updateDocSchema); if (!parsed.success) return parsed.response; const body = parsed.data;
     const repo = await createDocRepository(dbClient);
     const service = new DocsService(repo, dbClient as SupabaseClient | undefined);
+
+    if (!ossMode && dbClient) {
+      const existing = await repo.getById(id);
+      const docType = (existing as unknown as { doc_type?: string }).doc_type ?? 'page';
+      if (docType === 'sprint_report') return apiError('FORBIDDEN', 'sprint_report documents are read-only', 403);
+      if (docType === 'policy') {
+        const denied = await requireRole(dbClient as SupabaseClient, existing.org_id, EDIT_ROLES, 'Admin or PO access required to edit policy documents');
+        if (denied) return denied;
+      }
+    }
+
     const doc = await service.updateDoc(id, {
       ...body,
       created_by: me.id,
@@ -64,6 +76,17 @@ export async function DELETE(request: Request, { params }: RouteParams) {
     const ossMode = isOssMode();
     const dbClient = ossMode ? undefined : (me.type === 'agent' ? createSupabaseAdminClient() : supabase);
     const repo = await createDocRepository(dbClient);
+
+    if (!ossMode && dbClient) {
+      const existing = await repo.getById(id);
+      const docType = (existing as unknown as { doc_type?: string }).doc_type ?? 'page';
+      if (docType === 'sprint_report') return apiError('FORBIDDEN', 'sprint_report documents cannot be deleted', 403);
+      if (docType === 'policy') {
+        const denied = await requireRole(dbClient as SupabaseClient, existing.org_id, ADMIN_ROLES, 'Admin access required to delete policy documents');
+        if (denied) return denied;
+      }
+    }
+
     const service = new DocsService(repo, dbClient as SupabaseClient | undefined);
     await service.deleteDoc(id);
     return apiSuccess({ ok: true });

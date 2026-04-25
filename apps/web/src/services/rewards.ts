@@ -58,4 +58,50 @@ export class RewardsService {
       .map(([member_id, balance]) => ({ member_id, balance }))
       .sort((a, b) => b.balance - a.balance);
   }
+
+  async getLeaderboardByPeriod(
+    projectId: string,
+    period: 'daily' | 'weekly' | 'monthly' | 'all',
+    limit = 50,
+    cursor?: string,
+  ) {
+    const periodMs: Record<string, number> = {
+      daily: 86400_000,
+      weekly: 7 * 86400_000,
+      monthly: 30 * 86400_000,
+    };
+
+    if (period === 'all') {
+      // all-time: reward_balances materialized view 사용
+      let q = this.supabase
+        .from('reward_balances')
+        .select('member_id, balance')
+        .eq('project_id', projectId)
+        .order('balance', { ascending: false })
+        .limit(limit);
+      if (cursor) q = q.lt('balance', Number(cursor));
+      const { data, error } = await q;
+      if (error) throw error;
+      return (data ?? []) as { member_id: string; balance: number }[];
+    }
+
+    const since = new Date(Date.now() - periodMs[period]).toISOString();
+    let q = this.supabase
+      .from('reward_ledger')
+      .select('member_id, amount')
+      .eq('project_id', projectId)
+      .gte('created_at', since);
+    if (cursor) q = q.lt('created_at', cursor);
+    const { data, error } = await q;
+    if (error) throw error;
+
+    const totals: Record<string, number> = {};
+    for (const r of data ?? []) {
+      totals[r.member_id as string] = (totals[r.member_id as string] ?? 0) + Number(r.amount);
+    }
+    return Object.entries(totals)
+      .map(([member_id, balance]) => ({ member_id, balance }))
+      .sort((a, b) => b.balance - a.balance)
+      .slice(0, limit);
+  }
 }

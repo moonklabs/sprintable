@@ -27,7 +27,6 @@ export class SupabaseTaskRepository implements ITaskRepository {
         title: input.title.trim(),
         assignee_id: input.assignee_id ?? null,
         status: input.status ?? 'todo',
-        story_points: input.story_points ?? null,
       })
       .select()
       .single();
@@ -89,7 +88,7 @@ export class SupabaseTaskRepository implements ITaskRepository {
   }
 
   async update(id: string, input: UpdateTaskInput): Promise<Task> {
-    const ALLOWED: (keyof UpdateTaskInput)[] = ['title', 'status', 'assignee_id', 'story_points'];
+    const ALLOWED: (keyof UpdateTaskInput)[] = ['title', 'status', 'assignee_id'];
     const patch: Record<string, unknown> = {};
     for (const key of ALLOWED) {
       if (key in input) patch[key] = input[key];

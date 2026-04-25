@@ -14,6 +14,7 @@ export interface Doc {
   tags: string[] | null;
   sort_order: number;
   is_folder: boolean;
+  doc_type: string;
   created_by: string;
   created_at: string;
   updated_at: string;
@@ -25,6 +26,7 @@ export interface DocSummary {
   title: string;
   slug: string;
   icon: string | null;
+  tags: string[] | null;
   sort_order: number;
   is_folder: boolean;
   updated_at: string;
@@ -42,6 +44,7 @@ export interface CreateDocInput {
   parent_id?: string | null;
   is_folder?: boolean;
   sort_order?: number;
+  doc_type?: string;
   created_by: string;
 }
 
@@ -57,6 +60,7 @@ export interface UpdateDocInput {
 
 export interface DocListFilters extends PaginationOptions {
   project_id: string;
+  tags?: string[];
 }
 
 export interface IDocRepository {

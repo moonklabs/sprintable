@@ -59,7 +59,7 @@ export class SupabaseSprintRepository implements ISprintRepository {
   }
 
   async update(id: string, input: UpdateSprintInput): Promise<Sprint> {
-    const ALLOWED: (keyof UpdateSprintInput)[] = ['title', 'start_date', 'end_date', 'team_size', 'status', 'velocity'];
+    const ALLOWED: (keyof UpdateSprintInput)[] = ['title', 'start_date', 'end_date', 'team_size', 'status', 'velocity', 'duration', 'report_doc_id'];
     const patch: Record<string, unknown> = {};
     for (const key of ALLOWED) {
       if (key in input) patch[key] = input[key];

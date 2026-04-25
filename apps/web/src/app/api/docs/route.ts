@@ -38,9 +38,11 @@ export async function GET(request: Request) {
       cursor: searchParams.get('cursor'),
     }, { defaultLimit: 40, maxLimit: 100 });
     const query = searchParams.get('q');
+    const tagsParam = searchParams.get('tags');
+    const tags = tagsParam ? tagsParam.split(',').map((t) => t.trim()).filter(Boolean) : undefined;
     const rows = query
-      ? await service.search(projectId, query, pageInput)
-      : await service.list(projectId, pageInput);
+      ? await service.search(projectId, query, { ...pageInput, tags })
+      : await service.list(projectId, { ...pageInput, tags });
     const { page, meta } = buildCursorPageMeta(rows, pageInput.limit, 'updated_at');
     return apiSuccess(page, meta);
   } catch (err: unknown) { return handleApiError(err); }

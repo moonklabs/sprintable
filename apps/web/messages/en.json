@@ -42,7 +42,8 @@
     "epics": "Epics",
     "sprint": "Sprint",
     "workspace": "Workspace",
-    "configure": "Configure"
+    "configure": "Configure",
+    "sprints": "Sprints"
   },
   "dashboard": {
     "title": "Dashboard",
@@ -497,7 +498,15 @@
     "tabProjects": "Projects",
     "tabMembers": "Members",
     "tabIntegrations": "Integrations",
-    "tabSubscription": "Subscription"
+    "tabSubscription": "Subscription",
+    "tabUsage": "Usage",
+    "standupSettings": "Standup Settings",
+    "standupSettingsDesc": "Set the daily standup deadline time.",
+    "standupDeadline": "Deadline",
+    "revoked": "Revoked",
+    "revoke": "Revoke",
+    "resend": "Resend",
+    "gracePeriodNotice": "Your current plan will remain active until {date}."
   },
   "landing": {
     "navProduct": "Overview",

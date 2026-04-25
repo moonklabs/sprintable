@@ -42,7 +42,8 @@
     "epics": "에픽",
     "sprint": "스프린트",
     "workspace": "워크스페이스",
-    "configure": "환경설정"
+    "configure": "환경설정",
+    "sprints": "스프린트"
   },
   "dashboard": {
     "title": "대시보드",
@@ -497,7 +498,15 @@
     "tabProjects": "프로젝트",
     "tabMembers": "멤버",
     "tabIntegrations": "연동",
-    "tabSubscription": "구독"
+    "tabSubscription": "구독",
+    "tabUsage": "사용량",
+    "standupSettings": "스탠드업 설정",
+    "standupSettingsDesc": "일일 스탠드업 마감 시간을 설정합니다.",
+    "standupDeadline": "마감 시간",
+    "revoked": "취소됨",
+    "revoke": "취소",
+    "resend": "재발송",
+    "gracePeriodNotice": "{date}까지 현재 플랜이 유지됩니다."
   },
   "landing": {
     "navProduct": "개요",

@@ -47,9 +47,11 @@ export function DashboardShell({
             projectName={projectName}
             projectMemberships={projectMemberships}
           />
-          <SidebarInset className="relative overflow-hidden">
+          <SidebarInset className="relative flex flex-col overflow-hidden">
             <TopBar />
-            {children}
+            <div className="flex flex-1 min-h-0 flex-col overflow-y-auto">
+              {children}
+            </div>
           </SidebarInset>
         </SidebarProvider>
       </RealtimeProvider>
