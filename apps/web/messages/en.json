@@ -39,7 +39,8 @@
     "mockup": "Mockups",
     "meetings": "Meetings",
     "agents": "Agents",
-    "epics": "Epics"
+    "epics": "Epics",
+    "sprints": "Sprints"
   },
   "dashboard": {
     "title": "Dashboard",
@@ -1815,5 +1816,18 @@
     "notAssigned": "Not assigned",
     "spExceeded": "SP Over",
     "spExceededDetail": "{total}SP / target {target}SP exceeded"
+  },
+  "sprints": {
+    "title": "Sprints",
+    "loading": "Loading...",
+    "noProject": "No project selected.",
+    "noSprints": "No sprints found.",
+    "days": "d",
+    "viewReport": "View Report",
+    "completionRate": "Completion",
+    "stories": "Stories",
+    "burndown": "Burndown",
+    "idealLine": "Ideal",
+    "actualLine": "Actual"
   }
 }

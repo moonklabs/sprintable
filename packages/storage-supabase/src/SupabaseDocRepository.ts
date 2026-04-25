@@ -75,6 +75,7 @@ export class SupabaseDocRepository implements IDocRepository {
         tags: input.tags ?? [],
         sort_order: input.sort_order ?? 0,
         is_folder: input.is_folder ?? false,
+        doc_type: input.doc_type ?? 'page',
         created_by: input.created_by,
       })
       .select()

@@ -97,20 +97,41 @@ export class SprintService {
   async getBurndown(id: string) {
     const sprint = await this.getById(id);
     if (!this.supabase) {
-      return { sprint, total_points: 0, done_points: 0, remaining_points: 0, completion_pct: 0, stories_count: 0, done_count: 0 };
+      return { sprint, total_points: 0, done_points: 0, remaining_points: 0, completion_pct: 0, stories_count: 0, done_count: 0, ideal_line: [], actual_line: [] };
     }
     const { data: stories, error } = await this.supabase.from('stories').select('story_points, status, updated_at').eq('sprint_id', id);
     if (error) throw error;
     const totalPoints = (stories ?? []).reduce((sum, s) => sum + ((s.story_points as number) ?? 0), 0);
     const donePoints = (stories ?? []).filter((s) => s.status === 'done').reduce((sum, s) => sum + ((s.story_points as number) ?? 0), 0);
+    const remaining = totalPoints - donePoints;
+
+    // 이상선: duration 기준 선형 감소 (day 0 → total, day duration → 0)
+    const duration = (sprint.duration as number | undefined) ?? 14;
+    const startDate = sprint.start_date ? new Date(sprint.start_date as string) : null;
+    const idealLine: Array<{ date: string; points: number }> = [];
+    for (let day = 0; day <= duration; day++) {
+      const date = startDate ? new Date(startDate.getTime() + day * 86_400_000).toISOString().slice(0, 10) : String(day);
+      idealLine.push({ date, points: Math.round(totalPoints * (1 - day / duration)) });
+    }
+
+    // 실제선: 시작일=total, 오늘=remaining (단순 2포인트)
+    const today = new Date().toISOString().slice(0, 10);
+    const startDateStr = startDate ? startDate.toISOString().slice(0, 10) : today;
+    const actualLine: Array<{ date: string; points: number }> = [
+      { date: startDateStr, points: totalPoints },
+      { date: today, points: remaining },
+    ];
+
     return {
       sprint,
       total_points: totalPoints,
       done_points: donePoints,
-      remaining_points: totalPoints - donePoints,
+      remaining_points: remaining,
       completion_pct: totalPoints > 0 ? Math.round((donePoints / totalPoints) * 100) : 0,
       stories_count: stories?.length ?? 0,
       done_count: (stories ?? []).filter((s) => s.status === 'done').length,
+      ideal_line: idealLine,
+      actual_line: actualLine,
     };
   }
 

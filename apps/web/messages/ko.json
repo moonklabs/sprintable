@@ -39,7 +39,8 @@
     "mockup": "목업",
     "meetings": "회의록",
     "agents": "에이전트",
-    "epics": "에픽"
+    "epics": "에픽",
+    "sprints": "스프린트"
   },
   "dashboard": {
     "title": "대시보드",
@@ -1815,5 +1816,18 @@
     "notAssigned": "미지정",
     "spExceeded": "SP 초과",
     "spExceededDetail": "{total}SP / 목표 {target}SP 초과"
+  },
+  "sprints": {
+    "title": "스프린트",
+    "loading": "로딩 중...",
+    "noProject": "프로젝트가 선택되지 않았습니다.",
+    "noSprints": "스프린트가 없습니다.",
+    "days": "일",
+    "viewReport": "리포트 보기",
+    "completionRate": "완료율",
+    "stories": "스토리",
+    "burndown": "번다운",
+    "idealLine": "이상선",
+    "actualLine": "실제선"
   }
 }
