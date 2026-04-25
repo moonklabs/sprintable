@@ -869,7 +869,8 @@
     "codeCopy": "Copy code",
     "codeCopied": "Copied",
     "moveCircularError": "Cannot move a document into its own subtree",
-    "movePermissionError": "You do not have permission to move documents here"
+    "movePermissionError": "You do not have permission to move documents here",
+    "clearFilter": "Clear filter"
   },
   "rewards": {
     "title": "Rewards",
