@@ -24,7 +24,7 @@ export async function createSupabaseServerClient() {
                 sameSite: 'lax',
                 secure: true,
                 path: '/',
-                maxAge: 3600,
+                maxAge: (options['maxAge'] as number | undefined) ?? 3600,
               });
             }
           } catch {

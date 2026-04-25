@@ -13,7 +13,6 @@ export function createSupabaseBrowserClient() {
         sameSite: 'lax',
         secure: true,
         path: '/',
-        maxAge: 3600,
       },
     },
   );
