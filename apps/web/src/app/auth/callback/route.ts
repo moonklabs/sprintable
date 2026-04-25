@@ -11,6 +11,9 @@ export async function GET(request: Request) {
   if (code) {
     const supabase = await createSupabaseServerClient();
     const { error } = await supabase.auth.exchangeCodeForSession(code);
+    if (error) {
+      console.error('[auth/callback] exchangeCodeForSession failed:', error.message, error.status);
+    }
     if (!error) {
       // MFA 검증 필요 여부 확인 (AAL1 → AAL2 required)
       const { data: aal } = await supabase.auth.mfa.getAuthenticatorAssuranceLevel();

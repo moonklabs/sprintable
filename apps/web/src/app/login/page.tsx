@@ -13,6 +13,7 @@ export default function LoginPage() {
     const callbackUrl = returnTo
       ? `${window.location.origin}/auth/callback?next=${encodeURIComponent(returnTo)}`
       : `${window.location.origin}/auth/callback`;
+    await supabase.auth.signOut(); // stale auth 쿠키 정리 (PKCE code verifier 충돌 방지)
     await supabase.auth.signInWithOAuth({
       provider,
       options: {
