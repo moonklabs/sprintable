@@ -31,7 +31,7 @@ function FallbackHandler() {
       if (aal?.nextLevel === 'aal2' && aal?.currentLevel !== 'aal2') {
         router.replace('/mfa'); return;
       }
-      if (next) { router.replace(next); return; }
+      if (next && next.startsWith('/')) { router.replace(next); return; }
 
       const { data: { user } } = await supabase.auth.getUser();
       if (user) {
