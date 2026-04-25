@@ -802,6 +802,7 @@
     "sessionList": "회고 세션 목록",
     "newSession": "새 세션",
     "newSessionPlaceholder": "회고 제목...",
+    "create": "생성",
     "creating": "생성 중...",
     "noSessions": "회고 세션이 없습니다",
     "phaseCollect": "📝 수집",

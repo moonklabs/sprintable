@@ -31,7 +31,7 @@ export async function POST(request: Request) {
     const parsed = await parseBody(request, createRetroSchema); if (!parsed.success) return parsed.response; const body = parsed.data;
     const service = new RetroService(dbClient);
     const session = await service.createSession({
-      org_id: me.org_id, project_id: me.project_id,
+      org_id: me.org_id, project_id: body.project_id ?? me.project_id,
       sprint_id: body.sprint_id, title: body.title, created_by: me.id,
     });
     return apiSuccess(session, undefined, 201);

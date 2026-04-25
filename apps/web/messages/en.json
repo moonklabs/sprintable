@@ -802,6 +802,7 @@
     "sessionList": "Retro sessions",
     "newSession": "New Session",
     "newSessionPlaceholder": "Retro title...",
+    "create": "Create",
     "creating": "Creating...",
     "noSessions": "No retro sessions",
     "phaseCollect": "📝 Collect",

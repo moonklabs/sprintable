@@ -7,7 +7,6 @@ import { Button } from '@/components/ui/button';
 import { EmptyState } from '@/components/ui/empty-state';
 import { OperatorInput, OperatorTextarea } from '@/components/ui/operator-control';
 import { TopBarSlot } from '@/components/nav/top-bar-slot';
-import { SectionCard, SectionCardBody, SectionCardHeader } from '@/components/ui/section-card';
 import { formatSeoulDate } from '@/lib/date';
 import { useDashboardContext } from '../../dashboard/dashboard-shell';
 import {
@@ -320,19 +319,17 @@ export default function StandupPage() {
 
   if (!projectId) {
     return (
-      <div className="space-y-4">
+      <>
         <TopBarSlot title={<h1 className="text-sm font-medium">{t('title')}</h1>} />
-        <SectionCard>
-          <SectionCardBody>
-            <EmptyState title={shellT('projectSelectPrompt')} description={shellT('projectSelectDescription')} />
-          </SectionCardBody>
-        </SectionCard>
-      </div>
+        <div className="flex h-64 items-center justify-center p-6">
+          <EmptyState title={shellT('projectSelectPrompt')} description={shellT('projectSelectDescription')} />
+        </div>
+      </>
     );
   }
 
   return (
-    <div className="space-y-5">
+    <>
       <TopBarSlot
         title={<h1 className="text-sm font-medium">{t('title')}</h1>}
         actions={
@@ -344,36 +341,36 @@ export default function StandupPage() {
           />
         }
       />
-      {headerBadges.length > 0 ? (
-        <div className="flex flex-wrap items-center gap-2 px-1">
-          {headerBadges.map((badge) => (
-            <Badge key={badge.label} variant={badge.variant}>{badge.label}</Badge>
-          ))}
-        </div>
-      ) : null}
+      <div className="flex min-h-0 flex-1 flex-col overflow-y-auto">
+        {headerBadges.length > 0 ? (
+          <div className="flex flex-wrap items-center gap-2 border-b border-border/80 px-6 py-3">
+            {headerBadges.map((badge) => (
+              <Badge key={badge.label} variant={badge.variant}>{badge.label}</Badge>
+            ))}
+          </div>
+        ) : null}
 
-      {loadError ? (
-        <SectionCard>
-          <SectionCardBody>
+        <div className="space-y-5 p-6">
+        {loadError ? (
+          <div className="rounded-xl border border-border bg-background p-6">
             <EmptyState
               title={loadError}
               description={t('loadFailedDescription')}
               action={<Button variant="hero" onClick={() => setRefreshToken((value) => value + 1)}>{t('retry')}</Button>}
             />
-          </SectionCardBody>
-        </SectionCard>
-      ) : null}
+          </div>
+        ) : null}
 
       {!loadError ? (
         <>
-      <SectionCard>
-        <SectionCardHeader>
+      <div className="rounded-xl border border-border bg-background">
+        <div className="border-b border-border/60 px-4 py-3">
           <div className="space-y-1">
             <h2 className="text-base font-semibold text-[color:var(--operator-foreground)]">{t('currentSprint')}</h2>
             <p className="text-sm text-[color:var(--operator-muted)]">{t('currentSprintDescription')}</p>
           </div>
-        </SectionCardHeader>
-        <SectionCardBody>
+        </div>
+        <div className="p-4">
           {loading ? (
             <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-3">
               {[1, 2, 3].map((item) => (
@@ -447,18 +444,18 @@ export default function StandupPage() {
           ) : (
             <EmptyState title={t('noActiveSprint')} description={t('noActiveSprintDescription')} />
           )}
-        </SectionCardBody>
-      </SectionCard>
+        </div>
+      </div>
 
       <div className="grid gap-4 xl:grid-cols-[minmax(0,1.05fr)_minmax(0,0.95fr)]">
-        <SectionCard>
-          <SectionCardHeader>
+        <div className="rounded-xl border border-border bg-background">
+          <div className="border-b border-border/60 px-4 py-3">
             <div className="space-y-1">
               <h2 className="text-base font-semibold text-[color:var(--operator-foreground)]">✍️ {t('myStandup')}</h2>
               <p className="text-sm text-[color:var(--operator-muted)]">{t('myStandupDescription')}</p>
             </div>
-          </SectionCardHeader>
-          <SectionCardBody>
+          </div>
+          <div className="p-4">
             {loading ? (
               <div className="space-y-3">
                 {[1, 2, 3, 4].map((item) => (
@@ -552,11 +549,11 @@ export default function StandupPage() {
                 </div>
               </div>
             )}
-          </SectionCardBody>
-        </SectionCard>
+          </div>
+        </div>
 
-        <SectionCard>
-          <SectionCardHeader>
+        <div className="rounded-xl border border-border bg-background">
+          <div className="border-b border-border/60 px-4 py-3">
             <div className="flex flex-wrap items-center justify-between gap-3">
               <div className="space-y-1">
                 <h2 className="text-base font-semibold text-[color:var(--operator-foreground)]">👥 {t('team')}</h2>
@@ -564,8 +561,8 @@ export default function StandupPage() {
               </div>
               <Badge variant="outline">{t('entryCount', { count: entries.length })}</Badge>
             </div>
-          </SectionCardHeader>
-          <SectionCardBody>
+          </div>
+          <div className="p-4">
             {loading ? (
               <div className="space-y-3">
                 {[1, 2, 3].map((item) => (
@@ -633,11 +630,13 @@ export default function StandupPage() {
                 ) : null}
               </div>
             )}
-          </SectionCardBody>
-        </SectionCard>
+          </div>
+        </div>
       </div>
       </>
       ) : null}
-    </div>
+        </div>
+      </div>
+    </>
   );
 }
