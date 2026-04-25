@@ -204,7 +204,6 @@ export function DocEditor({
             </div>
             <div className="tiptap-editor-wrapper p-3">
               <EditorContent editor={editor} className="tiptap-content min-h-[420px] outline-none" />
-              <p className="mt-2 text-xs text-muted-foreground">{labels.hint}</p>
             </div>
           </>
         ) : null}
