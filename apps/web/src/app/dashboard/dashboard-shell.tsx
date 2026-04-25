@@ -1,6 +1,7 @@
 'use client';
 
 import { createContext, useContext } from 'react';
+import { usePathname } from 'next/navigation';
 import { RealtimeProvider } from '@/components/realtime-provider';
 import { AppSidebar } from '@/components/nav/app-sidebar';
 import { TopBar } from '@/components/nav/top-bar';
@@ -37,6 +38,9 @@ export function DashboardShell({
   projectMemberships,
   children,
 }: DashboardShellProps) {
+  const pathname = usePathname();
+  const showTopBar = !pathname.startsWith('/settings');
+
   return (
     <DashboardCtx.Provider value={{ currentTeamMemberId, orgId, projectId, projectName, projectMemberships }}>
       <RealtimeProvider currentTeamMemberId={currentTeamMemberId}>
@@ -48,7 +52,7 @@ export function DashboardShell({
             projectMemberships={projectMemberships}
           />
           <SidebarInset className="relative flex flex-col overflow-hidden">
-            <TopBar />
+            {showTopBar && <TopBar />}
             <div className="flex flex-1 min-h-0 flex-col overflow-y-auto">
               {children}
             </div>
