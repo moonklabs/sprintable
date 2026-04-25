@@ -10,6 +10,11 @@ function FallbackHandler() {
   const searchParams = useSearchParams();
 
   useEffect(() => {
+    const rawKey = Object.keys(localStorage).find(k => k.includes('code-verifier'));
+    console.error('[FALLBACK DEBUG] code-verifier key:', rawKey);
+    console.error('[FALLBACK DEBUG] code-verifier value:', rawKey ? localStorage.getItem(rawKey) : 'MISSING');
+    console.error('[FALLBACK DEBUG] URL code:', new URLSearchParams(window.location.search).get('code')?.slice(0, 8));
+
     const next = searchParams.get('next');
 
     // vanilla client — localStorage 기반, signInWithOAuth가 저장한 code-verifier를 여기서 읽음

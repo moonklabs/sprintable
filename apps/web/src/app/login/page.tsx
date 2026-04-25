@@ -21,7 +21,6 @@ export default function LoginPage() {
       process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!,
       { auth: { flowType: 'pkce' } },
     );
-    await pkceClient.auth.signOut(); // localStorage 잔류 세션 정리
     await pkceClient.auth.signInWithOAuth({
       provider,
       options: {
