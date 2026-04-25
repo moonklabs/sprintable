@@ -9,48 +9,48 @@ function FallbackHandler() {
   const searchParams = useSearchParams();
 
   useEffect(() => {
-    const code = searchParams.get('code');
+    const supabase = createSupabaseBrowserClient();
     const next = searchParams.get('next');
 
-    if (!code) {
+    const { data: { subscription } } = supabase.auth.onAuthStateChange(
+      async (event, session) => {
+        if (event === 'SIGNED_IN' && session) {
+          const { data: aal } = await supabase.auth.mfa.getAuthenticatorAssuranceLevel();
+          if (aal?.nextLevel === 'aal2' && aal?.currentLevel !== 'aal2') {
+            router.replace('/mfa');
+            return;
+          }
+
+          if (next) {
+            router.replace(next);
+            return;
+          }
+
+          const { data: { user } } = await supabase.auth.getUser();
+          if (user) {
+            const { data: membership } = await supabase
+              .from('org_members')
+              .select('org_id')
+              .eq('user_id', user.id)
+              .limit(1)
+              .maybeSingle();
+            router.replace(membership ? '/dashboard' : '/onboarding');
+            return;
+          }
+
+          router.replace('/dashboard');
+        }
+      }
+    );
+
+    const timeout = setTimeout(() => {
       router.replace('/login?error=auth_failed');
-      return;
-    }
+    }, 15000);
 
-    const supabase = createSupabaseBrowserClient();
-
-    supabase.auth.exchangeCodeForSession(code).then(async ({ error }) => {
-      if (error) {
-        console.error('[auth/callback/fallback] exchangeCodeForSession failed:', error.message);
-        router.replace('/login?error=auth_failed');
-        return;
-      }
-
-      const { data: aal } = await supabase.auth.mfa.getAuthenticatorAssuranceLevel();
-      if (aal?.nextLevel === 'aal2' && aal?.currentLevel !== 'aal2') {
-        router.replace('/mfa');
-        return;
-      }
-
-      if (next) {
-        router.replace(next);
-        return;
-      }
-
-      const { data: { user } } = await supabase.auth.getUser();
-      if (user) {
-        const { data: membership } = await supabase
-          .from('org_members')
-          .select('org_id')
-          .eq('user_id', user.id)
-          .limit(1)
-          .maybeSingle();
-        router.replace(membership ? '/dashboard' : '/onboarding');
-        return;
-      }
-
-      router.replace('/dashboard');
-    });
+    return () => {
+      subscription.unsubscribe();
+      clearTimeout(timeout);
+    };
   }, [router, searchParams]);
 
   return (
