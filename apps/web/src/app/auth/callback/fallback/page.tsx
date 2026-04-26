@@ -85,24 +85,29 @@ function FallbackHandler() {
 
     (async () => {
       try {
-        // 1. code_verifier: 쿠키 우선, 없으면 sb-pkce-verifier sessionStorage
+        // 1. code_verifier: SDK sessionStorage 우선, 없으면 쿠키 fallback
         const projectRef = getProjectRef();
         const CV_COOKIE = `sb-${projectRef}-auth-token-code-verifier`;
-        let codeVerifier = getCookieValue(CV_COOKIE);
-        let cvPrefix = CV_COOKIE;
+        let codeVerifier: string | null | undefined;
+        let cvPrefix = 'N/A';
 
-        if (codeVerifier) {
-          cvSource = 'cookie';
-        } else {
-          try {
-            const ssVal = sessionStorage.getItem('sb-pkce-verifier');
-            if (ssVal) {
-              codeVerifier = ssVal;
-              cvSource = 'sessionStorage';
-              cvPrefix = 'sb-pkce-verifier';
-              sessionStorage.removeItem('sb-pkce-verifier');
-            }
-          } catch {}
+        try {
+          const ssVal = sessionStorage.getItem(CV_COOKIE);
+          if (ssVal) {
+            codeVerifier = ssVal;
+            cvSource = 'sessionStorage';
+            cvPrefix = ssVal.slice(0, 8);
+            sessionStorage.removeItem(CV_COOKIE);
+          }
+        } catch {}
+
+        if (!codeVerifier) {
+          const cookieVal = getCookieValue(CV_COOKIE);
+          if (cookieVal) {
+            codeVerifier = cookieVal;
+            cvSource = 'cookie';
+            cvPrefix = cookieVal.slice(0, 8);
+          }
         }
 
         const diagSnapshot = collectDiag(serverCv, cvSource, cvPrefix);
