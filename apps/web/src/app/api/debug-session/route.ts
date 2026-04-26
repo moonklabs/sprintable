@@ -40,6 +40,7 @@ export async function GET(request: Request) {
     authError,
     sessionData,
     sessionError,
+    authPath: cookieStore.get('sp-auth-path')?.value ?? 'none',
     userAgent: request.headers.get('user-agent')?.slice(0, 80),
     timestamp: new Date().toISOString(),
   });
