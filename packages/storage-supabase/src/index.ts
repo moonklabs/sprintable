@@ -7,3 +7,4 @@ export { SupabaseProjectRepository } from './SupabaseProjectRepository';
 export { SupabaseSprintRepository } from './SupabaseSprintRepository';
 export { SupabaseNotificationRepository } from './SupabaseNotificationRepository';
 export { SupabaseTeamMemberRepository } from './SupabaseTeamMemberRepository';
+export { SupabaseInboxItemRepository } from './SupabaseInboxItemRepository';
