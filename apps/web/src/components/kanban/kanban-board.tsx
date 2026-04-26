@@ -444,6 +444,33 @@ export function KanbanBoard({ projectId }: KanbanBoardProps) {
     }
   }, [fetchData]);
 
+  const handleCreateStory = useCallback(async (columnId: string, title: string) => {
+    if (!projectId) return;
+    try {
+      const res = await fetch('/api/stories', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          project_id: projectId,
+          title,
+          status: columnId,
+          priority: 'medium',
+          ...(selectedSprintId ? { sprint_id: selectedSprintId } : {}),
+          ...(selectedEpicId ? { epic_id: selectedEpicId } : {}),
+        }),
+      });
+      if (!res.ok) {
+        setTransitionError(t('createStoryFailed'));
+        return;
+      }
+      const json = await res.json();
+      const created = json.data as KanbanStory;
+      setStories((prev) => [...prev, created]);
+    } catch {
+      setTransitionError(t('createStoryFailed'));
+    }
+  }, [projectId, selectedSprintId, selectedEpicId, t]);
+
   // AC1/AC5: WIP limit 핸들러
   const handleWipLimitEdit = useCallback((columnId: string) => {
     setWipLimits((prev) => ({
@@ -679,6 +706,7 @@ export function KanbanBoard({ projectId }: KanbanBoardProps) {
                     onWipLimitSave={() => handleWipLimitSave(col.id)}
                     onWipLimitRemove={() => handleWipLimitRemove(col.id)}
                     onWipDraftChange={(v) => handleWipLimitDraftChange(col.id, v)}
+                    onCreateStory={handleCreateStory}
                   />
                 );
               })}

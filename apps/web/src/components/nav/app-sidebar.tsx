@@ -7,8 +7,11 @@ import { useTranslations } from 'next-intl';
 import {
   BookOpen,
   Bot,
+  CalendarDays,
+  CircleHelp,
   FolderKanban,
   Gauge,
+  Inbox,
   MessageSquareMore,
   PenTool,
   Settings,
@@ -38,6 +41,14 @@ interface AppSidebarProps {
   projectMemberships: Array<{ projectId: string; projectName: string }>;
 }
 
+function KbdHint({ children }: { children: React.ReactNode }) {
+  return (
+    <kbd className="ml-auto hidden rounded border border-sidebar-border/60 bg-sidebar-accent/40 px-1.5 py-0 font-mono text-[10px] font-medium text-sidebar-foreground/60 group-data-[active=true]/menu-button:text-sidebar-foreground/80 sm:inline-flex">
+      {children}
+    </kbd>
+  );
+}
+
 export function AppSidebar({
   projectId,
   projectName,
@@ -46,14 +57,22 @@ export function AppSidebar({
   const pathname = usePathname();
   const t = useTranslations('nav');
   const [memoUnreadCount, setMemoUnreadCount] = useState(0);
+  const [inboxUnreadCount, setInboxUnreadCount] = useState(0);
 
   useEffect(() => {
     async function fetchUnread() {
       try {
-        const res = await fetch('/api/notifications?unread=true&type=memo');
-        if (res.ok) {
-          const json = await res.json() as { meta?: { unreadCount?: number } };
+        const [memoRes, inboxRes] = await Promise.all([
+          fetch('/api/notifications?unread=true&type=memo'),
+          fetch('/api/notifications?unread=true'),
+        ]);
+        if (memoRes.ok) {
+          const json = await memoRes.json() as { meta?: { unreadCount?: number } };
           setMemoUnreadCount(json.meta?.unreadCount ?? 0);
+        }
+        if (inboxRes.ok) {
+          const json = await inboxRes.json() as { meta?: { unreadCount?: number } };
+          setInboxUnreadCount(json.meta?.unreadCount ?? 0);
         }
       } catch {
         // noop
@@ -97,6 +116,7 @@ export function AppSidebar({
                 >
                   <FolderKanban />
                   <span>{t('board')}</span>
+                  <KbdHint>B</KbdHint>
                 </SidebarMenuButton>
               </SidebarMenuItem>
               <SidebarMenuItem>
@@ -107,6 +127,7 @@ export function AppSidebar({
                 >
                   <Users />
                   <span>{t('standup')}</span>
+                  <KbdHint>S</KbdHint>
                 </SidebarMenuButton>
               </SidebarMenuItem>
               <SidebarMenuItem>
@@ -117,6 +138,7 @@ export function AppSidebar({
                 >
                   <Gauge />
                   <span>{t('retro')}</span>
+                  <KbdHint>R</KbdHint>
                 </SidebarMenuButton>
               </SidebarMenuItem>
             </SidebarMenu>
@@ -127,6 +149,21 @@ export function AppSidebar({
           <SidebarGroupLabel>{t('workspace')}</SidebarGroupLabel>
           <SidebarGroupContent>
             <SidebarMenu>
+              <SidebarMenuItem>
+                <SidebarMenuButton
+                  render={<Link href="/inbox" />}
+                  isActive={isActive('/inbox')}
+                  tooltip={t('inbox')}
+                >
+                  <Inbox />
+                  <span>{t('inbox')}</span>
+                  {inboxUnreadCount > 0 ? (
+                    <SidebarMenuBadge>
+                      {inboxUnreadCount > 9 ? '9+' : inboxUnreadCount}
+                    </SidebarMenuBadge>
+                  ) : null}
+                </SidebarMenuButton>
+              </SidebarMenuItem>
               <SidebarMenuItem>
                 <SidebarMenuButton
                   render={<Link href="/memos" />}
@@ -150,6 +187,16 @@ export function AppSidebar({
                 >
                   <BookOpen />
                   <span>{t('docs')}</span>
+                </SidebarMenuButton>
+              </SidebarMenuItem>
+              <SidebarMenuItem>
+                <SidebarMenuButton
+                  render={<Link href="/meetings" />}
+                  isActive={isActive('/meetings')}
+                  tooltip={t('meetings')}
+                >
+                  <CalendarDays />
+                  <span>{t('meetings')}</span>
                 </SidebarMenuButton>
               </SidebarMenuItem>
               <SidebarMenuItem>
@@ -196,7 +243,17 @@ export function AppSidebar({
       </SidebarContent>
 
       <SidebarFooter className="p-2">
-        <LocaleSwitcher />
+        <div className="flex items-center justify-between gap-2">
+          <LocaleSwitcher />
+          <Link
+            href="/docs"
+            aria-label={t('help')}
+            title={t('help')}
+            className="flex size-8 items-center justify-center rounded-md text-sidebar-foreground/60 transition hover:bg-sidebar-accent hover:text-sidebar-foreground"
+          >
+            <CircleHelp className="size-4" />
+          </Link>
+        </div>
       </SidebarFooter>
 
       <SidebarRail />

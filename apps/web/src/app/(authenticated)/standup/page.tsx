@@ -1,6 +1,7 @@
 'use client';
 
 import { useEffect, useMemo, useState } from 'react';
+import Link from 'next/link';
 import { useTranslations } from 'next-intl';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
@@ -9,8 +10,9 @@ import { OperatorInput, OperatorTextarea } from '@/components/ui/operator-contro
 import { TopBarSlot } from '@/components/nav/top-bar-slot';
 import { formatSeoulDate } from '@/lib/date';
 import { useDashboardContext } from '../../dashboard/dashboard-shell';
+import { StandupBoardCard } from '@/components/standup/standup-board-card';
+import { StandupFeedbackDialog } from '@/components/standup/standup-feedback-dialog';
 import {
-  StandupReviewCard,
   type StandupEntrySummary,
   type StandupFeedbackSummary,
   type StandupMemberSummary,
@@ -85,6 +87,12 @@ function buildStorySummary(
   };
 }
 
+function shiftDate(dateStr: string, days: number): string {
+  const [year, month, day] = dateStr.split('-').map(Number);
+  const d = new Date(year, month - 1, day + days);
+  return formatSeoulDate(d);
+}
+
 export default function StandupPage() {
   const t = useTranslations('standup');
   const shellT = useTranslations('shell');
@@ -107,6 +115,9 @@ export default function StandupPage() {
   const [refreshToken, setRefreshToken] = useState(0);
   const [storiesNextCursor, setStoriesNextCursor] = useState<string | null>(null);
   const [loadingMoreStories, setLoadingMoreStories] = useState(false);
+  const [sprintExpanded, setSprintExpanded] = useState(false);
+  const [editingSelf, setEditingSelf] = useState(false);
+  const [feedbackDialogMemberId, setFeedbackDialogMemberId] = useState<string | null>(null);
 
   const memberNameById = useMemo(() => {
     const map: Record<string, string> = {};
@@ -141,12 +152,23 @@ export default function StandupPage() {
     return left.title.localeCompare(right.title);
   }), [stories, currentTeamMemberId]);
 
+  const feedbackDialogMember = useMemo(
+    () => members.find((m) => m.id === feedbackDialogMemberId) ?? null,
+    [members, feedbackDialogMemberId],
+  );
+  const feedbackDialogEntry = feedbackDialogMemberId ? entryByAuthorId[feedbackDialogMemberId] : undefined;
+  const feedbackDialogFeedback = feedbackDialogEntry ? (feedbackByEntryId[feedbackDialogEntry.id] ?? []) : [];
+
   useEffect(() => {
     setDone(currentEntry?.done ?? '');
     setPlan(currentEntry?.plan ?? '');
     setBlockers(currentEntry?.blockers ?? '');
     setPlanStoryIds(currentEntry?.plan_story_ids ?? []);
   }, [currentEntry?.id, currentEntry?.updated_at, currentEntry?.done, currentEntry?.plan, currentEntry?.blockers, currentEntry?.plan_story_ids]);
+
+  useEffect(() => {
+    setEditingSelf(false);
+  }, [date]);
 
   useEffect(() => {
     let cancelled = false;
@@ -243,12 +265,19 @@ export default function StandupPage() {
     };
   }, [date, projectId, refreshToken, t]);
 
-  const currentSprintStories = stories;
   const currentUserStories = useMemo(() => {
     if (!currentTeamMemberId) return [];
-    const assigned = currentSprintStories.filter((story) => story.assignee_id === currentTeamMemberId && story.status !== 'done');
-    return assigned.length > 0 ? assigned : currentSprintStories.filter((story) => story.status !== 'done');
-  }, [currentSprintStories, currentTeamMemberId]);
+    const assigned = stories.filter((story) => story.assignee_id === currentTeamMemberId && story.status !== 'done');
+    return assigned.length > 0 ? assigned : stories.filter((story) => story.status !== 'done');
+  }, [stories, currentTeamMemberId]);
+
+  const humanMembersSorted = useMemo(() => {
+    if (!currentTeamMemberId) return humanMembers;
+    return [
+      ...humanMembers.filter((m) => m.id === currentTeamMemberId),
+      ...humanMembers.filter((m) => m.id !== currentTeamMemberId),
+    ];
+  }, [humanMembers, currentTeamMemberId]);
 
   const summaryBadges = [
     activeSprint ? { label: activeSprint.title, variant: 'chip' as const } : { label: t('noActiveSprint'), variant: 'outline' as const },
@@ -282,6 +311,7 @@ export default function StandupPage() {
         throw new Error('Failed to save standup');
       }
       setRefreshToken((value) => value + 1);
+      setEditingSelf(false);
     } catch {
       setSaveError(t('saveFailed'));
     } finally {
@@ -333,14 +363,29 @@ export default function StandupPage() {
       <TopBarSlot
         title={<h1 className="text-sm font-medium">{t('title')}</h1>}
         actions={
-          <OperatorInput
-            type="date"
-            value={date}
-            onChange={(event) => setDate(event.target.value)}
-            className="w-auto"
-          />
+          <div className="flex flex-wrap items-center gap-1.5">
+            <Button variant="ghost" size="icon" onClick={() => setDate((d) => shiftDate(d, -1))} title={t('previousDay')}>
+              ←
+            </Button>
+            <OperatorInput
+              type="date"
+              value={date}
+              onChange={(event) => setDate(event.target.value)}
+              className="w-auto"
+            />
+            <Button variant="ghost" size="icon" onClick={() => setDate((d) => shiftDate(d, 1))} title={t('nextDay')}>
+              →
+            </Button>
+            <Button variant="ghost" size="sm" onClick={() => setDate(formatSeoulDate())}>
+              {t('today')}
+            </Button>
+            <Button variant="outline" size="sm" asChild>
+              <Link href={`/meetings/new?standup_date=${date}`}>{t('meetingNotes')}</Link>
+            </Button>
+          </div>
         }
       />
+
       <div className="flex min-h-0 flex-1 flex-col overflow-y-auto">
         {headerBadges.length > 0 ? (
           <div className="flex flex-wrap items-center gap-2 border-b border-border/80 px-6 py-3">
@@ -350,293 +395,302 @@ export default function StandupPage() {
           </div>
         ) : null}
 
-        <div className="space-y-5 p-6">
-        {loadError ? (
-          <div className="rounded-xl border border-border bg-background p-6">
-            <EmptyState
-              title={loadError}
-              description={t('loadFailedDescription')}
-              action={<Button variant="hero" onClick={() => setRefreshToken((value) => value + 1)}>{t('retry')}</Button>}
-            />
-          </div>
-        ) : null}
-
-      {!loadError ? (
-        <>
-      <div className="rounded-xl border border-border bg-background">
-        <div className="border-b border-border/60 px-4 py-3">
-          <div className="space-y-1">
-            <h2 className="text-base font-semibold text-[color:var(--operator-foreground)]">{t('currentSprint')}</h2>
-            <p className="text-sm text-[color:var(--operator-muted)]">{t('currentSprintDescription')}</p>
-          </div>
-        </div>
-        <div className="p-4">
-          {loading ? (
-            <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-3">
-              {[1, 2, 3].map((item) => (
-                <div key={item} className="h-28 animate-pulse rounded-2xl bg-[color:var(--operator-surface-soft)]" />
-              ))}
+        <div className="space-y-6 p-6">
+          {loadError ? (
+            <div className="rounded-xl border border-border bg-background p-6">
+              <EmptyState
+                title={loadError}
+                description={t('loadFailedDescription')}
+                action={<Button variant="hero" onClick={() => setRefreshToken((value) => value + 1)}>{t('retry')}</Button>}
+              />
             </div>
-          ) : activeSprint ? (
-            stories.length > 0 ? (
-              <div className="space-y-3">
-                <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-3">
-                  {stories.map((story) => (
-                    <div key={story.id} className="rounded-2xl border border-border/70 bg-background p-4 shadow-sm">
-                      <div className="flex flex-wrap items-center justify-between gap-2">
-                        <p className="text-sm font-medium text-[color:var(--operator-foreground)]">{story.title}</p>
-                        <Badge variant="outline">{story.status}</Badge>
+          ) : null}
+
+          {!loadError ? (
+            <>
+              {/* 스프린트 섹션 — 접을 수 있는 컴팩트 카드 */}
+              <div className="rounded-xl border border-border bg-background">
+                <button
+                  type="button"
+                  className="flex w-full flex-wrap items-center justify-between gap-3 px-4 py-3 text-left"
+                  onClick={() => setSprintExpanded((prev) => !prev)}
+                >
+                  <div className="space-y-0.5">
+                    <h2 className="text-sm font-semibold text-[color:var(--operator-foreground)]">{t('currentSprint')}</h2>
+                    {activeSprint ? (
+                      <p className="text-xs text-[color:var(--operator-muted)]">{activeSprint.title} · {t('sprintStoryCount', { count: stories.length })}</p>
+                    ) : (
+                      <p className="text-xs text-[color:var(--operator-muted)]">{t('noActiveSprint')}</p>
+                    )}
+                  </div>
+                  <div className="flex items-center gap-2">
+                    <Badge variant="outline">{t('taskProgress', { done: doneTasks, total: totalTasks })}</Badge>
+                    <span className="text-xs text-[color:var(--operator-muted)]">{sprintExpanded ? t('collapseSprintStories') : t('expandSprintStories')}</span>
+                  </div>
+                </button>
+
+                {sprintExpanded ? (
+                  <div className="border-t border-border/60 p-4">
+                    {loading ? (
+                      <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-3">
+                        {[1, 2, 3].map((item) => (
+                          <div key={item} className="h-28 animate-pulse rounded-2xl bg-[color:var(--operator-surface-soft)]" />
+                        ))}
                       </div>
-                      <div className="mt-2 flex flex-wrap items-center gap-2 text-xs text-[color:var(--operator-muted)]">
-                        <Badge variant="chip">{story.assignee_name ?? t('unknown')}</Badge>
-                        <span>{t('taskProgress', { done: story.done_task_count, total: story.task_count })}</span>
-                      </div>
-                      <div className="mt-2 h-2 overflow-hidden rounded-full bg-white/10">
-                        <div
-                          className="h-full rounded-full bg-[linear-gradient(135deg,var(--operator-primary),var(--operator-primary-strong))]"
-                          style={{ width: `${story.task_count > 0 ? Math.round((story.done_task_count / story.task_count) * 100) : 0}%` }}
-                        />
-                      </div>
-                    </div>
-                  ))}
-                </div>
-                {storiesNextCursor ? (
-                  <div className="text-center">
-                    <Button
-                      variant="glass"
-                      size="sm"
-                      disabled={loadingMoreStories}
-                      onClick={async () => {
-                        if (!projectId || !activeSprint || !storiesNextCursor) return;
-                        setLoadingMoreStories(true);
-                        const storiesRes = await fetch(`/api/stories?project_id=${projectId}&sprint_id=${activeSprint.id}&limit=40&cursor=${encodeURIComponent(storiesNextCursor)}`);
-                        if (!storiesRes.ok) throw new Error('Failed to load sprint stories');
-                        const storiesJson = await storiesRes.json().catch(() => null);
-                        if (!storiesJson || !('data' in storiesJson)) throw new Error('Failed to load sprint stories');
-                        const storyRows = storiesJson.data as StandupStoryRow[];
-                        const taskEntries = await Promise.all(
-                          storyRows.map(async (story) => {
-                            const taskRes = await fetch(`/api/tasks?story_id=${story.id}&limit=1`);
-                            const taskJson = await taskRes.json().catch(() => null) as { data?: StandupTaskRow[]; meta?: { totalCount?: number; doneCount?: number } } | null;
-                            if (!taskRes.ok || !taskJson || !Array.isArray(taskJson.data)) {
-                              throw new Error(`Failed to load task summary for story ${story.id}`);
-                            }
-                            return [story.id, {
-                              taskCount: taskJson.meta?.totalCount ?? taskJson.data.length,
-                              doneTaskCount: taskJson.meta?.doneCount ?? taskJson.data.filter((task) => task.status === 'done').length,
-                            }] as const;
-                          }),
-                        );
-                        const taskProgressByStoryId = Object.fromEntries(taskEntries);
-                        setStories((prev) => [...prev, ...storyRows.map((story) => buildStorySummary(story, taskProgressByStoryId[story.id] ?? { taskCount: 0, doneTaskCount: 0 }, memberNameById))]);
-                        setStoriesNextCursor(storiesJson?.meta?.nextCursor ?? null);
-                        setLoadingMoreStories(false);
-                      }}
-                    >
-                      {loadingMoreStories ? t('loading') : t('loadMore')}
-                    </Button>
+                    ) : activeSprint ? (
+                      stories.length > 0 ? (
+                        <div className="space-y-3">
+                          <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-3">
+                            {stories.map((story) => (
+                              <div key={story.id} className="rounded-2xl border border-border/70 bg-background p-4 shadow-sm">
+                                <div className="flex flex-wrap items-center justify-between gap-2">
+                                  <p className="text-sm font-medium text-[color:var(--operator-foreground)]">{story.title}</p>
+                                  <Badge variant="outline">{story.status}</Badge>
+                                </div>
+                                <div className="mt-2 flex flex-wrap items-center gap-2 text-xs text-[color:var(--operator-muted)]">
+                                  <Badge variant="chip">{story.assignee_name ?? t('unknown')}</Badge>
+                                  <span>{t('taskProgress', { done: story.done_task_count, total: story.task_count })}</span>
+                                </div>
+                                <div className="mt-2 h-2 overflow-hidden rounded-full bg-white/10">
+                                  <div
+                                    className="h-full rounded-full bg-[linear-gradient(135deg,var(--operator-primary),var(--operator-primary-strong))]"
+                                    style={{ width: `${story.task_count > 0 ? Math.round((story.done_task_count / story.task_count) * 100) : 0}%` }}
+                                  />
+                                </div>
+                              </div>
+                            ))}
+                          </div>
+                          {storiesNextCursor ? (
+                            <div className="text-center">
+                              <Button
+                                variant="glass"
+                                size="sm"
+                                disabled={loadingMoreStories}
+                                onClick={async () => {
+                                  if (!projectId || !activeSprint || !storiesNextCursor) return;
+                                  setLoadingMoreStories(true);
+                                  const storiesRes = await fetch(`/api/stories?project_id=${projectId}&sprint_id=${activeSprint.id}&limit=40&cursor=${encodeURIComponent(storiesNextCursor)}`);
+                                  if (!storiesRes.ok) throw new Error('Failed to load sprint stories');
+                                  const storiesJson = await storiesRes.json().catch(() => null);
+                                  if (!storiesJson || !('data' in storiesJson)) throw new Error('Failed to load sprint stories');
+                                  const storyRows = storiesJson.data as StandupStoryRow[];
+                                  const taskEntries = await Promise.all(
+                                    storyRows.map(async (story) => {
+                                      const taskRes = await fetch(`/api/tasks?story_id=${story.id}&limit=1`);
+                                      const taskJson = await taskRes.json().catch(() => null) as { data?: StandupTaskRow[]; meta?: { totalCount?: number; doneCount?: number } } | null;
+                                      if (!taskRes.ok || !taskJson || !Array.isArray(taskJson.data)) {
+                                        throw new Error(`Failed to load task summary for story ${story.id}`);
+                                      }
+                                      return [story.id, {
+                                        taskCount: taskJson.meta?.totalCount ?? taskJson.data.length,
+                                        doneTaskCount: taskJson.meta?.doneCount ?? taskJson.data.filter((task) => task.status === 'done').length,
+                                      }] as const;
+                                    }),
+                                  );
+                                  const taskProgressByStoryId = Object.fromEntries(taskEntries);
+                                  setStories((prev) => [...prev, ...storyRows.map((story) => buildStorySummary(story, taskProgressByStoryId[story.id] ?? { taskCount: 0, doneTaskCount: 0 }, memberNameById))]);
+                                  setStoriesNextCursor(storiesJson?.meta?.nextCursor ?? null);
+                                  setLoadingMoreStories(false);
+                                }}
+                              >
+                                {loadingMoreStories ? t('loading') : t('loadMore')}
+                              </Button>
+                            </div>
+                          ) : null}
+                        </div>
+                      ) : (
+                        <EmptyState title={t('noSprintStories')} description={t('noSprintStoriesDescription')} />
+                      )
+                    ) : (
+                      <EmptyState title={t('noActiveSprint')} description={t('noActiveSprintDescription')} />
+                    )}
                   </div>
                 ) : null}
               </div>
-            ) : (
-              <EmptyState title={t('noSprintStories')} description={t('noSprintStoriesDescription')} />
-            )
-          ) : (
-            <EmptyState title={t('noActiveSprint')} description={t('noActiveSprintDescription')} />
-          )}
-        </div>
-      </div>
 
-      <div className="grid gap-4 xl:grid-cols-[minmax(0,1.05fr)_minmax(0,0.95fr)]">
-        <div className="rounded-xl border border-border bg-background">
-          <div className="border-b border-border/60 px-4 py-3">
-            <div className="space-y-1">
-              <h2 className="text-base font-semibold text-[color:var(--operator-foreground)]">✍️ {t('myStandup')}</h2>
-              <p className="text-sm text-[color:var(--operator-muted)]">{t('myStandupDescription')}</p>
-            </div>
-          </div>
-          <div className="p-4">
-            {loading ? (
-              <div className="space-y-3">
-                {[1, 2, 3, 4].map((item) => (
-                  <div key={item} className="h-20 animate-pulse rounded-2xl bg-[color:var(--operator-surface-soft)]" />
-                ))}
-              </div>
-            ) : (
-              <div className="space-y-5">
-                <div className="flex flex-wrap items-center gap-2">
-                  <Badge variant="chip">{t('myStoryCount', { count: currentUserStories.length })}</Badge>
-                  <Badge variant="outline">{t('linkedStoryCount', { count: planStoryIds.length })}</Badge>
-                </div>
-                <div>
-                  <label className="mb-2 block text-xs font-medium uppercase tracking-[0.18em] text-[color:var(--operator-muted)]">{t('done')}</label>
-                  <OperatorTextarea
-                    value={done}
-                    onChange={(event) => setDone(event.target.value)}
-                    rows={4}
-                    placeholder={t('donePlaceholder')}
-                  />
-                </div>
-                <div>
-                  <label className="mb-2 block text-xs font-medium uppercase tracking-[0.18em] text-[color:var(--operator-muted)]">{t('plan')}</label>
-                  <OperatorTextarea
-                    value={plan}
-                    onChange={(event) => setPlan(event.target.value)}
-                    rows={4}
-                    placeholder={t('planPlaceholder')}
-                  />
-                </div>
-                <div>
-                  <label className="mb-2 block text-xs font-medium uppercase tracking-[0.18em] text-[color:var(--operator-muted)]">{t('blockers')}</label>
-                  <OperatorTextarea
-                    value={blockers}
-                    onChange={(event) => setBlockers(event.target.value)}
-                    rows={3}
-                    placeholder={t('blockersPlaceholder')}
-                  />
-                </div>
-
-                <div className="space-y-4 rounded-2xl border border-border/70 bg-muted/10 p-4">
-                  <div className="flex flex-wrap items-center justify-between gap-2">
-                    <div>
-                      <p className="text-xs font-medium uppercase tracking-[0.18em] text-[color:var(--operator-muted)]">{t('linkedStories')}</p>
-                      <p className="text-sm text-[color:var(--operator-muted)]">{t('linkedStoriesDescription')}</p>
-                    </div>
-                    <Badge variant="outline">{t('linkedStoryCount', { count: planStoryIds.length })}</Badge>
+              {/* 사람 섹션 */}
+              {loading ? (
+                <section className="space-y-3">
+                  <div className="flex items-center gap-2">
+                    <h2 className="text-sm font-semibold text-[color:var(--operator-foreground)]">👤 {t('people')}</h2>
                   </div>
-                  {storyPickerStories.length > 0 ? (
-                    <div className="space-y-2">
-                      {storyPickerStories.map((story) => {
-                        const checked = planStoryIds.includes(story.id);
+                  <div className="grid grid-cols-1 gap-4 md:grid-cols-2 xl:grid-cols-3">
+                    {[1, 2, 3].map((item) => (
+                      <div key={item} className="h-48 animate-pulse rounded-xl bg-[color:var(--operator-surface-soft)]" />
+                    ))}
+                  </div>
+                </section>
+              ) : humanMembers.length > 0 ? (
+                <section className="space-y-3">
+                  <div className="flex flex-wrap items-center justify-between gap-2">
+                    <h2 className="text-sm font-semibold text-[color:var(--operator-foreground)]">👤 {t('people')}</h2>
+                    <Badge variant="chip">{t('memberCount', { count: humanMembers.length })}</Badge>
+                  </div>
+                  <div className="grid grid-cols-1 gap-4 md:grid-cols-2 xl:grid-cols-3">
+                    {humanMembersSorted.map((member) => {
+                      const isCurrentUser = member.id === currentTeamMemberId;
+                      const entry = entryByAuthorId[member.id];
+                      const memberFeedback = feedbackByEntryId[entry?.id ?? ''] ?? [];
+
+                      if (isCurrentUser && editingSelf) {
                         return (
-                          <label key={story.id} className="flex cursor-pointer items-start gap-3 rounded-xl border border-border/70 bg-background p-3.5 transition hover:bg-muted/40">
-                            <input
-                              type="checkbox"
-                              checked={checked}
-                              onChange={() => {
-                                setPlanStoryIds((current) => (
-                                  current.includes(story.id)
-                                    ? current.filter((storyId) => storyId !== story.id)
-                                    : [...current, story.id]
-                                ));
-                              }}
-                              className="mt-1 h-4 w-4 rounded border-input bg-transparent text-primary"
-                            />
-                            <div className="min-w-0 flex-1 space-y-1">
-                              <div className="flex flex-wrap items-center justify-between gap-2">
-                                <p className="text-sm font-medium text-foreground">{story.title}</p>
-                                <Badge variant="outline">{story.status}</Badge>
+                          <div key={member.id} className="col-span-full rounded-xl border border-[color:var(--operator-primary)]/40 bg-card p-4 shadow-sm space-y-4">
+                            <div className="flex flex-wrap items-center justify-between gap-2">
+                              <h3 className="text-sm font-semibold text-[color:var(--operator-foreground)]">{t('selfEditTitle')}</h3>
+                              <Button variant="ghost" size="sm" onClick={() => setEditingSelf(false)}>{t('cancel')}</Button>
+                            </div>
+
+                            <div className="grid gap-4 md:grid-cols-3">
+                              <div>
+                                <label className="mb-2 block text-xs font-semibold uppercase tracking-wider text-emerald-400">{t('done')}</label>
+                                <OperatorTextarea
+                                  value={done}
+                                  onChange={(event) => setDone(event.target.value)}
+                                  rows={4}
+                                  placeholder={t('donePlaceholder')}
+                                />
                               </div>
-                              <div className="flex flex-wrap items-center gap-2 text-xs text-muted-foreground">
-                                <Badge variant="chip">{story.assignee_name ?? t('unknown')}</Badge>
-                                <span>{t('taskProgress', { done: story.done_task_count, total: story.task_count })}</span>
+                              <div>
+                                <label className="mb-2 block text-xs font-semibold uppercase tracking-wider text-[color:var(--operator-primary-soft)]">{t('plan')}</label>
+                                <OperatorTextarea
+                                  value={plan}
+                                  onChange={(event) => setPlan(event.target.value)}
+                                  rows={4}
+                                  placeholder={t('planPlaceholder')}
+                                />
+                              </div>
+                              <div>
+                                <label className="mb-2 block text-xs font-semibold uppercase tracking-wider text-rose-300">{t('blockers')}</label>
+                                <OperatorTextarea
+                                  value={blockers}
+                                  onChange={(event) => setBlockers(event.target.value)}
+                                  rows={4}
+                                  placeholder={t('blockersPlaceholder')}
+                                />
                               </div>
                             </div>
-                          </label>
+
+                            <div className="space-y-3 rounded-xl border border-border/70 bg-muted/10 p-3">
+                              <div className="flex flex-wrap items-center justify-between gap-2">
+                                <p className="text-xs font-semibold uppercase tracking-wider text-[color:var(--operator-muted)]">{t('linkedStories')}</p>
+                                <Badge variant="outline">{t('linkedStoryCount', { count: planStoryIds.length })}</Badge>
+                              </div>
+                              {storyPickerStories.length > 0 ? (
+                                <div className="max-h-40 space-y-1.5 overflow-y-auto">
+                                  {storyPickerStories.map((story) => {
+                                    const checked = planStoryIds.includes(story.id);
+                                    return (
+                                      <label key={story.id} className="flex cursor-pointer items-start gap-3 rounded-lg border border-border/70 bg-background p-2.5 transition hover:bg-muted/40">
+                                        <input
+                                          type="checkbox"
+                                          checked={checked}
+                                          onChange={() => {
+                                            setPlanStoryIds((current) => (
+                                              current.includes(story.id)
+                                                ? current.filter((storyId) => storyId !== story.id)
+                                                : [...current, story.id]
+                                            ));
+                                          }}
+                                          className="mt-0.5 h-4 w-4 rounded border-input bg-transparent text-primary"
+                                        />
+                                        <div className="min-w-0 flex-1 space-y-0.5">
+                                          <div className="flex flex-wrap items-center justify-between gap-2">
+                                            <p className="text-sm font-medium text-foreground">{story.title}</p>
+                                            <Badge variant="outline">{story.status}</Badge>
+                                          </div>
+                                          <div className="flex flex-wrap items-center gap-2 text-xs text-muted-foreground">
+                                            <Badge variant="chip">{story.assignee_name ?? t('unknown')}</Badge>
+                                            <span>{t('taskProgress', { done: story.done_task_count, total: story.task_count })}</span>
+                                          </div>
+                                        </div>
+                                      </label>
+                                    );
+                                  })}
+                                </div>
+                              ) : (
+                                <p className="text-sm text-[color:var(--operator-muted)]">{t('noSprintStories')}</p>
+                              )}
+                            </div>
+
+                            <div className="flex flex-wrap items-center gap-3 pt-1">
+                              <Button variant="hero" size="lg" onClick={() => void handleSave()} disabled={saving}>
+                                {saving ? t('saving') : t('save')}
+                              </Button>
+                              <Button variant="outline" onClick={() => setEditingSelf(false)}>{t('cancel')}</Button>
+                              {saveError ? <p className="text-sm text-rose-300">{saveError}</p> : null}
+                            </div>
+                          </div>
                         );
-                      })}
-                    </div>
-                  ) : (
-                    <EmptyState title={t('noSprintStories')} description={t('noSprintStoriesDescription')} className="bg-transparent px-4 py-6" />
-                  )}
-                </div>
+                      }
 
-                <div className="space-y-2 pt-1">
-                  <Button variant="hero" size="lg" onClick={() => void handleSave()} disabled={saving} className="w-full sm:w-auto">
-                    {saving ? t('saving') : t('save')}
-                  </Button>
-                  {saveError ? <p className="text-sm text-rose-300">{saveError}</p> : null}
-                </div>
-              </div>
-            )}
-          </div>
-        </div>
-
-        <div className="rounded-xl border border-border bg-background">
-          <div className="border-b border-border/60 px-4 py-3">
-            <div className="flex flex-wrap items-center justify-between gap-3">
-              <div className="space-y-1">
-                <h2 className="text-base font-semibold text-[color:var(--operator-foreground)]">👥 {t('team')}</h2>
-                <p className="text-sm text-[color:var(--operator-muted)]">{t('teamDescription')}</p>
-              </div>
-              <Badge variant="outline">{t('entryCount', { count: entries.length })}</Badge>
-            </div>
-          </div>
-          <div className="p-4">
-            {loading ? (
-              <div className="space-y-3">
-                {[1, 2, 3].map((item) => (
-                  <div key={item} className="h-40 animate-pulse rounded-2xl bg-[color:var(--operator-surface-soft)]" />
-                ))}
-              </div>
-            ) : members.length === 0 ? (
-              <EmptyState title={t('noMembers')} description={t('noMembersDescription')} />
-            ) : (
-              <div className="space-y-6">
-                {humanMembers.length > 0 ? (
-                  <section className="space-y-3">
-                    <div className="flex flex-wrap items-center justify-between gap-2">
-                      <div>
-                        <h3 className="text-sm font-semibold text-[color:var(--operator-foreground)]">{t('people')}</h3>
-                        <p className="text-xs text-[color:var(--operator-muted)]">{t('peopleDescription')}</p>
-                      </div>
-                      <Badge variant="chip">{t('memberCount', { count: humanMembers.length })}</Badge>
-                    </div>
-                    <div className="space-y-3">
-                      {humanMembers.map((member) => (
-                        <StandupReviewCard
+                      return (
+                        <StandupBoardCard
                           key={member.id}
                           member={member}
-                          entry={entryByAuthorId[member.id]}
-                          currentMemberId={currentTeamMemberId}
-                          stories={stories}
-                          feedback={feedbackByEntryId[entryByAuthorId[member.id]?.id ?? ''] ?? []}
-                          memberNameById={memberNameById}
-                          onCreateFeedback={createFeedback}
-                          onUpdateFeedback={updateFeedback}
-                          onDeleteFeedback={deleteFeedback}
+                          entry={entry}
+                          feedback={memberFeedback}
+                          isCurrentUser={isCurrentUser}
+                          activeSprintTitle={activeSprint?.title ?? null}
+                          onEdit={isCurrentUser ? () => setEditingSelf(true) : undefined}
+                          onOpenFeedback={() => setFeedbackDialogMemberId(member.id)}
                         />
-                      ))}
-                    </div>
-                  </section>
-                ) : null}
+                      );
+                    })}
+                  </div>
+                </section>
+              ) : null}
 
-                {agentMembers.length > 0 ? (
-                  <section className="space-y-3">
-                    <div className="flex flex-wrap items-center justify-between gap-2">
-                      <div>
-                        <h3 className="text-sm font-semibold text-[color:var(--operator-foreground)]">{t('agents')}</h3>
-                        <p className="text-xs text-[color:var(--operator-muted)]">{t('agentsDescription')}</p>
-                      </div>
-                      <Badge variant="chip">{t('memberCount', { count: agentMembers.length })}</Badge>
-                    </div>
-                    <div className="space-y-3">
-                      {agentMembers.map((member) => (
-                        <StandupReviewCard
+              {/* 에이전트 섹션 */}
+              {!loading && agentMembers.length > 0 ? (
+                <section className="space-y-3">
+                  <div className="flex flex-wrap items-center justify-between gap-2">
+                    <h2 className="text-sm font-semibold text-[color:var(--operator-foreground)]">🤖 {t('agents')}</h2>
+                    <Badge variant="chip">{t('memberCount', { count: agentMembers.length })}</Badge>
+                  </div>
+                  <div className="grid grid-cols-1 gap-4 md:grid-cols-2 xl:grid-cols-3">
+                    {agentMembers.map((member) => {
+                      const entry = entryByAuthorId[member.id];
+                      const memberFeedback = feedbackByEntryId[entry?.id ?? ''] ?? [];
+                      return (
+                        <StandupBoardCard
                           key={member.id}
                           member={member}
-                          entry={entryByAuthorId[member.id]}
-                          currentMemberId={currentTeamMemberId}
-                          stories={stories}
-                          feedback={feedbackByEntryId[entryByAuthorId[member.id]?.id ?? ''] ?? []}
-                          memberNameById={memberNameById}
-                          onCreateFeedback={createFeedback}
-                          onUpdateFeedback={updateFeedback}
-                          onDeleteFeedback={deleteFeedback}
+                          entry={entry}
+                          feedback={memberFeedback}
+                          isCurrentUser={false}
+                          activeSprintTitle={activeSprint?.title ?? null}
+                          onOpenFeedback={() => setFeedbackDialogMemberId(member.id)}
                         />
-                      ))}
-                    </div>
-                  </section>
-                ) : null}
-              </div>
-            )}
-          </div>
+                      );
+                    })}
+                  </div>
+                </section>
+              ) : null}
+
+              {!loading && members.length === 0 ? (
+                <EmptyState title={t('noMembers')} description={t('noMembersDescription')} />
+              ) : null}
+            </>
+          ) : null}
         </div>
       </div>
-      </>
+
+      {/* 피드백 다이얼로그 */}
+      {feedbackDialogMember ? (
+        <StandupFeedbackDialog
+          open={feedbackDialogMemberId !== null}
+          onOpenChange={(next) => { if (!next) setFeedbackDialogMemberId(null); }}
+          member={feedbackDialogMember}
+          entry={feedbackDialogEntry}
+          feedback={feedbackDialogFeedback}
+          stories={stories}
+          memberNameById={memberNameById}
+          currentMemberId={currentTeamMemberId}
+          onCreateFeedback={createFeedback}
+          onUpdateFeedback={updateFeedback}
+          onDeleteFeedback={deleteFeedback}
+        />
       ) : null}
-        </div>
-      </div>
     </>
   );
 }

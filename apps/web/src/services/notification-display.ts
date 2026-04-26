@@ -13,6 +13,9 @@ export const NOTIFICATION_TYPE_ICONS: Record<string, string> = {
   task_assigned: '📋',
   task_completed: '✅',
   sprint_closed: '🏁',
+  standup_reminder: '🧍',
+  story_assigned: '📌',
+  invitation: '✉️',
 };
 
 export const INBOX_FILTER_TYPES = ['', ...NOTIFICATION_TYPES] as const;
@@ -46,6 +49,12 @@ export function getInboxNotificationLabel(
       return t('filter_task_completed');
     case 'sprint_closed':
       return t('filter_sprint_closed');
+    case 'standup_reminder':
+      return t('filter_standup_reminder');
+    case 'story_assigned':
+      return t('filter_story_assigned');
+    case 'invitation':
+      return t('filter_invitation');
     default:
       return type;
   }

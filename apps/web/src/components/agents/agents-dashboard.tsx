@@ -58,6 +58,16 @@ function statusBadgeVariant(status: string) {
   }
 }
 
+function statusDotClass(status: string): string {
+  switch (status) {
+    case 'ACTIVE': return 'bg-emerald-500';
+    case 'DEPLOY_FAILED': return 'bg-destructive';
+    case 'SUSPENDED': return 'bg-muted-foreground/60';
+    case 'DEPLOYING': return 'bg-amber-500 animate-pulse';
+    default: return 'bg-muted-foreground/40';
+  }
+}
+
 function statusLabel(status: string, t: ReturnType<typeof useTranslations<'agents'>>) {
   switch (status) {
     case 'ACTIVE': return t('statusActive');
@@ -256,13 +266,28 @@ export function AgentsDashboard({ deployments: initialDeployments }: { deploymen
           </div>
           <div className="space-y-3 p-4">
             {deployments.length === 0 ? (
-              <div className="rounded-md border border-dashed border-border bg-muted/30 px-5 py-10 text-center">
-                <Bot className="mx-auto size-10 text-primary" />
-                <h3 className="mt-4 text-lg font-semibold text-foreground">{t('emptyDeploymentsTitle')}</h3>
-                <p className="mt-2 text-sm text-muted-foreground">{t('emptyDeploymentsBody')}</p>
-                <div className="mt-5 flex flex-wrap justify-center gap-2">
-                  <Link href="/agents/workflow" className={buttonVariants({ variant: 'glass', size: 'lg' })}>{t('workflowEditorCta')}</Link>
-                  <Link href="/agents/deploy" className={buttonVariants({ variant: 'hero', size: 'lg' })}>{t('openWizard')}</Link>
+              <div className="space-y-6 py-4">
+                <div className="rounded-md border border-dashed border-border bg-muted/30 px-5 py-8 text-center">
+                  <Bot className="mx-auto size-10 text-primary" />
+                  <h3 className="mt-4 text-lg font-semibold text-foreground">{t('emptyDeploymentsTitle')}</h3>
+                  <p className="mt-2 text-sm text-muted-foreground">{t('emptyDeploymentsBody')}</p>
+                  <div className="mt-6 flex flex-wrap justify-center gap-2">
+                    <Link href="/agents/workflow" className={buttonVariants({ variant: 'glass', size: 'lg' })}>{t('workflowEditorCta')}</Link>
+                    <Link href="/agents/deploy" className={buttonVariants({ variant: 'hero', size: 'lg' })}>{t('openWizard')}</Link>
+                  </div>
+                </div>
+                <div className="grid gap-3 md:grid-cols-3">
+                  {([
+                    { icon: '📋', titleKey: 'featureTaskTitle', bodyKey: 'featureTaskBody' },
+                    { icon: '⚡', titleKey: 'featureAutoTitle', bodyKey: 'featureAutoBody' },
+                    { icon: '🔁', titleKey: 'featureSkillTitle', bodyKey: 'featureSkillBody' },
+                  ] as const).map(({ icon, titleKey, bodyKey }) => (
+                    <div key={titleKey} className="rounded-lg border border-border/60 bg-muted/20 p-4">
+                      <div className="text-2xl">{icon}</div>
+                      <p className="mt-2 text-sm font-semibold text-foreground">{t(titleKey)}</p>
+                      <p className="mt-1 text-xs text-muted-foreground">{t(bodyKey)}</p>
+                    </div>
+                  ))}
                 </div>
               </div>
             ) : deployments.map((deployment) => {
@@ -275,6 +300,10 @@ export function AgentsDashboard({ deployments: initialDeployments }: { deploymen
                   <div className="flex flex-col gap-3 lg:flex-row lg:items-start lg:justify-between">
                     <div className="min-w-0 flex-1 space-y-2">
                       <div className="flex flex-wrap items-center gap-2">
+                        <span
+                          className={`h-2 w-2 shrink-0 rounded-full ${statusDotClass(deployment.status)}`}
+                          aria-hidden="true"
+                        />
                         <h3 className="text-sm font-semibold text-foreground">{deployment.name}</h3>
                         <Badge variant={statusBadgeVariant(deployment.status)}>
                           {statusLabel(deployment.status, t)}

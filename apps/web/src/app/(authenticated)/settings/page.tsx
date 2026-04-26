@@ -449,7 +449,7 @@ export default function SettingsPage() {
         <div className="w-52 shrink-0 border-r overflow-y-auto p-4">
           <h1 className="mb-4 px-2 text-sm font-semibold">{t('title')}</h1>
           <TabsList variant="line" className="w-full flex-col items-stretch">
-            <span className="px-2 pb-1 pt-2 text-xs text-muted-foreground">{t('myAccount')}</span>
+            <span className="px-2 pb-1 pt-1 text-[10px] font-medium uppercase tracking-wider text-muted-foreground/70">{t('myAccount')}</span>
             <TabsTrigger value="profile">
               <User className="h-4 w-4" />
               {t('tabProfile')}
@@ -467,7 +467,7 @@ export default function SettingsPage() {
 
             {currentProjectId ? (
               <>
-                <span className="px-2 pb-1 pt-4 text-xs text-muted-foreground">{t('projectSettings')}</span>
+                <span className="px-2 pb-1 pt-4 text-[10px] font-medium uppercase tracking-wider text-muted-foreground/70">{t('projectSettings')}</span>
                 <TabsTrigger value="notifications">
                   <Bell className="h-4 w-4" />
                   {t('tabNotifications')}
@@ -481,7 +481,7 @@ export default function SettingsPage() {
 
             {adminChecked && isAdmin ? (
               <>
-                <span className="px-2 pb-1 pt-4 text-xs text-muted-foreground truncate">{t('organizationSettings')}</span>
+                <span className="truncate px-2 pb-1 pt-4 text-[10px] font-medium uppercase tracking-wider text-muted-foreground/70">{t('organizationSettings')}</span>
                 <TabsTrigger value="projects">
                   <FolderKanban className="h-4 w-4" />
                   {t('tabProjects')}
@@ -509,7 +509,7 @@ export default function SettingsPage() {
               </>
             ) : null}
 
-            <span className="px-2 pb-1 pt-4 text-xs text-muted-foreground">{t('dangerZone')}</span>
+            <span className="px-2 pb-1 pt-4 text-[10px] font-medium uppercase tracking-wider text-muted-foreground/70">{t('dangerZone')}</span>
             <TabsTrigger
               value="danger"
               className="text-destructive hover:text-destructive data-active:text-destructive data-active:bg-destructive/10"

@@ -173,7 +173,7 @@ export function StoryCard({ story, epicName, assignee, onClick, onEdit, onChange
           )}
         </div>
         <div className="flex items-center gap-2">
-          <span className="max-w-[104px] truncate font-mono text-[10px] text-muted-foreground">{story.id}</span>
+          <span className="font-mono text-[10px] text-muted-foreground/50">#{story.id.slice(0, 6)}</span>
           {story.story_points != null ? (
             <Badge variant="secondary" className="font-mono text-[10px] px-1.5 py-0">{story.story_points}</Badge>
           ) : null}
