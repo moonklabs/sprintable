@@ -28,7 +28,7 @@ export async function createSupabaseServerClient() {
               });
             }
           } catch {
-            // Server Component에서는 set 불가 — 무시
+            // Server Component에서는 set 불가 — middleware refreshing user sessions에서는 무시
           }
         },
       },
