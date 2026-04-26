@@ -33,6 +33,7 @@ interface UseDocSyncOptions<TDoc = { updated_at: string }> {
   snapshotKey?: string;
   serverUpdatedAt: string | null;
   editing: boolean;
+  autosave?: boolean;
   autosaveDelay?: number;
   pollInterval?: number;
   onSaved?: (doc: TDoc) => void;
@@ -45,6 +46,7 @@ export function useDocSync<TDoc = { updated_at: string }>({
   snapshotKey,
   serverUpdatedAt,
   editing,
+  autosave = true,
   autosaveDelay = 1500,
   pollInterval = 10_000,
   onSaved,
@@ -176,12 +178,12 @@ export function useDocSync<TDoc = { updated_at: string }>({
   }, [baselineUpdatedAt, docId, lastSavedSnapshot, onSaved, savePayload]);
 
   useEffect(() => {
-    if (!editing || !isDirty || conflictRef.current || remoteChangedRef.current) return;
+    if (!autosave || !editing || !isDirty || conflictRef.current || remoteChangedRef.current) return;
 
     const scheduler = createAutosaveScheduler(autosaveDelay);
     scheduler.schedule(() => { void save(); });
     return () => scheduler.cancel();
-  }, [autosaveDelay, currentSnapshot, editing, isDirty, save]);
+  }, [autosave, autosaveDelay, currentSnapshot, editing, isDirty, save]);
 
   useEffect(() => {
     if (!docId || !editing || !baselineUpdatedAt || remoteChangedRef.current || conflictRef.current) return;

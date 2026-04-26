@@ -4,6 +4,7 @@ import { useEffect, useState } from 'react';
 import { useTranslations } from 'next-intl';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
+import { TopBarSlot } from '@/components/nav/top-bar-slot';
 
 interface Sprint {
   id: string;
@@ -82,10 +83,11 @@ export function SprintsClient({ projectId }: SprintsClientProps) {
   }
 
   return (
-    <div className="flex h-full">
+    <>
+      <TopBarSlot title={<h1 className="text-sm font-medium">{t('title')}</h1>} />
+      <div className="flex min-h-0 flex-1 overflow-hidden">
       {/* Sprint list */}
       <div className="flex w-full flex-col gap-3 overflow-y-auto p-6 lg:w-1/2">
-        <h1 className="text-xl font-semibold text-foreground">{t('title')}</h1>
         {sprints.length === 0 ? (
           <p className="text-sm text-muted-foreground">{t('noSprints')}</p>
         ) : (
@@ -169,5 +171,6 @@ export function SprintsClient({ projectId }: SprintsClientProps) {
         </div>
       ) : null}
     </div>
+    </>
   );
 }

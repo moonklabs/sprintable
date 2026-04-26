@@ -5,6 +5,8 @@ import { handleApiError } from '@/lib/api-error';
 import { apiSuccess, apiError, ApiErrors } from '@/lib/api-response';
 import { getAuthContext } from '@/lib/auth-helpers';
 import { RetroSessionService } from '@/services/retro-session';
+import { isOssMode } from '@/lib/storage/factory';
+import { voteOssRetroItem } from '@/lib/oss-retro';
 
 type RouteParams = { params: Promise<{ id: string; item_id: string }> };
 
@@ -23,6 +25,11 @@ export async function POST(request: Request, { params }: RouteParams) {
 
     const body = await request.json().catch(() => ({})) as { voter_id?: string };
     const voterId = body.voter_id ?? me.id;
+
+    if (isOssMode()) {
+      const data = voteOssRetroItem(item_id, voterId, projectId);
+      return apiSuccess(data);
+    }
 
     const dbClient: SupabaseClient = me.type === 'agent' ? createSupabaseAdminClient() : supabase;
     const service = new RetroSessionService(dbClient);

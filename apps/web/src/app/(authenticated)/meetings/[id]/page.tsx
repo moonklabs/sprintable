@@ -6,8 +6,10 @@ import { useTranslations } from 'next-intl';
 import ReactMarkdown from 'react-markdown';
 import { AudioRecorder } from '@/components/meetings/audio-recorder';
 import { AiSummarizeButton } from '@/components/meetings/ai-summarize-button';
+import { ChevronLeft } from 'lucide-react';
 import { RouteErrorState } from '@/components/ui/route-error-state';
 import { PageSkeleton } from '@/components/ui/page-skeleton';
+import { TopBarSlot } from '@/components/nav/top-bar-slot';
 import { useUpgradeGuard } from '@/hooks/use-upgrade-guard';
 import { readApiClientError } from '@/lib/api-client-error';
 
@@ -129,31 +131,45 @@ export default function MeetingDetailPage() {
       />
     );
   }
-  if (!meeting) return <div className="p-6 text-sm text-gray-400">{t('noMeetings')}</div>;
+  if (!meeting) return <div className="flex h-64 items-center justify-center text-sm text-muted-foreground">{t('noMeetings')}</div>;
 
   return (
-    <div className="mx-auto max-w-4xl px-3 py-4 sm:p-6">
-      {/* 헤더 */}
+    <>
+      <TopBarSlot
+        title={
+          <div className="flex items-center gap-1.5">
+            <button
+              type="button"
+              onClick={() => router.push('/meetings')}
+              className="flex items-center text-muted-foreground hover:text-foreground"
+            >
+              <ChevronLeft className="size-4" />
+            </button>
+            <h1 className="text-sm font-medium truncate max-w-xs">{meeting.title}</h1>
+          </div>
+        }
+      />
+      <div className="flex min-h-0 flex-1 overflow-y-auto">
+      <div className="mx-auto w-full max-w-4xl px-4 py-6 sm:px-6">
+      {/* 메타 */}
       <div className="mb-6">
-        <button onClick={() => router.push('/meetings')} className="mb-2 text-xs text-gray-400 hover:text-gray-600">← {t('meetings')}</button>
-        <h1 className="text-xl font-bold text-gray-900">{meeting.title}</h1>
-        <p className="mt-1 text-sm text-gray-500">
+        <p className="text-sm text-muted-foreground">
           {new Date(meeting.date).toLocaleDateString()} · {t(meeting.meeting_type as 'standup' | 'retro' | 'general' | 'review')}
           {meeting.duration_min ? ` · ${meeting.duration_min}${t('minuteAbbrev')}` : ''}
         </p>
         {meeting.participants.length > 0 && (
           <div className="mt-2 flex gap-1">
             {meeting.participants.map((p, i) => (
-              <span key={i} className="rounded-full bg-gray-100 px-2 py-0.5 text-[10px] text-gray-600">{p.name ?? '?'}</span>
+              <span key={i} className="rounded-full bg-muted px-2 py-0.5 text-[10px] text-muted-foreground">{p.name ?? '?'}</span>
             ))}
           </div>
         )}
       </div>
 
       {actionError ? (
-        <div className="mb-6 flex items-center justify-between gap-3 rounded-lg border border-rose-200 bg-rose-50 px-4 py-3 text-sm text-rose-700">
+        <div className="mb-6 flex items-center justify-between gap-3 rounded-lg border border-destructive/30 bg-destructive/5 px-4 py-3 text-sm text-destructive">
           <span>{actionError}</span>
-          <button onClick={() => void loadMeeting()} className="shrink-0 rounded bg-white px-3 py-1 text-xs font-medium text-rose-700">
+          <button onClick={() => void loadMeeting()} className="shrink-0 rounded bg-background border border-border px-3 py-1 text-xs font-medium text-destructive">
             {tc('retry')}
           </button>
         </div>
@@ -212,16 +228,16 @@ export default function MeetingDetailPage() {
 
       {/* AI 요약 (AC5: 편집 가능) */}
       {meeting.ai_summary && (
-        <section className="mb-6 rounded-lg border bg-blue-50 p-4">
+        <section className="mb-6 rounded-lg border bg-primary/5 p-4">
           <div className="flex items-center justify-between">
-            <h2 className="mb-2 text-sm font-semibold text-blue-700">{t('summary')}</h2>
+            <h2 className="mb-2 text-sm font-semibold text-primary">{t('summary')}</h2>
             {!editingSummary && (
-              <button onClick={() => { setSummaryDraft(meeting.ai_summary ?? ''); setEditingSummary(true); }} className="text-xs text-blue-500 hover:text-blue-700">{t('editSummary')}</button>
+              <button onClick={() => { setSummaryDraft(meeting.ai_summary ?? ''); setEditingSummary(true); }} className="text-xs text-primary hover:text-primary">{t('editSummary')}</button>
             )}
           </div>
           {editingSummary ? (
             <div className="space-y-2">
-              <textarea value={summaryDraft} onChange={e => setSummaryDraft(e.target.value)} rows={6} className="w-full rounded border bg-white px-3 py-2 text-xs" />
+              <textarea value={summaryDraft} onChange={e => setSummaryDraft(e.target.value)} rows={6} className="w-full rounded border bg-background px-3 py-2 text-xs" />
               <div className="flex gap-2">
                 <button
                   disabled={savingSummary}
@@ -234,7 +250,7 @@ export default function MeetingDetailPage() {
                     }, t('saveFailed'));
                     setSavingSummary(false);
                   }}
-                  className="rounded bg-blue-600 px-3 py-1 text-xs text-white"
+                  className="rounded bg-primary px-3 py-1 text-xs text-white"
                 >
                   {savingSummary ? '...' : t('save')}
                 </button>
@@ -242,7 +258,7 @@ export default function MeetingDetailPage() {
               </div>
             </div>
           ) : (
-            <div className="prose prose-sm max-w-none text-gray-700"><ReactMarkdown>{meeting.ai_summary}</ReactMarkdown></div>
+            <div className="prose prose-sm max-w-none text-foreground"><ReactMarkdown>{meeting.ai_summary}</ReactMarkdown></div>
           )}
         </section>
       )}
@@ -250,22 +266,22 @@ export default function MeetingDetailPage() {
       {/* 결정사항 (AC5: 편집/삭제/추가) */}
       <section className="mb-6">
         <div className="mb-3 flex items-center justify-between">
-          <h2 className="text-sm font-semibold text-gray-700">{t('decisions')}</h2>
+          <h2 className="text-sm font-semibold text-foreground">{t('decisions')}</h2>
           <button onClick={() => {
             const newD = { id: `d${Date.now()}`, text: '', owner: '' };
             setMeeting(prev => prev ? { ...prev, decisions: [...prev.decisions, newD] } : null);
-          }} className="text-xs text-blue-500 hover:text-blue-700">+ {t('addDecision')}</button>
+          }} className="text-xs text-primary hover:text-primary">+ {t('addDecision')}</button>
         </div>
         <div className="space-y-2">
           {meeting.decisions.map((d) => (
             <div key={d.id} className="flex items-start gap-2 rounded-lg border p-3">
               <span className="text-sm">📌</span>
               <div className="flex-1 space-y-1">
-                <input value={d.text} onChange={e => { setMeeting(prev => prev ? { ...prev, decisions: prev.decisions.map(item => item.id === d.id ? { ...item, text: e.target.value } : item) } : null); }} className="w-full rounded border-0 bg-transparent px-0 text-sm text-gray-800 focus:outline-none focus:ring-0" placeholder={t('decisions')} />
-                <input value={d.owner ?? ''} onChange={e => { setMeeting(prev => prev ? { ...prev, decisions: prev.decisions.map(item => item.id === d.id ? { ...item, owner: e.target.value } : item) } : null); }} className="w-full rounded border-0 bg-transparent px-0 text-[10px] text-gray-400 focus:outline-none" placeholder="Owner" />
+                <input value={d.text} onChange={e => { setMeeting(prev => prev ? { ...prev, decisions: prev.decisions.map(item => item.id === d.id ? { ...item, text: e.target.value } : item) } : null); }} className="w-full rounded border-0 bg-transparent px-0 text-sm text-foreground focus:outline-none focus:ring-0" placeholder={t('decisions')} />
+                <input value={d.owner ?? ''} onChange={e => { setMeeting(prev => prev ? { ...prev, decisions: prev.decisions.map(item => item.id === d.id ? { ...item, owner: e.target.value } : item) } : null); }} className="w-full rounded border-0 bg-transparent px-0 text-[10px] text-muted-foreground focus:outline-none" placeholder="Owner" />
               </div>
-              <button onClick={async () => { const arr = meeting.decisions.filter(item => item.id !== d.id); setMeeting(prev => prev ? { ...prev, decisions: arr } : null); await fetch(`/api/meetings/${meetingId}`, { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ decisions: arr }) }); }} className="text-xs text-red-400 hover:text-red-600">✕</button>
-              <button onClick={async () => { await fetch(`/api/meetings/${meetingId}`, { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ decisions: meeting.decisions }) }); }} className="rounded bg-gray-100 px-2 py-1 text-[10px] text-gray-500 hover:bg-gray-200">{t('save')}</button>
+              <button onClick={async () => { const arr = meeting.decisions.filter(item => item.id !== d.id); setMeeting(prev => prev ? { ...prev, decisions: arr } : null); await fetch(`/api/meetings/${meetingId}`, { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ decisions: arr }) }); }} className="text-xs text-muted-foreground hover:text-destructive">✕</button>
+              <button onClick={async () => { await fetch(`/api/meetings/${meetingId}`, { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ decisions: meeting.decisions }) }); }} className="rounded bg-muted px-2 py-1 text-[10px] text-muted-foreground hover:bg-muted/70">{t('save')}</button>
             </div>
           ))}
         </div>
@@ -274,25 +290,25 @@ export default function MeetingDetailPage() {
       {/* 액션아이템 (AC5: 편집/삭제/추가) */}
       <section className="mb-6">
         <div className="mb-3 flex items-center justify-between">
-          <h2 className="text-sm font-semibold text-gray-700">{t('actionItems')}</h2>
+          <h2 className="text-sm font-semibold text-foreground">{t('actionItems')}</h2>
           <button onClick={() => {
             const newAi = { id: `a${Date.now()}`, text: '', assignee: '', due_date: '', status: 'todo' };
             setMeeting(prev => prev ? { ...prev, action_items: [...prev.action_items, newAi] } : null);
-          }} className="text-xs text-blue-500 hover:text-blue-700">+ {t('addActionItem')}</button>
+          }} className="text-xs text-primary hover:text-primary">+ {t('addActionItem')}</button>
         </div>
         <div className="space-y-2">
           {meeting.action_items.map((ai) => (
             <div key={ai.id} className="flex items-center gap-2 rounded-lg border p-3">
               <span className={`h-2 w-2 shrink-0 rounded-full ${ai.status === 'done' ? 'bg-green-500' : 'bg-yellow-500'}`} />
               <div className="flex-1 space-y-1">
-                <input value={ai.text} onChange={e => { setMeeting(prev => prev ? { ...prev, action_items: prev.action_items.map(item => item.id === ai.id ? { ...item, text: e.target.value } : item) } : null); }} className="w-full rounded border-0 bg-transparent px-0 text-sm text-gray-800 focus:outline-none" placeholder={t('actionItems')} />
+                <input value={ai.text} onChange={e => { setMeeting(prev => prev ? { ...prev, action_items: prev.action_items.map(item => item.id === ai.id ? { ...item, text: e.target.value } : item) } : null); }} className="w-full rounded border-0 bg-transparent px-0 text-sm text-foreground focus:outline-none" placeholder={t('actionItems')} />
                 <div className="flex gap-2">
-                  <input value={ai.assignee ?? ''} onChange={e => { setMeeting(prev => prev ? { ...prev, action_items: prev.action_items.map(item => item.id === ai.id ? { ...item, assignee: e.target.value } : item) } : null); }} className="w-24 rounded border-0 bg-transparent px-0 text-[10px] text-gray-400 focus:outline-none" placeholder={t('assigneeLabel')} />
-                  <input type="date" value={ai.due_date ?? ''} onChange={e => { setMeeting(prev => prev ? { ...prev, action_items: prev.action_items.map(item => item.id === ai.id ? { ...item, due_date: e.target.value } : item) } : null); }} className="rounded border-0 bg-transparent px-0 text-[10px] text-gray-400 focus:outline-none" />
+                  <input value={ai.assignee ?? ''} onChange={e => { setMeeting(prev => prev ? { ...prev, action_items: prev.action_items.map(item => item.id === ai.id ? { ...item, assignee: e.target.value } : item) } : null); }} className="w-24 rounded border-0 bg-transparent px-0 text-[10px] text-muted-foreground focus:outline-none" placeholder={t('assigneeLabel')} />
+                  <input type="date" value={ai.due_date ?? ''} onChange={e => { setMeeting(prev => prev ? { ...prev, action_items: prev.action_items.map(item => item.id === ai.id ? { ...item, due_date: e.target.value } : item) } : null); }} className="rounded border-0 bg-transparent px-0 text-[10px] text-muted-foreground focus:outline-none" />
                 </div>
               </div>
-              <button onClick={async () => { const arr = meeting.action_items.filter(item => item.id !== ai.id); setMeeting(prev => prev ? { ...prev, action_items: arr } : null); await fetch(`/api/meetings/${meetingId}`, { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ action_items: arr }) }); }} className="text-xs text-red-400 hover:text-red-600">✕</button>
-              <button onClick={async () => { await fetch(`/api/meetings/${meetingId}`, { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ action_items: meeting.action_items }) }); }} className="rounded bg-gray-100 px-2 py-1 text-[10px] text-gray-500 hover:bg-gray-200">{t('save')}</button>
+              <button onClick={async () => { const arr = meeting.action_items.filter(item => item.id !== ai.id); setMeeting(prev => prev ? { ...prev, action_items: arr } : null); await fetch(`/api/meetings/${meetingId}`, { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ action_items: arr }) }); }} className="text-xs text-muted-foreground hover:text-destructive">✕</button>
+              <button onClick={async () => { await fetch(`/api/meetings/${meetingId}`, { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ action_items: meeting.action_items }) }); }} className="rounded bg-muted px-2 py-1 text-[10px] text-muted-foreground hover:bg-muted/70">{t('save')}</button>
               <button
                 disabled={creatingStoryId === ai.id}
                 onClick={async () => {
@@ -317,7 +333,7 @@ export default function MeetingDetailPage() {
                   }, t('createStoryFailed'));
                   setCreatingStoryId(null);
                 }}
-                className="rounded bg-blue-50 px-2 py-1 text-[10px] text-blue-600 hover:bg-blue-100 disabled:opacity-50"
+                className="rounded bg-primary/5 px-2 py-1 text-[10px] text-blue-600 hover:bg-blue-100 disabled:opacity-50"
               >
                 {creatingStoryId === ai.id ? '...' : t('createStory')}
               </button>
@@ -330,18 +346,18 @@ export default function MeetingDetailPage() {
       {meeting.raw_transcript !== null && (
         <section className="mb-6">
           <div className="flex items-center gap-2">
-            <button onClick={() => setShowTranscript(!showTranscript)} className="text-xs text-gray-500 hover:text-gray-700">
+            <button onClick={() => setShowTranscript(!showTranscript)} className="text-xs text-muted-foreground hover:text-foreground">
               {showTranscript ? t('hideTranscript') : t('viewTranscript')}
             </button>
             {showTranscript && !editingTranscript && (
-              <button onClick={() => { setTranscriptDraft(meeting.raw_transcript ?? ''); setEditingTranscript(true); }} className="text-xs text-blue-500">{t('editTranscript')}</button>
+              <button onClick={() => { setTranscriptDraft(meeting.raw_transcript ?? ''); setEditingTranscript(true); }} className="text-xs text-primary">{t('editTranscript')}</button>
             )}
           </div>
           {showTranscript && (
             <div className="mt-2 rounded-lg border bg-gray-50 p-4">
               {editingTranscript ? (
                 <div className="space-y-2">
-                  <textarea value={transcriptDraft} onChange={e => setTranscriptDraft(e.target.value)} rows={8} className="w-full rounded border bg-white px-3 py-2 text-xs" />
+                  <textarea value={transcriptDraft} onChange={e => setTranscriptDraft(e.target.value)} rows={8} className="w-full rounded border bg-background px-3 py-2 text-xs" />
                   <div className="flex gap-2">
                     <button
                       disabled={savingTranscript}
@@ -354,7 +370,7 @@ export default function MeetingDetailPage() {
                         }, t('saveFailed'));
                         setSavingTranscript(false);
                       }}
-                      className="rounded bg-blue-600 px-3 py-1 text-xs text-white"
+                      className="rounded bg-primary px-3 py-1 text-xs text-white"
                     >
                       {savingTranscript ? '...' : t('save')}
                     </button>
@@ -362,12 +378,14 @@ export default function MeetingDetailPage() {
                   </div>
                 </div>
               ) : (
-                <pre className="whitespace-pre-wrap text-xs text-gray-600">{meeting.raw_transcript}</pre>
+                <pre className="whitespace-pre-wrap text-xs text-muted-foreground">{meeting.raw_transcript}</pre>
               )}
             </div>
           )}
         </section>
       )}
     </div>
+    </div>
+    </>
   );
 }

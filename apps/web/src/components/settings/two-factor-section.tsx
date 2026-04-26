@@ -103,7 +103,7 @@ export function TwoFactorSection() {
           <button
             onClick={handleSetup}
             disabled={busy}
-            className="rounded-lg bg-blue-600 px-4 py-2 text-sm font-medium text-white hover:bg-blue-700 disabled:opacity-50"
+            className="rounded-lg bg-primary px-4 py-2 text-sm font-medium text-primary-foreground hover:bg-primary/90 disabled:opacity-50"
           >
             {busy ? '...' : 'Enable 2FA'}
           </button>
@@ -123,14 +123,14 @@ export function TwoFactorSection() {
               inputMode="numeric"
               maxLength={6}
               placeholder="000000"
-              className="w-full rounded-lg border border-border bg-background px-4 py-2 text-center font-mono tracking-widest text-foreground focus:outline-none focus:ring-2 focus:ring-blue-500"
+              className="w-full rounded-lg border border-border bg-background px-4 py-2 text-center font-mono tracking-widest text-foreground focus:outline-none focus:ring-2 focus:ring-primary"
               value={otpCode}
               onChange={(e) => setOtpCode(e.target.value.replace(/\D/g, '').slice(0, 6))}
             />
             <button
               onClick={handleVerify}
               disabled={busy || otpCode.length !== 6}
-              className="w-full rounded-lg bg-blue-600 px-4 py-2 text-sm font-medium text-white hover:bg-blue-700 disabled:opacity-50"
+              className="w-full rounded-lg bg-primary px-4 py-2 text-sm font-medium text-primary-foreground hover:bg-primary/90 disabled:opacity-50"
             >
               {busy ? '...' : 'Activate 2FA'}
             </button>

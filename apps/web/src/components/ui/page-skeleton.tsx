@@ -14,19 +14,19 @@ export function PageSkeleton({ showTitle = true, cards = 3, rows = 5 }: PageSkel
   return (
     <div className="animate-pulse space-y-6 p-6">
       {showTitle && (
-        <div className="h-8 w-48 rounded-lg bg-gray-200" />
+        <div className="h-8 w-48 rounded-lg bg-muted" />
       )}
       {cards > 0 && (
         <div className="grid grid-cols-1 gap-4 md:grid-cols-3">
           {Array.from({ length: cards }).map((_, i) => (
-            <div key={i} className="h-24 rounded-xl bg-gray-200" />
+            <div key={i} className="h-24 rounded-xl bg-muted" />
           ))}
         </div>
       )}
       {rows > 0 && (
         <div className="space-y-3">
           {Array.from({ length: rows }).map((_, i) => (
-            <div key={i} className="h-12 rounded-lg bg-gray-200" />
+            <div key={i} className="h-12 rounded-lg bg-muted" />
           ))}
         </div>
       )}

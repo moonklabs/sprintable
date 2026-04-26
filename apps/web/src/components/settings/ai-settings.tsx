@@ -1,6 +1,7 @@
 'use client';
 
 import { useEffect, useMemo, useState } from 'react';
+import { OperatorDropdownSelect } from '@/components/ui/operator-dropdown-select';
 import { useTranslations } from 'next-intl';
 import {
   ANTHROPIC_MODELS,
@@ -145,10 +146,10 @@ export function AiSettingsSection({ projectId }: { projectId: string }) {
 
   return (
     <section className="rounded-lg border p-4">
-      <h3 className="mb-3 text-sm font-semibold text-gray-700">{t('aiSettings')}</h3>
+      <h3 className="mb-3 text-sm font-semibold text-foreground">{t('aiSettings')}</h3>
 
       {settings && (
-        <div className="mb-3 space-y-1 text-xs text-gray-500">
+        <div className="mb-3 space-y-1 text-xs text-muted-foreground">
           <div className="flex items-center gap-2">
             <span>{t('currentProvider')}: <strong>{PROVIDER_LABELS[settings.provider]}</strong></span>
             <span>·</span>
@@ -165,20 +166,16 @@ export function AiSettingsSection({ projectId }: { projectId: string }) {
 
       <div className="space-y-3">
         <div>
-          <label className="mb-1 block text-xs font-medium text-gray-600">{t('aiProvider')}</label>
-          <select
+          <label className="mb-1 block text-xs font-medium text-muted-foreground">{t('aiProvider')}</label>
+          <OperatorDropdownSelect
             value={provider}
-            onChange={(e) => setProvider(e.target.value as LLMProvider)}
-            className="w-full rounded border px-3 py-2 text-sm"
-          >
-            {Object.entries(PROVIDER_LABELS).map(([value, label]) => (
-              <option key={value} value={value}>{label}</option>
-            ))}
-          </select>
+            onValueChange={(v) => setProvider(v as LLMProvider)}
+            options={Object.entries(PROVIDER_LABELS).map(([v, label]) => ({ value: v, label }))}
+          />
         </div>
 
         <div>
-          <label className="mb-1 block text-xs font-medium text-gray-600">{t('aiModel')}</label>
+          <label className="mb-1 block text-xs font-medium text-muted-foreground">{t('aiModel')}</label>
           {provider === 'openai-compatible' ? (
             <input
               type="text"
@@ -188,20 +185,16 @@ export function AiSettingsSection({ projectId }: { projectId: string }) {
               className="w-full rounded border px-3 py-2 text-sm"
             />
           ) : (
-            <select
-              value={model}
-              onChange={(e) => setModel(e.target.value)}
-              className="w-full rounded border px-3 py-2 text-sm"
-            >
-              {modelOptions.map((option) => (
-                <option key={option} value={option}>{option}</option>
-              ))}
-            </select>
+            <OperatorDropdownSelect
+              value={model as string}
+              onValueChange={(v) => setModel(v)}
+              options={modelOptions.map((o) => ({ value: o, label: o }))}
+            />
           )}
         </div>
 
         <div>
-          <label className="mb-1 block text-xs font-medium text-gray-600">{t('aiApiKey')}</label>
+          <label className="mb-1 block text-xs font-medium text-muted-foreground">{t('aiApiKey')}</label>
           <input
             type="password"
             value={apiKey}
@@ -215,7 +208,7 @@ export function AiSettingsSection({ projectId }: { projectId: string }) {
         </div>
 
         <div>
-          <label className="mb-1 block text-xs font-medium text-gray-600">{t('aiBaseUrl')}</label>
+          <label className="mb-1 block text-xs font-medium text-muted-foreground">{t('aiBaseUrl')}</label>
           <input
             type="url"
             value={baseUrl}
@@ -227,7 +220,7 @@ export function AiSettingsSection({ projectId }: { projectId: string }) {
 
         <div className="grid grid-cols-2 gap-3">
           <div>
-            <label className="mb-1 block text-xs font-medium text-gray-600">{t('aiTimeoutMs')}</label>
+            <label className="mb-1 block text-xs font-medium text-muted-foreground">{t('aiTimeoutMs')}</label>
             <input
               type="number"
               min={1}
@@ -238,7 +231,7 @@ export function AiSettingsSection({ projectId }: { projectId: string }) {
             />
           </div>
           <div>
-            <label className="mb-1 block text-xs font-medium text-gray-600">{t('aiMaxRetries')}</label>
+            <label className="mb-1 block text-xs font-medium text-muted-foreground">{t('aiMaxRetries')}</label>
             <input
               type="number"
               min={0}
@@ -250,13 +243,13 @@ export function AiSettingsSection({ projectId }: { projectId: string }) {
           </div>
         </div>
 
-        {error && <p className="text-xs text-red-500">{error}</p>}
+        {error && <p className="text-xs text-destructive">{error}</p>}
         {saved && <p className="text-xs text-green-500">{t('aiSettingsSaved')}</p>}
 
         <button
           onClick={handleSave}
           disabled={saving || (!apiKey.trim() && (!settings || requiresNewApiKey))}
-          className="rounded bg-purple-600 px-4 py-2 text-sm font-medium text-white hover:bg-purple-700 disabled:opacity-50"
+          className="rounded bg-primary px-4 py-2 text-sm font-medium text-primary-foreground hover:bg-primary/90 disabled:opacity-50"
         >
           {saving ? '...' : t('saveAiSettings')}
         </button>

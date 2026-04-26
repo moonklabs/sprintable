@@ -3,17 +3,13 @@
 import { useEffect } from 'react';
 import { useTranslations } from 'next-intl';
 import { KanbanBoard } from '@/components/kanban/kanban-board';
-import { PageHeader } from '@/components/ui/page-header';
-import { SectionCard, SectionCardBody } from '@/components/ui/section-card';
+import { TopBarSlot } from '@/components/nav/top-bar-slot';
 import { useDashboardContext } from '../../dashboard/dashboard-shell';
-import { OssWebhookBanner } from '@/components/oss/oss-webhook-banner';
-
 const isOssMode = process.env['NEXT_PUBLIC_OSS_MODE'] === 'true';
 
 export default function BoardPage() {
   const { projectId } = useDashboardContext();
   const t = useTranslations('board');
-  const tc = useTranslations('common');
 
   useEffect(() => {
     if (!isOssMode) return;
@@ -21,18 +17,9 @@ export default function BoardPage() {
   }, []);
 
   return (
-    <div className="space-y-4">
-      <PageHeader
-        eyebrow={tc('operatorSurface')}
-        title={t('title')}
-        description={t('subtitle')}
-        actions={isOssMode ? <OssWebhookBanner /> : undefined}
-      />
-      <SectionCard>
-        <SectionCardBody>
-          <KanbanBoard projectId={projectId} />
-        </SectionCardBody>
-      </SectionCard>
-    </div>
+    <>
+      <TopBarSlot title={<h1 className="text-sm font-medium">{t('title')}</h1>} />
+      <KanbanBoard projectId={projectId} />
+    </>
   );
 }

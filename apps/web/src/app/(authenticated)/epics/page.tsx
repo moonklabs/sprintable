@@ -10,7 +10,7 @@ export default function EpicsPage() {
 
   if (!projectId) {
     return (
-      <div className="flex min-h-screen items-center justify-center">
+      <div className="flex h-64 items-center justify-center">
         <p className="text-sm text-[color:var(--operator-muted)]">{t('noProject')}</p>
       </div>
     );

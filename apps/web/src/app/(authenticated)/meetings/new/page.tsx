@@ -3,6 +3,11 @@
 import { useState } from 'react';
 import { useRouter } from 'next/navigation';
 import { useTranslations } from 'next-intl';
+import { TopBarSlot } from '@/components/nav/top-bar-slot';
+import { Button } from '@/components/ui/button';
+import { OperatorInput } from '@/components/ui/operator-control';
+import { OperatorDropdownSelect } from '@/components/ui/operator-dropdown-select';
+import { Badge } from '@/components/ui/badge';
 
 export default function NewMeetingPage() {
   const t = useTranslations('meeting');
@@ -36,7 +41,6 @@ export default function NewMeetingPage() {
     if (!res.ok) {
       const json = await res.json().catch(() => null);
       setError(json?.error?.message ?? 'Failed');
-      // AC8: feature gating error
       if (res.status === 403 && json?.error?.code === 'UPGRADE_REQUIRED') {
         setError(t('upgradeRequired'));
       }
@@ -49,51 +53,109 @@ export default function NewMeetingPage() {
   }
 
   return (
-    <div className="mx-auto max-w-lg p-6">
-      <h1 className="mb-6 text-xl font-bold text-gray-900">{t('createMeeting')}</h1>
-      <form onSubmit={handleSubmit} className="space-y-4">
-        <div>
-          <label className="text-xs font-medium text-gray-500">{t('title')}</label>
-          <input type="text" value={title} onChange={e => setTitle(e.target.value)} required className="mt-1 w-full rounded-lg border px-3 py-2 text-sm" />
-        </div>
-        <div>
-          <label className="text-xs font-medium text-gray-500">{t('filter')}</label>
-          <select value={meetingType} onChange={e => setMeetingType(e.target.value)} className="mt-1 w-full rounded-lg border px-3 py-2 text-sm">
-            <option value="standup">{t('standup')}</option>
-            <option value="retro">{t('retro')}</option>
-            <option value="general">{t('general')}</option>
-            <option value="review">{t('review')}</option>
-          </select>
-        </div>
-        <div className="flex gap-3">
-          <div className="flex-1">
-            <label className="text-xs font-medium text-gray-500">{t('dateRange')}</label>
-            <input type="datetime-local" value={date} onChange={e => setDate(e.target.value)} className="mt-1 w-full rounded-lg border px-3 py-2 text-sm" />
-          </div>
-          <div className="w-24">
-            <label className="text-xs font-medium text-gray-500">min</label>
-            <input type="number" value={durationMin} onChange={e => setDurationMin(e.target.value)} className="mt-1 w-full rounded-lg border px-3 py-2 text-sm" />
-          </div>
-        </div>
-        {/* AC6: 참석자 입력 */}
-        <div>
-          <label className="text-xs font-medium text-gray-500">{t('participants')}</label>
-          <div className="mt-1 flex gap-2">
-            <input type="text" value={participantInput} onChange={e => setParticipantInput(e.target.value)}
-              onKeyDown={e => { if (e.key === 'Enter') { e.preventDefault(); const name = participantInput.trim(); if (name) { setParticipants(prev => [...prev, { name }]); setParticipantInput(''); } } }}
-              placeholder="Enter name + Enter" className="flex-1 rounded-lg border px-3 py-2 text-sm" />
-          </div>
-          {participants.length > 0 && (
-            <div className="mt-2 flex flex-wrap gap-1">
-              {participants.map((p, i) => (<span key={i} className="flex items-center gap-1 rounded-full bg-gray-100 px-2 py-0.5 text-xs">{p.name}<button onClick={() => setParticipants(prev => prev.filter((_, j) => j !== i))} className="text-gray-400 hover:text-red-500">✕</button></span>))}
+    <>
+      <TopBarSlot title={<h1 className="text-sm font-medium">{t('createMeeting')}</h1>} />
+
+      <div className="flex min-h-0 flex-1 overflow-y-auto p-6">
+        <div className="w-full max-w-lg">
+          <form onSubmit={handleSubmit} className="space-y-4">
+            <div>
+              <label className="mb-1.5 block text-xs font-medium uppercase tracking-[0.18em] text-muted-foreground">
+                {t('title')}
+              </label>
+              <OperatorInput
+                type="text"
+                value={title}
+                onChange={(e) => setTitle(e.target.value)}
+                required
+              />
             </div>
-          )}
+
+            <div>
+              <label className="mb-1.5 block text-xs font-medium uppercase tracking-[0.18em] text-muted-foreground">
+                {t('filter')}
+              </label>
+              <OperatorDropdownSelect
+                value={meetingType}
+                onValueChange={setMeetingType}
+                options={[
+                  { value: 'standup', label: t('standup') },
+                  { value: 'retro', label: t('retro') },
+                  { value: 'general', label: t('general') },
+                  { value: 'review', label: t('review') },
+                ]}
+              />
+            </div>
+
+            <div className="flex gap-3">
+              <div className="flex-1">
+                <label className="mb-1.5 block text-xs font-medium uppercase tracking-[0.18em] text-muted-foreground">
+                  {t('dateRange')}
+                </label>
+                <OperatorInput
+                  type="datetime-local"
+                  value={date}
+                  onChange={(e) => setDate(e.target.value)}
+                />
+              </div>
+              <div className="w-24">
+                <label className="mb-1.5 block text-xs font-medium uppercase tracking-[0.18em] text-muted-foreground">
+                  min
+                </label>
+                <OperatorInput
+                  type="number"
+                  value={durationMin}
+                  onChange={(e) => setDurationMin(e.target.value)}
+                />
+              </div>
+            </div>
+
+            <div>
+              <label className="mb-1.5 block text-xs font-medium uppercase tracking-[0.18em] text-muted-foreground">
+                {t('participants')}
+              </label>
+              <OperatorInput
+                type="text"
+                value={participantInput}
+                onChange={(e) => setParticipantInput(e.target.value)}
+                onKeyDown={(e) => {
+                  if (e.key === 'Enter') {
+                    e.preventDefault();
+                    const name = participantInput.trim();
+                    if (name) {
+                      setParticipants((prev) => [...prev, { name }]);
+                      setParticipantInput('');
+                    }
+                  }
+                }}
+                placeholder="이름 입력 후 Enter"
+              />
+              {participants.length > 0 ? (
+                <div className="mt-2 flex flex-wrap gap-1">
+                  {participants.map((p, i) => (
+                    <Badge key={i} variant="chip" className="flex items-center gap-1">
+                      {p.name}
+                      <button
+                        type="button"
+                        onClick={() => setParticipants((prev) => prev.filter((_, j) => j !== i))}
+                        className="ml-0.5 text-muted-foreground hover:text-destructive"
+                      >
+                        ✕
+                      </button>
+                    </Badge>
+                  ))}
+                </div>
+              ) : null}
+            </div>
+
+            {error ? <p className="text-xs text-destructive">{error}</p> : null}
+
+            <Button type="submit" disabled={saving || !title} className="w-full">
+              {saving ? '...' : t('createMeeting')}
+            </Button>
+          </form>
         </div>
-        {error && <p className="text-xs text-red-500">{error}</p>}
-        <button type="submit" disabled={saving || !title} className="w-full rounded-lg bg-blue-600 py-2 text-sm font-medium text-white hover:bg-blue-700 disabled:opacity-50">
-          {saving ? '...' : t('createMeeting')}
-        </button>
-      </form>
-    </div>
+      </div>
+    </>
   );
 }

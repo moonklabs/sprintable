@@ -17,9 +17,11 @@ import { isOssMode } from '@/lib/storage/factory';
 export default async function NewAgentPersonaPage() {
   if (isOssMode()) {
     return (
-      <div className="flex flex-col items-center justify-center py-20 text-center space-y-2">
-        <h2 className="text-xl font-semibold">OSS 버전 미제공 기능인.</h2>
-        <p className="text-muted-foreground">에이전트 배포 관리는 SaaS 버전에서 이용 가능한.</p>
+      <div className="flex h-64 items-center justify-center p-6 text-center">
+        <div>
+          <h2 className="text-base font-semibold text-foreground">OSS 버전 미제공 기능인.</h2>
+          <p className="mt-1 text-sm text-muted-foreground">에이전트 배포 관리는 SaaS 버전에서 이용 가능한.</p>
+        </div>
       </div>
     );
   }
@@ -79,7 +81,7 @@ export default async function NewAgentPersonaPage() {
   })));
 
   return (
-    <div className="space-y-4">
+    <div className="flex min-h-0 flex-1 flex-col overflow-y-auto p-6 space-y-6">
       <PageHeader
         eyebrow={t('personaComposerEyebrow')}
         title={t('personaComposerTitle')}

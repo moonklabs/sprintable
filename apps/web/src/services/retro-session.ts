@@ -44,6 +44,51 @@ const VALID_TRANSITIONS: Record<string, string[]> = {
 export class RetroSessionService {
   constructor(private readonly supabase: SupabaseClient) {}
 
+  async getSession(sessionId: string, projectId: string): Promise<RetroSessionRecord> {
+    const { data, error } = await this.supabase
+      .from('retro_sessions')
+      .select('*')
+      .eq('id', sessionId)
+      .eq('project_id', projectId)
+      .single();
+    if (error || !data) throw new Error('Session not found');
+    return data as RetroSessionRecord;
+  }
+
+  async getItems(sessionId: string, projectId: string): Promise<RetroItemRecord[]> {
+    const { data: sess } = await this.supabase
+      .from('retro_sessions')
+      .select('id')
+      .eq('id', sessionId)
+      .eq('project_id', projectId)
+      .single();
+    if (!sess) throw new Error('Session not in project');
+    const { data, error } = await this.supabase
+      .from('retro_items')
+      .select('*')
+      .eq('session_id', sessionId)
+      .order('created_at');
+    if (error) throw error;
+    return (data ?? []) as RetroItemRecord[];
+  }
+
+  async getActions(sessionId: string, projectId: string): Promise<RetroActionRecord[]> {
+    const { data: sess } = await this.supabase
+      .from('retro_sessions')
+      .select('id')
+      .eq('id', sessionId)
+      .eq('project_id', projectId)
+      .single();
+    if (!sess) throw new Error('Session not in project');
+    const { data, error } = await this.supabase
+      .from('retro_actions')
+      .select('*')
+      .eq('session_id', sessionId)
+      .order('created_at');
+    if (error) throw error;
+    return (data ?? []) as RetroActionRecord[];
+  }
+
   async listSessions(projectId: string): Promise<RetroSessionRecord[]> {
     const { data, error } = await this.supabase
       .from('retro_sessions')

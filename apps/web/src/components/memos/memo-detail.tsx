@@ -6,6 +6,7 @@ import { useLocale, useTranslations } from 'next-intl';
 import { Badge } from '@/components/ui/badge';
 import { EmptyState } from '@/components/ui/empty-state';
 import { SectionCard, SectionCardBody, SectionCardHeader } from '@/components/ui/section-card';
+import { OperatorDropdownSelect } from '@/components/ui/operator-dropdown-select';
 import { StatusBadge } from '@/components/ui/status-badge';
 import { MemoComposer } from '@/components/memos/memo-composer';
 import { useMemoPresence } from '@/components/memos/use-memo-presence';
@@ -407,16 +408,14 @@ export function MemoDetail({
                       placeholder={t('searchDocs')}
                       className="w-full rounded-md border border-input px-3 py-2 text-sm focus:border-ring focus:outline-none"
                     />
-                    <select
+                    <OperatorDropdownSelect
                       value={selectedDocId}
-                      onChange={(event) => setSelectedDocId(event.target.value)}
-                      className="w-full rounded-md border border-input px-3 py-2 text-sm focus:border-ring focus:outline-none"
-                    >
-                      <option value="">{t('selectDocToLink')}</option>
-                      {filteredDocs.map((doc) => (
-                        <option key={doc.id} value={doc.id}>{doc.title} /{doc.slug}</option>
-                      ))}
-                    </select>
+                      onValueChange={setSelectedDocId}
+                      options={[
+                        { value: '', label: t('selectDocToLink') },
+                        ...filteredDocs.map((doc) => ({ value: doc.id, label: `${doc.title} /${doc.slug}` })),
+                      ]}
+                    />
                     <button
                       type="button"
                       onClick={handleLinkExistingDoc}

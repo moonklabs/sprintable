@@ -7,8 +7,7 @@ import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { OperatorInput } from '@/components/ui/operator-control';
 import { EmptyState } from '@/components/ui/empty-state';
-import { PageHeader } from '@/components/ui/page-header';
-import { SectionCard, SectionCardBody, SectionCardHeader } from '@/components/ui/section-card';
+import { TopBarSlot } from '@/components/nav/top-bar-slot';
 import { PageSkeleton } from '@/components/ui/page-skeleton';
 import { UpgradeModal } from '@/components/ui/upgrade-modal';
 
@@ -68,15 +67,14 @@ export default function MockupsPage() {
   if (loading) return <PageSkeleton />;
 
   return (
-    <div className="space-y-4">
-      <PageHeader
-        eyebrow={tc('operatorSurface')}
-        title={t('title')}
-        actions={(
-          <Button variant="hero" size="lg" onClick={() => setShowCreate(true)}>
+    <>
+      <TopBarSlot
+        title={<h1 className="text-sm font-medium">{t('title')}</h1>}
+        actions={
+          <Button variant="outline" size="sm" onClick={() => setShowCreate(true)}>
             {t('newMockup')}
           </Button>
-        )}
+        }
       />
 
       {showCreate ? (
@@ -125,53 +123,48 @@ export default function MockupsPage() {
         </div>
       ) : null}
 
-      <SectionCard>
-        <SectionCardHeader>
-          <div className="text-sm font-semibold text-[color:var(--operator-foreground)]">{t('title')}</div>
-        </SectionCardHeader>
-        <SectionCardBody>
-          {mockups.length === 0 ? (
-            <EmptyState title={t('noMockups')} />
-          ) : (
-            <div className="grid grid-cols-1 gap-4 md:grid-cols-2 xl:grid-cols-3">
-              {mockups.map((mockup) => (
-                <button
-                  key={mockup.id}
-                  type="button"
-                  className="group rounded-3xl border border-white/8 bg-[color:var(--operator-surface-soft)]/55 p-4 text-left transition hover:border-[color:var(--operator-primary)]/18 hover:bg-white/8"
-                  onClick={() => router.push(`/mockups/${mockup.id}`)}
-                >
-                  <div className="flex items-start justify-between gap-3">
-                    <div>
-                      <h3 className="text-sm font-semibold text-[color:var(--operator-foreground)]">{mockup.title}</h3>
-                      <div className="mt-2 flex flex-wrap items-center gap-2">
-                        <Badge variant="outline">{mockup.category}</Badge>
-                        <Badge variant="info">v{mockup.version}</Badge>
-                      </div>
+      <div className="flex min-h-0 flex-1 overflow-y-auto p-6">
+        {mockups.length === 0 ? (
+          <EmptyState title={t('noMockups')} />
+        ) : (
+          <div className="grid w-full grid-cols-1 gap-4 md:grid-cols-2 xl:grid-cols-3">
+            {mockups.map((mockup) => (
+              <button
+                key={mockup.id}
+                type="button"
+                className="group rounded-3xl border border-white/8 bg-[color:var(--operator-surface-soft)]/55 p-4 text-left transition hover:border-[color:var(--operator-primary)]/18 hover:bg-white/8"
+                onClick={() => router.push(`/mockups/${mockup.id}`)}
+              >
+                <div className="flex items-start justify-between gap-3">
+                  <div>
+                    <h3 className="text-sm font-semibold text-[color:var(--operator-foreground)]">{mockup.title}</h3>
+                    <div className="mt-2 flex flex-wrap items-center gap-2">
+                      <Badge variant="outline">{mockup.category}</Badge>
+                      <Badge variant="info">v{mockup.version}</Badge>
                     </div>
-                    <span className="text-lg">{mockup.viewport === 'mobile' ? '📱' : '🖥'}</span>
                   </div>
-                  <div className="mt-3 text-xs text-[color:var(--operator-muted)]">{new Date(mockup.created_at).toLocaleDateString()}</div>
-                  <div className="mt-3 opacity-0 transition group-hover:opacity-100">
-                    <Button
-                      variant="glass"
-                      size="sm"
-                      onClick={(e) => {
-                        e.stopPropagation();
-                        router.push(`/mockups/${mockup.id}/edit`);
-                      }}
-                    >
-                      {t('editMockup')}
-                    </Button>
-                  </div>
-                </button>
-              ))}
-            </div>
-          )}
-        </SectionCardBody>
-      </SectionCard>
+                  <span className="text-lg">{mockup.viewport === 'mobile' ? '📱' : '🖥'}</span>
+                </div>
+                <div className="mt-3 text-xs text-[color:var(--operator-muted)]">{new Date(mockup.created_at).toLocaleDateString()}</div>
+                <div className="mt-3 opacity-0 transition group-hover:opacity-100">
+                  <Button
+                    variant="glass"
+                    size="sm"
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      router.push(`/mockups/${mockup.id}/edit`);
+                    }}
+                  >
+                    {t('editMockup')}
+                  </Button>
+                </div>
+              </button>
+            ))}
+          </div>
+        )}
+      </div>
 
       {upgradeMsg ? <UpgradeModal message={upgradeMsg} onClose={() => setUpgradeMsg(null)} /> : null}
-    </div>
+    </>
   );
 }

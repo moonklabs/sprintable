@@ -6,8 +6,45 @@ import { apiSuccess, ApiErrors } from '@/lib/api-response';
 import { getAuthContext } from '@/lib/auth-helpers';
 import { RetroSessionService } from '@/services/retro-session';
 import type { RetroSessionPhase } from '@/services/retro-session';
+import { isOssMode } from '@/lib/storage/factory';
+import { getOssRetroSession, listOssRetroItems, listOssRetroActions, advanceOssRetroPhase } from '@/lib/oss-retro';
+import type { RetroPhase } from '@/lib/oss-retro';
 
 type RouteParams = { params: Promise<{ id: string }> };
+
+// GET /api/retro-sessions/:id?project_id=X — fetch session with items and actions
+export async function GET(request: Request, { params }: RouteParams) {
+  try {
+    const { id } = await params;
+    const supabase = await createSupabaseServerClient();
+    const me = await getAuthContext(supabase, request);
+    if (!me) return ApiErrors.unauthorized();
+    if (me.rateLimitExceeded) return ApiErrors.tooManyRequests(me.rateLimitRemaining, me.rateLimitResetAt);
+
+    const { searchParams } = new URL(request.url);
+    const projectId = searchParams.get('project_id');
+    if (!projectId) return ApiErrors.badRequest('project_id required');
+
+    if (isOssMode()) {
+      const session = getOssRetroSession(id, projectId);
+      if (!session) return ApiErrors.notFound('Session not found');
+      const items = listOssRetroItems(id, projectId);
+      const actions = listOssRetroActions(id, projectId);
+      return apiSuccess({ session, items, actions });
+    }
+
+    const dbClient: SupabaseClient = me.type === 'agent' ? createSupabaseAdminClient() : supabase;
+    const service = new RetroSessionService(dbClient);
+    const [session, items, actions] = await Promise.all([
+      service.getSession(id, projectId),
+      service.getItems(id, projectId),
+      service.getActions(id, projectId),
+    ]);
+    return apiSuccess({ session, items, actions });
+  } catch (err: unknown) {
+    return handleApiError(err);
+  }
+}
 
 // PATCH /api/retro-sessions/:id — change phase
 export async function PATCH(request: Request, { params }: RouteParams) {
@@ -24,6 +61,11 @@ export async function PATCH(request: Request, { params }: RouteParams) {
 
     const body = await request.json() as { phase?: RetroSessionPhase };
     if (!body.phase) return ApiErrors.badRequest('phase required');
+
+    if (isOssMode()) {
+      const data = advanceOssRetroPhase(id, projectId, body.phase as RetroPhase);
+      return apiSuccess(data);
+    }
 
     const dbClient: SupabaseClient = me.type === 'agent' ? createSupabaseAdminClient() : supabase;
     const service = new RetroSessionService(dbClient);

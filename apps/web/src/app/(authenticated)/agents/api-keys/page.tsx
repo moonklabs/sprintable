@@ -12,10 +12,10 @@ export default async function ApiKeysPage() {
     const agents = await repo.list({ org_id: OSS_ORG_ID, project_id: OSS_PROJECT_ID });
     const agentMembers = agents.filter((m) => m.type === 'agent' && m.is_active);
     return (
-      <div className="container mx-auto py-8 space-y-8">
+      <div className="flex min-h-0 flex-1 flex-col overflow-y-auto p-6 space-y-6">
         <div>
-          <h1 className="text-3xl font-bold">Agent API Keys</h1>
-          <p className="text-muted-foreground mt-2">Manage API keys for agent authentication</p>
+          <h2 className="text-base font-semibold text-foreground">Agent API Keys</h2>
+          <p className="mt-1 text-sm text-muted-foreground">Manage API keys for agent authentication</p>
         </div>
         {agentMembers.length === 0 ? (
           <p className="text-muted-foreground">No agents found in this project</p>

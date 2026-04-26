@@ -279,6 +279,49 @@ function initSchema(db: DatabaseSync): void {
 
     CREATE UNIQUE INDEX IF NOT EXISTS sprints_active_unique
       ON sprints(project_id) WHERE status = 'active' AND deleted_at IS NULL;
+
+    CREATE TABLE IF NOT EXISTS retro_sessions (
+      id TEXT PRIMARY KEY,
+      org_id TEXT NOT NULL,
+      project_id TEXT NOT NULL,
+      sprint_id TEXT,
+      title TEXT NOT NULL,
+      phase TEXT NOT NULL DEFAULT 'collect',
+      created_by TEXT,
+      created_at TEXT NOT NULL,
+      updated_at TEXT NOT NULL
+    );
+
+    CREATE TABLE IF NOT EXISTS retro_items (
+      id TEXT PRIMARY KEY,
+      session_id TEXT NOT NULL,
+      category TEXT NOT NULL,
+      text TEXT NOT NULL,
+      author_id TEXT,
+      vote_count INTEGER NOT NULL DEFAULT 0,
+      created_at TEXT NOT NULL
+    );
+
+    CREATE TABLE IF NOT EXISTS retro_votes (
+      id TEXT PRIMARY KEY,
+      item_id TEXT NOT NULL,
+      voter_id TEXT NOT NULL,
+      created_at TEXT NOT NULL,
+      UNIQUE(item_id, voter_id)
+    );
+
+    CREATE TABLE IF NOT EXISTS retro_actions (
+      id TEXT PRIMARY KEY,
+      session_id TEXT NOT NULL,
+      title TEXT NOT NULL,
+      assignee_id TEXT,
+      status TEXT NOT NULL DEFAULT 'open',
+      created_at TEXT NOT NULL
+    );
+
+    CREATE INDEX IF NOT EXISTS idx_retro_sessions_project ON retro_sessions(project_id);
+    CREATE INDEX IF NOT EXISTS idx_retro_items_session ON retro_items(session_id);
+    CREATE INDEX IF NOT EXISTS idx_retro_actions_session ON retro_actions(session_id);
   `);
 }
 
