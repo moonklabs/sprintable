@@ -10,16 +10,15 @@ export async function GET(request: Request) {
   const origin = resolveAppUrl(null);
 
   if (code) {
-    const fallbackParams = new URLSearchParams({ code });
-    if (next) fallbackParams.set('next', next);
-    const fallbackUrl = `${origin}/auth/callback/fallback?${fallbackParams.toString()}`;
-
-    // code_verifier 쿠키 없으면 서버 교환 skip.
-    // exchangeCodeForSession 내부가 code_verifier 유무와 무관하게 removeItem을 호출하여
-    // 삭제 Set-Cookie 헤더를 반환하고, 이로 인해 브라우저의 code_verifier 쿠키가 소거됨.
-    // 서버에 쿠키가 없으면 바로 fallback으로 이동 → 브라우저 쿠키 보존 → fallback 교환 성공.
     const cookieStore = await cookies();
     const hasCodeVerifier = cookieStore.getAll().some(c => c.name.includes('code-verifier'));
+
+    const fallbackParams = new URLSearchParams({ code });
+    if (next) fallbackParams.set('next', next);
+    fallbackParams.set('server_cv', hasCodeVerifier ? '1' : '0');
+    const fallbackUrl = `${origin}/auth/callback/fallback?${fallbackParams.toString()}`;
+
+    // code_verifier 쿠키 없으면 서버 교환 skip → sessionStorage 백업에서 복원 시도
     if (!hasCodeVerifier) {
       return NextResponse.redirect(fallbackUrl);
     }

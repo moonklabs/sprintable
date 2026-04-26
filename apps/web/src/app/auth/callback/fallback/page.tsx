@@ -10,10 +10,12 @@ interface DiagInfo {
   hasSbCookie: boolean;
   hasCodeVerifier: boolean;
   localStorageSbKeys: string[];
+  serverCv: string;
+  restoredFromSession: boolean;
   exchangeError?: string;
 }
 
-function collectDiag(): Omit<DiagInfo, 'exchangeError'> {
+function collectDiag(serverCv: string, restoredFromSession: boolean): Omit<DiagInfo, 'exchangeError'> {
   const cookieEnabled = navigator.cookieEnabled;
   const allCookies = document.cookie ? document.cookie.split(';').map(c => c.trim()) : [];
   const cookieNames = allCookies.map(c => c.split('=')[0].trim());
@@ -28,7 +30,7 @@ function collectDiag(): Omit<DiagInfo, 'exchangeError'> {
     }
   } catch { /* localStorage 접근 불가 */ }
 
-  return { cookieEnabled, cookieNames, hasSbCookie, hasCodeVerifier, localStorageSbKeys };
+  return { cookieEnabled, cookieNames, hasSbCookie, hasCodeVerifier, localStorageSbKeys, serverCv, restoredFromSession };
 }
 
 function FallbackHandler() {
@@ -40,12 +42,24 @@ function FallbackHandler() {
   useEffect(() => {
     const code = searchParams.get('code');
     const next = searchParams.get('next');
+    const serverCv = searchParams.get('server_cv') ?? 'unknown';
     if (!code) { router.replace('/login?error=no_code'); return; }
 
     const supabase = createSupabaseBrowserClient();
 
     (async () => {
-      const diagSnapshot = collectDiag();
+      // sessionStorage 백업에서 code_verifier 복원 (OAuth redirect chain 중 쿠키 유실 대비)
+      let restoredFromSession = false;
+      try {
+        const backup = sessionStorage.getItem('sb-pkce-backup');
+        if (backup && !document.cookie.includes('code-verifier')) {
+          document.cookie = backup + '; Path=/; SameSite=Lax; Secure; Max-Age=600';
+          restoredFromSession = true;
+        }
+        sessionStorage.removeItem('sb-pkce-backup');
+      } catch { /* sessionStorage 접근 불가 */ }
+
+      const diagSnapshot = collectDiag(serverCv, restoredFromSession);
 
       const { error } = await supabase.auth.exchangeCodeForSession(code);
       if (error) {
@@ -79,6 +93,8 @@ function FallbackHandler() {
         <div className="w-full max-w-lg rounded-lg border border-red-200 bg-red-50 p-4 text-xs font-mono text-red-900 space-y-1">
           <p className="font-bold text-red-700">🔍 Auth Debug Info</p>
           <p>cookieEnabled: {String(diag.cookieEnabled)}</p>
+          <p>serverCv: {diag.serverCv}</p>
+          <p>restoredFromSession: {String(diag.restoredFromSession)}</p>
           <p>hasSbCookie: {String(diag.hasSbCookie)}</p>
           <p>hasCodeVerifier: {String(diag.hasCodeVerifier)}</p>
           <p>cookieNames: [{diag.cookieNames.join(', ') || '(empty)'}]</p>
