@@ -2,6 +2,7 @@
 
 import { Suspense, useEffect } from 'react';
 import { useRouter, useSearchParams } from 'next/navigation';
+import { createSupabaseBrowserClient } from '@/lib/supabase/client';
 
 const SUPABASE_URL = process.env['NEXT_PUBLIC_SUPABASE_URL']!;
 const SUPABASE_ANON_KEY = process.env['NEXT_PUBLIC_SUPABASE_ANON_KEY']!;
@@ -94,7 +95,20 @@ function FallbackHandler() {
 
         const tokenData = await res.json();
         removeCookie(CV_KEY);
-        writeSessionCookies(tokenData);
+
+        // setSession으로 SDK 표준 쿠키 기록 (서버 getUser 호환 필수)
+        try {
+          const supabase = createSupabaseBrowserClient();
+          await Promise.race([
+            supabase.auth.setSession({
+              access_token: tokenData.access_token,
+              refresh_token: tokenData.refresh_token,
+            }),
+            new Promise<never>((_, r) => setTimeout(() => r(new Error('timeout')), 10000)),
+          ]);
+        } catch {
+          writeSessionCookies(tokenData);
+        }
 
         const redirectTo = next && next.startsWith('/') ? next : '/dashboard';
         window.location.replace(redirectTo);
