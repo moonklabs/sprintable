@@ -70,6 +70,31 @@ function FallbackHandler() {
           }
         }
 
+        const redirectTo = next && next.startsWith('/') ? next : '/dashboard';
+
+        // 1단계: SDK exchange 우선 시도 (브라우저 쿠키에서 code_verifier 직접 읽음)
+        try {
+          const cookieDomain = process.env['NEXT_PUBLIC_COOKIE_DOMAIN'];
+          const supabaseForExchange = createBrowserClient(SUPABASE_URL, SUPABASE_ANON_KEY, {
+            isSingleton: false,
+            cookieOptions: {
+              ...(cookieDomain ? { domain: cookieDomain } : {}),
+              sameSite: 'lax' as const,
+              secure: true,
+              path: '/',
+            },
+          });
+          const { error: exchangeError } = await supabaseForExchange.auth.exchangeCodeForSession(code);
+          if (!exchangeError) {
+            supabaseForExchange.auth.stopAutoRefresh();
+            window.location.replace(redirectTo);
+            return;
+          }
+          console.warn('[fallback] SDK exchange failed, falling back to REST:', exchangeError.message);
+        } catch (e) {
+          console.warn('[fallback] SDK exchange exception, falling back to REST:', e);
+        }
+
         if (!codeVerifier) {
           router.replace('/login?error=auth_failed');
           return;
@@ -120,7 +145,6 @@ function FallbackHandler() {
           writeSessionCookies(tokenData);
         }
 
-        const redirectTo = next && next.startsWith('/') ? next : '/dashboard';
         window.location.replace(redirectTo);
       } catch {
         router.replace('/login?error=auth_failed');
