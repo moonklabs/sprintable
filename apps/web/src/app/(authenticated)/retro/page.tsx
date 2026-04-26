@@ -1,6 +1,7 @@
 'use client';
 
 import { useEffect, useState } from 'react';
+import Link from 'next/link';
 import { useTranslations } from 'next-intl';
 import { Plus } from 'lucide-react';
 import { Badge } from '@/components/ui/badge';
@@ -160,9 +161,10 @@ export default function RetroPage() {
           ) : (
             <div className="space-y-2">
               {sessions.map((session) => (
-                <div
+                <Link
                   key={session.id}
-                  className="flex items-center justify-between gap-4 rounded-xl border border-border bg-background px-4 py-3"
+                  href={`/retro/${session.id}`}
+                  className="flex items-center justify-between gap-4 rounded-xl border border-border bg-background px-4 py-3 transition hover:bg-muted/40"
                 >
                   <div className="min-w-0">
                     <p className="truncate text-sm font-medium text-foreground">{session.title}</p>
@@ -173,7 +175,7 @@ export default function RetroPage() {
                   <Badge variant={PHASE_VARIANTS[session.phase] ?? 'outline'}>
                     {PHASE_KEYS[session.phase] ? t(PHASE_KEYS[session.phase] as 'phaseCollect') : session.phase}
                   </Badge>
-                </div>
+                </Link>
               ))}
             </div>
           )}
