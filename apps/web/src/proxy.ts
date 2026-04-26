@@ -12,6 +12,7 @@ const PUBLIC_PREFIX = [
   '/api/',
   '/login',
   '/auth/callback',
+  '/auth/login',
   '/invite',
   '/internal-dogfood',
 ];
