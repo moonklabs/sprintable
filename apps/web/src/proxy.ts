@@ -110,9 +110,6 @@ export async function proxy(request: NextRequest) {
     return NextResponse.redirect(url);
   }
 
-  supabaseResponse.headers.set('x-sp-debug-cookies', String(request.cookies.getAll().filter(c => c.name.includes('auth-token')).length));
-  supabaseResponse.headers.set('x-sp-debug-auth', user ? user.id.slice(0, 8) : 'none');
-
   return supabaseResponse;
 }
 
