@@ -92,21 +92,21 @@ function FallbackHandler() {
         let cvPrefix = 'N/A';
 
         try {
-          const ssVal = sessionStorage.getItem(CV_COOKIE);
-          if (ssVal) {
-            codeVerifier = ssVal;
+          const ssRaw = sessionStorage.getItem(CV_COOKIE);
+          if (ssRaw) {
+            try { codeVerifier = JSON.parse(ssRaw); } catch { codeVerifier = ssRaw; }
             cvSource = 'sessionStorage';
-            cvPrefix = ssVal.slice(0, 8);
+            cvPrefix = (codeVerifier ?? '').slice(0, 8);
             sessionStorage.removeItem(CV_COOKIE);
           }
         } catch {}
 
         if (!codeVerifier) {
-          const cookieVal = getCookieValue(CV_COOKIE);
-          if (cookieVal) {
-            codeVerifier = cookieVal;
+          const cookieRaw = getCookieValue(CV_COOKIE);
+          if (cookieRaw) {
+            try { codeVerifier = JSON.parse(cookieRaw); } catch { codeVerifier = cookieRaw; }
             cvSource = 'cookie';
-            cvPrefix = cookieVal.slice(0, 8);
+            cvPrefix = (codeVerifier ?? '').slice(0, 8);
           }
         }
 
