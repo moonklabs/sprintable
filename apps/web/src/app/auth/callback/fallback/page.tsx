@@ -40,7 +40,7 @@ function FallbackHandler() {
   const [diag, setDiag] = useState<DiagInfo | null>(null);
 
   useEffect(() => {
-    const code = searchParams.get('code');
+    const code = searchParams.get('auth_code');
     const next = searchParams.get('next');
     const serverCv = searchParams.get('server_cv') ?? 'unknown';
     if (!code) { router.replace('/login?error=no_code'); return; }
