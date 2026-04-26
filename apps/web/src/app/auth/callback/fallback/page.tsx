@@ -48,11 +48,12 @@ interface DiagInfo {
   hasCodeVerifier: boolean;
   localStorageSbKeys: string[];
   serverCv: string;
-  restoredFromSession: boolean;
+  cvSource: string;
+  cvPrefix: string;
   exchangeError?: string;
 }
 
-function collectDiag(serverCv: string, restoredFromSession: boolean): Omit<DiagInfo, 'exchangeError'> {
+function collectDiag(serverCv: string, cvSource: string, cvPrefix: string): Omit<DiagInfo, 'exchangeError'> {
   const cookieEnabled = navigator.cookieEnabled;
   const allCookies = document.cookie ? document.cookie.split(';').map(c => c.trim()) : [];
   const cookieNames = allCookies.map(c => c.split('=')[0].trim());
@@ -65,7 +66,7 @@ function collectDiag(serverCv: string, restoredFromSession: boolean): Omit<DiagI
       if (k && k.startsWith('sb-')) localStorageSbKeys.push(k);
     }
   } catch {}
-  return { cookieEnabled, cookieNames, hasSbCookie, hasCodeVerifier, localStorageSbKeys, serverCv, restoredFromSession };
+  return { cookieEnabled, cookieNames, hasSbCookie, hasCodeVerifier, localStorageSbKeys, serverCv, cvSource, cvPrefix };
 }
 
 function FallbackHandler() {
@@ -80,29 +81,34 @@ function FallbackHandler() {
     const serverCv = searchParams.get('server_cv') ?? 'unknown';
     if (!code) { router.replace('/login?error=no_code'); return; }
 
-    let restoredFromSession = false;
+    let cvSource = 'none';
 
     (async () => {
       try {
-        // 1. sessionStorage → cookie 복원
-        try {
-          const backup = sessionStorage.getItem('sb-pkce-backup');
-          if (backup && !document.cookie.includes('code-verifier')) {
-            document.cookie = backup + '; Path=/; SameSite=Lax; Secure; Max-Age=600';
-            restoredFromSession = true;
-          }
-          sessionStorage.removeItem('sb-pkce-backup');
-        } catch {}
-
-        // 2. code_verifier 쿠키 직접 읽기 (lock-free)
+        // 1. code_verifier: 쿠키 우선, 없으면 sb-pkce-verifier sessionStorage
         const projectRef = getProjectRef();
         const CV_COOKIE = `sb-${projectRef}-auth-token-code-verifier`;
-        const codeVerifier = getCookieValue(CV_COOKIE);
+        let codeVerifier = getCookieValue(CV_COOKIE);
+        let cvPrefix = CV_COOKIE;
 
-        const diagSnapshot = collectDiag(serverCv, restoredFromSession);
+        if (codeVerifier) {
+          cvSource = 'cookie';
+        } else {
+          try {
+            const ssVal = sessionStorage.getItem('sb-pkce-verifier');
+            if (ssVal) {
+              codeVerifier = ssVal;
+              cvSource = 'sessionStorage';
+              cvPrefix = 'sb-pkce-verifier';
+              sessionStorage.removeItem('sb-pkce-verifier');
+            }
+          } catch {}
+        }
+
+        const diagSnapshot = collectDiag(serverCv, cvSource, cvPrefix);
 
         if (!codeVerifier) {
-          setDiag({ ...diagSnapshot, exchangeError: 'code_verifier cookie not found' });
+          setDiag({ ...diagSnapshot, exchangeError: 'code_verifier not found (cookie + sessionStorage both empty)' });
           setStatus('인증 실패. 아래 정보를 스크린샷으로 캡처해주세요.');
           return;
         }
@@ -162,7 +168,7 @@ function FallbackHandler() {
         }
         router.replace('/dashboard');
       } catch (err) {
-        const diagSnapshot = collectDiag(serverCv, restoredFromSession);
+        const diagSnapshot = collectDiag(serverCv, cvSource, 'unknown');
         setDiag({ ...diagSnapshot, exchangeError: `uncaught: ${String(err)}` });
         setStatus('인증 실패. 아래 정보를 스크린샷으로 캡처해주세요.');
       }
@@ -177,7 +183,8 @@ function FallbackHandler() {
           <p className="font-bold text-red-700">🔍 Auth Debug Info</p>
           <p>cookieEnabled: {String(diag.cookieEnabled)}</p>
           <p>serverCv: {diag.serverCv}</p>
-          <p>restoredFromSession: {String(diag.restoredFromSession)}</p>
+          <p>cvSource: {diag.cvSource}</p>
+          <p>cvPrefix: {diag.cvPrefix}</p>
           <p>hasSbCookie: {String(diag.hasSbCookie)}</p>
           <p>hasCodeVerifier: {String(diag.hasCodeVerifier)}</p>
           <p>cookieNames: [{diag.cookieNames.join(', ') || '(empty)'}]</p>
