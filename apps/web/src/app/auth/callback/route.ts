@@ -13,7 +13,7 @@ export async function GET(request: Request) {
     const cookieStore = await cookies();
     const hasCodeVerifier = cookieStore.getAll().some(c => c.name.includes('code-verifier'));
 
-    const fallbackParams = new URLSearchParams({ code });
+    const fallbackParams = new URLSearchParams({ auth_code: code });
     if (next) fallbackParams.set('next', next);
     fallbackParams.set('server_cv', hasCodeVerifier ? '1' : '0');
     const fallbackUrl = `${origin}/auth/callback/fallback?${fallbackParams.toString()}`;
