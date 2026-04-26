@@ -18,6 +18,7 @@ export function getDb(): DatabaseSync {
   migrateLegacyStoryStatuses(_db);
   migrateStorySchema(_db);
   migrateEpicSchema(_db);
+  migrateTeamMembersAgentIdentity(_db);
   seedOssDefaults(_db);
   return _db;
 }
@@ -202,6 +203,74 @@ function initSchema(db: DatabaseSync): void {
     CREATE INDEX IF NOT EXISTS idx_team_members_org_id ON team_members(org_id);
     CREATE INDEX IF NOT EXISTS idx_team_members_user_id ON team_members(user_id);
 
+    -- ============================================================
+    -- inbox_items — Operator Cockpit Phase A.1
+    -- See packages/db/supabase/migrations/20260426170000_inbox_items.sql
+    -- SQLite has no jsonb; origin_chain/options stored as TEXT (JSON string).
+    -- Application-layer Zod validation enforces shape.
+    -- ============================================================
+    CREATE TABLE IF NOT EXISTS inbox_items (
+      id                  TEXT PRIMARY KEY,
+      org_id              TEXT NOT NULL,
+      project_id          TEXT NOT NULL,
+      assignee_member_id  TEXT NOT NULL,
+      kind                TEXT NOT NULL CHECK (kind IN ('approval','decision','blocker','mention')),
+      title               TEXT NOT NULL,
+      context             TEXT,
+      agent_summary       TEXT,
+      origin_chain        TEXT NOT NULL DEFAULT '[]',
+      options             TEXT NOT NULL DEFAULT '[]',
+      after_decision      TEXT,
+      from_agent_id       TEXT,
+      story_id            TEXT,
+      memo_id             TEXT,
+      priority            TEXT NOT NULL DEFAULT 'normal' CHECK (priority IN ('high','normal')),
+      state               TEXT NOT NULL DEFAULT 'pending' CHECK (state IN ('pending','resolved','dismissed')),
+      resolved_by         TEXT,
+      resolved_option_id  TEXT,
+      resolved_note       TEXT,
+      source_type         TEXT NOT NULL CHECK (source_type IN ('agent_run','memo_mention','webhook','manual')),
+      source_id           TEXT NOT NULL,
+      waiting_since       TEXT NOT NULL,
+      created_at          TEXT NOT NULL,
+      resolved_at         TEXT,
+      UNIQUE (org_id, source_type, source_id, kind)
+    );
+
+    CREATE INDEX IF NOT EXISTS idx_inbox_items_org_id      ON inbox_items(org_id);
+    CREATE INDEX IF NOT EXISTS idx_inbox_items_project_id  ON inbox_items(project_id);
+    CREATE INDEX IF NOT EXISTS idx_inbox_items_assignee    ON inbox_items(assignee_member_id);
+    CREATE INDEX IF NOT EXISTS idx_inbox_items_pending     ON inbox_items(state) WHERE state = 'pending';
+    CREATE INDEX IF NOT EXISTS idx_inbox_items_kind        ON inbox_items(kind);
+    CREATE INDEX IF NOT EXISTS idx_inbox_items_created_at  ON inbox_items(created_at DESC);
+
+    -- ============================================================
+    -- inbox_outbox — webhook delivery queue (D6 outbox pattern)
+    -- See packages/db/supabase/migrations/20260426170200_inbox_outbox.sql
+    -- ============================================================
+    CREATE TABLE IF NOT EXISTS inbox_outbox (
+      id              TEXT PRIMARY KEY,
+      org_id          TEXT NOT NULL,
+      inbox_item_id   TEXT NOT NULL REFERENCES inbox_items(id) ON DELETE CASCADE,
+      event_type      TEXT NOT NULL CHECK (event_type IN ('resolved','dismissed','reassigned')),
+      payload         TEXT NOT NULL,
+      webhook_url     TEXT,
+      status          TEXT NOT NULL DEFAULT 'pending'
+        CHECK (status IN ('pending','in_flight','delivered','failed','dead')),
+      attempt_count   INTEGER NOT NULL DEFAULT 0,
+      last_attempt_at TEXT,
+      next_attempt_at TEXT NOT NULL,
+      last_error      TEXT,
+      delivered_at    TEXT,
+      created_at      TEXT NOT NULL,
+      updated_at      TEXT NOT NULL
+    );
+
+    CREATE INDEX IF NOT EXISTS idx_inbox_outbox_inbox_item_id ON inbox_outbox(inbox_item_id);
+    CREATE INDEX IF NOT EXISTS idx_inbox_outbox_status        ON inbox_outbox(status);
+    CREATE INDEX IF NOT EXISTS idx_inbox_outbox_pending_due   ON inbox_outbox(next_attempt_at)
+      WHERE status IN ('pending','in_flight');
+
     CREATE TABLE IF NOT EXISTS standup_entries (
       id TEXT PRIMARY KEY,
       org_id TEXT NOT NULL,
@@ -365,6 +434,23 @@ function migrateEpicSchema(db: DatabaseSync): void {
   }
   // 기존 'open' status → 'active' 정리
   db.exec(`UPDATE epics SET status = 'active' WHERE status = 'open'`);
+}
+
+// Operator Cockpit Phase A: agent identity columns on team_members
+// See packages/db/supabase/migrations/20260426170100_team_members_color.sql
+function migrateTeamMembersAgentIdentity(db: DatabaseSync): void {
+  const newColumns: [string, string, string?][] = [
+    ['color', 'TEXT', "'#3385f8'"],
+    ['agent_role', 'TEXT', undefined],
+  ];
+  for (const [col, type, defaultValue] of newColumns) {
+    const ddl = defaultValue
+      ? `ALTER TABLE team_members ADD COLUMN ${col} ${type} NOT NULL DEFAULT ${defaultValue}`
+      : `ALTER TABLE team_members ADD COLUMN ${col} ${type}`;
+    try { db.exec(ddl); } catch { /* already exists */ }
+  }
+  // SQLite에는 ALTER TABLE ADD CONSTRAINT가 없음.
+  // hex 검증 + agent_role 제약은 application layer (zod)에서 enforce.
 }
 
 function seedOssDefaults(db: DatabaseSync): void {
