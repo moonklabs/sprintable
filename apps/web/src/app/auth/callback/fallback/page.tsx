@@ -2,7 +2,6 @@
 
 import { Suspense, useEffect, useState } from 'react';
 import { useRouter, useSearchParams } from 'next/navigation';
-import { createSupabaseBrowserClient } from '@/lib/supabase/client';
 
 const SUPABASE_URL = process.env['NEXT_PUBLIC_SUPABASE_URL']!;
 const SUPABASE_ANON_KEY = process.env['NEXT_PUBLIC_SUPABASE_ANON_KEY']!;
@@ -141,37 +140,13 @@ function FallbackHandler() {
 
         const tokenData = await res.json();
 
-        // 4. code_verifier 쿠키 정리
+        // 4. code_verifier 쿠키 정리 + 세션 쿠키 수동 기록
         removeCookie(CV_COOKIE);
+        writeSessionCookies(tokenData);
 
-        // 5. 싱글톤 setSession (자기 자신만 lock 경합) + 10초 timeout
-        try {
-          const supabase = createSupabaseBrowserClient();
-          await Promise.race([
-            supabase.auth.setSession({ access_token: tokenData.access_token, refresh_token: tokenData.refresh_token }),
-            new Promise<never>((_, r) => setTimeout(() => r(new Error('setSession timed out')), 10000)),
-          ]);
-        } catch {
-          // setSession 실패 시 수동 chunked cookie fallback
-          writeSessionCookies(tokenData);
-        }
-
-        // 6. MFA → next → membership redirect
-        const supabase = createSupabaseBrowserClient();
-        const { data: aal } = await supabase.auth.mfa.getAuthenticatorAssuranceLevel();
-        if (aal?.nextLevel === 'aal2' && aal?.currentLevel !== 'aal2') {
-          router.replace('/mfa'); return;
-        }
-        if (next && next.startsWith('/')) { router.replace(next); return; }
-        const { data: { user } } = await supabase.auth.getUser();
-        if (user) {
-          const { data: membership } = await supabase
-            .from('org_members').select('org_id')
-            .eq('user_id', user.id).limit(1).maybeSingle();
-          router.replace(membership ? '/dashboard' : '/onboarding');
-          return;
-        }
-        router.replace('/dashboard');
+        // 5. SDK 완전 우회 — hard redirect (MFA/온보딩은 middleware/dashboard에서 처리)
+        const redirectTo = next && next.startsWith('/') ? next : '/dashboard';
+        window.location.replace(redirectTo);
       } catch (err) {
         const diagSnapshot = collectDiag(serverCv, cvSource, 'unknown');
         setDiag({ ...diagSnapshot, exchangeError: `uncaught: ${String(err)}` });
