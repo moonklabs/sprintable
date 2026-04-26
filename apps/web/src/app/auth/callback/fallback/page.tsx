@@ -2,7 +2,7 @@
 
 import { Suspense, useEffect } from 'react';
 import { useRouter, useSearchParams } from 'next/navigation';
-import { createSupabaseBrowserClient } from '@/lib/supabase/client';
+import { createBrowserClient } from '@supabase/ssr';
 
 const SUPABASE_URL = process.env['NEXT_PUBLIC_SUPABASE_URL']!;
 const SUPABASE_ANON_KEY = process.env['NEXT_PUBLIC_SUPABASE_ANON_KEY']!;
@@ -29,7 +29,7 @@ function writeSessionCookies(session: Record<string, unknown>) {
   const COOKIE_BASE = `sb-${getProjectRef()}-auth-token`;
   document.cookie.split(';').forEach(c => {
     const name = c.trim().split('=')[0];
-    if (name.startsWith(COOKIE_BASE + '.')) {
+    if (name === COOKIE_BASE || name.startsWith(COOKIE_BASE + '.')) {
       document.cookie = `${name}=; Path=/; Max-Age=0${domainAttr}`;
     }
   });
@@ -96,9 +96,18 @@ function FallbackHandler() {
         const tokenData = await res.json();
         removeCookie(CV_KEY);
 
-        // setSession으로 SDK 표준 쿠키 기록 (서버 getUser 호환 필수)
+        // isSingleton:false 전용 클라이언트로 setSession — 싱글톤 lock 경합 없음
         try {
-          const supabase = createSupabaseBrowserClient();
+          const cookieDomain = process.env['NEXT_PUBLIC_COOKIE_DOMAIN'];
+          const supabase = createBrowserClient(SUPABASE_URL, SUPABASE_ANON_KEY, {
+            isSingleton: false,
+            cookieOptions: {
+              ...(cookieDomain ? { domain: cookieDomain } : {}),
+              sameSite: 'lax' as const,
+              secure: true,
+              path: '/',
+            },
+          });
           await Promise.race([
             supabase.auth.setSession({
               access_token: tokenData.access_token,
