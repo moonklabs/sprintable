@@ -2,7 +2,44 @@
 
 import { Suspense, useEffect, useState } from 'react';
 import { useRouter, useSearchParams } from 'next/navigation';
-import { createBrowserClient } from '@supabase/ssr';
+import { createSupabaseBrowserClient } from '@/lib/supabase/client';
+
+const SUPABASE_URL = process.env['NEXT_PUBLIC_SUPABASE_URL']!;
+const SUPABASE_ANON_KEY = process.env['NEXT_PUBLIC_SUPABASE_ANON_KEY']!;
+
+function getProjectRef() {
+  try { return new URL(SUPABASE_URL).hostname.split('.')[0]; } catch { return ''; }
+}
+
+function getCookieValue(name: string): string | undefined {
+  const match = document.cookie.split(';').map(c => c.trim()).find(c => c.startsWith(name + '='));
+  return match ? decodeURIComponent(match.slice(name.length + 1)) : undefined;
+}
+
+function removeCookie(name: string) {
+  const cookieDomain = process.env['NEXT_PUBLIC_COOKIE_DOMAIN'];
+  document.cookie = `${name}=; Path=/; Max-Age=0${cookieDomain ? `; Domain=${cookieDomain}` : ''}`;
+}
+
+function writeSessionCookies(session: Record<string, unknown>) {
+  const json = JSON.stringify(session);
+  const CHUNK_SIZE = 3180;
+  const cookieDomain = process.env['NEXT_PUBLIC_COOKIE_DOMAIN'];
+  const domainAttr = cookieDomain ? `; Domain=${cookieDomain}` : '';
+  const COOKIE_BASE = `sb-${getProjectRef()}-auth-token`;
+  // clean existing chunks
+  document.cookie.split(';').forEach(c => {
+    const name = c.trim().split('=')[0];
+    if (name.startsWith(COOKIE_BASE + '.')) {
+      document.cookie = `${name}=; Path=/; Max-Age=0${domainAttr}`;
+    }
+  });
+  // write new chunks
+  for (let i = 0; i * CHUNK_SIZE < json.length; i++) {
+    const chunk = json.slice(i * CHUNK_SIZE, (i + 1) * CHUNK_SIZE);
+    document.cookie = `${COOKIE_BASE}.${i}=${encodeURIComponent(chunk)}; Path=/; SameSite=Lax; Secure; Max-Age=604800${domainAttr}`;
+  }
+}
 
 interface DiagInfo {
   cookieEnabled: boolean;
@@ -47,7 +84,7 @@ function FallbackHandler() {
 
     (async () => {
       try {
-        // 1. sessionStorage 복원 (클라이언트 생성 전)
+        // 1. sessionStorage → cookie 복원
         try {
           const backup = sessionStorage.getItem('sb-pkce-backup');
           if (backup && !document.cookie.includes('code-verifier')) {
@@ -57,46 +94,64 @@ function FallbackHandler() {
           sessionStorage.removeItem('sb-pkce-backup');
         } catch {}
 
+        // 2. code_verifier 쿠키 직접 읽기 (lock-free)
+        const projectRef = getProjectRef();
+        const CV_COOKIE = `sb-${projectRef}-auth-token-code-verifier`;
+        const codeVerifier = getCookieValue(CV_COOKIE);
+
         const diagSnapshot = collectDiag(serverCv, restoredFromSession);
 
-        // 2. 전용 클라이언트 — detectSessionInUrl:false + isSingleton:false
-        // _initialize()가 세션 복원만 수행 (URL 파싱/자동 교환 안 함), 싱글톤 캐시와 격리
-        const cookieDomain = process.env['NEXT_PUBLIC_COOKIE_DOMAIN'];
-        const supabase = createBrowserClient(
-          process.env['NEXT_PUBLIC_SUPABASE_URL']!,
-          process.env['NEXT_PUBLIC_SUPABASE_ANON_KEY']!,
-          {
-            isSingleton: false,
-            cookieOptions: {
-              ...(cookieDomain ? { domain: cookieDomain } : {}),
-              sameSite: 'lax' as const,
-              secure: true,
-              path: '/',
-            },
-            auth: { detectSessionInUrl: false, flowType: 'pkce' },
-          },
-        );
-
-        // 3. exchange + 15초 timeout (hang 방지)
-        const { error } = await Promise.race([
-          supabase.auth.exchangeCodeForSession(code),
-          new Promise<never>((_, reject) =>
-            setTimeout(() => reject(new Error('Exchange timed out (15s)')), 15000)
-          ),
-        ]);
-
-        if (error) {
-          setDiag({ ...diagSnapshot, exchangeError: `${error.code ?? 'unknown'}: ${error.message}` });
+        if (!codeVerifier) {
+          setDiag({ ...diagSnapshot, exchangeError: 'code_verifier cookie not found' });
           setStatus('인증 실패. 아래 정보를 스크린샷으로 캡처해주세요.');
           return;
         }
 
+        // 3. REST API 직접 호출 — SDK Navigator Lock 완전 우회
+        const res = await Promise.race([
+          fetch(`${SUPABASE_URL}/auth/v1/token?grant_type=pkce`, {
+            method: 'POST',
+            headers: {
+              'Content-Type': 'application/json',
+              'apikey': SUPABASE_ANON_KEY,
+              'Authorization': `Bearer ${SUPABASE_ANON_KEY}`,
+            },
+            body: JSON.stringify({ auth_code: code, code_verifier: codeVerifier }),
+          }),
+          new Promise<never>((_, r) => setTimeout(() => r(new Error('Exchange timed out (15s)')), 15000)),
+        ]);
+
+        if (!res.ok) {
+          const errText = await res.text().catch(() => res.status.toString());
+          setDiag({ ...diagSnapshot, exchangeError: `REST ${res.status}: ${errText}` });
+          setStatus('인증 실패. 아래 정보를 스크린샷으로 캡처해주세요.');
+          return;
+        }
+
+        const tokenData = await res.json();
+
+        // 4. code_verifier 쿠키 정리
+        removeCookie(CV_COOKIE);
+
+        // 5. 싱글톤 setSession (자기 자신만 lock 경합) + 10초 timeout
+        try {
+          const supabase = createSupabaseBrowserClient();
+          await Promise.race([
+            supabase.auth.setSession({ access_token: tokenData.access_token, refresh_token: tokenData.refresh_token }),
+            new Promise<never>((_, r) => setTimeout(() => r(new Error('setSession timed out')), 10000)),
+          ]);
+        } catch {
+          // setSession 실패 시 수동 chunked cookie fallback
+          writeSessionCookies(tokenData);
+        }
+
+        // 6. MFA → next → membership redirect
+        const supabase = createSupabaseBrowserClient();
         const { data: aal } = await supabase.auth.mfa.getAuthenticatorAssuranceLevel();
         if (aal?.nextLevel === 'aal2' && aal?.currentLevel !== 'aal2') {
           router.replace('/mfa'); return;
         }
         if (next && next.startsWith('/')) { router.replace(next); return; }
-
         const { data: { user } } = await supabase.auth.getUser();
         if (user) {
           const { data: membership } = await supabase
