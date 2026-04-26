@@ -115,6 +115,7 @@ function FallbackHandler() {
             }),
             new Promise<never>((_, r) => setTimeout(() => r(new Error('timeout')), 10000)),
           ]);
+          supabase.auth.stopAutoRefresh();
         } catch {
           writeSessionCookies(tokenData);
         }

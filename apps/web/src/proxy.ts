@@ -72,12 +72,16 @@ export async function proxy(request: NextRequest) {
           return request.cookies.getAll();
         },
         setAll(cookiesToSet: Array<{ name: string; value: string; options: Record<string, unknown> }>) {
+          const cookieDomain = process.env['NEXT_PUBLIC_COOKIE_DOMAIN'];
           for (const { name, value } of cookiesToSet) {
             request.cookies.set(name, value);
           }
           supabaseResponse = NextResponse.next({ request });
           for (const { name, value, options } of cookiesToSet) {
-            supabaseResponse.cookies.set(name, value, options as Parameters<typeof supabaseResponse.cookies.set>[2]);
+            supabaseResponse.cookies.set(name, value, {
+              ...(options as Parameters<typeof supabaseResponse.cookies.set>[2]),
+              ...(cookieDomain ? { domain: cookieDomain } : {}),
+            });
           }
         },
       },
