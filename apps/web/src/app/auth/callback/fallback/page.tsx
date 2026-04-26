@@ -1,6 +1,6 @@
 'use client';
 
-import { Suspense, useEffect, useState } from 'react';
+import { Suspense, useEffect } from 'react';
 import { useRouter, useSearchParams } from 'next/navigation';
 
 const SUPABASE_URL = process.env['NEXT_PUBLIC_SUPABASE_URL']!;
@@ -26,98 +26,54 @@ function writeSessionCookies(session: Record<string, unknown>) {
   const cookieDomain = process.env['NEXT_PUBLIC_COOKIE_DOMAIN'];
   const domainAttr = cookieDomain ? `; Domain=${cookieDomain}` : '';
   const COOKIE_BASE = `sb-${getProjectRef()}-auth-token`;
-  // clean existing chunks
   document.cookie.split(';').forEach(c => {
     const name = c.trim().split('=')[0];
     if (name.startsWith(COOKIE_BASE + '.')) {
       document.cookie = `${name}=; Path=/; Max-Age=0${domainAttr}`;
     }
   });
-  // write new chunks
   for (let i = 0; i * CHUNK_SIZE < json.length; i++) {
     const chunk = json.slice(i * CHUNK_SIZE, (i + 1) * CHUNK_SIZE);
     document.cookie = `${COOKIE_BASE}.${i}=${encodeURIComponent(chunk)}; Path=/; SameSite=Lax; Secure; Max-Age=604800${domainAttr}`;
   }
 }
 
-interface DiagInfo {
-  cookieEnabled: boolean;
-  cookieNames: string[];
-  hasSbCookie: boolean;
-  hasCodeVerifier: boolean;
-  localStorageSbKeys: string[];
-  serverCv: string;
-  cvSource: string;
-  cvPrefix: string;
-  exchangeError?: string;
-}
-
-function collectDiag(serverCv: string, cvSource: string, cvPrefix: string): Omit<DiagInfo, 'exchangeError'> {
-  const cookieEnabled = navigator.cookieEnabled;
-  const allCookies = document.cookie ? document.cookie.split(';').map(c => c.trim()) : [];
-  const cookieNames = allCookies.map(c => c.split('=')[0].trim());
-  const hasSbCookie = cookieNames.some(n => n.startsWith('sb-'));
-  const hasCodeVerifier = cookieNames.some(n => n.includes('code-verifier'));
-  const localStorageSbKeys: string[] = [];
-  try {
-    for (let i = 0; i < localStorage.length; i++) {
-      const k = localStorage.key(i);
-      if (k && k.startsWith('sb-')) localStorageSbKeys.push(k);
-    }
-  } catch {}
-  return { cookieEnabled, cookieNames, hasSbCookie, hasCodeVerifier, localStorageSbKeys, serverCv, cvSource, cvPrefix };
-}
-
 function FallbackHandler() {
   const router = useRouter();
   const searchParams = useSearchParams();
-  const [status, setStatus] = useState('로그인 처리 중...');
-  const [diag, setDiag] = useState<DiagInfo | null>(null);
 
   useEffect(() => {
     const code = searchParams.get('auth_code');
     const next = searchParams.get('next');
-    const serverCv = searchParams.get('server_cv') ?? 'unknown';
     if (!code) { router.replace('/login?error=no_code'); return; }
-
-    let cvSource = 'none';
 
     (async () => {
       try {
-        // 1. code_verifier: SDK sessionStorage 우선, 없으면 쿠키 fallback
         const projectRef = getProjectRef();
-        const CV_COOKIE = `sb-${projectRef}-auth-token-code-verifier`;
+        const CV_KEY = `sb-${projectRef}-auth-token-code-verifier`;
+
         let codeVerifier: string | null | undefined;
-        let cvPrefix = 'N/A';
 
         try {
-          const ssRaw = sessionStorage.getItem(CV_COOKIE);
+          const ssRaw = sessionStorage.getItem(CV_KEY);
           if (ssRaw) {
             try { codeVerifier = JSON.parse(ssRaw); } catch { codeVerifier = ssRaw; }
-            cvSource = 'sessionStorage';
-            cvPrefix = (codeVerifier ?? '').slice(0, 8);
-            sessionStorage.removeItem(CV_COOKIE);
+            sessionStorage.removeItem(CV_KEY);
           }
         } catch {}
 
         if (!codeVerifier) {
-          const cookieRaw = getCookieValue(CV_COOKIE);
+          const cookieRaw = getCookieValue(CV_KEY);
           if (cookieRaw) {
             try { codeVerifier = JSON.parse(cookieRaw); } catch { codeVerifier = cookieRaw; }
-            cvSource = 'cookie';
-            cvPrefix = (codeVerifier ?? '').slice(0, 8);
           }
         }
 
-        const diagSnapshot = collectDiag(serverCv, cvSource, cvPrefix);
-
         if (!codeVerifier) {
-          setDiag({ ...diagSnapshot, exchangeError: 'code_verifier not found (cookie + sessionStorage both empty)' });
-          setStatus('인증 실패. 아래 정보를 스크린샷으로 캡처해주세요.');
+          router.replace('/login?error=auth_failed');
           return;
         }
 
-        // 3. REST API 직접 호출 — SDK Navigator Lock 완전 우회
         const res = await Promise.race([
           fetch(`${SUPABASE_URL}/auth/v1/token?grant_type=pkce`, {
             method: 'POST',
@@ -128,50 +84,29 @@ function FallbackHandler() {
             },
             body: JSON.stringify({ auth_code: code, code_verifier: codeVerifier }),
           }),
-          new Promise<never>((_, r) => setTimeout(() => r(new Error('Exchange timed out (15s)')), 15000)),
+          new Promise<never>((_, r) => setTimeout(() => r(new Error('timeout')), 15000)),
         ]);
 
         if (!res.ok) {
-          const errText = await res.text().catch(() => res.status.toString());
-          setDiag({ ...diagSnapshot, exchangeError: `REST ${res.status}: ${errText}` });
-          setStatus('인증 실패. 아래 정보를 스크린샷으로 캡처해주세요.');
+          router.replace('/login?error=auth_failed');
           return;
         }
 
         const tokenData = await res.json();
-
-        // 4. code_verifier 쿠키 정리 + 세션 쿠키 수동 기록
-        removeCookie(CV_COOKIE);
+        removeCookie(CV_KEY);
         writeSessionCookies(tokenData);
 
-        // 5. SDK 완전 우회 — hard redirect (MFA/온보딩은 middleware/dashboard에서 처리)
         const redirectTo = next && next.startsWith('/') ? next : '/dashboard';
         window.location.replace(redirectTo);
-      } catch (err) {
-        const diagSnapshot = collectDiag(serverCv, cvSource, 'unknown');
-        setDiag({ ...diagSnapshot, exchangeError: `uncaught: ${String(err)}` });
-        setStatus('인증 실패. 아래 정보를 스크린샷으로 캡처해주세요.');
+      } catch {
+        router.replace('/login?error=auth_failed');
       }
     })();
   }, [router, searchParams]);
 
   return (
-    <div className="flex min-h-screen flex-col items-center justify-center gap-4 bg-gray-50 p-6">
-      <p className="text-sm text-gray-500">{status}</p>
-      {diag && (
-        <div className="w-full max-w-lg rounded-lg border border-red-200 bg-red-50 p-4 text-xs font-mono text-red-900 space-y-1">
-          <p className="font-bold text-red-700">🔍 Auth Debug Info</p>
-          <p>cookieEnabled: {String(diag.cookieEnabled)}</p>
-          <p>serverCv: {diag.serverCv}</p>
-          <p>cvSource: {diag.cvSource}</p>
-          <p>cvPrefix: {diag.cvPrefix}</p>
-          <p>hasSbCookie: {String(diag.hasSbCookie)}</p>
-          <p>hasCodeVerifier: {String(diag.hasCodeVerifier)}</p>
-          <p>cookieNames: [{diag.cookieNames.join(', ') || '(empty)'}]</p>
-          <p>localStorageSbKeys: [{diag.localStorageSbKeys.join(', ') || '(empty)'}]</p>
-          {diag.exchangeError && <p>exchangeError: {diag.exchangeError}</p>}
-        </div>
-      )}
+    <div className="flex min-h-screen items-center justify-center bg-gray-50">
+      <p className="text-sm text-gray-500">로그인 처리 중...</p>
     </div>
   );
 }
