@@ -35,7 +35,7 @@ function rateLimitedFetch(input: RequestInfo | URL, init?: RequestInit): Promise
         const body = await response.clone().json() as Record<string, string>;
         const msg = (body.error_description ?? body.message ?? '').toLowerCase();
         const code = body.error ?? body.code ?? '';
-        if (msg.includes('already used') || code === 'invalid_grant' || code === 'refresh_token_already_used') {
+        if (msg.includes('already used') || msg.includes('already_used') || code === 'invalid_grant' || code === 'refresh_token_already_used') {
           rateLimitBlockedUntil.set(url, Date.now() + 600_000);
         }
       } catch { /* body parse 실패 무시 */ }
