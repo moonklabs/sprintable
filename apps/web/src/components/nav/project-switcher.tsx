@@ -34,11 +34,15 @@ export function ProjectSwitcher({
 
         setPending(true);
         try {
-          await fetch('/api/current-project', {
+          const res = await fetch('/api/current-project', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({ project_id: nextProjectId }),
           });
+          if (!res.ok) {
+            console.error('[ProjectSwitcher] project switch failed', res.status);
+            return;
+          }
           router.refresh();
         } finally {
           setPending(false);
