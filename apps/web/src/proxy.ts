@@ -91,20 +91,20 @@ export async function proxy(request: NextRequest) {
     },
   );
 
-  let user = null;
-  try {
-    const { data } = await supabase.auth.getUser();
-    user = data.user;
-  } catch {
+  // 로컬 JWT 파싱 — 네트워크 zero (JWKS 캐시 활용)
+  const { data: claimsData } = await supabase.auth.getClaims();
+
+  if (!claimsData?.claims) {
     const url = request.nextUrl.clone();
     url.pathname = '/login';
     return NextResponse.redirect(url);
   }
 
-  if (!user) {
-    const url = request.nextUrl.clone();
-    url.pathname = '/login';
-    return NextResponse.redirect(url);
+  // exp 만료 임박(5분 이내)일 때만 refreshSession() 호출
+  const exp = (claimsData.claims as { exp?: number }).exp;
+  const now = Math.floor(Date.now() / 1000);
+  if (exp !== undefined && exp - now < 300) {
+    await supabase.auth.refreshSession();
   }
 
   if (request.nextUrl.pathname === '/login') {
