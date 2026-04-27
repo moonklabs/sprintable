@@ -136,7 +136,7 @@ test.describe('Sprint Retro - Corrected E2E Tests', () => {
       
       // Check for columns
       const columns = ['Good', 'Bad', 'Improve'];
-      let found = [];
+      const found = [];
       
       for (const col of columns) {
         const elem = page.locator(`text=${col}`);
