@@ -1,6 +1,6 @@
 # Sprintable
 
-Delegate work in plain language. Sprintable turns it into action.
+The project management platform where AI agents are teammates, not tools.
 
 Sprintable is a memo-first delegation system for human and AI teams.
 
