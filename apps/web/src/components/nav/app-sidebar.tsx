@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useState } from 'react';
+import { useCallback, useEffect, useState } from 'react';
 import Link from 'next/link';
 import { usePathname } from 'next/navigation';
 import { useTranslations } from 'next-intl';
@@ -12,12 +12,15 @@ import {
   FolderKanban,
   Gauge,
   Inbox,
+  LayoutDashboard,
   MessageSquareMore,
   PenTool,
+  Search,
   Settings,
   Users,
 } from 'lucide-react';
 import { LocaleSwitcher } from '@/components/locale-switcher';
+import { CommandPalette } from '@/components/command-palette/command-palette';
 import { ProjectSwitcher } from '@/components/nav/project-switcher';
 import {
   Sidebar,
@@ -58,6 +61,22 @@ export function AppSidebar({
   const t = useTranslations('nav');
   const [memoUnreadCount, setMemoUnreadCount] = useState(0);
   const [inboxUnreadCount, setInboxUnreadCount] = useState(0);
+  const [paletteOpen, setPaletteOpen] = useState(false);
+
+  const openPalette = useCallback(() => setPaletteOpen(true), []);
+
+  useEffect(() => {
+    function onKeyDown(event: KeyboardEvent) {
+      const isMod = event.metaKey || event.ctrlKey;
+      if (!isMod || event.key.toLowerCase() !== 'k') return;
+      const target = event.target as HTMLElement | null;
+      if (target?.isContentEditable) return;
+      event.preventDefault();
+      setPaletteOpen((prev) => !prev);
+    }
+    window.addEventListener('keydown', onKeyDown);
+    return () => window.removeEventListener('keydown', onKeyDown);
+  }, []);
 
   useEffect(() => {
     async function fetchUnread() {
@@ -101,9 +120,68 @@ export function AppSidebar({
             {projectName ?? 'Sprintable'}
           </div>
         )}
+        <button
+          type="button"
+          onClick={openPalette}
+          className="mt-2 flex w-full items-center gap-2 rounded-md border border-sidebar-border/60 bg-sidebar-accent/30 px-2.5 py-1.5 text-left text-sm text-sidebar-foreground/60 transition hover:border-sidebar-border hover:bg-sidebar-accent/60 hover:text-sidebar-foreground"
+          aria-label={t('search')}
+        >
+          <Search className="size-4" />
+          <span className="flex-1 truncate">{t('search')}</span>
+          <kbd className="hidden rounded border border-sidebar-border/60 bg-sidebar-accent/40 px-1.5 py-0 font-mono text-[10px] font-medium text-sidebar-foreground/60 sm:inline-flex">
+            ⌘K
+          </kbd>
+        </button>
       </SidebarHeader>
 
       <SidebarContent>
+        <SidebarGroup>
+          <SidebarGroupContent>
+            <SidebarMenu>
+              <SidebarMenuItem>
+                <SidebarMenuButton
+                  render={<Link href="/inbox" />}
+                  isActive={isActive('/inbox')}
+                  tooltip={t('inbox')}
+                >
+                  <Inbox />
+                  <span>{t('inbox')}</span>
+                  {inboxUnreadCount > 0 ? (
+                    <SidebarMenuBadge>
+                      {inboxUnreadCount > 9 ? '9+' : inboxUnreadCount}
+                    </SidebarMenuBadge>
+                  ) : null}
+                </SidebarMenuButton>
+              </SidebarMenuItem>
+              <SidebarMenuItem>
+                <SidebarMenuButton
+                  render={<Link href="/dashboard" />}
+                  isActive={isActive('/dashboard')}
+                  tooltip={t('dashboard')}
+                >
+                  <LayoutDashboard />
+                  <span>{t('dashboard')}</span>
+                </SidebarMenuButton>
+              </SidebarMenuItem>
+              <SidebarMenuItem>
+                <SidebarMenuButton
+                  render={<Link href="/memos" />}
+                  isActive={isActive('/memos')}
+                  tooltip={t('memos')}
+                >
+                  <MessageSquareMore />
+                  <span>{t('memos')}</span>
+                  {memoUnreadCount > 0 ? (
+                    <SidebarMenuBadge>
+                      {memoUnreadCount > 9 ? '9+' : memoUnreadCount}
+                    </SidebarMenuBadge>
+                  ) : null}
+                </SidebarMenuButton>
+              </SidebarMenuItem>
+            </SidebarMenu>
+          </SidebarGroupContent>
+        </SidebarGroup>
+
         <SidebarGroup>
           <SidebarGroupLabel>{t('sprint')}</SidebarGroupLabel>
           <SidebarGroupContent>
@@ -149,36 +227,6 @@ export function AppSidebar({
           <SidebarGroupLabel>{t('workspace')}</SidebarGroupLabel>
           <SidebarGroupContent>
             <SidebarMenu>
-              <SidebarMenuItem>
-                <SidebarMenuButton
-                  render={<Link href="/inbox" />}
-                  isActive={isActive('/inbox')}
-                  tooltip={t('inbox')}
-                >
-                  <Inbox />
-                  <span>{t('inbox')}</span>
-                  {inboxUnreadCount > 0 ? (
-                    <SidebarMenuBadge>
-                      {inboxUnreadCount > 9 ? '9+' : inboxUnreadCount}
-                    </SidebarMenuBadge>
-                  ) : null}
-                </SidebarMenuButton>
-              </SidebarMenuItem>
-              <SidebarMenuItem>
-                <SidebarMenuButton
-                  render={<Link href="/memos" />}
-                  isActive={isActive('/memos')}
-                  tooltip={t('memos')}
-                >
-                  <MessageSquareMore />
-                  <span>{t('memos')}</span>
-                  {memoUnreadCount > 0 ? (
-                    <SidebarMenuBadge>
-                      {memoUnreadCount > 9 ? '9+' : memoUnreadCount}
-                    </SidebarMenuBadge>
-                  ) : null}
-                </SidebarMenuButton>
-              </SidebarMenuItem>
               <SidebarMenuItem>
                 <SidebarMenuButton
                   render={<Link href="/docs" />}
@@ -257,6 +305,7 @@ export function AppSidebar({
       </SidebarFooter>
 
       <SidebarRail />
+      <CommandPalette open={paletteOpen} onOpenChange={setPaletteOpen} />
     </Sidebar>
   );
 }

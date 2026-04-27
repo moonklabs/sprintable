@@ -44,7 +44,22 @@
     "workspace": "Workspace",
     "configure": "Configure",
     "sprints": "Sprints",
+    "search": "Search…",
     "help": "Help"
+  },
+  "commandPalette": {
+    "title": "Command palette",
+    "placeholder": "Type a command, memo ID, or agent name…",
+    "navigate": "Navigate",
+    "actions": "Actions",
+    "noResults": "No results",
+    "close": "Close",
+    "goInbox": "Go to Inbox",
+    "goDashboard": "Go to Dashboard",
+    "goBoard": "Go to Board",
+    "goMemos": "Go to Memos",
+    "goAgents": "Go to Agents",
+    "goDocs": "Go to Docs"
   },
   "dashboard": {
     "title": "Dashboard",
