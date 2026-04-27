@@ -1828,7 +1828,8 @@
     "backToList": "Back",
     "notAssigned": "Not assigned",
     "spExceeded": "SP Over",
-    "spExceededDetail": "{total}SP / target {target}SP exceeded"
+    "spExceededDetail": "{total}SP / target {target}SP exceeded",
+    "noStories": "No stories linked to this epic."
   },
   "sprints": {
     "title": "Sprints",

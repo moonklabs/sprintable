@@ -1828,7 +1828,8 @@
     "backToList": "목록으로",
     "notAssigned": "미지정",
     "spExceeded": "SP 초과",
-    "spExceededDetail": "{total}SP / 목표 {target}SP 초과"
+    "spExceededDetail": "{total}SP / 목표 {target}SP 초과",
+    "noStories": "이 에픽에 연결된 스토리가 없습니다."
   },
   "sprints": {
     "title": "스프린트",
