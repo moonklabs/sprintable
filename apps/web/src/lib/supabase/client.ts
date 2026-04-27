@@ -32,9 +32,10 @@ function rateLimitedFetch(input: RequestInfo | URL, init?: RequestInit): Promise
     // 같은 URL로의 10분 backoff를 설정해 자동 refresh 루프를 중단시킴.
     if (response.status === 400 && url.includes('/token')) {
       try {
-        const body = await response.clone().json() as { error?: string; error_description?: string };
-        const desc = (body.error_description ?? '').toLowerCase();
-        if (desc.includes('already used') || body.error === 'invalid_grant') {
+        const body = await response.clone().json() as Record<string, string>;
+        const msg = (body.error_description ?? body.message ?? '').toLowerCase();
+        const code = body.error ?? body.code ?? '';
+        if (msg.includes('already used') || code === 'invalid_grant' || code === 'refresh_token_already_used') {
           rateLimitBlockedUntil.set(url, Date.now() + 600_000);
         }
       } catch { /* body parse 실패 무시 */ }
