@@ -17,8 +17,10 @@ CREATE INDEX IF NOT EXISTS idx_story_activities_story_id
 
 ALTER TABLE public.story_activities ENABLE ROW LEVEL SECURITY;
 
+DROP POLICY IF EXISTS "story_activities_select" ON public.story_activities;
 CREATE POLICY "story_activities_select" ON public.story_activities FOR SELECT
   USING (org_id IN (SELECT public.get_user_org_ids()));
 
+DROP POLICY IF EXISTS "story_activities_insert" ON public.story_activities;
 CREATE POLICY "story_activities_insert" ON public.story_activities FOR INSERT
   WITH CHECK (org_id IN (SELECT public.get_user_org_ids()));
