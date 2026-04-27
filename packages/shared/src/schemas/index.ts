@@ -285,3 +285,4 @@ export const updateBridgeUserSchema = z.object({
 });
 
 export * from './meetings';
+export * from './workflow-contract';
