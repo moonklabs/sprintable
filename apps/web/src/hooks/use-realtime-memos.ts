@@ -29,10 +29,13 @@ interface UseRealtimeMemosOptions {
   onMemoUpdated?: (memo: RealtimeMemo) => void;
 }
 
+const RECONNECT_DELAYS_MS = [5_000, 30_000, 60_000, 300_000]; // 5s → 30s → 60s → 5min
+
 export function useRealtimeMemos({ currentTeamMemberId, onNewMemo, onNewReply, onMemoUpdated }: UseRealtimeMemosOptions) {
   const channelRef = useRef<RealtimeChannel | null>(null);
   const [connected, setConnected] = useState(false);
   const reconnectTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const reconnectAttemptsRef = useRef(0);
   const onNewMemoRef = useRef(onNewMemo);
   const onNewReplyRef = useRef(onNewReply);
   const onMemoUpdatedRef = useRef(onMemoUpdated);
@@ -74,13 +77,17 @@ return;
         .subscribe((status) => {
           if (status === 'SUBSCRIBED') {
             setConnected(true);
+            reconnectAttemptsRef.current = 0;
           } else if (status === 'CLOSED' || status === 'CHANNEL_ERROR') {
             setConnected(false);
             if (!reconnectTimerRef.current) {
+              const attempts = reconnectAttemptsRef.current;
+              const delay = RECONNECT_DELAYS_MS[Math.min(attempts, RECONNECT_DELAYS_MS.length - 1)];
+              reconnectAttemptsRef.current += 1;
               reconnectTimerRef.current = setTimeout(() => {
                 reconnectTimerRef.current = null;
                 subscribe();
-              }, 5000);
+              }, delay);
             }
           }
         });
