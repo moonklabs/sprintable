@@ -270,23 +270,22 @@ export default async function DashboardPage() {
           }
         />
 
-        <div className="grid gap-4 md:grid-cols-3">
-          <SectionCard className="col-span-full">
-            <SectionCardHeader>
-              <div className="flex items-center justify-between gap-3">
-                <div>
-                  <div className="text-sm font-semibold text-foreground">{t('commandCenter')}</div>
-                  <div className="text-sm text-muted-foreground">{t('commandCenterDescription')}</div>
-                </div>
-                <StatusBadge status="active" label={t('statusActive')} />
+        <SectionCard>
+          <SectionCardHeader>
+            <div className="flex items-center justify-between gap-3">
+              <div>
+                <div className="text-sm font-semibold text-foreground">{t('commandCenter')}</div>
+                <div className="text-sm text-muted-foreground">{t('commandCenterDescription')}</div>
               </div>
-            </SectionCardHeader>
-            <SectionCardBody className="grid gap-3 md:grid-cols-3">
-              <OperatorStatCard label={t('projects')} value={projectMemberships.length} hint={t('projectsHint')} />
-              <OperatorStatCard label={t('activeSprints')} value={activeSprints?.length ?? 0} hint={t('activeSprintsHint')} />
-              <OperatorStatCard label={t('openMemos')} value={recentMemos?.length ?? 0} hint={t('openMemosHint')} />
-            </SectionCardBody>
-          </SectionCard>
+              <StatusBadge status="active" label={t('statusActive')} />
+            </div>
+          </SectionCardHeader>
+          <SectionCardBody className="grid gap-3 md:grid-cols-3">
+            <OperatorStatCard label={t('projects')} value={projectMemberships.length} hint={t('projectsHint')} />
+            <OperatorStatCard label={t('activeSprints')} value={activeSprints?.length ?? 0} hint={t('activeSprintsHint')} />
+            <OperatorStatCard label={t('openMemos')} value={recentMemos?.length ?? 0} hint={t('openMemosHint')} />
+          </SectionCardBody>
+        </SectionCard>
 
         <div className="grid gap-4 xl:grid-cols-3">
           <SectionCard className="xl:col-span-2">
@@ -406,7 +405,6 @@ export default async function DashboardPage() {
           </SectionCard>
         </div>
       </div>
-    </div>
     </div>
   );
 }
