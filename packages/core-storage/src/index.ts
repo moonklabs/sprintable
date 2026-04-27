@@ -103,5 +103,23 @@ export type {
   CreateAgentApiKeyInput,
 } from './interfaces/IAgentApiKeyRepository';
 
+export type {
+  IInboxItemRepository,
+  InboxItem,
+  CreateInboxItemInput,
+  InboxListFilters,
+  ResolveInboxItemInput,
+  DismissInboxItemInput,
+  ReassignInboxItemInput,
+  InboxItemCount,
+  InboxKind,
+  InboxState,
+  InboxPriority,
+  InboxSourceType,
+  OutboxEventType,
+  OriginNode,
+  InboxOption,
+} from './interfaces/IInboxItemRepository';
+
 export { NullSubscriptionRepository } from './null/NullSubscriptionRepository';
 export { NullAgentRunBillingRepository } from './null/NullAgentRunBillingRepository';
