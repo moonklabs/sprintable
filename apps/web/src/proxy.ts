@@ -91,17 +91,8 @@ export async function proxy(request: NextRequest) {
     },
   );
 
-  let user = null;
-  try {
-    const { data } = await supabase.auth.getUser();
-    user = data.user;
-  } catch {
-    const url = request.nextUrl.clone();
-    url.pathname = '/login';
-    return NextResponse.redirect(url);
-  }
-
-  if (!user) {
+  const { data: claimsData } = await supabase.auth.getClaims();
+  if (!claimsData?.claims) {
     const url = request.nextUrl.clone();
     url.pathname = '/login';
     return NextResponse.redirect(url);
