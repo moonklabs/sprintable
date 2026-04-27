@@ -1842,6 +1842,24 @@
     "stories": "스토리",
     "burndown": "번다운",
     "idealLine": "이상선",
-    "actualLine": "실제선"
+    "actualLine": "실제선",
+    "newSprint": "새 스프린트",
+    "sprintTitle": "스프린트 이름",
+    "sprintTitlePlaceholder": "스프린트 이름을 입력하세요",
+    "startDate": "시작일",
+    "endDate": "종료일",
+    "cancel": "취소",
+    "create": "생성",
+    "createError": "스프린트 생성에 실패했습니다.",
+    "activate": "스프린트 시작",
+    "close": "스프린트 종료",
+    "activateError": "스프린트 시작에 실패했습니다.",
+    "closeError": "스프린트 종료에 실패했습니다.",
+    "closeConfirm": "스프린트를 종료하시겠습니까? 미완료 스토리는 백로그로 이동됩니다.",
+    "sprintStories": "스프린트 스토리",
+    "noSprintStories": "배정된 스토리가 없습니다.",
+    "backlog": "백로그",
+    "assign": "추가",
+    "unassign": "제거"
   }
 }

@@ -1842,6 +1842,24 @@
     "stories": "Stories",
     "burndown": "Burndown",
     "idealLine": "Ideal",
-    "actualLine": "Actual"
+    "actualLine": "Actual",
+    "newSprint": "New Sprint",
+    "sprintTitle": "Sprint name",
+    "sprintTitlePlaceholder": "Enter sprint name",
+    "startDate": "Start date",
+    "endDate": "End date",
+    "cancel": "Cancel",
+    "create": "Create",
+    "createError": "Failed to create sprint.",
+    "activate": "Start Sprint",
+    "close": "Close Sprint",
+    "activateError": "Failed to start sprint.",
+    "closeError": "Failed to close sprint.",
+    "closeConfirm": "Close this sprint? Incomplete stories will move to backlog.",
+    "sprintStories": "Sprint Stories",
+    "noSprintStories": "No stories assigned to this sprint.",
+    "backlog": "Backlog",
+    "assign": "Add",
+    "unassign": "Remove"
   }
 }
