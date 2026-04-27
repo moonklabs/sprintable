@@ -12,6 +12,7 @@ import {
   FolderKanban,
   Gauge,
   Inbox,
+  LayoutDashboard,
   MessageSquareMore,
   PenTool,
   Settings,
@@ -105,6 +106,53 @@ export function AppSidebar({
 
       <SidebarContent>
         <SidebarGroup>
+          <SidebarGroupContent>
+            <SidebarMenu>
+              <SidebarMenuItem>
+                <SidebarMenuButton
+                  render={<Link href="/inbox" />}
+                  isActive={isActive('/inbox')}
+                  tooltip={t('inbox')}
+                >
+                  <Inbox />
+                  <span>{t('inbox')}</span>
+                  {inboxUnreadCount > 0 ? (
+                    <SidebarMenuBadge>
+                      {inboxUnreadCount > 9 ? '9+' : inboxUnreadCount}
+                    </SidebarMenuBadge>
+                  ) : null}
+                </SidebarMenuButton>
+              </SidebarMenuItem>
+              <SidebarMenuItem>
+                <SidebarMenuButton
+                  render={<Link href="/dashboard" />}
+                  isActive={isActive('/dashboard')}
+                  tooltip={t('dashboard')}
+                >
+                  <LayoutDashboard />
+                  <span>{t('dashboard')}</span>
+                </SidebarMenuButton>
+              </SidebarMenuItem>
+              <SidebarMenuItem>
+                <SidebarMenuButton
+                  render={<Link href="/memos" />}
+                  isActive={isActive('/memos')}
+                  tooltip={t('memos')}
+                >
+                  <MessageSquareMore />
+                  <span>{t('memos')}</span>
+                  {memoUnreadCount > 0 ? (
+                    <SidebarMenuBadge>
+                      {memoUnreadCount > 9 ? '9+' : memoUnreadCount}
+                    </SidebarMenuBadge>
+                  ) : null}
+                </SidebarMenuButton>
+              </SidebarMenuItem>
+            </SidebarMenu>
+          </SidebarGroupContent>
+        </SidebarGroup>
+
+        <SidebarGroup>
           <SidebarGroupLabel>{t('sprint')}</SidebarGroupLabel>
           <SidebarGroupContent>
             <SidebarMenu>
@@ -149,36 +197,6 @@ export function AppSidebar({
           <SidebarGroupLabel>{t('workspace')}</SidebarGroupLabel>
           <SidebarGroupContent>
             <SidebarMenu>
-              <SidebarMenuItem>
-                <SidebarMenuButton
-                  render={<Link href="/inbox" />}
-                  isActive={isActive('/inbox')}
-                  tooltip={t('inbox')}
-                >
-                  <Inbox />
-                  <span>{t('inbox')}</span>
-                  {inboxUnreadCount > 0 ? (
-                    <SidebarMenuBadge>
-                      {inboxUnreadCount > 9 ? '9+' : inboxUnreadCount}
-                    </SidebarMenuBadge>
-                  ) : null}
-                </SidebarMenuButton>
-              </SidebarMenuItem>
-              <SidebarMenuItem>
-                <SidebarMenuButton
-                  render={<Link href="/memos" />}
-                  isActive={isActive('/memos')}
-                  tooltip={t('memos')}
-                >
-                  <MessageSquareMore />
-                  <span>{t('memos')}</span>
-                  {memoUnreadCount > 0 ? (
-                    <SidebarMenuBadge>
-                      {memoUnreadCount > 9 ? '9+' : memoUnreadCount}
-                    </SidebarMenuBadge>
-                  ) : null}
-                </SidebarMenuButton>
-              </SidebarMenuItem>
               <SidebarMenuItem>
                 <SidebarMenuButton
                   render={<Link href="/docs" />}
