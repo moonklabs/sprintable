@@ -16,7 +16,6 @@ export async function GET(request: Request) {
   }
 
   const supabase = await createSupabaseServerClient();
-  await supabase.auth.signOut();
 
   const redirectTo = returnTo && returnTo.startsWith('/')
     ? `${origin}/auth/callback?next=${encodeURIComponent(returnTo)}`
