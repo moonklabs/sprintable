@@ -101,7 +101,7 @@ test.describe('Sprint Retro - Final Comprehensive Tests', () => {
       
       // Check for phase stepper
       const phases = ['Collect', 'Group', 'Vote', 'Discuss', 'Action'];
-      let phasesFound = [];
+      const phasesFound = [];
       
       for (const phase of phases) {
         const element = page.locator(`text=${phase}`);
@@ -114,7 +114,7 @@ test.describe('Sprint Retro - Final Comprehensive Tests', () => {
       
       // Check for columns
       const columns = ['Good', 'Bad', 'Improve'];
-      let columnsFound = [];
+      const columnsFound = [];
       
       for (const col of columns) {
         const element = page.locator(`text=${col}`);
