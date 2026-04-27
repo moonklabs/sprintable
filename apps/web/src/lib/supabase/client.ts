@@ -23,7 +23,8 @@ function rateLimitedFetch(input: RequestInfo | URL, init?: RequestInit): Promise
   return globalThis.fetch(input, init).then((response) => {
     if (response.status === 429) {
       const retryAfterHeader = response.headers.get('Retry-After');
-      const backoffSec = retryAfterHeader ? Math.max(parseInt(retryAfterHeader, 10), 60) : 60;
+      const retrySeconds = parseInt(retryAfterHeader ?? '', 10);
+      const backoffSec = !isNaN(retrySeconds) ? Math.max(retrySeconds, 60) : 60;
       rateLimitBlockedUntil.set(url, Date.now() + backoffSec * 1000);
     }
     return response;
