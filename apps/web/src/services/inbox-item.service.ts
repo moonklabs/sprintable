@@ -78,34 +78,26 @@ export class InboxItemService {
     });
   }
 
+  private async getRepo() {
+    return createInboxItemRepository(isOssMode() ? undefined : this.supabase);
+  }
+
   /**
    * resolve — assignee 본인 또는 admin이 호출. RLS가 권한 검증.
    * @throws NotFoundError, error with code 23514 if already resolved.
    */
   async resolve(id: string, orgId: string, input: ResolveInboxItemInput): Promise<InboxItem> {
-    if (isOssMode()) {
-      const repo = await createInboxItemRepository();
-      return repo.resolve(id, orgId, input);
-    }
-    const repo = await createInboxItemRepository(this.supabase);
+    const repo = await this.getRepo();
     return repo.resolve(id, orgId, input);
   }
 
   async dismiss(id: string, orgId: string, input: DismissInboxItemInput): Promise<InboxItem> {
-    if (isOssMode()) {
-      const repo = await createInboxItemRepository();
-      return repo.dismiss(id, orgId, input);
-    }
-    const repo = await createInboxItemRepository(this.supabase);
+    const repo = await this.getRepo();
     return repo.dismiss(id, orgId, input);
   }
 
   async reassign(id: string, orgId: string, input: ReassignInboxItemInput): Promise<InboxItem> {
-    if (isOssMode()) {
-      const repo = await createInboxItemRepository();
-      return repo.reassign(id, orgId, input);
-    }
-    const repo = await createInboxItemRepository(this.supabase);
+    const repo = await this.getRepo();
     return repo.reassign(id, orgId, input);
   }
 }

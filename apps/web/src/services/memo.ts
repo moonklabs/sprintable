@@ -7,6 +7,7 @@ import { buildAbsoluteMemoLink } from './app-url';
 import { NotFoundError, ForbiddenError } from './sprint';
 import { NotificationService } from './notification.service';
 import { hasExactMemberMention } from './doc-comment-notifications';
+import { InboxItemService } from './inbox-item.service';
 
 export interface CreateMemoInput {
   project_id: string;
@@ -494,7 +495,6 @@ export class MemoService {
 
     // 멘션 알림 + inbox 듀얼 쓰기
     // notifications → 곧 inbox_items로 일원화 (Phase A.B). 그동안 둘 다 emit.
-    const { InboxItemService } = await import('./inbox-item.service');
     const inboxService = new InboxItemService(this.supabase);
 
     for (const userId of mentionedIds) {
@@ -520,8 +520,8 @@ export class MemoService {
           context: content.slice(0, 500),
           source_id: `${memoId}:${userId}`,
         });
-      } catch {
-        // dual-write tolerated to fail. notifications path stays authoritative for v1.
+      } catch (err: unknown) {
+        console.error('[MemoService._processMemoMentions] inbox dual-write failed', err);
       }
     }
   }

@@ -7,6 +7,7 @@ import { getAuthContext } from '@/lib/auth-helpers';
 import { apiSuccess, ApiErrors } from '@/lib/api-response';
 import { AgentRunService } from '@/services/agent-run';
 import { InboxItemService } from '@/services/inbox-item.service';
+import { originChainSchema, inboxOptionsSchema, INBOX_PRIORITIES } from '@sprintable/shared';
 
 type RouteParams = { params: Promise<{ id: string }> };
 
@@ -19,21 +20,13 @@ const inboxOnCompletionSchema = z.object({
   title: z.string().min(1).max(200),
   context: z.string().max(2000).optional().nullable(),
   agent_summary: z.string().max(2000).optional().nullable(),
-  options: z.array(z.object({
-    id: z.string().uuid(),
-    label: z.string().min(1),
-    kind: z.enum(['approve', 'approve-alt', 'reassign', 'changes']),
-    consequence: z.string().min(1),
-  })).default([]),
+  options: inboxOptionsSchema.default([]),
   after_decision: z.string().max(500).optional().nullable(),
-  origin_chain: z.array(z.object({
-    type: z.enum(['memo', 'story', 'run', 'initiative']),
-    id: z.string().min(1),
-  })).optional(),
+  origin_chain: originChainSchema.optional(),
   story_id: z.string().optional().nullable(),
   memo_id: z.string().optional().nullable(),
-  priority: z.enum(['high', 'normal']).optional(),
-  kind: z.enum(['approval', 'decision', 'blocker']).optional().default('approval'),
+  priority: z.enum(INBOX_PRIORITIES).optional(),
+  kind: z.enum(['approval', 'decision', 'blocker'] as const).optional().default('approval'),
 });
 
 const updateAgentRunSchema = z.object({
@@ -105,9 +98,8 @@ export async function PATCH(request: Request, { params }: RouteParams) {
           source_type: 'agent_run',
           source_id: id,
         });
-      } catch {
-        // Inbox emit failure is logged at the service layer (future). Don't fail
-        // the run-update response; UNIQUE protects against double-emit on retry.
+      } catch (err: unknown) {
+        console.error('[agent-runs PATCH] inbox emit failed', err);
       }
     }
 
