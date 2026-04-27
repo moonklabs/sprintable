@@ -144,8 +144,8 @@ export function StoryCard({ story, epicName, assignee, onClick, onEdit, onChange
         <div className="absolute inset-0 pointer-events-none rounded-lg border border-transparent bg-gradient-to-r from-cyan-500/10 to-purple-500/10 opacity-50" />
       )}
       {epicName && story.epic_id ? (
-        <Badge variant={getEpicColor(story.epic_id)} className="mb-3 max-w-full truncate">
-          {epicName}
+        <Badge variant={getEpicColor(story.epic_id)} className="mb-3 max-w-full">
+          <span className="min-w-0 truncate leading-none">{epicName}</span>
         </Badge>
       ) : null}
       <p className="relative z-10 line-clamp-2 text-sm font-medium leading-5 text-foreground">{story.title}</p>
