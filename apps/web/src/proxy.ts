@@ -11,6 +11,8 @@ const PUBLIC_EXACT = [
 const PUBLIC_PREFIX = [
   '/api/',
   '/login',
+  '/signup',
+  '/forgot-password',
   '/auth/callback',
   '/auth/login',
   '/invite',
