@@ -14,7 +14,6 @@ import {
   Inbox,
   LayoutDashboard,
   MessageSquareMore,
-  PenTool,
   Search,
   Settings,
   Users,
@@ -245,16 +244,6 @@ export function AppSidebar({
                 >
                   <CalendarDays />
                   <span>{t('meetings')}</span>
-                </SidebarMenuButton>
-              </SidebarMenuItem>
-              <SidebarMenuItem>
-                <SidebarMenuButton
-                  render={<Link href="/mockups" />}
-                  isActive={isActive('/mockups')}
-                  tooltip={t('mockup')}
-                >
-                  <PenTool />
-                  <span>{t('mockup')}</span>
                 </SidebarMenuButton>
               </SidebarMenuItem>
               <SidebarMenuItem>
