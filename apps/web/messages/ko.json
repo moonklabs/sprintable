@@ -787,7 +787,22 @@
     "phaseVote": "🗳️ 투표",
     "phaseDiscuss": "💬 토론",
     "phaseAction": "🎯 액션",
-    "phaseClosed": "✅ 완료"
+    "phaseClosed": "✅ 완료",
+    "loading": "불러오는 중...",
+    "backToList": "목록으로",
+    "sessionNotFound": "세션을 찾을 수 없습니다.",
+    "phaseNext": "다음 단계",
+    "export": "내보내기",
+    "categoryGood": "Good",
+    "categoryBad": "Bad",
+    "categoryImprove": "Improve",
+    "addItem": "항목 추가",
+    "itemPlaceholder": "의견을 입력하세요...",
+    "submit": "추가",
+    "actions": "액션 아이템",
+    "noActions": "아직 액션 아이템이 없습니다.",
+    "addAction": "추가",
+    "actionPlaceholder": "액션 아이템을 입력하세요..."
   },
   "docs": {
     "title": "문서",

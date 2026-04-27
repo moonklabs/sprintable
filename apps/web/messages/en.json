@@ -787,7 +787,22 @@
     "phaseVote": "🗳️ Vote",
     "phaseDiscuss": "💬 Discuss",
     "phaseAction": "🎯 Action",
-    "phaseClosed": "✅ Closed"
+    "phaseClosed": "✅ Closed",
+    "loading": "Loading...",
+    "backToList": "Back to list",
+    "sessionNotFound": "Session not found.",
+    "phaseNext": "Next phase",
+    "export": "Export",
+    "categoryGood": "Good",
+    "categoryBad": "Bad",
+    "categoryImprove": "Improve",
+    "addItem": "Add item",
+    "itemPlaceholder": "Enter your thoughts...",
+    "submit": "Add",
+    "actions": "Action items",
+    "noActions": "No action items yet.",
+    "addAction": "Add",
+    "actionPlaceholder": "Enter action item..."
   },
   "docs": {
     "title": "Documentation",

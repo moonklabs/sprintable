@@ -8,6 +8,28 @@ import { RetroSessionService } from '@/services/retro-session';
 
 type RouteParams = { params: Promise<{ id: string }> };
 
+// GET /api/retro-sessions/:id/actions?project_id=X
+export async function GET(request: Request, { params }: RouteParams) {
+  try {
+    const { id } = await params;
+    const supabase = await createSupabaseServerClient();
+    const me = await getAuthContext(supabase, request);
+    if (!me) return ApiErrors.unauthorized();
+    if (me.rateLimitExceeded) return ApiErrors.tooManyRequests(me.rateLimitRemaining, me.rateLimitResetAt);
+
+    const { searchParams } = new URL(request.url);
+    const projectId = searchParams.get('project_id');
+    if (!projectId) return ApiErrors.badRequest('project_id required');
+
+    const dbClient: SupabaseClient = me.type === 'agent' ? createSupabaseAdminClient() : supabase;
+    const service = new RetroSessionService(dbClient);
+    const data = await service.listActions(id, projectId);
+    return apiSuccess(data);
+  } catch (err: unknown) {
+    return handleApiError(err);
+  }
+}
+
 // POST /api/retro-sessions/:id/actions
 export async function POST(request: Request, { params }: RouteParams) {
   try {
