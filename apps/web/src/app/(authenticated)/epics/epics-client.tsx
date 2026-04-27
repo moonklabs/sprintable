@@ -1,6 +1,7 @@
 'use client';
 
 import { useCallback, useEffect, useState } from 'react';
+import { useRouter } from 'next/navigation';
 import { useTranslations } from 'next-intl';
 import { ChevronLeft, Plus, X } from 'lucide-react';
 import { Button } from '@/components/ui/button';
@@ -466,6 +467,7 @@ interface EpicDetailPanelProps {
 
 function EpicDetailPanel({ epic, onUpdate, onClose }: EpicDetailPanelProps) {
   const t = useTranslations('epics');
+  const router = useRouter();
   const [isEditing, setIsEditing] = useState(false);
 
   const stories = epic.stories ?? [];
@@ -581,14 +583,16 @@ function EpicDetailPanel({ epic, onUpdate, onClose }: EpicDetailPanelProps) {
             </div>
 
             {/* Story list */}
-            {stories.length > 0 ? (
-              <div className="space-y-2">
-                <p className="text-[10px] font-semibold uppercase tracking-[0.18em] text-[color:var(--operator-muted)]">{t('stories')}</p>
+            <div className="space-y-2">
+              <p className="text-[10px] font-semibold uppercase tracking-[0.18em] text-[color:var(--operator-muted)]">{t('stories')}</p>
+              {stories.length > 0 ? (
                 <div className="space-y-1.5">
                   {stories.map((story) => (
-                    <div
+                    <button
                       key={story.id}
-                      className="flex items-center justify-between rounded-xl border border-[color:var(--operator-border,hsl(var(--border)))] px-3 py-2"
+                      type="button"
+                      onClick={() => router.push(`/board?story=${story.id}`)}
+                      className="flex w-full items-center justify-between rounded-xl border border-[color:var(--operator-border,hsl(var(--border)))] px-3 py-2 text-left transition-colors hover:border-primary/30 hover:bg-primary/5"
                     >
                       <p className="text-sm text-[color:var(--operator-foreground)]">{story.title}</p>
                       <div className="flex shrink-0 items-center gap-2">
@@ -599,11 +603,13 @@ function EpicDetailPanel({ epic, onUpdate, onClose }: EpicDetailPanelProps) {
                           {story.status}
                         </Badge>
                       </div>
-                    </div>
+                    </button>
                   ))}
                 </div>
-              </div>
-            ) : null}
+              ) : (
+                <p className="text-sm italic text-[color:var(--operator-muted)]">{t('noStories')}</p>
+              )}
+            </div>
           </div>
         )}
       </div>
