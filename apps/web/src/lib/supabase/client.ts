@@ -36,10 +36,11 @@ function rateLimitedFetch(input: RequestInfo | URL, init?: RequestInit): Promise
         const code = body.error ?? body.code ?? '';
         if (msg.includes('already used') || msg.includes('already_used') || code === 'invalid_grant' || code === 'refresh_token_already_used') {
           // sb-* auth 쿠키 전량 삭제 후 /login 리다이렉트
+          const cookieDomain = process.env['NEXT_PUBLIC_COOKIE_DOMAIN'];
           document.cookie.split(';').forEach((c) => {
             const name = c.trim().split('=')[0];
             if (name?.startsWith('sb-')) {
-              document.cookie = `${name}=; expires=Thu, 01 Jan 1970 00:00:00 UTC; path=/`;
+              document.cookie = `${name}=; expires=Thu, 01 Jan 1970 00:00:00 UTC; path=/${cookieDomain ? `; domain=${cookieDomain}` : ''}`;
             }
           });
           window.location.href = '/login';
