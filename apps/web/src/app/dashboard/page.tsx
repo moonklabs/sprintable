@@ -270,24 +270,28 @@ export default async function DashboardPage() {
           }
         />
 
-        <SectionCard>
-          <SectionCardHeader>
-            <div className="flex items-center justify-between gap-3">
-              <div>
-                <div className="text-sm font-semibold text-foreground">{t('commandCenter')}</div>
-                <div className="text-sm text-muted-foreground">{t('commandCenterDescription')}</div>
+        <div className="grid gap-4 md:grid-cols-3">
+          <SectionCard className="col-span-full">
+            <SectionCardHeader>
+              <div className="flex items-center justify-between gap-3">
+                <div>
+                  <div className="text-sm font-semibold text-foreground">{t('commandCenter')}</div>
+                  <div className="text-sm text-muted-foreground">{t('commandCenterDescription')}</div>
+                </div>
+                <StatusBadge status="active" label={t('statusActive')} />
               </div>
-              <StatusBadge status="active" label={t('statusActive')} />
-            </div>
-          </SectionCardHeader>
-          <SectionCardBody className="grid gap-3 md:grid-cols-3">
-            <OperatorStatCard label={t('projects')} value={projectMemberships.length} hint={t('projectsHint')} />
-            <OperatorStatCard label={t('activeSprints')} value={activeSprints?.length ?? 0} hint={t('activeSprintsHint')} />
-            <OperatorStatCard label={t('openMemos')} value={recentMemos?.length ?? 0} hint={t('openMemosHint')} />
-          </SectionCardBody>
-        </SectionCard>
+            </SectionCardHeader>
+            <SectionCardBody className="grid gap-3 md:grid-cols-3">
+              <OperatorStatCard label={t('projects')} value={projectMemberships.length} hint={t('projectsHint')} />
+              <OperatorStatCard label={t('activeSprints')} value={activeSprints?.length ?? 0} hint={t('activeSprintsHint')} />
+              <OperatorStatCard label={t('openMemos')} value={recentMemos?.length ?? 0} hint={t('openMemosHint')} />
+            </SectionCardBody>
+          </SectionCard>
 
-        <div className="grid gap-4 xl:grid-cols-3">
+        {/* Fix: outer parent is `grid md:grid-cols-3`, so this nested grid
+            needs col-span-full to span all 3 outer columns; without it, the
+            5 cards below get squeezed into 1/3 of the page width. */}
+        <div className="col-span-full grid gap-4 xl:grid-cols-3">
           <SectionCard className="xl:col-span-2">
             <SectionCardHeader>
               <div className="flex items-center justify-between gap-3">
@@ -405,6 +409,7 @@ export default async function DashboardPage() {
           </SectionCard>
         </div>
       </div>
+    </div>
     </div>
   );
 }

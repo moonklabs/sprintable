@@ -53,9 +53,10 @@ console.error('[Realtime] Failed to create Supabase client:', err);
 return;
 }
 
-    function subscribe() {
+    async function subscribe() {
       if (channelRef.current) {
-        supabase.removeChannel(channelRef.current);
+        await supabase.removeChannel(channelRef.current);
+        channelRef.current = null;
       }
 
       const channel = supabase
@@ -79,7 +80,7 @@ return;
             if (!reconnectTimerRef.current) {
               reconnectTimerRef.current = setTimeout(() => {
                 reconnectTimerRef.current = null;
-                subscribe();
+                subscribe().catch((err) => console.error('[Realtime] reconnect error:', err));
               }, 5000);
             }
           }
@@ -88,11 +89,9 @@ return;
       channelRef.current = channel;
     }
 
-    try {
-      subscribe();
-    } catch (err) {
+    subscribe().catch((err) => {
       console.error('[Realtime] subscribe error:', err);
-    }
+    });
 
     return () => {
       if (reconnectTimerRef.current) clearTimeout(reconnectTimerRef.current);

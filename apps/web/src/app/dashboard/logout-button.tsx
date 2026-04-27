@@ -17,7 +17,7 @@ export function LogoutButton() {
   };
 
   return (
-    <Button variant="destructive" className="w-full" onClick={handleLogout}>
+    <Button variant="destructive" size="sm" onClick={handleLogout}>
       {t('logout')}
     </Button>
   );

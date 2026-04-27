@@ -237,7 +237,7 @@ export function KanbanColumn({
       ) : null}
 
       <SortableContextCompat items={stories.map((s) => s.id)} strategy={verticalListSortingStrategy}>
-        <div className="flex min-h-0 min-w-0 flex-1 flex-col gap-2 overflow-y-auto">
+        <div className="flex min-h-0 min-w-0 flex-1 flex-col gap-2 overflow-y-auto [&>*]:shrink-0">
           {stories.length === 0 && !composing ? (
             <div className="flex min-h-[100px] items-center justify-center px-4 text-center">
               <p className="text-xs text-muted-foreground/60">{t('noStories')}</p>
