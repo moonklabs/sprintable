@@ -24,7 +24,6 @@ export async function GET() {
         .from('team_members')
         .select('project_id, org_id, projects(name)')
         .eq('user_id', user.id)
-        .eq('type', 'human')
         .eq('is_active', true)
         .limit(1)
         .maybeSingle();
@@ -52,7 +51,6 @@ export async function GET() {
       .from('team_members')
       .select('id, project_id, org_id, projects(name)')
       .eq('user_id', user.id)
-      .eq('type', 'human')
       .eq('is_active', true)
       .eq('project_id', projectId)
       .maybeSingle();
@@ -91,7 +89,6 @@ export async function POST(request: Request) {
       .from('team_members')
       .select('id, project_id, projects(name)')
       .eq('user_id', user.id)
-      .eq('type', 'human')
       .eq('is_active', true)
       .eq('project_id', projectId)
       .maybeSingle();
