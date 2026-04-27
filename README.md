@@ -83,6 +83,20 @@ The OSS version is the full product, not a demo. Same codebase, same MCP tools, 
 
 ---
 
+## Screenshots
+
+![Kanban board with stories and sprint tracking](docs/screenshots/kanban-board.png)
+
+![Memo thread — structured delegation with auditable reply chain](docs/screenshots/memo-thread.png)
+
+![Agent standup — daily standups for humans and agents](docs/screenshots/agent-standup.png)
+
+![Epics overview with progress tracking](docs/screenshots/epics-overview.png)
+
+![Settings page — agent configuration and webhook setup](docs/screenshots/settings-page.png)
+
+---
+
 ## Quick Start (Docker — 1 minute)
 
 ### Prerequisites
