@@ -1,6 +1,7 @@
 'use client';
 
 import { useEffect, useState } from 'react';
+import Link from 'next/link';
 import { useTranslations } from 'next-intl';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
@@ -156,7 +157,7 @@ export default function RetroPage() {
           ) : (
             <div className="space-y-3">
               {sessions.map((session) => (
-                <div key={session.id} className="flex flex-col gap-3 rounded-md border border-border bg-card p-4 shadow-sm md:flex-row md:items-center md:justify-between">
+                <Link key={session.id} href={`/retro/${session.id}`} className="flex flex-col gap-3 rounded-md border border-border bg-card p-4 shadow-sm transition hover:bg-muted/40 md:flex-row md:items-center md:justify-between">
                   <div className="space-y-1">
                     <p className="text-sm font-semibold text-foreground">{session.title}</p>
                     <p className="text-xs text-muted-foreground">{new Date(session.created_at).toLocaleDateString()}</p>
@@ -164,7 +165,7 @@ export default function RetroPage() {
                   <Badge variant={PHASE_VARIANTS[session.phase] ?? 'outline'}>
                     {PHASE_KEYS[session.phase] ? t(PHASE_KEYS[session.phase] as 'phaseCollect') : session.phase}
                   </Badge>
-                </div>
+                </Link>
               ))}
             </div>
           )}
