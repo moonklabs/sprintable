@@ -44,7 +44,22 @@
     "workspace": "워크스페이스",
     "configure": "환경설정",
     "sprints": "스프린트",
+    "search": "검색…",
     "help": "도움말"
+  },
+  "commandPalette": {
+    "title": "커맨드 팔레트",
+    "placeholder": "명령, 메모 ID, 에이전트 이름 입력…",
+    "navigate": "이동",
+    "actions": "작업",
+    "noResults": "결과 없음",
+    "close": "닫기",
+    "goInbox": "인박스로 이동",
+    "goDashboard": "대시보드로 이동",
+    "goBoard": "보드로 이동",
+    "goMemos": "메모로 이동",
+    "goAgents": "에이전트로 이동",
+    "goDocs": "문서로 이동"
   },
   "dashboard": {
     "title": "대시보드",
