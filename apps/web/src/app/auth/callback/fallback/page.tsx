@@ -119,7 +119,7 @@ function FallbackHandler() {
           writeSessionCookies(tokenData);
         }
 
-        const redirectTo = next && next.startsWith('/') ? next : '/dashboard';
+        const redirectTo = next && next.startsWith('/') ? next : '/inbox';
         window.location.replace(redirectTo);
       } catch {
         router.replace('/login?error=auth_failed');

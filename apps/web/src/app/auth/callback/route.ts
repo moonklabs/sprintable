@@ -44,10 +44,10 @@ export async function GET(request: Request) {
           .eq('user_id', user.id)
           .limit(1)
           .maybeSingle();
-        return NextResponse.redirect(`${origin}${membership ? '/dashboard' : '/onboarding'}`);
+        return NextResponse.redirect(`${origin}${membership ? '/inbox' : '/onboarding'}`);
       }
 
-      return NextResponse.redirect(`${origin}/dashboard`);
+      return NextResponse.redirect(`${origin}/inbox`);
     }
 
     // 서버 교환 실패 시 클라이언트 fallback으로
