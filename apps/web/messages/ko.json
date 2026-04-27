@@ -994,7 +994,11 @@
     "hoursAgo": "시간 전",
     "selectToView": "알림을 선택하면 상세 내용을 볼 수 있습니다",
     "detailEmptyTitle": "선택된 알림이 없습니다",
-    "receivedAt": "수신 시각"
+    "receivedAt": "수신 시각",
+    "decisionsWaiting": "결정 대기",
+    "decisionsErrorRetry": "처리에 실패했습니다. 잠시 후 다시 시도해 주세요.",
+    "priorityHigh": "긴급",
+    "dismiss": "보류"
   },
   "invite": {
     "title": "조직 초대",
