@@ -28,15 +28,21 @@ function rateLimitedFetch(input: RequestInfo | URL, init?: RequestInit): Promise
       rateLimitBlockedUntil.set(url, Date.now() + backoffSec * 1000);
     }
 
-    // refresh_token_already_used (HTTP 400) — SDK 재시도 루프 차단
-    // 같은 URL로의 10분 backoff를 설정해 자동 refresh 루프를 중단시킴.
+    // refresh_token_already_used (HTTP 400) — sb-* 쿠키 클리어 후 /login 리다이렉트
     if (response.status === 400 && url.includes('/token')) {
       try {
         const body = await response.clone().json() as Record<string, string>;
         const msg = (body.error_description ?? body.message ?? '').toLowerCase();
         const code = body.error ?? body.code ?? '';
         if (msg.includes('already used') || msg.includes('already_used') || code === 'invalid_grant' || code === 'refresh_token_already_used') {
-          rateLimitBlockedUntil.set(url, Date.now() + 600_000);
+          // sb-* auth 쿠키 전량 삭제 후 /login 리다이렉트
+          document.cookie.split(';').forEach((c) => {
+            const name = c.trim().split('=')[0];
+            if (name?.startsWith('sb-')) {
+              document.cookie = `${name}=; expires=Thu, 01 Jan 1970 00:00:00 UTC; path=/`;
+            }
+          });
+          window.location.href = '/login';
         }
       } catch { /* body parse 실패 무시 */ }
     }
