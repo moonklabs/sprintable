@@ -994,7 +994,11 @@
     "hoursAgo": "h ago",
     "selectToView": "Select a notification to view details",
     "detailEmptyTitle": "No notification selected",
-    "receivedAt": "Received"
+    "receivedAt": "Received",
+    "decisionsWaiting": "Decisions waiting",
+    "decisionsErrorRetry": "Action failed. Please retry shortly.",
+    "priorityHigh": "Urgent",
+    "dismiss": "Dismiss"
   },
   "invite": {
     "title": "Organization Invitation",

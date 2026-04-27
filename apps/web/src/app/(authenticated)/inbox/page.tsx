@@ -8,6 +8,7 @@ import { createSupabaseBrowserClient } from '@/lib/supabase/client';
 import { Button } from '@/components/ui/button';
 import { TopBarSlot } from '@/components/nav/top-bar-slot';
 import { Badge } from '@/components/ui/badge';
+import { DecisionsWaiting } from '@/components/inbox/decisions-waiting';
 import { useDashboardContext } from '../../dashboard/dashboard-shell';
 import { useToast, ToastContainer } from '@/components/ui/toast';
 import {
@@ -207,7 +208,10 @@ export default function InboxPage() {
         }
       />
 
-      <div className="flex min-h-0 flex-1 overflow-hidden">
+      <div className="flex min-h-0 flex-1 flex-col overflow-hidden">
+        <DecisionsWaiting onChange={() => void refreshNotifications()} />
+
+        <div className="flex min-h-0 flex-1 overflow-hidden">
         {/* Left: notification list */}
         <div className="flex w-full max-w-[420px] min-w-[320px] flex-col border-r border-border/80">
           <div className="flex-1 overflow-y-auto px-3 py-3">
@@ -317,6 +321,7 @@ export default function InboxPage() {
               <p className="text-sm font-medium text-[color:var(--operator-muted)]">{t('selectToView')}</p>
             </div>
           )}
+        </div>
         </div>
       </div>
 
