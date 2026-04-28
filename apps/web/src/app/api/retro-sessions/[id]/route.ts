@@ -26,10 +26,12 @@ export async function GET(request: Request, { params }: RouteParams) {
     if (!projectId) return ApiErrors.badRequest('project_id required');
 
     if (isOssMode()) {
-      const session = getOssRetroSession(id, projectId);
+      const session = await getOssRetroSession(id, projectId);
       if (!session) return ApiErrors.notFound('Session not found');
-      const items = listOssRetroItems(id, projectId);
-      const actions = listOssRetroActions(id, projectId);
+      const [items, actions] = await Promise.all([
+        listOssRetroItems(id, projectId),
+        listOssRetroActions(id, projectId),
+      ]);
       return apiSuccess({ session, items, actions });
     }
 
@@ -64,7 +66,7 @@ export async function PATCH(request: Request, { params }: RouteParams) {
     if (!body.phase) return ApiErrors.badRequest('phase required');
 
     if (isOssMode()) {
-      const data = advanceOssRetroPhase(id, projectId, body.phase as RetroPhase);
+      const data = await advanceOssRetroPhase(id, projectId, body.phase as RetroPhase);
       return apiSuccess(data);
     }
 

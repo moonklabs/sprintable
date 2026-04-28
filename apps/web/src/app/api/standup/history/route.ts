@@ -22,7 +22,7 @@ export async function GET(request: Request) {
     const limit = searchParams.get('limit') ? Number(searchParams.get('limit')) : 50;
 
     if (isOssMode()) {
-      return apiSuccess(getOssStandupHistory(projectId, limit));
+      return apiSuccess(await getOssStandupHistory(projectId, limit));
     }
 
     const dbClient: SupabaseClient = me.type === 'agent' ? createSupabaseAdminClient() : supabase;

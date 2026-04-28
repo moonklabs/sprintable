@@ -158,11 +158,17 @@ export async function createAgentRunBillingRepository(supabase?: unknown): Promi
 }
 
 export async function createAgentRunRepository(): Promise<IAgentRunRepository> {
-  const { SqliteAgentRunRepository, getDb } = await import('@sprintable/storage-sqlite');
-  return new SqliteAgentRunRepository(getDb());
+  if (isOssMode()) {
+    const { SqliteAgentRunRepository, getDb } = await import('@sprintable/storage-sqlite');
+    return new SqliteAgentRunRepository(getDb());
+  }
+  throw new Error('AgentRunRepository is only available in OSS mode');
 }
 
 export async function createAgentApiKeyRepository(): Promise<IAgentApiKeyRepository> {
-  const { SqliteAgentApiKeyRepository, getDb } = await import('@sprintable/storage-sqlite');
-  return new SqliteAgentApiKeyRepository(getDb());
+  if (isOssMode()) {
+    const { SqliteAgentApiKeyRepository, getDb } = await import('@sprintable/storage-sqlite');
+    return new SqliteAgentApiKeyRepository(getDb());
+  }
+  throw new Error('AgentApiKeyRepository is only available in OSS mode');
 }

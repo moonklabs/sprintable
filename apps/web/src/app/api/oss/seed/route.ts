@@ -1,6 +1,5 @@
 import { isOssMode, createStoryRepository, createProjectRepository } from '@/lib/storage/factory';
 import { apiSuccess, apiError } from '@/lib/api-response';
-import { OSS_PROJECT_ID, OSS_ORG_ID } from '@sprintable/storage-sqlite';
 
 const SAMPLE_STORIES = [
   { title: 'SPR-1: GitHub Webhook 연동하기', status: 'backlog' as const, priority: 'high' as const },
@@ -14,6 +13,7 @@ export async function POST() {
   }
 
   try {
+    const { OSS_PROJECT_ID, OSS_ORG_ID } = await import('@sprintable/storage-sqlite');
     const storyRepo = await createStoryRepository();
     const existing = await storyRepo.list({ project_id: OSS_PROJECT_ID, limit: 1 });
 

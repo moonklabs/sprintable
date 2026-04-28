@@ -18,7 +18,7 @@ export async function GET(request: Request) {
     const projectId = searchParams.get('project_id');
     if (!projectId) return ApiErrors.badRequest('project_id required');
     if (isOssMode()) {
-      return apiSuccess(listOssRetroSessions(projectId));
+      return apiSuccess(await listOssRetroSessions(projectId));
     }
     const dbClient = me.type === 'agent' ? createSupabaseAdminClient() : supabase;
     const service = new RetroService(dbClient);
@@ -34,7 +34,7 @@ export async function POST(request: Request) {
     if (me.rateLimitExceeded) return ApiErrors.tooManyRequests(me.rateLimitRemaining, me.rateLimitResetAt);
     const parsed = await parseBody(request, createRetroSchema); if (!parsed.success) return parsed.response; const body = parsed.data;
     if (isOssMode()) {
-      const session = createOssRetroSession({
+      const session = await createOssRetroSession({
         org_id: me.org_id,
         project_id: body.project_id ?? me.project_id,
         title: body.title,

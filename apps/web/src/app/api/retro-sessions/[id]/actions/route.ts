@@ -49,7 +49,7 @@ export async function POST(request: Request, { params }: RouteParams) {
     if (!body.title) return ApiErrors.badRequest('title required');
 
     if (isOssMode()) {
-      const data = addOssRetroAction({ session_id: id, project_id: projectId, title: body.title, assignee_id: body.assignee_id ?? null });
+      const data = await addOssRetroAction({ session_id: id, project_id: projectId, title: body.title, assignee_id: body.assignee_id ?? null });
       return apiSuccess(data);
     }
 
