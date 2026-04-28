@@ -27,7 +27,7 @@ export async function POST(request: Request, { params }: RouteParams) {
     const voterId = body.voter_id ?? me.id;
 
     if (isOssMode()) {
-      const data = voteOssRetroItem(item_id, voterId, projectId);
+      const data = await voteOssRetroItem(item_id, voterId, projectId);
       return apiSuccess(data);
     }
 

@@ -25,7 +25,7 @@ export async function GET(request: Request, { params }: RouteParams) {
     if (me.rateLimitExceeded) return ApiErrors.tooManyRequests(me.rateLimitRemaining, me.rateLimitResetAt);
 
     if (isOssMode()) {
-      return apiSuccess(listOssStandupFeedbackForEntry(entryId));
+      return apiSuccess(await listOssStandupFeedbackForEntry(entryId));
     }
 
     const dbClient: SupabaseClient = me.type === 'agent' ? createSupabaseAdminClient() : supabase;
@@ -56,7 +56,7 @@ export async function PATCH(request: Request, { params }: RouteParams) {
     const body = parsed.data;
 
     if (isOssMode()) {
-      return apiSuccess(updateOssStandupFeedback(id, body, me.id));
+      return apiSuccess(await updateOssStandupFeedback(id, body, me.id));
     }
 
     const service = new StandupFeedbackService(dbClient);
@@ -76,7 +76,7 @@ export async function DELETE(request: Request, { params }: RouteParams) {
     if (me.rateLimitExceeded) return ApiErrors.tooManyRequests(me.rateLimitRemaining, me.rateLimitResetAt);
 
     if (isOssMode()) {
-      deleteOssStandupFeedback(id, me.id);
+      await deleteOssStandupFeedback(id, me.id);
       return apiSuccess({ ok: true });
     }
 

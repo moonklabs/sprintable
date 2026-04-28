@@ -25,9 +25,9 @@ export async function GET(request: Request) {
 
     if (isOssMode()) {
       if (memberId) {
-        return apiSuccess(getOssStandupEntryForUser(projectId, memberId, date));
+        return apiSuccess(await getOssStandupEntryForUser(projectId, memberId, date));
       }
-      return apiSuccess(listOssStandupEntries(projectId, date));
+      return apiSuccess(await listOssStandupEntries(projectId, date));
     }
 
     const dbClient: SupabaseClient = me.type === 'agent' ? createSupabaseAdminClient() : supabase;
@@ -70,7 +70,7 @@ export async function POST(request: Request) {
     const body = parsed.data;
 
     if (ossMode) {
-      const entry = saveOssStandupEntry({
+      const entry = await saveOssStandupEntry({
         project_id: me.project_id,
         org_id: me.org_id,
         author_id: authorId,
@@ -129,7 +129,7 @@ export async function PUT(request: Request) {
       }
       const body = parsed.data;
 
-      const entry = saveOssStandupEntry({
+      const entry = await saveOssStandupEntry({
         project_id: me.project_id,
         org_id: me.org_id,
         author_id: me.id,

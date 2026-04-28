@@ -8,6 +8,7 @@ const nextConfig: NextConfig = {
   devIndicators: {
     position: 'bottom-right',
   },
+  serverExternalPackages: ['@sprintable/storage-sqlite'],
 };
 
 export default withNextIntl(nextConfig);

@@ -23,7 +23,7 @@ export async function GET(request: Request) {
     if (!date) return ApiErrors.badRequest('date required');
 
     if (isOssMode()) {
-      return apiSuccess(getOssStandupMissing(projectId, date));
+      return apiSuccess(await getOssStandupMissing(projectId, date));
     }
 
     const dbClient: SupabaseClient = me.type === 'agent' ? createSupabaseAdminClient() : supabase;

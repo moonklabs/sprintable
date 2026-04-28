@@ -22,7 +22,7 @@ export async function GET(request: Request) {
     if (!projectId || !date) return ApiErrors.badRequest('project_id and date required');
 
     if (isOssMode()) {
-      return apiSuccess(listOssStandupFeedbackByDate(projectId, date));
+      return apiSuccess(await listOssStandupFeedbackByDate(projectId, date));
     }
 
     const dbClient: SupabaseClient = me.type === 'agent' ? createSupabaseAdminClient() : supabase;
@@ -49,7 +49,7 @@ export async function POST(request: Request) {
     const body = parsed.data;
 
     if (ossMode) {
-      const feedback = createOssStandupFeedback({
+      const feedback = await createOssStandupFeedback({
         project_id: me.project_id,
         org_id: me.org_id,
         standup_entry_id: body.standup_entry_id,
