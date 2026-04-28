@@ -53,7 +53,7 @@ export async function POST(request: Request, { params }: RouteParams) {
     const author_id = body.author_id ?? me.id;
 
     if (isOssMode()) {
-      const data = addOssRetroItem({ session_id: id, project_id: projectId, category: body.category as RetroCategory, text: body.text, author_id: body.author_id });
+      const data = addOssRetroItem({ session_id: id, project_id: projectId, category: body.category as RetroCategory, text: body.text!, author_id: author_id });
       return apiSuccess(data);
     }
 
