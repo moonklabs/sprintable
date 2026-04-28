@@ -967,7 +967,9 @@
     "codeCopy": "코드 복사",
     "codeCopied": "복사됨",
     "moveCircularError": "문서를 자신의 하위로 이동할 수 없습니다",
-    "movePermissionError": "이 위치로 문서를 이동할 권한이 없습니다"
+    "movePermissionError": "이 위치로 문서를 이동할 권한이 없습니다",
+    "tagFilter": "태그",
+    "clearFilter": "필터 지우기"
   },
   "rewards": {
     "title": "리워드",
