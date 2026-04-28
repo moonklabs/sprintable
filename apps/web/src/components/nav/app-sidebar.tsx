@@ -19,6 +19,7 @@ import {
   Users,
 } from 'lucide-react';
 import { LocaleSwitcher } from '@/components/locale-switcher';
+import { ThemeToggle } from '@/components/nav/theme-toggle';
 import { CommandPalette } from '@/components/command-palette/command-palette';
 import { ProjectSwitcher } from '@/components/nav/project-switcher';
 import {
@@ -281,7 +282,10 @@ export function AppSidebar({
 
       <SidebarFooter className="p-2">
         <div className="flex items-center justify-between gap-2">
-          <LocaleSwitcher />
+          <div className="flex items-center gap-2">
+            <LocaleSwitcher />
+            <ThemeToggle />
+          </div>
           <Link
             href="/docs"
             aria-label={t('help')}
