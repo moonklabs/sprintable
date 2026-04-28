@@ -88,7 +88,7 @@ export function DocContentRenderer({
   }, [codeCopyLabel, content, contentFormat, headings]);
 
   const rootClassName = cn(
-    'doc-renderer prose prose-invert prose-sm max-w-none text-[color:var(--operator-foreground)]',
+    'doc-renderer prose dark:prose-invert prose-sm max-w-none text-[color:var(--operator-foreground)]',
     '[&_h1]:scroll-mt-24 [&_h1]:text-3xl [&_h1]:font-bold [&_h1]:tracking-tight',
     '[&_h2]:scroll-mt-24 [&_h2]:mt-10 [&_h2]:text-2xl [&_h2]:font-semibold',
     '[&_h3]:scroll-mt-24 [&_h3]:mt-8 [&_h3]:text-xl [&_h3]:font-semibold',
@@ -101,8 +101,8 @@ export function DocContentRenderer({
     '[&_td]:border [&_td]:border-white/10 [&_td]:px-3 [&_td]:py-2',
     '[&_hr]:my-8 [&_hr]:border-white/10',
     '[&_ul]:space-y-2 [&_ol]:space-y-2',
-    '[&_pre]:overflow-x-auto [&_pre]:rounded-2xl [&_pre]:border [&_pre]:border-white/10 [&_pre]:bg-[#0b1120] [&_pre]:p-4 [&_pre]:text-[13px] [&_pre]:leading-6',
-    '[&_code]:rounded-md [&_code]:bg-white/10 [&_code]:px-1.5 [&_code]:py-0.5 [&_code]:text-[0.95em]',
+    '[&_pre]:overflow-x-auto [&_pre]:rounded-2xl [&_pre]:border [&_pre]:border-white/10 [&_pre]:bg-gray-50 [&_pre]:text-gray-900 [&_pre]:dark:bg-[#0b1120] [&_pre]:dark:text-gray-100 [&_pre]:p-4 [&_pre]:text-[13px] [&_pre]:leading-6',
+    '[&_code]:rounded-md [&_code]:bg-gray-100 [&_code]:text-gray-800 [&_code]:dark:bg-white/10 [&_code]:dark:text-gray-200 [&_code]:px-1.5 [&_code]:py-0.5 [&_code]:text-[0.95em]',
     '[&_pre_code]:bg-transparent [&_pre_code]:p-0',
     '[&_[data-doc-code-shell="true"]]:not-prose [&_[data-doc-code-shell="true"]]:my-6',
     '[&_[data-doc-code-actions="true"]]:mb-2 [&_[data-doc-code-actions="true"]]:flex [&_[data-doc-code-actions="true"]]:justify-end',
