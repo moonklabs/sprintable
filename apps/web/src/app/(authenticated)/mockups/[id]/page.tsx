@@ -9,8 +9,8 @@ import { Button } from '@/components/ui/button';
 import { OperatorSelect } from '@/components/ui/operator-control';
 import { EmptyState } from '@/components/ui/empty-state';
 import { PageSkeleton } from '@/components/ui/page-skeleton';
-import { PageHeader } from '@/components/ui/page-header';
-import { SectionCard, SectionCardBody, SectionCardHeader } from '@/components/ui/section-card';
+import { ChevronRight } from 'lucide-react';
+import { TopBarSlot } from '@/components/nav/top-bar-slot';
 
 interface MockupComponent {
   id: string;
@@ -38,7 +38,6 @@ interface MockupData {
 
 export default function MockupViewerPage() {
   const t = useTranslations('mockup');
-  const tc = useTranslations('common');
   const params = useParams();
   const [mockup, setMockup] = useState<MockupData | null>(null);
   const [loading, setLoading] = useState(true);
@@ -102,20 +101,25 @@ export default function MockupViewerPage() {
 
   return (
     <div className="space-y-4">
-      <PageHeader
-        eyebrow={tc('operatorSurface')}
-        title={mockup.title}
-        actions={(
+      <TopBarSlot
+        title={
+          <div className="flex items-center gap-1.5">
+            <span className="text-sm text-muted-foreground">{t('title')}</span>
+            <ChevronRight className="h-3.5 w-3.5 text-muted-foreground" />
+            <h1 className="text-sm font-medium">{mockup.title}</h1>
+          </div>
+        }
+        actions={
           <div className="flex items-center gap-2">
             <Badge variant="outline">{mockup.viewport === 'mobile' ? t('mobile') : t('desktop')}</Badge>
             <Badge variant="info">v{mockup.version}</Badge>
           </div>
-        )}
+        }
       />
 
       <div className="grid gap-4 xl:grid-cols-[minmax(0,1fr)_360px]">
-        <SectionCard>
-          <SectionCardHeader>
+        <div>
+          <div className="border-b border-border/80 px-4 py-3">
             <div className="flex flex-wrap items-center justify-between gap-3">
               <div className="text-sm font-semibold text-[color:var(--operator-foreground)]">{t('title')}</div>
               {scenarios.length > 0 ? (
@@ -129,8 +133,8 @@ export default function MockupViewerPage() {
                 </OperatorSelect>
               ) : null}
             </div>
-          </SectionCardHeader>
-          <SectionCardBody>
+          </div>
+          <div className="px-4 py-4">
             <div className="rounded-3xl border border-white/8 bg-[color:var(--operator-surface-soft)]/35 p-4" onClick={() => setSelectedId(null)}>
               <div className={`mx-auto bg-white text-black shadow-lg ${isMobile ? 'w-[375px] rounded-[2rem] border-4 border-gray-800 p-4' : 'w-full max-w-4xl rounded-2xl p-6'}`}>
                 {rootComponents.length === 0 ? (
@@ -140,17 +144,17 @@ export default function MockupViewerPage() {
                 )}
               </div>
             </div>
-          </SectionCardBody>
-        </SectionCard>
+          </div>
+        </div>
 
-        <SectionCard>
-          <SectionCardHeader>
+        <div>
+          <div className="border-b border-border/80 px-4 py-3">
             <div className="flex items-center justify-between gap-3">
               <div className="text-sm font-semibold text-[color:var(--operator-foreground)]">{selectedComponent?.component_type ?? t('selectComponent')}</div>
               <Button variant="glass" size="sm" onClick={() => setSelectedId(null)} disabled={!selectedComponent}>✕</Button>
             </div>
-          </SectionCardHeader>
-          <SectionCardBody>
+          </div>
+          <div className="px-4 py-4">
             {selectedComponent ? (
               <div className="space-y-4">
                 {selectedComponent.spec_description ? (
@@ -168,8 +172,8 @@ export default function MockupViewerPage() {
             ) : (
               <EmptyState title={t('selectComponent')} />
             )}
-          </SectionCardBody>
-        </SectionCard>
+          </div>
+        </div>
       </div>
     </div>
   );

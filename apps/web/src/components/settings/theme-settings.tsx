@@ -2,7 +2,7 @@
 
 import { useTheme } from 'next-themes';
 import { useEffect, useState } from 'react';
-import { OperatorSelect } from '@/components/ui/operator-control';
+import { OperatorDropdownSelect } from '@/components/ui/operator-dropdown-select';
 import { SectionCard, SectionCardBody, SectionCardHeader } from '@/components/ui/section-card';
 
 export function ThemeSettings() {
@@ -35,14 +35,15 @@ export function ThemeSettings() {
             <label className="block text-sm font-medium mb-2 text-[color:var(--operator-foreground)]">
               테마 선택
             </label>
-            <OperatorSelect
+            <OperatorDropdownSelect
               value={theme || 'system'}
-              onChange={(e) => setTheme(e.target.value as 'light' | 'dark' | 'system')}
-            >
-              <option value="light">라이트 모드</option>
-              <option value="dark">다크 모드</option>
-              <option value="system">시스템 설정</option>
-            </OperatorSelect>
+              onValueChange={(v) => setTheme(v as 'light' | 'dark' | 'system')}
+              options={[
+                { value: 'light', label: '라이트 모드' },
+                { value: 'dark', label: '다크 모드' },
+                { value: 'system', label: '시스템 설정' },
+              ]}
+            />
           </div>
 
           {theme === 'system' && (

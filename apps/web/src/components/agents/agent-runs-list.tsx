@@ -7,8 +7,7 @@ import { Activity, ArrowLeft, ChevronDown, Clock3, Cpu, Hash, Zap } from 'lucide
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { EmptyState } from '@/components/ui/empty-state';
-import { PageHeader } from '@/components/ui/page-header';
-import { SectionCard, SectionCardBody, SectionCardHeader } from '@/components/ui/section-card';
+import { TopBarSlot } from '@/components/nav/top-bar-slot';
 import {
   ALL_RUN_STATUS_FILTER,
   DEFAULT_RUN_STATUS_FILTER,
@@ -167,23 +166,12 @@ export function AgentRunsList() {
   }
 
   return (
-    <div className="space-y-4">
-      <PageHeader
-        eyebrow={t('eyebrow')}
-        title={t('title')}
-        description={t('description')}
-        actions={
-          <Link href="/agents">
-            <Button variant="glass" size="lg">
-              <ArrowLeft className="mr-2 size-4" />
-              {t('backToAgents')}
-            </Button>
-          </Link>
-        }
-      />
+    <>
+      <TopBarSlot title={<h1 className="text-sm font-medium">{t('title')}</h1>} />
 
-      <SectionCard>
-        <SectionCardHeader>
+      <div className="flex min-h-0 flex-1 flex-col overflow-hidden">
+        {/* Filters */}
+        <div className="flex-shrink-0 border-b border-border/80 px-6 py-3">
           <div className="flex flex-col gap-2 sm:flex-row sm:flex-wrap sm:items-center">
             <div className="flex flex-wrap items-center gap-2">
               {STATUS_FILTERS.map((s) => (
@@ -215,8 +203,9 @@ export function AgentRunsList() {
               />
             </div>
           </div>
-        </SectionCardHeader>
-        <SectionCardBody>
+        </div>
+        {/* Runs list */}
+        <div className="flex-1 overflow-y-auto px-6 py-4">
           {loading ? (
             <div className="space-y-3">
               {[1, 2, 3, 4, 5].map((i) => (
@@ -304,8 +293,8 @@ export function AgentRunsList() {
               )}
             </div>
           )}
-        </SectionCardBody>
-      </SectionCard>
-    </div>
+        </div>
+      </div>
+    </>
   );
 }

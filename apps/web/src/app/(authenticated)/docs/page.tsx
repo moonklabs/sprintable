@@ -10,7 +10,7 @@ export default function DocsPage() {
 
   if (!projectId) {
     return (
-      <div className="flex min-h-screen items-center justify-center">
+      <div className="flex h-64 items-center justify-center">
         <p className="text-sm text-gray-400">{t('noProject')}</p>
       </div>
     );

@@ -134,22 +134,22 @@ export function StoryCard({ story, epicName, assignee, onClick, onEdit, onChange
       {...listeners}
       onClick={onClick}
       onContextMenu={handleContextMenu}
-      className={`group relative cursor-pointer overflow-hidden rounded-xl border p-4 transition ${
+      className={`group relative cursor-pointer overflow-hidden rounded-lg p-3 transition ${
         assignee?.type === 'agent'
-          ? 'border-cyan-500/45 bg-[linear-gradient(135deg,rgba(6,182,212,0.08),rgba(168,85,247,0.04))] shadow-[0_0_15px_rgba(6,182,212,0.12)] hover:border-cyan-400 hover:shadow-[0_0_22px_rgba(6,182,212,0.18)]'
-          : 'border-border/80 bg-background shadow-sm hover:border-primary/30 hover:shadow-md'
+          ? 'bg-[linear-gradient(135deg,rgba(6,182,212,0.08),rgba(168,85,247,0.04))] ring-1 ring-cyan-500/30 hover:ring-cyan-400/60'
+          : 'bg-background shadow-sm hover:shadow-md hover:bg-background'
       }`}
     >
       {assignee?.type === 'agent' && (
         <div className="absolute inset-0 pointer-events-none rounded-lg border border-transparent bg-gradient-to-r from-cyan-500/10 to-purple-500/10 opacity-50" />
       )}
       {epicName && story.epic_id ? (
-        <Badge variant={getEpicColor(story.epic_id)} className="mb-3 max-w-full truncate">
-          {epicName}
+        <Badge variant={getEpicColor(story.epic_id)} className="mb-3 max-w-full">
+          <span className="min-w-0 truncate leading-none">{epicName}</span>
         </Badge>
       ) : null}
-      <p className="relative z-10 line-clamp-2 text-[15px] font-semibold leading-5 text-foreground">{story.title}</p>
-      <div className="relative z-10 mt-4 flex items-center justify-between gap-2 border-t border-border/60 pt-3">
+      <p className="relative z-10 line-clamp-2 text-sm font-medium leading-5 text-foreground">{story.title}</p>
+      <div className="relative z-10 mt-3 flex items-center justify-between gap-2">
         <div className="flex items-center gap-2">
           {assignee ? (
             <div className={`flex h-6 w-6 items-center justify-center rounded-full border text-[10px] font-medium ${
@@ -173,7 +173,7 @@ export function StoryCard({ story, epicName, assignee, onClick, onEdit, onChange
           )}
         </div>
         <div className="flex items-center gap-2">
-          <span className="max-w-[104px] truncate font-mono text-[10px] text-muted-foreground">{story.id}</span>
+          <span className="font-mono text-[10px] text-muted-foreground/50">#{story.id.slice(0, 6)}</span>
           {story.story_points != null ? (
             <Badge variant="secondary" className="font-mono text-[10px] px-1.5 py-0">{story.story_points}</Badge>
           ) : null}

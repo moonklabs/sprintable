@@ -123,7 +123,7 @@ function MemoFeedItem({ memo, isSelected, onClick, memberMap }: MemoFeedItemProp
             <span className="text-[10px] text-[color:var(--operator-muted)]">{t('repliesCountBadge', { count: memo.reply_count ?? 0 })}</span>
           )}
           {hasUnread && (
-            <div className="flex h-4 w-4 items-center justify-center rounded-full bg-blue-500 text-[10px] text-white">
+            <div className="flex h-4 w-4 items-center justify-center rounded-full bg-primary text-[10px] text-primary-foreground">
               {memo.unread_count}
             </div>
           )}

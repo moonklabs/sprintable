@@ -180,7 +180,7 @@ function renderWithMentions(text: string, isCurrentUser: boolean): React.ReactNo
   return parts.map((part, i) => {
     if (/^@[\w가-힣]+$/.test(part)) {
       return (
-        <span key={`${part}-${i}`} className={`font-semibold ${isCurrentUser ? 'text-blue-200' : 'text-[color:var(--operator-primary)]'}`}>
+        <span key={`${part}-${i}`} className={`font-semibold ${isCurrentUser ? 'text-primary-foreground/90' : 'text-[color:var(--operator-primary)]'}`}>
           {part}
         </span>
       );
@@ -197,7 +197,7 @@ function ThreadMessage({ content, authorId, timestamp, isCurrentUser, reviewType
       <div
         className={`
           max-w-[86%] rounded-xl px-4 py-2.5 shadow-sm lg:max-w-[64%]
-          ${isCurrentUser ? 'bg-blue-600 text-white' : 'border border-white/8 bg-background text-[color:var(--operator-foreground)]'}
+          ${isCurrentUser ? 'bg-primary text-primary-foreground' : 'border border-white/8 bg-background text-[color:var(--operator-foreground)]'}
           ${reviewType === 'approve' ? 'border-2 border-green-500' : ''}
           ${reviewType === 'request_changes' ? 'border-2 border-red-500' : ''}
         `}
@@ -211,7 +211,7 @@ function ThreadMessage({ content, authorId, timestamp, isCurrentUser, reviewType
         <div className="whitespace-pre-wrap break-words text-[14px] leading-6">
           {renderWithMentions(content, isCurrentUser)}
         </div>
-        <div className={`mt-1.5 text-[11px] ${isCurrentUser ? 'text-blue-200' : 'text-[color:var(--operator-muted)]'}`}>
+        <div className={`mt-1.5 text-[11px] ${isCurrentUser ? 'text-primary-foreground/70' : 'text-[color:var(--operator-muted)]'}`}>
           {new Date(timestamp).toLocaleTimeString()}
         </div>
       </div>

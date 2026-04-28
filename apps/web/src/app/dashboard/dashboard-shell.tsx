@@ -1,8 +1,12 @@
 'use client';
 
 import { createContext, useContext } from 'react';
+import { usePathname } from 'next/navigation';
 import { RealtimeProvider } from '@/components/realtime-provider';
-import { OperatorShell } from '@/components/nav/operator-shell';
+import { AppSidebar } from '@/components/nav/app-sidebar';
+import { TopBar } from '@/components/nav/top-bar';
+import { TopBarProvider } from '@/components/nav/top-bar-context';
+import { SidebarProvider, SidebarInset } from '@/components/ui/sidebar';
 
 export interface DashboardProjectOption {
   projectId: string;
@@ -27,18 +31,36 @@ interface DashboardShellProps extends DashboardContext {
   children: React.ReactNode;
 }
 
-export function DashboardShell({ currentTeamMemberId, orgId, projectId, projectName, projectMemberships, children }: DashboardShellProps) {
+export function DashboardShell({
+  currentTeamMemberId,
+  orgId,
+  projectId,
+  projectName,
+  projectMemberships,
+  children,
+}: DashboardShellProps) {
+  const pathname = usePathname();
+  const showTopBar = !pathname.startsWith('/settings');
+
   return (
     <DashboardCtx.Provider value={{ currentTeamMemberId, orgId, projectId, projectName, projectMemberships }}>
       <RealtimeProvider currentTeamMemberId={currentTeamMemberId}>
-        <OperatorShell
-          currentTeamMemberId={currentTeamMemberId}
-          projectId={projectId}
-          projectName={projectName}
-          projectMemberships={projectMemberships}
-        >
-          {children}
-        </OperatorShell>
+        <TopBarProvider>
+          <SidebarProvider className="h-svh">
+            <AppSidebar
+              currentTeamMemberId={currentTeamMemberId}
+              projectId={projectId}
+              projectName={projectName}
+              projectMemberships={projectMemberships}
+            />
+            <SidebarInset className="relative flex flex-col overflow-hidden">
+              {showTopBar && <TopBar />}
+              <div className="flex flex-1 min-h-0 flex-col overflow-y-auto">
+                {children}
+              </div>
+            </SidebarInset>
+          </SidebarProvider>
+        </TopBarProvider>
       </RealtimeProvider>
     </DashboardCtx.Provider>
   );

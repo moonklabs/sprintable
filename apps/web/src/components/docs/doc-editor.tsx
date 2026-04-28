@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useCallback, useRef } from 'react';
+import { useEffect, useCallback, useRef, useState } from 'react';
 import { useEditor, EditorContent } from '@tiptap/react';
 import StarterKit from '@tiptap/starter-kit';
 import Link from '@tiptap/extension-link';
@@ -17,6 +17,7 @@ import { CodeBlockWithCopy } from './extensions/code-block-copy';
 import { markdownToHtml, htmlToMarkdown } from './lib/content-converter';
 
 type ContentFormat = 'markdown' | 'html';
+type ViewMode = 'preview' | 'markdown';
 
 export function DocEditor({
   value,
@@ -26,23 +27,29 @@ export function DocEditor({
   onNavigate,
   onChange,
   onContentFormatChange,
+  onSave,
+  isDirty = false,
+  autosave = true,
+  onAutosaveToggle,
   labels,
 }: {
   value: string;
   contentFormat: ContentFormat;
   editable?: boolean;
-  /** ID of the currently open document — prevents self-embed in page-embed blocks. */
   currentDocId?: string;
-  /** Called when user clicks an embedded page link. */
   onNavigate?: (slug: string) => void;
   onChange: (value: string) => void;
-  onContentFormatChange: (format: ContentFormat) => void;
+  onContentFormatChange?: (format: ContentFormat) => void;
+  onSave?: () => Promise<boolean>;
+  isDirty?: boolean;
+  autosave?: boolean;
+  onAutosaveToggle?: (enabled: boolean) => void;
   labels: {
     contentFormat: string;
     markdown: string;
-    html: string;
+    preview: string;
+    save: string;
     toolbar: string;
-    hint: string;
     placeholder: string;
     h1: string;
     h2: string;
@@ -52,9 +59,11 @@ export function DocEditor({
     quote: string;
     code: string;
     link: string;
+    autosave: string;
   };
 }) {
   const suppressUpdateRef = useRef(false);
+  const [viewMode, setViewMode] = useState<ViewMode>('preview');
 
   const editor = useEditor({
     immediatelyRender: false,
@@ -85,19 +94,16 @@ export function DocEditor({
     },
   });
 
-  // Sync editable prop changes
   useEffect(() => {
     if (!editor) return;
     editor.setEditable(editable);
   }, [editor, editable]);
 
-  // Sync external value changes into the editor
   useEffect(() => {
     if (!editor) return;
     const currentHtml = editor.getHTML();
     const incomingHtml = contentFormat === 'markdown' ? markdownToHtml(value) : value;
 
-    // Avoid re-setting if content matches (prevents cursor jump)
     if (currentHtml === incomingHtml) return;
 
     const currentOutput = contentFormat === 'markdown' ? htmlToMarkdown(currentHtml) : currentHtml;
@@ -107,6 +113,20 @@ export function DocEditor({
     editor.commands.setContent(incomingHtml, { emitUpdate: false });
     suppressUpdateRef.current = false;
   }, [editor, value, contentFormat]);
+
+  const rawMarkdown = contentFormat === 'markdown' ? value : htmlToMarkdown(value);
+
+  const handleTextareaChange = useCallback(
+    (e: React.ChangeEvent<HTMLTextAreaElement>) => {
+      const md = e.target.value;
+      if (contentFormat === 'markdown') {
+        onChange(md);
+      } else {
+        onChange(markdownToHtml(md));
+      }
+    },
+    [contentFormat, onChange],
+  );
 
   const addLink = useCallback(() => {
     if (!editor) return;
@@ -126,89 +146,139 @@ export function DocEditor({
   }, [editor]);
 
   return (
-    <div className="space-y-4">
-      <div className="flex flex-wrap items-center gap-3 rounded-2xl border border-border/60 bg-muted/20 p-3">
-        <span className="text-xs font-medium text-muted-foreground">{labels.contentFormat}</span>
-        <div className="inline-flex rounded-xl border border-border bg-background p-1">
-          {(['markdown', 'html'] as const).map((format) => (
+    <div className="flex h-full flex-col overflow-hidden rounded-2xl border border-border/60 bg-background">
+      {/* Tab bar + toolbar */}
+      <div className="flex flex-shrink-0 flex-wrap items-center justify-between gap-2 border-b border-border/60 px-3 py-2">
+        {/* View mode tabs */}
+        <div className="inline-flex rounded-lg border border-border bg-muted/30 p-0.5">
+          {(['preview', 'markdown'] as const).map((mode) => (
             <button
-              key={format}
+              key={mode}
               type="button"
-              onClick={() => onContentFormatChange(format)}
-              className={`rounded-lg px-3 py-1 text-xs font-medium ${contentFormat === format ? 'bg-primary text-primary-foreground' : 'text-muted-foreground hover:text-foreground'}`}
+              onClick={() => setViewMode(mode)}
+              className={`rounded-md px-3 py-1 text-xs font-medium transition-colors ${
+                viewMode === mode
+                  ? 'bg-background text-foreground shadow-sm'
+                  : 'text-muted-foreground hover:text-foreground'
+              }`}
             >
-              {format === 'markdown' ? labels.markdown : labels.html}
+              {mode === 'preview' ? labels.preview : labels.markdown}
             </button>
           ))}
         </div>
-      </div>
 
-      <div className="rounded-2xl border border-border/60 bg-background">
-        {editor ? (
-          <>
-            <div className="flex flex-wrap items-center gap-1.5 border-b border-border/60 px-3 py-2">
-              <ToolbarButton
-                active={editor.isActive('heading', { level: 1 })}
-                onClick={() => editor.chain().focus().toggleHeading({ level: 1 }).run()}
-              >
-                {labels.h1}
-              </ToolbarButton>
-              <ToolbarButton
-                active={editor.isActive('heading', { level: 2 })}
-                onClick={() => editor.chain().focus().toggleHeading({ level: 2 }).run()}
-              >
-                {labels.h2}
-              </ToolbarButton>
-              <Sep />
-              <ToolbarButton
-                active={editor.isActive('bold')}
-                onClick={() => editor.chain().focus().toggleBold().run()}
-              >
-                {labels.bold}
-              </ToolbarButton>
-              <ToolbarButton
-                active={editor.isActive('italic')}
-                onClick={() => editor.chain().focus().toggleItalic().run()}
-              >
-                {labels.italic}
-              </ToolbarButton>
-              <Sep />
-              <ToolbarButton
-                active={editor.isActive('bulletList')}
-                onClick={() => editor.chain().focus().toggleBulletList().run()}
-              >
-                {labels.bullet}
-              </ToolbarButton>
-              <ToolbarButton
-                active={editor.isActive('blockquote')}
-                onClick={() => editor.chain().focus().toggleBlockquote().run()}
-              >
-                {labels.quote}
-              </ToolbarButton>
-              <ToolbarButton
-                active={editor.isActive('codeBlock')}
-                onClick={() => editor.chain().focus().toggleCodeBlock().run()}
-              >
-                {labels.code}
-              </ToolbarButton>
-              <Sep />
-              <ToolbarButton active={false} onClick={addLink}>
-                {labels.link}
-              </ToolbarButton>
-              <ToolbarButton active={false} onClick={addImage}>
-                🖼
-              </ToolbarButton>
-              <ToolbarButton active={false} onClick={insertTable}>
-                ⊞
-              </ToolbarButton>
-            </div>
-            <div className="tiptap-editor-wrapper p-3">
-              <EditorContent editor={editor} className="tiptap-content min-h-[420px] outline-none" />
-              <p className="mt-2 text-xs text-muted-foreground">{labels.hint}</p>
-            </div>
-          </>
+        {/* Toolbar — only in preview mode */}
+        {viewMode === 'preview' && editor ? (
+          <div className="flex flex-wrap items-center gap-1.5">
+            <ToolbarButton
+              active={editor.isActive('heading', { level: 1 })}
+              onClick={() => editor.chain().focus().toggleHeading({ level: 1 }).run()}
+            >
+              {labels.h1}
+            </ToolbarButton>
+            <ToolbarButton
+              active={editor.isActive('heading', { level: 2 })}
+              onClick={() => editor.chain().focus().toggleHeading({ level: 2 }).run()}
+            >
+              {labels.h2}
+            </ToolbarButton>
+            <Sep />
+            <ToolbarButton
+              active={editor.isActive('bold')}
+              onClick={() => editor.chain().focus().toggleBold().run()}
+            >
+              {labels.bold}
+            </ToolbarButton>
+            <ToolbarButton
+              active={editor.isActive('italic')}
+              onClick={() => editor.chain().focus().toggleItalic().run()}
+            >
+              {labels.italic}
+            </ToolbarButton>
+            <Sep />
+            <ToolbarButton
+              active={editor.isActive('bulletList')}
+              onClick={() => editor.chain().focus().toggleBulletList().run()}
+            >
+              {labels.bullet}
+            </ToolbarButton>
+            <ToolbarButton
+              active={editor.isActive('blockquote')}
+              onClick={() => editor.chain().focus().toggleBlockquote().run()}
+            >
+              {labels.quote}
+            </ToolbarButton>
+            <ToolbarButton
+              active={editor.isActive('codeBlock')}
+              onClick={() => editor.chain().focus().toggleCodeBlock().run()}
+            >
+              {labels.code}
+            </ToolbarButton>
+            <Sep />
+            <ToolbarButton active={false} onClick={addLink}>
+              {labels.link}
+            </ToolbarButton>
+            <ToolbarButton active={false} onClick={addImage}>
+              🖼
+            </ToolbarButton>
+            <ToolbarButton active={false} onClick={insertTable}>
+              ⊞
+            </ToolbarButton>
+          </div>
         ) : null}
       </div>
+
+      {/* Editor content — fills remaining height */}
+      {viewMode === 'markdown' ? (
+        <textarea
+          value={rawMarkdown}
+          onChange={handleTextareaChange}
+          readOnly={!editable}
+          className="flex-1 w-full resize-none bg-transparent p-4 font-mono text-sm leading-relaxed outline-none"
+          placeholder={labels.placeholder}
+        />
+      ) : (
+        <div className="tiptap-editor-wrapper flex-1 overflow-y-auto p-3">
+          <EditorContent editor={editor} className="tiptap-content h-full outline-none" />
+        </div>
+      )}
+
+      {/* Save bar — always visible when onSave is provided */}
+      {onSave ? (
+        <div className="flex flex-shrink-0 items-center justify-between border-t border-border/60 bg-muted/20 px-4 py-2.5">
+          {/* Autosave switch */}
+          {onAutosaveToggle ? (
+            <button
+              type="button"
+              role="switch"
+              aria-checked={autosave}
+              onClick={() => onAutosaveToggle(!autosave)}
+              className="flex items-center gap-1.5 text-xs text-muted-foreground transition-colors hover:text-foreground"
+            >
+              <span>{labels.autosave}</span>
+              <span
+                className={`relative inline-flex h-[18px] w-[30px] flex-shrink-0 items-center rounded-full transition-colors ${
+                  autosave ? 'bg-emerald-500' : 'bg-muted-foreground/30'
+                }`}
+              >
+                <span
+                  className={`inline-block h-3 w-3 transform rounded-full bg-white shadow-sm transition-transform ${
+                    autosave ? 'translate-x-[14px]' : 'translate-x-[3px]'
+                  }`}
+                />
+              </span>
+            </button>
+          ) : <span />}
+          <button
+            type="button"
+            onClick={() => void onSave()}
+            disabled={!isDirty}
+            className="rounded-lg bg-primary px-3 py-1.5 text-xs font-semibold text-primary-foreground transition-colors hover:bg-primary/90 disabled:cursor-not-allowed disabled:opacity-40"
+          >
+            {labels.save}
+          </button>
+        </div>
+      ) : null}
     </div>
   );
 }

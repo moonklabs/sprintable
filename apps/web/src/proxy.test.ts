@@ -26,27 +26,27 @@ describe('middleware', () => {
       process.env['OSS_MODE'] = 'true';
     });
 
-    it('redirects / to /dashboard (AC-4)', async () => {
+    it('redirects / to /inbox (AC-4)', async () => {
       const request = new NextRequest('https://app.example.com/');
       const response = await middleware(request);
       expect(response.status).toBe(307);
-      expect(response.headers.get('location')).toBe('https://app.example.com/dashboard');
+      expect(response.headers.get('location')).toBe('https://app.example.com/inbox');
       expect(createServerClient).not.toHaveBeenCalled();
     });
 
-    it('redirects /login to /dashboard (AC-5)', async () => {
+    it('redirects /login to /inbox (AC-5)', async () => {
       const request = new NextRequest('https://app.example.com/login');
       const response = await middleware(request);
       expect(response.status).toBe(307);
-      expect(response.headers.get('location')).toBe('https://app.example.com/dashboard');
+      expect(response.headers.get('location')).toBe('https://app.example.com/inbox');
       expect(createServerClient).not.toHaveBeenCalled();
     });
 
-    it('redirects /auth/callback to /dashboard (AC-5)', async () => {
+    it('redirects /auth/callback to /inbox (AC-5)', async () => {
       const request = new NextRequest('https://app.example.com/auth/callback?code=abc');
       const response = await middleware(request);
       expect(response.status).toBe(307);
-      expect(response.headers.get('location')).toBe('https://app.example.com/dashboard');
+      expect(response.headers.get('location')).toBe('https://app.example.com/inbox');
       expect(createServerClient).not.toHaveBeenCalled();
     });
 

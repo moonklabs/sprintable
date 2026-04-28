@@ -5,6 +5,7 @@ import { useRouter } from 'next/navigation';
 import { useTranslations } from 'next-intl';
 import { ChevronLeft, Plus, X } from 'lucide-react';
 import { Button } from '@/components/ui/button';
+import { TopBarSlot } from '@/components/nav/top-bar-slot';
 import { Badge } from '@/components/ui/badge';
 import { EmptyState } from '@/components/ui/empty-state';
 
@@ -490,9 +491,9 @@ function EpicDetailPanel({ epic, onUpdate, onClose }: EpicDetailPanelProps) {
   };
 
   return (
-    <div className="flex h-full min-h-0 flex-col overflow-hidden rounded-2xl border border-[color:var(--operator-border,hsl(var(--border)))] bg-[color:var(--operator-surface)]">
+    <div className="flex h-full min-h-0 flex-col overflow-hidden bg-background">
       {/* Header */}
-      <div className="flex shrink-0 items-center justify-between border-b border-[color:var(--operator-border,hsl(var(--border)))] px-5 py-4">
+      <div className="flex shrink-0 items-center justify-between border-b border-border/80 px-5 py-4">
         <div className="flex items-center gap-2">
           <button
             type="button"
@@ -722,25 +723,17 @@ export function EpicsClient({ projectId, orgId }: EpicsClientProps) {
 
   if (loading) {
     return (
-      <div className="flex h-64 items-center justify-center">
-        <p className="text-sm text-[color:var(--operator-muted)]">{t('loading')}</p>
-      </div>
+      <>
+        <TopBarSlot title={<h1 className="text-sm font-medium">{t('title')}</h1>} />
+        <div className="flex h-64 items-center justify-center">
+          <p className="text-sm text-[color:var(--operator-muted)]">{t('loading')}</p>
+        </div>
+      </>
     );
   }
 
   const listPanel = (
-    <div className="flex h-full min-h-0 flex-col overflow-hidden rounded-2xl border border-[color:var(--operator-border,hsl(var(--border)))] bg-[color:var(--operator-surface)]">
-      {/* List header */}
-      <div className="flex shrink-0 items-center justify-between border-b border-[color:var(--operator-border,hsl(var(--border)))] px-5 py-4">
-        <div>
-          <p className="text-[11px] font-semibold uppercase tracking-[0.2em] text-[color:var(--operator-muted)]">{t('title')}</p>
-          <h1 className="text-lg font-bold text-[color:var(--operator-foreground)]">{t('title')}</h1>
-        </div>
-        <Button size="sm" onClick={() => setShowCreate(true)}>
-          <Plus className="size-4" />
-          <span className="hidden sm:inline">{t('newEpic')}</span>
-        </Button>
-      </div>
+    <div className="flex h-full min-h-0 flex-col overflow-hidden bg-[color:var(--operator-surface-soft)]/35">
 
       {/* List body */}
       <div className="flex-1 overflow-y-auto p-4">
@@ -773,9 +766,19 @@ export function EpicsClient({ projectId, orgId }: EpicsClientProps) {
 
   return (
     <>
+      <TopBarSlot
+        title={<h1 className="text-sm font-medium">{t('title')}</h1>}
+        actions={
+          <Button size="sm" variant="outline" onClick={() => setShowCreate(true)}>
+            <Plus className="mr-1.5 h-3.5 w-3.5" />
+            {t('newEpic')}
+          </Button>
+        }
+      />
+
       {/* Desktop layout: list + slide-in detail panel */}
-      <div className="hidden lg:flex lg:gap-4 lg:items-stretch lg:min-h-[calc(100vh-9rem)]">
-        <div className={`transition-all duration-300 ${selectedEpic ? 'w-[380px] shrink-0' : 'w-full'}`}>
+      <div className="hidden min-h-0 flex-1 overflow-hidden lg:flex lg:items-stretch lg:gap-0">
+        <div className={`transition-all duration-300 ${selectedEpic ? 'w-[380px] shrink-0 border-r border-border/80' : 'w-full'}`}>
           {listPanel}
         </div>
         {selectedEpic ? (
@@ -790,7 +793,7 @@ export function EpicsClient({ projectId, orgId }: EpicsClientProps) {
       </div>
 
       {/* Mobile layout */}
-      <div className="flex flex-col lg:hidden">
+      <div className="flex flex-1 flex-col overflow-hidden lg:hidden">
         {mobileView === 'list' ? (
           <div className="flex-1">{listPanel}</div>
         ) : (

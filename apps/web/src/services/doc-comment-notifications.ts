@@ -1,5 +1,6 @@
 import type { SupabaseClient } from '@supabase/supabase-js';
 import { NotificationService } from './notification.service';
+import { InboxItemService } from './inbox-item.service';
 
 export interface MentionableProjectMember {
   id: string;
@@ -108,6 +109,32 @@ export async function notifyDocCommentMentions({
   }));
 
   await new NotificationService(adminSupabase).createMany(notifications);
+
+  // Inbox dual-write — Phase A.B에 inbox_items로 일원화 예정. v1엔 notifications + inbox 둘 다 emit.
+  // 문서 댓글은 댓글 단위로 dedup해야 하므로 source_id에 commentId 포함 (doc_comment 별도 source key).
+  // produceMentionFromMemo는 memo_id 단위 dedup이라 여기서는 service.create를 직접 호출.
+  const inboxService = new InboxItemService(adminSupabase);
+  const inboxBody = buildDocCommentNotificationBody(doc.title, content);
+  for (const member of mentionedMembers) {
+    try {
+      await inboxService.create({
+        org_id: doc.org_id,
+        project_id: doc.project_id,
+        assignee_member_id: member.id,
+        kind: 'mention',
+        title: '문서 댓글에서 멘션됨',
+        context: inboxBody,
+        origin_chain: [{ type: 'memo', id: doc.id }],
+        options: [],
+        memo_id: doc.id,
+        source_type: 'memo_mention',
+        // 댓글 단위 dedup. memo_mention과 namespace 안 겹치게 prefix.
+        source_id: `doc_comment:${commentId}:${member.id}`,
+      });
+    } catch (err: unknown) {
+      console.error('[doc-comment-notifications] inbox dual-write failed', err);
+    }
+  }
 
   return notifications.length;
 }

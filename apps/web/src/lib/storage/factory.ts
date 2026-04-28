@@ -12,6 +12,7 @@ import type {
   IAgentRunBillingRepository,
   IAgentRunRepository,
   IAgentApiKeyRepository,
+  IInboxItemRepository,
 } from '@sprintable/core-storage';
 
 export function isOssMode(): boolean {
@@ -106,6 +107,16 @@ export async function createTeamMemberRepository(supabase?: unknown): Promise<IT
   const { SupabaseTeamMemberRepository } = await import('@sprintable/storage-supabase');
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   return new SupabaseTeamMemberRepository(supabase as any);
+}
+
+export async function createInboxItemRepository(supabase?: unknown): Promise<IInboxItemRepository> {
+  if (isOssMode()) {
+    const { SqliteInboxItemRepository, getDb } = await import('@sprintable/storage-sqlite');
+    return new SqliteInboxItemRepository(getDb());
+  }
+  const { SupabaseInboxItemRepository } = await import('@sprintable/storage-supabase');
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  return new SupabaseInboxItemRepository(supabase as any);
 }
 
 // ============================================================================

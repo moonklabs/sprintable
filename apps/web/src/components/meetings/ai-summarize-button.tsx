@@ -38,20 +38,20 @@ export function AiSummarizeButton({ meetingId, hasTranscript, guardedFetch, onRe
           <button
             onClick={handleClick}
             disabled={!hasTranscript}
-            className="flex items-center gap-2 rounded-lg bg-purple-600 px-4 py-2 text-sm font-medium text-white hover:bg-purple-700 disabled:cursor-not-allowed disabled:opacity-50"
+            className="flex items-center gap-2 rounded-lg bg-primary px-4 py-2 text-sm font-medium text-primary-foreground hover:bg-primary/90 disabled:cursor-not-allowed disabled:opacity-50"
           >
             ✨ {t('aiSummarize')}
           </button>
         ) : (
           <button
             onClick={cancel}
-            className="flex items-center gap-2 rounded-lg bg-gray-500 px-4 py-2 text-sm font-medium text-white hover:bg-gray-600"
+            className="flex items-center gap-2 rounded-lg bg-muted px-4 py-2 text-sm font-medium text-foreground hover:bg-muted/80"
           >
             ⏹ {t('cancel')}
           </button>
         )}
         {!hasTranscript && (
-          <span className="text-xs text-gray-400">{t('transcriptRequired')}</span>
+          <span className="text-xs text-muted-foreground">{t('transcriptRequired')}</span>
         )}
       </div>
 
@@ -68,20 +68,20 @@ export function AiSummarizeButton({ meetingId, hasTranscript, guardedFetch, onRe
 
       {/* AC7: 스트리밍 텍스트 프리뷰 */}
       {isLoading && streamText && (
-        <div className="rounded-lg border bg-purple-50 p-3">
+        <div className="rounded-lg border bg-primary/5 p-3">
           <div className="mb-1 flex items-center gap-2">
-            <span className="h-2 w-2 animate-pulse rounded-full bg-purple-500" />
-            <span className="text-xs font-medium text-purple-700">{t('aiSummarizing')}</span>
+            <span className="h-2 w-2 animate-pulse rounded-full bg-primary/50" />
+            <span className="text-xs font-medium text-primary">{t('aiSummarizing')}</span>
           </div>
-          <pre className="max-h-48 overflow-auto whitespace-pre-wrap text-xs text-gray-600">
+          <pre className="max-h-48 overflow-auto whitespace-pre-wrap text-xs text-muted-foreground">
             {streamText}
           </pre>
         </div>
       )}
 
       {isLoading && !streamText && (
-        <div className="flex items-center gap-2 text-xs text-purple-600">
-          <span className="h-2 w-2 animate-pulse rounded-full bg-purple-500" />
+        <div className="flex items-center gap-2 text-xs text-primary">
+          <span className="h-2 w-2 animate-pulse rounded-full bg-primary/50" />
           {t('aiSummarizing')}
         </div>
       )}

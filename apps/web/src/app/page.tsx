@@ -4,7 +4,7 @@ import { createSupabaseServerClient } from '@/lib/supabase/server';
 
 export default async function RootPage() {
   if (isOssMode()) {
-    redirect('/dashboard');
+    redirect('/inbox');
   }
 
   const supabase = await createSupabaseServerClient();
@@ -12,5 +12,5 @@ export default async function RootPage() {
     data: { user },
   } = await supabase.auth.getUser();
 
-  redirect(user ? '/dashboard' : '/login');
+  redirect(user ? '/inbox' : '/login');
 }

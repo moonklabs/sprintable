@@ -6,6 +6,9 @@ import { apiSuccess, ApiErrors } from '@/lib/api-response';
 import { getAuthContext } from '@/lib/auth-helpers';
 import { RetroSessionService } from '@/services/retro-session';
 import type { RetroItemCategory } from '@/services/retro-session';
+import { isOssMode } from '@/lib/storage/factory';
+import { addOssRetroItem } from '@/lib/oss-retro';
+import type { RetroCategory } from '@/lib/oss-retro';
 
 type RouteParams = { params: Promise<{ id: string }> };
 
@@ -48,6 +51,11 @@ export async function POST(request: Request, { params }: RouteParams) {
     if (!body.category) return ApiErrors.badRequest('category required');
     if (!body.text) return ApiErrors.badRequest('text required');
     const author_id = body.author_id ?? me.id;
+
+    if (isOssMode()) {
+      const data = addOssRetroItem({ session_id: id, project_id: projectId, category: body.category as RetroCategory, text: body.text, author_id: body.author_id });
+      return apiSuccess(data);
+    }
 
     const dbClient: SupabaseClient = me.type === 'agent' ? createSupabaseAdminClient() : supabase;
     const service = new RetroSessionService(dbClient);

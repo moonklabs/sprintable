@@ -3,12 +3,12 @@
 import { useEffect, useState } from 'react';
 import Link from 'next/link';
 import { useTranslations } from 'next-intl';
+import { Plus } from 'lucide-react';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { EmptyState } from '@/components/ui/empty-state';
-import { OperatorInput } from '@/components/ui/operator-control';
-import { PageHeader } from '@/components/ui/page-header';
-import { SectionCard, SectionCardBody, SectionCardHeader } from '@/components/ui/section-card';
+import { Input } from '@/components/ui/input';
+import { TopBarSlot } from '@/components/nav/top-bar-slot';
 import { useDashboardContext } from '../../dashboard/dashboard-shell';
 
 interface RetroSession {
@@ -29,13 +29,14 @@ const PHASE_VARIANTS: Record<string, 'success' | 'info' | 'outline' | 'secondary
 
 export default function RetroPage() {
   const t = useTranslations('retro');
-  const tc = useTranslations('common');
   const shellT = useTranslations('shell');
   const { projectId } = useDashboardContext();
   const [sessions, setSessions] = useState<RetroSession[]>([]);
   const [loading, setLoading] = useState(true);
   const [title, setTitle] = useState('');
   const [creating, setCreating] = useState(false);
+  const [createError, setCreateError] = useState<string | null>(null);
+  const [loadError, setLoadError] = useState<string | null>(null);
 
   useEffect(() => {
     let cancelled = false;
@@ -48,41 +49,41 @@ export default function RetroPage() {
         return;
       }
       setLoading(true);
+      setLoadError(null);
       try {
         const res = await fetch(`/api/retro?project_id=${projectId}`);
-        if (res.ok && !cancelled) {
-          const json = await res.json();
-          setSessions(json.data);
-        }
-      } catch {
-        // silent
+        if (!res.ok) throw new Error(`HTTP ${res.status}`);
+        const json = await res.json();
+        if (!cancelled) setSessions(json.data ?? []);
+      } catch (err) {
+        if (!cancelled) setLoadError(err instanceof Error ? err.message : 'Failed to load');
+      } finally {
+        if (!cancelled) setLoading(false);
       }
-      if (!cancelled) setLoading(false);
     }
     void load();
-    return () => {
-      cancelled = true;
-    };
+    return () => { cancelled = true; };
   }, [projectId]);
 
   const handleCreate = async () => {
-    if (!title.trim()) return;
+    if (!title.trim() || !projectId) return;
     setCreating(true);
+    setCreateError(null);
     try {
       const res = await fetch('/api/retro', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ title: title.trim() }),
+        body: JSON.stringify({ title: title.trim(), project_id: projectId }),
       });
-      if (res.ok) {
-        const json = await res.json();
-        setSessions((prev) => [json.data, ...prev]);
-        setTitle('');
-      }
-    } catch {
-      // silent
+      if (!res.ok) throw new Error(`HTTP ${res.status}`);
+      const json = await res.json();
+      setSessions((prev) => [json.data, ...prev]);
+      setTitle('');
+    } catch (err) {
+      setCreateError(err instanceof Error ? err.message : 'Failed to create session');
+    } finally {
+      setCreating(false);
     }
-    setCreating(false);
   };
 
   const PHASE_KEYS: Record<string, string> = {
@@ -96,71 +97,80 @@ export default function RetroPage() {
 
   if (!projectId) {
     return (
-      <div className="space-y-4">
-        <PageHeader
-          eyebrow={tc('operatorSurface')}
-          title={t('title')}
-          description={t('surfaceDescription')}
-        />
-        <SectionCard>
-          <SectionCardBody>
-            <EmptyState title={shellT('projectSelectPrompt')} description={shellT('projectSelectDescription')} />
-          </SectionCardBody>
-        </SectionCard>
-      </div>
+      <>
+        <TopBarSlot title={<h1 className="text-sm font-medium">{t('title')}</h1>} />
+        <div className="flex h-64 items-center justify-center p-6">
+          <EmptyState title={shellT('projectSelectPrompt')} description={shellT('projectSelectDescription')} />
+        </div>
+      </>
     );
   }
 
   return (
-    <div className="space-y-4">
-      <PageHeader
-        eyebrow={tc('operatorSurface')}
-        title={t('title')}
-        description={t('surfaceDescription')}
+    <>
+      <TopBarSlot
+        title={<h1 className="text-sm font-medium">{t('title')}</h1>}
+        actions={
+          <Button size="sm" variant="outline" onClick={() => document.getElementById('retro-title-input')?.focus()}>
+            <Plus className="mr-1.5 h-3.5 w-3.5" />
+            {t('newSession')}
+          </Button>
+        }
       />
 
-      <SectionCard>
-        <SectionCardHeader>
-          <div className="space-y-1">
-            <h2 className="text-base font-semibold text-foreground">{t('newSession')}</h2>
-            <p className="text-sm text-muted-foreground">{t('surfaceDescription')}</p>
-          </div>
-        </SectionCardHeader>
-        <SectionCardBody>
-          <div className="flex flex-col gap-3 md:flex-row">
-            <OperatorInput
-              type="text"
+      <div className="flex min-h-0 flex-1 flex-col gap-0 overflow-y-auto">
+        {/* Create new session */}
+        <div className="flex-shrink-0 border-b border-border/80 px-6 py-4">
+          <p className="mb-3 text-xs font-medium uppercase tracking-[0.18em] text-muted-foreground">
+            {t('newSession')}
+          </p>
+          <div className="flex gap-2">
+            <Input
+              id="retro-title-input"
               value={title}
               onChange={(e) => setTitle(e.target.value)}
+              onKeyDown={(e) => { if (e.key === 'Enter') void handleCreate(); }}
               placeholder={t('newSessionPlaceholder')}
               className="flex-1"
             />
-            <Button variant="hero" size="lg" onClick={handleCreate} disabled={!title.trim() || creating}>
-              {creating ? t('creating') : t('newSession')}
+            <Button variant="default" onClick={handleCreate} disabled={!title.trim() || creating}>
+              {creating ? t('creating') : t('create')}
             </Button>
           </div>
-        </SectionCardBody>
-      </SectionCard>
+          {createError ? (
+            <p className="mt-2 text-xs text-destructive">{createError}</p>
+          ) : null}
+        </div>
 
-      <SectionCard>
-        <SectionCardHeader>
-          <div className="space-y-1">
-            <h2 className="text-base font-semibold text-foreground">{t('sessionList')}</h2>
-            <p className="text-sm text-muted-foreground">{t('surfaceDescription')}</p>
-          </div>
-        </SectionCardHeader>
-        <SectionCardBody>
+        {/* Session list */}
+        <div className="flex-1 px-6 py-4">
+          <p className="mb-3 text-xs font-medium uppercase tracking-[0.18em] text-muted-foreground">
+            {t('sessionList')}
+          </p>
+
           {loading ? (
-            <div className="space-y-3">{[1, 2].map((i) => <div key={i} className="h-20 animate-pulse rounded-md bg-muted" />)}</div>
+            <div className="space-y-3">
+              {[1, 2, 3].map((i) => (
+                <div key={i} className="h-16 animate-pulse rounded-xl bg-muted/50" />
+              ))}
+            </div>
+          ) : loadError ? (
+            <EmptyState title={loadError} description={t('surfaceDescription')} />
           ) : sessions.length === 0 ? (
             <EmptyState title={t('noSessions')} description={t('surfaceDescription')} />
           ) : (
-            <div className="space-y-3">
+            <div className="space-y-2">
               {sessions.map((session) => (
-                <Link key={session.id} href={`/retro/${session.id}`} className="flex flex-col gap-3 rounded-md border border-border bg-card p-4 shadow-sm transition hover:bg-muted/40 md:flex-row md:items-center md:justify-between">
-                  <div className="space-y-1">
-                    <p className="text-sm font-semibold text-foreground">{session.title}</p>
-                    <p className="text-xs text-muted-foreground">{new Date(session.created_at).toLocaleDateString()}</p>
+                <Link
+                  key={session.id}
+                  href={`/retro/${session.id}`}
+                  className="flex items-center justify-between gap-4 rounded-xl border border-border bg-background px-4 py-3 transition hover:bg-muted/40"
+                >
+                  <div className="min-w-0">
+                    <p className="truncate text-sm font-medium text-foreground">{session.title}</p>
+                    <p className="text-xs text-muted-foreground">
+                      {new Date(session.created_at).toLocaleDateString()}
+                    </p>
                   </div>
                   <Badge variant={PHASE_VARIANTS[session.phase] ?? 'outline'}>
                     {PHASE_KEYS[session.phase] ? t(PHASE_KEYS[session.phase] as 'phaseCollect') : session.phase}
@@ -169,8 +179,8 @@ export default function RetroPage() {
               ))}
             </div>
           )}
-        </SectionCardBody>
-      </SectionCard>
-    </div>
+        </div>
+      </div>
+    </>
   );
 }

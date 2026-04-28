@@ -198,6 +198,7 @@ export const updateStandupFeedbackSchema = z.object({
 
 // ─── Retro ───────────────────────────────────
 export const createRetroSchema = z.object({
+  project_id: z.string().optional(),
   sprint_id: z.string().min(1).optional().nullable(),
   title: z.string().min(1),
 });
@@ -285,3 +286,4 @@ export const updateBridgeUserSchema = z.object({
 });
 
 export * from './meetings';
+export * from './inbox';

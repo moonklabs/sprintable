@@ -1,37 +1,28 @@
 'use client';
 
 import { useCallback, useEffect, useState } from 'react';
-import { useParams, useRouter } from 'next/navigation';
+import Link from 'next/link';
+import { useParams } from 'next/navigation';
 import { useTranslations } from 'next-intl';
-import { ArrowLeft, Download, ChevronRight, Plus, ThumbsUp } from 'lucide-react';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
+import { EmptyState } from '@/components/ui/empty-state';
+import { OperatorTextarea } from '@/components/ui/operator-control';
+import { TopBarSlot } from '@/components/nav/top-bar-slot';
 import { useDashboardContext } from '../../../dashboard/dashboard-shell';
+import type { RetroActionRecord, RetroItemRecord, RetroSessionPhase, RetroSessionRecord } from '@/services/retro-session';
 
-// ─── Types ────────────────────────────────────────────────────────────────────
+type RetroItemCategory = 'good' | 'bad' | 'improve';
 
-interface RetroSession {
-  id: string;
-  title: string;
-  phase: string;
-}
+const PHASE_ORDER: RetroSessionPhase[] = ['collect', 'group', 'vote', 'discuss', 'action', 'closed'];
 
-interface RetroItem {
-  id: string;
-  category: string;
-  text: string;
-  vote_count: number;
-}
-
-interface RetroAction {
-  id: string;
-  title: string;
-  status: string;
-}
-
-type Phase = 'collect' | 'group' | 'vote' | 'discuss' | 'action' | 'closed';
-
-// ─── Constants ────────────────────────────────────────────────────────────────
+const PHASE_NEXT: Partial<Record<RetroSessionPhase, RetroSessionPhase>> = {
+  collect: 'group',
+  group: 'vote',
+  vote: 'discuss',
+  discuss: 'action',
+  action: 'closed',
+};
 
 const PHASE_VARIANTS: Record<string, 'success' | 'info' | 'outline' | 'secondary'> = {
   collect: 'info',
@@ -42,290 +33,369 @@ const PHASE_VARIANTS: Record<string, 'success' | 'info' | 'outline' | 'secondary
   closed: 'outline',
 };
 
-const NEXT_PHASE: Record<string, Phase> = {
-  collect: 'group',
-  group: 'vote',
-  vote: 'discuss',
-  discuss: 'action',
-  action: 'closed',
-};
-
-const CATEGORIES: Array<'good' | 'bad' | 'improve'> = ['good', 'bad', 'improve'];
-
-// ─── Page ─────────────────────────────────────────────────────────────────────
-
-export default function RetroDetailPage() {
+export default function RetroSessionPage() {
   const t = useTranslations('retro');
-  const { id } = useParams<{ id: string }>();
-  const router = useRouter();
-  const { projectId } = useDashboardContext();
+  const { projectId, currentTeamMemberId } = useDashboardContext();
+  const params = useParams<{ id: string }>();
+  const sessionId = params.id;
 
-  const [session, setSession] = useState<RetroSession | null>(null);
-  const [items, setItems] = useState<RetroItem[]>([]);
-  const [actions, setActions] = useState<RetroAction[]>([]);
+  const [session, setSession] = useState<RetroSessionRecord | null>(null);
+  const [items, setItems] = useState<RetroItemRecord[]>([]);
+  const [actions, setActions] = useState<RetroActionRecord[]>([]);
   const [loading, setLoading] = useState(true);
+  const [loadError, setLoadError] = useState<string | null>(null);
+  const [advancing, setAdvancing] = useState(false);
+  const [advanceError, setAdvanceError] = useState<string | null>(null);
+  const [votedItemIds, setVotedItemIds] = useState<Set<string>>(new Set());
 
-  const [newItemCategory, setNewItemCategory] = useState<'good' | 'bad' | 'improve'>('good');
-  const [newItemText, setNewItemText] = useState('');
-  const [addingItem, setAddingItem] = useState(false);
+  const [newItemText, setNewItemText] = useState<Record<RetroItemCategory, string>>({ good: '', bad: '', improve: '' });
+  const [addingItem, setAddingItem] = useState<RetroItemCategory | null>(null);
+  const [addItemError, setAddItemError] = useState<string | null>(null);
 
-  const [newActionTitle, setNewActionTitle] = useState('');
+  const [newActionText, setNewActionText] = useState('');
   const [addingAction, setAddingAction] = useState(false);
-
-  const [advancingPhase, setAdvancingPhase] = useState(false);
-  const [exporting, setExporting] = useState(false);
-  const [exportMd, setExportMd] = useState<string | null>(null);
+  const [addActionError, setAddActionError] = useState<string | null>(null);
 
   const load = useCallback(async () => {
-    if (!projectId) return;
+    if (!projectId || !sessionId) return;
     setLoading(true);
+    setLoadError(null);
     try {
-      const [sessRes, itemsRes, actionsRes] = await Promise.all([
-        fetch(`/api/retro-sessions/${id}?project_id=${projectId}`),
-        fetch(`/api/retro-sessions/${id}/items?project_id=${projectId}`),
-        fetch(`/api/retro-sessions/${id}/actions?project_id=${projectId}`),
-      ]);
-      if (sessRes.ok) {
-        const j = await sessRes.json();
-        setSession(j.data as RetroSession);
-      }
-      if (itemsRes.ok) {
-        const j = await itemsRes.json();
-        setItems((j.data ?? []) as RetroItem[]);
-      }
-      if (actionsRes.ok) {
-        const j = await actionsRes.json();
-        setActions((j.data ?? []) as RetroAction[]);
-      }
+      const res = await fetch(`/api/retro-sessions/${sessionId}?project_id=${projectId}`);
+      if (!res.ok) throw new Error(`HTTP ${res.status}`);
+      const json = await res.json() as { data: { session: RetroSessionRecord; items: RetroItemRecord[]; actions: RetroActionRecord[] } };
+      setSession(json.data.session);
+      setItems(json.data.items);
+      setActions(json.data.actions);
+    } catch {
+      setLoadError(t('loadFailed'));
     } finally {
       setLoading(false);
     }
-  }, [id, projectId]);
+  }, [projectId, sessionId, t]);
 
   useEffect(() => { void load(); }, [load]);
 
-  const handleAddItem = async () => {
-    if (!newItemText.trim() || !projectId) return;
-    setAddingItem(true);
+  async function advancePhase() {
+    if (!session || !projectId) return;
+    const nextPhase = PHASE_NEXT[session.phase as RetroSessionPhase];
+    if (!nextPhase) return;
+    setAdvancing(true);
+    setAdvanceError(null);
     try {
-      const res = await fetch(`/api/retro-sessions/${id}/items?project_id=${projectId}`, {
-        method: 'POST',
+      const res = await fetch(`/api/retro-sessions/${sessionId}?project_id=${projectId}`, {
+        method: 'PATCH',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ category: newItemCategory, text: newItemText.trim() }),
+        body: JSON.stringify({ phase: nextPhase }),
       });
-      if (res.ok) {
-        const j = await res.json();
-        setItems((prev) => [...prev, j.data as RetroItem]);
-        setNewItemText('');
-      }
+      if (!res.ok) throw new Error(`HTTP ${res.status}`);
+      const json = await res.json() as { data: RetroSessionRecord };
+      setSession(json.data);
+    } catch {
+      setAdvanceError(t('advanceFailed'));
     } finally {
-      setAddingItem(false);
+      setAdvancing(false);
     }
-  };
+  }
 
-  const handleVote = async (itemId: string) => {
-    if (!projectId) return;
-    await fetch(`/api/retro-sessions/${id}/items/${itemId}/vote?project_id=${projectId}`, { method: 'POST' });
-    setItems((prev) => prev.map((item) => item.id === itemId ? { ...item, vote_count: item.vote_count + 1 } : item));
-  };
-
-  const handleAddAction = async () => {
-    if (!newActionTitle.trim() || !projectId) return;
-    setAddingAction(true);
+  async function addItem(category: RetroItemCategory) {
+    const text = newItemText[category].trim();
+    if (!text || !projectId || !currentTeamMemberId) return;
+    setAddingItem(category);
+    setAddItemError(null);
     try {
-      const res = await fetch(`/api/retro-sessions/${id}/actions?project_id=${projectId}`, {
+      const res = await fetch(`/api/retro-sessions/${sessionId}/items?project_id=${projectId}`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ title: newActionTitle.trim() }),
+        body: JSON.stringify({ category, text, author_id: currentTeamMemberId }),
       });
-      if (res.ok) {
-        const j = await res.json();
-        setActions((prev) => [...prev, j.data as RetroAction]);
-        setNewActionTitle('');
+      if (!res.ok) throw new Error(`HTTP ${res.status}`);
+      const json = await res.json() as { data: RetroItemRecord };
+      setItems((prev) => [...prev, json.data]);
+      setNewItemText((prev) => ({ ...prev, [category]: '' }));
+    } catch {
+      setAddItemError(t('addItemFailed'));
+    } finally {
+      setAddingItem(null);
+    }
+  }
+
+  async function voteItem(itemId: string) {
+    if (!projectId || votedItemIds.has(itemId)) return;
+    setVotedItemIds((prev) => new Set([...prev, itemId]));
+    try {
+      const res = await fetch(`/api/retro-sessions/${sessionId}/items/${itemId}/vote?project_id=${projectId}`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({}),
+      });
+      if (!res.ok) {
+        setVotedItemIds((prev) => { const next = new Set(prev); next.delete(itemId); return next; });
+        return;
       }
+      setItems((prev) => prev.map((item) => item.id === itemId ? { ...item, vote_count: item.vote_count + 1 } : item));
+    } catch {
+      setVotedItemIds((prev) => { const next = new Set(prev); next.delete(itemId); return next; });
+    }
+  }
+
+  async function addAction() {
+    const text = newActionText.trim();
+    if (!text || !projectId) return;
+    setAddingAction(true);
+    setAddActionError(null);
+    try {
+      const res = await fetch(`/api/retro-sessions/${sessionId}/actions?project_id=${projectId}`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ title: text }),
+      });
+      if (!res.ok) throw new Error(`HTTP ${res.status}`);
+      const json = await res.json() as { data: RetroActionRecord };
+      setActions((prev) => [...prev, json.data]);
+      setNewActionText('');
+    } catch {
+      setAddActionError(t('addActionFailed'));
     } finally {
       setAddingAction(false);
     }
-  };
+  }
 
-  const handleAdvancePhase = async () => {
-    if (!session || !projectId) return;
-    const next = NEXT_PHASE[session.phase];
-    if (!next) return;
-    setAdvancingPhase(true);
-    try {
-      const res = await fetch(`/api/retro-sessions/${id}?project_id=${projectId}`, {
-        method: 'PATCH',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ phase: next }),
-      });
-      if (res.ok) {
-        const j = await res.json();
-        setSession(j.data as RetroSession);
-      }
-    } finally {
-      setAdvancingPhase(false);
-    }
-  };
-
-  const handleExport = async () => {
+  async function exportSession() {
     if (!projectId) return;
-    setExporting(true);
     try {
-      const res = await fetch(`/api/retro-sessions/${id}/export?project_id=${projectId}`);
-      if (res.ok) {
-        const j = await res.json();
-        setExportMd((j.data as { markdown: string }).markdown);
-      }
-    } finally {
-      setExporting(false);
+      const res = await fetch(`/api/retro-sessions/${sessionId}/export?project_id=${projectId}`);
+      if (!res.ok) return;
+      const json = await res.json() as { data: { markdown: string } };
+      await navigator.clipboard.writeText(json.data.markdown);
+      alert(t('exportCopied'));
+    } catch {
+      // ignore
     }
+  }
+
+  type RetroTranslationKey = 'phaseCollect' | 'phaseGroup' | 'phaseVote' | 'phaseDiscuss' | 'phaseAction' | 'phaseClosed';
+  const PHASE_KEYS: Record<string, RetroTranslationKey> = {
+    collect: 'phaseCollect',
+    group: 'phaseGroup',
+    vote: 'phaseVote',
+    discuss: 'phaseDiscuss',
+    action: 'phaseAction',
+    closed: 'phaseClosed',
   };
 
-  if (loading) {
-    return <p className="p-6 text-sm text-muted-foreground">{t('loading')}</p>;
-  }
+  const currentPhase = session?.phase as RetroSessionPhase | undefined;
+  const nextPhase = currentPhase ? PHASE_NEXT[currentPhase] : undefined;
+  const canAddItems = currentPhase === 'collect';
+  const canVote = currentPhase === 'vote';
+  const canAddActions = currentPhase === 'action';
+  const showItems = currentPhase && ['collect', 'group', 'vote', 'discuss', 'action', 'closed'].includes(currentPhase);
+  const showActions = currentPhase && ['action', 'closed'].includes(currentPhase);
 
-  if (!session) {
-    return (
-      <div className="p-6">
-        <button type="button" onClick={() => router.back()} className="mb-4 flex items-center gap-1 text-sm text-muted-foreground hover:text-foreground">
-          <ArrowLeft className="size-4" /> {t('backToList')}
-        </button>
-        <p className="text-sm text-muted-foreground">{t('sessionNotFound')}</p>
-      </div>
-    );
-  }
-
-  const nextPhase = NEXT_PHASE[session.phase];
+  const CATEGORIES: RetroItemCategory[] = ['good', 'bad', 'improve'];
+  const CATEGORY_LABEL_KEY: Record<RetroItemCategory, 'categoryGood' | 'categoryBad' | 'categoryImprove'> = {
+    good: 'categoryGood',
+    bad: 'categoryBad',
+    improve: 'categoryImprove',
+  };
+  const CATEGORY_COLORS: Record<RetroItemCategory, string> = {
+    good: 'text-emerald-400',
+    bad: 'text-rose-300',
+    improve: 'text-amber-400',
+  };
 
   return (
-    <div className="space-y-6 p-6">
-      {/* Header */}
-      <div className="flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
-        <div className="flex items-center gap-3">
-          <button type="button" onClick={() => router.push('/retro')} className="flex items-center gap-1 text-sm text-muted-foreground hover:text-foreground">
-            <ArrowLeft className="size-4" />
-            <span className="hidden lg:inline">{t('backToList')}</span>
-          </button>
-          <div>
-            <h1 className="text-lg font-semibold text-foreground">{session.title}</h1>
-            <Badge variant={PHASE_VARIANTS[session.phase] ?? 'outline'} className="mt-1">
-              {t(`phase${session.phase.charAt(0).toUpperCase()}${session.phase.slice(1)}` as 'phaseCollect')}
-            </Badge>
+    <>
+      <TopBarSlot
+        title={
+          <div className="flex items-center gap-2">
+            <Link href="/retro" className="text-xs text-muted-foreground hover:text-foreground">
+              {t('backToList')}
+            </Link>
+            <span className="text-muted-foreground">/</span>
+            <h1 className="text-sm font-medium">{session?.title ?? '...'}</h1>
+            {session ? (
+              <Badge variant={PHASE_VARIANTS[session.phase] ?? 'outline'}>
+                {PHASE_KEYS[session.phase] ? t(PHASE_KEYS[session.phase] as 'phaseCollect') : session.phase}
+              </Badge>
+            ) : null}
           </div>
-        </div>
-        <div className="flex items-center gap-2">
-          {nextPhase ? (
-            <Button size="sm" onClick={() => void handleAdvancePhase()} disabled={advancingPhase}>
-              <ChevronRight className="size-4" />
-              {advancingPhase ? '...' : t('phaseNext')}
+        }
+        actions={
+          session && session.phase !== 'closed' ? (
+            <div className="flex items-center gap-2">
+              {advanceError ? <span className="text-xs text-destructive">{advanceError}</span> : null}
+              {nextPhase ? (
+                <Button variant="hero" size="sm" onClick={() => void advancePhase()} disabled={advancing}>
+                  {advancing ? t('advancing') : t('nextPhase')}
+                </Button>
+              ) : null}
+            </div>
+          ) : session?.phase === 'closed' ? (
+            <Button variant="outline" size="sm" onClick={() => void exportSession()}>
+              {t('export')}
             </Button>
-          ) : null}
-          <Button size="sm" variant="outline" onClick={() => void handleExport()} disabled={exporting}>
-            <Download className="size-4" />
-            {exporting ? '...' : t('export')}
-          </Button>
-        </div>
-      </div>
+          ) : null
+        }
+      />
 
-      {/* Export output */}
-      {exportMd ? (
-        <div className="rounded-lg border border-border bg-muted/30 p-4">
-          <pre className="whitespace-pre-wrap text-xs text-foreground">{exportMd}</pre>
-        </div>
-      ) : null}
-
-      {/* Items by category */}
-      <div className="grid gap-4 lg:grid-cols-3">
-        {CATEGORIES.map((cat) => (
-          <div key={cat} className="rounded-lg border border-border bg-card p-4 space-y-3">
-            <h2 className="text-sm font-semibold text-foreground">
-              {cat === 'good' ? '👍' : cat === 'bad' ? '👎' : '💡'} {t(`category${cat.charAt(0).toUpperCase()}${cat.slice(1)}` as 'categoryGood')}
-            </h2>
-            <ul className="space-y-2">
-              {items.filter((item) => item.category === cat).map((item) => (
-                <li key={item.id} className="flex items-start justify-between gap-2 rounded-md border border-border px-3 py-2 text-sm">
-                  <span className="text-foreground">{item.text}</span>
-                  <button
-                    type="button"
-                    onClick={() => void handleVote(item.id)}
-                    className="flex shrink-0 items-center gap-1 text-xs text-muted-foreground hover:text-primary"
+      <div className="flex min-h-0 flex-1 flex-col overflow-y-auto">
+        {/* Phase stepper */}
+        {session ? (
+          <div className="flex flex-wrap items-center gap-1.5 border-b border-border/80 px-6 py-3">
+            {PHASE_ORDER.map((phase, index) => {
+              const currentIndex = PHASE_ORDER.indexOf(session.phase as RetroSessionPhase);
+              const isActive = phase === session.phase;
+              const isDone = index < currentIndex;
+              return (
+                <div key={phase} className="flex items-center gap-1.5">
+                  {index > 0 ? <span className="text-muted-foreground">›</span> : null}
+                  <Badge
+                    variant={isActive ? (PHASE_VARIANTS[phase] ?? 'outline') : isDone ? 'success' : 'outline'}
+                    className={isDone ? 'opacity-50' : ''}
                   >
-                    <ThumbsUp className="size-3" />
-                    {item.vote_count}
-                  </button>
-                </li>
-              ))}
-            </ul>
-          </div>
-        ))}
-      </div>
-
-      {/* Add item */}
-      {session.phase !== 'closed' ? (
-        <div className="rounded-lg border border-border bg-card p-4 space-y-3">
-          <h2 className="text-sm font-semibold text-foreground">{t('addItem')}</h2>
-          <div className="flex flex-col gap-2 lg:flex-row">
-            <select
-              value={newItemCategory}
-              onChange={(e) => setNewItemCategory(e.target.value as 'good' | 'bad' | 'improve')}
-              className="rounded-lg border border-border bg-background px-3 py-2 text-sm text-foreground focus:outline-none focus:ring-2 focus:ring-primary/40"
-            >
-              {CATEGORIES.map((cat) => (
-                <option key={cat} value={cat}>
-                  {cat === 'good' ? '👍' : cat === 'bad' ? '👎' : '💡'} {t(`category${cat.charAt(0).toUpperCase()}${cat.slice(1)}` as 'categoryGood')}
-                </option>
-              ))}
-            </select>
-            <input
-              type="text"
-              value={newItemText}
-              onChange={(e) => setNewItemText(e.target.value)}
-              onKeyDown={(e) => { if (e.key === 'Enter') void handleAddItem(); }}
-              placeholder={t('itemPlaceholder')}
-              className="flex-1 rounded-lg border border-border bg-background px-3 py-2 text-sm text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-2 focus:ring-primary/40"
-            />
-            <Button size="sm" onClick={() => void handleAddItem()} disabled={addingItem || !newItemText.trim()}>
-              <Plus className="size-4" />
-              {addingItem ? '...' : t('submit')}
-            </Button>
-          </div>
-        </div>
-      ) : null}
-
-      {/* Action items */}
-      <div className="rounded-lg border border-border bg-card p-4 space-y-3">
-        <h2 className="text-sm font-semibold text-foreground">{t('actions')}</h2>
-        {actions.length === 0 ? (
-          <p className="text-xs italic text-muted-foreground">{t('noActions')}</p>
-        ) : (
-          <ul className="space-y-2">
-            {actions.map((action) => (
-              <li key={action.id} className="flex items-center justify-between rounded-md border border-border px-3 py-2 text-sm">
-                <span className="text-foreground">{action.title}</span>
-                <Badge variant="outline">{action.status}</Badge>
-              </li>
-            ))}
-          </ul>
-        )}
-        {session.phase !== 'closed' ? (
-          <div className="flex gap-2 pt-1">
-            <input
-              type="text"
-              value={newActionTitle}
-              onChange={(e) => setNewActionTitle(e.target.value)}
-              onKeyDown={(e) => { if (e.key === 'Enter') void handleAddAction(); }}
-              placeholder={t('actionPlaceholder')}
-              className="flex-1 rounded-lg border border-border bg-background px-3 py-2 text-sm text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-2 focus:ring-primary/40"
-            />
-            <Button size="sm" onClick={() => void handleAddAction()} disabled={addingAction || !newActionTitle.trim()}>
-              <Plus className="size-4" />
-              {addingAction ? '...' : t('addAction')}
-            </Button>
+                    {t(PHASE_KEYS[phase] as 'phaseCollect')}
+                  </Badge>
+                </div>
+              );
+            })}
           </div>
         ) : null}
+
+        <div className="space-y-6 p-6">
+          {loading ? (
+            <div className="space-y-3">
+              {[1, 2, 3].map((i) => (
+                <div key={i} className="h-32 animate-pulse rounded-xl bg-muted/50" />
+              ))}
+            </div>
+          ) : loadError ? (
+            <EmptyState
+              title={loadError}
+              description={t('loadFailedDescription')}
+              action={<Button variant="hero" onClick={() => void load()}>{t('retry')}</Button>}
+            />
+          ) : (
+            <>
+              {/* Items grid */}
+              {showItems ? (
+                <div className="grid grid-cols-1 gap-4 md:grid-cols-3">
+                  {CATEGORIES.map((category) => {
+                    const categoryItems = items.filter((item) => item.category === category);
+                    return (
+                      <div key={category} className="flex flex-col gap-3 rounded-xl border border-border bg-card p-4">
+                        <h2 className={`text-sm font-semibold ${CATEGORY_COLORS[category]}`}>
+                          {t(CATEGORY_LABEL_KEY[category])}
+                        </h2>
+
+                        <div className="flex-1 space-y-2">
+                          {categoryItems.length === 0 ? (
+                            <p className="text-xs text-muted-foreground">{t('noItems')}</p>
+                          ) : (
+                            categoryItems.map((item) => {
+                              const hasVoted = votedItemIds.has(item.id);
+                              return (
+                                <div key={item.id} className="flex items-start justify-between gap-2 rounded-lg border border-border/60 bg-background p-2.5">
+                                  <p className="flex-1 text-sm text-foreground">{item.text}</p>
+                                  <div className="flex shrink-0 items-center gap-1.5">
+                                    {item.vote_count > 0 ? (
+                                      <span className="text-xs text-muted-foreground">{t('votes', { count: item.vote_count })}</span>
+                                    ) : null}
+                                    {canVote ? (
+                                      <Button
+                                        variant={hasVoted ? 'outline' : 'glass'}
+                                        size="sm"
+                                        onClick={() => void voteItem(item.id)}
+                                        disabled={hasVoted}
+                                        className="h-6 px-2 text-xs"
+                                      >
+                                        {hasVoted ? t('alreadyVoted') : t('vote')}
+                                      </Button>
+                                    ) : null}
+                                  </div>
+                                </div>
+                              );
+                            })
+                          )}
+                        </div>
+
+                        {canAddItems ? (
+                          <div className="space-y-2 border-t border-border/60 pt-3">
+                            {addItemError ? <p className="text-xs text-destructive">{addItemError}</p> : null}
+                            <OperatorTextarea
+                              value={newItemText[category]}
+                              onChange={(e) => setNewItemText((prev) => ({ ...prev, [category]: e.target.value }))}
+                              onKeyDown={(e) => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); void addItem(category); } }}
+                              placeholder={t('addItemPlaceholder')}
+                              rows={2}
+                            />
+                            <Button
+                              variant="hero"
+                              size="sm"
+                              onClick={() => void addItem(category)}
+                              disabled={!newItemText[category].trim() || addingItem === category}
+                              className="w-full"
+                            >
+                              {addingItem === category ? t('addingItem') : t('addItem')}
+                            </Button>
+                          </div>
+                        ) : null}
+                      </div>
+                    );
+                  })}
+                </div>
+              ) : null}
+
+              {/* Actions section */}
+              {showActions ? (
+                <div className="rounded-xl border border-border bg-card p-4 space-y-4">
+                  <h2 className="text-sm font-semibold text-foreground">{t('actions')}</h2>
+
+                  {actions.length === 0 ? (
+                    <p className="text-sm text-muted-foreground">{t('noActions')}</p>
+                  ) : (
+                    <div className="space-y-2">
+                      {actions.map((action) => (
+                        <div key={action.id} className="flex items-center gap-3 rounded-lg border border-border/60 bg-background px-3 py-2">
+                          <Badge variant={action.status === 'done' ? 'success' : 'outline'}>{action.status}</Badge>
+                          <p className="flex-1 text-sm text-foreground">{action.title}</p>
+                        </div>
+                      ))}
+                    </div>
+                  )}
+
+                  {canAddActions ? (
+                    <div className="space-y-2 border-t border-border/60 pt-3">
+                      {addActionError ? <p className="text-xs text-destructive">{addActionError}</p> : null}
+                      <div className="flex gap-2">
+                        <input
+                          type="text"
+                          value={newActionText}
+                          onChange={(e) => setNewActionText(e.target.value)}
+                          onKeyDown={(e) => { if (e.key === 'Enter') void addAction(); }}
+                          placeholder={t('addActionPlaceholder')}
+                          className="flex-1 rounded-lg border border-input bg-transparent px-3 py-2 text-sm text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-1 focus:ring-ring"
+                        />
+                        <Button
+                          variant="hero"
+                          size="sm"
+                          onClick={() => void addAction()}
+                          disabled={!newActionText.trim() || addingAction}
+                        >
+                          {addingAction ? t('addingAction') : t('addAction')}
+                        </Button>
+                      </div>
+                    </div>
+                  ) : null}
+                </div>
+              ) : null}
+
+              {/* Group / Discuss phases - read-only items */}
+              {currentPhase && ['group', 'discuss'].includes(currentPhase) && !showItems ? null : null}
+            </>
+          )}
+        </div>
       </div>
-    </div>
+    </>
   );
 }

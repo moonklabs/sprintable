@@ -7,8 +7,7 @@ import { ArrowLeft, Bot, Clock3, RefreshCw, TriangleAlert, User } from 'lucide-r
 import { Badge } from '@/components/ui/badge';
 import { Button, buttonVariants } from '@/components/ui/button';
 import { EmptyState } from '@/components/ui/empty-state';
-import { PageHeader } from '@/components/ui/page-header';
-import { SectionCard, SectionCardBody, SectionCardHeader } from '@/components/ui/section-card';
+import { TopBarSlot } from '@/components/nav/top-bar-slot';
 import { AgentHitlPolicyEditor } from './agent-hitl-policy-editor';
 import { getTriggerMemoHref } from '@/services/agent-run-history';
 
@@ -82,38 +81,35 @@ export function AgentHitlRequestsList() {
   }, [fetchRequests]);
 
   return (
-    <div className="space-y-4">
-      <PageHeader
-        eyebrow={t('eyebrow')}
-        title={t('title')}
-        description={t('description')}
-        actions={(
-          <div className="flex flex-wrap items-center gap-2">
-            <Button variant="glass" size="lg" onClick={() => void fetchRequests(true)}>
-              <RefreshCw className={`mr-2 size-4 ${refreshing ? 'animate-spin' : ''}`} />
+    <>
+      <TopBarSlot
+        title={<h1 className="text-sm font-medium">{t('title')}</h1>}
+        actions={
+          <div className="flex items-center gap-2">
+            <Button variant="glass" size="sm" onClick={() => void fetchRequests(true)}>
+              <RefreshCw className={`mr-1.5 size-3.5 ${refreshing ? 'animate-spin' : ''}`} />
               {t('refresh')}
             </Button>
-            <Link href="/agents" className={buttonVariants({ variant: 'glass', size: 'lg' })}>
-              <ArrowLeft className="mr-2 size-4" />
+            <Link href="/agents" className={buttonVariants({ variant: 'outline', size: 'sm' })}>
+              <ArrowLeft className="mr-1.5 size-3.5" />
               {t('backToAgents')}
             </Link>
           </div>
-        )}
+        }
       />
 
-      <AgentHitlPolicyEditor />
+      <div className="flex min-h-0 flex-1 flex-col overflow-y-auto p-6 space-y-5">
+        <AgentHitlPolicyEditor />
 
-      <SectionCard>
-        <SectionCardHeader>
-          <div className="flex items-center justify-between gap-3">
+        <div className="rounded-xl border border-border bg-background">
+          <div className="flex items-center justify-between gap-3 border-b border-border/60 px-4 py-3">
             <div>
               <h2 className="text-base font-semibold text-foreground">{t('sectionTitle')}</h2>
               <p className="text-sm text-muted-foreground">{t('sectionBody')}</p>
             </div>
             <Badge variant="chip">{t('pendingCount', { count: requests.length })}</Badge>
           </div>
-        </SectionCardHeader>
-        <SectionCardBody>
+          <div className="p-4">
           {loading ? (
             <div className="space-y-3">
               {[1, 2, 3].map((i) => (
@@ -184,8 +180,9 @@ export function AgentHitlRequestsList() {
               ))}
             </div>
           )}
-        </SectionCardBody>
-      </SectionCard>
-    </div>
+          </div>
+        </div>
+      </div>
+    </>
   );
 }

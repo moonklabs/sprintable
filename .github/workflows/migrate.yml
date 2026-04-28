@@ -1,0 +1,77 @@
+name: DB Migrations
+
+# Auto-applies Supabase migrations to the matching environment.
+# - push to develop  → staging Supabase project
+# - push to main     → production Supabase project (gated by environment reviewer)
+# Only fires when files under packages/db/supabase/migrations/ change.
+
+on:
+  push:
+    branches: [develop, main]
+    paths:
+      - 'packages/db/supabase/migrations/**'
+      - '.github/workflows/migrate.yml'
+  workflow_dispatch:
+    inputs:
+      target:
+        description: 'Target environment'
+        required: true
+        type: choice
+        options:
+          - staging
+          - production
+
+concurrency:
+  # Per-ref serialization. Never cancel an in-flight migration.
+  group: migrate-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  migrate:
+    name: Push migrations
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+
+    # Resolve target env:
+    #   workflow_dispatch  → user input
+    #   push to main       → production
+    #   push to develop    → staging
+    environment: ${{ github.event.inputs.target || (github.ref == 'refs/heads/main' && 'production' || 'staging') }}
+
+    defaults:
+      run:
+        working-directory: packages/db
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Supabase CLI
+        uses: supabase/setup-cli@v1
+        with:
+          version: latest
+
+      - name: Link to Supabase project
+        run: supabase link --project-ref "$SUPABASE_PROJECT_REF"
+        env:
+          SUPABASE_ACCESS_TOKEN: ${{ secrets.SUPABASE_ACCESS_TOKEN }}
+          SUPABASE_DB_PASSWORD: ${{ secrets.SUPABASE_DB_PASSWORD }}
+          SUPABASE_PROJECT_REF: ${{ secrets.SUPABASE_PROJECT_REF }}
+
+      - name: Preview pending migrations (dry-run)
+        run: supabase db push --dry-run
+        env:
+          SUPABASE_ACCESS_TOKEN: ${{ secrets.SUPABASE_ACCESS_TOKEN }}
+          SUPABASE_DB_PASSWORD: ${{ secrets.SUPABASE_DB_PASSWORD }}
+
+      - name: Apply migrations
+        run: supabase db push
+        env:
+          SUPABASE_ACCESS_TOKEN: ${{ secrets.SUPABASE_ACCESS_TOKEN }}
+          SUPABASE_DB_PASSWORD: ${{ secrets.SUPABASE_DB_PASSWORD }}
+
+      - name: Verify schema
+        run: supabase db diff --linked || true
+        env:
+          SUPABASE_ACCESS_TOKEN: ${{ secrets.SUPABASE_ACCESS_TOKEN }}
+          SUPABASE_DB_PASSWORD: ${{ secrets.SUPABASE_DB_PASSWORD }}

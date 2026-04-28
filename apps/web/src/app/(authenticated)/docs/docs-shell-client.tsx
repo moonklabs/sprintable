@@ -12,7 +12,7 @@ import { Input } from '@/components/ui/input';
 import { ToastContainer, useToast } from '@/components/ui/toast';
 import { ChevronLeft, Plus, X, Trash2, Copy, Check } from 'lucide-react';
 import { DocsShell } from '@/components/docs/docs-shell';
-import { GlassPanel } from '@/components/ui/glass-panel';
+import { TopBarSlot } from '@/components/nav/top-bar-slot';
 
 interface Doc {
   id: string;
@@ -93,6 +93,7 @@ export function DocsShellClient({ projectId }: DocsShellClientProps) {
   const [content, setContent] = useState('');
   const [contentFormat, setContentFormat] = useState<'markdown' | 'html'>('markdown');
   const [mdCopied, setMdCopied] = useState(false);
+  const [autosave, setAutosave] = useState(true);
 
   const handleCopyMarkdown = useCallback(async () => {
     try {
@@ -121,11 +122,12 @@ export function DocsShellClient({ projectId }: DocsShellClientProps) {
     );
   }, []);
 
-  const { status: saveStatus } = useDocSync<DocDetail>({
+  const { status: saveStatus, isDirty, save } = useDocSync<DocDetail>({
     docId: selectedDoc?.id ?? null,
     savePayload: { title, content, content_format: contentFormat },
     serverUpdatedAt: selectedDoc?.updated_at ?? null,
     editing: selectedDoc !== null,
+    autosave,
     onSaved: handleDocSaved,
   });
 
@@ -377,34 +379,28 @@ export function DocsShellClient({ projectId }: DocsShellClientProps) {
     if (slug) void fetchDoc(slug);
   }, [searchParams, fetchDoc]);
 
+  const handleNewDoc = useCallback(() => {
+    setShowCreate(true);
+    setNewTitle('');
+    setNewSlug('');
+    setNewContent('');
+    setNewParentId(null);
+    setSlugManuallyEdited(false);
+  }, []);
+
   if (loading) {
     return (
-      <div className="flex h-screen items-center justify-center">
-        <p className="text-sm text-[color:var(--operator-muted)]">{t('loading')}</p>
-      </div>
+      <>
+        <TopBarSlot title={<h1 className="text-sm font-medium">{t('title')}</h1>} />
+        <div className="flex h-64 items-center justify-center">
+          <p className="text-sm text-[color:var(--operator-muted)]">{t('loading')}</p>
+        </div>
+      </>
     );
   }
 
   const sidebarContent = (
     <>
-      <div className="flex-shrink-0 border-b border-white/10 px-4 py-4">
-        <div className="flex items-center justify-between gap-2">
-          <div className="space-y-1">
-            <p className="text-[11px] font-semibold uppercase tracking-[0.2em] text-muted-foreground">Knowledge Base</p>
-            <h1 className="text-lg font-semibold">{t('title')}</h1>
-          </div>
-          <Button size="sm" onClick={() => {
-            setShowCreate(true);
-            setNewTitle('');
-            setNewSlug('');
-            setNewContent('');
-            setNewParentId(null);
-            setSlugManuallyEdited(false);
-          }}>
-            <Plus className="h-4 w-4" />
-          </Button>
-        </div>
-      </div>
       {/* Tag filter chips */}
       {(() => {
         const allTags = [...new Set(tree.flatMap((d) => (d as unknown as { tags?: string[] | null }).tags ?? []))];
@@ -436,17 +432,7 @@ export function DocsShellClient({ projectId }: DocsShellClientProps) {
             description={t('selectDoc')}
             className="mt-2 bg-background/70"
             action={
-              <Button
-                size="sm"
-                onClick={() => {
-                  setShowCreate(true);
-                  setNewTitle('');
-                  setNewSlug('');
-                  setNewContent('');
-                  setNewParentId(null);
-                  setSlugManuallyEdited(false);
-                }}
-              >
+              <Button size="sm" onClick={handleNewDoc}>
                 <Plus className="mr-1 h-4 w-4" />
                 {t('newDoc')}
               </Button>
@@ -527,7 +513,7 @@ export function DocsShellClient({ projectId }: DocsShellClientProps) {
             </div>
           </div>
         ) : selectedDoc ? (
-          <>
+          <div className="flex h-full flex-col overflow-hidden">
             {/* Header */}
             <div className="flex-shrink-0 border-b border-white/10 px-4 py-3 lg:px-6 lg:py-5">
               <div className="flex items-center justify-between gap-4">
@@ -553,8 +539,8 @@ export function DocsShellClient({ projectId }: DocsShellClientProps) {
               </div>
             </div>
 
-            {/* Content — always-editable tiptap */}
-            <div className="flex-1 overflow-y-auto px-4 py-4 lg:px-6 lg:py-6">
+            {/* Content — fills remaining height */}
+            <div className="flex min-h-0 flex-1 flex-col overflow-hidden px-4 py-4 lg:px-6 lg:py-6">
               <DocEditor
                 value={content}
                 contentFormat={contentFormat}
@@ -563,12 +549,16 @@ export function DocsShellClient({ projectId }: DocsShellClientProps) {
                 onNavigate={handleSelectDoc}
                 onChange={setContent}
                 onContentFormatChange={setContentFormat}
+                isDirty={isDirty}
+                onSave={save}
+                autosave={autosave}
+                onAutosaveToggle={setAutosave}
                 labels={{
                   contentFormat: t('contentFormat'),
                   markdown: t('formatMarkdown'),
-                  html: t('formatHtml'),
+                  preview: t('formatPreview'),
+                  save: t('save'),
                   toolbar: t('toolbar'),
-                  hint: t('toolbarHint'),
                   placeholder: t('editorPlaceholder'),
                   h1: t('toolbarH1'),
                   h2: t('toolbarH2'),
@@ -578,10 +568,11 @@ export function DocsShellClient({ projectId }: DocsShellClientProps) {
                   quote: t('toolbarQuote'),
                   code: t('toolbarCode'),
                   link: t('toolbarLink'),
+                  autosave: t('autosave'),
                 }}
               />
             </div>
-          </>
+          </div>
   ) : (
     <div className="flex h-full items-center justify-center p-4 lg:p-6">
       <EmptyState
@@ -589,17 +580,7 @@ export function DocsShellClient({ projectId }: DocsShellClientProps) {
         description={t('selectDoc')}
         className="w-full max-w-lg bg-background/70"
         action={
-          <Button
-            size="sm"
-            onClick={() => {
-              setShowCreate(true);
-              setNewTitle('');
-              setNewSlug('');
-              setNewContent('');
-              setNewParentId(null);
-              setSlugManuallyEdited(false);
-            }}
-          >
+          <Button size="sm" onClick={handleNewDoc}>
             <Plus className="mr-1 h-4 w-4" />
             {t('newDoc')}
           </Button>
@@ -610,33 +591,43 @@ export function DocsShellClient({ projectId }: DocsShellClientProps) {
 
   return (
     <>
-      {/* Desktop layout (lg+) — unchanged 2-panel DocsShell */}
-      <div className="hidden lg:block">
-        <DocsShell sidebar={sidebarContent} className="min-h-[calc(100vh-8rem)]">
-          {editorContent}
-        </DocsShell>
-      </div>
+      <TopBarSlot
+        title={<h1 className="text-sm font-medium">{t('title')}</h1>}
+        actions={
+          <Button size="sm" variant="outline" onClick={handleNewDoc}>
+            <Plus className="mr-1.5 h-3.5 w-3.5" />
+            {t('newDoc')}
+          </Button>
+        }
+      />
 
-      {/* Mobile layout (< lg) — list ↔ detail full-screen */}
-      <div className="lg:hidden">
+      {/* Desktop: flat 2-panel (lg+) */}
+      <DocsShell sidebar={sidebarContent} className="hidden min-h-0 flex-1 lg:flex">
+        {editorContent}
+      </DocsShell>
+
+      {/* Mobile: list ↔ detail full-screen (< lg) */}
+      <div className="flex flex-1 flex-col lg:hidden">
         {mobileView === 'detail' ? (
-          <div className="space-y-2">
-            <button
-              type="button"
-              onClick={() => setMobileView('list')}
-              className="flex items-center gap-1 py-1 text-sm text-[color:var(--operator-muted)] hover:text-[color:var(--operator-foreground)]"
-            >
-              <ChevronLeft className="size-4" />
-              {t('title')}
-            </button>
-            <GlassPanel className="flex min-h-0 flex-col overflow-hidden shadow-sm">
+          <div className="flex flex-1 flex-col">
+            <div className="flex-shrink-0 border-b border-border/80 px-4 py-2">
+              <button
+                type="button"
+                onClick={() => setMobileView('list')}
+                className="flex min-h-[44px] items-center gap-1 text-sm text-[color:var(--operator-muted)] hover:text-[color:var(--operator-foreground)]"
+              >
+                <ChevronLeft className="size-4" />
+                {t('title')}
+              </button>
+            </div>
+            <div className="flex flex-1 flex-col overflow-hidden bg-background">
               {editorContent}
-            </GlassPanel>
+            </div>
           </div>
         ) : (
-          <GlassPanel className="flex flex-col border-white/8 bg-[color:var(--operator-surface-soft)]/75 shadow-sm">
+          <div className="flex flex-1 flex-col bg-background overflow-y-auto">
             {sidebarContent}
-          </GlassPanel>
+          </div>
         )}
       </div>
 

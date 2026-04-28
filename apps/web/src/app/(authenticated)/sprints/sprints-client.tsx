@@ -5,6 +5,7 @@ import { useTranslations } from 'next-intl';
 import { Plus, X, Play, StopCircle, ChevronRight } from 'lucide-react';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
+import { TopBarSlot } from '@/components/nav/top-bar-slot';
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -284,32 +285,37 @@ export function SprintsClient({ projectId }: SprintsClientProps) {
     return <p className="p-6 text-sm text-muted-foreground">{t('loading')}</p>;
   }
 
-  const listPanel = (
-    <div className="flex h-full flex-col overflow-y-auto p-6">
-      <div className="mb-4 flex items-center justify-between">
-        <h1 className="text-xl font-semibold text-foreground">{t('title')}</h1>
-        <Button size="sm" onClick={() => setShowCreate(true)}>
-          <Plus className="size-4" />
-          <span className="hidden sm:inline">{t('newSprint')}</span>
-        </Button>
-      </div>
-      {sprints.length === 0 ? (
-        <p className="text-sm text-muted-foreground">{t('noSprints')}</p>
-      ) : (
-        <ul className="space-y-2">
-          {sprints.map((sprint) => (
-            <li
-              key={sprint.id}
-              onClick={() => void handleSelect(sprint)}
-              className={`cursor-pointer rounded-lg border p-4 transition hover:bg-muted/40 ${selected?.id === sprint.id ? 'border-primary bg-muted/40' : 'border-border'}`}
-            >
-              <div className="flex items-center justify-between">
-                <span className="font-medium text-foreground">{sprint.title}</span>
-                <div className="flex items-center gap-2">
+  return (
+    <>
+      <TopBarSlot
+        title={<h1 className="text-sm font-medium">{t('title')}</h1>}
+        actions={
+          <Button size="sm" onClick={() => setShowCreate(true)}>
+            <Plus className="size-4" />
+            <span className="hidden sm:inline">{t('newSprint')}</span>
+          </Button>
+        }
+      />
+      <div className="flex min-h-0 flex-1 overflow-hidden">
+      {/* Sprint list */}
+      <div className={`flex flex-col gap-3 overflow-y-auto p-6 transition-all duration-300 ${selected ? 'hidden w-1/2 lg:flex' : 'w-full'}`}>
+        {sprints.length === 0 ? (
+          <p className="text-sm text-muted-foreground">{t('noSprints')}</p>
+        ) : (
+          <ul className="space-y-2">
+            {sprints.map((sprint) => (
+              <li
+                key={sprint.id}
+                onClick={() => void handleSelect(sprint)}
+                className={`cursor-pointer rounded-lg border p-4 transition hover:bg-muted/40 ${selected?.id === sprint.id ? 'border-primary bg-muted/40' : 'border-border'}`}
+              >
+                <div className="flex items-center justify-between">
+                  <span className="font-medium text-foreground">{sprint.title}</span>
+                  <div className="flex items-center gap-2">
                   <Badge variant={statusVariant(sprint.status)}>{sprint.status}</Badge>
                   <ChevronRight className="size-4 text-muted-foreground" />
+                  </div>
                 </div>
-              </div>
               <p className="mt-1 text-xs text-muted-foreground">
                 {sprint.start_date} ~ {sprint.end_date} · {sprint.duration}{t('days')}
               </p>
@@ -327,10 +333,10 @@ export function SprintsClient({ projectId }: SprintsClientProps) {
         </ul>
       )}
     </div>
-  );
 
-  const detailPanel = selected ? (
-    <div className="flex h-full flex-col overflow-y-auto border-l border-border p-6">
+  {/* Detail panel */}
+  {selected ? (
+    <div className="flex w-full flex-col overflow-y-auto border-l border-border p-6 lg:w-1/2">
       {/* Header */}
       <div className="mb-4 flex items-start justify-between gap-2">
         <div>
@@ -449,22 +455,8 @@ export function SprintsClient({ projectId }: SprintsClientProps) {
         </div>
       ) : null}
     </div>
-  ) : null;
-
-  return (
-    <>
-      {/* Desktop: list + detail side by side */}
-      <div className="hidden h-full lg:flex">
-        <div className={`transition-all duration-300 ${selected ? 'w-1/2' : 'w-full'}`}>
-          {listPanel}
-        </div>
-        {selected ? <div className="w-1/2">{detailPanel}</div> : null}
-      </div>
-
-      {/* Mobile: list or detail */}
-      <div className="flex h-full flex-col lg:hidden">
-        {selected ? detailPanel : listPanel}
-      </div>
+  ) : null}
+    </div>
 
       {showCreate ? (
         <CreateDialog

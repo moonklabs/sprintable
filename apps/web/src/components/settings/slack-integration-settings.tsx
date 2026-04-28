@@ -15,7 +15,8 @@ import {
   DialogTitle,
 } from '@/components/ui/dialog';
 import { GlassPanel } from '@/components/ui/glass-panel';
-import { OperatorInput, OperatorSelect } from '@/components/ui/operator-control';
+import { OperatorInput } from '@/components/ui/operator-control';
+import { OperatorDropdownSelect } from '@/components/ui/operator-dropdown-select';
 import { SectionCard, SectionCardBody, SectionCardHeader } from '@/components/ui/section-card';
 import { ToastContainer, useToast } from '@/components/ui/toast';
 
@@ -387,15 +388,14 @@ export function SlackIntegrationSettingsSection() {
                       <div className="grid flex-1 gap-3 xl:max-w-xl xl:grid-cols-[minmax(0,1fr)_auto]">
                         <div className="space-y-2">
                           <label className="text-xs uppercase tracking-[0.18em] text-[color:var(--operator-muted)]">{t('selectProjectLabel')}</label>
-                          <OperatorSelect
+                          <OperatorDropdownSelect
                             value={selectedProjectId}
-                            onChange={(event) => setSelectedProjects((prev) => ({ ...prev, [channel.id]: event.target.value }))}
-                          >
-                            <option value="">{t('selectProjectPlaceholder')}</option>
-                            {data.projects.map((project) => (
-                              <option key={project.id} value={project.id}>{project.name}</option>
-                            ))}
-                          </OperatorSelect>
+                            onValueChange={(v) => setSelectedProjects((prev) => ({ ...prev, [channel.id]: v }))}
+                            options={[
+                              { value: '', label: t('selectProjectPlaceholder') },
+                              ...data.projects.map((project) => ({ value: project.id, label: project.name })),
+                            ]}
+                          />
                         </div>
                         <div className="flex items-end">
                           <Button

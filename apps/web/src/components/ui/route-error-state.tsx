@@ -24,16 +24,16 @@ export function RouteErrorState({
   const t = useTranslations('common');
 
   return (
-    <div className={`flex items-center justify-center ${compact ? 'min-h-[50vh]' : 'min-h-screen bg-gray-50'}`}>
+    <div className={`flex items-center justify-center ${compact ? 'min-h-[50vh]' : 'min-h-screen bg-background'}`}>
       <div className={`space-y-4 rounded-2xl bg-white text-center shadow-lg ${compact ? 'w-full max-w-lg border p-6' : 'w-full max-w-sm p-8'}`}>
         <div className="space-y-2">
-          <p className={`${compact ? 'text-base' : 'text-lg'} font-semibold text-gray-900`}>
+          <p className={`${compact ? 'text-base' : 'text-lg'} font-semibold text-foreground`}>
             {title ?? t('error')}
           </p>
-          <p className="text-sm text-gray-500">
+          <p className="text-sm text-muted-foreground">
             {description ?? t('errorDescription')}
           </p>
-          {error?.message ? <p className="text-xs text-gray-400">{error.message}</p> : null}
+          {error?.message ? <p className="text-xs text-muted-foreground">{error.message}</p> : null}
         </div>
         <div className="flex justify-center gap-3">
           <button
@@ -44,7 +44,7 @@ export function RouteErrorState({
           </button>
           <a
             href={secondaryHref}
-            className="rounded-lg border border-gray-300 px-4 py-2 text-sm font-medium text-gray-700 hover:bg-gray-50"
+            className="rounded-lg border border-border px-4 py-2 text-sm font-medium text-foreground hover:bg-muted/50"
           >
             {secondaryLabel ?? t('goToLogin')}
           </a>

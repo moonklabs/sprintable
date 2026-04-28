@@ -4,6 +4,7 @@ import { useCallback, useEffect, useRef, useState } from 'react';
 import { useTranslations } from 'next-intl';
 import { Input } from '@/components/ui/input';
 import { SectionCard, SectionCardBody, SectionCardHeader } from '@/components/ui/section-card';
+import { OperatorDropdownSelect } from '@/components/ui/operator-dropdown-select';
 import { MemoComposer } from '@/components/memos/memo-composer';
 import { MEMO_TEMPLATE_PRESETS, type MemoTemplateId, getMemoTemplatePreset, parseMemoDraft, serializeMemoDraft } from './memo-workspace';
 
@@ -166,18 +167,18 @@ export function MemoCreateForm({ members, onSubmit, onCancel, initialTitle, draf
         />
 
         <div className="grid gap-3 lg:grid-cols-2">
-          <select
+          <OperatorDropdownSelect
             value={memoType}
-            onChange={(e) => setMemoType(e.target.value)}
-            className="rounded-md border border-input px-3 py-2 text-sm"
-          >
-            <option value="memo">{t('typeMemo')}</option>
-            <option value="task">{t('typeTask')}</option>
-            <option value="checklist">{t('typeChecklist')}</option>
-            <option value="decision">{t('typeDecision')}</option>
-            <option value="request">{t('typeRequest')}</option>
-            <option value="handoff">{t('typeHandoff')}</option>
-          </select>
+            onValueChange={setMemoType}
+            options={[
+              { value: 'memo', label: t('typeMemo') },
+              { value: 'task', label: t('typeTask') },
+              { value: 'checklist', label: t('typeChecklist') },
+              { value: 'decision', label: t('typeDecision') },
+              { value: 'request', label: t('typeRequest') },
+              { value: 'handoff', label: t('typeHandoff') },
+            ]}
+          />
           <div className="space-y-2">
             <div className="text-xs font-medium uppercase tracking-wide text-muted-foreground">{t('assignees')}</div>
             <div className="max-h-32 space-y-1 overflow-y-auto rounded-md border border-input p-2">

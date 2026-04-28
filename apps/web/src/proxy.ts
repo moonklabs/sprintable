@@ -28,17 +28,17 @@ export async function proxy(request: NextRequest) {
 
   // OSS_MODE: bypass Supabase auth entirely (AC-1, AC-4, AC-5)
   if (isOssMode()) {
-    // / → /dashboard (AC-4)
+    // / → /inbox (AC-4) — operator cockpit first screen (Phase A3)
     if (pathname === '/') {
       const url = request.nextUrl.clone();
-      url.pathname = '/dashboard';
+      url.pathname = '/inbox';
       return NextResponse.redirect(url);
     }
 
-    // /login, /auth/callback → /dashboard (AC-5)
+    // /login, /auth/callback → /inbox (AC-5)
     if (pathname === '/login' || pathname.startsWith('/auth/callback')) {
       const url = request.nextUrl.clone();
-      url.pathname = '/dashboard';
+      url.pathname = '/inbox';
       url.search = '';
       return NextResponse.redirect(url);
     }
@@ -109,7 +109,7 @@ export async function proxy(request: NextRequest) {
 
   if (request.nextUrl.pathname === '/login') {
     const url = request.nextUrl.clone();
-    url.pathname = '/dashboard';
+    url.pathname = '/inbox';
     return NextResponse.redirect(url);
   }
 
