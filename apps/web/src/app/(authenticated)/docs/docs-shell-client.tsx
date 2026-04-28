@@ -10,7 +10,7 @@ import { Button } from '@/components/ui/button';
 import { EmptyState } from '@/components/ui/empty-state';
 import { Input } from '@/components/ui/input';
 import { ToastContainer, useToast } from '@/components/ui/toast';
-import { ChevronLeft, Plus, X, Trash2, Copy, Check } from 'lucide-react';
+import { ChevronLeft, ChevronDown, ChevronRight, Plus, X, Trash2, Copy, Check } from 'lucide-react';
 import { DocsShell } from '@/components/docs/docs-shell';
 import { TopBarSlot } from '@/components/nav/top-bar-slot';
 
@@ -87,6 +87,7 @@ export function DocsShellClient({ projectId }: DocsShellClientProps) {
   const [loading, setLoading] = useState(true);
   const [mobileView, setMobileView] = useState<'list' | 'detail'>('list');
   const [selectedTags, setSelectedTags] = useState<string[]>([]);
+  const [tagsCollapsed, setTagsCollapsed] = useState(true);
 
   // Always-editable content states
   const [title, setTitle] = useState('');
@@ -401,26 +402,49 @@ export function DocsShellClient({ projectId }: DocsShellClientProps) {
 
   const sidebarContent = (
     <>
-      {/* Tag filter chips */}
+      {/* Tag filter — AC1 접기/펼치기 */}
       {(() => {
         const allTags = [...new Set(tree.flatMap((d) => (d as unknown as { tags?: string[] | null }).tags ?? []))];
         if (allTags.length === 0) return null;
         return (
-          <div className="flex flex-wrap gap-1.5 border-b border-white/10 px-4 py-2">
-            {allTags.map((tag) => (
-              <button
-                key={tag}
-                type="button"
-                onClick={() => setSelectedTags((prev) => prev.includes(tag) ? prev.filter((t) => t !== tag) : [...prev, tag])}
-                className={`rounded-full px-2.5 py-0.5 text-[11px] font-medium transition ${selectedTags.includes(tag) ? 'bg-primary text-primary-foreground' : 'bg-muted/60 text-muted-foreground hover:bg-muted'}`}
-              >
-                #{tag}
-              </button>
-            ))}
-            {selectedTags.length > 0 && (
-              <button type="button" onClick={() => setSelectedTags([])} className="text-[11px] text-muted-foreground hover:text-foreground underline">
-                {t('clearFilter')}
-              </button>
+          <div className="border-b border-white/10">
+            {/* AC1: 토글 헤더 + AC3: 활성 태그 뱃지 */}
+            <button
+              type="button"
+              onClick={() => setTagsCollapsed((v) => !v)}
+              className="flex w-full items-center justify-between px-4 py-1 text-[11px] text-muted-foreground hover:text-foreground"
+            >
+              <span className="flex items-center gap-1.5">
+                {tagsCollapsed ? <ChevronRight className="size-3" /> : <ChevronDown className="size-3" />}
+                {t('tagFilter')}
+                {/* AC3: 접힌 상태에서 활성 태그 수 뱃지 */}
+                {tagsCollapsed && selectedTags.length > 0 && (
+                  <span className="rounded-full bg-primary px-1.5 py-0.5 text-[10px] font-semibold text-primary-foreground">
+                    {selectedTags.length}
+                  </span>
+                )}
+              </span>
+            </button>
+
+            {/* AC1: 펼친 상태에서만 태그 칩 표시 + AC2: 공간 축소 */}
+            {!tagsCollapsed && (
+              <div className="flex max-h-[120px] flex-wrap gap-1 overflow-y-auto px-4 py-1">
+                {allTags.map((tag) => (
+                  <button
+                    key={tag}
+                    type="button"
+                    onClick={() => setSelectedTags((prev) => prev.includes(tag) ? prev.filter((t) => t !== tag) : [...prev, tag])}
+                    className={`rounded-full px-2 py-0.5 text-[11px] font-medium transition ${selectedTags.includes(tag) ? 'bg-primary text-primary-foreground' : 'bg-muted/60 text-muted-foreground hover:bg-muted'}`}
+                  >
+                    #{tag}
+                  </button>
+                ))}
+                {selectedTags.length > 0 && (
+                  <button type="button" onClick={() => setSelectedTags([])} className="text-[11px] text-muted-foreground underline hover:text-foreground">
+                    {t('clearFilter')}
+                  </button>
+                )}
+              </div>
             )}
           </div>
         );
