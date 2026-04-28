@@ -12,6 +12,21 @@ type AuditSeverity = 'debug' | 'info' | 'warn' | 'error' | 'security';
 
 type AuditLogger = (eventType: string, severity: AuditSeverity, payload: Record<string, unknown>) => Promise<void>;
 
+export type StatusUpdateGateResult = {
+  pass: boolean;
+  nextStatus: string;
+  mode?: string;
+  violations?: Array<{ condition?: string; field?: string; message: string }>;
+};
+
+export type StatusUpdateGateFn = (
+  storyId: string,
+  targetStatus: string,
+  orgId: string,
+  projectId: string,
+  actorId: string,
+) => Promise<StatusUpdateGateResult | null>;
+
 interface MemoScope {
   id: string;
   org_id: string;
@@ -243,6 +258,7 @@ export class AgentBuiltinToolService {
   private _epicServicePromise: Promise<EpicService> | null = null;
   private readonly auditLogger?: AuditLogger;
   private readonly fetchFn: typeof fetch;
+  private readonly statusUpdateGateFn?: StatusUpdateGateFn;
 
   constructor(
     private readonly supabase: SupabaseClient,
@@ -252,6 +268,7 @@ export class AgentBuiltinToolService {
       epicService?: EpicService;
       auditLogger?: AuditLogger;
       fetchFn?: typeof fetch;
+      statusUpdateGateFn?: StatusUpdateGateFn;
     } = {},
   ) {
     this.memoService = options.memoService ?? MemoService.fromSupabase(supabase);
@@ -259,6 +276,7 @@ export class AgentBuiltinToolService {
     this._epicService = options.epicService ?? null;
     this.auditLogger = options.auditLogger;
     this.fetchFn = options.fetchFn ?? fetch;
+    this.statusUpdateGateFn = options.statusUpdateGateFn;
   }
 
   private async getEpicService(): Promise<EpicService> {
@@ -406,6 +424,24 @@ export class AgentBuiltinToolService {
       case 'update_story_status': {
         const args = updateStoryStatusSchema.parse(rawArgs);
         const story = await this.ensureStoryInScope(args.story_id, ctx);
+
+        if (this.statusUpdateGateFn) {
+          const gateResult = await this.statusUpdateGateFn(
+            story.id, args.status, ctx.memo.org_id, ctx.memo.project_id, ctx.agent.id
+          );
+          if (gateResult && !gateResult.pass) {
+            return {
+              gate_failed: true,
+              mode: gateResult.mode,
+              violations: gateResult.violations,
+              hint: gateResult.violations?.map((v) => v.message).join('; ') ?? 'Gate check failed',
+            };
+          }
+          const nextStatus = gateResult?.nextStatus ?? args.status;
+          const updated = await this.storyService.update(story.id, { status: nextStatus });
+          return { story: this.presentStory(updated as StoryRecord), gate: gateResult };
+        }
+
         const updated = await this.storyService.update(story.id, { status: args.status });
         return { story: this.presentStory(updated as StoryRecord) };
       }
