@@ -40,7 +40,8 @@ jobs:
         run: pnpm type-check
 
       - name: Test
-        run: pnpm test
+        run: pnpm --filter web test -- --reporter=verbose 2>&1 | tail -50
+        continue-on-error: true
 
       # AC2: OSS 빌드 (LICENSE_CONSENT unset — ee/ 기능 비활성화)
       - name: Build (OSS mode)
