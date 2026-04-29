@@ -87,6 +87,9 @@ export function DocsShellClient({ projectId }: DocsShellClientProps) {
   const [loading, setLoading] = useState(true);
   const [mobileView, setMobileView] = useState<'list' | 'detail'>('list');
   const [selectedTags, setSelectedTags] = useState<string[]>([]);
+  const [docsHasMore, setDocsHasMore] = useState(false);
+  const [docsNextCursor, setDocsNextCursor] = useState<string | null>(null);
+  const [docsLoadingMore, setDocsLoadingMore] = useState(false);
   const [tagsCollapsed, setTagsCollapsed] = useState(true);
 
   // Always-editable content states
@@ -132,22 +135,30 @@ export function DocsShellClient({ projectId }: DocsShellClientProps) {
     onSaved: handleDocSaved,
   });
 
-  const fetchTree = useCallback(async (tags?: string[]) => {
+  const fetchTree = useCallback(async (tags?: string[], cursor?: string | null) => {
     if (!projectId) return;
 
     try {
-      const params = new URLSearchParams({ project_id: projectId });
+      const params = new URLSearchParams({ project_id: projectId, limit: '20' });
       if (tags?.length) params.set('tags', tags.join(','));
       else params.set('view', 'tree');
+      if (cursor) params.set('cursor', cursor);
       const res = await fetch(`/api/docs?${params.toString()}`);
       if (!res.ok) throw new Error('Failed to fetch tree');
 
-      const { data } = await res.json();
-      setTree(data || []);
+      const { data, meta } = await res.json() as { data: Doc[]; meta?: { hasMore?: boolean; nextCursor?: string | null } };
+      if (cursor) {
+        setTree((prev) => [...prev, ...(data || [])]);
+      } else {
+        setTree(data || []);
+      }
+      setDocsHasMore(meta?.hasMore ?? false);
+      setDocsNextCursor(meta?.nextCursor ?? null);
     } catch (error) {
       console.error('Failed to fetch docs tree:', error);
     } finally {
       setLoading(false);
+      setDocsLoadingMore(false);
     }
   }, [projectId]);
 
@@ -463,17 +474,36 @@ export function DocsShellClient({ projectId }: DocsShellClientProps) {
             }
           />
         ) : (
-          <DocTree
-            docs={tree}
-            selectedSlug={selectedDoc?.slug || null}
-            onSelect={(doc) => { handleSelectDoc(doc); }}
-            onReorder={handleReorder}
-            onMove={handleMove}
-            onMoveDenied={handleMoveDenied}
-            onRename={handleRename}
-            onDelete={handleDeleteDoc}
-            onAddChild={handleAddChild}
-          />
+          <>
+            <DocTree
+              docs={tree}
+              selectedSlug={selectedDoc?.slug || null}
+              onSelect={(doc) => { handleSelectDoc(doc); }}
+              onReorder={handleReorder}
+              onMove={handleMove}
+              onMoveDenied={handleMoveDenied}
+              onRename={handleRename}
+              onDelete={handleDeleteDoc}
+              onAddChild={handleAddChild}
+            />
+            {docsHasMore && (
+              <div className="px-2 py-1">
+                <Button
+                  variant="ghost"
+                  size="sm"
+                  className="w-full text-xs text-muted-foreground"
+                  disabled={docsLoadingMore}
+                  onClick={() => {
+                    if (!docsNextCursor || docsLoadingMore) return;
+                    setDocsLoadingMore(true);
+                    void fetchTree(selectedTags.length ? selectedTags : undefined, docsNextCursor);
+                  }}
+                >
+                  {docsLoadingMore ? tc('loading') : tc('loadMore')}
+                </Button>
+              </div>
+            )}
+          </>
         )}
       </div>
     </>

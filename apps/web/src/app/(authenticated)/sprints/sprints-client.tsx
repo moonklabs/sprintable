@@ -150,6 +150,7 @@ function CreateDialog({ projectId, onCreated, onClose }: CreateDialogProps) {
 
 export function SprintsClient({ projectId }: SprintsClientProps) {
   const t = useTranslations('sprints');
+  const tc = useTranslations('common');
 
   const [sprints, setSprints] = useState<Sprint[]>([]);
   const [loading, setLoading] = useState(true);
@@ -157,7 +158,13 @@ export function SprintsClient({ projectId }: SprintsClientProps) {
   const [burndown, setBurndown] = useState<BurndownData | null>(null);
   const [loadingBurndown, setLoadingBurndown] = useState(false);
   const [sprintStories, setSprintStories] = useState<Story[]>([]);
+  const [sprintStoriesHasMore, setSprintStoriesHasMore] = useState(false);
+  const [sprintStoriesNextCursor, setSprintStoriesNextCursor] = useState<string | null>(null);
+  const [sprintStoriesLoadingMore, setSprintStoriesLoadingMore] = useState(false);
   const [backlogStories, setBacklogStories] = useState<Story[]>([]);
+  const [backlogHasMore, setBacklogHasMore] = useState(false);
+  const [backlogNextCursor, setBacklogNextCursor] = useState<string | null>(null);
+  const [backlogLoadingMore, setBacklogLoadingMore] = useState(false);
   const [loadingStories, setLoadingStories] = useState(false);
   const [showCreate, setShowCreate] = useState(false);
   const [activating, setActivating] = useState(false);
@@ -184,32 +191,72 @@ export function SprintsClient({ projectId }: SprintsClientProps) {
     setLoadingStories(true);
     setBurndown(null);
     setSprintStories([]);
+    setSprintStoriesHasMore(false);
+    setSprintStoriesNextCursor(null);
     setBacklogStories([]);
+    setBacklogHasMore(false);
+    setBacklogNextCursor(null);
     setActionError(null);
 
     try {
       const [burndownRes, storiesRes, backlogRes] = await Promise.all([
         fetch(`/api/sprints/${sprint.id}/burndown`),
-        fetch(`/api/stories?project_id=${projectId}&sprint_id=${sprint.id}`),
-        fetch(`/api/stories/backlog?project_id=${projectId}`),
+        fetch(`/api/stories?project_id=${projectId}&sprint_id=${sprint.id}&limit=20`),
+        fetch(`/api/stories/backlog?project_id=${projectId}&limit=20`),
       ]);
       if (burndownRes.ok) {
         const json = await burndownRes.json();
         setBurndown(json.data);
       }
       if (storiesRes.ok) {
-        const json = await storiesRes.json();
+        const json = await storiesRes.json() as { data?: Story[]; meta?: { hasMore?: boolean; nextCursor?: string | null } };
         setSprintStories(json.data ?? []);
+        setSprintStoriesHasMore(json.meta?.hasMore ?? false);
+        setSprintStoriesNextCursor(json.meta?.nextCursor ?? null);
       }
       if (backlogRes.ok) {
-        const json = await backlogRes.json();
+        const json = await backlogRes.json() as { data?: Story[]; meta?: { hasMore?: boolean; nextCursor?: string | null } };
         setBacklogStories(json.data ?? []);
+        setBacklogHasMore(json.meta?.hasMore ?? false);
+        setBacklogNextCursor(json.meta?.nextCursor ?? null);
       }
     } finally {
       setLoadingBurndown(false);
       setLoadingStories(false);
     }
   }, [projectId]);
+
+  const loadMoreSprintStories = useCallback(async () => {
+    if (!selected || !sprintStoriesNextCursor || sprintStoriesLoadingMore) return;
+    setSprintStoriesLoadingMore(true);
+    try {
+      const res = await fetch(`/api/stories?project_id=${projectId}&sprint_id=${selected.id}&limit=20&cursor=${sprintStoriesNextCursor}`);
+      if (res.ok) {
+        const json = await res.json() as { data?: Story[]; meta?: { hasMore?: boolean; nextCursor?: string | null } };
+        setSprintStories((prev) => [...prev, ...(json.data ?? [])]);
+        setSprintStoriesHasMore(json.meta?.hasMore ?? false);
+        setSprintStoriesNextCursor(json.meta?.nextCursor ?? null);
+      }
+    } finally {
+      setSprintStoriesLoadingMore(false);
+    }
+  }, [selected, projectId, sprintStoriesNextCursor, sprintStoriesLoadingMore]);
+
+  const loadMoreBacklog = useCallback(async () => {
+    if (!backlogNextCursor || backlogLoadingMore) return;
+    setBacklogLoadingMore(true);
+    try {
+      const res = await fetch(`/api/stories/backlog?project_id=${projectId}&limit=20&cursor=${backlogNextCursor}`);
+      if (res.ok) {
+        const json = await res.json() as { data?: Story[]; meta?: { hasMore?: boolean; nextCursor?: string | null } };
+        setBacklogStories((prev) => [...prev, ...(json.data ?? [])]);
+        setBacklogHasMore(json.meta?.hasMore ?? false);
+        setBacklogNextCursor(json.meta?.nextCursor ?? null);
+      }
+    } finally {
+      setBacklogLoadingMore(false);
+    }
+  }, [projectId, backlogNextCursor, backlogLoadingMore]);
 
   const handleSelect = useCallback(async (sprint: Sprint) => {
     setSelected(sprint);
@@ -411,26 +458,39 @@ export function SprintsClient({ projectId }: SprintsClientProps) {
         ) : sprintStories.length === 0 ? (
           <p className="text-xs italic text-muted-foreground">{t('noSprintStories')}</p>
         ) : (
-          <ul className="space-y-1.5">
-            {sprintStories.map((story) => (
-              <li key={story.id} className="flex items-center justify-between rounded-lg border border-border px-3 py-2">
-                <span className="text-sm text-foreground truncate">{story.title}</span>
-                <div className="flex shrink-0 items-center gap-2">
-                  {story.story_points != null ? <span className="text-xs text-muted-foreground">{story.story_points}SP</span> : null}
-                  {selected.status !== 'closed' ? (
-                    <button
-                      type="button"
-                      onClick={() => void handleUnassignStory(story)}
-                      className="text-xs text-muted-foreground hover:text-destructive"
-                      title={t('unassign')}
-                    >
-                      <X className="size-3" />
-                    </button>
-                  ) : null}
-                </div>
-              </li>
-            ))}
-          </ul>
+          <>
+            <ul className="space-y-1.5">
+              {sprintStories.map((story) => (
+                <li key={story.id} className="flex items-center justify-between rounded-lg border border-border px-3 py-2">
+                  <span className="text-sm text-foreground truncate">{story.title}</span>
+                  <div className="flex shrink-0 items-center gap-2">
+                    {story.story_points != null ? <span className="text-xs text-muted-foreground">{story.story_points}SP</span> : null}
+                    {selected.status !== 'closed' ? (
+                      <button
+                        type="button"
+                        onClick={() => void handleUnassignStory(story)}
+                        className="text-xs text-muted-foreground hover:text-destructive"
+                        title={t('unassign')}
+                      >
+                        <X className="size-3" />
+                      </button>
+                    ) : null}
+                  </div>
+                </li>
+              ))}
+            </ul>
+            {sprintStoriesHasMore && (
+              <Button
+                variant="ghost"
+                size="sm"
+                className="mt-1 w-full text-xs text-muted-foreground"
+                disabled={sprintStoriesLoadingMore}
+                onClick={() => void loadMoreSprintStories()}
+              >
+                {sprintStoriesLoadingMore ? tc('loading') : tc('loadMore')}
+              </Button>
+            )}
+          </>
         )}
       </div>
 
@@ -452,6 +512,17 @@ export function SprintsClient({ projectId }: SprintsClientProps) {
               </li>
             ))}
           </ul>
+          {backlogHasMore && (
+            <Button
+              variant="ghost"
+              size="sm"
+              className="w-full text-xs text-muted-foreground"
+              disabled={backlogLoadingMore}
+              onClick={() => void loadMoreBacklog()}
+            >
+              {backlogLoadingMore ? tc('loading') : tc('loadMore')}
+            </Button>
+          )}
         </div>
       ) : null}
     </div>
