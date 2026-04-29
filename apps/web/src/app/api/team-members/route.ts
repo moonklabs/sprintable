@@ -222,8 +222,9 @@ export async function POST(request: Request) {
         role: body.role ?? 'member',
         user_id: body.user_id ?? null,
         agent_config: parsedAgentConfig.data,
+        ...(body.webhook_url ? { webhook_url: body.webhook_url } : {}),
       })
-      .select('id, name, type, role, user_id, project_id, is_active')
+      .select('id, name, type, role, user_id, project_id, is_active, webhook_url')
       .single();
 
     if (error) throw error;

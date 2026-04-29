@@ -111,16 +111,35 @@ export async function PATCH(
 
     let body: unknown;
     try { body = await request.json(); } catch { return apiError('BAD_REQUEST', 'Invalid JSON', 400); }
-    const { role: newRole } = body as { role?: string };
-    if (!newRole) return apiError('BAD_REQUEST', 'role required', 400);
+    const { role: newRole, webhook_url: rawWebhookUrl } = body as { role?: string; webhook_url?: string | null };
+
+    if (!newRole && rawWebhookUrl === undefined) {
+      return apiError('BAD_REQUEST', 'At least one of role or webhook_url is required', 400);
+    }
+
+    // webhook_url: HTTPS 또는 null/빈문자열(→null 클리어)
+    let webhookUrl: string | null | undefined;
+    if (rawWebhookUrl !== undefined) {
+      if (rawWebhookUrl === null || rawWebhookUrl === '') {
+        webhookUrl = null;
+      } else if (/^https:\/\//i.test(rawWebhookUrl)) {
+        webhookUrl = rawWebhookUrl;
+      } else {
+        return apiError('BAD_REQUEST', 'webhook_url must be a valid HTTPS URL or empty to clear', 400);
+      }
+    }
+
+    const updatePayload: Record<string, unknown> = {};
+    if (newRole) updatePayload['role'] = newRole;
+    if (webhookUrl !== undefined) updatePayload['webhook_url'] = webhookUrl;
 
     const oldRole = target.role as string;
 
     const { data: updated, error: updateError } = await supabase
       .from('team_members')
-      .update({ role: newRole })
+      .update(updatePayload)
       .eq('id', id)
-      .select('id, name, type, role, user_id, project_id, is_active')
+      .select('id, name, type, role, user_id, project_id, is_active, webhook_url')
       .single();
 
     if (updateError) throw updateError;
