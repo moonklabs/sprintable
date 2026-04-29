@@ -36,6 +36,9 @@ export function MemosFeedClient({ currentTeamMemberId, projectId }: MemosFeedCli
   const [mobileView, setMobileView] = useState<'list' | 'detail'>('list');
   const [searchQuery, setSearchQuery] = useState('');
   const [debouncedQuery, setDebouncedQuery] = useState('');
+  const [hasMore, setHasMore] = useState(false);
+  const [nextCursor, setNextCursor] = useState<string | null>(null);
+  const [loadingMore, setLoadingMore] = useState(false);
   const debounceTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   const handleSearchChange = (value: string) => {
@@ -49,26 +52,40 @@ export function MemosFeedClient({ currentTeamMemberId, projectId }: MemosFeedCli
     [members],
   );
 
-  const fetchMemos = useCallback(async (q?: string) => {
+  const fetchMemos = useCallback(async (q?: string, cursor?: string | null) => {
     if (!projectId) return;
 
     try {
       const params = new URLSearchParams();
       params.append('project_id', projectId);
-      params.append('limit', '50');
+      params.append('limit', '10');
       if (q?.trim()) params.append('q', q.trim());
+      if (cursor) params.append('cursor', cursor);
 
       const res = await fetch(`/api/memos?${params.toString()}`);
       if (!res.ok) throw new Error('Failed to fetch memos');
 
-      const { data } = await res.json();
-      setMemos(data || []);
+      const { data, meta } = await res.json();
+      if (cursor) {
+        setMemos((prev) => [...prev, ...(data ?? [])]);
+      } else {
+        setMemos(data ?? []);
+      }
+      setHasMore(meta?.hasMore ?? false);
+      setNextCursor(meta?.nextCursor ?? null);
     } catch (error) {
       console.error('Failed to fetch memos:', error);
     } finally {
       setLoading(false);
+      setLoadingMore(false);
     }
   }, [projectId]);
+
+  const loadMore = useCallback(async () => {
+    if (!hasMore || !nextCursor || loadingMore) return;
+    setLoadingMore(true);
+    await fetchMemos(debouncedQuery || undefined, nextCursor);
+  }, [fetchMemos, debouncedQuery, hasMore, loadingMore, nextCursor]);
 
   const fetchMembers = useCallback(async () => {
     if (!projectId) return;
@@ -207,6 +224,8 @@ export function MemosFeedClient({ currentTeamMemberId, projectId }: MemosFeedCli
   }, [fetchMemos, fetchMembers]);
 
   useEffect(() => {
+    setNextCursor(null);
+    setHasMore(false);
     void fetchMemos(debouncedQuery);
   }, [debouncedQuery, fetchMemos]);
 
@@ -310,6 +329,13 @@ export function MemosFeedClient({ currentTeamMemberId, projectId }: MemosFeedCli
             memberMap={memberMap}
             onNewMemo={handleNewMemo}
           />
+          {hasMore && (
+            <div className="px-3 py-2">
+              <Button variant="ghost" size="sm" className="w-full text-muted-foreground" onClick={() => void loadMore()} disabled={loadingMore}>
+                {loadingMore ? t('loading') : t('loadMore')}
+              </Button>
+            </div>
+          )}
         </div>
       </div>
 
@@ -330,6 +356,13 @@ export function MemosFeedClient({ currentTeamMemberId, projectId }: MemosFeedCli
               memberMap={memberMap}
               onNewMemo={handleNewMemo}
             />
+            {hasMore && (
+              <div className="px-3 py-2">
+                <Button variant="ghost" size="sm" className="w-full text-muted-foreground" onClick={() => void loadMore()} disabled={loadingMore}>
+                  {loadingMore ? t('loading') : t('loadMore')}
+                </Button>
+              </div>
+            )}
           </div>
         </div>
       )}
