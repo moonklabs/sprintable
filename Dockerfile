@@ -11,6 +11,8 @@ COPY packages/mcp-server/package.json packages/mcp-server/package.json
 COPY packages/sdk/package.json packages/sdk/package.json
 COPY packages/storage-sqlite/package.json packages/storage-sqlite/package.json
 COPY packages/storage-supabase/package.json packages/storage-supabase/package.json
+COPY ee/packages/storage-saas/package.json ee/packages/storage-saas/package.json
+COPY ee/packages/mcp-server-saas/package.json ee/packages/mcp-server-saas/package.json
 RUN pnpm install --frozen-lockfile --ignore-scripts
 
 # ─── Stage 2: Build ───
@@ -26,10 +28,12 @@ COPY . .
 ARG NEXT_PUBLIC_SUPABASE_URL
 ARG NEXT_PUBLIC_SUPABASE_ANON_KEY
 ARG NEXT_PUBLIC_APP_URL
+ARG LICENSE_CONSENT=
 ENV NODE_ENV=production
 ENV NEXT_PUBLIC_SUPABASE_URL=$NEXT_PUBLIC_SUPABASE_URL
 ENV NEXT_PUBLIC_SUPABASE_ANON_KEY=$NEXT_PUBLIC_SUPABASE_ANON_KEY
 ENV NEXT_PUBLIC_APP_URL=$NEXT_PUBLIC_APP_URL
+ENV LICENSE_CONSENT=$LICENSE_CONSENT
 
 RUN pnpm build
 

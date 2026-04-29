@@ -1,4 +1,4 @@
-name: Docker Smoke Test (OSS)
+name: Docker Smoke Test (OSS + EE)
 
 on:
   pull_request:
@@ -10,6 +10,7 @@ on:
       - docker-compose.prod.yml
       - apps/web/**
       - packages/**
+      - ee/**
       - .github/workflows/docker-smoke-test.yml
 
 jobs:
@@ -23,6 +24,7 @@ jobs:
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@v3
 
+      # AC1: OSS 빌드 (LICENSE_CONSENT unset)
       - name: Build OSS image (amd64 only, no push)
         uses: docker/build-push-action@v6
         with:
@@ -35,7 +37,7 @@ jobs:
           cache-from: type=gha
           cache-to: type=gha,mode=max
 
-      - name: Run container and verify health
+      - name: Run OSS container and verify health
         run: |
           docker run -d \
             --name sprintable-smoke \
@@ -48,20 +50,37 @@ jobs:
             -e NEXT_PUBLIC_APP_URL=http://localhost:3108 \
             sprintable-oss:smoke
 
-          echo "Waiting for server to respond..."
+          echo "Waiting for OSS server to respond..."
           for i in $(seq 1 30); do
             if curl -sf http://localhost:3108/api/health > /dev/null 2>&1; then
-              echo "Server is healthy!"
+              echo "OSS server is healthy!"
               exit 0
             fi
             echo "Attempt $i: not ready yet"
             sleep 2
           done
 
-          echo "Server failed to start. Logs:"
+          echo "OSS server failed to start. Logs:"
           docker logs sprintable-smoke
           exit 1
 
-      - name: Cleanup
+      - name: Cleanup OSS container
         if: always()
         run: docker rm -f sprintable-smoke 2>/dev/null || true
+
+      # AC2: EE 빌드 (LICENSE_CONSENT=agreed)
+      - name: Build EE image (amd64 only, no push)
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: Dockerfile
+          platforms: linux/amd64
+          push: false
+          load: true
+          tags: sprintable-ee:smoke
+          build-args: |
+            LICENSE_CONSENT=agreed
+            NEXT_PUBLIC_SUPABASE_URL=https://placeholder.supabase.co
+            NEXT_PUBLIC_SUPABASE_ANON_KEY=ci-placeholder
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
