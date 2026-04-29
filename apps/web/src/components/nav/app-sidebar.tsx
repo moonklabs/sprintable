@@ -1,6 +1,6 @@
 'use client';
 
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import Link from 'next/link';
 import { usePathname } from 'next/navigation';
 import { useTranslations } from 'next-intl';
@@ -78,29 +78,35 @@ export function AppSidebar({
     return () => window.removeEventListener('keydown', onKeyDown);
   }, []);
 
-  useEffect(() => {
-    async function fetchUnread() {
-      try {
-        const [memoRes, inboxRes] = await Promise.all([
-          fetch('/api/notifications?unread=true&type=memo'),
-          fetch('/api/notifications?unread=true'),
-        ]);
-        if (memoRes.ok) {
-          const json = await memoRes.json() as { meta?: { unreadCount?: number } };
-          setMemoUnreadCount(json.meta?.unreadCount ?? 0);
-        }
-        if (inboxRes.ok) {
-          const json = await inboxRes.json() as { meta?: { unreadCount?: number } };
-          setInboxUnreadCount(json.meta?.unreadCount ?? 0);
-        }
-      } catch {
-        // noop
-      }
+  const intervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
+
+  const fetchUnread = useCallback(async () => {
+    try {
+      const res = await fetch('/api/notifications/count');
+      if (!res.ok) return;
+      const json = await res.json() as { data?: { memoUnreadCount?: number; inboxUnreadCount?: number } };
+      setMemoUnreadCount(json.data?.memoUnreadCount ?? 0);
+      setInboxUnreadCount(json.data?.inboxUnreadCount ?? 0);
+    } catch {
+      // noop
     }
-    void fetchUnread();
-    const interval = setInterval(fetchUnread, 30000);
-    return () => clearInterval(interval);
   }, []);
+
+  useEffect(() => {
+    const start = () => {
+      if (intervalRef.current) return;
+      intervalRef.current = setInterval(() => { void fetchUnread(); }, 30000);
+    };
+    const stop = () => {
+      if (intervalRef.current) { clearInterval(intervalRef.current); intervalRef.current = null; }
+    };
+    const handleVisibility = () => { if (document.hidden) { stop(); } else { void fetchUnread(); start(); } };
+
+    void fetchUnread();
+    start();
+    document.addEventListener('visibilitychange', handleVisibility);
+    return () => { stop(); document.removeEventListener('visibilitychange', handleVisibility); };
+  }, [fetchUnread]);
 
   function isActive(href: string) {
     return pathname === href || (href !== '/' && pathname.startsWith(href));
