@@ -44,6 +44,7 @@ export const createTeamMemberSchema = z.object({
   name: z.string().trim().min(1).optional().nullable(),
   role: z.string().trim().min(1).optional().default('member'),
   agent_config: z.record(z.string(), z.unknown()).optional().nullable(),
+  webhook_url: z.string().url().startsWith('https://').optional().nullable(),
 }).superRefine((value, ctx) => {
   if (value.type === 'human' && !value.user_id) {
     ctx.addIssue({

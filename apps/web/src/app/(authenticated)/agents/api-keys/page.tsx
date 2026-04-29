@@ -3,6 +3,7 @@ import { createSupabaseServerClient } from '@/lib/supabase/server';
 import { getMyTeamMember } from '@/lib/auth-helpers';
 import { requireOrgAdmin } from '@/lib/admin-check';
 import { AgentApiKeyManager } from '@/components/agents/agent-api-key-manager';
+import { AgentWebhookManager } from '@/components/agents/agent-webhook-manager';
 import { isOssMode, createTeamMemberRepository } from '@/lib/storage/factory';
 
 export default async function ApiKeysPage() {
@@ -39,10 +40,10 @@ export default async function ApiKeysPage() {
   // API Key 관리는 admin만 가능
   await requireOrgAdmin(supabase, me.org_id).catch(() => redirect('/dashboard'));
 
-  // 프로젝트 내 모든 에이전트 조회
+  // 프로젝트 내 모든 에이전트 조회 (webhook_url 포함)
   const { data: agents } = await supabase
     .from('team_members')
-    .select('id, name, type')
+    .select('id, name, type, webhook_url')
     .eq('org_id', me.org_id)
     .eq('project_id', me.project_id)
     .eq('type', 'agent')
@@ -54,7 +55,7 @@ export default async function ApiKeysPage() {
       <div>
         <h1 className="text-3xl font-bold">Agent API Keys</h1>
         <p className="text-muted-foreground mt-2">
-          Manage API keys for agent authentication
+          Manage API keys and webhook URLs for agent authentication
         </p>
       </div>
 
@@ -63,11 +64,17 @@ export default async function ApiKeysPage() {
       ) : (
         <div className="space-y-6">
           {agents.map((agent) => (
-            <AgentApiKeyManager
-              key={agent.id}
-              agentId={agent.id as string}
-              agentName={agent.name as string}
-            />
+            <div key={agent.id} className="space-y-3">
+              <AgentApiKeyManager
+                agentId={agent.id as string}
+                agentName={agent.name as string}
+              />
+              <AgentWebhookManager
+                agentId={agent.id as string}
+                agentName={agent.name as string}
+                currentWebhookUrl={(agent.webhook_url as string | null) ?? null}
+              />
+            </div>
           ))}
         </div>
       )}
