@@ -305,6 +305,8 @@ export class AgentExecutionLoop {
   private readonly billingLimitEnforcer: Pick<BillingLimitEnforcer, 'enforceBeforeRun' | 'enforceAfterRun'>;
   private readonly sessionLifecycle: Pick<AgentSessionLifecycleService, 'claimSession' | 'applyRunOutcome'>;
   private readonly hitlPolicyService: Pick<AgentHitlPolicyService, 'getProjectPolicy'>;
+  private readonly auditBuffer: Array<Record<string, unknown>> = [];
+  private readonly AUDIT_FLUSH_THRESHOLD = 10;
 
   constructor(
     private readonly supabase: SupabaseClient,
@@ -807,6 +809,8 @@ export class AgentExecutionLoop {
         toolCallHistory,
         outputMemoIds: Array.from(outputMemoIds),
       };
+    } finally {
+      await this.flushAuditBuffer();
     }
   }
 
@@ -1454,24 +1458,31 @@ export class AgentExecutionLoop {
     severity: 'debug' | 'info' | 'warn' | 'error' | 'security',
     payload: Record<string, unknown>,
   ) {
-    const { error } = await this.supabase
-      .from('agent_audit_logs')
-      .insert({
-        org_id: orgId,
-        project_id: projectId,
-        agent_id: agentId,
-        deployment_id: asOptionalString(payload.deployment_id),
-        session_id: asOptionalString(payload.session_id),
-        run_id: asOptionalString(payload.run_id),
-        event_type: eventType,
-        severity,
-        summary: buildAuditSummary(eventType, payload),
-        payload,
-        created_by: asOptionalString(payload.created_by) ?? agentId,
-      });
+    this.auditBuffer.push({
+      org_id: orgId,
+      project_id: projectId,
+      agent_id: agentId,
+      deployment_id: asOptionalString(payload.deployment_id),
+      session_id: asOptionalString(payload.session_id),
+      run_id: asOptionalString(payload.run_id),
+      event_type: eventType,
+      severity,
+      summary: buildAuditSummary(eventType, payload),
+      payload,
+      created_by: asOptionalString(payload.created_by) ?? agentId,
+    });
 
+    if (this.auditBuffer.length >= this.AUDIT_FLUSH_THRESHOLD) {
+      await this.flushAuditBuffer();
+    }
+  }
+
+  private async flushAuditBuffer() {
+    if (!this.auditBuffer.length) return;
+    const entries = this.auditBuffer.splice(0);
+    const { error } = await this.supabase.from('agent_audit_logs').insert(entries);
     if (error) {
-      this.logger.error('[AgentExecutionLoop] Failed to log audit:', error.message);
+      this.logger.error('[AgentExecutionLoop] Failed to bulk insert audit logs:', error.message);
     }
   }
 
