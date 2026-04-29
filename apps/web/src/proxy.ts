@@ -92,7 +92,16 @@ export async function proxy(request: NextRequest) {
   );
 
   // 로컬 JWT 파싱 — 네트워크 zero (JWKS 캐시 활용)
-  const { data: claimsData } = await supabase.auth.getClaims();
+  // getClaims 실패(네트워크 오류, 만료 등) 시 로그인으로 리다이렉트
+  let claimsData: { claims?: Record<string, unknown> | null } | null = null;
+  try {
+    const result = await supabase.auth.getClaims();
+    claimsData = result.data;
+  } catch {
+    const url = request.nextUrl.clone();
+    url.pathname = '/login';
+    return NextResponse.redirect(url);
+  }
 
   if (!claimsData?.claims) {
     const url = request.nextUrl.clone();

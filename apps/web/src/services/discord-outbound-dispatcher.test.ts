@@ -278,10 +278,9 @@ describe('DiscordOutboundDispatcher', () => {
     expect(result).toEqual({ status: 'failed', reason: 'auth_failed', attempts: 1 });
     expect(state.insertedReplies[0]).toMatchObject({ memo_id: 'memo-1', created_by: 'agent-1' });
     expect(String(state.insertedReplies[0]?.content)).toContain('Discord 전송 실패');
-    expect(state.insertedNotifications[0]).toMatchObject({
-      org_id: 'org-1',
-      title: 'Discord bridge auth_failed',
-    });
+    expect(state.insertedNotifications).toEqual(expect.arrayContaining([
+      expect.objectContaining({ org_id: 'org-1', title: 'Discord bridge auth_failed' }),
+    ]));
     expect(state.dispatches[0]).toMatchObject({ status: 'failed', error_message: 'auth_failed' });
   });
 });

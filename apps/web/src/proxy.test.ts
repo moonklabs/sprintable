@@ -99,9 +99,11 @@ describe('middleware', () => {
   it('redirects protected paths to login when auth refresh throws', async () => {
     createServerClient.mockReturnValue({
       auth: {
-        getUser: vi.fn(async () => {
+        getClaims: vi.fn(async () => {
           throw new Error('auth timeout');
         }),
+        setAll: vi.fn(),
+        getAll: vi.fn(() => []),
       },
     });
 

@@ -5,6 +5,7 @@ import { checkFeatureLimit, checkResourceLimit } from './check-feature';
 type Row = Record<string, unknown>;
 
 function createSupabaseStub(state: {
+  orgSubscriptions?: Row[];
   subscriptions?: Row[];
   planOfferingSnapshots?: Row[];
   planTiers?: Row[];
@@ -69,6 +70,7 @@ function createSupabaseStub(state: {
 
   return {
     from(table: string) {
+      if (table === 'org_subscriptions') return createSelectBuilder(() => state.orgSubscriptions ?? []);
       if (table === 'subscriptions') return createSelectBuilder(() => state.subscriptions ?? []);
       if (table === 'plan_offering_snapshots') return createSelectBuilder(() => state.planOfferingSnapshots ?? []);
       if (table === 'plan_tiers') return createSelectBuilder(() => state.planTiers ?? []);
@@ -82,8 +84,8 @@ function createSupabaseStub(state: {
 describe('check-feature', () => {
   it('uses trialing subscription snapshots as the entitlement source', async () => {
     const supabase = createSupabaseStub({
-      subscriptions: [{ org_id: 'org-1', status: 'trialing', tier_id: 'tier-team', offering_snapshot_id: 'snap-team' }],
-      planOfferingSnapshots: [{ id: 'snap-team', tier_id: 'tier-team', version: 1, features: { agent_orchestration: true } }],
+      orgSubscriptions: [{ org_id: 'org-1', tier: 'team', status: 'trialing' }],
+      planTiers: [{ id: 'tier-team', name: 'team' }],
     });
 
     const result = await checkFeatureLimit(supabase as never, 'org-1', 'agent_orchestration');
@@ -93,13 +95,8 @@ describe('check-feature', () => {
 
   it('falls back to the current free snapshot when there is no entitled subscription', async () => {
     const supabase = createSupabaseStub({
-      planOfferingSnapshots: [{
-        id: 'snap-free',
-        tier_id: '00000000-0000-0000-0000-000000000a01',
-        version: 2,
-        effective_until: null,
-        features: { agent_orchestration: false },
-      }],
+      planTiers: [{ id: 'tier-free-id', name: 'free' }],
+      planFeatures: [{ tier_id: 'tier-free-id', feature_key: 'agent_orchestration', enabled: false }],
     });
 
     const result = await checkFeatureLimit(supabase as never, 'org-1', 'agent_orchestration');
@@ -110,7 +107,8 @@ describe('check-feature', () => {
 
   it('falls back to legacy plan_features when a subscription has no snapshot yet', async () => {
     const supabase = createSupabaseStub({
-      subscriptions: [{ org_id: 'org-1', status: 'active', tier_id: 'tier-free', offering_snapshot_id: null }],
+      orgSubscriptions: [{ org_id: 'org-1', tier: 'free', status: 'active' }],
+      planTiers: [{ id: 'tier-free', name: 'free' }],
       planFeatures: [{ tier_id: 'tier-free', feature_key: 'max_docs', enabled: true, limit_value: 10 }],
       docs: Array.from({ length: 10 }, (_, index) => ({ id: `doc-${index + 1}`, org_id: 'org-1' })),
     });

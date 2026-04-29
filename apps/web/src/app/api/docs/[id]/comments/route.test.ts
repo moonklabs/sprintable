@@ -14,6 +14,13 @@ vi.mock('@sprintable/shared', () => ({
     data: { content: '@파울로 오르테가 검토 부탁드리는.' },
   })),
   createDocCommentSchema: {},
+  VALID_STORY_TRANSITIONS: {
+    backlog: ['ready-for-dev'],
+    'ready-for-dev': ['in-progress', 'backlog'],
+    'in-progress': ['in-review', 'ready-for-dev'],
+    'in-review': ['done', 'in-progress'],
+    done: ['in-review'],
+  },
 }));
 vi.mock('@/lib/supabase/server', () => ({ createSupabaseServerClient }));
 vi.mock('@/lib/supabase/admin', () => ({ createSupabaseAdminClient }));

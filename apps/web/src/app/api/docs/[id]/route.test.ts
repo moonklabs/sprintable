@@ -12,10 +12,25 @@ const getDocTimestamp = vi.fn();
 vi.mock('@sprintable/shared', () => ({
   parseBody,
   updateDocSchema: {},
+  VALID_STORY_TRANSITIONS: {
+    backlog: ['ready-for-dev'],
+    'ready-for-dev': ['in-progress', 'backlog'],
+    'in-progress': ['in-review', 'ready-for-dev'],
+    'in-review': ['done', 'in-progress'],
+    done: ['in-review'],
+  },
 }));
 vi.mock('@/lib/supabase/server', () => ({ createSupabaseServerClient }));
 vi.mock('@/lib/supabase/admin', () => ({ createSupabaseAdminClient }));
 vi.mock('@/lib/auth-helpers', () => ({ getAuthContext }));
+vi.mock('@/lib/storage/factory', () => ({
+  isOssMode: () => false,
+  createDocRepository: vi.fn().mockResolvedValue({
+    getById: vi.fn().mockResolvedValue({ id: 'doc-1', org_id: 'org-1', doc_type: 'page' }),
+    update: vi.fn().mockResolvedValue({ id: 'doc-1', updated_at: '2026-04-09T15:21:00.000Z' }),
+    delete: vi.fn().mockResolvedValue(undefined),
+  }),
+}));
 vi.mock('@/services/docs', () => {
   class DocsServiceMock {
     updateDoc = updateDoc;

@@ -177,6 +177,20 @@ function createDispatcherSupabaseStub(options?: {
         };
       }
 
+      if (table === 'webhook_deliveries') {
+        const builder = {
+          insert: vi.fn(() => builder),
+          select: vi.fn(() => builder),
+          update: vi.fn(() => builder),
+          eq: vi.fn(() => builder),
+          single: vi.fn(async () => ({ data: null, error: { message: 'test_no_delivery_tracking' } })),
+          then(resolve: (value: { data: null; error: { message: string } }) => void) {
+            return Promise.resolve({ data: null, error: { message: 'test_no_delivery_tracking' } }).then(resolve);
+          },
+        };
+        return builder;
+      }
+
       throw new Error(`Unexpected table: ${table}`);
     }),
   };

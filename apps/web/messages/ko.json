@@ -594,6 +594,7 @@
     "customers": {
       "label": "대상 고객",
       "title": "Sprintable이 맞는 팀",
+      "tagline": "BYOA 실험에서 실제로 배포하는 에이전트 팀까지",
       "subtitle": "AI 작업이 스프린트 바깥에 흩어져 있다는 통증을 이미 느끼는 팀을 위한 구조입니다.",
       "founders": {
         "title": "창업자 겸 오퍼레이터",
@@ -613,7 +614,7 @@
     },
     "model": {
       "label": "운영 모델",
-      "title": "AI 운영 모델을 선택합니다.",
+      "title": "AI 운영 모델을 선택하는 방식",
       "subtitle": "BYOA와 agent serving을 인프라 강의가 아니라 구매 결정 언어로 설명합니다.",
       "bridgeTitle": "가볍게 시작하고, orchestration이 가치가 될 때 업그레이드합니다.",
       "bridgeBody": "BYOA는 가장 마찰이 적은 진입 경로입니다. Agent serving은 항상 켜져 있는 워크플로우, shared routing, premium automation이 팀 루프 안에서 필요해질 때의 선택지입니다.",

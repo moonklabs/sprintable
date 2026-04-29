@@ -1,4 +1,3 @@
-import { NextResponse } from 'next/server';
 import { z } from 'zod/v4';
 
 type RequestLike = {
@@ -7,7 +6,7 @@ type RequestLike = {
 
 type ParseResult<T> =
   | { success: true; data: T }
-  | { success: false; response: NextResponse };
+  | { success: false; response: Response };
 
 /**
  * Request body를 Zod 스키마로 검증하는 헬퍼.
@@ -24,11 +23,11 @@ export async function parseBody<T extends z.ZodType>(
   } catch {
     return {
       success: false,
-      response: NextResponse.json({
+      response: Response.json({
         data: null,
         error: { code: 'INVALID_JSON', message: 'Invalid JSON body' },
         meta: null,
-      }, { status: 400 } as any),
+      }, { status: 400 }),
     };
   }
 
@@ -40,11 +39,11 @@ export async function parseBody<T extends z.ZodType>(
     }));
     return {
       success: false,
-      response: NextResponse.json({
+      response: Response.json({
         data: null,
         error: { code: 'VALIDATION_FAILED', message: 'Validation failed', issues },
         meta: null,
-      }, { status: 400 } as any),
+      }, { status: 400 }),
     };
   }
 

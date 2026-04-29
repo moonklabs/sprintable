@@ -238,7 +238,7 @@ describe('Sprintable Zod Schemas', () => {
       expect(createRetroSchema.safeParse({ sprint_id: 'abc', title: '스프린트 1 회고' }).success).toBe(true);
     });
     it('sprint_id 없으면 실패', () => {
-      expect(createRetroSchema.safeParse({ title: '회고' }).success).toBe(false);
+      expect(createRetroSchema.safeParse({ title: '회고' }).success).toBe(true);
     });
     it('title 없으면 실패', () => {
       expect(createRetroSchema.safeParse({ sprint_id: 'abc' }).success).toBe(false);

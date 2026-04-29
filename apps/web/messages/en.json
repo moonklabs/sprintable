@@ -594,6 +594,7 @@
     "customers": {
       "label": "Target customers",
       "title": "Who Sprintable is for",
+      "tagline": "From BYOA pilots to agent teams that ship",
       "subtitle": "Built for teams that already feel the pain of AI work living outside the sprint.",
       "founders": {
         "title": "Founder-operators",

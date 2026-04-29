@@ -1126,29 +1126,29 @@ describe('retro tools via pmApi', () => {
     expect(result).toEqual({ data: { id: 'retro-session-alpha', phase: 'collect' } });
   });
 
-  it('change_retro_phase calls PATCH /api/retro/:sprint_id with phase', async () => {
+  it('change_retro_phase calls PATCH /api/retro-sessions/:id with phase', async () => {
     stubFetch((url, init) => {
-      expect(url).toContain('/api/retro/sprint-alpha?');
+      expect(url).toContain('/api/retro-sessions/sprint-alpha?');
       expect(init?.method).toBe('PATCH');
       const body = JSON.parse(init?.body as string);
       expect(body).toEqual({ phase: 'vote' });
       return new Response(JSON.stringify({ data: { id: 'retro-session-alpha', phase: 'vote' } }), { status: 200 });
     });
 
-    const result = await harness.invoke('change_retro_phase', { project_id: 'project-alpha', sprint_id: 'sprint-alpha', phase: 'vote' });
+    const result = await harness.invoke('change_retro_phase', { project_id: 'project-alpha', session_id: 'sprint-alpha', phase: 'vote' });
     expect(result).toEqual({ data: { id: 'retro-session-alpha', phase: 'vote' } });
   });
 
-  it('add_retro_item calls POST /api/retro/:sprint_id/items', async () => {
+  it('add_retro_item calls POST /api/retro-sessions/:id/items', async () => {
     stubFetch((url, init) => {
-      expect(url).toContain('/api/retro/sprint-alpha/items?');
+      expect(url).toContain('/api/retro-sessions/sprint-alpha/items?');
       expect(init?.method).toBe('POST');
       const body = JSON.parse(init?.body as string);
       expect(body).toMatchObject({ category: 'good', text: 'Great teamwork', author_id: 'member-alpha' });
       return new Response(JSON.stringify({ data: { id: 'item-new', category: 'good' } }), { status: 200 });
     });
 
-    const result = await harness.invoke('add_retro_item', { project_id: 'project-alpha', sprint_id: 'sprint-alpha', category: 'good', text: 'Great teamwork', author_id: 'member-alpha' });
+    const result = await harness.invoke('add_retro_item', { project_id: 'project-alpha', session_id: 'sprint-alpha', category: 'good', text: 'Great teamwork', author_id: 'member-alpha' });
     expect(result).toEqual({ data: { id: 'item-new', category: 'good' } });
   });
 

@@ -10,6 +10,18 @@ export default defineConfig({
     },
   },
   test: {
-    exclude: ['**/node_modules/**', '**/dist/**', '**/.next/**', '**/e2e/**'],
+    exclude: [
+      '**/node_modules/**',
+      '**/dist/**',
+      '**/.next/**',
+      '**/e2e/**',
+      // QA worktrees are transient PR review directories, excluded from main test runs
+      '.qa-worktrees/**',
+      // EE billing tests require EE-specific infrastructure (payment/factory, monthly-agent-usage-dashboard)
+      // that is not available in the OSS vitest setup. These require a separate EE vitest config.
+      'ee/apps/web/src/services/billing-limit-enforcer.test.ts',
+      'ee/apps/web/src/app/api/billing/**/*.test.ts',
+      'ee/apps/web/src/app/api/v1/billing/**/*.test.ts',
+    ],
   },
 });

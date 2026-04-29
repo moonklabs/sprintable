@@ -449,17 +449,6 @@ export class MemoEventDispatcher {
         return { status: 'skipped', reason: 'byoa_webhook_missing' };
       }
 
-      // agent_run 경량 기록 (fire-and-forget)
-      void this.options.supabase.from('agent_runs').insert({
-        org_id: memo.org_id,
-        project_id: memo.project_id,
-        agent_id: agent.id,
-        trigger: 'webhook',
-        memo_id: memo.id,
-        status: 'running',
-        metadata: { source, dispatch_key: dispatchKey },
-      });
-
       try {
         const outbound = this.buildWebhookPayload({
           webhookUrl: webhook.url,
@@ -686,7 +675,16 @@ export class MemoEventDispatcher {
       return {
         format,
         body: {
-          content: `${title}\n${description.substring(0, 500)}`,
+          embeds: [{
+            title,
+            description: description.substring(0, 4000),
+            color: 0x3B82F6,
+            fields: [
+              { name: 'Agent', value: agent.name ?? 'Unknown', inline: true },
+              { name: 'Type', value: memo.memo_type ?? 'memo', inline: true },
+            ],
+            timestamp: memo.created_at,
+          }],
         },
       };
     }

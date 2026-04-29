@@ -44,10 +44,10 @@ export function registerRewardsTools(server: McpServer) {
     limit: z.number().int().min(1).max(100).optional().describe('Max results (default: 50)'),
   }, async ({ project_id, period, limit }) => {
     try {
-      const params = new URLSearchParams({ project_id });
+      const params = new URLSearchParams({ project_id, type: 'leaderboard' });
       if (period) params.set('period', period);
       if (limit !== undefined) params.set('limit', String(limit));
-      const data = await pmApi(`/api/rewards/leaderboard?${params.toString()}`);
+      const data = await pmApi(`/api/rewards?${params.toString()}`);
       return ok(data);
     } catch (e) {
       return err(e instanceof PmApiError ? e.message : String(e));
