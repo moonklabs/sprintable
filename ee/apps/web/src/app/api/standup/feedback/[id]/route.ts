@@ -1,0 +1,71 @@
+import { parseBody, updateStandupFeedbackSchema } from '@sprintable/shared';
+import type { SupabaseClient } from '@supabase/supabase-js';
+import { createSupabaseServerClient } from '@/lib/supabase/server';
+import { createSupabaseAdminClient } from '@/lib/supabase/admin';
+import { handleApiError } from '@/lib/api-error';
+import { getAuthContext } from '@/lib/auth-helpers';
+import { apiSuccess, ApiErrors } from '@/lib/api-response';
+import { StandupFeedbackService } from '@/services/standup';
+
+type RouteParams = { params: Promise<{ id: string }> };
+
+// GET /api/standup/feedback/:entry_id — list all feedback for a standup entry
+export async function GET(request: Request, { params }: RouteParams) {
+  try {
+    const { id: entryId } = await params;
+    const supabase = await createSupabaseServerClient();
+    const me = await getAuthContext(supabase, request);
+    if (!me) return ApiErrors.unauthorized();
+    if (me.rateLimitExceeded) return ApiErrors.tooManyRequests(me.rateLimitRemaining, me.rateLimitResetAt);
+
+    const dbClient: SupabaseClient = me.type === 'agent' ? createSupabaseAdminClient() : supabase;
+    const { data, error } = await dbClient
+      .from('standup_feedback')
+      .select('*')
+      .eq('standup_entry_id', entryId)
+      .order('created_at');
+    if (error) throw error;
+    return apiSuccess(data ?? []);
+  } catch (err: unknown) {
+    return handleApiError(err);
+  }
+}
+
+export async function PATCH(request: Request, { params }: RouteParams) {
+  try {
+    const { id } = await params;
+    const supabase = await createSupabaseServerClient();
+    const me = await getAuthContext(supabase, request);
+    if (!me) return ApiErrors.unauthorized();
+    if (me.rateLimitExceeded) return ApiErrors.tooManyRequests(me.rateLimitRemaining, me.rateLimitResetAt);
+
+    const dbClient: SupabaseClient = me.type === 'agent' ? createSupabaseAdminClient() : supabase;
+
+    const parsed = await parseBody(request, updateStandupFeedbackSchema);
+    if (!parsed.success) return parsed.response;
+    const body = parsed.data;
+
+    const service = new StandupFeedbackService(dbClient);
+    const feedback = await service.update(id, body, me.id);
+    return apiSuccess(feedback);
+  } catch (err: unknown) {
+    return handleApiError(err);
+  }
+}
+
+export async function DELETE(request: Request, { params }: RouteParams) {
+  try {
+    const { id } = await params;
+    const supabase = await createSupabaseServerClient();
+    const me = await getAuthContext(supabase, request);
+    if (!me) return ApiErrors.unauthorized();
+    if (me.rateLimitExceeded) return ApiErrors.tooManyRequests(me.rateLimitRemaining, me.rateLimitResetAt);
+
+    const dbClient: SupabaseClient = me.type === 'agent' ? createSupabaseAdminClient() : supabase;
+    const service = new StandupFeedbackService(dbClient);
+    await service.delete(id, me.id);
+    return apiSuccess({ ok: true });
+  } catch (err: unknown) {
+    return handleApiError(err);
+  }
+}

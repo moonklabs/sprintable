@@ -1016,10 +1016,10 @@ export default function SettingsPage() {
               </TabsContent>
             ) : null}
 
-            {process.env.NEXT_PUBLIC_OSS_MODE !== 'true' && adminChecked && isAdmin ? (
+            {process.env.NEXT_PUBLIC_OSS_MODE !== 'true' && adminChecked && isAdmin && orgId ? (
               <TabsContent value="usage">
                 <UsageDashboard
-                  orgId={orgId ?? undefined}
+                  orgId={orgId}
                   currentProjectId={currentProjectId}
                   projects={projects}
                   defaultMonth={new Date().toISOString().slice(0, 7)}
