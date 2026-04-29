@@ -566,7 +566,7 @@ export class MemoService {
     return { ...enriched, supersedes_chain: chain };
   }
 
-  async addReply(memoId: string, content: string, createdBy: string, reviewType = 'comment') {
+  async addReply(memoId: string, content: string, createdBy: string, reviewType = 'comment', additionalRecipientIds?: string[]) {
     if (!content?.trim()) throw new Error('content is required');
 
     const memo = await this.repo.getById(memoId);
@@ -605,6 +605,7 @@ export class MemoService {
               content: data.content,
               created_by: data.created_by,
             },
+            additionalRecipientIds,
             appUrl: process.env.NEXT_PUBLIC_APP_URL,
           });
         } catch (dispatchError) {
@@ -615,7 +616,7 @@ export class MemoService {
         this._sendReplyNotifications(memo, data).catch(() => {});
       } else if (this.teamMemberRepo) {
         try {
-          await this.dispatchOssReplyWebhooks(memo, data);
+          await this.dispatchOssReplyWebhooks(memo, data, additionalRecipientIds);
         } catch (dispatchError) {
           console.warn('[MemoService.addReply] OSS reply webhook dispatch failed', dispatchError);
         }
@@ -666,7 +667,7 @@ export class MemoService {
     }
   }
 
-  private async dispatchOssReplyWebhooks(memo: Memo, reply: MemoReply) {
+  private async dispatchOssReplyWebhooks(memo: Memo, reply: MemoReply, additionalRecipientIds?: string[]) {
     if (!this.teamMemberRepo) return;
 
     const members = await this.teamMemberRepo.list({ org_id: memo.org_id, project_id: memo.project_id, is_active: true });
@@ -675,6 +676,7 @@ export class MemoService {
     const participants = new Set<string>([memo.created_by]);
     if (memo.assigned_to) participants.add(memo.assigned_to);
     for (const r of priorReplies) participants.add(r.created_by);
+    for (const id of (additionalRecipientIds ?? [])) participants.add(id);
 
     // Parse @mentions from current and prior replies — add to notification recipients
     const allContents = [reply.content, ...priorReplies.map((r) => r.content ?? '')];

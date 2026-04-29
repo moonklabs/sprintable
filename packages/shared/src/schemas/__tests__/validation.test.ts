@@ -37,6 +37,12 @@ describe('Sprintable Zod Schemas', () => {
     it('빈 content 실패', () => {
       expect(createMemoReplySchema.safeParse({ content: '' }).success).toBe(false);
     });
+    it('assigned_to_ids 포함 reply 통과', () => {
+      expect(createMemoReplySchema.safeParse({ content: '답글', assigned_to_ids: ['uuid-1', 'uuid-2'] }).success).toBe(true);
+    });
+    it('assigned_to 단일 ID 통과', () => {
+      expect(createMemoReplySchema.safeParse({ content: '답글', assigned_to: 'uuid-1' }).success).toBe(true);
+    });
   });
 
   // ─── Core write APIs ───

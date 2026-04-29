@@ -46,6 +46,7 @@ export interface DispatchWorkflowMemoReplyWebhooksOptions {
   supabase?: SupabaseClient;
   memo: MemoReplyDispatchMemo;
   reply: MemoReplyDispatchReply;
+  additionalRecipientIds?: string[];
   logger?: Logger;
   fetchFn?: typeof fetch;
   appUrl?: string;
@@ -219,7 +220,7 @@ export async function dispatchWorkflowMemoReplyWebhooks(
 ): Promise<DispatchWorkflowMemoReplyWebhooksResult> {
   const logger = options.logger ?? console;
   const fetchFn = options.fetchFn ?? fetch;
-  const { memo, reply, supabase } = options;
+  const { memo, reply, supabase, additionalRecipientIds } = options;
 
   if (!supabase) return { status: 'skipped', reason: 'oss_mode' };
 
@@ -271,6 +272,9 @@ export async function dispatchWorkflowMemoReplyWebhooks(
   );
   for (const memberId of mentionedIds) {
     participants.add(memberId);
+  }
+  for (const id of (additionalRecipientIds ?? [])) {
+    participants.add(id);
   }
 
   participants.delete(reply.created_by);

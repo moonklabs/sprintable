@@ -83,6 +83,8 @@ export const updateNotificationSchema = z.object({
 
 export const createMemoReplySchema = z.object({
   content: z.string().min(1),
+  assigned_to: z.string().optional().describe('Single team member ID to notify via webhook (legacy, use assigned_to_ids for multiple)'),
+  assigned_to_ids: z.array(z.string()).optional().describe('Team member IDs to explicitly notify via webhook on this reply'),
 });
 
 export const createMemoLinkedDocSchema = z.object({
