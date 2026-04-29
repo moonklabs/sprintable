@@ -192,7 +192,7 @@ describe('InboxOutboxService.scan', () => {
     const fetchImpl = vi.fn(async (url: string) => {
       if (url === ok.webhook_url) return new Response(null, { status: 204 });
       return new Response(null, { status: 503 });
-    });
+    }) as unknown as typeof fetch;
 
     const supabase = {
       rpc: vi.fn(async (name: string) => {
