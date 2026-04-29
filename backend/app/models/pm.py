@@ -78,7 +78,7 @@ class Story(Base, OrgScopedMixin, TimestampMixin, SoftDeleteMixin):
     tasks: Mapped[list["Task"]] = relationship("Task", back_populates="story", lazy="select")
 
 
-class Task(Base, OrgScopedMixin, TimestampMixin):
+class Task(Base, OrgScopedMixin, TimestampMixin, SoftDeleteMixin):
     __tablename__ = "tasks"
 
     id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
