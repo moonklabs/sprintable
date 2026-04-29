@@ -1,0 +1,157 @@
+general:
+  - id: GEN-001
+    rule: "Keep functions focused on one responsibility; split orchestration, validation, persistence, and presentation when a function becomes difficult to scan or test."
+    stacks: [all]
+  - id: GEN-002
+    rule: "Replace magic values with named constants or shared catalog arrays when the value is reused or part of a public contract."
+    stacks: [all]
+  - id: GEN-003
+    rule: "Handle errors at the boundary that can add context; do not swallow errors, and convert them to the repository's standard API or domain error shape before returning."
+    stacks: [all]
+  - id: GEN-004
+    rule: "Prefer colocated tests next to the code they protect, using .test.ts or .test.tsx file names."
+    stacks: [vitest, playwright]
+  - id: GEN-005
+    rule: "Keep user-facing copy, comments, and documentation in English unless the file is explicitly localized."
+    stacks: [all]
+
+typescript:
+  - id: TS-001
+    rule: "Keep TypeScript strict; do not weaken strict, isolatedModules, forceConsistentCasingInFileNames, or noUncheckedIndexedAccess in shared tsconfig files."
+    stacks: [typescript]
+  - id: TS-002
+    rule: "Avoid any in production code; if a dependency boundary forces it, isolate the cast, prefer unknown plus a type guard, and leave a narrow eslint-disable comment only at that line."
+    stacks: [typescript]
+  - id: TS-003
+    rule: "Use const arrays or objects plus derived union types for finite domain values; use Zod enum schemas only for runtime validation of those values."
+    stacks: [typescript, zod]
+  - id: TS-004
+    rule: "Use interface for public object contracts and type for unions, mapped types, and inferred schema aliases; reserve I-prefixed names for repository interfaces that already follow the I*Repository pattern."
+    stacks: [typescript]
+  - id: TS-005
+    rule: "Import types with import type or export type when the imported symbol is type-only."
+    stacks: [typescript]
+  - id: TS-006
+    rule: "Use package-level index.ts barrel exports for public package boundaries, but prefer direct relative imports inside a package or feature folder."
+    stacks: [typescript]
+
+nextjs:
+  - id: NEXT-001
+    rule: "Use Next.js App Router conventions: page.tsx for pages, layout.tsx for layouts, loading.tsx for loading states, error.tsx for route errors, and route.ts for route handlers."
+    stacks: [next]
+  - id: NEXT-002
+    rule: "Default to server components; add 'use client' only for React state, effects, browser APIs, event handlers, realtime subscriptions, or client-only providers."
+    stacks: [next, react]
+  - id: NEXT-003
+    rule: "Keep page components thin; move reusable UI to src/components, browser hooks to src/hooks, server/domain work to src/services, and framework helpers to src/lib."
+    stacks: [next, react]
+  - id: NEXT-004
+    rule: "In app code, use the @/* path alias for apps/web/src imports and @sprintable/* workspace package imports for package boundaries."
+    stacks: [next, typescript]
+  - id: NEXT-005
+    rule: "Keep API route handlers responsible for authentication, request parsing, validation, response shaping, and delegating business logic to services or repositories."
+    stacks: [next]
+
+api:
+  - id: API-001
+    rule: "Return API responses through apiSuccess, apiError, ApiErrors, or handleApiError so endpoints preserve the standard { data, error, meta } envelope."
+    stacks: [next, typescript]
+  - id: API-002
+    rule: "Validate request bodies, query parameters, and tool arguments with Zod schemas before passing data into services or repositories."
+    stacks: [next, zod]
+  - id: API-003
+    rule: "Use explicit, stable error codes such as VALIDATION_ERROR, UNAUTHORIZED, FORBIDDEN, NOT_FOUND, UPGRADE_REQUIRED, and INTERNAL_ERROR for API failures."
+    stacks: [next]
+  - id: API-004
+    rule: "Keep OSS-mode and SaaS-overlay behavior behind explicit boundary helpers or repository abstractions; do not reimplement billing, limits, or subscription policy inside OSS stub files."
+    stacks: [next, monorepo]
+  - id: API-005
+    rule: "Treat external webhooks and MCP/tool payloads as untrusted input; verify signatures or authorization, validate schemas, and scope access by organization, project, and member before mutation."
+    stacks: [next, security]
+
+validation:
+  - id: VAL-001
+    rule: "Put shared request schemas in @sprintable/shared when they are used by multiple app routes, tools, packages, or tests."
+    stacks: [zod, monorepo]
+  - id: VAL-002
+    rule: "Export schema-derived types with z.infer when a runtime schema is the source of truth."
+    stacks: [zod, typescript]
+  - id: VAL-003
+    rule: "Prefer safeParse for user input branches that return validation responses; use parse when invalid data indicates a programmer or integration error."
+    stacks: [zod, typescript]
+  - id: VAL-004
+    rule: "Keep enum-like values synchronized between runtime schemas, domain union types, and tests."
+    stacks: [zod, typescript, vitest]
+
+storage:
+  - id: STO-001
+    rule: "Define domain repository contracts in @sprintable/core-storage and keep concrete persistence details in storage adapter packages."
+    stacks: [typescript, monorepo]
+  - id: STO-002
+    rule: "Name storage adapters by backend and domain, for example SupabaseStoryRepository or SqliteStoryRepository."
+    stacks: [typescript]
+  - id: STO-003
+    rule: "Keep Supabase-specific query logic in storage-supabase and SQLite-specific SQL logic in storage-sqlite; services should depend on repository contracts or factory helpers."
+    stacks: [supabase, sqlite, monorepo]
+  - id: STO-004
+    rule: "Convert database row shapes into domain shapes at the repository boundary, including JSON parsing, boolean normalization, and nullable field handling."
+    stacks: [typescript, sqlite, supabase]
+
+react_ui:
+  - id: UI-001
+    rule: "Build reusable primitives in src/components/ui and feature-specific components under their feature folder."
+    stacks: [react, next]
+  - id: UI-002
+    rule: "Use Tailwind utility classes and existing UI helpers before adding custom CSS or new component abstractions."
+    stacks: [react, tailwind]
+  - id: UI-003
+    rule: "Keep client components deterministic on first render; fetch mutable data in effects, route handlers, or server components as appropriate."
+    stacks: [react, next]
+  - id: UI-004
+    rule: "Add loading, empty, and error states for authenticated product surfaces that fetch remote or repository-backed data."
+    stacks: [react, next]
+
+testing:
+  - id: TEST-001
+    rule: "Add or update Vitest coverage for services, schemas, route handlers, and pure UI utilities whenever behavior changes."
+    stacks: [vitest]
+  - id: TEST-002
+    rule: "Use Playwright e2e tests for end-to-end web flows, layout verification, OSS seed behavior, and webhook endpoint behavior."
+    stacks: [playwright, next]
+  - id: TEST-003
+    rule: "Mock network, Supabase, webhook, and time-dependent dependencies at the test boundary; keep assertions focused on observable behavior and API contracts."
+    stacks: [vitest, playwright]
+  - id: TEST-004
+    rule: "Exclude generated dist output, .next output, and e2e tests from the root Vitest run."
+    stacks: [vitest]
+
+monorepo:
+  - id: MONO-001
+    rule: "Use pnpm workspaces with workspace:* for internal @sprintable package dependencies."
+    stacks: [pnpm, turborepo]
+  - id: MONO-002
+    rule: "Keep app code in apps/web and reusable domain, storage, SDK, MCP, and shared validation code in packages/*."
+    stacks: [pnpm, turborepo]
+  - id: MONO-003
+    rule: "Build, lint, test, and type-check through Turborepo tasks so package dependency order is respected."
+    stacks: [turborepo, pnpm]
+  - id: MONO-004
+    rule: "Do not commit or import from generated dist directories when source files are available."
+    stacks: [typescript, monorepo]
+  - id: MONO-005
+    rule: "Keep Node and package manager versions aligned with package.json: Node >=22.5.0 and pnpm 9.15.x."
+    stacks: [node, pnpm]
+
+security:
+  - id: SEC-001
+    rule: "Never expose service-role keys, API key secrets, OAuth secrets, webhook signing secrets, or KMS credentials to client components or browser bundles."
+    stacks: [next, security]
+  - id: SEC-002
+    rule: "Use server-only Supabase helpers for privileged operations and client Supabase helpers only inside explicit client-side auth or realtime boundaries."
+    stacks: [next, supabase]
+  - id: SEC-003
+    rule: "Verify organization and project ownership before returning or mutating project-scoped resources."
+    stacks: [next, security]
+  - id: SEC-004
+    rule: "Sanitize or constrain rich text, markdown, and embedded document content before rendering user-provided HTML."
+    stacks: [react, security]
