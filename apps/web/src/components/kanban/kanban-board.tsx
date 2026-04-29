@@ -148,10 +148,10 @@ export function KanbanBoard({ projectId }: KanbanBoardProps) {
       const sprintParams = projectId ? `?project_id=${projectId}` : '';
       const epicParams = new URLSearchParams();
       if (projectId) epicParams.set('project_id', projectId);
-      epicParams.set('limit', '50');
+      epicParams.set('limit', '20');
       const memberParams = projectId ? `?project_id=${projectId}` : '';
 
-      params.set('limit', '50');
+      params.set('limit', '20');
       const [storiesRes, sprintsRes, epicsRes, membersRes] = await Promise.all([
         fetch(`/api/stories?${params}`),
         fetch(`/api/sprints${sprintParams}`),
