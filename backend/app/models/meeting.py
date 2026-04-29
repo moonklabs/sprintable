@@ -1,6 +1,7 @@
 import uuid
+from datetime import datetime
 
-from sqlalchemy import ForeignKey, Integer, Text
+from sqlalchemy import DateTime, ForeignKey, Integer, Text, func
 from sqlalchemy.dialects.postgresql import JSONB, UUID
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
@@ -20,7 +21,7 @@ class Meeting(Base, TimestampMixin, SoftDeleteMixin):
     )
     title: Mapped[str] = mapped_column(Text, nullable=False)
     meeting_type: Mapped[str] = mapped_column(Text, nullable=False, default="general")
-    date: Mapped[str] = mapped_column(Text, nullable=False)
+    date: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, server_default=func.now())
     duration_min: Mapped[int | None] = mapped_column(Integer, nullable=True)
     participants: Mapped[list] = mapped_column(JSONB, nullable=False, default=list)
     raw_transcript: Mapped[str | None] = mapped_column(Text, nullable=True)

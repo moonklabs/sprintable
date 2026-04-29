@@ -30,6 +30,17 @@ def test_sprint_has_duration_and_report_doc_id() -> None:
     cols = {c.key for c in Sprint.__table__.columns}
     assert "duration" in cols
     assert "report_doc_id" in cols
+    assert "start_date" in cols
+    assert "end_date" in cols
+
+
+def test_sprint_date_columns_type() -> None:
+    from sqlalchemy import Date
+    col_map = {c.key: c for c in Sprint.__table__.columns}
+    assert isinstance(col_map["start_date"].type, Date)
+    assert isinstance(col_map["end_date"].type, Date)
+    assert col_map["start_date"].nullable is True
+    assert col_map["end_date"].nullable is True
 
 
 def test_doc_has_doc_type() -> None:
@@ -42,6 +53,20 @@ def test_meeting_no_org_id() -> None:
     cols = {c.key for c in Meeting.__table__.columns}
     assert "project_id" in cols
     assert "org_id" not in cols
+
+
+def test_meeting_date_is_datetime() -> None:
+    from sqlalchemy import DateTime
+    col_map = {c.key: c for c in Meeting.__table__.columns}
+    assert isinstance(col_map["date"].type, DateTime)
+    assert col_map["date"].type.timezone is True
+
+
+def test_org_member_no_is_active_no_updated_at() -> None:
+    cols = {c.key for c in OrgMember.__table__.columns}
+    assert "is_active" not in cols
+    assert "updated_at" not in cols
+    assert "created_at" in cols
 
 
 # ── AC3: BaseRepository unit tests ────────────────────────────────────────────
