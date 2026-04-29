@@ -257,6 +257,7 @@ export function LandingPage() {
             <div className="max-w-3xl space-y-4">
               <p className="text-sm font-semibold uppercase tracking-[0.28em] text-[#8ea2d7]">{t('customers.label')}</p>
               <h2 className="text-4xl font-black tracking-[-0.03em] text-white sm:text-5xl">{t('customers.title')}</h2>
+              <p className="text-xl font-semibold text-[#b6c4ff]">{t('customers.tagline')}</p>
               <p className="text-lg leading-8 text-[#c4cddd]">{t('customers.subtitle')}</p>
             </div>
 

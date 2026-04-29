@@ -1,19 +1,23 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
-const { createSupabaseServerClient, getMyTeamMember } = vi.hoisted(() => ({
+const { createSupabaseServerClient, createSupabaseAdminClient, getMyTeamMember, getAuthContext } = vi.hoisted(() => ({
   createSupabaseServerClient: vi.fn(),
+  createSupabaseAdminClient: vi.fn(),
   getMyTeamMember: vi.fn(),
+  getAuthContext: vi.fn(),
 }));
 
 vi.mock('@/lib/supabase/server', () => ({
   createSupabaseServerClient,
 }));
+vi.mock('@/lib/supabase/admin', () => ({ createSupabaseAdminClient }));
 
 vi.mock('@/lib/auth-helpers', async () => {
   const actual = await vi.importActual<typeof import('@/lib/auth-helpers')>('@/lib/auth-helpers');
   return {
     ...actual,
     getMyTeamMember,
+    getAuthContext,
   };
 });
 
@@ -64,8 +68,12 @@ function createDeleteSupabaseStub(activeMembershipCount: number) {
 describe('DELETE /api/team-members/[id]', () => {
   beforeEach(() => {
     createSupabaseServerClient.mockReset();
+    createSupabaseAdminClient.mockReset();
     getMyTeamMember.mockReset();
+    getAuthContext.mockReset();
+    createSupabaseAdminClient.mockReturnValue({ from: () => ({ insert: () => ({ then: (r: (v: unknown) => void) => Promise.resolve({ error: null }).then(r) }) }) });
     getMyTeamMember.mockResolvedValue({ id: 'admin-team-member', org_id: 'org-1', project_id: 'project-1' });
+    getAuthContext.mockResolvedValue({ id: 'admin-team-member', org_id: 'org-1', project_id: 'project-1', type: 'human' as const });
   });
 
   it('blocks removing the last active project membership for a human member', async () => {

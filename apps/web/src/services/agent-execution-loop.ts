@@ -379,6 +379,7 @@ export class AgentExecutionLoop {
         run_scope: { org_id: run.org_id, project_id: run.project_id, agent_id: run.agent_id, memo_id: run.memo_id },
         memo_scope: { org_id: memo.org_id, project_id: memo.project_id, assigned_to: memo.assigned_to },
       });
+      await this.flushAuditBuffer();
       await this.persistRunProgress(run.id, {
         status: 'failed',
         finished_at: new Date().toISOString(),

@@ -1,8 +1,9 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
-const { createSupabaseServerClient, getMyTeamMember } = vi.hoisted(() => ({
+const { createSupabaseServerClient, getMyTeamMember, getAuthContext } = vi.hoisted(() => ({
   createSupabaseServerClient: vi.fn(),
   getMyTeamMember: vi.fn(),
+  getAuthContext: vi.fn(),
 }));
 
 vi.mock('@/lib/supabase/server', () => ({
@@ -10,7 +11,7 @@ vi.mock('@/lib/supabase/server', () => ({
 }));
 vi.mock('@/lib/auth-helpers', async () => {
   const actual = await vi.importActual<typeof import('@/lib/auth-helpers')>('@/lib/auth-helpers');
-  return { ...actual, getMyTeamMember };
+  return { ...actual, getMyTeamMember, getAuthContext };
 });
 
 import { POST } from './route';
@@ -27,6 +28,8 @@ describe('POST /api/team-members', () => {
   beforeEach(() => {
     createSupabaseServerClient.mockReset();
     getMyTeamMember.mockReset();
+    getAuthContext.mockReset();
+    getAuthContext.mockResolvedValue({ id: 'tm-1', org_id: 'org-1', project_id: 'project-1', type: 'human' as const });
   });
 
   it('returns validation errors for malformed payloads', async () => {

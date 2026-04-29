@@ -91,7 +91,7 @@ describe('PATCH /api/retro/[sprint_id]', () => {
     getAuthContext.mockResolvedValue(makeAgent());
   });
 
-  it('returns 400 when project_id missing', async () => {
+  it('returns 410 (GONE) when called — v1 retro PATCH API removed', async () => {
     const supabase = { from: vi.fn(() => createQueryStub()) };
     createSupabaseServerClient.mockResolvedValue(supabase);
     createSupabaseAdminClient.mockReturnValue(supabase);
@@ -101,10 +101,12 @@ describe('PATCH /api/retro/[sprint_id]', () => {
       { params: Promise.resolve({ sprint_id: 'sprint-1' }) },
     );
 
-    expect(response.status).toBe(400);
+    expect(response.status).toBe(410);
+    const body = await response.json();
+    expect(body.error.code).toBe('GONE');
   });
 
-  it('returns 400 when phase missing', async () => {
+  it('returns 410 regardless of params — v1 retro PATCH removed', async () => {
     const supabase = { from: vi.fn(() => createQueryStub()) };
     createSupabaseServerClient.mockResolvedValue(supabase);
     createSupabaseAdminClient.mockReturnValue(supabase);
@@ -114,6 +116,6 @@ describe('PATCH /api/retro/[sprint_id]', () => {
       { params: Promise.resolve({ sprint_id: 'sprint-1' }) },
     );
 
-    expect(response.status).toBe(400);
+    expect(response.status).toBe(410);
   });
 });

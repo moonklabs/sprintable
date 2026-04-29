@@ -627,10 +627,16 @@ function createSupabaseStub(options?: { failHitlRequestUpdate?: boolean; failRun
         const filters: Array<(record: Record<string, unknown>) => boolean> = [];
         let limitCount: number | null = null;
         let pendingInsert: Record<string, unknown> | null = null;
+        let isInsertMode = false;
         const builder = {
           select() { return builder; },
-          insert(payload: Record<string, unknown>) {
-            pendingInsert = payload;
+          insert(payload: Record<string, unknown> | Array<Record<string, unknown>>) {
+            isInsertMode = true;
+            if (Array.isArray(payload)) {
+              for (const item of payload) state.auditLogs.push(item);
+            } else {
+              pendingInsert = payload;
+            }
             return builder;
           },
           eq(column: string, value: unknown) {
@@ -643,8 +649,12 @@ function createSupabaseStub(options?: { failHitlRequestUpdate?: boolean; failRun
             return builder;
           },
           then(resolve: (value: { data: unknown[] | null; error: null }) => void) {
-            if (pendingInsert) {
-              state.auditLogs.push(pendingInsert);
+            if (isInsertMode) {
+              if (pendingInsert) {
+                state.auditLogs.push(pendingInsert);
+                pendingInsert = null;
+              }
+              isInsertMode = false;
               return Promise.resolve({ data: null, error: null }).then(resolve);
             }
 
