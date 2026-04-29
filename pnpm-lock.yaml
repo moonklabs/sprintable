@@ -188,6 +188,35 @@ importers:
         specifier: ^4.1.2
         version: 4.1.2(@types/node@20.19.37)(msw@2.12.14(@types/node@20.19.37)(typescript@5.9.3))(vite@8.0.3(@emnapi/core@1.9.1)(@emnapi/runtime@1.9.1)(@types/node@20.19.37)(esbuild@0.27.4)(jiti@2.6.1)(tsx@4.21.0))
 
+  ee/packages/mcp-server-saas:
+    dependencies:
+      '@modelcontextprotocol/sdk':
+        specifier: ^1.0.0
+        version: 1.29.0(zod@3.25.76)
+      zod:
+        specifier: ^3.23.8
+        version: 3.25.76
+    devDependencies:
+      '@types/node':
+        specifier: ^20.0.0
+        version: 20.19.37
+      typescript:
+        specifier: ^5.4.5
+        version: 5.9.3
+
+  ee/packages/storage-saas:
+    dependencies:
+      '@sprintable/core-storage':
+        specifier: workspace:*
+        version: link:../../../packages/core-storage
+      '@supabase/supabase-js':
+        specifier: ^2.101.1
+        version: 2.101.1
+    devDependencies:
+      typescript:
+        specifier: ^5
+        version: 5.9.3
+
   packages/core-storage:
     devDependencies:
       typescript:
