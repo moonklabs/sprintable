@@ -674,19 +674,37 @@ export function EpicsClient({ projectId, orgId }: EpicsClientProps) {
   const [loading, setLoading] = useState(true);
   const [showCreate, setShowCreate] = useState(false);
   const [mobileView, setMobileView] = useState<'list' | 'detail'>('list');
+  const [epicsHasMore, setEpicsHasMore] = useState(false);
+  const [epicsNextCursor, setEpicsNextCursor] = useState<string | null>(null);
+  const [epicsLoadingMore, setEpicsLoadingMore] = useState(false);
 
-  const fetchEpics = useCallback(async () => {
+  const fetchEpics = useCallback(async (cursor?: string | null) => {
     try {
-      const res = await fetch(`/api/epics?project_id=${projectId}`);
+      const params = new URLSearchParams({ project_id: projectId, limit: '20' });
+      if (cursor) params.set('cursor', cursor);
+      const res = await fetch(`/api/epics?${params.toString()}`);
       if (!res.ok) throw new Error('Failed to fetch epics');
-      const { data } = await res.json() as { data: Epic[] };
-      setEpics(data ?? []);
+      const { data, meta } = await res.json() as { data: Epic[]; meta?: { hasMore?: boolean; nextCursor?: string | null } };
+      if (cursor) {
+        setEpics((prev) => [...prev, ...(data ?? [])]);
+      } else {
+        setEpics(data ?? []);
+      }
+      setEpicsHasMore(meta?.hasMore ?? false);
+      setEpicsNextCursor(meta?.nextCursor ?? null);
     } catch {
       // noop — show empty state
     } finally {
       setLoading(false);
+      setEpicsLoadingMore(false);
     }
   }, [projectId]);
+
+  const loadMoreEpics = useCallback(async () => {
+    if (!epicsHasMore || !epicsNextCursor || epicsLoadingMore) return;
+    setEpicsLoadingMore(true);
+    await fetchEpics(epicsNextCursor);
+  }, [epicsHasMore, epicsNextCursor, epicsLoadingMore, fetchEpics]);
 
   const fetchEpicDetail = useCallback(async (id: string) => {
     try {
@@ -758,6 +776,11 @@ export function EpicsClient({ projectId, orgId }: EpicsClientProps) {
                 onClick={() => { void handleSelectEpic(epic); }}
               />
             ))}
+            {epicsHasMore && (
+              <Button variant="ghost" size="sm" className="w-full text-muted-foreground" onClick={() => void loadMoreEpics()} disabled={epicsLoadingMore}>
+                {epicsLoadingMore ? '로딩 중...' : '더 보기'}
+              </Button>
+            )}
           </div>
         )}
       </div>
