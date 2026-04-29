@@ -1,3 +1,4 @@
+import { cache } from 'react';
 import type { SupabaseClient, User } from '@supabase/supabase-js';
 import { cookies } from 'next/headers';
 import { isOssMode } from '@/lib/storage/factory';
@@ -35,7 +36,7 @@ async function getCurrentProjectIdCookie() {
   return cookieStore.get(CURRENT_PROJECT_COOKIE)?.value ?? null;
 }
 
-export async function getMyProjectMemberships(supabase: SupabaseClient, user: User): Promise<ProjectMembership[]> {
+export const getMyProjectMemberships = cache(async (supabase: SupabaseClient, user: User): Promise<ProjectMembership[]> => {
   const { data, error } = await supabase
     .from('team_members')
     .select('id, org_id, project_id, projects(id, name)')
@@ -60,7 +61,7 @@ export async function getMyProjectMemberships(supabase: SupabaseClient, user: Us
       };
     })
     .filter((membership) => Boolean(membership.project_id));
-}
+});
 
 export interface MembershipContext {
   me: {
@@ -100,10 +101,10 @@ export async function getOssUserContext(): Promise<MembershipContext> {
  * 현재 auth user의 team_member를 조회.
  * 없으면 자동 생성 (온보딩에서 누락된 케이스 fallback).
  */
-export async function getMyTeamMember(supabase: SupabaseClient, user: User) {
+export const getMyTeamMember = cache(async (supabase: SupabaseClient, user: User) => {
   const memberships = await getMyProjectMemberships(supabase, user);
   return resolveTeamMemberFromMemberships(supabase, user, memberships);
-}
+});
 
 async function resolveTeamMemberFromMemberships(
   supabase: SupabaseClient,
@@ -192,7 +193,7 @@ async function resolveTeamMemberFromMemberships(
  *
  * @returns team_member context { id, org_id, project_id, project_name, type?, rateLimitExceeded? }
  */
-export async function getAuthContext(
+export const getAuthContext = cache(async (
   supabase: SupabaseClient,
   request: Request
 ): Promise<{
@@ -205,7 +206,7 @@ export async function getAuthContext(
   rateLimitExceeded?: boolean;
   rateLimitRemaining?: number;
   rateLimitResetAt?: number;
-} | null> {
+} | null> => {
   // 1. OSS_MODE — Supabase 없이 SQLite 기반 인증
   if (isOssMode()) {
     const { OSS_ORG_ID, OSS_PROJECT_ID, OSS_MEMBER_ID, getDb } = await import('@sprintable/storage-sqlite');
@@ -295,4 +296,4 @@ export async function getAuthContext(
     ...oauthMember,
     type: 'human',
   };
-}
+});
