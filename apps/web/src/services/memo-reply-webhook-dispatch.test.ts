@@ -268,4 +268,35 @@ describe('dispatchWorkflowMemoReplyWebhooks', () => {
     expect(calledUrls).toContain('https://discord.com/api/webhooks/member-1/project');
     expect(calledUrls).toContain('https://discord.com/api/webhooks/member-2/direct');
   });
+
+  it('delivers to additionalRecipientIds not otherwise in participant set', async () => {
+    const fetchFn = vi.fn<typeof fetch>().mockResolvedValue(new Response(null, { status: 204 }));
+    const supabase = createSupabaseStub({ priorReplies: [], memoAssignees: [] });
+
+    const result = await dispatchWorkflowMemoReplyWebhooks({
+      supabase,
+      fetchFn: fetchFn as typeof fetch,
+      appUrl: 'https://app.example.com',
+      memo: {
+        id: 'memo-1',
+        org_id: 'org-1',
+        project_id: 'project-1',
+        title: 'QA 킥오프',
+        created_by: 'member-1',
+        assigned_to: null,
+        metadata: null,
+      },
+      reply: {
+        id: 'reply-4',
+        memo_id: 'memo-1',
+        content: 'QA 시작 바라는.',
+        created_by: 'member-1',
+      },
+      additionalRecipientIds: ['member-2'],
+    });
+
+    expect(result.status).toBe('sent');
+    const calledUrls = fetchFn.mock.calls.map((call) => call[0]);
+    expect(calledUrls).toContain('https://discord.com/api/webhooks/member-2/direct');
+  });
 });

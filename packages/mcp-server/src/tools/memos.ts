@@ -87,11 +87,16 @@ export function registerMemosTools(server: McpServer) {
   server.tool('reply_memo', 'Reply to a memo', {
     memo_id: z.string(),
     content: z.string(),
-  }, async ({ memo_id, content }) => {
+    assigned_to: z.string().optional().describe('Single team member ID to explicitly notify via webhook (legacy, use assigned_to_ids for multiple)'),
+    assigned_to_ids: z.array(z.string()).optional().describe('Team member IDs to explicitly notify via webhook on this reply'),
+  }, async ({ memo_id, content, assigned_to, assigned_to_ids }) => {
     try {
+      const resolvedIds = assigned_to_ids ?? (assigned_to ? [assigned_to] : undefined);
+      const payload: Record<string, unknown> = { content };
+      if (resolvedIds) payload.assigned_to_ids = resolvedIds;
       const data = await pmApi(`/api/memos/${encodeURIComponent(memo_id)}/replies`, {
         method: 'POST',
-        body: JSON.stringify({ content }),
+        body: JSON.stringify(payload),
       });
       return ok(data);
     } catch (e) { return handleError(e); }

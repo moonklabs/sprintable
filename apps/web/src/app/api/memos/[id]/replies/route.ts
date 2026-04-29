@@ -36,7 +36,8 @@ export async function POST(request: Request, { params }: RouteParams) {
     const repo = await createMemoRepository(dbClient);
     const teamMemberRepo = isOssMode() ? await createTeamMemberRepository() : undefined;
     const service = new MemoService(repo, dbClient as SupabaseClient | undefined, teamMemberRepo);
-    const reply = await service.addReply(id, body.content, me.id);
+    const resolvedIds = body.assigned_to_ids ?? (body.assigned_to ? [body.assigned_to] : undefined);
+    const reply = await service.addReply(id, body.content, me.id, 'comment', resolvedIds);
     return apiSuccess(reply, undefined, 201);
   } catch (err: unknown) {
     return handleApiError(err);
