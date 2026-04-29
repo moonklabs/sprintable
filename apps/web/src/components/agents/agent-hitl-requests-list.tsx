@@ -1,7 +1,7 @@
 'use client';
 
 import Link from 'next/link';
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import { useTranslations } from 'next-intl';
 import { ArrowLeft, Bot, Clock3, RefreshCw, TriangleAlert, User } from 'lucide-react';
 import { Badge } from '@/components/ui/badge';
@@ -72,12 +72,22 @@ export function AgentHitlRequestsList() {
     }
   }, []);
 
+  const intervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
+
   useEffect(() => {
+    const start = () => {
+      if (intervalRef.current) return;
+      intervalRef.current = setInterval(() => { void fetchRequests(true); }, AUTO_REFRESH_INTERVAL);
+    };
+    const stop = () => {
+      if (intervalRef.current) { clearInterval(intervalRef.current); intervalRef.current = null; }
+    };
+    const handleVisibility = () => { if (document.hidden) { stop(); } else { void fetchRequests(true); start(); } };
+
     void fetchRequests();
-    const interval = setInterval(() => {
-      void fetchRequests(true);
-    }, AUTO_REFRESH_INTERVAL);
-    return () => clearInterval(interval);
+    start();
+    document.addEventListener('visibilitychange', handleVisibility);
+    return () => { stop(); document.removeEventListener('visibilitychange', handleVisibility); };
   }, [fetchRequests]);
 
   return (

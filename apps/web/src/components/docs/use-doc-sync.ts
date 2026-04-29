@@ -48,7 +48,7 @@ export function useDocSync<TDoc = { updated_at: string }>({
   editing,
   autosave = true,
   autosaveDelay = 1500,
-  pollInterval = 10_000,
+  pollInterval = 30_000,
   onSaved,
   onRemoteChange,
 }: UseDocSyncOptions<TDoc>) {
@@ -188,27 +188,36 @@ export function useDocSync<TDoc = { updated_at: string }>({
   useEffect(() => {
     if (!docId || !editing || !baselineUpdatedAt || remoteChangedRef.current || conflictRef.current) return;
 
-    const interval = window.setInterval(async () => {
-      if (savingRef.current) return;
+    let intervalId: ReturnType<typeof window.setInterval> | null = null;
 
+    const poll = async () => {
+      if (savingRef.current || remoteChangedRef.current || conflictRef.current) return;
       try {
-        const res = await fetch(`/api/docs/${docId}`);
+        const res = await fetch(`/api/docs/${docId}/updated-at`);
         if (!res.ok) return;
-
-        const json = await res.json();
-        const remoteUpdatedAt = json.data?.updated_at as string | undefined;
-
+        const json = await res.json() as { data?: { updated_at?: string } };
+        const remoteUpdatedAt = json.data?.updated_at;
         if (!remoteUpdatedAt || remoteUpdatedAt === baselineUpdatedAt) return;
-
         remoteChangedRef.current = true;
         setStatus('remote-changed');
         onRemoteChange?.(remoteUpdatedAt);
       } catch {
         // polling failures are intentionally silent
       }
-    }, pollInterval);
+    };
 
-    return () => window.clearInterval(interval);
+    const start = () => {
+      if (intervalId) return;
+      intervalId = window.setInterval(() => { void poll(); }, pollInterval);
+    };
+    const stop = () => {
+      if (intervalId) { window.clearInterval(intervalId); intervalId = null; }
+    };
+    const handleVisibility = () => { if (document.hidden) { stop(); } else { start(); } };
+
+    start();
+    document.addEventListener('visibilitychange', handleVisibility);
+    return () => { stop(); document.removeEventListener('visibilitychange', handleVisibility); };
   }, [baselineUpdatedAt, docId, editing, onRemoteChange, pollInterval]);
 
   return {
