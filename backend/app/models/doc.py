@@ -1,7 +1,8 @@
 import uuid
+from typing import List
 
 from sqlalchemy import ForeignKey, Integer, Text
-from sqlalchemy.dialects.postgresql import UUID
+from sqlalchemy.dialects.postgresql import ARRAY, UUID
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.core.database import Base
@@ -27,6 +28,8 @@ class Doc(Base, OrgScopedMixin, TimestampMixin, SoftDeleteMixin):
     icon: Mapped[str | None] = mapped_column(Text, nullable=True)
     sort_order: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
     doc_type: Mapped[str] = mapped_column(Text, nullable=False, default="page")
+    content_format: Mapped[str] = mapped_column(Text, nullable=False, default="markdown")
+    tags: Mapped[List[str]] = mapped_column(ARRAY(Text), nullable=False, default=list)
 
     children: Mapped[list["Doc"]] = relationship("Doc", back_populates="parent", lazy="select")
     parent: Mapped["Doc | None"] = relationship("Doc", back_populates="children", remote_side=[id])
