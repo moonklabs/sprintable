@@ -188,7 +188,7 @@ export function useDocSync<TDoc = { updated_at: string }>({
   useEffect(() => {
     if (!docId || !editing || !baselineUpdatedAt || remoteChangedRef.current || conflictRef.current) return;
 
-    let intervalId: ReturnType<typeof window.setInterval> | null = null;
+    let intervalId: ReturnType<typeof setInterval> | null = null;
 
     const poll = async () => {
       if (savingRef.current || remoteChangedRef.current || conflictRef.current) return;
@@ -208,10 +208,10 @@ export function useDocSync<TDoc = { updated_at: string }>({
 
     const start = () => {
       if (intervalId) return;
-      intervalId = window.setInterval(() => { void poll(); }, pollInterval);
+      intervalId = setInterval(() => { void poll(); }, pollInterval);
     };
     const stop = () => {
-      if (intervalId) { window.clearInterval(intervalId); intervalId = null; }
+      if (intervalId) { clearInterval(intervalId); intervalId = null; }
     };
     const handleVisibility = () => { if (document.hidden) { stop(); } else { start(); } };
 
