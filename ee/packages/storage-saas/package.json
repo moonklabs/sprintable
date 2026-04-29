@@ -1,0 +1,19 @@
+{
+  "name": "@moonklabs/storage-saas",
+  "version": "0.1.0",
+  "private": true,
+  "description": "SaaS-only Repository implementations (Subscription, AgentRunBilling)",
+  "type": "module",
+  "main": "src/index.ts",
+  "types": "src/index.ts",
+  "scripts": {
+    "typecheck": "tsc --noEmit"
+  },
+  "dependencies": {
+    "@sprintable/core-storage": "workspace:*",
+    "@supabase/supabase-js": "^2.101.1"
+  },
+  "devDependencies": {
+    "typescript": "^5"
+  }
+}
