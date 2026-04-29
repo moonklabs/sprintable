@@ -52,6 +52,8 @@ export async function GET(request: Request) {
 
     const { searchParams } = new URL(request.url);
     const storyId = searchParams.get('story_id') ?? undefined;
+    const storyIdsRaw = searchParams.get('story_ids');
+    const storyIds = storyIdsRaw ? storyIdsRaw.split(',').map((s) => s.trim()).filter(Boolean) : undefined;
     const projectId = searchParams.get('project_id') ?? undefined;
     const assigneeId = searchParams.get('assignee_id') ?? undefined;
     const status = searchParams.get('status') ?? undefined;
@@ -64,6 +66,25 @@ export async function GET(request: Request) {
 
     const repo = await createTaskRepository(dbClient);
     const service = new TaskService(repo);
+
+    // story_ids: 일괄 조회 (kanban board N+1 방지용)
+    if (storyIds && storyIds.length > 0) {
+      if (dbClient) {
+        let q = dbClient.from('tasks').select('*').in('story_id', storyIds).order('created_at', { ascending: true });
+        if (status) q = q.eq('status', status);
+        const { data, error } = await q;
+        if (error) throw error;
+        return apiSuccess(data ?? []);
+      }
+      // OSS: fallback to per-story serial fetch
+      const all: unknown[] = [];
+      for (const sid of storyIds) {
+        const items = await service.list({ story_id: sid, status });
+        all.push(...items);
+      }
+      return apiSuccess(all);
+    }
+
     const tasks = await service.list({
       story_id: storyId,
       project_id: projectId,
