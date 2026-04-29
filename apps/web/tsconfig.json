@@ -27,7 +27,8 @@
       "@sprintable/storage-sqlite": ["../../packages/storage-sqlite/src/index.ts"],
       "@sprintable/storage-sqlite/*": ["../../packages/storage-sqlite/src/*"],
       "@sprintable/storage-supabase": ["../../packages/storage-supabase/src/index.ts"],
-      "@sprintable/storage-supabase/*": ["../../packages/storage-supabase/src/*"]
+      "@sprintable/storage-supabase/*": ["../../packages/storage-supabase/src/*"],
+      "@ee/*": ["../../ee/packages/*"]
     }
   },
   "include": [

@@ -11,6 +11,9 @@
     "resolveJsonModule": true,
     "isolatedModules": true,
     "noUncheckedIndexedAccess": true,
-    "noEmit": true
+    "noEmit": true,
+    "paths": {
+      "@ee/*": ["./ee/packages/*"]
+    }
   }
 }
