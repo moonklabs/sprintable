@@ -11,6 +11,7 @@ import { OperatorInput, OperatorSelect, OperatorTextarea } from '@/components/ui
 import { SectionCard, SectionCardBody, SectionCardHeader } from '@/components/ui/section-card';
 import type { PersonaToolOption } from '@/services/persona-composer';
 import { estimatePromptTokens } from '@/services/persona-composer';
+import { createSupabaseBrowserClient } from '@/lib/supabase/client';
 
 export interface PersonaComposerAgent {
   id: string;
@@ -143,9 +144,13 @@ export function AgentPersonaComposer({
     setCreatedPersona(null);
 
     try {
-      const response = await fetch('/api/v1/agent-personas', {
+      const supabase = createSupabaseBrowserClient();
+      const { data: { session } } = await supabase.auth.getSession();
+      const headers: Record<string, string> = { 'Content-Type': 'application/json' };
+      if (session?.access_token) headers['Authorization'] = `Bearer ${session.access_token}`;
+      const response = await fetch('/api/v2/agent-personas', {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers,
         body: JSON.stringify({
           agent_id: selectedAgentId,
           name: name.trim(),
