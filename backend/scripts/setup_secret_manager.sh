@@ -9,7 +9,7 @@
 
 set -euo pipefail
 
-GCP_PROJECT="${GCP_PROJECT:-sprintable}"
+GCP_PROJECT="${GCP_PROJECT:-sprintable-494803}"
 GCP_REGION="${GCP_REGION:-asia-northeast3}"
 
 log() { echo "[$(date '+%Y-%m-%d %H:%M:%S')] $*"; }
@@ -49,8 +49,8 @@ create_secret "JWT_SECRET"                     "${SECRET_JWT_SECRET:?JWT_SECRET 
 create_secret "SUPABASE_SERVICE_ROLE_KEY"      "${SECRET_SERVICE_ROLE_KEY:-placeholder}"
 # Cloud SQL 연결 URL (dev/prod 분리) — D-S1 인스턴스 생성 후 실제 값으로 교체 필요
 # 형식: postgresql+asyncpg://sprintable:PASSWORD@/sprintable?host=/cloudsql/PROJECT:REGION:INSTANCE
-create_secret "DATABASE_URL_DEV"               "${SECRET_DATABASE_URL_DEV:-postgresql+asyncpg://placeholder@/sprintable?host=/cloudsql/sprintable:asia-northeast3:sprintable-dev}"
-create_secret "DATABASE_URL_PROD"              "${SECRET_DATABASE_URL_PROD:-postgresql+asyncpg://placeholder@/sprintable?host=/cloudsql/sprintable:asia-northeast3:sprintable-prod}"
+create_secret "DATABASE_URL_DEV"               "${SECRET_DATABASE_URL_DEV:-postgresql+asyncpg://placeholder@/sprintable?host=/cloudsql/sprintable-494803:asia-northeast3:sprintable-dev}"
+create_secret "DATABASE_URL_PROD"              "${SECRET_DATABASE_URL_PROD:-postgresql+asyncpg://placeholder@/sprintable?host=/cloudsql/sprintable-494803:asia-northeast3:sprintable-prod}"
 
 # ─── Cloud Run SA에 Secret Accessor 권한 ──────────────────────────────────────
 PROJECT_NUMBER=$(gcloud projects describe "${GCP_PROJECT}" --format="value(projectNumber)")

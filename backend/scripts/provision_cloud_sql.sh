@@ -16,7 +16,7 @@
 
 set -euo pipefail
 
-GCP_PROJECT="${GCP_PROJECT:-sprintable}"
+GCP_PROJECT="${GCP_PROJECT:-sprintable-494803}"
 GCP_REGION="${GCP_REGION:-asia-northeast3}"
 VPC_NETWORK="${VPC_NETWORK:-default}"
 TARGET="${1:-both}"
@@ -131,7 +131,7 @@ print_proxy_instructions() {
    chmod +x cloud-sql-proxy
 
 2. Dev 인스턴스 연결:
-   ./cloud-sql-proxy sprintable:asia-northeast3:sprintable-dev --port 5433 &
+   ./cloud-sql-proxy sprintable-494803:asia-northeast3:sprintable-dev --port 5433 &
 
 3. FastAPI .env 설정:
    DATABASE_URL=postgresql+asyncpg://sprintable:PASSWORD@127.0.0.1:5433/sprintable

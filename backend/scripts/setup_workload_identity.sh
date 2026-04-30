@@ -8,7 +8,7 @@
 
 set -euo pipefail
 
-GCP_PROJECT="${GCP_PROJECT:-sprintable}"
+GCP_PROJECT="${GCP_PROJECT:-sprintable-494803}"
 GITHUB_OWNER="${GITHUB_OWNER:-moonklabs}"
 GITHUB_REPO="${GITHUB_REPO:-sprintable}"
 SA_NAME="${SA_NAME:-github-actions}"

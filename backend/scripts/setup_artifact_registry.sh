@@ -10,7 +10,7 @@
 
 set -euo pipefail
 
-GCP_PROJECT="${GCP_PROJECT:-sprintable}"
+GCP_PROJECT="${GCP_PROJECT:-sprintable-494803}"
 AR_REGION="${AR_REGION:-asia-northeast3}"
 AR_REPO="${AR_REPO:-sprintable}"
 GITHUB_OWNER="${GITHUB_OWNER:-moonklabs}"
