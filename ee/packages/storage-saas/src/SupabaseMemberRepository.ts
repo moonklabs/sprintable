@@ -44,7 +44,7 @@ export class SupabaseMemberRepository {
 
   async list(filters: { org_id: string; type?: 'human' | 'agent'; is_active?: boolean }): Promise<Member[]> {
     if (this.fastapi) {
-      return fastapiCall<Member[]>('GET', '/api/v2/org-members', this.accessToken, {
+      return fastapiCall<Member[]>('GET', '/api/v2/members', this.accessToken, {
         query: { type: filters.type, is_active: filters.is_active != null ? String(filters.is_active) : undefined },
       });
     }
@@ -59,7 +59,7 @@ export class SupabaseMemberRepository {
 
   async getById(id: string): Promise<Member | null> {
     if (this.fastapi) {
-      try { return await fastapiCall<Member>('GET', `/api/v2/org-members/${id}`, this.accessToken); }
+      try { return await fastapiCall<Member>('GET', `/api/v2/members/${id}`, this.accessToken); }
       catch { return null; }
     }
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -70,7 +70,7 @@ export class SupabaseMemberRepository {
   async getByUserId(userId: string, orgId: string, type?: string): Promise<Member | null> {
     if (this.fastapi) {
       try {
-        const members = await fastapiCall<Member[]>('GET', '/api/v2/org-members', this.accessToken, { query: { type } });
+        const members = await fastapiCall<Member[]>('GET', '/api/v2/members', this.accessToken, { query: { type } });
         return members.find((m) => (m as unknown as { user_id?: string }).user_id === userId) ?? null;
       } catch { return null; }
     }
@@ -83,7 +83,7 @@ export class SupabaseMemberRepository {
 
   async upsertHuman(input: UpsertMemberInput & { user_id: string }): Promise<Member | null> {
     if (this.fastapi) {
-      return fastapiCall<Member>('POST', '/api/v2/org-members/upsert', this.accessToken, { body: { ...input, type: 'human' } });
+      return fastapiCall<Member>('POST', '/api/v2/members/upsert', this.accessToken, { body: { ...input, type: 'human' } });
     }
     const existing = await this.getByUserId(input.user_id, input.org_id, 'human');
     if (existing) return this.update(existing.id, { name: input.name, avatar_url: input.avatar_url, is_active: input.is_active ?? true });
@@ -95,7 +95,7 @@ export class SupabaseMemberRepository {
 
   async insertAgent(input: UpsertMemberInput): Promise<Member | null> {
     if (this.fastapi) {
-      return fastapiCall<Member>('POST', '/api/v2/org-members', this.accessToken, { body: { ...input, type: 'agent' } });
+      return fastapiCall<Member>('POST', '/api/v2/members', this.accessToken, { body: { ...input, type: 'agent' } });
     }
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     const { data, error } = await (this.supabase as any).from('members').insert({ org_id: input.org_id, user_id: input.user_id ?? null, name: input.name, type: 'agent', agent_config: input.agent_config ?? null, webhook_url: input.webhook_url ?? null, is_active: input.is_active ?? true, updated_at: new Date().toISOString() }).select('*').single();
@@ -105,7 +105,7 @@ export class SupabaseMemberRepository {
 
   async update(id: string, input: UpdateMemberInput): Promise<Member | null> {
     if (this.fastapi) {
-      return fastapiCall<Member>('PATCH', `/api/v2/org-members/${id}`, this.accessToken, { body: input });
+      return fastapiCall<Member>('PATCH', `/api/v2/members/${id}`, this.accessToken, { body: input });
     }
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     const { data, error } = await (this.supabase as any).from('members').update({ ...input, updated_at: new Date().toISOString() }).eq('id', id).select('*').single();
@@ -115,7 +115,7 @@ export class SupabaseMemberRepository {
 
   async softDelete(id: string): Promise<boolean> {
     if (this.fastapi) {
-      try { await fastapiCall<void>('DELETE', `/api/v2/org-members/${id}`, this.accessToken); return true; }
+      try { await fastapiCall<void>('DELETE', `/api/v2/members/${id}`, this.accessToken); return true; }
       catch { return false; }
     }
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
