@@ -1,30 +1,26 @@
 import type { SupabaseClient } from '@supabase/supabase-js';
-import type {
-  IAgentRunBillingRepository,
-  AgentRunBilling,
-  RecordAgentRunBillingInput,
-  AgentRunBillingSummary,
-} from '@sprintable/core-storage';
+import type { IAgentRunBillingRepository, AgentRunBilling, RecordAgentRunBillingInput, AgentRunBillingSummary } from '@sprintable/core-storage';
+import { fastapiCall } from '@sprintable/storage-supabase';
 
-/**
- * SaaS-only. Persists per-run token usage + cost to `agent_run_billing` table.
- * OSS mode uses NullAgentRunBillingRepository (no-op record, zero summary).
- */
 export class SupabaseAgentRunBillingRepository implements IAgentRunBillingRepository {
-  constructor(private readonly supabase: SupabaseClient) {}
+  constructor(
+    private readonly supabase: SupabaseClient,
+    private readonly accessToken: string = '',
+  ) {}
+
+  private get fastapi(): boolean { return Boolean(this.accessToken); }
 
   async record(input: RecordAgentRunBillingInput): Promise<AgentRunBilling> {
-    const { data, error } = await this.supabase
-      .from('agent_run_billing')
-      .insert({
-        org_id: input.org_id,
-        agent_run_id: input.agent_run_id,
-        input_tokens: input.token_input,
-        output_tokens: input.token_output,
-        cost_usd: input.cost_usd,
-      })
-      .select()
-      .single();
+    if (this.fastapi) {
+      return fastapiCall<AgentRunBilling>('POST', '/api/v2/billing/agent-run', this.accessToken, { body: input });
+    }
+    const { data, error } = await this.supabase.from('agent_run_billing').insert({
+      org_id: input.org_id,
+      agent_run_id: input.agent_run_id,
+      input_tokens: input.token_input,
+      output_tokens: input.token_output,
+      cost_usd: input.cost_usd,
+    }).select().single();
     if (error) throw error;
     const row = data as Record<string, unknown>;
     return {
@@ -39,15 +35,15 @@ export class SupabaseAgentRunBillingRepository implements IAgentRunBillingReposi
   }
 
   async getSummaryForOrg(orgId: string, since?: string): Promise<AgentRunBillingSummary> {
-    let query = this.supabase
-      .from('agent_run_billing')
-      .select('input_tokens, output_tokens, cost_usd')
-      .eq('org_id', orgId);
+    if (this.fastapi) {
+      return fastapiCall<AgentRunBillingSummary>('GET', '/api/v2/billing/agent-run/summary', this.accessToken, {
+        query: { org_id: orgId, since },
+      });
+    }
+    let query = this.supabase.from('agent_run_billing').select('input_tokens, output_tokens, cost_usd').eq('org_id', orgId);
     if (since) query = query.gte('created_at', since);
-
     const { data, error } = await query;
     if (error) throw error;
-
     const rows = (data ?? []) as Array<{ input_tokens: number | null; output_tokens: number | null; cost_usd: number | null }>;
     return {
       total_runs: rows.length,
