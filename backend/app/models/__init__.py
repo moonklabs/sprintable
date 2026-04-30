@@ -1,3 +1,4 @@
+from app.models.api_key import ApiKey
 from app.models.audit import AuditLog
 from app.models.webhook_config import WebhookConfig
 from app.models.doc import Doc
@@ -15,6 +16,7 @@ from app.models.standup import StandupEntry, StandupFeedback
 from app.models.team import TeamMember
 
 __all__ = [
+    "ApiKey",
     "AuditLog",
     "WebhookConfig",
     "Doc",
