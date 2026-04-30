@@ -1,4 +1,5 @@
 from app.models.agent_deployment import AgentAuditLog, AgentDeployment, AgentPersona
+from app.models.agent_routing_rule import AgentRoutingRule
 from app.models.agent_run import AgentRun
 from app.models.api_key import ApiKey
 from app.models.org_subscription import OrgSubscription
@@ -23,6 +24,7 @@ __all__ = [
     "AgentAuditLog",
     "AgentDeployment",
     "AgentPersona",
+    "AgentRoutingRule",
     "AgentRun",
     "ApiKey",
     "OrgSubscription",
