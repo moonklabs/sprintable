@@ -38,6 +38,21 @@ def _get_org_project(auth: AuthContext) -> tuple[uuid.UUID | None, uuid.UUID | N
     return uuid.UUID(str(o)), uuid.UUID(str(p))
 
 
+async def _verify_page_ownership(
+    session: AsyncSession,
+    page_id: uuid.UUID,
+    project_id: uuid.UUID,
+) -> bool:
+    result = await session.execute(
+        select(MockupPage.id).where(
+            MockupPage.id == page_id,
+            MockupPage.project_id == project_id,
+            MockupPage.deleted_at.is_(None),
+        )
+    )
+    return result.scalar_one_or_none() is not None
+
+
 # ─── Mockups CRUD ─────────────────────────────────────────────────────────────
 
 @router.get("/mockups")
@@ -102,7 +117,11 @@ async def get_mockup(
         return _err("FORBIDDEN", "org_id required", 403)
 
     result = await session.execute(
-        select(MockupPage).where(MockupPage.id == page_id, MockupPage.deleted_at.is_(None))
+        select(MockupPage).where(
+            MockupPage.id == page_id,
+            MockupPage.project_id == project_id,
+            MockupPage.deleted_at.is_(None),
+        )
     )
     page = result.scalar_one_or_none()
     if not page:
@@ -135,12 +154,16 @@ async def update_mockup(
     auth: AuthContext = Depends(get_current_user),
     session: AsyncSession = Depends(get_db),
 ) -> JSONResponse:
-    org_id, _ = _get_org_project(auth)
+    org_id, project_id = _get_org_project(auth)
     if not org_id:
         return _err("FORBIDDEN", "org_id required", 403)
 
     result = await session.execute(
-        select(MockupPage).where(MockupPage.id == page_id, MockupPage.deleted_at.is_(None))
+        select(MockupPage).where(
+            MockupPage.id == page_id,
+            MockupPage.project_id == project_id,
+            MockupPage.deleted_at.is_(None),
+        )
     )
     page = result.scalar_one_or_none()
     if not page:
@@ -156,6 +179,30 @@ async def update_mockup(
         updates["viewport"] = body.viewport
 
     if body.components is not None:
+        # 버전 스냅샷 저장 (rollback 데이터 보장)
+        comps_r = await session.execute(
+            select(MockupComponent).where(MockupComponent.page_id == page_id).order_by(MockupComponent.sort_order)
+        )
+        scen_r = await session.execute(
+            select(MockupScenario).where(MockupScenario.page_id == page_id).order_by(MockupScenario.sort_order)
+        )
+        snapshot = {
+            "title": page.title,
+            "components": [
+                {"type": c.type, "props": c.props, "sort_order": c.sort_order}
+                for c in comps_r.scalars().all()
+            ],
+            "scenarios": [
+                {"name": s.name, "override_props": s.override_props, "is_default": s.is_default, "sort_order": s.sort_order}
+                for s in scen_r.scalars().all()
+            ],
+        }
+        session.add(MockupVersion(
+            page_id=page_id,
+            version=page.version or 1,
+            snapshot=snapshot,
+        ))
+
         await session.execute(
             text("DELETE FROM mockup_components WHERE page_id = :pid"), {"pid": str(page_id)}
         )
@@ -180,13 +227,13 @@ async def delete_mockup(
     auth: AuthContext = Depends(get_current_user),
     session: AsyncSession = Depends(get_db),
 ) -> JSONResponse:
-    org_id, _ = _get_org_project(auth)
+    org_id, project_id = _get_org_project(auth)
     if not org_id:
         return _err("FORBIDDEN", "org_id required", 403)
 
     await session.execute(
         update(MockupPage)
-        .where(MockupPage.id == page_id, MockupPage.deleted_at.is_(None))
+        .where(MockupPage.id == page_id, MockupPage.project_id == project_id, MockupPage.deleted_at.is_(None))
         .values(deleted_at=datetime.now(timezone.utc))
     )
     await session.commit()
@@ -201,8 +248,11 @@ async def list_versions(
     auth: AuthContext = Depends(get_current_user),
     session: AsyncSession = Depends(get_db),
 ) -> JSONResponse:
-    if not _get_org_project(auth)[0]:
+    org_id, project_id = _get_org_project(auth)
+    if not org_id:
         return _err("FORBIDDEN", "org_id required", 403)
+    if not await _verify_page_ownership(session, page_id, project_id):
+        return _err("NOT_FOUND", "Mockup not found", 404)
 
     result = await session.execute(
         select(MockupVersion.id, MockupVersion.version, MockupVersion.created_at)
@@ -220,8 +270,11 @@ async def restore_version(
     auth: AuthContext = Depends(get_current_user),
     session: AsyncSession = Depends(get_db),
 ) -> JSONResponse:
-    if not _get_org_project(auth)[0]:
+    org_id, project_id = _get_org_project(auth)
+    if not org_id:
         return _err("FORBIDDEN", "org_id required", 403)
+    if not await _verify_page_ownership(session, page_id, project_id):
+        return _err("NOT_FOUND", "Mockup not found", 404)
 
     result = await session.execute(
         select(MockupVersion).where(MockupVersion.id == body.version_id, MockupVersion.page_id == page_id)
@@ -273,8 +326,11 @@ async def list_scenarios(
     auth: AuthContext = Depends(get_current_user),
     session: AsyncSession = Depends(get_db),
 ) -> JSONResponse:
-    if not _get_org_project(auth)[0]:
+    org_id, project_id = _get_org_project(auth)
+    if not org_id:
         return _err("FORBIDDEN", "org_id required", 403)
+    if not await _verify_page_ownership(session, page_id, project_id):
+        return _err("NOT_FOUND", "Mockup not found", 404)
     result = await session.execute(
         select(MockupScenario).where(MockupScenario.page_id == page_id).order_by(MockupScenario.sort_order)
     )
@@ -289,8 +345,11 @@ async def create_scenario(
     auth: AuthContext = Depends(get_current_user),
     session: AsyncSession = Depends(get_db),
 ) -> JSONResponse:
-    if not _get_org_project(auth)[0]:
+    org_id, project_id = _get_org_project(auth)
+    if not org_id:
         return _err("FORBIDDEN", "org_id required", 403)
+    if not await _verify_page_ownership(session, page_id, project_id):
+        return _err("NOT_FOUND", "Mockup not found", 404)
     s = MockupScenario(page_id=page_id, name=body.name, override_props=body.override_props, is_default=False)
     session.add(s)
     await session.commit()
@@ -304,8 +363,11 @@ async def update_scenario(
     auth: AuthContext = Depends(get_current_user),
     session: AsyncSession = Depends(get_db),
 ) -> JSONResponse:
-    if not _get_org_project(auth)[0]:
+    org_id, project_id = _get_org_project(auth)
+    if not org_id:
         return _err("FORBIDDEN", "org_id required", 403)
+    if not await _verify_page_ownership(session, page_id, project_id):
+        return _err("NOT_FOUND", "Mockup not found", 404)
     vals: dict[str, Any] = {}
     if body.name is not None:
         vals["name"] = body.name
@@ -328,8 +390,11 @@ async def delete_scenario(
     auth: AuthContext = Depends(get_current_user),
     session: AsyncSession = Depends(get_db),
 ) -> JSONResponse:
-    if not _get_org_project(auth)[0]:
+    org_id, project_id = _get_org_project(auth)
+    if not org_id:
         return _err("FORBIDDEN", "org_id required", 403)
+    if not await _verify_page_ownership(session, page_id, project_id):
+        return _err("NOT_FOUND", "Mockup not found", 404)
     result = await session.execute(
         select(MockupScenario).where(MockupScenario.id == body.scenario_id, MockupScenario.page_id == page_id)
     )
