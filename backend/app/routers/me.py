@@ -1,0 +1,46 @@
+import uuid
+
+from fastapi import APIRouter, Depends, HTTPException, Query
+from sqlalchemy import select
+from sqlalchemy.ext.asyncio import AsyncSession
+
+from app.dependencies.auth import AuthContext, get_current_user
+from app.dependencies.database import get_db
+from app.models.team import TeamMember
+from app.schemas.me import MeResponse, UpdateMe
+
+router = APIRouter(prefix="/api/v2/me", tags=["me"])
+
+
+@router.get("", response_model=MeResponse)
+async def get_me(
+    member_id: uuid.UUID = Query(...),
+    session: AsyncSession = Depends(get_db),
+    _auth: AuthContext = Depends(get_current_user),
+) -> MeResponse:
+    result = await session.execute(
+        select(TeamMember).where(TeamMember.id == member_id)
+    )
+    member = result.scalar_one_or_none()
+    if member is None:
+        raise HTTPException(status_code=404, detail="Member not found")
+    return MeResponse.model_validate(member)
+
+
+@router.patch("", response_model=MeResponse)
+async def update_me(
+    member_id: uuid.UUID = Query(...),
+    body: UpdateMe = ...,
+    session: AsyncSession = Depends(get_db),
+    _auth: AuthContext = Depends(get_current_user),
+) -> MeResponse:
+    result = await session.execute(
+        select(TeamMember).where(TeamMember.id == member_id)
+    )
+    member = result.scalar_one_or_none()
+    if member is None:
+        raise HTTPException(status_code=404, detail="Member not found")
+    member.name = body.name
+    await session.flush()
+    await session.refresh(member)
+    return MeResponse.model_validate(member)
