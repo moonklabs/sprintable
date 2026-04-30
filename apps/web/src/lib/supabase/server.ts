@@ -8,6 +8,7 @@ export const SP_RT_COOKIE = 'sp_rt';
 export interface ServerSession {
   user_id: string;
   email: string;
+  access_token: string;
 }
 
 function getJwtSecretBytes(): Uint8Array {
@@ -22,7 +23,7 @@ export async function getServerSession(): Promise<ServerSession | null> {
   try {
     const { payload } = await jwtVerify(token, getJwtSecretBytes());
     if (payload['type'] !== 'access' || !payload.sub) return null;
-    return { user_id: payload.sub, email: (payload['email'] as string) ?? '' };
+    return { user_id: payload.sub, email: (payload['email'] as string) ?? '', access_token: token };
   } catch {
     return null;
   }

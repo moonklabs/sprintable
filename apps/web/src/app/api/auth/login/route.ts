@@ -1,21 +1,19 @@
 import { NextResponse } from 'next/server';
 import { SP_AT_COOKIE, SP_RT_COOKIE } from '@/lib/supabase/server';
+import { verifyCsrfOrigin } from '@/lib/auth/csrf';
 
 const FASTAPI_URL = () => process.env['NEXT_PUBLIC_FASTAPI_URL'] ?? 'http://localhost:8000';
 
 function cookieBase() {
   const domain = process.env['NEXT_PUBLIC_COOKIE_DOMAIN'];
-  return {
-    httpOnly: true,
-    secure: true,
-    sameSite: 'lax' as const,
-    path: '/',
-    ...(domain ? { domain } : {}),
-  };
+  return { httpOnly: true, secure: true, sameSite: 'lax' as const, path: '/', ...(domain ? { domain } : {}) };
 }
 
-/** POST /api/auth/login — email/password 로그인 → JWT 쿠키 설정 */
+/** POST /api/auth/login */
 export async function POST(request: Request) {
+  const csrfError = verifyCsrfOrigin(request);
+  if (csrfError) return csrfError;
+
   const body = await request.json() as { email: string; password: string; totp_code?: string | null };
 
   const fastapiRes = await fetch(`${FASTAPI_URL()}/api/v2/auth/token`, {
@@ -25,7 +23,6 @@ export async function POST(request: Request) {
   });
 
   const json = await fastapiRes.json() as { data?: { access_token: string; refresh_token: string; token_type: string }; error?: { code: string; message: string } };
-
   if (!fastapiRes.ok || !json.data) {
     return NextResponse.json({ error: json.error ?? { code: 'AUTH_FAILED', message: 'Login failed' } }, { status: fastapiRes.status });
   }
