@@ -31,7 +31,7 @@ def publish_event(org_id: str, event_type: str, data: dict) -> None:
     dead: list[asyncio.Queue] = []
     for q in _subscribers.get(org_id, set()):
         try:
-            q.put_nowait(payload)
+            q.put_nowait(dict(payload))  # copy per subscriber — shared dict mutation 방지
         except asyncio.QueueFull:
             dead.append(q)
     for q in dead:
@@ -63,8 +63,9 @@ async def memo_event_stream(
             while not await request.is_disconnected():
                 try:
                     event = await asyncio.wait_for(queue.get(), timeout=30.0)
-                    event_type = event.pop("type", "message")
-                    yield f"event: {event_type}\ndata: {json.dumps(event)}\n\n"
+                    event_type = event.get("type", "message")
+                    data = {k: v for k, v in event.items() if k != "type"}
+                    yield f"event: {event_type}\ndata: {json.dumps(data)}\n\n"
                 except asyncio.TimeoutError:
                     yield "event: heartbeat\ndata: {}\n\n"
         except (asyncio.CancelledError, GeneratorExit):
