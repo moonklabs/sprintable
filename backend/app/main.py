@@ -2,7 +2,7 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
 from app.core.config import settings
-from app.routers import account, agent_deployments, agent_personas, agent_routing_rules, agent_runs, agent_sessions, analytics, api_keys, audit_logs, bridge, current_project, dashboard, docs, epics, health, hitl, invitations, me, meetings, members, memos, notifications, org_members, organizations, oss, policy_documents, project_settings, projects, retros, rewards, sprints, standups, stories, subscription, tasks, team_members, webhooks
+from app.routers import account, agent_deployments, agent_personas, agent_routing_rules, agent_runs, agent_sessions, analytics, api_keys, audit_logs, bridge, current_project, dashboard, docs, epics, health, hitl, invitations, me, meetings, members, memos, notifications, org_members, organizations, oss, policy_documents, project_settings, projects, retros, rewards, sprints, standups, stories, subscription, tasks, team_members, webhooks, workflow_versions
 
 app = FastAPI(
     title="Sprintable API v2",
@@ -57,6 +57,7 @@ app.include_router(agent_routing_rules.router)
 app.include_router(agent_sessions.router)
 app.include_router(bridge.router)
 app.include_router(hitl.router)
+app.include_router(workflow_versions.router)
 
 if settings.is_ee_enabled:
     from ee.routers import billing  # type: ignore[import]

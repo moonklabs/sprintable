@@ -632,16 +632,23 @@ function AgentWorkflowEditorInner({ initialMembers, initialRules, projectName }:
   }, [addToast, rollbackSnapshot, syncCanvasFromRules, t]);
 
   useEffect(() => {
-    fetch('/api/v1/workflow-versions')
-      .then((r) => r.json())
-      .then((json: { data?: WorkflowVersionSummary[] }) => { if (Array.isArray(json.data)) setVersions(json.data); })
-      .catch(() => null);
+    void (async () => {
+      try {
+        const authHeaders = await getAuthHeaders();
+        const r = await fetch('/api/v2/workflow-versions', { headers: authHeaders });
+        const json = await r.json() as { data?: WorkflowVersionSummary[] };
+        if (Array.isArray(json.data)) setVersions(json.data);
+      } catch {
+        // ignore
+      }
+    })();
   }, [savedRules]);
 
   const rollbackToVersion = useCallback(async (versionId: string) => {
     setSaving(true);
     try {
-      const response = await fetch(`/api/v1/workflow-versions/${versionId}/rollback`, { method: 'POST' });
+      const authHeaders = await getAuthHeaders();
+      const response = await fetch(`/api/v2/workflow-versions/${versionId}/rollback`, { method: 'POST', headers: authHeaders });
       const json = await response.json().catch(() => null) as { data?: RoutingRuleSummary[] } | null;
       if (!response.ok || !json?.data || !Array.isArray(json.data)) throw new Error(t('workflowRollbackErrorBody'));
       setSavedRules(json.data);
