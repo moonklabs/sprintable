@@ -1,0 +1,59 @@
+# D-S2: Cloud Build — Frontend + Backend 멀티 이미지 빌드
+# GCP 프로젝트: sprintable | 리전: asia-northeast3
+#
+# 트리거: main 브랜치 push (GitHub Actions → Cloud Build)
+# 이미지 태그: $COMMIT_SHA + latest
+# 캐시: Artifact Registry 레이어 캐시
+
+substitutions:
+  _AR_REGION: asia-northeast3
+  _AR_REPO: sprintable
+
+steps:
+  # ─── Frontend (Next.js standalone) ────────────────────────────────────────
+  - id: build-frontend
+    name: gcr.io/cloud-builders/docker
+    args:
+      - build
+      - -f
+      - apps/web/Dockerfile
+      - -t
+      - ${_AR_REGION}-docker.pkg.dev/${PROJECT_ID}/${_AR_REPO}/frontend:${COMMIT_SHA}
+      - -t
+      - ${_AR_REGION}-docker.pkg.dev/${PROJECT_ID}/${_AR_REPO}/frontend:latest
+      - --cache-from
+      - ${_AR_REGION}-docker.pkg.dev/${PROJECT_ID}/${_AR_REPO}/frontend:latest
+      - --build-arg
+      - BUILDKIT_INLINE_CACHE=1
+      - .
+    env:
+      - DOCKER_BUILDKIT=1
+
+  # ─── Backend (FastAPI) ─────────────────────────────────────────────────────
+  - id: build-backend
+    name: gcr.io/cloud-builders/docker
+    args:
+      - build
+      - -f
+      - backend/Dockerfile
+      - -t
+      - ${_AR_REGION}-docker.pkg.dev/${PROJECT_ID}/${_AR_REPO}/backend:${COMMIT_SHA}
+      - -t
+      - ${_AR_REGION}-docker.pkg.dev/${PROJECT_ID}/${_AR_REPO}/backend:latest
+      - --cache-from
+      - ${_AR_REGION}-docker.pkg.dev/${PROJECT_ID}/${_AR_REPO}/backend:latest
+      - --build-arg
+      - BUILDKIT_INLINE_CACHE=1
+      - ./backend
+    env:
+      - DOCKER_BUILDKIT=1
+
+images:
+  - ${_AR_REGION}-docker.pkg.dev/${PROJECT_ID}/${_AR_REPO}/frontend:${COMMIT_SHA}
+  - ${_AR_REGION}-docker.pkg.dev/${PROJECT_ID}/${_AR_REPO}/frontend:latest
+  - ${_AR_REGION}-docker.pkg.dev/${PROJECT_ID}/${_AR_REPO}/backend:${COMMIT_SHA}
+  - ${_AR_REGION}-docker.pkg.dev/${PROJECT_ID}/${_AR_REPO}/backend:latest
+
+options:
+  machineType: E2_HIGHCPU_8
+  logging: CLOUD_LOGGING_ONLY
