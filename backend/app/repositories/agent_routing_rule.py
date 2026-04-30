@@ -189,7 +189,7 @@ class AgentRoutingRuleRepository:
         items: list[dict],
     ) -> list[RoutingRuleResponse]:
         await self.session.execute(
-            text("SELECT replace_agent_routing_rules(:org_id, :project_id, :actor_id, :rules::jsonb)"),
+            text("SELECT replace_agent_routing_rules(:org_id, :project_id, :actor_id, CAST(:rules AS jsonb))"),
             {
                 "org_id": str(org_id),
                 "project_id": str(project_id),
