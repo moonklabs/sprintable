@@ -10,7 +10,6 @@ from app.schemas.analytics import (
     AgentStatsResponse,
     BurndownResponse,
     EpicProgressResponse,
-    LeaderboardEntry,
     MemberWorkloadResponse,
     ProjectHealthResponse,
     ProjectOverviewResponse,
@@ -122,17 +121,3 @@ async def get_sprint_velocity(
     if data is None:
         raise HTTPException(status_code=404, detail="Sprint not found")
     return SprintVelocityResponse.model_validate(data)
-
-
-@router.get("/rewards/leaderboard", response_model=list[LeaderboardEntry])
-async def get_leaderboard(
-    project_id: uuid.UUID = Query(...),
-    period: str = Query(default="all"),
-    limit: int = Query(default=50, ge=1, le=100),
-    cursor: str | None = Query(default=None),
-    repo: AnalyticsRepository = Depends(_get_repo),
-) -> list[LeaderboardEntry]:
-    if period not in ("daily", "weekly", "monthly", "all"):
-        raise HTTPException(status_code=400, detail="period must be one of: daily, weekly, monthly, all")
-    items = await repo.get_leaderboard(project_id, period, limit, cursor)
-    return [LeaderboardEntry.model_validate(i) for i in items]
