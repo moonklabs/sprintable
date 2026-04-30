@@ -21,15 +21,23 @@ import type { SupabaseClient } from '@supabase/supabase-js';
 
 let _bootstrapped = false;
 
+async function getSpAt(): Promise<string> {
+  try {
+    const { cookies } = await import('next/headers');
+    const store = await cookies();
+    return store.get('sp_at')?.value ?? '';
+  } catch { return ''; }
+}
+
 export function registerSaasRepositories(): void {
   if (_bootstrapped) return;
   _bootstrapped = true;
 
   registerSubscriptionRepository(async (supabase?: unknown) => {
-    return new SupabaseSubscriptionRepository(supabase as SupabaseClient);
+    return new SupabaseSubscriptionRepository(supabase as SupabaseClient, await getSpAt());
   });
 
   registerAgentRunBillingRepository(async (supabase?: unknown) => {
-    return new SupabaseAgentRunBillingRepository(supabase as SupabaseClient);
+    return new SupabaseAgentRunBillingRepository(supabase as SupabaseClient, await getSpAt());
   });
 }

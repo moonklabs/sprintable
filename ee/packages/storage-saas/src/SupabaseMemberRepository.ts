@@ -1,4 +1,5 @@
 import type { SupabaseClient } from '@supabase/supabase-js';
+import { fastapiCall } from '@sprintable/storage-supabase';
 
 export interface Member {
   id: string;
@@ -34,120 +35,91 @@ export interface UpdateMemberInput {
 }
 
 export class SupabaseMemberRepository {
-  constructor(private readonly supabase: SupabaseClient) {}
+  constructor(
+    private readonly supabase: SupabaseClient,
+    private readonly accessToken: string = '',
+  ) {}
+
+  private get fastapi(): boolean { return Boolean(this.accessToken); }
 
   async list(filters: { org_id: string; type?: 'human' | 'agent'; is_active?: boolean }): Promise<Member[]> {
+    if (this.fastapi) {
+      return fastapiCall<Member[]>('GET', '/api/v2/org-members', this.accessToken, {
+        query: { type: filters.type, is_active: filters.is_active != null ? String(filters.is_active) : undefined },
+      });
+    }
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    let query = (this.supabase as any)
-      .from('members')
-      .select('*')
-      .eq('org_id', filters.org_id)
-      .order('created_at', { ascending: true });
-
+    let query = (this.supabase as any).from('members').select('*').eq('org_id', filters.org_id).order('created_at', { ascending: true });
     if (filters.type !== undefined) query = query.eq('type', filters.type);
     if (filters.is_active !== undefined) query = query.eq('is_active', filters.is_active);
-
     const { data, error } = await query;
     if (error || !data) return [];
     return data as Member[];
   }
 
   async getById(id: string): Promise<Member | null> {
+    if (this.fastapi) {
+      try { return await fastapiCall<Member>('GET', `/api/v2/org-members/${id}`, this.accessToken); }
+      catch { return null; }
+    }
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    const { data } = await (this.supabase as any)
-      .from('members')
-      .select('*')
-      .eq('id', id)
-      .maybeSingle();
+    const { data } = await (this.supabase as any).from('members').select('*').eq('id', id).maybeSingle();
     return (data as Member | null) ?? null;
   }
 
   async getByUserId(userId: string, orgId: string, type?: string): Promise<Member | null> {
+    if (this.fastapi) {
+      try {
+        const members = await fastapiCall<Member[]>('GET', '/api/v2/org-members', this.accessToken, { query: { type } });
+        return members.find((m) => (m as unknown as { user_id?: string }).user_id === userId) ?? null;
+      } catch { return null; }
+    }
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    let query = (this.supabase as any)
-      .from('members')
-      .select('*')
-      .eq('user_id', userId)
-      .eq('org_id', orgId);
+    let query = (this.supabase as any).from('members').select('*').eq('user_id', userId).eq('org_id', orgId);
     if (type) query = query.eq('type', type);
     const { data } = await query.maybeSingle();
     return (data as Member | null) ?? null;
   }
 
   async upsertHuman(input: UpsertMemberInput & { user_id: string }): Promise<Member | null> {
-    // Partial unique index (WHERE type = 'human') cannot be used as ON CONFLICT target via JS client.
-    // Use explicit select → update/insert pattern with type='human' filter to prevent multi-row
-    // error when the same (user_id, org_id) exists as both human and agent records.
-    const existing = await this.getByUserId(input.user_id, input.org_id, 'human');
-
-    if (existing) {
-      return this.update(existing.id, {
-        name: input.name,
-        avatar_url: input.avatar_url,
-        is_active: input.is_active ?? true,
-      });
+    if (this.fastapi) {
+      return fastapiCall<Member>('POST', '/api/v2/org-members/upsert', this.accessToken, { body: { ...input, type: 'human' } });
     }
-
+    const existing = await this.getByUserId(input.user_id, input.org_id, 'human');
+    if (existing) return this.update(existing.id, { name: input.name, avatar_url: input.avatar_url, is_active: input.is_active ?? true });
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    const { data, error } = await (this.supabase as any)
-      .from('members')
-      .insert({
-        org_id: input.org_id,
-        user_id: input.user_id,
-        name: input.name,
-        type: 'human',
-        avatar_url: input.avatar_url ?? null,
-        is_active: input.is_active ?? true,
-        updated_at: new Date().toISOString(),
-      })
-      .select('*')
-      .single();
+    const { data, error } = await (this.supabase as any).from('members').insert({ org_id: input.org_id, user_id: input.user_id, name: input.name, type: 'human', avatar_url: input.avatar_url ?? null, is_active: input.is_active ?? true, updated_at: new Date().toISOString() }).select('*').single();
     if (error) return null;
     return data as Member;
   }
 
   async insertAgent(input: UpsertMemberInput): Promise<Member | null> {
+    if (this.fastapi) {
+      return fastapiCall<Member>('POST', '/api/v2/org-members', this.accessToken, { body: { ...input, type: 'agent' } });
+    }
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    const { data, error } = await (this.supabase as any)
-      .from('members')
-      .insert({
-        org_id: input.org_id,
-        user_id: input.user_id ?? null,
-        name: input.name,
-        type: 'agent',
-        agent_config: input.agent_config ?? null,
-        webhook_url: input.webhook_url ?? null,
-        is_active: input.is_active ?? true,
-        updated_at: new Date().toISOString(),
-      })
-      .select('*')
-      .single();
+    const { data, error } = await (this.supabase as any).from('members').insert({ org_id: input.org_id, user_id: input.user_id ?? null, name: input.name, type: 'agent', agent_config: input.agent_config ?? null, webhook_url: input.webhook_url ?? null, is_active: input.is_active ?? true, updated_at: new Date().toISOString() }).select('*').single();
     if (error) return null;
     return data as Member;
   }
 
   async update(id: string, input: UpdateMemberInput): Promise<Member | null> {
+    if (this.fastapi) {
+      return fastapiCall<Member>('PATCH', `/api/v2/org-members/${id}`, this.accessToken, { body: input });
+    }
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    const { data, error } = await (this.supabase as any)
-      .from('members')
-      .update({ ...input, updated_at: new Date().toISOString() })
-      .eq('id', id)
-      .select('*')
-      .single();
+    const { data, error } = await (this.supabase as any).from('members').update({ ...input, updated_at: new Date().toISOString() }).eq('id', id).select('*').single();
     if (error) return null;
     return data as Member;
   }
 
   async softDelete(id: string): Promise<boolean> {
+    if (this.fastapi) {
+      try { await fastapiCall<void>('DELETE', `/api/v2/org-members/${id}`, this.accessToken); return true; }
+      catch { return false; }
+    }
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    const { error } = await (this.supabase as any)
-      .from('members')
-      .update({
-        is_active: false,
-        deleted_at: new Date().toISOString(),
-        updated_at: new Date().toISOString(),
-      })
-      .eq('id', id);
+    const { error } = await (this.supabase as any).from('members').update({ is_active: false, deleted_at: new Date().toISOString(), updated_at: new Date().toISOString() }).eq('id', id);
     return !error;
   }
 }

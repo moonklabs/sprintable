@@ -1,25 +1,21 @@
 import type { SupabaseClient } from '@supabase/supabase-js';
-import type {
-  ISubscriptionRepository,
-  Subscription,
-  UpdateSubscriptionInput,
-} from '@sprintable/core-storage';
+import type { ISubscriptionRepository, Subscription, UpdateSubscriptionInput } from '@sprintable/core-storage';
+import { fastapiCall } from '@sprintable/storage-supabase';
 
-/**
- * SaaS-only. Backed by `subscriptions` table in the multi-tenant Supabase project.
- * OSS mode uses NullSubscriptionRepository (returns plan:'oss') — this impl
- * is only reachable via factory when OSS_MODE != 'true' and sprintable-saas
- * is composed into the build (submodule/overlay).
- */
 export class SupabaseSubscriptionRepository implements ISubscriptionRepository {
-  constructor(private readonly supabase: SupabaseClient) {}
+  constructor(
+    private readonly supabase: SupabaseClient,
+    private readonly accessToken: string = '',
+  ) {}
+
+  private get fastapi(): boolean { return Boolean(this.accessToken); }
 
   async getForOrg(orgId: string): Promise<Subscription | null> {
-    const { data, error } = await this.supabase
-      .from('subscriptions')
-      .select('*')
-      .eq('org_id', orgId)
-      .maybeSingle();
+    if (this.fastapi) {
+      try { return await fastapiCall<Subscription>('GET', `/api/v2/subscription/${orgId}`, this.accessToken); }
+      catch { return null; }
+    }
+    const { data, error } = await this.supabase.from('subscriptions').select('*').eq('org_id', orgId).maybeSingle();
     if (error) throw error;
     if (!data) return null;
     const row = data as Record<string, unknown>;
@@ -38,6 +34,9 @@ export class SupabaseSubscriptionRepository implements ISubscriptionRepository {
   }
 
   async update(orgId: string, input: UpdateSubscriptionInput): Promise<Subscription> {
+    if (this.fastapi) {
+      return fastapiCall<Subscription>('PATCH', `/api/v2/subscription/${orgId}`, this.accessToken, { body: input });
+    }
     const patch: Record<string, unknown> = {};
     if (input.plan !== undefined) patch['tier_id'] = input.plan;
     if (input.status !== undefined) patch['status'] = input.status;
@@ -45,13 +44,8 @@ export class SupabaseSubscriptionRepository implements ISubscriptionRepository {
     if (input.current_period_end !== undefined) patch['current_period_end'] = input.current_period_end;
     if (input.cancel_at_period_end !== undefined) patch['canceled_at'] = input.cancel_at_period_end ? new Date().toISOString() : null;
     if (input.metadata !== undefined) patch['metadata'] = input.metadata;
-
-    const { error } = await this.supabase
-      .from('subscriptions')
-      .update(patch)
-      .eq('org_id', orgId);
+    const { error } = await this.supabase.from('subscriptions').update(patch).eq('org_id', orgId);
     if (error) throw error;
-
     const refreshed = await this.getForOrg(orgId);
     if (!refreshed) throw new Error(`Subscription not found after update: ${orgId}`);
     return refreshed;

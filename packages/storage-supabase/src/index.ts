@@ -1,3 +1,4 @@
+export { fastapiCall, mapApiError } from './utils';
 export { SupabaseEpicRepository } from './SupabaseEpicRepository';
 export { SupabaseStoryRepository } from './SupabaseStoryRepository';
 export { SupabaseTaskRepository } from './SupabaseTaskRepository';
