@@ -39,11 +39,18 @@ create_secret() {
 }
 
 # ─── 시크릿 생성 ─────────────────────────────────────────────────────────────
+# 공통 (프론트 + 백엔드)
 create_secret "NEXT_PUBLIC_SUPABASE_URL"       "${SECRET_SUPABASE_URL:-placeholder}"
 create_secret "NEXT_PUBLIC_SUPABASE_ANON_KEY"  "${SECRET_SUPABASE_ANON_KEY:-placeholder}"
 create_secret "NEXT_PUBLIC_COOKIE_DOMAIN"      "${SECRET_COOKIE_DOMAIN:-app.sprintable.ai}"
 create_secret "JWT_SECRET"                     "${SECRET_JWT_SECRET:?JWT_SECRET required}"
+
+# 백엔드 전용
 create_secret "SUPABASE_SERVICE_ROLE_KEY"      "${SECRET_SERVICE_ROLE_KEY:-placeholder}"
+# Cloud SQL 연결 URL (dev/prod 분리) — D-S1 인스턴스 생성 후 실제 값으로 교체 필요
+# 형식: postgresql+asyncpg://sprintable:PASSWORD@/sprintable?host=/cloudsql/PROJECT:REGION:INSTANCE
+create_secret "DATABASE_URL_DEV"               "${SECRET_DATABASE_URL_DEV:-postgresql+asyncpg://placeholder@/sprintable?host=/cloudsql/sprintable:asia-northeast3:sprintable-dev}"
+create_secret "DATABASE_URL_PROD"              "${SECRET_DATABASE_URL_PROD:-postgresql+asyncpg://placeholder@/sprintable?host=/cloudsql/sprintable:asia-northeast3:sprintable-prod}"
 
 # ─── Cloud Run SA에 Secret Accessor 권한 ──────────────────────────────────────
 PROJECT_NUMBER=$(gcloud projects describe "${GCP_PROJECT}" --format="value(projectNumber)")
