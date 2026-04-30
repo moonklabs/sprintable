@@ -22,6 +22,9 @@ class Settings(BaseSettings):
     supabase_jwt_secret: str = ""
     supabase_url: str = ""
 
+    # CORS (쉼표 구분 origins, Cloud Run 환경변수 CORS_ORIGINS로 주입)
+    cors_origins: str = "http://localhost:3000,http://localhost:3108,https://app.sprintable.ai"
+
     # App
     app_env: str = "development"
     debug: bool = True
