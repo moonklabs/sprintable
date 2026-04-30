@@ -160,3 +160,20 @@ async def test_transition_session_terminated_200():
             assert resp.json()["data"]["session"]["status"] == "terminated"
     finally:
         app.dependency_overrides.clear()
+
+
+@pytest.mark.anyio
+async def test_transition_session_idle_200():
+    client, session, app = await _client()
+    try:
+        with patch("app.repositories.agent_session.AgentSessionRepository.transition", new_callable=AsyncMock) as mock_tx:
+            s = _make_session("idle")
+            s.idle_at = datetime.now(timezone.utc)
+            mock_tx.return_value = s
+            async with client as c:
+                resp = await c.patch(f"/api/v2/agent-sessions/{SESSION_ID}", json={"status": "idle"})
+            assert resp.status_code == 200
+            assert resp.json()["data"]["session"]["status"] == "idle"
+            assert resp.json()["data"]["resumptions"] == []
+    finally:
+        app.dependency_overrides.clear()
