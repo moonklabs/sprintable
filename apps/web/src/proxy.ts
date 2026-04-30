@@ -27,7 +27,7 @@ function isOssMode(): boolean {
 }
 
 function getJwtSecretBytes(): Uint8Array {
-  const secret = process.env['JWT_SECRET'] ?? process.env['SUPABASE_JWT_SECRET'] ?? '';
+  const secret = process.env['JWT_SECRET'] ?? '';
   return new TextEncoder().encode(secret);
 }
 
