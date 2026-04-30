@@ -1,29 +1,28 @@
-import { createSupabaseServerClient } from '@/lib/supabase/server';
 import { handleApiError } from '@/lib/api-error';
 import { apiSuccess, apiError, ApiErrors } from '@/lib/api-response';
 import { isOssMode } from '@/lib/storage/factory';
+import { getServerSession } from '@/lib/supabase/server';
 
-/** POST /api/auth/2fa/verify — OTP 검증 → factor 활성화 (enabled=true) */
+const FASTAPI_URL = () => process.env['NEXT_PUBLIC_FASTAPI_URL'] ?? 'http://localhost:8000';
+
+/** POST /api/auth/2fa/verify — TOTP 검증 + 활성화 (FastAPI) */
 export async function POST(request: Request) {
   if (isOssMode()) return apiError('NOT_IMPLEMENTED', '2FA is not supported in OSS mode.', 501);
   try {
-    const supabase = await createSupabaseServerClient();
-    const { data: { user } } = await supabase.auth.getUser();
-    if (!user) return ApiErrors.unauthorized();
+    const session = await getServerSession();
+    if (!session) return ApiErrors.unauthorized();
 
-    const { factor_id, code } = await request.json() as { factor_id: string; code: string };
-    if (!factor_id || !code) return apiError('BAD_REQUEST', 'factor_id and code are required', 400);
+    const { code } = await request.json() as { code: string };
+    if (!code) return apiError('BAD_REQUEST', 'code is required', 400);
 
-    const { data: challenge, error: challengeError } = await supabase.auth.mfa.challenge({ factorId: factor_id });
-    if (challengeError) return apiError('MFA_ERROR', challengeError.message, 400);
-
-    const { error: verifyError } = await supabase.auth.mfa.verify({
-      factorId: factor_id,
-      challengeId: challenge.id,
-      code,
+    const res = await fetch(`${FASTAPI_URL()}/api/v2/auth/totp/verify`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ code }),
     });
-    if (verifyError) return apiError('INVALID_OTP', 'Invalid or expired OTP code', 400);
+    const json = await res.json() as { data?: { totp_enabled: boolean }; error?: { code: string; message: string } };
+    if (!res.ok || !json.data) return apiError(json.error?.code ?? 'INVALID_OTP', json.error?.message ?? 'Invalid OTP code', res.status);
 
-    return apiSuccess({ ok: true, enabled: true });
+    return apiSuccess({ ok: true, enabled: json.data.totp_enabled });
   } catch (err: unknown) { return handleApiError(err); }
 }

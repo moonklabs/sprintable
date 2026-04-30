@@ -1,24 +1,24 @@
-import { createSupabaseServerClient } from '@/lib/supabase/server';
 import { handleApiError } from '@/lib/api-error';
 import { apiSuccess, apiError, ApiErrors } from '@/lib/api-response';
 import { isOssMode } from '@/lib/storage/factory';
+import { getServerSession } from '@/lib/supabase/server';
 
-/** POST /api/auth/2fa/setup — TOTP factor 등록 시작, QR URI + secret 반환 */
+const FASTAPI_URL = () => process.env['NEXT_PUBLIC_FASTAPI_URL'] ?? 'http://localhost:8000';
+
+/** POST /api/auth/2fa/setup — TOTP secret 생성 (FastAPI) */
 export async function POST() {
   if (isOssMode()) return apiError('NOT_IMPLEMENTED', '2FA is not supported in OSS mode.', 501);
   try {
-    const supabase = await createSupabaseServerClient();
-    const { data: { user } } = await supabase.auth.getUser();
-    if (!user) return ApiErrors.unauthorized();
+    const session = await getServerSession();
+    if (!session) return ApiErrors.unauthorized();
 
-    const { data, error } = await supabase.auth.mfa.enroll({ factorType: 'totp' });
-    if (error) return apiError('MFA_ERROR', error.message, 400);
-
-    return apiSuccess({
-      factor_id: data.id,
-      qr_code: data.totp.qr_code,
-      secret: data.totp.secret,
-      uri: data.totp.uri,
+    const res = await fetch(`${FASTAPI_URL()}/api/v2/auth/totp/setup`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
     });
+    const json = await res.json() as { data?: { totp_secret: string; provisioning_uri: string }; error?: { code: string; message: string } };
+    if (!res.ok || !json.data) return apiError(json.error?.code ?? 'MFA_ERROR', json.error?.message ?? 'TOTP setup failed', res.status);
+
+    return apiSuccess({ secret: json.data.totp_secret, uri: json.data.provisioning_uri });
   } catch (err: unknown) { return handleApiError(err); }
 }

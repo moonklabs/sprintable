@@ -1,5 +1,32 @@
 import { createServerClient } from '@supabase/ssr';
 import { cookies } from 'next/headers';
+import { jwtVerify } from 'jose';
+
+export const SP_AT_COOKIE = 'sp_at';
+export const SP_RT_COOKIE = 'sp_rt';
+
+export interface ServerSession {
+  user_id: string;
+  email: string;
+}
+
+function getJwtSecretBytes(): Uint8Array {
+  const secret = process.env['JWT_SECRET'] ?? process.env['SUPABASE_JWT_SECRET'] ?? '';
+  return new TextEncoder().encode(secret);
+}
+
+export async function getServerSession(): Promise<ServerSession | null> {
+  const cookieStore = await cookies();
+  const token = cookieStore.get(SP_AT_COOKIE)?.value;
+  if (!token) return null;
+  try {
+    const { payload } = await jwtVerify(token, getJwtSecretBytes());
+    if (payload['type'] !== 'access' || !payload.sub) return null;
+    return { user_id: payload.sub, email: (payload['email'] as string) ?? '' };
+  } catch {
+    return null;
+  }
+}
 
 export async function createSupabaseServerClient() {
   const supabaseUrl = process.env['NEXT_PUBLIC_SUPABASE_URL'] ?? 'http://localhost:54321';

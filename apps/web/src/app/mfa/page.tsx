@@ -2,12 +2,10 @@
 
 import { useState } from 'react';
 import { useRouter } from 'next/navigation';
-import { createSupabaseBrowserClient } from '@/lib/supabase/client';
 import { SprintableLogo } from '@/components/brand/sprintable-logo';
 
 export default function MfaPage() {
   const router = useRouter();
-  const supabase = createSupabaseBrowserClient();
   const [code, setCode] = useState('');
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
@@ -17,21 +15,19 @@ export default function MfaPage() {
     setLoading(true);
     setError(null);
     try {
-      const { data: factors, error: listError } = await supabase.auth.mfa.listFactors();
-      if (listError || !factors?.totp?.[0]) {
-        setError('No 2FA factor found. Please re-login.');
+      const res = await fetch('/api/auth/2fa/verify', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ code: code.trim() }),
+      });
+      const json = await res.json() as { data?: { ok: boolean }; error?: { message: string } };
+      if (!res.ok || !json.data?.ok) {
+        setError(json.error?.message ?? 'Invalid verification code. Please try again.');
         return;
       }
-      const factor = factors.totp[0];
-      const { data: challenge, error: challengeError } = await supabase.auth.mfa.challenge({ factorId: factor.id });
-      if (challengeError) { setError(challengeError.message); return; }
-      const { error: verifyError } = await supabase.auth.mfa.verify({
-        factorId: factor.id,
-        challengeId: challenge.id,
-        code: code.trim(),
-      });
-      if (verifyError) { setError('Invalid verification code. Please try again.'); return; }
       router.push('/dashboard');
+    } catch {
+      setError('Verification failed. Please try again.');
     } finally {
       setLoading(false);
     }

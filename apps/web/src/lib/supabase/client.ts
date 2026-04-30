@@ -2,7 +2,58 @@
 
 import { createBrowserClient } from '@supabase/ssr';
 
-// URL별 rate-limit backoff 만료 시각 (ms). 모듈 스코프로 탭 전체 공유.
+// ─── FastAPI Auth Utilities ───────────────────────────────────────────────────
+
+export interface AuthTokens {
+  access_token: string;
+  refresh_token: string;
+  token_type: string;
+}
+
+export interface AuthResult {
+  data: AuthTokens | null;
+  error: { code: string; message: string } | null;
+}
+
+async function callAuthRoute(path: string, body: object): Promise<AuthResult> {
+  const res = await fetch(path, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(body),
+  });
+  const json = await res.json() as { data?: AuthTokens | { ok: boolean }; error?: { code: string; message: string } };
+  if (!res.ok) {
+    return { data: null, error: json.error ?? { code: 'UNKNOWN', message: 'Unknown error' } };
+  }
+  return { data: json.data as AuthTokens, error: null };
+}
+
+export async function loginWithPassword(
+  email: string,
+  password: string,
+  totpCode?: string,
+): Promise<AuthResult> {
+  return callAuthRoute('/api/auth/login', { email, password, totp_code: totpCode ?? null });
+}
+
+export async function registerUser(email: string, password: string): Promise<AuthResult> {
+  return callAuthRoute('/api/auth/register', { email, password });
+}
+
+export async function logoutUser(refreshToken?: string): Promise<void> {
+  await fetch('/api/auth/logout', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ refresh_token: refreshToken ?? '' }),
+  });
+}
+
+export async function refreshAuthTokens(): Promise<AuthResult> {
+  return callAuthRoute('/api/auth/refresh', {});
+}
+
+// ─── Supabase Browser Client (realtime / DB only — auth via FastAPI) ─────────
+
 const rateLimitBlockedUntil = new Map<string, number>();
 
 function getUrlKey(input: RequestInfo | URL): string {
@@ -19,7 +70,6 @@ function rateLimitedFetch(input: RequestInfo | URL, init?: RequestInit): Promise
     const remainingSec = Math.ceil((blockedUntil - now) / 1000);
     return Promise.reject(new Error(`rate_limit_backoff:${remainingSec}`));
   }
-
   return globalThis.fetch(input, init).then(async (response) => {
     if (response.status === 429) {
       const retryAfterHeader = response.headers.get('Retry-After');
@@ -27,27 +77,6 @@ function rateLimitedFetch(input: RequestInfo | URL, init?: RequestInit): Promise
       const backoffSec = !isNaN(retrySeconds) ? Math.max(retrySeconds, 60) : 60;
       rateLimitBlockedUntil.set(url, Date.now() + backoffSec * 1000);
     }
-
-    // refresh_token_already_used (HTTP 400) — sb-* 쿠키 클리어 후 /login 리다이렉트
-    if (response.status === 400 && url.includes('/token')) {
-      try {
-        const body = await response.clone().json() as Record<string, string>;
-        const msg = (body.error_description ?? body.message ?? '').toLowerCase();
-        const code = body.error ?? body.code ?? '';
-        if (msg.includes('already used') || msg.includes('already_used') || code === 'invalid_grant' || code === 'refresh_token_already_used') {
-          // sb-* auth 쿠키 전량 삭제 후 /login 리다이렉트
-          const cookieDomain = process.env['NEXT_PUBLIC_COOKIE_DOMAIN'];
-          document.cookie.split(';').forEach((c) => {
-            const name = c.trim().split('=')[0];
-            if (name?.startsWith('sb-')) {
-              document.cookie = `${name}=; expires=Thu, 01 Jan 1970 00:00:00 UTC; path=/${cookieDomain ? `; domain=${cookieDomain}` : ''}`;
-            }
-          });
-          window.location.href = '/login';
-        }
-      } catch { /* body parse 실패 무시 */ }
-    }
-
     return response;
   });
 }
@@ -64,9 +93,8 @@ export function createSupabaseBrowserClient() {
         secure: true,
         path: '/',
       },
-      global: {
-        fetch: rateLimitedFetch,
-      },
+      global: { fetch: rateLimitedFetch },
+      auth: { persistSession: false, autoRefreshToken: false },
     },
   );
 }
