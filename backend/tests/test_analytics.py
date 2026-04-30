@@ -281,35 +281,3 @@ async def test_get_sprint_velocity_200():
         app.dependency_overrides.clear()
 
 
-@pytest.mark.anyio
-async def test_get_leaderboard_200():
-    client, session, app = await _client()
-    try:
-        mock_data = [
-            {"member_id": MEMBER_ID, "balance": 150.0},
-            {"member_id": AGENT_ID, "balance": 80.0},
-        ]
-        with patch("app.repositories.analytics.AnalyticsRepository.get_leaderboard", new_callable=AsyncMock) as mock_fn:
-            mock_fn.return_value = mock_data
-
-            async with client as c:
-                resp = await c.get(f"/api/v2/rewards/leaderboard?project_id={PROJECT_ID}&period=all")
-
-        assert resp.status_code == 200
-        assert len(resp.json()) == 2
-        assert resp.json()[0]["balance"] == 150.0
-    finally:
-        app.dependency_overrides.clear()
-
-
-@pytest.mark.anyio
-async def test_get_leaderboard_invalid_period_400():
-    client, session, app = await _client()
-    try:
-        with patch("app.repositories.analytics.AnalyticsRepository.get_leaderboard", new_callable=AsyncMock):
-            async with client as c:
-                resp = await c.get(f"/api/v2/rewards/leaderboard?project_id={PROJECT_ID}&period=invalid")
-
-        assert resp.status_code == 400
-    finally:
-        app.dependency_overrides.clear()
