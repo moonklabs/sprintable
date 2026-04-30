@@ -2,7 +2,7 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
 from app.core.config import settings
-from app.routers import analytics, audit_logs, docs, epics, health, invitations, me, meetings, memos, notifications, org_members, organizations, project_settings, projects, retros, rewards, sprints, standups, stories, tasks, team_members
+from app.routers import analytics, audit_logs, current_project, dashboard, docs, epics, health, invitations, me, meetings, members, memos, notifications, org_members, organizations, project_settings, projects, retros, rewards, sprints, standups, stories, tasks, team_members
 
 app = FastAPI(
     title="Sprintable API v2",
@@ -38,6 +38,9 @@ app.include_router(analytics.router)
 app.include_router(invitations.router)
 app.include_router(rewards.router)
 app.include_router(audit_logs.router)
+app.include_router(dashboard.router)
+app.include_router(current_project.router)
+app.include_router(members.router)
 app.include_router(organizations.router)
 app.include_router(me.router)
 app.include_router(project_settings.router)
