@@ -5,6 +5,7 @@ from app.models.agent_session import AgentSession
 from app.models.bridge import BridgeChannelMapping, BridgeUserMapping
 from app.models.hitl import HitlPolicy, HitlRequest
 from app.models.mockup import MockupComponent, MockupPage, MockupScenario, MockupVersion, UsageMeter
+from app.models.user import RefreshToken, User
 from app.models.workflow_version import WorkflowVersion
 from app.models.api_key import ApiKey
 from app.models.org_subscription import OrgSubscription
@@ -72,5 +73,7 @@ __all__ = [
     "Story",
     "Task",
     "TeamMember",
+    "RefreshToken",
+    "User",
     "WorkflowVersion",
 ]
