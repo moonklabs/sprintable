@@ -6,6 +6,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.dependencies.auth import AuthContext, get_current_user
 from app.dependencies.database import get_db
 from app.repositories.memo import MemoReplyRepository, MemoRepository
+from app.routers.events import publish_event
 from app.schemas.memo import CreateMemo, CreateReply, MemoListResponse, MemoResponse, ReplyResponse, UpdateMemo
 
 router = APIRouter(prefix="/api/v2/memos", tags=["memos"])
@@ -63,6 +64,7 @@ async def create_memo(
         supersedes_id=body.supersedes_id,
         memo_metadata=body.memo_metadata,
     )
+    publish_event(str(body.org_id), "memo_created", {"id": str(memo.id)})
     return MemoListResponse.model_validate(memo)
 
 
@@ -87,6 +89,7 @@ async def update_memo(
     memo = await repo.update(id, **data)
     if memo is None:
         raise HTTPException(status_code=404, detail="Memo not found")
+    publish_event(str(repo.org_id), "memo_updated", {"id": str(id)})
     return MemoListResponse.model_validate(memo)
 
 
@@ -115,6 +118,7 @@ async def add_reply(
     reply = await reply_repo.create(
         memo_id=id, content=body.content, created_by=body.created_by, review_type=body.review_type
     )
+    publish_event(str(repo.org_id), "reply_created", {"id": str(reply.id), "memo_id": str(id)})
     return ReplyResponse.model_validate(reply)
 
 
