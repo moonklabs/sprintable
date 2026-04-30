@@ -41,7 +41,7 @@ async def list_workflow_versions(
     if not org_id:
         return _err("FORBIDDEN", "org_id required", 403)
     versions = await repo.list(org_id=org_id, project_id=project_id)
-    return _ok([v.model_dump() for v in versions])
+    return _ok([v.model_dump(mode="json") for v in versions])
 
 
 @router.post("/{version_id}/rollback")
@@ -61,4 +61,4 @@ async def rollback_to_version(
     )
     if rules is None:
         return _err("NOT_FOUND", "Workflow version not found", 404)
-    return _ok([r.model_dump() for r in rules])
+    return _ok([r.model_dump(mode="json") for r in rules])
