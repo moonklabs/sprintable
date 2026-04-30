@@ -19,35 +19,14 @@ function getJwtSecretBytes(): Uint8Array {
 export async function getServerSession(): Promise<ServerSession | null> {
   const cookieStore = await cookies();
   const token = cookieStore.get(SP_AT_COOKIE)?.value;
-
-  // FastAPI JWT (sp_at 쿠키) 우선 검증
-  if (token) {
-    try {
-      const { payload } = await jwtVerify(token, getJwtSecretBytes());
-      if (payload['type'] === 'access' && payload.sub) {
-        return { user_id: payload.sub, email: (payload['email'] as string) ?? '', access_token: token };
-      }
-    } catch {
-      // 유효하지 않으면 Supabase fallback으로
-    }
-  }
-
-  // Supabase 세션 fallback (Google OAuth 등 FastAPI 미배포 환경 대응)
+  if (!token) return null;
   try {
-    const supabase = await createSupabaseServerClient();
-    const { data: { session: supabaseSession } } = await supabase.auth.getSession();
-    if (supabaseSession?.user) {
-      return {
-        user_id: supabaseSession.user.id,
-        email: supabaseSession.user.email ?? '',
-        access_token: supabaseSession.access_token,
-      };
-    }
+    const { payload } = await jwtVerify(token, getJwtSecretBytes());
+    if (payload['type'] !== 'access' || !payload.sub) return null;
+    return { user_id: payload.sub, email: (payload['email'] as string) ?? '', access_token: token };
   } catch {
-    // Supabase도 실패하면 null
+    return null;
   }
-
-  return null;
 }
 
 export async function createSupabaseServerClient() {
