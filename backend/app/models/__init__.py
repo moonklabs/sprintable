@@ -1,4 +1,5 @@
 from app.models.audit import AuditLog
+from app.models.webhook_config import WebhookConfig
 from app.models.doc import Doc
 from app.models.invitation import Invitation
 from app.models.meeting import Meeting
@@ -15,6 +16,7 @@ from app.models.team import TeamMember
 
 __all__ = [
     "AuditLog",
+    "WebhookConfig",
     "Doc",
     "Epic",
     "InboxItem",
