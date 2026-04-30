@@ -4,6 +4,7 @@ import { handleApiError } from '@/lib/api-error';
 import { apiSuccess, ApiErrors } from '@/lib/api-response';
 import { getAuthContext } from '@/lib/auth-helpers';
 import { checkFeatureLimit } from '@/lib/check-feature';
+import { uploadToGcs, GCS_RECORDINGS_BUCKET } from '@/lib/gcs';
 
 type RouteParams = { params: Promise<{ id: string }> };
 
@@ -55,16 +56,10 @@ export async function POST(request: Request, { params }: RouteParams) {
       : 'ogg';
     const path = `meetings/${id}/${Date.now()}.${ext}`;
 
-    const { data, error } = await dbClient.storage
-      .from('recordings')
-      .upload(path, file, { contentType: file.type, upsert: true });
-
-    if (error) throw error;
-
-    const { data: { publicUrl } } = dbClient.storage.from('recordings').getPublicUrl(path);
+    const publicUrl = await uploadToGcs(GCS_RECORDINGS_BUCKET, path, file);
 
     await dbClient.from('meetings').update({ recording_url: publicUrl }).eq('id', id);
 
-    return apiSuccess({ path: data.path, publicUrl });
+    return apiSuccess({ path, publicUrl });
   } catch (err: unknown) { return handleApiError(err); }
 }

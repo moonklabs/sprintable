@@ -1,8 +1,8 @@
-import { createSupabaseServerClient } from '@/lib/supabase/server';
+import { getServerSession } from '@/lib/supabase/server';
 import { handleApiError } from '@/lib/api-error';
-import { getMyTeamMember } from '@/lib/auth-helpers';
 import { apiSuccess, apiError, ApiErrors } from '@/lib/api-response';
 import { isOssMode } from '@/lib/storage/factory';
+import { uploadToGcs, GCS_MEMO_ATTACHMENTS_BUCKET } from '@/lib/gcs';
 
 const MAX_FILE_SIZE = 10 * 1024 * 1024;
 const ALLOWED_IMAGE_TYPES = new Set(['image/png', 'image/jpeg', 'image/webp', 'image/gif', 'image/avif']);
@@ -28,12 +28,8 @@ function sanitizeFilename(name: string) {
 export async function POST(request: Request) {
   if (isOssMode()) return apiError('NOT_IMPLEMENTED', 'Attachments are not available in OSS mode.', 501);
   try {
-    const supabase = await createSupabaseServerClient();
-    const { data: { user } } = await supabase.auth.getUser();
-    if (!user) return ApiErrors.unauthorized();
-
-    const me = await getMyTeamMember(supabase, user);
-    if (!me) return ApiErrors.forbidden('Team member not found');
+    const session = await getServerSession();
+    if (!session) return ApiErrors.unauthorized();
 
     const formData = await request.formData();
     const file = formData.get('file');
@@ -51,15 +47,9 @@ export async function POST(request: Request) {
     const memoId = String(formData.get('memo_id') ?? '');
     const filename = sanitizeFilename(file.name);
     const ext = resolveExtension(file);
-    const path = `memos/${me.project_id}/${scope}/${memoId || 'drafts'}/${Date.now()}-${filename}.${ext}`;
+    const path = `memos/${scope}/${memoId || 'drafts'}/${Date.now()}-${filename}.${ext}`;
 
-    const { error } = await supabase.storage.from('memo-attachments').upload(path, file, {
-      contentType: file.type,
-      upsert: false,
-    });
-    if (error) throw error;
-
-    const { data: { publicUrl } } = supabase.storage.from('memo-attachments').getPublicUrl(path);
+    const publicUrl = await uploadToGcs(GCS_MEMO_ATTACHMENTS_BUCKET, path, file);
     const alt = filename || 'image';
 
     return apiSuccess({
