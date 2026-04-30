@@ -2,7 +2,7 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
 from app.core.config import settings
-from app.routers import docs, epics, health, meetings, org_members, projects, retros, sprints, standups, stories, tasks, team_members
+from app.routers import docs, epics, health, meetings, memos, org_members, projects, retros, sprints, standups, stories, tasks, team_members
 
 app = FastAPI(
     title="Sprintable API v2",
@@ -32,6 +32,7 @@ app.include_router(team_members.router)
 app.include_router(org_members.router)
 app.include_router(standups.router)
 app.include_router(retros.router)
+app.include_router(memos.router)
 
 if settings.is_ee_enabled:
     from ee.routers import billing  # type: ignore[import]
