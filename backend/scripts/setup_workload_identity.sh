@@ -8,7 +8,7 @@
 
 set -euo pipefail
 
-GCP_PROJECT="${GCP_PROJECT:-sprintable}"
+GCP_PROJECT="${GCP_PROJECT:-sprintable-494803}"
 GITHUB_OWNER="${GITHUB_OWNER:-moonklabs}"
 GITHUB_REPO="${GITHUB_REPO:-sprintable}"
 SA_NAME="${SA_NAME:-github-actions}"
@@ -31,7 +31,7 @@ gcloud iam service-accounts create "${SA_NAME}" \
     --project="${GCP_PROJECT}" 2>/dev/null || log "SA already exists, skipping."
 
 # 필요 권한 부여
-for ROLE in roles/cloudbuild.builds.editor roles/artifactregistry.writer roles/run.admin; do
+for ROLE in roles/cloudbuild.builds.editor roles/artifactregistry.writer roles/run.admin roles/secretmanager.secretAccessor; do
     gcloud projects add-iam-policy-binding "${GCP_PROJECT}" \
         --member="serviceAccount:${SA_EMAIL}" \
         --role="${ROLE}" \

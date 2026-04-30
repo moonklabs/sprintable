@@ -12,8 +12,8 @@ class Settings(BaseSettings):
     database_url: str = "postgresql+asyncpg://postgres:postgres@localhost:54322/postgres"
 
     # Cloud SQL (D-S1: Phase D GCP 인프라)
-    cloud_sql_instance_dev: str = "sprintable:asia-northeast3:sprintable-dev"
-    cloud_sql_instance_prod: str = "sprintable:asia-northeast3:sprintable-prod"
+    cloud_sql_instance_dev: str = "sprintable-494803:asia-northeast3:sprintable-dev"
+    cloud_sql_instance_prod: str = "sprintable-494803:asia-northeast3:sprintable-prod"
 
     # JWT
     jwt_secret: str = ""

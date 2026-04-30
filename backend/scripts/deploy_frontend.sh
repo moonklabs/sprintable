@@ -18,7 +18,7 @@
 
 set -euo pipefail
 
-GCP_PROJECT="${GCP_PROJECT:-sprintable}"
+GCP_PROJECT="${GCP_PROJECT:-sprintable-494803}"
 GCP_REGION="${GCP_REGION:-asia-northeast3}"
 AR_REPO="${AR_REPO:-sprintable}"
 ENV="${1:-${ENV:-dev}}"

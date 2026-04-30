@@ -19,7 +19,7 @@
 
 set -euo pipefail
 
-GCP_PROJECT="${GCP_PROJECT:-sprintable}"
+GCP_PROJECT="${GCP_PROJECT:-sprintable-494803}"
 GCP_REGION="${GCP_REGION:-asia-northeast3}"
 AR_REPO="${AR_REPO:-sprintable}"
 ENV="${1:-${ENV:-dev}}"
@@ -76,7 +76,7 @@ gcloud run deploy "${SERVICE_NAME}" \
     --set-secrets="\
 DATABASE_URL=DATABASE_URL_${ENV^^}:latest,\
 JWT_SECRET=JWT_SECRET:latest,\
-SUPABASE_URL=SUPABASE_URL:latest,\
+SUPABASE_URL=NEXT_PUBLIC_SUPABASE_URL:latest,\
 SUPABASE_SERVICE_ROLE_KEY=SUPABASE_SERVICE_ROLE_KEY:latest" \
     --startup-probe-path="/api/v2/health"
 
