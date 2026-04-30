@@ -2,6 +2,7 @@
 
 import { useCallback, useEffect, useState } from 'react';
 import { useTranslations } from 'next-intl';
+import { createSupabaseBrowserClient } from '@/lib/supabase/client';
 import { AlertTriangle, CheckCircle2, Clock3, ShieldAlert } from 'lucide-react';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
@@ -30,11 +31,20 @@ export function AgentHitlPolicyEditor() {
   const [error, setError] = useState<string | null>(null);
   const [savedAt, setSavedAt] = useState<string | null>(null);
 
+  const getAuthHeaders = async (): Promise<Record<string, string>> => {
+    const supabase = createSupabaseBrowserClient();
+    const { data: { session } } = await supabase.auth.getSession();
+    const headers: Record<string, string> = {};
+    if (session?.access_token) headers['Authorization'] = `Bearer ${session.access_token}`;
+    return headers;
+  };
+
   const fetchPolicy = useCallback(async () => {
     setLoading(true);
     setError(null);
     try {
-      const response = await fetch('/api/v1/hitl-policy');
+      const authHeaders = await getAuthHeaders();
+      const response = await fetch('/api/v2/hitl/policy', { headers: authHeaders });
       if (!response.ok) throw new Error(t('policyLoadFailed'));
       const json = await response.json() as { data?: HitlPolicySnapshot };
       if (!json.data) throw new Error(t('policyLoadFailed'));
@@ -82,9 +92,10 @@ export function AgentHitlPolicyEditor() {
     setSaving(true);
     setError(null);
     try {
-      const response = await fetch('/api/v1/hitl-policy', {
+      const authHeaders = await getAuthHeaders();
+      const response = await fetch('/api/v2/hitl/policy', {
         method: 'PATCH',
-        headers: { 'Content-Type': 'application/json' },
+        headers: { 'Content-Type': 'application/json', ...authHeaders },
         body: JSON.stringify({
           approval_rules: policy.approval_rules,
           timeout_classes: policy.timeout_classes,

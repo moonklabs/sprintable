@@ -3,6 +3,7 @@ from app.models.agent_routing_rule import AgentRoutingRule
 from app.models.agent_run import AgentRun
 from app.models.agent_session import AgentSession
 from app.models.bridge import BridgeChannelMapping, BridgeUserMapping
+from app.models.hitl import HitlPolicy, HitlRequest
 from app.models.api_key import ApiKey
 from app.models.org_subscription import OrgSubscription
 from app.models.policy_document import PolicyDocument
@@ -31,6 +32,8 @@ __all__ = [
     "AgentSession",
     "BridgeChannelMapping",
     "BridgeUserMapping",
+    "HitlPolicy",
+    "HitlRequest",
     "ApiKey",
     "OrgSubscription",
     "PolicyDocument",
