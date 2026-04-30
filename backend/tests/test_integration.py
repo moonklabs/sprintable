@@ -249,3 +249,136 @@ async def test_project_settings_get_via_conftest(test_client, mock_session, proj
     resp = await test_client.get(f"/api/v2/project-settings?project_id={project_id}")
     assert resp.status_code == 200
     assert resp.json()["standup_deadline"] == "09:00:00"
+
+
+# ── Sprint 6: S33~S39 도메인 통합 테스트 ─────────────────────────────────────
+
+@pytest.mark.anyio
+async def test_dashboard_get_via_conftest(test_client, mock_session, project_id):
+    """GET /api/v2/dashboard 200."""
+    import uuid as _uuid
+    member_id = _uuid.uuid4()
+    mock_result = MagicMock()
+    mock_result.scalar_one_or_none.return_value = project_id
+    mock_result.all.return_value = []
+    mock_session.execute = AsyncMock(return_value=mock_result)
+
+    resp = await test_client.get(f"/api/v2/dashboard?member_id={member_id}&project_id={project_id}")
+    assert resp.status_code == 200
+    assert "my_stories" in resp.json()
+
+
+@pytest.mark.anyio
+async def test_current_project_get_via_conftest(test_client, mock_session):
+    """GET /api/v2/current-project 200 (member 없으면 null)."""
+    import uuid as _uuid
+    member_id = _uuid.uuid4()
+    mock_result = MagicMock()
+    mock_result.first.return_value = None
+    mock_session.execute = AsyncMock(return_value=mock_result)
+
+    resp = await test_client.get(f"/api/v2/current-project?member_id={member_id}")
+    assert resp.status_code == 200
+    assert resp.json()["project_id"] is None
+
+
+@pytest.mark.anyio
+async def test_members_list_via_conftest_s6(test_client, mock_session, project_id):
+    """GET /api/v2/members 200."""
+    mock_result = MagicMock()
+    mock_result.scalars.return_value.all.return_value = []
+    mock_session.execute = AsyncMock(return_value=mock_result)
+
+    resp = await test_client.get(f"/api/v2/members?project_id={project_id}")
+    assert resp.status_code == 200
+    assert resp.json() == []
+
+
+@pytest.mark.anyio
+async def test_webhooks_config_list_via_conftest(test_client, mock_session):
+    """GET /api/v2/webhooks/config 200."""
+    mock_result = MagicMock()
+    mock_result.scalars.return_value.all.return_value = []
+    mock_session.execute = AsyncMock(return_value=mock_result)
+
+    resp = await test_client.get("/api/v2/webhooks/config")
+    assert resp.status_code == 200
+    assert resp.json() == []
+
+
+@pytest.mark.anyio
+async def test_agent_keys_list_via_conftest(test_client, mock_session):
+    """GET /api/v2/agents/{id}/api-keys — agent 없으면 404."""
+    import uuid as _uuid
+    agent_id = _uuid.uuid4()
+    mock_result = MagicMock()
+    mock_result.scalar_one_or_none.return_value = None
+    mock_session.execute = AsyncMock(return_value=mock_result)
+
+    resp = await test_client.get(f"/api/v2/agents/{agent_id}/api-keys")
+    assert resp.status_code == 404
+
+
+@pytest.mark.anyio
+async def test_agent_runs_list_via_conftest(test_client, mock_session, project_id):
+    """GET /api/v2/agent-runs 200."""
+    mock_result = MagicMock()
+    mock_result.all.return_value = []
+    mock_result.scalars.return_value.all.return_value = []
+    mock_session.execute = AsyncMock(return_value=mock_result)
+
+    resp = await test_client.get(f"/api/v2/agent-runs?project_id={project_id}")
+    assert resp.status_code == 200
+    assert resp.json() == []
+
+
+@pytest.mark.anyio
+async def test_notification_settings_get_via_conftest_s6(test_client, mock_session):
+    """GET /api/v2/notification-settings 200."""
+    import uuid as _uuid
+    member_id = _uuid.uuid4()
+    mock_result = MagicMock()
+    mock_result.scalars.return_value.all.return_value = []
+    mock_session.execute = AsyncMock(return_value=mock_result)
+
+    resp = await test_client.get(f"/api/v2/notification-settings?member_id={member_id}")
+    assert resp.status_code == 200
+    assert resp.json() == []
+
+
+@pytest.mark.anyio
+async def test_policy_documents_get_via_conftest(test_client, mock_session, project_id):
+    """GET /api/v2/policy-documents 200."""
+    mock_result = MagicMock()
+    mock_result.scalars.return_value.all.return_value = []
+    mock_session.execute = AsyncMock(return_value=mock_result)
+
+    resp = await test_client.get(f"/api/v2/policy-documents?project_id={project_id}")
+    assert resp.status_code == 200
+    assert resp.json() == []
+
+
+@pytest.mark.anyio
+async def test_subscription_status_via_conftest(test_client, mock_session):
+    """GET /api/v2/subscription/status 200 (기본값 반환)."""
+    mock_result = MagicMock()
+    mock_result.first.return_value = None
+    mock_session.execute = AsyncMock(return_value=mock_result)
+
+    resp = await test_client.get("/api/v2/subscription/status")
+    assert resp.status_code == 200
+    assert resp.json()["status"] == "active"
+    assert resp.json()["tier"] == "free"
+
+
+@pytest.mark.anyio
+async def test_oss_seed_already_seeded_via_conftest(test_client, mock_session, project_id, org_id):
+    """POST /api/v2/oss/seed — 데이터 있으면 already_has_data 200."""
+    count_result = MagicMock()
+    count_result.scalar_one.return_value = 3
+    mock_session.execute = AsyncMock(return_value=count_result)
+
+    resp = await test_client.post(f"/api/v2/oss/seed?project_id={project_id}&org_id={org_id}")
+    assert resp.status_code == 200
+    assert resp.json()["seeded"] is False
+    assert resp.json()["reason"] == "already_has_data"
