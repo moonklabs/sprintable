@@ -1,3 +1,4 @@
+from app.models.agent_deployment import AgentAuditLog, AgentDeployment, AgentPersona
 from app.models.agent_run import AgentRun
 from app.models.api_key import ApiKey
 from app.models.org_subscription import OrgSubscription
@@ -19,6 +20,9 @@ from app.models.standup import StandupEntry, StandupFeedback
 from app.models.team import TeamMember
 
 __all__ = [
+    "AgentAuditLog",
+    "AgentDeployment",
+    "AgentPersona",
     "AgentRun",
     "ApiKey",
     "OrgSubscription",

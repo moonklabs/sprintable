@@ -276,7 +276,7 @@ export function AgentDeploymentWizard({
     if (!deploymentId || !deploying) return;
     let cancelled = false;
     const timer = setInterval(async () => {
-      const response = await fetch(`/api/v1/agent-deployments/${deploymentId}`, { cache: 'no-store' });
+      const response = await fetch(`/api/v2/agent-deployments/${deploymentId}`, { cache: 'no-store' });
       const json = await response.json();
       if (!response.ok) {
         if (!cancelled) {
@@ -338,7 +338,7 @@ export function AgentDeploymentWizard({
     setPreflightRunning(true);
     setFailureMessage(null);
     try {
-      const response = await fetch('/api/v1/agent-deployments/preflight', {
+      const response = await fetch('/api/v2/agent-deployments/preflight', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(deploymentPayload),
@@ -370,7 +370,7 @@ export function AgentDeploymentWizard({
     setFailureMessage(null);
     setDeploymentStatus('DEPLOYING');
     try {
-      const response = await fetch('/api/v1/agent-deployments', {
+      const response = await fetch('/api/v2/agent-deployments', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(deploymentPayload),
@@ -415,7 +415,7 @@ export function AgentDeploymentWizard({
     if (!deploymentId) return;
     setVerificationSubmitting(true);
     try {
-      const response = await fetch(`/api/v1/agent-deployments/${deploymentId}/verification`, {
+      const response = await fetch(`/api/v2/agent-deployments/${deploymentId}/verification`, {
         method: 'POST',
       });
       const json = await response.json();

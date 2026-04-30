@@ -154,7 +154,7 @@ export function AgentsDashboard({ deployments: initialDeployments }: { deploymen
   const fetchDeployments = useCallback(async () => {
     setIsRefreshing(true);
     try {
-      const res = await fetch('/api/v1/agent-deployments');
+      const res = await fetch('/api/v2/agent-deployments');
       if (!res.ok) return;
       const json = await res.json() as { data: AgentDeploymentCard[] | null };
       if (json.data) {
@@ -203,7 +203,7 @@ export function AgentsDashboard({ deployments: initialDeployments }: { deploymen
     if (!pendingAction) return;
     setTransitioning(true);
     try {
-      const res = await fetch(`/api/v1/agent-deployments/${pendingAction.deploymentId}`, {
+      const res = await fetch(`/api/v2/agent-deployments/${pendingAction.deploymentId}`, {
         method: 'PATCH',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ status: pendingAction.targetStatus }),
