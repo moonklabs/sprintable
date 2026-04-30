@@ -1,4 +1,4 @@
-import { createServerClient } from '@supabase/ssr';
+import { jwtVerify } from 'jose';
 import { NextResponse, type NextRequest } from 'next/server';
 
 const PUBLIC_EXACT = [
@@ -19,31 +19,81 @@ const PUBLIC_PREFIX = [
   '/internal-dogfood',
 ];
 
+export const SP_AT_COOKIE = 'sp_at';
+export const SP_RT_COOKIE = 'sp_rt';
+
 function isOssMode(): boolean {
   return process.env['OSS_MODE'] === 'true';
+}
+
+function getJwtSecretBytes(): Uint8Array {
+  const secret = process.env['JWT_SECRET'] ?? process.env['SUPABASE_JWT_SECRET'] ?? '';
+  return new TextEncoder().encode(secret);
+}
+
+async function verifyAccessToken(token: string): Promise<{ exp?: number } | null> {
+  try {
+    const { payload } = await jwtVerify(token, getJwtSecretBytes());
+    if (payload['type'] !== 'access') return null;
+    return { exp: payload.exp };
+  } catch {
+    return null;
+  }
+}
+
+async function tryRefreshViaFastapi(request: NextRequest): Promise<{ accessToken: string; refreshToken: string } | null> {
+  const rt = request.cookies.get(SP_RT_COOKIE)?.value;
+  if (!rt) return null;
+
+  const fastapiUrl = process.env['NEXT_PUBLIC_FASTAPI_URL'] ?? 'http://localhost:8000';
+  try {
+    const res = await fetch(`${fastapiUrl}/api/v2/auth/refresh`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ refresh_token: rt }),
+    });
+    if (!res.ok) return null;
+    const json = await res.json() as { data?: { access_token: string; refresh_token: string } };
+    const tokens = json.data;
+    if (!tokens?.access_token || !tokens?.refresh_token) return null;
+    return { accessToken: tokens.access_token, refreshToken: tokens.refresh_token };
+  } catch {
+    return null;
+  }
+}
+
+function applyTokenCookies(
+  response: NextResponse,
+  accessToken: string,
+  refreshToken: string,
+): void {
+  const cookieDomain = process.env['NEXT_PUBLIC_COOKIE_DOMAIN'];
+  const base = {
+    httpOnly: true,
+    secure: true,
+    sameSite: 'lax' as const,
+    path: '/',
+    ...(cookieDomain ? { domain: cookieDomain } : {}),
+  };
+  response.cookies.set(SP_AT_COOKIE, accessToken, { ...base, maxAge: 15 * 60 });
+  response.cookies.set(SP_RT_COOKIE, refreshToken, { ...base, maxAge: 30 * 24 * 60 * 60 });
 }
 
 export async function proxy(request: NextRequest) {
   const pathname = request.nextUrl.pathname;
 
-  // OSS_MODE: bypass Supabase auth entirely (AC-1, AC-4, AC-5)
   if (isOssMode()) {
-    // / → /inbox (AC-4) — operator cockpit first screen (Phase A3)
     if (pathname === '/') {
       const url = request.nextUrl.clone();
       url.pathname = '/inbox';
       return NextResponse.redirect(url);
     }
-
-    // /login, /auth/callback → /inbox (AC-5)
     if (pathname === '/login' || pathname.startsWith('/auth/callback')) {
       const url = request.nextUrl.clone();
       url.pathname = '/inbox';
       url.search = '';
       return NextResponse.redirect(url);
     }
-
-    // all other paths pass through — no Supabase auth check
     return NextResponse.next({ request });
   }
 
@@ -64,65 +114,52 @@ export async function proxy(request: NextRequest) {
     );
   }
 
-  let supabaseResponse = NextResponse.next({ request });
+  const accessToken = request.cookies.get(SP_AT_COOKIE)?.value;
 
-  const supabase = createServerClient(
-    process.env['NEXT_PUBLIC_SUPABASE_URL']!,
-    process.env['NEXT_PUBLIC_SUPABASE_ANON_KEY']!,
-    {
-      cookies: {
-        getAll() {
-          return request.cookies.getAll();
-        },
-        setAll(cookiesToSet: Array<{ name: string; value: string; options: Record<string, unknown> }>) {
-          const cookieDomain = process.env['NEXT_PUBLIC_COOKIE_DOMAIN'];
-          for (const { name, value } of cookiesToSet) {
-            request.cookies.set(name, value);
-          }
-          supabaseResponse = NextResponse.next({ request });
-          for (const { name, value, options } of cookiesToSet) {
-            supabaseResponse.cookies.set(name, value, {
-              ...(options as Parameters<typeof supabaseResponse.cookies.set>[2]),
-              ...(cookieDomain ? { domain: cookieDomain } : {}),
-            });
-          }
-        },
-      },
-    },
-  );
+  if (!accessToken) {
+    const tokens = await tryRefreshViaFastapi(request);
+    if (!tokens) {
+      const url = request.nextUrl.clone();
+      url.pathname = '/login';
+      return NextResponse.redirect(url);
+    }
+    const response = NextResponse.next({ request });
+    applyTokenCookies(response, tokens.accessToken, tokens.refreshToken);
+    return response;
+  }
 
-  // 로컬 JWT 파싱 — 네트워크 zero (JWKS 캐시 활용)
-  // getClaims 실패(네트워크 오류, 만료 등) 시 로그인으로 리다이렉트
-  let claimsData: { claims?: Record<string, unknown> | null } | null = null;
+  let claims: { exp?: number } | null;
   try {
-    const result = await supabase.auth.getClaims();
-    claimsData = result.data;
+    claims = await verifyAccessToken(accessToken);
   } catch {
     const url = request.nextUrl.clone();
     url.pathname = '/login';
     return NextResponse.redirect(url);
   }
 
-  if (!claimsData?.claims) {
+  if (!claims) {
     const url = request.nextUrl.clone();
     url.pathname = '/login';
     return NextResponse.redirect(url);
   }
 
-  // exp 만료 임박(5분 이내)일 때만 refreshSession() 호출
-  const exp = (claimsData.claims as { exp?: number }).exp;
+  // Proactive refresh if expiring within 5 minutes
   const now = Math.floor(Date.now() / 1000);
-  if (exp !== undefined && exp - now < 300) {
-    await supabase.auth.refreshSession();
+  const response = NextResponse.next({ request });
+  if (claims.exp !== undefined && claims.exp - now < 300) {
+    const tokens = await tryRefreshViaFastapi(request);
+    if (tokens) {
+      applyTokenCookies(response, tokens.accessToken, tokens.refreshToken);
+    }
   }
 
-  if (request.nextUrl.pathname === '/login') {
+  if (pathname === '/login') {
     const url = request.nextUrl.clone();
     url.pathname = '/inbox';
     return NextResponse.redirect(url);
   }
 
-  return supabaseResponse;
+  return response;
 }
 
 export const config = {

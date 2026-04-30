@@ -1,5 +1,6 @@
 import { redirect } from 'next/navigation';
 import { isOssMode } from '@/lib/storage/factory';
+import { getServerSession } from '@/lib/supabase/server';
 import { createSupabaseServerClient } from '@/lib/supabase/server';
 import { getMyMembershipContext, getOssUserContext } from '@/lib/auth-helpers';
 import { DashboardShell } from '../dashboard/dashboard-shell';
@@ -25,9 +26,12 @@ export default async function AuthenticatedLayout({
   }
 
   try {
+    const session = await getServerSession();
+    if (!session) redirect('/login');
+
+    // Supabase client still used for DB queries during Phase C transition
     const supabase = await createSupabaseServerClient();
     const { data: { user } } = await supabase.auth.getUser();
-
     if (!user) redirect('/login');
 
     const { me, memberships } = await getMyMembershipContext(supabase, user);

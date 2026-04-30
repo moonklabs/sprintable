@@ -1,39 +1,44 @@
 'use client';
 
 import { useEffect, useState } from 'react';
-import { createSupabaseBrowserClient } from '@/lib/supabase/client';
 import { SectionCard, SectionCardBody, SectionCardHeader } from '@/components/ui/section-card';
 
 type TwoFaState = 'loading' | 'disabled' | 'enrolling' | 'enabled';
 
 export function TwoFactorSection() {
-  const supabase = createSupabaseBrowserClient();
   const [state, setState] = useState<TwoFaState>('loading');
-  const [factorId, setFactorId] = useState<string | null>(null);
-  const [qrCode, setQrCode] = useState<string | null>(null);
+  const [provUri, setProvUri] = useState<string | null>(null);
   const [secret, setSecret] = useState<string | null>(null);
   const [otpCode, setOtpCode] = useState('');
   const [message, setMessage] = useState<{ type: 'success' | 'error'; text: string } | null>(null);
   const [busy, setBusy] = useState(false);
 
   useEffect(() => {
+    // Attempt setup to detect current 2FA state
     (async () => {
-      const { data } = await supabase.auth.mfa.listFactors();
-      const enabled = (data?.totp?.length ?? 0) > 0 && data?.totp?.[0]?.status === 'verified';
-      setState(enabled ? 'enabled' : 'disabled');
+      const res = await fetch('/api/auth/2fa/setup', { method: 'POST' });
+      const json = await res.json() as { data?: { secret: string; uri: string }; error?: { code: string } };
+      if (res.status === 409 && json.error?.code === 'TOTP_ALREADY_ENABLED') {
+        setState('enabled');
+      } else if (res.ok && json.data) {
+        setProvUri(json.data.uri);
+        setSecret(json.data.secret);
+        setState('enrolling');
+      } else {
+        setState('disabled');
+      }
     })();
-  }, [supabase]);
+  }, []);
 
   const handleSetup = async () => {
     setBusy(true);
     setMessage(null);
     try {
       const res = await fetch('/api/auth/2fa/setup', { method: 'POST' });
-      const json = await res.json();
-      if (!res.ok) { setMessage({ type: 'error', text: json.error ?? 'Setup failed' }); return; }
-      setFactorId(json.data.factor_id);
-      setQrCode(json.data.qr_code);
-      setSecret(json.data.secret);
+      const json = await res.json() as { data?: { secret: string; uri: string }; error?: { code: string; message: string } };
+      if (!res.ok) { setMessage({ type: 'error', text: json.error?.message ?? 'Setup failed' }); return; }
+      setProvUri(json.data?.uri ?? null);
+      setSecret(json.data?.secret ?? null);
       setState('enrolling');
     } finally {
       setBusy(false);
@@ -41,19 +46,19 @@ export function TwoFactorSection() {
   };
 
   const handleVerify = async () => {
-    if (!factorId || otpCode.length !== 6) return;
+    if (otpCode.length !== 6) return;
     setBusy(true);
     setMessage(null);
     try {
       const res = await fetch('/api/auth/2fa/verify', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ factor_id: factorId, code: otpCode }),
+        body: JSON.stringify({ code: otpCode }),
       });
-      const json = await res.json();
-      if (!res.ok) { setMessage({ type: 'error', text: json.error ?? 'Invalid code' }); return; }
+      const json = await res.json() as { data?: { ok: boolean }; error?: { message: string } };
+      if (!res.ok) { setMessage({ type: 'error', text: json.error?.message ?? 'Invalid code' }); return; }
       setState('enabled');
-      setQrCode(null);
+      setProvUri(null);
       setSecret(null);
       setOtpCode('');
       setMessage({ type: 'success', text: '2FA enabled successfully.' });
@@ -72,8 +77,8 @@ export function TwoFactorSection() {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ code: otpCode }),
       });
-      const json = await res.json();
-      if (!res.ok) { setMessage({ type: 'error', text: json.error ?? 'Invalid code' }); return; }
+      const json = await res.json() as { error?: { message: string } };
+      if (!res.ok) { setMessage({ type: 'error', text: json.error?.message ?? 'Invalid code' }); return; }
       setState('disabled');
       setOtpCode('');
       setMessage({ type: 'success', text: '2FA disabled.' });
@@ -109,15 +114,15 @@ export function TwoFactorSection() {
           </button>
         )}
 
-        {state === 'enrolling' && qrCode && (
+        {state === 'enrolling' && provUri && (
           <div className="space-y-4">
-            <p className="text-sm text-muted-foreground">Scan this QR code with your authenticator app, then enter the 6-digit code below.</p>
-            <div className="flex justify-center" dangerouslySetInnerHTML={{ __html: qrCode }} />
+            <p className="text-sm text-muted-foreground">Scan the QR code or enter the key manually, then enter the 6-digit code below.</p>
             {secret && (
               <p className="text-center text-xs text-muted-foreground">
                 Manual key: <span className="font-mono text-foreground">{secret}</span>
               </p>
             )}
+            <p className="break-all text-center text-xs text-muted-foreground font-mono">{provUri}</p>
             <input
               type="text"
               inputMode="numeric"

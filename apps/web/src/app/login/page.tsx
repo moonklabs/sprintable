@@ -1,6 +1,43 @@
+'use client';
+
+import { useState } from 'react';
+import { useRouter } from 'next/navigation';
 import { SprintableLogo } from '@/components/brand/sprintable-logo';
+import { loginWithPassword } from '@/lib/supabase/client';
 
 export default function LoginPage() {
+  const router = useRouter();
+  const [email, setEmail] = useState('');
+  const [password, setPassword] = useState('');
+  const [totpCode, setTotpCode] = useState('');
+  const [showTotp, setShowTotp] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const [loading, setLoading] = useState(false);
+
+  const handleLogin = async () => {
+    if (!email.trim() || !password.trim()) return;
+    setLoading(true);
+    setError(null);
+    try {
+      const result = await loginWithPassword(email.trim(), password, showTotp ? totpCode : undefined);
+      if (result.error) {
+        if (result.error.code === 'TOTP_REQUIRED') {
+          setShowTotp(true);
+          setError('Enter the 6-digit code from your authenticator app.');
+          return;
+        }
+        setError(result.error.message);
+        return;
+      }
+      router.push('/inbox');
+      router.refresh();
+    } catch {
+      setError('Login failed. Please try again.');
+    } finally {
+      setLoading(false);
+    }
+  };
+
   return (
     <div className="flex min-h-screen items-center justify-center bg-gray-50">
       <div className="w-full max-w-sm space-y-6 rounded-2xl bg-white p-4 shadow-lg sm:p-8">
@@ -15,6 +52,57 @@ export default function LoginPage() {
         </div>
 
         <div className="space-y-3">
+          <input
+            type="email"
+            placeholder="Email"
+            autoComplete="email"
+            className="w-full rounded-lg border border-gray-300 px-4 py-3 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
+            value={email}
+            onChange={(e) => setEmail(e.target.value)}
+            onKeyDown={(e) => e.key === 'Enter' && handleLogin()}
+            disabled={loading}
+          />
+          <input
+            type="password"
+            placeholder="Password"
+            autoComplete="current-password"
+            className="w-full rounded-lg border border-gray-300 px-4 py-3 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
+            value={password}
+            onChange={(e) => setPassword(e.target.value)}
+            onKeyDown={(e) => e.key === 'Enter' && handleLogin()}
+            disabled={loading}
+          />
+          {showTotp && (
+            <input
+              type="text"
+              inputMode="numeric"
+              maxLength={6}
+              placeholder="6-digit authenticator code"
+              className="w-full rounded-lg border border-gray-300 px-4 py-3 text-center text-lg font-mono tracking-widest focus:outline-none focus:ring-2 focus:ring-blue-500"
+              value={totpCode}
+              onChange={(e) => setTotpCode(e.target.value.replace(/\D/g, '').slice(0, 6))}
+              onKeyDown={(e) => e.key === 'Enter' && handleLogin()}
+              autoFocus
+              disabled={loading}
+            />
+          )}
+          {error && <p className="text-sm text-red-600">{error}</p>}
+          <button
+            onClick={handleLogin}
+            disabled={loading || !email.trim() || !password.trim()}
+            className="flex w-full min-h-[44px] items-center justify-center rounded-lg bg-blue-600 px-4 py-3 text-sm font-medium text-white transition hover:bg-blue-700 disabled:opacity-50"
+          >
+            {loading ? 'Signing in...' : 'Sign in'}
+          </button>
+        </div>
+
+        <div className="space-y-3">
+          <div className="relative flex items-center">
+            <div className="flex-grow border-t border-gray-200" />
+            <span className="mx-3 flex-shrink text-xs text-gray-400">or continue with</span>
+            <div className="flex-grow border-t border-gray-200" />
+          </div>
+
           <a href="/auth/login?provider=google" className="flex w-full min-h-[44px] items-center justify-center gap-3 rounded-lg border border-gray-300 bg-white px-4 py-3 text-sm font-medium text-gray-700 transition hover:bg-gray-50">
             <svg className="h-5 w-5" viewBox="0 0 24 24">
               <path d="M22.56 12.25c0-.78-.07-1.53-.2-2.25H12v4.26h5.92a5.06 5.06 0 01-2.2 3.32v2.77h3.57c2.08-1.92 3.28-4.74 3.28-8.1z" fill="#4285F4" />
