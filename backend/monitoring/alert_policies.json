@@ -1,0 +1,71 @@
+[
+  {
+    "displayName": "Sprintable — 5xx Error Rate > 1%",
+    "combiner": "OR",
+    "conditions": [{
+      "displayName": "Cloud Run 5xx > 1% for 5 min",
+      "conditionThreshold": {
+        "filter": "metric.type=\"run.googleapis.com/request_count\" resource.type=\"cloud_run_revision\" resource.labels.service_name=starts_with(\"sprintable-\") metric.labels.response_code_class=\"5xx\"",
+        "aggregations": [{
+          "alignmentPeriod": "300s",
+          "perSeriesAligner": "ALIGN_RATE",
+          "crossSeriesReducer": "REDUCE_SUM",
+          "groupByFields": ["resource.labels.service_name"]
+        }],
+        "comparison": "COMPARISON_GT",
+        "thresholdValue": 0.01,
+        "duration": "300s",
+        "trigger": {"count": 1}
+      }
+    }],
+    "alertStrategy": {"autoClose": "1800s"},
+    "notificationChannels": [],
+    "severity": "ERROR"
+  },
+  {
+    "displayName": "Sprintable — Cloud SQL CPU > 80%",
+    "combiner": "OR",
+    "conditions": [{
+      "displayName": "Cloud SQL CPU utilization > 80%",
+      "conditionThreshold": {
+        "filter": "metric.type=\"cloudsql.googleapis.com/database/cpu/utilization\" resource.type=\"cloudsql_database\" resource.labels.database_id=starts_with(\"sprintable-494803:sprintable-\")",
+        "aggregations": [{
+          "alignmentPeriod": "60s",
+          "perSeriesAligner": "ALIGN_MEAN",
+          "crossSeriesReducer": "REDUCE_MEAN",
+          "groupByFields": ["resource.labels.database_id"]
+        }],
+        "comparison": "COMPARISON_GT",
+        "thresholdValue": 0.80,
+        "duration": "300s",
+        "trigger": {"count": 1}
+      }
+    }],
+    "alertStrategy": {"autoClose": "1800s"},
+    "notificationChannels": [],
+    "severity": "WARNING"
+  },
+  {
+    "displayName": "Sprintable — Cloud Run Memory > 90%",
+    "combiner": "OR",
+    "conditions": [{
+      "displayName": "Cloud Run memory utilization > 90%",
+      "conditionThreshold": {
+        "filter": "metric.type=\"run.googleapis.com/container/memory/utilizations\" resource.type=\"cloud_run_revision\" resource.labels.service_name=starts_with(\"sprintable-\")",
+        "aggregations": [{
+          "alignmentPeriod": "60s",
+          "perSeriesAligner": "ALIGN_PERCENTILE_99",
+          "crossSeriesReducer": "REDUCE_MEAN",
+          "groupByFields": ["resource.labels.service_name"]
+        }],
+        "comparison": "COMPARISON_GT",
+        "thresholdValue": 0.90,
+        "duration": "300s",
+        "trigger": {"count": 1}
+      }
+    }],
+    "alertStrategy": {"autoClose": "1800s"},
+    "notificationChannels": [],
+    "severity": "WARNING"
+  }
+]

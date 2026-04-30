@@ -1,7 +1,12 @@
+import os
+
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
 from app.core.config import settings
+from app.core.logging_config import configure_logging
+
+configure_logging(json_logs=os.getenv("APP_ENV", "development") != "development")
 from app.routers import account, agent_deployments, agent_personas, agent_routing_rules, agent_runs, agent_sessions, analytics, api_keys, audit_logs, auth, bridge, current_project, dashboard, docs, epics, events, health, hitl, invitations, me, meetings, members, memos, mockups, notifications, org_members, organizations, oss, policy_documents, presence, project_settings, projects, retros, rewards, sprints, standups, stories, subscription, tasks, team_members, webhooks, workflow_versions
 
 app = FastAPI(
