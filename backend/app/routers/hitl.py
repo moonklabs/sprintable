@@ -84,12 +84,13 @@ async def resolve_hitl_request(
     auth: AuthContext = Depends(get_current_user),
     repo: HitlRepository = Depends(_repo),
 ) -> JSONResponse:
-    org_id, _ = _get_org_project(auth)
+    org_id, project_id = _get_org_project(auth)
     if not org_id:
         return _err("FORBIDDEN", "org_id required", 403)
     row = await repo.resolve_request(
         request_id=request_id,
         org_id=org_id,
+        project_id=project_id,
         actor_id=auth.user_id,
         status=body.status,
         response_text=body.response_text,

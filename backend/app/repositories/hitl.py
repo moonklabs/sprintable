@@ -164,6 +164,7 @@ class HitlRepository:
         stmt = select(HitlRequest).where(
             HitlRequest.org_id == org_id,
             HitlRequest.project_id == project_id,
+            HitlRequest.deleted_at.is_(None),
         )
         if status:
             stmt = stmt.where(HitlRequest.status == status)
@@ -205,16 +206,19 @@ class HitlRepository:
         self,
         request_id: uuid.UUID,
         org_id: uuid.UUID,
+        project_id: uuid.UUID | None,
         actor_id: uuid.UUID,
         status: str,
         response_text: str | None,
     ) -> HitlRequest | None:
-        result = await self.session.execute(
-            select(HitlRequest).where(
-                HitlRequest.id == request_id,
-                HitlRequest.org_id == org_id,
-            )
+        stmt = select(HitlRequest).where(
+            HitlRequest.id == request_id,
+            HitlRequest.org_id == org_id,
+            HitlRequest.deleted_at.is_(None),
         )
+        if project_id is not None:
+            stmt = stmt.where(HitlRequest.project_id == project_id)
+        result = await self.session.execute(stmt)
         row = result.scalar_one_or_none()
         if row is None:
             return None
