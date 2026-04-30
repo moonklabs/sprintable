@@ -131,7 +131,7 @@ def _build_routing_template(agents: list[dict], existing_rule_count: int) -> dic
 
 async def _replace_routing_rules(session: AsyncSession, org_id: uuid.UUID, project_id: uuid.UUID, actor_id: uuid.UUID, rules: list[dict]) -> None:
     await session.execute(
-        text("SELECT replace_agent_routing_rules(:org_id, :project_id, :actor_id, :rules::jsonb)"),
+        text("SELECT replace_agent_routing_rules(:org_id, :project_id, :actor_id, CAST(:rules AS jsonb))"),
         {
             "org_id": str(org_id),
             "project_id": str(project_id),

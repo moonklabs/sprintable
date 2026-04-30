@@ -31,6 +31,7 @@ import { PageHeader } from '@/components/ui/page-header';
 import { SectionCard, SectionCardBody, SectionCardHeader } from '@/components/ui/section-card';
 import { ToastContainer, useToast } from '@/components/ui/toast';
 import { getRollbackSnapshotFromRules, type RoutingRuleSummary, type WorkflowVersionSummary } from '@/services/agent-routing-rule';
+import { createSupabaseBrowserClient } from '@/lib/supabase/client';
 import {
   WORKFLOW_MEMO_TYPE_OPTIONS,
   WORKFLOW_ORIGINAL_ASSIGNEE_ID,
@@ -553,15 +554,22 @@ function AgentWorkflowEditorInner({ initialMembers, initialRules, projectName }:
 
   // ─── API actions ───────────────────────────────────────────────────────────
 
+  const getAuthHeaders = async (): Promise<Record<string, string>> => {
+    const supabase = createSupabaseBrowserClient();
+    const { data: { session } } = await supabase.auth.getSession();
+    return session?.access_token ? { Authorization: `Bearer ${session.access_token}` } : {};
+  };
+
   const saveWorkflow = useCallback(async () => {
     setSaving(true);
     try {
       if (!draftWorkflow.rules) throw new Error(draftWorkflow.error ?? t('workflowSaveErrorBody'));
 
       const desired = draftWorkflow.rules;
-      const response = await fetch('/api/v1/agent-routing-rules', {
+      const authHeaders = await getAuthHeaders();
+      const response = await fetch('/api/v2/agent-routing-rules', {
         method: 'PUT',
-        headers: { 'Content-Type': 'application/json' },
+        headers: { 'Content-Type': 'application/json', ...authHeaders },
         body: JSON.stringify({
           items: desired.map((rule) => ({
             id: rule.id,
@@ -604,9 +612,10 @@ function AgentWorkflowEditorInner({ initialMembers, initialRules, projectName }:
     if (!rollbackSnapshot?.items.length) return;
     setSaving(true);
     try {
-      const response = await fetch('/api/v1/agent-routing-rules', {
+      const authHeaders = await getAuthHeaders();
+      const response = await fetch('/api/v2/agent-routing-rules', {
         method: 'PUT',
-        headers: { 'Content-Type': 'application/json' },
+        headers: { 'Content-Type': 'application/json', ...authHeaders },
         body: JSON.stringify({ items: rollbackSnapshot.items }),
       });
       const json = await response.json().catch(() => null) as ApiResponse<RoutingRuleSummary[]> | null;
@@ -651,9 +660,10 @@ function AgentWorkflowEditorInner({ initialMembers, initialRules, projectName }:
     if (savedRules.length === 0) return;
     setSaving(true);
     try {
-      const response = await fetch('/api/v1/agent-routing-rules', {
+      const authHeaders = await getAuthHeaders();
+      const response = await fetch('/api/v2/agent-routing-rules', {
         method: 'PATCH',
-        headers: { 'Content-Type': 'application/json' },
+        headers: { 'Content-Type': 'application/json', ...authHeaders },
         body: JSON.stringify({ disable_all: true }),
       });
       const json = await response.json().catch(() => null) as ApiResponse<RoutingRuleSummary[]> | null;
