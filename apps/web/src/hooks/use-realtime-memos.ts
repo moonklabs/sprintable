@@ -1,8 +1,6 @@
 'use client';
 
 import { useEffect, useRef, useState } from 'react';
-import { createSupabaseBrowserClient } from '@/lib/supabase/client';
-import type { RealtimeChannel } from '@supabase/supabase-js';
 
 interface RealtimeMemo {
   id: string;
@@ -29,11 +27,11 @@ interface UseRealtimeMemosOptions {
   onMemoUpdated?: (memo: RealtimeMemo) => void;
 }
 
-const RECONNECT_DELAYS_MS = [5_000, 30_000, 60_000, 300_000]; // 5s → 30s → 60s → 5min
+const RECONNECT_DELAYS_MS = [5_000, 30_000, 60_000, 300_000];
 
 export function useRealtimeMemos({ currentTeamMemberId, onNewMemo, onNewReply, onMemoUpdated }: UseRealtimeMemosOptions) {
-  const channelRef = useRef<RealtimeChannel | null>(null);
   const [connected, setConnected] = useState(false);
+  const sourceRef = useRef<EventSource | null>(null);
   const reconnectTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const reconnectAttemptsRef = useRef(0);
   const onNewMemoRef = useRef(onNewMemo);
@@ -48,61 +46,67 @@ export function useRealtimeMemos({ currentTeamMemberId, onNewMemo, onNewReply, o
 
   useEffect(() => {
     if (process.env['NEXT_PUBLIC_OSS_MODE'] === 'true') return;
-let supabase: ReturnType<typeof createSupabaseBrowserClient>;
-try {
-supabase = createSupabaseBrowserClient();
-} catch (err) {
-console.error('[Realtime] Failed to create Supabase client:', err);
-return;
-}
+    if (typeof EventSource === 'undefined') return;
 
-    async function subscribe() {
-      if (channelRef.current) {
-        await supabase.removeChannel(channelRef.current);
-        channelRef.current = null;
+    function connect() {
+      if (sourceRef.current) {
+        sourceRef.current.close();
+        sourceRef.current = null;
       }
 
-      const channel = supabase
-        .channel('memos-realtime')
-        .on('postgres_changes', { event: 'INSERT', schema: 'public', table: 'memos' }, (payload) => {
-          const memo = payload.new as RealtimeMemo;
+      const url = new URL('/api/v2/events/memos', window.location.origin);
+      if (currentTeamMemberIdRef.current) url.searchParams.set('member_id', currentTeamMemberIdRef.current);
+
+      const source = new EventSource(url.toString());
+      sourceRef.current = source;
+
+      source.onopen = () => {
+        setConnected(true);
+        reconnectAttemptsRef.current = 0;
+      };
+
+      source.onerror = () => {
+        setConnected(false);
+        source.close();
+        sourceRef.current = null;
+        if (!reconnectTimerRef.current) {
+          const attempts = reconnectAttemptsRef.current;
+          const delay = RECONNECT_DELAYS_MS[Math.min(attempts, RECONNECT_DELAYS_MS.length - 1)];
+          reconnectAttemptsRef.current += 1;
+          reconnectTimerRef.current = setTimeout(() => {
+            reconnectTimerRef.current = null;
+            connect();
+          }, delay);
+        }
+      };
+
+      source.addEventListener('memo_created', (e: MessageEvent) => {
+        try {
+          const memo = JSON.parse(e.data) as RealtimeMemo;
           const isAssignedToMe = Boolean(currentTeamMemberIdRef.current && memo.assigned_to === currentTeamMemberIdRef.current);
           onNewMemoRef.current?.(memo, isAssignedToMe);
-        })
-        .on('postgres_changes', { event: 'UPDATE', schema: 'public', table: 'memos' }, (payload) => {
-          onMemoUpdatedRef.current?.(payload.new as RealtimeMemo);
-        })
-        .on('postgres_changes', { event: 'INSERT', schema: 'public', table: 'memo_replies' }, (payload) => {
-          onNewReplyRef.current?.(payload.new as RealtimeReply);
-        })
-        .subscribe((status) => {
-          if (status === 'SUBSCRIBED') {
-            setConnected(true);
-            reconnectAttemptsRef.current = 0;
-          } else if (status === 'CLOSED' || status === 'CHANNEL_ERROR') {
-            setConnected(false);
-            if (!reconnectTimerRef.current) {
-              const attempts = reconnectAttemptsRef.current;
-              const delay = RECONNECT_DELAYS_MS[Math.min(attempts, RECONNECT_DELAYS_MS.length - 1)];
-              reconnectAttemptsRef.current += 1;
-              reconnectTimerRef.current = setTimeout(() => {
-                reconnectTimerRef.current = null;
-                subscribe().catch((err) => console.error('[Realtime] reconnect error:', err));
-              }, delay);
-            }
-          }
-        });
+        } catch { /* ignore parse errors */ }
+      });
 
-      channelRef.current = channel;
+      source.addEventListener('memo_updated', (e: MessageEvent) => {
+        try {
+          onMemoUpdatedRef.current?.(JSON.parse(e.data) as RealtimeMemo);
+        } catch { /* ignore parse errors */ }
+      });
+
+      source.addEventListener('reply_created', (e: MessageEvent) => {
+        try {
+          onNewReplyRef.current?.(JSON.parse(e.data) as RealtimeReply);
+        } catch { /* ignore parse errors */ }
+      });
     }
 
-    subscribe().catch((err) => {
-      console.error('[Realtime] subscribe error:', err);
-    });
+    connect();
 
     return () => {
       if (reconnectTimerRef.current) clearTimeout(reconnectTimerRef.current);
-      if (channelRef.current) supabase.removeChannel(channelRef.current);
+      if (sourceRef.current) sourceRef.current.close();
+      sourceRef.current = null;
     };
   }, []);
 

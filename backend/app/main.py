@@ -2,7 +2,7 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
 from app.core.config import settings
-from app.routers import account, agent_deployments, agent_personas, agent_routing_rules, agent_runs, agent_sessions, analytics, api_keys, audit_logs, auth, bridge, current_project, dashboard, docs, epics, health, hitl, invitations, me, meetings, members, memos, mockups, notifications, org_members, organizations, oss, policy_documents, project_settings, projects, retros, rewards, sprints, standups, stories, subscription, tasks, team_members, webhooks, workflow_versions
+from app.routers import account, agent_deployments, agent_personas, agent_routing_rules, agent_runs, agent_sessions, analytics, api_keys, audit_logs, auth, bridge, current_project, dashboard, docs, epics, events, health, hitl, invitations, me, meetings, members, memos, mockups, notifications, org_members, organizations, oss, policy_documents, presence, project_settings, projects, retros, rewards, sprints, standups, stories, subscription, tasks, team_members, webhooks, workflow_versions
 
 app = FastAPI(
     title="Sprintable API v2",
@@ -22,6 +22,8 @@ app.add_middleware(
 
 app.include_router(auth.router)
 app.include_router(health.router)
+app.include_router(events.router)
+app.include_router(presence.router)
 app.include_router(sprints.router)
 app.include_router(epics.router)
 app.include_router(tasks.router)
