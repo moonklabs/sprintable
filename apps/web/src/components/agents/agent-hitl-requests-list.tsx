@@ -4,6 +4,7 @@ import Link from 'next/link';
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { useTranslations } from 'next-intl';
 import { ArrowLeft, Bot, Clock3, RefreshCw, TriangleAlert, User } from 'lucide-react';
+import { createSupabaseBrowserClient } from '@/lib/supabase/client';
 import { Badge } from '@/components/ui/badge';
 import { Button, buttonVariants } from '@/components/ui/button';
 import { EmptyState } from '@/components/ui/empty-state';
@@ -62,7 +63,12 @@ export function AgentHitlRequestsList() {
     else setLoading(true);
 
     try {
-      const res = await fetch('/api/v1/hitl-requests?status=pending');
+      const supabase = createSupabaseBrowserClient();
+      const { data: { session } } = await supabase.auth.getSession();
+      const headers: Record<string, string> = {};
+      if (session?.access_token) headers['Authorization'] = `Bearer ${session.access_token}`;
+
+      const res = await fetch('/api/v2/hitl/requests?status=pending', { headers });
       if (!res.ok) return;
       const json = await res.json() as { data?: HitlRequestItem[] };
       setRequests(json.data ?? []);
