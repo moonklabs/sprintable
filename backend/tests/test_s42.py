@@ -179,6 +179,34 @@ async def test_delete_builtin_persona_403():
 
 
 @pytest.mark.anyio
+async def test_delete_in_use_persona_403():
+    client, session, app = await _client()
+    try:
+        with patch("app.repositories.agent_persona.AgentPersonaRepository.delete", new_callable=AsyncMock) as mock_del:
+            mock_del.side_effect = ValueError("Cannot delete a persona that is currently in use")
+            async with client as c:
+                resp = await c.delete(f"/api/v2/agent-personas/{PERSONA_ID}")
+            assert resp.status_code == 403
+            assert "in use" in resp.json()["error"]["message"]
+    finally:
+        app.dependency_overrides.clear()
+
+
+@pytest.mark.anyio
+async def test_update_builtin_persona_403():
+    client, session, app = await _client()
+    try:
+        with patch("app.repositories.agent_persona.AgentPersonaRepository.update", new_callable=AsyncMock) as mock_update:
+            mock_update.side_effect = ValueError("Built-in personas cannot be modified")
+            async with client as c:
+                resp = await c.patch(f"/api/v2/agent-personas/{PERSONA_ID}", json={"name": "New Name"})
+            assert resp.status_code == 403
+            assert "Built-in" in resp.json()["error"]["message"]
+    finally:
+        app.dependency_overrides.clear()
+
+
+@pytest.mark.anyio
 async def test_seed_builtin_200():
     client, session, app = await _client()
     try:
