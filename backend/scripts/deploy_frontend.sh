@@ -34,6 +34,7 @@ case "${ENV}" in
         MEMORY="512Mi"
         CPU="1"
         FASTAPI_SERVICE="sprintable-backend-dev"
+        RUNTIME_SA="cloudrun-runtime-dev@${GCP_PROJECT}.iam.gserviceaccount.com"
         ;;
     prod)
         SERVICE_NAME="sprintable-frontend-prod"
@@ -42,6 +43,7 @@ case "${ENV}" in
         MEMORY="1Gi"
         CPU="2"
         FASTAPI_SERVICE="sprintable-backend-prod"
+        RUNTIME_SA="cloudrun-runtime-prod@${GCP_PROJECT}.iam.gserviceaccount.com"
         ;;
     *)
         echo "Usage: $0 [dev|prod]"; exit 1 ;;
@@ -67,6 +69,7 @@ gcloud run deploy "${SERVICE_NAME}" \
     --project="${GCP_PROJECT}" \
     --platform=managed \
     --allow-unauthenticated \
+    --service-account="${RUNTIME_SA}" \
     --port=3000 \
     --memory="${MEMORY}" \
     --cpu="${CPU}" \
