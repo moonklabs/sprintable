@@ -36,7 +36,7 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 MONITORING_DIR="${SCRIPT_DIR}/../monitoring"
 CMD="${1:-all}"
 
-log() { echo "[$(date '+%Y-%m-%d %H:%M:%S')] $*"; }
+log() { echo "[$(date '+%Y-%m-%d %H:%M:%S')] $*" >&2; }
 
 # ─── API 활성화 ───────────────────────────────────────────────────────────────
 enable_apis() {
