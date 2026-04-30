@@ -19,6 +19,16 @@ export function isOssMode(): boolean {
   return process.env['OSS_MODE'] === 'true';
 }
 
+async function getSpAt(): Promise<string> {
+  try {
+    const { cookies } = await import('next/headers');
+    const store = await cookies();
+    return store.get('sp_at')?.value ?? '';
+  } catch {
+    return '';
+  }
+}
+
 export async function createEpicRepository(supabase?: unknown): Promise<IEpicRepository> {
   if (isOssMode()) {
     const { SqliteEpicRepository, getDb } = await import('@sprintable/storage-sqlite');
@@ -26,7 +36,7 @@ export async function createEpicRepository(supabase?: unknown): Promise<IEpicRep
   }
   const { SupabaseEpicRepository } = await import('@sprintable/storage-supabase');
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  return new SupabaseEpicRepository(supabase as any);
+  return new SupabaseEpicRepository(supabase as any, await getSpAt());
 }
 
 export async function createStoryRepository(supabase?: unknown): Promise<IStoryRepository> {
@@ -36,7 +46,7 @@ export async function createStoryRepository(supabase?: unknown): Promise<IStoryR
   }
   const { SupabaseStoryRepository } = await import('@sprintable/storage-supabase');
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  return new SupabaseStoryRepository(supabase as any);
+  return new SupabaseStoryRepository(supabase as any, await getSpAt());
 }
 
 export async function createTaskRepository(supabase?: unknown): Promise<ITaskRepository> {
@@ -46,7 +56,7 @@ export async function createTaskRepository(supabase?: unknown): Promise<ITaskRep
   }
   const { SupabaseTaskRepository } = await import('@sprintable/storage-supabase');
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  return new SupabaseTaskRepository(supabase as any);
+  return new SupabaseTaskRepository(supabase as any, await getSpAt());
 }
 
 export async function createMemoRepository(supabase?: unknown): Promise<IMemoRepository> {
@@ -56,7 +66,7 @@ export async function createMemoRepository(supabase?: unknown): Promise<IMemoRep
   }
   const { SupabaseMemoRepository } = await import('@sprintable/storage-supabase');
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  return new SupabaseMemoRepository(supabase as any);
+  return new SupabaseMemoRepository(supabase as any, await getSpAt());
 }
 
 export async function createDocRepository(supabase?: unknown): Promise<IDocRepository> {
@@ -66,7 +76,7 @@ export async function createDocRepository(supabase?: unknown): Promise<IDocRepos
   }
   const { SupabaseDocRepository } = await import('@sprintable/storage-supabase');
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  return new SupabaseDocRepository(supabase as any);
+  return new SupabaseDocRepository(supabase as any, await getSpAt());
 }
 
 export async function createProjectRepository(supabase?: unknown): Promise<IProjectRepository> {
@@ -76,7 +86,7 @@ export async function createProjectRepository(supabase?: unknown): Promise<IProj
   }
   const { SupabaseProjectRepository } = await import('@sprintable/storage-supabase');
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  return new SupabaseProjectRepository(supabase as any);
+  return new SupabaseProjectRepository(supabase as any, await getSpAt());
 }
 
 export async function createSprintRepository(supabase?: unknown): Promise<ISprintRepository> {
@@ -86,7 +96,7 @@ export async function createSprintRepository(supabase?: unknown): Promise<ISprin
   }
   const { SupabaseSprintRepository } = await import('@sprintable/storage-supabase');
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  return new SupabaseSprintRepository(supabase as any);
+  return new SupabaseSprintRepository(supabase as any, await getSpAt());
 }
 
 export async function createNotificationRepository(supabase?: unknown): Promise<INotificationRepository> {
@@ -96,7 +106,7 @@ export async function createNotificationRepository(supabase?: unknown): Promise<
   }
   const { SupabaseNotificationRepository } = await import('@sprintable/storage-supabase');
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  return new SupabaseNotificationRepository(supabase as any);
+  return new SupabaseNotificationRepository(supabase as any, await getSpAt());
 }
 
 export async function createTeamMemberRepository(supabase?: unknown): Promise<ITeamMemberRepository> {
@@ -106,7 +116,7 @@ export async function createTeamMemberRepository(supabase?: unknown): Promise<IT
   }
   const { SupabaseTeamMemberRepository } = await import('@sprintable/storage-supabase');
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  return new SupabaseTeamMemberRepository(supabase as any);
+  return new SupabaseTeamMemberRepository(supabase as any, await getSpAt());
 }
 
 export async function createInboxItemRepository(supabase?: unknown): Promise<IInboxItemRepository> {
@@ -116,7 +126,7 @@ export async function createInboxItemRepository(supabase?: unknown): Promise<IIn
   }
   const { SupabaseInboxItemRepository } = await import('@sprintable/storage-supabase');
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  return new SupabaseInboxItemRepository(supabase as any);
+  return new SupabaseInboxItemRepository(supabase as any, await getSpAt());
 }
 
 // ============================================================================
