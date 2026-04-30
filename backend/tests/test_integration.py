@@ -382,3 +382,87 @@ async def test_oss_seed_already_seeded_via_conftest(test_client, mock_session, p
     assert resp.status_code == 200
     assert resp.json()["seeded"] is False
     assert resp.json()["reason"] == "already_has_data"
+
+
+# ── Sprint 7: S41~S47 Phase B FastAPI 통합 ────────────────────────────────────
+
+async def _make_full_client_s7(mock_session):
+    """org_id + project_id 포함 클라이언트 (S41+ 라우터용)."""
+    from httpx import ASGITransport, AsyncClient
+    from app.main import app
+    from app.dependencies.auth import get_current_user
+    from app.dependencies.database import get_db
+    ctx = MagicMock()
+    ctx.user_id = uuid.uuid4()
+    ctx.claims = {"app_metadata": {"org_id": str(uuid.uuid4()), "project_id": str(uuid.uuid4())}}
+
+    async def _db():
+        yield mock_session
+
+    async def _auth():
+        return ctx
+
+    app.dependency_overrides[get_db] = _db
+    app.dependency_overrides[get_current_user] = _auth
+    return AsyncClient(transport=ASGITransport(app=app), base_url="http://test"), app
+
+
+@pytest.mark.anyio
+async def test_agent_deployments_list_s7(mock_session):
+    """GET /api/v2/agent-deployments 200 — envelope 형식."""
+    from unittest.mock import patch
+    client, app = await _make_full_client_s7(mock_session)
+    try:
+        with patch(
+            "app.services.deployment_lifecycle.DeploymentLifecycleService.build_cards",
+            new_callable=AsyncMock,
+            return_value=[],
+        ):
+            async with client as c:
+                resp = await c.get("/api/v2/agent-deployments")
+        assert resp.status_code == 200
+        assert resp.json()["error"] is None
+        assert isinstance(resp.json()["data"], list)
+    finally:
+        app.dependency_overrides.clear()
+
+
+@pytest.mark.anyio
+async def test_agent_personas_list_s7(mock_session):
+    """GET /api/v2/agent-personas 200 — S42 라우터 등록 확인."""
+    client, app = await _make_full_client_s7(mock_session)
+    try:
+        mock_result = MagicMock()
+        mock_result.scalars.return_value.all.return_value = []
+        mock_session.execute = AsyncMock(return_value=mock_result)
+        agent_id = uuid.uuid4()
+        async with client as c:
+            resp = await c.get(f"/api/v2/agent-personas?agent_id={agent_id}")
+        assert resp.status_code == 200
+        assert resp.json()["error"] is None
+    finally:
+        app.dependency_overrides.clear()
+
+
+@pytest.mark.anyio
+async def test_agent_routing_rules_list_s7(mock_session):
+    """GET /api/v2/agent-routing-rules 200 — S43 라우터 등록 확인."""
+    client, app = await _make_full_client_s7(mock_session)
+    try:
+        mock_result = MagicMock()
+        mock_result.scalars.return_value.all.return_value = []
+        mock_session.execute = AsyncMock(return_value=mock_result)
+        async with client as c:
+            resp = await c.get("/api/v2/agent-routing-rules")
+        assert resp.status_code == 200
+        assert resp.json()["error"] is None
+    finally:
+        app.dependency_overrides.clear()
+
+
+@pytest.mark.anyio
+async def test_bridge_teams_conversation_update_s7(test_client, mock_session):
+    """POST /api/v2/bridge/teams/events conversationUpdate — S47 등록 확인."""
+    resp = await test_client.post("/api/v2/bridge/teams/events", json={"type": "conversationUpdate"})
+    assert resp.status_code == 200
+    assert resp.json()["ok"] is True
