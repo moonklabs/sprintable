@@ -1,6 +1,10 @@
-from dataclasses import dataclass
+from __future__ import annotations
 
-from fastapi import Depends, HTTPException, status
+import uuid
+from dataclasses import dataclass, field
+from typing import Literal
+
+from fastapi import Depends, Header, HTTPException, status
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 
 from app.core.security import JWTError, decode_jwt
@@ -13,15 +17,12 @@ class AuthContext:
     user_id: str
     email: str | None
     claims: dict
+    org_id: str | None = field(default=None)
 
 
 def get_current_user(
     credentials: HTTPAuthorizationCredentials | None = Depends(bearer_scheme),
 ) -> AuthContext:
-    """
-    JWT 인증 스켈레톤 — 토큰 파싱만 수행.
-    서명 검증은 Phase B S1에서 완성.
-    """
     if credentials is None:
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Missing Authorization header")
 
@@ -35,8 +36,85 @@ def get_current_user(
     if not user_id:
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Token missing sub claim")
 
+    org_id: str | None = payload.get("app_metadata", {}).get("org_id")
+
     return AuthContext(
         user_id=user_id,
         email=payload.get("email"),
         claims=payload,
+        org_id=org_id,
     )
+
+
+# ─── Scope dependencies ───────────────────────────────────────────────────────
+
+def get_org_scope(
+    auth: AuthContext = Depends(get_current_user),
+    x_org_id: str | None = Header(default=None, alias="X-Org-Id"),
+) -> uuid.UUID:
+    """org_id를 JWT app_metadata 또는 X-Org-Id 헤더에서 추출. 없으면 400."""
+    raw = auth.claims.get("app_metadata", {}).get("org_id") or x_org_id
+    if not raw:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="org_id required (JWT app_metadata.org_id or X-Org-Id header)",
+        )
+    try:
+        return uuid.UUID(str(raw))
+    except ValueError:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Invalid org_id format")
+
+
+RoleType = Literal["admin", "member", "viewer"]
+
+
+def require_role(*allowed_roles: RoleType):
+    """JWT app_metadata.role이 허용 역할 중 하나인지 검증하는 dependency factory."""
+    def _check(auth: AuthContext = Depends(get_current_user)) -> AuthContext:
+        role = auth.claims.get("app_metadata", {}).get("role", "member")
+        if role not in allowed_roles:
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail=f"Role '{role}' not allowed. Required: {list(allowed_roles)}",
+            )
+        return auth
+    return _check
+
+
+def require_admin(auth: AuthContext = Depends(get_current_user)) -> AuthContext:
+    """admin role 전용 엔드포인트 가드."""
+    role = auth.claims.get("app_metadata", {}).get("role", "member")
+    if role != "admin":
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Admin role required",
+        )
+    return auth
+
+
+def require_project_access(
+    project_id: uuid.UUID,
+    auth: AuthContext = Depends(get_current_user),
+) -> uuid.UUID:
+    """JWT app_metadata.project_ids에 project_id가 포함되어 있는지 검증.
+    project_ids 클레임이 없으면(레거시 토큰) 통과 — Phase C 전환 기간 호환."""
+    project_ids = auth.claims.get("app_metadata", {}).get("project_ids")
+    if project_ids is not None:
+        if str(project_id) not in [str(pid) for pid in project_ids]:
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail=f"Access to project {project_id} denied",
+            )
+    return project_id
+
+
+def get_scope_context(
+    auth: AuthContext = Depends(get_current_user),
+    x_org_id: str | None = Header(default=None, alias="X-Org-Id"),
+    x_project_id: str | None = Header(default=None, alias="X-Project-Id"),
+) -> dict:
+    """org_id + project_id 컨텍스트를 한번에 추출."""
+    org_id = get_org_scope(auth, x_org_id)
+    project_id_raw = auth.claims.get("app_metadata", {}).get("project_id") or x_project_id
+    project_id = uuid.UUID(str(project_id_raw)) if project_id_raw else None
+    return {"org_id": org_id, "project_id": project_id, "user_id": auth.user_id}
