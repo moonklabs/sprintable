@@ -18,6 +18,7 @@ import {
 } from '@/components/ui/dialog';
 import { getDeploymentHealthState, getDeploymentRecoveryCueKeys, hasActiveFailureSignal } from '@/services/agent-deployment-console';
 import { getTriggerMemoHref } from '@/services/agent-run-history';
+import { createSupabaseBrowserClient } from '@/lib/supabase/client';
 
 export interface AgentDeploymentCard {
   id: string;
@@ -150,11 +151,18 @@ export function AgentsDashboard({ deployments: initialDeployments }: { deploymen
     }
   }, [addToast]);
 
+  const getAuthHeaders = async (): Promise<Record<string, string>> => {
+    const supabase = createSupabaseBrowserClient();
+    const { data: { session } } = await supabase.auth.getSession();
+    return session?.access_token ? { Authorization: `Bearer ${session.access_token}` } : {};
+  };
+
   // Auto-refresh polling
   const fetchDeployments = useCallback(async () => {
     setIsRefreshing(true);
     try {
-      const res = await fetch('/api/v2/agent-deployments');
+      const authHeaders = await getAuthHeaders();
+      const res = await fetch('/api/v2/agent-deployments', { headers: authHeaders });
       if (!res.ok) return;
       const json = await res.json() as { data: AgentDeploymentCard[] | null };
       if (json.data) {
@@ -203,9 +211,10 @@ export function AgentsDashboard({ deployments: initialDeployments }: { deploymen
     if (!pendingAction) return;
     setTransitioning(true);
     try {
+      const authHeaders = await getAuthHeaders();
       const res = await fetch(`/api/v2/agent-deployments/${pendingAction.deploymentId}`, {
         method: 'PATCH',
-        headers: { 'Content-Type': 'application/json' },
+        headers: { 'Content-Type': 'application/json', ...authHeaders },
         body: JSON.stringify({ status: pendingAction.targetStatus }),
       });
       if (!res.ok) {
