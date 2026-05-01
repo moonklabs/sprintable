@@ -7,7 +7,7 @@ import { SectionCard, SectionCardBody, SectionCardHeader } from '@/components/ui
 import { getInternalDogfoodActors, isInternalDogfoodEnabled, readInternalDogfoodSession, resolveInternalDogfoodActor } from '@/lib/internal-dogfood';
 
 interface PageProps {
-  searchParams?: Promise<Record<string, string | string[] | undefined>> | Record<string, string | string[] | undefined>;
+  searchParams?: Promise<Record<string, string | string[] | undefined>>;
 }
 
 function readString(value: string | string[] | undefined) {
@@ -17,7 +17,7 @@ function readString(value: string | string[] | undefined) {
 export default async function InternalDogfoodPage({ searchParams }: PageProps) {
   if (!isInternalDogfoodEnabled()) notFound();
 
-  const params = searchParams ? await Promise.resolve(searchParams) : {};
+  const params = searchParams ? await searchParams : {};
   const error = readString(params.error);
   const createdMemoId = readString(params.created_memo_id);
   const createdStoryId = readString(params.created_story_id);
