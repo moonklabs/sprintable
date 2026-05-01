@@ -14,12 +14,13 @@ router = APIRouter(prefix="/api/v2/me", tags=["me"])
 
 @router.get("", response_model=MeResponse)
 async def get_me(
-    member_id: uuid.UUID = Query(...),
+    member_id: uuid.UUID | None = Query(default=None),
     session: AsyncSession = Depends(get_db),
-    _auth: AuthContext = Depends(get_current_user),
+    auth: AuthContext = Depends(get_current_user),
 ) -> MeResponse:
+    resolved_id = member_id or uuid.UUID(auth.user_id)
     result = await session.execute(
-        select(TeamMember).where(TeamMember.id == member_id)
+        select(TeamMember).where(TeamMember.id == resolved_id)
     )
     member = result.scalar_one_or_none()
     if member is None:
