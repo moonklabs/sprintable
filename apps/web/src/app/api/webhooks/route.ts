@@ -1,25 +1,9 @@
-import { handleApiError } from '@/lib/api-error';
-import { getMyTeamMember } from '@/lib/auth-helpers';
-import { requireOrgAdmin } from '@/lib/admin-check';
-import { apiSuccess, apiError, ApiErrors } from '@/lib/api-response';
+import { apiError } from '@/lib/api-response';
 import { isOssMode } from '@/lib/storage/factory';
-// eslint-disable-next-line @typescript-eslint/no-explicit-any
-const supabase: any = undefined;
 
-export async function GET(request: Request) {
-  if (isOssMode()) return apiError('NOT_AVAILABLE', 'Not available in OSS mode.', 503);
-  try {
-    const { data: { user } } = await supabase.auth.getUser();
-    if (!user) return ApiErrors.unauthorized();
-    const me = await getMyTeamMember(supabase, user);
-    if (!me) return ApiErrors.forbidden();
-    const { searchParams } = new URL(request.url);
-    const targetId = searchParams.get('member_id') ?? me.id;
-    if (targetId !== me.id) await requireOrgAdmin(supabase, me.org_id);
-    const { data, error } = await supabase.from('webhook_configs').select('*').eq('member_id', targetId);
-    if (error) throw error;
-    return apiSuccess(data);
-  } catch (err: unknown) { return handleApiError(err); }
+export async function GET() {
+  if (isOssMode()) return apiError('NOT_IMPLEMENTED', 'SaaS overlay required', 501);
+  return apiError('NOT_IMPLEMENTED', 'SaaS overlay required', 501);
 }
 
 // Deprecated: use PUT /api/webhooks/config instead (supports project_id scoping)

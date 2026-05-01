@@ -1,7 +1,6 @@
 import Link from 'next/link';
 import { redirect } from 'next/navigation';
 import { getTranslations } from 'next-intl/server';
-import { createSupabaseServerClient } from '@/lib/supabase/server';
 import { getMyTeamMember } from '@/lib/auth-helpers';
 import { requireOrgAdmin } from '@/lib/admin-check';
 import { checkFeatureLimit } from '@/lib/check-feature';
@@ -26,7 +25,7 @@ export default async function NewAgentPersonaPage() {
     );
   }
   const t = await getTranslations('agents');
-  const supabase = await createSupabaseServerClient();
+  const supabase = await (undefined as any);
   const { data: { user } } = await supabase.auth.getUser();
   if (!user) redirect('/login');
 
