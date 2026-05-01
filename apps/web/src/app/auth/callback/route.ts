@@ -1,5 +1,6 @@
 import { NextResponse } from 'next/server';
 import { cookies } from 'next/headers';
+import { createSupabaseServerClient } from '@/lib/supabase/server';
 import { resolveAppUrl } from '@/services/app-url';
 
 export async function GET(request: Request) {
@@ -17,7 +18,7 @@ export async function GET(request: Request) {
   const hasCodeVerifier = cookieStore.getAll().some(c => c.name.includes('code-verifier'));
   console.log('[auth-cb] cv present:', hasCodeVerifier);
 
-  const supabase = (undefined as any);
+  const supabase = await createSupabaseServerClient();
   const { error } = await supabase.auth.exchangeCodeForSession(code);
 
   if (error) {

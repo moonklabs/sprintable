@@ -40,7 +40,7 @@ describe('getAuthContext — OSS 모드', () => {
       headers: { Authorization: 'Bearer sk_live_test123' },
     });
 
-    const result = await getAuthContext(request);
+    const result = await getAuthContext({} as never, request);
 
     expect(result?.type).toBe('agent');
     expect(result?.id).toBe('member-1');
@@ -50,7 +50,7 @@ describe('getAuthContext — OSS 모드', () => {
   it('API Key 없음 → human fallback', async () => {
     const request = new Request('http://localhost');
 
-    const result = await getAuthContext(request);
+    const result = await getAuthContext({} as never, request);
 
     expect(result?.type).toBe('human');
     expect(result?.id).toBe('oss-member');
@@ -64,7 +64,7 @@ describe('getAuthContext — OSS 모드', () => {
       headers: { Authorization: 'Bearer sk_live_revoked' },
     });
 
-    const result = await getAuthContext(request);
+    const result = await getAuthContext({} as never, request);
 
     expect(result?.type).toBe('human');
     expect(result?.id).toBe('oss-member');
@@ -77,7 +77,7 @@ describe('getAuthContext — OSS 모드', () => {
       headers: { Authorization: 'Bearer sk_live_expired' },
     });
 
-    const result = await getAuthContext(request);
+    const result = await getAuthContext({} as never, request);
 
     expect(result?.type).toBe('human');
     expect(result?.id).toBe('oss-member');

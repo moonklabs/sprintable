@@ -1,10 +1,9 @@
 import { handleApiError } from '@/lib/api-error';
 import { apiSuccess, ApiErrors } from '@/lib/api-response';
+import { createSupabaseAdminClient } from '@/lib/supabase/admin';
 import { isOssMode, createInboxItemRepository } from '@/lib/storage/factory';
 import { incomingInboxItemSchema } from '@sprintable/shared';
 import { verifyIncomingHmac } from '@/services/inbox-item.service';
-// eslint-disable-next-line @typescript-eslint/no-explicit-any
-const supabase: any = undefined;
 
 /**
  * POST /api/inbox/incoming
@@ -45,7 +44,7 @@ export async function POST(request: Request) {
     }
 
     const ossMode = isOssMode();
-    const repo = await createInboxItemRepository(ossMode ? undefined : (await (await import('@/lib/supabase/admin')).createSupabaseAdminClient()));
+    const repo = await createInboxItemRepository(ossMode ? undefined : createSupabaseAdminClient());
 
     const item = await repo.create({
       org_id: orgIdHeader,

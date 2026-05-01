@@ -1,8 +1,7 @@
+import { createSupabaseServerClient } from '@/lib/supabase/server';
 import { handleApiError } from '@/lib/api-error';
 import { apiSuccess, apiError, ApiErrors } from '@/lib/api-response';
 import { isOssMode } from '@/lib/storage/factory';
-// eslint-disable-next-line @typescript-eslint/no-explicit-any
-const supabase: any = undefined;
 
 type RouteParams = { params: Promise<{ id: string }> };
 
@@ -11,6 +10,7 @@ export async function GET(_request: Request, { params }: RouteParams) {
   if (isOssMode()) return apiSuccess([]);
   try {
     const { id } = await params;
+    const supabase = await createSupabaseServerClient();
     const { data: { user } } = await supabase.auth.getUser();
     if (!user) return ApiErrors.unauthorized();
 
@@ -30,6 +30,7 @@ export async function POST(request: Request, { params }: RouteParams) {
   if (isOssMode()) return apiError('NOT_IMPLEMENTED', 'Mockups are not available in OSS mode.', 501);
   try {
     const { id } = await params;
+    const supabase = await createSupabaseServerClient();
     const { data: { user } } = await supabase.auth.getUser();
     if (!user) return ApiErrors.unauthorized();
 
@@ -50,6 +51,7 @@ export async function PATCH(request: Request, { params }: RouteParams) {
   if (isOssMode()) return apiError('NOT_IMPLEMENTED', 'Mockups are not available in OSS mode.', 501);
   try {
     const { id } = await params;
+    const supabase = await createSupabaseServerClient();
     const { data: { user } } = await supabase.auth.getUser();
     if (!user) return ApiErrors.unauthorized();
 
@@ -72,6 +74,7 @@ export async function DELETE(request: Request, { params }: RouteParams) {
   if (isOssMode()) return apiError('NOT_IMPLEMENTED', 'Mockups are not available in OSS mode.', 501);
   try {
     const { id } = await params;
+    const supabase = await createSupabaseServerClient();
     const { data: { user } } = await supabase.auth.getUser();
     if (!user) return ApiErrors.unauthorized();
 

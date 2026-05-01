@@ -1,4 +1,5 @@
 import { z } from 'zod';
+import { createSupabaseServerClient } from '@/lib/supabase/server';
 import { getMyTeamMember } from '@/lib/auth-helpers';
 import { requireOrgAdmin } from '@/lib/admin-check';
 import { apiError, apiSuccess, ApiErrors } from '@/lib/api-response';
@@ -6,8 +7,6 @@ import { handleApiError } from '@/lib/api-error';
 import { requireAgentOrchestration } from '@/lib/require-agent-orchestration';
 import { AgentSessionLifecycleService } from '@/services/agent-session-lifecycle';
 import { isOssMode } from '@/lib/storage/factory';
-// eslint-disable-next-line @typescript-eslint/no-explicit-any
-const supabase: any = undefined;
 
 const querySchema = z.object({
   agentId: z.string().uuid().optional(),
@@ -19,6 +18,7 @@ export async function GET(request: Request) {
   if (isOssMode()) return apiError('NOT_IMPLEMENTED', 'Not available in OSS mode.', 501);
 
   try {
+    const supabase = await createSupabaseServerClient();
     const { data: { user } } = await supabase.auth.getUser();
     if (!user) return ApiErrors.unauthorized();
 

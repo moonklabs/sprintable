@@ -1,3 +1,4 @@
+import { createSupabaseServerClient } from '@/lib/supabase/server';
 import { getMyTeamMember } from '@/lib/auth-helpers';
 import { requireOrgAdmin } from '@/lib/admin-check';
 import { apiError, apiSuccess, ApiErrors } from '@/lib/api-response';
@@ -16,15 +17,12 @@ import {
   matchesProjectAiCredentialProvider,
   resolveProjectAiCredentialProvider,
 } from '@/lib/llm/project-ai-settings';
-// eslint-disable-next-line @typescript-eslint/no-explicit-any
-const supabase: any = undefined;
-// eslint-disable-next-line @typescript-eslint/no-explicit-any
-type SupabaseClientType = any;
 
 export async function GET() {
   if (isOssMode()) return apiError('NOT_IMPLEMENTED', 'Not available in OSS mode.', 501);
 
   try {
+    const supabase = await createSupabaseServerClient();
     const { data: { user } } = await supabase.auth.getUser();
     if (!user) return ApiErrors.unauthorized();
 
@@ -42,7 +40,7 @@ export async function GET() {
   }
 }
 
-async function assertByomDeploymentAllowed(supabase: SupabaseClientType, projectId: string, input: { llm_mode: string; provider: string }) {
+async function assertByomDeploymentAllowed(supabase: Awaited<ReturnType<typeof createSupabaseServerClient>>, projectId: string, input: { llm_mode: string; provider: string }) {
   if (input.llm_mode !== 'byom') return;
 
   const aiCredentialState = await getProjectAiSettingsWithIntegration(supabase as never, projectId);
@@ -70,6 +68,7 @@ export async function POST(request: Request) {
   if (isOssMode()) return apiError('NOT_IMPLEMENTED', 'Not available in OSS mode.', 501);
 
   try {
+    const supabase = await createSupabaseServerClient();
     const { data: { user } } = await supabase.auth.getUser();
     if (!user) return ApiErrors.unauthorized();
 

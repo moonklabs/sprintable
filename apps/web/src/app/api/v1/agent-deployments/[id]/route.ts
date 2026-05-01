@@ -1,3 +1,4 @@
+import { createSupabaseServerClient } from '@/lib/supabase/server';
 import { getMyTeamMember } from '@/lib/auth-helpers';
 import { requireOrgAdmin } from '@/lib/admin-check';
 import { apiError, apiSuccess, ApiErrors } from '@/lib/api-response';
@@ -17,6 +18,7 @@ export async function GET(_request: Request, { params }: RouteParams) {
 
   try {
     const { id } = await params;
+    const supabase = await createSupabaseServerClient();
     const { data: { user } } = await supabase.auth.getUser();
     if (!user) return ApiErrors.unauthorized();
 
@@ -49,6 +51,7 @@ export async function PATCH(request: Request, { params }: RouteParams) {
 
   try {
     const { id } = await params;
+    const supabase = await createSupabaseServerClient();
     const { data: { user } } = await supabase.auth.getUser();
     if (!user) return ApiErrors.unauthorized();
 
@@ -88,6 +91,7 @@ export async function DELETE(_request: Request, { params }: RouteParams) {
 
   try {
     const { id } = await params;
+    const supabase = await createSupabaseServerClient();
     const { data: { user } } = await supabase.auth.getUser();
     if (!user) return ApiErrors.unauthorized();
 
@@ -114,5 +118,3 @@ export async function DELETE(_request: Request, { params }: RouteParams) {
     return handleApiError(error);
   }
 }
-// eslint-disable-next-line @typescript-eslint/no-explicit-any
-const supabase: any = undefined;

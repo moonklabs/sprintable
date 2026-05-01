@@ -1,7 +1,4 @@
-// eslint-disable-next-line @typescript-eslint/no-explicit-any
-type RealtimeChannel = any;
-// eslint-disable-next-line @typescript-eslint/no-explicit-any
-type SupabaseClient = any;
+import type { RealtimeChannel, SupabaseClient } from '@supabase/supabase-js';
 import { AgentRoutingRuleService, RoutingPolicyError, type RoutingEvaluationResult, type RoutingRuleSummary } from './agent-routing-rule';
 import { buildWebhookSignatureHeaders } from '@/lib/webhook-signature';
 import { WebhookDeliveryService } from './webhook-delivery.service';

@@ -17,7 +17,7 @@ export async function POST(request: Request, { params }: { params: Promise<{ id:
     const parsed = await parseBody(request, dismissInboxItemSchema);
     if (!parsed.success) return parsed.response;
 
-    const repo = await createInboxItemRepository();
+    const repo = await createInboxItemRepository(dbClient);
     try {
       const result = await repo.dismiss(id, me.org_id, {
         resolved_by: me.id,

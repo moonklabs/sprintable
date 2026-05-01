@@ -1,8 +1,7 @@
 import { NextResponse } from 'next/server';
+import { createSupabaseAdminClient } from '@/lib/supabase/admin';
 import { decodeMcpOAuthState } from '@/lib/mcp-oauth-state';
 import { exchangeGitHubOAuthCode } from '@/services/project-mcp';
-// eslint-disable-next-line @typescript-eslint/no-explicit-any
-const supabase: any = undefined;
 
 export async function GET(request: Request) {
   const url = new URL(request.url);
@@ -17,7 +16,7 @@ export async function GET(request: Request) {
       return NextResponse.redirect(`${origin}/dashboard/settings?mcp_connection=github_error`);
     }
 
-    const admin = (await (await import('@/lib/supabase/admin')).createSupabaseAdminClient());
+    const admin = createSupabaseAdminClient();
     await exchangeGitHubOAuthCode(admin as never, {
       code,
       origin,

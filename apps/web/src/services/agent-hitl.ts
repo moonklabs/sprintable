@@ -1,5 +1,4 @@
-// eslint-disable-next-line @typescript-eslint/no-explicit-any
-type SupabaseClient = any;
+import type { SupabaseClient } from '@supabase/supabase-js';
 import { ForbiddenError, NotFoundError } from './sprint';
 import { fireWebhooks } from './webhook-notify';
 import { syncSlackHitlRequestState } from './slack-hitl';

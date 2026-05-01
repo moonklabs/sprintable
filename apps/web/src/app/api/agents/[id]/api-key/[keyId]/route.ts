@@ -1,9 +1,8 @@
+import { createSupabaseServerClient } from '@/lib/supabase/server';
 import { handleApiError } from '@/lib/api-error';
 import { getAuthContext } from '@/lib/auth-helpers';
 import { apiSuccess, ApiErrors } from '@/lib/api-response';
 import { isOssMode, createAgentApiKeyRepository } from '@/lib/storage/factory';
-// eslint-disable-next-line @typescript-eslint/no-explicit-any
-const supabase: any = undefined;
 
 type RouteParams = { params: Promise<{ id: string; keyId: string }> };
 
@@ -24,7 +23,8 @@ export async function DELETE(request: Request, { params }: RouteParams) {
   }
   try {
     const { keyId } = await params;
-    const me = await getAuthContext(request);
+    const supabase = await createSupabaseServerClient();
+    const me = await getAuthContext(supabase, request);
     if (!me) return ApiErrors.unauthorized();
 
     // Admin 권한 확인

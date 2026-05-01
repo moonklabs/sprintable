@@ -1,10 +1,6 @@
 'use client';
 
-// SaaS-only 브라우저 클라이언트 — OSS에서는 이 파일의 함수가 호출되지 않음
-// ssr dynamic load (static import 제거, C-S10)
-
-// eslint-disable-next-line @typescript-eslint/no-explicit-any
-type BrowserClient = any;
+import { createBrowserClient } from '@supabase/ssr';
 
 // ─── FastAPI Auth Utilities ───────────────────────────────────────────────────
 
@@ -81,30 +77,24 @@ function rateLimitedFetch(input: RequestInfo | URL, init?: RequestInit): Promise
       const backoffSec = !isNaN(retrySeconds) ? Math.max(retrySeconds, 60) : 60;
       rateLimitBlockedUntil.set(url, Date.now() + backoffSec * 1000);
     }
-
-    if (response.status === 400 && url.includes('/token')) {
-      try {
-        const body = await response.clone().json() as Record<string, string>;
-        const msg = (body.error_description ?? body.message ?? '').toLowerCase();
-        const code = body.error ?? body.code ?? '';
-        if (msg.includes('already used') || msg.includes('already_used') || code === 'invalid_grant' || code === 'refresh_token_already_used') {
-          const cookieDomain = process.env['NEXT_PUBLIC_COOKIE_DOMAIN'];
-          document.cookie.split(';').forEach((c) => {
-            const name = c.trim().split('=')[0];
-            if (name?.startsWith('sb-')) {
-              document.cookie = `${name}=; expires=Thu, 01 Jan 1970 00:00:00 UTC; path=/${cookieDomain ? `; domain=${cookieDomain}` : ''}`;
-            }
-          });
-          window.location.href = '/login';
-        }
-      } catch { /* body parse 실패 무시 */ }
-    }
-
     return response;
   });
 }
 
-export function createSupabaseBrowserClient(): BrowserClient {
-  // SaaS overlay에서 이 함수를 오버라이드하여 실제 브라우저 클라이언트 반환
-  throw new Error('createSupabaseBrowserClient: SaaS overlay required');
+export function createSupabaseBrowserClient() {
+  const cookieDomain = process.env['NEXT_PUBLIC_COOKIE_DOMAIN'];
+  return createBrowserClient(
+    process.env['NEXT_PUBLIC_SUPABASE_URL']!,
+    process.env['NEXT_PUBLIC_SUPABASE_ANON_KEY']!,
+    {
+      cookieOptions: {
+        ...(cookieDomain ? { domain: cookieDomain } : {}),
+        sameSite: 'lax',
+        secure: true,
+        path: '/',
+      },
+      global: { fetch: rateLimitedFetch },
+      auth: { persistSession: false, autoRefreshToken: false },
+    },
+  );
 }

@@ -1,4 +1,6 @@
 import { z } from 'zod';
+import { createSupabaseServerClient } from '@/lib/supabase/server';
+import { createSupabaseAdminClient } from '@/lib/supabase/admin';
 import { handleApiError } from '@/lib/api-error';
 import { apiSuccess, apiError, ApiErrors } from '@/lib/api-response';
 import { getMyTeamMember } from '@/lib/auth-helpers';
@@ -19,6 +21,7 @@ const reviewRequestSchema = z.object({
 });
 
 async function requireAdminContext(projectId: string) {
+  const supabase = await createSupabaseServerClient();
   const { data: { user } } = await supabase.auth.getUser();
   if (!user) return { error: ApiErrors.unauthorized() as Response };
 
@@ -44,7 +47,7 @@ export async function GET(request: Request, { params }: RouteParams) {
     if ('error' in ctx) return ctx.error;
 
     const origin = new URL(request.url).origin;
-    const admin = (await (await import('@/lib/supabase/admin')).createSupabaseAdminClient());
+    const admin = createSupabaseAdminClient();
     const connections = await listProjectMcpConnectionSummaries(admin as never, {
       orgId: ctx.me.org_id,
       projectId: id,
@@ -73,7 +76,7 @@ export async function POST(request: Request, { params }: RouteParams) {
       return ApiErrors.badRequest(parsed.error.issues.map((issue) => issue.message).join(', '));
     }
 
-    const admin = (await (await import('@/lib/supabase/admin')).createSupabaseAdminClient());
+    const admin = createSupabaseAdminClient();
     const created = await createMcpConnectionReviewRequest(admin as never, {
       orgId: ctx.me.org_id,
       projectId: id,
@@ -88,5 +91,3 @@ export async function POST(request: Request, { params }: RouteParams) {
     return handleApiError(error);
   }
 }
-// eslint-disable-next-line @typescript-eslint/no-explicit-any
-const supabase: any = undefined;

@@ -1,3 +1,6 @@
+import type { SupabaseClient } from '@supabase/supabase-js';
+import { createSupabaseServerClient } from '@/lib/supabase/server';
+import { createSupabaseAdminClient } from '@/lib/supabase/admin';
 import { SprintService } from '@/services/sprint';
 import { handleApiError } from '@/lib/api-error';
 import { apiSuccess, ApiErrors } from '@/lib/api-response';
@@ -6,13 +9,6 @@ import { isOssMode, createSprintRepository, createDocRepository } from '@/lib/st
 import { NotificationService } from '@/services/notification.service';
 import { DocsService } from '@/services/docs';
 import { requireRole, EDIT_ROLES } from '@/lib/role-guard';
-// eslint-disable-next-line @typescript-eslint/no-explicit-any
-const supabase: any = undefined;
-// eslint-disable-next-line @typescript-eslint/no-explicit-any
-type SupabaseClient = any;
-const ossMode = isOssMode();
-// eslint-disable-next-line @typescript-eslint/no-explicit-any
-const dbClient: any = undefined;
 
 type RouteParams = { params: Promise<{ id: string }> };
 
@@ -20,17 +16,20 @@ type RouteParams = { params: Promise<{ id: string }> };
 export async function POST(request: Request, { params }: RouteParams) {
   try {
     const { id } = await params;
-    const me = await getAuthContext(request);
+    const supabase = await createSupabaseServerClient();
+    const me = await getAuthContext(supabase, request);
     if (!me) return ApiErrors.unauthorized();
     if (me.rateLimitExceeded) return ApiErrors.tooManyRequests(me.rateLimitRemaining, me.rateLimitResetAt);
+    const ossMode = isOssMode();
+    const dbClient = ossMode ? undefined : (me.type === 'agent' ? createSupabaseAdminClient() : supabase);
 
     if (!ossMode && dbClient && me.type !== 'agent') {
       const denied = await requireRole(supabase, me.org_id, EDIT_ROLES, 'Admin or PO access required to close sprint');
       if (denied) return denied;
     }
 
-    const repo = await createSprintRepository();
-    const service = new SprintService(repo);
+    const repo = await createSprintRepository(dbClient);
+    const service = new SprintService(repo, dbClient as SupabaseClient | undefined);
     const sprint = await service.close(id);
 
     if (!ossMode && dbClient) {

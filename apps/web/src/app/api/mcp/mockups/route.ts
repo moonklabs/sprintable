@@ -1,12 +1,11 @@
 import { z } from 'zod';
+import { createSupabaseServerClient } from '@/lib/supabase/server';
 import { handleApiError } from '@/lib/api-error';
 import { apiSuccess, apiError, ApiErrors } from '@/lib/api-response';
 import { MockupService } from '@/services/mockup';
 import { getMyTeamMember } from '@/lib/auth-helpers';
 import { checkResourceLimit } from '@/lib/check-feature';
 import { isOssMode } from '@/lib/storage/factory';
-// eslint-disable-next-line @typescript-eslint/no-explicit-any
-const supabase: any = undefined;
 
 // MCP tool action schemas
 const ListMockupsSchema = z.object({
@@ -72,6 +71,7 @@ const McpRequestSchema = z.discriminatedUnion('action', [
 export async function POST(request: Request) {
   if (isOssMode()) return apiError('NOT_IMPLEMENTED', 'Mockups are not available in OSS mode.', 501);
   try {
+    const supabase = await createSupabaseServerClient();
     const { data: { user } } = await supabase.auth.getUser();
     if (!user) return ApiErrors.unauthorized();
 

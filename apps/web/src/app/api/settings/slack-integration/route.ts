@@ -1,5 +1,6 @@
 import { z } from 'zod';
 import { NextResponse } from 'next/server';
+import { createSupabaseServerClient } from '@/lib/supabase/server';
 import { getMyTeamMember } from '@/lib/auth-helpers';
 import { handleApiError } from '@/lib/api-error';
 import { apiSuccess, apiError, ApiErrors } from '@/lib/api-response';
@@ -19,6 +20,7 @@ const saveMappingSchema = z.object({
 });
 
 async function requireAdminContext() {
+  const supabase = await createSupabaseServerClient();
   const { data: { user } } = await supabase.auth.getUser();
   if (!user) return { error: ApiErrors.unauthorized() as Response };
 
@@ -237,5 +239,3 @@ export async function PUT(request: Request) {
     return handleApiError(error);
   }
 }
-// eslint-disable-next-line @typescript-eslint/no-explicit-any
-const supabase: any = undefined;

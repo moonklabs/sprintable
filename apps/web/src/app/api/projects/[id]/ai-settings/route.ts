@@ -1,4 +1,5 @@
 import { z } from 'zod';
+import { createSupabaseServerClient } from '@/lib/supabase/server';
 import { handleApiError } from '@/lib/api-error';
 import { apiError, apiSuccess, ApiErrors } from '@/lib/api-response';
 import { buildManagedAgentFailurePatch } from '@/lib/managed-agent-contract';
@@ -76,6 +77,7 @@ export async function GET(_request: Request, { params }: RouteParams) {
   if (isOssMode()) return apiSuccess(null);
   try {
     const { id } = await params;
+    const supabase = await createSupabaseServerClient();
     const { data: { user } } = await supabase.auth.getUser();
     if (!user) return ApiErrors.unauthorized();
 
@@ -103,6 +105,7 @@ export async function PUT(request: Request, { params }: RouteParams) {
   if (isOssMode()) return apiError('NOT_IMPLEMENTED', 'AI settings persistence is not supported in OSS mode. Set API keys via environment variables.', 501);
   try {
     const { id } = await params;
+    const supabase = await createSupabaseServerClient();
     const { data: { user } } = await supabase.auth.getUser();
     if (!user) return ApiErrors.unauthorized();
 
@@ -169,6 +172,7 @@ export async function DELETE(_request: Request, { params }: RouteParams) {
   if (isOssMode()) return apiError('NOT_IMPLEMENTED', 'AI settings are not supported in OSS mode.', 501);
   try {
     const { id } = await params;
+    const supabase = await createSupabaseServerClient();
     const { data: { user } } = await supabase.auth.getUser();
     if (!user) return ApiErrors.unauthorized();
 
@@ -247,5 +251,3 @@ export async function DELETE(_request: Request, { params }: RouteParams) {
     return handleApiError(err);
   }
 }
-// eslint-disable-next-line @typescript-eslint/no-explicit-any
-const supabase: any = undefined;

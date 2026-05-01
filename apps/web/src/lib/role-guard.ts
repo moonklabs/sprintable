@@ -1,5 +1,4 @@
-// eslint-disable-next-line @typescript-eslint/no-explicit-any
-type SupabaseClient = any;
+import type { SupabaseClient } from '@supabase/supabase-js';
 import { ApiErrors } from '@/lib/api-response';
 
 export const ADMIN_ROLES = ['owner', 'admin'] as const;

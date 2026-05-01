@@ -1,5 +1,4 @@
-// eslint-disable-next-line @typescript-eslint/no-explicit-any
-type SupabaseClient = any;
+import type { SupabaseClient } from '@supabase/supabase-js';
 import { createSupabaseAdminClient } from '@/lib/supabase/admin';
 import { BUILTIN_AGENT_TOOL_NAMES } from './agent-builtin-tool-names';
 import { listProjectApprovedMcpToolOptions } from './project-mcp';

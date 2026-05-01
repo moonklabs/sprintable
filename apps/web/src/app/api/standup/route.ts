@@ -1,19 +1,19 @@
 import { saveStandupSchema } from '@sprintable/shared';
+import type { SupabaseClient } from '@supabase/supabase-js';
+import { createSupabaseServerClient } from '@/lib/supabase/server';
+import { createSupabaseAdminClient } from '@/lib/supabase/admin';
 import { StandupService } from '@/services/standup';
 import { isOssMode } from '@/lib/storage/factory';
 import { handleApiError } from '@/lib/api-error';
 import { getAuthContext } from '@/lib/auth-helpers';
 import { apiSuccess, ApiErrors } from '@/lib/api-response';
 import { getOssStandupEntryForUser, listOssStandupEntries, saveOssStandupEntry } from '@/lib/oss-standup';
-// eslint-disable-next-line @typescript-eslint/no-explicit-any
-const supabase: any = undefined;
-// eslint-disable-next-line @typescript-eslint/no-explicit-any
-type SupabaseClient = any;
 
 // GET /api/standup?project_id=...&date=YYYY-MM-DD[&member_id=...]
 export async function GET(request: Request) {
   try {
-    const me = await getAuthContext(request);
+    const supabase = await createSupabaseServerClient();
+    const me = await getAuthContext(supabase, request);
     if (!me) return ApiErrors.unauthorized();
     if (me.rateLimitExceeded) return ApiErrors.tooManyRequests(me.rateLimitRemaining, me.rateLimitResetAt);
 
@@ -30,7 +30,7 @@ export async function GET(request: Request) {
       return apiSuccess(await listOssStandupEntries(projectId, date));
     }
 
-    const dbClient: SupabaseClient = me.type === 'agent' ? (await (await import('@/lib/supabase/admin')).createSupabaseAdminClient()) : supabase;
+    const dbClient: SupabaseClient = me.type === 'agent' ? createSupabaseAdminClient() : supabase;
     const service = new StandupService(dbClient);
     if (memberId) {
       const entry = await service.getEntryForUser(projectId, memberId, date);
@@ -46,12 +46,13 @@ export async function GET(request: Request) {
 // POST /api/standup — supports Dual Auth; agent may pass author_id in body
 export async function POST(request: Request) {
   try {
-    const me = await getAuthContext(request);
+    const supabase = await createSupabaseServerClient();
+    const me = await getAuthContext(supabase, request);
     if (!me) return ApiErrors.unauthorized();
     if (me.rateLimitExceeded) return ApiErrors.tooManyRequests(me.rateLimitRemaining, me.rateLimitResetAt);
     const ossMode = isOssMode();
 
-    const dbClient: SupabaseClient = me.type === 'agent' ? (await (await import('@/lib/supabase/admin')).createSupabaseAdminClient()) : supabase;
+    const dbClient: SupabaseClient = me.type === 'agent' ? createSupabaseAdminClient() : supabase;
 
     let rawBody: unknown;
     try { rawBody = await request.json(); } catch { return ApiErrors.badRequest('Invalid JSON body'); }
@@ -111,7 +112,8 @@ export async function POST(request: Request) {
 // PUT /api/standup — kept for backwards compatibility (human auth only)
 export async function PUT(request: Request) {
   try {
-    const me = await getAuthContext(request);
+    const supabase = await createSupabaseServerClient();
+    const me = await getAuthContext(supabase, request);
     if (!me) return ApiErrors.unauthorized();
     if (me.rateLimitExceeded) return ApiErrors.tooManyRequests(me.rateLimitRemaining, me.rateLimitResetAt);
     const ossMode = isOssMode();

@@ -1,11 +1,10 @@
 import { cookies } from 'next/headers';
+import { createSupabaseServerClient } from '@/lib/supabase/server';
 import { handleApiError } from '@/lib/api-error';
 import { apiSuccess, ApiErrors } from '@/lib/api-response';
 import { CURRENT_PROJECT_COOKIE } from '@/lib/auth-helpers';
 import { parseBody, setCurrentProjectSchema } from '@sprintable/shared';
 import { isOssMode } from '@/lib/storage/factory';
-// eslint-disable-next-line @typescript-eslint/no-explicit-any
-const supabase: any = undefined;
 
 export async function GET() {
   if (isOssMode()) {
@@ -13,6 +12,7 @@ export async function GET() {
     return apiSuccess({ project_id: OSS_PROJECT_ID, project_name: 'My Project', org_id: OSS_ORG_ID });
   }
   try {
+    const supabase = await createSupabaseServerClient();
     const { data: { user } } = await supabase.auth.getUser();
     if (!user) return ApiErrors.unauthorized();
 
@@ -79,6 +79,7 @@ export async function POST(request: Request) {
     return apiSuccess({ project_id: OSS_PROJECT_ID, project_name: 'My Project' });
   }
   try {
+    const supabase = await createSupabaseServerClient();
     const { data: { user } } = await supabase.auth.getUser();
     if (!user) return ApiErrors.unauthorized();
 

@@ -52,7 +52,7 @@ describe('createInternalDogfoodMemoInSprintable', () => {
 
         throw new Error(`Unexpected table read: ${table}`);
       },
-    } as unknown as any;
+    } as unknown as import('@supabase/supabase-js').SupabaseClient;
 
     const result = await createInternalDogfoodMemoInSprintable(
       supabase,
