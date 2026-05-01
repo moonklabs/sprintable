@@ -24,7 +24,7 @@ export async function GET(request: Request, { params }: RouteParams) {
     const limit = Math.min(Number(searchParams.get('limit') ?? '50'), 100);
     const cursor = searchParams.get('cursor') ?? undefined;
 
-    const admin = (await (await import('@/lib/supabase/admin')).createSupabaseAdminClient());
+    const admin = (await (await import('@/lib/supabase/admin')).createSupabaseAdminClient()) as any;
     let query = admin
       .from('api_key_logs')
       .select('id, api_key_id, endpoint, ip_address, status_code, created_at')

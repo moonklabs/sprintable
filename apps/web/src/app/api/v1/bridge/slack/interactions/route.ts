@@ -102,63 +102,6 @@ export async function POST(request: Request) {
     return Response.json({ text: 'Supabase service role is not configured' }, { status: 500 });
   }
 
-  const supabase = (await import('@supabase/supabase-js')).createClient(supabaseUrl, serviceRoleKey);
-  const requestRow = await loadHitlRequest(supabase, requestId);
-  if (!requestRow) {
-    return Response.json({ response_type: 'ephemeral', text: 'HITL 요청을 찾지 못한.' }, { status: 404 });
-  }
-
-  if (!matchesSlackInteractionSource(requestRow.metadata ?? null, payload)) {
-    return Response.json({ response_type: 'ephemeral', text: '원본 Slack HITL 메시지와 일치하지 않는 요청인.' }, { status: 400 });
-  }
-
-  const bridgeService = new BridgeInboundService(supabase as never);
-  const userId = payload.user?.id ?? null;
-  if (!userId) {
-    return Response.json({ response_type: 'ephemeral', text: 'Slack 사용자 정보를 확인하지 못한.' });
-  }
-
-  const mapping = await bridgeService.findUserMapping(requestRow.org_id, requestRow.project_id, 'slack', userId);
-  if (!mapping) {
-    return Response.json({ response_type: 'ephemeral', text: 'Slack 계정이 Sprintable 팀원에 연결되지 않은.' });
-  }
-
-  const service = new AgentHitlService(supabase as never);
-  const actionKind = action.action_id === 'hitl_approve' ? 'approve' : 'reject';
-
-  try {
-    await service.respond({
-      requestId,
-      actorId: mapping.team_member_id,
-      orgId: requestRow.org_id,
-      projectId: requestRow.project_id,
-      action: actionKind,
-      comment: actionKind === 'reject' ? getRejectReason(payload) : 'Slack에서 승인한',
-    });
-
-    return Response.json({
-      response_type: 'ephemeral',
-      text: actionKind === 'approve' ? 'HITL 승인 처리한.' : 'HITL 거부 처리한.',
-    });
-  } catch (error) {
-    if (error instanceof HitlConflictError) {
-      const latest = await loadHitlRequest(supabase, requestId);
-      if (latest) {
-        const metadata = (latest.metadata ?? {}) as Record<string, unknown>;
-        await syncSlackHitlRequestState(supabase as never, {
-          request: latest,
-          hitlMemoId: typeof metadata.hitl_memo_id === 'string' ? metadata.hitl_memo_id : null,
-          sourceMemoId: typeof metadata.source_memo_id === 'string' ? metadata.source_memo_id : null,
-          actorId: mapping.team_member_id,
-        }, {
-          appUrl: process.env.NEXT_PUBLIC_APP_URL,
-          logger: console,
-        });
-      }
-
-      return Response.json({ response_type: 'ephemeral', text: '이미 처리된 HITL 요청인.' });
-    }
-
-    return Response.json({ response_type: 'ephemeral', text: 'Slack HITL 처리 중 오류가 발생한.' }, { status: 500 });
-  }
+  // SaaS overlay에서 처리
+  return apiError('NOT_IMPLEMENTED', 'SaaS overlay required', 501);
 }

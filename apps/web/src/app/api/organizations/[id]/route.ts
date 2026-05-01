@@ -40,7 +40,7 @@ export async function DELETE(_request: Request, { params }: RouteParams) {
     }
 
     // Soft delete via admin client to bypass RLS UPDATE restriction
-    const admin = (await (await import('@/lib/supabase/admin')).createSupabaseAdminClient());
+    const admin = (await (await import('@/lib/supabase/admin')).createSupabaseAdminClient()) as any;
     const { error } = await admin
       .from('organizations')
       .update({ deleted_at: new Date().toISOString() })

@@ -27,7 +27,7 @@ export async function POST(request: Request) {
     const { api_key_id } = await request.json() as { api_key_id: string };
     if (!api_key_id) return apiError('BAD_REQUEST', 'api_key_id required', 400);
 
-    const admin = (await (await import('@/lib/supabase/admin')).createSupabaseAdminClient());
+    const admin = (await (await import('@/lib/supabase/admin')).createSupabaseAdminClient()) as any;
 
     // 기존 키 조회 + org 확인
     const { data: existing } = await admin

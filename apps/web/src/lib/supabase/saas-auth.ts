@@ -1,4 +1,4 @@
-// OSS stub — SaaS overlay에서 실제 구현 제공 (@supabase import 있음)
+// OSS stub — SaaS overlay에서 실제 구현 제공 (supabase import 있음 (SaaS overlay 파일))
 // getAuthContext의 SaaS OAuth 분기를 이 파일로 위임
 
 export interface SaasMember {

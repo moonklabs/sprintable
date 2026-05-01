@@ -30,7 +30,7 @@ describe('StandupService.save', () => {
           single: async () => ({ data: null, error: null }),
         };
       },
-    } as unknown as import('@supabase/supabase-js').SupabaseClient;
+    } as unknown as any;
 
     const service = new StandupService(supabase);
     const entry = await service.save({
@@ -93,7 +93,7 @@ describe('StandupFeedbackService', () => {
           single: async () => ({ data: null, error: null }),
         };
       },
-    } as unknown as import('@supabase/supabase-js').SupabaseClient;
+    } as unknown as any;
 
     const service = new StandupFeedbackService(supabase);
     const feedback = await service.listByDate('project-1', '2026-04-10');
@@ -145,7 +145,7 @@ describe('StandupFeedbackService', () => {
           single: async () => ({ data: null, error: null }),
         };
       },
-    } as unknown as import('@supabase/supabase-js').SupabaseClient;
+    } as unknown as any;
 
     const service = new StandupFeedbackService(supabase);
     const feedback = await service.create({
@@ -190,7 +190,7 @@ describe('StandupFeedbackService', () => {
           single: async () => ({ data: null, error: null }),
         };
       },
-    } as unknown as import('@supabase/supabase-js').SupabaseClient;
+    } as unknown as any;
 
     const service = new StandupFeedbackService(supabase);
     await expect(service.update('feedback-1', { feedback_text: 'change' }, 'member-2')).rejects.toThrow('Permission denied');

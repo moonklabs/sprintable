@@ -13,22 +13,8 @@ export async function GET(request: Request) {
   }
 
   try {
-    const supabase = (await import('@supabase/supabase-js')).createClient(
-      process.env.NEXT_PUBLIC_SUPABASE_URL!,
-      process.env.SUPABASE_SERVICE_ROLE_KEY!,
-    );
-
-    const service = new AgentSessionLifecycleService(supabase as never);
-    const result = await service.recoverStaleRuns();
-    if (result.resumeCandidates.length > 0) {
-      await resumeSessionCandidates(supabase as never, result.resumeCandidates);
-    }
-    return apiSuccess({
-      recoveredCount: result.recoveredCount,
-      retryScheduledCount: result.retryScheduledCount,
-      terminatedCount: result.terminatedCount,
-      resumedCount: result.resumedCount,
-    });
+    // SaaS overlay에서 처리
+    return apiError('NOT_IMPLEMENTED', 'SaaS overlay required', 501);
   } catch (error) {
     return apiError('INTERNAL_ERROR', error instanceof Error ? error.message : 'Internal error', 500);
   }

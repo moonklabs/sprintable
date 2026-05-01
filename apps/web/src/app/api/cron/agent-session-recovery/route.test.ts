@@ -10,7 +10,7 @@ const {
   resumeSessionCandidatesMock: vi.fn(),
 }));
 
-vi.mock('@supabase/supabase-js', () => ({
+vi.mock('', () => ({
   createClient: createClientMock,
 }));
 

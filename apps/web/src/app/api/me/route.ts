@@ -15,8 +15,9 @@ export async function GET(request: Request) {
     if (!me) return ApiErrors.unauthorized();
 
     if (me.type === 'agent') {
+      // eslint-disable-next-line @typescript-eslint/no-unused-vars
       const { createSupabaseAdminClient } = await import('@/lib/supabase/admin');
-      const adminClient = (await (await import('@/lib/supabase/admin')).createSupabaseAdminClient());
+      const adminClient = (await (await import('@/lib/supabase/admin')).createSupabaseAdminClient()) as any;
       const { data: member, error } = await adminClient
         .from('team_members')
         .select('id, name, type, role, is_active')

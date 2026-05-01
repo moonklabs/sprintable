@@ -179,7 +179,7 @@ async function resolveTeamMemberFromMemberships(
 /**
  * Dual auth: OSS (SQLite) → SaaS API Key → SaaS OAuth 순으로 인증
  *
- * @supabase import 없음 — SaaS OAuth는 saas-auth.ts hook으로 위임
+ * supabase 의존성 없음 — SaaS OAuth는 saas-auth.ts hook으로 위임
  */
 export async function getAuthContext(
   request: Request

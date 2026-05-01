@@ -25,33 +25,6 @@ export async function POST(request: Request) {
     return Response.json({ error: 'Unable to resolve Teams source channel' }, { status: 400 });
   }
 
-  const supabase = (await import('@supabase/supabase-js')).createClient(supabaseUrl, serviceRoleKey);
-  const inboundService = new BridgeInboundService(supabase as never);
-  const mapping = await inboundService.findChannelMapping('teams', sourceChannelId);
-  if (!mapping) {
-    return Response.json({ ok: true, skipped: 'channel_not_mapped' });
-  }
-
-  const config = resolveTeamsInboundConfig(mapping.config ?? null);
-  const verified = await verifyTeamsRequest({
-    authorizationHeader: request.headers.get('authorization'),
-    serviceUrl: activity.serviceUrl,
-    botAppId: config.botAppId,
-  });
-  if (!verified) {
-    return Response.json({ error: 'Invalid Teams signature' }, { status: 401 });
-  }
-
-  if (shouldIgnoreTeamsActivity(activity)) {
-    return Response.json({ ok: true, skipped: 'ignored_activity' });
-  }
-
-  const result = await inboundService.processInboundMessage({
-    platform: 'teams',
-    mapping,
-    event: normalizeTeamsActivity(activity),
-    unknownUserLabel: 'Microsoft Teams 연동 미설정 사용자',
-  });
-
-  return Response.json({ ok: true, result });
+  // SaaS overlay에서 처리
+  return apiError('NOT_IMPLEMENTED', 'SaaS overlay required', 501);
 }

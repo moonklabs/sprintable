@@ -1,4 +1,4 @@
-// @supabase/ssr import 제거됨 (C-S10)
+// ssr import 제거됨 (C-S10)
 // SaaS overlay에서 실제 구현 제공
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any

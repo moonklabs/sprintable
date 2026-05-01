@@ -194,18 +194,13 @@ export class BackgroundRuntimeWorker {
   }
 }
 
-export function createBackgroundRuntimeWorkerFromEnv(env: NodeJS.ProcessEnv = process.env) {
+export function createBackgroundRuntimeWorkerFromEnv(env: NodeJS.ProcessEnv = process.env): BackgroundRuntimeWorker | null {
   const supabaseUrl = env['NEXT_PUBLIC_SUPABASE_URL'];
   const serviceRoleKey = env['SUPABASE_SERVICE_ROLE_KEY'];
   if (!supabaseUrl || !serviceRoleKey) {
     return null;
   }
 
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  const { createClient } = require('@supabase/supabase-js') as typeof import('@supabase/supabase-js');
-  return new BackgroundRuntimeWorker({
-    supabase: createClient(supabaseUrl, serviceRoleKey),
-    appUrl: resolveAppUrl(env['NEXT_PUBLIC_APP_URL'], env),
-    settings: resolveBackgroundRuntimeSettings(env),
-  });
+  // SaaS overlay에서 처리 — OSS에서 미지원
+  return null;
 }

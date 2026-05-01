@@ -23,7 +23,7 @@ export async function POST(request: Request) {
     const { name, slug } = parsed.data;
 
     // admin client — slug 유니크 검증 시 RLS가 다른 org를 숨기는 것을 방지
-    const admin = (await (await import('@/lib/supabase/admin')).createSupabaseAdminClient());
+    const admin = (await (await import('@/lib/supabase/admin')).createSupabaseAdminClient()) as any;
 
     const { data: existingSlug } = await admin
       .from('organizations')

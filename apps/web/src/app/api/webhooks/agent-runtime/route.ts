@@ -139,40 +139,6 @@ async function validateWebhookSecret(
 
 export async function POST(request: Request) {
   if (isOssMode()) return apiError('NOT_AVAILABLE', 'Not available in OSS mode.', 503);
-  const supabase = (await import('@supabase/supabase-js')).createClient(
-    process.env.NEXT_PUBLIC_SUPABASE_URL!,
-    process.env.SUPABASE_SERVICE_ROLE_KEY!,
-  );
-
-  try {
-    const payloadResult = payloadSchema.safeParse(await request.json());
-    if (!payloadResult.success) {
-      return apiError('BAD_REQUEST', payloadResult.error.issues.map((issue) => issue.message).join(', '), 400);
-    }
-
-    const payload = payloadResult.data;
-    const scope = await resolveWebhookScope(supabase, payload);
-    const presentedSecret = request.headers.get('x-webhook-secret');
-    const secretValid = await validateWebhookSecret(supabase, scope.orgId, scope.projectId, scope.agentId, presentedSecret);
-    if (!secretValid) {
-      return apiError('UNAUTHORIZED', 'Invalid webhook secret', 401);
-    }
-
-    const loop = new AgentExecutionLoop(supabase as never);
-    const result = await loop.execute({
-      runId: scope.runId,
-      memoId: scope.memoId,
-      orgId: scope.orgId,
-      projectId: scope.projectId,
-      agentId: scope.agentId,
-      triggerEvent: payload.event,
-      originalRunId: scope.originalRunId,
-      routing: scope.routing,
-    });
-
-    return apiSuccess(result);
-  } catch (error) {
-    const message = error instanceof Error ? error.message : 'Webhook execution failed';
-    return apiError('WEBHOOK_ERROR', message, 400);
-  }
+  // SaaS overlay에서 처리
+  return apiError('NOT_IMPLEMENTED', 'SaaS overlay required', 501);
 }

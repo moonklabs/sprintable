@@ -12,14 +12,8 @@ export async function GET(request: Request) {
   }
 
   try {
-    const supabase = (await import('@supabase/supabase-js')).createClient(
-      process.env.NEXT_PUBLIC_SUPABASE_URL!,
-      process.env.SUPABASE_SERVICE_ROLE_KEY!,
-    );
-
-    const service = new AgentHitlTimeoutService(supabase as never, { logger: console });
-    const result = await service.scan();
-    return apiSuccess(result);
+    // SaaS overlay에서 처리
+    return apiError('NOT_IMPLEMENTED', 'SaaS overlay required', 501);
   } catch (error) {
     return apiError('INTERNAL_ERROR', error instanceof Error ? error.message : 'Internal error', 500);
   }
