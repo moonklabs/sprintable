@@ -6,21 +6,7 @@ import { getAuthContext } from '@/lib/auth-helpers';
 import { apiSuccess, ApiErrors } from '@/lib/api-response';
 import { handleApiError } from '@/lib/api-error';
 import { isOssMode, createDocRepository } from '@/lib/storage/factory';
-
-/**
- * Extract all doc IDs referenced by page-embed nodes from an HTML string.
- * Exported for unit testing.
- */
-export function extractEmbedIds(html: string | null | undefined): string[] {
-  if (!html) return [];
-  const ids: string[] = [];
-  const regex = /data-doc-id="([^"]+)"/g;
-  let m: RegExpExecArray | null;
-  while ((m = regex.exec(html)) !== null) {
-    if (m[1]) ids.push(m[1]);
-  }
-  return ids;
-}
+import { extractEmbedIds } from './extract-embed-ids';
 
 /**
  * BFS over the embed graph starting from `startDocId`, collecting all
