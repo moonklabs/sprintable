@@ -3,7 +3,7 @@ import { MemoService } from '@/services/memo';
 import { handleApiError } from '@/lib/api-error';
 import { getAuthContext } from '@/lib/auth-helpers';
 import { apiSuccess, ApiErrors } from '@/lib/api-response';
-import { createMemoRepository, createTeamMemberRepository, isOssMode } from '@/lib/storage/factory';
+import { createMemoRepository, createTeamMemberRepository } from '@/lib/storage/factory';
 
 type RouteParams = { params: Promise<{ id: string }> };
 
@@ -30,7 +30,7 @@ export async function POST(request: Request, { params }: RouteParams) {
     const parsed = await parseBody(request, createMemoReplySchema); if (!parsed.success) return parsed.response; const body = parsed.data;
     const dbClient = undefined;
     const repo = await createMemoRepository(dbClient);
-    const teamMemberRepo = isOssMode() ? await createTeamMemberRepository() : undefined;
+    const teamMemberRepo = await createTeamMemberRepository();
     const service = new MemoService(repo, dbClient, teamMemberRepo);
     const resolvedIds = body.assigned_to_ids ?? (body.assigned_to ? [body.assigned_to] : undefined);
     const reply = await service.addReply(id, body.content, me.id, 'comment', resolvedIds);
