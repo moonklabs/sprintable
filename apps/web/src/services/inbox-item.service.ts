@@ -113,7 +113,7 @@ export async function verifyIncomingHmac(request: Request, rawBody: string): Pro
   const signature = request.headers.get('x-sprintable-signature');
   if (!signature) return false;
 
-  const { createHmac, timingSafeEqual } = await import('node:crypto');
+  const { createHmac, timingSafeEqual } = await import('crypto');
   const expected = createHmac('sha256', secret).update(rawBody).digest('hex');
   const expectedBuf = Buffer.from(expected, 'hex');
   const actualBuf = Buffer.from(signature, 'hex');
