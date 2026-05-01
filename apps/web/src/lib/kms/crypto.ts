@@ -1,4 +1,4 @@
-import { createCipheriv, createDecipheriv, randomBytes } from 'node:crypto';
+import { createCipheriv, createDecipheriv, randomBytes } from 'crypto';
 import type { KmsAdapter, KmsProvider, WrappedDekEnvelope } from './provider';
 import { getKmsAdapter } from './provider';
 import { KmsDecryptionError } from './errors';

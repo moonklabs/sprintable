@@ -1,4 +1,4 @@
-import { randomUUID } from 'node:crypto';
+import { randomUUID } from 'crypto';
 
 let _sqlite: typeof import('@sprintable/storage-sqlite') | undefined;
 async function getSqlite() {
