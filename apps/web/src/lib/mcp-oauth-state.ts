@@ -1,4 +1,4 @@
-import { createHmac, timingSafeEqual } from 'node:crypto';
+import { createHmac, timingSafeEqual } from 'crypto';
 
 const DEFAULT_MAX_AGE_SECONDS = 60 * 10;
 

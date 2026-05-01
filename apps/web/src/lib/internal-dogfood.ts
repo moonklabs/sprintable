@@ -1,4 +1,4 @@
-import { createHmac, timingSafeEqual } from 'node:crypto';
+import { createHmac, timingSafeEqual } from 'crypto';
 import { cookies } from 'next/headers';
 
 export const INTERNAL_DOGFOOD_COOKIE = 'sprintable_internal_dogfood';

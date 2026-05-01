@@ -1,5 +1,5 @@
 import type { SupabaseClient } from '@supabase/supabase-js';
-import { createHmac } from 'node:crypto';
+import { createHmac } from 'crypto';
 
 // Operator Cockpit Phase A — outbox worker
 // Polls inbox_outbox via claim_pending_outbox RPC, POSTs to webhook_url with HMAC,

@@ -1,4 +1,4 @@
-import { createCipheriv, createDecipheriv, createHash, createHmac, randomBytes } from 'node:crypto';
+import { createCipheriv, createDecipheriv, createHash, createHmac, randomBytes } from 'crypto';
 import { KmsConfigurationError, KmsDecryptionError, KmsServiceError } from './errors';
 
 export type KmsProvider = 'local' | 'gcp' | 'vault';

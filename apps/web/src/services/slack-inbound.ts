@@ -1,4 +1,4 @@
-import { createHmac, timingSafeEqual } from 'node:crypto';
+import { createHmac, timingSafeEqual } from 'crypto';
 import type { BridgeInboundEvent } from './bridge-inbound';
 
 export interface SlackMessageEvent {
