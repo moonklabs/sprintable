@@ -9,6 +9,7 @@ substitutions:
   _AR_REGION: asia-northeast3
   _AR_REPO: sprintable
   _DEPLOY_ENV: dev  # main push 시 prod로 오버라이드됨
+  _FASTAPI_URL: https://sprintable-backend-dev-787818285179.asia-northeast3.run.app  # 트리거별 오버라이드
 
 steps:
   # ─── Frontend (Next.js standalone) ────────────────────────────────────────
@@ -27,6 +28,8 @@ steps:
       - ${_AR_REGION}-docker.pkg.dev/${PROJECT_ID}/${_AR_REPO}/frontend:latest-${_DEPLOY_ENV}
       - --build-arg
       - BUILDKIT_INLINE_CACHE=1
+      - --build-arg
+      - NEXT_PUBLIC_FASTAPI_URL=${_FASTAPI_URL}
       - .
     env:
       - DOCKER_BUILDKIT=1
