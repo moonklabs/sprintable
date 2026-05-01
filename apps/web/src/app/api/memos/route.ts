@@ -4,7 +4,7 @@ import { getAuthContext } from '@/lib/auth-helpers';
 import { parseBody, createMemoSchema, MEMO_TYPES_REQUIRING_ASSIGNEE } from '@sprintable/shared';
 import { apiSuccess, ApiErrors } from '@/lib/api-response';
 import { buildCursorPageMeta, parseCursorPageInput } from '@/lib/pagination';
-import { createMemoRepository, createTeamMemberRepository, createProjectRepository, isOssMode } from '@/lib/storage/factory';
+import { createMemoRepository, createTeamMemberRepository, createProjectRepository } from '@/lib/storage/factory';
 import { apiError } from '@/lib/api-response';
 
 export async function POST(request: Request) {
@@ -39,8 +39,8 @@ export async function POST(request: Request) {
     }
     const dbClient = undefined;
     const repo = await createMemoRepository(dbClient);
-    const teamMemberRepo = isOssMode() ? await createTeamMemberRepository() : undefined;
-    const projectRepo = isOssMode() ? await createProjectRepository() : undefined;
+    const teamMemberRepo = await createTeamMemberRepository();
+    const projectRepo = await createProjectRepository();
     const service = new MemoService(repo, dbClient, teamMemberRepo, projectRepo);
     const memo = await service.create({
       ...body,
