@@ -48,15 +48,9 @@ importers:
       '@sprintable/core-storage':
         specifier: workspace:*
         version: link:../../packages/core-storage
-      '@sprintable/storage-supabase':
+      '@sprintable/storage-api':
         specifier: workspace:*
-        version: link:../../packages/storage-supabase
-      '@supabase/ssr':
-        specifier: ^0.10.0
-        version: 0.10.0(@supabase/supabase-js@2.101.1)
-      '@supabase/supabase-js':
-        specifier: ^2.101.1
-        version: 2.101.1
+        version: link:../../packages/storage-api
       '@tiptap/core':
         specifier: ^3.22.3
         version: 3.22.3(@tiptap/pm@3.22.3)
@@ -296,6 +290,16 @@ importers:
         specifier: ^4.1.2
         version: 4.1.2(@types/node@22.19.17)(msw@2.12.14(@types/node@22.19.17)(typescript@5.9.3))(vite@8.0.3(@emnapi/core@1.9.1)(@emnapi/runtime@1.9.1)(@types/node@22.19.17)(esbuild@0.27.4)(jiti@2.6.1)(tsx@4.21.0))
 
+  packages/storage-api:
+    dependencies:
+      '@sprintable/core-storage':
+        specifier: workspace:*
+        version: link:../core-storage
+    devDependencies:
+      typescript:
+        specifier: ^5.7.0
+        version: 5.9.3
+
   packages/storage-sqlite:
     dependencies:
       '@sprintable/core-storage':
@@ -305,19 +309,6 @@ importers:
       '@types/node':
         specifier: ^22
         version: 22.19.17
-      typescript:
-        specifier: ^5.7.0
-        version: 5.9.3
-
-  packages/storage-supabase:
-    dependencies:
-      '@sprintable/core-storage':
-        specifier: workspace:*
-        version: link:../core-storage
-      '@supabase/supabase-js':
-        specifier: ^2
-        version: 2.101.1
-    devDependencies:
       typescript:
         specifier: ^5.7.0
         version: 5.9.3
@@ -1333,11 +1324,6 @@ packages:
   '@supabase/realtime-js@2.101.1':
     resolution: {integrity: sha512-Oa6dno0OB9I+hv5do5zsZHbFu41ViZnE9IWjmkeeF/8fPmB5fWoHGqeTYEC3/0DAgtpUoFJa4FpvzFH0SBHo1Q==}
     engines: {node: '>=20.0.0'}
-
-  '@supabase/ssr@0.10.0':
-    resolution: {integrity: sha512-36jIu+DuKzg5EgA3fnH+zHvwASvpKcL4zPgmHoZaULroS5Q4mzeHcM69zJ0sXUHddO5IcHjQNZJ9Vyhl/DdbRw==}
-    peerDependencies:
-      '@supabase/supabase-js': ^2.100.1
 
   '@supabase/storage-js@2.101.1':
     resolution: {integrity: sha512-WhTaUOBgeEvnKLy95Cdlp6+D5igSF/65yC727w1olxbet5nzUvMlajKUWyzNtQu2efrz2cQ7FcdVBdQqgT9YKQ==}
@@ -5966,11 +5952,6 @@ snapshots:
     transitivePeerDependencies:
       - bufferutil
       - utf-8-validate
-
-  '@supabase/ssr@0.10.0(@supabase/supabase-js@2.101.1)':
-    dependencies:
-      '@supabase/supabase-js': 2.101.1
-      cookie: 1.1.1
 
   '@supabase/storage-js@2.101.1':
     dependencies:
