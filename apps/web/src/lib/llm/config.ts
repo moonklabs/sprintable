@@ -1,4 +1,4 @@
-import { createAdminClient } from '@/lib/db/admin';
+
 import { z } from 'zod';
 import { githubMcpConfigSchema } from '@/lib/github-mcp';
 import { KmsError } from '@/lib/kms';
@@ -113,7 +113,7 @@ export async function resolveLLMConfig(projectId: string, overrides?: {
   timeoutMs?: number;
   maxRetries?: number;
 }) : Promise<LLMConfig | null> {
-  const serviceClient = createAdminClient();
+  const serviceClient = undefined;
 
   const { settings, integration } = await getProjectAiSettingsWithIntegration(serviceClient as never, projectId);
   const persistedProvider = settings?.provider as LLMProvider | undefined;

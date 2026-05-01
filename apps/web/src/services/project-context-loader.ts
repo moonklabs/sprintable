@@ -1,4 +1,4 @@
-import { createAdminClient } from '@/lib/db/admin';
+
 import type { PromptProjectRecord, PromptTeamMemberRecord } from './agent-system-prompt';
 
 export interface ProjectContextLoaderOptions {

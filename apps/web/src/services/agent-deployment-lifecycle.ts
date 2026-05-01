@@ -1,5 +1,5 @@
 
-import { createAdminClient } from '@/lib/db/admin';
+
 import { AgentExecutionLoop } from './agent-execution-loop';
 import { AgentRoutingRuleService } from './agent-routing-rule';
 import { buildAutomaticRoutingTemplate, resolveAutoRoutingPersonaRole, type AutoRoutingTemplateAgent, type AutoRoutingTemplateResult } from './agent-routing-template';
@@ -222,7 +222,7 @@ export class AgentDeploymentLifecycleService {
       }
     }
 
-    const mcpValidation = await validateProjectMcpConnections(createAdminClient() as never, {
+    const mcpValidation = await validateProjectMcpConnections(undefined as never, {
       projectId: input.projectId,
     }).catch((error) => ({
       ok: false,

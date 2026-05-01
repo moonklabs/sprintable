@@ -1,5 +1,5 @@
 import { createEpicSchema } from '@sprintable/shared';
-import { createAdminClient } from '@/lib/db/admin';
+
 import { EpicService, type CreateEpicInput } from '@/services/epic';
 import { handleApiError } from '@/lib/api-error';
 import { apiSuccess, apiError, ApiErrors } from '@/lib/api-response';
@@ -14,7 +14,7 @@ export async function GET(request: Request) {
     const me = await getAuthContext(request);
     if (!me) return ApiErrors.unauthorized();
     if (me.rateLimitExceeded) return ApiErrors.tooManyRequests(me.rateLimitRemaining, me.rateLimitResetAt);
-    const dbClient = me.type === 'agent' ? createAdminClient() : undefined;
+    const dbClient = undefined;
 
     const { searchParams } = new URL(request.url);
     const pageInput = parseCursorPageInput({
@@ -38,7 +38,7 @@ export async function POST(request: Request) {
     const me = await getAuthContext(request);
     if (!me) return ApiErrors.unauthorized();
     if (me.rateLimitExceeded) return ApiErrors.tooManyRequests(me.rateLimitRemaining, me.rateLimitResetAt);
-    const dbClient = me.type === 'agent' ? createAdminClient() : undefined;
+    const dbClient = undefined;
 
     // 권한 체크: agent 또는 admin/owner만 에픽 생성 가능
     if (!isOssMode() && me.type !== 'agent') {

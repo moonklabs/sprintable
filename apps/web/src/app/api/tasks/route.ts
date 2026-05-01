@@ -1,6 +1,6 @@
 
 import { parseBody, createTaskSchema } from '@sprintable/shared';
-import { createAdminClient } from '@/lib/db/admin';
+
 import { TaskService, type CreateTaskInput } from '@/services/task';
 import { createTaskRepository, isOssMode } from '@/lib/storage/factory';
 import { handleApiError } from '@/lib/api-error';
@@ -46,7 +46,7 @@ export async function GET(request: Request) {
     if (!me) return ApiErrors.unauthorized();
     if (me.rateLimitExceeded) return ApiErrors.tooManyRequests(me.rateLimitRemaining, me.rateLimitResetAt);
     const ossMode = isOssMode();
-    const dbClient: any | undefined = ossMode ? undefined : (me.type === 'agent' ? createAdminClient() : undefined);
+    const dbClient: any | undefined = undefined;
 
     const { searchParams } = new URL(request.url);
     const storyId = searchParams.get('story_id') ?? undefined;
@@ -114,7 +114,7 @@ export async function POST(request: Request) {
     const me = await getAuthContext(request);
     if (!me) return ApiErrors.unauthorized();
     if (me.rateLimitExceeded) return ApiErrors.tooManyRequests(me.rateLimitRemaining, me.rateLimitResetAt);
-    const dbClient: any = me.type === 'agent' ? createAdminClient() : undefined;
+    const dbClient: any = undefined;
 
     const parsed = await parseBody(request, createTaskSchema); if (!parsed.success) return parsed.response; const body = parsed.data;
     const repo = await createTaskRepository(dbClient);

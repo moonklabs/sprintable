@@ -1,7 +1,6 @@
 import { handleApiError } from '@/lib/api-error';
 import { apiSuccess, ApiErrors } from '@/lib/api-response';
-import { createAdminClient } from '@/lib/db/admin';
-import { isOssMode, createInboxItemRepository } from '@/lib/storage/factory';
+import { createInboxItemRepository } from '@/lib/storage/factory';
 import { incomingInboxItemSchema } from '@sprintable/shared';
 import { verifyIncomingHmac } from '@/services/inbox-item.service';
 
@@ -43,8 +42,7 @@ export async function POST(request: Request) {
       return ApiErrors.validationFailed(issues);
     }
 
-    const ossMode = isOssMode();
-    const repo = await createInboxItemRepository(ossMode ? undefined : createAdminClient());
+    const repo = await createInboxItemRepository(undefined);
 
     const item = await repo.create({
       org_id: orgIdHeader,

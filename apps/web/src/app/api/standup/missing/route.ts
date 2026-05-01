@@ -1,5 +1,5 @@
 
-import { createAdminClient } from '@/lib/db/admin';
+
 import { handleApiError } from '@/lib/api-error';
 import { apiSuccess, ApiErrors } from '@/lib/api-response';
 import { getAuthContext } from '@/lib/auth-helpers';
@@ -24,7 +24,7 @@ export async function GET(request: Request) {
       return apiSuccess(await getOssStandupMissing(projectId, date));
     }
 
-    const dbClient: any = me.type === 'agent' ? createAdminClient() : undefined;
+    const dbClient: any = undefined;
     const service = new StandupService(dbClient);
     const data = await service.getMissing(projectId, date);
     return apiSuccess(data);

@@ -1,5 +1,5 @@
 
-import { createAdminClient } from '@/lib/db/admin';
+
 import { SprintService, type CreateSprintInput } from '@/services/sprint';
 import { handleApiError } from '@/lib/api-error';
 import { apiSuccess, apiError, ApiErrors } from '@/lib/api-response';
@@ -14,7 +14,7 @@ export async function POST(request: Request) {
     if (!me) return ApiErrors.unauthorized();
     if (me.rateLimitExceeded) return ApiErrors.tooManyRequests(me.rateLimitRemaining, me.rateLimitResetAt);
     const ossMode = isOssMode();
-    const dbClient = ossMode ? undefined : (me.type === 'agent' ? createAdminClient() : undefined);
+    const dbClient = undefined;
 
     let rawBody: unknown;
     try { rawBody = await request.json(); } catch { return apiError('BAD_REQUEST', 'Invalid JSON body', 400); }
@@ -40,7 +40,7 @@ export async function GET(request: Request) {
     if (!me) return ApiErrors.unauthorized();
     if (me.rateLimitExceeded) return ApiErrors.tooManyRequests(me.rateLimitRemaining, me.rateLimitResetAt);
     const ossMode = isOssMode();
-    const dbClient = ossMode ? undefined : (me.type === 'agent' ? createAdminClient() : undefined);
+    const dbClient = undefined;
 
     const { searchParams } = new URL(request.url);
     const repo = await createSprintRepository(dbClient);

@@ -1,5 +1,5 @@
 
-import { createAdminClient } from '@/lib/db/admin';
+
 import { StoryService } from '@/services/story';
 import { handleApiError } from '@/lib/api-error';
 import { getAuthContext } from '@/lib/auth-helpers';
@@ -12,7 +12,7 @@ export async function GET(request: Request) {
     if (!me) return ApiErrors.unauthorized();
     if (me.rateLimitExceeded) return ApiErrors.tooManyRequests(me.rateLimitRemaining, me.rateLimitResetAt);
     const ossMode = isOssMode();
-    const dbClient = ossMode ? undefined : (me.type === 'agent' ? createAdminClient() : undefined);
+    const dbClient = undefined;
 
     const { searchParams } = new URL(request.url);
     const projectId = searchParams.get('project_id');

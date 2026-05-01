@@ -1,6 +1,5 @@
 import { NextResponse } from 'next/server';
-import { isOssMode, createDocRepository } from '@/lib/storage/factory';
-import { createAdminClient } from '@/lib/db/admin';
+import { createDocRepository } from '@/lib/storage/factory';
 
 export const dynamic = 'force-dynamic';
 
@@ -9,7 +8,7 @@ const DOC_SLUG = 'baos-enrollment-guide-agent';
 
 export async function GET() {
   try {
-    const db = isOssMode() ? undefined : createAdminClient();
+    const db = undefined;
     const repo = await createDocRepository(db);
     const doc = await repo.getBySlug(PROJECT_ID, DOC_SLUG);
 

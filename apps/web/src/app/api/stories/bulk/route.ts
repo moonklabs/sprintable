@@ -1,6 +1,6 @@
 
 import { parseBody, bulkUpdateStorySchema } from '@sprintable/shared';
-import { createAdminClient } from '@/lib/db/admin';
+
 import { StoryService } from '@/services/story';
 import { handleApiError } from '@/lib/api-error';
 import { getAuthContext } from '@/lib/auth-helpers';
@@ -14,7 +14,7 @@ export async function PATCH(request: Request) {
     if (!me) return ApiErrors.unauthorized();
     if (me.rateLimitExceeded) return ApiErrors.tooManyRequests(me.rateLimitRemaining, me.rateLimitResetAt);
     const ossMode = isOssMode();
-    const dbClient = ossMode ? undefined : (me.type === 'agent' ? createAdminClient() : undefined);
+    const dbClient = undefined;
 
     const parsed = await parseBody(request, bulkUpdateStorySchema); if (!parsed.success) return parsed.response; const body = parsed.data;
     if (!Array.isArray(body.items) || body.items.length === 0) {

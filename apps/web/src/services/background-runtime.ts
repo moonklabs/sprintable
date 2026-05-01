@@ -1,4 +1,4 @@
-import { createAdminClient } from '@/lib/db/admin';
+
 import { DiscordGatewayRuntime } from './discord-gateway-runtime';
 import { DiscordOutboundDispatcher } from './discord-outbound-dispatcher';
 import { MemoEventDispatcher } from './memo-event-dispatcher';
@@ -195,7 +195,7 @@ export class BackgroundRuntimeWorker {
 
 export function createBackgroundRuntimeWorkerFromEnv(env: NodeJS.ProcessEnv = process.env) {
   return new BackgroundRuntimeWorker({
-    db: createAdminClient(),
+    db: undefined,
     appUrl: resolveAppUrl(env['NEXT_PUBLIC_APP_URL'], env),
     settings: resolveBackgroundRuntimeSettings(env),
   });

@@ -1,5 +1,5 @@
 
-import { createAdminClient } from '@/lib/db/admin';
+
 import { BUILTIN_AGENT_TOOL_NAMES } from './agent-builtin-tool-names';
 import { listProjectApprovedMcpToolOptions } from './project-mcp';
 
@@ -30,7 +30,7 @@ export async function listProjectPersonaToolOptions(_db: any, projectId: string)
 
   let approvedOptions: Array<{ name: string; serverName: string; groupKind: 'mcp' | 'github' }> = [];
   try {
-    approvedOptions = await listProjectApprovedMcpToolOptions(createAdminClient() as never, projectId);
+    approvedOptions = await listProjectApprovedMcpToolOptions(undefined as never, projectId);
   } catch {
     approvedOptions = [];
   }
