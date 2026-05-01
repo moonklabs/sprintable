@@ -170,9 +170,10 @@ def test_auth_context_includes_org_id_from_jwt():
     from fastapi.security import HTTPAuthorizationCredentials
     creds = HTTPAuthorizationCredentials(scheme="Bearer", credentials=token)
 
+    import asyncio
     with patch.dict("os.environ", {"JWT_SECRET": "test-secret"}):
         from app.dependencies.auth import get_current_user
-        ctx = get_current_user(credentials=creds)
+        ctx = asyncio.run(get_current_user(credentials=creds, db=None))
 
     assert ctx.org_id == "org-abc"
     assert ctx.user_id == "user-1"
