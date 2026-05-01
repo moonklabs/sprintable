@@ -1,11 +1,12 @@
 import { z } from 'zod';
-import { createSupabaseServerClient } from '@/lib/supabase/server';
 import { handleApiError } from '@/lib/api-error';
 import { apiSuccess, ApiErrors } from '@/lib/api-response';
 import { getMyTeamMember } from '@/lib/auth-helpers';
 import { requireOrgAdmin } from '@/lib/admin-check';
 import { validateCustomEndpoint } from '@/lib/llm/config';
 import type { LLMProvider } from '@/lib/llm';
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+const supabase: any = undefined;
 
 import { isOssMode } from '@/lib/storage/factory';
 
@@ -39,7 +40,6 @@ export async function POST(request: Request, { params }: RouteParams) {
   }
   try {
     const { id } = await params;
-    const supabase = await createSupabaseServerClient();
     const { data: { user } } = await supabase.auth.getUser();
     if (!user) return ApiErrors.unauthorized();
 

@@ -1,4 +1,5 @@
-import type { SupabaseClient } from '@supabase/supabase-js';
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+type SupabaseClient = any;
 
 export type AuditAction = 'member_added' | 'member_removed' | 'role_changed';
 

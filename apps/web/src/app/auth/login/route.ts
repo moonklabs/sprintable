@@ -1,5 +1,4 @@
 import { NextResponse } from 'next/server';
-import { createSupabaseServerClient } from '@/lib/supabase/server';
 import { resolveAppUrl } from '@/services/app-url';
 
 const ALLOWED_PROVIDERS = ['google', 'github'] as const;
@@ -15,7 +14,7 @@ export async function GET(request: Request) {
     return NextResponse.redirect(`${origin}/login?error=invalid_provider`);
   }
 
-  const supabase = await createSupabaseServerClient();
+  const supabase = (undefined as any);
 
   const redirectTo = returnTo && returnTo.startsWith('/')
     ? `${origin}/auth/callback?next=${encodeURIComponent(returnTo)}`

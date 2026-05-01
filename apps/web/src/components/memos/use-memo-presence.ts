@@ -1,7 +1,8 @@
 'use client';
 
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import type { RealtimeChannel } from '@supabase/supabase-js';
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+type RealtimeChannel = any;
 import { createSupabaseBrowserClient } from '@/lib/supabase/client';
 
 interface MemoPresenceEntry {

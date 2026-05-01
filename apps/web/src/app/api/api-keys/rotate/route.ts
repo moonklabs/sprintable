@@ -1,11 +1,11 @@
-import { createSupabaseServerClient } from '@/lib/supabase/server';
-import { createSupabaseAdminClient } from '@/lib/supabase/admin';
 import { handleApiError } from '@/lib/api-error';
 import { apiSuccess, apiError, ApiErrors } from '@/lib/api-response';
 import { getAuthContext } from '@/lib/auth-helpers';
 import { generateApiKey } from '@/lib/auth-api-key';
 import { isOssMode } from '@/lib/storage/factory';
 import { requireRole, ADMIN_ROLES } from '@/lib/role-guard';
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+const supabase: any = undefined;
 
 /**
  * POST /api/api-keys/rotate
@@ -15,8 +15,7 @@ import { requireRole, ADMIN_ROLES } from '@/lib/role-guard';
 export async function POST(request: Request) {
   if (isOssMode()) return apiError('NOT_IMPLEMENTED', 'API key rotation is not supported in OSS mode.', 501);
   try {
-    const supabase = await createSupabaseServerClient();
-    const me = await getAuthContext(supabase, request);
+    const me = await getAuthContext(request);
     if (!me) return ApiErrors.unauthorized();
     if (me.rateLimitExceeded) return ApiErrors.tooManyRequests(me.rateLimitRemaining, me.rateLimitResetAt);
 
@@ -28,7 +27,7 @@ export async function POST(request: Request) {
     const { api_key_id } = await request.json() as { api_key_id: string };
     if (!api_key_id) return apiError('BAD_REQUEST', 'api_key_id required', 400);
 
-    const admin = createSupabaseAdminClient();
+    const admin = (await (await import('@/lib/supabase/admin')).createSupabaseAdminClient());
 
     // 기존 키 조회 + org 확인
     const { data: existing } = await admin

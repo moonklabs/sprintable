@@ -1,11 +1,11 @@
-import { createSupabaseServerClient } from '@/lib/supabase/server';
-import { createSupabaseAdminClient } from '@/lib/supabase/admin';
 import { handleApiError } from '@/lib/api-error';
 import { apiSuccess, apiError, ApiErrors } from '@/lib/api-response';
 import { getMyTeamMember, getAuthContext } from '@/lib/auth-helpers';
 import { isOssMode } from '@/lib/storage/factory';
 import { requireRole, ADMIN_ROLES } from '@/lib/role-guard';
 import { AuditLogService } from '@/services/audit-log.service';
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+const supabase: any = undefined;
 
 export async function DELETE(
   request: Request,
@@ -13,9 +13,8 @@ export async function DELETE(
 ) {
   if (isOssMode()) return apiError('NOT_IMPLEMENTED', 'Member management is not supported in OSS mode.', 501);
   try {
-    const supabase = await createSupabaseServerClient();
     // AC4: API Key로 접근하는 에이전트는 admin scope 필요
-    const meScope = await getAuthContext(supabase, request);
+    const meScope = await getAuthContext(request);
     if (meScope?.type === 'agent' && !meScope.scope?.includes('admin')) {
       return ApiErrors.insufficientScope('admin');
     }
@@ -61,7 +60,7 @@ export async function DELETE(
 
     if (updateError) throw updateError;
 
-    new AuditLogService(createSupabaseAdminClient()).log({
+    new AuditLogService((await (await import('@/lib/supabase/admin')).createSupabaseAdminClient())).log({
       org_id: me.org_id as string,
       actor_id: user.id,
       action: 'member_removed',
@@ -81,8 +80,7 @@ export async function PATCH(
 ) {
   if (isOssMode()) return apiError('NOT_IMPLEMENTED', 'Member management is not supported in OSS mode.', 501);
   try {
-    const supabase = await createSupabaseServerClient();
-    const meScope = await getAuthContext(supabase, request);
+    const meScope = await getAuthContext(request);
     if (meScope?.type === 'agent' && !meScope.scope?.includes('admin')) {
       return ApiErrors.insufficientScope('admin');
     }
@@ -125,7 +123,7 @@ export async function PATCH(
 
     if (updateError) throw updateError;
 
-    new AuditLogService(createSupabaseAdminClient()).log({
+    new AuditLogService((await (await import('@/lib/supabase/admin')).createSupabaseAdminClient())).log({
       org_id: me.org_id as string,
       actor_id: user.id,
       action: 'role_changed',

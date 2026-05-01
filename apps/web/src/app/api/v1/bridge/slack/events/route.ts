@@ -1,4 +1,3 @@
-import { createClient } from '@supabase/supabase-js';
 import { apiError, apiSuccess } from '@/lib/api-response';
 import { isOssMode } from '@/lib/storage/factory';
 import { BridgeInboundService } from '@/services/bridge-inbound';
@@ -47,7 +46,7 @@ export async function POST(request: Request) {
     return apiError('CONFIGURATION_ERROR', 'Supabase service role is not configured', 500);
   }
 
-  const supabase = createClient(supabaseUrl, serviceRoleKey);
+  const supabase = (await import('@supabase/supabase-js')).createClient(supabaseUrl, serviceRoleKey);
   const bridgeService = new BridgeInboundService(supabase);
   const channelMapping = await bridgeService.findChannelMapping('slack', payload.event.channel);
 

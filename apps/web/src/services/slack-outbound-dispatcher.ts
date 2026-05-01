@@ -1,4 +1,7 @@
-import type { RealtimeChannel, SupabaseClient } from '@supabase/supabase-js';
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+type RealtimeChannel = any;
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+type SupabaseClient = any;
 import { MemoService } from './memo';
 import { buildAbsoluteMemoLink } from './app-url';
 

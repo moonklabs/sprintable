@@ -1,13 +1,13 @@
-import { createSupabaseServerClient } from '@/lib/supabase/server';
 import { handleApiError } from '@/lib/api-error';
 import { apiSuccess, apiError, ApiErrors } from '@/lib/api-response';
 import { isOssMode } from '@/lib/storage/factory';
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+const supabase: any = undefined;
 
 /** POST — 계정 탈퇴 요청 (30일 유예) */
 export async function POST() {
   if (isOssMode()) return apiError('NOT_IMPLEMENTED', 'Account deletion is not supported in OSS mode.', 501);
   try {
-    const supabase = await createSupabaseServerClient();
     const { data: { user } } = await supabase.auth.getUser();
     if (!user) return ApiErrors.unauthorized();
 

@@ -38,7 +38,7 @@ export function MemoCreateForm({ members, onSubmit, onCancel, initialTitle, draf
     if (!draftStorageKey || draftKeyRef.current === draftStorageKey) return;
     draftKeyRef.current = draftStorageKey;
 
-    let stored = null;
+    let stored: ReturnType<typeof parseMemoDraft> = null;
     try {
       stored = parseMemoDraft(window.localStorage.getItem(draftStorageKey));
     } catch {

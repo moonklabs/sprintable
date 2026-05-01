@@ -1,4 +1,5 @@
-import type { SupabaseClient } from '@supabase/supabase-js';
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+type SupabaseClient = any;
 import { BridgeInboundService } from './bridge-inbound';
 import {
   type DiscordBridgeConfig,

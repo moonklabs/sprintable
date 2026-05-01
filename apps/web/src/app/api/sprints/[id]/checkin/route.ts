@@ -1,11 +1,8 @@
-import type { SupabaseClient } from '@supabase/supabase-js';
-import { createSupabaseServerClient } from '@/lib/supabase/server';
-import { createSupabaseAdminClient } from '@/lib/supabase/admin';
 import { handleApiError } from '@/lib/api-error';
 import { apiSuccess, ApiErrors } from '@/lib/api-response';
 import { getAuthContext } from '@/lib/auth-helpers';
 import { SprintService, NotFoundError } from '@/services/sprint';
-import { isOssMode, createSprintRepository } from '@/lib/storage/factory';
+import { createSprintRepository } from '@/lib/storage/factory';
 
 type RouteParams = { params: Promise<{ id: string }> };
 
@@ -13,19 +10,16 @@ type RouteParams = { params: Promise<{ id: string }> };
 export async function GET(request: Request, { params }: RouteParams) {
   try {
     const { id } = await params;
-    const supabase = await createSupabaseServerClient();
-    const me = await getAuthContext(supabase, request);
+    const me = await getAuthContext(request);
     if (!me) return ApiErrors.unauthorized();
     if (me.rateLimitExceeded) return ApiErrors.tooManyRequests(me.rateLimitRemaining, me.rateLimitResetAt);
-    const ossMode = isOssMode();
-    const dbClient = ossMode ? undefined : (me.type === 'agent' ? createSupabaseAdminClient() : supabase);
 
     const { searchParams } = new URL(request.url);
     const date = searchParams.get('date');
     if (!date) return ApiErrors.badRequest('date required');
 
-    const repo = await createSprintRepository(dbClient);
-    const service = new SprintService(repo, dbClient as SupabaseClient | undefined);
+    const repo = await createSprintRepository();
+    const service = new SprintService(repo);
     const data = await service.checkin(id, date);
     return apiSuccess(data);
   } catch (err: unknown) {

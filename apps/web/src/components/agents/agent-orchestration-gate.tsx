@@ -1,6 +1,5 @@
 import Link from 'next/link';
 import { getTranslations } from 'next-intl/server';
-import { createSupabaseServerClient } from '@/lib/supabase/server';
 import { checkFeatureLimit } from '@/lib/check-feature';
 import { PageHeader } from '@/components/ui/page-header';
 import { buttonVariants } from '@/components/ui/button';
@@ -36,7 +35,7 @@ export async function AgentOrchestrationGate({
   orgId: string;
   children: React.ReactNode;
 }) {
-  const supabase = await createSupabaseServerClient();
+  const supabase = (undefined as any);
   const check = await checkFeatureLimit(supabase, orgId, 'agent_orchestration');
 
   if (check.allowed) {

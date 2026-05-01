@@ -206,7 +206,7 @@ describe('InboxOutboxService.scan', () => {
 
     const service = new InboxOutboxService(supabase as never, {
       hmacSecret: 'secret',
-      fetchImpl,
+      fetchImpl: fetchImpl as any,
       logger: { error: () => {} },
     });
 

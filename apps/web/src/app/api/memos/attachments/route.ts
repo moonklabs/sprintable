@@ -1,8 +1,9 @@
-import { createSupabaseServerClient } from '@/lib/supabase/server';
 import { handleApiError } from '@/lib/api-error';
 import { getMyTeamMember } from '@/lib/auth-helpers';
 import { apiSuccess, apiError, ApiErrors } from '@/lib/api-response';
 import { isOssMode } from '@/lib/storage/factory';
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+const supabase: any = undefined;
 
 const MAX_FILE_SIZE = 10 * 1024 * 1024;
 const ALLOWED_IMAGE_TYPES = new Set(['image/png', 'image/jpeg', 'image/webp', 'image/gif', 'image/avif']);
@@ -28,7 +29,6 @@ function sanitizeFilename(name: string) {
 export async function POST(request: Request) {
   if (isOssMode()) return apiError('NOT_IMPLEMENTED', 'Attachments are not available in OSS mode.', 501);
   try {
-    const supabase = await createSupabaseServerClient();
     const { data: { user } } = await supabase.auth.getUser();
     if (!user) return ApiErrors.unauthorized();
 

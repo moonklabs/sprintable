@@ -2,7 +2,8 @@
 
 import { useEffect, useRef, useState } from 'react';
 import { createSupabaseBrowserClient } from '@/lib/supabase/client';
-import type { RealtimeChannel } from '@supabase/supabase-js';
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+type RealtimeChannel = any;
 
 interface RealtimeMemo {
   id: string;

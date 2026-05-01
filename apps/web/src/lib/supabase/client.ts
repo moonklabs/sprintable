@@ -1,6 +1,10 @@
 'use client';
 
-import { createBrowserClient } from '@supabase/ssr';
+// SaaS-only 브라우저 클라이언트 — OSS에서는 이 파일의 함수가 호출되지 않음
+// @supabase/ssr은 dynamic import로 로드 (static import 제거, C-S10)
+
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+type BrowserClient = any;
 
 // URL별 rate-limit backoff 만료 시각 (ms). 모듈 스코프로 탭 전체 공유.
 const rateLimitBlockedUntil = new Map<string, number>();
@@ -28,14 +32,12 @@ function rateLimitedFetch(input: RequestInfo | URL, init?: RequestInit): Promise
       rateLimitBlockedUntil.set(url, Date.now() + backoffSec * 1000);
     }
 
-    // refresh_token_already_used (HTTP 400) — sb-* 쿠키 클리어 후 /login 리다이렉트
     if (response.status === 400 && url.includes('/token')) {
       try {
         const body = await response.clone().json() as Record<string, string>;
         const msg = (body.error_description ?? body.message ?? '').toLowerCase();
         const code = body.error ?? body.code ?? '';
         if (msg.includes('already used') || msg.includes('already_used') || code === 'invalid_grant' || code === 'refresh_token_already_used') {
-          // sb-* auth 쿠키 전량 삭제 후 /login 리다이렉트
           const cookieDomain = process.env['NEXT_PUBLIC_COOKIE_DOMAIN'];
           document.cookie.split(';').forEach((c) => {
             const name = c.trim().split('=')[0];
@@ -52,9 +54,15 @@ function rateLimitedFetch(input: RequestInfo | URL, init?: RequestInit): Promise
   });
 }
 
-export function createSupabaseBrowserClient() {
+let _client: BrowserClient | null = null;
+
+export function createSupabaseBrowserClient(): BrowserClient {
+  if (_client) return _client;
+  // @supabase/ssr를 즉시 require (브라우저 환경에서만 호출됨)
+  // eslint-disable-next-line @typescript-eslint/no-require-imports
+  const { createBrowserClient } = require('@supabase/ssr') as typeof import('@supabase/ssr');
   const cookieDomain = process.env['NEXT_PUBLIC_COOKIE_DOMAIN'];
-  return createBrowserClient(
+  _client = createBrowserClient(
     process.env['NEXT_PUBLIC_SUPABASE_URL']!,
     process.env['NEXT_PUBLIC_SUPABASE_ANON_KEY']!,
     {
@@ -69,4 +77,5 @@ export function createSupabaseBrowserClient() {
       },
     },
   );
+  return _client;
 }

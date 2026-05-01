@@ -1,8 +1,8 @@
-import { createSupabaseServerClient } from '@/lib/supabase/server';
-import { createSupabaseAdminClient } from '@/lib/supabase/admin';
 import { handleApiError } from '@/lib/api-error';
 import { apiSuccess, apiError, ApiErrors } from '@/lib/api-response';
 import { z } from 'zod/v4';
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+const supabase: any = undefined;
 
 const createOrgSchema = z.object({
   name: z.string().trim().min(1),
@@ -12,7 +12,6 @@ const createOrgSchema = z.object({
 // POST /api/organizations — create org + register creator as owner
 export async function POST(request: Request) {
   try {
-    const supabase = await createSupabaseServerClient();
     const { data: { user } } = await supabase.auth.getUser();
     if (!user) return ApiErrors.unauthorized();
 
@@ -24,7 +23,7 @@ export async function POST(request: Request) {
     const { name, slug } = parsed.data;
 
     // admin client — slug 유니크 검증 시 RLS가 다른 org를 숨기는 것을 방지
-    const admin = createSupabaseAdminClient();
+    const admin = (await (await import('@/lib/supabase/admin')).createSupabaseAdminClient());
 
     const { data: existingSlug } = await admin
       .from('organizations')

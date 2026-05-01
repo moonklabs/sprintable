@@ -1,4 +1,3 @@
-import { createClient } from '@supabase/supabase-js';
 import { apiSuccess, apiError } from '@/lib/api-response';
 import { isOssMode } from '@/lib/storage/factory';
 import { AgentRetryService } from '@/services/agent-retry';
@@ -26,7 +25,7 @@ export async function GET(request: Request) {
 
   try {
     // service_role로 RLS 우회
-    const supabase = createClient(
+    const supabase = (await import('@supabase/supabase-js')).createClient(
       process.env.NEXT_PUBLIC_SUPABASE_URL!,
       process.env.SUPABASE_SERVICE_ROLE_KEY!,
     );

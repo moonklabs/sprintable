@@ -1,4 +1,5 @@
-import { createClient, type SupabaseClient } from '@supabase/supabase-js';
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+type SupabaseClient = any;
 import { DiscordGatewayRuntime } from './discord-gateway-runtime';
 import { DiscordOutboundDispatcher } from './discord-outbound-dispatcher';
 import { MemoEventDispatcher } from './memo-event-dispatcher';
@@ -200,6 +201,8 @@ export function createBackgroundRuntimeWorkerFromEnv(env: NodeJS.ProcessEnv = pr
     return null;
   }
 
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const { createClient } = require('@supabase/supabase-js') as typeof import('@supabase/supabase-js');
   return new BackgroundRuntimeWorker({
     supabase: createClient(supabaseUrl, serviceRoleKey),
     appUrl: resolveAppUrl(env['NEXT_PUBLIC_APP_URL'], env),

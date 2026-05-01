@@ -1,4 +1,5 @@
-import type { SupabaseClient } from '@supabase/supabase-js';
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+type SupabaseClient = any;
 import type { ISprintRepository, CreateSprintInput, UpdateSprintInput } from '@sprintable/core-storage';
 import { SupabaseSprintRepository } from '@sprintable/storage-supabase';
 import { requireOrgAdmin } from '@/lib/admin-check';

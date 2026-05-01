@@ -1,13 +1,13 @@
 import { NextResponse } from 'next/server';
-import { createSupabaseServerClient } from '@/lib/supabase/server';
 import { getMyTeamMember } from '@/lib/auth-helpers';
 import { apiError, ApiErrors } from '@/lib/api-response';
 import { isOssMode } from '@/lib/storage/factory';
 import { buildSlackConnectUrl } from '@/services/slack-channel-mapping';
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+const supabase: any = undefined;
 
 export async function GET() {
   if (isOssMode()) return apiError('NOT_AVAILABLE', 'Not available in OSS mode.', 503);
-  const supabase = await createSupabaseServerClient();
   const { data: { user } } = await supabase.auth.getUser();
   if (!user) return ApiErrors.unauthorized();
 

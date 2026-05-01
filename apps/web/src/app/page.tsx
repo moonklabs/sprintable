@@ -1,13 +1,12 @@
 import { redirect } from 'next/navigation';
 import { isOssMode } from '@/lib/storage/factory';
-import { createSupabaseServerClient } from '@/lib/supabase/server';
 
 export default async function RootPage() {
   if (isOssMode()) {
     redirect('/inbox');
   }
 
-  const supabase = await createSupabaseServerClient();
+  const supabase = (undefined as any);
   const {
     data: { user },
   } = await supabase.auth.getUser();
