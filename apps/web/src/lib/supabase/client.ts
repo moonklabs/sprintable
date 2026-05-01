@@ -1,7 +1,7 @@
 'use client';
 
 // SaaS-only 브라우저 클라이언트 — OSS에서는 이 파일의 함수가 호출되지 않음
-// @supabase/ssr은 dynamic import로 로드 (static import 제거, C-S10)
+// ssr dynamic load (static import 제거, C-S10)
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 type BrowserClient = any;
@@ -104,27 +104,7 @@ function rateLimitedFetch(input: RequestInfo | URL, init?: RequestInit): Promise
   });
 }
 
-let _client: BrowserClient | null = null;
-
 export function createSupabaseBrowserClient(): BrowserClient {
-  if (_client) return _client;
-  // @supabase/ssr를 즉시 require (브라우저 환경에서만 호출됨)
-  // eslint-disable-next-line @typescript-eslint/no-require-imports
-  const { createBrowserClient } = require('@supabase/ssr') as typeof import('@supabase/ssr');
-  const cookieDomain = process.env['NEXT_PUBLIC_COOKIE_DOMAIN'];
-  _client = createBrowserClient(
-    process.env['NEXT_PUBLIC_SUPABASE_URL']!,
-    process.env['NEXT_PUBLIC_SUPABASE_ANON_KEY']!,
-    {
-      cookieOptions: {
-        ...(cookieDomain ? { domain: cookieDomain } : {}),
-        sameSite: 'lax',
-        secure: true,
-        path: '/',
-      },
-      global: { fetch: rateLimitedFetch },
-      auth: { persistSession: false, autoRefreshToken: false },
-    },
-  );
-  return _client;
+  // SaaS overlay에서 이 함수를 오버라이드하여 실제 브라우저 클라이언트 반환
+  throw new Error('createSupabaseBrowserClient: SaaS overlay required');
 }
