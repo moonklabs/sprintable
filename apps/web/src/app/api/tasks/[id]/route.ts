@@ -1,5 +1,5 @@
 import { parseBody, updateTaskSchema } from '@sprintable/shared';
-import { createAdminClient } from '@/lib/db/admin';
+
 import { TaskService } from '@/services/task';
 import { createTaskRepository, isOssMode } from '@/lib/storage/factory';
 import { handleApiError } from '@/lib/api-error';
@@ -15,7 +15,7 @@ export async function GET(request: Request, { params }: RouteParams) {
     const me = await getAuthContext(request);
     if (!me) return ApiErrors.unauthorized();
     if (me.rateLimitExceeded) return ApiErrors.tooManyRequests(me.rateLimitRemaining, me.rateLimitResetAt);
-    const dbClient = me.type === 'agent' ? createAdminClient() : undefined;
+    const dbClient = undefined;
     const repo = await createTaskRepository(dbClient);
     const service = new TaskService(repo);
     return apiSuccess(await service.getById(id, { org_id: me.org_id, project_id: me.project_id }));
@@ -28,7 +28,7 @@ export async function PATCH(request: Request, { params }: RouteParams) {
     const me = await getAuthContext(request);
     if (!me) return ApiErrors.unauthorized();
     if (me.rateLimitExceeded) return ApiErrors.tooManyRequests(me.rateLimitRemaining, me.rateLimitResetAt);
-    const dbClient = me.type === 'agent' ? createAdminClient() : undefined;
+    const dbClient = undefined;
     const parsed = await parseBody(request, updateTaskSchema); if (!parsed.success) return parsed.response; const body = parsed.data;
     const repo = await createTaskRepository(dbClient);
     const service = new TaskService(repo);
@@ -48,22 +48,6 @@ export async function PATCH(request: Request, { params }: RouteParams) {
           reference_id: id,
         }).catch(() => {});
       }
-      if (body.status === 'done' && before.status !== 'done' && before.story_id) {
-        (async () => {
-          const { data } = await dbClient.from('stories').select('assignee_id').eq('id', before.story_id).maybeSingle();
-          if (data?.assignee_id) {
-            await notifService.create({
-              org_id: me.org_id,
-              user_id: data.assignee_id as string,
-              type: 'task_completed',
-              title: '태스크가 완료되었습니다',
-              body: before.title ?? '',
-              reference_type: 'task',
-              reference_id: id,
-            });
-          }
-        })().catch(() => {});
-      }
     }
 
     return apiSuccess(result);
@@ -76,7 +60,7 @@ export async function DELETE(request: Request, { params }: RouteParams) {
     const me = await getAuthContext(request);
     if (!me) return ApiErrors.unauthorized();
     if (me.rateLimitExceeded) return ApiErrors.tooManyRequests(me.rateLimitRemaining, me.rateLimitResetAt);
-    const dbClient = me.type === 'agent' ? createAdminClient() : undefined;
+    const dbClient = undefined;
     const repo = await createTaskRepository(dbClient);
     const service = new TaskService(repo);
     const existing = await service.getById(id, { org_id: me.org_id });

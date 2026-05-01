@@ -1,5 +1,5 @@
 
-import { createAdminClient } from '@/lib/db/admin';
+
 import { githubMcpToolArgumentSchemas, isGitHubMcpToolName } from '@/lib/github-mcp';
 import { resolveMcpTokenRef } from '@/lib/mcp-secrets';
 import {
@@ -185,7 +185,7 @@ export class AgentToolExecutionEngine {
 
     let approvedServers: ExternalServerConfig[] = [];
     try {
-      approvedServers = await listProjectApprovedMcpServerConfigs(createAdminClient() as never, projectId);
+      approvedServers = await listProjectApprovedMcpServerConfigs(undefined as never, projectId);
     } catch {
       approvedServers = [];
     }
@@ -352,7 +352,7 @@ export class AgentToolExecutionEngine {
 
       if (server.auth?.token_ref) {
         const token = parseMcpVaultRef(server.auth.token_ref)
-          ? await resolveProjectMcpVaultToken(createAdminClient() as never, ctx.memo.project_id, server.auth.token_ref)
+          ? await resolveProjectMcpVaultToken(undefined as never, ctx.memo.project_id, server.auth.token_ref)
           : resolveMcpTokenRef(server.auth.token_ref);
         const headerName = server.auth.header_name ?? (server.kind === 'github' ? 'X-GitHub-Token' : 'Authorization');
         const scheme = server.auth.scheme ?? (server.kind === 'github' ? 'plain' : 'bearer');

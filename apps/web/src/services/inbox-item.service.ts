@@ -9,7 +9,7 @@ import type {
   OriginNode,
   InboxOption,
 } from '@sprintable/core-storage';
-import { createAdminClient } from '@/lib/db/admin';
+
 import { isOssMode, createInboxItemRepository } from '@/lib/storage/factory';
 import { createInboxItemSchema, originChainSchema, inboxOptionsSchema } from '@sprintable/shared';
 
@@ -44,7 +44,7 @@ export class InboxItemService {
   async create(input: CreateInboxItemInput): Promise<InboxItem> {
     // Validate at single boundary point (codex tactical fix #10 — Zod at write time)
     const validated = createInboxItemSchema.parse(input);
-    const repo = await createInboxItemRepository(this.db ?? createAdminClient());
+    const repo = await createInboxItemRepository(this.db);
     return repo.create(validated);
   }
 
