@@ -6,6 +6,51 @@
 import { getServerSession } from '@/lib/supabase/server';
 import { ApiErrors } from '@/lib/api-response';
 
+import { NotFoundError, ForbiddenError } from '@sprintable/core-storage';
+
+export function mapApiError(status: number, body: { error?: { code?: string; message?: string } }): Error {
+  const msg = body.error?.message ?? `HTTP ${status}`;
+  if (status === 404) return new NotFoundError(msg);
+  if (status === 403) return new ForbiddenError(msg);
+  return new Error(msg);
+}
+
+export async function fastapiCall<T>(
+  method: 'GET' | 'POST' | 'PATCH' | 'DELETE' | 'PUT',
+  path: string,
+  accessToken: string,
+  options?: {
+    body?: unknown;
+    query?: Record<string, string | number | boolean | null | undefined>;
+    orgId?: string;
+  },
+): Promise<T> {
+  const url = new URL(path, FASTAPI_URL());
+  if (options?.query) {
+    for (const [k, v] of Object.entries(options.query)) {
+      if (v != null) url.searchParams.set(k, String(v));
+    }
+  }
+  const headers: Record<string, string> = { 'Content-Type': 'application/json' };
+  if (accessToken) headers['Authorization'] = `Bearer ${accessToken}`;
+  if (options?.orgId) headers['X-Org-Id'] = options.orgId;
+
+  const res = await fetch(url.toString(), {
+    method,
+    headers,
+    body: options?.body !== undefined ? JSON.stringify(options.body) : undefined,
+  });
+
+  if (!res.ok) {
+    let errBody: { error?: { code?: string; message?: string } } = {};
+    try { errBody = await res.json(); } catch { /* ignore */ }
+    throw mapApiError(res.status, errBody);
+  }
+
+  if (res.status === 204) return undefined as T;
+  return res.json() as Promise<T>;
+}
+
 const FASTAPI_URL = () => process.env['NEXT_PUBLIC_FASTAPI_URL'] ?? 'http://localhost:8000';
 
 /**
