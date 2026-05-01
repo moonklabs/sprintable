@@ -9,9 +9,8 @@ import { isOssMode, createDocRepository } from '@/lib/storage/factory';
 
 /**
  * Extract all doc IDs referenced by page-embed nodes from an HTML string.
- * Exported for unit testing.
  */
-export function extractEmbedIds(html: string | null | undefined): string[] {
+function extractEmbedIds(html: string | null | undefined): string[] {
   if (!html) return [];
   const ids: string[] = [];
   const regex = /data-doc-id="([^"]+)"/g;
