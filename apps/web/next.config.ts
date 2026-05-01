@@ -6,7 +6,7 @@ const withNextIntl = createNextIntlPlugin('./src/i18n/request.ts');
 const nextConfig: NextConfig = {
   output: 'standalone',
   turbopack: {
-    root: __dirname,
+    root: process.cwd(),
   },
   devIndicators: {
     position: 'bottom-right',

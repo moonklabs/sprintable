@@ -16,6 +16,7 @@ steps:
     name: gcr.io/cloud-builders/docker
     args:
       - build
+      - --no-cache
       - -f
       - apps/web/Dockerfile
       - -t
