@@ -1,8 +1,8 @@
 import { handleApiError } from '@/lib/api-error';
-import { apiSuccess, apiError, ApiErrors } from '@/lib/api-response';
+import { apiSuccess, ApiErrors } from '@/lib/api-response';
 import { parseBody, createTeamMemberSchema } from '@sprintable/shared';
-import { managedAgentRegistrationConfigSchema } from '@/lib/managed-agent-contract';
 import { createTeamMemberRepository } from '@/lib/storage/factory';
+import { proxyToFastapi } from '@/lib/fastapi-proxy';
 
 export async function GET(request: Request) {
   try {
@@ -24,7 +24,7 @@ export async function POST(request: Request) {
     const parsed = await parseBody(request, createTeamMemberSchema);
     if (!parsed.success) return parsed.response;
     const body = parsed.data;
-    if (body.type !== 'agent') return apiSuccess({ ok: true, skipped: true });
+    if (body.type !== 'agent') return proxyToFastapi(request, '/api/v2/team-members');
     if (!body.name) return ApiErrors.badRequest('name required for agent');
     const { OSS_PROJECT_ID, OSS_ORG_ID } = await import('@sprintable/storage-sqlite');
     const repo = await createTeamMemberRepository();

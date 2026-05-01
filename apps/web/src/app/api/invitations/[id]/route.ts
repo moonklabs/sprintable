@@ -1,8 +1,8 @@
-import { apiError, apiSuccess } from '@/lib/api-response';
+import { proxyToFastapi } from '@/lib/fastapi-proxy';
 
 type RouteParams = { params: Promise<{ id: string }> };
 
-/** DELETE /api/invitations/[id] — OSS 미지원 */
-export async function DELETE(_request: Request, _ctx: RouteParams) {
-  return apiSuccess({ ok: true, skipped: true });
+/** DELETE /api/invitations/[id] */
+export async function DELETE(request: Request, _ctx: RouteParams) {
+  return proxyToFastapi(request, '/api/v2/invitations');
 }

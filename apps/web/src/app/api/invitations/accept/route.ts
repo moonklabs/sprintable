@@ -1,6 +1,6 @@
-import { apiError, apiSuccess } from '@/lib/api-response';
+import { proxyToFastapi } from '@/lib/fastapi-proxy';
 
-/** POST — 초대 수락 (OSS 미지원) */
-export async function POST(_request: Request) {
-  return apiSuccess({ ok: true, skipped: true });
+/** POST — 초대 수락 */
+export async function POST(request: Request) {
+  return proxyToFastapi(request, '/api/v2/invitations/accept');
 }

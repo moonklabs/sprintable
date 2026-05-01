@@ -1,5 +1,6 @@
 import { handleApiError } from '@/lib/api-error';
-import { apiSuccess, apiError } from '@/lib/api-response';
+import { apiSuccess } from '@/lib/api-response';
+import { proxyToFastapi } from '@/lib/fastapi-proxy';
 
 type RouteParams = { params: Promise<{ id: string }> };
 
@@ -12,6 +13,6 @@ export async function GET(_request: Request, { params }: RouteParams) {
   }
 }
 
-export async function POST(_request: Request, _ctx: RouteParams) {
-  return apiSuccess({ ok: true, skipped: true });
+export async function POST(request: Request, _ctx: RouteParams) {
+  return proxyToFastapi(request, '/api/v2/projects/mcp-connections');
 }

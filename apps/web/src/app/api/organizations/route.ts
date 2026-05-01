@@ -1,6 +1,6 @@
-import { apiError, apiSuccess } from '@/lib/api-response';
+import { proxyToFastapi } from '@/lib/fastapi-proxy';
 
-// POST /api/organizations — not supported in OSS mode
-export async function POST() {
-  return apiSuccess({ ok: true, skipped: true });
+// POST /api/organizations
+export async function POST(request: Request) {
+  return proxyToFastapi(request, '/api/v2/organizations');
 }

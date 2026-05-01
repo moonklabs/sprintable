@@ -1,11 +1,11 @@
-import { apiSuccess, apiError } from '@/lib/api-response';
+import { proxyToFastapi } from '@/lib/fastapi-proxy';
 
-/** GET — 초대 목록 (OSS 미지원) */
-export async function GET(_request?: Request) {
-  return apiSuccess([]);
+/** GET — 초대 목록 */
+export async function GET(request: Request) {
+  return proxyToFastapi(request, '/api/v2/invitations');
 }
 
-/** POST — 초대 생성 (OSS 미지원) */
-export async function POST(_request: Request) {
-  return apiSuccess({ ok: true, skipped: true });
+/** POST — 초대 생성 */
+export async function POST(request: Request) {
+  return proxyToFastapi(request, '/api/v2/invitations');
 }

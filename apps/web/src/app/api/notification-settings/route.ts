@@ -1,9 +1,9 @@
-import { apiSuccess, apiError } from '@/lib/api-response';
+import { proxyToFastapi } from '@/lib/fastapi-proxy';
 
-export async function GET() {
-  return apiSuccess([]);
+export async function GET(request: Request) {
+  return proxyToFastapi(request, '/api/v2/notification-settings');
 }
 
-export async function PUT() {
-  return apiSuccess({ ok: true, skipped: true });
+export async function PUT(request: Request) {
+  return proxyToFastapi(request, '/api/v2/notification-settings');
 }

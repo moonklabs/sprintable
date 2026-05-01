@@ -36,7 +36,7 @@ export async function createEpicRepository(db?: unknown): Promise<IEpicRepositor
   }
   const { ApiEpicRepository } = await import('@sprintable/storage-api');
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  return new ApiEpicRepository(db as any, await getSpAt());
+  return new ApiEpicRepository(await getSpAt());
 }
 
 export async function createStoryRepository(db?: unknown): Promise<IStoryRepository> {
@@ -46,7 +46,7 @@ export async function createStoryRepository(db?: unknown): Promise<IStoryReposit
   }
   const { ApiStoryRepository } = await import('@sprintable/storage-api');
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  return new ApiStoryRepository(db as any, await getSpAt());
+  return new ApiStoryRepository(await getSpAt());
 }
 
 export async function createTaskRepository(db?: unknown): Promise<ITaskRepository> {
@@ -56,7 +56,7 @@ export async function createTaskRepository(db?: unknown): Promise<ITaskRepositor
   }
   const { ApiTaskRepository } = await import('@sprintable/storage-api');
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  return new ApiTaskRepository(db as any, await getSpAt());
+  return new ApiTaskRepository(await getSpAt());
 }
 
 export async function createMemoRepository(db?: unknown): Promise<IMemoRepository> {
@@ -66,7 +66,7 @@ export async function createMemoRepository(db?: unknown): Promise<IMemoRepositor
   }
   const { ApiMemoRepository } = await import('@sprintable/storage-api');
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  return new ApiMemoRepository(db as any, await getSpAt());
+  return new ApiMemoRepository(await getSpAt());
 }
 
 export async function createDocRepository(db?: unknown): Promise<IDocRepository> {
@@ -76,7 +76,7 @@ export async function createDocRepository(db?: unknown): Promise<IDocRepository>
   }
   const { ApiDocRepository } = await import('@sprintable/storage-api');
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  return new ApiDocRepository(db as any, await getSpAt());
+  return new ApiDocRepository(await getSpAt());
 }
 
 export async function createProjectRepository(db?: unknown): Promise<IProjectRepository> {
@@ -86,7 +86,7 @@ export async function createProjectRepository(db?: unknown): Promise<IProjectRep
   }
   const { ApiProjectRepository } = await import('@sprintable/storage-api');
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  return new ApiProjectRepository(db as any, await getSpAt());
+  return new ApiProjectRepository(await getSpAt());
 }
 
 export async function createSprintRepository(db?: unknown): Promise<ISprintRepository> {
@@ -96,7 +96,7 @@ export async function createSprintRepository(db?: unknown): Promise<ISprintRepos
   }
   const { ApiSprintRepository } = await import('@sprintable/storage-api');
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  return new ApiSprintRepository(db as any, await getSpAt());
+  return new ApiSprintRepository(await getSpAt());
 }
 
 export async function createNotificationRepository(db?: unknown): Promise<INotificationRepository> {
@@ -106,7 +106,7 @@ export async function createNotificationRepository(db?: unknown): Promise<INotif
   }
   const { ApiNotificationRepository } = await import('@sprintable/storage-api');
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  return new ApiNotificationRepository(db as any, await getSpAt());
+  return new ApiNotificationRepository(await getSpAt());
 }
 
 export async function createTeamMemberRepository(db?: unknown): Promise<ITeamMemberRepository> {
@@ -116,7 +116,7 @@ export async function createTeamMemberRepository(db?: unknown): Promise<ITeamMem
   }
   const { ApiTeamMemberRepository } = await import('@sprintable/storage-api');
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  return new ApiTeamMemberRepository(db as any, await getSpAt());
+  return new ApiTeamMemberRepository(await getSpAt());
 }
 
 export async function createInboxItemRepository(db?: unknown): Promise<IInboxItemRepository> {
@@ -126,7 +126,7 @@ export async function createInboxItemRepository(db?: unknown): Promise<IInboxIte
   }
   const { ApiInboxItemRepository } = await import('@sprintable/storage-api');
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  return new ApiInboxItemRepository(db as any, await getSpAt());
+  return new ApiInboxItemRepository(await getSpAt());
 }
 
 // ============================================================================

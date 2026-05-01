@@ -1,6 +1,6 @@
-import { apiError, apiSuccess } from '@/lib/api-response';
+import { proxyToFastapi } from '@/lib/fastapi-proxy';
 
-/** DELETE /api/organizations/[id] — not supported in OSS mode */
-export async function DELETE() {
-  return apiSuccess({ ok: true, skipped: true });
+/** DELETE /api/organizations/[id] */
+export async function DELETE(request: Request) {
+  return proxyToFastapi(request, '/api/v2/organizations');
 }

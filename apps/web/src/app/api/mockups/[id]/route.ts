@@ -1,58 +1,18 @@
-import { parseBody, updateMockupPageSchema } from '@sprintable/shared';
-import { MockupService } from '@/services/mockup';
-import { handleApiError } from '@/lib/api-error';
-import { apiSuccess, apiError, ApiErrors } from '@/lib/api-response';
-import { isOssMode } from '@/lib/storage/factory';
+import { proxyToFastapi } from '@/lib/fastapi-proxy';
 
 type RouteParams = { params: Promise<{ id: string }> };
 
 /** GET — 목업 상세 (컴포넌트 포함) */
-export async function GET(_request: Request, { params }: RouteParams) {
-  if (isOssMode()) return apiSuccess({ ok: true, skipped: true });
-  try {
-    const { id } = await params;
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    const db: any = null;
-    const { data: { user } } = await db.auth.getUser();
-    if (!user) return ApiErrors.unauthorized();
-
-    const service = new MockupService(db);
-    const mockup = await service.getById(id);
-    return apiSuccess(mockup);
-  } catch (err: unknown) { return handleApiError(err); }
+export async function GET(request: Request, _ctx: RouteParams) {
+  return proxyToFastapi(request, '/api/v2/mockups');
 }
 
 /** PUT — 목업 수정 (컴포넌트 트리 일괄 교체) */
-export async function PUT(request: Request, { params }: RouteParams) {
-  if (isOssMode()) return apiSuccess({ ok: true, skipped: true });
-  try {
-    const { id } = await params;
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    const db: any = null;
-    const { data: { user } } = await db.auth.getUser();
-    if (!user) return ApiErrors.unauthorized();
-
-    const parsed = await parseBody(request, updateMockupPageSchema);
-    if (!parsed.success) return parsed.response;
-
-    const service = new MockupService(db);
-    const result = await service.update(id, parsed.data);
-    return apiSuccess(result);
-  } catch (err: unknown) { return handleApiError(err); }
+export async function PUT(request: Request, _ctx: RouteParams) {
+  return proxyToFastapi(request, '/api/v2/mockups');
 }
 
 /** DELETE — 목업 소프트 삭제 */
-export async function DELETE(_request: Request, { params }: RouteParams) {
-  if (isOssMode()) return apiSuccess({ ok: true, skipped: true });
-  try {
-    const { id } = await params;
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    const db: any = null;
-    const { data: { user } } = await db.auth.getUser();
-    if (!user) return ApiErrors.unauthorized();
-
-    const service = new MockupService(db);
-    await service.delete(id);
-    return apiSuccess({ ok: true });
-  } catch (err: unknown) { return handleApiError(err); }
+export async function DELETE(request: Request, _ctx: RouteParams) {
+  return proxyToFastapi(request, '/api/v2/mockups');
 }

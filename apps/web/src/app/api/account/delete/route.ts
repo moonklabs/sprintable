@@ -1,6 +1,6 @@
-import { apiError, apiSuccess } from '@/lib/api-response';
+import { proxyToFastapi } from '@/lib/fastapi-proxy';
 
-/** POST — 계정 탈퇴 (OSS 미지원) */
-export async function POST() {
-  return apiSuccess({ ok: true, skipped: true });
+/** POST — 계정 탈퇴 */
+export async function POST(request: Request) {
+  return proxyToFastapi(request, '/api/v2/account/delete');
 }

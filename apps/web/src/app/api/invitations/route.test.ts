@@ -46,7 +46,7 @@ describe('GET /api/invitations', () => {
       createDbStub({ data: { org_id: 'org-1', role: 'owner' } }),
     );
 
-    const res = await GET();
+    const res = await GET(new Request('http://test'));
     expect(res.status).toBe(200);
   });
 
@@ -56,7 +56,7 @@ describe('GET /api/invitations', () => {
       createDbStub({ data: { org_id: 'org-1', role: 'owner' } }),
     );
 
-    const res = await GET();
+    const res = await GET(new Request('http://test'));
     expect(res.status).toBe(200);
   });
 
@@ -65,7 +65,7 @@ describe('GET /api/invitations', () => {
       createDbStub({ data: { org_id: 'org-1', role: 'member' } }),
     );
 
-    const res = await GET();
+    const res = await GET(new Request('http://test'));
     expect(res.status).toBe(403);
   });
 
@@ -74,7 +74,7 @@ describe('GET /api/invitations', () => {
       createDbStub({ data: null }),
     );
 
-    const res = await GET();
+    const res = await GET(new Request('http://test'));
     expect(res.status).toBe(403);
   });
 });

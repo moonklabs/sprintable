@@ -1,8 +1,8 @@
-import { apiError, apiSuccess } from '@/lib/api-response';
+import { proxyToFastapi } from '@/lib/fastapi-proxy';
 
 type RouteParams = { params: Promise<{ id: string }> };
 
-/** POST /api/invitations/[id]/resend — OSS 미지원 */
-export async function POST(_request: Request, _ctx: RouteParams) {
-  return apiSuccess({ ok: true, skipped: true });
+/** POST /api/invitations/[id]/resend */
+export async function POST(request: Request, _ctx: RouteParams) {
+  return proxyToFastapi(request, '/api/v2/invitations/resend');
 }

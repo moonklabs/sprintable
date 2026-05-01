@@ -1,6 +1,7 @@
 import { handleApiError } from '@/lib/api-error';
-import { apiSuccess, apiError } from '@/lib/api-response';
+import { apiSuccess } from '@/lib/api-response';
 import { createProjectRepository } from '@/lib/storage/factory';
+import { proxyToFastapi } from '@/lib/fastapi-proxy';
 
 /** GET — 조직 프로젝트 목록 */
 export async function GET(_request: Request) {
@@ -14,7 +15,7 @@ export async function GET(_request: Request) {
   }
 }
 
-/** POST — 프로젝트 생성 (OSS 미지원) */
-export async function POST(_request: Request) {
-  return apiSuccess({ ok: true, skipped: true });
+/** POST — 프로젝트 생성 */
+export async function POST(request: Request) {
+  return proxyToFastapi(request, '/api/v2/projects');
 }

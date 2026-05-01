@@ -1,18 +1,18 @@
-import { apiSuccess, apiError } from '@/lib/api-response';
+import { proxyToFastapi } from '@/lib/fastapi-proxy';
 
 type RouteParams = { params: Promise<{ id: string }> };
 
 /** GET — OSS 모드에서는 null 반환 */
-export async function GET(_request: Request, _ctx: RouteParams) {
-  return apiSuccess(null);
+export async function GET(request: Request, _ctx: RouteParams) {
+  return proxyToFastapi(request, '/api/v2/projects/ai-settings');
 }
 
-/** PUT — OSS 미지원 */
-export async function PUT(_request: Request, _ctx: RouteParams) {
-  return apiSuccess({ ok: true, skipped: true });
+/** PUT */
+export async function PUT(request: Request, _ctx: RouteParams) {
+  return proxyToFastapi(request, '/api/v2/projects/ai-settings');
 }
 
-/** DELETE — OSS 미지원 */
-export async function DELETE(_request: Request, _ctx: RouteParams) {
-  return apiSuccess({ ok: true, skipped: true });
+/** DELETE */
+export async function DELETE(request: Request, _ctx: RouteParams) {
+  return proxyToFastapi(request, '/api/v2/projects/ai-settings');
 }
