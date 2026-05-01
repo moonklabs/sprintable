@@ -1,5 +1,5 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
-import { extractEmbedIds } from './route';
+import { extractEmbedIds } from './extract-embed-ids';
 
 // ---------------------------------------------------------------------------
 // Pure helper — extractEmbedIds
