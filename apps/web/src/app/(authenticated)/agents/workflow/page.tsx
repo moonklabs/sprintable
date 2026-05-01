@@ -3,6 +3,7 @@ import { AgentWorkflowEditor } from '@/components/agents/agent-workflow-editor';
 import { requireOrgAdmin } from '@/lib/admin-check';
 import { getMyTeamMember } from '@/lib/auth-helpers';
 import { checkFeatureLimit } from '@/lib/check-feature';
+import { createSupabaseServerClient } from '@/lib/supabase/server';
 import { AgentOrchestrationUpgradeState } from '@/components/agents/agent-orchestration-gate';
 import { AgentRoutingRuleService } from '@/services/agent-routing-rule';
 import type { WorkflowMember } from '@/services/agent-workflow-editor';
@@ -19,7 +20,7 @@ export default async function AgentWorkflowPage() {
       </div>
     );
   }
-  const supabase = await (undefined as any);
+  const supabase = await createSupabaseServerClient();
   const { data: { user } } = await supabase.auth.getUser();
   if (!user) redirect('/login');
 

@@ -1,3 +1,4 @@
+import { createSupabaseServerClient } from '@/lib/supabase/server';
 import { getMyTeamMember } from '@/lib/auth-helpers';
 import { requireOrgAdmin } from '@/lib/admin-check';
 import { apiError, apiSuccess, ApiErrors } from '@/lib/api-response';
@@ -16,13 +17,9 @@ import {
   DeploymentLifecycleError,
   type DeploymentPreflightResult,
 } from '@/services/agent-deployment-lifecycle';
-// eslint-disable-next-line @typescript-eslint/no-explicit-any
-const supabase: any = undefined;
-// eslint-disable-next-line @typescript-eslint/no-explicit-any
-type SupabaseClientType = any;
 
 async function getByomBlockingReason(
-  supabase: SupabaseClientType,
+  supabase: Awaited<ReturnType<typeof createSupabaseServerClient>>,
   projectId: string,
   input: { llm_mode: string; provider: string },
 ): Promise<string | null> {
@@ -57,6 +54,7 @@ export async function POST(request: Request) {
   if (isOssMode()) return apiError('NOT_IMPLEMENTED', 'Not available in OSS mode.', 501);
 
   try {
+    const supabase = await createSupabaseServerClient();
     const { data: { user } } = await supabase.auth.getUser();
     if (!user) return ApiErrors.unauthorized();
 

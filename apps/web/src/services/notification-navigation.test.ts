@@ -1,7 +1,6 @@
 import { describe, expect, it, vi } from 'vitest';
+import type { SupabaseClient } from '@supabase/supabase-js';
 import { attachNotificationHrefs } from './notification-navigation';
-// eslint-disable-next-line @typescript-eslint/no-explicit-any
-type SupabaseClient = any;
 
 function createSupabaseStub() {
   const docCommentsQuery = {

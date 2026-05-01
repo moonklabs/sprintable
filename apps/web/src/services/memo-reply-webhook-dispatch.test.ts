@@ -1,7 +1,6 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
+import type { SupabaseClient } from '@supabase/supabase-js';
 import { dispatchWorkflowMemoReplyWebhooks } from './memo-reply-webhook-dispatch';
-// eslint-disable-next-line @typescript-eslint/no-explicit-any
-type SupabaseClient = any;
 
 function createSupabaseStub(options?: {
   priorReplies?: Array<Record<string, unknown>>;

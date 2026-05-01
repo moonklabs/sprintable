@@ -1,5 +1,4 @@
-// eslint-disable-next-line @typescript-eslint/no-explicit-any
-type SupabaseClient = any;
+import type { SupabaseClient } from '@supabase/supabase-js';
 import { decryptSecretForOrg, encryptSecretForOrg } from '@/lib/kms';
 
 export const ORG_INTEGRATION_TYPE = 'byom_api_key';

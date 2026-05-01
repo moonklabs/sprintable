@@ -1,4 +1,5 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
+import type { SupabaseClient } from '@supabase/supabase-js';
 import {
   buildSlackMemoLink,
   buildSlackOutboundText,
@@ -6,8 +7,6 @@ import {
   isSlackSourceMemo,
   SlackOutboundDispatcher,
 } from './slack-outbound-dispatcher';
-// eslint-disable-next-line @typescript-eslint/no-explicit-any
-type SupabaseClient = any;
 
 function createSupabaseStub(options?: {
   memo?: Record<string, unknown> | null;

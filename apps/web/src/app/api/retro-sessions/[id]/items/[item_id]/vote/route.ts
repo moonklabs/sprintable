@@ -1,13 +1,12 @@
+import type { SupabaseClient } from '@supabase/supabase-js';
+import { createSupabaseServerClient } from '@/lib/supabase/server';
+import { createSupabaseAdminClient } from '@/lib/supabase/admin';
 import { handleApiError } from '@/lib/api-error';
 import { apiSuccess, apiError, ApiErrors } from '@/lib/api-response';
 import { getAuthContext } from '@/lib/auth-helpers';
 import { RetroSessionService } from '@/services/retro-session';
 import { isOssMode } from '@/lib/storage/factory';
 import { voteOssRetroItem } from '@/lib/oss-retro';
-// eslint-disable-next-line @typescript-eslint/no-explicit-any
-const supabase: any = undefined;
-// eslint-disable-next-line @typescript-eslint/no-explicit-any
-type SupabaseClient = any;
 
 type RouteParams = { params: Promise<{ id: string; item_id: string }> };
 
@@ -15,7 +14,8 @@ type RouteParams = { params: Promise<{ id: string; item_id: string }> };
 export async function POST(request: Request, { params }: RouteParams) {
   try {
     const { item_id } = await params;
-    const me = await getAuthContext(request);
+    const supabase = await createSupabaseServerClient();
+    const me = await getAuthContext(supabase, request);
     if (!me) return ApiErrors.unauthorized();
     if (me.rateLimitExceeded) return ApiErrors.tooManyRequests(me.rateLimitRemaining, me.rateLimitResetAt);
 
@@ -31,7 +31,7 @@ export async function POST(request: Request, { params }: RouteParams) {
       return apiSuccess(data);
     }
 
-    const dbClient: SupabaseClient = me.type === 'agent' ? (await (await import('@/lib/supabase/admin')).createSupabaseAdminClient()) : supabase;
+    const dbClient: SupabaseClient = me.type === 'agent' ? createSupabaseAdminClient() : supabase;
     const service = new RetroSessionService(dbClient);
     const data = await service.voteItem(item_id, voterId, projectId);
     return apiSuccess(data);

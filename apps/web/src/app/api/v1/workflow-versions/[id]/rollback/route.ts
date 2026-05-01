@@ -1,3 +1,4 @@
+import { createSupabaseServerClient } from '@/lib/supabase/server';
 import { apiError, ApiErrors, apiSuccess } from '@/lib/api-response';
 import { handleApiError } from '@/lib/api-error';
 import { AgentRoutingRuleService } from '@/services/agent-routing-rule';
@@ -5,8 +6,7 @@ import { requireOrgAdmin } from '@/lib/admin-check';
 import { requireAgentOrchestration } from '@/lib/require-agent-orchestration';
 import { isOssMode } from '@/lib/storage/factory';
 import { getAuthContext } from '@/lib/auth-helpers';
-// eslint-disable-next-line @typescript-eslint/no-explicit-any
-type SupabaseClient = any;
+import type { SupabaseClient } from '@supabase/supabase-js';
 
 export async function POST(
   request: Request,
@@ -15,16 +15,17 @@ export async function POST(
   if (isOssMode()) return apiError('NOT_IMPLEMENTED', 'Not available in OSS mode.', 501);
 
   try {
-    const me = await getAuthContext(request);
+    const supabase = await createSupabaseServerClient();
+    const me = await getAuthContext(supabase, request);
     if (!me) return ApiErrors.unauthorized();
 
     let supabaseForService: SupabaseClient;
     if (me.type === 'agent') {
       const { createSupabaseAdminClient } = await import('@/lib/supabase/admin');
-      supabaseForService = (await (await import('@/lib/supabase/admin')).createSupabaseAdminClient());
+      supabaseForService = createSupabaseAdminClient();
     } else {
-      await requireOrgAdmin((undefined as any), me.org_id);
-      supabaseForService = (undefined as any);
+      await requireOrgAdmin(supabase, me.org_id);
+      supabaseForService = supabase;
     }
 
     const gateResponse = await requireAgentOrchestration(supabaseForService, me.org_id);

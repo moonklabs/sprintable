@@ -8,7 +8,7 @@ const { createClientMock, getProjectAiSettingsWithIntegrationMock, ensureProject
   decryptProjectSecretMock: vi.fn(),
 }));
 
-vi.mock('', () => ({
+vi.mock('@supabase/supabase-js', () => ({
   createClient: createClientMock,
 }));
 

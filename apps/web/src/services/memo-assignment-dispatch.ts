@@ -57,7 +57,7 @@ export async function dispatchMemoAssignmentImmediately(memo: DispatchableMemo) 
 
   // SaaS: webhook_configs → team_members.webhook_url 직접 전송 (agent_runs 불필요)
   try {
-    const supabase = (await (await import('@/lib/supabase/admin')).createSupabaseAdminClient()) as any;
+    const supabase = createSupabaseAdminClient();
     const assigneeId = memo.assigned_to;
 
     // webhook_configs: project_id 기준 우선

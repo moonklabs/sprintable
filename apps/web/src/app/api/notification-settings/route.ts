@@ -1,14 +1,14 @@
 import { parseBody, updateNotificationSettingsSchema } from '@sprintable/shared';
+import { createSupabaseServerClient } from '@/lib/supabase/server';
 import { handleApiError } from '@/lib/api-error';
 import { getMyTeamMember } from '@/lib/auth-helpers';
 import { apiSuccess, apiError, ApiErrors } from '@/lib/api-response';
 import { isOssMode } from '@/lib/storage/factory';
-// eslint-disable-next-line @typescript-eslint/no-explicit-any
-const supabase: any = undefined;
 
 export async function GET() {
   if (isOssMode()) return apiSuccess([]);
   try {
+    const supabase = await createSupabaseServerClient();
     const { data: { user } } = await supabase.auth.getUser();
     if (!user) return ApiErrors.unauthorized();
     const me = await getMyTeamMember(supabase, user);
@@ -22,6 +22,7 @@ export async function GET() {
 export async function PUT(request: Request) {
   if (isOssMode()) return apiError('NOT_IMPLEMENTED', 'Notification settings are not supported in OSS mode.', 501);
   try {
+    const supabase = await createSupabaseServerClient();
     const { data: { user } } = await supabase.auth.getUser();
     if (!user) return ApiErrors.unauthorized();
     const me = await getMyTeamMember(supabase, user);

@@ -1,6 +1,5 @@
-// eslint-disable-next-line @typescript-eslint/no-explicit-any
-type SupabaseClient = any;
-import { createHmac } from 'node:crypto';
+import type { SupabaseClient } from '@supabase/supabase-js';
+import { createHmac } from 'crypto';
 
 // Operator Cockpit Phase A — outbox worker
 // Polls inbox_outbox via claim_pending_outbox RPC, POSTs to webhook_url with HMAC,

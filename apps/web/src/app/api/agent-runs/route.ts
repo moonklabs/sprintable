@@ -1,13 +1,12 @@
 import { z } from 'zod';
+import type { SupabaseClient } from '@supabase/supabase-js';
+import { createSupabaseServerClient } from '@/lib/supabase/server';
+import { createSupabaseAdminClient } from '@/lib/supabase/admin';
 import { handleApiError } from '@/lib/api-error';
 import { getAuthContext } from '@/lib/auth-helpers';
 import { apiSuccess, ApiErrors } from '@/lib/api-response';
 import { AgentRunService } from '@/services/agent-run';
 import { requireAgentScope } from '@/lib/auth-api-key';
-// eslint-disable-next-line @typescript-eslint/no-explicit-any
-const supabase: any = undefined;
-// eslint-disable-next-line @typescript-eslint/no-explicit-any
-type SupabaseClient = any;
 
 const createAgentRunSchema = z.object({
   agent_id: z.string().min(1),
@@ -27,13 +26,14 @@ const createAgentRunSchema = z.object({
 // POST /api/agent-runs
 export async function POST(request: Request) {
   try {
-    const me = await getAuthContext(request);
+    const supabase = await createSupabaseServerClient();
+    const me = await getAuthContext(supabase, request);
     if (!me) return ApiErrors.unauthorized();
     if (me.rateLimitExceeded) return ApiErrors.tooManyRequests(me.rateLimitRemaining, me.rateLimitResetAt);
 
     if (!requireAgentScope(me, 'write')) return ApiErrors.insufficientScope('write');
 
-    const dbClient: SupabaseClient = me.type === 'agent' ? (await (await import('@/lib/supabase/admin')).createSupabaseAdminClient()) : supabase;
+    const dbClient: SupabaseClient = me.type === 'agent' ? createSupabaseAdminClient() : supabase;
 
     let rawBody: unknown;
     try { rawBody = await request.json(); } catch { return ApiErrors.badRequest('Invalid JSON body'); }
@@ -78,7 +78,8 @@ export async function POST(request: Request) {
 // GET /api/agent-runs?project_id=X&limit=N
 export async function GET(request: Request) {
   try {
-    const me = await getAuthContext(request);
+    const supabase = await createSupabaseServerClient();
+    const me = await getAuthContext(supabase, request);
     if (!me) return ApiErrors.unauthorized();
     if (me.rateLimitExceeded) return ApiErrors.tooManyRequests(me.rateLimitRemaining, me.rateLimitResetAt);
 
@@ -89,7 +90,7 @@ export async function GET(request: Request) {
     const agentId = searchParams.get('agent_id') ?? undefined;
     const cursor = searchParams.get('cursor') ?? undefined;
 
-    const dbClient: SupabaseClient = me.type === 'agent' ? (await (await import('@/lib/supabase/admin')).createSupabaseAdminClient()) : supabase;
+    const dbClient: SupabaseClient = me.type === 'agent' ? createSupabaseAdminClient() : supabase;
     const service = new AgentRunService(dbClient);
     const runs = await service.list(projectId, limit ? Number(limit) : undefined, agentId, cursor);
     return apiSuccess(runs);

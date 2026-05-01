@@ -1,7 +1,6 @@
 // OSS stub — 실제 구현은 @moonklabs/sprintable-saas 에 있다.
 // OSS 단독 빌드에서는 usage 한도가 없으므로 모든 호출이 allowed로 반환된다.
-// eslint-disable-next-line @typescript-eslint/no-explicit-any
-type SupabaseClient = any;
+import type { SupabaseClient } from '@supabase/supabase-js';
 
 export interface UsageCheckResult {
   allowed: boolean;

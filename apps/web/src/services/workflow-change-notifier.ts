@@ -1,5 +1,4 @@
-// eslint-disable-next-line @typescript-eslint/no-explicit-any
-type SupabaseClient = any;
+import type { SupabaseClient } from '@supabase/supabase-js';
 import { MemoService } from './memo';
 import type { RoutingRuleSummary } from './agent-routing-rule';
 

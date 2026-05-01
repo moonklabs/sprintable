@@ -7,6 +7,7 @@ const { createClientMock, findChannelMapping, processInboundMessage, verifyTeams
   verifyTeamsRequestMock: vi.fn(),
 }));
 
+vi.mock('@supabase/supabase-js', () => ({ createClient: createClientMock }));
 vi.mock('@/services/bridge-inbound', () => ({
   BridgeInboundService: class BridgeInboundService {
     findChannelMapping = findChannelMapping;

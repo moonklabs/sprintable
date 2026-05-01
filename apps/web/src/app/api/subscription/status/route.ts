@@ -1,15 +1,15 @@
+import { createSupabaseServerClient } from '@/lib/supabase/server';
 import { handleApiError } from '@/lib/api-error';
 import { apiSuccess, ApiErrors } from '@/lib/api-response';
 import { getAuthContext } from '@/lib/auth-helpers';
 import { isOssMode } from '@/lib/storage/factory';
-// eslint-disable-next-line @typescript-eslint/no-explicit-any
-const supabase: any = undefined;
 
 /** GET /api/subscription/status — grace_until + status 조회 */
 export async function GET(request: Request) {
   if (isOssMode()) return apiSuccess({ status: 'active', grace_until: null });
   try {
-    const me = await getAuthContext(request);
+    const supabase = await createSupabaseServerClient();
+    const me = await getAuthContext(supabase, request);
     if (!me) return ApiErrors.unauthorized();
 
     const { data } = await supabase

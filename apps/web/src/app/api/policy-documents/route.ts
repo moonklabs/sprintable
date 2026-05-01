@@ -1,13 +1,13 @@
+import { createSupabaseServerClient } from '@/lib/supabase/server';
 import { handleApiError } from '@/lib/api-error';
 import { apiSuccess, ApiErrors } from '@/lib/api-response';
 import { PolicyDocumentService } from '@/services/policy-document';
 import { isOssMode } from '@/lib/storage/factory';
-// eslint-disable-next-line @typescript-eslint/no-explicit-any
-const supabase: any = undefined;
 
 export async function GET(request: Request) {
   if (isOssMode()) return apiSuccess([]);
   try {
+    const supabase = await createSupabaseServerClient();
     const { data: { user } } = await supabase.auth.getUser();
     if (!user) return ApiErrors.unauthorized();
 

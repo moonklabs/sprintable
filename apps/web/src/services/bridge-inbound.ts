@@ -1,7 +1,4 @@
-// eslint-disable-next-line @typescript-eslint/no-explicit-any
-type PostgrestError = any;
-// eslint-disable-next-line @typescript-eslint/no-explicit-any
-type SupabaseClient = any;
+import type { PostgrestError, SupabaseClient } from '@supabase/supabase-js';
 import { MemoService, type CreateMemoInput } from './memo';
 
 export type BridgePlatform = 'slack' | 'discord' | 'teams' | 'telegram';

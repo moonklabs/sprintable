@@ -1,14 +1,13 @@
 import { parseBody, createTaskSchema } from '@sprintable/shared';
+import type { SupabaseClient } from '@supabase/supabase-js';
+import { createSupabaseServerClient } from '@/lib/supabase/server';
+import { createSupabaseAdminClient } from '@/lib/supabase/admin';
 import { TaskService, type CreateTaskInput } from '@/services/task';
 import { createTaskRepository, isOssMode } from '@/lib/storage/factory';
 import { handleApiError } from '@/lib/api-error';
 import { apiSuccess, ApiErrors } from '@/lib/api-response';
 import { getAuthContext } from '@/lib/auth-helpers';
 import { buildCursorPageMeta, parseCursorPageInput } from '@/lib/pagination';
-// eslint-disable-next-line @typescript-eslint/no-explicit-any
-const supabase: any = undefined;
-// eslint-disable-next-line @typescript-eslint/no-explicit-any
-type SupabaseClient = any;
 
 async function getStoryTaskCounts(
   service: TaskService,
@@ -44,11 +43,12 @@ async function getStoryTaskCounts(
 
 export async function GET(request: Request) {
   try {
-    const me = await getAuthContext(request);
+    const supabase = await createSupabaseServerClient();
+    const me = await getAuthContext(supabase, request);
     if (!me) return ApiErrors.unauthorized();
     if (me.rateLimitExceeded) return ApiErrors.tooManyRequests(me.rateLimitRemaining, me.rateLimitResetAt);
     const ossMode = isOssMode();
-    const dbClient: SupabaseClient | undefined = ossMode ? undefined : (me.type === 'agent' ? (await (await import('@/lib/supabase/admin')).createSupabaseAdminClient()) : supabase);
+    const dbClient: SupabaseClient | undefined = ossMode ? undefined : (me.type === 'agent' ? createSupabaseAdminClient() : supabase);
 
     const { searchParams } = new URL(request.url);
     const storyId = searchParams.get('story_id') ?? undefined;
@@ -64,7 +64,7 @@ export async function GET(request: Request) {
       cursor: searchParams.get('cursor'),
     }, { defaultLimit: 50, maxLimit: 100 });
 
-    const repo = await createTaskRepository();
+    const repo = await createTaskRepository(dbClient);
     const service = new TaskService(repo);
 
     // story_ids: 일괄 조회 (kanban board N+1 방지용)
@@ -113,13 +113,14 @@ export async function GET(request: Request) {
 
 export async function POST(request: Request) {
   try {
-    const me = await getAuthContext(request);
+    const supabase = await createSupabaseServerClient();
+    const me = await getAuthContext(supabase, request);
     if (!me) return ApiErrors.unauthorized();
     if (me.rateLimitExceeded) return ApiErrors.tooManyRequests(me.rateLimitRemaining, me.rateLimitResetAt);
-    const dbClient: SupabaseClient = me.type === 'agent' ? (await (await import('@/lib/supabase/admin')).createSupabaseAdminClient()) : supabase;
+    const dbClient: SupabaseClient = me.type === 'agent' ? createSupabaseAdminClient() : supabase;
 
     const parsed = await parseBody(request, createTaskSchema); if (!parsed.success) return parsed.response; const body = parsed.data;
-    const repo = await createTaskRepository();
+    const repo = await createTaskRepository(dbClient);
     const service = new TaskService(repo);
     const task = await service.create(body as CreateTaskInput);
     return apiSuccess(task, undefined, 201);

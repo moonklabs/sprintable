@@ -5,6 +5,7 @@ const { createClient, execute } = vi.hoisted(() => ({
   execute: vi.fn(),
 }));
 
+vi.mock('@supabase/supabase-js', () => ({ createClient }));
 vi.mock('@/services/agent-execution-loop', () => ({
   AgentExecutionLoop: class AgentExecutionLoop {
     execute = execute;

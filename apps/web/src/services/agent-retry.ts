@@ -1,5 +1,4 @@
-// eslint-disable-next-line @typescript-eslint/no-explicit-any
-type SupabaseClient = any;
+import type { SupabaseClient } from '@supabase/supabase-js';
 
 /** PM AC: 5분 → 30분 → 2시간 exponential backoff */
 const BACKOFF_MINUTES = [5, 30, 120];

@@ -1,5 +1,4 @@
-// eslint-disable-next-line @typescript-eslint/no-explicit-any
-type SupabaseClient = any;
+import type { SupabaseClient } from '@supabase/supabase-js';
 import { AgentExecutionLoop } from './agent-execution-loop';
 import type { SessionResumeCandidate } from './agent-session-lifecycle';
 

@@ -2,6 +2,7 @@ import Link from 'next/link';
 import { cookies } from 'next/headers';
 import { redirect } from 'next/navigation';
 import { isOssMode } from '@/lib/storage/factory';
+import { createSupabaseServerClient } from '@/lib/supabase/server';
 import { CURRENT_PROJECT_COOKIE, getMyProjectMemberships, getOssUserContext, resolveCurrentProjectMembership } from '@/lib/auth-helpers';
 import { getLocale, getTranslations } from 'next-intl/server';
 import { LogoutButton } from './logout-button';
@@ -172,7 +173,7 @@ export default async function DashboardPage() {
     );
   }
 
-  const supabase = (undefined as any);
+  const supabase = await createSupabaseServerClient();
   const { data: { user } } = await supabase.auth.getUser();
   if (!user) redirect('/login');
 

@@ -1,11 +1,11 @@
+import { createSupabaseServerClient } from '@/lib/supabase/server';
+import { createSupabaseAdminClient } from '@/lib/supabase/admin';
 import { handleApiError } from '@/lib/api-error';
 import { apiSuccess, apiUpgradeRequired, ApiErrors } from '@/lib/api-response';
 import { getAuthContext } from '@/lib/auth-helpers';
 import { checkFeatureLimit } from '@/lib/check-feature';
 import { checkUsage, incrementUsage, getThresholdAlert } from '@/lib/usage-check';
 import { NotificationService } from '@/services/notification.service';
-// eslint-disable-next-line @typescript-eslint/no-explicit-any
-const supabase: any = undefined;
 
 export const maxDuration = 60;
 
@@ -25,10 +25,11 @@ const ALLOWED_MIME_TYPES = new Set(['audio/webm', 'audio/wav', 'audio/mp4', 'aud
 export async function POST(request: Request, { params }: RouteParams) {
   try {
     const { id } = await params;
-    const me = await getAuthContext(request);
+    const supabase = await createSupabaseServerClient();
+    const me = await getAuthContext(supabase, request);
     if (!me) return ApiErrors.unauthorized();
     if (me.rateLimitExceeded) return ApiErrors.tooManyRequests(me.rateLimitRemaining, me.rateLimitResetAt);
-    const dbClient = me.type === 'agent' ? (await (await import('@/lib/supabase/admin')).createSupabaseAdminClient()) : supabase;
+    const dbClient = me.type === 'agent' ? createSupabaseAdminClient() : supabase;
 
     // AC2+AC3: usage meter 체크 (통합 게이팅+쿼오타 체크)
     const usageCheck = await checkUsage(dbClient, me.org_id, 'stt_minutes');

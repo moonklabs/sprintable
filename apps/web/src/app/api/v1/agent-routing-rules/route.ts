@@ -1,4 +1,5 @@
 import { z } from 'zod';
+import { createSupabaseServerClient } from '@/lib/supabase/server';
 import { getMyTeamMember, getAuthContext } from '@/lib/auth-helpers';
 import { apiError, ApiErrors, apiSuccess } from '@/lib/api-response';
 import { handleApiError } from '@/lib/api-error';
@@ -7,10 +8,7 @@ import { AgentRoutingRuleService, getRoutingPolicyIssues, normalizeRoutingAction
 import { requireAgentOrchestration } from '@/lib/require-agent-orchestration';
 import { isOssMode } from '@/lib/storage/factory';
 import { notifyWorkflowChange } from '@/services/workflow-change-notifier';
-// eslint-disable-next-line @typescript-eslint/no-explicit-any
-type SupabaseClient = any;
-// eslint-disable-next-line @typescript-eslint/no-explicit-any
-const supabase: any = undefined;
+import type { SupabaseClient } from '@supabase/supabase-js';
 
 const conditionsSchema = z.object({
   memo_type: z.array(z.string().trim().min(1)).optional(),
@@ -93,13 +91,14 @@ export async function GET(request: Request) {
   if (isOssMode()) return apiError('NOT_IMPLEMENTED', 'Not available in OSS mode.', 501);
 
   try {
-    const me = await getAuthContext(request);
+    const supabase = await createSupabaseServerClient();
+    const me = await getAuthContext(supabase, request);
     if (!me) return ApiErrors.unauthorized();
 
     let supabaseForService: SupabaseClient;
     if (me.type === 'agent') {
       const { createSupabaseAdminClient } = await import('@/lib/supabase/admin');
-      supabaseForService = (await (await import('@/lib/supabase/admin')).createSupabaseAdminClient());
+      supabaseForService = createSupabaseAdminClient();
     } else {
       supabaseForService = supabase;
     }
@@ -126,6 +125,7 @@ export async function POST(request: Request) {
   if (isOssMode()) return apiError('NOT_IMPLEMENTED', 'Not available in OSS mode.', 501);
 
   try {
+    const supabase = await createSupabaseServerClient();
     const { data: { user } } = await supabase.auth.getUser();
     if (!user) return ApiErrors.unauthorized();
 
@@ -162,13 +162,14 @@ export async function PUT(request: Request) {
   if (isOssMode()) return apiError('NOT_IMPLEMENTED', 'Not available in OSS mode.', 501);
 
   try {
-    const me = await getAuthContext(request);
+    const supabase = await createSupabaseServerClient();
+    const me = await getAuthContext(supabase, request);
     if (!me) return ApiErrors.unauthorized();
 
     let supabaseForService: SupabaseClient;
     if (me.type === 'agent') {
       const { createSupabaseAdminClient } = await import('@/lib/supabase/admin');
-      supabaseForService = (await (await import('@/lib/supabase/admin')).createSupabaseAdminClient());
+      supabaseForService = createSupabaseAdminClient();
     } else {
       await requireOrgAdmin(supabase, me.org_id);
       supabaseForService = supabase;
@@ -232,6 +233,7 @@ export async function PATCH(request: Request) {
   if (isOssMode()) return apiError('NOT_IMPLEMENTED', 'Not available in OSS mode.', 501);
 
   try {
+    const supabase = await createSupabaseServerClient();
     const { data: { user } } = await supabase.auth.getUser();
     if (!user) return ApiErrors.unauthorized();
 
@@ -277,6 +279,7 @@ export async function DELETE(request: Request) {
   if (isOssMode()) return apiError('NOT_IMPLEMENTED', 'Not available in OSS mode.', 501);
 
   try {
+    const supabase = await createSupabaseServerClient();
     const { data: { user } } = await supabase.auth.getUser();
     if (!user) return ApiErrors.unauthorized();
 

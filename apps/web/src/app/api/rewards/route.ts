@@ -1,17 +1,18 @@
 import { parseBody, createRewardSchema } from '@sprintable/shared';
+import { createSupabaseServerClient } from '@/lib/supabase/server';
+import { createSupabaseAdminClient } from '@/lib/supabase/admin';
 import { RewardsService } from '@/services/rewards';
 import { handleApiError } from '@/lib/api-error';
 import { getAuthContext } from '@/lib/auth-helpers';
 import { apiSuccess, ApiErrors } from '@/lib/api-response';
-// eslint-disable-next-line @typescript-eslint/no-explicit-any
-const supabase: any = undefined;
 
 export async function GET(request: Request) {
   try {
-    const me = await getAuthContext(request);
+    const supabase = await createSupabaseServerClient();
+    const me = await getAuthContext(supabase, request);
     if (!me) return ApiErrors.unauthorized();
     if (me.rateLimitExceeded) return ApiErrors.tooManyRequests(me.rateLimitRemaining, me.rateLimitResetAt);
-    const dbClient = me.type === 'agent' ? (await (await import('@/lib/supabase/admin')).createSupabaseAdminClient()) : supabase;
+    const dbClient = me.type === 'agent' ? createSupabaseAdminClient() : supabase;
     const { searchParams } = new URL(request.url);
     // AC1: agent 요청 시 me.project_id 강제 — cross-project 조회 차단
     const projectId = me.type === 'agent' ? me.project_id : searchParams.get('project_id');
@@ -27,14 +28,15 @@ export async function GET(request: Request) {
 
 export async function POST(request: Request) {
   try {
-    const me = await getAuthContext(request);
+    const supabase = await createSupabaseServerClient();
+    const me = await getAuthContext(supabase, request);
     if (!me) return ApiErrors.unauthorized();
     if (me.rateLimitExceeded) return ApiErrors.tooManyRequests(me.rateLimitRemaining, me.rateLimitResetAt);
     // AC2: agent 요청 시 admin scope 필요 (requireOrgAdmin은 OAuth 전용이므로 scope 체크로 대체)
     if (me.type === 'agent' && !me.scope?.includes('admin')) {
       return ApiErrors.insufficientScope('admin');
     }
-    const dbClient = me.type === 'agent' ? (await (await import('@/lib/supabase/admin')).createSupabaseAdminClient()) : supabase;
+    const dbClient = me.type === 'agent' ? createSupabaseAdminClient() : supabase;
     const parsed = await parseBody(request, createRewardSchema); if (!parsed.success) return parsed.response; const body = parsed.data;
     const service = new RewardsService(dbClient);
     const entry = await service.grant({

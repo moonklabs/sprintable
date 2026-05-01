@@ -1,5 +1,4 @@
-// eslint-disable-next-line @typescript-eslint/no-explicit-any
-type SupabaseClient = any;
+import type { SupabaseClient } from '@supabase/supabase-js';
 import { NotificationService } from './notification.service';
 import { InboxItemService } from './inbox-item.service';
 

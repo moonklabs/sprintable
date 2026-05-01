@@ -1,4 +1,5 @@
 import { redirect } from 'next/navigation';
+import { createSupabaseServerClient } from '@/lib/supabase/server';
 import { getMyTeamMember } from '@/lib/auth-helpers';
 import { requireOrgAdmin } from '@/lib/admin-check';
 import { checkFeatureLimit } from '@/lib/check-feature';
@@ -17,7 +18,7 @@ export default async function AgentHitlRequestsPage() {
       </div>
     );
   }
-  const supabase = await (undefined as any);
+  const supabase = await createSupabaseServerClient();
   const { data: { user } } = await supabase.auth.getUser();
   if (!user) redirect('/login');
 

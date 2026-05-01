@@ -11,6 +11,7 @@ const { createClient, scan } = vi.hoisted(() => {
   };
 });
 
+vi.mock('@supabase/supabase-js', () => ({ createClient }));
 vi.mock('@/services/inbox-outbox.service', () => ({
   InboxOutboxService: class InboxOutboxService {
     scan = scan;

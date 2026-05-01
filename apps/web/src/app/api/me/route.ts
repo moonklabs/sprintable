@@ -1,9 +1,8 @@
+import { createSupabaseServerClient } from '@/lib/supabase/server';
 import { handleApiError } from '@/lib/api-error';
 import { apiSuccess, apiError, ApiErrors } from '@/lib/api-response';
 import { getAuthContext } from '@/lib/auth-helpers';
 import { isOssMode } from '@/lib/storage/factory';
-// eslint-disable-next-line @typescript-eslint/no-explicit-any
-const supabase: any = undefined;
 
 export async function GET(request: Request) {
   if (isOssMode()) {
@@ -11,13 +10,13 @@ export async function GET(request: Request) {
     return apiSuccess({ id: OSS_MEMBER_ID, name: 'OSS User', type: 'human', role: 'owner', is_active: true, email: null });
   }
   try {
-    const me = await getAuthContext(request);
+    const supabase = await createSupabaseServerClient();
+    const me = await getAuthContext(supabase, request);
     if (!me) return ApiErrors.unauthorized();
 
     if (me.type === 'agent') {
-      // eslint-disable-next-line @typescript-eslint/no-unused-vars
       const { createSupabaseAdminClient } = await import('@/lib/supabase/admin');
-      const adminClient = (await (await import('@/lib/supabase/admin')).createSupabaseAdminClient()) as any;
+      const adminClient = createSupabaseAdminClient();
       const { data: member, error } = await adminClient
         .from('team_members')
         .select('id, name, type, role, is_active')
@@ -56,6 +55,7 @@ export async function PATCH(request: Request) {
     return apiSuccess({ id: OSS_MEMBER_ID, name: name.trim(), type: 'human', role: 'owner', is_active: true, email: null });
   }
   try {
+    const supabase = await createSupabaseServerClient();
     const { data: { user } } = await supabase.auth.getUser();
     if (!user) return ApiErrors.unauthorized();
 

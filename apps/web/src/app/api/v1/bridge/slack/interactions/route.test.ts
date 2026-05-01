@@ -8,6 +8,7 @@ const { createClient, findUserMapping, respond, syncSlackHitlRequestState } = vi
   syncSlackHitlRequestState: vi.fn(),
 }));
 
+vi.mock('@supabase/supabase-js', () => ({ createClient }));
 vi.mock('@/services/bridge-inbound', () => ({
   BridgeInboundService: class BridgeInboundService {
     findUserMapping = findUserMapping;
