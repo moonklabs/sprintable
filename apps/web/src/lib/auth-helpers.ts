@@ -253,35 +253,36 @@ export const getAuthContext = cache(async (
     };
   }
 
-  // 2. API Key 인증 시도 (admin client로 RLS 우회, SaaS 전용)
+  // 2. API Key 인증 — FastAPI /api/v2/me에 rawApiKey를 Bearer 토큰으로 전달
   // x-api-key 헤더는 Authorization 헤더가 CDN에서 strip될 때를 위한 fallback
   const authHeader = request.headers.get('Authorization');
   const xApiKey = request.headers.get('x-api-key');
   const rawApiKey = authHeader?.startsWith('Bearer ') ? authHeader.slice(7) : (xApiKey ?? null);
   if (rawApiKey) {
-    const { getTeamMemberFromApiKey } = await import('./auth-api-key');
-    const { createAdminClient } = await import('./db/admin');
-    const adminClient = createAdminClient();
-    const endpoint = new URL(request.url).pathname;
-    const ip = request.headers.get('x-forwarded-for') ?? request.headers.get('x-real-ip');
-    const apiKeyMember = await getTeamMemberFromApiKey(adminClient, rawApiKey, { endpoint, ip });
+    try {
+      const { fastapiCall } = await import('@sprintable/storage-api');
+      const apiKeyMember = await fastapiCall<{
+        id: string; org_id: string; project_id: string; project_name: string;
+        type: 'human' | 'agent'; scope?: string[];
+      }>('GET', '/api/v2/me', rawApiKey);
 
-    if (apiKeyMember) {
-      // Rate limiting (에이전트만)
-      const { checkRateLimit } = await import('./rate-limiter');
-      const { allowed, remaining, resetAt } = checkRateLimit(apiKeyMember.id);
-
-      return {
-        id: apiKeyMember.id,
-        org_id: apiKeyMember.org_id,
-        project_id: apiKeyMember.project_id,
-        project_name: '', // API Key 인증은 project_name이 없음 (필요시 별도 조회)
-        type: apiKeyMember.type,
-        scope: apiKeyMember.scope,
-        rateLimitExceeded: !allowed,
-        rateLimitRemaining: remaining,
-        rateLimitResetAt: resetAt,
-      };
+      if (apiKeyMember) {
+        const { checkRateLimit } = await import('./rate-limiter');
+        const { allowed, remaining, resetAt } = checkRateLimit(apiKeyMember.id);
+        return {
+          id: apiKeyMember.id,
+          org_id: apiKeyMember.org_id,
+          project_id: apiKeyMember.project_id,
+          project_name: apiKeyMember.project_name ?? '',
+          type: apiKeyMember.type,
+          scope: apiKeyMember.scope,
+          rateLimitExceeded: !allowed,
+          rateLimitRemaining: remaining,
+          rateLimitResetAt: resetAt,
+        };
+      }
+    } catch {
+      // API key 인증 실패 — OAuth 경로로 계속
     }
   }
 
