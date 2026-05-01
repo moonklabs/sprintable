@@ -19,7 +19,7 @@ FROM base AS builder
 WORKDIR /app
 COPY --from=deps /app/node_modules ./node_modules
 COPY --from=deps /app/apps/web/node_modules ./apps/web/node_modules
-COPY packages/ packages/
+COPY --from=deps /app/packages ./packages
 COPY apps/web/ apps/web/
 # ee overlay (SaaS 빌드 시 주입, OSS에서는 빈 디렉토리 허용)
 COPY ee/ ee/
