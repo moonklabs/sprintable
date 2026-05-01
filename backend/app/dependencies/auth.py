@@ -29,7 +29,7 @@ async def _resolve_api_key(raw_key: str, db: AsyncSession) -> AuthContext:
     from app.models.api_key import ApiKey
     from app.models.team import TeamMember
 
-    key_hash = hash_token(raw_key.removeprefix("sk_live_"))
+    key_hash = hash_token(raw_key)
     now = datetime.now(timezone.utc)
 
     result = await db.execute(
