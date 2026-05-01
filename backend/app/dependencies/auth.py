@@ -2,12 +2,16 @@ from __future__ import annotations
 
 import uuid
 from dataclasses import dataclass, field
+from datetime import datetime, timezone
 from typing import Literal
 
 from fastapi import Depends, Header, HTTPException, status
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
+from sqlalchemy import select
+from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.core.security import JWTError, decode_jwt
+from app.core.security import JWTError, decode_jwt, hash_token
+from app.dependencies.database import get_db
 
 bearer_scheme = HTTPBearer(auto_error=False)
 
@@ -20,13 +24,70 @@ class AuthContext:
     org_id: str | None = field(default=None)
 
 
-def get_current_user(
+async def _resolve_api_key(raw_key: str, db: AsyncSession) -> AuthContext:
+    """sk_live_* API key를 DB에서 조회하여 AuthContext 반환."""
+    from app.models.api_key import ApiKey
+    from app.models.team import TeamMember
+
+    key_hash = hash_token(raw_key)
+    now = datetime.now(timezone.utc)
+
+    result = await db.execute(
+        select(ApiKey)
+        .where(ApiKey.key_hash == key_hash)
+        .where(ApiKey.revoked_at.is_(None))
+        .where((ApiKey.expires_at.is_(None)) | (ApiKey.expires_at > now))
+    )
+    api_key = result.scalar_one_or_none()
+    if not api_key:
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid API key")
+
+    member_result = await db.execute(
+        select(TeamMember)
+        .where(TeamMember.id == api_key.team_member_id)
+        .where(TeamMember.is_active.is_(True))
+    )
+    member = member_result.scalar_one_or_none()
+    if not member:
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="API key member not found")
+
+    # fire-and-forget last_used_at 업데이트
+    api_key.last_used_at = now
+
+    scope: list[str] = api_key.scope or ["read", "write"]
+    org_id = str(member.org_id)
+    project_id = str(member.project_id)
+
+    return AuthContext(
+        user_id=str(member.id),
+        email=None,
+        claims={
+            "sub": str(member.id),
+            "app_metadata": {
+                "org_id": org_id,
+                "project_id": project_id,
+                "scope": scope,
+                "api_key_id": str(api_key.id),
+            },
+        },
+        org_id=org_id,
+    )
+
+
+async def get_current_user(
     credentials: HTTPAuthorizationCredentials | None = Depends(bearer_scheme),
+    db: AsyncSession = Depends(get_db),
 ) -> AuthContext:
     if credentials is None:
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Missing Authorization header")
 
     token = credentials.credentials
+
+    # sk_live_* prefix → API key 경로 (DB 조회)
+    if token.startswith("sk_live_"):
+        return await _resolve_api_key(token, db)
+
+    # JWT 경로 (기존)
     try:
         payload = decode_jwt(token)
     except JWTError as exc:
