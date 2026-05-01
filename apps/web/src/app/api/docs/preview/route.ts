@@ -39,6 +39,3 @@ export async function GET(request: Request) {
     return handleApiError(err);
   }
 }
-
-// extractEmbedIds re-export for use in other modules if needed
-export { extractEmbedIds };
