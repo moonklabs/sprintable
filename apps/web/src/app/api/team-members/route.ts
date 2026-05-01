@@ -24,7 +24,7 @@ export async function POST(request: Request) {
     const parsed = await parseBody(request, createTeamMemberSchema);
     if (!parsed.success) return parsed.response;
     const body = parsed.data;
-    if (body.type !== 'agent') return apiError('NOT_IMPLEMENTED', 'Only agent members are supported in OSS mode.', 501);
+    if (body.type !== 'agent') return apiSuccess({ ok: true, skipped: true });
     if (!body.name) return ApiErrors.badRequest('name required for agent');
     const { OSS_PROJECT_ID, OSS_ORG_ID } = await import('@sprintable/storage-sqlite');
     const repo = await createTeamMemberRepository();

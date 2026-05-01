@@ -109,8 +109,7 @@ function withTimeout<T>(promise: Promise<T>, timeoutMs: number): Promise<T> {
 }
 
 export function createProjectContextReplicaClient(): SupabaseClient | null {
-  // Supabase 직접 클라이언트 생성 제거됨 (C-S10: @supabase 의존 제거)
-  // 레플리카 클라이언트는 SaaS overlay에서 주입받거나 null 반환
+  // 레플리카 클라이언트는 사용하지 않음
   return null;
 }
 

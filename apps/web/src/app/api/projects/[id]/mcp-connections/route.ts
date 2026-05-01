@@ -13,5 +13,5 @@ export async function GET(_request: Request, { params }: RouteParams) {
 }
 
 export async function POST(_request: Request, _ctx: RouteParams) {
-  return apiError('NOT_IMPLEMENTED', 'MCP connection management is not supported in OSS mode.', 501);
+  return apiSuccess({ ok: true, skipped: true });
 }

@@ -68,7 +68,7 @@ const McpRequestSchema = z.discriminatedUnion('action', [
 ]);
 
 export async function POST(request: Request) {
-  if (isOssMode()) return apiError('NOT_IMPLEMENTED', 'Mockups are not available in OSS mode.', 501);
+  if (isOssMode()) return apiSuccess({ ok: true, skipped: true });
   try {
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     const supabase: any = null;

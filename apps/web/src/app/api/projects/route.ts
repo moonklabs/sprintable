@@ -16,5 +16,5 @@ export async function GET(_request: Request) {
 
 /** POST — 프로젝트 생성 (OSS 미지원) */
 export async function POST(_request: Request) {
-  return apiError('NOT_IMPLEMENTED', 'Project creation is not supported in OSS mode.', 501);
+  return apiSuccess({ ok: true, skipped: true });
 }

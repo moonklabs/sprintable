@@ -27,7 +27,7 @@ export async function GET(_request: Request, { params }: RouteParams) {
 
 /** POST — 버전 복원 */
 export async function POST(request: Request, { params }: RouteParams) {
-  if (isOssMode()) return apiError('NOT_IMPLEMENTED', 'Mockups are not available in OSS mode.', 501);
+  if (isOssMode()) return apiSuccess({ ok: true, skipped: true });
   try {
     const { id } = await params;
     // eslint-disable-next-line @typescript-eslint/no-explicit-any

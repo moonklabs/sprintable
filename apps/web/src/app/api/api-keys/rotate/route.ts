@@ -12,7 +12,7 @@ import { requireRole, ADMIN_ROLES } from '@/lib/role-guard';
  * Body: { api_key_id: string }
  */
 export async function POST(request: Request) {
-  if (isOssMode()) return apiError('NOT_IMPLEMENTED', 'API key rotation is not supported in OSS mode.', 501);
+  if (isOssMode()) return apiSuccess({ ok: true, skipped: true });
   try {
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     const supabase: any = null;

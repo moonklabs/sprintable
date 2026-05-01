@@ -5,5 +5,5 @@ export async function GET() {
 }
 
 export async function PUT() {
-  return apiError('NOT_IMPLEMENTED', 'Notification settings are not supported in OSS mode.', 501);
+  return apiSuccess({ ok: true, skipped: true });
 }

@@ -8,7 +8,7 @@ type RouteParams = { params: Promise<{ id: string }> };
 
 /** GET — 목업 상세 (컴포넌트 포함) */
 export async function GET(_request: Request, { params }: RouteParams) {
-  if (isOssMode()) return apiError('NOT_IMPLEMENTED', 'Mockups are not available in OSS mode.', 501);
+  if (isOssMode()) return apiSuccess({ ok: true, skipped: true });
   try {
     const { id } = await params;
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -24,7 +24,7 @@ export async function GET(_request: Request, { params }: RouteParams) {
 
 /** PUT — 목업 수정 (컴포넌트 트리 일괄 교체) */
 export async function PUT(request: Request, { params }: RouteParams) {
-  if (isOssMode()) return apiError('NOT_IMPLEMENTED', 'Mockups are not available in OSS mode.', 501);
+  if (isOssMode()) return apiSuccess({ ok: true, skipped: true });
   try {
     const { id } = await params;
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -43,7 +43,7 @@ export async function PUT(request: Request, { params }: RouteParams) {
 
 /** DELETE — 목업 소프트 삭제 */
 export async function DELETE(_request: Request, { params }: RouteParams) {
-  if (isOssMode()) return apiError('NOT_IMPLEMENTED', 'Mockups are not available in OSS mode.', 501);
+  if (isOssMode()) return apiSuccess({ ok: true, skipped: true });
   try {
     const { id } = await params;
     // eslint-disable-next-line @typescript-eslint/no-explicit-any

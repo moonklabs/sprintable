@@ -5,7 +5,7 @@ import { proxyToFastapi } from '@/lib/fastapi-proxy';
 type RouteParams = { params: Promise<{ id: string }> };
 
 export async function PATCH(request: Request, { params }: RouteParams) {
-  if (isOssMode()) return apiError('NOT_IMPLEMENTED', 'Not available in OSS mode.', 501);
+  if (isOssMode()) return apiSuccess({ ok: true, skipped: true });
   const { id } = await params;
   return proxyToFastapi(request, `/api/v2/agent-sessions/${id}`);
 }

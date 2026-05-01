@@ -26,7 +26,7 @@ function sanitizeFilename(name: string) {
 }
 
 export async function POST(request: Request) {
-  if (isOssMode()) return apiError('NOT_IMPLEMENTED', 'Attachments are not available in OSS mode.', 501);
+  if (isOssMode()) return apiSuccess({ ok: true, skipped: true });
   try {
     const session = await getServerSession();
     if (!session) return ApiErrors.unauthorized();

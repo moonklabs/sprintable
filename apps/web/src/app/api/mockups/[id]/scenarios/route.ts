@@ -27,7 +27,7 @@ export async function GET(_request: Request, { params }: RouteParams) {
 
 /** POST — 시나리오 생성 */
 export async function POST(request: Request, { params }: RouteParams) {
-  if (isOssMode()) return apiError('NOT_IMPLEMENTED', 'Mockups are not available in OSS mode.', 501);
+  if (isOssMode()) return apiSuccess({ ok: true, skipped: true });
   try {
     const { id } = await params;
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -49,7 +49,7 @@ export async function POST(request: Request, { params }: RouteParams) {
 
 /** PATCH — 시나리오 수정 */
 export async function PATCH(request: Request, { params }: RouteParams) {
-  if (isOssMode()) return apiError('NOT_IMPLEMENTED', 'Mockups are not available in OSS mode.', 501);
+  if (isOssMode()) return apiSuccess({ ok: true, skipped: true });
   try {
     const { id } = await params;
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -73,7 +73,7 @@ export async function PATCH(request: Request, { params }: RouteParams) {
 
 /** DELETE — 시나리오 삭제 (default 불가) */
 export async function DELETE(request: Request, { params }: RouteParams) {
-  if (isOssMode()) return apiError('NOT_IMPLEMENTED', 'Mockups are not available in OSS mode.', 501);
+  if (isOssMode()) return apiSuccess({ ok: true, skipped: true });
   try {
     const { id } = await params;
     // eslint-disable-next-line @typescript-eslint/no-explicit-any

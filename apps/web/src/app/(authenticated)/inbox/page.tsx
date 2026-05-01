@@ -83,11 +83,9 @@ export default function InboxPage() {
     if (!currentTeamMemberId) return;
 
     const ossMode = process.env.NEXT_PUBLIC_OSS_MODE === 'true';
-    const hasSupabaseEnv =
-      !!process.env.NEXT_PUBLIC_SUPABASE_URL && !!process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY;
 
-    // OSS or missing Supabase config: fall back to polling the existing inbox API
-    if (ossMode || !hasSupabaseEnv) {
+    // OSS: fall back to polling the existing inbox API
+    if (ossMode) {
       const interval = setInterval(() => {
         void refreshNotifications();
       }, 15000);
