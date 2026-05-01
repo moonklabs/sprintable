@@ -1,5 +1,7 @@
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+type SupabaseClient = any;
+
 import { randomUUID } from 'crypto';
-import type { SupabaseClient } from '@supabase/supabase-js';
 import {
   buildInitialPersonaVersionMetadata,
   buildPersonaChangeHistoryEntry,

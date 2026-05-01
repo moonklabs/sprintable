@@ -1,5 +1,3 @@
-import { createSupabaseServerClient } from '@/lib/supabase/server';
-import { createSupabaseAdminClient } from '@/lib/supabase/admin';
 import { handleApiError } from '@/lib/api-error';
 import { apiUpgradeRequired, ApiErrors } from '@/lib/api-response';
 import { getAuthContext } from '@/lib/auth-helpers';
@@ -41,11 +39,10 @@ Use the same language as the transcript. Be concise and accurate.`;
 export async function POST(request: Request, { params }: RouteParams) {
   try {
     const { id } = await params;
-    const supabase = await createSupabaseServerClient();
-    const me = await getAuthContext(supabase, request);
+    const me = await getAuthContext(request);
     if (!me) return ApiErrors.unauthorized();
     if (me.rateLimitExceeded) return ApiErrors.tooManyRequests(me.rateLimitRemaining, me.rateLimitResetAt);
-    const dbClient = me.type === 'agent' ? createSupabaseAdminClient() : supabase;
+    const dbClient = undefined;
 
     const usageCheck = await checkUsage(dbClient, me.org_id, 'ai_calls');
     if (!usageCheck.allowed) {
@@ -55,15 +52,6 @@ export async function POST(request: Request, { params }: RouteParams) {
       );
     }
 
-    const { data: meeting } = await dbClient
-      .from('meetings')
-      .select('id, raw_transcript, project_id')
-      .eq('id', id)
-      .single();
-
-    if (!meeting) return ApiErrors.notFound();
-    if (!meeting.raw_transcript) return ApiErrors.badRequest('NO_TRANSCRIPT');
-
     const body = await request.json().catch(() => ({})) as {
       provider?: LLMProvider;
       apiKey?: string;
@@ -71,9 +59,15 @@ export async function POST(request: Request, { params }: RouteParams) {
       baseUrl?: string;
       timeoutMs?: number;
       maxRetries?: number;
+      projectId?: string;
+      rawTranscript?: string;
     };
 
-    const llmConfig = await resolveLLMConfig(meeting.project_id, body);
+    const projectId = body.projectId ?? me.project_id;
+    const rawTranscript = body.rawTranscript;
+    if (!rawTranscript) return ApiErrors.badRequest('NO_TRANSCRIPT');
+
+    const llmConfig = await resolveLLMConfig(projectId, body);
     if (!llmConfig) return ApiErrors.badRequest('NO_API_KEY');
 
     const llm = createLLMClient(llmConfig);
@@ -84,7 +78,7 @@ export async function POST(request: Request, { params }: RouteParams) {
         try {
           const response = await llm.generate([
             { role: 'system', content: SYSTEM_PROMPT },
-            { role: 'user', content: `Meeting transcript:\n\n${meeting.raw_transcript}` },
+            { role: 'user', content: `Meeting transcript:\n\n${rawTranscript}` },
           ], { responseFormat: 'json_object' });
 
           if (response.text) {
@@ -98,22 +92,6 @@ export async function POST(request: Request, { params }: RouteParams) {
           } catch {
             parsed = { summary: response.text, decisions: [], action_items: [] };
           }
-
-          const { error: updateErr } = await dbClient
-            .from('meetings')
-            .update({
-              ai_summary: parsed.summary ?? response.text,
-              decisions: parsed.decisions ?? [],
-              action_items: parsed.action_items ?? [],
-            })
-            .eq('id', id);
-
-          await dbClient.from('ai_usage').insert({
-            org_id: me.org_id,
-            project_id: meeting.project_id,
-            feature_key: 'ai_structuring',
-            meeting_id: id,
-          });
 
           await incrementUsage(dbClient, me.org_id, 'ai_calls');
           const postUsage = await checkUsage(dbClient, me.org_id, 'ai_calls');
@@ -132,10 +110,10 @@ export async function POST(request: Request, { params }: RouteParams) {
           controller.enqueue(encoder.encode(
             `data: ${JSON.stringify({
               done: true,
+              meetingId: id,
               summary: parsed.summary ?? response.text,
               decisions: parsed.decisions ?? [],
               action_items: parsed.action_items ?? [],
-              error: updateErr?.message ?? null,
             })}\n\n`,
           ));
         } catch (error) {

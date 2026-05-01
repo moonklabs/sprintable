@@ -1,13 +1,8 @@
 import { z } from 'zod';
-import { createSupabaseServerClient } from '@/lib/supabase/server';
 import { handleApiError } from '@/lib/api-error';
 import { apiSuccess, ApiErrors } from '@/lib/api-response';
-import { getMyTeamMember } from '@/lib/auth-helpers';
-import { requireOrgAdmin } from '@/lib/admin-check';
 import { validateCustomEndpoint } from '@/lib/llm/config';
 import type { LLMProvider } from '@/lib/llm';
-
-import { isOssMode } from '@/lib/storage/factory';
 
 type RouteParams = { params: Promise<{ id: string }> };
 
@@ -27,7 +22,7 @@ const validateKeySchema = z.object({
 
 /** POST — validate a BYOM API key by making a lightweight provider call */
 export async function POST(request: Request, { params }: RouteParams) {
-  if (isOssMode()) {
+  try {
     const { id } = await params;
     const rawBody = await request.json().catch(() => null);
     const parsed = validateKeySchema.safeParse(rawBody);
@@ -35,28 +30,6 @@ export async function POST(request: Request, { params }: RouteParams) {
     const { provider, api_key, base_url } = parsed.data;
     const normalizedBaseUrl = base_url?.trim() ? validateCustomEndpoint(base_url, provider) : undefined;
     const valid = await testProviderKey(provider, api_key, normalizedBaseUrl);
-    return apiSuccess({ valid, project_id: id });
-  }
-  try {
-    const { id } = await params;
-    const supabase = await createSupabaseServerClient();
-    const { data: { user } } = await supabase.auth.getUser();
-    if (!user) return ApiErrors.unauthorized();
-
-    const me = await getMyTeamMember(supabase, user);
-    if (!me) return ApiErrors.forbidden();
-    await requireOrgAdmin(supabase, me.org_id);
-
-    const rawBody = await request.json();
-    const parsed = validateKeySchema.safeParse(rawBody);
-    if (!parsed.success) {
-      return ApiErrors.badRequest(parsed.error.issues.map((i) => i.message).join(', '));
-    }
-
-    const { provider, api_key, base_url } = parsed.data;
-    const normalizedBaseUrl = base_url?.trim() ? validateCustomEndpoint(base_url, provider) : undefined;
-    const valid = await testProviderKey(provider, api_key, normalizedBaseUrl);
-
     return apiSuccess({ valid, project_id: id });
   } catch (err: unknown) {
     return handleApiError(err);
@@ -95,7 +68,6 @@ async function testProviderKey(provider: LLMProvider, apiKey: string, baseUrl?: 
     const config = endpoints[provider];
     if (!config) return false;
 
-    // For Anthropic, we need a POST with minimal payload to test auth
     if (provider === 'anthropic') {
       const res = await fetch(config.url, {
         method: 'POST',
@@ -103,7 +75,6 @@ async function testProviderKey(provider: LLMProvider, apiKey: string, baseUrl?: 
         body: JSON.stringify({ model: 'claude-sonnet-4', max_tokens: 1, messages: [{ role: 'user', content: 'hi' }] }),
         signal: AbortSignal.timeout(10000),
       });
-      // 200 = valid, 401/403 = invalid key, other errors = might be valid but service issue
       return res.status !== 401 && res.status !== 403;
     }
 
@@ -115,7 +86,6 @@ async function testProviderKey(provider: LLMProvider, apiKey: string, baseUrl?: 
 
     return res.status !== 401 && res.status !== 403;
   } catch {
-    // Network errors — treat as potentially valid (service might be down)
     return false;
   }
 }

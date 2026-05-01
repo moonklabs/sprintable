@@ -1,7 +1,5 @@
 'use client';
 
-import { createBrowserClient } from '@supabase/ssr';
-
 // ─── FastAPI Auth Utilities ───────────────────────────────────────────────────
 
 export interface AuthTokens {
@@ -52,7 +50,7 @@ export async function refreshAuthTokens(): Promise<AuthResult> {
   return callAuthRoute('/api/auth/refresh', {});
 }
 
-// ─── Supabase Browser Client (realtime / DB only — auth via FastAPI) ─────────
+// ─── Rate-limited fetch helper ────────────────────────────────────────────────
 
 const rateLimitBlockedUntil = new Map<string, number>();
 
@@ -62,7 +60,7 @@ function getUrlKey(input: RequestInfo | URL): string {
   return (input as Request).url;
 }
 
-function rateLimitedFetch(input: RequestInfo | URL, init?: RequestInit): Promise<Response> {
+export function rateLimitedFetch(input: RequestInfo | URL, init?: RequestInit): Promise<Response> {
   const url = getUrlKey(input);
   const now = Date.now();
   const blockedUntil = rateLimitBlockedUntil.get(url);
@@ -81,20 +79,9 @@ function rateLimitedFetch(input: RequestInfo | URL, init?: RequestInit): Promise
   });
 }
 
-export function createSupabaseBrowserClient() {
-  const cookieDomain = process.env['NEXT_PUBLIC_COOKIE_DOMAIN'];
-  return createBrowserClient(
-    process.env['NEXT_PUBLIC_SUPABASE_URL']!,
-    process.env['NEXT_PUBLIC_SUPABASE_ANON_KEY']!,
-    {
-      cookieOptions: {
-        ...(cookieDomain ? { domain: cookieDomain } : {}),
-        sameSite: 'lax',
-        secure: true,
-        path: '/',
-      },
-      global: { fetch: rateLimitedFetch },
-      auth: { persistSession: false, autoRefreshToken: false },
-    },
-  );
+// ─── Supabase Browser Client stub (auth via FastAPI) ─────────────────────────
+
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+export function createSupabaseBrowserClient(): any {
+  return undefined;
 }

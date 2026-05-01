@@ -1,4 +1,6 @@
-import type { SupabaseClient } from '@supabase/supabase-js';
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+type SupabaseClient = any;
+
 import { createSupabaseAdminClient } from '@/lib/supabase/admin';
 import { githubMcpToolArgumentSchemas, isGitHubMcpToolName } from '@/lib/github-mcp';
 import { resolveMcpTokenRef } from '@/lib/mcp-secrets';

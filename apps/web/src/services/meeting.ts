@@ -1,4 +1,6 @@
-import type { SupabaseClient } from '@supabase/supabase-js';
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+type SupabaseClient = any;
+
 
 export class MeetingService {
   constructor(private readonly supabase: SupabaseClient) {}

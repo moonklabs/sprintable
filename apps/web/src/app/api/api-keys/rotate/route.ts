@@ -1,4 +1,3 @@
-import { createSupabaseServerClient } from '@/lib/supabase/server';
 import { createSupabaseAdminClient } from '@/lib/supabase/admin';
 import { handleApiError } from '@/lib/api-error';
 import { apiSuccess, apiError, ApiErrors } from '@/lib/api-response';
@@ -15,8 +14,9 @@ import { requireRole, ADMIN_ROLES } from '@/lib/role-guard';
 export async function POST(request: Request) {
   if (isOssMode()) return apiError('NOT_IMPLEMENTED', 'API key rotation is not supported in OSS mode.', 501);
   try {
-    const supabase = await createSupabaseServerClient();
-    const me = await getAuthContext(supabase, request);
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const supabase: any = null;
+    const me = await getAuthContext(request);
     if (!me) return ApiErrors.unauthorized();
     if (me.rateLimitExceeded) return ApiErrors.tooManyRequests(me.rateLimitRemaining, me.rateLimitResetAt);
 

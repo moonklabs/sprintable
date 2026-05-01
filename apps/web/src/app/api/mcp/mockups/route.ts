@@ -1,5 +1,4 @@
 import { z } from 'zod';
-import { createSupabaseServerClient } from '@/lib/supabase/server';
 import { handleApiError } from '@/lib/api-error';
 import { apiSuccess, apiError, ApiErrors } from '@/lib/api-response';
 import { MockupService } from '@/services/mockup';
@@ -71,9 +70,9 @@ const McpRequestSchema = z.discriminatedUnion('action', [
 export async function POST(request: Request) {
   if (isOssMode()) return apiError('NOT_IMPLEMENTED', 'Mockups are not available in OSS mode.', 501);
   try {
-    const supabase = await createSupabaseServerClient();
-    const { data: { user } } = await supabase.auth.getUser();
-    if (!user) return ApiErrors.unauthorized();
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const supabase: any = null;
+    if (!supabase) return ApiErrors.unauthorized();
 
     const body = await request.json();
     const parsed = McpRequestSchema.safeParse(body);
@@ -96,7 +95,7 @@ export async function POST(request: Request) {
       }
 
       case 'create_mockup': {
-        const me = await getMyTeamMember(supabase, user);
+        const me = await getMyTeamMember(supabase, null as any);
         if (!me) return ApiErrors.forbidden('Team member not found');
 
         const check = await checkResourceLimit(supabase, me.org_id, 'max_mockups', 'mockup_pages');

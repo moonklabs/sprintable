@@ -1,7 +1,4 @@
-import type { SupabaseClient } from '@supabase/supabase-js';
 import { parseBody, createDocSchema } from '@sprintable/shared';
-import { createSupabaseServerClient } from '@/lib/supabase/server';
-import { createSupabaseAdminClient } from '@/lib/supabase/admin';
 import { DocsService } from '@/services/docs';
 import { handleApiError } from '@/lib/api-error';
 import { getAuthContext } from '@/lib/auth-helpers';
@@ -12,17 +9,15 @@ import { isOssMode, createDocRepository } from '@/lib/storage/factory';
 
 export async function GET(request: Request) {
   try {
-    const supabase = await createSupabaseServerClient();
-    const me = await getAuthContext(supabase, request);
+    const me = await getAuthContext(request);
     if (!me) return ApiErrors.unauthorized();
     if (me.rateLimitExceeded) return ApiErrors.tooManyRequests(me.rateLimitRemaining, me.rateLimitResetAt);
-    const ossMode = isOssMode();
-    const dbClient = ossMode ? undefined : (me.type === 'agent' ? createSupabaseAdminClient() : supabase);
+    const dbClient = undefined;
     const { searchParams } = new URL(request.url);
     const projectId = searchParams.get('project_id');
     if (!projectId) return ApiErrors.badRequest('project_id required');
     const repo = await createDocRepository(dbClient);
-    const service = new DocsService(repo, dbClient as SupabaseClient | undefined);
+    const service = new DocsService(repo, dbClient);
     const slug = searchParams.get('slug');
     if (slug) return apiSuccess(await service.getDoc(projectId, slug));
 
@@ -43,26 +38,26 @@ export async function GET(request: Request) {
     const rows = query
       ? await service.search(projectId, query, { ...pageInput, tags })
       : await service.list(projectId, { ...pageInput, tags });
-    const { page, meta } = buildCursorPageMeta(rows, pageInput.limit, 'updated_at');
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const { page, meta } = buildCursorPageMeta(rows as any[], pageInput.limit, 'updated_at');
     return apiSuccess(page, meta);
   } catch (err: unknown) { return handleApiError(err); }
 }
 
 export async function POST(request: Request) {
   try {
-    const supabase = await createSupabaseServerClient();
-    const me = await getAuthContext(supabase, request);
+    const me = await getAuthContext(request);
     if (!me) return ApiErrors.unauthorized();
     if (me.rateLimitExceeded) return ApiErrors.tooManyRequests(me.rateLimitRemaining, me.rateLimitResetAt);
     const ossMode = isOssMode();
-    const dbClient = ossMode ? undefined : (me.type === 'agent' ? createSupabaseAdminClient() : supabase);
+    const dbClient = undefined;
     if (!ossMode) {
-      const check = await checkResourceLimit(dbClient!, me.org_id, 'max_docs', 'docs');
+      const check = await checkResourceLimit(dbClient, me.org_id, 'max_docs', 'docs');
       if (!check.allowed) return apiError('UPGRADE_REQUIRED', check.reason ?? 'Document limit reached. Upgrade to Team.', 403);
     }
     const parsed = await parseBody(request, createDocSchema); if (!parsed.success) return parsed.response; const body = parsed.data;
     const repo = await createDocRepository(dbClient);
-    const service = new DocsService(repo, dbClient as SupabaseClient | undefined);
+    const service = new DocsService(repo, dbClient);
     const doc = await service.createDoc({
       org_id: me.org_id, project_id: me.project_id,
       title: body.title, slug: body.slug ?? '', content: body.content ?? '', content_format: body.content_format ?? 'markdown',

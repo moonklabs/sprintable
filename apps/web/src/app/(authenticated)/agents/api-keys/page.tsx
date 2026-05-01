@@ -1,5 +1,4 @@
 import { redirect } from 'next/navigation';
-import { createSupabaseServerClient } from '@/lib/supabase/server';
 import { getMyTeamMember } from '@/lib/auth-helpers';
 import { requireOrgAdmin } from '@/lib/admin-check';
 import { AgentApiKeyManager } from '@/components/agents/agent-api-key-manager';
@@ -30,8 +29,8 @@ export default async function ApiKeysPage() {
       </div>
     );
   }
-  const supabase = await createSupabaseServerClient();
-  const { data: { user } } = await supabase.auth.getUser();
+  const supabase = null as any;
+  const { data: { user } } = { data: { user: null } };
   if (!user) redirect('/login');
 
   const me = await getMyTeamMember(supabase, user);

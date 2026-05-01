@@ -1,4 +1,7 @@
-import type { RealtimeChannel, SupabaseClient } from '@supabase/supabase-js';
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+type SupabaseClient = any;
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+type RealtimeChannel = any;
 import { MemoService } from './memo';
 import { getActiveDiscordOrgAuth, isDiscordAuthExpired, notifyDiscordAuthFailed, resolveDiscordToken } from './discord-bridge-utils';
 import { DISCORD_MAX_MESSAGE_LENGTH } from './discord-inbound';

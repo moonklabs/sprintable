@@ -6,7 +6,7 @@ import { Input } from '@/components/ui/input';
 import { SectionCard, SectionCardBody, SectionCardHeader } from '@/components/ui/section-card';
 import { OperatorDropdownSelect } from '@/components/ui/operator-dropdown-select';
 import { MemoComposer } from '@/components/memos/memo-composer';
-import { MEMO_TEMPLATE_PRESETS, type MemoTemplateId, getMemoTemplatePreset, parseMemoDraft, serializeMemoDraft } from './memo-workspace';
+import { MEMO_TEMPLATE_PRESETS, type MemoTemplateId, type MemoDraftState, getMemoTemplatePreset, parseMemoDraft, serializeMemoDraft } from './memo-workspace';
 
 interface Member {
   id: string;
@@ -38,7 +38,7 @@ export function MemoCreateForm({ members, onSubmit, onCancel, initialTitle, draf
     if (!draftStorageKey || draftKeyRef.current === draftStorageKey) return;
     draftKeyRef.current = draftStorageKey;
 
-    let stored = null;
+    let stored: MemoDraftState | null = null;
     try {
       stored = parseMemoDraft(window.localStorage.getItem(draftStorageKey));
     } catch {

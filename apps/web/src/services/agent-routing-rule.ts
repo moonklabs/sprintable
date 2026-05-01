@@ -1,4 +1,6 @@
-import type { SupabaseClient } from '@supabase/supabase-js';
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+type SupabaseClient = any;
+
 import { ForbiddenError, NotFoundError } from './sprint';
 
 export type RoutingAutoReplyMode = 'process_and_forward' | 'process_and_report';
@@ -583,7 +585,8 @@ export class AgentRoutingRuleService {
           items: currentRules.map((rule) => createRoutingRuleSnapshotItem(rule)),
         }
       : undefined;
-    const preparedItems = [];
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const preparedItems: any[] = [];
 
     for (const [index, item] of input.items.entries()) {
       const existingRuleId = item.id?.trim() || undefined;

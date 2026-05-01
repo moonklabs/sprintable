@@ -1,4 +1,6 @@
-import { createClient, type SupabaseClient } from '@supabase/supabase-js';
+import { createSupabaseAdminClient } from '@/lib/supabase/admin';
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+type SupabaseClient = any;
 import { DiscordGatewayRuntime } from './discord-gateway-runtime';
 import { DiscordOutboundDispatcher } from './discord-outbound-dispatcher';
 import { MemoEventDispatcher } from './memo-event-dispatcher';
@@ -194,14 +196,8 @@ export class BackgroundRuntimeWorker {
 }
 
 export function createBackgroundRuntimeWorkerFromEnv(env: NodeJS.ProcessEnv = process.env) {
-  const supabaseUrl = env['NEXT_PUBLIC_SUPABASE_URL'];
-  const serviceRoleKey = env['SUPABASE_SERVICE_ROLE_KEY'];
-  if (!supabaseUrl || !serviceRoleKey) {
-    return null;
-  }
-
   return new BackgroundRuntimeWorker({
-    supabase: createClient(supabaseUrl, serviceRoleKey),
+    supabase: createSupabaseAdminClient(),
     appUrl: resolveAppUrl(env['NEXT_PUBLIC_APP_URL'], env),
     settings: resolveBackgroundRuntimeSettings(env),
   });

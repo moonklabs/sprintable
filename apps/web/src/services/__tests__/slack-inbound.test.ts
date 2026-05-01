@@ -1,6 +1,8 @@
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+type SupabaseClient = any;
+
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { createHmac } from 'node:crypto';
-import type { SupabaseClient } from '@supabase/supabase-js';
 import {
   BridgeInboundService,
   checkChannelRateLimit,

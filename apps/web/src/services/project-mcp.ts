@@ -1,5 +1,7 @@
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+type SupabaseClient = any;
+
 import { z } from 'zod';
-import type { SupabaseClient } from '@supabase/supabase-js';
 import { decryptSecretForOrg, encryptSecretForOrg } from '@/lib/kms';
 import { encodeMcpOAuthState } from '@/lib/mcp-oauth-state';
 import { GITHUB_MCP_TOOL_NAMES } from '@/lib/github-mcp';

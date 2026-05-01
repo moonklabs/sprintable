@@ -1,4 +1,6 @@
-import type { SupabaseClient } from '@supabase/supabase-js';
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+type SupabaseClient = any;
+
 
 interface NotificationReference {
   reference_type: string | null;
@@ -26,7 +28,7 @@ function buildMemoHref(memoId: string) {
 }
 
 export async function attachNotificationHrefs<T extends NotificationReference>(
-  supabase: SupabaseClient,
+  supabase: SupabaseClient | undefined,
   notifications: T[],
 ): Promise<Array<T & { href: string | null }>> {
   const docCommentIds = notifications
@@ -38,7 +40,7 @@ export async function attachNotificationHrefs<T extends NotificationReference>(
     .map((notification) => notification.reference_id as string);
 
   let docComments: DocCommentRow[] = [];
-  if (docCommentIds.length) {
+  if (supabase && docCommentIds.length) {
     const { data, error } = await supabase
       .from('doc_comments')
       .select('id, doc_id')
@@ -51,7 +53,7 @@ export async function attachNotificationHrefs<T extends NotificationReference>(
   const allDocIds = [...new Set([...docIds, ...docComments.map((comment) => comment.doc_id)])];
 
   let docs: DocRow[] = [];
-  if (allDocIds.length) {
+  if (supabase && allDocIds.length) {
     const { data, error } = await supabase
       .from('docs')
       .select('id, slug')

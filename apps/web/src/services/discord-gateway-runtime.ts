@@ -1,4 +1,6 @@
-import type { SupabaseClient } from '@supabase/supabase-js';
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+type SupabaseClient = any;
+
 import { DiscordGatewayBridge } from './discord-gateway-bridge';
 import { getActiveDiscordOrgAuth, isDiscordAuthExpired, notifyDiscordAuthFailed, resolveDiscordToken } from './discord-bridge-utils';
 
@@ -92,7 +94,7 @@ export class DiscordGatewayRuntime {
     }
   }
 
-  private async listActiveDiscordOrgIds() {
+  private async listActiveDiscordOrgIds(): Promise<string[]> {
     const { data, error } = await this.options.supabase
       .from('messaging_bridge_channels')
       .select('org_id')
@@ -100,7 +102,8 @@ export class DiscordGatewayRuntime {
       .eq('is_active', true);
 
     if (error) throw error;
-    return [...new Set((data ?? []).map((row) => String((row as { org_id: string }).org_id)).filter(Boolean))];
+    const ids: string[] = (data ?? []).map((row: { org_id: unknown }) => String(row.org_id)).filter((id): id is string => Boolean(id));
+    return Array.from(new Set(ids));
   }
 
   private async reportAuthFailed(orgId: string, reason: string) {

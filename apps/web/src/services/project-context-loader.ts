@@ -1,4 +1,6 @@
-import { createClient, type SupabaseClient } from '@supabase/supabase-js';
+import { createSupabaseAdminClient } from '@/lib/supabase/admin';
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+type SupabaseClient = any;
 import type { PromptProjectRecord, PromptTeamMemberRecord } from './agent-system-prompt';
 
 export interface ProjectContextLoaderOptions {
@@ -107,13 +109,9 @@ function withTimeout<T>(promise: Promise<T>, timeoutMs: number): Promise<T> {
 }
 
 export function createProjectContextReplicaClient(): SupabaseClient | null {
-  const url = process.env.SUPABASE_REPLICA_URL;
-  const serviceRoleKey = process.env.SUPABASE_REPLICA_SERVICE_ROLE_KEY ?? process.env.SUPABASE_SERVICE_ROLE_KEY;
-  if (!url || !serviceRoleKey) return null;
-
-  return createClient(url, serviceRoleKey, {
-    auth: { persistSession: false, autoRefreshToken: false },
-  });
+  // Supabase 직접 클라이언트 생성 제거됨 (C-S10: @supabase 의존 제거)
+  // 레플리카 클라이언트는 SaaS overlay에서 주입받거나 null 반환
+  return null;
 }
 
 export class ProjectContextLoader {

@@ -1,6 +1,9 @@
 import { cache } from 'react';
-import type { SupabaseClient, User } from '@supabase/supabase-js';
 import { cookies } from 'next/headers';
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+type SupabaseClient = any;
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+type User = any;
 import { isOssMode } from '@/lib/storage/factory';
 
 export const CURRENT_PROJECT_COOKIE = 'sprintable_current_project_id';
@@ -194,7 +197,6 @@ async function resolveTeamMemberFromMemberships(
  * @returns team_member context { id, org_id, project_id, project_name, type?, rateLimitExceeded? }
  */
 export const getAuthContext = cache(async (
-  supabase: SupabaseClient,
   request: Request
 ): Promise<{
   id: string;
@@ -285,15 +287,23 @@ export const getAuthContext = cache(async (
     }
   }
 
-  // 3. OAuth 세션 인증 시도
-  const { data: { user } } = await supabase.auth.getUser();
-  if (!user) return null;
+  // 3. OAuth 세션 — JWT 쿠키 파싱
+  const { getServerSession } = await import('./supabase/server');
+  const session = await getServerSession();
+  if (!session) return null;
 
-  const oauthMember = await getMyTeamMember(supabase, user);
-  if (!oauthMember) return null;
+  // FastAPI로 team member 조회
+  const { fastapiCall } = await import('@sprintable/storage-supabase');
+  const meData = await fastapiCall<{ id: string; org_id: string; project_id: string; project_name: string } | null>(
+    'GET', '/api/v2/me', session.access_token
+  ).catch(() => null);
+  if (!meData) return null;
 
   return {
-    ...oauthMember,
-    type: 'human',
+    id: meData.id,
+    org_id: meData.org_id,
+    project_id: meData.project_id,
+    project_name: meData.project_name,
+    type: 'human' as const,
   };
 });
