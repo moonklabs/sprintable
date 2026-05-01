@@ -21,7 +21,14 @@ export function isOssMode(): boolean {
 
 async function getSpAt(): Promise<string> {
   try {
-    const { cookies } = await import('next/headers');
+    const { cookies, headers } = await import('next/headers');
+    // API key 요청: x-api-key 또는 Authorization: Bearer sk_live_* 헤더 우선
+    const headerStore = await headers();
+    const xApiKey = headerStore.get('x-api-key');
+    if (xApiKey) return xApiKey;
+    const authHeader = headerStore.get('authorization');
+    if (authHeader?.startsWith('Bearer sk_live_')) return authHeader.slice(7);
+    // OAuth 세션: sp_at 쿠키
     const store = await cookies();
     return store.get('sp_at')?.value ?? '';
   } catch {
