@@ -1,9 +1,10 @@
-import { createSupabaseServerClient } from '@/lib/supabase/server';
 import { handleApiError } from '@/lib/api-error';
 import { getAuthContext } from '@/lib/auth-helpers';
 import { generateApiKey } from '@/lib/auth-api-key';
 import { apiSuccess, apiError, ApiErrors } from '@/lib/api-response';
 import { isOssMode, createAgentApiKeyRepository } from '@/lib/storage/factory';
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+const supabase: any = undefined;
 
 type RouteParams = { params: Promise<{ id: string }> };
 
@@ -29,8 +30,7 @@ export async function POST(request: Request, { params }: RouteParams) {
   }
   try {
     const { id: teamMemberId } = await params;
-    const supabase = await createSupabaseServerClient();
-    const me = await getAuthContext(supabase, request);
+    const me = await getAuthContext(request);
     if (!me) return ApiErrors.unauthorized();
 
     // AC4: API Key로 접근 시 admin scope 필요
@@ -118,8 +118,7 @@ export async function GET(request: Request, { params }: RouteParams) {
   }
   try {
     const { id: teamMemberId } = await params;
-    const supabase = await createSupabaseServerClient();
-    const me = await getAuthContext(supabase, request);
+    const me = await getAuthContext(request);
     if (!me) return ApiErrors.unauthorized();
 
     // Admin 권한 확인

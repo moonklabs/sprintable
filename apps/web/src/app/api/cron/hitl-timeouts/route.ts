@@ -1,4 +1,3 @@
-import { createClient } from '@supabase/supabase-js';
 import { apiError, apiSuccess } from '@/lib/api-response';
 import { isOssMode } from '@/lib/storage/factory';
 import { AgentHitlTimeoutService } from '@/services/agent-hitl-timeout';
@@ -13,7 +12,7 @@ export async function GET(request: Request) {
   }
 
   try {
-    const supabase = createClient(
+    const supabase = (await import('@supabase/supabase-js')).createClient(
       process.env.NEXT_PUBLIC_SUPABASE_URL!,
       process.env.SUPABASE_SERVICE_ROLE_KEY!,
     );

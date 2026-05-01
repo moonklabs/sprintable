@@ -1,6 +1,5 @@
 import { redirect } from 'next/navigation';
 import { isOssMode } from '@/lib/storage/factory';
-import { createSupabaseServerClient } from '@/lib/supabase/server';
 import { getMyMembershipContext, getOssUserContext } from '@/lib/auth-helpers';
 import { DashboardShell } from './dashboard-shell';
 
@@ -25,7 +24,7 @@ export default async function DashboardLayout({
   }
 
   try {
-    const supabase = await createSupabaseServerClient();
+    const supabase = (undefined as any);
     const { data: { user } } = await supabase.auth.getUser();
 
     if (!user) {

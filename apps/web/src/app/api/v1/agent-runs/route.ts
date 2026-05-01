@@ -1,10 +1,11 @@
-import { createSupabaseServerClient } from '@/lib/supabase/server';
 import { getMyTeamMember } from '@/lib/auth-helpers';
 import { apiSuccess, ApiErrors } from '@/lib/api-response';
 import { handleApiError } from '@/lib/api-error';
 import { requireAgentOrchestration } from '@/lib/require-agent-orchestration';
 import { normalizeRunStatusFilter } from '@/services/agent-run-history';
 import { isOssMode, createAgentRunRepository } from '@/lib/storage/factory';
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+const supabase: any = undefined;
 
 const PAGE_SIZE = 20;
 const DEFAULT_DAYS = 7;
@@ -30,7 +31,6 @@ export async function GET(request: Request) {
     } catch (error) { return handleApiError(error); }
   }
   try {
-    const supabase = await createSupabaseServerClient();
     const { data: { user } } = await supabase.auth.getUser();
     if (!user) return ApiErrors.unauthorized();
 

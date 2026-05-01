@@ -1,4 +1,3 @@
-import { createClient } from '@supabase/supabase-js';
 import { z } from 'zod';
 import { githubMcpConfigSchema } from '@/lib/github-mcp';
 import { KmsError } from '@/lib/kms';
@@ -113,7 +112,7 @@ export async function resolveLLMConfig(projectId: string, overrides?: {
   timeoutMs?: number;
   maxRetries?: number;
 }) : Promise<LLMConfig | null> {
-  const serviceClient = createClient(
+  const serviceClient = (await import('@supabase/supabase-js')).createClient(
     process.env.NEXT_PUBLIC_SUPABASE_URL!,
     process.env.SUPABASE_SERVICE_ROLE_KEY!,
   );

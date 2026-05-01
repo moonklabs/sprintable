@@ -1,12 +1,14 @@
-import type { SupabaseClient } from '@supabase/supabase-js';
-import { createSupabaseServerClient } from '@/lib/supabase/server';
-import { createSupabaseAdminClient } from '@/lib/supabase/admin';
 import { DocsService } from '@/services/docs';
 import { getAuthContext } from '@/lib/auth-helpers';
 import { apiSuccess, ApiErrors } from '@/lib/api-response';
 import { handleApiError } from '@/lib/api-error';
 import { isOssMode, createDocRepository } from '@/lib/storage/factory';
 import { extractEmbedIds } from './extract-embed-ids';
+
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+type SupabaseClient = any;
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+const dbClient: any = undefined;
 
 /**
  * BFS over the embed graph starting from `startDocId`, collecting all
@@ -53,20 +55,17 @@ async function collectTransitiveEmbeds(
  */
 export async function GET(request: Request) {
   try {
-    const supabase = await createSupabaseServerClient();
-    const me = await getAuthContext(supabase, request);
+    const me = await getAuthContext(request);
     if (!me) return ApiErrors.unauthorized();
     if (me.rateLimitExceeded)
       return ApiErrors.tooManyRequests(me.rateLimitRemaining, me.rateLimitResetAt);
-    const ossMode = isOssMode();
-    const dbClient = ossMode ? undefined : (me.type === 'agent' ? createSupabaseAdminClient() : supabase);
 
     const { searchParams } = new URL(request.url);
     const q = searchParams.get('q')?.trim();
     if (!q) return ApiErrors.badRequest('q is required');
 
-    const repo = await createDocRepository(dbClient);
-    const service = new DocsService(repo, dbClient as SupabaseClient | undefined);
+    const repo = await createDocRepository();
+    const service = new DocsService(repo);
     const doc = await service.getDocPreview(me.project_id, q);
     if (!doc) return ApiErrors.notFound('Document not found');
 

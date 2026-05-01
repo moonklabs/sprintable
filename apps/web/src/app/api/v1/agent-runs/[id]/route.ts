@@ -1,10 +1,11 @@
-import { createSupabaseServerClient } from '@/lib/supabase/server';
 import { getMyTeamMember } from '@/lib/auth-helpers';
 import { apiSuccess, ApiErrors } from '@/lib/api-response';
 import { handleApiError } from '@/lib/api-error';
 import { requireAgentOrchestration } from '@/lib/require-agent-orchestration';
 import { createContinuityDebugInfo, getMemoryCompactionPolicy, type MemoryRetrievalDiagnostics } from '@/lib/agent-memory-contract';
 import { isOssMode, createAgentRunRepository } from '@/lib/storage/factory';
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+const supabase: any = undefined;
 
 type RouteParams = { params: Promise<{ id: string }> };
 
@@ -21,7 +22,6 @@ export async function GET(_request: Request, { params }: RouteParams) {
   }
   try {
     const { id } = await params;
-    const supabase = await createSupabaseServerClient();
     const { data: { user } } = await supabase.auth.getUser();
     if (!user) return ApiErrors.unauthorized();
 

@@ -1,10 +1,11 @@
-import { createClient, type SupabaseClient } from '@supabase/supabase-js';
 import { apiError } from '@/lib/api-response';
 import { isOssMode } from '@/lib/storage/factory';
 import { BridgeInboundService } from '@/services/bridge-inbound';
 import { AgentHitlService, HitlConflictError } from '@/services/agent-hitl';
 import { syncSlackHitlRequestState, type SlackHitlRequestContext } from '@/services/slack-hitl';
 import { verifySlackSignature } from '@/services/slack-inbound';
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+type SupabaseClient = any;
 
 interface SlackInteractionPayload {
   type: string;
@@ -101,7 +102,7 @@ export async function POST(request: Request) {
     return Response.json({ text: 'Supabase service role is not configured' }, { status: 500 });
   }
 
-  const supabase = createClient(supabaseUrl, serviceRoleKey);
+  const supabase = (await import('@supabase/supabase-js')).createClient(supabaseUrl, serviceRoleKey);
   const requestRow = await loadHitlRequest(supabase, requestId);
   if (!requestRow) {
     return Response.json({ response_type: 'ephemeral', text: 'HITL 요청을 찾지 못한.' }, { status: 404 });

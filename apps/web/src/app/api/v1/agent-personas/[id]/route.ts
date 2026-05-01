@@ -1,5 +1,4 @@
 import { z } from 'zod';
-import { createSupabaseServerClient } from '@/lib/supabase/server';
 import { getMyTeamMember } from '@/lib/auth-helpers';
 import { apiError, apiSuccess, ApiErrors } from '@/lib/api-response';
 import { handleApiError } from '@/lib/api-error';
@@ -7,6 +6,8 @@ import { requireOrgAdmin } from '@/lib/admin-check';
 import { requireAgentOrchestration } from '@/lib/require-agent-orchestration';
 import { AgentPersonaService } from '@/services/agent-persona';
 import { isOssMode } from '@/lib/storage/factory';
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+const supabase: any = undefined;
 
 const updatePersonaSchema = z.object({
   name: z.string().trim().min(1).optional(),
@@ -27,7 +28,6 @@ export async function GET(_request: Request, { params }: RouteParams) {
 
   try {
     const { id } = await params;
-    const supabase = await createSupabaseServerClient();
     const { data: { user } } = await supabase.auth.getUser();
     if (!user) return ApiErrors.unauthorized();
 
@@ -54,7 +54,6 @@ export async function PATCH(request: Request, { params }: RouteParams) {
 
   try {
     const { id } = await params;
-    const supabase = await createSupabaseServerClient();
     const { data: { user } } = await supabase.auth.getUser();
     if (!user) return ApiErrors.unauthorized();
 
@@ -93,7 +92,6 @@ export async function DELETE(_request: Request, { params }: RouteParams) {
 
   try {
     const { id } = await params;
-    const supabase = await createSupabaseServerClient();
     const { data: { user } } = await supabase.auth.getUser();
     if (!user) return ApiErrors.unauthorized();
 

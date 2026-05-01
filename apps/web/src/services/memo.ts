@@ -1,4 +1,5 @@
-import type { SupabaseClient } from '@supabase/supabase-js';
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+type SupabaseClient = any;
 import type { IMemoRepository, ITeamMemberRepository, IProjectRepository, Memo, MemoReply } from '@sprintable/core-storage';
 import { SupabaseMemoRepository } from '@sprintable/storage-supabase';
 import { dispatchMemoAssignmentImmediately, type DispatchableMemo } from './memo-assignment-dispatch';
@@ -143,7 +144,7 @@ export class MemoService {
     if (readsResult.error && !this.isMissingOptionalMemoTableError(readsResult.error, 'memo_reads')) throw readsResult.error;
 
     const linkedRows = this.isMissingOptionalMemoTableError(linksResult.error, 'memo_doc_links') ? [] : (linksResult.data ?? []);
-    const linkedDocIds = [...new Set(linkedRows.map((row: LinkedDocRow) => row.doc_id))];
+    const linkedDocIds = [...new Set(linkedRows.map((row: LinkedDocRow) => row.doc_id))] as string[];
     const linkedDocs = linkedDocIds.length
       ? await this.loadLinkedDocs(linkedDocIds, projectId)
       : [];
@@ -198,7 +199,7 @@ export class MemoService {
     return readRows
       .map((row) => ({
         id: row.team_member_id,
-        name: memberById.get(row.team_member_id)?.name ?? row.team_member_id,
+        name: (memberById.get(row.team_member_id) as any)?.name ?? row.team_member_id,
         read_at: row.read_at,
       }))
       .filter((reader) => Boolean(reader.name));
@@ -319,7 +320,7 @@ export class MemoService {
         ...memo,
         reply_count: replyStats?.reply_count ?? 0,
         latest_reply_at: replyStats?.latest_reply_at ?? null,
-        project_name: projectNameById.get(memo.project_id as string) ?? null,
+        project_name: (projectNameById.get(memo.project_id as string) ?? null) as string | null,
         readers: readersByMemoId.get(memoId) ?? [],
       };
     });

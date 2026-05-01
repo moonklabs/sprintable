@@ -3,7 +3,8 @@
 // OSS 단독 빌드에서는 모든 feature gate가 allowed로 해석된다.
 // @deprecated E-DATA-INTEGRITY S9: SaaS overlay의 2계층 구현은 checkEntitlement()로 전환됨.
 // 이 OSS stub은 agent_orchestration/stt_recording 등 비결제 gate 용도로만 유지.
-import type { SupabaseClient } from '@supabase/supabase-js';
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+type SupabaseClient = any;
 
 export interface FeatureCheckResult {
   allowed: boolean;

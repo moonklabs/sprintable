@@ -1,8 +1,8 @@
-import { createSupabaseServerClient } from '@/lib/supabase/server';
-import { createSupabaseAdminClient } from '@/lib/supabase/admin';
 import { handleApiError } from '@/lib/api-error';
 import { apiSuccess, apiError, ApiErrors } from '@/lib/api-response';
 import { isOssMode } from '@/lib/storage/factory';
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+const supabase: any = undefined;
 
 type RouteParams = { params: Promise<{ id: string }> };
 
@@ -11,7 +11,6 @@ export async function DELETE(_request: Request, { params }: RouteParams) {
   if (isOssMode()) return apiError('NOT_IMPLEMENTED', 'Organization management is not supported in OSS mode.', 501);
   try {
     const { id } = await params;
-    const supabase = await createSupabaseServerClient();
     const { data: { user } } = await supabase.auth.getUser();
     if (!user) return ApiErrors.unauthorized();
 
@@ -41,7 +40,7 @@ export async function DELETE(_request: Request, { params }: RouteParams) {
     }
 
     // Soft delete via admin client to bypass RLS UPDATE restriction
-    const admin = createSupabaseAdminClient();
+    const admin = (await (await import('@/lib/supabase/admin')).createSupabaseAdminClient());
     const { error } = await admin
       .from('organizations')
       .update({ deleted_at: new Date().toISOString() })

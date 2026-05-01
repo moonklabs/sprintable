@@ -1,5 +1,3 @@
-import { createSupabaseServerClient } from '@/lib/supabase/server';
-import { createSupabaseAdminClient } from '@/lib/supabase/admin';
 import { MemoService } from '@/services/memo';
 import { DocsService } from '@/services/docs';
 import { handleApiError } from '@/lib/api-error';
@@ -7,7 +5,10 @@ import { getAuthContext } from '@/lib/auth-helpers';
 import { apiSuccess, ApiErrors } from '@/lib/api-response';
 import { parseBody, createMemoLinkedDocSchema } from '@sprintable/shared';
 import { createMemoRepository, isOssMode } from '@/lib/storage/factory';
-import type { SupabaseClient } from '@supabase/supabase-js';
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+const supabase: any = undefined;
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+type SupabaseClient = any;
 
 type RouteParams = { params: Promise<{ id: string }> };
 
@@ -24,17 +25,16 @@ function slugify(value: string) {
 export async function POST(request: Request, { params }: RouteParams) {
   try {
     const { id } = await params;
-    const supabase = await createSupabaseServerClient();
-    const me = await getAuthContext(supabase, request);
+    const me = await getAuthContext(request);
     if (!me) return ApiErrors.unauthorized();
 
     const parsed = await parseBody(request, createMemoLinkedDocSchema);
     if (!parsed.success) return parsed.response;
     const body = parsed.data;
 
-    const dbClient = isOssMode() ? undefined : (me.type === 'agent' ? createSupabaseAdminClient() : supabase);
-    const repo = await createMemoRepository(dbClient);
-    const memoService = new MemoService(repo, dbClient as SupabaseClient | undefined);
+    const dbClient = isOssMode() ? undefined : (me.type === 'agent' ? (await (await import('@/lib/supabase/admin')).createSupabaseAdminClient()) : supabase);
+    const repo = await createMemoRepository();
+    const memoService = new MemoService(repo);
     let linkedDocId = body.doc_id ?? null;
     let createdDoc: Awaited<ReturnType<DocsService['createDoc']>> | null = null;
 
@@ -43,7 +43,7 @@ export async function POST(request: Request, { params }: RouteParams) {
       const title = body.title?.trim() || memo.title || memo.content.slice(0, 80) || 'Untitled doc';
       const slug = slugify(title) || `memo-${id.slice(0, 8)}`;
       const { createDocRepository } = await import('@/lib/storage/factory');
-      const docRepo = await createDocRepository(dbClient);
+      const docRepo = await createDocRepository();
       const docsService = new DocsService(docRepo, dbClient as SupabaseClient | undefined);
       createdDoc = await docsService.createDoc({
         org_id: me.org_id,

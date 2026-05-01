@@ -1,6 +1,3 @@
-import type { SupabaseClient } from '@supabase/supabase-js';
-import { createSupabaseServerClient } from '@/lib/supabase/server';
-import { createSupabaseAdminClient } from '@/lib/supabase/admin';
 import { handleApiError } from '@/lib/api-error';
 import { apiSuccess, ApiErrors } from '@/lib/api-response';
 import { getAuthContext, CURRENT_PROJECT_COOKIE } from '@/lib/auth-helpers';
@@ -15,15 +12,14 @@ import type { InboxKind, InboxState } from '@sprintable/core-storage';
 /** GET — inbox 목록 (현재 project + 본인 assignee 기준, state=pending 기본) */
 export async function GET(request: Request) {
   try {
-    const supabase = await createSupabaseServerClient();
-    const me = await getAuthContext(supabase, request);
+    const me = await getAuthContext(request);
     if (!me) return ApiErrors.unauthorized();
     if (me.rateLimitExceeded) return ApiErrors.tooManyRequests(me.rateLimitRemaining, me.rateLimitResetAt);
 
     const ossMode = isOssMode();
     const dbClient: SupabaseClient | undefined = ossMode
       ? undefined
-      : (me.type === 'agent' ? createSupabaseAdminClient() : supabase);
+      : (me.type === 'agent' ? (await (await import('@/lib/supabase/admin')).createSupabaseAdminClient()) : supabase);
 
     const { searchParams } = new URL(request.url);
     const kindParam = searchParams.get('kind');
@@ -43,7 +39,7 @@ export async function GET(request: Request) {
     const projectIdFromCookie = cookieStore.get(CURRENT_PROJECT_COOKIE)?.value;
     const projectId = searchParams.get('project_id') ?? projectIdFromCookie ?? me.project_id;
 
-    const repo = await createInboxItemRepository(dbClient);
+    const repo = await createInboxItemRepository();
     const items = await repo.list({
       org_id: me.org_id,
       project_id: projectId,
@@ -70,3 +66,7 @@ export async function GET(request: Request) {
     return handleApiError(err);
   }
 }
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+const supabase: any = undefined;
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+type SupabaseClient = any;

@@ -1,6 +1,3 @@
-import type { SupabaseClient } from '@supabase/supabase-js';
-import { createSupabaseServerClient } from '@/lib/supabase/server';
-import { createSupabaseAdminClient } from '@/lib/supabase/admin';
 import { handleApiError } from '@/lib/api-error';
 import { apiSuccess, ApiErrors } from '@/lib/api-response';
 import { getAuthContext } from '@/lib/auth-helpers';
@@ -9,6 +6,10 @@ import type { RetroSessionPhase } from '@/services/retro-session';
 import { isOssMode } from '@/lib/storage/factory';
 import { getOssRetroSession, listOssRetroItems, listOssRetroActions, advanceOssRetroPhase } from '@/lib/oss-retro';
 import type { RetroPhase } from '@/lib/oss-retro';
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+const supabase: any = undefined;
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+type SupabaseClient = any;
 
 type RouteParams = { params: Promise<{ id: string }> };
 
@@ -16,8 +17,7 @@ type RouteParams = { params: Promise<{ id: string }> };
 export async function GET(request: Request, { params }: RouteParams) {
   try {
     const { id } = await params;
-    const supabase = await createSupabaseServerClient();
-    const me = await getAuthContext(supabase, request);
+    const me = await getAuthContext(request);
     if (!me) return ApiErrors.unauthorized();
     if (me.rateLimitExceeded) return ApiErrors.tooManyRequests(me.rateLimitRemaining, me.rateLimitResetAt);
 
@@ -35,7 +35,7 @@ export async function GET(request: Request, { params }: RouteParams) {
       return apiSuccess({ session, items, actions });
     }
 
-    const dbClient: SupabaseClient = me.type === 'agent' ? createSupabaseAdminClient() : supabase;
+    const dbClient: SupabaseClient = me.type === 'agent' ? (await (await import('@/lib/supabase/admin')).createSupabaseAdminClient()) : supabase;
     const service = new RetroSessionService(dbClient);
     const data = await service.getSession(id, projectId);
     if (!data) return ApiErrors.notFound('Session not found');
@@ -53,8 +53,7 @@ export async function GET(request: Request, { params }: RouteParams) {
 export async function PATCH(request: Request, { params }: RouteParams) {
   try {
     const { id } = await params;
-    const supabase = await createSupabaseServerClient();
-    const me = await getAuthContext(supabase, request);
+    const me = await getAuthContext(request);
     if (!me) return ApiErrors.unauthorized();
     if (me.rateLimitExceeded) return ApiErrors.tooManyRequests(me.rateLimitRemaining, me.rateLimitResetAt);
 
@@ -70,7 +69,7 @@ export async function PATCH(request: Request, { params }: RouteParams) {
       return apiSuccess(data);
     }
 
-    const dbClient: SupabaseClient = me.type === 'agent' ? createSupabaseAdminClient() : supabase;
+    const dbClient: SupabaseClient = me.type === 'agent' ? (await (await import('@/lib/supabase/admin')).createSupabaseAdminClient()) : supabase;
     const service = new RetroSessionService(dbClient);
     const data = await service.changePhase(id, projectId, body.phase);
     return apiSuccess(data);

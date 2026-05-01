@@ -1,4 +1,5 @@
-import type { SupabaseClient } from '@supabase/supabase-js';
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+type SupabaseClient = any;
 import { z } from 'zod';
 import { AgentToolExecutionEngine, type ToolRegistry } from './agent-tool-execution-engine';
 import { AgentRetryService, type RetryScheduler } from './agent-retry';

@@ -1,4 +1,3 @@
-import { createClient } from '@supabase/supabase-js';
 import { apiError } from '@/lib/api-response';
 import { isOssMode } from '@/lib/storage/factory';
 import { BridgeInboundService } from '@/services/bridge-inbound';
@@ -26,7 +25,7 @@ export async function POST(request: Request) {
     return Response.json({ error: 'Unable to resolve Teams source channel' }, { status: 400 });
   }
 
-  const supabase = createClient(supabaseUrl, serviceRoleKey);
+  const supabase = (await import('@supabase/supabase-js')).createClient(supabaseUrl, serviceRoleKey);
   const inboundService = new BridgeInboundService(supabase as never);
   const mapping = await inboundService.findChannelMapping('teams', sourceChannelId);
   if (!mapping) {
