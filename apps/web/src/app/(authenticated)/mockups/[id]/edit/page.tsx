@@ -1,11 +1,12 @@
 import { MockupEditorShell } from '@/components/mockups/mockup-editor-shell';
 
 interface MockupEditorPageProps {
-  params: {
+  params: Promise<{
     id: string;
-  };
+  }>;
 }
 
-export default function MockupEditorPage({ params }: MockupEditorPageProps) {
-  return <MockupEditorShell mockupId={params.id} />;
+export default async function MockupEditorPage({ params }: MockupEditorPageProps) {
+  const { id } = await params;
+  return <MockupEditorShell mockupId={id} />;
 }
