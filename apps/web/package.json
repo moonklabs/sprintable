@@ -4,7 +4,7 @@
   "private": true,
   "scripts": {
     "dev": "bash scripts/kill-port.sh ${PORT:-3108} && next dev --webpack --port ${PORT:-3108}",
-    "build": "next build",
+    "build": "next build --webpack",
     "start": "bash scripts/kill-port.sh ${PORT:-3108} && next start --port ${PORT:-3108}",
     "lint": "eslint",
     "type-check": "tsc --noEmit",
