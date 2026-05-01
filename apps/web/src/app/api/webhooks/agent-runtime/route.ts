@@ -1,6 +1,4 @@
-import { createSupabaseAdminClient } from '@/lib/supabase/admin';
-// eslint-disable-next-line @typescript-eslint/no-explicit-any
-type SupabaseClient = any;
+import { createAdminClient } from '@/lib/db/admin';
 import { z } from 'zod';
 import { apiError, apiSuccess } from '@/lib/api-response';
 import { isOssMode } from '@/lib/storage/factory';
@@ -55,7 +53,7 @@ const retryRequestedSchema = z.object({
 
 const payloadSchema = z.union([memoAssignedSchema, retryRequestedSchema]);
 
-async function resolveWebhookScope(supabase: SupabaseClient, payload: z.infer<typeof payloadSchema>) {
+async function resolveWebhookScope(db: any, payload: z.infer<typeof payloadSchema>) {
   if (payload.event === 'memo.assigned') {
     return {
       runId: payload.data.run_id,
@@ -75,7 +73,7 @@ async function resolveWebhookScope(supabase: SupabaseClient, payload: z.infer<ty
     };
   }
 
-  const runResult = await supabase
+  const runResult = await db
     .from('agent_runs')
     .select('id, org_id, project_id, memo_id, agent_id')
     .eq('id', payload.data.new_run_id)
@@ -103,13 +101,13 @@ async function resolveWebhookScope(supabase: SupabaseClient, payload: z.infer<ty
 }
 
 async function validateWebhookSecret(
-  supabase: SupabaseClient,
+  db: any,
   orgId: string,
   projectId: string,
   agentId: string,
   presentedSecret: string | null,
 ) {
-  const projectConfigResult = await supabase
+  const projectConfigResult = await db
     .from('webhook_configs')
     .select('secret')
     .eq('org_id', orgId)
@@ -119,7 +117,7 @@ async function validateWebhookSecret(
     .maybeSingle();
   const projectConfig = projectConfigResult.data as { secret: string | null } | null;
 
-  const defaultConfigResult = await supabase
+  const defaultConfigResult = await db
     .from('webhook_configs')
     .select('secret')
     .eq('org_id', orgId)
@@ -140,7 +138,7 @@ async function validateWebhookSecret(
 
 export async function POST(request: Request) {
   if (isOssMode()) return apiError('NOT_AVAILABLE', 'Not available in OSS mode.', 503);
-  const supabase = createSupabaseAdminClient();
+  const db = createAdminClient();
 
   try {
     const payloadResult = payloadSchema.safeParse(await request.json());
@@ -149,14 +147,14 @@ export async function POST(request: Request) {
     }
 
     const payload = payloadResult.data;
-    const scope = await resolveWebhookScope(supabase, payload);
+    const scope = await resolveWebhookScope(db, payload);
     const presentedSecret = request.headers.get('x-webhook-secret');
-    const secretValid = await validateWebhookSecret(supabase, scope.orgId, scope.projectId, scope.agentId, presentedSecret);
+    const secretValid = await validateWebhookSecret(db, scope.orgId, scope.projectId, scope.agentId, presentedSecret);
     if (!secretValid) {
       return apiError('UNAUTHORIZED', 'Invalid webhook secret', 401);
     }
 
-    const loop = new AgentExecutionLoop(supabase as never);
+    const loop = new AgentExecutionLoop(db as never);
     const result = await loop.execute({
       runId: scope.runId,
       memoId: scope.memoId,

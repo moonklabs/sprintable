@@ -1,7 +1,7 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
-const { createSupabaseServerClient } = vi.hoisted(() => ({
-  createSupabaseServerClient: vi.fn(),
+const { createDbServerClient } = vi.hoisted(() => ({
+  createDbServerClient: vi.fn(),
 }));
 
 const { getAuthContext } = vi.hoisted(() => ({
@@ -10,7 +10,7 @@ const { getAuthContext } = vi.hoisted(() => ({
 
 const listMock = vi.fn();
 
-vi.mock('@/lib/supabase/server', () => ({ createSupabaseServerClient }));
+vi.mock('@/lib/db/server', () => ({ createDbServerClient }));
 vi.mock('@/lib/auth-helpers', () => ({ getAuthContext }));
 vi.mock('@/services/memo', () => ({ MemoService: class { list = listMock; } }));
 
@@ -18,10 +18,10 @@ import { GET } from './route';
 
 describe('GET /api/memos', () => {
   beforeEach(() => {
-    createSupabaseServerClient.mockReset();
+    createDbServerClient.mockReset();
     getAuthContext.mockReset();
     listMock.mockReset();
-    createSupabaseServerClient.mockResolvedValue({});
+    createDbServerClient.mockResolvedValue({});
     getAuthContext.mockResolvedValue({
       id: 'member-1',
       org_id: 'org-1',

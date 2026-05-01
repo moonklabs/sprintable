@@ -1,13 +1,13 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
-const { createSupabaseServerClient, getAuthContext, createSupabaseAdminClient } = vi.hoisted(() => ({
-  createSupabaseServerClient: vi.fn(),
+const { createDbServerClient, getAuthContext, createAdminClient } = vi.hoisted(() => ({
+  createDbServerClient: vi.fn(),
   getAuthContext: vi.fn(),
-  createSupabaseAdminClient: vi.fn(),
+  createAdminClient: vi.fn(),
 }));
 
-vi.mock('@/lib/supabase/server', () => ({ createSupabaseServerClient }));
-vi.mock('@/lib/supabase/admin', () => ({ createSupabaseAdminClient }));
+vi.mock('@/lib/db/server', () => ({ createDbServerClient }));
+vi.mock('@/lib/db/admin', () => ({ createAdminClient }));
 vi.mock('@/lib/auth-helpers', () => ({ getAuthContext }));
 
 import { GET } from './route';
@@ -36,15 +36,15 @@ function createQueryStub(rows: Record<string, unknown>[] = [], opts: { singleNot
 
 describe('GET /api/sprints/[id]/burndown', () => {
   beforeEach(() => {
-    createSupabaseServerClient.mockReset();
+    createDbServerClient.mockReset();
     getAuthContext.mockReset();
-    createSupabaseAdminClient.mockReset();
+    createAdminClient.mockReset();
     getAuthContext.mockResolvedValue(makeAgent());
   });
 
   it('returns 401 when not authenticated', async () => {
-    const supabase = {};
-    createSupabaseServerClient.mockResolvedValue(supabase);
+    const db = {};
+    createDbServerClient.mockResolvedValue(db);
     getAuthContext.mockResolvedValue(null);
 
     const response = await GET(
@@ -61,11 +61,11 @@ describe('GET /api/sprints/[id]/burndown', () => {
       { story_points: 5, status: 'done', updated_at: '2026-04-01' },
       { story_points: 3, status: 'todo', updated_at: '2026-04-02' },
     ];
-    const supabase = {
+    const db = {
       from: vi.fn((table: string) => createQueryStub(table === 'sprints' ? [sprint] : stories)),
     };
-    createSupabaseServerClient.mockResolvedValue(supabase);
-    createSupabaseAdminClient.mockReturnValue(supabase);
+    createDbServerClient.mockResolvedValue(db);
+    createAdminClient.mockReturnValue(db);
 
     const response = await GET(
       new Request('http://localhost/api/sprints/sprint-1/burndown'),
@@ -78,9 +78,9 @@ describe('GET /api/sprints/[id]/burndown', () => {
   });
 
   it('returns 404 when sprint not found', async () => {
-    const supabase = { from: vi.fn(() => createQueryStub([], { singleNotFound: true })) };
-    createSupabaseServerClient.mockResolvedValue(supabase);
-    createSupabaseAdminClient.mockReturnValue(supabase);
+    const db = { from: vi.fn(() => createQueryStub([], { singleNotFound: true })) };
+    createDbServerClient.mockResolvedValue(db);
+    createAdminClient.mockReturnValue(db);
 
     const response = await GET(
       new Request('http://localhost/api/sprints/sprint-missing/burndown'),

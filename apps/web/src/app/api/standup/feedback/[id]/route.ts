@@ -1,8 +1,6 @@
-// eslint-disable-next-line @typescript-eslint/no-explicit-any
-type SupabaseClient = any;
 
 import { parseBody, updateStandupFeedbackSchema } from '@sprintable/shared';
-import { createSupabaseAdminClient } from '@/lib/supabase/admin';
+import { createAdminClient } from '@/lib/db/admin';
 import { handleApiError } from '@/lib/api-error';
 import { getAuthContext } from '@/lib/auth-helpers';
 import { apiSuccess, ApiErrors } from '@/lib/api-response';
@@ -28,7 +26,7 @@ export async function GET(request: Request, { params }: RouteParams) {
       return apiSuccess(await listOssStandupFeedbackForEntry(entryId));
     }
 
-    const dbClient: SupabaseClient = me.type === 'agent' ? createSupabaseAdminClient() : undefined;
+    const dbClient: any = me.type === 'agent' ? createAdminClient() : undefined;
     const { data, error } = await dbClient
       .from('standup_feedback')
       .select('*')
@@ -48,7 +46,7 @@ export async function PATCH(request: Request, { params }: RouteParams) {
     if (!me) return ApiErrors.unauthorized();
     if (me.rateLimitExceeded) return ApiErrors.tooManyRequests(me.rateLimitRemaining, me.rateLimitResetAt);
 
-    const dbClient: SupabaseClient = me.type === 'agent' ? createSupabaseAdminClient() : undefined;
+    const dbClient: any = me.type === 'agent' ? createAdminClient() : undefined;
 
     const parsed = await parseBody(request, updateStandupFeedbackSchema);
     if (!parsed.success) return parsed.response;
@@ -78,7 +76,7 @@ export async function DELETE(request: Request, { params }: RouteParams) {
       return apiSuccess({ ok: true });
     }
 
-    const dbClient: SupabaseClient = me.type === 'agent' ? createSupabaseAdminClient() : undefined;
+    const dbClient: any = me.type === 'agent' ? createAdminClient() : undefined;
     const service = new StandupFeedbackService(dbClient);
     await service.delete(id, me.id);
     return apiSuccess({ ok: true });

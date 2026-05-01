@@ -1,7 +1,7 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { buildMemoDispatchKey, buildPollingCursorFilter, MemoEventDispatcher } from './memo-event-dispatcher';
 
-function createDispatcherSupabaseStub(options?: {
+function createDispatcherDbStub(options?: {
   memos?: Array<Record<string, unknown>>;
   teamMembers?: Array<Record<string, unknown>>;
   deployment?: Record<string, unknown> | null;
@@ -35,7 +35,7 @@ function createDispatcherSupabaseStub(options?: {
     config: {},
   };
 
-  const supabase = {
+  const db = {
     channel: vi.fn(() => ({
       on: vi.fn().mockReturnThis(),
       subscribe: vi.fn(),
@@ -195,7 +195,7 @@ function createDispatcherSupabaseStub(options?: {
     }),
   };
 
-  return { supabase, state };
+  return { db, state };
 }
 
 afterEach(() => {
@@ -210,8 +210,8 @@ describe('MemoEventDispatcher', () => {
   });
 
   it('skips self-loop memo dispatches', async () => {
-    const { supabase, state } = createDispatcherSupabaseStub();
-    const dispatcher = new MemoEventDispatcher({ supabase: supabase as never, fetchFn: vi.fn() as never });
+    const { db, state } = createDispatcherDbStub();
+    const dispatcher = new MemoEventDispatcher({ db: db as never, fetchFn: vi.fn() as never });
 
     const result = await dispatcher.dispatchMemoIfNeeded({
       id: 'memo-1',
@@ -233,10 +233,10 @@ describe('MemoEventDispatcher', () => {
 
   it('dispatches assigned agent memos and completes the run', async () => {
     const fetchFn = vi.fn().mockResolvedValue(new Response('{}', { status: 200, headers: { 'content-type': 'application/json' } }));
-    const { supabase, state } = createDispatcherSupabaseStub({
+    const { db, state } = createDispatcherDbStub({
       projectWebhook: { url: 'https://agent.example.com/project-webhook', secret: 'secret-1' },
     });
-    const dispatcher = new MemoEventDispatcher({ supabase: supabase as never, fetchFn: fetchFn as never });
+    const dispatcher = new MemoEventDispatcher({ db: db as never, fetchFn: fetchFn as never });
 
     const result = await dispatcher.dispatchMemoIfNeeded({
       id: 'memo-1',
@@ -284,10 +284,10 @@ describe('MemoEventDispatcher', () => {
       error: null,
       meta: null,
     }), { status: 200, headers: { 'content-type': 'application/json' } }));
-    const { supabase, state } = createDispatcherSupabaseStub({
+    const { db, state } = createDispatcherDbStub({
       projectWebhook: { url: 'https://agent.example.com/project-webhook', secret: 'secret-1' },
     });
-    const dispatcher = new MemoEventDispatcher({ supabase: supabase as never, fetchFn: fetchFn as never });
+    const dispatcher = new MemoEventDispatcher({ db: db as never, fetchFn: fetchFn as never });
 
     const result = await dispatcher.dispatchMemoIfNeeded({
       id: 'memo-runtime-1',
@@ -312,10 +312,10 @@ describe('MemoEventDispatcher', () => {
 
   it('formats Discord webhook payloads with embeds', async () => {
     const fetchFn = vi.fn().mockResolvedValue(new Response(null, { status: 204 }));
-    const { supabase, state } = createDispatcherSupabaseStub({
+    const { db, state } = createDispatcherDbStub({
       projectWebhook: { url: 'https://discord.com/api/webhooks/123/abc', secret: null },
     });
-    const dispatcher = new MemoEventDispatcher({ supabase: supabase as never, fetchFn: fetchFn as never });
+    const dispatcher = new MemoEventDispatcher({ db: db as never, fetchFn: fetchFn as never });
 
     const result = await dispatcher.dispatchMemoIfNeeded({
       id: 'memo-discord-1',
@@ -353,7 +353,7 @@ describe('MemoEventDispatcher', () => {
 
   it('routes a memo with the first matched rule and includes routing metadata in the webhook payload', async () => {
     const fetchFn = vi.fn().mockResolvedValue(new Response('{}', { status: 200, headers: { 'content-type': 'application/json' } }));
-    const { supabase, state } = createDispatcherSupabaseStub({
+    const { db, state } = createDispatcherDbStub({
       teamMembers: [
         {
           id: 'agent-1',
@@ -398,7 +398,7 @@ describe('MemoEventDispatcher', () => {
         },
       ],
     });
-    const dispatcher = new MemoEventDispatcher({ supabase: supabase as never, fetchFn: fetchFn as never });
+    const dispatcher = new MemoEventDispatcher({ db: db as never, fetchFn: fetchFn as never });
 
     const result = await dispatcher.dispatchMemoIfNeeded({
       id: 'memo-2',
@@ -428,7 +428,7 @@ describe('MemoEventDispatcher', () => {
 
   it('dispatches a forwarded memo to its assigned next agent without re-matching the same routing rule', async () => {
     const fetchFn = vi.fn().mockResolvedValue(new Response('{}', { status: 200, headers: { 'content-type': 'application/json' } }));
-    const { supabase, state } = createDispatcherSupabaseStub({
+    const { db, state } = createDispatcherDbStub({
       teamMembers: [
         {
           id: 'agent-1',
@@ -473,7 +473,7 @@ describe('MemoEventDispatcher', () => {
         },
       ],
     });
-    const dispatcher = new MemoEventDispatcher({ supabase: supabase as never, fetchFn: fetchFn as never });
+    const dispatcher = new MemoEventDispatcher({ db: db as never, fetchFn: fetchFn as never });
 
     const result = await dispatcher.dispatchMemoIfNeeded({
       id: 'memo-forwarded',
@@ -505,7 +505,7 @@ describe('MemoEventDispatcher', () => {
 
   it('fails closed when routing resolves to an invalid forward rule instead of silently reporting back to the original assignee', async () => {
     const fetchFn = vi.fn();
-    const { supabase, state } = createDispatcherSupabaseStub({
+    const { db, state } = createDispatcherDbStub({
       routingRules: [
         {
           id: 'rule-broken',
@@ -529,7 +529,7 @@ describe('MemoEventDispatcher', () => {
         },
       ],
     });
-    const dispatcher = new MemoEventDispatcher({ supabase: supabase as never, fetchFn: fetchFn as never });
+    const dispatcher = new MemoEventDispatcher({ db: db as never, fetchFn: fetchFn as never });
 
     const result = await dispatcher.dispatchMemoIfNeeded({
       id: 'memo-broken-forward',
@@ -560,7 +560,7 @@ describe('MemoEventDispatcher', () => {
 
   it('fails closed when a drifted forward target resolves to a human instead of an active agent', async () => {
     const fetchFn = vi.fn();
-    const { supabase, state } = createDispatcherSupabaseStub({
+    const { db, state } = createDispatcherDbStub({
       teamMembers: [
         {
           id: 'agent-1',
@@ -604,7 +604,7 @@ describe('MemoEventDispatcher', () => {
         },
       ],
     });
-    const dispatcher = new MemoEventDispatcher({ supabase: supabase as never, fetchFn: fetchFn as never });
+    const dispatcher = new MemoEventDispatcher({ db: db as never, fetchFn: fetchFn as never });
 
     const result = await dispatcher.dispatchMemoIfNeeded({
       id: 'memo-human-target',
@@ -641,9 +641,9 @@ describe('MemoEventDispatcher', () => {
         throw new Error('broken_rule_payload');
       }),
     };
-    const { supabase, state } = createDispatcherSupabaseStub();
+    const { db, state } = createDispatcherDbStub();
     const dispatcher = new MemoEventDispatcher({
-      supabase: supabase as never,
+      db: db as never,
       fetchFn: fetchFn as never,
       routingRuleService,
     });
@@ -670,7 +670,7 @@ describe('MemoEventDispatcher', () => {
 
   it('logs fallback audit when no routing rule matches and dispatches to the original assignee', async () => {
     const fetchFn = vi.fn().mockResolvedValue(new Response('{}', { status: 200, headers: { 'content-type': 'application/json' } }));
-    const { supabase, state } = createDispatcherSupabaseStub({
+    const { db, state } = createDispatcherDbStub({
       routingRules: [
         {
           id: 'rule-bug-only',
@@ -694,7 +694,7 @@ describe('MemoEventDispatcher', () => {
         },
       ],
     });
-    const dispatcher = new MemoEventDispatcher({ supabase: supabase as never, fetchFn: fetchFn as never });
+    const dispatcher = new MemoEventDispatcher({ db: db as never, fetchFn: fetchFn as never });
 
     const result = await dispatcher.dispatchMemoIfNeeded({
       id: 'memo-4',
@@ -721,7 +721,7 @@ describe('MemoEventDispatcher', () => {
 
   it('queues dispatch when the deployment is still deploying', async () => {
     const fetchFn = vi.fn();
-    const { supabase, state } = createDispatcherSupabaseStub({
+    const { db, state } = createDispatcherDbStub({
       deployment: {
         id: 'deployment-1',
         model: 'gpt-4o-mini',
@@ -730,7 +730,7 @@ describe('MemoEventDispatcher', () => {
         config: {},
       },
     });
-    const dispatcher = new MemoEventDispatcher({ supabase: supabase as never, fetchFn: fetchFn as never });
+    const dispatcher = new MemoEventDispatcher({ db: db as never, fetchFn: fetchFn as never });
 
     const result = await dispatcher.dispatchMemoIfNeeded({
       id: 'memo-1',
@@ -753,7 +753,7 @@ describe('MemoEventDispatcher', () => {
 
   it('holds dispatch when the deployment is suspended', async () => {
     const fetchFn = vi.fn();
-    const { supabase, state } = createDispatcherSupabaseStub({
+    const { db, state } = createDispatcherDbStub({
       deployment: {
         id: 'deployment-1',
         model: 'gpt-4o-mini',
@@ -762,7 +762,7 @@ describe('MemoEventDispatcher', () => {
         config: {},
       },
     });
-    const dispatcher = new MemoEventDispatcher({ supabase: supabase as never, fetchFn: fetchFn as never });
+    const dispatcher = new MemoEventDispatcher({ db: db as never, fetchFn: fetchFn as never });
 
     const result = await dispatcher.dispatchMemoIfNeeded({
       id: 'memo-1',
@@ -784,10 +784,10 @@ describe('MemoEventDispatcher', () => {
   });
 
   it('treats unique dispatch key conflicts as duplicates', async () => {
-    const { supabase } = createDispatcherSupabaseStub({
+    const { db } = createDispatcherDbStub({
       runInsertError: { code: '23505', message: 'duplicate key value violates unique constraint' },
     });
-    const dispatcher = new MemoEventDispatcher({ supabase: supabase as never, fetchFn: vi.fn() as never });
+    const dispatcher = new MemoEventDispatcher({ db: db as never, fetchFn: vi.fn() as never });
 
     const result = await dispatcher.dispatchMemoIfNeeded({
       id: 'memo-1',
@@ -808,10 +808,10 @@ describe('MemoEventDispatcher', () => {
 
   it('keeps generic webhooks on JSON response validation', async () => {
     const fetchFn = vi.fn().mockResolvedValue(new Response('ok', { status: 200, headers: { 'content-type': 'text/plain' } }));
-    const { supabase, state } = createDispatcherSupabaseStub({
+    const { db, state } = createDispatcherDbStub({
       projectWebhook: { url: 'https://agent.example.com/project-webhook', secret: null },
     });
-    const dispatcher = new MemoEventDispatcher({ supabase: supabase as never, fetchFn: fetchFn as never });
+    const dispatcher = new MemoEventDispatcher({ db: db as never, fetchFn: fetchFn as never });
 
     const result = await dispatcher.dispatchMemoIfNeeded({
       id: 'memo-generic-1',
@@ -842,17 +842,17 @@ describe('MemoEventDispatcher', () => {
     );
   });
 
-  it('swallows polling exceptions so dispatcher keeps running through Supabase outages', async () => {
+  it('swallows polling exceptions so dispatcher keeps running through DB outages', async () => {
     const logger = {
       info: vi.fn(),
       warn: vi.fn(),
       error: vi.fn(),
     };
-    const { supabase, state } = createDispatcherSupabaseStub({
+    const { db, state } = createDispatcherDbStub({
       memoQueryThrows: new Error('Cloudflare 522'),
     });
     const dispatcher = new MemoEventDispatcher({
-      supabase: supabase as never,
+      db: db as never,
       fetchFn: vi.fn() as never,
       logger,
     });
@@ -874,9 +874,9 @@ describe('MemoEventDispatcher', () => {
         forwardToAgentId: null,
       })),
     };
-    const { supabase } = createDispatcherSupabaseStub();
+    const { db } = createDispatcherDbStub();
     const dispatcher = new MemoEventDispatcher({
-      supabase: supabase as never,
+      db: db as never,
       fetchFn: fetchFn as never,
       routingRuleService,
     });
@@ -902,7 +902,7 @@ describe('MemoEventDispatcher', () => {
   it('polls missed memos across same-timestamp batch boundaries without dropping any', async () => {
     const fetchFn = vi.fn().mockResolvedValue(new Response('{}', { status: 200, headers: { 'content-type': 'application/json' } }));
     const sharedUpdatedAt = new Date(Date.now() - (60 * 60 * 1000)).toISOString();
-    const { supabase } = createDispatcherSupabaseStub({
+    const { db } = createDispatcherDbStub({
       memos: Array.from({ length: 60 }, (_, index) => ({
         id: `memo-${String(index + 1).padStart(3, '0')}`,
         org_id: 'org-1',
@@ -918,7 +918,7 @@ describe('MemoEventDispatcher', () => {
       })),
     });
     const dispatcher = new MemoEventDispatcher({
-      supabase: supabase as never,
+      db: db as never,
       fetchFn: fetchFn as never,
       pollBatchSize: 50,
       initialPollLookbackMs: 24 * 60 * 60 * 1000,
@@ -941,11 +941,11 @@ describe('MemoEventDispatcher', () => {
       webhook_url: 'https://discord.com/api/webhooks/123/abc',
       is_active: true,
     };
-    const { supabase, state } = createDispatcherSupabaseStub({
+    const { db, state } = createDispatcherDbStub({
       teamMembers: [byoaMember],
       deployment: null,
     });
-    const dispatcher = new MemoEventDispatcher({ supabase: supabase as never, fetchFn: fetchFn as never });
+    const dispatcher = new MemoEventDispatcher({ db: db as never, fetchFn: fetchFn as never });
 
     const result = await dispatcher.dispatchMemoIfNeeded({
       id: 'memo-byoa-1',
@@ -981,7 +981,7 @@ describe('MemoEventDispatcher', () => {
         forwardToAgentId: 'agent-dev',
       })),
     };
-    const { supabase, state } = createDispatcherSupabaseStub({
+    const { db, state } = createDispatcherDbStub({
       teamMembers: [
         {
           id: 'agent-dev',
@@ -995,7 +995,7 @@ describe('MemoEventDispatcher', () => {
       ],
     });
     const dispatcher = new MemoEventDispatcher({
-      supabase: supabase as never,
+      db: db as never,
       fetchFn: fetchFn as never,
       routingRuleService: routingRuleService as never,
     });
@@ -1035,9 +1035,9 @@ describe('MemoEventDispatcher', () => {
         forwardToAgentId: null,
       })),
     };
-    const { supabase } = createDispatcherSupabaseStub();
+    const { db } = createDispatcherDbStub();
     const dispatcher = new MemoEventDispatcher({
-      supabase: supabase as never,
+      db: db as never,
       fetchFn: fetchFn as never,
       routingRuleService: routingRuleService as never,
     });

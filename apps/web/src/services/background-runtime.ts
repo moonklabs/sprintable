@@ -1,6 +1,4 @@
-import { createSupabaseAdminClient } from '@/lib/supabase/admin';
-// eslint-disable-next-line @typescript-eslint/no-explicit-any
-type SupabaseClient = any;
+import { createAdminClient } from '@/lib/db/admin';
 import { DiscordGatewayRuntime } from './discord-gateway-runtime';
 import { DiscordOutboundDispatcher } from './discord-outbound-dispatcher';
 import { MemoEventDispatcher } from './memo-event-dispatcher';
@@ -19,23 +17,23 @@ export interface BackgroundRuntimeSettings {
 }
 
 export interface BackgroundRuntimeWorkerOptions {
-  supabase: SupabaseClient;
+  db: any;
   appUrl?: string;
   settings?: BackgroundRuntimeSettings;
-  createSlackOutboundDispatcher?: (input: { supabase: SupabaseClient; appUrl?: string }) => SlackOutboundDispatcherLike;
+  createSlackOutboundDispatcher?: (input: { db: any; appUrl?: string }) => SlackOutboundDispatcherLike;
   createDiscordOutboundDispatcher?: (input: {
-    supabase: SupabaseClient;
+    db: any;
     appUrl?: string;
     pollingIntervalMs: number;
   }) => DiscordOutboundDispatcherLike;
-  createDiscordGatewayRuntime?: (input: { supabase: SupabaseClient }) => DiscordGatewayRuntimeLike;
+  createDiscordGatewayRuntime?: (input: { db: any }) => DiscordGatewayRuntimeLike;
   createTeamsOutboundDispatcher?: (input: {
-    supabase: SupabaseClient;
+    db: any;
     appUrl?: string;
     pollingIntervalMs: number;
   }) => TeamsOutboundDispatcherLike;
   createMemoEventDispatcher?: (input: {
-    supabase: SupabaseClient;
+    db: any;
     pollingIntervalMs: number;
   }) => MemoEventDispatcherLike;
 }
@@ -129,44 +127,44 @@ export class BackgroundRuntimeWorker {
     const settings = options.settings ?? resolveBackgroundRuntimeSettings();
 
     this.slackOutboundDispatcher = options.createSlackOutboundDispatcher?.({
-      supabase: options.supabase,
+      db: options.db,
       appUrl: options.appUrl,
     }) ?? new SlackOutboundDispatcher({
-      supabase: options.supabase,
+      db: options.db,
       appUrl: options.appUrl,
     });
 
     this.discordOutboundDispatcher = options.createDiscordOutboundDispatcher?.({
-      supabase: options.supabase,
+      db: options.db,
       appUrl: options.appUrl,
       pollingIntervalMs: settings.discordOutboundPollingIntervalMs,
     }) ?? new DiscordOutboundDispatcher({
-      supabase: options.supabase,
+      db: options.db,
       appUrl: options.appUrl,
       pollingIntervalMs: settings.discordOutboundPollingIntervalMs,
     });
 
     this.discordGatewayRuntime = options.createDiscordGatewayRuntime?.({
-      supabase: options.supabase,
+      db: options.db,
     }) ?? new DiscordGatewayRuntime({
-      supabase: options.supabase,
+      db: options.db,
     });
 
     this.teamsOutboundDispatcher = options.createTeamsOutboundDispatcher?.({
-      supabase: options.supabase,
+      db: options.db,
       appUrl: options.appUrl,
       pollingIntervalMs: settings.teamsOutboundPollingIntervalMs,
     }) ?? new TeamsOutboundDispatcher({
-      supabase: options.supabase,
+      db: options.db,
       appUrl: options.appUrl,
       pollingIntervalMs: settings.teamsOutboundPollingIntervalMs,
     });
 
     this.memoEventDispatcher = options.createMemoEventDispatcher?.({
-      supabase: options.supabase,
+      db: options.db,
       pollingIntervalMs: settings.memoPollingIntervalMs,
     }) ?? new MemoEventDispatcher({
-      supabase: options.supabase,
+      db: options.db,
       pollingIntervalMs: settings.memoPollingIntervalMs,
     });
   }
@@ -197,7 +195,7 @@ export class BackgroundRuntimeWorker {
 
 export function createBackgroundRuntimeWorkerFromEnv(env: NodeJS.ProcessEnv = process.env) {
   return new BackgroundRuntimeWorker({
-    supabase: createSupabaseAdminClient(),
+    db: createAdminClient(),
     appUrl: resolveAppUrl(env['NEXT_PUBLIC_APP_URL'], env),
     settings: resolveBackgroundRuntimeSettings(env),
   });

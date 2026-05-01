@@ -1,8 +1,6 @@
-// eslint-disable-next-line @typescript-eslint/no-explicit-any
-type SupabaseClient = any;
 
 import { parseBody, bulkUpdateStorySchema } from '@sprintable/shared';
-import { createSupabaseAdminClient } from '@/lib/supabase/admin';
+import { createAdminClient } from '@/lib/db/admin';
 import { StoryService } from '@/services/story';
 import { handleApiError } from '@/lib/api-error';
 import { getAuthContext } from '@/lib/auth-helpers';
@@ -16,7 +14,7 @@ export async function PATCH(request: Request) {
     if (!me) return ApiErrors.unauthorized();
     if (me.rateLimitExceeded) return ApiErrors.tooManyRequests(me.rateLimitRemaining, me.rateLimitResetAt);
     const ossMode = isOssMode();
-    const dbClient = ossMode ? undefined : (me.type === 'agent' ? createSupabaseAdminClient() : undefined);
+    const dbClient = ossMode ? undefined : (me.type === 'agent' ? createAdminClient() : undefined);
 
     const parsed = await parseBody(request, bulkUpdateStorySchema); if (!parsed.success) return parsed.response; const body = parsed.data;
     if (!Array.isArray(body.items) || body.items.length === 0) {
@@ -24,7 +22,7 @@ export async function PATCH(request: Request) {
     }
 
     const repo = await createStoryRepository(dbClient);
-    const service = new StoryService(repo, dbClient as SupabaseClient | undefined, { isAdminContext: me.type === 'agent' });
+    const service = new StoryService(repo, dbClient as any | undefined, { isAdminContext: me.type === 'agent' });
     const results = await service.bulkUpdate(body.items);
     return apiSuccess(results);
   } catch (err: unknown) {

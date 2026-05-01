@@ -1,13 +1,13 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
-const { createSupabaseServerClient, getAuthContext, createSupabaseAdminClient } = vi.hoisted(() => ({
-  createSupabaseServerClient: vi.fn(),
+const { createDbServerClient, getAuthContext, createAdminClient } = vi.hoisted(() => ({
+  createDbServerClient: vi.fn(),
   getAuthContext: vi.fn(),
-  createSupabaseAdminClient: vi.fn(),
+  createAdminClient: vi.fn(),
 }));
 
-vi.mock('@/lib/supabase/server', () => ({ createSupabaseServerClient }));
-vi.mock('@/lib/supabase/admin', () => ({ createSupabaseAdminClient }));
+vi.mock('@/lib/db/server', () => ({ createDbServerClient }));
+vi.mock('@/lib/db/admin', () => ({ createAdminClient }));
 vi.mock('@/lib/auth-helpers', () => ({ getAuthContext }));
 
 import { GET, POST } from './route';
@@ -30,9 +30,9 @@ function createQueryStub(rows: Record<string, unknown>[]) {
 
 describe('GET /api/standup/feedback', () => {
   beforeEach(() => {
-    createSupabaseServerClient.mockReset();
+    createDbServerClient.mockReset();
     getAuthContext.mockReset();
-    createSupabaseAdminClient.mockReset();
+    createAdminClient.mockReset();
     getAuthContext.mockResolvedValue({ id: 'member-1', type: 'human', rateLimitExceeded: false, rateLimitRemaining: 299, rateLimitResetAt: 0 });
   });
 
@@ -40,13 +40,13 @@ describe('GET /api/standup/feedback', () => {
     const entries = [{ id: 'entry-1' }];
     const feedback = [{ id: 'feedback-1', standup_entry_id: 'entry-1', feedback_text: 'LGTM' }];
     let callCount = 0;
-    const supabase = {
+    const db = {
       from: vi.fn(() => {
         callCount++;
         return createQueryStub(callCount === 1 ? entries : feedback);
       }),
     };
-    createSupabaseServerClient.mockResolvedValue(supabase);
+    createDbServerClient.mockResolvedValue(db);
 
     const response = await GET(new Request('http://localhost/api/standup/feedback?project_id=project-alpha&date=2026-04-15'));
 
@@ -56,7 +56,7 @@ describe('GET /api/standup/feedback', () => {
   });
 
   it('returns 400 when project_id or date missing', async () => {
-    createSupabaseServerClient.mockResolvedValue({});
+    createDbServerClient.mockResolvedValue({});
 
     const response = await GET(new Request('http://localhost/api/standup/feedback?project_id=project-alpha'));
 
@@ -64,7 +64,7 @@ describe('GET /api/standup/feedback', () => {
   });
 
   it('returns 401 when not authenticated', async () => {
-    createSupabaseServerClient.mockResolvedValue({});
+    createDbServerClient.mockResolvedValue({});
     getAuthContext.mockResolvedValue(null);
 
     const response = await GET(new Request('http://localhost/api/standup/feedback?project_id=p&date=2026-04-15'));
@@ -75,16 +75,16 @@ describe('GET /api/standup/feedback', () => {
 
 describe('POST /api/standup/feedback', () => {
   beforeEach(() => {
-    createSupabaseServerClient.mockReset();
+    createDbServerClient.mockReset();
     getAuthContext.mockReset();
-    createSupabaseAdminClient.mockReset();
+    createAdminClient.mockReset();
     getAuthContext.mockResolvedValue({ id: 'member-1', type: 'human', rateLimitExceeded: false, rateLimitRemaining: 299, rateLimitResetAt: 0 });
   });
 
   it('returns 400 for invalid payload', async () => {
     const memberData = { project_id: 'project-alpha', org_id: 'org-1' };
-    const supabase = { from: vi.fn(() => createQueryStub([memberData])) };
-    createSupabaseServerClient.mockResolvedValue(supabase);
+    const db = { from: vi.fn(() => createQueryStub([memberData])) };
+    createDbServerClient.mockResolvedValue(db);
 
     const response = await POST(new Request('http://localhost/api/standup/feedback', {
       method: 'POST',

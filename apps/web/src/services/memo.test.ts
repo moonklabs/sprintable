@@ -3,7 +3,7 @@ import { MemoService } from './memo';
 
 describe('MemoService.getByIdWithDetails', () => {
   it('enriches memo details with replies, reply summary, project name, timeline, and linked docs', async () => {
-    const supabase = {
+    const db = {
       from(table: string) {
         if (table === 'memos') {
           return {
@@ -114,9 +114,9 @@ describe('MemoService.getByIdWithDetails', () => {
           then: (resolve: (value: { data: unknown[]; error: null }) => void) => Promise.resolve({ data: [], error: null }).then(resolve),
         };
       },
-    } as unknown as import('@supabase/supabase-js').SupabaseClient;
+    } as any;
 
-    const service = MemoService.fromSupabase(supabase);
+    const service = MemoService.fromDb(db);
     const memo = await service.getByIdWithDetails('memo-1');
 
     expect(memo.reply_count).toBe(2);
@@ -132,7 +132,7 @@ describe('MemoService.create', () => {
   it('rejects created_by values outside the current project scope', async () => {
     let teamMemberIdFilter: string | null = null;
 
-    const supabase = {
+    const db = {
       from(table: string) {
         if (table === 'projects') {
           return {
@@ -173,9 +173,9 @@ describe('MemoService.create', () => {
           single: async () => ({ data: null, error: null }),
         };
       },
-    } as unknown as import('@supabase/supabase-js').SupabaseClient;
+    } as any;
 
-    const service = MemoService.fromSupabase(supabase);
+    const service = MemoService.fromDb(db);
 
     await expect(service.create({
       project_id: 'project-1',
@@ -191,7 +191,7 @@ describe('MemoService.linkDoc and markRead', () => {
     let linkedPayload: Record<string, unknown> | null = null;
     let readPayload: Record<string, unknown> | null = null;
 
-    const supabase = {
+    const db = {
       from(table: string) {
         if (table === 'memos') {
           return {
@@ -254,9 +254,9 @@ describe('MemoService.linkDoc and markRead', () => {
           single: async () => ({ data: null, error: null }),
         };
       },
-    } as unknown as import('@supabase/supabase-js').SupabaseClient;
+    } as any;
 
-    const service = MemoService.fromSupabase(supabase);
+    const service = MemoService.fromDb(db);
 
     await expect(service.linkDoc('memo-1', 'doc-1', 'author-1')).resolves.toMatchObject({ doc_id: 'doc-1', memo_id: 'memo-1' });
     await expect(service.markRead('memo-1', 'author-1')).resolves.toMatchObject({ memo_id: 'memo-1', team_member_id: 'author-1' });
@@ -265,7 +265,7 @@ describe('MemoService.linkDoc and markRead', () => {
   });
 
   it('treats missing memo_reads as optional when marking memo as read during rollout', async () => {
-    const supabase = {
+    const db = {
       from(table: string) {
         if (table === 'memos') {
           return {
@@ -312,9 +312,9 @@ describe('MemoService.linkDoc and markRead', () => {
           single: async () => ({ data: null, error: null }),
         };
       },
-    } as unknown as import('@supabase/supabase-js').SupabaseClient;
+    } as any;
 
-    const service = MemoService.fromSupabase(supabase);
+    const service = MemoService.fromDb(db);
     await expect(service.markRead('memo-1', 'author-1')).resolves.toMatchObject({
       memo_id: 'memo-1',
       team_member_id: 'author-1',
@@ -325,7 +325,7 @@ describe('MemoService.linkDoc and markRead', () => {
 
 describe('MemoService.list', () => {
   it('treats missing memo_reads as optional during rollout', async () => {
-    const supabase = {
+    const db = {
       from(table: string) {
         if (table === 'memos') {
           return {
@@ -389,9 +389,9 @@ describe('MemoService.list', () => {
 
         throw new Error(`Unexpected table: ${table}`);
       },
-    } as unknown as import('@supabase/supabase-js').SupabaseClient;
+    } as any;
 
-    const service = MemoService.fromSupabase(supabase);
+    const service = MemoService.fromDb(db);
     const memos = await service.list({ project_id: 'project-1' });
 
     expect(memos).toEqual([
@@ -406,7 +406,7 @@ describe('MemoService.list', () => {
   });
 
   it('builds memo summaries with batched reply and read lookups', async () => {
-    const supabase = {
+    const db = {
       from(table: string) {
         if (table === 'memos') {
           return {
@@ -487,9 +487,9 @@ describe('MemoService.list', () => {
 
         throw new Error(`Unexpected table: ${table}`);
       },
-    } as unknown as import('@supabase/supabase-js').SupabaseClient;
+    } as any;
 
-    const service = MemoService.fromSupabase(supabase);
+    const service = MemoService.fromDb(db);
     const memos = await service.list({ project_id: 'project-1' });
 
     expect(memos).toEqual([

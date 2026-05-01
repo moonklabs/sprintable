@@ -1,21 +1,21 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 const {
-  createSupabaseServerClient,
-  createSupabaseAdminClient,
+  createDbServerClient,
+  createAdminClient,
   getAuthContext,
   createInboxItemRepository,
   isOssMode,
 } = vi.hoisted(() => ({
-  createSupabaseServerClient: vi.fn(),
-  createSupabaseAdminClient: vi.fn(),
+  createDbServerClient: vi.fn(),
+  createAdminClient: vi.fn(),
   getAuthContext: vi.fn(),
   createInboxItemRepository: vi.fn(),
   isOssMode: vi.fn(() => false),
 }));
 
-vi.mock('@/lib/supabase/server', () => ({ createSupabaseServerClient }));
-vi.mock('@/lib/supabase/admin', () => ({ createSupabaseAdminClient }));
+vi.mock('@/lib/db/server', () => ({ createDbServerClient }));
+vi.mock('@/lib/db/admin', () => ({ createAdminClient }));
 vi.mock('@/lib/auth-helpers', async () => {
   const actual = await vi.importActual<typeof import('@/lib/auth-helpers')>('@/lib/auth-helpers');
   return { ...actual, getAuthContext };
@@ -53,7 +53,7 @@ describe('POST /api/inbox/[id]/resolve', () => {
   beforeEach(() => {
     vi.clearAllMocks();
     isOssMode.mockReturnValue(false);
-    createSupabaseServerClient.mockResolvedValue({});
+    createDbServerClient.mockResolvedValue({});
     getAuthContext.mockResolvedValue(ME);
   });
 

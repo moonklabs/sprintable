@@ -1,5 +1,5 @@
 {
-  "name": "@sprintable/storage-supabase",
+  "name": "@sprintable/storage-api",
   "version": "0.1.0",
   "private": true,
   "type": "module",

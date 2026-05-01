@@ -5,7 +5,7 @@ import {
   syncSlackHitlRequestState,
 } from './slack-hitl';
 
-function createSupabaseStub(options?: {
+function createDbStub(options?: {
   auth?: Record<string, unknown> | null;
   assignee?: Record<string, unknown> | null;
 }) {
@@ -17,7 +17,7 @@ function createSupabaseStub(options?: {
   const auth = options?.auth ?? { access_token_ref: 'env:SLACK_OAUTH_TOKEN_ORG_1', expires_at: null };
   const assignee = options?.assignee ?? { id: 'admin-1', name: 'Qasim' };
 
-  const supabase = {
+  const db = {
     from(table: string) {
       if (table === 'messaging_bridge_org_auths') {
         return {
@@ -59,7 +59,7 @@ function createSupabaseStub(options?: {
     },
   };
 
-  return { supabase, state };
+  return { db, state };
 }
 
 describe('slack hitl helpers', () => {
@@ -107,9 +107,9 @@ describe('notifySlackHitlRequest', () => {
 
   it('posts a threaded Slack Block Kit HITL request and stores message metadata', async () => {
     const fetchFn = vi.fn<typeof fetch>().mockResolvedValue(new Response(JSON.stringify({ ok: true, ts: '1710000001.000200' }), { status: 200 }));
-    const { supabase, state } = createSupabaseStub();
+    const { db, state } = createDbStub();
 
-    const result = await notifySlackHitlRequest(supabase as never, {
+    const result = await notifySlackHitlRequest(db as never, {
       request: {
         id: 'hitl-1',
         org_id: 'org-1',
@@ -159,9 +159,9 @@ describe('notifySlackHitlRequest', () => {
 
   it('ignores Slack send failure and leaves a Sprintable memo comment', async () => {
     const fetchFn = vi.fn<typeof fetch>().mockResolvedValue(new Response(JSON.stringify({ ok: false, error: 'invalid_auth' }), { status: 401 }));
-    const { supabase, state } = createSupabaseStub();
+    const { db, state } = createDbStub();
 
-    const result = await notifySlackHitlRequest(supabase as never, {
+    const result = await notifySlackHitlRequest(db as never, {
       request: {
         id: 'hitl-1',
         org_id: 'org-1',
@@ -207,9 +207,9 @@ describe('syncSlackHitlRequestState', () => {
 
   it('updates the Slack message to a non-interactive resolved state', async () => {
     const fetchFn = vi.fn<typeof fetch>().mockResolvedValue(new Response(JSON.stringify({ ok: true, ts: '1710000001.000200' }), { status: 200 }));
-    const { supabase } = createSupabaseStub();
+    const { db } = createDbStub();
 
-    const result = await syncSlackHitlRequestState(supabase as never, {
+    const result = await syncSlackHitlRequestState(db as never, {
       request: {
         id: 'hitl-1',
         org_id: 'org-1',

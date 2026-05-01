@@ -1,5 +1,3 @@
-// eslint-disable-next-line @typescript-eslint/no-explicit-any
-type SupabaseClient = any;
 
 // OSS stub — 실제 구현은 @moonklabs/sprintable-saas 에 있으며
 // SaaS 결합 빌드 시 submodule overlay로 덮어쓴다.
@@ -14,23 +12,23 @@ export interface FeatureCheckResult {
 }
 
 export async function checkFeatureLimit(
-  _supabase: SupabaseClient,
+  _db: any,
   _orgId: string,
   _feature: string,
 ): Promise<FeatureCheckResult> {
   return { allowed: true };
 }
 
-export async function checkMemberLimit(_supabase: SupabaseClient, _orgId: string): Promise<FeatureCheckResult> {
+export async function checkMemberLimit(_db: any, _orgId: string): Promise<FeatureCheckResult> {
   return { allowed: true };
 }
 
-export async function checkProjectLimit(_supabase: SupabaseClient, _orgId: string): Promise<FeatureCheckResult> {
+export async function checkProjectLimit(_db: any, _orgId: string): Promise<FeatureCheckResult> {
   return { allowed: true };
 }
 
 export async function checkResourceLimit(
-  _supabase: SupabaseClient,
+  _db: any,
   _orgId: string,
   _featureKey: string,
   _table: string,

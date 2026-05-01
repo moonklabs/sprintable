@@ -18,7 +18,7 @@ import {
 } from '@/components/ui/dialog';
 import { getDeploymentHealthState, getDeploymentRecoveryCueKeys, hasActiveFailureSignal } from '@/services/agent-deployment-console';
 import { getTriggerMemoHref } from '@/services/agent-run-history';
-import { createSupabaseBrowserClient } from '@/lib/supabase/client';
+import { createBrowserClient } from '@/lib/db/client';
 
 export interface AgentDeploymentCard {
   id: string;
@@ -152,8 +152,8 @@ export function AgentsDashboard({ deployments: initialDeployments }: { deploymen
   }, [addToast]);
 
   const getAuthHeaders = async (): Promise<Record<string, string>> => {
-    const supabase = createSupabaseBrowserClient();
-    const { data: { session } } = await supabase.auth.getSession();
+    const db = createBrowserClient();
+    const { data: { session } } = await db.auth.getSession();
     return session?.access_token ? { Authorization: `Bearer ${session.access_token}` } : {};
   };
 

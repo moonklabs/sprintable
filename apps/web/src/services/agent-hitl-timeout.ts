@@ -1,5 +1,3 @@
-// eslint-disable-next-line @typescript-eslint/no-explicit-any
-type SupabaseClient = any;
 
 import { dispatchMemoAssignmentImmediately, type DispatchableMemo } from './memo-assignment-dispatch';
 import { syncSlackHitlRequestState } from './slack-hitl';
@@ -75,7 +73,7 @@ function dedupe(values: Array<string | null | undefined>) {
 
 export class AgentHitlTimeoutService {
   constructor(
-    private readonly supabase: SupabaseClient,
+    private readonly db: any,
     private readonly options: {
       now?: () => Date;
       syncSlackHitlFn?: typeof syncSlackHitlRequestState;
@@ -135,9 +133,9 @@ export class AgentHitlTimeoutService {
     });
 
     try {
-      await new NotificationService(this.supabase).createMany(notifications);
+      await new NotificationService(this.db).createMany(notifications);
     } catch (notifError) {
-      await this.supabase
+      await this.db
         .from('agent_hitl_requests')
         .update({ reminder_sent_at: null })
         .in('id', claimed.map((request) => request.id));
@@ -176,7 +174,7 @@ export class AgentHitlTimeoutService {
     }
 
     const runIds = dedupe(processable.map((request) => request.run_id));
-    const { data: transitionedRuns, error: runError } = await this.supabase
+    const { data: transitionedRuns, error: runError } = await this.db
       .from('agent_runs')
       .update({
         status: 'failed',
@@ -216,7 +214,7 @@ export class AgentHitlTimeoutService {
     const compensations: Compensation[] = [
       async () => {
         for (const run of rollbackRunStates) {
-          await this.supabase
+          await this.db
             .from('agent_runs')
             .update({
               status: run.status,
@@ -273,7 +271,7 @@ export class AgentHitlTimeoutService {
         };
       }));
 
-      const { data: timeoutMemos, error: timeoutMemoError } = await this.supabase
+      const { data: timeoutMemos, error: timeoutMemoError } = await this.db
         .from('memos')
         .insert(timeoutMemoRows)
         .select('id, org_id, project_id, title, content, memo_type, status, assigned_to, created_by, metadata, updated_at, created_at');
@@ -282,7 +280,7 @@ export class AgentHitlTimeoutService {
       const timeoutMemoIds = (timeoutMemos ?? []).map((memo) => String((memo as { id: string }).id));
       compensations.unshift(async () => {
         if (timeoutMemoIds.length === 0) return;
-        await this.supabase.from('memos').delete().in('id', timeoutMemoIds);
+        await this.db.from('memos').delete().in('id', timeoutMemoIds);
       });
 
       for (const memo of timeoutMemos ?? []) {
@@ -330,7 +328,7 @@ export class AgentHitlTimeoutService {
 
       const replyRows = [...sourceReplies, ...hitlReplies];
       if (replyRows.length > 0) {
-        const { data: insertedReplies, error: replyError } = await this.supabase
+        const { data: insertedReplies, error: replyError } = await this.db
           .from('memo_replies')
           .insert(replyRows)
           .select('id');
@@ -339,13 +337,13 @@ export class AgentHitlTimeoutService {
         const replyIds = (insertedReplies ?? []).map((reply) => String((reply as { id: string }).id));
         compensations.unshift(async () => {
           if (replyIds.length === 0) return;
-          await this.supabase.from('memo_replies').delete().in('id', replyIds);
+          await this.db.from('memo_replies').delete().in('id', replyIds);
         });
       }
 
       const hitlMemoIds = dedupe(transitionedRequests.map((request) => asString(asRecord(request.metadata)?.hitl_memo_id)));
       if (hitlMemoIds.length > 0) {
-        const { error: resolveHitlMemoError } = await this.supabase
+        const { error: resolveHitlMemoError } = await this.db
           .from('memos')
           .update({ status: 'resolved', resolved_at: now, resolved_by: null })
           .in('id', hitlMemoIds)
@@ -353,14 +351,14 @@ export class AgentHitlTimeoutService {
         if (resolveHitlMemoError) throw resolveHitlMemoError;
 
         compensations.unshift(async () => {
-          await this.supabase
+          await this.db
             .from('memos')
             .update({ status: 'open', resolved_at: null, resolved_by: null })
             .in('id', hitlMemoIds);
         });
       }
 
-      const { data: expiredRequests, error: requestUpdateError } = await this.supabase
+      const { data: expiredRequests, error: requestUpdateError } = await this.db
         .from('agent_hitl_requests')
         .update({
           status: 'expired',
@@ -383,7 +381,7 @@ export class AgentHitlTimeoutService {
 
     await Promise.allSettled(transitionedRequests.map(async (request) => {
       try {
-        await (this.options.syncSlackHitlFn ?? syncSlackHitlRequestState)(this.supabase, {
+        await (this.options.syncSlackHitlFn ?? syncSlackHitlRequestState)(this.db, {
           request: {
             ...request,
             status: 'expired',
@@ -413,7 +411,7 @@ export class AgentHitlTimeoutService {
   }
 
   private async listReminderCandidates(now: string, reminderDeadline: string) {
-    const { data, error } = await this.supabase
+    const { data, error } = await this.db
       .from('agent_hitl_requests')
       .select('id, org_id, project_id, agent_id, run_id, requested_for, title, prompt, status, response_text, expires_at, reminder_sent_at, expired_at, metadata')
       .eq('status', 'pending')
@@ -428,7 +426,7 @@ export class AgentHitlTimeoutService {
   }
 
   private async claimReminderCandidates(ids: string[], now: string) {
-    const { data, error } = await this.supabase
+    const { data, error } = await this.db
       .from('agent_hitl_requests')
       .update({ reminder_sent_at: now })
       .in('id', ids)
@@ -441,7 +439,7 @@ export class AgentHitlTimeoutService {
   }
 
   private async listExpiredCandidateIds(now: string, limit: number) {
-    const { data, error } = await this.supabase
+    const { data, error } = await this.db
       .from('agent_hitl_requests')
       .select('id')
       .eq('status', 'pending')
@@ -456,7 +454,7 @@ export class AgentHitlTimeoutService {
   }
 
   private async claimExpiredCandidates(ids: string[], now: string) {
-    const { data, error } = await this.supabase
+    const { data, error } = await this.db
       .from('agent_hitl_requests')
       .update({ expired_at: now })
       .in('id', ids)
@@ -471,7 +469,7 @@ export class AgentHitlTimeoutService {
   private async loadRunStates(runIds: string[]) {
     if (runIds.length === 0) return new Map<string, AgentRunStateRow>();
 
-    const { data, error } = await this.supabase
+    const { data, error } = await this.db
       .from('agent_runs')
       .select('id, status, result_summary, finished_at, last_error_code, error_message')
       .in('id', runIds);
@@ -486,7 +484,7 @@ export class AgentHitlTimeoutService {
   private async clearExpiredClaims(requestIds: string[]) {
     if (requestIds.length === 0) return;
 
-    const { error } = await this.supabase
+    const { error } = await this.db
       .from('agent_hitl_requests')
       .update({ expired_at: null })
       .in('id', requestIds)
@@ -502,7 +500,7 @@ export class AgentHitlTimeoutService {
   }
 
   private async listActiveAdminRecipients(orgId: string, projectId: string) {
-    const { data: orgMembers, error: orgMembersError } = await this.supabase
+    const { data: orgMembers, error: orgMembersError } = await this.db
       .from('org_members')
       .select('user_id')
       .eq('org_id', orgId)
@@ -518,7 +516,7 @@ export class AgentHitlTimeoutService {
       return [] as Array<{ id: string }>;
     }
 
-    const { data: teamMembers, error: teamMembersError } = await this.supabase
+    const { data: teamMembers, error: teamMembersError } = await this.db
       .from('team_members')
       .select('id, user_id')
       .eq('org_id', orgId)

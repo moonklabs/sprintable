@@ -1,5 +1,3 @@
-// eslint-disable-next-line @typescript-eslint/no-explicit-any
-type SupabaseClient = any;
 
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { createHmac } from 'node:crypto';
@@ -42,7 +40,7 @@ function nowTimestamp() {
   return String(Math.floor(Date.now() / 1000));
 }
 
-function createSupabaseStub(overrides: {
+function createDbStub(overrides: {
   channelData?: unknown;
   userData?: unknown;
   existingMemoData?: unknown;
@@ -146,13 +144,13 @@ function createSupabaseStub(overrides: {
     return query;
   };
 
-  const supabase = {
+  const db = {
     from(table: string) {
       return makeQuery(table);
     },
-  } as unknown as SupabaseClient;
+  } as any;
 
-  return { supabase, state };
+  return { db, state };
 }
 
 describe('verifySlackSignature', () => {
@@ -288,8 +286,8 @@ describe('BridgeInboundService', () => {
   });
 
   it('creates a memo with required metadata for a mapped Slack user', async () => {
-    const { supabase, state } = createSupabaseStub();
-    const service = new BridgeInboundService(supabase);
+    const { db, state } = createDbStub();
+    const service = new BridgeInboundService(db);
 
     const result = await service.processInboundMessage({
       platform: 'slack',
@@ -326,12 +324,12 @@ describe('BridgeInboundService', () => {
   });
 
   it('uses a fallback author and labels unmapped users', async () => {
-    const { supabase, state } = createSupabaseStub({
+    const { db, state } = createDbStub({
       userData: null,
       projectScopedMemberData: { id: 'agent-1' },
       agentFallbackData: { id: 'agent-1' },
     });
-    const service = new BridgeInboundService(supabase);
+    const service = new BridgeInboundService(db);
 
     const result = await service.processInboundMessage({
       platform: 'slack',
@@ -358,12 +356,12 @@ describe('BridgeInboundService', () => {
   });
 
   it('falls back when a mapped user is outside the current project scope', async () => {
-    const { supabase, state } = createSupabaseStub({
+    const { db, state } = createDbStub({
       userData: { team_member_id: 'tm-other-project', display_name: 'Elsewhere' },
       projectScopedMemberData: { id: 'agent-1' },
       agentFallbackData: { id: 'agent-1' },
     });
-    const service = new BridgeInboundService(supabase);
+    const service = new BridgeInboundService(db);
 
     const result = await service.processInboundMessage({
       platform: 'slack',
@@ -389,11 +387,11 @@ describe('BridgeInboundService', () => {
   });
 
   it('ignores duplicate Slack retries when the memo insert hits the durable event id constraint', async () => {
-    const { supabase, state } = createSupabaseStub({
+    const { db, state } = createDbStub({
       existingMemoData: { id: 'memo-existing' },
       memoInsertError: { code: '23505', message: 'duplicate key value violates unique constraint' },
     });
-    const service = new BridgeInboundService(supabase);
+    const service = new BridgeInboundService(db);
 
     const result = await service.processInboundMessage({
       platform: 'slack',
@@ -416,8 +414,8 @@ describe('BridgeInboundService', () => {
   });
 
   it('returns rate_limited after the channel exceeds 60 events per minute', async () => {
-    const { supabase } = createSupabaseStub();
-    const service = new BridgeInboundService(supabase);
+    const { db } = createDbStub();
+    const service = new BridgeInboundService(db);
     const event: BridgeInboundEvent = {
       channelId: 'C1234',
       userId: 'U123',
@@ -438,8 +436,8 @@ describe('BridgeInboundService', () => {
   });
 
   it('treats concurrent events independently', async () => {
-    const { supabase, state } = createSupabaseStub();
-    const service = new BridgeInboundService(supabase);
+    const { db, state } = createDbStub();
+    const service = new BridgeInboundService(db);
 
     const results = await Promise.all(Array.from({ length: 5 }, (_, index) => service.processInboundMessage({
       platform: 'slack',

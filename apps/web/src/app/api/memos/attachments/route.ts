@@ -1,4 +1,4 @@
-import { getServerSession } from '@/lib/supabase/server';
+import { getServerSession } from '@/lib/db/server';
 import { handleApiError } from '@/lib/api-error';
 import { apiSuccess, apiError, ApiErrors } from '@/lib/api-response';
 import { isOssMode } from '@/lib/storage/factory';

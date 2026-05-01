@@ -5,7 +5,7 @@ describe('StandupService.save', () => {
   it('persists linked story ids with the standup entry', async () => {
     let payload: Record<string, unknown> | null = null;
 
-    const supabase = {
+    const db = {
       from(table: string) {
         if (table === 'standup_entries') {
           return {
@@ -30,9 +30,9 @@ describe('StandupService.save', () => {
           single: async () => ({ data: null, error: null }),
         };
       },
-    } as unknown as import('@supabase/supabase-js').SupabaseClient;
+    } as any;
 
-    const service = new StandupService(supabase);
+    const service = new StandupService(db);
     const entry = await service.save({
       project_id: 'project-1',
       org_id: 'org-1',
@@ -59,7 +59,7 @@ describe('StandupService.save', () => {
 
 describe('StandupFeedbackService', () => {
   it('loads feedback by standup date', async () => {
-    const supabase = {
+    const db = {
       from(table: string) {
         if (table === 'standup_entries') {
           return {
@@ -93,9 +93,9 @@ describe('StandupFeedbackService', () => {
           single: async () => ({ data: null, error: null }),
         };
       },
-    } as unknown as import('@supabase/supabase-js').SupabaseClient;
+    } as any;
 
-    const service = new StandupFeedbackService(supabase);
+    const service = new StandupFeedbackService(db);
     const feedback = await service.listByDate('project-1', '2026-04-10');
 
     expect(feedback).toEqual([{ id: 'feedback-1', standup_entry_id: 'entry-1' }]);
@@ -104,7 +104,7 @@ describe('StandupFeedbackService', () => {
   it('creates feedback with the reviewer as the author', async () => {
     let insertPayload: Record<string, unknown> | null = null;
 
-    const supabase = {
+    const db = {
       from(table: string) {
         if (table === 'standup_entries') {
           return {
@@ -145,9 +145,9 @@ describe('StandupFeedbackService', () => {
           single: async () => ({ data: null, error: null }),
         };
       },
-    } as unknown as import('@supabase/supabase-js').SupabaseClient;
+    } as any;
 
-    const service = new StandupFeedbackService(supabase);
+    const service = new StandupFeedbackService(db);
     const feedback = await service.create({
       project_id: 'project-1',
       org_id: 'org-1',
@@ -170,7 +170,7 @@ describe('StandupFeedbackService', () => {
   });
 
   it('rejects updates from non-authors', async () => {
-    const supabase = {
+    const db = {
       from(table: string) {
         if (table === 'standup_feedback') {
           return {
@@ -190,9 +190,9 @@ describe('StandupFeedbackService', () => {
           single: async () => ({ data: null, error: null }),
         };
       },
-    } as unknown as import('@supabase/supabase-js').SupabaseClient;
+    } as any;
 
-    const service = new StandupFeedbackService(supabase);
+    const service = new StandupFeedbackService(db);
     await expect(service.update('feedback-1', { feedback_text: 'change' }, 'member-2')).rejects.toThrow('Permission denied');
   });
 });

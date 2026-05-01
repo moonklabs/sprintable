@@ -23,12 +23,12 @@ export async function DELETE(request: Request, { params }: RouteParams) {
   try {
     const { keyId } = await params;
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    const supabase: any = null;
+    const db: any = null;
     const me = await getAuthContext(request);
     if (!me) return ApiErrors.unauthorized();
 
     // Admin 권한 확인
-    const { data: myMember } = await supabase
+    const { data: myMember } = await db
       .from('team_members')
       .select('role, org_id')
       .eq('id', me.id)
@@ -39,7 +39,7 @@ export async function DELETE(request: Request, { params }: RouteParams) {
     }
 
     // API Key 조회 (org 확인용)
-    const { data: apiKeyRow } = await supabase
+    const { data: apiKeyRow } = await db
       .from('agent_api_keys')
       .select('id, team_member_id, team_members(org_id)')
       .eq('id', keyId)
@@ -59,7 +59,7 @@ export async function DELETE(request: Request, { params }: RouteParams) {
     }
 
     // Revoke (revoked_at 설정)
-    const { error: updateError } = await supabase
+    const { error: updateError } = await db
       .from('agent_api_keys')
       .update({ revoked_at: new Date().toISOString() })
       .eq('id', keyId);

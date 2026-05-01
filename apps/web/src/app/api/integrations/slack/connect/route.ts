@@ -7,11 +7,11 @@ import { buildSlackConnectUrl } from '@/services/slack-channel-mapping';
 export async function GET() {
   if (isOssMode()) return apiError('NOT_AVAILABLE', 'Not available in OSS mode.', 503);
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  const supabase: any = null;
-  const me = await getMyTeamMember(supabase, null as any);
+  const db: any = null;
+  const me = await getMyTeamMember(db, null as any);
   if (!me) return ApiErrors.forbidden('Team member not found');
 
-  const { data: orgMember } = await supabase
+  const { data: orgMember } = await db
     .from('org_members')
     .select('role')
     .eq('org_id', me.org_id)

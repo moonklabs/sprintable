@@ -1,8 +1,6 @@
-// eslint-disable-next-line @typescript-eslint/no-explicit-any
-type SupabaseClient = any;
 
 import { saveStandupSchema } from '@sprintable/shared';
-import { createSupabaseAdminClient } from '@/lib/supabase/admin';
+import { createAdminClient } from '@/lib/db/admin';
 import { StandupService } from '@/services/standup';
 import { isOssMode } from '@/lib/storage/factory';
 import { handleApiError } from '@/lib/api-error';
@@ -30,7 +28,7 @@ export async function GET(request: Request) {
       return apiSuccess(await listOssStandupEntries(projectId, date));
     }
 
-    const dbClient: SupabaseClient = me.type === 'agent' ? createSupabaseAdminClient() : undefined;
+    const dbClient: any = me.type === 'agent' ? createAdminClient() : undefined;
     const service = new StandupService(dbClient);
     if (memberId) {
       const entry = await service.getEntryForUser(projectId, memberId, date);
@@ -51,7 +49,7 @@ export async function POST(request: Request) {
     if (me.rateLimitExceeded) return ApiErrors.tooManyRequests(me.rateLimitRemaining, me.rateLimitResetAt);
     const ossMode = isOssMode();
 
-    const dbClient: SupabaseClient = me.type === 'agent' ? createSupabaseAdminClient() : undefined;
+    const dbClient: any = me.type === 'agent' ? createAdminClient() : undefined;
 
     let rawBody: unknown;
     try { rawBody = await request.json(); } catch { return ApiErrors.badRequest('Invalid JSON body'); }
@@ -141,7 +139,7 @@ export async function PUT(request: Request) {
       return apiSuccess(entry);
     }
 
-    const dbClient: SupabaseClient = undefined;
+    const dbClient: any = undefined;
     const { data: member, error: memberError } = await dbClient
       .from('team_members')
       .select('id, project_id, org_id')

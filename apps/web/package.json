@@ -23,7 +23,7 @@
     "@google-cloud/storage": "^7.19.0",
     "@radix-ui/react-slot": "^1.2.4",
     "@sprintable/core-storage": "workspace:*",
-    "@sprintable/storage-supabase": "workspace:*",
+    "@sprintable/storage-api": "workspace:*",
 "@tiptap/core": "^3.22.3",
     "@tiptap/extension-image": "^3.22.3",
     "@tiptap/extension-link": "^3.22.3",

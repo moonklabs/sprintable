@@ -1,16 +1,16 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 const {
-  createSupabaseServerClient,
+  createDbServerClient,
   getMyTeamMember,
   requireAgentOrchestration,
 } = vi.hoisted(() => ({
-  createSupabaseServerClient: vi.fn(),
+  createDbServerClient: vi.fn(),
   getMyTeamMember: vi.fn(),
   requireAgentOrchestration: vi.fn(),
 }));
 
-vi.mock('@/lib/supabase/server', () => ({ createSupabaseServerClient }));
+vi.mock('@/lib/db/server', () => ({ createDbServerClient }));
 vi.mock('@/lib/auth-helpers', async () => {
   const actual = await vi.importActual<typeof import('@/lib/auth-helpers')>('@/lib/auth-helpers');
   return { ...actual, getMyTeamMember };
@@ -82,7 +82,7 @@ function createMembersQueryStub(rows: Array<Record<string, unknown>>) {
 
 describe('GET /api/v1/agent-runs', () => {
   beforeEach(() => {
-    createSupabaseServerClient.mockReset();
+    createDbServerClient.mockReset();
     getMyTeamMember.mockReset();
     requireAgentOrchestration.mockReset();
 
@@ -91,7 +91,7 @@ describe('GET /api/v1/agent-runs', () => {
   });
 
   it('blocks run history reads when upgrade is required', async () => {
-    createSupabaseServerClient.mockResolvedValue({
+    createDbServerClient.mockResolvedValue({
       auth: { getUser: vi.fn().mockResolvedValue({ data: { user: { id: 'user-1' } } }) },
       from: vi.fn(),
     });
@@ -138,7 +138,7 @@ describe('GET /api/v1/agent-runs', () => {
     ];
     const memberRows = [{ id: 'agent-1', name: 'Didi' }];
 
-    createSupabaseServerClient.mockResolvedValue({
+    createDbServerClient.mockResolvedValue({
       auth: { getUser: vi.fn().mockResolvedValue({ data: { user: { id: 'user-1' } } }) },
       from: vi.fn((table: string) => {
         if (table === 'agent_runs') return createRunQueryStub(runRows);

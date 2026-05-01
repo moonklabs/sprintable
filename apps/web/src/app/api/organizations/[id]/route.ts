@@ -1,4 +1,4 @@
-import { apiError } from '@/lib/api-response';
+import { apiError, apiSuccess } from '@/lib/api-response';
 
 /** DELETE /api/organizations/[id] — not supported in OSS mode */
 export async function DELETE() {

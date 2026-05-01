@@ -1,5 +1,3 @@
-// eslint-disable-next-line @typescript-eslint/no-explicit-any
-type SupabaseClient = any;
 
 
 export type AuditAction = 'member_added' | 'member_removed' | 'role_changed';
@@ -15,10 +13,10 @@ export interface AuditLogInput {
 }
 
 export class AuditLogService {
-  constructor(private readonly supabase: SupabaseClient) {}
+  constructor(private readonly db: any) {}
 
   async log(input: AuditLogInput): Promise<void> {
-    await this.supabase.from('permission_audit_logs').insert({
+    await this.db.from('permission_audit_logs').insert({
       org_id: input.org_id,
       actor_id: input.actor_id,
       action: input.action,
@@ -30,7 +28,7 @@ export class AuditLogService {
   }
 
   async list(orgId: string, limit = 50, cursor?: string) {
-    let query = this.supabase
+    let query = this.db
       .from('permission_audit_logs')
       .select('id, org_id, actor_id, action, target_user_id, old_role, new_role, metadata, created_at')
       .eq('org_id', orgId)

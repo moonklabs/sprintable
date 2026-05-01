@@ -29,18 +29,18 @@ export default async function ApiKeysPage() {
       </div>
     );
   }
-  const supabase = null as any;
+  const db = null as any;
   const { data: { user } } = { data: { user: null } };
   if (!user) redirect('/login');
 
-  const me = await getMyTeamMember(supabase, user);
+  const me = await getMyTeamMember(db, user);
   if (!me) redirect('/dashboard');
 
   // API Key 관리는 admin만 가능
-  await requireOrgAdmin(supabase, me.org_id).catch(() => redirect('/dashboard'));
+  await requireOrgAdmin(db, me.org_id).catch(() => redirect('/dashboard'));
 
   // 프로젝트 내 모든 에이전트 조회 (webhook_url 포함)
-  const { data: agents } = await supabase
+  const { data: agents } = await db
     .from('team_members')
     .select('id, name, type, webhook_url')
     .eq('org_id', me.org_id)

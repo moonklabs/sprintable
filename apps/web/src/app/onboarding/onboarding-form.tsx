@@ -2,7 +2,7 @@
 
 import { useState } from 'react';
 import { useRouter } from 'next/navigation';
-import { createSupabaseBrowserClient } from '@/lib/supabase/client';
+import { createBrowserClient } from '@/lib/db/client';
 import { UpgradeModal } from '@/components/ui/upgrade-modal';
 import { useTranslations } from 'next-intl';
 
@@ -10,7 +10,7 @@ type Step = 'org' | 'project';
 
 export function OnboardingForm() {
   const router = useRouter();
-  const supabase = createSupabaseBrowserClient();
+  const db = createBrowserClient();
   const t = useTranslations('onboarding');
 
   const [step, setStep] = useState<Step>('org');
@@ -91,7 +91,7 @@ export function OnboardingForm() {
     }
 
     // team_member 자동 생성 (type=human)
-    const { data: { user } } = await supabase.auth.getUser();
+    const { data: { user } } = await db.auth.getUser();
     if (user) {
       const name = user.user_metadata?.name
         || user.user_metadata?.full_name
@@ -99,7 +99,7 @@ export function OnboardingForm() {
         || t('unknownUser');
 
       // 중복 방지: 이미 존재하면 스킵
-      const { data: existingMember } = await supabase
+      const { data: existingMember } = await db
         .from('team_members')
         .select('id')
         .eq('user_id', user.id)
@@ -108,7 +108,7 @@ export function OnboardingForm() {
         .maybeSingle();
 
       if (!existingMember) {
-        await supabase
+        await db
           .from('team_members')
           .insert({
             org_id: orgId,

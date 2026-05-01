@@ -1,20 +1,20 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 const {
-  createSupabaseServerClient,
+  createDbServerClient,
   getMyTeamMember,
   requireOrgAdmin,
   requireAgentOrchestration,
   executeRetry,
 } = vi.hoisted(() => ({
-  createSupabaseServerClient: vi.fn(),
+  createDbServerClient: vi.fn(),
   getMyTeamMember: vi.fn(),
   requireOrgAdmin: vi.fn(),
   requireAgentOrchestration: vi.fn(),
   executeRetry: vi.fn(),
 }));
 
-vi.mock('@/lib/supabase/server', () => ({ createSupabaseServerClient }));
+vi.mock('@/lib/db/server', () => ({ createDbServerClient }));
 vi.mock('@/lib/auth-helpers', async () => {
   const actual = await vi.importActual<typeof import('@/lib/auth-helpers')>('@/lib/auth-helpers');
   return { ...actual, getMyTeamMember };
@@ -52,7 +52,7 @@ function createRunLookupStub(run: Record<string, unknown> | null) {
 
 describe('POST /api/v1/agent-runs/[id]/retry', () => {
   beforeEach(() => {
-    createSupabaseServerClient.mockReset();
+    createDbServerClient.mockReset();
     getMyTeamMember.mockReset();
     requireOrgAdmin.mockReset();
     requireAgentOrchestration.mockReset();
@@ -64,7 +64,7 @@ describe('POST /api/v1/agent-runs/[id]/retry', () => {
   });
 
   it('blocks retry bypass when upgrade is required', async () => {
-    createSupabaseServerClient.mockResolvedValue({
+    createDbServerClient.mockResolvedValue({
       auth: { getUser: vi.fn().mockResolvedValue({ data: { user: { id: 'user-1' } } }) },
       from: vi.fn(),
     });
@@ -82,7 +82,7 @@ describe('POST /api/v1/agent-runs/[id]/retry', () => {
   });
 
   it('blocks duplicate manual retry when a retry is already scheduled or launched', async () => {
-    createSupabaseServerClient.mockResolvedValue({
+    createDbServerClient.mockResolvedValue({
       auth: { getUser: vi.fn().mockResolvedValue({ data: { user: { id: 'user-1' } } }) },
       from: vi.fn((table: string) => {
         if (table === 'agent_runs') {
@@ -112,7 +112,7 @@ describe('POST /api/v1/agent-runs/[id]/retry', () => {
   });
 
   it('blocks manual retry for non-retryable failures', async () => {
-    createSupabaseServerClient.mockResolvedValue({
+    createDbServerClient.mockResolvedValue({
       auth: { getUser: vi.fn().mockResolvedValue({ data: { user: { id: 'user-1' } } }) },
       from: vi.fn((table: string) => {
         if (table === 'agent_runs') {
@@ -142,7 +142,7 @@ describe('POST /api/v1/agent-runs/[id]/retry', () => {
   });
 
   it('retries a failed run within the current org/project scope', async () => {
-    createSupabaseServerClient.mockResolvedValue({
+    createDbServerClient.mockResolvedValue({
       auth: { getUser: vi.fn().mockResolvedValue({ data: { user: { id: 'user-1' } } }) },
       from: vi.fn((table: string) => {
         if (table === 'agent_runs') {

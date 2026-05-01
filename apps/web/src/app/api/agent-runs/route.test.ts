@@ -1,13 +1,13 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
-const { createSupabaseServerClient, getAuthContext, createSupabaseAdminClient } = vi.hoisted(() => ({
-  createSupabaseServerClient: vi.fn(),
+const { createDbServerClient, getAuthContext, createAdminClient } = vi.hoisted(() => ({
+  createDbServerClient: vi.fn(),
   getAuthContext: vi.fn(),
-  createSupabaseAdminClient: vi.fn(),
+  createAdminClient: vi.fn(),
 }));
 
-vi.mock('@/lib/supabase/server', () => ({ createSupabaseServerClient }));
-vi.mock('@/lib/supabase/admin', () => ({ createSupabaseAdminClient }));
+vi.mock('@/lib/db/server', () => ({ createDbServerClient }));
+vi.mock('@/lib/db/admin', () => ({ createAdminClient }));
 vi.mock('@/lib/auth-helpers', () => ({ getAuthContext }));
 
 import { GET, POST } from './route';
@@ -51,9 +51,9 @@ function createQueryStub(rows: Record<string, unknown>[]) {
 
 describe('POST /api/agent-runs', () => {
   beforeEach(() => {
-    createSupabaseServerClient.mockReset();
+    createDbServerClient.mockReset();
     getAuthContext.mockReset();
-    createSupabaseAdminClient.mockReset();
+    createAdminClient.mockReset();
     getAuthContext.mockResolvedValue({
       id: 'agent-1',
       type: 'agent',
@@ -66,14 +66,14 @@ describe('POST /api/agent-runs', () => {
   it('creates agent run and returns 201', async () => {
     const memberData = { project_id: 'project-alpha', org_id: 'org-1' };
     const runData = makeRun();
-    const adminSupabase = {
+    const adminDb = {
       from: vi.fn((table: string) => {
         if (table === 'team_members') return createQueryStub([memberData]);
         return createQueryStub([runData]);
       }),
     };
-    createSupabaseAdminClient.mockReturnValue(adminSupabase);
-    createSupabaseServerClient.mockResolvedValue({});
+    createAdminClient.mockReturnValue(adminDb);
+    createDbServerClient.mockResolvedValue({});
 
     const response = await POST(
       new Request('http://localhost/api/agent-runs', {
@@ -92,7 +92,7 @@ describe('POST /api/agent-runs', () => {
     const memberData = { project_id: 'project-alpha', org_id: 'org-1' };
     const runData = makeRun({ status: 'failed', retry_count: 0, max_retries: 3 });
     let callCount = 0;
-    const adminSupabase = {
+    const adminDb = {
       from: vi.fn((table: string) => {
         if (table === 'team_members') return createQueryStub([memberData]);
         callCount++;
@@ -100,8 +100,8 @@ describe('POST /api/agent-runs', () => {
         return createQueryStub([runData]); // update next_retry_at
       }),
     };
-    createSupabaseAdminClient.mockReturnValue(adminSupabase);
-    createSupabaseServerClient.mockResolvedValue({});
+    createAdminClient.mockReturnValue(adminDb);
+    createDbServerClient.mockResolvedValue({});
 
     const response = await POST(
       new Request('http://localhost/api/agent-runs', {
@@ -118,7 +118,7 @@ describe('POST /api/agent-runs', () => {
   });
 
   it('returns 400 for missing required fields', async () => {
-    createSupabaseServerClient.mockResolvedValue({});
+    createDbServerClient.mockResolvedValue({});
 
     const response = await POST(
       new Request('http://localhost/api/agent-runs', {
@@ -134,7 +134,7 @@ describe('POST /api/agent-runs', () => {
   });
 
   it('returns 401 when not authenticated', async () => {
-    createSupabaseServerClient.mockResolvedValue({});
+    createDbServerClient.mockResolvedValue({});
     getAuthContext.mockResolvedValue(null);
 
     const response = await POST(
@@ -151,9 +151,9 @@ describe('POST /api/agent-runs', () => {
 
 describe('GET /api/agent-runs', () => {
   beforeEach(() => {
-    createSupabaseServerClient.mockReset();
+    createDbServerClient.mockReset();
     getAuthContext.mockReset();
-    createSupabaseAdminClient.mockReset();
+    createAdminClient.mockReset();
     getAuthContext.mockResolvedValue({
       id: 'agent-1',
       type: 'agent',
@@ -165,9 +165,9 @@ describe('GET /api/agent-runs', () => {
 
   it('returns recent runs for project', async () => {
     const runs = [makeRun(), makeRun({ id: 'run-2' })];
-    const adminSupabase = { from: vi.fn(() => createQueryStub(runs)) };
-    createSupabaseAdminClient.mockReturnValue(adminSupabase);
-    createSupabaseServerClient.mockResolvedValue({});
+    const adminDb = { from: vi.fn(() => createQueryStub(runs)) };
+    createAdminClient.mockReturnValue(adminDb);
+    createDbServerClient.mockResolvedValue({});
 
     const response = await GET(
       new Request('http://localhost/api/agent-runs?project_id=project-alpha'),
@@ -179,7 +179,7 @@ describe('GET /api/agent-runs', () => {
   });
 
   it('returns 400 when project_id missing', async () => {
-    createSupabaseServerClient.mockResolvedValue({});
+    createDbServerClient.mockResolvedValue({});
 
     const response = await GET(new Request('http://localhost/api/agent-runs'));
 
@@ -188,12 +188,12 @@ describe('GET /api/agent-runs', () => {
 
   it('uses admin client for agent auth', async () => {
     const runs = [makeRun()];
-    const adminSupabase = { from: vi.fn(() => createQueryStub(runs)) };
-    createSupabaseAdminClient.mockReturnValue(adminSupabase);
-    createSupabaseServerClient.mockResolvedValue({});
+    const adminDb = { from: vi.fn(() => createQueryStub(runs)) };
+    createAdminClient.mockReturnValue(adminDb);
+    createDbServerClient.mockResolvedValue({});
 
     await GET(new Request('http://localhost/api/agent-runs?project_id=project-alpha'));
 
-    expect(createSupabaseAdminClient).toHaveBeenCalled();
+    expect(createAdminClient).toHaveBeenCalled();
   });
 });

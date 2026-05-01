@@ -1,5 +1,3 @@
-// eslint-disable-next-line @typescript-eslint/no-explicit-any
-type SupabaseClient = any;
 
 import type { InternalDogfoodActor } from '@/lib/internal-dogfood';
 import { getInternalDogfoodAllowedTeamMemberIds } from '@/lib/internal-dogfood';
@@ -29,11 +27,11 @@ function toActor(row: TeamMemberRow): InternalDogfoodActor {
   };
 }
 
-export async function listInternalDogfoodActors(supabase: SupabaseClient): Promise<InternalDogfoodActor[]> {
+export async function listInternalDogfoodActors(db: any): Promise<InternalDogfoodActor[]> {
   const allowedIds = getInternalDogfoodAllowedTeamMemberIds();
   if (!allowedIds.length) return [];
 
-  const { data, error } = await supabase
+  const { data, error } = await db
     .from('team_members')
     .select('id, org_id, project_id, name, type, is_active, projects(name)')
     .eq('is_active', true)
@@ -45,13 +43,13 @@ export async function listInternalDogfoodActors(supabase: SupabaseClient): Promi
 }
 
 export async function resolveInternalDogfoodActor(
-  supabase: SupabaseClient,
+  db: any,
   teamMemberId: string,
 ): Promise<InternalDogfoodActor | null> {
   const allowedIds = getInternalDogfoodAllowedTeamMemberIds();
   if (!allowedIds.includes(teamMemberId)) return null;
 
-  const { data, error } = await supabase
+  const { data, error } = await db
     .from('team_members')
     .select('id, org_id, project_id, name, type, is_active, projects(name)')
     .eq('id', teamMemberId)
@@ -64,10 +62,10 @@ export async function resolveInternalDogfoodActor(
 }
 
 export async function listProjectAssignableMembers(
-  supabase: SupabaseClient,
+  db: any,
   actor: InternalDogfoodActor,
 ) {
-  const { data, error } = await supabase
+  const { data, error } = await db
     .from('team_members')
     .select('id, name, type, is_active')
     .eq('org_id', actor.org_id)

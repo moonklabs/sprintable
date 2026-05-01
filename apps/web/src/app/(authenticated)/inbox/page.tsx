@@ -4,7 +4,7 @@ import { useCallback, useEffect, useMemo, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import { useTranslations } from 'next-intl';
 import { Inbox as InboxIcon } from 'lucide-react';
-import { createSupabaseBrowserClient } from '@/lib/supabase/client';
+import { createBrowserClient } from '@/lib/db/client';
 import { Button } from '@/components/ui/button';
 import { TopBarSlot } from '@/components/nav/top-bar-slot';
 import { Badge } from '@/components/ui/badge';
@@ -92,10 +92,10 @@ export default function InboxPage() {
       return () => clearInterval(interval);
     }
 
-    // Supabase realtime path (cloud mode)
-    let supabase: ReturnType<typeof createSupabaseBrowserClient>;
+    // DB realtime path (cloud mode)
+    let db: ReturnType<typeof createBrowserClient>;
     try {
-      supabase = createSupabaseBrowserClient();
+      db = createBrowserClient();
     } catch {
       const interval = setInterval(() => {
         void refreshNotifications();
@@ -103,7 +103,7 @@ export default function InboxPage() {
       return () => clearInterval(interval);
     }
 
-    const channel = supabase
+    const channel = db
       .channel('inbox-realtime')
       .on('postgres_changes', {
         event: 'INSERT',
@@ -122,7 +122,7 @@ export default function InboxPage() {
       .subscribe();
 
     return () => {
-      supabase.removeChannel(channel);
+      db.removeChannel(channel);
     };
   }, [currentTeamMemberId, addToast, refreshNotifications]);
 

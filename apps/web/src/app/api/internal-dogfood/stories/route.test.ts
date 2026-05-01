@@ -23,7 +23,7 @@ describe('POST /api/internal-dogfood/stories', () => {
 
   it('creates a story with the internal actor scope', async () => {
     getInternalDogfoodContext.mockResolvedValue({
-      supabase: { tag: 'admin' },
+      db: { tag: 'admin' },
       actor: { id: 'tm-1', org_id: 'org-1', project_id: 'project-1', name: 'Didi', project_name: 'Sprintable' },
     });
     createStory.mockResolvedValue({ id: 'story-1' });
@@ -55,7 +55,7 @@ describe('POST /api/internal-dogfood/stories', () => {
 
   it('redirects back when the title is missing', async () => {
     getInternalDogfoodContext.mockResolvedValue({
-      supabase: { tag: 'admin' },
+      db: { tag: 'admin' },
       actor: { id: 'tm-1', org_id: 'org-1', project_id: 'project-1', name: 'Didi', project_name: 'Sprintable' },
     });
 

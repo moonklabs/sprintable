@@ -2,7 +2,7 @@
 
 import { useCallback, useEffect, useState } from 'react';
 import { useTranslations } from 'next-intl';
-import { createSupabaseBrowserClient } from '@/lib/supabase/client';
+import { createBrowserClient } from '@/lib/db/client';
 import { AlertTriangle, CheckCircle2, Clock3, ShieldAlert } from 'lucide-react';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
@@ -32,8 +32,8 @@ export function AgentHitlPolicyEditor() {
   const [savedAt, setSavedAt] = useState<string | null>(null);
 
   const getAuthHeaders = async (): Promise<Record<string, string>> => {
-    const supabase = createSupabaseBrowserClient();
-    const { data: { session } } = await supabase.auth.getSession();
+    const db = createBrowserClient();
+    const { data: { session } } = await db.auth.getSession();
     const headers: Record<string, string> = {};
     if (session?.access_token) headers['Authorization'] = `Bearer ${session.access_token}`;
     return headers;

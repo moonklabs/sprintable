@@ -1,7 +1,5 @@
-// eslint-disable-next-line @typescript-eslint/no-explicit-any
-type SupabaseClient = any;
 
-import { createSupabaseAdminClient } from '@/lib/supabase/admin';
+import { createAdminClient } from '@/lib/db/admin';
 import { BUILTIN_AGENT_TOOL_NAMES } from './agent-builtin-tool-names';
 import { listProjectApprovedMcpToolOptions } from './project-mcp';
 
@@ -27,12 +25,12 @@ export function resolvePersonaToolOptions(rawConfig: unknown): PersonaToolOption
   }));
 }
 
-export async function listProjectPersonaToolOptions(_supabase: SupabaseClient, projectId: string): Promise<PersonaToolOption[]> {
+export async function listProjectPersonaToolOptions(_db: any, projectId: string): Promise<PersonaToolOption[]> {
   const builtinOptions = resolvePersonaToolOptions(null);
 
   let approvedOptions: Array<{ name: string; serverName: string; groupKind: 'mcp' | 'github' }> = [];
   try {
-    approvedOptions = await listProjectApprovedMcpToolOptions(createSupabaseAdminClient() as never, projectId);
+    approvedOptions = await listProjectApprovedMcpToolOptions(createAdminClient() as never, projectId);
   } catch {
     approvedOptions = [];
   }
@@ -52,7 +50,7 @@ export async function listProjectPersonaToolOptions(_supabase: SupabaseClient, p
   return [...deduped.values()];
 }
 
-export async function listProjectPersonaAllowedToolNames(supabase: SupabaseClient, projectId: string): Promise<string[]> {
-  const options = await listProjectPersonaToolOptions(supabase, projectId);
+export async function listProjectPersonaAllowedToolNames(db: any, projectId: string): Promise<string[]> {
+  const options = await listProjectPersonaToolOptions(db, projectId);
   return options.map((option) => option.name);
 }

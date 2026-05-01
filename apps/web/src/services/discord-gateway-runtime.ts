@@ -1,5 +1,3 @@
-// eslint-disable-next-line @typescript-eslint/no-explicit-any
-type SupabaseClient = any;
 
 import { DiscordGatewayBridge } from './discord-gateway-bridge';
 import { getActiveDiscordOrgAuth, isDiscordAuthExpired, notifyDiscordAuthFailed, resolveDiscordToken } from './discord-bridge-utils';
@@ -9,7 +7,7 @@ type Logger = Pick<Console, 'info' | 'warn' | 'error'>;
 type BridgeLike = { start(): void; stop(): void };
 
 export interface DiscordGatewayRuntimeOptions {
-  supabase: SupabaseClient;
+  db: any;
   logger?: Logger;
   refreshIntervalMs?: number;
   createBridge?: (input: { orgId: string; token: string }) => BridgeLike;
@@ -29,7 +27,7 @@ export class DiscordGatewayRuntime {
     this.logger = options.logger ?? console;
     this.refreshIntervalMs = options.refreshIntervalMs ?? DEFAULT_REFRESH_INTERVAL_MS;
     this.createBridge = options.createBridge ?? ((input) => new DiscordGatewayBridge({
-      supabase: this.options.supabase,
+      db: this.options.db,
       orgId: input.orgId,
       token: input.token,
       logger: this.logger,
@@ -73,7 +71,7 @@ export class DiscordGatewayRuntime {
     }
 
     for (const orgId of activeOrgIds) {
-      const auth = await getActiveDiscordOrgAuth(this.options.supabase, orgId);
+      const auth = await getActiveDiscordOrgAuth(this.options.db, orgId);
       const token = resolveDiscordToken(auth?.access_token_ref);
       if (!auth || !token || isDiscordAuthExpired(auth.expires_at)) {
         this.bridges.get(orgId)?.stop();
@@ -95,7 +93,7 @@ export class DiscordGatewayRuntime {
   }
 
   private async listActiveDiscordOrgIds(): Promise<string[]> {
-    const { data, error } = await this.options.supabase
+    const { data, error } = await this.options.db
       .from('messaging_bridge_channels')
       .select('org_id')
       .eq('platform', 'discord')
@@ -109,6 +107,6 @@ export class DiscordGatewayRuntime {
   private async reportAuthFailed(orgId: string, reason: string) {
     if (this.authFailureReasons.get(orgId) === reason) return;
     this.authFailureReasons.set(orgId, reason);
-    await notifyDiscordAuthFailed(this.options.supabase, orgId, reason);
+    await notifyDiscordAuthFailed(this.options.db, orgId, reason);
   }
 }

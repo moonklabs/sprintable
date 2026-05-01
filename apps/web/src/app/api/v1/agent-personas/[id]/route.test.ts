@@ -1,7 +1,7 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 const {
-  createSupabaseServerClient,
+  createDbServerClient,
   getMyTeamMember,
   requireOrgAdmin,
   requireAgentOrchestration,
@@ -9,7 +9,7 @@ const {
   updatePersona,
   deletePersona,
 } = vi.hoisted(() => ({
-  createSupabaseServerClient: vi.fn(),
+  createDbServerClient: vi.fn(),
   getMyTeamMember: vi.fn(),
   requireOrgAdmin: vi.fn(),
   requireAgentOrchestration: vi.fn(),
@@ -18,8 +18,8 @@ const {
   deletePersona: vi.fn(),
 }));
 
-vi.mock('@/lib/supabase/server', () => ({
-  createSupabaseServerClient,
+vi.mock('@/lib/db/server', () => ({
+  createDbServerClient,
 }));
 
 vi.mock('@/lib/auth-helpers', async () => {
@@ -50,7 +50,7 @@ import { DELETE, GET, PATCH } from './route';
 
 describe('/api/v1/agent-personas/[id]', () => {
   beforeEach(() => {
-    createSupabaseServerClient.mockReset();
+    createDbServerClient.mockReset();
     getMyTeamMember.mockReset();
     requireOrgAdmin.mockReset();
     requireAgentOrchestration.mockReset();
@@ -58,7 +58,7 @@ describe('/api/v1/agent-personas/[id]', () => {
     updatePersona.mockReset();
     deletePersona.mockReset();
 
-    createSupabaseServerClient.mockResolvedValue({
+    createDbServerClient.mockResolvedValue({
       auth: {
         getUser: vi.fn().mockResolvedValue({ data: { user: { id: 'user-1' } } }),
       },

@@ -71,8 +71,8 @@ export async function POST(request: Request) {
   if (isOssMode()) return apiSuccess({ ok: true, skipped: true });
   try {
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    const supabase: any = null;
-    if (!supabase) return ApiErrors.unauthorized();
+    const db: any = null;
+    if (!db) return ApiErrors.unauthorized();
 
     const body = await request.json();
     const parsed = McpRequestSchema.safeParse(body);
@@ -80,7 +80,7 @@ export async function POST(request: Request) {
       return apiError('VALIDATION_ERROR', parsed.error.issues.map(i => `${i.path.join('.')}: ${i.message}`).join('; '), 400);
     }
 
-    const service = new MockupService(supabase);
+    const service = new MockupService(db);
     const input = parsed.data;
 
     switch (input.action) {
@@ -95,10 +95,10 @@ export async function POST(request: Request) {
       }
 
       case 'create_mockup': {
-        const me = await getMyTeamMember(supabase, null as any);
+        const me = await getMyTeamMember(db, null as any);
         if (!me) return ApiErrors.forbidden('Team member not found');
 
-        const check = await checkResourceLimit(supabase, me.org_id, 'max_mockups', 'mockup_pages');
+        const check = await checkResourceLimit(db, me.org_id, 'max_mockups', 'mockup_pages');
         if (!check.allowed) return apiError('UPGRADE_REQUIRED', check.reason ?? 'Mockup limit reached', 403);
 
         const result = await service.create({
@@ -127,7 +127,7 @@ export async function POST(request: Request) {
       }
 
       case 'list_scenarios': {
-        const { data, error } = await supabase
+        const { data, error } = await db
           .from('mockup_scenarios')
           .select('id, name, is_default, override_props, sort_order')
           .eq('page_id', input.mockup_id)
@@ -138,14 +138,14 @@ export async function POST(request: Request) {
 
       case 'switch_scenario': {
         // 기본 컴포넌트 조회
-        const { data: components } = await supabase
+        const { data: components } = await db
           .from('mockup_components')
           .select('id, parent_id, component_type, props, sort_order')
           .eq('page_id', input.mockup_id)
           .order('sort_order');
 
         // 시나리오 조회
-        const { data: scenario } = await supabase
+        const { data: scenario } = await db
           .from('mockup_scenarios')
           .select('name, override_props, is_default')
           .eq('page_id', input.mockup_id)

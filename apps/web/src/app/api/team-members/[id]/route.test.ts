@@ -1,16 +1,16 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
-const { createSupabaseServerClient, createSupabaseAdminClient, getMyTeamMember, getAuthContext } = vi.hoisted(() => ({
-  createSupabaseServerClient: vi.fn(),
-  createSupabaseAdminClient: vi.fn(),
+const { createDbServerClient, createAdminClient, getMyTeamMember, getAuthContext } = vi.hoisted(() => ({
+  createDbServerClient: vi.fn(),
+  createAdminClient: vi.fn(),
   getMyTeamMember: vi.fn(),
   getAuthContext: vi.fn(),
 }));
 
-vi.mock('@/lib/supabase/server', () => ({
-  createSupabaseServerClient,
+vi.mock('@/lib/db/server', () => ({
+  createDbServerClient,
 }));
-vi.mock('@/lib/supabase/admin', () => ({ createSupabaseAdminClient }));
+vi.mock('@/lib/db/admin', () => ({ createAdminClient }));
 
 vi.mock('@/lib/auth-helpers', async () => {
   const actual = await vi.importActual<typeof import('@/lib/auth-helpers')>('@/lib/auth-helpers');
@@ -23,7 +23,7 @@ vi.mock('@/lib/auth-helpers', async () => {
 
 import { DELETE } from './route';
 
-function createDeleteSupabaseStub(activeMembershipCount: number) {
+function createDeleteDbStub(activeMembershipCount: number) {
   let teamMembersCall = 0;
 
   return {
@@ -67,17 +67,17 @@ function createDeleteSupabaseStub(activeMembershipCount: number) {
 
 describe('DELETE /api/team-members/[id]', () => {
   beforeEach(() => {
-    createSupabaseServerClient.mockReset();
-    createSupabaseAdminClient.mockReset();
+    createDbServerClient.mockReset();
+    createAdminClient.mockReset();
     getMyTeamMember.mockReset();
     getAuthContext.mockReset();
-    createSupabaseAdminClient.mockReturnValue({ from: () => ({ insert: () => ({ then: (r: (v: unknown) => void) => Promise.resolve({ error: null }).then(r) }) }) });
+    createAdminClient.mockReturnValue({ from: () => ({ insert: () => ({ then: (r: (v: unknown) => void) => Promise.resolve({ error: null }).then(r) }) }) });
     getMyTeamMember.mockResolvedValue({ id: 'admin-team-member', org_id: 'org-1', project_id: 'project-1' });
     getAuthContext.mockResolvedValue({ id: 'admin-team-member', org_id: 'org-1', project_id: 'project-1', type: 'human' as const });
   });
 
   it('blocks removing the last active project membership for a human member', async () => {
-    createSupabaseServerClient.mockResolvedValue(createDeleteSupabaseStub(1));
+    createDbServerClient.mockResolvedValue(createDeleteDbStub(1));
 
     const response = await DELETE(new Request('http://localhost/api/team-members/member-1', { method: 'DELETE' }), {
       params: Promise.resolve({ id: 'member-1' }),
@@ -89,7 +89,7 @@ describe('DELETE /api/team-members/[id]', () => {
   });
 
   it('allows deactivation when another active project membership exists', async () => {
-    createSupabaseServerClient.mockResolvedValue(createDeleteSupabaseStub(2));
+    createDbServerClient.mockResolvedValue(createDeleteDbStub(2));
 
     const response = await DELETE(new Request('http://localhost/api/team-members/member-1', { method: 'DELETE' }), {
       params: Promise.resolve({ id: 'member-1' }),

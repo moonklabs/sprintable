@@ -1,6 +1,4 @@
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
-type SupabaseClient = any;
-// eslint-disable-next-line @typescript-eslint/no-explicit-any
 type RealtimeChannel = any;
 import { AgentRoutingRuleService, RoutingPolicyError, type RoutingEvaluationResult, type RoutingRuleSummary } from './agent-routing-rule';
 import { buildWebhookSignatureHeaders } from '@/lib/webhook-signature';
@@ -62,7 +60,7 @@ type OutboundWebhookFormat = 'discord' | 'google' | 'slack' | 'generic';
 type AgentExecutionStatus = 'completed' | 'failed' | 'held' | 'hitl';
 
 export interface MemoEventDispatcherOptions {
-  supabase: SupabaseClient;
+  db: any;
   logger?: Logger;
   fetchFn?: typeof fetch;
   pollingIntervalMs?: number;
@@ -210,7 +208,7 @@ export class MemoEventDispatcher {
     this.reconnectMaxDelayMs = options.reconnectMaxDelayMs ?? DEFAULT_RECONNECT_MAX_DELAY_MS;
     this.pollBatchSize = options.pollBatchSize ?? DEFAULT_POLL_BATCH_SIZE;
     this.webhookTimeoutMs = options.webhookTimeoutMs ?? DEFAULT_WEBHOOK_TIMEOUT_MS;
-    this.routingRuleService = options.routingRuleService ?? new AgentRoutingRuleService(options.supabase);
+    this.routingRuleService = options.routingRuleService ?? new AgentRoutingRuleService(options.db);
     this.lastPolledAt = new Date(Date.now() - (options.initialPollLookbackMs ?? DEFAULT_INITIAL_LOOKBACK_MS)).toISOString();
   }
 
@@ -235,14 +233,14 @@ export class MemoEventDispatcher {
     }
 
     if (this.channel) {
-      await this.options.supabase.removeChannel(this.channel);
+      await this.options.db.removeChannel(this.channel);
       this.channel = null;
     }
   }
 
   async pollOnce() {
     try {
-      const { data, error } = await this.options.supabase
+      const { data, error } = await this.options.db
         .from('memos')
         .select('id, org_id, project_id, title, content, memo_type, status, assigned_to, created_by, metadata, updated_at, created_at')
         .eq('status', 'open')
@@ -297,13 +295,13 @@ export class MemoEventDispatcher {
   private subscribe() {
     if (this.stopped) return;
 
-    const supabase = this.options.supabase;
+    const db = this.options.db;
     if (this.channel) {
-      void supabase.removeChannel(this.channel);
+      void db.removeChannel(this.channel);
       this.channel = null;
     }
 
-    const channel = supabase
+    const channel = db
       .channel(`memo-event-dispatcher-${Date.now()}`)
       .on('postgres_changes', { event: 'INSERT', schema: 'public', table: 'memos' }, (payload) => {
         const memo = payload.new as MemoRow;
@@ -466,7 +464,7 @@ export class MemoEventDispatcher {
         });
         const bodyStr = JSON.stringify(outbound.body);
         // webhook_deliveries 재시도 큐 경유 발송
-        const deliveryService = new WebhookDeliveryService(this.options.supabase);
+        const deliveryService = new WebhookDeliveryService(this.options.db);
         const success = await deliveryService.dispatch({
           org_id: memo.org_id,
           webhook_config_id: null,
@@ -616,7 +614,7 @@ export class MemoEventDispatcher {
         };
       }
 
-      await this.options.supabase
+      await this.options.db
         .from('agent_runs')
         .update({
           status: 'completed',
@@ -717,7 +715,7 @@ export class MemoEventDispatcher {
   }
 
   private async getAgentById(memo: MemoRow, agentId: string): Promise<TeamMemberRow | null> {
-    const { data, error } = await this.options.supabase
+    const { data, error } = await this.options.db
       .from('team_members')
       .select('id, org_id, project_id, type, name, webhook_url, is_active')
       .eq('id', agentId)
@@ -733,7 +731,7 @@ export class MemoEventDispatcher {
 
   /** BYOA fallback: deployment 없어도 webhook_url이 있는 팀 멤버 반환 */
   private async getByoaMember(memo: MemoRow, memberId: string): Promise<TeamMemberRow | null> {
-    const { data, error } = await this.options.supabase
+    const { data, error } = await this.options.db
       .from('team_members')
       .select('id, org_id, project_id, type, name, webhook_url, is_active')
       .eq('id', memberId)
@@ -747,7 +745,7 @@ export class MemoEventDispatcher {
   }
 
   private async getDeploymentById(memo: MemoRow, agentId: string, deploymentId: string): Promise<AgentDeploymentRow | null> {
-    const { data } = await this.options.supabase
+    const { data } = await this.options.db
       .from('agent_deployments')
       .select('id, model, runtime, status, config')
       .eq('id', deploymentId)
@@ -761,7 +759,7 @@ export class MemoEventDispatcher {
   }
 
   private async getLatestDeployment(memo: MemoRow, agentId: string): Promise<AgentDeploymentRow | null> {
-    const { data } = await this.options.supabase
+    const { data } = await this.options.db
       .from('agent_deployments')
       .select('id, model, runtime, status, config')
       .eq('org_id', memo.org_id)
@@ -777,8 +775,8 @@ export class MemoEventDispatcher {
   }
 
   private async resolveWebhook(agent: TeamMemberRow, projectId: string): Promise<WebhookConfigRow | { url: string; secret: null; channel: null } | null> {
-    const supabase = this.options.supabase;
-    const { data: projectConfig } = await supabase
+    const db = this.options.db;
+    const { data: projectConfig } = await db
       .from('webhook_configs')
       .select('url, secret, channel')
       .eq('org_id', agent.org_id)
@@ -790,7 +788,7 @@ export class MemoEventDispatcher {
 
     if (projectConfig?.url) return projectConfig as WebhookConfigRow;
 
-    const { data: defaultConfig } = await supabase
+    const { data: defaultConfig } = await db
       .from('webhook_configs')
       .select('url, secret, channel')
       .eq('org_id', agent.org_id)
@@ -814,7 +812,7 @@ export class MemoEventDispatcher {
     status: 'queued' | 'held' | 'running',
     resultSummary?: string,
   ): Promise<{ id: string } | DispatchResult> {
-    const { data, error } = await this.options.supabase
+    const { data, error } = await this.options.db
       .from('agent_runs')
       .insert({
         org_id: memo.org_id,
@@ -852,7 +850,7 @@ export class MemoEventDispatcher {
     const resultSummary = getDispatchFailureSummary(eventType);
     const errorMessage = details?.trim() || resultSummary;
 
-    await this.options.supabase
+    await this.options.db
       .from('agent_runs')
       .update({
         status: 'failed',
@@ -870,7 +868,7 @@ export class MemoEventDispatcher {
   }
 
   private async postSystemReply(memo: MemoRow, createdBy: string, content: string) {
-    const { error } = await this.options.supabase
+    const { error } = await this.options.db
       .from('memo_replies')
       .insert({ memo_id: memo.id, content, created_by: createdBy, review_type: 'system' });
     if (error) {
@@ -885,7 +883,7 @@ export class MemoEventDispatcher {
     severity: 'info' | 'warn' | 'error' | 'security' | 'debug',
     payload: Record<string, unknown>,
   ) {
-    const { error } = await this.options.supabase
+    const { error } = await this.options.db
       .from('agent_audit_logs')
       .insert({
         org_id: memo.org_id,

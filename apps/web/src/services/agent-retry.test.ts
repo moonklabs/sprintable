@@ -63,7 +63,7 @@ describe('agent-retry policy helpers', () => {
       insertedRun: null as Record<string, unknown> | null,
     };
 
-    const supabase = {
+    const db = {
       from(table: string) {
         if (table === 'agent_runs') {
           return {
@@ -112,7 +112,7 @@ describe('agent-retry policy helpers', () => {
       },
     };
 
-    const service = new AgentRetryService(supabase as never);
+    const service = new AgentRetryService(db as never);
     const result = await service.executeRetry('run-1');
 
     expect(result).toEqual({ newRunId: 'run-2' });
@@ -155,7 +155,7 @@ describe('agent-retry policy helpers', () => {
       updates: [] as Record<string, unknown>[],
     };
 
-    const supabase = {
+    const db = {
       from(table: string) {
         if (table === 'agent_runs') {
           return {
@@ -182,7 +182,7 @@ describe('agent-retry policy helpers', () => {
       },
     };
 
-    const service = new AgentRetryService(supabase as never);
+    const service = new AgentRetryService(db as never);
 
     await expect(service.executeRetry('run-1')).rejects.toThrow('Failed to create retry run: insert failed; parent retry state restored');
     expect(state.updates).toHaveLength(2);

@@ -1,8 +1,6 @@
-// eslint-disable-next-line @typescript-eslint/no-explicit-any
-type SupabaseClient = any;
 
 import { z } from 'zod';
-import { createSupabaseAdminClient } from '@/lib/supabase/admin';
+import { createAdminClient } from '@/lib/db/admin';
 import { handleApiError } from '@/lib/api-error';
 import { getAuthContext } from '@/lib/auth-helpers';
 import { apiSuccess, ApiErrors } from '@/lib/api-response';
@@ -33,7 +31,7 @@ export async function POST(request: Request) {
 
     if (!requireAgentScope(me, 'write')) return ApiErrors.insufficientScope('write');
 
-    const dbClient: SupabaseClient = createSupabaseAdminClient();
+    const dbClient: any = createAdminClient();
 
     let rawBody: unknown;
     try { rawBody = await request.json(); } catch { return ApiErrors.badRequest('Invalid JSON body'); }
@@ -89,7 +87,7 @@ export async function GET(request: Request) {
     const agentId = searchParams.get('agent_id') ?? undefined;
     const cursor = searchParams.get('cursor') ?? undefined;
 
-    const dbClient: SupabaseClient = createSupabaseAdminClient();
+    const dbClient: any = createAdminClient();
     const service = new AgentRunService(dbClient);
     const runs = await service.list(projectId, limit ? Number(limit) : undefined, agentId, cursor);
     return apiSuccess(runs);

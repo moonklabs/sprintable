@@ -24,7 +24,7 @@ describe('DiscordGatewayBridge', () => {
     const processInboundMessage = vi.fn(async () => ({ action: 'processed' }));
 
     const bridge = new DiscordGatewayBridge({
-      supabase: {} as never,
+      db: {} as never,
       orgId: 'org-1',
       token: 'discord-token',
       socketFactory,
@@ -69,7 +69,7 @@ describe('DiscordGatewayBridge', () => {
       .mockReturnValueOnce(secondSocket);
 
     const bridge = new DiscordGatewayBridge({
-      supabase: {} as never,
+      db: {} as never,
       orgId: 'org-1',
       token: 'discord-token',
       socketFactory,
@@ -106,7 +106,7 @@ describe('DiscordGatewayBridge', () => {
       .mockReturnValueOnce(secondSocket);
 
     const bridge = new DiscordGatewayBridge({
-      supabase: {} as never,
+      db: {} as never,
       orgId: 'org-1',
       token: 'discord-token',
       socketFactory,
@@ -142,7 +142,7 @@ describe('DiscordGatewayBridge', () => {
     const onAuthFailed = vi.fn();
 
     const bridge = new DiscordGatewayBridge({
-      supabase: {} as never,
+      db: {} as never,
       orgId: 'org-1',
       token: 'discord-token',
       socketFactory,

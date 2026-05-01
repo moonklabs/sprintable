@@ -1,5 +1,3 @@
-// eslint-disable-next-line @typescript-eslint/no-explicit-any
-type SupabaseClient = any;
 
 import { checkFeatureLimit } from '@/lib/check-feature';
 import { apiUpgradeRequired } from '@/lib/api-response';
@@ -11,8 +9,8 @@ import { apiUpgradeRequired } from '@/lib/api-response';
  * Returns `null` when the feature is allowed, or a NextResponse to
  * short-circuit the handler.
  */
-export async function requireAgentOrchestration(supabase: SupabaseClient, orgId: string) {
-  const check = await checkFeatureLimit(supabase, orgId, 'agent_orchestration');
+export async function requireAgentOrchestration(db: any, orgId: string) {
+  const check = await checkFeatureLimit(db, orgId, 'agent_orchestration');
   if (!check.allowed) {
     const message = check.reason ?? 'Agent orchestration requires a Team plan or above.';
     return apiUpgradeRequired(message, 'agent_orchestration');

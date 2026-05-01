@@ -1,8 +1,6 @@
-// eslint-disable-next-line @typescript-eslint/no-explicit-any
-type SupabaseClient = any;
 
 import { parseBody, createStorySchema } from '@sprintable/shared';
-import { createSupabaseAdminClient } from '@/lib/supabase/admin';
+import { createAdminClient } from '@/lib/db/admin';
 import { StoryService, type CreateStoryInput } from '@/services/story';
 import { handleApiError } from '@/lib/api-error';
 import { apiSuccess, apiError, ApiErrors } from '@/lib/api-response';
@@ -17,7 +15,7 @@ export async function POST(request: Request) {
     if (!me) return ApiErrors.unauthorized();
     if (me.rateLimitExceeded) return ApiErrors.tooManyRequests(me.rateLimitRemaining, me.rateLimitResetAt);
     const ossMode = isOssMode();
-    const dbClient = ossMode ? undefined : (me.type === 'agent' ? createSupabaseAdminClient() : undefined);
+    const dbClient = ossMode ? undefined : (me.type === 'agent' ? createAdminClient() : undefined);
 
     if (!ossMode) {
       const check = await checkResourceLimit(dbClient!, me.org_id, 'max_stories', 'stories');
@@ -30,7 +28,7 @@ export async function POST(request: Request) {
     const parsed = createStorySchema.safeParse(rawBody);
     if (!parsed.success) return apiError('VALIDATION_ERROR', JSON.stringify(parsed.error.issues), 400);
     const repo = await createStoryRepository(dbClient);
-    const service = new StoryService(repo, dbClient as SupabaseClient | undefined);
+    const service = new StoryService(repo, dbClient as any | undefined);
     const story = await service.create(parsed.data as CreateStoryInput);
     return apiSuccess(story, undefined, 201);
   } catch (err: unknown) {
@@ -44,7 +42,7 @@ export async function GET(request: Request) {
     if (!me) return ApiErrors.unauthorized();
     if (me.rateLimitExceeded) return ApiErrors.tooManyRequests(me.rateLimitRemaining, me.rateLimitResetAt);
     const ossMode = isOssMode();
-    const dbClient = ossMode ? undefined : (me.type === 'agent' ? createSupabaseAdminClient() : undefined);
+    const dbClient = ossMode ? undefined : (me.type === 'agent' ? createAdminClient() : undefined);
 
     const { searchParams } = new URL(request.url);
     const pageInput = parseCursorPageInput({
@@ -52,7 +50,7 @@ export async function GET(request: Request) {
       cursor: searchParams.get('cursor'),
     }, { defaultLimit: 50, maxLimit: 100 });
     const repo = await createStoryRepository(dbClient);
-    const service = new StoryService(repo, dbClient as SupabaseClient | undefined);
+    const service = new StoryService(repo, dbClient as any | undefined);
     const stories = await service.list({
       sprint_id: searchParams.get('sprint_id') ?? undefined,
       epic_id: searchParams.get('epic_id') ?? undefined,

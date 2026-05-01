@@ -1,5 +1,3 @@
-// eslint-disable-next-line @typescript-eslint/no-explicit-any
-type SupabaseClient = any;
 
 import type { NotificationType } from '@/lib/notification-types';
 
@@ -14,16 +12,16 @@ export interface CreateNotificationInput {
 }
 
 export class NotificationService {
-  constructor(private readonly supabase: SupabaseClient) {}
+  constructor(private readonly db: any) {}
 
   async create(input: CreateNotificationInput): Promise<void> {
-    const { error } = await this.supabase.from('notifications').insert(input);
+    const { error } = await this.db.from('notifications').insert(input);
     if (error) throw error;
   }
 
   async createMany(inputs: CreateNotificationInput[]): Promise<void> {
     if (inputs.length === 0) return;
-    const { error } = await this.supabase.from('notifications').insert(inputs);
+    const { error } = await this.db.from('notifications').insert(inputs);
     if (error) throw error;
   }
 }

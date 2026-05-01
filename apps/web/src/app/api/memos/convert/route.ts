@@ -1,5 +1,5 @@
 import { handleApiError } from '@/lib/api-error';
-import { apiError } from '@/lib/api-response';
+import { apiError, apiSuccess } from '@/lib/api-response';
 import { isOssMode } from '@/lib/storage/factory';
 
 /** POST — 메모를 스토리로 전환 */

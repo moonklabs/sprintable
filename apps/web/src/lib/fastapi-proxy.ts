@@ -3,7 +3,7 @@
  * Authorization 헤더를 sp_at 쿠키에서 추출해 forwarding.
  */
 
-import { getServerSession } from '@/lib/supabase/server';
+import { getServerSession } from '@/lib/db/server';
 import { ApiErrors } from '@/lib/api-response';
 
 import { NotFoundError, ForbiddenError } from '@sprintable/core-storage';

@@ -1,13 +1,13 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
-const { createSupabaseServerClient, getAuthContext, createSupabaseAdminClient } = vi.hoisted(() => ({
-  createSupabaseServerClient: vi.fn(),
+const { createDbServerClient, getAuthContext, createAdminClient } = vi.hoisted(() => ({
+  createDbServerClient: vi.fn(),
   getAuthContext: vi.fn(),
-  createSupabaseAdminClient: vi.fn(),
+  createAdminClient: vi.fn(),
 }));
 
-vi.mock('@/lib/supabase/server', () => ({ createSupabaseServerClient }));
-vi.mock('@/lib/supabase/admin', () => ({ createSupabaseAdminClient }));
+vi.mock('@/lib/db/server', () => ({ createDbServerClient }));
+vi.mock('@/lib/db/admin', () => ({ createAdminClient }));
 vi.mock('@/lib/auth-helpers', () => ({ getAuthContext }));
 
 import { POST } from './route';
@@ -37,15 +37,15 @@ function createQueryStub(rows: Record<string, unknown>[] = [], opts: { singleNot
 
 describe('POST /api/sprints/[id]/kickoff', () => {
   beforeEach(() => {
-    createSupabaseServerClient.mockReset();
+    createDbServerClient.mockReset();
     getAuthContext.mockReset();
-    createSupabaseAdminClient.mockReset();
+    createAdminClient.mockReset();
     getAuthContext.mockResolvedValue(makeAgent());
   });
 
   it('returns 401 when not authenticated', async () => {
-    const supabase = {};
-    createSupabaseServerClient.mockResolvedValue(supabase);
+    const db = {};
+    createDbServerClient.mockResolvedValue(db);
     getAuthContext.mockResolvedValue(null);
 
     const response = await POST(
@@ -60,7 +60,7 @@ describe('POST /api/sprints/[id]/kickoff', () => {
     const sprint = { id: 'sprint-1', project_id: 'project-alpha', title: 'Sprint 1', org_id: 'org-1' };
     const project = { org_id: 'org-1' };
     const members = [{ id: 'member-1' }, { id: 'member-2' }];
-    const supabase = {
+    const db = {
       from: vi.fn((table: string) => {
         if (table === 'sprints') return createQueryStub([sprint]);
         if (table === 'projects') return createQueryStub([project]);
@@ -68,8 +68,8 @@ describe('POST /api/sprints/[id]/kickoff', () => {
         return createQueryStub([], { insertOk: true });
       }),
     };
-    createSupabaseServerClient.mockResolvedValue(supabase);
-    createSupabaseAdminClient.mockReturnValue(supabase);
+    createDbServerClient.mockResolvedValue(db);
+    createAdminClient.mockReturnValue(db);
 
     const response = await POST(
       new Request('http://localhost/api/sprints/sprint-1/kickoff', { method: 'POST', body: '{}' }),

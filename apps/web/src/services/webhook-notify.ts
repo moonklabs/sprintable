@@ -1,5 +1,3 @@
-// eslint-disable-next-line @typescript-eslint/no-explicit-any
-type SupabaseClient = any;
 
 import { buildWebhookSignatureHeaders } from '@/lib/webhook-signature';
 
@@ -13,11 +11,11 @@ interface WebhookPayload {
  * - 해당 이벤트를 구독하는 웹훅만 발송
  */
 export async function fireWebhooks(
-  supabase: SupabaseClient,
+  db: any,
   orgId: string,
   payload: WebhookPayload,
 ): Promise<void> {
-  const { data: configs } = await supabase
+  const { data: configs } = await db
     .from('webhook_configs')
     .select('url, secret, events')
     .eq('org_id', orgId)

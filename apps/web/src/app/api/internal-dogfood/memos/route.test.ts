@@ -23,7 +23,7 @@ describe('POST /api/internal-dogfood/memos', () => {
 
   it('creates a memo with the internal actor scope', async () => {
     getInternalDogfoodContext.mockResolvedValue({
-      supabase: { tag: 'admin' },
+      db: { tag: 'admin' },
       actor: { id: 'tm-1', org_id: 'org-1', project_id: 'project-1', name: 'Didi', project_name: 'Sprintable' },
     });
     createMemo.mockResolvedValue({ id: 'memo-1' });

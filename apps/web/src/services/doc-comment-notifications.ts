@@ -1,5 +1,3 @@
-// eslint-disable-next-line @typescript-eslint/no-explicit-any
-type SupabaseClient = any;
 
 import { NotificationService } from './notification.service';
 import { InboxItemService } from './inbox-item.service';
@@ -62,8 +60,8 @@ function buildDocCommentNotificationBody(docTitle: string, content: string) {
 }
 
 interface NotifyDocCommentMentionsInput {
-  sourceSupabase: SupabaseClient;
-  adminSupabase: SupabaseClient;
+  sourceDb: any;
+  adminDb: any;
   docId: string;
   commentId: string;
   content: string;
@@ -71,14 +69,14 @@ interface NotifyDocCommentMentionsInput {
 }
 
 export async function notifyDocCommentMentions({
-  sourceSupabase,
-  adminSupabase,
+  sourceDb,
+  adminDb,
   docId,
   commentId,
   content,
   authorId,
 }: NotifyDocCommentMentionsInput) {
-  const { data: doc, error: docError } = await sourceSupabase
+  const { data: doc, error: docError } = await sourceDb
     .from('docs')
     .select('id, org_id, project_id, title, deleted_at')
     .eq('id', docId)
@@ -87,7 +85,7 @@ export async function notifyDocCommentMentions({
   if (docError) throw docError;
   if (!doc || doc.deleted_at) return 0;
 
-  const { data: members, error: membersError } = await sourceSupabase
+  const { data: members, error: membersError } = await sourceDb
     .from('team_members')
     .select('id, name, user_id, type, is_active')
     .eq('org_id', doc.org_id)
@@ -110,12 +108,12 @@ export async function notifyDocCommentMentions({
     reference_id: commentId,
   }));
 
-  await new NotificationService(adminSupabase).createMany(notifications);
+  await new NotificationService(adminDb).createMany(notifications);
 
   // Inbox dual-write — Phase A.B에 inbox_items로 일원화 예정. v1엔 notifications + inbox 둘 다 emit.
   // 문서 댓글은 댓글 단위로 dedup해야 하므로 source_id에 commentId 포함 (doc_comment 별도 source key).
   // produceMentionFromMemo는 memo_id 단위 dedup이라 여기서는 service.create를 직접 호출.
-  const inboxService = new InboxItemService(adminSupabase);
+  const inboxService = new InboxItemService(adminDb);
   const inboxBody = buildDocCommentNotificationBody(doc.title, content);
   for (const member of mentionedMembers) {
     try {

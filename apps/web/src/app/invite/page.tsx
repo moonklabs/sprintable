@@ -3,7 +3,7 @@
 import { useState, useEffect } from 'react';
 import { useSearchParams, useRouter } from 'next/navigation';
 import { useTranslations } from 'next-intl';
-import { createSupabaseBrowserClient } from '@/lib/supabase/client';
+import { createBrowserClient } from '@/lib/db/client';
 
 export default function InvitePage() {
   const t = useTranslations('invite');
@@ -20,8 +20,8 @@ export default function InvitePage() {
       return;
     }
 
-    const supabase = createSupabaseBrowserClient();
-    supabase.auth.getUser().then(({ data: { user } }) => {
+    const db = createBrowserClient();
+    db.auth.getUser().then(({ data: { user } }) => {
       if (user) {
         void acceptInvite(token);
       } else {

@@ -1,7 +1,5 @@
-// eslint-disable-next-line @typescript-eslint/no-explicit-any
-type SupabaseClient = any;
 
-import { createSupabaseAdminClient } from '@/lib/supabase/admin';
+import { createAdminClient } from '@/lib/db/admin';
 import { handleApiError } from '@/lib/api-error';
 import { apiSuccess, ApiErrors } from '@/lib/api-response';
 import { getAuthContext } from '@/lib/auth-helpers';
@@ -15,7 +13,7 @@ export async function GET(request: Request, { params }: RouteParams) {
     const me = await getAuthContext(request);
     if (!me) return ApiErrors.unauthorized();
     if (me.rateLimitExceeded) return ApiErrors.tooManyRequests(me.rateLimitRemaining, me.rateLimitResetAt);
-    const dbClient: SupabaseClient = me.type === 'agent' ? createSupabaseAdminClient() : undefined;
+    const dbClient: any = me.type === 'agent' ? createAdminClient() : undefined;
 
     const { data: stories, error } = await dbClient
       .from('stories')

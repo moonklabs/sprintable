@@ -1,4 +1,4 @@
-import { apiError } from '@/lib/api-response';
+import { apiError, apiSuccess } from '@/lib/api-response';
 
 type RouteParams = { params: Promise<{ id: string }> };
 

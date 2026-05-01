@@ -1,13 +1,13 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
-const { createSupabaseServerClient, getAuthContext, createSupabaseAdminClient } = vi.hoisted(() => ({
-  createSupabaseServerClient: vi.fn(),
+const { createDbServerClient, getAuthContext, createAdminClient } = vi.hoisted(() => ({
+  createDbServerClient: vi.fn(),
   getAuthContext: vi.fn(),
-  createSupabaseAdminClient: vi.fn(),
+  createAdminClient: vi.fn(),
 }));
 
-vi.mock('@/lib/supabase/server', () => ({ createSupabaseServerClient }));
-vi.mock('@/lib/supabase/admin', () => ({ createSupabaseAdminClient }));
+vi.mock('@/lib/db/server', () => ({ createDbServerClient }));
+vi.mock('@/lib/db/admin', () => ({ createAdminClient }));
 vi.mock('@/lib/auth-helpers', () => ({ getAuthContext }));
 
 import { GET, PATCH } from './route';
@@ -34,16 +34,16 @@ function createQueryStub(rows: Record<string, unknown>[] = [], opts: { singleNul
 
 describe('GET /api/retro/[sprint_id]', () => {
   beforeEach(() => {
-    createSupabaseServerClient.mockReset();
+    createDbServerClient.mockReset();
     getAuthContext.mockReset();
-    createSupabaseAdminClient.mockReset();
+    createAdminClient.mockReset();
     getAuthContext.mockResolvedValue(makeAgent());
   });
 
   it('returns 400 when project_id missing', async () => {
-    const supabase = { from: vi.fn(() => createQueryStub()) };
-    createSupabaseServerClient.mockResolvedValue(supabase);
-    createSupabaseAdminClient.mockReturnValue(supabase);
+    const db = { from: vi.fn(() => createQueryStub()) };
+    createDbServerClient.mockResolvedValue(db);
+    createAdminClient.mockReturnValue(db);
 
     const response = await GET(
       new Request('http://localhost/api/retro/sprint-1'),
@@ -54,8 +54,8 @@ describe('GET /api/retro/[sprint_id]', () => {
   });
 
   it('returns 401 when not authenticated', async () => {
-    const supabase = {};
-    createSupabaseServerClient.mockResolvedValue(supabase);
+    const db = {};
+    createDbServerClient.mockResolvedValue(db);
     getAuthContext.mockResolvedValue(null);
 
     const response = await GET(
@@ -68,9 +68,9 @@ describe('GET /api/retro/[sprint_id]', () => {
 
   it('returns 200 with session data', async () => {
     const session = { id: 'session-1', sprint_id: 'sprint-1', phase: 'collect' };
-    const supabase = { from: vi.fn(() => createQueryStub([session])) };
-    createSupabaseServerClient.mockResolvedValue(supabase);
-    createSupabaseAdminClient.mockReturnValue(supabase);
+    const db = { from: vi.fn(() => createQueryStub([session])) };
+    createDbServerClient.mockResolvedValue(db);
+    createAdminClient.mockReturnValue(db);
 
     const response = await GET(
       new Request('http://localhost/api/retro/sprint-1?project_id=project-alpha'),
@@ -85,16 +85,16 @@ describe('GET /api/retro/[sprint_id]', () => {
 
 describe('PATCH /api/retro/[sprint_id]', () => {
   beforeEach(() => {
-    createSupabaseServerClient.mockReset();
+    createDbServerClient.mockReset();
     getAuthContext.mockReset();
-    createSupabaseAdminClient.mockReset();
+    createAdminClient.mockReset();
     getAuthContext.mockResolvedValue(makeAgent());
   });
 
   it('returns 410 (GONE) when called — v1 retro PATCH API removed', async () => {
-    const supabase = { from: vi.fn(() => createQueryStub()) };
-    createSupabaseServerClient.mockResolvedValue(supabase);
-    createSupabaseAdminClient.mockReturnValue(supabase);
+    const db = { from: vi.fn(() => createQueryStub()) };
+    createDbServerClient.mockResolvedValue(db);
+    createAdminClient.mockReturnValue(db);
 
     const response = await PATCH(
       new Request('http://localhost/api/retro/sprint-1', { method: 'PATCH', body: JSON.stringify({ phase: 'vote' }) }),
@@ -107,9 +107,9 @@ describe('PATCH /api/retro/[sprint_id]', () => {
   });
 
   it('returns 410 regardless of params — v1 retro PATCH removed', async () => {
-    const supabase = { from: vi.fn(() => createQueryStub()) };
-    createSupabaseServerClient.mockResolvedValue(supabase);
-    createSupabaseAdminClient.mockReturnValue(supabase);
+    const db = { from: vi.fn(() => createQueryStub()) };
+    createDbServerClient.mockResolvedValue(db);
+    createAdminClient.mockReturnValue(db);
 
     const response = await PATCH(
       new Request('http://localhost/api/retro/sprint-1?project_id=p', { method: 'PATCH', body: JSON.stringify({}) }),

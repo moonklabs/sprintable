@@ -173,10 +173,10 @@ export default async function DashboardPage() {
   }
 
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  const supabase: any = null;
-  if (!supabase) redirect('/login');
+  const db: any = null;
+  if (!db) redirect('/login');
 
-  const { data: memberships } = await supabase
+  const { data: memberships } = await db
     .from('org_members')
     .select('org_id')
     .eq('user_id', (null as any))
@@ -185,13 +185,13 @@ export default async function DashboardPage() {
   if (!memberships || memberships.length === 0) redirect('/onboarding');
 
   const orgId = memberships[0]!.org_id as string;
-  const { data: org } = await supabase
+  const { data: org } = await db
     .from('organizations')
     .select('name, slug')
     .eq('id', orgId)
     .single();
 
-  const projectMemberships = await getMyProjectMemberships(supabase, null as any);
+  const projectMemberships = await getMyProjectMemberships(db, null as any);
   const cookieStore = await cookies();
   const currentProjectId = cookieStore.get(CURRENT_PROJECT_COOKIE)?.value ?? null;
   const currentMembership = resolveCurrentProjectMembership(projectMemberships, currentProjectId);
@@ -238,12 +238,12 @@ export default async function DashboardPage() {
   const teamMemberId = currentMembership.id;
 
   const [{ data: activeSprints }, { data: recentMemos }, { data: docs }, { data: policyDocuments }, { data: allStories }, { data: assignedStories }] = await Promise.all([
-    supabase.from('sprints').select('id, title, status, start_date, end_date').eq('project_id', projectId).eq('status', 'active').limit(3),
-    supabase.from('memos').select('id, title, content, status, created_at').eq('project_id', projectId).eq('status', 'open').order('created_at', { ascending: false }).limit(5),
-    supabase.from('docs').select('id, title, slug, updated_at').eq('project_id', projectId).order('updated_at', { ascending: false }).limit(4),
-    supabase.from('policy_documents').select('id, title, sprint_id, epic_id, created_at').eq('project_id', projectId).order('created_at', { ascending: false }).limit(4),
-    supabase.from('stories').select('id, status').eq('project_id', projectId),
-    supabase.from('stories').select('id, title, status').eq('project_id', projectId).eq('assignee_id', teamMemberId).limit(5),
+    db.from('sprints').select('id, title, status, start_date, end_date').eq('project_id', projectId).eq('status', 'active').limit(3),
+    db.from('memos').select('id, title, content, status, created_at').eq('project_id', projectId).eq('status', 'open').order('created_at', { ascending: false }).limit(5),
+    db.from('docs').select('id, title, slug, updated_at').eq('project_id', projectId).order('updated_at', { ascending: false }).limit(4),
+    db.from('policy_documents').select('id, title, sprint_id, epic_id, created_at').eq('project_id', projectId).order('created_at', { ascending: false }).limit(4),
+    db.from('stories').select('id, status').eq('project_id', projectId),
+    db.from('stories').select('id, title, status').eq('project_id', projectId).eq('assignee_id', teamMemberId).limit(5),
   ]);
 
   // Calculate story counts by status

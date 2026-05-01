@@ -10,11 +10,11 @@ export async function GET(_request: Request, { params }: RouteParams) {
   try {
     const { id } = await params;
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    const supabase: any = null;
-    const { data: { user } } = await supabase.auth.getUser();
+    const db: any = null;
+    const { data: { user } } = await db.auth.getUser();
     if (!user) return ApiErrors.unauthorized();
 
-    const { data, error } = await supabase
+    const { data, error } = await db
       .from('mockup_scenarios')
       .select('*')
       .eq('page_id', id)
@@ -31,12 +31,12 @@ export async function POST(request: Request, { params }: RouteParams) {
   try {
     const { id } = await params;
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    const supabase: any = null;
-    const { data: { user } } = await supabase.auth.getUser();
+    const db: any = null;
+    const { data: { user } } = await db.auth.getUser();
     if (!user) return ApiErrors.unauthorized();
 
     const body = await request.json();
-    const { data, error } = await supabase
+    const { data, error } = await db
       .from('mockup_scenarios')
       .insert({ page_id: id, name: body.name ?? 'New Scenario', override_props: body.override_props ?? {}, is_default: false })
       .select()
@@ -53,8 +53,8 @@ export async function PATCH(request: Request, { params }: RouteParams) {
   try {
     const { id } = await params;
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    const supabase: any = null;
-    const { data: { user } } = await supabase.auth.getUser();
+    const db: any = null;
+    const { data: { user } } = await db.auth.getUser();
     if (!user) return ApiErrors.unauthorized();
 
     const body = await request.json();
@@ -65,7 +65,7 @@ export async function PATCH(request: Request, { params }: RouteParams) {
     if (body.override_props !== undefined) updates.override_props = body.override_props;
     if (body.sort_order !== undefined) updates.sort_order = body.sort_order;
 
-    const { error } = await supabase.from('mockup_scenarios').update(updates).eq('id', body.scenario_id).eq('page_id', id);
+    const { error } = await db.from('mockup_scenarios').update(updates).eq('id', body.scenario_id).eq('page_id', id);
     if (error) throw error;
     return apiSuccess({ ok: true });
   } catch (err: unknown) { return handleApiError(err); }
@@ -77,18 +77,18 @@ export async function DELETE(request: Request, { params }: RouteParams) {
   try {
     const { id } = await params;
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    const supabase: any = null;
-    const { data: { user } } = await supabase.auth.getUser();
+    const db: any = null;
+    const { data: { user } } = await db.auth.getUser();
     if (!user) return ApiErrors.unauthorized();
 
     const body = await request.json();
     if (!body.scenario_id) return ApiErrors.badRequest('scenario_id required');
 
     // default 삭제 방지 + page scope
-    const { data: scenario } = await supabase.from('mockup_scenarios').select('is_default').eq('id', body.scenario_id).eq('page_id', id).single();
+    const { data: scenario } = await db.from('mockup_scenarios').select('is_default').eq('id', body.scenario_id).eq('page_id', id).single();
     if (scenario?.is_default) return apiError('CANNOT_DELETE_DEFAULT', 'Cannot delete default scenario', 400);
 
-    const { error } = await supabase.from('mockup_scenarios').delete().eq('id', body.scenario_id).eq('page_id', id);
+    const { error } = await db.from('mockup_scenarios').delete().eq('id', body.scenario_id).eq('page_id', id);
     if (error) throw error;
     return apiSuccess({ ok: true });
   } catch (err: unknown) { return handleApiError(err); }

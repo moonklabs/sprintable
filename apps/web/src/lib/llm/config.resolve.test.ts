@@ -8,10 +8,6 @@ const { createClientMock, getProjectAiSettingsWithIntegrationMock, ensureProject
   decryptProjectSecretMock: vi.fn(),
 }));
 
-vi.mock('@supabase/supabase-js', () => ({
-  createClient: createClientMock,
-}));
-
 vi.mock('./project-ai-settings', async () => {
   const actual = await vi.importActual<typeof import('./project-ai-settings')>('./project-ai-settings');
   return {
@@ -27,8 +23,8 @@ import { LLMAuthError } from './errors';
 
 beforeEach(() => {
   vi.resetAllMocks();
-  process.env.NEXT_PUBLIC_SUPABASE_URL = 'https://example.supabase.co';
-  process.env.SUPABASE_SERVICE_ROLE_KEY = 'service-role';
+  process.env.DATABASE_URL = 'https://example.db.co';
+  process.env.DATABASE_SERVICE_KEY = 'service-role';
   process.env.OPENAI_API_KEY = '';
   process.env.ANTHROPIC_API_KEY = '';
   process.env.GOOGLE_API_KEY = '';

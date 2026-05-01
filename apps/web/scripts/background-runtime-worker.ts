@@ -6,7 +6,7 @@ if (!shouldStartBackgroundRuntime(process.env)) {
 
 const backgroundRuntimeWorker = createBackgroundRuntimeWorkerFromEnv(process.env);
 if (!backgroundRuntimeWorker) {
-  throw new Error('NEXT_PUBLIC_SUPABASE_URL and SUPABASE_SERVICE_ROLE_KEY are required');
+  throw new Error('Background runtime worker could not be initialized. Check environment configuration.');
 }
 
 backgroundRuntimeWorker.start();

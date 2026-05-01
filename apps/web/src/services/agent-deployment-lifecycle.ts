@@ -1,7 +1,5 @@
-// eslint-disable-next-line @typescript-eslint/no-explicit-any
-type SupabaseClient = any;
 
-import { createSupabaseAdminClient } from '@/lib/supabase/admin';
+import { createAdminClient } from '@/lib/db/admin';
 import { AgentExecutionLoop } from './agent-execution-loop';
 import { AgentRoutingRuleService } from './agent-routing-rule';
 import { buildAutomaticRoutingTemplate, resolveAutoRoutingPersonaRole, type AutoRoutingTemplateAgent, type AutoRoutingTemplateResult } from './agent-routing-template';
@@ -161,7 +159,7 @@ function ensureTransitionAllowed(current: DeploymentLifecycleStatus, next: Deplo
 }
 
 export class AgentDeploymentLifecycleService {
-  constructor(private readonly supabase: SupabaseClient) {}
+  constructor(private readonly db: any) {}
 
   async runDeploymentPreflight(input: CreateDeploymentInput): Promise<DeploymentPreflightResult> {
     const checkedAt = new Date().toISOString();
@@ -224,7 +222,7 @@ export class AgentDeploymentLifecycleService {
       }
     }
 
-    const mcpValidation = await validateProjectMcpConnections(createSupabaseAdminClient() as never, {
+    const mcpValidation = await validateProjectMcpConnections(createAdminClient() as never, {
       projectId: input.projectId,
     }).catch((error) => ({
       ok: false,
@@ -289,7 +287,7 @@ export class AgentDeploymentLifecycleService {
           projectIds: [input.projectId],
         });
 
-    const { data, error } = await this.supabase
+    const { data, error } = await this.db
       .from('agent_deployments')
       .insert({
         org_id: input.orgId,
@@ -323,7 +321,7 @@ export class AgentDeploymentLifecycleService {
 
     try {
       if (routingPreview.rules.length > 0) {
-        const routingService = new AgentRoutingRuleService(this.supabase as never);
+        const routingService = new AgentRoutingRuleService(this.db as never);
         const finalizedPreview = await this.previewAutomaticRoutingTemplate({
           orgId: input.orgId,
           projectId: input.projectId,
@@ -351,7 +349,7 @@ export class AgentDeploymentLifecycleService {
         model: deployment.model,
       });
 
-      await fireWebhooks(this.supabase, input.orgId, {
+      await fireWebhooks(this.db, input.orgId, {
         event: 'agent_deployment.initializing',
         data: {
           deployment_id: deployment.id,
@@ -451,7 +449,7 @@ export class AgentDeploymentLifecycleService {
       );
     }
 
-    const { data, error } = await this.supabase
+    const { data, error } = await this.db
       .from('agent_deployments')
       .update(patch)
       .eq('id', deployment.id)
@@ -485,7 +483,7 @@ export class AgentDeploymentLifecycleService {
       failure_detail: input.failure?.detail ?? null,
     });
 
-    await fireWebhooks(this.supabase, input.orgId, {
+    await fireWebhooks(this.db, input.orgId, {
       event,
       data: {
         deployment_id: deployment.id,
@@ -537,7 +535,7 @@ export class AgentDeploymentLifecycleService {
     const now = new Date().toISOString();
     const nextConfig = markManagedAgentDeploymentVerificationCompleted(deploymentConfig, input.actorId, now);
 
-    const { data, error } = await this.supabase
+    const { data, error } = await this.db
       .from('agent_deployments')
       .update({
         config: nextConfig,
@@ -560,7 +558,7 @@ export class AgentDeploymentLifecycleService {
       verification_required_checkpoints: nextConfig.verification?.required_checkpoints ?? [],
     });
 
-    await fireWebhooks(this.supabase, input.orgId, {
+    await fireWebhooks(this.db, input.orgId, {
       event: 'agent_deployment.verification_completed',
       data: {
         deployment_id: deployment.id,
@@ -592,7 +590,7 @@ export class AgentDeploymentLifecycleService {
     );
 
     const now = new Date().toISOString();
-    const { data, error } = await this.supabase
+    const { data, error } = await this.db
       .from('agent_deployments')
       .update({
         status: 'TERMINATED',
@@ -614,7 +612,7 @@ export class AgentDeploymentLifecycleService {
       queue_failed_count: queueFailedCount,
     });
 
-    await fireWebhooks(this.supabase, input.orgId, {
+    await fireWebhooks(this.db, input.orgId, {
       event: 'agent_deployment.terminated',
       data: {
         deployment_id: deployment.id,
@@ -658,7 +656,7 @@ export class AgentDeploymentLifecycleService {
   }
 
   private async listProjectLiveDeployments(orgId: string, projectId: string): Promise<ProjectLiveDeploymentRecord[]> {
-    const { data, error } = await this.supabase
+    const { data, error } = await this.db
       .from('agent_deployments')
       .select('id, agent_id, persona_id, status')
       .eq('org_id', orgId)
@@ -671,7 +669,7 @@ export class AgentDeploymentLifecycleService {
   }
 
   private async countProjectRoutingRules(orgId: string, projectId: string): Promise<number> {
-    const { data, error } = await this.supabase
+    const { data, error } = await this.db
       .from('agent_routing_rules')
       .select('id')
       .eq('org_id', orgId)
@@ -685,7 +683,7 @@ export class AgentDeploymentLifecycleService {
   private async listPersonasByIds(orgId: string, personaIds: string[]): Promise<AgentPersonaRecord[]> {
     if (!personaIds.length) return [];
 
-    const { data, error } = await this.supabase
+    const { data, error } = await this.db
       .from('agent_personas')
       .select('id, org_id, project_id, agent_id, slug, config, is_builtin, deleted_at')
       .eq('org_id', orgId)
@@ -704,7 +702,7 @@ export class AgentDeploymentLifecycleService {
     const [liveDeployments, existingRuleCount, agentRows] = await Promise.all([
       this.listProjectLiveDeployments(input.orgId, input.projectId),
       this.countProjectRoutingRules(input.orgId, input.projectId),
-      this.supabase
+      this.db
         .from('team_members')
         .select('id, name')
         .eq('org_id', input.orgId)
@@ -744,7 +742,7 @@ export class AgentDeploymentLifecycleService {
   }
 
   private async getAgent(orgId: string, projectId: string, agentId: string): Promise<TeamMemberRecord> {
-    const { data, error } = await this.supabase
+    const { data, error } = await this.db
       .from('team_members')
       .select('id, org_id, project_id, type, is_active, name')
       .eq('id', agentId)
@@ -760,7 +758,7 @@ export class AgentDeploymentLifecycleService {
   }
 
   private async getDeployablePersona(orgId: string, projectId: string, agentId: string, personaId: string): Promise<AgentPersonaRecord> {
-    const { data, error } = await this.supabase
+    const { data, error } = await this.db
       .from('agent_personas')
       .select('id, org_id, project_id, agent_id, slug, config, is_builtin, deleted_at')
       .eq('id', personaId)
@@ -780,7 +778,7 @@ export class AgentDeploymentLifecycleService {
   }
 
   private async getDeployment(orgId: string, projectId: string, deploymentId: string): Promise<AgentDeploymentRecord> {
-    const { data, error } = await this.supabase
+    const { data, error } = await this.db
       .from('agent_deployments')
       .select('*')
       .eq('id', deploymentId)
@@ -797,7 +795,7 @@ export class AgentDeploymentLifecycleService {
   }
 
   private async assertNoDuplicateLiveDeployment(orgId: string, projectId: string, agentId: string, currentDeploymentId?: string) {
-    const query = this.supabase
+    const query = this.db
       .from('agent_deployments')
       .select('id, status')
       .eq('org_id', orgId)
@@ -826,7 +824,7 @@ export class AgentDeploymentLifecycleService {
     toStatus: 'queued' | 'held',
     patch: Record<string, unknown>,
   ): Promise<number> {
-    const { data, error } = await this.supabase
+    const { data, error } = await this.db
       .from('agent_runs')
       .update({ status: toStatus, ...patch })
       .eq('deployment_id', deploymentId)
@@ -838,7 +836,7 @@ export class AgentDeploymentLifecycleService {
   }
 
   private async listQueuedRuns(deploymentId: string): Promise<QueuedRunRecord[]> {
-    const { data, error } = await this.supabase
+    const { data, error } = await this.db
       .from('agent_runs')
       .select('id, org_id, project_id, agent_id, memo_id')
       .eq('deployment_id', deploymentId)
@@ -853,12 +851,12 @@ export class AgentDeploymentLifecycleService {
     const queuedRuns = await this.listQueuedRuns(deployment.id);
     if (!queuedRuns.length) return 0;
 
-    const executionLoop = new AgentExecutionLoop(this.supabase);
+    const executionLoop = new AgentExecutionLoop(this.db);
     let resumedCount = 0;
 
     for (const run of queuedRuns) {
       if (!run.memo_id) {
-        await this.supabase
+        await this.db
           .from('agent_runs')
           .update({
             status: 'failed',
@@ -874,7 +872,7 @@ export class AgentDeploymentLifecycleService {
         continue;
       }
 
-      await this.supabase
+      await this.db
         .from('agent_runs')
         .update({
           status: 'running',
@@ -899,7 +897,7 @@ export class AgentDeploymentLifecycleService {
         });
       } catch (error) {
         const message = error instanceof Error ? error.message : 'deployment_resume_failed';
-        await this.supabase
+        await this.db
           .from('agent_runs')
           .update({
             status: 'failed',
@@ -920,7 +918,7 @@ export class AgentDeploymentLifecycleService {
   }
 
   private async failQueuedRuns(deploymentId: string, errorCode: string, errorMessage: string): Promise<number> {
-    const { data, error } = await this.supabase
+    const { data, error } = await this.db
       .from('agent_runs')
       .update({
         status: 'failed',
@@ -944,7 +942,7 @@ export class AgentDeploymentLifecycleService {
     severity: 'debug' | 'info' | 'warn' | 'error' | 'security',
     payload: Record<string, unknown>,
   ) {
-    const { error } = await this.supabase
+    const { error } = await this.db
       .from('agent_audit_logs')
       .insert({
         org_id: orgId,

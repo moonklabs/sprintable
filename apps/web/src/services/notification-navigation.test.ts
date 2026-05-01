@@ -1,10 +1,8 @@
-// eslint-disable-next-line @typescript-eslint/no-explicit-any
-type SupabaseClient = any;
 
 import { describe, expect, it, vi } from 'vitest';
 import { attachNotificationHrefs } from './notification-navigation';
 
-function createSupabaseStub() {
+function createDbStub() {
   const docCommentsQuery = {
     select: vi.fn(() => docCommentsQuery),
     in: vi.fn().mockResolvedValue({
@@ -32,12 +30,12 @@ function createSupabaseStub() {
       if (table === 'docs') return docsQuery;
       throw new Error(`unexpected table: ${table}`);
     }),
-  } as unknown as SupabaseClient;
+  } as any;
 }
 
 describe('attachNotificationHrefs', () => {
   it('builds memo and doc comment deep links with safe docs fallback', async () => {
-    const notifications = await attachNotificationHrefs(createSupabaseStub(), [
+    const notifications = await attachNotificationHrefs(createDbStub(), [
       { id: 'notif-1', reference_type: 'memo', reference_id: 'memo-1' },
       { id: 'notif-2', reference_type: 'doc_comment', reference_id: 'comment-1' },
       { id: 'notif-3', reference_type: 'doc_comment', reference_id: 'missing-comment' },

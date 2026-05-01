@@ -1,5 +1,3 @@
-// eslint-disable-next-line @typescript-eslint/no-explicit-any
-type SupabaseClient = any;
 
 
 const BACKOFF_MINUTES = [5, 30, 120] as const;
@@ -70,14 +68,14 @@ export type AgentRunWithRetry = AgentRunRecord & {
 };
 
 export class AgentRunService {
-  constructor(private readonly supabase: SupabaseClient) {}
+  constructor(private readonly db: any) {}
 
   async create(input: CreateAgentRunInput): Promise<AgentRunWithRetry> {
     const runStatus = input.status ?? 'completed';
     const terminalNow =
       runStatus === 'completed' || runStatus === 'failed' ? new Date().toISOString() : null;
 
-    const { data, error } = await this.supabase
+    const { data, error } = await this.db
       .from('agent_runs')
       .insert({
         org_id: input.org_id,
@@ -128,7 +126,7 @@ export class AgentRunService {
       updates.finished_at = new Date().toISOString();
     }
 
-    const { data, error } = await this.supabase
+    const { data, error } = await this.db
       .from('agent_runs')
       .update(updates)
       .eq('id', id)
@@ -149,7 +147,7 @@ export class AgentRunService {
   }
 
   async list(projectId: string, limit = 20, agentId?: string, cursor?: string): Promise<AgentRunRecord[]> {
-    let query = this.supabase
+    let query = this.db
       .from('agent_runs')
       .select('*')
       .eq('project_id', projectId)
@@ -170,7 +168,7 @@ export class AgentRunService {
 
     if (retryCount < maxRetries) {
       const nextRetryAt = calculateNextRetryAt(retryCount);
-      const { error } = await this.supabase
+      const { error } = await this.db
         .from('agent_runs')
         .update({ next_retry_at: nextRetryAt })
         .eq('id', run.id);

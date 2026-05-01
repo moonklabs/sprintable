@@ -79,9 +79,9 @@ export function rateLimitedFetch(input: RequestInfo | URL, init?: RequestInit): 
   });
 }
 
-// ─── Supabase Browser Client stub (auth via FastAPI) ─────────────────────────
+// ─── DB Browser Client stub (auth via FastAPI) ─────────────────────────
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
-export function createSupabaseBrowserClient(): any {
+export function createBrowserClient(): any {
   return undefined;
 }

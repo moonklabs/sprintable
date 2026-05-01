@@ -23,7 +23,7 @@ export async function POST(request: Request) {
     return NextResponse.redirect(redirectToInternalDogfood(request, { error: 'story_title_required' }));
   }
 
-  const story = await createInternalDogfoodStoryInSprintable(context.supabase, context.actor, {
+  const story = await createInternalDogfoodStoryInSprintable(context.db, context.actor, {
     title,
     description: description || null,
     assigneeId,

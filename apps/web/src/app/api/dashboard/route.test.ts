@@ -1,13 +1,13 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
-const { createSupabaseServerClient, getAuthContext, createSupabaseAdminClient } = vi.hoisted(() => ({
-  createSupabaseServerClient: vi.fn(),
+const { createDbServerClient, getAuthContext, createAdminClient } = vi.hoisted(() => ({
+  createDbServerClient: vi.fn(),
   getAuthContext: vi.fn(),
-  createSupabaseAdminClient: vi.fn(),
+  createAdminClient: vi.fn(),
 }));
 
-vi.mock('@/lib/supabase/server', () => ({ createSupabaseServerClient }));
-vi.mock('@/lib/supabase/admin', () => ({ createSupabaseAdminClient }));
+vi.mock('@/lib/db/server', () => ({ createDbServerClient }));
+vi.mock('@/lib/db/admin', () => ({ createAdminClient }));
 vi.mock('@/lib/auth-helpers', () => ({ getAuthContext }));
 
 import { GET } from './route';
@@ -18,15 +18,15 @@ function makeAgent() {
 
 describe('GET /api/dashboard', () => {
   beforeEach(() => {
-    createSupabaseServerClient.mockReset();
+    createDbServerClient.mockReset();
     getAuthContext.mockReset();
-    createSupabaseAdminClient.mockReset();
+    createAdminClient.mockReset();
     getAuthContext.mockResolvedValue(makeAgent());
   });
 
   it('returns 401 when not authenticated', async () => {
-    const supabase = {};
-    createSupabaseServerClient.mockResolvedValue(supabase);
+    const db = {};
+    createDbServerClient.mockResolvedValue(db);
     getAuthContext.mockResolvedValue(null);
 
     const response = await GET(new Request('http://localhost/api/dashboard?member_id=member-1'));
@@ -35,9 +35,9 @@ describe('GET /api/dashboard', () => {
   });
 
   it('returns 400 when member_id is missing', async () => {
-    const supabase = {};
-    createSupabaseServerClient.mockResolvedValue(supabase);
-    createSupabaseAdminClient.mockReturnValue(supabase);
+    const db = {};
+    createDbServerClient.mockResolvedValue(db);
+    createAdminClient.mockReturnValue(db);
 
     const response = await GET(new Request('http://localhost/api/dashboard'));
 
@@ -50,9 +50,9 @@ describe('GET /api/dashboard', () => {
     q.select = vi.fn(chain);
     q.eq = vi.fn(chain);
     q.single = vi.fn(async () => ({ data: null, error: { message: 'not found' } }));
-    const supabase = { from: vi.fn(() => q) };
-    createSupabaseServerClient.mockResolvedValue(supabase);
-    createSupabaseAdminClient.mockReturnValue(supabase);
+    const db = { from: vi.fn(() => q) };
+    createDbServerClient.mockResolvedValue(db);
+    createAdminClient.mockReturnValue(db);
 
     const response = await GET(new Request('http://localhost/api/dashboard?member_id=nonexistent'));
 
@@ -74,7 +74,7 @@ describe('GET /api/dashboard', () => {
       q.then = Promise.resolve({ data: rows, error: null }).then.bind(Promise.resolve({ data: rows, error: null }));
       return q;
     };
-    const supabase = {
+    const db = {
       from: vi.fn(() => {
         const idx = callIndex++;
         if (idx === 0) return makeQuery(stories);
@@ -82,8 +82,8 @@ describe('GET /api/dashboard', () => {
         return makeQuery(memos);
       }),
     };
-    createSupabaseServerClient.mockResolvedValue(supabase);
-    createSupabaseAdminClient.mockReturnValue(supabase);
+    createDbServerClient.mockResolvedValue(db);
+    createAdminClient.mockReturnValue(db);
 
     const response = await GET(
       new Request('http://localhost/api/dashboard?member_id=member-1&project_id=project-1'),

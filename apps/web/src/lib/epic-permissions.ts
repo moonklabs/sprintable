@@ -1,5 +1,3 @@
-// eslint-disable-next-line @typescript-eslint/no-explicit-any
-type SupabaseClient = any;
 
 
 const ALLOWED_TRANSITIONS: Record<string, string[]> = {
@@ -22,10 +20,10 @@ export function validateStatusTransition(from: string, to: string): void {
 const ROLE_RANK: Record<string, number> = { owner: 3, admin: 2, member: 1 };
 
 export async function getEpicActorRole(
-  supabase: SupabaseClient,
+  db: any,
   memberId: string,
 ): Promise<string | null> {
-  const { data } = await supabase
+  const { data } = await db
     .from('team_members')
     .select('role')
     .eq('id', memberId)

@@ -1,5 +1,5 @@
 import { parseBody, updateTaskSchema } from '@sprintable/shared';
-import { createSupabaseAdminClient } from '@/lib/supabase/admin';
+import { createAdminClient } from '@/lib/db/admin';
 import { TaskService } from '@/services/task';
 import { createTaskRepository, isOssMode } from '@/lib/storage/factory';
 import { handleApiError } from '@/lib/api-error';
@@ -15,7 +15,7 @@ export async function GET(request: Request, { params }: RouteParams) {
     const me = await getAuthContext(request);
     if (!me) return ApiErrors.unauthorized();
     if (me.rateLimitExceeded) return ApiErrors.tooManyRequests(me.rateLimitRemaining, me.rateLimitResetAt);
-    const dbClient = me.type === 'agent' ? createSupabaseAdminClient() : undefined;
+    const dbClient = me.type === 'agent' ? createAdminClient() : undefined;
     const repo = await createTaskRepository(dbClient);
     const service = new TaskService(repo);
     return apiSuccess(await service.getById(id, { org_id: me.org_id, project_id: me.project_id }));
@@ -28,7 +28,7 @@ export async function PATCH(request: Request, { params }: RouteParams) {
     const me = await getAuthContext(request);
     if (!me) return ApiErrors.unauthorized();
     if (me.rateLimitExceeded) return ApiErrors.tooManyRequests(me.rateLimitRemaining, me.rateLimitResetAt);
-    const dbClient = me.type === 'agent' ? createSupabaseAdminClient() : undefined;
+    const dbClient = me.type === 'agent' ? createAdminClient() : undefined;
     const parsed = await parseBody(request, updateTaskSchema); if (!parsed.success) return parsed.response; const body = parsed.data;
     const repo = await createTaskRepository(dbClient);
     const service = new TaskService(repo);
@@ -76,7 +76,7 @@ export async function DELETE(request: Request, { params }: RouteParams) {
     const me = await getAuthContext(request);
     if (!me) return ApiErrors.unauthorized();
     if (me.rateLimitExceeded) return ApiErrors.tooManyRequests(me.rateLimitRemaining, me.rateLimitResetAt);
-    const dbClient = me.type === 'agent' ? createSupabaseAdminClient() : undefined;
+    const dbClient = me.type === 'agent' ? createAdminClient() : undefined;
     const repo = await createTaskRepository(dbClient);
     const service = new TaskService(repo);
     const existing = await service.getById(id, { org_id: me.org_id });

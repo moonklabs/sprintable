@@ -5,17 +5,13 @@ const { createClient } = vi.hoisted(() => ({
   createClient: vi.fn(),
 }));
 
-vi.mock('@supabase/supabase-js', () => ({
-  createClient,
-}));
-
 import { POST } from './route';
 
 function makeSignature(secret: string, timestamp: string, body: string) {
   return `v0=${createHmac('sha256', secret).update(`v0:${timestamp}:${body}`).digest('hex')}`;
 }
 
-function createSupabaseStub(channelData: unknown) {
+function createDbStub(channelData: unknown) {
   const resolveSingle = (table: string) => {
     if (table === 'messaging_bridge_channels') {
       return { data: channelData, error: null };
@@ -73,8 +69,8 @@ describe('POST /api/v1/bridge/slack/events', () => {
   beforeEach(() => {
     createClient.mockReset();
     process.env.SLACK_SIGNING_SECRET = 'route-signing-secret';
-    process.env.NEXT_PUBLIC_SUPABASE_URL = 'https://example.supabase.co';
-    process.env.SUPABASE_SERVICE_ROLE_KEY = 'service-role-key';
+    process.env.DATABASE_URL = 'https://example.db.co';
+    process.env.DATABASE_SERVICE_KEY = 'service-role-key';
   });
 
   it('returns 401 when the Slack signature is invalid', async () => {
@@ -105,7 +101,7 @@ describe('POST /api/v1/bridge/slack/events', () => {
   });
 
   it('acknowledges unmapped channels with 200 and ignores the event', async () => {
-    createClient.mockReturnValue(createSupabaseStub(null));
+    createClient.mockReturnValue(createDbStub(null));
 
     const response = await POST(makeRequest({
       type: 'event_callback',
@@ -116,6 +112,6 @@ describe('POST /api/v1/bridge/slack/events', () => {
     expect(response.status).toBe(200);
     const body = await response.json();
     expect(body.data).toEqual({ action: 'ignored' });
-    expect(createClient).toHaveBeenCalledWith('https://example.supabase.co', 'service-role-key');
+    expect(createClient).toHaveBeenCalledWith('https://example.db.co', 'service-role-key');
   });
 });

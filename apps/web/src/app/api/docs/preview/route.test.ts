@@ -42,16 +42,16 @@ describe('extractEmbedIds', () => {
 // Route handler — GET /api/docs/preview
 // ---------------------------------------------------------------------------
 
-const { createSupabaseServerClient, createSupabaseAdminClient, getAuthContext } = vi.hoisted(() => ({
-  createSupabaseServerClient: vi.fn(),
-  createSupabaseAdminClient: vi.fn(),
+const { createDbServerClient, createAdminClient, getAuthContext } = vi.hoisted(() => ({
+  createDbServerClient: vi.fn(),
+  createAdminClient: vi.fn(),
   getAuthContext: vi.fn(),
 }));
 
 const getDocPreviewMock = vi.fn();
 
-vi.mock('@/lib/supabase/server', () => ({ createSupabaseServerClient }));
-vi.mock('@/lib/supabase/admin', () => ({ createSupabaseAdminClient }));
+vi.mock('@/lib/db/server', () => ({ createDbServerClient }));
+vi.mock('@/lib/db/admin', () => ({ createAdminClient }));
 vi.mock('@/lib/auth-helpers', () => ({ getAuthContext }));
 vi.mock('@/services/docs', () => ({
   DocsService: class {
@@ -59,7 +59,7 @@ vi.mock('@/services/docs', () => ({
   },
 }));
 
-// Supabase client stub for collectTransitiveEmbeds BFS (no embeds in target docs)
+// DB client stub for collectTransitiveEmbeds BFS (no embeds in target docs)
 const fromMock = vi.fn().mockReturnValue({
   select: vi.fn().mockReturnThis(),
   eq: vi.fn().mockReturnThis(),
@@ -80,14 +80,14 @@ const mockAuth = {
 
 describe('GET /api/docs/preview', () => {
   beforeEach(() => {
-    createSupabaseServerClient.mockReset();
-    createSupabaseAdminClient.mockReset();
+    createDbServerClient.mockReset();
+    createAdminClient.mockReset();
     getAuthContext.mockReset();
     getDocPreviewMock.mockReset();
     fromMock.mockClear();
 
-    createSupabaseServerClient.mockResolvedValue(mockDbClient);
-    createSupabaseAdminClient.mockReturnValue(mockDbClient);
+    createDbServerClient.mockResolvedValue(mockDbClient);
+    createAdminClient.mockReturnValue(mockDbClient);
     getAuthContext.mockResolvedValue(mockAuth);
   });
 

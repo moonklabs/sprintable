@@ -37,7 +37,7 @@ const ORG_ID = 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa';
 const PROJECT_ID = 'bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb';
 const MEMBER_ID = 'cccccccc-cccc-4ccc-8ccc-cccccccccccc';
 
-function createSupabaseStub(options?: {
+function createDbStub(options?: {
   approvedServers?: unknown[];
   integrations?: Array<Record<string, unknown>>;
 }) {
@@ -104,7 +104,7 @@ function createSupabaseStub(options?: {
     integrations: options?.integrations ?? [],
   };
 
-  const supabase = {
+  const db = {
     from(table: string) {
       if (table === 'approved_mcp_servers') {
         return {
@@ -200,7 +200,7 @@ function createSupabaseStub(options?: {
     },
   };
 
-  return { supabase, state };
+  return { db, state };
 }
 
 describe('project-mcp service', () => {
@@ -219,7 +219,7 @@ describe('project-mcp service', () => {
   });
 
   it('builds OAuth connect URLs for approved servers and returns connection summaries', async () => {
-    const { supabase } = createSupabaseStub({
+    const { db } = createDbStub({
       integrations: [
         {
           id: '44444444-4444-4444-8444-444444444444',
@@ -242,7 +242,7 @@ describe('project-mcp service', () => {
       ],
     });
 
-    const summaries = await listProjectMcpConnectionSummaries(supabase as never, {
+    const summaries = await listProjectMcpConnectionSummaries(db as never, {
       orgId: ORG_ID,
       projectId: PROJECT_ID,
       origin: 'https://sprintable.app',
@@ -262,14 +262,14 @@ describe('project-mcp service', () => {
   });
 
   it('stores manual provider connections with encrypted secret and cached tool names', async () => {
-    const { supabase, state } = createSupabaseStub();
+    const { db, state } = createDbStub();
     const fetchFn = vi.fn(async () => new Response(JSON.stringify({
       jsonrpc: '2.0',
       id: '1',
       result: { tools: [{ name: 'linear.search_issues' }, { name: 'linear.create_issue' }] },
     }), { status: 200, headers: { 'Content-Type': 'application/json' } }));
 
-    const result = await upsertProjectMcpConnection(supabase as never, {
+    const result = await upsertProjectMcpConnection(db as never, {
       orgId: ORG_ID,
       projectId: PROJECT_ID,
       actorId: MEMBER_ID,
@@ -290,13 +290,13 @@ describe('project-mcp service', () => {
   });
 
   it('exchanges GitHub OAuth code and stores the validated token', async () => {
-    const { supabase, state } = createSupabaseStub();
+    const { db, state } = createDbStub();
     const fetchFn = vi.fn()
       .mockResolvedValueOnce(new Response(JSON.stringify({ access_token: 'gho_1234' }), { status: 200, headers: { 'Content-Type': 'application/json' } }))
       .mockResolvedValueOnce(new Response(JSON.stringify({ login: 'octocat' }), { status: 200, headers: { 'Content-Type': 'application/json' } }))
       .mockResolvedValueOnce(new Response(JSON.stringify({ jsonrpc: '2.0', id: '1', result: { tools: [] } }), { status: 200, headers: { 'Content-Type': 'application/json' } }));
 
-    const result = await exchangeGitHubOAuthCode(supabase as never, {
+    const result = await exchangeGitHubOAuthCode(db as never, {
       code: 'oauth-code',
       origin: 'https://sprintable.app',
       orgId: ORG_ID,
@@ -314,7 +314,7 @@ describe('project-mcp service', () => {
   });
 
   it('resolves active approved MCP configs and vault tokens for runtime execution', async () => {
-    const { supabase } = createSupabaseStub({
+    const { db } = createDbStub({
       integrations: [
         {
           id: '55555555-5555-4555-8555-555555555555',
@@ -337,9 +337,9 @@ describe('project-mcp service', () => {
       ],
     });
 
-    const configs = await listProjectApprovedMcpServerConfigs(supabase as never, PROJECT_ID);
-    const toolOptions = await listProjectApprovedMcpToolOptions(supabase as never, PROJECT_ID);
-    const token = await resolveProjectMcpVaultToken(supabase as never, PROJECT_ID, buildMcpVaultRef('linear'));
+    const configs = await listProjectApprovedMcpServerConfigs(db as never, PROJECT_ID);
+    const toolOptions = await listProjectApprovedMcpToolOptions(db as never, PROJECT_ID);
+    const token = await resolveProjectMcpVaultToken(db as never, PROJECT_ID, buildMcpVaultRef('linear'));
 
     expect(configs).toEqual([
       expect.objectContaining({
@@ -354,7 +354,7 @@ describe('project-mcp service', () => {
   });
 
   it('marks broken connections as error during validation', async () => {
-    const { supabase, state } = createSupabaseStub({
+    const { db, state } = createDbStub({
       integrations: [
         {
           id: '66666666-6666-4666-8666-666666666666',
@@ -378,7 +378,7 @@ describe('project-mcp service', () => {
     });
     const fetchFn = vi.fn(async () => new Response(JSON.stringify({ error: { message: 'token invalid' } }), { status: 401, headers: { 'Content-Type': 'application/json' } }));
 
-    const result = await validateProjectMcpConnections(supabase as never, {
+    const result = await validateProjectMcpConnections(db as never, {
       projectId: PROJECT_ID,
       fetchFn,
     });

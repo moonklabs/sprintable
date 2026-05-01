@@ -1,8 +1,6 @@
-// eslint-disable-next-line @typescript-eslint/no-explicit-any
-type SupabaseClient = any;
 
 import { parseBody, createStandupFeedbackSchema } from '@sprintable/shared';
-import { createSupabaseAdminClient } from '@/lib/supabase/admin';
+import { createAdminClient } from '@/lib/db/admin';
 import { handleApiError } from '@/lib/api-error';
 import { getAuthContext } from '@/lib/auth-helpers';
 import { apiSuccess, ApiErrors } from '@/lib/api-response';
@@ -25,7 +23,7 @@ export async function GET(request: Request) {
       return apiSuccess(await listOssStandupFeedbackByDate(projectId, date));
     }
 
-    const dbClient: SupabaseClient = me.type === 'agent' ? createSupabaseAdminClient() : undefined;
+    const dbClient: any = me.type === 'agent' ? createAdminClient() : undefined;
     const service = new StandupFeedbackService(dbClient);
     const feedback = await service.listByDate(projectId, date);
     return apiSuccess(feedback);
@@ -41,7 +39,7 @@ export async function POST(request: Request) {
     if (me.rateLimitExceeded) return ApiErrors.tooManyRequests(me.rateLimitRemaining, me.rateLimitResetAt);
     const ossMode = isOssMode();
 
-    const dbClient: SupabaseClient = me.type === 'agent' ? createSupabaseAdminClient() : undefined;
+    const dbClient: any = me.type === 'agent' ? createAdminClient() : undefined;
 
     const parsed = await parseBody(request, createStandupFeedbackSchema);
     if (!parsed.success) return parsed.response;

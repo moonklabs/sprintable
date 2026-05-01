@@ -1,7 +1,7 @@
 import { describe, expect, it, vi } from 'vitest';
 import { AgentSessionLifecycleService, type AgentSessionRecord, type AgentSessionRunRecord } from './agent-session-lifecycle';
 
-function createSupabaseStub(initial?: {
+function createDbStub(initial?: {
   sessions?: AgentSessionRecord[];
   runs?: AgentSessionRunRecord[];
   memories?: Array<Record<string, unknown>>;
@@ -140,7 +140,7 @@ function createSupabaseStub(initial?: {
 
   return {
     state,
-    supabase: {
+    db: {
       from(table: string) {
         if (table === 'agent_sessions' || table === 'agent_runs' || table === 'agent_session_memories') {
           return makeQuery(table);
@@ -202,7 +202,7 @@ function makeRun(overrides: Partial<AgentSessionRunRecord> = {}): AgentSessionRu
 
 describe('AgentSessionLifecycleService', () => {
   it('creates an active session and restores snapshot memories when capacity is available', async () => {
-    const { supabase, state } = createSupabaseStub({
+    const { db, state } = createDbStub({
       sessions: [makeSession({
         id: 'session-restore',
         session_key: 'memo:memo-1',
@@ -212,7 +212,7 @@ describe('AgentSessionLifecycleService', () => {
         },
       })],
     });
-    const service = new AgentSessionLifecycleService(supabase as never, { nowFn: () => new Date('2026-04-09T01:00:00.000Z') });
+    const service = new AgentSessionLifecycleService(db as never, { nowFn: () => new Date('2026-04-09T01:00:00.000Z') });
 
     const result = await service.claimSession({
       run: makeRun({ session_id: 'session-restore' }),
@@ -230,12 +230,12 @@ describe('AgentSessionLifecycleService', () => {
   });
 
   it('holds a new session when another active session already occupies the concurrency slot', async () => {
-    const { supabase } = createSupabaseStub({
+    const { db } = createDbStub({
       sessions: [
         makeSession({ id: 'session-active', session_key: 'memo:other', status: 'active' }),
       ],
     });
-    const service = new AgentSessionLifecycleService(supabase as never, { sessionLimit: 1, nowFn: () => new Date('2026-04-09T01:00:00.000Z') });
+    const service = new AgentSessionLifecycleService(db as never, { sessionLimit: 1, nowFn: () => new Date('2026-04-09T01:00:00.000Z') });
 
     const result = await service.claimSession({
       run: makeRun({ id: 'run-2', memo_id: 'memo-2' }),
@@ -251,7 +251,7 @@ describe('AgentSessionLifecycleService', () => {
   });
 
   it('suspends HITL sessions and resumes the oldest waiting held run', async () => {
-    const { supabase, state } = createSupabaseStub({
+    const { db, state } = createDbStub({
       sessions: [
         makeSession({ id: 'session-current', session_key: 'memo:memo-1', status: 'active' }),
         makeSession({ id: 'session-waiting', session_key: 'memo:memo-2', status: 'idle' }),
@@ -264,7 +264,7 @@ describe('AgentSessionLifecycleService', () => {
         org_id: 'org-1', project_id: 'project-1', agent_id: 'agent-1', session_id: 'session-current', run_id: 'run-current', memory_type: 'summary', importance: 80, content: 'Need approval', created_at: '2026-04-09T00:40:00.000Z',
       }],
     });
-    const service = new AgentSessionLifecycleService(supabase as never, { sessionLimit: 1, nowFn: () => new Date('2026-04-09T01:00:00.000Z') });
+    const service = new AgentSessionLifecycleService(db as never, { sessionLimit: 1, nowFn: () => new Date('2026-04-09T01:00:00.000Z') });
 
     const result = await service.applyRunOutcome({
       run: makeRun({ id: 'run-current', session_id: 'session-current', memo_id: 'memo-1', status: 'hitl_pending' }),
@@ -279,7 +279,7 @@ describe('AgentSessionLifecycleService', () => {
   });
 
   it('excludes cross-project memories from the saved session snapshot', async () => {
-    const { supabase } = createSupabaseStub({
+    const { db } = createDbStub({
       sessions: [makeSession({ id: 'session-current', status: 'active' })],
       runs: [makeRun({ id: 'run-current', session_id: 'session-current', status: 'running' })],
       memories: [
@@ -291,7 +291,7 @@ describe('AgentSessionLifecycleService', () => {
         },
       ],
     });
-    const service = new AgentSessionLifecycleService(supabase as never, { nowFn: () => new Date('2026-04-09T01:00:00.000Z') });
+    const service = new AgentSessionLifecycleService(db as never, { nowFn: () => new Date('2026-04-09T01:00:00.000Z') });
 
     const result = await service.applyRunOutcome({
       run: makeRun({ id: 'run-current', session_id: 'session-current', status: 'completed' }),
@@ -304,11 +304,11 @@ describe('AgentSessionLifecycleService', () => {
   });
 
   it('terminates the session after a final failure when no retry is scheduled', async () => {
-    const { supabase } = createSupabaseStub({
+    const { db } = createDbStub({
       sessions: [makeSession({ id: 'session-fail', status: 'active' })],
       runs: [makeRun({ id: 'run-fail', session_id: 'session-fail', status: 'failed', retry_count: 3, max_retries: 3 })],
     });
-    const service = new AgentSessionLifecycleService(supabase as never, { nowFn: () => new Date('2026-04-09T01:00:00.000Z') });
+    const service = new AgentSessionLifecycleService(db as never, { nowFn: () => new Date('2026-04-09T01:00:00.000Z') });
 
     const result = await service.applyRunOutcome({
       run: makeRun({ id: 'run-fail', session_id: 'session-fail', status: 'failed', retry_count: 3, max_retries: 3 }),
@@ -322,11 +322,11 @@ describe('AgentSessionLifecycleService', () => {
   });
 
   it('reactivates a suspended session and returns its held run for execution', async () => {
-    const { supabase, state } = createSupabaseStub({
+    const { db, state } = createDbStub({
       sessions: [makeSession({ id: 'session-reactivate', status: 'suspended', suspended_at: '2026-04-09T00:30:00.000Z' })],
       runs: [makeRun({ id: 'run-held', session_id: 'session-reactivate', memo_id: 'memo-1', status: 'held' })],
     });
-    const service = new AgentSessionLifecycleService(supabase as never, { sessionLimit: 1, nowFn: () => new Date('2026-04-09T01:00:00.000Z') });
+    const service = new AgentSessionLifecycleService(db as never, { sessionLimit: 1, nowFn: () => new Date('2026-04-09T01:00:00.000Z') });
 
     const result = await service.transitionSession({
       sessionId: 'session-reactivate',
@@ -344,14 +344,14 @@ describe('AgentSessionLifecycleService', () => {
 
   it('recovers stale running runs, schedules retry, and suspends the crashed session', async () => {
     const retryService = { scheduleRetry: vi.fn(async () => ({ scheduled: true, nextRetryAt: '2026-04-09T01:05:00.000Z' })) };
-    const { supabase, state } = createSupabaseStub({
+    const { db, state } = createDbStub({
       sessions: [makeSession({ id: 'session-crash', status: 'active' })],
       runs: [makeRun({ id: 'run-crash', session_id: 'session-crash', started_at: '2026-04-09T00:00:00.000Z', status: 'running' })],
       memories: [{
         org_id: 'org-1', project_id: 'project-1', agent_id: 'agent-1', session_id: 'session-crash', run_id: 'run-crash', memory_type: 'context', importance: 70, content: 'tool output', created_at: '2026-04-09T00:10:00.000Z',
       }],
     });
-    const service = new AgentSessionLifecycleService(supabase as never, {
+    const service = new AgentSessionLifecycleService(db as never, {
       nowFn: () => new Date('2026-04-09T01:00:00.000Z'),
       crashTimeoutMs: 5 * 60 * 1000,
       retryService,

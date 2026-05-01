@@ -1,8 +1,6 @@
-// eslint-disable-next-line @typescript-eslint/no-explicit-any
-type SupabaseClient = any;
 
 import { parseBody, createTaskSchema } from '@sprintable/shared';
-import { createSupabaseAdminClient } from '@/lib/supabase/admin';
+import { createAdminClient } from '@/lib/db/admin';
 import { TaskService, type CreateTaskInput } from '@/services/task';
 import { createTaskRepository, isOssMode } from '@/lib/storage/factory';
 import { handleApiError } from '@/lib/api-error';
@@ -13,7 +11,7 @@ import { buildCursorPageMeta, parseCursorPageInput } from '@/lib/pagination';
 async function getStoryTaskCounts(
   service: TaskService,
   storyId: string,
-  dbClient: SupabaseClient | undefined,
+  dbClient: any | undefined,
   ossMode: boolean,
 ) {
   if (ossMode || !dbClient) {
@@ -48,7 +46,7 @@ export async function GET(request: Request) {
     if (!me) return ApiErrors.unauthorized();
     if (me.rateLimitExceeded) return ApiErrors.tooManyRequests(me.rateLimitRemaining, me.rateLimitResetAt);
     const ossMode = isOssMode();
-    const dbClient: SupabaseClient | undefined = ossMode ? undefined : (me.type === 'agent' ? createSupabaseAdminClient() : undefined);
+    const dbClient: any | undefined = ossMode ? undefined : (me.type === 'agent' ? createAdminClient() : undefined);
 
     const { searchParams } = new URL(request.url);
     const storyId = searchParams.get('story_id') ?? undefined;
@@ -116,7 +114,7 @@ export async function POST(request: Request) {
     const me = await getAuthContext(request);
     if (!me) return ApiErrors.unauthorized();
     if (me.rateLimitExceeded) return ApiErrors.tooManyRequests(me.rateLimitRemaining, me.rateLimitResetAt);
-    const dbClient: SupabaseClient = me.type === 'agent' ? createSupabaseAdminClient() : undefined;
+    const dbClient: any = me.type === 'agent' ? createAdminClient() : undefined;
 
     const parsed = await parseBody(request, createTaskSchema); if (!parsed.success) return parsed.response; const body = parsed.data;
     const repo = await createTaskRepository(dbClient);

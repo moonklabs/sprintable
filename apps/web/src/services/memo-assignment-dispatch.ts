@@ -1,4 +1,4 @@
-import { createSupabaseAdminClient } from '@/lib/supabase/admin';
+import { createAdminClient } from '@/lib/db/admin';
 import { buildAbsoluteMemoLink } from './app-url';
 import { buildWebhookSignatureHeaders } from '@/lib/webhook-signature';
 import { WebhookDeliveryService } from './webhook-delivery.service';
@@ -57,11 +57,11 @@ export async function dispatchMemoAssignmentImmediately(memo: DispatchableMemo) 
 
   // SaaS: webhook_configs → team_members.webhook_url 직접 전송 (agent_runs 불필요)
   try {
-    const supabase = createSupabaseAdminClient();
+    const db = createAdminClient();
     const assigneeId = memo.assigned_to;
 
     // webhook_configs: project_id 기준 우선
-    const { data: projectConfig } = await supabase
+    const { data: projectConfig } = await db
       .from('webhook_configs')
       .select('id, url, secret, channel')
       .eq('org_id', memo.org_id)
@@ -83,7 +83,7 @@ export async function dispatchMemoAssignmentImmediately(memo: DispatchableMemo) 
       webhookChannel = (projectConfig.channel as string | null) ?? null;
     } else {
       // webhook_configs: org 기본값
-      const { data: defaultConfig } = await supabase
+      const { data: defaultConfig } = await db
         .from('webhook_configs')
         .select('id, url, secret, channel')
         .eq('org_id', memo.org_id)
@@ -100,7 +100,7 @@ export async function dispatchMemoAssignmentImmediately(memo: DispatchableMemo) 
         webhookChannel = (defaultConfig.channel as string | null) ?? null;
       } else {
         // fallback: team_members.webhook_url (config_id 없음)
-        const { data: member } = await supabase
+        const { data: member } = await db
           .from('team_members')
           .select('webhook_url')
           .eq('id', assigneeId)
@@ -134,7 +134,7 @@ export async function dispatchMemoAssignmentImmediately(memo: DispatchableMemo) 
       ...buildWebhookSignatureHeaders(webhookSecret, body),
     };
 
-    const ok = await new WebhookDeliveryService(supabase).dispatch({
+    const ok = await new WebhookDeliveryService(db).dispatch({
       org_id: memo.org_id,
       webhook_config_id: webhookConfigId,
       event_type: 'memo.assigned',

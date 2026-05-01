@@ -1,5 +1,5 @@
 import { updateEpicSchema } from '@sprintable/shared';
-import { createSupabaseAdminClient } from '@/lib/supabase/admin';
+import { createAdminClient } from '@/lib/db/admin';
 import { EpicService } from '@/services/epic';
 import { handleApiError } from '@/lib/api-error';
 import { apiSuccess, apiError, ApiErrors } from '@/lib/api-response';
@@ -15,7 +15,7 @@ export async function GET(request: Request, { params }: RouteParams) {
     const me = await getAuthContext(request);
     if (!me) return ApiErrors.unauthorized();
     if (me.rateLimitExceeded) return ApiErrors.tooManyRequests(me.rateLimitRemaining, me.rateLimitResetAt);
-    const dbClient = me.type === 'agent' ? createSupabaseAdminClient() : undefined;
+    const dbClient = me.type === 'agent' ? createAdminClient() : undefined;
     const repo = await createEpicRepository(dbClient);
     const service = new EpicService(repo);
     return apiSuccess(await service.getByIdWithStories(id, { org_id: me.org_id, project_id: me.project_id }));
@@ -28,7 +28,7 @@ export async function PATCH(request: Request, { params }: RouteParams) {
     const me = await getAuthContext(request);
     if (!me) return ApiErrors.unauthorized();
     if (me.rateLimitExceeded) return ApiErrors.tooManyRequests(me.rateLimitRemaining, me.rateLimitResetAt);
-    const dbClient = me.type === 'agent' ? createSupabaseAdminClient() : undefined;
+    const dbClient = me.type === 'agent' ? createAdminClient() : undefined;
 
     let rawBody: unknown;
     try { rawBody = await request.json(); } catch { return apiError('BAD_REQUEST', 'Invalid JSON body', 400); }
@@ -60,7 +60,7 @@ export async function DELETE(request: Request, { params }: RouteParams) {
       if (denied) return denied;
     }
 
-    const dbClient = me.type === 'agent' ? createSupabaseAdminClient() : undefined;
+    const dbClient = me.type === 'agent' ? createAdminClient() : undefined;
     const repo = await createEpicRepository(dbClient);
     const service = new EpicService(repo);
     await service.delete(id, me.org_id);

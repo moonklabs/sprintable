@@ -1,10 +1,10 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
-const { createSupabaseAdminClient } = vi.hoisted(() => ({
-  createSupabaseAdminClient: vi.fn(),
+const { createAdminClient } = vi.hoisted(() => ({
+  createAdminClient: vi.fn(),
 }));
 
-vi.mock('@/lib/supabase/admin', () => ({ createSupabaseAdminClient }));
+vi.mock('@/lib/db/admin', () => ({ createAdminClient }));
 
 vi.mock('@/lib/storage/factory', () => ({
   isOssMode: vi.fn(() => false),
@@ -28,7 +28,7 @@ const baseMemo = {
   created_at: '2026-04-22T00:00:00.000Z',
 };
 
-function makeSupabase(results: Record<string, unknown>) {
+function makeDb(results: Record<string, unknown>) {
   return {
     from: vi.fn((table: string) => {
       if (table === 'webhook_deliveries') {
@@ -64,24 +64,24 @@ describe('dispatchMemoAssignmentImmediately', () => {
     mockFetch.mockResolvedValue({ ok: true, status: 200 });
   });
 
-  it('skips unassigned memos without calling supabase', async () => {
+  it('skips unassigned memos without calling db', async () => {
     await dispatchMemoAssignmentImmediately({ ...baseMemo, assigned_to: null });
-    expect(createSupabaseAdminClient).not.toHaveBeenCalled();
+    expect(createAdminClient).not.toHaveBeenCalled();
     expect(mockFetch).not.toHaveBeenCalled();
   });
 
-  it('skips non-open memos without calling supabase', async () => {
+  it('skips non-open memos without calling db', async () => {
     await dispatchMemoAssignmentImmediately({ ...baseMemo, status: 'resolved' });
-    expect(createSupabaseAdminClient).not.toHaveBeenCalled();
+    expect(createAdminClient).not.toHaveBeenCalled();
     expect(mockFetch).not.toHaveBeenCalled();
   });
 
   it('sends webhook via team_members.webhook_url when webhook_configs is empty', async () => {
-    const supabase = makeSupabase({
+    const db = makeDb({
       webhook_configs: { data: null, error: null },
       team_members: { data: { webhook_url: 'https://discord.com/api/webhooks/1/token' }, error: null },
     });
-    createSupabaseAdminClient.mockReturnValue(supabase);
+    createAdminClient.mockReturnValue(db);
 
     await dispatchMemoAssignmentImmediately(baseMemo);
 
@@ -92,11 +92,11 @@ describe('dispatchMemoAssignmentImmediately', () => {
   });
 
   it('prefers webhook_configs url over team_members.webhook_url', async () => {
-    const supabase = makeSupabase({
+    const db = makeDb({
       webhook_configs: { data: { id: 'config-1', url: 'https://discord.com/api/webhooks/2/config', secret: null, channel: 'discord' }, error: null },
       team_members: { data: { webhook_url: 'https://discord.com/api/webhooks/1/fallback' }, error: null },
     });
-    createSupabaseAdminClient.mockReturnValue(supabase);
+    createAdminClient.mockReturnValue(db);
 
     await dispatchMemoAssignmentImmediately(baseMemo);
 
@@ -108,11 +108,11 @@ describe('dispatchMemoAssignmentImmediately', () => {
 
   it('logs console.error and skips fetch when no webhook url found', async () => {
     const errorSpy = vi.spyOn(console, 'error').mockImplementation(() => {});
-    const supabase = makeSupabase({
+    const db = makeDb({
       webhook_configs: { data: null, error: null },
       team_members: { data: null, error: null },
     });
-    createSupabaseAdminClient.mockReturnValue(supabase);
+    createAdminClient.mockReturnValue(db);
 
     await dispatchMemoAssignmentImmediately(baseMemo);
 

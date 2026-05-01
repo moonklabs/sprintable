@@ -1,8 +1,6 @@
-// eslint-disable-next-line @typescript-eslint/no-explicit-any
-type SupabaseClient = any;
 
 import type { ISprintRepository, Sprint, CreateSprintInput, UpdateSprintInput } from '@sprintable/core-storage';
-import { SupabaseSprintRepository, fastapiCall } from '@sprintable/storage-supabase';
+import { ApiSprintRepository, fastapiCall } from '@sprintable/storage-api';
 import { requireOrgAdmin } from '@/lib/admin-check';
 import { NotificationService } from './notification.service';
 
@@ -26,12 +24,12 @@ async function getSpAt(): Promise<string> {
 
 export class SprintService {
   private readonly repo: ISprintRepository;
-  private readonly supabase: SupabaseClient | null;
+  private readonly db: any | null;
   private readonly _accessToken: string;
 
-  constructor(repo: ISprintRepository, supabase?: SupabaseClient, accessToken = '') {
+  constructor(repo: ISprintRepository, db?: any, accessToken = '') {
     this.repo = repo;
-    this.supabase = supabase ?? null;
+    this.db = db ?? null;
     this._accessToken = accessToken;
   }
 
@@ -39,8 +37,8 @@ export class SprintService {
     return this._accessToken || await getSpAt();
   }
 
-  static fromSupabase(supabase: SupabaseClient): SprintService {
-    return new SprintService(new SupabaseSprintRepository(supabase), supabase);
+  static fromDb(db: any): SprintService {
+    return new SprintService(new ApiSprintRepository(db), db);
   }
 
   async create(input: CreateSprintInput) {
@@ -82,9 +80,9 @@ export class SprintService {
     if (token) {
       const stories = await fastapiCall<unknown[]>('GET', '/api/v2/stories', token, { query: { sprint_id: id } });
       if (stories.length > 0) throw new Error('Cannot delete sprint with assigned stories');
-    } else if (this.supabase) {
-      await requireOrgAdmin(this.supabase, sprint.org_id as string);
-      const { data: stories } = await this.supabase.from('stories').select('id').eq('sprint_id', id).limit(1);
+    } else if (this.db) {
+      await requireOrgAdmin(this.db, sprint.org_id as string);
+      const { data: stories } = await this.db.from('stories').select('id').eq('sprint_id', id).limit(1);
       if (stories && stories.length > 0) throw new Error('Cannot delete sprint with assigned stories');
     }
     await this.repo.delete(id, sprint.org_id as string);
@@ -100,8 +98,8 @@ export class SprintService {
         const first = active[0] as { title?: string };
         throw new ForbiddenError(`Active sprint already exists: "${first.title ?? ''}". Close it before activating another.`);
       }
-    } else if (this.supabase) {
-      const { data: active } = await this.supabase.from('sprints').select('id, title').eq('project_id', sprint.project_id as string).eq('status', 'active').is('deleted_at', null).limit(1).maybeSingle();
+    } else if (this.db) {
+      const { data: active } = await this.db.from('sprints').select('id, title').eq('project_id', sprint.project_id as string).eq('status', 'active').is('deleted_at', null).limit(1).maybeSingle();
       if (active) throw new ForbiddenError(`Active sprint already exists: "${active.title}". Close it before activating another.`);
     }
     return this.repo.update(id, { status: 'active' });
@@ -111,8 +109,8 @@ export class SprintService {
     const token = await this.getToken();
     if (token) return fastapiCall<Record<string, unknown>>('GET', `/api/v2/sprints/${id}/burndown`, token);
     const sprint = await this.getById(id);
-    if (!this.supabase) return { sprint, total_points: 0, done_points: 0, remaining_points: 0, completion_pct: 0, stories_count: 0, done_count: 0, ideal_line: [], actual_line: [] };
-    const { data: stories, error } = await this.supabase.from('stories').select('story_points, status, updated_at').eq('sprint_id', id);
+    if (!this.db) return { sprint, total_points: 0, done_points: 0, remaining_points: 0, completion_pct: 0, stories_count: 0, done_count: 0, ideal_line: [], actual_line: [] };
+    const { data: stories, error } = await this.db.from('stories').select('story_points, status, updated_at').eq('sprint_id', id);
     if (error) throw error;
     const totalPoints = (stories ?? []).reduce((sum, s) => sum + ((s.story_points as number) ?? 0), 0);
     const donePoints = (stories ?? []).filter((s) => s.status === 'done').reduce((sum, s) => sum + ((s.story_points as number) ?? 0), 0);
@@ -133,12 +131,12 @@ export class SprintService {
     const token = await this.getToken();
     if (token) return fastapiCall<{ notified: number }>('POST', `/api/v2/sprints/${id}/kickoff`, token, { body: { message } });
     const sprint = await this.getById(id);
-    if (!this.supabase) return { notified: 0 };
-    const { data: members, error: membersError } = await this.supabase.from('team_members').select('id').eq('project_id', sprint.project_id as string).eq('is_active', true);
+    if (!this.db) return { notified: 0 };
+    const { data: members, error: membersError } = await this.db.from('team_members').select('id').eq('project_id', sprint.project_id as string).eq('is_active', true);
     if (membersError) throw membersError;
-    const { data: project } = await this.supabase.from('projects').select('org_id').eq('id', sprint.project_id as string).single();
+    const { data: project } = await this.db.from('projects').select('org_id').eq('id', sprint.project_id as string).single();
     const notifications = (members ?? []).map((member) => ({ org_id: project?.org_id as string, user_id: member.id as string, type: 'info' as const, title: `🚀 ${sprint.title as string} 킥오프!`, body: message ?? `${sprint.title as string}가 시작되었습니다.`, reference_type: 'sprint', reference_id: id }));
-    await new NotificationService(this.supabase).createMany(notifications);
+    await new NotificationService(this.db).createMany(notifications);
     return { notified: notifications.length };
   }
 
@@ -146,11 +144,11 @@ export class SprintService {
     const token = await this.getToken();
     if (token) return fastapiCall<Record<string, unknown>>('POST', `/api/v2/sprints/${id}/checkin`, token, { body: { date } });
     const sprint = await this.getById(id);
-    if (!this.supabase) return { total_stories: 0, total_points: 0, done_points: 0, completion_pct: 0, missing_standups: [] };
-    const { data: stories, error: storiesError } = await this.supabase.from('stories').select('status, story_points, assignee_id').eq('sprint_id', id);
+    if (!this.db) return { total_stories: 0, total_points: 0, done_points: 0, completion_pct: 0, missing_standups: [] };
+    const { data: stories, error: storiesError } = await this.db.from('stories').select('status, story_points, assignee_id').eq('sprint_id', id);
     if (storiesError) throw storiesError;
-    const { data: members } = await this.supabase.from('team_members').select('id, name').eq('project_id', sprint.project_id as string).eq('is_active', true);
-    const { data: standups } = await this.supabase.from('standup_entries').select('author_id').eq('project_id', sprint.project_id as string).eq('date', date);
+    const { data: members } = await this.db.from('team_members').select('id, name').eq('project_id', sprint.project_id as string).eq('is_active', true);
+    const { data: standups } = await this.db.from('standup_entries').select('author_id').eq('project_id', sprint.project_id as string).eq('date', date);
     const standupAuthors = new Set((standups ?? []).map((s) => s.author_id as string));
     const missing = (members ?? []).filter((m) => !standupAuthors.has(m.id as string));
     const totalPts = (stories ?? []).reduce((sum, s) => sum + ((s.story_points as number) ?? 0), 0);
@@ -165,14 +163,14 @@ export class SprintService {
     if (token) return fastapiCall<Sprint & { rolled_over: number }>('POST', `/api/v2/sprints/${id}/close`, token);
     let velocity = 0;
     let rolledOver = 0;
-    if (this.supabase) {
-      const { data: doneStories } = await this.supabase.from('stories').select('story_points').eq('sprint_id', id).eq('status', 'done');
+    if (this.db) {
+      const { data: doneStories } = await this.db.from('stories').select('story_points').eq('sprint_id', id).eq('status', 'done');
       velocity = (doneStories ?? []).reduce((sum, s) => sum + (s.story_points ?? 0), 0);
-      const { data: incomplete } = await this.supabase.from('stories').select('id').eq('sprint_id', id).neq('status', 'done');
+      const { data: incomplete } = await this.db.from('stories').select('id').eq('sprint_id', id).neq('status', 'done');
       if (incomplete && incomplete.length > 0) {
         const incompleteIds = incomplete.map((s) => s.id as string);
-        const { data: nextSprint } = await this.supabase.from('sprints').select('id').eq('project_id', sprint.project_id as string).in('status', ['active', 'planning']).neq('id', id).is('deleted_at', null).order('start_date', { ascending: true }).limit(1).maybeSingle();
-        await this.supabase.from('stories').update({ sprint_id: nextSprint?.id ?? null }).in('id', incompleteIds);
+        const { data: nextSprint } = await this.db.from('sprints').select('id').eq('project_id', sprint.project_id as string).in('status', ['active', 'planning']).neq('id', id).is('deleted_at', null).order('start_date', { ascending: true }).limit(1).maybeSingle();
+        await this.db.from('stories').update({ sprint_id: nextSprint?.id ?? null }).in('id', incompleteIds);
         rolledOver = incompleteIds.length;
       }
     }

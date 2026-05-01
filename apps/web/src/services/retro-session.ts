@@ -1,5 +1,3 @@
-// eslint-disable-next-line @typescript-eslint/no-explicit-any
-type SupabaseClient = any;
 
 
 export type RetroSessionPhase = 'collect' | 'group' | 'vote' | 'discuss' | 'action' | 'closed';
@@ -44,10 +42,10 @@ const VALID_TRANSITIONS: Record<string, string[]> = {
 };
 
 export class RetroSessionService {
-  constructor(private readonly supabase: SupabaseClient) {}
+  constructor(private readonly db: any) {}
 
   async getSession(sessionId: string, projectId: string): Promise<RetroSessionRecord | null> {
-    const { data, error } = await this.supabase
+    const { data, error } = await this.db
       .from('retro_sessions')
       .select('*')
       .eq('id', sessionId)
@@ -58,14 +56,14 @@ export class RetroSessionService {
   }
 
   async listItems(sessionId: string, projectId: string): Promise<RetroItemRecord[]> {
-    const { data: sess } = await this.supabase
+    const { data: sess } = await this.db
       .from('retro_sessions')
       .select('id')
       .eq('id', sessionId)
       .eq('project_id', projectId)
       .single();
     if (!sess) throw new Error('Session not in project');
-    const { data, error } = await this.supabase
+    const { data, error } = await this.db
       .from('retro_items')
       .select('*')
       .eq('session_id', sessionId)
@@ -75,14 +73,14 @@ export class RetroSessionService {
   }
 
   async listActions(sessionId: string, projectId: string): Promise<RetroActionRecord[]> {
-    const { data: sess } = await this.supabase
+    const { data: sess } = await this.db
       .from('retro_sessions')
       .select('id')
       .eq('id', sessionId)
       .eq('project_id', projectId)
       .single();
     if (!sess) throw new Error('Session not in project');
-    const { data, error } = await this.supabase
+    const { data, error } = await this.db
       .from('retro_actions')
       .select('*')
       .eq('session_id', sessionId)
@@ -92,7 +90,7 @@ export class RetroSessionService {
   }
 
   async listSessions(projectId: string): Promise<RetroSessionRecord[]> {
-    const { data, error } = await this.supabase
+    const { data, error } = await this.db
       .from('retro_sessions')
       .select('*')
       .eq('project_id', projectId)
@@ -108,7 +106,7 @@ export class RetroSessionService {
     sprint_id?: string | null;
     created_by: string;
   }): Promise<RetroSessionRecord> {
-    const { data, error } = await this.supabase
+    const { data, error } = await this.db
       .from('retro_sessions')
       .insert(input)
       .select()
@@ -118,7 +116,7 @@ export class RetroSessionService {
   }
 
   async changePhase(sessionId: string, projectId: string, phase: RetroSessionPhase): Promise<RetroSessionRecord> {
-    const { data: session, error: fetchErr } = await this.supabase
+    const { data: session, error: fetchErr } = await this.db
       .from('retro_sessions')
       .select('phase')
       .eq('id', sessionId)
@@ -129,7 +127,7 @@ export class RetroSessionService {
     if (!VALID_TRANSITIONS[current]?.includes(phase)) {
       throw new Error(`Invalid transition: ${current} → ${phase}`);
     }
-    const { data, error } = await this.supabase
+    const { data, error } = await this.db
       .from('retro_sessions')
       .update({ phase })
       .eq('id', sessionId)
@@ -146,14 +144,14 @@ export class RetroSessionService {
     text: string;
     author_id: string;
   }): Promise<RetroItemRecord> {
-    const { data: sess, error: sessErr } = await this.supabase
+    const { data: sess, error: sessErr } = await this.db
       .from('retro_sessions')
       .select('id')
       .eq('id', input.session_id)
       .eq('project_id', input.project_id)
       .single();
     if (sessErr || !sess) throw new Error('Session not in project');
-    const { data, error } = await this.supabase
+    const { data, error } = await this.db
       .from('retro_items')
       .insert({ session_id: input.session_id, category: input.category, text: input.text, author_id: input.author_id })
       .select()
@@ -163,20 +161,20 @@ export class RetroSessionService {
   }
 
   async voteItem(itemId: string, voterId: string, projectId: string): Promise<{ voted: boolean }> {
-    const { data: item } = await this.supabase
+    const { data: item } = await this.db
       .from('retro_items')
       .select('session_id')
       .eq('id', itemId)
       .single();
     if (!item) throw new Error('Item not found');
-    const { data: sess } = await this.supabase
+    const { data: sess } = await this.db
       .from('retro_sessions')
       .select('id')
       .eq('id', item.session_id as string)
       .eq('project_id', projectId)
       .single();
     if (!sess) throw new Error('Item not in project');
-    const { error } = await this.supabase
+    const { error } = await this.db
       .from('retro_votes')
       .insert({ item_id: itemId, voter_id: voterId });
     if (error) {
@@ -194,14 +192,14 @@ export class RetroSessionService {
     title: string;
     assignee_id?: string | null;
   }): Promise<RetroActionRecord> {
-    const { data: sess, error: sessErr } = await this.supabase
+    const { data: sess, error: sessErr } = await this.db
       .from('retro_sessions')
       .select('id')
       .eq('id', input.session_id)
       .eq('project_id', input.project_id)
       .single();
     if (sessErr || !sess) throw new Error('Session not in project');
-    const { data, error } = await this.supabase
+    const { data, error } = await this.db
       .from('retro_actions')
       .insert({ session_id: input.session_id, title: input.title, assignee_id: input.assignee_id ?? null })
       .select()
@@ -211,19 +209,19 @@ export class RetroSessionService {
   }
 
   async exportSession(sessionId: string, projectId: string): Promise<{ markdown: string }> {
-    const { data: sess, error: sessErr } = await this.supabase
+    const { data: sess, error: sessErr } = await this.db
       .from('retro_sessions')
       .select('title')
       .eq('id', sessionId)
       .eq('project_id', projectId)
       .single();
     if (sessErr || !sess) throw new Error('Session not in project');
-    const { data: items } = await this.supabase
+    const { data: items } = await this.db
       .from('retro_items')
       .select('category, text, vote_count')
       .eq('session_id', sessionId)
       .order('vote_count', { ascending: false });
-    const { data: actions } = await this.supabase
+    const { data: actions } = await this.db
       .from('retro_actions')
       .select('title, status')
       .eq('session_id', sessionId)

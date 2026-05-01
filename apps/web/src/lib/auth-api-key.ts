@@ -1,5 +1,3 @@
-// eslint-disable-next-line @typescript-eslint/no-explicit-any
-type SupabaseClient = any;
 
 import { createHash } from 'crypto';
 
@@ -60,7 +58,7 @@ export function extractBearerToken(authHeader: string | null): string | null {
  * @returns team_member context 또는 null (인증 실패)
  */
 export async function getTeamMemberFromApiKey(
-  adminClient: SupabaseClient,
+  adminClient: any,
   apiKey: string,
   logContext?: { endpoint: string; ip?: string | null },
 ): Promise<TeamMemberContext | null> {
@@ -136,7 +134,7 @@ export function requireAgentScope(
 }
 
 export async function getTeamMemberFromRequest(
-  adminClient: SupabaseClient,
+  adminClient: any,
   request: Request
 ): Promise<TeamMemberContext | null> {
   const authHeader = request.headers.get('Authorization');

@@ -4,7 +4,7 @@ import { AgentBuiltinToolService, BUILTIN_AGENT_TOOL_NAMES } from './agent-built
 type Row = Record<string, unknown>;
 type Tables = Record<string, Row[]>;
 
-function createSupabaseStub(seed?: Partial<Tables>) {
+function createDbStub(seed?: Partial<Tables>) {
   const tables: Tables = {
     projects: [
       { id: 'project-1', org_id: 'org-1', name: 'Alpha', description: 'Alpha project' },
@@ -169,7 +169,7 @@ function createSupabaseStub(seed?: Partial<Tables>) {
     return rows;
   };
 
-  const supabase = {
+  const db = {
     from(table: string) {
       const state = {
         filters: [] as Array<(row: Row) => boolean>,
@@ -227,7 +227,7 @@ function createSupabaseStub(seed?: Partial<Tables>) {
     },
   };
 
-  return { supabase, tables };
+  return { db, tables };
 }
 
 function createContext() {
@@ -258,9 +258,9 @@ function createContext() {
 
 describe('AgentBuiltinToolService', () => {
   it('creates a memo and records execution audit metadata', async () => {
-    const { supabase, tables } = createSupabaseStub();
+    const { db, tables } = createDbStub();
     const auditLogger = vi.fn(async () => undefined);
-    const service = new AgentBuiltinToolService(supabase as never, { auditLogger });
+    const service = new AgentBuiltinToolService(db as never, { auditLogger });
 
     const result = await service.execute('create_memo', {
       title: 'New memo',
@@ -288,10 +288,10 @@ describe('AgentBuiltinToolService', () => {
 
   it('calls notify_slack with org auth, registered channel, and audit metadata', async () => {
     process.env.SLACK_OAUTH_TOKEN_ORG_1 = 'xoxb-org-token';
-    const { supabase } = createSupabaseStub();
+    const { db } = createDbStub();
     const auditLogger = vi.fn(async () => undefined);
     const fetchFn = vi.fn(async () => new Response(JSON.stringify({ ok: true, channel: 'C12345678', ts: '1710000000.000100' }), { status: 200 }));
-    const service = new AgentBuiltinToolService(supabase as never, { auditLogger, fetchFn: fetchFn as never });
+    const service = new AgentBuiltinToolService(db as never, { auditLogger, fetchFn: fetchFn as never });
 
     const result = await service.execute('notify_slack', {
       channel_id: 'C12345678',
@@ -328,9 +328,9 @@ describe('AgentBuiltinToolService', () => {
 
   it('returns channel_not_registered when notify_slack targets an unregistered channel', async () => {
     process.env.SLACK_OAUTH_TOKEN_ORG_1 = 'xoxb-org-token';
-    const { supabase } = createSupabaseStub({ messaging_bridge_channels: [] });
+    const { db } = createDbStub({ messaging_bridge_channels: [] });
     const fetchFn = vi.fn();
-    const service = new AgentBuiltinToolService(supabase as never, { fetchFn: fetchFn as never });
+    const service = new AgentBuiltinToolService(db as never, { fetchFn: fetchFn as never });
 
     const result = await service.execute('notify_slack', {
       channel_id: 'C404',
@@ -343,8 +343,8 @@ describe('AgentBuiltinToolService', () => {
   });
 
   it('returns slack_auth_required when org slack auth is missing or expired', async () => {
-    const { supabase: missingAuthSupabase } = createSupabaseStub({ messaging_bridge_org_auths: [] });
-    const missingAuthService = new AgentBuiltinToolService(missingAuthSupabase as never, { fetchFn: vi.fn() as never });
+    const { db: missingAuthDb } = createDbStub({ messaging_bridge_org_auths: [] });
+    const missingAuthService = new AgentBuiltinToolService(missingAuthDb as never, { fetchFn: vi.fn() as never });
 
     await expect(missingAuthService.execute('notify_slack', {
       channel_id: 'C12345678',
@@ -352,7 +352,7 @@ describe('AgentBuiltinToolService', () => {
     }, createContext())).resolves.toEqual({ error: 'slack_auth_required' });
 
     process.env.SLACK_OAUTH_TOKEN_ORG_1 = 'xoxb-expired';
-    const { supabase: expiredAuthSupabase } = createSupabaseStub({
+    const { db: expiredAuthDb } = createDbStub({
       messaging_bridge_org_auths: [{
         id: 'eeeeeeee-eeee-4eee-8eee-eeeeeeeeeeee',
         org_id: 'org-1',
@@ -364,7 +364,7 @@ describe('AgentBuiltinToolService', () => {
         updated_at: '2026-04-06T12:00:00.000Z',
       }],
     });
-    const expiredAuthService = new AgentBuiltinToolService(expiredAuthSupabase as never, { fetchFn: vi.fn() as never });
+    const expiredAuthService = new AgentBuiltinToolService(expiredAuthDb as never, { fetchFn: vi.fn() as never });
 
     await expect(expiredAuthService.execute('notify_slack', {
       channel_id: 'C12345678',
@@ -375,9 +375,9 @@ describe('AgentBuiltinToolService', () => {
 
   it('returns Slack API errors when the bot is not in the target channel', async () => {
     process.env.SLACK_OAUTH_TOKEN_ORG_1 = 'xoxb-org-token';
-    const { supabase } = createSupabaseStub();
+    const { db } = createDbStub();
     const fetchFn = vi.fn(async () => new Response(JSON.stringify({ ok: false, error: 'not_in_channel' }), { status: 200 }));
-    const service = new AgentBuiltinToolService(supabase as never, { fetchFn: fetchFn as never });
+    const service = new AgentBuiltinToolService(db as never, { fetchFn: fetchFn as never });
 
     const result = await service.execute('notify_slack', {
       channel_id: 'C12345678',
@@ -389,8 +389,8 @@ describe('AgentBuiltinToolService', () => {
   });
 
   it('lists memos with truncated content previews', async () => {
-    const { supabase } = createSupabaseStub();
-    const service = new AgentBuiltinToolService(supabase as never);
+    const { db } = createDbStub();
+    const service = new AgentBuiltinToolService(db as never);
 
     const result = await service.execute('list_memos', { limit: 2 }, createContext());
 
@@ -402,7 +402,7 @@ describe('AgentBuiltinToolService', () => {
   });
 
   it('applies list_memos filters before limit so filtered rows are not dropped', async () => {
-    const { supabase } = createSupabaseStub({
+    const { db } = createDbStub({
       memos: [
         {
           id: '44444444-4444-4444-8444-444444444444',
@@ -445,7 +445,7 @@ describe('AgentBuiltinToolService', () => {
         },
       ],
     });
-    const service = new AgentBuiltinToolService(supabase as never);
+    const service = new AgentBuiltinToolService(db as never);
 
     const result = await service.execute('list_memos', { limit: 2, status: 'resolved' }, createContext());
 
@@ -455,9 +455,9 @@ describe('AgentBuiltinToolService', () => {
   });
 
   it('blocks cross-project references and logs a security audit event', async () => {
-    const { supabase } = createSupabaseStub();
+    const { db } = createDbStub();
     const auditLogger = vi.fn(async () => undefined);
-    const service = new AgentBuiltinToolService(supabase as never, { auditLogger });
+    const service = new AgentBuiltinToolService(db as never, { auditLogger });
 
     const result = await service.execute('create_story', {
       title: 'Cross project attempt',
@@ -479,8 +479,8 @@ describe('AgentBuiltinToolService', () => {
   });
 
   it('creates and assigns a story within the current project scope', async () => {
-    const { supabase, tables } = createSupabaseStub();
-    const service = new AgentBuiltinToolService(supabase as never);
+    const { db, tables } = createDbStub();
+    const service = new AgentBuiltinToolService(db as never);
 
     const created = await service.execute('create_story', {
       title: 'Implement MCP tool',
@@ -507,7 +507,7 @@ describe('AgentBuiltinToolService', () => {
   });
 
   it('forwards a memo to another agent successfully', async () => {
-    const { supabase, tables } = createSupabaseStub({
+    const { db, tables } = createDbStub({
       team_members: [
         { id: '11111111-1111-4111-8111-111111111111', org_id: 'org-1', project_id: 'project-1', type: 'agent', name: 'Didi', role: 'member', is_active: true },
         { id: 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa', org_id: 'org-1', project_id: 'project-1', type: 'agent', name: 'Kiki', role: 'member', is_active: true },
@@ -515,7 +515,7 @@ describe('AgentBuiltinToolService', () => {
       ],
     });
     const auditLogger = vi.fn(async () => undefined);
-    const service = new AgentBuiltinToolService(supabase as never, { auditLogger });
+    const service = new AgentBuiltinToolService(db as never, { auditLogger });
 
     const result = await service.execute('forward_memo', {
       target_agent_display_name: 'Kiki',
@@ -537,8 +537,8 @@ describe('AgentBuiltinToolService', () => {
   });
 
   it('returns self_forward_not_allowed when forwarding to self', async () => {
-    const { supabase } = createSupabaseStub();
-    const service = new AgentBuiltinToolService(supabase as never);
+    const { db } = createDbStub();
+    const service = new AgentBuiltinToolService(db as never);
 
     const result = await service.execute('forward_memo', {
       target_agent_display_name: 'Didi',
@@ -549,14 +549,14 @@ describe('AgentBuiltinToolService', () => {
   });
 
   it('forwards correctly when duplicate name includes self and one other agent', async () => {
-    const { supabase, tables } = createSupabaseStub({
+    const { db, tables } = createDbStub({
       team_members: [
         { id: '11111111-1111-4111-8111-111111111111', org_id: 'org-1', project_id: 'project-1', type: 'agent', name: 'Didi', role: 'member', is_active: true },
         { id: 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa', org_id: 'org-1', project_id: 'project-1', type: 'agent', name: 'Didi', role: 'member', is_active: true },
         { id: '22222222-2222-4222-8222-222222222222', org_id: 'org-1', project_id: 'project-1', type: 'human', name: 'Ortega', role: 'owner', is_active: true },
       ],
     });
-    const service = new AgentBuiltinToolService(supabase as never);
+    const service = new AgentBuiltinToolService(db as never);
 
     const result = await service.execute('forward_memo', {
       target_agent_display_name: 'Didi',
@@ -575,14 +575,14 @@ describe('AgentBuiltinToolService', () => {
   });
 
   it('returns target_agent_not_found when multiple non-self agents share the same name', async () => {
-    const { supabase } = createSupabaseStub({
+    const { db } = createDbStub({
       team_members: [
         { id: '11111111-1111-4111-8111-111111111111', org_id: 'org-1', project_id: 'project-1', type: 'agent', name: 'Didi', role: 'member', is_active: true },
         { id: 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa', org_id: 'org-1', project_id: 'project-1', type: 'agent', name: 'Kiki', role: 'member', is_active: true },
         { id: 'bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb', org_id: 'org-1', project_id: 'project-1', type: 'agent', name: 'Kiki', role: 'member', is_active: true },
       ],
     });
-    const service = new AgentBuiltinToolService(supabase as never);
+    const service = new AgentBuiltinToolService(db as never);
 
     const result = await service.execute('forward_memo', {
       target_agent_display_name: 'Kiki',
@@ -594,8 +594,8 @@ describe('AgentBuiltinToolService', () => {
   });
 
   it('returns target_agent_not_found when no matching agent exists', async () => {
-    const { supabase } = createSupabaseStub();
-    const service = new AgentBuiltinToolService(supabase as never);
+    const { db } = createDbStub();
+    const service = new AgentBuiltinToolService(db as never);
 
     const result = await service.execute('forward_memo', {
       target_agent_display_name: 'NonexistentAgent',
@@ -639,7 +639,7 @@ describe('AgentBuiltinToolService', () => {
       metadata: { forwarded_from_memo_id: chainMemos[9].id },
     };
 
-    const { supabase } = createSupabaseStub({
+    const { db } = createDbStub({
       memos: [...chainMemos, currentMemo],
       team_members: [
         { id: '11111111-1111-4111-8111-111111111111', org_id: 'org-1', project_id: 'project-1', type: 'agent', name: 'Didi', role: 'member', is_active: true },
@@ -647,7 +647,7 @@ describe('AgentBuiltinToolService', () => {
       ],
     });
     const auditLogger = vi.fn(async () => undefined);
-    const service = new AgentBuiltinToolService(supabase as never, { auditLogger });
+    const service = new AgentBuiltinToolService(db as never, { auditLogger });
 
     const result = await service.execute('forward_memo', {
       target_agent_display_name: 'Kiki',
@@ -667,8 +667,8 @@ describe('AgentBuiltinToolService', () => {
   });
 
   it('updates memo content and lists epics in scope', async () => {
-    const { supabase, tables } = createSupabaseStub();
-    const service = new AgentBuiltinToolService(supabase as never);
+    const { db, tables } = createDbStub();
+    const service = new AgentBuiltinToolService(db as never);
 
     const updated = await service.execute('update_memo', {
       memo_id: '44444444-4444-4444-8444-444444444444',

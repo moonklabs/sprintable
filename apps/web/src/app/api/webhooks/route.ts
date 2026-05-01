@@ -8,15 +8,15 @@ export async function GET(request: Request) {
   if (isOssMode()) return apiError('NOT_AVAILABLE', 'Not available in OSS mode.', 503);
   try {
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    const supabase: any = null;
-    const { data: { user } } = await supabase.auth.getUser();
+    const db: any = null;
+    const { data: { user } } = await db.auth.getUser();
     if (!user) return ApiErrors.unauthorized();
-    const me = await getMyTeamMember(supabase, user);
+    const me = await getMyTeamMember(db, user);
     if (!me) return ApiErrors.forbidden();
     const { searchParams } = new URL(request.url);
     const targetId = searchParams.get('member_id') ?? me.id;
-    if (targetId !== me.id) await requireOrgAdmin(supabase, me.org_id);
-    const { data, error } = await supabase.from('webhook_configs').select('*').eq('member_id', targetId);
+    if (targetId !== me.id) await requireOrgAdmin(db, me.org_id);
+    const { data, error } = await db.from('webhook_configs').select('*').eq('member_id', targetId);
     if (error) throw error;
     return apiSuccess(data);
   } catch (err: unknown) { return handleApiError(err); }

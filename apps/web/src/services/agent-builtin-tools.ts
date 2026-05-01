@@ -1,5 +1,3 @@
-// eslint-disable-next-line @typescript-eslint/no-explicit-any
-type SupabaseClient = any;
 
 import { z } from 'zod';
 import { MemoService } from './memo';
@@ -263,7 +261,7 @@ export class AgentBuiltinToolService {
   private readonly statusUpdateGateFn?: StatusUpdateGateFn;
 
   constructor(
-    private readonly supabase: SupabaseClient,
+    private readonly db: any,
     options: {
       memoService?: MemoService;
       storyService?: StoryService;
@@ -273,8 +271,8 @@ export class AgentBuiltinToolService {
       statusUpdateGateFn?: StatusUpdateGateFn;
     } = {},
   ) {
-    this.memoService = options.memoService ?? MemoService.fromSupabase(supabase);
-    this.storyService = options.storyService ?? StoryService.fromSupabase(supabase);
+    this.memoService = options.memoService ?? MemoService.fromDb(db);
+    this.storyService = options.storyService ?? StoryService.fromDb(db);
     this._epicService = options.epicService ?? null;
     this.auditLogger = options.auditLogger;
     this.fetchFn = options.fetchFn ?? fetch;
@@ -284,7 +282,7 @@ export class AgentBuiltinToolService {
   private async getEpicService(): Promise<EpicService> {
     if (this._epicService) return this._epicService;
     if (!this._epicServicePromise) {
-      this._epicServicePromise = createEpicRepository(this.supabase).then((repo) => new EpicService(repo));
+      this._epicServicePromise = createEpicRepository(this.db).then((repo) => new EpicService(repo));
     }
     this._epicService = await this._epicServicePromise;
     return this._epicService;
@@ -377,7 +375,7 @@ export class AgentBuiltinToolService {
         if (args.status !== undefined) patch.status = args.status.trim();
         if (args.assigned_to !== undefined) patch.assigned_to = args.assigned_to;
 
-        const { data, error } = await this.supabase
+        const { data, error } = await this.db
           .from('memos')
           .update(patch)
           .eq('id', memo.id)
@@ -388,7 +386,7 @@ export class AgentBuiltinToolService {
 
         // memo_assignees upsert — trg_memo_assignees_notify 발동하여 알림 보장
         if (!error && data && args.assigned_to) {
-          await this.supabase
+          await this.db
             .from('memo_assignees')
             .upsert(
               { memo_id: memo.id, member_id: args.assigned_to, assigned_by: ctx.memo.created_by },
@@ -500,7 +498,7 @@ export class AgentBuiltinToolService {
   }
 
   private async listMemosInternal(args: { limit?: number; status?: string; memo_type?: string; assigned_to?: string }, ctx: ToolExecutionContext) {
-    let query = this.supabase
+    let query = this.db
       .from('memos')
       .select('id, org_id, project_id, title, content, memo_type, status, assigned_to, created_by, created_at, updated_at')
       .eq('org_id', ctx.memo.org_id)
@@ -527,7 +525,7 @@ export class AgentBuiltinToolService {
   }
 
   private async getMemoInScope(memoId: string, ctx: ToolExecutionContext): Promise<MemoScope> {
-    const { data, error } = await this.supabase
+    const { data, error } = await this.db
       .from('memos')
       .select('id, org_id, project_id, title, content, memo_type, status, assigned_to, created_by, created_at, updated_at')
       .eq('id', memoId)
@@ -555,7 +553,7 @@ export class AgentBuiltinToolService {
   }
 
   private async listMemoReplies(memoId: string) {
-    const { data, error } = await this.supabase
+    const { data, error } = await this.db
       .from('memo_replies')
       .select('id, memo_id, content, created_by, created_at')
       .eq('memo_id', memoId)
@@ -565,7 +563,7 @@ export class AgentBuiltinToolService {
   }
 
   private async ensureMemberInScope(memberId: string, ctx: ToolExecutionContext) {
-    const { data, error } = await this.supabase
+    const { data, error } = await this.db
       .from('team_members')
       .select('id, org_id, project_id')
       .eq('id', memberId)
@@ -591,7 +589,7 @@ export class AgentBuiltinToolService {
   }
 
   private async ensureStoryInScope(storyId: string, ctx: ToolExecutionContext): Promise<StoryRecord> {
-    const { data, error } = await this.supabase
+    const { data, error } = await this.db
       .from('stories')
       .select('*')
       .eq('id', storyId)
@@ -618,7 +616,7 @@ export class AgentBuiltinToolService {
   }
 
   private async ensureEpicInScope(epicId: string, ctx: ToolExecutionContext): Promise<EpicRecord> {
-    const { data, error } = await this.supabase
+    const { data, error } = await this.db
       .from('epics')
       .select('*')
       .eq('id', epicId)
@@ -645,7 +643,7 @@ export class AgentBuiltinToolService {
   }
 
   private async ensureSprintInScope(sprintId: string, ctx: ToolExecutionContext) {
-    const { data, error } = await this.supabase
+    const { data, error } = await this.db
       .from('sprints')
       .select('id, org_id, project_id')
       .eq('id', sprintId)
@@ -672,7 +670,7 @@ export class AgentBuiltinToolService {
 
   private async forwardMemoInternal(args: z.infer<typeof forwardMemoSchema>, ctx: ToolExecutionContext): Promise<Record<string, unknown>> {
     // Resolve target agent by display name within org/project
-    const { data: agents, error: agentError } = await this.supabase
+    const { data: agents, error: agentError } = await this.db
       .from('team_members')
       .select('id, name')
       .eq('org_id', ctx.memo.org_id)
@@ -707,7 +705,7 @@ export class AgentBuiltinToolService {
     let chainLength = 0;
     let currentId: string | null = ctx.memo.id;
     while (currentId && chainLength < MAX_FORWARD_CHAIN_DEPTH + 1) {
-      const { data: chainMemo } = await this.supabase
+      const { data: chainMemo } = await this.db
         .from('memos')
         .select('id, metadata')
         .eq('id', currentId)
@@ -810,7 +808,7 @@ export class AgentBuiltinToolService {
   }
 
   private async getSlackChannelRegistration(channelId: string, ctx: ToolExecutionContext): Promise<MessagingBridgeChannelRecord | null> {
-    const { data, error } = await this.supabase
+    const { data, error } = await this.db
       .from('messaging_bridge_channels')
       .select('id, org_id, project_id, platform, channel_id, config, is_active')
       .eq('org_id', ctx.memo.org_id)
@@ -825,7 +823,7 @@ export class AgentBuiltinToolService {
   }
 
   private async getActiveSlackOrgAuth(ctx: ToolExecutionContext): Promise<MessagingBridgeOrgAuthRecord | null> {
-    const { data, error } = await this.supabase
+    const { data, error } = await this.db
       .from('messaging_bridge_org_auths')
       .select('id, org_id, platform, access_token_ref, expires_at')
       .eq('org_id', ctx.memo.org_id)

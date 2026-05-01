@@ -1,14 +1,14 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
-const { createSupabaseServerClient, getAuthContext, createSupabaseAdminClient, attachNotificationHrefs } = vi.hoisted(() => ({
-  createSupabaseServerClient: vi.fn(),
+const { createDbServerClient, getAuthContext, createAdminClient, attachNotificationHrefs } = vi.hoisted(() => ({
+  createDbServerClient: vi.fn(),
   getAuthContext: vi.fn(),
-  createSupabaseAdminClient: vi.fn(),
+  createAdminClient: vi.fn(),
   attachNotificationHrefs: vi.fn(),
 }));
 
-vi.mock('@/lib/supabase/server', () => ({ createSupabaseServerClient }));
-vi.mock('@/lib/supabase/admin', () => ({ createSupabaseAdminClient }));
+vi.mock('@/lib/db/server', () => ({ createDbServerClient }));
+vi.mock('@/lib/db/admin', () => ({ createAdminClient }));
 vi.mock('@/lib/auth-helpers', () => ({ getAuthContext }));
 vi.mock('@/services/notification-navigation', () => ({ attachNotificationHrefs }));
 
@@ -48,9 +48,9 @@ function createCountQueryStub(count: number) {
 
 describe('GET /api/notifications', () => {
   beforeEach(() => {
-    createSupabaseServerClient.mockReset();
+    createDbServerClient.mockReset();
     getAuthContext.mockReset();
-    createSupabaseAdminClient.mockReset();
+    createAdminClient.mockReset();
     attachNotificationHrefs.mockReset();
     getAuthContext.mockResolvedValue({ id: 'team-member-1', type: 'human', rateLimitExceeded: false, rateLimitRemaining: 299, rateLimitResetAt: 0 });
   });
@@ -61,14 +61,14 @@ describe('GET /api/notifications', () => {
     ];
     const notificationsQuery = createNotificationsQueryStub(rows);
     const countQuery = createCountQueryStub(1);
-    const supabase = {
+    const db = {
       from: vi.fn((table: string) => {
         if (table !== 'notifications') throw new Error(`unexpected table: ${table}`);
-        return supabase.from.mock.calls.length === 1 ? notificationsQuery : countQuery;
+        return db.from.mock.calls.length === 1 ? notificationsQuery : countQuery;
       }),
     };
 
-    createSupabaseServerClient.mockResolvedValue(supabase);
+    createDbServerClient.mockResolvedValue(db);
     attachNotificationHrefs.mockResolvedValue([
       { ...rows[0], href: '/memos?id=memo-1' },
     ]);
@@ -77,7 +77,7 @@ describe('GET /api/notifications', () => {
 
     expect(response.status).toBe(200);
     const body = await response.json();
-    expect(attachNotificationHrefs).toHaveBeenCalledWith(supabase, rows);
+    expect(attachNotificationHrefs).toHaveBeenCalledWith(db, rows);
     expect(body.data).toEqual([
       expect.objectContaining({ id: 'notification-1', href: '/memos?id=memo-1' }),
     ]);
@@ -87,15 +87,15 @@ describe('GET /api/notifications', () => {
 
 describe('PATCH /api/notifications', () => {
   beforeEach(() => {
-    createSupabaseServerClient.mockReset();
+    createDbServerClient.mockReset();
     getAuthContext.mockReset();
-    createSupabaseAdminClient.mockReset();
+    createAdminClient.mockReset();
     attachNotificationHrefs.mockReset();
     getAuthContext.mockResolvedValue({ id: 'team-member-1', type: 'human', rateLimitExceeded: false, rateLimitRemaining: 299, rateLimitResetAt: 0 });
   });
 
   it('returns validation errors for malformed payloads', async () => {
-    createSupabaseServerClient.mockResolvedValue({});
+    createDbServerClient.mockResolvedValue({});
 
     const response = await PATCH(new Request('http://localhost/api/notifications', {
       method: 'PATCH',

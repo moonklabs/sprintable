@@ -1,21 +1,21 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
-const { createSupabaseServerClient } = vi.hoisted(() => ({
-  createSupabaseServerClient: vi.fn(),
+const { createDbServerClient } = vi.hoisted(() => ({
+  createDbServerClient: vi.fn(),
 }));
 
 const { getAuthContext } = vi.hoisted(() => ({
   getAuthContext: vi.fn(),
 }));
 
-const { createSupabaseAdminClient } = vi.hoisted(() => ({
-  createSupabaseAdminClient: vi.fn(),
+const { createAdminClient } = vi.hoisted(() => ({
+  createAdminClient: vi.fn(),
 }));
 
 const getByIdWithDetailsMock = vi.fn();
 
-vi.mock('@/lib/supabase/server', () => ({ createSupabaseServerClient }));
-vi.mock('@/lib/supabase/admin', () => ({ createSupabaseAdminClient }));
+vi.mock('@/lib/db/server', () => ({ createDbServerClient }));
+vi.mock('@/lib/db/admin', () => ({ createAdminClient }));
 vi.mock('@/lib/auth-helpers', () => ({ getAuthContext }));
 vi.mock('@/services/memo', async (importOriginal) => {
   const actual = await importOriginal<typeof import('@/services/memo')>();
@@ -29,12 +29,12 @@ import { GET } from './route';
 
 describe('GET /api/memos/[id]', () => {
   beforeEach(() => {
-    createSupabaseServerClient.mockReset();
+    createDbServerClient.mockReset();
     getAuthContext.mockReset();
-    createSupabaseAdminClient.mockReset();
+    createAdminClient.mockReset();
     getByIdWithDetailsMock.mockReset();
-    createSupabaseServerClient.mockResolvedValue({});
-    createSupabaseAdminClient.mockReturnValue({});
+    createDbServerClient.mockResolvedValue({});
+    createAdminClient.mockReturnValue({});
   });
 
   it('returns 401 when no auth context', async () => {
@@ -81,7 +81,7 @@ describe('GET /api/memos/[id]', () => {
     });
 
     const mockAdminClient = { admin: true };
-    createSupabaseAdminClient.mockReturnValue(mockAdminClient);
+    createAdminClient.mockReturnValue(mockAdminClient);
     getByIdWithDetailsMock.mockResolvedValue({ id: 'memo-1', content: 'Test Memo', project_id: 'project-1' });
 
     await GET(
@@ -89,7 +89,7 @@ describe('GET /api/memos/[id]', () => {
       { params: Promise.resolve({ id: 'memo-1' }) }
     );
 
-    expect(createSupabaseAdminClient).toHaveBeenCalled();
+    expect(createAdminClient).toHaveBeenCalled();
     expect(getByIdWithDetailsMock).toHaveBeenCalled();
   });
 
@@ -103,7 +103,7 @@ describe('GET /api/memos/[id]', () => {
     });
 
     const mockServerClient = { server: true };
-    createSupabaseServerClient.mockResolvedValue(mockServerClient);
+    createDbServerClient.mockResolvedValue(mockServerClient);
     getByIdWithDetailsMock.mockResolvedValue({ id: 'memo-1', content: 'Test Memo', project_id: 'project-1' });
 
     await GET(
@@ -111,7 +111,7 @@ describe('GET /api/memos/[id]', () => {
       { params: Promise.resolve({ id: 'memo-1' }) }
     );
 
-    expect(createSupabaseAdminClient).not.toHaveBeenCalled();
+    expect(createAdminClient).not.toHaveBeenCalled();
     expect(getByIdWithDetailsMock).toHaveBeenCalled();
   });
 
@@ -148,7 +148,7 @@ describe('GET /api/memos/[id]', () => {
     });
 
     const mockAdminClient = { admin: true };
-    createSupabaseAdminClient.mockReturnValue(mockAdminClient);
+    createAdminClient.mockReturnValue(mockAdminClient);
     // Memo belongs to different project
     getByIdWithDetailsMock.mockResolvedValue({
       id: 'memo-2',
@@ -177,7 +177,7 @@ describe('GET /api/memos/[id]', () => {
     });
 
     const mockAdminClient = { admin: true };
-    createSupabaseAdminClient.mockReturnValue(mockAdminClient);
+    createAdminClient.mockReturnValue(mockAdminClient);
     getByIdWithDetailsMock.mockResolvedValue({
       id: 'memo-1',
       content: 'Same Project Memo',

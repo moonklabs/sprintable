@@ -1,12 +1,10 @@
-// eslint-disable-next-line @typescript-eslint/no-explicit-any
-type SupabaseClient = any;
 
 
 export class RewardsService {
-  constructor(private readonly supabase: SupabaseClient) {}
+  constructor(private readonly db: any) {}
 
   async getBalance(projectId: string, memberId: string) {
-    const { data, error } = await this.supabase
+    const { data, error } = await this.db
       .from('reward_ledger')
       .select('amount')
       .eq('project_id', projectId)
@@ -17,7 +15,7 @@ export class RewardsService {
   }
 
   async getLedger(projectId: string, memberId?: string) {
-    let query = this.supabase
+    let query = this.db
       .from('reward_ledger')
       .select('*')
       .eq('project_id', projectId)
@@ -30,7 +28,7 @@ export class RewardsService {
 
   async grant(input: { org_id: string; project_id: string; member_id: string; amount: number; reason: string; granted_by: string; reference_type?: string; reference_id?: string }) {
     // member_id가 같은 org/project 소속인지 검증
-    const { data: member } = await this.supabase
+    const { data: member } = await this.db
       .from('team_members')
       .select('id')
       .eq('id', input.member_id)
@@ -39,13 +37,13 @@ export class RewardsService {
       .single();
     if (!member) throw new Error('member_id must be a team member in the same project');
 
-    const { data, error } = await this.supabase.from('reward_ledger').insert(input).select().single();
+    const { data, error } = await this.db.from('reward_ledger').insert(input).select().single();
     if (error) throw error;
     return data;
   }
 
   async getLeaderboard(projectId: string) {
-    const { data, error } = await this.supabase
+    const { data, error } = await this.db
       .from('reward_ledger')
       .select('member_id, amount')
       .eq('project_id', projectId);
@@ -75,7 +73,7 @@ export class RewardsService {
 
     if (period === 'all') {
       // all-time: reward_balances materialized view 사용
-      let q = this.supabase
+      let q = this.db
         .from('reward_balances')
         .select('member_id, balance')
         .eq('project_id', projectId)
@@ -88,7 +86,7 @@ export class RewardsService {
     }
 
     const since = new Date(Date.now() - periodMs[period]).toISOString();
-    let q = this.supabase
+    let q = this.db
       .from('reward_ledger')
       .select('member_id, amount')
       .eq('project_id', projectId)

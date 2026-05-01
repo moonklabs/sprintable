@@ -12,18 +12,18 @@ export async function GET(request: Request) {
   if (isOssMode()) return apiSuccess([]);
   try {
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    const supabase: any = null;
-    const { data: { user } } = await supabase.auth.getUser();
+    const db: any = null;
+    const { data: { user } } = await db.auth.getUser();
     if (!user) return ApiErrors.unauthorized();
 
-    const me = await getMyTeamMember(supabase, user);
+    const me = await getMyTeamMember(db, user);
     if (!me) return ApiErrors.forbidden('Team member not found');
 
     const { searchParams } = new URL(request.url);
     const page = Number(searchParams.get('page') ?? '1');
     const limit = Number(searchParams.get('limit') ?? '20');
 
-    const service = new MockupService(supabase);
+    const service = new MockupService(db);
     const result = await service.list(me.project_id, page, limit);
     return apiSuccess(result.items, { total: result.total, page, limit });
   } catch (err: unknown) { return handleApiError(err); }
@@ -34,21 +34,21 @@ export async function POST(request: Request) {
   if (isOssMode()) return apiSuccess({ ok: true, skipped: true });
   try {
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    const supabase: any = null;
-    const { data: { user } } = await supabase.auth.getUser();
+    const db: any = null;
+    const { data: { user } } = await db.auth.getUser();
     if (!user) return ApiErrors.unauthorized();
 
-    const me = await getMyTeamMember(supabase, user);
+    const me = await getMyTeamMember(db, user);
     if (!me) return ApiErrors.forbidden('Team member not found');
 
     // Feature Gating
-    const check = await checkResourceLimit(supabase, me.org_id, 'max_mockups', 'mockup_pages');
+    const check = await checkResourceLimit(db, me.org_id, 'max_mockups', 'mockup_pages');
     if (!check.allowed) return apiError('UPGRADE_REQUIRED', check.reason ?? 'Mockup limit reached', 403);
 
     const parsed = await parseBody(request, createMockupPageSchema);
     if (!parsed.success) return parsed.response;
 
-    const service = new MockupService(supabase);
+    const service = new MockupService(db);
     const mockup = await service.create({
       org_id: me.org_id, project_id: me.project_id,
       slug: parsed.data.slug, title: parsed.data.title,

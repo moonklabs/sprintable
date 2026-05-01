@@ -22,7 +22,7 @@ export async function POST(request: Request) {
     return NextResponse.redirect(redirectToInternalDogfood(request, { error: 'memo_content_required' }));
   }
 
-  const memo = await createInternalDogfoodMemoInSprintable(context.supabase, context.actor, {
+  const memo = await createInternalDogfoodMemoInSprintable(context.db, context.actor, {
     title: title || null,
     content,
     memoType,

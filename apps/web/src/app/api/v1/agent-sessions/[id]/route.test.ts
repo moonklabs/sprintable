@@ -1,16 +1,16 @@
 import { describe, expect, it, vi, beforeEach } from 'vitest';
 
 const {
-  createSupabaseServerClientMock,
-  createSupabaseAdminClientMock,
+  createDbServerClientMock,
+  createAdminClientMock,
   getMyTeamMemberMock,
   requireOrgAdminMock,
   requireAgentOrchestrationMock,
   transitionSessionMock,
   resumeSessionCandidatesMock,
 } = vi.hoisted(() => ({
-  createSupabaseServerClientMock: vi.fn(),
-  createSupabaseAdminClientMock: vi.fn(),
+  createDbServerClientMock: vi.fn(),
+  createAdminClientMock: vi.fn(),
   getMyTeamMemberMock: vi.fn(),
   requireOrgAdminMock: vi.fn(),
   requireAgentOrchestrationMock: vi.fn(),
@@ -18,12 +18,12 @@ const {
   resumeSessionCandidatesMock: vi.fn(),
 }));
 
-vi.mock('@/lib/supabase/server', () => ({
-  createSupabaseServerClient: createSupabaseServerClientMock,
+vi.mock('@/lib/db/server', () => ({
+  createDbServerClient: createDbServerClientMock,
 }));
 
-vi.mock('@/lib/supabase/admin', () => ({
-  createSupabaseAdminClient: createSupabaseAdminClientMock,
+vi.mock('@/lib/db/admin', () => ({
+  createAdminClient: createAdminClientMock,
 }));
 
 vi.mock('@/lib/auth-helpers', () => ({
@@ -57,18 +57,18 @@ import { PATCH } from './route';
 
 describe('PATCH /api/v1/agent-sessions/[id]', () => {
   beforeEach(() => {
-    createSupabaseServerClientMock.mockReset();
-    createSupabaseAdminClientMock.mockReset();
+    createDbServerClientMock.mockReset();
+    createAdminClientMock.mockReset();
     getMyTeamMemberMock.mockReset();
     requireOrgAdminMock.mockReset();
     requireAgentOrchestrationMock.mockReset();
     transitionSessionMock.mockReset();
     resumeSessionCandidatesMock.mockReset();
 
-    createSupabaseServerClientMock.mockResolvedValue({
+    createDbServerClientMock.mockResolvedValue({
       auth: { getUser: vi.fn(async () => ({ data: { user: { id: 'user-1' } } })) },
     });
-    createSupabaseAdminClientMock.mockReturnValue({ tag: 'admin-supabase' });
+    createAdminClientMock.mockReturnValue({ tag: 'admin-db' });
     getMyTeamMemberMock.mockResolvedValue({ id: 'member-1', org_id: 'org-1', project_id: 'project-1' });
     requireOrgAdminMock.mockResolvedValue(undefined);
     requireAgentOrchestrationMock.mockResolvedValue(null);
@@ -135,7 +135,7 @@ describe('PATCH /api/v1/agent-sessions/[id]', () => {
     );
 
     expect(response.status).toBe(200);
-    expect(resumeSessionCandidatesMock).toHaveBeenCalledWith({ tag: 'admin-supabase' }, [
+    expect(resumeSessionCandidatesMock).toHaveBeenCalledWith({ tag: 'admin-db' }, [
       { runId: 'run-1', memoId: 'memo-1', orgId: 'org-1', projectId: 'project-1', agentId: 'agent-1' },
     ]);
   });

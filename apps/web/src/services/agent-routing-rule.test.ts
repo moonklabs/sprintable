@@ -8,7 +8,7 @@ import {
   normalizeRoutingConditions,
 } from './agent-routing-rule';
 
-function createSupabaseStub(
+function createDbStub(
   rules: Array<Record<string, unknown>>,
   options?: { teamMembers?: Array<Record<string, unknown>> },
 ) {
@@ -64,7 +64,7 @@ function createSupabaseStub(
 }
 
 
-function createDisableRulesSupabaseStub({
+function createDisableRulesDbStub({
   rules,
 }: {
   rules: Array<Record<string, unknown>>;
@@ -76,7 +76,7 @@ function createDisableRulesSupabaseStub({
 
   return {
     update,
-    supabase: {
+    db: {
       from(table: string) {
         if (table === 'agent_routing_rules') {
           return {
@@ -98,7 +98,7 @@ function createDisableRulesSupabaseStub({
   };
 }
 
-function createReplaceRulesSupabaseStub({
+function createReplaceRulesDbStub({
   rules,
   rpc,
 }: {
@@ -252,7 +252,7 @@ describe('AgentRoutingRuleService.reorderPriorities', () => {
     const rpc = vi.fn(async () => ({ data: null, error: null }));
     const service = new AgentRoutingRuleService({
       rpc,
-      from: createSupabaseStub(rules).from,
+      from: createDbStub(rules).from,
     } as never);
 
     const result = await service.reorderPriorities({ orgId: 'org-1', projectId: 'project-1' }, [
@@ -275,7 +275,7 @@ describe('AgentRoutingRuleService.reorderPriorities', () => {
     const rpc = vi.fn(async () => ({ data: null, error: new Error('routing_rule_reorder_scope_mismatch') }));
     const service = new AgentRoutingRuleService({
       rpc,
-      from: createSupabaseStub([]).from,
+      from: createDbStub([]).from,
     } as never);
 
     await expect(service.reorderPriorities({ orgId: 'org-1', projectId: 'project-1' }, [
@@ -333,7 +333,7 @@ describe('AgentRoutingRuleService.replaceRules', () => {
       },
     ];
     const rpc = vi.fn(async () => ({ data: null, error: null }));
-    const service = new AgentRoutingRuleService(createReplaceRulesSupabaseStub({ rules, rpc }) as never);
+    const service = new AgentRoutingRuleService(createReplaceRulesDbStub({ rules, rpc }) as never);
 
     const result = await service.replaceRules({
       orgId: 'org-1',
@@ -414,7 +414,7 @@ describe('AgentRoutingRuleService.replaceRules', () => {
 
   it('surfaces atomic replace failures without leaving client-side partial mutation loops', async () => {
     const rpc = vi.fn(async () => ({ data: null, error: new Error('routing_rule_replace_scope_mismatch') }));
-    const service = new AgentRoutingRuleService(createReplaceRulesSupabaseStub({ rules: [], rpc }) as never);
+    const service = new AgentRoutingRuleService(createReplaceRulesDbStub({ rules: [], rpc }) as never);
 
     await expect(service.replaceRules({
       orgId: 'org-1',
@@ -427,7 +427,7 @@ describe('AgentRoutingRuleService.replaceRules', () => {
 
   it('rejects process_and_forward replacements that omit a forward target instead of silently falling back later', async () => {
     const rpc = vi.fn(async () => ({ data: null, error: null }));
-    const service = new AgentRoutingRuleService(createReplaceRulesSupabaseStub({ rules: [], rpc }) as never);
+    const service = new AgentRoutingRuleService(createReplaceRulesDbStub({ rules: [], rpc }) as never);
 
     await expect(service.replaceRules({
       orgId: 'org-1',
@@ -540,7 +540,7 @@ describe('routing rollout helpers', () => {
 
 describe('AgentRoutingRuleService.disableRules', () => {
   it('disables all live rules in place so rollback metadata stays intact', async () => {
-    const { supabase, update } = createDisableRulesSupabaseStub({
+    const { db, update } = createDisableRulesDbStub({
       rules: [
         {
           id: 'rule-1',
@@ -577,7 +577,7 @@ describe('AgentRoutingRuleService.disableRules', () => {
         },
       ],
     });
-    const service = new AgentRoutingRuleService(supabase as never);
+    const service = new AgentRoutingRuleService(db as never);
 
     const result = await service.disableRules({ orgId: 'org-1', projectId: 'project-1' });
 
@@ -596,7 +596,7 @@ describe('AgentRoutingRuleService.disableRules', () => {
 
 describe('AgentRoutingRuleService.evaluateMemo', () => {
   it('picks the first matching rule after sorting by priority ASC', async () => {
-    const service = new AgentRoutingRuleService(createSupabaseStub([
+    const service = new AgentRoutingRuleService(createDbStub([
       {
         id: 'rule-low',
         org_id: 'org-1',
@@ -654,7 +654,7 @@ describe('AgentRoutingRuleService.evaluateMemo', () => {
   });
 
   it('treats empty conditions.memo_type as match-all', async () => {
-    const service = new AgentRoutingRuleService(createSupabaseStub([
+    const service = new AgentRoutingRuleService(createDbStub([
       {
         id: 'rule-1',
         org_id: 'org-1',
@@ -690,7 +690,7 @@ describe('AgentRoutingRuleService.evaluateMemo', () => {
   });
 
   it('falls back to the original assignee when nothing matches', async () => {
-    const service = new AgentRoutingRuleService(createSupabaseStub([
+    const service = new AgentRoutingRuleService(createDbStub([
       {
         id: 'rule-1',
         org_id: 'org-1',
@@ -727,7 +727,7 @@ describe('AgentRoutingRuleService.evaluateMemo', () => {
   });
 
   it('fails closed when a matched process_and_forward rule has no forward target', async () => {
-    const service = new AgentRoutingRuleService(createSupabaseStub([
+    const service = new AgentRoutingRuleService(createDbStub([
       {
         id: 'rule-broken',
         org_id: 'org-1',
@@ -760,7 +760,7 @@ describe('AgentRoutingRuleService.evaluateMemo', () => {
   });
 
   it('fails closed when a matched process_and_forward rule drifts to a human forward target', async () => {
-    const service = new AgentRoutingRuleService(createSupabaseStub([
+    const service = new AgentRoutingRuleService(createDbStub([
       {
         id: 'rule-human-target',
         org_id: 'org-1',

@@ -1,8 +1,8 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
-const { createSupabaseServerClient, createSupabaseAdminClient, getAuthContext, parseBody } = vi.hoisted(() => ({
-  createSupabaseServerClient: vi.fn(),
-  createSupabaseAdminClient: vi.fn(),
+const { createDbServerClient, createAdminClient, getAuthContext, parseBody } = vi.hoisted(() => ({
+  createDbServerClient: vi.fn(),
+  createAdminClient: vi.fn(),
   getAuthContext: vi.fn(),
   parseBody: vi.fn(),
 }));
@@ -20,8 +20,8 @@ vi.mock('@sprintable/shared', () => ({
     done: ['in-review'],
   },
 }));
-vi.mock('@/lib/supabase/server', () => ({ createSupabaseServerClient }));
-vi.mock('@/lib/supabase/admin', () => ({ createSupabaseAdminClient }));
+vi.mock('@/lib/db/server', () => ({ createDbServerClient }));
+vi.mock('@/lib/db/admin', () => ({ createAdminClient }));
 vi.mock('@/lib/auth-helpers', () => ({ getAuthContext }));
 vi.mock('@/lib/storage/factory', () => ({
   isOssMode: () => false,
@@ -54,8 +54,8 @@ const mockAuth = {
 describe('/api/docs/[id] route', () => {
   beforeEach(() => {
     vi.clearAllMocks();
-    createSupabaseServerClient.mockResolvedValue({});
-    createSupabaseAdminClient.mockReturnValue({});
+    createDbServerClient.mockResolvedValue({});
+    createAdminClient.mockReturnValue({});
     getAuthContext.mockResolvedValue(mockAuth);
     parseBody.mockResolvedValue({
       success: true,

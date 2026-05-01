@@ -1,5 +1,3 @@
-// eslint-disable-next-line @typescript-eslint/no-explicit-any
-type SupabaseClient = any;
 
 import type { AgentRunFailureDisposition } from './agent-retry';
 import { canManuallyRetryRun, getRunFailureDisposition } from './agent-run-history';
@@ -35,12 +33,12 @@ export interface AgentDeploymentCardData {
 }
 
 export async function buildDeploymentCards(
-  supabase: SupabaseClient,
+  db: any,
   orgId: string,
   projectId: string,
   requestedForTeamMemberId?: string,
 ): Promise<AgentDeploymentCardData[]> {
-  const { data: deployments, error: deploymentsError } = await supabase
+  const { data: deployments, error: deploymentsError } = await db
     .from('agent_deployments')
     .select('id, name, status, model, runtime, updated_at, agent_id, persona_id')
     .eq('org_id', orgId)
@@ -61,7 +59,7 @@ export async function buildDeploymentCards(
   todayStart.setHours(0, 0, 0, 0);
   const todayISO = todayStart.toISOString();
 
-  const pendingHitlRequestsQuery = supabase
+  const pendingHitlRequestsQuery = db
     .from('agent_hitl_requests')
     .select('run_id, expires_at')
     .eq('org_id', orgId)
@@ -82,28 +80,28 @@ export async function buildDeploymentCards(
     { data: pendingHitlRequests, error: pendingHitlRequestsError },
   ] = await Promise.all([
     agentIds.length
-      ? supabase.from('team_members').select('id, name').in('id', agentIds)
+      ? db.from('team_members').select('id, name').in('id', agentIds)
       : Promise.resolve({ data: [] as Array<{ id: string; name: string }>, error: null }),
     personaIds.length
-      ? supabase.from('agent_personas').select('id, name').in('id', personaIds)
+      ? db.from('agent_personas').select('id, name').in('id', personaIds)
       : Promise.resolve({ data: [] as Array<{ id: string; name: string }>, error: null }),
-    supabase
+    db
       .from('agent_runs')
       .select('deployment_id, input_tokens, output_tokens')
       .in('deployment_id', deploymentIds)
       .gte('created_at', todayISO),
-    supabase
+    db
       .from('agent_runs')
       .select('deployment_id, finished_at, started_at, created_at')
       .in('deployment_id', deploymentIds)
       .order('created_at', { ascending: false }),
-    supabase
+    db
       .from('agent_runs')
       .select('deployment_id, finished_at, started_at, created_at')
       .in('deployment_id', deploymentIds)
       .eq('status', 'completed')
       .order('created_at', { ascending: false }),
-    supabase
+    db
       .from('agent_runs')
       .select('id, deployment_id, memo_id, error_message, last_error_code, result_summary, retry_count, max_retries, next_retry_at, failure_disposition, finished_at, started_at, created_at')
       .in('deployment_id', deploymentIds)
@@ -122,7 +120,7 @@ export async function buildDeploymentCards(
 
   const hitlRunIds = [...new Set((pendingHitlRequests ?? []).map((row) => row.run_id as string | null).filter(Boolean) as string[])];
   const { data: hitlRuns, error: hitlRunsError } = hitlRunIds.length
-    ? await supabase.from('agent_runs').select('id, deployment_id').in('id', hitlRunIds)
+    ? await db.from('agent_runs').select('id, deployment_id').in('id', hitlRunIds)
     : { data: [] as Array<{ id: string; deployment_id: string | null }>, error: null };
 
   if (hitlRunsError) throw hitlRunsError;

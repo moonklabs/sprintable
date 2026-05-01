@@ -1,10 +1,8 @@
-import { createSupabaseAdminClient } from '@/lib/supabase/admin';
-// eslint-disable-next-line @typescript-eslint/no-explicit-any
-type SupabaseClient = any;
+import { createAdminClient } from '@/lib/db/admin';
 import type { PromptProjectRecord, PromptTeamMemberRecord } from './agent-system-prompt';
 
 export interface ProjectContextLoaderOptions {
-  readClient?: SupabaseClient;
+  readClient?: any;
   timeoutMs?: number;
   recentMemoLimit?: number;
   openEpicLimit?: number;
@@ -108,20 +106,20 @@ function withTimeout<T>(promise: Promise<T>, timeoutMs: number): Promise<T> {
   });
 }
 
-export function createProjectContextReplicaClient(): SupabaseClient | null {
+export function createProjectContextReplicaClient(): any | null {
   // 레플리카 클라이언트는 사용하지 않음
   return null;
 }
 
 export class ProjectContextLoader {
-  private readonly readClient: SupabaseClient;
+  private readonly readClient: any;
   private readonly timeoutMs: number;
   private readonly recentMemoLimit: number;
   private readonly openEpicLimit: number;
   private readonly openStoryLimit: number;
 
   constructor(
-    private readonly primaryClient: SupabaseClient,
+    private readonly primaryClient: any,
     options: ProjectContextLoaderOptions = {},
   ) {
     this.readClient = options.readClient ?? createProjectContextReplicaClient() ?? primaryClient;
@@ -142,7 +140,7 @@ export class ProjectContextLoader {
     }
   }
 
-  private async loadDetailed(client: SupabaseClient, scope: { orgId: string; projectId: string; agentId: string }) {
+  private async loadDetailed(client: any, scope: { orgId: string; projectId: string; agentId: string }) {
     const [projectResult, teamMembersResult, memosResult, epicsResult, storiesResult] = await Promise.all([
       client
         .from('projects')

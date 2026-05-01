@@ -12,11 +12,11 @@ export async function GET(_request: Request, { params }: RouteParams) {
   try {
     const { id } = await params;
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    const supabase: any = null;
-    const { data: { user } } = await supabase.auth.getUser();
+    const db: any = null;
+    const { data: { user } } = await db.auth.getUser();
     if (!user) return ApiErrors.unauthorized();
 
-    const service = new MockupService(supabase);
+    const service = new MockupService(db);
     const mockup = await service.getById(id);
     return apiSuccess(mockup);
   } catch (err: unknown) { return handleApiError(err); }
@@ -28,14 +28,14 @@ export async function PUT(request: Request, { params }: RouteParams) {
   try {
     const { id } = await params;
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    const supabase: any = null;
-    const { data: { user } } = await supabase.auth.getUser();
+    const db: any = null;
+    const { data: { user } } = await db.auth.getUser();
     if (!user) return ApiErrors.unauthorized();
 
     const parsed = await parseBody(request, updateMockupPageSchema);
     if (!parsed.success) return parsed.response;
 
-    const service = new MockupService(supabase);
+    const service = new MockupService(db);
     const result = await service.update(id, parsed.data);
     return apiSuccess(result);
   } catch (err: unknown) { return handleApiError(err); }
@@ -47,11 +47,11 @@ export async function DELETE(_request: Request, { params }: RouteParams) {
   try {
     const { id } = await params;
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    const supabase: any = null;
-    const { data: { user } } = await supabase.auth.getUser();
+    const db: any = null;
+    const { data: { user } } = await db.auth.getUser();
     if (!user) return ApiErrors.unauthorized();
 
-    const service = new MockupService(supabase);
+    const service = new MockupService(db);
     await service.delete(id);
     return apiSuccess({ ok: true });
   } catch (err: unknown) { return handleApiError(err); }

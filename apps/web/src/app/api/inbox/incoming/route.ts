@@ -1,6 +1,6 @@
 import { handleApiError } from '@/lib/api-error';
 import { apiSuccess, ApiErrors } from '@/lib/api-response';
-import { createSupabaseAdminClient } from '@/lib/supabase/admin';
+import { createAdminClient } from '@/lib/db/admin';
 import { isOssMode, createInboxItemRepository } from '@/lib/storage/factory';
 import { incomingInboxItemSchema } from '@sprintable/shared';
 import { verifyIncomingHmac } from '@/services/inbox-item.service';
@@ -44,7 +44,7 @@ export async function POST(request: Request) {
     }
 
     const ossMode = isOssMode();
-    const repo = await createInboxItemRepository(ossMode ? undefined : createSupabaseAdminClient());
+    const repo = await createInboxItemRepository(ossMode ? undefined : createAdminClient());
 
     const item = await repo.create({
       org_id: orgIdHeader,

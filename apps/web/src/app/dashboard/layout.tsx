@@ -1,9 +1,9 @@
 import { redirect } from 'next/navigation';
 import { isOssMode } from '@/lib/storage/factory';
-import { getServerSession } from '@/lib/supabase/server';
+import { getServerSession } from '@/lib/db/server';
 import { getOssUserContext } from '@/lib/auth-helpers';
 import { DashboardShell } from './dashboard-shell';
-import { fastapiCall } from '@sprintable/storage-supabase';
+import { fastapiCall } from '@sprintable/storage-api';
 
 interface MemberContext {
   id: string;

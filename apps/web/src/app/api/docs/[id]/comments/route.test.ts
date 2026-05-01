@@ -1,8 +1,8 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
-const { createSupabaseServerClient, createSupabaseAdminClient, getAuthContext, notifyDocCommentMentions, addComment } = vi.hoisted(() => ({
-  createSupabaseServerClient: vi.fn(),
-  createSupabaseAdminClient: vi.fn(),
+const { createDbServerClient, createAdminClient, getAuthContext, notifyDocCommentMentions, addComment } = vi.hoisted(() => ({
+  createDbServerClient: vi.fn(),
+  createAdminClient: vi.fn(),
   getAuthContext: vi.fn(),
   notifyDocCommentMentions: vi.fn(),
   addComment: vi.fn(),
@@ -22,8 +22,8 @@ vi.mock('@sprintable/shared', () => ({
     done: ['in-review'],
   },
 }));
-vi.mock('@/lib/supabase/server', () => ({ createSupabaseServerClient }));
-vi.mock('@/lib/supabase/admin', () => ({ createSupabaseAdminClient }));
+vi.mock('@/lib/db/server', () => ({ createDbServerClient }));
+vi.mock('@/lib/db/admin', () => ({ createAdminClient }));
 vi.mock('@/services/doc-comment-notifications', () => ({ notifyDocCommentMentions }));
 vi.mock('@/lib/auth-helpers', () => ({ getAuthContext }));
 vi.mock('@/services/docs', () => {
@@ -47,14 +47,14 @@ const mockAuth = {
 
 describe('POST /api/docs/[id]/comments', () => {
   beforeEach(() => {
-    createSupabaseServerClient.mockReset();
-    createSupabaseAdminClient.mockReset();
+    createDbServerClient.mockReset();
+    createAdminClient.mockReset();
     getAuthContext.mockReset();
     notifyDocCommentMentions.mockReset();
     addComment.mockReset();
 
-    createSupabaseServerClient.mockResolvedValue({});
-    createSupabaseAdminClient.mockReturnValue({ tag: 'admin' });
+    createDbServerClient.mockResolvedValue({});
+    createAdminClient.mockReturnValue({ tag: 'admin' });
     getAuthContext.mockResolvedValue(mockAuth);
     addComment.mockResolvedValue({
       id: 'comment-1',

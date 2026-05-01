@@ -1,8 +1,8 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
-const { createSupabaseServerClient, createSupabaseAdminClient, getAuthContext, createTaskRepository, isOssMode } = vi.hoisted(() => ({
-  createSupabaseServerClient: vi.fn(),
-  createSupabaseAdminClient: vi.fn(),
+const { createDbServerClient, createAdminClient, getAuthContext, createTaskRepository, isOssMode } = vi.hoisted(() => ({
+  createDbServerClient: vi.fn(),
+  createAdminClient: vi.fn(),
   getAuthContext: vi.fn(),
   createTaskRepository: vi.fn(),
   isOssMode: vi.fn().mockReturnValue(false),
@@ -10,8 +10,8 @@ const { createSupabaseServerClient, createSupabaseAdminClient, getAuthContext, c
 
 const listMock = vi.fn();
 
-vi.mock('@/lib/supabase/server', () => ({ createSupabaseServerClient }));
-vi.mock('@/lib/supabase/admin', () => ({ createSupabaseAdminClient }));
+vi.mock('@/lib/db/server', () => ({ createDbServerClient }));
+vi.mock('@/lib/db/admin', () => ({ createAdminClient }));
 vi.mock('@/lib/auth-helpers', () => ({ getAuthContext }));
 vi.mock('@/lib/storage/factory', () => ({ createTaskRepository, isOssMode }));
 vi.mock('@/services/task', () => ({ TaskService: class { list = listMock; } }));
@@ -46,15 +46,15 @@ function createCountBuilder() {
 describe('GET /api/tasks', () => {
   beforeEach(() => {
     listMock.mockReset();
-    createSupabaseServerClient.mockReset();
-    createSupabaseAdminClient.mockReset();
+    createDbServerClient.mockReset();
+    createAdminClient.mockReset();
     getAuthContext.mockReset();
     createTaskRepository.mockReset();
     isOssMode.mockReturnValue(false);
 
-    const supabaseMock = { from: vi.fn(() => createCountBuilder()) };
-    createSupabaseServerClient.mockResolvedValue(supabaseMock);
-    createSupabaseAdminClient.mockReturnValue(supabaseMock);
+    const dbMock = { from: vi.fn(() => createCountBuilder()) };
+    createDbServerClient.mockResolvedValue(dbMock);
+    createAdminClient.mockReturnValue(dbMock);
     getAuthContext.mockResolvedValue(mockAuth);
     createTaskRepository.mockResolvedValue({});
   });

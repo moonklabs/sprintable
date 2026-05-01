@@ -21,10 +21,10 @@ describe('InboxOutboxService.scan', () => {
   });
 
   it('returns zero counts when no rows are claimed', async () => {
-    const supabase = {
+    const db = {
       rpc: vi.fn().mockResolvedValue({ data: [], error: null }),
     };
-    const service = new InboxOutboxService(supabase as never, {
+    const service = new InboxOutboxService(db as never, {
       hmacSecret: 'secret',
       logger: { error: () => {} },
     });
@@ -32,7 +32,7 @@ describe('InboxOutboxService.scan', () => {
     const result = await service.scan();
 
     expect(result).toEqual({ scanned: 0, delivered: 0, retried: 0, dead: 0, skipped: 0 });
-    expect(supabase.rpc).toHaveBeenCalledWith('claim_pending_outbox', expect.any(Object));
+    expect(db.rpc).toHaveBeenCalledWith('claim_pending_outbox', expect.any(Object));
   });
 
   it('delivers rows with 2xx response and marks delivered', async () => {
@@ -40,7 +40,7 @@ describe('InboxOutboxService.scan', () => {
     const fetchImpl = vi.fn().mockResolvedValue(new Response(null, { status: 200 }));
 
     const rpcCalls: Array<{ name: string; args: Record<string, unknown> }> = [];
-    const supabase = {
+    const db = {
       rpc: vi.fn(async (name: string, args: Record<string, unknown>) => {
         rpcCalls.push({ name, args });
         if (name === 'claim_pending_outbox') return { data: [row], error: null };
@@ -49,7 +49,7 @@ describe('InboxOutboxService.scan', () => {
       }),
     };
 
-    const service = new InboxOutboxService(supabase as never, {
+    const service = new InboxOutboxService(db as never, {
       hmacSecret: 'secret',
       fetchImpl,
       logger: { error: () => {} },
@@ -74,7 +74,7 @@ describe('InboxOutboxService.scan', () => {
     const row = makeRow({ attempt_count: 1 });
     const fetchImpl = vi.fn().mockResolvedValue(new Response(null, { status: 502 }));
 
-    const supabase = {
+    const db = {
       rpc: vi.fn(async (name: string) => {
         if (name === 'claim_pending_outbox') return { data: [row], error: null };
         if (name === 'mark_outbox_failed') return { data: { ...row, status: 'pending' }, error: null };
@@ -82,7 +82,7 @@ describe('InboxOutboxService.scan', () => {
       }),
     };
 
-    const service = new InboxOutboxService(supabase as never, {
+    const service = new InboxOutboxService(db as never, {
       hmacSecret: 'secret',
       fetchImpl,
       logger: { error: () => {} },
@@ -91,7 +91,7 @@ describe('InboxOutboxService.scan', () => {
     const result = await service.scan();
 
     expect(result).toEqual({ scanned: 1, delivered: 0, retried: 1, dead: 0, skipped: 0 });
-    expect(supabase.rpc).toHaveBeenCalledWith(
+    expect(db.rpc).toHaveBeenCalledWith(
       'mark_outbox_failed',
       expect.objectContaining({ p_id: row.id, p_error: 'http_502' }),
     );
@@ -101,7 +101,7 @@ describe('InboxOutboxService.scan', () => {
     const row = makeRow({ attempt_count: 5 });
     const fetchImpl = vi.fn().mockResolvedValue(new Response(null, { status: 500 }));
 
-    const supabase = {
+    const db = {
       rpc: vi.fn(async (name: string) => {
         if (name === 'claim_pending_outbox') return { data: [row], error: null };
         if (name === 'mark_outbox_failed') return { data: { ...row, status: 'dead' }, error: null };
@@ -109,7 +109,7 @@ describe('InboxOutboxService.scan', () => {
       }),
     };
 
-    const service = new InboxOutboxService(supabase as never, {
+    const service = new InboxOutboxService(db as never, {
       hmacSecret: 'secret',
       fetchImpl,
       logger: { error: () => {} },
@@ -124,7 +124,7 @@ describe('InboxOutboxService.scan', () => {
     const row = makeRow({ webhook_url: null });
     const fetchImpl = vi.fn();
 
-    const supabase = {
+    const db = {
       rpc: vi.fn(async (name: string) => {
         if (name === 'claim_pending_outbox') return { data: [row], error: null };
         if (name === 'mark_outbox_dead') return { data: { ...row, status: 'dead' }, error: null };
@@ -132,7 +132,7 @@ describe('InboxOutboxService.scan', () => {
       }),
     };
 
-    const service = new InboxOutboxService(supabase as never, {
+    const service = new InboxOutboxService(db as never, {
       hmacSecret: 'secret',
       fetchImpl,
       logger: { error: () => {} },
@@ -142,7 +142,7 @@ describe('InboxOutboxService.scan', () => {
 
     expect(result).toEqual({ scanned: 1, delivered: 0, retried: 0, dead: 0, skipped: 1 });
     expect(fetchImpl).not.toHaveBeenCalled();
-    expect(supabase.rpc).toHaveBeenCalledWith(
+    expect(db.rpc).toHaveBeenCalledWith(
       'mark_outbox_dead',
       expect.objectContaining({ p_error: 'no_webhook_url' }),
     );
@@ -152,7 +152,7 @@ describe('InboxOutboxService.scan', () => {
     const row = makeRow();
     const fetchImpl = vi.fn().mockRejectedValue(new Error('network down'));
 
-    const supabase = {
+    const db = {
       rpc: vi.fn(async (name: string) => {
         if (name === 'claim_pending_outbox') return { data: [row], error: null };
         if (name === 'mark_outbox_failed') return { data: { ...row, status: 'pending' }, error: null };
@@ -160,7 +160,7 @@ describe('InboxOutboxService.scan', () => {
       }),
     };
 
-    const service = new InboxOutboxService(supabase as never, {
+    const service = new InboxOutboxService(db as never, {
       hmacSecret: 'secret',
       fetchImpl,
       logger: { error: () => {} },
@@ -169,7 +169,7 @@ describe('InboxOutboxService.scan', () => {
     const result = await service.scan();
 
     expect(result).toEqual({ scanned: 1, delivered: 0, retried: 1, dead: 0, skipped: 0 });
-    expect(supabase.rpc).toHaveBeenCalledWith(
+    expect(db.rpc).toHaveBeenCalledWith(
       'mark_outbox_failed',
       expect.objectContaining({ p_error: 'network down' }),
     );
@@ -194,7 +194,7 @@ describe('InboxOutboxService.scan', () => {
       return new Response(null, { status: 503 });
     }) as unknown as typeof fetch;
 
-    const supabase = {
+    const db = {
       rpc: vi.fn(async (name: string) => {
         if (name === 'claim_pending_outbox') return { data: [ok, fail, skip], error: null };
         if (name === 'mark_outbox_delivered') return { data: { ...ok, status: 'delivered' }, error: null };
@@ -204,7 +204,7 @@ describe('InboxOutboxService.scan', () => {
       }),
     };
 
-    const service = new InboxOutboxService(supabase as never, {
+    const service = new InboxOutboxService(db as never, {
       hmacSecret: 'secret',
       fetchImpl,
       logger: { error: () => {} },
@@ -216,10 +216,10 @@ describe('InboxOutboxService.scan', () => {
   });
 
   it('throws when claim_pending_outbox RPC errors', async () => {
-    const supabase = {
+    const db = {
       rpc: vi.fn().mockResolvedValue({ data: null, error: { message: 'pg_down' } }),
     };
-    const service = new InboxOutboxService(supabase as never, {
+    const service = new InboxOutboxService(db as never, {
       hmacSecret: 'secret',
       logger: { error: () => {} },
     });
@@ -231,14 +231,14 @@ describe('InboxOutboxService.scan', () => {
     const row = makeRow();
     const fetchImpl = vi.fn().mockResolvedValue(new Response(null, { status: 200 }));
 
-    const supabase = {
+    const db = {
       rpc: vi.fn(async (name: string) => {
         if (name === 'claim_pending_outbox') return { data: [row], error: null };
         return { data: { ...row, status: 'delivered' }, error: null };
       }),
     };
 
-    const service = new InboxOutboxService(supabase as never, {
+    const service = new InboxOutboxService(db as never, {
       hmacSecret: '',
       fetchImpl,
       logger: { error: () => {} },

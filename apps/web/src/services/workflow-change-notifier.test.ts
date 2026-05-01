@@ -26,7 +26,7 @@ function makeRule(overrides: Partial<RoutingRuleSummary> = {}): RoutingRuleSumma
   };
 }
 
-function makeSupabaseStub({
+function makeDbStub({
   latestVersion = { id: 'wv-1', version: 3, change_summary: { added_rules: 1, removed_rules: 0, changed_rules: 0 } },
   memoCreateData = { id: 'memo-1', project_id: 'proj-1', org_id: 'org-1', title: null, content: '', memo_type: 'system_workflow_update', status: 'open', assigned_to: null, created_by: 'actor-1', created_at: '2026-01-01T00:00:00Z', updated_at: '2026-01-01T00:00:00Z', metadata: {} },
   insertChangeEvent = vi.fn(async () => ({ error: null })),
@@ -39,7 +39,7 @@ function makeSupabaseStub({
 
   return {
     insertChangeEvent,
-    supabase: {
+    db: {
       from(table: string) {
         if (table === 'workflow_versions') {
           return {
@@ -112,8 +112,8 @@ function makeSupabaseStub({
 
 describe('notifyWorkflowChange', () => {
   it('returns early when no workflow_versions exist', async () => {
-    const { supabase, insertChangeEvent } = makeSupabaseStub({ latestVersion: null });
-    await notifyWorkflowChange(supabase as never, {
+    const { db, insertChangeEvent } = makeDbStub({ latestVersion: null });
+    await notifyWorkflowChange(db as never, {
       orgId: 'org-1',
       projectId: 'proj-1',
       actorId: 'actor-1',
@@ -123,8 +123,8 @@ describe('notifyWorkflowChange', () => {
   });
 
   it('returns early when newRules is empty', async () => {
-    const { supabase, insertChangeEvent } = makeSupabaseStub();
-    await notifyWorkflowChange(supabase as never, {
+    const { db, insertChangeEvent } = makeDbStub();
+    await notifyWorkflowChange(db as never, {
       orgId: 'org-1',
       projectId: 'proj-1',
       actorId: 'actor-1',
@@ -135,12 +135,12 @@ describe('notifyWorkflowChange', () => {
 
   it('deduplicates agent_id and forward_to_agent_id', async () => {
     const insertChangeEvent = vi.fn(async () => ({ error: null }));
-    const { supabase } = makeSupabaseStub({ insertChangeEvent });
+    const { db } = makeDbStub({ insertChangeEvent });
     const rules = [
       makeRule({ agent_id: 'agent-a', action: { auto_reply_mode: 'process_and_forward', forward_to_agent_id: 'agent-b' } }),
       makeRule({ id: 'rule-2', agent_id: 'agent-a', action: { auto_reply_mode: 'process_and_report', forward_to_agent_id: null } }),
     ];
-    await notifyWorkflowChange(supabase as never, {
+    await notifyWorkflowChange(db as never, {
       orgId: 'org-1',
       projectId: 'proj-1',
       actorId: 'actor-1',
@@ -152,8 +152,8 @@ describe('notifyWorkflowChange', () => {
 
   it('inserts workflow_change_events with version_id and memo_ids', async () => {
     const insertChangeEvent = vi.fn(async () => ({ error: null }));
-    const { supabase } = makeSupabaseStub({ insertChangeEvent });
-    await notifyWorkflowChange(supabase as never, {
+    const { db } = makeDbStub({ insertChangeEvent });
+    await notifyWorkflowChange(db as never, {
       orgId: 'org-1',
       projectId: 'proj-1',
       actorId: 'actor-1',
@@ -167,8 +167,8 @@ describe('notifyWorkflowChange', () => {
   });
 
   it('includes version number in memo content', async () => {
-    const { supabase, insertChangeEvent } = makeSupabaseStub();
-    await notifyWorkflowChange(supabase as never, {
+    const { db, insertChangeEvent } = makeDbStub();
+    await notifyWorkflowChange(db as never, {
       orgId: 'org-1',
       projectId: 'proj-1',
       actorId: 'actor-1',

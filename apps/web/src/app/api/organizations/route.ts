@@ -1,4 +1,4 @@
-import { apiError } from '@/lib/api-response';
+import { apiError, apiSuccess } from '@/lib/api-response';
 
 // POST /api/organizations — not supported in OSS mode
 export async function POST() {

@@ -1,5 +1,3 @@
-// eslint-disable-next-line @typescript-eslint/no-explicit-any
-type SupabaseClient = any;
 
 import { AgentRetryService, type RetryScheduler } from './agent-retry';
 import {
@@ -147,13 +145,13 @@ export class AgentSessionLifecycleService {
   private readonly retryService: RetryScheduler;
 
   constructor(
-    private readonly supabase: SupabaseClient,
+    private readonly db: any,
     options: AgentSessionLifecycleOptions = {},
   ) {
     this.sessionLimit = Math.max(1, options.sessionLimit ?? Number(process.env['AGENT_SESSION_CONCURRENCY_LIMIT'] ?? DEFAULT_SESSION_LIMIT));
     this.crashTimeoutMs = Math.max(60_000, options.crashTimeoutMs ?? Number(process.env['AGENT_SESSION_CRASH_TIMEOUT_MS'] ?? DEFAULT_CRASH_TIMEOUT_MS));
     this.nowFn = options.nowFn ?? (() => new Date());
-    this.retryService = options.retryService ?? new AgentRetryService(supabase);
+    this.retryService = options.retryService ?? new AgentRetryService(db);
   }
 
   async claimSession(input: {
@@ -340,7 +338,7 @@ export class AgentSessionLifecycleService {
     status?: AgentSessionStatus;
     limit?: number;
   }): Promise<AgentSessionRecord[]> {
-    let query = this.supabase
+    let query = this.db
       .from('agent_sessions')
       .select('*')
       .eq('org_id', input.orgId)
@@ -359,7 +357,7 @@ export class AgentSessionLifecycleService {
 
   async recoverStaleRuns(): Promise<RecoverStaleSessionsResult> {
     const cutoff = new Date(this.nowFn().getTime() - this.crashTimeoutMs).toISOString();
-    const { data, error } = await this.supabase
+    const { data, error } = await this.db
       .from('agent_runs')
       .select('id, org_id, project_id, agent_id, memo_id, session_id, status, retry_count, max_retries, started_at, finished_at, result_summary, last_error_code, error_message')
       .eq('status', 'running')
@@ -381,7 +379,7 @@ export class AgentSessionLifecycleService {
     for (const row of (data ?? []) as AgentSessionRunRecord[]) {
       if (!row.session_id) continue;
 
-        const { error: failError } = await this.supabase
+        const { error: failError } = await this.db
         .from('agent_runs')
         .update({
           status: 'failed',
@@ -423,7 +421,7 @@ export class AgentSessionLifecycleService {
   }
 
   private async getSessionByKey(orgId: string, projectId: string, agentId: string, sessionKey: string) {
-    const { data, error } = await this.supabase
+    const { data, error } = await this.db
       .from('agent_sessions')
       .select('*')
       .eq('org_id', orgId)
@@ -438,7 +436,7 @@ export class AgentSessionLifecycleService {
   }
 
   private async getSessionById(id: string) {
-    const { data, error } = await this.supabase
+    const { data, error } = await this.db
       .from('agent_sessions')
       .select('*')
       .eq('id', id)
@@ -450,7 +448,7 @@ export class AgentSessionLifecycleService {
   }
 
   private async countActiveSessions(orgId: string, projectId: string, agentId: string, excludeId: string | null) {
-    let query = this.supabase
+    let query = this.db
       .from('agent_sessions')
       .select('id')
       .eq('org_id', orgId)
@@ -467,7 +465,7 @@ export class AgentSessionLifecycleService {
   }
 
   private async createSession(payload: Record<string, unknown>) {
-    const { data, error } = await this.supabase
+    const { data, error } = await this.db
       .from('agent_sessions')
       .insert({
         context_snapshot: {},
@@ -481,7 +479,7 @@ export class AgentSessionLifecycleService {
   }
 
   private async updateSession(id: string, patch: Record<string, unknown>) {
-    const { error } = await this.supabase
+    const { error } = await this.db
       .from('agent_sessions')
       .update(patch)
       .eq('id', id);
@@ -588,7 +586,7 @@ export class AgentSessionLifecycleService {
   }
 
   private async listSessionMemories(scope: AgentSessionMemoryScope): Promise<SessionMemoryRow[]> {
-    const { data, error } = await this.supabase
+    const { data, error } = await this.db
       .from('agent_session_memories')
       .select('id, org_id, project_id, agent_id, session_id, run_id, memory_type, importance, content, metadata, created_at')
       .eq('org_id', scope.orgId)
@@ -618,7 +616,7 @@ export class AgentSessionLifecycleService {
     if (existingMemories.length > 0) return 0;
 
     for (const memory of memories) {
-      const { error } = await this.supabase
+      const { error } = await this.db
         .from('agent_session_memories')
         .insert(createSessionMemoryWrite({
           scope: {
@@ -641,7 +639,7 @@ export class AgentSessionLifecycleService {
   }
 
   private async resumeHeldRunsForSession(sessionId: string): Promise<SessionResumeCandidate[]> {
-    const { data: heldRuns, error: heldRunsError } = await this.supabase
+    const { data: heldRuns, error: heldRunsError } = await this.db
       .from('agent_runs')
       .select('id, org_id, project_id, agent_id, memo_id, session_id, status, retry_count, max_retries, started_at, finished_at, result_summary, last_error_code, error_message')
       .eq('session_id', sessionId)
@@ -653,7 +651,7 @@ export class AgentSessionLifecycleService {
     const run = ((heldRuns ?? []) as AgentSessionRunRecord[])[0];
     if (!run || !run.memo_id || !run.session_id) return [];
 
-    const { error: resumeError } = await this.supabase
+    const { error: resumeError } = await this.db
       .from('agent_runs')
       .update({
         status: 'running',
@@ -681,7 +679,7 @@ export class AgentSessionLifecycleService {
     let availableSlots = this.sessionLimit - await this.countActiveSessions(orgId, projectId, agentId, null);
     if (availableSlots <= 0) return [];
 
-    const { data: heldRuns, error: heldRunsError } = await this.supabase
+    const { data: heldRuns, error: heldRunsError } = await this.db
       .from('agent_runs')
       .select('id, org_id, project_id, agent_id, memo_id, session_id, status, retry_count, max_retries, started_at, finished_at, result_summary, last_error_code, error_message')
       .eq('org_id', orgId)
@@ -707,7 +705,7 @@ export class AgentSessionLifecycleService {
       );
       await this.restoreContextSnapshotIfNeeded(activated);
 
-      const { error: resumeError } = await this.supabase
+      const { error: resumeError } = await this.db
         .from('agent_runs')
         .update({
           status: 'running',

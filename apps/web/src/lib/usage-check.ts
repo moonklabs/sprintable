@@ -1,5 +1,3 @@
-// eslint-disable-next-line @typescript-eslint/no-explicit-any
-type SupabaseClient = any;
 
 // OSS stub — 실제 구현은 @moonklabs/sprintable-saas 에 있다.
 // OSS 단독 빌드에서는 usage 한도가 없으므로 모든 호출이 allowed로 반환된다.
@@ -13,7 +11,7 @@ export interface UsageCheckResult {
 }
 
 export async function checkUsage(
-  _supabase: SupabaseClient,
+  _db: any,
   _orgId: string,
   meterType: string,
 ): Promise<UsageCheckResult> {
@@ -21,7 +19,7 @@ export async function checkUsage(
 }
 
 export async function incrementUsage(
-  _supabase: SupabaseClient,
+  _db: any,
   _orgId: string,
   _meterType: string,
   _delta: number = 1,

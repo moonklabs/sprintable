@@ -1,8 +1,6 @@
-// eslint-disable-next-line @typescript-eslint/no-explicit-any
-type SupabaseClient = any;
 
 import type { IStoryRepository, CreateStoryInput, UpdateStoryInput, BulkUpdateItem, StoryListFilters } from '@sprintable/core-storage';
-import { SupabaseStoryRepository } from '@sprintable/storage-supabase';
+import { ApiStoryRepository } from '@sprintable/storage-api';
 import { NotFoundError, ForbiddenError } from './sprint';
 import { requireOrgAdmin, isOrgAdmin } from '@/lib/admin-check';
 import { VALID_STORY_TRANSITIONS } from '@sprintable/shared';
@@ -20,17 +18,17 @@ export class InvalidTransitionError extends Error {
 
 export class StoryService {
   private readonly repo: IStoryRepository;
-  private readonly supabase: SupabaseClient | null;
+  private readonly db: any | null;
   private readonly isAdminContext: boolean;
 
-  constructor(repo: IStoryRepository, supabase?: SupabaseClient, options?: { isAdminContext?: boolean }) {
+  constructor(repo: IStoryRepository, db?: any, options?: { isAdminContext?: boolean }) {
     this.repo = repo;
-    this.supabase = supabase ?? null;
+    this.db = db ?? null;
     this.isAdminContext = options?.isAdminContext ?? false;
   }
 
-  static fromSupabase(supabase: SupabaseClient): StoryService {
-    return new StoryService(new SupabaseStoryRepository(supabase), supabase);
+  static fromDb(db: any): StoryService {
+    return new StoryService(new ApiStoryRepository(db), db);
   }
 
   async create(input: CreateStoryInput) {
@@ -38,8 +36,8 @@ export class StoryService {
     if (!input.project_id) throw new Error('project_id is required');
     if (!input.org_id) throw new Error('org_id is required');
 
-    if (this.supabase) {
-      const { data, error } = await this.supabase
+    if (this.db) {
+      const { data, error } = await this.db
         .from('stories')
         .insert({
           project_id: input.project_id,
@@ -111,7 +109,7 @@ export class StoryService {
       // isAdminContext: agent API key 경유 시 service_role client는 auth.getUser()가 null이므로 플래그로 우회
       const adminReverseToBacklog =
         targetStatus === 'backlog' &&
-        (this.isAdminContext || (!!this.supabase && await isOrgAdmin(this.supabase, existing.org_id as string)));
+        (this.isAdminContext || (!!this.db && await isOrgAdmin(this.db, existing.org_id as string)));
 
       if (!adminReverseToBacklog) {
         const validNext = VALID_TRANSITIONS[currentStatus];
@@ -125,9 +123,9 @@ export class StoryService {
       }
 
       // done → in-review는 admin만 (OSS: single user = always admin)
-      if (currentStatus === 'done' && targetStatus !== 'backlog' && this.supabase) {
+      if (currentStatus === 'done' && targetStatus !== 'backlog' && this.db) {
         try {
-          await requireOrgAdmin(this.supabase, existing.org_id as string);
+          await requireOrgAdmin(this.db, existing.org_id as string);
         } catch {
           throw new ForbiddenError('Admin permission required to reopen done stories');
         }
@@ -139,10 +137,10 @@ export class StoryService {
 
   async delete(id: string) {
     const story = await this.getById(id);
-    if (this.supabase) {
+    if (this.db) {
       // done 상태 스토리 DELETE도 admin 권한 필요 (SID:357)
-      await requireOrgAdmin(this.supabase, story.org_id as string);
-      const { error: childError } = await this.supabase.from('tasks').update({ deleted_at: new Date().toISOString() }).eq('story_id', id);
+      await requireOrgAdmin(this.db, story.org_id as string);
+      const { error: childError } = await this.db.from('tasks').update({ deleted_at: new Date().toISOString() }).eq('story_id', id);
       if (childError) throw new Error(`Failed to soft-delete tasks: ${childError.message}`);
     }
     await this.repo.delete(id);
@@ -161,7 +159,7 @@ export class StoryService {
 
           const adminReverseToBacklog =
             targetStatus === 'backlog' &&
-            (this.isAdminContext || (!!this.supabase && await isOrgAdmin(this.supabase, existing.org_id as string)));
+            (this.isAdminContext || (!!this.db && await isOrgAdmin(this.db, existing.org_id as string)));
 
           if (!adminReverseToBacklog) {
             const validNext = VALID_TRANSITIONS[currentStatus];
@@ -174,9 +172,9 @@ export class StoryService {
           }
 
           // done → in-review는 admin만 (단건 update()와 동일)
-          if (currentStatus === 'done' && targetStatus !== 'backlog' && this.supabase) {
+          if (currentStatus === 'done' && targetStatus !== 'backlog' && this.db) {
             try {
-              await requireOrgAdmin(this.supabase, existing.org_id as string);
+              await requireOrgAdmin(this.db, existing.org_id as string);
             } catch {
               throw new ForbiddenError('Admin permission required to reopen done stories');
             }
