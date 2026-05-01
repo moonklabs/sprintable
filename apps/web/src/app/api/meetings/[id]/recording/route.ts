@@ -22,7 +22,8 @@ export async function POST(request: Request, { params }: RouteParams) {
     const me = await getAuthContext(request);
     if (!me) return ApiErrors.unauthorized();
     if (me.rateLimitExceeded) return ApiErrors.tooManyRequests(me.rateLimitRemaining, me.rateLimitResetAt);
-    const dbClient = me.type === 'agent' ? (await (await import('@/lib/supabase/admin')).createSupabaseAdminClient()) : undefined;
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+const dbClient: any = undefined; // SaaS overlay에서 처리
 
     // AC9: Feature gating — 녹음 기능 티어 검증
     const featureCheck = await checkFeatureLimit(dbClient, me.org_id, 'stt_recording');
