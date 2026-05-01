@@ -1,43 +1,12 @@
-import { createAdminClient } from '@/lib/db/admin';
-import { handleApiError } from '@/lib/api-error';
-import { apiSuccess, ApiErrors } from '@/lib/api-response';
-import { getAuthContext } from '@/lib/auth-helpers';
+import { proxyToFastapi } from '@/lib/fastapi-proxy';
+import { apiSuccess } from '@/lib/api-response';
 import { isOssMode } from '@/lib/storage/factory';
-import { requireRole, ADMIN_ROLES } from '@/lib/role-guard';
 
 type RouteParams = { params: Promise<{ id: string }> };
 
 /** GET /api/api-keys/[id]/logs — 키별 사용 이력 (admin/owner only) */
 export async function GET(request: Request, { params }: RouteParams) {
   if (isOssMode()) return apiSuccess([]);
-  try {
-    const { id } = await params;
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    const db: any = null;
-    const me = await getAuthContext(request);
-    if (!me) return ApiErrors.unauthorized();
-    if (me.rateLimitExceeded) return ApiErrors.tooManyRequests(me.rateLimitRemaining, me.rateLimitResetAt);
-
-    const denied = await requireRole(db, me.org_id, ADMIN_ROLES, 'Admin access required to view API key logs');
-    if (denied) return denied;
-
-    const { searchParams } = new URL(request.url);
-    const limit = Math.min(Number(searchParams.get('limit') ?? '50'), 100);
-    const cursor = searchParams.get('cursor') ?? undefined;
-
-    const admin = createAdminClient();
-    let query = admin
-      .from('api_key_logs')
-      .select('id, api_key_id, endpoint, ip_address, status_code, created_at')
-      .eq('api_key_id', id)
-      .eq('org_id', me.org_id)
-      .order('created_at', { ascending: false })
-      .limit(limit);
-
-    if (cursor) query = query.lt('created_at', cursor);
-
-    const { data, error } = await query;
-    if (error) throw error;
-    return apiSuccess(data ?? []);
-  } catch (err: unknown) { return handleApiError(err); }
+  const { id } = await params;
+  return proxyToFastapi(request, `/api/v2/api-keys/${id}/logs`);
 }
