@@ -24,7 +24,8 @@ COPY apps/web/ apps/web/
 # ee overlay (SaaS 빌드 시 주입, OSS에서는 빈 디렉토리 허용)
 COPY ee/ ee/
 WORKDIR /app/apps/web
-ENV NEXT_TELEMETRY_DISABLED=1
+ENV NEXT_TELEMETRY_DISABLED=1 \
+    NEXT_TURBOPACK=0
 RUN pnpm build
 
 # ─── 런타임 ──────────────────────────────────────────────────────────────────
