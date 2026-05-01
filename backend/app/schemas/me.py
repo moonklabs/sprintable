@@ -10,6 +10,8 @@ class MeResponse(BaseModel):
     model_config = ConfigDict(from_attributes=True)
 
     id: uuid.UUID
+    org_id: uuid.UUID
+    project_id: uuid.UUID
     name: str
     type: str
     role: str
