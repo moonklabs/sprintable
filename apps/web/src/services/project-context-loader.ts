@@ -1,5 +1,8 @@
-import { createClient, type SupabaseClient } from '@supabase/supabase-js';
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+type SupabaseClient = any;
 import type { PromptProjectRecord, PromptTeamMemberRecord } from './agent-system-prompt';
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+const supabase: any = undefined;
 
 export interface ProjectContextLoaderOptions {
   readClient?: SupabaseClient;
@@ -107,13 +110,8 @@ function withTimeout<T>(promise: Promise<T>, timeoutMs: number): Promise<T> {
 }
 
 export function createProjectContextReplicaClient(): SupabaseClient | null {
-  const url = process.env.SUPABASE_REPLICA_URL;
-  const serviceRoleKey = process.env.SUPABASE_REPLICA_SERVICE_ROLE_KEY ?? process.env.SUPABASE_SERVICE_ROLE_KEY;
-  if (!url || !serviceRoleKey) return null;
-
-  return createClient(url, serviceRoleKey, {
-    auth: { persistSession: false, autoRefreshToken: false },
-  });
+  // SaaS overlay에서 처리 — OSS에서 미지원
+  return null;
 }
 
 export class ProjectContextLoader {

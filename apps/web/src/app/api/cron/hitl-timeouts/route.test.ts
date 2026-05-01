@@ -11,7 +11,6 @@ const { createClient, scan } = vi.hoisted(() => {
   };
 });
 
-vi.mock('@supabase/supabase-js', () => ({ createClient }));
 vi.mock('@/services/agent-hitl-timeout', () => ({
   AgentHitlTimeoutService: class AgentHitlTimeoutService {
     scan = scan;

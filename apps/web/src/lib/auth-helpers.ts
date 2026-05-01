@@ -1,5 +1,3 @@
-import { cache } from 'react';
-import type { SupabaseClient, User } from '@supabase/supabase-js';
 import { cookies } from 'next/headers';
 import { isOssMode } from '@/lib/storage/factory';
 
@@ -21,13 +19,11 @@ export function resolveCurrentProjectMembership(
     if (explicitMembership) return explicitMembership;
   }
 
-  // explicit cookie가 없더라도 active membership이 하나뿐이면 그 membership이 current project가 된다.
   if (memberships.length === 1) {
     const [onlyMembership] = memberships;
     return onlyMembership ?? null;
   }
 
-  // 다중 membership에서는 명시적 선택 없이는 current project를 암묵적으로 고르지 않는다.
   return null;
 }
 
@@ -36,7 +32,8 @@ async function getCurrentProjectIdCookie() {
   return cookieStore.get(CURRENT_PROJECT_COOKIE)?.value ?? null;
 }
 
-export const getMyProjectMemberships = cache(async (supabase: SupabaseClient, user: User): Promise<ProjectMembership[]> => {
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+export async function getMyProjectMemberships(supabase: any, user: { id: string }): Promise<ProjectMembership[]> {
   const { data, error } = await supabase
     .from('team_members')
     .select('id, org_id, project_id, projects(id, name)')
@@ -48,7 +45,7 @@ export const getMyProjectMemberships = cache(async (supabase: SupabaseClient, us
   if (error || !data) return [];
 
   return data
-    .map((membership) => {
+    .map((membership: { id: unknown; org_id: unknown; project_id: unknown; projects: unknown }) => {
       const project = Array.isArray(membership.projects)
         ? membership.projects.find(Boolean)
         : membership.projects;
@@ -60,8 +57,8 @@ export const getMyProjectMemberships = cache(async (supabase: SupabaseClient, us
         project_name: (project as { id: string; name: string } | null)?.name ?? 'Untitled Project',
       };
     })
-    .filter((membership) => Boolean(membership.project_id));
-});
+    .filter((membership: ProjectMembership) => Boolean(membership.project_id));
+}
 
 export interface MembershipContext {
   me: {
@@ -77,7 +74,8 @@ export interface MembershipContext {
  * 한 번의 호출로 memberships + current team member를 함께 반환.
  * Layout에서 duplicate fetch를 방지한다.
  */
-export async function getMyMembershipContext(supabase: SupabaseClient, user: User): Promise<MembershipContext> {
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+export async function getMyMembershipContext(supabase: any, user: { id: string; user_metadata?: Record<string, unknown>; email?: string }): Promise<MembershipContext> {
   const memberships = await getMyProjectMemberships(supabase, user);
   const me = await resolveTeamMemberFromMemberships(supabase, user, memberships);
   return { me, memberships };
@@ -101,14 +99,17 @@ export async function getOssUserContext(): Promise<MembershipContext> {
  * 현재 auth user의 team_member를 조회.
  * 없으면 자동 생성 (온보딩에서 누락된 케이스 fallback).
  */
-export const getMyTeamMember = cache(async (supabase: SupabaseClient, user: User) => {
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+export async function getMyTeamMember(supabase: any, user: { id: string; user_metadata?: Record<string, unknown>; email?: string }) {
   const memberships = await getMyProjectMemberships(supabase, user);
   return resolveTeamMemberFromMemberships(supabase, user, memberships);
-});
+}
 
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
 async function resolveTeamMemberFromMemberships(
-  supabase: SupabaseClient,
-  user: User,
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  supabase: any,
+  user: { id: string; user_metadata?: Record<string, unknown>; email?: string },
   memberships: ProjectMembership[],
 ) {
   const currentProjectId = await getCurrentProjectIdCookie();
@@ -125,9 +126,6 @@ async function resolveTeamMemberFromMemberships(
     };
   }
 
-  // fallback self-heal은 레거시/온보딩 누락 복구용으로만 사용한다.
-  // current project cookie는 기존 membership 선택에만 사용하며,
-  // membership이 0개인 상태에서는 권한 부여 source로 신뢰하지 않는다.
   const { data: orgMember } = await supabase
     .from('org_members')
     .select('org_id')
@@ -145,8 +143,6 @@ async function resolveTeamMemberFromMemberships(
 
   if (projectsError) return null;
 
-  // 다중 프로젝트 org에서는 명시적 project membership이 없는 사용자를
-  // 자동으로 아무 프로젝트에 붙이지 않는다.
   if (!projects || projects.length !== 1) return null;
 
   const [project] = projects;
@@ -158,8 +154,8 @@ async function resolveTeamMemberFromMemberships(
 
   const { getTranslations } = await import('next-intl/server');
   const tc = await getTranslations('common');
-  const name = user.user_metadata?.name
-    || user.user_metadata?.full_name
+  const name = user.user_metadata?.['name']
+    || user.user_metadata?.['full_name']
     || user.email
     || tc('unknown');
 
@@ -181,20 +177,11 @@ async function resolveTeamMemberFromMemberships(
 }
 
 /**
- * Dual auth: OAuth 또는 API Key로 인증
+ * Dual auth: OSS (SQLite) → SaaS API Key → SaaS OAuth 순으로 인증
  *
- * 1. Authorization Bearer 토큰이 있으면 API Key 인증 시도 (admin client로 RLS 우회)
- * 2. 없으면 OAuth 세션 인증 시도
- * 3. 둘 다 실패하면 null 반환
- *
- * Rate limiting:
- * - 에이전트(API Key): 300 req/min
- * - 사람(OAuth): rate limit 없음
- *
- * @returns team_member context { id, org_id, project_id, project_name, type?, rateLimitExceeded? }
+ * supabase 의존성 없음 — SaaS OAuth는 saas-auth.ts hook으로 위임
  */
-export const getAuthContext = cache(async (
-  supabase: SupabaseClient,
+export async function getAuthContext(
   request: Request
 ): Promise<{
   id: string;
@@ -206,7 +193,7 @@ export const getAuthContext = cache(async (
   rateLimitExceeded?: boolean;
   rateLimitRemaining?: number;
   rateLimitResetAt?: number;
-} | null> => {
+} | null> {
   // 1. OSS_MODE — Supabase 없이 SQLite 기반 인증
   if (isOssMode()) {
     const { OSS_ORG_ID, OSS_PROJECT_ID, OSS_MEMBER_ID, getDb } = await import('@sprintable/storage-sqlite');
@@ -243,7 +230,6 @@ export const getAuthContext = cache(async (
       }
     }
 
-    // API Key 없거나 인증 실패 시 고정 human 반환 (하위 호환)
     return {
       id: OSS_MEMBER_ID,
       org_id: OSS_ORG_ID,
@@ -253,21 +239,19 @@ export const getAuthContext = cache(async (
     };
   }
 
-  // 2. API Key 인증 시도 (admin client로 RLS 우회, SaaS 전용)
-  // x-api-key 헤더는 Authorization 헤더가 CDN에서 strip될 때를 위한 fallback
+  // 2. API Key 인증 시도 (SaaS 전용, admin client dynamic import)
   const authHeader = request.headers.get('Authorization');
   const xApiKey = request.headers.get('x-api-key');
   const rawApiKey = authHeader?.startsWith('Bearer ') ? authHeader.slice(7) : (xApiKey ?? null);
   if (rawApiKey) {
     const { getTeamMemberFromApiKey } = await import('./auth-api-key');
     const { createSupabaseAdminClient } = await import('./supabase/admin');
-    const adminClient = createSupabaseAdminClient();
+    const adminClient = await createSupabaseAdminClient();
     const endpoint = new URL(request.url).pathname;
     const ip = request.headers.get('x-forwarded-for') ?? request.headers.get('x-real-ip');
     const apiKeyMember = await getTeamMemberFromApiKey(adminClient, rawApiKey, { endpoint, ip });
 
     if (apiKeyMember) {
-      // Rate limiting (에이전트만)
       const { checkRateLimit } = await import('./rate-limiter');
       const { allowed, remaining, resetAt } = checkRateLimit(apiKeyMember.id);
 
@@ -275,7 +259,7 @@ export const getAuthContext = cache(async (
         id: apiKeyMember.id,
         org_id: apiKeyMember.org_id,
         project_id: apiKeyMember.project_id,
-        project_name: '', // API Key 인증은 project_name이 없음 (필요시 별도 조회)
+        project_name: '',
         type: apiKeyMember.type,
         scope: apiKeyMember.scope,
         rateLimitExceeded: !allowed,
@@ -285,15 +269,13 @@ export const getAuthContext = cache(async (
     }
   }
 
-  // 3. OAuth 세션 인증 시도
-  const { data: { user } } = await supabase.auth.getUser();
-  if (!user) return null;
-
-  const oauthMember = await getMyTeamMember(supabase, user);
+  // 3. SaaS OAuth 세션 인증 — saas-auth.ts hook으로 위임 (SaaS overlay에서 실제 구현)
+  const { getSaasOAuthContext } = await import('./supabase/saas-auth');
+  const oauthMember = await getSaasOAuthContext(request);
   if (!oauthMember) return null;
 
   return {
     ...oauthMember,
     type: 'human',
   };
-});
+}

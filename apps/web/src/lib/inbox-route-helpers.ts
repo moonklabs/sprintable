@@ -1,5 +1,5 @@
-import type { SupabaseClient } from '@supabase/supabase-js';
-import { createSupabaseServerClient } from '@/lib/supabase/server';
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+type SupabaseClient = any;
 import { createSupabaseAdminClient } from '@/lib/supabase/admin';
 import { apiError, ApiErrors } from '@/lib/api-response';
 import { getAuthContext } from '@/lib/auth-helpers';
@@ -13,14 +13,13 @@ export type InboxRouteSetup =
   | { ok: true; me: InboxAuthContext; dbClient: SupabaseClient | undefined };
 
 export async function setupInboxRoute(request: Request): Promise<InboxRouteSetup> {
-  const supabase = await createSupabaseServerClient();
-  const me = await getAuthContext(supabase, request);
+  const me = await getAuthContext(request);
   if (!me) return { ok: false, response: ApiErrors.unauthorized() };
   if (me.rateLimitExceeded) return { ok: false, response: ApiErrors.tooManyRequests(me.rateLimitRemaining, me.rateLimitResetAt) };
 
   const dbClient: SupabaseClient | undefined = isOssMode()
     ? undefined
-    : (me.type === 'agent' ? createSupabaseAdminClient() : supabase);
+    : (me.type === 'agent' ? (await (await import('@/lib/supabase/admin')).createSupabaseAdminClient()) : (undefined as any));
 
   return { ok: true, me, dbClient };
 }

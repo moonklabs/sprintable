@@ -95,17 +95,21 @@ export default function InboxPage() {
     }
 
     // Supabase realtime path (cloud mode)
-    let supabase: ReturnType<typeof createSupabaseBrowserClient>;
-    try {
-      supabase = createSupabaseBrowserClient();
-    } catch {
-      const interval = setInterval(() => {
-        void refreshNotifications();
-      }, 15000);
-      return () => clearInterval(interval);
-    }
+    let cleanupFn: (() => void) | undefined;
 
-    const channel = supabase
+    (async () => {
+      let supabase: ReturnType<typeof createSupabaseBrowserClient>;
+      try {
+        supabase = createSupabaseBrowserClient();
+      } catch {
+        const interval = setInterval(() => {
+          void refreshNotifications();
+        }, 15000);
+        cleanupFn = () => clearInterval(interval);
+        return;
+      }
+
+      const channel = supabase
       .channel('inbox-realtime')
       .on('postgres_changes', {
         event: 'INSERT',
@@ -123,8 +127,13 @@ export default function InboxPage() {
       })
       .subscribe();
 
+      cleanupFn = () => {
+        supabase.removeChannel(channel);
+      };
+    })();
+
     return () => {
-      supabase.removeChannel(channel);
+      cleanupFn?.();
     };
   }, [currentTeamMemberId, addToast, refreshNotifications]);
 

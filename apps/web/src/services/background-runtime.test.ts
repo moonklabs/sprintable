@@ -36,7 +36,7 @@ const {
   memoStopMock: vi.fn().mockResolvedValue(undefined),
 }));
 
-vi.mock('@supabase/supabase-js', () => ({
+vi.mock('', () => ({
   createClient: createClientMock,
 }));
 

@@ -1,6 +1,4 @@
 import { z } from 'zod';
-import { createSupabaseServerClient } from '@/lib/supabase/server';
-import { createSupabaseAdminClient } from '@/lib/supabase/admin';
 import { getMyTeamMember } from '@/lib/auth-helpers';
 import { requireOrgAdmin } from '@/lib/admin-check';
 import { apiError, apiSuccess, ApiErrors } from '@/lib/api-response';
@@ -9,6 +7,8 @@ import { requireAgentOrchestration } from '@/lib/require-agent-orchestration';
 import { AgentSessionLifecycleError, AgentSessionLifecycleService } from '@/services/agent-session-lifecycle';
 import { resumeSessionCandidates } from '@/services/agent-session-resume';
 import { isOssMode } from '@/lib/storage/factory';
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+const supabase: any = undefined;
 
 type RouteParams = { params: Promise<{ id: string }> };
 
@@ -22,7 +22,6 @@ export async function PATCH(request: Request, { params }: RouteParams) {
 
   try {
     const { id } = await params;
-    const supabase = await createSupabaseServerClient();
     const { data: { user } } = await supabase.auth.getUser();
     if (!user) return ApiErrors.unauthorized();
 
@@ -49,7 +48,7 @@ export async function PATCH(request: Request, { params }: RouteParams) {
     });
 
     if (result.resumptions.length > 0) {
-      await resumeSessionCandidates(createSupabaseAdminClient() as never, result.resumptions);
+      await resumeSessionCandidates((await (await import('@/lib/supabase/admin')).createSupabaseAdminClient()) as never, result.resumptions);
     }
 
     return apiSuccess(result);

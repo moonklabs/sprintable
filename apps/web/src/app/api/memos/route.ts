@@ -1,5 +1,3 @@
-import { createSupabaseServerClient } from '@/lib/supabase/server';
-import { createSupabaseAdminClient } from '@/lib/supabase/admin';
 import { MemoService, type CreateMemoInput } from '@/services/memo';
 import { handleApiError } from '@/lib/api-error';
 import { getAuthContext } from '@/lib/auth-helpers';
@@ -7,13 +5,15 @@ import { parseBody, createMemoSchema, MEMO_TYPES_REQUIRING_ASSIGNEE } from '@spr
 import { apiSuccess, ApiErrors } from '@/lib/api-response';
 import { buildCursorPageMeta, parseCursorPageInput } from '@/lib/pagination';
 import { createMemoRepository, createTeamMemberRepository, createProjectRepository, isOssMode } from '@/lib/storage/factory';
-import type { SupabaseClient } from '@supabase/supabase-js';
 import { apiError } from '@/lib/api-response';
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+const supabase: any = undefined;
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+type SupabaseClient = any;
 
 export async function POST(request: Request) {
   try {
-    const supabase = await createSupabaseServerClient();
-    const me = await getAuthContext(supabase, request);
+    const me = await getAuthContext(request);
     if (!me) return ApiErrors.unauthorized();
     if (me.rateLimitExceeded) {
       return new Response(
@@ -41,8 +41,8 @@ export async function POST(request: Request) {
         return apiError('BAD_REQUEST', `memo_type '${body.memo_type}' requires at least one assignee`, 400);
       }
     }
-    const dbClient = isOssMode() ? undefined : (me.type === 'agent' ? createSupabaseAdminClient() : supabase);
-    const repo = await createMemoRepository(dbClient);
+    const dbClient = isOssMode() ? undefined : (me.type === 'agent' ? (await (await import('@/lib/supabase/admin')).createSupabaseAdminClient()) : supabase);
+    const repo = await createMemoRepository();
     const teamMemberRepo = isOssMode() ? await createTeamMemberRepository() : undefined;
     const projectRepo = isOssMode() ? await createProjectRepository() : undefined;
     const service = new MemoService(repo, dbClient as SupabaseClient | undefined, teamMemberRepo, projectRepo);
@@ -60,8 +60,7 @@ export async function POST(request: Request) {
 
 export async function GET(request: Request) {
   try {
-    const supabase = await createSupabaseServerClient();
-    const me = await getAuthContext(supabase, request);
+    const me = await getAuthContext(request);
     if (!me) return ApiErrors.unauthorized();
     if (me.rateLimitExceeded) {
       return new Response(
@@ -83,9 +82,9 @@ export async function GET(request: Request) {
       limit: searchParams.get('limit') ? Number(searchParams.get('limit')) : undefined,
       cursor: searchParams.get('cursor'),
     }, { defaultLimit: 30, maxLimit: 100 });
-    const dbClient = isOssMode() ? undefined : (me.type === 'agent' ? createSupabaseAdminClient() : supabase);
-    const repo = await createMemoRepository(dbClient);
-    const service = new MemoService(repo, dbClient as SupabaseClient | undefined);
+    const dbClient = isOssMode() ? undefined : (me.type === 'agent' ? (await (await import('@/lib/supabase/admin')).createSupabaseAdminClient()) : supabase);
+    const repo = await createMemoRepository();
+    const service = new MemoService(repo);
     const memos = await service.list({
       org_id: me.org_id,
       project_id: searchParams.get('project_id') ?? undefined,

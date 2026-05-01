@@ -1,4 +1,3 @@
-import { createClient } from '@supabase/supabase-js';
 import { z } from 'zod';
 import { githubMcpConfigSchema } from '@/lib/github-mcp';
 import { KmsError } from '@/lib/kms';
@@ -104,6 +103,9 @@ function ensureProviderBaseUrl(provider: LLMProvider, baseUrl?: string): string 
   return normalized;
 }
 
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+const serviceClient: any = undefined;
+
 export async function resolveLLMConfig(projectId: string, overrides?: {
   provider?: LLMProvider;
   billingMode?: 'managed' | 'byom';
@@ -113,12 +115,8 @@ export async function resolveLLMConfig(projectId: string, overrides?: {
   timeoutMs?: number;
   maxRetries?: number;
 }) : Promise<LLMConfig | null> {
-  const serviceClient = createClient(
-    process.env.NEXT_PUBLIC_SUPABASE_URL!,
-    process.env.SUPABASE_SERVICE_ROLE_KEY!,
-  );
-
-  const { settings, integration } = await getProjectAiSettingsWithIntegration(serviceClient as never, projectId);
+  // SaaS overlay에서 처리 — OSS에서 미지원
+  const { settings, integration } = await getProjectAiSettingsWithIntegration(undefined as never, projectId);
   const persistedProvider = settings?.provider as LLMProvider | undefined;
   const provider = overrides?.provider ?? persistedProvider;
 

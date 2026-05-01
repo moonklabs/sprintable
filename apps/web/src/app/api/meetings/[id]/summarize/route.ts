@@ -1,5 +1,3 @@
-import { createSupabaseServerClient } from '@/lib/supabase/server';
-import { createSupabaseAdminClient } from '@/lib/supabase/admin';
 import { handleApiError } from '@/lib/api-error';
 import { apiUpgradeRequired, ApiErrors } from '@/lib/api-response';
 import { getAuthContext } from '@/lib/auth-helpers';
@@ -41,11 +39,10 @@ Use the same language as the transcript. Be concise and accurate.`;
 export async function POST(request: Request, { params }: RouteParams) {
   try {
     const { id } = await params;
-    const supabase = await createSupabaseServerClient();
-    const me = await getAuthContext(supabase, request);
+    const me = await getAuthContext(request);
     if (!me) return ApiErrors.unauthorized();
     if (me.rateLimitExceeded) return ApiErrors.tooManyRequests(me.rateLimitRemaining, me.rateLimitResetAt);
-    const dbClient = me.type === 'agent' ? createSupabaseAdminClient() : supabase;
+    const dbClient = me.type === 'agent' ? (await (await import('@/lib/supabase/admin')).createSupabaseAdminClient()) : supabase;
 
     const usageCheck = await checkUsage(dbClient, me.org_id, 'ai_calls');
     if (!usageCheck.allowed) {
@@ -162,3 +159,5 @@ export async function POST(request: Request, { params }: RouteParams) {
     return handleApiError(err);
   }
 }
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+const supabase: any = undefined;

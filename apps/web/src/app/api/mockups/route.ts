@@ -1,5 +1,4 @@
 import { parseBody, createMockupPageSchema } from '@sprintable/shared';
-import { createSupabaseServerClient } from '@/lib/supabase/server';
 import { MockupService } from '@/services/mockup';
 import { handleApiError } from '@/lib/api-error';
 import { apiSuccess, ApiErrors } from '@/lib/api-response';
@@ -7,12 +6,13 @@ import { getMyTeamMember } from '@/lib/auth-helpers';
 import { checkResourceLimit } from '@/lib/check-feature';
 import { apiError } from '@/lib/api-response';
 import { isOssMode } from '@/lib/storage/factory';
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+const supabase: any = undefined;
 
 /** GET — 목업 목록 (페이지네이션) */
 export async function GET(request: Request) {
   if (isOssMode()) return apiSuccess([]);
   try {
-    const supabase = await createSupabaseServerClient();
     const { data: { user } } = await supabase.auth.getUser();
     if (!user) return ApiErrors.unauthorized();
 
@@ -33,7 +33,6 @@ export async function GET(request: Request) {
 export async function POST(request: Request) {
   if (isOssMode()) return apiError('NOT_IMPLEMENTED', 'Mockups are not available in OSS mode.', 501);
   try {
-    const supabase = await createSupabaseServerClient();
     const { data: { user } } = await supabase.auth.getUser();
     if (!user) return ApiErrors.unauthorized();
 

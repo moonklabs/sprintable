@@ -114,7 +114,7 @@ describe('MemoService.getByIdWithDetails', () => {
           then: (resolve: (value: { data: unknown[]; error: null }) => void) => Promise.resolve({ data: [], error: null }).then(resolve),
         };
       },
-    } as unknown as import('@supabase/supabase-js').SupabaseClient;
+    } as unknown as any;
 
     const service = MemoService.fromSupabase(supabase);
     const memo = await service.getByIdWithDetails('memo-1');
@@ -173,7 +173,7 @@ describe('MemoService.create', () => {
           single: async () => ({ data: null, error: null }),
         };
       },
-    } as unknown as import('@supabase/supabase-js').SupabaseClient;
+    } as unknown as any;
 
     const service = MemoService.fromSupabase(supabase);
 
@@ -254,7 +254,7 @@ describe('MemoService.linkDoc and markRead', () => {
           single: async () => ({ data: null, error: null }),
         };
       },
-    } as unknown as import('@supabase/supabase-js').SupabaseClient;
+    } as unknown as any;
 
     const service = MemoService.fromSupabase(supabase);
 
@@ -312,7 +312,7 @@ describe('MemoService.linkDoc and markRead', () => {
           single: async () => ({ data: null, error: null }),
         };
       },
-    } as unknown as import('@supabase/supabase-js').SupabaseClient;
+    } as unknown as any;
 
     const service = MemoService.fromSupabase(supabase);
     await expect(service.markRead('memo-1', 'author-1')).resolves.toMatchObject({
@@ -389,7 +389,7 @@ describe('MemoService.list', () => {
 
         throw new Error(`Unexpected table: ${table}`);
       },
-    } as unknown as import('@supabase/supabase-js').SupabaseClient;
+    } as unknown as any;
 
     const service = MemoService.fromSupabase(supabase);
     const memos = await service.list({ project_id: 'project-1' });
@@ -487,7 +487,7 @@ describe('MemoService.list', () => {
 
         throw new Error(`Unexpected table: ${table}`);
       },
-    } as unknown as import('@supabase/supabase-js').SupabaseClient;
+    } as unknown as any;
 
     const service = MemoService.fromSupabase(supabase);
     const memos = await service.list({ project_id: 'project-1' });

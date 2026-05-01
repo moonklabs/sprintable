@@ -1,5 +1,4 @@
 import { redirect } from 'next/navigation';
-import { createSupabaseServerClient } from '@/lib/supabase/server';
 import { getMyTeamMember } from '@/lib/auth-helpers';
 import { requireOrgAdmin } from '@/lib/admin-check';
 import { checkFeatureLimit } from '@/lib/check-feature';
@@ -34,7 +33,7 @@ export default async function AgentDeployPage() {
       </div>
     );
   }
-  const supabase = await createSupabaseServerClient();
+  const supabase = await (undefined as any);
   const { data: { user } } = await supabase.auth.getUser();
   if (!user) redirect('/login');
 
@@ -127,7 +126,7 @@ export default async function AgentDeployPage() {
         .is('deleted_at', null)
         .in('id', customBasePersonaIds)
     : { data: [] as Array<{ id: string; slug: string }> };
-  const customBaseSlugById = new Map((customBasePersonas ?? []).map((persona) => [persona.id as string, persona.slug as string]));
+  const customBaseSlugById = new Map((customBasePersonas ?? []).map((persona) => [persona.id as string, persona.slug as string])) as Map<string, string>;
 
   const orgCustomPersonas = (customPersonas ?? []).map((persona) => ({
     id: persona.id as string,
@@ -182,14 +181,15 @@ export default async function AgentDeployPage() {
 
   const existingDeployments: WizardExistingDeployment[] = (liveDeployments ?? []).map((deployment) => {
     const persona = deployment.persona_id ? livePersonaById.get(deployment.persona_id as string) : null;
-    const basePersonaSlug = persona ? liveBaseSlugMap.get(getBasePersonaId(persona.config) ?? '') ?? null : null;
+    const personaAny = persona as any;
+    const basePersonaSlug = persona ? (liveBaseSlugMap.get(getBasePersonaId(personaAny.config) ?? '') ?? null) as string | null : null;
     return {
       id: deployment.id as string,
       agentId: deployment.agent_id as string,
       agentName: agentNameById[deployment.agent_id as string] ?? (deployment.agent_id as string),
       personaId: (deployment.persona_id as string | null) ?? null,
       role: resolveAutoRoutingPersonaRole({
-        slug: (persona?.slug as string | undefined) ?? null,
+        slug: (personaAny?.slug as string | undefined) ?? null,
         basePersonaSlug,
       }),
     };

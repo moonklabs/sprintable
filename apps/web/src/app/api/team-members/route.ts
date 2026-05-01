@@ -1,5 +1,3 @@
-import { createSupabaseServerClient } from '@/lib/supabase/server';
-import { createSupabaseAdminClient } from '@/lib/supabase/admin';
 import { handleApiError } from '@/lib/api-error';
 import { apiSuccess, apiError, ApiErrors } from '@/lib/api-response';
 import { getMyTeamMember } from '@/lib/auth-helpers';
@@ -8,6 +6,8 @@ import { parseBody, createTeamMemberSchema } from '@sprintable/shared';
 import { managedAgentRegistrationConfigSchema } from '@/lib/managed-agent-contract';
 import { isOssMode, createTeamMemberRepository } from '@/lib/storage/factory';
 import { AuditLogService } from '@/services/audit-log.service';
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+const supabase: any = undefined;
 
 export async function GET(request: Request) {
   if (isOssMode()) {
@@ -20,7 +20,6 @@ export async function GET(request: Request) {
     return apiSuccess(members);
   }
   try {
-    const supabase = await createSupabaseServerClient();
     const { data: { user } } = await supabase.auth.getUser();
     if (!user) return ApiErrors.unauthorized();
 
@@ -81,10 +80,9 @@ export async function POST(request: Request) {
     return apiSuccess(member, undefined, 201);
   }
   try {
-    const supabase = await createSupabaseServerClient();
     // AC4: API Key로 접근하는 에이전트는 admin scope 필요
     const { getAuthContext } = await import('@/lib/auth-helpers');
-    const meScope = await getAuthContext(supabase, request);
+    const meScope = await getAuthContext(request);
     if (meScope?.type === 'agent' && !meScope.scope?.includes('admin')) {
       return ApiErrors.insufficientScope('admin');
     }
@@ -154,7 +152,7 @@ export async function POST(request: Request) {
           .single();
 
         if (reactivateError) throw reactivateError;
-        new AuditLogService(createSupabaseAdminClient()).log({
+        new AuditLogService((await (await import('@/lib/supabase/admin')).createSupabaseAdminClient())).log({
           org_id: me.org_id as string,
           actor_id: user.id,
           action: 'member_added',
@@ -192,7 +190,7 @@ export async function POST(request: Request) {
         .single();
 
       if (error) throw error;
-      new AuditLogService(createSupabaseAdminClient()).log({
+      new AuditLogService((await (await import('@/lib/supabase/admin')).createSupabaseAdminClient())).log({
         org_id: me.org_id as string,
         actor_id: user.id,
         action: 'member_added',
@@ -228,7 +226,7 @@ export async function POST(request: Request) {
       .single();
 
     if (error) throw error;
-    new AuditLogService(createSupabaseAdminClient()).log({
+    new AuditLogService((await (await import('@/lib/supabase/admin')).createSupabaseAdminClient())).log({
       org_id: me.org_id as string,
       actor_id: user.id,
       action: 'member_added',

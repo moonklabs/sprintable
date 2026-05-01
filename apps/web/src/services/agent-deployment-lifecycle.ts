@@ -1,4 +1,5 @@
-import type { SupabaseClient } from '@supabase/supabase-js';
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+type SupabaseClient = any;
 import { createSupabaseAdminClient } from '@/lib/supabase/admin';
 import { AgentExecutionLoop } from './agent-execution-loop';
 import { AgentRoutingRuleService } from './agent-routing-rule';

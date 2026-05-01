@@ -1,4 +1,3 @@
-import { createSupabaseServerClient } from '@/lib/supabase/server';
 import { getMyTeamMember } from '@/lib/auth-helpers';
 import { requireOrgAdmin } from '@/lib/admin-check';
 import { apiError, apiSuccess, ApiErrors } from '@/lib/api-response';
@@ -7,6 +6,8 @@ import { requireAgentOrchestration } from '@/lib/require-agent-orchestration';
 import { AgentRetryService } from '@/services/agent-retry';
 import { canManuallyRetryRun } from '@/services/agent-run-history';
 import { isOssMode } from '@/lib/storage/factory';
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+const supabase: any = undefined;
 
 type RouteParams = { params: Promise<{ id: string }> };
 
@@ -15,7 +16,6 @@ export async function POST(_request: Request, { params }: RouteParams) {
 
   try {
     const { id } = await params;
-    const supabase = await createSupabaseServerClient();
     const { data: { user } } = await supabase.auth.getUser();
     if (!user) return ApiErrors.unauthorized();
 

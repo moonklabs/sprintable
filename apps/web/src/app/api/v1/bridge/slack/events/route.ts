@@ -1,4 +1,3 @@
-import { createClient } from '@supabase/supabase-js';
 import { apiError, apiSuccess } from '@/lib/api-response';
 import { isOssMode } from '@/lib/storage/factory';
 import { BridgeInboundService } from '@/services/bridge-inbound';
@@ -47,44 +46,6 @@ export async function POST(request: Request) {
     return apiError('CONFIGURATION_ERROR', 'Supabase service role is not configured', 500);
   }
 
-  const supabase = createClient(supabaseUrl, serviceRoleKey);
-  const bridgeService = new BridgeInboundService(supabase);
-  const channelMapping = await bridgeService.findChannelMapping('slack', payload.event.channel);
-
-  if (!channelMapping) {
-    return apiSuccess({ action: 'ignored' });
-  }
-
-  const slackConfig = resolveSlackBridgeConfig(channelMapping.config);
-  if (shouldIgnoreSlackMessage(payload.event, slackConfig)) {
-    return apiSuccess({ action: 'ignored' });
-  }
-
-  const result = await bridgeService.processInboundMessage({
-    platform: 'slack',
-    mapping: channelMapping,
-    event: normalizeSlackEvent(payload.event, payload.team_id ?? '', slackConfig, payload.event_id ?? null),
-    unknownUserLabel: 'Slack 연동 미설정 사용자',
-  });
-
-  if (result.action === 'rate_limited') {
-    const noticeSent = slackConfig.botToken
-      ? await postSlackRateLimitNotice(slackConfig.botToken, {
-          channel: payload.event.channel,
-          threadTs: payload.event.thread_ts ?? null,
-        })
-      : false;
-
-    return apiSuccess({
-      action: 'rate_limited',
-      memo_id: null,
-      notice_sent: noticeSent,
-    });
-  }
-
-  return apiSuccess({
-    action: result.action,
-    memo_id: result.memoId ?? null,
-    notice_sent: null,
-  });
+  // SaaS overlay에서 처리
+  return apiError('NOT_IMPLEMENTED', 'SaaS overlay required', 501);
 }

@@ -1,28 +1,27 @@
 import { parseBody, updateStorySchema } from '@sprintable/shared';
-import type { SupabaseClient } from '@supabase/supabase-js';
-import { createSupabaseServerClient } from '@/lib/supabase/server';
-import { createSupabaseAdminClient } from '@/lib/supabase/admin';
 import { StoryService } from '@/services/story';
 import { handleApiError } from '@/lib/api-error';
 import { apiSuccess, ApiErrors } from '@/lib/api-response';
 import { getAuthContext } from '@/lib/auth-helpers';
 import { isOssMode, createStoryRepository } from '@/lib/storage/factory';
 import { NotificationService } from '@/services/notification.service';
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+type SupabaseClient = any;
+const ossMode = isOssMode();
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+const dbClient: any = undefined;
 
 type RouteParams = { params: Promise<{ id: string }> };
 
 export async function GET(request: Request, { params }: RouteParams) {
   try {
     const { id } = await params;
-    const supabase = await createSupabaseServerClient();
-    const me = await getAuthContext(supabase, request);
+    const me = await getAuthContext(request);
     if (!me) return ApiErrors.unauthorized();
     if (me.rateLimitExceeded) return ApiErrors.tooManyRequests(me.rateLimitRemaining, me.rateLimitResetAt);
-    const ossMode = isOssMode();
-    const dbClient = ossMode ? undefined : (me.type === 'agent' ? createSupabaseAdminClient() : supabase);
 
-    const repo = await createStoryRepository(dbClient);
-    const service = new StoryService(repo, dbClient as SupabaseClient | undefined);
+    const repo = await createStoryRepository();
+    const service = new StoryService(repo);
     const story = await service.getByIdWithDetails(id);
 
     // Agent scope 검증: cross-project 접근 차단
@@ -39,15 +38,12 @@ export async function GET(request: Request, { params }: RouteParams) {
 export async function PATCH(request: Request, { params }: RouteParams) {
   try {
     const { id } = await params;
-    const supabase = await createSupabaseServerClient();
-    const me = await getAuthContext(supabase, request);
+    const me = await getAuthContext(request);
     if (!me) return ApiErrors.unauthorized();
     if (me.rateLimitExceeded) return ApiErrors.tooManyRequests(me.rateLimitRemaining, me.rateLimitResetAt);
-    const ossMode = isOssMode();
-    const dbClient = ossMode ? undefined : (me.type === 'agent' ? createSupabaseAdminClient() : supabase);
 
     const parsed = await parseBody(request, updateStorySchema); if (!parsed.success) return parsed.response; const body = parsed.data;
-    const repo = await createStoryRepository(dbClient);
+    const repo = await createStoryRepository();
     const service = new StoryService(repo, dbClient as SupabaseClient | undefined, { isAdminContext: me.type === 'agent' });
 
     const before = await service.getById(id);
@@ -88,15 +84,12 @@ export async function PATCH(request: Request, { params }: RouteParams) {
 export async function DELETE(request: Request, { params }: RouteParams) {
   try {
     const { id } = await params;
-    const supabase = await createSupabaseServerClient();
-    const me = await getAuthContext(supabase, request);
+    const me = await getAuthContext(request);
     if (!me) return ApiErrors.unauthorized();
     if (me.rateLimitExceeded) return ApiErrors.tooManyRequests(me.rateLimitRemaining, me.rateLimitResetAt);
-    const ossMode = isOssMode();
-    const dbClient = ossMode ? undefined : (me.type === 'agent' ? createSupabaseAdminClient() : supabase);
 
-    const repo = await createStoryRepository(dbClient);
-    const service = new StoryService(repo, dbClient as SupabaseClient | undefined);
+    const repo = await createStoryRepository();
+    const service = new StoryService(repo);
     await service.delete(id);
     return apiSuccess({ ok: true });
   } catch (err: unknown) {

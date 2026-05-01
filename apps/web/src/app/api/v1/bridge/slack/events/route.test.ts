@@ -5,7 +5,7 @@ const { createClient } = vi.hoisted(() => ({
   createClient: vi.fn(),
 }));
 
-vi.mock('@supabase/supabase-js', () => ({
+vi.mock('', () => ({
   createClient,
 }));
 

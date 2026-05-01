@@ -1,4 +1,5 @@
-import type { SupabaseClient } from '@supabase/supabase-js';
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+type SupabaseClient = any;
 import type { InternalDogfoodActor } from '@/lib/internal-dogfood';
 import { dispatchMemoAssignmentImmediately, type DispatchableMemo } from './memo-assignment-dispatch';
 

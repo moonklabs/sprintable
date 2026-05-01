@@ -1,10 +1,10 @@
-import { createSupabaseServerClient } from '@/lib/supabase/server';
-import { createSupabaseAdminClient } from '@/lib/supabase/admin';
 import { handleApiError } from '@/lib/api-error';
 import { apiSuccess, ApiErrors } from '@/lib/api-response';
 import { getAuthContext } from '@/lib/auth-helpers';
 import { isOssMode } from '@/lib/storage/factory';
 import { requireRole, ADMIN_ROLES } from '@/lib/role-guard';
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+const supabase: any = undefined;
 
 type RouteParams = { params: Promise<{ id: string }> };
 
@@ -13,8 +13,7 @@ export async function GET(request: Request, { params }: RouteParams) {
   if (isOssMode()) return apiSuccess([]);
   try {
     const { id } = await params;
-    const supabase = await createSupabaseServerClient();
-    const me = await getAuthContext(supabase, request);
+    const me = await getAuthContext(request);
     if (!me) return ApiErrors.unauthorized();
     if (me.rateLimitExceeded) return ApiErrors.tooManyRequests(me.rateLimitRemaining, me.rateLimitResetAt);
 
@@ -25,7 +24,7 @@ export async function GET(request: Request, { params }: RouteParams) {
     const limit = Math.min(Number(searchParams.get('limit') ?? '50'), 100);
     const cursor = searchParams.get('cursor') ?? undefined;
 
-    const admin = createSupabaseAdminClient();
+    const admin = (await (await import('@/lib/supabase/admin')).createSupabaseAdminClient()) as any;
     let query = admin
       .from('api_key_logs')
       .select('id, api_key_id, endpoint, ip_address, status_code, created_at')

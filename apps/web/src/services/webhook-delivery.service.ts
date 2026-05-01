@@ -1,4 +1,5 @@
-import type { SupabaseClient } from '@supabase/supabase-js';
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+type SupabaseClient = any;
 
 const BACKOFF_DELAYS_MS = [0, 1_000, 4_000] as const; // attempt 0,1,2 전 대기
 const MAX_ATTEMPTS = 3;

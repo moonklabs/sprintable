@@ -1,4 +1,5 @@
-import type { SupabaseClient } from '@supabase/supabase-js';
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+type SupabaseClient = any;
 import { dispatchMemoAssignmentImmediately, type DispatchableMemo } from './memo-assignment-dispatch';
 import { syncSlackHitlRequestState } from './slack-hitl';
 import { NotificationService } from './notification.service';
@@ -160,7 +161,7 @@ export class AgentHitlTimeoutService {
     }
 
     const runsById = await this.loadRunStates(dedupe(claimed.map((request) => request.run_id)));
-    const processable = claimed.filter((request) => request.run_id && runsById.get(request.run_id)?.status === 'hitl_pending');
+    const processable = claimed.filter((request) => request.run_id && (runsById.get(request.run_id) as any)?.status === 'hitl_pending');
     const skippedBeforeRunUpdate = claimed.filter((request) => !processable.some((row) => row.id === request.id));
     await this.clearExpiredClaims(skippedBeforeRunUpdate.map((request) => request.id));
 
