@@ -1,8 +1,8 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
-const { createSupabaseServerClient, createSupabaseAdminClient, getAuthContext } = vi.hoisted(() => ({
-  createSupabaseServerClient: vi.fn(),
-  createSupabaseAdminClient: vi.fn(),
+const { createDbServerClient, createAdminClient, getAuthContext } = vi.hoisted(() => ({
+  createDbServerClient: vi.fn(),
+  createAdminClient: vi.fn(),
   getAuthContext: vi.fn(),
 }));
 const getTreeMock = vi.fn();
@@ -10,8 +10,8 @@ const listMock = vi.fn();
 const searchMock = vi.fn();
 const getDocMock = vi.fn();
 
-vi.mock('@/lib/supabase/server', () => ({ createSupabaseServerClient }));
-vi.mock('@/lib/supabase/admin', () => ({ createSupabaseAdminClient }));
+vi.mock('@/lib/db/server', () => ({ createDbServerClient }));
+vi.mock('@/lib/db/admin', () => ({ createAdminClient }));
 vi.mock('@/lib/auth-helpers', () => ({ getAuthContext }));
 vi.mock('@/services/docs', () => ({ DocsService: class { getTree = getTreeMock; list = listMock; search = searchMock; getDoc = getDocMock; } }));
 
@@ -28,15 +28,15 @@ const mockAuth = {
 
 describe('GET /api/docs', () => {
   beforeEach(() => {
-    createSupabaseServerClient.mockReset();
-    createSupabaseAdminClient.mockReset();
+    createDbServerClient.mockReset();
+    createAdminClient.mockReset();
     getAuthContext.mockReset();
     getTreeMock.mockReset();
     listMock.mockReset();
     searchMock.mockReset();
     getDocMock.mockReset();
-    createSupabaseServerClient.mockResolvedValue({});
-    createSupabaseAdminClient.mockReturnValue({});
+    createDbServerClient.mockResolvedValue({});
+    createAdminClient.mockReturnValue({});
     getAuthContext.mockResolvedValue(mockAuth);
   });
 

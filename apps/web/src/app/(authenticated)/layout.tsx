@@ -1,9 +1,16 @@
 import { redirect } from 'next/navigation';
 import { isOssMode } from '@/lib/storage/factory';
-import { getServerSession } from '@/lib/supabase/server';
-import { createSupabaseServerClient } from '@/lib/supabase/server';
-import { getMyMembershipContext, getOssUserContext } from '@/lib/auth-helpers';
+import { getServerSession } from '@/lib/db/server';
+import { getOssUserContext } from '@/lib/auth-helpers';
 import { DashboardShell } from '../dashboard/dashboard-shell';
+import { fastapiCall } from '@sprintable/storage-api';
+
+interface MemberContext {
+  id: string;
+  org_id: string;
+  project_id: string;
+  project_name: string;
+}
 
 export default async function AuthenticatedLayout({
   children,
@@ -29,20 +36,16 @@ export default async function AuthenticatedLayout({
     const session = await getServerSession();
     if (!session) redirect('/login');
 
-    // Supabase client still used for DB queries during Phase C transition
-    const supabase = await createSupabaseServerClient();
-    const { data: { user } } = await supabase.auth.getUser();
-    if (!user) redirect('/login');
-
-    const { me, memberships } = await getMyMembershipContext(supabase, user);
+    const me = await fastapiCall<MemberContext | null>('GET', '/api/v2/me', session.access_token).catch(() => null);
+    if (!me) redirect('/login');
 
     return (
       <DashboardShell
-        currentTeamMemberId={me?.id}
-        orgId={me?.org_id}
-        projectId={me?.project_id}
-        projectName={me?.project_name}
-        projectMemberships={memberships.map((membership) => ({ projectId: membership.project_id, projectName: membership.project_name }))}
+        currentTeamMemberId={me.id}
+        orgId={me.org_id}
+        projectId={me.project_id}
+        projectName={me.project_name}
+        projectMemberships={[{ projectId: me.project_id, projectName: me.project_name }]}
       >
         {children}
       </DashboardShell>

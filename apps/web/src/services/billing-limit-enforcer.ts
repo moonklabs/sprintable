@@ -1,6 +1,6 @@
+
 // OSS stub — 실제 billing 한도 집행은 @moonklabs/sprintable-saas 에 있다.
 // OSS 단독 빌드에서는 한도 없음으로 enforceBeforeRun은 항상 allow 반환, enforceAfterRun은 no-op.
-import type { SupabaseClient } from '@supabase/supabase-js';
 
 export interface BillingLimitSettings {
   monthlyCapCents: number | null;
@@ -48,8 +48,8 @@ interface BillingLimitDeps {
 }
 
 export class BillingLimitEnforcer {
-  constructor(_supabase: SupabaseClient, _options?: BillingLimitDeps) {
-    void _supabase;
+  constructor(_db: any, _options?: BillingLimitDeps) {
+    void _db;
     void _options;
   }
 

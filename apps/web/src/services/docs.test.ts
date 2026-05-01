@@ -1,7 +1,7 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { DocsService } from './docs';
 
-function createDocsSupabase(options?: {
+function createDocsDb(options?: {
   updateResult?: Record<string, unknown> | null;
   currentUpdatedAt?: string;
 }) {
@@ -29,7 +29,7 @@ function createDocsSupabase(options?: {
     select: vi.fn(() => readBuilder),
   };
 
-  const supabase = {
+  const db = {
     from: vi.fn((table: string) => {
       if (table !== 'docs') throw new Error(`Unexpected table: ${table}`);
       return docsTable;
@@ -37,7 +37,7 @@ function createDocsSupabase(options?: {
     rpc: vi.fn().mockResolvedValue({ data: null, error: null }),
   };
 
-  return { supabase, updateBuilder, readBuilder };
+  return { db, updateBuilder, readBuilder };
 }
 
 describe('DocsService.updateDoc', () => {
@@ -46,8 +46,8 @@ describe('DocsService.updateDoc', () => {
   });
 
   it('applies optimistic concurrency when expected_updated_at is provided', async () => {
-    const { supabase, updateBuilder } = createDocsSupabase();
-    const service = new DocsService({} as never, supabase as never);
+    const { db, updateBuilder } = createDocsDb();
+    const service = new DocsService({} as never, db as never);
 
     const result = await service.updateDoc('doc-1', {
       content: 'updated',
@@ -58,17 +58,17 @@ describe('DocsService.updateDoc', () => {
 
     expect(updateBuilder.eq).toHaveBeenCalledWith('id', 'doc-1');
     expect(updateBuilder.eq).toHaveBeenCalledWith('updated_at', '2026-04-09T15:19:00.000Z');
-    expect(supabase.rpc).toHaveBeenCalledWith('trim_doc_revisions', { _doc_id: 'doc-1', _keep: 50 });
+    expect(db.rpc).toHaveBeenCalledWith('trim_doc_revisions', { _doc_id: 'doc-1', _keep: 50 });
     expect(result).toEqual(expect.objectContaining({ id: 'doc-1', content: 'updated' }));
   });
 
   it('throws a conflict error when updated_at no longer matches', async () => {
-    const { supabase, updateBuilder, readBuilder } = createDocsSupabase({
+    const { db, updateBuilder, readBuilder } = createDocsDb({
       updateResult: null,
       currentUpdatedAt: '2026-04-09T15:21:00.000Z',
     });
     updateBuilder.maybeSingle.mockResolvedValue({ data: null, error: null });
-    const service = new DocsService({} as never, supabase as never);
+    const service = new DocsService({} as never, db as never);
 
     await expect(service.updateDoc('doc-1', {
       content: 'stale update',
@@ -80,12 +80,12 @@ describe('DocsService.updateDoc', () => {
     });
 
     expect(readBuilder.eq).toHaveBeenCalledWith('id', 'doc-1');
-    expect(supabase.rpc).not.toHaveBeenCalled();
+    expect(db.rpc).not.toHaveBeenCalled();
   });
 
   it('allows explicit overwrite after a conflict acknowledgement', async () => {
-    const { supabase, updateBuilder } = createDocsSupabase();
-    const service = new DocsService({} as never, supabase as never);
+    const { db, updateBuilder } = createDocsDb();
+    const service = new DocsService({} as never, db as never);
 
     await service.updateDoc('doc-1', {
       content: 'overwrite me',
@@ -95,6 +95,6 @@ describe('DocsService.updateDoc', () => {
 
     expect(updateBuilder.eq).toHaveBeenCalledWith('id', 'doc-1');
     expect(updateBuilder.eq).not.toHaveBeenCalledWith('updated_at', '2026-04-09T15:19:00.000Z');
-    expect(supabase.rpc).toHaveBeenCalledWith('trim_doc_revisions', { _doc_id: 'doc-1', _keep: 50 });
+    expect(db.rpc).toHaveBeenCalledWith('trim_doc_revisions', { _doc_id: 'doc-1', _keep: 50 });
   });
 });

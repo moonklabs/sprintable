@@ -2,7 +2,7 @@ import { describe, expect, it } from 'vitest';
 import { buildDeploymentCards } from './agent-dashboard';
 import { getDeploymentHealthState, getDeploymentRecoveryCueKeys } from './agent-deployment-console';
 
-function createSupabaseStub(options?: {
+function createDbStub(options?: {
   deployments?: Array<Record<string, unknown>>;
   agents?: Array<{ id: string; name: string }>;
   personas?: Array<{ id: string; name: string }>;
@@ -23,7 +23,7 @@ function createSupabaseStub(options?: {
   const pendingHitlRequests = options?.pendingHitlRequests ?? [];
   const hitlRuns = options?.hitlRuns ?? [];
 
-  const supabase = {
+  const db = {
     from(table: string) {
       if (table === 'agent_deployments') {
         return {
@@ -106,18 +106,18 @@ function createSupabaseStub(options?: {
     },
   };
 
-  return supabase;
+  return db;
 }
 
 describe('buildDeploymentCards', () => {
   it('returns empty array when no deployments exist', async () => {
-    const supabase = createSupabaseStub();
-    const cards = await buildDeploymentCards(supabase as never, 'org-1', 'project-1');
+    const db = createDbStub();
+    const cards = await buildDeploymentCards(db as never, 'org-1', 'project-1');
     expect(cards).toEqual([]);
   });
 
   it('builds cards with agent names, persona names, execution summary, and last run time', async () => {
-    const supabase = createSupabaseStub({
+    const db = createDbStub({
       deployments: [
         {
           id: 'dep-1',
@@ -158,7 +158,7 @@ describe('buildDeploymentCards', () => {
       ],
     });
 
-    const cards = await buildDeploymentCards(supabase as never, 'org-1', 'project-1');
+    const cards = await buildDeploymentCards(db as never, 'org-1', 'project-1');
 
     expect(cards).toHaveLength(2);
 
@@ -190,7 +190,7 @@ describe('buildDeploymentCards', () => {
   });
 
   it('handles deployments with no runs today', async () => {
-    const supabase = createSupabaseStub({
+    const db = createDbStub({
       deployments: [
         {
           id: 'dep-1',
@@ -208,7 +208,7 @@ describe('buildDeploymentCards', () => {
       latestRuns: [],
     });
 
-    const cards = await buildDeploymentCards(supabase as never, 'org-1', 'project-1');
+    const cards = await buildDeploymentCards(db as never, 'org-1', 'project-1');
 
     expect(cards[0]).toMatchObject({
       executions_today: 0,
@@ -219,7 +219,7 @@ describe('buildDeploymentCards', () => {
   });
 
   it('aggregates pending HITL requests per deployment', async () => {
-    const supabase = createSupabaseStub({
+    const db = createDbStub({
       deployments: [
         {
           id: 'dep-1',
@@ -243,7 +243,7 @@ describe('buildDeploymentCards', () => {
       ],
     });
 
-    const cards = await buildDeploymentCards(supabase as never, 'org-1', 'project-1', 'admin-1');
+    const cards = await buildDeploymentCards(db as never, 'org-1', 'project-1', 'admin-1');
 
     expect(cards[0]).toMatchObject({
       pending_hitl_count: 2,
@@ -252,7 +252,7 @@ describe('buildDeploymentCards', () => {
   });
 
   it('limits HITL dashboard aggregates to the current admin queue', async () => {
-    const supabase = createSupabaseStub({
+    const db = createDbStub({
       deployments: [
         {
           id: 'dep-1',
@@ -276,7 +276,7 @@ describe('buildDeploymentCards', () => {
       ],
     });
 
-    const cards = await buildDeploymentCards(supabase as never, 'org-1', 'project-1', 'admin-1');
+    const cards = await buildDeploymentCards(db as never, 'org-1', 'project-1', 'admin-1');
 
     expect(cards[0]).toMatchObject({
       pending_hitl_count: 1,
@@ -285,7 +285,7 @@ describe('buildDeploymentCards', () => {
   });
 
   it('keeps retry-exhausted failures active when only a later queued run exists', async () => {
-    const supabase = createSupabaseStub({
+    const db = createDbStub({
       deployments: [
         {
           id: 'dep-1',
@@ -322,7 +322,7 @@ describe('buildDeploymentCards', () => {
       ],
     });
 
-    const cards = await buildDeploymentCards(supabase as never, 'org-1', 'project-1');
+    const cards = await buildDeploymentCards(db as never, 'org-1', 'project-1');
 
     expect(cards[0]).toMatchObject({
       last_run_at: '2026-04-12T06:10:00.000Z',
@@ -339,7 +339,7 @@ describe('buildDeploymentCards', () => {
   });
 
   it('clears the failure signal only after a later successful run exists', async () => {
-    const supabase = createSupabaseStub({
+    const db = createDbStub({
       deployments: [
         {
           id: 'dep-1',
@@ -378,7 +378,7 @@ describe('buildDeploymentCards', () => {
       ],
     });
 
-    const cards = await buildDeploymentCards(supabase as never, 'org-1', 'project-1');
+    const cards = await buildDeploymentCards(db as never, 'org-1', 'project-1');
 
     expect(cards[0]).toMatchObject({
       last_run_at: '2026-04-12T06:30:00.000Z',
@@ -389,7 +389,7 @@ describe('buildDeploymentCards', () => {
   });
 
   it('falls back to Agent when agent name not found', async () => {
-    const supabase = createSupabaseStub({
+    const db = createDbStub({
       deployments: [
         {
           id: 'dep-1',
@@ -407,7 +407,7 @@ describe('buildDeploymentCards', () => {
       latestRuns: [],
     });
 
-    const cards = await buildDeploymentCards(supabase as never, 'org-1', 'project-1');
+    const cards = await buildDeploymentCards(db as never, 'org-1', 'project-1');
     expect(cards[0]?.agent_name).toBe('Agent');
   });
 });

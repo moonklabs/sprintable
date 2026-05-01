@@ -1,22 +1,22 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
-const { cookieSet, createSupabaseServerClient } = vi.hoisted(() => ({
+const { cookieSet, createDbServerClient } = vi.hoisted(() => ({
   cookieSet: vi.fn(),
-  createSupabaseServerClient: vi.fn(),
+  createDbServerClient: vi.fn(),
 }));
 
 vi.mock('next/headers', () => ({
   cookies: vi.fn(async () => ({ set: cookieSet })),
 }));
 
-vi.mock('@/lib/supabase/server', () => ({
-  createSupabaseServerClient,
+vi.mock('@/lib/db/server', () => ({
+  createDbServerClient,
 }));
 
 import { POST } from './route';
 import { CURRENT_PROJECT_COOKIE } from '@/lib/auth-helpers';
 
-function createSupabaseStub(projectId: string | null) {
+function createDbStub(projectId: string | null) {
   return {
     auth: {
       getUser: vi.fn().mockResolvedValue({ data: { user: { id: 'user-1' } } }),
@@ -31,11 +31,11 @@ function createSupabaseStub(projectId: string | null) {
 describe('POST /api/invitations/accept', () => {
   beforeEach(() => {
     cookieSet.mockReset();
-    createSupabaseServerClient.mockReset();
+    createDbServerClient.mockReset();
   });
 
   it('sets current project cookie when accept_invitation returns a project_id', async () => {
-    createSupabaseServerClient.mockResolvedValue(createSupabaseStub('project-1'));
+    createDbServerClient.mockResolvedValue(createDbStub('project-1'));
 
     const response = await POST(new Request('http://localhost/api/invitations/accept', {
       method: 'POST',
@@ -50,7 +50,7 @@ describe('POST /api/invitations/accept', () => {
   });
 
   it('returns validation errors for malformed payloads', async () => {
-    createSupabaseServerClient.mockResolvedValue(createSupabaseStub(null));
+    createDbServerClient.mockResolvedValue(createDbStub(null));
 
     const response = await POST(new Request('http://localhost/api/invitations/accept', {
       method: 'POST',
@@ -65,7 +65,7 @@ describe('POST /api/invitations/accept', () => {
   });
 
   it('does not set current project cookie when accept_invitation returns null project_id', async () => {
-    createSupabaseServerClient.mockResolvedValue(createSupabaseStub(null));
+    createDbServerClient.mockResolvedValue(createDbStub(null));
 
     const response = await POST(new Request('http://localhost/api/invitations/accept', {
       method: 'POST',

@@ -1,4 +1,4 @@
-import type { SupabaseClient } from '@supabase/supabase-js';
+
 import { decryptSecretForOrg, encryptSecretForOrg } from '@/lib/kms';
 
 export const ORG_INTEGRATION_TYPE = 'byom_api_key';
@@ -64,16 +64,16 @@ export function matchesProjectAiCredentialProvider(payload: ProjectAiCredentialS
 }
 
 export async function getProjectAiSettingsWithIntegration(
-  supabase: SupabaseClient,
+  db: any,
   projectId: string,
 ): Promise<ProjectAiCredentialState> {
   const [{ data: settings, error: settingsError }, { data: integration, error: integrationError }] = await Promise.all([
-    supabase
+    db
       .from('project_ai_settings')
       .select('id, org_id, project_id, provider, api_key, llm_config, created_at, updated_at')
       .eq('project_id', projectId)
       .maybeSingle(),
-    supabase
+    db
       .from('org_integrations')
       .select('id, org_id, project_id, integration_type, provider, secret_last4, encrypted_secret, kms_provider, kms_status, rotation_requested_at, created_at, updated_at')
       .eq('project_id', projectId)
@@ -91,7 +91,7 @@ export async function getProjectAiSettingsWithIntegration(
 }
 
 export async function upsertEncryptedProjectSecret(
-  supabase: SupabaseClient,
+  db: any,
   input: {
     orgId: string;
     projectId: string;
@@ -103,7 +103,7 @@ export async function upsertEncryptedProjectSecret(
   const updatedAt = input.updatedAt ?? new Date().toISOString();
   const encryptedSecret = await encryptSecretForOrg(input.orgId, input.plaintextSecret);
 
-  const { error: integrationError } = await supabase
+  const { error: integrationError } = await db
     .from('org_integrations')
     .upsert({
       org_id: input.orgId,
@@ -120,7 +120,7 @@ export async function upsertEncryptedProjectSecret(
 
   if (integrationError) throw integrationError;
 
-  const { error: settingsError } = await supabase
+  const { error: settingsError } = await db
     .from('project_ai_settings')
     .update({ api_key: null, updated_at: updatedAt })
     .eq('project_id', input.projectId);
@@ -131,7 +131,7 @@ export async function upsertEncryptedProjectSecret(
 }
 
 export async function persistProjectAiSettingsWithEncryptedSecret(
-  supabase: SupabaseClient,
+  db: any,
   input: {
     orgId: string;
     projectId: string;
@@ -143,7 +143,7 @@ export async function persistProjectAiSettingsWithEncryptedSecret(
 ) {
   const updatedAt = input.updatedAt ?? new Date().toISOString();
   const encryptedSecret = await encryptSecretForOrg(input.orgId, input.plaintextSecret);
-  const { data, error } = await supabase.rpc('upsert_project_ai_settings_with_secret', {
+  const { data, error } = await db.rpc('upsert_project_ai_settings_with_secret', {
     p_org_id: input.orgId,
     p_project_id: input.projectId,
     p_provider: input.provider,
@@ -168,7 +168,7 @@ export async function decryptProjectSecret(
 }
 
 export async function ensureProjectSecretEncrypted(
-  supabase: SupabaseClient,
+  db: any,
   payload: {
     settings: ProjectAiSettingsRecord | null;
     integration: OrgIntegrationRecord | null;
@@ -177,13 +177,13 @@ export async function ensureProjectSecretEncrypted(
   if (payload.integration?.encrypted_secret) return payload.integration;
   if (!payload.settings?.org_id || !payload.settings?.api_key) return payload.integration;
 
-  await upsertEncryptedProjectSecret(supabase, {
+  await upsertEncryptedProjectSecret(db, {
     orgId: payload.settings.org_id,
     projectId: payload.settings.project_id,
     provider: payload.settings.provider,
     plaintextSecret: payload.settings.api_key,
   });
 
-  const { integration } = await getProjectAiSettingsWithIntegration(supabase, payload.settings.project_id);
+  const { integration } = await getProjectAiSettingsWithIntegration(db, payload.settings.project_id);
   return integration;
 }

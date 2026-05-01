@@ -1,4 +1,4 @@
-import type { SupabaseClient } from '@supabase/supabase-js';
+
 import { ForbiddenError, NotFoundError } from './sprint';
 import { fireWebhooks } from './webhook-notify';
 import { syncSlackHitlRequestState } from './slack-hitl';
@@ -54,7 +54,7 @@ export class HitlConflictError extends Error {
 
 export class AgentHitlService {
   constructor(
-    private readonly supabase: SupabaseClient,
+    private readonly db: any,
     private readonly options: {
       fireWebhooksFn?: typeof fireWebhooks;
       syncSlackHitlFn?: typeof syncSlackHitlRequestState;
@@ -101,7 +101,7 @@ export class AgentHitlService {
 
     const compensations: Compensation[] = [
       async () => {
-        await this.supabase
+        await this.db
           .from('agent_hitl_requests')
           .update({
             status: 'pending',
@@ -121,11 +121,11 @@ export class AgentHitlService {
         input.action === 'approve' ? 'approve' : 'reject',
       );
       compensations.unshift(async () => {
-        await this.supabase.from('memo_replies').delete().eq('id', hitlReplyId);
+        await this.db.from('memo_replies').delete().eq('id', hitlReplyId);
       });
 
       compensations.unshift(async () => {
-        await this.supabase
+        await this.db
           .from('memos')
           .update({ status: 'open', resolved_by: null, resolved_at: null })
           .eq('id', hitlMemoId);
@@ -134,7 +134,7 @@ export class AgentHitlService {
 
       if (input.action === 'approve') {
         compensations.unshift(async () => {
-          await this.supabase
+          await this.db
             .from('agent_runs')
             .update({
               status: run.status,
@@ -155,7 +155,7 @@ export class AgentHitlService {
 
         const resumedRun = await this.createResumedRun(run);
         compensations.unshift(async () => {
-          await this.supabase.from('agent_runs').delete().eq('id', resumedRun.id);
+          await this.db.from('agent_runs').delete().eq('id', resumedRun.id);
         });
 
         const sourceReplyId = await this.insertMemoReply(
@@ -171,10 +171,10 @@ export class AgentHitlService {
           'comment',
         );
         compensations.unshift(async () => {
-          await this.supabase.from('memo_replies').delete().eq('id', sourceReplyId);
+          await this.db.from('memo_replies').delete().eq('id', sourceReplyId);
         });
 
-        await (this.options.fireWebhooksFn ?? fireWebhooks)(this.supabase, input.orgId, {
+        await (this.options.fireWebhooksFn ?? fireWebhooks)(this.db, input.orgId, {
           event: 'agent_run.retry_requested',
           data: {
             new_run_id: resumedRun.id,
@@ -217,7 +217,7 @@ export class AgentHitlService {
       }
 
       compensations.unshift(async () => {
-        await this.supabase
+        await this.db
           .from('agent_runs')
           .update({
             status: run.status,
@@ -248,7 +248,7 @@ export class AgentHitlService {
         'comment',
       );
       compensations.unshift(async () => {
-        await this.supabase.from('memo_replies').delete().eq('id', sourceReplyId);
+        await this.db.from('memo_replies').delete().eq('id', sourceReplyId);
       });
 
       await this.insertAuditLog({
@@ -284,7 +284,7 @@ export class AgentHitlService {
   }
 
   private async getRequest(requestId: string, orgId: string, projectId: string) {
-    const { data, error } = await this.supabase
+    const { data, error } = await this.db
       .from('agent_hitl_requests')
       .select('id, org_id, project_id, agent_id, deployment_id, session_id, run_id, requested_for, status, title, prompt, response_text, expires_at, expired_at, metadata')
       .eq('id', requestId)
@@ -298,7 +298,7 @@ export class AgentHitlService {
 
   private async getRun(runId: string | null, orgId: string, projectId: string) {
     if (!runId) throw new Error('HITL request run missing');
-    const { data, error } = await this.supabase
+    const { data, error } = await this.db
       .from('agent_runs')
       .select('id, org_id, project_id, agent_id, deployment_id, session_id, story_id, memo_id, trigger, model, status, result_summary, finished_at, last_error_code, error_message, max_retries, retry_count')
       .eq('id', runId)
@@ -317,7 +317,7 @@ export class AgentHitlService {
     responseText: string,
     respondedAt: string,
   ) {
-    const { data, error } = await this.supabase
+    const { data, error } = await this.db
       .from('agent_hitl_requests')
       .update({
         status,
@@ -343,7 +343,7 @@ export class AgentHitlService {
     projectId: string,
     resolvedAt: string,
   ) {
-    const { data, error } = await this.supabase
+    const { data, error } = await this.db
       .from('memos')
       .update({ status: 'resolved', resolved_by: actorId, resolved_at: resolvedAt })
       .eq('id', memoId)
@@ -368,7 +368,7 @@ export class AgentHitlService {
       error_message: string | null;
     },
   ) {
-    const { data, error } = await this.supabase
+    const { data, error } = await this.db
       .from('agent_runs')
       .update(update)
       .eq('id', run.id)
@@ -384,7 +384,7 @@ export class AgentHitlService {
   }
 
   private async createResumedRun(run: AgentRunRow) {
-    const { data, error } = await this.supabase
+    const { data, error } = await this.db
       .from('agent_runs')
       .insert({
         org_id: run.org_id,
@@ -416,7 +416,7 @@ export class AgentHitlService {
   }
 
   private async insertMemoReply(memoId: string, createdBy: string, content: string, reviewType: string) {
-    const { data, error } = await this.supabase
+    const { data, error } = await this.db
       .from('memo_replies')
       .insert({
         memo_id: memoId,
@@ -439,7 +439,7 @@ export class AgentHitlService {
     eventType: string;
     payload: Record<string, unknown>;
   }) {
-    const { error } = await this.supabase
+    const { error } = await this.db
       .from('agent_audit_logs')
       .insert({
         org_id: input.request.org_id,
@@ -486,7 +486,7 @@ export class AgentHitlService {
     actorId: string,
   ) {
     try {
-      await (this.options.syncSlackHitlFn ?? syncSlackHitlRequestState)(this.supabase, {
+      await (this.options.syncSlackHitlFn ?? syncSlackHitlRequestState)(this.db, {
         request,
         hitlMemoId,
         sourceMemoId,

@@ -1,13 +1,13 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
-const { createSupabaseServerClient, getAuthContext, createSupabaseAdminClient } = vi.hoisted(() => ({
-  createSupabaseServerClient: vi.fn(),
+const { createDbServerClient, getAuthContext, createAdminClient } = vi.hoisted(() => ({
+  createDbServerClient: vi.fn(),
   getAuthContext: vi.fn(),
-  createSupabaseAdminClient: vi.fn(),
+  createAdminClient: vi.fn(),
 }));
 
-vi.mock('@/lib/supabase/server', () => ({ createSupabaseServerClient }));
-vi.mock('@/lib/supabase/admin', () => ({ createSupabaseAdminClient }));
+vi.mock('@/lib/db/server', () => ({ createDbServerClient }));
+vi.mock('@/lib/db/admin', () => ({ createAdminClient }));
 vi.mock('@/lib/auth-helpers', () => ({ getAuthContext }));
 
 import { GET, POST } from './route';
@@ -30,15 +30,15 @@ function createQueryStub(rows: Record<string, unknown>[] = []) {
 
 describe('GET /api/retro-sessions', () => {
   beforeEach(() => {
-    createSupabaseServerClient.mockReset();
+    createDbServerClient.mockReset();
     getAuthContext.mockReset();
-    createSupabaseAdminClient.mockReset();
+    createAdminClient.mockReset();
     getAuthContext.mockResolvedValue(makeAgent());
   });
 
   it('returns 401 when not authenticated', async () => {
-    const supabase = {};
-    createSupabaseServerClient.mockResolvedValue(supabase);
+    const db = {};
+    createDbServerClient.mockResolvedValue(db);
     getAuthContext.mockResolvedValue(null);
 
     const response = await GET(
@@ -49,9 +49,9 @@ describe('GET /api/retro-sessions', () => {
   });
 
   it('returns 400 when project_id is missing', async () => {
-    const supabase = {};
-    createSupabaseServerClient.mockResolvedValue(supabase);
-    createSupabaseAdminClient.mockReturnValue(supabase);
+    const db = {};
+    createDbServerClient.mockResolvedValue(db);
+    createAdminClient.mockReturnValue(db);
 
     const response = await GET(
       new Request('http://localhost/api/retro-sessions'),
@@ -62,11 +62,11 @@ describe('GET /api/retro-sessions', () => {
 
   it('returns 200 with sessions list', async () => {
     const sessions = [{ id: 'session-1', project_id: 'project-1', phase: 'collect' }];
-    const supabase = {
+    const db = {
       from: vi.fn(() => createQueryStub(sessions)),
     };
-    createSupabaseServerClient.mockResolvedValue(supabase);
-    createSupabaseAdminClient.mockReturnValue(supabase);
+    createDbServerClient.mockResolvedValue(db);
+    createAdminClient.mockReturnValue(db);
 
     const response = await GET(
       new Request('http://localhost/api/retro-sessions?project_id=project-1'),
@@ -80,15 +80,15 @@ describe('GET /api/retro-sessions', () => {
 
 describe('POST /api/retro-sessions', () => {
   beforeEach(() => {
-    createSupabaseServerClient.mockReset();
+    createDbServerClient.mockReset();
     getAuthContext.mockReset();
-    createSupabaseAdminClient.mockReset();
+    createAdminClient.mockReset();
     getAuthContext.mockResolvedValue(makeAgent());
   });
 
   it('returns 401 when not authenticated', async () => {
-    const supabase = {};
-    createSupabaseServerClient.mockResolvedValue(supabase);
+    const db = {};
+    createDbServerClient.mockResolvedValue(db);
     getAuthContext.mockResolvedValue(null);
 
     const response = await POST(
@@ -99,9 +99,9 @@ describe('POST /api/retro-sessions', () => {
   });
 
   it('returns 400 when required fields are missing', async () => {
-    const supabase = {};
-    createSupabaseServerClient.mockResolvedValue(supabase);
-    createSupabaseAdminClient.mockReturnValue(supabase);
+    const db = {};
+    createDbServerClient.mockResolvedValue(db);
+    createAdminClient.mockReturnValue(db);
 
     const response = await POST(
       new Request('http://localhost/api/retro-sessions', {
@@ -115,11 +115,11 @@ describe('POST /api/retro-sessions', () => {
 
   it('returns 200 with created session', async () => {
     const session = { id: 'session-new', project_id: 'project-1', title: 'Sprint Retro', phase: 'collect' };
-    const supabase = {
+    const db = {
       from: vi.fn(() => createQueryStub([session])),
     };
-    createSupabaseServerClient.mockResolvedValue(supabase);
-    createSupabaseAdminClient.mockReturnValue(supabase);
+    createDbServerClient.mockResolvedValue(db);
+    createAdminClient.mockReturnValue(db);
 
     const response = await POST(
       new Request('http://localhost/api/retro-sessions', {

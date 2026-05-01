@@ -8,7 +8,6 @@ const { createClient, findUserMapping, respond, syncSlackHitlRequestState } = vi
   syncSlackHitlRequestState: vi.fn(),
 }));
 
-vi.mock('@supabase/supabase-js', () => ({ createClient }));
 vi.mock('@/services/bridge-inbound', () => ({
   BridgeInboundService: class BridgeInboundService {
     findUserMapping = findUserMapping;
@@ -39,7 +38,7 @@ function makeSignature(secret: string, timestamp: string, body: string) {
   return `v0=${createHmac('sha256', secret).update(`v0:${timestamp}:${body}`).digest('hex')}`;
 }
 
-function createSupabaseStub(requestRow: Record<string, unknown> | null) {
+function createDbStub(requestRow: Record<string, unknown> | null) {
   return {
     from(table: string) {
       if (table === 'agent_hitl_requests') {
@@ -112,8 +111,8 @@ describe('POST /api/v1/bridge/slack/interactions', () => {
     respond.mockReset();
     syncSlackHitlRequestState.mockReset();
     process.env.SLACK_SIGNING_SECRET = 'route-signing-secret';
-    process.env.NEXT_PUBLIC_SUPABASE_URL = 'https://example.supabase.co';
-    process.env.SUPABASE_SERVICE_ROLE_KEY = 'service-role-key';
+    process.env.DATABASE_URL = 'https://example.db.co';
+    process.env.DATABASE_SERVICE_KEY = 'service-role-key';
   });
 
   it('returns 401 when the Slack signature is invalid', async () => {
@@ -122,7 +121,7 @@ describe('POST /api/v1/bridge/slack/interactions', () => {
   });
 
   it('processes approve actions through AgentHitlService', async () => {
-    createClient.mockReturnValue(createSupabaseStub(createRequestRow()));
+    createClient.mockReturnValue(createDbStub(createRequestRow()));
     findUserMapping.mockResolvedValue({ team_member_id: 'admin-1', display_name: 'Qasim' });
     respond.mockResolvedValue({ id: 'hitl-1', status: 'approved' });
 
@@ -141,7 +140,7 @@ describe('POST /api/v1/bridge/slack/interactions', () => {
   });
 
   it('rejects unknown action ids instead of default-approving them', async () => {
-    createClient.mockReturnValue(createSupabaseStub(createRequestRow()));
+    createClient.mockReturnValue(createDbStub(createRequestRow()));
 
     const response = await POST(makeRequest(createApprovePayload('totally_other_action')));
 
@@ -151,7 +150,7 @@ describe('POST /api/v1/bridge/slack/interactions', () => {
   });
 
   it('rejects interactions that do not originate from the stored Slack message', async () => {
-    createClient.mockReturnValue(createSupabaseStub(createRequestRow()));
+    createClient.mockReturnValue(createDbStub(createRequestRow()));
 
     const response = await POST(makeRequest({
       ...createApprovePayload(),
@@ -165,7 +164,7 @@ describe('POST /api/v1/bridge/slack/interactions', () => {
   });
 
   it('syncs the Slack message on conflict and returns an ephemeral notice', async () => {
-    createClient.mockReturnValue(createSupabaseStub(createRequestRow({
+    createClient.mockReturnValue(createDbStub(createRequestRow({
       status: 'approved',
       response_text: '승인',
     })));

@@ -109,7 +109,7 @@ function createBuilder(executor: (plan: QueryPlan) => Promise<{ data: unknown; e
   return builder;
 }
 
-function createSupabaseStub(state: State, options?: { failRunTransition?: boolean }) {
+function createDbStub(state: State, options?: { failRunTransition?: boolean }) {
   const failRunTransition = options?.failRunTransition ?? false;
   return {
     from(table: string) {
@@ -237,8 +237,8 @@ describe('AgentHitlService', () => {
 
   it('approves a pending HITL request, resolves the memo, and resumes the run', async () => {
     const state = createState();
-    const supabase = createSupabaseStub(state);
-    const service = new AgentHitlService(supabase as never, { fireWebhooksFn, logger: console });
+    const db = createDbStub(state);
+    const service = new AgentHitlService(db as never, { fireWebhooksFn, logger: console });
 
     const result = await service.respond({
       requestId: 'hitl-1',
@@ -279,7 +279,7 @@ describe('AgentHitlService', () => {
       expect.objectContaining({ memo_id: 'memo-hitl-1', review_type: 'approve' }),
       expect.objectContaining({ memo_id: 'memo-source-1', review_type: 'comment', content: expect.stringContaining('재개 run ID: run-hitl-resume-2') }),
     ]));
-    expect(fireWebhooksFn).toHaveBeenCalledWith(supabase, 'org-1', expect.objectContaining({
+    expect(fireWebhooksFn).toHaveBeenCalledWith(db, 'org-1', expect.objectContaining({
       event: 'agent_run.retry_requested',
       data: expect.objectContaining({ new_run_id: 'run-hitl-resume-2', original_run_id: 'run-hitl-1' }),
     }));
@@ -287,8 +287,8 @@ describe('AgentHitlService', () => {
 
   it('rejects a pending HITL request and records the rejection reason', async () => {
     const state = createState();
-    const supabase = createSupabaseStub(state);
-    const service = new AgentHitlService(supabase as never, { fireWebhooksFn, logger: console });
+    const db = createDbStub(state);
+    const service = new AgentHitlService(db as never, { fireWebhooksFn, logger: console });
 
     const result = await service.respond({
       requestId: 'hitl-1',
@@ -324,8 +324,8 @@ describe('AgentHitlService', () => {
 
   it('rolls back approval artifacts when the original run transition no longer succeeds', async () => {
     const state = createState();
-    const supabase = createSupabaseStub(state, { failRunTransition: true });
-    const service = new AgentHitlService(supabase as never, { fireWebhooksFn, logger: console });
+    const db = createDbStub(state, { failRunTransition: true });
+    const service = new AgentHitlService(db as never, { fireWebhooksFn, logger: console });
 
     await expect(service.respond({
       requestId: 'hitl-1',
@@ -355,8 +355,8 @@ describe('AgentHitlService', () => {
   it('throws conflict when the request was already processed', async () => {
     const state = createState();
     state.hitlRequests[0]!.status = 'approved';
-    const supabase = createSupabaseStub(state);
-    const service = new AgentHitlService(supabase as never, { fireWebhooksFn, logger: console });
+    const db = createDbStub(state);
+    const service = new AgentHitlService(db as never, { fireWebhooksFn, logger: console });
 
     await expect(service.respond({
       requestId: 'hitl-1',
@@ -370,8 +370,8 @@ describe('AgentHitlService', () => {
 
   it('blocks admins who are not assigned to the request', async () => {
     const state = createState();
-    const supabase = createSupabaseStub(state);
-    const service = new AgentHitlService(supabase as never, { fireWebhooksFn, logger: console });
+    const db = createDbStub(state);
+    const service = new AgentHitlService(db as never, { fireWebhooksFn, logger: console });
 
     await expect(service.respond({
       requestId: 'hitl-1',

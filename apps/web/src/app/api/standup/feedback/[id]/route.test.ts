@@ -1,13 +1,13 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
-const { createSupabaseServerClient, getAuthContext, createSupabaseAdminClient } = vi.hoisted(() => ({
-  createSupabaseServerClient: vi.fn(),
+const { createDbServerClient, getAuthContext, createAdminClient } = vi.hoisted(() => ({
+  createDbServerClient: vi.fn(),
   getAuthContext: vi.fn(),
-  createSupabaseAdminClient: vi.fn(),
+  createAdminClient: vi.fn(),
 }));
 
-vi.mock('@/lib/supabase/server', () => ({ createSupabaseServerClient }));
-vi.mock('@/lib/supabase/admin', () => ({ createSupabaseAdminClient }));
+vi.mock('@/lib/db/server', () => ({ createDbServerClient }));
+vi.mock('@/lib/db/admin', () => ({ createAdminClient }));
 vi.mock('@/lib/auth-helpers', () => ({ getAuthContext }));
 
 import { GET } from './route';
@@ -24,9 +24,9 @@ function createFeedbackQueryStub(rows: Record<string, unknown>[]) {
 
 describe('GET /api/standup/feedback/[id]', () => {
   beforeEach(() => {
-    createSupabaseServerClient.mockReset();
+    createDbServerClient.mockReset();
     getAuthContext.mockReset();
-    createSupabaseAdminClient.mockReset();
+    createAdminClient.mockReset();
     getAuthContext.mockResolvedValue({ id: 'member-1', type: 'human', rateLimitExceeded: false, rateLimitRemaining: 299, rateLimitResetAt: 0 });
   });
 
@@ -34,8 +34,8 @@ describe('GET /api/standup/feedback/[id]', () => {
     const rows = [
       { id: 'fb-1', standup_entry_id: 'entry-1', feedback_text: 'LGTM', review_type: 'approve' },
     ];
-    const supabase = { from: vi.fn(() => createFeedbackQueryStub(rows)) };
-    createSupabaseServerClient.mockResolvedValue(supabase);
+    const db = { from: vi.fn(() => createFeedbackQueryStub(rows)) };
+    createDbServerClient.mockResolvedValue(db);
 
     const response = await GET(
       new Request('http://localhost/api/standup/feedback/entry-1'),
@@ -48,7 +48,7 @@ describe('GET /api/standup/feedback/[id]', () => {
   });
 
   it('returns 401 when not authenticated', async () => {
-    createSupabaseServerClient.mockResolvedValue({});
+    createDbServerClient.mockResolvedValue({});
     getAuthContext.mockResolvedValue(null);
 
     const response = await GET(
@@ -62,9 +62,9 @@ describe('GET /api/standup/feedback/[id]', () => {
   it('uses admin client for agent auth', async () => {
     getAuthContext.mockResolvedValue({ id: 'agent-1', type: 'agent', rateLimitExceeded: false, rateLimitRemaining: 299, rateLimitResetAt: 0 });
     const rows = [{ id: 'fb-1', standup_entry_id: 'entry-1' }];
-    const adminSupabase = { from: vi.fn(() => createFeedbackQueryStub(rows)) };
-    createSupabaseAdminClient.mockReturnValue(adminSupabase);
-    createSupabaseServerClient.mockResolvedValue({});
+    const adminDb = { from: vi.fn(() => createFeedbackQueryStub(rows)) };
+    createAdminClient.mockReturnValue(adminDb);
+    createDbServerClient.mockResolvedValue({});
 
     const response = await GET(
       new Request('http://localhost/api/standup/feedback/entry-1'),
@@ -72,6 +72,6 @@ describe('GET /api/standup/feedback/[id]', () => {
     );
 
     expect(response.status).toBe(200);
-    expect(createSupabaseAdminClient).toHaveBeenCalled();
+    expect(createAdminClient).toHaveBeenCalled();
   });
 });

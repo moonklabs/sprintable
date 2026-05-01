@@ -1,6 +1,6 @@
+
 // OSS stub — 실제 과금 계산 로직은 @moonklabs/sprintable-saas 에 있다.
 // OSS 단독 빌드에서는 cost=0, cap 없음으로 모든 run을 허용한다.
-import type { SupabaseClient } from '@supabase/supabase-js';
 import type { LLMConfig, LLMProvider } from '@/lib/llm';
 
 export interface ManagedPricingRow {
@@ -24,7 +24,7 @@ export interface RunBillingSummary {
 }
 
 export async function getManagedPricingRow(
-  _supabase: SupabaseClient,
+  _db: any,
   _provider: LLMProvider,
   _model: string,
 ): Promise<ManagedPricingRow | null> {

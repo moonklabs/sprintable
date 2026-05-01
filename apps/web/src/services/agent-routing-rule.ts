@@ -1,4 +1,4 @@
-import type { SupabaseClient } from '@supabase/supabase-js';
+
 import { ForbiddenError, NotFoundError } from './sprint';
 
 export type RoutingAutoReplyMode = 'process_and_forward' | 'process_and_report';
@@ -459,10 +459,10 @@ function presentVersion(row: WorkflowVersionRow): WorkflowVersionSummary {
 }
 
 export class AgentRoutingRuleService {
-  constructor(private readonly supabase: SupabaseClient) {}
+  constructor(private readonly db: any) {}
 
   async listRules(scope: RoutingScope): Promise<RoutingRuleSummary[]> {
-    const { data, error } = await this.supabase
+    const { data, error } = await this.db
       .from('agent_routing_rules')
       .select('*')
       .eq('org_id', scope.orgId)
@@ -491,7 +491,7 @@ export class AgentRoutingRuleService {
       await this.assertAgentExists({ orgId: input.orgId, projectId: input.projectId, agentId: action.forward_to_agent_id });
     }
 
-    const { data, error } = await this.supabase
+    const { data, error } = await this.db
       .from('agent_routing_rules')
       .insert({
         org_id: input.orgId,
@@ -558,7 +558,7 @@ export class AgentRoutingRuleService {
       metadata: nextMetadata,
     };
 
-    const { data, error } = await this.supabase
+    const { data, error } = await this.db
       .from('agent_routing_rules')
       .update(patch)
       .eq('id', id)
@@ -583,7 +583,8 @@ export class AgentRoutingRuleService {
           items: currentRules.map((rule) => createRoutingRuleSnapshotItem(rule)),
         }
       : undefined;
-    const preparedItems = [];
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const preparedItems: any[] = [];
 
     for (const [index, item] of input.items.entries()) {
       const existingRuleId = item.id?.trim() || undefined;
@@ -631,7 +632,7 @@ export class AgentRoutingRuleService {
       });
     }
 
-    const { error } = await this.supabase.rpc('replace_agent_routing_rules', {
+    const { error } = await this.db.rpc('replace_agent_routing_rules', {
       _org_id: input.orgId,
       _project_id: input.projectId,
       _actor_id: input.actorId,
@@ -659,7 +660,7 @@ export class AgentRoutingRuleService {
     currentRules: RoutingRuleSummary[];
     newRules: RoutingRuleSummary[];
   }): Promise<void> {
-    const { data: versionData } = await this.supabase.rpc('next_workflow_version', {
+    const { data: versionData } = await this.db.rpc('next_workflow_version', {
       p_project_id: input.projectId,
     });
 
@@ -672,7 +673,7 @@ export class AgentRoutingRuleService {
       return prev && JSON.stringify(createRoutingRuleSnapshotItem(prev)) !== JSON.stringify(createRoutingRuleSnapshotItem(r));
     }).length;
 
-    const actorMember = await this.supabase
+    const actorMember = await this.db
       .from('team_members')
       .select('id')
       .eq('id', input.actorId)
@@ -680,7 +681,7 @@ export class AgentRoutingRuleService {
 
     const createdBy = actorMember.data?.id ?? null;
 
-    await this.supabase.from('workflow_versions').insert({
+    await this.db.from('workflow_versions').insert({
       org_id: input.orgId,
       project_id: input.projectId,
       version: versionData ?? 1,
@@ -691,7 +692,7 @@ export class AgentRoutingRuleService {
   }
 
   async listVersions(scope: RoutingScope): Promise<WorkflowVersionSummary[]> {
-    const { data, error } = await this.supabase
+    const { data, error } = await this.db
       .from('workflow_versions')
       .select('*')
       .eq('org_id', scope.orgId)
@@ -707,7 +708,7 @@ export class AgentRoutingRuleService {
     scope: RoutingScope,
     actorId: string,
   ): Promise<RoutingRuleSummary[]> {
-    const { data, error } = await this.supabase
+    const { data, error } = await this.db
       .from('workflow_versions')
       .select('*')
       .eq('id', versionId)
@@ -741,7 +742,7 @@ export class AgentRoutingRuleService {
   async deleteRule(id: string, scope: RoutingScope): Promise<{ ok: true; id: string }> {
     await this.getRawRuleById(id, scope);
 
-    const { error } = await this.supabase
+    const { error } = await this.db
       .from('agent_routing_rules')
       .update({ deleted_at: new Date().toISOString(), is_enabled: false })
       .eq('id', id)
@@ -754,7 +755,7 @@ export class AgentRoutingRuleService {
   }
 
   async disableRules(scope: RoutingScope): Promise<RoutingRuleSummary[]> {
-    const { error } = await this.supabase
+    const { error } = await this.db
       .from('agent_routing_rules')
       .update({ is_enabled: false })
       .eq('org_id', scope.orgId)
@@ -767,7 +768,7 @@ export class AgentRoutingRuleService {
 
   async reorderPriorities(scope: RoutingScope, updates: RoutingPriorityUpdate[]): Promise<RoutingRuleSummary[]> {
     const cleaned = updates.map((item) => ({ id: item.id, priority: item.priority }));
-    const { error } = await this.supabase.rpc('reorder_agent_routing_rules', {
+    const { error } = await this.db.rpc('reorder_agent_routing_rules', {
       _org_id: scope.orgId,
       _project_id: scope.projectId,
       _updates: cleaned,
@@ -832,7 +833,7 @@ export class AgentRoutingRuleService {
   }
 
   private async getRawRuleById(id: string, scope: RoutingScope): Promise<RoutingRuleRow> {
-    const { data, error } = await this.supabase
+    const { data, error } = await this.db
       .from('agent_routing_rules')
       .select('*')
       .eq('id', id)
@@ -849,7 +850,7 @@ export class AgentRoutingRuleService {
   }
 
   private async assertAgentExists(scope: RoutingAgentScope) {
-    const { data, error } = await this.supabase
+    const { data, error } = await this.db
       .from('team_members')
       .select('id, type, is_active')
       .eq('id', scope.agentId)
@@ -863,7 +864,7 @@ export class AgentRoutingRuleService {
   }
 
   private async assertPersonaExists(personaId: string, scope: RoutingAgentScope) {
-    const { data, error } = await this.supabase
+    const { data, error } = await this.db
       .from('agent_personas')
       .select('id')
       .eq('id', personaId)
@@ -877,7 +878,7 @@ export class AgentRoutingRuleService {
   }
 
   private async assertDeploymentExists(deploymentId: string, scope: RoutingAgentScope) {
-    const { data, error } = await this.supabase
+    const { data, error } = await this.db
       .from('agent_deployments')
       .select('id')
       .eq('id', deploymentId)

@@ -1,5 +1,4 @@
-import { createSupabaseServerClient } from '@/lib/supabase/server';
-import { createSupabaseAdminClient } from '@/lib/supabase/admin';
+import { createAdminClient } from '@/lib/db/admin';
 import { handleApiError } from '@/lib/api-error';
 import { apiSuccess, ApiErrors } from '@/lib/api-response';
 import { getAuthContext } from '@/lib/auth-helpers';
@@ -13,19 +12,20 @@ export async function GET(request: Request, { params }: RouteParams) {
   if (isOssMode()) return apiSuccess([]);
   try {
     const { id } = await params;
-    const supabase = await createSupabaseServerClient();
-    const me = await getAuthContext(supabase, request);
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const db: any = null;
+    const me = await getAuthContext(request);
     if (!me) return ApiErrors.unauthorized();
     if (me.rateLimitExceeded) return ApiErrors.tooManyRequests(me.rateLimitRemaining, me.rateLimitResetAt);
 
-    const denied = await requireRole(supabase, me.org_id, ADMIN_ROLES, 'Admin access required to view API key logs');
+    const denied = await requireRole(db, me.org_id, ADMIN_ROLES, 'Admin access required to view API key logs');
     if (denied) return denied;
 
     const { searchParams } = new URL(request.url);
     const limit = Math.min(Number(searchParams.get('limit') ?? '50'), 100);
     const cursor = searchParams.get('cursor') ?? undefined;
 
-    const admin = createSupabaseAdminClient();
+    const admin = createAdminClient();
     let query = admin
       .from('api_key_logs')
       .select('id, api_key_id, endpoint, ip_address, status_code, created_at')

@@ -1,13 +1,13 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
-const { createSupabaseServerClient, getMyTeamMember, requireOrgAdmin } = vi.hoisted(() => ({
-  createSupabaseServerClient: vi.fn(),
+const { createDbServerClient, getMyTeamMember, requireOrgAdmin } = vi.hoisted(() => ({
+  createDbServerClient: vi.fn(),
   getMyTeamMember: vi.fn(),
   requireOrgAdmin: vi.fn(),
 }));
 
-vi.mock('@/lib/supabase/server', () => ({
-  createSupabaseServerClient,
+vi.mock('@/lib/db/server', () => ({
+  createDbServerClient,
 }));
 
 vi.mock('@/lib/auth-helpers', async () => {
@@ -24,7 +24,7 @@ vi.mock('@/lib/admin-check', () => ({
 
 import { POST } from './route';
 
-function createSupabaseStub() {
+function createDbStub() {
   return {
     auth: {
       getUser: vi.fn().mockResolvedValue({ data: { user: { id: 'user-1' } } }),
@@ -34,7 +34,7 @@ function createSupabaseStub() {
 
 describe('POST /api/projects/[id]/ai-settings/validate', () => {
   beforeEach(() => {
-    createSupabaseServerClient.mockReset();
+    createDbServerClient.mockReset();
     getMyTeamMember.mockReset();
     requireOrgAdmin.mockReset();
     getMyTeamMember.mockResolvedValue({ id: 'team-member-1', org_id: 'org-1', project_id: 'project-1' });
@@ -43,10 +43,10 @@ describe('POST /api/projects/[id]/ai-settings/validate', () => {
   });
 
   it('returns 401 when unauthenticated', async () => {
-    const supabase = {
+    const db = {
       auth: { getUser: vi.fn().mockResolvedValue({ data: { user: null } }) },
     };
-    createSupabaseServerClient.mockResolvedValue(supabase);
+    createDbServerClient.mockResolvedValue(db);
 
     const response = await POST(
       new Request('http://localhost/api/projects/project-1/ai-settings/validate', {
@@ -61,7 +61,7 @@ describe('POST /api/projects/[id]/ai-settings/validate', () => {
   });
 
   it('returns 400 when api_key is missing', async () => {
-    createSupabaseServerClient.mockResolvedValue(createSupabaseStub());
+    createDbServerClient.mockResolvedValue(createDbStub());
 
     const response = await POST(
       new Request('http://localhost/api/projects/project-1/ai-settings/validate', {
@@ -76,7 +76,7 @@ describe('POST /api/projects/[id]/ai-settings/validate', () => {
   });
 
   it('returns valid=true when provider responds with 200', async () => {
-    createSupabaseServerClient.mockResolvedValue(createSupabaseStub());
+    createDbServerClient.mockResolvedValue(createDbStub());
     const fetchMock = vi.fn().mockResolvedValue({ status: 200 });
     vi.stubGlobal('fetch', fetchMock);
 
@@ -95,7 +95,7 @@ describe('POST /api/projects/[id]/ai-settings/validate', () => {
   });
 
   it('returns valid=false when provider responds with 401', async () => {
-    createSupabaseServerClient.mockResolvedValue(createSupabaseStub());
+    createDbServerClient.mockResolvedValue(createDbStub());
     const fetchMock = vi.fn().mockResolvedValue({ status: 401 });
     vi.stubGlobal('fetch', fetchMock);
 
@@ -114,7 +114,7 @@ describe('POST /api/projects/[id]/ai-settings/validate', () => {
   });
 
   it('sends POST for anthropic provider validation', async () => {
-    createSupabaseServerClient.mockResolvedValue(createSupabaseStub());
+    createDbServerClient.mockResolvedValue(createDbStub());
     const fetchMock = vi.fn().mockResolvedValue({ status: 200 });
     vi.stubGlobal('fetch', fetchMock);
 
@@ -134,7 +134,7 @@ describe('POST /api/projects/[id]/ai-settings/validate', () => {
   });
 
   it('requires base_url for openai-compatible validation', async () => {
-    createSupabaseServerClient.mockResolvedValue(createSupabaseStub());
+    createDbServerClient.mockResolvedValue(createDbStub());
 
     const response = await POST(
       new Request('http://localhost/api/projects/project-1/ai-settings/validate', {
@@ -151,7 +151,7 @@ describe('POST /api/projects/[id]/ai-settings/validate', () => {
   });
 
   it('validates openai-compatible keys against the provided base_url', async () => {
-    createSupabaseServerClient.mockResolvedValue(createSupabaseStub());
+    createDbServerClient.mockResolvedValue(createDbStub());
     const fetchMock = vi.fn().mockResolvedValue({ status: 200 });
     vi.stubGlobal('fetch', fetchMock);
 
@@ -176,7 +176,7 @@ describe('POST /api/projects/[id]/ai-settings/validate', () => {
   });
 
   it('uses x-goog-api-key header for google validation instead of query params', async () => {
-    createSupabaseServerClient.mockResolvedValue(createSupabaseStub());
+    createDbServerClient.mockResolvedValue(createDbStub());
     const fetchMock = vi.fn().mockResolvedValue({ status: 200 });
     vi.stubGlobal('fetch', fetchMock);
 
@@ -201,7 +201,7 @@ describe('POST /api/projects/[id]/ai-settings/validate', () => {
   });
 
   it('returns 400 for invalid provider value', async () => {
-    createSupabaseServerClient.mockResolvedValue(createSupabaseStub());
+    createDbServerClient.mockResolvedValue(createDbStub());
 
     const response = await POST(
       new Request('http://localhost/api/projects/project-1/ai-settings/validate', {

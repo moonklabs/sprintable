@@ -1,5 +1,5 @@
 import { NextResponse } from 'next/server';
-import { createSupabaseAdminClient } from '@/lib/supabase/admin';
+import { createAdminClient } from '@/lib/db/admin';
 import { decodeMcpOAuthState } from '@/lib/mcp-oauth-state';
 import { exchangeGitHubOAuthCode } from '@/services/project-mcp';
 
@@ -16,7 +16,7 @@ export async function GET(request: Request) {
       return NextResponse.redirect(`${origin}/dashboard/settings?mcp_connection=github_error`);
     }
 
-    const admin = createSupabaseAdminClient();
+    const admin = createAdminClient();
     await exchangeGitHubOAuthCode(admin as never, {
       code,
       origin,

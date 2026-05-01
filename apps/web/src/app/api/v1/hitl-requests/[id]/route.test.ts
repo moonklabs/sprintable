@@ -1,14 +1,14 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
-const { createSupabaseServerClient, getMyTeamMember, requireOrgAdmin, requireAgentOrchestration, respond } = vi.hoisted(() => ({
-  createSupabaseServerClient: vi.fn(),
+const { createDbServerClient, getMyTeamMember, requireOrgAdmin, requireAgentOrchestration, respond } = vi.hoisted(() => ({
+  createDbServerClient: vi.fn(),
   getMyTeamMember: vi.fn(),
   requireOrgAdmin: vi.fn(),
   requireAgentOrchestration: vi.fn(),
   respond: vi.fn(),
 }));
 
-vi.mock('@/lib/supabase/server', () => ({ createSupabaseServerClient }));
+vi.mock('@/lib/db/server', () => ({ createDbServerClient }));
 vi.mock('@/lib/auth-helpers', () => ({ getMyTeamMember }));
 vi.mock('@/lib/admin-check', () => ({ requireOrgAdmin }));
 vi.mock('@/lib/require-agent-orchestration', () => ({ requireAgentOrchestration }));
@@ -34,7 +34,7 @@ import { PATCH } from './route';
 
 describe('PATCH /api/v1/hitl-requests/[id]', () => {
   beforeEach(() => {
-    createSupabaseServerClient.mockReset();
+    createDbServerClient.mockReset();
     getMyTeamMember.mockReset();
     requireOrgAdmin.mockReset();
     requireAgentOrchestration.mockReset();
@@ -43,7 +43,7 @@ describe('PATCH /api/v1/hitl-requests/[id]', () => {
   });
 
   it('returns unauthorized when no auth user exists', async () => {
-    createSupabaseServerClient.mockResolvedValue({
+    createDbServerClient.mockResolvedValue({
       auth: { getUser: vi.fn().mockResolvedValue({ data: { user: null } }) },
     });
 
@@ -56,7 +56,7 @@ describe('PATCH /api/v1/hitl-requests/[id]', () => {
   });
 
   it('blocks approve/reject bypass when upgrade is required', async () => {
-    createSupabaseServerClient.mockResolvedValue({
+    createDbServerClient.mockResolvedValue({
       auth: { getUser: vi.fn().mockResolvedValue({ data: { user: { id: 'user-1' } } }) },
     });
     getMyTeamMember.mockResolvedValue({ id: 'admin-1', org_id: 'org-1', project_id: 'project-1' });
@@ -76,7 +76,7 @@ describe('PATCH /api/v1/hitl-requests/[id]', () => {
   });
 
   it('maps service conflicts to 409', async () => {
-    createSupabaseServerClient.mockResolvedValue({
+    createDbServerClient.mockResolvedValue({
       auth: { getUser: vi.fn().mockResolvedValue({ data: { user: { id: 'user-1' } } }) },
     });
     getMyTeamMember.mockResolvedValue({ id: 'admin-1', org_id: 'org-1', project_id: 'project-1' });
@@ -97,7 +97,7 @@ describe('PATCH /api/v1/hitl-requests/[id]', () => {
   });
 
   it('returns approved payload on success', async () => {
-    createSupabaseServerClient.mockResolvedValue({
+    createDbServerClient.mockResolvedValue({
       auth: { getUser: vi.fn().mockResolvedValue({ data: { user: { id: 'user-1' } } }) },
     });
     getMyTeamMember.mockResolvedValue({ id: 'admin-1', org_id: 'org-1', project_id: 'project-1' });

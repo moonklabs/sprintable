@@ -1,4 +1,4 @@
-import type { SupabaseClient } from '@supabase/supabase-js';
+
 import type {
   InboxItem,
   CreateInboxItemInput,
@@ -9,7 +9,7 @@ import type {
   OriginNode,
   InboxOption,
 } from '@sprintable/core-storage';
-import { createSupabaseAdminClient } from '@/lib/supabase/admin';
+import { createAdminClient } from '@/lib/db/admin';
 import { isOssMode, createInboxItemRepository } from '@/lib/storage/factory';
 import { createInboxItemSchema, originChainSchema, inboxOptionsSchema } from '@sprintable/shared';
 
@@ -35,7 +35,7 @@ export interface ProduceApprovalArgs {
 }
 
 export class InboxItemService {
-  constructor(private readonly supabase?: SupabaseClient) {}
+  constructor(private readonly db?: any) {}
 
   /**
    * Create new inbox_item. Idempotent on (org_id, source_type, source_id, kind).
@@ -44,7 +44,7 @@ export class InboxItemService {
   async create(input: CreateInboxItemInput): Promise<InboxItem> {
     // Validate at single boundary point (codex tactical fix #10 — Zod at write time)
     const validated = createInboxItemSchema.parse(input);
-    const repo = await createInboxItemRepository(this.supabase ?? createSupabaseAdminClient());
+    const repo = await createInboxItemRepository(this.db ?? createAdminClient());
     return repo.create(validated);
   }
 
@@ -79,7 +79,7 @@ export class InboxItemService {
   }
 
   private async getRepo() {
-    return createInboxItemRepository(isOssMode() ? undefined : this.supabase);
+    return createInboxItemRepository(isOssMode() ? undefined : this.db);
   }
 
   /**

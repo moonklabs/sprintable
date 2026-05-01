@@ -1,6 +1,5 @@
-import type { SupabaseClient } from '@supabase/supabase-js';
-import { createSupabaseServerClient } from '@/lib/supabase/server';
-import { createSupabaseAdminClient } from '@/lib/supabase/admin';
+
+import { createAdminClient } from '@/lib/db/admin';
 import { StoryService } from '@/services/story';
 import { handleApiError } from '@/lib/api-error';
 import { getAuthContext } from '@/lib/auth-helpers';
@@ -12,19 +11,18 @@ type RouteParams = { params: Promise<{ id: string }> };
 export async function GET(request: Request, { params }: RouteParams) {
   try {
     const { id } = await params;
-    const supabase = await createSupabaseServerClient();
-    const me = await getAuthContext(supabase, request);
+    const me = await getAuthContext(request);
     if (!me) return ApiErrors.unauthorized();
     if (me.rateLimitExceeded) return ApiErrors.tooManyRequests(me.rateLimitRemaining, me.rateLimitResetAt);
     const ossMode = isOssMode();
-    const dbClient = ossMode ? undefined : (me.type === 'agent' ? createSupabaseAdminClient() : supabase);
+    const dbClient = ossMode ? undefined : (me.type === 'agent' ? createAdminClient() : undefined);
 
     const url = new URL(request.url);
     const limit = url.searchParams.get('limit');
     const cursor = url.searchParams.get('cursor');
 
     const repo = await createStoryRepository(dbClient);
-    const service = new StoryService(repo, dbClient as SupabaseClient | undefined);
+    const service = new StoryService(repo, dbClient as any | undefined);
     const comments = await service.getComments(id, {
       limit: limit ? parseInt(limit, 10) : 20,
       cursor: cursor ?? undefined,
@@ -43,12 +41,11 @@ export async function GET(request: Request, { params }: RouteParams) {
 export async function POST(request: Request, { params }: RouteParams) {
   try {
     const { id } = await params;
-    const supabase = await createSupabaseServerClient();
-    const me = await getAuthContext(supabase, request);
+    const me = await getAuthContext(request);
     if (!me) return ApiErrors.unauthorized();
     if (me.rateLimitExceeded) return ApiErrors.tooManyRequests(me.rateLimitRemaining, me.rateLimitResetAt);
     const ossMode = isOssMode();
-    const dbClient = ossMode ? undefined : (me.type === 'agent' ? createSupabaseAdminClient() : supabase);
+    const dbClient = ossMode ? undefined : (me.type === 'agent' ? createAdminClient() : undefined);
 
     const body = await request.json();
     if (!body.content || typeof body.content !== 'string') {
@@ -56,7 +53,7 @@ export async function POST(request: Request, { params }: RouteParams) {
     }
 
     const repo = await createStoryRepository(dbClient);
-    const service = new StoryService(repo, dbClient as SupabaseClient | undefined);
+    const service = new StoryService(repo, dbClient as any | undefined);
     const comment = await service.addComment({
       story_id: id,
       content: body.content,

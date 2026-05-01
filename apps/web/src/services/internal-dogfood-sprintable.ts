@@ -1,9 +1,9 @@
-import type { SupabaseClient } from '@supabase/supabase-js';
+
 import type { InternalDogfoodActor } from '@/lib/internal-dogfood';
 import { dispatchMemoAssignmentImmediately, type DispatchableMemo } from './memo-assignment-dispatch';
 
 export async function createInternalDogfoodMemoInSprintable(
-  supabase: SupabaseClient,
+  db: any,
   actor: InternalDogfoodActor,
   input: {
     title?: string | null;
@@ -23,7 +23,7 @@ export async function createInternalDogfoodMemoInSprintable(
     metadata: { internal_dogfood: true },
   };
 
-  const { data, error } = await supabase
+  const { data, error } = await db
     .from('memos')
     .insert(memoPayload)
     .select('id, org_id, project_id, title, content, memo_type, status, assigned_to, created_by, metadata, updated_at, created_at')
@@ -37,7 +37,7 @@ export async function createInternalDogfoodMemoInSprintable(
 }
 
 export async function createInternalDogfoodStoryInSprintable(
-  supabase: SupabaseClient,
+  db: any,
   actor: InternalDogfoodActor,
   input: {
     title: string;
@@ -47,7 +47,7 @@ export async function createInternalDogfoodStoryInSprintable(
     priority: string;
   },
 ) {
-  const { data, error } = await supabase
+  const { data, error } = await db
     .from('stories')
     .insert({
       org_id: actor.org_id,

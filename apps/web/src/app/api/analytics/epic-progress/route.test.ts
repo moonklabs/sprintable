@@ -1,13 +1,13 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
-const { createSupabaseServerClient, getAuthContext, createSupabaseAdminClient } = vi.hoisted(() => ({
-  createSupabaseServerClient: vi.fn(),
+const { createDbServerClient, getAuthContext, createAdminClient } = vi.hoisted(() => ({
+  createDbServerClient: vi.fn(),
   getAuthContext: vi.fn(),
-  createSupabaseAdminClient: vi.fn(),
+  createAdminClient: vi.fn(),
 }));
 
-vi.mock('@/lib/supabase/server', () => ({ createSupabaseServerClient }));
-vi.mock('@/lib/supabase/admin', () => ({ createSupabaseAdminClient }));
+vi.mock('@/lib/db/server', () => ({ createDbServerClient }));
+vi.mock('@/lib/db/admin', () => ({ createAdminClient }));
 vi.mock('@/lib/auth-helpers', () => ({ getAuthContext }));
 
 import { GET } from './route';
@@ -27,16 +27,16 @@ function createQueryStub(rows: Record<string, unknown>[] = []) {
 
 describe('GET /api/analytics/epic-progress', () => {
   beforeEach(() => {
-    createSupabaseServerClient.mockReset();
+    createDbServerClient.mockReset();
     getAuthContext.mockReset();
-    createSupabaseAdminClient.mockReset();
+    createAdminClient.mockReset();
     getAuthContext.mockResolvedValue(makeAgent());
   });
 
   it('returns 400 when project_id missing', async () => {
-    const supabase = { from: vi.fn(() => createQueryStub()) };
-    createSupabaseServerClient.mockResolvedValue(supabase);
-    createSupabaseAdminClient.mockReturnValue(supabase);
+    const db = { from: vi.fn(() => createQueryStub()) };
+    createDbServerClient.mockResolvedValue(db);
+    createAdminClient.mockReturnValue(db);
 
     const response = await GET(new Request('http://localhost/api/analytics/epic-progress?epic_id=epic-1'));
 
@@ -46,9 +46,9 @@ describe('GET /api/analytics/epic-progress', () => {
   });
 
   it('returns 400 when epic_id missing', async () => {
-    const supabase = { from: vi.fn(() => createQueryStub()) };
-    createSupabaseServerClient.mockResolvedValue(supabase);
-    createSupabaseAdminClient.mockReturnValue(supabase);
+    const db = { from: vi.fn(() => createQueryStub()) };
+    createDbServerClient.mockResolvedValue(db);
+    createAdminClient.mockReturnValue(db);
 
     const response = await GET(new Request('http://localhost/api/analytics/epic-progress?project_id=p'));
 
@@ -63,9 +63,9 @@ describe('GET /api/analytics/epic-progress', () => {
       { status: 'done', story_points: 3 },
       { status: 'in-progress', story_points: 2 },
     ];
-    const supabase = { from: vi.fn(() => createQueryStub(stories)) };
-    createSupabaseServerClient.mockResolvedValue(supabase);
-    createSupabaseAdminClient.mockReturnValue(supabase);
+    const db = { from: vi.fn(() => createQueryStub(stories)) };
+    createDbServerClient.mockResolvedValue(db);
+    createAdminClient.mockReturnValue(db);
 
     const response = await GET(new Request('http://localhost/api/analytics/epic-progress?project_id=project-alpha&epic_id=epic-1'));
 

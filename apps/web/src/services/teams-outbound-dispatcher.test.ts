@@ -1,5 +1,5 @@
+
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import type { SupabaseClient } from '@supabase/supabase-js';
 import {
   buildTeamsAdaptiveCard,
   buildTeamsMemoLink,
@@ -7,7 +7,7 @@ import {
   TeamsOutboundDispatcher,
 } from './teams-outbound-dispatcher';
 
-function createSupabaseStub(options?: {
+function createDbStub(options?: {
   memo?: Record<string, unknown> | null;
   channelMapping?: Record<string, unknown> | null;
   activeAgent?: Record<string, unknown> | null;
@@ -53,7 +53,7 @@ function createSupabaseStub(options?: {
     expires_at: null,
   };
 
-  const supabase = {
+  const db = {
     channel: vi.fn(() => channel),
     removeChannel: vi.fn(async () => {
       state.removedChannels += 1;
@@ -190,9 +190,9 @@ function createSupabaseStub(options?: {
 
       throw new Error(`Unexpected table: ${table}`);
     },
-  } as unknown as SupabaseClient;
+  } as any;
 
-  return { supabase, state };
+  return { db, state };
 }
 
 afterEach(() => {
@@ -231,9 +231,9 @@ describe('TeamsOutboundDispatcher', () => {
     const fetchFn = vi.fn<typeof fetch>()
       .mockResolvedValueOnce(new Response(JSON.stringify({ access_token: 'teams-token' }), { status: 200 }))
       .mockResolvedValueOnce(new Response(JSON.stringify({ id: 'sent-activity-1' }), { status: 200 }));
-    const { supabase, state } = createSupabaseStub();
+    const { db, state } = createDbStub();
     const dispatcher = new TeamsOutboundDispatcher({
-      supabase,
+      db,
       fetchFn: fetchFn as typeof fetch,
       appUrl: 'https://app.example.com',
       retryDelayMs: 0,
@@ -270,7 +270,7 @@ describe('TeamsOutboundDispatcher', () => {
     const fetchFn = vi.fn<typeof fetch>()
       .mockResolvedValueOnce(new Response(JSON.stringify({ access_token: 'teams-token' }), { status: 200 }))
       .mockResolvedValueOnce(new Response(JSON.stringify({ id: 'sent-activity-2' }), { status: 200 }));
-    const { supabase } = createSupabaseStub({
+    const { db } = createDbStub({
       memo: {
         id: 'memo-2',
         org_id: 'org-1',
@@ -285,7 +285,7 @@ describe('TeamsOutboundDispatcher', () => {
       },
     });
     const dispatcher = new TeamsOutboundDispatcher({
-      supabase,
+      db,
       fetchFn: fetchFn as typeof fetch,
       appUrl: 'https://app.example.com',
       retryDelayMs: 0,
@@ -308,12 +308,12 @@ describe('TeamsOutboundDispatcher', () => {
   });
 
   it('records auth_failed and notifies admins when Teams credentials are missing', async () => {
-    const { supabase, state } = createSupabaseStub({
+    const { db, state } = createDbStub({
       auth: { org_id: 'org-1', access_token_ref: 'env:TEAMS_APP_SECRET', expires_at: '2026-04-07T00:00:00.000Z' },
     });
     delete process.env.TEAMS_APP_SECRET;
 
-    const dispatcher = new TeamsOutboundDispatcher({ supabase, retryDelayMs: 0 });
+    const dispatcher = new TeamsOutboundDispatcher({ db, retryDelayMs: 0 });
     const result = await dispatcher.dispatchReplyIfNeeded({
       id: 'reply-2',
       memo_id: 'memo-1',

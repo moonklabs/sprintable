@@ -1,15 +1,15 @@
 import { describe, expect, it, vi, beforeEach } from 'vitest';
 
 const {
-  createSupabaseAdminClientMock,
+  createAdminClientMock,
   exchangeGitHubOAuthCodeMock,
 } = vi.hoisted(() => ({
-  createSupabaseAdminClientMock: vi.fn(() => ({ tag: 'admin' })),
+  createAdminClientMock: vi.fn(() => ({ tag: 'admin' })),
   exchangeGitHubOAuthCodeMock: vi.fn(),
 }));
 
-vi.mock('@/lib/supabase/admin', () => ({
-  createSupabaseAdminClient: createSupabaseAdminClientMock,
+vi.mock('@/lib/db/admin', () => ({
+  createAdminClient: createAdminClientMock,
 }));
 
 vi.mock('@/services/project-mcp', () => ({
@@ -22,7 +22,7 @@ import { GET } from './route';
 describe('GitHub MCP callback route', () => {
   beforeEach(() => {
     process.env.MCP_CONNECTION_STATE_SECRET = 'test-secret';
-    createSupabaseAdminClientMock.mockClear();
+    createAdminClientMock.mockClear();
     exchangeGitHubOAuthCodeMock.mockReset();
   });
 

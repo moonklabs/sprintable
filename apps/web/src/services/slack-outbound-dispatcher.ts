@@ -1,4 +1,5 @@
-import type { RealtimeChannel, SupabaseClient } from '@supabase/supabase-js';
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+type RealtimeChannel = any;
 import { MemoService } from './memo';
 import { buildAbsoluteMemoLink } from './app-url';
 
@@ -29,7 +30,7 @@ interface TeamMemberRow {
 type Logger = Pick<Console, 'info' | 'warn' | 'error'>;
 
 export interface SlackOutboundDispatcherOptions {
-  supabase: SupabaseClient;
+  db: any;
   logger?: Logger;
   fetchFn?: typeof fetch;
   appUrl?: string;
@@ -139,7 +140,7 @@ export class SlackOutboundDispatcher {
   start() {
     if (this.channel) return;
 
-    this.channel = this.options.supabase
+    this.channel = this.options.db
       .channel(`slack-outbound-dispatcher-${Date.now()}`)
       .on('postgres_changes', { event: 'INSERT', schema: 'public', table: 'memo_replies' }, (payload) => {
         const reply = payload.new as ReplyRow;
@@ -159,7 +160,7 @@ export class SlackOutboundDispatcher {
 
   async stop() {
     if (!this.channel) return;
-    await this.options.supabase.removeChannel(this.channel);
+    await this.options.db.removeChannel(this.channel);
     this.channel = null;
   }
 
@@ -233,7 +234,7 @@ export class SlackOutboundDispatcher {
   }
 
   private async getMemo(memoId: string): Promise<MemoRow | null> {
-    const { data } = await this.options.supabase
+    const { data } = await this.options.db
       .from('memos')
       .select('id, org_id, project_id, metadata')
       .eq('id', memoId)
@@ -243,7 +244,7 @@ export class SlackOutboundDispatcher {
   }
 
   private async getSlackChannelMapping(orgId: string, projectId: string, channelId: string): Promise<ChannelMappingRow | null> {
-    const { data } = await this.options.supabase
+    const { data } = await this.options.db
       .from('messaging_bridge_channels')
       .select('channel_id, config')
       .eq('org_id', orgId)
@@ -257,7 +258,7 @@ export class SlackOutboundDispatcher {
   }
 
   private async isActiveAgentReply(orgId: string, projectId: string, createdBy: string): Promise<boolean> {
-    const { data } = await this.options.supabase
+    const { data } = await this.options.db
       .from('team_members')
       .select('id')
       .eq('id', createdBy)
@@ -277,7 +278,7 @@ export class SlackOutboundDispatcher {
       reason,
     });
 
-    const memoService = MemoService.fromSupabase(this.options.supabase);
+    const memoService = MemoService.fromDb(this.options.db);
     await memoService.addReply(
       reply.memo_id,
       `${FAILURE_COMMENT_PREFIX}\n- reply_id: ${reply.id}\n- reason: ${reason}`,

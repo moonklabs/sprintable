@@ -3,7 +3,7 @@ import { AgentExecutionLoop, type AgentExecutionInput } from './agent-execution-
 import { buildHitlPolicySnapshot } from './agent-hitl-policy';
 import type { LLMClient, LLMConfig } from '@/lib/llm';
 
-function createSupabaseStub(options?: { failHitlRequestUpdate?: boolean; failRunProgressPersist?: boolean }) {
+function createDbStub(options?: { failHitlRequestUpdate?: boolean; failRunProgressPersist?: boolean }) {
   const failHitlRequestUpdate = options?.failHitlRequestUpdate ?? false;
   const failRunProgressPersist = options?.failRunProgressPersist ?? false;
 
@@ -197,7 +197,7 @@ function createSupabaseStub(options?: { failHitlRequestUpdate?: boolean; failRun
     return 0;
   });
 
-  const supabase = {
+  const db = {
     from(table: string) {
       if (table === 'billing_limits') {
         return {
@@ -697,7 +697,7 @@ function createSupabaseStub(options?: { failHitlRequestUpdate?: boolean; failRun
     },
   };
 
-  return { supabase, state };
+  return { db, state };
 }
 
 function createMockClient(responses: Array<Record<string, unknown>>): LLMClient {
@@ -736,11 +736,11 @@ function createInput(overrides?: Partial<AgentExecutionInput>): AgentExecutionIn
 
 describe('AgentExecutionLoop', () => {
   it('handles tool_call -> respond loop and persists tool history/output memo ids', async () => {
-    const { supabase, state } = createSupabaseStub();
+    const { db, state } = createDbStub();
     const addReply = vi.fn(async () => ({ id: 'reply-final' }));
     const resolve = vi.fn();
     const retryService = { scheduleRetry: vi.fn(async () => ({ scheduled: false, nextRetryAt: null })) };
-    const loop = new AgentExecutionLoop(supabase as never, {
+    const loop = new AgentExecutionLoop(db as never, {
       resolveLLMConfigFn: vi.fn(async () => createLLMConfig()),
       createLLMClientFn: () => createMockClient([
         { action: 'tool_call', tool_name: 'list_recent_project_memos', tool_arguments: { limit: 1 } },
@@ -784,7 +784,7 @@ describe('AgentExecutionLoop', () => {
   });
 
   it('uses the deployment contract for provider, billing mode, allowed projects, and session binding', async () => {
-    const { supabase, state } = createSupabaseStub();
+    const { db, state } = createDbStub();
     state.run.deployment_id = 'deployment-1';
     state.deployments = [{
       id: 'deployment-1',
@@ -817,7 +817,7 @@ describe('AgentExecutionLoop', () => {
         usage: { inputTokens: 10, outputTokens: 5 },
       })),
     };
-    const loop = new AgentExecutionLoop(supabase as never, {
+    const loop = new AgentExecutionLoop(db as never, {
       resolveLLMConfigFn,
       createLLMClientFn: () => llmClient,
       memoService: { addReply, resolve: vi.fn() } as never,
@@ -843,7 +843,7 @@ describe('AgentExecutionLoop', () => {
   });
 
   it('fails closed when a deployment-scoped run cannot load its deployment contract', async () => {
-    const { supabase, state } = createSupabaseStub();
+    const { db, state } = createDbStub();
     state.run.deployment_id = 'deployment-missing';
 
     const resolveLLMConfigFn = vi.fn(async () => createLLMConfig());
@@ -853,7 +853,7 @@ describe('AgentExecutionLoop', () => {
       execute: vi.fn(),
     };
 
-    const loop = new AgentExecutionLoop(supabase as never, {
+    const loop = new AgentExecutionLoop(db as never, {
       resolveLLMConfigFn,
       createLLMClientFn,
       memoService: { addReply: vi.fn(async () => ({ id: 'reply-missing-deployment' })), resolve: vi.fn() } as never,
@@ -873,7 +873,7 @@ describe('AgentExecutionLoop', () => {
   });
 
   it('fails closed when a deployment-scoped run has an invalid deployment contract config', async () => {
-    const { supabase, state } = createSupabaseStub();
+    const { db, state } = createDbStub();
     state.run.deployment_id = 'deployment-1';
     state.deployments = [{
       id: 'deployment-1',
@@ -896,7 +896,7 @@ describe('AgentExecutionLoop', () => {
       execute: vi.fn(),
     };
 
-    const loop = new AgentExecutionLoop(supabase as never, {
+    const loop = new AgentExecutionLoop(db as never, {
       resolveLLMConfigFn,
       createLLMClientFn,
       memoService: { addReply: vi.fn(async () => ({ id: 'reply-invalid-deployment' })), resolve: vi.fn() } as never,
@@ -916,13 +916,13 @@ describe('AgentExecutionLoop', () => {
   });
 
   it('fails loudly when run progress cannot be persisted', async () => {
-    const { supabase } = createSupabaseStub({ failRunProgressPersist: true });
+    const { db } = createDbStub({ failRunProgressPersist: true });
     const logger = {
       info: vi.fn(),
       warn: vi.fn(),
       error: vi.fn(),
     };
-    const loop = new AgentExecutionLoop(supabase as never, {
+    const loop = new AgentExecutionLoop(db as never, {
       resolveLLMConfigFn: vi.fn(async () => createLLMConfig()),
       createLLMClientFn: () => createMockClient([
         { action: 'respond', message: '작업 완료', summary: 'done' },
@@ -940,9 +940,9 @@ describe('AgentExecutionLoop', () => {
   });
 
   it('supports newly added builtin MCP tool calls', async () => {
-    const { supabase } = createSupabaseStub();
+    const { db } = createDbStub();
     const addReply = vi.fn(async () => ({ id: 'reply-created' }));
-    const loop = new AgentExecutionLoop(supabase as never, {
+    const loop = new AgentExecutionLoop(db as never, {
       resolveLLMConfigFn: vi.fn(async () => createLLMConfig()),
       createLLMClientFn: () => createMockClient([
         { action: 'tool_call', tool_name: 'list_memos', tool_arguments: { limit: 2 } },
@@ -963,9 +963,9 @@ describe('AgentExecutionLoop', () => {
   });
 
   it('builds the staged system prompt pipeline before calling the model', async () => {
-    const { supabase } = createSupabaseStub();
+    const { db } = createDbStub();
     const client = createMockClient([{ action: 'respond', message: '작업 완료', summary: 'done' }]);
-    const loop = new AgentExecutionLoop(supabase as never, {
+    const loop = new AgentExecutionLoop(db as never, {
       resolveLLMConfigFn: vi.fn(async () => createLLMConfig()),
       createLLMClientFn: () => client,
       memoService: { addReply: vi.fn(async () => ({ id: 'reply-pipeline' })), resolve: vi.fn() } as never,
@@ -989,7 +989,7 @@ describe('AgentExecutionLoop', () => {
   });
 
   it('keeps out-of-scope memories out of the execution prompt and records blocked diagnostics', async () => {
-    const { supabase, state } = createSupabaseStub();
+    const { db, state } = createDbStub();
     state.sessionMemories.push({
       id: 'session-other-project',
       org_id: '22222222-2222-4222-8222-222222222222',
@@ -1034,7 +1034,7 @@ describe('AgentExecutionLoop', () => {
     });
 
     const client = createMockClient([{ action: 'respond', message: '작업 완료', summary: 'done' }]);
-    const loop = new AgentExecutionLoop(supabase as never, {
+    const loop = new AgentExecutionLoop(db as never, {
       resolveLLMConfigFn: vi.fn(async () => createLLMConfig()),
       createLLMClientFn: () => client,
       memoService: { addReply: vi.fn(async () => ({ id: 'reply-memory-scope' })), resolve: vi.fn() } as never,
@@ -1072,7 +1072,7 @@ describe('AgentExecutionLoop', () => {
   });
 
   it('preserves exact-scope memory injection even when blocked diagnostics candidates dominate the ranking', async () => {
-    const { supabase, state } = createSupabaseStub();
+    const { db, state } = createDbStub();
     state.sessionMemories = [
       {
         id: 'session-in-scope-low-rank',
@@ -1121,7 +1121,7 @@ describe('AgentExecutionLoop', () => {
     ];
 
     const client = createMockClient([{ action: 'respond', message: '작업 완료', summary: 'done' }]);
-    const loop = new AgentExecutionLoop(supabase as never, {
+    const loop = new AgentExecutionLoop(db as never, {
       resolveLLMConfigFn: vi.fn(async () => createLLMConfig()),
       createLLMClientFn: () => client,
       memoService: { addReply: vi.fn(async () => ({ id: 'reply-memory-starvation' })), resolve: vi.fn() } as never,
@@ -1150,7 +1150,7 @@ describe('AgentExecutionLoop', () => {
   });
 
   it('keeps persona-disallowed external tools out of the execution prompt by using the effective registry boundary', async () => {
-    const { supabase, state } = createSupabaseStub();
+    const { db, state } = createDbStub();
     state.persona.config = { tool_allowlist: ['get_source_memo'] };
 
     const client = createMockClient([{ action: 'respond', message: '작업 완료', summary: 'done' }]);
@@ -1170,7 +1170,7 @@ describe('AgentExecutionLoop', () => {
       execute: vi.fn(),
     };
 
-    const loop = new AgentExecutionLoop(supabase as never, {
+    const loop = new AgentExecutionLoop(db as never, {
       resolveLLMConfigFn: vi.fn(async () => createLLMConfig()),
       createLLMClientFn: () => client,
       memoService: { addReply: vi.fn(async () => ({ id: 'reply-boundary' })), resolve: vi.fn() } as never,
@@ -1192,7 +1192,7 @@ describe('AgentExecutionLoop', () => {
   });
 
   it('keeps tools out of the execution prompt when the deployment project scope excludes the current project', async () => {
-    const { supabase, state } = createSupabaseStub();
+    const { db, state } = createDbStub();
     state.run.deployment_id = 'deployment-1';
     state.deployments = [{
       id: 'deployment-1',
@@ -1212,7 +1212,7 @@ describe('AgentExecutionLoop', () => {
     }];
 
     const client = createMockClient([{ action: 'respond', message: '작업 완료', summary: 'done' }]);
-    const loop = new AgentExecutionLoop(supabase as never, {
+    const loop = new AgentExecutionLoop(db as never, {
       resolveLLMConfigFn: vi.fn(async () => createLLMConfig({
         provider: 'openai',
         billingMode: 'managed',
@@ -1232,9 +1232,9 @@ describe('AgentExecutionLoop', () => {
   });
 
   it('creates HITL request and memo reply when the model asks for human input', async () => {
-    const { supabase, state } = createSupabaseStub();
+    const { db, state } = createDbStub();
     const addReply = vi.fn(async () => ({ id: 'reply-hitl' }));
-    const loop = new AgentExecutionLoop(supabase as never, {
+    const loop = new AgentExecutionLoop(db as never, {
       resolveLLMConfigFn: vi.fn(async () => createLLMConfig()),
       createLLMClientFn: () => createMockClient([
         { action: 'hitl', title: 'Need approval', question: 'Should I close this memo?', reason: 'Closing impacts project scope' },
@@ -1295,8 +1295,8 @@ describe('AgentExecutionLoop', () => {
   });
 
   it('rolls back the pending HITL request when HITL memo creation fails', async () => {
-    const { supabase, state } = createSupabaseStub();
-    const loop = new AgentExecutionLoop(supabase as never, {
+    const { db, state } = createDbStub();
+    const loop = new AgentExecutionLoop(db as never, {
       resolveLLMConfigFn: vi.fn(async () => createLLMConfig()),
       createLLMClientFn: () => createMockClient([
         { action: 'hitl', title: 'Need approval', question: 'Should I close this memo?', reason: 'Closing impacts project scope' },
@@ -1323,8 +1323,8 @@ describe('AgentExecutionLoop', () => {
   });
 
   it('rolls back the HITL request and memo when request metadata update fails', async () => {
-    const { supabase, state } = createSupabaseStub({ failHitlRequestUpdate: true });
-    const loop = new AgentExecutionLoop(supabase as never, {
+    const { db, state } = createDbStub({ failHitlRequestUpdate: true });
+    const loop = new AgentExecutionLoop(db as never, {
       resolveLLMConfigFn: vi.fn(async () => createLLMConfig()),
       createLLMClientFn: () => createMockClient([
         { action: 'hitl', title: 'Need approval', question: 'Should I close this memo?', reason: 'Closing impacts project scope' },
@@ -1344,7 +1344,7 @@ describe('AgentExecutionLoop', () => {
   });
 
   it('reassigns HITL to another active admin when the creator admin is inactive', async () => {
-    const { supabase, state } = createSupabaseStub();
+    const { db, state } = createDbStub();
     state.creator.is_active = false;
     state.teamMembers = [
       state.creator,
@@ -1370,7 +1370,7 @@ describe('AgentExecutionLoop', () => {
     ];
 
     const addReply = vi.fn(async () => ({ id: 'reply-hitl-reassign' }));
-    const loop = new AgentExecutionLoop(supabase as never, {
+    const loop = new AgentExecutionLoop(db as never, {
       resolveLLMConfigFn: vi.fn(async () => createLLMConfig()),
       createLLMClientFn: () => createMockClient([
         { action: 'hitl', title: 'Need approval', question: 'Should I close this memo?', reason: 'Closing impacts project scope' },
@@ -1404,10 +1404,10 @@ describe('AgentExecutionLoop', () => {
   });
 
   it('fails HITL handoff when no active admin human is available', async () => {
-    const { supabase, state } = createSupabaseStub();
+    const { db, state } = createDbStub();
     state.orgMembers = [];
 
-    const loop = new AgentExecutionLoop(supabase as never, {
+    const loop = new AgentExecutionLoop(db as never, {
       resolveLLMConfigFn: vi.fn(async () => createLLMConfig()),
       createLLMClientFn: () => createMockClient([
         { action: 'hitl', title: 'Need approval', question: 'Should I close this memo?', reason: 'Closing impacts project scope' },
@@ -1424,7 +1424,7 @@ describe('AgentExecutionLoop', () => {
   });
 
   it.skip('[OSS-stubbed billing] normalizes legacy billing HITL request types back to approval when managed cost exceeds the per-run cap', async () => {
-    const { supabase, state } = createSupabaseStub();
+    const { db, state } = createDbStub();
     state.run.per_run_cap_cents = 100;
     const hitlPolicy = buildHitlPolicySnapshot({
       schema_version: 1,
@@ -1453,7 +1453,7 @@ describe('AgentExecutionLoop', () => {
       })),
     };
 
-    const loop = new AgentExecutionLoop(supabase as never, {
+    const loop = new AgentExecutionLoop(db as never, {
       resolveLLMConfigFn: vi.fn(async () => createLLMConfig({
         provider: 'openai',
         billingMode: 'managed',
@@ -1505,7 +1505,7 @@ describe('AgentExecutionLoop', () => {
   });
 
   it.skip('[OSS-stubbed billing] uses fallback managed pricing and warns when a model is missing from llm_pricing_config', async () => {
-    const { supabase, state } = createSupabaseStub();
+    const { db, state } = createDbStub();
     const warn = vi.fn();
 
     const expensiveClient: LLMClient = {
@@ -1516,7 +1516,7 @@ describe('AgentExecutionLoop', () => {
     };
 
     const loop = new AgentExecutionLoop(
-      supabase as never,
+      db as never,
       {
         resolveLLMConfigFn: vi.fn(async () => createLLMConfig({
           provider: 'openai',
@@ -1542,11 +1542,11 @@ describe('AgentExecutionLoop', () => {
   });
 
   it('forwards the processed memo to the next agent when routing mode is process_and_forward', async () => {
-    const { supabase } = createSupabaseStub();
+    const { db } = createDbStub();
     const addReply = vi.fn();
     const createMemo = vi.fn(async () => ({ id: 'memo-forwarded' }));
     const resolve = vi.fn();
-    const loop = new AgentExecutionLoop(supabase as never, {
+    const loop = new AgentExecutionLoop(db as never, {
       resolveLLMConfigFn: vi.fn(async () => createLLMConfig()),
       createLLMClientFn: () => createMockClient([{ action: 'respond', message: '다음 에이전트에게 넘길 내용', summary: 'forwarded' }]),
       memoService: { addReply, create: createMemo, resolve } as never,
@@ -1584,9 +1584,9 @@ describe('AgentExecutionLoop', () => {
   });
 
   it('fails closed when a process_and_forward run reaches finalize without an explicit forward target', async () => {
-    const { supabase, state } = createSupabaseStub();
+    const { db, state } = createDbStub();
     const createMemo = vi.fn(async () => ({ id: 'memo-forwarded' }));
-    const loop = new AgentExecutionLoop(supabase as never, {
+    const loop = new AgentExecutionLoop(db as never, {
       resolveLLMConfigFn: vi.fn(async () => createLLMConfig()),
       createLLMClientFn: () => createMockClient([{ action: 'respond', message: '다음 에이전트에게 넘길 내용', summary: 'forward' }]),
       memoService: { addReply: vi.fn(), create: createMemo, resolve: vi.fn() } as never,
@@ -1608,7 +1608,7 @@ describe('AgentExecutionLoop', () => {
   });
 
   it('fails closed when a process_and_forward runtime payload targets an inactive agent', async () => {
-    const { supabase, state } = createSupabaseStub();
+    const { db, state } = createDbStub();
     state.teamMembers = [
       state.creator,
       state.agent,
@@ -1623,7 +1623,7 @@ describe('AgentExecutionLoop', () => {
       },
     ];
     const createMemo = vi.fn(async () => ({ id: 'memo-forwarded' }));
-    const loop = new AgentExecutionLoop(supabase as never, {
+    const loop = new AgentExecutionLoop(db as never, {
       resolveLLMConfigFn: vi.fn(async () => createLLMConfig()),
       createLLMClientFn: () => createMockClient([{ action: 'respond', message: '다음 에이전트에게 넘길 내용', summary: 'forward' }]),
       memoService: { addReply: vi.fn(), create: createMemo, resolve: vi.fn() } as never,
@@ -1646,10 +1646,10 @@ describe('AgentExecutionLoop', () => {
   });
 
   it('resolves the memo after replying when routing mode is process_and_report', async () => {
-    const { supabase } = createSupabaseStub();
+    const { db } = createDbStub();
     const addReply = vi.fn(async () => ({ id: 'reply-report' }));
     const resolve = vi.fn(async () => ({ id: '55555555-5555-4555-8555-555555555555', status: 'resolved' }));
-    const loop = new AgentExecutionLoop(supabase as never, {
+    const loop = new AgentExecutionLoop(db as never, {
       resolveLLMConfigFn: vi.fn(async () => createLLMConfig()),
       createLLMClientFn: () => createMockClient([{ action: 'respond', message: '완료 보고', summary: 'reported' }]),
       memoService: { addReply, create: vi.fn(), resolve } as never,
@@ -1672,13 +1672,13 @@ describe('AgentExecutionLoop', () => {
   });
 
   it('short-circuits execution when the daily billing cap is exceeded', async () => {
-    const { supabase, state } = createSupabaseStub();
+    const { db, state } = createDbStub();
     const llmClient = createMockClient([{ action: 'respond', message: 'should not happen' }]);
     const billingLimitEnforcer = {
       enforceBeforeRun: vi.fn(async () => ({ status: 'daily_cap_exceeded' as const, reason: '일일 한도 초과, 내일 재개' })),
       enforceAfterRun: vi.fn(async () => ({ thresholdAlertSent: false, monthlyCapExceeded: false, suspendedDeploymentCount: 0 })),
     };
-    const loop = new AgentExecutionLoop(supabase as never, {
+    const loop = new AgentExecutionLoop(db as never, {
       resolveLLMConfigFn: vi.fn(async () => createLLMConfig()),
       createLLMClientFn: () => llmClient,
       memoService: { addReply: vi.fn(), resolve: vi.fn() } as never,
@@ -1697,9 +1697,9 @@ describe('AgentExecutionLoop', () => {
   });
 
   it('blocks cross-org/project mismatches and schedules retry after failure', async () => {
-    const { supabase, state } = createSupabaseStub();
+    const { db, state } = createDbStub();
     const retryService = { scheduleRetry: vi.fn(async () => ({ scheduled: true, nextRetryAt: '2026-04-06T11:00:00.000Z' })) };
-    const loop = new AgentExecutionLoop(supabase as never, {
+    const loop = new AgentExecutionLoop(db as never, {
       resolveLLMConfigFn: vi.fn(async () => createLLMConfig()),
       createLLMClientFn: () => createMockClient([{ action: 'respond', message: 'should not happen' }]),
       memoService: { addReply: vi.fn(), resolve: vi.fn() } as never,
@@ -1716,8 +1716,8 @@ describe('AgentExecutionLoop', () => {
   });
 
   it('blocks cross-project scope mismatches with an explicit scope audit event', async () => {
-    const { supabase, state } = createSupabaseStub();
-    const loop = new AgentExecutionLoop(supabase as never, {
+    const { db, state } = createDbStub();
+    const loop = new AgentExecutionLoop(db as never, {
       resolveLLMConfigFn: vi.fn(async () => createLLMConfig()),
       createLLMClientFn: () => createMockClient([{ action: 'respond', message: 'should not happen' }]),
       memoService: { addReply: vi.fn(), resolve: vi.fn() } as never,
@@ -1733,9 +1733,9 @@ describe('AgentExecutionLoop', () => {
   });
 
   it('fails and schedules retry when llm call limit is exceeded', async () => {
-    const { supabase, state } = createSupabaseStub();
+    const { db, state } = createDbStub();
     const retryService = { scheduleRetry: vi.fn(async () => ({ scheduled: true, nextRetryAt: '2026-04-06T11:00:00.000Z' })) };
-    const loop = new AgentExecutionLoop(supabase as never, {
+    const loop = new AgentExecutionLoop(db as never, {
       resolveLLMConfigFn: vi.fn(async () => createLLMConfig()),
       createLLMClientFn: () => createMockClient(Array.from({ length: 20 }, () => ({ action: 'tool_call', tool_name: 'get_source_memo', tool_arguments: {} }))),
       memoService: { addReply: vi.fn(), resolve: vi.fn() } as never,

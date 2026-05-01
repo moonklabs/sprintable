@@ -1,6 +1,5 @@
-import type { SupabaseClient } from '@supabase/supabase-js';
-import { createSupabaseServerClient } from '@/lib/supabase/server';
-import { createSupabaseAdminClient } from '@/lib/supabase/admin';
+
+import { createAdminClient } from '@/lib/db/admin';
 import { SprintService, type CreateSprintInput } from '@/services/sprint';
 import { handleApiError } from '@/lib/api-error';
 import { apiSuccess, apiError, ApiErrors } from '@/lib/api-response';
@@ -11,12 +10,11 @@ import { isOssMode, createSprintRepository } from '@/lib/storage/factory';
 // POST /api/sprints — 생성
 export async function POST(request: Request) {
   try {
-    const supabase = await createSupabaseServerClient();
-    const me = await getAuthContext(supabase, request);
+    const me = await getAuthContext(request);
     if (!me) return ApiErrors.unauthorized();
     if (me.rateLimitExceeded) return ApiErrors.tooManyRequests(me.rateLimitRemaining, me.rateLimitResetAt);
     const ossMode = isOssMode();
-    const dbClient = ossMode ? undefined : (me.type === 'agent' ? createSupabaseAdminClient() : supabase);
+    const dbClient = ossMode ? undefined : (me.type === 'agent' ? createAdminClient() : undefined);
 
     let rawBody: unknown;
     try { rawBody = await request.json(); } catch { return apiError('BAD_REQUEST', 'Invalid JSON body', 400); }
@@ -27,7 +25,7 @@ export async function POST(request: Request) {
     const parsed = createSprintSchema.safeParse(body);
     if (!parsed.success) return apiError('VALIDATION_ERROR', JSON.stringify(parsed.error.issues), 400);
     const repo = await createSprintRepository(dbClient);
-    const service = new SprintService(repo, dbClient as SupabaseClient | undefined);
+    const service = new SprintService(repo, dbClient as any | undefined);
     const sprint = await service.create(parsed.data as CreateSprintInput);
     return apiSuccess(sprint, undefined, 201);
   } catch (err: unknown) {
@@ -38,16 +36,15 @@ export async function POST(request: Request) {
 // GET /api/sprints — 목록
 export async function GET(request: Request) {
   try {
-    const supabase = await createSupabaseServerClient();
-    const me = await getAuthContext(supabase, request);
+    const me = await getAuthContext(request);
     if (!me) return ApiErrors.unauthorized();
     if (me.rateLimitExceeded) return ApiErrors.tooManyRequests(me.rateLimitRemaining, me.rateLimitResetAt);
     const ossMode = isOssMode();
-    const dbClient = ossMode ? undefined : (me.type === 'agent' ? createSupabaseAdminClient() : supabase);
+    const dbClient = ossMode ? undefined : (me.type === 'agent' ? createAdminClient() : undefined);
 
     const { searchParams } = new URL(request.url);
     const repo = await createSprintRepository(dbClient);
-    const service = new SprintService(repo, dbClient as SupabaseClient | undefined);
+    const service = new SprintService(repo, dbClient as any | undefined);
     const sprints = await service.list({
       project_id: searchParams.get('project_id') ?? undefined,
       status: searchParams.get('status') ?? undefined,

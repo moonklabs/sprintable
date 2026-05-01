@@ -3,7 +3,7 @@
 import { useState } from 'react';
 import { useRouter } from 'next/navigation';
 import { SprintableLogo } from '@/components/brand/sprintable-logo';
-import { loginWithPassword } from '@/lib/supabase/client';
+import { loginWithPassword } from '@/lib/db/client';
 
 export default function LoginPage() {
   const router = useRouter();

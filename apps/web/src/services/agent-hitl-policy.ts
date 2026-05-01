@@ -1,5 +1,5 @@
+
 import { z } from 'zod';
-import type { SupabaseClient } from '@supabase/supabase-js';
 
 export const HITL_HIGH_RISK_ACTION_KEYS = [
   'destructive_change',
@@ -279,10 +279,10 @@ export function buildHitlPolicyPromptSummary(snapshot: Pick<HitlPolicySnapshot, 
 }
 
 export class AgentHitlPolicyService {
-  constructor(private readonly supabase: SupabaseClient) {}
+  constructor(private readonly db: any) {}
 
   async getProjectPolicy(scope: { orgId: string; projectId: string }): Promise<HitlPolicySnapshot> {
-    const { data, error } = await this.supabase
+    const { data, error } = await this.db
       .from('agent_hitl_policies')
       .select('config')
       .eq('org_id', scope.orgId)
@@ -313,7 +313,7 @@ export class AgentHitlPolicyService {
     };
     const now = new Date().toISOString();
 
-    const { error } = await this.supabase
+    const { error } = await this.db
       .from('agent_hitl_policies')
       .upsert({
         org_id: scope.orgId,

@@ -1,13 +1,13 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
-const { createSupabaseServerClient, getAuthContext, createSupabaseAdminClient } = vi.hoisted(() => ({
-  createSupabaseServerClient: vi.fn(),
+const { createDbServerClient, getAuthContext, createAdminClient } = vi.hoisted(() => ({
+  createDbServerClient: vi.fn(),
   getAuthContext: vi.fn(),
-  createSupabaseAdminClient: vi.fn(),
+  createAdminClient: vi.fn(),
 }));
 
-vi.mock('@/lib/supabase/server', () => ({ createSupabaseServerClient }));
-vi.mock('@/lib/supabase/admin', () => ({ createSupabaseAdminClient }));
+vi.mock('@/lib/db/server', () => ({ createDbServerClient }));
+vi.mock('@/lib/db/admin', () => ({ createAdminClient }));
 vi.mock('@/lib/auth-helpers', () => ({ getAuthContext }));
 
 import { GET, POST } from './route';
@@ -31,16 +31,16 @@ function createQueryStub(rows: Record<string, unknown>[]) {
 
 describe('GET /api/standup', () => {
   beforeEach(() => {
-    createSupabaseServerClient.mockReset();
+    createDbServerClient.mockReset();
     getAuthContext.mockReset();
-    createSupabaseAdminClient.mockReset();
+    createAdminClient.mockReset();
     getAuthContext.mockResolvedValue({ id: 'member-1', type: 'human', rateLimitExceeded: false, rateLimitRemaining: 299, rateLimitResetAt: 0 });
   });
 
   it('returns entries list when no member_id provided', async () => {
     const entries = [makeStandupEntry()];
-    const supabase = { from: vi.fn(() => createQueryStub(entries)) };
-    createSupabaseServerClient.mockResolvedValue(supabase);
+    const db = { from: vi.fn(() => createQueryStub(entries)) };
+    createDbServerClient.mockResolvedValue(db);
 
     const response = await GET(new Request('http://localhost/api/standup?project_id=project-alpha&date=2026-04-15'));
 
@@ -51,8 +51,8 @@ describe('GET /api/standup', () => {
 
   it('returns single entry when member_id provided', async () => {
     const entry = makeStandupEntry();
-    const supabase = { from: vi.fn(() => createQueryStub([entry])) };
-    createSupabaseServerClient.mockResolvedValue(supabase);
+    const db = { from: vi.fn(() => createQueryStub([entry])) };
+    createDbServerClient.mockResolvedValue(db);
 
     const response = await GET(new Request('http://localhost/api/standup?project_id=project-alpha&member_id=member-1&date=2026-04-15'));
 
@@ -62,8 +62,8 @@ describe('GET /api/standup', () => {
   });
 
   it('returns 400 when project_id or date missing', async () => {
-    const supabase = {};
-    createSupabaseServerClient.mockResolvedValue(supabase);
+    const db = {};
+    createDbServerClient.mockResolvedValue(db);
 
     const response = await GET(new Request('http://localhost/api/standup?project_id=project-alpha'));
 
@@ -71,8 +71,8 @@ describe('GET /api/standup', () => {
   });
 
   it('returns 401 when not authenticated', async () => {
-    const supabase = {};
-    createSupabaseServerClient.mockResolvedValue(supabase);
+    const db = {};
+    createDbServerClient.mockResolvedValue(db);
     getAuthContext.mockResolvedValue(null);
 
     const response = await GET(new Request('http://localhost/api/standup?project_id=p&date=2026-04-15'));
@@ -84,35 +84,35 @@ describe('GET /api/standup', () => {
     getAuthContext.mockResolvedValue({ id: 'agent-1', type: 'agent', rateLimitExceeded: false, rateLimitRemaining: 299, rateLimitResetAt: 0 });
     const entries = [makeStandupEntry()];
     const adminQuery = createQueryStub(entries);
-    const adminSupabase = { from: vi.fn(() => adminQuery) };
-    createSupabaseAdminClient.mockReturnValue(adminSupabase);
-    createSupabaseServerClient.mockResolvedValue({});
+    const adminDb = { from: vi.fn(() => adminQuery) };
+    createAdminClient.mockReturnValue(adminDb);
+    createDbServerClient.mockResolvedValue({});
 
     const response = await GET(new Request('http://localhost/api/standup?project_id=project-alpha&date=2026-04-15'));
 
     expect(response.status).toBe(200);
-    expect(createSupabaseAdminClient).toHaveBeenCalled();
+    expect(createAdminClient).toHaveBeenCalled();
   });
 });
 
 describe('POST /api/standup', () => {
   beforeEach(() => {
-    createSupabaseServerClient.mockReset();
+    createDbServerClient.mockReset();
     getAuthContext.mockReset();
-    createSupabaseAdminClient.mockReset();
+    createAdminClient.mockReset();
     getAuthContext.mockResolvedValue({ id: 'member-1', type: 'human', rateLimitExceeded: false, rateLimitRemaining: 299, rateLimitResetAt: 0 });
   });
 
   it('saves standup entry for human user', async () => {
     const memberData = { project_id: 'project-alpha', org_id: 'org-1' };
     const entryData = makeStandupEntry();
-    const supabase = {
+    const db = {
       from: vi.fn((table: string) => {
         if (table === 'team_members') return createQueryStub([memberData]);
         return createQueryStub([entryData]);
       }),
     };
-    createSupabaseServerClient.mockResolvedValue(supabase);
+    createDbServerClient.mockResolvedValue(db);
 
     const response = await POST(new Request('http://localhost/api/standup', {
       method: 'POST',
@@ -129,14 +129,14 @@ describe('POST /api/standup', () => {
     getAuthContext.mockResolvedValue({ id: 'agent-1', type: 'agent', rateLimitExceeded: false, rateLimitRemaining: 299, rateLimitResetAt: 0 });
     const memberData = { project_id: 'project-alpha', org_id: 'org-1' };
     const entryData = makeStandupEntry({ author_id: 'member-1' });
-    const adminSupabase = {
+    const adminDb = {
       from: vi.fn((table: string) => {
         if (table === 'team_members') return createQueryStub([memberData]);
         return createQueryStub([entryData]);
       }),
     };
-    createSupabaseAdminClient.mockReturnValue(adminSupabase);
-    createSupabaseServerClient.mockResolvedValue({});
+    createAdminClient.mockReturnValue(adminDb);
+    createDbServerClient.mockResolvedValue({});
 
     const response = await POST(new Request('http://localhost/api/standup', {
       method: 'POST',
@@ -145,12 +145,12 @@ describe('POST /api/standup', () => {
     }));
 
     expect(response.status).toBe(200);
-    expect(createSupabaseAdminClient).toHaveBeenCalled();
+    expect(createAdminClient).toHaveBeenCalled();
   });
 
   it('returns 400 for invalid body', async () => {
-    const supabase = {};
-    createSupabaseServerClient.mockResolvedValue(supabase);
+    const db = {};
+    createDbServerClient.mockResolvedValue(db);
 
     const response = await POST(new Request('http://localhost/api/standup', {
       method: 'POST',

@@ -1,5 +1,5 @@
+
 import { randomUUID } from 'crypto';
-import type { SupabaseClient } from '@supabase/supabase-js';
 import {
   buildInitialPersonaVersionMetadata,
   buildPersonaChangeHistoryEntry,
@@ -166,7 +166,7 @@ function isPayloadRecord(value: unknown): value is Record<string, unknown> {
 }
 
 export class AgentPersonaService {
-  constructor(private readonly supabase: SupabaseClient) {}
+  constructor(private readonly db: any) {}
 
   async listPersonas(options: ListPersonasOptions): Promise<PersonaSummary[]> {
     const { includeBuiltin = false } = options;
@@ -181,7 +181,7 @@ export class AgentPersonaService {
   }
 
   async getDefaultPersona(scope: PersonaScope): Promise<PersonaSummary | null> {
-    const { data, error } = await this.supabase
+    const { data, error } = await this.db
       .from('agent_personas')
       .select('*')
       .eq('org_id', scope.orgId)
@@ -201,7 +201,7 @@ export class AgentPersonaService {
   async createPersona(input: CreatePersonaInput): Promise<PersonaSummary> {
     await this.assertAgentExists(input);
 
-    const allowedToolNames = await listProjectPersonaAllowedToolNames(this.supabase, input.projectId);
+    const allowedToolNames = await listProjectPersonaAllowedToolNames(this.db, input.projectId);
     const toolAllowlist = validateToolAllowlist(input.tool_allowlist, allowedToolNames);
     const basePersona = input.base_persona_id
       ? await this.getRawPersonaById(input.base_persona_id, input)
@@ -227,7 +227,7 @@ export class AgentPersonaService {
       ...(toolAllowlist !== undefined ? { tool_allowlist: toolAllowlist } : {}),
     }, versionMetadata);
 
-    const { data, error } = await this.supabase
+    const { data, error } = await this.db
       .from('agent_personas')
       .insert({
         id: personaId,
@@ -289,7 +289,7 @@ export class AgentPersonaService {
       await this.assertNoPersonaCycle(current.id, basePersona, new Set<string>());
     }
 
-    const allowedToolNames = await listProjectPersonaAllowedToolNames(this.supabase, current.project_id);
+    const allowedToolNames = await listProjectPersonaAllowedToolNames(this.db, current.project_id);
     const nextToolAllowlist = Object.prototype.hasOwnProperty.call(input, 'tool_allowlist')
       ? validateToolAllowlist(input.tool_allowlist, allowedToolNames)
       : (Object.prototype.hasOwnProperty.call(currentConfig, 'tool_allowlist')
@@ -329,7 +329,7 @@ export class AgentPersonaService {
     if (input.model !== undefined) patch.model = input.model?.trim() || null;
     if (input.is_default !== undefined) patch.is_default = input.is_default;
 
-    const { data, error } = await this.supabase
+    const { data, error } = await this.db
       .from('agent_personas')
       .update(patch)
       .eq('id', id)
@@ -372,7 +372,7 @@ export class AgentPersonaService {
     const wasDefault = current.is_default;
     const currentConfig = normalizePersonaConfig(current.config);
 
-    const { error } = await this.supabase
+    const { error } = await this.db
       .from('agent_personas')
       .update({ deleted_at: new Date().toISOString(), is_default: false })
       .eq('id', id);
@@ -398,7 +398,7 @@ export class AgentPersonaService {
   }
 
   private async assertAgentExists(scope: PersonaScope) {
-    const { data, error } = await this.supabase
+    const { data, error } = await this.db
       .from('team_members')
       .select('id, type')
       .eq('org_id', scope.orgId)
@@ -413,7 +413,7 @@ export class AgentPersonaService {
   }
 
   private async listRawPersonas(scope: PersonaScope): Promise<PersonaRow[]> {
-    const { data, error } = await this.supabase
+    const { data, error } = await this.db
       .from('agent_personas')
       .select('*')
       .eq('org_id', scope.orgId)
@@ -428,7 +428,7 @@ export class AgentPersonaService {
   }
 
   private async getRawPersonaById(id: string, scope?: Partial<PersonaScope>): Promise<PersonaRow> {
-    let query = this.supabase
+    let query = this.db
       .from('agent_personas')
       .select('*')
       .eq('id', id)
@@ -465,7 +465,7 @@ export class AgentPersonaService {
     const ownSystemPrompt = sanitizePromptValue(persona.system_prompt, false) ?? '';
     const ownStylePrompt = sanitizePromptValue(persona.style_prompt, true);
     const hasOwnToolAllowlist = Object.prototype.hasOwnProperty.call(config, 'tool_allowlist');
-    const toolOptions = await listProjectPersonaToolOptions(this.supabase, persona.project_id);
+    const toolOptions = await listProjectPersonaToolOptions(this.db, persona.project_id);
     const allowedToolNames = toolOptions.map((option) => option.name);
     const ownToolAllowlist = normalizeToolAllowlist(config.tool_allowlist, allowedToolNames);
 
@@ -511,7 +511,7 @@ export class AgentPersonaService {
   }
 
   private async getPersonaChangeHistory(persona: PersonaRow): Promise<PersonaChangeHistoryEntry[]> {
-    const { data, error } = await this.supabase
+    const { data, error } = await this.db
       .from('agent_audit_logs')
       .select('event_type, severity, summary, payload, created_by, created_at')
       .eq('org_id', persona.org_id)
@@ -532,12 +532,12 @@ export class AgentPersonaService {
 
   private async isPersonaInUse(id: string): Promise<boolean> {
     const [deploymentResult, sessionResult] = await Promise.all([
-      this.supabase
+      this.db
         .from('agent_deployments')
         .select('id', { count: 'exact', head: true })
         .eq('persona_id', id)
         .is('deleted_at', null),
-      this.supabase
+      this.db
         .from('agent_sessions')
         .select('id', { count: 'exact', head: true })
         .eq('persona_id', id)
@@ -551,7 +551,7 @@ export class AgentPersonaService {
   }
 
   private async clearDefaultPersona(scope: PersonaScope, exceptId?: string) {
-    let query = this.supabase
+    let query = this.db
       .from('agent_personas')
       .update({ is_default: false })
       .eq('org_id', scope.orgId)
@@ -578,7 +578,7 @@ export class AgentPersonaService {
     if (!target) return;
 
     await this.clearDefaultPersona(scope, target.id);
-    const { error } = await this.supabase
+    const { error } = await this.db
       .from('agent_personas')
       .update({ is_default: true })
       .eq('id', target.id)
@@ -659,7 +659,7 @@ export class AgentPersonaService {
       };
     }
 
-    const { error } = await this.supabase
+    const { error } = await this.db
       .from('agent_audit_logs')
       .insert({
         org_id: orgId,

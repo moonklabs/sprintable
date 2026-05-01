@@ -1,12 +1,12 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
-const { createSupabaseServerClient, checkProjectLimit } = vi.hoisted(() => ({
-  createSupabaseServerClient: vi.fn(),
+const { createDbServerClient, checkProjectLimit } = vi.hoisted(() => ({
+  createDbServerClient: vi.fn(),
   checkProjectLimit: vi.fn(),
 }));
 
-vi.mock('@/lib/supabase/server', () => ({
-  createSupabaseServerClient,
+vi.mock('@/lib/db/server', () => ({
+  createDbServerClient,
 }));
 
 vi.mock('@/lib/check-feature', () => ({
@@ -29,7 +29,7 @@ interface ProjectRow {
   deleted_at?: string | null;
 }
 
-function createSupabaseStub({
+function createDbStub({
   user = { id: 'user-1', email: 'owner@sprintable.app', user_metadata: { name: 'Owner' } },
   orgMemberships = [{ org_id: 'org-1', role: 'admin' }],
   projects = [
@@ -119,19 +119,19 @@ function createSupabaseStub({
 
 describe('GET /api/projects', () => {
   beforeEach(() => {
-    createSupabaseServerClient.mockReset();
+    createDbServerClient.mockReset();
     checkProjectLimit.mockReset();
   });
 
   it('returns only projects from the requested organization when the user belongs to it', async () => {
-    const supabase = createSupabaseStub({
+    const db = createDbStub({
       orgMemberships: [{ org_id: 'org-1', role: 'member' }],
       projects: [
         { id: 'project-1', org_id: 'org-1', name: 'Alpha' },
         { id: 'project-2', org_id: 'org-2', name: 'Other org' },
       ],
     });
-    createSupabaseServerClient.mockResolvedValue(supabase);
+    createDbServerClient.mockResolvedValue(db);
 
     const response = await GET(new Request('http://localhost/api/projects?org_id=org-1'));
 
@@ -144,7 +144,7 @@ describe('GET /api/projects', () => {
   });
 
   it('requires org_id when the user belongs to multiple organizations', async () => {
-    createSupabaseServerClient.mockResolvedValue(createSupabaseStub({
+    createDbServerClient.mockResolvedValue(createDbStub({
       orgMemberships: [
         { org_id: 'org-1', role: 'admin' },
         { org_id: 'org-2', role: 'member' },
@@ -162,13 +162,13 @@ describe('GET /api/projects', () => {
 
 describe('POST /api/projects', () => {
   beforeEach(() => {
-    createSupabaseServerClient.mockReset();
+    createDbServerClient.mockReset();
     checkProjectLimit.mockReset();
     checkProjectLimit.mockResolvedValue({ allowed: true });
   });
 
   it('returns validation errors for malformed payloads', async () => {
-    createSupabaseServerClient.mockResolvedValue(createSupabaseStub());
+    createDbServerClient.mockResolvedValue(createDbStub());
 
     const response = await POST(new Request('http://localhost/api/projects', {
       method: 'POST',
@@ -182,7 +182,7 @@ describe('POST /api/projects', () => {
   });
 
   it('rejects project creation for non-admin members', async () => {
-    createSupabaseServerClient.mockResolvedValue(createSupabaseStub({
+    createDbServerClient.mockResolvedValue(createDbStub({
       orgMemberships: [{ org_id: 'org-1', role: 'member' }],
     }));
 
@@ -204,7 +204,7 @@ describe('POST /api/projects', () => {
       allowed: false,
       reason: 'Project limit reached (3). Upgrade to Team.',
     });
-    createSupabaseServerClient.mockResolvedValue(createSupabaseStub());
+    createDbServerClient.mockResolvedValue(createDbStub());
 
     const response = await POST(new Request('http://localhost/api/projects', {
       method: 'POST',
@@ -219,8 +219,8 @@ describe('POST /api/projects', () => {
   });
 
   it('creates the project and provisions the creator membership atomically through a single RPC', async () => {
-    const supabase = createSupabaseStub();
-    createSupabaseServerClient.mockResolvedValue(supabase);
+    const db = createDbStub();
+    createDbServerClient.mockResolvedValue(db);
 
     const response = await POST(new Request('http://localhost/api/projects', {
       method: 'POST',
@@ -235,8 +235,8 @@ describe('POST /api/projects', () => {
     expect(response.status).toBe(201);
     const body = await response.json();
     expect(body.data).toEqual(expect.objectContaining({ name: 'Operator Console' }));
-    expect(checkProjectLimit).toHaveBeenCalledWith(supabase, 'org-1');
-    expect(supabase.__mocks.rpc).toHaveBeenCalledWith('create_project_with_creator_membership', {
+    expect(checkProjectLimit).toHaveBeenCalledWith(db, 'org-1');
+    expect(db.__mocks.rpc).toHaveBeenCalledWith('create_project_with_creator_membership', {
       _org_id: 'org-1',
       _name: 'Operator Console',
       _description: 'Settings-surface project creation',
@@ -245,10 +245,10 @@ describe('POST /api/projects', () => {
   });
 
   it('surfaces atomic create RPC failures without falling back to direct project inserts', async () => {
-    const supabase = createSupabaseStub({
+    const db = createDbStub({
       createProjectError: { message: 'creator_membership_provision_failed' },
     });
-    createSupabaseServerClient.mockResolvedValue(supabase);
+    createDbServerClient.mockResolvedValue(db);
 
     const response = await POST(new Request('http://localhost/api/projects', {
       method: 'POST',
@@ -257,8 +257,8 @@ describe('POST /api/projects', () => {
     }));
 
     expect(response.status).toBeGreaterThanOrEqual(400);
-    expect(supabase.__mocks.projectsTable.select).not.toHaveBeenCalled();
-    expect(supabase.__mocks.rpc).toHaveBeenCalledWith('create_project_with_creator_membership', {
+    expect(db.__mocks.projectsTable.select).not.toHaveBeenCalled();
+    expect(db.__mocks.rpc).toHaveBeenCalledWith('create_project_with_creator_membership', {
       _org_id: 'org-1',
       _name: 'Operator Console',
       _description: null,

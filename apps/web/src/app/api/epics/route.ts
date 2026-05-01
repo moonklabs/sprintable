@@ -1,6 +1,5 @@
 import { createEpicSchema } from '@sprintable/shared';
-import { createSupabaseServerClient } from '@/lib/supabase/server';
-import { createSupabaseAdminClient } from '@/lib/supabase/admin';
+import { createAdminClient } from '@/lib/db/admin';
 import { EpicService, type CreateEpicInput } from '@/services/epic';
 import { handleApiError } from '@/lib/api-error';
 import { apiSuccess, apiError, ApiErrors } from '@/lib/api-response';
@@ -12,11 +11,10 @@ import { getEpicActorRole, hasEpicRole } from '@/lib/epic-permissions';
 
 export async function GET(request: Request) {
   try {
-    const supabase = await createSupabaseServerClient();
-    const me = await getAuthContext(supabase, request);
+    const me = await getAuthContext(request);
     if (!me) return ApiErrors.unauthorized();
     if (me.rateLimitExceeded) return ApiErrors.tooManyRequests(me.rateLimitRemaining, me.rateLimitResetAt);
-    const dbClient = me.type === 'agent' ? createSupabaseAdminClient() : supabase;
+    const dbClient = me.type === 'agent' ? createAdminClient() : undefined;
 
     const { searchParams } = new URL(request.url);
     const pageInput = parseCursorPageInput({
@@ -37,15 +35,14 @@ export async function GET(request: Request) {
 
 export async function POST(request: Request) {
   try {
-    const supabase = await createSupabaseServerClient();
-    const me = await getAuthContext(supabase, request);
+    const me = await getAuthContext(request);
     if (!me) return ApiErrors.unauthorized();
     if (me.rateLimitExceeded) return ApiErrors.tooManyRequests(me.rateLimitRemaining, me.rateLimitResetAt);
-    const dbClient = me.type === 'agent' ? createSupabaseAdminClient() : supabase;
+    const dbClient = me.type === 'agent' ? createAdminClient() : undefined;
 
     // 권한 체크: agent 또는 admin/owner만 에픽 생성 가능
     if (!isOssMode() && me.type !== 'agent') {
-      const role = await getEpicActorRole(supabase, me.id);
+      const role = await getEpicActorRole(dbClient, me.id);
       if (!role || !hasEpicRole(role, 'admin')) {
         return apiError('FORBIDDEN', 'Epic creation requires admin or owner role', 403);
       }

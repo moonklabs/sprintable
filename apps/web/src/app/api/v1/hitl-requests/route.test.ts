@@ -1,12 +1,12 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
-const { createSupabaseServerClient, getMyTeamMember, requireAgentOrchestration } = vi.hoisted(() => ({
-  createSupabaseServerClient: vi.fn(),
+const { createDbServerClient, getMyTeamMember, requireAgentOrchestration } = vi.hoisted(() => ({
+  createDbServerClient: vi.fn(),
   getMyTeamMember: vi.fn(),
   requireAgentOrchestration: vi.fn(),
 }));
 
-vi.mock('@/lib/supabase/server', () => ({ createSupabaseServerClient }));
+vi.mock('@/lib/db/server', () => ({ createDbServerClient }));
 vi.mock('@/lib/auth-helpers', async () => {
   const actual = await vi.importActual<typeof import('@/lib/auth-helpers')>('@/lib/auth-helpers');
   return { ...actual, getMyTeamMember };
@@ -43,14 +43,14 @@ function createQueryStub(rows: Array<Record<string, unknown>>) {
 
 describe('GET /api/v1/hitl-requests', () => {
   beforeEach(() => {
-    createSupabaseServerClient.mockReset();
+    createDbServerClient.mockReset();
     getMyTeamMember.mockReset();
     requireAgentOrchestration.mockReset();
     requireAgentOrchestration.mockResolvedValue(null);
   });
 
   it('blocks HITL inbox reads when upgrade is required', async () => {
-    createSupabaseServerClient.mockResolvedValue({
+    createDbServerClient.mockResolvedValue({
       auth: {
         getUser: vi.fn().mockResolvedValue({ data: { user: { id: 'user-1' } } }),
       },
@@ -136,7 +136,7 @@ describe('GET /api/v1/hitl-requests', () => {
       { id: 'human-1', name: 'Ortega' },
     ];
 
-    createSupabaseServerClient.mockResolvedValue({
+    createDbServerClient.mockResolvedValue({
       auth: {
         getUser: vi.fn().mockResolvedValue({ data: { user: { id: 'user-1' } } }),
       },
@@ -165,7 +165,7 @@ describe('GET /api/v1/hitl-requests', () => {
   });
 
   it('returns unauthorized when no auth user exists', async () => {
-    createSupabaseServerClient.mockResolvedValue({
+    createDbServerClient.mockResolvedValue({
       auth: {
         getUser: vi.fn().mockResolvedValue({ data: { user: null } }),
       },

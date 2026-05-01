@@ -1,4 +1,4 @@
-import type { SupabaseClient } from '@supabase/supabase-js';
+
 import { isExpiredIsoTimestamp, resolveMessagingBridgeSecretRef } from './slack-channel-mapping';
 import { buildSlackMemoLink, isSlackSourceMemo } from './slack-outbound-dispatcher';
 
@@ -172,8 +172,8 @@ async function postSlackJson(
   };
 }
 
-async function getActiveSlackToken(supabase: SupabaseClient, orgId: string) {
-  const { data, error } = await supabase
+async function getActiveSlackToken(db: any, orgId: string) {
+  const { data, error } = await db
     .from('messaging_bridge_org_auths')
     .select('access_token_ref, expires_at')
     .eq('org_id', orgId)
@@ -189,8 +189,8 @@ async function getActiveSlackToken(supabase: SupabaseClient, orgId: string) {
   return token;
 }
 
-async function getTeamMemberName(supabase: SupabaseClient, teamMemberId: string) {
-  const { data, error } = await supabase
+async function getTeamMemberName(db: any, teamMemberId: string) {
+  const { data, error } = await db
     .from('team_members')
     .select('id, name')
     .eq('id', teamMemberId)
@@ -202,13 +202,13 @@ async function getTeamMemberName(supabase: SupabaseClient, teamMemberId: string)
 }
 
 async function appendFailureComment(
-  supabase: SupabaseClient,
+  db: any,
   memoId: string | null,
   createdBy: string,
   reason: string,
 ) {
   if (!memoId) return;
-  await supabase
+  await db
     .from('memo_replies')
     .insert({
       memo_id: memoId,
@@ -219,11 +219,11 @@ async function appendFailureComment(
 }
 
 async function updateRequestMetadata(
-  supabase: SupabaseClient,
+  db: any,
   requestId: string,
   nextMetadata: Record<string, unknown>,
 ) {
-  const { error } = await supabase
+  const { error } = await db
     .from('agent_hitl_requests')
     .update({ metadata: nextMetadata })
     .eq('id', requestId);
@@ -232,7 +232,7 @@ async function updateRequestMetadata(
 }
 
 export async function notifySlackHitlRequest(
-  supabase: SupabaseClient,
+  db: any,
   input: {
     request: SlackHitlRequestContext;
     sourceMemo: { id: string; metadata: Record<string, unknown> | null };
@@ -248,9 +248,9 @@ export async function notifySlackHitlRequest(
     return { status: 'skipped' as const, reason: 'memo_not_slack_source' };
   }
 
-  const token = await getActiveSlackToken(supabase, input.request.org_id);
+  const token = await getActiveSlackToken(db, input.request.org_id);
   if (!token) {
-    await appendFailureComment(supabase, input.hitlMemoId, input.createdBy, 'slack_auth_missing');
+    await appendFailureComment(db, input.hitlMemoId, input.createdBy, 'slack_auth_missing');
     return { status: 'failed' as const, reason: 'slack_auth_missing' };
   }
 
@@ -260,7 +260,7 @@ export async function notifySlackHitlRequest(
     : typeof input.sourceMemo.metadata.slack_ts === 'string'
       ? input.sourceMemo.metadata.slack_ts
       : null;
-  const assigneeName = await getTeamMemberName(supabase, input.request.requested_for);
+  const assigneeName = await getTeamMemberName(db, input.request.requested_for);
   const hitlMemoLink = buildSlackMemoLink(deps.appUrl, input.hitlMemoId);
   const sourceMemoLink = buildSlackMemoLink(deps.appUrl, input.sourceMemo.id);
   const blocks = buildSlackHitlBlocks({
@@ -284,11 +284,11 @@ export async function notifySlackHitlRequest(
     }, fetchFn);
 
     if (!result.ok || !result.ts) {
-      await appendFailureComment(supabase, input.hitlMemoId, input.createdBy, result.error);
+      await appendFailureComment(db, input.hitlMemoId, input.createdBy, result.error);
       return { status: 'failed' as const, reason: result.error };
     }
 
-    await updateRequestMetadata(supabase, input.request.id, {
+    await updateRequestMetadata(db, input.request.id, {
       ...(input.request.metadata ?? {}),
       slack_team_id: typeof input.sourceMemo.metadata.team_id === 'string' ? input.sourceMemo.metadata.team_id : null,
       slack_channel_id: channelId,
@@ -300,13 +300,13 @@ export async function notifySlackHitlRequest(
   } catch (error) {
     const reason = error instanceof Error ? error.message : 'slack_hitl_send_failed';
     logger.warn?.(`[SlackHitl] notify failed: ${reason}`);
-    await appendFailureComment(supabase, input.hitlMemoId, input.createdBy, reason);
+    await appendFailureComment(db, input.hitlMemoId, input.createdBy, reason);
     return { status: 'failed' as const, reason };
   }
 }
 
 export async function syncSlackHitlRequestState(
-  supabase: SupabaseClient,
+  db: any,
   input: {
     request: SlackHitlRequestContext;
     hitlMemoId: string | null;
@@ -328,13 +328,13 @@ export async function syncSlackHitlRequestState(
     return { status: 'skipped' as const, reason: 'slack_message_missing' };
   }
 
-  const token = await getActiveSlackToken(supabase, input.request.org_id);
+  const token = await getActiveSlackToken(db, input.request.org_id);
   if (!token) {
-    await appendFailureComment(supabase, input.hitlMemoId, input.actorId, 'slack_auth_missing');
+    await appendFailureComment(db, input.hitlMemoId, input.actorId, 'slack_auth_missing');
     return { status: 'failed' as const, reason: 'slack_auth_missing' };
   }
 
-  const assigneeName = await getTeamMemberName(supabase, input.request.requested_for);
+  const assigneeName = await getTeamMemberName(db, input.request.requested_for);
   const hitlMemoLink = input.hitlMemoId ? buildSlackMemoLink(deps.appUrl, input.hitlMemoId) : buildSlackMemoLink(deps.appUrl, '');
   const sourceMemoLink = input.sourceMemoId ? buildSlackMemoLink(deps.appUrl, input.sourceMemoId) : null;
   const blocks = buildSlackHitlBlocks({
@@ -358,7 +358,7 @@ export async function syncSlackHitlRequestState(
     }, fetchFn);
 
     if (!result.ok) {
-      await appendFailureComment(supabase, input.hitlMemoId, input.actorId, result.error);
+      await appendFailureComment(db, input.hitlMemoId, input.actorId, result.error);
       return { status: 'failed' as const, reason: result.error };
     }
 
@@ -366,7 +366,7 @@ export async function syncSlackHitlRequestState(
   } catch (error) {
     const reason = error instanceof Error ? error.message : 'slack_hitl_update_failed';
     logger.warn?.(`[SlackHitl] sync failed: ${reason}`);
-    await appendFailureComment(supabase, input.hitlMemoId, input.actorId, reason);
+    await appendFailureComment(db, input.hitlMemoId, input.actorId, reason);
     return { status: 'failed' as const, reason };
   }
 }

@@ -1,6 +1,5 @@
-import type { SupabaseClient } from '@supabase/supabase-js';
-import { createSupabaseServerClient } from '@/lib/supabase/server';
-import { createSupabaseAdminClient } from '@/lib/supabase/admin';
+
+import { createAdminClient } from '@/lib/db/admin';
 import { SprintService } from '@/services/sprint';
 import { handleApiError } from '@/lib/api-error';
 import { apiSuccess, ApiErrors } from '@/lib/api-response';
@@ -16,24 +15,23 @@ type RouteParams = { params: Promise<{ id: string }> };
 export async function POST(request: Request, { params }: RouteParams) {
   try {
     const { id } = await params;
-    const supabase = await createSupabaseServerClient();
-    const me = await getAuthContext(supabase, request);
+    const me = await getAuthContext(request);
     if (!me) return ApiErrors.unauthorized();
     if (me.rateLimitExceeded) return ApiErrors.tooManyRequests(me.rateLimitRemaining, me.rateLimitResetAt);
     const ossMode = isOssMode();
-    const dbClient = ossMode ? undefined : (me.type === 'agent' ? createSupabaseAdminClient() : supabase);
+    const dbClient = ossMode ? undefined : (me.type === 'agent' ? createAdminClient() : undefined);
 
     if (!ossMode && dbClient && me.type !== 'agent') {
-      const denied = await requireRole(supabase, me.org_id, EDIT_ROLES, 'Admin or PO access required to close sprint');
+      const denied = await requireRole(dbClient, me.org_id, EDIT_ROLES, 'Admin or PO access required to close sprint');
       if (denied) return denied;
     }
 
     const repo = await createSprintRepository(dbClient);
-    const service = new SprintService(repo, dbClient as SupabaseClient | undefined);
+    const service = new SprintService(repo, dbClient as any | undefined);
     const sprint = await service.close(id);
 
     if (!ossMode && dbClient) {
-      const db = dbClient as SupabaseClient;
+      const db = dbClient as any;
 
       // 알림 발송 (fire-and-forget)
       const notifService = new NotificationService(db);

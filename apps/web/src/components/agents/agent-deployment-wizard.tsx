@@ -16,7 +16,7 @@ import { AgentDeploymentVerificationStep } from '@/components/agents/agent-deplo
 import { ANTHROPIC_MODELS, GOOGLE_MODELS, GROQ_MODELS, LLMProvider, OPENAI_MODELS } from '@/lib/llm/types';
 import type { ManagedAgentDeploymentVerification } from '@/lib/managed-agent-contract';
 import { buildAutomaticRoutingTemplate, resolveAutoRoutingPersonaRole, type AutoRoutingPersonaRole } from '@/services/agent-routing-template';
-import { createSupabaseBrowserClient } from '@/lib/supabase/client';
+import { createBrowserClient } from '@/lib/db/client';
 
 export interface WizardAgent {
   id: string;
@@ -160,8 +160,8 @@ export function AgentDeploymentWizard({
   const [overwriteRoutingRules, setOverwriteRoutingRules] = useState(false);
 
   const getAuthHeaders = async (): Promise<Record<string, string>> => {
-    const supabase = createSupabaseBrowserClient();
-    const { data: { session } } = await supabase.auth.getSession();
+    const db = createBrowserClient();
+    const { data: { session } } = await db.auth.getSession();
     return session?.access_token ? { Authorization: `Bearer ${session.access_token}` } : {};
   };
 

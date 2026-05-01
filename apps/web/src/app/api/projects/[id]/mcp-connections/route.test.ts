@@ -1,27 +1,27 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 const {
-  createSupabaseServerClientMock,
-  createSupabaseAdminClientMock,
+  createDbServerClientMock,
+  createAdminClientMock,
   getMyTeamMemberMock,
   requireOrgAdminMock,
   listProjectMcpConnectionSummariesMock,
   createMcpConnectionReviewRequestMock,
 } = vi.hoisted(() => ({
-  createSupabaseServerClientMock: vi.fn(),
-  createSupabaseAdminClientMock: vi.fn(() => ({ tag: 'admin' })),
+  createDbServerClientMock: vi.fn(),
+  createAdminClientMock: vi.fn(() => ({ tag: 'admin' })),
   getMyTeamMemberMock: vi.fn(),
   requireOrgAdminMock: vi.fn(),
   listProjectMcpConnectionSummariesMock: vi.fn(),
   createMcpConnectionReviewRequestMock: vi.fn(),
 }));
 
-vi.mock('@/lib/supabase/server', () => ({
-  createSupabaseServerClient: createSupabaseServerClientMock,
+vi.mock('@/lib/db/server', () => ({
+  createDbServerClient: createDbServerClientMock,
 }));
 
-vi.mock('@/lib/supabase/admin', () => ({
-  createSupabaseAdminClient: createSupabaseAdminClientMock,
+vi.mock('@/lib/db/admin', () => ({
+  createAdminClient: createAdminClientMock,
 }));
 
 vi.mock('@/lib/auth-helpers', () => ({
@@ -39,7 +39,7 @@ vi.mock('@/services/project-mcp', () => ({
 
 import { GET, POST } from './route';
 
-function createSupabaseStub() {
+function createDbStub() {
   return {
     auth: {
       getUser: vi.fn(async () => ({ data: { user: { id: 'user-1' } } })),
@@ -49,14 +49,14 @@ function createSupabaseStub() {
 
 describe('project mcp connections route', () => {
   beforeEach(() => {
-    createSupabaseServerClientMock.mockReset();
-    createSupabaseAdminClientMock.mockClear();
+    createDbServerClientMock.mockReset();
+    createAdminClientMock.mockClear();
     getMyTeamMemberMock.mockReset();
     requireOrgAdminMock.mockReset();
     listProjectMcpConnectionSummariesMock.mockReset();
     createMcpConnectionReviewRequestMock.mockReset();
 
-    createSupabaseServerClientMock.mockResolvedValue(createSupabaseStub());
+    createDbServerClientMock.mockResolvedValue(createDbStub());
     getMyTeamMemberMock.mockResolvedValue({ id: 'member-1', org_id: 'org-1', project_id: 'project-1' });
     requireOrgAdminMock.mockResolvedValue(undefined);
   });

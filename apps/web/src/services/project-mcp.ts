@@ -1,5 +1,5 @@
+
 import { z } from 'zod';
-import type { SupabaseClient } from '@supabase/supabase-js';
 import { decryptSecretForOrg, encryptSecretForOrg } from '@/lib/kms';
 import { encodeMcpOAuthState } from '@/lib/mcp-oauth-state';
 import { GITHUB_MCP_TOOL_NAMES } from '@/lib/github-mcp';
@@ -168,8 +168,8 @@ function buildAuthHeader(server: ApprovedMcpServerRecord, secret: string) {
   };
 }
 
-async function loadApprovedServers(supabase: SupabaseClient) {
-  const { data, error } = await supabase
+async function loadApprovedServers(db: any) {
+  const { data, error } = await db
     .from('approved_mcp_servers')
     .select('*')
     .eq('is_active', true)
@@ -179,8 +179,8 @@ async function loadApprovedServers(supabase: SupabaseClient) {
   return (data ?? []).map((row) => approvedMcpServerSchema.parse(row));
 }
 
-async function loadProjectMcpIntegrations(supabase: SupabaseClient, projectId: string) {
-  const { data, error } = await supabase
+async function loadProjectMcpIntegrations(db: any, projectId: string) {
+  const { data, error } = await db
     .from('org_integrations')
     .select('id, org_id, project_id, integration_type, provider, secret_last4, encrypted_secret, kms_provider, kms_status, config, status, validated_at, last_error, tool_cache, tool_cache_expires_at')
     .eq('project_id', projectId)
@@ -251,7 +251,7 @@ async function fetchToolsList(
 }
 
 async function updateIntegrationCache(
-  supabase: SupabaseClient,
+  db: any,
   integrationId: string,
   input: {
     status: 'active' | 'error' | 'pending_oauth';
@@ -281,7 +281,7 @@ async function updateIntegrationCache(
   patch.rotation_requested_at = null;
   patch.kms_status = 'active';
 
-  const { error } = await supabase
+  const { error } = await db
     .from('org_integrations')
     .update(patch)
     .eq('id', integrationId);
@@ -290,12 +290,12 @@ async function updateIntegrationCache(
 }
 
 export async function listProjectMcpConnectionSummaries(
-  supabase: SupabaseClient,
+  db: any,
   input: { orgId: string; projectId: string; origin: string; actorId: string },
 ): Promise<ProjectMcpConnectionSummary[]> {
   const [servers, integrations] = await Promise.all([
-    loadApprovedServers(supabase),
-    loadProjectMcpIntegrations(supabase, input.projectId),
+    loadApprovedServers(db),
+    loadProjectMcpIntegrations(db, input.projectId),
   ]);
 
   return servers.map((server) => {
@@ -325,7 +325,7 @@ export async function listProjectMcpConnectionSummaries(
 }
 
 async function saveProjectMcpConnection(
-  supabase: SupabaseClient,
+  db: any,
   server: ApprovedMcpServerRecord,
   input: {
     orgId: string;
@@ -344,7 +344,7 @@ async function saveProjectMcpConnection(
     label: input.label?.trim() || server.display_name,
   };
 
-  const { error } = await supabase
+  const { error } = await db
     .from('org_integrations')
     .upsert({
       org_id: input.orgId,
@@ -378,7 +378,7 @@ async function saveProjectMcpConnection(
 }
 
 export async function upsertProjectMcpConnection(
-  supabase: SupabaseClient,
+  db: any,
   input: {
     orgId: string;
     projectId: string;
@@ -389,15 +389,15 @@ export async function upsertProjectMcpConnection(
     fetchFn?: typeof fetch;
   },
 ) {
-  const [server] = (await loadApprovedServers(supabase)).filter((entry) => entry.server_key === input.serverKey);
+  const [server] = (await loadApprovedServers(db)).filter((entry) => entry.server_key === input.serverKey);
   if (!server) throw new Error('approved_mcp_server_not_found');
   if (server.auth_strategy === 'oauth') throw new Error('oauth_connection_requires_callback');
 
-  return saveProjectMcpConnection(supabase, server, input);
+  return saveProjectMcpConnection(db, server, input);
 }
 
 export async function exchangeGitHubOAuthCode(
-  supabase: SupabaseClient,
+  db: any,
   input: {
     code: string;
     origin: string;
@@ -407,7 +407,7 @@ export async function exchangeGitHubOAuthCode(
     fetchFn?: typeof fetch;
   },
 ) {
-  const server = (await loadApprovedServers(supabase)).find((entry) => entry.server_key === 'github');
+  const server = (await loadApprovedServers(db)).find((entry) => entry.server_key === 'github');
   if (!server) throw new Error('approved_mcp_server_not_found');
 
   const clientId = resolveOptionalEnv(server.oauth_client_id_env);
@@ -456,7 +456,7 @@ export async function exchangeGitHubOAuthCode(
 
   const viewer = githubViewerSchema.parse(viewerJson ?? {});
 
-  return saveProjectMcpConnection(supabase, server, {
+  return saveProjectMcpConnection(db, server, {
     orgId: input.orgId,
     projectId: input.projectId,
     actorId: input.actorId,
@@ -467,10 +467,10 @@ export async function exchangeGitHubOAuthCode(
 }
 
 export async function deleteProjectMcpConnection(
-  supabase: SupabaseClient,
+  db: any,
   input: { projectId: string; serverKey: string },
 ) {
-  const { error } = await supabase
+  const { error } = await db
     .from('org_integrations')
     .delete()
     .eq('project_id', input.projectId)
@@ -480,7 +480,7 @@ export async function deleteProjectMcpConnection(
 }
 
 export async function createMcpConnectionReviewRequest(
-  supabase: SupabaseClient,
+  db: any,
   input: {
     orgId: string;
     projectId: string;
@@ -490,7 +490,7 @@ export async function createMcpConnectionReviewRequest(
     notes?: string | null;
   },
 ) {
-  const { data, error } = await supabase
+  const { data, error } = await db
     .from('mcp_connection_requests')
     .insert({
       org_id: input.orgId,
@@ -509,12 +509,12 @@ export async function createMcpConnectionReviewRequest(
 }
 
 export async function listProjectApprovedMcpServerConfigs(
-  supabase: SupabaseClient,
+  db: any,
   projectId: string,
 ): Promise<ExternalMcpServerConfig[]> {
   const [servers, integrations] = await Promise.all([
-    loadApprovedServers(supabase),
-    loadProjectMcpIntegrations(supabase, projectId),
+    loadApprovedServers(db),
+    loadProjectMcpIntegrations(db, projectId),
   ]);
 
   const configs: ExternalMcpServerConfig[] = [];
@@ -558,7 +558,7 @@ export async function listProjectApprovedMcpServerConfigs(
 }
 
 export async function resolveProjectMcpVaultToken(
-  supabase: SupabaseClient,
+  db: any,
   projectId: string,
   tokenRef: string,
 ): Promise<string> {
@@ -567,7 +567,7 @@ export async function resolveProjectMcpVaultToken(
     throw new Error(`invalid_mcp_vault_ref:${tokenRef}`);
   }
 
-  const { data, error } = await supabase
+  const { data, error } = await db
     .from('org_integrations')
     .select('org_id, encrypted_secret')
     .eq('project_id', projectId)
@@ -583,15 +583,15 @@ export async function resolveProjectMcpVaultToken(
 }
 
 export async function validateProjectMcpConnections(
-  supabase: SupabaseClient,
+  db: any,
   input: {
     projectId: string;
     fetchFn?: typeof fetch;
   },
 ) {
   const [servers, integrations] = await Promise.all([
-    loadApprovedServers(supabase),
-    loadProjectMcpIntegrations(supabase, input.projectId),
+    loadApprovedServers(db),
+    loadProjectMcpIntegrations(db, input.projectId),
   ]);
 
   const errors: string[] = [];
@@ -605,7 +605,7 @@ export async function validateProjectMcpConnections(
       const secret = await decryptSecretForOrg(integration.org_id, integration.encrypted_secret);
       const toolNames = await fetchToolsList(server, secret, input.fetchFn);
       const now = new Date();
-      await updateIntegrationCache(supabase, integration.id, {
+      await updateIntegrationCache(db, integration.id, {
         status: 'active',
         toolNames,
         validatedAt: now.toISOString(),
@@ -615,7 +615,7 @@ export async function validateProjectMcpConnections(
     } catch (error) {
       const message = error instanceof Error ? error.message : 'mcp_validation_failed';
       errors.push(`${server.display_name}: ${message}`);
-      await updateIntegrationCache(supabase, integration.id, {
+      await updateIntegrationCache(db, integration.id, {
         status: 'error',
         validatedAt: new Date().toISOString(),
         lastError: message,
@@ -630,12 +630,12 @@ export async function validateProjectMcpConnections(
 }
 
 export async function listProjectApprovedMcpToolOptions(
-  supabase: SupabaseClient,
+  db: any,
   projectId: string,
 ): Promise<Array<{ name: string; serverName: string; groupKind: 'mcp' | 'github' }>> {
   const [servers, integrations] = await Promise.all([
-    loadApprovedServers(supabase),
-    loadProjectMcpIntegrations(supabase, projectId),
+    loadApprovedServers(db),
+    loadProjectMcpIntegrations(db, projectId),
   ]);
 
   const options = integrations.flatMap((integration) => {

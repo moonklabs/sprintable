@@ -1,15 +1,15 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 const {
-  createSupabaseAdminClientMock,
+  createAdminClientMock,
   listProjectApprovedMcpToolOptionsMock,
 } = vi.hoisted(() => ({
-  createSupabaseAdminClientMock: vi.fn(() => ({ tag: 'admin' })),
+  createAdminClientMock: vi.fn(() => ({ tag: 'admin' })),
   listProjectApprovedMcpToolOptionsMock: vi.fn<(...args: unknown[]) => Promise<Array<{ name: string; serverName: string; groupKind: 'mcp' | 'github' }>>>(async () => []),
 }));
 
-vi.mock('@/lib/supabase/admin', () => ({
-  createSupabaseAdminClient: createSupabaseAdminClientMock,
+vi.mock('@/lib/db/admin', () => ({
+  createAdminClient: createAdminClientMock,
 }));
 
 vi.mock('./project-mcp', () => ({
@@ -20,7 +20,7 @@ import { estimatePromptTokens, listProjectPersonaToolOptions, resolvePersonaTool
 
 describe('persona-composer helpers', () => {
   beforeEach(() => {
-    createSupabaseAdminClientMock.mockClear();
+    createAdminClientMock.mockClear();
     listProjectApprovedMcpToolOptionsMock.mockReset();
     listProjectApprovedMcpToolOptionsMock.mockResolvedValue([]);
   });
@@ -49,7 +49,7 @@ describe('persona-composer helpers', () => {
   });
 
   it('merges approved MCP tool options into the project tool list without reviving legacy MCP config', async () => {
-    const supabase = {
+    const db = {
       from(table: string) {
         if (table !== 'project_ai_settings') throw new Error(`Unexpected table: ${table}`);
         return {
@@ -75,7 +75,7 @@ describe('persona-composer helpers', () => {
       { name: 'linear.search_issues', serverName: 'Linear', groupKind: 'mcp' },
     ]);
 
-    const options = await listProjectPersonaToolOptions(supabase as never, 'project-1');
+    const options = await listProjectPersonaToolOptions(db as never, 'project-1');
 
     expect(listProjectApprovedMcpToolOptionsMock).toHaveBeenCalledWith({ tag: 'admin' }, 'project-1');
     expect(options.find((option) => option.name === 'linear.search_issues')).toMatchObject({

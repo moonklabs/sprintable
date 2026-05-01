@@ -33,7 +33,7 @@ export default async function InternalDogfoodPage({ searchParams }: PageProps) {
         <PageHeader
           eyebrow="Internal dogfood"
           title="Sprintable emergency memo / story intake"
-          description="Supabase auth plane 장애 중에도 Moonlabs 내부 인력이 Sprintable에서 직접 메모와 스토리를 생성하기 위한 임시 진입점인"
+          description="인증 플레인 장애 중에도 Moonlabs 내부 인력이 Sprintable에서 직접 메모와 스토리를 생성하기 위한 임시 진입점인"
           actions={actor ? (
             <form action="/api/internal-dogfood/sign-out" method="post">
               <Button type="submit" variant="outline">세션 종료</Button>

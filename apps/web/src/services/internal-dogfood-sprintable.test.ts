@@ -18,7 +18,7 @@ describe('createInternalDogfoodMemoInSprintable', () => {
   it('writes memos directly and dispatches the inserted memo without extra reads', async () => {
     const insertPayloads: Array<Record<string, unknown>> = [];
 
-    const supabase = {
+    const db = {
       from(table: string) {
         if (table === 'memos') {
           const builder = {
@@ -52,10 +52,10 @@ describe('createInternalDogfoodMemoInSprintable', () => {
 
         throw new Error(`Unexpected table read: ${table}`);
       },
-    } as unknown as import('@supabase/supabase-js').SupabaseClient;
+    } as any;
 
     const result = await createInternalDogfoodMemoInSprintable(
-      supabase,
+      db,
       { id: 'tm-1', org_id: 'org-1', project_id: 'project-1', name: 'Didi', project_name: 'Sprintable' },
       {
         title: 'Internal blocker',

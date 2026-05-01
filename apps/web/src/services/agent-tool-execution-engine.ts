@@ -1,5 +1,5 @@
-import type { SupabaseClient } from '@supabase/supabase-js';
-import { createSupabaseAdminClient } from '@/lib/supabase/admin';
+
+import { createAdminClient } from '@/lib/db/admin';
 import { githubMcpToolArgumentSchemas, isGitHubMcpToolName } from '@/lib/github-mcp';
 import { resolveMcpTokenRef } from '@/lib/mcp-secrets';
 import {
@@ -148,14 +148,14 @@ export class AgentToolExecutionEngine {
   private readonly auditLogger?: AuditLogger;
 
   constructor(
-    supabase: SupabaseClient,
+    db: any,
     options: {
       builtinToolService?: AgentBuiltinToolService;
       fetchFn?: FetchFn;
       auditLogger?: AuditLogger;
     } = {},
   ) {
-    this.builtinToolService = options.builtinToolService ?? new AgentBuiltinToolService(supabase, {
+    this.builtinToolService = options.builtinToolService ?? new AgentBuiltinToolService(db, {
       auditLogger: options.auditLogger,
     });
     this.fetchFn = options.fetchFn ?? fetch;
@@ -185,7 +185,7 @@ export class AgentToolExecutionEngine {
 
     let approvedServers: ExternalServerConfig[] = [];
     try {
-      approvedServers = await listProjectApprovedMcpServerConfigs(createSupabaseAdminClient() as never, projectId);
+      approvedServers = await listProjectApprovedMcpServerConfigs(createAdminClient() as never, projectId);
     } catch {
       approvedServers = [];
     }
@@ -352,7 +352,7 @@ export class AgentToolExecutionEngine {
 
       if (server.auth?.token_ref) {
         const token = parseMcpVaultRef(server.auth.token_ref)
-          ? await resolveProjectMcpVaultToken(createSupabaseAdminClient() as never, ctx.memo.project_id, server.auth.token_ref)
+          ? await resolveProjectMcpVaultToken(createAdminClient() as never, ctx.memo.project_id, server.auth.token_ref)
           : resolveMcpTokenRef(server.auth.token_ref);
         const headerName = server.auth.header_name ?? (server.kind === 'github' ? 'X-GitHub-Token' : 'Authorization');
         const scheme = server.auth.scheme ?? (server.kind === 'github' ? 'plain' : 'bearer');

@@ -7,7 +7,6 @@ const { createClientMock, findChannelMapping, processInboundMessage, verifyTeams
   verifyTeamsRequestMock: vi.fn(),
 }));
 
-vi.mock('@supabase/supabase-js', () => ({ createClient: createClientMock }));
 vi.mock('@/services/bridge-inbound', () => ({
   BridgeInboundService: class BridgeInboundService {
     findChannelMapping = findChannelMapping;
@@ -30,8 +29,8 @@ describe('POST /api/v1/bridge/teams/events', () => {
     findChannelMapping.mockReset();
     processInboundMessage.mockReset();
     verifyTeamsRequestMock.mockReset();
-    process.env.NEXT_PUBLIC_SUPABASE_URL = 'https://example.supabase.co';
-    process.env.SUPABASE_SERVICE_ROLE_KEY = 'service-role-key';
+    process.env.DATABASE_URL = 'https://example.db.co';
+    process.env.DATABASE_SERVICE_KEY = 'service-role-key';
   });
 
   it('skips unmapped teams channels without failing the webhook', async () => {

@@ -1,4 +1,5 @@
-import type { PostgrestError, SupabaseClient } from '@supabase/supabase-js';
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+type PostgrestError = any;
 import { MemoService, type CreateMemoInput } from './memo';
 
 export type BridgePlatform = 'slack' | 'discord' | 'teams' | 'telegram';
@@ -121,10 +122,10 @@ function isBridgeDuplicateMemoError(error: unknown): error is PostgrestError {
 }
 
 export class BridgeInboundService {
-  constructor(private readonly supabase: SupabaseClient) {}
+  constructor(private readonly db: any) {}
 
   async findChannelMapping(platform: BridgePlatform, channelId: string): Promise<BridgeChannelMapping | null> {
-    const { data } = await this.supabase
+    const { data } = await this.db
       .from('messaging_bridge_channels')
       .select('id, org_id, project_id, platform, channel_id, config, is_active')
       .eq('platform', platform)
@@ -136,7 +137,7 @@ export class BridgeInboundService {
   }
 
   async findUserMapping(orgId: string, projectId: string, platform: BridgePlatform, platformUserId: string): Promise<BridgeUserMapping | null> {
-    const { data } = await this.supabase
+    const { data } = await this.db
       .from('messaging_bridge_users')
       .select('team_member_id, display_name')
       .eq('org_id', orgId)
@@ -148,7 +149,7 @@ export class BridgeInboundService {
     const mapping = (data as BridgeUserMapping | null) ?? null;
     if (!mapping) return null;
 
-    const { data: scopedMember } = await this.supabase
+    const { data: scopedMember } = await this.db
       .from('team_members')
       .select('id')
       .eq('id', mapping.team_member_id)
@@ -170,7 +171,7 @@ export class BridgeInboundService {
   ): Promise<string | null> {
     if (!eventId) return null;
 
-    const { data } = await this.supabase
+    const { data } = await this.db
       .from('memos')
       .select('id')
       .eq('org_id', orgId)
@@ -183,7 +184,7 @@ export class BridgeInboundService {
   }
 
   async findFallbackAuthor(orgId: string, projectId: string): Promise<string | null> {
-    const { data: agent } = await this.supabase
+    const { data: agent } = await this.db
       .from('team_members')
       .select('id')
       .eq('org_id', orgId)
@@ -196,7 +197,7 @@ export class BridgeInboundService {
 
     if (agent?.id) return agent.id as string;
 
-    const { data: human } = await this.supabase
+    const { data: human } = await this.db
       .from('team_members')
       .select('id')
       .eq('org_id', orgId)
@@ -239,7 +240,7 @@ export class BridgeInboundService {
 
     const unknownUserLabel = userMapping ? null : (input.unknownUserLabel ?? `${input.platform} 연동 미설정 사용자`);
     const metadata = normalizeBridgeMetadata(input.platform, input.event);
-    const memoService = MemoService.fromSupabase(this.supabase);
+    const memoService = MemoService.fromDb(this.db);
 
     try {
       const memo = await memoService.create({

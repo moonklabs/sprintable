@@ -1,21 +1,21 @@
 import { describe, expect, it, vi, beforeEach } from 'vitest';
 
 const {
-  createSupabaseServerClientMock,
+  createDbServerClientMock,
   getMyTeamMemberMock,
   requireOrgAdminMock,
   requireAgentOrchestrationMock,
   listSessionsMock,
 } = vi.hoisted(() => ({
-  createSupabaseServerClientMock: vi.fn(),
+  createDbServerClientMock: vi.fn(),
   getMyTeamMemberMock: vi.fn(),
   requireOrgAdminMock: vi.fn(),
   requireAgentOrchestrationMock: vi.fn(),
   listSessionsMock: vi.fn(),
 }));
 
-vi.mock('@/lib/supabase/server', () => ({
-  createSupabaseServerClient: createSupabaseServerClientMock,
+vi.mock('@/lib/db/server', () => ({
+  createDbServerClient: createDbServerClientMock,
 }));
 
 vi.mock('@/lib/auth-helpers', () => ({
@@ -40,13 +40,13 @@ import { GET } from './route';
 
 describe('GET /api/v1/agent-sessions', () => {
   beforeEach(() => {
-    createSupabaseServerClientMock.mockReset();
+    createDbServerClientMock.mockReset();
     getMyTeamMemberMock.mockReset();
     requireOrgAdminMock.mockReset();
     requireAgentOrchestrationMock.mockReset();
     listSessionsMock.mockReset();
 
-    createSupabaseServerClientMock.mockResolvedValue({
+    createDbServerClientMock.mockResolvedValue({
       auth: { getUser: vi.fn(async () => ({ data: { user: { id: 'user-1' } } })) },
     });
     getMyTeamMemberMock.mockResolvedValue({ id: 'member-1', org_id: 'org-1', project_id: 'project-1' });

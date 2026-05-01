@@ -2,8 +2,8 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 const { createClient, scan } = vi.hoisted(() => {
   process.env.CRON_SECRET = 'cron-secret';
-  process.env.NEXT_PUBLIC_SUPABASE_URL = 'https://example.supabase.co';
-  process.env.SUPABASE_SERVICE_ROLE_KEY = 'service-role-key';
+  process.env.DATABASE_URL = 'https://example.db.co';
+  process.env.DATABASE_SERVICE_KEY = 'service-role-key';
 
   return {
     createClient: vi.fn(),
@@ -11,7 +11,6 @@ const { createClient, scan } = vi.hoisted(() => {
   };
 });
 
-vi.mock('@supabase/supabase-js', () => ({ createClient }));
 vi.mock('@/services/inbox-outbox.service', () => ({
   InboxOutboxService: class InboxOutboxService {
     scan = scan;

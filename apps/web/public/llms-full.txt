@@ -339,7 +339,7 @@ Routing rules in **Settings → Agent Routing** determine which agent handles wh
 
 ## Self-Hosting
 
-### Docker (OSS — SQLite, no Supabase required)
+### Docker (OSS — SQLite, no external DB required)
 ```bash
 git clone https://github.com/moonklabs/sprintable.git
 cd sprintable

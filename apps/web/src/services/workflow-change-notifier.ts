@@ -1,4 +1,4 @@
-import type { SupabaseClient } from '@supabase/supabase-js';
+
 import { MemoService } from './memo';
 import type { RoutingRuleSummary } from './agent-routing-rule';
 
@@ -30,10 +30,10 @@ function buildMemoContent(version: number, summary: { added_rules: number; remov
 }
 
 export async function notifyWorkflowChange(
-  supabase: SupabaseClient,
+  db: any,
   input: WorkflowChangeNotifyInput,
 ): Promise<void> {
-  const { data: versionRows } = await supabase
+  const { data: versionRows } = await db
     .from('workflow_versions')
     .select('id, version, change_summary')
     .eq('org_id', input.orgId)
@@ -60,7 +60,7 @@ export async function notifyWorkflowChange(
     latestVersion.change_summary ?? { added_rules: 0, removed_rules: 0, changed_rules: 0 },
   );
 
-  const memoService = MemoService.fromSupabase(supabase);
+  const memoService = MemoService.fromDb(db);
   const memoIds: string[] = [];
 
   for (const agentId of agentIds) {
@@ -80,7 +80,7 @@ export async function notifyWorkflowChange(
     }
   }
 
-  await supabase.from('workflow_change_events').insert({
+  await db.from('workflow_change_events').insert({
     org_id: input.orgId,
     project_id: input.projectId,
     workflow_version_id: latestVersion.id,

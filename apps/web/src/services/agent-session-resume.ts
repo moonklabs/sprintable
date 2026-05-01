@@ -1,12 +1,12 @@
-import type { SupabaseClient } from '@supabase/supabase-js';
+
 import { AgentExecutionLoop } from './agent-execution-loop';
 import type { SessionResumeCandidate } from './agent-session-lifecycle';
 
 export async function resumeSessionCandidates(
-  supabase: SupabaseClient,
+  db: any,
   candidates: SessionResumeCandidate[],
 ) {
-  const loop = new AgentExecutionLoop(supabase);
+  const loop = new AgentExecutionLoop(db);
 
   for (const candidate of candidates) {
     try {
@@ -20,7 +20,7 @@ export async function resumeSessionCandidates(
       });
     } catch (error) {
       const message = error instanceof Error ? error.message : 'session_resume_failed';
-      await supabase
+      await db
         .from('agent_runs')
         .update({
           status: 'failed',

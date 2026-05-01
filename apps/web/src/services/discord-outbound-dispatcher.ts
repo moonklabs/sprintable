@@ -1,4 +1,5 @@
-import type { RealtimeChannel, SupabaseClient } from '@supabase/supabase-js';
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+type RealtimeChannel = any;
 import { MemoService } from './memo';
 import { getActiveDiscordOrgAuth, isDiscordAuthExpired, notifyDiscordAuthFailed, resolveDiscordToken } from './discord-bridge-utils';
 import { DISCORD_MAX_MESSAGE_LENGTH } from './discord-inbound';
@@ -41,7 +42,7 @@ interface ReplyDispatchRow {
 type Logger = Pick<Console, 'info' | 'warn' | 'error'>;
 
 export interface DiscordOutboundDispatcherOptions {
-  supabase: SupabaseClient;
+  db: any;
   logger?: Logger;
   fetchFn?: typeof fetch;
   appUrl?: string;
@@ -208,7 +209,7 @@ export class DiscordOutboundDispatcher {
 
   start() {
     if (!this.channel) {
-      this.channel = this.options.supabase
+      this.channel = this.options.db
         .channel(`discord-outbound-dispatcher-${Date.now()}`)
         .on('postgres_changes', { event: 'INSERT', schema: 'public', table: 'memo_replies' }, (payload) => {
           const reply = payload.new as ReplyRow;
@@ -241,14 +242,14 @@ export class DiscordOutboundDispatcher {
     }
 
     if (this.channel) {
-      await this.options.supabase.removeChannel(this.channel);
+      await this.options.db.removeChannel(this.channel);
       this.channel = null;
     }
   }
 
   async pollOnce() {
     try {
-      const { data, error } = await this.options.supabase
+      const { data, error } = await this.options.db
         .from('memo_replies')
         .select('id, memo_id, content, created_by, created_at')
         .or(buildReplyPollingCursorFilter(this.lastPolledAt, this.lastPolledId))
@@ -315,7 +316,7 @@ export class DiscordOutboundDispatcher {
         return { status: 'failed', reason: 'discord_channel_mapping_missing', attempts: claim.attemptCount };
       }
 
-      const auth = await getActiveDiscordOrgAuth(this.options.supabase, memo.org_id);
+      const auth = await getActiveDiscordOrgAuth(this.options.db, memo.org_id);
       const token = resolveDiscordToken(auth?.access_token_ref);
       if (!auth || !token || isDiscordAuthExpired(auth.expires_at)) {
         await this.handleAuthFailed(memo.org_id, reply, claim.claimToken, 'auth_failed');
@@ -373,7 +374,7 @@ export class DiscordOutboundDispatcher {
   }
 
   private async getMemo(memoId: string): Promise<MemoRow | null> {
-    const { data } = await this.options.supabase
+    const { data } = await this.options.db
       .from('memos')
       .select('id, org_id, project_id, metadata')
       .eq('id', memoId)
@@ -383,7 +384,7 @@ export class DiscordOutboundDispatcher {
   }
 
   private async getDiscordChannelMapping(orgId: string, projectId: string, channelId: string): Promise<ChannelMappingRow | null> {
-    const { data } = await this.options.supabase
+    const { data } = await this.options.db
       .from('messaging_bridge_channels')
       .select('channel_id')
       .eq('org_id', orgId)
@@ -397,7 +398,7 @@ export class DiscordOutboundDispatcher {
   }
 
   private async isActiveAgentReply(orgId: string, projectId: string, createdBy: string): Promise<boolean> {
-    const { data } = await this.options.supabase
+    const { data } = await this.options.db
       .from('team_members')
       .select('id')
       .eq('id', createdBy)
@@ -411,7 +412,7 @@ export class DiscordOutboundDispatcher {
   }
 
   private async getReplyDispatch(replyId: string): Promise<ReplyDispatchRow | null> {
-    const { data, error } = await this.options.supabase
+    const { data, error } = await this.options.db
       .from('messaging_bridge_reply_dispatches')
       .select('id, status, attempt_count, claim_token, claimed_at, sent_at, error_message, updated_at')
       .eq('platform', 'discord')
@@ -441,7 +442,7 @@ export class DiscordOutboundDispatcher {
       error_message: null,
     };
 
-    const { data: inserted, error: insertError } = await this.options.supabase
+    const { data: inserted, error: insertError } = await this.options.db
       .from('messaging_bridge_reply_dispatches')
       .insert(insertRow)
       .select('id, status, attempt_count, claim_token, claimed_at, sent_at, error_message, updated_at')
@@ -472,7 +473,7 @@ export class DiscordOutboundDispatcher {
     }
 
     const nextAttemptCount = (existing.attempt_count ?? 0) + 1;
-    const { data: reclaimed, error: reclaimError } = await this.options.supabase
+    const { data: reclaimed, error: reclaimError } = await this.options.db
       .from('messaging_bridge_reply_dispatches')
       .update({
         status: 'pending',
@@ -498,7 +499,7 @@ export class DiscordOutboundDispatcher {
   }
 
   private async markReplyDispatchSent(replyId: string, claimToken: string) {
-    const { error } = await this.options.supabase
+    const { error } = await this.options.db
       .from('messaging_bridge_reply_dispatches')
       .update({
         status: 'sent',
@@ -513,7 +514,7 @@ export class DiscordOutboundDispatcher {
   }
 
   private async markReplyDispatchFailed(replyId: string, claimToken: string, reason: string) {
-    const { error } = await this.options.supabase
+    const { error } = await this.options.db
       .from('messaging_bridge_reply_dispatches')
       .update({
         status: 'failed',
@@ -534,7 +535,7 @@ export class DiscordOutboundDispatcher {
       reason,
     });
 
-    const memoService = MemoService.fromSupabase(this.options.supabase);
+    const memoService = MemoService.fromDb(this.options.db);
     await memoService.addReply(
       reply.memo_id,
       `${FAILURE_COMMENT_PREFIX}\n- reply_id: ${reply.id}\n- reason: ${reason}`,
@@ -547,6 +548,6 @@ export class DiscordOutboundDispatcher {
     await this.recordFailure(reply, reason);
     if (this.notifiedAuthFailures.has(orgId)) return;
     this.notifiedAuthFailures.add(orgId);
-    await notifyDiscordAuthFailed(this.options.supabase, orgId, reason);
+    await notifyDiscordAuthFailed(this.options.db, orgId, reason);
   }
 }

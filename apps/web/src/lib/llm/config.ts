@@ -1,4 +1,4 @@
-import { createClient } from '@supabase/supabase-js';
+import { createAdminClient } from '@/lib/db/admin';
 import { z } from 'zod';
 import { githubMcpConfigSchema } from '@/lib/github-mcp';
 import { KmsError } from '@/lib/kms';
@@ -113,10 +113,7 @@ export async function resolveLLMConfig(projectId: string, overrides?: {
   timeoutMs?: number;
   maxRetries?: number;
 }) : Promise<LLMConfig | null> {
-  const serviceClient = createClient(
-    process.env.NEXT_PUBLIC_SUPABASE_URL!,
-    process.env.SUPABASE_SERVICE_ROLE_KEY!,
-  );
+  const serviceClient = createAdminClient();
 
   const { settings, integration } = await getProjectAiSettingsWithIntegration(serviceClient as never, projectId);
   const persistedProvider = settings?.provider as LLMProvider | undefined;

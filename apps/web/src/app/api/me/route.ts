@@ -1,84 +1,36 @@
-import { createSupabaseServerClient } from '@/lib/supabase/server';
 import { handleApiError } from '@/lib/api-error';
 import { apiSuccess, apiError, ApiErrors } from '@/lib/api-response';
 import { getAuthContext } from '@/lib/auth-helpers';
-import { isOssMode } from '@/lib/storage/factory';
+import { createTeamMemberRepository } from '@/lib/storage/factory';
 
 export async function GET(request: Request) {
-  if (isOssMode()) {
-    const { OSS_MEMBER_ID } = await import('@sprintable/storage-sqlite');
-    return apiSuccess({ id: OSS_MEMBER_ID, name: 'OSS User', type: 'human', role: 'owner', is_active: true, email: null });
-  }
   try {
-    const supabase = await createSupabaseServerClient();
-    const me = await getAuthContext(supabase, request);
+    const { OSS_MEMBER_ID, OSS_ORG_ID } = await import('@sprintable/storage-sqlite');
+    const me = await getAuthContext(request);
     if (!me) return ApiErrors.unauthorized();
 
-    if (me.type === 'agent') {
-      const { createSupabaseAdminClient } = await import('@/lib/supabase/admin');
-      const adminClient = createSupabaseAdminClient();
-      const { data: member, error } = await adminClient
-        .from('team_members')
-        .select('id, name, type, role, is_active')
-        .eq('id', me.id)
-        .maybeSingle();
-      if (error) throw error;
-      if (!member) return ApiErrors.notFound('Member not found');
-      return apiSuccess({ ...member, email: null });
-    }
-
-    const { data: { user } } = await supabase.auth.getUser();
-    if (!user) return ApiErrors.unauthorized();
-
-    const { data: member, error } = await supabase
-      .from('team_members')
-      .select('id, name, type, role, is_active')
-      .eq('id', me.id)
-      .maybeSingle();
-
-    if (error) throw error;
+    const repo = await createTeamMemberRepository();
+    const members = await repo.list({ org_id: OSS_ORG_ID });
+    const member = members.find((m) => m.id === (me.id ?? OSS_MEMBER_ID));
     if (!member) return ApiErrors.notFound('Member not found');
-
-    return apiSuccess({ ...member, email: user.email ?? null });
+    return apiSuccess({ ...member, email: null });
   } catch (err: unknown) {
     return handleApiError(err);
   }
 }
 
 export async function PATCH(request: Request) {
-  if (isOssMode()) {
-    const { OSS_MEMBER_ID } = await import('@sprintable/storage-sqlite');
+  try {
+    const { OSS_MEMBER_ID, OSS_ORG_ID } = await import('@sprintable/storage-sqlite');
     let body: unknown;
     try { body = await request.json(); } catch { return apiError('BAD_REQUEST', 'Invalid JSON body', 400); }
     const { name } = (body as Record<string, unknown>) ?? {};
     if (typeof name !== 'string' || !name.trim()) return apiError('VALIDATION_ERROR', 'name is required', 400);
-    return apiSuccess({ id: OSS_MEMBER_ID, name: name.trim(), type: 'human', role: 'owner', is_active: true, email: null });
-  }
-  try {
-    const supabase = await createSupabaseServerClient();
-    const { data: { user } } = await supabase.auth.getUser();
-    if (!user) return ApiErrors.unauthorized();
 
-    const { getMyTeamMember } = await import('@/lib/auth-helpers');
-    const me = await getMyTeamMember(supabase, user);
-    if (!me) return ApiErrors.forbidden('Team member not found');
-
-    let body: unknown;
-    try { body = await request.json(); } catch { return apiError('BAD_REQUEST', 'Invalid JSON body', 400); }
-    if (!body || typeof body !== 'object') return apiError('BAD_REQUEST', 'Body must be an object', 400);
-
-    const { name } = body as Record<string, unknown>;
-    if (typeof name !== 'string' || !name.trim()) return apiError('VALIDATION_ERROR', 'name is required', 400);
-
-    const { data, error } = await supabase
-      .from('team_members')
-      .update({ name: name.trim() })
-      .eq('id', me.id)
-      .select('id, name, type, role, is_active')
-      .maybeSingle();
-
-    if (error) throw error;
-    return apiSuccess({ ...data, email: user.email ?? null });
+    const repo = await createTeamMemberRepository();
+    void OSS_ORG_ID;
+    const updated = await repo.update(OSS_MEMBER_ID, { name: name.trim() });
+    return apiSuccess({ ...updated, email: null });
   } catch (err: unknown) {
     return handleApiError(err);
   }

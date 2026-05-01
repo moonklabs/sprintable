@@ -1,18 +1,18 @@
-import type { SupabaseClient } from '@supabase/supabase-js';
+
 import type { IDocRepository, CreateDocInput, UpdateDocInput } from '@sprintable/core-storage';
-import { SupabaseDocRepository } from '@sprintable/storage-supabase';
+import { ApiDocRepository } from '@sprintable/storage-api';
 
 export class DocsService {
   private readonly repo: IDocRepository;
-  private readonly supabase: SupabaseClient | null;
+  private readonly db: any | null;
 
-  constructor(repo: IDocRepository, supabase?: SupabaseClient) {
+  constructor(repo: IDocRepository, db?: any) {
     this.repo = repo;
-    this.supabase = supabase ?? null;
+    this.db = db ?? null;
   }
 
-  static fromSupabase(supabase: SupabaseClient): DocsService {
-    return new DocsService(new SupabaseDocRepository(supabase), supabase);
+  static fromDb(db: any): DocsService {
+    return new DocsService(new ApiDocRepository(db), db);
   }
 
   async list(projectId: string, input?: { limit?: number; cursor?: string | null; tags?: string[] }) {
@@ -48,10 +48,10 @@ export class DocsService {
   ) {
     const { expected_updated_at, force_overwrite, created_by: _created_by, ...fields } = input;
 
-    // AC4: parent_id가 UUID면 해당 폴더 존재 여부 검증 (Supabase + OSS 공통)
+    // AC4: parent_id가 UUID면 해당 폴더 존재 여부 검증 (DB + OSS 공통)
     if (fields.parent_id != null) {
-      if (this.supabase) {
-        const { data: parentDoc, error: parentErr } = await this.supabase
+      if (this.db) {
+        const { data: parentDoc, error: parentErr } = await this.db
           .from('docs')
           .select('id, is_folder')
           .eq('id', fields.parent_id)
@@ -67,15 +67,15 @@ export class DocsService {
       }
     }
 
-    if (this.supabase) {
-      let query = this.supabase.from('docs').update(fields).eq('id', id);
+    if (this.db) {
+      let query = this.db.from('docs').update(fields).eq('id', id);
       if (expected_updated_at && !force_overwrite) query = query.eq('updated_at', expected_updated_at);
       const { data, error } = await query.select().maybeSingle();
       if (error) throw error;
 
       if (!data) {
         if (expected_updated_at && !force_overwrite) {
-          const { data: current, error: fetchErr } = await this.supabase.from('docs').select('updated_at').eq('id', id).single();
+          const { data: current, error: fetchErr } = await this.db.from('docs').select('updated_at').eq('id', id).single();
           if (fetchErr) throw fetchErr;
           const err = new Error('Document was modified by another user');
           (err as Error & { code?: string; server_updated_at?: string }).code = 'CONFLICT';
@@ -87,7 +87,7 @@ export class DocsService {
 
       // 리비전은 DB 트리거(trg_docs_auto_revision)가 자동 생성
       if (fields.content !== undefined) {
-        await this.supabase.rpc('trim_doc_revisions', { _doc_id: id, _keep: 50 });
+        await this.db.rpc('trim_doc_revisions', { _doc_id: id, _keep: 50 });
       }
       return data;
     }
@@ -97,8 +97,8 @@ export class DocsService {
 
   /** Fetch only updated_at for lightweight polling */
   async getDocTimestamp(id: string) {
-    if (this.supabase) {
-      const { data, error } = await this.supabase.from('docs').select('updated_at').eq('id', id).single();
+    if (this.db) {
+      const { data, error } = await this.db.from('docs').select('updated_at').eq('id', id).single();
       if (error) throw error;
       return data;
     }
@@ -107,29 +107,29 @@ export class DocsService {
   }
 
   async getRevisions(docId: string) {
-    if (!this.supabase) return [];
-    const { data, error } = await this.supabase.from('doc_revisions').select('*').eq('doc_id', docId).order('created_at', { ascending: false });
+    if (!this.db) return [];
+    const { data, error } = await this.db.from('doc_revisions').select('*').eq('doc_id', docId).order('created_at', { ascending: false });
     if (error) throw error;
     return data;
   }
 
   async getComments(docId: string) {
-    if (!this.supabase) return [];
-    const { data, error } = await this.supabase.from('doc_comments').select('*').eq('doc_id', docId).order('created_at');
+    if (!this.db) return [];
+    const { data, error } = await this.db.from('doc_comments').select('*').eq('doc_id', docId).order('created_at');
     if (error) throw error;
     return data;
   }
 
   async addComment(input: { doc_id: string; content: string; created_by: string }) {
-    if (!this.supabase) throw new Error('Comments not supported in OSS mode');
-    const { data, error } = await this.supabase.from('doc_comments').insert(input).select().single();
+    if (!this.db) throw new Error('Comments not supported in OSS mode');
+    const { data, error } = await this.db.from('doc_comments').insert(input).select().single();
     if (error) throw error;
     return data;
   }
 
   async deleteDoc(id: string) {
-    if (this.supabase) {
-      const { error } = await this.supabase.from('docs').update({ deleted_at: new Date().toISOString() }).eq('id', id);
+    if (this.db) {
+      const { error } = await this.db.from('docs').update({ deleted_at: new Date().toISOString() }).eq('id', id);
       if (error) throw error;
       return;
     }
@@ -139,8 +139,8 @@ export class DocsService {
   /** Fetch preview fields (id, title, icon, slug, content) by UUID or slug */
   async getDocPreview(projectId: string, q: string) {
     const isUuid = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(q);
-    if (this.supabase) {
-      let builder = this.supabase.from('docs').select('id, title, icon, slug, content').eq('project_id', projectId);
+    if (this.db) {
+      let builder = this.db.from('docs').select('id, title, icon, slug, content').eq('project_id', projectId);
       builder = isUuid ? builder.eq('id', q) : builder.eq('slug', q);
       const { data, error } = await builder.maybeSingle();
       if (error) throw error;
@@ -155,8 +155,8 @@ export class DocsService {
   }
 
   async search(projectId: string, query: string, input?: { limit?: number; cursor?: string | null; tags?: string[] }) {
-    if (this.supabase) {
-      let builder = this.supabase
+    if (this.db) {
+      let builder = this.db
         .from('docs')
         .select('id, parent_id, title, slug, icon, sort_order, is_folder, updated_at')
         .eq('project_id', projectId)

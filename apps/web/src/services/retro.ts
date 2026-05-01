@@ -1,4 +1,4 @@
-import type { SupabaseClient } from '@supabase/supabase-js';
+
 
 export type RetroPhase = 'collect' | 'vote' | 'discuss' | 'action' | 'closed';
 export type RetroCategory = 'good' | 'bad' | 'improve';
@@ -39,10 +39,10 @@ export interface RetroExport {
 }
 
 export class RetroService {
-  constructor(private readonly supabase: SupabaseClient) {}
+  constructor(private readonly db: any) {}
 
   async getSessions(projectId: string): Promise<RetroSession[]> {
-    const { data, error } = await this.supabase
+    const { data, error } = await this.db
       .from('retro_sessions')
       .select('*')
       .eq('project_id', projectId)
@@ -52,7 +52,7 @@ export class RetroService {
   }
 
   async getSession(id: string): Promise<RetroSession> {
-    const { data, error } = await this.supabase
+    const { data, error } = await this.db
       .from('retro_sessions')
       .select('*')
       .eq('id', id)
@@ -62,7 +62,7 @@ export class RetroService {
   }
 
   async getSessionBySprintId(projectId: string, sprintId: string): Promise<RetroSession | null> {
-    const { data } = await this.supabase
+    const { data } = await this.db
       .from('retro_sessions')
       .select('*')
       .eq('project_id', projectId)
@@ -79,7 +79,7 @@ export class RetroService {
     title: string;
     created_by: string;
   }): Promise<RetroSession> {
-    const { data, error } = await this.supabase
+    const { data, error } = await this.db
       .from('retro_sessions')
       .insert(input)
       .select()
@@ -97,7 +97,7 @@ export class RetroService {
     const existing = await this.getSessionBySprintId(projectId, sprintId);
     if (existing) return existing;
     if (!initiatorId) throw new Error('No retro found. Provide initiator_id to create one.');
-    const sprint = await this.supabase
+    const sprint = await this.db
       .from('sprints')
       .select('title')
       .eq('id', sprintId)
@@ -108,7 +108,7 @@ export class RetroService {
   }
 
   async changePhase(id: string, phase: RetroPhase): Promise<RetroSession> {
-    const { data, error } = await this.supabase
+    const { data, error } = await this.db
       .from('retro_sessions')
       .update({ phase })
       .eq('id', id)
@@ -125,7 +125,7 @@ export class RetroService {
   }
 
   async getItems(sessionId: string): Promise<RetroItem[]> {
-    const { data, error } = await this.supabase
+    const { data, error } = await this.db
       .from('retro_items')
       .select('*')
       .eq('session_id', sessionId)
@@ -140,7 +140,7 @@ export class RetroService {
     text: string;
     author_id: string;
   }): Promise<RetroItem> {
-    const { data, error } = await this.supabase
+    const { data, error } = await this.db
       .from('retro_items')
       .insert(input)
       .select()
@@ -163,7 +163,7 @@ export class RetroService {
 
   // AC1: retro_votes INSERT 경유, AC2: 중복 투표 시 CONFLICT 에러
   async vote(itemId: string, voterId: string): Promise<{ voted: boolean }> {
-    const { error } = await this.supabase
+    const { error } = await this.db
       .from('retro_votes')
       .insert({ item_id: itemId, voter_id: voterId });
     if (error) {
@@ -176,7 +176,7 @@ export class RetroService {
   }
 
   async getActions(sessionId: string): Promise<RetroAction[]> {
-    const { data, error } = await this.supabase
+    const { data, error } = await this.db
       .from('retro_actions')
       .select('*')
       .eq('session_id', sessionId)
@@ -190,7 +190,7 @@ export class RetroService {
     title: string;
     assignee_id?: string | null;
   }): Promise<RetroAction> {
-    const { data, error } = await this.supabase
+    const { data, error } = await this.db
       .from('retro_actions')
       .insert(input)
       .select()
@@ -211,7 +211,7 @@ export class RetroService {
   }
 
   async updateActionStatus(id: string, status: ActionStatus): Promise<RetroAction> {
-    const { data, error } = await this.supabase
+    const { data, error } = await this.db
       .from('retro_actions')
       .update({ status })
       .eq('id', id)
@@ -222,7 +222,7 @@ export class RetroService {
   }
 
   async exportSession(sessionId: string): Promise<RetroExport> {
-    const { data: session } = await this.supabase
+    const { data: session } = await this.db
       .from('retro_sessions')
       .select('title')
       .eq('id', sessionId)

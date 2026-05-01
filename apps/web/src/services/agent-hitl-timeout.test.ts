@@ -178,7 +178,7 @@ function createDeleteBuilder(rows: Array<Record<string, unknown>>, onDelete?: (d
   return builder;
 }
 
-function createSupabaseStub(state: State, options: StubOptions = {}) {
+function createDbStub(state: State, options: StubOptions = {}) {
   return {
     from(table: string) {
       if (table === 'agent_hitl_requests') {
@@ -277,8 +277,8 @@ describe('AgentHitlTimeoutService', () => {
 
   it('sends one-hour reminders and expires overdue HITL requests in bulk', async () => {
     const state = createState();
-    const supabase = createSupabaseStub(state);
-    const service = new AgentHitlTimeoutService(supabase as never, {
+    const db = createDbStub(state);
+    const service = new AgentHitlTimeoutService(db as never, {
       now: () => new Date('2026-04-08T10:30:00.000Z'),
       syncSlackHitlFn,
       logger: console,
@@ -338,8 +338,8 @@ describe('AgentHitlTimeoutService', () => {
       escalation_mode: 'timeout_memo_and_escalate',
     };
 
-    const supabase = createSupabaseStub(state);
-    const service = new AgentHitlTimeoutService(supabase as never, {
+    const db = createDbStub(state);
+    const service = new AgentHitlTimeoutService(db as never, {
       now: () => new Date('2026-04-08T10:30:00.000Z'),
       syncSlackHitlFn,
       logger: console,
@@ -416,8 +416,8 @@ describe('AgentHitlTimeoutService', () => {
       },
     });
 
-    const supabase = createSupabaseStub(state);
-    const service = new AgentHitlTimeoutService(supabase as never, {
+    const db = createDbStub(state);
+    const service = new AgentHitlTimeoutService(db as never, {
       now: () => new Date('2026-04-08T10:30:00.000Z'),
       syncSlackHitlFn,
       logger: console,
@@ -437,8 +437,8 @@ describe('AgentHitlTimeoutService', () => {
 
   it('clears the expired claim when the run transition loses a race', async () => {
     const state = createState();
-    const supabase = createSupabaseStub(state, { skipRunTransition: true });
-    const service = new AgentHitlTimeoutService(supabase as never, {
+    const db = createDbStub(state, { skipRunTransition: true });
+    const service = new AgentHitlTimeoutService(db as never, {
       now: () => new Date('2026-04-08T10:30:00.000Z'),
       syncSlackHitlFn,
       logger: console,
@@ -468,8 +468,8 @@ describe('AgentHitlTimeoutService', () => {
 
   it('rolls back timeout claims and run state when timeout memo creation fails', async () => {
     const state = createState();
-    const supabase = createSupabaseStub(state, { failTimeoutMemoInsert: true });
-    const service = new AgentHitlTimeoutService(supabase as never, {
+    const db = createDbStub(state, { failTimeoutMemoInsert: true });
+    const service = new AgentHitlTimeoutService(db as never, {
       now: () => new Date('2026-04-08T10:30:00.000Z'),
       syncSlackHitlFn,
       logger: console,
@@ -499,8 +499,8 @@ describe('AgentHitlTimeoutService', () => {
     state.requests[1]!.status = 'expired';
     state.requests[1]!.expired_at = '2026-04-08T10:00:00.000Z';
 
-    const supabase = createSupabaseStub(state);
-    const service = new AgentHitlTimeoutService(supabase as never, {
+    const db = createDbStub(state);
+    const service = new AgentHitlTimeoutService(db as never, {
       now: () => new Date('2026-04-08T10:30:00.000Z'),
       syncSlackHitlFn,
       logger: console,

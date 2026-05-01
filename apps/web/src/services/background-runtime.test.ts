@@ -36,10 +36,6 @@ const {
   memoStopMock: vi.fn().mockResolvedValue(undefined),
 }));
 
-vi.mock('@supabase/supabase-js', () => ({
-  createClient: createClientMock,
-}));
-
 vi.mock('./slack-outbound-dispatcher', () => ({
   SlackOutboundDispatcher: class {
     constructor(options: unknown) {
@@ -226,9 +222,9 @@ describe('BackgroundRuntimeWorker', () => {
   });
 
   it('starts and stops the shared background services once', async () => {
-    const supabase = { tag: 'supabase' } as never;
+    const db = { tag: 'db' } as never;
     const worker = new BackgroundRuntimeWorker({
-      supabase,
+      db,
       appUrl: 'https://app.example.com',
       settings: {
         role: 'worker',
@@ -243,24 +239,24 @@ describe('BackgroundRuntimeWorker', () => {
     worker.start();
 
     expect(slackCtorMock).toHaveBeenCalledWith({
-      supabase,
+      db,
       appUrl: 'https://app.example.com',
     });
     expect(discordCtorMock).toHaveBeenCalledWith({
-      supabase,
+      db,
       appUrl: 'https://app.example.com',
       pollingIntervalMs: 120000,
     });
     expect(gatewayCtorMock).toHaveBeenCalledWith({
-      supabase,
+      db,
     });
     expect(teamsCtorMock).toHaveBeenCalledWith({
-      supabase,
+      db,
       appUrl: 'https://app.example.com',
       pollingIntervalMs: 180000,
     });
     expect(memoCtorMock).toHaveBeenCalledWith({
-      supabase,
+      db,
       pollingIntervalMs: 90000,
     });
     expect(slackStartMock).toHaveBeenCalledTimes(1);
@@ -279,61 +275,61 @@ describe('BackgroundRuntimeWorker', () => {
   });
 
   it('creates a worker from env using the shared service-role client', () => {
-    createClientMock.mockReturnValue({ tag: 'supabase-client' });
+    createClientMock.mockReturnValue({ tag: 'db-client' });
 
     const worker = createBackgroundRuntimeWorkerFromEnv({
       NODE_ENV: 'production',
-      NEXT_PUBLIC_SUPABASE_URL: 'https://supabase.example.com',
-      SUPABASE_SERVICE_ROLE_KEY: 'service-role-key',
+      DATABASE_URL: 'https://db.example.com',
+      DATABASE_SERVICE_KEY: 'service-role-key',
       NEXT_PUBLIC_APP_URL: 'https://app.example.com',
       SPRINTABLE_RUNTIME_ROLE: 'worker',
       SPRINTABLE_BACKGROUND_POLL_INTERVAL_MS: '45000',
     } as NodeJS.ProcessEnv);
 
-    expect(createClientMock).toHaveBeenCalledWith('https://supabase.example.com', 'service-role-key');
+    expect(createClientMock).toHaveBeenCalledWith('https://db.example.com', 'service-role-key');
     expect(worker).toBeInstanceOf(BackgroundRuntimeWorker);
     expect(slackCtorMock).toHaveBeenCalledWith({
-      supabase: { tag: 'supabase-client' },
+      db: { tag: 'db-client' },
       appUrl: 'https://app.example.com',
     });
     expect(discordCtorMock).toHaveBeenCalledWith({
-      supabase: { tag: 'supabase-client' },
+      db: { tag: 'db-client' },
       appUrl: 'https://app.example.com',
       pollingIntervalMs: 45000,
     });
     expect(teamsCtorMock).toHaveBeenCalledWith({
-      supabase: { tag: 'supabase-client' },
+      db: { tag: 'db-client' },
       appUrl: 'https://app.example.com',
       pollingIntervalMs: 45000,
     });
     expect(memoCtorMock).toHaveBeenCalledWith({
-      supabase: { tag: 'supabase-client' },
+      db: { tag: 'db-client' },
       pollingIntervalMs: 45000,
     });
   });
 
   it('falls back to the Vercel URL when APP_BASE_URL is missing', () => {
-    createClientMock.mockReturnValue({ tag: 'supabase-client' });
+    createClientMock.mockReturnValue({ tag: 'db-client' });
 
     createBackgroundRuntimeWorkerFromEnv({
       NODE_ENV: 'production',
-      NEXT_PUBLIC_SUPABASE_URL: 'https://supabase.example.com',
-      SUPABASE_SERVICE_ROLE_KEY: 'service-role-key',
+      DATABASE_URL: 'https://db.example.com',
+      DATABASE_SERVICE_KEY: 'service-role-key',
       VERCEL_PROJECT_PRODUCTION_URL: 'myapp.vercel.app',
       SPRINTABLE_RUNTIME_ROLE: 'worker',
     } as NodeJS.ProcessEnv);
 
     expect(slackCtorMock).toHaveBeenCalledWith({
-      supabase: { tag: 'supabase-client' },
+      db: { tag: 'db-client' },
       appUrl: 'https://myapp.vercel.app',
     });
     expect(discordCtorMock).toHaveBeenCalledWith({
-      supabase: { tag: 'supabase-client' },
+      db: { tag: 'db-client' },
       appUrl: 'https://myapp.vercel.app',
       pollingIntervalMs: DEFAULT_PRODUCTION_BACKGROUND_POLLING_INTERVAL_MS,
     });
     expect(teamsCtorMock).toHaveBeenCalledWith({
-      supabase: { tag: 'supabase-client' },
+      db: { tag: 'db-client' },
       appUrl: 'https://myapp.vercel.app',
       pollingIntervalMs: DEFAULT_PRODUCTION_BACKGROUND_POLLING_INTERVAL_MS,
     });
@@ -342,7 +338,7 @@ describe('BackgroundRuntimeWorker', () => {
   it('returns null when service-role env is incomplete', () => {
     const worker = createBackgroundRuntimeWorkerFromEnv({
       NODE_ENV: 'production',
-      NEXT_PUBLIC_SUPABASE_URL: 'https://supabase.example.com',
+      DATABASE_URL: 'https://db.example.com',
     } as NodeJS.ProcessEnv);
 
     expect(worker).toBeNull();

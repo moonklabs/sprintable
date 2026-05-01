@@ -1,8 +1,8 @@
+
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import type { SupabaseClient } from '@supabase/supabase-js';
 import { dispatchWorkflowMemoReplyWebhooks } from './memo-reply-webhook-dispatch';
 
-function createSupabaseStub(options?: {
+function createDbStub(options?: {
   priorReplies?: Array<Record<string, unknown>>;
   members?: Array<Record<string, unknown>>;
   webhookConfigs?: Array<Record<string, unknown>>;
@@ -22,7 +22,7 @@ function createSupabaseStub(options?: {
   ];
   const memoAssignees = options?.memoAssignees ?? [];
 
-  const supabase = {
+  const db = {
     from(table: string) {
       if (table === 'team_members') {
         return {
@@ -91,9 +91,9 @@ function createSupabaseStub(options?: {
 
       throw new Error(`Unexpected table: ${table}`);
     },
-  } as unknown as SupabaseClient;
+  } as any;
 
-  return supabase;
+  return db;
 }
 
 afterEach(() => {
@@ -105,10 +105,10 @@ afterEach(() => {
 describe('dispatchWorkflowMemoReplyWebhooks', () => {
   it('sends direct webhooks to workflow participants with project/default fallback', async () => {
     const fetchFn = vi.fn<typeof fetch>().mockResolvedValue(new Response(null, { status: 204 }));
-    const supabase = createSupabaseStub();
+    const db = createDbStub();
 
     const result = await dispatchWorkflowMemoReplyWebhooks({
-      supabase,
+      db,
       fetchFn: fetchFn as typeof fetch,
       appUrl: 'https://app.example.com',
       memo: {
@@ -150,10 +150,10 @@ describe('dispatchWorkflowMemoReplyWebhooks', () => {
   it('falls back to APP_BASE_URL when appUrl is omitted', async () => {
     process.env.APP_BASE_URL = 'https://app.example.com';
     const fetchFn = vi.fn<typeof fetch>().mockResolvedValue(new Response(null, { status: 204 }));
-    const supabase = createSupabaseStub();
+    const db = createDbStub();
 
     await dispatchWorkflowMemoReplyWebhooks({
-      supabase,
+      db,
       fetchFn: fetchFn as typeof fetch,
       memo: {
         id: 'memo-1',
@@ -178,10 +178,10 @@ describe('dispatchWorkflowMemoReplyWebhooks', () => {
 
   it('skips Discord source memos because bridge-based reply handling owns that path', async () => {
     const fetchFn = vi.fn<typeof fetch>();
-    const supabase = createSupabaseStub();
+    const db = createDbStub();
 
     const result = await dispatchWorkflowMemoReplyWebhooks({
-      supabase,
+      db,
       fetchFn: fetchFn as typeof fetch,
       memo: {
         id: 'memo-1',
@@ -206,10 +206,10 @@ describe('dispatchWorkflowMemoReplyWebhooks', () => {
 
   it('dispatches to first-name mention with Korean honorific (e.g. @까심군)', async () => {
     const fetchFn = vi.fn<typeof fetch>().mockResolvedValue(new Response(null, { status: 204 }));
-    const supabase = createSupabaseStub();
+    const db = createDbStub();
 
     const result = await dispatchWorkflowMemoReplyWebhooks({
-      supabase,
+      db,
       fetchFn: fetchFn as typeof fetch,
       appUrl: 'https://app.example.com',
       memo: {
@@ -237,13 +237,13 @@ describe('dispatchWorkflowMemoReplyWebhooks', () => {
 
   it('includes memo_assignees in participant set', async () => {
     const fetchFn = vi.fn<typeof fetch>().mockResolvedValue(new Response(null, { status: 204 }));
-    const supabase = createSupabaseStub({
+    const db = createDbStub({
       memoAssignees: [{ member_id: 'member-2' }],
       priorReplies: [],
     });
 
     const result = await dispatchWorkflowMemoReplyWebhooks({
-      supabase,
+      db,
       fetchFn: fetchFn as typeof fetch,
       appUrl: 'https://app.example.com',
       memo: {
@@ -271,10 +271,10 @@ describe('dispatchWorkflowMemoReplyWebhooks', () => {
 
   it('delivers to additionalRecipientIds not otherwise in participant set', async () => {
     const fetchFn = vi.fn<typeof fetch>().mockResolvedValue(new Response(null, { status: 204 }));
-    const supabase = createSupabaseStub({ priorReplies: [], memoAssignees: [] });
+    const db = createDbStub({ priorReplies: [], memoAssignees: [] });
 
     const result = await dispatchWorkflowMemoReplyWebhooks({
-      supabase,
+      db,
       fetchFn: fetchFn as typeof fetch,
       appUrl: 'https://app.example.com',
       memo: {

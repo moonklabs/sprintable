@@ -1,7 +1,6 @@
+
 import { saveStandupSchema } from '@sprintable/shared';
-import type { SupabaseClient } from '@supabase/supabase-js';
-import { createSupabaseServerClient } from '@/lib/supabase/server';
-import { createSupabaseAdminClient } from '@/lib/supabase/admin';
+import { createAdminClient } from '@/lib/db/admin';
 import { StandupService } from '@/services/standup';
 import { isOssMode } from '@/lib/storage/factory';
 import { handleApiError } from '@/lib/api-error';
@@ -12,8 +11,7 @@ import { getOssStandupEntryForUser, listOssStandupEntries, saveOssStandupEntry }
 // GET /api/standup?project_id=...&date=YYYY-MM-DD[&member_id=...]
 export async function GET(request: Request) {
   try {
-    const supabase = await createSupabaseServerClient();
-    const me = await getAuthContext(supabase, request);
+    const me = await getAuthContext(request);
     if (!me) return ApiErrors.unauthorized();
     if (me.rateLimitExceeded) return ApiErrors.tooManyRequests(me.rateLimitRemaining, me.rateLimitResetAt);
 
@@ -30,7 +28,7 @@ export async function GET(request: Request) {
       return apiSuccess(await listOssStandupEntries(projectId, date));
     }
 
-    const dbClient: SupabaseClient = me.type === 'agent' ? createSupabaseAdminClient() : supabase;
+    const dbClient: any = me.type === 'agent' ? createAdminClient() : undefined;
     const service = new StandupService(dbClient);
     if (memberId) {
       const entry = await service.getEntryForUser(projectId, memberId, date);
@@ -46,13 +44,12 @@ export async function GET(request: Request) {
 // POST /api/standup — supports Dual Auth; agent may pass author_id in body
 export async function POST(request: Request) {
   try {
-    const supabase = await createSupabaseServerClient();
-    const me = await getAuthContext(supabase, request);
+    const me = await getAuthContext(request);
     if (!me) return ApiErrors.unauthorized();
     if (me.rateLimitExceeded) return ApiErrors.tooManyRequests(me.rateLimitRemaining, me.rateLimitResetAt);
     const ossMode = isOssMode();
 
-    const dbClient: SupabaseClient = me.type === 'agent' ? createSupabaseAdminClient() : supabase;
+    const dbClient: any = me.type === 'agent' ? createAdminClient() : undefined;
 
     let rawBody: unknown;
     try { rawBody = await request.json(); } catch { return ApiErrors.badRequest('Invalid JSON body'); }
@@ -112,8 +109,7 @@ export async function POST(request: Request) {
 // PUT /api/standup — kept for backwards compatibility (human auth only)
 export async function PUT(request: Request) {
   try {
-    const supabase = await createSupabaseServerClient();
-    const me = await getAuthContext(supabase, request);
+    const me = await getAuthContext(request);
     if (!me) return ApiErrors.unauthorized();
     if (me.rateLimitExceeded) return ApiErrors.tooManyRequests(me.rateLimitRemaining, me.rateLimitResetAt);
     const ossMode = isOssMode();
@@ -143,7 +139,8 @@ export async function PUT(request: Request) {
       return apiSuccess(entry);
     }
 
-    const { data: member, error: memberError } = await supabase
+    const dbClient: any = undefined;
+    const { data: member, error: memberError } = await dbClient
       .from('team_members')
       .select('id, project_id, org_id')
       .eq('id', me.id)
@@ -160,7 +157,7 @@ export async function PUT(request: Request) {
     }
     const body = parsed.data;
 
-    const service = new StandupService(supabase);
+    const service = new StandupService(dbClient);
     const entry = await service.save({
       project_id: member.project_id,
       org_id: member.org_id,

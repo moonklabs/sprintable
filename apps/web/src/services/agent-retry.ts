@@ -1,4 +1,4 @@
-import type { SupabaseClient } from '@supabase/supabase-js';
+
 
 /** PM AC: 5분 → 30분 → 2시간 exponential backoff */
 const BACKOFF_MINUTES = [5, 30, 120];
@@ -59,7 +59,7 @@ export function getFailureDisposition(input: RetryableFailureInput): AgentRunFai
 }
 
 export class AgentRetryService {
-  constructor(private readonly supabase: SupabaseClient) {}
+  constructor(private readonly db: any) {}
 
   /**
    * AC1+AC2: 실패한 run에 재시도 스케줄링
@@ -67,7 +67,7 @@ export class AgentRetryService {
    * - exponential backoff 적용 (5분/30분/2시간)
    */
   async scheduleRetry(runId: string): Promise<{ scheduled: boolean; nextRetryAt: string | null; disposition: AgentRunFailureDisposition }> {
-    const { data: run, error } = await this.supabase
+    const { data: run, error } = await this.db
       .from('agent_runs')
       .select('id, retry_count, max_retries, status, last_error_code, error_message, next_retry_at')
       .eq('id', runId)
@@ -78,11 +78,11 @@ export class AgentRetryService {
 
     const retryable = isRetryableRuntimeFailure(run);
     if (!retryable) {
-      await this.supabase.from('agent_runs').update({ failure_disposition: 'non_retryable', next_retry_at: null }).eq('id', runId);
+      await this.db.from('agent_runs').update({ failure_disposition: 'non_retryable', next_retry_at: null }).eq('id', runId);
       return { scheduled: false, nextRetryAt: null, disposition: 'non_retryable' };
     }
     if (run.retry_count >= run.max_retries) {
-      await this.supabase.from('agent_runs').update({ failure_disposition: 'retry_exhausted', next_retry_at: null }).eq('id', runId);
+      await this.db.from('agent_runs').update({ failure_disposition: 'retry_exhausted', next_retry_at: null }).eq('id', runId);
       return { scheduled: false, nextRetryAt: null, disposition: 'retry_exhausted' };
     }
 
@@ -90,7 +90,7 @@ export class AgentRetryService {
     const delayMinutes = BACKOFF_MINUTES[backoffIdx];
     const nextRetryAt = new Date(Date.now() + delayMinutes * 60 * 1000).toISOString();
 
-    const { error: updateErr } = await this.supabase
+    const { error: updateErr } = await this.db
       .from('agent_runs')
       .update({ next_retry_at: nextRetryAt, failure_disposition: 'retry_scheduled' })
       .eq('id', runId);
@@ -104,7 +104,7 @@ export class AgentRetryService {
    * AC1: 재시도 실행 — 원본 retry_count 증가 + 새 run 생성 + 웹훅 재실행 요청
    */
   async executeRetry(runId: string): Promise<{ newRunId: string }> {
-    const { data: run, error } = await this.supabase
+    const { data: run, error } = await this.db
       .from('agent_runs')
       .select('*')
       .eq('id', runId)
@@ -113,7 +113,7 @@ export class AgentRetryService {
     if (error || !run) throw new Error(`Run not found: ${runId}`);
 
     const rollbackParentLaunch = async (cause: string): Promise<never> => {
-      const { error: rollbackErr } = await this.supabase
+      const { error: rollbackErr } = await this.db
         .from('agent_runs')
         .update({
           retry_count: run.retry_count,
@@ -130,7 +130,7 @@ export class AgentRetryService {
       throw new Error(`${cause}; parent retry state restored`);
     };
 
-    const { error: updateErr } = await this.supabase
+    const { error: updateErr } = await this.db
       .from('agent_runs')
       .update({
         retry_count: run.retry_count + 1,
@@ -142,7 +142,7 @@ export class AgentRetryService {
 
     if (updateErr) throw new Error(`Failed to update retry count: ${updateErr.message}`);
 
-    const { data: newRun, error: insertErr } = await this.supabase
+    const { data: newRun, error: insertErr } = await this.db
       .from('agent_runs')
       .insert({
         org_id: run.org_id,
@@ -168,7 +168,7 @@ export class AgentRetryService {
 
     const createdRun = newRun as NonNullable<typeof newRun>;
     const { fireWebhooks } = await import('./webhook-notify');
-    await fireWebhooks(this.supabase, createdRun.org_id, {
+    await fireWebhooks(this.db, createdRun.org_id, {
       event: 'agent_run.retry_requested',
       data: {
         new_run_id: createdRun.id,
@@ -186,7 +186,7 @@ export class AgentRetryService {
   }
 
   async getFinalFailures(orgId: string, limit = 20) {
-    const { data, error } = await this.supabase
+    const { data, error } = await this.db
       .from('agent_runs')
       .select('id, agent_id, story_id, memo_id, error_message, retry_count, max_retries, created_at, last_error_code, next_retry_at, failure_disposition, status')
       .eq('org_id', orgId)
@@ -203,7 +203,7 @@ export class AgentRetryService {
 
   async getPendingRetries(orgId: string) {
     const now = new Date().toISOString();
-    const { data, error } = await this.supabase
+    const { data, error } = await this.db
       .from('agent_runs')
       .select('id, agent_id, retry_count, max_retries, next_retry_at, error_message, org_id, last_error_code, failure_disposition, status')
       .eq('org_id', orgId)
@@ -218,7 +218,7 @@ export class AgentRetryService {
 
   async getAllPendingRetries() {
     const now = new Date().toISOString();
-    const { data, error } = await this.supabase
+    const { data, error } = await this.db
       .from('agent_runs')
       .select('id, agent_id, retry_count, max_retries, next_retry_at, error_message, org_id, last_error_code, failure_disposition, status')
       .eq('status', 'failed')

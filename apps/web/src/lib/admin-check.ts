@@ -1,15 +1,15 @@
-import type { SupabaseClient } from '@supabase/supabase-js';
+
 import { ForbiddenError } from '@/services/sprint';
 
 /**
  * 현재 auth user가 org admin인지 체크
  * soft delete 시 기존 DELETE 정책(admin 전용) 권한 보존용
  */
-export async function requireOrgAdmin(supabase: SupabaseClient, orgId: string) {
-  const { data: { user } } = await supabase.auth.getUser();
+export async function requireOrgAdmin(db: any, orgId: string) {
+  const { data: { user } } = await db.auth.getUser();
   if (!user) throw new ForbiddenError('Not authenticated');
 
-  const { data } = await supabase
+  const { data } = await db
     .from('team_members')
     .select('role')
     .eq('org_id', orgId)
@@ -23,11 +23,11 @@ export async function requireOrgAdmin(supabase: SupabaseClient, orgId: string) {
 }
 
 /** 현재 auth user가 org admin(owner/admin)인지 여부 반환 — 예외 없음 */
-export async function isOrgAdmin(supabase: SupabaseClient, orgId: string): Promise<boolean> {
-  const { data: { user } } = await supabase.auth.getUser();
+export async function isOrgAdmin(db: any, orgId: string): Promise<boolean> {
+  const { data: { user } } = await db.auth.getUser();
   if (!user) return false;
 
-  const { data } = await supabase
+  const { data } = await db
     .from('team_members')
     .select('role')
     .eq('org_id', orgId)

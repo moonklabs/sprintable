@@ -1,13 +1,13 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
-const { createSupabaseServerClient, getMyTeamMember, getAuthContext } = vi.hoisted(() => ({
-  createSupabaseServerClient: vi.fn(),
+const { createDbServerClient, getMyTeamMember, getAuthContext } = vi.hoisted(() => ({
+  createDbServerClient: vi.fn(),
   getMyTeamMember: vi.fn(),
   getAuthContext: vi.fn(),
 }));
 
-vi.mock('@/lib/supabase/server', () => ({
-  createSupabaseServerClient,
+vi.mock('@/lib/db/server', () => ({
+  createDbServerClient,
 }));
 vi.mock('@/lib/auth-helpers', async () => {
   const actual = await vi.importActual<typeof import('@/lib/auth-helpers')>('@/lib/auth-helpers');
@@ -16,7 +16,7 @@ vi.mock('@/lib/auth-helpers', async () => {
 
 import { POST } from './route';
 
-function createSupabaseStub() {
+function createDbStub() {
   return {
     auth: {
       getUser: vi.fn().mockResolvedValue({ data: { user: { id: 'user-1' } } }),
@@ -26,14 +26,14 @@ function createSupabaseStub() {
 
 describe('POST /api/team-members', () => {
   beforeEach(() => {
-    createSupabaseServerClient.mockReset();
+    createDbServerClient.mockReset();
     getMyTeamMember.mockReset();
     getAuthContext.mockReset();
     getAuthContext.mockResolvedValue({ id: 'tm-1', org_id: 'org-1', project_id: 'project-1', type: 'human' as const });
   });
 
   it('returns validation errors for malformed payloads', async () => {
-    createSupabaseServerClient.mockResolvedValue(createSupabaseStub());
+    createDbServerClient.mockResolvedValue(createDbStub());
     getMyTeamMember.mockResolvedValue({ id: 'tm-1', org_id: 'org-1', project_id: 'project-1' });
 
     const response = await POST(new Request('http://localhost/api/team-members', {

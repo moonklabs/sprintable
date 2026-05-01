@@ -9,13 +9,13 @@ interface StubData {
   stories?: Array<Record<string, unknown>>;
 }
 
-function createContextSupabaseStub(data: StubData, options: { pending?: boolean } = {}) {
+function createContextDbStub(data: StubData, options: { pending?: boolean } = {}) {
   const calls: string[] = [];
   const pendingPromise = new Promise<never>(() => undefined);
 
   const resolveAsync = <T,>(value: T) => (options.pending ? pendingPromise : Promise.resolve(value));
 
-  const supabase = {
+  const db = {
     from(table: string) {
       calls.push(table);
 
@@ -88,16 +88,16 @@ function createContextSupabaseStub(data: StubData, options: { pending?: boolean 
     },
   };
 
-  return { supabase, calls };
+  return { db, calls };
 }
 
 describe('ProjectContextLoader', () => {
   it('loads recent memos, open epics/stories, and team composition from the replica client', async () => {
-    const primary = createContextSupabaseStub({
+    const primary = createContextDbStub({
       project: { id: 'project-1', name: 'Primary project', description: 'Primary fallback' },
       teamMembers: [{ id: 'agent-1', name: 'Didi', type: 'agent', role: 'member', is_active: true }],
     });
-    const replica = createContextSupabaseStub({
+    const replica = createContextDbStub({
       project: { id: 'project-1', name: 'Sprintable', description: 'Prompt runtime delivery project' },
       teamMembers: [
         { id: 'user-1', name: 'Ortega', type: 'human', role: 'owner', is_active: true },
@@ -114,8 +114,8 @@ describe('ProjectContextLoader', () => {
       ],
     });
 
-    const loader = new ProjectContextLoader(primary.supabase as never, {
-      readClient: replica.supabase as never,
+    const loader = new ProjectContextLoader(primary.db as never, {
+      readClient: replica.db as never,
       timeoutMs: 50,
     });
 
@@ -134,11 +134,11 @@ describe('ProjectContextLoader', () => {
   });
 
   it('redacts secrets from memo and summary content before returning prompt context', async () => {
-    const primary = createContextSupabaseStub({
+    const primary = createContextDbStub({
       project: { id: 'project-1', name: 'Sprintable', description: 'Primary fallback' },
       teamMembers: [{ id: 'agent-1', name: 'Didi', type: 'agent', role: 'member', is_active: true }],
     });
-    const replica = createContextSupabaseStub({
+    const replica = createContextDbStub({
       project: { id: 'project-1', name: 'Sprintable', description: 'Authorization: Bearer topsecret token=abc123' },
       teamMembers: [{ id: 'agent-1', name: 'Didi', type: 'agent', role: 'member', is_active: true }],
       memos: [
@@ -148,8 +148,8 @@ describe('ProjectContextLoader', () => {
       stories: [],
     });
 
-    const loader = new ProjectContextLoader(primary.supabase as never, {
-      readClient: replica.supabase as never,
+    const loader = new ProjectContextLoader(primary.db as never, {
+      readClient: replica.db as never,
       timeoutMs: 50,
     });
 
@@ -163,14 +163,14 @@ describe('ProjectContextLoader', () => {
   });
 
   it('falls back to the primary client when the replica times out', async () => {
-    const primary = createContextSupabaseStub({
+    const primary = createContextDbStub({
       project: { id: 'project-1', name: 'Sprintable', description: 'Primary fallback project' },
       teamMembers: [{ id: 'agent-1', name: 'Didi', type: 'agent', role: 'member', is_active: true }],
     });
-    const replica = createContextSupabaseStub({}, { pending: true });
+    const replica = createContextDbStub({}, { pending: true });
 
-    const loader = new ProjectContextLoader(primary.supabase as never, {
-      readClient: replica.supabase as never,
+    const loader = new ProjectContextLoader(primary.db as never, {
+      readClient: replica.db as never,
       timeoutMs: 1,
     });
 

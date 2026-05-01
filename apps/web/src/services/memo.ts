@@ -1,6 +1,6 @@
-import type { SupabaseClient } from '@supabase/supabase-js';
+
 import type { IMemoRepository, ITeamMemberRepository, IProjectRepository, Memo, MemoReply } from '@sprintable/core-storage';
-import { SupabaseMemoRepository } from '@sprintable/storage-supabase';
+import { ApiMemoRepository } from '@sprintable/storage-api';
 import { dispatchMemoAssignmentImmediately, type DispatchableMemo } from './memo-assignment-dispatch';
 import { dispatchWorkflowMemoReplyWebhooks } from './memo-reply-webhook-dispatch';
 import { buildAbsoluteMemoLink } from './app-url';
@@ -54,29 +54,29 @@ const MEMO_LIST_BATCH_SIZE = 100;
 
 export class MemoService {
   private readonly repo: IMemoRepository;
-  private readonly supabase: SupabaseClient | null;
+  private readonly db: any | null;
   private readonly teamMemberRepo: ITeamMemberRepository | null;
   private readonly projectRepo: IProjectRepository | null;
 
   constructor(
     repo: IMemoRepository,
-    supabase?: SupabaseClient,
+    db?: any,
     teamMemberRepo?: ITeamMemberRepository,
     projectRepo?: IProjectRepository,
   ) {
     this.repo = repo;
-    this.supabase = supabase ?? null;
+    this.db = db ?? null;
     this.teamMemberRepo = teamMemberRepo ?? null;
     this.projectRepo = projectRepo ?? null;
   }
 
-  static fromSupabase(supabase: SupabaseClient): MemoService {
-    return new MemoService(new SupabaseMemoRepository(supabase), supabase);
+  static fromDb(db: any): MemoService {
+    return new MemoService(new ApiMemoRepository(db), db);
   }
 
   private async ensureActiveTeamMember(orgId: string, projectId: string, memberId: string, message: string) {
-    if (!this.supabase) return; // OSS: skip — API key auth already validated caller
-    const { data: member } = await this.supabase
+    if (!this.db) return; // OSS: skip — API key auth already validated caller
+    const { data: member } = await this.db
       .from('team_members')
       .select('id')
       .eq('id', memberId)
@@ -107,7 +107,7 @@ export class MemoService {
       ...(latestReplyAt ? [{ label: 'latest reply', at: latestReplyAt, by: latestReplyAuthor as string | undefined }] : []),
     ];
 
-    if (!this.supabase) {
+    if (!this.db) {
       return {
         ...memo,
         reply_count: replies.length,
@@ -121,17 +121,17 @@ export class MemoService {
     }
 
     const [projectResult, linksResult, readsResult] = await Promise.all([
-      this.supabase
+      this.db
         .from('projects')
         .select('id, name')
         .eq('id', projectId)
         .single(),
-      this.supabase
+      this.db
         .from('memo_doc_links')
         .select('doc_id, created_at')
         .eq('memo_id', memoId)
         .order('created_at', { ascending: true }),
-      this.supabase
+      this.db
         .from('memo_reads')
         .select('memo_id, team_member_id, read_at')
         .eq('memo_id', memoId)
@@ -143,7 +143,7 @@ export class MemoService {
     if (readsResult.error && !this.isMissingOptionalMemoTableError(readsResult.error, 'memo_reads')) throw readsResult.error;
 
     const linkedRows = this.isMissingOptionalMemoTableError(linksResult.error, 'memo_doc_links') ? [] : (linksResult.data ?? []);
-    const linkedDocIds = [...new Set(linkedRows.map((row: LinkedDocRow) => row.doc_id))];
+    const linkedDocIds: string[] = Array.from(new Set(linkedRows.map((row: LinkedDocRow) => row.doc_id)));
     const linkedDocs = linkedDocIds.length
       ? await this.loadLinkedDocs(linkedDocIds, projectId)
       : [];
@@ -166,8 +166,8 @@ export class MemoService {
   }
 
   private async loadLinkedDocs(linkedDocIds: string[], projectId: string) {
-    if (!this.supabase) return [];
-    const { data: docs, error } = await this.supabase
+    if (!this.db) return [];
+    const { data: docs, error } = await this.db
       .from('docs')
       .select('id, title, slug')
       .eq('project_id', projectId)
@@ -183,11 +183,11 @@ export class MemoService {
   }
 
   private async loadReaders(readRows: MemoReadRow[]) {
-    if (!this.supabase) return [];
+    if (!this.db) return [];
     const readerIds = [...new Set(readRows.map((row) => row.team_member_id))];
     if (!readerIds.length) return [];
 
-    const { data: members, error } = await this.supabase
+    const { data: members, error } = await this.db
       .from('team_members')
       .select('id, name')
       .in('id', readerIds);
@@ -198,7 +198,7 @@ export class MemoService {
     return readRows
       .map((row) => ({
         id: row.team_member_id,
-        name: memberById.get(row.team_member_id)?.name ?? row.team_member_id,
+        name: (memberById.get(row.team_member_id) as any)?.name ?? row.team_member_id,
         read_at: row.read_at,
       }))
       .filter((reader) => Boolean(reader.name));
@@ -213,11 +213,11 @@ export class MemoService {
   }
 
   private async loadMemoReplyRows(memoIds: string[]) {
-    if (!this.supabase) return [];
+    if (!this.db) return [];
     const rows: Array<{ memo_id: string; created_at: string }> = [];
 
     for (const chunk of this.chunkValues(memoIds)) {
-      const { data, error } = await this.supabase
+      const { data, error } = await this.db
         .from('memo_replies')
         .select('memo_id, created_at')
         .in('memo_id', chunk)
@@ -231,11 +231,11 @@ export class MemoService {
   }
 
   private async loadMemoReadRows(memoIds: string[]) {
-    if (!this.supabase) return [];
+    if (!this.db) return [];
     const rows: MemoReadRow[] = [];
 
     for (const chunk of this.chunkValues(memoIds)) {
-      const { data, error } = await this.supabase
+      const { data, error } = await this.db
         .from('memo_reads')
         .select('memo_id, team_member_id, read_at')
         .in('memo_id', chunk)
@@ -264,7 +264,7 @@ export class MemoService {
   }>> {
     if (!memos.length) return [];
 
-    if (!this.supabase) {
+    if (!this.db) {
       return memos.map((memo) => ({
         ...memo,
         reply_count: 0,
@@ -280,7 +280,7 @@ export class MemoService {
     const [replyRows, projectsResult, readRows] = await Promise.all([
       memoIds.length ? this.loadMemoReplyRows(memoIds) : Promise.resolve([]),
       projectIds.length
-        ? this.supabase
+        ? this.db
           .from('projects')
           .select('id, name')
           .in('id', projectIds)
@@ -319,7 +319,7 @@ export class MemoService {
         ...memo,
         reply_count: replyStats?.reply_count ?? 0,
         latest_reply_at: replyStats?.latest_reply_at ?? null,
-        project_name: projectNameById.get(memo.project_id as string) ?? null,
+        project_name: (projectNameById.get(memo.project_id as string) as string | undefined) ?? null,
         readers: readersByMemoId.get(memoId) ?? [],
       };
     });
@@ -345,8 +345,8 @@ export class MemoService {
       }));
     }
 
-    if (this.supabase) {
-      const { data: project } = await this.supabase
+    if (this.db) {
+      const { data: project } = await this.db
         .from('projects')
         .select('id, org_id')
         .eq('id', input.project_id)
@@ -354,7 +354,7 @@ export class MemoService {
         .single();
       if (!project) throw new Error('project_id must belong to the same organization');
 
-      const { data: author } = await this.supabase
+      const { data: author } = await this.db
         .from('team_members')
         .select('id')
         .eq('id', input.created_by)
@@ -365,7 +365,7 @@ export class MemoService {
       if (!author) throw new Error('created_by must be an active team member in the same project');
 
       if (assigneeIds.length > 0) {
-        const { data: assignees } = await this.supabase
+        const { data: assignees } = await this.db
           .from('team_members')
           .select('id')
           .eq('org_id', input.org_id)
@@ -378,7 +378,7 @@ export class MemoService {
       }
 
       if (input.supersedes_id) {
-        const { data: prevMemo } = await this.supabase
+        const { data: prevMemo } = await this.db
           .from('memos')
           .select('id')
           .eq('id', input.supersedes_id)
@@ -421,14 +421,14 @@ export class MemoService {
       metadata: input.metadata ?? {},
     });
 
-    if (this.supabase && assigneeIds.length > 0) {
+    if (this.db && assigneeIds.length > 0) {
       const assigneeRows = assigneeIds.map((memberId) => ({
         memo_id: data.id,
         member_id: memberId,
         assigned_by: input.created_by,
       }));
 
-      const { error: assigneeError } = await this.supabase
+      const { error: assigneeError } = await this.db
         .from('memo_assignees')
         .insert(assigneeRows);
 
@@ -439,8 +439,8 @@ export class MemoService {
     }
 
     if (input.supersedes_id) {
-      if (this.supabase) {
-        await this.supabase
+      if (this.db) {
+        await this.db
           .from('memos')
           .update({ status: 'resolved', resolved_by: input.created_by, resolved_at: new Date().toISOString() })
           .eq('id', input.supersedes_id)
@@ -458,7 +458,7 @@ export class MemoService {
     }
 
     // @멘션 파싱 + DB 저장 + 알림 (fire-and-forget)
-    if (this.supabase) {
+    if (this.db) {
       this._processMemoMentions(data.id, input.content.trim(), input.org_id, input.project_id, input.created_by).catch(() => {});
     }
 
@@ -466,10 +466,10 @@ export class MemoService {
   }
 
   private async _processMemoMentions(memoId: string, content: string, orgId: string, projectId: string, authorId: string): Promise<void> {
-    if (!this.supabase) return;
-    const notifService = new NotificationService(this.supabase);
+    if (!this.db) return;
+    const notifService = new NotificationService(this.db);
 
-    const { data: members } = await this.supabase
+    const { data: members } = await this.db
       .from('team_members')
       .select('id, name')
       .eq('org_id', orgId)
@@ -486,7 +486,7 @@ export class MemoService {
     if (mentionedIds.length === 0) return;
 
     // memo_mentions DB 저장 (ON CONFLICT DO NOTHING)
-    await this.supabase
+    await this.db
       .from('memo_mentions')
       .upsert(
         mentionedIds.map((uid) => ({ memo_id: memoId, mentioned_user_id: uid })),
@@ -495,7 +495,7 @@ export class MemoService {
 
     // 멘션 알림 + inbox 듀얼 쓰기
     // notifications → 곧 inbox_items로 일원화 (Phase A.B). 그동안 둘 다 emit.
-    const inboxService = new InboxItemService(this.supabase);
+    const inboxService = new InboxItemService(this.db);
 
     for (const userId of mentionedIds) {
       await notifService.create({
@@ -586,10 +586,10 @@ export class MemoService {
     }
 
     if (data) {
-      if (this.supabase) {
+      if (this.db) {
         try {
           await dispatchWorkflowMemoReplyWebhooks({
-            supabase: this.supabase,
+            db: this.db,
             memo: {
               id: memo.id,
               org_id: memo.org_id,
@@ -627,8 +627,8 @@ export class MemoService {
   }
 
   private async _sendReplyNotifications(memo: Memo, reply: MemoReply) {
-    if (!this.supabase) return;
-    const notifService = new NotificationService(this.supabase);
+    if (!this.db) return;
+    const notifService = new NotificationService(this.db);
     const replyAuthor = reply.created_by;
 
     // memo_reply: 원 메모 작성자에게 (자기 자신 제외)
@@ -645,7 +645,7 @@ export class MemoService {
     }
 
     // memo_mention: @멘션 대상자 (자기 자신 제외)
-    const { data: members } = await this.supabase
+    const { data: members } = await this.db
       .from('team_members')
       .select('id, name')
       .eq('org_id', memo.org_id)
@@ -733,11 +733,11 @@ export class MemoService {
   }
 
   async linkDoc(memoId: string, docId: string, createdBy: string) {
-    if (!this.supabase) throw new Error('linkDoc requires Supabase');
+    if (!this.db) throw new Error('linkDoc requires DB client');
     const memo = await this.repo.getById(memoId);
     await this.ensureActiveTeamMember(memo.org_id, memo.project_id as string, createdBy, 'created_by must be an active team member in the same project');
 
-    const { data: doc } = await this.supabase
+    const { data: doc } = await this.db
       .from('docs')
       .select('id, project_id, org_id')
       .eq('id', docId)
@@ -746,7 +746,7 @@ export class MemoService {
       .single();
     if (!doc) throw new Error('doc_id must reference a doc in the same project');
 
-    const { data, error } = await this.supabase
+    const { data, error } = await this.db
       .from('memo_doc_links')
       .upsert({
         memo_id: memoId,
@@ -764,11 +764,11 @@ export class MemoService {
   }
 
   async markRead(memoId: string, teamMemberId: string) {
-    if (!this.supabase) return { memo_id: memoId, team_member_id: teamMemberId, read_at: new Date().toISOString() };
+    if (!this.db) return { memo_id: memoId, team_member_id: teamMemberId, read_at: new Date().toISOString() };
     const memo = await this.repo.getById(memoId);
     await this.ensureActiveTeamMember(memo.org_id, memo.project_id as string, teamMemberId, 'team_member_id must be an active team member in the same project');
 
-    const { data, error } = await this.supabase
+    const { data, error } = await this.db
       .from('memo_reads')
       .upsert({
         memo_id: memoId,

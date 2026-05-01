@@ -1,12 +1,12 @@
+
 import { describe, expect, it, vi } from 'vitest';
-import type { SupabaseClient } from '@supabase/supabase-js';
 import {
   findMentionedProjectMembers,
   hasExactMemberMention,
   notifyDocCommentMentions,
 } from './doc-comment-notifications';
 
-function createSourceSupabaseStub() {
+function createSourceDbStub() {
   const docsQuery = {
     select: vi.fn(() => docsQuery),
     eq: vi.fn(() => docsQuery),
@@ -58,16 +58,16 @@ function createSourceSupabaseStub() {
       if (table === 'team_members') return teamMembersQuery;
       throw new Error(`unexpected table: ${table}`);
     }),
-  } as unknown as SupabaseClient;
+  } as any;
 }
 
-function createAdminSupabaseStub(insertSpy: ReturnType<typeof vi.fn>) {
+function createAdminDbStub(insertSpy: ReturnType<typeof vi.fn>) {
   return {
     from: vi.fn((table: string) => {
       expect(table).toBe('notifications');
       return { insert: insertSpy };
     }),
-  } as unknown as SupabaseClient;
+  } as any;
 }
 
 describe('hasExactMemberMention', () => {
@@ -106,8 +106,8 @@ describe('notifyDocCommentMentions', () => {
     const insertSpy = vi.fn().mockResolvedValue({ error: null });
 
     const created = await notifyDocCommentMentions({
-      sourceSupabase: createSourceSupabaseStub(),
-      adminSupabase: createAdminSupabaseStub(insertSpy),
+      sourceDb: createSourceDbStub(),
+      adminDb: createAdminDbStub(insertSpy),
       docId: 'doc-1',
       commentId: 'comment-1',
       content: '@파울로 오르테가 @까심 아르야 확인 부탁드리는.',
@@ -135,8 +135,8 @@ describe('notifyDocCommentMentions', () => {
     const insertSpy = vi.fn().mockResolvedValue({ error: null });
 
     const created = await notifyDocCommentMentions({
-      sourceSupabase: createSourceSupabaseStub(),
-      adminSupabase: createAdminSupabaseStub(insertSpy),
+      sourceDb: createSourceDbStub(),
+      adminDb: createAdminDbStub(insertSpy),
       docId: 'doc-1',
       commentId: 'comment-1',
       content: '일반 댓글인',

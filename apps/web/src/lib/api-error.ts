@@ -17,7 +17,7 @@ export function handleApiError(err: unknown) {
     return apiError('INVALID_TRANSITION', err.message, 400);
   }
 
-  // Supabase/Postgrest 에러 코드 직접 매핑
+  // DB/Postgrest 에러 코드 직접 매핑
   if (typeof err === 'object' && err !== null && 'code' in err) {
     const code = (err as { code: string }).code;
     if (code === '42501') {

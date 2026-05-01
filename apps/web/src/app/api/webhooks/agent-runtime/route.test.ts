@@ -5,7 +5,6 @@ const { createClient, execute } = vi.hoisted(() => ({
   execute: vi.fn(),
 }));
 
-vi.mock('@supabase/supabase-js', () => ({ createClient }));
 vi.mock('@/services/agent-execution-loop', () => ({
   AgentExecutionLoop: class AgentExecutionLoop {
     execute = execute;
@@ -45,7 +44,7 @@ function createBuilder(executor: (plan: QueryPlan) => Promise<{ data: unknown; e
   return builder;
 }
 
-function createSupabaseStub(options?: {
+function createDbStub(options?: {
   run?: Record<string, unknown> | null;
   webhookConfigs?: Array<Record<string, unknown>>;
 }) {
@@ -91,12 +90,12 @@ describe('POST /api/webhooks/agent-runtime', () => {
   beforeEach(() => {
     createClient.mockReset();
     execute.mockReset();
-    process.env.NEXT_PUBLIC_SUPABASE_URL = 'https://example.supabase.co';
-    process.env.SUPABASE_SERVICE_ROLE_KEY = 'service-role-key';
+    process.env.DATABASE_URL = 'https://example.db.co';
+    process.env.DATABASE_SERVICE_KEY = 'service-role-key';
   });
 
   it('executes memo.assigned payloads after validating the project webhook secret', async () => {
-    createClient.mockReturnValue(createSupabaseStub({
+    createClient.mockReturnValue(createDbStub({
       webhookConfigs: [{
         org_id: ORG_ID,
         member_id: AGENT_ID,
@@ -150,7 +149,7 @@ describe('POST /api/webhooks/agent-runtime', () => {
   });
 
   it('resolves retry_requested payloads from the resumed run even when memo_id is omitted', async () => {
-    createClient.mockReturnValue(createSupabaseStub({
+    createClient.mockReturnValue(createDbStub({
       run: {
         id: RETRY_RUN_ID,
         org_id: ORG_ID,
@@ -184,7 +183,7 @@ describe('POST /api/webhooks/agent-runtime', () => {
   });
 
   it('rejects webhook calls with an invalid secret', async () => {
-    createClient.mockReturnValue(createSupabaseStub({
+    createClient.mockReturnValue(createDbStub({
       webhookConfigs: [{
         org_id: ORG_ID,
         member_id: AGENT_ID,
@@ -213,7 +212,7 @@ describe('POST /api/webhooks/agent-runtime', () => {
   });
 
   it('returns a webhook error when the resumed run cannot be found', async () => {
-    createClient.mockReturnValue(createSupabaseStub({ run: null }));
+    createClient.mockReturnValue(createDbStub({ run: null }));
 
     const response = await POST(makeRequest({
       event: 'agent_run.retry_requested',

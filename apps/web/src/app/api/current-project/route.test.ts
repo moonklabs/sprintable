@@ -1,22 +1,22 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
-const { cookieSet, createSupabaseServerClient } = vi.hoisted(() => ({
+const { cookieSet, createDbServerClient } = vi.hoisted(() => ({
   cookieSet: vi.fn(),
-  createSupabaseServerClient: vi.fn(),
+  createDbServerClient: vi.fn(),
 }));
 
 vi.mock('next/headers', () => ({
   cookies: vi.fn(async () => ({ set: cookieSet })),
 }));
 
-vi.mock('@/lib/supabase/server', () => ({
-  createSupabaseServerClient,
+vi.mock('@/lib/db/server', () => ({
+  createDbServerClient,
 }));
 
 import { POST } from './route';
 import { CURRENT_PROJECT_COOKIE } from '@/lib/auth-helpers';
 
-function createMembershipSupabaseStub(membership: { project_id: string; projects: { name: string } | null } | null) {
+function createMembershipDbStub(membership: { project_id: string; projects: { name: string } | null } | null) {
   const query = {
     select: vi.fn(() => query),
     eq: vi.fn(() => query),
@@ -34,11 +34,11 @@ function createMembershipSupabaseStub(membership: { project_id: string; projects
 describe('POST /api/current-project', () => {
   beforeEach(() => {
     cookieSet.mockReset();
-    createSupabaseServerClient.mockReset();
+    createDbServerClient.mockReset();
   });
 
   it('persists current project cookie when the requested project belongs to the user', async () => {
-    createSupabaseServerClient.mockResolvedValue(createMembershipSupabaseStub({
+    createDbServerClient.mockResolvedValue(createMembershipDbStub({
       project_id: 'project-1',
       projects: { name: 'Alpha' },
     }));
@@ -56,7 +56,7 @@ describe('POST /api/current-project', () => {
   });
 
   it('returns validation errors for malformed payloads', async () => {
-    createSupabaseServerClient.mockResolvedValue(createMembershipSupabaseStub(null));
+    createDbServerClient.mockResolvedValue(createMembershipDbStub(null));
 
     const response = await POST(new Request('http://localhost/api/current-project', {
       method: 'POST',
@@ -71,7 +71,7 @@ describe('POST /api/current-project', () => {
   });
 
   it('rejects switching to a project without membership', async () => {
-    createSupabaseServerClient.mockResolvedValue(createMembershipSupabaseStub(null));
+    createDbServerClient.mockResolvedValue(createMembershipDbStub(null));
 
     const response = await POST(new Request('http://localhost/api/current-project', {
       method: 'POST',

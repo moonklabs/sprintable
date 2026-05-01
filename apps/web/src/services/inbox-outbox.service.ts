@@ -1,4 +1,4 @@
-import type { SupabaseClient } from '@supabase/supabase-js';
+
 import { createHmac } from 'crypto';
 
 // Operator Cockpit Phase A — outbox worker
@@ -52,7 +52,7 @@ export class InboxOutboxService {
   private readonly fetchImpl: typeof fetch;
 
   constructor(
-    private readonly supabase: SupabaseClient,
+    private readonly db: any,
     options: InboxOutboxServiceOptions = {},
   ) {
     this.logger = options.logger ?? console;
@@ -71,7 +71,7 @@ export class InboxOutboxService {
       skipped: 0,
     };
 
-    const { data: rows, error } = await this.supabase.rpc('claim_pending_outbox', {
+    const { data: rows, error } = await this.db.rpc('claim_pending_outbox', {
       p_batch_size: this.batchSize,
     });
 
@@ -147,7 +147,7 @@ export class InboxOutboxService {
   }
 
   private async markDelivered(id: string): Promise<void> {
-    const { error } = await this.supabase.rpc('mark_outbox_delivered', { p_id: id });
+    const { error } = await this.db.rpc('mark_outbox_delivered', { p_id: id });
     if (error) {
       this.logger.error('mark_outbox_delivered_failed', { id, error });
       throw error;
@@ -156,7 +156,7 @@ export class InboxOutboxService {
 
   /** Returns true if the row transitioned to 'dead'. */
   private async markFailed(id: string, errorMsg: string): Promise<boolean> {
-    const { data, error } = await this.supabase.rpc('mark_outbox_failed', {
+    const { data, error } = await this.db.rpc('mark_outbox_failed', {
       p_id: id,
       p_error: errorMsg,
     });
@@ -169,7 +169,7 @@ export class InboxOutboxService {
   }
 
   private async markDead(id: string, errorMsg: string): Promise<void> {
-    const { error } = await this.supabase.rpc('mark_outbox_dead', {
+    const { error } = await this.db.rpc('mark_outbox_dead', {
       p_id: id,
       p_error: errorMsg,
     });

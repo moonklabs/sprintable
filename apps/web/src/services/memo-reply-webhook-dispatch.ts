@@ -1,4 +1,4 @@
-import type { SupabaseClient } from '@supabase/supabase-js';
+
 import { buildAbsoluteMemoLink } from './app-url';
 import { hasExactMemberMention } from './doc-comment-notifications';
 import { buildWebhookSignatureHeaders } from '@/lib/webhook-signature';
@@ -43,7 +43,7 @@ interface WebhookConfigRow {
 type Logger = Pick<Console, 'warn' | 'error'>;
 
 export interface DispatchWorkflowMemoReplyWebhooksOptions {
-  supabase?: SupabaseClient;
+  db?: any;
   memo: MemoReplyDispatchMemo;
   reply: MemoReplyDispatchReply;
   additionalRecipientIds?: string[];
@@ -150,11 +150,11 @@ interface ResolvedWebhook {
 }
 
 async function resolveWebhook(
-  supabase: SupabaseClient,
+  db: any,
   memo: MemoReplyDispatchMemo,
   member: TeamMemberRow,
 ): Promise<ResolvedWebhook | null> {
-  const { data: projectConfig } = await supabase
+  const { data: projectConfig } = await db
     .from('webhook_configs')
     .select('id, url, secret, channel')
     .eq('org_id', memo.org_id)
@@ -166,7 +166,7 @@ async function resolveWebhook(
 
   if (projectConfig?.url) return projectConfig as WebhookConfigRow;
 
-  const { data: defaultConfig } = await supabase
+  const { data: defaultConfig } = await db
     .from('webhook_configs')
     .select('id, url, secret, channel')
     .eq('org_id', memo.org_id)
@@ -182,7 +182,7 @@ async function resolveWebhook(
 }
 
 async function postWebhook(
-  supabase: SupabaseClient,
+  db: any,
   fetchFn: typeof fetch,
   orgId: string,
   webhook: ResolvedWebhook,
@@ -204,7 +204,7 @@ async function postWebhook(
     ...buildWebhookSignatureHeaders(webhook.secret, body),
   };
 
-  return new WebhookDeliveryService(supabase).dispatch({
+  return new WebhookDeliveryService(db).dispatch({
     org_id: orgId,
     webhook_config_id: webhook.id,
     event_type: 'memo.reply',
@@ -220,9 +220,9 @@ export async function dispatchWorkflowMemoReplyWebhooks(
 ): Promise<DispatchWorkflowMemoReplyWebhooksResult> {
   const logger = options.logger ?? console;
   const fetchFn = options.fetchFn ?? fetch;
-  const { memo, reply, supabase, additionalRecipientIds } = options;
+  const { memo, reply, db, additionalRecipientIds } = options;
 
-  if (!supabase) return { status: 'skipped', reason: 'oss_mode' };
+  if (!db) return { status: 'skipped', reason: 'oss_mode' };
 
   if (isSystemFailureReply(reply.content)) {
     return { status: 'skipped', reason: 'system_failure_comment' };
@@ -233,17 +233,17 @@ export async function dispatchWorkflowMemoReplyWebhooks(
   }
 
   const [membersResult, priorRepliesResult, assigneesResult] = await Promise.all([
-    supabase
+    db
       .from('team_members')
       .select('id, name, webhook_url, is_active')
       .eq('org_id', memo.org_id)
       .eq('project_id', memo.project_id)
       .eq('is_active', true),
-    supabase
+    db
       .from('memo_replies')
       .select('created_by, content')
       .eq('memo_id', memo.id),
-    supabase
+    db
       .from('memo_assignees')
       .select('member_id')
       .eq('memo_id', memo.id),
@@ -293,11 +293,11 @@ export async function dispatchWorkflowMemoReplyWebhooks(
     const member = memberById.get(participantId);
     if (!member?.is_active) continue;
 
-    const webhook = await resolveWebhook(supabase, memo, member);
+    const webhook = await resolveWebhook(db, memo, member);
     if (!webhook) continue;
 
     try {
-      const sent = await postWebhook(supabase, fetchFn, memo.org_id, webhook, title, description);
+      const sent = await postWebhook(db, fetchFn, memo.org_id, webhook, title, description);
       if (sent) {
         sentCount += 1;
       } else {

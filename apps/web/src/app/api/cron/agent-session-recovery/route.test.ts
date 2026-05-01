@@ -10,10 +10,6 @@ const {
   resumeSessionCandidatesMock: vi.fn(),
 }));
 
-vi.mock('@supabase/supabase-js', () => ({
-  createClient: createClientMock,
-}));
-
 vi.mock('@/services/agent-session-lifecycle', () => ({
   AgentSessionLifecycleService: class {
     recoverStaleRuns = recoverStaleRunsMock;
@@ -31,12 +27,12 @@ describe('GET /api/cron/agent-session-recovery', () => {
 
   beforeEach(() => {
     process.env.CRON_SECRET = 'cron-secret';
-    process.env.NEXT_PUBLIC_SUPABASE_URL = 'https://supabase.example.com';
-    process.env.SUPABASE_SERVICE_ROLE_KEY = 'service-role-key';
+    process.env.DATABASE_URL = 'https://db.example.com';
+    process.env.DATABASE_SERVICE_KEY = 'service-role-key';
     createClientMock.mockReset();
     recoverStaleRunsMock.mockReset();
     resumeSessionCandidatesMock.mockReset();
-    createClientMock.mockReturnValue({ tag: 'supabase' });
+    createClientMock.mockReturnValue({ tag: 'db' });
     recoverStaleRunsMock.mockResolvedValue({
       recoveredCount: 1,
       retryScheduledCount: 1,
@@ -57,9 +53,9 @@ describe('GET /api/cron/agent-session-recovery', () => {
     const payload = await response.json();
 
     expect(response.status).toBe(200);
-    expect(createClientMock).toHaveBeenCalledWith('https://supabase.example.com', 'service-role-key');
+    expect(createClientMock).toHaveBeenCalledWith('https://db.example.com', 'service-role-key');
     expect(recoverStaleRunsMock).toHaveBeenCalledTimes(1);
-    expect(resumeSessionCandidatesMock).toHaveBeenCalledWith({ tag: 'supabase' }, [
+    expect(resumeSessionCandidatesMock).toHaveBeenCalledWith({ tag: 'db' }, [
       { runId: 'run-1', memoId: 'memo-1', orgId: 'org-1', projectId: 'project-1', agentId: 'agent-1' },
     ]);
     expect(payload.data).toEqual({ recoveredCount: 1, retryScheduledCount: 1, terminatedCount: 0, resumedCount: 1 });

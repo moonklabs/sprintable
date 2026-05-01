@@ -1,4 +1,4 @@
-import type { SupabaseClient } from '@supabase/supabase-js';
+
 import { BridgeInboundService } from './bridge-inbound';
 import {
   type DiscordBridgeConfig,
@@ -24,7 +24,7 @@ type SocketFactory = (url: string) => WebSocketLike;
 type Logger = Pick<Console, 'info' | 'warn' | 'error'>;
 
 export interface DiscordGatewayBridgeOptions {
-  supabase: SupabaseClient;
+  db: any;
   orgId: string;
   token: string;
   socketFactory?: SocketFactory;
@@ -64,7 +64,7 @@ export class DiscordGatewayBridge {
     this.logger = options.logger ?? console;
     this.reconnectBaseDelayMs = options.reconnectBaseDelayMs ?? DEFAULT_RECONNECT_BASE_DELAY_MS;
     this.reconnectMaxDelayMs = options.reconnectMaxDelayMs ?? DEFAULT_RECONNECT_MAX_DELAY_MS;
-    this.inboundService = options.inboundService ?? new BridgeInboundService(options.supabase);
+    this.inboundService = options.inboundService ?? new BridgeInboundService(options.db);
     this.postRateLimitNoticeFn = options.postRateLimitNoticeFn ?? postDiscordRateLimitNotice;
   }
 

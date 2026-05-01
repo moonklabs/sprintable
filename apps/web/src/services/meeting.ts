@@ -1,11 +1,11 @@
-import type { SupabaseClient } from '@supabase/supabase-js';
+
 
 export class MeetingService {
-  constructor(private readonly supabase: SupabaseClient) {}
+  constructor(private readonly db: any) {}
 
   async list(projectId: string, page = 1, limit = 20) {
     const offset = (page - 1) * limit;
-    const { data, error, count } = await this.supabase
+    const { data, error, count } = await this.db
       .from('meetings')
       .select('id, title, meeting_type, date, duration_min, participants, ai_summary, created_at', { count: 'exact' })
       .eq('project_id', projectId)
@@ -18,7 +18,7 @@ export class MeetingService {
   }
 
   async getById(id: string) {
-    const { data, error } = await this.supabase
+    const { data, error } = await this.db
       .from('meetings')
       .select('*')
       .eq('id', id)
@@ -42,7 +42,7 @@ export class MeetingService {
     action_items?: unknown[];
     created_by?: string;
   }) {
-    const { data, error } = await this.supabase
+    const { data, error } = await this.db
       .from('meetings')
       .insert(input)
       .select('id, title, meeting_type, date, duration_min, created_at')
@@ -68,7 +68,7 @@ export class MeetingService {
       if (v !== undefined) updates[k] = v;
     }
 
-    const { data, error } = await this.supabase
+    const { data, error } = await this.db
       .from('meetings')
       .update(updates)
       .eq('id', id)
@@ -81,7 +81,7 @@ export class MeetingService {
   }
 
   async delete(id: string) {
-    const { error } = await this.supabase
+    const { error } = await this.db
       .from('meetings')
       .update({ deleted_at: new Date().toISOString() })
       .eq('id', id)

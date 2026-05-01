@@ -1,7 +1,6 @@
 import { handleApiError } from '@/lib/api-error';
 import { apiSuccess, apiError, ApiErrors } from '@/lib/api-response';
-import { isOssMode } from '@/lib/storage/factory';
-import { getServerSession } from '@/lib/supabase/server';
+import { getServerSession } from '@/lib/db/server';
 import { verifyCsrfOrigin } from '@/lib/auth/csrf';
 import { NextResponse } from 'next/server';
 
@@ -9,7 +8,6 @@ const FASTAPI_URL = () => process.env['NEXT_PUBLIC_FASTAPI_URL'] ?? 'http://loca
 
 /** POST /api/auth/2fa/setup — TOTP secret 생성 (FastAPI) */
 export async function POST(request: Request) {
-  if (isOssMode()) return apiError('NOT_IMPLEMENTED', '2FA is not supported in OSS mode.', 501);
   const csrfError = verifyCsrfOrigin(request);
   if (csrfError) return csrfError as NextResponse;
   try {

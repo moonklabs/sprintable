@@ -3,17 +3,17 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 const {
   fireWebhooks,
   agentExecutionExecute,
-  createSupabaseAdminClientMock,
+  createAdminClientMock,
   validateProjectMcpConnectionsMock,
 } = vi.hoisted(() => ({
   fireWebhooks: vi.fn(),
   agentExecutionExecute: vi.fn(),
-  createSupabaseAdminClientMock: vi.fn(() => ({ tag: 'admin' })),
+  createAdminClientMock: vi.fn(() => ({ tag: 'admin' })),
   validateProjectMcpConnectionsMock: vi.fn<(...args: unknown[]) => Promise<{ ok: boolean; errors: string[] }>>(async () => ({ ok: true, errors: [] })),
 }));
 
-vi.mock('@/lib/supabase/admin', () => ({
-  createSupabaseAdminClient: createSupabaseAdminClientMock,
+vi.mock('@/lib/db/admin', () => ({
+  createAdminClient: createAdminClientMock,
 }));
 vi.mock('./project-mcp', () => ({
   validateProjectMcpConnections: validateProjectMcpConnectionsMock,
@@ -110,7 +110,7 @@ function makeRuns(status: RunStatus, count: number): RunRecord[] {
   }));
 }
 
-function createSupabaseStub(options?: {
+function createDbStub(options?: {
   includeBaseDeployment?: boolean;
   duplicateLiveDeployment?: boolean;
   deploymentStatus?: DeploymentStatus;
@@ -160,7 +160,7 @@ function createSupabaseStub(options?: {
     rpcCalls: [] as Array<{ fn: string; args: Record<string, unknown> }>,
   };
 
-  const supabase = {
+  const db = {
     rpc: async (fn: string, args: Record<string, unknown>) => {
       state.rpcCalls.push({ fn, args });
       return { data: null, error: null };
@@ -391,7 +391,7 @@ function createSupabaseStub(options?: {
     },
   };
 
-  return { supabase, state };
+  return { db, state };
 }
 
 describe('AgentDeploymentLifecycleService', () => {
@@ -400,14 +400,14 @@ describe('AgentDeploymentLifecycleService', () => {
     fireWebhooks.mockResolvedValue(undefined);
     agentExecutionExecute.mockReset();
     agentExecutionExecute.mockResolvedValue({ status: 'completed', llmCallCount: 1, toolCallHistory: [], outputMemoIds: [] });
-    createSupabaseAdminClientMock.mockClear();
+    createAdminClientMock.mockClear();
     validateProjectMcpConnectionsMock.mockReset();
     validateProjectMcpConnectionsMock.mockResolvedValue({ ok: true, errors: [] });
   });
 
   it('creates a deployment and activates it after preflight passes', async () => {
-    const { supabase, state } = createSupabaseStub();
-    const service = new AgentDeploymentLifecycleService(supabase as never);
+    const { db, state } = createDbStub();
+    const service = new AgentDeploymentLifecycleService(db as never);
 
     const result = await service.createDeployment({
       orgId: 'org-1',
@@ -447,7 +447,7 @@ describe('AgentDeploymentLifecycleService', () => {
   });
 
   it('records post-deploy verification completion on an active deployment', async () => {
-    const { supabase, state } = createSupabaseStub({
+    const { db, state } = createDbStub({
       includeBaseDeployment: true,
       deploymentStatus: 'ACTIVE',
       deployments: [{
@@ -467,7 +467,7 @@ describe('AgentDeploymentLifecycleService', () => {
         },
       }],
     });
-    const service = new AgentDeploymentLifecycleService(supabase as never);
+    const service = new AgentDeploymentLifecycleService(db as never);
 
     const result = await service.completeDeploymentVerification({
       orgId: 'org-1',
@@ -500,7 +500,7 @@ describe('AgentDeploymentLifecycleService', () => {
   });
 
   it('applies the automatic PO and Dev routing template when the project mix matches', async () => {
-    const { supabase, state } = createSupabaseStub({
+    const { db, state } = createDbStub({
       deployments: [{
         id: 'deployment-po',
         org_id: 'org-1',
@@ -532,7 +532,7 @@ describe('AgentDeploymentLifecycleService', () => {
         { id: 'persona-po', org_id: 'org-1', project_id: 'project-1', agent_id: 'agent-2', slug: 'product-owner', config: {}, is_builtin: true, deleted_at: null },
       ],
     });
-    const service = new AgentDeploymentLifecycleService(supabase as never);
+    const service = new AgentDeploymentLifecycleService(db as never);
 
     await service.createDeployment({
       orgId: 'org-1',
@@ -567,7 +567,7 @@ describe('AgentDeploymentLifecycleService', () => {
   });
 
   it('blocks deployment until overwrite confirmation is provided for automatic routing replacement', async () => {
-    const { supabase, state } = createSupabaseStub({
+    const { db, state } = createDbStub({
       deployments: [{
         id: 'deployment-po',
         org_id: 'org-1',
@@ -600,7 +600,7 @@ describe('AgentDeploymentLifecycleService', () => {
       ],
       routingRules: [{ id: 'rule-1' }],
     });
-    const service = new AgentDeploymentLifecycleService(supabase as never);
+    const service = new AgentDeploymentLifecycleService(db as never);
 
     await expect(service.createDeployment({
       orgId: 'org-1',
@@ -624,7 +624,7 @@ describe('AgentDeploymentLifecycleService', () => {
   });
 
   it('allows org-scoped custom personas from a different project and agent', async () => {
-    const { supabase, state } = createSupabaseStub({
+    const { db, state } = createDbStub({
       persona: {
         id: 'persona-org-wide',
         org_id: 'org-1',
@@ -634,7 +634,7 @@ describe('AgentDeploymentLifecycleService', () => {
         deleted_at: null,
       },
     });
-    const service = new AgentDeploymentLifecycleService(supabase as never);
+    const service = new AgentDeploymentLifecycleService(db as never);
 
     const result = await service.createDeployment({
       orgId: 'org-1',
@@ -650,7 +650,7 @@ describe('AgentDeploymentLifecycleService', () => {
   });
 
   it('blocks deployment when a builtin persona is outside the current project or agent scope', async () => {
-    const { supabase } = createSupabaseStub({
+    const { db } = createDbStub({
       persona: {
         id: 'builtin-other-agent',
         org_id: 'org-1',
@@ -660,7 +660,7 @@ describe('AgentDeploymentLifecycleService', () => {
         deleted_at: null,
       },
     });
-    const service = new AgentDeploymentLifecycleService(supabase as never);
+    const service = new AgentDeploymentLifecycleService(db as never);
 
     await expect(service.createDeployment({
       orgId: 'org-1',
@@ -682,8 +682,8 @@ describe('AgentDeploymentLifecycleService', () => {
   });
 
   it('blocks deployment when a live deployment already exists for the agent', async () => {
-    const { supabase } = createSupabaseStub({ duplicateLiveDeployment: true });
-    const service = new AgentDeploymentLifecycleService(supabase as never);
+    const { db } = createDbStub({ duplicateLiveDeployment: true });
+    const service = new AgentDeploymentLifecycleService(db as never);
 
     await expect(service.createDeployment({
       orgId: 'org-1',
@@ -704,8 +704,8 @@ describe('AgentDeploymentLifecycleService', () => {
   });
 
   it('blocks deployment creation when preflight MCP validation fails', async () => {
-    const { supabase, state } = createSupabaseStub();
-    const service = new AgentDeploymentLifecycleService(supabase as never);
+    const { db, state } = createDbStub();
+    const service = new AgentDeploymentLifecycleService(db as never);
     validateProjectMcpConnectionsMock.mockResolvedValue({ ok: false, errors: ['GitHub: external_mcp_http_401'] });
 
     await expect(service.createDeployment({
@@ -731,8 +731,8 @@ describe('AgentDeploymentLifecycleService', () => {
   });
 
   it('marks the deployment as DEPLOY_FAILED when activation work fails after insert', async () => {
-    const { supabase } = createSupabaseStub();
-    const service = new AgentDeploymentLifecycleService(supabase as never);
+    const { db } = createDbStub();
+    const service = new AgentDeploymentLifecycleService(db as never);
     fireWebhooks.mockRejectedValueOnce(new Error('webhook_delivery_failed'));
 
     const result = await service.createDeployment({
@@ -751,12 +751,12 @@ describe('AgentDeploymentLifecycleService', () => {
   });
 
   it('holds queued runs when a deployment is suspended', async () => {
-    const { supabase, state } = createSupabaseStub({
+    const { db, state } = createDbStub({
       includeBaseDeployment: true,
       deploymentStatus: 'ACTIVE',
       queuedRunCount: 3,
     });
-    const service = new AgentDeploymentLifecycleService(supabase as never);
+    const service = new AgentDeploymentLifecycleService(db as never);
 
     const result = await service.transitionDeployment({
       orgId: 'org-1',
@@ -775,12 +775,12 @@ describe('AgentDeploymentLifecycleService', () => {
   });
 
   it('resumes held runs into actual execution when a suspended deployment becomes active', async () => {
-    const { supabase, state } = createSupabaseStub({
+    const { db, state } = createDbStub({
       includeBaseDeployment: true,
       deploymentStatus: 'SUSPENDED',
       heldRunCount: 2,
     });
-    const service = new AgentDeploymentLifecycleService(supabase as never);
+    const service = new AgentDeploymentLifecycleService(db as never);
 
     const result = await service.transitionDeployment({
       orgId: 'org-1',
@@ -799,12 +799,12 @@ describe('AgentDeploymentLifecycleService', () => {
   });
 
   it('resumes queued runs created during DEPLOYING when the deployment becomes active', async () => {
-    const { supabase } = createSupabaseStub({
+    const { db } = createDbStub({
       includeBaseDeployment: true,
       deploymentStatus: 'DEPLOYING',
       queuedRunCount: 2,
     });
-    const service = new AgentDeploymentLifecycleService(supabase as never);
+    const service = new AgentDeploymentLifecycleService(db as never);
 
     const result = await service.transitionDeployment({
       orgId: 'org-1',
@@ -822,13 +822,13 @@ describe('AgentDeploymentLifecycleService', () => {
   });
 
   it('fails queued and held runs when the deployment is terminated', async () => {
-    const { supabase, state } = createSupabaseStub({
+    const { db, state } = createDbStub({
       includeBaseDeployment: true,
       deploymentStatus: 'ACTIVE',
       queuedRunCount: 2,
       heldRunCount: 1,
     });
-    const service = new AgentDeploymentLifecycleService(supabase as never);
+    const service = new AgentDeploymentLifecycleService(db as never);
 
     const result = await service.terminateDeployment({
       orgId: 'org-1',

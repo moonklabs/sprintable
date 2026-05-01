@@ -1,13 +1,13 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
-const { createSupabaseServerClient, getAuthContext, createSupabaseAdminClient } = vi.hoisted(() => ({
-  createSupabaseServerClient: vi.fn(),
+const { createDbServerClient, getAuthContext, createAdminClient } = vi.hoisted(() => ({
+  createDbServerClient: vi.fn(),
   getAuthContext: vi.fn(),
-  createSupabaseAdminClient: vi.fn(),
+  createAdminClient: vi.fn(),
 }));
 
-vi.mock('@/lib/supabase/server', () => ({ createSupabaseServerClient }));
-vi.mock('@/lib/supabase/admin', () => ({ createSupabaseAdminClient }));
+vi.mock('@/lib/db/server', () => ({ createDbServerClient }));
+vi.mock('@/lib/db/admin', () => ({ createAdminClient }));
 vi.mock('@/lib/auth-helpers', () => ({ getAuthContext }));
 
 import { GET } from './route';
@@ -32,16 +32,16 @@ function createQueryStub(rows: Record<string, unknown>[], opts: { singleError?: 
 
 describe('GET /api/analytics/agent-stats', () => {
   beforeEach(() => {
-    createSupabaseServerClient.mockReset();
+    createDbServerClient.mockReset();
     getAuthContext.mockReset();
-    createSupabaseAdminClient.mockReset();
+    createAdminClient.mockReset();
     getAuthContext.mockResolvedValue(makeAgent());
   });
 
   it('returns 400 when project_id missing', async () => {
-    const supabase = { from: vi.fn(() => createQueryStub([])) };
-    createSupabaseServerClient.mockResolvedValue(supabase);
-    createSupabaseAdminClient.mockReturnValue(supabase);
+    const db = { from: vi.fn(() => createQueryStub([])) };
+    createDbServerClient.mockResolvedValue(db);
+    createAdminClient.mockReturnValue(db);
 
     const response = await GET(new Request('http://localhost/api/analytics/agent-stats?agent_id=agent-1'));
 
@@ -49,9 +49,9 @@ describe('GET /api/analytics/agent-stats', () => {
   });
 
   it('returns 400 when agent_id missing', async () => {
-    const supabase = { from: vi.fn(() => createQueryStub([])) };
-    createSupabaseServerClient.mockResolvedValue(supabase);
-    createSupabaseAdminClient.mockReturnValue(supabase);
+    const db = { from: vi.fn(() => createQueryStub([])) };
+    createDbServerClient.mockResolvedValue(db);
+    createAdminClient.mockReturnValue(db);
 
     const response = await GET(new Request('http://localhost/api/analytics/agent-stats?project_id=p'));
 
@@ -59,9 +59,9 @@ describe('GET /api/analytics/agent-stats', () => {
   });
 
   it('returns 400 when agent not found in project', async () => {
-    const supabase = { from: vi.fn(() => createQueryStub([], { singleError: true })) };
-    createSupabaseServerClient.mockResolvedValue(supabase);
-    createSupabaseAdminClient.mockReturnValue(supabase);
+    const db = { from: vi.fn(() => createQueryStub([], { singleError: true })) };
+    createDbServerClient.mockResolvedValue(db);
+    createAdminClient.mockReturnValue(db);
 
     const response = await GET(new Request('http://localhost/api/analytics/agent-stats?project_id=p&agent_id=a'));
 

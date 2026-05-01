@@ -1,4 +1,4 @@
-import type { SupabaseClient } from '@supabase/supabase-js';
+
 import { ForbiddenError, NotFoundError } from './sprint';
 
 export type StandupReviewType = 'comment' | 'approve' | 'request_changes';
@@ -43,10 +43,10 @@ export interface StandupFeedbackRecord {
 }
 
 export class StandupService {
-  constructor(private readonly supabase: SupabaseClient) {}
+  constructor(private readonly db: any) {}
 
   async getEntries(projectId: string, date: string) {
-    const { data, error } = await this.supabase
+    const { data, error } = await this.db
       .from('standup_entries')
       .select('*')
       .eq('project_id', projectId)
@@ -57,7 +57,7 @@ export class StandupService {
   }
 
   async getEntryForUser(projectId: string, authorId: string, date: string) {
-    const { data, error } = await this.supabase
+    const { data, error } = await this.db
       .from('standup_entries')
       .select('*')
       .eq('project_id', projectId)
@@ -69,7 +69,7 @@ export class StandupService {
   }
 
   async save(input: SaveStandupInput) {
-    const { data, error } = await this.supabase
+    const { data, error } = await this.db
       .from('standup_entries')
       .upsert({
         project_id: input.project_id,
@@ -92,7 +92,7 @@ export class StandupService {
     // deadline 조회: 오늘 날짜면 마감 전 여부 체크
     const today = new Date().toISOString().slice(0, 10);
     if (date === today) {
-      const { data: settings } = await this.supabase
+      const { data: settings } = await this.db
         .from('project_settings')
         .select('standup_deadline')
         .eq('project_id', projectId)
@@ -107,12 +107,12 @@ export class StandupService {
       }
     }
 
-    const { data: members } = await this.supabase
+    const { data: members } = await this.db
       .from('team_members')
       .select('id, name')
       .eq('project_id', projectId)
       .eq('is_active', true);
-    const { data: entries } = await this.supabase
+    const { data: entries } = await this.db
       .from('standup_entries')
       .select('author_id')
       .eq('project_id', projectId)
@@ -123,7 +123,7 @@ export class StandupService {
   }
 
   async getHistory(projectId: string, limit = 50) {
-    const { data, error } = await this.supabase
+    const { data, error } = await this.db
       .from('standup_entries')
       .select('author_id, date, done, plan, blockers')
       .eq('project_id', projectId)
@@ -135,10 +135,10 @@ export class StandupService {
 }
 
 export class StandupFeedbackService {
-  constructor(private readonly supabase: SupabaseClient) {}
+  constructor(private readonly db: any) {}
 
   async listByDate(projectId: string, date: string): Promise<StandupFeedbackRecord[]> {
-    const { data: entries, error: entriesError } = await this.supabase
+    const { data: entries, error: entriesError } = await this.db
       .from('standup_entries')
       .select('id')
       .eq('project_id', projectId)
@@ -148,7 +148,7 @@ export class StandupFeedbackService {
     if (!entries || entries.length === 0) return [];
 
     const entryIds = entries.map((entry) => entry.id);
-    const { data, error } = await this.supabase
+    const { data, error } = await this.db
       .from('standup_feedback')
       .select('*')
       .eq('project_id', projectId)
@@ -160,7 +160,7 @@ export class StandupFeedbackService {
   }
 
   async create(input: CreateStandupFeedbackInput): Promise<StandupFeedbackRecord> {
-    const { data: entry, error: entryError } = await this.supabase
+    const { data: entry, error: entryError } = await this.db
       .from('standup_entries')
       .select('id, org_id, project_id, sprint_id')
       .eq('id', input.standup_entry_id)
@@ -179,7 +179,7 @@ export class StandupFeedbackService {
     const feedbackText = input.feedback_text.trim();
     if (!feedbackText) throw new Error('feedback_text is required');
 
-    const { data, error } = await this.supabase
+    const { data, error } = await this.db
       .from('standup_feedback')
       .insert({
         org_id: entry.org_id,
@@ -210,7 +210,7 @@ export class StandupFeedbackService {
     }
     if (Object.keys(sanitized).length === 0) throw new Error('No valid fields to update');
 
-    const { data: existing, error: existingError } = await this.supabase
+    const { data: existing, error: existingError } = await this.db
       .from('standup_feedback')
       .select('id, feedback_by_id')
       .eq('id', id)
@@ -226,7 +226,7 @@ export class StandupFeedbackService {
       throw new ForbiddenError('Permission denied');
     }
 
-    const { data, error } = await this.supabase
+    const { data, error } = await this.db
       .from('standup_feedback')
       .update(sanitized)
       .eq('id', id)
@@ -243,7 +243,7 @@ export class StandupFeedbackService {
   }
 
   async delete(id: string, feedbackById: string): Promise<void> {
-    const { data: existing, error: existingError } = await this.supabase
+    const { data: existing, error: existingError } = await this.db
       .from('standup_feedback')
       .select('id, feedback_by_id')
       .eq('id', id)
@@ -259,7 +259,7 @@ export class StandupFeedbackService {
       throw new ForbiddenError('Permission denied');
     }
 
-    const { error } = await this.supabase
+    const { error } = await this.db
       .from('standup_feedback')
       .delete()
       .eq('id', id)

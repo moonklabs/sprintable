@@ -1,7 +1,7 @@
 import { describe, expect, it, vi } from 'vitest';
 import { DiscordGatewayRuntime } from './discord-gateway-runtime';
 
-function createSupabaseStub(options?: {
+function createDbStub(options?: {
   channels?: Array<Record<string, unknown>>;
   auth?: Record<string, unknown> | null;
   adminRecipients?: Array<Record<string, unknown>>;
@@ -14,7 +14,7 @@ function createSupabaseStub(options?: {
   const auth = options?.auth ?? { org_id: 'org-1', access_token_ref: 'env:DISCORD_RUNTIME_TOKEN', expires_at: null };
   const adminRecipients = options?.adminRecipients ?? [{ id: 'admin-1', user_id: 'user-1' }];
 
-  const supabase = {
+  const db = {
     from(table: string) {
       if (table === 'messaging_bridge_channels') {
         return {
@@ -69,19 +69,19 @@ function createSupabaseStub(options?: {
     },
   };
 
-  return { supabase, state };
+  return { db, state };
 }
 
 describe('DiscordGatewayRuntime', () => {
   it('starts one gateway bridge per active discord org with a valid token', async () => {
     process.env.DISCORD_RUNTIME_TOKEN = 'discord-runtime-token';
-    const { supabase } = createSupabaseStub();
+    const { db } = createDbStub();
     const start = vi.fn();
     const stop = vi.fn();
     const createBridge = vi.fn(() => ({ start, stop }));
 
     const runtime = new DiscordGatewayRuntime({
-      supabase: supabase as never,
+      db: db as never,
       createBridge,
       refreshIntervalMs: 60_000,
       logger: console,
@@ -94,13 +94,13 @@ describe('DiscordGatewayRuntime', () => {
   });
 
   it('records an auth_failed notification when the Discord token is missing or expired', async () => {
-    const { supabase, state } = createSupabaseStub({
+    const { db, state } = createDbStub({
       auth: { org_id: 'org-1', access_token_ref: 'env:DISCORD_RUNTIME_TOKEN', expires_at: '2026-04-07T00:00:00.000Z' },
     });
     delete process.env.DISCORD_RUNTIME_TOKEN;
 
     const runtime = new DiscordGatewayRuntime({
-      supabase: supabase as never,
+      db: db as never,
       refreshIntervalMs: 60_000,
       logger: console,
     });

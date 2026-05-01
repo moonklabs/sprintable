@@ -1,6 +1,7 @@
 import { cache } from 'react';
-import type { SupabaseClient, User } from '@supabase/supabase-js';
 import { cookies } from 'next/headers';
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+type User = any;
 import { isOssMode } from '@/lib/storage/factory';
 
 export const CURRENT_PROJECT_COOKIE = 'sprintable_current_project_id';
@@ -36,8 +37,8 @@ async function getCurrentProjectIdCookie() {
   return cookieStore.get(CURRENT_PROJECT_COOKIE)?.value ?? null;
 }
 
-export const getMyProjectMemberships = cache(async (supabase: SupabaseClient, user: User): Promise<ProjectMembership[]> => {
-  const { data, error } = await supabase
+export const getMyProjectMemberships = cache(async (db: any, user: User): Promise<ProjectMembership[]> => {
+  const { data, error } = await db
     .from('team_members')
     .select('id, org_id, project_id, projects(id, name)')
     .eq('user_id', user.id)
@@ -77,9 +78,9 @@ export interface MembershipContext {
  * 한 번의 호출로 memberships + current team member를 함께 반환.
  * Layout에서 duplicate fetch를 방지한다.
  */
-export async function getMyMembershipContext(supabase: SupabaseClient, user: User): Promise<MembershipContext> {
-  const memberships = await getMyProjectMemberships(supabase, user);
-  const me = await resolveTeamMemberFromMemberships(supabase, user, memberships);
+export async function getMyMembershipContext(db: any, user: User): Promise<MembershipContext> {
+  const memberships = await getMyProjectMemberships(db, user);
+  const me = await resolveTeamMemberFromMemberships(db, user, memberships);
   return { me, memberships };
 }
 
@@ -101,13 +102,13 @@ export async function getOssUserContext(): Promise<MembershipContext> {
  * 현재 auth user의 team_member를 조회.
  * 없으면 자동 생성 (온보딩에서 누락된 케이스 fallback).
  */
-export const getMyTeamMember = cache(async (supabase: SupabaseClient, user: User) => {
-  const memberships = await getMyProjectMemberships(supabase, user);
-  return resolveTeamMemberFromMemberships(supabase, user, memberships);
+export const getMyTeamMember = cache(async (db: any, user: User) => {
+  const memberships = await getMyProjectMemberships(db, user);
+  return resolveTeamMemberFromMemberships(db, user, memberships);
 });
 
 async function resolveTeamMemberFromMemberships(
-  supabase: SupabaseClient,
+  db: any,
   user: User,
   memberships: ProjectMembership[],
 ) {
@@ -128,7 +129,7 @@ async function resolveTeamMemberFromMemberships(
   // fallback self-heal은 레거시/온보딩 누락 복구용으로만 사용한다.
   // current project cookie는 기존 membership 선택에만 사용하며,
   // membership이 0개인 상태에서는 권한 부여 source로 신뢰하지 않는다.
-  const { data: orgMember } = await supabase
+  const { data: orgMember } = await db
     .from('org_members')
     .select('org_id')
     .eq('user_id', user.id)
@@ -136,7 +137,7 @@ async function resolveTeamMemberFromMemberships(
 
   if (!orgMember) return null;
 
-  const { data: projects, error: projectsError } = await supabase
+  const { data: projects, error: projectsError } = await db
     .from('projects')
     .select('id, name')
     .eq('org_id', orgMember.org_id)
@@ -153,7 +154,7 @@ async function resolveTeamMemberFromMemberships(
   if (!project) return null;
 
   const { checkMemberLimit } = await import('./check-feature');
-  const memberCheck = await checkMemberLimit(supabase, orgMember.org_id);
+  const memberCheck = await checkMemberLimit(db, orgMember.org_id);
   if (!memberCheck.allowed) return null;
 
   const { getTranslations } = await import('next-intl/server');
@@ -163,7 +164,7 @@ async function resolveTeamMemberFromMemberships(
     || user.email
     || tc('unknown');
 
-  const { data: memberId, error: rpcError } = await supabase
+  const { data: memberId, error: rpcError } = await db
     .rpc('ensure_my_team_member', {
       _org_id: orgMember.org_id,
       _project_id: project.id,
@@ -194,7 +195,6 @@ async function resolveTeamMemberFromMemberships(
  * @returns team_member context { id, org_id, project_id, project_name, type?, rateLimitExceeded? }
  */
 export const getAuthContext = cache(async (
-  supabase: SupabaseClient,
   request: Request
 ): Promise<{
   id: string;
@@ -207,7 +207,7 @@ export const getAuthContext = cache(async (
   rateLimitRemaining?: number;
   rateLimitResetAt?: number;
 } | null> => {
-  // 1. OSS_MODE — Supabase 없이 SQLite 기반 인증
+  // 1. OSS_MODE — DB 없이 SQLite 기반 인증
   if (isOssMode()) {
     const { OSS_ORG_ID, OSS_PROJECT_ID, OSS_MEMBER_ID, getDb } = await import('@sprintable/storage-sqlite');
 
@@ -260,8 +260,8 @@ export const getAuthContext = cache(async (
   const rawApiKey = authHeader?.startsWith('Bearer ') ? authHeader.slice(7) : (xApiKey ?? null);
   if (rawApiKey) {
     const { getTeamMemberFromApiKey } = await import('./auth-api-key');
-    const { createSupabaseAdminClient } = await import('./supabase/admin');
-    const adminClient = createSupabaseAdminClient();
+    const { createAdminClient } = await import('./db/admin');
+    const adminClient = createAdminClient();
     const endpoint = new URL(request.url).pathname;
     const ip = request.headers.get('x-forwarded-for') ?? request.headers.get('x-real-ip');
     const apiKeyMember = await getTeamMemberFromApiKey(adminClient, rawApiKey, { endpoint, ip });
@@ -285,15 +285,23 @@ export const getAuthContext = cache(async (
     }
   }
 
-  // 3. OAuth 세션 인증 시도
-  const { data: { user } } = await supabase.auth.getUser();
-  if (!user) return null;
+  // 3. OAuth 세션 — JWT 쿠키 파싱
+  const { getServerSession } = await import('./db/server');
+  const session = await getServerSession();
+  if (!session) return null;
 
-  const oauthMember = await getMyTeamMember(supabase, user);
-  if (!oauthMember) return null;
+  // FastAPI로 team member 조회
+  const { fastapiCall } = await import('@sprintable/storage-api');
+  const meData = await fastapiCall<{ id: string; org_id: string; project_id: string; project_name: string } | null>(
+    'GET', '/api/v2/me', session.access_token
+  ).catch(() => null);
+  if (!meData) return null;
 
   return {
-    ...oauthMember,
-    type: 'human',
+    id: meData.id,
+    org_id: meData.org_id,
+    project_id: meData.project_id,
+    project_name: meData.project_name,
+    type: 'human' as const,
   };
 });

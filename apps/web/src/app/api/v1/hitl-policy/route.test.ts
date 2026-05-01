@@ -1,14 +1,14 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 const {
-  createSupabaseServerClient,
+  createDbServerClient,
   getMyTeamMember,
   requireOrgAdmin,
   requireAgentOrchestration,
   getProjectPolicy,
   saveProjectPolicy,
 } = vi.hoisted(() => ({
-  createSupabaseServerClient: vi.fn(),
+  createDbServerClient: vi.fn(),
   getMyTeamMember: vi.fn(),
   requireOrgAdmin: vi.fn(),
   requireAgentOrchestration: vi.fn(),
@@ -16,7 +16,7 @@ const {
   saveProjectPolicy: vi.fn(),
 }));
 
-vi.mock('@/lib/supabase/server', () => ({ createSupabaseServerClient }));
+vi.mock('@/lib/db/server', () => ({ createDbServerClient }));
 vi.mock('@/lib/auth-helpers', () => ({ getMyTeamMember }));
 vi.mock('@/lib/admin-check', () => ({ requireOrgAdmin }));
 vi.mock('@/lib/require-agent-orchestration', () => ({ requireAgentOrchestration }));
@@ -33,7 +33,7 @@ vi.mock('@/services/agent-hitl-policy', () => ({
 
 import { GET, PATCH } from './route';
 
-function createSupabaseStub(userId: string | null = 'user-1') {
+function createDbStub(userId: string | null = 'user-1') {
   return {
     auth: {
       getUser: vi.fn(async () => ({ data: { user: userId ? { id: userId } : null } })),
@@ -43,14 +43,14 @@ function createSupabaseStub(userId: string | null = 'user-1') {
 
 describe('GET/PATCH /api/v1/hitl-policy', () => {
   beforeEach(() => {
-    createSupabaseServerClient.mockReset();
+    createDbServerClient.mockReset();
     getMyTeamMember.mockReset();
     requireOrgAdmin.mockReset();
     requireAgentOrchestration.mockReset();
     getProjectPolicy.mockReset();
     saveProjectPolicy.mockReset();
 
-    createSupabaseServerClient.mockResolvedValue(createSupabaseStub());
+    createDbServerClient.mockResolvedValue(createDbStub());
     getMyTeamMember.mockResolvedValue({ id: 'tm-1', org_id: 'org-1', project_id: 'project-1' });
     requireOrgAdmin.mockResolvedValue(undefined);
     requireAgentOrchestration.mockResolvedValue(null);
@@ -59,7 +59,7 @@ describe('GET/PATCH /api/v1/hitl-policy', () => {
   it('returns the current project HITL policy for admins', async () => {
     getProjectPolicy.mockResolvedValue({ schema_version: 1, approval_rules: [], timeout_classes: [], high_risk_actions: [], prompt_summary: 'summary' });
 
-    const response = await GET();
+    const response = await GET(new Request('http://test'));
 
     expect(response.status).toBe(200);
     await expect(response.json()).resolves.toMatchObject({

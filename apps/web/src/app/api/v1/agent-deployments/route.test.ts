@@ -1,7 +1,7 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 const {
-  createSupabaseServerClient,
+  createDbServerClient,
   getMyTeamMember,
   requireOrgAdmin,
   buildDeploymentCards,
@@ -9,7 +9,7 @@ const {
   requireAgentOrchestration,
   getProjectAiSettingsWithIntegrationMock,
 } = vi.hoisted(() => ({
-  createSupabaseServerClient: vi.fn(),
+  createDbServerClient: vi.fn(),
   getMyTeamMember: vi.fn(),
   requireOrgAdmin: vi.fn(),
   buildDeploymentCards: vi.fn(),
@@ -18,7 +18,7 @@ const {
   getProjectAiSettingsWithIntegrationMock: vi.fn(),
 }));
 
-vi.mock('@/lib/supabase/server', () => ({ createSupabaseServerClient }));
+vi.mock('@/lib/db/server', () => ({ createDbServerClient }));
 vi.mock('@/lib/auth-helpers', async () => {
   const actual = await vi.importActual<typeof import('@/lib/auth-helpers')>('@/lib/auth-helpers');
   return { ...actual, getMyTeamMember };
@@ -46,7 +46,7 @@ import { GET, POST } from './route';
 
 describe('/api/v1/agent-deployments', () => {
   beforeEach(() => {
-    createSupabaseServerClient.mockReset();
+    createDbServerClient.mockReset();
     getMyTeamMember.mockReset();
     requireOrgAdmin.mockReset();
     buildDeploymentCards.mockReset();
@@ -54,7 +54,7 @@ describe('/api/v1/agent-deployments', () => {
     requireAgentOrchestration.mockReset();
     getProjectAiSettingsWithIntegrationMock.mockReset();
 
-    createSupabaseServerClient.mockResolvedValue({
+    createDbServerClient.mockResolvedValue({
       auth: {
         getUser: vi.fn().mockResolvedValue({ data: { user: { id: 'user-1' } } }),
       },
@@ -71,7 +71,7 @@ describe('/api/v1/agent-deployments', () => {
   it('lists deployment cards when agent orchestration is enabled', async () => {
     buildDeploymentCards.mockResolvedValue([{ id: 'dep-1', name: 'Reviewer' }]);
 
-    const response = await GET();
+    const response = await GET(new Request('http://test'));
 
     expect(response.status).toBe(200);
     expect(requireAgentOrchestration).toHaveBeenCalledWith(expect.anything(), 'org-1');
@@ -86,7 +86,7 @@ describe('/api/v1/agent-deployments', () => {
       error: { code: 'UPGRADE_REQUIRED', message: 'Upgrade required' },
     }), { status: 403, headers: { 'Content-Type': 'application/json' } }));
 
-    const response = await GET();
+    const response = await GET(new Request('http://test'));
 
     expect(response.status).toBe(403);
     expect(buildDeploymentCards).not.toHaveBeenCalled();

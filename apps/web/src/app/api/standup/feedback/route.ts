@@ -1,7 +1,6 @@
+
 import { parseBody, createStandupFeedbackSchema } from '@sprintable/shared';
-import type { SupabaseClient } from '@supabase/supabase-js';
-import { createSupabaseServerClient } from '@/lib/supabase/server';
-import { createSupabaseAdminClient } from '@/lib/supabase/admin';
+import { createAdminClient } from '@/lib/db/admin';
 import { handleApiError } from '@/lib/api-error';
 import { getAuthContext } from '@/lib/auth-helpers';
 import { apiSuccess, ApiErrors } from '@/lib/api-response';
@@ -11,8 +10,7 @@ import { StandupFeedbackService } from '@/services/standup';
 
 export async function GET(request: Request) {
   try {
-    const supabase = await createSupabaseServerClient();
-    const me = await getAuthContext(supabase, request);
+    const me = await getAuthContext(request);
     if (!me) return ApiErrors.unauthorized();
     if (me.rateLimitExceeded) return ApiErrors.tooManyRequests(me.rateLimitRemaining, me.rateLimitResetAt);
 
@@ -25,7 +23,7 @@ export async function GET(request: Request) {
       return apiSuccess(await listOssStandupFeedbackByDate(projectId, date));
     }
 
-    const dbClient: SupabaseClient = me.type === 'agent' ? createSupabaseAdminClient() : supabase;
+    const dbClient: any = me.type === 'agent' ? createAdminClient() : undefined;
     const service = new StandupFeedbackService(dbClient);
     const feedback = await service.listByDate(projectId, date);
     return apiSuccess(feedback);
@@ -36,13 +34,12 @@ export async function GET(request: Request) {
 
 export async function POST(request: Request) {
   try {
-    const supabase = await createSupabaseServerClient();
-    const me = await getAuthContext(supabase, request);
+    const me = await getAuthContext(request);
     if (!me) return ApiErrors.unauthorized();
     if (me.rateLimitExceeded) return ApiErrors.tooManyRequests(me.rateLimitRemaining, me.rateLimitResetAt);
     const ossMode = isOssMode();
 
-    const dbClient: SupabaseClient = me.type === 'agent' ? createSupabaseAdminClient() : supabase;
+    const dbClient: any = me.type === 'agent' ? createAdminClient() : undefined;
 
     const parsed = await parseBody(request, createStandupFeedbackSchema);
     if (!parsed.success) return parsed.response;

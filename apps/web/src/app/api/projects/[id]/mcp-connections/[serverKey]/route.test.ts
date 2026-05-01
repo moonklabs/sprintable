@@ -1,16 +1,16 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 const {
-  createSupabaseServerClientMock,
-  createSupabaseAdminClientMock,
+  createDbServerClientMock,
+  createAdminClientMock,
   getMyTeamMemberMock,
   requireOrgAdminMock,
   upsertProjectMcpConnectionMock,
   deleteProjectMcpConnectionMock,
   transitionDeploymentMock,
 } = vi.hoisted(() => ({
-  createSupabaseServerClientMock: vi.fn(),
-  createSupabaseAdminClientMock: vi.fn(() => ({ tag: 'admin' })),
+  createDbServerClientMock: vi.fn(),
+  createAdminClientMock: vi.fn(() => ({ tag: 'admin' })),
   getMyTeamMemberMock: vi.fn(),
   requireOrgAdminMock: vi.fn(),
   upsertProjectMcpConnectionMock: vi.fn(),
@@ -18,12 +18,12 @@ const {
   transitionDeploymentMock: vi.fn(),
 }));
 
-vi.mock('@/lib/supabase/server', () => ({
-  createSupabaseServerClient: createSupabaseServerClientMock,
+vi.mock('@/lib/db/server', () => ({
+  createDbServerClient: createDbServerClientMock,
 }));
 
-vi.mock('@/lib/supabase/admin', () => ({
-  createSupabaseAdminClient: createSupabaseAdminClientMock,
+vi.mock('@/lib/db/admin', () => ({
+  createAdminClient: createAdminClientMock,
 }));
 
 vi.mock('@/lib/auth-helpers', () => ({
@@ -47,7 +47,7 @@ vi.mock('@/services/agent-deployment-lifecycle', () => ({
 
 import { DELETE, PUT } from './route';
 
-function createSupabaseStub() {
+function createDbStub() {
   return {
     auth: {
       getUser: vi.fn(async () => ({ data: { user: { id: 'user-1' } } })),
@@ -70,15 +70,15 @@ function createSupabaseStub() {
 
 describe('project mcp connection detail route', () => {
   beforeEach(() => {
-    createSupabaseServerClientMock.mockReset();
-    createSupabaseAdminClientMock.mockClear();
+    createDbServerClientMock.mockReset();
+    createAdminClientMock.mockClear();
     getMyTeamMemberMock.mockReset();
     requireOrgAdminMock.mockReset();
     upsertProjectMcpConnectionMock.mockReset();
     deleteProjectMcpConnectionMock.mockReset();
     transitionDeploymentMock.mockReset();
 
-    createSupabaseServerClientMock.mockResolvedValue(createSupabaseStub());
+    createDbServerClientMock.mockResolvedValue(createDbStub());
     getMyTeamMemberMock.mockResolvedValue({ id: 'member-1', org_id: 'org-1', project_id: 'project-1' });
     requireOrgAdminMock.mockResolvedValue(undefined);
   });

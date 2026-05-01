@@ -1,4 +1,4 @@
-import type { SupabaseClient } from '@supabase/supabase-js';
+
 
 interface NotificationReference {
   reference_type: string | null;
@@ -26,7 +26,7 @@ function buildMemoHref(memoId: string) {
 }
 
 export async function attachNotificationHrefs<T extends NotificationReference>(
-  supabase: SupabaseClient,
+  db: any | undefined,
   notifications: T[],
 ): Promise<Array<T & { href: string | null }>> {
   const docCommentIds = notifications
@@ -38,8 +38,8 @@ export async function attachNotificationHrefs<T extends NotificationReference>(
     .map((notification) => notification.reference_id as string);
 
   let docComments: DocCommentRow[] = [];
-  if (docCommentIds.length) {
-    const { data, error } = await supabase
+  if (db && docCommentIds.length) {
+    const { data, error } = await db
       .from('doc_comments')
       .select('id, doc_id')
       .in('id', docCommentIds);
@@ -51,8 +51,8 @@ export async function attachNotificationHrefs<T extends NotificationReference>(
   const allDocIds = [...new Set([...docIds, ...docComments.map((comment) => comment.doc_id)])];
 
   let docs: DocRow[] = [];
-  if (allDocIds.length) {
-    const { data, error } = await supabase
+  if (db && allDocIds.length) {
+    const { data, error } = await db
       .from('docs')
       .select('id, slug')
       .in('id', allDocIds);

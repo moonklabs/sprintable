@@ -1,15 +1,15 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 const {
-  createSupabaseAdminClientMock,
+  createAdminClientMock,
   listProjectApprovedMcpToolOptionsMock,
 } = vi.hoisted(() => ({
-  createSupabaseAdminClientMock: vi.fn(() => ({ tag: 'admin' })),
+  createAdminClientMock: vi.fn(() => ({ tag: 'admin' })),
   listProjectApprovedMcpToolOptionsMock: vi.fn<(...args: unknown[]) => Promise<Array<{ name: string; serverName: string; groupKind: 'mcp' | 'github' }>>>(async () => []),
 }));
 
-vi.mock('@/lib/supabase/admin', () => ({
-  createSupabaseAdminClient: createSupabaseAdminClientMock,
+vi.mock('@/lib/db/admin', () => ({
+  createAdminClient: createAdminClientMock,
 }));
 
 vi.mock('./project-mcp', () => ({
@@ -55,7 +55,7 @@ type AuditRecord = {
 };
 
 beforeEach(() => {
-  createSupabaseAdminClientMock.mockClear();
+  createAdminClientMock.mockClear();
   listProjectApprovedMcpToolOptionsMock.mockReset();
   listProjectApprovedMcpToolOptionsMock.mockResolvedValue([]);
 });
@@ -83,7 +83,7 @@ function makePersona(overrides: Partial<PersonaRecord>): PersonaRecord {
   };
 }
 
-function createSupabaseStub(initial: {
+function createDbStub(initial: {
   personas: PersonaRecord[];
   llmConfig?: Record<string, unknown> | null;
   deployments?: Array<{ id: string; persona_id: string | null; deleted_at: string | null }>;
@@ -97,7 +97,7 @@ function createSupabaseStub(initial: {
     auditLogs: [...(initial.auditLogs ?? [])],
   };
 
-  const supabase = {
+  const db = {
     from(table: string) {
       if (table === 'team_members') {
         return {
@@ -336,7 +336,7 @@ function createSupabaseStub(initial: {
     },
   };
 
-  return { supabase, state };
+  return { db, state };
 }
 
 describe('AgentPersonaService', () => {
@@ -358,8 +358,8 @@ describe('AgentPersonaService', () => {
       is_builtin: true,
       is_default: true,
     });
-    const { supabase, state } = createSupabaseStub({ personas: [builtinGeneral, builtinDeveloper] });
-    const service = new AgentPersonaService(supabase as never);
+    const { db, state } = createDbStub({ personas: [builtinGeneral, builtinDeveloper] });
+    const service = new AgentPersonaService(db as never);
 
     const persona = await service.createPersona({
       orgId: 'org-1',
@@ -390,10 +390,10 @@ describe('AgentPersonaService', () => {
     listProjectApprovedMcpToolOptionsMock.mockResolvedValue([
       { name: 'external.search_docs', serverName: 'Docs', groupKind: 'mcp' },
     ]);
-    const { supabase } = createSupabaseStub({
+    const { db } = createDbStub({
       personas: [makePersona({ id: 'builtin-general', slug: 'general', is_builtin: true, is_default: true })],
     });
-    const service = new AgentPersonaService(supabase as never);
+    const service = new AgentPersonaService(db as never);
 
     const persona = await service.createPersona({
       orgId: 'org-1',
@@ -410,8 +410,8 @@ describe('AgentPersonaService', () => {
   });
 
   it('rejects unsupported tool allowlist entries', async () => {
-    const { supabase } = createSupabaseStub({ personas: [makePersona({ id: 'builtin-general', slug: 'general', is_builtin: true, is_default: true })] });
-    const service = new AgentPersonaService(supabase as never);
+    const { db } = createDbStub({ personas: [makePersona({ id: 'builtin-general', slug: 'general', is_builtin: true, is_default: true })] });
+    const service = new AgentPersonaService(db as never);
 
     await expect(service.createPersona({
       orgId: 'org-1',
@@ -467,7 +467,7 @@ describe('AgentPersonaService', () => {
       },
     });
 
-    const { supabase } = createSupabaseStub({
+    const { db } = createDbStub({
       personas: [builtinGeneral, builtinDeveloper, customDefault],
       deployments: [{ id: 'deployment-1', persona_id: 'custom-default', deleted_at: null }],
       sessions: [],
@@ -494,7 +494,7 @@ describe('AgentPersonaService', () => {
         created_at: '2026-04-06T12:45:00.000Z',
       }],
     });
-    const service = new AgentPersonaService(supabase as never);
+    const service = new AgentPersonaService(db as never);
 
     const persona = await service.getDefaultPersona({
       orgId: 'org-1',
@@ -537,10 +537,10 @@ describe('AgentPersonaService', () => {
       },
     });
 
-    const { supabase } = createSupabaseStub({
+    const { db } = createDbStub({
       personas: [builtinGeneral, customDefault],
     });
-    const service = new AgentPersonaService(supabase as never);
+    const service = new AgentPersonaService(db as never);
 
     const persona = await service.getDefaultPersona({
       orgId: 'org-1',
@@ -571,10 +571,10 @@ describe('AgentPersonaService', () => {
         },
       },
     });
-    const { supabase, state } = createSupabaseStub({
+    const { db, state } = createDbStub({
       personas: [makePersona({ id: 'builtin-general', slug: 'general', is_builtin: true, is_default: true }), currentPersona],
     });
-    const service = new AgentPersonaService(supabase as never);
+    const service = new AgentPersonaService(db as never);
 
     const persona = await service.updatePersona('custom-dev', {
       orgId: 'org-1',
@@ -623,12 +623,12 @@ describe('AgentPersonaService', () => {
       },
     });
 
-    const { supabase, state } = createSupabaseStub({
+    const { db, state } = createDbStub({
       personas: [builtinGeneral, customDefault],
       deployments: [],
       sessions: [],
     });
-    const service = new AgentPersonaService(supabase as never);
+    const service = new AgentPersonaService(db as never);
 
     const result = await service.deletePersona('custom-default', {
       orgId: 'org-1',

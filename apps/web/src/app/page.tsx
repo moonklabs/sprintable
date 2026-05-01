@@ -1,6 +1,6 @@
 import { redirect } from 'next/navigation';
 import { isOssMode } from '@/lib/storage/factory';
-import { getServerSession } from '@/lib/supabase/server';
+import { getServerSession } from '@/lib/db/server';
 
 export default async function RootPage() {
   if (isOssMode()) {

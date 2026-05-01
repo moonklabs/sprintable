@@ -1,13 +1,13 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
-const { createSupabaseServerClient, getAuthContext, createSupabaseAdminClient } = vi.hoisted(() => ({
-  createSupabaseServerClient: vi.fn(),
+const { createDbServerClient, getAuthContext, createAdminClient } = vi.hoisted(() => ({
+  createDbServerClient: vi.fn(),
   getAuthContext: vi.fn(),
-  createSupabaseAdminClient: vi.fn(),
+  createAdminClient: vi.fn(),
 }));
 
-vi.mock('@/lib/supabase/server', () => ({ createSupabaseServerClient }));
-vi.mock('@/lib/supabase/admin', () => ({ createSupabaseAdminClient }));
+vi.mock('@/lib/db/server', () => ({ createDbServerClient }));
+vi.mock('@/lib/db/admin', () => ({ createAdminClient }));
 vi.mock('@/lib/auth-helpers', () => ({ getAuthContext }));
 
 import { PATCH } from './route';
@@ -48,9 +48,9 @@ function createQueryStub(rows: Record<string, unknown>[]) {
 
 describe('PATCH /api/agent-runs/[id]', () => {
   beforeEach(() => {
-    createSupabaseServerClient.mockReset();
+    createDbServerClient.mockReset();
     getAuthContext.mockReset();
-    createSupabaseAdminClient.mockReset();
+    createAdminClient.mockReset();
     getAuthContext.mockResolvedValue({
       id: 'agent-1',
       type: 'agent',
@@ -64,14 +64,14 @@ describe('PATCH /api/agent-runs/[id]', () => {
     const existingRun = makeRun({ org_id: 'org-1', project_id: 'project-alpha' });
     const updatedRun = makeRun({ status: 'completed' });
     let callCount = 0;
-    const adminSupabase = {
+    const adminDb = {
       from: vi.fn(() => {
         callCount++;
         return createQueryStub(callCount === 1 ? [existingRun] : [updatedRun]);
       }),
     };
-    createSupabaseAdminClient.mockReturnValue(adminSupabase);
-    createSupabaseServerClient.mockResolvedValue({});
+    createAdminClient.mockReturnValue(adminDb);
+    createDbServerClient.mockResolvedValue({});
 
     const response = await PATCH(
       new Request('http://localhost/api/agent-runs/run-1', {
@@ -91,7 +91,7 @@ describe('PATCH /api/agent-runs/[id]', () => {
     const existingRun = makeRun({ org_id: 'org-1', project_id: 'project-alpha' });
     const updatedRun = makeRun({ status: 'failed', retry_count: 1, max_retries: 3 });
     let callCount = 0;
-    const adminSupabase = {
+    const adminDb = {
       from: vi.fn(() => {
         callCount++;
         if (callCount === 1) return createQueryStub([existingRun]); // fetch existing
@@ -99,8 +99,8 @@ describe('PATCH /api/agent-runs/[id]', () => {
         return createQueryStub([updatedRun]); // update next_retry_at
       }),
     };
-    createSupabaseAdminClient.mockReturnValue(adminSupabase);
-    createSupabaseServerClient.mockResolvedValue({});
+    createAdminClient.mockReturnValue(adminDb);
+    createDbServerClient.mockResolvedValue({});
 
     const response = await PATCH(
       new Request('http://localhost/api/agent-runs/run-1', {
@@ -117,9 +117,9 @@ describe('PATCH /api/agent-runs/[id]', () => {
   });
 
   it('returns 400 for missing status', async () => {
-    createSupabaseServerClient.mockResolvedValue({});
-    const adminSupabase = { from: vi.fn(() => createQueryStub([makeRun()])) };
-    createSupabaseAdminClient.mockReturnValue(adminSupabase);
+    createDbServerClient.mockResolvedValue({});
+    const adminDb = { from: vi.fn(() => createQueryStub([makeRun()])) };
+    createAdminClient.mockReturnValue(adminDb);
 
     const response = await PATCH(
       new Request('http://localhost/api/agent-runs/run-1', {
@@ -136,7 +136,7 @@ describe('PATCH /api/agent-runs/[id]', () => {
   });
 
   it('returns 401 when not authenticated', async () => {
-    createSupabaseServerClient.mockResolvedValue({});
+    createDbServerClient.mockResolvedValue({});
     getAuthContext.mockResolvedValue(null);
 
     const response = await PATCH(

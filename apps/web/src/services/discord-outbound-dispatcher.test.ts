@@ -1,5 +1,5 @@
+
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import type { SupabaseClient } from '@supabase/supabase-js';
 import {
   buildDiscordMemoLink,
   buildDiscordOutboundChunks,
@@ -7,7 +7,7 @@ import {
   isDiscordSourceMemo,
 } from './discord-outbound-dispatcher';
 
-function createSupabaseStub(options?: {
+function createDbStub(options?: {
   memo?: Record<string, unknown> | null;
   channelMapping?: Record<string, unknown> | null;
   activeAgent?: Record<string, unknown> | null;
@@ -49,7 +49,7 @@ function createSupabaseStub(options?: {
     expires_at: null,
   };
 
-  const supabase = {
+  const db = {
     channel: vi.fn(() => channel),
     removeChannel: vi.fn(async () => {
       state.removedChannels += 1;
@@ -186,9 +186,9 @@ function createSupabaseStub(options?: {
 
       throw new Error(`Unexpected table: ${table}`);
     },
-  } as unknown as SupabaseClient;
+  } as any;
 
-  return { supabase, state };
+  return { db, state };
 }
 
 afterEach(() => {
@@ -228,9 +228,9 @@ describe('DiscordOutboundDispatcher', () => {
       .mockResolvedValue(new Response(JSON.stringify({ id: 'message-1' }), { status: 200 }))
       .mockResolvedValue(new Response(JSON.stringify({ id: 'message-2' }), { status: 200 }))
       .mockResolvedValue(new Response(JSON.stringify({ id: 'message-3' }), { status: 200 }));
-    const { supabase, state } = createSupabaseStub();
+    const { db, state } = createDbStub();
     const dispatcher = new DiscordOutboundDispatcher({
-      supabase,
+      db,
       fetchFn: fetchFn as typeof fetch,
       appUrl: 'https://app.example.com',
       retryDelayMs: 0,
@@ -258,14 +258,14 @@ describe('DiscordOutboundDispatcher', () => {
   });
 
   it('records auth_failed and notifies admins when the Discord token is expired', async () => {
-    const { supabase, state } = createSupabaseStub({
+    const { db, state } = createDbStub({
       auth: {
         org_id: 'org-1',
         access_token_ref: 'env:DISCORD_BOT_TOKEN',
         expires_at: '2026-04-07T00:00:00.000Z',
       },
     });
-    const dispatcher = new DiscordOutboundDispatcher({ supabase, retryDelayMs: 0 });
+    const dispatcher = new DiscordOutboundDispatcher({ db, retryDelayMs: 0 });
 
     const result = await dispatcher.dispatchReplyIfNeeded({
       id: 'reply-2',

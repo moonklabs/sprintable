@@ -1,9 +1,7 @@
-import { createSupabaseServerClient } from '@/lib/supabase/server';
 import { handleApiError } from '@/lib/api-error';
 import { apiSuccess, apiError, ApiErrors } from '@/lib/api-response';
 import { getAuthContext } from '@/lib/auth-helpers';
-import { isOssMode } from '@/lib/storage/factory';
-import { requireRole, ADMIN_ROLES } from '@/lib/role-guard';
+import { createProjectRepository } from '@/lib/storage/factory';
 import { z } from 'zod/v4';
 
 type RouteParams = { params: Promise<{ id: string }> };
@@ -17,18 +15,11 @@ const updateProjectSchema = z.object({
 export async function GET(request: Request, { params }: RouteParams) {
   try {
     const { id } = await params;
-    const supabase = await createSupabaseServerClient();
-    const me = await getAuthContext(supabase, request);
+    const me = await getAuthContext(request);
     if (!me) return ApiErrors.unauthorized();
 
-    const { data: project, error } = await supabase
-      .from('projects')
-      .select('id, name, description, org_id, created_at, updated_at')
-      .eq('id', id)
-      .eq('org_id', me.org_id)
-      .maybeSingle();
-
-    if (error) throw error;
+    const repo = await createProjectRepository();
+    const project = await repo.getById(id);
     if (!project) return ApiErrors.notFound('Project not found');
 
     return apiSuccess(project);
@@ -37,27 +28,13 @@ export async function GET(request: Request, { params }: RouteParams) {
   }
 }
 
-// PATCH /api/projects/:id — owner/admin only
+// PATCH /api/projects/:id
 export async function PATCH(request: Request, { params }: RouteParams) {
   try {
     const { id } = await params;
-    const supabase = await createSupabaseServerClient();
-    const me = await getAuthContext(supabase, request);
+    const me = await getAuthContext(request);
     if (!me) return ApiErrors.unauthorized();
     if (me.rateLimitExceeded) return ApiErrors.tooManyRequests(me.rateLimitRemaining, me.rateLimitResetAt);
-
-    const { data: project } = await supabase
-      .from('projects')
-      .select('org_id')
-      .eq('id', id)
-      .maybeSingle();
-
-    if (!project) return ApiErrors.notFound('Project not found');
-
-    if (!isOssMode() && me.type !== 'agent') {
-      const denied = await requireRole(supabase, project.org_id as string, ADMIN_ROLES, 'Admin access required');
-      if (denied) return denied;
-    }
 
     let body: unknown;
     try { body = await request.json(); } catch { return apiError('BAD_REQUEST', 'At least one field required', 400); }
@@ -69,49 +46,35 @@ export async function PATCH(request: Request, { params }: RouteParams) {
       return apiError('BAD_REQUEST', 'At least one field required', 400);
     }
 
-    const { data: updated, error } = await supabase
-      .from('projects')
-      .update({ ...(update.name ? { name: update.name } : {}), ...(update.description !== undefined ? { description: update.description } : {}) })
-      .eq('id', id)
-      .select('id, name, description, org_id, created_at, updated_at')
-      .single();
+    const repo = await createProjectRepository();
+    const existing = await repo.getById(id);
+    if (!existing) return ApiErrors.notFound('Project not found');
 
-    if (error) throw error;
+    const updated = await repo.update(id, {
+      ...(update.name ? { name: update.name } : {}),
+      ...(update.description !== undefined ? { description: update.description } : {}),
+    });
+
     return apiSuccess(updated);
   } catch (err: unknown) {
     return handleApiError(err);
   }
 }
 
-// DELETE /api/projects/:id — soft delete (owner/admin only)
+// DELETE /api/projects/:id — soft delete
 export async function DELETE(request: Request, { params }: RouteParams) {
   try {
     const { id } = await params;
-    const supabase = await createSupabaseServerClient();
-    const me = await getAuthContext(supabase, request);
+    const me = await getAuthContext(request);
     if (!me) return ApiErrors.unauthorized();
     if (me.rateLimitExceeded) return ApiErrors.tooManyRequests(me.rateLimitRemaining, me.rateLimitResetAt);
 
-    const { data: project } = await supabase
-      .from('projects')
-      .select('org_id')
-      .eq('id', id)
-      .is('deleted_at', null)
-      .maybeSingle();
+    const { OSS_ORG_ID } = await import('@sprintable/storage-sqlite');
+    const repo = await createProjectRepository();
+    const existing = await repo.getById(id);
+    if (!existing) return ApiErrors.notFound('Project not found');
 
-    if (!project) return ApiErrors.notFound('Project not found');
-
-    if (!isOssMode() && me.type !== 'agent') {
-      const denied = await requireRole(supabase, project.org_id as string, ADMIN_ROLES, 'Admin access required');
-      if (denied) return denied;
-    }
-
-    const { error } = await supabase
-      .from('projects')
-      .update({ deleted_at: new Date().toISOString() })
-      .eq('id', id);
-
-    if (error) throw error;
+    await repo.delete(id, OSS_ORG_ID);
     return apiSuccess({ id });
   } catch (err: unknown) {
     return handleApiError(err);

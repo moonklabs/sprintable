@@ -1,4 +1,4 @@
-import type { SupabaseClient } from '@supabase/supabase-js';
+
 import { z } from 'zod';
 import { AgentToolExecutionEngine, type ToolRegistry } from './agent-tool-execution-engine';
 import { AgentRetryService, type RetryScheduler } from './agent-retry';
@@ -309,7 +309,7 @@ export class AgentExecutionLoop {
   private readonly AUDIT_FLUSH_THRESHOLD = 10;
 
   constructor(
-    private readonly supabase: SupabaseClient,
+    private readonly db: any,
     deps: AgentExecutionLoopDependencies = {},
     logger: Logger = console,
   ) {
@@ -317,11 +317,11 @@ export class AgentExecutionLoop {
     this.resolveLLMConfigFn = deps.resolveLLMConfigFn ?? resolveLLMConfig;
     this.createLLMClientFn = deps.createLLMClientFn ?? createLLMClient;
     this.getManagedPricingRowFn = deps.getManagedPricingRowFn ?? getManagedPricingRow;
-    this.retryService = deps.retryService ?? new AgentRetryService(supabase);
+    this.retryService = deps.retryService ?? new AgentRetryService(db);
     this.fireWebhooksFn = deps.fireWebhooksFn ?? fireWebhooks;
-    this.memoService = deps.memoService ?? MemoService.fromSupabase(supabase);
-    this.projectContextLoader = deps.projectContextLoader ?? new ProjectContextLoader(supabase);
-    this.toolExecutionEngine = deps.toolExecutionEngine ?? new AgentToolExecutionEngine(supabase, {
+    this.memoService = deps.memoService ?? MemoService.fromDb(db);
+    this.projectContextLoader = deps.projectContextLoader ?? new ProjectContextLoader(db);
+    this.toolExecutionEngine = deps.toolExecutionEngine ?? new AgentToolExecutionEngine(db, {
       auditLogger: (eventType, severity, payload) => this.logAudit(
         String(payload.org_id),
         String(payload.project_id),
@@ -331,11 +331,11 @@ export class AgentExecutionLoop {
         payload,
       ),
     });
-    this.billingLimitEnforcer = deps.billingLimitEnforcer ?? new BillingLimitEnforcer(supabase, {
+    this.billingLimitEnforcer = deps.billingLimitEnforcer ?? new BillingLimitEnforcer(db, {
       fireWebhooksFn: this.fireWebhooksFn,
     });
-    this.sessionLifecycle = deps.sessionLifecycle ?? new AgentSessionLifecycleService(supabase);
-    this.hitlPolicyService = deps.hitlPolicyService ?? new AgentHitlPolicyService(supabase);
+    this.sessionLifecycle = deps.sessionLifecycle ?? new AgentSessionLifecycleService(db);
+    this.hitlPolicyService = deps.hitlPolicyService ?? new AgentHitlPolicyService(db);
   }
 
   async execute(input: AgentExecutionInput): Promise<AgentExecutionResult> {
@@ -922,7 +922,7 @@ export class AgentExecutionLoop {
     nextAgentId: string;
     ruleId?: string;
   }) {
-    const { data, error } = await this.supabase
+    const { data, error } = await this.db
       .from('team_members')
       .select('id, type, is_active')
       .eq('id', input.nextAgentId)
@@ -941,7 +941,7 @@ export class AgentExecutionLoop {
 
   private async ensureSession(run: AgentRunRecord, memo: MemoRecord, agent: TeamMemberRecord, personaId: string | null): Promise<string> {
     const sessionKey = `memo:${memo.id}`;
-    const { data: existing } = await this.supabase
+    const { data: existing } = await this.db
       .from('agent_sessions')
       .select('id')
       .eq('org_id', run.org_id)
@@ -952,14 +952,14 @@ export class AgentExecutionLoop {
       .maybeSingle();
 
     if (existing?.id) {
-      await this.supabase
+      await this.db
         .from('agent_sessions')
         .update({ last_activity_at: new Date().toISOString() })
         .eq('id', existing.id);
       return existing.id as string;
     }
 
-    const { data, error } = await this.supabase
+    const { data, error } = await this.db
       .from('agent_sessions')
       .insert({
         org_id: run.org_id,
@@ -988,7 +988,7 @@ export class AgentExecutionLoop {
     memoryType: 'context' | 'summary' | 'decision' | 'todo' | 'fact';
     content: string;
   }) {
-    await this.supabase.from('agent_session_memories').insert(createSessionMemoryWrite({
+    await this.db.from('agent_session_memories').insert(createSessionMemoryWrite({
       scope: input.scope,
       runId: input.runId,
       memoryType: input.memoryType,
@@ -1036,7 +1036,7 @@ export class AgentExecutionLoop {
     let hitlMemoId: string | null = null;
 
     try {
-      const { data, error } = await this.supabase
+      const { data, error } = await this.db
         .from('agent_hitl_requests')
         .insert({
           org_id: run.org_id,
@@ -1091,7 +1091,7 @@ export class AgentExecutionLoop {
       });
       hitlMemoId = hitlMemo.id as string;
 
-      const { error: hitlUpdateError } = await this.supabase
+      const { error: hitlUpdateError } = await this.db
         .from('agent_hitl_requests')
         .update({
           metadata: {
@@ -1115,7 +1115,7 @@ export class AgentExecutionLoop {
         timeout_class: timeoutClass.key,
       });
 
-      await notifySlackHitlRequest(this.supabase, {
+      await notifySlackHitlRequest(this.db, {
         request: {
           id: hitlRequestId,
           org_id: run.org_id,
@@ -1154,7 +1154,7 @@ export class AgentExecutionLoop {
     const cleanupErrors: string[] = [];
 
     if (hitlRequestId) {
-      const { error } = await this.supabase
+      const { error } = await this.db
         .from('agent_hitl_requests')
         .delete()
         .eq('id', hitlRequestId);
@@ -1162,7 +1162,7 @@ export class AgentExecutionLoop {
     }
 
     if (hitlMemoId) {
-      const { error } = await this.supabase
+      const { error } = await this.db
         .from('memos')
         .delete()
         .eq('id', hitlMemoId);
@@ -1220,7 +1220,7 @@ export class AgentExecutionLoop {
     const normalizedInputTokens = totalInputTokens === 0 && totalOutputTokens === 0 ? null : totalInputTokens;
     const normalizedOutputTokens = totalInputTokens === 0 && totalOutputTokens === 0 ? null : totalOutputTokens;
     const pricingRow = llmConfig.billingMode === 'managed'
-      ? await this.getManagedPricingRowFn(this.supabase, llmConfig.provider, String(llmConfig.model))
+      ? await this.getManagedPricingRowFn(this.db, llmConfig.provider, String(llmConfig.model))
       : null;
 
     if (llmConfig.billingMode === 'managed' && !pricingRow) {
@@ -1243,7 +1243,7 @@ export class AgentExecutionLoop {
   }
 
   private async getHitlRecipient(memo: MemoRecord): Promise<string> {
-    const { data: creator } = await this.supabase
+    const { data: creator } = await this.db
       .from('team_members')
       .select('id, user_id, type, org_id, project_id, is_active')
       .eq('id', memo.created_by)
@@ -1252,7 +1252,7 @@ export class AgentExecutionLoop {
       .maybeSingle();
 
     if (creator?.id && creator.type === 'human' && creator.user_id && creator.is_active) {
-      const { data: creatorOrgMember } = await this.supabase
+      const { data: creatorOrgMember } = await this.db
         .from('org_members')
         .select('role')
         .eq('org_id', memo.org_id)
@@ -1269,7 +1269,7 @@ export class AgentExecutionLoop {
   }
 
   private async listHitlAdminRecipients(orgId: string, projectId: string): Promise<TeamMemberRecord[]> {
-    const { data: orgMembers, error: orgMembersError } = await this.supabase
+    const { data: orgMembers, error: orgMembersError } = await this.db
       .from('org_members')
       .select('user_id')
       .eq('org_id', orgId)
@@ -1283,7 +1283,7 @@ export class AgentExecutionLoop {
 
     if (adminUserIds.length === 0) return [];
 
-    const { data: teamMembers, error: teamMembersError } = await this.supabase
+    const { data: teamMembers, error: teamMembersError } = await this.db
       .from('team_members')
       .select('id, org_id, project_id, type, name, user_id, is_active')
       .eq('org_id', orgId)
@@ -1386,7 +1386,7 @@ export class AgentExecutionLoop {
 
     const retry = await this.retryService.scheduleRetry(run.id);
     if (!retry.scheduled) {
-      await this.fireWebhooksFn(this.supabase, run.org_id, {
+      await this.fireWebhooksFn(this.db, run.org_id, {
         event: 'agent_run.final_failure',
         data: {
           run_id: run.id,
@@ -1440,7 +1440,7 @@ export class AgentExecutionLoop {
   }
 
   private async persistRunProgress(runId: string, patch: Record<string, unknown>) {
-    const { error } = await this.supabase
+    const { error } = await this.db
       .from('agent_runs')
       .update(patch)
       .eq('id', runId);
@@ -1481,7 +1481,7 @@ export class AgentExecutionLoop {
   private async flushAuditBuffer() {
     if (!this.auditBuffer.length) return;
     const entries = this.auditBuffer.splice(0);
-    const { error } = await this.supabase.from('agent_audit_logs').insert(entries);
+    const { error } = await this.db.from('agent_audit_logs').insert(entries);
     if (error) {
       this.logger.error('[AgentExecutionLoop] Failed to bulk insert audit logs:', error.message);
     }
@@ -1490,7 +1490,7 @@ export class AgentExecutionLoop {
 
   private async listSessionMemories(scope: AgentSessionMemoryScope): Promise<{ memories: PromptMemoryRecord[]; queriedCount: number; blockedCount: number }> {
     const [{ data: exactData, error: exactError }, { data: diagnosticData, error: diagnosticError }] = await Promise.all([
-      this.supabase
+      this.db
         .from('agent_session_memories')
         .select('id, org_id, project_id, agent_id, session_id, memory_type, importance, content, created_at')
         .eq('org_id', scope.orgId)
@@ -1501,7 +1501,7 @@ export class AgentExecutionLoop {
         .order('importance', { ascending: false })
         .order('created_at', { ascending: false })
         .limit(PROMPT_MEMORY_LIMIT),
-      this.supabase
+      this.db
         .from('agent_session_memories')
         .select('id, org_id, project_id, agent_id, session_id, memory_type, importance, content, created_at')
         .eq('org_id', scope.orgId)
@@ -1555,7 +1555,7 @@ export class AgentExecutionLoop {
 
   private async listLongTermMemories(scope: AgentMemoryProjectScope): Promise<{ memories: PromptMemoryRecord[]; queriedCount: number; blockedCount: number }> {
     const [{ data: exactData, error: exactError }, { data: diagnosticData, error: diagnosticError }] = await Promise.all([
-      this.supabase
+      this.db
         .from('agent_long_term_memories')
         .select('id, org_id, project_id, agent_id, memory_type, importance, content, created_at')
         .eq('org_id', scope.orgId)
@@ -1565,7 +1565,7 @@ export class AgentExecutionLoop {
         .order('importance', { ascending: false })
         .order('created_at', { ascending: false })
         .limit(PROMPT_MEMORY_LIMIT),
-      this.supabase
+      this.db
         .from('agent_long_term_memories')
         .select('id, org_id, project_id, agent_id, memory_type, importance, content, created_at')
         .eq('org_id', scope.orgId)
@@ -1614,7 +1614,7 @@ export class AgentExecutionLoop {
   }
 
   private async getRun(runId: string): Promise<AgentRunRecord> {
-    const { data, error } = await this.supabase
+    const { data, error } = await this.db
       .from('agent_runs')
       .select('id, org_id, project_id, agent_id, memo_id, deployment_id, session_id, status, per_run_cap_cents, retry_count, max_retries, started_at, finished_at, result_summary, last_error_code, error_message, next_retry_at, failure_disposition')
       .eq('id', runId)
@@ -1624,7 +1624,7 @@ export class AgentExecutionLoop {
   }
 
   private async getMemo(memoId: string): Promise<MemoRecord> {
-    const { data, error } = await this.supabase
+    const { data, error } = await this.db
       .from('memos')
       .select('id, org_id, project_id, title, content, memo_type, status, assigned_to, created_by, created_at, updated_at, metadata')
       .eq('id', memoId)
@@ -1634,7 +1634,7 @@ export class AgentExecutionLoop {
   }
 
   private async getMemoReplies(memoId: string): Promise<MemoReplyRecord[]> {
-    const { data, error } = await this.supabase
+    const { data, error } = await this.db
       .from('memo_replies')
       .select('id, memo_id, content, created_by, created_at')
       .eq('memo_id', memoId)
@@ -1644,7 +1644,7 @@ export class AgentExecutionLoop {
   }
 
   private async getAgent(agentId: string): Promise<TeamMemberRecord> {
-    const { data, error } = await this.supabase
+    const { data, error } = await this.db
       .from('team_members')
       .select('id, org_id, project_id, type, name')
       .eq('id', agentId)
@@ -1659,7 +1659,7 @@ export class AgentExecutionLoop {
     agentId: string,
     deploymentId: string,
   ): Promise<AgentDeploymentRuntimeRecord | null> {
-    const { data, error } = await this.supabase
+    const { data, error } = await this.db
       .from('agent_deployments')
       .select('id, org_id, project_id, agent_id, persona_id, model, status, config')
       .eq('id', deploymentId)
@@ -1678,7 +1678,7 @@ export class AgentExecutionLoop {
   }
 
   private async getPersonaById(personaId: string, orgId: string, projectId: string, agentId: string): Promise<AgentPersonaRecord | null> {
-    const persona = await new AgentPersonaService(this.supabase).getPersonaById(personaId, {
+    const persona = await new AgentPersonaService(this.db).getPersonaById(personaId, {
       orgId,
       projectId,
       agentId,
@@ -1696,7 +1696,7 @@ export class AgentExecutionLoop {
   }
 
   private async getDefaultPersona(orgId: string, projectId: string, agentId: string): Promise<AgentPersonaRecord | null> {
-    const persona = await new AgentPersonaService(this.supabase).getDefaultPersona({
+    const persona = await new AgentPersonaService(this.db).getDefaultPersona({
       orgId,
       projectId,
       agentId,

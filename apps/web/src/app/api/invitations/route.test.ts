@@ -1,11 +1,11 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
-const { createSupabaseServerClient } = vi.hoisted(() => ({
-  createSupabaseServerClient: vi.fn(),
+const { createDbServerClient } = vi.hoisted(() => ({
+  createDbServerClient: vi.fn(),
 }));
 
-vi.mock('@/lib/supabase/server', () => ({
-  createSupabaseServerClient,
+vi.mock('@/lib/db/server', () => ({
+  createDbServerClient,
 }));
 
 import { GET, POST } from './route';
@@ -19,7 +19,7 @@ function makeChain(result: unknown) {
   return chain;
 }
 
-function createSupabaseStub(orgMemberResult: unknown, invitationsResult = { data: [], error: null }) {
+function createDbStub(orgMemberResult: unknown, invitationsResult = { data: [], error: null }) {
   const orgMemberChain = makeChain(orgMemberResult);
   const invitationsChain = makeChain(invitationsResult);
   (invitationsChain['order'] as ReturnType<typeof vi.fn>).mockResolvedValue(invitationsResult);
@@ -38,54 +38,54 @@ function createSupabaseStub(orgMemberResult: unknown, invitationsResult = { data
 
 describe('GET /api/invitations', () => {
   beforeEach(() => {
-    createSupabaseServerClient.mockReset();
+    createDbServerClient.mockReset();
   });
 
   it('returns 200 and invitation list for org owner (single project)', async () => {
-    createSupabaseServerClient.mockResolvedValue(
-      createSupabaseStub({ data: { org_id: 'org-1', role: 'owner' } }),
+    createDbServerClient.mockResolvedValue(
+      createDbStub({ data: { org_id: 'org-1', role: 'owner' } }),
     );
 
-    const res = await GET();
+    const res = await GET(new Request('http://test'));
     expect(res.status).toBe(200);
   });
 
   it('returns 200 for owner with multiple project memberships — regression for E-023:S6', async () => {
     // 다중 프로젝트 사용자도 org_members.role=owner 이면 admin 섹션 접근 가능해야 함
-    createSupabaseServerClient.mockResolvedValue(
-      createSupabaseStub({ data: { org_id: 'org-1', role: 'owner' } }),
+    createDbServerClient.mockResolvedValue(
+      createDbStub({ data: { org_id: 'org-1', role: 'owner' } }),
     );
 
-    const res = await GET();
+    const res = await GET(new Request('http://test'));
     expect(res.status).toBe(200);
   });
 
   it('returns 403 for non-admin org member', async () => {
-    createSupabaseServerClient.mockResolvedValue(
-      createSupabaseStub({ data: { org_id: 'org-1', role: 'member' } }),
+    createDbServerClient.mockResolvedValue(
+      createDbStub({ data: { org_id: 'org-1', role: 'member' } }),
     );
 
-    const res = await GET();
+    const res = await GET(new Request('http://test'));
     expect(res.status).toBe(403);
   });
 
   it('returns 403 when org_members record not found', async () => {
-    createSupabaseServerClient.mockResolvedValue(
-      createSupabaseStub({ data: null }),
+    createDbServerClient.mockResolvedValue(
+      createDbStub({ data: null }),
     );
 
-    const res = await GET();
+    const res = await GET(new Request('http://test'));
     expect(res.status).toBe(403);
   });
 });
 
 describe('POST /api/invitations', () => {
   beforeEach(() => {
-    createSupabaseServerClient.mockReset();
+    createDbServerClient.mockReset();
   });
 
   it('returns validation errors for malformed payloads', async () => {
-    createSupabaseServerClient.mockResolvedValue({
+    createDbServerClient.mockResolvedValue({
       auth: {
         getUser: vi.fn().mockResolvedValue({ data: { user: { id: 'user-1' } } }),
       },

@@ -1,6 +1,4 @@
 import { parseBody, createRetroSchema } from '@sprintable/shared';
-import { createSupabaseServerClient } from '@/lib/supabase/server';
-import { createSupabaseAdminClient } from '@/lib/supabase/admin';
 import { RetroService } from '@/services/retro';
 import { handleApiError } from '@/lib/api-error';
 import { getAuthContext } from '@/lib/auth-helpers';
@@ -10,8 +8,7 @@ import { listOssRetroSessions, createOssRetroSession } from '@/lib/oss-retro';
 
 export async function GET(request: Request) {
   try {
-    const supabase = await createSupabaseServerClient();
-    const me = await getAuthContext(supabase, request);
+    const me = await getAuthContext(request);
     if (!me) return ApiErrors.unauthorized();
     if (me.rateLimitExceeded) return ApiErrors.tooManyRequests(me.rateLimitRemaining, me.rateLimitResetAt);
     const { searchParams } = new URL(request.url);
@@ -20,7 +17,7 @@ export async function GET(request: Request) {
     if (isOssMode()) {
       return apiSuccess(await listOssRetroSessions(projectId));
     }
-    const dbClient = me.type === 'agent' ? createSupabaseAdminClient() : supabase;
+    const dbClient = undefined;
     const service = new RetroService(dbClient);
     return apiSuccess(await service.getSessions(projectId));
   } catch (err: unknown) { return handleApiError(err); }
@@ -28,8 +25,7 @@ export async function GET(request: Request) {
 
 export async function POST(request: Request) {
   try {
-    const supabase = await createSupabaseServerClient();
-    const me = await getAuthContext(supabase, request);
+    const me = await getAuthContext(request);
     if (!me) return ApiErrors.unauthorized();
     if (me.rateLimitExceeded) return ApiErrors.tooManyRequests(me.rateLimitRemaining, me.rateLimitResetAt);
     const parsed = await parseBody(request, createRetroSchema); if (!parsed.success) return parsed.response; const body = parsed.data;
@@ -43,7 +39,7 @@ export async function POST(request: Request) {
       });
       return apiSuccess(session, undefined, 201);
     }
-    const dbClient = me.type === 'agent' ? createSupabaseAdminClient() : supabase;
+    const dbClient = undefined;
     const service = new RetroService(dbClient);
     const session = await service.createSession({
       org_id: me.org_id, project_id: body.project_id ?? me.project_id,

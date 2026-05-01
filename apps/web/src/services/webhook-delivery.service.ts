@@ -1,4 +1,4 @@
-import type { SupabaseClient } from '@supabase/supabase-js';
+
 
 const BACKOFF_DELAYS_MS = [0, 1_000, 4_000] as const; // attempt 0,1,2 전 대기
 const MAX_ATTEMPTS = 3;
@@ -14,13 +14,13 @@ export interface WebhookDispatchInput {
 }
 
 export class WebhookDeliveryService {
-  constructor(private readonly supabase: SupabaseClient) {}
+  constructor(private readonly db: any) {}
 
   async dispatch(input: WebhookDispatchInput): Promise<boolean> {
     const { org_id, webhook_config_id, event_type, url, headers, body } = input;
     const fetchFn = input.fetchFn ?? fetch;
 
-    const { data: delivery, error: insertError } = await this.supabase
+    const { data: delivery, error: insertError } = await this.db
       .from('webhook_deliveries')
       .insert({ org_id, webhook_config_id, event_type, payload: { url, body } })
       .select('id')
@@ -50,7 +50,7 @@ export class WebhookDeliveryService {
       }
 
       if (deliveryId) {
-        await this.supabase
+        await this.db
           .from('webhook_deliveries')
           .update({ attempts: attempt + 1 })
           .eq('id', deliveryId);
@@ -66,7 +66,7 @@ export class WebhookDeliveryService {
 
         if (response.ok) {
           if (deliveryId) {
-            await this.supabase
+            await this.db
               .from('webhook_deliveries')
               .update({ status: 'success', delivered_at: new Date().toISOString() })
               .eq('id', deliveryId);
@@ -80,7 +80,7 @@ export class WebhookDeliveryService {
       }
 
       if (deliveryId) {
-        await this.supabase
+        await this.db
           .from('webhook_deliveries')
           .update({ last_error: lastError })
           .eq('id', deliveryId);
@@ -88,7 +88,7 @@ export class WebhookDeliveryService {
     }
 
     if (deliveryId) {
-      await this.supabase
+      await this.db
         .from('webhook_deliveries')
         .update({ status: 'failed', last_error: lastError })
         .eq('id', deliveryId);

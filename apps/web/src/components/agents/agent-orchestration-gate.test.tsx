@@ -2,28 +2,28 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { renderToStaticMarkup } from 'react-dom/server';
 
 const {
-  createSupabaseServerClient,
+  createDbServerClient,
   checkFeatureLimit,
   getTranslations,
 } = vi.hoisted(() => ({
-  createSupabaseServerClient: vi.fn(),
+  createDbServerClient: vi.fn(),
   checkFeatureLimit: vi.fn(),
   getTranslations: vi.fn(),
 }));
 
 vi.mock('next-intl/server', () => ({ getTranslations }));
-vi.mock('@/lib/supabase/server', () => ({ createSupabaseServerClient }));
+vi.mock('@/lib/db/server', () => ({ createDbServerClient }));
 vi.mock('@/lib/check-feature', () => ({ checkFeatureLimit }));
 
 import { AgentOrchestrationGate } from './agent-orchestration-gate';
 
 describe('AgentOrchestrationGate', () => {
   beforeEach(() => {
-    createSupabaseServerClient.mockReset();
+    createDbServerClient.mockReset();
     checkFeatureLimit.mockReset();
     getTranslations.mockReset();
 
-    createSupabaseServerClient.mockResolvedValue({});
+    createDbServerClient.mockResolvedValue({});
     getTranslations.mockResolvedValue((key: string) => ({
       orchestrationGateTitle: 'Agent orchestration requires Team',
       orchestrationGateDescription: 'Upgrade to unlock deployments, personas, and workflow routing.',

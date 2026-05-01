@@ -1,6 +1,5 @@
-import type { SupabaseClient } from '@supabase/supabase-js';
-import { createSupabaseServerClient } from '@/lib/supabase/server';
-import { createSupabaseAdminClient } from '@/lib/supabase/admin';
+
+import { createAdminClient } from '@/lib/db/admin';
 import { handleApiError } from '@/lib/api-error';
 import { apiSuccess, ApiErrors } from '@/lib/api-response';
 import { getAuthContext } from '@/lib/auth-helpers';
@@ -11,11 +10,10 @@ type RouteParams = { params: Promise<{ id: string }> };
 export async function GET(request: Request, { params }: RouteParams) {
   try {
     const { id } = await params;
-    const supabase = await createSupabaseServerClient();
-    const me = await getAuthContext(supabase, request);
+    const me = await getAuthContext(request);
     if (!me) return ApiErrors.unauthorized();
     if (me.rateLimitExceeded) return ApiErrors.tooManyRequests(me.rateLimitRemaining, me.rateLimitResetAt);
-    const dbClient: SupabaseClient = me.type === 'agent' ? createSupabaseAdminClient() : supabase;
+    const dbClient: any = me.type === 'agent' ? createAdminClient() : undefined;
 
     const { data, error } = await dbClient
       .from('sprints')

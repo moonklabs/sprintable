@@ -31,7 +31,7 @@ import { PageHeader } from '@/components/ui/page-header';
 import { SectionCard, SectionCardBody, SectionCardHeader } from '@/components/ui/section-card';
 import { ToastContainer, useToast } from '@/components/ui/toast';
 import { getRollbackSnapshotFromRules, type RoutingRuleSummary, type WorkflowVersionSummary } from '@/services/agent-routing-rule';
-import { createSupabaseBrowserClient } from '@/lib/supabase/client';
+import { createBrowserClient } from '@/lib/db/client';
 import {
   WORKFLOW_MEMO_TYPE_OPTIONS,
   WORKFLOW_ORIGINAL_ASSIGNEE_ID,
@@ -555,8 +555,8 @@ function AgentWorkflowEditorInner({ initialMembers, initialRules, projectName }:
   // ─── API actions ───────────────────────────────────────────────────────────
 
   const getAuthHeaders = async (): Promise<Record<string, string>> => {
-    const supabase = createSupabaseBrowserClient();
-    const { data: { session } } = await supabase.auth.getSession();
+    const db = createBrowserClient();
+    const { data: { session } } = await db.auth.getSession();
     return session?.access_token ? { Authorization: `Bearer ${session.access_token}` } : {};
   };
 

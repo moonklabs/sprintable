@@ -2,7 +2,7 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { KmsServiceError } from '@/lib/kms';
 
 const {
-  createSupabaseServerClient,
+  createDbServerClient,
   getMyTeamMember,
   requireOrgAdmin,
   getProjectAiSettingsWithIntegration,
@@ -10,7 +10,7 @@ const {
   decryptProjectSecret,
   persistProjectAiSettingsWithEncryptedSecret,
 } = vi.hoisted(() => ({
-  createSupabaseServerClient: vi.fn(),
+  createDbServerClient: vi.fn(),
   getMyTeamMember: vi.fn(),
   requireOrgAdmin: vi.fn(),
   getProjectAiSettingsWithIntegration: vi.fn(),
@@ -19,8 +19,8 @@ const {
   persistProjectAiSettingsWithEncryptedSecret: vi.fn(),
 }));
 
-vi.mock('@/lib/supabase/server', () => ({
-  createSupabaseServerClient,
+vi.mock('@/lib/db/server', () => ({
+  createDbServerClient,
 }));
 
 vi.mock('@/lib/auth-helpers', async () => {
@@ -46,7 +46,7 @@ vi.mock('@/lib/llm/project-ai-settings', () => ({
 
 import { DELETE, GET, PUT } from './route';
 
-function createSupabaseStub() {
+function createDbStub() {
   const projectUpsertSpy = vi.fn();
   const rotationUpdateSpy = vi.fn();
   const deploymentUpdateSpy = vi.fn();
@@ -123,7 +123,7 @@ function createSupabaseStub() {
 
   let orgIntegrationFromCount = 0;
 
-  const supabase = {
+  const db = {
     auth: {
       getUser: vi.fn().mockResolvedValue({ data: { user: { id: 'user-1' } } }),
     },
@@ -139,7 +139,7 @@ function createSupabaseStub() {
   };
 
   return {
-    supabase,
+    db,
     projectUpsertSpy,
     rotationUpdateSpy,
     deploymentUpdateSpy,
@@ -159,8 +159,8 @@ beforeEach(() => {
 
 describe('GET /api/projects/[id]/ai-settings', () => {
   it('returns masked BYOM metadata from org_integrations, not plaintext api_key', async () => {
-    const { supabase } = createSupabaseStub();
-    createSupabaseServerClient.mockResolvedValue(supabase);
+    const { db } = createDbStub();
+    createDbServerClient.mockResolvedValue(db);
     getProjectAiSettingsWithIntegration.mockResolvedValue({
       settings: {
         id: 'setting-1',
@@ -186,8 +186,8 @@ describe('GET /api/projects/[id]/ai-settings', () => {
   });
 
   it('returns a safe 503 message when KMS is unavailable', async () => {
-    const { supabase } = createSupabaseStub();
-    createSupabaseServerClient.mockResolvedValue(supabase);
+    const { db } = createDbStub();
+    createDbServerClient.mockResolvedValue(db);
     getProjectAiSettingsWithIntegration.mockResolvedValue({
       settings: { org_id: 'org-1', project_id: 'project-1', provider: 'openai', api_key: null, llm_config: {} },
       integration: { secret_last4: '1234', encrypted_secret: 'encrypted' },
@@ -206,8 +206,8 @@ describe('GET /api/projects/[id]/ai-settings', () => {
 
 describe('PUT /api/projects/[id]/ai-settings', () => {
   it('returns validation errors for malformed payloads', async () => {
-    const { supabase } = createSupabaseStub();
-    createSupabaseServerClient.mockResolvedValue(supabase);
+    const { db } = createDbStub();
+    createDbServerClient.mockResolvedValue(db);
 
     const response = await PUT(new Request('http://localhost/api/projects/project-1/ai-settings', {
       method: 'PUT',
@@ -223,8 +223,8 @@ describe('PUT /api/projects/[id]/ai-settings', () => {
   });
 
   it('requires a fresh api_key when the provider changes', async () => {
-    const { supabase, projectUpsertSpy } = createSupabaseStub();
-    createSupabaseServerClient.mockResolvedValue(supabase);
+    const { db, projectUpsertSpy } = createDbStub();
+    createDbServerClient.mockResolvedValue(db);
     getProjectAiSettingsWithIntegration.mockResolvedValue({
       settings: {
         org_id: 'org-1',
@@ -250,8 +250,8 @@ describe('PUT /api/projects/[id]/ai-settings', () => {
   });
 
   it('rejects direct legacy MCP configuration writes', async () => {
-    const { supabase, projectUpsertSpy } = createSupabaseStub();
-    createSupabaseServerClient.mockResolvedValue(supabase);
+    const { db, projectUpsertSpy } = createDbStub();
+    createDbServerClient.mockResolvedValue(db);
     getProjectAiSettingsWithIntegration.mockResolvedValue({ settings: null, integration: null });
 
     const response = await PUT(new Request('http://localhost/api/projects/project-1/ai-settings', {
@@ -285,8 +285,8 @@ describe('PUT /api/projects/[id]/ai-settings', () => {
   });
 
   it('stores encrypted BYOM metadata atomically without persisting plaintext to project_ai_settings', async () => {
-    const { supabase, projectUpsertSpy } = createSupabaseStub();
-    createSupabaseServerClient.mockResolvedValue(supabase);
+    const { db, projectUpsertSpy } = createDbStub();
+    createDbServerClient.mockResolvedValue(db);
     getProjectAiSettingsWithIntegration.mockResolvedValue({ settings: null, integration: null });
     ensureProjectSecretEncrypted.mockResolvedValue(null);
     persistProjectAiSettingsWithEncryptedSecret.mockResolvedValue({
@@ -314,7 +314,7 @@ describe('PUT /api/projects/[id]/ai-settings', () => {
     expect(response.status).toBe(200);
     expect(projectUpsertSpy).not.toHaveBeenCalled();
     expect(persistProjectAiSettingsWithEncryptedSecret).toHaveBeenCalledWith(
-      supabase,
+      db,
       expect.objectContaining({
         orgId: 'org-1',
         projectId: 'project-1',
@@ -326,8 +326,8 @@ describe('PUT /api/projects/[id]/ai-settings', () => {
   });
 
   it('drops carried legacy MCP config when re-saving AI settings', async () => {
-    const { supabase } = createSupabaseStub();
-    createSupabaseServerClient.mockResolvedValue(supabase);
+    const { db } = createDbStub();
+    createDbServerClient.mockResolvedValue(db);
     getProjectAiSettingsWithIntegration.mockResolvedValue({
       settings: {
         org_id: 'org-1',
@@ -371,7 +371,7 @@ describe('PUT /api/projects/[id]/ai-settings', () => {
 
     expect(response.status).toBe(200);
     expect(persistProjectAiSettingsWithEncryptedSecret).toHaveBeenCalledWith(
-      supabase,
+      db,
       expect.objectContaining({
         llmConfig: expect.not.objectContaining({
           mcp_servers: expect.anything(),
@@ -382,8 +382,8 @@ describe('PUT /api/projects/[id]/ai-settings', () => {
   });
 
   it('reuses the existing encrypted secret when the provider is unchanged', async () => {
-    const { supabase } = createSupabaseStub();
-    createSupabaseServerClient.mockResolvedValue(supabase);
+    const { db } = createDbStub();
+    createDbServerClient.mockResolvedValue(db);
     getProjectAiSettingsWithIntegration.mockResolvedValue({
       settings: {
         org_id: 'org-1',
@@ -416,14 +416,14 @@ describe('PUT /api/projects/[id]/ai-settings', () => {
 
     expect(response.status).toBe(200);
     expect(persistProjectAiSettingsWithEncryptedSecret).toHaveBeenCalledWith(
-      supabase,
+      db,
       expect.objectContaining({ plaintextSecret: 'sk-openai-1111' }),
     );
   });
 
   it('returns 503 and avoids partial writes when transactional secret persistence fails', async () => {
-    const { supabase, projectUpsertSpy } = createSupabaseStub();
-    createSupabaseServerClient.mockResolvedValue(supabase);
+    const { db, projectUpsertSpy } = createDbStub();
+    createDbServerClient.mockResolvedValue(db);
     getProjectAiSettingsWithIntegration.mockResolvedValue({ settings: null, integration: null });
     persistProjectAiSettingsWithEncryptedSecret.mockRejectedValue(new KmsServiceError('vault down'));
 
@@ -444,8 +444,8 @@ describe('PUT /api/projects/[id]/ai-settings', () => {
 
 describe('DELETE /api/projects/[id]/ai-settings', () => {
   it('requests KMS rotation, marks deployments failed, and deletes the integration', async () => {
-    const { supabase, rotationUpdateSpy, deploymentUpdateSpy, projectDeleteSpy, integrationDeleteSpy } = createSupabaseStub();
-    createSupabaseServerClient.mockResolvedValue(supabase);
+    const { db, rotationUpdateSpy, deploymentUpdateSpy, projectDeleteSpy, integrationDeleteSpy } = createDbStub();
+    createDbServerClient.mockResolvedValue(db);
     getProjectAiSettingsWithIntegration.mockResolvedValue({
       settings: {
         org_id: 'org-1',

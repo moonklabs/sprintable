@@ -1,5 +1,5 @@
-import type { SupabaseClient } from '@supabase/supabase-js';
-import { fastapiCall } from '@sprintable/storage-supabase';
+
+import { fastapiCall } from '@sprintable/storage-api';
 
 // ─── Typed interfaces ────────────────────────────────────────────────────────
 
@@ -78,7 +78,7 @@ async function getSpAt(): Promise<string> {
 
 export class AnalyticsService {
   constructor(
-    private readonly supabase: SupabaseClient,
+    private readonly db: any,
     private readonly accessToken: string = '',
   ) {}
 
@@ -90,12 +90,12 @@ export class AnalyticsService {
     const token = await this.getToken();
     if (token) return fastapiCall<ProjectOverview>('GET', '/api/v2/analytics/overview', token, { query: { project_id: projectId } });
     const [sprints, epics, stories, tasks, memos, members] = await Promise.all([
-      this.supabase.from('sprints').select('id, status').eq('project_id', projectId),
-      this.supabase.from('epics').select('id').eq('project_id', projectId),
-      this.supabase.from('stories').select('id, status, story_points').eq('project_id', projectId),
-      this.supabase.from('tasks').select('id, status, stories!inner(project_id)').eq('stories.project_id', projectId),
-      this.supabase.from('memos').select('id, status').eq('project_id', projectId),
-      this.supabase.from('team_members').select('id, type').eq('project_id', projectId).eq('is_active', true),
+      this.db.from('sprints').select('id, status').eq('project_id', projectId),
+      this.db.from('epics').select('id').eq('project_id', projectId),
+      this.db.from('stories').select('id, status, story_points').eq('project_id', projectId),
+      this.db.from('tasks').select('id, status, stories!inner(project_id)').eq('stories.project_id', projectId),
+      this.db.from('memos').select('id, status').eq('project_id', projectId),
+      this.db.from('team_members').select('id, type').eq('project_id', projectId).eq('is_active', true),
     ]);
     const sprintRows = (sprints.data ?? []) as SprintRow[];
     const storyRows = (stories.data ?? []) as StoryRow[];
@@ -115,8 +115,8 @@ export class AnalyticsService {
     const token = await this.getToken();
     if (token) return fastapiCall<MemberWorkload>('GET', '/api/v2/analytics/workload', token, { query: { project_id: projectId, member_id: memberId } });
     const [stories, tasks] = await Promise.all([
-      this.supabase.from('stories').select('id, status, story_points').eq('project_id', projectId).eq('assignee_id', memberId),
-      this.supabase.from('tasks').select('id, status, stories!inner(project_id)').eq('stories.project_id', projectId).eq('assignee_id', memberId),
+      this.db.from('stories').select('id, status, story_points').eq('project_id', projectId).eq('assignee_id', memberId),
+      this.db.from('tasks').select('id, status, stories!inner(project_id)').eq('stories.project_id', projectId).eq('assignee_id', memberId),
     ]);
     const storyRows = (stories.data ?? []) as StoryRow[];
     const taskRows = (tasks.data ?? []) as TaskRow[];
@@ -129,7 +129,7 @@ export class AnalyticsService {
   async getVelocityHistory(projectId: string): Promise<SprintVelocity[]> {
     const token = await this.getToken();
     if (token) return fastapiCall<SprintVelocity[]>('GET', '/api/v2/analytics/velocity-history', token, { query: { project_id: projectId } });
-    const { data, error } = await this.supabase.from('sprints').select('id, title, velocity, status, start_date, end_date').eq('project_id', projectId).eq('status', 'closed').order('end_date');
+    const { data, error } = await this.db.from('sprints').select('id, title, velocity, status, start_date, end_date').eq('project_id', projectId).eq('status', 'closed').order('end_date');
     if (error) throw new Error(error.message);
     return (data ?? []) as SprintVelocity[];
   }
@@ -138,13 +138,13 @@ export class AnalyticsService {
     const token = await this.getToken();
     if (token) return fastapiCall<RecentActivity>('GET', '/api/v2/analytics/activity', token, { query: { project_id: projectId, limit } });
     const [storiesResult, memosResult, runsResult] = await Promise.all([
-      this.supabase.from('stories').select('id, title, status, updated_at').eq('project_id', projectId).order('updated_at', { ascending: false }).limit(limit),
-      this.supabase.from('memos').select('id, title, status, created_at').eq('project_id', projectId).order('created_at', { ascending: false }).limit(limit),
+      this.db.from('stories').select('id, title, status, updated_at').eq('project_id', projectId).order('updated_at', { ascending: false }).limit(limit),
+      this.db.from('memos').select('id, title, status, created_at').eq('project_id', projectId).order('created_at', { ascending: false }).limit(limit),
       (async () => {
-        const { data: agents } = await this.supabase.from('team_members').select('id').eq('project_id', projectId).eq('type', 'agent');
+        const { data: agents } = await this.db.from('team_members').select('id').eq('project_id', projectId).eq('type', 'agent');
         const ids = (agents ?? []).map((a: { id: string }) => a.id);
         if (ids.length === 0) return { data: [] as AgentRunRow[] };
-        return this.supabase.from('agent_runs').select('id, agent_id, trigger, status, created_at').in('agent_id', ids).order('created_at', { ascending: false }).limit(limit);
+        return this.db.from('agent_runs').select('id, agent_id, trigger, status, created_at').in('agent_id', ids).order('created_at', { ascending: false }).limit(limit);
       })(),
     ]);
     return {
@@ -157,7 +157,7 @@ export class AnalyticsService {
   async getEpicProgress(projectId: string, epicId: string): Promise<EpicProgress> {
     const token = await this.getToken();
     if (token) return fastapiCall<EpicProgress>('GET', '/api/v2/analytics/epic-progress', token, { query: { project_id: projectId, epic_id: epicId } });
-    const { data } = await this.supabase.from('stories').select('status, story_points').eq('project_id', projectId).eq('epic_id', epicId);
+    const { data } = await this.db.from('stories').select('status, story_points').eq('project_id', projectId).eq('epic_id', epicId);
     const stories = (data ?? []) as StoryRow[];
     const total = stories.length;
     const done = stories.filter((s) => s.status === 'done').length;
@@ -169,9 +169,9 @@ export class AnalyticsService {
   async getAgentStats(projectId: string, agentId: string): Promise<AgentStats> {
     const token = await this.getToken();
     if (token) return fastapiCall<AgentStats>('GET', '/api/v2/analytics/agent-stats', token, { query: { project_id: projectId, agent_id: agentId } });
-    const mb = await this.supabase.from('team_members').select('id').eq('id', agentId).eq('project_id', projectId).eq('type', 'agent').single();
+    const mb = await this.db.from('team_members').select('id').eq('id', agentId).eq('project_id', projectId).eq('type', 'agent').single();
     if (mb.error) throw new Error('Agent not found in project');
-    const { data } = await this.supabase.from('agent_runs').select('status, input_tokens, output_tokens, cost_usd, duration_ms').eq('agent_id', agentId).order('created_at', { ascending: false }).limit(1000);
+    const { data } = await this.db.from('agent_runs').select('status, input_tokens, output_tokens, cost_usd, duration_ms').eq('agent_id', agentId).order('created_at', { ascending: false }).limit(1000);
     const runs = (data ?? []) as AgentRunRow[];
     const completed = runs.filter((r) => r.status === 'completed');
     return {
@@ -188,14 +188,14 @@ export class AnalyticsService {
     const token = await this.getToken();
     if (token) return fastapiCall<ProjectHealth>('GET', '/api/v2/analytics/health', token, { query: { project_id: projectId } });
     const [sprintResult, memosResult, unassignedResult] = await Promise.all([
-      this.supabase.from('sprints').select('id, title, start_date, end_date').eq('project_id', projectId).eq('status', 'active').single(),
-      this.supabase.from('memos').select('*', { count: 'exact', head: true }).eq('project_id', projectId).eq('status', 'open'),
-      this.supabase.from('stories').select('*', { count: 'exact', head: true }).eq('project_id', projectId).is('assignee_id', null).neq('status', 'done'),
+      this.db.from('sprints').select('id, title, start_date, end_date').eq('project_id', projectId).eq('status', 'active').single(),
+      this.db.from('memos').select('*', { count: 'exact', head: true }).eq('project_id', projectId).eq('status', 'open'),
+      this.db.from('stories').select('*', { count: 'exact', head: true }).eq('project_id', projectId).is('assignee_id', null).neq('status', 'done'),
     ]);
     const activeSprint = sprintResult.data;
     const openMemoCount = memosResult.count ?? 0;
     const unassignedCount = unassignedResult.count ?? 0;
-    const stories = activeSprint ? await this.supabase.from('stories').select('status, story_points').eq('sprint_id', activeSprint.id) : { data: [] as StoryRow[] };
+    const stories = activeSprint ? await this.db.from('stories').select('status, story_points').eq('sprint_id', activeSprint.id) : { data: [] as StoryRow[] };
     const storyRows = (stories.data ?? []) as StoryRow[];
     const total = storyRows.length;
     const done = storyRows.filter((s) => s.status === 'done').length;

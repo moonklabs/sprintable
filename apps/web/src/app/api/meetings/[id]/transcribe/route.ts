@@ -1,5 +1,3 @@
-import { createSupabaseServerClient } from '@/lib/supabase/server';
-import { createSupabaseAdminClient } from '@/lib/supabase/admin';
 import { handleApiError } from '@/lib/api-error';
 import { apiSuccess, apiUpgradeRequired, ApiErrors } from '@/lib/api-response';
 import { getAuthContext } from '@/lib/auth-helpers';
@@ -25,11 +23,10 @@ const ALLOWED_MIME_TYPES = new Set(['audio/webm', 'audio/wav', 'audio/mp4', 'aud
 export async function POST(request: Request, { params }: RouteParams) {
   try {
     const { id } = await params;
-    const supabase = await createSupabaseServerClient();
-    const me = await getAuthContext(supabase, request);
+    const me = await getAuthContext(request);
     if (!me) return ApiErrors.unauthorized();
     if (me.rateLimitExceeded) return ApiErrors.tooManyRequests(me.rateLimitRemaining, me.rateLimitResetAt);
-    const dbClient = me.type === 'agent' ? createSupabaseAdminClient() : supabase;
+    const dbClient = undefined;
 
     // AC2+AC3: usage meter 체크 (통합 게이팅+쿼오타 체크)
     const usageCheck = await checkUsage(dbClient, me.org_id, 'stt_minutes');
@@ -40,23 +37,10 @@ export async function POST(request: Request, { params }: RouteParams) {
       );
     }
 
-    // AC9: STT 분 쿼터 체크
-    const startOfMonth = new Date();
-    startOfMonth.setDate(1);
-    startOfMonth.setHours(0, 0, 0, 0);
-    const { data: usageRows } = await dbClient
-      .from('stt_usage')
-      .select('duration_sec')
-      .eq('org_id', me.org_id)
-      .gte('created_at', startOfMonth.toISOString());
-    const monthlyMinutes = Math.ceil(
-      (usageRows ?? []).reduce((sum: number, r: { duration_sec: number }) => sum + r.duration_sec, 0) / 60,
-    );
-
     // AC9: STT minute quota — checkFeatureLimit 경유 (SaaS overlay에서 org_subscriptions 기반 검증)
     const quotaCheck = await checkFeatureLimit(dbClient, me.org_id, 'max_stt_minutes');
     if (!quotaCheck.allowed) {
-      return apiUpgradeRequired(`Monthly STT limit reached (${monthlyMinutes} min)`, 'stt_minutes');
+      return apiUpgradeRequired(`Monthly STT limit reached`, 'stt_minutes');
     }
 
     const formData = await request.formData();
@@ -98,17 +82,7 @@ export async function POST(request: Request, { params }: RouteParams) {
 
     const result = (await whisperRes.json()) as { text: string; duration?: number };
 
-    // raw_transcript 저장
-    await dbClient.from('meetings').update({ raw_transcript: result.text }).eq('id', id);
-
-    // AC9: 사용량 기록
     const durationSec = result.duration ? Math.ceil(result.duration) : Math.max(60, Math.ceil(file.size / (1024 * 1024)) * 60);
-    await dbClient.from('stt_usage').insert({
-      org_id: me.org_id,
-      meeting_id: id,
-      duration_sec: durationSec,
-      provider: 'whisper',
-    });
 
     // AC2: usage meter 증가 + AC6: threshold 알림
     await incrementUsage(dbClient, me.org_id, 'stt_minutes', Math.ceil(durationSec / 60));
@@ -126,9 +100,9 @@ export async function POST(request: Request, { params }: RouteParams) {
     }
 
     return apiSuccess({
+      meetingId: id,
       text: result.text,
       duration_sec: durationSec,
-      usage: { monthlyMinutes: monthlyMinutes + Math.ceil(durationSec / 60) },
     });
   } catch (err: unknown) { return handleApiError(err); }
 }

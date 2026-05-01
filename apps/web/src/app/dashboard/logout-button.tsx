@@ -1,7 +1,7 @@
 'use client';
 
 import { useRouter } from 'next/navigation';
-import { logoutUser } from '@/lib/supabase/client';
+import { logoutUser } from '@/lib/db/client';
 import { useTranslations } from 'next-intl';
 import { Button } from '@/components/ui/button';
 

@@ -1,12 +1,12 @@
 import { describe, expect, it, vi, beforeEach } from 'vitest';
 
 const {
-  createSupabaseAdminClientMock,
+  createAdminClientMock,
   listProjectApprovedMcpServerConfigsMock,
   parseMcpVaultRefMock,
   resolveProjectMcpVaultTokenMock,
 } = vi.hoisted(() => ({
-  createSupabaseAdminClientMock: vi.fn(() => ({ tag: 'admin' })),
+  createAdminClientMock: vi.fn(() => ({ tag: 'admin' })),
   listProjectApprovedMcpServerConfigsMock: vi.fn<(...args: unknown[]) => Promise<Array<{
     kind: 'generic' | 'github';
     name: string;
@@ -18,8 +18,8 @@ const {
   resolveProjectMcpVaultTokenMock: vi.fn<(...args: unknown[]) => Promise<string>>(),
 }));
 
-vi.mock('@/lib/supabase/admin', () => ({
-  createSupabaseAdminClient: createSupabaseAdminClientMock,
+vi.mock('@/lib/db/admin', () => ({
+  createAdminClient: createAdminClientMock,
 }));
 
 vi.mock('./project-mcp', () => ({
@@ -32,7 +32,7 @@ import { AgentToolExecutionEngine } from './agent-tool-execution-engine';
 import { AgentBuiltinToolService } from './agent-builtin-tools';
 import { GITHUB_MCP_TOOL_NAMES } from '@/lib/github-mcp';
 
-function createSupabaseStub(llmConfig?: unknown) {
+function createDbStub(llmConfig?: unknown) {
   return {
     from(table: string) {
       if (table !== 'project_ai_settings') throw new Error(`Unexpected table: ${table}`);
@@ -77,7 +77,7 @@ function allowlistedToolNames(...externalToolNames: string[]) {
 
 describe('AgentToolExecutionEngine', () => {
   beforeEach(() => {
-    createSupabaseAdminClientMock.mockClear();
+    createAdminClientMock.mockClear();
     listProjectApprovedMcpServerConfigsMock.mockReset();
     listProjectApprovedMcpServerConfigsMock.mockResolvedValue([]);
     parseMcpVaultRefMock.mockClear();
@@ -89,7 +89,7 @@ describe('AgentToolExecutionEngine', () => {
     const builtinToolService = {
       execute: vi.fn(async () => ({ memo_id: 'memo-1', ok: true })),
     } as unknown as AgentBuiltinToolService;
-    const engine = new AgentToolExecutionEngine(createSupabaseStub() as never, { builtinToolService });
+    const engine = new AgentToolExecutionEngine(createDbStub() as never, { builtinToolService });
 
     const registry = await engine.loadRegistry('project-1', ['create_memo']);
     const result = await engine.execute('create_memo', { title: 'hello', content: 'world' }, createContext(), registry);
@@ -110,7 +110,7 @@ describe('AgentToolExecutionEngine', () => {
       },
     ]);
 
-    const engine = new AgentToolExecutionEngine(createSupabaseStub() as never);
+    const engine = new AgentToolExecutionEngine(createDbStub() as never);
     const registry = await engine.loadRegistry('project-1', allowlistedToolNames('external.search_docs', 'external.fetch_doc'));
 
     expect(registry.availableToolNames).toEqual(['create_memo', 'external.search_docs', 'external.fetch_doc']);
@@ -126,7 +126,7 @@ describe('AgentToolExecutionEngine', () => {
       },
     ]);
 
-    const engine = new AgentToolExecutionEngine(createSupabaseStub() as never);
+    const engine = new AgentToolExecutionEngine(createDbStub() as never);
     const registry = await engine.loadRegistry('project-1', ['create_memo']);
 
     expect(registry.availableToolNames).toEqual(['create_memo']);
@@ -151,7 +151,7 @@ describe('AgentToolExecutionEngine', () => {
       result: { content: [{ type: 'text', text: 'Approved linear ok' }] },
     }), { status: 200, headers: { 'Content-Type': 'application/json' } }));
 
-    const engine = new AgentToolExecutionEngine(createSupabaseStub({
+    const engine = new AgentToolExecutionEngine(createDbStub({
       mcp_servers: [{
         name: 'legacy-linear',
         url: 'https://legacy-linear.example.com/rpc',
@@ -191,7 +191,7 @@ describe('AgentToolExecutionEngine', () => {
     }), { status: 200, headers: { 'Content-Type': 'application/json' } }));
 
     const auditLogger = vi.fn(async () => undefined);
-    const engine = new AgentToolExecutionEngine(createSupabaseStub() as never, { fetchFn, auditLogger });
+    const engine = new AgentToolExecutionEngine(createDbStub() as never, { fetchFn, auditLogger });
 
     const registry = await engine.loadRegistry('project-1', allowlistedToolNames('external.search_docs'));
     const result = await engine.execute('external.search_docs', { query: 'agent runtime' }, createContext(), registry);
@@ -229,7 +229,7 @@ describe('AgentToolExecutionEngine', () => {
     ]);
 
     const auditLogger = vi.fn(async () => undefined);
-    const engine = new AgentToolExecutionEngine(createSupabaseStub() as never, { auditLogger });
+    const engine = new AgentToolExecutionEngine(createDbStub() as never, { auditLogger });
 
     const registry = await engine.loadRegistry('project-1', allowlistedToolNames('external.search_docs'));
     const result = await engine.execute('external.delete_everything', {}, createContext(), registry);
@@ -263,7 +263,7 @@ describe('AgentToolExecutionEngine', () => {
     ]);
 
     const auditLogger = vi.fn(async () => undefined);
-    const engine = new AgentToolExecutionEngine(createSupabaseStub() as never, { auditLogger });
+    const engine = new AgentToolExecutionEngine(createDbStub() as never, { auditLogger });
     const registry = await engine.loadRegistry('project-1', ['create_memo']);
     const result = await engine.execute('external.search_docs', { query: 'agent runtime' }, createContext(), registry);
 
@@ -288,7 +288,7 @@ describe('AgentToolExecutionEngine', () => {
 
   it('denies tool execution when the current project falls outside the deployment scope', async () => {
     const auditLogger = vi.fn(async () => undefined);
-    const engine = new AgentToolExecutionEngine(createSupabaseStub() as never, { auditLogger });
+    const engine = new AgentToolExecutionEngine(createDbStub() as never, { auditLogger });
 
     const registry = await engine.loadRegistry('project-1', ['create_memo'], {
       allowedProjectIds: ['project-2'],
@@ -321,7 +321,7 @@ describe('AgentToolExecutionEngine', () => {
 
   it('denies tool execution when the registry agent scope does not match the current agent', async () => {
     const auditLogger = vi.fn(async () => undefined);
-    const engine = new AgentToolExecutionEngine(createSupabaseStub() as never, { auditLogger });
+    const engine = new AgentToolExecutionEngine(createDbStub() as never, { auditLogger });
 
     const registry = await engine.loadRegistry('project-1', ['create_memo'], {
       agentId: 'agent-2',
@@ -349,7 +349,7 @@ describe('AgentToolExecutionEngine', () => {
 
   it('denies allowlisted external tools when the project has no approved server mapping', async () => {
     const auditLogger = vi.fn(async () => undefined);
-    const engine = new AgentToolExecutionEngine(createSupabaseStub() as never, { auditLogger });
+    const engine = new AgentToolExecutionEngine(createDbStub() as never, { auditLogger });
 
     const registry = await engine.loadRegistry('project-1', allowlistedToolNames('external.search_docs'));
     const result = await engine.execute('external.search_docs', { query: 'agent runtime' }, createContext(), registry);
@@ -389,7 +389,7 @@ describe('AgentToolExecutionEngine', () => {
     ]);
 
     const auditLogger = vi.fn(async () => undefined);
-    const engine = new AgentToolExecutionEngine(createSupabaseStub() as never, { auditLogger });
+    const engine = new AgentToolExecutionEngine(createDbStub() as never, { auditLogger });
     const registry = await engine.loadRegistry('project-1', allowlistedToolNames('external.search_docs'));
     const result = await engine.execute('external.search_docs', { query: 'agent runtime' }, createContext(), registry);
 
@@ -428,7 +428,7 @@ describe('AgentToolExecutionEngine', () => {
 
     vi.useFakeTimers();
     const auditLogger = vi.fn(async () => undefined);
-    const engine = new AgentToolExecutionEngine(createSupabaseStub() as never, { fetchFn, auditLogger });
+    const engine = new AgentToolExecutionEngine(createDbStub() as never, { fetchFn, auditLogger });
 
     const registry = await engine.loadRegistry('project-1', allowlistedToolNames('external.search_docs'));
     const executionPromise = engine.execute('external.search_docs', { query: 'slow' }, createContext(), registry);
@@ -458,7 +458,7 @@ describe('AgentToolExecutionEngine', () => {
       },
     ]);
 
-    const engine = new AgentToolExecutionEngine(createSupabaseStub() as never);
+    const engine = new AgentToolExecutionEngine(createDbStub() as never);
     const registry = await engine.loadRegistry('project-1', allowlistedToolNames(...GITHUB_MCP_TOOL_NAMES));
 
     expect(registry.availableToolNames).toEqual(['create_memo', ...GITHUB_MCP_TOOL_NAMES]);
@@ -482,7 +482,7 @@ describe('AgentToolExecutionEngine', () => {
       result: { content: [{ type: 'text', text: 'Linear search ok' }] },
     }), { status: 200, headers: { 'Content-Type': 'application/json' } }));
 
-    const engine = new AgentToolExecutionEngine(createSupabaseStub() as never, { fetchFn });
+    const engine = new AgentToolExecutionEngine(createDbStub() as never, { fetchFn });
     const registry = await engine.loadRegistry('project-1', allowlistedToolNames('linear.search_issues'));
     const result = await engine.execute('linear.search_issues', { query: 'S426' }, createContext(), registry);
 
@@ -511,7 +511,7 @@ describe('AgentToolExecutionEngine', () => {
       result: { content: [{ type: 'text', text: 'Listed issues successfully' }] },
     }), { status: 200, headers: { 'Content-Type': 'application/json' } }));
 
-    const engine = new AgentToolExecutionEngine(createSupabaseStub() as never, { fetchFn });
+    const engine = new AgentToolExecutionEngine(createDbStub() as never, { fetchFn });
     const registry = await engine.loadRegistry('project-1', allowlistedToolNames('github.list_issues'));
     const result = await engine.execute('github.list_issues', {
       owner: 'moonklabs',
@@ -542,7 +542,7 @@ describe('AgentToolExecutionEngine', () => {
     ]);
 
     const fetchFn = vi.fn();
-    const engine = new AgentToolExecutionEngine(createSupabaseStub() as never, { fetchFn });
+    const engine = new AgentToolExecutionEngine(createDbStub() as never, { fetchFn });
 
     const registry = await engine.loadRegistry('project-1', allowlistedToolNames('github.comment_issue'));
     const result = await engine.execute('github.comment_issue', {
@@ -573,7 +573,7 @@ describe('AgentToolExecutionEngine', () => {
       error: { message: 'API rate limit exceeded' },
     }), { status: 429, headers: { 'Content-Type': 'application/json' } }));
 
-    const engine = new AgentToolExecutionEngine(createSupabaseStub() as never, { fetchFn });
+    const engine = new AgentToolExecutionEngine(createDbStub() as never, { fetchFn });
     const registry = await engine.loadRegistry('project-1', allowlistedToolNames('github.list_pull_requests'));
     const result = await engine.execute('github.list_pull_requests', {
       owner: 'moonklabs',
@@ -603,8 +603,8 @@ describe('AgentToolExecutionEngine', () => {
 
     const gatewayFetch = vi.fn(async () => new Response('Bad gateway', { status: 502 }));
 
-    const permissionEngine = new AgentToolExecutionEngine(createSupabaseStub() as never, { fetchFn: permissionFetch });
-    const gatewayEngine = new AgentToolExecutionEngine(createSupabaseStub() as never, { fetchFn: gatewayFetch });
+    const permissionEngine = new AgentToolExecutionEngine(createDbStub() as never, { fetchFn: permissionFetch });
+    const gatewayEngine = new AgentToolExecutionEngine(createDbStub() as never, { fetchFn: gatewayFetch });
 
     const permissionRegistry = await permissionEngine.loadRegistry('project-1', allowlistedToolNames('github.merge_pull_request'));
     const gatewayRegistry = await gatewayEngine.loadRegistry('project-1', allowlistedToolNames('github.get_pull_request'));

@@ -1,5 +1,5 @@
+
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import type { SupabaseClient } from '@supabase/supabase-js';
 import {
   buildSlackMemoLink,
   buildSlackOutboundText,
@@ -8,7 +8,7 @@ import {
   SlackOutboundDispatcher,
 } from './slack-outbound-dispatcher';
 
-function createSupabaseStub(options?: {
+function createDbStub(options?: {
   memo?: Record<string, unknown> | null;
   channelMapping?: Record<string, unknown> | null;
   activeAgent?: Record<string, unknown> | null;
@@ -53,7 +53,7 @@ function createSupabaseStub(options?: {
 
   const activeAgent = options?.activeAgent ?? { id: 'agent-1' };
 
-  const supabase = {
+  const db = {
     channel: vi.fn(() => channel),
     removeChannel: vi.fn(async () => {
       state.removedChannels += 1;
@@ -109,9 +109,9 @@ function createSupabaseStub(options?: {
 
       throw new Error(`Unexpected table: ${table}`);
     },
-  } as unknown as SupabaseClient;
+  } as any;
 
-  return { supabase, state };
+  return { db, state };
 }
 
 afterEach(() => {
@@ -153,9 +153,9 @@ describe('SlackOutboundDispatcher', () => {
   it('sends threaded Slack replies when thread_ts exists', async () => {
     process.env.SLACK_BOT_TOKEN = 'xoxb-thread';
     const fetchFn = vi.fn().mockResolvedValue(new Response(JSON.stringify({ ok: true }), { status: 200 }));
-    const { supabase } = createSupabaseStub();
+    const { db } = createDbStub();
     const dispatcher = new SlackOutboundDispatcher({
-      supabase,
+      db,
       fetchFn: fetchFn as typeof fetch,
       appUrl: 'https://app.example.com',
       retryDelayMs: 0,
@@ -182,7 +182,7 @@ describe('SlackOutboundDispatcher', () => {
   it('sends new Slack messages when thread_ts is absent', async () => {
     process.env.SLACK_BOT_TOKEN = 'xoxb-root';
     const fetchFn = vi.fn().mockResolvedValue(new Response(JSON.stringify({ ok: true }), { status: 200 }));
-    const { supabase } = createSupabaseStub({
+    const { db } = createDbStub({
       memo: {
         id: 'memo-1',
         org_id: 'org-1',
@@ -195,7 +195,7 @@ describe('SlackOutboundDispatcher', () => {
       },
     });
     const dispatcher = new SlackOutboundDispatcher({
-      supabase,
+      db,
       fetchFn: fetchFn as typeof fetch,
       appUrl: 'https://app.example.com',
       retryDelayMs: 0,
@@ -221,9 +221,9 @@ describe('SlackOutboundDispatcher', () => {
     const fetchFn = vi
       .fn<typeof fetch>()
       .mockResolvedValue(new Response(JSON.stringify({ ok: false, error: 'invalid_auth' }), { status: 401 }));
-    const { supabase, state } = createSupabaseStub();
+    const { db, state } = createDbStub();
     const dispatcher = new SlackOutboundDispatcher({
-      supabase,
+      db,
       fetchFn: fetchFn as typeof fetch,
       retryDelayMs: 0,
       maxRetries: 3,
@@ -250,8 +250,8 @@ describe('SlackOutboundDispatcher', () => {
   it('skips replies that are not authored by an active agent in the same project', async () => {
     process.env.SLACK_BOT_TOKEN = 'xoxb-human-skip';
     const fetchFn = vi.fn();
-    const { supabase } = createSupabaseStub();
-    const dispatcher = new SlackOutboundDispatcher({ supabase, fetchFn: fetchFn as typeof fetch, retryDelayMs: 0 });
+    const { db } = createDbStub();
+    const dispatcher = new SlackOutboundDispatcher({ db, fetchFn: fetchFn as typeof fetch, retryDelayMs: 0 });
 
     const result = await dispatcher.dispatchReplyIfNeeded({
       id: 'reply-human',
@@ -268,7 +268,7 @@ describe('SlackOutboundDispatcher', () => {
   it('skips non-slack source memos', async () => {
     process.env.SLACK_BOT_TOKEN = 'xoxb-skip';
     const fetchFn = vi.fn();
-    const { supabase } = createSupabaseStub({
+    const { db } = createDbStub({
       memo: {
         id: 'memo-1',
         org_id: 'org-1',
@@ -276,7 +276,7 @@ describe('SlackOutboundDispatcher', () => {
         metadata: { source: 'email', channel_id: 'mail-1' },
       },
     });
-    const dispatcher = new SlackOutboundDispatcher({ supabase, fetchFn: fetchFn as typeof fetch, retryDelayMs: 0 });
+    const dispatcher = new SlackOutboundDispatcher({ db, fetchFn: fetchFn as typeof fetch, retryDelayMs: 0 });
 
     const result = await dispatcher.dispatchReplyIfNeeded({
       id: 'reply-4',
@@ -293,9 +293,9 @@ describe('SlackOutboundDispatcher', () => {
   it('subscribes to memo reply realtime events and dispatches them', async () => {
     process.env.SLACK_BOT_TOKEN = 'xoxb-realtime';
     const fetchFn = vi.fn().mockResolvedValue(new Response(JSON.stringify({ ok: true }), { status: 200 }));
-    const { supabase, state } = createSupabaseStub();
+    const { db, state } = createDbStub();
     const dispatcher = new SlackOutboundDispatcher({
-      supabase,
+      db,
       fetchFn: fetchFn as typeof fetch,
       retryDelayMs: 0,
     });

@@ -1,4 +1,4 @@
-import type { SupabaseClient } from '@supabase/supabase-js';
+
 import { isExpiredIsoTimestamp, resolveMessagingBridgeSecretRef } from './slack-channel-mapping';
 import { NotificationService } from './notification.service';
 
@@ -22,10 +22,10 @@ export function isDiscordAuthExpired(expiresAt: string | null | undefined, now =
 }
 
 export async function getActiveDiscordOrgAuth(
-  supabase: SupabaseClient,
+  db: any,
   orgId: string,
 ): Promise<OrgAuthRow | null> {
-  const { data, error } = await supabase
+  const { data, error } = await db
     .from('messaging_bridge_org_auths')
     .select('org_id, access_token_ref, expires_at')
     .eq('org_id', orgId)
@@ -36,8 +36,8 @@ export async function getActiveDiscordOrgAuth(
   return (data as OrgAuthRow | null) ?? null;
 }
 
-export async function listAdminRecipients(supabase: SupabaseClient, orgId: string): Promise<TeamMemberRecipientRow[]> {
-  const { data: orgMembers, error: orgMembersError } = await supabase
+export async function listAdminRecipients(db: any, orgId: string): Promise<TeamMemberRecipientRow[]> {
+  const { data: orgMembers, error: orgMembersError } = await db
     .from('org_members')
     .select('user_id')
     .eq('org_id', orgId)
@@ -50,7 +50,7 @@ export async function listAdminRecipients(supabase: SupabaseClient, orgId: strin
 
   if (!userIds.length) return [];
 
-  const { data: teamMembers, error: teamMembersError } = await supabase
+  const { data: teamMembers, error: teamMembersError } = await db
     .from('team_members')
     .select('id, user_id')
     .eq('org_id', orgId)
@@ -67,11 +67,11 @@ export async function listAdminRecipients(supabase: SupabaseClient, orgId: strin
 }
 
 export async function notifyDiscordAuthFailed(
-  supabase: SupabaseClient,
+  db: any,
   orgId: string,
   reason: string,
 ) {
-  const recipients = await listAdminRecipients(supabase, orgId);
+  const recipients = await listAdminRecipients(db, orgId);
   if (!recipients.length) return 0;
 
   const notifications = recipients.map((recipient) => ({
@@ -83,6 +83,6 @@ export async function notifyDiscordAuthFailed(
     reference_type: 'integration',
   }));
 
-  await new NotificationService(supabase).createMany(notifications);
+  await new NotificationService(db).createMany(notifications);
   return notifications.length;
 }
