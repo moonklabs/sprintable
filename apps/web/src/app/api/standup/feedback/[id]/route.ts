@@ -1,6 +1,5 @@
 
-import { parseBody, updateStandupFeedbackSchema } from '@sprintable/shared';
-import { createAdminClient } from '@/lib/db/admin';
+import { proxyToFastapi } from '@/lib/fastapi-proxy';
 import { handleApiError } from '@/lib/api-error';
 import { getAuthContext } from '@/lib/auth-helpers';
 import { apiSuccess, ApiErrors } from '@/lib/api-response';
@@ -10,30 +9,23 @@ import {
   listOssStandupFeedbackForEntry,
   updateOssStandupFeedback,
 } from '@/lib/oss-standup';
-import { StandupFeedbackService } from '@/services/standup';
+import { parseBody, updateStandupFeedbackSchema } from '@sprintable/shared';
 
 type RouteParams = { params: Promise<{ id: string }> };
 
 // GET /api/standup/feedback/:entry_id — list all feedback for a standup entry
 export async function GET(request: Request, { params }: RouteParams) {
   try {
-    const { id: entryId } = await params;
-    const me = await getAuthContext(request);
-    if (!me) return ApiErrors.unauthorized();
-    if (me.rateLimitExceeded) return ApiErrors.tooManyRequests(me.rateLimitRemaining, me.rateLimitResetAt);
-
     if (isOssMode()) {
+      const { id: entryId } = await params;
+      const me = await getAuthContext(request);
+      if (!me) return ApiErrors.unauthorized();
+      if (me.rateLimitExceeded) return ApiErrors.tooManyRequests(me.rateLimitRemaining, me.rateLimitResetAt);
       return apiSuccess(await listOssStandupFeedbackForEntry(entryId));
     }
 
-    const dbClient: any = me.type === 'agent' ? createAdminClient() : undefined;
-    const { data, error } = await dbClient
-      .from('standup_feedback')
-      .select('*')
-      .eq('standup_entry_id', entryId)
-      .order('created_at');
-    if (error) throw error;
-    return apiSuccess(data ?? []);
+    const { id } = await params;
+    return proxyToFastapi(request, `/api/v2/standup/feedback/${id}`);
   } catch (err: unknown) {
     return handleApiError(err);
   }
@@ -41,24 +33,18 @@ export async function GET(request: Request, { params }: RouteParams) {
 
 export async function PATCH(request: Request, { params }: RouteParams) {
   try {
-    const { id } = await params;
-    const me = await getAuthContext(request);
-    if (!me) return ApiErrors.unauthorized();
-    if (me.rateLimitExceeded) return ApiErrors.tooManyRequests(me.rateLimitRemaining, me.rateLimitResetAt);
-
-    const dbClient: any = me.type === 'agent' ? createAdminClient() : undefined;
-
-    const parsed = await parseBody(request, updateStandupFeedbackSchema);
-    if (!parsed.success) return parsed.response;
-    const body = parsed.data;
-
     if (isOssMode()) {
-      return apiSuccess(await updateOssStandupFeedback(id, body, me.id));
+      const { id } = await params;
+      const me = await getAuthContext(request);
+      if (!me) return ApiErrors.unauthorized();
+      if (me.rateLimitExceeded) return ApiErrors.tooManyRequests(me.rateLimitRemaining, me.rateLimitResetAt);
+      const parsed = await parseBody(request, updateStandupFeedbackSchema);
+      if (!parsed.success) return parsed.response;
+      return apiSuccess(await updateOssStandupFeedback(id, parsed.data, me.id));
     }
 
-    const service = new StandupFeedbackService(dbClient);
-    const feedback = await service.update(id, body, me.id);
-    return apiSuccess(feedback);
+    const { id } = await params;
+    return proxyToFastapi(request, `/api/v2/standup/feedback/${id}`);
   } catch (err: unknown) {
     return handleApiError(err);
   }
@@ -66,20 +52,17 @@ export async function PATCH(request: Request, { params }: RouteParams) {
 
 export async function DELETE(request: Request, { params }: RouteParams) {
   try {
-    const { id } = await params;
-    const me = await getAuthContext(request);
-    if (!me) return ApiErrors.unauthorized();
-    if (me.rateLimitExceeded) return ApiErrors.tooManyRequests(me.rateLimitRemaining, me.rateLimitResetAt);
-
     if (isOssMode()) {
+      const { id } = await params;
+      const me = await getAuthContext(request);
+      if (!me) return ApiErrors.unauthorized();
+      if (me.rateLimitExceeded) return ApiErrors.tooManyRequests(me.rateLimitRemaining, me.rateLimitResetAt);
       await deleteOssStandupFeedback(id, me.id);
       return apiSuccess({ ok: true });
     }
 
-    const dbClient: any = me.type === 'agent' ? createAdminClient() : undefined;
-    const service = new StandupFeedbackService(dbClient);
-    await service.delete(id, me.id);
-    return apiSuccess({ ok: true });
+    const { id } = await params;
+    return proxyToFastapi(request, `/api/v2/standup/feedback/${id}`);
   } catch (err: unknown) {
     return handleApiError(err);
   }
