@@ -1,3 +1,4 @@
+import type { SupabaseClient } from '@/types/supabase';
 import { handleApiError } from '@/lib/api-error';
 import { getAuthContext } from '@/lib/auth-helpers';
 import { apiSuccess, ApiErrors } from '@/lib/api-response';
@@ -22,8 +23,7 @@ export async function DELETE(request: Request, { params }: RouteParams) {
   }
   try {
     const { keyId } = await params;
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    const db: any = null;
+    const db = null as unknown as SupabaseClient;
     const me = await getAuthContext(request);
     if (!me) return ApiErrors.unauthorized();
 

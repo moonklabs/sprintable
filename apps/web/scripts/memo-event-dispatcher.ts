@@ -1,6 +1,8 @@
+import type { SupabaseClient } from '../src/types/supabase';
 import { MemoEventDispatcher } from '../src/services/memo-event-dispatcher';
 
-const dispatcher = new MemoEventDispatcher({ db: undefined });
+// OSS mode: no Supabase client; service skips Supabase-dependent paths when db is absent
+const dispatcher = new MemoEventDispatcher({ db: undefined as unknown as SupabaseClient });
 
 dispatcher.start();
 

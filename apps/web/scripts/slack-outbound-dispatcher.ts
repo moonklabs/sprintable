@@ -1,7 +1,9 @@
+import type { SupabaseClient } from '../src/types/supabase';
 import { SlackOutboundDispatcher } from '../src/services/slack-outbound-dispatcher';
 
+// OSS mode: no Supabase client; service skips Supabase-dependent paths when db is absent
 const dispatcher = new SlackOutboundDispatcher({
-  db: undefined,
+  db: undefined as unknown as SupabaseClient,
   appUrl: process.env.NEXT_PUBLIC_APP_URL,
 });
 

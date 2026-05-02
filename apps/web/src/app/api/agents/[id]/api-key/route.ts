@@ -1,3 +1,4 @@
+import type { SupabaseClient } from '@/types/supabase';
 import { handleApiError } from '@/lib/api-error';
 import { getAuthContext } from '@/lib/auth-helpers';
 import { generateApiKey } from '@/lib/auth-api-key';
@@ -28,8 +29,7 @@ export async function POST(request: Request, { params }: RouteParams) {
   }
   try {
     const { id: teamMemberId } = await params;
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    const db: any = null;
+    const db = null as unknown as SupabaseClient;
     const me = await getAuthContext(request);
     if (!me) return ApiErrors.unauthorized();
 
@@ -118,8 +118,7 @@ export async function GET(request: Request, { params }: RouteParams) {
   }
   try {
     const { id: teamMemberId } = await params;
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    const db: any = null;
+    const db = null as unknown as SupabaseClient;
     const me = await getAuthContext(request);
     if (!me) return ApiErrors.unauthorized();
 
