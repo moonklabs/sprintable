@@ -1,7 +1,7 @@
 import uuid
 from datetime import date
 
-from sqlalchemy import BigInteger, Date, ForeignKey, Integer, String, Text
+from sqlalchemy import BigInteger, Date, DateTime, ForeignKey, Integer, String, Text, func
 from sqlalchemy.dialects.postgresql import UUID
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
@@ -98,6 +98,46 @@ class Task(Base, OrgScopedMixin, TimestampMixin, SoftDeleteMixin):
     story_points: Mapped[int | None] = mapped_column(Integer, nullable=True)
 
     story: Mapped[Story] = relationship("Story", back_populates="tasks")
+
+
+class StoryComment(Base, OrgScopedMixin):
+    __tablename__ = "story_comments"
+
+    id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    story_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("stories.id", ondelete="CASCADE"), nullable=False, index=True
+    )
+    project_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("projects.id", ondelete="CASCADE"), nullable=False
+    )
+    content: Mapped[str] = mapped_column(Text, nullable=False)
+    created_by: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("team_members.id", ondelete="CASCADE"), nullable=False
+    )
+    created_at: Mapped[uuid.UUID] = mapped_column(
+        DateTime(timezone=True), server_default=func.now(), nullable=False
+    )
+
+
+class StoryActivity(Base, OrgScopedMixin):
+    __tablename__ = "story_activities"
+
+    id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    story_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("stories.id", ondelete="CASCADE"), nullable=False, index=True
+    )
+    project_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("projects.id", ondelete="CASCADE"), nullable=False
+    )
+    activity_type: Mapped[str] = mapped_column(Text, nullable=False)
+    old_value: Mapped[str | None] = mapped_column(Text, nullable=True)
+    new_value: Mapped[str | None] = mapped_column(Text, nullable=True)
+    created_by: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("team_members.id", ondelete="CASCADE"), nullable=False
+    )
+    created_at: Mapped[uuid.UUID] = mapped_column(
+        DateTime(timezone=True), server_default=func.now(), nullable=False
+    )
 
 
 from app.models.project import Project  # noqa: E402, F401
