@@ -2,6 +2,7 @@ import uuid
 
 from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy import select
+from sqlalchemy.orm import joinedload
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.dependencies.auth import AuthContext, get_current_user
@@ -20,12 +21,16 @@ async def get_me(
 ) -> MeResponse:
     resolved_id = member_id or uuid.UUID(auth.user_id)
     result = await session.execute(
-        select(TeamMember).where(TeamMember.id == resolved_id)
+        select(TeamMember)
+        .options(joinedload(TeamMember.project))
+        .where(TeamMember.id == resolved_id)
     )
     member = result.scalar_one_or_none()
     if member is None:
         raise HTTPException(status_code=404, detail="Member not found")
-    return MeResponse.model_validate(member)
+    data = MeResponse.model_validate(member)
+    data.project_name = member.project.name if member.project else None
+    return data
 
 
 @router.patch("", response_model=MeResponse)
