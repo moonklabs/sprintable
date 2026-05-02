@@ -1,6 +1,7 @@
 'use client';
 
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { useRouter, useSearchParams } from 'next/navigation';
 import { useTranslations } from 'next-intl';
 import { ChevronLeft, Plus, Search, X } from 'lucide-react';
 import { MemoFeed } from '@/components/memos/memo-feed';
@@ -28,6 +29,8 @@ interface Member {
 
 export function MemosFeedClient({ currentTeamMemberId, projectId }: MemosFeedClientProps) {
   const t = useTranslations('memos');
+  const router = useRouter();
+  const searchParams = useSearchParams();
   const [memos, setMemos] = useState<MemoSummaryState[]>([]);
   const [members, setMembers] = useState<Member[]>([]);
   const [selectedMemo, setSelectedMemo] = useState<MemoDetailState | null>(null);
@@ -41,6 +44,44 @@ export function MemosFeedClient({ currentTeamMemberId, projectId }: MemosFeedCli
   const [loadingMore, setLoadingMore] = useState(false);
   const debounceTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
 
+  // Member/Agent filter — stored in URL params
+  const selectedMemberIds = useMemo(() => {
+    const raw = searchParams.get('member_ids');
+    return raw ? raw.split(',').filter(Boolean) : [];
+  }, [searchParams]);
+
+  const selectedAgentIds = useMemo(() => {
+    const raw = searchParams.get('agent_ids');
+    return raw ? raw.split(',').filter(Boolean) : [];
+  }, [searchParams]);
+
+  const hasActiveFilters = selectedMemberIds.length > 0 || selectedAgentIds.length > 0;
+
+  const toggleMemberId = useCallback((id: string) => {
+    const params = new URLSearchParams(searchParams.toString());
+    const current = params.get('member_ids')?.split(',').filter(Boolean) ?? [];
+    const next = current.includes(id) ? current.filter((x) => x !== id) : [...current, id];
+    if (next.length > 0) params.set('member_ids', next.join(','));
+    else params.delete('member_ids');
+    router.replace(`/memos${params.size > 0 ? `?${params.toString()}` : ''}`, { scroll: false });
+  }, [router, searchParams]);
+
+  const toggleAgentId = useCallback((id: string) => {
+    const params = new URLSearchParams(searchParams.toString());
+    const current = params.get('agent_ids')?.split(',').filter(Boolean) ?? [];
+    const next = current.includes(id) ? current.filter((x) => x !== id) : [...current, id];
+    if (next.length > 0) params.set('agent_ids', next.join(','));
+    else params.delete('agent_ids');
+    router.replace(`/memos${params.size > 0 ? `?${params.toString()}` : ''}`, { scroll: false });
+  }, [router, searchParams]);
+
+  const clearFilters = useCallback(() => {
+    const params = new URLSearchParams(searchParams.toString());
+    params.delete('member_ids');
+    params.delete('agent_ids');
+    router.replace(`/memos${params.size > 0 ? `?${params.toString()}` : ''}`, { scroll: false });
+  }, [router, searchParams]);
+
   const handleSearchChange = (value: string) => {
     setSearchQuery(value);
     if (debounceTimer.current) clearTimeout(debounceTimer.current);
@@ -51,6 +92,15 @@ export function MemosFeedClient({ currentTeamMemberId, projectId }: MemosFeedCli
     () => Object.fromEntries(members.map((m) => [m.id, m.name])),
     [members],
   );
+
+  const humanMembers = useMemo(() => members.filter((m) => m.type !== 'agent'), [members]);
+  const agentMembers = useMemo(() => members.filter((m) => m.type === 'agent'), [members]);
+
+  const filteredMemos = useMemo(() => {
+    if (!hasActiveFilters) return memos;
+    const allSelectedIds = new Set([...selectedMemberIds, ...selectedAgentIds]);
+    return memos.filter((memo) => memo.assigned_to !== null && allSelectedIds.has(memo.assigned_to));
+  }, [memos, hasActiveFilters, selectedMemberIds, selectedAgentIds]);
 
   const fetchMemos = useCallback(async (q?: string, cursor?: string | null) => {
     if (!projectId) return;
@@ -241,7 +291,8 @@ export function MemosFeedClient({ currentTeamMemberId, projectId }: MemosFeedCli
   }
 
   const feedHeader = (
-    <div className="flex-shrink-0 border-b border-border/80 px-3 py-2">
+    <div className="flex-shrink-0 border-b border-border/80 px-3 py-2 space-y-2">
+      {/* Search */}
       <div className="relative">
         <Search className="absolute left-2.5 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-muted-foreground" />
         <input
@@ -261,6 +312,66 @@ export function MemosFeedClient({ currentTeamMemberId, projectId }: MemosFeedCli
           </button>
         ) : null}
       </div>
+
+      {/* Member / Agent filter chips */}
+      {(humanMembers.length > 0 || agentMembers.length > 0) && (
+        <div className="space-y-1.5">
+          {humanMembers.length > 0 && (
+            <div className="flex flex-wrap gap-1">
+              <span className="flex items-center text-[10px] font-medium text-muted-foreground pr-1">{t('filterMembers')}</span>
+              {humanMembers.map((m) => {
+                const active = selectedMemberIds.includes(m.id);
+                return (
+                  <button
+                    key={m.id}
+                    type="button"
+                    onClick={() => toggleMemberId(m.id)}
+                    className={`rounded-md border px-2 py-0.5 text-xs font-medium transition-colors ${
+                      active
+                        ? 'border-primary/40 bg-primary/10 text-primary'
+                        : 'border-border bg-muted/30 text-muted-foreground hover:bg-muted/60 hover:text-foreground'
+                    }`}
+                  >
+                    {m.name}
+                  </button>
+                );
+              })}
+            </div>
+          )}
+          {agentMembers.length > 0 && (
+            <div className="flex flex-wrap gap-1">
+              <span className="flex items-center text-[10px] font-medium text-muted-foreground pr-1">{t('filterAgents')}</span>
+              {agentMembers.map((m) => {
+                const active = selectedAgentIds.includes(m.id);
+                return (
+                  <button
+                    key={m.id}
+                    type="button"
+                    onClick={() => toggleAgentId(m.id)}
+                    className={`rounded-md border px-2 py-0.5 text-xs font-medium transition-colors ${
+                      active
+                        ? 'border-primary/40 bg-primary/10 text-primary'
+                        : 'border-border bg-muted/30 text-muted-foreground hover:bg-muted/60 hover:text-foreground'
+                    }`}
+                  >
+                    {m.name}
+                  </button>
+                );
+              })}
+            </div>
+          )}
+          {hasActiveFilters && (
+            <button
+              type="button"
+              onClick={clearFilters}
+              className="flex items-center gap-1 text-[10px] text-muted-foreground hover:text-foreground"
+            >
+              <X className="h-3 w-3" />
+              {t('clearFilters')}
+            </button>
+          )}
+        </div>
+      )}
     </div>
   );
 
@@ -322,14 +433,20 @@ export function MemosFeedClient({ currentTeamMemberId, projectId }: MemosFeedCli
       <div className="hidden w-[340px] flex-shrink-0 flex-col border-r border-border/80 bg-background lg:flex">
         {feedHeader}
         <div className="flex-1 overflow-y-auto">
-          <MemoFeed
-            memos={memos}
-            onSelectMemo={handleSelectMemo}
-            selectedMemoId={selectedMemo?.id ?? null}
-            memberMap={memberMap}
-            onNewMemo={handleNewMemo}
-          />
-          {hasMore && (
+          {hasActiveFilters && filteredMemos.length === 0 ? (
+            <div className="flex h-32 items-center justify-center px-4">
+              <p className="text-center text-sm text-muted-foreground">{t('noFilteredMemos')}</p>
+            </div>
+          ) : (
+            <MemoFeed
+              memos={filteredMemos}
+              onSelectMemo={handleSelectMemo}
+              selectedMemoId={selectedMemo?.id ?? null}
+              memberMap={memberMap}
+              onNewMemo={handleNewMemo}
+            />
+          )}
+          {hasMore && !hasActiveFilters && (
             <div className="px-3 py-2">
               <Button variant="ghost" size="sm" className="w-full text-muted-foreground" onClick={() => void loadMore()} disabled={loadingMore}>
                 {loadingMore ? t('loading') : t('loadMore')}
@@ -349,14 +466,20 @@ export function MemosFeedClient({ currentTeamMemberId, projectId }: MemosFeedCli
         <div className="flex flex-1 flex-col lg:hidden">
           {feedHeader}
           <div className="flex-1 overflow-y-auto">
-            <MemoFeed
-              memos={memos}
-              onSelectMemo={handleSelectMemo}
-              selectedMemoId={selectedMemo?.id ?? null}
-              memberMap={memberMap}
-              onNewMemo={handleNewMemo}
-            />
-            {hasMore && (
+            {hasActiveFilters && filteredMemos.length === 0 ? (
+              <div className="flex h-32 items-center justify-center px-4">
+                <p className="text-center text-sm text-muted-foreground">{t('noFilteredMemos')}</p>
+              </div>
+            ) : (
+              <MemoFeed
+                memos={filteredMemos}
+                onSelectMemo={handleSelectMemo}
+                selectedMemoId={selectedMemo?.id ?? null}
+                memberMap={memberMap}
+                onNewMemo={handleNewMemo}
+              />
+            )}
+            {hasMore && !hasActiveFilters && (
               <div className="px-3 py-2">
                 <Button variant="ghost" size="sm" className="w-full text-muted-foreground" onClick={() => void loadMore()} disabled={loadingMore}>
                   {loadingMore ? t('loading') : t('loadMore')}
