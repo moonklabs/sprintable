@@ -48,6 +48,8 @@ class MemoListResponse(BaseModel):
 
 class MemoResponse(MemoListResponse):
     deleted_at: datetime | None = None
+    replies: list["ReplyResponse"] = []
+    reply_count: int = 0
 
 
 class CreateReply(BaseModel):

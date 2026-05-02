@@ -1,15 +1,64 @@
 import uuid
+import asyncio
+import logging
 
+import httpx
 from fastapi import APIRouter, Depends, Header, HTTPException, Query, status
+from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
+
+logger = logging.getLogger(__name__)
 
 from app.dependencies.auth import AuthContext, get_current_user
 from app.dependencies.database import get_db
+from app.models.team import TeamMember
 from app.repositories.memo import MemoReplyRepository, MemoRepository
 from app.routers.events import publish_event
 from app.schemas.memo import CreateMemo, CreateReply, MemoListResponse, MemoResponse, ReplyResponse, UpdateMemo
 
 router = APIRouter(prefix="/api/v2/memos", tags=["memos"])
+
+
+async def _dispatch_reply_webhooks(db: AsyncSession, memo: object, reply: object, sender_id: uuid.UUID) -> None:
+    try:
+        from app.models.memo import Memo, MemoReply  # noqa: PLC0415
+
+        m: Memo = memo  # type: ignore[assignment]
+        r: MemoReply = reply  # type: ignore[assignment]
+
+        recipient_ids = {m.assigned_to, m.created_by} - {sender_id, None}
+        if not recipient_ids:
+            return
+
+        rows = await db.execute(
+            select(TeamMember.webhook_url).where(
+                TeamMember.id.in_(recipient_ids),
+                TeamMember.is_active.is_(True),
+                TeamMember.webhook_url.isnot(None),
+            )
+        )
+        urls = [row[0] for row in rows if row[0]]
+        if not urls:
+            return
+
+        app_url = __import__("os").environ.get("NEXT_PUBLIC_APP_URL", "")
+        memo_url = f"{app_url}/memos?id={m.id}" if app_url else ""
+
+        async with httpx.AsyncClient(timeout=10) as client:
+            for url in urls:
+                try:
+                    if "discord.com/api/webhooks" in url or "discordapp.com/api/webhooks" in url:
+                        payload = {
+                            "content": f"📩 **새 답신**\n{r.content[:500]}",
+                            "embeds": [{"title": m.title or "메모 답신", "url": memo_url}] if memo_url else [],
+                        }
+                    else:
+                        payload = {"text": f"새 답신: {r.content[:200]}"}
+                    await client.post(url, json=payload)
+                except Exception:  # noqa: BLE001
+                    pass
+    except Exception:  # noqa: BLE001
+        logger.warning("reply webhook dispatch failed", exc_info=True)
 
 
 def _get_repo(
@@ -71,12 +120,18 @@ async def create_memo(
 @router.get("/{id}", response_model=MemoResponse)
 async def get_memo(
     id: uuid.UUID,
+    db: AsyncSession = Depends(get_db),
     repo: MemoRepository = Depends(_get_repo),
 ) -> MemoResponse:
     memo = await repo.get(id)
     if memo is None:
         raise HTTPException(status_code=404, detail="Memo not found")
-    return MemoResponse.model_validate(memo)
+    reply_repo = MemoReplyRepository(db)
+    replies = await reply_repo.list_by_memo(id)
+    response = MemoResponse.model_validate(memo)
+    response.replies = [ReplyResponse.model_validate(r) for r in replies]
+    response.reply_count = len(replies)
+    return response
 
 
 @router.patch("/{id}", response_model=MemoListResponse)
@@ -119,6 +174,10 @@ async def add_reply(
         memo_id=id, content=body.content, created_by=body.created_by, review_type=body.review_type
     )
     publish_event(str(repo.org_id), "reply_created", {"id": str(reply.id), "memo_id": str(id)})
+
+    # Discord 웹훅 발송 (비동기, 실패 무시)
+    asyncio.create_task(_dispatch_reply_webhooks(db, memo, reply, body.created_by))
+
     return ReplyResponse.model_validate(reply)
 
 
