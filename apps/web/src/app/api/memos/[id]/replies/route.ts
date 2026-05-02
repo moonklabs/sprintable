@@ -45,9 +45,12 @@ export async function POST(request: Request, { params }: RouteParams) {
     const body = parsed.data;
 
     const { fastapiCall } = await import('@sprintable/storage-api');
+    const xApiKey = request.headers.get('x-api-key');
+    const authHeader = request.headers.get('authorization');
+    const rawApiKey = xApiKey ?? (authHeader?.startsWith('Bearer sk_live_') ? authHeader.slice(7) : null);
     const { getServerSession } = await import('@/lib/db/server');
     const session = await getServerSession();
-    const token = session?.access_token ?? '';
+    const token = rawApiKey ?? session?.access_token ?? '';
 
     const reply = await fastapiCall<unknown>(
       'POST', `/api/v2/memos/${id}/replies`, token,
