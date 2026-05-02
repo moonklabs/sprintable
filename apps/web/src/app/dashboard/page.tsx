@@ -1,8 +1,9 @@
 import Link from 'next/link';
-import { cookies } from 'next/headers';
 import { redirect } from 'next/navigation';
 import { isOssMode } from '@/lib/storage/factory';
-import { CURRENT_PROJECT_COOKIE, getMyProjectMemberships, getOssUserContext, resolveCurrentProjectMembership } from '@/lib/auth-helpers';
+import { getOssUserContext } from '@/lib/auth-helpers';
+import { getServerSession } from '@/lib/db/server';
+import { fastapiCall } from '@sprintable/storage-api';
 import { getLocale, getTranslations } from 'next-intl/server';
 import { LogoutButton } from './logout-button';
 import { SectionCard, SectionCardBody, SectionCardHeader } from '@/components/ui/section-card';
@@ -172,86 +173,40 @@ export default async function DashboardPage() {
     );
   }
 
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  const db: any = null;
-  if (!db) redirect('/login');
+  const session = await getServerSession();
+  if (!session) redirect('/login');
 
-  const { data: memberships } = await db
-    .from('org_members')
-    .select('org_id')
-    .eq('user_id', (null as any))
-    .limit(1);
+  const me = await fastapiCall<{ id: string; org_id: string; project_id: string; project_name: string | null }>(
+    'GET', '/api/v2/me', session.access_token,
+  ).catch(() => null);
+  if (!me) redirect('/login');
 
-  if (!memberships || memberships.length === 0) redirect('/onboarding');
+  const projectId = me.project_id;
+  const teamMemberId = me.id;
 
-  const orgId = memberships[0]!.org_id as string;
-  const { data: org } = await db
-    .from('organizations')
-    .select('name, slug')
-    .eq('id', orgId)
-    .single();
-
-  const projectMemberships = await getMyProjectMemberships(db, null as any);
-  const cookieStore = await cookies();
-  const currentProjectId = cookieStore.get(CURRENT_PROJECT_COOKIE)?.value ?? null;
-  const currentMembership = resolveCurrentProjectMembership(projectMemberships, currentProjectId);
-
-  if (projectMemberships.length === 0) {
-    return (
-      <div className="min-h-full p-4 md:p-6">
-        <div className="mx-auto max-w-7xl space-y-6">
-          <TopBarSlot
-            title={<h1 className="text-sm font-medium">{t('title')}</h1>}
-            actions={<LogoutButton />}
-          />
-
-          <SectionCard>
-            <SectionCardBody>
-              <EmptyState title={t('noProjectAccess')} description={t('noProjectAccessDescription')} />
-            </SectionCardBody>
-          </SectionCard>
-        </div>
-      </div>
-    );
+  interface DashboardData {
+    my_stories: Array<{ id: string; title: string; status: string; story_points: number | null }>;
+    my_tasks: Array<{ id: string; title: string; status: string }>;
+    open_memos: Array<{ id: string; title: string | null; status: string }>;
   }
 
-  if (!currentMembership) {
-    return (
-      <div className="min-h-full p-4 md:p-6">
-        <div className="mx-auto max-w-7xl space-y-6">
-          <TopBarSlot
-            title={<h1 className="text-sm font-medium">{t('title')}</h1>}
-            actions={<LogoutButton />}
-          />
+  const dashboardData = await fastapiCall<DashboardData>(
+    'GET', '/api/v2/dashboard', session.access_token,
+    { query: { member_id: teamMemberId, project_id: projectId } },
+  ).catch(() => null);
 
-          <SectionCard>
-            <SectionCardBody>
-              <EmptyState title={shellT('projectSelectPrompt')} description={shellT('projectSelectDescription')} />
-            </SectionCardBody>
-          </SectionCard>
-        </div>
-      </div>
-    );
-  }
-
-  const projectId = currentMembership.project_id;
-  const teamMemberId = currentMembership.id;
-
-  const [{ data: activeSprints }, { data: recentMemos }, { data: docs }, { data: policyDocuments }, { data: allStories }, { data: assignedStories }] = await Promise.all([
-    db.from('sprints').select('id, title, status, start_date, end_date').eq('project_id', projectId).eq('status', 'active').limit(3),
-    db.from('memos').select('id, title, content, status, created_at').eq('project_id', projectId).eq('status', 'open').order('created_at', { ascending: false }).limit(5),
-    db.from('docs').select('id, title, slug, updated_at').eq('project_id', projectId).order('updated_at', { ascending: false }).limit(4),
-    db.from('policy_documents').select('id, title, sprint_id, epic_id, created_at').eq('project_id', projectId).order('created_at', { ascending: false }).limit(4),
-    db.from('stories').select('id, status').eq('project_id', projectId),
-    db.from('stories').select('id, title, status').eq('project_id', projectId).eq('assignee_id', teamMemberId).limit(5),
-  ]);
+  const activeSprints: Array<{ id: string; title: string; status: string; start_date: string; end_date: string }> = [];
+  const recentMemos = (dashboardData?.open_memos ?? []).map((m) => ({ id: m.id, title: m.title, content: '', created_at: '' }));
+  const docs: Array<{ id: string; title: string; slug: string }> = [];
+  const policyDocuments: Array<{ id: string; title: string; created_at: string }> = [];
+  const assignedStories = dashboardData?.my_stories ?? [];
 
   // Calculate story counts by status
   const storyCounts = {
-    inProgress: allStories?.filter((s) => s.status === 'in-progress').length ?? 0,
-    inReview: allStories?.filter((s) => s.status === 'in-review').length ?? 0,
-    blocked: 0, // TODO: Add blocked status when available
-    open: allStories?.filter((s) => s.status !== 'done').length ?? 0,
+    inProgress: assignedStories.filter((s) => s.status === 'in-progress').length,
+    inReview: assignedStories.filter((s) => s.status === 'in-review').length,
+    blocked: 0,
+    open: assignedStories.filter((s) => s.status !== 'done').length,
   };
 
   return (
@@ -281,7 +236,7 @@ export default async function DashboardPage() {
               </div>
             </SectionCardHeader>
             <SectionCardBody className="grid gap-3 md:grid-cols-3">
-              <OperatorStatCard label={t('projects')} value={projectMemberships.length} hint={t('projectsHint')} />
+              <OperatorStatCard label={t('projects')} value={1} hint={t('projectsHint')} />
               <OperatorStatCard label={t('activeSprints')} value={activeSprints?.length ?? 0} hint={t('activeSprintsHint')} />
               <OperatorStatCard label={t('openMemos')} value={recentMemos?.length ?? 0} hint={t('openMemosHint')} />
             </SectionCardBody>
