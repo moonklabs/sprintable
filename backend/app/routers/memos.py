@@ -115,10 +115,13 @@ async def get_memo(
         raise HTTPException(status_code=404, detail="Memo not found")
     reply_repo = MemoReplyRepository(db)
     replies = await reply_repo.list_by_memo(id)
-    response = MemoResponse.model_validate(memo)
-    response.replies = [ReplyResponse.model_validate(r) for r in replies]
-    response.reply_count = len(replies)
-    return response
+    reply_items = [ReplyResponse.model_validate(r) for r in replies]
+    # column 속성만 추출하여 ORM relationship lazy-load 완전 우회
+    col_keys = [c.key for c in memo.__table__.columns]
+    memo_dict: dict = {k: getattr(memo, k) for k in col_keys}
+    memo_dict["replies"] = reply_items
+    memo_dict["reply_count"] = len(reply_items)
+    return MemoResponse.model_validate(memo_dict)
 
 
 @router.patch("/{id}", response_model=MemoListResponse)

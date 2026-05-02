@@ -46,12 +46,6 @@ class MemoListResponse(BaseModel):
     updated_at: datetime
 
 
-class MemoResponse(MemoListResponse):
-    deleted_at: datetime | None = None
-    replies: list["ReplyResponse"] = []
-    reply_count: int = 0
-
-
 class CreateReply(BaseModel):
     content: str
     created_by: uuid.UUID
@@ -67,3 +61,9 @@ class ReplyResponse(BaseModel):
     content: str
     review_type: str
     created_at: datetime
+
+
+class MemoResponse(MemoListResponse):
+    deleted_at: datetime | None = None
+    replies: list[ReplyResponse] = []
+    reply_count: int = 0
