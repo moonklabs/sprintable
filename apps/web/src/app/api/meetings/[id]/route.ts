@@ -1,8 +1,8 @@
-import { parseBody, updateMeetingSchema } from '@sprintable/shared';
-import { MeetingService } from '@/services/meeting';
 import { handleApiError } from '@/lib/api-error';
 import { apiSuccess, ApiErrors } from '@/lib/api-response';
 import { getAuthContext } from '@/lib/auth-helpers';
+import { isOssMode } from '@/lib/storage/factory';
+import { proxyToFastapiWithParams } from '@/lib/fastapi-proxy';
 
 type RouteParams = { params: Promise<{ id: string }> };
 
@@ -13,11 +13,12 @@ export async function GET(request: Request, { params }: RouteParams) {
     const me = await getAuthContext(request);
     if (!me) return ApiErrors.unauthorized();
     if (me.rateLimitExceeded) return ApiErrors.tooManyRequests(me.rateLimitRemaining, me.rateLimitResetAt);
-    const dbClient = undefined;
 
-    const service = new MeetingService(dbClient);
-    const meeting = await service.getById(id);
-    return apiSuccess(meeting);
+    if (isOssMode()) return ApiErrors.notFound('Meeting not found');
+
+    const _r = await proxyToFastapiWithParams(request, '/api/v2/meetings/[id]', { id });
+    if (!_r.ok) return _r;
+    return apiSuccess(await _r.json());
   } catch (err: unknown) { return handleApiError(err); }
 }
 
@@ -28,28 +29,27 @@ export async function PUT(request: Request, { params }: RouteParams) {
     const me = await getAuthContext(request);
     if (!me) return ApiErrors.unauthorized();
     if (me.rateLimitExceeded) return ApiErrors.tooManyRequests(me.rateLimitRemaining, me.rateLimitResetAt);
-    const dbClient = undefined;
 
-    const parsed = await parseBody(request, updateMeetingSchema);
-    if (!parsed.success) return parsed.response;
+    if (isOssMode()) return ApiErrors.notFound('Meeting not found');
 
-    const service = new MeetingService(dbClient);
-    const meeting = await service.update(id, parsed.data);
-    return apiSuccess(meeting);
+    const _r = await proxyToFastapiWithParams(request, '/api/v2/meetings/[id]', { id });
+    if (!_r.ok) return _r;
+    return apiSuccess(await _r.json());
   } catch (err: unknown) { return handleApiError(err); }
 }
 
-/** DELETE — 회의록 삭제 (soft) */
+/** DELETE — 회의록 삭제 */
 export async function DELETE(request: Request, { params }: RouteParams) {
   try {
     const { id } = await params;
     const me = await getAuthContext(request);
     if (!me) return ApiErrors.unauthorized();
     if (me.rateLimitExceeded) return ApiErrors.tooManyRequests(me.rateLimitRemaining, me.rateLimitResetAt);
-    const dbClient = undefined;
 
-    const service = new MeetingService(dbClient);
-    await service.delete(id);
-    return apiSuccess({ ok: true });
+    if (isOssMode()) return ApiErrors.notFound('Meeting not found');
+
+    const _r = await proxyToFastapiWithParams(request, '/api/v2/meetings/[id]', { id });
+    if (!_r.ok) return _r;
+    return apiSuccess(await _r.json());
   } catch (err: unknown) { return handleApiError(err); }
 }
