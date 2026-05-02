@@ -85,8 +85,41 @@ async def _get_user_by_id(session: AsyncSession, user_id: uuid.UUID) -> User | N
     return result.scalar_one_or_none()
 
 
-def _build_app_metadata(user: User) -> dict:
-    return {}
+async def _build_app_metadata(user: User, session: AsyncSession) -> dict:
+    from app.models.team import TeamMember
+
+    # 1. user_id로 이미 연결된 team_member 조회
+    result = await session.execute(
+        select(TeamMember)
+        .where(TeamMember.user_id == user.id, TeamMember.is_active.is_(True))
+        .order_by(TeamMember.created_at.asc())
+        .limit(1)
+    )
+    member = result.scalar_one_or_none()
+
+    if not member:
+        # 2. user_id 미연결 human team_member 중 첫 번째에 자동 연결
+        result2 = await session.execute(
+            select(TeamMember)
+            .where(
+                TeamMember.user_id.is_(None),
+                TeamMember.is_active.is_(True),
+                TeamMember.type == "human",
+            )
+            .order_by(TeamMember.created_at.asc())
+            .limit(1)
+        )
+        member = result2.scalar_one_or_none()
+        if member:
+            member.user_id = user.id
+
+    if not member:
+        return {}
+
+    return {
+        "org_id": str(member.org_id),
+        "project_id": str(member.project_id),
+    }
 
 
 async def _store_refresh_token(
@@ -129,7 +162,7 @@ async def register(
         await session.rollback()
         return _err("EMAIL_TAKEN", "Email already registered", 409)
 
-    tokens = create_tokens(str(user.id), email=user.email, app_metadata=_build_app_metadata(user))
+    tokens = create_tokens(str(user.id), email=user.email, app_metadata=await _build_app_metadata(user, session))
     _, refresh_exp = create_refresh_token(str(user.id), expires_delta=timedelta(days=REFRESH_TOKEN_EXPIRE_DAYS))
     await _store_refresh_token(session, user, tokens["refresh_token"], refresh_exp)
 
@@ -153,7 +186,7 @@ async def login(
         if not verify_totp(user.totp_secret or "", body.totp_code):
             return _err("INVALID_TOTP", "Invalid TOTP code", 403)
 
-    tokens = create_tokens(str(user.id), email=user.email, app_metadata=_build_app_metadata(user))
+    tokens = create_tokens(str(user.id), email=user.email, app_metadata=await _build_app_metadata(user, session))
     _, refresh_exp = create_refresh_token(str(user.id), expires_delta=timedelta(days=REFRESH_TOKEN_EXPIRE_DAYS))
     await _store_refresh_token(session, user, tokens["refresh_token"], refresh_exp)
 
@@ -199,7 +232,7 @@ async def refresh_token(
         .values(revoked_at=datetime.now(timezone.utc))
     )
 
-    tokens = create_tokens(str(user.id), email=user.email, app_metadata=_build_app_metadata(user))
+    tokens = create_tokens(str(user.id), email=user.email, app_metadata=await _build_app_metadata(user, session))
     _, refresh_exp = create_refresh_token(str(user.id), expires_delta=timedelta(days=REFRESH_TOKEN_EXPIRE_DAYS))
     await _store_refresh_token(session, user, tokens["refresh_token"], refresh_exp)
 
@@ -422,7 +455,7 @@ async def oauth_callback(
     from datetime import timedelta
     from app.core.security import ACCESS_TOKEN_EXPIRE_MINUTES, REFRESH_TOKEN_EXPIRE_DAYS
 
-    tokens = create_tokens(str(user.id), user.email, _build_app_metadata(user))
+    tokens = create_tokens(str(user.id), user.email, await _build_app_metadata(user, session))
     raw_refresh = tokens["refresh_token"]
     expires_at = datetime.now(timezone.utc) + timedelta(days=REFRESH_TOKEN_EXPIRE_DAYS)
     await _store_refresh_token(session, user, raw_refresh, expires_at)
