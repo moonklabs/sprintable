@@ -1,10 +1,15 @@
 import uuid
+from datetime import date as date_type
 
 from fastapi import APIRouter, Depends, Header, HTTPException, Query, status
+from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.dependencies.auth import AuthContext, get_current_user
 from app.dependencies.database import get_db
+from app.models.pm import Story
+from app.models.standup import StandupEntry
+from app.models.team import TeamMember
 from app.repositories.sprint import SprintRepository
 from app.schemas.sprint import KickoffBody, SprintCreate, SprintResponse, SprintUpdate
 
@@ -127,3 +132,59 @@ async def kickoff_sprint(
         raise HTTPException(status_code=404, detail="Sprint not found")
     # Notification dispatch is Phase D — return stub for Phase B
     return {"notified": 0, "sprint_id": str(id), "message": body.message}
+
+
+@router.get("/{id}/checkin")
+async def checkin_sprint(
+    id: uuid.UUID,
+    date: str = Query(..., description="YYYY-MM-DD"),
+    db: AsyncSession = Depends(get_db),
+    repo: SprintRepository = Depends(_get_repo),
+) -> dict:
+    sprint = await repo.get(id)
+    if sprint is None:
+        raise HTTPException(status_code=404, detail="Sprint not found")
+
+    try:
+        checkin_date = date_type.fromisoformat(date)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail="Invalid date format, expected YYYY-MM-DD") from exc
+
+    stories_result = await db.execute(
+        select(Story.status, Story.story_points).where(Story.sprint_id == id)
+    )
+    stories = stories_result.all()
+
+    members_result = await db.execute(
+        select(TeamMember.id, TeamMember.name).where(
+            TeamMember.project_id == sprint.project_id,
+            TeamMember.is_active.is_(True),
+        )
+    )
+    members = members_result.all()
+
+    standup_result = await db.execute(
+        select(StandupEntry.author_id).where(
+            StandupEntry.project_id == sprint.project_id,
+            StandupEntry.date == checkin_date,
+        )
+    )
+    standup_author_ids = {row.author_id for row in standup_result}
+
+    total_stories = len(stories)
+    total_points = sum(s.story_points or 0 for s in stories)
+    done_points = sum(s.story_points or 0 for s in stories if s.status == "done")
+    completion_pct = round((done_points / total_points) * 100) if total_points > 0 else 0
+    missing_standups = [
+        {"id": str(m.id), "name": m.name}
+        for m in members
+        if m.id not in standup_author_ids
+    ]
+
+    return {
+        "total_stories": total_stories,
+        "total_points": total_points,
+        "done_points": done_points,
+        "completion_pct": completion_pct,
+        "missing_standups": missing_standups,
+    }
