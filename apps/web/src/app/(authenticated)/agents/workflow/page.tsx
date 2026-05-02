@@ -20,6 +20,5 @@ export default async function AgentWorkflowPage() {
     );
   }
   // SaaS-only path — not reached in OSS mode
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  return null as any;
+  return null;
 }

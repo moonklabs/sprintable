@@ -19,7 +19,7 @@ export async function GET(request: Request, { params }: RouteParams) {
       const limit = url.searchParams.get('limit');
       const cursor = url.searchParams.get('cursor');
       const repo = await createStoryRepository();
-      const service = new StoryService(repo, undefined as any);
+      const service = new StoryService(repo, undefined);
       const comments = await service.getComments(id, {
         limit: limit ? parseInt(limit, 10) : 20,
         cursor: cursor ?? undefined,
@@ -49,7 +49,7 @@ export async function POST(request: Request, { params }: RouteParams) {
       const body = await request.json();
       if (!body.content || typeof body.content !== 'string') return ApiErrors.badRequest('content is required');
       const repo = await createStoryRepository();
-      const service = new StoryService(repo, undefined as any);
+      const service = new StoryService(repo, undefined);
       const comment = await service.addComment({ story_id: id, content: body.content, created_by: me.id });
       return apiSuccess(comment, undefined, 201);
     }

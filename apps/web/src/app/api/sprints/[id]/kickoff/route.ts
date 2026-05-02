@@ -20,7 +20,7 @@ export async function POST(request: Request, { params }: RouteParams) {
 
     const body = await request.json().catch(() => ({})) as { message?: string };
     const repo = await createSprintRepository(dbClient);
-    const service = new SprintService(repo, dbClient as any | undefined);
+    const service = new SprintService(repo, dbClient);
     const data = await service.kickoff(id, body.message);
     return apiSuccess(data);
   } catch (err: unknown) {

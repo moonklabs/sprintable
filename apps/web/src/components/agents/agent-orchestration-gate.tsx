@@ -35,8 +35,7 @@ export async function AgentOrchestrationGate({
   orgId: string;
   children: React.ReactNode;
 }) {
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  const check = await checkFeatureLimit(null as any, orgId, 'agent_orchestration');
+  const check = await checkFeatureLimit(null, orgId, 'agent_orchestration');
 
   if (check.allowed) {
     return <>{children}</>;

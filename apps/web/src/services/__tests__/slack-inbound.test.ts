@@ -1,4 +1,5 @@
 
+import type { SupabaseClient } from '@/types/supabase';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { createHmac } from 'node:crypto';
 import {
@@ -148,7 +149,7 @@ function createDbStub(overrides: {
     from(table: string) {
       return makeQuery(table);
     },
-  } as any;
+  } as unknown as SupabaseClient;
 
   return { db, state };
 }

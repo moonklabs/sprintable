@@ -1,4 +1,5 @@
 
+import type { SupabaseClient } from '@/types/supabase';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { dispatchWorkflowMemoReplyWebhooks } from './memo-reply-webhook-dispatch';
 
@@ -91,7 +92,7 @@ function createDbStub(options?: {
 
       throw new Error(`Unexpected table: ${table}`);
     },
-  } as any;
+  } as unknown as SupabaseClient;
 
   return db;
 }

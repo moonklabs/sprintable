@@ -16,7 +16,7 @@ export async function GET(request: Request) {
       const projectId = searchParams.get('project_id');
       if (!projectId) return ApiErrors.badRequest('project_id required');
       const repo = await createStoryRepository();
-      const service = new StoryService(repo, undefined as any);
+      const service = new StoryService(repo, undefined);
       const stories = await service.backlog(projectId);
       return apiSuccess(stories);
     }

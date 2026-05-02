@@ -1,3 +1,4 @@
+import type { SupabaseClient } from '@/types/supabase';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 const { dispatchMemoAssignmentImmediately } = vi.hoisted(() => ({
@@ -52,7 +53,7 @@ describe('createInternalDogfoodMemoInSprintable', () => {
 
         throw new Error(`Unexpected table read: ${table}`);
       },
-    } as any;
+    } as unknown as SupabaseClient;
 
     const result = await createInternalDogfoodMemoInSprintable(
       db,

@@ -12,6 +12,5 @@ export default async function AgentsPage() {
     return <AgentsDashboard deployments={[]} />;
   }
   // SaaS-only path — not reached in OSS mode
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  return null as any;
+  return null;
 }

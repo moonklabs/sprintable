@@ -11,6 +11,5 @@ export default async function AgentDeployPage() {
       </div>
     );
   }
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  return null as any;
+  return null;
 }

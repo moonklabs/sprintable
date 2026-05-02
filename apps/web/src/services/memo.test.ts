@@ -1,3 +1,4 @@
+import type { SupabaseClient } from '@/types/supabase';
 import { describe, it, expect } from 'vitest';
 import { MemoService } from './memo';
 
@@ -114,7 +115,7 @@ describe('MemoService.getByIdWithDetails', () => {
           then: (resolve: (value: { data: unknown[]; error: null }) => void) => Promise.resolve({ data: [], error: null }).then(resolve),
         };
       },
-    } as any;
+    } as unknown as SupabaseClient;
 
     const service = MemoService.fromDb(db);
     const memo = await service.getByIdWithDetails('memo-1');
@@ -173,7 +174,7 @@ describe('MemoService.create', () => {
           single: async () => ({ data: null, error: null }),
         };
       },
-    } as any;
+    } as unknown as SupabaseClient;
 
     const service = MemoService.fromDb(db);
 
@@ -254,7 +255,7 @@ describe('MemoService.linkDoc and markRead', () => {
           single: async () => ({ data: null, error: null }),
         };
       },
-    } as any;
+    } as unknown as SupabaseClient;
 
     const service = MemoService.fromDb(db);
 
@@ -312,7 +313,7 @@ describe('MemoService.linkDoc and markRead', () => {
           single: async () => ({ data: null, error: null }),
         };
       },
-    } as any;
+    } as unknown as SupabaseClient;
 
     const service = MemoService.fromDb(db);
     await expect(service.markRead('memo-1', 'author-1')).resolves.toMatchObject({
@@ -389,7 +390,7 @@ describe('MemoService.list', () => {
 
         throw new Error(`Unexpected table: ${table}`);
       },
-    } as any;
+    } as unknown as SupabaseClient;
 
     const service = MemoService.fromDb(db);
     const memos = await service.list({ project_id: 'project-1' });
@@ -487,7 +488,7 @@ describe('MemoService.list', () => {
 
         throw new Error(`Unexpected table: ${table}`);
       },
-    } as any;
+    } as unknown as SupabaseClient;
 
     const service = MemoService.fromDb(db);
     const memos = await service.list({ project_id: 'project-1' });

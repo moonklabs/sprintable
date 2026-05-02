@@ -28,7 +28,7 @@ export async function POST(request: Request) {
     const parsed = createStorySchema.safeParse(rawBody);
     if (!parsed.success) return apiError('VALIDATION_ERROR', JSON.stringify(parsed.error.issues), 400);
     const repo = await createStoryRepository(dbClient);
-    const service = new StoryService(repo, dbClient as any | undefined);
+    const service = new StoryService(repo, dbClient);
     const story = await service.create(parsed.data as CreateStoryInput);
     return apiSuccess(story, undefined, 201);
   } catch (err: unknown) {
@@ -50,7 +50,7 @@ export async function GET(request: Request) {
       cursor: searchParams.get('cursor'),
     }, { defaultLimit: 50, maxLimit: 100 });
     const repo = await createStoryRepository(dbClient);
-    const service = new StoryService(repo, dbClient as any | undefined);
+    const service = new StoryService(repo, dbClient);
     const stories = await service.list({
       sprint_id: searchParams.get('sprint_id') ?? undefined,
       epic_id: searchParams.get('epic_id') ?? undefined,

@@ -1,4 +1,5 @@
 
+import type { SupabaseClient } from '@/types/supabase';
 import { describe, expect, it, vi } from 'vitest';
 import {
   findMentionedProjectMembers,
@@ -58,7 +59,7 @@ function createSourceDbStub() {
       if (table === 'team_members') return teamMembersQuery;
       throw new Error(`unexpected table: ${table}`);
     }),
-  } as any;
+  } as unknown as SupabaseClient;
 }
 
 function createAdminDbStub(insertSpy: ReturnType<typeof vi.fn>) {
@@ -67,7 +68,7 @@ function createAdminDbStub(insertSpy: ReturnType<typeof vi.fn>) {
       expect(table).toBe('notifications');
       return { insert: insertSpy };
     }),
-  } as any;
+  } as unknown as SupabaseClient;
 }
 
 describe('hasExactMemberMention', () => {

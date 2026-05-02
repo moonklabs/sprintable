@@ -1,4 +1,5 @@
 
+import type { SupabaseClient } from '@/types/supabase';
 import { describe, expect, it, vi } from 'vitest';
 import { attachNotificationHrefs } from './notification-navigation';
 
@@ -30,7 +31,7 @@ function createDbStub() {
       if (table === 'docs') return docsQuery;
       throw new Error(`unexpected table: ${table}`);
     }),
-  } as any;
+  } as unknown as SupabaseClient;
 }
 
 describe('attachNotificationHrefs', () => {

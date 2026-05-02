@@ -19,7 +19,7 @@ export async function GET(request: Request, { params }: RouteParams) {
     const dbClient = undefined;
 
     const repo = await createSprintRepository(dbClient);
-    const service = new SprintService(repo, dbClient as any | undefined);
+    const service = new SprintService(repo, dbClient);
     const data = await service.getBurndown(id);
     return apiSuccess(data);
   } catch (err: unknown) {

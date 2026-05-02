@@ -20,7 +20,7 @@ export async function GET(request: Request, { params }: RouteParams) {
     const dbClient = undefined;
 
     const repo = await createSprintRepository(dbClient);
-    const service = new SprintService(repo, dbClient as any | undefined);
+    const service = new SprintService(repo, dbClient);
     const sprint = await service.getById(id);
     return apiSuccess(sprint);
   } catch (err: unknown) {
@@ -41,7 +41,7 @@ export async function PATCH(request: Request, { params }: RouteParams) {
     const parsed = await parseBody(request, updateSprintSchema);
     if (!parsed.success) return parsed.response;
     const repo = await createSprintRepository(dbClient);
-    const service = new SprintService(repo, dbClient as any | undefined);
+    const service = new SprintService(repo, dbClient);
     const sprint = await service.update(id, parsed.data);
     return apiSuccess(sprint);
   } catch (err: unknown) {
@@ -60,7 +60,7 @@ export async function DELETE(request: Request, { params }: RouteParams) {
     const dbClient = undefined;
 
     const repo = await createSprintRepository(dbClient);
-    const service = new SprintService(repo, dbClient as any | undefined);
+    const service = new SprintService(repo, dbClient);
     await service.delete(id);
     return apiSuccess({ ok: true });
   } catch (err: unknown) {

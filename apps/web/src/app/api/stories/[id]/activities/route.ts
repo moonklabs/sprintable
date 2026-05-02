@@ -19,7 +19,7 @@ export async function GET(request: Request, { params }: RouteParams) {
       const limit = url.searchParams.get('limit');
       const cursor = url.searchParams.get('cursor');
       const repo = await createStoryRepository();
-      const service = new StoryService(repo, undefined as any);
+      const service = new StoryService(repo, undefined);
       const activities = await service.getActivities(id, {
         limit: limit ? parseInt(limit, 10) : 20,
         cursor: cursor ?? undefined,

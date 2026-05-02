@@ -1,3 +1,4 @@
+import type { SupabaseClient } from '@/types/supabase';
 import { handleApiError } from '@/lib/api-error';
 import { apiSuccess, apiError, ApiErrors } from '@/lib/api-response';
 import { isOssMode } from '@/lib/storage/factory';
@@ -8,8 +9,7 @@ import { requireOrgAdmin } from '@/lib/admin-check';
 export async function GET() {
   if (isOssMode()) return apiError('NOT_AVAILABLE', 'Not available in OSS mode.', 503);
   try {
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    const db: any = null;
+    const db = null as unknown as SupabaseClient;
     const { data: { user } } = await db.auth.getUser();
     if (!user) return ApiErrors.unauthorized();
 
@@ -31,8 +31,7 @@ export async function GET() {
 export async function PUT(request: Request) {
   if (isOssMode()) return apiError('NOT_AVAILABLE', 'Not available in OSS mode.', 503);
   try {
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    const db: any = null;
+    const db = null as unknown as SupabaseClient;
     const { data: { user } } = await db.auth.getUser();
     if (!user) return ApiErrors.unauthorized();
 
@@ -87,8 +86,7 @@ export async function PUT(request: Request) {
 export async function DELETE(request: Request) {
   if (isOssMode()) return apiError('NOT_AVAILABLE', 'Not available in OSS mode.', 503);
   try {
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    const db: any = null;
+    const db = null as unknown as SupabaseClient;
     const { data: { user } } = await db.auth.getUser();
     if (!user) return ApiErrors.unauthorized();
 

@@ -1,6 +1,7 @@
 
 import { parseBody, createTaskSchema } from '@sprintable/shared';
 
+import type { SupabaseClient } from '@/types/supabase';
 import { TaskService, type CreateTaskInput } from '@/services/task';
 import { createTaskRepository, isOssMode } from '@/lib/storage/factory';
 import { handleApiError } from '@/lib/api-error';
@@ -11,7 +12,7 @@ import { buildCursorPageMeta, parseCursorPageInput } from '@/lib/pagination';
 async function getStoryTaskCounts(
   service: TaskService,
   storyId: string,
-  dbClient: any | undefined,
+  dbClient: SupabaseClient | undefined,
   ossMode: boolean,
 ) {
   if (ossMode || !dbClient) {
@@ -46,7 +47,7 @@ export async function GET(request: Request) {
     if (!me) return ApiErrors.unauthorized();
     if (me.rateLimitExceeded) return ApiErrors.tooManyRequests(me.rateLimitRemaining, me.rateLimitResetAt);
     const ossMode = isOssMode();
-    const dbClient: any | undefined = undefined;
+    const dbClient = (undefined as unknown) as SupabaseClient | undefined;
 
     const { searchParams } = new URL(request.url);
     const storyId = searchParams.get('story_id') ?? undefined;
@@ -114,7 +115,7 @@ export async function POST(request: Request) {
     const me = await getAuthContext(request);
     if (!me) return ApiErrors.unauthorized();
     if (me.rateLimitExceeded) return ApiErrors.tooManyRequests(me.rateLimitRemaining, me.rateLimitResetAt);
-    const dbClient: any = undefined;
+    const dbClient = (undefined as unknown) as SupabaseClient | undefined;
 
     const parsed = await parseBody(request, createTaskSchema); if (!parsed.success) return parsed.response; const body = parsed.data;
     const repo = await createTaskRepository(dbClient);

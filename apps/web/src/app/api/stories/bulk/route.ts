@@ -21,7 +21,7 @@ export async function PATCH(request: Request) {
         return ApiErrors.badRequest('items array required');
       }
       const repo = await createStoryRepository();
-      const service = new StoryService(repo, undefined as any, { isAdminContext: me.type === 'agent' });
+      const service = new StoryService(repo, undefined, { isAdminContext: me.type === 'agent' });
       const results = await service.bulkUpdate(body.items);
       return apiSuccess(results);
     }

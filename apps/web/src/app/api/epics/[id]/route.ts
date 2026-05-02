@@ -1,6 +1,7 @@
 import { updateEpicSchema } from '@sprintable/shared';
 
 import { EpicService } from '@/services/epic';
+import type { SupabaseClient } from '@/types/supabase';
 import { handleApiError } from '@/lib/api-error';
 import { apiSuccess, apiError, ApiErrors } from '@/lib/api-response';
 import { getAuthContext } from '@/lib/auth-helpers';
@@ -15,7 +16,7 @@ export async function GET(request: Request, { params }: RouteParams) {
     const me = await getAuthContext(request);
     if (!me) return ApiErrors.unauthorized();
     if (me.rateLimitExceeded) return ApiErrors.tooManyRequests(me.rateLimitRemaining, me.rateLimitResetAt);
-    const dbClient = undefined;
+    const dbClient: SupabaseClient | undefined = undefined;
     const repo = await createEpicRepository(dbClient);
     const service = new EpicService(repo);
     return apiSuccess(await service.getByIdWithStories(id, { org_id: me.org_id, project_id: me.project_id }));
@@ -28,7 +29,7 @@ export async function PATCH(request: Request, { params }: RouteParams) {
     const me = await getAuthContext(request);
     if (!me) return ApiErrors.unauthorized();
     if (me.rateLimitExceeded) return ApiErrors.tooManyRequests(me.rateLimitRemaining, me.rateLimitResetAt);
-    const dbClient = undefined;
+    const dbClient: SupabaseClient | undefined = undefined;
 
     let rawBody: unknown;
     try { rawBody = await request.json(); } catch { return apiError('BAD_REQUEST', 'Invalid JSON body', 400); }
@@ -56,11 +57,11 @@ export async function DELETE(request: Request, { params }: RouteParams) {
     if (me.rateLimitExceeded) return ApiErrors.tooManyRequests(me.rateLimitRemaining, me.rateLimitResetAt);
 
     if (!isOssMode() && me.type !== 'agent') {
-      const denied = await requireRole(undefined, me.org_id, ADMIN_ROLES, 'Epic deletion requires admin or owner role');
+      const denied = await requireRole(null as unknown as SupabaseClient, me.org_id, ADMIN_ROLES, 'Epic deletion requires admin or owner role');
       if (denied) return denied;
     }
 
-    const dbClient = undefined;
+    const dbClient: SupabaseClient | undefined = undefined;
     const repo = await createEpicRepository(dbClient);
     const service = new EpicService(repo);
     await service.delete(id, me.org_id);

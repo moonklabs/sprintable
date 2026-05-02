@@ -1,4 +1,5 @@
 import { redirect } from 'next/navigation';
+import type { SupabaseClient } from '@/types/supabase';
 import { getMyTeamMember } from '@/lib/auth-helpers';
 import { requireOrgAdmin } from '@/lib/admin-check';
 import { AgentApiKeyManager } from '@/components/agents/agent-api-key-manager';
@@ -29,7 +30,7 @@ export default async function ApiKeysPage() {
       </div>
     );
   }
-  const db = null as any;
+  const db = null as unknown as SupabaseClient;
   const { data: { user } } = { data: { user: null } };
   if (!user) redirect('/login');
 

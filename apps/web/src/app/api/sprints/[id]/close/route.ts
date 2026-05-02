@@ -1,5 +1,6 @@
 
 
+import type { SupabaseClient } from '@/types/supabase';
 import { SprintService } from '@/services/sprint';
 import { handleApiError } from '@/lib/api-error';
 import { apiSuccess, ApiErrors } from '@/lib/api-response';
@@ -19,7 +20,8 @@ export async function POST(request: Request, { params }: RouteParams) {
     if (!me) return ApiErrors.unauthorized();
     if (me.rateLimitExceeded) return ApiErrors.tooManyRequests(me.rateLimitRemaining, me.rateLimitResetAt);
     const ossMode = isOssMode();
-    const dbClient = undefined;
+    // SaaS 전용 Supabase 클라이언트 (OSS 빌드에서는 undefined)
+    const dbClient = (undefined as unknown) as SupabaseClient | undefined;
 
     if (!ossMode && dbClient && me.type !== 'agent') {
       const denied = await requireRole(dbClient, me.org_id, EDIT_ROLES, 'Admin or PO access required to close sprint');
@@ -27,11 +29,11 @@ export async function POST(request: Request, { params }: RouteParams) {
     }
 
     const repo = await createSprintRepository(dbClient);
-    const service = new SprintService(repo, dbClient as any | undefined);
+    const service = new SprintService(repo, dbClient);
     const sprint = await service.close(id);
 
     if (!ossMode && dbClient) {
-      const db = dbClient as any;
+      const db = dbClient;
 
       // 알림 발송 (fire-and-forget)
       const notifService = new NotificationService(db);

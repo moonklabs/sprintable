@@ -38,8 +38,7 @@ export async function GET(request: Request) {
     const rows = query
       ? await service.search(projectId, query, { ...pageInput, tags })
       : await service.list(projectId, { ...pageInput, tags });
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    const { page, meta } = buildCursorPageMeta(rows as any[], pageInput.limit, 'updated_at');
+    const { page, meta } = buildCursorPageMeta(rows as Array<{ updated_at?: string }>, pageInput.limit, 'updated_at');
     return apiSuccess(page, meta);
   } catch (err: unknown) { return handleApiError(err); }
 }

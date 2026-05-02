@@ -1,3 +1,4 @@
+import type { SupabaseClient } from '@/types/supabase';
 import { describe, expect, it } from 'vitest';
 import { StandupFeedbackService, StandupService } from './standup';
 
@@ -30,7 +31,7 @@ describe('StandupService.save', () => {
           single: async () => ({ data: null, error: null }),
         };
       },
-    } as any;
+    } as unknown as SupabaseClient;
 
     const service = new StandupService(db);
     const entry = await service.save({
@@ -93,7 +94,7 @@ describe('StandupFeedbackService', () => {
           single: async () => ({ data: null, error: null }),
         };
       },
-    } as any;
+    } as unknown as SupabaseClient;
 
     const service = new StandupFeedbackService(db);
     const feedback = await service.listByDate('project-1', '2026-04-10');
@@ -145,7 +146,7 @@ describe('StandupFeedbackService', () => {
           single: async () => ({ data: null, error: null }),
         };
       },
-    } as any;
+    } as unknown as SupabaseClient;
 
     const service = new StandupFeedbackService(db);
     const feedback = await service.create({
@@ -190,7 +191,7 @@ describe('StandupFeedbackService', () => {
           single: async () => ({ data: null, error: null }),
         };
       },
-    } as any;
+    } as unknown as SupabaseClient;
 
     const service = new StandupFeedbackService(db);
     await expect(service.update('feedback-1', { feedback_text: 'change' }, 'member-2')).rejects.toThrow('Permission denied');

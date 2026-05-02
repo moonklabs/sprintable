@@ -1,4 +1,5 @@
 
+import type { SupabaseClient } from '@/types/supabase';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import {
   buildSlackMemoLink,
@@ -109,7 +110,7 @@ function createDbStub(options?: {
 
       throw new Error(`Unexpected table: ${table}`);
     },
-  } as any;
+  } as unknown as SupabaseClient;
 
   return { db, state };
 }
