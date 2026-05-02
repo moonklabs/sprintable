@@ -2,10 +2,12 @@ import uuid
 from datetime import date
 
 from fastapi import APIRouter, Depends, Header, HTTPException, Query, status
+from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.dependencies.auth import AuthContext, get_current_user
 from app.dependencies.database import get_db
+from app.models.standup import StandupEntry, StandupFeedback
 from app.repositories.standup import StandupEntryRepository, StandupFeedbackRepository
 from app.schemas.standup import (
     FeedbackCreate,
@@ -79,6 +81,32 @@ async def get_missing_standups(
     repo: StandupEntryRepository = Depends(_get_repo),
 ) -> list[uuid.UUID]:
     return await repo.get_missing(project_id, date_filter)
+
+
+@router.get("/feedback", response_model=list[FeedbackResponse])
+async def list_feedback(
+    project_id: uuid.UUID = Query(...),
+    date_filter: date = Query(..., alias="date"),
+    db: AsyncSession = Depends(get_db),
+    auth: AuthContext = Depends(get_current_user),
+    x_org_id: str | None = Header(default=None, alias="X-Org-Id"),
+) -> list[FeedbackResponse]:
+    org_id_str = auth.claims.get("app_metadata", {}).get("org_id") or x_org_id
+    if not org_id_str:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="org_id required")
+    org_id = uuid.UUID(str(org_id_str))
+
+    q = (
+        select(StandupFeedback)
+        .join(StandupEntry, StandupFeedback.standup_entry_id == StandupEntry.id)
+        .where(
+            StandupFeedback.project_id == project_id,
+            StandupFeedback.org_id == org_id,
+            StandupEntry.date == date_filter,
+        )
+    )
+    result = await db.execute(q)
+    return [FeedbackResponse.model_validate(f) for f in result.scalars()]
 
 
 @router.get("/{id}", response_model=StandupEntryResponse)
