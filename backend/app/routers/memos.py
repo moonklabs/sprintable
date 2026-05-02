@@ -116,9 +116,8 @@ async def get_memo(
     reply_repo = MemoReplyRepository(db)
     replies = await reply_repo.list_by_memo(id)
     reply_items = [ReplyResponse.model_validate(r) for r in replies]
-    # column 속성만 추출하여 ORM relationship lazy-load 완전 우회
-    col_keys = [c.key for c in memo.__table__.columns]
-    memo_dict: dict = {k: getattr(memo, k) for k in col_keys}
+    # __dict__ 사용: 로드된 column 값만 포함, lazy-load 안 된 relationship 자동 제외
+    memo_dict: dict = {k: v for k, v in memo.__dict__.items() if not k.startswith("_")}
     memo_dict["replies"] = reply_items
     memo_dict["reply_count"] = len(reply_items)
     return MemoResponse.model_validate(memo_dict)
