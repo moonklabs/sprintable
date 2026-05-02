@@ -1,4 +1,5 @@
 
+import type { SupabaseClient } from '@/types/supabase';
 import { fastapiCall } from '@sprintable/storage-api';
 
 // ─── Typed interfaces ────────────────────────────────────────────────────────
@@ -78,7 +79,7 @@ async function getSpAt(): Promise<string> {
 
 export class AnalyticsService {
   constructor(
-    private readonly db: any,
+    private readonly db: SupabaseClient,
     private readonly accessToken: string = '',
   ) {}
 

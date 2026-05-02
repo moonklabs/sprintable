@@ -1,4 +1,5 @@
 
+import type { SupabaseClient } from '@/types/supabase';
 import { DiscordGatewayBridge } from './discord-gateway-bridge';
 import { getActiveDiscordOrgAuth, isDiscordAuthExpired, notifyDiscordAuthFailed, resolveDiscordToken } from './discord-bridge-utils';
 
@@ -7,7 +8,7 @@ type Logger = Pick<Console, 'info' | 'warn' | 'error'>;
 type BridgeLike = { start(): void; stop(): void };
 
 export interface DiscordGatewayRuntimeOptions {
-  db: any;
+  db: SupabaseClient;
   logger?: Logger;
   refreshIntervalMs?: number;
   createBridge?: (input: { orgId: string; token: string }) => BridgeLike;

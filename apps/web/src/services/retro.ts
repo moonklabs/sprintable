@@ -1,4 +1,5 @@
 
+import type { SupabaseClient } from '@/types/supabase';
 
 export type RetroPhase = 'collect' | 'vote' | 'discuss' | 'action' | 'closed';
 export type RetroCategory = 'good' | 'bad' | 'improve';
@@ -39,7 +40,7 @@ export interface RetroExport {
 }
 
 export class RetroService {
-  constructor(private readonly db: any) {}
+  constructor(private readonly db: SupabaseClient) {}
 
   async getSessions(projectId: string): Promise<RetroSession[]> {
     const { data, error } = await this.db

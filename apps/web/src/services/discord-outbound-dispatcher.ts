@@ -1,5 +1,4 @@
-// eslint-disable-next-line @typescript-eslint/no-explicit-any
-type RealtimeChannel = any;
+import type { SupabaseClient, RealtimeChannelLike } from '@/types/supabase';
 import { MemoService } from './memo';
 import { getActiveDiscordOrgAuth, isDiscordAuthExpired, notifyDiscordAuthFailed, resolveDiscordToken } from './discord-bridge-utils';
 import { DISCORD_MAX_MESSAGE_LENGTH } from './discord-inbound';
@@ -42,7 +41,7 @@ interface ReplyDispatchRow {
 type Logger = Pick<Console, 'info' | 'warn' | 'error'>;
 
 export interface DiscordOutboundDispatcherOptions {
-  db: any;
+  db: SupabaseClient;
   logger?: Logger;
   fetchFn?: typeof fetch;
   appUrl?: string;
@@ -190,7 +189,7 @@ export class DiscordOutboundDispatcher {
   private readonly claimTtlMs: number;
   private readonly inFlightReplyIds = new Set<string>();
   private readonly notifiedAuthFailures = new Set<string>();
-  private channel: RealtimeChannel | null = null;
+  private channel: RealtimeChannelLike | null = null;
   private pollingTimer: ReturnType<typeof setInterval> | null = null;
   private lastPolledAt: string;
   private lastPolledId = MIN_CURSOR_ID;

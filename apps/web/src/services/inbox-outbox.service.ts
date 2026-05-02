@@ -1,5 +1,6 @@
 
 import { createHmac } from 'crypto';
+import type { SupabaseClient } from '@/types/supabase';
 
 // Operator Cockpit Phase A — outbox worker
 // Polls inbox_outbox via claim_pending_outbox RPC, POSTs to webhook_url with HMAC,
@@ -52,7 +53,7 @@ export class InboxOutboxService {
   private readonly fetchImpl: typeof fetch;
 
   constructor(
-    private readonly db: any,
+    private readonly db: SupabaseClient,
     options: InboxOutboxServiceOptions = {},
   ) {
     this.logger = options.logger ?? console;

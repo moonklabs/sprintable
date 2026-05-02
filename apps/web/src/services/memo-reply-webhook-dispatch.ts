@@ -1,4 +1,5 @@
 
+import type { SupabaseClient } from '@/types/supabase';
 import { buildAbsoluteMemoLink } from './app-url';
 import { hasExactMemberMention } from './doc-comment-notifications';
 import { buildWebhookSignatureHeaders } from '@/lib/webhook-signature';
@@ -43,7 +44,7 @@ interface WebhookConfigRow {
 type Logger = Pick<Console, 'warn' | 'error'>;
 
 export interface DispatchWorkflowMemoReplyWebhooksOptions {
-  db?: any;
+  db?: SupabaseClient;
   memo: MemoReplyDispatchMemo;
   reply: MemoReplyDispatchReply;
   additionalRecipientIds?: string[];
@@ -150,7 +151,7 @@ interface ResolvedWebhook {
 }
 
 async function resolveWebhook(
-  db: any,
+  db: SupabaseClient,
   memo: MemoReplyDispatchMemo,
   member: TeamMemberRow,
 ): Promise<ResolvedWebhook | null> {
@@ -182,7 +183,7 @@ async function resolveWebhook(
 }
 
 async function postWebhook(
-  db: any,
+  db: SupabaseClient,
   fetchFn: typeof fetch,
   orgId: string,
   webhook: ResolvedWebhook,

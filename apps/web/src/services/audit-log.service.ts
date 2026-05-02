@@ -1,5 +1,7 @@
 
 
+import type { SupabaseClient } from '@/types/supabase';
+
 export type AuditAction = 'member_added' | 'member_removed' | 'role_changed';
 
 export interface AuditLogInput {
@@ -13,7 +15,7 @@ export interface AuditLogInput {
 }
 
 export class AuditLogService {
-  constructor(private readonly db: any) {}
+  constructor(private readonly db: SupabaseClient) {}
 
   async log(input: AuditLogInput): Promise<void> {
     await this.db.from('permission_audit_logs').insert({

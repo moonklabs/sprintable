@@ -1,4 +1,5 @@
 
+import type { SupabaseClient } from '@/types/supabase';
 import type { IMemoRepository, ITeamMemberRepository, IProjectRepository, Memo, MemoReply } from '@sprintable/core-storage';
 import { ApiMemoRepository } from '@sprintable/storage-api';
 import { dispatchMemoAssignmentImmediately, type DispatchableMemo } from './memo-assignment-dispatch';
@@ -54,13 +55,13 @@ const MEMO_LIST_BATCH_SIZE = 100;
 
 export class MemoService {
   private readonly repo: IMemoRepository;
-  private readonly db: any | null;
+  private readonly db: SupabaseClient | null;
   private readonly teamMemberRepo: ITeamMemberRepository | null;
   private readonly projectRepo: IProjectRepository | null;
 
   constructor(
     repo: IMemoRepository,
-    db?: any,
+    db?: SupabaseClient,
     teamMemberRepo?: ITeamMemberRepository,
     projectRepo?: IProjectRepository,
   ) {
@@ -70,8 +71,8 @@ export class MemoService {
     this.projectRepo = projectRepo ?? null;
   }
 
-  static fromDb(db: any): MemoService {
-    return new MemoService(new ApiMemoRepository(db), db);
+  static fromDb(db: SupabaseClient): MemoService {
+    return new MemoService(new ApiMemoRepository(), db);
   }
 
   private async ensureActiveTeamMember(orgId: string, projectId: string, memberId: string, message: string) {
@@ -198,7 +199,7 @@ export class MemoService {
     return readRows
       .map((row) => ({
         id: row.team_member_id,
-        name: (memberById.get(row.team_member_id) as any)?.name ?? row.team_member_id,
+        name: (memberById.get(row.team_member_id) as { name?: string } | undefined)?.name ?? row.team_member_id,
         read_at: row.read_at,
       }))
       .filter((reader) => Boolean(reader.name));

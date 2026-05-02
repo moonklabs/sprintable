@@ -10,6 +10,7 @@ import type {
   InboxOption,
 } from '@sprintable/core-storage';
 
+import type { SupabaseClient } from '@/types/supabase';
 import { isOssMode, createInboxItemRepository } from '@/lib/storage/factory';
 import { createInboxItemSchema, originChainSchema, inboxOptionsSchema } from '@sprintable/shared';
 
@@ -35,7 +36,7 @@ export interface ProduceApprovalArgs {
 }
 
 export class InboxItemService {
-  constructor(private readonly db?: any) {}
+  constructor(private readonly db?: SupabaseClient) {}
 
   /**
    * Create new inbox_item. Idempotent on (org_id, source_type, source_id, kind).

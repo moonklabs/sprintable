@@ -1,5 +1,6 @@
 
 
+import type { SupabaseClient } from '@/types/supabase';
 import { githubMcpToolArgumentSchemas, isGitHubMcpToolName } from '@/lib/github-mcp';
 import { resolveMcpTokenRef } from '@/lib/mcp-secrets';
 import {
@@ -148,7 +149,7 @@ export class AgentToolExecutionEngine {
   private readonly auditLogger?: AuditLogger;
 
   constructor(
-    db: any,
+    db: SupabaseClient,
     options: {
       builtinToolService?: AgentBuiltinToolService;
       fetchFn?: FetchFn;

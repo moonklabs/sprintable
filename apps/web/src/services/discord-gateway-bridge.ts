@@ -1,4 +1,5 @@
 
+import type { SupabaseClient } from '@/types/supabase';
 import { BridgeInboundService } from './bridge-inbound';
 import {
   type DiscordBridgeConfig,
@@ -24,7 +25,7 @@ type SocketFactory = (url: string) => WebSocketLike;
 type Logger = Pick<Console, 'info' | 'warn' | 'error'>;
 
 export interface DiscordGatewayBridgeOptions {
-  db: any;
+  db: SupabaseClient;
   orgId: string;
   token: string;
   socketFactory?: SocketFactory;

@@ -1,4 +1,5 @@
 
+import type { SupabaseClient } from '@/types/supabase';
 
 const BACKOFF_DELAYS_MS = [0, 1_000, 4_000] as const; // attempt 0,1,2 전 대기
 const MAX_ATTEMPTS = 3;
@@ -14,7 +15,7 @@ export interface WebhookDispatchInput {
 }
 
 export class WebhookDeliveryService {
-  constructor(private readonly db: any) {}
+  constructor(private readonly db: SupabaseClient) {}
 
   async dispatch(input: WebhookDispatchInput): Promise<boolean> {
     const { org_id, webhook_config_id, event_type, url, headers, body } = input;

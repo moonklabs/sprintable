@@ -1,5 +1,6 @@
 
 import { randomUUID } from 'crypto';
+import type { SupabaseClient } from '@/types/supabase';
 import {
   buildInitialPersonaVersionMetadata,
   buildPersonaChangeHistoryEntry,
@@ -166,7 +167,7 @@ function isPayloadRecord(value: unknown): value is Record<string, unknown> {
 }
 
 export class AgentPersonaService {
-  constructor(private readonly db: any) {}
+  constructor(private readonly db: SupabaseClient) {}
 
   async listPersonas(options: ListPersonasOptions): Promise<PersonaSummary[]> {
     const { includeBuiltin = false } = options;

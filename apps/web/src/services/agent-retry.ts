@@ -1,4 +1,5 @@
 
+import type { SupabaseClient } from '@/types/supabase';
 
 /** PM AC: 5분 → 30분 → 2시간 exponential backoff */
 const BACKOFF_MINUTES = [5, 30, 120];
@@ -59,7 +60,7 @@ export function getFailureDisposition(input: RetryableFailureInput): AgentRunFai
 }
 
 export class AgentRetryService {
-  constructor(private readonly db: any) {}
+  constructor(private readonly db: SupabaseClient) {}
 
   /**
    * AC1+AC2: 실패한 run에 재시도 스케줄링

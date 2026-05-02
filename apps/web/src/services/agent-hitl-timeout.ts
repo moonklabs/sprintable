@@ -1,4 +1,5 @@
 
+import type { SupabaseClient } from '@/types/supabase';
 import { dispatchMemoAssignmentImmediately, type DispatchableMemo } from './memo-assignment-dispatch';
 import { syncSlackHitlRequestState } from './slack-hitl';
 import { NotificationService } from './notification.service';
@@ -73,7 +74,7 @@ function dedupe(values: Array<string | null | undefined>) {
 
 export class AgentHitlTimeoutService {
   constructor(
-    private readonly db: any,
+    private readonly db: SupabaseClient,
     private readonly options: {
       now?: () => Date;
       syncSlackHitlFn?: typeof syncSlackHitlRequestState;
@@ -160,7 +161,7 @@ export class AgentHitlTimeoutService {
     }
 
     const runsById = await this.loadRunStates(dedupe(claimed.map((request) => request.run_id)));
-    const processable = claimed.filter((request) => request.run_id && (runsById.get(request.run_id) as any)?.status === 'hitl_pending');
+    const processable = claimed.filter((request) => request.run_id && (runsById.get(request.run_id) as { status?: string } | undefined)?.status === 'hitl_pending');
     const skippedBeforeRunUpdate = claimed.filter((request) => !processable.some((row) => row.id === request.id));
     await this.clearExpiredClaims(skippedBeforeRunUpdate.map((request) => request.id));
 

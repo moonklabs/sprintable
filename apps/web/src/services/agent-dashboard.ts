@@ -1,4 +1,5 @@
 
+import type { SupabaseClient } from '@/types/supabase';
 import type { AgentRunFailureDisposition } from './agent-retry';
 import { canManuallyRetryRun, getRunFailureDisposition } from './agent-run-history';
 
@@ -33,7 +34,7 @@ export interface AgentDeploymentCardData {
 }
 
 export async function buildDeploymentCards(
-  db: any,
+  db: SupabaseClient,
   orgId: string,
   projectId: string,
   requestedForTeamMemberId?: string,

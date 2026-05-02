@@ -1,4 +1,5 @@
 
+import type { SupabaseClient } from '@/types/supabase';
 import type { ISprintRepository, Sprint, CreateSprintInput, UpdateSprintInput } from '@sprintable/core-storage';
 import { ApiSprintRepository, fastapiCall } from '@sprintable/storage-api';
 import { requireOrgAdmin } from '@/lib/admin-check';
@@ -24,10 +25,10 @@ async function getSpAt(): Promise<string> {
 
 export class SprintService {
   private readonly repo: ISprintRepository;
-  private readonly db: any | null;
+  private readonly db: SupabaseClient | null;
   private readonly _accessToken: string;
 
-  constructor(repo: ISprintRepository, db?: any, accessToken = '') {
+  constructor(repo: ISprintRepository, db?: SupabaseClient, accessToken = '') {
     this.repo = repo;
     this.db = db ?? null;
     this._accessToken = accessToken;
@@ -37,8 +38,8 @@ export class SprintService {
     return this._accessToken || await getSpAt();
   }
 
-  static fromDb(db: any): SprintService {
-    return new SprintService(new ApiSprintRepository(db), db);
+  static fromDb(db: SupabaseClient): SprintService {
+    return new SprintService(new ApiSprintRepository(), db);
   }
 
   async create(input: CreateSprintInput) {

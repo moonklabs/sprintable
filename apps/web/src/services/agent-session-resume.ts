@@ -1,9 +1,10 @@
 
+import type { SupabaseClient } from '@/types/supabase';
 import { AgentExecutionLoop } from './agent-execution-loop';
 import type { SessionResumeCandidate } from './agent-session-lifecycle';
 
 export async function resumeSessionCandidates(
-  db: any,
+  db: SupabaseClient,
   candidates: SessionResumeCandidate[],
 ) {
   const loop = new AgentExecutionLoop(db);

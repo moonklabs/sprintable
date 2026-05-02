@@ -1,7 +1,8 @@
 
+import type { SupabaseClient } from '@/types/supabase';
 
 export class RewardsService {
-  constructor(private readonly db: any) {}
+  constructor(private readonly db: SupabaseClient) {}
 
   async getBalance(projectId: string, memberId: string) {
     const { data, error } = await this.db

@@ -1,4 +1,5 @@
 
+import type { SupabaseClient } from '@/types/supabase';
 
 const BACKOFF_MINUTES = [5, 30, 120] as const;
 
@@ -68,7 +69,7 @@ export type AgentRunWithRetry = AgentRunRecord & {
 };
 
 export class AgentRunService {
-  constructor(private readonly db: any) {}
+  constructor(private readonly db: SupabaseClient) {}
 
   async create(input: CreateAgentRunInput): Promise<AgentRunWithRetry> {
     const runStatus = input.status ?? 'completed';

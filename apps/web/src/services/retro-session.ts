@@ -1,4 +1,5 @@
 
+import type { SupabaseClient } from '@/types/supabase';
 
 export type RetroSessionPhase = 'collect' | 'group' | 'vote' | 'discuss' | 'action' | 'closed';
 export type RetroItemCategory = 'good' | 'bad' | 'improve';
@@ -42,7 +43,7 @@ const VALID_TRANSITIONS: Record<string, string[]> = {
 };
 
 export class RetroSessionService {
-  constructor(private readonly db: any) {}
+  constructor(private readonly db: SupabaseClient) {}
 
   async getSession(sessionId: string, projectId: string): Promise<RetroSessionRecord | null> {
     const { data, error } = await this.db

@@ -1,7 +1,8 @@
 
+import type { SupabaseClient } from '@/types/supabase';
 
 export class PolicyDocumentService {
-  constructor(private readonly db: any) {}
+  constructor(private readonly db: SupabaseClient) {}
 
   async list(filters: { project_id: string; sprint_id?: string; q?: string }) {
     let query = this.db

@@ -1,4 +1,5 @@
 
+import type { SupabaseClient } from '@/types/supabase';
 import { MemoService } from './memo';
 import type { RoutingRuleSummary } from './agent-routing-rule';
 
@@ -30,7 +31,7 @@ function buildMemoContent(version: number, summary: { added_rules: number; remov
 }
 
 export async function notifyWorkflowChange(
-  db: any,
+  db: SupabaseClient,
   input: WorkflowChangeNotifyInput,
 ): Promise<void> {
   const { data: versionRows } = await db

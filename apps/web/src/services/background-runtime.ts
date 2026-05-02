@@ -1,4 +1,5 @@
 
+import type { SupabaseClient } from '@/types/supabase';
 import { DiscordGatewayRuntime } from './discord-gateway-runtime';
 import { DiscordOutboundDispatcher } from './discord-outbound-dispatcher';
 import { MemoEventDispatcher } from './memo-event-dispatcher';
@@ -17,23 +18,23 @@ export interface BackgroundRuntimeSettings {
 }
 
 export interface BackgroundRuntimeWorkerOptions {
-  db: any;
+  db: SupabaseClient;
   appUrl?: string;
   settings?: BackgroundRuntimeSettings;
-  createSlackOutboundDispatcher?: (input: { db: any; appUrl?: string }) => SlackOutboundDispatcherLike;
+  createSlackOutboundDispatcher?: (input: { db: SupabaseClient; appUrl?: string }) => SlackOutboundDispatcherLike;
   createDiscordOutboundDispatcher?: (input: {
-    db: any;
+    db: SupabaseClient;
     appUrl?: string;
     pollingIntervalMs: number;
   }) => DiscordOutboundDispatcherLike;
-  createDiscordGatewayRuntime?: (input: { db: any }) => DiscordGatewayRuntimeLike;
+  createDiscordGatewayRuntime?: (input: { db: SupabaseClient }) => DiscordGatewayRuntimeLike;
   createTeamsOutboundDispatcher?: (input: {
-    db: any;
+    db: SupabaseClient;
     appUrl?: string;
     pollingIntervalMs: number;
   }) => TeamsOutboundDispatcherLike;
   createMemoEventDispatcher?: (input: {
-    db: any;
+    db: SupabaseClient;
     pollingIntervalMs: number;
   }) => MemoEventDispatcherLike;
 }
@@ -194,8 +195,9 @@ export class BackgroundRuntimeWorker {
 }
 
 export function createBackgroundRuntimeWorkerFromEnv(env: NodeJS.ProcessEnv = process.env) {
+  // db is intentionally undefined in env-bootstrapped workers (no Supabase client available at init time).
   return new BackgroundRuntimeWorker({
-    db: undefined,
+    db: undefined as unknown as SupabaseClient,
     appUrl: resolveAppUrl(env['NEXT_PUBLIC_APP_URL'], env),
     settings: resolveBackgroundRuntimeSettings(env),
   });

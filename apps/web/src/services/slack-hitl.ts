@@ -1,4 +1,5 @@
 
+import type { SupabaseClient } from '@/types/supabase';
 import { isExpiredIsoTimestamp, resolveMessagingBridgeSecretRef } from './slack-channel-mapping';
 import { buildSlackMemoLink, isSlackSourceMemo } from './slack-outbound-dispatcher';
 
@@ -172,7 +173,7 @@ async function postSlackJson(
   };
 }
 
-async function getActiveSlackToken(db: any, orgId: string) {
+async function getActiveSlackToken(db: SupabaseClient, orgId: string) {
   const { data, error } = await db
     .from('messaging_bridge_org_auths')
     .select('access_token_ref, expires_at')
@@ -189,7 +190,7 @@ async function getActiveSlackToken(db: any, orgId: string) {
   return token;
 }
 
-async function getTeamMemberName(db: any, teamMemberId: string) {
+async function getTeamMemberName(db: SupabaseClient, teamMemberId: string) {
   const { data, error } = await db
     .from('team_members')
     .select('id, name')
@@ -202,7 +203,7 @@ async function getTeamMemberName(db: any, teamMemberId: string) {
 }
 
 async function appendFailureComment(
-  db: any,
+  db: SupabaseClient,
   memoId: string | null,
   createdBy: string,
   reason: string,
@@ -219,7 +220,7 @@ async function appendFailureComment(
 }
 
 async function updateRequestMetadata(
-  db: any,
+  db: SupabaseClient,
   requestId: string,
   nextMetadata: Record<string, unknown>,
 ) {
@@ -232,7 +233,7 @@ async function updateRequestMetadata(
 }
 
 export async function notifySlackHitlRequest(
-  db: any,
+  db: SupabaseClient,
   input: {
     request: SlackHitlRequestContext;
     sourceMemo: { id: string; metadata: Record<string, unknown> | null };
@@ -306,7 +307,7 @@ export async function notifySlackHitlRequest(
 }
 
 export async function syncSlackHitlRequestState(
-  db: any,
+  db: SupabaseClient,
   input: {
     request: SlackHitlRequestContext;
     hitlMemoId: string | null;

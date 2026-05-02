@@ -1,5 +1,4 @@
-// eslint-disable-next-line @typescript-eslint/no-explicit-any
-type PostgrestError = any;
+import type { SupabaseClient } from '@/types/supabase';
 import { MemoService, type CreateMemoInput } from './memo';
 
 export type BridgePlatform = 'slack' | 'discord' | 'teams' | 'telegram';
@@ -114,7 +113,8 @@ function buildMemoContent(platform: BridgePlatform, event: BridgeInboundEvent, u
   ].join('\n');
 }
 
-function isBridgeDuplicateMemoError(error: unknown): error is PostgrestError {
+interface DbError { code?: string; message?: string }
+function isBridgeDuplicateMemoError(error: unknown): error is DbError {
   return typeof error === 'object'
     && error !== null
     && 'code' in error
@@ -122,7 +122,7 @@ function isBridgeDuplicateMemoError(error: unknown): error is PostgrestError {
 }
 
 export class BridgeInboundService {
-  constructor(private readonly db: any) {}
+  constructor(private readonly db: SupabaseClient) {}
 
   async findChannelMapping(platform: BridgePlatform, channelId: string): Promise<BridgeChannelMapping | null> {
     const { data } = await this.db

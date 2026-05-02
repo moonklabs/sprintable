@@ -1,4 +1,5 @@
 
+import type { SupabaseClient } from '@/types/supabase';
 import { ForbiddenError, NotFoundError } from './sprint';
 
 export type RoutingAutoReplyMode = 'process_and_forward' | 'process_and_report';
@@ -459,7 +460,7 @@ function presentVersion(row: WorkflowVersionRow): WorkflowVersionSummary {
 }
 
 export class AgentRoutingRuleService {
-  constructor(private readonly db: any) {}
+  constructor(private readonly db: SupabaseClient) {}
 
   async listRules(scope: RoutingScope): Promise<RoutingRuleSummary[]> {
     const { data, error } = await this.db
@@ -583,8 +584,7 @@ export class AgentRoutingRuleService {
           items: currentRules.map((rule) => createRoutingRuleSnapshotItem(rule)),
         }
       : undefined;
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    const preparedItems: any[] = [];
+    const preparedItems: Record<string, unknown>[] = [];
 
     for (const [index, item] of input.items.entries()) {
       const existingRuleId = item.id?.trim() || undefined;

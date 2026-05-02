@@ -1,4 +1,5 @@
 
+import type { SupabaseClient } from '@/types/supabase';
 import type { InternalDogfoodActor } from '@/lib/internal-dogfood';
 import { getInternalDogfoodAllowedTeamMemberIds } from '@/lib/internal-dogfood';
 
@@ -27,7 +28,7 @@ function toActor(row: TeamMemberRow): InternalDogfoodActor {
   };
 }
 
-export async function listInternalDogfoodActors(db: any): Promise<InternalDogfoodActor[]> {
+export async function listInternalDogfoodActors(db: SupabaseClient): Promise<InternalDogfoodActor[]> {
   const allowedIds = getInternalDogfoodAllowedTeamMemberIds();
   if (!allowedIds.length) return [];
 
@@ -43,7 +44,7 @@ export async function listInternalDogfoodActors(db: any): Promise<InternalDogfoo
 }
 
 export async function resolveInternalDogfoodActor(
-  db: any,
+  db: SupabaseClient,
   teamMemberId: string,
 ): Promise<InternalDogfoodActor | null> {
   const allowedIds = getInternalDogfoodAllowedTeamMemberIds();
@@ -62,7 +63,7 @@ export async function resolveInternalDogfoodActor(
 }
 
 export async function listProjectAssignableMembers(
-  db: any,
+  db: SupabaseClient,
   actor: InternalDogfoodActor,
 ) {
   const { data, error } = await db

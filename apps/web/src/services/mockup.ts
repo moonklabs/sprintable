@@ -1,7 +1,8 @@
 
+import type { SupabaseClient } from '@/types/supabase';
 
 export class MockupService {
-  constructor(private readonly db: any) {}
+  constructor(private readonly db: SupabaseClient) {}
 
   async list(projectId: string, page = 1, limit = 20) {
     const offset = (page - 1) * limit;

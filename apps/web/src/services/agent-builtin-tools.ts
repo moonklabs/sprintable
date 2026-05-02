@@ -1,5 +1,6 @@
 
 import { z } from 'zod';
+import type { SupabaseClient } from '@/types/supabase';
 import { MemoService } from './memo';
 import { StoryService } from './story';
 import { EpicService } from './epic';
@@ -261,7 +262,7 @@ export class AgentBuiltinToolService {
   private readonly statusUpdateGateFn?: StatusUpdateGateFn;
 
   constructor(
-    private readonly db: any,
+    private readonly db: SupabaseClient,
     options: {
       memoService?: MemoService;
       storyService?: StoryService;

@@ -1,5 +1,4 @@
-// eslint-disable-next-line @typescript-eslint/no-explicit-any
-type RealtimeChannel = any;
+import type { SupabaseClient, RealtimeChannelLike } from '@/types/supabase';
 import { MemoService } from './memo';
 import { buildAbsoluteMemoLink } from './app-url';
 
@@ -30,7 +29,7 @@ interface TeamMemberRow {
 type Logger = Pick<Console, 'info' | 'warn' | 'error'>;
 
 export interface SlackOutboundDispatcherOptions {
-  db: any;
+  db: SupabaseClient;
   logger?: Logger;
   fetchFn?: typeof fetch;
   appUrl?: string;
@@ -127,7 +126,7 @@ export class SlackOutboundDispatcher {
   private readonly retryDelayMs: number;
   private readonly maxRetries: number;
   private readonly inFlightReplyIds = new Set<string>();
-  private channel: RealtimeChannel | null = null;
+  private channel: RealtimeChannelLike | null = null;
 
   constructor(private readonly options: SlackOutboundDispatcherOptions) {
     this.logger = options.logger ?? console;

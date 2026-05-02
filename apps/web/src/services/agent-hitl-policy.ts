@@ -1,5 +1,6 @@
 
 import { z } from 'zod';
+import type { SupabaseClient } from '@/types/supabase';
 
 export const HITL_HIGH_RISK_ACTION_KEYS = [
   'destructive_change',
@@ -279,7 +280,7 @@ export function buildHitlPolicyPromptSummary(snapshot: Pick<HitlPolicySnapshot, 
 }
 
 export class AgentHitlPolicyService {
-  constructor(private readonly db: any) {}
+  constructor(private readonly db: SupabaseClient) {}
 
   async getProjectPolicy(scope: { orgId: string; projectId: string }): Promise<HitlPolicySnapshot> {
     const { data, error } = await this.db

@@ -1,4 +1,5 @@
 
+import type { SupabaseClient } from '@/types/supabase';
 import { buildWebhookSignatureHeaders } from '@/lib/webhook-signature';
 
 interface WebhookPayload {
@@ -11,7 +12,7 @@ interface WebhookPayload {
  * - 해당 이벤트를 구독하는 웹훅만 발송
  */
 export async function fireWebhooks(
-  db: any,
+  db: SupabaseClient,
   orgId: string,
   payload: WebhookPayload,
 ): Promise<void> {

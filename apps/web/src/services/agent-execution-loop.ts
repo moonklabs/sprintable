@@ -1,5 +1,6 @@
 
 import { z } from 'zod';
+import type { SupabaseClient } from '@/types/supabase';
 import { AgentToolExecutionEngine, type ToolRegistry } from './agent-tool-execution-engine';
 import { AgentRetryService, type RetryScheduler } from './agent-retry';
 import { RoutingPolicyError } from './agent-routing-rule';
@@ -309,7 +310,7 @@ export class AgentExecutionLoop {
   private readonly AUDIT_FLUSH_THRESHOLD = 10;
 
   constructor(
-    private readonly db: any,
+    private readonly db: SupabaseClient,
     deps: AgentExecutionLoopDependencies = {},
     logger: Logger = console,
   ) {

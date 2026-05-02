@@ -24,7 +24,7 @@ export interface RunBillingSummary {
 }
 
 export async function getManagedPricingRow(
-  _db: any,
+  _db: unknown,
   _provider: LLMProvider,
   _model: string,
 ): Promise<ManagedPricingRow | null> {

@@ -1,5 +1,4 @@
-// eslint-disable-next-line @typescript-eslint/no-explicit-any
-type RealtimeChannel = any;
+import type { SupabaseClient, RealtimeChannelLike } from '@/types/supabase';
 import { AgentRoutingRuleService, RoutingPolicyError, type RoutingEvaluationResult, type RoutingRuleSummary } from './agent-routing-rule';
 import { buildWebhookSignatureHeaders } from '@/lib/webhook-signature';
 import { WebhookDeliveryService } from './webhook-delivery.service';
@@ -60,7 +59,7 @@ type OutboundWebhookFormat = 'discord' | 'google' | 'slack' | 'generic';
 type AgentExecutionStatus = 'completed' | 'failed' | 'held' | 'hitl';
 
 export interface MemoEventDispatcherOptions {
-  db: any;
+  db: SupabaseClient;
   logger?: Logger;
   fetchFn?: typeof fetch;
   pollingIntervalMs?: number;
@@ -192,7 +191,7 @@ export class MemoEventDispatcher {
   private readonly routingRuleService: Pick<AgentRoutingRuleService, 'evaluateMemo'>;
   private readonly inFlightKeys = new Set<string>();
 
-  private channel: RealtimeChannel | null = null;
+  private channel: RealtimeChannelLike | null = null;
   private reconnectTimer: ReturnType<typeof setTimeout> | null = null;
   private pollingTimer: ReturnType<typeof setInterval> | null = null;
   private reconnectAttempt = 0;

@@ -1,4 +1,5 @@
 
+import type { SupabaseClient } from '@/types/supabase';
 import { ForbiddenError, NotFoundError } from './sprint';
 
 export type StandupReviewType = 'comment' | 'approve' | 'request_changes';
@@ -43,7 +44,7 @@ export interface StandupFeedbackRecord {
 }
 
 export class StandupService {
-  constructor(private readonly db: any) {}
+  constructor(private readonly db: SupabaseClient) {}
 
   async getEntries(projectId: string, date: string) {
     const { data, error } = await this.db
@@ -135,7 +136,7 @@ export class StandupService {
 }
 
 export class StandupFeedbackService {
-  constructor(private readonly db: any) {}
+  constructor(private readonly db: SupabaseClient) {}
 
   async listByDate(projectId: string, date: string): Promise<StandupFeedbackRecord[]> {
     const { data: entries, error: entriesError } = await this.db

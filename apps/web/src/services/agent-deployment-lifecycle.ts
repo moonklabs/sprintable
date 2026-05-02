@@ -1,5 +1,6 @@
 
 
+import type { SupabaseClient } from '@/types/supabase';
 import { AgentExecutionLoop } from './agent-execution-loop';
 import { AgentRoutingRuleService } from './agent-routing-rule';
 import { buildAutomaticRoutingTemplate, resolveAutoRoutingPersonaRole, type AutoRoutingTemplateAgent, type AutoRoutingTemplateResult } from './agent-routing-template';
@@ -159,7 +160,7 @@ function ensureTransitionAllowed(current: DeploymentLifecycleStatus, next: Deplo
 }
 
 export class AgentDeploymentLifecycleService {
-  constructor(private readonly db: any) {}
+  constructor(private readonly db: SupabaseClient) {}
 
   async runDeploymentPreflight(input: CreateDeploymentInput): Promise<DeploymentPreflightResult> {
     const checkedAt = new Date().toISOString();

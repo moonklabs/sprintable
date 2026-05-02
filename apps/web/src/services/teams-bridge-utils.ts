@@ -1,4 +1,5 @@
 
+import type { SupabaseClient } from '@/types/supabase';
 import { isExpiredIsoTimestamp, resolveMessagingBridgeSecretRef } from './slack-channel-mapping';
 import { NotificationService } from './notification.service';
 
@@ -29,7 +30,7 @@ export function resolveTeamsBridgeConfig(config: Record<string, string> | null |
 }
 
 export async function getActiveTeamsOrgAuth(
-  db: any,
+  db: SupabaseClient,
   orgId: string,
 ): Promise<OrgAuthRow | null> {
   const { data, error } = await db
@@ -51,7 +52,7 @@ export function isTeamsAuthExpired(expiresAt: string | null | undefined, now = D
   return isExpiredIsoTimestamp(expiresAt, now);
 }
 
-async function listAdminRecipients(db: any, orgId: string): Promise<TeamMemberRecipientRow[]> {
+async function listAdminRecipients(db: SupabaseClient, orgId: string): Promise<TeamMemberRecipientRow[]> {
   const { data: orgMembers, error: orgMembersError } = await db
     .from('org_members')
     .select('user_id')
@@ -82,7 +83,7 @@ async function listAdminRecipients(db: any, orgId: string): Promise<TeamMemberRe
 }
 
 export async function notifyTeamsAuthFailed(
-  db: any,
+  db: SupabaseClient,
   orgId: string,
   reason: string,
 ) {

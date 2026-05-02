@@ -1,18 +1,19 @@
 
 import type { IDocRepository, CreateDocInput, UpdateDocInput } from '@sprintable/core-storage';
 import { ApiDocRepository } from '@sprintable/storage-api';
+import type { SupabaseClient } from '@/types/supabase';
 
 export class DocsService {
   private readonly repo: IDocRepository;
-  private readonly db: any | null;
+  private readonly db: SupabaseClient | null;
 
-  constructor(repo: IDocRepository, db?: any) {
+  constructor(repo: IDocRepository, db?: SupabaseClient) {
     this.repo = repo;
     this.db = db ?? null;
   }
 
-  static fromDb(db: any): DocsService {
-    return new DocsService(new ApiDocRepository(db), db);
+  static fromDb(db: SupabaseClient): DocsService {
+    return new DocsService(new ApiDocRepository(), db);
   }
 
   async list(projectId: string, input?: { limit?: number; cursor?: string | null; tags?: string[] }) {

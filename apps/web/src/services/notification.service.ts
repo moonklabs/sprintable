@@ -1,4 +1,5 @@
 
+import type { SupabaseClient } from '@/types/supabase';
 import type { NotificationType } from '@/lib/notification-types';
 
 export interface CreateNotificationInput {
@@ -12,7 +13,7 @@ export interface CreateNotificationInput {
 }
 
 export class NotificationService {
-  constructor(private readonly db: any) {}
+  constructor(private readonly db: SupabaseClient) {}
 
   async create(input: CreateNotificationInput): Promise<void> {
     const { error } = await this.db.from('notifications').insert(input);

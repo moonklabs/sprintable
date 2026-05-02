@@ -1,4 +1,5 @@
 
+import type { SupabaseClient } from '@/types/supabase';
 import { NotificationService } from './notification.service';
 import { InboxItemService } from './inbox-item.service';
 
@@ -60,8 +61,8 @@ function buildDocCommentNotificationBody(docTitle: string, content: string) {
 }
 
 interface NotifyDocCommentMentionsInput {
-  sourceDb: any;
-  adminDb: any;
+  sourceDb: SupabaseClient;
+  adminDb: SupabaseClient;
   docId: string;
   commentId: string;
   content: string;

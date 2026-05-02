@@ -1,4 +1,5 @@
 
+import type { SupabaseClient } from '@/types/supabase';
 import { AgentRetryService, type RetryScheduler } from './agent-retry';
 import {
   createSessionMemoryWrite,
@@ -145,7 +146,7 @@ export class AgentSessionLifecycleService {
   private readonly retryService: RetryScheduler;
 
   constructor(
-    private readonly db: any,
+    private readonly db: SupabaseClient,
     options: AgentSessionLifecycleOptions = {},
   ) {
     this.sessionLimit = Math.max(1, options.sessionLimit ?? Number(process.env['AGENT_SESSION_CONCURRENCY_LIMIT'] ?? DEFAULT_SESSION_LIMIT));

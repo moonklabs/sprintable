@@ -1,4 +1,5 @@
 
+import type { SupabaseClient } from '@/types/supabase';
 
 interface NotificationReference {
   reference_type: string | null;
@@ -26,7 +27,7 @@ function buildMemoHref(memoId: string) {
 }
 
 export async function attachNotificationHrefs<T extends NotificationReference>(
-  db: any | undefined,
+  db: SupabaseClient | undefined,
   notifications: T[],
 ): Promise<Array<T & { href: string | null }>> {
   const docCommentIds = notifications

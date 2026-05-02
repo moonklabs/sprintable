@@ -1,4 +1,5 @@
 
+import type { SupabaseClient } from '@/types/supabase';
 import type { IStoryRepository, CreateStoryInput, UpdateStoryInput, BulkUpdateItem, StoryListFilters } from '@sprintable/core-storage';
 import { ApiStoryRepository } from '@sprintable/storage-api';
 import { NotFoundError, ForbiddenError } from './sprint';
@@ -18,17 +19,17 @@ export class InvalidTransitionError extends Error {
 
 export class StoryService {
   private readonly repo: IStoryRepository;
-  private readonly db: any | null;
+  private readonly db: SupabaseClient | null;
   private readonly isAdminContext: boolean;
 
-  constructor(repo: IStoryRepository, db?: any, options?: { isAdminContext?: boolean }) {
+  constructor(repo: IStoryRepository, db?: SupabaseClient, options?: { isAdminContext?: boolean }) {
     this.repo = repo;
     this.db = db ?? null;
     this.isAdminContext = options?.isAdminContext ?? false;
   }
 
-  static fromDb(db: any): StoryService {
-    return new StoryService(new ApiStoryRepository(db), db);
+  static fromDb(db: SupabaseClient): StoryService {
+    return new StoryService(new ApiStoryRepository(), db);
   }
 
   async create(input: CreateStoryInput) {

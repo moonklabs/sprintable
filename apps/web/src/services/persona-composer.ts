@@ -1,5 +1,6 @@
 
 
+import type { SupabaseClient } from '@/types/supabase';
 import { BUILTIN_AGENT_TOOL_NAMES } from './agent-builtin-tool-names';
 import { listProjectApprovedMcpToolOptions } from './project-mcp';
 
@@ -25,7 +26,7 @@ export function resolvePersonaToolOptions(rawConfig: unknown): PersonaToolOption
   }));
 }
 
-export async function listProjectPersonaToolOptions(_db: any, projectId: string): Promise<PersonaToolOption[]> {
+export async function listProjectPersonaToolOptions(_db: SupabaseClient | undefined, projectId: string): Promise<PersonaToolOption[]> {
   const builtinOptions = resolvePersonaToolOptions(null);
 
   let approvedOptions: Array<{ name: string; serverName: string; groupKind: 'mcp' | 'github' }> = [];
@@ -50,7 +51,7 @@ export async function listProjectPersonaToolOptions(_db: any, projectId: string)
   return [...deduped.values()];
 }
 
-export async function listProjectPersonaAllowedToolNames(db: any, projectId: string): Promise<string[]> {
+export async function listProjectPersonaAllowedToolNames(db: SupabaseClient | undefined, projectId: string): Promise<string[]> {
   const options = await listProjectPersonaToolOptions(db, projectId);
   return options.map((option) => option.name);
 }

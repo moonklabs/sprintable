@@ -1,9 +1,10 @@
 
+import type { SupabaseClient } from '@/types/supabase';
 import type { InternalDogfoodActor } from '@/lib/internal-dogfood';
 import { dispatchMemoAssignmentImmediately, type DispatchableMemo } from './memo-assignment-dispatch';
 
 export async function createInternalDogfoodMemoInSprintable(
-  db: any,
+  db: SupabaseClient,
   actor: InternalDogfoodActor,
   input: {
     title?: string | null;
@@ -37,7 +38,7 @@ export async function createInternalDogfoodMemoInSprintable(
 }
 
 export async function createInternalDogfoodStoryInSprintable(
-  db: any,
+  db: SupabaseClient,
   actor: InternalDogfoodActor,
   input: {
     title: string;

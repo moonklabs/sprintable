@@ -1,5 +1,4 @@
-// eslint-disable-next-line @typescript-eslint/no-explicit-any
-type RealtimeChannel = any;
+import type { SupabaseClient, RealtimeChannelLike } from '@/types/supabase';
 import { MemoService } from './memo';
 import { buildAbsoluteMemoLink } from './app-url';
 import {
@@ -49,7 +48,7 @@ interface ReplyDispatchRow {
 type Logger = Pick<Console, 'info' | 'warn' | 'error'>;
 
 export interface TeamsOutboundDispatcherOptions {
-  db: any;
+  db: SupabaseClient;
   logger?: Logger;
   fetchFn?: typeof fetch;
   appUrl?: string;
@@ -190,7 +189,7 @@ export class TeamsOutboundDispatcher {
   private readonly claimTtlMs: number;
   private readonly inFlightReplyIds = new Set<string>();
   private readonly notifiedAuthFailures = new Set<string>();
-  private channel: RealtimeChannel | null = null;
+  private channel: RealtimeChannelLike | null = null;
   private pollingTimer: ReturnType<typeof setInterval> | null = null;
   private lastPolledAt: string;
   private lastPolledId = MIN_CURSOR_ID;

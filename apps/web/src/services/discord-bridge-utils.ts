@@ -1,4 +1,5 @@
 
+import type { SupabaseClient } from '@/types/supabase';
 import { isExpiredIsoTimestamp, resolveMessagingBridgeSecretRef } from './slack-channel-mapping';
 import { NotificationService } from './notification.service';
 
@@ -22,7 +23,7 @@ export function isDiscordAuthExpired(expiresAt: string | null | undefined, now =
 }
 
 export async function getActiveDiscordOrgAuth(
-  db: any,
+  db: SupabaseClient,
   orgId: string,
 ): Promise<OrgAuthRow | null> {
   const { data, error } = await db
@@ -36,7 +37,7 @@ export async function getActiveDiscordOrgAuth(
   return (data as OrgAuthRow | null) ?? null;
 }
 
-export async function listAdminRecipients(db: any, orgId: string): Promise<TeamMemberRecipientRow[]> {
+export async function listAdminRecipients(db: SupabaseClient, orgId: string): Promise<TeamMemberRecipientRow[]> {
   const { data: orgMembers, error: orgMembersError } = await db
     .from('org_members')
     .select('user_id')
@@ -67,7 +68,7 @@ export async function listAdminRecipients(db: any, orgId: string): Promise<TeamM
 }
 
 export async function notifyDiscordAuthFailed(
-  db: any,
+  db: SupabaseClient,
   orgId: string,
   reason: string,
 ) {

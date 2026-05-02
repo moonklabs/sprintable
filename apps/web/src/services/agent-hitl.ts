@@ -1,4 +1,5 @@
 
+import type { SupabaseClient } from '@/types/supabase';
 import { ForbiddenError, NotFoundError } from './sprint';
 import { fireWebhooks } from './webhook-notify';
 import { syncSlackHitlRequestState } from './slack-hitl';
@@ -54,7 +55,7 @@ export class HitlConflictError extends Error {
 
 export class AgentHitlService {
   constructor(
-    private readonly db: any,
+    private readonly db: SupabaseClient,
     private readonly options: {
       fireWebhooksFn?: typeof fireWebhooks;
       syncSlackHitlFn?: typeof syncSlackHitlRequestState;
