@@ -48,10 +48,9 @@ export async function PATCH(request: Request, { params }: RouteParams) {
     const projectId = searchParams.get('project_id');
     if (!projectId) return ApiErrors.badRequest('project_id required');
 
-    const body = await request.json() as { phase?: string };
-    if (!body.phase) return ApiErrors.badRequest('phase required');
-
     if (isOssMode()) {
+      const body = await request.json() as { phase?: string };
+      if (!body.phase) return ApiErrors.badRequest('phase required');
       const data = await advanceOssRetroPhase(id, projectId, body.phase as RetroPhase);
       return apiSuccess(data);
     }
