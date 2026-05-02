@@ -116,9 +116,12 @@ async def get_memo(
     reply_repo = MemoReplyRepository(db)
     replies = await reply_repo.list_by_memo(id)
     reply_items = [ReplyResponse.model_validate(r) for r in replies]
-    # update= 로 replies 오버라이드하여 ORM lazy-load 방지
-    response = MemoResponse.model_validate(memo, update={"replies": reply_items, "reply_count": len(reply_items)})
-    return response
+    # column 속성만 추출하여 ORM relationship lazy-load 완전 우회
+    col_keys = [c.key for c in memo.__table__.columns]
+    memo_dict: dict = {k: getattr(memo, k) for k in col_keys}
+    memo_dict["replies"] = reply_items
+    memo_dict["reply_count"] = len(reply_items)
+    return MemoResponse.model_validate(memo_dict)
 
 
 @router.patch("/{id}", response_model=MemoListResponse)
