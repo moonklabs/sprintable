@@ -25,7 +25,10 @@ export async function GET(request: Request, { params }: RouteParams) {
     }
 
     const { id } = await params;
-    return proxyToFastapi(request, `/api/v2/standups/feedback/${id}`);
+const _r = await proxyToFastapi(request, `/api/v2/standups/feedback/${id}`);
+    if (!_r.ok) return _r;
+    if (_r.status === 204) return apiSuccess({ ok: true });
+    return apiSuccess(await _r.json())
   } catch (err: unknown) {
     return handleApiError(err);
   }
@@ -44,7 +47,10 @@ export async function PATCH(request: Request, { params }: RouteParams) {
     }
 
     const { id } = await params;
-    return proxyToFastapi(request, `/api/v2/standups/feedback/${id}`);
+const _r = await proxyToFastapi(request, `/api/v2/standups/feedback/${id}`);
+    if (!_r.ok) return _r;
+    if (_r.status === 204) return apiSuccess({ ok: true });
+    return apiSuccess(await _r.json())
   } catch (err: unknown) {
     return handleApiError(err);
   }
@@ -62,7 +68,10 @@ export async function DELETE(request: Request, { params }: RouteParams) {
     }
 
     const { id } = await params;
-    return proxyToFastapi(request, `/api/v2/standups/feedback/${id}`);
+const _r = await proxyToFastapi(request, `/api/v2/standups/feedback/${id}`);
+    if (!_r.ok) return _r;
+    if (_r.status === 204) return apiSuccess({ ok: true });
+    return apiSuccess(await _r.json())
   } catch (err: unknown) {
     return handleApiError(err);
   }

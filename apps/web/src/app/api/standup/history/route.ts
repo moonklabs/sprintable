@@ -23,7 +23,10 @@ export async function GET(request: Request) {
       return apiSuccess(await getOssStandupHistory(projectId, limit));
     }
 
-    return proxyToFastapi(request, '/api/v2/standups');
+const _r = await proxyToFastapi(request, '/api/v2/standups');
+    if (!_r.ok) return _r;
+    if (_r.status === 204) return apiSuccess({ ok: true });
+    return apiSuccess(await _r.json())
   } catch (err: unknown) {
     return handleApiError(err);
   }

@@ -30,7 +30,12 @@ export async function POST(request: Request) {
     const parsed = await parseBody(request, createTeamMemberSchema);
     if (!parsed.success) return parsed.response;
     const body = parsed.data;
-    if (body.type !== 'agent') return proxyToFastapi(request, '/api/v2/team-members');
+    if (body.type !== 'agent') {
+      const _r = await proxyToFastapi(request, '/api/v2/team-members');
+      if (!_r.ok) return _r;
+      if (_r.status === 204) return apiSuccess({ ok: true });
+      return apiSuccess(await _r.json());
+    }
     if (!body.name) return ApiErrors.badRequest('name required for agent');
     if (isOssMode()) {
       const { OSS_PROJECT_ID, OSS_ORG_ID } = await import('@sprintable/storage-sqlite');
@@ -44,7 +49,10 @@ export async function POST(request: Request) {
       });
       return apiSuccess(member, undefined, 201);
     }
-    return proxyToFastapi(request, '/api/v2/team-members');
+const _r = await proxyToFastapi(request, '/api/v2/team-members');
+    if (!_r.ok) return _r;
+    if (_r.status === 204) return apiSuccess({ ok: true });
+    return apiSuccess(await _r.json())
   } catch (err: unknown) {
     return handleApiError(err);
   }

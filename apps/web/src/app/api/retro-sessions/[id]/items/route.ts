@@ -16,7 +16,10 @@ export async function GET(request: Request, { params }: RouteParams) {
     if (!me) return ApiErrors.unauthorized();
     if (me.rateLimitExceeded) return ApiErrors.tooManyRequests(me.rateLimitRemaining, me.rateLimitResetAt);
 
-    return proxyToFastapiWithParams(request, '/api/v2/retros/[id]/items', { id });
+const _r = await proxyToFastapiWithParams(request, '/api/v2/retros/[id]/items', { id });
+    if (!_r.ok) return _r;
+    if (_r.status === 204) return apiSuccess({ ok: true });
+    return apiSuccess(await _r.json())
   } catch (err: unknown) {
     return handleApiError(err);
   }
@@ -41,7 +44,10 @@ export async function POST(request: Request, { params }: RouteParams) {
       return apiSuccess(data);
     }
 
-    return proxyToFastapiWithParams(request, '/api/v2/retros/[id]/items', { id });
+const _r = await proxyToFastapiWithParams(request, '/api/v2/retros/[id]/items', { id });
+    if (!_r.ok) return _r;
+    if (_r.status === 204) return apiSuccess({ ok: true });
+    return apiSuccess(await _r.json())
   } catch (err: unknown) {
     return handleApiError(err);
   }

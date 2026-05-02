@@ -1,5 +1,5 @@
 import { handleApiError } from '@/lib/api-error';
-import { ApiErrors } from '@/lib/api-response';
+import { apiSuccess, ApiErrors } from '@/lib/api-response';
 import { getAuthContext } from '@/lib/auth-helpers';
 import { isOssMode } from '@/lib/storage/factory';
 import { proxyToFastapi } from '@/lib/fastapi-proxy';
@@ -20,7 +20,10 @@ export async function GET(request: Request) {
       return apiSuccess(await listOssRetroSessions(projectId));
     }
 
-    return proxyToFastapi(request, '/api/v2/retros');
+const _r = await proxyToFastapi(request, '/api/v2/retros');
+    if (!_r.ok) return _r;
+    if (_r.status === 204) return apiSuccess({ ok: true });
+    return apiSuccess(await _r.json())
   } catch (err: unknown) {
     return handleApiError(err);
   }
@@ -48,7 +51,10 @@ export async function POST(request: Request) {
       return apiSuccess(data, undefined, 201);
     }
 
-    return proxyToFastapi(request, '/api/v2/retros');
+const _r = await proxyToFastapi(request, '/api/v2/retros');
+    if (!_r.ok) return _r;
+    if (_r.status === 204) return apiSuccess({ ok: true });
+    return apiSuccess(await _r.json())
   } catch (err: unknown) {
     return handleApiError(err);
   }

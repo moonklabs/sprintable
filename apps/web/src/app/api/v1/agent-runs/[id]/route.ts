@@ -17,11 +17,17 @@ export async function GET(request: Request, { params }: RouteParams) {
     } catch (error) { return handleApiError(error); }
   }
   const { id } = await params;
-  return proxyToFastapi(request, `/api/v2/agent-runs/${id}`);
+const _r = await proxyToFastapi(request, `/api/v2/agent-runs/${id}`);
+  if (!_r.ok) return _r;
+  if (_r.status === 204) return apiSuccess({ ok: true });
+  return apiSuccess(await _r.json())
 }
 
 export async function PATCH(request: Request, { params }: RouteParams) {
   if (isOssMode()) return ApiErrors.badRequest('Not available in OSS mode');
   const { id } = await params;
-  return proxyToFastapi(request, `/api/v2/agent-runs/${id}`);
+const _r = await proxyToFastapi(request, `/api/v2/agent-runs/${id}`);
+  if (!_r.ok) return _r;
+  if (_r.status === 204) return apiSuccess({ ok: true });
+  return apiSuccess(await _r.json())
 }

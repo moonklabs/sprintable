@@ -8,5 +8,8 @@ type RouteParams = { params: Promise<{ id: string }> };
 export async function GET(request: Request, { params }: RouteParams) {
   if (isOssMode()) return apiSuccess([]);
   const { id } = await params;
-  return proxyToFastapi(request, `/api/v2/api-keys/${id}/logs`);
+const _r = await proxyToFastapi(request, `/api/v2/api-keys/${id}/logs`);
+  if (!_r.ok) return _r;
+  if (_r.status === 204) return apiSuccess({ ok: true });
+  return apiSuccess(await _r.json())
 }
