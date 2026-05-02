@@ -10,7 +10,7 @@ from fastapi import APIRouter, Depends
 from fastapi.responses import JSONResponse
 from pydantic import BaseModel
 from sqlalchemy.exc import IntegrityError
-from sqlalchemy import select, update
+from sqlalchemy import or_, select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.config import settings
@@ -88,14 +88,19 @@ async def _get_user_by_id(session: AsyncSession, user_id: uuid.UUID) -> User | N
 async def _build_app_metadata(user: User, session: AsyncSession) -> dict:
     from app.models.team import TeamMember
 
-    # 1. user_id로 이미 연결된 team_member 조회
+    # 1. user_id 또는 PK(id)로 연결된 team_member 조회
     result = await session.execute(
         select(TeamMember)
-        .where(TeamMember.user_id == user.id, TeamMember.is_active.is_(True))
+        .where(
+            or_(TeamMember.user_id == user.id, TeamMember.id == user.id),
+            TeamMember.is_active.is_(True),
+        )
         .order_by(TeamMember.created_at.asc())
         .limit(1)
     )
     member = result.scalar_one_or_none()
+    if member and member.user_id is None:
+        member.user_id = user.id
 
     if not member:
         # 2. user_id 미연결 human team_member 중 첫 번째에 자동 연결
