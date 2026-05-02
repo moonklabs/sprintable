@@ -17,7 +17,10 @@ export async function GET(request: Request) {
       if (!member) return ApiErrors.notFound('Member not found');
       return apiSuccess({ ...member, email: null });
     }
-    return proxyToFastapi(request, '/api/v2/me');
+    const res = await proxyToFastapi(request, '/api/v2/me');
+    if (!res.ok) return res;
+    const data: unknown = await res.json();
+    return apiSuccess(data);
   } catch (err: unknown) {
     return handleApiError(err);
   }

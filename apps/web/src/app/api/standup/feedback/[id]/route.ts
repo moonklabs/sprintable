@@ -25,7 +25,7 @@ export async function GET(request: Request, { params }: RouteParams) {
     }
 
     const { id } = await params;
-    return proxyToFastapi(request, `/api/v2/standup/feedback/${id}`);
+    return proxyToFastapi(request, `/api/v2/standups/feedback/${id}`);
   } catch (err: unknown) {
     return handleApiError(err);
   }
@@ -44,7 +44,7 @@ export async function PATCH(request: Request, { params }: RouteParams) {
     }
 
     const { id } = await params;
-    return proxyToFastapi(request, `/api/v2/standup/feedback/${id}`);
+    return proxyToFastapi(request, `/api/v2/standups/feedback/${id}`);
   } catch (err: unknown) {
     return handleApiError(err);
   }
@@ -62,7 +62,7 @@ export async function DELETE(request: Request, { params }: RouteParams) {
     }
 
     const { id } = await params;
-    return proxyToFastapi(request, `/api/v2/standup/feedback/${id}`);
+    return proxyToFastapi(request, `/api/v2/standups/feedback/${id}`);
   } catch (err: unknown) {
     return handleApiError(err);
   }

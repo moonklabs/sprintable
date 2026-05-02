@@ -22,7 +22,7 @@ export async function GET(request: Request) {
       return apiSuccess(await listOssStandupFeedbackByDate(projectId, date));
     }
 
-    return proxyToFastapi(request, '/api/v2/standup/feedback');
+    return proxyToFastapi(request, '/api/v2/standups/feedback');
   } catch (err: unknown) {
     return handleApiError(err);
   }
@@ -50,7 +50,7 @@ export async function POST(request: Request) {
       return apiSuccess(feedback, undefined, 201);
     }
 
-    return proxyToFastapi(request, '/api/v2/standup/feedback');
+    return proxyToFastapi(request, '/api/v2/standups/feedback');
   } catch (err: unknown) {
     return handleApiError(err);
   }

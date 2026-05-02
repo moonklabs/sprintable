@@ -1,6 +1,8 @@
 import { handleApiError } from '@/lib/api-error';
-import { apiSuccess, ApiErrors } from '@/lib/api-response';
+import { ApiErrors } from '@/lib/api-response';
 import { getAuthContext } from '@/lib/auth-helpers';
+import { isOssMode } from '@/lib/storage/factory';
+import { proxyToFastapi } from '@/lib/fastapi-proxy';
 
 // GET /api/dashboard?member_id=X[&project_id=X]
 export async function GET(request: Request) {
@@ -9,16 +11,12 @@ export async function GET(request: Request) {
     if (!me) return ApiErrors.unauthorized();
     if (me.rateLimitExceeded) return ApiErrors.tooManyRequests(me.rateLimitRemaining, me.rateLimitResetAt);
 
-    const { searchParams } = new URL(request.url);
-    const memberId = searchParams.get('member_id');
-    if (!memberId) return ApiErrors.badRequest('member_id required');
+    if (isOssMode()) {
+      const { apiSuccess } = await import('@/lib/api-response');
+      return apiSuccess({ my_stories: [], assigned_stories: [], my_tasks: [], open_memos: [] });
+    }
 
-    return apiSuccess({
-      my_stories: [],
-      assigned_stories: [],
-      my_tasks: [],
-      open_memos: [],
-    });
+    return proxyToFastapi(request, '/api/v2/dashboard');
   } catch (err: unknown) {
     return handleApiError(err);
   }
