@@ -1,7 +1,7 @@
-import { RewardsService } from '@/services/rewards';
 import { handleApiError } from '@/lib/api-error';
-import { apiSuccess, ApiErrors } from '@/lib/api-response';
+import { ApiErrors } from '@/lib/api-response';
 import { getAuthContext } from '@/lib/auth-helpers';
+import { proxyToFastapi } from '@/lib/fastapi-proxy';
 
 /** GET /api/rewards/leaderboard?project_id=X&period=daily|weekly|monthly|all&limit=N&cursor=X */
 export async function GET(request: Request) {
@@ -19,11 +19,6 @@ export async function GET(request: Request) {
       return ApiErrors.badRequest('period must be one of: daily, weekly, monthly, all');
     }
 
-    const limit = Math.min(Number(searchParams.get('limit') ?? '50'), 100);
-    const cursor = searchParams.get('cursor') ?? undefined;
-
-    const service = new RewardsService(undefined);
-    const data = await service.getLeaderboardByPeriod(projectId, period, limit, cursor);
-    return apiSuccess(data);
+    return proxyToFastapi(request, '/api/v2/rewards/leaderboard');
   } catch (err: unknown) { return handleApiError(err); }
 }

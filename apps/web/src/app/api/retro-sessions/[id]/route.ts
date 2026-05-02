@@ -1,9 +1,8 @@
 import { handleApiError } from '@/lib/api-error';
 import { apiSuccess, ApiErrors } from '@/lib/api-response';
 import { getAuthContext } from '@/lib/auth-helpers';
-import { RetroSessionService } from '@/services/retro-session';
-import type { RetroSessionPhase } from '@/services/retro-session';
 import { isOssMode } from '@/lib/storage/factory';
+import { proxyToFastapiWithParams } from '@/lib/fastapi-proxy';
 import { getOssRetroSession, listOssRetroItems, listOssRetroActions, advanceOssRetroPhase } from '@/lib/oss-retro';
 import type { RetroPhase } from '@/lib/oss-retro';
 
@@ -31,15 +30,7 @@ export async function GET(request: Request, { params }: RouteParams) {
       return apiSuccess({ session, items, actions });
     }
 
-    const dbClient = undefined;
-    const service = new RetroSessionService(dbClient);
-    const data = await service.getSession(id, projectId);
-    if (!data) return ApiErrors.notFound('Session not found');
-    const [items, actions] = await Promise.all([
-      service.listItems(id, projectId),
-      service.listActions(id, projectId),
-    ]);
-    return apiSuccess({ session: data, items, actions });
+    return proxyToFastapiWithParams(request, '/api/v2/retros/[id]', { id });
   } catch (err: unknown) {
     return handleApiError(err);
   }
@@ -57,7 +48,7 @@ export async function PATCH(request: Request, { params }: RouteParams) {
     const projectId = searchParams.get('project_id');
     if (!projectId) return ApiErrors.badRequest('project_id required');
 
-    const body = await request.json() as { phase?: RetroSessionPhase };
+    const body = await request.json() as { phase?: string };
     if (!body.phase) return ApiErrors.badRequest('phase required');
 
     if (isOssMode()) {
@@ -65,10 +56,7 @@ export async function PATCH(request: Request, { params }: RouteParams) {
       return apiSuccess(data);
     }
 
-    const dbClient = undefined;
-    const service = new RetroSessionService(dbClient);
-    const data = await service.changePhase(id, projectId, body.phase);
-    return apiSuccess(data);
+    return proxyToFastapiWithParams(request, '/api/v2/retros/[id]/phase', { id });
   } catch (err: unknown) {
     return handleApiError(err);
   }

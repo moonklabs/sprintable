@@ -1,11 +1,11 @@
 
 
 import { handleApiError } from '@/lib/api-error';
-import { apiSuccess, ApiErrors } from '@/lib/api-response';
+import { apiSuccess, apiError, ApiErrors } from '@/lib/api-response';
 import { getAuthContext } from '@/lib/auth-helpers';
 import { isOssMode } from '@/lib/storage/factory';
 import { getOssStandupHistory } from '@/lib/oss-standup';
-import { StandupService } from '@/services/standup';
+import { proxyToFastapi } from '@/lib/fastapi-proxy';
 
 // GET /api/standup/history?project_id=X[&limit=N]
 export async function GET(request: Request) {
@@ -23,10 +23,7 @@ export async function GET(request: Request) {
       return apiSuccess(await getOssStandupHistory(projectId, limit));
     }
 
-    const dbClient: any = undefined;
-    const service = new StandupService(dbClient);
-    const data = await service.getHistory(projectId, limit);
-    return apiSuccess(data);
+    return proxyToFastapi(request, '/api/v2/standups');
   } catch (err: unknown) {
     return handleApiError(err);
   }
