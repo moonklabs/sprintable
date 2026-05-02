@@ -12,23 +12,23 @@ export interface FeatureCheckResult {
 }
 
 export async function checkFeatureLimit(
-  _db: any,
+  _db: unknown,
   _orgId: string,
   _feature: string,
 ): Promise<FeatureCheckResult> {
   return { allowed: true };
 }
 
-export async function checkMemberLimit(_db: any, _orgId: string): Promise<FeatureCheckResult> {
+export async function checkMemberLimit(_db: unknown, _orgId: string): Promise<FeatureCheckResult> {
   return { allowed: true };
 }
 
-export async function checkProjectLimit(_db: any, _orgId: string): Promise<FeatureCheckResult> {
+export async function checkProjectLimit(_db: unknown, _orgId: string): Promise<FeatureCheckResult> {
   return { allowed: true };
 }
 
 export async function checkResourceLimit(
-  _db: any,
+  _db: unknown,
   _orgId: string,
   _featureKey: string,
   _table: string,

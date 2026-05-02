@@ -107,7 +107,6 @@ export function rateLimitedFetch(input: RequestInfo | URL, init?: RequestInit): 
 
 // ─── DB Browser Client stub (auth via FastAPI) ─────────────────────────
 
-// eslint-disable-next-line @typescript-eslint/no-explicit-any
-export function createBrowserClient(): any {
+export function createBrowserClient(): undefined {
   return undefined;
 }

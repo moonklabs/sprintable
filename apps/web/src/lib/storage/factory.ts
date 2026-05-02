@@ -42,7 +42,6 @@ export async function createEpicRepository(db?: unknown): Promise<IEpicRepositor
     return new SqliteEpicRepository(getDb());
   }
   const { ApiEpicRepository } = await import('@sprintable/storage-api');
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
   return new ApiEpicRepository(await getSpAt());
 }
 
@@ -52,7 +51,6 @@ export async function createStoryRepository(db?: unknown): Promise<IStoryReposit
     return new SqliteStoryRepository(getDb());
   }
   const { ApiStoryRepository } = await import('@sprintable/storage-api');
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
   return new ApiStoryRepository(await getSpAt());
 }
 
@@ -62,7 +60,6 @@ export async function createTaskRepository(db?: unknown): Promise<ITaskRepositor
     return new SqliteTaskRepository(getDb());
   }
   const { ApiTaskRepository } = await import('@sprintable/storage-api');
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
   return new ApiTaskRepository(await getSpAt());
 }
 
@@ -72,7 +69,6 @@ export async function createMemoRepository(db?: unknown): Promise<IMemoRepositor
     return new SqliteMemoRepository(getDb());
   }
   const { ApiMemoRepository } = await import('@sprintable/storage-api');
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
   return new ApiMemoRepository(await getSpAt());
 }
 
@@ -82,7 +78,6 @@ export async function createDocRepository(db?: unknown): Promise<IDocRepository>
     return new SqliteDocRepository(getDb());
   }
   const { ApiDocRepository } = await import('@sprintable/storage-api');
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
   return new ApiDocRepository(await getSpAt());
 }
 
@@ -92,7 +87,6 @@ export async function createProjectRepository(db?: unknown): Promise<IProjectRep
     return new SqliteProjectRepository(getDb());
   }
   const { ApiProjectRepository } = await import('@sprintable/storage-api');
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
   return new ApiProjectRepository(await getSpAt());
 }
 
@@ -102,7 +96,6 @@ export async function createSprintRepository(db?: unknown): Promise<ISprintRepos
     return new SqliteSprintRepository(getDb());
   }
   const { ApiSprintRepository } = await import('@sprintable/storage-api');
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
   return new ApiSprintRepository(await getSpAt());
 }
 
@@ -112,7 +105,6 @@ export async function createNotificationRepository(db?: unknown): Promise<INotif
     return new SqliteNotificationRepository(getDb());
   }
   const { ApiNotificationRepository } = await import('@sprintable/storage-api');
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
   return new ApiNotificationRepository(await getSpAt());
 }
 
@@ -122,7 +114,6 @@ export async function createTeamMemberRepository(db?: unknown): Promise<ITeamMem
     return new SqliteTeamMemberRepository(getDb());
   }
   const { ApiTeamMemberRepository } = await import('@sprintable/storage-api');
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
   return new ApiTeamMemberRepository(await getSpAt());
 }
 
@@ -132,7 +123,6 @@ export async function createInboxItemRepository(db?: unknown): Promise<IInboxIte
     return new SqliteInboxItemRepository(getDb());
   }
   const { ApiInboxItemRepository } = await import('@sprintable/storage-api');
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
   return new ApiInboxItemRepository(await getSpAt());
 }
 

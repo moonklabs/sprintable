@@ -16,11 +16,12 @@ export function validateStatusTransition(from: string, to: string): void {
     );
   }
 }
+import type { SupabaseClient } from '@/types/supabase';
 
 const ROLE_RANK: Record<string, number> = { owner: 3, admin: 2, member: 1 };
 
 export async function getEpicActorRole(
-  db: any,
+  db: SupabaseClient,
   memberId: string,
 ): Promise<string | null> {
   const { data } = await db

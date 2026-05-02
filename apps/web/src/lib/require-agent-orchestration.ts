@@ -1,4 +1,5 @@
 
+import type { SupabaseClient } from '@/types/supabase';
 import { checkFeatureLimit } from '@/lib/check-feature';
 import { apiUpgradeRequired } from '@/lib/api-response';
 
@@ -9,7 +10,7 @@ import { apiUpgradeRequired } from '@/lib/api-response';
  * Returns `null` when the feature is allowed, or a NextResponse to
  * short-circuit the handler.
  */
-export async function requireAgentOrchestration(db: any, orgId: string) {
+export async function requireAgentOrchestration(db: SupabaseClient, orgId: string) {
   const check = await checkFeatureLimit(db, orgId, 'agent_orchestration');
   if (!check.allowed) {
     const message = check.reason ?? 'Agent orchestration requires a Team plan or above.';

@@ -1,3 +1,4 @@
+import type { SupabaseClient } from '@/types/supabase';
 import { apiError } from '@/lib/api-response';
 import { isInternalDogfoodEnabled, readInternalDogfoodSession, resolveInternalDogfoodActor } from '@/lib/internal-dogfood';
 
@@ -16,5 +17,5 @@ export async function getInternalDogfoodContext() {
     return { errorResponse: apiError('FORBIDDEN', 'Internal dogfood actor not allowed', 403) };
   }
 
-  return { db: undefined, actor };
+  return { db: undefined as unknown as SupabaseClient, actor };
 }

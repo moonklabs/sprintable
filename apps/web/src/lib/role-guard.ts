@@ -1,4 +1,5 @@
 
+import type { SupabaseClient } from '@/types/supabase';
 import { ApiErrors } from '@/lib/api-response';
 
 export const ADMIN_ROLES = ['owner', 'admin'] as const;
@@ -6,7 +7,7 @@ export const EDIT_ROLES = ['owner', 'admin', 'po'] as const;
 export type RoleGuardRole = typeof ADMIN_ROLES[number] | typeof EDIT_ROLES[number];
 
 /** Fetch the caller's role in the org. Returns null if unauthenticated or not a member. */
-export async function getCallerRole(db: any, orgId: string): Promise<string | null> {
+export async function getCallerRole(db: SupabaseClient, orgId: string): Promise<string | null> {
   const { data: { user } } = await db.auth.getUser();
   if (!user) return null;
   const { data } = await db
@@ -25,7 +26,7 @@ export async function getCallerRole(db: any, orgId: string): Promise<string | nu
  * OSS mode always passes (isOssMode check must be done by caller before invoking).
  */
 export async function requireRole(
-  db: any,
+  db: SupabaseClient,
   orgId: string,
   roles: readonly string[],
   message?: string,

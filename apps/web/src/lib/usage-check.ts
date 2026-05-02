@@ -11,7 +11,7 @@ export interface UsageCheckResult {
 }
 
 export async function checkUsage(
-  _db: any,
+  _db: unknown,
   _orgId: string,
   meterType: string,
 ): Promise<UsageCheckResult> {
@@ -19,7 +19,7 @@ export async function checkUsage(
 }
 
 export async function incrementUsage(
-  _db: any,
+  _db: unknown,
   _orgId: string,
   _meterType: string,
   _delta: number = 1,
