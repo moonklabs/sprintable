@@ -3,12 +3,13 @@ from datetime import datetime
 
 from fastapi import APIRouter, Body, Depends, Header, HTTPException, Query, status
 from pydantic import BaseModel
-from sqlalchemy import select
+from sqlalchemy import or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.dependencies.auth import AuthContext, get_current_user
 from app.dependencies.database import get_db
 from app.models.pm import Story, StoryActivity, StoryComment
+from app.models.team import TeamMember
 from app.repositories.story import StoryRepository
 from app.schemas.story import StoryCreate, StoryResponse, StoryStatusUpdate, StoryUpdate
 
@@ -174,23 +175,40 @@ async def list_comments(
 ) -> list[CommentResponse]:
     q = select(StoryComment).where(
         StoryComment.story_id == id,
-        StoryComment.deleted_at.is_(None),
     ).order_by(StoryComment.created_at.desc()).limit(limit)
     result = await db.execute(q)
     return [CommentResponse.model_validate(r) for r in result.scalars()]
+
+
+async def _resolve_team_member_id(auth: AuthContext, org_id: uuid.UUID, db: AsyncSession) -> uuid.UUID:
+    user_id = uuid.UUID(str(auth.user_id))
+    result = await db.execute(
+        select(TeamMember)
+        .where(
+            or_(TeamMember.user_id == user_id, TeamMember.id == user_id),
+            TeamMember.org_id == org_id,
+            TeamMember.is_active.is_(True),
+        )
+        .limit(1)
+    )
+    member = result.scalar_one_or_none()
+    if not member:
+        raise HTTPException(status_code=403, detail="Team member not found for current user")
+    return member.id
 
 
 @router.post("/{id}/comments", response_model=CommentResponse, status_code=201)
 async def add_comment(
     id: uuid.UUID,
     content: str = Body(..., embed=True),
-    created_by: uuid.UUID = Body(..., embed=True),
     db: AsyncSession = Depends(get_db),
     repo: StoryRepository = Depends(_get_repo),
+    auth: AuthContext = Depends(get_current_user),
 ) -> CommentResponse:
     story = await repo.get(id)
     if not story:
         raise HTTPException(status_code=404, detail="Story not found")
+    created_by = await _resolve_team_member_id(auth, repo.org_id, db)
     comment = StoryComment(
         story_id=id,
         org_id=repo.org_id,
