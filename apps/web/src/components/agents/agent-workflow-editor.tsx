@@ -31,7 +31,6 @@ import { PageHeader } from '@/components/ui/page-header';
 import { SectionCard, SectionCardBody, SectionCardHeader } from '@/components/ui/section-card';
 import { ToastContainer, useToast } from '@/components/ui/toast';
 import { getRollbackSnapshotFromRules, type RoutingRuleSummary, type WorkflowVersionSummary } from '@/services/agent-routing-rule';
-import { createBrowserClient } from '@/lib/db/client';
 import {
   WORKFLOW_MEMO_TYPE_OPTIONS,
   WORKFLOW_ORIGINAL_ASSIGNEE_ID,
@@ -554,22 +553,15 @@ function AgentWorkflowEditorInner({ initialMembers, initialRules, projectName }:
 
   // ─── API actions ───────────────────────────────────────────────────────────
 
-  const getAuthHeaders = async (): Promise<Record<string, string>> => {
-    const db = createBrowserClient();
-    const { data: { session } } = await db.auth.getSession();
-    return session?.access_token ? { Authorization: `Bearer ${session.access_token}` } : {};
-  };
-
   const saveWorkflow = useCallback(async () => {
     setSaving(true);
     try {
       if (!draftWorkflow.rules) throw new Error(draftWorkflow.error ?? t('workflowSaveErrorBody'));
 
       const desired = draftWorkflow.rules;
-      const authHeaders = await getAuthHeaders();
-      const response = await fetch('/api/v2/agent-routing-rules', {
+      const response = await fetch('/api/v1/agent-routing-rules', {
         method: 'PUT',
-        headers: { 'Content-Type': 'application/json', ...authHeaders },
+        headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           items: desired.map((rule) => ({
             id: rule.id,
@@ -612,10 +604,9 @@ function AgentWorkflowEditorInner({ initialMembers, initialRules, projectName }:
     if (!rollbackSnapshot?.items.length) return;
     setSaving(true);
     try {
-      const authHeaders = await getAuthHeaders();
-      const response = await fetch('/api/v2/agent-routing-rules', {
+      const response = await fetch('/api/v1/agent-routing-rules', {
         method: 'PUT',
-        headers: { 'Content-Type': 'application/json', ...authHeaders },
+        headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ items: rollbackSnapshot.items }),
       });
       const json = await response.json().catch(() => null) as ApiResponse<RoutingRuleSummary[]> | null;
@@ -634,8 +625,7 @@ function AgentWorkflowEditorInner({ initialMembers, initialRules, projectName }:
   useEffect(() => {
     void (async () => {
       try {
-        const authHeaders = await getAuthHeaders();
-        const r = await fetch('/api/v2/workflow-versions', { headers: authHeaders });
+        const r = await fetch('/api/v1/workflow-versions');
         const json = await r.json() as { data?: WorkflowVersionSummary[] };
         if (Array.isArray(json.data)) setVersions(json.data);
       } catch {
@@ -647,8 +637,7 @@ function AgentWorkflowEditorInner({ initialMembers, initialRules, projectName }:
   const rollbackToVersion = useCallback(async (versionId: string) => {
     setSaving(true);
     try {
-      const authHeaders = await getAuthHeaders();
-      const response = await fetch(`/api/v2/workflow-versions/${versionId}/rollback`, { method: 'POST', headers: authHeaders });
+      const response = await fetch(`/api/v1/workflow-versions/${versionId}/rollback`, { method: 'POST' });
       const json = await response.json().catch(() => null) as { data?: RoutingRuleSummary[] } | null;
       if (!response.ok || !json?.data || !Array.isArray(json.data)) throw new Error(t('workflowRollbackErrorBody'));
       setSavedRules(json.data);
@@ -667,10 +656,9 @@ function AgentWorkflowEditorInner({ initialMembers, initialRules, projectName }:
     if (savedRules.length === 0) return;
     setSaving(true);
     try {
-      const authHeaders = await getAuthHeaders();
-      const response = await fetch('/api/v2/agent-routing-rules', {
+      const response = await fetch('/api/v1/agent-routing-rules', {
         method: 'PATCH',
-        headers: { 'Content-Type': 'application/json', ...authHeaders },
+        headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ disable_all: true }),
       });
       const json = await response.json().catch(() => null) as ApiResponse<RoutingRuleSummary[]> | null;

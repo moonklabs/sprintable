@@ -16,7 +16,6 @@ import { AgentDeploymentVerificationStep } from '@/components/agents/agent-deplo
 import { ANTHROPIC_MODELS, GOOGLE_MODELS, GROQ_MODELS, LLMProvider, OPENAI_MODELS } from '@/lib/llm/types';
 import type { ManagedAgentDeploymentVerification } from '@/lib/managed-agent-contract';
 import { buildAutomaticRoutingTemplate, resolveAutoRoutingPersonaRole, type AutoRoutingPersonaRole } from '@/services/agent-routing-template';
-import { createBrowserClient } from '@/lib/db/client';
 
 export interface WizardAgent {
   id: string;
@@ -159,12 +158,6 @@ export function AgentDeploymentWizard({
   const [failureMessage, setFailureMessage] = useState<string | null>(null);
   const [overwriteRoutingRules, setOverwriteRoutingRules] = useState(false);
 
-  const getAuthHeaders = async (): Promise<Record<string, string>> => {
-    const db = createBrowserClient();
-    const { data: { session } } = await db.auth.getSession();
-    return session?.access_token ? { Authorization: `Bearer ${session.access_token}` } : {};
-  };
-
   const builtinPersonas = personas.filter((persona) => persona.is_builtin);
   const customPersonas = personas.filter((persona) => !persona.is_builtin);
   const selectedPersona = personas.find((persona) => persona.id === selectedPersonaId) ?? null;
@@ -283,8 +276,7 @@ export function AgentDeploymentWizard({
     if (!deploymentId || !deploying) return;
     let cancelled = false;
     const timer = setInterval(async () => {
-      const authHeaders = await getAuthHeaders();
-      const response = await fetch(`/api/v2/agent-deployments/${deploymentId}`, { cache: 'no-store', headers: authHeaders });
+      const response = await fetch(`/api/v1/agent-deployments/${deploymentId}`, { cache: 'no-store' });
       const json = await response.json();
       if (!response.ok) {
         if (!cancelled) {
@@ -346,10 +338,9 @@ export function AgentDeploymentWizard({
     setPreflightRunning(true);
     setFailureMessage(null);
     try {
-      const authHeaders = await getAuthHeaders();
-      const response = await fetch('/api/v2/agent-deployments/preflight', {
+      const response = await fetch('/api/v1/agent-deployments/preflight', {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json', ...authHeaders },
+        headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(deploymentPayload),
       });
 
@@ -379,10 +370,9 @@ export function AgentDeploymentWizard({
     setFailureMessage(null);
     setDeploymentStatus('DEPLOYING');
     try {
-      const authHeaders = await getAuthHeaders();
-      const response = await fetch('/api/v2/agent-deployments', {
+      const response = await fetch('/api/v1/agent-deployments', {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json', ...authHeaders },
+        headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(deploymentPayload),
       });
 
@@ -425,10 +415,8 @@ export function AgentDeploymentWizard({
     if (!deploymentId) return;
     setVerificationSubmitting(true);
     try {
-      const authHeaders = await getAuthHeaders();
-      const response = await fetch(`/api/v2/agent-deployments/${deploymentId}/verification`, {
+      const response = await fetch(`/api/v1/agent-deployments/${deploymentId}/verification`, {
         method: 'POST',
-        headers: authHeaders,
       });
       const json = await response.json();
       if (!response.ok) {
