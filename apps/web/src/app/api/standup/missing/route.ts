@@ -4,8 +4,8 @@ import { handleApiError } from '@/lib/api-error';
 import { apiSuccess, ApiErrors } from '@/lib/api-response';
 import { getAuthContext } from '@/lib/auth-helpers';
 import { isOssMode } from '@/lib/storage/factory';
+import { proxyToFastapi } from '@/lib/fastapi-proxy';
 import { getOssStandupMissing } from '@/lib/oss-standup';
-import { StandupService } from '@/services/standup';
 
 // GET /api/standup/missing?project_id=X&date=YYYY-MM-DD
 export async function GET(request: Request) {
@@ -24,10 +24,7 @@ export async function GET(request: Request) {
       return apiSuccess(await getOssStandupMissing(projectId, date));
     }
 
-    const dbClient: any = undefined;
-    const service = new StandupService(dbClient);
-    const data = await service.getMissing(projectId, date);
-    return apiSuccess(data);
+    return proxyToFastapi(request, '/api/v2/standups/missing');
   } catch (err: unknown) {
     return handleApiError(err);
   }

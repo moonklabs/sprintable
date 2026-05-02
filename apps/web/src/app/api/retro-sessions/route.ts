@@ -1,7 +1,8 @@
 import { handleApiError } from '@/lib/api-error';
-import { apiSuccess, ApiErrors } from '@/lib/api-response';
+import { ApiErrors } from '@/lib/api-response';
 import { getAuthContext } from '@/lib/auth-helpers';
-import { RetroSessionService } from '@/services/retro-session';
+import { isOssMode } from '@/lib/storage/factory';
+import { proxyToFastapi } from '@/lib/fastapi-proxy';
 
 // GET /api/retro-sessions?project_id=X
 export async function GET(request: Request) {
@@ -10,14 +11,16 @@ export async function GET(request: Request) {
     if (!me) return ApiErrors.unauthorized();
     if (me.rateLimitExceeded) return ApiErrors.tooManyRequests(me.rateLimitRemaining, me.rateLimitResetAt);
 
-    const { searchParams } = new URL(request.url);
-    const projectId = searchParams.get('project_id');
-    if (!projectId) return ApiErrors.badRequest('project_id required');
+    if (isOssMode()) {
+      const { apiSuccess } = await import('@/lib/api-response');
+      const { listOssRetroSessions } = await import('@/lib/oss-retro');
+      const { searchParams } = new URL(request.url);
+      const projectId = searchParams.get('project_id');
+      if (!projectId) return ApiErrors.badRequest('project_id required');
+      return apiSuccess(await listOssRetroSessions(projectId));
+    }
 
-    const dbClient = undefined;
-    const service = new RetroSessionService(dbClient);
-    const data = await service.listSessions(projectId);
-    return apiSuccess(data);
+    return proxyToFastapi(request, '/api/v2/retros');
   } catch (err: unknown) {
     return handleApiError(err);
   }
@@ -30,28 +33,22 @@ export async function POST(request: Request) {
     if (!me) return ApiErrors.unauthorized();
     if (me.rateLimitExceeded) return ApiErrors.tooManyRequests(me.rateLimitRemaining, me.rateLimitResetAt);
 
-    const body = await request.json() as {
-      project_id?: string;
-      org_id?: string;
-      title?: string;
-      sprint_id?: string | null;
-      created_by?: string;
-    };
-    if (!body.project_id) return ApiErrors.badRequest('project_id required');
-    if (!body.org_id) return ApiErrors.badRequest('org_id required');
-    if (!body.title) return ApiErrors.badRequest('title required');
-    if (!body.created_by) return ApiErrors.badRequest('created_by required');
+    if (isOssMode()) {
+      const { apiSuccess } = await import('@/lib/api-response');
+      const { createOssRetroSession } = await import('@/lib/oss-retro');
+      const body = await request.json() as {
+        project_id?: string; org_id?: string; title?: string;
+        sprint_id?: string | null; created_by?: string;
+      };
+      if (!body.project_id) return ApiErrors.badRequest('project_id required');
+      if (!body.org_id) return ApiErrors.badRequest('org_id required');
+      if (!body.title) return ApiErrors.badRequest('title required');
+      if (!body.created_by) return ApiErrors.badRequest('created_by required');
+      const data = await createOssRetroSession({ org_id: body.org_id, project_id: body.project_id, title: body.title, sprint_id: body.sprint_id ?? null, created_by: body.created_by });
+      return apiSuccess(data, undefined, 201);
+    }
 
-    const dbClient = undefined;
-    const service = new RetroSessionService(dbClient);
-    const data = await service.createSession({
-      org_id: body.org_id,
-      project_id: body.project_id,
-      title: body.title,
-      sprint_id: body.sprint_id ?? null,
-      created_by: body.created_by,
-    });
-    return apiSuccess(data);
+    return proxyToFastapi(request, '/api/v2/retros');
   } catch (err: unknown) {
     return handleApiError(err);
   }

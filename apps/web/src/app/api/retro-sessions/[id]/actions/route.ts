@@ -1,8 +1,8 @@
 import { handleApiError } from '@/lib/api-error';
 import { apiSuccess, ApiErrors } from '@/lib/api-response';
 import { getAuthContext } from '@/lib/auth-helpers';
-import { RetroSessionService } from '@/services/retro-session';
 import { isOssMode } from '@/lib/storage/factory';
+import { proxyToFastapiWithParams } from '@/lib/fastapi-proxy';
 import { addOssRetroAction } from '@/lib/oss-retro';
 
 type RouteParams = { params: Promise<{ id: string }> };
@@ -19,10 +19,7 @@ export async function GET(request: Request, { params }: RouteParams) {
     const projectId = searchParams.get('project_id');
     if (!projectId) return ApiErrors.badRequest('project_id required');
 
-    const dbClient = undefined;
-    const service = new RetroSessionService(dbClient);
-    const data = await service.listActions(id, projectId);
-    return apiSuccess(data);
+    return proxyToFastapiWithParams(request, '/api/v2/retros/[id]/actions', { id });
   } catch (err: unknown) {
     return handleApiError(err);
   }
@@ -48,10 +45,7 @@ export async function POST(request: Request, { params }: RouteParams) {
       return apiSuccess(data);
     }
 
-    const dbClient = undefined;
-    const service = new RetroSessionService(dbClient);
-    const data = await service.addAction({ session_id: id, project_id: projectId, title: body.title, assignee_id: body.assignee_id ?? null });
-    return apiSuccess(data);
+    return proxyToFastapiWithParams(request, '/api/v2/retros/[id]/actions', { id });
   } catch (err: unknown) {
     return handleApiError(err);
   }
