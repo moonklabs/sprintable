@@ -4,7 +4,6 @@ import { handleApiError } from '@/lib/api-error';
 import { getAuthContext } from '@/lib/auth-helpers';
 import { apiSuccess, ApiErrors } from '@/lib/api-response';
 import { isOssMode, createMemoRepository, createTeamMemberRepository } from '@/lib/storage/factory';
-import { proxyToFastapiWithParams } from '@/lib/fastapi-proxy';
 
 type RouteParams = { params: Promise<{ id: string }> };
 
@@ -40,7 +39,27 @@ export async function POST(request: Request, { params }: RouteParams) {
       return apiSuccess(reply, undefined, 201);
     }
 
-    return proxyToFastapiWithParams(request, '/api/v2/memos/[id]/replies', { id });
+    // non-OSS: body 파싱 후 created_by(me.id) 주입해서 FastAPI 호출
+    const parsed = await parseBody(request, createMemoReplySchema);
+    if (!parsed.success) return parsed.response;
+    const body = parsed.data;
+
+    const { fastapiCall } = await import('@sprintable/storage-api');
+    const { getServerSession } = await import('@/lib/db/server');
+    const session = await getServerSession();
+    const token = session?.access_token ?? '';
+
+    const reply = await fastapiCall<unknown>(
+      'POST', `/api/v2/memos/${id}/replies`, token,
+      {
+        body: {
+          content: body.content,
+          created_by: me.id,
+          review_type: 'comment',
+        },
+      },
+    );
+    return apiSuccess(reply, undefined, 201);
   } catch (err: unknown) {
     return handleApiError(err);
   }
