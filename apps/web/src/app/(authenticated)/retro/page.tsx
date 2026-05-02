@@ -51,7 +51,7 @@ export default function RetroPage() {
       setLoading(true);
       setLoadError(null);
       try {
-        const res = await fetch(`/api/retro?project_id=${projectId}`);
+        const res = await fetch(`/api/retro-sessions?project_id=${projectId}`);
         if (!res.ok) throw new Error(`HTTP ${res.status}`);
         const json = await res.json();
         if (!cancelled) setSessions(json.data ?? []);
@@ -70,7 +70,7 @@ export default function RetroPage() {
     setCreating(true);
     setCreateError(null);
     try {
-      const res = await fetch('/api/retro', {
+      const res = await fetch('/api/retro-sessions', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ title: title.trim(), project_id: projectId }),
