@@ -30,7 +30,10 @@ export async function GET(request: Request, { params }: RouteParams) {
       return apiSuccess({ session, items, actions });
     }
 
-    return proxyToFastapiWithParams(request, '/api/v2/retros/[id]', { id });
+const _r = await proxyToFastapiWithParams(request, '/api/v2/retros/[id]', { id });
+    if (!_r.ok) return _r;
+    if (_r.status === 204) return apiSuccess({ ok: true });
+    return apiSuccess(await _r.json())
   } catch (err: unknown) {
     return handleApiError(err);
   }
@@ -55,7 +58,10 @@ export async function PATCH(request: Request, { params }: RouteParams) {
       return apiSuccess(data);
     }
 
-    return proxyToFastapiWithParams(request, '/api/v2/retros/[id]/phase', { id });
+const _r = await proxyToFastapiWithParams(request, '/api/v2/retros/[id]/phase', { id });
+    if (!_r.ok) return _r;
+    if (_r.status === 204) return apiSuccess({ ok: true });
+    return apiSuccess(await _r.json())
   } catch (err: unknown) {
     return handleApiError(err);
   }

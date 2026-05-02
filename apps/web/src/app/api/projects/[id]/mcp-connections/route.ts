@@ -14,5 +14,8 @@ export async function GET(_request: Request, { params }: RouteParams) {
 }
 
 export async function POST(request: Request, _ctx: RouteParams) {
-  return proxyToFastapi(request, '/api/v2/projects/mcp-connections');
+const _r = await proxyToFastapi(request, '/api/v2/projects/mcp-connections');
+  if (!_r.ok) return _r;
+  if (_r.status === 204) return apiSuccess({ ok: true });
+  return apiSuccess(await _r.json())
 }

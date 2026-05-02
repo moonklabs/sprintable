@@ -27,7 +27,10 @@ export async function GET(request: Request) {
       return apiSuccess(await listOssStandupEntries(projectId, date));
     }
 
-    return proxyToFastapi(request, '/api/v2/standups');
+const _r = await proxyToFastapi(request, '/api/v2/standups');
+    if (!_r.ok) return _r;
+    if (_r.status === 204) return apiSuccess({ ok: true });
+    return apiSuccess(await _r.json())
   } catch (err: unknown) {
     return handleApiError(err);
   }
@@ -70,7 +73,10 @@ export async function POST(request: Request) {
       return apiSuccess(entry);
     }
 
-    return proxyToFastapi(request, '/api/v2/standups');
+const _r = await proxyToFastapi(request, '/api/v2/standups');
+    if (!_r.ok) return _r;
+    if (_r.status === 204) return apiSuccess({ ok: true });
+    return apiSuccess(await _r.json())
   } catch (err: unknown) {
     return handleApiError(err);
   }
@@ -108,7 +114,10 @@ export async function PUT(request: Request) {
       return apiSuccess(entry);
     }
 
-    return proxyToFastapi(request, '/api/v2/standups');
+const _r = await proxyToFastapi(request, '/api/v2/standups');
+    if (!_r.ok) return _r;
+    if (_r.status === 204) return apiSuccess({ ok: true });
+    return apiSuccess(await _r.json())
   } catch (err: unknown) {
     return handleApiError(err);
   }

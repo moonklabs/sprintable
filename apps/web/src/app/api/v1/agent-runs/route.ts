@@ -26,10 +26,16 @@ export async function GET(request: Request) {
       return apiSuccess(enriched, { nextCursor: result.nextCursor, hasMore: result.hasMore, limit });
     } catch (error) { return handleApiError(error); }
   }
-  return proxyToFastapi(request, '/api/v2/agent-runs');
+const _r = await proxyToFastapi(request, '/api/v2/agent-runs');
+  if (!_r.ok) return _r;
+  if (_r.status === 204) return apiSuccess({ ok: true });
+  return apiSuccess(await _r.json())
 }
 
 export async function POST(request: Request) {
   if (isOssMode()) return ApiErrors.badRequest('Not available in OSS mode');
-  return proxyToFastapi(request, '/api/v2/agent-runs');
+const _r = await proxyToFastapi(request, '/api/v2/agent-runs');
+  if (!_r.ok) return _r;
+  if (_r.status === 204) return apiSuccess({ ok: true });
+  return apiSuccess(await _r.json())
 }
