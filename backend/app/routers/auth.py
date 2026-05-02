@@ -1,14 +1,19 @@
 from __future__ import annotations
 
+import secrets
 import uuid
 from datetime import datetime, timezone
+from urllib.parse import urlencode
 
+import httpx
 from fastapi import APIRouter, Depends
 from fastapi.responses import JSONResponse
 from pydantic import BaseModel
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy import select, update
 from sqlalchemy.ext.asyncio import AsyncSession
+
+from app.core.config import settings
 
 from app.core.security import (
     create_tokens,
@@ -263,3 +268,168 @@ async def totp_verify(
     )
     await session.commit()
     return _ok({"totp_enabled": True})
+
+
+# ─── OAuth ────────────────────────────────────────────────────────────────────
+
+_OAUTH_CONFIGS: dict[str, dict] = {
+    "google": {
+        "authorize_url": "https://accounts.google.com/o/oauth2/v2/auth",
+        "token_url": "https://oauth2.googleapis.com/token",
+        "userinfo_url": "https://www.googleapis.com/oauth2/v3/userinfo",
+        "scope": "openid email profile",
+        "id_field": "sub",
+        "email_field": "email",
+    },
+    "github": {
+        "authorize_url": "https://github.com/login/oauth/authorize",
+        "token_url": "https://github.com/login/oauth/access_token",
+        "userinfo_url": "https://api.github.com/user",
+        "scope": "read:user user:email",
+        "id_field": "id",
+        "email_field": "email",
+    },
+}
+
+
+def _redirect_uri(provider: str) -> str:
+    return f"{settings.app_url}/api/auth/callback/{provider}"
+
+
+def _client_id(provider: str) -> str:
+    return settings.google_client_id if provider == "google" else settings.github_client_id
+
+
+def _client_secret(provider: str) -> str:
+    return settings.google_client_secret if provider == "google" else settings.github_client_secret
+
+
+class OAuthCallbackRequest(BaseModel):
+    provider: str
+    code: str
+    state: str
+
+
+@router.get("/oauth/{provider}/authorize")
+async def oauth_authorize(provider: str) -> JSONResponse:
+    if provider not in _OAUTH_CONFIGS:
+        return _err("INVALID_PROVIDER", f"Unsupported provider: {provider}", 400)
+    cfg = _OAUTH_CONFIGS[provider]
+    state = secrets.token_urlsafe(32)
+    params = {
+        "client_id": _client_id(provider),
+        "redirect_uri": _redirect_uri(provider),
+        "response_type": "code",
+        "scope": cfg["scope"],
+        "state": state,
+    }
+    if provider == "google":
+        params["access_type"] = "offline"
+        params["prompt"] = "select_account"
+    url = f"{cfg['authorize_url']}?{urlencode(params)}"
+    return _ok({"url": url, "state": state})
+
+
+@router.post("/oauth/callback")
+async def oauth_callback(
+    body: OAuthCallbackRequest,
+    session: AsyncSession = Depends(get_db),
+) -> JSONResponse:
+    provider = body.provider
+    if provider not in _OAUTH_CONFIGS:
+        return _err("INVALID_PROVIDER", f"Unsupported provider: {provider}", 400)
+    cfg = _OAUTH_CONFIGS[provider]
+
+    async with httpx.AsyncClient(timeout=15) as client:
+        # 1. code → access_token 교환
+        token_resp = await client.post(
+            cfg["token_url"],
+            data={
+                "client_id": _client_id(provider),
+                "client_secret": _client_secret(provider),
+                "code": body.code,
+                "redirect_uri": _redirect_uri(provider),
+                "grant_type": "authorization_code",
+            },
+            headers={"Accept": "application/json"},
+        )
+        if token_resp.status_code != 200:
+            return _err("OAUTH_TOKEN_EXCHANGE_FAILED", "Failed to exchange code for token", 400)
+        token_data = token_resp.json()
+        access_token = token_data.get("access_token")
+        if not access_token:
+            return _err("OAUTH_NO_TOKEN", "No access_token in response", 400)
+
+        # 2. userinfo 조회
+        userinfo_resp = await client.get(
+            cfg["userinfo_url"],
+            headers={"Authorization": f"Bearer {access_token}"},
+        )
+        if userinfo_resp.status_code != 200:
+            return _err("OAUTH_USERINFO_FAILED", "Failed to fetch user info", 400)
+        userinfo = userinfo_resp.json()
+
+        # GitHub email이 null인 경우 /user/emails로 추가 조회
+        if provider == "github" and not userinfo.get("email"):
+            emails_resp = await client.get(
+                "https://api.github.com/user/emails",
+                headers={"Authorization": f"Bearer {access_token}"},
+            )
+            if emails_resp.status_code == 200:
+                emails = emails_resp.json()
+                primary = next((e["email"] for e in emails if e.get("primary") and e.get("verified")), None)
+                if primary:
+                    userinfo["email"] = primary
+
+    oauth_id = str(userinfo.get(cfg["id_field"], ""))
+    email = (userinfo.get(cfg["email_field"]) or "").lower().strip()
+
+    if not oauth_id or not email:
+        return _err("OAUTH_MISSING_INFO", "Missing id or email from provider", 400)
+
+    # 3. 기존 유저 조회 (oauth_id 기준 → email 기준 순)
+    id_col = User.google_id if provider == "google" else User.github_id
+    result = await session.execute(select(User).where(id_col == oauth_id, User.is_active.is_(True)))
+    user = result.scalar_one_or_none()
+
+    if not user:
+        # 동일 이메일 유저가 있으면 OAuth ID 연결
+        result = await session.execute(select(User).where(User.email == email, User.is_active.is_(True)))
+        user = result.scalar_one_or_none()
+        if user:
+            await session.execute(
+                update(User).where(User.id == user.id).values(**{f"{provider}_id": oauth_id})
+            )
+            await session.commit()
+            await session.refresh(user)
+        else:
+            # 신규 유저 생성 (비밀번호 없음 — OAuth 전용)
+            user = User(
+                email=email,
+                hashed_password="",
+                is_active=True,
+                **{f"{provider}_id": oauth_id},
+            )
+            session.add(user)
+            try:
+                await session.commit()
+                await session.refresh(user)
+            except IntegrityError:
+                await session.rollback()
+                return _err("EMAIL_CONFLICT", "Email already registered", 409)
+
+    # 4. JWT 발급
+    from datetime import timedelta
+    from app.core.security import ACCESS_TOKEN_EXPIRE_MINUTES, REFRESH_TOKEN_EXPIRE_DAYS
+
+    tokens = create_tokens(str(user.id), user.email, _build_app_metadata(user))
+    raw_refresh = tokens["refresh_token"]
+    expires_at = datetime.now(timezone.utc) + timedelta(days=REFRESH_TOKEN_EXPIRE_DAYS)
+    await _store_refresh_token(session, user, raw_refresh, expires_at)
+
+    return _ok({
+        "access_token": tokens["access_token"],
+        "refresh_token": raw_refresh,
+        "token_type": "bearer",
+        "expires_in": ACCESS_TOKEN_EXPIRE_MINUTES * 60,
+    })

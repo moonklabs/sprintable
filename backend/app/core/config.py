@@ -29,6 +29,14 @@ class Settings(BaseSettings):
     app_env: str = "development"
     debug: bool = True
 
+    # OAuth — Google / GitHub
+    google_client_id: str = ""
+    google_client_secret: str = ""
+    github_client_id: str = ""
+    github_client_secret: str = ""
+    # Next.js 프론트엔드 URL (OAuth redirect_uri 조합용)
+    app_url: str = "http://localhost:3000"
+
     # EE / SaaS gating
     license_consent: str = ""
 
