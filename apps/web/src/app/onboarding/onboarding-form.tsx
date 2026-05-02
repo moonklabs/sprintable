@@ -2,7 +2,6 @@
 
 import { useState } from 'react';
 import { useRouter } from 'next/navigation';
-import { createBrowserClient } from '@/lib/db/client';
 import { UpgradeModal } from '@/components/ui/upgrade-modal';
 import { useTranslations } from 'next-intl';
 
@@ -10,7 +9,6 @@ type Step = 'org' | 'project';
 
 export function OnboardingForm() {
   const router = useRouter();
-  const db = createBrowserClient();
   const t = useTranslations('onboarding');
 
   const [step, setStep] = useState<Step>('org');
@@ -91,34 +89,21 @@ export function OnboardingForm() {
     }
 
     // team_member 자동 생성 (type=human)
-    const { data: { user } } = await db.auth.getUser();
-    if (user) {
-      const name = user.user_metadata?.name
-        || user.user_metadata?.full_name
-        || user.email
-        || t('unknownUser');
-
-      // 중복 방지: 이미 존재하면 스킵
-      const { data: existingMember } = await db
-        .from('team_members')
-        .select('id')
-        .eq('user_id', user.id)
-        .eq('project_id', project.id)
-        .eq('type', 'human')
-        .maybeSingle();
-
-      if (!existingMember) {
-        await db
-          .from('team_members')
-          .insert({
-            org_id: orgId,
-            project_id: project.id,
-            type: 'human',
-            user_id: user.id,
-            name,
-            role: 'member',
-          });
-      }
+    const meRes = await fetch('/api/me');
+    if (meRes.ok) {
+      const meJson = await meRes.json() as { data?: { name?: string } };
+      const memberName = meJson.data?.name ?? t('unknownUser');
+      await fetch('/api/team-members', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          org_id: orgId,
+          project_id: project.id,
+          type: 'human',
+          name: memberName,
+          role: 'member',
+        }),
+      }).catch(() => null);
     }
 
     await fetch('/api/current-project', {

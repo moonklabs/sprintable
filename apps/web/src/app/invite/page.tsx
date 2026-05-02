@@ -3,7 +3,6 @@
 import { useState, useEffect } from 'react';
 import { useSearchParams, useRouter } from 'next/navigation';
 import { useTranslations } from 'next-intl';
-import { createBrowserClient } from '@/lib/db/client';
 
 export default function InvitePage() {
   const t = useTranslations('invite');
@@ -20,9 +19,8 @@ export default function InvitePage() {
       return;
     }
 
-    const db = createBrowserClient();
-    db.auth.getUser().then(({ data: { user } }) => {
-      if (user) {
+    fetch('/api/me').then((res) => {
+      if (res.ok) {
         void acceptInvite(token);
       } else {
         setStatus('login-required');

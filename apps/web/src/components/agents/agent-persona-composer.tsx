@@ -11,7 +11,6 @@ import { OperatorInput, OperatorSelect, OperatorTextarea } from '@/components/ui
 import { SectionCard, SectionCardBody, SectionCardHeader } from '@/components/ui/section-card';
 import type { PersonaToolOption } from '@/services/persona-composer';
 import { estimatePromptTokens } from '@/services/persona-composer';
-import { createBrowserClient } from '@/lib/db/client';
 
 export interface PersonaComposerAgent {
   id: string;
@@ -144,13 +143,9 @@ export function AgentPersonaComposer({
     setCreatedPersona(null);
 
     try {
-      const db = createBrowserClient();
-      const { data: { session } } = await db.auth.getSession();
-      const headers: Record<string, string> = { 'Content-Type': 'application/json' };
-      if (session?.access_token) headers['Authorization'] = `Bearer ${session.access_token}`;
-      const response = await fetch('/api/v2/agent-personas', {
+      const response = await fetch('/api/v1/agent-personas', {
         method: 'POST',
-        headers,
+        headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           agent_id: selectedAgentId,
           name: name.trim(),
