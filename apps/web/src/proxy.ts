@@ -128,19 +128,19 @@ export async function proxy(request: NextRequest) {
     return response;
   }
 
-  let claims: { exp?: number } | null;
-  try {
-    claims = await verifyAccessToken(accessToken);
-  } catch {
-    const url = request.nextUrl.clone();
-    url.pathname = '/login';
-    return NextResponse.redirect(url);
-  }
+  const claims = await verifyAccessToken(accessToken);
 
   if (!claims) {
-    const url = request.nextUrl.clone();
-    url.pathname = '/login';
-    return NextResponse.redirect(url);
+    // access token invalid/expired — try refresh before redirecting
+    const tokens = await tryRefreshViaFastapi(request);
+    if (!tokens) {
+      const url = request.nextUrl.clone();
+      url.pathname = '/login';
+      return NextResponse.redirect(url);
+    }
+    const response = NextResponse.next({ request });
+    applyTokenCookies(response, tokens.accessToken, tokens.refreshToken);
+    return response;
   }
 
   // Proactive refresh if expiring within 5 minutes
