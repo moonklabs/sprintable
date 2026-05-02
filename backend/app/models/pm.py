@@ -1,5 +1,5 @@
 import uuid
-from datetime import date
+from datetime import date, datetime
 
 from sqlalchemy import BigInteger, Date, DateTime, ForeignKey, Integer, String, Text, func
 from sqlalchemy.dialects.postgresql import UUID
@@ -114,7 +114,7 @@ class StoryComment(Base, OrgScopedMixin):
     created_by: Mapped[uuid.UUID] = mapped_column(
         UUID(as_uuid=True), ForeignKey("team_members.id", ondelete="CASCADE"), nullable=False
     )
-    created_at: Mapped[uuid.UUID] = mapped_column(
+    created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now(), nullable=False
     )
 
@@ -135,7 +135,7 @@ class StoryActivity(Base, OrgScopedMixin):
     created_by: Mapped[uuid.UUID] = mapped_column(
         UUID(as_uuid=True), ForeignKey("team_members.id", ondelete="CASCADE"), nullable=False
     )
-    created_at: Mapped[uuid.UUID] = mapped_column(
+    created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now(), nullable=False
     )
 
