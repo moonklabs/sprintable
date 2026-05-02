@@ -4,7 +4,6 @@ import { useCallback, useEffect, useMemo, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import { useTranslations } from 'next-intl';
 import { Inbox as InboxIcon } from 'lucide-react';
-import { createBrowserClient } from '@/lib/db/client';
 import { Button } from '@/components/ui/button';
 import { TopBarSlot } from '@/components/nav/top-bar-slot';
 import { Badge } from '@/components/ui/badge';
@@ -82,49 +81,11 @@ export default function InboxPage() {
   useEffect(() => {
     if (!currentTeamMemberId) return;
 
-    const ossMode = process.env.NEXT_PUBLIC_OSS_MODE === 'true';
-
-    // OSS: fall back to polling the existing inbox API
-    if (ossMode) {
-      const interval = setInterval(() => {
-        void refreshNotifications();
-      }, 15000);
-      return () => clearInterval(interval);
-    }
-
-    // DB realtime path (cloud mode)
-    let db: ReturnType<typeof createBrowserClient>;
-    try {
-      db = createBrowserClient();
-    } catch {
-      const interval = setInterval(() => {
-        void refreshNotifications();
-      }, 15000);
-      return () => clearInterval(interval);
-    }
-
-    const channel = db
-      .channel('inbox-realtime')
-      .on('postgres_changes', {
-        event: 'INSERT',
-        schema: 'public',
-        table: 'notifications',
-        filter: `user_id=eq.${currentTeamMemberId}`,
-      }, (payload) => {
-        const newNotif = payload.new as Notification;
-        addToast({
-          title: `${NOTIFICATION_TYPE_ICONS[newNotif.type] ?? 'ℹ️'} ${newNotif.title}`,
-          body: newNotif.body?.slice(0, 60) ?? '',
-          type: 'info',
-        });
-        void refreshNotifications();
-      })
-      .subscribe();
-
-    return () => {
-      db.removeChannel(channel);
-    };
-  }, [currentTeamMemberId, addToast, refreshNotifications]);
+    const interval = setInterval(() => {
+      void refreshNotifications();
+    }, 15000);
+    return () => clearInterval(interval);
+  }, [currentTeamMemberId, refreshNotifications]);
 
   const setNotificationReadState = async (id: string, currentIsRead: boolean, nextIsRead: boolean) => {
     if (currentIsRead === nextIsRead) return;
