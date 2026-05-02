@@ -15,7 +15,10 @@ export async function GET(request: Request) {
       const members = await repo.list({ org_id: OSS_ORG_ID, project_id: projectId, ...(type ? { type } : {}) });
       return apiSuccess(members);
     }
-    return proxyToFastapi(request, '/api/v2/team-members');
+    const res = await proxyToFastapi(request, '/api/v2/team-members');
+    if (!res.ok) return res;
+    const data: unknown = await res.json();
+    return apiSuccess(data);
   } catch (err: unknown) {
     return handleApiError(err);
   }
