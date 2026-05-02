@@ -50,6 +50,32 @@ export async function refreshAuthTokens(): Promise<AuthResult> {
   return callAuthRoute('/api/auth/refresh', {});
 }
 
+// ─── 401 인터셉터 fetch 래퍼 ─────────────────────────────────────────────────
+
+let _refreshing: Promise<AuthResult> | null = null;
+
+export async function fetchWithAuth(input: RequestInfo | URL, init?: RequestInit): Promise<Response> {
+  const res = await fetch(input, init);
+  if (res.status !== 401) return res;
+
+  // 중복 refresh 방지: 동시 호출 시 하나만 실행
+  if (!_refreshing) {
+    _refreshing = refreshAuthTokens().finally(() => { _refreshing = null; });
+  }
+  try {
+    await _refreshing;
+  } catch {
+    if (typeof window !== 'undefined') window.location.href = '/login';
+    return res;
+  }
+
+  const retried = await fetch(input, init);
+  if (retried.status === 401 && typeof window !== 'undefined') {
+    window.location.href = '/login';
+  }
+  return retried;
+}
+
 // ─── Rate-limited fetch helper ────────────────────────────────────────────────
 
 const rateLimitBlockedUntil = new Map<string, number>();
