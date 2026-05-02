@@ -15,8 +15,7 @@ export async function GET(request: Request) {
     if (!projectId) return ApiErrors.badRequest('project_id required');
 
     const repo = await createTeamMemberRepository();
-    const { OSS_ORG_ID } = await import('@sprintable/storage-sqlite');
-    const members = await repo.list({ org_id: OSS_ORG_ID, project_id: projectId });
+    const members = await repo.list({ org_id: me.org_id, project_id: projectId });
     const active = members.filter((m) => m.is_active);
     return apiSuccess(active);
   } catch (err: unknown) {
