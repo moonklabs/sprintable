@@ -115,9 +115,9 @@ async def get_memo(
         raise HTTPException(status_code=404, detail="Memo not found")
     reply_repo = MemoReplyRepository(db)
     replies = await reply_repo.list_by_memo(id)
-    response = MemoResponse.model_validate(memo)
-    response.replies = [ReplyResponse.model_validate(r) for r in replies]
-    response.reply_count = len(replies)
+    reply_items = [ReplyResponse.model_validate(r) for r in replies]
+    # update= 로 replies 오버라이드하여 ORM lazy-load 방지
+    response = MemoResponse.model_validate(memo, update={"replies": reply_items, "reply_count": len(reply_items)})
     return response
 
 
