@@ -16,6 +16,7 @@ class MeResponse(BaseModel):
     type: str
     role: str
     is_active: bool
+    project_name: str | None = None
 
 
 class UpdateMe(BaseModel):
