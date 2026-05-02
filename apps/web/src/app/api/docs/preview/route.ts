@@ -1,9 +1,8 @@
-import { DocsService } from '@/services/docs';
 import { getAuthContext } from '@/lib/auth-helpers';
 import { apiSuccess, ApiErrors } from '@/lib/api-response';
 import { handleApiError } from '@/lib/api-error';
-import { createDocRepository } from '@/lib/storage/factory';
-import { extractEmbedIds } from './extract-embed-ids';
+import { isOssMode, createDocRepository } from '@/lib/storage/factory';
+import { proxyToFastapi } from '@/lib/fastapi-proxy';
 
 /**
  * GET /api/docs/preview?q=<slug-or-uuid>
@@ -19,21 +18,29 @@ export async function GET(request: Request) {
     const q = searchParams.get('q')?.trim();
     if (!q) return ApiErrors.badRequest('q is required');
 
-    const dbClient = undefined;
-    const repo = await createDocRepository(dbClient);
-    const service = new DocsService(repo, dbClient);
-    const doc = await service.getDocPreview(me.project_id, q);
-    if (!doc) return ApiErrors.notFound('Document not found');
+    if (isOssMode()) {
+      const repo = await createDocRepository();
+      const isUuid = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(q);
+      try {
+        const doc = isUuid
+          ? await repo.getById(q)
+          : await (repo as unknown as { getBySlug: (p: string, s: string) => Promise<{ id: string; title: string; icon: string | null; slug: string; content: string }> }).getBySlug(me.project_id, q);
+        if (!doc) return ApiErrors.notFound('Document not found');
+        return apiSuccess({ id: doc.id, title: doc.title, icon: doc.icon ?? null, slug: doc.slug, embedChain: [] });
+      } catch {
+        return ApiErrors.notFound('Document not found');
+      }
+    }
 
-    // OSS: embed chain traversal 미지원 (raw DB 클라이언트 없음)
-    const embedChain: string[] = [];
-
+    const _r = await proxyToFastapi(request, '/api/v2/docs/preview');
+    if (!_r.ok) return _r;
+    const data = await _r.json() as { id: string; title: string; icon: string | null; slug: string; embed_chain?: string[] };
     return apiSuccess({
-      id: doc.id,
-      title: doc.title,
-      icon: doc.icon ?? null,
-      slug: doc.slug,
-      embedChain,
+      id: data.id,
+      title: data.title,
+      icon: data.icon ?? null,
+      slug: data.slug,
+      embedChain: data.embed_chain ?? [],
     });
   } catch (err: unknown) {
     return handleApiError(err);
