@@ -1,5 +1,6 @@
 import { updateEpicSchema } from '@sprintable/shared';
 
+import type { SupabaseClient } from '@/types/supabase';
 import { EpicService } from '@/services/epic';
 import { handleApiError } from '@/lib/api-error';
 import { apiSuccess, apiError, ApiErrors } from '@/lib/api-response';
@@ -55,12 +56,11 @@ export async function DELETE(request: Request, { params }: RouteParams) {
     if (!me) return ApiErrors.unauthorized();
     if (me.rateLimitExceeded) return ApiErrors.tooManyRequests(me.rateLimitRemaining, me.rateLimitResetAt);
 
-    if (!isOssMode() && me.type !== 'agent') {
-      const denied = await requireRole(undefined, me.org_id, ADMIN_ROLES, 'Epic deletion requires admin or owner role');
+    const dbClient: SupabaseClient | undefined = undefined;
+    if (!isOssMode() && dbClient && me.type !== 'agent') {
+      const denied = await requireRole(dbClient, me.org_id, ADMIN_ROLES, 'Epic deletion requires admin or owner role');
       if (denied) return denied;
     }
-
-    const dbClient = undefined;
     const repo = await createEpicRepository(dbClient);
     const service = new EpicService(repo);
     await service.delete(id, me.org_id);
