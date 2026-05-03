@@ -154,8 +154,8 @@
   --operator-danger: var(--destructive);
 
   /* Tiptap editor */
-  --tiptap-code-bg: oklch(0.96 0 0);
-  --tiptap-pre-bg: oklch(0.98 0 0);
+  --tiptap-code-bg: oklch(0.22 0 0);
+  --tiptap-pre-bg: oklch(0.14 0 0);
   --tiptap-blockquote-border: oklch(0.66 0.18 258);
   --tiptap-blockquote-bg: oklch(0.97 0 0);
   --tiptap-table-border: oklch(0.88 0 0);
@@ -297,9 +297,9 @@
 .tiptap-content .tiptap h1 { font-size: 24px; font-weight: 700; margin: 1em 0 0.5em; }
 .tiptap-content .tiptap h2 { font-size: 20px; font-weight: 600; margin: 0.8em 0 0.4em; }
 .tiptap-content .tiptap h3 { font-size: 16px; font-weight: 600; margin: 0.6em 0 0.3em; }
-.tiptap-content .tiptap code { background: var(--tiptap-code-bg); padding: 2px 6px; border-radius: 4px; font-size: 13px; font-family: var(--font-mono, monospace); }
-.tiptap-content .tiptap pre { background: var(--tiptap-pre-bg); padding: 16px; border-radius: 8px; overflow-x: auto; font-size: 13px; line-height: 1.6; }
-.tiptap-content .tiptap pre code { background: none; padding: 0; border-radius: 0; font-size: inherit; }
+.tiptap-content .tiptap code { background: var(--tiptap-code-bg); color: oklch(0.9 0 0); padding: 2px 6px; border-radius: 4px; font-size: 13px; font-family: var(--font-mono, monospace); }
+.tiptap-content .tiptap pre { background: var(--tiptap-pre-bg); color: oklch(0.9 0 0); padding: 16px; border-radius: 8px; overflow-x: auto; font-size: 13px; line-height: 1.6; }
+.tiptap-content .tiptap pre code { background: none; color: inherit; padding: 0; border-radius: 0; font-size: inherit; }
 .tiptap-content .tiptap blockquote { border-left: 3px solid var(--tiptap-blockquote-border); padding: 12px 16px; margin: 12px 0; border-radius: 0 6px 6px 0; background: var(--tiptap-blockquote-bg); }
 .tiptap-content .tiptap ul,
 .tiptap-content .tiptap ol { padding-left: 20px; }
