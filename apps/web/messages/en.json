@@ -152,6 +152,7 @@
   "memos": {
     "title": "Memos",
     "loading": "Loading...",
+    "loadError": "Failed to load memo.",
     "newMemo": "+ New Memo",
     "surfaceDescription": "The operating inbox for project issues, decisions, and requests.",
     "statsOpen": "Open memos",

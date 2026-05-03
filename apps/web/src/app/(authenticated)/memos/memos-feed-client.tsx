@@ -177,10 +177,9 @@ export function MemosFeedClient({ currentTeamMemberId, projectId }: MemosFeedCli
     }
   }, [markMemoRead]);
 
-  const handleSelectMemo = useCallback(async (memoId: string) => {
-    await fetchMemoDetail(memoId);
-    setMobileView('detail');
-  }, [fetchMemoDetail]);
+  const handleSelectMemo = useCallback((memoId: string) => {
+    router.push(`/memos/${memoId}`);
+  }, [router]);
 
   const handleNewMemo = useCallback(() => {
     setShowCreate(true);

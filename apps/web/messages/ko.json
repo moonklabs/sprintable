@@ -152,6 +152,7 @@
   "memos": {
     "title": "메모",
     "loading": "로딩 중...",
+    "loadError": "메모를 불러오지 못했습니다.",
     "newMemo": "+ 새 메모",
     "surfaceDescription": "프로젝트 이슈, 의사결정, 요청을 한 곳에서 다루는 운영 인박스입니다.",
     "statsOpen": "열린 메모",
