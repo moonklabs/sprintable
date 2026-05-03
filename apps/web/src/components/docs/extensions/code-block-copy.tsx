@@ -22,13 +22,13 @@ function CodeBlockView({ node }: ReactNodeViewProps) {
 
   return (
     <NodeViewWrapper className="my-4 not-prose">
-      <div className="rounded-2xl border border-white/10 bg-[#0b1120]">
+      <div className="rounded-2xl border border-slate-700 bg-[#0b1120]">
         <div className="flex justify-end px-3 pt-2">
           <button
             type="button"
             contentEditable={false}
             onClick={handleCopy}
-            className="rounded-full border border-white/12 bg-white/8 px-3 py-1.5 text-[11px] font-medium uppercase tracking-[0.18em] text-muted-foreground transition hover:border-primary/35 hover:text-foreground"
+            className="rounded-full border border-slate-600 bg-slate-700/50 px-3 py-1.5 text-[11px] font-medium uppercase tracking-[0.18em] text-slate-300 transition hover:border-slate-400 hover:text-slate-100"
           >
             {copied ? '복사됨' : '복사'}
           </button>
