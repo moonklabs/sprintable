@@ -5,6 +5,7 @@ import { handleApiError } from '@/lib/api-error';
 import { apiSuccess, apiError, ApiErrors } from '@/lib/api-response';
 import { getAuthContext } from '@/lib/auth-helpers';
 import { buildCursorPageMeta, parseCursorPageInput } from '@/lib/pagination';
+import type { SupabaseClient } from '@/types/supabase';
 import { createEpicRepository } from '@/lib/storage/factory';
 import { isOssMode } from '@/lib/storage/factory';
 import { getEpicActorRole, hasEpicRole } from '@/lib/epic-permissions';
@@ -38,10 +39,10 @@ export async function POST(request: Request) {
     const me = await getAuthContext(request);
     if (!me) return ApiErrors.unauthorized();
     if (me.rateLimitExceeded) return ApiErrors.tooManyRequests(me.rateLimitRemaining, me.rateLimitResetAt);
-    const dbClient = undefined;
+    const dbClient: SupabaseClient | undefined = undefined;
 
     // 권한 체크: agent 또는 admin/owner만 에픽 생성 가능
-    if (!isOssMode() && me.type !== 'agent') {
+    if (!isOssMode() && dbClient && me.type !== 'agent') {
       const role = await getEpicActorRole(dbClient, me.id);
       if (!role || !hasEpicRole(role, 'admin')) {
         return apiError('FORBIDDEN', 'Epic creation requires admin or owner role', 403);
