@@ -95,18 +95,18 @@ export function DocContentRenderer({
     '[&_p]:leading-7 [&_p]:text-[color:var(--operator-foreground)]/92',
     '[&_a]:text-[color:var(--operator-primary-soft)] [&_a]:underline [&_a]:underline-offset-4',
     '[&_blockquote]:rounded-2xl [&_blockquote]:border-l-4 [&_blockquote]:border-[color:var(--operator-primary)]/45 [&_blockquote]:bg-[color:var(--operator-primary)]/8 [&_blockquote]:px-4 [&_blockquote]:py-3 [&_blockquote]:text-[color:var(--operator-foreground)]/88',
-    '[&_img]:max-h-[32rem] [&_img]:w-full [&_img]:rounded-2xl [&_img]:border [&_img]:border-white/10 [&_img]:object-contain',
-    '[&_table]:w-full [&_table]:border-collapse [&_table]:overflow-hidden [&_table]:rounded-2xl [&_table]:border [&_table]:border-white/10 [&_table]:bg-black/10',
-    '[&_thead]:bg-white/6 [&_th]:border [&_th]:border-white/10 [&_th]:px-3 [&_th]:py-2 [&_th]:text-left [&_th]:font-semibold',
-    '[&_td]:border [&_td]:border-white/10 [&_td]:px-3 [&_td]:py-2',
-    '[&_hr]:my-8 [&_hr]:border-white/10',
+    '[&_img]:max-h-[32rem] [&_img]:w-full [&_img]:rounded-2xl [&_img]:border [&_img]:border-border [&_img]:object-contain',
+    '[&_table]:w-full [&_table]:border-collapse [&_table]:overflow-hidden [&_table]:rounded-2xl [&_table]:border [&_table]:border-border [&_table]:bg-muted/20',
+    '[&_thead]:bg-muted/50 [&_th]:border [&_th]:border-border [&_th]:px-3 [&_th]:py-2 [&_th]:text-left [&_th]:font-semibold',
+    '[&_td]:border [&_td]:border-border [&_td]:px-3 [&_td]:py-2',
+    '[&_hr]:my-8 [&_hr]:border-border',
     '[&_ul]:space-y-2 [&_ol]:space-y-2',
-    '[&_pre]:overflow-x-auto [&_pre]:rounded-2xl [&_pre]:border [&_pre]:border-white/10 [&_pre]:bg-gray-50 [&_pre]:text-gray-900 [&_pre]:dark:bg-[#0b1120] [&_pre]:dark:text-gray-100 [&_pre]:p-4 [&_pre]:text-[13px] [&_pre]:leading-6',
+    '[&_pre]:overflow-x-auto [&_pre]:rounded-2xl [&_pre]:border [&_pre]:border-border [&_pre]:bg-gray-50 [&_pre]:text-gray-900 [&_pre]:dark:bg-[#0b1120] [&_pre]:dark:text-gray-100 [&_pre]:p-4 [&_pre]:text-[13px] [&_pre]:leading-6',
     '[&_code]:rounded-md [&_code]:bg-gray-100 [&_code]:text-gray-800 [&_code]:dark:bg-white/10 [&_code]:dark:text-gray-200 [&_code]:px-1.5 [&_code]:py-0.5 [&_code]:text-[0.95em]',
     '[&_pre_code]:bg-transparent [&_pre_code]:p-0',
     '[&_[data-doc-code-shell="true"]]:not-prose [&_[data-doc-code-shell="true"]]:my-6',
     '[&_[data-doc-code-actions="true"]]:mb-2 [&_[data-doc-code-actions="true"]]:flex [&_[data-doc-code-actions="true"]]:justify-end',
-    '[&_[data-doc-copy-button="true"]]:rounded-full [&_[data-doc-copy-button="true"]]:border [&_[data-doc-copy-button="true"]]:border-white/12 [&_[data-doc-copy-button="true"]]:bg-white/8 [&_[data-doc-copy-button="true"]]:px-3 [&_[data-doc-copy-button="true"]]:py-1.5 [&_[data-doc-copy-button="true"]]:text-[11px] [&_[data-doc-copy-button="true"]]:font-medium [&_[data-doc-copy-button="true"]]:uppercase [&_[data-doc-copy-button="true"]]:tracking-[0.18em] [&_[data-doc-copy-button="true"]]:text-[color:var(--operator-muted)]',
+    '[&_[data-doc-copy-button="true"]]:rounded-full [&_[data-doc-copy-button="true"]]:border [&_[data-doc-copy-button="true"]]:border-border [&_[data-doc-copy-button="true"]]:bg-muted/50 [&_[data-doc-copy-button="true"]]:px-3 [&_[data-doc-copy-button="true"]]:py-1.5 [&_[data-doc-copy-button="true"]]:text-[11px] [&_[data-doc-copy-button="true"]]:font-medium [&_[data-doc-copy-button="true"]]:uppercase [&_[data-doc-copy-button="true"]]:tracking-[0.18em] [&_[data-doc-copy-button="true"]]:text-[color:var(--operator-muted)]',
     className,
   );
 
@@ -143,7 +143,7 @@ export function DocContentRenderer({
           blockquote: ({ children }) => <blockquote>{children}</blockquote>,
           img: ({ src, alt }) => <img src={src ?? ''} alt={alt ?? ''} loading="lazy" />, 
           table: ({ children }) => (
-            <div className="not-prose overflow-x-auto rounded-2xl border border-white/10">
+            <div className="not-prose overflow-x-auto rounded-2xl border border-border">
               <table>{children}</table>
             </div>
           ),
@@ -196,7 +196,7 @@ function decorateHtmlContent(content: string, headings: ReturnType<typeof extrac
   });
 
   const withTableShells = withHeadingIds.replace(/<table\b[\s\S]*?<\/table>/gi, (tableMarkup) => {
-    return `<div class="not-prose overflow-x-auto rounded-2xl border border-white/10">${tableMarkup}</div>`;
+    return `<div class="not-prose overflow-x-auto rounded-2xl border border-border">${tableMarkup}</div>`;
   });
 
   return withTableShells.replace(/<pre>([\s\S]*?)<\/pre>/gi, (_match, inner) => {

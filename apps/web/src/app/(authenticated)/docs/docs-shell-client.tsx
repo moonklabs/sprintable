@@ -418,7 +418,7 @@ export function DocsShellClient({ projectId }: DocsShellClientProps) {
         const allTags = [...new Set(tree.flatMap((d) => (d as unknown as { tags?: string[] | null }).tags ?? []))];
         if (allTags.length === 0) return null;
         return (
-          <div className="border-b border-white/10">
+          <div className="border-b border-border">
             {/* AC1: 토글 헤더 + AC3: 활성 태그 뱃지 */}
             <button
               type="button"
@@ -511,7 +511,7 @@ export function DocsShellClient({ projectId }: DocsShellClientProps) {
 
   const editorContent = showCreate ? (
           <div className="flex h-full flex-col">
-            <div className="flex-shrink-0 border-b border-white/10 px-4 py-3 lg:px-6 lg:py-5">
+            <div className="flex-shrink-0 border-b border-border px-4 py-3 lg:px-6 lg:py-5">
               <div className="flex items-center justify-between">
                 <div className="space-y-1">
                   <p className="text-[11px] font-semibold uppercase tracking-[0.2em] text-muted-foreground">Draft</p>
@@ -549,7 +549,7 @@ export function DocsShellClient({ projectId }: DocsShellClientProps) {
                     value={newContent}
                     onChange={(e) => setNewContent(e.target.value)}
                     placeholder={t('editorPlaceholder')}
-                    className="w-full min-h-[220px] rounded-xl border border-white/10 bg-[color:var(--operator-surface-soft)] px-4 py-3 text-sm resize-none"
+                    className="w-full min-h-[220px] rounded-xl border border-border bg-muted/30 px-4 py-3 text-sm text-foreground resize-none placeholder:text-muted-foreground"
                   />
                 </div>
                 <div className="flex gap-2">
@@ -569,7 +569,7 @@ export function DocsShellClient({ projectId }: DocsShellClientProps) {
         ) : selectedDoc ? (
           <div className="flex h-full flex-col overflow-hidden">
             {/* Header */}
-            <div className="flex-shrink-0 border-b border-white/10 px-4 py-3 lg:px-6 lg:py-5">
+            <div className="flex-shrink-0 border-b border-border px-4 py-3 lg:px-6 lg:py-5">
               <div className="flex items-center justify-between gap-4">
                 <div className="flex-1 min-w-0">
                   <Input
