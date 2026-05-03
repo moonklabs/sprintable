@@ -13,6 +13,7 @@ from app.schemas.standup import (
     FeedbackCreate,
     FeedbackResponse,
     StandupEntryResponse,
+    StandupSaveBody,
     StandupUpsert,
 )
 
@@ -64,6 +65,37 @@ async def upsert_standup(
     entry = await repo.upsert(
         project_id=body.project_id,
         author_id=body.author_id,
+        date=body.date,
+        sprint_id=body.sprint_id,
+        done=body.done,
+        plan=body.plan,
+        blockers=body.blockers,
+        plan_story_ids=body.plan_story_ids,
+    )
+    return StandupEntryResponse.model_validate(entry)
+
+
+@router.put("", response_model=StandupEntryResponse)
+async def save_standup(
+    body: StandupSaveBody,
+    session: AsyncSession = Depends(get_db),
+    auth: AuthContext = Depends(get_current_user),
+    x_org_id: str | None = Header(default=None, alias="X-Org-Id"),
+) -> StandupEntryResponse:
+    org_id_str = auth.claims.get("app_metadata", {}).get("org_id") or x_org_id
+    if not org_id_str:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="org_id required")
+    project_id_str = auth.claims.get("app_metadata", {}).get("project_id")
+    if not project_id_str:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="project_id required in JWT app_metadata")
+    org_id = uuid.UUID(str(org_id_str))
+    project_id = uuid.UUID(str(project_id_str))
+    author_id = uuid.UUID(str(auth.user_id))
+
+    repo = StandupEntryRepository(session, org_id)
+    entry = await repo.upsert(
+        project_id=project_id,
+        author_id=author_id,
         date=body.date,
         sprint_id=body.sprint_id,
         done=body.done,
