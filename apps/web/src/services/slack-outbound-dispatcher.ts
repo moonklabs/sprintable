@@ -139,6 +139,7 @@ export class SlackOutboundDispatcher {
 
   start() {
     if (this.channel) return;
+    if (!this.options.db) return;
 
     this.channel = this.options.db
       .channel(`slack-outbound-dispatcher-${Date.now()}`)

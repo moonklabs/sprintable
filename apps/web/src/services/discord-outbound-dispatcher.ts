@@ -208,6 +208,7 @@ export class DiscordOutboundDispatcher {
   }
 
   start() {
+    if (!this.options.db) return;
     if (!this.channel) {
       this.channel = this.options.db
         .channel(`discord-outbound-dispatcher-${Date.now()}`)

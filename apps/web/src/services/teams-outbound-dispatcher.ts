@@ -208,6 +208,7 @@ export class TeamsOutboundDispatcher {
   }
 
   start() {
+    if (!this.options.db) return;
     if (!this.channel) {
       this.channel = this.options.db
         .channel(`teams-outbound-dispatcher-${Date.now()}`)

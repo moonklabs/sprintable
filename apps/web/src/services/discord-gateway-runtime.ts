@@ -38,6 +38,7 @@ export class DiscordGatewayRuntime {
   }
 
   start() {
+    if (!this.options.db) return;
     void this.refresh();
     if (!this.refreshTimer) {
       this.refreshTimer = setInterval(() => {

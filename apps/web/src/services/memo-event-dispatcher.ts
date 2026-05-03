@@ -213,6 +213,7 @@ export class MemoEventDispatcher {
   }
 
   start() {
+    if (!this.options.db) return;
     this.stopped = false;
     this.subscribe();
     void this.pollOnce();
