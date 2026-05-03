@@ -14,6 +14,7 @@ import type { MemoDetailState } from '@/components/memos/memo-state';
 interface Member {
   id: string;
   name: string;
+  type: string;
 }
 
 export default function MemoDetailPage() {
@@ -27,7 +28,7 @@ export default function MemoDetailPage() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(false);
 
-  const memberMap = Object.fromEntries(members.map((m) => [m.id, m.name]));
+  const memberMap = Object.fromEntries(members.map((m) => [m.id, { name: m.name, type: m.type }]));
 
   const fetchMemo = useCallback(async () => {
     try {

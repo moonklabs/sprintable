@@ -6,18 +6,24 @@ import { useTranslations } from 'next-intl';
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
 import rehypeSanitize from 'rehype-sanitize';
+import { Bot, User } from 'lucide-react';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { StatusBadge } from '@/components/ui/status-badge';
 import { Textarea } from '@/components/ui/textarea';
 import type { MemoDetailState } from './memo-state';
 
+interface MemberInfo {
+  name: string;
+  type: string;
+}
+
 interface MemoThreadProps {
   memo: MemoDetailState;
   currentUserId: string;
   onReply: (content: string) => Promise<void>;
   onResolve: () => Promise<void>;
-  memberMap?: Record<string, string>;
+  memberMap?: Record<string, MemberInfo>;
 }
 
 /**
@@ -48,8 +54,8 @@ export function MemoThread({ memo, currentUserId, onReply, onResolve, memberMap 
     ? allReplies
     : allReplies.slice(allReplies.length - REPLY_COLLAPSE_THRESHOLD);
 
-  const senderName = memo.created_by ? (memberMap[memo.created_by] ?? tc('unknown')) : tc('deletedUser');
-  const assigneeName = memo.assigned_to ? (memberMap[memo.assigned_to] ?? tc('unknown')) : null;
+  const senderName = memo.created_by ? (memberMap[memo.created_by]?.name ?? tc('unknown')) : tc('deletedUser');
+  const assigneeName = memo.assigned_to ? (memberMap[memo.assigned_to]?.name ?? tc('unknown')) : null;
   const memoTypeLabel = memo.memo_type
     ? (() => {
         const key = `type${memo.memo_type.charAt(0).toUpperCase()}${memo.memo_type.slice(1)}`;
@@ -107,9 +113,12 @@ export function MemoThread({ memo, currentUserId, onReply, onResolve, memberMap 
             </div>
             {/* Slack-style: sender → assignee + date */}
             <div className="flex flex-wrap items-center gap-1.5 text-[11px]">
-              <span className="font-semibold text-[color:var(--operator-foreground)]">{senderName}</span>
-              {assigneeName ? (
-                <span className="text-[color:var(--operator-muted)]">→ {assigneeName}</span>
+              <MemberLabel memberId={memo.created_by ?? null} name={senderName} memberMap={memberMap} bold />
+              {assigneeName && memo.assigned_to ? (
+                <>
+                  <span className="text-[color:var(--operator-muted)]">→</span>
+                  <MemberLabel memberId={memo.assigned_to} name={assigneeName} memberMap={memberMap} />
+                </>
               ) : null}
               <span className="text-[color:var(--operator-muted)]">{new Date(memo.created_at).toLocaleString()}</span>
             </div>
@@ -196,7 +205,7 @@ interface ThreadMessageProps {
   timestamp: string;
   isCurrentUser: boolean;
   reviewType?: string;
-  memberMap: Record<string, string>;
+  memberMap: Record<string, MemberInfo>;
 }
 
 function MarkdownContent({ content, isCurrentUser }: { content: string; isCurrentUser: boolean }) {
@@ -231,27 +240,95 @@ function MarkdownContent({ content, isCurrentUser }: { content: string; isCurren
   );
 }
 
-function ThreadMessage({ content, authorId, timestamp, isCurrentUser, reviewType, memberMap }: ThreadMessageProps) {
-  const authorName = authorId ? (memberMap[authorId] ?? authorId) : '—';
-
+function MemberLabel({ memberId, name, memberMap, bold }: { memberId: string | null; name: string; memberMap: Record<string, MemberInfo>; bold?: boolean }) {
+  const isAgent = memberId ? memberMap[memberId]?.type === 'agent' : false;
   return (
-    <div className={`flex ${isCurrentUser ? 'justify-end' : 'justify-start'}`}>
-      <div
-        className={`
-          max-w-[86%] rounded-xl px-4 py-2.5 shadow-sm lg:max-w-[64%]
-          ${isCurrentUser ? 'bg-primary text-primary-foreground' : 'border border-white/8 bg-background text-[color:var(--operator-foreground)]'}
-          ${reviewType === 'approve' ? 'border-2 border-green-500' : ''}
-          ${reviewType === 'request_changes' ? 'border-2 border-red-500' : ''}
-        `}
-      >
-        {!isCurrentUser && (
-          <div className="mb-1 text-[11px] font-semibold text-[color:var(--operator-foreground)]">
-            {authorName}
+    <span className={`flex items-center gap-0.5 ${bold ? 'font-semibold text-[color:var(--operator-foreground)]' : 'text-[color:var(--operator-muted)]'}`}>
+      {isAgent
+        ? <Bot className="h-3 w-3 shrink-0 text-cyan-500" />
+        : <User className="h-3 w-3 shrink-0 text-[color:var(--operator-muted)]" />
+      }
+      {name}
+    </span>
+  );
+}
+
+function getInitials(name: string): string {
+  return name.slice(0, 2).toUpperCase();
+}
+
+function ThreadMessage({ content, authorId, timestamp, isCurrentUser, reviewType, memberMap }: ThreadMessageProps) {
+  const member = authorId ? memberMap[authorId] : null;
+  const authorName = member?.name ?? authorId ?? '—';
+  const isAgent = member?.type === 'agent';
+
+  if (isCurrentUser) {
+    return (
+      <div className="flex justify-end">
+        <div
+          className={`max-w-[86%] rounded-xl bg-primary px-4 py-2.5 text-primary-foreground shadow-sm lg:max-w-[64%]
+            ${reviewType === 'approve' ? 'ring-2 ring-green-500' : ''}
+            ${reviewType === 'request_changes' ? 'ring-2 ring-red-500' : ''}
+          `}
+        >
+          <MarkdownContent content={content} isCurrentUser={true} />
+          <div className="mt-1.5 text-right text-[11px] text-primary-foreground/70">
+            {new Date(timestamp).toLocaleTimeString()}
           </div>
-        )}
-        <MarkdownContent content={content} isCurrentUser={isCurrentUser} />
-        <div className={`mt-1.5 text-[11px] ${isCurrentUser ? 'text-primary-foreground/70' : 'text-[color:var(--operator-muted)]'}`}>
-          {new Date(timestamp).toLocaleTimeString()}
+        </div>
+      </div>
+    );
+  }
+
+  if (isAgent) {
+    return (
+      <div className="flex items-start gap-2.5">
+        <div className="flex h-7 w-7 shrink-0 items-center justify-center rounded-full border border-cyan-500/30 bg-cyan-500/10 text-[10px] font-medium text-cyan-600 dark:text-cyan-400">
+          {getInitials(authorName)}
+        </div>
+        <div className="max-w-[86%] lg:max-w-[64%]">
+          <div className="mb-1 flex items-center gap-1.5">
+            <span className="text-[11px] font-semibold text-cyan-600 dark:text-cyan-400">{authorName}</span>
+            <span className="relative flex h-1.5 w-1.5">
+              <span className="absolute inline-flex h-full w-full animate-ping rounded-full bg-cyan-400 opacity-75" />
+              <span className="relative inline-flex h-1.5 w-1.5 rounded-full bg-cyan-500" />
+            </span>
+            <span className="font-mono text-[10px] text-cyan-600/70 dark:text-cyan-400/70">Agent</span>
+          </div>
+          <div
+            className={`rounded-xl border border-cyan-500/20 bg-[linear-gradient(135deg,rgba(6,182,212,0.08),rgba(168,85,247,0.04))] px-4 py-2.5 shadow-sm
+              ${reviewType === 'approve' ? 'ring-2 ring-green-500' : ''}
+              ${reviewType === 'request_changes' ? 'ring-2 ring-red-500' : ''}
+            `}
+          >
+            <MarkdownContent content={content} isCurrentUser={false} />
+            <div className="mt-1.5 text-[11px] text-[color:var(--operator-muted)]">
+              {new Date(timestamp).toLocaleTimeString()}
+            </div>
+          </div>
+        </div>
+      </div>
+    );
+  }
+
+  // Other human
+  return (
+    <div className="flex items-start gap-2.5">
+      <div className="flex h-7 w-7 shrink-0 items-center justify-center rounded-full border border-border bg-muted text-[10px] font-medium text-muted-foreground">
+        {getInitials(authorName)}
+      </div>
+      <div className="max-w-[86%] lg:max-w-[64%]">
+        <div className="mb-1 text-[11px] font-semibold text-[color:var(--operator-foreground)]">{authorName}</div>
+        <div
+          className={`rounded-xl border border-white/8 bg-background px-4 py-2.5 text-[color:var(--operator-foreground)] shadow-sm
+            ${reviewType === 'approve' ? 'ring-2 ring-green-500' : ''}
+            ${reviewType === 'request_changes' ? 'ring-2 ring-red-500' : ''}
+          `}
+        >
+          <MarkdownContent content={content} isCurrentUser={false} />
+          <div className="mt-1.5 text-[11px] text-[color:var(--operator-muted)]">
+            {new Date(timestamp).toLocaleTimeString()}
+          </div>
         </div>
       </div>
     </div>
