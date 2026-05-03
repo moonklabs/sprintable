@@ -1,8 +1,11 @@
 'use client';
 
 import type React from 'react';
-import { useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { useTranslations } from 'next-intl';
+import ReactMarkdown from 'react-markdown';
+import remarkGfm from 'remark-gfm';
+import rehypeSanitize from 'rehype-sanitize';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { StatusBadge } from '@/components/ui/status-badge';
@@ -28,7 +31,16 @@ export function MemoThread({ memo, currentUserId, onReply, onResolve, memberMap 
   const tc = useTranslations('common');
   const [replyContent, setReplyContent] = useState('');
   const [isSubmitting, setIsSubmitting] = useState(false);
+  const [isResolving, setIsResolving] = useState(false);
   const [repliesExpanded, setRepliesExpanded] = useState(false);
+  const scrollRef = useRef<HTMLDivElement>(null);
+  const allRepliesCount = (memo.replies ?? []).length;
+
+  useEffect(() => {
+    if (scrollRef.current) {
+      scrollRef.current.scrollTop = scrollRef.current.scrollHeight;
+    }
+  }, [allRepliesCount]);
 
   const allReplies = memo.replies ?? [];
   const hiddenCount = Math.max(0, allReplies.length - REPLY_COLLAPSE_THRESHOLD);
@@ -44,6 +56,18 @@ export function MemoThread({ memo, currentUserId, onReply, onResolve, memberMap 
         return t.has(key) ? t(key as 'typeMemo') : memo.memo_type;
       })()
     : t('typeMemo');
+
+  const handleResolve = async () => {
+    if (isResolving) return;
+    setIsResolving(true);
+    try {
+      await onResolve();
+    } catch (error) {
+      console.error('Failed to resolve memo:', error);
+    } finally {
+      setIsResolving(false);
+    }
+  };
 
   const handleSubmitReply = async () => {
     if (!replyContent.trim() || isSubmitting) return;
@@ -91,15 +115,15 @@ export function MemoThread({ memo, currentUserId, onReply, onResolve, memberMap 
             </div>
           </div>
           {memo.status === 'open' && (
-            <Button variant="outline" size="sm" onClick={onResolve}>
-              {t('resolve')}
+            <Button variant="outline" size="sm" onClick={() => void handleResolve()} disabled={isResolving}>
+              {isResolving ? t('resolving') : t('resolve')}
             </Button>
           )}
         </div>
       </div>
 
       {/* Thread messages */}
-      <div className="flex-1 overflow-y-auto bg-[color:var(--operator-surface-soft)]/20 px-4 py-3 lg:px-5">
+      <div ref={scrollRef} className="flex-1 overflow-y-auto bg-[color:var(--operator-surface-soft)]/20 px-4 py-3 lg:px-5">
         <div className="mx-auto w-full max-w-4xl space-y-3">
           {/* Original message */}
           <ThreadMessage
@@ -175,18 +199,36 @@ interface ThreadMessageProps {
   memberMap: Record<string, string>;
 }
 
-function renderWithMentions(text: string, isCurrentUser: boolean): React.ReactNode {
-  const parts = text.split(/(@[\w가-힣]+)/g);
-  return parts.map((part, i) => {
-    if (/^@[\w가-힣]+$/.test(part)) {
-      return (
-        <span key={`${part}-${i}`} className={`font-semibold ${isCurrentUser ? 'text-primary-foreground/90' : 'text-[color:var(--operator-primary)]'}`}>
-          {part}
-        </span>
-      );
-    }
-    return part;
-  });
+function MarkdownContent({ content, isCurrentUser }: { content: string; isCurrentUser: boolean }) {
+  const text = isCurrentUser ? 'text-primary-foreground' : 'text-[color:var(--operator-foreground)]';
+  const muted = isCurrentUser ? 'text-primary-foreground/70' : 'text-[color:var(--operator-muted)]';
+  const codeBg = isCurrentUser ? 'bg-primary-foreground/10 text-primary-foreground' : 'bg-muted text-[color:var(--operator-foreground)]';
+  const border = isCurrentUser ? 'border-primary-foreground/30' : 'border-border';
+
+  return (
+    <ReactMarkdown
+      remarkPlugins={[remarkGfm]}
+      rehypePlugins={[rehypeSanitize]}
+      components={{
+        p: ({ children }) => <p className={`mb-2 break-words text-[14px] leading-6 last:mb-0 ${text}`}>{children}</p>,
+        h1: ({ children }) => <h1 className={`mb-2 text-lg font-bold ${text}`}>{children}</h1>,
+        h2: ({ children }) => <h2 className={`mb-2 text-base font-bold ${text}`}>{children}</h2>,
+        h3: ({ children }) => <h3 className={`mb-1.5 text-sm font-bold ${text}`}>{children}</h3>,
+        ul: ({ children }) => <ul className={`mb-2 ml-4 list-disc space-y-0.5 ${text}`}>{children}</ul>,
+        ol: ({ children }) => <ol className={`mb-2 ml-4 list-decimal space-y-0.5 ${text}`}>{children}</ol>,
+        li: ({ children }) => <li className={`text-[14px] leading-6 ${text}`}>{children}</li>,
+        pre: ({ children }) => <pre className={`mb-2 overflow-x-auto rounded-lg p-3 text-[13px] ${codeBg}`}>{children}</pre>,
+        code: ({ children }) => <code className={`rounded px-1 py-0.5 font-mono text-[13px] ${codeBg}`}>{children}</code>,
+        blockquote: ({ children }) => <blockquote className={`mb-2 border-l-2 pl-3 ${border} ${muted}`}>{children}</blockquote>,
+        a: ({ href, children }) => <a href={href} target="_blank" rel="noopener noreferrer" className="underline underline-offset-2">{children}</a>,
+        strong: ({ children }) => <strong className={`font-semibold ${text}`}>{children}</strong>,
+        em: ({ children }) => <em className={`italic ${text}`}>{children}</em>,
+        hr: () => <hr className={`my-2 ${border}`} />,
+      }}
+    >
+      {content}
+    </ReactMarkdown>
+  );
 }
 
 function ThreadMessage({ content, authorId, timestamp, isCurrentUser, reviewType, memberMap }: ThreadMessageProps) {
@@ -202,15 +244,12 @@ function ThreadMessage({ content, authorId, timestamp, isCurrentUser, reviewType
           ${reviewType === 'request_changes' ? 'border-2 border-red-500' : ''}
         `}
       >
-        {/* Author name above message */}
         {!isCurrentUser && (
           <div className="mb-1 text-[11px] font-semibold text-[color:var(--operator-foreground)]">
             {authorName}
           </div>
         )}
-        <div className="whitespace-pre-wrap break-words text-[14px] leading-6">
-          {renderWithMentions(content, isCurrentUser)}
-        </div>
+        <MarkdownContent content={content} isCurrentUser={isCurrentUser} />
         <div className={`mt-1.5 text-[11px] ${isCurrentUser ? 'text-primary-foreground/70' : 'text-[color:var(--operator-muted)]'}`}>
           {new Date(timestamp).toLocaleTimeString()}
         </div>

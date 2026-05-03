@@ -12,6 +12,7 @@ import { ByomKeyManagement } from '@/components/settings/byom-key-management';
 import { McpConnectionSettings } from '@/components/settings/mcp-connection-settings';
 import { SlackIntegrationSettingsSection } from '@/components/settings/slack-integration-settings';
 import { ThemeSettings } from '@/components/settings/theme-settings';
+import { RefreshSettings } from '@/components/settings/refresh-settings';
 import { StandupDeadlineSection } from '@/components/settings/standup-deadline-section';
 import { TwoFactorSection } from '@/components/settings/two-factor-section';
 import { Badge } from '@/components/ui/badge';
@@ -579,6 +580,19 @@ export default function SettingsPage() {
                   <StandupDeadlineSection projectId={currentProjectId} />
                 </div>
               ) : null}
+              <div className="mt-6">
+                <SectionCard>
+                  <SectionCardHeader>
+                    <div className="space-y-1">
+                      <h2 className="text-base font-semibold text-foreground">{t('autoRefresh')}</h2>
+                      <p className="text-sm text-muted-foreground">{t('autoRefreshDescription')}</p>
+                    </div>
+                  </SectionCardHeader>
+                  <SectionCardBody>
+                    <RefreshSettings />
+                  </SectionCardBody>
+                </SectionCard>
+              </div>
             </TabsContent>
 
             <TabsContent value="ai">

@@ -3,6 +3,7 @@
 import { useTranslations } from 'next-intl';
 import { EmptyState } from '@/components/ui/empty-state';
 import { Button } from '@/components/ui/button';
+import { StatusBadge } from '@/components/ui/status-badge';
 import { cn } from '@/lib/utils';
 import type { MemoSummaryState } from './memo-state';
 
@@ -92,9 +93,12 @@ function MemoFeedItem({ memo, isSelected, onClick, memberMap }: MemoFeedItemProp
         )}>
           {senderName}
         </span>
-        <span className="shrink-0 text-[10px] text-[color:var(--operator-muted)]">
-          {new Date(memo.created_at).toLocaleDateString()}
-        </span>
+        <div className="flex shrink-0 items-center gap-1.5">
+          {memo.status !== 'open' && <StatusBadge status={memo.status} />}
+          <span className="text-[10px] text-[color:var(--operator-muted)]">
+            {new Date(memo.created_at).toLocaleDateString()}
+          </span>
+        </div>
       </div>
 
       {/* Title + content preview */}

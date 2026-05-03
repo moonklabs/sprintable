@@ -7,6 +7,7 @@ import { AppSidebar } from '@/components/nav/app-sidebar';
 import { TopBar } from '@/components/nav/top-bar';
 import { TopBarProvider } from '@/components/nav/top-bar-context';
 import { SidebarProvider, SidebarInset } from '@/components/ui/sidebar';
+import { RefreshProvider } from '@/contexts/refresh-context';
 
 export interface DashboardProjectOption {
   projectId: string;
@@ -44,6 +45,7 @@ export function DashboardShell({
 
   return (
     <DashboardCtx.Provider value={{ currentTeamMemberId, orgId, projectId, projectName, projectMemberships }}>
+      <RefreshProvider>
       <RealtimeProvider currentTeamMemberId={currentTeamMemberId}>
         <TopBarProvider>
           <SidebarProvider className="h-svh">
@@ -62,6 +64,7 @@ export function DashboardShell({
           </SidebarProvider>
         </TopBarProvider>
       </RealtimeProvider>
+      </RefreshProvider>
     </DashboardCtx.Provider>
   );
 }

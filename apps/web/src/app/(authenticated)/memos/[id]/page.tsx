@@ -1,8 +1,10 @@
 'use client';
 
 import { useCallback, useEffect, useState } from 'react';
+import { useAutoRefresh } from '@/hooks/use-auto-refresh';
 import { useParams, useRouter } from 'next/navigation';
-import { ChevronLeft } from 'lucide-react';
+import { ChevronLeft, Plus } from 'lucide-react';
+import { Button } from '@/components/ui/button';
 import { useTranslations } from 'next-intl';
 import { MemoThread } from '@/components/memos/memo-thread';
 import { TopBarSlot } from '@/components/nav/top-bar-slot';
@@ -57,6 +59,8 @@ export default function MemoDetailPage() {
     void Promise.all([fetchMemo(), fetchMembers()]);
   }, [fetchMemo, fetchMembers]);
 
+  useAutoRefresh('memo-detail', () => void fetchMemo());
+
   const handleReply = useCallback(async (content: string) => {
     if (!memo) return;
     const res = await fetch(`/api/memos/${memo.id}/replies`, {
@@ -72,7 +76,10 @@ export default function MemoDetailPage() {
   const handleResolve = useCallback(async () => {
     if (!memo) return;
     const res = await fetch(`/api/memos/${memo.id}/resolve`, { method: 'PATCH' });
-    if (!res.ok) throw new Error('Failed to resolve memo');
+    if (!res.ok) {
+      const body = await res.json().catch(() => ({}));
+      throw new Error(body?.error?.message ?? 'Failed to resolve memo');
+    }
     setMemo((prev) => prev ? { ...prev, status: 'resolved' } : null);
   }, [memo]);
 
@@ -80,14 +87,25 @@ export default function MemoDetailPage() {
     <>
       <TopBarSlot
         title={
-          <button
-            type="button"
-            onClick={() => router.push('/memos')}
-            className="flex items-center gap-1 text-sm text-muted-foreground hover:text-foreground"
-          >
-            <ChevronLeft className="h-4 w-4" />
-            {t('title')}
-          </button>
+          <div className="flex items-center gap-1">
+            <button
+              type="button"
+              onClick={() => router.push('/memos')}
+              className="flex items-center gap-1 text-sm text-muted-foreground hover:text-foreground lg:hidden"
+            >
+              <ChevronLeft className="h-4 w-4" />
+              {t('title')}
+            </button>
+            <span className="hidden text-sm font-medium lg:block">
+              {memo?.title ?? t('title')}
+            </span>
+          </div>
+        }
+        actions={
+          <Button size="sm" variant="outline" onClick={() => router.push('/memos/new')}>
+            <Plus className="mr-1.5 h-3.5 w-3.5" />
+            {t('newMemo')}
+          </Button>
         }
       />
       <div className="flex min-h-0 flex-1 flex-col bg-background">
