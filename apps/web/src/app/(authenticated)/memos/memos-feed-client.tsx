@@ -93,6 +93,11 @@ export function MemosFeedClient({ currentTeamMemberId, projectId }: MemosFeedCli
     [members],
   );
 
+  const memberInfoMap = useMemo(
+    () => Object.fromEntries(members.map((m) => [m.id, { name: m.name, type: m.type }])),
+    [members],
+  );
+
   const humanMembers = useMemo(() => members.filter((m) => m.type !== 'agent'), [members]);
   const agentMembers = useMemo(() => members.filter((m) => m.type === 'agent'), [members]);
 
@@ -398,7 +403,7 @@ export function MemosFeedClient({ currentTeamMemberId, projectId }: MemosFeedCli
       currentUserId={currentTeamMemberId}
       onReply={handleReply}
       onResolve={handleResolve}
-      memberMap={memberMap}
+      memberMap={memberInfoMap}
     />
   ) : (
     <div className="flex h-full items-center justify-center p-4">
