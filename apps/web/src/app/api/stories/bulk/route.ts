@@ -22,7 +22,21 @@ export async function PATCH(request: Request) {
       }
       const repo = await createStoryRepository();
       const service = new StoryService(repo, undefined as any, { isAdminContext: me.type === 'agent' });
+
+      // activity log를 위해 변경 전 상태 수집
+      const befores = await Promise.all(body.items.map((item) => service.getById(item.id).catch(() => null)));
+
       const results = await service.bulkUpdate(body.items);
+
+      // status 변경 activity log
+      for (let i = 0; i < body.items.length; i++) {
+        const item = body.items[i]!;
+        const before = befores[i];
+        if (item.status && before && item.status !== before.status) {
+          service.logActivity({ story_id: item.id, org_id: me.org_id, actor_id: me.id, action_type: 'status_changed', old_value: before.status as string, new_value: item.status }).catch(() => {});
+        }
+      }
+
       return apiSuccess(results);
     }
 

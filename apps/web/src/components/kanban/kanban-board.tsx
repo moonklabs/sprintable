@@ -136,7 +136,11 @@ export function KanbanBoard({ projectId }: KanbanBoardProps) {
   const epicMap: Record<string, string> = {};
   for (const e of epics) epicMap[e.id] = e.title;
   const memberMap: Record<string, KanbanMember> = {};
-  for (const m of members) memberMap[m.id] = m;
+  for (const m of members) {
+    memberMap[m.id] = m;
+    const userId = (m as unknown as { user_id?: string | null }).user_id;
+    if (userId) memberMap[userId] = m;
+  }
 
   const fetchData = useCallback(async () => {
     setLoading(true);
@@ -786,6 +790,8 @@ export function KanbanBoard({ projectId }: KanbanBoardProps) {
         <StoryDetailPanel
           story={selectedStory}
           tasks={storyTasks}
+          memberMap={memberMap}
+          members={members}
           nextTasksCursor={storyTasksNextCursor}
           loadingMoreTasks={loadingMoreStoryTasks}
           onLoadMoreTasks={async () => {
@@ -800,6 +806,10 @@ export function KanbanBoard({ projectId }: KanbanBoardProps) {
             setLoadingMoreStoryTasks(false);
           }}
           onClose={handleCloseStory}
+          onStoryUpdate={(updated) => {
+            setSelectedStory(updated);
+            setStories((prev) => prev.map((s) => s.id === updated.id ? { ...s, ...updated } : s));
+          }}
         />
       )}
     </div>

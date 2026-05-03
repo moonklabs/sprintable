@@ -147,7 +147,13 @@
     "filterAgents": "에이전트",
     "sprints": "스프린트",
     "epics": "에픽",
-    "assignees": "담당자"
+    "assignees": "담당자",
+    "assignee": "담당자",
+    "unassigned": "담당자 없음",
+    "save": "저장",
+    "cancel": "취소",
+    "edit": "편집",
+    "addDescription": "설명 추가"
   },
   "memos": {
     "title": "메모",

@@ -147,7 +147,13 @@
     "filterAgents": "Agents",
     "sprints": "Sprints",
     "epics": "Epics",
-    "assignees": "Assignees"
+    "assignees": "Assignees",
+    "assignee": "Assignee",
+    "unassigned": "Unassigned",
+    "save": "Save",
+    "cancel": "Cancel",
+    "edit": "Edit",
+    "addDescription": "Add description"
   },
   "memos": {
     "title": "Memos",
