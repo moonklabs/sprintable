@@ -13,7 +13,11 @@ export async function POST() {
   }
 
   try {
-    const { OSS_PROJECT_ID, OSS_ORG_ID } = await import('@sprintable/storage-pglite');
+    const { getOssUserContext } = await import('@/lib/auth-helpers');
+    const { me } = await getOssUserContext();
+    if (!me) return apiError('NOT_AVAILABLE', 'No project context', 503);
+    const { project_id: OSS_PROJECT_ID, org_id: OSS_ORG_ID } = me;
+
     const storyRepo = await createStoryRepository();
     const existing = await storyRepo.list({ project_id: OSS_PROJECT_ID, limit: 1 });
 

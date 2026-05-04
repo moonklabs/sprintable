@@ -1,7 +1,7 @@
 import { handleApiError } from '@/lib/api-error';
 import { apiSuccess, apiError, ApiErrors } from '@/lib/api-response';
 import { getAuthContext } from '@/lib/auth-helpers';
-import { isOssMode, createProjectRepository } from '@/lib/storage/factory';
+import { createProjectRepository } from '@/lib/storage/factory';
 import { z } from 'zod/v4';
 
 type RouteParams = { params: Promise<{ id: string }> };
@@ -69,13 +69,7 @@ export async function DELETE(request: Request, { params }: RouteParams) {
     if (!me) return ApiErrors.unauthorized();
     if (me.rateLimitExceeded) return ApiErrors.tooManyRequests(me.rateLimitRemaining, me.rateLimitResetAt);
 
-    let orgId: string;
-    if (isOssMode()) {
-      const { OSS_ORG_ID } = await import('@sprintable/storage-pglite');
-      orgId = OSS_ORG_ID;
-    } else {
-      orgId = me.org_id;
-    }
+    const orgId = me.org_id;
 
     const repo = await createProjectRepository();
     const existing = await repo.getById(id);
