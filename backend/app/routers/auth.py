@@ -103,7 +103,7 @@ async def _build_app_metadata(user: User, session: AsyncSession) -> dict:
         member.user_id = user.id
 
     if not member:
-        # 2. user_id 미연결 human team_member 중 첫 번째에 자동 연결
+        # 2. user_id NULL human team_member 중 첫 번째에 자동 연결
         result2 = await session.execute(
             select(TeamMember)
             .where(
