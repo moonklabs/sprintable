@@ -38,8 +38,8 @@ async function getSpAt(): Promise<string> {
 
 export async function createEpicRepository(db?: unknown): Promise<IEpicRepository> {
   if (isOssMode()) {
-    const { SqliteEpicRepository, getDb } = await import('@sprintable/storage-sqlite');
-    return new SqliteEpicRepository(getDb());
+    const { PgliteEpicRepository, getDb } = await import('@sprintable/storage-pglite');
+    return new PgliteEpicRepository(await getDb());
   }
   const { ApiEpicRepository } = await import('@sprintable/storage-api');
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -48,8 +48,8 @@ export async function createEpicRepository(db?: unknown): Promise<IEpicRepositor
 
 export async function createStoryRepository(db?: unknown): Promise<IStoryRepository> {
   if (isOssMode()) {
-    const { SqliteStoryRepository, getDb } = await import('@sprintable/storage-sqlite');
-    return new SqliteStoryRepository(getDb());
+    const { PgliteStoryRepository, getDb } = await import('@sprintable/storage-pglite');
+    return new PgliteStoryRepository(await getDb());
   }
   const { ApiStoryRepository } = await import('@sprintable/storage-api');
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -58,8 +58,8 @@ export async function createStoryRepository(db?: unknown): Promise<IStoryReposit
 
 export async function createTaskRepository(db?: unknown): Promise<ITaskRepository> {
   if (isOssMode()) {
-    const { SqliteTaskRepository, getDb } = await import('@sprintable/storage-sqlite');
-    return new SqliteTaskRepository(getDb());
+    const { PgliteTaskRepository, getDb } = await import('@sprintable/storage-pglite');
+    return new PgliteTaskRepository(await getDb());
   }
   const { ApiTaskRepository } = await import('@sprintable/storage-api');
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -68,8 +68,8 @@ export async function createTaskRepository(db?: unknown): Promise<ITaskRepositor
 
 export async function createMemoRepository(db?: unknown): Promise<IMemoRepository> {
   if (isOssMode()) {
-    const { SqliteMemoRepository, getDb } = await import('@sprintable/storage-sqlite');
-    return new SqliteMemoRepository(getDb());
+    const { PgliteMemoRepository, getDb } = await import('@sprintable/storage-pglite');
+    return new PgliteMemoRepository(await getDb());
   }
   const { ApiMemoRepository } = await import('@sprintable/storage-api');
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -78,8 +78,8 @@ export async function createMemoRepository(db?: unknown): Promise<IMemoRepositor
 
 export async function createDocRepository(db?: unknown): Promise<IDocRepository> {
   if (isOssMode()) {
-    const { SqliteDocRepository, getDb } = await import('@sprintable/storage-sqlite');
-    return new SqliteDocRepository(getDb());
+    const { PgliteDocRepository, getDb } = await import('@sprintable/storage-pglite');
+    return new PgliteDocRepository(await getDb());
   }
   const { ApiDocRepository } = await import('@sprintable/storage-api');
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -88,8 +88,8 @@ export async function createDocRepository(db?: unknown): Promise<IDocRepository>
 
 export async function createProjectRepository(db?: unknown): Promise<IProjectRepository> {
   if (isOssMode()) {
-    const { SqliteProjectRepository, getDb } = await import('@sprintable/storage-sqlite');
-    return new SqliteProjectRepository(getDb());
+    const { PgliteProjectRepository, getDb } = await import('@sprintable/storage-pglite');
+    return new PgliteProjectRepository(await getDb());
   }
   const { ApiProjectRepository } = await import('@sprintable/storage-api');
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -98,8 +98,8 @@ export async function createProjectRepository(db?: unknown): Promise<IProjectRep
 
 export async function createSprintRepository(db?: unknown): Promise<ISprintRepository> {
   if (isOssMode()) {
-    const { SqliteSprintRepository, getDb } = await import('@sprintable/storage-sqlite');
-    return new SqliteSprintRepository(getDb());
+    const { PgliteSprintRepository, getDb } = await import('@sprintable/storage-pglite');
+    return new PgliteSprintRepository(await getDb());
   }
   const { ApiSprintRepository } = await import('@sprintable/storage-api');
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -108,8 +108,8 @@ export async function createSprintRepository(db?: unknown): Promise<ISprintRepos
 
 export async function createNotificationRepository(db?: unknown): Promise<INotificationRepository> {
   if (isOssMode()) {
-    const { SqliteNotificationRepository, getDb } = await import('@sprintable/storage-sqlite');
-    return new SqliteNotificationRepository(getDb());
+    const { PgliteNotificationRepository, getDb } = await import('@sprintable/storage-pglite');
+    return new PgliteNotificationRepository(await getDb());
   }
   const { ApiNotificationRepository } = await import('@sprintable/storage-api');
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -118,8 +118,8 @@ export async function createNotificationRepository(db?: unknown): Promise<INotif
 
 export async function createTeamMemberRepository(db?: unknown): Promise<ITeamMemberRepository> {
   if (isOssMode()) {
-    const { SqliteTeamMemberRepository, getDb } = await import('@sprintable/storage-sqlite');
-    return new SqliteTeamMemberRepository(getDb());
+    const { PgliteTeamMemberRepository, getDb } = await import('@sprintable/storage-pglite');
+    return new PgliteTeamMemberRepository(await getDb());
   }
   const { ApiTeamMemberRepository } = await import('@sprintable/storage-api');
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -128,8 +128,8 @@ export async function createTeamMemberRepository(db?: unknown): Promise<ITeamMem
 
 export async function createInboxItemRepository(db?: unknown): Promise<IInboxItemRepository> {
   if (isOssMode()) {
-    const { SqliteInboxItemRepository, getDb } = await import('@sprintable/storage-sqlite');
-    return new SqliteInboxItemRepository(getDb());
+    const { PgliteInboxItemRepository, getDb } = await import('@sprintable/storage-pglite');
+    return new PgliteInboxItemRepository(await getDb());
   }
   const { ApiInboxItemRepository } = await import('@sprintable/storage-api');
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -176,16 +176,16 @@ export async function createAgentRunBillingRepository(db?: unknown): Promise<IAg
 
 export async function createAgentRunRepository(): Promise<IAgentRunRepository> {
   if (isOssMode()) {
-    const { SqliteAgentRunRepository, getDb } = await import('@sprintable/storage-sqlite');
-    return new SqliteAgentRunRepository(getDb());
+    const { PgliteAgentRunRepository, getDb } = await import('@sprintable/storage-pglite');
+    return new PgliteAgentRunRepository(await getDb());
   }
   throw new Error('AgentRunRepository is only available in OSS mode');
 }
 
 export async function createAgentApiKeyRepository(): Promise<IAgentApiKeyRepository> {
   if (isOssMode()) {
-    const { SqliteAgentApiKeyRepository, getDb } = await import('@sprintable/storage-sqlite');
-    return new SqliteAgentApiKeyRepository(getDb());
+    const { PgliteAgentApiKeyRepository, getDb } = await import('@sprintable/storage-pglite');
+    return new PgliteAgentApiKeyRepository(await getDb());
   }
   throw new Error('AgentApiKeyRepository is only available in OSS mode');
 }
