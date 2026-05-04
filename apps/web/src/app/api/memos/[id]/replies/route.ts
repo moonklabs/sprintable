@@ -52,6 +52,7 @@ export async function POST(request: Request, { params }: RouteParams) {
     const session = await getServerSession();
     const token = rawApiKey ?? session?.access_token ?? '';
 
+    const resolvedIds = body.assigned_to_ids ?? (body.assigned_to ? [body.assigned_to] : undefined);
     const reply = await fastapiCall<unknown>(
       'POST', `/api/v2/memos/${id}/replies`, token,
       {
@@ -59,6 +60,7 @@ export async function POST(request: Request, { params }: RouteParams) {
           content: body.content,
           created_by: me.id,
           review_type: 'comment',
+          ...(resolvedIds ? { assigned_to_ids: resolvedIds } : {}),
         },
       },
     );

@@ -1,7 +1,8 @@
 import os
 
-from fastapi import FastAPI
+from fastapi import FastAPI, HTTPException, Request
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import JSONResponse
 
 from app.core.config import settings
 from app.core.logging_config import configure_logging
@@ -16,6 +17,25 @@ app = FastAPI(
     docs_url="/api/v2/_swagger" if settings.debug else None,
     redoc_url=None,
 )
+
+_HTTP_CODE_MAP: dict[int, str] = {
+    400: "BAD_REQUEST",
+    401: "UNAUTHORIZED",
+    403: "FORBIDDEN",
+    404: "NOT_FOUND",
+    409: "CONFLICT",
+    422: "UNPROCESSABLE_ENTITY",
+}
+
+
+@app.exception_handler(HTTPException)
+async def http_exception_handler(request: Request, exc: HTTPException) -> JSONResponse:
+    code = _HTTP_CODE_MAP.get(exc.status_code, f"HTTP_{exc.status_code}")
+    return JSONResponse(
+        status_code=exc.status_code,
+        content={"data": None, "error": {"code": code, "message": str(exc.detail)}, "meta": None},
+    )
+
 
 app.add_middleware(
     CORSMiddleware,
