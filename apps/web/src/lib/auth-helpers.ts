@@ -90,7 +90,14 @@ function toPos(q: string, p: (string|number|boolean|null)[]): [string, (string|n
 
 export async function getOssUserContext(): Promise<MembershipContext> {
   const { getDb } = await import('@sprintable/storage-pglite');
+  const { OSS_SESSION_COOKIE, verifyOssSession } = await import('@/lib/oss-auth');
   const db = await getDb();
+
+  // Resolve current user from session cookie.
+  const cookieStore = await cookies();
+  const sessionToken = cookieStore.get(OSS_SESSION_COOKIE)?.value ?? null;
+  const session = sessionToken ? await verifyOssSession(sessionToken) : null;
+  const userId = session?.userId ?? null;
 
   const projects = (await db.query(
     'SELECT id, name, org_id FROM projects WHERE deleted_at IS NULL ORDER BY created_at ASC'
@@ -101,10 +108,28 @@ export async function getOssUserContext(): Promise<MembershipContext> {
   const cookieProjectId = await getCurrentProjectIdCookie();
   const currentProject = projects.find((p) => p.id === cookieProjectId) ?? projects[0]!;
 
-  const memberRow = (await db.query(
-    `SELECT id, org_id, project_id FROM team_members WHERE project_id = $1 AND is_active = 1 AND type = 'human' ORDER BY created_at ASC LIMIT 1`,
-    [currentProject.id]
-  )).rows[0] as { id: string; org_id: string; project_id: string } | undefined;
+  // Resolve team_member for the authenticated user in the current project.
+  let memberRow: { id: string; org_id: string; project_id: string } | undefined;
+  if (userId) {
+    memberRow = (await db.query(
+      `SELECT id, org_id, project_id FROM team_members WHERE user_id = $1 AND project_id = $2 AND is_active = 1 LIMIT 1`,
+      [userId, currentProject.id]
+    )).rows[0] as { id: string; org_id: string; project_id: string } | undefined;
+
+    // Fallback: any project the user belongs to if not in the current project.
+    if (!memberRow) {
+      memberRow = (await db.query(
+        `SELECT id, org_id, project_id FROM team_members WHERE user_id = $1 AND is_active = 1 ORDER BY created_at ASC LIMIT 1`,
+        [userId]
+      )).rows[0] as { id: string; org_id: string; project_id: string } | undefined;
+    }
+  } else {
+    // No session: fall back to any human member (single-user legacy / first boot).
+    memberRow = (await db.query(
+      `SELECT id, org_id, project_id FROM team_members WHERE project_id = $1 AND is_active = 1 AND type = 'human' ORDER BY created_at ASC LIMIT 1`,
+      [currentProject.id]
+    )).rows[0] as { id: string; org_id: string; project_id: string } | undefined;
+  }
 
   const memberships: ProjectMembership[] = projects.map((p) => ({
     id: memberRow?.id ?? '',
@@ -114,7 +139,7 @@ export async function getOssUserContext(): Promise<MembershipContext> {
   }));
 
   const me = memberRow
-    ? { id: memberRow.id, org_id: memberRow.org_id, project_id: currentProject.id, project_name: currentProject.name }
+    ? { id: memberRow.id, org_id: memberRow.org_id, project_id: memberRow.project_id, project_name: currentProject.name }
     : null;
 
   return { me, memberships };
