@@ -7,9 +7,11 @@ import { isOssMode, createTeamMemberRepository } from '@/lib/storage/factory';
 
 export default async function ApiKeysPage() {
   if (isOssMode()) {
-    const { OSS_ORG_ID, OSS_PROJECT_ID } = await import('@sprintable/storage-pglite');
+    const { getOssUserContext } = await import('@/lib/auth-helpers');
+    const { me } = await getOssUserContext();
+    if (!me) return <div>No project</div>;
     const repo = await createTeamMemberRepository();
-    const agents = await repo.list({ org_id: OSS_ORG_ID, project_id: OSS_PROJECT_ID });
+    const agents = await repo.list({ org_id: me.org_id, project_id: me.project_id });
     const agentMembers = agents.filter((m) => m.type === 'agent' && m.is_active);
     return (
       <div className="flex min-h-0 flex-1 flex-col overflow-y-auto p-6 space-y-6">
