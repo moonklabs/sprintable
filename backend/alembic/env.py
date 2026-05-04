@@ -16,7 +16,10 @@ target_metadata = Base.metadata
 
 
 def get_url() -> str:
-    return os.environ.get("DATABASE_URL", config.get_main_option("sqlalchemy.url", ""))
+    url = os.environ.get("DATABASE_URL", config.get_main_option("sqlalchemy.url", ""))
+    # alembic은 동기 실행 — asyncpg → psycopg2 변환
+    return url.replace("postgresql+asyncpg://", "postgresql+psycopg2://").replace("postgresql+asyncpg+ssl://", "postgresql+psycopg2://")
+
 
 
 def run_migrations_offline() -> None:
