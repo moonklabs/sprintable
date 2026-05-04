@@ -15,7 +15,12 @@ export async function GET(request: Request) {
       const cookieProjectId = cookieStore.get(CURRENT_PROJECT_COOKIE)?.value;
       const current = projects.find((p) => p.id === cookieProjectId) ?? projects[0];
       if (!current) return apiError('NOT_FOUND', 'No projects found', 404);
-      return apiSuccess({ project_id: current.id, project_name: current.name, org_id: current.org_id });
+      return apiSuccess({
+        project_id: current.id,
+        project_name: current.name,
+        org_id: current.org_id,
+        projects: projects.map((p) => ({ id: p.id, name: p.name, org_id: p.org_id })),
+      });
     }
 
     // 비-OSS: getAuthContext → me에 org_id, project_id 포함
