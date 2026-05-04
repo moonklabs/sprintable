@@ -87,10 +87,19 @@ async def get_session(
     items = await item_repo.list_by_session(id)
     actions = await action_repo.list_by_session(id)
 
-    data = SessionResponse.model_validate(session)
-    data.items = [ItemResponse.model_validate(i) for i in items]
-    data.actions = [ActionResponse.model_validate(a) for a in actions]
-    return data
+    return SessionResponse(
+        id=session.id,
+        project_id=session.project_id,
+        org_id=session.org_id,
+        sprint_id=session.sprint_id,
+        created_by=session.created_by,
+        title=session.title,
+        phase=session.phase,
+        created_at=session.created_at,
+        updated_at=session.updated_at,
+        items=[ItemResponse.model_validate(i) for i in items],
+        actions=[ActionResponse.model_validate(a) for a in actions],
+    )
 
 
 @router.patch("/{id}/phase", response_model=SessionListResponse)
