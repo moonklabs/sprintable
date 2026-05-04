@@ -6,6 +6,13 @@ const turndown = new TurndownService({
   bulletListMarker: '-',
 });
 
+// Disable Turndown's built-in text escape function.
+// We do round-trip editing (WYSIWYG ↔ markdown), so auto-escaping
+// causes backslash accumulation on every load/save cycle:
+//   "hello_world" → "hello\_world" → "hello\\_world" → …
+// TipTap handles structural formatting; no inline text escaping is needed.
+(turndown as unknown as { escape: (str: string) => string }).escape = (str: string) => str;
+
 // Preserve page-embed atoms — must be before the generic block rule
 turndown.addRule('pageEmbed', {
   filter: (node) => node.nodeName === 'DIV' && node.hasAttribute('data-page-embed'),
@@ -66,11 +73,7 @@ turndown.addRule('table', {
  */
 export function htmlToMarkdown(html: string): string {
   if (!html.trim()) return '';
-  const md = turndown.turndown(html).trim();
-  // Turndown escapes "1. " at line-start to "1\. " to prevent accidental ordered lists.
-  // We undo this because our markdownToHtml already handles the conversion,
-  // and leaving it causes backslash accumulation on each load/save cycle.
-  return md.replace(/^(\d+)\\\. /gm, '$1. ');
+  return turndown.turndown(html).trim();
 }
 
 /**
@@ -78,8 +81,15 @@ export function htmlToMarkdown(html: string): string {
  * Uses a minimal approach - TipTap's StarterKit handles most markdown
  * when loaded as HTML via DOMParser, so we handle the basic cases.
  */
-export function markdownToHtml(md: string): string {
-  if (!md.trim()) return '';
+export function markdownToHtml(rawMd: string): string {
+  if (!rawMd.trim()) return '';
+
+  // Strip accumulated Turndown backslash escapes from previously saved content.
+  // Turndown added these automatically on prior saves; each round-trip doubled them.
+  // Process ordered-list dots first (may have multiple backslashes), then inline escapes.
+  let md = rawMd
+    .replace(/^(\d+)\\+\. /gm, '$1. ')
+    .replace(/\\([*_`[\]\\])/g, '$1');
 
   // Extract fenced code blocks first to prevent other transforms from modifying their content.
   // Subsequent regex passes use gm flags which would otherwise corrupt multi-line code blocks.
