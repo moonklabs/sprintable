@@ -81,6 +81,9 @@ async def revoke_agent_api_key(
     _auth: AuthContext = Depends(get_current_user),
     repo: ApiKeyRepository = Depends(_get_repo),
 ) -> dict:
+    key = await repo.get(key_id)
+    if key is None or key.team_member_id != agent_id:
+        raise HTTPException(status_code=404, detail="API key not found for this agent")
     result = await repo.revoke(key_id)
     if result is None:
         raise HTTPException(status_code=404, detail="API key not found")
