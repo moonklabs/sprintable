@@ -5,14 +5,12 @@ const {
   createAdminClient,
   getAuthContext,
   createInboxItemRepository,
-  isOssMode,
   cookies,
 } = vi.hoisted(() => ({
   createDbServerClient: vi.fn(),
   createAdminClient: vi.fn(),
   getAuthContext: vi.fn(),
   createInboxItemRepository: vi.fn(),
-  isOssMode: vi.fn(() => false),
   cookies: vi.fn(),
 }));
 
@@ -22,7 +20,7 @@ vi.mock('@/lib/auth-helpers', async () => {
   const actual = await vi.importActual<typeof import('@/lib/auth-helpers')>('@/lib/auth-helpers');
   return { ...actual, getAuthContext };
 });
-vi.mock('@/lib/storage/factory', () => ({ createInboxItemRepository, isOssMode }));
+vi.mock('@/lib/storage/factory', () => ({ createInboxItemRepository }));
 vi.mock('next/headers', () => ({ cookies }));
 
 import { GET } from './route';
@@ -41,7 +39,6 @@ const ME = {
 describe('GET /api/inbox', () => {
   beforeEach(() => {
     vi.clearAllMocks();
-    isOssMode.mockReturnValue(false);
     createDbServerClient.mockResolvedValue({});
     cookies.mockResolvedValue({ get: vi.fn(() => undefined) });
     getAuthContext.mockResolvedValue(ME);
@@ -122,16 +119,5 @@ describe('GET /api/inbox', () => {
     expect(repo.list).toHaveBeenCalledWith(expect.objectContaining({ project_id: 'cookie-proj' }));
   });
 
-  it('OSS mode skips dbClient and uses local repo', async () => {
-    isOssMode.mockReturnValue(true);
-    const repo = {
-      list: vi.fn().mockResolvedValue([]),
-      count: vi.fn().mockResolvedValue({ total: 0, byKind: { approval: 0, decision: 0, blocker: 0, mention: 0 } }),
-    };
-    createInboxItemRepository.mockResolvedValue(repo);
-
-    const res = await GET(new Request('http://localhost/api/inbox'));
-    expect(res.status).toBe(200);
-    expect(createInboxItemRepository).toHaveBeenCalledWith(undefined);
-  });
 });
+

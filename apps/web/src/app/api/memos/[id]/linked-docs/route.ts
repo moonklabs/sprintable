@@ -29,7 +29,7 @@ export async function POST(request: Request, { params }: RouteParams) {
     const body = parsed.data;
 
     const dbClient = undefined;
-    const repo = await createMemoRepository(dbClient);
+    const repo = await createMemoRepository();
     const memoService = new MemoService(repo, dbClient);
     let linkedDocId = body.doc_id ?? null;
     let createdDoc: Awaited<ReturnType<DocsService['createDoc']>> | null = null;
@@ -39,7 +39,7 @@ export async function POST(request: Request, { params }: RouteParams) {
       const title = body.title?.trim() || memo.title || memo.content.slice(0, 80) || 'Untitled doc';
       const slug = slugify(title) || `memo-${id.slice(0, 8)}`;
       const { createDocRepository } = await import('@/lib/storage/factory');
-      const docRepo = await createDocRepository(dbClient);
+      const docRepo = await createDocRepository();
       const docsService = new DocsService(docRepo, dbClient);
       createdDoc = await docsService.createDoc({
         org_id: me.org_id,

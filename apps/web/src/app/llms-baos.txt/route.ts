@@ -9,7 +9,7 @@ const DOC_SLUG = 'baos-enrollment-guide-agent';
 export async function GET() {
   try {
     const db = undefined;
-    const repo = await createDocRepository(db);
+    const repo = await createDocRepository();
     const doc = await repo.getBySlug(PROJECT_ID, DOC_SLUG);
 
     if (!doc) {

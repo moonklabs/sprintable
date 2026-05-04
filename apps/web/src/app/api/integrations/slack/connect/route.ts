@@ -1,11 +1,9 @@
 import { NextResponse } from 'next/server';
 import { getMyTeamMember } from '@/lib/auth-helpers';
-import { apiError, ApiErrors } from '@/lib/api-response';
-import { isOssMode } from '@/lib/storage/factory';
+import { ApiErrors } from '@/lib/api-response';
 import { buildSlackConnectUrl } from '@/services/slack-channel-mapping';
 
 export async function GET() {
-  if (isOssMode()) return apiError('NOT_AVAILABLE', 'Not available in OSS mode.', 503);
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const db: any = null;
   const me = await getMyTeamMember(db, null as any);

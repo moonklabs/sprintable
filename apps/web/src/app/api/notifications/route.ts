@@ -3,7 +3,7 @@ import { apiSuccess, ApiErrors } from '@/lib/api-response';
 import { getAuthContext } from '@/lib/auth-helpers';
 import { attachNotificationHrefs } from '@/services/notification-navigation';
 import { parseBody, updateNotificationSchema } from '@sprintable/shared';
-import { isOssMode, createNotificationRepository } from '@/lib/storage/factory';
+import { createNotificationRepository } from '@/lib/storage/factory';
 
 /** GET — 알림 목록 (안읽음 우선, 최신순) */
 export async function GET(request: Request) {

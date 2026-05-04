@@ -9,7 +9,6 @@ COPY packages/shared/package.json packages/shared/package.json
 COPY packages/db/package.json packages/db/package.json
 COPY packages/mcp-server/package.json packages/mcp-server/package.json
 COPY packages/sdk/package.json packages/sdk/package.json
-COPY packages/storage-pglite/package.json packages/storage-pglite/package.json
 COPY packages/storage-supabase/package.json packages/storage-supabase/package.json
 COPY ee/packages/storage-saas/package.json ee/packages/storage-saas/package.json
 COPY ee/packages/mcp-server-saas/package.json ee/packages/mcp-server-saas/package.json

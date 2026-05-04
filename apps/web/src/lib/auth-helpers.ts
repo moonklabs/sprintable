@@ -2,7 +2,6 @@ import { cache } from 'react';
 import { cookies } from 'next/headers';
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 type User = any;
-import { isOssMode } from '@/lib/storage/factory';
 
 export const CURRENT_PROJECT_COOKIE = 'sprintable_current_project_id';
 
@@ -81,67 +80,6 @@ export interface MembershipContext {
 export async function getMyMembershipContext(db: any, user: User): Promise<MembershipContext> {
   const memberships = await getMyProjectMemberships(db, user);
   const me = await resolveTeamMemberFromMemberships(db, user, memberships);
-  return { me, memberships };
-}
-
-function toPos(q: string, p: (string|number|boolean|null)[]): [string, (string|number|boolean|null)[]] {
-  let i = 0; return [q.replace(/\?/g, () => `$${++i}`), p];
-}
-
-export async function getOssUserContext(): Promise<MembershipContext> {
-  const { getDb } = await import('@sprintable/storage-pglite');
-  const { OSS_SESSION_COOKIE, verifyOssSession } = await import('@/lib/oss-auth');
-  const db = await getDb();
-
-  // Resolve current user from session cookie.
-  const cookieStore = await cookies();
-  const sessionToken = cookieStore.get(OSS_SESSION_COOKIE)?.value ?? null;
-  const session = sessionToken ? await verifyOssSession(sessionToken) : null;
-  const userId = session?.userId ?? null;
-
-  const projects = (await db.query(
-    'SELECT id, name, org_id FROM projects WHERE deleted_at IS NULL ORDER BY created_at ASC'
-  )).rows as Array<{ id: string; name: string; org_id: string }>;
-
-  if (projects.length === 0) return { me: null, memberships: [] };
-
-  const cookieProjectId = await getCurrentProjectIdCookie();
-  const currentProject = projects.find((p) => p.id === cookieProjectId) ?? projects[0]!;
-
-  // Resolve team_member for the authenticated user in the current project.
-  let memberRow: { id: string; org_id: string; project_id: string } | undefined;
-  if (userId) {
-    memberRow = (await db.query(
-      `SELECT id, org_id, project_id FROM team_members WHERE user_id = $1 AND project_id = $2 AND is_active = 1 LIMIT 1`,
-      [userId, currentProject.id]
-    )).rows[0] as { id: string; org_id: string; project_id: string } | undefined;
-
-    // Fallback: any project the user belongs to if not in the current project.
-    if (!memberRow) {
-      memberRow = (await db.query(
-        `SELECT id, org_id, project_id FROM team_members WHERE user_id = $1 AND is_active = 1 ORDER BY created_at ASC LIMIT 1`,
-        [userId]
-      )).rows[0] as { id: string; org_id: string; project_id: string } | undefined;
-    }
-  } else {
-    // No session: fall back to any human member (single-user legacy / first boot).
-    memberRow = (await db.query(
-      `SELECT id, org_id, project_id FROM team_members WHERE project_id = $1 AND is_active = 1 AND type = 'human' ORDER BY created_at ASC LIMIT 1`,
-      [currentProject.id]
-    )).rows[0] as { id: string; org_id: string; project_id: string } | undefined;
-  }
-
-  const memberships: ProjectMembership[] = projects.map((p) => ({
-    id: memberRow?.id ?? '',
-    org_id: p.org_id,
-    project_id: p.id,
-    project_name: p.name,
-  }));
-
-  const me = memberRow
-    ? { id: memberRow.id, org_id: memberRow.org_id, project_id: memberRow.project_id, project_name: currentProject.name }
-    : null;
-
   return { me, memberships };
 }
 
@@ -231,7 +169,7 @@ async function resolveTeamMemberFromMemberships(
 /**
  * Dual auth: OAuth 또는 API Key로 인증
  *
- * 1. Authorization Bearer 토큰이 있으면 API Key 인증 시도 (admin client로 RLS 우회)
+ * 1. Authorization Bearer 토큰이 있으면 API Key 인증 시도
  * 2. 없으면 OAuth 세션 인증 시도
  * 3. 둘 다 실패하면 null 반환
  *
@@ -254,51 +192,7 @@ export const getAuthContext = cache(async (
   rateLimitRemaining?: number;
   rateLimitResetAt?: number;
 } | null> => {
-  // 1. OSS_MODE — DB 없이 PGLite 기반 인증
-  if (isOssMode()) {
-    const { getDb } = await import('@sprintable/storage-pglite');
-
-    const authHeader = request.headers.get('Authorization');
-    const xApiKey = request.headers.get('x-api-key');
-    const rawApiKey = authHeader?.startsWith('Bearer ') ? authHeader.slice(7) : (xApiKey ?? null);
-
-    if (rawApiKey) {
-      const { hashApiKey } = await import('./auth-api-key');
-      const db = await getDb();
-      const keyHash = hashApiKey(rawApiKey);
-      const now = new Date().toISOString();
-
-      const keyRow = (await db.query(...toPos(
-        'SELECT id, team_member_id FROM agent_api_keys WHERE key_hash = ? AND revoked_at IS NULL AND (expires_at IS NULL OR expires_at > ?) LIMIT 1',
-        [keyHash, now]
-      ))).rows[0] as { id: string; team_member_id: string } | null;
-
-      if (keyRow) {
-        const member = (await db.query(...toPos(
-          'SELECT id, org_id, project_id, type FROM team_members WHERE id = ? AND is_active = 1 LIMIT 1',
-          [keyRow.team_member_id]
-        ))).rows[0] as { id: string; org_id: string; project_id: string; type: string } | null;
-
-        if (member) {
-          await db.query(...toPos('UPDATE agent_api_keys SET last_used_at = ? WHERE id = ?', [now, keyRow.id]));
-          return {
-            id: member.id,
-            org_id: member.org_id,
-            project_id: member.project_id,
-            project_name: 'My Project',
-            type: member.type as 'human' | 'agent',
-          };
-        }
-      }
-    }
-
-    // API Key 없거나 인증 실패 시 PGLite에서 동적으로 조회
-    const ossCtx = await getOssUserContext();
-    if (!ossCtx.me) return null;
-    return { id: ossCtx.me.id, org_id: ossCtx.me.org_id, project_id: ossCtx.me.project_id, project_name: ossCtx.me.project_name, type: 'human' };
-  }
-
-  // 2. API Key 인증 — FastAPI /api/v2/me에 rawApiKey를 Bearer 토큰으로 전달
+  // 1. API Key 인증 — FastAPI /api/v2/me에 rawApiKey를 Bearer 토큰으로 전달
   // x-api-key 헤더는 Authorization 헤더가 CDN에서 strip될 때를 위한 fallback
   const authHeader = request.headers.get('Authorization');
   const xApiKey = request.headers.get('x-api-key');
@@ -331,7 +225,7 @@ export const getAuthContext = cache(async (
     }
   }
 
-  // 3. OAuth 세션 — JWT 쿠키 파싱
+  // 2. OAuth 세션 — JWT 쿠키 파싱
   const { getServerSession } = await import('./db/server');
   const session = await getServerSession();
   if (!session) return null;

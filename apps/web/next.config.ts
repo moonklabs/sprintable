@@ -10,7 +10,6 @@ const nextConfig: NextConfig = {
   devIndicators: {
     position: 'bottom-right',
   },
-  serverExternalPackages: ['@sprintable/storage-pglite', '@electric-sql/pglite'],
   async rewrites() {
     const fastapiUrl = process.env.NEXT_PUBLIC_FASTAPI_URL ?? 'http://localhost:8000';
     return [

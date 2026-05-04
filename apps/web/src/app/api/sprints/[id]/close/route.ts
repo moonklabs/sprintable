@@ -4,7 +4,7 @@ import { SprintService } from '@/services/sprint';
 import { handleApiError } from '@/lib/api-error';
 import { apiSuccess, ApiErrors } from '@/lib/api-response';
 import { getAuthContext } from '@/lib/auth-helpers';
-import { isOssMode, createSprintRepository, createDocRepository } from '@/lib/storage/factory';
+import { createSprintRepository, createDocRepository } from '@/lib/storage/factory';
 import { NotificationService } from '@/services/notification.service';
 import { DocsService } from '@/services/docs';
 import { requireRole, EDIT_ROLES } from '@/lib/role-guard';
@@ -18,19 +18,18 @@ export async function POST(request: Request, { params }: RouteParams) {
     const me = await getAuthContext(request);
     if (!me) return ApiErrors.unauthorized();
     if (me.rateLimitExceeded) return ApiErrors.tooManyRequests(me.rateLimitRemaining, me.rateLimitResetAt);
-    const ossMode = isOssMode();
     const dbClient = undefined;
 
-    if (!ossMode && dbClient && me.type !== 'agent') {
+    if (dbClient && me.type !== 'agent') {
       const denied = await requireRole(dbClient, me.org_id, EDIT_ROLES, 'Admin or PO access required to close sprint');
       if (denied) return denied;
     }
 
-    const repo = await createSprintRepository(dbClient);
+    const repo = await createSprintRepository();
     const service = new SprintService(repo, dbClient as any | undefined);
     const sprint = await service.close(id);
 
-    if (!ossMode && dbClient) {
+    if (dbClient) {
       const db = dbClient as any;
 
       // 알림 발송 (fire-and-forget)
@@ -77,7 +76,7 @@ export async function POST(request: Request, { params }: RouteParams) {
         ].join('\n');
 
         const slug = `sprint-report-${id.slice(0, 8)}-${Date.now()}`;
-        const docRepo = await createDocRepository(db);
+        const docRepo = await createDocRepository();
         const docsService = new DocsService(docRepo, db);
         const doc = await docsService.createDoc({
           org_id: sprint.org_id as string,
@@ -91,7 +90,7 @@ export async function POST(request: Request, { params }: RouteParams) {
         });
 
         // sprint에 report_doc_id 기록
-        const sprintRepo = await createSprintRepository(db);
+        const sprintRepo = await createSprintRepository();
         await sprintRepo.update(id, { report_doc_id: doc.id });
       })().catch(() => {});
 

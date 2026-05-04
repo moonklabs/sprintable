@@ -1,7 +1,6 @@
 import { handleApiError } from '@/lib/api-error';
 import { ApiErrors } from '@/lib/api-response';
 import { getAuthContext } from '@/lib/auth-helpers';
-import { isOssMode } from '@/lib/storage/factory';
 import { proxyToFastapiWithParams } from '@/lib/fastapi-proxy';
 
 type RouteParams = { params: Promise<{ id: string }> };

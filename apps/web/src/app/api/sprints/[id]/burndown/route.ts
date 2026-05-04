@@ -4,7 +4,7 @@ import { handleApiError } from '@/lib/api-error';
 import { apiSuccess, ApiErrors } from '@/lib/api-response';
 import { getAuthContext } from '@/lib/auth-helpers';
 import { SprintService, NotFoundError } from '@/services/sprint';
-import { isOssMode, createSprintRepository } from '@/lib/storage/factory';
+import { createSprintRepository } from '@/lib/storage/factory';
 
 type RouteParams = { params: Promise<{ id: string }> };
 
@@ -15,10 +15,9 @@ export async function GET(request: Request, { params }: RouteParams) {
     const me = await getAuthContext(request);
     if (!me) return ApiErrors.unauthorized();
     if (me.rateLimitExceeded) return ApiErrors.tooManyRequests(me.rateLimitRemaining, me.rateLimitResetAt);
-    const ossMode = isOssMode();
     const dbClient = undefined;
 
-    const repo = await createSprintRepository(dbClient);
+    const repo = await createSprintRepository();
     const service = new SprintService(repo, dbClient as any | undefined);
     const data = await service.getBurndown(id);
     return apiSuccess(data);

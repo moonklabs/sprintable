@@ -6,7 +6,6 @@ import { apiSuccess, apiError, ApiErrors } from '@/lib/api-response';
 import { getAuthContext } from '@/lib/auth-helpers';
 import { buildCursorPageMeta, parseCursorPageInput } from '@/lib/pagination';
 import { createEpicRepository } from '@/lib/storage/factory';
-import { isOssMode } from '@/lib/storage/factory';
 import { getEpicActorRole, hasEpicRole } from '@/lib/epic-permissions';
 
 export async function GET(request: Request) {
@@ -21,7 +20,7 @@ export async function GET(request: Request) {
       limit: searchParams.get('limit') ? Number(searchParams.get('limit')) : undefined,
       cursor: searchParams.get('cursor'),
     }, { defaultLimit: 50, maxLimit: 100 });
-    const repo = await createEpicRepository(dbClient);
+    const repo = await createEpicRepository();
     const service = new EpicService(repo);
     const epics = await service.list({
       project_id: searchParams.get('project_id') ?? undefined,
@@ -41,7 +40,7 @@ export async function POST(request: Request) {
     const dbClient = undefined;
 
     // 권한 체크: agent 또는 admin/owner만 에픽 생성 가능
-    if (!isOssMode() && me.type !== 'agent') {
+    if (me.type !== 'agent') {
       const role = await getEpicActorRole(dbClient, me.id);
       if (!role || !hasEpicRole(role, 'admin')) {
         return apiError('FORBIDDEN', 'Epic creation requires admin or owner role', 403);
@@ -62,7 +61,7 @@ export async function POST(request: Request) {
     if (!body.org_id) body.org_id = me.org_id;
     const parsed = createEpicSchema.safeParse(body);
     if (!parsed.success) return apiError('VALIDATION_ERROR', JSON.stringify(parsed.error.issues), 400);
-    const repo = await createEpicRepository(dbClient);
+    const repo = await createEpicRepository();
     const service = new EpicService(repo);
     const epic = await service.create(parsed.data as unknown as CreateEpicInput);
     return apiSuccess(epic, undefined, 201);

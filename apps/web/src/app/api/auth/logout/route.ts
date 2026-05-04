@@ -2,7 +2,6 @@ import { NextResponse } from 'next/server';
 import { cookies } from 'next/headers';
 import { SP_AT_COOKIE, SP_RT_COOKIE } from '@/lib/db/server';
 import { verifyCsrfOrigin } from '@/lib/auth/csrf';
-import { isOssMode } from '@/lib/storage/factory';
 
 const FASTAPI_URL = () => process.env['NEXT_PUBLIC_FASTAPI_URL'] ?? 'http://localhost:8000';
 
@@ -10,13 +9,6 @@ const FASTAPI_URL = () => process.env['NEXT_PUBLIC_FASTAPI_URL'] ?? 'http://loca
 export async function POST(request: Request) {
   const csrfError = verifyCsrfOrigin(request);
   if (csrfError) return csrfError;
-
-  if (isOssMode()) {
-    const { OSS_SESSION_COOKIE } = await import('@/lib/oss-auth');
-    const res = NextResponse.json({ data: { ok: true } });
-    res.cookies.set(OSS_SESSION_COOKIE, '', { httpOnly: true, secure: process.env['NODE_ENV'] === 'production', sameSite: 'lax', path: '/', maxAge: 0 });
-    return res;
-  }
 
   const cookieStore = await cookies();
   const refreshToken = cookieStore.get(SP_RT_COOKIE)?.value ?? '';

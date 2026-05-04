@@ -2,7 +2,7 @@
 import { parseBody, createTaskSchema } from '@sprintable/shared';
 
 import { TaskService, type CreateTaskInput } from '@/services/task';
-import { createTaskRepository, isOssMode } from '@/lib/storage/factory';
+import { createTaskRepository } from '@/lib/storage/factory';
 import { handleApiError } from '@/lib/api-error';
 import { apiSuccess, ApiErrors } from '@/lib/api-response';
 import { getAuthContext } from '@/lib/auth-helpers';
@@ -12,9 +12,8 @@ async function getStoryTaskCounts(
   service: TaskService,
   storyId: string,
   dbClient: any | undefined,
-  ossMode: boolean,
 ) {
-  if (ossMode || !dbClient) {
+  if (!dbClient) {
     const [allTasks, doneTasks] = await Promise.all([
       service.list({ story_id: storyId }),
       service.list({ story_id: storyId, status: 'done' }),
@@ -45,7 +44,6 @@ export async function GET(request: Request) {
     const me = await getAuthContext(request);
     if (!me) return ApiErrors.unauthorized();
     if (me.rateLimitExceeded) return ApiErrors.tooManyRequests(me.rateLimitRemaining, me.rateLimitResetAt);
-    const ossMode = isOssMode();
     const dbClient: any | undefined = undefined;
 
     const { searchParams } = new URL(request.url);
@@ -62,7 +60,7 @@ export async function GET(request: Request) {
       cursor: searchParams.get('cursor'),
     }, { defaultLimit: 50, maxLimit: 100 });
 
-    const repo = await createTaskRepository(dbClient);
+    const repo = await createTaskRepository();
     const service = new TaskService(repo);
 
     // story_ids: 일괄 조회 (kanban board N+1 방지용)
@@ -99,7 +97,7 @@ export async function GET(request: Request) {
       return apiSuccess(page, meta);
     }
 
-    const counts = await getStoryTaskCounts(service, storyId, dbClient, ossMode);
+    const counts = await getStoryTaskCounts(service, storyId, dbClient);
 
     return apiSuccess(page, {
       ...meta,
@@ -117,7 +115,7 @@ export async function POST(request: Request) {
     const dbClient: any = undefined;
 
     const parsed = await parseBody(request, createTaskSchema); if (!parsed.success) return parsed.response; const body = parsed.data;
-    const repo = await createTaskRepository(dbClient);
+    const repo = await createTaskRepository();
     const service = new TaskService(repo);
     const task = await service.create(body as CreateTaskInput);
     return apiSuccess(task, undefined, 201);

@@ -339,22 +339,23 @@ Routing rules in **Settings → Agent Routing** determine which agent handles wh
 
 ## Self-Hosting
 
-### Docker (OSS — SQLite, no external DB required)
+### Docker (PostgreSQL + FastAPI + Next.js)
 ```bash
 git clone https://github.com/moonklabs/sprintable.git
 cd sprintable
 cp .env.example .env
-docker compose -f docker-compose.oss.yml up
+docker compose up -d
 ```
 
-### Required env vars (OSS)
+### Required env vars
 ```
-APP_BASE_URL=http://localhost:3108
-OSS_MODE=true
-NEXT_PUBLIC_OSS_MODE=true
-SQLITE_PATH=./.data/sprintable.db
-AGENT_API_KEY_SECRET=<generate: openssl rand -base64 32>
-PM_API_URL=http://localhost:3108
+POSTGRES_DB=sprintable
+POSTGRES_USER=sprintable
+POSTGRES_PASSWORD=<generate: openssl rand -hex 16>
+JWT_SECRET=<generate: openssl rand -hex 32>
+SECRET_KEY=<generate: openssl rand -hex 32>
+NEXT_PUBLIC_APP_URL=http://localhost:3000
+NEXT_PUBLIC_FASTAPI_URL=http://localhost:8000
 ```
 
 Full guide: https://github.com/moonklabs/sprintable/blob/main/docs/self-hosting.md

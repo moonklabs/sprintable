@@ -5,7 +5,7 @@ import { handleApiError } from '@/lib/api-error';
 import { parseBody, updateSprintSchema } from '@sprintable/shared';
 import { apiSuccess, ApiErrors } from '@/lib/api-response';
 import { getAuthContext } from '@/lib/auth-helpers';
-import { isOssMode, createSprintRepository } from '@/lib/storage/factory';
+import { createSprintRepository } from '@/lib/storage/factory';
 
 type RouteParams = { params: Promise<{ id: string }> };
 
@@ -16,10 +16,9 @@ export async function GET(request: Request, { params }: RouteParams) {
     const me = await getAuthContext(request);
     if (!me) return ApiErrors.unauthorized();
     if (me.rateLimitExceeded) return ApiErrors.tooManyRequests(me.rateLimitRemaining, me.rateLimitResetAt);
-    const ossMode = isOssMode();
     const dbClient = undefined;
 
-    const repo = await createSprintRepository(dbClient);
+    const repo = await createSprintRepository();
     const service = new SprintService(repo, dbClient as any | undefined);
     const sprint = await service.getById(id);
     return apiSuccess(sprint);
@@ -35,12 +34,11 @@ export async function PATCH(request: Request, { params }: RouteParams) {
     const me = await getAuthContext(request);
     if (!me) return ApiErrors.unauthorized();
     if (me.rateLimitExceeded) return ApiErrors.tooManyRequests(me.rateLimitRemaining, me.rateLimitResetAt);
-    const ossMode = isOssMode();
     const dbClient = undefined;
 
     const parsed = await parseBody(request, updateSprintSchema);
     if (!parsed.success) return parsed.response;
-    const repo = await createSprintRepository(dbClient);
+    const repo = await createSprintRepository();
     const service = new SprintService(repo, dbClient as any | undefined);
     const sprint = await service.update(id, parsed.data);
     return apiSuccess(sprint);
@@ -56,10 +54,9 @@ export async function DELETE(request: Request, { params }: RouteParams) {
     const me = await getAuthContext(request);
     if (!me) return ApiErrors.unauthorized();
     if (me.rateLimitExceeded) return ApiErrors.tooManyRequests(me.rateLimitRemaining, me.rateLimitResetAt);
-    const ossMode = isOssMode();
     const dbClient = undefined;
 
-    const repo = await createSprintRepository(dbClient);
+    const repo = await createSprintRepository();
     const service = new SprintService(repo, dbClient as any | undefined);
     await service.delete(id);
     return apiSuccess({ ok: true });

@@ -5,7 +5,7 @@ import { handleApiError } from '@/lib/api-error';
 import { apiSuccess, apiError, ApiErrors } from '@/lib/api-response';
 import { getAuthContext } from '@/lib/auth-helpers';
 import { createSprintSchema } from '@sprintable/shared';
-import { isOssMode, createSprintRepository } from '@/lib/storage/factory';
+import { createSprintRepository } from '@/lib/storage/factory';
 
 // POST /api/sprints — 생성
 export async function POST(request: Request) {
@@ -13,7 +13,6 @@ export async function POST(request: Request) {
     const me = await getAuthContext(request);
     if (!me) return ApiErrors.unauthorized();
     if (me.rateLimitExceeded) return ApiErrors.tooManyRequests(me.rateLimitRemaining, me.rateLimitResetAt);
-    const ossMode = isOssMode();
     const dbClient = undefined;
 
     let rawBody: unknown;
@@ -24,7 +23,7 @@ export async function POST(request: Request) {
     if (!body.org_id) body.org_id = me.org_id;
     const parsed = createSprintSchema.safeParse(body);
     if (!parsed.success) return apiError('VALIDATION_ERROR', JSON.stringify(parsed.error.issues), 400);
-    const repo = await createSprintRepository(dbClient);
+    const repo = await createSprintRepository();
     const service = new SprintService(repo, dbClient as any | undefined);
     const sprint = await service.create(parsed.data as CreateSprintInput);
     return apiSuccess(sprint, undefined, 201);
@@ -39,11 +38,10 @@ export async function GET(request: Request) {
     const me = await getAuthContext(request);
     if (!me) return ApiErrors.unauthorized();
     if (me.rateLimitExceeded) return ApiErrors.tooManyRequests(me.rateLimitRemaining, me.rateLimitResetAt);
-    const ossMode = isOssMode();
     const dbClient = undefined;
 
     const { searchParams } = new URL(request.url);
-    const repo = await createSprintRepository(dbClient);
+    const repo = await createSprintRepository();
     const service = new SprintService(repo, dbClient as any | undefined);
     const sprints = await service.list({
       project_id: searchParams.get('project_id') ?? undefined,

@@ -1,9 +1,7 @@
 import { handleApiError } from '@/lib/api-error';
 import { apiSuccess, ApiErrors } from '@/lib/api-response';
 import { getAuthContext } from '@/lib/auth-helpers';
-import { isOssMode } from '@/lib/storage/factory';
 import { proxyToFastapiWithParams } from '@/lib/fastapi-proxy';
-import { addOssRetroAction } from '@/lib/oss-retro';
 
 type RouteParams = { params: Promise<{ id: string }> };
 
@@ -43,12 +41,7 @@ export async function POST(request: Request, { params }: RouteParams) {
     const body = await request.json() as { title?: string; assignee_id?: string | null };
     if (!body.title) return ApiErrors.badRequest('title required');
 
-    if (isOssMode()) {
-      const data = await addOssRetroAction({ session_id: id, project_id: projectId, title: body.title, assignee_id: body.assignee_id ?? null });
-      return apiSuccess(data);
-    }
-
-const _r = await proxyToFastapiWithParams(request, '/api/v2/retros/[id]/actions', { id });
+    const _r = await proxyToFastapiWithParams(request, '/api/v2/retros/[id]/actions', { id });
     if (!_r.ok) return _r;
     if (_r.status === 204) return apiSuccess({ ok: true });
     return apiSuccess(await _r.json())

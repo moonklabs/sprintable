@@ -1,7 +1,7 @@
 import { handleApiError } from '@/lib/api-error';
 import { apiSuccess, ApiErrors } from '@/lib/api-response';
 import { getAuthContext } from '@/lib/auth-helpers';
-import { createMemoRepository, isOssMode } from '@/lib/storage/factory';
+import { createMemoRepository } from '@/lib/storage/factory';
 
 type RouteParams = { params: Promise<{ id: string }> };
 
@@ -15,7 +15,7 @@ export async function PATCH(request: Request, { params }: RouteParams) {
 
 
     const dbClient = undefined;
-    const repo = await createMemoRepository(dbClient);
+    const repo = await createMemoRepository();
     const memo = await repo.getById(id);
 
     const archivedAt = memo.archived_at ? null : new Date().toISOString();
