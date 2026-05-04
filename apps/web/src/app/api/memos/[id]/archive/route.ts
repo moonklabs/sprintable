@@ -13,7 +13,6 @@ export async function PATCH(request: Request, { params }: RouteParams) {
     if (!me) return ApiErrors.unauthorized();
     if (me.rateLimitExceeded) return ApiErrors.tooManyRequests(me.rateLimitRemaining, me.rateLimitResetAt);
 
-    if (isOssMode()) return ApiErrors.notFound('Archive not supported in OSS mode');
 
     const dbClient = undefined;
     const repo = await createMemoRepository(dbClient);

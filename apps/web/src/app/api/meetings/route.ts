@@ -27,7 +27,6 @@ export async function POST(request: Request) {
     if (!me) return ApiErrors.unauthorized();
     if (me.rateLimitExceeded) return ApiErrors.tooManyRequests(me.rateLimitRemaining, me.rateLimitResetAt);
 
-    if (isOssMode()) return ApiErrors.badRequest('Meetings not supported in OSS mode');
 
     // AC8: Feature gating (SaaS only)
     const check = await checkResourceLimit(undefined, me.org_id, 'max_meetings', 'meetings');

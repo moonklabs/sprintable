@@ -89,17 +89,60 @@ function toPos(q: string, p: (string|number|boolean|null)[]): [string, (string|n
 }
 
 export async function getOssUserContext(): Promise<MembershipContext> {
-  const { OSS_ORG_ID, OSS_PROJECT_ID, OSS_MEMBER_ID } = await import('@sprintable/storage-pglite');
-  const me = {
-    id: OSS_MEMBER_ID,
-    org_id: OSS_ORG_ID,
-    project_id: OSS_PROJECT_ID,
-    project_name: 'My Project',
-  };
-  return {
-    me,
-    memberships: [{ id: OSS_MEMBER_ID, org_id: OSS_ORG_ID, project_id: OSS_PROJECT_ID, project_name: 'My Project' }],
-  };
+  const { getDb } = await import('@sprintable/storage-pglite');
+  const { OSS_SESSION_COOKIE, verifyOssSession } = await import('@/lib/oss-auth');
+  const db = await getDb();
+
+  // Resolve current user from session cookie.
+  const cookieStore = await cookies();
+  const sessionToken = cookieStore.get(OSS_SESSION_COOKIE)?.value ?? null;
+  const session = sessionToken ? await verifyOssSession(sessionToken) : null;
+  const userId = session?.userId ?? null;
+
+  const projects = (await db.query(
+    'SELECT id, name, org_id FROM projects WHERE deleted_at IS NULL ORDER BY created_at ASC'
+  )).rows as Array<{ id: string; name: string; org_id: string }>;
+
+  if (projects.length === 0) return { me: null, memberships: [] };
+
+  const cookieProjectId = await getCurrentProjectIdCookie();
+  const currentProject = projects.find((p) => p.id === cookieProjectId) ?? projects[0]!;
+
+  // Resolve team_member for the authenticated user in the current project.
+  let memberRow: { id: string; org_id: string; project_id: string } | undefined;
+  if (userId) {
+    memberRow = (await db.query(
+      `SELECT id, org_id, project_id FROM team_members WHERE user_id = $1 AND project_id = $2 AND is_active = 1 LIMIT 1`,
+      [userId, currentProject.id]
+    )).rows[0] as { id: string; org_id: string; project_id: string } | undefined;
+
+    // Fallback: any project the user belongs to if not in the current project.
+    if (!memberRow) {
+      memberRow = (await db.query(
+        `SELECT id, org_id, project_id FROM team_members WHERE user_id = $1 AND is_active = 1 ORDER BY created_at ASC LIMIT 1`,
+        [userId]
+      )).rows[0] as { id: string; org_id: string; project_id: string } | undefined;
+    }
+  } else {
+    // No session: fall back to any human member (single-user legacy / first boot).
+    memberRow = (await db.query(
+      `SELECT id, org_id, project_id FROM team_members WHERE project_id = $1 AND is_active = 1 AND type = 'human' ORDER BY created_at ASC LIMIT 1`,
+      [currentProject.id]
+    )).rows[0] as { id: string; org_id: string; project_id: string } | undefined;
+  }
+
+  const memberships: ProjectMembership[] = projects.map((p) => ({
+    id: memberRow?.id ?? '',
+    org_id: p.org_id,
+    project_id: p.id,
+    project_name: p.name,
+  }));
+
+  const me = memberRow
+    ? { id: memberRow.id, org_id: memberRow.org_id, project_id: memberRow.project_id, project_name: currentProject.name }
+    : null;
+
+  return { me, memberships };
 }
 
 /**
@@ -213,7 +256,7 @@ export const getAuthContext = cache(async (
 } | null> => {
   // 1. OSS_MODE — DB 없이 PGLite 기반 인증
   if (isOssMode()) {
-    const { OSS_ORG_ID, OSS_PROJECT_ID, OSS_MEMBER_ID, getDb } = await import('@sprintable/storage-pglite');
+    const { getDb } = await import('@sprintable/storage-pglite');
 
     const authHeader = request.headers.get('Authorization');
     const xApiKey = request.headers.get('x-api-key');
@@ -249,14 +292,10 @@ export const getAuthContext = cache(async (
       }
     }
 
-    // API Key 없거나 인증 실패 시 고정 human 반환 (하위 호환)
-    return {
-      id: OSS_MEMBER_ID,
-      org_id: OSS_ORG_ID,
-      project_id: OSS_PROJECT_ID,
-      project_name: 'My Project',
-      type: 'human',
-    };
+    // API Key 없거나 인증 실패 시 PGLite에서 동적으로 조회
+    const ossCtx = await getOssUserContext();
+    if (!ossCtx.me) return null;
+    return { id: ossCtx.me.id, org_id: ossCtx.me.org_id, project_id: ossCtx.me.project_id, project_name: ossCtx.me.project_name, type: 'human' };
   }
 
   // 2. API Key 인증 — FastAPI /api/v2/me에 rawApiKey를 Bearer 토큰으로 전달

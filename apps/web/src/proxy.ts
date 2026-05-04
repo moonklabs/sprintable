@@ -26,6 +26,21 @@ function isOssMode(): boolean {
   return process.env['OSS_MODE'] === 'true';
 }
 
+const OSS_SESSION_COOKIE = 'sp_oss_at';
+const OSS_PUBLIC_PREFIXES = ['/login', '/register', '/api/', '/_next/', '/favicon', '/icon'];
+
+function getOssSecretBytes(): Uint8Array {
+  const s = process.env['OSS_SESSION_SECRET'] ?? 'sprintable-oss-dev-secret-change-in-prod';
+  return new TextEncoder().encode(s);
+}
+
+async function verifyOssSessionToken(token: string): Promise<boolean> {
+  try {
+    const { payload } = await jwtVerify(token, getOssSecretBytes());
+    return payload['type'] === 'oss_access' && !!payload.sub;
+  } catch { return false; }
+}
+
 function getJwtSecretBytes(): Uint8Array {
   const secret = process.env['JWT_SECRET'] ?? '';
   return new TextEncoder().encode(secret);
@@ -83,17 +98,33 @@ export async function proxy(request: NextRequest) {
   const pathname = request.nextUrl.pathname;
 
   if (isOssMode()) {
+    const isOssPublic = OSS_PUBLIC_PREFIXES.some((p) => pathname.startsWith(p));
+    const sessionToken = request.cookies.get(OSS_SESSION_COOKIE)?.value;
+    const isAuthenticated = sessionToken ? await verifyOssSessionToken(sessionToken) : false;
+
+    if (isOssPublic) {
+      // Redirect authenticated users away from login/register to app.
+      if (isAuthenticated && (pathname === '/login' || pathname === '/register')) {
+        const url = request.nextUrl.clone();
+        url.pathname = '/inbox';
+        url.search = '';
+        return NextResponse.redirect(url);
+      }
+      return NextResponse.next({ request });
+    }
+
+    if (!isAuthenticated) {
+      const url = request.nextUrl.clone();
+      url.pathname = '/login';
+      return NextResponse.redirect(url);
+    }
+
     if (pathname === '/') {
       const url = request.nextUrl.clone();
       url.pathname = '/inbox';
       return NextResponse.redirect(url);
     }
-    if (pathname === '/login' || pathname.startsWith('/auth/callback')) {
-      const url = request.nextUrl.clone();
-      url.pathname = '/inbox';
-      url.search = '';
-      return NextResponse.redirect(url);
-    }
+
     return NextResponse.next({ request });
   }
 
@@ -162,7 +193,7 @@ export async function proxy(request: NextRequest) {
   return response;
 }
 
-export const config = {
+export const proxyConfig = {
   matcher: [
     '/((?!_next/static|_next/image|favicon.ico|.*\\.(?:svg|png|jpg|jpeg|gif|webp)$).*)',
   ],

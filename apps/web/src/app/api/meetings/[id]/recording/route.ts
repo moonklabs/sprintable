@@ -13,7 +13,6 @@ export async function POST(request: Request, { params }: RouteParams) {
     if (!me) return ApiErrors.unauthorized();
     if (me.rateLimitExceeded) return ApiErrors.tooManyRequests(me.rateLimitRemaining, me.rateLimitResetAt);
 
-    if (isOssMode()) return ApiErrors.badRequest('Recording not supported in OSS mode');
 
     const _r = await proxyToFastapiWithParams(request, '/api/v2/meetings/[id]/recording', { id });
     if (!_r.ok) return _r;
