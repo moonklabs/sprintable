@@ -5,7 +5,7 @@ import { handleApiError } from '@/lib/api-error';
 import { parseBody, updateSprintSchema } from '@sprintable/shared';
 import { apiSuccess, ApiErrors } from '@/lib/api-response';
 import { getAuthContext } from '@/lib/auth-helpers';
-import { isOssMode, createSprintRepository } from '@/lib/storage/factory';
+import { createSprintRepository } from '@/lib/storage/factory';
 
 type RouteParams = { params: Promise<{ id: string }> };
 
@@ -16,7 +16,6 @@ export async function GET(request: Request, { params }: RouteParams) {
     const me = await getAuthContext(request);
     if (!me) return ApiErrors.unauthorized();
     if (me.rateLimitExceeded) return ApiErrors.tooManyRequests(me.rateLimitRemaining, me.rateLimitResetAt);
-    const ossMode = isOssMode();
     const dbClient = undefined;
 
     const repo = await createSprintRepository(dbClient);
@@ -35,7 +34,6 @@ export async function PATCH(request: Request, { params }: RouteParams) {
     const me = await getAuthContext(request);
     if (!me) return ApiErrors.unauthorized();
     if (me.rateLimitExceeded) return ApiErrors.tooManyRequests(me.rateLimitRemaining, me.rateLimitResetAt);
-    const ossMode = isOssMode();
     const dbClient = undefined;
 
     const parsed = await parseBody(request, updateSprintSchema);
@@ -56,7 +54,6 @@ export async function DELETE(request: Request, { params }: RouteParams) {
     const me = await getAuthContext(request);
     if (!me) return ApiErrors.unauthorized();
     if (me.rateLimitExceeded) return ApiErrors.tooManyRequests(me.rateLimitRemaining, me.rateLimitResetAt);
-    const ossMode = isOssMode();
     const dbClient = undefined;
 
     const repo = await createSprintRepository(dbClient);
