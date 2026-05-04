@@ -1,5 +1,5 @@
 import { handleApiError } from '@/lib/api-error';
-import { ApiErrors } from '@/lib/api-response';
+import { apiSuccess, ApiErrors } from '@/lib/api-response';
 import { getAuthContext } from '@/lib/auth-helpers';
 import { proxyToFastapi } from '@/lib/fastapi-proxy';
 
@@ -13,10 +13,12 @@ export async function GET(request: Request) {
     const url = new URL(request.url);
     url.searchParams.set('assignee_member_id', me.id);
 
-    return proxyToFastapi(
+    const _r = await proxyToFastapi(
       new Request(url.toString(), { method: 'GET', headers: request.headers }),
       '/api/v2/inbox',
     );
+    if (!_r.ok) return _r;
+    return apiSuccess(await _r.json());
   } catch (err: unknown) {
     return handleApiError(err);
   }
