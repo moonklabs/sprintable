@@ -105,6 +105,13 @@ export default function SettingsPage() {
   const isOss = process.env.NEXT_PUBLIC_OSS_MODE === 'true';
   const [isAdmin, setIsAdmin] = useState(isOss);
   const [adminChecked, setAdminChecked] = useState(isOss);
+  const [newMemberName, setNewMemberName] = useState('');
+  const [newMemberEmail, setNewMemberEmail] = useState('');
+  const [newMemberType, setNewMemberType] = useState<'human' | 'agent'>('human');
+  const [newMemberWebhookUrl, setNewMemberWebhookUrl] = useState('');
+  const [newMemberProjectId, setNewMemberProjectId] = useState('');
+  const [addingOssMember, setAddingOssMember] = useState(false);
+  const [addMemberResult, setAddMemberResult] = useState<{ type: 'success' | 'error'; text: string } | null>(null);
   const [deletingProjectId, setDeletingProjectId] = useState<string | null>(null);
   const [deleteProjectConfirmId, setDeleteProjectConfirmId] = useState<string | null>(null);
   const [projectInviteEmail, setProjectInviteEmail] = useState('');
@@ -440,6 +447,36 @@ export default function SettingsPage() {
     setRemovingMemberId(null);
   };
 
+  const handleAddOssMember = async () => {
+    if (!newMemberName.trim()) return;
+    setAddingOssMember(true);
+    setAddMemberResult(null);
+    const projectId = newMemberProjectId || memberProjectId || currentProjectId || '';
+    const body: Record<string, unknown> = {
+      name: newMemberName.trim(),
+      type: newMemberType,
+      project_id: projectId || undefined,
+    };
+    if (newMemberEmail.trim()) body.email = newMemberEmail.trim();
+    if (newMemberType === 'agent' && newMemberWebhookUrl.trim()) body.webhook_url = newMemberWebhookUrl.trim();
+    const res = await fetch('/api/team-members', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(body),
+    });
+    if (res.ok) {
+      setNewMemberName('');
+      setNewMemberEmail('');
+      setNewMemberWebhookUrl('');
+      setAddMemberResult({ type: 'success', text: `${newMemberType === 'agent' ? 'Agent' : 'Member'} "${newMemberName.trim()}" added` });
+      if (projectId) await refreshMemberData(projectId);
+    } else {
+      const json = await res.json().catch(() => null);
+      setAddMemberResult({ type: 'error', text: json?.error?.message ?? 'Failed to add member' });
+    }
+    setAddingOssMember(false);
+  };
+
   // suppress unused variable warning — createdProjectMembership used in future flows
   void createdProjectMembership;
   void projectMemberships;
@@ -721,6 +758,60 @@ export default function SettingsPage() {
 
             <TabsContent value="members">
               <div className="space-y-6">
+                {isOss ? (
+                  <SectionCard>
+                    <SectionCardHeader>
+                      <div className="space-y-1">
+                        <h2 className="text-base font-semibold text-foreground">Add Member</h2>
+                        <p className="text-sm text-muted-foreground">Add human or agent members directly to a project</p>
+                      </div>
+                    </SectionCardHeader>
+                    <SectionCardBody className="space-y-4">
+                      <div className="grid gap-3 md:grid-cols-[minmax(0,1fr)_minmax(0,1fr)_auto_auto]">
+                        <OperatorInput
+                          value={newMemberName}
+                          onChange={(e) => setNewMemberName(e.target.value)}
+                          placeholder="Name (required)"
+                        />
+                        <OperatorInput
+                          value={newMemberEmail}
+                          onChange={(e) => setNewMemberEmail(e.target.value)}
+                          placeholder="Email (optional)"
+                          type="email"
+                        />
+                        <OperatorDropdownSelect
+                          value={newMemberType}
+                          onValueChange={(v) => setNewMemberType(v as 'human' | 'agent')}
+                          options={[
+                            { value: 'human', label: 'Human' },
+                            { value: 'agent', label: 'Agent' },
+                          ]}
+                        />
+                        <OperatorDropdownSelect
+                          value={newMemberProjectId || memberProjectId || currentProjectId || ''}
+                          onValueChange={(v) => setNewMemberProjectId(v)}
+                          options={projects.map((p) => ({ value: p.id, label: p.name }))}
+                        />
+                      </div>
+                      {newMemberType === 'agent' ? (
+                        <OperatorInput
+                          value={newMemberWebhookUrl}
+                          onChange={(e) => setNewMemberWebhookUrl(e.target.value)}
+                          placeholder="Webhook URL (https://...)"
+                          type="url"
+                        />
+                      ) : null}
+                      <Button variant="hero" size="lg" onClick={handleAddOssMember} disabled={!newMemberName.trim() || addingOssMember}>
+                        {addingOssMember ? '...' : 'Add Member'}
+                      </Button>
+                      {addMemberResult ? (
+                        <div className={`rounded-md border p-3 text-xs ${addMemberResult.type === 'success' ? 'border-emerald-500/20 bg-emerald-500/10 text-emerald-600 dark:text-emerald-400' : 'border-destructive/20 bg-destructive/10 text-destructive'}`}>
+                          {addMemberResult.text}
+                        </div>
+                      ) : null}
+                    </SectionCardBody>
+                  </SectionCard>
+                ) : null}
                 <SectionCard>
                   <SectionCardHeader>
                     <div className="space-y-1">

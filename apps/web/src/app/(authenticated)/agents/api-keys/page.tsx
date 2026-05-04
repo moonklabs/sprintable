@@ -3,33 +3,11 @@ import { getMyTeamMember } from '@/lib/auth-helpers';
 import { requireOrgAdmin } from '@/lib/admin-check';
 import { AgentApiKeyManager } from '@/components/agents/agent-api-key-manager';
 import { AgentWebhookManager } from '@/components/agents/agent-webhook-manager';
-import { isOssMode, createTeamMemberRepository } from '@/lib/storage/factory';
+import { isOssMode } from '@/lib/storage/factory';
 
 export default async function ApiKeysPage() {
   if (isOssMode()) {
-    const { getOssUserContext } = await import('@/lib/auth-helpers');
-    const { me } = await getOssUserContext();
-    if (!me) return <div>No project</div>;
-    const repo = await createTeamMemberRepository();
-    const agents = await repo.list({ org_id: me.org_id, project_id: me.project_id });
-    const agentMembers = agents.filter((m) => m.type === 'agent' && m.is_active);
-    return (
-      <div className="flex min-h-0 flex-1 flex-col overflow-y-auto p-6 space-y-6">
-        <div>
-          <h2 className="text-base font-semibold text-foreground">Agent API Keys</h2>
-          <p className="mt-1 text-sm text-muted-foreground">Manage API keys for agent authentication</p>
-        </div>
-        {agentMembers.length === 0 ? (
-          <p className="text-muted-foreground">No agents found in this project</p>
-        ) : (
-          <div className="space-y-6">
-            {agentMembers.map((agent) => (
-              <AgentApiKeyManager key={agent.id} agentId={agent.id} agentName={agent.name} />
-            ))}
-          </div>
-        )}
-      </div>
-    );
+    redirect('/settings#members');
   }
   const db = null as any;
   const { data: { user } } = { data: { user: null } };
