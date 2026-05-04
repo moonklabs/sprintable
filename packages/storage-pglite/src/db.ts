@@ -311,6 +311,25 @@ async function _initSchema(db: PGlite): Promise<void> {
       scope TEXT DEFAULT '["read","write"]'
     );
 
+    CREATE TABLE IF NOT EXISTS agent_personas (
+      id TEXT PRIMARY KEY,
+      org_id TEXT NOT NULL,
+      project_id TEXT NOT NULL,
+      agent_id TEXT NOT NULL,
+      name TEXT NOT NULL,
+      slug TEXT NOT NULL,
+      description TEXT,
+      system_prompt TEXT NOT NULL DEFAULT '',
+      style_prompt TEXT,
+      model TEXT,
+      config TEXT NOT NULL DEFAULT '{}',
+      is_builtin INTEGER NOT NULL DEFAULT 0,
+      is_default INTEGER NOT NULL DEFAULT 0,
+      created_by TEXT,
+      created_at TEXT NOT NULL,
+      updated_at TEXT NOT NULL
+    );
+
     CREATE TABLE IF NOT EXISTS retro_sessions (
       id TEXT PRIMARY KEY,
       org_id TEXT NOT NULL,
@@ -376,6 +395,7 @@ async function _initSchema(db: PGlite): Promise<void> {
     CREATE INDEX IF NOT EXISTS idx_agent_runs_org_project ON agent_runs(org_id, project_id);
     CREATE INDEX IF NOT EXISTS idx_agent_runs_created_at ON agent_runs(created_at);
     CREATE INDEX IF NOT EXISTS idx_agent_api_keys_team_member ON agent_api_keys(team_member_id);
+    CREATE INDEX IF NOT EXISTS idx_agent_personas_project ON agent_personas(project_id);
     CREATE INDEX IF NOT EXISTS idx_retro_sessions_project ON retro_sessions(project_id);
     CREATE INDEX IF NOT EXISTS idx_retro_items_session ON retro_items(session_id);
     CREATE INDEX IF NOT EXISTS idx_retro_actions_session ON retro_actions(session_id);

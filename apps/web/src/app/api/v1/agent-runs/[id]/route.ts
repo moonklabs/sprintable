@@ -26,7 +26,28 @@ const _r = await proxyToFastapi(request, `/api/v2/agent-runs/${id}`);
 }
 
 export async function PATCH(request: Request, { params }: RouteParams) {
-  if (isOssMode()) return ApiErrors.badRequest('Not available in OSS mode');
+  if (isOssMode()) {
+    try {
+      const { id } = await params;
+      const me = await getAuthContext(request);
+      if (!me) return ApiErrors.unauthorized();
+      let body: unknown;
+      try { body = await request.json(); } catch { body = {}; }
+      const b = (body as Record<string, unknown>) ?? {};
+      const { getDb } = await import('@sprintable/storage-pglite');
+      const db = await getDb();
+      const sets: string[] = [];
+      const vals: unknown[] = [];
+      const allowed = ['status','result_summary','error_message','started_at','finished_at','duration_ms','input_tokens','output_tokens'] as const;
+      for (const k of allowed) {
+        if (k in b) { sets.push(`${k} = $${sets.length + 1}`); vals.push(b[k] ?? null); }
+      }
+      if (sets.length) await db.query(`UPDATE agent_runs SET ${sets.join(', ')} WHERE id = $${sets.length + 1} AND org_id = $${sets.length + 2}`, [...vals, id, me.org_id]);
+      const run = (await db.query('SELECT * FROM agent_runs WHERE id = $1', [id])).rows[0];
+      if (!run) return ApiErrors.notFound('Agent run not found');
+      return apiSuccess(run);
+    } catch (error) { return handleApiError(error); }
+  }
   const { id } = await params;
 const _r = await proxyToFastapi(request, `/api/v2/agent-runs/${id}`);
   if (!_r.ok) return _r;

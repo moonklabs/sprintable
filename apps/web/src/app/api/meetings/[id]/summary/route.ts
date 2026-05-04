@@ -15,7 +15,6 @@ export async function POST(request: Request, { params }: RouteParams) {
     if (!me) return ApiErrors.unauthorized();
     if (me.rateLimitExceeded) return ApiErrors.tooManyRequests(me.rateLimitRemaining, me.rateLimitResetAt);
 
-    if (isOssMode()) return ApiErrors.badRequest('AI summary not supported in OSS mode');
 
     const _r = await proxyToFastapiWithParams(request, '/api/v2/meetings/[id]/summary', { id });
     if (!_r.ok) return _r;
