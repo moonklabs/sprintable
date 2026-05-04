@@ -12,6 +12,8 @@ RUN uv sync --no-dev
 # 소스 복사
 COPY app/ app/
 COPY ee/ ee/
+COPY alembic.ini .
+COPY alembic/ alembic/
 
 ENV PATH="/app/.venv/bin:$PATH"
 
