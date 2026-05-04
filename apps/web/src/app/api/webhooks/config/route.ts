@@ -7,7 +7,7 @@ import { proxyToFastapi } from '@/lib/fastapi-proxy';
 export async function GET(request: Request) {
   if (isOssMode()) return apiError('NOT_AVAILABLE', 'Not available in OSS mode.', 503);
   try {
-    const _r = await proxyToFastapi(request, '/api/v2/webhooks');
+    const _r = await proxyToFastapi(request, '/api/v2/webhooks/config');
     if (!_r.ok) return _r;
     return apiSuccess(await _r.json());
   } catch (err: unknown) { return handleApiError(err); }
@@ -17,7 +17,7 @@ export async function GET(request: Request) {
 export async function PUT(request: Request) {
   if (isOssMode()) return apiError('NOT_AVAILABLE', 'Not available in OSS mode.', 503);
   try {
-    const _r = await proxyToFastapi(request, '/api/v2/webhooks');
+    const _r = await proxyToFastapi(request, '/api/v2/webhooks/config');
     if (!_r.ok) return _r;
     return apiSuccess(await _r.json());
   } catch (err: unknown) { return handleApiError(err); }
@@ -27,7 +27,7 @@ export async function PUT(request: Request) {
 export async function DELETE(request: Request) {
   if (isOssMode()) return apiError('NOT_AVAILABLE', 'Not available in OSS mode.', 503);
   try {
-    const _r = await proxyToFastapi(request, '/api/v2/webhooks');
+    const _r = await proxyToFastapi(request, '/api/v2/webhooks/config');
     if (!_r.ok) return _r;
     return apiSuccess(await _r.json());
   } catch (err: unknown) { return handleApiError(err); }
