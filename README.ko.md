@@ -44,8 +44,6 @@ HTTP 웹훅을 받을 수 있는 모든 에이전트가 작동합니다: Claude 
 
 - [Docker Desktop 4.x+](https://www.docker.com/products/docker-desktop/)
 
-Supabase 계정 불필요. Sprintable은 SQLite로 바로 동작합니다.
-
 ### 실행
 
 ```bash
@@ -56,17 +54,15 @@ cd sprintable
 # 2. 환경변수 설정
 cp .env.example .env
 # .env 파일 편집 — 기본값으로 로컬 사용 가능.
-# 네트워크에 노출하기 전에 AGENT_API_KEY_SECRET을 반드시 설정하세요.
+# 네트워크에 노출하기 전에 JWT_SECRET과 SECRET_KEY를 반드시 설정하세요.
 
 # 3. 실행
-docker compose -f docker-compose.oss.yml up
+docker compose up -d
 ```
 
 [http://localhost:3108](http://localhost:3108) 접속.
 
 첫 실행 시 샘플 프로젝트와 3개 스토리가 자동 생성됩니다.
-
-데이터는 `.data/sprintable.db`(SQLite)에 저장됩니다 — 외부로 나가는 데이터 없음.
 
 ---
 
@@ -192,15 +188,15 @@ Sprintable은 에이전트 협업의 단일 진실 소스입니다.
 
 ## 기술 스택
 
-| 레이어 | 기술 | 이유 |
-|---|---|---|
-| 프론트엔드 | Next.js 15, TypeScript, Tailwind, shadcn/ui | 빠른 반복, 타입 안전 |
-| 스토리지 (OSS) | SQLite via better-sqlite3 | 의존성 없는 로컬 스토리지 |
-| 스토리지 (Cloud) | Supabase | 관리형 Postgres + 실시간 (SaaS용) |
-| 에이전트 인터페이스 | MCP 서버 (`/mcp`) | 프레임워크 무관: Claude Code, 모든 MCP 클라이언트 |
-| 에이전트 기동 | HTTP 웹훅 (아웃바운드 POST) | HTTP 서빙 가능한 모든 에이전트 호환 |
-| 모노레포 | pnpm + Turborepo | 빠른 빌드, 패키지 공유 |
-| 라이선스 | AGPL-3.0 (OSS) + Commercial | 자유롭게 사용, 기여는 공유 |
+| 레이어 | 기술 |
+|---|---|
+| 프론트엔드 | Next.js 15, TypeScript, Tailwind, shadcn/ui |
+| 백엔드 | FastAPI (Python) |
+| 데이터베이스 | PostgreSQL |
+| 에이전트 인터페이스 | MCP 서버 (`/mcp`) |
+| 에이전트 기동 | HTTP 웹훅 (아웃바운드 POST) |
+| 모노레포 | pnpm + Turborepo |
+| 라이선스 | AGPL-3.0 (OSS) + Commercial |
 
 ---
 
@@ -211,13 +207,13 @@ Sprintable은 에이전트 협업의 단일 진실 소스입니다.
 | 변수 | 기본값 | 설명 |
 |---|---|---|
 | `APP_BASE_URL` | `http://localhost:3108` | 공개 URL (웹훅 링크에 사용) |
-| `OSS_MODE` | `true` | OSS/SQLite 모드 활성화 |
-| `SQLITE_PATH` | `./.data/sprintable.db` | SQLite 파일 경로 |
-| `AGENT_API_KEY_SECRET` | — | 에이전트 API 키 서명 — 프로덕션 전 반드시 변경 |
-| `PM_API_URL` | `http://localhost:3108` | MCP 서버 → 웹 앱 내부 URL |
+| `POSTGRES_DB` | `sprintable` | PostgreSQL 데이터베이스 이름 |
+| `POSTGRES_USER` | `sprintable` | PostgreSQL 사용자 |
+| `POSTGRES_PASSWORD` | — | PostgreSQL 비밀번호 — 프로덕션 전 반드시 변경 |
+| `JWT_SECRET` | — | JWT 토큰 서명 — 프로덕션 전 반드시 변경 |
+| `SECRET_KEY` | — | 애플리케이션 시크릿 키 — 프로덕션 전 반드시 변경 |
+| `NEXT_PUBLIC_FASTAPI_URL` | `http://localhost:8000` | FastAPI 백엔드 URL |
 | `GITHUB_WEBHOOK_SECRET` | — | 선택: PR 머지 시 티켓 자동 종료 |
-
-Supabase 변수는 `OSS_MODE=false` (Cloud/SaaS 배포) 시에만 필요합니다.
 
 ---
 

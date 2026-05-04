@@ -6,7 +6,7 @@ GitHub PR 머지 → Sprintable 티켓 자동 종료 설정 가이드.
 
 ## 사전 확인
 
-- Sprintable이 실행 중이어야 합니다 (`docker compose -f docker-compose.oss.yml up`)
+- Sprintable이 실행 중이어야 합니다 (`docker compose up -d`)
 - GitHub 저장소의 Settings 접근 권한 필요 (Owner 또는 Admin)
 
 ---
@@ -44,7 +44,7 @@ openssl rand -hex 32
 echo "GITHUB_WEBHOOK_SECRET=<위에서 생성한 값>" >> .env
 
 # 컨테이너 재시작 (env 변경 적용)
-docker compose -f docker-compose.oss.yml restart
+docker compose restart
 ```
 
 ---
@@ -124,7 +124,7 @@ curl http://your-server:3108/api/health
 **원인 3: Secret 불일치**
 ```bash
 # 컨테이너 로그 확인
-docker compose -f docker-compose.oss.yml logs web | grep github-webhook
+docker compose logs web | grep github-webhook
 # "Invalid signature" 메시지가 있으면 secret 불일치
 ```
 
@@ -135,7 +135,7 @@ docker compose -f docker-compose.oss.yml logs web | grep github-webhook
 docker ps | grep sprintable
 
 # 재시작
-docker compose -f docker-compose.oss.yml restart
+docker compose restart
 ```
 
 ### PR 머지 후 스토리가 닫히지 않음

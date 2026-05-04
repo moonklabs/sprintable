@@ -69,20 +69,6 @@ No context lost between handoffs. Every decision lives in the memo thread. Any a
 
 ---
 
-## OSS vs Cloud
-
-| | OSS (self-hosted) | Cloud (SaaS) |
-|---|---|---|
-| Storage | SQLite — zero-dependency, single file | Supabase (managed Postgres) |
-| Scale | Single team, local development | Multi-org, team collaboration |
-| Pricing | Free (AGPL-3.0) | Org flat-rate — agents don't cost extra seats |
-| Setup | Docker, 1 minute | [app.sprintable.ai](https://app.sprintable.ai) |
-| Data | Stays on your machine | Managed cloud with row-level security |
-
-The OSS version is the full product, not a demo. Same codebase, same MCP tools, same workflow engine.
-
----
-
 ## Screenshots
 
 ![Kanban board with stories and sprint tracking](docs/screenshots/kanban-board.png)
@@ -103,8 +89,6 @@ The OSS version is the full product, not a demo. Same codebase, same MCP tools, 
 
 - [Docker Desktop 4.x+](https://www.docker.com/products/docker-desktop/)
 
-No Supabase account required. Sprintable runs on SQLite out of the box.
-
 ### Run
 
 ```bash
@@ -115,17 +99,15 @@ cd sprintable
 # 2. Configure
 cp .env.example .env
 # Edit .env — the defaults work for local use.
-# Set a real AGENT_API_KEY_SECRET before exposing to a network.
+# Set a real JWT_SECRET and SECRET_KEY before exposing to a network.
 
 # 3. Start
-docker compose -f docker-compose.oss.yml up
+docker compose up -d
 ```
 
 Open [http://localhost:3108](http://localhost:3108).
 
 On first run, a sample project with 3 stories is created automatically.
-
-Data is stored in SQLite at `.data/sprintable.db` — nothing leaves your machine.
 
 ---
 
@@ -258,8 +240,8 @@ Full tool reference: [llms-full.txt](https://app.sprintable.ai/llms-full.txt)
 | Layer | Technology |
 |---|---|
 | Frontend | Next.js 15, TypeScript, Tailwind, shadcn/ui |
-| Storage (OSS) | SQLite via better-sqlite3 |
-| Storage (Cloud) | Supabase (Postgres + RLS + realtime) |
+| Backend | FastAPI (Python) |
+| Database | PostgreSQL |
 | Agent interface | MCP server at `/mcp` |
 | Agent wakeup | HTTP webhooks (outbound POST) |
 | Monorepo | pnpm + Turborepo |
@@ -273,13 +255,13 @@ Copy `.env.example` to `.env` and edit as needed.
 | Variable | Default | Description |
 |---|---|---|
 | `APP_BASE_URL` | `http://localhost:3108` | Public URL (used in webhook payloads) |
-| `OSS_MODE` | `true` | Enable OSS/SQLite mode |
-| `SQLITE_PATH` | `./.data/sprintable.db` | SQLite file path |
-| `AGENT_API_KEY_SECRET` | — | Signs agent API keys — set before production |
-| `PM_API_URL` | `http://localhost:3108` | Internal URL for MCP server |
+| `POSTGRES_DB` | `sprintable` | PostgreSQL database name |
+| `POSTGRES_USER` | `sprintable` | PostgreSQL user |
+| `POSTGRES_PASSWORD` | — | PostgreSQL password — set before production |
+| `JWT_SECRET` | — | Signs JWT tokens — set before production |
+| `SECRET_KEY` | — | Application secret key — set before production |
+| `NEXT_PUBLIC_FASTAPI_URL` | `http://localhost:8000` | FastAPI backend URL |
 | `GITHUB_WEBHOOK_SECRET` | — | Optional: auto-close stories on PR merge |
-
-Supabase variables are only needed when `OSS_MODE=false` (Cloud/SaaS deployment).
 
 ---
 
