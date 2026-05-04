@@ -24,7 +24,6 @@ vi.mock('@/lib/db/server', () => ({ createDbServerClient }));
 vi.mock('@/lib/db/admin', () => ({ createAdminClient }));
 vi.mock('@/lib/auth-helpers', () => ({ getAuthContext }));
 vi.mock('@/lib/storage/factory', () => ({
-  isOssMode: () => false,
   createDocRepository: vi.fn().mockResolvedValue({
     getById: vi.fn().mockResolvedValue({ id: 'doc-1', org_id: 'org-1', doc_type: 'page' }),
     update: vi.fn().mockResolvedValue({ id: 'doc-1', updated_at: '2026-04-09T15:21:00.000Z' }),

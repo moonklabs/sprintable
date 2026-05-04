@@ -5,13 +5,11 @@ const {
   createAdminClient,
   getAuthContext,
   createInboxItemRepository,
-  isOssMode,
 } = vi.hoisted(() => ({
   createDbServerClient: vi.fn(),
   createAdminClient: vi.fn(),
   getAuthContext: vi.fn(),
   createInboxItemRepository: vi.fn(),
-  isOssMode: vi.fn(() => false),
 }));
 
 vi.mock('@/lib/db/server', () => ({ createDbServerClient }));
@@ -20,7 +18,7 @@ vi.mock('@/lib/auth-helpers', async () => {
   const actual = await vi.importActual<typeof import('@/lib/auth-helpers')>('@/lib/auth-helpers');
   return { ...actual, getAuthContext };
 });
-vi.mock('@/lib/storage/factory', () => ({ createInboxItemRepository, isOssMode }));
+vi.mock('@/lib/storage/factory', () => ({ createInboxItemRepository }));
 
 import { POST } from './route';
 import { NotFoundError } from '@sprintable/core-storage';
@@ -52,7 +50,6 @@ const PARAMS = { params: Promise.resolve({ id: 'i1' }) };
 describe('POST /api/inbox/[id]/resolve', () => {
   beforeEach(() => {
     vi.clearAllMocks();
-    isOssMode.mockReturnValue(false);
     createDbServerClient.mockResolvedValue({});
     getAuthContext.mockResolvedValue(ME);
   });
@@ -129,12 +126,5 @@ describe('POST /api/inbox/[id]/resolve', () => {
     expect(res.status).toBe(400);
   });
 
-  it('OSS mode passes undefined dbClient', async () => {
-    isOssMode.mockReturnValue(true);
-    const repo = { resolve: vi.fn().mockResolvedValue({ id: 'i1', state: 'resolved' }) };
-    createInboxItemRepository.mockResolvedValue(repo);
-
-    await POST(makeRequest({ choice: VALID_OPTION_ID }), PARAMS);
-    expect(createInboxItemRepository).toHaveBeenCalledWith(undefined);
-  });
 });
+
