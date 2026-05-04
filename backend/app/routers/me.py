@@ -1,7 +1,7 @@
 import uuid
 
 from fastapi import APIRouter, Depends, HTTPException, Query
-from sqlalchemy import or_, select
+from sqlalchemy import select
 from sqlalchemy.orm import joinedload
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -42,10 +42,7 @@ async def get_my_memberships(
         select(TeamMember)
         .options(joinedload(TeamMember.project))
         .where(
-            or_(
-                TeamMember.id == uuid.UUID(auth.user_id),
-                TeamMember.user_id == uuid.UUID(auth.user_id),
-            ),
+            TeamMember.user_id == uuid.UUID(auth.user_id),
             TeamMember.is_active.is_(True),
             TeamMember.type == "human",
         )
