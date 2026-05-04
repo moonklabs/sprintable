@@ -102,8 +102,9 @@ export default function SettingsPage() {
   const [memberActionMessage, setMemberActionMessage] = useState<{ type: 'success' | 'error'; text: string } | null>(null);
   const [addingMember, setAddingMember] = useState(false);
   const [removingMemberId, setRemovingMemberId] = useState<string | null>(null);
-  const [isAdmin, setIsAdmin] = useState(false);
-  const [adminChecked, setAdminChecked] = useState(false);
+  const isOss = process.env.NEXT_PUBLIC_OSS_MODE === 'true';
+  const [isAdmin, setIsAdmin] = useState(isOss);
+  const [adminChecked, setAdminChecked] = useState(isOss);
   const [deletingProjectId, setDeletingProjectId] = useState<string | null>(null);
   const [deleteProjectConfirmId, setDeleteProjectConfirmId] = useState<string | null>(null);
   const [projectInviteEmail, setProjectInviteEmail] = useState('');
