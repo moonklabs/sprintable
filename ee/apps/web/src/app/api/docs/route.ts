@@ -9,7 +9,7 @@ import { apiSuccess, apiError, ApiErrors } from '@/lib/api-response';
 import { buildCursorPageMeta, parseCursorPageInput } from '@/lib/pagination';
 import { checkEntitlement } from '@/lib/entitlement';
 import { incrementUsage } from '@/lib/usage-tracker';
-import { isOssMode, createDocRepository } from '@/lib/storage/factory';
+import { createDocRepository } from '@/lib/storage/factory';
 import { getTeamMemberRole, hasRole } from '@/lib/doc-permissions';
 
 export async function GET(request: Request) {
@@ -18,8 +18,7 @@ export async function GET(request: Request) {
     const me = await getAuthContext(supabase, request);
     if (!me) return ApiErrors.unauthorized();
     if (me.rateLimitExceeded) return ApiErrors.tooManyRequests(me.rateLimitRemaining, me.rateLimitResetAt);
-    const ossMode = isOssMode();
-    const dbClient = ossMode ? undefined : (me.type === 'agent' ? createSupabaseAdminClient() : supabase);
+    const dbClient = me.type === 'agent' ? createSupabaseAdminClient() : supabase;
     const { searchParams } = new URL(request.url);
     const projectId = searchParams.get('project_id');
     if (!projectId) return ApiErrors.badRequest('project_id required');
@@ -54,20 +53,17 @@ export async function POST(request: Request) {
     const me = await getAuthContext(supabase, request);
     if (!me) return ApiErrors.unauthorized();
     if (me.rateLimitExceeded) return ApiErrors.tooManyRequests(me.rateLimitRemaining, me.rateLimitResetAt);
-    const ossMode = isOssMode();
-    const dbClient = ossMode ? undefined : (me.type === 'agent' ? createSupabaseAdminClient() : supabase);
-    if (!ossMode && me.type !== 'agent') {
+    const dbClient = me.type === 'agent' ? createSupabaseAdminClient() : supabase;
+    if (me.type !== 'agent') {
       const role = await getTeamMemberRole(supabase, me.id);
       if (!role || !hasRole(role, 'admin')) {
         return apiError('FORBIDDEN', 'Document creation requires admin or owner role', 403);
       }
     }
-    if (!ossMode) {
-      const ent = await checkEntitlement(supabase, me.org_id, 'docs');
-      if (!ent.allowed) return apiError('quota_exceeded', `Doc quota exceeded (${ent.current}/${ent.limit})`, 402, { resource: 'docs', current: ent.current, limit: ent.limit, upgradeUrl: ent.upgradeUrl });
-    }
+    const ent = await checkEntitlement(supabase, me.org_id, 'docs');
+    if (!ent.allowed) return apiError('quota_exceeded', `Doc quota exceeded (${ent.current}/${ent.limit})`, 402, { resource: 'docs', current: ent.current, limit: ent.limit, upgradeUrl: ent.upgradeUrl });
     const parsed = await parseBody(request, createDocSchema); if (!parsed.success) return parsed.response; const body = parsed.data;
-    if (!ossMode && me.type !== 'agent' && body.is_folder) {
+    if (me.type !== 'agent' && body.is_folder) {
       const role = await getTeamMemberRole(supabase, me.id);
       if (!role || !hasRole(role, 'owner')) {
         return apiError('FORBIDDEN', 'Folder creation requires owner role', 403);
@@ -81,7 +77,7 @@ export async function POST(request: Request) {
       icon: body.icon ?? null, tags: body.tags ?? [],
       parent_id: body.parent_id ?? undefined, is_folder: body.is_folder ?? false, created_by: me.id,
     });
-    if (!ossMode) void incrementUsage(me.org_id, 'docs');
+    void incrementUsage(me.org_id, 'docs');
     return apiSuccess(doc, undefined, 201);
   } catch (err: unknown) { return handleApiError(err); }
 }

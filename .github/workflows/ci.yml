@@ -59,17 +59,7 @@ jobs:
       - name: Test
         run: pnpm vitest run 2>&1 | tail -80
 
-      # AC2: OSS 빌드 (LICENSE_CONSENT unset — ee/ 기능 비활성화)
-      - name: Build (OSS mode)
-        run: pnpm build
-        env:
-          NEXT_PUBLIC_SUPABASE_URL: https://placeholder.supabase.co
-          NEXT_PUBLIC_SUPABASE_ANON_KEY: ci-placeholder
-          OSS_MODE: 'true'
-          NEXT_PUBLIC_OSS_MODE: 'true'
-
-      # AC3: EE 빌드 (LICENSE_CONSENT=agreed — ee/ 기능 활성화)
-      - name: Build (EE mode — LICENSE_CONSENT=agreed)
+      - name: Build
         run: pnpm build
         env:
           NEXT_PUBLIC_SUPABASE_URL: https://placeholder.supabase.co
