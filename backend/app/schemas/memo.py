@@ -50,6 +50,7 @@ class CreateReply(BaseModel):
     content: str
     created_by: uuid.UUID
     review_type: str = "comment"
+    assigned_to_ids: list[uuid.UUID] | None = None
 
 
 class ReplyResponse(BaseModel):
