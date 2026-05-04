@@ -8,11 +8,11 @@ export async function register() {
   if (process.env.NODE_ENV === 'test') return;
 
   if (process.env.NEXT_RUNTIME === 'nodejs') {
-    // OSS 모드: PGLite DB 초기화 (최초 기동 시 ~/.sprintable/data/pglite/ 생성)
-    if (process.env['OSS_MODE'] === 'true') {
-      const { getDb } = await import('@sprintable/storage-pglite');
-      await getDb();
-    }
+    // OSS 모드: PGLite는 첫 요청 시 lazy init (WASM은 instrumentation hook에서 불안정)
+    // if (process.env['OSS_MODE'] === 'true') {
+    //   const { getDb } = await import('@sprintable/storage-pglite');
+    //   await getDb();
+    // }
 
     if (globalThis.__backgroundRuntimeWorker) return;
 
