@@ -18,7 +18,7 @@ export async function POST(request: Request, { params }: RouteParams) {
     const dbClient = undefined;
 
     const body = await request.json().catch(() => ({})) as { message?: string };
-    const repo = await createSprintRepository(dbClient);
+    const repo = await createSprintRepository();
     const service = new SprintService(repo, dbClient as any | undefined);
     const data = await service.kickoff(id, body.message);
     return apiSuccess(data);

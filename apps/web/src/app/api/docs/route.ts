@@ -16,7 +16,7 @@ export async function GET(request: Request) {
     const { searchParams } = new URL(request.url);
     const projectId = searchParams.get('project_id');
     if (!projectId) return ApiErrors.badRequest('project_id required');
-    const repo = await createDocRepository(dbClient);
+    const repo = await createDocRepository();
     const service = new DocsService(repo, dbClient);
     const slug = searchParams.get('slug');
     if (slug) return apiSuccess(await service.getDoc(projectId, slug));
@@ -53,7 +53,7 @@ export async function POST(request: Request) {
     const check = await checkResourceLimit(dbClient, me.org_id, 'max_docs', 'docs');
     if (!check.allowed) return apiError('UPGRADE_REQUIRED', check.reason ?? 'Document limit reached. Upgrade to Team.', 403);
     const parsed = await parseBody(request, createDocSchema); if (!parsed.success) return parsed.response; const body = parsed.data;
-    const repo = await createDocRepository(dbClient);
+    const repo = await createDocRepository();
     const service = new DocsService(repo, dbClient);
     const doc = await service.createDoc({
       org_id: me.org_id, project_id: me.project_id,

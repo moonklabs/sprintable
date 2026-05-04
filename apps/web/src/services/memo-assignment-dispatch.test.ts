@@ -7,7 +7,6 @@ const { createAdminClient } = vi.hoisted(() => ({
 vi.mock('@/lib/db/admin', () => ({ createAdminClient }));
 
 vi.mock('@/lib/storage/factory', () => ({
-  isOssMode: vi.fn(() => false),
   createTeamMemberRepository: vi.fn(),
 }));
 

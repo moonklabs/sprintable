@@ -1,6 +1,5 @@
 import { handleApiError } from '@/lib/api-error';
 import { apiSuccess, apiError } from '@/lib/api-response';
-;
 import { proxyToFastapi } from '@/lib/fastapi-proxy';
 
 /** GET — 내 웹훅 설정 목록 */

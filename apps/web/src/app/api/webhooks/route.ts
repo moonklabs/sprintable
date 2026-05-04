@@ -2,7 +2,6 @@ import { handleApiError } from '@/lib/api-error';
 import { getMyTeamMember } from '@/lib/auth-helpers';
 import { requireOrgAdmin } from '@/lib/admin-check';
 import { apiSuccess, apiError, ApiErrors } from '@/lib/api-response';
-;
 
 export async function GET(request: Request) {
   try {

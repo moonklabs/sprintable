@@ -1,7 +1,6 @@
 import { handleApiError } from '@/lib/api-error';
 import { apiSuccess, apiError, ApiErrors } from '@/lib/api-response';
 import { getAuthContext } from '@/lib/auth-helpers';
-;
 import { proxyToFastapi } from '@/lib/fastapi-proxy';
 import { checkResourceLimit } from '@/lib/check-feature';
 
@@ -24,6 +23,7 @@ export async function POST(request: Request) {
     const me = await getAuthContext(request);
     if (!me) return ApiErrors.unauthorized();
     if (me.rateLimitExceeded) return ApiErrors.tooManyRequests(me.rateLimitRemaining, me.rateLimitResetAt);
+
 
     // AC8: Feature gating (SaaS only)
     const check = await checkResourceLimit(undefined, me.org_id, 'max_meetings', 'meetings');

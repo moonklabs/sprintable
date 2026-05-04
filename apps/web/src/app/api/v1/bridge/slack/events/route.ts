@@ -1,10 +1,6 @@
-import { apiError } from '@/lib/api-response';
-;
-
 const FASTAPI_URL = () => process.env['NEXT_PUBLIC_FASTAPI_URL'] ?? 'http://localhost:8000';
 
 export async function POST(request: Request) {
-
   const rawBody = await request.text();
   const headers: Record<string, string> = {
     'Content-Type': request.headers.get('Content-Type') ?? 'application/json',

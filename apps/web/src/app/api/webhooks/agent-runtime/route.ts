@@ -1,6 +1,5 @@
 import { proxyToFastapi } from '@/lib/fastapi-proxy';
-import { apiSuccess, apiError } from '@/lib/api-response';
-;
+import { apiSuccess } from '@/lib/api-response';
 
 export async function POST(request: Request) {
   const _r = await proxyToFastapi(request, '/api/v2/webhooks/agent-runtime');

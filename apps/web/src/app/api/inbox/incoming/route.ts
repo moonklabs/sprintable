@@ -42,7 +42,7 @@ export async function POST(request: Request) {
       return ApiErrors.validationFailed(issues);
     }
 
-    const repo = await createInboxItemRepository(undefined);
+    const repo = await createInboxItemRepository();
 
     const item = await repo.create({
       org_id: orgIdHeader,

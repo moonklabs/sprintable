@@ -38,7 +38,7 @@ export async function POST(request: Request) {
       }
     }
     const dbClient = undefined;
-    const repo = await createMemoRepository(dbClient);
+    const repo = await createMemoRepository();
     const teamMemberRepo = await createTeamMemberRepository();
     const projectRepo = await createProjectRepository();
     const service = new MemoService(repo, dbClient, teamMemberRepo, projectRepo);
@@ -79,7 +79,7 @@ export async function GET(request: Request) {
       cursor: searchParams.get('cursor'),
     }, { defaultLimit: 30, maxLimit: 100 });
     const dbClient = undefined;
-    const repo = await createMemoRepository(dbClient);
+    const repo = await createMemoRepository();
     const service = new MemoService(repo, dbClient);
     const memos = await service.list({
       org_id: me.org_id,

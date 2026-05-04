@@ -282,7 +282,7 @@ export class AgentBuiltinToolService {
   private async getEpicService(): Promise<EpicService> {
     if (this._epicService) return this._epicService;
     if (!this._epicServicePromise) {
-      this._epicServicePromise = createEpicRepository(this.db).then((repo) => new EpicService(repo));
+      this._epicServicePromise = createEpicRepository().then((repo) => new EpicService(repo));
     }
     this._epicService = await this._epicServicePromise;
     return this._epicService;

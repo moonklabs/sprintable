@@ -60,7 +60,7 @@ export async function GET(request: Request) {
       cursor: searchParams.get('cursor'),
     }, { defaultLimit: 50, maxLimit: 100 });
 
-    const repo = await createTaskRepository(dbClient);
+    const repo = await createTaskRepository();
     const service = new TaskService(repo);
 
     // story_ids: 일괄 조회 (kanban board N+1 방지용)
@@ -115,7 +115,7 @@ export async function POST(request: Request) {
     const dbClient: any = undefined;
 
     const parsed = await parseBody(request, createTaskSchema); if (!parsed.success) return parsed.response; const body = parsed.data;
-    const repo = await createTaskRepository(dbClient);
+    const repo = await createTaskRepository();
     const service = new TaskService(repo);
     const task = await service.create(body as CreateTaskInput);
     return apiSuccess(task, undefined, 201);

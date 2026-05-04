@@ -22,7 +22,6 @@ const PUBLIC_PREFIX = [
 export const SP_AT_COOKIE = 'sp_at';
 export const SP_RT_COOKIE = 'sp_rt';
 
-
 function getJwtSecretBytes(): Uint8Array {
   const secret = process.env['JWT_SECRET'] ?? '';
   return new TextEncoder().encode(secret);

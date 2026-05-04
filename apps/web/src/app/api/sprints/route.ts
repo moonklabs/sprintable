@@ -23,7 +23,7 @@ export async function POST(request: Request) {
     if (!body.org_id) body.org_id = me.org_id;
     const parsed = createSprintSchema.safeParse(body);
     if (!parsed.success) return apiError('VALIDATION_ERROR', JSON.stringify(parsed.error.issues), 400);
-    const repo = await createSprintRepository(dbClient);
+    const repo = await createSprintRepository();
     const service = new SprintService(repo, dbClient as any | undefined);
     const sprint = await service.create(parsed.data as CreateSprintInput);
     return apiSuccess(sprint, undefined, 201);
@@ -41,7 +41,7 @@ export async function GET(request: Request) {
     const dbClient = undefined;
 
     const { searchParams } = new URL(request.url);
-    const repo = await createSprintRepository(dbClient);
+    const repo = await createSprintRepository();
     const service = new SprintService(repo, dbClient as any | undefined);
     const sprints = await service.list({
       project_id: searchParams.get('project_id') ?? undefined,
