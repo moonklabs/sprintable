@@ -119,30 +119,9 @@ async def _build_app_metadata(user: User, session: AsyncSession) -> dict:
             member.user_id = user.id
 
     if not member:
-        # 3. stale Supabase UID 감지: user_id가 users 테이블에 존재하지 않는 레코드
-        # (Supabase→Cloud SQL 마이그레이션 잔존 — 미등록 유저 최초 로그인 시 자동 교정)
-        stale_exists = (
-            select(User.id).where(User.id == TeamMember.user_id).correlates(TeamMember).exists()
-        )
-        result3 = await session.execute(
-            select(TeamMember)
-            .where(
-                TeamMember.user_id.is_not(None),
-                TeamMember.is_active.is_(True),
-                TeamMember.type == "human",
-                ~stale_exists,
-            )
-            .order_by(TeamMember.created_at.asc())
-            .limit(1)
-        )
-        member = result3.scalar_one_or_none()
-        if member:
-            member.user_id = user.id
-
-    if not member:
         return {}
 
-    # 4. 같은 org의 user_id NULL 레코드 전량 백필 (교차 프로젝트 멤버십 해소)
+    # 3. 같은 org의 user_id NULL 레코드 전량 백필 (교차 프로젝트 멤버십 해소)
     await session.execute(
         update(TeamMember)
         .where(
