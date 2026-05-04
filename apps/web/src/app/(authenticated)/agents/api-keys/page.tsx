@@ -3,12 +3,8 @@ import { getMyTeamMember } from '@/lib/auth-helpers';
 import { requireOrgAdmin } from '@/lib/admin-check';
 import { AgentApiKeyManager } from '@/components/agents/agent-api-key-manager';
 import { AgentWebhookManager } from '@/components/agents/agent-webhook-manager';
-import { isOssMode } from '@/lib/storage/factory';
 
 export default async function ApiKeysPage() {
-  if (isOssMode()) {
-    redirect('/settings?tab=members');
-  }
   const db = null as any;
   const { data: { user } } = { data: { user: null } };
   if (!user) redirect('/login');

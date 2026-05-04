@@ -2,11 +2,8 @@
 
 import { useState } from 'react';
 import { useRouter, useSearchParams } from 'next/navigation';
-import Link from 'next/link';
 import { SprintableLogo } from '@/components/brand/sprintable-logo';
 import { loginWithPassword } from '@/lib/db/client';
-
-const IS_OSS = process.env['NEXT_PUBLIC_OSS_MODE'] === 'true';
 
 const OAUTH_ERROR_MESSAGES: Record<string, string> = {
   oauth_init_failed: 'OAuth authentication failed. Please try again.',
@@ -34,22 +31,6 @@ export default function LoginPage() {
     setLoading(true);
     setError(null);
     try {
-      if (IS_OSS) {
-        const res = await fetch('/api/auth/login', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ email: email.trim(), password }),
-        });
-        const json = await res.json() as { error?: { code: string; message: string } };
-        if (!res.ok) {
-          setError(json.error?.message ?? 'Login failed. Please try again.');
-          return;
-        }
-        router.push('/inbox');
-        router.refresh();
-        return;
-      }
-
       const result = await loginWithPassword(email.trim(), password, showTotp ? totpCode : undefined);
       if (result.error) {
         if (result.error.code === 'TOTP_REQUIRED') {
@@ -127,15 +108,7 @@ export default function LoginPage() {
           </button>
         </div>
 
-        {IS_OSS ? (
-          <p className="text-center text-sm text-gray-500">
-            No account?{' '}
-            <Link href="/register" className="font-medium text-blue-600 hover:underline">
-              Create one
-            </Link>
-          </p>
-        ) : (
-          <div className="space-y-3">
+        <div className="space-y-3">
             <div className="relative flex items-center">
               <div className="flex-grow border-t border-gray-200" />
               <span className="mx-3 flex-shrink text-xs text-gray-400">or continue with</span>
@@ -159,7 +132,6 @@ export default function LoginPage() {
               Continue with GitHub
             </a>
           </div>
-        )}
       </div>
     </div>
   );

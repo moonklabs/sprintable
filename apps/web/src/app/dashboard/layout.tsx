@@ -1,7 +1,6 @@
 import { redirect } from 'next/navigation';
-import { isOssMode } from '@/lib/storage/factory';
+;
 import { getServerSession } from '@/lib/db/server';
-import { getOssUserContext } from '@/lib/auth-helpers';
 import { DashboardShell } from './dashboard-shell';
 import { fastapiCall } from '@sprintable/storage-api';
 
@@ -17,21 +16,6 @@ export default async function DashboardLayout({
 }: {
   children: React.ReactNode;
 }) {
-  if (isOssMode()) {
-    const { me, memberships } = await getOssUserContext();
-    return (
-      <DashboardShell
-        currentTeamMemberId={me?.id}
-        orgId={me?.org_id}
-        projectId={me?.project_id}
-        projectName={me?.project_name}
-        projectMemberships={memberships.map((membership) => ({ projectId: membership.project_id, projectName: membership.project_name }))}
-      >
-        {children}
-      </DashboardShell>
-    );
-  }
-
   try {
     const session = await getServerSession();
     if (!session) redirect('/login');
