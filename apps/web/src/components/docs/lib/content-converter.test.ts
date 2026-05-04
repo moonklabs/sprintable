@@ -57,8 +57,8 @@ describe('markdownToHtml', () => {
   it('converts ordered lists into ol blocks', () => {
     const result = markdownToHtml('1. one\n2. two');
     expect(result).toContain('<ol>');
-    expect(result).toContain('<li>one</li>');
-    expect(result).toContain('<li>two</li>');
+    expect(result).toContain('<li><p>one</p></li>');
+    expect(result).toContain('<li><p>two</p></li>');
   });
 
   it('converts blockquotes', () => {
@@ -137,8 +137,8 @@ describe('htmlToMarkdown', () => {
 
   it('preserves ordered lists through roundtrip conversion', () => {
     const markdown = '1. one\n2. two';
-    expect(htmlToMarkdown(markdownToHtml(markdown))).toContain('1.  one');
-    expect(htmlToMarkdown(markdownToHtml(markdown))).toContain('2.  two');
+    expect(htmlToMarkdown(markdownToHtml(markdown))).toContain('1. one');
+    expect(htmlToMarkdown(markdownToHtml(markdown))).toContain('2. two');
   });
 
   it('preserves markdown tables through roundtrip conversion', () => {

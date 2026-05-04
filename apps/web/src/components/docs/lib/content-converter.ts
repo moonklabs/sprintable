@@ -13,6 +13,27 @@ const turndown = new TurndownService({
 // TipTap handles structural formatting; no inline text escaping is needed.
 (turndown as unknown as { escape: (str: string) => string }).escape = (str: string) => str;
 
+// Custom list item rule — produces compact format regardless of whether
+// TipTap wrapped the content in <p> tags (which it always does via schema normalization).
+// Without this, Turndown outputs "loose" lists with blank lines between items:
+//   -   item\n    \n-   next  →  fixed to:  - item\n- next
+turndown.addRule('compactListItem', {
+  filter: 'li',
+  replacement: (content, node) => {
+    const clean = content
+      .replace(/^\n+/, '')       // strip leading newlines from <p>
+      .replace(/\n\s*\n/g, '\n') // collapse blank lines
+      .trimEnd();
+    const isOrdered = (node as HTMLElement).parentElement?.nodeName === 'OL';
+    if (isOrdered) {
+      const siblings = Array.from((node as HTMLElement).parentElement?.children ?? []);
+      const index = siblings.indexOf(node as HTMLElement) + 1;
+      return `${index}. ${clean}\n`;
+    }
+    return `- ${clean}\n`;
+  },
+});
+
 // Preserve page-embed atoms — must be before the generic block rule
 turndown.addRule('pageEmbed', {
   filter: (node) => node.nodeName === 'DIV' && node.hasAttribute('data-page-embed'),
@@ -185,7 +206,7 @@ export function markdownToHtml(rawMd: string): string {
       return listBlock;
     }
 
-    return `<ol>${items.map((item) => `<li>${item}</li>`).join('')}</ol>`;
+    return `<ol>${items.map((item) => `<li><p>${item}</p></li>`).join('')}</ol>`;
   });
 
   // Unordered lists
@@ -200,7 +221,7 @@ export function markdownToHtml(rawMd: string): string {
       return listBlock;
     }
 
-    return `<ul>${items.map((item) => `<li>${item}</li>`).join('')}</ul>`;
+    return `<ul>${items.map((item) => `<li><p>${item}</p></li>`).join('')}</ul>`;
   });
 
   // Paragraphs - wrap remaining plain-text lines (exclude HTML tags and code block/atom placeholders)
