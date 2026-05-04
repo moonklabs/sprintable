@@ -1,10 +1,7 @@
 import { handleApiError } from '@/lib/api-error';
 import { apiSuccess, ApiErrors } from '@/lib/api-response';
 import { getAuthContext } from '@/lib/auth-helpers';
-;
 import { proxyToFastapiWithParams } from '@/lib/fastapi-proxy';
-import { getOssRetroSession, listOssRetroItems, listOssRetroActions, advanceOssRetroPhase } from '@/lib/oss-retro';
-import type { RetroPhase } from '@/lib/oss-retro';
 
 type RouteParams = { params: Promise<{ id: string }> };
 
@@ -20,7 +17,7 @@ export async function GET(request: Request, { params }: RouteParams) {
     const projectId = searchParams.get('project_id');
     if (!projectId) return ApiErrors.badRequest('project_id required');
 
-const _r = await proxyToFastapiWithParams(request, '/api/v2/retros/[id]', { id });
+    const _r = await proxyToFastapiWithParams(request, '/api/v2/retros/[id]', { id });
     if (!_r.ok) return _r;
     if (_r.status === 204) return apiSuccess({ ok: true });
     return apiSuccess(await _r.json())
@@ -41,7 +38,7 @@ export async function PATCH(request: Request, { params }: RouteParams) {
     const projectId = searchParams.get('project_id');
     if (!projectId) return ApiErrors.badRequest('project_id required');
 
-const _r = await proxyToFastapiWithParams(request, '/api/v2/retros/[id]/phase', { id });
+    const _r = await proxyToFastapiWithParams(request, '/api/v2/retros/[id]/phase', { id });
     if (!_r.ok) return _r;
     if (_r.status === 204) return apiSuccess({ ok: true });
     return apiSuccess(await _r.json())

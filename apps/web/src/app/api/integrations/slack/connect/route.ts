@@ -1,7 +1,6 @@
 import { NextResponse } from 'next/server';
 import { getMyTeamMember } from '@/lib/auth-helpers';
-import { apiError, ApiErrors } from '@/lib/api-response';
-;
+import { ApiErrors } from '@/lib/api-response';
 import { buildSlackConnectUrl } from '@/services/slack-channel-mapping';
 
 export async function GET() {

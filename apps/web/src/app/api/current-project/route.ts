@@ -1,13 +1,11 @@
 import { cookies } from 'next/headers';
 import { handleApiError } from '@/lib/api-error';
-import { apiSuccess, apiError, ApiErrors } from '@/lib/api-response';
+import { apiSuccess, ApiErrors } from '@/lib/api-response';
 import { CURRENT_PROJECT_COOKIE, getAuthContext } from '@/lib/auth-helpers';
 import { parseBody, setCurrentProjectSchema } from '@sprintable/shared';
-;
 
 export async function GET(request: Request) {
   try {
-    // 비-OSS: getAuthContext → me에 org_id, project_id 포함
     const me = await getAuthContext(request);
     if (!me) return ApiErrors.unauthorized();
 
@@ -40,7 +38,6 @@ export async function POST(request: Request) {
     if (!parsed.success) return parsed.response;
     const { project_id: projectId } = parsed.data;
 
-    // 비-OSS: 쿠키에 project_id 저장 + fastapiCall로 프로젝트 정보 조회
     const cookieStore = await cookies();
     cookieStore.set(CURRENT_PROJECT_COOKIE, projectId, {
       path: '/',

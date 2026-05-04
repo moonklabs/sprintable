@@ -1,7 +1,5 @@
 import { handleApiError } from '@/lib/api-error';
-import { apiSuccess, ApiErrors, apiError } from '@/lib/api-response';
-;
-import { getAuthContext } from '@/lib/auth-helpers';
+import { apiSuccess } from '@/lib/api-response';
 import { proxyToFastapi } from '@/lib/fastapi-proxy';
 
 export async function GET(request: Request) {

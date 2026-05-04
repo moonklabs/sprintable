@@ -18,7 +18,7 @@ export async function GET(request: Request, { params }: RouteParams) {
     if (me.rateLimitExceeded) return ApiErrors.tooManyRequests(me.rateLimitRemaining, me.rateLimitResetAt);
     const dbClient = undefined;
 
-    const repo = await createStoryRepository(dbClient);
+    const repo = await createStoryRepository();
     const service = new StoryService(repo, dbClient as any | undefined);
     const story = await service.getByIdWithDetails(id);
 
@@ -42,7 +42,7 @@ export async function PATCH(request: Request, { params }: RouteParams) {
     const dbClient = undefined;
 
     const parsed = await parseBody(request, updateStorySchema); if (!parsed.success) return parsed.response; const body = parsed.data;
-    const repo = await createStoryRepository(dbClient);
+    const repo = await createStoryRepository();
     const service = new StoryService(repo, dbClient as any | undefined, { isAdminContext: me.type === 'agent' });
 
     const before = await service.getById(id);
@@ -93,7 +93,7 @@ export async function DELETE(request: Request, { params }: RouteParams) {
     if (me.rateLimitExceeded) return ApiErrors.tooManyRequests(me.rateLimitRemaining, me.rateLimitResetAt);
     const dbClient = undefined;
 
-    const repo = await createStoryRepository(dbClient);
+    const repo = await createStoryRepository();
     const service = new StoryService(repo, dbClient as any | undefined);
     await service.delete(id);
     return apiSuccess({ ok: true });

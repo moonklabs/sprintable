@@ -1,6 +1,5 @@
 import { apiError, ApiErrors } from '@/lib/api-response';
 import { getAuthContext } from '@/lib/auth-helpers';
-;
 import { NotFoundError } from '@sprintable/core-storage';
 
 export type InboxAuthContext = NonNullable<Awaited<ReturnType<typeof getAuthContext>>>;

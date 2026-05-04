@@ -16,7 +16,7 @@ export async function GET(request: Request, { params }: RouteParams) {
     if (!me) return ApiErrors.unauthorized();
     if (me.rateLimitExceeded) return ApiErrors.tooManyRequests(me.rateLimitRemaining, me.rateLimitResetAt);
     const dbClient = undefined;
-    const repo = await createEpicRepository(dbClient);
+    const repo = await createEpicRepository();
     const service = new EpicService(repo);
     return apiSuccess(await service.getByIdWithStories(id, { org_id: me.org_id, project_id: me.project_id }));
   } catch (err: unknown) { return handleApiError(err); }
@@ -36,7 +36,7 @@ export async function PATCH(request: Request, { params }: RouteParams) {
     const parsed = updateEpicSchema.safeParse(rawBody);
     if (!parsed.success) return apiError('VALIDATION_ERROR', JSON.stringify(parsed.error.issues), 400);
 
-    const repo = await createEpicRepository(dbClient);
+    const repo = await createEpicRepository();
     const service = new EpicService(repo);
     try {
       return apiSuccess(await service.update(id, parsed.data, { org_id: me.org_id, project_id: me.project_id }));
@@ -61,7 +61,7 @@ export async function DELETE(request: Request, { params }: RouteParams) {
     }
 
     const dbClient = undefined;
-    const repo = await createEpicRepository(dbClient);
+    const repo = await createEpicRepository();
     const service = new EpicService(repo);
     await service.delete(id, me.org_id);
     return apiSuccess({ ok: true });

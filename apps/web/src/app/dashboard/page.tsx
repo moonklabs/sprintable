@@ -1,6 +1,5 @@
 import Link from 'next/link';
 import { redirect } from 'next/navigation';
-;
 import { getServerSession } from '@/lib/db/server';
 import { fastapiCall } from '@sprintable/storage-api';
 import { getLocale, getTranslations } from 'next-intl/server';

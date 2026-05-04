@@ -1,7 +1,5 @@
 import { handleApiError } from '@/lib/api-error';
-import { apiSuccess, apiError, ApiErrors } from '@/lib/api-response';
-import { getAuthContext } from '@/lib/auth-helpers';
-import { createTeamMemberRepository } from '@/lib/storage/factory';
+import { apiSuccess } from '@/lib/api-response';
 import { proxyToFastapi } from '@/lib/fastapi-proxy';
 
 export async function GET(request: Request) {
@@ -17,10 +15,10 @@ export async function GET(request: Request) {
 
 export async function PATCH(request: Request) {
   try {
-const _r = await proxyToFastapi(request, '/api/v2/me');
+    const _r = await proxyToFastapi(request, '/api/v2/me');
     if (!_r.ok) return _r;
     if (_r.status === 204) return apiSuccess({ ok: true });
-    return apiSuccess(await _r.json())
+    return apiSuccess(await _r.json());
   } catch (err: unknown) {
     return handleApiError(err);
   }

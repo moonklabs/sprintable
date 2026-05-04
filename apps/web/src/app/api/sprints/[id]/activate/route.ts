@@ -17,7 +17,7 @@ export async function POST(request: Request, { params }: RouteParams) {
     if (me.rateLimitExceeded) return ApiErrors.tooManyRequests(me.rateLimitRemaining, me.rateLimitResetAt);
     const dbClient = undefined;
 
-    const repo = await createSprintRepository(dbClient);
+    const repo = await createSprintRepository();
     const service = new SprintService(repo, dbClient as any | undefined);
     const sprint = await service.activate(id);
     return apiSuccess(sprint);

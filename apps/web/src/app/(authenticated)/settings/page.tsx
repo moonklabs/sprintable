@@ -109,8 +109,16 @@ export default function SettingsPage() {
   const [memberActionMessage, setMemberActionMessage] = useState<{ type: 'success' | 'error'; text: string } | null>(null);
   const [addingMember, setAddingMember] = useState(false);
   const [removingMemberId, setRemovingMemberId] = useState<string | null>(null);
-  const [isAdmin, setIsAdmin] = useState(false);
-  const [adminChecked, setAdminChecked] = useState(false);
+  const isOss = process.env.NEXT_PUBLIC_OSS_MODE === 'true';
+  const [isAdmin, setIsAdmin] = useState(isOss);
+  const [adminChecked, setAdminChecked] = useState(isOss);
+  const [newMemberName, setNewMemberName] = useState('');
+  const [newMemberEmail, setNewMemberEmail] = useState('');
+  const [newMemberType, setNewMemberType] = useState<'human' | 'agent'>('human');
+  const [newMemberWebhookUrl, setNewMemberWebhookUrl] = useState('');
+  const [newMemberProjectId, setNewMemberProjectId] = useState('');
+  const [addingOssMember, setAddingOssMember] = useState(false);
+  const [addMemberResult, setAddMemberResult] = useState<{ type: 'success' | 'error'; text: string } | null>(null);
   const [deletingProjectId, setDeletingProjectId] = useState<string | null>(null);
   const [deleteProjectConfirmId, setDeleteProjectConfirmId] = useState<string | null>(null);
   const [projectInviteEmail, setProjectInviteEmail] = useState('');
@@ -446,6 +454,36 @@ export default function SettingsPage() {
     setRemovingMemberId(null);
   };
 
+  const handleAddOssMember = async () => {
+    if (!newMemberName.trim()) return;
+    setAddingOssMember(true);
+    setAddMemberResult(null);
+    const projectId = newMemberProjectId || memberProjectId || currentProjectId || '';
+    const body: Record<string, unknown> = {
+      name: newMemberName.trim(),
+      type: newMemberType,
+      project_id: projectId || undefined,
+    };
+    if (newMemberEmail.trim()) body.email = newMemberEmail.trim();
+    if (newMemberType === 'agent' && newMemberWebhookUrl.trim()) body.webhook_url = newMemberWebhookUrl.trim();
+    const res = await fetch('/api/team-members', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(body),
+    });
+    if (res.ok) {
+      setNewMemberName('');
+      setNewMemberEmail('');
+      setNewMemberWebhookUrl('');
+      setAddMemberResult({ type: 'success', text: `${newMemberType === 'agent' ? 'Agent' : 'Member'} "${newMemberName.trim()}" added` });
+      if (projectId) await refreshMemberData(projectId);
+    } else {
+      const json = await res.json().catch(() => null);
+      setAddMemberResult({ type: 'error', text: json?.error?.message ?? 'Failed to add member' });
+    }
+    setAddingOssMember(false);
+  };
+
   // suppress unused variable warning — createdProjectMembership used in future flows
   void createdProjectMembership;
   void projectMemberships;
@@ -502,14 +540,18 @@ export default function SettingsPage() {
                   <Zap className="h-4 w-4" />
                   {t('tabIntegrations')}
                 </TabsTrigger>
-                <TabsTrigger value="subscription">
+                {process.env.NEXT_PUBLIC_OSS_MODE !== 'true' ? (
+                  <TabsTrigger value="subscription">
                     <CreditCard className="h-4 w-4" />
                     {t('tabSubscription')}
                   </TabsTrigger>
+                ) : null}
+                {process.env.NEXT_PUBLIC_OSS_MODE !== 'true' ? (
                   <TabsTrigger value="usage">
                     <BarChart2 className="h-4 w-4" />
                     {t('tabUsage')}
                   </TabsTrigger>
+                ) : null}
               </>
             ) : null}
 
@@ -531,7 +573,7 @@ export default function SettingsPage() {
             <TabsContent value="profile">
               <div className="space-y-6">
                 <MyProfileSection />
-                <TwoFactorSection />
+                {process.env.NEXT_PUBLIC_OSS_MODE !== 'true' ? <TwoFactorSection /> : null}
               </div>
             </TabsContent>
 
@@ -723,6 +765,60 @@ export default function SettingsPage() {
 
             <TabsContent value="members">
               <div className="space-y-6">
+                {isOss ? (
+                  <SectionCard>
+                    <SectionCardHeader>
+                      <div className="space-y-1">
+                        <h2 className="text-base font-semibold text-foreground">Add Member</h2>
+                        <p className="text-sm text-muted-foreground">Add human or agent members directly to a project</p>
+                      </div>
+                    </SectionCardHeader>
+                    <SectionCardBody className="space-y-4">
+                      <div className="grid gap-3 md:grid-cols-[minmax(0,1fr)_minmax(0,1fr)_auto_auto]">
+                        <OperatorInput
+                          value={newMemberName}
+                          onChange={(e) => setNewMemberName(e.target.value)}
+                          placeholder="Name (required)"
+                        />
+                        <OperatorInput
+                          value={newMemberEmail}
+                          onChange={(e) => setNewMemberEmail(e.target.value)}
+                          placeholder="Email (optional)"
+                          type="email"
+                        />
+                        <OperatorDropdownSelect
+                          value={newMemberType}
+                          onValueChange={(v) => setNewMemberType(v as 'human' | 'agent')}
+                          options={[
+                            { value: 'human', label: 'Human' },
+                            { value: 'agent', label: 'Agent' },
+                          ]}
+                        />
+                        <OperatorDropdownSelect
+                          value={newMemberProjectId || memberProjectId || currentProjectId || ''}
+                          onValueChange={(v) => setNewMemberProjectId(v)}
+                          options={projects.map((p) => ({ value: p.id, label: p.name }))}
+                        />
+                      </div>
+                      {newMemberType === 'agent' ? (
+                        <OperatorInput
+                          value={newMemberWebhookUrl}
+                          onChange={(e) => setNewMemberWebhookUrl(e.target.value)}
+                          placeholder="Webhook URL (https://...)"
+                          type="url"
+                        />
+                      ) : null}
+                      <Button variant="hero" size="lg" onClick={handleAddOssMember} disabled={!newMemberName.trim() || addingOssMember}>
+                        {addingOssMember ? '...' : 'Add Member'}
+                      </Button>
+                      {addMemberResult ? (
+                        <div className={`rounded-md border p-3 text-xs ${addMemberResult.type === 'success' ? 'border-emerald-500/20 bg-emerald-500/10 text-emerald-600 dark:text-emerald-400' : 'border-destructive/20 bg-destructive/10 text-destructive'}`}>
+                          {addMemberResult.text}
+                        </div>
+                      ) : null}
+                    </SectionCardBody>
+                  </SectionCard>
+                ) : null}
                 <SectionCard>
                   <SectionCardHeader>
                     <div className="space-y-1">
@@ -996,42 +1092,44 @@ export default function SettingsPage() {
               </div>
             </TabsContent>
 
-            <TabsContent value="subscription">
-              <SectionCard>
-                <SectionCardHeader>
-                  <div className="space-y-1">
-                    <h2 className="text-base font-semibold text-foreground">{t('manageSubscription')}</h2>
-                    <p className="text-sm text-muted-foreground">{t('subscriptionDescription')}</p>
-                  </div>
-                </SectionCardHeader>
-                <SectionCardBody className="space-y-3">
-                  {graceUntil && new Date(graceUntil) > new Date() ? (
-                    <p className="rounded-md border border-amber-500/30 bg-amber-500/10 px-3 py-2 text-sm text-amber-300">
-                      {t('gracePeriodNotice', { date: new Date(graceUntil).toLocaleDateString('ko-KR') })}
-                    </p>
-                  ) : null}
-                  <Button
-                    variant="glass"
-                    size="lg"
-                    onClick={async () => {
-                      try {
-                        const res = await fetch('/api/subscription/portal', { method: 'POST' });
-                        if (res.ok) {
-                          const json = await res.json() as { data: { portalUrl: string } };
-                          window.open(json.data.portalUrl, '_blank');
+            {process.env.NEXT_PUBLIC_OSS_MODE !== 'true' ? (
+              <TabsContent value="subscription">
+                <SectionCard>
+                  <SectionCardHeader>
+                    <div className="space-y-1">
+                      <h2 className="text-base font-semibold text-foreground">{t('manageSubscription')}</h2>
+                      <p className="text-sm text-muted-foreground">{t('subscriptionDescription')}</p>
+                    </div>
+                  </SectionCardHeader>
+                  <SectionCardBody className="space-y-3">
+                    {graceUntil && new Date(graceUntil) > new Date() ? (
+                      <p className="rounded-md border border-amber-500/30 bg-amber-500/10 px-3 py-2 text-sm text-amber-300">
+                        {t('gracePeriodNotice', { date: new Date(graceUntil).toLocaleDateString('ko-KR') })}
+                      </p>
+                    ) : null}
+                    <Button
+                      variant="glass"
+                      size="lg"
+                      onClick={async () => {
+                        try {
+                          const res = await fetch('/api/subscription/portal', { method: 'POST' });
+                          if (res.ok) {
+                            const json = await res.json() as { data: { portalUrl: string } };
+                            window.open(json.data.portalUrl, '_blank');
+                          }
+                        } catch {
+                          // noop
                         }
-                      } catch {
-                        // noop
-                      }
-                    }}
-                  >
-                    {t('manageSubscriptionBtn')}
-                  </Button>
-                </SectionCardBody>
-              </SectionCard>
-            </TabsContent>
+                      }}
+                    >
+                      {t('manageSubscriptionBtn')}
+                    </Button>
+                  </SectionCardBody>
+                </SectionCard>
+              </TabsContent>
+            ) : null}
 
-            {adminChecked && isAdmin && orgId ? (
+            {process.env.NEXT_PUBLIC_OSS_MODE !== 'true' && adminChecked && isAdmin && orgId ? (
               <TabsContent value="usage">
                 <UsageDashboard
                   orgId={orgId}

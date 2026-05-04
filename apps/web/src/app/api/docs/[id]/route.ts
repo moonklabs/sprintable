@@ -15,7 +15,7 @@ export async function PATCH(request: Request, { params }: RouteParams) {
     if (me.rateLimitExceeded) return ApiErrors.tooManyRequests(me.rateLimitRemaining, me.rateLimitResetAt);
     const dbClient = undefined;
     const parsed = await parseBody(request, updateDocSchema); if (!parsed.success) return parsed.response; const body = parsed.data;
-    const repo = await createDocRepository(dbClient);
+    const repo = await createDocRepository();
     const service = new DocsService(repo, dbClient);
 
     const doc = await service.updateDoc(id, {
@@ -42,7 +42,7 @@ export async function GET(request: Request, { params }: RouteParams) {
     if (!me) return ApiErrors.unauthorized();
     if (me.rateLimitExceeded) return ApiErrors.tooManyRequests(me.rateLimitRemaining, me.rateLimitResetAt);
     const dbClient = undefined;
-    const repo = await createDocRepository(dbClient);
+    const repo = await createDocRepository();
     const service = new DocsService(repo, dbClient);
     return apiSuccess(await service.getDocTimestamp(id));
   } catch (err: unknown) { return handleApiError(err); }
@@ -55,7 +55,7 @@ export async function DELETE(request: Request, { params }: RouteParams) {
     if (!me) return ApiErrors.unauthorized();
     if (me.rateLimitExceeded) return ApiErrors.tooManyRequests(me.rateLimitRemaining, me.rateLimitResetAt);
     const dbClient = undefined;
-    const repo = await createDocRepository(dbClient);
+    const repo = await createDocRepository();
 
     const service = new DocsService(repo, dbClient);
     await service.deleteDoc(id);

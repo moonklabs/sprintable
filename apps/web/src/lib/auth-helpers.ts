@@ -2,7 +2,6 @@ import { cache } from 'react';
 import { cookies } from 'next/headers';
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 type User = any;
-;
 
 export const CURRENT_PROJECT_COOKIE = 'sprintable_current_project_id';
 
@@ -170,7 +169,7 @@ async function resolveTeamMemberFromMemberships(
 /**
  * Dual auth: OAuth 또는 API Key로 인증
  *
- * 1. Authorization Bearer 토큰이 있으면 API Key 인증 시도 (admin client로 RLS 우회)
+ * 1. Authorization Bearer 토큰이 있으면 API Key 인증 시도
  * 2. 없으면 OAuth 세션 인증 시도
  * 3. 둘 다 실패하면 null 반환
  *
@@ -193,8 +192,7 @@ export const getAuthContext = cache(async (
   rateLimitRemaining?: number;
   rateLimitResetAt?: number;
 } | null> => {
-  // 1. OSS_MODE — DB 없이 PGLite 기반 인증
-  // 2. API Key 인증 — FastAPI /api/v2/me에 rawApiKey를 Bearer 토큰으로 전달
+  // 1. API Key 인증 — FastAPI /api/v2/me에 rawApiKey를 Bearer 토큰으로 전달
   // x-api-key 헤더는 Authorization 헤더가 CDN에서 strip될 때를 위한 fallback
   const authHeader = request.headers.get('Authorization');
   const xApiKey = request.headers.get('x-api-key');
@@ -227,7 +225,7 @@ export const getAuthContext = cache(async (
     }
   }
 
-  // 3. OAuth 세션 — JWT 쿠키 파싱
+  // 2. OAuth 세션 — JWT 쿠키 파싱
   const { getServerSession } = await import('./db/server');
   const session = await getServerSession();
   if (!session) return null;

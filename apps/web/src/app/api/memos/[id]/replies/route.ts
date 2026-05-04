@@ -1,9 +1,7 @@
 import { parseBody, createMemoReplySchema } from '@sprintable/shared';
-import { MemoService } from '@/services/memo';
 import { handleApiError } from '@/lib/api-error';
 import { getAuthContext } from '@/lib/auth-helpers';
 import { apiSuccess, ApiErrors } from '@/lib/api-response';
-import { createMemoRepository, createTeamMemberRepository } from '@/lib/storage/factory';
 
 type RouteParams = { params: Promise<{ id: string }> };
 
@@ -27,7 +25,6 @@ export async function POST(request: Request, { params }: RouteParams) {
       );
     }
 
-    // non-OSS: body 파싱 후 created_by(me.id) 주입해서 FastAPI 호출
     const parsed = await parseBody(request, createMemoReplySchema);
     if (!parsed.success) return parsed.response;
     const body = parsed.data;

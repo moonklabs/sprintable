@@ -27,7 +27,7 @@ export async function GET(request: Request, { params }: RouteParams) {
     }
 
     const dbClient = undefined;
-    const repo = await createMemoRepository(dbClient);
+    const repo = await createMemoRepository();
     const service = new MemoService(repo, dbClient);
     const memo = await service.getByIdWithDetails(id);
 

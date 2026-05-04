@@ -25,7 +25,7 @@ export async function POST(request: Request, { params }: RouteParams) {
       if (denied) return denied;
     }
 
-    const repo = await createSprintRepository(dbClient);
+    const repo = await createSprintRepository();
     const service = new SprintService(repo, dbClient as any | undefined);
     const sprint = await service.close(id);
 
@@ -76,7 +76,7 @@ export async function POST(request: Request, { params }: RouteParams) {
         ].join('\n');
 
         const slug = `sprint-report-${id.slice(0, 8)}-${Date.now()}`;
-        const docRepo = await createDocRepository(db);
+        const docRepo = await createDocRepository();
         const docsService = new DocsService(docRepo, db);
         const doc = await docsService.createDoc({
           org_id: sprint.org_id as string,
@@ -90,7 +90,7 @@ export async function POST(request: Request, { params }: RouteParams) {
         });
 
         // sprint에 report_doc_id 기록
-        const sprintRepo = await createSprintRepository(db);
+        const sprintRepo = await createSprintRepository();
         await sprintRepo.update(id, { report_doc_id: doc.id });
       })().catch(() => {});
 

@@ -44,7 +44,7 @@ export class InboxItemService {
   async create(input: CreateInboxItemInput): Promise<InboxItem> {
     // Validate at single boundary point (codex tactical fix #10 — Zod at write time)
     const validated = createInboxItemSchema.parse(input);
-    const repo = await createInboxItemRepository(this.db);
+    const repo = await createInboxItemRepository();
     return repo.create(validated);
   }
 
@@ -79,7 +79,7 @@ export class InboxItemService {
   }
 
   private async getRepo() {
-    return createInboxItemRepository(this.db);
+    return createInboxItemRepository();
   }
 
   /**

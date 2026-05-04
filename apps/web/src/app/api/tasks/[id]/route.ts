@@ -16,7 +16,7 @@ export async function GET(request: Request, { params }: RouteParams) {
     if (!me) return ApiErrors.unauthorized();
     if (me.rateLimitExceeded) return ApiErrors.tooManyRequests(me.rateLimitRemaining, me.rateLimitResetAt);
     const dbClient = undefined;
-    const repo = await createTaskRepository(dbClient);
+    const repo = await createTaskRepository();
     const service = new TaskService(repo);
     return apiSuccess(await service.getById(id, { org_id: me.org_id, project_id: me.project_id }));
   } catch (err: unknown) { return handleApiError(err); }
@@ -30,22 +30,24 @@ export async function PATCH(request: Request, { params }: RouteParams) {
     if (me.rateLimitExceeded) return ApiErrors.tooManyRequests(me.rateLimitRemaining, me.rateLimitResetAt);
     const dbClient = undefined;
     const parsed = await parseBody(request, updateTaskSchema); if (!parsed.success) return parsed.response; const body = parsed.data;
-    const repo = await createTaskRepository(dbClient);
+    const repo = await createTaskRepository();
     const service = new TaskService(repo);
     const before = await service.getById(id, { org_id: me.org_id, project_id: me.project_id });
     const result = await service.update(id, body);
 
-    const notifService = new NotificationService(dbClient);
-    if (body.assignee_id && body.assignee_id !== before.assignee_id) {
-      notifService.create({
-        org_id: me.org_id,
-        user_id: body.assignee_id,
-        type: 'task_assigned',
-        title: '태스크가 배정되었습니다',
-        body: before.title ?? '',
-        reference_type: 'task',
-        reference_id: id,
-      }).catch(() => {});
+    if (dbClient) {
+      const notifService = new NotificationService(dbClient);
+      if (body.assignee_id && body.assignee_id !== before.assignee_id) {
+        notifService.create({
+          org_id: me.org_id,
+          user_id: body.assignee_id,
+          type: 'task_assigned',
+          title: '태스크가 배정되었습니다',
+          body: before.title ?? '',
+          reference_type: 'task',
+          reference_id: id,
+        }).catch(() => {});
+      }
     }
 
     return apiSuccess(result);
@@ -59,7 +61,7 @@ export async function DELETE(request: Request, { params }: RouteParams) {
     if (!me) return ApiErrors.unauthorized();
     if (me.rateLimitExceeded) return ApiErrors.tooManyRequests(me.rateLimitRemaining, me.rateLimitResetAt);
     const dbClient = undefined;
-    const repo = await createTaskRepository(dbClient);
+    const repo = await createTaskRepository();
     const service = new TaskService(repo);
     const existing = await service.getById(id, { org_id: me.org_id });
     await service.delete(id, existing.org_id);

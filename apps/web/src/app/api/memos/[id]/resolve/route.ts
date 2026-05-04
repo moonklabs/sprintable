@@ -13,7 +13,7 @@ export async function PATCH(request: Request, { params }: RouteParams) {
     if (!me) return ApiErrors.unauthorized();
 
     const dbClient = undefined;
-    const repo = await createMemoRepository(dbClient);
+    const repo = await createMemoRepository();
     const service = new MemoService(repo, dbClient);
     const memo = await service.resolve(id, me.id);
     return apiSuccess(memo);

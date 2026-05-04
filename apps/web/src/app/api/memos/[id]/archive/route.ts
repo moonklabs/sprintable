@@ -13,8 +13,9 @@ export async function PATCH(request: Request, { params }: RouteParams) {
     if (!me) return ApiErrors.unauthorized();
     if (me.rateLimitExceeded) return ApiErrors.tooManyRequests(me.rateLimitRemaining, me.rateLimitResetAt);
 
+
     const dbClient = undefined;
-    const repo = await createMemoRepository(dbClient);
+    const repo = await createMemoRepository();
     const memo = await repo.getById(id);
 
     const archivedAt = memo.archived_at ? null : new Date().toISOString();

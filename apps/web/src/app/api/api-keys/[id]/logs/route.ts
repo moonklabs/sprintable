@@ -1,6 +1,5 @@
 import { proxyToFastapi } from '@/lib/fastapi-proxy';
 import { apiSuccess } from '@/lib/api-response';
-;
 
 type RouteParams = { params: Promise<{ id: string }> };
 
