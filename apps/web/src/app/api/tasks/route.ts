@@ -72,7 +72,7 @@ export async function GET(request: Request) {
         if (error) throw error;
         return apiSuccess(data ?? []);
       }
-      // fallback to per-story serial fetch
+      // OSS: fallback to per-story serial fetch
       const all: unknown[] = [];
       for (const sid of storyIds) {
         const items = await service.list({ story_id: sid, status });

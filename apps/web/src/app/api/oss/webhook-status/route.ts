@@ -1,6 +1,5 @@
-import { apiSuccess } from '@/lib/api-response';
+import { apiError } from '@/lib/api-response';
 
 export async function GET() {
-  const connected = !!process.env['GITHUB_WEBHOOK_SECRET'];
-  return apiSuccess({ connected });
+  return apiError('NOT_AVAILABLE', 'Only available in OSS mode', 403);
 }

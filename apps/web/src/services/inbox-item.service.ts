@@ -10,7 +10,7 @@ import type {
   InboxOption,
 } from '@sprintable/core-storage';
 
-import { isOssMode, createInboxItemRepository } from '@/lib/storage/factory';
+import { createInboxItemRepository } from '@/lib/storage/factory';
 import { createInboxItemSchema, originChainSchema, inboxOptionsSchema } from '@sprintable/shared';
 
 // Operator Cockpit Phase A — high-level service for producers
@@ -79,7 +79,7 @@ export class InboxItemService {
   }
 
   private async getRepo() {
-    return createInboxItemRepository(isOssMode() ? undefined : this.db);
+    return createInboxItemRepository(this.db);
   }
 
   /**
