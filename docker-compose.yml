@@ -1,82 +1,54 @@
-# AC2: web + supabase(local) 원커맨드 실행
-# Usage: docker compose up
+# Sprintable — self-hosted / local development
+# Usage: cp .env.example .env  &&  docker compose up -d
 
 services:
-  # ─── Supabase: PostgreSQL ───
-  supabase-db:
-    image: supabase/postgres:15.6.1.117
-    ports:
-      - "54322:5432"
-    environment:
-      POSTGRES_PASSWORD: postgres
-      POSTGRES_DB: postgres
+  db:
+    image: postgres:15
+    restart: unless-stopped
     volumes:
-      - supabase-db-data:/var/lib/postgresql/data
+      - ./data/postgres:/var/lib/postgresql/data
+    environment:
+      POSTGRES_DB: ${POSTGRES_DB:-sprintable}
+      POSTGRES_USER: ${POSTGRES_USER:-sprintable}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-sprintable}
     healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U postgres"]
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-sprintable}"]
       interval: 5s
       timeout: 3s
+      retries: 10
+
+  backend:
+    build: ./backend
+    restart: unless-stopped
+    depends_on:
+      db:
+        condition: service_healthy
+    environment:
+      DATABASE_URL: postgresql://${POSTGRES_USER:-sprintable}:${POSTGRES_PASSWORD:-sprintable}@db:5432/${POSTGRES_DB:-sprintable}
+      JWT_SECRET: ${JWT_SECRET:-change-me-in-production-min-32-chars}
+      SECRET_KEY: ${SECRET_KEY:-change-me-in-production-min-32-chars}
+    command: >
+      sh -c "alembic upgrade head && uvicorn app.main:app --host 0.0.0.0 --port 8000"
+    ports:
+      - "${BACKEND_PORT:-8000}:8000"
+    healthcheck:
+      test: ["CMD-SHELL", "curl -sf http://localhost:8000/api/v2/health || exit 1"]
+      interval: 10s
+      timeout: 5s
       retries: 5
+      start_period: 30s
 
-  # ─── Supabase: PostgREST (API) ───
-  supabase-rest:
-    image: postgrest/postgrest:v12.2.3
-    ports:
-      - "54321:3000"
-    environment:
-      PGRST_DB_URI: postgresql://postgres:postgres@supabase-db:5432/postgres
-      PGRST_DB_SCHEMAS: public,storage
-      PGRST_DB_ANON_ROLE: anon
-      PGRST_JWT_SECRET: ${JWT_SECRET:-super-secret-jwt-token-with-at-least-32-characters-long}
-    depends_on:
-      supabase-db:
-        condition: service_healthy
-
-  # ─── Supabase: GoTrue (Auth) ───
-  supabase-auth:
-    image: supabase/gotrue:v2.151.0
-    ports:
-      - "54323:9999"
-    environment:
-      GOTRUE_API_HOST: 0.0.0.0
-      GOTRUE_API_PORT: 9999
-      API_EXTERNAL_URL: http://localhost:54321
-      GOTRUE_DB_DRIVER: postgres
-      GOTRUE_DB_DATABASE_URL: postgresql://postgres:postgres@supabase-db:5432/postgres?search_path=auth
-      GOTRUE_SITE_URL: http://localhost:3108
-      GOTRUE_JWT_SECRET: ${JWT_SECRET:-super-secret-jwt-token-with-at-least-32-characters-long}
-      GOTRUE_JWT_EXP: 3600
-      GOTRUE_DISABLE_SIGNUP: "false"
-    depends_on:
-      supabase-db:
-        condition: service_healthy
-
-  # ─── Web App ───
-  web:
+  frontend:
     build:
       context: .
       dockerfile: Dockerfile
-      args:
-        NEXT_PUBLIC_SUPABASE_URL: http://localhost:54321
-        NEXT_PUBLIC_SUPABASE_ANON_KEY: ${SUPABASE_ANON_KEY:-eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJyb2xlIjoiYW5vbiJ9.placeholder}
-        NEXT_PUBLIC_APP_URL: http://localhost:3108
-    ports:
-      - "3108:3108"
-    environment:
-      NEXT_PUBLIC_SUPABASE_URL: http://localhost:54321
-      NEXT_PUBLIC_SUPABASE_ANON_KEY: ${SUPABASE_ANON_KEY:-eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJyb2xlIjoiYW5vbiJ9.placeholder}
-      NEXT_PUBLIC_APP_URL: http://localhost:3108
-      SUPABASE_SERVICE_ROLE_KEY: ${SUPABASE_SERVICE_ROLE_KEY:-eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJyb2xlIjoic2VydmljZV9yb2xlIn0.placeholder}
-      DATABASE_URL: postgresql://postgres:postgres@supabase-db:5432/postgres
-      OPENAI_API_KEY: ${OPENAI_API_KEY:-}
-    depends_on:
-      supabase-db:
-        condition: service_healthy
-      supabase-rest:
-        condition: service_started
-      supabase-auth:
-        condition: service_started
     restart: unless-stopped
-
-volumes:
-  supabase-db-data:
+    depends_on:
+      backend:
+        condition: service_healthy
+    environment:
+      NEXT_PUBLIC_FASTAPI_URL: http://backend:8000
+      NEXT_PUBLIC_APP_URL: ${NEXT_PUBLIC_APP_URL:-http://localhost:3000}
+      JWT_SECRET: ${JWT_SECRET:-change-me-in-production-min-32-chars}
+    ports:
+      - "${PORT:-3000}:3000"
