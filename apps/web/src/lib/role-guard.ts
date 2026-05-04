@@ -22,7 +22,6 @@ export async function getCallerRole(db: any, orgId: string): Promise<string | nu
 /**
  * Assert that the caller has one of the required roles.
  * Returns an ApiErrors.forbidden() Response if not, null if allowed.
- * OSS mode always passes (isOssMode check must be done by caller before invoking).
  */
 export async function requireRole(
   db: any,

@@ -56,7 +56,7 @@ export function useMemoPresence({ memoId, currentTeamMemberId, currentTeamMember
   }, [memoId, currentTeamMemberId, enabled]);
 
   useEffect(() => {
-    if (!enabled || !memoId || !currentTeamMemberId || process.env['NEXT_PUBLIC_OSS_MODE'] === 'true') {
+    if (!enabled || !memoId || !currentTeamMemberId) {
       setState({ connected: false, viewers: [], typingUsers: [] });
       return;
     }

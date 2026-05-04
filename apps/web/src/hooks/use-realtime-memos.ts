@@ -45,7 +45,6 @@ export function useRealtimeMemos({ currentTeamMemberId, onNewMemo, onNewReply, o
   useEffect(() => { currentTeamMemberIdRef.current = currentTeamMemberId; }, [currentTeamMemberId]);
 
   useEffect(() => {
-    if (process.env['NEXT_PUBLIC_OSS_MODE'] === 'true') return;
     if (typeof EventSource === 'undefined') return;
 
     function connect() {
