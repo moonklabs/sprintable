@@ -1,8 +1,6 @@
 import { jwtVerify } from 'jose';
 import { NextResponse, type NextRequest } from 'next/server';
 
-export const runtime = 'nodejs';
-
 const PUBLIC_EXACT = [
   '/',
   '/llms.txt',
