@@ -8,8 +8,8 @@
 substitutions:
   _AR_REGION: asia-northeast3
   _AR_REPO: sprintable
-  _DEPLOY_ENV: dev  # main push 시 prod로 오버라이드됨
-  _FASTAPI_URL: https://sprintable-backend-dev-787818285179.asia-northeast3.run.app  # 트리거별 오버라이드
+  _DEPLOY_ENV: dev
+  _FASTAPI_URL: https://sprintable-backend-dev-787818285179.asia-northeast3.run.app
 
 steps:
   # ─── Frontend (Next.js standalone) ────────────────────────────────────────
@@ -53,11 +53,47 @@ steps:
     env:
       - DOCKER_BUILDKIT=1
 
-images:
-  - ${_AR_REGION}-docker.pkg.dev/${PROJECT_ID}/${_AR_REPO}/frontend:${COMMIT_SHA}
-  - ${_AR_REGION}-docker.pkg.dev/${PROJECT_ID}/${_AR_REPO}/frontend:latest-${_DEPLOY_ENV}
-  - ${_AR_REGION}-docker.pkg.dev/${PROJECT_ID}/${_AR_REPO}/backend:${COMMIT_SHA}
-  - ${_AR_REGION}-docker.pkg.dev/${PROJECT_ID}/${_AR_REPO}/backend:latest-${_DEPLOY_ENV}
+  # ─── Push images ──────────────────────────────────────────────────────────
+  - id: push-frontend
+    name: gcr.io/cloud-builders/docker
+    args:
+      - push
+      - --all-tags
+      - ${_AR_REGION}-docker.pkg.dev/${PROJECT_ID}/${_AR_REPO}/frontend
+    waitFor: [build-frontend]
+
+  - id: push-backend
+    name: gcr.io/cloud-builders/docker
+    args:
+      - push
+      - --all-tags
+      - ${_AR_REGION}-docker.pkg.dev/${PROJECT_ID}/${_AR_REPO}/backend
+    waitFor: [build-backend]
+
+  # ─── Deploy to Cloud Run ───────────────────────────────────────────────────
+  - id: deploy-frontend
+    name: gcr.io/google.com/cloudsdktool/cloud-sdk
+    entrypoint: gcloud
+    args:
+      - run
+      - deploy
+      - sprintable-frontend-${_DEPLOY_ENV}
+      - --image=${_AR_REGION}-docker.pkg.dev/${PROJECT_ID}/${_AR_REPO}/frontend:${COMMIT_SHA}
+      - --region=${_AR_REGION}
+      - --quiet
+    waitFor: [push-frontend]
+
+  - id: deploy-backend
+    name: gcr.io/google.com/cloudsdktool/cloud-sdk
+    entrypoint: gcloud
+    args:
+      - run
+      - deploy
+      - sprintable-backend-${_DEPLOY_ENV}
+      - --image=${_AR_REGION}-docker.pkg.dev/${PROJECT_ID}/${_AR_REPO}/backend:${COMMIT_SHA}
+      - --region=${_AR_REGION}
+      - --quiet
+    waitFor: [push-backend]
 
 options:
   machineType: E2_HIGHCPU_8
