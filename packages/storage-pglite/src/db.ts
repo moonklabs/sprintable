@@ -110,6 +110,7 @@ async function _initSchema(db: PGlite): Promise<void> {
       created_by TEXT NOT NULL,
       resolved_by TEXT,
       resolved_at TEXT,
+      archived_at TEXT,
       metadata TEXT,
       created_at TEXT NOT NULL,
       updated_at TEXT NOT NULL,
