@@ -7,7 +7,7 @@ import { proxyToFastapi } from '@/lib/fastapi-proxy';
 export async function GET(request: Request) {
   try {
     if (isOssMode()) {
-      const { OSS_ORG_ID, OSS_PROJECT_ID } = await import('@sprintable/storage-sqlite');
+      const { OSS_ORG_ID, OSS_PROJECT_ID } = await import('@sprintable/storage-pglite');
       const repo = await createProjectRepository();
       const project = await repo.getById(OSS_PROJECT_ID);
       return apiSuccess(project ? [{ id: project.id, name: project.name, description: null, org_id: OSS_ORG_ID }] : []);

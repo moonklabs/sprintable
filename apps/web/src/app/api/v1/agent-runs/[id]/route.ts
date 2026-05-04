@@ -9,7 +9,7 @@ export async function GET(request: Request, { params }: RouteParams) {
   if (isOssMode()) {
     try {
       const { id } = await params;
-      const { OSS_ORG_ID, OSS_PROJECT_ID } = await import('@sprintable/storage-sqlite');
+      const { OSS_ORG_ID, OSS_PROJECT_ID } = await import('@sprintable/storage-pglite');
       const repo = await createAgentRunRepository();
       const run = await repo.getById(id, OSS_ORG_ID, OSS_PROJECT_ID);
       if (!run) return ApiErrors.notFound('Agent run not found');

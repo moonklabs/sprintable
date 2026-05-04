@@ -84,8 +84,12 @@ export async function getMyMembershipContext(db: any, user: User): Promise<Membe
   return { me, memberships };
 }
 
+function toPos(q: string, p: (string|number|boolean|null)[]): [string, (string|number|boolean|null)[]] {
+  let i = 0; return [q.replace(/\?/g, () => `$${++i}`), p];
+}
+
 export async function getOssUserContext(): Promise<MembershipContext> {
-  const { OSS_ORG_ID, OSS_PROJECT_ID, OSS_MEMBER_ID } = await import('@sprintable/storage-sqlite');
+  const { OSS_ORG_ID, OSS_PROJECT_ID, OSS_MEMBER_ID } = await import('@sprintable/storage-pglite');
   const me = {
     id: OSS_MEMBER_ID,
     org_id: OSS_ORG_ID,
@@ -207,9 +211,9 @@ export const getAuthContext = cache(async (
   rateLimitRemaining?: number;
   rateLimitResetAt?: number;
 } | null> => {
-  // 1. OSS_MODE — DB 없이 SQLite 기반 인증
+  // 1. OSS_MODE — DB 없이 PGLite 기반 인증
   if (isOssMode()) {
-    const { OSS_ORG_ID, OSS_PROJECT_ID, OSS_MEMBER_ID, getDb } = await import('@sprintable/storage-sqlite');
+    const { OSS_ORG_ID, OSS_PROJECT_ID, OSS_MEMBER_ID, getDb } = await import('@sprintable/storage-pglite');
 
     const authHeader = request.headers.get('Authorization');
     const xApiKey = request.headers.get('x-api-key');
@@ -217,21 +221,23 @@ export const getAuthContext = cache(async (
 
     if (rawApiKey) {
       const { hashApiKey } = await import('./auth-api-key');
-      const db = getDb();
+      const db = await getDb();
       const keyHash = hashApiKey(rawApiKey);
       const now = new Date().toISOString();
 
-      const keyRow = db.prepare(
-        'SELECT id, team_member_id FROM agent_api_keys WHERE key_hash = ? AND revoked_at IS NULL AND (expires_at IS NULL OR expires_at > ?) LIMIT 1'
-      ).get(keyHash, now) as { id: string; team_member_id: string } | null;
+      const keyRow = (await db.query(...toPos(
+        'SELECT id, team_member_id FROM agent_api_keys WHERE key_hash = ? AND revoked_at IS NULL AND (expires_at IS NULL OR expires_at > ?) LIMIT 1',
+        [keyHash, now]
+      ))).rows[0] as { id: string; team_member_id: string } | null;
 
       if (keyRow) {
-        const member = db.prepare(
-          'SELECT id, org_id, project_id, type FROM team_members WHERE id = ? AND is_active = 1 LIMIT 1'
-        ).get(keyRow.team_member_id) as { id: string; org_id: string; project_id: string; type: string } | null;
+        const member = (await db.query(...toPos(
+          'SELECT id, org_id, project_id, type FROM team_members WHERE id = ? AND is_active = 1 LIMIT 1',
+          [keyRow.team_member_id]
+        ))).rows[0] as { id: string; org_id: string; project_id: string; type: string } | null;
 
         if (member) {
-          db.prepare('UPDATE agent_api_keys SET last_used_at = ? WHERE id = ?').run(now, keyRow.id);
+          await db.query(...toPos('UPDATE agent_api_keys SET last_used_at = ? WHERE id = ?', [now, keyRow.id]));
           return {
             id: member.id,
             org_id: member.org_id,
