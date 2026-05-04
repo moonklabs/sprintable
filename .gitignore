@@ -40,3 +40,4 @@ coverage/
 .gstack/
 .omc/
 .sisyphus/
+.qa-worktrees/
