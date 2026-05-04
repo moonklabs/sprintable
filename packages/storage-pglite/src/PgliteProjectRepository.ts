@@ -1,4 +1,4 @@
-import type { DatabaseSync } from 'node:sqlite';
+import type { PGlite } from '@electric-sql/pglite';
 import type {
   IProjectRepository,
   Project,
@@ -10,25 +10,30 @@ import type {
 import { NotFoundError } from '@sprintable/core-storage';
 import { randomUUID } from 'node:crypto';
 
-type SqlParam = string | number | bigint | null | Uint8Array;
+type SqlParam = string | number | boolean | null;
 
-export class SqliteProjectRepository implements IProjectRepository {
-  constructor(private readonly db: DatabaseSync) {}
+function toPos(query: string, params: SqlParam[]): [string, SqlParam[]] {
+  let i = 0;
+  return [query.replace(/\?/g, () => `$${++i}`), params];
+}
+
+export class PgliteProjectRepository implements IProjectRepository {
+  constructor(private readonly db: PGlite) {}
 
   async list(filters: ProjectListFilters): Promise<Project[]> {
-    let sql = 'SELECT * FROM projects WHERE org_id = ? AND deleted_at IS NULL';
+    let query = 'SELECT * FROM projects WHERE org_id = ? AND deleted_at IS NULL';
     const params: SqlParam[] = [filters.org_id];
-    if (filters.cursor) { sql += ' AND created_at > ?'; params.push(filters.cursor); }
-    sql += ' ORDER BY created_at ASC';
-    if (filters.limit != null) { sql += ' LIMIT ?'; params.push(filters.limit + 1); }
-    return this.db.prepare(sql).all(...params) as unknown as Project[];
+    if (filters.cursor) { query += ' AND created_at > ?'; params.push(filters.cursor); }
+    query += ' ORDER BY created_at ASC';
+    if (filters.limit != null) { query += ' LIMIT ?'; params.push(filters.limit + 1); }
+    return (await this.db.query(...toPos(query, params))).rows as unknown as Project[];
   }
 
   async getById(id: string, scope?: RepositoryScopeContext): Promise<Project> {
-    let sql = 'SELECT * FROM projects WHERE id = ? AND deleted_at IS NULL';
+    let query = 'SELECT * FROM projects WHERE id = ? AND deleted_at IS NULL';
     const params: SqlParam[] = [id];
-    if (scope?.org_id) { sql += ' AND org_id = ?'; params.push(scope.org_id); }
-    const row = this.db.prepare(sql).get(...params) as Project | undefined;
+    if (scope?.org_id) { query += ' AND org_id = ?'; params.push(scope.org_id); }
+    const row = (await this.db.query(...toPos(query, params))).rows[0] as Project | undefined;
     if (!row) throw new NotFoundError('Project not found');
     return row;
   }
@@ -36,10 +41,10 @@ export class SqliteProjectRepository implements IProjectRepository {
   async create(input: CreateProjectInput): Promise<Project> {
     const id = randomUUID();
     const now = new Date().toISOString();
-    this.db.prepare(`
+    await this.db.query(...toPos(`
       INSERT INTO projects (id, org_id, name, description, created_by, created_at, updated_at)
       VALUES (?, ?, ?, ?, ?, ?, ?)
-    `).run(id, input.org_id, input.name.trim(), input.description ?? null, input.created_by ?? null, now, now);
+    `, [id, input.org_id, input.name.trim(), input.description ?? null, input.created_by ?? null, now, now]));
     return this.getById(id);
   }
 
@@ -53,11 +58,11 @@ export class SqliteProjectRepository implements IProjectRepository {
     if (sets.length === 0) throw new Error('No valid fields to update');
     sets.push('updated_at = ?'); params.push(new Date().toISOString());
     params.push(id);
-    this.db.prepare(`UPDATE projects SET ${sets.join(', ')} WHERE id = ? AND deleted_at IS NULL`).run(...params);
+    await this.db.query(...toPos(`UPDATE projects SET ${sets.join(', ')} WHERE id = ? AND deleted_at IS NULL`, params));
     return this.getById(id);
   }
 
   async delete(id: string, orgId: string): Promise<void> {
-    this.db.prepare('UPDATE projects SET deleted_at = ? WHERE id = ? AND org_id = ?').run(new Date().toISOString(), id, orgId);
+    await this.db.query(...toPos('UPDATE projects SET deleted_at = ? WHERE id = ? AND org_id = ?', [new Date().toISOString(), id, orgId]));
   }
 }

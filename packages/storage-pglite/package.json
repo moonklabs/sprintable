@@ -1,5 +1,5 @@
 {
-  "name": "@sprintable/storage-sqlite",
+  "name": "@sprintable/storage-pglite",
   "version": "0.1.0",
   "private": true,
   "type": "module",
@@ -12,6 +12,7 @@
     "type-check": "tsc --noEmit"
   },
   "dependencies": {
+    "@electric-sql/pglite": "^0.2.0",
     "@sprintable/core-storage": "workspace:*"
   },
   "devDependencies": {
@@ -19,6 +20,6 @@
     "typescript": "^5.7.0"
   },
   "engines": {
-    "node": ">=22.5.0"
+    "node": ">=20.0.0"
   }
 }

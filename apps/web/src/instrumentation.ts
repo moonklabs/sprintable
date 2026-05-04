@@ -6,9 +6,16 @@ declare global {
 
 export async function register() {
   if (process.env.NODE_ENV === 'test') return;
-  if (globalThis.__backgroundRuntimeWorker) return;
 
   if (process.env.NEXT_RUNTIME === 'nodejs') {
+    // OSS 모드: PGLite DB 초기화 (최초 기동 시 ~/.sprintable/data/pglite/ 생성)
+    if (process.env['OSS_MODE'] === 'true') {
+      const { getDb } = await import('@sprintable/storage-pglite');
+      await getDb();
+    }
+
+    if (globalThis.__backgroundRuntimeWorker) return;
+
     const { createBackgroundRuntimeWorkerFromEnv, shouldStartBackgroundRuntime } = await import(
       '@/services/background-runtime'
     );

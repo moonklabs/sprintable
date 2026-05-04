@@ -1,4 +1,4 @@
-import type { DatabaseSync } from 'node:sqlite';
+import type { PGlite } from '@electric-sql/pglite';
 import type {
   ITeamMemberRepository,
   TeamMember,
@@ -9,7 +9,12 @@ import type {
 import { NotFoundError } from '@sprintable/core-storage';
 import { randomUUID } from 'node:crypto';
 
-type SqlParam = string | number | bigint | null | Uint8Array;
+type SqlParam = string | number | boolean | null;
+
+function toPos(query: string, params: SqlParam[]): [string, SqlParam[]] {
+  let i = 0;
+  return [query.replace(/\?/g, () => `$${++i}`), params];
+}
 
 interface TeamMemberRow extends Omit<TeamMember, 'is_active' | 'type'> {
   is_active: number;
@@ -24,44 +29,44 @@ function hydrate(row: TeamMemberRow): TeamMember {
   };
 }
 
-export class SqliteTeamMemberRepository implements ITeamMemberRepository {
-  constructor(private readonly db: DatabaseSync) {}
+export class PgliteTeamMemberRepository implements ITeamMemberRepository {
+  constructor(private readonly db: PGlite) {}
 
   async list(filters: TeamMemberListFilters): Promise<TeamMember[]> {
-    let sql = 'SELECT * FROM team_members WHERE org_id = ? AND deleted_at IS NULL';
+    let query = 'SELECT * FROM team_members WHERE org_id = ? AND deleted_at IS NULL';
     const params: SqlParam[] = [filters.org_id];
-    if (filters.project_id) { sql += ' AND project_id = ?'; params.push(filters.project_id); }
-    if (filters.type) { sql += ' AND type = ?'; params.push(filters.type); }
-    if (filters.is_active != null) { sql += ' AND is_active = ?'; params.push(filters.is_active ? 1 : 0); }
-    if (filters.cursor) { sql += ' AND created_at > ?'; params.push(filters.cursor); }
-    sql += ' ORDER BY created_at ASC';
-    if (filters.limit != null) { sql += ' LIMIT ?'; params.push(filters.limit + 1); }
-    const rows = this.db.prepare(sql).all(...params) as unknown as TeamMemberRow[];
+    if (filters.project_id) { query += ' AND project_id = ?'; params.push(filters.project_id); }
+    if (filters.type) { query += ' AND type = ?'; params.push(filters.type); }
+    if (filters.is_active != null) { query += ' AND is_active = ?'; params.push(filters.is_active ? 1 : 0); }
+    if (filters.cursor) { query += ' AND created_at > ?'; params.push(filters.cursor); }
+    query += ' ORDER BY created_at ASC';
+    if (filters.limit != null) { query += ' LIMIT ?'; params.push(filters.limit + 1); }
+    const rows = (await this.db.query(...toPos(query, params))).rows as unknown as TeamMemberRow[];
     return rows.map(hydrate);
   }
 
   async getById(id: string): Promise<TeamMember> {
-    const row = this.db.prepare('SELECT * FROM team_members WHERE id = ? AND deleted_at IS NULL').get(id) as TeamMemberRow | undefined;
+    const row = (await this.db.query(...toPos('SELECT * FROM team_members WHERE id = ? AND deleted_at IS NULL', [id]))).rows[0] as TeamMemberRow | undefined;
     if (!row) throw new NotFoundError('Team member not found');
     return hydrate(row);
   }
 
   async getByUserId(userId: string, orgId: string): Promise<TeamMember | null> {
-    const row = this.db.prepare('SELECT * FROM team_members WHERE user_id = ? AND org_id = ? AND deleted_at IS NULL').get(userId, orgId) as TeamMemberRow | undefined;
+    const row = (await this.db.query(...toPos('SELECT * FROM team_members WHERE user_id = ? AND org_id = ? AND deleted_at IS NULL', [userId, orgId]))).rows[0] as TeamMemberRow | undefined;
     return row ? hydrate(row) : null;
   }
 
   async create(input: CreateTeamMemberInput): Promise<TeamMember> {
     const id = randomUUID();
     const now = new Date().toISOString();
-    this.db.prepare(`
+    await this.db.query(...toPos(`
       INSERT INTO team_members (id, org_id, project_id, user_id, name, email, role, type, is_active, webhook_url, created_at, updated_at)
       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-    `).run(
+    `, [
       id, input.org_id, input.project_id, input.user_id ?? null, input.name, input.email ?? null,
       input.role ?? 'member', input.type ?? 'human', (input.is_active ?? true) ? 1 : 0,
       (input as { webhook_url?: string | null }).webhook_url ?? null, now, now,
-    );
+    ]));
     return this.getById(id);
   }
 
@@ -79,11 +84,11 @@ export class SqliteTeamMemberRepository implements ITeamMemberRepository {
     if (sets.length === 0) throw new Error('No valid fields to update');
     sets.push('updated_at = ?'); params.push(new Date().toISOString());
     params.push(id);
-    this.db.prepare(`UPDATE team_members SET ${sets.join(', ')} WHERE id = ? AND deleted_at IS NULL`).run(...params);
+    await this.db.query(...toPos(`UPDATE team_members SET ${sets.join(', ')} WHERE id = ? AND deleted_at IS NULL`, params));
     return this.getById(id);
   }
 
   async delete(id: string, orgId: string): Promise<void> {
-    this.db.prepare('UPDATE team_members SET deleted_at = ? WHERE id = ? AND org_id = ?').run(new Date().toISOString(), id, orgId);
+    await this.db.query(...toPos('UPDATE team_members SET deleted_at = ? WHERE id = ? AND org_id = ?', [new Date().toISOString(), id, orgId]));
   }
 }

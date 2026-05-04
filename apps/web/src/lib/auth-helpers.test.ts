@@ -1,15 +1,15 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
-const { isOssMode, hashApiKey, prepareMock, getDbMock } = vi.hoisted(() => ({
+const { isOssMode, hashApiKey, queryMock, getDbMock } = vi.hoisted(() => ({
   isOssMode: vi.fn(),
   hashApiKey: vi.fn(),
-  prepareMock: vi.fn(),
+  queryMock: vi.fn(),
   getDbMock: vi.fn(),
 }));
 
 vi.mock('@/lib/storage/factory', () => ({ isOssMode }));
 vi.mock('@/lib/auth-api-key', () => ({ hashApiKey }));
-vi.mock('@sprintable/storage-sqlite', () => ({
+vi.mock('@sprintable/storage-pglite', () => ({
   OSS_ORG_ID: 'oss-org',
   OSS_PROJECT_ID: 'oss-proj',
   OSS_MEMBER_ID: 'oss-member',
@@ -22,19 +22,18 @@ describe('getAuthContext — OSS 모드', () => {
   beforeEach(() => {
     isOssMode.mockReset();
     hashApiKey.mockReset();
-    prepareMock.mockReset();
+    queryMock.mockReset();
     getDbMock.mockReset();
     isOssMode.mockReturnValue(true);
     hashApiKey.mockReturnValue('hashed-key');
-    getDbMock.mockReturnValue({ prepare: prepareMock });
+    getDbMock.mockResolvedValue({ query: queryMock });
   });
 
   it('유효한 API Key → type: agent 반환', async () => {
-    const getMock = vi.fn()
-      .mockReturnValueOnce({ id: 'key-1', team_member_id: 'member-1' })
-      .mockReturnValueOnce({ id: 'member-1', org_id: 'oss-org', project_id: 'oss-proj', type: 'agent' });
-    const runMock = vi.fn();
-    prepareMock.mockReturnValue({ get: getMock, run: runMock });
+    queryMock
+      .mockResolvedValueOnce({ rows: [{ id: 'key-1', team_member_id: 'member-1' }] })
+      .mockResolvedValueOnce({ rows: [{ id: 'member-1', org_id: 'oss-org', project_id: 'oss-proj', type: 'agent' }] })
+      .mockResolvedValue({ rows: [] }); // UPDATE last_used_at
 
     const request = new Request('http://localhost', {
       headers: { Authorization: 'Bearer sk_live_test123' },
@@ -44,7 +43,7 @@ describe('getAuthContext — OSS 모드', () => {
 
     expect(result?.type).toBe('agent');
     expect(result?.id).toBe('member-1');
-    expect(runMock).toHaveBeenCalledOnce();
+    expect(queryMock).toHaveBeenCalledTimes(3);
   });
 
   it('API Key 없음 → human fallback', async () => {
@@ -54,11 +53,11 @@ describe('getAuthContext — OSS 모드', () => {
 
     expect(result?.type).toBe('human');
     expect(result?.id).toBe('oss-member');
-    expect(prepareMock).not.toHaveBeenCalled();
+    expect(queryMock).not.toHaveBeenCalled();
   });
 
   it('revoked_at 설정 key → human fallback', async () => {
-    prepareMock.mockReturnValue({ get: vi.fn().mockReturnValue(null), run: vi.fn() });
+    queryMock.mockResolvedValue({ rows: [] });
 
     const request = new Request('http://localhost', {
       headers: { Authorization: 'Bearer sk_live_revoked' },
@@ -71,7 +70,7 @@ describe('getAuthContext — OSS 모드', () => {
   });
 
   it('expires_at 만료 key → human fallback', async () => {
-    prepareMock.mockReturnValue({ get: vi.fn().mockReturnValue(null), run: vi.fn() });
+    queryMock.mockResolvedValue({ rows: [] });
 
     const request = new Request('http://localhost', {
       headers: { Authorization: 'Bearer sk_live_expired' },

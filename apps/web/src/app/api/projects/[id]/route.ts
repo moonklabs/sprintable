@@ -71,7 +71,7 @@ export async function DELETE(request: Request, { params }: RouteParams) {
 
     let orgId: string;
     if (isOssMode()) {
-      const { OSS_ORG_ID } = await import('@sprintable/storage-sqlite');
+      const { OSS_ORG_ID } = await import('@sprintable/storage-pglite');
       orgId = OSS_ORG_ID;
     } else {
       orgId = me.org_id;

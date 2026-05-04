@@ -26,6 +26,11 @@ dist/
 .DS_Store
 Thumbs.db
 
+# SQLite / PGLite DB files
+*.db
+sprintable.db
+.sprintable/
+
 # Turbo
 .turbo/
 
@@ -35,3 +40,4 @@ coverage/
 .gstack/
 .omc/
 .sisyphus/
+.qa-worktrees/
