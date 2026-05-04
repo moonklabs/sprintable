@@ -35,7 +35,26 @@ const _r = await proxyToFastapi(request, '/api/v2/agent-runs');
 }
 
 export async function POST(request: Request) {
-  if (isOssMode()) return ApiErrors.badRequest('Not available in OSS mode');
+  if (isOssMode()) {
+    try {
+      const me = await getAuthContext(request);
+      if (!me) return ApiErrors.unauthorized();
+      let body: unknown;
+      try { body = await request.json(); } catch { body = {}; }
+      const b = (body as Record<string, unknown>) ?? {};
+      const { getDb } = await import('@sprintable/storage-pglite');
+      const { randomUUID } = await import('node:crypto');
+      const db = await getDb();
+      const id = randomUUID();
+      const now = new Date().toISOString();
+      await db.query(
+        'INSERT INTO agent_runs (id, org_id, project_id, agent_id, session_id, memo_id, story_id, trigger, status, created_at) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10)',
+        [id, me.org_id, me.project_id, b.agent_id ?? null, b.session_id ?? null, b.memo_id ?? null, b.story_id ?? null, b.trigger ?? null, 'pending', now]
+      );
+      const run = (await db.query('SELECT * FROM agent_runs WHERE id = $1', [id])).rows[0];
+      return apiSuccess(run, undefined, 201);
+    } catch (error) { return handleApiError(error); }
+  }
 const _r = await proxyToFastapi(request, '/api/v2/agent-runs');
   if (!_r.ok) return _r;
   if (_r.status === 204) return apiSuccess({ ok: true });
