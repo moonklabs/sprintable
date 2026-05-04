@@ -66,7 +66,11 @@ turndown.addRule('table', {
  */
 export function htmlToMarkdown(html: string): string {
   if (!html.trim()) return '';
-  return turndown.turndown(html).trim();
+  const md = turndown.turndown(html).trim();
+  // Turndown escapes "1. " at line-start to "1\. " to prevent accidental ordered lists.
+  // We undo this because our markdownToHtml already handles the conversion,
+  // and leaving it causes backslash accumulation on each load/save cycle.
+  return md.replace(/^(\d+)\\\. /gm, '$1. ');
 }
 
 /**
@@ -159,12 +163,12 @@ export function markdownToHtml(md: string): string {
     return `<table>${thead}${tbody}</table>`;
   });
 
-  // Ordered lists
-  html = html.replace(/(?:^\d+\.\s+.+(?:\n|$))+/gm, (listBlock) => {
+  // Ordered lists — also handle Turndown-escaped "1\. " notation from existing DB data
+  html = html.replace(/(?:^\d+\\?\.\s+.+(?:\n|$))+/gm, (listBlock) => {
     const items = listBlock
       .trim()
       .split('\n')
-      .map((line) => line.replace(/^\d+\.\s+/, '').trim())
+      .map((line) => line.replace(/^\d+\\?\.\s+/, '').trim())
       .filter(Boolean);
 
     if (items.length === 0) {
