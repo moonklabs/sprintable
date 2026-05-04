@@ -121,6 +121,18 @@ async def _build_app_metadata(user: User, session: AsyncSession) -> dict:
     if not member:
         return {}
 
+    # 3. 같은 org의 user_id NULL 레코드 전량 백필 (교차 프로젝트 멤버십 해소)
+    await session.execute(
+        update(TeamMember)
+        .where(
+            TeamMember.user_id.is_(None),
+            TeamMember.is_active.is_(True),
+            TeamMember.type == "human",
+            TeamMember.org_id == member.org_id,
+        )
+        .values(user_id=user.id)
+    )
+
     return {
         "org_id": str(member.org_id),
         "project_id": str(member.project_id),
