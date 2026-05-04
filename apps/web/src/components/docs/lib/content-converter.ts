@@ -6,6 +6,34 @@ const turndown = new TurndownService({
   bulletListMarker: '-',
 });
 
+// Disable Turndown's built-in text escape function.
+// We do round-trip editing (WYSIWYG ↔ markdown), so auto-escaping
+// causes backslash accumulation on every load/save cycle:
+//   "hello_world" → "hello\_world" → "hello\\_world" → …
+// TipTap handles structural formatting; no inline text escaping is needed.
+(turndown as unknown as { escape: (str: string) => string }).escape = (str: string) => str;
+
+// Custom list item rule — produces compact format regardless of whether
+// TipTap wrapped the content in <p> tags (which it always does via schema normalization).
+// Without this, Turndown outputs "loose" lists with blank lines between items:
+//   -   item\n    \n-   next  →  fixed to:  - item\n- next
+turndown.addRule('compactListItem', {
+  filter: 'li',
+  replacement: (content, node) => {
+    const clean = content
+      .replace(/^\n+/, '')       // strip leading newlines from <p>
+      .replace(/\n\s*\n/g, '\n') // collapse blank lines
+      .trimEnd();
+    const isOrdered = (node as HTMLElement).parentElement?.nodeName === 'OL';
+    if (isOrdered) {
+      const siblings = Array.from((node as HTMLElement).parentElement?.children ?? []);
+      const index = siblings.indexOf(node as HTMLElement) + 1;
+      return `${index}. ${clean}\n`;
+    }
+    return `- ${clean}\n`;
+  },
+});
+
 // Preserve page-embed atoms — must be before the generic block rule
 turndown.addRule('pageEmbed', {
   filter: (node) => node.nodeName === 'DIV' && node.hasAttribute('data-page-embed'),
@@ -74,8 +102,15 @@ export function htmlToMarkdown(html: string): string {
  * Uses a minimal approach - TipTap's StarterKit handles most markdown
  * when loaded as HTML via DOMParser, so we handle the basic cases.
  */
-export function markdownToHtml(md: string): string {
-  if (!md.trim()) return '';
+export function markdownToHtml(rawMd: string): string {
+  if (!rawMd.trim()) return '';
+
+  // Strip accumulated Turndown backslash escapes from previously saved content.
+  // Turndown added these automatically on prior saves; each round-trip doubled them.
+  // Process ordered-list dots first (may have multiple backslashes), then inline escapes.
+  let md = rawMd
+    .replace(/^(\d+)\\+\. /gm, '$1. ')
+    .replace(/\\([*_`[\]\\])/g, '$1');
 
   // Extract fenced code blocks first to prevent other transforms from modifying their content.
   // Subsequent regex passes use gm flags which would otherwise corrupt multi-line code blocks.
@@ -159,19 +194,19 @@ export function markdownToHtml(md: string): string {
     return `<table>${thead}${tbody}</table>`;
   });
 
-  // Ordered lists
-  html = html.replace(/(?:^\d+\.\s+.+(?:\n|$))+/gm, (listBlock) => {
+  // Ordered lists — also handle Turndown-escaped "1\. " notation from existing DB data
+  html = html.replace(/(?:^\d+\\?\.\s+.+(?:\n|$))+/gm, (listBlock) => {
     const items = listBlock
       .trim()
       .split('\n')
-      .map((line) => line.replace(/^\d+\.\s+/, '').trim())
+      .map((line) => line.replace(/^\d+\\?\.\s+/, '').trim())
       .filter(Boolean);
 
     if (items.length === 0) {
       return listBlock;
     }
 
-    return `<ol>${items.map((item) => `<li>${item}</li>`).join('')}</ol>`;
+    return `<ol>${items.map((item) => `<li><p>${item}</p></li>`).join('')}</ol>`;
   });
 
   // Unordered lists
@@ -186,7 +221,7 @@ export function markdownToHtml(md: string): string {
       return listBlock;
     }
 
-    return `<ul>${items.map((item) => `<li>${item}</li>`).join('')}</ul>`;
+    return `<ul>${items.map((item) => `<li><p>${item}</p></li>`).join('')}</ul>`;
   });
 
   // Paragraphs - wrap remaining plain-text lines (exclude HTML tags and code block/atom placeholders)
