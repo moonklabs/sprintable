@@ -1,17 +1,29 @@
 'use client';
 
 import { useState } from 'react';
-import { useRouter } from 'next/navigation';
+import { useRouter, useSearchParams } from 'next/navigation';
 import { SprintableLogo } from '@/components/brand/sprintable-logo';
 import { loginWithPassword } from '@/lib/db/client';
 
+const OAUTH_ERROR_MESSAGES: Record<string, string> = {
+  oauth_init_failed: 'OAuth authentication failed. Please try again.',
+  oauth_missing_params: 'OAuth parameters missing. Please try again.',
+  csrf_mismatch: 'Security check failed. Please try again.',
+  oauth_no_token: 'Authentication token not received. Please try again.',
+  invalid_provider: 'Invalid OAuth provider.',
+};
+
 export default function LoginPage() {
   const router = useRouter();
+  const searchParams = useSearchParams();
+  const errorCode = searchParams.get('error');
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [totpCode, setTotpCode] = useState('');
   const [showTotp, setShowTotp] = useState(false);
-  const [error, setError] = useState<string | null>(null);
+  const [error, setError] = useState<string | null>(
+    errorCode ? (OAUTH_ERROR_MESSAGES[errorCode] ?? 'Login failed. Please try again.') : null
+  );
   const [loading, setLoading] = useState(false);
 
   const handleLogin = async () => {
