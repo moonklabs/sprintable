@@ -14,7 +14,8 @@ export async function GET(request: Request) {
       const projectId = searchParams.get('project_id') ?? me.project_id;
       const type = searchParams.get('type') as 'human' | 'agent' | null;
       const repo = await createTeamMemberRepository();
-      const members = await repo.list({ org_id: me.org_id, project_id: projectId, ...(type ? { type } : {}) });
+      const includeInactive = searchParams.get('include_inactive') === 'true';
+      const members = await repo.list({ org_id: me.org_id, project_id: projectId, ...(type ? { type } : {}), ...(includeInactive ? {} : { is_active: true }) });
       return apiSuccess(members);
     }
     const res = await proxyToFastapi(request, '/api/v2/team-members');

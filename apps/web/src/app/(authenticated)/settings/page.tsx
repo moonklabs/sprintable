@@ -1,7 +1,7 @@
 'use client';
 
 import { useEffect, useMemo, useState } from 'react';
-import { useRouter } from 'next/navigation';
+import { useRouter, useSearchParams } from 'next/navigation';
 import { useTranslations } from 'next-intl';
 import { BarChart2, Bell, Bot, CreditCard, FolderKanban, Key, Palette, Trash2, User, Users, Zap } from 'lucide-react';
 import { UsageDashboard } from '@/components/settings/usage-dashboard';
@@ -68,6 +68,13 @@ export default function SettingsPage() {
   const t = useTranslations('settings');
   const tc = useTranslations('common');
   const router = useRouter();
+  const searchParamsHook = useSearchParams();
+  const [activeTab, setActiveTab] = useState(() => searchParamsHook.get('tab') ?? 'profile');
+
+  useEffect(() => {
+    const tab = searchParamsHook.get('tab');
+    if (tab) setActiveTab(tab);
+  }, [searchParamsHook]);
 
   const [orgId, setOrgId] = useState<string | null>(null);
   const [currentProjectId, setCurrentProjectId] = useState<string | null>(null);
@@ -483,7 +490,7 @@ export default function SettingsPage() {
 
   return (
     <>
-      <Tabs defaultValue="profile" orientation="vertical" className="flex-1 min-h-0 gap-0">
+      <Tabs value={activeTab} onValueChange={setActiveTab} orientation="vertical" className="flex-1 min-h-0 gap-0">
         {/* Left nav */}
         <div className="w-52 shrink-0 border-r overflow-y-auto p-4">
           <h1 className="mb-4 px-2 text-sm font-semibold">{t('title')}</h1>

@@ -7,7 +7,7 @@ import { isOssMode } from '@/lib/storage/factory';
 
 export default async function ApiKeysPage() {
   if (isOssMode()) {
-    redirect('/settings#members');
+    redirect('/settings?tab=members');
   }
   const db = null as any;
   const { data: { user } } = { data: { user: null } };
