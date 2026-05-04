@@ -89,7 +89,7 @@ export function MemoListClient({ selectedMemoId, onNewMemo }: MemoListClientProp
     debounceTimer.current = setTimeout(() => setDebouncedQuery(value), 300);
   };
 
-  const fetchMemos = useCallback(async (q?: string, cursor?: string | null) => {
+  const fetchMemos = useCallback(async (q?: string, cursor?: string | null, filterIds?: string[]) => {
     if (!projectId) return;
     try {
       const params = new URLSearchParams();
@@ -97,6 +97,7 @@ export function MemoListClient({ selectedMemoId, onNewMemo }: MemoListClientProp
       params.append('limit', '10');
       if (q?.trim()) params.append('q', q.trim());
       if (cursor) params.append('cursor', cursor);
+      if (filterIds?.length) params.append('assigned_to', filterIds.join(','));
       const res = await fetch(`/api/memos?${params.toString()}`);
       if (!res.ok) throw new Error('Failed to fetch memos');
       const { data, meta } = await res.json();
@@ -118,7 +119,7 @@ export function MemoListClient({ selectedMemoId, onNewMemo }: MemoListClientProp
   const fetchMembers = useCallback(async () => {
     if (!projectId) return;
     try {
-      const res = await fetch(`/api/team-members?project_id=${projectId}`);
+      const res = await fetch(`/api/team-members?project_id=${projectId}&is_active=true`);
       if (!res.ok) return;
       const { data } = await res.json();
       setMembers(data ?? []);
@@ -140,8 +141,9 @@ export function MemoListClient({ selectedMemoId, onNewMemo }: MemoListClientProp
   useEffect(() => {
     setNextCursor(null);
     setHasMore(false);
-    void fetchMemos(debouncedQuery);
-  }, [debouncedQuery, fetchMemos]);
+    const allFilterIds = [...selectedMemberIds, ...selectedAgentIds];
+    void fetchMemos(debouncedQuery, null, allFilterIds.length ? allFilterIds : undefined);
+  }, [debouncedQuery, fetchMemos, selectedMemberIds, selectedAgentIds]);
 
   useAutoRefresh('memo-list', () => void fetchMemos(debouncedQuery));
 
