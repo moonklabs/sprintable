@@ -24,6 +24,7 @@
     "@radix-ui/react-slot": "^1.2.4",
     "@sprintable/core-storage": "workspace:*",
     "@sprintable/storage-api": "workspace:*",
+    "@sprintable/storage-pglite": "workspace:*",
 "@tiptap/core": "^3.22.3",
     "@tiptap/extension-image": "^3.22.3",
     "@tiptap/extension-link": "^3.22.3",
