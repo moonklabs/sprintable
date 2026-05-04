@@ -33,6 +33,32 @@ async def get_me(
     return data
 
 
+@router.get("/memberships")
+async def get_my_memberships(
+    session: AsyncSession = Depends(get_db),
+    auth: AuthContext = Depends(get_current_user),
+) -> list[dict]:
+    result = await session.execute(
+        select(TeamMember)
+        .options(joinedload(TeamMember.project))
+        .where(
+            TeamMember.user_id == uuid.UUID(auth.user_id),
+            TeamMember.is_active.is_(True),
+            TeamMember.type == "human",
+        )
+        .order_by(TeamMember.created_at)
+    )
+    members = result.scalars().all()
+    return [
+        {
+            "projectId": str(m.project_id),
+            "projectName": m.project.name if m.project else "Untitled Project",
+        }
+        for m in members
+        if m.project_id
+    ]
+
+
 @router.patch("", response_model=MeResponse)
 async def update_me(
     member_id: uuid.UUID = Query(...),

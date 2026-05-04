@@ -12,6 +12,7 @@ import { formatSeoulDate } from '@/lib/date';
 import { useDashboardContext } from '../../dashboard/dashboard-shell';
 import { StandupBoardCard } from '@/components/standup/standup-board-card';
 import { StandupFeedbackDialog } from '@/components/standup/standup-feedback-dialog';
+import { StandupHistorySection } from '@/components/standup/standup-history-section';
 import {
   type StandupEntrySummary,
   type StandupFeedbackSummary,
@@ -670,6 +671,8 @@ export default function StandupPage() {
               {!loading && members.length === 0 ? (
                 <EmptyState title={t('noMembers')} description={t('noMembersDescription')} />
               ) : null}
+
+              {projectId ? <StandupHistorySection projectId={projectId} memberNameById={memberNameById} /> : null}
             </>
           ) : null}
         </div>
