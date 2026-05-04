@@ -8,7 +8,7 @@ import { isOssMode } from '@/lib/storage/factory';
 export async function GET(request: Request) {
   try {
     if (isOssMode()) {
-      const { OSS_PROJECT_ID, OSS_ORG_ID } = await import('@sprintable/storage-sqlite');
+      const { OSS_PROJECT_ID, OSS_ORG_ID } = await import('@sprintable/storage-pglite');
       const { createProjectRepository } = await import('@/lib/storage/factory');
       const repo = await createProjectRepository();
       const project = await repo.getById(OSS_PROJECT_ID);
@@ -53,7 +53,7 @@ export async function POST(request: Request) {
     const { project_id: projectId } = parsed.data;
 
     if (isOssMode()) {
-      const { OSS_PROJECT_ID } = await import('@sprintable/storage-sqlite');
+      const { OSS_PROJECT_ID } = await import('@sprintable/storage-pglite');
       if (projectId !== OSS_PROJECT_ID) return ApiErrors.forbidden('Project membership not found');
 
       const cookieStore = await cookies();

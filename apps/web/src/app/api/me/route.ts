@@ -7,7 +7,7 @@ import { proxyToFastapi } from '@/lib/fastapi-proxy';
 export async function GET(request: Request) {
   try {
     if (isOssMode()) {
-      const { OSS_MEMBER_ID, OSS_ORG_ID } = await import('@sprintable/storage-sqlite');
+      const { OSS_MEMBER_ID, OSS_ORG_ID } = await import('@sprintable/storage-pglite');
       const me = await getAuthContext(request);
       if (!me) return ApiErrors.unauthorized();
 
@@ -29,7 +29,7 @@ export async function GET(request: Request) {
 export async function PATCH(request: Request) {
   try {
     if (isOssMode()) {
-      const { OSS_MEMBER_ID } = await import('@sprintable/storage-sqlite');
+      const { OSS_MEMBER_ID } = await import('@sprintable/storage-pglite');
       let body: unknown;
       try { body = await request.json(); } catch { return apiError('BAD_REQUEST', 'Invalid JSON body', 400); }
       const { name } = (body as Record<string, unknown>) ?? {};

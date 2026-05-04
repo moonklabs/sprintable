@@ -13,7 +13,7 @@ export async function POST() {
   }
 
   try {
-    const { OSS_PROJECT_ID, OSS_ORG_ID } = await import('@sprintable/storage-sqlite');
+    const { OSS_PROJECT_ID, OSS_ORG_ID } = await import('@sprintable/storage-pglite');
     const storyRepo = await createStoryRepository();
     const existing = await storyRepo.list({ project_id: OSS_PROJECT_ID, limit: 1 });
 

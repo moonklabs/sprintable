@@ -9,7 +9,7 @@ const { isOssMode, hashApiKey, prepareMock, getDbMock } = vi.hoisted(() => ({
 
 vi.mock('@/lib/storage/factory', () => ({ isOssMode }));
 vi.mock('@/lib/auth-api-key', () => ({ hashApiKey }));
-vi.mock('@sprintable/storage-sqlite', () => ({
+vi.mock('@sprintable/storage-pglite', () => ({
   OSS_ORG_ID: 'oss-org',
   OSS_PROJECT_ID: 'oss-proj',
   OSS_MEMBER_ID: 'oss-member',

@@ -9,7 +9,7 @@ const PAGE_SIZE = 20;
 export async function GET(request: Request) {
   if (isOssMode()) {
     try {
-      const { OSS_ORG_ID, OSS_PROJECT_ID } = await import('@sprintable/storage-sqlite');
+      const { OSS_ORG_ID, OSS_PROJECT_ID } = await import('@sprintable/storage-pglite');
       const repo = await createAgentRunRepository();
       const url = new URL(request.url);
       const limit = Math.min(Number(url.searchParams.get('limit') ?? PAGE_SIZE), 50);

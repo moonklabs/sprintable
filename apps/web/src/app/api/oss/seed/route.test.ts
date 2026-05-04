@@ -13,7 +13,7 @@ vi.mock('@/lib/storage/factory', () => ({
   createProjectRepository: vi.fn().mockResolvedValue({ update: mockProjectUpdate }),
 }));
 
-vi.mock('@sprintable/storage-sqlite', () => ({
+vi.mock('@sprintable/storage-pglite', () => ({
   OSS_PROJECT_ID: 'oss-project',
   OSS_ORG_ID: 'oss-org',
 }));

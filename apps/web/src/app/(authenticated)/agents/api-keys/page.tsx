@@ -7,7 +7,7 @@ import { isOssMode, createTeamMemberRepository } from '@/lib/storage/factory';
 
 export default async function ApiKeysPage() {
   if (isOssMode()) {
-    const { OSS_ORG_ID, OSS_PROJECT_ID } = await import('@sprintable/storage-sqlite');
+    const { OSS_ORG_ID, OSS_PROJECT_ID } = await import('@sprintable/storage-pglite');
     const repo = await createTeamMemberRepository();
     const agents = await repo.list({ org_id: OSS_ORG_ID, project_id: OSS_PROJECT_ID });
     const agentMembers = agents.filter((m) => m.type === 'agent' && m.is_active);

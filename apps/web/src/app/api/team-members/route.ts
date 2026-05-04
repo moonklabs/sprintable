@@ -7,7 +7,7 @@ import { proxyToFastapi } from '@/lib/fastapi-proxy';
 export async function GET(request: Request) {
   try {
     if (isOssMode()) {
-      const { OSS_PROJECT_ID, OSS_ORG_ID } = await import('@sprintable/storage-sqlite');
+      const { OSS_PROJECT_ID, OSS_ORG_ID } = await import('@sprintable/storage-pglite');
       const { searchParams } = new URL(request.url);
       const projectId = searchParams.get('project_id') ?? OSS_PROJECT_ID;
       const type = searchParams.get('type') as 'human' | 'agent' | null;
@@ -38,7 +38,7 @@ export async function POST(request: Request) {
     }
     if (!body.name) return ApiErrors.badRequest('name required for agent');
     if (isOssMode()) {
-      const { OSS_PROJECT_ID, OSS_ORG_ID } = await import('@sprintable/storage-sqlite');
+      const { OSS_PROJECT_ID, OSS_ORG_ID } = await import('@sprintable/storage-pglite');
       const repo = await createTeamMemberRepository();
       const member = await repo.create({
         org_id: OSS_ORG_ID,

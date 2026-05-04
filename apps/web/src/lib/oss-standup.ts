@@ -1,9 +1,13 @@
 import { randomUUID } from 'crypto';
 
-let _sqlite: typeof import('@sprintable/storage-sqlite') | undefined;
+let _sqlite: typeof import('@sprintable/storage-pglite') | undefined;
 async function getSqlite() {
-  _sqlite ??= await import('@sprintable/storage-sqlite');
+  _sqlite ??= await import('@sprintable/storage-pglite');
   return _sqlite;
+}
+
+function toPos(q: string, p: (string|number|boolean|null)[]): [string, (string|number|boolean|null)[]] {
+  let i = 0; return [q.replace(/\?/g, () => `$${++i}`), p];
 }
 
 type StandupReviewType = 'comment' | 'approve' | 'request_changes';
@@ -80,28 +84,26 @@ function normalizeFeedback(row: Record<string, unknown>): StandupFeedbackRow {
 
 export async function listOssStandupEntries(projectId: string, date: string): Promise<StandupEntryRow[]> {
   const { getDb } = await getSqlite();
-  const rows = getDb()
-    .prepare(`
+  const db = await getDb();
+  const rows = (await db.query(...toPos(`
       SELECT *
       FROM standup_entries
       WHERE project_id = ? AND date = ?
       ORDER BY created_at
-    `)
-    .all(projectId, date) as Array<Record<string, unknown>>;
+    `, [projectId, date]))).rows as Array<Record<string, unknown>>;
 
   return rows.map(normalizeEntry);
 }
 
 export async function getOssStandupEntryForUser(projectId: string, authorId: string, date: string): Promise<StandupEntryRow | null> {
   const { getDb } = await getSqlite();
-  const row = getDb()
-    .prepare(`
+  const db = await getDb();
+  const row = (await db.query(...toPos(`
       SELECT *
       FROM standup_entries
       WHERE project_id = ? AND author_id = ? AND date = ?
       LIMIT 1
-    `)
-    .get(projectId, authorId, date) as Record<string, unknown> | undefined;
+    `, [projectId, authorId, date]))).rows[0] as Record<string, unknown> | undefined;
 
   return row ? normalizeEntry(row) : null;
 }
@@ -118,10 +120,11 @@ export async function saveOssStandupEntry(input: {
   plan_story_ids?: string[];
 }): Promise<StandupEntryRow> {
   const { getDb } = await getSqlite();
+  const db = await getDb();
   const now = new Date().toISOString();
   const id = randomUUID();
 
-  getDb().prepare(`
+  await db.query(...toPos(`
     INSERT INTO standup_entries (
       id, org_id, project_id, sprint_id, author_id, date, done, plan, blockers, plan_story_ids, created_at, updated_at
     ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
@@ -132,7 +135,7 @@ export async function saveOssStandupEntry(input: {
       blockers = excluded.blockers,
       plan_story_ids = excluded.plan_story_ids,
       updated_at = excluded.updated_at
-  `).run(
+  `, [
     id,
     input.org_id,
     input.project_id,
@@ -145,25 +148,25 @@ export async function saveOssStandupEntry(input: {
     JSON.stringify(input.plan_story_ids ?? []),
     now,
     now,
-  );
+  ]));
 
   return (await getOssStandupEntryForUser(input.project_id, input.author_id, input.date))!;
 }
 
 export async function getOssStandupMissing(projectId: string, date: string) {
   const { getDb } = await getSqlite();
-  const db = getDb();
-  const members = db.prepare(`
+  const db = await getDb();
+  const members = (await db.query(...toPos(`
     SELECT id, name
     FROM team_members
     WHERE project_id = ? AND is_active = 1
-  `).all(projectId) as Array<{ id: string; name: string }>;
+  `, [projectId]))).rows as Array<{ id: string; name: string }>;
 
-  const entries = db.prepare(`
+  const entries = (await db.query(...toPos(`
     SELECT author_id
     FROM standup_entries
     WHERE project_id = ? AND date = ?
-  `).all(projectId, date) as Array<{ author_id: string }>;
+  `, [projectId, date]))).rows as Array<{ author_id: string }>;
 
   const submitted = new Set(entries.map((entry) => entry.author_id));
   const missing = members.filter((member) => !submitted.has(member.id));
@@ -176,48 +179,52 @@ export async function getOssStandupMissing(projectId: string, date: string) {
 
 export async function getOssStandupHistory(projectId: string, limit = 50) {
   const { getDb } = await getSqlite();
-  return getDb().prepare(`
+  const db = await getDb();
+  return (await db.query(...toPos(`
     SELECT author_id, date, done, plan, blockers
     FROM standup_entries
     WHERE project_id = ?
     ORDER BY date DESC
     LIMIT ?
-  `).all(projectId, limit) as Array<Record<string, unknown>>;
+  `, [projectId, limit]))).rows as Array<Record<string, unknown>>;
 }
 
 export async function listOssStandupFeedbackByDate(projectId: string, date: string): Promise<StandupFeedbackRow[]> {
   const { getDb } = await getSqlite();
-  const rows = getDb().prepare(`
+  const db = await getDb();
+  const rows = (await db.query(...toPos(`
     SELECT sf.*
     FROM standup_feedback sf
     INNER JOIN standup_entries se ON se.id = sf.standup_entry_id
     WHERE se.project_id = ? AND se.date = ?
     ORDER BY sf.created_at
-  `).all(projectId, date) as Array<Record<string, unknown>>;
+  `, [projectId, date]))).rows as Array<Record<string, unknown>>;
 
   return rows.map(normalizeFeedback);
 }
 
 export async function listOssStandupFeedbackForEntry(entryId: string): Promise<StandupFeedbackRow[]> {
   const { getDb } = await getSqlite();
-  const rows = getDb().prepare(`
+  const db = await getDb();
+  const rows = (await db.query(...toPos(`
     SELECT *
     FROM standup_feedback
     WHERE standup_entry_id = ?
     ORDER BY created_at
-  `).all(entryId) as Array<Record<string, unknown>>;
+  `, [entryId]))).rows as Array<Record<string, unknown>>;
 
   return rows.map(normalizeFeedback);
 }
 
 export async function getOssStandupFeedback(id: string): Promise<StandupFeedbackRow | null> {
   const { getDb } = await getSqlite();
-  const row = getDb().prepare(`
+  const db = await getDb();
+  const row = (await db.query(...toPos(`
     SELECT *
     FROM standup_feedback
     WHERE id = ?
     LIMIT 1
-  `).get(id) as Record<string, unknown> | undefined;
+  `, [id]))).rows[0] as Record<string, unknown> | undefined;
 
   return row ? normalizeFeedback(row) : null;
 }
@@ -231,13 +238,13 @@ export async function createOssStandupFeedback(input: {
   feedback_text: string;
 }): Promise<StandupFeedbackRow> {
   const { getDb } = await getSqlite();
-  const db = getDb();
-  const entry = db.prepare(`
+  const db = await getDb();
+  const entry = (await db.query(...toPos(`
     SELECT sprint_id
     FROM standup_entries
     WHERE id = ?
     LIMIT 1
-  `).get(input.standup_entry_id) as { sprint_id?: string | null } | undefined;
+  `, [input.standup_entry_id]))).rows[0] as { sprint_id?: string | null } | undefined;
 
   if (!entry) {
     throw new Error('Standup entry not found');
@@ -245,11 +252,11 @@ export async function createOssStandupFeedback(input: {
 
   const now = new Date().toISOString();
   const id = randomUUID();
-  db.prepare(`
+  await db.query(...toPos(`
     INSERT INTO standup_feedback (
       id, org_id, project_id, sprint_id, standup_entry_id, feedback_by_id, review_type, feedback_text, created_at, updated_at
     ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-  `).run(
+  `, [
     id,
     input.org_id,
     input.project_id,
@@ -260,7 +267,7 @@ export async function createOssStandupFeedback(input: {
     input.feedback_text,
     now,
     now,
-  );
+  ]));
 
   return (await getOssStandupFeedback(id))!;
 }
@@ -271,6 +278,7 @@ export async function updateOssStandupFeedback(
   actorId: string,
 ): Promise<StandupFeedbackRow> {
   const { getDb } = await getSqlite();
+  const db = await getDb();
   const current = await getOssStandupFeedback(id);
   if (!current) throw new Error('Standup feedback not found');
   if (current.feedback_by_id !== actorId) throw new Error('Only the feedback author can update this entry');
@@ -278,23 +286,24 @@ export async function updateOssStandupFeedback(
   const nextReviewType = input.review_type ?? current.review_type;
   const nextText = input.feedback_text ?? current.feedback_text;
 
-  getDb().prepare(`
+  await db.query(...toPos(`
     UPDATE standup_feedback
     SET review_type = ?, feedback_text = ?, updated_at = ?
     WHERE id = ?
-  `).run(nextReviewType, nextText, new Date().toISOString(), id);
+  `, [nextReviewType, nextText, new Date().toISOString(), id]));
 
   return (await getOssStandupFeedback(id))!;
 }
 
 export async function deleteOssStandupFeedback(id: string, actorId: string): Promise<void> {
   const { getDb } = await getSqlite();
+  const db = await getDb();
   const current = await getOssStandupFeedback(id);
   if (!current) throw new Error('Standup feedback not found');
   if (current.feedback_by_id !== actorId) throw new Error('Only the feedback author can delete this entry');
 
-  getDb().prepare(`
+  await db.query(...toPos(`
     DELETE FROM standup_feedback
     WHERE id = ?
-  `).run(id);
+  `, [id]));
 }
