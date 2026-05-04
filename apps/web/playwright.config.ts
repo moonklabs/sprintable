@@ -23,10 +23,5 @@ export default defineConfig({
         command: 'pnpm dev',
         url: 'http://localhost:3108',
         reuseExistingServer: !process.env['CI'],
-        env: {
-          OSS_MODE: 'true',
-          NEXT_PUBLIC_OSS_MODE: 'true',
-          SQLITE_PATH: './.data/test.db',
-        },
       },
 });

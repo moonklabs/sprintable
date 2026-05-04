@@ -6,7 +6,7 @@ import { getAuthContext } from '@/lib/auth-helpers';
 import { parseBody, createMemoSchema } from '@sprintable/shared';
 import { apiSuccess, apiError, ApiErrors } from '@/lib/api-response';
 import { buildCursorPageMeta, parseCursorPageInput } from '@/lib/pagination';
-import { createMemoRepository, createTeamMemberRepository, createProjectRepository, isOssMode } from '@/lib/storage/factory';
+import { createMemoRepository } from '@/lib/storage/factory';
 import { checkEntitlement } from '@/lib/entitlement';
 import { incrementUsage } from '@/lib/usage-tracker';
 import type { SupabaseClient } from '@supabase/supabase-js';
@@ -31,20 +31,16 @@ export async function POST(request: Request) {
       );
     }
 
-    if (!isOssMode()) {
-      const ent = await checkEntitlement(supabase, me.org_id, 'memos');
-      if (!ent.allowed) return apiError('quota_exceeded', `Memo quota exceeded (${ent.current}/${ent.limit})`, 402, { resource: 'memos', current: ent.current, limit: ent.limit, upgradeUrl: ent.upgradeUrl });
-    }
+    const ent = await checkEntitlement(supabase, me.org_id, 'memos');
+    if (!ent.allowed) return apiError('quota_exceeded', `Memo quota exceeded (${ent.current}/${ent.limit})`, 402, { resource: 'memos', current: ent.current, limit: ent.limit, upgradeUrl: ent.upgradeUrl });
 
     const parsed = await parseBody(request, createMemoSchema);
     if (!parsed.success) return parsed.response;
     const body = parsed.data;
     console.warn('[POST /api/memos] parsed assigned_to_ids:', JSON.stringify(body.assigned_to_ids));
-    const dbClient = isOssMode() ? undefined : (me.type === 'agent' ? createSupabaseAdminClient() : supabase);
+    const dbClient = me.type === 'agent' ? createSupabaseAdminClient() : supabase;
     const repo = await createMemoRepository(dbClient);
-    const teamMemberRepo = isOssMode() ? await createTeamMemberRepository() : undefined;
-    const projectRepo = isOssMode() ? await createProjectRepository() : undefined;
-    const service = new MemoService(repo, dbClient as SupabaseClient | undefined, teamMemberRepo, projectRepo);
+    const service = new MemoService(repo, dbClient as SupabaseClient | undefined);
     const memo = await service.create({
       ...body,
       org_id: me.org_id,
@@ -83,7 +79,7 @@ export async function GET(request: Request) {
       limit: searchParams.get('limit') ? Number(searchParams.get('limit')) : undefined,
       cursor: searchParams.get('cursor'),
     }, { defaultLimit: 30, maxLimit: 100 });
-    const dbClient = isOssMode() ? undefined : (me.type === 'agent' ? createSupabaseAdminClient() : supabase);
+    const dbClient = me.type === 'agent' ? createSupabaseAdminClient() : supabase;
     const repo = await createMemoRepository(dbClient);
     const service = new MemoService(repo, dbClient as SupabaseClient | undefined);
     const memos = await service.list({

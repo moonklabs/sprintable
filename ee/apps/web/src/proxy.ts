@@ -38,34 +38,12 @@ const EE_DISABLED_RESPONSE = new NextResponse(
   { status: 403, headers: { 'Content-Type': 'application/json' } },
 );
 
-function isOssMode(): boolean {
-  return process.env['OSS_MODE'] === 'true';
-}
-
 export async function proxy(request: NextRequest) {
   const pathname = request.nextUrl.pathname;
 
   // EE gate — block SaaS-only API paths when LICENSE_CONSENT is not set
   if (EE_API_PREFIXES.some((prefix) => pathname.startsWith(prefix))) {
     if (!isEEEnabled()) return EE_DISABLED_RESPONSE;
-  }
-
-  // OSS_MODE: bypass Supabase auth entirely
-  if (isOssMode()) {
-    if (pathname === '/') {
-      const url = request.nextUrl.clone();
-      url.pathname = '/inbox';
-      return NextResponse.redirect(url);
-    }
-
-    if (pathname === '/login' || pathname.startsWith('/auth/callback')) {
-      const url = request.nextUrl.clone();
-      url.pathname = '/inbox';
-      url.search = '';
-      return NextResponse.redirect(url);
-    }
-
-    return NextResponse.next({ request });
   }
 
   const isPublicPath =

@@ -4,11 +4,9 @@ import { apiSuccess, apiError, ApiErrors } from '@/lib/api-response';
 import { getMyTeamMember } from '@/lib/auth-helpers';
 import { checkMemberEntitlement } from '@/lib/entitlement';
 import { parseBody, createInvitationSchema } from '@sprintable/shared';
-import { isOssMode } from '@/lib/storage/factory';
 import { sendInviteEmail } from '@/lib/email';
 
 export async function GET() {
-  if (isOssMode()) return apiSuccess([]);
   try {
     const supabase = await createSupabaseServerClient();
     const { data: { user } } = await supabase.auth.getUser();
@@ -36,7 +34,6 @@ export async function GET() {
 }
 
 export async function POST(request: Request) {
-  if (isOssMode()) return apiError('NOT_IMPLEMENTED', 'Invitations are not supported in OSS mode.', 501);
   try {
     const supabase = await createSupabaseServerClient();
     const { data: { user } } = await supabase.auth.getUser();

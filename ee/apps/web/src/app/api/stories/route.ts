@@ -9,7 +9,7 @@ import { getAuthContext } from '@/lib/auth-helpers';
 import { checkEntitlement } from '@/lib/entitlement';
 import { incrementUsage } from '@/lib/usage-tracker';
 import { buildCursorPageMeta, parseCursorPageInput } from '@/lib/pagination';
-import { isOssMode, createStoryRepository } from '@/lib/storage/factory';
+import { createStoryRepository } from '@/lib/storage/factory';
 import { WorkflowContractService } from '@/services/workflow-contract-service';
 import { GateCheckService } from '@/services/gate-check-service';
 
@@ -19,13 +19,10 @@ export async function POST(request: Request) {
     const me = await getAuthContext(supabase, request);
     if (!me) return ApiErrors.unauthorized();
     if (me.rateLimitExceeded) return ApiErrors.tooManyRequests(me.rateLimitRemaining, me.rateLimitResetAt);
-    const ossMode = isOssMode();
-    const dbClient = ossMode ? undefined : (me.type === 'agent' ? createSupabaseAdminClient() : supabase);
+    const dbClient = me.type === 'agent' ? createSupabaseAdminClient() : supabase;
 
-    if (!ossMode) {
-      const ent = await checkEntitlement(supabase, me.org_id, 'stories');
-      if (!ent.allowed) return apiError('quota_exceeded', `Story quota exceeded (${ent.current}/${ent.limit})`, 402, { resource: 'stories', current: ent.current, limit: ent.limit, upgradeUrl: ent.upgradeUrl });
-    }
+    const ent = await checkEntitlement(supabase, me.org_id, 'stories');
+    if (!ent.allowed) return apiError('quota_exceeded', `Story quota exceeded (${ent.current}/${ent.limit})`, 402, { resource: 'stories', current: ent.current, limit: ent.limit, upgradeUrl: ent.upgradeUrl });
 
     const rawBody = await request.json();
     if (!rawBody.project_id) rawBody.project_id = me.project_id;
@@ -38,24 +35,22 @@ export async function POST(request: Request) {
     void incrementUsage(me.org_id, 'stories');
 
     // 활성 story 계약에 자동 인스턴스 바인딩 (fire-and-forget)
-    if (!ossMode) {
-      void (async () => {
-        try {
-          const admin = createSupabaseAdminClient();
-          const contracts = await new WorkflowContractService(admin).list(me.org_id, 'story', story.project_id ?? undefined);
-          if (contracts.length > 0) {
-            const gateSvc = new GateCheckService(admin);
-            await Promise.all(
-              contracts.map((c) =>
-                gateSvc.createInstance(c.id, story.id, c.definition.initial_state)
-              )
-            );
-          }
-        } catch {
-          // story 생성은 성공 — 인스턴스 바인딩 실패가 응답을 막지 않음
+    void (async () => {
+      try {
+        const admin = createSupabaseAdminClient();
+        const contracts = await new WorkflowContractService(admin).list(me.org_id, 'story', story.project_id ?? undefined);
+        if (contracts.length > 0) {
+          const gateSvc = new GateCheckService(admin);
+          await Promise.all(
+            contracts.map((c) =>
+              gateSvc.createInstance(c.id, story.id, c.definition.initial_state)
+            )
+          );
         }
-      })();
-    }
+      } catch {
+        // story 생성은 성공 — 인스턴스 바인딩 실패가 응답을 막지 않음
+      }
+    })();
 
     return apiSuccess(story, undefined, 201);
   } catch (err: unknown) {
@@ -69,8 +64,7 @@ export async function GET(request: Request) {
     const me = await getAuthContext(supabase, request);
     if (!me) return ApiErrors.unauthorized();
     if (me.rateLimitExceeded) return ApiErrors.tooManyRequests(me.rateLimitRemaining, me.rateLimitResetAt);
-    const ossMode = isOssMode();
-    const dbClient = ossMode ? undefined : (me.type === 'agent' ? createSupabaseAdminClient() : supabase);
+    const dbClient = me.type === 'agent' ? createSupabaseAdminClient() : supabase;
 
     const { searchParams } = new URL(request.url);
     const pageInput = parseCursorPageInput({
