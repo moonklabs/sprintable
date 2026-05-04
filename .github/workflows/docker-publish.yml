@@ -1,4 +1,4 @@
-name: Docker Publish (OSS)
+name: Docker Publish
 
 on:
   push:
@@ -53,7 +53,7 @@ jobs:
         uses: docker/build-push-action@v6
         with:
           context: .
-          file: Dockerfile.oss
+          file: Dockerfile
           platforms: linux/amd64,linux/arm64
           push: true
           tags: ${{ steps.meta.outputs.tags }}

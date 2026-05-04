@@ -2,93 +2,100 @@
 
 Deploy Sprintable on your own infrastructure.
 
-## OSS Mode (Default — No Database Required)
+## Stack
 
-Run Sprintable locally with SQLite in minutes.
-
-### Prerequisites
-
-- Node.js >=22.5.0
-- pnpm 9+
-
-### Quick Start
-
-```bash
-# Clone the repo
-git clone https://github.com/moonklabs/sprintable.git
-cd sprintable
-
-# Install dependencies
-pnpm install
-
-# Copy env file (OSS defaults work out of the box)
-cp .env.example apps/web/.env.local
-
-# Start dev server
-pnpm dev
-```
-
-Visit `http://localhost:3108`. Data is stored in SQLite at `.data/sprintable.db` — no external database needed.
-
-### Environment Variables (OSS)
-
-| Variable | Description |
-|----------|-------------|
-| `APP_BASE_URL` | Public URL of this deployment (e.g. `http://localhost:3108`) |
-| `OSS_MODE` | Set to `true` for OSS mode |
-| `NEXT_PUBLIC_OSS_MODE` | Set to `true` (must match `OSS_MODE`) |
-| `SQLITE_PATH` | Path to SQLite database file (e.g. `./.data/sprintable.db`) |
-| `AGENT_API_KEY_SECRET` | Secret for agent API authentication |
-| `PM_API_URL` | Internal URL used by MCP server to reach the web app |
+| Layer | Technology |
+|---|---|
+| Frontend | Next.js 15 |
+| Backend | FastAPI (Python) |
+| Database | PostgreSQL |
 
 ---
 
-## SaaS / Advanced Mode (Supabase + Docker)
-
-For production deployments with Supabase, multi-user auth, and billing.
+## Quick Start (Docker — 1 minute)
 
 ### Prerequisites
 
-- Docker 24+ and Docker Compose v2
-- Domain with SSL (recommended)
-- Supabase project (cloud or self-hosted)
+- Docker Desktop 4.x+ (or Docker Engine 24+ with Compose v2)
 
-### Configure Environment
+### Run
+
+```bash
+# Clone
+git clone https://github.com/moonklabs/sprintable.git
+cd sprintable
+
+# Configure
+cp .env.example .env
+# Edit .env — defaults work for local use.
+# Set JWT_SECRET, SECRET_KEY, and POSTGRES_PASSWORD before production.
+
+# Start
+docker compose up -d
+```
+
+Visit `http://localhost:3108`. The database is initialized automatically on first run.
+
+---
+
+## Environment Variables
+
+| Variable | Default | Description |
+|---|---|---|
+| `APP_BASE_URL` | `http://localhost:3108` | Public URL of this deployment (used in webhook payloads) |
+| `POSTGRES_DB` | `sprintable` | PostgreSQL database name |
+| `POSTGRES_USER` | `sprintable` | PostgreSQL user |
+| `POSTGRES_PASSWORD` | — | PostgreSQL password — **required, set before production** |
+| `JWT_SECRET` | — | Signs JWT tokens — **required, set before production** |
+| `SECRET_KEY` | — | Application secret key — **required, set before production** |
+| `NEXT_PUBLIC_FASTAPI_URL` | `http://localhost:8000` | FastAPI backend URL (used by the frontend) |
+| `GITHUB_WEBHOOK_SECRET` | — | Optional: auto-close stories on PR merge |
+
+---
+
+## Production Deployment
+
+### 1. Prepare environment
 
 ```bash
 cp .env.example .env
-# Set OSS_MODE=false and fill in Supabase variables
 ```
 
-| Variable | Description |
-|----------|-------------|
-| `NEXT_PUBLIC_SUPABASE_URL` | Your Supabase project URL |
-| `NEXT_PUBLIC_SUPABASE_ANON_KEY` | Supabase anon/public key |
-| `SUPABASE_SERVICE_ROLE_KEY` | Supabase service role key |
-| `OPENAI_API_KEY` | For AI features (STT, summarization) |
-| `ANTHROPIC_API_KEY` | Alternative AI provider |
-
-### Database Migrations
+Edit `.env` and set strong values for `POSTGRES_PASSWORD`, `JWT_SECRET`, and `SECRET_KEY`:
 
 ```bash
-# Using Supabase CLI
-supabase db push --db-url postgresql://...
+POSTGRES_PASSWORD=$(openssl rand -hex 32)
+JWT_SECRET=$(openssl rand -hex 32)
+SECRET_KEY=$(openssl rand -hex 32)
+APP_BASE_URL=https://your-domain.com
+NEXT_PUBLIC_FASTAPI_URL=https://your-domain.com/api
 ```
 
-### Deploy
+### 2. Start
 
 ```bash
-docker compose -f docker-compose.prod.yml up -d
+docker compose up -d
 ```
 
-### Verify
+### 3. Verify
 
 ```bash
-curl http://localhost:3108/api/health
+curl https://your-domain.com/api/health
 # Expected: {"status":"ok","timestamp":"..."}
 ```
 
-### Multi-Platform Build (ARM64 + AMD64)
+---
+
+## Updating
+
+```bash
+git pull origin main
+docker compose up -d --build
+```
+
+---
+
+## Multi-Platform Build (ARM64 + AMD64)
 
 ```bash
 docker buildx build --platform linux/amd64,linux/arm64 \
@@ -96,87 +103,70 @@ docker buildx build --platform linux/amd64,linux/arm64 \
   --push .
 ```
 
-### Updating
-
-```bash
-git pull origin main
-docker compose -f docker-compose.prod.yml up -d --build
-```
-
 ---
 
 ## Troubleshooting
 
-### `node:sqlite not found`
-Upgrade to Node.js >=22.5.0. The `node:sqlite` module is built-in starting from that version.
-
-### Missing environment variables
-Check that all [OSS required] variables from `.env.example` are set in `apps/web/.env.local`.
-
-### Database connection issues (SaaS)
-Verify `NEXT_PUBLIC_SUPABASE_URL` and `SUPABASE_SERVICE_ROLE_KEY` are correct and the Supabase project is accessible.
-
-### Health check failing
-Check logs: `docker compose logs web`
-
----
-
-## OSS 모드 트러블슈팅
-
-### `connection refused` (포트 충돌 또는 Docker 미실행)
+### `connection refused` (port conflict or Docker not running)
 
 ```bash
-# Docker daemon 실행 확인
+# Confirm Docker daemon is running
 docker info
 
-# 3108 포트 점유 프로세스 확인
+# Find process on port 3108
 lsof -i :3108
-# 또는 Linux:
+# Linux:
 ss -tlnp | grep 3108
 
-# 점유 프로세스 종료 후 재시작
-docker compose -f docker-compose.oss.yml up
+# Kill conflicting process, then restart
+docker compose up -d
 ```
 
-### `localhost:3108` 응답 없음 (Mac Docker Desktop bridge 문제)
-
-Mac에서 Docker Desktop 사용 시 bridge 네트워크 문제로 타임아웃이 발생할 수 있습니다.
+### `localhost:3108` timeout (Mac Docker Desktop bridge issue)
 
 ```bash
-# 방법 1: Docker Desktop 재시작
-# Docker Desktop 메뉴 → Restart
+# Option 1: Restart Docker Desktop
+# Docker Desktop menu → Restart
 
-# 방법 2: 네트워크 초기화
-docker compose -f docker-compose.oss.yml down
+# Option 2: Reset network
+docker compose down
 docker network prune -f
-docker compose -f docker-compose.oss.yml up
-
-# 방법 3: 대안 포트 사용
-# docker-compose.oss.yml에서 ports를 "3001:3108"으로 변경 후 http://localhost:3001 접속
+docker compose up -d
 ```
 
-### `permission denied` on volume mount (Linux UID 불일치)
-
-Linux에서 volume mount 시 컨테이너 내부 UID(1000)와 호스트 UID가 다를 경우 발생합니다.
+### `permission denied` on volume mount (Linux UID mismatch)
 
 ```bash
-# 데이터 디렉토리 소유권 변경
 sudo chown -R 1000:1000 ./data
-
-# 또는 docker-compose.oss.yml에 user 추가:
-# user: "${UID}:${GID}"
+docker compose up -d
 ```
 
-### GitHub Webhook Secret 불일치
+### Database connection error
+
+Verify `POSTGRES_PASSWORD` in `.env` matches what was used when the volume was initialized. If changing the password on an existing volume, recreate the volume:
 
 ```bash
-# 컨테이너 로그에서 확인
-docker compose -f docker-compose.oss.yml logs web | grep "github-webhook"
-# "Invalid signature" → .env의 GITHUB_WEBHOOK_SECRET과 GitHub webhook secret이 다름
+docker compose down -v
+docker compose up -d
+```
 
-# 재설정 방법:
-# 1. openssl rand -hex 32 로 새 secret 생성
-# 2. .env의 GITHUB_WEBHOOK_SECRET 업데이트
-# 3. GitHub 저장소 Settings → Webhooks → 해당 webhook 수정 → Secret 업데이트
-# 4. docker compose -f docker-compose.oss.yml restart
+### Health check failing
+
+```bash
+docker compose logs backend
+docker compose logs web
+```
+
+### GitHub Webhook Secret mismatch
+
+```bash
+# Check container logs
+docker compose logs web | grep "github-webhook"
+# "Invalid signature" → GITHUB_WEBHOOK_SECRET in .env doesn't match GitHub webhook secret
+
+# Fix:
+# 1. openssl rand -hex 32  (generate new secret)
+# 2. Update GITHUB_WEBHOOK_SECRET in .env
+# 3. Update secret in GitHub repo Settings → Webhooks
+# 4. docker compose restart
 ```
