@@ -1,0 +1,68 @@
+{
+  "survey_date": "2026-05-04T07:18:00Z",
+  "surveyed_by": "ortega-po",
+  "connection": "public-ip-34.22.111.69:5432/sprintable",
+
+  "root_cause_discovery": {
+    "issue": "team_members.user_id and org_members.user_id contain Supabase auth.users UUIDs, not Cloud SQL users.id UUIDs",
+    "impact": "Auth flow WHERE user_id = cloud_sql_uid fails for cross-project memberships (장사왕 GNB)",
+    "sprintable_workaround": "tm.id = users.id PK coincidence (legacy pattern)",
+    "affected_records": {
+      "team_members_human_invalid_user_id": 17,
+      "org_members_invalid_user_id": 10
+    },
+    "registered_users_mapping": [
+      {
+        "name": "송윤재",
+        "email": "iamyoonjae@moonklabs.com",
+        "cloud_sql_id": "aac01791-5a99-4f5c-99c1-29f35c84cc61",
+        "supabase_auth_uid": "a306ae71-58ad-468b-84c0-667850d28fb1"
+      },
+      {
+        "name": "윤도선",
+        "email": "dosunyun@moonklabs.com",
+        "cloud_sql_id": "fb474687-aeef-4f4e-a5e9-c97c0cb427f3",
+        "supabase_auth_uid": "cccaed24-e082-4b7b-ae82-eae588a64f58"
+      }
+    ],
+    "unregistered_supabase_uids": [
+      {"name": "신이삭", "supabase_uid": "df196f2e-78bb-413f-ad1e-333419874482"},
+      {"name": "신이삭 (sellerking)", "supabase_uid": "c7ab5124-be42-47f2-bed5-c93a73a5d5fa"},
+      {"name": "차봉희", "supabase_uid": "62d433c1-e245-404b-a8c2-d492074b2acb"},
+      {"name": "최하록", "supabase_uid": "ab3dd4af-454c-4f96-b0e7-9b85f9a96c3a"},
+      {"name": "윤희선", "supabase_uid": "cb1bb777-fb2b-4788-8768-11c926ea2c93"},
+      {"name": "이수민", "supabase_uid": "e3df5abb-eeee-4a5d-9e0d-6e99e389e5fc"},
+      {"name": "지창훈", "supabase_uid": "77503b80-eb10-4fef-baf5-44d415d18b95"},
+      {"name": "sellerking@moonklabs.com", "supabase_uid": "7efeaad6-c91e-4e44-815d-63c18b85ba81"},
+      {"name": "Integritics", "supabase_uid": "7673bded-05af-480a-9683-aa3fb9e65606"}
+    ]
+  },
+
+  "fk_null_survey": {
+    "critical": [
+      {"table": "agent_personas", "column": "created_by", "total": 40, "null_count": 40, "null_pct": 100.0}
+    ],
+    "high": [
+      {"table": "docs", "column": "created_by", "total": 346, "null_count": 237, "null_pct": 68.5}
+    ],
+    "low": [
+      {"table": "doc_revisions", "column": "created_by", "total": 141, "null_count": 3, "null_pct": 2.1}
+    ],
+    "clean": [
+      {"table": "team_members", "column": "user_id", "note": "0 human NULL, 10 agent NULL (by design)"},
+      {"table": "agent_deployments", "total": 0},
+      {"table": "agent_sessions", "column": "created_by", "total": 3, "null_count": 0},
+      {"table": "agent_routing_rules", "column": "created_by", "total": 24, "null_count": 0},
+      {"table": "meetings", "total": 0},
+      {"table": "policy_documents", "total": 0},
+      {"table": "workflow_versions", "column": "created_by", "total": 3, "null_count": 0},
+      {"table": "standup_entries", "column": "author_id", "total": 125, "null_count": 0},
+      {"table": "webhook_configs", "column": "member_id", "total": 3, "null_count": 0},
+      {"table": "notifications", "column": "user_id", "total": 1159, "null_count": 0},
+      {"table": "memos", "column": "created_by", "total": 1955, "null_count": 0},
+      {"table": "stories", "column": "project_id", "total": 921, "null_count": 0},
+      {"table": "retro_sessions", "column": "created_by", "total": 1, "null_count": 0},
+      {"table": "reward_ledger", "column": "member_id", "total": 3, "null_count": 0}
+    ]
+  }
+}
