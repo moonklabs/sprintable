@@ -21,24 +21,14 @@ depends_on = None
 
 def upgrade() -> None:
     # Step 1: team_members.id == users.id 케이스 (Supabase PK 동일 패턴)
+    # invitations 테이블에 team_member_id 컬럼 없어 email 경유 교차 프로젝트 매핑 불가.
+    # 잔여 NULL 레코드는 _build_app_metadata() Step 2 로그인 시 자동 백필.
     op.execute("""
         UPDATE team_members
         SET user_id = id
         WHERE user_id IS NULL
           AND type = 'human'
           AND id IN (SELECT id FROM users)
-    """)
-
-    # Step 2: invitations 테이블 경유 email 매핑
-    # invitations.team_member_id → invitations.email → users.id
-    op.execute("""
-        UPDATE team_members tm
-        SET user_id = u.id
-        FROM invitations inv
-        JOIN users u ON u.email = inv.email
-        WHERE tm.user_id IS NULL
-          AND tm.type = 'human'
-          AND inv.team_member_id = tm.id
     """)
 
 
