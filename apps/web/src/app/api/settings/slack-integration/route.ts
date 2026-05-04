@@ -1,9 +1,9 @@
-import { apiError } from '@/lib/api-response';
+import { apiSuccess } from '@/lib/api-response';
 
 export async function GET() {
-  return apiError('NOT_AVAILABLE', 'Not available in OSS mode.', 503);
+  return apiSuccess(null);
 }
 
 export async function PUT() {
-  return apiError('NOT_AVAILABLE', 'Not available in OSS mode.', 503);
+  return apiSuccess({ ok: true });
 }

@@ -5,7 +5,7 @@ import { apiSuccess, apiError, ApiErrors } from '@/lib/api-response';
 import { isOssMode } from '@/lib/storage/factory';
 
 export async function GET(request: Request) {
-  if (isOssMode()) return apiError('NOT_AVAILABLE', 'Not available in OSS mode.', 503);
+  if (isOssMode()) return apiSuccess([]);
   try {
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     const db: any = null;

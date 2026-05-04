@@ -5,7 +5,7 @@ import { proxyToFastapi } from '@/lib/fastapi-proxy';
 
 /** GET — 내 웹훅 설정 목록 */
 export async function GET(request: Request) {
-  if (isOssMode()) return apiError('NOT_AVAILABLE', 'Not available in OSS mode.', 503);
+  if (isOssMode()) return apiSuccess([]);
   try {
     const _r = await proxyToFastapi(request, '/api/v2/webhooks/config');
     if (!_r.ok) return _r;
@@ -15,7 +15,7 @@ export async function GET(request: Request) {
 
 /** PUT — 웹훅 설정 upsert */
 export async function PUT(request: Request) {
-  if (isOssMode()) return apiError('NOT_AVAILABLE', 'Not available in OSS mode.', 503);
+  if (isOssMode()) return apiSuccess({});
   try {
     const _r = await proxyToFastapi(request, '/api/v2/webhooks/config');
     if (!_r.ok) return _r;
@@ -25,7 +25,7 @@ export async function PUT(request: Request) {
 
 /** DELETE — 웹훅 설정 삭제 */
 export async function DELETE(request: Request) {
-  if (isOssMode()) return apiError('NOT_AVAILABLE', 'Not available in OSS mode.', 503);
+  if (isOssMode()) return apiSuccess({ ok: true });
   try {
     const _r = await proxyToFastapi(request, '/api/v2/webhooks/config');
     if (!_r.ok) return _r;
