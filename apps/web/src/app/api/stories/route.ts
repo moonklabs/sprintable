@@ -7,20 +7,17 @@ import { apiSuccess, apiError, ApiErrors } from '@/lib/api-response';
 import { getAuthContext } from '@/lib/auth-helpers';
 import { checkResourceLimit } from '@/lib/check-feature';
 import { buildCursorPageMeta, parseCursorPageInput } from '@/lib/pagination';
-import { isOssMode, createStoryRepository } from '@/lib/storage/factory';
+import { createStoryRepository } from '@/lib/storage/factory';
 
 export async function POST(request: Request) {
   try {
     const me = await getAuthContext(request);
     if (!me) return ApiErrors.unauthorized();
     if (me.rateLimitExceeded) return ApiErrors.tooManyRequests(me.rateLimitRemaining, me.rateLimitResetAt);
-    const ossMode = isOssMode();
     const dbClient = undefined;
 
-    if (!ossMode) {
-      const check = await checkResourceLimit(dbClient!, me.org_id, 'max_stories', 'stories');
-      if (!check.allowed) return apiError('UPGRADE_REQUIRED', check.reason ?? 'Story limit reached. Upgrade to Team.', 403);
-    }
+    const check = await checkResourceLimit(dbClient!, me.org_id, 'max_stories', 'stories');
+    if (!check.allowed) return apiError('UPGRADE_REQUIRED', check.reason ?? 'Story limit reached. Upgrade to Team.', 403);
 
     const rawBody = await request.json();
     if (!rawBody.project_id) rawBody.project_id = me.project_id;
@@ -41,7 +38,6 @@ export async function GET(request: Request) {
     const me = await getAuthContext(request);
     if (!me) return ApiErrors.unauthorized();
     if (me.rateLimitExceeded) return ApiErrors.tooManyRequests(me.rateLimitRemaining, me.rateLimitResetAt);
-    const ossMode = isOssMode();
     const dbClient = undefined;
 
     const { searchParams } = new URL(request.url);

@@ -4,7 +4,7 @@ import { EpicService } from '@/services/epic';
 import { handleApiError } from '@/lib/api-error';
 import { apiSuccess, apiError, ApiErrors } from '@/lib/api-response';
 import { getAuthContext } from '@/lib/auth-helpers';
-import { createEpicRepository, isOssMode } from '@/lib/storage/factory';
+import { createEpicRepository } from '@/lib/storage/factory';
 import { requireRole, ADMIN_ROLES } from '@/lib/role-guard';
 
 type RouteParams = { params: Promise<{ id: string }> };
@@ -55,7 +55,7 @@ export async function DELETE(request: Request, { params }: RouteParams) {
     if (!me) return ApiErrors.unauthorized();
     if (me.rateLimitExceeded) return ApiErrors.tooManyRequests(me.rateLimitRemaining, me.rateLimitResetAt);
 
-    if (!isOssMode() && me.type !== 'agent') {
+    if (me.type !== 'agent') {
       const denied = await requireRole(undefined, me.org_id, ADMIN_ROLES, 'Epic deletion requires admin or owner role');
       if (denied) return denied;
     }

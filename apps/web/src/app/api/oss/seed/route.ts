@@ -1,4 +1,4 @@
-import { isOssMode, createStoryRepository, createProjectRepository } from '@/lib/storage/factory';
+import { createStoryRepository, createProjectRepository } from '@/lib/storage/factory';
 import { apiSuccess, apiError } from '@/lib/api-response';
 
 const SAMPLE_STORIES = [
@@ -8,10 +8,6 @@ const SAMPLE_STORIES = [
 ];
 
 export async function POST() {
-  if (!isOssMode()) {
-    return apiError('NOT_AVAILABLE', 'Seed is only available in OSS mode', 403);
-  }
-
   try {
     const { getOssUserContext } = await import('@/lib/auth-helpers');
     const { me } = await getOssUserContext();

@@ -1,7 +1,7 @@
 import { handleApiError } from '@/lib/api-error';
 import { apiSuccess, ApiErrors } from '@/lib/api-response';
 import { getAuthContext } from '@/lib/auth-helpers';
-import { isOssMode, createTeamMemberRepository } from '@/lib/storage/factory';
+import { createTeamMemberRepository } from '@/lib/storage/factory';
 
 // GET /api/members?project_id=X
 export async function GET(request: Request) {

@@ -1,10 +1,9 @@
 import { apiError } from '@/lib/api-response';
-import { isOssMode } from '@/lib/storage/factory';
+;
 
 const FASTAPI_URL = () => process.env['NEXT_PUBLIC_FASTAPI_URL'] ?? 'http://localhost:8000';
 
 export async function POST(request: Request) {
-  if (isOssMode()) return apiError('NOT_AVAILABLE', 'Not available in OSS mode.', 503);
 
   const rawBody = await request.text();
   const headers: Record<string, string> = {

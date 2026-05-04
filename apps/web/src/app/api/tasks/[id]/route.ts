@@ -1,7 +1,7 @@
 import { parseBody, updateTaskSchema } from '@sprintable/shared';
 
 import { TaskService } from '@/services/task';
-import { createTaskRepository, isOssMode } from '@/lib/storage/factory';
+import { createTaskRepository } from '@/lib/storage/factory';
 import { handleApiError } from '@/lib/api-error';
 import { apiSuccess, ApiErrors } from '@/lib/api-response';
 import { getAuthContext } from '@/lib/auth-helpers';
@@ -35,19 +35,17 @@ export async function PATCH(request: Request, { params }: RouteParams) {
     const before = await service.getById(id, { org_id: me.org_id, project_id: me.project_id });
     const result = await service.update(id, body);
 
-    if (!isOssMode()) {
-      const notifService = new NotificationService(dbClient);
-      if (body.assignee_id && body.assignee_id !== before.assignee_id) {
-        notifService.create({
-          org_id: me.org_id,
-          user_id: body.assignee_id,
-          type: 'task_assigned',
-          title: '태스크가 배정되었습니다',
-          body: before.title ?? '',
-          reference_type: 'task',
-          reference_id: id,
-        }).catch(() => {});
-      }
+    const notifService = new NotificationService(dbClient);
+    if (body.assignee_id && body.assignee_id !== before.assignee_id) {
+      notifService.create({
+        org_id: me.org_id,
+        user_id: body.assignee_id,
+        type: 'task_assigned',
+        title: '태스크가 배정되었습니다',
+        body: before.title ?? '',
+        reference_type: 'task',
+        reference_id: id,
+      }).catch(() => {});
     }
 
     return apiSuccess(result);

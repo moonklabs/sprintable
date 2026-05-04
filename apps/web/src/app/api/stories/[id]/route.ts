@@ -5,7 +5,7 @@ import { StoryService } from '@/services/story';
 import { handleApiError } from '@/lib/api-error';
 import { apiSuccess, ApiErrors } from '@/lib/api-response';
 import { getAuthContext } from '@/lib/auth-helpers';
-import { isOssMode, createStoryRepository } from '@/lib/storage/factory';
+import { createStoryRepository } from '@/lib/storage/factory';
 import { NotificationService } from '@/services/notification.service';
 
 type RouteParams = { params: Promise<{ id: string }> };
@@ -16,7 +16,6 @@ export async function GET(request: Request, { params }: RouteParams) {
     const me = await getAuthContext(request);
     if (!me) return ApiErrors.unauthorized();
     if (me.rateLimitExceeded) return ApiErrors.tooManyRequests(me.rateLimitRemaining, me.rateLimitResetAt);
-    const ossMode = isOssMode();
     const dbClient = undefined;
 
     const repo = await createStoryRepository(dbClient);
@@ -40,7 +39,6 @@ export async function PATCH(request: Request, { params }: RouteParams) {
     const me = await getAuthContext(request);
     if (!me) return ApiErrors.unauthorized();
     if (me.rateLimitExceeded) return ApiErrors.tooManyRequests(me.rateLimitRemaining, me.rateLimitResetAt);
-    const ossMode = isOssMode();
     const dbClient = undefined;
 
     const parsed = await parseBody(request, updateStorySchema); if (!parsed.success) return parsed.response; const body = parsed.data;
@@ -58,7 +56,7 @@ export async function PATCH(request: Request, { params }: RouteParams) {
       const newAssigneeId = body.assignee_id as string | null;
       const oldAssigneeId = before.assignee_id as string | null;
 
-      if (!ossMode && dbClient) {
+      if (dbClient) {
         const notifService = new NotificationService(dbClient as any);
         if (newAssigneeId && newAssigneeId !== actorId) {
           notifService.create({ org_id: orgId, user_id: newAssigneeId, type: 'story_assigned', title: '스토리가 배정되었습니다', body: before.title ?? '', reference_type: 'story', reference_id: id }).catch(() => {});
@@ -93,7 +91,6 @@ export async function DELETE(request: Request, { params }: RouteParams) {
     const me = await getAuthContext(request);
     if (!me) return ApiErrors.unauthorized();
     if (me.rateLimitExceeded) return ApiErrors.tooManyRequests(me.rateLimitRemaining, me.rateLimitResetAt);
-    const ossMode = isOssMode();
     const dbClient = undefined;
 
     const repo = await createStoryRepository(dbClient);

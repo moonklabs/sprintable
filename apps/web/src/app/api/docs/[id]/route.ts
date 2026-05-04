@@ -3,7 +3,7 @@ import { DocsService } from '@/services/docs';
 import { handleApiError } from '@/lib/api-error';
 import { getAuthContext } from '@/lib/auth-helpers';
 import { apiSuccess, apiError, ApiErrors } from '@/lib/api-response';
-import { isOssMode, createDocRepository } from '@/lib/storage/factory';
+import { createDocRepository } from '@/lib/storage/factory';
 
 type RouteParams = { params: Promise<{ id: string }> };
 
@@ -17,12 +17,6 @@ export async function PATCH(request: Request, { params }: RouteParams) {
     const parsed = await parseBody(request, updateDocSchema); if (!parsed.success) return parsed.response; const body = parsed.data;
     const repo = await createDocRepository(dbClient);
     const service = new DocsService(repo, dbClient);
-
-    if (isOssMode()) {
-      const existing = await repo.getById(id);
-      const docType = (existing as unknown as { doc_type?: string }).doc_type ?? 'page';
-      if (docType === 'sprint_report') return apiError('FORBIDDEN', 'sprint_report documents are read-only', 403);
-    }
 
     const doc = await service.updateDoc(id, {
       ...body,
@@ -62,12 +56,6 @@ export async function DELETE(request: Request, { params }: RouteParams) {
     if (me.rateLimitExceeded) return ApiErrors.tooManyRequests(me.rateLimitRemaining, me.rateLimitResetAt);
     const dbClient = undefined;
     const repo = await createDocRepository(dbClient);
-
-    if (isOssMode()) {
-      const existing = await repo.getById(id);
-      const docType = (existing as unknown as { doc_type?: string }).doc_type ?? 'page';
-      if (docType === 'sprint_report') return apiError('FORBIDDEN', 'sprint_report documents cannot be deleted', 403);
-    }
 
     const service = new DocsService(repo, dbClient);
     await service.deleteDoc(id);
