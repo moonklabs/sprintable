@@ -1,5 +1,5 @@
 import uuid
-from typing import Literal
+from datetime import datetime
 
 from fastapi import APIRouter, Depends, Header, HTTPException, Query, status
 from pydantic import BaseModel
@@ -22,6 +22,7 @@ class EntitySearchResult(BaseModel):
     entity_id: uuid.UUID
     title: str
     status: str | None = None
+    created_at: datetime
 
 
 def _get_org_id(
@@ -56,7 +57,7 @@ async def search_entities(
 
     if "story" in requested:
         stmt = (
-            select(Story.id, Story.title, Story.status)
+            select(Story.id, Story.title, Story.status, Story.created_at)
             .where(
                 Story.org_id == org_id,
                 Story.project_id == project_id,
@@ -67,12 +68,12 @@ async def search_entities(
             stmt = stmt.where(Story.title.ilike(search))
         stmt = stmt.order_by(Story.created_at.desc()).limit(DEFAULT_LIMIT)
         rows = await db.execute(stmt)
-        for rid, title, st in rows:
-            results.append(EntitySearchResult(entity_type="story", entity_id=rid, title=title, status=st))
+        for rid, title, st, cat in rows:
+            results.append(EntitySearchResult(entity_type="story", entity_id=rid, title=title, status=st, created_at=cat))
 
     if "doc" in requested:
         stmt = (
-            select(Doc.id, Doc.title)
+            select(Doc.id, Doc.title, Doc.created_at)
             .where(
                 Doc.org_id == org_id,
                 Doc.project_id == project_id,
@@ -83,12 +84,12 @@ async def search_entities(
             stmt = stmt.where(Doc.title.ilike(search))
         stmt = stmt.order_by(Doc.created_at.desc()).limit(DEFAULT_LIMIT)
         rows = await db.execute(stmt)
-        for rid, title in rows:
-            results.append(EntitySearchResult(entity_type="doc", entity_id=rid, title=title))
+        for rid, title, cat in rows:
+            results.append(EntitySearchResult(entity_type="doc", entity_id=rid, title=title, created_at=cat))
 
     if "epic" in requested:
         stmt = (
-            select(Epic.id, Epic.title, Epic.status)
+            select(Epic.id, Epic.title, Epic.status, Epic.created_at)
             .where(
                 Epic.org_id == org_id,
                 Epic.project_id == project_id,
@@ -98,12 +99,12 @@ async def search_entities(
             stmt = stmt.where(Epic.title.ilike(search))
         stmt = stmt.order_by(Epic.created_at.desc()).limit(DEFAULT_LIMIT)
         rows = await db.execute(stmt)
-        for rid, title, st in rows:
-            results.append(EntitySearchResult(entity_type="epic", entity_id=rid, title=title, status=st))
+        for rid, title, st, cat in rows:
+            results.append(EntitySearchResult(entity_type="epic", entity_id=rid, title=title, status=st, created_at=cat))
 
     if "task" in requested:
         stmt = (
-            select(Task.id, Task.title, Task.status)
+            select(Task.id, Task.title, Task.status, Task.created_at)
             .join(Story, Task.story_id == Story.id)
             .where(
                 Task.org_id == org_id,
@@ -115,11 +116,12 @@ async def search_entities(
             stmt = stmt.where(Task.title.ilike(search))
         stmt = stmt.order_by(Task.created_at.desc()).limit(DEFAULT_LIMIT)
         rows = await db.execute(stmt)
-        for rid, title, st in rows:
-            results.append(EntitySearchResult(entity_type="task", entity_id=rid, title=title, status=st))
+        for rid, title, st, cat in rows:
+            results.append(EntitySearchResult(entity_type="task", entity_id=rid, title=title, status=st, created_at=cat))
 
-    # Sort by title when searching, by created_at (already DESC per type) otherwise
     if search:
         results.sort(key=lambda r: r.title.lower())
+    else:
+        results.sort(key=lambda r: r.created_at, reverse=True)
 
     return results[:DEFAULT_LIMIT]
