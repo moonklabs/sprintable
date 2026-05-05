@@ -60,7 +60,10 @@ async def upsert_standup(
     session: AsyncSession = Depends(get_db),
     _auth: AuthContext = Depends(get_current_user),
 ) -> StandupEntryResponse:
-    repo = StandupEntryRepository(session, body.org_id)
+    org_id = body.org_id or (_auth.org_id and uuid.UUID(_auth.org_id)) or None
+    if not org_id:
+        raise HTTPException(status_code=400, detail="org_id required")
+    repo = StandupEntryRepository(session, org_id)
     entry = await repo.upsert(
         project_id=body.project_id,
         author_id=body.author_id,
