@@ -14,6 +14,7 @@ interface AgentMember {
   name: string;
   type: string;
   is_active: boolean;
+  webhook_url: string | null;
 }
 
 interface ApiKey {
@@ -85,6 +86,9 @@ export function AgentApiKeysSection({ projectId }: { projectId: string }) {
   const [revoking, setRevoking] = useState<string | null>(null);
   const [newAgentName, setNewAgentName] = useState('');
   const [adding, setAdding] = useState(false);
+  const [webhookUrls, setWebhookUrls] = useState<Record<string, string>>({});
+  const [webhookErrors, setWebhookErrors] = useState<Record<string, string>>({});
+  const [savingWebhook, setSavingWebhook] = useState<string | null>(null);
   const { addToast } = useToast();
 
   const fetchAgents = useCallback(async () => {
@@ -94,6 +98,14 @@ export function AgentApiKeysSection({ projectId }: { projectId: string }) {
       const json = await res.json() as { data: AgentMember[] };
       const agentList = (json.data ?? []).filter((m) => m.type === 'agent');
       setAgents(agentList);
+      // Seed webhook URL inputs from fetched data
+      setWebhookUrls((prev) => {
+        const next = { ...prev };
+        for (const agent of agentList) {
+          if (!(agent.id in next)) next[agent.id] = agent.webhook_url ?? '';
+        }
+        return next;
+      });
       const keyMap: Record<string, ApiKey[]> = {};
       await Promise.all(agentList.map(async (agent) => {
         const kr = await fetch(`/api/agents/${agent.id}/api-key`);
@@ -151,6 +163,33 @@ export function AgentApiKeysSection({ projectId }: { projectId: string }) {
       setAdding(false);
     }
   }, [newAgentName, projectId, fetchAgents, addToast]);
+
+  const handleSaveWebhook = useCallback(async (agentId: string, agentName: string) => {
+    const trimmed = (webhookUrls[agentId] ?? '').trim();
+    if (trimmed && !/^https:\/\//i.test(trimmed)) {
+      setWebhookErrors((prev) => ({ ...prev, [agentId]: 'Webhook URL must start with https://' }));
+      return;
+    }
+    setWebhookErrors((prev) => ({ ...prev, [agentId]: '' }));
+    setSavingWebhook(agentId);
+    try {
+      const res = await fetch(`/api/team-members/${agentId}`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ webhook_url: trimmed || null }),
+      });
+      if (!res.ok) {
+        const json = await res.json().catch(() => ({})) as { error?: { message?: string } };
+        addToast({ type: 'error', title: json.error?.message ?? 'Failed to save webhook URL' });
+        return;
+      }
+      addToast({ type: 'success', title: `Webhook URL updated for ${agentName}` });
+    } catch {
+      addToast({ type: 'error', title: 'Network error — please retry' });
+    } finally {
+      setSavingWebhook(null);
+    }
+  }, [addToast, webhookUrls]);
 
   const handleCopy = useCallback(async (text: string, label: string) => {
     try {
@@ -280,6 +319,37 @@ export function AgentApiKeysSection({ projectId }: { projectId: string }) {
                     ⚠️ MCP Config를 사용하려면 먼저 API Key를 발급하세요.
                   </p>
                 )}
+
+                {/* Webhook URL */}
+                <div className="mt-3 rounded-md border border-border bg-muted/20 p-3 space-y-2">
+                  <p className="text-xs font-semibold text-foreground">Webhook URL</p>
+                  <p className="text-xs text-muted-foreground">메모 배정 시 이 URL로 POST 전송됩니다. HTTPS 필수.</p>
+                  <div className="flex gap-2">
+                    <input
+                      type="url"
+                      value={webhookUrls[agent.id] ?? ''}
+                      onChange={(e) => {
+                        setWebhookUrls((prev) => ({ ...prev, [agent.id]: e.target.value }));
+                        setWebhookErrors((prev) => ({ ...prev, [agent.id]: '' }));
+                      }}
+                      onKeyDown={(e) => { if (e.key === 'Enter') void handleSaveWebhook(agent.id, agent.name); }}
+                      placeholder="https://your-agent.example.com/webhook"
+                      className="flex-1 rounded-md border border-border bg-background px-3 py-1.5 font-mono text-xs text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-1 focus:ring-ring"
+                    />
+                    <Button
+                      size="sm"
+                      variant="outline"
+                      className="shrink-0"
+                      disabled={savingWebhook === agent.id}
+                      onClick={() => void handleSaveWebhook(agent.id, agent.name)}
+                    >
+                      {savingWebhook === agent.id ? 'Saving...' : 'Save'}
+                    </Button>
+                  </div>
+                  {webhookErrors[agent.id] ? (
+                    <p className="text-xs text-red-600">{webhookErrors[agent.id]}</p>
+                  ) : null}
+                </div>
               </div>
             );
           })}
