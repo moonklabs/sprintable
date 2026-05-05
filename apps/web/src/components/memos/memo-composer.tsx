@@ -20,10 +20,51 @@ function applyMention(value: string, cursorPos: number, name: string): { text: s
   return { text: value.slice(0, start) + replacement + value.slice(cursorPos), caretPos: start + replacement.length };
 }
 
+function getEntityQuery(value: string, cursorPos: number): string | null {
+  const before = value.slice(0, cursorPos);
+  const m = before.match(/#([\w가-힣]*)$/);
+  return m ? m[1] : null;
+}
+
+function applyEntity(
+  value: string,
+  cursorPos: number,
+  title: string,
+  entityType: string,
+  entityId: string,
+): { text: string; caretPos: number } {
+  const before = value.slice(0, cursorPos);
+  const m = before.match(/#([\w가-힣]*)$/);
+  if (!m) return { text: value, caretPos: cursorPos };
+  const start = cursorPos - m[0].length;
+  const replacement = `[${title}](entity:${entityType}:${entityId}) `;
+  return { text: value.slice(0, start) + replacement + value.slice(cursorPos), caretPos: start + replacement.length };
+}
+
+const ENTITY_ICONS: Record<string, string> = {
+  story: '📋',
+  doc: '📄',
+  epic: '🎯',
+  task: '✅',
+};
+
 interface MentionMember {
   id: string;
   name: string;
   role?: string | null;
+}
+
+interface EntityResult {
+  entity_type: string;
+  entity_id: string;
+  title: string;
+  status: string | null;
+}
+
+export interface EmbedItem {
+  entity_type: string;
+  entity_id: string;
+  position: number;
 }
 
 interface MemoComposerProps {
@@ -41,6 +82,8 @@ interface MemoComposerProps {
   memoId?: string;
   currentTeamMemberId?: string;
   currentTeamMemberName?: string;
+  projectId?: string;
+  onEmbedsChange?: (embeds: EmbedItem[]) => void;
 }
 
 const IMAGE_MIME_TYPES = new Set(['image/png', 'image/jpeg', 'image/webp', 'image/gif', 'image/avif']);
@@ -64,6 +107,8 @@ export function MemoComposer({
   memoId,
   currentTeamMemberId,
   currentTeamMemberName,
+  projectId,
+  onEmbedsChange,
 }: MemoComposerProps) {
   const t = useTranslations('memos');
   const textareaRef = useRef<HTMLTextAreaElement | null>(null);
@@ -75,6 +120,11 @@ export function MemoComposer({
   const [mentionQuery, setMentionQuery] = useState<string | null>(null);
   const [mentionMembers, setMentionMembers] = useState<MentionMember[]>([]);
   const [mentionIndex, setMentionIndex] = useState(0);
+
+  const [entityQuery, setEntityQuery] = useState<string | null>(null);
+  const [entityResults, setEntityResults] = useState<EntityResult[]>([]);
+  const [entityIndex, setEntityIndex] = useState(0);
+  const [embeds, setEmbeds] = useState<EmbedItem[]>([]);
 
   useEffect(() => {
     valueRef.current = value;
@@ -98,6 +148,26 @@ export function MemoComposer({
       .catch(() => {});
     return () => { cancelled = true; };
   }, [mentionQuery]);
+
+  // Entity search with 200ms debounce
+  useEffect(() => {
+    if (entityQuery === null || !projectId) {
+      setEntityResults([]);
+      return;
+    }
+    const timer = window.setTimeout(() => {
+      const params = new URLSearchParams({ project_id: projectId });
+      if (entityQuery) params.set('q', entityQuery);
+      fetch(`/api/v2/entities/search?${params}`)
+        .then((r) => r.json())
+        .then((json: EntityResult[]) => {
+          setEntityResults(Array.isArray(json) ? json : []);
+          setEntityIndex(0);
+        })
+        .catch(() => {});
+    }, 200);
+    return () => window.clearTimeout(timer);
+  }, [entityQuery, projectId]);
 
   const localCollaboration = useMemoPresence({
     memoId,
@@ -196,12 +266,49 @@ export function MemoComposer({
     });
   }, [onChange, value]);
 
+  const selectEntity = useCallback((entity: EntityResult) => {
+    const textarea = textareaRef.current;
+    const cursorPos = textarea?.selectionStart ?? value.length;
+    const { text, caretPos } = applyEntity(value, cursorPos, entity.title, entity.entity_type, entity.entity_id);
+    onChange(text);
+    setEntityQuery(null);
+    setEntityResults([]);
+
+    const nextEmbeds: EmbedItem[] = [
+      ...embeds,
+      { entity_type: entity.entity_type, entity_id: entity.entity_id, position: embeds.length },
+    ];
+    setEmbeds(nextEmbeds);
+    onEmbedsChange?.(nextEmbeds);
+
+    requestAnimationFrame(() => {
+      textarea?.focus();
+      textarea?.setSelectionRange(caretPos, caretPos);
+    });
+  }, [embeds, onChange, onEmbedsChange, value]);
+
   const handleChange = useCallback((nextValue: string, cursorPos: number) => {
     onChange(nextValue);
     collaboration.setTyping(Boolean(nextValue.trim()));
-    const q = getMentionQuery(nextValue, cursorPos);
-    setMentionQuery(q);
-    if (q === null) setMentionMembers([]);
+
+    const mq = getMentionQuery(nextValue, cursorPos);
+    const eq = getEntityQuery(nextValue, cursorPos);
+
+    // @ and # are mutually exclusive
+    if (mq !== null) {
+      setMentionQuery(mq);
+      setEntityQuery(null);
+      setEntityResults([]);
+    } else if (eq !== null) {
+      setEntityQuery(eq);
+      setMentionQuery(null);
+      setMentionMembers([]);
+    } else {
+      setMentionQuery(null);
+      setMentionMembers([]);
+      setEntityQuery(null);
+      setEntityResults([]);
+    }
   }, [collaboration, onChange]);
 
   const handleSubmit = useCallback(async () => {
@@ -217,6 +324,28 @@ export function MemoComposer({
   }, [collaboration, value]);
 
   const handleKeyDown = useCallback((event: KeyboardEvent<HTMLTextAreaElement>) => {
+    if (entityResults.length > 0) {
+      if (event.key === 'ArrowDown') {
+        event.preventDefault();
+        setEntityIndex((i) => (i + 1) % entityResults.length);
+        return;
+      }
+      if (event.key === 'ArrowUp') {
+        event.preventDefault();
+        setEntityIndex((i) => (i - 1 + entityResults.length) % entityResults.length);
+        return;
+      }
+      if (event.key === 'Enter' || event.key === 'Tab') {
+        event.preventDefault();
+        selectEntity(entityResults[entityIndex]);
+        return;
+      }
+      if (event.key === 'Escape') {
+        setEntityQuery(null);
+        setEntityResults([]);
+        return;
+      }
+    }
     if (mentionMembers.length > 0) {
       if (event.key === 'ArrowDown') {
         event.preventDefault();
@@ -243,7 +372,7 @@ export function MemoComposer({
       event.preventDefault();
       void handleSubmit();
     }
-  }, [handleSubmit, mentionMembers, mentionIndex, selectMention]);
+  }, [entityIndex, entityResults, handleSubmit, mentionMembers, mentionIndex, selectEntity, selectMention]);
 
   const presenceSummary = useMemo(() => {
     const viewers = collaboration.viewers.map((entry) => entry.name);
@@ -275,6 +404,8 @@ export function MemoComposer({
             window.setTimeout(() => {
               setMentionQuery(null);
               setMentionMembers([]);
+              setEntityQuery(null);
+              setEntityResults([]);
             }, 150);
           }}
           placeholder={placeholder}
@@ -293,6 +424,25 @@ export function MemoComposer({
                 >
                   <span className="font-medium text-primary">@</span>{member.name}
                   {member.role ? <span className="ml-2 text-xs opacity-60">{member.role}</span> : null}
+                </button>
+              </li>
+            ))}
+          </ul>
+        )}
+        {entityResults.length > 0 && (
+          <ul className="absolute bottom-full left-0 z-50 mb-1 max-h-48 w-[min(20rem,100%)] overflow-y-auto rounded-md border border-border bg-popover shadow-md">
+            {entityResults.map((entity, idx) => (
+              <li key={`${entity.entity_type}:${entity.entity_id}`}>
+                <button
+                  type="button"
+                  onMouseDown={(e) => { e.preventDefault(); selectEntity(entity); }}
+                  className={`w-full px-3 py-2 text-left text-sm transition ${idx === entityIndex ? 'bg-primary/10 text-primary font-medium' : 'text-muted-foreground hover:bg-muted hover:text-foreground'}`}
+                >
+                  <span className="mr-1.5">{ENTITY_ICONS[entity.entity_type] ?? '#'}</span>
+                  <span className="font-medium">{entity.title}</span>
+                  {entity.status ? (
+                    <span className="ml-2 rounded px-1.5 py-0.5 text-xs bg-muted text-muted-foreground">{entity.status}</span>
+                  ) : null}
                 </button>
               </li>
             ))}
