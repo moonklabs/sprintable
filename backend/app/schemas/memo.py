@@ -5,6 +5,23 @@ from typing import Any
 from pydantic import BaseModel, ConfigDict
 
 
+class MemoEntityLinkCreate(BaseModel):
+    entity_type: str
+    entity_id: uuid.UUID
+    position: int = 0
+
+
+class MemoEntityLinkResponse(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
+    id: uuid.UUID
+    memo_id: uuid.UUID
+    entity_type: str
+    entity_id: uuid.UUID
+    position: int
+    created_at: datetime
+
+
 class CreateMemo(BaseModel):
     project_id: uuid.UUID
     org_id: uuid.UUID
