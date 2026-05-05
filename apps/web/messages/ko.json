@@ -304,7 +304,21 @@
     "createProjectAction": "프로젝트 만들기",
     "projectDescPlaceholder": "프로젝트 설명...",
     "createProjectFailed": "프로젝트 생성에 실패했습니다",
-    "unknownUser": "알 수 없음"
+    "unknownUser": "알 수 없음",
+    "createAgent": "AI 에이전트 추가",
+    "agentSubtitle": "AI 에이전트를 프로젝트에 연결하면 스프린트, 메모, 스탠드업을 자동으로 관리합니다.",
+    "agentName": "에이전트 이름",
+    "agentNamePlaceholder": "예: My Agent",
+    "agentRole": "역할",
+    "createAgentAction": "에이전트 생성 + API 키 발급",
+    "connectAgent": "에이전트 연결",
+    "connectSubtitle": "아래 MCP config를 에이전트 설정에 붙여넣으세요.",
+    "mcpConfigTitle": "MCP Config",
+    "promptTitle": "온보딩 프롬프트",
+    "finish": "완료 → 대시보드",
+    "skip": "건너뛰기",
+    "stepOf": "{current} / {total}",
+    "createOrgFailed": "조직 생성에 실패했습니다"
   },
   "settings": {
     "title": "설정",
