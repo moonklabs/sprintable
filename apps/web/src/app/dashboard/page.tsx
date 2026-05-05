@@ -34,6 +34,13 @@ export default async function DashboardPage() {
   const projectId = me.project_id;
   const teamMemberId = me.id;
 
+  // Agent connection banner: check if any active agent exists
+  const agentsData = await fastapiCall<Array<{ id: string; is_active: boolean; type: string }>>(
+    'GET', '/api/v2/members', session.access_token,
+    { query: { project_id: projectId, member_type: 'agent' } },
+  ).catch(() => null);
+  const hasActiveAgent = (agentsData ?? []).some((a) => a.is_active);
+
   interface DashboardData {
     my_stories: Array<{ id: string; title: string; status: string; story_points: number | null }>;
     my_tasks: Array<{ id: string; title: string; status: string }>;
@@ -73,6 +80,16 @@ export default async function DashboardPage() {
             </div>
           }
         />
+
+        {/* Agent connection banner — shown only when no active agents */}
+        {!hasActiveAgent && (
+          <div className="flex items-center justify-between gap-3 rounded-lg border border-blue-200 bg-blue-50 px-4 py-3 dark:border-blue-800 dark:bg-blue-950">
+            <p className="text-sm text-blue-900 dark:text-blue-100">{t('noAgentBanner')}</p>
+            <Button asChild size="sm" variant="outline" className="shrink-0 border-blue-300 text-blue-800 hover:bg-blue-100 dark:border-blue-700 dark:text-blue-200 dark:hover:bg-blue-900">
+              <Link href="/settings?tab=api-keys">{t('noAgentBannerCta')}</Link>
+            </Button>
+          </div>
+        )}
 
         <div className="grid gap-4 md:grid-cols-3">
           <SectionCard className="col-span-full">
@@ -142,9 +159,10 @@ export default async function DashboardPage() {
                   </div>
                 </div>
               ) : (
-                <div className="rounded-md border border-border bg-muted/30 px-4 py-3 text-center">
-                  <div className="text-sm text-muted-foreground">{t('noAssignedStories')}</div>
-                </div>
+                <EmptyState
+                  title={t('noAssignedStories')}
+                  action={<Button asChild size="sm" variant="outline"><Link href="/board">{t('viewBoard')}</Link></Button>}
+                />
               )}
               <div className="pt-1"><WidgetRefreshTime fetchedAt={fetchedAt} /></div>
             </SectionCardBody>
@@ -163,7 +181,13 @@ export default async function DashboardPage() {
                   <div className="mt-1 text-xs text-muted-foreground">{formatLocaleDateOnly(s.start_date, locale)} ~ {formatLocaleDateOnly(s.end_date, locale)}</div>
                   <div className="mt-2"><StatusBadge status={s.status} label={getSprintStatusLabel(s.status)} /></div>
                 </Link>
-              )) : <EmptyState title={t('noActiveSprints')} description={t('noActiveSprintsDescription')} />}
+              )) : (
+                <EmptyState
+                  title={t('noActiveSprints')}
+                  description={t('noActiveSprintsDescription')}
+                  action={<Button asChild size="sm" variant="outline"><Link href="/sprints">{t('startSprint')}</Link></Button>}
+                />
+              )}
               <div className="pt-1"><WidgetRefreshTime fetchedAt={fetchedAt} /></div>
             </SectionCardBody>
           </SectionCard>
@@ -176,7 +200,13 @@ export default async function DashboardPage() {
                   <div className="font-medium text-foreground">{doc.title}</div>
                   <div className="text-xs text-muted-foreground">/{doc.slug}</div>
                 </div>
-              )) : <EmptyState title={t('noDocsYet')} description={t('noDocsYetDescription')} />}
+              )) : (
+                <EmptyState
+                  title={t('noDocsYet')}
+                  description={t('noDocsYetDescription')}
+                  action={<Button asChild size="sm" variant="outline"><Link href="/docs">{t('writeDocs')}</Link></Button>}
+                />
+              )}
               <div className="pt-1"><WidgetRefreshTime fetchedAt={fetchedAt} /></div>
             </SectionCardBody>
           </SectionCard>
@@ -207,7 +237,13 @@ export default async function DashboardPage() {
                   <div className="font-medium text-foreground">{memo.title ?? memo.content.slice(0, 60)}</div>
                   <div className="text-xs text-muted-foreground">{formatLocaleDateTime(memo.created_at, locale)}</div>
                 </div>
-              )) : <EmptyState title={t('noOpenMemos')} description={t('noOpenMemosDescription')} />}
+              )) : (
+                <EmptyState
+                  title={t('noOpenMemos')}
+                  description={t('noOpenMemosDescription')}
+                  action={<Button asChild size="sm" variant="outline"><Link href="/memos">{t('writeMemo')}</Link></Button>}
+                />
+              )}
               <div className="pt-1"><WidgetRefreshTime fetchedAt={fetchedAt} /></div>
             </SectionCardBody>
           </SectionCard>

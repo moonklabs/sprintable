@@ -100,7 +100,13 @@
     "blocked": "차단됨",
     "openStories": "전체 열림",
     "assignedToMe": "나에게 할당됨",
-    "noAssignedStories": "할당된 스토리가 없습니다"
+    "noAssignedStories": "할당된 스토리가 없습니다",
+    "startSprint": "스프린트 시작하기",
+    "writeMemo": "첫 메모 작성",
+    "viewBoard": "보드 보기",
+    "writeDocs": "문서 작성",
+    "noAgentBanner": "AI 에이전트를 연결하면 더 많은 일을 위임할 수 있어요",
+    "noAgentBannerCta": "에이전트 연결"
   },
   "board": {
     "title": "칸반 보드",
