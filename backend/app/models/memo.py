@@ -38,6 +38,7 @@ class Memo(Base, OrgScopedMixin, TimestampMixin, SoftDeleteMixin):
     replies: Mapped[list["MemoReply"]] = relationship("MemoReply", back_populates="memo", lazy="select")
     assignees: Mapped[list["MemoAssignee"]] = relationship("MemoAssignee", back_populates="memo", lazy="select")
     doc_links: Mapped[list["MemoDocLink"]] = relationship("MemoDocLink", back_populates="memo", lazy="select")
+    entity_links: Mapped[list["MemoEntityLink"]] = relationship("MemoEntityLink", back_populates="memo", lazy="select", order_by="MemoEntityLink.position")
     mentions: Mapped[list["MemoMention"]] = relationship("MemoMention", back_populates="memo", lazy="select")
     reads: Mapped[list["MemoRead"]] = relationship("MemoRead", back_populates="memo", lazy="select")
 
@@ -118,6 +119,26 @@ class MemoDocLink(Base):
     )
 
     memo: Mapped[Memo] = relationship("Memo", back_populates="doc_links")
+
+
+MEMO_ENTITY_TYPES = ('story', 'doc', 'epic', 'task')
+
+
+class MemoEntityLink(Base):
+    __tablename__ = "memo_entity_links"
+
+    id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    memo_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("memos.id", ondelete="CASCADE"), nullable=False, index=True
+    )
+    entity_type: Mapped[str] = mapped_column(nullable=False)
+    entity_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), nullable=False)
+    position: Mapped[int] = mapped_column(nullable=False, default=0)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now(), nullable=False
+    )
+
+    memo: Mapped[Memo] = relationship("Memo", back_populates="entity_links")
 
 
 class MemoMention(Base):

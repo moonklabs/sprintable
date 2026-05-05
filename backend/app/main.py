@@ -8,7 +8,7 @@ from app.core.config import settings
 from app.core.logging_config import configure_logging
 
 configure_logging(json_logs=os.getenv("APP_ENV", "development") != "development")
-from app.routers import account, agent_deployments, agent_personas, agent_routing_rules, agent_runs, agent_sessions, analytics, api_keys, audit_logs, auth, bridge, cron, current_project, dashboard, docs, epics, events, health, hitl, invitations, me, meetings, members, memos, mockups, notifications, org_members, organizations, oss, policy_documents, presence, project_settings, projects, retros, rewards, sprints, standups, stories, subscription, tasks, team_members, webhooks, workflow_versions
+from app.routers import account, agent_deployments, agent_personas, agent_routing_rules, agent_runs, agent_sessions, analytics, api_keys, audit_logs, auth, bridge, cron, current_project, dashboard, docs, entities, epics, events, health, hitl, invitations, me, meetings, members, memos, mockups, notifications, org_members, organizations, oss, policy_documents, presence, project_settings, projects, retros, rewards, sprints, standups, stories, subscription, tasks, team_members, webhooks, workflow_versions
 
 app = FastAPI(
     title="Sprintable API v2",
@@ -61,6 +61,7 @@ app.include_router(org_members.router)
 app.include_router(standups.router)
 app.include_router(retros.router)
 app.include_router(memos.router)
+app.include_router(entities.router)
 app.include_router(notifications.router)
 app.include_router(analytics.router)
 app.include_router(invitations.router)

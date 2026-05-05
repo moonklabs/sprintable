@@ -8,6 +8,7 @@ import { EmptyState } from '@/components/ui/empty-state';
 import { SectionCard, SectionCardBody, SectionCardHeader } from '@/components/ui/section-card';
 import { OperatorDropdownSelect } from '@/components/ui/operator-dropdown-select';
 import { StatusBadge } from '@/components/ui/status-badge';
+import { EmbedCard, EntityChip, getEntityHref } from '@/components/memos/embed-card';
 import { MemoComposer } from '@/components/memos/memo-composer';
 import { useMemoPresence } from '@/components/memos/use-memo-presence';
 import type { MemoDetailState, MemoReply } from '@/components/memos/memo-state';
@@ -330,10 +331,45 @@ export function MemoDetail({
           <SectionCard>
             <SectionCardBody>
               <div className={markdownClassName}>
-                <ReactMarkdown>{memoState.content}</ReactMarkdown>
+                <ReactMarkdown
+                  components={{
+                    a: ({ href, children }) => {
+                      const m = href?.match(/^entity:(\w+):([0-9a-f-]+)$/i);
+                      if (m) {
+                        const entityType = m[1];
+                        const entityId = m[2];
+                        const entityHref = getEntityHref(entityType, entityId);
+                        return <EntityChip entityType={entityType} label={String(children)} href={entityHref} />;
+                      }
+                      return <a href={href} target="_blank" rel="noreferrer">{children}</a>;
+                    },
+                  }}
+                >
+                  {memoState.content}
+                </ReactMarkdown>
               </div>
             </SectionCardBody>
           </SectionCard>
+
+          {memoState.embeds && memoState.embeds.length > 0 ? (
+            <SectionCard>
+              <SectionCardHeader>
+                <div className="text-sm font-semibold">{t('embeds')} ({memoState.embeds.length})</div>
+              </SectionCardHeader>
+              <SectionCardBody className="space-y-2">
+                {memoState.embeds.map((embed) => (
+                  <EmbedCard
+                    key={`${embed.entity_type}:${embed.entity_id}`}
+                    entity_type={embed.entity_type}
+                    entity_id={embed.entity_id}
+                    title={embed.title}
+                    status={embed.status}
+                    position={embed.position}
+                  />
+                ))}
+              </SectionCardBody>
+            </SectionCard>
+          ) : null}
 
           <SectionCard>
             <SectionCardHeader>

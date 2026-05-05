@@ -252,6 +252,7 @@
     "latestReply": "최근 답글",
     "timeline": "타임라인",
     "noTimelineEvents": "타임라인 이벤트가 아직 없습니다.",
+    "embeds": "임베드 엔티티",
     "linkedDocs": "연결 문서",
     "noLinkedDocs": "연결된 문서가 없습니다.",
     "readBy": "읽음",
