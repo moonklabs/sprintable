@@ -151,6 +151,7 @@ export function MemoComposer({
 
   // Entity search with 200ms debounce
   useEffect(() => {
+    let cancelled = false;
     if (entityQuery === null || !projectId) {
       setEntityResults([]);
       return;
@@ -161,12 +162,13 @@ export function MemoComposer({
       fetch(`/api/v2/entities/search?${params}`)
         .then((r) => r.json())
         .then((json: EntityResult[]) => {
+          if (cancelled) return;
           setEntityResults(Array.isArray(json) ? json : []);
           setEntityIndex(0);
         })
         .catch(() => {});
     }, 200);
-    return () => window.clearTimeout(timer);
+    return () => { cancelled = true; window.clearTimeout(timer); };
   }, [entityQuery, projectId]);
 
   const localCollaboration = useMemoPresence({
