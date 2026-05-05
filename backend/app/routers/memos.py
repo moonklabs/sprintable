@@ -84,7 +84,13 @@ async def list_memos(
     if q:
         filters["q"] = q
     memos = await repo.list(**filters)
-    return [MemoListResponse.model_validate(m) for m in memos]
+    results = []
+    for m in memos:
+        count = await repo.get_entity_link_count(m.id)
+        memo_dict = {k: v for k, v in m.__dict__.items() if not k.startswith("_")}
+        memo_dict["embed_count"] = count
+        results.append(MemoListResponse.model_validate(memo_dict))
+    return results
 
 
 @router.post("", response_model=MemoListResponse, status_code=201)
@@ -104,8 +110,12 @@ async def create_memo(
         supersedes_id=body.supersedes_id,
         memo_metadata=body.memo_metadata,
     )
+    if body.embeds:
+        await repo.create_entity_links(memo.id, body.embeds)
     publish_event(str(body.org_id), "memo_created", {"id": str(memo.id)})
-    return MemoListResponse.model_validate(memo)
+    memo_dict = {k: v for k, v in memo.__dict__.items() if not k.startswith("_")}
+    memo_dict["embed_count"] = len(body.embeds)
+    return MemoListResponse.model_validate(memo_dict)
 
 
 @router.get("/{id}", response_model=MemoResponse)
@@ -120,10 +130,13 @@ async def get_memo(
     reply_repo = MemoReplyRepository(db)
     replies = await reply_repo.list_by_memo(id)
     reply_items = [ReplyResponse.model_validate(r) for r in replies]
+    embeds = await repo.get_entity_links_resolved(id)
     # __dict__ 사용: 로드된 column 값만 포함, lazy-load 안 된 relationship 자동 제외
     memo_dict: dict = {k: v for k, v in memo.__dict__.items() if not k.startswith("_")}
     memo_dict["replies"] = reply_items
     memo_dict["reply_count"] = len(reply_items)
+    memo_dict["embeds"] = embeds
+    memo_dict["embed_count"] = len(embeds)
     return MemoResponse.model_validate(memo_dict)
 
 
