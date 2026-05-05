@@ -24,6 +24,14 @@ export interface MemoTimelineItem {
   by?: string | null;
 }
 
+export interface MemoEmbed {
+  entity_type: string;
+  entity_id: string;
+  title: string | null;
+  status: string | null;
+  position?: number;
+}
+
 export interface MemoDetailState {
   id: string;
   project_id?: string;
@@ -45,6 +53,7 @@ export interface MemoDetailState {
   linked_docs?: MemoLinkedDoc[];
   readers?: MemoReader[];
   supersedes_chain?: unknown[];
+  embeds?: MemoEmbed[];
 }
 
 export interface MemoSummaryState {
