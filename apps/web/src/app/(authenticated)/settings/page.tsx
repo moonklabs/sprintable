@@ -21,7 +21,6 @@ import { OperatorInput } from '@/components/ui/operator-control';
 import { OperatorDropdownSelect } from '@/components/ui/operator-dropdown-select';
 import { SectionCard, SectionCardBody, SectionCardHeader } from '@/components/ui/section-card';
 import { Tabs, TabsList, TabsTrigger, TabsContent } from '@/components/ui/tabs';
-import { cn } from '@/lib/utils';
 
 interface NotificationSetting {
   id: string;
@@ -75,7 +74,7 @@ export default function SettingsPage() {
 
   const handleTabChange = (tab: string) => {
     setActiveTab(tab);
-    setLnbOpen(false);
+    setLnbOpen(false); // 모바일에서 탭 선택 시 LNB 자동 접기
   };
 
   useEffect(() => {
@@ -459,34 +458,9 @@ export default function SettingsPage() {
 
   return (
     <>
-      <Tabs value={activeTab} onValueChange={handleTabChange} className="flex-1 min-h-0 flex flex-col lg:flex-row gap-0 relative">
-        {/* Mobile: toggle bar — current tab name + hamburger (< lg) */}
-        <div className="lg:hidden flex shrink-0 items-center gap-3 border-b px-4 py-2">
-          <button
-            type="button"
-            onClick={() => setLnbOpen((v) => !v)}
-            className="rounded-md p-1 text-muted-foreground hover:bg-muted hover:text-foreground"
-            aria-label="Toggle navigation"
-          >
-            {lnbOpen ? <X className="h-5 w-5" /> : <Menu className="h-5 w-5" />}
-          </button>
-          <span className="text-sm font-medium truncate">{t('title')}</span>
-        </div>
-
-        {/* Mobile backdrop */}
-        {lnbOpen && (
-          <div
-            className="fixed inset-0 z-40 bg-black/30 lg:hidden"
-            onClick={() => setLnbOpen(false)}
-          />
-        )}
-
-        {/* LNB: desktop=always shown, mobile=overlay when open */}
-        <div className={cn(
-          "w-52 shrink-0 border-r overflow-y-auto p-4 flex-col",
-          "hidden lg:flex",
-          lnbOpen && "max-lg:absolute max-lg:inset-y-0 max-lg:left-0 max-lg:z-50 max-lg:flex max-lg:bg-background max-lg:shadow-xl",
-        )}>
+      <Tabs value={activeTab} onValueChange={handleTabChange} orientation="vertical" className="flex-1 min-h-0 gap-0">
+        {/* Left nav: desktop=always visible, mobile=toggle via lnbOpen */}
+        <div className={`shrink-0 border-r overflow-y-auto p-4 flex-col w-52 ${lnbOpen ? 'flex' : 'hidden'} lg:flex`}>
           <h1 className="mb-4 px-2 text-sm font-semibold">{t('title')}</h1>
           <TabsList variant="line" className="w-full flex-col items-stretch">
             <span className="px-2 pb-1 pt-1 text-[10px] font-medium uppercase tracking-wider text-muted-foreground/70">{t('myAccount')}</span>
@@ -558,6 +532,18 @@ export default function SettingsPage() {
 
         {/* Right content */}
         <div className="flex-1 min-w-0 overflow-y-auto">
+          {/* Mobile toggle button */}
+          <div className="lg:hidden flex items-center gap-2 border-b px-4 py-2">
+            <button
+              type="button"
+              onClick={() => setLnbOpen((v) => !v)}
+              className="rounded-md p-1 text-muted-foreground hover:bg-muted hover:text-foreground"
+              aria-label="Toggle navigation"
+            >
+              {lnbOpen ? <X className="h-5 w-5" /> : <Menu className="h-5 w-5" />}
+            </button>
+            <span className="text-sm font-medium">{t('title')}</span>
+          </div>
           <div className="w-full max-w-3xl mx-auto p-6">
 
             <TabsContent value="profile">
