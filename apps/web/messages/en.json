@@ -304,7 +304,21 @@
     "createProjectAction": "Create Project",
     "projectDescPlaceholder": "Project description...",
     "createProjectFailed": "Failed to create project",
-    "unknownUser": "Unknown"
+    "unknownUser": "Unknown",
+    "createAgent": "Add AI Agent",
+    "agentSubtitle": "Connect an AI agent to automatically manage sprints, memos, and standups.",
+    "agentName": "Agent Name",
+    "agentNamePlaceholder": "e.g. My Agent",
+    "agentRole": "Role",
+    "createAgentAction": "Create Agent + Issue API Key",
+    "connectAgent": "Connect Agent",
+    "connectSubtitle": "Paste the MCP config below into your agent settings.",
+    "mcpConfigTitle": "MCP Config",
+    "promptTitle": "Onboarding Prompt",
+    "finish": "Finish → Dashboard",
+    "skip": "Skip",
+    "stepOf": "{current} / {total}",
+    "createOrgFailed": "Failed to create organization"
   },
   "settings": {
     "title": "Settings",
