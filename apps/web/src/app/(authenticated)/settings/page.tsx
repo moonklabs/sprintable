@@ -452,7 +452,7 @@ export default function SettingsPage() {
 
   return (
     <>
-      <Tabs value={activeTab} onValueChange={setActiveTab} orientation="vertical" className="flex-1 min-h-0 flex flex-col lg:flex-row gap-0">
+      <Tabs value={activeTab} onValueChange={setActiveTab} className="flex-1 min-h-0 flex flex-col lg:flex-row gap-0">
         {/* Mobile: horizontal scrollable tab bar (< lg) */}
         <div className="lg:hidden shrink-0 border-b overflow-x-auto">
           <TabsList variant="line" className="flex-row w-max gap-0 px-2 py-1">
