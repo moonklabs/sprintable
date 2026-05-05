@@ -21,6 +21,7 @@ import { OperatorInput } from '@/components/ui/operator-control';
 import { OperatorDropdownSelect } from '@/components/ui/operator-dropdown-select';
 import { SectionCard, SectionCardBody, SectionCardHeader } from '@/components/ui/section-card';
 import { Tabs, TabsList, TabsTrigger, TabsContent } from '@/components/ui/tabs';
+import { SidebarTrigger } from '@/components/ui/sidebar';
 
 interface NotificationSetting {
   id: string;
@@ -534,6 +535,7 @@ export default function SettingsPage() {
         <div className="flex-1 min-w-0 overflow-y-auto">
           {/* Mobile toggle button */}
           <div className="lg:hidden flex items-center gap-2 border-b px-4 py-2">
+            <SidebarTrigger className="mr-1" />
             <button
               type="button"
               onClick={() => setLnbOpen((v) => !v)}
