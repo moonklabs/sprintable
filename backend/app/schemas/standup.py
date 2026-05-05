@@ -8,7 +8,7 @@ REVIEW_TYPES = ("comment", "approve", "request_changes")
 
 class StandupUpsert(BaseModel):
     project_id: uuid.UUID
-    org_id: uuid.UUID
+    org_id: uuid.UUID | None = None
     author_id: uuid.UUID
     date: date
     sprint_id: uuid.UUID | None = None
