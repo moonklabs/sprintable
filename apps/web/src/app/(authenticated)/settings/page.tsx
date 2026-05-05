@@ -4,6 +4,7 @@ import { useEffect, useMemo, useState } from 'react';
 import { useRouter, useSearchParams } from 'next/navigation';
 import { useTranslations } from 'next-intl';
 import { BarChart2, Bell, Bot, CreditCard, FolderKanban, Key, Menu, Palette, Trash2, User, Users, X, Zap } from 'lucide-react';
+import { SidebarTrigger } from '@/components/ui/sidebar';
 import { UsageDashboard } from '@/components/settings/usage-dashboard';
 import { AgentApiKeysSection } from '@/components/settings/agent-api-keys-section';
 import { AiSettingsSection } from '@/components/settings/ai-settings';
@@ -534,6 +535,7 @@ export default function SettingsPage() {
         <div className="flex-1 min-w-0 overflow-y-auto">
           {/* Mobile toggle button */}
           <div className="lg:hidden flex items-center gap-2 border-b px-4 py-2">
+            <SidebarTrigger className="mr-1" />
             <button
               type="button"
               onClick={() => setLnbOpen((v) => !v)}
