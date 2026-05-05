@@ -100,7 +100,13 @@
     "blocked": "Blocked",
     "openStories": "Open Stories",
     "assignedToMe": "Assigned to Me",
-    "noAssignedStories": "No assigned stories"
+    "noAssignedStories": "No assigned stories",
+    "startSprint": "Start a sprint",
+    "writeMemo": "Write first memo",
+    "viewBoard": "View board",
+    "writeDocs": "Write a doc",
+    "noAgentBanner": "Connect an AI agent to delegate more work automatically",
+    "noAgentBannerCta": "Connect agent"
   },
   "board": {
     "title": "Kanban Board",
