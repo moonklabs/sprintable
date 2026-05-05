@@ -15,6 +15,18 @@ depends_on = None
 
 
 def upgrade() -> None:
+    # Guard: prod DB에 memos PK가 누락된 경우 복구 (FK 생성 선행 조건)
+    op.execute("""
+        DO $$ BEGIN
+            IF NOT EXISTS (
+                SELECT 1 FROM pg_constraint
+                WHERE conname = 'memos_pkey' AND contype = 'p'
+            ) THEN
+                ALTER TABLE memos ADD PRIMARY KEY (id);
+            END IF;
+        END $$;
+    """)
+
     op.create_table(
         'memo_entity_links',
         sa.Column('id', UUID(as_uuid=True), primary_key=True, server_default=sa.text('gen_random_uuid()')),
