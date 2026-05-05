@@ -24,6 +24,7 @@ def upgrade() -> None:
         sa.Column('position', sa.Integer(), nullable=False, server_default='0'),
         sa.Column('created_at', sa.DateTime(timezone=True), nullable=False, server_default=sa.text('now()')),
         sa.UniqueConstraint('memo_id', 'entity_type', 'entity_id', name='uq_memo_entity_links'),
+        sa.CheckConstraint("entity_type IN ('story','doc','epic','task')", name='ck_mel_entity_type'),
     )
     op.create_index('ix_memo_entity_links_memo_id', 'memo_entity_links', ['memo_id'])
 

@@ -1,12 +1,12 @@
 import uuid
 from datetime import datetime
-from typing import Any
+from typing import Any, Literal
 
 from pydantic import BaseModel, ConfigDict
 
 
 class MemoEntityLinkCreate(BaseModel):
-    entity_type: str
+    entity_type: Literal['story', 'doc', 'epic', 'task']
     entity_id: uuid.UUID
     position: int = 0
 
