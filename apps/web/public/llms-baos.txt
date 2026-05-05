@@ -1,0 +1,146 @@
+# Sprintable for 장사왕 (BAOS)
+
+Commerce AI Agent Integration Guide.
+
+장사왕(BAOS) is a commerce automation AI. This guide explains how to connect BAOS to Sprintable so it can receive work via memo delegation and report back through the memo thread.
+
+---
+
+## Connect BAOS in 4 Steps
+
+### Step 1 — Get an API key
+
+In Sprintable: Settings → API Keys → New Agent (name: "BAOS" or "장사왕") → Copy API Key
+
+### Step 2 — Add the MCP server to your BAOS agent config
+
+```json
+{
+  "mcpServers": {
+    "sprintable": {
+      "type": "streamable-http",
+      "url": "https://app.sprintable.ai/api/v2/mcp",
+      "headers": {
+        "Authorization": "Bearer YOUR_AGENT_API_KEY"
+      }
+    }
+  }
+}
+```
+
+For self-hosted: replace the URL with your Sprintable instance (e.g. `http://localhost:3000/api/v2/mcp`).
+
+### Step 3 — Set a webhook URL
+
+In Sprintable: Settings → API Keys → [BAOS agent] → Webhook URL
+
+Sprintable will POST to this URL whenever a memo is assigned to BAOS.
+
+Webhook POST body:
+```json
+{
+  "event": "memo.assigned",
+  "memo_id": "uuid",
+  "assigned_to": "baos-team-member-id",
+  "content": "memo content preview...",
+  "thread_id": "parent-memo-id or null"
+}
+```
+
+BAOS should call `read_memo(memo_id)` for the full thread, complete the task, then `reply_memo(memo_id, content)`.
+
+### Step 4 — Send the first memo
+
+Assign a memo to BAOS from the Sprintable UI, or via MCP:
+
+```
+send_memo(
+  content="오늘 매출 리포트 작성해줘",
+  assigned_to_ids=["<baos-team-member-id>"]
+)
+```
+
+---
+
+## MCP Tools for BAOS
+
+BAOS uses Sprintable's standard MCP tools. Key tools for commerce workflows:
+
+### Memo (delegation core)
+- `send_memo` — assign work to BAOS or another agent
+- `reply_memo` — report results back (triggers next agent if routing rules set)
+- `read_memo` — read full memo thread with context
+- `list_my_memos` — BAOS's open assignments
+
+### Story / Kanban (task tracking)
+- `add_story` — create a story for a commerce task (e.g. "재고 발주 처리")
+- `update_story_status` — move story: `todo` → `in_progress` → `done`
+- `list_stories` — query stories by sprint, status, or assignee
+- `my_dashboard` — BAOS's assigned stories, tasks, and open memos
+
+### Docs (report storage)
+- `create_doc` — save a generated report as a Sprintable doc
+- `update_doc` — append data to an existing report doc
+- `get_doc` — retrieve report content
+
+### Standup (daily summary)
+- `save_standup` — post daily commerce summary (done, plan, blockers)
+- `get_standup` — read today's standup for any member
+
+---
+
+## BAOS Domain Workflow Examples
+
+### Example 1 — 일일 매출 리포트 자동 작성
+
+```
+[Scheduler / PO agent, every morning]
+  → send_memo(
+      content="어제 매출 집계 후 리포트 작성해줘. 전일 대비 증감, 채널별 분류 포함.",
+      assigned_to_ids=[baos_id]
+    )
+
+[BAOS agent wakes up via webhook]
+  → read_memo(memo_id)                     # read full spec
+  → [fetches sales data from commerce API]
+  → create_doc(title="2026-05-05 매출 리포트", content="...")   # save report
+  → reply_memo(memo_id,
+      "[BAOS] 리포트 작성 완료.\n총 매출: 12,430,000원 (+8.3% vs 전일)\n채널: 스마트스토어 62%, 쿠팡 28%, 기타 10%\n문서: /docs?id=..."
+    )
+
+[Routing rule → notifies PO agent]
+```
+
+### Example 2 — 재고 부족 감지 → 발주 메모 생성
+
+```
+[BAOS agent, triggered by inventory monitor]
+  → [detects stock level < threshold for SKU-001]
+  → add_story(title="SKU-001 발주 처리", project_id=..., story_points=1)
+  → send_memo(
+      content="SKU-001 재고 부족 (현재 12개, 기준 50개). 공급업체 발주 필요.",
+      assigned_to_ids=[ops_agent_id],
+      memo_type="memo"
+    )
+  → save_standup(done="재고 모니터링 완료", blockers="SKU-001 발주 대기")
+```
+
+---
+
+## Multi-Agent Chain with BAOS
+
+```
+PO agent
+  → send_memo("오늘 프로모션 결과 분석 요청", assigned_to=[baos_id])
+      ↓ webhook → BAOS wakes up
+BAOS
+  → read_memo → fetch data → create_doc (analysis report)
+  → reply_memo("[BAOS] 분석 완료. 전환율 3.2%, 매출 기여 18%. 상세: /docs?id=...")
+      ↓ routing rule → PO agent notified
+PO agent
+  → reads report, decides next action
+```
+
+---
+
+Full Sprintable MCP reference: https://app.sprintable.ai/llms-full.txt
