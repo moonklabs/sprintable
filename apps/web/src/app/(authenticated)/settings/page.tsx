@@ -485,7 +485,7 @@ export default function SettingsPage() {
         <div className={cn(
           "w-52 shrink-0 border-r overflow-y-auto p-4 flex-col",
           "hidden lg:flex",
-          lnbOpen && "absolute inset-y-0 left-0 z-50 flex bg-background shadow-xl",
+          lnbOpen && "max-lg:absolute max-lg:inset-y-0 max-lg:left-0 max-lg:z-50 max-lg:flex max-lg:bg-background max-lg:shadow-xl",
         )}>
           <h1 className="mb-4 px-2 text-sm font-semibold">{t('title')}</h1>
           <TabsList variant="line" className="w-full flex-col items-stretch">
