@@ -452,9 +452,36 @@ export default function SettingsPage() {
 
   return (
     <>
-      <Tabs value={activeTab} onValueChange={setActiveTab} orientation="vertical" className="flex-1 min-h-0 gap-0">
-        {/* Left nav */}
-        <div className="w-52 shrink-0 border-r overflow-y-auto p-4">
+      <Tabs value={activeTab} onValueChange={setActiveTab} className="flex-1 min-h-0 flex flex-col lg:flex-row gap-0">
+        {/* Mobile: horizontal scrollable tab bar (< lg) */}
+        <div className="lg:hidden shrink-0 border-b overflow-x-auto">
+          <TabsList variant="line" className="flex-row w-max gap-0 px-2 py-1">
+            <TabsTrigger value="profile"><User className="h-4 w-4" />{t('tabProfile')}</TabsTrigger>
+            <TabsTrigger value="appearance"><Palette className="h-4 w-4" />{t('tabAppearance')}</TabsTrigger>
+            {currentProjectId && isAdmin ? <TabsTrigger value="api-keys"><Key className="h-4 w-4" />{t('tabApiKeys')}</TabsTrigger> : null}
+            {currentProjectId ? (
+              <>
+                <TabsTrigger value="notifications"><Bell className="h-4 w-4" />{t('tabNotifications')}</TabsTrigger>
+                <TabsTrigger value="ai"><Bot className="h-4 w-4" />{t('tabAiAgents')}</TabsTrigger>
+              </>
+            ) : null}
+            {adminChecked && isAdmin ? (
+              <>
+                <TabsTrigger value="projects"><FolderKanban className="h-4 w-4" />{t('tabProjects')}</TabsTrigger>
+                <TabsTrigger value="members"><Users className="h-4 w-4" />{t('tabMembers')}</TabsTrigger>
+                <TabsTrigger value="integrations"><Zap className="h-4 w-4" />{t('tabIntegrations')}</TabsTrigger>
+                <TabsTrigger value="subscription"><CreditCard className="h-4 w-4" />{t('tabSubscription')}</TabsTrigger>
+                <TabsTrigger value="usage"><BarChart2 className="h-4 w-4" />{t('tabUsage')}</TabsTrigger>
+              </>
+            ) : null}
+            <TabsTrigger value="danger" className="text-destructive hover:text-destructive data-active:text-destructive data-active:bg-destructive/10">
+              <Trash2 className="h-4 w-4" />{t('deleteAccount')}
+            </TabsTrigger>
+          </TabsList>
+        </div>
+
+        {/* Desktop: left vertical LNB (>= lg) */}
+        <div className="hidden lg:flex flex-col w-52 shrink-0 border-r overflow-y-auto p-4">
           <h1 className="mb-4 px-2 text-sm font-semibold">{t('title')}</h1>
           <TabsList variant="line" className="w-full flex-col items-stretch">
             <span className="px-2 pb-1 pt-1 text-[10px] font-medium uppercase tracking-wider text-muted-foreground/70">{t('myAccount')}</span>
