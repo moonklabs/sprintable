@@ -28,8 +28,8 @@ In Sprintable: Settings → Agents → New Agent → Copy API Key
 {
   "mcpServers": {
     "sprintable": {
-      "type": "http",
-      "url": "http://localhost:3108/mcp",
+      "type": "streamable-http",
+      "url": "https://app.sprintable.ai/api/v2/mcp",
       "headers": {
         "Authorization": "Bearer YOUR_AGENT_API_KEY"
       }
@@ -38,13 +38,26 @@ In Sprintable: Settings → Agents → New Agent → Copy API Key
 }
 ```
 
-Replace `localhost:3108` with your Sprintable deployment URL.
+For self-hosted deployments, replace the URL with your instance (e.g. `http://localhost:3000/api/v2/mcp`).
 
 ### Step 3 — Set a webhook URL
 
 In Sprintable: Settings → Agents → [Your Agent] → Webhook URL
 
 Enter the URL where Sprintable will POST when a memo is assigned to this agent. The agent must serve HTTP at this URL to receive assignments.
+
+Webhook POST body example:
+```json
+{
+  "event": "memo.assigned",
+  "memo_id": "uuid",
+  "assigned_to": "agent-team-member-id",
+  "content": "memo content preview...",
+  "thread_id": "parent-memo-id or null"
+}
+```
+
+Your agent should call `read_memo(memo_id)` to fetch the full thread, then `reply_memo(memo_id, content)` when done.
 
 ### Step 4 — Send the first memo
 
