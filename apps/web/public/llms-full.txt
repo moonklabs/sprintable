@@ -64,6 +64,31 @@ Sprintable (SSoT)
 
 ---
 
+## Authentication Model
+
+Sprintable uses **Agent API Keys** (`sk_live_...`) for MCP and HTTP API access.
+
+### API Key Scope
+- Issued per agent team member (`type: 'agent'`)
+- Grants access to **all MCP tools** across the entire org (all projects the agent is a member of)
+- **Cannot** access UI routes (e.g. `/dashboard`, `/board`) — those require browser session auth
+- Passed as `Authorization: Bearer <api_key>` header on every MCP or REST request
+
+### How to obtain
+Settings → API Keys → select agent → Issue New Key (shown once — copy immediately)
+
+### Error Codes
+
+| HTTP | Meaning | Common cause |
+|---|---|---|
+| 401 | Unauthenticated | Missing or invalid `Authorization` header |
+| 403 | Forbidden | UI-only route accessed via API key; or wrong org scope |
+| 422 | Validation error | Missing required field or type mismatch in request body |
+| 429 | Rate limited | Too many requests — back off and retry with exponential delay |
+| 500 | Server error | Sprintable internal error — report via memo to the ops agent |
+
+---
+
 ## MCP Tool Reference
 
 All tools are available at `POST /mcp` with `Authorization: Bearer <api_key>`.
@@ -324,6 +349,29 @@ All tools are available at `POST /mcp` with `Authorization: Bearer <api_key>`.
 ### QA Reply Convention
 - Approve: `[QA][APPROVE]` prefix in reply content
 - Request changes: `[QA][RC]` prefix in reply content
+
+### Multi-Agent Routing: PO → DEV → QA Chain
+
+```
+PO agent
+  → send_memo(type="kickoff", content="Implement login AC...", assigned_to_ids=[dev_id])
+      ↓ Sprintable fires webhook → DEV agent wakes up
+DEV agent
+  → read_memo(memo_id) — reads full spec
+  → [does work: writes code, opens PR]
+  → reply_memo(memo_id, "[DEV][PR] https://github.com/.../pull/42")
+      ↓ Routing rule: reply from dev → forward to QA agent webhook
+QA agent
+  → read_memo(memo_id) — reads PR link from thread
+  → [reviews PR]
+  → reply_memo(memo_id, "[QA][APPROVE] All AC pass. PR ready to merge.")
+      ↓ Routing rule: QA APPROVE → notify PO agent
+PO agent
+  → read_memo(memo_id) — sees QA approval
+  → merge PR, update_story_status(story_id, "done")
+```
+
+**Key rule:** Each agent only calls `reply_memo` — Sprintable's routing engine determines who wakes up next. Agents never call each other directly.
 
 ---
 

@@ -6,6 +6,9 @@ import { SectionCard, SectionCardBody, SectionCardHeader } from '@/components/ui
 import { Badge } from '@/components/ui/badge';
 import { useToast } from '@/components/ui/toast';
 
+const MCP_SERVER_URL = 'https://app.sprintable.ai/api/v2/mcp';
+const LLMS_PROMPT = 'Read this document and complete onboarding: https://app.sprintable.ai/llms.txt';
+
 interface AgentMember {
   id: string;
   name: string;
@@ -26,6 +29,51 @@ interface NewKeyResult {
   key_prefix: string;
   api_key: string;
   created_at: string;
+}
+
+function buildMcpConfig(apiKey: string) {
+  return JSON.stringify(
+    {
+      mcpServers: {
+        sprintable: {
+          type: 'streamable-http',
+          url: MCP_SERVER_URL,
+          headers: { Authorization: `Bearer ${apiKey}` },
+        },
+      },
+    },
+    null,
+    2,
+  );
+}
+
+function McpConfigBlock({
+  apiKey,
+  agentName,
+  onCopy,
+}: {
+  apiKey: string;
+  agentName: string;
+  onCopy: (text: string, label: string) => void;
+}) {
+  const config = buildMcpConfig(apiKey);
+
+  return (
+    <div className="mt-3 rounded-md border border-border bg-muted/20 p-3 space-y-2">
+      <div className="flex items-center justify-between gap-2">
+        <p className="text-xs font-semibold text-foreground">MCP Config — {agentName}</p>
+        <Button
+          size="sm"
+          variant="outline"
+          className="h-6 text-xs"
+          onClick={() => onCopy(config, 'MCP Config')}
+        >
+          Copy
+        </Button>
+      </div>
+      <pre className="overflow-x-auto rounded bg-background p-2 text-xs text-foreground/80">{config}</pre>
+    </div>
+  );
 }
 
 export function AgentApiKeysSection({ projectId }: { projectId: string }) {
@@ -104,103 +152,165 @@ export function AgentApiKeysSection({ projectId }: { projectId: string }) {
     }
   }, [newAgentName, projectId, fetchAgents, addToast]);
 
+  const handleCopy = useCallback(async (text: string, label: string) => {
+    try {
+      await navigator.clipboard.writeText(text);
+      addToast({ type: 'success', title: `${label} 복사됨` });
+    } catch {
+      addToast({ type: 'error', title: '복사 실패', body: '클립보드 접근 권한을 확인하세요.' });
+    }
+  }, [addToast]);
+
   if (loading) return <div className="text-sm text-muted-foreground">Loading...</div>;
 
   return (
-    <SectionCard>
-      <SectionCardHeader>
-        <div className="space-y-1">
-          <h2 className="text-base font-semibold">🔑 Agent API Keys</h2>
-          <p className="text-sm text-muted-foreground">에이전트 팀원의 API Key를 관리하는. MCP/HTTP API 전용 — UI 로그인 불가.</p>
-        </div>
-      </SectionCardHeader>
-      <SectionCardBody>
-        <div className="mb-6 flex gap-2">
-          <input
-            type="text"
-            value={newAgentName}
-            onChange={(e) => setNewAgentName(e.target.value)}
-            onKeyDown={(e) => { if (e.key === 'Enter') void handleAddAgent(); }}
-            placeholder="에이전트 이름"
-            className="flex-1 rounded-md border border-border bg-muted/30 px-3 py-2 text-sm text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-1 focus:ring-ring"
-          />
-          <Button
-            size="sm"
-            variant="outline"
-            disabled={!newAgentName.trim() || adding}
-            onClick={() => void handleAddAgent()}
-          >
-            {adding ? '추가 중...' : '+ 에이전트 추가'}
-          </Button>
-        </div>
-        {agents.length === 0 && (
-          <p className="text-sm text-muted-foreground">No agent team members in this project.</p>
-        )}
-        {agents.map((agent) => (
-          <div key={agent.id} className="mb-6">
-            <div className="mb-2 flex items-center gap-2">
-              <span className="font-medium text-sm">{agent.name}</span>
-              <Badge variant={agent.is_active ? 'default' : 'secondary'}>
-                {agent.is_active ? 'active' : 'inactive'}
-              </Badge>
-            </div>
-
-            {newKey?.agentId === agent.id && (
-              <div className="mb-3 rounded-md border border-yellow-300 bg-yellow-50 p-3 dark:border-yellow-700 dark:bg-yellow-950">
-                <p className="mb-1 text-xs font-semibold text-yellow-800 dark:text-yellow-200">
-                  새 API Key — 지금만 표시됩니다. 복사해 두세요.
-                </p>
-                <code className="block break-all text-xs text-yellow-900 dark:text-yellow-100">
-                  {newKey.result.api_key}
-                </code>
-              </div>
-            )}
-
-            <div className="space-y-1">
-              {(keys[agent.id] ?? []).map((k) => (
-                <div key={k.id} className="flex items-center justify-between rounded border px-3 py-2 text-xs">
-                  <div className="flex items-center gap-3">
-                    <code className="font-mono">{k.key_prefix}…</code>
-                    <span className="text-muted-foreground">
-                      발급: {new Date(k.created_at).toLocaleDateString()}
-                    </span>
-                    {k.last_used_at && (
-                      <span className="text-muted-foreground">
-                        최근 사용: {new Date(k.last_used_at).toLocaleDateString()}
-                      </span>
-                    )}
-                    {k.revoked_at && <Badge variant="destructive">revoked</Badge>}
-                  </div>
-                  {!k.revoked_at && (
-                    <Button
-                      size="sm"
-                      variant="ghost"
-                      className="h-6 text-xs text-destructive hover:text-destructive"
-                      disabled={revoking === k.id}
-                      onClick={() => void handleRevoke(agent.id, k.id)}
-                    >
-                      {revoking === k.id ? 'Revoking...' : 'Revoke'}
-                    </Button>
-                  )}
-                </div>
-              ))}
-              {(keys[agent.id] ?? []).length === 0 && (
-                <p className="text-xs text-muted-foreground">발급된 API Key 없음.</p>
-              )}
-            </div>
-
+    <div className="space-y-4">
+      <SectionCard>
+        <SectionCardHeader>
+          <div className="space-y-1">
+            <h2 className="text-base font-semibold">🔑 Agent API Keys</h2>
+            <p className="text-sm text-muted-foreground">에이전트 팀원의 API Key를 관리하는. MCP/HTTP API 전용 — UI 로그인 불가.</p>
+          </div>
+        </SectionCardHeader>
+        <SectionCardBody>
+          <div className="mb-6 flex gap-2">
+            <input
+              type="text"
+              value={newAgentName}
+              onChange={(e) => setNewAgentName(e.target.value)}
+              onKeyDown={(e) => { if (e.key === 'Enter') void handleAddAgent(); }}
+              placeholder="에이전트 이름"
+              className="flex-1 rounded-md border border-border bg-muted/30 px-3 py-2 text-sm text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-1 focus:ring-ring"
+            />
             <Button
               size="sm"
               variant="outline"
-              className="mt-2"
-              disabled={issuing === agent.id}
-              onClick={() => void handleIssue(agent.id)}
+              disabled={!newAgentName.trim() || adding}
+              onClick={() => void handleAddAgent()}
             >
-              {issuing === agent.id ? 'Issuing...' : '+ 새 API Key 발급'}
+              {adding ? '추가 중...' : '+ 에이전트 추가'}
             </Button>
           </div>
-        ))}
-      </SectionCardBody>
-    </SectionCard>
+          {agents.length === 0 && (
+            <p className="text-sm text-muted-foreground">No agent team members in this project.</p>
+          )}
+          {agents.map((agent) => {
+            const agentKeys = keys[agent.id] ?? [];
+            const activeKeys = agentKeys.filter((k) => !k.revoked_at);
+            const freshKey = newKey?.agentId === agent.id ? newKey.result : null;
+
+            return (
+              <div key={agent.id} className="mb-6">
+                <div className="mb-2 flex items-center gap-2">
+                  <span className="font-medium text-sm">{agent.name}</span>
+                  <Badge variant={agent.is_active ? 'default' : 'secondary'}>
+                    {agent.is_active ? 'active' : 'inactive'}
+                  </Badge>
+                </div>
+
+                {freshKey ? (
+                  <div className="mb-3 rounded-md border border-yellow-300 bg-yellow-50 p-3 dark:border-yellow-700 dark:bg-yellow-950">
+                    <p className="mb-1 text-xs font-semibold text-yellow-800 dark:text-yellow-200">
+                      새 API Key — 지금만 표시됩니다. 복사해 두세요.
+                    </p>
+                    <code className="block break-all text-xs text-yellow-900 dark:text-yellow-100">
+                      {freshKey.api_key}
+                    </code>
+                  </div>
+                ) : null}
+
+                <div className="space-y-1">
+                  {agentKeys.map((k) => (
+                    <div key={k.id} className="flex items-center justify-between rounded border px-3 py-2 text-xs">
+                      <div className="flex items-center gap-3">
+                        <code className="font-mono">{k.key_prefix}…</code>
+                        <span className="text-muted-foreground">
+                          발급: {new Date(k.created_at).toLocaleDateString()}
+                        </span>
+                        {k.last_used_at && (
+                          <span className="text-muted-foreground">
+                            최근 사용: {new Date(k.last_used_at).toLocaleDateString()}
+                          </span>
+                        )}
+                        {k.revoked_at && <Badge variant="destructive">revoked</Badge>}
+                      </div>
+                      {!k.revoked_at && (
+                        <Button
+                          size="sm"
+                          variant="ghost"
+                          className="h-6 text-xs text-destructive hover:text-destructive"
+                          disabled={revoking === k.id}
+                          onClick={() => void handleRevoke(agent.id, k.id)}
+                        >
+                          {revoking === k.id ? 'Revoking...' : 'Revoke'}
+                        </Button>
+                      )}
+                    </div>
+                  ))}
+                  {agentKeys.length === 0 && (
+                    <p className="text-xs text-muted-foreground">발급된 API Key 없음.</p>
+                  )}
+                </div>
+
+                <Button
+                  size="sm"
+                  variant="outline"
+                  className="mt-2"
+                  disabled={issuing === agent.id}
+                  onClick={() => void handleIssue(agent.id)}
+                >
+                  {issuing === agent.id ? 'Issuing...' : '+ 새 API Key 발급'}
+                </Button>
+
+                {/* MCP Config block */}
+                {freshKey ? (
+                  <McpConfigBlock
+                    apiKey={freshKey.api_key}
+                    agentName={agent.name}
+                    onCopy={handleCopy}
+                  />
+                ) : activeKeys.length > 0 ? (
+                  <McpConfigBlock
+                    apiKey={`${activeKeys[0].key_prefix}...`}
+                    agentName={agent.name}
+                    onCopy={handleCopy}
+                  />
+                ) : (
+                  <p className="mt-3 text-xs text-muted-foreground">
+                    ⚠️ MCP Config를 사용하려면 먼저 API Key를 발급하세요.
+                  </p>
+                )}
+              </div>
+            );
+          })}
+        </SectionCardBody>
+      </SectionCard>
+
+      {/* Agent onboarding prompt */}
+      <SectionCard>
+        <SectionCardHeader>
+          <div className="space-y-1">
+            <h2 className="text-base font-semibold">🤖 에이전트 온보딩 프롬프트</h2>
+            <p className="text-sm text-muted-foreground">에이전트에게 아래 문구를 전달하면 Sprintable 사용법을 자동으로 학습합니다.</p>
+          </div>
+        </SectionCardHeader>
+        <SectionCardBody>
+          <div className="rounded-md border border-border bg-muted/20 p-3 space-y-2">
+            <div className="flex items-center justify-between gap-2">
+              <p className="text-xs font-semibold text-foreground">온보딩 프롬프트</p>
+              <Button
+                size="sm"
+                variant="outline"
+                className="h-6 text-xs"
+                onClick={() => void handleCopy(LLMS_PROMPT, '온보딩 프롬프트')}
+              >
+                Copy
+              </Button>
+            </div>
+            <pre className="overflow-x-auto rounded bg-background p-2 text-xs text-foreground/80 whitespace-pre-wrap">{LLMS_PROMPT}</pre>
+          </div>
+        </SectionCardBody>
+      </SectionCard>
+    </div>
   );
 }
