@@ -159,7 +159,7 @@ export function MemoComposer({
     const timer = window.setTimeout(() => {
       const params = new URLSearchParams({ project_id: projectId });
       if (entityQuery) params.set('q', entityQuery);
-      fetch(`/api/v2/entities/search?${params}`)
+      fetch(`/api/entities/search?${params}`)
         .then((r) => r.json())
         .then((json: EntityResult[]) => {
           if (cancelled) return;
