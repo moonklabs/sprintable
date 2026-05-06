@@ -1,6 +1,5 @@
 
 import { createHash } from 'crypto';
-import type { SupabaseClient } from '@supabase/supabase-js';
 
 export class RevokedApiKeyError extends Error {
   constructor(message = 'API key has been revoked') {
@@ -59,7 +58,8 @@ export function extractBearerToken(authHeader: string | null): string | null {
  * @returns team_member context 또는 null (인증 실패)
  */
 export async function getTeamMemberFromApiKey(
-  adminClient: SupabaseClient,
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any -- @supabase/supabase-js not in web package.json
+  adminClient: any,
   apiKey: string,
   logContext?: { endpoint: string; ip?: string | null },
 ): Promise<TeamMemberContext | null> {
@@ -135,7 +135,8 @@ export function requireAgentScope(
 }
 
 export async function getTeamMemberFromRequest(
-  adminClient: SupabaseClient,
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any -- @supabase/supabase-js not in web package.json
+  adminClient: any,
   request: Request
 ): Promise<TeamMemberContext | null> {
   const authHeader = request.headers.get('Authorization');

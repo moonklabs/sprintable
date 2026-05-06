@@ -1,5 +1,3 @@
-import type { SupabaseClient } from '@supabase/supabase-js';
-
 const ALLOWED_TRANSITIONS: Record<string, string[]> = {
   draft: ['active'],
   active: ['done', 'archived'],
@@ -20,7 +18,8 @@ export function validateStatusTransition(from: string, to: string): void {
 const ROLE_RANK: Record<string, number> = { owner: 3, admin: 2, member: 1 };
 
 export async function getEpicActorRole(
-  db: SupabaseClient | null | undefined,
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any -- @supabase/supabase-js not in web package.json
+  db: any,
   memberId: string,
 ): Promise<string | null> {
   if (!db) return null;
