@@ -164,9 +164,10 @@ export function MemoComposer({
       if (entityQuery) params.set('q', entityQuery);
       fetch(`/api/entities/search?${params}`)
         .then((r) => r.json())
-        .then((json: EntityResult[]) => {
+        .then((json: EntityResult[] | { data?: EntityResult[] }) => {
           if (cancelled) return;
-          setEntityResults(Array.isArray(json) ? json : []);
+          const arr = Array.isArray(json) ? json : (json.data ?? []);
+          setEntityResults(Array.isArray(arr) ? arr : []);
           setEntityIndex(0);
         })
         .catch(() => {});
