@@ -164,9 +164,10 @@ export function MemoComposer({
       if (entityQuery) params.set('q', entityQuery);
       fetch(`/api/entities/search?${params}`)
         .then((r) => r.json())
-        .then((json: EntityResult[]) => {
+        .then((json: EntityResult[] | { data?: EntityResult[] }) => {
           if (cancelled) return;
-          setEntityResults(Array.isArray(json) ? json : []);
+          const arr = Array.isArray(json) ? json : (json.data ?? []);
+          setEntityResults(Array.isArray(arr) ? arr : []);
           setEntityIndex(0);
         })
         .catch(() => {});
@@ -482,7 +483,11 @@ export function MemoComposer({
             </button>
           ) : null}
         </div>
-        <div className="text-xs text-muted-foreground">{t('composerShortcut')}</div>
+        <div className="flex flex-wrap gap-x-3 gap-y-0.5 text-xs text-muted-foreground">
+          <span>{t('composerShortcut')}</span>
+          <span>{t('composerMentionHint')}</span>
+          <span>{t('composerEmbedHint')}</span>
+        </div>
       </div>
 
       {uploadError ? <p className="text-xs text-red-600">{uploadError}</p> : null}
