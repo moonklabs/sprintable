@@ -61,6 +61,7 @@ interface ProjectMember {
   user_id: string | null;
   project_id: string;
   is_active: boolean;
+  webhook_url?: string | null;
 }
 
 const EVENT_TYPES = ['story_assigned', 'memo_received', 'reward_granted', 'story_status_changed'];
@@ -135,6 +136,9 @@ export default function SettingsPage() {
   const [addingAgent, setAddingAgent] = useState(false);
   const [deactivatingAgentId, setDeactivatingAgentId] = useState<string | null>(null);
   const [agentActionMessage, setAgentActionMessage] = useState<{ type: 'success' | 'error'; text: string } | null>(null);
+  const [webhookEditing, setWebhookEditing] = useState<Record<string, string>>({});
+  const [webhookSaving, setWebhookSaving] = useState<string | null>(null);
+  const [webhookErrors, setWebhookErrors] = useState<Record<string, string>>({});
 
   const refreshProjects = async () => {
     const endpoint = orgId ? `/api/projects?org_id=${encodeURIComponent(orgId)}` : '/api/projects';
@@ -497,6 +501,37 @@ export default function SettingsPage() {
     }
 
     setProjectInviting(false);
+  };
+
+  const handleSaveWebhookUrl = async (memberId: string) => {
+    const url = (webhookEditing[memberId] ?? '').trim();
+    if (url && !/^https:\/\//i.test(url)) {
+      setWebhookErrors((prev) => ({ ...prev, [memberId]: 'HTTPS URL만 허용됩니다 (https://)' }));
+      return;
+    }
+    setWebhookErrors((prev) => ({ ...prev, [memberId]: '' }));
+    setWebhookSaving(memberId);
+    const prevMembers = projectMembers;
+    setProjectMembers((prev) => prev.map((m) => m.id === memberId ? { ...m, webhook_url: url || null } : m));
+    try {
+      const res = await fetch(`/api/team-members/${memberId}`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ webhook_url: url || null }),
+      });
+      if (!res.ok) {
+        setProjectMembers(prevMembers);
+        const json = await res.json().catch(() => ({})) as { error?: { message?: string } };
+        setWebhookErrors((prev) => ({ ...prev, [memberId]: json.error?.message ?? 'Webhook URL 저장 실패' }));
+      } else {
+        setWebhookEditing((prev) => { const next = { ...prev }; delete next[memberId]; return next; });
+      }
+    } catch {
+      setProjectMembers(prevMembers);
+      setWebhookErrors((prev) => ({ ...prev, [memberId]: '네트워크 오류 — 다시 시도하세요.' }));
+    } finally {
+      setWebhookSaving(null);
+    }
   };
 
   const handleRemoveProjectMember = async (memberId: string) => {
@@ -1104,20 +1139,67 @@ export default function SettingsPage() {
                     <div className="space-y-2">
                       <div className="text-xs font-medium uppercase tracking-[0.18em] text-muted-foreground">{t('projectMembers')}</div>
                       {projectMembers.length > 0 ? (
-                        projectMembers.map((member) => (
-                          <div key={member.id} className="flex items-center justify-between gap-3 rounded-md border border-border bg-muted/30 px-3 py-3 text-sm">
-                            <div className="min-w-0">
-                              <div className="font-medium text-foreground">{member.name}</div>
-                              <div className="mt-1 flex flex-wrap items-center gap-2">
-                                <Badge variant={member.type === 'agent' ? 'secondary' : 'info'}>{member.type === 'agent' ? t('agentMember') : t('humanMember')}</Badge>
-                                <Badge variant="outline">{member.role}</Badge>
+                        projectMembers.map((member) => {
+                          const isEditingWebhook = member.id in webhookEditing;
+                          const currentWebhookUrl = member.webhook_url ?? '';
+                          return (
+                          <div key={member.id} className="rounded-md border border-border bg-muted/30 px-3 py-3 text-sm space-y-2">
+                            <div className="flex items-center justify-between gap-3">
+                              <div className="min-w-0">
+                                <div className="font-medium text-foreground">{member.name}</div>
+                                <div className="mt-1 flex flex-wrap items-center gap-2">
+                                  <Badge variant={member.type === 'agent' ? 'secondary' : 'info'}>{member.type === 'agent' ? t('agentMember') : t('humanMember')}</Badge>
+                                  <Badge variant="outline">{member.role}</Badge>
+                                </div>
                               </div>
+                              <Button variant="glass" size="sm" onClick={() => handleRemoveProjectMember(member.id)} disabled={removingMemberId === member.id}>
+                                {removingMemberId === member.id ? '...' : t('removeFromProject')}
+                              </Button>
                             </div>
-                            <Button variant="glass" size="sm" onClick={() => handleRemoveProjectMember(member.id)} disabled={removingMemberId === member.id}>
-                              {removingMemberId === member.id ? '...' : t('removeFromProject')}
-                            </Button>
+                            {/* Webhook URL */}
+                            <div className="flex items-center gap-2">
+                              {isEditingWebhook ? (
+                                <>
+                                  <input
+                                    type="url"
+                                    value={webhookEditing[member.id]}
+                                    onChange={(e) => {
+                                      setWebhookEditing((prev) => ({ ...prev, [member.id]: e.target.value }));
+                                      setWebhookErrors((prev) => ({ ...prev, [member.id]: '' }));
+                                    }}
+                                    onKeyDown={(e) => { if (e.key === 'Enter') void handleSaveWebhookUrl(member.id); if (e.key === 'Escape') setWebhookEditing((prev) => { const next = { ...prev }; delete next[member.id]; return next; }); }}
+                                    placeholder="https://your-webhook.example.com"
+                                    className="flex-1 rounded-md border border-border bg-background px-2 py-1 font-mono text-xs text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-1 focus:ring-ring"
+                                    autoFocus
+                                  />
+                                  <Button size="sm" variant="outline" className="shrink-0 h-7 text-xs" disabled={webhookSaving === member.id} onClick={() => void handleSaveWebhookUrl(member.id)}>
+                                    {webhookSaving === member.id ? '...' : '저장'}
+                                  </Button>
+                                  <Button size="sm" variant="ghost" className="shrink-0 h-7 text-xs" onClick={() => setWebhookEditing((prev) => { const next = { ...prev }; delete next[member.id]; return next; })}>
+                                    취소
+                                  </Button>
+                                </>
+                              ) : (
+                                <button
+                                  type="button"
+                                  className="flex-1 text-left text-xs text-muted-foreground hover:text-foreground transition-colors"
+                                  title={currentWebhookUrl || 'Webhook URL 설정'}
+                                  onClick={() => setWebhookEditing((prev) => ({ ...prev, [member.id]: currentWebhookUrl }))}
+                                >
+                                  {currentWebhookUrl ? (
+                                    <span className="font-mono">{currentWebhookUrl.length > 50 ? `${currentWebhookUrl.slice(0, 50)}…` : currentWebhookUrl}</span>
+                                  ) : (
+                                    <span className="italic">Webhook URL 설정…</span>
+                                  )}
+                                </button>
+                              )}
+                            </div>
+                            {webhookErrors[member.id] ? (
+                              <p className="text-xs text-destructive">{webhookErrors[member.id]}</p>
+                            ) : null}
                           </div>
-                        ))
+                          );
+                        })
                       ) : (
                         <div className="rounded-md border border-dashed border-border px-3 py-6 text-sm text-muted-foreground">
                           {t('noProjectMembers')}
