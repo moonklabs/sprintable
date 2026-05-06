@@ -11,6 +11,7 @@ import { Button } from '@/components/ui/button';
 import { StatusBadge } from '@/components/ui/status-badge';
 import type { MemoDetailState } from './memo-state';
 import { MemoComposer } from './memo-composer';
+import { EntityChip, getEntityHref } from '@/components/memos/embed-card';
 
 interface MemberInfo {
   name: string;
@@ -217,7 +218,16 @@ function MarkdownContent({ content, isCurrentUser }: { content: string; isCurren
         pre: ({ children }) => <pre className={`mb-2 overflow-x-auto rounded-lg p-3 text-[13px] ${codeBg}`}>{children}</pre>,
         code: ({ children }) => <code className={`rounded px-1 py-0.5 font-mono text-[13px] ${codeBg}`}>{children}</code>,
         blockquote: ({ children }) => <blockquote className={`mb-2 border-l-2 pl-3 ${border} ${muted}`}>{children}</blockquote>,
-        a: ({ href, children }) => <a href={href} target="_blank" rel="noopener noreferrer" className="underline underline-offset-2">{children}</a>,
+        a: ({ href, children }) => {
+          const m = href?.match(/^entity:(\w+):([0-9a-f-]+)$/i);
+          if (m) {
+            const entityType = m[1];
+            const entityId = m[2];
+            const entityHref = getEntityHref(entityType, entityId);
+            return <EntityChip entityType={entityType} label={String(children)} href={entityHref} />;
+          }
+          return <a href={href} target="_blank" rel="noopener noreferrer" className="underline underline-offset-2">{children}</a>;
+        },
         strong: ({ children }) => <strong className={`font-semibold ${text}`}>{children}</strong>,
         em: ({ children }) => <em className={`italic ${text}`}>{children}</em>,
         hr: () => <hr className={`my-2 ${border}`} />,
