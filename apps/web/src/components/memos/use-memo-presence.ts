@@ -1,6 +1,6 @@
 'use client';
 
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState, startTransition } from 'react';
 
 interface MemoPresenceEntry {
   user_id: string;
@@ -57,18 +57,19 @@ export function useMemoPresence({ memoId, currentTeamMemberId, currentTeamMember
 
   useEffect(() => {
     if (!enabled || !memoId || !currentTeamMemberId) {
-      setState({ connected: false, viewers: [], typingUsers: [] });
+      startTransition(() => setState({ connected: false, viewers: [], typingUsers: [] }));
       return;
     }
 
     // 초기 presence + 폴링
-    sendPresence(false);
-    fetchViewers();
+    void sendPresence(false);
+    const initialFetch = setTimeout(() => { void fetchViewers(); }, 0);
 
     heartbeatRef.current = setInterval(() => sendPresence(typingRef.current), HEARTBEAT_INTERVAL_MS);
     pollRef.current = setInterval(fetchViewers, POLL_INTERVAL_MS);
 
     return () => {
+      clearTimeout(initialFetch);
       if (heartbeatRef.current) clearInterval(heartbeatRef.current);
       if (pollRef.current) clearInterval(pollRef.current);
       if (typingTimerRef.current) clearTimeout(typingTimerRef.current);

@@ -108,7 +108,7 @@ export function markdownToHtml(rawMd: string): string {
   // Strip accumulated Turndown backslash escapes from previously saved content.
   // Turndown added these automatically on prior saves; each round-trip doubled them.
   // Process ordered-list dots first (may have multiple backslashes), then inline escapes.
-  let md = rawMd
+  const md = rawMd
     .replace(/^(\d+)\\+\. /gm, '$1. ')
     .replace(/\\([*_`[\]\\])/g, '$1');
 

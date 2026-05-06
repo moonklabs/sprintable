@@ -4,7 +4,7 @@ import { ApiMemoRepository } from '@sprintable/storage-api';
 import { dispatchMemoAssignmentImmediately, type DispatchableMemo } from './memo-assignment-dispatch';
 import { dispatchWorkflowMemoReplyWebhooks } from './memo-reply-webhook-dispatch';
 import { buildAbsoluteMemoLink } from './app-url';
-import { NotFoundError, ForbiddenError } from './sprint';
+import { ForbiddenError } from './sprint';
 import { NotificationService } from './notification.service';
 import { hasExactMemberMention } from './doc-comment-notifications';
 import { InboxItemService } from './inbox-item.service';

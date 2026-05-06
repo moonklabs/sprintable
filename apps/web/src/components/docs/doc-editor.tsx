@@ -26,7 +26,6 @@ export function DocEditor({
   currentDocId,
   onNavigate,
   onChange,
-  onContentFormatChange,
   onSave,
   isDirty = false,
   autosave = true,

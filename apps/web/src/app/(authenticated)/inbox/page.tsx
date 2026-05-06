@@ -49,7 +49,7 @@ export default function InboxPage() {
   const [unreadCount, setUnreadCount] = useState(0);
   const [loading, setLoading] = useState(true);
   const [selectedId, setSelectedId] = useState<string | null>(null);
-  const { toasts, addToast, dismissToast } = useToast();
+  const { toasts, dismissToast } = useToast();
 
   const refreshNotifications = useCallback(async () => {
     const result = await fetchInboxNotifications('');

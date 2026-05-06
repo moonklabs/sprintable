@@ -40,7 +40,7 @@ export class WebhookDeliveryService {
     headers: Record<string, string>,
     body: string,
     deliveryId: string | null,
-    orgId: string | null,
+    _orgId: string | null,
   ): Promise<boolean> {
     let lastError = '';
 

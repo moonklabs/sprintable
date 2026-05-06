@@ -1,7 +1,6 @@
 import { redirect } from 'next/navigation';
 import { getServerSession } from '@/lib/db/server';
 import { DashboardShell } from '../dashboard/dashboard-shell';
-import { fastapiCall } from '@sprintable/storage-api';
 
 interface MemberContext {
   id: string;

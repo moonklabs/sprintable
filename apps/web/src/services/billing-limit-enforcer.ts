@@ -42,7 +42,7 @@ interface MemoScope {
 
 interface BillingLimitDeps {
   fetchFn?: typeof fetch;
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+   
   fireWebhooksFn?: (...args: any[]) => Promise<unknown>;
   now?: () => Date;
 }

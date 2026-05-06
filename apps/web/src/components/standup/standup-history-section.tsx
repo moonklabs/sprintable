@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useState } from 'react';
+import { useEffect, useState, startTransition } from 'react';
 import { useTranslations } from 'next-intl';
 import { Badge } from '@/components/ui/badge';
 
@@ -25,7 +25,7 @@ export function StandupHistorySection({ projectId, memberNameById = {} }: Props)
 
   useEffect(() => {
     if (!projectId) return;
-    setLoading(true);
+    startTransition(() => setLoading(true));
     fetch(`/api/standup/history?project_id=${projectId}&limit=20`)
       .then((r) => r.json())
       .then((json) => {

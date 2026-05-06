@@ -583,7 +583,7 @@ export class AgentRoutingRuleService {
           items: currentRules.map((rule) => createRoutingRuleSnapshotItem(rule)),
         }
       : undefined;
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+     
     const preparedItems: any[] = [];
 
     for (const [index, item] of input.items.entries()) {

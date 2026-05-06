@@ -6,7 +6,6 @@ import { useRouter, useSearchParams } from 'next/navigation';
 import { useTranslations } from 'next-intl';
 import { BarChart2, Bell, Bot, CreditCard, FolderKanban, Key, Menu, Palette, Trash2, User, Users, X, Zap } from 'lucide-react';
 import { UsageDashboard } from '@/components/settings/usage-dashboard';
-import { AgentApiKeysSection } from '@/components/settings/agent-api-keys-section';
 import { AiSettingsSection } from '@/components/settings/ai-settings';
 import { MyProfileSection } from '@/components/settings/my-profile-section';
 import { ByomKeyManagement } from '@/components/settings/byom-key-management';
@@ -86,7 +85,7 @@ export default function SettingsPage() {
 
   const [orgId, setOrgId] = useState<string | null>(null);
   const [currentProjectId, setCurrentProjectId] = useState<string | null>(null);
-  const [projectMemberships, setProjectMemberships] = useState<Array<{ projectId: string; projectName: string }>>([]);
+  const [projectMemberships] = useState<Array<{ projectId: string; projectName: string }>>([]);
   const [settings, setSettings] = useState<NotificationSetting[]>([]);
   const [loading, setLoading] = useState(true);
   const [showDeleteConfirm, setShowDeleteConfirm] = useState(false);

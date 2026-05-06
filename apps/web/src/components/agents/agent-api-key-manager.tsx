@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useCallback } from 'react';
 import { Button } from '@/components/ui/button';
 import { Card } from '@/components/ui/card';
 import {
@@ -42,12 +42,7 @@ export function AgentApiKeyManager({ agentId, agentName, onNewKey }: AgentApiKey
   const [selectedScopes, setSelectedScopes] = useState<Scope[]>(['read', 'write']);
   const { addToast } = useToast();
 
-  // Load API keys on mount
-  useEffect(() => {
-    loadApiKeys();
-  }, [agentId]);
-
-  const loadApiKeys = async () => {
+  const loadApiKeys = useCallback(async () => {
     setLoading(true);
     try {
       const response = await fetch(`/api/agents/${agentId}/api-key`);
@@ -63,7 +58,12 @@ export function AgentApiKeyManager({ agentId, agentName, onNewKey }: AgentApiKey
     } finally {
       setLoading(false);
     }
-  };
+  }, [agentId, addToast]);
+
+  // Load API keys on mount
+  useEffect(() => {
+    void loadApiKeys();
+  }, [loadApiKeys]);
 
   const generateApiKey = async () => {
     setLoading(true);

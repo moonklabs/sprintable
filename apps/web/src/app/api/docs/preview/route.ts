@@ -1,7 +1,6 @@
 import { getAuthContext } from '@/lib/auth-helpers';
 import { apiSuccess, ApiErrors } from '@/lib/api-response';
 import { handleApiError } from '@/lib/api-error';
-import { createDocRepository } from '@/lib/storage/factory';
 import { proxyToFastapi } from '@/lib/fastapi-proxy';
 
 /**

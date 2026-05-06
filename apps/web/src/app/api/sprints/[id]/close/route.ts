@@ -26,10 +26,12 @@ export async function POST(request: Request, { params }: RouteParams) {
     }
 
     const repo = await createSprintRepository();
-    const service = new SprintService(repo, dbClient as any | undefined);
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any -- legacy Supabase client param, dbClient is always undefined in OSS mode
+    const service = new SprintService(repo, dbClient as any);
     const sprint = await service.close(id);
 
     if (dbClient) {
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any -- dbClient undefined in OSS; this branch never executes
       const db = dbClient as any;
 
       // 알림 발송 (fire-and-forget)
