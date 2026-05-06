@@ -246,9 +246,12 @@ export default function AgentDetailPage() {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ scope: ['read', 'write'] }),
       });
-      const rawKey = keyRes.ok
-        ? ((await keyRes.json() as { data?: { api_key?: string } }).data?.api_key ?? '')
-        : '';
+      if (!keyRes.ok) {
+        addToast({ type: 'error', title: 'API Key 자동 생성 실패. 상세 페이지에서 수동으로 발급하세요.' });
+        await fetchSameNameAgents(agent.name);
+        return;
+      }
+      const rawKey = (await keyRes.json() as { data?: { api_key?: string } }).data?.api_key ?? '';
 
       const projectName = projects.find((p) => p.id === selectedAddProjectId)?.name ?? selectedAddProjectId;
       setNewProjectResult({ agentId: newAgentId, projectId: selectedAddProjectId, projectName, apiKey: rawKey, webhookUrl: '', savingWebhook: false });
