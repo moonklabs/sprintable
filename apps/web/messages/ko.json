@@ -318,13 +318,15 @@
     "agentRole": "역할",
     "createAgentAction": "에이전트 생성 + API 키 발급",
     "connectAgent": "에이전트 연결",
-    "connectSubtitle": "아래 MCP config를 에이전트 설정에 붙여넣으세요.",
+    "connectSubtitle": "MCP config를 에이전트에 붙여넣어 연결하세요. 추가 에이전트는 Settings > Members > Agents에서 관리합니다.",
     "mcpConfigTitle": "MCP Config",
     "promptTitle": "온보딩 프롬프트",
     "finish": "완료 → 대시보드",
     "skip": "건너뛰기",
     "stepOf": "{current} / {total}",
-    "createOrgFailed": "조직 생성에 실패했습니다"
+    "createOrgFailed": "조직 생성에 실패했습니다",
+    "apiKeyFailedMembers": "API Key 발급에 실패했습니다. Settings > Members > Agents에서 수동으로 발급하세요.",
+    "goToMembersAgents": "Members > Agents에서 관리하기"
   },
   "settings": {
     "title": "설정",
