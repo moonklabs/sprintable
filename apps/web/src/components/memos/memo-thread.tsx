@@ -1,6 +1,5 @@
 'use client';
 
-import type React from 'react';
 import { useEffect, useRef, useState } from 'react';
 import { useTranslations } from 'next-intl';
 import ReactMarkdown from 'react-markdown';
@@ -10,8 +9,8 @@ import { Bot, User } from 'lucide-react';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { StatusBadge } from '@/components/ui/status-badge';
-import { Textarea } from '@/components/ui/textarea';
 import type { MemoDetailState } from './memo-state';
+import { MemoComposer } from './memo-composer';
 
 interface MemberInfo {
   name: string;
@@ -89,12 +88,6 @@ export function MemoThread({ memo, currentUserId, onReply, onResolve, memberMap 
     }
   };
 
-  const handleKeyDown = (e: React.KeyboardEvent<HTMLTextAreaElement>) => {
-    if (e.key === 'Enter' && (e.metaKey || e.ctrlKey)) {
-      e.preventDefault();
-      void handleSubmitReply();
-    }
-  };
 
   return (
     <div className="flex h-full flex-col">
@@ -172,26 +165,18 @@ export function MemoThread({ memo, currentUserId, onReply, onResolve, memberMap 
       {/* Reply input */}
       {memo.status === 'open' && (
         <div className="flex-shrink-0 border-t border-white/10 bg-background px-4 py-3 lg:px-5">
-          <div className="mx-auto flex w-full max-w-4xl gap-2">
-            <Textarea
+          <div className="mx-auto w-full max-w-4xl">
+            <MemoComposer
               value={replyContent}
-              onChange={(e) => setReplyContent(e.target.value)}
-              onKeyDown={handleKeyDown}
+              onChange={setReplyContent}
+              onSubmit={handleSubmitReply}
               placeholder={t('replyPlaceholder')}
-              className="flex-1 min-h-[72px] resize-none rounded-xl bg-background"
+              submitLabel={isSubmitting ? t('sending') : t('send')}
+              helperText={t('replyHint')}
+              submitting={isSubmitting}
               disabled={isSubmitting}
+              projectId={memo.project_id}
             />
-            <Button
-              onClick={() => void handleSubmitReply()}
-              disabled={!replyContent.trim() || isSubmitting}
-              size="sm"
-              className="self-end"
-            >
-              {isSubmitting ? t('sending') : t('send')}
-            </Button>
-          </div>
-          <div className="mx-auto mt-1.5 w-full max-w-4xl text-[11px] text-[color:var(--operator-muted)]">
-            {t('replyHint')}
           </div>
         </div>
       )}
