@@ -269,6 +269,8 @@
     "uploadingImage": "Uploading image...",
     "uploadFailed": "Image upload failed.",
     "composerShortcut": "Ctrl/⌘+Enter to send",
+    "composerMentionHint": "@ mention members",
+    "composerEmbedHint": "# embed entities",
     "realtimeConnected": "Realtime connected",
     "docLinkTools": "Doc linking",
     "hideCreateDoc": "Hide create form",

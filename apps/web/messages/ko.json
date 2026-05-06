@@ -269,6 +269,8 @@
     "uploadingImage": "이미지 업로드 중...",
     "uploadFailed": "이미지 업로드에 실패했습니다.",
     "composerShortcut": "Ctrl/⌘+Enter로 전송",
+    "composerMentionHint": "@ 멤버 멘션",
+    "composerEmbedHint": "# 엔티티 삽입",
     "realtimeConnected": "실시간 연결됨",
     "docLinkTools": "문서 연결",
     "hideCreateDoc": "생성 폼 숨기기",
