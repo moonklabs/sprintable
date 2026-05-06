@@ -1,6 +1,7 @@
 import uuid
 
 from fastapi import APIRouter, Depends, HTTPException, Query, status
+from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.dependencies.auth import AuthContext, get_current_user
@@ -18,12 +19,26 @@ def _get_repo(session: AsyncSession = Depends(get_db)) -> OrganizationRepository
 @router.post("", response_model=OrganizationResponse, status_code=201)
 async def create_organization(
     body: CreateOrganization,
-    _auth: AuthContext = Depends(get_current_user),
+    auth: AuthContext = Depends(get_current_user),
     repo: OrganizationRepository = Depends(_get_repo),
+    session: AsyncSession = Depends(get_db),
 ) -> OrganizationResponse:
     org = await repo.create(name=body.name, slug=body.slug, owner_member_id=body.owner_member_id)
     if org is None:
         raise HTTPException(status_code=409, detail="Slug already exists")
+
+    # OSS bootstrap: owner_member_id 미전달 시 auth.user_id로 직접 org_member 생성
+    if body.owner_member_id is None and auth.user_id:
+        await session.execute(
+            text(
+                "INSERT INTO org_members (id, org_id, user_id, role)"
+                " VALUES (gen_random_uuid(), :org_id, :user_id, 'owner')"
+                " ON CONFLICT (org_id, user_id) DO NOTHING"
+            ),
+            {"org_id": str(org.id), "user_id": auth.user_id},
+        )
+        await session.commit()
+
     return OrganizationResponse.model_validate(org)
 
 
