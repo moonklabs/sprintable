@@ -31,9 +31,10 @@ interface ApiKey {
 interface AgentApiKeyManagerProps {
   agentId: string;
   agentName: string;
+  onNewKey?: (apiKey: string) => void;
 }
 
-export function AgentApiKeyManager({ agentId, agentName }: AgentApiKeyManagerProps) {
+export function AgentApiKeyManager({ agentId, agentName, onNewKey }: AgentApiKeyManagerProps) {
   const [apiKeys, setApiKeys] = useState<ApiKey[]>([]);
   const [loading, setLoading] = useState(false);
   const [newKeyDialog, setNewKeyDialog] = useState(false);
@@ -74,7 +75,9 @@ export function AgentApiKeyManager({ agentId, agentName }: AgentApiKeyManagerPro
       });
       if (!response.ok) throw new Error('Failed to generate API key');
       const result = await response.json();
-      setGeneratedKey(result.data.api_key);
+      const rawKey = result.data.api_key as string;
+      setGeneratedKey(rawKey);
+      onNewKey?.(rawKey);
       await loadApiKeys();
     } catch (error) {
       addToast({

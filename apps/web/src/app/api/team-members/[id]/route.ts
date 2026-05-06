@@ -5,6 +5,17 @@ import { handleApiError } from '@/lib/api-error';
 
 type RouteParams = { params: Promise<{ id: string }> };
 
+export async function GET(request: Request, { params }: RouteParams) {
+  try {
+    const { id } = await params;
+    const me = await getAuthContext(request);
+    if (!me) return ApiErrors.unauthorized();
+    const _r = await proxyToFastapiWithParams(request, '/api/v2/team-members/[id]', { id });
+    if (!_r.ok) return _r;
+    return apiSuccess(await _r.json());
+  } catch (err: unknown) { return handleApiError(err); }
+}
+
 export async function PATCH(request: Request, { params }: RouteParams) {
   try {
     const { id } = await params;

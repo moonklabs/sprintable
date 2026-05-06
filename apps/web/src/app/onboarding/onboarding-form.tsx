@@ -1,6 +1,7 @@
 'use client';
 
 import { useState } from 'react';
+import Link from 'next/link';
 import { useRouter } from 'next/navigation';
 import { UpgradeModal } from '@/components/ui/upgrade-modal';
 import { useTranslations } from 'next-intl';
@@ -347,25 +348,29 @@ export function OnboardingForm() {
         {step === 'connect' && (
           <div className="space-y-4">
             {newApiKey ? (
-              <>
-                <div className="rounded-md border border-gray-200 bg-gray-50 p-3 space-y-2">
-                  <div className="flex items-center justify-between gap-2">
-                    <p className="text-xs font-semibold text-gray-700">{t('mcpConfigTitle')}</p>
-                    <button
-                      onClick={() => void handleCopy(buildMcpConfig(newApiKey), 'mcp')}
-                      className="rounded border border-gray-300 px-2 py-1 text-xs text-gray-600 hover:bg-gray-100 transition"
-                    >
-                      {copied === 'mcp' ? '✓ Copied' : 'Copy'}
-                    </button>
-                  </div>
-                  <pre className="overflow-x-auto rounded bg-white border border-gray-100 p-2 text-xs text-gray-700">
-                    {buildMcpConfig(newApiKey)}
-                  </pre>
+              <div className="rounded-md border border-gray-200 bg-gray-50 p-3 space-y-2">
+                <div className="flex items-center justify-between gap-2">
+                  <p className="text-xs font-semibold text-gray-700">{t('mcpConfigTitle')}</p>
+                  <button
+                    onClick={() => void handleCopy(buildMcpConfig(newApiKey), 'mcp')}
+                    className="rounded border border-gray-300 px-2 py-1 text-xs text-gray-600 hover:bg-gray-100 transition"
+                  >
+                    {copied === 'mcp' ? '✓ Copied' : 'Copy'}
+                  </button>
                 </div>
-              </>
+                <pre className="overflow-x-auto rounded bg-white border border-gray-100 p-2 text-xs text-gray-700">
+                  {buildMcpConfig(newApiKey)}
+                </pre>
+              </div>
             ) : (
-              <div className="rounded-md border border-yellow-200 bg-yellow-50 p-3 text-sm text-yellow-800">
-                API Key 발급에 실패했습니다. Settings → API Keys에서 수동으로 발급하세요.
+              <div className="rounded-md border border-amber-200 bg-amber-50 p-3 space-y-2">
+                <p className="text-sm text-amber-800">{t('apiKeyFailedMembers')}</p>
+                <Link
+                  href="/settings?tab=members"
+                  className="inline-block rounded border border-amber-400 bg-white px-3 py-1 text-xs font-medium text-amber-700 hover:bg-amber-50 transition"
+                >
+                  {t('goToMembersAgents')} →
+                </Link>
               </div>
             )}
 
@@ -382,6 +387,14 @@ export function OnboardingForm() {
               <p className="break-all rounded bg-white border border-gray-100 p-2 text-xs text-gray-700">
                 {LLMS_PROMPT}
               </p>
+            </div>
+
+            {/* Members > Agents 경로 안내 */}
+            <div className="rounded-md border border-gray-100 bg-gray-50 px-3 py-2 text-xs text-gray-500">
+              에이전트 추가 및 API Key 관리:{' '}
+              <Link href="/settings?tab=members" className="font-medium text-blue-600 hover:underline">
+                Settings → Members → Agents
+              </Link>
             </div>
 
             <button
