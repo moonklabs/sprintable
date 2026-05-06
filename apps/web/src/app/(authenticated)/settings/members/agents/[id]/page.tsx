@@ -241,7 +241,7 @@ export default function AgentDetailPage() {
       const memberJson = await memberRes.json() as { data: AgentMember };
       const newAgentId = memberJson.data.id;
 
-      const keyRes = await fetch(`/api/agents/${newAgentId}/api-key`, {
+      const keyRes = await fetch(`/api/agents/${newAgentId}/api-keys`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ scope: ['read', 'write'] }),
