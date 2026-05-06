@@ -1,5 +1,7 @@
 'use client';
 
+// @deprecated: team_members.webhook_url 직접 수정 방식. webhook_configs 테이블 기반 AM-S2 구현으로 대체됨.
+// 에이전트 상세 페이지(/settings/members/agents/[id]) Webhook 섹션 사용 권장.
 import { useState } from 'react';
 import { useTranslations } from 'next-intl';
 import { Button } from '@/components/ui/button';
