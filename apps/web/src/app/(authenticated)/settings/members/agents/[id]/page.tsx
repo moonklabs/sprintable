@@ -75,7 +75,8 @@ export default function AgentDetailPage() {
   const [webhookUrl, setWebhookUrl] = useState('');
   const [savingWebhook, setSavingWebhook] = useState(false);
 
-  const [activeApiKey, setActiveApiKey] = useState<string | null>(null);
+  const [freshApiKey, setFreshApiKey] = useState<string | null>(null);
+  const [hasActiveKey, setHasActiveKey] = useState(false);
   const [mcpCopied, setMcpCopied] = useState(false);
 
   const fetchAgent = useCallback(async () => {
@@ -99,7 +100,7 @@ export default function AgentDetailPage() {
     if (!res.ok) return;
     const json = await res.json() as { data: ApiKey[] };
     const active = (json.data ?? []).find((k) => !k.revoked_at);
-    setActiveApiKey(active ? `${active.key_prefix}...` : null);
+    setHasActiveKey(!!active);
   }, [id]);
 
   useEffect(() => {
@@ -167,7 +168,7 @@ export default function AgentDetailPage() {
   };
 
   const handleCopyMcp = async () => {
-    const key = activeApiKey ?? '<YOUR_API_KEY>';
+    const key = freshApiKey ?? '<YOUR_API_KEY>';
     try {
       await navigator.clipboard.writeText(buildMcpConfig(key));
       setMcpCopied(true);
@@ -247,7 +248,11 @@ export default function AgentDetailPage() {
       </SectionCard>
 
       {/* API Keys */}
-      <AgentApiKeyManager agentId={id} agentName={agent.name} />
+      <AgentApiKeyManager
+        agentId={id}
+        agentName={agent.name}
+        onNewKey={(key) => { setFreshApiKey(key); setHasActiveKey(true); }}
+      />
 
       {/* Webhook 설정 */}
       <SectionCard>
@@ -292,11 +297,15 @@ export default function AgentDetailPage() {
           </div>
         </SectionCardHeader>
         <SectionCardBody>
-          {!activeApiKey ? (
-            <p className="text-xs text-amber-400">API Key를 먼저 발급하면 실제 키가 포함된 설정을 복사할 수 있습니다.</p>
-          ) : null}
-          <pre className="mt-2 overflow-x-auto rounded-md border border-border bg-muted/30 p-3 text-xs text-foreground/80">
-            {buildMcpConfig(activeApiKey ?? '<YOUR_API_KEY>')}
+          {freshApiKey ? (
+            <p className="text-xs text-emerald-500 mb-2">새 API Key가 포함된 설정입니다. 지금 복사해 두세요 — 페이지를 새로고침하면 사라집니다.</p>
+          ) : !hasActiveKey ? (
+            <p className="text-xs text-amber-400 mb-2">API Key를 먼저 발급하세요. 발급 직후 실제 키가 이 블록에 자동으로 포함됩니다.</p>
+          ) : (
+            <p className="text-xs text-muted-foreground mb-2">보안상 기존 키는 재표시되지 않습니다. 새 키를 발급하면 이 블록에 자동으로 포함됩니다.</p>
+          )}
+          <pre className="overflow-x-auto rounded-md border border-border bg-muted/30 p-3 text-xs text-foreground/80">
+            {buildMcpConfig(freshApiKey ?? '<YOUR_API_KEY>')}
           </pre>
         </SectionCardBody>
       </SectionCard>
