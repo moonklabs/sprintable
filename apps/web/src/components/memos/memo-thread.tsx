@@ -4,7 +4,6 @@ import { useEffect, useRef, useState } from 'react';
 import { useTranslations } from 'next-intl';
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
-import rehypeSanitize, { defaultSchema } from 'rehype-sanitize';
 import { Bot, User } from 'lucide-react';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
@@ -206,7 +205,6 @@ function MarkdownContent({ content, isCurrentUser }: { content: string; isCurren
   return (
     <ReactMarkdown
       remarkPlugins={[remarkGfm]}
-      rehypePlugins={[[rehypeSanitize, { ...defaultSchema, protocols: { ...defaultSchema.protocols, href: [...(defaultSchema.protocols?.href ?? []), 'entity'] } }]]}
       components={{
         p: ({ children }) => <p className={`mb-2 break-words text-[14px] leading-6 last:mb-0 ${text}`}>{children}</p>,
         h1: ({ children }) => <h1 className={`mb-2 text-lg font-bold ${text}`}>{children}</h1>,
