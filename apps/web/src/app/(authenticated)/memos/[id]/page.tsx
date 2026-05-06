@@ -47,7 +47,7 @@ export default function MemoDetailPage() {
   const fetchMembers = useCallback(async () => {
     if (!projectId) return;
     try {
-      const res = await fetch(`/api/team-members?project_id=${projectId}`);
+      const res = await fetch(`/api/team-members?project_id=${projectId}&is_active=true`);
       if (!res.ok) return;
       const { data } = await res.json();
       setMembers(data ?? []);

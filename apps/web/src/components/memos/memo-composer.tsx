@@ -136,7 +136,7 @@ export function MemoComposer({
       return;
     }
     let cancelled = false;
-    fetch('/api/team-members')
+    fetch(`/api/team-members?is_active=true${projectId ? `&project_id=${projectId}` : ''}`)
       .then((r) => r.json())
       .then((json) => {
         if (cancelled) return;
