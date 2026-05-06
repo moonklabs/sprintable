@@ -128,6 +128,13 @@ export default function SettingsPage() {
   const [resendingInviteId, setResendingInviteId] = useState<string | null>(null);
   const [resendResult, setResendResult] = useState<{ id: string; url: string } | null>(null);
   const [graceUntil, setGraceUntil] = useState<string | null>(null);
+  const [membersSubTab, setMembersSubTab] = useState<'people' | 'agents'>('people');
+  const [orgAgents, setOrgAgents] = useState<ProjectMember[]>([]);
+  const [newAgentName, setNewAgentName] = useState('');
+  const [newAgentProjectId, setNewAgentProjectId] = useState('');
+  const [addingAgent, setAddingAgent] = useState(false);
+  const [deactivatingAgentId, setDeactivatingAgentId] = useState<string | null>(null);
+  const [agentActionMessage, setAgentActionMessage] = useState<{ type: 'success' | 'error'; text: string } | null>(null);
 
   const refreshProjects = async () => {
     const endpoint = orgId ? `/api/projects?org_id=${encodeURIComponent(orgId)}` : '/api/projects';
@@ -186,6 +193,52 @@ export default function SettingsPage() {
     } finally {
       setResendingInviteId(null);
     }
+  };
+
+  const refreshOrgAgents = async () => {
+    const res = await fetch('/api/team-members?type=agent&include_inactive=true');
+    if (!res.ok) return;
+    const json = await res.json();
+    setOrgAgents((json.data ?? []) as ProjectMember[]);
+  };
+
+  const handleAddAgent = async () => {
+    if (!newAgentName.trim() || !newAgentProjectId) return;
+    setAddingAgent(true);
+    setAgentActionMessage(null);
+    const res = await fetch('/api/team-members', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ project_id: newAgentProjectId, name: newAgentName.trim(), type: 'agent', role: 'member' }),
+    });
+    if (res.ok) {
+      setNewAgentName('');
+      setNewAgentProjectId('');
+      setAgentActionMessage({ type: 'success', text: t('agentAdded') });
+      await refreshOrgAgents();
+    } else {
+      const json = await res.json().catch(() => null);
+      setAgentActionMessage({ type: 'error', text: json?.error?.message ?? t('agentActionFailed') });
+    }
+    setAddingAgent(false);
+  };
+
+  const handleToggleAgentActive = async (agent: ProjectMember) => {
+    setDeactivatingAgentId(agent.id);
+    setAgentActionMessage(null);
+    const res = await fetch(`/api/team-members/${agent.id}`, {
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ is_active: !agent.is_active }),
+    });
+    if (res.ok) {
+      setAgentActionMessage({ type: 'success', text: agent.is_active ? t('agentDeactivated') : t('agentActivated') });
+      await refreshOrgAgents();
+    } else {
+      const json = await res.json().catch(() => null);
+      setAgentActionMessage({ type: 'error', text: json?.error?.message ?? t('agentActionFailed') });
+    }
+    setDeactivatingAgentId(null);
   };
 
   const refreshMemberData = async (projectId: string) => {
@@ -248,6 +301,11 @@ export default function SettingsPage() {
     if (!isAdmin || !memberProjectId) return;
     void refreshMemberData(memberProjectId).catch(() => {});
   }, [isAdmin, memberProjectId]);
+
+  useEffect(() => {
+    if (!isAdmin) return;
+    void refreshOrgAgents().catch(() => {});
+  }, [isAdmin]);
 
   const toggleSetting = async (eventType: string, currentEnabled: boolean) => {
     const newEnabled = !currentEnabled;
@@ -742,6 +800,103 @@ export default function SettingsPage() {
             </TabsContent>
 
             <TabsContent value="members">
+              {/* People / Agents 서브탭 */}
+              <div className="mb-6 flex gap-1 rounded-lg border border-border bg-muted/30 p-1">
+                <button
+                  type="button"
+                  onClick={() => setMembersSubTab('people')}
+                  className={`flex-1 rounded-md px-3 py-1.5 text-sm font-medium transition-colors ${membersSubTab === 'people' ? 'bg-background text-foreground shadow-sm' : 'text-muted-foreground hover:text-foreground'}`}
+                >
+                  {t('membersTabPeople')}
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setMembersSubTab('agents')}
+                  className={`flex-1 rounded-md px-3 py-1.5 text-sm font-medium transition-colors ${membersSubTab === 'agents' ? 'bg-background text-foreground shadow-sm' : 'text-muted-foreground hover:text-foreground'}`}
+                >
+                  {t('membersTabAgents')}
+                </button>
+              </div>
+
+              {membersSubTab === 'agents' ? (
+                <div className="space-y-6">
+                  <SectionCard>
+                    <SectionCardHeader>
+                      <div className="space-y-1">
+                        <h2 className="text-base font-semibold text-foreground">{t('orgAgentsTitle')}</h2>
+                        <p className="text-sm text-muted-foreground">{t('orgAgentsDescription')}</p>
+                      </div>
+                    </SectionCardHeader>
+                    <SectionCardBody className="space-y-4">
+                      {agentActionMessage ? (
+                        <div className={`rounded-md border p-3 text-xs ${agentActionMessage.type === 'success' ? 'border-emerald-500/20 bg-emerald-500/10 text-emerald-600 dark:text-emerald-400' : 'border-destructive/20 bg-destructive/10 text-destructive'}`}>
+                          {agentActionMessage.text}
+                        </div>
+                      ) : null}
+
+                      {orgAgents.length > 0 ? (
+                        <div className="space-y-2">
+                          {orgAgents.map((agent) => {
+                            const projectName = projects.find((p) => p.id === agent.project_id)?.name ?? agent.project_id;
+                            return (
+                              <div key={agent.id} className="flex items-center justify-between gap-3 rounded-md border border-border bg-muted/30 px-3 py-3 text-sm">
+                                <div className="min-w-0">
+                                  <div className="font-medium text-foreground">{agent.name}</div>
+                                  <div className="mt-1 flex flex-wrap items-center gap-2">
+                                    <Badge variant="secondary">{t('agentMember')}</Badge>
+                                    <Badge variant="outline">{agent.role}</Badge>
+                                    <span className="text-xs text-muted-foreground">{projectName}</span>
+                                    {!agent.is_active ? <Badge variant="destructive">inactive</Badge> : null}
+                                  </div>
+                                </div>
+                                <Button
+                                  variant="glass"
+                                  size="sm"
+                                  onClick={() => void handleToggleAgentActive(agent)}
+                                  disabled={deactivatingAgentId === agent.id}
+                                >
+                                  {deactivatingAgentId === agent.id ? '...' : agent.is_active ? t('deactivateAgent') : t('activateAgent')}
+                                </Button>
+                              </div>
+                            );
+                          })}
+                        </div>
+                      ) : (
+                        <div className="rounded-md border border-dashed border-border px-3 py-8 text-center">
+                          <p className="text-sm text-muted-foreground">{t('noOrgAgents')}</p>
+                          <p className="mt-1 text-xs text-muted-foreground">{t('noOrgAgentsCta')}</p>
+                        </div>
+                      )}
+
+                      {isAdmin ? (
+                        <div className="grid gap-3 md:grid-cols-[minmax(0,1fr)_220px_auto]">
+                          <OperatorInput
+                            value={newAgentName}
+                            onChange={(e) => setNewAgentName(e.target.value)}
+                            placeholder={t('agentNamePlaceholder')}
+                          />
+                          <OperatorDropdownSelect
+                            value={newAgentProjectId}
+                            onValueChange={(v) => setNewAgentProjectId(v)}
+                            options={[
+                              { value: '', label: t('selectProject') },
+                              ...projects.map((p) => ({ value: p.id, label: p.name })),
+                            ]}
+                          />
+                          <Button
+                            variant="hero"
+                            size="lg"
+                            onClick={() => void handleAddAgent()}
+                            disabled={!newAgentName.trim() || !newAgentProjectId || addingAgent}
+                          >
+                            {addingAgent ? '...' : t('addAgent')}
+                          </Button>
+                        </div>
+                      ) : null}
+                    </SectionCardBody>
+                  </SectionCard>
+                </div>
+              ) : (
               <div className="space-y-6">
                 <SectionCard>
                   <SectionCardHeader>
@@ -953,6 +1108,7 @@ export default function SettingsPage() {
                   </SectionCardBody>
                 </SectionCard>
               </div>
+              )}
             </TabsContent>
 
             <TabsContent value="integrations">
