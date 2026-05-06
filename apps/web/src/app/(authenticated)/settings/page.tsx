@@ -203,13 +203,13 @@ export default function SettingsPage() {
   };
 
   const handleAddAgent = async () => {
-    if (!newAgentName.trim() || !newAgentProjectId) return;
+    if (!newAgentName.trim() || !newAgentProjectId || !orgId) return;
     setAddingAgent(true);
     setAgentActionMessage(null);
     const res = await fetch('/api/team-members', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ project_id: newAgentProjectId, name: newAgentName.trim(), type: 'agent', role: 'member' }),
+      body: JSON.stringify({ org_id: orgId, project_id: newAgentProjectId, name: newAgentName.trim(), type: 'agent', role: 'member' }),
     });
     if (res.ok) {
       setNewAgentName('');
