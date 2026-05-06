@@ -49,7 +49,7 @@ export async function fastapiCall<T>(
 
   if (!res.ok) {
     let errBody: { error?: { code?: string; message?: string } } = {};
-    try { errBody = await res.json(); } catch { /* ignore parse error */ }
+    try { errBody = await res.json() as typeof errBody; } catch { /* ignore parse error */ }
     throw mapApiError(res.status, errBody);
   }
 
