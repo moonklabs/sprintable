@@ -209,11 +209,23 @@ export function KanbanBoard({ projectId }: KanbanBoardProps) {
   // URL에서 스토리 ID 읽어서 자동으로 패널 열기
   useEffect(() => {
     const storyId = searchParams.get('story');
-    if (storyId && stories.length > 0) {
-      const story = stories.find((s) => s.id === storyId);
-      if (story && (!selectedStoryRef.current || selectedStoryRef.current.id !== storyId)) {
-        void handleStoryClick(story);
-      }
+    if (!storyId) return;
+    if (selectedStoryRef.current?.id === storyId) return;
+
+    const story = stories.find((s) => s.id === storyId);
+    if (story) {
+      void handleStoryClick(story);
+    } else if (stories.length > 0) {
+      // 현재 보드에 없는 스토리 — 직접 fetch 후 패널 오픈
+      fetch(`/api/stories/${storyId}`)
+        .then((r) => (r.ok ? r.json() : null))
+        .then((json) => {
+          const fetched = json?.data as KanbanStory | undefined;
+          if (fetched && selectedStoryRef.current?.id !== storyId) {
+            void handleStoryClick(fetched);
+          }
+        })
+        .catch(() => {});
     }
   }, [searchParams, stories, handleStoryClick]);
 
