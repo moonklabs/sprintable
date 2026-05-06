@@ -2,7 +2,7 @@
 
 import { useEffect, useRef, useState } from 'react';
 import { useTranslations } from 'next-intl';
-import ReactMarkdown from 'react-markdown';
+import ReactMarkdown, { defaultUrlTransform } from 'react-markdown';
 import remarkGfm from 'remark-gfm';
 import { Bot, User } from 'lucide-react';
 import { Badge } from '@/components/ui/badge';
@@ -205,6 +205,7 @@ function MarkdownContent({ content, isCurrentUser }: { content: string; isCurren
   return (
     <ReactMarkdown
       remarkPlugins={[remarkGfm]}
+      urlTransform={(url) => url.startsWith('entity:') ? url : defaultUrlTransform(url)}
       components={{
         p: ({ children }) => <p className={`mb-2 break-words text-[14px] leading-6 last:mb-0 ${text}`}>{children}</p>,
         h1: ({ children }) => <h1 className={`mb-2 text-lg font-bold ${text}`}>{children}</h1>,
