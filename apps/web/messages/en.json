@@ -318,13 +318,15 @@
     "agentRole": "Role",
     "createAgentAction": "Create Agent + Issue API Key",
     "connectAgent": "Connect Agent",
-    "connectSubtitle": "Paste the MCP config below into your agent settings.",
+    "connectSubtitle": "Paste the MCP config into your agent to connect. Manage additional agents under Settings > Members > Agents.",
     "mcpConfigTitle": "MCP Config",
     "promptTitle": "Onboarding Prompt",
     "finish": "Finish → Dashboard",
     "skip": "Skip",
     "stepOf": "{current} / {total}",
-    "createOrgFailed": "Failed to create organization"
+    "createOrgFailed": "Failed to create organization",
+    "apiKeyFailedMembers": "API key generation failed. Go to Settings > Members > Agents to issue one manually.",
+    "goToMembersAgents": "Manage in Members > Agents"
   },
   "settings": {
     "title": "Settings",
