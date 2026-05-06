@@ -146,7 +146,7 @@ export function MemosFeedClient({ currentTeamMemberId, projectId }: MemosFeedCli
     if (!projectId) return;
 
     try {
-      const res = await fetch(`/api/team-members?project_id=${projectId}`);
+      const res = await fetch(`/api/team-members?project_id=${projectId}&is_active=true`);
       if (!res.ok) throw new Error('Failed to fetch members');
 
       const { data } = await res.json();

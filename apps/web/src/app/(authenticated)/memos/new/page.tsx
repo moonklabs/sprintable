@@ -20,7 +20,7 @@ export default function NewMemoPage() {
 
   useEffect(() => {
     if (!projectId) return;
-    fetch(`/api/team-members?project_id=${projectId}`)
+    fetch(`/api/team-members?project_id=${projectId}&is_active=true`)
       .then((r) => (r.ok ? r.json() : null))
       .then((json) => setMembers(json?.data ?? []))
       .catch(() => null);
