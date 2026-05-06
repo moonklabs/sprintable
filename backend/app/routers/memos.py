@@ -11,6 +11,7 @@ logger = logging.getLogger(__name__)
 
 from app.dependencies.auth import AuthContext, get_current_user
 from app.dependencies.database import get_db
+from app.models.memo import MemoAssignee
 from app.models.team import TeamMember
 from app.repositories.memo import MemoReplyRepository, MemoRepository
 from app.routers.events import publish_event
@@ -21,12 +22,17 @@ router = APIRouter(prefix="/api/v2/memos", tags=["memos"])
 
 async def _collect_reply_webhook_urls(
     db: AsyncSession,
+    memo_id: uuid.UUID,
     assigned_to: uuid.UUID | None,
     created_by: uuid.UUID | None,
     sender_id: uuid.UUID,
     extra_ids: list[uuid.UUID] | None = None,
 ) -> list[str]:
-    recipient_ids = ({assigned_to, created_by} | set(extra_ids or [])) - {sender_id, None}
+    assignee_rows = await db.execute(
+        select(MemoAssignee.member_id).where(MemoAssignee.memo_id == memo_id)
+    )
+    all_assignee_ids = {row[0] for row in assignee_rows}
+    recipient_ids = ({assigned_to, created_by} | all_assignee_ids | set(extra_ids or [])) - {sender_id, None}
     if not recipient_ids:
         return []
     rows = await db.execute(
@@ -184,7 +190,7 @@ async def add_reply(
 
     # 세션이 열려 있는 지금 webhook URLs 수집 후 BackgroundTasks에 HTTP 발송 위임
     webhook_urls = await _collect_reply_webhook_urls(
-        db, memo.assigned_to, memo.created_by, body.created_by, body.assigned_to_ids
+        db, id, memo.assigned_to, memo.created_by, body.created_by, body.assigned_to_ids
     )
     if webhook_urls:
         app_url = os.environ.get("NEXT_PUBLIC_APP_URL", "")
