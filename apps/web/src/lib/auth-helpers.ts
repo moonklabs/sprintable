@@ -1,6 +1,5 @@
 import { cache } from 'react';
 import { cookies } from 'next/headers';
-import type { SupabaseClient } from '@supabase/supabase-js';
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 type User = any;
 
@@ -37,7 +36,8 @@ async function getCurrentProjectIdCookie() {
   return cookieStore.get(CURRENT_PROJECT_COOKIE)?.value ?? null;
 }
 
-export const getMyProjectMemberships = cache(async (db: SupabaseClient, user: User): Promise<ProjectMembership[]> => {
+export const getMyProjectMemberships = cache(async (// eslint-disable-next-line @typescript-eslint/no-explicit-any -- @supabase/supabase-js not in web package.json
+  db: any, user: User): Promise<ProjectMembership[]> => {
   const { data, error } = await db
     .from('team_members')
     .select('id, org_id, project_id, projects(id, name)')
@@ -78,7 +78,8 @@ export interface MembershipContext {
  * 한 번의 호출로 memberships + current team member를 함께 반환.
  * Layout에서 duplicate fetch를 방지한다.
  */
-export async function getMyMembershipContext(db: SupabaseClient, user: User): Promise<MembershipContext> {
+export async function getMyMembershipContext(// eslint-disable-next-line @typescript-eslint/no-explicit-any -- @supabase/supabase-js not in web package.json
+  db: any, user: User): Promise<MembershipContext> {
   const memberships = await getMyProjectMemberships(db, user);
   const me = await resolveTeamMemberFromMemberships(db, user, memberships);
   return { me, memberships };
@@ -88,13 +89,15 @@ export async function getMyMembershipContext(db: SupabaseClient, user: User): Pr
  * 현재 auth user의 team_member를 조회.
  * 없으면 자동 생성 (온보딩에서 누락된 케이스 fallback).
  */
-export const getMyTeamMember = cache(async (db: SupabaseClient, user: User) => {
+export const getMyTeamMember = cache(async (// eslint-disable-next-line @typescript-eslint/no-explicit-any -- @supabase/supabase-js not in web package.json
+  db: any, user: User) => {
   const memberships = await getMyProjectMemberships(db, user);
   return resolveTeamMemberFromMemberships(db, user, memberships);
 });
 
 async function resolveTeamMemberFromMemberships(
-  db: SupabaseClient,
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any -- @supabase/supabase-js not in web package.json
+  db: any,
   user: User,
   memberships: ProjectMembership[],
 ) {

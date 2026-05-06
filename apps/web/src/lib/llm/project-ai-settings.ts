@@ -1,4 +1,3 @@
-import type { SupabaseClient } from '@supabase/supabase-js';
 import { decryptSecretForOrg, encryptSecretForOrg } from '@/lib/kms';
 
 export const ORG_INTEGRATION_TYPE = 'byom_api_key';
@@ -64,7 +63,8 @@ export function matchesProjectAiCredentialProvider(payload: ProjectAiCredentialS
 }
 
 export async function getProjectAiSettingsWithIntegration(
-  db: SupabaseClient,
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any -- @supabase/supabase-js not in web package.json
+  db: any,
   projectId: string,
 ): Promise<ProjectAiCredentialState> {
   const [{ data: settings, error: settingsError }, { data: integration, error: integrationError }] = await Promise.all([
@@ -91,7 +91,8 @@ export async function getProjectAiSettingsWithIntegration(
 }
 
 export async function upsertEncryptedProjectSecret(
-  db: SupabaseClient,
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any -- @supabase/supabase-js not in web package.json
+  db: any,
   input: {
     orgId: string;
     projectId: string;
@@ -131,7 +132,8 @@ export async function upsertEncryptedProjectSecret(
 }
 
 export async function persistProjectAiSettingsWithEncryptedSecret(
-  db: SupabaseClient,
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any -- @supabase/supabase-js not in web package.json
+  db: any,
   input: {
     orgId: string;
     projectId: string;
@@ -168,7 +170,8 @@ export async function decryptProjectSecret(
 }
 
 export async function ensureProjectSecretEncrypted(
-  db: SupabaseClient,
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any -- @supabase/supabase-js not in web package.json
+  db: any,
   payload: {
     settings: ProjectAiSettingsRecord | null;
     integration: OrgIntegrationRecord | null;
