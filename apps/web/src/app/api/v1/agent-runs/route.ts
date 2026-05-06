@@ -1,9 +1,6 @@
 import { apiSuccess } from '@/lib/api-response';
 import { handleApiError } from '@/lib/api-error';
-import { normalizeRunStatusFilter } from '@/services/agent-run-history';
 import { proxyToFastapi } from '@/lib/fastapi-proxy';
-
-const PAGE_SIZE = 20;
 
 export async function GET(request: Request) {
   try {

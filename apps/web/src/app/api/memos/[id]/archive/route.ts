@@ -14,7 +14,6 @@ export async function PATCH(request: Request, { params }: RouteParams) {
     if (me.rateLimitExceeded) return ApiErrors.tooManyRequests(me.rateLimitRemaining, me.rateLimitResetAt);
 
 
-    const dbClient = undefined;
     const repo = await createMemoRepository();
     const memo = await repo.getById(id);
 

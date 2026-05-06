@@ -86,15 +86,15 @@ function createDbStub() {
     }),
   };
 
-  let deploymentEqCount = 0;
+  let _deploymentEqCount = 0;
   const deploymentUpdateQuery = {
     update: vi.fn((payload: unknown) => {
       deploymentUpdateSpy(payload);
-      deploymentEqCount = 0;
+      _deploymentEqCount = 0;
       return deploymentUpdateQuery;
     }),
     eq: vi.fn(() => {
-      deploymentEqCount += 1;
+      _deploymentEqCount += 1;
       return deploymentUpdateQuery;
     }),
     in: vi.fn(async () => ({ error: null })),

@@ -58,6 +58,7 @@ export function extractBearerToken(authHeader: string | null): string | null {
  * @returns team_member context 또는 null (인증 실패)
  */
 export async function getTeamMemberFromApiKey(
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any -- @supabase/supabase-js not in web package.json
   adminClient: any,
   apiKey: string,
   logContext?: { endpoint: string; ip?: string | null },
@@ -134,6 +135,7 @@ export function requireAgentScope(
 }
 
 export async function getTeamMemberFromRequest(
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any -- @supabase/supabase-js not in web package.json
   adminClient: any,
   request: Request
 ): Promise<TeamMemberContext | null> {

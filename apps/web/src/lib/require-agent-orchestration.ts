@@ -1,4 +1,3 @@
-
 import { checkFeatureLimit } from '@/lib/check-feature';
 import { apiUpgradeRequired } from '@/lib/api-response';
 
@@ -9,6 +8,7 @@ import { apiUpgradeRequired } from '@/lib/api-response';
  * Returns `null` when the feature is allowed, or a NextResponse to
  * short-circuit the handler.
  */
+// eslint-disable-next-line @typescript-eslint/no-explicit-any -- @supabase/supabase-js not in web package.json
 export async function requireAgentOrchestration(db: any, orgId: string) {
   const check = await checkFeatureLimit(db, orgId, 'agent_orchestration');
   if (!check.allowed) {

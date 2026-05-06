@@ -15,7 +15,6 @@ export async function GET(request: Request, { params }: RouteParams) {
     const me = await getAuthContext(request);
     if (!me) return ApiErrors.unauthorized();
     if (me.rateLimitExceeded) return ApiErrors.tooManyRequests(me.rateLimitRemaining, me.rateLimitResetAt);
-    const dbClient = undefined;
     const repo = await createEpicRepository();
     const service = new EpicService(repo);
     return apiSuccess(await service.getByIdWithStories(id, { org_id: me.org_id, project_id: me.project_id }));
@@ -28,7 +27,6 @@ export async function PATCH(request: Request, { params }: RouteParams) {
     const me = await getAuthContext(request);
     if (!me) return ApiErrors.unauthorized();
     if (me.rateLimitExceeded) return ApiErrors.tooManyRequests(me.rateLimitRemaining, me.rateLimitResetAt);
-    const dbClient = undefined;
 
     let rawBody: unknown;
     try { rawBody = await request.json(); } catch { return apiError('BAD_REQUEST', 'Invalid JSON body', 400); }
@@ -60,7 +58,6 @@ export async function DELETE(request: Request, { params }: RouteParams) {
       if (denied) return denied;
     }
 
-    const dbClient = undefined;
     const repo = await createEpicRepository();
     const service = new EpicService(repo);
     await service.delete(id, me.org_id);

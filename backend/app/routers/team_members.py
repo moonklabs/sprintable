@@ -29,7 +29,7 @@ def _get_repo(
 async def list_team_members(
     project_id: uuid.UUID | None = Query(default=None),
     type_filter: str | None = Query(default=None, alias="type"),
-    is_active: bool | None = Query(default=None),
+    is_active: bool | None = Query(default=True),
     repo: TeamMemberRepository = Depends(_get_repo),
 ) -> list[TeamMemberResponse]:
     filters: dict = {}

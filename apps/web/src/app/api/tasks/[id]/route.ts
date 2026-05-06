@@ -15,7 +15,6 @@ export async function GET(request: Request, { params }: RouteParams) {
     const me = await getAuthContext(request);
     if (!me) return ApiErrors.unauthorized();
     if (me.rateLimitExceeded) return ApiErrors.tooManyRequests(me.rateLimitRemaining, me.rateLimitResetAt);
-    const dbClient = undefined;
     const repo = await createTaskRepository();
     const service = new TaskService(repo);
     return apiSuccess(await service.getById(id, { org_id: me.org_id, project_id: me.project_id }));
@@ -60,7 +59,6 @@ export async function DELETE(request: Request, { params }: RouteParams) {
     const me = await getAuthContext(request);
     if (!me) return ApiErrors.unauthorized();
     if (me.rateLimitExceeded) return ApiErrors.tooManyRequests(me.rateLimitRemaining, me.rateLimitResetAt);
-    const dbClient = undefined;
     const repo = await createTaskRepository();
     const service = new TaskService(repo);
     const existing = await service.getById(id, { org_id: me.org_id });

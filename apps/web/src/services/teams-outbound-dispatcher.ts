@@ -1,4 +1,4 @@
-// eslint-disable-next-line @typescript-eslint/no-explicit-any
+ 
 type RealtimeChannel = any;
 import { MemoService } from './memo';
 import { buildAbsoluteMemoLink } from './app-url';

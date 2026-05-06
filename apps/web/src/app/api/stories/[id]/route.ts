@@ -19,7 +19,7 @@ export async function GET(request: Request, { params }: RouteParams) {
     const dbClient = undefined;
 
     const repo = await createStoryRepository();
-    const service = new StoryService(repo, dbClient as any | undefined);
+    const service = new StoryService(repo, dbClient);
     const story = await service.getByIdWithDetails(id);
 
     // Agent scope 검증: cross-project 접근 차단
@@ -43,7 +43,7 @@ export async function PATCH(request: Request, { params }: RouteParams) {
 
     const parsed = await parseBody(request, updateStorySchema); if (!parsed.success) return parsed.response; const body = parsed.data;
     const repo = await createStoryRepository();
-    const service = new StoryService(repo, dbClient as any | undefined, { isAdminContext: me.type === 'agent' });
+    const service = new StoryService(repo, dbClient, { isAdminContext: me.type === 'agent' });
 
     const before = await service.getById(id);
     const story = await service.update(id, body);
@@ -57,7 +57,7 @@ export async function PATCH(request: Request, { params }: RouteParams) {
       const oldAssigneeId = before.assignee_id as string | null;
 
       if (dbClient) {
-        const notifService = new NotificationService(dbClient as any);
+        const notifService = new NotificationService(dbClient);
         if (newAssigneeId && newAssigneeId !== actorId) {
           notifService.create({ org_id: orgId, user_id: newAssigneeId, type: 'story_assigned', title: '스토리가 배정되었습니다', body: before.title ?? '', reference_type: 'story', reference_id: id }).catch(() => {});
         }
@@ -94,7 +94,7 @@ export async function DELETE(request: Request, { params }: RouteParams) {
     const dbClient = undefined;
 
     const repo = await createStoryRepository();
-    const service = new StoryService(repo, dbClient as any | undefined);
+    const service = new StoryService(repo, dbClient);
     await service.delete(id);
     return apiSuccess({ ok: true });
   } catch (err: unknown) {

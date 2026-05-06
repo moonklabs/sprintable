@@ -31,6 +31,8 @@ export async function PATCH(request: Request, { params }: RouteParams) {
 export async function DELETE(request: Request, { params }: RouteParams) {
   try {
     const { id } = await params;
+    const me = await getAuthContext(request);
+    if (!me) return ApiErrors.unauthorized();
     const _r = await proxyToFastapiWithParams(request, '/api/v2/team-members/[id]', { id });
     if (!_r.ok) return _r;
     if (_r.status === 204) return apiSuccess({ ok: true });

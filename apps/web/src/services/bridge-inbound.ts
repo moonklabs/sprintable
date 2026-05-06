@@ -1,4 +1,4 @@
-// eslint-disable-next-line @typescript-eslint/no-explicit-any
+ 
 type PostgrestError = any;
 import { MemoService, type CreateMemoInput } from './memo';
 

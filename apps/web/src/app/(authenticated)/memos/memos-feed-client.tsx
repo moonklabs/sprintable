@@ -10,7 +10,7 @@ import { MemoCreateForm } from '@/components/memos/memo-create-form';
 import { Button } from '@/components/ui/button';
 import { EmptyState } from '@/components/ui/empty-state';
 import { TopBarSlot } from '@/components/nav/top-bar-slot';
-import { summarizeMemo, mergeMemoDetailIntoList, type MemoDetailState, type MemoSummaryState } from '@/components/memos/memo-state';
+import { summarizeMemo, type MemoDetailState, type MemoSummaryState } from '@/components/memos/memo-state';
 
 interface MemosFeedClientProps {
   currentTeamMemberId: string;
@@ -146,7 +146,7 @@ export function MemosFeedClient({ currentTeamMemberId, projectId }: MemosFeedCli
     if (!projectId) return;
 
     try {
-      const res = await fetch(`/api/team-members?project_id=${projectId}`);
+      const res = await fetch(`/api/team-members?project_id=${projectId}&is_active=true`);
       if (!res.ok) throw new Error('Failed to fetch members');
 
       const { data } = await res.json();
@@ -155,32 +155,6 @@ export function MemosFeedClient({ currentTeamMemberId, projectId }: MemosFeedCli
       console.error('Failed to fetch members:', error);
     }
   }, [projectId]);
-
-  const markMemoRead = useCallback(async (memoId: string) => {
-    try {
-      await fetch(`/api/memos/${memoId}/read`, {
-        method: 'PATCH',
-      });
-    } catch (error) {
-      console.error('Failed to mark memo as read:', error);
-    }
-  }, []);
-
-  const fetchMemoDetail = useCallback(async (memoId: string) => {
-    try {
-      const res = await fetch(`/api/memos/${memoId}`);
-      if (!res.ok) throw new Error('Failed to fetch memo');
-
-      const { data } = await res.json();
-      setSelectedMemo(data);
-      setMemos((prev) => mergeMemoDetailIntoList(prev, data));
-
-      // Auto mark as read when thread is opened
-      await markMemoRead(memoId);
-    } catch (error) {
-      console.error('Failed to fetch memo detail:', error);
-    }
-  }, [markMemoRead]);
 
   const handleSelectMemo = useCallback((memoId: string) => {
     router.push(`/memos/${memoId}`);

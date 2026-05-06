@@ -225,7 +225,7 @@ export function MemoDetail({
     } finally {
       setLinkingDoc(false);
     }
-  }, [memoState.id, onMemoChange, selectedDocId, t]);
+  }, [memoState.id, selectedDocId, t]);
 
   const handleCreateDoc = useCallback(async () => {
     const title = newDocTitle.trim() || memoState.title || memoState.content.slice(0, 80) || t('createDocFromMemo');
@@ -256,7 +256,7 @@ export function MemoDetail({
     } finally {
       setCreatingDoc(false);
     }
-  }, [memoState.content, memoState.id, memoState.title, newDocTitle, onMemoChange, t]);
+  }, [memoState.content, memoState.id, memoState.title, newDocTitle, t]);
 
   useEffect(() => {
     const autoName = memoState.title || memoState.content.slice(0, 80);
@@ -504,6 +504,7 @@ export function MemoDetail({
           memoId={memoState.id}
           currentTeamMemberId={currentTeamMemberId}
           currentTeamMemberName={currentTeamMemberName ?? (currentTeamMemberId ? memberMap[currentTeamMemberId] : undefined)}
+          projectId={projectId ?? memoState.project_id}
         />
       </div>
     </div>

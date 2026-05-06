@@ -18,7 +18,7 @@ export async function POST(request: Request, { params }: RouteParams) {
     const dbClient = undefined;
 
     const repo = await createSprintRepository();
-    const service = new SprintService(repo, dbClient as any | undefined);
+    const service = new SprintService(repo, dbClient);
     const sprint = await service.activate(id);
     return apiSuccess(sprint);
   } catch (err: unknown) {

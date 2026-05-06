@@ -1,4 +1,3 @@
-
 import { decryptSecretForOrg, encryptSecretForOrg } from '@/lib/kms';
 
 export const ORG_INTEGRATION_TYPE = 'byom_api_key';
@@ -64,6 +63,7 @@ export function matchesProjectAiCredentialProvider(payload: ProjectAiCredentialS
 }
 
 export async function getProjectAiSettingsWithIntegration(
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any -- @supabase/supabase-js not in web package.json
   db: any,
   projectId: string,
 ): Promise<ProjectAiCredentialState> {
@@ -91,6 +91,7 @@ export async function getProjectAiSettingsWithIntegration(
 }
 
 export async function upsertEncryptedProjectSecret(
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any -- @supabase/supabase-js not in web package.json
   db: any,
   input: {
     orgId: string;
@@ -131,6 +132,7 @@ export async function upsertEncryptedProjectSecret(
 }
 
 export async function persistProjectAiSettingsWithEncryptedSecret(
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any -- @supabase/supabase-js not in web package.json
   db: any,
   input: {
     orgId: string;
@@ -168,6 +170,7 @@ export async function decryptProjectSecret(
 }
 
 export async function ensureProjectSecretEncrypted(
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any -- @supabase/supabase-js not in web package.json
   db: any,
   payload: {
     settings: ProjectAiSettingsRecord | null;
