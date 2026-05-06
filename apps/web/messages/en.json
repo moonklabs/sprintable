@@ -576,7 +576,21 @@
     "revoked": "Revoked",
     "revoke": "Revoke",
     "resend": "Resend",
-    "gracePeriodNotice": "Your current plan will remain active until {date}."
+    "gracePeriodNotice": "Your current plan will remain active until {date}.",
+    "membersTabPeople": "People",
+    "membersTabAgents": "Agents",
+    "orgAgentsTitle": "Organization Agents",
+    "orgAgentsDescription": "View and manage agents across all projects in your organization.",
+    "agentNamePlaceholder": "Agent name",
+    "addAgent": "Add Agent",
+    "noOrgAgents": "No agents registered in this organization",
+    "noOrgAgentsCta": "Add an agent to use it as an AI team member across projects.",
+    "agentDeactivated": "Agent deactivated",
+    "agentActivated": "Agent activated",
+    "agentAdded": "Agent added",
+    "agentActionFailed": "Agent operation failed",
+    "deactivateAgent": "Deactivate",
+    "activateAgent": "Activate"
   },
   "landing": {
     "navProduct": "Overview",
