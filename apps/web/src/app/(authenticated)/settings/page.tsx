@@ -513,19 +513,25 @@ export default function SettingsPage() {
     setWebhookSaving(memberId);
     const prevMembers = projectMembers;
     setProjectMembers((prev) => prev.map((m) => m.id === memberId ? { ...m, webhook_url: url || null } : m));
-    const res = await fetch(`/api/team-members/${memberId}`, {
-      method: 'PATCH',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ webhook_url: url || null }),
-    });
-    if (!res.ok) {
+    try {
+      const res = await fetch(`/api/team-members/${memberId}`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ webhook_url: url || null }),
+      });
+      if (!res.ok) {
+        setProjectMembers(prevMembers);
+        const json = await res.json().catch(() => ({})) as { error?: { message?: string } };
+        setWebhookErrors((prev) => ({ ...prev, [memberId]: json.error?.message ?? 'Webhook URL 저장 실패' }));
+      } else {
+        setWebhookEditing((prev) => { const next = { ...prev }; delete next[memberId]; return next; });
+      }
+    } catch {
       setProjectMembers(prevMembers);
-      const json = await res.json().catch(() => ({})) as { error?: { message?: string } };
-      setWebhookErrors((prev) => ({ ...prev, [memberId]: json.error?.message ?? 'Webhook URL 저장 실패' }));
-    } else {
-      setWebhookEditing((prev) => { const next = { ...prev }; delete next[memberId]; return next; });
+      setWebhookErrors((prev) => ({ ...prev, [memberId]: '네트워크 오류 — 다시 시도하세요.' }));
+    } finally {
+      setWebhookSaving(null);
     }
-    setWebhookSaving(null);
   };
 
   const handleRemoveProjectMember = async (memberId: string) => {
