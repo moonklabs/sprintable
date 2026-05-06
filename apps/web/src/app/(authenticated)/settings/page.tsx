@@ -1,6 +1,7 @@
 'use client';
 
 import { useEffect, useMemo, useState } from 'react';
+import Link from 'next/link';
 import { useRouter, useSearchParams } from 'next/navigation';
 import { useTranslations } from 'next-intl';
 import { BarChart2, Bell, Bot, CreditCard, FolderKanban, Key, Menu, Palette, Trash2, User, Users, X, Zap } from 'lucide-react';
@@ -841,7 +842,7 @@ export default function SettingsPage() {
                             return (
                               <div key={agent.id} className="flex items-center justify-between gap-3 rounded-md border border-border bg-muted/30 px-3 py-3 text-sm">
                                 <div className="min-w-0">
-                                  <div className="font-medium text-foreground">{agent.name}</div>
+                                  <Link href={`/settings/members/agents/${agent.id}`} className="font-medium text-foreground hover:underline hover:text-primary">{agent.name}</Link>
                                   <div className="mt-1 flex flex-wrap items-center gap-2">
                                     <Badge variant="secondary">{t('agentMember')}</Badge>
                                     <Badge variant="outline">{agent.role}</Badge>
