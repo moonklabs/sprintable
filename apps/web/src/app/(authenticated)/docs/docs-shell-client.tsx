@@ -10,7 +10,7 @@ import { Button } from '@/components/ui/button';
 import { EmptyState } from '@/components/ui/empty-state';
 import { Input } from '@/components/ui/input';
 import { ToastContainer, useToast } from '@/components/ui/toast';
-import { ChevronLeft, ChevronDown, ChevronRight, Plus, X, Trash2, Copy, Check } from 'lucide-react';
+import { ChevronDown, ChevronRight, Plus, X, Trash2, Copy, Check, Menu } from 'lucide-react';
 import { DocsShell } from '@/components/docs/docs-shell';
 import { TopBarSlot } from '@/components/nav/top-bar-slot';
 
@@ -85,7 +85,7 @@ export function DocsShellClient({ projectId }: DocsShellClientProps) {
   const [tree, setTree] = useState<Doc[]>([]);
   const [selectedDoc, setSelectedDoc] = useState<DocDetail | null>(null);
   const [loading, setLoading] = useState(true);
-  const [mobileView, setMobileView] = useState<'list' | 'detail'>('list');
+  const [treeDrawerOpen, setTreeDrawerOpen] = useState(false);
   const [selectedTags, setSelectedTags] = useState<string[]>([]);
   const [docsHasMore, setDocsHasMore] = useState(false);
   const [docsNextCursor, setDocsNextCursor] = useState<string | null>(null);
@@ -185,7 +185,7 @@ export function DocsShellClient({ projectId }: DocsShellClientProps) {
     const params = new URLSearchParams(searchParams);
     params.set('slug', slug);
     router.replace(`?${params.toString()}`);
-    setMobileView('detail');
+    setTreeDrawerOpen(false);
   }, [fetchDoc, router, searchParams]);
 
   const handleReorder = useCallback(async (docId: string, newSortOrder: number) => {
@@ -660,28 +660,49 @@ export function DocsShellClient({ projectId }: DocsShellClientProps) {
         {editorContent}
       </DocsShell>
 
-      {/* Mobile: list ↔ detail full-screen (< lg) */}
-      <div className="flex flex-1 flex-col lg:hidden">
-        {mobileView === 'detail' ? (
-          <div className="flex flex-1 flex-col">
-            <div className="flex-shrink-0 border-b border-border/80 px-4 py-2">
-              <button
-                type="button"
-                onClick={() => setMobileView('list')}
-                className="flex min-h-[44px] items-center gap-1 text-sm text-[color:var(--operator-muted)] hover:text-[color:var(--operator-foreground)]"
-              >
-                <ChevronLeft className="size-4" />
-                {t('title')}
-              </button>
+      {/* Mobile: content + tree drawer overlay (< lg) */}
+      <div className="flex flex-1 flex-col overflow-hidden lg:hidden">
+        {/* Mobile top bar: tree toggle button */}
+        <div className="flex-shrink-0 flex items-center gap-2 border-b border-border/80 bg-background px-4 py-2">
+          <button
+            type="button"
+            onClick={() => setTreeDrawerOpen(true)}
+            className="flex min-h-[44px] items-center gap-2 text-sm text-[color:var(--operator-muted)] hover:text-[color:var(--operator-foreground)]"
+            aria-label="문서 트리 열기"
+          >
+            <Menu className="size-4" />
+            <span>{t('title')}</span>
+          </button>
+        </div>
+        {/* Content area — always visible on mobile */}
+        <div className="flex min-h-0 flex-1 flex-col overflow-hidden bg-background">
+          {editorContent}
+        </div>
+        {/* Tree drawer overlay */}
+        {treeDrawerOpen && (
+          <>
+            <div
+              className="fixed inset-0 z-40 bg-black/50"
+              onClick={() => setTreeDrawerOpen(false)}
+              aria-hidden="true"
+            />
+            <div className="fixed inset-y-0 left-0 z-50 flex w-[280px] flex-col overflow-hidden bg-background shadow-xl">
+              <div className="flex flex-shrink-0 items-center justify-between border-b border-border/80 px-4 py-3">
+                <span className="text-sm font-medium text-foreground">{t('title')}</span>
+                <button
+                  type="button"
+                  onClick={() => setTreeDrawerOpen(false)}
+                  className="rounded p-1 text-muted-foreground hover:text-foreground"
+                  aria-label="닫기"
+                >
+                  <X className="size-4" />
+                </button>
+              </div>
+              <div className="flex-1 overflow-y-auto">
+                {sidebarContent}
+              </div>
             </div>
-            <div className="flex flex-1 flex-col overflow-hidden bg-background">
-              {editorContent}
-            </div>
-          </div>
-        ) : (
-          <div className="flex flex-1 flex-col bg-background overflow-y-auto">
-            {sidebarContent}
-          </div>
+          </>
         )}
       </div>
 
