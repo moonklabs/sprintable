@@ -1,4 +1,3 @@
-
 import { ApiErrors } from '@/lib/api-response';
 
 export const ADMIN_ROLES = ['owner', 'admin'] as const;
@@ -6,6 +5,7 @@ export const EDIT_ROLES = ['owner', 'admin', 'po'] as const;
 export type RoleGuardRole = typeof ADMIN_ROLES[number] | typeof EDIT_ROLES[number];
 
 /** Fetch the caller's role in the org. Returns null if unauthenticated or not a member. */
+// eslint-disable-next-line @typescript-eslint/no-explicit-any -- type narrowing requires logic change, separate PR scope
 export async function getCallerRole(db: any, orgId: string): Promise<string | null> {
   const { data: { user } } = await db.auth.getUser();
   if (!user) return null;
@@ -24,6 +24,7 @@ export async function getCallerRole(db: any, orgId: string): Promise<string | nu
  * Returns an ApiErrors.forbidden() Response if not, null if allowed.
  */
 export async function requireRole(
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any -- type narrowing requires logic change, separate PR scope
   db: any,
   orgId: string,
   roles: readonly string[],

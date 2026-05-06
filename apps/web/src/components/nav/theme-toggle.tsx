@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useState } from 'react';
+import { useEffect, useState, startTransition } from 'react';
 import { Monitor, Moon, Sun } from 'lucide-react';
 import { useTheme } from 'next-themes';
 
@@ -14,7 +14,7 @@ export function ThemeToggle({ className = '' }: { className?: string }) {
   const { theme, setTheme } = useTheme();
   const [mounted, setMounted] = useState(false);
 
-  useEffect(() => { setMounted(true); }, []);
+  useEffect(() => { startTransition(() => setMounted(true)); }, []);
 
   return (
     <div className={`flex items-center gap-1 ${className}`.trim()}>

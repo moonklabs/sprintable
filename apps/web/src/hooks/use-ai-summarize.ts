@@ -92,7 +92,7 @@ export function useAiSummarize(meetingId: string, fetchFn?: typeof fetch) {
       setError(err instanceof Error ? err.message : 'AI summarize failed');
       setIsLoading(false);
     }
-  }, [meetingId]);
+  }, [meetingId, fetchFn]);
 
   const cancel = useCallback(() => {
     abortRef.current?.abort();

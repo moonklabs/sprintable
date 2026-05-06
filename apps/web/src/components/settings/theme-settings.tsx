@@ -1,7 +1,7 @@
 'use client';
 
 import { useTheme } from 'next-themes';
-import { useEffect, useState } from 'react';
+import { useEffect, useState, startTransition } from 'react';
 import { OperatorDropdownSelect } from '@/components/ui/operator-dropdown-select';
 import { SectionCard, SectionCardBody, SectionCardHeader } from '@/components/ui/section-card';
 
@@ -11,8 +11,7 @@ export function ThemeSettings() {
 
   // Prevent hydration mismatch
   useEffect(() => {
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-    setMounted(true);
+    startTransition(() => setMounted(true));
   }, []);
 
   if (!mounted) {

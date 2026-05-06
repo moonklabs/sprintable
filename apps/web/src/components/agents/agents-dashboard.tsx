@@ -3,7 +3,7 @@
 import Link from 'next/link';
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { useLocale, useTranslations } from 'next-intl';
-import { Bot, Clock3, GitBranch, History, Pause, Play, RefreshCw, Rocket, TriangleAlert, Zap } from 'lucide-react';
+import { Bot, Clock3, History, Pause, Play, RefreshCw, Rocket, TriangleAlert, Zap } from 'lucide-react';
 import { Badge } from '@/components/ui/badge';
 import { Button, buttonVariants } from '@/components/ui/button';
 import { TopBarSlot } from '@/components/nav/top-bar-slot';

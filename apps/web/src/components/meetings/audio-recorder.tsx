@@ -131,7 +131,6 @@ export function AudioRecorder({
   onTranscript,
   onAudioBlob,
   onUpgradeRequired,
-  sttProvider = 'browser',
   sttApiKey,
   meetingId,
   lang = 'ko-KR',

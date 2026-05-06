@@ -1,4 +1,4 @@
-
+import type { SupabaseClient } from '@supabase/supabase-js';
 import { decryptSecretForOrg, encryptSecretForOrg } from '@/lib/kms';
 
 export const ORG_INTEGRATION_TYPE = 'byom_api_key';
@@ -64,7 +64,7 @@ export function matchesProjectAiCredentialProvider(payload: ProjectAiCredentialS
 }
 
 export async function getProjectAiSettingsWithIntegration(
-  db: any,
+  db: SupabaseClient,
   projectId: string,
 ): Promise<ProjectAiCredentialState> {
   const [{ data: settings, error: settingsError }, { data: integration, error: integrationError }] = await Promise.all([
@@ -91,7 +91,7 @@ export async function getProjectAiSettingsWithIntegration(
 }
 
 export async function upsertEncryptedProjectSecret(
-  db: any,
+  db: SupabaseClient,
   input: {
     orgId: string;
     projectId: string;
@@ -131,7 +131,7 @@ export async function upsertEncryptedProjectSecret(
 }
 
 export async function persistProjectAiSettingsWithEncryptedSecret(
-  db: any,
+  db: SupabaseClient,
   input: {
     orgId: string;
     projectId: string;
@@ -168,7 +168,7 @@ export async function decryptProjectSecret(
 }
 
 export async function ensureProjectSecretEncrypted(
-  db: any,
+  db: SupabaseClient,
   payload: {
     settings: ProjectAiSettingsRecord | null;
     integration: OrgIntegrationRecord | null;

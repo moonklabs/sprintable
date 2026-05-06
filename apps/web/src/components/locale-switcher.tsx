@@ -4,8 +4,6 @@ import { Globe } from 'lucide-react';
 import { useCallback } from 'react';
 import { useLocale } from 'next-intl';
 
-const LOCALE_CODES = ['en', 'ko'] as const;
-
 function setLocaleCookie(locale: string) {
   if (typeof window !== 'undefined') {
     window.document.cookie = `locale=${locale};path=/;max-age=${60 * 60 * 24 * 365}`;

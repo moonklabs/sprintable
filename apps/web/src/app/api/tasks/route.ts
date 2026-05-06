@@ -1,4 +1,4 @@
-
+import type { DbClient } from '@/services/db-client';
 import { parseBody, createTaskSchema } from '@sprintable/shared';
 
 import { TaskService, type CreateTaskInput } from '@/services/task';
@@ -11,7 +11,7 @@ import { buildCursorPageMeta, parseCursorPageInput } from '@/lib/pagination';
 async function getStoryTaskCounts(
   service: TaskService,
   storyId: string,
-  dbClient: any | undefined,
+  dbClient: DbClient | undefined,
 ) {
   if (!dbClient) {
     const [allTasks, doneTasks] = await Promise.all([
@@ -44,7 +44,7 @@ export async function GET(request: Request) {
     const me = await getAuthContext(request);
     if (!me) return ApiErrors.unauthorized();
     if (me.rateLimitExceeded) return ApiErrors.tooManyRequests(me.rateLimitRemaining, me.rateLimitResetAt);
-    const dbClient: any | undefined = undefined;
+    const dbClient = undefined as DbClient | undefined;
 
     const { searchParams } = new URL(request.url);
     const storyId = searchParams.get('story_id') ?? undefined;
@@ -112,8 +112,6 @@ export async function POST(request: Request) {
     const me = await getAuthContext(request);
     if (!me) return ApiErrors.unauthorized();
     if (me.rateLimitExceeded) return ApiErrors.tooManyRequests(me.rateLimitRemaining, me.rateLimitResetAt);
-    const dbClient: any = undefined;
-
     const parsed = await parseBody(request, createTaskSchema); if (!parsed.success) return parsed.response; const body = parsed.data;
     const repo = await createTaskRepository();
     const service = new TaskService(repo);

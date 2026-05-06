@@ -1,9 +1,7 @@
 import { handleApiError } from '@/lib/api-error';
 import { apiSuccess, ApiErrors } from '@/lib/api-response';
 import { parseBody, createTeamMemberSchema } from '@sprintable/shared';
-import { createTeamMemberRepository } from '@/lib/storage/factory';
 import { proxyToFastapi } from '@/lib/fastapi-proxy';
-import { getAuthContext } from '@/lib/auth-helpers';
 
 export async function GET(request: Request) {
   try {

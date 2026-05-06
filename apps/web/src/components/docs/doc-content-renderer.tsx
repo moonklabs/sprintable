@@ -7,6 +7,7 @@ import DOMPurify from 'dompurify';
 import remarkGfm from 'remark-gfm';
 import rehypeRaw from 'rehype-raw';
 import rehypeSanitize from 'rehype-sanitize';
+import NextImage from 'next/image';
 import { cn } from '@/lib/utils';
 import { extractDocHeadings, slugifyHeading } from './doc-heading-utils';
 
@@ -141,7 +142,7 @@ export function DocContentRenderer({
             return <h3 id={heading?.id}>{children}</h3>;
           },
           blockquote: ({ children }) => <blockquote>{children}</blockquote>,
-          img: ({ src, alt }) => <img src={src ?? ''} alt={alt ?? ''} loading="lazy" />, 
+          img: ({ src, alt }) => <NextImage src={typeof src === 'string' ? src : ''} alt={alt ?? ''} width={800} height={600} style={{ maxWidth: '100%', height: 'auto' }} unoptimized />,
           table: ({ children }) => (
             <div className="not-prose overflow-x-auto rounded-2xl border border-border">
               <table>{children}</table>

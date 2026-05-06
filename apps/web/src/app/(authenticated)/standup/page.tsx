@@ -266,12 +266,6 @@ export default function StandupPage() {
     };
   }, [date, projectId, refreshToken, t]);
 
-  const currentUserStories = useMemo(() => {
-    if (!currentTeamMemberId) return [];
-    const assigned = stories.filter((story) => story.assignee_id === currentTeamMemberId && story.status !== 'done');
-    return assigned.length > 0 ? assigned : stories.filter((story) => story.status !== 'done');
-  }, [stories, currentTeamMemberId]);
-
   const humanMembersSorted = useMemo(() => {
     if (!currentTeamMemberId) return humanMembers;
     return [

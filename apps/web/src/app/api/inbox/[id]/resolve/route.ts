@@ -12,7 +12,7 @@ export async function POST(request: Request, { params }: { params: Promise<{ id:
 
     const setup = await setupInboxRoute(request);
     if (!setup.ok) return setup.response;
-    const { me, dbClient } = setup;
+    const { me } = setup;
 
     const parsed = await parseBody(request, resolveInboxItemSchema);
     if (!parsed.success) return parsed.response;

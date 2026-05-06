@@ -3,7 +3,7 @@
 import { useCallback, useEffect, useState } from 'react';
 import Link from 'next/link';
 import { useTranslations } from 'next-intl';
-import { Activity, ArrowLeft, ChevronDown, Clock3, Cpu, Hash, Zap } from 'lucide-react';
+import { Activity, ChevronDown, Clock3, Cpu, Hash, Zap } from 'lucide-react';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { EmptyState } from '@/components/ui/empty-state';

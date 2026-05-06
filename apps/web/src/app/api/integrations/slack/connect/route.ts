@@ -6,7 +6,7 @@ import { buildSlackConnectUrl } from '@/services/slack-channel-mapping';
 export async function GET() {
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const db: any = null;
-  const me = await getMyTeamMember(db, null as any);
+  const me = await getMyTeamMember(db, null as unknown);
   if (!me) return ApiErrors.forbidden('Team member not found');
 
   const { data: orgMember } = await db

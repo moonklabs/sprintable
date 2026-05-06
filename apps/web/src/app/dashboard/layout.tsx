@@ -15,25 +15,21 @@ export default async function DashboardLayout({
 }: {
   children: React.ReactNode;
 }) {
-  try {
-    const session = await getServerSession();
-    if (!session) redirect('/login');
+  const session = await getServerSession().catch(() => null);
+  if (!session) redirect('/login');
 
-    const me = await fastapiCall<MemberContext | null>('GET', '/api/v2/me', session.access_token).catch(() => null);
-    if (!me) redirect('/login');
+  const me = await fastapiCall<MemberContext | null>('GET', '/api/v2/me', session.access_token).catch(() => null);
+  if (!me) redirect('/login');
 
-    return (
-      <DashboardShell
-        currentTeamMemberId={me.id}
-        orgId={me.org_id}
-        projectId={me.project_id}
-        projectName={me.project_name}
-        projectMemberships={[{ projectId: me.project_id, projectName: me.project_name }]}
-      >
-        {children}
-      </DashboardShell>
-    );
-  } catch {
-    redirect('/login');
-  }
+  return (
+    <DashboardShell
+      currentTeamMemberId={me.id}
+      orgId={me.org_id}
+      projectId={me.project_id}
+      projectName={me.project_name}
+      projectMemberships={[{ projectId: me.project_id, projectName: me.project_name }]}
+    >
+      {children}
+    </DashboardShell>
+  );
 }

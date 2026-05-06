@@ -291,28 +291,26 @@ function AgentWorkflowEditorInner({ initialMembers, initialRules, projectName }:
 
   // ─── RF state ──────────────────────────────────────────────────────────────
 
-  const removeNode = useCallback((nodeId: string) => {
-    if (nodeId === WORKFLOW_ORIGINAL_ASSIGNEE_ID) return;
-    setRfNodes((prev) => prev.filter((n) => n.id !== nodeId));
-    setRfEdges((prev) => prev.filter((e) => e.source !== nodeId && e.target !== nodeId));
-    setSelectedEdgeId((prev) => {
-      const edge = prev ? undefined : undefined; // clear if affected
-      void edge;
-      return null;
-    });
-  }, []);
-
-  const [rfNodes, setRfNodes, onNodesChange] = useNodesState<WFRFNode>(
-    wfNodesToRF(initialGraph.nodes, memberMap, fallbackMember, removeNode),
-  );
+  const [rfNodes, setRfNodes, onNodesChange] = useNodesState<WFRFNode>([]);
   const [rfEdges, setRfEdges, onEdgesChange] = useEdgesState<WFRFEdge>(
     wfEdgesToRF(initialGraph.edges, initialGraph.edges[0]?.id ?? null),
   );
 
-  // Sync onRemove callback into node data whenever removeNode changes
+  const removeNode = useCallback((nodeId: string) => {
+    if (nodeId === WORKFLOW_ORIGINAL_ASSIGNEE_ID) return;
+    setRfNodes((prev) => prev.filter((n) => n.id !== nodeId));
+    setRfEdges((prev) => prev.filter((e) => e.source !== nodeId && e.target !== nodeId));
+    setSelectedEdgeId(() => null);
+  }, [setRfNodes, setRfEdges]);
+
+  // Seed initial nodes once removeNode is stable, then keep onRemove in sync
   useEffect(() => {
-    setRfNodes((prev) => prev.map((n) => ({ ...n, data: { ...n.data, onRemove: removeNode } })));
-  }, [removeNode, setRfNodes]);
+    setRfNodes((prev) =>
+      prev.length === 0
+        ? wfNodesToRF(initialGraph.nodes, memberMap, fallbackMember, removeNode)
+        : prev.map((n) => ({ ...n, data: { ...n.data, onRemove: removeNode } })),
+    );
+  }, [removeNode, setRfNodes, initialGraph.nodes, memberMap, fallbackMember]);
 
   // ─── Derived state ─────────────────────────────────────────────────────────
 

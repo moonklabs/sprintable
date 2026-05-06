@@ -1,9 +1,7 @@
 import { handleApiError } from '@/lib/api-error';
 import { apiSuccess, ApiErrors } from '@/lib/api-response';
 import { getAuthContext } from '@/lib/auth-helpers';
-import { createStoryRepository } from '@/lib/storage/factory';
 import { proxyToFastapi } from '@/lib/fastapi-proxy';
-import { StoryService } from '@/services/story';
 
 export async function GET(request: Request) {
   try {
