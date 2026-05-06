@@ -9,7 +9,7 @@ from pydantic import BaseModel, ConfigDict
 class CreateOrganization(BaseModel):
     name: str
     slug: str
-    owner_member_id: uuid.UUID
+    owner_member_id: uuid.UUID | None = None
 
 
 class OrganizationResponse(BaseModel):
