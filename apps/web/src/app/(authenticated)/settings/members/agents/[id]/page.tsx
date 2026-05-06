@@ -1,14 +1,15 @@
 'use client';
 
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useMemo, useState } from 'react';
 import { useParams, useRouter } from 'next/navigation';
 import Link from 'next/link';
 import { useTranslations } from 'next-intl';
-import { ArrowLeft, Check, Pencil, X } from 'lucide-react';
+import { ArrowLeft, Check, Pencil, Plus, X } from 'lucide-react';
 import { AgentApiKeyManager } from '@/components/agents/agent-api-key-manager';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { OperatorInput } from '@/components/ui/operator-control';
+import { OperatorDropdownSelect } from '@/components/ui/operator-dropdown-select';
 import { SectionCard, SectionCardBody, SectionCardHeader } from '@/components/ui/section-card';
 import { useToast } from '@/components/ui/toast';
 
@@ -38,6 +39,20 @@ interface ApiKey {
   created_at: string;
   last_used_at: string | null;
   revoked_at: string | null;
+}
+
+interface ProjectOption {
+  id: string;
+  name: string;
+}
+
+interface NewProjectResult {
+  agentId: string;
+  projectId: string;
+  projectName: string;
+  apiKey: string;
+  webhookUrl: string;
+  savingWebhook: boolean;
 }
 
 function buildMcpConfig(apiKey: string) {
@@ -79,12 +94,42 @@ export default function AgentDetailPage() {
   const [hasActiveKey, setHasActiveKey] = useState(false);
   const [mcpCopied, setMcpCopied] = useState(false);
 
+  const [projects, setProjects] = useState<ProjectOption[]>([]);
+  const [sameNameAgents, setSameNameAgents] = useState<AgentMember[]>([]);
+  const [showAddToProject, setShowAddToProject] = useState(false);
+  const [selectedAddProjectId, setSelectedAddProjectId] = useState('');
+  const [addingToProject, setAddingToProject] = useState(false);
+  const [newProjectResult, setNewProjectResult] = useState<NewProjectResult | null>(null);
+  const [orgId, setOrgId] = useState<string | null>(null);
+
   const fetchAgent = useCallback(async () => {
     const res = await fetch(`/api/team-members/${id}`);
     if (!res.ok) { router.push('/settings?tab=members'); return; }
     const json = await res.json() as { data: AgentMember };
     setAgent(json.data);
   }, [id, router]);
+
+  const fetchOrgContext = useCallback(async () => {
+    const [projectRes, contextRes] = await Promise.all([
+      fetch('/api/projects'),
+      fetch('/api/current-project'),
+    ]);
+    if (projectRes.ok) {
+      const json = await projectRes.json() as { data: ProjectOption[] };
+      setProjects((json.data ?? []).slice().sort((a, b) => a.name.localeCompare(b.name)));
+    }
+    if (contextRes.ok) {
+      const json = await contextRes.json() as { data?: { org_id?: string } };
+      setOrgId(json.data?.org_id ?? null);
+    }
+  }, []);
+
+  const fetchSameNameAgents = useCallback(async (agentName: string) => {
+    const res = await fetch('/api/team-members?type=agent&include_inactive=true');
+    if (!res.ok) return;
+    const json = await res.json() as { data: AgentMember[] };
+    setSameNameAgents((json.data ?? []).filter((a) => a.name === agentName && a.id !== id));
+  }, [id]);
 
   const fetchWebhookConfigs = useCallback(async (projectId: string) => {
     const res = await fetch(`/api/webhooks/config?project_id=${encodeURIComponent(projectId)}`);
@@ -105,14 +150,26 @@ export default function AgentDetailPage() {
 
   useEffect(() => {
     setLoading(true);
-    Promise.all([fetchAgent(), fetchActiveApiKey()])
+    Promise.all([fetchAgent(), fetchActiveApiKey(), fetchOrgContext()])
       .finally(() => setLoading(false));
-  }, [fetchAgent, fetchActiveApiKey]);
+  }, [fetchAgent, fetchActiveApiKey, fetchOrgContext]);
 
   useEffect(() => {
     if (!agent) return;
     void fetchWebhookConfigs(agent.project_id);
-  }, [agent, fetchWebhookConfigs]);
+    void fetchSameNameAgents(agent.name);
+  }, [agent, fetchWebhookConfigs, fetchSameNameAgents]);
+
+  const assignedProjectIds = useMemo(() => {
+    const ids = new Set(sameNameAgents.map((a) => a.project_id));
+    if (agent) ids.add(agent.project_id);
+    return ids;
+  }, [sameNameAgents, agent]);
+
+  const availableProjects = useMemo(
+    () => projects.filter((p) => !assignedProjectIds.has(p.id)),
+    [projects, assignedProjectIds],
+  );
 
   const handleSaveEdit = async () => {
     if (!editName.trim()) return;
@@ -164,6 +221,68 @@ export default function AgentDetailPage() {
       await fetchWebhookConfigs(agent.project_id);
     } finally {
       setSavingWebhook(false);
+    }
+  };
+
+  const handleAddToProject = async () => {
+    if (!selectedAddProjectId || !agent || !orgId) return;
+    setAddingToProject(true);
+    try {
+      const memberRes = await fetch('/api/team-members', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ org_id: orgId, project_id: selectedAddProjectId, name: agent.name, type: 'agent', role: agent.role }),
+      });
+      if (!memberRes.ok) {
+        const json = await memberRes.json().catch(() => null) as { error?: { message?: string } } | null;
+        addToast({ type: 'error', title: json?.error?.message ?? tc('error') });
+        return;
+      }
+      const memberJson = await memberRes.json() as { data: AgentMember };
+      const newAgentId = memberJson.data.id;
+
+      const keyRes = await fetch(`/api/agents/${newAgentId}/api-keys`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ scope: ['read', 'write'] }),
+      });
+      if (!keyRes.ok) {
+        addToast({ type: 'error', title: 'API Key 자동 생성 실패. 상세 페이지에서 수동으로 발급하세요.' });
+        await fetchSameNameAgents(agent.name);
+        return;
+      }
+      const rawKey = (await keyRes.json() as { data?: { api_key?: string } }).data?.api_key ?? '';
+
+      const projectName = projects.find((p) => p.id === selectedAddProjectId)?.name ?? selectedAddProjectId;
+      setNewProjectResult({ agentId: newAgentId, projectId: selectedAddProjectId, projectName, apiKey: rawKey, webhookUrl: '', savingWebhook: false });
+      setSelectedAddProjectId('');
+      setShowAddToProject(false);
+      await fetchSameNameAgents(agent.name);
+    } finally {
+      setAddingToProject(false);
+    }
+  };
+
+  const handleSaveNewProjectWebhook = async () => {
+    if (!newProjectResult) return;
+    const trimmed = newProjectResult.webhookUrl.trim();
+    if (trimmed && !/^https:\/\//i.test(trimmed)) {
+      addToast({ type: 'error', title: 'Webhook URL must start with https://' });
+      return;
+    }
+    setNewProjectResult((prev) => prev ? { ...prev, savingWebhook: true } : null);
+    try {
+      if (trimmed) {
+        await fetch('/api/webhooks/config', {
+          method: 'PUT',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ member_id: newProjectResult.agentId, url: trimmed, project_id: newProjectResult.projectId }),
+        });
+      }
+      addToast({ type: 'success', title: `${newProjectResult.projectName} 프로젝트 추가 완료` });
+      setNewProjectResult(null);
+    } finally {
+      setNewProjectResult((prev) => prev ? { ...prev, savingWebhook: false } : null);
     }
   };
 
@@ -307,6 +426,103 @@ export default function AgentDetailPage() {
           <pre className="overflow-x-auto rounded-md border border-border bg-muted/30 p-3 text-xs text-foreground/80">
             {buildMcpConfig(freshApiKey ?? '<YOUR_API_KEY>')}
           </pre>
+        </SectionCardBody>
+      </SectionCard>
+
+      {/* 다른 프로젝트에 추가 */}
+      <SectionCard>
+        <SectionCardHeader>
+          <div className="flex items-center justify-between w-full">
+            <div className="space-y-1">
+              <h2 className="text-base font-semibold text-foreground">다른 프로젝트에 추가</h2>
+              <p className="text-sm text-muted-foreground">
+                동일 이름으로 다른 프로젝트에 격리 배포합니다. 프로젝트별 독립 API Key와 Webhook이 발급됩니다.
+              </p>
+            </div>
+            {!showAddToProject && availableProjects.length > 0 ? (
+              <Button variant="outline" size="sm" onClick={() => setShowAddToProject(true)}>
+                <Plus className="h-3.5 w-3.5 mr-1" />
+                프로젝트 추가
+              </Button>
+            ) : null}
+          </div>
+        </SectionCardHeader>
+        <SectionCardBody className="space-y-4">
+          {/* 이미 할당된 프로젝트 목록 */}
+          {sameNameAgents.length > 0 ? (
+            <div className="space-y-2">
+              <p className="text-xs font-medium uppercase tracking-[0.18em] text-muted-foreground">할당된 프로젝트</p>
+              {sameNameAgents.map((a) => {
+                const pName = projects.find((p) => p.id === a.project_id)?.name ?? a.project_id;
+                return (
+                  <div key={a.id} className="flex items-center justify-between gap-3 rounded-md border border-border bg-muted/30 px-3 py-2 text-sm">
+                    <span className="text-foreground font-medium">{pName}</span>
+                    <div className="flex items-center gap-2">
+                      {!a.is_active ? <Badge variant="destructive">inactive</Badge> : null}
+                      <Link href={`/settings/members/agents/${a.id}`} className="text-xs text-muted-foreground hover:text-foreground underline-offset-2 hover:underline">
+                        상세
+                      </Link>
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+          ) : null}
+
+          {/* 추가 폼 */}
+          {showAddToProject ? (
+            <div className="flex gap-2 items-center">
+              <OperatorDropdownSelect
+                value={selectedAddProjectId}
+                onValueChange={(v) => setSelectedAddProjectId(v)}
+                options={[
+                  { value: '', label: '프로젝트 선택' },
+                  ...availableProjects.map((p) => ({ value: p.id, label: p.name })),
+                ]}
+              />
+              <Button variant="hero" size="sm" onClick={() => void handleAddToProject()} disabled={!selectedAddProjectId || addingToProject}>
+                {addingToProject ? '...' : '추가'}
+              </Button>
+              <Button variant="ghost" size="sm" onClick={() => { setShowAddToProject(false); setSelectedAddProjectId(''); }}>
+                취소
+              </Button>
+            </div>
+          ) : availableProjects.length === 0 ? (
+            <p className="text-xs text-muted-foreground">추가 가능한 프로젝트가 없습니다.</p>
+          ) : null}
+
+          {/* 신규 추가 결과: API Key + Webhook 입력 */}
+          {newProjectResult ? (
+            <div className="rounded-md border border-emerald-500/30 bg-emerald-500/5 p-4 space-y-3">
+              <p className="text-sm font-semibold text-emerald-500">{newProjectResult.projectName} 프로젝트 추가 완료</p>
+              {newProjectResult.apiKey ? (
+                <div className="space-y-1">
+                  <p className="text-xs font-medium text-foreground">API Key — 지금만 표시됩니다. 복사해 두세요.</p>
+                  <code className="block break-all rounded bg-background border border-border p-2 text-xs text-foreground/80 font-mono">
+                    {newProjectResult.apiKey}
+                  </code>
+                </div>
+              ) : null}
+              <div className="space-y-1">
+                <p className="text-xs font-medium text-foreground">Webhook URL (선택)</p>
+                <div className="flex gap-2">
+                  <OperatorInput
+                    type="url"
+                    value={newProjectResult.webhookUrl}
+                    onChange={(e) => setNewProjectResult((prev) => prev ? { ...prev, webhookUrl: e.target.value } : null)}
+                    placeholder="https://your-agent.example.com/webhook"
+                    className="flex-1 font-mono text-xs"
+                  />
+                  <Button variant="hero" size="sm" onClick={() => void handleSaveNewProjectWebhook()} disabled={newProjectResult.savingWebhook}>
+                    {newProjectResult.savingWebhook ? '...' : tc('save')}
+                  </Button>
+                  <Button variant="ghost" size="sm" onClick={() => setNewProjectResult(null)}>
+                    건너뛰기
+                  </Button>
+                </div>
+              </div>
+            </div>
+          ) : null}
         </SectionCardBody>
       </SectionCard>
     </div>
