@@ -19,12 +19,18 @@ async def get_me(
     session: AsyncSession = Depends(get_db),
     auth: AuthContext = Depends(get_current_user),
 ) -> MeResponse:
-    resolved_id = member_id or uuid.UUID(auth.user_id)
-    result = await session.execute(
-        select(TeamMember)
-        .options(joinedload(TeamMember.project))
-        .where(TeamMember.id == resolved_id)
-    )
+    if member_id:
+        result = await session.execute(
+            select(TeamMember)
+            .options(joinedload(TeamMember.project))
+            .where(TeamMember.id == member_id)
+        )
+    else:
+        result = await session.execute(
+            select(TeamMember)
+            .options(joinedload(TeamMember.project))
+            .where(TeamMember.user_id == uuid.UUID(auth.user_id))
+        )
     member = result.scalar_one_or_none()
     if member is None:
         raise HTTPException(status_code=404, detail="Member not found")

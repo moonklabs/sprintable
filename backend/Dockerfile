@@ -14,6 +14,7 @@ COPY app/ app/
 COPY ee/ ee/
 COPY alembic.ini .
 COPY alembic/ alembic/
+COPY bootstrap.py .
 
 ENV PATH="/app/.venv/bin:$PATH"
 
