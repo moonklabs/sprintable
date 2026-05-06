@@ -11,7 +11,7 @@ logger = logging.getLogger(__name__)
 
 from app.dependencies.auth import AuthContext, get_current_user
 from app.dependencies.database import get_db
-from app.models.memo import MemoAssignee
+from app.models.memo import MemoAssignee, MemoReply
 from app.models.team import TeamMember
 from app.repositories.memo import MemoReplyRepository, MemoRepository
 from app.routers.events import publish_event
@@ -32,7 +32,11 @@ async def _collect_reply_webhook_urls(
         select(MemoAssignee.member_id).where(MemoAssignee.memo_id == memo_id)
     )
     all_assignee_ids = {row[0] for row in assignee_rows}
-    recipient_ids = ({assigned_to, created_by} | all_assignee_ids | set(extra_ids or [])) - {sender_id, None}
+    reply_rows = await db.execute(
+        select(MemoReply.created_by).where(MemoReply.memo_id == memo_id).distinct()
+    )
+    prior_participant_ids = {row[0] for row in reply_rows}
+    recipient_ids = ({assigned_to, created_by} | all_assignee_ids | prior_participant_ids | set(extra_ids or [])) - {sender_id, None}
     if not recipient_ids:
         return []
     rows = await db.execute(
