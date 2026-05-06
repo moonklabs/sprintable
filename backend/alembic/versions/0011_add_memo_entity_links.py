@@ -40,12 +40,16 @@ def upgrade() -> None:
     )
     op.create_index('ix_memo_entity_links_memo_id', 'memo_entity_links', ['memo_id'])
 
-    # Migrate existing memo_doc_links data as entity_type='doc'
+    # Migrate existing memo_doc_links data (skip if table doesn't exist — fresh OSS install)
     op.execute("""
-        INSERT INTO memo_entity_links (id, memo_id, entity_type, entity_id, position, created_at)
-        SELECT gen_random_uuid(), memo_id, 'doc', doc_id, 0, created_at
-        FROM memo_doc_links
-        ON CONFLICT ON CONSTRAINT uq_memo_entity_links DO NOTHING
+        DO $$ BEGIN
+            IF EXISTS (SELECT 1 FROM information_schema.tables WHERE table_name = 'memo_doc_links') THEN
+                INSERT INTO memo_entity_links (id, memo_id, entity_type, entity_id, position, created_at)
+                SELECT gen_random_uuid(), memo_id, 'doc', doc_id, 0, created_at
+                FROM memo_doc_links
+                ON CONFLICT ON CONSTRAINT uq_memo_entity_links DO NOTHING;
+            END IF;
+        END $$;
     """)
 
 

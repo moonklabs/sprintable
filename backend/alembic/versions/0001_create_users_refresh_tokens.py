@@ -43,7 +43,7 @@ def upgrade() -> None:
     op.create_table(
         "refresh_tokens",
         sa.Column("id", UUID(as_uuid=True), primary_key=True, nullable=False),
-        sa.Column("user_id", UUID(as_uuid=True), nullable=False, index=True),
+        sa.Column("user_id", UUID(as_uuid=True), nullable=False),
         sa.Column("token_hash", sa.Text(), nullable=False, unique=True),
         sa.Column("org_id", UUID(as_uuid=True), nullable=True),
         sa.Column("project_id", UUID(as_uuid=True), nullable=True),
