@@ -308,6 +308,14 @@ export default function SettingsPage() {
     void refreshOrgAgents().catch(() => {});
   }, [isAdmin]);
 
+  // api-keys 탭 접근 시 Members > Agents로 자동 전환 (레거시 리다이렉트)
+  useEffect(() => {
+    if (activeTab === 'api-keys') {
+      setActiveTab('members');
+      setMembersSubTab('agents');
+    }
+  }, [activeTab]);
+
   const toggleSetting = async (eventType: string, currentEnabled: boolean) => {
     const newEnabled = !currentEnabled;
     await fetch('/api/notification-settings', {
@@ -619,9 +627,20 @@ export default function SettingsPage() {
             </TabsContent>
 
             <TabsContent value="api-keys">
-              {currentProjectId && isAdmin ? (
-                <AgentApiKeysSection projectId={currentProjectId} />
-              ) : null}
+              <SectionCard>
+                <SectionCardBody>
+                  <p className="text-sm text-muted-foreground">
+                    에이전트 API Key 관리는 <strong>Members → Agents</strong> 탭으로 이관됐습니다.
+                  </p>
+                  <button
+                    type="button"
+                    onClick={() => { setActiveTab('members'); setMembersSubTab('agents'); }}
+                    className="mt-3 rounded-md border border-border px-3 py-1.5 text-sm text-foreground hover:bg-muted transition-colors"
+                  >
+                    Members → Agents로 이동
+                  </button>
+                </SectionCardBody>
+              </SectionCard>
             </TabsContent>
 
             <TabsContent value="notifications">

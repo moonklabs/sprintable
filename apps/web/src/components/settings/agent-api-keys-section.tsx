@@ -320,7 +320,7 @@ export function AgentApiKeysSection({ projectId }: { projectId: string }) {
                   </p>
                 )}
 
-                {/* Webhook URL */}
+                {/* @deprecated: team_members.webhook_url — webhook_configs 테이블로 이관 예정 (AM-S2). 신규 에이전트는 상세 페이지 Webhook 섹션 사용. */}
                 <div className="mt-3 rounded-md border border-border bg-muted/20 p-3 space-y-2">
                   <p className="text-xs font-semibold text-foreground">Webhook URL</p>
                   <p className="text-xs text-muted-foreground">메모 배정 시 이 URL로 POST 전송됩니다. HTTPS 필수.</p>

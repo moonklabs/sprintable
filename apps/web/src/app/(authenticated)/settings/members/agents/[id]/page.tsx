@@ -379,6 +379,11 @@ export default function AgentDetailPage() {
           <div className="space-y-1">
             <h2 className="text-base font-semibold text-foreground">Webhook URL</h2>
             <p className="text-sm text-muted-foreground">이 에이전트로 이벤트가 발생할 때 POST로 전송됩니다. HTTPS 필수.</p>
+            {agent.webhook_url && webhookConfigs.length === 0 ? (
+              <p className="mt-1 rounded-md border border-amber-500/30 bg-amber-500/10 px-3 py-2 text-xs text-amber-600 dark:text-amber-400">
+                기존 webhook URL(<code className="font-mono">{agent.webhook_url}</code>)이 레거시 필드에 저장되어 있습니다. 아래에 다시 입력해 저장하면 새 webhook_configs 방식으로 마이그레이션됩니다.
+              </p>
+            ) : null}
           </div>
         </SectionCardHeader>
         <SectionCardBody className="space-y-3">
