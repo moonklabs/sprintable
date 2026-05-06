@@ -170,13 +170,13 @@ export function MemosFeedClient({ currentTeamMemberId, projectId }: MemosFeedCli
     setMobileView('list');
   }, []);
 
-  const handleReply = useCallback(async (content: string) => {
+  const handleReply = useCallback(async (content: string, mentionedIds?: string[]) => {
     if (!selectedMemo) return;
 
     const res = await fetch(`/api/memos/${selectedMemo.id}/replies`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ content }),
+      body: JSON.stringify({ content, ...(mentionedIds && mentionedIds.length > 0 ? { assigned_to_ids: mentionedIds } : {}) }),
     });
 
     if (!res.ok) throw new Error('Failed to submit reply');

@@ -62,12 +62,12 @@ export default function MemoDetailPage() {
 
   useAutoRefresh('memo-detail', () => void fetchMemo());
 
-  const handleReply = useCallback(async (content: string) => {
+  const handleReply = useCallback(async (content: string, mentionedIds?: string[]) => {
     if (!memo) return;
     const res = await fetch(`/api/memos/${memo.id}/replies`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ content }),
+      body: JSON.stringify({ content, ...(mentionedIds && mentionedIds.length > 0 ? { assigned_to_ids: mentionedIds } : {}) }),
     });
     if (!res.ok) throw new Error('Failed to submit reply');
     const { data: reply } = await res.json();

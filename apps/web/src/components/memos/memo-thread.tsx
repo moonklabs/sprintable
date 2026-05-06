@@ -20,7 +20,7 @@ interface MemberInfo {
 interface MemoThreadProps {
   memo: MemoDetailState;
   currentUserId: string;
-  onReply: (content: string) => Promise<void>;
+  onReply: (content: string, mentionedIds?: string[]) => Promise<void>;
   onResolve: () => Promise<void>;
   memberMap?: Record<string, MemberInfo>;
 }
@@ -35,6 +35,7 @@ export function MemoThread({ memo, currentUserId, onReply, onResolve, memberMap 
   const t = useTranslations('memos');
   const tc = useTranslations('common');
   const [replyContent, setReplyContent] = useState('');
+  const [mentionedIds, setMentionedIds] = useState<string[]>([]);
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [isResolving, setIsResolving] = useState(false);
   const [repliesExpanded, setRepliesExpanded] = useState(false);
@@ -79,8 +80,9 @@ export function MemoThread({ memo, currentUserId, onReply, onResolve, memberMap 
 
     setIsSubmitting(true);
     try {
-      await onReply(replyContent.trim());
+      await onReply(replyContent.trim(), mentionedIds);
       setReplyContent('');
+      setMentionedIds([]);
     } catch (error) {
       console.error('Failed to submit reply:', error);
     } finally {
@@ -170,6 +172,7 @@ export function MemoThread({ memo, currentUserId, onReply, onResolve, memberMap 
               value={replyContent}
               onChange={setReplyContent}
               onSubmit={handleSubmitReply}
+              onMentionIdsChange={setMentionedIds}
               placeholder={t('replyPlaceholder')}
               submitLabel={isSubmitting ? t('sending') : t('send')}
               helperText={t('replyHint')}

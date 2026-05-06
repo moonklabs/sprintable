@@ -84,6 +84,7 @@ interface MemoComposerProps {
   currentTeamMemberName?: string;
   projectId?: string;
   onEmbedsChange?: (embeds: EmbedItem[]) => void;
+  onMentionIdsChange?: (ids: string[]) => void;
 }
 
 const IMAGE_MIME_TYPES = new Set(['image/png', 'image/jpeg', 'image/webp', 'image/gif', 'image/avif']);
@@ -109,6 +110,7 @@ export function MemoComposer({
   currentTeamMemberName,
   projectId,
   onEmbedsChange,
+  onMentionIdsChange,
 }: MemoComposerProps) {
   const t = useTranslations('memos');
   const textareaRef = useRef<HTMLTextAreaElement | null>(null);
@@ -117,6 +119,7 @@ export function MemoComposer({
   const [uploading, setUploading] = useState(false);
   const [uploadError, setUploadError] = useState<string | null>(null);
 
+  const mentionedIdsRef = useRef<string[]>([]);
   const [mentionQuery, setMentionQuery] = useState<string | null>(null);
   const [mentionMembers, setMentionMembers] = useState<MentionMember[]>([]);
   const [mentionIndex, setMentionIndex] = useState(0);
@@ -262,11 +265,15 @@ export function MemoComposer({
     onChange(text);
     setMentionQuery(null);
     setMentionMembers([]);
+    if (!mentionedIdsRef.current.includes(member.id)) {
+      mentionedIdsRef.current = [...mentionedIdsRef.current, member.id];
+      onMentionIdsChange?.(mentionedIdsRef.current);
+    }
     requestAnimationFrame(() => {
       textarea?.focus();
       textarea?.setSelectionRange(caretPos, caretPos);
     });
-  }, [onChange, value]);
+  }, [onChange, onMentionIdsChange, value]);
 
   const selectEntity = useCallback((entity: EntityResult) => {
     const textarea = textareaRef.current;
@@ -317,7 +324,9 @@ export function MemoComposer({
     if (disabled || submitting || uploading || !value.trim()) return;
     collaboration.setTyping(false);
     await onSubmit();
-  }, [collaboration, disabled, onSubmit, submitting, uploading, value]);
+    mentionedIdsRef.current = [];
+    onMentionIdsChange?.([]);
+  }, [collaboration, disabled, onMentionIdsChange, onSubmit, submitting, uploading, value]);
 
   useEffect(() => {
     if (!value.trim()) {
