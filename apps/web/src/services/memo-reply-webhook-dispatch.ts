@@ -281,10 +281,10 @@ export async function dispatchWorkflowMemoReplyWebhooks(
 
   const authorName = memberById.get(reply.created_by)?.name?.trim() || reply.created_by;
   const preview = buildPreview(reply.content);
-  const memoLabel = memo.title?.trim() ? `“${memo.title.trim()}”` : `#${memo.id}`;
+  const memoLabel = memo.title?.trim() ? `”${memo.title.trim()}”` : `#${memo.id}`;
   const memoLink = buildMemoLink(options.appUrl, memo.id);
   const title = `💬 답장: ${authorName}`;
-  const description = `메모 ${memoLabel}에 답장\n${preview}\n\n${memoLink}`;
+  const description = `메모 ${memoLabel}에 답장\n${preview}\n\n${memoLink}\n\nmemo_id: ${memo.id}\nreply_id: ${reply.id}`;
 
   let sentCount = 0;
   let failedRecipientCount = 0;
