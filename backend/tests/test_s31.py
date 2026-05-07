@@ -39,6 +39,10 @@ def _mock_org() -> MagicMock:
 def _mock_member() -> MagicMock:
     m = MagicMock()
     m.id = MEMBER_ID
+    m.org_id = ORG_ID
+    m.project_id = PROJECT_ID
+    m.project_name = None
+    m.project = None
     m.name = "Alice"
     m.type = "human"
     m.role = "admin"
@@ -205,6 +209,25 @@ async def test_get_me_200():
 
         async with client as c:
             resp = await c.get(f"/api/v2/me?member_id={MEMBER_ID}")
+
+        assert resp.status_code == 200
+        assert resp.json()["name"] == "Alice"
+    finally:
+        app.dependency_overrides.clear()
+
+
+@pytest.mark.anyio
+async def test_get_me_via_api_key_200():
+    """API key 인증: auth.user_id = member.id → or_(id, user_id) 조회로 정상 반환."""
+    client, session, app = await _client()
+    try:
+        mock_result = MagicMock()
+        mock_result.scalar_one_or_none.return_value = _mock_member()
+        session.execute = AsyncMock(return_value=mock_result)
+
+        async with client as c:
+            # member_id 쿼리 파라미터 없이 호출 (API key 인증 경로)
+            resp = await c.get("/api/v2/me")
 
         assert resp.status_code == 200
         assert resp.json()["name"] == "Alice"
