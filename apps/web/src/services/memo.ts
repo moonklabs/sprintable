@@ -704,8 +704,8 @@ export class MemoService {
       try {
         const format = this.detectWebhookFormat(member.webhook_url);
         const body = format === 'discord'
-          ? JSON.stringify({ content: `${title}\n${description.substring(0, 500)}`, embeds: [{ title, description, color: 0x3B82F6 }] })
-          : JSON.stringify({ text: `*${title}*\n${description}` });
+          ? JSON.stringify({ content: `${title}\n${description.substring(0, 500)}\n\nmemo_id: ${memo.id}\nreply_id: ${reply.id}`, embeds: [{ title, description, color: 0x3B82F6 }] })
+          : JSON.stringify({ text: `*${title}*\n${description}\n\nmemo_id: ${memo.id}\nreply_id: ${reply.id}` });
 
         await fetch(member.webhook_url, {
           method: 'POST',
