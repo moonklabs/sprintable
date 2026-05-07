@@ -1,6 +1,7 @@
 'use client';
 
 import { useState, useEffect, useCallback } from 'react';
+import { Check, Copy } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Card } from '@/components/ui/card';
 import {
@@ -40,7 +41,13 @@ export function AgentApiKeyManager({ agentId, agentName, onNewKey }: AgentApiKey
   const [newKeyDialog, setNewKeyDialog] = useState(false);
   const [generatedKey, setGeneratedKey] = useState<string | null>(null);
   const [selectedScopes, setSelectedScopes] = useState<Scope[]>(['read', 'write']);
+  const [copiedOnboarding, setCopiedOnboarding] = useState(false);
   const { addToast } = useToast();
+
+  const LLMS_URL = 'https://app.sprintable.ai/llms.txt';
+
+  const buildOnboardingMessage = (apiKey: string) =>
+    `아래의 정보를 읽고 온보딩하기 바람.\nsprintable agent name : ${agentName}\nsprintable agent api key : ${apiKey}\n${LLMS_URL}`;
 
   const loadApiKeys = useCallback(async () => {
     setLoading(true);
@@ -125,6 +132,20 @@ export function AgentApiKeyManager({ agentId, agentName, onNewKey }: AgentApiKey
     });
   };
 
+  const copyOnboardingMessage = async (apiKey: string) => {
+    try {
+      await navigator.clipboard.writeText(buildOnboardingMessage(apiKey));
+      setCopiedOnboarding(true);
+      addToast({ type: 'success', title: '온보딩 메시지 복사됨' });
+      window.setTimeout(() => setCopiedOnboarding(false), 1500);
+    } catch {
+      addToast({ type: 'error', title: '복사 실패', body: '클립보드 접근 권한을 확인하세요.' });
+    }
+  };
+
+  const activeKeys = apiKeys.filter((k) => !k.revoked_at);
+  const hasActiveKey = activeKeys.length > 0 || generatedKey !== null;
+
   return (
     <Card className="p-6">
       <div className="flex items-center justify-between mb-4">
@@ -137,6 +158,15 @@ export function AgentApiKeyManager({ agentId, agentName, onNewKey }: AgentApiKey
         <div className="flex gap-2">
           <Button variant="outline" onClick={loadApiKeys} disabled={loading}>
             Refresh
+          </Button>
+          <Button
+            variant="outline"
+            disabled={!hasActiveKey || copiedOnboarding}
+            onClick={() => void copyOnboardingMessage(generatedKey ?? (activeKeys[0] ? `${activeKeys[0].key_prefix}...` : ''))}
+            className="gap-1.5"
+          >
+            {copiedOnboarding ? <Check className="h-3.5 w-3.5 text-emerald-500" /> : <Copy className="h-3.5 w-3.5" />}
+            온보딩 메시지 복사
           </Button>
           <Button
             onClick={() => {
@@ -252,6 +282,19 @@ export function AgentApiKeyManager({ agentId, agentName, onNewKey }: AgentApiKey
                   Authorization: Bearer {generatedKey}
                 </code>
               </p>
+              <div className="pt-2 border-t border-border">
+                <p className="text-xs text-muted-foreground mb-2">에이전트에게 아래 온보딩 메시지를 전달하세요:</p>
+                <pre className="text-xs bg-muted rounded p-2 whitespace-pre-wrap break-all">{buildOnboardingMessage(generatedKey)}</pre>
+                <Button
+                  variant="outline"
+                  size="sm"
+                  className="mt-2 gap-1.5"
+                  onClick={() => void copyOnboardingMessage(generatedKey)}
+                >
+                  {copiedOnboarding ? <Check className="h-3.5 w-3.5 text-emerald-500" /> : <Copy className="h-3.5 w-3.5" />}
+                  온보딩 메시지 복사
+                </Button>
+              </div>
             </div>
           )}
           <DialogFooter>

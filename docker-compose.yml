@@ -24,15 +24,16 @@ services:
       db:
         condition: service_healthy
     environment:
-      DATABASE_URL: postgresql://${POSTGRES_USER:-sprintable}:${POSTGRES_PASSWORD:-sprintable}@db:5432/${POSTGRES_DB:-sprintable}
+      DATABASE_URL: postgresql+asyncpg://${POSTGRES_USER:-sprintable}:${POSTGRES_PASSWORD:-sprintable}@db:5432/${POSTGRES_DB:-sprintable}
+      ALEMBIC_DATABASE_URL: postgresql://${POSTGRES_USER:-sprintable}:${POSTGRES_PASSWORD:-sprintable}@db:5432/${POSTGRES_DB:-sprintable}
       JWT_SECRET: ${JWT_SECRET:-change-me-in-production-min-32-chars}
       SECRET_KEY: ${SECRET_KEY:-change-me-in-production-min-32-chars}
     command: >
-      sh -c "alembic upgrade head && uvicorn app.main:app --host 0.0.0.0 --port 8000"
+      sh -c "python bootstrap.py && uvicorn app.main:app --host 0.0.0.0 --port 8000"
     ports:
       - "${BACKEND_PORT:-8000}:8000"
     healthcheck:
-      test: ["CMD-SHELL", "curl -sf http://localhost:8000/api/v2/health || exit 1"]
+      test: ["CMD-SHELL", "python -c \"import urllib.request; urllib.request.urlopen('http://localhost:8000/api/v2/health')\" || exit 1"]
       interval: 10s
       timeout: 5s
       retries: 5
@@ -50,5 +51,8 @@ services:
       NEXT_PUBLIC_FASTAPI_URL: http://backend:8000
       NEXT_PUBLIC_APP_URL: ${NEXT_PUBLIC_APP_URL:-http://localhost:3000}
       JWT_SECRET: ${JWT_SECRET:-change-me-in-production-min-32-chars}
+      NEXT_PUBLIC_SUPABASE_URL: ${NEXT_PUBLIC_SUPABASE_URL:-http://placeholder.invalid}
+      NEXT_PUBLIC_SUPABASE_ANON_KEY: ${NEXT_PUBLIC_SUPABASE_ANON_KEY:-placeholder}
+      SUPABASE_SERVICE_ROLE_KEY: ${SUPABASE_SERVICE_ROLE_KEY:-placeholder}
     ports:
-      - "${PORT:-3000}:3000"
+      - "${PORT:-3000}:3108"

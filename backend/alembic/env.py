@@ -16,8 +16,12 @@ target_metadata = Base.metadata
 
 
 def get_url() -> str:
+    # ALEMBIC_DATABASE_URL: sync URL (docker-compose 전용, 명시적 분리)
+    alembic_url = os.environ.get("ALEMBIC_DATABASE_URL")
+    if alembic_url:
+        return alembic_url
     url = os.environ.get("DATABASE_URL", config.get_main_option("sqlalchemy.url", ""))
-    # alembic은 동기 실행 — asyncpg → psycopg2 변환
+    # fallback: asyncpg → psycopg2 변환
     return url.replace("postgresql+asyncpg://", "postgresql+psycopg2://").replace("postgresql+asyncpg+ssl://", "postgresql+psycopg2://")
 
 

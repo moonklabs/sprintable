@@ -1,6 +1,7 @@
 import uuid
 
 from fastapi import APIRouter, Depends, Header, HTTPException, status
+from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.dependencies.auth import AuthContext, get_current_user
@@ -37,10 +38,27 @@ async def list_projects(
 async def create_project(
     body: ProjectCreate,
     session: AsyncSession = Depends(get_db),
-    _auth: AuthContext = Depends(get_current_user),
+    auth: AuthContext = Depends(get_current_user),
 ) -> ProjectResponse:
     repo = ProjectRepository(session, body.org_id)
     project = await repo.create(name=body.name, description=body.description)
+
+    # OSS bootstrap: 프로젝트 생성 시 인증 유저 team_member 자동 생성
+    # (Supabase trg_org_bootstrap_owner 대체 — project_id가 확정된 이 시점에 생성)
+    if auth.user_id:
+        await session.execute(
+            text(
+                "INSERT INTO team_members"
+                " (id, org_id, project_id, user_id, name, type, role, is_active)"
+                " SELECT gen_random_uuid(), :org_id, :project_id, :user_id,"
+                "        COALESCE(u.email, 'owner'), 'human', 'member', true"
+                " FROM users u WHERE u.id = :user_id"
+                " ON CONFLICT DO NOTHING"
+            ),
+            {"org_id": str(body.org_id), "project_id": str(project.id), "user_id": auth.user_id},
+        )
+        await session.commit()
+
     return ProjectResponse.model_validate(project)
 
 
