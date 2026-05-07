@@ -208,6 +208,7 @@
     "filterMembers": "Members",
     "filterAgents": "Agents",
     "clearFilters": "Clear filters",
+    "sentByMe": "Sent by me",
     "noFilteredMemos": "No memos match the selected filters.",
     "filterAssigned": "Assigned to me",
     "filterCreated": "Created by me",
