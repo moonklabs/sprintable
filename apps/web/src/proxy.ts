@@ -12,6 +12,7 @@ const PUBLIC_PREFIX = [
   '/api/',
   '/login',
   '/signup',
+  '/register',
   '/forgot-password',
   '/auth/callback',
   '/auth/login',
