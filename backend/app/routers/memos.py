@@ -94,11 +94,11 @@ async def list_memos(
     if q:
         filters["q"] = q
     memos = await repo.list(**filters)
+    counts = await repo.get_entity_link_counts_batch([m.id for m in memos])
     results = []
     for m in memos:
-        count = await repo.get_entity_link_count(m.id)
         memo_dict = {k: v for k, v in m.__dict__.items() if not k.startswith("_")}
-        memo_dict["embed_count"] = count
+        memo_dict["embed_count"] = counts.get(m.id, 0)
         results.append(MemoListResponse.model_validate(memo_dict))
     return results
 
