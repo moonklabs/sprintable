@@ -678,6 +678,7 @@ interface EpicsClientProps {
 
 export function EpicsClient({ projectId, orgId }: EpicsClientProps) {
   const t = useTranslations('epics');
+  const router = useRouter();
   const [epics, setEpics] = useState<Epic[]>([]);
   const [selectedEpic, setSelectedEpic] = useState<Epic | null>(null);
   const [loading, setLoading] = useState(true);
