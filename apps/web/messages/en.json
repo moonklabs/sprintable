@@ -152,6 +152,8 @@
     "filterAgents": "Agents",
     "sprints": "Sprints",
     "epics": "Epics",
+    "manageSprints": "Manage sprints →",
+    "manageEpics": "Manage epics →",
     "assignees": "Assignees",
     "assignee": "Assignee",
     "unassigned": "Unassigned",
