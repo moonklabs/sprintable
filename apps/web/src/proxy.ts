@@ -1,3 +1,5 @@
+export const runtime = 'nodejs';
+
 import { jwtVerify } from 'jose';
 import { NextResponse, type NextRequest } from 'next/server';
 
@@ -143,7 +145,9 @@ export async function proxy(request: NextRequest) {
   return response;
 }
 
-export const proxyConfig = {
+export default proxy;
+
+export const config = {
   matcher: [
     '/((?!_next/static|_next/image|favicon.ico|.*\\.(?:svg|png|jpg|jpeg|gif|webp)$).*)',
   ],
