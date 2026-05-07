@@ -29,6 +29,7 @@
     "dashboard": "Dashboard",
     "sprintManagement": "Sprint Management",
     "board": "Board",
+    "epics": "Epics",
     "memos": "Memos",
     "settings": "Settings",
     "standup": "Standup",

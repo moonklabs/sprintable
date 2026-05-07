@@ -16,6 +16,7 @@ import {
   MessageSquareMore,
   Search,
   Settings,
+  Target,
   Users,
 } from 'lucide-react';
 import { LogoutButton } from '@/app/dashboard/logout-button';
@@ -203,6 +204,16 @@ export function AppSidebar({
                   <FolderKanban />
                   <span>{t('board')}</span>
                   <KbdHint>B</KbdHint>
+                </SidebarMenuButton>
+              </SidebarMenuItem>
+              <SidebarMenuItem>
+                <SidebarMenuButton
+                  render={<Link href="/epics" />}
+                  isActive={isActive('/epics')}
+                  tooltip={t('epics')}
+                >
+                  <Target />
+                  <span>{t('epics')}</span>
                 </SidebarMenuButton>
               </SidebarMenuItem>
               <SidebarMenuItem>
