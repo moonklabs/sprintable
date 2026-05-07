@@ -153,7 +153,7 @@ function EntityPreviewModal({
       onClick={handleOverlayClick}
       className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 backdrop-blur-sm"
     >
-      <div className="relative w-full max-w-3xl max-h-[80vh] flex flex-col rounded-xl border border-border bg-popover shadow-xl">
+      <div className="relative w-full max-w-3xl max-h-[80vh] flex flex-col rounded-xl border border-border bg-popover text-popover-foreground shadow-xl">
         {/* Header */}
         <div className="flex-shrink-0 flex items-start gap-3 px-6 pt-5 pb-3 border-b border-border">
           <div className={`flex items-center gap-2 rounded-md border px-3 py-1.5 text-sm ${colorClass} flex-1 min-w-0`}>
