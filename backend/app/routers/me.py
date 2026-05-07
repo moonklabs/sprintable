@@ -26,10 +26,18 @@ async def get_me(
             .where(TeamMember.id == member_id)
         )
     else:
+        # API key 인증: auth.user_id = TeamMember.id
+        # JWT 인증:     auth.user_id = user.id = TeamMember.user_id
+        uid = uuid.UUID(auth.user_id)
         result = await session.execute(
             select(TeamMember)
             .options(joinedload(TeamMember.project))
-            .where(TeamMember.user_id == uuid.UUID(auth.user_id))
+            .where(
+                or_(
+                    TeamMember.id == uid,
+                    TeamMember.user_id == uid,
+                )
+            )
         )
     member = result.scalar_one_or_none()
     if member is None:

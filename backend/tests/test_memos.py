@@ -30,6 +30,7 @@ def _mock_memo(status: str = "open") -> MagicMock:
     m.deleted_at = None
     m.memo_metadata = {}
     m.search_vector = None
+    m.embed_count = 0
     m.created_at = datetime(2026, 4, 30, tzinfo=timezone.utc)
     m.updated_at = datetime(2026, 4, 30, tzinfo=timezone.utc)
     return m
@@ -80,8 +81,10 @@ async def _client():
 async def test_list_memos_200():
     client, session, app = await _client()
     try:
-        with patch("app.repositories.memo.MemoRepository.list", new_callable=AsyncMock) as mock_list:
+        with patch("app.repositories.memo.MemoRepository.list", new_callable=AsyncMock) as mock_list, \
+             patch("app.repositories.memo.MemoRepository.get_entity_link_count", new_callable=AsyncMock) as mock_count:
             mock_list.return_value = [_mock_memo()]
+            mock_count.return_value = 0
 
             async with client as c:
                 resp = await c.get(f"/api/v2/memos?project_id={PROJECT_ID}")
