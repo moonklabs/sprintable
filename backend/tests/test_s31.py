@@ -217,6 +217,25 @@ async def test_get_me_200():
 
 
 @pytest.mark.anyio
+async def test_get_me_via_api_key_200():
+    """API key 인증: auth.user_id = member.id → or_(id, user_id) 조회로 정상 반환."""
+    client, session, app = await _client()
+    try:
+        mock_result = MagicMock()
+        mock_result.scalar_one_or_none.return_value = _mock_member()
+        session.execute = AsyncMock(return_value=mock_result)
+
+        async with client as c:
+            # member_id 쿼리 파라미터 없이 호출 (API key 인증 경로)
+            resp = await c.get("/api/v2/me")
+
+        assert resp.status_code == 200
+        assert resp.json()["name"] == "Alice"
+    finally:
+        app.dependency_overrides.clear()
+
+
+@pytest.mark.anyio
 async def test_get_me_404():
     client, session, app = await _client()
     try:
