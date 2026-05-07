@@ -1974,6 +1974,8 @@
     "description": "설명",
     "noDescription": "설명이 없습니다.",
     "editEpic": "에픽 수정",
+    "viewFull": "전체 보기",
+    "filterAll": "전체",
     "saveChanges": "변경 저장",
     "cancel": "취소",
     "createEpic": "에픽 생성",

@@ -433,6 +433,10 @@ function EpicRow({ epic, isSelected, onClick }: EpicRowProps) {
           </div>
         </div>
 
+        {epic.description?.trim() ? (
+          <p className="text-xs text-[color:var(--operator-muted)] line-clamp-1">{epic.description.split('\n')[0]?.replace(/^#+\s*/, '')}</p>
+        ) : null}
+
         <div className="flex items-center gap-3 text-xs text-[color:var(--operator-muted)]">
           {epic.target_date ? (
             <span>{t('targetDate')}: {formatDate(epic.target_date)}</span>
@@ -510,9 +514,14 @@ function EpicDetailPanel({ epic, onUpdate, onClose }: EpicDetailPanelProps) {
         </div>
         <div className="flex items-center gap-2">
           {!isEditing ? (
-            <Button size="sm" variant="outline" onClick={() => setIsEditing(true)}>
-              {t('editEpic')}
-            </Button>
+            <>
+              <Button size="sm" variant="outline" onClick={() => router.push(`/epics/${epic.id}`)}>
+                {t('viewFull')}
+              </Button>
+              <Button size="sm" variant="outline" onClick={() => setIsEditing(true)}>
+                {t('editEpic')}
+              </Button>
+            </>
           ) : null}
           <button
             type="button"
@@ -677,6 +686,7 @@ export function EpicsClient({ projectId, orgId }: EpicsClientProps) {
   const [epicsHasMore, setEpicsHasMore] = useState(false);
   const [epicsNextCursor, setEpicsNextCursor] = useState<string | null>(null);
   const [epicsLoadingMore, setEpicsLoadingMore] = useState(false);
+  const [statusFilter, setStatusFilter] = useState<EpicStatus | 'all'>('all');
 
   const fetchEpics = useCallback(async (cursor?: string | null) => {
     try {
@@ -719,10 +729,15 @@ export function EpicsClient({ projectId, orgId }: EpicsClientProps) {
   }, []);
 
   const handleSelectEpic = useCallback(async (epic: Epic) => {
+    // 모바일: 상세 페이지 직접 이동
+    if (typeof window !== 'undefined' && window.innerWidth < 1024) {
+      router.push(`/epics/${epic.id}`);
+      return;
+    }
     setSelectedEpic(epic);
     setMobileView('detail');
     await fetchEpicDetail(epic.id);
-  }, [fetchEpicDetail]);
+  }, [fetchEpicDetail, router]);
 
   const handleCreated = useCallback((epic: Epic) => {
     setEpics((prev) => [epic, ...prev]);
@@ -750,12 +765,32 @@ export function EpicsClient({ projectId, orgId }: EpicsClientProps) {
     );
   }
 
+  const filteredEpics = statusFilter === 'all' ? epics : epics.filter((e) => e.status === statusFilter);
+
   const listPanel = (
     <div className="flex h-full min-h-0 flex-col overflow-hidden bg-[color:var(--operator-surface-soft)]/35">
 
+      {/* Status filter */}
+      <div className="flex shrink-0 gap-1 px-4 pt-3 pb-1 flex-wrap">
+        {(['all', 'draft', 'active', 'done', 'archived'] as const).map((s) => (
+          <button
+            key={s}
+            type="button"
+            onClick={() => setStatusFilter(s)}
+            className={`rounded-lg border px-2.5 py-1 text-xs font-medium transition-colors ${
+              statusFilter === s
+                ? 'border-primary/40 bg-primary/10 text-primary'
+                : 'border-[color:var(--operator-border,hsl(var(--border)))] text-[color:var(--operator-muted)] hover:bg-muted/50'
+            }`}
+          >
+            {s === 'all' ? t('filterAll') : s}
+          </button>
+        ))}
+      </div>
+
       {/* List body */}
       <div className="flex-1 overflow-y-auto p-4">
-        {epics.length === 0 ? (
+        {filteredEpics.length === 0 ? (
           <EmptyState
             title={t('noEpics')}
             description={t('noEpicsDescription')}
@@ -768,7 +803,7 @@ export function EpicsClient({ projectId, orgId }: EpicsClientProps) {
           />
         ) : (
           <div className="space-y-2">
-            {epics.map((epic) => (
+            {filteredEpics.map((epic) => (
               <EpicRow
                 key={epic.id}
                 epic={epic}
