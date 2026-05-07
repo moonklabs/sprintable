@@ -24,6 +24,8 @@ class MemoRepository(BaseRepository[Memo]):
             q = q.where(Memo.project_id == filters["project_id"])
         if "assigned_to" in filters:
             q = q.where(Memo.assigned_to == filters["assigned_to"])
+        if "created_by" in filters:
+            q = q.where(Memo.created_by == filters["created_by"])
         if "status" in filters:
             q = q.where(Memo.status == filters["status"])
         if "q" in filters and filters["q"]:

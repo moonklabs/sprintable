@@ -81,11 +81,12 @@ export async function GET(request: Request) {
     const dbClient = undefined;
     const repo = await createMemoRepository();
     const service = new MemoService(repo, dbClient);
+    const sentOnly = searchParams.get('sent') === 'true';
     const memos = await service.list({
       org_id: me.org_id,
       project_id: searchParams.get('project_id') ?? undefined,
       assigned_to: searchParams.get('assigned_to') ?? undefined,
-      created_by: searchParams.get('created_by') ?? undefined,
+      created_by: sentOnly ? me.id : (searchParams.get('created_by') ?? undefined),
       status: searchParams.get('status') ?? undefined,
       q: searchParams.get('q') ?? undefined,
       include_archived: searchParams.get('include_archived') === 'true',
