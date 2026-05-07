@@ -232,7 +232,7 @@ async def test_me_get_via_conftest(test_client, mock_session):
     """GET /api/v2/me 404 (member 없음) — 라우터 연결 확인."""
     member_id = uuid.uuid4()
     mock_result = MagicMock()
-    mock_result.scalar_one_or_none.return_value = None
+    mock_result.scalars.return_value.first.return_value = None
     mock_session.execute = AsyncMock(return_value=mock_result)
 
     resp = await test_client.get(f"/api/v2/me?member_id={member_id}")
