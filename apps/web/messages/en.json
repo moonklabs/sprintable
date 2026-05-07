@@ -1974,6 +1974,8 @@
     "description": "Description",
     "noDescription": "No description provided.",
     "editEpic": "Edit Epic",
+    "viewFull": "View Full",
+    "filterAll": "All",
     "saveChanges": "Save Changes",
     "cancel": "Cancel",
     "createEpic": "Create Epic",
