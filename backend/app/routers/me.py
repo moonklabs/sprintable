@@ -19,27 +19,24 @@ async def get_me(
     session: AsyncSession = Depends(get_db),
     auth: AuthContext = Depends(get_current_user),
 ) -> MeResponse:
+    uid = uuid.UUID(auth.user_id)
+    is_api_key = bool(auth.claims.get("app_metadata", {}).get("api_key_id"))
+
     if member_id:
-        result = await session.execute(
-            select(TeamMember)
-            .options(joinedload(TeamMember.project))
-            .where(TeamMember.id == member_id)
-        )
-    else:
+        where_clause = TeamMember.id == member_id
+    elif is_api_key:
         # API key 인증: auth.user_id = TeamMember.id
-        # JWT 인증:     auth.user_id = user.id = TeamMember.user_id
-        uid = uuid.UUID(auth.user_id)
-        result = await session.execute(
-            select(TeamMember)
-            .options(joinedload(TeamMember.project))
-            .where(
-                or_(
-                    TeamMember.id == uid,
-                    TeamMember.user_id == uid,
-                )
-            )
-        )
-    member = result.scalar_one_or_none()
+        where_clause = TeamMember.id == uid
+    else:
+        # JWT 인증: auth.user_id = user.id = TeamMember.user_id
+        where_clause = TeamMember.user_id == uid
+
+    result = await session.execute(
+        select(TeamMember)
+        .options(joinedload(TeamMember.project))
+        .where(where_clause)
+    )
+    member = result.scalars().first()
     if member is None:
         raise HTTPException(status_code=404, detail="Member not found")
     data = MeResponse.model_validate(member)
