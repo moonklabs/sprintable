@@ -17,6 +17,7 @@ RUN pnpm install --frozen-lockfile --filter web...
 # ─── 빌드 ────────────────────────────────────────────────────────────────────
 FROM base AS builder
 WORKDIR /app
+COPY package.json ./
 COPY --from=deps /app/node_modules ./node_modules
 COPY --from=deps /app/apps/web/node_modules ./apps/web/node_modules
 COPY --from=deps /app/packages ./packages
