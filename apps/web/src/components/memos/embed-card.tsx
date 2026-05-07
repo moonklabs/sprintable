@@ -2,6 +2,9 @@
 
 import { useCallback, useEffect, useRef, useState } from 'react';
 import Link from 'next/link';
+import ReactMarkdown from 'react-markdown';
+import remarkGfm from 'remark-gfm';
+import rehypeSanitize from 'rehype-sanitize';
 import { ExternalLink, X } from 'lucide-react';
 
 export const ENTITY_ICONS: Record<string, string> = {
@@ -42,55 +45,60 @@ const ENTITY_API: Record<string, (id: string) => string> = {
   doc: (id) => `/api/docs/${id}`,
 };
 
+const MdBadge = ({ label }: { label: string }) => (
+  <span className="rounded border px-1.5 py-0.5 text-[11px] font-medium border-border bg-muted text-muted-foreground">
+    {label}
+  </span>
+);
+
+const MdBody = ({ content }: { content: string }) => (
+  <div className="prose prose-sm dark:prose-invert max-w-none text-sm leading-relaxed">
+    <ReactMarkdown remarkPlugins={[remarkGfm]} rehypePlugins={[rehypeSanitize]}>
+      {content}
+    </ReactMarkdown>
+  </div>
+);
+
 function EntityDetail({ entityType, detail }: { entityType: string; detail: Record<string, unknown> }) {
-  const snippet = (text: unknown) =>
-    typeof text === 'string' && text.trim()
-      ? text.trim().slice(0, 160) + (text.trim().length > 160 ? '…' : '')
-      : null;
-
-  const badge = (label: string) => (
-    <span className="rounded border px-1.5 py-0.5 text-[11px] font-medium border-border bg-muted text-muted-foreground">
-      {label}
-    </span>
-  );
-
   if (entityType === 'story') {
-    const d = detail as { status?: string; priority?: string; story_points?: number; description?: string };
+    const d = detail as { status?: string; priority?: string; story_points?: number; description?: string; acceptance_criteria?: string };
     return (
-      <div className="space-y-2 text-sm">
+      <div className="space-y-3">
         <div className="flex flex-wrap gap-1.5">
-          {d.status && badge(d.status)}
-          {d.priority && badge(d.priority)}
-          {d.story_points != null && badge(`${d.story_points} SP`)}
+          {d.status && <MdBadge label={d.status} />}
+          {d.priority && <MdBadge label={d.priority} />}
+          {d.story_points != null && <MdBadge label={`${d.story_points} SP`} />}
         </div>
-        {snippet(d.description) && (
-          <p className="text-xs text-muted-foreground leading-relaxed">{snippet(d.description)}</p>
+        {d.description && <MdBody content={d.description} />}
+        {d.acceptance_criteria && (
+          <div className="border-t border-border pt-3">
+            <p className="text-xs font-semibold text-muted-foreground mb-1">Acceptance Criteria</p>
+            <MdBody content={d.acceptance_criteria} />
+          </div>
         )}
       </div>
     );
   }
 
   if (entityType === 'epic') {
-    const d = detail as { status?: string; priority?: string; objective?: string };
+    const d = detail as { status?: string; priority?: string; objective?: string; description?: string; target_date?: string; story_points_target?: number };
     return (
-      <div className="space-y-2 text-sm">
+      <div className="space-y-3">
         <div className="flex flex-wrap gap-1.5">
-          {d.status && badge(d.status)}
-          {d.priority && badge(d.priority)}
+          {d.status && <MdBadge label={d.status} />}
+          {d.priority && <MdBadge label={d.priority} />}
+          {d.story_points_target != null && <MdBadge label={`목표 ${d.story_points_target} SP`} />}
+          {d.target_date && <MdBadge label={d.target_date} />}
         </div>
-        {snippet(d.objective) && (
-          <p className="text-xs text-muted-foreground leading-relaxed">{snippet(d.objective)}</p>
-        )}
+        {d.objective && <MdBody content={d.objective} />}
+        {d.description && d.description !== d.objective && <MdBody content={d.description} />}
       </div>
     );
   }
 
   if (entityType === 'doc') {
     const d = detail as { content?: string };
-    const preview = snippet(d.content?.replace(/[#*`>]/g, '').replace(/\n+/g, ' '));
-    return preview ? (
-      <p className="text-xs text-muted-foreground leading-relaxed">{preview}</p>
-    ) : null;
+    return d.content ? <MdBody content={d.content} /> : null;
   }
 
   return null;
@@ -145,44 +153,51 @@ function EntityPreviewModal({
       onClick={handleOverlayClick}
       className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 backdrop-blur-sm"
     >
-      <div className="relative w-full max-w-sm rounded-xl border border-border bg-popover p-5 shadow-xl">
-        <button
-          type="button"
-          onClick={onClose}
-          className="absolute right-3 top-3 text-muted-foreground hover:text-foreground"
-          aria-label="닫기"
-        >
-          <X className="h-4 w-4" />
-        </button>
-        <div className={`flex items-center gap-2 rounded-md border px-3 py-2 text-sm ${colorClass} mb-3`}>
-          <span>{icon}</span>
-          <span className="font-medium">{label}</span>
-          {status ? (
-            <span className="ml-auto rounded px-1.5 py-0.5 text-xs bg-black/10 dark:bg-white/10">{status}</span>
-          ) : null}
+      <div className="relative w-full max-w-3xl max-h-[80vh] flex flex-col rounded-xl border border-border bg-popover shadow-xl">
+        {/* Header */}
+        <div className="flex-shrink-0 flex items-start gap-3 px-6 pt-5 pb-3 border-b border-border">
+          <div className={`flex items-center gap-2 rounded-md border px-3 py-1.5 text-sm ${colorClass} flex-1 min-w-0`}>
+            <span>{icon}</span>
+            <span className="font-semibold truncate">{label}</span>
+            {status ? (
+              <span className="ml-auto shrink-0 rounded px-1.5 py-0.5 text-xs bg-black/10 dark:bg-white/10">{status}</span>
+            ) : null}
+          </div>
+          <button
+            type="button"
+            onClick={onClose}
+            className="shrink-0 text-muted-foreground hover:text-foreground mt-0.5"
+            aria-label="닫기"
+          >
+            <X className="h-4 w-4" />
+          </button>
         </div>
-        <div className="mb-4 min-h-[40px]">
+        {/* Scrollable body */}
+        <div className="flex-1 overflow-y-auto px-6 py-4">
           {loading ? (
-            <div className="flex items-center gap-2 text-xs text-muted-foreground">
+            <div className="flex items-center gap-2 text-xs text-muted-foreground py-8 justify-center">
               <span className="h-3 w-3 animate-spin rounded-full border-2 border-current border-t-transparent" />
               불러오는 중…
             </div>
           ) : detail ? (
             <EntityDetail entityType={entityType} detail={detail} />
           ) : entityType === 'task' ? (
-            <p className="text-xs text-muted-foreground">이 엔티티는 별도 페이지가 없는.</p>
+            <p className="text-xs text-muted-foreground py-4">이 엔티티는 별도 페이지가 없는.</p>
           ) : null}
         </div>
-        {href ? (
-          <Link
-            href={href}
-            onClick={onClose}
-            className="flex items-center gap-1.5 text-sm text-primary hover:underline"
-          >
-            <ExternalLink className="h-3.5 w-3.5" />
-            전체 보기
-          </Link>
-        ) : null}
+        {/* Footer */}
+        {href && (
+          <div className="flex-shrink-0 px-6 py-3 border-t border-border">
+            <Link
+              href={href}
+              onClick={onClose}
+              className="flex items-center gap-1.5 text-sm text-primary hover:underline"
+            >
+              <ExternalLink className="h-3.5 w-3.5" />
+              전체 보기
+            </Link>
+          </div>
+        )}
       </div>
     </div>
   );
