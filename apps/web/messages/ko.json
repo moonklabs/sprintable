@@ -152,6 +152,8 @@
     "filterAgents": "에이전트",
     "sprints": "스프린트",
     "epics": "에픽",
+    "manageSprints": "스프린트 관리 →",
+    "manageEpics": "에픽 관리 →",
     "assignees": "담당자",
     "assignee": "담당자",
     "unassigned": "담당자 없음",

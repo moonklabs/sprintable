@@ -102,6 +102,10 @@ export function BoardSidebarFilters({ projectId }: BoardSidebarFiltersProps) {
                     {s.id === sprintId && <Check className="size-3.5 text-primary" />}
                   </DropdownMenuItem>
                 ))}
+                <DropdownMenuSeparator />
+                <DropdownMenuItem onClick={() => router.push('/sprints')}>
+                  <span className="flex-1 text-muted-foreground">{t('manageSprints')}</span>
+                </DropdownMenuItem>
               </DropdownMenuContent>
             </DropdownMenu>
           </SidebarMenuItem>
@@ -131,6 +135,10 @@ export function BoardSidebarFilters({ projectId }: BoardSidebarFiltersProps) {
                     {e.id === epicId && <Check className="size-3.5 text-primary" />}
                   </DropdownMenuItem>
                 ))}
+                <DropdownMenuSeparator />
+                <DropdownMenuItem onClick={() => router.push('/epics')}>
+                  <span className="flex-1 text-muted-foreground">{t('manageEpics')}</span>
+                </DropdownMenuItem>
               </DropdownMenuContent>
             </DropdownMenu>
           </SidebarMenuItem>
