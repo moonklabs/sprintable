@@ -621,6 +621,10 @@ export function KanbanBoard({ projectId }: KanbanBoardProps) {
                     {s.id === selectedSprintId && <Check className="size-3.5 text-primary" />}
                   </DropdownMenuItem>
                 ))}
+                <DropdownMenuSeparator />
+                <DropdownMenuItem onClick={() => router.push('/sprints')}>
+                  <span className="flex-1 text-xs text-muted-foreground">{t('manageSprints')}</span>
+                </DropdownMenuItem>
               </DropdownMenuGroup>
               <DropdownMenuSeparator />
               <DropdownMenuGroup>
@@ -636,6 +640,10 @@ export function KanbanBoard({ projectId }: KanbanBoardProps) {
                     {e.id === selectedEpicId && <Check className="size-3.5 text-primary" />}
                   </DropdownMenuItem>
                 ))}
+                <DropdownMenuSeparator />
+                <DropdownMenuItem onClick={() => router.push('/epics')}>
+                  <span className="flex-1 text-xs text-muted-foreground">{t('manageEpics')}</span>
+                </DropdownMenuItem>
               </DropdownMenuGroup>
               <DropdownMenuSeparator />
               <DropdownMenuGroup>
