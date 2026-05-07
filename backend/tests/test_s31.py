@@ -39,6 +39,10 @@ def _mock_org() -> MagicMock:
 def _mock_member() -> MagicMock:
     m = MagicMock()
     m.id = MEMBER_ID
+    m.org_id = ORG_ID
+    m.project_id = PROJECT_ID
+    m.project_name = None
+    m.project = None
     m.name = "Alice"
     m.type = "human"
     m.role = "admin"
