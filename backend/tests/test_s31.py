@@ -199,13 +199,50 @@ async def test_delete_organization_403_not_owner():
 
 # ── Me ────────────────────────────────────────────────────────────────────────
 
+def _mock_result(member):
+    """scalars().first() 패턴 mock 생성."""
+    r = MagicMock()
+    r.scalars.return_value.first.return_value = member
+    return r
+
+
+async def _client_api_key():
+    """API key claims (api_key_id 포함)를 가진 클라이언트."""
+    from app.main import app
+
+    ctx = MagicMock()
+    ctx.user_id = str(MEMBER_ID)
+    ctx.email = None
+    ctx.claims = {
+        "app_metadata": {
+            "org_id": str(ORG_ID),
+            "api_key_id": str(uuid.uuid4()),
+        }
+    }
+
+    mock_session = AsyncMock()
+
+    async def override_db():
+        yield mock_session
+
+    async def override_auth():
+        return ctx
+
+    from app.dependencies.auth import get_current_user
+    from app.dependencies.database import get_db
+
+    app.dependency_overrides[get_db] = override_db
+    app.dependency_overrides[get_current_user] = override_auth
+
+    from httpx import ASGITransport, AsyncClient
+    return AsyncClient(transport=ASGITransport(app=app), base_url="http://test"), mock_session, app
+
+
 @pytest.mark.anyio
 async def test_get_me_200():
     client, session, app = await _client()
     try:
-        mock_result = MagicMock()
-        mock_result.scalar_one_or_none.return_value = _mock_member()
-        session.execute = AsyncMock(return_value=mock_result)
+        session.execute = AsyncMock(return_value=_mock_result(_mock_member()))
 
         async with client as c:
             resp = await c.get(f"/api/v2/me?member_id={MEMBER_ID}")
@@ -218,15 +255,28 @@ async def test_get_me_200():
 
 @pytest.mark.anyio
 async def test_get_me_via_api_key_200():
-    """API key 인증: auth.user_id = member.id → or_(id, user_id) 조회로 정상 반환."""
-    client, session, app = await _client()
+    """API key 인증: auth.user_id = TeamMember.id → id 분기로 조회."""
+    client, session, app = await _client_api_key()
     try:
-        mock_result = MagicMock()
-        mock_result.scalar_one_or_none.return_value = _mock_member()
-        session.execute = AsyncMock(return_value=mock_result)
+        session.execute = AsyncMock(return_value=_mock_result(_mock_member()))
 
         async with client as c:
-            # member_id 쿼리 파라미터 없이 호출 (API key 인증 경로)
+            resp = await c.get("/api/v2/me")
+
+        assert resp.status_code == 200
+        assert resp.json()["name"] == "Alice"
+    finally:
+        app.dependency_overrides.clear()
+
+
+@pytest.mark.anyio
+async def test_get_me_via_jwt_no_member_id_200():
+    """JWT 인증: member_id 미전달 시 user_id 분기로 조회."""
+    client, session, app = await _client()
+    try:
+        session.execute = AsyncMock(return_value=_mock_result(_mock_member()))
+
+        async with client as c:
             resp = await c.get("/api/v2/me")
 
         assert resp.status_code == 200
@@ -239,9 +289,7 @@ async def test_get_me_via_api_key_200():
 async def test_get_me_404():
     client, session, app = await _client()
     try:
-        mock_result = MagicMock()
-        mock_result.scalar_one_or_none.return_value = None
-        session.execute = AsyncMock(return_value=mock_result)
+        session.execute = AsyncMock(return_value=_mock_result(None))
 
         async with client as c:
             resp = await c.get(f"/api/v2/me?member_id={uuid.uuid4()}")
