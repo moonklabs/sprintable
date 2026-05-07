@@ -288,7 +288,7 @@ export async function dispatchWorkflowMemoReplyWebhooks(
   const memoLabel = memo.title?.trim() ? `”${memo.title.trim()}”` : `#${memo.id}`;
   const memoLink = buildMemoLink(options.appUrl, memo.id);
   const title = `💬 답장: ${authorName}`;
-  const description = `메모 ${memoLabel}에 답장\n${preview}\n\n${memoLink}\n\nmemo_id: ${memo.id}\nreply_id: ${reply.id}`;
+  const description = `메모 ${memoLabel}에 답장\n${preview}\n\n${memoLink}`;
 
   let sentCount = 0;
   let failedRecipientCount = 0;
