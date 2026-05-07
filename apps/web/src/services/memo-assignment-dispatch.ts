@@ -32,8 +32,8 @@ export async function dispatchMemoAssignmentImmediately(memo: DispatchableMemo) 
 
     const isDiscord = member.webhook_url.includes('discord.com') || member.webhook_url.includes('discordapp.com');
     const body = isDiscord
-      ? JSON.stringify({ content: `${title}\n${description.substring(0, 500)}` })
-      : JSON.stringify({ text: `*${title}*\n${description}` });
+      ? JSON.stringify({ content: `${title}\n${description.substring(0, 500)}\n\nmemo_id: ${memo.id}` })
+      : JSON.stringify({ text: `*${title}*\n${description}\n\nmemo_id: ${memo.id}` });
 
     await fetch(member.webhook_url, {
       method: 'POST',

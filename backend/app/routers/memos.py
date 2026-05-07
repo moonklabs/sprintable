@@ -49,14 +49,17 @@ async def _collect_reply_webhook_urls(
     return [row[0] for row in rows if row[0]]
 
 
-def _fire_webhook(url: str, content: str, title: str, memo_url: str) -> None:
+def _fire_webhook(url: str, content: str, title: str, memo_url: str, memo_id: str = "") -> None:
     try:
+        full_content = content
+        if memo_id:
+            full_content = f"{content}\n\nmemo_id: {memo_id}"
         if "discord.com/api/webhooks" in url or "discordapp.com/api/webhooks" in url:
-            payload: dict = {"content": content}
+            payload: dict = {"content": full_content}
             if memo_url:
                 payload["embeds"] = [{"title": title, "url": memo_url}]
         else:
-            payload = {"text": content}
+            payload = {"text": full_content}
         httpx.post(url, json=payload, timeout=10)
     except Exception:  # noqa: BLE001
         logger.warning("reply webhook fire failed url=%s", url, exc_info=True)
@@ -202,10 +205,10 @@ async def add_reply(
     if webhook_urls:
         app_url = os.environ.get("NEXT_PUBLIC_APP_URL", "")
         memo_url = f"{app_url}/memos?id={id}" if app_url else ""
-        content = f"📩 **새 답신**\n{reply.content[:500]}"
+        content = f"📩 **새 답신**\n{reply.content[:500]}\n\nreply_id: {reply.id}"
         title = memo.title or "메모 답신"
         for url in webhook_urls:
-            background_tasks.add_task(_fire_webhook, url, content, title, memo_url)
+            background_tasks.add_task(_fire_webhook, url, content, title, memo_url, str(id))
 
     return ReplyResponse.model_validate(reply)
 
