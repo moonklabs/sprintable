@@ -36,6 +36,66 @@ export interface EmbedCardData {
   position?: number;
 }
 
+const ENTITY_API: Record<string, (id: string) => string> = {
+  story: (id) => `/api/stories/${id}`,
+  epic: (id) => `/api/epics/${id}`,
+  doc: (id) => `/api/docs/${id}`,
+};
+
+function EntityDetail({ entityType, detail }: { entityType: string; detail: Record<string, unknown> }) {
+  const snippet = (text: unknown) =>
+    typeof text === 'string' && text.trim()
+      ? text.trim().slice(0, 160) + (text.trim().length > 160 ? '…' : '')
+      : null;
+
+  const badge = (label: string) => (
+    <span className="rounded border px-1.5 py-0.5 text-[11px] font-medium border-border bg-muted text-muted-foreground">
+      {label}
+    </span>
+  );
+
+  if (entityType === 'story') {
+    const d = detail as { status?: string; priority?: string; story_points?: number; description?: string };
+    return (
+      <div className="space-y-2 text-sm">
+        <div className="flex flex-wrap gap-1.5">
+          {d.status && badge(d.status)}
+          {d.priority && badge(d.priority)}
+          {d.story_points != null && badge(`${d.story_points} SP`)}
+        </div>
+        {snippet(d.description) && (
+          <p className="text-xs text-muted-foreground leading-relaxed">{snippet(d.description)}</p>
+        )}
+      </div>
+    );
+  }
+
+  if (entityType === 'epic') {
+    const d = detail as { status?: string; priority?: string; objective?: string };
+    return (
+      <div className="space-y-2 text-sm">
+        <div className="flex flex-wrap gap-1.5">
+          {d.status && badge(d.status)}
+          {d.priority && badge(d.priority)}
+        </div>
+        {snippet(d.objective) && (
+          <p className="text-xs text-muted-foreground leading-relaxed">{snippet(d.objective)}</p>
+        )}
+      </div>
+    );
+  }
+
+  if (entityType === 'doc') {
+    const d = detail as { content?: string };
+    const preview = snippet(d.content?.replace(/[#*`>]/g, '').replace(/\n+/g, ' '));
+    return preview ? (
+      <p className="text-xs text-muted-foreground leading-relaxed">{preview}</p>
+    ) : null;
+  }
+
+  return null;
+}
+
 function EntityPreviewModal({
   entityType,
   entityId,
@@ -52,12 +112,24 @@ function EntityPreviewModal({
   onClose: () => void;
 }) {
   const overlayRef = useRef<HTMLDivElement>(null);
+  const [detail, setDetail] = useState<Record<string, unknown> | null>(null);
+  const [loading, setLoading] = useState(entityType !== 'task');
 
   useEffect(() => {
     const handler = (e: KeyboardEvent) => { if (e.key === 'Escape') onClose(); };
     document.addEventListener('keydown', handler);
     return () => document.removeEventListener('keydown', handler);
   }, [onClose]);
+
+  useEffect(() => {
+    const url = ENTITY_API[entityType]?.(entityId);
+    if (!url) return;
+    fetch(url)
+      .then((r) => r.ok ? r.json() : Promise.reject())
+      .then((json) => setDetail((json as { data?: Record<string, unknown> }).data ?? json as Record<string, unknown>))
+      .catch(() => { /* fetch 실패 시 fallback만 표시 */ })
+      .finally(() => setLoading(false));
+  }, [entityType, entityId]);
 
   const handleOverlayClick = useCallback((e: React.MouseEvent) => {
     if (e.target === overlayRef.current) onClose();
@@ -82,11 +154,23 @@ function EntityPreviewModal({
         >
           <X className="h-4 w-4" />
         </button>
-        <div className={`flex items-center gap-2 rounded-md border px-3 py-2 text-sm ${colorClass} mb-4`}>
+        <div className={`flex items-center gap-2 rounded-md border px-3 py-2 text-sm ${colorClass} mb-3`}>
           <span>{icon}</span>
           <span className="font-medium">{label}</span>
           {status ? (
             <span className="ml-auto rounded px-1.5 py-0.5 text-xs bg-black/10 dark:bg-white/10">{status}</span>
+          ) : null}
+        </div>
+        <div className="mb-4 min-h-[40px]">
+          {loading ? (
+            <div className="flex items-center gap-2 text-xs text-muted-foreground">
+              <span className="h-3 w-3 animate-spin rounded-full border-2 border-current border-t-transparent" />
+              불러오는 중…
+            </div>
+          ) : detail ? (
+            <EntityDetail entityType={entityType} detail={detail} />
+          ) : entityType === 'task' ? (
+            <p className="text-xs text-muted-foreground">이 엔티티는 별도 페이지가 없는.</p>
           ) : null}
         </div>
         {href ? (
@@ -98,9 +182,7 @@ function EntityPreviewModal({
             <ExternalLink className="h-3.5 w-3.5" />
             전체 보기
           </Link>
-        ) : (
-          <p className="text-xs text-muted-foreground">이 엔티티는 별도 페이지가 없는.</p>
-        )}
+        ) : null}
       </div>
     </div>
   );
