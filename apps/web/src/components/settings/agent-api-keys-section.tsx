@@ -6,7 +6,7 @@ import { SectionCard, SectionCardBody, SectionCardHeader } from '@/components/ui
 import { Badge } from '@/components/ui/badge';
 import { useToast } from '@/components/ui/toast';
 
-const MCP_SERVER_URL = 'https://app.sprintable.ai/api/v2/mcp';
+const MCP_SERVER_URL = `${process.env.NEXT_PUBLIC_FASTAPI_URL ?? 'https://app.sprintable.ai'}/api/v2/mcp`;
 const LLMS_PROMPT = 'Read this document and complete onboarding: https://app.sprintable.ai/llms.txt';
 
 interface AgentMember {

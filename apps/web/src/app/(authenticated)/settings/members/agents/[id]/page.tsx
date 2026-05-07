@@ -13,7 +13,7 @@ import { OperatorDropdownSelect } from '@/components/ui/operator-dropdown-select
 import { SectionCard, SectionCardBody, SectionCardHeader } from '@/components/ui/section-card';
 import { useToast } from '@/components/ui/toast';
 
-const MCP_SERVER_URL = 'https://app.sprintable.ai/api/v2/mcp';
+const MCP_SERVER_URL = `${process.env.NEXT_PUBLIC_FASTAPI_URL ?? 'https://app.sprintable.ai'}/api/v2/mcp`;
 
 interface AgentMember {
   id: string;

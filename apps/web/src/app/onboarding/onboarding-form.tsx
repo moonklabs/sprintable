@@ -6,7 +6,7 @@ import { useRouter } from 'next/navigation';
 import { UpgradeModal } from '@/components/ui/upgrade-modal';
 import { useTranslations } from 'next-intl';
 
-const MCP_SERVER_URL = 'https://app.sprintable.ai/api/v2/mcp';
+const MCP_SERVER_URL = `${process.env.NEXT_PUBLIC_FASTAPI_URL ?? 'https://app.sprintable.ai'}/api/v2/mcp`;
 const LLMS_PROMPT = 'Read this document and complete onboarding: https://app.sprintable.ai/llms.txt';
 const AGENT_ROLES = ['developer', 'designer', 'pm', 'qa', 'devops'];
 
