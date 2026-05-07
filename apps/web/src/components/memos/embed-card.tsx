@@ -148,13 +148,16 @@ export function EmbedCard({ entity_type, entity_id, title, status }: EmbedCardDa
 
 export function EntityChip({
   entityType,
+  entityId,
   label,
   href,
 }: {
   entityType: string;
+  entityId?: string;
   label: string;
   href: string | null;
 }) {
+  const [showModal, setShowModal] = useState(false);
   const icon = ENTITY_ICONS[entityType] ?? '#';
   const colorClass = ENTITY_COLORS[entityType] ?? 'border-border bg-muted text-foreground';
 
@@ -164,6 +167,30 @@ export function EntityChip({
       <span>{label}</span>
     </span>
   );
+
+  if (entityId) {
+    return (
+      <>
+        <button
+          type="button"
+          onClick={() => setShowModal(true)}
+          className="inline-flex no-underline transition-opacity hover:opacity-80"
+        >
+          {inner}
+        </button>
+        {showModal && (
+          <EntityPreviewModal
+            entityType={entityType}
+            entityId={entityId}
+            title={label}
+            status={null}
+            href={href}
+            onClose={() => setShowModal(false)}
+          />
+        )}
+      </>
+    );
+  }
 
   if (href) {
     return (
