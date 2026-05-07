@@ -585,22 +585,24 @@ export function KanbanBoard({ projectId }: KanbanBoardProps) {
               }
             />
             <DropdownMenuContent align="start" className="w-56 max-h-[60vh] overflow-y-auto">
-              <DropdownMenuLabel className="text-xs text-muted-foreground">{t('sprints')}</DropdownMenuLabel>
-              <DropdownMenuSeparator />
-              <DropdownMenuItem onClick={() => updateFilter('sprint_id', '')}>
-                <span className="flex-1">{t('allSprints')}</span>
-                {!selectedSprintId && <Check className="size-3.5 text-primary" />}
-              </DropdownMenuItem>
-              {sprints.map((s) => (
-                <DropdownMenuItem key={s.id} onClick={() => updateFilter('sprint_id', s.id)}>
-                  <span className="flex-1 truncate">{s.title}</span>
-                  {s.id === selectedSprintId && <Check className="size-3.5 text-primary" />}
+              <DropdownMenuGroup>
+                <DropdownMenuLabel className="text-xs text-muted-foreground">{t('sprints')}</DropdownMenuLabel>
+                <DropdownMenuSeparator />
+                <DropdownMenuItem onClick={() => updateFilter('sprint_id', '')}>
+                  <span className="flex-1">{t('allSprints')}</span>
+                  {!selectedSprintId && <Check className="size-3.5 text-primary" />}
                 </DropdownMenuItem>
-              ))}
-              <DropdownMenuSeparator />
-              <DropdownMenuItem onClick={() => router.push('/sprints')}>
-                <span className="flex-1 text-xs text-muted-foreground">{t('manageSprints')}</span>
-              </DropdownMenuItem>
+                {sprints.map((s) => (
+                  <DropdownMenuItem key={s.id} onClick={() => updateFilter('sprint_id', s.id)}>
+                    <span className="flex-1 truncate">{s.title}</span>
+                    {s.id === selectedSprintId && <Check className="size-3.5 text-primary" />}
+                  </DropdownMenuItem>
+                ))}
+                <DropdownMenuSeparator />
+                <DropdownMenuItem onClick={() => router.push('/sprints')}>
+                  <span className="flex-1 text-xs text-muted-foreground">{t('manageSprints')}</span>
+                </DropdownMenuItem>
+              </DropdownMenuGroup>
             </DropdownMenuContent>
           </DropdownMenu>
 
@@ -624,22 +626,24 @@ export function KanbanBoard({ projectId }: KanbanBoardProps) {
               }
             />
             <DropdownMenuContent align="start" className="w-56 max-h-[60vh] overflow-y-auto">
-              <DropdownMenuLabel className="text-xs text-muted-foreground">{t('epics')}</DropdownMenuLabel>
-              <DropdownMenuSeparator />
-              <DropdownMenuItem onClick={() => updateFilter('epic_id', '')}>
-                <span className="flex-1">{t('allEpics')}</span>
-                {!selectedEpicId && <Check className="size-3.5 text-primary" />}
-              </DropdownMenuItem>
-              {epics.map((e) => (
-                <DropdownMenuItem key={e.id} onClick={() => updateFilter('epic_id', e.id)}>
-                  <span className="flex-1 truncate">{e.title}</span>
-                  {e.id === selectedEpicId && <Check className="size-3.5 text-primary" />}
+              <DropdownMenuGroup>
+                <DropdownMenuLabel className="text-xs text-muted-foreground">{t('epics')}</DropdownMenuLabel>
+                <DropdownMenuSeparator />
+                <DropdownMenuItem onClick={() => updateFilter('epic_id', '')}>
+                  <span className="flex-1">{t('allEpics')}</span>
+                  {!selectedEpicId && <Check className="size-3.5 text-primary" />}
                 </DropdownMenuItem>
-              ))}
-              <DropdownMenuSeparator />
-              <DropdownMenuItem onClick={() => router.push('/epics')}>
-                <span className="flex-1 text-xs text-muted-foreground">{t('manageEpics')}</span>
-              </DropdownMenuItem>
+                {epics.map((e) => (
+                  <DropdownMenuItem key={e.id} onClick={() => updateFilter('epic_id', e.id)}>
+                    <span className="flex-1 truncate">{e.title}</span>
+                    {e.id === selectedEpicId && <Check className="size-3.5 text-primary" />}
+                  </DropdownMenuItem>
+                ))}
+                <DropdownMenuSeparator />
+                <DropdownMenuItem onClick={() => router.push('/epics')}>
+                  <span className="flex-1 text-xs text-muted-foreground">{t('manageEpics')}</span>
+                </DropdownMenuItem>
+              </DropdownMenuGroup>
             </DropdownMenuContent>
           </DropdownMenu>
 
@@ -663,18 +667,20 @@ export function KanbanBoard({ projectId }: KanbanBoardProps) {
               }
             />
             <DropdownMenuContent align="start" className="w-56 max-h-[60vh] overflow-y-auto">
-              <DropdownMenuLabel className="text-xs text-muted-foreground">{t('assignees')}</DropdownMenuLabel>
-              <DropdownMenuSeparator />
-              <DropdownMenuItem onClick={() => updateFilter('assignee_id', '')}>
-                <span className="flex-1">{t('allAssignees')}</span>
-                {!selectedAssigneeId && <Check className="size-3.5 text-primary" />}
-              </DropdownMenuItem>
-              {members.map((m) => (
-                <DropdownMenuItem key={m.id} onClick={() => updateFilter('assignee_id', m.id)}>
-                  <span className="flex-1 truncate">{m.name}</span>
-                  {m.id === selectedAssigneeId && <Check className="size-3.5 text-primary" />}
+              <DropdownMenuGroup>
+                <DropdownMenuLabel className="text-xs text-muted-foreground">{t('assignees')}</DropdownMenuLabel>
+                <DropdownMenuSeparator />
+                <DropdownMenuItem onClick={() => updateFilter('assignee_id', '')}>
+                  <span className="flex-1">{t('allAssignees')}</span>
+                  {!selectedAssigneeId && <Check className="size-3.5 text-primary" />}
                 </DropdownMenuItem>
-              ))}
+                {members.map((m) => (
+                  <DropdownMenuItem key={m.id} onClick={() => updateFilter('assignee_id', m.id)}>
+                    <span className="flex-1 truncate">{m.name}</span>
+                    {m.id === selectedAssigneeId && <Check className="size-3.5 text-primary" />}
+                  </DropdownMenuItem>
+                ))}
+              </DropdownMenuGroup>
             </DropdownMenuContent>
           </DropdownMenu>
         </div>
