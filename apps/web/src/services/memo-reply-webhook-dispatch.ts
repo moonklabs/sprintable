@@ -188,15 +188,19 @@ async function postWebhook(
   webhook: ResolvedWebhook,
   title: string,
   description: string,
+  ids?: { memo_id: string; reply_id?: string },
 ) {
+  const idsSuffix = ids
+    ? `\n\nmemo_id: ${ids.memo_id}${ids.reply_id ? `\nreply_id: ${ids.reply_id}` : ''}`
+    : '';
   const format = webhook.channel ?? detectWebhookFormat(webhook.url);
   const body = format === 'discord'
     ? JSON.stringify({
-        content: `${title}\n${description.substring(0, 500)}`,
+        content: `${title}\n${description.substring(0, 500)}${idsSuffix}`,
         embeds: [{ title, description, color: 0x3B82F6 }],
       })
     : format === 'google' || format === 'slack'
-      ? JSON.stringify({ text: `*${title}*\n${description}` })
+      ? JSON.stringify({ text: `*${title}*\n${description}${idsSuffix}` })
       : JSON.stringify({ title, description });
 
   const headers: Record<string, string> = {
@@ -284,7 +288,7 @@ export async function dispatchWorkflowMemoReplyWebhooks(
   const memoLabel = memo.title?.trim() ? `”${memo.title.trim()}”` : `#${memo.id}`;
   const memoLink = buildMemoLink(options.appUrl, memo.id);
   const title = `💬 답장: ${authorName}`;
-  const description = `메모 ${memoLabel}에 답장\n${preview}\n\n${memoLink}\n\nmemo_id: ${memo.id}\nreply_id: ${reply.id}`;
+  const description = `메모 ${memoLabel}에 답장\n${preview}\n\n${memoLink}`;
 
   let sentCount = 0;
   let failedRecipientCount = 0;
@@ -297,7 +301,7 @@ export async function dispatchWorkflowMemoReplyWebhooks(
     if (!webhook) continue;
 
     try {
-      const sent = await postWebhook(db, fetchFn, memo.org_id, webhook, title, description);
+      const sent = await postWebhook(db, fetchFn, memo.org_id, webhook, title, description, { memo_id: memo.id, reply_id: reply.id });
       if (sent) {
         sentCount += 1;
       } else {
