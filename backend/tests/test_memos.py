@@ -82,9 +82,9 @@ async def test_list_memos_200():
     client, session, app = await _client()
     try:
         with patch("app.repositories.memo.MemoRepository.list", new_callable=AsyncMock) as mock_list, \
-             patch("app.repositories.memo.MemoRepository.get_entity_link_count", new_callable=AsyncMock) as mock_count:
+             patch("app.repositories.memo.MemoRepository.get_entity_link_counts_batch", new_callable=AsyncMock) as mock_count:
             mock_list.return_value = [_mock_memo()]
-            mock_count.return_value = 0
+            mock_count.return_value = {}
 
             async with client as c:
                 resp = await c.get(f"/api/v2/memos?project_id={PROJECT_ID}")

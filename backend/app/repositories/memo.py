@@ -24,6 +24,8 @@ class MemoRepository(BaseRepository[Memo]):
             q = q.where(Memo.project_id == filters["project_id"])
         if "assigned_to" in filters:
             q = q.where(Memo.assigned_to == filters["assigned_to"])
+        if "created_by" in filters:
+            q = q.where(Memo.created_by == filters["created_by"])
         if "status" in filters:
             q = q.where(Memo.status == filters["status"])
         if "q" in filters and filters["q"]:
@@ -144,6 +146,17 @@ class MemoRepository(BaseRepository[Memo]):
             select(func.count()).select_from(MemoEntityLink).where(MemoEntityLink.memo_id == memo_id)
         )
         return result.scalar_one()
+
+    async def get_entity_link_counts_batch(self, memo_ids: list[uuid.UUID]) -> dict[uuid.UUID, int]:
+        from sqlalchemy import func
+        if not memo_ids:
+            return {}
+        result = await self.session.execute(
+            select(MemoEntityLink.memo_id, func.count().label("cnt"))
+            .where(MemoEntityLink.memo_id.in_(memo_ids))
+            .group_by(MemoEntityLink.memo_id)
+        )
+        return {row.memo_id: row.cnt for row in result}
 
 
 class MemoReplyRepository:

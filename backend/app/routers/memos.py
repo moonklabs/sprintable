@@ -80,6 +80,7 @@ def _get_repo(
 async def list_memos(
     project_id: uuid.UUID | None = Query(default=None),
     assigned_to: uuid.UUID | None = Query(default=None),
+    created_by: uuid.UUID | None = Query(default=None),
     status_filter: str | None = Query(default=None, alias="status"),
     q: str | None = Query(default=None),
     repo: MemoRepository = Depends(_get_repo),
@@ -89,16 +90,18 @@ async def list_memos(
         filters["project_id"] = project_id
     if assigned_to:
         filters["assigned_to"] = assigned_to
+    if created_by:
+        filters["created_by"] = created_by
     if status_filter:
         filters["status"] = status_filter
     if q:
         filters["q"] = q
     memos = await repo.list(**filters)
+    counts = await repo.get_entity_link_counts_batch([m.id for m in memos])
     results = []
     for m in memos:
-        count = await repo.get_entity_link_count(m.id)
         memo_dict = {k: v for k, v in m.__dict__.items() if not k.startswith("_")}
-        memo_dict["embed_count"] = count
+        memo_dict["embed_count"] = counts.get(m.id, 0)
         results.append(MemoListResponse.model_validate(memo_dict))
     return results
 

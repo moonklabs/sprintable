@@ -236,27 +236,48 @@ export function DocTree({ docs, selectedSlug, onSelect, onReorder, onMove, onMov
     const overDoc = docs.find((d) => d.id === over.id);
     if (!activeDoc || !overDoc) return;
 
-    if (activeDoc.parent_id !== overDoc.parent_id) {
-      // Cross-parent move: prevent circular (dragging a node into its own subtree)
+    // Drop position 기반으로 reorder vs 자식 이동 구분:
+    // over 항목의 상단 25% / 하단 25% → same-level reorder
+    // 중앙 50% → overDoc을 부모로 이동
+    const overRect = over.rect;
+    const activeTranslated = active.rect.current.translated;
+    const activeCenterY = activeTranslated
+      ? activeTranslated.top + activeTranslated.height / 2
+      : overRect.top + overRect.height / 2;
+    const relativeY = (activeCenterY - overRect.top) / overRect.height;
+    const dropIntoParent = relativeY > 0.25 && relativeY < 0.75;
+
+    if (dropIntoParent) {
+      // 자식으로 이동 (overDoc이 새 부모)
+      if (activeDoc.parent_id === overDoc.id) return; // 이미 자식
       if (isDescendant(docs, activeDoc.id, overDoc.id)) {
         onMoveDenied?.('circular');
         return;
       }
-
-      // Require onMove to be wired for cross-parent moves
       if (!onMove) {
         onMoveDenied?.('no-permission');
         return;
       }
-
-      // Place activeDoc as a child of overDoc (overDoc becomes the new parent)
-      const newParentId = overDoc.id;
-      await onMove(activeDoc.id, newParentId, overDoc.sort_order);
+      await onMove(activeDoc.id, overDoc.id, overDoc.sort_order);
       return;
     }
 
-    // Same-parent reorder (existing behaviour)
+    // Same-level reorder (상단/하단 25% 드롭)
     if (!onReorder) return;
+    if (activeDoc.parent_id !== overDoc.parent_id) {
+      // Cross-parent reorder: overDoc과 같은 레벨로 이동
+      if (isDescendant(docs, activeDoc.id, overDoc.id)) {
+        onMoveDenied?.('circular');
+        return;
+      }
+      if (!onMove) {
+        onMoveDenied?.('no-permission');
+        return;
+      }
+      await onMove(activeDoc.id, overDoc.parent_id, overDoc.sort_order);
+      return;
+    }
+
     const siblings = docs.filter((d) => d.parent_id === activeDoc.parent_id).sort((a, b) => a.sort_order - b.sort_order);
     const oldIndex = siblings.findIndex((d) => d.id === active.id);
     const newIndex = siblings.findIndex((d) => d.id === over.id);

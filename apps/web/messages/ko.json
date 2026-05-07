@@ -208,6 +208,7 @@
     "filterMembers": "멤버",
     "filterAgents": "에이전트",
     "clearFilters": "필터 초기화",
+    "sentByMe": "보낸 메모",
     "noFilteredMemos": "선택한 필터에 해당하는 메모가 없습니다.",
     "filterAssigned": "내게 할당",
     "filterCreated": "내가 작성",

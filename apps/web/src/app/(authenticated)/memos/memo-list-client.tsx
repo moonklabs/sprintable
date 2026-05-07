@@ -47,7 +47,9 @@ export function MemoListClient({ selectedMemoId, onNewMemo }: MemoListClientProp
     return raw ? raw.split(',').filter(Boolean) : [];
   }, [searchParams]);
 
-  const hasActiveFilters = selectedMemberIds.length > 0 || selectedAgentIds.length > 0;
+  const showSentOnly = searchParams.get('sent') === 'true';
+
+  const hasActiveFilters = selectedMemberIds.length > 0 || selectedAgentIds.length > 0 || showSentOnly;
   const humanMembers = useMemo(() => members.filter((m) => m.type !== 'agent'), [members]);
   const agentMembers = useMemo(() => members.filter((m) => m.type === 'agent'), [members]);
   const memberMap = useMemo(() => Object.fromEntries(members.map((m) => [m.id, m.name])), [members]);
@@ -76,10 +78,18 @@ export function MemoListClient({ selectedMemoId, onNewMemo }: MemoListClientProp
     router.replace(`/memos${params.size > 0 ? `?${params.toString()}` : ''}`, { scroll: false });
   }, [router, searchParams]);
 
+  const toggleSentOnly = useCallback(() => {
+    const params = new URLSearchParams(searchParams.toString());
+    if (showSentOnly) params.delete('sent');
+    else params.set('sent', 'true');
+    router.replace(`/memos${params.size > 0 ? `?${params.toString()}` : ''}`, { scroll: false });
+  }, [router, searchParams, showSentOnly]);
+
   const clearFilters = useCallback(() => {
     const params = new URLSearchParams(searchParams.toString());
     params.delete('member_ids');
     params.delete('agent_ids');
+    params.delete('sent');
     router.replace(`/memos${params.size > 0 ? `?${params.toString()}` : ''}`, { scroll: false });
   }, [router, searchParams]);
 
@@ -98,6 +108,7 @@ export function MemoListClient({ selectedMemoId, onNewMemo }: MemoListClientProp
       if (q?.trim()) params.append('q', q.trim());
       if (cursor) params.append('cursor', cursor);
       if (filterIds?.length) params.append('assigned_to', filterIds.join(','));
+      if (showSentOnly) params.append('sent', 'true');
       const res = await fetch(`/api/memos?${params.toString()}`);
       if (!res.ok) throw new Error('Failed to fetch memos');
       const { data, meta } = await res.json();
@@ -143,7 +154,7 @@ export function MemoListClient({ selectedMemoId, onNewMemo }: MemoListClientProp
     setHasMore(false);
     const allFilterIds = [...selectedMemberIds, ...selectedAgentIds];
     void fetchMemos(debouncedQuery, null, allFilterIds.length ? allFilterIds : undefined);
-  }, [debouncedQuery, fetchMemos, selectedMemberIds, selectedAgentIds]);
+  }, [debouncedQuery, fetchMemos, selectedMemberIds, selectedAgentIds, showSentOnly]);
 
   useAutoRefresh('memo-list', () => void fetchMemos(debouncedQuery));
 
@@ -173,6 +184,16 @@ export function MemoListClient({ selectedMemoId, onNewMemo }: MemoListClientProp
               <X className="h-3.5 w-3.5" />
             </button>
           ) : null}
+        </div>
+
+        <div className="flex flex-wrap gap-1">
+          <button
+            type="button"
+            onClick={toggleSentOnly}
+            className={`rounded-md border px-2 py-0.5 text-xs font-medium transition-colors ${showSentOnly ? 'border-primary/40 bg-primary/10 text-primary' : 'border-border bg-muted/30 text-muted-foreground hover:bg-muted/60 hover:text-foreground'}`}
+          >
+            {t('sentByMe')}
+          </button>
         </div>
 
         {(humanMembers.length > 0 || agentMembers.length > 0) && (

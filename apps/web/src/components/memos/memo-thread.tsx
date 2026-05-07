@@ -223,7 +223,7 @@ function MarkdownContent({ content, isCurrentUser }: { content: string; isCurren
             const entityType = m[1];
             const entityId = m[2];
             const entityHref = getEntityHref(entityType, entityId);
-            return <EntityChip entityType={entityType} label={String(children)} href={entityHref} />;
+            return <EntityChip entityType={entityType} entityId={entityId} label={String(children)} href={entityHref} />;
           }
           return <a href={href} target="_blank" rel="noopener noreferrer" className="underline underline-offset-2">{children}</a>;
         },

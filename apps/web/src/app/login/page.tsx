@@ -2,6 +2,7 @@
 
 import { useState } from 'react';
 import { useRouter, useSearchParams } from 'next/navigation';
+import Link from 'next/link';
 import { SprintableLogo } from '@/components/brand/sprintable-logo';
 import { loginWithPassword } from '@/lib/db/client';
 
@@ -132,6 +133,13 @@ export default function LoginPage() {
             Continue with GitHub
           </a>
         </div>
+
+        <p className="text-center text-sm text-gray-500">
+          Don&apos;t have an account?{' '}
+          <Link href="/register" className="font-medium text-blue-600 hover:text-blue-700">
+            Sign up
+          </Link>
+        </p>
       </div>
     </div>
   );

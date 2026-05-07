@@ -339,7 +339,7 @@ export function MemoDetail({
                         const entityType = m[1];
                         const entityId = m[2];
                         const entityHref = getEntityHref(entityType, entityId);
-                        return <EntityChip entityType={entityType} label={String(children)} href={entityHref} />;
+                        return <EntityChip entityType={entityType} entityId={entityId} label={String(children)} href={entityHref} />;
                       }
                       return <a href={href} target="_blank" rel="noreferrer">{children}</a>;
                     },
