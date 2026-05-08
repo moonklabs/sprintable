@@ -38,6 +38,10 @@ def _make_user(totp_enabled: bool = False, totp_secret: str | None = None) -> Ma
     u.is_active = True
     u.totp_enabled = totp_enabled
     u.totp_secret = totp_secret
+    u.org_id = uuid.uuid4()
+    u.project_id = uuid.uuid4()
+    u.role = "member"
+    u.user_id = None
     return u
 
 
@@ -199,6 +203,10 @@ async def test_refresh_token_rotation_200():
         stored.token_hash = hash_token(raw_refresh)
         stored.expires_at = exp
         stored.revoked_at = None
+        stored.org_id = uuid.uuid4()
+        stored.project_id = uuid.uuid4()
+        stored.role = "member"
+        stored.user_id = None
 
         def side_effect(stmt):
             r = MagicMock()
