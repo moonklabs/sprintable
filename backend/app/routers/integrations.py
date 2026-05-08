@@ -2,9 +2,10 @@ import os
 import json
 import base64
 import urllib.parse
+import uuid
 
 from fastapi import APIRouter, Depends
-from fastapi.responses import JSONResponse, RedirectResponse
+from fastapi.responses import JSONResponse
 
 from app.dependencies.auth import AuthContext, get_current_user
 from app.dependencies.database import get_db
@@ -22,17 +23,16 @@ def _err(code: str, message: str, status: int = 400) -> JSONResponse:
     )
 
 
-@router.get("/slack/connect", response_model=None)
+@router.get("/slack/connect")
 async def slack_connect(
     auth: AuthContext = Depends(get_current_user),
     session: AsyncSession = Depends(get_db),
-) -> RedirectResponse | JSONResponse:
+) -> JSONResponse:
     org_id_str = auth.claims.get("app_metadata", {}).get("org_id")
     project_id_str = auth.claims.get("app_metadata", {}).get("project_id")
     if not org_id_str:
         return _err("FORBIDDEN", "org_id required", 403)
 
-    import uuid
     org_id = uuid.UUID(org_id_str)
     user_id = uuid.UUID(auth.user_id)
 
@@ -40,6 +40,7 @@ async def slack_connect(
         select(OrgMember).where(
             OrgMember.org_id == org_id,
             OrgMember.user_id == user_id,
+            OrgMember.deleted_at.is_(None),
         )
     )
     org_member = result.scalar_one_or_none()
@@ -62,4 +63,4 @@ async def slack_connect(
         "state": state,
     })
     url = f"https://slack.com/oauth/v2/authorize?{params}"
-    return RedirectResponse(url=url)
+    return JSONResponse({"data": {"url": url}, "error": None, "meta": None})
