@@ -6,7 +6,7 @@ from typing import Any
 
 from fastapi import APIRouter, Depends, Query
 from fastapi.responses import JSONResponse
-from sqlalchemy import select, text, update
+from sqlalchemy import select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.dependencies.auth import AuthContext, get_current_user
@@ -312,7 +312,16 @@ async def restore_version(
                 sort_order=s.get("sort_order", 0),
             ))
 
-    await session.execute(text("SELECT increment_mockup_version(:pid)"), {"pid": str(page_id)})
+    page_ver_result = await session.execute(
+        select(MockupPage.version).where(MockupPage.id == page_id)
+    )
+    current_version = page_ver_result.scalar_one_or_none() or 1
+    session.add(MockupVersion(
+        page_id=page_id,
+        version=current_version,
+        snapshot=ver.snapshot or {},
+    ))
+    updates["version"] = current_version + 1
     await session.execute(update(MockupPage).where(MockupPage.id == page_id).values(**updates))
     await session.commit()
     return _ok({"ok": True})
