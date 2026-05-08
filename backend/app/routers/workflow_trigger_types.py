@@ -2,6 +2,7 @@ import uuid
 
 from fastapi import APIRouter, Depends, Header, HTTPException, status
 from pydantic import BaseModel
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.dependencies.auth import AuthContext, get_current_user, require_admin
@@ -60,7 +61,10 @@ async def create_trigger_type(
     repo: WorkflowTriggerTypeRepository = Depends(_get_repo),
     _: None = Depends(require_admin),
 ) -> TriggerTypeResponse:
-    obj = await repo.create(slug=body.slug, label=body.label, description=body.description)
+    try:
+        obj = await repo.create(slug=body.slug, label=body.label, description=body.description)
+    except IntegrityError:
+        raise HTTPException(status_code=409, detail=f"Slug '{body.slug}' already exists for this organization")
     return TriggerTypeResponse.model_validate(obj)
 
 

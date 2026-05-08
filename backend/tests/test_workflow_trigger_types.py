@@ -1,6 +1,7 @@
 """Tests for workflow_trigger_types CRUD API."""
 import uuid
 from unittest.mock import AsyncMock, MagicMock, patch
+from sqlalchemy.exc import IntegrityError
 
 import pytest
 from httpx import ASGITransport, AsyncClient
@@ -163,5 +164,19 @@ async def test_delete_system_type_forbidden():
             async with client as c:
                 resp = await c.delete(f"/api/v2/workflow-trigger-types/{TRIGGER_ID}")
         assert resp.status_code == 403
+    finally:
+        app.dependency_overrides.clear()
+
+
+@pytest.mark.anyio
+async def test_create_duplicate_slug_409():
+    """동일 org에서 같은 slug 생성 시 409."""
+    client, session, app = await _client()
+    try:
+        with patch("app.repositories.workflow_trigger_type.WorkflowTriggerTypeRepository.create", new_callable=AsyncMock) as mock_create:
+            mock_create.side_effect = IntegrityError("duplicate", {}, Exception())
+            async with client as c:
+                resp = await c.post("/api/v2/workflow-trigger-types", json={"slug": "kickoff", "label": "Kickoff"})
+        assert resp.status_code == 409
     finally:
         app.dependency_overrides.clear()
