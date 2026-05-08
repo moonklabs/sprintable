@@ -160,7 +160,11 @@
     "save": "Save",
     "cancel": "Cancel",
     "edit": "Edit",
-    "addDescription": "Add description"
+    "addDescription": "Add description",
+    "searchSprints": "Search sprints...",
+    "searchEpics": "Search epics...",
+    "searchAssignees": "Search assignees...",
+    "noResults": "No results"
   },
   "memos": {
     "title": "Memos",
