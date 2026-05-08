@@ -42,8 +42,8 @@ export function WorkflowTriggerTypesSection() {
   const refresh = async () => {
     const res = await fetch('/api/workflow-trigger-types');
     if (res.ok) {
-      const json = await res.json() as { data: WorkflowTriggerType[] };
-      setTriggerTypes(json.data ?? []);
+      const json = await res.json() as WorkflowTriggerType[];
+      setTriggerTypes(Array.isArray(json) ? json : []);
     }
     setLoading(false);
   };
