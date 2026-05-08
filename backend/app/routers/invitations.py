@@ -85,6 +85,10 @@ async def accept_invitation(
     if inv is None or inv.status != "pending" or inv.expires_at < datetime.now(timezone.utc):
         raise HTTPException(status_code=400, detail="Invalid, expired, or already used token")
 
+    caller_email = auth.claims.get("email", "")
+    if inv.email.lower() != caller_email.lower():
+        raise HTTPException(status_code=403, detail="Invitation was issued to a different email")
+
     inv.status = "accepted"
     inv.accepted_at = datetime.now(timezone.utc)
 

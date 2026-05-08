@@ -39,7 +39,7 @@ async def _client():
     ctx = MagicMock()
     ctx.user_id = str(uuid.uuid4())
     ctx.email = "test@example.com"
-    ctx.claims = {"app_metadata": {"org_id": str(ORG_ID)}}
+    ctx.claims = {"app_metadata": {"org_id": str(ORG_ID)}, "email": "new@example.com"}
 
     mock_session = AsyncMock()
 
@@ -242,5 +242,24 @@ async def test_accept_invitation_creates_org_and_team_member():
         # TeamMember session.add 호출 확인
         assert session.add.called
         assert session.flush.called
+    finally:
+        app.dependency_overrides.clear()
+
+
+@pytest.mark.anyio
+async def test_accept_invitation_403_email_mismatch():
+    """다른 이메일로 발행된 초대 토큰 수락 시 403 반환 (권한 상승 방지)."""
+    client, session, app = await _client()
+    try:
+        inv = _mock_invitation("pending")
+        inv.email = "other@example.com"  # 로그인 유저(new@example.com)와 불일치
+        inv_result = MagicMock()
+        inv_result.scalar_one_or_none.return_value = inv
+        session.execute = AsyncMock(return_value=inv_result)
+
+        async with client as c:
+            resp = await c.post("/api/v2/invitations/accept", json={"token": TOKEN})
+
+        assert resp.status_code == 403
     finally:
         app.dependency_overrides.clear()
