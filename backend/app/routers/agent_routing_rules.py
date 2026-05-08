@@ -67,22 +67,25 @@ async def create_rule(
     org_id, project_id = _get_org_project(auth)
     if not org_id:
         return _err("FORBIDDEN", "org_id required", 403)
-    rule = await repo.create(
-        org_id=org_id,
-        project_id=project_id,
-        actor_id=uuid.UUID(auth.user_id),
-        agent_id=body.agent_id,
-        name=body.name,
-        priority=body.priority or 100,
-        match_type=body.match_type or "event",
-        conditions=body.conditions,
-        action=body.action,
-        target_runtime=body.target_runtime or "openclaw",
-        target_model=body.target_model,
-        is_enabled=body.is_enabled if body.is_enabled is not None else True,
-        persona_id=body.persona_id,
-        deployment_id=body.deployment_id,
-    )
+    try:
+        rule = await repo.create(
+            org_id=org_id,
+            project_id=project_id,
+            actor_id=uuid.UUID(auth.user_id),
+            agent_id=body.agent_id,
+            name=body.name,
+            priority=body.priority or 100,
+            match_type=body.match_type or "event",
+            conditions=body.conditions,
+            action=body.action,
+            target_runtime=body.target_runtime or "openclaw",
+            target_model=body.target_model,
+            is_enabled=body.is_enabled if body.is_enabled is not None else True,
+            persona_id=body.persona_id,
+            deployment_id=body.deployment_id,
+        )
+    except ValueError as exc:
+        return _err("BAD_REQUEST", str(exc), 400)
     return _ok(rule.model_dump(mode="json"), status=201)
 
 
@@ -116,16 +119,22 @@ async def replace_or_update_rules(
             }
             for item in req.items
         ]
-        rules = await repo.replace(org_id, project_id, uuid.UUID(auth.user_id), items)
+        try:
+            rules = await repo.replace(org_id, project_id, uuid.UUID(auth.user_id), items)
+        except ValueError as exc:
+            return _err("BAD_REQUEST", str(exc), 400)
         return _ok([r.model_dump(mode="json") for r in rules])
 
     req_update = UpdateRoutingRuleRequest.model_validate(body)
-    rule = await repo.update(
-        req_update.id,
-        org_id,
-        project_id,
-        **{k: v for k, v in req_update.model_dump().items() if k != "id"},
-    )
+    try:
+        rule = await repo.update(
+            req_update.id,
+            org_id,
+            project_id,
+            **{k: v for k, v in req_update.model_dump().items() if k != "id"},
+        )
+    except ValueError as exc:
+        return _err("BAD_REQUEST", str(exc), 400)
     if rule is None:
         return _err("NOT_FOUND", "Routing rule not found", 404)
     return _ok(rule.model_dump(mode="json"))

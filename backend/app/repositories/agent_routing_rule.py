@@ -9,6 +9,7 @@ from sqlalchemy import select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models.agent_routing_rule import AgentRoutingRule
+from app.repositories.workflow_trigger_type import WorkflowTriggerTypeRepository
 from app.schemas.agent_routing_rule import RoutingRuleResponse
 
 _DEFAULT_RUNTIME = "openclaw"
@@ -21,7 +22,20 @@ def _normalize_conditions(value: Any) -> dict[str, Any]:
     memo_type = value.get("memo_type", [])
     if not isinstance(memo_type, list):
         memo_type = []
-    return {"memo_type": [str(m).strip().lower() for m in memo_type if str(m).strip()]}
+    result: dict[str, Any] = {"memo_type": [str(m).strip().lower() for m in memo_type if str(m).strip()]}
+    if "trigger_type_slugs" in value:
+        raw = value["trigger_type_slugs"]
+        if not isinstance(raw, list):
+            raw = []
+        seen: set[str] = set()
+        deduped: list[str] = []
+        for s in raw:
+            cleaned = str(s).strip().lower()
+            if cleaned and cleaned not in seen:
+                seen.add(cleaned)
+                deduped.append(cleaned)
+        result["trigger_type_slugs"] = deduped
+    return result
 
 
 def _normalize_action(value: Any) -> dict[str, Any]:
@@ -59,6 +73,17 @@ def _to_response(rule: AgentRoutingRule) -> RoutingRuleResponse:
         created_at=rule.created_at,
         updated_at=rule.updated_at,
     )
+
+
+async def _validate_trigger_slugs(session: AsyncSession, org_id: uuid.UUID, slugs: list[str]) -> None:
+    if not slugs:
+        return
+    trigger_repo = WorkflowTriggerTypeRepository(session, org_id)
+    existing = await trigger_repo.list()
+    valid_slugs = {t.slug for t in existing}
+    invalid = [s for s in slugs if s not in valid_slugs]
+    if invalid:
+        raise ValueError(f"Unknown trigger_type_slugs: {invalid}")
 
 
 class AgentRoutingRuleRepository:
@@ -106,6 +131,8 @@ class AgentRoutingRuleRepository:
         persona_id: uuid.UUID | None = None,
         deployment_id: uuid.UUID | None = None,
     ) -> RoutingRuleResponse:
+        normalized = _normalize_conditions(conditions)
+        await _validate_trigger_slugs(self.session, org_id, normalized.get("trigger_type_slugs", []))
         rule = AgentRoutingRule(
             org_id=org_id,
             project_id=project_id,
@@ -115,7 +142,7 @@ class AgentRoutingRuleRepository:
             name=name.strip(),
             priority=priority,
             match_type=match_type or _DEFAULT_MATCH_TYPE,
-            conditions=_normalize_conditions(conditions),
+            conditions=normalized,
             action=_normalize_action(action),
             target_runtime=(target_runtime or _DEFAULT_RUNTIME).strip(),
             target_model=target_model.strip() if target_model else None,
@@ -161,7 +188,9 @@ class AgentRoutingRuleRepository:
         if "match_type" in fields and fields["match_type"]:
             patch["match_type"] = fields["match_type"]
         if "conditions" in fields:
-            patch["conditions"] = _normalize_conditions(fields["conditions"])
+            norm_cond = _normalize_conditions(fields["conditions"])
+            await _validate_trigger_slugs(self.session, org_id, norm_cond.get("trigger_type_slugs", []))
+            patch["conditions"] = norm_cond
         if "action" in fields:
             patch["action"] = _normalize_action(fields["action"])
         if "target_runtime" in fields and fields["target_runtime"]:
@@ -199,6 +228,8 @@ class AgentRoutingRuleRepository:
             .values(deleted_at=now)
         )
         for item in items:
+            norm_cond = _normalize_conditions(item.get("conditions"))
+            await _validate_trigger_slugs(self.session, org_id, norm_cond.get("trigger_type_slugs", []))
             self.session.add(AgentRoutingRule(
                 org_id=org_id,
                 project_id=project_id,
@@ -208,7 +239,7 @@ class AgentRoutingRuleRepository:
                 name=str(item.get("name") or ""),
                 priority=item.get("priority", 100),
                 match_type=str(item.get("match_type") or _DEFAULT_MATCH_TYPE),
-                conditions=_normalize_conditions(item.get("conditions")),
+                conditions=norm_cond,
                 action=_normalize_action(item.get("action")),
                 target_runtime=str(item.get("target_runtime") or _DEFAULT_RUNTIME),
                 target_model=item.get("target_model"),
