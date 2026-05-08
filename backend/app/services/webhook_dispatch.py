@@ -1,4 +1,4 @@
-"""Shared webhook dispatch utility — extracted from deployment_lifecycle."""
+"""Shared webhook dispatch utility."""
 from __future__ import annotations
 
 import hashlib
