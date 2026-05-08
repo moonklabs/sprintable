@@ -907,6 +907,7 @@ export default function SettingsPage() {
                                     {!agent.is_active ? <Badge variant="destructive">inactive</Badge> : null}
                                   </div>
                                 </div>
+                                {isAdmin ? (
                                 <Button
                                   variant="glass"
                                   size="sm"
@@ -915,6 +916,7 @@ export default function SettingsPage() {
                                 >
                                   {deactivatingAgentId === agent.id ? '...' : agent.is_active ? t('deactivateAgent') : t('activateAgent')}
                                 </Button>
+                                ) : null}
                               </div>
                             );
                           })}
@@ -1222,6 +1224,7 @@ export default function SettingsPage() {
               )}
             </TabsContent>
 
+            {adminChecked && isAdmin ? (
             <TabsContent value="integrations">
               <div className="space-y-6">
                 <SlackIntegrationSettingsSection />
@@ -1282,7 +1285,9 @@ export default function SettingsPage() {
                 </SectionCard>
               </div>
             </TabsContent>
+            ) : null}
 
+            {adminChecked && isAdmin ? (
             <TabsContent value="subscription">
               <SectionCard>
                 <SectionCardHeader>
@@ -1317,6 +1322,7 @@ export default function SettingsPage() {
                 </SectionCardBody>
               </SectionCard>
             </TabsContent>
+            ) : null}
 
             {adminChecked && isAdmin && orgId ? (
               <TabsContent value="usage">
