@@ -287,6 +287,29 @@ async def test_status_transition_each_step_200(from_status: str, to_status: str)
 
 
 @pytest.mark.anyio
+@pytest.mark.parametrize("status", ["backlog", "ready-for-dev", "in-progress", "in-review", "done"])
+async def test_status_same_status_idempotent_200(status: str):
+    """동일 status로 PATCH → 200 idempotent (no-op)."""
+    client, session, app = await _client()
+    try:
+        story = _mock_story(status)
+        mock_result = MagicMock()
+        mock_result.scalar_one_or_none.return_value = story
+        session.execute = AsyncMock(return_value=mock_result)
+
+        async with client as c:
+            resp = await c.patch(
+                f"/api/v2/stories/{STORY_ID}/status",
+                json={"status": status},
+            )
+
+        assert resp.status_code == 200
+        assert resp.json()["status"] == status
+    finally:
+        app.dependency_overrides.clear()
+
+
+@pytest.mark.anyio
 @pytest.mark.parametrize("from_status,to_status", [
     ("done", "in-review"),
     ("in-review", "in-progress"),

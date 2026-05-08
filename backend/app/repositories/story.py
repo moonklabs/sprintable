@@ -31,7 +31,9 @@ class StoryRepository(BaseRepository[Story]):
         if new_status not in STORY_STATUSES:
             raise ValueError(f"Invalid status: {new_status}")
 
-        # 순차 전이 검증
+        if new_status == story.status:
+            return story
+
         current_idx = list(STORY_STATUSES).index(story.status)
         new_idx = list(STORY_STATUSES).index(new_status)
         if new_idx != current_idx + 1:
