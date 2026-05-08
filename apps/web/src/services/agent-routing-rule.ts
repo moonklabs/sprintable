@@ -575,6 +575,7 @@ export class AgentRoutingRuleService {
   }
 
   async replaceRules(input: ReplaceRoutingRulesInput): Promise<RoutingRuleSummary[]> {
+    if (!this.accessToken) throw new Error('replaceRules requires accessToken');
     const scope = { orgId: input.orgId, projectId: input.projectId };
     const currentRules = await this.listRules(scope);
     const rolloutSavedAt = new Date().toISOString();
@@ -677,7 +678,7 @@ export class AgentRoutingRuleService {
       return prev && JSON.stringify(createRoutingRuleSnapshotItem(prev)) !== JSON.stringify(createRoutingRuleSnapshotItem(r));
     }).length;
 
-    await fetch(`${FASTAPI_URL()}/api/v2/workflow-versions`, {
+    const versionRes = await fetch(`${FASTAPI_URL()}/api/v2/workflow-versions`, {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
@@ -691,6 +692,10 @@ export class AgentRoutingRuleService {
         created_by: input.actorId,
       }),
     });
+    if (!versionRes.ok) {
+      const body = await versionRes.json().catch(() => ({}));
+      throw new Error(body?.error?.message ?? `workflow version save failed: ${versionRes.status}`);
+    }
   }
 
   async listVersions(scope: RoutingScope): Promise<WorkflowVersionSummary[]> {
@@ -769,6 +774,7 @@ export class AgentRoutingRuleService {
   }
 
   async reorderPriorities(scope: RoutingScope, updates: RoutingPriorityUpdate[]): Promise<RoutingRuleSummary[]> {
+    if (!this.accessToken) throw new Error('reorderPriorities requires accessToken');
     const cleaned = updates.map((item) => ({ id: item.id, priority: item.priority }));
     const reorderRes = await fetch(`${FASTAPI_URL()}/api/v2/agent-routing-rules`, {
       method: 'PATCH',
