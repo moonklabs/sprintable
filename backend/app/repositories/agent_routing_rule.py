@@ -5,7 +5,7 @@ import uuid
 from datetime import datetime, timezone
 from typing import Any
 
-from sqlalchemy import select, text, update
+from sqlalchemy import select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models.agent_routing_rule import AgentRoutingRule
@@ -188,15 +188,34 @@ class AgentRoutingRuleRepository:
         actor_id: uuid.UUID,
         items: list[dict],
     ) -> list[RoutingRuleResponse]:
+        now = datetime.now(timezone.utc)
         await self.session.execute(
-            text("SELECT replace_agent_routing_rules(:org_id, :project_id, :actor_id, CAST(:rules AS jsonb))"),
-            {
-                "org_id": str(org_id),
-                "project_id": str(project_id),
-                "actor_id": str(actor_id),
-                "rules": json.dumps(items),
-            },
+            update(AgentRoutingRule)
+            .where(
+                AgentRoutingRule.org_id == org_id,
+                AgentRoutingRule.project_id == project_id,
+                AgentRoutingRule.deleted_at.is_(None),
+            )
+            .values(deleted_at=now)
         )
+        for item in items:
+            self.session.add(AgentRoutingRule(
+                org_id=org_id,
+                project_id=project_id,
+                agent_id=uuid.UUID(str(item["agent_id"])),
+                persona_id=uuid.UUID(str(item["persona_id"])) if item.get("persona_id") else None,
+                deployment_id=uuid.UUID(str(item["deployment_id"])) if item.get("deployment_id") else None,
+                name=str(item.get("name") or ""),
+                priority=item.get("priority", 100),
+                match_type=str(item.get("match_type") or _DEFAULT_MATCH_TYPE),
+                conditions=_normalize_conditions(item.get("conditions")),
+                action=_normalize_action(item.get("action")),
+                target_runtime=str(item.get("target_runtime") or _DEFAULT_RUNTIME),
+                target_model=item.get("target_model"),
+                is_enabled=item.get("is_enabled", True),
+                rule_metadata=item.get("metadata") or {},
+                created_by=actor_id,
+            ))
         await self.session.flush()
         return await self.list(org_id, project_id)
 

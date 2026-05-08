@@ -1,32 +1,24 @@
 import { NextResponse } from 'next/server';
-import { getMyTeamMember } from '@/lib/auth-helpers';
+import { fastapiCall } from '@/lib/fastapi-proxy';
 import { ApiErrors } from '@/lib/api-response';
-import { buildSlackConnectUrl } from '@/services/slack-channel-mapping';
+import { getServerSession } from '@/lib/db/server';
 
 export async function GET() {
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  const db: any = null;
-  const me = await getMyTeamMember(db, null as unknown);
-  if (!me) return ApiErrors.forbidden('Team member not found');
+  const session = await getServerSession();
+  if (!session?.access_token) return ApiErrors.unauthorized();
 
-  const { data: orgMember } = await db
-    .from('org_members')
-    .select('role')
-    .eq('org_id', me.org_id)
-    .eq('user_id', me.id)
-    .maybeSingle();
-
-  if (!orgMember || !['owner', 'admin'].includes(orgMember.role as string)) {
-    return ApiErrors.forbidden('Admin access required');
+  try {
+    const result = await fastapiCall<{ data: { url: string } }>(
+      'GET',
+      '/api/v2/integrations/slack/connect',
+      session.access_token,
+    );
+    return NextResponse.redirect(result.data.url);
+  } catch (err: unknown) {
+    const status = err instanceof Error && err.message.includes('403') ? 403 : 400;
+    return NextResponse.json(
+      { data: null, error: { code: 'FAILED', message: String(err) }, meta: null },
+      { status },
+    );
   }
-
-  const clientId = process.env['SLACK_CLIENT_ID'];
-  const redirectUri = process.env['SLACK_REDIRECT_URI'];
-  if (!clientId || !redirectUri) {
-    return ApiErrors.badRequest('Slack OAuth is not configured');
-  }
-
-  const state = Buffer.from(JSON.stringify({ orgId: me.org_id, projectId: me.project_id, source: 'slack-settings' })).toString('base64url');
-  const url = buildSlackConnectUrl({ clientId, redirectUri, state });
-  return NextResponse.redirect(url);
 }
