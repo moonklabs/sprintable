@@ -30,6 +30,9 @@ from app.core.security import (
 )
 from app.dependencies.auth import AuthContext, get_current_user
 from app.dependencies.database import get_db
+from app.models.invitation import Invitation
+from app.models.project import OrgMember
+from app.models.team import TeamMember
 from app.models.user import RefreshToken, User
 
 from datetime import timedelta
@@ -119,9 +122,50 @@ async def _build_app_metadata(user: User, session: AsyncSession) -> dict:
             member.user_id = user.id
 
     if not member:
+        # 3. 이메일로 pending 초대 조회 → 자동 수락 + org_member + team_member 생성
+        inv_result = await session.execute(
+            select(Invitation).where(
+                Invitation.email == user.email,
+                Invitation.status == "pending",
+                Invitation.expires_at > datetime.now(timezone.utc),
+            ).order_by(Invitation.created_at.asc()).limit(1)
+        )
+        inv = inv_result.scalar_one_or_none()
+        if inv:
+            inv.status = "accepted"
+            inv.accepted_at = datetime.now(timezone.utc)
+            from sqlalchemy.dialects.postgresql import insert as pg_insert
+            await session.execute(
+                pg_insert(OrgMember)
+                .values(org_id=inv.org_id, user_id=user.id, role=inv.role)
+                .on_conflict_do_nothing(constraint="uq_org_members_org_user")
+            )
+            if inv.project_id:
+                existing_tm = await session.execute(
+                    select(TeamMember).where(
+                        TeamMember.project_id == inv.project_id,
+                        TeamMember.user_id == user.id,
+                        TeamMember.is_active.is_(True),
+                    )
+                )
+                if not existing_tm.scalar_one_or_none():
+                    new_member = TeamMember(
+                        org_id=inv.org_id,
+                        project_id=inv.project_id,
+                        user_id=user.id,
+                        type="human",
+                        name=inv.email.split("@")[0],
+                        role=inv.role,
+                    )
+                    session.add(new_member)
+            await session.flush()
+            return {
+                "org_id": str(inv.org_id),
+                "project_id": str(inv.project_id) if inv.project_id else "",
+            }
         return {}
 
-    # 3. 같은 org의 user_id NULL 레코드 전량 백필 (교차 프로젝트 멤버십 해소)
+    # 4. 같은 org의 user_id NULL 레코드 전량 백필 (교차 프로젝트 멤버십 해소)
     await session.execute(
         update(TeamMember)
         .where(
