@@ -1,5 +1,5 @@
 import uuid
-from datetime import datetime
+from datetime import datetime, timezone
 
 from fastapi import APIRouter, Body, Depends, Header, HTTPException, Query, status
 from pydantic import BaseModel
@@ -132,6 +132,11 @@ async def update_story_status(
 
     if old_status != story.status:
         org_id = repo.org_id
+        actor_id: uuid.UUID | None = None
+        try:
+            actor_id = await _resolve_team_member_id(auth, org_id, db)
+        except Exception:
+            pass
         event_data = {
             "story_id": str(id),
             "story_title": story.title,
@@ -139,26 +144,28 @@ async def update_story_status(
             "old_status": old_status,
             "project_id": str(story.project_id),
             "org_id": str(org_id),
+            "actor_id": str(actor_id) if actor_id else None,
+            "timestamp": datetime.now(timezone.utc).isoformat(),
         }
         publish_event(str(org_id), "story.status_changed", event_data)
         try:
             await fire_webhooks(db, org_id, "story.status_changed", event_data)
         except Exception:
             pass
-        try:
-            actor_id = await _resolve_team_member_id(auth, org_id, db)
-            db.add(StoryActivity(
-                story_id=id,
-                org_id=org_id,
-                project_id=story.project_id,
-                activity_type="status_changed",
-                old_value=old_status,
-                new_value=story.status,
-                created_by=actor_id,
-            ))
-            await db.flush()
-        except Exception:
-            pass
+        if actor_id:
+            try:
+                db.add(StoryActivity(
+                    story_id=id,
+                    org_id=org_id,
+                    project_id=story.project_id,
+                    activity_type="status_changed",
+                    old_value=old_status,
+                    new_value=story.status,
+                    created_by=actor_id,
+                ))
+                await db.flush()
+            except Exception:
+                pass
 
     return StoryResponse.model_validate(story)
 
