@@ -34,7 +34,7 @@ class StoryRepository(BaseRepository[Story]):
         # 순차 전이 검증
         current_idx = list(STORY_STATUSES).index(story.status)
         new_idx = list(STORY_STATUSES).index(new_status)
-        if abs(new_idx - current_idx) > 1:
+        if new_idx != current_idx + 1:
             raise ValueError(
                 f"Non-sequential transition not allowed: {story.status} → {new_status}"
             )

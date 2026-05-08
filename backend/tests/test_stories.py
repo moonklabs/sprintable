@@ -226,3 +226,87 @@ async def test_status_transition_invalid_400():
         assert resp.status_code == 400
     finally:
         app.dependency_overrides.clear()
+
+
+@pytest.mark.anyio
+async def test_status_update_returns_new_value_not_stale():
+    """update() ORM setattr 방식 — 항상 동일 객체 반환해도 setattr된 새 값이 나와야 함."""
+    client, session, app = await _client()
+    try:
+        original = _mock_story("backlog")
+
+        async def mock_execute(stmt, *args, **kwargs):
+            result = MagicMock()
+            result.scalar_one_or_none.return_value = original
+            return result
+
+        session.execute = mock_execute
+
+        async with client as c:
+            resp = await c.patch(
+                f"/api/v2/stories/{STORY_ID}/status",
+                json={"status": "ready-for-dev"},
+            )
+
+        assert resp.status_code == 200
+        assert resp.json()["status"] == "ready-for-dev"
+        assert resp.json()["status"] != "backlog"
+    finally:
+        app.dependency_overrides.clear()
+
+
+@pytest.mark.anyio
+@pytest.mark.parametrize("from_status,to_status", [
+    ("ready-for-dev", "in-progress"),
+    ("in-progress", "in-review"),
+    ("in-review", "done"),
+])
+async def test_status_transition_each_step_200(from_status: str, to_status: str):
+    """순차 전이 각 단계 성공."""
+    client, session, app = await _client()
+    try:
+        story = _mock_story(from_status)
+
+        async def mock_execute(stmt, *args, **kwargs):
+            result = MagicMock()
+            result.scalar_one_or_none.return_value = story
+            return result
+
+        session.execute = mock_execute
+
+        async with client as c:
+            resp = await c.patch(
+                f"/api/v2/stories/{STORY_ID}/status",
+                json={"status": to_status},
+            )
+
+        assert resp.status_code == 200
+        assert resp.json()["status"] == to_status
+    finally:
+        app.dependency_overrides.clear()
+
+
+@pytest.mark.anyio
+@pytest.mark.parametrize("from_status,to_status", [
+    ("done", "in-review"),
+    ("in-review", "in-progress"),
+    ("ready-for-dev", "backlog"),
+])
+async def test_status_backward_transition_400(from_status: str, to_status: str):
+    """역방향 전이 거부 → 400."""
+    client, session, app = await _client()
+    try:
+        story = _mock_story(from_status)
+        mock_result = MagicMock()
+        mock_result.scalar_one_or_none.return_value = story
+        session.execute = AsyncMock(return_value=mock_result)
+
+        async with client as c:
+            resp = await c.patch(
+                f"/api/v2/stories/{STORY_ID}/status",
+                json={"status": to_status},
+            )
+
+        assert resp.status_code == 400
+    finally:
+        app.dependency_overrides.clear()
