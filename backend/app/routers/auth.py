@@ -106,23 +106,7 @@ async def _build_app_metadata(user: User, session: AsyncSession) -> dict:
         member.user_id = user.id
 
     if not member:
-        # 2. user_id NULL human team_member 중 첫 번째에 자동 연결
-        result2 = await session.execute(
-            select(TeamMember)
-            .where(
-                TeamMember.user_id.is_(None),
-                TeamMember.is_active.is_(True),
-                TeamMember.type == "human",
-            )
-            .order_by(TeamMember.created_at.asc())
-            .limit(1)
-        )
-        member = result2.scalar_one_or_none()
-        if member:
-            member.user_id = user.id
-
-    if not member:
-        # 3. 이메일로 pending 초대 조회 → 자동 수락 + org_member + team_member 생성
+        # 2. 이메일로 pending 초대 조회 → 자동 수락 + org_member + team_member 생성
         inv_result = await session.execute(
             select(Invitation).where(
                 Invitation.email == user.email,
@@ -164,19 +148,27 @@ async def _build_app_metadata(user: User, session: AsyncSession) -> dict:
                 "project_id": str(inv.project_id) if inv.project_id else "",
                 "role": inv.role,
             }
-        return {}
 
-    # 4. 같은 org의 user_id NULL 레코드 전량 백필 (교차 프로젝트 멤버십 해소)
-    await session.execute(
-        update(TeamMember)
-        .where(
-            TeamMember.user_id.is_(None),
-            TeamMember.is_active.is_(True),
-            TeamMember.type == "human",
-            TeamMember.org_id == member.org_id,
+    if not member:
+        # 3. legacy fallback — email prefix name으로 연결되지 않은 human 레코드 단건 연결
+        email_name = user.email.split("@")[0]
+        result2 = await session.execute(
+            select(TeamMember)
+            .where(
+                TeamMember.user_id.is_(None),
+                TeamMember.is_active.is_(True),
+                TeamMember.type == "human",
+                TeamMember.name == email_name,
+            )
+            .order_by(TeamMember.created_at.asc())
+            .limit(1)
         )
-        .values(user_id=user.id)
-    )
+        member = result2.scalar_one_or_none()
+        if member:
+            member.user_id = user.id
+
+    if not member:
+        return {}
 
     return {
         "org_id": str(member.org_id),
