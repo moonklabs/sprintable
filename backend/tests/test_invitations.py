@@ -182,15 +182,20 @@ async def test_resend_invitation_404_when_revoked():
 async def test_accept_invitation_200():
     client, session, app = await _client()
     try:
-        accepted = _mock_invitation("accepted")
-        with patch("app.repositories.invitation.InvitationRepository.accept", new_callable=AsyncMock) as mock_accept:
-            mock_accept.return_value = accepted
+        inv = _mock_invitation("pending")
+        inv_result = MagicMock()
+        inv_result.scalar_one_or_none.return_value = inv
+        tm_result = MagicMock()
+        tm_result.scalar_one_or_none.return_value = None
+        session.execute = AsyncMock(side_effect=[inv_result, MagicMock(), tm_result])
+        session.flush = AsyncMock()
 
-            async with client as c:
-                resp = await c.post("/api/v2/invitations/accept", json={"token": TOKEN})
+        async with client as c:
+            resp = await c.post("/api/v2/invitations/accept", json={"token": TOKEN})
 
         assert resp.status_code == 200
         assert resp.json()["ok"] is True
+        assert resp.json()["org_id"] == str(ORG_ID)
     finally:
         app.dependency_overrides.clear()
 
@@ -199,12 +204,43 @@ async def test_accept_invitation_200():
 async def test_accept_invitation_400_invalid_token():
     client, session, app = await _client()
     try:
-        with patch("app.repositories.invitation.InvitationRepository.accept", new_callable=AsyncMock) as mock_accept:
-            mock_accept.return_value = None
+        inv_result = MagicMock()
+        inv_result.scalar_one_or_none.return_value = None
+        session.execute = AsyncMock(return_value=inv_result)
 
-            async with client as c:
-                resp = await c.post("/api/v2/invitations/accept", json={"token": "badtoken"})
+        async with client as c:
+            resp = await c.post("/api/v2/invitations/accept", json={"token": "badtoken"})
 
         assert resp.status_code == 400
+    finally:
+        app.dependency_overrides.clear()
+
+
+@pytest.mark.anyio
+async def test_accept_invitation_creates_org_and_team_member():
+    """직접 생성 경로: OrgMember + TeamMember 생성 호출 검증."""
+    client, session, app = await _client()
+    try:
+        inv = _mock_invitation("pending")
+        inv_result = MagicMock()
+        inv_result.scalar_one_or_none.return_value = inv
+        tm_result = MagicMock()
+        tm_result.scalar_one_or_none.return_value = None  # 중복 없음
+        org_exec_result = MagicMock()
+        session.execute = AsyncMock(side_effect=[inv_result, org_exec_result, tm_result])
+        session.flush = AsyncMock()
+        session.add = MagicMock()
+
+        async with client as c:
+            resp = await c.post("/api/v2/invitations/accept", json={"token": TOKEN})
+
+        assert resp.status_code == 200
+        assert resp.json()["org_id"] == str(ORG_ID)
+        assert resp.json()["project_id"] == str(PROJECT_ID)
+        # OrgMember INSERT + TeamMember 중복체크 실행 확인
+        assert session.execute.call_count == 3
+        # TeamMember session.add 호출 확인
+        assert session.add.called
+        assert session.flush.called
     finally:
         app.dependency_overrides.clear()

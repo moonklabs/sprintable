@@ -141,14 +141,23 @@ async def _build_app_metadata(user: User, session: AsyncSession) -> dict:
                 .on_conflict_do_nothing(constraint="uq_org_members_org_user")
             )
             if inv.project_id:
-                new_member = TeamMember(
-                    org_id=inv.org_id,
-                    project_id=inv.project_id,
-                    user_id=user.id,
-                    type="human",
-                    role=inv.role,
+                existing_tm = await session.execute(
+                    select(TeamMember).where(
+                        TeamMember.project_id == inv.project_id,
+                        TeamMember.user_id == user.id,
+                        TeamMember.is_active.is_(True),
+                    )
                 )
-                session.add(new_member)
+                if not existing_tm.scalar_one_or_none():
+                    new_member = TeamMember(
+                        org_id=inv.org_id,
+                        project_id=inv.project_id,
+                        user_id=user.id,
+                        type="human",
+                        name=inv.email.split("@")[0],
+                        role=inv.role,
+                    )
+                    session.add(new_member)
             await session.flush()
             return {
                 "org_id": str(inv.org_id),
