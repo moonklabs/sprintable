@@ -94,6 +94,9 @@ export function KanbanBoard({ projectId }: KanbanBoardProps) {
   const [showSearch, setShowSearch] = useState(false);
   const [assigneeTypeFilter, setAssigneeTypeFilter] = useState<'' | 'human' | 'agent'>('');
   const [viewMode, setViewMode] = useState<'board' | 'list'>('board');
+  const [sprintSearch, setSprintSearch] = useState('');
+  const [epicSearch, setEpicSearch] = useState('');
+  const [assigneeSearch, setAssigneeSearch] = useState('');
 
   const updateFilter = useCallback((key: string, value: string) => {
     const params = new URLSearchParams(searchParams.toString());
@@ -566,7 +569,7 @@ export function KanbanBoard({ projectId }: KanbanBoardProps) {
           <div className="mx-1 h-4 w-px bg-border/60" />
 
           {/* Sprint chip */}
-          <DropdownMenu>
+          <DropdownMenu onOpenChange={(open) => { if (!open) setSprintSearch(''); }}>
             <DropdownMenuTrigger
               render={
                 <button
@@ -584,21 +587,40 @@ export function KanbanBoard({ projectId }: KanbanBoardProps) {
                 </button>
               }
             />
-            <DropdownMenuContent align="start" className="w-56 max-h-[60vh] overflow-y-auto">
-              <DropdownMenuGroup>
-                <DropdownMenuLabel className="text-xs text-muted-foreground">{t('sprints')}</DropdownMenuLabel>
-                <DropdownMenuSeparator />
-                <DropdownMenuItem onClick={() => updateFilter('sprint_id', '')}>
-                  <span className="flex-1">{t('allSprints')}</span>
-                  {!selectedSprintId && <Check className="size-3.5 text-primary" />}
-                </DropdownMenuItem>
-                {sprints.map((s) => (
-                  <DropdownMenuItem key={s.id} onClick={() => updateFilter('sprint_id', s.id)}>
-                    <span className="flex-1 truncate">{s.title}</span>
-                    {s.id === selectedSprintId && <Check className="size-3.5 text-primary" />}
+            <DropdownMenuContent align="start" className="w-56">
+              <div className="p-1">
+                <Input
+                  autoFocus
+                  value={sprintSearch}
+                  onChange={(e) => setSprintSearch(e.target.value)}
+                  onKeyDown={(e) => e.stopPropagation()}
+                  placeholder={t('searchSprints')}
+                  className="h-7 text-xs"
+                />
+              </div>
+              <DropdownMenuSeparator />
+              <div className="max-h-[50vh] overflow-y-auto">
+                <DropdownMenuGroup>
+                  <DropdownMenuItem onClick={() => updateFilter('sprint_id', '')}>
+                    <span className="flex-1">{t('allSprints')}</span>
+                    {!selectedSprintId && <Check className="size-3.5 text-primary" />}
                   </DropdownMenuItem>
-                ))}
-                <DropdownMenuSeparator />
+                  {(() => {
+                    const filtered = sprints.filter((s) => s.title.toLowerCase().includes(sprintSearch.toLowerCase()));
+                    if (filtered.length === 0) {
+                      return <div className="px-2 py-1.5 text-xs text-muted-foreground">{t('noResults')}</div>;
+                    }
+                    return filtered.map((s) => (
+                      <DropdownMenuItem key={s.id} onClick={() => updateFilter('sprint_id', s.id)}>
+                        <span className="flex-1 truncate">{s.title}</span>
+                        {s.id === selectedSprintId && <Check className="size-3.5 text-primary" />}
+                      </DropdownMenuItem>
+                    ));
+                  })()}
+                </DropdownMenuGroup>
+              </div>
+              <DropdownMenuSeparator />
+              <DropdownMenuGroup>
                 <DropdownMenuItem onClick={() => router.push('/sprints')}>
                   <span className="flex-1 text-xs text-muted-foreground">{t('manageSprints')}</span>
                 </DropdownMenuItem>
@@ -607,7 +629,7 @@ export function KanbanBoard({ projectId }: KanbanBoardProps) {
           </DropdownMenu>
 
           {/* Epic chip */}
-          <DropdownMenu>
+          <DropdownMenu onOpenChange={(open) => { if (!open) setEpicSearch(''); }}>
             <DropdownMenuTrigger
               render={
                 <button
@@ -625,21 +647,40 @@ export function KanbanBoard({ projectId }: KanbanBoardProps) {
                 </button>
               }
             />
-            <DropdownMenuContent align="start" className="w-56 max-h-[60vh] overflow-y-auto">
-              <DropdownMenuGroup>
-                <DropdownMenuLabel className="text-xs text-muted-foreground">{t('epics')}</DropdownMenuLabel>
-                <DropdownMenuSeparator />
-                <DropdownMenuItem onClick={() => updateFilter('epic_id', '')}>
-                  <span className="flex-1">{t('allEpics')}</span>
-                  {!selectedEpicId && <Check className="size-3.5 text-primary" />}
-                </DropdownMenuItem>
-                {epics.map((e) => (
-                  <DropdownMenuItem key={e.id} onClick={() => updateFilter('epic_id', e.id)}>
-                    <span className="flex-1 truncate">{e.title}</span>
-                    {e.id === selectedEpicId && <Check className="size-3.5 text-primary" />}
+            <DropdownMenuContent align="start" className="w-56">
+              <div className="p-1">
+                <Input
+                  autoFocus
+                  value={epicSearch}
+                  onChange={(e) => setEpicSearch(e.target.value)}
+                  onKeyDown={(e) => e.stopPropagation()}
+                  placeholder={t('searchEpics')}
+                  className="h-7 text-xs"
+                />
+              </div>
+              <DropdownMenuSeparator />
+              <div className="max-h-[50vh] overflow-y-auto">
+                <DropdownMenuGroup>
+                  <DropdownMenuItem onClick={() => updateFilter('epic_id', '')}>
+                    <span className="flex-1">{t('allEpics')}</span>
+                    {!selectedEpicId && <Check className="size-3.5 text-primary" />}
                   </DropdownMenuItem>
-                ))}
-                <DropdownMenuSeparator />
+                  {(() => {
+                    const filtered = epics.filter((e) => e.title.toLowerCase().includes(epicSearch.toLowerCase()));
+                    if (filtered.length === 0) {
+                      return <div className="px-2 py-1.5 text-xs text-muted-foreground">{t('noResults')}</div>;
+                    }
+                    return filtered.map((e) => (
+                      <DropdownMenuItem key={e.id} onClick={() => updateFilter('epic_id', e.id)}>
+                        <span className="flex-1 truncate">{e.title}</span>
+                        {e.id === selectedEpicId && <Check className="size-3.5 text-primary" />}
+                      </DropdownMenuItem>
+                    ));
+                  })()}
+                </DropdownMenuGroup>
+              </div>
+              <DropdownMenuSeparator />
+              <DropdownMenuGroup>
                 <DropdownMenuItem onClick={() => router.push('/epics')}>
                   <span className="flex-1 text-xs text-muted-foreground">{t('manageEpics')}</span>
                 </DropdownMenuItem>
@@ -648,7 +689,7 @@ export function KanbanBoard({ projectId }: KanbanBoardProps) {
           </DropdownMenu>
 
           {/* Assignee chip */}
-          <DropdownMenu>
+          <DropdownMenu onOpenChange={(open) => { if (!open) setAssigneeSearch(''); }}>
             <DropdownMenuTrigger
               render={
                 <button
@@ -666,21 +707,63 @@ export function KanbanBoard({ projectId }: KanbanBoardProps) {
                 </button>
               }
             />
-            <DropdownMenuContent align="start" className="w-56 max-h-[60vh] overflow-y-auto">
-              <DropdownMenuGroup>
-                <DropdownMenuLabel className="text-xs text-muted-foreground">{t('assignees')}</DropdownMenuLabel>
-                <DropdownMenuSeparator />
-                <DropdownMenuItem onClick={() => updateFilter('assignee_id', '')}>
-                  <span className="flex-1">{t('allAssignees')}</span>
-                  {!selectedAssigneeId && <Check className="size-3.5 text-primary" />}
-                </DropdownMenuItem>
-                {members.map((m) => (
-                  <DropdownMenuItem key={m.id} onClick={() => updateFilter('assignee_id', m.id)}>
-                    <span className="flex-1 truncate">{m.name}</span>
-                    {m.id === selectedAssigneeId && <Check className="size-3.5 text-primary" />}
+            <DropdownMenuContent align="start" className="w-56">
+              <div className="p-1">
+                <Input
+                  autoFocus
+                  value={assigneeSearch}
+                  onChange={(e) => setAssigneeSearch(e.target.value)}
+                  onKeyDown={(e) => e.stopPropagation()}
+                  placeholder={t('searchAssignees')}
+                  className="h-7 text-xs"
+                />
+              </div>
+              <DropdownMenuSeparator />
+              <div className="max-h-[50vh] overflow-y-auto">
+                <DropdownMenuGroup>
+                  <DropdownMenuItem onClick={() => updateFilter('assignee_id', '')}>
+                    <span className="flex-1">{t('allAssignees')}</span>
+                    {!selectedAssigneeId && <Check className="size-3.5 text-primary" />}
                   </DropdownMenuItem>
-                ))}
-              </DropdownMenuGroup>
+                </DropdownMenuGroup>
+                {(() => {
+                  const q = assigneeSearch.toLowerCase();
+                  const humans = members.filter((m) => m.type !== 'agent' && m.name.toLowerCase().includes(q));
+                  const agents = members.filter((m) => m.type === 'agent' && m.name.toLowerCase().includes(q));
+                  const hasResults = humans.length > 0 || agents.length > 0;
+                  if (!hasResults) {
+                    return <div className="px-2 py-1.5 text-xs text-muted-foreground">{t('noResults')}</div>;
+                  }
+                  return (
+                    <>
+                      {humans.length > 0 && (
+                        <DropdownMenuGroup>
+                          <DropdownMenuSeparator />
+                          <DropdownMenuLabel className="text-xs text-muted-foreground">{t('filterMembers')}</DropdownMenuLabel>
+                          {humans.map((m) => (
+                            <DropdownMenuItem key={m.id} onClick={() => updateFilter('assignee_id', m.id)}>
+                              <span className="flex-1 truncate">{m.name}</span>
+                              {m.id === selectedAssigneeId && <Check className="size-3.5 text-primary" />}
+                            </DropdownMenuItem>
+                          ))}
+                        </DropdownMenuGroup>
+                      )}
+                      {agents.length > 0 && (
+                        <DropdownMenuGroup>
+                          <DropdownMenuSeparator />
+                          <DropdownMenuLabel className="text-xs text-muted-foreground">{t('filterAgents')}</DropdownMenuLabel>
+                          {agents.map((m) => (
+                            <DropdownMenuItem key={m.id} onClick={() => updateFilter('assignee_id', m.id)}>
+                              <span className="flex-1 truncate">{m.name}</span>
+                              {m.id === selectedAssigneeId && <Check className="size-3.5 text-primary" />}
+                            </DropdownMenuItem>
+                          ))}
+                        </DropdownMenuGroup>
+                      )}
+                    </>
+                  );
+                })()}
+              </div>
             </DropdownMenuContent>
           </DropdownMenu>
         </div>

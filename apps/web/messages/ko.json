@@ -160,7 +160,11 @@
     "save": "저장",
     "cancel": "취소",
     "edit": "편집",
-    "addDescription": "설명 추가"
+    "addDescription": "설명 추가",
+    "searchSprints": "스프린트 검색...",
+    "searchEpics": "에픽 검색...",
+    "searchAssignees": "담당자 검색...",
+    "noResults": "결과 없음"
   },
   "memos": {
     "title": "메모",
