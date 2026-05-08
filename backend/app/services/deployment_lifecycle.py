@@ -10,10 +10,12 @@ from datetime import datetime, timezone
 from typing import Any
 
 import httpx
-from sqlalchemy import select, text, update
+from sqlalchemy import select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models.agent_deployment import AgentAuditLog, AgentDeployment, AgentPersona
+from app.models.agent_routing_rule import AgentRoutingRule
+from app.repositories.agent_routing_rule import _normalize_action, _normalize_conditions
 from app.models.agent_run import AgentRun
 from app.models.team import TeamMember
 from app.models.webhook_config import WebhookConfig
@@ -130,15 +132,34 @@ def _build_routing_template(agents: list[dict], existing_rule_count: int) -> dic
 
 
 async def _replace_routing_rules(session: AsyncSession, org_id: uuid.UUID, project_id: uuid.UUID, actor_id: uuid.UUID, rules: list[dict]) -> None:
+    now = datetime.now(timezone.utc)
     await session.execute(
-        text("SELECT replace_agent_routing_rules(:org_id, :project_id, :actor_id, CAST(:rules AS jsonb))"),
-        {
-            "org_id": str(org_id),
-            "project_id": str(project_id),
-            "actor_id": str(actor_id),
-            "rules": json.dumps(rules),
-        },
+        update(AgentRoutingRule)
+        .where(
+            AgentRoutingRule.org_id == org_id,
+            AgentRoutingRule.project_id == project_id,
+            AgentRoutingRule.deleted_at.is_(None),
+        )
+        .values(deleted_at=now)
     )
+    for item in rules:
+        session.add(AgentRoutingRule(
+            org_id=org_id,
+            project_id=project_id,
+            agent_id=uuid.UUID(str(item["agent_id"])),
+            persona_id=uuid.UUID(str(item["persona_id"])) if item.get("persona_id") else None,
+            deployment_id=uuid.UUID(str(item["deployment_id"])) if item.get("deployment_id") else None,
+            name=str(item.get("name") or ""),
+            priority=item.get("priority", 100),
+            match_type=str(item.get("match_type") or "event"),
+            conditions=_normalize_conditions(item.get("conditions")),
+            action=_normalize_action(item.get("action")),
+            target_runtime=str(item.get("target_runtime") or "openclaw"),
+            target_model=item.get("target_model"),
+            is_enabled=item.get("is_enabled", True),
+            rule_metadata=item.get("metadata") or {},
+            created_by=actor_id,
+        ))
 
 
 # ---------------------------------------------------------------------------

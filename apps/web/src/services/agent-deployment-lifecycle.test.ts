@@ -532,7 +532,10 @@ describe('AgentDeploymentLifecycleService', () => {
         { id: 'persona-po', org_id: 'org-1', project_id: 'project-1', agent_id: 'agent-2', slug: 'product-owner', config: {}, is_builtin: true, deleted_at: null },
       ],
     });
-    const service = new AgentDeploymentLifecycleService(db as never);
+    const fetchMock = vi.spyOn(global, 'fetch')
+      .mockResolvedValueOnce(new Response(JSON.stringify({ data: [], error: null, meta: null }), { status: 200 }))
+      .mockResolvedValueOnce(new Response(JSON.stringify({ data: {}, error: null, meta: null }), { status: 201 }));
+    const service = new AgentDeploymentLifecycleService(db as never, 'test-token');
 
     await service.createDeployment({
       orgId: 'org-1',
@@ -543,27 +546,26 @@ describe('AgentDeploymentLifecycleService', () => {
       name: 'Developer deployment',
     });
 
-    expect(state.rpcCalls).toContainEqual({
-      fn: 'replace_agent_routing_rules',
-      args: {
-        _org_id: 'org-1',
-        _project_id: 'project-1',
-        _actor_id: 'admin-1',
-        _rules: [
-          expect.objectContaining({
-            agent_id: 'agent-2',
-            conditions: { memo_type: ['requirement', 'user_story'] },
-            metadata: expect.objectContaining({ auto_generated: true, template_id: 'po-dev' }),
-          }),
-          expect.objectContaining({
-            agent_id: 'agent-1',
-            conditions: { memo_type: ['task', 'dev_task'] },
-            deployment_id: 'deployment-created',
-            metadata: expect.objectContaining({ auto_generated: true, template_id: 'po-dev' }),
-          }),
-        ],
-      },
-    });
+    expect(fetchMock).toHaveBeenCalledWith(
+      expect.stringContaining('/api/v2/agent-routing-rules'),
+      expect.objectContaining({ method: 'PUT' }),
+    );
+    const putCall = fetchMock.mock.calls.find(([, opts]) => (opts as RequestInit)?.method === 'PUT');
+    const putBody = JSON.parse((putCall![1] as RequestInit).body as string);
+    expect(putBody.items).toEqual(expect.arrayContaining([
+      expect.objectContaining({
+        agent_id: 'agent-2',
+        conditions: { memo_type: ['requirement', 'user_story'] },
+        metadata: expect.objectContaining({ auto_generated: true, template_id: 'po-dev' }),
+      }),
+      expect.objectContaining({
+        agent_id: 'agent-1',
+        conditions: { memo_type: ['task', 'dev_task'] },
+        deployment_id: 'deployment-created',
+        metadata: expect.objectContaining({ auto_generated: true, template_id: 'po-dev' }),
+      }),
+    ]));
+    fetchMock.mockRestore();
   });
 
   it('blocks deployment until overwrite confirmation is provided for automatic routing replacement', async () => {

@@ -333,7 +333,7 @@ describe('stories tools via pmApi', () => {
 
   it('update_story_status calls PATCH with status', async () => {
     stubFetch((url, init) => {
-      expect(url).toBe('http://test-pm-api/api/stories/story-alpha');
+      expect(url).toBe('http://test-pm-api/api/stories/story-alpha/status');
       const body = JSON.parse(init?.body as string);
       expect(body).toEqual({ status: 'in-progress' });
       return new Response(JSON.stringify({ data: { id: 'story-alpha', status: 'in-progress' } }), { status: 200 });

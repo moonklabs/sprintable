@@ -3,7 +3,7 @@ from datetime import datetime
 
 from fastapi import APIRouter, Body, Depends, Header, HTTPException, Query, status
 from pydantic import BaseModel
-from sqlalchemy import or_, select
+from sqlalchemy import delete, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.dependencies.auth import AuthContext, get_current_user
@@ -161,11 +161,29 @@ async def update_doc(
     id: uuid.UUID,
     body: DocUpdate,
     repo: DocRepository = Depends(_get_repo),
+    session: AsyncSession = Depends(get_db),
 ) -> DocResponse:
     data = body.model_dump(exclude_unset=True)
     doc = await repo.update(id, **data)
     if doc is None:
         raise HTTPException(status_code=404, detail="Doc not found")
+
+    if "content" in data:
+        cutoff_sq = (
+            select(DocRevision.created_at)
+            .where(DocRevision.doc_id == id)
+            .order_by(DocRevision.created_at.desc())
+            .offset(50)
+            .limit(1)
+            .scalar_subquery()
+        )
+        await session.execute(
+            delete(DocRevision).where(
+                DocRevision.doc_id == id,
+                DocRevision.created_at <= cutoff_sq,
+            )
+        )
+
     return DocResponse.model_validate(doc)
 
 

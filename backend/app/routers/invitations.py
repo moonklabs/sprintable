@@ -1,10 +1,15 @@
 import uuid
+from datetime import datetime, timezone
 
 from fastapi import APIRouter, Depends, Header, HTTPException, Query, status
+from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.dependencies.auth import AuthContext, get_current_user
 from app.dependencies.database import get_db
+from app.models.invitation import Invitation
+from app.models.project import OrgMember
+from app.models.team import TeamMember
 from app.repositories.invitation import InvitationRepository
 from app.schemas.invitation import AcceptInvitation, CreateInvitation, InvitationResponse
 
@@ -70,10 +75,50 @@ async def resend_invitation(
 @router.post("/accept", status_code=200)
 async def accept_invitation(
     body: AcceptInvitation,
-    repo: InvitationRepository = Depends(_get_repo),
+    session: AsyncSession = Depends(get_db),
+    auth: AuthContext = Depends(get_current_user),
 ) -> dict:
-    inv = await repo.accept(body.token)
-    if inv is None:
+    result = await session.execute(
+        select(Invitation).where(Invitation.token == body.token)
+    )
+    inv = result.scalar_one_or_none()
+    if inv is None or inv.status != "pending" or inv.expires_at < datetime.now(timezone.utc):
         raise HTTPException(status_code=400, detail="Invalid, expired, or already used token")
-    # Phase D: org_member + team_member 생성은 Supabase RPC(accept_invitation) 위임
+
+    caller_email = auth.claims.get("email", "")
+    if inv.email.lower() != caller_email.lower():
+        raise HTTPException(status_code=403, detail="Invitation was issued to a different email")
+
+    inv.status = "accepted"
+    inv.accepted_at = datetime.now(timezone.utc)
+
+    user_id = uuid.UUID(auth.user_id)
+
+    from sqlalchemy.dialects.postgresql import insert as pg_insert
+    await session.execute(
+        pg_insert(OrgMember)
+        .values(org_id=inv.org_id, user_id=user_id, role=inv.role)
+        .on_conflict_do_nothing(constraint="uq_org_members_org_user")
+    )
+
+    if inv.project_id:
+        existing_tm = await session.execute(
+            select(TeamMember).where(
+                TeamMember.project_id == inv.project_id,
+                TeamMember.user_id == user_id,
+                TeamMember.is_active.is_(True),
+            )
+        )
+        if not existing_tm.scalar_one_or_none():
+            new_member = TeamMember(
+                org_id=inv.org_id,
+                project_id=inv.project_id,
+                user_id=user_id,
+                type="human",
+                name=inv.email.split("@")[0],
+                role=inv.role,
+            )
+            session.add(new_member)
+
+    await session.flush()
     return {"ok": True, "org_id": str(inv.org_id), "project_id": str(inv.project_id) if inv.project_id else None}

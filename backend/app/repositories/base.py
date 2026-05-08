@@ -1,7 +1,7 @@
 import uuid
 from typing import Any, Generic, TypeVar
 
-from sqlalchemy import select, update
+from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.database import Base
@@ -39,12 +39,13 @@ class BaseRepository(Generic[T]):
         return obj
 
     async def update(self, id: uuid.UUID, **data: Any) -> T | None:
-        await self.session.execute(
-            update(self.model)
-            .where(self._org_filter(), self.model.id == id)  # type: ignore[attr-defined]
-            .values(**data)
-        )
-        return await self.get(id)
+        obj = await self.get(id)
+        if obj is None:
+            return None
+        for key, value in data.items():
+            setattr(obj, key, value)
+        await self.session.flush()
+        return obj
 
     async def delete(self, id: uuid.UUID) -> bool:
         obj = await self.get(id)

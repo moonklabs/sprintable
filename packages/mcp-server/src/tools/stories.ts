@@ -109,7 +109,7 @@ export function registerStoriesTools(server: McpServer) {
     status: z.enum(['backlog', 'ready-for-dev', 'in-progress', 'in-review', 'done']),
   }, async ({ story_id, status }) => {
     try {
-      const data = await pmApi(`/api/stories/${encodeURIComponent(story_id)}`, {
+      const data = await pmApi(`/api/stories/${encodeURIComponent(story_id)}/status`, {
         method: 'PATCH',
         body: JSON.stringify({ status }),
       });
