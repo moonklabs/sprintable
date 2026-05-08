@@ -78,8 +78,8 @@ def _to_response(rule: AgentRoutingRule) -> RoutingRuleResponse:
 async def _validate_trigger_slugs(session: AsyncSession, org_id: uuid.UUID, slugs: list[str]) -> None:
     if not slugs:
         return
-    trigger_repo = WorkflowTriggerTypeRepository(session)
-    existing = await trigger_repo.list(org_id)
+    trigger_repo = WorkflowTriggerTypeRepository(session, org_id)
+    existing = await trigger_repo.list()
     valid_slugs = {t.slug for t in existing}
     invalid = [s for s in slugs if s not in valid_slugs]
     if invalid:
