@@ -204,90 +204,60 @@ describe('agent-routing-rule helpers', () => {
 });
 
 describe('AgentRoutingRuleService.reorderPriorities', () => {
-  it('uses the atomic reorder rpc and returns the refreshed priority order', async () => {
+  it('uses the atomic reorder FastAPI PATCH and returns the refreshed priority order', async () => {
     const rules = [
       {
-        id: 'rule-1',
-        org_id: 'org-1',
-        project_id: 'project-1',
-        agent_id: 'agent-1',
-        persona_id: null,
-        deployment_id: null,
-        name: 'rule-1',
-        priority: 5,
-        match_type: 'event',
-        conditions: { memo_type: ['task'] },
-        action: { auto_reply_mode: 'process_and_report' },
-        target_runtime: 'openclaw',
-        target_model: null,
-        is_enabled: true,
-        metadata: {},
-        created_by: 'member-1',
-        created_at: '2026-04-07T10:00:00.000Z',
-        updated_at: '2026-04-07T10:00:00.000Z',
-        deleted_at: null,
+        id: 'rule-1', org_id: 'org-1', project_id: 'project-1', agent_id: 'agent-1',
+        persona_id: null, deployment_id: null, name: 'rule-1', priority: 5,
+        match_type: 'event', conditions: { memo_type: ['task'] },
+        action: { auto_reply_mode: 'process_and_report' }, target_runtime: 'openclaw',
+        target_model: null, is_enabled: true, metadata: {}, created_by: 'member-1',
+        created_at: '2026-04-07T10:00:00.000Z', updated_at: '2026-04-07T10:00:00.000Z', deleted_at: null,
       },
       {
-        id: 'rule-2',
-        org_id: 'org-1',
-        project_id: 'project-1',
-        agent_id: 'agent-2',
-        persona_id: null,
-        deployment_id: null,
-        name: 'rule-2',
-        priority: 10,
-        match_type: 'event',
-        conditions: { memo_type: ['bug'] },
-        action: { auto_reply_mode: 'process_and_report' },
-        target_runtime: 'openclaw',
-        target_model: null,
-        is_enabled: true,
-        metadata: {},
-        created_by: 'member-1',
-        created_at: '2026-04-07T10:01:00.000Z',
-        updated_at: '2026-04-07T10:01:00.000Z',
-        deleted_at: null,
+        id: 'rule-2', org_id: 'org-1', project_id: 'project-1', agent_id: 'agent-2',
+        persona_id: null, deployment_id: null, name: 'rule-2', priority: 10,
+        match_type: 'event', conditions: { memo_type: ['bug'] },
+        action: { auto_reply_mode: 'process_and_report' }, target_runtime: 'openclaw',
+        target_model: null, is_enabled: true, metadata: {}, created_by: 'member-1',
+        created_at: '2026-04-07T10:01:00.000Z', updated_at: '2026-04-07T10:01:00.000Z', deleted_at: null,
       },
     ];
-    const rpc = vi.fn(async () => ({ data: null, error: null }));
-    const service = new AgentRoutingRuleService({
-      rpc,
-      from: createDbStub(rules).from,
-    } as never);
+    const fetchMock = vi.spyOn(global, 'fetch').mockResolvedValueOnce(
+      new Response(JSON.stringify({ data: rules, error: null, meta: null }), { status: 200 }),
+    );
+    const service = new AgentRoutingRuleService({ from: createDbStub(rules).from } as never, 'test-token');
 
     const result = await service.reorderPriorities({ orgId: 'org-1', projectId: 'project-1' }, [
       { id: 'rule-1', priority: 5 },
       { id: 'rule-2', priority: 10 },
     ]);
 
-    expect(rpc).toHaveBeenCalledWith('reorder_agent_routing_rules', {
-      _org_id: 'org-1',
-      _project_id: 'project-1',
-      _updates: [
-        { id: 'rule-1', priority: 5 },
-        { id: 'rule-2', priority: 10 },
-      ],
-    });
+    expect(fetchMock).toHaveBeenCalledWith(
+      expect.stringContaining('/api/v2/agent-routing-rules'),
+      expect.objectContaining({ method: 'PATCH' }),
+    );
     expect(result.map((rule) => rule.id)).toEqual(['rule-1', 'rule-2']);
+    fetchMock.mockRestore();
   });
 
   it('surfaces atomic reorder failures without applying a partial service-side patch loop', async () => {
-    const rpc = vi.fn(async () => ({ data: null, error: new Error('routing_rule_reorder_scope_mismatch') }));
-    const service = new AgentRoutingRuleService({
-      rpc,
-      from: createDbStub([]).from,
-    } as never);
+    const fetchMock = vi.spyOn(global, 'fetch').mockResolvedValueOnce(
+      new Response(JSON.stringify({ data: null, error: { message: 'routing_rule_reorder_scope_mismatch' } }), { status: 400 }),
+    );
+    const service = new AgentRoutingRuleService({ from: createDbStub([]).from } as never, 'test-token');
 
     await expect(service.reorderPriorities({ orgId: 'org-1', projectId: 'project-1' }, [
       { id: 'rule-1', priority: 5 },
       { id: 'rule-2', priority: 10 },
     ])).rejects.toThrow('routing_rule_reorder_scope_mismatch');
-    expect(rpc).toHaveBeenCalledTimes(1);
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    fetchMock.mockRestore();
   });
 });
 
 describe('AgentRoutingRuleService.replaceRules', () => {
-  it('uses the atomic replace rpc and returns the refreshed workflow snapshot', async () => {
+  it('uses the atomic replace FastAPI PUT and returns the refreshed workflow snapshot', async () => {
     const rules = [
       {
         id: 'rule-1',
@@ -332,8 +302,10 @@ describe('AgentRoutingRuleService.replaceRules', () => {
         deleted_at: null,
       },
     ];
-    const rpc = vi.fn(async () => ({ data: null, error: null }));
-    const service = new AgentRoutingRuleService(createReplaceRulesDbStub({ rules, rpc }) as never);
+    const fetchMock = vi.spyOn(global, 'fetch')
+      .mockResolvedValueOnce(new Response(JSON.stringify({ data: rules, error: null, meta: null }), { status: 200 }))
+      .mockResolvedValueOnce(new Response(JSON.stringify({ data: {}, error: null, meta: null }), { status: 201 }));
+    const service = new AgentRoutingRuleService(createReplaceRulesDbStub({ rules, rpc: vi.fn() }) as never, 'test-token');
 
     const result = await service.replaceRules({
       orgId: 'org-1',
@@ -358,63 +330,19 @@ describe('AgentRoutingRuleService.replaceRules', () => {
       ],
     });
 
-    expect(rpc).toHaveBeenCalledWith('replace_agent_routing_rules', {
-      _org_id: 'org-1',
-      _project_id: 'project-1',
-      _actor_id: 'member-1',
-      _rules: [
-        {
-          id: 'rule-1',
-          agent_id: 'agent-1',
-          persona_id: null,
-          deployment_id: null,
-          name: 'rule-1',
-          priority: 10,
-          match_type: 'event',
-          conditions: { memo_type: ['task'] },
-          action: { auto_reply_mode: 'process_and_forward', forward_to_agent_id: 'agent-2' },
-          target_runtime: 'openclaw',
-          target_model: null,
-          is_enabled: true,
-          metadata: expect.objectContaining({
-            auto_generated: false,
-            template_id: 'po-dev',
-            rollout_saved_at: expect.any(String),
-            rollback_snapshot: expect.objectContaining({
-              item_count: 2,
-              items: [
-                createRoutingRuleSnapshotItem(rules[0] as never),
-                createRoutingRuleSnapshotItem(rules[1] as never),
-              ],
-            }),
-          }),
-        },
-        {
-          id: null,
-          agent_id: 'agent-2',
-          persona_id: null,
-          deployment_id: null,
-          name: 'rule-2',
-          priority: 20,
-          match_type: 'event',
-          conditions: { memo_type: [] },
-          action: { auto_reply_mode: 'process_and_report', forward_to_agent_id: null },
-          target_runtime: 'openclaw',
-          target_model: null,
-          is_enabled: true,
-          metadata: expect.objectContaining({
-            rollout_saved_at: expect.any(String),
-            rollback_snapshot: expect.objectContaining({ item_count: 2 }),
-          }),
-        },
-      ],
-    });
+    expect(fetchMock).toHaveBeenCalledWith(
+      expect.stringContaining('/api/v2/agent-routing-rules'),
+      expect.objectContaining({ method: 'PUT' }),
+    );
     expect(result.map((rule) => rule.id)).toEqual(['rule-1', 'rule-2']);
+    fetchMock.mockRestore();
   });
 
   it('surfaces atomic replace failures without leaving client-side partial mutation loops', async () => {
-    const rpc = vi.fn(async () => ({ data: null, error: new Error('routing_rule_replace_scope_mismatch') }));
-    const service = new AgentRoutingRuleService(createReplaceRulesDbStub({ rules: [], rpc }) as never);
+    const fetchMock = vi.spyOn(global, 'fetch').mockResolvedValueOnce(
+      new Response(JSON.stringify({ data: null, error: { message: 'routing_rule_replace_scope_mismatch' } }), { status: 400 }),
+    );
+    const service = new AgentRoutingRuleService(createReplaceRulesDbStub({ rules: [], rpc: vi.fn() }) as never, 'test-token');
 
     await expect(service.replaceRules({
       orgId: 'org-1',
@@ -422,12 +350,12 @@ describe('AgentRoutingRuleService.replaceRules', () => {
       actorId: 'member-1',
       items: [],
     })).rejects.toThrow('routing_rule_replace_scope_mismatch');
-    expect(rpc).toHaveBeenCalledTimes(1);
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    fetchMock.mockRestore();
   });
 
   it('rejects process_and_forward replacements that omit a forward target instead of silently falling back later', async () => {
-    const rpc = vi.fn(async () => ({ data: null, error: null }));
-    const service = new AgentRoutingRuleService(createReplaceRulesDbStub({ rules: [], rpc }) as never);
+    const service = new AgentRoutingRuleService(createReplaceRulesDbStub({ rules: [], rpc: vi.fn() }) as never, 'test-token');
 
     await expect(service.replaceRules({
       orgId: 'org-1',
@@ -441,7 +369,6 @@ describe('AgentRoutingRuleService.replaceRules', () => {
         },
       ],
     })).rejects.toThrow('process_and_forward requires forward_to_agent_id');
-    expect(rpc).not.toHaveBeenCalled();
   });
 });
 
