@@ -302,14 +302,14 @@ export default function SettingsPage() {
   }, [currentProjectId, orgId]);
 
   useEffect(() => {
-    if (!isAdmin || !memberProjectId) return;
+    if (!memberProjectId) return;
     void refreshMemberData(memberProjectId).catch(() => {});
-  }, [isAdmin, memberProjectId]);
+  }, [memberProjectId]);
 
   useEffect(() => {
-    if (!isAdmin) return;
     void refreshOrgAgents().catch(() => {});
-  }, [isAdmin]);
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   // api-keys 탭 접근 시 Members > Agents로 자동 전환 (레거시 리다이렉트)
   useEffect(() => {
@@ -595,7 +595,7 @@ export default function SettingsPage() {
               </>
             ) : null}
 
-            {adminChecked && isAdmin ? (
+            {adminChecked ? (
               <>
                 <span className="truncate px-2 pb-1 pt-4 text-[10px] font-medium uppercase tracking-wider text-muted-foreground/70">{t('organizationSettings')}</span>
                 <TabsTrigger value="projects">
@@ -606,18 +606,22 @@ export default function SettingsPage() {
                   <Users className="h-4 w-4" />
                   {t('tabMembers')}
                 </TabsTrigger>
-                <TabsTrigger value="integrations">
-                  <Zap className="h-4 w-4" />
-                  {t('tabIntegrations')}
-                </TabsTrigger>
-                <TabsTrigger value="subscription">
-                  <CreditCard className="h-4 w-4" />
-                  {t('tabSubscription')}
-                </TabsTrigger>
-                <TabsTrigger value="usage">
-                  <BarChart2 className="h-4 w-4" />
-                  {t('tabUsage')}
-                </TabsTrigger>
+                {isAdmin ? (
+                  <>
+                    <TabsTrigger value="integrations">
+                      <Zap className="h-4 w-4" />
+                      {t('tabIntegrations')}
+                    </TabsTrigger>
+                    <TabsTrigger value="subscription">
+                      <CreditCard className="h-4 w-4" />
+                      {t('tabSubscription')}
+                    </TabsTrigger>
+                    <TabsTrigger value="usage">
+                      <BarChart2 className="h-4 w-4" />
+                      {t('tabUsage')}
+                    </TabsTrigger>
+                  </>
+                ) : null}
               </>
             ) : null}
 
@@ -922,36 +926,35 @@ export default function SettingsPage() {
                         </div>
                       )}
 
-                      {isAdmin ? (
-                        <div className="grid gap-3 md:grid-cols-[minmax(0,1fr)_220px_auto]">
-                          <OperatorInput
-                            value={newAgentName}
-                            onChange={(e) => setNewAgentName(e.target.value)}
-                            placeholder={t('agentNamePlaceholder')}
-                          />
-                          <OperatorDropdownSelect
-                            value={newAgentProjectId}
-                            onValueChange={(v) => setNewAgentProjectId(v)}
-                            options={[
-                              { value: '', label: t('selectProject') },
-                              ...projects.map((p) => ({ value: p.id, label: p.name })),
-                            ]}
-                          />
-                          <Button
-                            variant="hero"
-                            size="lg"
-                            onClick={() => void handleAddAgent()}
-                            disabled={!newAgentName.trim() || !newAgentProjectId || addingAgent}
-                          >
-                            {addingAgent ? '...' : t('addAgent')}
-                          </Button>
-                        </div>
-                      ) : null}
+                      <div className="grid gap-3 md:grid-cols-[minmax(0,1fr)_220px_auto]">
+                        <OperatorInput
+                          value={newAgentName}
+                          onChange={(e) => setNewAgentName(e.target.value)}
+                          placeholder={t('agentNamePlaceholder')}
+                        />
+                        <OperatorDropdownSelect
+                          value={newAgentProjectId}
+                          onValueChange={(v) => setNewAgentProjectId(v)}
+                          options={[
+                            { value: '', label: t('selectProject') },
+                            ...projects.map((p) => ({ value: p.id, label: p.name })),
+                          ]}
+                        />
+                        <Button
+                          variant="hero"
+                          size="lg"
+                          onClick={() => void handleAddAgent()}
+                          disabled={!newAgentName.trim() || !newAgentProjectId || addingAgent}
+                        >
+                          {addingAgent ? '...' : t('addAgent')}
+                        </Button>
+                      </div>
                     </SectionCardBody>
                   </SectionCard>
                 </div>
               ) : (
               <div className="space-y-6">
+                {isAdmin ? (
                 <SectionCard>
                   <SectionCardHeader>
                     <div className="space-y-1">
@@ -1058,7 +1061,9 @@ export default function SettingsPage() {
                     ) : null}
                   </SectionCardBody>
                 </SectionCard>
+                ) : null}
 
+                {isAdmin ? (
                 <SectionCard>
                   <SectionCardHeader>
                     <div className="space-y-1">
@@ -1098,6 +1103,7 @@ export default function SettingsPage() {
                     ) : null}
                   </SectionCardBody>
                 </SectionCard>
+                ) : null}
 
                 <SectionCard>
                   <SectionCardHeader>
@@ -1107,6 +1113,7 @@ export default function SettingsPage() {
                     </div>
                   </SectionCardHeader>
                   <SectionCardBody className="space-y-4">
+                    {isAdmin ? (
                     <div className="grid gap-3 md:grid-cols-[220px_minmax(0,1fr)_auto]">
                       <OperatorDropdownSelect
                         value={memberProjectId}
@@ -1129,6 +1136,7 @@ export default function SettingsPage() {
                         {addingMember ? '...' : t('addToProject')}
                       </Button>
                     </div>
+                    ) : null}
 
                     {memberActionMessage ? (
                       <div className={`rounded-md border p-3 text-xs ${memberActionMessage.type === 'success' ? 'border-emerald-500/20 bg-emerald-500/10 text-emerald-600 dark:text-emerald-400' : 'border-destructive/20 bg-destructive/10 text-destructive'}`}>
@@ -1152,9 +1160,11 @@ export default function SettingsPage() {
                                   <Badge variant="outline">{member.role}</Badge>
                                 </div>
                               </div>
+                              {isAdmin ? (
                               <Button variant="glass" size="sm" onClick={() => handleRemoveProjectMember(member.id)} disabled={removingMemberId === member.id}>
                                 {removingMemberId === member.id ? '...' : t('removeFromProject')}
                               </Button>
+                              ) : null}
                             </div>
                             {/* Webhook URL */}
                             <div className="flex items-center gap-2">
