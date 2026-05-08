@@ -157,20 +157,12 @@ export default function SettingsPage() {
     const res = await fetch('/api/invitations');
     if (res.ok) {
       const json = await res.json();
-      setIsAdmin(true);
-      setAdminChecked(true);
       setInvitations(json.data ?? []);
       const statusRes = await fetch('/api/subscription/status');
       if (statusRes.ok) {
         const statusJson = await statusRes.json() as { data?: { grace_until?: string | null } };
         setGraceUntil(statusJson.data?.grace_until ?? null);
       }
-      return;
-    }
-
-    if (res.status === 403) {
-      setIsAdmin(false);
-      setAdminChecked(true);
     }
   };
 
@@ -267,6 +259,18 @@ export default function SettingsPage() {
   // Fetch org and project context
   useEffect(() => {
     async function loadContext() {
+      // admin 감지: /api/me role 기반 (invitations 응답 결과에 의존하지 않음)
+      try {
+        const meRes = await fetch('/api/me');
+        const meJson = meRes.ok ? await meRes.json() : null;
+        const role = (meJson?.data?.role ?? 'member') as string;
+        setIsAdmin(role === 'admin');
+      } catch {
+        setIsAdmin(false);
+      } finally {
+        setAdminChecked(true);
+      }
+
       // Get current project
       const projectRes = await fetch('/api/current-project');
       if (projectRes.ok) {

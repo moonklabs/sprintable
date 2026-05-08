@@ -39,7 +39,7 @@ async def _client():
     ctx = MagicMock()
     ctx.user_id = str(uuid.uuid4())
     ctx.email = "test@example.com"
-    ctx.claims = {"app_metadata": {"org_id": str(ORG_ID)}, "email": "new@example.com"}
+    ctx.claims = {"app_metadata": {"org_id": str(ORG_ID), "role": "admin"}, "email": "new@example.com"}
 
     mock_session = AsyncMock()
 
