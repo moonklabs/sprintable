@@ -6,7 +6,7 @@ from typing import Any
 
 from fastapi import APIRouter, Depends, Query
 from fastapi.responses import JSONResponse
-from sqlalchemy import select, update
+from sqlalchemy import select, text, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.dependencies.auth import AuthContext, get_current_user
@@ -283,8 +283,29 @@ async def restore_version(
     if not ver:
         return _err("NOT_FOUND", "Version not found", 404)
 
-    snapshot = ver.snapshot or {}
+    restore_from = ver.snapshot or {}
     now = datetime.now(timezone.utc)
+
+    # 복원 전 현재 상태를 이력으로 저장 (undo 가능하도록)
+    page_before = await session.execute(select(MockupPage).where(MockupPage.id == page_id))
+    page_obj = page_before.scalar_one_or_none()
+    before_comps = await session.execute(select(MockupComponent).where(MockupComponent.page_id == page_id))
+    before_scens = await session.execute(select(MockupScenario).where(MockupScenario.page_id == page_id))
+    current_snapshot = {
+        "title": page_obj.title if page_obj else None,
+        "components": [
+            {"type": c.type, "props": c.props, "sort_order": c.sort_order}
+            for c in before_comps.scalars().all()
+        ],
+        "scenarios": [
+            {"name": s.name, "override_props": s.override_props, "is_default": s.is_default, "sort_order": s.sort_order}
+            for s in before_scens.scalars().all()
+        ],
+    }
+    current_version = page_obj.version or 1 if page_obj else 1
+    session.add(MockupVersion(page_id=page_id, version=current_version, snapshot=current_snapshot))
+
+    snapshot = restore_from
 
     await session.execute(text("DELETE FROM mockup_components WHERE page_id = :pid"), {"pid": str(page_id)})
     components = snapshot.get("components") or []
@@ -312,15 +333,6 @@ async def restore_version(
                 sort_order=s.get("sort_order", 0),
             ))
 
-    page_ver_result = await session.execute(
-        select(MockupPage.version).where(MockupPage.id == page_id)
-    )
-    current_version = page_ver_result.scalar_one_or_none() or 1
-    session.add(MockupVersion(
-        page_id=page_id,
-        version=current_version,
-        snapshot=ver.snapshot or {},
-    ))
     updates["version"] = current_version + 1
     await session.execute(update(MockupPage).where(MockupPage.id == page_id).values(**updates))
     await session.commit()

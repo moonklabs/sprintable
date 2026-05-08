@@ -205,10 +205,15 @@ class AgentRoutingRuleRepository:
                 agent_id=uuid.UUID(str(item["agent_id"])),
                 persona_id=uuid.UUID(str(item["persona_id"])) if item.get("persona_id") else None,
                 deployment_id=uuid.UUID(str(item["deployment_id"])) if item.get("deployment_id") else None,
+                name=str(item.get("name") or ""),
                 priority=item.get("priority", 100),
+                match_type=str(item.get("match_type") or _DEFAULT_MATCH_TYPE),
                 conditions=_normalize_conditions(item.get("conditions")),
                 action=_normalize_action(item.get("action")),
+                target_runtime=str(item.get("target_runtime") or _DEFAULT_RUNTIME),
+                target_model=item.get("target_model"),
                 is_enabled=item.get("is_enabled", True),
+                rule_metadata=item.get("metadata") or {},
                 created_by=actor_id,
             ))
         await self.session.flush()

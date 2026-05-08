@@ -2,7 +2,7 @@ import { proxyToFastapi } from '@/lib/fastapi-proxy';
 import { apiError } from '@/lib/api-response';
 
 export async function GET(request: Request) {
-  return proxyToFastapi(request, '/api/v2/webhooks');
+  return proxyToFastapi(request, '/api/v2/webhooks/config');
 }
 
 // Deprecated: use PUT /api/webhooks/config instead (supports project_id scoping)
