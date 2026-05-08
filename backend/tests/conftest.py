@@ -37,7 +37,7 @@ def auth_ctx(org_id: uuid.UUID) -> MagicMock:
     ctx = MagicMock()
     ctx.user_id = str(uuid.uuid4())
     ctx.email = "test@example.com"
-    ctx.claims = {"app_metadata": {"org_id": str(org_id)}}
+    ctx.claims = {"app_metadata": {"org_id": str(org_id), "role": "admin"}}
     return ctx
 
 

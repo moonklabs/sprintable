@@ -162,6 +162,7 @@ async def _build_app_metadata(user: User, session: AsyncSession) -> dict:
             return {
                 "org_id": str(inv.org_id),
                 "project_id": str(inv.project_id) if inv.project_id else "",
+                "role": inv.role,
             }
         return {}
 
@@ -180,6 +181,7 @@ async def _build_app_metadata(user: User, session: AsyncSession) -> dict:
     return {
         "org_id": str(member.org_id),
         "project_id": str(member.project_id),
+        "role": member.role,
     }
 
 
