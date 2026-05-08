@@ -458,8 +458,10 @@ function presentVersion(row: WorkflowVersionRow): WorkflowVersionSummary {
   };
 }
 
+const FASTAPI_URL = () => process.env['NEXT_PUBLIC_FASTAPI_URL'] ?? 'http://localhost:8000';
+
 export class AgentRoutingRuleService {
-  constructor(private readonly db: any) {}
+  constructor(private readonly db: any, private readonly accessToken?: string) {}
 
   async listRules(scope: RoutingScope): Promise<RoutingRuleSummary[]> {
     const { data, error } = await this.db
@@ -632,14 +634,18 @@ export class AgentRoutingRuleService {
       });
     }
 
-    const { error } = await this.db.rpc('replace_agent_routing_rules', {
-      _org_id: input.orgId,
-      _project_id: input.projectId,
-      _actor_id: input.actorId,
-      _rules: preparedItems,
+    const replaceRes = await fetch(`${FASTAPI_URL()}/api/v2/agent-routing-rules`, {
+      method: 'PUT',
+      headers: {
+        'Content-Type': 'application/json',
+        ...(this.accessToken ? { Authorization: `Bearer ${this.accessToken}` } : {}),
+      },
+      body: JSON.stringify({ items: preparedItems }),
     });
-
-    if (error) throw error;
+    if (!replaceRes.ok) {
+      const body = await replaceRes.json().catch(() => ({}));
+      throw new Error(body?.error?.message ?? `replace_rules failed: ${replaceRes.status}`);
+    }
 
     const newRules = await this.listRules(scope);
     await this.saveVersion({
@@ -660,9 +666,7 @@ export class AgentRoutingRuleService {
     currentRules: RoutingRuleSummary[];
     newRules: RoutingRuleSummary[];
   }): Promise<void> {
-    const { data: versionData } = await this.db.rpc('next_workflow_version', {
-      p_project_id: input.projectId,
-    });
+    if (!this.accessToken) return;
 
     const currentSet = new Map(input.currentRules.map((r) => [r.id, r]));
     const newSet = new Map(input.newRules.map((r) => [r.id, r]));
@@ -673,21 +677,19 @@ export class AgentRoutingRuleService {
       return prev && JSON.stringify(createRoutingRuleSnapshotItem(prev)) !== JSON.stringify(createRoutingRuleSnapshotItem(r));
     }).length;
 
-    const actorMember = await this.db
-      .from('team_members')
-      .select('id')
-      .eq('id', input.actorId)
-      .single();
-
-    const createdBy = actorMember.data?.id ?? null;
-
-    await this.db.from('workflow_versions').insert({
-      org_id: input.orgId,
-      project_id: input.projectId,
-      version: versionData ?? 1,
-      snapshot: input.newRules.map((r) => createRoutingRuleSnapshotItem(r)),
-      change_summary: { added_rules: addedRules, removed_rules: removedRules, changed_rules: changedRules },
-      created_by: createdBy,
+    await fetch(`${FASTAPI_URL()}/api/v2/workflow-versions`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        Authorization: `Bearer ${this.accessToken}`,
+      },
+      body: JSON.stringify({
+        org_id: input.orgId,
+        project_id: input.projectId,
+        snapshot: input.newRules.map((r) => createRoutingRuleSnapshotItem(r)),
+        change_summary: { added_rules: addedRules, removed_rules: removedRules, changed_rules: changedRules },
+        created_by: input.actorId,
+      }),
     });
   }
 
@@ -768,13 +770,18 @@ export class AgentRoutingRuleService {
 
   async reorderPriorities(scope: RoutingScope, updates: RoutingPriorityUpdate[]): Promise<RoutingRuleSummary[]> {
     const cleaned = updates.map((item) => ({ id: item.id, priority: item.priority }));
-    const { error } = await this.db.rpc('reorder_agent_routing_rules', {
-      _org_id: scope.orgId,
-      _project_id: scope.projectId,
-      _updates: cleaned,
+    const reorderRes = await fetch(`${FASTAPI_URL()}/api/v2/agent-routing-rules`, {
+      method: 'PATCH',
+      headers: {
+        'Content-Type': 'application/json',
+        ...(this.accessToken ? { Authorization: `Bearer ${this.accessToken}` } : {}),
+      },
+      body: JSON.stringify({ items: cleaned }),
     });
-
-    if (error) throw error;
+    if (!reorderRes.ok) {
+      const body = await reorderRes.json().catch(() => ({}));
+      throw new Error(body?.error?.message ?? `reorder_rules failed: ${reorderRes.status}`);
+    }
     return this.listRules(scope);
   }
 

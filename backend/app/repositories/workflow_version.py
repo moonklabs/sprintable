@@ -1,8 +1,9 @@
 from __future__ import annotations
 
 import uuid
+from datetime import datetime, timezone
 
-from sqlalchemy import select
+from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models.workflow_version import WorkflowVersion
@@ -32,6 +33,34 @@ def _to_response(row: WorkflowVersion) -> WorkflowVersionResponse:
 class WorkflowVersionRepository:
     def __init__(self, session: AsyncSession) -> None:
         self.session = session
+
+    async def create(
+        self,
+        org_id: uuid.UUID,
+        project_id: uuid.UUID,
+        snapshot: list,
+        change_summary: dict,
+        created_by: uuid.UUID | None = None,
+    ) -> WorkflowVersionResponse:
+        max_result = await self.session.execute(
+            select(func.max(WorkflowVersion.version)).where(
+                WorkflowVersion.org_id == org_id,
+                WorkflowVersion.project_id == project_id,
+            )
+        )
+        next_version = (max_result.scalar() or 0) + 1
+        row = WorkflowVersion(
+            org_id=org_id,
+            project_id=project_id,
+            version=next_version,
+            snapshot=snapshot,
+            change_summary=change_summary,
+            created_by=created_by,
+        )
+        self.session.add(row)
+        await self.session.flush()
+        await self.session.refresh(row)
+        return _to_response(row)
 
     async def list(self, org_id: uuid.UUID, project_id: uuid.UUID) -> list[WorkflowVersionResponse]:
         result = await self.session.execute(

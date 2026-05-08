@@ -85,10 +85,6 @@ export class DocsService {
         throw new Error(`Document not found: ${id}`);
       }
 
-      // 리비전은 DB 트리거(trg_docs_auto_revision)가 자동 생성
-      if (fields.content !== undefined) {
-        await this.db.rpc('trim_doc_revisions', { _doc_id: id, _keep: 50 });
-      }
       return data;
     }
 

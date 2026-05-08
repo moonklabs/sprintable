@@ -32,6 +32,30 @@ def _get_org_project(auth: AuthContext) -> tuple[uuid.UUID | None, uuid.UUID | N
     return uuid.UUID(str(org_id_str)), uuid.UUID(str(project_id_str))
 
 
+@router.post("", status_code=201)
+async def create_workflow_version(
+    body: dict,
+    auth: AuthContext = Depends(get_current_user),
+    repo: WorkflowVersionRepository = Depends(_repo),
+) -> JSONResponse:
+    org_id, project_id = _get_org_project(auth)
+    if not org_id:
+        return _err("FORBIDDEN", "org_id required", 403)
+
+    import uuid as uuid_mod
+    created_by_raw = body.get("created_by")
+    created_by = uuid_mod.UUID(str(created_by_raw)) if created_by_raw else None
+
+    version = await repo.create(
+        org_id=org_id,
+        project_id=project_id,
+        snapshot=body.get("snapshot") or [],
+        change_summary=body.get("change_summary") or {},
+        created_by=created_by,
+    )
+    return _ok(version.model_dump(mode="json"), status=201)
+
+
 @router.get("")
 async def list_workflow_versions(
     auth: AuthContext = Depends(get_current_user),
