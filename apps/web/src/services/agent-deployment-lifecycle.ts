@@ -159,7 +159,7 @@ function ensureTransitionAllowed(current: DeploymentLifecycleStatus, next: Deplo
 }
 
 export class AgentDeploymentLifecycleService {
-  constructor(private readonly db: any) {}
+  constructor(private readonly db: any, private readonly accessToken?: string) {}
 
   async runDeploymentPreflight(input: CreateDeploymentInput): Promise<DeploymentPreflightResult> {
     const checkedAt = new Date().toISOString();
@@ -321,7 +321,7 @@ export class AgentDeploymentLifecycleService {
 
     try {
       if (routingPreview.rules.length > 0) {
-        const routingService = new AgentRoutingRuleService(this.db as never);
+        const routingService = new AgentRoutingRuleService(this.db as never, this.accessToken);
         const finalizedPreview = await this.previewAutomaticRoutingTemplate({
           orgId: input.orgId,
           projectId: input.projectId,
