@@ -69,6 +69,8 @@ async def test_validate_trigger_slugs_passes_for_known_slugs():
         mock_repo.list.return_value = [_mock_trigger("kickoff"), _mock_trigger("qa_request")]
         MockRepo.return_value = mock_repo
         await _validate_trigger_slugs(mock_session, ORG_ID, ["kickoff", "qa_request"])
+        MockRepo.assert_called_once_with(mock_session, ORG_ID)
+        mock_repo.list.assert_called_once_with()
 
 
 @pytest.mark.asyncio
@@ -80,6 +82,8 @@ async def test_validate_trigger_slugs_raises_for_unknown_slug():
         MockRepo.return_value = mock_repo
         with pytest.raises(ValueError, match="nonexistent"):
             await _validate_trigger_slugs(mock_session, ORG_ID, ["kickoff", "nonexistent"])
+        MockRepo.assert_called_once_with(mock_session, ORG_ID)
+        mock_repo.list.assert_called_once_with()
 
 
 @pytest.mark.asyncio
@@ -89,6 +93,7 @@ async def test_validate_trigger_slugs_noop_for_empty_list():
         mock_repo = AsyncMock()
         MockRepo.return_value = mock_repo
         await _validate_trigger_slugs(mock_session, ORG_ID, [])
+        MockRepo.assert_not_called()
         mock_repo.list.assert_not_called()
 
 
