@@ -5,7 +5,7 @@ from fastapi import APIRouter, Depends, Header, HTTPException, Query, status
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.dependencies.auth import AuthContext, get_current_user
+from app.dependencies.auth import AuthContext, get_current_user, require_admin
 from app.dependencies.database import get_db
 from app.models.invitation import Invitation
 from app.models.project import OrgMember
@@ -31,6 +31,7 @@ def _get_repo(
 async def list_invitations(
     project_id: uuid.UUID | None = Query(default=None),
     repo: InvitationRepository = Depends(_get_repo),
+    _: None = Depends(require_admin),
 ) -> list[InvitationResponse]:
     items = await repo.list(project_id=project_id)
     return [InvitationResponse.model_validate(i) for i in items]
