@@ -53,7 +53,7 @@ async def trigger_workflow(
             WorkflowExecutionLog.org_id == org_id,
             WorkflowExecutionLog.project_id == body.project_id,
             WorkflowExecutionLog.trigger_type_slug == body.trigger_type_slug,
-            WorkflowExecutionLog.event_context["story_id"].astext == body.story_id,
+            WorkflowExecutionLog.event_context["metadata"]["story_id"].astext == body.story_id,
             WorkflowExecutionLog.created_at >= cutoff,
         )
         .limit(1)
