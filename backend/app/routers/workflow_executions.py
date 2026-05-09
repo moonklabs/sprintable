@@ -6,7 +6,7 @@ from pydantic import BaseModel
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.dependencies.auth import AuthContext, get_current_user
+from app.dependencies.auth import AuthContext, get_current_user, require_admin
 from app.dependencies.database import get_db
 from app.models.agent_routing_rule import AgentRoutingRule
 from app.models.team import TeamMember
@@ -65,6 +65,7 @@ async def list_executions(
     limit: int = Query(default=20, le=100),
     db: AsyncSession = Depends(get_db),
     org_id: uuid.UUID = Depends(_get_org_id),
+    _: AuthContext = Depends(require_admin),
 ) -> ExecutionLogListResponse:
     base = (
         select(WorkflowExecutionLog)
@@ -133,6 +134,7 @@ async def get_execution(
     id: uuid.UUID,
     db: AsyncSession = Depends(get_db),
     org_id: uuid.UUID = Depends(_get_org_id),
+    _: AuthContext = Depends(require_admin),
 ) -> ExecutionLogDetail:
     result = await db.execute(
         select(WorkflowExecutionLog).where(

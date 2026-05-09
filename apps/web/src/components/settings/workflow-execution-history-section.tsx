@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useState } from 'react';
+import { Fragment, useEffect, useState } from 'react';
 import { useTranslations } from 'next-intl';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
@@ -96,9 +96,8 @@ export function WorkflowExecutionHistorySection({ projectId }: { projectId: stri
                 </thead>
                 <tbody>
                   {logs.map((log) => (
-                    <>
+                    <Fragment key={log.id}>
                       <tr
-                        key={log.id}
                         className="border-b border-border/50 cursor-pointer hover:bg-muted/30"
                         onClick={() => setExpandedId(expandedId === log.id ? null : log.id)}
                       >
@@ -115,13 +114,13 @@ export function WorkflowExecutionHistorySection({ projectId }: { projectId: stri
                         </td>
                       </tr>
                       {expandedId === log.id && log.error_message ? (
-                        <tr key={`${log.id}-err`} className="border-b border-border/50 bg-destructive/5">
+                        <tr className="border-b border-border/50 bg-destructive/5">
                           <td colSpan={5} className="px-2 py-2 text-xs text-destructive">
                             {log.error_message}
                           </td>
                         </tr>
                       ) : null}
-                    </>
+                    </Fragment>
                   ))}
                 </tbody>
               </table>
