@@ -15,6 +15,7 @@ SYSTEM_TRIGGER_TYPES = [
     {"slug": "handoff", "label": "Handoff", "description": "담당자 간 인계"},
     {"slug": "status_changed", "label": "Status Changed", "description": "스토리 상태 전이"},
     {"slug": "assignee_changed", "label": "Assignee Changed", "description": "스토리 담당자 변경"},
+    {"slug": "reply", "label": "Reply", "description": "메모 답신"},
 ]
 
 
