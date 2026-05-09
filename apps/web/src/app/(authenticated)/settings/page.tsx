@@ -13,6 +13,7 @@ import { McpConnectionSettings } from '@/components/settings/mcp-connection-sett
 import { SlackIntegrationSettingsSection } from '@/components/settings/slack-integration-settings';
 import { WorkflowTriggerTypesSection } from '@/components/settings/workflow-trigger-types-section';
 import { WorkflowExecutionHistorySection } from '@/components/settings/workflow-execution-history-section';
+import { WorkflowTemplateGallerySection } from '@/components/settings/workflow-template-gallery-section';
 import { ThemeSettings } from '@/components/settings/theme-settings';
 import { RefreshSettings } from '@/components/settings/refresh-settings';
 import { StandupDeadlineSection } from '@/components/settings/standup-deadline-section';
@@ -1301,6 +1302,7 @@ export default function SettingsPage() {
             <TabsContent value="workflow">
               <div className="space-y-6">
                 <WorkflowTriggerTypesSection />
+                {currentProjectId ? <WorkflowTemplateGallerySection projectId={currentProjectId} orgId={orgId ?? undefined} /> : null}
                 {currentProjectId ? <WorkflowExecutionHistorySection projectId={currentProjectId} /> : null}
               </div>
             </TabsContent>
