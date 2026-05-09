@@ -6,8 +6,13 @@ import { SectionCard, SectionCardBody, SectionCardHeader } from '@/components/ui
 import { Badge } from '@/components/ui/badge';
 import { useToast } from '@/components/ui/toast';
 
-const MCP_SERVER_URL = `${process.env.NEXT_PUBLIC_APP_URL ?? 'https://app.sprintable.ai'}/api/v2/mcp`;
-const LLMS_PROMPT = `Read this document and complete onboarding: ${process.env.NEXT_PUBLIC_APP_URL ?? 'https://app.sprintable.ai'}/llms.txt`;
+function getAppOrigin() {
+  if (typeof window !== 'undefined') return window.location.origin;
+  return process.env.NEXT_PUBLIC_APP_URL ?? 'https://app.sprintable.ai';
+}
+
+const MCP_SERVER_URL = () => `${getAppOrigin()}/api/v2/mcp`;
+const LLMS_PROMPT = () => `Read this document and complete onboarding: ${getAppOrigin()}/llms.txt`;
 
 interface AgentMember {
   id: string;
@@ -38,7 +43,7 @@ function buildMcpConfig(apiKey: string) {
       mcpServers: {
         sprintable: {
           type: 'streamable-http',
-          url: MCP_SERVER_URL,
+          url: MCP_SERVER_URL(),
           headers: { Authorization: `Bearer ${apiKey}` },
         },
       },
@@ -372,12 +377,12 @@ export function AgentApiKeysSection({ projectId }: { projectId: string }) {
                 size="sm"
                 variant="outline"
                 className="h-6 text-xs"
-                onClick={() => void handleCopy(LLMS_PROMPT, '온보딩 프롬프트')}
+                onClick={() => void handleCopy(LLMS_PROMPT(), '온보딩 프롬프트')}
               >
                 Copy
               </Button>
             </div>
-            <pre className="overflow-x-auto rounded bg-background p-2 text-xs text-foreground/80 whitespace-pre-wrap">{LLMS_PROMPT}</pre>
+            <pre className="overflow-x-auto rounded bg-background p-2 text-xs text-foreground/80 whitespace-pre-wrap">{LLMS_PROMPT()}</pre>
           </div>
         </SectionCardBody>
       </SectionCard>
