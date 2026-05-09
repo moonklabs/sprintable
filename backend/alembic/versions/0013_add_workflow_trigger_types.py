@@ -17,6 +17,19 @@ depends_on = None
 
 
 def upgrade() -> None:
+    # Guard: ensure organizations.id has a primary key constraint (may be missing in dev envs
+    # that were bootstrapped via create_all() before this migration ran)
+    op.execute("""
+        DO $$
+        BEGIN
+            IF NOT EXISTS (
+                SELECT 1 FROM pg_constraint
+                WHERE conrelid = 'organizations'::regclass AND contype = 'p'
+            ) THEN
+                ALTER TABLE organizations ADD PRIMARY KEY (id);
+            END IF;
+        END $$;
+    """)
     op.create_table(
         "workflow_trigger_types",
         sa.Column("id", UUID(as_uuid=True), primary_key=True),
