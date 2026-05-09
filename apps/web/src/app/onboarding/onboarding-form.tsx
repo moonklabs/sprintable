@@ -145,7 +145,7 @@ export function OnboardingForm() {
           project_id: project.id,
           type: 'human',
           name: memberName,
-          role: 'member',
+          role: 'admin',
         }),
       }).catch(() => null);
     }

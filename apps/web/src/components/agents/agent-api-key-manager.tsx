@@ -42,6 +42,8 @@ export function AgentApiKeyManager({ agentId, agentName, onNewKey }: AgentApiKey
   const [generatedKey, setGeneratedKey] = useState<string | null>(null);
   const [selectedScopes, setSelectedScopes] = useState<Scope[]>(['read', 'write']);
   const [copiedOnboarding, setCopiedOnboarding] = useState(false);
+  const [copiedKey, setCopiedKey] = useState(false);
+  const [revokeConfirmDialog, setRevokeConfirmDialog] = useState(false);
   const { addToast } = useToast();
 
   const LLMS_URL = 'https://app.sprintable.ai/llms.txt';
@@ -97,6 +99,24 @@ export function AgentApiKeyManager({ agentId, agentName, onNewKey }: AgentApiKey
     }
   };
 
+  const revokeAllAndGenerate = async () => {
+    setRevokeConfirmDialog(false);
+    setLoading(true);
+    try {
+      await Promise.all(
+        activeKeys.map((key) =>
+          fetch(`/api/agents/${agentId}/api-key/${key.id}`, { method: 'DELETE' })
+        )
+      );
+    } catch {
+      // 일부 revoke 실패해도 신규 발급은 진행
+    } finally {
+      setLoading(false);
+    }
+    setNewKeyDialog(true);
+    void generateApiKey();
+  };
+
   const revokeApiKey = async (keyId: string) => {
     if (!confirm('Are you sure you want to revoke this API key?')) return;
 
@@ -123,23 +143,45 @@ export function AgentApiKeyManager({ agentId, agentName, onNewKey }: AgentApiKey
     }
   };
 
-  const copyToClipboard = (text: string) => {
-    navigator.clipboard.writeText(text);
-    addToast({
-      type: 'success',
-      title: 'Copied',
-      body: 'API key copied to clipboard',
-    });
+  const writeToClipboard = async (text: string): Promise<void> => {
+    if (navigator.clipboard?.writeText) {
+      await navigator.clipboard.writeText(text);
+      return;
+    }
+    const prev = document.activeElement as HTMLElement | null;
+    const el = document.createElement('textarea');
+    el.value = text;
+    el.setAttribute('readonly', '');
+    el.style.cssText = 'position:fixed;top:-9999px;left:-9999px;width:1px;height:1px';
+    document.body.appendChild(el);
+    el.focus();
+    el.select();
+    el.setSelectionRange(0, el.value.length);
+    const ok = document.execCommand('copy');
+    document.body.removeChild(el);
+    prev?.focus();
+    if (!ok) throw new Error('execCommand copy failed');
+  };
+
+  const copyToClipboard = async (text: string) => {
+    try {
+      await writeToClipboard(text);
+      setCopiedKey(true);
+      addToast({ type: 'success', title: 'Copied', body: 'API key copied to clipboard' });
+      window.setTimeout(() => setCopiedKey(false), 1500);
+    } catch {
+      addToast({ type: 'error', title: 'Copy failed', body: '클립보드 접근에 실패했습니다.' });
+    }
   };
 
   const copyOnboardingMessage = async (apiKey: string) => {
     try {
-      await navigator.clipboard.writeText(buildOnboardingMessage(apiKey));
+      await writeToClipboard(buildOnboardingMessage(apiKey));
       setCopiedOnboarding(true);
       addToast({ type: 'success', title: '온보딩 메시지 복사됨' });
       window.setTimeout(() => setCopiedOnboarding(false), 1500);
     } catch {
-      addToast({ type: 'error', title: '복사 실패', body: '클립보드 접근 권한을 확인하세요.' });
+      addToast({ type: 'error', title: '복사 실패', body: '클립보드 접근에 실패했습니다.' });
     }
   };
 
@@ -171,8 +213,12 @@ export function AgentApiKeyManager({ agentId, agentName, onNewKey }: AgentApiKey
             </Button>
             <Button
               onClick={() => {
-                setNewKeyDialog(true);
-                generateApiKey();
+                if (activeKeys.length > 0) {
+                  setRevokeConfirmDialog(true);
+                } else {
+                  setNewKeyDialog(true);
+                  void generateApiKey();
+                }
               }}
               disabled={loading}
             >
@@ -255,8 +301,28 @@ export function AgentApiKeyManager({ agentId, agentName, onNewKey }: AgentApiKey
         </div>
       )}
 
-      <Dialog open={newKeyDialog} onOpenChange={setNewKeyDialog}>
+      <Dialog open={revokeConfirmDialog} onOpenChange={setRevokeConfirmDialog}>
         <DialogContent>
+          <DialogHeader>
+            <DialogTitle>기존 키 무효화 후 새 키 발급</DialogTitle>
+            <DialogDescription>
+              활성 API 키 {activeKeys.length}개를 모두 무효화하고 새 키를 발급합니다.
+              기존 키로 연결된 에이전트는 새 키로 업데이트가 필요합니다.
+            </DialogDescription>
+          </DialogHeader>
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setRevokeConfirmDialog(false)}>
+              취소
+            </Button>
+            <Button variant="destructive" onClick={() => void revokeAllAndGenerate()}>
+              무효화하고 새 키 발급
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      <Dialog open={newKeyDialog} onOpenChange={setNewKeyDialog}>
+        <DialogContent className="sm:max-w-lg">
           <DialogHeader>
             <DialogTitle>API Key Generated</DialogTitle>
             <DialogDescription>
@@ -273,14 +339,15 @@ export function AgentApiKeyManager({ agentId, agentName, onNewKey }: AgentApiKey
                     readOnly
                     className="font-mono text-sm"
                   />
-                  <Button onClick={() => copyToClipboard(generatedKey)}>
-                    Copy
+                  <Button onClick={() => void copyToClipboard(generatedKey)} className="gap-1.5 shrink-0">
+                    {copiedKey ? <Check className="h-3.5 w-3.5 text-emerald-500" /> : <Copy className="h-3.5 w-3.5" />}
+                    {copiedKey ? 'Copied!' : 'Copy'}
                   </Button>
                 </div>
               </div>
               <p className="text-sm text-muted-foreground">
                 Use this key in the Authorization header:
-                <code className="block mt-1 p-2 bg-muted rounded text-xs">
+                <code className="block mt-1 p-2 bg-muted rounded text-xs break-all">
                   Authorization: Bearer {generatedKey}
                 </code>
               </p>
