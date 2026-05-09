@@ -5,6 +5,9 @@ import path from 'path';
 const withNextIntl = createNextIntlPlugin('./src/i18n/request.ts');
 
 const nextConfig: NextConfig = {
+  // Allow dev server access from non-localhost origins (e.g. Tailscale, LAN)
+  // Set NEXT_DEV_ALLOWED_ORIGINS=host1,host2 in .env.local to enable
+  allowedDevOrigins: process.env['NEXT_DEV_ALLOWED_ORIGINS']?.split(',').map((s) => s.trim()).filter(Boolean) ?? [],
   output: 'standalone',
   outputFileTracingRoot: path.resolve(__dirname, '../..'),
   devIndicators: {
