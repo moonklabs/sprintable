@@ -26,6 +26,9 @@ dist/
 .DS_Store
 Thumbs.db
 
+# Docker volumes / local data
+data/
+
 # SQLite / PGLite DB files
 *.db
 sprintable.db

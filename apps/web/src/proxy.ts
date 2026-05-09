@@ -1,5 +1,6 @@
 import { jwtVerify } from 'jose';
 import { NextResponse, type NextRequest } from 'next/server';
+import { cookieBase } from '@/lib/auth/cookies';
 
 const PUBLIC_EXACT = [
   '/',
@@ -64,14 +65,7 @@ function applyTokenCookies(
   accessToken: string,
   refreshToken: string,
 ): void {
-  const cookieDomain = process.env['NEXT_PUBLIC_COOKIE_DOMAIN'];
-  const base = {
-    httpOnly: true,
-    secure: true,
-    sameSite: 'lax' as const,
-    path: '/',
-    ...(cookieDomain ? { domain: cookieDomain } : {}),
-  };
+  const base = cookieBase();
   response.cookies.set(SP_AT_COOKIE, accessToken, { ...base, maxAge: 15 * 60 });
   response.cookies.set(SP_RT_COOKIE, refreshToken, { ...base, maxAge: 30 * 24 * 60 * 60 });
 }

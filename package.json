@@ -3,12 +3,16 @@
   "private": true,
   "scripts": {
     "build": "turbo run build",
-    "dev": "turbo run dev",
+    "predev": "bash apps/web/scripts/kill-port.sh 3109 && bash apps/web/scripts/kill-port.sh 8001",
+    "dev": "concurrently -n fe,be -c cyan,yellow \"PORT=3109 pnpm --filter web dev\" \"cd backend && uv run uvicorn app.main:app --host 0.0.0.0 --port 8001 --reload\"",
+    "dev:fe": "PORT=3109 pnpm --filter web dev",
+    "dev:be": "cd backend && uv run uvicorn app.main:app --host 0.0.0.0 --port 8001 --reload",
     "lint": "turbo run lint",
     "type-check": "turbo run type-check",
     "test": "vitest run"
   },
   "devDependencies": {
+    "concurrently": "^9.2.1",
     "tsx": "^4.0.0",
     "turbo": "^2.4.0",
     "typescript": "^5.7.0",
