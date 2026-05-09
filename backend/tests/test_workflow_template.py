@@ -4,7 +4,7 @@ from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 
-from app.repositories.workflow_template import WorkflowTemplateRepository, resolve_rules_template
+from app.repositories.workflow_template import WorkflowTemplateRepository, resolve_rules_template, _resolve_side_effects
 from app.services.deployment_lifecycle import _select_template_slug, _build_routing_template_from_db
 
 
@@ -56,6 +56,46 @@ def test_resolve_rules_template_missing_role_ref_preserved():
     resolved = resolve_rules_template(rules, role_map)
     assert len(resolved) == 1
     assert "agent_id" not in resolved[0]
+
+
+def test_resolve_rules_template_assign_to_role_substituted():
+    rules = [
+        {
+            "role_ref": "step_1",
+            "name": "kickoff",
+            "priority": 10,
+            "conditions": {},
+            "action": {"auto_reply_mode": "process_and_report", "side_effects": [{"type": "auto_assign", "assign_to_role": "step_1"}]},
+        }
+    ]
+    role_map = {
+        "step_1": {
+            "agent_id": "agent-uuid-1",
+            "agent_name": "Dev",
+            "role": "developer",
+            "persona_id": None,
+            "deployment_id": None,
+            "target_runtime": "openclaw",
+            "target_model": None,
+        }
+    }
+    resolved = resolve_rules_template(rules, role_map)
+    se = resolved[0]["action"]["side_effects"][0]
+    assert se["assign_to_role"] == "developer"
+
+
+def test_resolve_side_effects_step_ref_replaced():
+    role_map = {"step_1": {"agent_id": "a", "role": "developer"}}
+    side_effects = [{"type": "auto_assign", "assign_to_role": "step_1"}]
+    result = _resolve_side_effects(side_effects, role_map)
+    assert result[0]["assign_to_role"] == "developer"
+
+
+def test_resolve_side_effects_non_step_ref_unchanged():
+    role_map = {"step_1": {"agent_id": "a", "role": "developer"}}
+    side_effects = [{"type": "update_status", "target_status": "in-review"}]
+    result = _resolve_side_effects(side_effects, role_map)
+    assert result[0]["target_status"] == "in-review"
 
 
 def test_resolve_rules_template_does_not_mutate_original():

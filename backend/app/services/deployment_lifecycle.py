@@ -146,6 +146,7 @@ async def _build_routing_template_from_db(
         step_map[step_key] = {
             "agent_id": str(agent["agentId"]),
             "agent_name": agent.get("agentName", ""),
+            "role": agent.get("role", ""),
             "persona_id": agent.get("personaId"),
             "deployment_id": agent.get("deploymentId"),
             "target_runtime": "openclaw",

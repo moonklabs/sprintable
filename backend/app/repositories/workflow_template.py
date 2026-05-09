@@ -30,13 +30,33 @@ class WorkflowTemplateRepository:
         return result.scalar_one_or_none()
 
 
+def _resolve_step_ref(value: str, role_map: dict[str, dict[str, Any]]) -> str:
+    """step_X 문자열을 role_map의 role 값으로 치환. step_X가 없으면 원본 반환."""
+    info = role_map.get(value)
+    if info and info.get("role"):
+        return str(info["role"])
+    return value
+
+
+def _resolve_side_effects(side_effects: list[dict], role_map: dict[str, dict[str, Any]]) -> list[dict]:
+    """side_effects 내 assign_to_role의 step_X placeholder를 실제 role로 치환."""
+    result = []
+    for se in side_effects:
+        se_copy = copy.deepcopy(se)
+        if se_copy.get("type") == "auto_assign" and isinstance(se_copy.get("assign_to_role"), str):
+            se_copy["assign_to_role"] = _resolve_step_ref(se_copy["assign_to_role"], role_map)
+        result.append(se_copy)
+    return result
+
+
 def resolve_rules_template(
     rules_template: list[dict],
     role_map: dict[str, dict[str, Any]],
 ) -> list[dict]:
     """role_ref placeholder를 실제 agent_id/name으로 치환.
 
-    role_map: {"step_1": {"agent_id": "...", "agent_name": "...", ...}, ...}
+    role_map: {"step_1": {"agent_id": "...", "agent_name": "...", "role": "developer", ...}, ...}
+    중첩 필드(action.side_effects[].assign_to_role)도 step_X → 실제 role로 치환.
     """
     resolved = []
     for rule in rules_template:
@@ -50,5 +70,10 @@ def resolve_rules_template(
             r["target_runtime"] = agent_info.get("target_runtime", "openclaw")
             r["target_model"] = agent_info.get("target_model")
             r["is_enabled"] = True
+        # action.side_effects 내 assign_to_role 치환
+        action = r.get("action") or {}
+        if isinstance(action, dict) and action.get("side_effects"):
+            action["side_effects"] = _resolve_side_effects(action["side_effects"], role_map)
+            r["action"] = action
         resolved.append(r)
     return resolved
