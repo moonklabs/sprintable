@@ -33,7 +33,7 @@ def upgrade() -> None:
     op.create_table(
         "workflow_trigger_types",
         sa.Column("id", UUID(as_uuid=True), primary_key=True),
-        sa.Column("org_id", UUID(as_uuid=True), sa.ForeignKey("organizations.id", ondelete="CASCADE"), nullable=False, index=True),
+        sa.Column("org_id", UUID(as_uuid=True), sa.ForeignKey("organizations.id", ondelete="CASCADE"), nullable=False),
         sa.Column("slug", sa.Text, nullable=False),
         sa.Column("label", sa.Text, nullable=False),
         sa.Column("description", sa.Text, nullable=True),
