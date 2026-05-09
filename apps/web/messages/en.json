@@ -166,7 +166,12 @@
     "searchSprints": "Search sprints...",
     "searchEpics": "Search epics...",
     "searchAssignees": "Search assignees...",
-    "noResults": "No results"
+    "noResults": "No results",
+    "kickoff": "Kickoff",
+    "kickoffTriggered": "Workflow triggered",
+    "kickoffNoMatch": "No matching rule found",
+    "kickoffConflict": "Workflow already triggered recently",
+    "kickoffError": "Failed to trigger workflow"
   },
   "memos": {
     "title": "Memos",

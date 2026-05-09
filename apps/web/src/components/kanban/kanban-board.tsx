@@ -17,6 +17,7 @@ import {
   DropdownMenuSeparator,
   DropdownMenuTrigger,
 } from '@/components/ui/dropdown-menu';
+import { useToast, ToastContainer } from '@/components/ui/toast';
 import { KanbanColumn } from './kanban-column';
 import { KanbanListView } from './kanban-list-view';
 import { KanbanSkeleton } from './kanban-skeleton';
@@ -73,6 +74,7 @@ export function KanbanBoard({ projectId }: KanbanBoardProps) {
   const router = useRouter();
   const searchParams = useSearchParams();
   const t = useTranslations('board');
+  const { toasts, addToast, dismissToast } = useToast();
   const [transitionError, setTransitionError] = useState<string | null>(null);
   const [stories, setStories] = useState<KanbanStory[]>([]);
   const [sprints, setSprints] = useState<KanbanSprint[]>([]);
@@ -463,6 +465,17 @@ export function KanbanBoard({ projectId }: KanbanBoardProps) {
     }
   }, [fetchData]);
 
+  const handleKickoff = useCallback((_storyId: string, result: 'triggered' | 'no_match' | 'conflict' | 'error') => {
+    const messages: Record<string, { title: string; type: 'success' | 'error' | 'info' | 'warning' }> = {
+      triggered: { title: t('kickoffTriggered'), type: 'success' },
+      no_match: { title: t('kickoffNoMatch'), type: 'info' },
+      conflict: { title: t('kickoffConflict'), type: 'warning' },
+      error: { title: t('kickoffError'), type: 'error' },
+    };
+    const msg = messages[result] ?? { title: t('kickoffError'), type: 'error' };
+    addToast({ title: msg.title, type: msg.type });
+  }, [t, addToast]);
+
   const handleCreateStory = useCallback(async (columnId: string, title: string) => {
     if (!projectId) return;
     try {
@@ -537,6 +550,7 @@ export function KanbanBoard({ projectId }: KanbanBoardProps) {
 
   return (
     <div className="flex h-full flex-col overflow-hidden">
+      <ToastContainer toasts={toasts} onDismiss={dismissToast} />
       {transitionError && (
         <div className="fixed bottom-4 right-4 z-50 rounded-md border border-destructive bg-destructive px-4 py-3 text-sm text-destructive-foreground shadow-md">
           ⚠️ {transitionError}
@@ -853,6 +867,8 @@ export function KanbanBoard({ projectId }: KanbanBoardProps) {
                     onChangeStatus={handleChangeStatus}
                     onAssignStory={handleAssignStory}
                     onDeleteStory={handleDeleteStory}
+                    projectId={projectId}
+                    onKickoffStory={handleKickoff}
                     wipLimit={wipState.limit}
                     wipExceeded={isExceeded}
                     wipEditing={wipState.editing}
