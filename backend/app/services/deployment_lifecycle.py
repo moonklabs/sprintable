@@ -16,6 +16,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.models.agent_deployment import AgentAuditLog, AgentDeployment, AgentPersona
 from app.models.agent_routing_rule import AgentRoutingRule
 from app.repositories.agent_routing_rule import _normalize_action, _normalize_conditions
+from app.repositories.workflow_template import WorkflowTemplateRepository, resolve_rules_template
 from app.models.agent_run import AgentRun
 from app.models.team import TeamMember
 from app.models.webhook_config import WebhookConfig
@@ -100,6 +101,69 @@ def _resolve_persona_role(slug: str | None, base_slug: str | None) -> str:
     if val == "devops":
         return "devops"
     return "unknown"
+
+
+def _select_template_slug(agents: list[dict]) -> str:
+    """역할 조합으로 WorkflowTemplate slug 결정."""
+    has_po = any(a["role"] == "product-owner" for a in agents)
+    has_dev = any(a["role"] == "developer" for a in agents)
+    has_qa = any(a["role"] == "qa" for a in agents)
+    if has_po and has_dev and has_qa:
+        return "three-step"
+    if (has_po or has_dev) and len(agents) >= 2:
+        return "two-step"
+    return "solo"
+
+
+async def _build_routing_template_from_db(
+    session: AsyncSession,
+    agents: list[dict],
+    existing_rule_count: int,
+) -> dict[str, Any]:
+    """DB 조회 기반 라우팅 템플릿 빌더."""
+    seen: set[str] = set()
+    deduped = [a for a in agents if not (a["agentId"] in seen or seen.add(a["agentId"]))]  # type: ignore[func-returns-value]
+
+    po = next((a for a in deduped if a["role"] == "product-owner"), None)
+    dev = next((a for a in deduped if a["role"] == "developer"), None)
+
+    if len(deduped) <= 1 and not po:
+        return {"templateId": "solo-dev", "rules": [], "requiresOverwriteConfirmation": False, "existingRuleCount": existing_rule_count}
+    if not po and not dev:
+        return {"templateId": "none", "rules": [], "requiresOverwriteConfirmation": False, "existingRuleCount": existing_rule_count}
+
+    slug = _select_template_slug(deduped)
+    tmpl = await WorkflowTemplateRepository(session).get_by_slug(slug)
+    if not tmpl:
+        return _build_routing_template(deduped, existing_rule_count)
+
+    role_to_step: dict[str, str] = {}
+    for i, a in enumerate(deduped, start=1):
+        role_to_step[f"step_{i}"] = a
+
+    step_map: dict[str, dict] = {}
+    for step_key, agent in role_to_step.items():
+        step_map[step_key] = {
+            "agent_id": str(agent["agentId"]),
+            "agent_name": agent.get("agentName", ""),
+            "role": agent.get("role", ""),
+            "persona_id": agent.get("personaId"),
+            "deployment_id": agent.get("deploymentId"),
+            "target_runtime": "openclaw",
+            "target_model": None,
+        }
+
+    meta: dict[str, Any] = {"auto_generated": True, "template_id": slug, "from_workflow_template": True}
+    resolved_rules = resolve_rules_template(tmpl.rules_template, step_map)
+    for r in resolved_rules:
+        r["metadata"] = meta
+
+    return {
+        "templateId": slug,
+        "rules": resolved_rules,
+        "requiresOverwriteConfirmation": existing_rule_count > 0,
+        "existingRuleCount": existing_rule_count,
+    }
 
 
 def _build_routing_template(agents: list[dict], existing_rule_count: int) -> dict[str, Any]:
@@ -330,7 +394,10 @@ class DeploymentLifecycleService:
         ]
         agents.append(pending_agent)
 
-        return _build_routing_template(agents, rule_count)
+        try:
+            return await _build_routing_template_from_db(self.session, agents, rule_count)
+        except Exception:
+            return _build_routing_template(agents, rule_count)
 
     async def _log_audit(self, org_id: uuid.UUID, project_id: uuid.UUID, agent_id: uuid.UUID, event_type: str, severity: str, payload: dict) -> None:
         log = AgentAuditLog(
