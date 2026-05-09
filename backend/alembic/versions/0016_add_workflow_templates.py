@@ -169,8 +169,15 @@ SEED_TEMPLATES = [
 
 
 def upgrade() -> None:
-    op.create_table(
-        "workflow_templates",
+    # Guard: create table only if it doesn't already exist (dev envs may have it from create_all)
+    conn = op.get_bind()
+    table_exists = conn.execute(
+        sa.text("SELECT EXISTS (SELECT 1 FROM information_schema.tables WHERE table_name='workflow_templates')")
+    ).scalar()
+
+    if not table_exists:
+        op.create_table(
+            "workflow_templates",
         sa.Column("id", UUID(as_uuid=True), primary_key=True),
         sa.Column("slug", sa.String(100), unique=True, nullable=False, index=True),
         sa.Column("name", sa.String(200), nullable=False),
@@ -183,9 +190,18 @@ def upgrade() -> None:
         sa.Column("is_enabled", sa.Boolean, nullable=False, server_default="true"),
         sa.Column("created_at", sa.DateTime(timezone=True), server_default=sa.text("now()"), nullable=False),
         sa.Column("updated_at", sa.DateTime(timezone=True), server_default=sa.text("now()"), nullable=False),
-    )
+        )
+    else:
+        # Table exists from create_all — ensure slug column is present
+        col_exists = conn.execute(
+            sa.text("SELECT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name='workflow_templates' AND column_name='slug')")
+        ).scalar()
+        if not col_exists:
+            op.add_column("workflow_templates", sa.Column("slug", sa.String(100), nullable=True))
+            op.execute("UPDATE workflow_templates SET slug = id::text WHERE slug IS NULL")
+            op.alter_column("workflow_templates", "slug", nullable=False)
+            op.create_index("ix_workflow_templates_slug", "workflow_templates", ["slug"], unique=True)
 
-    conn = op.get_bind()
     for tmpl in SEED_TEMPLATES:
         conn.execute(
             sa.text(
