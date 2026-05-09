@@ -49,9 +49,9 @@ async def create_project(
         await session.execute(
             text(
                 "INSERT INTO team_members"
-                " (id, org_id, project_id, user_id, name, type, role, is_active)"
+                " (id, org_id, project_id, user_id, name, type, role, is_active, color)"
                 " SELECT gen_random_uuid(), :org_id, :project_id, :user_id,"
-                "        COALESCE(u.email, 'owner'), 'human', 'member', true"
+                "        COALESCE(u.email, 'owner'), 'human', 'member', true, '#4F46E5'"
                 " FROM users u WHERE u.id = :user_id"
                 " ON CONFLICT DO NOTHING"
             ),

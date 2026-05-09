@@ -30,7 +30,7 @@ const PHASE_VARIANTS: Record<string, 'success' | 'info' | 'outline' | 'secondary
 export default function RetroPage() {
   const t = useTranslations('retro');
   const shellT = useTranslations('shell');
-  const { projectId } = useDashboardContext();
+  const { projectId, orgId } = useDashboardContext();
   const [sessions, setSessions] = useState<RetroSession[]>([]);
   const [loading, setLoading] = useState(true);
   const [title, setTitle] = useState('');
@@ -66,14 +66,14 @@ export default function RetroPage() {
   }, [projectId]);
 
   const handleCreate = async () => {
-    if (!title.trim() || !projectId) return;
+    if (!title.trim() || !projectId || !orgId) return;
     setCreating(true);
     setCreateError(null);
     try {
       const res = await fetch('/api/retro-sessions', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ title: title.trim(), project_id: projectId }),
+        body: JSON.stringify({ title: title.trim(), project_id: projectId, org_id: orgId }),
       });
       if (!res.ok) throw new Error(`HTTP ${res.status}`);
       const json = await res.json();
@@ -133,7 +133,7 @@ export default function RetroPage() {
               placeholder={t('newSessionPlaceholder')}
               className="flex-1"
             />
-            <Button variant="default" onClick={handleCreate} disabled={!title.trim() || creating}>
+            <Button variant="default" onClick={handleCreate} disabled={!title.trim() || !orgId || creating}>
               {creating ? t('creating') : t('create')}
             </Button>
           </div>
