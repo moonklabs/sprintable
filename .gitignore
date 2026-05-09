@@ -39,6 +39,7 @@ sprintable.db
 
 # Test
 coverage/
+test-results/
 .omx/
 .gstack/
 .omc/
