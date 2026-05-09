@@ -1159,8 +1159,8 @@ export default function SettingsPage() {
 
                     <div className="space-y-2">
                       <div className="text-xs font-medium uppercase tracking-[0.18em] text-muted-foreground">{t('projectMembers')}</div>
-                      {projectMembers.length > 0 ? (
-                        projectMembers.map((member) => {
+                      {projectMembers.filter((m) => m.type === 'human').length > 0 ? (
+                        projectMembers.filter((m) => m.type === 'human').map((member) => {
                           const isEditingWebhook = member.id in webhookEditing;
                           const currentWebhookUrl = member.webhook_url ?? '';
                           return (

@@ -13,7 +13,11 @@ import { OperatorDropdownSelect } from '@/components/ui/operator-dropdown-select
 import { SectionCard, SectionCardBody, SectionCardHeader } from '@/components/ui/section-card';
 import { useToast } from '@/components/ui/toast';
 
-const MCP_SERVER_URL = `${process.env.NEXT_PUBLIC_APP_URL ?? 'https://app.sprintable.ai'}/api/v2/mcp`;
+function getAppOrigin() {
+  if (typeof window !== 'undefined') return window.location.origin;
+  return process.env.NEXT_PUBLIC_APP_URL ?? 'https://app.sprintable.ai';
+}
+const MCP_SERVER_URL = () => `${getAppOrigin()}/api/v2/mcp`;
 
 interface AgentMember {
   id: string;
@@ -61,7 +65,7 @@ function buildMcpConfig(apiKey: string) {
       mcpServers: {
         sprintable: {
           type: 'streamable-http',
-          url: MCP_SERVER_URL,
+          url: MCP_SERVER_URL(),
           headers: { Authorization: `Bearer ${apiKey}` },
         },
       },
@@ -415,22 +419,26 @@ export default function AgentDetailPage() {
               <h2 className="text-base font-semibold text-foreground">MCP Config</h2>
               <p className="text-sm text-muted-foreground">Claude Code나 MCP 클라이언트에 붙여넣으면 이 에이전트로 Sprintable에 연결됩니다.</p>
             </div>
-            <Button variant="glass" size="sm" onClick={() => void handleCopyMcp()}>
-              {mcpCopied ? <Check className="h-3.5 w-3.5" /> : 'Copy'}
-            </Button>
+            {freshApiKey && (
+              <Button variant="glass" size="sm" onClick={() => void handleCopyMcp()}>
+                {mcpCopied ? <Check className="h-3.5 w-3.5" /> : 'Copy'}
+              </Button>
+            )}
           </div>
         </SectionCardHeader>
         <SectionCardBody>
           {freshApiKey ? (
-            <p className="text-xs text-emerald-500 mb-2">새 API Key가 포함된 설정입니다. 지금 복사해 두세요 — 페이지를 새로고침하면 사라집니다.</p>
+            <>
+              <p className="text-xs text-emerald-500 mb-2">새 API Key가 포함된 설정입니다. 지금 복사해 두세요 — 페이지를 새로고침하면 사라집니다.</p>
+              <pre className="overflow-x-auto rounded-md border border-border bg-muted/30 p-3 text-xs text-foreground/80">
+                {buildMcpConfig(freshApiKey)}
+              </pre>
+            </>
           ) : !hasActiveKey ? (
-            <p className="text-xs text-amber-400 mb-2">API Key를 먼저 발급하세요. 발급 직후 실제 키가 이 블록에 자동으로 포함됩니다.</p>
+            <p className="text-xs text-amber-400">API Key를 먼저 발급하세요. 발급 직후 실제 키가 이 블록에 자동으로 포함됩니다.</p>
           ) : (
-            <p className="text-xs text-muted-foreground mb-2">보안상 기존 키는 재표시되지 않습니다. 새 키를 발급하면 이 블록에 자동으로 포함됩니다.</p>
+            <p className="text-xs text-muted-foreground">보안상 기존 키는 재표시되지 않습니다. 위 API Keys 섹션에서 새 키를 발급하면 실제 키가 포함된 Config가 여기에 자동으로 나타납니다.</p>
           )}
-          <pre className="overflow-x-auto rounded-md border border-border bg-muted/30 p-3 text-xs text-foreground/80">
-            {buildMcpConfig(freshApiKey ?? '<YOUR_API_KEY>')}
-          </pre>
         </SectionCardBody>
       </SectionCard>
 

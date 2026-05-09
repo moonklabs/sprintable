@@ -16,18 +16,7 @@
 
 import { expect, test, type Page } from '@playwright/test';
 
-// ---------------------------------------------------------------------------
-// Auth helper — OSS mode uses cookie-less session; adapt to your auth flow
-// ---------------------------------------------------------------------------
-async function ensureLoggedIn(page: Page) {
-  await page.goto('/');
-  const url = page.url();
-  if (url.includes('/login') || url.includes('/auth')) {
-    // OSS mode auto-seeds a session — just navigate to the seed endpoint first
-    await page.request.post('/api/oss/seed').catch(() => {});
-    await page.goto('/dashboard');
-  }
-}
+test.use({ storageState: 'playwright/.auth/owner.json' });
 
 // ---------------------------------------------------------------------------
 // Helpers
@@ -94,9 +83,6 @@ const ROUTES: RouteSpec[] = [
 // Tests
 // ---------------------------------------------------------------------------
 test.describe('Layout Verification', () => {
-  test.beforeEach(async ({ page }) => {
-    await ensureLoggedIn(page);
-  });
 
   for (const route of ROUTES) {
     test(`[A-E] ${route.label}`, async ({ page }) => {
