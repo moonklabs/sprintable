@@ -252,9 +252,16 @@ async def add_reply(
     if memo.project_id:
         from app.services.workflow_pipeline import process_event
         from app.services.rule_evaluator import EventContext
+        from app.models.memo import MemoEntityLink
         try:
             author_role = await _resolve_author_role(db, reply.created_by)
             has_pr = bool(re.search(r"github\.com/.+/pull/\d+", reply.content or ""))
+            story_link_result = await db.execute(
+                select(MemoEntityLink.entity_id)
+                .where(MemoEntityLink.memo_id == id, MemoEntityLink.entity_type == "story")
+                .limit(1)
+            )
+            linked_story_id = story_link_result.scalar_one_or_none()
             await process_event(
                 db,
                 repo.org_id,
@@ -274,6 +281,7 @@ async def add_reply(
                         "review_type": reply.review_type,
                         "has_pr_link": has_pr,
                         "content_preview": (reply.content or "")[:200],
+                        "story_id": str(linked_story_id) if linked_story_id else None,
                     },
                 ),
             )

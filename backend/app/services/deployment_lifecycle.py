@@ -97,6 +97,8 @@ def _resolve_persona_role(slug: str | None, base_slug: str | None) -> str:
         return "developer"
     if val == "qa":
         return "qa"
+    if val == "devops":
+        return "devops"
     return "unknown"
 
 
@@ -118,15 +120,35 @@ def _build_routing_template(agents: list[dict], existing_rule_count: int) -> dic
     if not po or not dev:
         return {"templateId": "none", "rules": [], "requiresOverwriteConfirmation": False, "existingRuleCount": existing_rule_count}
 
+    devops = next((a for a in deduped if a["role"] == "devops"), None)
     template_id = "po-dev-qa" if qa else "po-dev"
     roles = ["product-owner", "developer", "qa"] if qa else ["product-owner", "developer"]
+    if devops:
+        roles.append("devops")
     meta: dict[str, Any] = {"auto_generated": True, "template_id": template_id, "generated_from_roles": roles}
+
     rules = [
-        {"agent_id": str(po["agentId"]), "persona_id": po.get("personaId"), "deployment_id": po.get("deploymentId"), "name": f"{po['agentName']} auto route requirement/user_story", "priority": 10, "match_type": "event", "conditions": {"memo_type": ["requirement", "user_story"], "trigger_type_slugs": ["kickoff"]}, "action": {"auto_reply_mode": "process_and_report", "forward_to_agent_id": None}, "target_runtime": "openclaw", "target_model": None, "is_enabled": True, "metadata": meta},
-        {"agent_id": str(dev["agentId"]), "persona_id": dev.get("personaId"), "deployment_id": dev.get("deploymentId"), "name": f"{dev['agentName']} auto route task/dev_task", "priority": 20, "match_type": "event", "conditions": {"memo_type": ["task", "dev_task"], "trigger_type_slugs": ["kickoff"]}, "action": {"auto_reply_mode": "process_and_report", "forward_to_agent_id": None}, "target_runtime": "openclaw", "target_model": None, "is_enabled": True, "metadata": meta},
+        # PO: requirement/user_story kickoff
+        {"agent_id": str(po["agentId"]), "persona_id": po.get("personaId"), "deployment_id": po.get("deploymentId"), "name": f"{po['agentName']} auto route requirement/user_story", "priority": 10, "match_type": "event", "conditions": {"memo_type": ["requirement", "user_story"], "trigger_type_slugs": ["kickoff"]}, "action": {"auto_reply_mode": "process_and_report", "forward_to_agent_id": None, "side_effects": []}, "target_runtime": "openclaw", "target_model": None, "is_enabled": True, "metadata": meta},
+        # Dev: kickoff → auto-assign developer
+        {"agent_id": str(dev["agentId"]), "persona_id": dev.get("personaId"), "deployment_id": dev.get("deploymentId"), "name": f"{dev['agentName']} auto route task/dev_task + auto-assign", "priority": 20, "match_type": "event", "conditions": {"memo_type": ["task", "dev_task"], "trigger_type_slugs": ["kickoff"]}, "action": {"auto_reply_mode": "process_and_report", "forward_to_agent_id": None, "side_effects": [{"type": "auto_assign", "assign_to_role": "developer"}]}, "target_runtime": "openclaw", "target_model": None, "is_enabled": True, "metadata": meta},
     ]
+
     if qa:
-        rules.append({"agent_id": str(qa["agentId"]), "persona_id": qa.get("personaId"), "deployment_id": qa.get("deploymentId"), "name": f"{qa['agentName']} auto route review", "priority": 30, "match_type": "event", "conditions": {"memo_type": ["review"], "trigger_type_slugs": ["qa_request"]}, "action": {"auto_reply_mode": "process_and_report", "forward_to_agent_id": None}, "target_runtime": "openclaw", "target_model": None, "is_enabled": True, "metadata": meta})
+        rules += [
+            # Dev PR → PO review + status in-review
+            {"agent_id": str(po["agentId"]), "persona_id": po.get("personaId"), "deployment_id": po.get("deploymentId"), "name": "Dev PR → PO review + status in-review", "priority": 25, "match_type": "event", "conditions": {"trigger_type_slugs": ["review_request"], "event_params": {"reply_author_role": ["developer"], "has_pr_link": [True]}}, "action": {"auto_reply_mode": "process_and_report", "forward_to_agent_id": None, "side_effects": [{"type": "update_status", "target_status": "in-review"}]}, "target_runtime": "openclaw", "target_model": None, "is_enabled": True, "metadata": meta},
+            # PO approve → QA request
+            {"agent_id": str(qa["agentId"]), "persona_id": qa.get("personaId"), "deployment_id": qa.get("deploymentId"), "name": "PO approve → QA request", "priority": 30, "match_type": "event", "conditions": {"trigger_type_slugs": ["review_request"], "event_params": {"reply_author_role": ["product_owner"], "review_type": ["approve"]}}, "action": {"auto_reply_mode": "process_and_report", "forward_to_agent_id": None, "side_effects": []}, "target_runtime": "openclaw", "target_model": None, "is_enabled": True, "metadata": meta},
+            # QA approve → PO merge notify
+            {"agent_id": str(po["agentId"]), "persona_id": po.get("personaId"), "deployment_id": po.get("deploymentId"), "name": "QA approve → PO merge notify", "priority": 35, "match_type": "event", "conditions": {"trigger_type_slugs": ["qa_request"], "event_params": {"reply_author_role": ["qa"], "review_type": ["approve"]}}, "action": {"auto_reply_mode": "process_and_report", "forward_to_agent_id": None, "side_effects": []}, "target_runtime": "openclaw", "target_model": None, "is_enabled": True, "metadata": meta},
+        ]
+
+    if devops:
+        rules.append(
+            # Story done → DevOps deploy notify
+            {"agent_id": str(devops["agentId"]), "persona_id": devops.get("personaId"), "deployment_id": devops.get("deploymentId"), "name": "Story done → DevOps deploy notify", "priority": 40, "match_type": "event", "conditions": {"trigger_type_slugs": ["status_changed"], "event_params": {"new_status": ["done"]}}, "action": {"auto_reply_mode": "process_and_report", "forward_to_agent_id": None, "side_effects": []}, "target_runtime": "openclaw", "target_model": None, "is_enabled": True, "metadata": meta}
+        )
 
     return {"templateId": template_id, "rules": rules, "requiresOverwriteConfirmation": existing_rule_count > 0, "existingRuleCount": existing_rule_count}
 

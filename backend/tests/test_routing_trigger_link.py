@@ -124,5 +124,75 @@ def test_build_routing_template_qa_rule_includes_qa_request_slug():
         {"agentId": str(uuid.uuid4()), "agentName": "QA", "role": "qa", "personaId": None, "deploymentId": None},
     ]
     result = _build_routing_template(agents, 0)
-    qa_rule = next(r for r in result["rules"] if "review" in r["conditions"]["memo_type"])
-    assert qa_rule["conditions"]["trigger_type_slugs"] == ["qa_request"]
+    qa_approve_rule = next(r for r in result["rules"] if "qa_request" in r["conditions"].get("trigger_type_slugs", []))
+    assert "qa_request" in qa_approve_rule["conditions"]["trigger_type_slugs"]
+
+
+# ── S4-4 self-dogfooding 5-rule template tests ────────────────────────────────
+
+def test_build_routing_template_po_dev_qa_has_5_rules():
+    from app.services.deployment_lifecycle import _build_routing_template
+
+    agents = [
+        {"agentId": str(uuid.uuid4()), "agentName": "PO", "role": "product-owner", "personaId": None, "deploymentId": None},
+        {"agentId": str(uuid.uuid4()), "agentName": "Dev", "role": "developer", "personaId": None, "deploymentId": None},
+        {"agentId": str(uuid.uuid4()), "agentName": "QA", "role": "qa", "personaId": None, "deploymentId": None},
+    ]
+    result = _build_routing_template(agents, 0)
+    assert len(result["rules"]) == 5
+
+
+def test_build_routing_template_dev_kickoff_has_auto_assign():
+    from app.services.deployment_lifecycle import _build_routing_template
+
+    agents = [
+        {"agentId": str(uuid.uuid4()), "agentName": "PO", "role": "product-owner", "personaId": None, "deploymentId": None},
+        {"agentId": str(uuid.uuid4()), "agentName": "Dev", "role": "developer", "personaId": None, "deploymentId": None},
+        {"agentId": str(uuid.uuid4()), "agentName": "QA", "role": "qa", "personaId": None, "deploymentId": None},
+    ]
+    result = _build_routing_template(agents, 0)
+    dev_rule = next(r for r in result["rules"] if "task" in r["conditions"].get("memo_type", []) and r["priority"] == 20)
+    side_effects = dev_rule["action"].get("side_effects", [])
+    assert any(se["type"] == "auto_assign" and se["assign_to_role"] == "developer" for se in side_effects)
+
+
+def test_build_routing_template_pr_review_rule_has_event_params():
+    from app.services.deployment_lifecycle import _build_routing_template
+
+    agents = [
+        {"agentId": str(uuid.uuid4()), "agentName": "PO", "role": "product-owner", "personaId": None, "deploymentId": None},
+        {"agentId": str(uuid.uuid4()), "agentName": "Dev", "role": "developer", "personaId": None, "deploymentId": None},
+        {"agentId": str(uuid.uuid4()), "agentName": "QA", "role": "qa", "personaId": None, "deploymentId": None},
+    ]
+    result = _build_routing_template(agents, 0)
+    pr_rule = next(r for r in result["rules"] if r["priority"] == 25)
+    assert "event_params" in pr_rule["conditions"]
+    assert pr_rule["conditions"]["event_params"]["has_pr_link"] == [True]
+    se = pr_rule["action"]["side_effects"]
+    assert any(s["type"] == "update_status" and s["target_status"] == "in-review" for s in se)
+
+
+def test_build_routing_template_devops_adds_rule():
+    from app.services.deployment_lifecycle import _build_routing_template
+
+    agents = [
+        {"agentId": str(uuid.uuid4()), "agentName": "PO", "role": "product-owner", "personaId": None, "deploymentId": None},
+        {"agentId": str(uuid.uuid4()), "agentName": "Dev", "role": "developer", "personaId": None, "deploymentId": None},
+        {"agentId": str(uuid.uuid4()), "agentName": "QA", "role": "qa", "personaId": None, "deploymentId": None},
+        {"agentId": str(uuid.uuid4()), "agentName": "DevOps", "role": "devops", "personaId": None, "deploymentId": None},
+    ]
+    result = _build_routing_template(agents, 0)
+    assert len(result["rules"]) == 6
+    devops_rule = next(r for r in result["rules"] if r["priority"] == 40)
+    assert devops_rule["conditions"]["event_params"]["new_status"] == ["done"]
+
+
+def test_build_routing_template_po_dev_only_has_2_rules():
+    from app.services.deployment_lifecycle import _build_routing_template
+
+    agents = [
+        {"agentId": str(uuid.uuid4()), "agentName": "PO", "role": "product-owner", "personaId": None, "deploymentId": None},
+        {"agentId": str(uuid.uuid4()), "agentName": "Dev", "role": "developer", "personaId": None, "deploymentId": None},
+    ]
+    result = _build_routing_template(agents, 0)
+    assert len(result["rules"]) == 2
