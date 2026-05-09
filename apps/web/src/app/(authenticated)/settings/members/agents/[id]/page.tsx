@@ -13,7 +13,11 @@ import { OperatorDropdownSelect } from '@/components/ui/operator-dropdown-select
 import { SectionCard, SectionCardBody, SectionCardHeader } from '@/components/ui/section-card';
 import { useToast } from '@/components/ui/toast';
 
-const MCP_SERVER_URL = `${process.env.NEXT_PUBLIC_APP_URL ?? 'https://app.sprintable.ai'}/api/v2/mcp`;
+function getAppOrigin() {
+  if (typeof window !== 'undefined') return window.location.origin;
+  return process.env.NEXT_PUBLIC_APP_URL ?? 'https://app.sprintable.ai';
+}
+const MCP_SERVER_URL = () => `${getAppOrigin()}/api/v2/mcp`;
 
 interface AgentMember {
   id: string;
@@ -61,7 +65,7 @@ function buildMcpConfig(apiKey: string) {
       mcpServers: {
         sprintable: {
           type: 'streamable-http',
-          url: MCP_SERVER_URL,
+          url: MCP_SERVER_URL(),
           headers: { Authorization: `Bearer ${apiKey}` },
         },
       },
