@@ -23,7 +23,9 @@
     "operatorSurface": "Operator surface",
     "back": "Back",
     "next": "Next",
-    "close": "Close"
+    "close": "Close",
+    "add": "Add",
+    "confirm": "Confirm"
   },
   "nav": {
     "dashboard": "Dashboard",
