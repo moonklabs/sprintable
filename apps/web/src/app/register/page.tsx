@@ -27,7 +27,10 @@ export default function RegisterPage() {
         setError(json.error?.message ?? 'Registration failed. Please try again.');
         return;
       }
-      router.push('/inbox');
+      // Invited users already have org context from JWT; direct signups need onboarding.
+      const meRes = await fetch('/api/me');
+      const meJson = await meRes.json() as { data?: { org_id?: string } };
+      router.push(meJson.data?.org_id ? '/inbox' : '/onboarding');
       router.refresh();
     } catch {
       setError('Registration failed. Please try again.');
