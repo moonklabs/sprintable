@@ -206,7 +206,7 @@ def upgrade() -> None:
         conn.execute(
             sa.text(
                 "INSERT INTO workflow_templates (id, slug, name, description, chain_length, steps, presets, rules_template, is_system, is_enabled) "
-                "VALUES (:id, :slug, :name, :description, :chain_length, :steps::jsonb, :presets::jsonb, :rules_template::jsonb, true, true) "
+                "VALUES (:id, :slug, :name, :description, :chain_length, CAST(:steps AS jsonb), CAST(:presets AS jsonb), CAST(:rules_template AS jsonb), true, true) "
                 "ON CONFLICT (slug) DO NOTHING"
             ),
             {
