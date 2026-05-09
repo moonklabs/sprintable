@@ -59,6 +59,14 @@ def _matches(rule: AgentRoutingRule, ctx: EventContext) -> bool:
         if ctx.memo_type not in memo_types:
             return False
 
+    event_params: dict[str, Any] = conditions.get("event_params") or {}
+    for key, allowed_values in event_params.items():
+        if not isinstance(allowed_values, list) or not allowed_values:
+            continue
+        actual = ctx.metadata.get(key)
+        if actual not in allowed_values:
+            return False
+
     return True
 
 
