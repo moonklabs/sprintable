@@ -267,7 +267,7 @@ export default function SettingsPage() {
         const meRes = await fetch('/api/me');
         const meJson = meRes.ok ? await meRes.json() : null;
         const role = (meJson?.data?.role ?? 'member') as string;
-        setIsAdmin(role === 'admin');
+        setIsAdmin(role === 'admin' || role === 'owner');
       } catch {
         setIsAdmin(false);
       } finally {
