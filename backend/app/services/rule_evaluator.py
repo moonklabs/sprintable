@@ -25,6 +25,7 @@ class EventContext:
     memo_id: str | None = None
     actor_id: str | None = None
     metadata: dict[str, Any] = field(default_factory=dict)
+    is_side_effect: bool = False
 
     def to_dict(self) -> dict[str, Any]:
         return {

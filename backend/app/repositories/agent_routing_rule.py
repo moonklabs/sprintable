@@ -47,7 +47,7 @@ def _normalize_conditions(value: Any) -> dict[str, Any]:
 
 def _normalize_action(value: Any) -> dict[str, Any]:
     if not value or not isinstance(value, dict):
-        return {"auto_reply_mode": "process_and_report", "forward_to_agent_id": None}
+        return {"auto_reply_mode": "process_and_report", "forward_to_agent_id": None, "side_effects": []}
     mode = value.get("auto_reply_mode", "process_and_report")
     if mode not in ("process_and_forward", "process_and_report"):
         mode = "process_and_report"
@@ -56,7 +56,13 @@ def _normalize_action(value: Any) -> dict[str, Any]:
         forward_to = fwd.strip()
     else:
         forward_to = None
-    return {"auto_reply_mode": mode, "forward_to_agent_id": forward_to}
+    raw_effects = value.get("side_effects", [])
+    valid_types = {"update_status", "auto_assign"}
+    if isinstance(raw_effects, list):
+        side_effects = [se for se in raw_effects if isinstance(se, dict) and se.get("type") in valid_types]
+    else:
+        side_effects = []
+    return {"auto_reply_mode": mode, "forward_to_agent_id": forward_to, "side_effects": side_effects}
 
 
 def _to_response(rule: AgentRoutingRule) -> RoutingRuleResponse:

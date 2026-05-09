@@ -137,3 +137,97 @@ async def test_process_event_independent_of_webhook():
         await process_event(session, ORG_ID, PROJECT_ID, ctx)
     # Should complete without touching any webhook code
     assert True
+
+
+# ── side_effects tests (S4-3) ─────────────────────────────────────────────────
+
+from app.services.workflow_pipeline import _execute_side_effects
+from app.repositories.agent_routing_rule import _normalize_action
+
+
+def _make_result_with_side_effects(side_effects: list) -> EvaluationResult:
+    action = {
+        "auto_reply_mode": "process_and_report",
+        "forward_to_agent_id": None,
+        "side_effects": side_effects,
+    }
+    return EvaluationResult(
+        matched=True,
+        rule=MagicMock(),
+        action=action,
+        target_agent_id=AGENT_ID,
+        log_id=LOG_ID,
+    )
+
+
+@pytest.mark.asyncio
+async def test_side_effect_update_status():
+    session = _mock_session()
+    story_id = str(uuid.uuid4())
+    ctx = EventContext(event_type="e", metadata={"story_id": story_id})
+    side_effects = [{"type": "update_status", "target_status": "in-review"}]
+    await _execute_side_effects(session, ORG_ID, side_effects, ctx)
+    session.execute.assert_awaited_once()
+
+
+@pytest.mark.asyncio
+async def test_side_effect_auto_assign():
+    session = _mock_session()
+    story_id = str(uuid.uuid4())
+    member_id = uuid.uuid4()
+    result_mock = MagicMock()
+    result_mock.scalar_one_or_none.return_value = member_id
+    session.execute = AsyncMock(return_value=result_mock)
+    ctx = EventContext(event_type="e", metadata={"story_id": story_id})
+    side_effects = [{"type": "auto_assign", "assign_to_role": "qa"}]
+    await _execute_side_effects(session, ORG_ID, side_effects, ctx)
+    assert session.execute.call_count == 2  # select + update
+
+
+@pytest.mark.asyncio
+async def test_side_effect_loop_prevention():
+    session = _mock_session()
+    ctx = EventContext(event_type="e", is_side_effect=True)
+    with patch("app.services.workflow_pipeline.evaluate", new=AsyncMock()) as mock_eval:
+        await process_event(session, ORG_ID, PROJECT_ID, ctx)
+    mock_eval.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_side_effect_partial_failure_memo_sent():
+    session = _mock_session()
+    ctx = EventContext(event_type="e", metadata={})
+    result = _make_result_with_side_effects([{"type": "update_status", "target_status": "in-review"}])
+    with patch("app.services.workflow_pipeline.evaluate", new=AsyncMock(return_value=result)), \
+         patch("app.services.workflow_pipeline._send_memo", new=AsyncMock()) as mock_send, \
+         patch("app.services.workflow_pipeline._execute_side_effects", side_effect=Exception("se_fail")):
+        await process_event(session, ORG_ID, PROJECT_ID, ctx)
+    mock_send.assert_awaited_once()
+
+
+@pytest.mark.asyncio
+async def test_side_effect_empty_backward_compat():
+    session = _mock_session()
+    ctx = EventContext(event_type="e")
+    result = _make_result(matched=True, mode="process_and_report")
+    with patch("app.services.workflow_pipeline.evaluate", new=AsyncMock(return_value=result)), \
+         patch("app.services.workflow_pipeline._send_memo", new=AsyncMock()) as mock_send:
+        await process_event(session, ORG_ID, PROJECT_ID, ctx)
+    mock_send.assert_awaited_once()
+
+
+def test_normalize_action_side_effects():
+    result = _normalize_action({
+        "auto_reply_mode": "process_and_report",
+        "side_effects": [
+            {"type": "update_status", "target_status": "in-review"},
+            {"type": "invalid_type"},
+        ],
+    })
+    assert len(result["side_effects"]) == 1
+    assert result["side_effects"][0]["type"] == "update_status"
+
+
+def test_normalize_action_no_side_effects_backward_compat():
+    result = _normalize_action({"auto_reply_mode": "process_and_report"})
+    assert result["side_effects"] == []
