@@ -129,6 +129,19 @@ async def create_memo(
     if body.embeds:
         await repo.create_entity_links(memo.id, body.embeds)
     publish_event(str(body.org_id), "memo_created", {"id": str(memo.id)})
+    if body.project_id:
+        from app.services.workflow_pipeline import process_event
+        from app.services.rule_evaluator import EventContext
+        try:
+            await process_event(session, body.org_id, body.project_id, EventContext(
+                event_type="memo_created",
+                trigger_type_slug="kickoff" if body.memo_type == "task" else None,
+                memo_type=body.memo_type,
+                memo_id=str(memo.id),
+                actor_id=str(body.created_by) if body.created_by else None,
+            ))
+        except Exception:
+            pass
     memo_dict = {k: v for k, v in memo.__dict__.items() if not k.startswith("_")}
     memo_dict["embed_count"] = len(body.embeds)
     return MemoListResponse.model_validate(memo_dict)

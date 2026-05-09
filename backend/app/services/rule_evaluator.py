@@ -43,6 +43,7 @@ class EvaluationResult:
     rule: AgentRoutingRule | None
     action: dict[str, Any] | None
     target_agent_id: uuid.UUID | None
+    log_id: uuid.UUID | None = None
 
 
 def _matches(rule: AgentRoutingRule, ctx: EventContext) -> bool:
@@ -115,4 +116,5 @@ async def evaluate(
         rule=matched_rule,
         action=action,
         target_agent_id=target_agent_id,
+        log_id=log.id,
     )

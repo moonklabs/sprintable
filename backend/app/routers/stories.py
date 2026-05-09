@@ -14,6 +14,8 @@ from app.repositories.story import StoryRepository
 from app.routers.events import publish_event
 from app.schemas.story import StoryCreate, StoryResponse, StoryStatusUpdate, StoryUpdate
 from app.services.webhook_dispatch import fire_webhooks
+from app.services.workflow_pipeline import process_event
+from app.services.rule_evaluator import EventContext
 
 router = APIRouter(prefix="/api/v2/stories", tags=["stories"])
 
@@ -131,6 +133,15 @@ async def update_story(
             await fire_webhooks(db, org_id, "story.assignee_changed", event_data)
         except Exception:
             pass
+        try:
+            await process_event(db, org_id, story.project_id, EventContext(
+                event_type="story.assignee_changed",
+                trigger_type_slug="assignee_changed",
+                actor_id=str(actor_id) if actor_id else None,
+                metadata=event_data,
+            ))
+        except Exception:
+            pass
         if actor_id:
             try:
                 db.add(StoryActivity(
@@ -195,6 +206,15 @@ async def update_story_status(
         publish_event(str(org_id), "story.status_changed", event_data)
         try:
             await fire_webhooks(db, org_id, "story.status_changed", event_data)
+        except Exception:
+            pass
+        try:
+            await process_event(db, org_id, story.project_id, EventContext(
+                event_type="story.status_changed",
+                trigger_type_slug="status_changed",
+                actor_id=str(actor_id) if actor_id else None,
+                metadata=event_data,
+            ))
         except Exception:
             pass
         if actor_id:
