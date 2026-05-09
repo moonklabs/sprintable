@@ -148,55 +148,57 @@ export function AgentApiKeyManager({ agentId, agentName, onNewKey }: AgentApiKey
 
   return (
     <Card className="p-6">
-      <div className="flex items-center justify-between mb-4">
+      <div className="flex items-start justify-between mb-4">
         <div>
           <h3 className="text-lg font-semibold">API Keys - {agentName}</h3>
           <p className="text-sm text-muted-foreground">
             Manage API keys for agent authentication
           </p>
         </div>
-        <div className="flex gap-2">
-          <Button variant="outline" onClick={loadApiKeys} disabled={loading}>
-            Refresh
-          </Button>
-          <Button
-            variant="outline"
-            disabled={!hasActiveKey || copiedOnboarding}
-            onClick={() => void copyOnboardingMessage(generatedKey ?? (activeKeys[0] ? `${activeKeys[0].key_prefix}...` : ''))}
-            className="gap-1.5"
-          >
-            {copiedOnboarding ? <Check className="h-3.5 w-3.5 text-emerald-500" /> : <Copy className="h-3.5 w-3.5" />}
-            온보딩 메시지 복사
-          </Button>
-          <Button
-            onClick={() => {
-              setNewKeyDialog(true);
-              generateApiKey();
-            }}
-            disabled={loading}
-          >
-            Generate API Key
-          </Button>
-        </div>
-        <div className="flex gap-4 mt-3">
-          <p className="text-xs text-muted-foreground self-center">Scope:</p>
-          {SCOPES.map((scope) => (
-            <label key={scope} className="flex items-center gap-1.5 text-xs cursor-pointer">
-              <input
-                type="checkbox"
-                checked={selectedScopes.includes(scope)}
-                onChange={(e) => {
-                  if (e.target.checked) {
-                    setSelectedScopes((prev) => [...prev, scope]);
-                  } else {
-                    setSelectedScopes((prev) => prev.filter((s) => s !== scope));
-                  }
-                }}
-                className="h-3 w-3"
-              />
-              <span className={scope === 'admin' ? 'text-orange-500 font-medium' : ''}>{scope}</span>
-            </label>
-          ))}
+        <div className="flex flex-col items-end gap-2">
+          <div className="flex gap-2">
+            <Button variant="outline" onClick={loadApiKeys} disabled={loading}>
+              Refresh
+            </Button>
+            <Button
+              variant="outline"
+              disabled={!hasActiveKey || copiedOnboarding}
+              onClick={() => void copyOnboardingMessage(generatedKey ?? (activeKeys[0] ? `${activeKeys[0].key_prefix}...` : ''))}
+              className="gap-1.5"
+            >
+              {copiedOnboarding ? <Check className="h-3.5 w-3.5 text-emerald-500" /> : <Copy className="h-3.5 w-3.5" />}
+              온보딩 메시지 복사
+            </Button>
+            <Button
+              onClick={() => {
+                setNewKeyDialog(true);
+                generateApiKey();
+              }}
+              disabled={loading}
+            >
+              Generate API Key
+            </Button>
+          </div>
+          <div className="flex gap-4">
+            <p className="text-xs text-muted-foreground self-center">Scope:</p>
+            {SCOPES.map((scope) => (
+              <label key={scope} className="flex items-center gap-1.5 text-xs cursor-pointer">
+                <input
+                  type="checkbox"
+                  checked={selectedScopes.includes(scope)}
+                  onChange={(e) => {
+                    if (e.target.checked) {
+                      setSelectedScopes((prev) => [...prev, scope]);
+                    } else {
+                      setSelectedScopes((prev) => prev.filter((s) => s !== scope));
+                    }
+                  }}
+                  className="h-3 w-3"
+                />
+                <span className={scope === 'admin' ? 'text-orange-500 font-medium' : ''}>{scope}</span>
+              </label>
+            ))}
+          </div>
         </div>
       </div>
 
