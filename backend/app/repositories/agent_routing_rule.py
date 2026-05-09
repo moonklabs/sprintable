@@ -35,6 +35,13 @@ def _normalize_conditions(value: Any) -> dict[str, Any]:
                 seen.add(cleaned)
                 deduped.append(cleaned)
         result["trigger_type_slugs"] = deduped
+    if "event_params" in value:
+        raw_params = value["event_params"]
+        if isinstance(raw_params, dict):
+            normalized_params: dict[str, list] = {}
+            for k, v in raw_params.items():
+                normalized_params[k] = v if isinstance(v, list) else [v]
+            result["event_params"] = normalized_params
     return result
 
 

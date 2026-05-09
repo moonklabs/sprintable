@@ -157,3 +157,86 @@ async def test_evaluate_returns_target_agent_id():
     ctx = EventContext(event_type="e", trigger_type_slug="kickoff")
     result = await evaluate(session, ORG_ID, PROJECT_ID, ctx)
     assert result.target_agent_id == AGENT_ID
+
+
+# ── event_params matching tests (S4-2) ───────────────────────────────────────
+
+def _rule_with_params(event_params: dict, **kwargs) -> MagicMock:
+    r = _rule(**kwargs)
+    r.conditions["event_params"] = event_params
+    return r
+
+
+def test_event_params_single_key_match():
+    rule = _rule_with_params({"reply_author_role": ["agent"]})
+    ctx = EventContext(event_type="memo.reply_created", metadata={"reply_author_role": "agent"})
+    assert _matches(rule, ctx) is True
+
+
+def test_event_params_single_key_no_match():
+    rule = _rule_with_params({"reply_author_role": ["agent"]})
+    ctx = EventContext(event_type="memo.reply_created", metadata={"reply_author_role": "human"})
+    assert _matches(rule, ctx) is False
+
+
+def test_event_params_multi_key_and():
+    rule = _rule_with_params({"reply_author_role": ["agent"], "has_pr_link": [True]})
+    ctx_ok = EventContext(event_type="e", metadata={"reply_author_role": "agent", "has_pr_link": True})
+    ctx_bad = EventContext(event_type="e", metadata={"reply_author_role": "agent", "has_pr_link": False})
+    assert _matches(rule, ctx_ok) is True
+    assert _matches(rule, ctx_bad) is False
+
+
+def test_event_params_or_values():
+    rule = _rule_with_params({"review_type": ["approve", "request_changes"]})
+    ctx_approve = EventContext(event_type="e", metadata={"review_type": "approve"})
+    ctx_rc = EventContext(event_type="e", metadata={"review_type": "request_changes"})
+    ctx_miss = EventContext(event_type="e", metadata={"review_type": "comment"})
+    assert _matches(rule, ctx_approve) is True
+    assert _matches(rule, ctx_rc) is True
+    assert _matches(rule, ctx_miss) is False
+
+
+def test_event_params_empty_backward_compat():
+    rule = _rule(trigger_type_slugs=["reply"])
+    ctx = EventContext(event_type="memo.reply_created", trigger_type_slug="reply", metadata={})
+    assert _matches(rule, ctx) is True
+
+
+def test_event_params_bool_matching():
+    rule = _rule_with_params({"has_pr_link": [True]})
+    ctx_true = EventContext(event_type="e", metadata={"has_pr_link": True})
+    ctx_false = EventContext(event_type="e", metadata={"has_pr_link": False})
+    assert _matches(rule, ctx_true) is True
+    assert _matches(rule, ctx_false) is False
+
+
+def test_event_params_missing_key_treated_as_miss():
+    rule = _rule_with_params({"reply_author_role": ["agent"]})
+    ctx = EventContext(event_type="e", metadata={})
+    assert _matches(rule, ctx) is False
+
+
+# ── _normalize_conditions event_params tests (S4-2) ──────────────────────────
+
+from app.repositories.agent_routing_rule import _normalize_conditions
+
+
+def test_normalize_conditions_event_params_passthrough():
+    result = _normalize_conditions({
+        "event_params": {"reply_author_role": ["agent"], "has_pr_link": [True]}
+    })
+    assert result["event_params"] == {"reply_author_role": ["agent"], "has_pr_link": [True]}
+
+
+def test_normalize_conditions_event_params_scalar_wrapped():
+    result = _normalize_conditions({
+        "event_params": {"review_type": "approve"}
+    })
+    assert result["event_params"] == {"review_type": ["approve"]}
+
+
+def test_normalize_conditions_no_event_params_unchanged():
+    result = _normalize_conditions({"memo_type": ["task"]})
+    assert "event_params" not in result
+    assert result["memo_type"] == ["task"]
