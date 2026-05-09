@@ -4,7 +4,13 @@ from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 
-from app.repositories.workflow_template import WorkflowTemplateRepository, resolve_rules_template, _resolve_side_effects
+from app.repositories.workflow_template import (
+    WorkflowTemplateRepository,
+    resolve_rules_template,
+    _resolve_side_effects,
+    _resolve_event_params,
+    _resolve_name,
+)
 from app.services.deployment_lifecycle import _select_template_slug, _build_routing_template_from_db
 
 
@@ -96,6 +102,57 @@ def test_resolve_side_effects_non_step_ref_unchanged():
     side_effects = [{"type": "update_status", "target_status": "in-review"}]
     result = _resolve_side_effects(side_effects, role_map)
     assert result[0]["target_status"] == "in-review"
+
+
+def test_resolve_event_params_step_ref_in_list():
+    role_map = {
+        "step_1": {"agent_id": "a1", "role": "developer"},
+        "step_2": {"agent_id": "a2", "role": "product-owner"},
+    }
+    params = {"reply_author_role": ["step_1"], "review_type": ["approve"]}
+    result = _resolve_event_params(params, role_map)
+    assert result["reply_author_role"] == ["developer"]
+    assert result["review_type"] == ["approve"]
+
+
+def test_resolve_event_params_multi_step_refs():
+    role_map = {
+        "step_2": {"agent_id": "a2", "role": "product-owner"},
+        "step_3": {"agent_id": "a3", "role": "qa"},
+    }
+    params = {"reply_author_role": ["step_2", "step_3"]}
+    result = _resolve_event_params(params, role_map)
+    assert result["reply_author_role"] == ["product-owner", "qa"]
+
+
+def test_resolve_name_placeholder():
+    role_map = {
+        "step_1": {"agent_id": "a1", "agent_name": "Dev"},
+        "step_2": {"agent_id": "a2", "agent_name": "PO"},
+    }
+    name = "{step_1} submit → {step_2} review"
+    assert _resolve_name(name, role_map) == "Dev submit → PO review"
+
+
+def test_resolve_rules_template_event_params_and_name_substituted():
+    rules = [
+        {
+            "role_ref": "step_2",
+            "name": "{step_1} submit → {step_2} review",
+            "priority": 20,
+            "conditions": {"event_params": {"reply_author_role": ["step_1"]}},
+            "action": {"auto_reply_mode": "process_and_report", "side_effects": []},
+        }
+    ]
+    role_map = {
+        "step_1": {"agent_id": "a1", "agent_name": "Dev", "role": "developer", "persona_id": None, "deployment_id": None, "target_runtime": "openclaw", "target_model": None},
+        "step_2": {"agent_id": "a2", "agent_name": "PO", "role": "product-owner", "persona_id": None, "deployment_id": None, "target_runtime": "openclaw", "target_model": None},
+    }
+    resolved = resolve_rules_template(rules, role_map)
+    r = resolved[0]
+    assert r["conditions"]["event_params"]["reply_author_role"] == ["developer"]
+    assert r["name"] == "Dev submit → PO review"
+    assert r["agent_id"] == "a2"
 
 
 def test_resolve_rules_template_does_not_mutate_original():

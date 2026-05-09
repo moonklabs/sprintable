@@ -49,6 +49,32 @@ def _resolve_side_effects(side_effects: list[dict], role_map: dict[str, dict[str
     return result
 
 
+def _resolve_event_params(event_params: dict, role_map: dict[str, dict[str, Any]]) -> dict:
+    """conditions.event_params 내 step_X placeholder 배열을 실제 role로 치환.
+
+    예: {"reply_author_role": ["step_1"]} → {"reply_author_role": ["developer"]}
+    """
+    resolved: dict = {}
+    for key, val in event_params.items():
+        if isinstance(val, list):
+            resolved[key] = [
+                _resolve_step_ref(v, role_map) if isinstance(v, str) else v
+                for v in val
+            ]
+        else:
+            resolved[key] = val
+    return resolved
+
+
+def _resolve_name(name: str, role_map: dict[str, dict[str, Any]]) -> str:
+    """name 필드의 {step_X} placeholder를 agent_name으로 치환."""
+    result = name
+    for step_key, info in role_map.items():
+        agent_name = info.get("agent_name") or step_key
+        result = result.replace(f"{{{step_key}}}", agent_name)
+    return result
+
+
 def resolve_rules_template(
     rules_template: list[dict],
     role_map: dict[str, dict[str, Any]],
@@ -56,7 +82,10 @@ def resolve_rules_template(
     """role_ref placeholder를 실제 agent_id/name으로 치환.
 
     role_map: {"step_1": {"agent_id": "...", "agent_name": "...", "role": "developer", ...}, ...}
-    중첩 필드(action.side_effects[].assign_to_role)도 step_X → 실제 role로 치환.
+    중첩 필드 전량 치환:
+    - action.side_effects[].assign_to_role (step_X → role)
+    - conditions.event_params 배열 내 step_X (step_X → role)
+    - name 필드 {step_X} (step_X → agent_name)
     """
     resolved = []
     for rule in rules_template:
@@ -70,7 +99,15 @@ def resolve_rules_template(
             r["target_runtime"] = agent_info.get("target_runtime", "openclaw")
             r["target_model"] = agent_info.get("target_model")
             r["is_enabled"] = True
-        # action.side_effects 내 assign_to_role 치환
+        # name {step_X} 치환
+        if isinstance(r.get("name"), str):
+            r["name"] = _resolve_name(r["name"], role_map)
+        # conditions.event_params step_X 치환
+        conditions = r.get("conditions") or {}
+        if isinstance(conditions, dict) and isinstance(conditions.get("event_params"), dict):
+            conditions["event_params"] = _resolve_event_params(conditions["event_params"], role_map)
+            r["conditions"] = conditions
+        # action.side_effects assign_to_role 치환
         action = r.get("action") or {}
         if isinstance(action, dict) and action.get("side_effects"):
             action["side_effects"] = _resolve_side_effects(action["side_effects"], role_map)
