@@ -122,12 +122,23 @@ async def apply_template(
 
     agent_ids = [uuid.UUID(v) for v in body.role_mapping.values()]
     agents_result = await db.execute(
-        select(TeamMember.id, TeamMember.name, TeamMember.role).where(TeamMember.id.in_(agent_ids))
+        select(TeamMember.id, TeamMember.name, TeamMember.role).where(
+            TeamMember.id.in_(agent_ids),
+            TeamMember.org_id == org_id,
+        )
     )
     agent_info_by_id: dict[uuid.UUID, dict] = {
         row.id: {"agent_id": str(row.id), "agent_name": row.name or str(row.id), "role": row.role or ""}
         for row in agents_result.all()
     }
+
+    # org 스코프 검증 — 조회 안 된 UUID는 타 org이거나 존재하지 않는 멤버
+    missing_agents = [v for v in body.role_mapping.values() if uuid.UUID(v) not in agent_info_by_id]
+    if missing_agents:
+        raise HTTPException(
+            status_code=422,
+            detail=f"agent(s) not found in this org: {missing_agents}",
+        )
 
     custom_labels = body.custom_labels or {}
     role_map: dict[str, dict[str, Any]] = {}
@@ -159,7 +170,7 @@ async def apply_template(
                 AgentRoutingRule.rule_metadata["from_workflow_template"].astext == "true",
             )
         )
-        ids_to_delete = [row[0] for row in existing]
+        ids_to_delete = [row[0] for row in existing.all()]
         if ids_to_delete:
             await db.execute(
                 update(AgentRoutingRule)

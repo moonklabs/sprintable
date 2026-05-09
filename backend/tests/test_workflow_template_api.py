@@ -128,6 +128,35 @@ async def test_apply_template_creates_rules():
 
 
 @pytest.mark.asyncio
+async def test_apply_template_cross_org_agent_422():
+    """타 org 멤버 UUID → DB에서 조회 안 됨 → 422."""
+    from fastapi import HTTPException
+    from app.routers.workflow_templates import apply_template
+
+    db = _mock_db()
+    tmpl = _make_template()
+
+    cross_org_id = uuid.uuid4()
+    agents_result = MagicMock()
+    agents_result.all.return_value = []  # org 조건 필터로 결과 없음
+    db.execute = AsyncMock(return_value=agents_result)
+
+    body = ApplyTemplateRequest(
+        project_id=uuid.uuid4(),
+        role_mapping={"step_1": str(cross_org_id), "step_2": str(uuid.uuid4())},
+    )
+
+    with patch("app.routers.workflow_templates.WorkflowTemplateRepository") as MockRepo:
+        instance = AsyncMock()
+        instance.get_by_slug = AsyncMock(return_value=tmpl)
+        MockRepo.return_value = instance
+        with pytest.raises(HTTPException) as exc:
+            await apply_template(slug="two-step", body=body, db=db, auth=MagicMock(), org_id=uuid.uuid4())
+
+    assert exc.value.status_code == 422
+
+
+@pytest.mark.asyncio
 async def test_apply_template_missing_role_mapping_422():
     from fastapi import HTTPException
     from app.routers.workflow_templates import apply_template
@@ -179,27 +208,20 @@ async def test_apply_template_overwrite_deletes_existing():
     agent2_id = uuid.uuid4()
     existing_rule_id = uuid.uuid4()
 
-    call_count = 0
+    # execute calls: 1=select existing, 2=update, 3=select agents
+    m_existing = MagicMock()
+    m_existing.all.return_value = [(existing_rule_id,)]
 
-    async def _execute_side_effect(stmt):
-        nonlocal call_count
-        call_count += 1
-        m = MagicMock()
-        if call_count == 1:
-            # select existing rules — for row in existing → [(id,)]
-            m.__iter__ = MagicMock(return_value=iter([(existing_rule_id,)]))
-        elif call_count == 2:
-            # update existing rules (ids_to_delete 있으므로)
-            pass
-        else:
-            # select agents
-            m.all.return_value = [
-                AgentRow(id=agent1_id, name="Dev", role="developer"),
-                AgentRow(id=agent2_id, name="PO", role="product-owner"),
-            ]
-        return m
+    m_update = MagicMock()
 
-    db.execute = AsyncMock(side_effect=_execute_side_effect)
+    m_agents = MagicMock()
+    m_agents.all.return_value = [
+        AgentRow(id=agent1_id, name="Dev", role="developer"),
+        AgentRow(id=agent2_id, name="PO", role="product-owner"),
+    ]
+
+    # 코드 execute 순서: 1=select agents, 2=select existing_rules, 3=update
+    db.execute = AsyncMock(side_effect=[m_agents, m_existing, m_update])
 
     body = ApplyTemplateRequest(
         project_id=uuid.uuid4(),
@@ -214,4 +236,4 @@ async def test_apply_template_overwrite_deletes_existing():
         result = await apply_template(slug="two-step", body=body, db=db, auth=MagicMock(), org_id=uuid.uuid4())
 
     assert result.ok is True
-    assert result.rules_deleted >= 0
+    assert result.rules_deleted == 1
