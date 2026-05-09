@@ -56,6 +56,7 @@ export function WorkflowTemplateGallerySection({
   const [agents, setAgents] = useState<TeamMember[]>([]);
   const [loading, setLoading] = useState(true);
   const [selected, setSelected] = useState<WorkflowTemplate | null>(null);
+  const [loadingDetail, setLoadingDetail] = useState(false);
   const [appliedSlug, setAppliedSlug] = useState<string | null>(null);
 
   const [roleMapping, setRoleMapping] = useState<Record<string, string>>({});
@@ -73,19 +74,20 @@ export function WorkflowTemplateGallerySection({
       const [tmplRes, memberRes, rulesRes] = await Promise.all([
         fetch('/api/workflow-templates'),
         fetch(`/api/team-members?project_id=${projectId}&type=agent`),
-        fetch(`/api/agent-routing-rules?project_id=${projectId}`),
+        fetch(`/api/v1/agent-routing-rules?project_id=${projectId}`),
       ]);
       if (tmplRes.ok) {
         const data: unknown = await tmplRes.json();
         setTemplates(Array.isArray(data) ? (data as WorkflowTemplate[]) : []);
       }
       if (memberRes.ok) {
-        const data: unknown = await memberRes.json();
-        setAgents(Array.isArray(data) ? (data as TeamMember[]) : []);
+        const json = await memberRes.json() as { data?: TeamMember[] } | TeamMember[];
+        const members = Array.isArray(json) ? json : ((json as { data?: TeamMember[] }).data ?? []);
+        setAgents(members);
       }
       if (rulesRes.ok) {
-        const data: unknown = await rulesRes.json();
-        const rules = Array.isArray(data) ? (data as AppliedRule[]) : [];
+        const json = await rulesRes.json() as { data?: AppliedRule[] } | AppliedRule[];
+        const rules = Array.isArray(json) ? json : ((json as { data?: AppliedRule[] }).data ?? []);
         const slug = rules.find(r => r.rule_metadata?.template_slug)?.rule_metadata?.template_slug ?? null;
         setAppliedSlug(slug);
       }
@@ -96,11 +98,21 @@ export function WorkflowTemplateGallerySection({
 
   useEffect(() => { void loadData(); }, [loadData]);
 
-  const handleSelectTemplate = (tmpl: WorkflowTemplate) => {
-    setSelected(tmpl);
+  const handleSelectTemplate = async (tmpl: WorkflowTemplate) => {
+    setSelected(null);
     setRoleMapping({});
     setApplyResult(null);
     setOverwriteConfirm(false);
+    setLoadingDetail(true);
+    try {
+      const res = await fetch(`/api/workflow-templates/${tmpl.slug}`);
+      if (res.ok) {
+        const full = await res.json() as WorkflowTemplate;
+        setSelected(full);
+      }
+    } finally {
+      setLoadingDetail(false);
+    }
   };
 
   const handleApply = async (overwrite = false) => {
@@ -170,8 +182,9 @@ export function WorkflowTemplateGallerySection({
           {templates.map(tmpl => (
             <button
               key={tmpl.slug}
-              onClick={() => handleSelectTemplate(tmpl)}
-              className={`rounded-lg border p-4 text-left transition hover:border-primary/60 hover:shadow-sm ${
+              onClick={() => void handleSelectTemplate(tmpl)}
+              disabled={loadingDetail}
+              className={`rounded-lg border p-4 text-left transition hover:border-primary/60 hover:shadow-sm disabled:opacity-60 ${
                 selected?.slug === tmpl.slug ? 'border-primary bg-primary/5' : 'border-border bg-background'
               }`}
             >
@@ -188,11 +201,15 @@ export function WorkflowTemplateGallerySection({
                 </div>
               </div>
               <p className="mt-2 text-[10px] text-muted-foreground/70">
-                프리셋 {Object.keys(tmpl.presets).length}종 · 규칙 {tmpl.rules_template.length}개
+                프리셋 {Object.keys(tmpl.presets ?? {}).length}종
               </p>
             </button>
           ))}
         </div>
+
+        {loadingDetail && (
+          <p className="mt-4 text-xs text-muted-foreground">템플릿 로딩 중...</p>
+        )}
 
         {selected && (
           <div className="mt-6 rounded-lg border border-border bg-muted/30 p-4 space-y-4">
@@ -200,6 +217,20 @@ export function WorkflowTemplateGallerySection({
               <h3 className="font-semibold text-sm text-foreground">{selected.name} — 역할 매핑</h3>
               <p className="mt-0.5 text-xs text-muted-foreground">각 역할에 프로젝트 에이전트를 연결하는.</p>
             </div>
+
+            {selected.rules_template && selected.rules_template.length > 0 && (
+              <div>
+                <p className="text-xs font-medium text-foreground mb-1">생성될 규칙 ({selected.rules_template.length}개)</p>
+                <ul className="space-y-0.5">
+                  {(selected.rules_template as Array<{ name?: string; priority?: number }>).map((r, i) => (
+                    <li key={i} className="flex items-center gap-2 text-[11px] text-muted-foreground">
+                      <span className="font-mono text-[10px] w-5 text-right shrink-0">{r.priority ?? i + 1}</span>
+                      <span className="truncate">{r.name ?? `규칙 ${i + 1}`}</span>
+                    </li>
+                  ))}
+                </ul>
+              </div>
+            )}
 
             {requiredSteps.map(ref => {
               const step = selected.steps.find(s => s.role_ref === ref);
