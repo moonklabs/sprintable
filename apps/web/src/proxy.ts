@@ -9,8 +9,13 @@ const PUBLIC_EXACT = [
   '/llms-baos.txt',
 ];
 
+// Fully public paths — no token check at all
 const PUBLIC_PREFIX = [
-  '/api/',
+  // Auth endpoints — open by design
+  '/api/auth/',
+  '/api/oss/',
+  '/api/webhook/',
+  // UI public routes
   '/login',
   '/signup',
   '/register',
@@ -70,6 +75,21 @@ function applyTokenCookies(
   response.cookies.set(SP_RT_COOKIE, refreshToken, { ...base, maxAge: 30 * 24 * 60 * 60 });
 }
 
+/** Rebuild request headers with updated sp_at/sp_rt so route handlers see fresh tokens */
+function buildRefreshedHeaders(
+  request: NextRequest,
+  tokens: { accessToken: string; refreshToken: string },
+): Headers {
+  const headers = new Headers(request.headers);
+  const existing = headers.get('cookie') ?? '';
+  const replace = (str: string, name: string, value: string) =>
+    str.includes(`${name}=`)
+      ? str.replace(new RegExp(`${name}=[^;]*`), `${name}=${value}`)
+      : str ? `${str}; ${name}=${value}` : `${name}=${value}`;
+  headers.set('cookie', replace(replace(existing, SP_AT_COOKIE, tokens.accessToken), SP_RT_COOKIE, tokens.refreshToken));
+  return headers;
+}
+
 export async function proxy(request: NextRequest) {
   const pathname = request.nextUrl.pathname;
 
@@ -81,9 +101,12 @@ export async function proxy(request: NextRequest) {
     return NextResponse.next({ request });
   }
 
+  // Authenticated API routes — try token refresh but never redirect to /login
+  const isApiPath = pathname.startsWith('/api/');
+
   // Agent API keys are for MCP/HTTP API only — block UI route access
   const authHeader = request.headers.get('Authorization');
-  if (authHeader?.startsWith('Bearer ')) {
+  if (!isApiPath && authHeader?.startsWith('Bearer ')) {
     return new NextResponse(
       JSON.stringify({ error: { code: 'FORBIDDEN', message: 'Agent API keys cannot access UI routes' } }),
       { status: 403, headers: { 'Content-Type': 'application/json' } },
@@ -95,11 +118,13 @@ export async function proxy(request: NextRequest) {
   if (!accessToken) {
     const tokens = await tryRefreshViaFastapi(request);
     if (!tokens) {
+      if (isApiPath) return NextResponse.next({ request }); // let handler return 401
       const url = request.nextUrl.clone();
       url.pathname = '/login';
       return NextResponse.redirect(url);
     }
-    const response = NextResponse.next({ request });
+    const headers = buildRefreshedHeaders(request, tokens);
+    const response = NextResponse.next({ request: { headers } });
     applyTokenCookies(response, tokens.accessToken, tokens.refreshToken);
     return response;
   }
@@ -107,14 +132,16 @@ export async function proxy(request: NextRequest) {
   const claims = await verifyAccessToken(accessToken);
 
   if (!claims) {
-    // access token invalid/expired — try refresh before redirecting
+    // access token invalid/expired — try refresh
     const tokens = await tryRefreshViaFastapi(request);
     if (!tokens) {
+      if (isApiPath) return NextResponse.next({ request }); // let handler return 401
       const url = request.nextUrl.clone();
       url.pathname = '/login';
       return NextResponse.redirect(url);
     }
-    const response = NextResponse.next({ request });
+    const headers = buildRefreshedHeaders(request, tokens);
+    const response = NextResponse.next({ request: { headers } });
     applyTokenCookies(response, tokens.accessToken, tokens.refreshToken);
     return response;
   }
