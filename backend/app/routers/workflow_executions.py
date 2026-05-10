@@ -3,7 +3,7 @@ from datetime import datetime
 
 from fastapi import APIRouter, Depends, Header, HTTPException, Query
 from pydantic import BaseModel
-from sqlalchemy import func, select
+from sqlalchemy import func, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.dependencies.auth import AuthContext, get_current_user, require_admin
@@ -56,17 +56,91 @@ class ExecutionLogListResponse(BaseModel):
     limit: int
 
 
+class StorySummaryItem(BaseModel):
+    status: str
+    rule_name: str | None
+    completed_at: datetime | None
+
+
+@router.get("/story-summary", response_model=dict[str, StorySummaryItem])
+async def story_execution_summary(
+    project_id: uuid.UUID = Query(...),
+    story_ids: list[str] = Query(default=[]),
+    db: AsyncSession = Depends(get_db),
+    org_id: uuid.UUID = Depends(_get_org_id),
+    _auth: AuthContext = Depends(get_current_user),
+) -> dict[str, StorySummaryItem]:
+    """Return latest execution status per story (no admin required — board/member view)."""
+    if not story_ids:
+        return {}
+
+    rows_result = await db.execute(
+        select(WorkflowExecutionLog)
+        .where(
+            WorkflowExecutionLog.org_id == org_id,
+            WorkflowExecutionLog.project_id == project_id,
+        )
+        .order_by(WorkflowExecutionLog.created_at.desc())
+        .limit(len(story_ids) * 10)
+    )
+    logs = list(rows_result.scalars().all())
+
+    rule_ids = {log.rule_id for log in logs if log.rule_id}
+    rule_name_map: dict[uuid.UUID, str] = {}
+    if rule_ids:
+        rr = await db.execute(
+            select(AgentRoutingRule.id, AgentRoutingRule.name).where(AgentRoutingRule.id.in_(rule_ids))
+        )
+        rule_name_map = {row.id: row.name for row in rr.all()}
+
+    summary: dict[str, StorySummaryItem] = {}
+    story_ids_set = set(story_ids)
+    for log in logs:
+        sid = (log.event_context or {}).get("metadata", {}).get("story_id")
+        if sid and sid in story_ids_set and sid not in summary:
+            summary[sid] = StorySummaryItem(
+                status=log.status,
+                rule_name=rule_name_map.get(log.rule_id) if log.rule_id else None,
+                completed_at=log.completed_at,
+            )
+        if len(summary) == len(story_ids_set):
+            break
+
+    return summary
+
+
 @router.get("", response_model=ExecutionLogListResponse)
 async def list_executions(
     project_id: uuid.UUID = Query(...),
     event_type: str | None = Query(default=None),
     status: str | None = Query(default=None),
+    story_id: str | None = Query(default=None),
+    member_id: uuid.UUID | None = Query(default=None),
     offset: int = Query(default=0, ge=0),
     limit: int = Query(default=20, le=100),
     db: AsyncSession = Depends(get_db),
     org_id: uuid.UUID = Depends(_get_org_id),
-    _: AuthContext = Depends(require_admin),
+    auth: AuthContext = Depends(get_current_user),
 ) -> ExecutionLogListResponse:
+    role = auth.claims.get("app_metadata", {}).get("role", "member")
+    if role != "admin":
+        if member_id is None:
+            raise HTTPException(status_code=403, detail="Admin role required, or provide member_id to query own executions")
+        user_id_str = str(auth.user_id)
+        try:
+            user_uuid = uuid.UUID(user_id_str)
+        except ValueError:
+            raise HTTPException(status_code=403, detail="Cannot verify member identity")
+        member_check = await db.execute(
+            select(TeamMember).where(
+                TeamMember.id == member_id,
+                TeamMember.org_id == org_id,
+                or_(TeamMember.user_id == user_uuid, TeamMember.id == user_uuid),
+            ).limit(1)
+        )
+        if not member_check.scalar_one_or_none():
+            raise HTTPException(status_code=403, detail="Can only query own executions")
+
     base = (
         select(WorkflowExecutionLog)
         .where(
@@ -78,6 +152,12 @@ async def list_executions(
         base = base.where(WorkflowExecutionLog.event_type == event_type)
     if status:
         base = base.where(WorkflowExecutionLog.status == status)
+    if story_id:
+        base = base.where(
+            WorkflowExecutionLog.event_context["metadata"]["story_id"].as_string() == story_id
+        )
+    if member_id:
+        base = base.where(WorkflowExecutionLog.target_agent_id == member_id)
 
     total_result = await db.execute(select(func.count()).select_from(base.subquery()))
     total: int = total_result.scalar_one() or 0

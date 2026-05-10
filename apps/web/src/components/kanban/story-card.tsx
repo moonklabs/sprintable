@@ -6,7 +6,7 @@ import { CSS } from '@dnd-kit/utilities';
 import { useTranslations } from 'next-intl';
 import type { KanbanStory, KanbanMember } from './types';
 import { Badge } from '@/components/ui/badge';
-import { ChevronRight, Rocket } from 'lucide-react';
+import { ChevronRight, Rocket, Zap, ZapOff } from 'lucide-react';
 
 const EPIC_COLORS = [
   'info',
@@ -25,6 +25,12 @@ function getInitials(name: string): string {
   return name.slice(0, 2).toUpperCase();
 }
 
+interface WorkflowExecStatus {
+  status: string;
+  rule_name?: string | null;
+  completed_at?: string | null;
+}
+
 interface StoryCardProps {
   story: KanbanStory;
   epicName?: string;
@@ -36,9 +42,10 @@ interface StoryCardProps {
   onDelete?: (storyId: string) => void;
   projectId?: string;
   onKickoff?: (storyId: string, result: 'triggered' | 'no_match' | 'conflict' | 'error') => void;
+  lastExecution?: WorkflowExecStatus | null;
 }
 
-export function StoryCard({ story, epicName, assignee, onClick, onEdit, onChangeStatus, onAssign, onDelete, projectId, onKickoff }: StoryCardProps) {
+export function StoryCard({ story, epicName, assignee, onClick, onEdit, onChangeStatus, onAssign, onDelete, projectId, onKickoff, lastExecution }: StoryCardProps) {
   const t = useTranslations('board');
   const [contextMenuOpen, setContextMenuOpen] = useState(false);
   const [statusMenuOpen, setStatusMenuOpen] = useState(false);
@@ -204,6 +211,22 @@ export function StoryCard({ story, epicName, assignee, onClick, onEdit, onChange
           <span className="font-mono text-[10px] text-muted-foreground/50">#{story.id.slice(0, 6)}</span>
           {story.story_points != null ? (
             <Badge variant="secondary" className="font-mono text-[10px] px-1.5 py-0">{story.story_points}</Badge>
+          ) : null}
+          {lastExecution ? (
+            <span
+              title={[
+                lastExecution.rule_name ?? '워크플로우 실행됨',
+                lastExecution.completed_at ? new Date(lastExecution.completed_at).toLocaleString() : '',
+                lastExecution.status === 'matched' ? '✅ 규칙 매칭' : '⊘ 규칙 없음',
+              ].filter(Boolean).join(' · ')}
+              className="flex h-5 w-5 items-center justify-center"
+            >
+              {lastExecution.status === 'matched' ? (
+                <Zap className="h-3 w-3 text-amber-500" />
+              ) : (
+                <ZapOff className="h-3 w-3 text-muted-foreground/40" />
+              )}
+            </span>
           ) : null}
           {projectId ? (
             <button

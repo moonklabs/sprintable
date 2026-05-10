@@ -130,6 +130,8 @@ export function KanbanBoard({ projectId }: KanbanBoardProps) {
     });
   }, [projectId]);
 
+  const [executionMap, setExecutionMap] = useState<Record<string, { status: string; rule_name?: string | null; completed_at?: string | null }>>({});
+
   const [selectedStory, setSelectedStory] = useState<KanbanStory | null>(null);
   const selectedStoryRef = useRef<KanbanStory | null>(null);
   selectedStoryRef.current = selectedStory;
@@ -168,10 +170,25 @@ export function KanbanBoard({ projectId }: KanbanBoardProps) {
         fetch(`/api/team-members${memberParams}`),
       ]);
 
-      if (storiesRes.ok) { const json = await storiesRes.json(); setStories(json.data); setNextCursor(json.meta?.nextCursor ?? null); }
+      let storyIds: string[] = [];
+      if (storiesRes.ok) { const json = await storiesRes.json(); storyIds = (json.data ?? []).map((s: { id: string }) => s.id); setStories(json.data); setNextCursor(json.meta?.nextCursor ?? null); }
       if (sprintsRes.ok) { const json = await sprintsRes.json(); setSprints(json.data); }
       if (epicsRes.ok) { const json = await epicsRes.json(); setEpics(json.data); setEpicsNextCursor(json.meta?.nextCursor ?? null); }
       if (membersRes.ok) { const json = await membersRes.json(); setMembers(json.data); }
+
+      if (projectId && storyIds.length > 0) {
+        try {
+          const summaryParams = new URLSearchParams({ project_id: projectId });
+          for (const sid of storyIds) summaryParams.append('story_ids', sid);
+          const summaryRes = await fetch(`/api/workflow-executions/story-summary?${summaryParams.toString()}`);
+          if (summaryRes.ok) {
+            const summaryJson = await summaryRes.json() as Record<string, { status: string; rule_name?: string | null; completed_at?: string | null }>;
+            setExecutionMap(summaryJson);
+          }
+        } catch {
+          // non-critical — skip silently
+        }
+      }
     } finally {
       setLoading(false);
     }
@@ -878,6 +895,7 @@ export function KanbanBoard({ projectId }: KanbanBoardProps) {
                     onWipLimitRemove={() => handleWipLimitRemove(col.id)}
                     onWipDraftChange={(v) => handleWipLimitDraftChange(col.id, v)}
                     onCreateStory={handleCreateStory}
+                    executionMap={executionMap}
                   />
                 );
               })}

@@ -55,6 +55,7 @@ interface KanbanColumnProps {
   onWipDraftChange?: (value: string) => void;
   // Inline create
   onCreateStory?: (columnId: string, title: string) => Promise<void> | void;
+  executionMap?: Record<string, { status: string; rule_name?: string | null; completed_at?: string | null }>;
 }
 
 export function KanbanColumn({
@@ -62,7 +63,7 @@ export function KanbanColumn({
   onEditStory, onChangeStatus, onAssignStory, onDeleteStory,
   wipLimit, wipExceeded, wipEditing, wipDraft,
   onWipLimitEdit, onWipLimitSave, onWipLimitRemove, onWipDraftChange,
-  onCreateStory, projectId, onKickoffStory,
+  onCreateStory, projectId, onKickoffStory, executionMap,
 }: KanbanColumnProps) {
   const { setNodeRef, isOver } = useDroppable({ id });
   const t = useTranslations('board');
@@ -258,6 +259,7 @@ export function KanbanColumn({
               onDelete={onDeleteStory}
               projectId={projectId}
               onKickoff={onKickoffStory}
+              lastExecution={executionMap?.[story.id] ?? null}
             />
           ))}
         </div>
