@@ -1,12 +1,12 @@
 import uuid
 from datetime import datetime
 
-from fastapi import APIRouter, Depends, Header, HTTPException, Query, status
+from fastapi import APIRouter, Depends, Query
 from pydantic import BaseModel
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.dependencies.auth import AuthContext, get_current_user
+from app.dependencies.auth import get_verified_org_id
 from app.dependencies.database import get_db
 from app.models.doc import Doc
 from app.models.pm import Epic, Story, Task
@@ -25,29 +25,14 @@ class EntitySearchResult(BaseModel):
     created_at: datetime
 
 
-def _get_org_id(
-    auth: AuthContext,
-    x_org_id: str | None,
-) -> uuid.UUID:
-    org_id_str = auth.claims.get("app_metadata", {}).get("org_id") or x_org_id
-    if not org_id_str:
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail="org_id required",
-        )
-    return uuid.UUID(str(org_id_str))
-
-
 @router.get("/search", response_model=list[EntitySearchResult])
 async def search_entities(
     project_id: uuid.UUID = Query(...),
     q: str | None = Query(default=None),
     types: str | None = Query(default=None, description="Comma-separated: story,doc,epic,task"),
     db: AsyncSession = Depends(get_db),
-    auth: AuthContext = Depends(get_current_user),
-    x_org_id: str | None = Header(default=None, alias="X-Org-Id"),
+    org_id: uuid.UUID = Depends(get_verified_org_id),
 ) -> list[EntitySearchResult]:
-    org_id = _get_org_id(auth, x_org_id)
 
     requested = set(types.split(",")) if types else VALID_TYPES
     requested = requested & VALID_TYPES

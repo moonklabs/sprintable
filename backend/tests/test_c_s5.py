@@ -1,8 +1,9 @@
 """C-S5: RLS → FastAPI 권한 검증 전환 — dependency injection 테스트"""
 from __future__ import annotations
 
+import types
 import uuid
-from unittest.mock import MagicMock, patch
+from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 from fastapi import HTTPException
@@ -139,22 +140,35 @@ def test_require_project_access_allows_legacy_token_without_project_ids():
 
 # ─── get_scope_context ────────────────────────────────────────────────────────
 
-def test_get_scope_context_returns_org_and_project():
+@pytest.mark.anyio
+async def test_get_scope_context_returns_org_and_project():
     from app.dependencies.auth import get_scope_context
     org = uuid.uuid4()
     proj = uuid.uuid4()
     auth = _make_auth(org_id=str(org))
-    ctx = get_scope_context(auth=auth, x_org_id=None, x_project_id=str(proj))
+
+    mock_result = MagicMock()
+    mock_result.scalar_one_or_none.return_value = proj  # project exists in org
+    mock_db = AsyncMock()
+    mock_db.execute = AsyncMock(return_value=mock_result)
+    mock_request = MagicMock()
+    mock_request.state = types.SimpleNamespace()
+
+    ctx = await get_scope_context(
+        auth=auth, x_org_id=None, x_project_id=str(proj),
+        db=mock_db, request=mock_request,
+    )
     assert ctx["org_id"] == org
     assert ctx["project_id"] == proj
     assert ctx["user_id"] == "user-1"
 
 
-def test_get_scope_context_project_none_when_not_provided():
+@pytest.mark.anyio
+async def test_get_scope_context_project_none_when_not_provided():
     from app.dependencies.auth import get_scope_context
     org = uuid.uuid4()
     auth = _make_auth(org_id=str(org))
-    ctx = get_scope_context(auth=auth, x_org_id=None, x_project_id=None)
+    ctx = await get_scope_context(auth=auth, x_org_id=None, x_project_id=None, db=None, request=None)
     assert ctx["org_id"] == org
     assert ctx["project_id"] is None
 

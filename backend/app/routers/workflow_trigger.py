@@ -1,12 +1,12 @@
 import uuid
 from datetime import datetime, timedelta, timezone
 
-from fastapi import APIRouter, Depends, Header, HTTPException
+from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.dependencies.auth import AuthContext, get_current_user
+from app.dependencies.auth import AuthContext, get_current_user, get_verified_org_id
 from app.dependencies.database import get_db
 from app.models.workflow_execution_log import WorkflowExecutionLog
 from app.services.rule_evaluator import EventContext
@@ -15,16 +15,6 @@ from app.services.workflow_pipeline import process_event
 router = APIRouter(prefix="/api/v2/workflow", tags=["workflow"])
 
 _DEDUP_SECONDS = 30
-
-
-def _get_org_id(
-    auth: AuthContext = Depends(get_current_user),
-    x_org_id: str | None = Header(default=None, alias="X-Org-Id"),
-) -> uuid.UUID:
-    org_id_str = auth.claims.get("app_metadata", {}).get("org_id") or x_org_id
-    if not org_id_str:
-        raise HTTPException(status_code=400, detail="org_id required")
-    return uuid.UUID(str(org_id_str))
 
 
 class TriggerRequest(BaseModel):
@@ -44,7 +34,7 @@ async def trigger_workflow(
     body: TriggerRequest,
     db: AsyncSession = Depends(get_db),
     auth: AuthContext = Depends(get_current_user),
-    org_id: uuid.UUID = Depends(_get_org_id),
+    org_id: uuid.UUID = Depends(get_verified_org_id),
 ) -> TriggerResponse:
     cutoff = datetime.now(timezone.utc) - timedelta(seconds=_DEDUP_SECONDS)
     recent = await db.execute(

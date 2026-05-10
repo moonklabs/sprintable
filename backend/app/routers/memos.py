@@ -4,13 +4,13 @@ import uuid
 import logging
 
 import httpx
-from fastapi import APIRouter, BackgroundTasks, Depends, Header, HTTPException, Query, status
+from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Query
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 logger = logging.getLogger(__name__)
 
-from app.dependencies.auth import AuthContext, get_current_user
+from app.dependencies.auth import AuthContext, get_current_user, get_verified_org_id
 from app.dependencies.database import get_db
 from app.models.memo import MemoAssignee, MemoReply
 from app.models.team import TeamMember
@@ -86,16 +86,9 @@ async def _resolve_author_role(db: AsyncSession, created_by: uuid.UUID | None) -
 
 def _get_repo(
     session: AsyncSession = Depends(get_db),
-    auth: AuthContext = Depends(get_current_user),
-    x_org_id: str | None = Header(default=None, alias="X-Org-Id"),
+    org_id: uuid.UUID = Depends(get_verified_org_id),
 ) -> MemoRepository:
-    org_id_str = auth.claims.get("app_metadata", {}).get("org_id") or x_org_id
-    if not org_id_str:
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail="org_id required",
-        )
-    return MemoRepository(session, uuid.UUID(str(org_id_str)))
+    return MemoRepository(session, org_id)
 
 
 @router.get("", response_model=list[MemoListResponse])

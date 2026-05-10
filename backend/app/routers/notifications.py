@@ -1,9 +1,9 @@
 import uuid
 
-from fastapi import APIRouter, Depends, Header, HTTPException, Query, status
+from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.dependencies.auth import AuthContext, get_current_user
+from app.dependencies.auth import AuthContext, get_current_user, get_verified_org_id
 from app.dependencies.database import get_db
 from app.repositories.notification import InboxRepository, NotificationRepository, NotificationSettingRepository
 from app.schemas.notification import (
@@ -17,26 +17,16 @@ from app.schemas.notification import (
 router = APIRouter(prefix="/api/v2", tags=["notifications"])
 
 
-def _get_org_id(
-    auth: AuthContext = Depends(get_current_user),
-    x_org_id: str | None = Header(default=None, alias="X-Org-Id"),
-) -> uuid.UUID:
-    org_id_str = auth.claims.get("app_metadata", {}).get("org_id") or x_org_id
-    if not org_id_str:
-        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="org_id required")
-    return uuid.UUID(str(org_id_str))
-
-
 def _notif_repo(
     session: AsyncSession = Depends(get_db),
-    org_id: uuid.UUID = Depends(_get_org_id),
+    org_id: uuid.UUID = Depends(get_verified_org_id),
 ) -> NotificationRepository:
     return NotificationRepository(session, org_id)
 
 
 def _inbox_repo(
     session: AsyncSession = Depends(get_db),
-    org_id: uuid.UUID = Depends(_get_org_id),
+    org_id: uuid.UUID = Depends(get_verified_org_id),
 ) -> InboxRepository:
     return InboxRepository(session, org_id)
 
@@ -85,7 +75,7 @@ async def upsert_notification_setting(
     member_id: uuid.UUID = Query(...),
     body: UpsertNotificationSetting = ...,
     session: AsyncSession = Depends(get_db),
-    org_id: uuid.UUID = Depends(_get_org_id),
+    org_id: uuid.UUID = Depends(get_verified_org_id),
 ) -> NotificationSettingResponse:
     repo = NotificationSettingRepository(session)
     setting = await repo.upsert(

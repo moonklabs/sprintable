@@ -1,10 +1,10 @@
 import uuid
 
-from fastapi import APIRouter, Depends, Header, HTTPException, status
+from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.dependencies.auth import AuthContext, get_current_user
+from app.dependencies.auth import AuthContext, get_current_user, get_verified_org_id
 from app.dependencies.database import get_db
 from app.repositories.project import ProjectRepository
 from app.schemas.project import ProjectCreate, ProjectResponse, ProjectUpdate
@@ -14,16 +14,9 @@ router = APIRouter(prefix="/api/v2/projects", tags=["projects"])
 
 def _get_repo(
     session: AsyncSession = Depends(get_db),
-    auth: AuthContext = Depends(get_current_user),
-    x_org_id: str | None = Header(default=None, alias="X-Org-Id"),
+    org_id: uuid.UUID = Depends(get_verified_org_id),
 ) -> ProjectRepository:
-    org_id_str = auth.claims.get("app_metadata", {}).get("org_id") or x_org_id
-    if not org_id_str:
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail="org_id required (X-Org-Id header or JWT app_metadata)",
-        )
-    return ProjectRepository(session, uuid.UUID(str(org_id_str)))
+    return ProjectRepository(session, org_id)
 
 
 @router.get("", response_model=list[ProjectResponse])
