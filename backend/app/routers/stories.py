@@ -8,7 +8,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.dependencies.auth import AuthContext, get_current_user
 from app.dependencies.database import get_db
-from app.models.pm import Story, StoryActivity, StoryComment
+from app.models.pm import Epic, Story, StoryActivity, StoryComment
 from app.models.team import TeamMember
 from app.repositories.story import StoryRepository
 from app.routers.events import publish_event
@@ -18,6 +18,25 @@ from app.services.workflow_pipeline import process_event
 from app.services.rule_evaluator import EventContext
 
 router = APIRouter(prefix="/api/v2/stories", tags=["stories"])
+
+
+async def _resolve_actor_info(
+    db: AsyncSession, actor_id: uuid.UUID | None
+) -> tuple[str | None, str | None]:
+    """Returns (name, role) for a TeamMember ID."""
+    if not actor_id:
+        return None, None
+    result = await db.execute(select(TeamMember).where(TeamMember.id == actor_id).limit(1))
+    member = result.scalar_one_or_none()
+    return (member.name if member else None, member.role if member else None)
+
+
+async def _resolve_epic_title(db: AsyncSession, epic_id: uuid.UUID | None) -> str | None:
+    if not epic_id:
+        return None
+    result = await db.execute(select(Epic).where(Epic.id == epic_id).limit(1))
+    epic = result.scalar_one_or_none()
+    return epic.title if epic else None
 
 
 def _get_repo(
@@ -117,18 +136,31 @@ async def update_story(
     if "assignee_id" in data and old_assignee_id != story.assignee_id:
         org_id = repo.org_id
         actor_id: uuid.UUID | None = None
+        actor_name: str | None = None
+        actor_role: str | None = None
         try:
             actor_id = await _resolve_team_member_id(auth, org_id, db)
+            actor_name, actor_role = await _resolve_actor_info(db, actor_id)
+        except Exception:
+            pass
+        epic_title: str | None = None
+        try:
+            epic_title = await _resolve_epic_title(db, story.epic_id)
         except Exception:
             pass
         event_data = {
             "story_id": str(id),
             "story_title": story.title,
+            "story_priority": story.priority,
+            "epic_id": str(story.epic_id) if story.epic_id else None,
+            "epic_title": epic_title,
             "assignee_id": str(story.assignee_id) if story.assignee_id else None,
             "old_assignee_id": str(old_assignee_id) if old_assignee_id else None,
             "project_id": str(story.project_id),
             "org_id": str(org_id),
             "actor_id": str(actor_id) if actor_id else None,
+            "actor_name": actor_name,
+            "actor_role": actor_role,
             "timestamp": datetime.now(timezone.utc).isoformat(),
         }
         publish_event(str(org_id), "story.assignee_changed", event_data)
@@ -196,18 +228,31 @@ async def update_story_status(
     if old_status != story.status:
         org_id = repo.org_id
         actor_id: uuid.UUID | None = None
+        actor_name: str | None = None
+        actor_role: str | None = None
         try:
             actor_id = await _resolve_team_member_id(auth, org_id, db)
+            actor_name, actor_role = await _resolve_actor_info(db, actor_id)
+        except Exception:
+            pass
+        epic_title: str | None = None
+        try:
+            epic_title = await _resolve_epic_title(db, story.epic_id)
         except Exception:
             pass
         event_data = {
             "story_id": str(id),
             "story_title": story.title,
+            "story_priority": story.priority,
+            "epic_id": str(story.epic_id) if story.epic_id else None,
+            "epic_title": epic_title,
             "status": story.status,
             "old_status": old_status,
             "project_id": str(story.project_id),
             "org_id": str(org_id),
             "actor_id": str(actor_id) if actor_id else None,
+            "actor_name": actor_name,
+            "actor_role": actor_role,
             "timestamp": datetime.now(timezone.utc).isoformat(),
         }
         publish_event(str(org_id), "story.status_changed", event_data)

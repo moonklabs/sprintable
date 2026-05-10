@@ -10,11 +10,32 @@ from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from typing import Any
 
+from pydantic import BaseModel
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models.agent_routing_rule import AgentRoutingRule
 from app.models.workflow_execution_log import WorkflowExecutionLog
+
+
+class EventMetadata(BaseModel):
+    """Structured schema for EventContext.metadata. extra='allow' preserves legacy flat keys."""
+
+    model_config = {"extra": "allow"}
+
+    story_id: str | None = None
+    story_title: str | None = None
+    story_status: str | None = None
+    story_priority: str | None = None
+    epic_id: str | None = None
+    epic_title: str | None = None
+    actor_id: str | None = None
+    actor_name: str | None = None
+    actor_role: str | None = None
+    memo_id: str | None = None
+    memo_type: str | None = None
+    title: str | None = None
+    context_message: str | None = None
 
 
 @dataclass
