@@ -45,6 +45,7 @@ class BaseRepository(Generic[T]):
         for key, value in data.items():
             setattr(obj, key, value)
         await self.session.flush()
+        await self.session.refresh(obj)
         return obj
 
     async def delete(self, id: uuid.UUID) -> bool:
