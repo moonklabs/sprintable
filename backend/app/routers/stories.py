@@ -111,6 +111,9 @@ async def update_story(
     if story is None:
         raise HTTPException(status_code=404, detail="Story not found")
 
+    # 변경사항 먼저 commit — side effects 에러가 rollback시키지 않도록
+    await db.commit()
+
     if "assignee_id" in data and old_assignee_id != story.assignee_id:
         org_id = repo.org_id
         actor_id: uuid.UUID | None = None
@@ -185,6 +188,10 @@ async def update_story_status(
         story = await repo.set_status(id, body.status)
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+    # status 변경을 side effects 실행 전에 먼저 commit — process_event/webhook
+    # 내부 DB 에러가 트랜잭션을 aborted 상태로 만들어 status 변경까지 rollback하는 버그 방지
+    await db.commit()
 
     if old_status != story.status:
         org_id = repo.org_id
