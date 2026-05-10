@@ -5,7 +5,7 @@ from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from typing import Literal
 
-from fastapi import Depends, Header, HTTPException, status
+from fastapi import Depends, Header, HTTPException, Request, status
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -109,6 +109,77 @@ async def get_current_user(
 
 # ─── Scope dependencies ───────────────────────────────────────────────────────
 
+async def _verify_org_membership(
+    user_id: str,
+    org_id: uuid.UUID,
+    db: AsyncSession,
+    request: Request,
+) -> None:
+    """caller가 org 멤버인지 DB 조회 — request.state 캐시로 N+1 방지."""
+    cache_key = f"_org_mbr_{user_id}_{org_id}"
+    cached = getattr(request.state, cache_key, None)
+    if cached is True:
+        return
+    if cached is False:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="해당 조직의 멤버가 아닌",
+        )
+
+    from app.models.project import OrgMember
+
+    result = await db.execute(
+        select(OrgMember.id).where(
+            OrgMember.org_id == org_id,
+            OrgMember.user_id == uuid.UUID(user_id),
+            OrgMember.deleted_at.is_(None),
+        )
+    )
+    is_member = result.scalar_one_or_none() is not None
+    setattr(request.state, cache_key, is_member)
+    if not is_member:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="해당 조직의 멤버가 아닌",
+        )
+
+
+async def get_verified_org_id(
+    auth: AuthContext = Depends(get_current_user),
+    x_org_id: str | None = Header(default=None, alias="X-Org-Id"),
+    x_project_id: str | None = Header(default=None, alias="X-Project-Id"),
+    db: AsyncSession = Depends(get_db),
+    request: Request = None,
+) -> uuid.UUID:
+    """org_id 추출 — X-Org-Id 헤더 fallback 시 DB membership 검증, X-Project-Id 헤더 시 project 소속 검증."""
+    jwt_org_id = auth.claims.get("app_metadata", {}).get("org_id")
+    raw = jwt_org_id or x_org_id
+    if not raw:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="org_id required (X-Org-Id header or JWT app_metadata)",
+        )
+    try:
+        org_id = uuid.UUID(str(raw))
+    except ValueError:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Invalid org_id format")
+
+    if not jwt_org_id and x_org_id:
+        # 헤더 fallback 사용 시에만 membership 검증 — JWT org_id는 발급 시 검증됨
+        await _verify_org_membership(auth.user_id, org_id, db, request)
+
+    jwt_project_id = auth.claims.get("app_metadata", {}).get("project_id")
+    if not jwt_project_id and x_project_id:
+        # X-Project-Id 헤더 fallback 사용 시 해당 project가 org에 속하는지 검증
+        try:
+            project_id = uuid.UUID(x_project_id)
+        except ValueError:
+            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Invalid X-Project-Id format")
+        await _verify_project_in_org(project_id, org_id, db, request)
+
+    return org_id
+
+
 def get_org_scope(
     auth: AuthContext = Depends(get_current_user),
     x_org_id: str | None = Header(default=None, alias="X-Org-Id"),
@@ -169,13 +240,52 @@ def require_project_access(
     return project_id
 
 
-def get_scope_context(
+async def _verify_project_in_org(
+    project_id: uuid.UUID,
+    org_id: uuid.UUID,
+    db: AsyncSession,
+    request: Request,
+) -> None:
+    """project가 org에 속하는지 DB 조회 — request.state 캐시로 N+1 방지."""
+    cache_key = f"_proj_in_org_{project_id}_{org_id}"
+    cached = getattr(request.state, cache_key, None)
+    if cached is True:
+        return
+    if cached is False:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="해당 조직에 속하지 않는 프로젝트인",
+        )
+
+    from app.models.project import Project
+
+    result = await db.execute(
+        select(Project.id).where(
+            Project.id == project_id,
+            Project.org_id == org_id,
+            Project.deleted_at.is_(None),
+        )
+    )
+    exists = result.scalar_one_or_none() is not None
+    setattr(request.state, cache_key, exists)
+    if not exists:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="해당 조직에 속하지 않는 프로젝트인",
+        )
+
+
+async def get_scope_context(
     auth: AuthContext = Depends(get_current_user),
     x_org_id: str | None = Header(default=None, alias="X-Org-Id"),
     x_project_id: str | None = Header(default=None, alias="X-Project-Id"),
+    db: AsyncSession = Depends(get_db),
+    request: Request = None,
 ) -> dict:
-    """org_id + project_id 컨텍스트를 한번에 추출."""
-    org_id = get_org_scope(auth, x_org_id)
-    project_id_raw = auth.claims.get("app_metadata", {}).get("project_id") or x_project_id
+    """org_id + project_id 컨텍스트를 한번에 추출 — 헤더 fallback 시 membership/소속 검증."""
+    # x_project_id를 get_verified_org_id에 전달해서 project 소속 검증도 위임
+    org_id = await get_verified_org_id(auth=auth, x_org_id=x_org_id, x_project_id=x_project_id, db=db, request=request)
+    jwt_project_id = auth.claims.get("app_metadata", {}).get("project_id")
+    project_id_raw = jwt_project_id or x_project_id
     project_id = uuid.UUID(str(project_id_raw)) if project_id_raw else None
     return {"org_id": org_id, "project_id": project_id, "user_id": auth.user_id}

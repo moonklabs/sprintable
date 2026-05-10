@@ -1,9 +1,9 @@
 import uuid
 
-from fastapi import APIRouter, Depends, Header, HTTPException, Query, status
+from fastapi import APIRouter, Depends, Query
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.dependencies.auth import AuthContext, get_current_user
+from app.dependencies.auth import get_verified_org_id
 from app.dependencies.database import get_db
 from app.repositories.audit import AuditLogRepository
 from app.schemas.audit import AuditLogResponse
@@ -13,13 +13,9 @@ router = APIRouter(prefix="/api/v2/audit-logs", tags=["audit-logs"])
 
 def _get_repo(
     session: AsyncSession = Depends(get_db),
-    auth: AuthContext = Depends(get_current_user),
-    x_org_id: str | None = Header(default=None, alias="X-Org-Id"),
+    org_id: uuid.UUID = Depends(get_verified_org_id),
 ) -> AuditLogRepository:
-    org_id_str = auth.claims.get("app_metadata", {}).get("org_id") or x_org_id
-    if not org_id_str:
-        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="org_id required")
-    return AuditLogRepository(session, uuid.UUID(str(org_id_str)))
+    return AuditLogRepository(session, org_id)
 
 
 @router.get("", response_model=list[AuditLogResponse])
