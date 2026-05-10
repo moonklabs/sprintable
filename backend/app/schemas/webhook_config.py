@@ -5,6 +5,8 @@ from datetime import datetime
 
 from pydantic import BaseModel, ConfigDict, field_validator
 
+from app.core.ssrf import validate_webhook_url
+
 
 class WebhookConfigResponse(BaseModel):
     model_config = ConfigDict(from_attributes=True)
@@ -32,4 +34,5 @@ class UpsertWebhookConfig(BaseModel):
     def url_must_be_https(cls, v: str) -> str:
         if not v.startswith("https://"):
             raise ValueError("url must start with https://")
+        validate_webhook_url(v)  # DNS resolve → private IP 차단 (SSRF 방어)
         return v

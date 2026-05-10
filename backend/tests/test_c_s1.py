@@ -29,7 +29,13 @@ async def _client():
     return AsyncClient(transport=ASGITransport(app=app), base_url="http://test"), mock_session, app
 
 
-def _make_user(totp_enabled: bool = False, totp_secret: str | None = None) -> MagicMock:
+def _make_user(
+    totp_enabled: bool = False,
+    totp_secret: str | None = None,
+    totp_last_timestep: int | None = None,
+    totp_fail_count: int = 0,
+    totp_locked_until=None,
+) -> MagicMock:
     from app.core.security import hash_password
     u = MagicMock()
     u.id = uuid.uuid4()
@@ -38,6 +44,9 @@ def _make_user(totp_enabled: bool = False, totp_secret: str | None = None) -> Ma
     u.is_active = True
     u.totp_enabled = totp_enabled
     u.totp_secret = totp_secret
+    u.totp_last_timestep = totp_last_timestep
+    u.totp_fail_count = totp_fail_count
+    u.totp_locked_until = totp_locked_until
     u.org_id = uuid.uuid4()
     u.project_id = uuid.uuid4()
     u.role = "member"
@@ -96,6 +105,116 @@ def test_totp_generate_verify():
     uri = get_totp_provisioning_uri(secret, "user@example.com")
     assert "otpauth://totp" in uri
     assert "Sprintable" in uri
+
+
+def test_verify_totp_with_timestep_success():
+    """현재 코드로 검증 성공 시 timestep(int) 반환."""
+    from app.core.security import verify_totp_with_timestep, generate_totp_secret
+    import pyotp
+    secret = generate_totp_secret()
+    code = pyotp.TOTP(secret).now()
+    ts = verify_totp_with_timestep(secret, code)
+    assert isinstance(ts, int)
+
+
+def test_verify_totp_with_timestep_failure():
+    """잘못된 코드 → None 반환."""
+    from app.core.security import verify_totp_with_timestep, generate_totp_secret
+    secret = generate_totp_secret()
+    assert verify_totp_with_timestep(secret, "000000") is None
+
+
+# ─── SEC-06 TOTP 보안 통합 테스트 ───────────────────────────────────────────────
+
+@pytest.mark.anyio
+async def test_totp_replay_rejected():
+    """같은 timestep 코드 재사용 시 TOTP_REPLAYED 반환."""
+    import pyotp
+    from app.core.security import generate_totp_secret, verify_totp_with_timestep
+    client, session, app = await _client()
+    try:
+        secret = generate_totp_secret()
+        code = pyotp.TOTP(secret).now()
+        ts = verify_totp_with_timestep(secret, code)
+
+        user = _make_user(totp_enabled=True, totp_secret=secret, totp_last_timestep=ts)
+
+        with patch("app.routers.auth._get_user_by_email", new_callable=AsyncMock) as mock_get_user, \
+             patch("app.routers.auth._build_app_metadata", new_callable=AsyncMock) as mock_meta, \
+             patch("app.routers.auth._store_refresh_token", new_callable=AsyncMock):
+            mock_get_user.return_value = user
+            mock_meta.return_value = {}
+            session.execute = AsyncMock(return_value=MagicMock())
+
+            async with client as c:
+                resp = await c.post("/api/v2/auth/token", json={
+                    "email": "test@example.com",
+                    "password": "correct-password",
+                    "totp_code": code,
+                })
+
+        assert resp.status_code == 403
+        assert resp.json()["error"]["code"] == "TOTP_REPLAYED"
+    finally:
+        app.dependency_overrides.clear()
+
+
+@pytest.mark.anyio
+async def test_totp_lockout_after_5_failures():
+    """연속 실패 5회 시 TOTP_LOCKED 반환."""
+    import pyotp
+    from app.core.security import generate_totp_secret
+    client, session, app = await _client()
+    try:
+        secret = generate_totp_secret()
+        # 4번 실패한 상태
+        user = _make_user(totp_enabled=True, totp_secret=secret, totp_fail_count=4)
+
+        with patch("app.routers.auth._get_user_by_email", new_callable=AsyncMock) as mock_get_user, \
+             patch("app.routers.auth._build_app_metadata", new_callable=AsyncMock):
+            mock_get_user.return_value = user
+            session.execute = AsyncMock(return_value=MagicMock())
+
+            async with client as c:
+                resp = await c.post("/api/v2/auth/token", json={
+                    "email": "test@example.com",
+                    "password": "correct-password",
+                    "totp_code": "000000",  # 잘못된 코드
+                })
+
+        # 5번째 실패 → lockout 설정 후 403
+        assert resp.status_code == 403
+        assert resp.json()["error"]["code"] == "INVALID_TOTP"
+    finally:
+        app.dependency_overrides.clear()
+
+
+@pytest.mark.anyio
+async def test_totp_locked_user_returns_429():
+    """lockout 중인 사용자 → 429 반환."""
+    import pyotp
+    from app.core.security import generate_totp_secret
+    client, session, app = await _client()
+    try:
+        secret = generate_totp_secret()
+        locked_until = datetime.now(timezone.utc) + timedelta(minutes=4)
+        user = _make_user(totp_enabled=True, totp_secret=secret, totp_locked_until=locked_until)
+
+        with patch("app.routers.auth._get_user_by_email", new_callable=AsyncMock) as mock_get_user:
+            mock_get_user.return_value = user
+
+            async with client as c:
+                code = pyotp.TOTP(secret).now()
+                resp = await c.post("/api/v2/auth/token", json={
+                    "email": "test@example.com",
+                    "password": "correct-password",
+                    "totp_code": code,
+                })
+
+        assert resp.status_code == 429
+        assert resp.json()["error"]["code"] == "TOTP_LOCKED"
+    finally:
+        app.dependency_overrides.clear()
 
 
 # ─── POST /api/v2/auth/register ───────────────────────────────────────────────

@@ -27,7 +27,7 @@ class Settings(BaseSettings):
 
     # App
     app_env: str = "development"
-    debug: bool = True
+    debug: bool = False
 
     # OAuth — Google / GitHub
     google_client_id: str = ""

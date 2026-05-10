@@ -1,28 +1,35 @@
 import uuid
 
-from fastapi import APIRouter, Depends, Header, HTTPException, status
+from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.dependencies.auth import AuthContext, get_current_user
+from app.dependencies.auth import AuthContext, get_current_user, get_verified_org_id
 from app.dependencies.database import get_db
 from app.repositories.org_member import OrgMemberRepository
-from app.schemas.org_member import OrgMemberCreate, OrgMemberResponse, OrgMemberUpdate
+from app.schemas.org_member import ORG_ROLES, OrgMemberCreate, OrgMemberResponse, OrgMemberUpdate
 
 router = APIRouter(prefix="/api/v2/org-members", tags=["org-members"])
 
 
 def _get_repo(
     session: AsyncSession = Depends(get_db),
-    auth: AuthContext = Depends(get_current_user),
-    x_org_id: str | None = Header(default=None, alias="X-Org-Id"),
+    org_id: uuid.UUID = Depends(get_verified_org_id),
 ) -> OrgMemberRepository:
-    org_id_str = auth.claims.get("app_metadata", {}).get("org_id") or x_org_id
-    if not org_id_str:
+    return OrgMemberRepository(session, org_id)
+
+
+async def _require_admin(
+    repo: OrgMemberRepository = Depends(_get_repo),
+    auth: AuthContext = Depends(get_current_user),
+) -> OrgMemberRepository:
+    """DB에서 caller의 OrgMember role 확인 — owner 또는 admin만 통과."""
+    caller = await repo.get_by_user(uuid.UUID(auth.user_id))
+    if caller is None or caller.role not in ("owner", "admin"):
         raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail="org_id required (X-Org-Id header or JWT app_metadata)",
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="org admin 또는 owner 권한 필요",
         )
-    return OrgMemberRepository(session, uuid.UUID(str(org_id_str)))
+    return repo
 
 
 @router.get("", response_model=list[OrgMemberResponse])
@@ -36,10 +43,11 @@ async def list_org_members(
 @router.post("", response_model=OrgMemberResponse, status_code=201)
 async def create_org_member(
     body: OrgMemberCreate,
-    session: AsyncSession = Depends(get_db),
-    _auth: AuthContext = Depends(get_current_user),
+    repo: OrgMemberRepository = Depends(_require_admin),
 ) -> OrgMemberResponse:
-    repo = OrgMemberRepository(session, body.org_id)
+    if body.role not in ORG_ROLES:
+        raise HTTPException(status_code=400, detail=f"role must be one of: {', '.join(ORG_ROLES)}")
+    # repo.org_id는 JWT에서 추출됨 — body.org_id 무시 (org_id 조작 방지)
     member = await repo.create(user_id=body.user_id, role=body.role)
     return OrgMemberResponse.model_validate(member)
 
@@ -59,9 +67,8 @@ async def get_org_member(
 async def update_org_member(
     id: uuid.UUID,
     body: OrgMemberUpdate,
-    repo: OrgMemberRepository = Depends(_get_repo),
+    repo: OrgMemberRepository = Depends(_require_admin),
 ) -> OrgMemberResponse:
-    from app.schemas.org_member import ORG_ROLES
     if body.role and body.role not in ORG_ROLES:
         raise HTTPException(status_code=400, detail=f"role must be one of: {', '.join(ORG_ROLES)}")
     data = body.model_dump(exclude_unset=True)
@@ -74,7 +81,7 @@ async def update_org_member(
 @router.delete("/{id}", status_code=200)
 async def delete_org_member(
     id: uuid.UUID,
-    repo: OrgMemberRepository = Depends(_get_repo),
+    repo: OrgMemberRepository = Depends(_require_admin),
 ) -> dict:
     ok = await repo.soft_delete(id)
     if not ok:

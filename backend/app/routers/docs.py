@@ -1,12 +1,12 @@
 import uuid
 from datetime import datetime
 
-from fastapi import APIRouter, Body, Depends, Header, HTTPException, Query, status
+from fastapi import APIRouter, Body, Depends, HTTPException, Query
 from pydantic import BaseModel
 from sqlalchemy import delete, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.dependencies.auth import AuthContext, get_current_user
+from app.dependencies.auth import AuthContext, get_current_user, get_verified_org_id
 from app.dependencies.database import get_db
 from app.models.doc import DocComment, DocRevision
 from app.models.team import TeamMember
@@ -18,16 +18,9 @@ router = APIRouter(prefix="/api/v2/docs", tags=["docs"])
 
 def _get_repo(
     session: AsyncSession = Depends(get_db),
-    auth: AuthContext = Depends(get_current_user),
-    x_org_id: str | None = Header(default=None, alias="X-Org-Id"),
+    org_id: uuid.UUID = Depends(get_verified_org_id),
 ) -> DocRepository:
-    org_id_str = auth.claims.get("app_metadata", {}).get("org_id") or x_org_id
-    if not org_id_str:
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail="org_id required (X-Org-Id header or JWT app_metadata)",
-        )
-    return DocRepository(session, uuid.UUID(str(org_id_str)))
+    return DocRepository(session, org_id)
 
 
 @router.get("", response_model=list[DocResponse])

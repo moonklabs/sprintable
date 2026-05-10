@@ -93,7 +93,8 @@ async def test_list_configs_empty_200():
 async def test_upsert_config_create_200():
     client, session, app = await _client()
     try:
-        with patch("app.repositories.webhook_config.WebhookConfigRepository.upsert", new_callable=AsyncMock) as mock_upsert:
+        with patch("app.schemas.webhook_config.validate_webhook_url"), \
+             patch("app.repositories.webhook_config.WebhookConfigRepository.upsert", new_callable=AsyncMock) as mock_upsert:
             mock_upsert.return_value = _mock_config()
 
             async with client as c:
@@ -115,7 +116,8 @@ async def test_upsert_config_update_200():
     client, session, app = await _client()
     try:
         updated = _mock_config(is_active=False)
-        with patch("app.repositories.webhook_config.WebhookConfigRepository.upsert", new_callable=AsyncMock) as mock_upsert:
+        with patch("app.schemas.webhook_config.validate_webhook_url"), \
+             patch("app.repositories.webhook_config.WebhookConfigRepository.upsert", new_callable=AsyncMock) as mock_upsert:
             mock_upsert.return_value = updated
 
             async with client as c:

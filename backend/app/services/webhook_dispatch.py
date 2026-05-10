@@ -12,6 +12,7 @@ import httpx
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.core.ssrf import validate_webhook_url_async
 from app.models.webhook_config import WebhookConfig
 
 
@@ -38,10 +39,15 @@ async def fire_webhooks(session: AsyncSession, org_id: uuid.UUID, event: str, da
     payload_obj = {"event": event, "data": data}
     body = json.dumps(payload_obj)
 
-    async with httpx.AsyncClient(timeout=10.0) as client:
+    async with httpx.AsyncClient(timeout=10.0, follow_redirects=False) as client:
         for row in configs:
             url, secret, events = row
             if events and event not in events:
+                continue
+            # dispatch 시 IP 재검증 (DNS rebinding 방지)
+            try:
+                await validate_webhook_url_async(url)
+            except ValueError:
                 continue
             headers = {"Content-Type": "application/json", **_build_signature_headers(secret, body)}
             try:

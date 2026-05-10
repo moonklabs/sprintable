@@ -1,13 +1,17 @@
+import logging
 import os
 
 from fastapi import FastAPI, HTTPException, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
+from slowapi.errors import RateLimitExceeded
 
 from app.core.config import settings
 from app.core.logging_config import configure_logging
+from app.core.rate_limit import limiter
 
 configure_logging(json_logs=os.getenv("APP_ENV", "development") != "development")
+_logger = logging.getLogger(__name__)
 from app.routers import account, agent_deployments, agent_personas, agent_routing_rules, agent_runs, agent_sessions, analytics, api_keys, audit_logs, auth, bridge, cron, current_project, dashboard, docs, entities, epics, events, health, hitl, integrations, invitations, me, meetings, members, memos, mockups, notifications, org_members, organizations, oss, policy_documents, presence, project_settings, projects, retros, rewards, sprints, standups, stories, subscription, tasks, team_members, webhooks, workflow_executions, workflow_templates, workflow_trigger, workflow_trigger_types, workflow_versions
 
 app = FastAPI(
@@ -37,12 +41,43 @@ async def http_exception_handler(request: Request, exc: HTTPException) -> JSONRe
     )
 
 
+@app.exception_handler(RateLimitExceeded)
+async def rate_limit_handler(request: Request, exc: RateLimitExceeded) -> JSONResponse:
+    retry_after = str(getattr(exc, "retry_after", 60))
+    resp = JSONResponse(
+        status_code=429,
+        content={"data": None, "error": {"code": "RATE_LIMITED", "message": "Too many requests"}, "meta": None},
+    )
+    resp.headers["Retry-After"] = retry_after
+    return resp
+
+
+@app.exception_handler(Exception)
+async def unhandled_exception_handler(request: Request, exc: Exception) -> JSONResponse:
+    """예상치 못한 500 에러 — 내부 정보는 로그에만, 클라이언트엔 일반 메시지."""
+    _logger.exception("Unhandled exception on %s %s: %s", request.method, request.url.path, exc)
+    detail = str(exc) if settings.debug else "Internal server error"
+    return JSONResponse(
+        status_code=500,
+        content={"data": None, "error": {"code": "INTERNAL_ERROR", "message": detail}, "meta": None},
+    )
+
+
+app.state.limiter = limiter
+
+
 app.add_middleware(
     CORSMiddleware,
     allow_origins=[o.strip() for o in settings.cors_origins.split(",") if o.strip()],
     allow_credentials=True,
-    allow_methods=["*"],
-    allow_headers=["*"],
+    allow_methods=["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"],
+    allow_headers=[
+        "Authorization",
+        "Content-Type",
+        "X-Org-Id",
+        "X-Project-Id",
+        "X-Request-ID",
+    ],
 )
 
 app.include_router(auth.router)

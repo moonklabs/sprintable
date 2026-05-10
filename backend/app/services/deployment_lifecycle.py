@@ -74,10 +74,16 @@ async def _fire_webhooks(session: AsyncSession, org_id: uuid.UUID, event: str, d
     payload_obj = {"event": event, "data": data}
     body = json.dumps(payload_obj)
 
-    async with httpx.AsyncClient(timeout=10.0) as client:
+    async with httpx.AsyncClient(timeout=10.0, follow_redirects=False) as client:
         for row in configs:
             url, secret, events = row
             if events and event not in events:
+                continue
+            # dispatch 전 IP 재검증 (DNS rebinding 방지)
+            from app.core.ssrf import validate_webhook_url_async
+            try:
+                await validate_webhook_url_async(url)
+            except ValueError:
                 continue
             headers = {"Content-Type": "application/json", **_build_signature_headers(secret, body)}
             try:
