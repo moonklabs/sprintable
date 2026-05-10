@@ -144,6 +144,36 @@ async def _verify_org_membership(
         )
 
 
+_WRITE_METHODS = frozenset({"POST", "PUT", "PATCH", "DELETE"})
+
+
+def _check_api_key_scope(auth: AuthContext, method: str) -> None:
+    """API Key 경로일 때만 scope 체크 — JWT 사용자(웹 UI)는 미적용."""
+    if not auth.claims.get("app_metadata", {}).get("api_key_id"):
+        return  # JWT 경로 → 스킵
+    scope: list[str] = auth.claims.get("app_metadata", {}).get("scope", ["read", "write"])
+    required = "write" if method.upper() in _WRITE_METHODS else "read"
+    if required not in scope:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail=f"API Key scope '{required}' required",
+        )
+
+
+def require_api_scope(required_scope: str):
+    """특정 scope를 명시적으로 요구하는 dependency factory."""
+    def _check(auth: AuthContext = Depends(get_current_user)) -> None:
+        if not auth.claims.get("app_metadata", {}).get("api_key_id"):
+            return  # JWT 사용자 → 스킵
+        scope: list[str] = auth.claims.get("app_metadata", {}).get("scope", ["read", "write"])
+        if required_scope not in scope:
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail=f"API Key scope '{required_scope}' required",
+            )
+    return _check
+
+
 async def get_verified_org_id(
     auth: AuthContext = Depends(get_current_user),
     x_org_id: str | None = Header(default=None, alias="X-Org-Id"),
@@ -151,7 +181,12 @@ async def get_verified_org_id(
     db: AsyncSession = Depends(get_db),
     request: Request = None,
 ) -> uuid.UUID:
-    """org_id 추출 — X-Org-Id 헤더 fallback 시 DB membership 검증, X-Project-Id 헤더 시 project 소속 검증."""
+    """org_id 추출 — X-Org-Id 헤더 fallback 시 DB membership 검증, X-Project-Id 헤더 시 project 소속 검증.
+    API Key 경로는 HTTP method 기반 scope 자동 체크."""
+    # API Key scope 체크 (request 있을 때만 — 직접 단위 테스트 호출 시 스킵)
+    if request is not None:
+        _check_api_key_scope(auth, request.method)
+
     jwt_org_id = auth.claims.get("app_metadata", {}).get("org_id")
     raw = jwt_org_id or x_org_id
     if not raw:
