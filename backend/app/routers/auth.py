@@ -24,6 +24,7 @@ from app.core.security import (
     hash_token,
     verify_password,
     verify_totp,
+    verify_totp_with_timestep,
     JWTError,
     REFRESH_TOKEN_EXPIRE_DAYS,
     create_refresh_token,
@@ -225,8 +226,40 @@ async def login(
     if user.totp_enabled:
         if not body.totp_code:
             return _err("TOTP_REQUIRED", "TOTP code required", 403)
-        if not verify_totp(user.totp_secret or "", body.totp_code):
+
+        now = datetime.now(timezone.utc)
+
+        # lockout 체크
+        if getattr(user, "totp_locked_until", None) and user.totp_locked_until > now:
+            remaining = int((user.totp_locked_until - now).total_seconds())
+            return _err("TOTP_LOCKED", f"Too many failures. Retry after {remaining}s", 429)
+
+        timestep = verify_totp_with_timestep(user.totp_secret or "", body.totp_code)
+
+        if timestep is None:
+            # 실패: 카운터 증가, 5회 도달 시 5분 lockout
+            fail_count = (getattr(user, "totp_fail_count", 0) or 0) + 1
+            updates: dict = {"totp_fail_count": fail_count}
+            if fail_count >= 5:
+                updates["totp_locked_until"] = now + timedelta(minutes=5)
+                updates["totp_fail_count"] = 0
+            await session.execute(update(User).where(User.id == user.id).values(**updates))
+            await session.commit()
             return _err("INVALID_TOTP", "Invalid TOTP code", 403)
+
+        # replay 체크: 같은 timestep 재사용 거부
+        last_ts = getattr(user, "totp_last_timestep", None)
+        if last_ts is not None and timestep <= last_ts:
+            return _err("TOTP_REPLAYED", "TOTP code already used", 403)
+
+        # 성공: 카운터 리셋 + timestep 업데이트
+        await session.execute(
+            update(User).where(User.id == user.id).values(
+                totp_last_timestep=timestep,
+                totp_fail_count=0,
+                totp_locked_until=None,
+            )
+        )
 
     tokens = create_tokens(str(user.id), email=user.email, app_metadata=await _build_app_metadata(user, session))
     _, refresh_exp = create_refresh_token(str(user.id), expires_delta=timedelta(days=REFRESH_TOKEN_EXPIRE_DAYS))

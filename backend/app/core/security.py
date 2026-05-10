@@ -124,5 +124,17 @@ def verify_totp(secret: str, code: str) -> bool:
     return pyotp.TOTP(secret).verify(code, valid_window=1)
 
 
+def verify_totp_with_timestep(secret: str, code: str) -> int | None:
+    """TOTP 코드 검증 후 성공한 timestep 반환 (replay 방지용). 실패 시 None."""
+    import time as _time
+    totp = pyotp.TOTP(secret)
+    now = int(_time.time())
+    for delta in range(-1, 2):  # valid_window=1 (30초 전/후 허용)
+        ts = now // 30 + delta
+        if totp.at(ts * 30) == code:
+            return ts
+    return None
+
+
 def get_totp_provisioning_uri(secret: str, email: str, issuer: str = "Sprintable") -> str:
     return pyotp.TOTP(secret).provisioning_uri(name=email, issuer_name=issuer)
