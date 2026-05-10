@@ -11,7 +11,7 @@ from fastapi import HTTPException
 
 # ─── get_org_scope ────────────────────────────────────────────────────────────
 
-def _make_auth(org_id: str | None = None, role: str = "member", project_ids: list | None = None):
+def _make_auth(org_id: str | None = None, role: str = "member", project_ids: list | None = None, user_id: str = "user-1"):
     from app.dependencies.auth import AuthContext
     app_metadata: dict = {}
     if org_id:
@@ -20,7 +20,7 @@ def _make_auth(org_id: str | None = None, role: str = "member", project_ids: lis
         app_metadata["role"] = role
     if project_ids is not None:
         app_metadata["project_ids"] = project_ids
-    return AuthContext(user_id="user-1", email="u@test.com", claims={"app_metadata": app_metadata})
+    return AuthContext(user_id=user_id, email="u@test.com", claims={"app_metadata": app_metadata})
 
 
 def test_get_org_scope_from_jwt():
@@ -171,6 +171,101 @@ async def test_get_scope_context_project_none_when_not_provided():
     ctx = await get_scope_context(auth=auth, x_org_id=None, x_project_id=None, db=None, request=None)
     assert ctx["org_id"] == org
     assert ctx["project_id"] is None
+
+
+# ─── SEC-02 IDOR 차단 보안 테스트 ────────────────────────────────────────────────
+
+@pytest.mark.anyio
+async def test_get_verified_org_id_403_on_foreign_org():
+    """X-Org-Id 헤더로 비소속 org 접근 시 403."""
+    from app.dependencies.auth import get_verified_org_id
+    caller_id = str(uuid.uuid4())
+    auth = _make_auth(org_id=None, user_id=caller_id)  # JWT에 org_id 없음 → 헤더 fallback
+
+    mock_result = MagicMock()
+    mock_result.scalar_one_or_none.return_value = None  # 멤버 아님
+    mock_db = AsyncMock()
+    mock_db.execute = AsyncMock(return_value=mock_result)
+    mock_request = MagicMock()
+    mock_request.state = types.SimpleNamespace()
+
+    with pytest.raises(HTTPException) as exc_info:
+        await get_verified_org_id(
+            auth=auth,
+            x_org_id=str(uuid.uuid4()),
+            x_project_id=None,
+            db=mock_db,
+            request=mock_request,
+        )
+    assert exc_info.value.status_code == 403
+
+
+@pytest.mark.anyio
+async def test_get_verified_org_id_pass_when_member():
+    """X-Org-Id 헤더로 소속 org 접근 시 정상 통과."""
+    from app.dependencies.auth import get_verified_org_id
+    org = uuid.uuid4()
+    caller_id = str(uuid.uuid4())
+    auth = _make_auth(org_id=None, user_id=caller_id)
+
+    mock_result = MagicMock()
+    mock_result.scalar_one_or_none.return_value = MagicMock()  # 멤버임
+    mock_db = AsyncMock()
+    mock_db.execute = AsyncMock(return_value=mock_result)
+    mock_request = MagicMock()
+    mock_request.state = types.SimpleNamespace()
+
+    result = await get_verified_org_id(
+        auth=auth,
+        x_org_id=str(org),
+        x_project_id=None,
+        db=mock_db,
+        request=mock_request,
+    )
+    assert result == org
+
+
+@pytest.mark.anyio
+async def test_get_verified_org_id_jwt_org_skips_db():
+    """JWT에 org_id 있으면 DB 조회 없이 통과 (N+1 방지 경로 확인)."""
+    from app.dependencies.auth import get_verified_org_id
+    org = uuid.uuid4()
+    auth = _make_auth(org_id=str(org))
+
+    mock_db = AsyncMock()
+    mock_request = MagicMock()
+    mock_request.state = types.SimpleNamespace()
+
+    result = await get_verified_org_id(
+        auth=auth, x_org_id=None, x_project_id=None, db=mock_db, request=mock_request,
+    )
+    assert result == org
+    mock_db.execute.assert_not_called()
+
+
+@pytest.mark.anyio
+async def test_get_verified_org_id_403_on_foreign_project():
+    """X-Project-Id 헤더로 비소속 project 접근 시 403."""
+    from app.dependencies.auth import get_verified_org_id
+    org = uuid.uuid4()
+    auth = _make_auth(org_id=str(org))  # JWT에 org_id 있음 (org 검증 skip)
+
+    mock_result = MagicMock()
+    mock_result.scalar_one_or_none.return_value = None  # project 비소속
+    mock_db = AsyncMock()
+    mock_db.execute = AsyncMock(return_value=mock_result)
+    mock_request = MagicMock()
+    mock_request.state = types.SimpleNamespace()
+
+    with pytest.raises(HTTPException) as exc_info:
+        await get_verified_org_id(
+            auth=auth,
+            x_org_id=None,
+            x_project_id=str(uuid.uuid4()),
+            db=mock_db,
+            request=mock_request,
+        )
+    assert exc_info.value.status_code == 403
 
 
 # ─── AuthContext org_id field ──────────────────────────────────────────────────

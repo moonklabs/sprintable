@@ -147,10 +147,11 @@ async def _verify_org_membership(
 async def get_verified_org_id(
     auth: AuthContext = Depends(get_current_user),
     x_org_id: str | None = Header(default=None, alias="X-Org-Id"),
+    x_project_id: str | None = Header(default=None, alias="X-Project-Id"),
     db: AsyncSession = Depends(get_db),
     request: Request = None,
 ) -> uuid.UUID:
-    """org_id 추출 — X-Org-Id 헤더 fallback 시 DB membership 검증."""
+    """org_id 추출 — X-Org-Id 헤더 fallback 시 DB membership 검증, X-Project-Id 헤더 시 project 소속 검증."""
     jwt_org_id = auth.claims.get("app_metadata", {}).get("org_id")
     raw = jwt_org_id or x_org_id
     if not raw:
@@ -166,6 +167,15 @@ async def get_verified_org_id(
     if not jwt_org_id and x_org_id:
         # 헤더 fallback 사용 시에만 membership 검증 — JWT org_id는 발급 시 검증됨
         await _verify_org_membership(auth.user_id, org_id, db, request)
+
+    jwt_project_id = auth.claims.get("app_metadata", {}).get("project_id")
+    if not jwt_project_id and x_project_id:
+        # X-Project-Id 헤더 fallback 사용 시 해당 project가 org에 속하는지 검증
+        try:
+            project_id = uuid.UUID(x_project_id)
+        except ValueError:
+            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Invalid X-Project-Id format")
+        await _verify_project_in_org(project_id, org_id, db, request)
 
     return org_id
 
@@ -273,10 +283,9 @@ async def get_scope_context(
     request: Request = None,
 ) -> dict:
     """org_id + project_id 컨텍스트를 한번에 추출 — 헤더 fallback 시 membership/소속 검증."""
-    org_id = await get_verified_org_id(auth=auth, x_org_id=x_org_id, db=db, request=request)
+    # x_project_id를 get_verified_org_id에 전달해서 project 소속 검증도 위임
+    org_id = await get_verified_org_id(auth=auth, x_org_id=x_org_id, x_project_id=x_project_id, db=db, request=request)
     jwt_project_id = auth.claims.get("app_metadata", {}).get("project_id")
     project_id_raw = jwt_project_id or x_project_id
     project_id = uuid.UUID(str(project_id_raw)) if project_id_raw else None
-    if not jwt_project_id and x_project_id and project_id:
-        await _verify_project_in_org(project_id, org_id, db, request)
     return {"org_id": org_id, "project_id": project_id, "user_id": auth.user_id}
