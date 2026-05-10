@@ -1,3 +1,4 @@
+import logging
 import os
 
 from fastapi import FastAPI, HTTPException, Request
@@ -10,6 +11,7 @@ from app.core.logging_config import configure_logging
 from app.core.rate_limit import limiter
 
 configure_logging(json_logs=os.getenv("APP_ENV", "development") != "development")
+_logger = logging.getLogger(__name__)
 from app.routers import account, agent_deployments, agent_personas, agent_routing_rules, agent_runs, agent_sessions, analytics, api_keys, audit_logs, auth, bridge, cron, current_project, dashboard, docs, entities, epics, events, health, hitl, integrations, invitations, me, meetings, members, memos, mockups, notifications, org_members, organizations, oss, policy_documents, presence, project_settings, projects, retros, rewards, sprints, standups, stories, subscription, tasks, team_members, webhooks, workflow_executions, workflow_templates, workflow_trigger, workflow_trigger_types, workflow_versions
 
 app = FastAPI(
@@ -48,6 +50,17 @@ async def rate_limit_handler(request: Request, exc: RateLimitExceeded) -> JSONRe
     )
     resp.headers["Retry-After"] = retry_after
     return resp
+
+
+@app.exception_handler(Exception)
+async def unhandled_exception_handler(request: Request, exc: Exception) -> JSONResponse:
+    """예상치 못한 500 에러 — 내부 정보는 로그에만, 클라이언트엔 일반 메시지."""
+    _logger.exception("Unhandled exception on %s %s: %s", request.method, request.url.path, exc)
+    detail = str(exc) if settings.debug else "Internal server error"
+    return JSONResponse(
+        status_code=500,
+        content={"data": None, "error": {"code": "INTERNAL_ERROR", "message": detail}, "meta": None},
+    )
 
 
 app.state.limiter = limiter

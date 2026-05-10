@@ -4,11 +4,14 @@ All endpoints require CRON_SECRET via Authorization: Bearer header.
 """
 from __future__ import annotations
 
+import logging
 import os
 import uuid
 from datetime import datetime, timedelta, timezone
 
 from fastapi import APIRouter, Depends, Header, HTTPException, Request
+
+logger = logging.getLogger(__name__)
 from fastapi.responses import JSONResponse
 from sqlalchemy import select, update
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -77,7 +80,8 @@ async def agent_session_recovery(
             "resumed_count": 0,
         })
     except Exception as exc:
-        return _err("INTERNAL_ERROR", str(exc), 500)
+        logger.exception("cron error: %s", exc)
+        return _err("INTERNAL_ERROR", "Internal server error", 500)
 
 
 # ─── POST /api/v2/internal/cron/anonymize ─────────────────────────────────────
@@ -122,7 +126,8 @@ async def hitl_timeouts(
 
         return _ok({"expired_count": expired_count, "notified_count": 0})
     except Exception as exc:
-        return _err("INTERNAL_ERROR", str(exc), 500)
+        logger.exception("cron error: %s", exc)
+        return _err("INTERNAL_ERROR", "Internal server error", 500)
 
 
 # ─── GET /api/v2/internal/cron/inbox-outbox ────────────────────────────────────
@@ -179,4 +184,5 @@ async def retry_agent_runs(
             "total": len(retried) + len(final_failures),
         })
     except Exception as exc:
-        return _err("INTERNAL_ERROR", str(exc), 500)
+        logger.exception("cron error: %s", exc)
+        return _err("INTERNAL_ERROR", "Internal server error", 500)
