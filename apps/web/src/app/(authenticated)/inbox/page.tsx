@@ -3,7 +3,7 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import { useTranslations } from 'next-intl';
-import { Inbox as InboxIcon } from 'lucide-react';
+import { Inbox as InboxIcon, Zap, ZapOff } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { TopBarSlot } from '@/components/nav/top-bar-slot';
 import { Badge } from '@/components/ui/badge';
@@ -14,6 +14,16 @@ import {
   getInboxNotificationLabel,
   NOTIFICATION_TYPE_ICONS,
 } from '@/services/notification-display';
+
+interface WorkflowExecItem {
+  id: string;
+  event_type: string;
+  trigger_type_slug: string | null;
+  rule_name: string | null;
+  status: string;
+  completed_at: string | null;
+  created_at: string;
+}
 
 interface Notification {
   id: string;
@@ -44,10 +54,11 @@ async function fetchInboxNotifications(typeFilter: string) {
 export default function InboxPage() {
   const router = useRouter();
   const t = useTranslations('inbox');
-  const { currentTeamMemberId } = useDashboardContext();
+  const { currentTeamMemberId, projectId } = useDashboardContext();
   const [notifications, setNotifications] = useState<Notification[]>([]);
   const [unreadCount, setUnreadCount] = useState(0);
   const [loading, setLoading] = useState(true);
+  const [workflowExecs, setWorkflowExecs] = useState<WorkflowExecItem[]>([]);
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const { toasts, dismissToast } = useToast();
 
@@ -77,6 +88,17 @@ export default function InboxPage() {
       cancelled = true;
     };
   }, []);
+
+  useEffect(() => {
+    if (!currentTeamMemberId || !projectId) return;
+    const params = new URLSearchParams({ project_id: projectId, member_id: currentTeamMemberId, limit: '10' });
+    fetch(`/api/workflow-executions?${params.toString()}`)
+      .then((r) => r.ok ? r.json() : null)
+      .then((json) => {
+        if (json?.items) setWorkflowExecs(json.items as WorkflowExecItem[]);
+      })
+      .catch(() => {});
+  }, [currentTeamMemberId, projectId]);
 
   useEffect(() => {
     if (!currentTeamMemberId) return;
@@ -169,6 +191,29 @@ export default function InboxPage() {
 
       <div className="flex min-h-0 flex-1 flex-col overflow-hidden">
         <DecisionsWaiting onChange={() => void refreshNotifications()} />
+
+        {workflowExecs.length > 0 && (
+          <div className="shrink-0 border-b border-border/80 px-4 py-3">
+            <p className="mb-2 text-[11px] font-medium uppercase tracking-wide text-[color:var(--operator-muted)]">워크플로우 실행</p>
+            <div className="flex flex-col gap-1.5">
+              {workflowExecs.slice(0, 5).map((exec) => (
+                <div key={exec.id} className="flex items-center gap-2 rounded-lg bg-[color:var(--operator-surface-soft)]/55 px-3 py-2 text-xs">
+                  {exec.status === 'matched' ? (
+                    <Zap className="h-3.5 w-3.5 shrink-0 text-amber-500" />
+                  ) : (
+                    <ZapOff className="h-3.5 w-3.5 shrink-0 text-[color:var(--operator-muted)]" />
+                  )}
+                  <span className="min-w-0 flex-1 truncate text-[color:var(--operator-foreground)]">
+                    {exec.rule_name ?? exec.event_type}
+                  </span>
+                  <span className="shrink-0 text-[10px] text-[color:var(--operator-muted)]">
+                    {exec.completed_at ? new Date(exec.completed_at).toLocaleString() : new Date(exec.created_at).toLocaleString()}
+                  </span>
+                </div>
+              ))}
+            </div>
+          </div>
+        )}
 
         <div className="flex min-h-0 flex-1 overflow-hidden">
         {/* Left: notification list */}
