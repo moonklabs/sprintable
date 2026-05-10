@@ -21,6 +21,9 @@ _BLOCKED_NETWORKS = [
 def _is_blocked_ip(ip: str) -> bool:
     try:
         addr = ipaddress.ip_address(ip)
+        # ::ffff:x.x.x.x 형태의 IPv4-mapped IPv6 → IPv4로 언매핑 후 재검사
+        if isinstance(addr, ipaddress.IPv6Address) and addr.ipv4_mapped is not None:
+            addr = addr.ipv4_mapped
         return any(addr in net for net in _BLOCKED_NETWORKS)
     except ValueError:
         return True  # 파싱 실패 → 차단

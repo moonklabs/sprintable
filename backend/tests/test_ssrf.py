@@ -50,6 +50,20 @@ def test_public_ip_allowed():
     assert _is_blocked_ip("52.223.0.1") is False  # Discord CDN 대역
 
 
+def test_ipv4_mapped_ipv6_loopback_blocked():
+    """::ffff:127.0.0.1 형태 IPv4-mapped IPv6 우회 차단."""
+    from app.core.ssrf import _is_blocked_ip
+    assert _is_blocked_ip("::ffff:127.0.0.1") is True
+
+
+def test_ipv4_mapped_ipv6_private_blocked():
+    """::ffff:10.x / ::ffff:192.168.x IPv4-mapped 우회 차단."""
+    from app.core.ssrf import _is_blocked_ip
+    assert _is_blocked_ip("::ffff:10.0.0.1") is True
+    assert _is_blocked_ip("::ffff:192.168.1.1") is True
+    assert _is_blocked_ip("::ffff:169.254.169.254") is True
+
+
 # ─── validate_webhook_url ──────────────────────────────────────────────────────
 
 def test_validate_blocks_private_ip():
