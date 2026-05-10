@@ -6,7 +6,7 @@ from datetime import datetime, timezone
 from urllib.parse import urlencode
 
 import httpx
-from fastapi import APIRouter, Depends
+from fastapi import APIRouter, Depends, Request
 from fastapi.responses import JSONResponse
 from pydantic import BaseModel
 from sqlalchemy.exc import IntegrityError
@@ -28,6 +28,7 @@ from app.core.security import (
     REFRESH_TOKEN_EXPIRE_DAYS,
     create_refresh_token,
 )
+from app.core.rate_limit import limiter
 from app.dependencies.auth import AuthContext, get_current_user
 from app.dependencies.database import get_db
 from app.models.invitation import Invitation
@@ -179,7 +180,9 @@ async def _store_refresh_token(
 # ─── POST /api/v2/auth/register ───────────────────────────────────────────────
 
 @router.post("/register", status_code=201)
+@limiter.limit("5/minute")
 async def register(
+    request: Request,
     body: RegisterRequest,
     session: AsyncSession = Depends(get_db),
 ) -> JSONResponse:
@@ -209,7 +212,9 @@ async def register(
 # ─── POST /api/v2/auth/token ──────────────────────────────────────────────────
 
 @router.post("/token")
+@limiter.limit("10/minute")
 async def login(
+    request: Request,
     body: LoginRequest,
     session: AsyncSession = Depends(get_db),
 ) -> JSONResponse:
@@ -233,7 +238,9 @@ async def login(
 # ─── POST /api/v2/auth/refresh ────────────────────────────────────────────────
 
 @router.post("/refresh")
+@limiter.limit("20/minute")
 async def refresh_token(
+    request: Request,
     body: RefreshRequest,
     session: AsyncSession = Depends(get_db),
 ) -> JSONResponse:

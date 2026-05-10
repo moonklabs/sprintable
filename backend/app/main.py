@@ -3,9 +3,11 @@ import os
 from fastapi import FastAPI, HTTPException, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
+from slowapi.errors import RateLimitExceeded
 
 from app.core.config import settings
 from app.core.logging_config import configure_logging
+from app.core.rate_limit import limiter
 
 configure_logging(json_logs=os.getenv("APP_ENV", "development") != "development")
 from app.routers import account, agent_deployments, agent_personas, agent_routing_rules, agent_runs, agent_sessions, analytics, api_keys, audit_logs, auth, bridge, cron, current_project, dashboard, docs, entities, epics, events, health, hitl, integrations, invitations, me, meetings, members, memos, mockups, notifications, org_members, organizations, oss, policy_documents, presence, project_settings, projects, retros, rewards, sprints, standups, stories, subscription, tasks, team_members, webhooks, workflow_executions, workflow_templates, workflow_trigger, workflow_trigger_types, workflow_versions
@@ -35,6 +37,20 @@ async def http_exception_handler(request: Request, exc: HTTPException) -> JSONRe
         status_code=exc.status_code,
         content={"data": None, "error": {"code": code, "message": str(exc.detail)}, "meta": None},
     )
+
+
+@app.exception_handler(RateLimitExceeded)
+async def rate_limit_handler(request: Request, exc: RateLimitExceeded) -> JSONResponse:
+    retry_after = str(getattr(exc, "retry_after", 60))
+    resp = JSONResponse(
+        status_code=429,
+        content={"data": None, "error": {"code": "RATE_LIMITED", "message": "Too many requests"}, "meta": None},
+    )
+    resp.headers["Retry-After"] = retry_after
+    return resp
+
+
+app.state.limiter = limiter
 
 
 app.add_middleware(
