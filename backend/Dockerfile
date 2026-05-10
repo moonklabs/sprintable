@@ -16,7 +16,13 @@ COPY alembic.ini .
 COPY alembic/ alembic/
 COPY bootstrap.py .
 
+# non-root 사용자 생성 + /app 소유권 변경 (uv .venv 포함)
+RUN useradd --create-home --shell /bin/bash appuser \
+    && chown -R appuser:appuser /app
+
 ENV PATH="/app/.venv/bin:$PATH"
+
+USER appuser
 
 EXPOSE 8000
 
