@@ -268,6 +268,72 @@ async def test_get_verified_org_id_403_on_foreign_project():
     assert exc_info.value.status_code == 403
 
 
+# ─── SEC-05 API Key scope 테스트 ────────────────────────────────────────────────
+
+def _make_api_key_auth(org_id: str, scope: list[str]) -> "AuthContext":
+    from app.dependencies.auth import AuthContext
+    return AuthContext(
+        user_id=str(uuid.uuid4()),
+        email=None,
+        claims={
+            "app_metadata": {
+                "org_id": org_id,
+                "scope": scope,
+                "api_key_id": str(uuid.uuid4()),
+            }
+        },
+        org_id=org_id,
+    )
+
+
+def test_api_key_read_scope_blocks_post():
+    """read-only API Key로 POST 시도 → 403."""
+    from app.dependencies.auth import _check_api_key_scope
+    auth = _make_api_key_auth(str(uuid.uuid4()), ["read"])
+    with pytest.raises(HTTPException) as exc_info:
+        _check_api_key_scope(auth, "POST")
+    assert exc_info.value.status_code == 403
+
+
+def test_api_key_write_scope_allows_post():
+    """write scope API Key로 POST → 통과."""
+    from app.dependencies.auth import _check_api_key_scope
+    auth = _make_api_key_auth(str(uuid.uuid4()), ["read", "write"])
+    _check_api_key_scope(auth, "POST")  # 예외 없음
+
+
+def test_api_key_read_scope_allows_get():
+    """read scope API Key로 GET → 통과."""
+    from app.dependencies.auth import _check_api_key_scope
+    auth = _make_api_key_auth(str(uuid.uuid4()), ["read"])
+    _check_api_key_scope(auth, "GET")  # 예외 없음
+
+
+def test_jwt_user_skips_scope_check():
+    """JWT 사용자(api_key_id 없음)는 scope 체크 미적용."""
+    from app.dependencies.auth import _check_api_key_scope
+    auth = _make_auth(org_id=str(uuid.uuid4()))  # api_key_id 없음
+    _check_api_key_scope(auth, "DELETE")  # 예외 없음 (스킵)
+
+
+def test_require_api_scope_factory_blocks_missing_scope():
+    """require_api_scope("write")가 read-only API Key에 403 반환."""
+    from app.dependencies.auth import require_api_scope, AuthContext
+    checker = require_api_scope("write")
+    auth = _make_api_key_auth(str(uuid.uuid4()), ["read"])
+    with pytest.raises(HTTPException) as exc_info:
+        checker(auth=auth)
+    assert exc_info.value.status_code == 403
+
+
+def test_require_api_scope_factory_passes_jwt():
+    """require_api_scope()는 JWT 사용자 스킵."""
+    from app.dependencies.auth import require_api_scope
+    checker = require_api_scope("write")
+    auth = _make_auth(org_id=str(uuid.uuid4()))
+    checker(auth=auth)  # 예외 없음
+
+
 # ─── AuthContext org_id field ──────────────────────────────────────────────────
 
 def test_auth_context_includes_org_id_from_jwt():
