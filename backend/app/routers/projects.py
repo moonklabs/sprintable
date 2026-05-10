@@ -43,6 +43,17 @@ async def create_project(
     repo = ProjectRepository(session, body.org_id)
     project = await repo.create(name=body.name, description=body.description)
 
+    # Auto-attach org-level team members (project_id IS NULL) to new project
+    await session.execute(
+        text(
+            "INSERT INTO project_memberships (project_id, team_member_id)"
+            " SELECT :project_id, id FROM team_members"
+            " WHERE org_id = :org_id AND project_id IS NULL AND is_active = TRUE"
+            " ON CONFLICT DO NOTHING"
+        ),
+        {"org_id": str(body.org_id), "project_id": str(project.id)},
+    )
+
     # OSS bootstrap: 프로젝트 생성 시 인증 유저 team_member 자동 생성
     # (Supabase trg_org_bootstrap_owner 대체 — project_id가 확정된 이 시점에 생성)
     if auth.user_id:
@@ -57,7 +68,8 @@ async def create_project(
             ),
             {"org_id": str(body.org_id), "project_id": str(project.id), "user_id": auth.user_id},
         )
-        await session.commit()
+
+    await session.commit()
 
     return ProjectResponse.model_validate(project)
 
