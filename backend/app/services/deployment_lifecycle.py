@@ -16,6 +16,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.models.agent_deployment import AgentAuditLog, AgentDeployment, AgentPersona
 from app.models.agent_routing_rule import AgentRoutingRule
 from app.repositories.agent_routing_rule import _normalize_action, _normalize_conditions
+from app.repositories.workflow_template import WorkflowTemplateRepository, resolve_rules_template
 from app.models.agent_run import AgentRun
 from app.models.team import TeamMember
 from app.models.webhook_config import WebhookConfig
@@ -97,7 +98,72 @@ def _resolve_persona_role(slug: str | None, base_slug: str | None) -> str:
         return "developer"
     if val == "qa":
         return "qa"
+    if val == "devops":
+        return "devops"
     return "unknown"
+
+
+def _select_template_slug(agents: list[dict]) -> str:
+    """역할 조합으로 WorkflowTemplate slug 결정."""
+    has_po = any(a["role"] == "product-owner" for a in agents)
+    has_dev = any(a["role"] == "developer" for a in agents)
+    has_qa = any(a["role"] == "qa" for a in agents)
+    if has_po and has_dev and has_qa:
+        return "three-step"
+    if (has_po or has_dev) and len(agents) >= 2:
+        return "two-step"
+    return "solo"
+
+
+async def _build_routing_template_from_db(
+    session: AsyncSession,
+    agents: list[dict],
+    existing_rule_count: int,
+) -> dict[str, Any]:
+    """DB 조회 기반 라우팅 템플릿 빌더."""
+    seen: set[str] = set()
+    deduped = [a for a in agents if not (a["agentId"] in seen or seen.add(a["agentId"]))]  # type: ignore[func-returns-value]
+
+    po = next((a for a in deduped if a["role"] == "product-owner"), None)
+    dev = next((a for a in deduped if a["role"] == "developer"), None)
+
+    if len(deduped) <= 1 and not po:
+        return {"templateId": "solo-dev", "rules": [], "requiresOverwriteConfirmation": False, "existingRuleCount": existing_rule_count}
+    if not po and not dev:
+        return {"templateId": "none", "rules": [], "requiresOverwriteConfirmation": False, "existingRuleCount": existing_rule_count}
+
+    slug = _select_template_slug(deduped)
+    tmpl = await WorkflowTemplateRepository(session).get_by_slug(slug)
+    if not tmpl:
+        return _build_routing_template(deduped, existing_rule_count)
+
+    role_to_step: dict[str, str] = {}
+    for i, a in enumerate(deduped, start=1):
+        role_to_step[f"step_{i}"] = a
+
+    step_map: dict[str, dict] = {}
+    for step_key, agent in role_to_step.items():
+        step_map[step_key] = {
+            "agent_id": str(agent["agentId"]),
+            "agent_name": agent.get("agentName", ""),
+            "role": agent.get("role", ""),
+            "persona_id": agent.get("personaId"),
+            "deployment_id": agent.get("deploymentId"),
+            "target_runtime": "openclaw",
+            "target_model": None,
+        }
+
+    meta: dict[str, Any] = {"auto_generated": True, "template_id": slug, "from_workflow_template": True}
+    resolved_rules = resolve_rules_template(tmpl.rules_template, step_map)
+    for r in resolved_rules:
+        r["metadata"] = meta
+
+    return {
+        "templateId": slug,
+        "rules": resolved_rules,
+        "requiresOverwriteConfirmation": existing_rule_count > 0,
+        "existingRuleCount": existing_rule_count,
+    }
 
 
 def _build_routing_template(agents: list[dict], existing_rule_count: int) -> dict[str, Any]:
@@ -118,15 +184,35 @@ def _build_routing_template(agents: list[dict], existing_rule_count: int) -> dic
     if not po or not dev:
         return {"templateId": "none", "rules": [], "requiresOverwriteConfirmation": False, "existingRuleCount": existing_rule_count}
 
+    devops = next((a for a in deduped if a["role"] == "devops"), None)
     template_id = "po-dev-qa" if qa else "po-dev"
     roles = ["product-owner", "developer", "qa"] if qa else ["product-owner", "developer"]
+    if devops:
+        roles.append("devops")
     meta: dict[str, Any] = {"auto_generated": True, "template_id": template_id, "generated_from_roles": roles}
+
     rules = [
-        {"agent_id": str(po["agentId"]), "persona_id": po.get("personaId"), "deployment_id": po.get("deploymentId"), "name": f"{po['agentName']} auto route requirement/user_story", "priority": 10, "match_type": "event", "conditions": {"memo_type": ["requirement", "user_story"]}, "action": {"auto_reply_mode": "process_and_report", "forward_to_agent_id": None}, "target_runtime": "openclaw", "target_model": None, "is_enabled": True, "metadata": meta},
-        {"agent_id": str(dev["agentId"]), "persona_id": dev.get("personaId"), "deployment_id": dev.get("deploymentId"), "name": f"{dev['agentName']} auto route task/dev_task", "priority": 20, "match_type": "event", "conditions": {"memo_type": ["task", "dev_task"]}, "action": {"auto_reply_mode": "process_and_report", "forward_to_agent_id": None}, "target_runtime": "openclaw", "target_model": None, "is_enabled": True, "metadata": meta},
+        # PO: requirement/user_story kickoff
+        {"agent_id": str(po["agentId"]), "persona_id": po.get("personaId"), "deployment_id": po.get("deploymentId"), "name": f"{po['agentName']} auto route requirement/user_story", "priority": 10, "match_type": "event", "conditions": {"memo_type": ["requirement", "user_story"], "trigger_type_slugs": ["kickoff"]}, "action": {"auto_reply_mode": "process_and_report", "forward_to_agent_id": None, "side_effects": []}, "target_runtime": "openclaw", "target_model": None, "is_enabled": True, "metadata": meta},
+        # Dev: kickoff → auto-assign developer
+        {"agent_id": str(dev["agentId"]), "persona_id": dev.get("personaId"), "deployment_id": dev.get("deploymentId"), "name": f"{dev['agentName']} auto route task/dev_task + auto-assign", "priority": 20, "match_type": "event", "conditions": {"memo_type": ["task", "dev_task"], "trigger_type_slugs": ["kickoff"]}, "action": {"auto_reply_mode": "process_and_report", "forward_to_agent_id": None, "side_effects": [{"type": "auto_assign", "assign_to_role": "developer"}]}, "target_runtime": "openclaw", "target_model": None, "is_enabled": True, "metadata": meta},
     ]
+
     if qa:
-        rules.append({"agent_id": str(qa["agentId"]), "persona_id": qa.get("personaId"), "deployment_id": qa.get("deploymentId"), "name": f"{qa['agentName']} auto route review", "priority": 30, "match_type": "event", "conditions": {"memo_type": ["review"]}, "action": {"auto_reply_mode": "process_and_report", "forward_to_agent_id": None}, "target_runtime": "openclaw", "target_model": None, "is_enabled": True, "metadata": meta})
+        rules += [
+            # Dev PR → PO review + status in-review
+            {"agent_id": str(po["agentId"]), "persona_id": po.get("personaId"), "deployment_id": po.get("deploymentId"), "name": "Dev PR → PO review + status in-review", "priority": 25, "match_type": "event", "conditions": {"trigger_type_slugs": ["review_request"], "event_params": {"reply_author_role": ["developer"], "has_pr_link": [True]}}, "action": {"auto_reply_mode": "process_and_report", "forward_to_agent_id": None, "side_effects": [{"type": "update_status", "target_status": "in-review"}]}, "target_runtime": "openclaw", "target_model": None, "is_enabled": True, "metadata": meta},
+            # PO approve → QA request
+            {"agent_id": str(qa["agentId"]), "persona_id": qa.get("personaId"), "deployment_id": qa.get("deploymentId"), "name": "PO approve → QA request", "priority": 30, "match_type": "event", "conditions": {"trigger_type_slugs": ["review_request"], "event_params": {"reply_author_role": ["product_owner"], "review_type": ["approve"]}}, "action": {"auto_reply_mode": "process_and_report", "forward_to_agent_id": None, "side_effects": []}, "target_runtime": "openclaw", "target_model": None, "is_enabled": True, "metadata": meta},
+            # QA approve → PO merge notify
+            {"agent_id": str(po["agentId"]), "persona_id": po.get("personaId"), "deployment_id": po.get("deploymentId"), "name": "QA approve → PO merge notify", "priority": 35, "match_type": "event", "conditions": {"trigger_type_slugs": ["qa_request"], "event_params": {"reply_author_role": ["qa"], "review_type": ["approve"]}}, "action": {"auto_reply_mode": "process_and_report", "forward_to_agent_id": None, "side_effects": []}, "target_runtime": "openclaw", "target_model": None, "is_enabled": True, "metadata": meta},
+        ]
+
+    if devops:
+        rules.append(
+            # Story done → DevOps deploy notify
+            {"agent_id": str(devops["agentId"]), "persona_id": devops.get("personaId"), "deployment_id": devops.get("deploymentId"), "name": "Story done → DevOps deploy notify", "priority": 40, "match_type": "event", "conditions": {"trigger_type_slugs": ["status_changed"], "event_params": {"new_status": ["done"]}}, "action": {"auto_reply_mode": "process_and_report", "forward_to_agent_id": None, "side_effects": []}, "target_runtime": "openclaw", "target_model": None, "is_enabled": True, "metadata": meta}
+        )
 
     return {"templateId": template_id, "rules": rules, "requiresOverwriteConfirmation": existing_rule_count > 0, "existingRuleCount": existing_rule_count}
 
@@ -308,7 +394,10 @@ class DeploymentLifecycleService:
         ]
         agents.append(pending_agent)
 
-        return _build_routing_template(agents, rule_count)
+        try:
+            return await _build_routing_template_from_db(self.session, agents, rule_count)
+        except Exception:
+            return _build_routing_template(agents, rule_count)
 
     async def _log_audit(self, org_id: uuid.UUID, project_id: uuid.UUID, agent_id: uuid.UUID, event_type: str, severity: str, payload: dict) -> None:
         log = AgentAuditLog(

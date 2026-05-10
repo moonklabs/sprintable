@@ -77,6 +77,45 @@ Contributors should **not** reimplement billing logic in these files — if
 you need feature gating, add an optional Repository via the registry
 pattern and keep the public surface BYOA-neutral.
 
+## Contributing Workflow Templates
+
+Workflow templates let contributors add new multi-step automation patterns without touching routing rule logic. See [`docs/workflow-templates.md`](docs/workflow-templates.md) for the full spec.
+
+### Adding a new template
+
+1. Add an entry to `SEED_TEMPLATES` in `backend/alembic/versions/0016_add_workflow_templates.py`.
+2. Each entry needs: `slug`, `name`, `description`, `chain_length`, `steps`, `presets`, `rules_template`.
+3. Use `step_1`, `step_2`, ... as `role_ref` placeholders — they are resolved at apply time.
+4. Set `is_system: false` for community templates (users can delete them).
+5. Write a pytest test in `backend/tests/test_e2e_workflow_template.py` asserting the correct rule count after `apply_template`.
+6. Run `alembic upgrade head` locally and verify `GET /api/v2/workflow-templates` returns your new template.
+
+### Template schema quick reference
+
+```python
+{
+  "slug": "my-template",
+  "name": "My Template",
+  "description": "Short description",
+  "chain_length": 2,
+  "steps": [
+    {"pattern": "assign", "role_ref": "step_1", "default_label": "Maker"},
+    {"pattern": "review", "role_ref": "step_2", "default_label": "Reviewer"},
+  ],
+  "presets": {"default": {"step_1": "Writer", "step_2": "Editor"}},
+  "rules_template": [
+    {
+      "role_ref": "step_1",
+      "name": "{step_1} kickoff",
+      "priority": 10,
+      "match_type": "event",
+      "conditions": {"memo_type": ["task"], "trigger_type_slugs": ["kickoff"]},
+      "action": {"auto_reply_mode": "process_and_report", "side_effects": []},
+    }
+  ],
+}
+```
+
 ## Code of Conduct
 
 Be respectful. Be constructive. We're all here to build something great.

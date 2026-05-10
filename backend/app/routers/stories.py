@@ -1,5 +1,5 @@
 import uuid
-from datetime import datetime
+from datetime import datetime, timezone
 
 from fastapi import APIRouter, Body, Depends, Header, HTTPException, Query, status
 from pydantic import BaseModel
@@ -8,12 +8,35 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.dependencies.auth import AuthContext, get_current_user
 from app.dependencies.database import get_db
-from app.models.pm import Story, StoryActivity, StoryComment
+from app.models.pm import Epic, Story, StoryActivity, StoryComment
 from app.models.team import TeamMember
 from app.repositories.story import StoryRepository
+from app.routers.events import publish_event
 from app.schemas.story import StoryCreate, StoryResponse, StoryStatusUpdate, StoryUpdate
+from app.services.webhook_dispatch import fire_webhooks
+from app.services.workflow_pipeline import process_event
+from app.services.rule_evaluator import EventContext
 
 router = APIRouter(prefix="/api/v2/stories", tags=["stories"])
+
+
+async def _resolve_actor_info(
+    db: AsyncSession, actor_id: uuid.UUID | None
+) -> tuple[str | None, str | None]:
+    """Returns (name, role) for a TeamMember ID."""
+    if not actor_id:
+        return None, None
+    result = await db.execute(select(TeamMember).where(TeamMember.id == actor_id).limit(1))
+    member = result.scalar_one_or_none()
+    return (member.name if member else None, member.role if member else None)
+
+
+async def _resolve_epic_title(db: AsyncSession, epic_id: uuid.UUID | None) -> str | None:
+    if not epic_id:
+        return None
+    result = await db.execute(select(Epic).where(Epic.id == epic_id).limit(1))
+    epic = result.scalar_one_or_none()
+    return epic.title if epic else None
 
 
 def _get_repo(
@@ -94,11 +117,81 @@ async def update_story(
     id: uuid.UUID,
     body: StoryUpdate,
     repo: StoryRepository = Depends(_get_repo),
+    db: AsyncSession = Depends(get_db),
+    auth: AuthContext = Depends(get_current_user),
 ) -> StoryResponse:
     data = body.model_dump(exclude_unset=True)
+    old_assignee_id: uuid.UUID | None = None
+    if "assignee_id" in data:
+        story_before = await repo.get(id)
+        if story_before:
+            old_assignee_id = story_before.assignee_id
     story = await repo.update(id, **data)
     if story is None:
         raise HTTPException(status_code=404, detail="Story not found")
+
+    # 변경사항 먼저 commit — side effects 에러가 rollback시키지 않도록
+    await db.commit()
+
+    if "assignee_id" in data and old_assignee_id != story.assignee_id:
+        org_id = repo.org_id
+        actor_id: uuid.UUID | None = None
+        actor_name: str | None = None
+        actor_role: str | None = None
+        try:
+            actor_id = await _resolve_team_member_id(auth, org_id, db)
+            actor_name, actor_role = await _resolve_actor_info(db, actor_id)
+        except Exception:
+            pass
+        epic_title: str | None = None
+        try:
+            epic_title = await _resolve_epic_title(db, story.epic_id)
+        except Exception:
+            pass
+        event_data = {
+            "story_id": str(id),
+            "story_title": story.title,
+            "story_priority": story.priority,
+            "epic_id": str(story.epic_id) if story.epic_id else None,
+            "epic_title": epic_title,
+            "assignee_id": str(story.assignee_id) if story.assignee_id else None,
+            "old_assignee_id": str(old_assignee_id) if old_assignee_id else None,
+            "project_id": str(story.project_id),
+            "org_id": str(org_id),
+            "actor_id": str(actor_id) if actor_id else None,
+            "actor_name": actor_name,
+            "actor_role": actor_role,
+            "timestamp": datetime.now(timezone.utc).isoformat(),
+        }
+        publish_event(str(org_id), "story.assignee_changed", event_data)
+        try:
+            await fire_webhooks(db, org_id, "story.assignee_changed", event_data)
+        except Exception:
+            pass
+        try:
+            await process_event(db, org_id, story.project_id, EventContext(
+                event_type="story.assignee_changed",
+                trigger_type_slug="assignee_changed",
+                actor_id=str(actor_id) if actor_id else None,
+                metadata=event_data,
+            ))
+        except Exception:
+            pass
+        if actor_id:
+            try:
+                db.add(StoryActivity(
+                    story_id=id,
+                    org_id=org_id,
+                    project_id=story.project_id,
+                    activity_type="assignee_changed",
+                    old_value=str(old_assignee_id) if old_assignee_id else None,
+                    new_value=str(story.assignee_id) if story.assignee_id else None,
+                    created_by=actor_id,
+                ))
+                await db.flush()
+            except Exception:
+                pass
+
     return StoryResponse.model_validate(story)
 
 
@@ -118,11 +211,79 @@ async def update_story_status(
     id: uuid.UUID,
     body: StoryStatusUpdate,
     repo: StoryRepository = Depends(_get_repo),
+    db: AsyncSession = Depends(get_db),
+    auth: AuthContext = Depends(get_current_user),
 ) -> StoryResponse:
+    story_before = await repo.get(id)
+    old_status = story_before.status if story_before else None
     try:
         story = await repo.set_status(id, body.status)
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+    # status 변경을 side effects 실행 전에 먼저 commit — process_event/webhook
+    # 내부 DB 에러가 트랜잭션을 aborted 상태로 만들어 status 변경까지 rollback하는 버그 방지
+    await db.commit()
+
+    if old_status != story.status:
+        org_id = repo.org_id
+        actor_id: uuid.UUID | None = None
+        actor_name: str | None = None
+        actor_role: str | None = None
+        try:
+            actor_id = await _resolve_team_member_id(auth, org_id, db)
+            actor_name, actor_role = await _resolve_actor_info(db, actor_id)
+        except Exception:
+            pass
+        epic_title: str | None = None
+        try:
+            epic_title = await _resolve_epic_title(db, story.epic_id)
+        except Exception:
+            pass
+        event_data = {
+            "story_id": str(id),
+            "story_title": story.title,
+            "story_priority": story.priority,
+            "epic_id": str(story.epic_id) if story.epic_id else None,
+            "epic_title": epic_title,
+            "status": story.status,
+            "old_status": old_status,
+            "project_id": str(story.project_id),
+            "org_id": str(org_id),
+            "actor_id": str(actor_id) if actor_id else None,
+            "actor_name": actor_name,
+            "actor_role": actor_role,
+            "timestamp": datetime.now(timezone.utc).isoformat(),
+        }
+        publish_event(str(org_id), "story.status_changed", event_data)
+        try:
+            await fire_webhooks(db, org_id, "story.status_changed", event_data)
+        except Exception:
+            pass
+        try:
+            await process_event(db, org_id, story.project_id, EventContext(
+                event_type="story.status_changed",
+                trigger_type_slug="status_changed",
+                actor_id=str(actor_id) if actor_id else None,
+                metadata=event_data,
+            ))
+        except Exception:
+            pass
+        if actor_id:
+            try:
+                db.add(StoryActivity(
+                    story_id=id,
+                    org_id=org_id,
+                    project_id=story.project_id,
+                    activity_type="status_changed",
+                    old_value=old_status,
+                    new_value=story.status,
+                    created_by=actor_id,
+                ))
+                await db.flush()
+            except Exception:
+                pass
+
     return StoryResponse.model_validate(story)
 
 

@@ -8,7 +8,7 @@ from app.core.config import settings
 from app.core.logging_config import configure_logging
 
 configure_logging(json_logs=os.getenv("APP_ENV", "development") != "development")
-from app.routers import account, agent_deployments, agent_personas, agent_routing_rules, agent_runs, agent_sessions, analytics, api_keys, audit_logs, auth, bridge, cron, current_project, dashboard, docs, entities, epics, events, health, hitl, integrations, invitations, me, meetings, members, memos, mockups, notifications, org_members, organizations, oss, policy_documents, presence, project_settings, projects, retros, rewards, sprints, standups, stories, subscription, tasks, team_members, webhooks, workflow_versions
+from app.routers import account, agent_deployments, agent_personas, agent_routing_rules, agent_runs, agent_sessions, analytics, api_keys, audit_logs, auth, bridge, cron, current_project, dashboard, docs, entities, epics, events, health, hitl, integrations, invitations, me, meetings, members, memos, mockups, notifications, org_members, organizations, oss, policy_documents, presence, project_settings, projects, retros, rewards, sprints, standups, stories, subscription, tasks, team_members, webhooks, workflow_executions, workflow_templates, workflow_trigger, workflow_trigger_types, workflow_versions
 
 app = FastAPI(
     title="Sprintable API v2",
@@ -89,6 +89,10 @@ app.include_router(cron.router)
 app.include_router(hitl.router)
 app.include_router(integrations.router)
 app.include_router(workflow_versions.router)
+app.include_router(workflow_trigger_types.router)
+app.include_router(workflow_executions.router)
+app.include_router(workflow_templates.router)
+app.include_router(workflow_trigger.router)
 app.include_router(mockups.router)
 
 if settings.is_ee_enabled:

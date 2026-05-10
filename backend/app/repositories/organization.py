@@ -25,21 +25,22 @@ class OrganizationRepository:
         )
         return result.scalar_one_or_none() is not None
 
-    async def create(self, name: str, slug: str, owner_member_id: uuid.UUID) -> Organization | None:
+    async def create(self, name: str, slug: str, owner_member_id: uuid.UUID | None) -> Organization | None:
         if await self.slug_exists(slug):
             return None
         org = Organization(name=name, slug=slug)
         self.session.add(org)
         await self.session.flush()
         await self.session.refresh(org)
-        await self.session.execute(
-            text(
-                "INSERT INTO org_members (org_id, user_id, role)"
-                " SELECT :org_id, user_id, 'owner' FROM team_members WHERE id = :member_id"
-                " ON CONFLICT (org_id, user_id) DO NOTHING"
-            ),
-            {"org_id": str(org.id), "member_id": str(owner_member_id)},
-        )
+        if owner_member_id is not None:
+            await self.session.execute(
+                text(
+                    "INSERT INTO org_members (org_id, user_id, role)"
+                    " SELECT :org_id, user_id, 'owner' FROM team_members WHERE id = :member_id"
+                    " ON CONFLICT (org_id, user_id) DO NOTHING"
+                ),
+                {"org_id": str(org.id), "member_id": str(owner_member_id)},
+            )
         return org
 
     async def delete(self, org_id: uuid.UUID, requester_member_id: uuid.UUID) -> dict:

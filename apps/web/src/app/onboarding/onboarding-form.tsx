@@ -6,8 +6,12 @@ import { useRouter } from 'next/navigation';
 import { UpgradeModal } from '@/components/ui/upgrade-modal';
 import { useTranslations } from 'next-intl';
 
-const MCP_SERVER_URL = `${process.env.NEXT_PUBLIC_APP_URL ?? 'https://app.sprintable.ai'}/api/v2/mcp`;
-const LLMS_PROMPT = `Read this document and complete onboarding: ${process.env.NEXT_PUBLIC_APP_URL ?? 'https://app.sprintable.ai'}/llms.txt`;
+function getAppOrigin() {
+  if (typeof window !== 'undefined') return window.location.origin;
+  return process.env.NEXT_PUBLIC_APP_URL ?? 'https://app.sprintable.ai';
+}
+const MCP_SERVER_URL = () => `${getAppOrigin()}/api/v2/mcp`;
+const LLMS_PROMPT = () => `Read this document and complete onboarding: ${getAppOrigin()}/llms.txt`;
 const AGENT_ROLES = ['developer', 'designer', 'pm', 'qa', 'devops'];
 
 function buildMcpConfig(apiKey: string) {
@@ -16,7 +20,7 @@ function buildMcpConfig(apiKey: string) {
       mcpServers: {
         sprintable: {
           type: 'streamable-http',
-          url: MCP_SERVER_URL,
+          url: MCP_SERVER_URL(),
           headers: { Authorization: `Bearer ${apiKey}` },
         },
       },
@@ -141,7 +145,7 @@ export function OnboardingForm() {
           project_id: project.id,
           type: 'human',
           name: memberName,
-          role: 'member',
+          role: 'admin',
         }),
       }).catch(() => null);
     }
@@ -378,14 +382,14 @@ export function OnboardingForm() {
               <div className="flex items-center justify-between gap-2">
                 <p className="text-xs font-semibold text-gray-700">{t('promptTitle')}</p>
                 <button
-                  onClick={() => void handleCopy(LLMS_PROMPT, 'prompt')}
+                  onClick={() => void handleCopy(LLMS_PROMPT(), 'prompt')}
                   className="rounded border border-gray-300 px-2 py-1 text-xs text-gray-600 hover:bg-gray-100 transition"
                 >
                   {copied === 'prompt' ? '✓ Copied' : 'Copy'}
                 </button>
               </div>
               <p className="break-all rounded bg-white border border-gray-100 p-2 text-xs text-gray-700">
-                {LLMS_PROMPT}
+                {LLMS_PROMPT()}
               </p>
             </div>
 

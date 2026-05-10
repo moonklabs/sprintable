@@ -1,4 +1,5 @@
 import os
+import re
 import uuid
 import logging
 
@@ -65,6 +66,24 @@ def _fire_webhook(url: str, content: str, title: str, memo_url: str, memo_id: st
         logger.warning("reply webhook fire failed url=%s", url, exc_info=True)
 
 
+def _infer_trigger_type(memo_type: str | None, review_type: str | None) -> str:
+    if review_type in ("approve", "request_changes"):
+        return "review_request"
+    if review_type == "qa":
+        return "qa_request"
+    return "reply"
+
+
+async def _resolve_author_role(db: AsyncSession, created_by: uuid.UUID | None) -> str:
+    if created_by is None:
+        return "member"
+    result = await db.execute(
+        select(TeamMember.role).where(TeamMember.id == created_by).limit(1)
+    )
+    row = result.scalar_one_or_none()
+    return str(row) if row else "member"
+
+
 def _get_repo(
     session: AsyncSession = Depends(get_db),
     auth: AuthContext = Depends(get_current_user),
@@ -129,6 +148,42 @@ async def create_memo(
     if body.embeds:
         await repo.create_entity_links(memo.id, body.embeds)
     publish_event(str(body.org_id), "memo_created", {"id": str(memo.id)})
+    if body.project_id:
+        from app.services.workflow_pipeline import process_event
+        from app.services.rule_evaluator import EventContext
+        actor_name: str | None = None
+        actor_role: str | None = None
+        if body.created_by:
+            try:
+                tm_result = await session.execute(
+                    select(TeamMember).where(TeamMember.id == body.created_by).limit(1)
+                )
+                tm = tm_result.scalar_one_or_none()
+                if tm:
+                    actor_name = tm.name
+                    actor_role = tm.role
+            except Exception:
+                pass
+        try:
+            await process_event(session, body.org_id, body.project_id, EventContext(
+                event_type="memo_created",
+                trigger_type_slug="kickoff" if body.memo_type == "task" else None,
+                memo_type=body.memo_type,
+                memo_id=str(memo.id),
+                actor_id=str(body.created_by) if body.created_by else None,
+                metadata={
+                    "memo_id": str(memo.id),
+                    "memo_type": body.memo_type,
+                    "title": body.title,
+                    "assigned_to_id": str(body.assigned_to) if body.assigned_to else None,
+                    "actor_id": str(body.created_by) if body.created_by else None,
+                    "actor_name": actor_name,
+                    "actor_role": actor_role,
+                    "context_message": body.title or (body.content or "")[:100],
+                },
+            ))
+        except Exception:
+            pass
     memo_dict = {k: v for k, v in memo.__dict__.items() if not k.startswith("_")}
     memo_dict["embed_count"] = len(body.embeds)
     return MemoListResponse.model_validate(memo_dict)
@@ -209,6 +264,55 @@ async def add_reply(
         title = memo.title or "메모 답신"
         for url in webhook_urls:
             background_tasks.add_task(_fire_webhook, url, content, title, memo_url, str(id))
+
+    if memo.project_id:
+        from app.services.workflow_pipeline import process_event
+        from app.services.rule_evaluator import EventContext
+        from app.models.memo import MemoEntityLink
+        try:
+            author_role = await _resolve_author_role(db, reply.created_by)
+            has_pr = bool(re.search(r"github\.com/.+/pull/\d+", reply.content or ""))
+            story_link_result = await db.execute(
+                select(MemoEntityLink.entity_id)
+                .where(MemoEntityLink.memo_id == id, MemoEntityLink.entity_type == "story")
+                .limit(1)
+            )
+            linked_story_id = story_link_result.scalar_one_or_none()
+            actor_name: str | None = None
+            if reply.created_by:
+                tm_result = await db.execute(
+                    select(TeamMember).where(TeamMember.id == reply.created_by).limit(1)
+                )
+                tm = tm_result.scalar_one_or_none()
+                actor_name = tm.name if tm else None
+            await process_event(
+                db,
+                repo.org_id,
+                memo.project_id,
+                EventContext(
+                    event_type="memo.reply_created",
+                    trigger_type_slug=_infer_trigger_type(memo.memo_type, reply.review_type),
+                    memo_type=memo.memo_type,
+                    memo_id=str(reply.id),
+                    actor_id=str(reply.created_by) if reply.created_by else None,
+                    metadata={
+                        "original_memo_id": str(id),
+                        "original_memo_type": memo.memo_type,
+                        "original_title": memo.title,
+                        "reply_author_id": str(reply.created_by) if reply.created_by else None,
+                        "reply_author_role": author_role,
+                        "actor_name": actor_name,
+                        "actor_role": author_role,
+                        "review_type": reply.review_type,
+                        "has_pr_link": has_pr,
+                        "content_preview": (reply.content or "")[:200],
+                        "context_message": memo.title or (reply.content or "")[:100],
+                        "story_id": str(linked_story_id) if linked_story_id else None,
+                    },
+                ),
+            )
+        except Exception:
+            pass
 
     return ReplyResponse.model_validate(reply)
 

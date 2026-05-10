@@ -42,6 +42,8 @@ interface KanbanColumnProps {
   onChangeStatus?: (storyId: string, newStatus: string) => void;
   onAssignStory?: (storyId: string) => void;
   onDeleteStory?: (storyId: string) => void;
+  projectId?: string;
+  onKickoffStory?: (storyId: string, result: 'triggered' | 'no_match' | 'conflict' | 'error') => void;
   // AC1/AC5: WIP limit
   wipLimit?: number | null;
   wipExceeded?: boolean;
@@ -53,6 +55,7 @@ interface KanbanColumnProps {
   onWipDraftChange?: (value: string) => void;
   // Inline create
   onCreateStory?: (columnId: string, title: string) => Promise<void> | void;
+  executionMap?: Record<string, { status: string; rule_name?: string | null; completed_at?: string | null }>;
 }
 
 export function KanbanColumn({
@@ -60,7 +63,7 @@ export function KanbanColumn({
   onEditStory, onChangeStatus, onAssignStory, onDeleteStory,
   wipLimit, wipExceeded, wipEditing, wipDraft,
   onWipLimitEdit, onWipLimitSave, onWipLimitRemove, onWipDraftChange,
-  onCreateStory,
+  onCreateStory, projectId, onKickoffStory, executionMap,
 }: KanbanColumnProps) {
   const { setNodeRef, isOver } = useDroppable({ id });
   const t = useTranslations('board');
@@ -254,6 +257,9 @@ export function KanbanColumn({
               onChangeStatus={onChangeStatus}
               onAssign={onAssignStory}
               onDelete={onDeleteStory}
+              projectId={projectId}
+              onKickoff={onKickoffStory}
+              lastExecution={executionMap?.[story.id] ?? null}
             />
           ))}
         </div>

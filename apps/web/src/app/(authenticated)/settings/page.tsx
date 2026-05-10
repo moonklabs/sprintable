@@ -4,13 +4,16 @@ import { useEffect, useMemo, useState } from 'react';
 import Link from 'next/link';
 import { useRouter, useSearchParams } from 'next/navigation';
 import { useTranslations } from 'next-intl';
-import { BarChart2, Bell, Bot, CreditCard, FolderKanban, Key, Menu, Palette, Trash2, User, Users, X, Zap } from 'lucide-react';
+import { BarChart2, Bell, Bot, CreditCard, FolderKanban, GitBranch, Key, Menu, Palette, Trash2, User, Users, X, Zap } from 'lucide-react';
 import { UsageDashboard } from '@/components/settings/usage-dashboard';
 import { AiSettingsSection } from '@/components/settings/ai-settings';
 import { MyProfileSection } from '@/components/settings/my-profile-section';
 import { ByomKeyManagement } from '@/components/settings/byom-key-management';
 import { McpConnectionSettings } from '@/components/settings/mcp-connection-settings';
 import { SlackIntegrationSettingsSection } from '@/components/settings/slack-integration-settings';
+import { WorkflowTriggerTypesSection } from '@/components/settings/workflow-trigger-types-section';
+import { WorkflowExecutionHistorySection } from '@/components/settings/workflow-execution-history-section';
+import { WorkflowTemplateGallerySection } from '@/components/settings/workflow-template-gallery-section';
 import { ThemeSettings } from '@/components/settings/theme-settings';
 import { RefreshSettings } from '@/components/settings/refresh-settings';
 import { StandupDeadlineSection } from '@/components/settings/standup-deadline-section';
@@ -264,7 +267,7 @@ export default function SettingsPage() {
         const meRes = await fetch('/api/me');
         const meJson = meRes.ok ? await meRes.json() : null;
         const role = (meJson?.data?.role ?? 'member') as string;
-        setIsAdmin(role === 'admin');
+        setIsAdmin(role === 'admin' || role === 'owner');
       } catch {
         setIsAdmin(false);
       } finally {
@@ -615,6 +618,10 @@ export default function SettingsPage() {
                     <TabsTrigger value="integrations">
                       <Zap className="h-4 w-4" />
                       {t('tabIntegrations')}
+                    </TabsTrigger>
+                    <TabsTrigger value="workflow">
+                      <GitBranch className="h-4 w-4" />
+                      {t('tabWorkflow')}
                     </TabsTrigger>
                     <TabsTrigger value="subscription">
                       <CreditCard className="h-4 w-4" />
@@ -1152,8 +1159,8 @@ export default function SettingsPage() {
 
                     <div className="space-y-2">
                       <div className="text-xs font-medium uppercase tracking-[0.18em] text-muted-foreground">{t('projectMembers')}</div>
-                      {projectMembers.length > 0 ? (
-                        projectMembers.map((member) => {
+                      {projectMembers.filter((m) => m.type === 'human').length > 0 ? (
+                        projectMembers.filter((m) => m.type === 'human').map((member) => {
                           const isEditingWebhook = member.id in webhookEditing;
                           const currentWebhookUrl = member.webhook_url ?? '';
                           return (
@@ -1287,6 +1294,16 @@ export default function SettingsPage() {
                     </div>
                   </SectionCardBody>
                 </SectionCard>
+              </div>
+            </TabsContent>
+            ) : null}
+
+            {adminChecked && isAdmin ? (
+            <TabsContent value="workflow">
+              <div className="space-y-6">
+                <WorkflowTriggerTypesSection />
+                {currentProjectId ? <WorkflowTemplateGallerySection projectId={currentProjectId} orgId={orgId ?? undefined} /> : null}
+                {currentProjectId ? <WorkflowExecutionHistorySection projectId={currentProjectId} /> : null}
               </div>
             </TabsContent>
             ) : null}

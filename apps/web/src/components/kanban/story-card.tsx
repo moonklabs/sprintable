@@ -6,7 +6,7 @@ import { CSS } from '@dnd-kit/utilities';
 import { useTranslations } from 'next-intl';
 import type { KanbanStory, KanbanMember } from './types';
 import { Badge } from '@/components/ui/badge';
-import { ChevronRight } from 'lucide-react';
+import { ChevronRight, Rocket, Zap, ZapOff } from 'lucide-react';
 
 const EPIC_COLORS = [
   'info',
@@ -25,6 +25,12 @@ function getInitials(name: string): string {
   return name.slice(0, 2).toUpperCase();
 }
 
+interface WorkflowExecStatus {
+  status: string;
+  rule_name?: string | null;
+  completed_at?: string | null;
+}
+
 interface StoryCardProps {
   story: KanbanStory;
   epicName?: string;
@@ -34,13 +40,42 @@ interface StoryCardProps {
   onChangeStatus?: (storyId: string, newStatus: string) => void;
   onAssign?: (storyId: string) => void;
   onDelete?: (storyId: string) => void;
+  projectId?: string;
+  onKickoff?: (storyId: string, result: 'triggered' | 'no_match' | 'conflict' | 'error') => void;
+  lastExecution?: WorkflowExecStatus | null;
 }
 
-export function StoryCard({ story, epicName, assignee, onClick, onEdit, onChangeStatus, onAssign, onDelete }: StoryCardProps) {
+export function StoryCard({ story, epicName, assignee, onClick, onEdit, onChangeStatus, onAssign, onDelete, projectId, onKickoff, lastExecution }: StoryCardProps) {
   const t = useTranslations('board');
   const [contextMenuOpen, setContextMenuOpen] = useState(false);
   const [statusMenuOpen, setStatusMenuOpen] = useState(false);
+  const [triggering, setTriggering] = useState(false);
   const menuRef = useRef<HTMLDivElement>(null);
+
+  const handleKickoff = useCallback(async (e: React.MouseEvent) => {
+    e.stopPropagation();
+    if (!projectId || triggering) return;
+    setTriggering(true);
+    try {
+      const res = await fetch('/api/workflow/trigger', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ project_id: projectId, story_id: story.id, trigger_type_slug: 'kickoff' }),
+      });
+      if (res.status === 409) {
+        onKickoff?.(story.id, 'conflict');
+      } else if (res.ok) {
+        const data = await res.json() as { status: string };
+        onKickoff?.(story.id, data.status === 'triggered' ? 'triggered' : 'no_match');
+      } else {
+        onKickoff?.(story.id, 'error');
+      }
+    } catch {
+      onKickoff?.(story.id, 'error');
+    } finally {
+      setTriggering(false);
+    }
+  }, [projectId, story.id, triggering, onKickoff]);
 
   const { attributes, listeners, setNodeRef, transform, transition, isDragging } = useSortable({
     id: story.id,
@@ -176,6 +211,36 @@ export function StoryCard({ story, epicName, assignee, onClick, onEdit, onChange
           <span className="font-mono text-[10px] text-muted-foreground/50">#{story.id.slice(0, 6)}</span>
           {story.story_points != null ? (
             <Badge variant="secondary" className="font-mono text-[10px] px-1.5 py-0">{story.story_points}</Badge>
+          ) : null}
+          {lastExecution ? (
+            <span
+              title={[
+                lastExecution.rule_name ?? '워크플로우 실행됨',
+                lastExecution.completed_at ? new Date(lastExecution.completed_at).toLocaleString() : '',
+                lastExecution.status === 'matched' ? '✅ 규칙 매칭' : '⊘ 규칙 없음',
+              ].filter(Boolean).join(' · ')}
+              className="flex h-5 w-5 items-center justify-center"
+            >
+              {lastExecution.status === 'matched' ? (
+                <Zap className="h-3 w-3 text-amber-500" />
+              ) : (
+                <ZapOff className="h-3 w-3 text-muted-foreground/40" />
+              )}
+            </span>
+          ) : null}
+          {projectId ? (
+            <button
+              onClick={(e) => void handleKickoff(e)}
+              disabled={triggering}
+              title={t('kickoff')}
+              className="flex h-5 w-5 items-center justify-center rounded text-muted-foreground/60 hover:text-primary hover:bg-primary/10 disabled:opacity-40 transition"
+            >
+              {triggering ? (
+                <span className="h-3 w-3 animate-spin rounded-full border border-current border-t-transparent" />
+              ) : (
+                <Rocket className="h-3 w-3" />
+              )}
+            </button>
           ) : null}
         </div>
       </div>

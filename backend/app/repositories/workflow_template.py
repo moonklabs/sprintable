@@ -1,0 +1,116 @@
+"""WorkflowTemplate repository — S5-1."""
+from __future__ import annotations
+
+import copy
+import uuid
+from typing import Any
+
+from sqlalchemy import select
+from sqlalchemy.ext.asyncio import AsyncSession
+
+from app.models.workflow_template import WorkflowTemplate
+
+
+class WorkflowTemplateRepository:
+    def __init__(self, session: AsyncSession) -> None:
+        self.session = session
+
+    async def list(self) -> list[WorkflowTemplate]:
+        result = await self.session.execute(
+            select(WorkflowTemplate)
+            .where(WorkflowTemplate.is_enabled.is_(True))
+            .order_by(WorkflowTemplate.chain_length.asc())
+        )
+        return list(result.scalars().all())
+
+    async def get_by_slug(self, slug: str) -> WorkflowTemplate | None:
+        result = await self.session.execute(
+            select(WorkflowTemplate).where(WorkflowTemplate.slug == slug)
+        )
+        return result.scalar_one_or_none()
+
+
+def _resolve_step_ref(value: str, role_map: dict[str, dict[str, Any]]) -> str:
+    """step_X 문자열을 role_map의 role 값으로 치환. step_X가 없으면 원본 반환."""
+    info = role_map.get(value)
+    if info and info.get("role"):
+        return str(info["role"])
+    return value
+
+
+def _resolve_side_effects(side_effects: list[dict], role_map: dict[str, dict[str, Any]]) -> list[dict]:
+    """side_effects 내 assign_to_role의 step_X placeholder를 실제 role로 치환."""
+    result = []
+    for se in side_effects:
+        se_copy = copy.deepcopy(se)
+        if se_copy.get("type") == "auto_assign" and isinstance(se_copy.get("assign_to_role"), str):
+            se_copy["assign_to_role"] = _resolve_step_ref(se_copy["assign_to_role"], role_map)
+        result.append(se_copy)
+    return result
+
+
+def _resolve_event_params(event_params: dict, role_map: dict[str, dict[str, Any]]) -> dict:
+    """conditions.event_params 내 step_X placeholder 배열을 실제 role로 치환.
+
+    예: {"reply_author_role": ["step_1"]} → {"reply_author_role": ["developer"]}
+    """
+    resolved: dict = {}
+    for key, val in event_params.items():
+        if isinstance(val, list):
+            resolved[key] = [
+                _resolve_step_ref(v, role_map) if isinstance(v, str) else v
+                for v in val
+            ]
+        else:
+            resolved[key] = val
+    return resolved
+
+
+def _resolve_name(name: str, role_map: dict[str, dict[str, Any]]) -> str:
+    """name 필드의 {step_X} placeholder를 agent_name으로 치환."""
+    result = name
+    for step_key, info in role_map.items():
+        agent_name = info.get("agent_name") or step_key
+        result = result.replace(f"{{{step_key}}}", agent_name)
+    return result
+
+
+def resolve_rules_template(
+    rules_template: list[dict],
+    role_map: dict[str, dict[str, Any]],
+) -> list[dict]:
+    """role_ref placeholder를 실제 agent_id/name으로 치환.
+
+    role_map: {"step_1": {"agent_id": "...", "agent_name": "...", "role": "developer", ...}, ...}
+    중첩 필드 전량 치환:
+    - action.side_effects[].assign_to_role (step_X → role)
+    - conditions.event_params 배열 내 step_X (step_X → role)
+    - name 필드 {step_X} (step_X → agent_name)
+    """
+    resolved = []
+    for rule in rules_template:
+        r = copy.deepcopy(rule)
+        role_ref = r.pop("role_ref", None)
+        agent_info = role_map.get(role_ref or "") if role_ref else None
+        if agent_info:
+            r["agent_id"] = agent_info.get("agent_id")
+            r["persona_id"] = agent_info.get("persona_id")
+            r["deployment_id"] = agent_info.get("deployment_id")
+            r["target_runtime"] = agent_info.get("target_runtime", "openclaw")
+            r["target_model"] = agent_info.get("target_model")
+            r["is_enabled"] = True
+        # name {step_X} 치환
+        if isinstance(r.get("name"), str):
+            r["name"] = _resolve_name(r["name"], role_map)
+        # conditions.event_params step_X 치환
+        conditions = r.get("conditions") or {}
+        if isinstance(conditions, dict) and isinstance(conditions.get("event_params"), dict):
+            conditions["event_params"] = _resolve_event_params(conditions["event_params"], role_map)
+            r["conditions"] = conditions
+        # action.side_effects assign_to_role 치환
+        action = r.get("action") or {}
+        if isinstance(action, dict) and action.get("side_effects"):
+            action["side_effects"] = _resolve_side_effects(action["side_effects"], role_map)
+            r["action"] = action
+        resolved.append(r)
+    return resolved
