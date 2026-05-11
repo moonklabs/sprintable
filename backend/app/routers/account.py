@@ -14,13 +14,12 @@ router = APIRouter(prefix="/api/v2/account", tags=["account"])
 
 @router.post("/delete", response_model=AccountDeleteResponse)
 async def delete_account(
-    user_id: uuid.UUID | None = None,
     org_id: uuid.UUID = Depends(get_verified_org_id),
     session: AsyncSession = Depends(get_db),
     auth: AuthContext = Depends(get_current_user),
 ) -> AccountDeleteResponse:
     now = datetime.now(timezone.utc).isoformat()
-    uid = user_id or auth.user_id
+    uid = auth.user_id
 
     await session.execute(
         text("UPDATE org_members SET deleted_at = :now WHERE user_id = :uid::uuid"),
