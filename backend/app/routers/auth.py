@@ -8,7 +8,9 @@ from urllib.parse import urlencode
 import httpx
 from fastapi import APIRouter, Depends, Request
 from fastapi.responses import JSONResponse
-from pydantic import BaseModel
+import re
+
+from pydantic import BaseModel, field_validator
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy import or_, select, update
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -64,6 +66,23 @@ class LoginRequest(BaseModel):
 class RegisterRequest(BaseModel):
     email: str
     password: str
+
+    @field_validator("password")
+    @classmethod
+    def validate_password(cls, v: str) -> str:
+        if len(v) < 8:
+            raise ValueError("Password must be at least 8 characters long")
+        categories = [
+            bool(re.search(r"[A-Z]", v)),
+            bool(re.search(r"[a-z]", v)),
+            bool(re.search(r"\d", v)),
+            bool(re.search(r"[^A-Za-z0-9]", v)),
+        ]
+        if sum(categories) < 3:
+            raise ValueError(
+                "Password must include at least 3 of: uppercase letters, lowercase letters, digits, special characters"
+            )
+        return v
 
 
 class RefreshRequest(BaseModel):
