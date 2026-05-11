@@ -230,9 +230,9 @@ async def test_all_valid_stages():
     """모든 유효 stage가 400 없이 처리된다."""
     from app.routers.workflow_report import _VALID_STAGES
 
-    client, session, app = await _client()
-    try:
-        for stage in _VALID_STAGES:
+    for stage in _VALID_STAGES:
+        client, session, app = await _client()
+        try:
             story = _mock_story()
             mock_result = MagicMock()
             mock_result.scalar_one_or_none.return_value = story
@@ -250,8 +250,8 @@ async def test_all_valid_stages():
                     })
 
             assert resp.status_code == 200, f"stage={stage} → {resp.status_code}"
-    finally:
-        app.dependency_overrides.clear()
+        finally:
+            app.dependency_overrides.clear()
 
 
 @pytest.mark.anyio
