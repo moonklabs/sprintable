@@ -1,9 +1,10 @@
 """POST /api/v2/workflow/report-done — 에이전트 작업 완료 보고 + 다음 단계 자동 트리거."""
 import json
+import os
 import uuid
 from typing import Any
 
-from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, status
 from pydantic import BaseModel
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -12,8 +13,10 @@ from app.dependencies.auth import AuthContext, get_current_user
 from app.dependencies.database import get_db
 from app.models.memo import MemoAssignee
 from app.models.pm import Story
+from app.models.team import TeamMember
 from app.repositories.memo import MemoRepository
 from app.repositories.story import StoryRepository
+from app.routers.memos import _fire_webhook
 
 router = APIRouter(prefix="/api/v2/workflow", tags=["workflow"])
 
@@ -92,6 +95,7 @@ class ReportDoneResponse(BaseModel):
 @router.post("/report-done", response_model=ReportDoneResponse, status_code=200)
 async def report_done(
     body: ReportDoneRequest,
+    background_tasks: BackgroundTasks,
     session: AsyncSession = Depends(get_db),
     auth: AuthContext = Depends(get_current_user),
 ) -> ReportDoneResponse:
@@ -149,6 +153,20 @@ async def report_done(
         ))
         await session.flush()
         memo_id = memo.id
+
+        # 수신자 webhook_url 조회 후 백그라운드 발송
+        wh_result = await session.execute(
+            select(TeamMember.webhook_url).where(
+                TeamMember.id == next_member_id,
+                TeamMember.is_active.is_(True),
+                TeamMember.webhook_url.isnot(None),
+            )
+        )
+        webhook_url = wh_result.scalar_one_or_none()
+        if webhook_url:
+            app_base_url = os.getenv("NEXT_PUBLIC_APP_URL", "https://app.sprintable.ai")
+            memo_url = f"{app_base_url}/memos?id={memo.id}"
+            background_tasks.add_task(_fire_webhook, webhook_url, title, title, memo_url, str(memo.id))
 
     return ReportDoneResponse(
         story_id=body.story_id,
