@@ -16,6 +16,7 @@ __all__ = [
     "decode_jwt", "JWTError",
     "create_access_token", "create_refresh_token", "create_tokens",
     "create_password_reset_token", "decode_password_reset_token",
+    "create_email_verification_token", "decode_email_verification_token",
     "hash_password", "verify_password",
     "generate_totp_secret", "verify_totp", "get_totp_provisioning_uri",
     "hash_token",
@@ -165,5 +166,31 @@ def decode_password_reset_token(token: str) -> dict:
     """Reset token 검증. 만료/타입 불일치 시 JWTError."""
     payload = decode_jwt(token)
     if payload.get("type") != "password_reset":
+        raise JWTError("Invalid token type")
+    return payload
+
+
+# ─── Email Verification Token ─────────────────────────────────────────────────
+
+EMAIL_VERIFICATION_EXPIRE_HOURS = 24
+
+
+def create_email_verification_token(user_id: str) -> str:
+    """24시간 만료 이메일 인증 토큰."""
+    now = datetime.now(timezone.utc)
+    exp = now + timedelta(hours=EMAIL_VERIFICATION_EXPIRE_HOURS)
+    payload = {
+        "sub": user_id,
+        "type": "email_verification",
+        "iat": int(now.timestamp()),
+        "exp": int(exp.timestamp()),
+    }
+    return jwt.encode(payload, _get_secret(), algorithm="HS256")
+
+
+def decode_email_verification_token(token: str) -> dict:
+    """Email verification token 검증. 만료/타입 불일치 시 JWTError."""
+    payload = decode_jwt(token)
+    if payload.get("type") != "email_verification":
         raise JWTError("Invalid token type")
     return payload

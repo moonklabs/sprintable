@@ -30,8 +30,10 @@ from app.core.config import settings
 from app.core.security import (
     create_tokens,
     create_password_reset_token,
+    create_email_verification_token,
     decode_jwt,
     decode_password_reset_token,
+    decode_email_verification_token,
     generate_totp_secret,
     get_totp_provisioning_uri,
     hash_password,
@@ -287,6 +289,7 @@ async def register(
         email=body.email,
         hashed_password=hash_password(body.password),
         is_active=True,
+        email_verified=False,
     )
     session.add(user)
     try:
@@ -298,6 +301,23 @@ async def register(
     tokens = create_tokens(str(user.id), email=user.email, app_metadata=await _build_app_metadata(user, session))
     _, refresh_exp = create_refresh_token(str(user.id), expires_delta=timedelta(days=REFRESH_TOKEN_EXPIRE_DAYS))
     await _store_refresh_token(session, user, tokens["refresh_token"], refresh_exp)
+
+    # 이메일 인증 발송 (비동기 — 실패해도 가입은 완료)
+    try:
+        verification_token = create_email_verification_token(str(user.id))
+        app_url = os.getenv("NEXT_PUBLIC_APP_URL", "https://app.sprintable.ai")
+        verify_link = f"{app_url}/verify-email?token={verification_token}"
+        from app.services.email import send_email
+        send_email(
+            to=user.email,
+            subject="Sprintable 이메일 인증",
+            html_body=(
+                f"<p>아래 링크를 클릭하여 이메일 인증을 완료해 주세요. 24시간 유효합니다.</p>"
+                f"<p><a href='{verify_link}'>이메일 인증하기</a></p>"
+            ),
+        )
+    except Exception:
+        pass  # 이메일 발송 실패는 가입에 영향 없음
 
     return _ok(tokens, 201)
 
@@ -605,11 +625,12 @@ async def oauth_callback(
             await session.commit()
             await session.refresh(user)
         else:
-            # 신규 유저 생성 (비밀번호 없음 — OAuth 전용)
+            # 신규 유저 생성 (비밀번호 없음 — OAuth 전용, 이메일 인증 완료)
             user = User(
                 email=email,
                 hashed_password="",
                 is_active=True,
+                email_verified=True,
                 **{f"{provider}_id": oauth_id},
             )
             session.add(user)
@@ -708,3 +729,58 @@ async def change_password(
         update(User).where(User.id == user.id).values(hashed_password=hash_password(body.new_password))
     )
     return _ok({"message": "Password changed successfully"})
+
+
+# ─── Email Verification ───────────────────────────────────────────────────────
+
+@router.get("/verify-email")
+async def verify_email(
+    token: str,
+    session: AsyncSession = Depends(get_db),
+) -> JSONResponse:
+    try:
+        payload = decode_email_verification_token(token)
+    except JWTError:
+        return _err("INVALID_TOKEN", "Verification link is invalid or expired", 400)
+
+    user_id = payload.get("sub")
+    user = await _get_user_by_id(session, uuid.UUID(user_id))
+    if user is None:
+        return _err("USER_NOT_FOUND", "User not found", 404)
+
+    if user.email_verified:
+        return _ok({"message": "Email already verified"})
+
+    await session.execute(
+        update(User).where(User.id == user.id).values(email_verified=True)
+    )
+    return _ok({"message": "Email verified successfully"})
+
+
+@router.post("/resend-verification")
+@limiter.limit("3/hour")
+async def resend_verification(
+    request: Request,
+    session: AsyncSession = Depends(get_db),
+    auth: AuthContext = Depends(get_current_user),
+) -> JSONResponse:
+    user = await _get_user_by_id(session, uuid.UUID(auth.user_id))
+    if user is None:
+        return _err("USER_NOT_FOUND", "User not found", 404)
+
+    if user.email_verified:
+        return _ok({"message": "Email already verified"})
+
+    verification_token = create_email_verification_token(str(user.id))
+    app_url = os.getenv("NEXT_PUBLIC_APP_URL", "https://app.sprintable.ai")
+    verify_link = f"{app_url}/verify-email?token={verification_token}"
+    from app.services.email import send_email
+    send_email(
+        to=user.email,
+        subject="Sprintable 이메일 인증",
+        html_body=(
+            f"<p>아래 링크를 클릭하여 이메일 인증을 완료해 주세요. 24시간 유효합니다.</p>"
+            f"<p><a href='{verify_link}'>이메일 인증하기</a></p>"
+        ),
+    )
+    return _ok({"message": "Verification email sent"})
