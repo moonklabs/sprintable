@@ -113,7 +113,7 @@ async def list_executions(
     auth: AuthContext = Depends(get_current_user),
 ) -> ExecutionLogListResponse:
     role = auth.claims.get("app_metadata", {}).get("role", "member")
-    if role != "admin":
+    if role not in ("admin", "owner"):
         if member_id is None:
             raise HTTPException(status_code=403, detail="Admin role required, or provide member_id to query own executions")
         user_id_str = str(auth.user_id)
