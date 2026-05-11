@@ -232,7 +232,7 @@ def get_org_scope(
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Invalid org_id format")
 
 
-RoleType = Literal["admin", "member", "viewer"]
+RoleType = Literal["admin", "member", "viewer", "owner"]
 
 
 def require_role(*allowed_roles: RoleType):
@@ -249,9 +249,9 @@ def require_role(*allowed_roles: RoleType):
 
 
 def require_admin(auth: AuthContext = Depends(get_current_user)) -> AuthContext:
-    """admin role 전용 엔드포인트 가드."""
+    """admin 또는 owner role 전용 엔드포인트 가드."""
     role = auth.claims.get("app_metadata", {}).get("role", "member")
-    if role != "admin":
+    if role not in ("admin", "owner"):
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
             detail="Admin role required",
