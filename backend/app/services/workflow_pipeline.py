@@ -61,6 +61,7 @@ async def _send_memo(
         title=_build_memo_title(ctx),
         assigned_to=agent_id,
         created_by=created_by,
+        memo_metadata={"origin": "workflow"},
     )
 
 

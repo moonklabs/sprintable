@@ -183,7 +183,8 @@ async def create_memo(
     if all_embeds:
         await repo.create_entity_links(memo.id, all_embeds)
     publish_event(str(body.org_id), "memo_created", {"id": str(memo.id)})
-    if body.project_id:
+    _is_workflow_origin = (body.memo_metadata or {}).get("origin") == "workflow"
+    if body.project_id and not _is_workflow_origin:
         from app.services.workflow_pipeline import process_event
         from app.services.rule_evaluator import EventContext
         actor_name: str | None = None
