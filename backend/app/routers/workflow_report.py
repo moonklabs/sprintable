@@ -1,4 +1,5 @@
 """POST /api/v2/workflow/report-done — 에이전트 작업 완료 보고 + 다음 단계 자동 트리거."""
+import json
 import uuid
 from typing import Any
 
@@ -35,7 +36,7 @@ _TRANSITIONS: dict[str, dict[str, Any]] = {
         "memo_type": "task",
         "memo_title_prefix": "[REVIEW 요청]",
         "memo_content": "개발 완료. PR 리뷰 요청드리는.",
-        "story_status": None,
+        "story_status": "in-review",
     },
     "review": {
         "next_stage": "qa",
@@ -65,7 +66,7 @@ _TRANSITIONS: dict[str, dict[str, Any]] = {
 
 # role → member_id (하드코딩)
 _ROLE_TO_MEMBER: dict[str, uuid.UUID] = {
-    "po": uuid.UUID("05f52181-ea2a-42be-b9a8-9a418b72feb1"),
+    "po": uuid.UUID("cff9055b-c671-4401-8436-a17f804a0406"),
     "dev": uuid.UUID("9cac9d96-5474-45f7-941e-787407597b52"),
     "qa": uuid.UUID("685f3f72-c85c-4a32-898f-3d3320ba39ad"),
 }
@@ -130,7 +131,7 @@ async def report_done(
         title = f"{transition['memo_title_prefix']} {story_title}"
         content_parts = [transition["memo_content"]]
         if body.context:
-            content_parts.append(f"\n\n**Context:**\n{body.context}")
+            content_parts.append(f"\n\n**Context:**\n{json.dumps(body.context, indent=2, ensure_ascii=False)}")
 
         memo_repo = MemoRepository(session, story.org_id)
         memo = await memo_repo.create(
