@@ -41,11 +41,13 @@ export async function POST(request: Request) {
     const teamMemberRepo = await createTeamMemberRepository();
     const projectRepo = await createProjectRepository();
     const service = new MemoService(repo, undefined, teamMemberRepo, projectRepo);
+    const { trigger_type, ...memoBody } = body;
     const memo = await service.create({
-      ...body,
+      ...memoBody,
       org_id: me.org_id,
       project_id: me.project_id,
       created_by: me.id,
+      ...(trigger_type ? { metadata: { trigger_type } } : {}),
     } as CreateMemoInput);
     return apiSuccess(memo, undefined, 201);
   } catch (err: unknown) {

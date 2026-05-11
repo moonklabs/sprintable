@@ -122,6 +122,7 @@ async def list_memos(
     created_by: uuid.UUID | None = Query(default=None),
     status_filter: str | None = Query(default=None, alias="status"),
     q: str | None = Query(default=None),
+    trigger_type: str | None = Query(default=None),
     repo: MemoRepository = Depends(_get_repo),
 ) -> list[MemoListResponse]:
     filters: dict = {}
@@ -135,6 +136,8 @@ async def list_memos(
         filters["status"] = status_filter
     if q:
         filters["q"] = q
+    if trigger_type:
+        filters["trigger_type"] = trigger_type
     memos = await repo.list(**filters)
     memo_ids = [m.id for m in memos]
     counts = await repo.get_entity_link_counts_batch(memo_ids)
