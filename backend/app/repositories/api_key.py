@@ -14,8 +14,8 @@ from app.models.api_key import ApiKey
 def _generate_key() -> tuple[str, str, str]:
     raw = secrets.token_hex(32)
     prefix = f"sk_live_{raw[:8]}"
-    key_hash = hashlib.sha256(raw.encode()).hexdigest()
     plaintext = f"sk_live_{raw}"
+    key_hash = hashlib.sha256(plaintext.encode()).hexdigest()
     return plaintext, prefix, key_hash
 
 
