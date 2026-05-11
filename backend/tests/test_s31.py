@@ -131,6 +131,12 @@ async def test_list_audit_logs_empty_200():
 async def test_create_organization_201():
     client, session, app = await _client()
     try:
+        mock_user = MagicMock()
+        mock_user.email_verified = True
+        mock_result = MagicMock()
+        mock_result.scalar_one_or_none.return_value = mock_user
+        session.execute = AsyncMock(return_value=mock_result)
+
         with patch("app.repositories.organization.OrganizationRepository.create", new_callable=AsyncMock) as mock_create:
             mock_create.return_value = _mock_org()
 
@@ -151,6 +157,12 @@ async def test_create_organization_201():
 async def test_create_organization_409_slug_conflict():
     client, session, app = await _client()
     try:
+        mock_user = MagicMock()
+        mock_user.email_verified = True
+        mock_result = MagicMock()
+        mock_result.scalar_one_or_none.return_value = mock_user
+        session.execute = AsyncMock(return_value=mock_result)
+
         with patch("app.repositories.organization.OrganizationRepository.create", new_callable=AsyncMock) as mock_create:
             mock_create.return_value = None
 
