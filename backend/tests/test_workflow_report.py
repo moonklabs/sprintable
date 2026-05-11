@@ -12,7 +12,7 @@ STORY_ID = uuid.uuid4()
 AGENT_ID = uuid.UUID("9cac9d96-5474-45f7-941e-787407597b52")
 MEMO_ID = uuid.uuid4()
 
-_PO_ID = uuid.UUID("cff9055b-c671-4401-8436-a17f804a0406")
+_PO_ID = uuid.UUID("05f52181-ea2a-42be-b9a8-9a418b72feb1")
 _DEV_ID = uuid.UUID("9cac9d96-5474-45f7-941e-787407597b52")
 _QA_ID = uuid.UUID("685f3f72-c85c-4a32-898f-3d3320ba39ad")
 
@@ -259,7 +259,7 @@ async def test_next_assignee_mapping():
     """각 stage별 next_role이 올바른 member_id에 매핑된다."""
     from app.routers.workflow_report import _ROLE_TO_MEMBER, _TRANSITIONS
 
-    assert _ROLE_TO_MEMBER["po"] == uuid.UUID("cff9055b-c671-4401-8436-a17f804a0406")
+    assert _ROLE_TO_MEMBER["po"] == uuid.UUID("05f52181-ea2a-42be-b9a8-9a418b72feb1")
     assert _ROLE_TO_MEMBER["dev"] == uuid.UUID("9cac9d96-5474-45f7-941e-787407597b52")
     assert _ROLE_TO_MEMBER["qa"] == uuid.UUID("685f3f72-c85c-4a32-898f-3d3320ba39ad")
     assert _TRANSITIONS["kickoff"]["next_role"] == "dev"
