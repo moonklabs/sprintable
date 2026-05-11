@@ -5,15 +5,38 @@ import { useRouter } from 'next/navigation';
 import Link from 'next/link';
 import { SprintableLogo } from '@/components/brand/sprintable-logo';
 
+function checkPasswordRules(pw: string) {
+  return {
+    length: pw.length >= 8,
+    upper: /[A-Z]/.test(pw),
+    lower: /[a-z]/.test(pw),
+    digit: /\d/.test(pw),
+    special: /[^A-Za-z0-9]/.test(pw),
+  };
+}
+
+function countCategories(rules: ReturnType<typeof checkPasswordRules>) {
+  return [rules.upper, rules.lower, rules.digit, rules.special].filter(Boolean).length;
+}
+
 export default function RegisterPage() {
   const router = useRouter();
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
+  const [passwordTouched, setPasswordTouched] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
 
+  const rules = checkPasswordRules(password);
+  const categoriesMet = countCategories(rules);
+  const isPasswordValid = rules.length && categoriesMet >= 3;
+
   const handleRegister = async () => {
     if (!email.trim() || !password.trim()) return;
+    if (!isPasswordValid) {
+      setPasswordTouched(true);
+      return;
+    }
     setLoading(true);
     setError(null);
     try {
@@ -27,7 +50,6 @@ export default function RegisterPage() {
         setError(json.error?.message ?? 'Registration failed. Please try again.');
         return;
       }
-      // Invited users already have org context from JWT; direct signups need onboarding.
       const meRes = await fetch('/api/me');
       const meJson = await meRes.json() as { data?: { org_id?: string } };
       router.push(meJson.data?.org_id ? '/inbox' : '/onboarding');
@@ -38,6 +60,8 @@ export default function RegisterPage() {
       setLoading(false);
     }
   };
+
+  const showRules = passwordTouched && password.length > 0;
 
   return (
     <div className="flex min-h-screen items-center justify-center bg-gray-50">
@@ -67,12 +91,23 @@ export default function RegisterPage() {
             type="password"
             placeholder="Password"
             autoComplete="new-password"
-            className="w-full rounded-lg border border-gray-300 px-4 py-3 text-sm text-gray-900 focus:outline-none focus:ring-2 focus:ring-blue-500"
+            className={`w-full rounded-lg border px-4 py-3 text-sm text-gray-900 focus:outline-none focus:ring-2 focus:ring-blue-500 ${
+              showRules && !isPasswordValid ? 'border-red-400' : 'border-gray-300'
+            }`}
             value={password}
-            onChange={(e) => setPassword(e.target.value)}
+            onChange={(e) => { setPassword(e.target.value); setPasswordTouched(true); }}
             onKeyDown={(e) => e.key === 'Enter' && handleRegister()}
             disabled={loading}
           />
+          {showRules && (
+            <ul className="space-y-1 text-xs">
+              <RuleItem met={rules.length} label="At least 8 characters" />
+              <li className={`flex items-center gap-1.5 ${categoriesMet >= 3 ? 'text-green-600' : 'text-gray-400'}`}>
+                <span>{categoriesMet >= 3 ? '✓' : '○'}</span>
+                <span>At least 3 of: uppercase, lowercase, digit, special character ({categoriesMet}/3)</span>
+              </li>
+            </ul>
+          )}
           {error && <p className="text-sm text-red-600">{error}</p>}
           <button
             onClick={handleRegister}
@@ -91,5 +126,14 @@ export default function RegisterPage() {
         </p>
       </div>
     </div>
+  );
+}
+
+function RuleItem({ met, label }: { met: boolean; label: string }) {
+  return (
+    <li className={`flex items-center gap-1.5 ${met ? 'text-green-600' : 'text-gray-400'}`}>
+      <span>{met ? '✓' : '○'}</span>
+      <span>{label}</span>
+    </li>
   );
 }
