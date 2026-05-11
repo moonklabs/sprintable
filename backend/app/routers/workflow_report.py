@@ -69,7 +69,7 @@ _TRANSITIONS: dict[str, dict[str, Any]] = {
 
 # role → member_id (하드코딩)
 _ROLE_TO_MEMBER: dict[str, uuid.UUID] = {
-    "po": uuid.UUID("cff9055b-c671-4401-8436-a17f804a0406"),
+    "po": uuid.UUID("05f52181-ea2a-42be-b9a8-9a418b72feb1"),
     "dev": uuid.UUID("9cac9d96-5474-45f7-941e-787407597b52"),
     "qa": uuid.UUID("685f3f72-c85c-4a32-898f-3d3320ba39ad"),
 }
