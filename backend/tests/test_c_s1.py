@@ -35,6 +35,8 @@ def _make_user(
     totp_last_timestep: int | None = None,
     totp_fail_count: int = 0,
     totp_locked_until=None,
+    login_fail_count: int = 0,
+    login_locked_until=None,
 ) -> MagicMock:
     from app.core.security import hash_password
     u = MagicMock()
@@ -47,6 +49,8 @@ def _make_user(
     u.totp_last_timestep = totp_last_timestep
     u.totp_fail_count = totp_fail_count
     u.totp_locked_until = totp_locked_until
+    u.login_fail_count = login_fail_count
+    u.login_locked_until = login_locked_until
     u.org_id = uuid.uuid4()
     u.project_id = uuid.uuid4()
     u.role = "member"
