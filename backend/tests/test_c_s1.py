@@ -228,7 +228,7 @@ async def test_register_new_user_201():
         session.execute = AsyncMock(return_value=result_none)
         with patch.dict("os.environ", {"JWT_SECRET": "test-secret"}):
             async with client as c:
-                resp = await c.post("/api/v2/auth/register", json={"email": "new@test.com", "password": "pass123"})
+                resp = await c.post("/api/v2/auth/register", json={"email": "new@test.com", "password": "TestPass1!"})
         assert resp.status_code == 201
         body = resp.json()
         assert body["error"] is None
@@ -247,7 +247,7 @@ async def test_register_duplicate_email_409():
         result_existing.scalar_one_or_none.return_value = _make_user()
         session.execute = AsyncMock(return_value=result_existing)
         async with client as c:
-            resp = await c.post("/api/v2/auth/register", json={"email": "exists@test.com", "password": "pass"})
+            resp = await c.post("/api/v2/auth/register", json={"email": "exists@test.com", "password": "TestPass1!"})
         assert resp.status_code == 409
         assert resp.json()["error"]["code"] == "EMAIL_TAKEN"
     finally:
