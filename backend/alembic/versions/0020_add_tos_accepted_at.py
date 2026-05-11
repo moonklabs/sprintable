@@ -1,7 +1,7 @@
 """add tos_accepted_at to users
 
-Revision ID: 0018
-Revises: 0017
+Revision ID: 0020
+Revises: 0019
 Create Date: 2026-05-11
 """
 from __future__ import annotations
@@ -9,8 +9,8 @@ from __future__ import annotations
 import sqlalchemy as sa
 from alembic import op
 
-revision = "0018"
-down_revision = "0017"
+revision = "0020"
+down_revision = "0019"
 branch_labels = None
 depends_on = None
 
