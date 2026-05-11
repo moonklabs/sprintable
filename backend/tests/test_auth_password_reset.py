@@ -15,13 +15,14 @@ from app.core.security import (
 # ─── Reset token 유틸리티 ─────────────────────────────────────────────────────
 
 def test_reset_token_roundtrip():
+    import hashlib
     uid = str(uuid.uuid4())
     hpw = hash_password("SomePass1!")
     token = create_password_reset_token(uid, hpw)
     payload = decode_password_reset_token(token)
     assert payload["sub"] == uid
     assert payload["type"] == "password_reset"
-    assert payload["pw_sig"] == hpw[:16]
+    assert payload["pw_sig"] == hashlib.sha256(hpw.encode()).hexdigest()[:16]
 
 
 def test_reset_token_wrong_type_rejected():
@@ -36,13 +37,14 @@ def test_reset_token_wrong_type_rejected():
 
 def test_pw_sig_changes_after_password_change():
     """비밀번호 변경 후 pw_sig 불일치로 토큰 자동 무효화 확인."""
+    import hashlib
     uid = str(uuid.uuid4())
     old_hpw = hash_password("OldPass1!")
     token = create_password_reset_token(uid, old_hpw)
     payload = decode_password_reset_token(token)
 
     new_hpw = hash_password("NewPass2@")
-    assert new_hpw[:16] != payload["pw_sig"]
+    assert hashlib.sha256(new_hpw.encode()).hexdigest()[:16] != payload["pw_sig"]
 
 
 # ─── /forgot-password ─────────────────────────────────────────────────────────

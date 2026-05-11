@@ -150,10 +150,11 @@ def create_password_reset_token(user_id: str, hashed_password: str) -> str:
     """30분 만료 reset token. pw_sig 포함으로 비밀번호 변경 후 자동 무효화."""
     now = datetime.now(timezone.utc)
     exp = now + timedelta(minutes=RESET_TOKEN_EXPIRE_MINUTES)
+    pw_sig = hashlib.sha256(hashed_password.encode()).hexdigest()[:16]
     payload = {
         "sub": user_id,
         "type": "password_reset",
-        "pw_sig": hashed_password[:16],
+        "pw_sig": pw_sig,
         "iat": int(now.timestamp()),
         "exp": int(exp.timestamp()),
     }

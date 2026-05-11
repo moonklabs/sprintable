@@ -681,7 +681,8 @@ async def reset_password(
         return _err("USER_NOT_FOUND", "User not found", 404)
 
     # pw_sig 불일치 시 이미 비밀번호 변경됨 → 토큰 무효
-    if user.hashed_password[:16] != pw_sig:
+    import hashlib as _hashlib
+    if _hashlib.sha256(user.hashed_password.encode()).hexdigest()[:16] != pw_sig:
         return _err("INVALID_TOKEN", "Reset token has already been used", 400)
 
     await session.execute(
