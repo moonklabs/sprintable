@@ -1,10 +1,13 @@
 import uuid
+from datetime import datetime, timezone
 
 from fastapi import APIRouter, Depends, HTTPException, status
+from sqlalchemy import update
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.dependencies.auth import AuthContext, get_current_user, get_verified_org_id
 from app.dependencies.database import get_db
+from app.models.user import RefreshToken
 from app.repositories.org_member import OrgMemberRepository
 from app.schemas.org_member import ORG_ROLES, OrgMemberCreate, OrgMemberResponse, OrgMemberUpdate
 
@@ -63,6 +66,15 @@ async def get_org_member(
     return OrgMemberResponse.model_validate(member)
 
 
+async def _revoke_user_refresh_tokens(session: AsyncSession, user_id: uuid.UUID) -> None:
+    """해당 사용자의 refresh token 전량 revoke."""
+    await session.execute(
+        update(RefreshToken)
+        .where(RefreshToken.user_id == user_id, RefreshToken.revoked_at.is_(None))
+        .values(revoked_at=datetime.now(timezone.utc))
+    )
+
+
 @router.patch("/{id}", response_model=OrgMemberResponse)
 async def update_org_member(
     id: uuid.UUID,
@@ -72,9 +84,16 @@ async def update_org_member(
     if body.role and body.role not in ORG_ROLES:
         raise HTTPException(status_code=400, detail=f"role must be one of: {', '.join(ORG_ROLES)}")
     data = body.model_dump(exclude_unset=True)
+    if "role" in data:
+        existing = await repo.get(id)
+        if existing is None:
+            raise HTTPException(status_code=404, detail="Org member not found")
+        if existing.role != data["role"]:
+            await _revoke_user_refresh_tokens(repo.session, existing.user_id)
     member = await repo.update(id, **data)
     if member is None:
         raise HTTPException(status_code=404, detail="Org member not found")
+    await repo.session.commit()
     return OrgMemberResponse.model_validate(member)
 
 
@@ -83,6 +102,10 @@ async def delete_org_member(
     id: uuid.UUID,
     repo: OrgMemberRepository = Depends(_require_admin),
 ) -> dict:
+    existing = await repo.get(id)
+    if existing is None:
+        raise HTTPException(status_code=404, detail="Org member not found")
+    await _revoke_user_refresh_tokens(repo.session, existing.user_id)
     ok = await repo.soft_delete(id)
     if not ok:
         raise HTTPException(status_code=404, detail="Org member not found")

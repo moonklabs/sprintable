@@ -53,9 +53,30 @@ from app.dependencies.database import get_db
 from app.models.invitation import Invitation
 from app.models.project import OrgMember
 from app.models.team import TeamMember
+from app.models.login_audit_log import LoginAuditLog
 from app.models.user import RefreshToken, User
 
 router = APIRouter(prefix="/api/v2/auth", tags=["auth"])
+
+
+async def _write_audit(
+    session: AsyncSession,
+    event_type: str,
+    *,
+    user_id: uuid.UUID | None = None,
+    email: str | None = None,
+    ip_address: str | None = None,
+    user_agent: str | None = None,
+    detail: str | None = None,
+) -> None:
+    session.add(LoginAuditLog(
+        event_type=event_type,
+        user_id=user_id,
+        email=email,
+        ip_address=ip_address,
+        user_agent=user_agent,
+        detail=detail,
+    ))
 
 
 def _ok(data: object, status_code: int = 200) -> JSONResponse:
@@ -358,6 +379,17 @@ async def login(
                     login_locked_until=locked_until,
                 )
             )
+        _ip = request.client.host if request.client else None
+        _ua = request.headers.get("user-agent")
+        await _write_audit(
+            session, "login_failure",
+            user_id=user.id if user else None,
+            email=body.email,
+            ip_address=_ip,
+            user_agent=_ua,
+            detail="INVALID_CREDENTIALS",
+        )
+        await session.commit()
         return _err("INVALID_CREDENTIALS", "Invalid email or password", 401)
 
     if user.totp_enabled:
@@ -407,6 +439,17 @@ async def login(
     tokens = create_tokens(str(user.id), email=user.email, app_metadata=await _build_app_metadata(user, session))
     _, refresh_exp = create_refresh_token(str(user.id), expires_delta=timedelta(days=REFRESH_TOKEN_EXPIRE_DAYS))
     await _store_refresh_token(session, user, tokens["refresh_token"], refresh_exp)
+
+    _ip = request.client.host if request.client else None
+    _ua = request.headers.get("user-agent")
+    await _write_audit(
+        session, "login_success",
+        user_id=user.id,
+        email=user.email,
+        ip_address=_ip,
+        user_agent=_ua,
+    )
+    await session.commit()
 
     return _ok(tokens)
 
@@ -503,6 +546,7 @@ async def totp_setup(
 
 @router.post("/totp/verify")
 async def totp_verify(
+    request: Request,
     body: TotpVerifyRequest,
     session: AsyncSession = Depends(get_db),
     auth: AuthContext = Depends(get_current_user),
@@ -518,6 +562,15 @@ async def totp_verify(
 
     await session.execute(
         update(User).where(User.id == user.id).values(totp_enabled=True)
+    )
+    _ip = request.client.host if request.client else None
+    _ua = request.headers.get("user-agent")
+    await _write_audit(
+        session, "2fa_enabled",
+        user_id=user.id,
+        email=user.email,
+        ip_address=_ip,
+        user_agent=_ua,
     )
     await session.commit()
     return _ok({"totp_enabled": True})
