@@ -416,6 +416,7 @@ export class MemoService {
       content: input.content.trim(),
       memo_type: input.memo_type ?? 'memo',
       assigned_to: assigneeIds[0] ?? null,
+      assigned_to_ids: assigneeIds.length > 0 ? assigneeIds : undefined,
       supersedes_id: input.supersedes_id ?? null,
       created_by: input.created_by,
       metadata: input.metadata ?? {},

@@ -27,6 +27,7 @@ export interface CreateMemoInput {
   content: string;
   memo_type?: string;
   assigned_to?: string | null;
+  assigned_to_ids?: string[];
   supersedes_id?: string | null;
   created_by: string;
   metadata?: Record<string, unknown>;

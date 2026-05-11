@@ -138,6 +138,14 @@ async def create_memo(
         supersedes_id=body.supersedes_id,
         memo_metadata=body.memo_metadata,
     )
+    if body.assigned_to_ids:
+        for member_id in body.assigned_to_ids:
+            session.add(MemoAssignee(
+                memo_id=memo.id,
+                member_id=member_id,
+                assigned_by=body.created_by,
+            ))
+        await session.flush()
     if body.embeds:
         await repo.create_entity_links(memo.id, body.embeds)
     publish_event(str(body.org_id), "memo_created", {"id": str(memo.id)})
