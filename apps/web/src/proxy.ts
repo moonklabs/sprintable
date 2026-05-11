@@ -20,10 +20,14 @@ const PUBLIC_PREFIX = [
   '/signup',
   '/register',
   '/forgot-password',
+  '/reset-password',
+  '/verify-email',
   '/auth/callback',
   '/auth/login',
   '/invite',
   '/internal-dogfood',
+  '/terms',
+  '/privacy',
 ];
 
 export const SP_AT_COOKIE = 'sp_at';
