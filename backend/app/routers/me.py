@@ -8,6 +8,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.dependencies.auth import AuthContext, get_current_user
 from app.dependencies.database import get_db
 from app.models.team import TeamMember
+from app.models.user import User
 from app.schemas.me import MeResponse, UpdateMe
 
 router = APIRouter(prefix="/api/v2/me", tags=["me"])
@@ -41,6 +42,13 @@ async def get_me(
         raise HTTPException(status_code=404, detail="Member not found")
     data = MeResponse.model_validate(member)
     data.project_name = member.project.name if member.project else None
+
+    if not is_api_key and member.user_id:
+        user_result = await session.execute(select(User).where(User.id == member.user_id))
+        user = user_result.scalar_one_or_none()
+        if user:
+            data.has_password = bool(user.hashed_password)
+
     return data
 
 
