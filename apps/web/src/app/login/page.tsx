@@ -135,6 +135,11 @@ export default function LoginPage() {
         </div>
 
         <p className="text-center text-sm text-gray-500">
+          <Link href="/forgot-password" className="font-medium text-blue-600 hover:text-blue-700">
+            비밀번호를 잊으셨나요?
+          </Link>
+        </p>
+        <p className="text-center text-sm text-gray-500">
           Don&apos;t have an account?{' '}
           <Link href="/register" className="font-medium text-blue-600 hover:text-blue-700">
             Sign up
