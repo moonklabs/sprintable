@@ -18,6 +18,7 @@ import { ThemeSettings } from '@/components/settings/theme-settings';
 import { RefreshSettings } from '@/components/settings/refresh-settings';
 import { StandupDeadlineSection } from '@/components/settings/standup-deadline-section';
 import { TwoFactorSection } from '@/components/settings/two-factor-section';
+import { SetPasswordSection } from '@/components/settings/set-password-section';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { OperatorInput } from '@/components/ui/operator-control';
@@ -667,6 +668,7 @@ export default function SettingsPage() {
             <TabsContent value="profile">
               <div className="space-y-6">
                 <MyProfileSection />
+                <SetPasswordSection />
                 <TwoFactorSection />
               </div>
             </TabsContent>

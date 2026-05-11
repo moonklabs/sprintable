@@ -174,6 +174,27 @@ class ChangePasswordRequest(BaseModel):
         return v
 
 
+class SetPasswordRequest(BaseModel):
+    new_password: str
+
+    @field_validator("new_password")
+    @classmethod
+    def validate_password(cls, v: str) -> str:
+        if len(v) < 8:
+            raise ValueError("Password must be at least 8 characters long")
+        categories = [
+            bool(re.search(r"[A-Z]", v)),
+            bool(re.search(r"[a-z]", v)),
+            bool(re.search(r"\d", v)),
+            bool(re.search(r"[^A-Za-z0-9]", v)),
+        ]
+        if sum(categories) < 3:
+            raise ValueError(
+                "Password must include at least 3 of: uppercase letters, lowercase letters, digits, special characters"
+            )
+        return v
+
+
 # ─── Helpers ──────────────────────────────────────────────────────────────────
 
 async def _get_user_by_email(session: AsyncSession, email: str) -> User | None:
@@ -766,6 +787,29 @@ async def change_password(
         update(User).where(User.id == user.id).values(hashed_password=hash_password(body.new_password))
     )
     return _ok({"message": "Password changed successfully"})
+
+
+# ─── POST /api/v2/auth/set-password ──────────────────────────────────────────
+
+@router.post("/set-password")
+async def set_password(
+    body: SetPasswordRequest,
+    session: AsyncSession = Depends(get_db),
+    auth: AuthContext = Depends(get_current_user),
+) -> JSONResponse:
+    """OAuth 전용 사용자 최초 비밀번호 설정 (hashed_password == "" 인 경우만 허용)."""
+    user = await _get_user_by_id(session, uuid.UUID(auth.user_id))
+    if user is None:
+        return _err("USER_NOT_FOUND", "User not found", 404)
+
+    if user.hashed_password:
+        return _err("ALREADY_HAS_PASSWORD", "User already has a password set", 400)
+
+    await session.execute(
+        update(User).where(User.id == user.id).values(hashed_password=hash_password(body.new_password))
+    )
+    await session.commit()
+    return _ok({"message": "Password set successfully"})
 
 
 # ─── Email Verification ───────────────────────────────────────────────────────
