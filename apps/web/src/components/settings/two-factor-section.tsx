@@ -1,6 +1,7 @@
 'use client';
 
 import { useEffect, useState } from 'react';
+import { QRCodeSVG } from 'qrcode.react';
 import { SectionCard, SectionCardBody, SectionCardHeader } from '@/components/ui/section-card';
 
 type TwoFaState = 'loading' | 'disabled' | 'enrolling' | 'enabled';
@@ -117,12 +118,16 @@ export function TwoFactorSection() {
         {state === 'enrolling' && provUri && (
           <div className="space-y-4">
             <p className="text-sm text-muted-foreground">Scan the QR code or enter the key manually, then enter the 6-digit code below.</p>
+            <div className="flex justify-center">
+              <div className="rounded-lg bg-white p-3">
+                <QRCodeSVG value={provUri} size={220} bgColor="#ffffff" fgColor="#000000" level="M" />
+              </div>
+            </div>
             {secret && (
               <p className="text-center text-xs text-muted-foreground">
                 Manual key: <span className="font-mono text-foreground">{secret}</span>
               </p>
             )}
-            <p className="break-all text-center text-xs text-muted-foreground font-mono">{provUri}</p>
             <input
               type="text"
               inputMode="numeric"
