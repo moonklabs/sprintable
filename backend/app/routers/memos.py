@@ -20,6 +20,30 @@ from app.schemas.memo import CreateMemo, CreateReply, MemoListResponse, MemoResp
 
 router = APIRouter(prefix="/api/v2/memos", tags=["memos"])
 
+_ENTITY_PATTERN = re.compile(
+    r"\(entity:(story|doc|epic|task):([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})\)",
+    re.IGNORECASE,
+)
+
+
+def _parse_entity_embeds(content: str) -> list:
+    """content 내 (entity:type:uuid) 패턴 파싱 → MemoEntityLinkCreate 리스트 (중복 제거)."""
+    from app.schemas.memo import MemoEntityLinkCreate
+    seen: set[tuple[str, str]] = set()
+    result = []
+    for i, m in enumerate(_ENTITY_PATTERN.finditer(content)):
+        entity_type, entity_id_str = m.group(1).lower(), m.group(2)
+        key = (entity_type, entity_id_str)
+        if key in seen:
+            continue
+        seen.add(key)
+        result.append(MemoEntityLinkCreate(
+            entity_type=entity_type,  # type: ignore[arg-type]
+            entity_id=uuid.UUID(entity_id_str),
+            position=i,
+        ))
+    return result
+
 
 async def _collect_reply_webhook_urls(
     db: AsyncSession,
@@ -151,8 +175,13 @@ async def create_memo(
                 assigned_by=body.created_by,
             ))
         await session.flush()
-    if body.embeds:
-        await repo.create_entity_links(memo.id, body.embeds)
+    parsed_embeds = _parse_entity_embeds(body.content or "")
+    all_embeds = list(body.embeds or []) + [
+        e for e in parsed_embeds
+        if not any(x.entity_type == e.entity_type and x.entity_id == e.entity_id for x in (body.embeds or []))
+    ]
+    if all_embeds:
+        await repo.create_entity_links(memo.id, all_embeds)
     publish_event(str(body.org_id), "memo_created", {"id": str(memo.id)})
     if body.project_id:
         from app.services.workflow_pipeline import process_event
@@ -191,7 +220,7 @@ async def create_memo(
         except Exception:
             pass
     memo_dict = {k: v for k, v in memo.__dict__.items() if not k.startswith("_")}
-    memo_dict["embed_count"] = len(body.embeds)
+    memo_dict["embed_count"] = len(all_embeds)
     return MemoListResponse.model_validate(memo_dict)
 
 
