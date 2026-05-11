@@ -5,7 +5,9 @@ export class SupabaseMemoRepository implements IMemoRepository {
   constructor(private readonly accessToken: string = '') {}
 
   async create(input: CreateMemoInput): Promise<Memo> {
-    return fastapiCall<Memo>('POST', '/api/v2/memos', this.accessToken, { body: input, orgId: input.org_id });
+    const { metadata, ...rest } = input;
+    const body = { ...rest, memo_metadata: metadata ?? {} };
+    return fastapiCall<Memo>('POST', '/api/v2/memos', this.accessToken, { body, orgId: input.org_id });
   }
 
   async list(filters: MemoListFilters): Promise<Memo[]> {

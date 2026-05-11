@@ -31,6 +31,11 @@ class MemoRepository(BaseRepository[Memo]):
         if "q" in filters and filters["q"]:
             search = f"%{filters['q']}%"
             q = q.where(or_(Memo.title.ilike(search), Memo.content.ilike(search)))
+        if "trigger_type" in filters and filters["trigger_type"]:
+            from sqlalchemy import func
+            q = q.where(
+                func.jsonb_extract_path_text(Memo.memo_metadata, "trigger_type") == filters["trigger_type"]
+            )
         q = q.order_by(Memo.created_at.desc())
         result = await self.session.execute(q)
         return list(result.scalars().all())
