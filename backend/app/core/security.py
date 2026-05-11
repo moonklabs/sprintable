@@ -15,6 +15,7 @@ from app.core.config import settings
 __all__ = [
     "decode_jwt", "JWTError",
     "create_access_token", "create_refresh_token", "create_tokens",
+    "create_password_reset_token", "decode_password_reset_token",
     "hash_password", "verify_password",
     "generate_totp_secret", "verify_totp", "get_totp_provisioning_uri",
     "hash_token",
@@ -138,3 +139,31 @@ def verify_totp_with_timestep(secret: str, code: str) -> int | None:
 
 def get_totp_provisioning_uri(secret: str, email: str, issuer: str = "Sprintable") -> str:
     return pyotp.TOTP(secret).provisioning_uri(name=email, issuer_name=issuer)
+
+
+# ─── Password Reset Token ──────────────────────────────────────────────────────
+
+RESET_TOKEN_EXPIRE_MINUTES = 30
+
+
+def create_password_reset_token(user_id: str, hashed_password: str) -> str:
+    """30분 만료 reset token. pw_sig 포함으로 비밀번호 변경 후 자동 무효화."""
+    now = datetime.now(timezone.utc)
+    exp = now + timedelta(minutes=RESET_TOKEN_EXPIRE_MINUTES)
+    pw_sig = hashlib.sha256(hashed_password.encode()).hexdigest()[:16]
+    payload = {
+        "sub": user_id,
+        "type": "password_reset",
+        "pw_sig": pw_sig,
+        "iat": int(now.timestamp()),
+        "exp": int(exp.timestamp()),
+    }
+    return jwt.encode(payload, _get_secret(), algorithm="HS256")
+
+
+def decode_password_reset_token(token: str) -> dict:
+    """Reset token 검증. 만료/타입 불일치 시 JWTError."""
+    payload = decode_jwt(token)
+    if payload.get("type") != "password_reset":
+        raise JWTError("Invalid token type")
+    return payload

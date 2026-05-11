@@ -1,8 +1,9 @@
 from __future__ import annotations
 
+import os
 import secrets
 import uuid
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from urllib.parse import urlencode
 
 import httpx
@@ -28,7 +29,9 @@ from app.core.config import settings
 
 from app.core.security import (
     create_tokens,
+    create_password_reset_token,
     decode_jwt,
+    decode_password_reset_token,
     generate_totp_secret,
     get_totp_provisioning_uri,
     hash_password,
@@ -47,8 +50,6 @@ from app.models.invitation import Invitation
 from app.models.project import OrgMember
 from app.models.team import TeamMember
 from app.models.user import RefreshToken, User
-
-from datetime import timedelta
 
 router = APIRouter(prefix="/api/v2/auth", tags=["auth"])
 
@@ -114,6 +115,59 @@ class LogoutRequest(BaseModel):
 
 class TotpVerifyRequest(BaseModel):
     code: str
+
+
+class ForgotPasswordRequest(BaseModel):
+    email: str
+
+    @field_validator("email")
+    @classmethod
+    def normalize_email(cls, v: str) -> str:
+        return _normalize_email(v)
+
+
+class ResetPasswordRequest(BaseModel):
+    token: str
+    new_password: str
+
+    @field_validator("new_password")
+    @classmethod
+    def validate_password(cls, v: str) -> str:
+        if len(v) < 8:
+            raise ValueError("Password must be at least 8 characters long")
+        categories = [
+            bool(re.search(r"[A-Z]", v)),
+            bool(re.search(r"[a-z]", v)),
+            bool(re.search(r"\d", v)),
+            bool(re.search(r"[^A-Za-z0-9]", v)),
+        ]
+        if sum(categories) < 3:
+            raise ValueError(
+                "Password must include at least 3 of: uppercase letters, lowercase letters, digits, special characters"
+            )
+        return v
+
+
+class ChangePasswordRequest(BaseModel):
+    current_password: str
+    new_password: str
+
+    @field_validator("new_password")
+    @classmethod
+    def validate_password(cls, v: str) -> str:
+        if len(v) < 8:
+            raise ValueError("Password must be at least 8 characters long")
+        categories = [
+            bool(re.search(r"[A-Z]", v)),
+            bool(re.search(r"[a-z]", v)),
+            bool(re.search(r"\d", v)),
+            bool(re.search(r"[^A-Za-z0-9]", v)),
+        ]
+        if sum(categories) < 3:
+            raise ValueError(
+                "Password must include at least 3 of: uppercase letters, lowercase letters, digits, special characters"
+            )
+        return v
 
 
 # ─── Helpers ──────────────────────────────────────────────────────────────────
@@ -581,3 +635,76 @@ async def oauth_callback(
         "token_type": "bearer",
         "expires_in": ACCESS_TOKEN_EXPIRE_MINUTES * 60,
     })
+
+
+# ─── Password Reset ───────────────────────────────────────────────────────────
+
+@router.post("/forgot-password")
+async def forgot_password(
+    body: ForgotPasswordRequest,
+    session: AsyncSession = Depends(get_db),
+) -> JSONResponse:
+    user = await _get_user_by_email(session, body.email)
+    # 이메일 존재 여부와 무관하게 동일 응답 (사용자 열거 방지)
+    if user is not None:
+        token = create_password_reset_token(str(user.id), user.hashed_password)
+        app_url = os.getenv("NEXT_PUBLIC_APP_URL", "https://app.sprintable.ai")
+        reset_link = f"{app_url}/reset-password?token={token}"
+        from app.services.email import send_email
+        send_email(
+            to=user.email,
+            subject="Sprintable 비밀번호 재설정",
+            html_body=(
+                f"<p>비밀번호 재설정 링크입니다. 30분 내에 사용 바랍니다.</p>"
+                f"<p><a href='{reset_link}'>비밀번호 재설정</a></p>"
+                f"<p>요청하지 않으셨다면 이 메일을 무시하세요.</p>"
+            ),
+        )
+    return _ok({"message": "If the email exists, a reset link has been sent"})
+
+
+@router.post("/reset-password")
+async def reset_password(
+    body: ResetPasswordRequest,
+    session: AsyncSession = Depends(get_db),
+) -> JSONResponse:
+    try:
+        payload = decode_password_reset_token(body.token)
+    except JWTError:
+        return _err("INVALID_TOKEN", "Reset token is invalid or expired", 400)
+
+    user_id = payload.get("sub")
+    pw_sig = payload.get("pw_sig", "")
+
+    user = await _get_user_by_id(session, uuid.UUID(user_id))
+    if user is None:
+        return _err("USER_NOT_FOUND", "User not found", 404)
+
+    # pw_sig 불일치 시 이미 비밀번호 변경됨 → 토큰 무효
+    import hashlib as _hashlib
+    if _hashlib.sha256(user.hashed_password.encode()).hexdigest()[:16] != pw_sig:
+        return _err("INVALID_TOKEN", "Reset token has already been used", 400)
+
+    await session.execute(
+        update(User).where(User.id == user.id).values(hashed_password=hash_password(body.new_password))
+    )
+    return _ok({"message": "Password reset successfully"})
+
+
+@router.patch("/change-password")
+async def change_password(
+    body: ChangePasswordRequest,
+    session: AsyncSession = Depends(get_db),
+    auth: AuthContext = Depends(get_current_user),
+) -> JSONResponse:
+    user = await _get_user_by_id(session, uuid.UUID(auth.user_id))
+    if user is None:
+        return _err("USER_NOT_FOUND", "User not found", 404)
+
+    if not verify_password(body.current_password, user.hashed_password):
+        return _err("WRONG_PASSWORD", "Current password is incorrect", 400)
+
+    await session.execute(
+        update(User).where(User.id == user.id).values(hashed_password=hash_password(body.new_password))
+    )
+    return _ok({"message": "Password changed successfully"})
