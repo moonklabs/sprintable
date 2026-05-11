@@ -223,7 +223,11 @@ async def test_soft_delete_200():
             nonlocal call_count
             call_count += 1
             result = MagicMock()
-            result.scalar_one_or_none.return_value = _mock_member() if call_count == 1 else None
+            # call 1: router get(id) for existing check
+            # call 2: revoke refresh tokens (UPDATE)
+            # call 3: soft_delete internal get(id)
+            # call 4: soft_delete UPDATE deleted_at
+            result.scalar_one_or_none.return_value = _mock_member() if call_count in (1, 3) else None
             result.scalars.return_value.all.return_value = []
             return result
 
