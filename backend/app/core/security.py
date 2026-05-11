@@ -194,3 +194,30 @@ def decode_email_verification_token(token: str) -> dict:
     if payload.get("type") != "email_verification":
         raise JWTError("Invalid token type")
     return payload
+
+
+# ─── OAuth State Token ────────────────────────────────────────────────────────
+
+OAUTH_STATE_EXPIRE_MINUTES = 10
+
+
+def create_oauth_state_token(provider: str) -> str:
+    """10분 만료 OAuth state JWT. CSRF 방지용."""
+    now = datetime.now(timezone.utc)
+    exp = now + timedelta(minutes=OAUTH_STATE_EXPIRE_MINUTES)
+    payload = {
+        "type": "oauth_state",
+        "provider": provider,
+        "iat": int(now.timestamp()),
+        "exp": int(exp.timestamp()),
+    }
+    return jwt.encode(payload, _get_secret(), algorithm="HS256")
+
+
+def decode_oauth_state_token(token: str, expected_provider: str) -> None:
+    """OAuth state token 검증. 만료/타입/provider 불일치 시 JWTError."""
+    payload = decode_jwt(token)
+    if payload.get("type") != "oauth_state":
+        raise JWTError("Invalid state token type")
+    if payload.get("provider") != expected_provider:
+        raise JWTError("Provider mismatch in state token")

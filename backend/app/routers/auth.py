@@ -31,9 +31,11 @@ from app.core.security import (
     create_tokens,
     create_password_reset_token,
     create_email_verification_token,
+    create_oauth_state_token,
     decode_jwt,
     decode_password_reset_token,
     decode_email_verification_token,
+    decode_oauth_state_token,
     generate_totp_secret,
     get_totp_provisioning_uri,
     hash_password,
@@ -332,7 +334,30 @@ async def login(
     session: AsyncSession = Depends(get_db),
 ) -> JSONResponse:
     user = await _get_user_by_email(session, body.email)
+
+    # brute force lockout 체크
+    if user and user.login_locked_until:
+        if user.login_locked_until > datetime.now(timezone.utc):
+            remaining = int((user.login_locked_until - datetime.now(timezone.utc)).total_seconds())
+            return _err("ACCOUNT_LOCKED", f"Account locked. Try again in {remaining} seconds", 429)
+        # 잠금 해제 시간 경과 — 카운터 초기화
+        await session.execute(
+            update(User).where(User.id == user.id).values(login_fail_count=0, login_locked_until=None)
+        )
+
     if not user or not verify_password(body.password, user.hashed_password):
+        # 실패 카운터 증가
+        if user:
+            new_count = (user.login_fail_count or 0) + 1
+            locked_until = (
+                datetime.now(timezone.utc) + timedelta(minutes=5) if new_count >= 5 else None
+            )
+            await session.execute(
+                update(User).where(User.id == user.id).values(
+                    login_fail_count=new_count,
+                    login_locked_until=locked_until,
+                )
+            )
         return _err("INVALID_CREDENTIALS", "Invalid email or password", 401)
 
     if user.totp_enabled:
@@ -371,6 +396,12 @@ async def login(
                 totp_fail_count=0,
                 totp_locked_until=None,
             )
+        )
+
+    # 로그인 성공 — 실패 카운터 리셋
+    if user.login_fail_count or user.login_locked_until:
+        await session.execute(
+            update(User).where(User.id == user.id).values(login_fail_count=0, login_locked_until=None)
         )
 
     tokens = create_tokens(str(user.id), email=user.email, app_metadata=await _build_app_metadata(user, session))
@@ -537,7 +568,7 @@ async def oauth_authorize(provider: str) -> JSONResponse:
     if provider not in _OAUTH_CONFIGS:
         return _err("INVALID_PROVIDER", f"Unsupported provider: {provider}", 400)
     cfg = _OAUTH_CONFIGS[provider]
-    state = secrets.token_urlsafe(32)
+    state = create_oauth_state_token(provider)
     params = {
         "client_id": _client_id(provider),
         "redirect_uri": _redirect_uri(provider),
@@ -561,6 +592,12 @@ async def oauth_callback(
     if provider not in _OAUTH_CONFIGS:
         return _err("INVALID_PROVIDER", f"Unsupported provider: {provider}", 400)
     cfg = _OAUTH_CONFIGS[provider]
+
+    # state JWT 검증 (CSRF 방지)
+    try:
+        decode_oauth_state_token(body.state, provider)
+    except JWTError:
+        return _err("INVALID_STATE", "OAuth state is invalid or expired", 400)
 
     async with httpx.AsyncClient(timeout=15) as client:
         # 1. code → access_token 교환
