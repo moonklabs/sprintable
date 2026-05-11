@@ -102,6 +102,29 @@ async def _execute_side_effects(
                             .where(Story.id == uuid.UUID(str(story_id_str)), Story.org_id == org_id)
                             .values(assignee_id=member_id)
                         )
+            elif effect_type == "resolve_memos" and story_id_str:
+                from app.models.memo import Memo, MemoEntityLink
+                link_result = await session.execute(
+                    select(MemoEntityLink.memo_id)
+                    .where(
+                        MemoEntityLink.entity_type == "story",
+                        MemoEntityLink.entity_id == uuid.UUID(str(story_id_str)),
+                    )
+                )
+                memo_ids = [row.memo_id for row in link_result]
+                if memo_ids:
+                    await session.execute(
+                        update(Memo)
+                        .where(
+                            Memo.id.in_(memo_ids),
+                            Memo.status == "open",
+                            Memo.deleted_at.is_(None),
+                        )
+                        .values(
+                            status="resolved",
+                            resolved_at=datetime.now(timezone.utc),
+                        )
+                    )
         except Exception:
             pass
 
