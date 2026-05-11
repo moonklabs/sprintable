@@ -85,6 +85,7 @@ class LoginRequest(BaseModel):
 class RegisterRequest(BaseModel):
     email: str
     password: str
+    tos_accepted: bool = False
 
     @field_validator("email")
     @classmethod
@@ -304,6 +305,9 @@ async def register(
     body: RegisterRequest,
     session: AsyncSession = Depends(get_db),
 ) -> JSONResponse:
+    if not body.tos_accepted:
+        return _err("TOS_NOT_ACCEPTED", "You must accept the Terms of Service to register", 400)
+
     existing = await _get_user_by_email(session, body.email)
     if existing:
         return _err("EMAIL_TAKEN", "Email already registered", 409)
@@ -313,6 +317,7 @@ async def register(
         hashed_password=hash_password(body.password),
         is_active=True,
         email_verified=False,
+        tos_accepted_at=datetime.now(timezone.utc),
     )
     session.add(user)
     try:
@@ -582,6 +587,7 @@ class OAuthCallbackRequest(BaseModel):
     provider: str
     code: str
     state: str
+    tos_accepted: bool = False
 
 
 @router.get("/oauth/{provider}/authorize")
@@ -684,11 +690,14 @@ async def oauth_callback(
             await session.refresh(user)
         else:
             # 신규 유저 생성 (비밀번호 없음 — OAuth 전용, 이메일 인증 완료)
+            if not body.tos_accepted:
+                return _err("TOS_NOT_ACCEPTED", "You must accept the Terms of Service to register", 400)
             user = User(
                 email=email,
                 hashed_password="",
                 is_active=True,
                 email_verified=True,
+                tos_accepted_at=datetime.now(timezone.utc),
                 **{f"{provider}_id": oauth_id},
             )
             session.add(user)
