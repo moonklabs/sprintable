@@ -7,6 +7,7 @@ const FASTAPI_BASE = process.env['NEXT_PUBLIC_FASTAPI_URL'] ?? 'http://localhost
 export async function GET(request: Request) {
   const { searchParams } = new URL(request.url);
   const provider = searchParams.get('provider');
+  const tosAccepted = searchParams.get('tos_accepted') === 'true';
   const origin = resolveAppUrl(null);
 
   if (!provider || !['google', 'github'].includes(provider)) {
@@ -34,6 +35,15 @@ export async function GET(request: Request) {
     maxAge: 300,
     path: '/',
   });
+  if (tosAccepted) {
+    cookieStore.set(`oauth_tos_${provider}`, 'true', {
+      httpOnly: true,
+      secure: process.env.NODE_ENV === 'production',
+      sameSite: 'lax',
+      maxAge: 300,
+      path: '/',
+    });
+  }
 
   return NextResponse.redirect(url);
 }

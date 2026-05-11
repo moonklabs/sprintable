@@ -30,7 +30,9 @@ export async function GET(request: Request, { params }: RouteParams) {
   // CSRF state 검증
   const cookieStore = await cookies();
   const storedState = cookieStore.get(`oauth_state_${provider}`)?.value;
+  const tosAccepted = cookieStore.get(`oauth_tos_${provider}`)?.value === 'true';
   cookieStore.delete(`oauth_state_${provider}`);
+  cookieStore.delete(`oauth_tos_${provider}`);
 
   if (!storedState || storedState !== state) {
     return NextResponse.redirect(`${origin}/login?error=csrf_mismatch`);
@@ -40,7 +42,7 @@ export async function GET(request: Request, { params }: RouteParams) {
   const fastapiRes = await fetch(`${FASTAPI_URL()}/api/v2/auth/oauth/callback`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ provider, code, state }),
+    body: JSON.stringify({ provider, code, state, tos_accepted: tosAccepted }),
   }).catch(() => null);
 
   if (!fastapiRes?.ok) {
