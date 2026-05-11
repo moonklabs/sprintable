@@ -13,7 +13,7 @@ _RAW = "t" * 64  # dummy hex-like string for testing
 _PREFIX_MARKER = "sk" + "_" + "live" + "_"  # split to avoid secret scanner
 PLAINTEXT = _PREFIX_MARKER + _RAW
 KEY_PREFIX = _PREFIX_MARKER + _RAW[:8]
-KEY_HASH = hashlib.sha256(_RAW.encode()).hexdigest()
+KEY_HASH = hashlib.sha256(PLAINTEXT.encode()).hexdigest()
 
 
 def _mock_key(revoked: bool = False) -> MagicMock:
@@ -184,8 +184,7 @@ async def test_key_hash_is_sha256():
     assert plaintext.startswith(_marker)
     assert prefix.startswith(_marker)
     assert len(key_hash) == 64
-    raw = plaintext[len(_marker):]
-    assert hashlib.sha256(raw.encode()).hexdigest() == key_hash
+    assert hashlib.sha256(plaintext.encode()).hexdigest() == key_hash
     assert key_hash != plaintext
 
 
