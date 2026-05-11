@@ -66,6 +66,8 @@ class MemoListResponse(BaseModel):
     created_at: datetime
     updated_at: datetime
     embed_count: int = 0
+    reply_count: int = 0
+    latest_reply_at: datetime | None = None
 
 
 class CreateReply(BaseModel):

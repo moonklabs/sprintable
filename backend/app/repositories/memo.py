@@ -158,6 +158,24 @@ class MemoRepository(BaseRepository[Memo]):
         )
         return {row.memo_id: row.cnt for row in result}
 
+    async def get_reply_counts_batch(
+        self, memo_ids: list[uuid.UUID]
+    ) -> dict[uuid.UUID, tuple[int, datetime | None]]:
+        """memo_id별 (reply_count, latest_reply_at) 배치 집계 — N+1 방지."""
+        from sqlalchemy import func
+        if not memo_ids:
+            return {}
+        result = await self.session.execute(
+            select(
+                MemoReply.memo_id,
+                func.count(MemoReply.id).label("cnt"),
+                func.max(MemoReply.created_at).label("latest"),
+            )
+            .where(MemoReply.memo_id.in_(memo_ids))
+            .group_by(MemoReply.memo_id)
+        )
+        return {row.memo_id: (row.cnt, row.latest) for row in result}
+
 
 class MemoReplyRepository:
     def __init__(self, session: AsyncSession) -> None:

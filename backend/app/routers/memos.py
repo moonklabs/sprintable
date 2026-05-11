@@ -112,11 +112,16 @@ async def list_memos(
     if q:
         filters["q"] = q
     memos = await repo.list(**filters)
-    counts = await repo.get_entity_link_counts_batch([m.id for m in memos])
+    memo_ids = [m.id for m in memos]
+    counts = await repo.get_entity_link_counts_batch(memo_ids)
+    reply_counts = await repo.get_reply_counts_batch(memo_ids)
     results = []
     for m in memos:
         memo_dict = {k: v for k, v in m.__dict__.items() if not k.startswith("_")}
         memo_dict["embed_count"] = counts.get(m.id, 0)
+        rc, latest = reply_counts.get(m.id, (0, None))
+        memo_dict["reply_count"] = rc
+        memo_dict["latest_reply_at"] = latest
         results.append(MemoListResponse.model_validate(memo_dict))
     return results
 
