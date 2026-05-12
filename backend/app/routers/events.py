@@ -2,6 +2,7 @@
 
 C-S6: SSE 스트림 (메모 변경 이벤트 실시간 푸시)
 E-EVENTBUS S1: events 테이블 CRUD (이벤트버스 기반)
+E-EVENTBUS S2: MCP Streamable HTTP SSE 푸시 (에이전트 전용)
 """
 from __future__ import annotations
 
@@ -24,7 +25,7 @@ from app.models.event import Event
 
 router = APIRouter(prefix="/api/v2/events", tags=["events"])
 
-# ─── In-process event bus ─────────────────────────────────────────────────────
+# ─── In-process event bus (C-S6: memo SSE) ────────────────────────────────────
 # org_id → set of queues (one per connected SSE client)
 _subscribers: dict[str, set[asyncio.Queue[dict]]] = defaultdict(set)
 
@@ -40,6 +41,34 @@ def publish_event(org_id: str, event_type: str, data: dict) -> None:
             dead.append(q)
     for q in dead:
         _subscribers[org_id].discard(q)
+
+
+# ─── Agent connection registry (S2: 에이전트별 SSE) ──────────────────────────
+# member_id (str) → Queue — 연결된 에이전트만 등록, 해제 시 삭제
+_agent_connections: dict[str, asyncio.Queue[dict]] = {}
+
+
+def _push_to_agent(member_id: str, payload: dict) -> bool:
+    """연결 중인 에이전트에게 SSE 페이로드 전송. True=전달, False=미연결."""
+    queue = _agent_connections.get(member_id)
+    if queue is None:
+        return False
+    try:
+        queue.put_nowait(payload)
+        return True
+    except asyncio.QueueFull:
+        return False
+
+
+def _event_to_payload(event: "Event") -> dict:
+    return {
+        "event_id": str(event.id),
+        "event_type": event.event_type,
+        "source": {"type": event.source_entity_type, "id": str(event.source_entity_id) if event.source_entity_id else None},
+        "sender_id": str(event.sender_id) if event.sender_id else None,
+        "payload": event.payload,
+        "created_at": event.created_at.isoformat(),
+    }
 
 
 # ─── SSE endpoint ─────────────────────────────────────────────────────────────
@@ -119,6 +148,82 @@ class EventResponse(BaseModel):
     model_config = ConfigDict(from_attributes=True)
 
 
+# ─── Agent SSE stream (S2) ────────────────────────────────────────────────────
+
+@router.get("/stream")
+async def agent_event_stream(
+    request: Request,
+    member_id: uuid.UUID = Query(...),
+    db: AsyncSession = Depends(get_db),
+    org_id: uuid.UUID = Depends(get_verified_org_id),
+):
+    """GET /api/v2/events/stream?member_id={id} — 에이전트 전용 SSE 스트림.
+
+    이벤트:
+    - heartbeat: 30초마다 연결 유지
+    - <event_type>: 이벤트버스 이벤트 실시간 수신
+    """
+    from app.models.team import TeamMember
+
+    # member_id가 요청자 org 소속인지 검증
+    result = await db.execute(
+        select(TeamMember.id).where(
+            TeamMember.id == member_id,
+            TeamMember.org_id == org_id,
+        )
+    )
+    if result.scalar_one_or_none() is None:
+        raise HTTPException(status_code=404, detail="Member not found")
+
+    member_id_str = str(member_id)
+    queue: asyncio.Queue[dict] = asyncio.Queue(maxsize=200)
+    _agent_connections[member_id_str] = queue
+
+    async def generate():
+        try:
+            # 연결 즉시 pending 이벤트 백필 전달
+            result = await db.execute(
+                select(Event)
+                .where(
+                    Event.org_id == org_id,
+                    Event.recipient_id == member_id,
+                    Event.status == "pending",
+                )
+                .order_by(Event.created_at.asc())
+            )
+            pending_events = result.scalars().all()
+            for evt in pending_events:
+                data = _event_to_payload(evt)
+                yield f"event: {evt.event_type}\ndata: {json.dumps(data)}\n\n"
+                evt.status = "delivered"
+                evt.delivered_at = datetime.now(timezone.utc)
+            if pending_events:
+                await db.commit()
+
+            # 신규 이벤트 리슨
+            while not await request.is_disconnected():
+                try:
+                    event_data = await asyncio.wait_for(queue.get(), timeout=30.0)
+                    event_type = event_data.get("event_type", "message")
+                    yield f"event: {event_type}\ndata: {json.dumps(event_data)}\n\n"
+                except asyncio.TimeoutError:
+                    yield "event: heartbeat\ndata: {}\n\n"
+        except (asyncio.CancelledError, GeneratorExit):
+            pass
+        finally:
+            _agent_connections.pop(member_id_str, None)
+
+    return StreamingResponse(
+        generate(),
+        media_type="text/event-stream",
+        headers={
+            "Cache-Control": "no-cache",
+            "X-Accel-Buffering": "no",
+            "Connection": "keep-alive",
+        },
+    )
+
+
 # ─── CRUD endpoints ───────────────────────────────────────────────────────────
 
 @router.post("", response_model=EventResponse, status_code=201)
@@ -127,7 +232,11 @@ async def create_event(
     db: AsyncSession = Depends(get_db),
     org_id: uuid.UUID = Depends(get_verified_org_id),
 ) -> EventResponse:
-    """POST /api/v2/events — 이벤트 생성 (내부용)."""
+    """POST /api/v2/events — 이벤트 생성 (내부용).
+
+    recipient가 SSE 연결 중이면 즉시 전달 + status=delivered.
+    미연결이면 status=pending 유지.
+    """
     from app.models.team import TeamMember
 
     # recipient가 동일 org 소속인지 + type 확정
@@ -156,6 +265,16 @@ async def create_event(
     db.add(event)
     await db.commit()
     await db.refresh(event)
+
+    # SSE 라우팅: 연결 중인 에이전트에게 즉시 전달
+    if member_type == "agent":
+        pushed = _push_to_agent(str(body.recipient_id), _event_to_payload(event))
+        if pushed:
+            event.status = "delivered"
+            event.delivered_at = datetime.now(timezone.utc)
+            await db.commit()
+            await db.refresh(event)
+
     return EventResponse.model_validate(event)
 
 
