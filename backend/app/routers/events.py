@@ -3,6 +3,7 @@
 C-S6: SSE 스트림 (메모 변경 이벤트 실시간 푸시)
 E-EVENTBUS S1: events 테이블 CRUD (이벤트버스 기반)
 E-EVENTBUS S2: MCP Streamable HTTP SSE 푸시 (에이전트 전용)
+E-EVENTBUS S3: 이벤트 큐 + 오프라인 재전달 (at-least-once + 배치 + expired)
 """
 from __future__ import annotations
 
@@ -10,13 +11,13 @@ import asyncio
 import json
 import uuid
 from collections import defaultdict
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from typing import Any
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Request
 from fastapi.responses import StreamingResponse
 from pydantic import BaseModel, ConfigDict
-from sqlalchemy import select, update
+from sqlalchemy import delete, select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.dependencies.auth import AuthContext, get_current_user, get_verified_org_id
@@ -43,21 +44,29 @@ def publish_event(org_id: str, event_type: str, data: dict) -> None:
         _subscribers[org_id].discard(q)
 
 
-# ─── Agent connection registry (S2: 에이전트별 SSE) ──────────────────────────
-# member_id (str) → Queue — 연결된 에이전트만 등록, 해제 시 삭제
-_agent_connections: dict[str, asyncio.Queue[dict]] = {}
+# ─── Agent connection registry (S2/S3: 에이전트별 SSE) ───────────────────────
+# member_id (str) → set[Queue] — 다중 연결 지원, 해제 시 해당 queue만 제거
+_agent_connections: dict[str, set[asyncio.Queue[dict]]] = defaultdict(set)
+
+_SSE_BATCH_SIZE = 10  # 배치 전달 청크 크기
 
 
 def _push_to_agent(member_id: str, payload: dict) -> bool:
-    """연결 중인 에이전트에게 SSE 페이로드 전송. True=전달, False=미연결."""
-    queue = _agent_connections.get(member_id)
-    if queue is None:
+    """연결 중인 에이전트 모든 큐에 SSE 페이로드 전송. True=1개 이상 전달, False=미연결."""
+    queues = _agent_connections.get(member_id)
+    if not queues:
         return False
-    try:
-        queue.put_nowait(payload)
-        return True
-    except asyncio.QueueFull:
-        return False
+    pushed = False
+    dead: list[asyncio.Queue] = []
+    for q in list(queues):
+        try:
+            q.put_nowait(payload)
+            pushed = True
+        except asyncio.QueueFull:
+            dead.append(q)
+    for q in dead:
+        queues.discard(q)
+    return pushed
 
 
 def _event_to_payload(event: "Event") -> dict:
@@ -177,11 +186,11 @@ async def agent_event_stream(
 
     member_id_str = str(member_id)
     queue: asyncio.Queue[dict] = asyncio.Queue(maxsize=200)
-    _agent_connections[member_id_str] = queue
+    _agent_connections[member_id_str].add(queue)
 
     async def generate():
         try:
-            # 연결 즉시 pending 이벤트 백필 전달
+            # 연결 즉시 pending 이벤트 백필 전달 (배치: 10건 청크)
             result = await db.execute(
                 select(Event)
                 .where(
@@ -192,26 +201,47 @@ async def agent_event_stream(
                 .order_by(Event.created_at.asc())
             )
             pending_events = result.scalars().all()
-            for evt in pending_events:
-                data = _event_to_payload(evt)
-                yield f"event: {evt.event_type}\ndata: {json.dumps(data)}\n\n"
-                evt.status = "delivered"
-                evt.delivered_at = datetime.now(timezone.utc)
-            if pending_events:
-                await db.commit()
+            for i in range(0, len(pending_events), _SSE_BATCH_SIZE):
+                batch = pending_events[i : i + _SSE_BATCH_SIZE]
+                for evt in batch:
+                    data = _event_to_payload(evt)
+                    yield f"event: {evt.event_type}\ndata: {json.dumps(data)}\n\n"
+                    evt.status = "delivered"
+                    evt.delivered_at = datetime.now(timezone.utc)
+                if batch:
+                    await db.commit()
 
-            # 신규 이벤트 리슨
+            # 신규 이벤트 리슨 — yield 후 delivered 마킹 (at-least-once)
             while not await request.is_disconnected():
                 try:
                     event_data = await asyncio.wait_for(queue.get(), timeout=30.0)
                     event_type = event_data.get("event_type", "message")
                     yield f"event: {event_type}\ndata: {json.dumps(event_data)}\n\n"
+                    # yield 후 DB delivered 마킹 — 실제 전송 시도 후 처리
+                    if eid := event_data.get("event_id"):
+                        try:
+                            r = await db.execute(
+                                select(Event).where(
+                                    Event.id == uuid.UUID(eid),
+                                    Event.status == "pending",
+                                    Event.org_id == org_id,
+                                )
+                            )
+                            live_evt = r.scalar_one_or_none()
+                            if live_evt:
+                                live_evt.status = "delivered"
+                                live_evt.delivered_at = datetime.now(timezone.utc)
+                                await db.commit()
+                        except Exception:
+                            pass
                 except asyncio.TimeoutError:
                     yield "event: heartbeat\ndata: {}\n\n"
         except (asyncio.CancelledError, GeneratorExit):
             pass
         finally:
-            _agent_connections.pop(member_id_str, None)
+            _agent_connections[member_id_str].discard(queue)
+            if not _agent_connections[member_id_str]:
+                _agent_connections.pop(member_id_str, None)
 
     return StreamingResponse(
         generate(),
@@ -266,14 +296,9 @@ async def create_event(
     await db.commit()
     await db.refresh(event)
 
-    # SSE 라우팅: 연결 중인 에이전트에게 즉시 전달
+    # SSE 라우팅: 연결 중인 에이전트에게 즉시 전달 (delivered 마킹은 SSE yield 후 처리)
     if member_type == "agent":
-        pushed = _push_to_agent(str(body.recipient_id), _event_to_payload(event))
-        if pushed:
-            event.status = "delivered"
-            event.delivered_at = datetime.now(timezone.utc)
-            await db.commit()
-            await db.refresh(event)
+        _push_to_agent(str(body.recipient_id), _event_to_payload(event))
 
     return EventResponse.model_validate(event)
 
@@ -317,3 +342,44 @@ async def mark_delivered(
     await db.commit()
     await db.refresh(event)
     return EventResponse.model_validate(event)
+
+
+# ─── S3: 큐 관리 (expired + cleanup) ─────────────────────────────────────────
+
+_EXPIRE_DAYS = 30
+_CLEANUP_DAYS = 7
+
+
+@router.post("/expire-stale", status_code=200)
+async def expire_stale_events(
+    db: AsyncSession = Depends(get_db),
+    org_id: uuid.UUID = Depends(get_verified_org_id),
+) -> dict:
+    """POST /api/v2/events/expire-stale — 30일 초과 pending → expired, 7일 초과 delivered 삭제."""
+    now = datetime.now(timezone.utc)
+    cutoff_expire = now - timedelta(days=_EXPIRE_DAYS)
+    cutoff_cleanup = now - timedelta(days=_CLEANUP_DAYS)
+
+    expired = await db.execute(
+        update(Event)
+        .where(
+            Event.org_id == org_id,
+            Event.status == "pending",
+            Event.created_at < cutoff_expire,
+        )
+        .values(status="expired")
+    )
+
+    cleaned = await db.execute(
+        delete(Event).where(
+            Event.org_id == org_id,
+            Event.status == "delivered",
+            Event.delivered_at < cutoff_cleanup,
+        )
+    )
+
+    await db.commit()
+    return {
+        "expired": expired.rowcount,
+        "cleaned": cleaned.rowcount,
+    }
