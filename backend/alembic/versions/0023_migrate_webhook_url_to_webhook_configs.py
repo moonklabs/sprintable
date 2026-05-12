@@ -31,7 +31,8 @@ def upgrade() -> None:
             FROM team_members tm
             WHERE tm.webhook_url IS NOT NULL
               AND NOT EXISTS (
-                  SELECT 1 FROM webhook_configs wc WHERE wc.member_id = tm.id
+                  SELECT 1 FROM webhook_configs wc
+                  WHERE wc.member_id = tm.id AND wc.project_id IS NULL
               )
         """)
     )
