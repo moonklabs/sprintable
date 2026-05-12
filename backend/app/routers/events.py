@@ -18,7 +18,7 @@ from pydantic import BaseModel, ConfigDict
 from sqlalchemy import select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.dependencies.auth import AuthContext, get_current_user
+from app.dependencies.auth import AuthContext, get_current_user, get_verified_org_id
 from app.dependencies.database import get_db
 from app.models.event import Event
 
@@ -92,7 +92,6 @@ async def memo_event_stream(
 
 class CreateEventRequest(BaseModel):
     project_id: uuid.UUID
-    org_id: uuid.UUID
     event_type: str
     source_entity_type: str | None = None
     source_entity_id: uuid.UUID | None = None
@@ -126,14 +125,17 @@ class EventResponse(BaseModel):
 async def create_event(
     body: CreateEventRequest,
     db: AsyncSession = Depends(get_db),
-    _auth: AuthContext = Depends(get_current_user),
+    org_id: uuid.UUID = Depends(get_verified_org_id),
 ) -> EventResponse:
     """POST /api/v2/events — 이벤트 생성 (내부용)."""
     from app.models.team import TeamMember
 
-    # recipient_type을 team_members.type 기준으로 확정
+    # recipient가 동일 org 소속인지 + type 확정
     result = await db.execute(
-        select(TeamMember.type).where(TeamMember.id == body.recipient_id)
+        select(TeamMember.type).where(
+            TeamMember.id == body.recipient_id,
+            TeamMember.org_id == org_id,
+        )
     )
     member_type = result.scalar_one_or_none()
     if member_type is None:
@@ -141,7 +143,7 @@ async def create_event(
 
     event = Event(
         project_id=body.project_id,
-        org_id=body.org_id,
+        org_id=org_id,
         event_type=body.event_type,
         source_entity_type=body.source_entity_type,
         source_entity_id=body.source_entity_id,
@@ -161,12 +163,16 @@ async def create_event(
 async def get_pending_events(
     recipient_id: uuid.UUID = Query(...),
     db: AsyncSession = Depends(get_db),
-    _auth: AuthContext = Depends(get_current_user),
+    org_id: uuid.UUID = Depends(get_verified_org_id),
 ) -> list[EventResponse]:
     """GET /api/v2/events/pending?recipient_id={id} — 수신자별 pending 이벤트 목록."""
     result = await db.execute(
         select(Event)
-        .where(Event.recipient_id == recipient_id, Event.status == "pending")
+        .where(
+            Event.org_id == org_id,
+            Event.recipient_id == recipient_id,
+            Event.status == "pending",
+        )
         .order_by(Event.created_at.asc())
     )
     events = result.scalars().all()
@@ -177,10 +183,12 @@ async def get_pending_events(
 async def mark_delivered(
     event_id: uuid.UUID,
     db: AsyncSession = Depends(get_db),
-    _auth: AuthContext = Depends(get_current_user),
+    org_id: uuid.UUID = Depends(get_verified_org_id),
 ) -> EventResponse:
     """PATCH /api/v2/events/{id}/delivered — 전달 완료 마킹."""
-    result = await db.execute(select(Event).where(Event.id == event_id))
+    result = await db.execute(
+        select(Event).where(Event.id == event_id, Event.org_id == org_id)
+    )
     event = result.scalar_one_or_none()
     if event is None:
         raise HTTPException(status_code=404, detail="Event not found")

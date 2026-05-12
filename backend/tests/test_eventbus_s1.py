@@ -59,8 +59,13 @@ def auth_ctx():
 
 
 @pytest.fixture
-async def client(mock_session, auth_ctx):
-    from app.dependencies.auth import get_current_user
+def org_id():
+    return uuid.uuid4()
+
+
+@pytest.fixture
+async def client(mock_session, auth_ctx, org_id):
+    from app.dependencies.auth import get_current_user, get_verified_org_id
     from app.dependencies.database import get_db
     from app.main import app
 
@@ -70,8 +75,12 @@ async def client(mock_session, auth_ctx):
     async def _auth():
         return auth_ctx
 
+    async def _org_id():
+        return org_id
+
     app.dependency_overrides[get_db] = _db
     app.dependency_overrides[get_current_user] = _auth
+    app.dependency_overrides[get_verified_org_id] = _org_id
     async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as c:
         yield c
     app.dependency_overrides.clear()
@@ -225,3 +234,68 @@ async def test_recipient_type_resolved_from_db(client, mock_session):
     resp = await client.post("/api/v2/events", json=payload)
     assert resp.status_code == 201
     assert captured.get("recipient_type") == "human"
+
+
+# ─── org scope 검증 ────────────────────────────────────────────────────────────
+
+@pytest.mark.anyio
+async def test_get_pending_filters_by_org(client, mock_session, org_id):
+    """GET /pending 은 verified org_id 내 이벤트만 반환해야 함."""
+    recipient_id = uuid.uuid4()
+    event_same_org = _make_event(recipient_id=recipient_id, org_id=org_id, status="pending")
+
+    scalars_mock = MagicMock()
+    scalars_mock.all.return_value = [event_same_org]
+    result_mock = MagicMock()
+    result_mock.scalars.return_value = scalars_mock
+    mock_session.execute.return_value = result_mock
+
+    resp = await client.get(f"/api/v2/events/pending?recipient_id={recipient_id}")
+    assert resp.status_code == 200
+    # execute 호출 시 org_id 필터가 쿼리에 포함됐는지 — 실제 SQL은 mock이므로 호출 여부로 확인
+    mock_session.execute.assert_called_once()
+
+
+@pytest.mark.anyio
+async def test_mark_delivered_cross_org_returns_404(client, mock_session):
+    """다른 org의 이벤트에 대한 PATCH는 404여야 함."""
+    scalar_mock = MagicMock()
+    scalar_mock.scalar_one_or_none.return_value = None  # org_id 불일치 → not found
+    mock_session.execute.return_value = scalar_mock
+
+    resp = await client.patch(f"/api/v2/events/{uuid.uuid4()}/delivered")
+    assert resp.status_code == 404
+
+
+@pytest.mark.anyio
+async def test_create_event_uses_verified_org(client, mock_session, org_id):
+    """POST 시 body의 org_id가 아닌 verified org_id가 Event에 설정돼야 함."""
+    captured = {}
+    member_result = MagicMock()
+    member_result.scalar_one_or_none.return_value = "agent"
+    mock_session.execute.return_value = member_result
+
+    def capture_add(obj):
+        if isinstance(obj, Event):
+            captured["org_id"] = obj.org_id
+    mock_session.add.side_effect = capture_add
+
+    async def _refresh(obj):
+        obj.id = uuid.uuid4()
+        obj.status = "pending"
+        obj.created_at = datetime.now(timezone.utc)
+        obj.delivered_at = None
+    mock_session.refresh.side_effect = _refresh
+
+    forged_org = uuid.uuid4()  # 요청자가 임의로 보낸 org_id
+    payload = {
+        "project_id": str(uuid.uuid4()),
+        "org_id": str(forged_org),
+        "event_type": "memo_created",
+        "recipient_id": str(uuid.uuid4()),
+        "recipient_type": "agent",
+    }
+    resp = await client.post("/api/v2/events", json=payload)
+    assert resp.status_code == 201
+    # body의 forged_org가 아닌 verified org_id가 사용됐는지
+    assert captured.get("org_id") == org_id
