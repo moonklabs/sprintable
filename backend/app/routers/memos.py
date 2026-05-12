@@ -17,6 +17,7 @@ from app.models.team import TeamMember
 from app.models.webhook_config import WebhookConfig
 from app.repositories.memo import MemoReplyRepository, MemoRepository
 from app.routers.events import publish_event
+from app.services.eventbus import dispatch_memo_event
 from app.schemas.memo import CreateMemo, CreateReply, MemoListResponse, MemoResponse, ReplyResponse, UpdateMemo
 
 router = APIRouter(prefix="/api/v2/memos", tags=["memos"])
@@ -193,6 +194,23 @@ async def create_memo(
     if body.assigned_to_ids:
         memo_recipient_ids.update(body.assigned_to_ids)
     memo_recipient_ids.discard(body.created_by)
+    # E-EVENTBUS S4: 이벤트버스 발행 (EVENTBUS_ENABLED=true 환경만)
+    if body.assigned_to and body.project_id:
+        await dispatch_memo_event(
+            session,
+            org_id=body.org_id,
+            project_id=body.project_id,
+            event_type="memo_created",
+            source_entity_id=memo.id,
+            sender_id=body.created_by,
+            recipient_ids=[body.assigned_to],
+            payload={
+                "title": body.title,
+                "content_preview": (body.content or "")[:100],
+                "sender_id": str(body.created_by) if body.created_by else None,
+                "thread_id": str(memo.id),
+            },
+        )
     if memo_recipient_ids:
         wh_rows = await session.execute(
             select(WebhookConfig.url).where(
@@ -313,6 +331,29 @@ async def add_reply(
         memo_id=id, content=body.content, created_by=body.created_by, review_type=body.review_type
     )
     publish_event(str(repo.org_id), "reply_created", {"id": str(reply.id), "memo_id": str(id)})
+
+    # E-EVENTBUS S4: 이벤트버스 발행 (EVENTBUS_ENABLED=true 환경만)
+    if memo.project_id:
+        reply_recipient_ids = [
+            r for r in [memo.assigned_to, memo.created_by]
+            if r and r != body.created_by
+        ]
+        if reply_recipient_ids:
+            await dispatch_memo_event(
+                db,
+                org_id=repo.org_id,
+                project_id=memo.project_id,
+                event_type="memo_replied",
+                source_entity_id=reply.id,
+                sender_id=body.created_by,
+                recipient_ids=reply_recipient_ids,
+                payload={
+                    "content_preview": (reply.content or "")[:100],
+                    "sender_id": str(body.created_by) if body.created_by else None,
+                    "parent_memo_id": str(id),
+                    "thread_id": str(id),
+                },
+            )
 
     # 세션이 열려 있는 지금 webhook URLs 수집 후 BackgroundTasks에 HTTP 발송 위임
     webhook_urls = await _collect_reply_webhook_urls(
