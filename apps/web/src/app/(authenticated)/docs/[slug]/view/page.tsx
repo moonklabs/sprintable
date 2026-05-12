@@ -17,26 +17,28 @@ interface DocDetail {
   content_format?: 'markdown' | 'html';
 }
 
+// null = 로딩 중, false = not found, DocDetail = 로드 완료
+type DocState = DocDetail | null | false;
+
 export default function DocViewPage() {
   const params = useParams();
   const slug = typeof params.slug === 'string' ? params.slug : '';
   const t = useTranslations('docs');
   const { projectId } = useDocsLayout();
 
-  const [doc, setDoc] = useState<DocDetail | null>(null);
-  const [loading, setLoading] = useState(true);
+  const [doc, setDoc] = useState<DocState>(null);
 
   useEffect(() => {
     if (!projectId || !slug) return;
-    setLoading(true);
+    let cancelled = false;
     fetch(`/api/docs?project_id=${projectId}&slug=${slug}`)
       .then((res) => (res.ok ? res.json() : null))
-      .then((json) => { setDoc(json?.data ?? null); })
-      .catch(() => { setDoc(null); })
-      .finally(() => { setLoading(false); });
+      .then((json) => { if (!cancelled) setDoc((json?.data as DocDetail) ?? false); })
+      .catch(() => { if (!cancelled) setDoc(false); });
+    return () => { cancelled = true; };
   }, [projectId, slug]);
 
-  if (loading) {
+  if (doc === null) {
     return (
       <div className="flex h-full items-center justify-center">
         <p className="text-sm text-[color:var(--operator-muted)]">{t('loading')}</p>
@@ -44,7 +46,7 @@ export default function DocViewPage() {
     );
   }
 
-  if (!doc) {
+  if (doc === false) {
     return (
       <div className="flex h-full items-center justify-center">
         <p className="text-sm text-muted-foreground">{t('notFound')}</p>
