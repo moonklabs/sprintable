@@ -14,7 +14,7 @@ from app.dependencies.database import get_db
 from app.models.event import Event
 from app.models.team import TeamMember
 
-router = APIRouter(prefix="/api/v2/notifications", tags=["event-notifications"])
+router = APIRouter(prefix="/api/v2/event-notifications", tags=["event-notifications"])
 
 
 # ─── Helper ───────────────────────────────────────────────────────────────────

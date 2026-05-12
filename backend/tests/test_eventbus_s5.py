@@ -92,7 +92,7 @@ def _make_event(**kwargs) -> MagicMock:
     return event
 
 
-# ─── AC2: GET /api/v2/notifications ──────────────────────────────────────────
+# ─── AC2: GET /api/v2/event-notifications ──────────────────────────────────────────
 
 @pytest.mark.anyio
 async def test_list_notifications_returns_current_user_events(client, mock_session, org_id, member_id):
@@ -109,13 +109,13 @@ async def test_list_notifications_returns_current_user_events(client, mock_sessi
     events_result.scalars.return_value = scalars_mock
     mock_session.execute.side_effect = [member_result, events_result]
 
-    resp = await client.get("/api/v2/notifications")
+    resp = await client.get("/api/v2/event-notifications")
     assert resp.status_code == 200
     data = resp.json()
     assert len(data) == 3
 
 
-# ─── AC3: GET /api/v2/notifications/unread-count ─────────────────────────────
+# ─── AC3: GET /api/v2/event-notifications/unread-count ─────────────────────────────
 
 @pytest.mark.anyio
 async def test_unread_count_returns_null_read_at_count(client, mock_session, member_id):
@@ -126,12 +126,12 @@ async def test_unread_count_returns_null_read_at_count(client, mock_session, mem
     count_result.scalar_one.return_value = 7
     mock_session.execute.side_effect = [member_result, count_result]
 
-    resp = await client.get("/api/v2/notifications/unread-count")
+    resp = await client.get("/api/v2/event-notifications/unread-count")
     assert resp.status_code == 200
     assert resp.json()["count"] == 7
 
 
-# ─── AC4: PATCH /api/v2/notifications/{id}/read ──────────────────────────────
+# ─── AC4: PATCH /api/v2/event-notifications/{id}/read ──────────────────────────────
 
 @pytest.mark.anyio
 async def test_mark_read_sets_read_at(client, mock_session, member_id):
@@ -150,7 +150,7 @@ async def test_mark_read_sets_read_at(client, mock_session, member_id):
     mock_session.execute.side_effect = [member_result, event_result]
     mock_session.refresh.side_effect = _refresh
 
-    resp = await client.patch(f"/api/v2/notifications/{event_id}/read")
+    resp = await client.patch(f"/api/v2/event-notifications/{event_id}/read")
     assert resp.status_code == 200
     assert event.read_at is not None
     mock_session.commit.assert_called_once()
@@ -174,7 +174,7 @@ async def test_mark_read_already_read_skips_commit(client, mock_session, member_
     mock_session.execute.side_effect = [member_result, event_result]
     mock_session.refresh.side_effect = _refresh
 
-    resp = await client.patch(f"/api/v2/notifications/{event_id}/read")
+    resp = await client.patch(f"/api/v2/event-notifications/{event_id}/read")
     assert resp.status_code == 200
     mock_session.commit.assert_not_called()
 
@@ -194,7 +194,7 @@ async def test_mark_read_other_user_returns_403(client, mock_session, member_id)
     event_result.scalar_one_or_none.return_value = event
     mock_session.execute.side_effect = [member_result, event_result]
 
-    resp = await client.patch(f"/api/v2/notifications/{event_id}/read")
+    resp = await client.patch(f"/api/v2/event-notifications/{event_id}/read")
     assert resp.status_code == 403
 
 
@@ -207,11 +207,11 @@ async def test_mark_read_not_found_returns_404(client, mock_session, member_id):
     event_result.scalar_one_or_none.return_value = None
     mock_session.execute.side_effect = [member_result, event_result]
 
-    resp = await client.patch(f"/api/v2/notifications/{uuid.uuid4()}/read")
+    resp = await client.patch(f"/api/v2/event-notifications/{uuid.uuid4()}/read")
     assert resp.status_code == 404
 
 
-# ─── AC5: PATCH /api/v2/notifications/read-all ───────────────────────────────
+# ─── AC5: PATCH /api/v2/event-notifications/read-all ───────────────────────────────
 
 @pytest.mark.anyio
 async def test_mark_all_read_updates_all_unread(client, mock_session, member_id):
@@ -222,7 +222,7 @@ async def test_mark_all_read_updates_all_unread(client, mock_session, member_id)
     update_result.rowcount = 5
     mock_session.execute.side_effect = [member_result, update_result]
 
-    resp = await client.patch("/api/v2/notifications/read-all")
+    resp = await client.patch("/api/v2/event-notifications/read-all")
     assert resp.status_code == 200
     assert resp.json()["updated"] == 5
     mock_session.commit.assert_called_once()
