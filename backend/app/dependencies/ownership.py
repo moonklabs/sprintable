@@ -28,7 +28,11 @@ async def assert_agent_owner(
 ) -> TeamMember:
     """agent 존재 확인 + ownership guard. TeamMember를 반환."""
     result = await session.execute(
-        select(TeamMember).where(TeamMember.id == agent_id, TeamMember.type == "agent")
+        select(TeamMember).where(
+            TeamMember.id == agent_id,
+            TeamMember.type == "agent",
+            TeamMember.org_id == org_id,
+        )
     )
     agent = result.scalar_one_or_none()
     if agent is None:
