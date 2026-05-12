@@ -31,13 +31,13 @@ function getEntityHref(notification: EventNotification): string | null {
   const { source_entity_type, source_entity_id } = notification;
   if (!source_entity_id) return null;
   switch (source_entity_type) {
-    case 'memo': return `/memos?id=${source_entity_id}`;
-    case 'story': return '/board';
-    case 'task': return '/board';
-    case 'epic': return '/epics';
-    case 'sprint': return '/sprints';
-    case 'doc': return '/docs';
-    default: return null;
+    case 'memo':   return `/memos?id=${source_entity_id}`;
+    case 'story':  return `/board?story_id=${source_entity_id}`;
+    case 'task':   return `/board?task_id=${source_entity_id}`;
+    case 'epic':   return `/epics/${source_entity_id}`;
+    case 'sprint': return `/sprints?id=${source_entity_id}`;
+    case 'doc':    return `/docs?id=${source_entity_id}`;
+    default:       return null;
   }
 }
 
@@ -244,17 +244,32 @@ export function NotificationBell() {
   }, [open]);
 
   const handleMarkRead = useCallback(async (id: string) => {
+    const readAt = new Date().toISOString();
+    // 낙관적 업데이트
     setNotifications((prev) =>
-      prev ? prev.map((n) => (n.id === id ? { ...n, read_at: new Date().toISOString() } : n)) : prev,
+      prev ? prev.map((n) => (n.id === id ? { ...n, read_at: readAt } : n)) : prev,
     );
     setUnreadCount((c) => Math.max(0, c - 1));
-    await fetch(`/api/event-notifications/${id}/read`, { method: 'PATCH' });
+    const res = await fetch(`/api/event-notifications/${id}/read`, { method: 'PATCH' });
+    // 서버 실패 시 롤백
+    if (!res.ok) {
+      setNotifications((prev) =>
+        prev ? prev.map((n) => (n.id === id ? { ...n, read_at: null } : n)) : prev,
+      );
+      setUnreadCount((c) => c + 1);
+    }
   }, []);
 
   const handleMarkAllRead = useCallback(async () => {
-    setNotifications((prev) => prev ? prev.map((n) => ({ ...n, read_at: n.read_at ?? new Date().toISOString() })) : prev);
+    const readAt = new Date().toISOString();
+    // 낙관적 업데이트
+    setNotifications((prev) => prev ? prev.map((n) => ({ ...n, read_at: n.read_at ?? readAt })) : prev);
     setUnreadCount(0);
-    await fetch('/api/event-notifications/read-all', { method: 'PATCH' });
+    const res = await fetch('/api/event-notifications/read-all', { method: 'PATCH' });
+    // 서버 실패 시 unread count 재폴링으로 보정
+    if (!res.ok) {
+      void fetchUnreadCount().then(setUnreadCount);
+    }
   }, []);
 
   const handleNavigate = useCallback(
