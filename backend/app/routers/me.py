@@ -42,6 +42,7 @@ async def get_me(
         raise HTTPException(status_code=404, detail="Member not found")
     data = MeResponse.model_validate(member)
     data.project_name = member.project.name if member.project else None
+    data.user_id = member.user_id
 
     if not is_api_key and member.user_id:
         user_result = await session.execute(select(User).where(User.id == member.user_id))

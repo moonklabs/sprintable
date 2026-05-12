@@ -27,6 +27,7 @@ interface AgentMember {
   project_id: string;
   is_active: boolean;
   webhook_url: string | null;
+  created_by: string | null;
 }
 
 interface WebhookConfig {
@@ -84,6 +85,8 @@ export default function AgentDetailPage() {
 
   const [agent, setAgent] = useState<AgentMember | null>(null);
   const [loading, setLoading] = useState(true);
+  const [currentUserId, setCurrentUserId] = useState<string | null>(null);
+  const [orgRole, setOrgRole] = useState<string>('member');
 
   const [editingName, setEditingName] = useState(false);
   const [editName, setEditName] = useState('');
@@ -114,9 +117,10 @@ export default function AgentDetailPage() {
   }, [id, router]);
 
   const fetchOrgContext = useCallback(async () => {
-    const [projectRes, contextRes] = await Promise.all([
+    const [projectRes, contextRes, meRes] = await Promise.all([
       fetch('/api/projects'),
       fetch('/api/current-project'),
+      fetch('/api/me'),
     ]);
     if (projectRes.ok) {
       const json = await projectRes.json() as { data: ProjectOption[] };
@@ -125,6 +129,11 @@ export default function AgentDetailPage() {
     if (contextRes.ok) {
       const json = await contextRes.json() as { data?: { org_id?: string } };
       setOrgId(json.data?.org_id ?? null);
+    }
+    if (meRes.ok) {
+      const json = await meRes.json() as { data?: { user_id?: string | null; role?: string } };
+      setCurrentUserId(json.data?.user_id ?? null);
+      setOrgRole(json.data?.role ?? 'member');
     }
   }, []);
 
@@ -189,8 +198,13 @@ export default function AgentDetailPage() {
       setEditingName(false);
       addToast({ type: 'success', title: tc('saved') });
     } else {
+      const status = res.status;
       const json = await res.json().catch(() => null) as { error?: { message?: string } } | null;
-      addToast({ type: 'error', title: json?.error?.message ?? tc('error') });
+      if (status === 403) {
+        addToast({ type: 'error', title: t('ownershipDenied') });
+      } else {
+        addToast({ type: 'error', title: json?.error?.message ?? tc('error') });
+      }
     }
     setSavingEdit(false);
   };
@@ -311,6 +325,33 @@ export default function AgentDetailPage() {
 
   if (!agent) return null;
 
+  const canEdit =
+    (currentUserId !== null && agent.created_by === currentUserId) ||
+    orgRole === 'admin' ||
+    orgRole === 'owner';
+
+  const handleToggleActive = async () => {
+    const next = !agent.is_active;
+    const res = await fetch(`/api/team-members/${id}`, {
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ is_active: next }),
+    });
+    if (res.ok) {
+      const json = await res.json() as { data: AgentMember };
+      setAgent(json.data);
+      addToast({ type: 'success', title: next ? t('agentActivated') : t('agentDeactivated') });
+    } else {
+      const status = res.status;
+      const json = await res.json().catch(() => null) as { error?: { message?: string } } | null;
+      if (status === 403) {
+        addToast({ type: 'error', title: t('ownershipDenied') });
+      } else {
+        addToast({ type: 'error', title: json?.error?.message ?? tc('error') });
+      }
+    }
+  };
+
   return (
     <div className="w-full max-w-3xl mx-auto p-6 space-y-6">
       <div className="flex items-center gap-3">
@@ -357,6 +398,7 @@ export default function AgentDetailPage() {
                     <Badge variant="outline">{agent.role}</Badge>
                   </div>
                 </div>
+                {canEdit && (
                 <button
                   type="button"
                   onClick={() => { setEditName(agent.name); setEditRole(agent.role); setEditingName(true); }}
@@ -364,18 +406,32 @@ export default function AgentDetailPage() {
                 >
                   <Pencil className="h-3.5 w-3.5" />
                 </button>
+              )}
               </div>
             )}
           </div>
         </SectionCardHeader>
+        {canEdit && (
+          <SectionCardBody>
+            <Button
+              variant="glass"
+              size="sm"
+              onClick={() => void handleToggleActive()}
+            >
+              {agent.is_active ? t('deactivateAgent') : t('activateAgent')}
+            </Button>
+          </SectionCardBody>
+        )}
       </SectionCard>
 
       {/* API Keys */}
-      <AgentApiKeyManager
-        agentId={id}
-        agentName={agent.name}
-        onNewKey={(key) => { setFreshApiKey(key); setHasActiveKey(true); }}
-      />
+      {canEdit && (
+        <AgentApiKeyManager
+          agentId={id}
+          agentName={agent.name}
+          onNewKey={(key) => { setFreshApiKey(key); setHasActiveKey(true); }}
+        />
+      )}
 
       {/* Webhook 설정 */}
       <SectionCard>
