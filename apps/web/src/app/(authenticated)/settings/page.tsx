@@ -66,6 +66,7 @@ interface ProjectMember {
   project_id: string;
   is_active: boolean;
   webhook_url?: string | null;
+  created_by?: string | null;
 }
 
 const EVENT_TYPES = ['story_assigned', 'memo_received', 'reward_granted', 'story_status_changed'];
@@ -123,6 +124,7 @@ export default function SettingsPage() {
   const [removingMemberId, setRemovingMemberId] = useState<string | null>(null);
   const [isAdmin, setIsAdmin] = useState(false);
   const [adminChecked, setAdminChecked] = useState(false);
+  const [currentUserId, setCurrentUserId] = useState<string | null>(null);
   const [deletingProjectId, setDeletingProjectId] = useState<string | null>(null);
   const [deleteProjectConfirmId, setDeleteProjectConfirmId] = useState<string | null>(null);
   const [projectInviteEmail, setProjectInviteEmail] = useState('');
@@ -269,6 +271,7 @@ export default function SettingsPage() {
         const meJson = meRes.ok ? await meRes.json() : null;
         const role = (meJson?.data?.role ?? 'member') as string;
         setIsAdmin(role === 'admin' || role === 'owner');
+        setCurrentUserId((meJson?.data?.user_id as string | null) ?? null);
       } catch {
         setIsAdmin(false);
       } finally {
@@ -917,6 +920,7 @@ export default function SettingsPage() {
                                     <Badge variant="secondary">{t('agentMember')}</Badge>
                                     <Badge variant="outline">{agent.role}</Badge>
                                     <span className="text-xs text-muted-foreground">{projectName}</span>
+                                    {currentUserId && agent.created_by === currentUserId ? <Badge variant="outline" className="border-primary/40 text-primary text-[10px]">{t('agentOwner')}</Badge> : null}
                                     {!agent.is_active ? <Badge variant="destructive">inactive</Badge> : null}
                                   </div>
                                 </div>

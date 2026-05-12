@@ -629,8 +629,8 @@
     "addAgent": "Add Agent",
     "noOrgAgents": "No agents registered in this organization",
     "noOrgAgentsCta": "Add an agent to use it as an AI team member across projects.",
-    "agentDeactivated": "Agent deactivated",
-    "agentActivated": "Agent activated",
+    "agentDeactivated": "Agent deactivated.",
+    "agentActivated": "Agent activated.",
     "agentAdded": "Agent added",
     "agentActionFailed": "Agent operation failed",
     "deactivateAgent": "Deactivate",
@@ -640,7 +640,9 @@
     "agentWebhookDescription": "Events will be POSTed to this endpoint when triggered for this agent. Must be HTTPS.",
     "agentMcpTitle": "MCP Config",
     "agentMcpDescription": "Paste this into Claude Code or any MCP client to connect as this agent.",
-    "agentMcpKeyRequired": "Generate an API key first to include the real key in the config."
+    "agentMcpKeyRequired": "Generate an API key first to include the real key in the config.",
+    "ownershipDenied": "Permission denied. Only the agent owner or admin can edit.",
+    "agentOwner": "my agent"
   },
   "landing": {
     "navProduct": "Overview",
