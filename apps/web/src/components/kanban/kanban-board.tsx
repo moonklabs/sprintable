@@ -935,7 +935,10 @@ export function KanbanBoard({ projectId }: KanbanBoardProps) {
                 const res = await fetch(`/api/stories?${params}`);
                 if (res.ok) {
                   const json = await res.json();
-                  setStories((prev) => [...prev, ...(json.data ?? [])]);
+                  setStories((prev) => {
+                    const existingIds = new Set(prev.map((s) => s.id));
+                    return [...prev, ...(json.data ?? []).filter((s: KanbanStory) => !existingIds.has(s.id))];
+                  });
                   setNextCursor(json.meta?.nextCursor ?? null);
                 }
                 setLoadingMore(false);
@@ -985,7 +988,10 @@ export function KanbanBoard({ projectId }: KanbanBoardProps) {
             const res = await fetch(`/api/tasks?story_id=${selectedStory.id}&limit=20&cursor=${encodeURIComponent(storyTasksNextCursor)}`);
             if (res.ok) {
               const json = await res.json();
-              setStoryTasks((prev) => [...prev, ...(json.data ?? [])]);
+              setStoryTasks((prev) => {
+                const existingIds = new Set(prev.map((t) => t.id));
+                return [...prev, ...(json.data ?? []).filter((t: Task) => !existingIds.has(t.id))];
+              });
               setStoryTasksNextCursor(json.meta?.nextCursor ?? null);
             }
             setLoadingMoreStoryTasks(false);
