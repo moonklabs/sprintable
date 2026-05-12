@@ -293,3 +293,16 @@ async def test_expire_stale_uses_correct_cutoffs(client, mock_session):
     assert resp.status_code == 200
     # execute 2번 호출 (update expired + delete cleaned)
     assert mock_session.execute.call_count == 2
+
+
+# ─── RC 이슈: live SSE yield 후 delivered 마킹 org_id 검증 ─────────────────
+
+def test_live_sse_delivered_query_has_org_scope():
+    """events.py의 SSE yield 후 delivered 마킹 쿼리에 org_id 조건이 포함됐는지 소스 확인."""
+    import inspect
+    from app.routers import events as ev_module
+    source = inspect.getsource(ev_module.agent_event_stream)
+    # SSE live 이벤트 yield 후 delivered 마킹 경로에 org_id 조건 존재 확인
+    assert "Event.org_id == org_id" in source, (
+        "agent_event_stream의 live delivered 마킹 쿼리에 org_id 조건 누락"
+    )

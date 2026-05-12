@@ -224,6 +224,7 @@ async def agent_event_stream(
                                 select(Event).where(
                                     Event.id == uuid.UUID(eid),
                                     Event.status == "pending",
+                                    Event.org_id == org_id,
                                 )
                             )
                             live_evt = r.scalar_one_or_none()
