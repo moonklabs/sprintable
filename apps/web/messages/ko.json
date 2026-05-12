@@ -1070,13 +1070,16 @@
     "docTagsLabel": "태그",
     "docTagsPlaceholder": "예: docs, mobile, parity",
     "docTagsHint": "쉼표로 구분하면 배지로 표시되어 주세요",
-    "codeCopy": "코드 복사",
+    "codeCopy": "복사",
     "codeCopied": "복사됨",
     "moveCircularError": "문서를 자신의 하위로 이동할 수 없습니다",
     "movePermissionError": "이 위치로 문서를 이동할 권한이 없습니다",
     "tagFilter": "태그",
     "clearFilter": "필터 지우기",
-    "advancedOptions": "고급 옵션"
+    "advancedOptions": "고급 옵션",
+    "preview": "미리보기",
+    "editDoc": "편집",
+    "notFound": "문서를 찾을 수 없는"
   },
   "rewards": {
     "title": "리워드",

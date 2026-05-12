@@ -1070,13 +1070,16 @@
     "docTagsLabel": "Tags",
     "docTagsPlaceholder": "For example, docs, mobile, parity",
     "docTagsHint": "Separate tags with commas to show them as badges.",
-    "codeCopy": "Copy code",
+    "codeCopy": "Copy",
     "codeCopied": "Copied",
     "moveCircularError": "Cannot move a document into its own subtree",
     "movePermissionError": "You do not have permission to move documents here",
     "tagFilter": "Tags",
     "clearFilter": "Clear filters",
-    "advancedOptions": "Advanced options"
+    "advancedOptions": "Advanced options",
+    "preview": "Preview",
+    "editDoc": "Edit",
+    "notFound": "Document not found"
   },
   "rewards": {
     "title": "Rewards",
