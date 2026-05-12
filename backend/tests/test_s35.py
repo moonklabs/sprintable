@@ -167,6 +167,51 @@ async def test_agent_not_found_404():
 
 
 @pytest.mark.anyio
+async def test_api_key_get_non_owner_403():
+    """non-owner → GET api-keys 403."""
+    client, session, app = await _client()
+    try:
+        from fastapi import HTTPException as _HTTPException
+        with patch("app.routers.api_keys.assert_agent_owner", new_callable=AsyncMock) as mock_oa:
+            mock_oa.side_effect = _HTTPException(status_code=403, detail="Not the owner of this agent")
+            async with client as c:
+                resp = await c.get(f"/api/v2/agents/{AGENT_ID}/api-keys")
+        assert resp.status_code == 403
+    finally:
+        app.dependency_overrides.clear()
+
+
+@pytest.mark.anyio
+async def test_api_key_create_non_owner_403():
+    """non-owner → POST api-keys 403."""
+    client, session, app = await _client()
+    try:
+        from fastapi import HTTPException as _HTTPException
+        with patch("app.routers.api_keys.assert_agent_owner", new_callable=AsyncMock) as mock_oa:
+            mock_oa.side_effect = _HTTPException(status_code=403, detail="Not the owner of this agent")
+            async with client as c:
+                resp = await c.post(f"/api/v2/agents/{AGENT_ID}/api-keys", json={})
+        assert resp.status_code == 403
+    finally:
+        app.dependency_overrides.clear()
+
+
+@pytest.mark.anyio
+async def test_api_key_delete_non_owner_403():
+    """non-owner → DELETE api-keys 403."""
+    client, session, app = await _client()
+    try:
+        from fastapi import HTTPException as _HTTPException
+        with patch("app.routers.api_keys.assert_agent_owner", new_callable=AsyncMock) as mock_oa:
+            mock_oa.side_effect = _HTTPException(status_code=403, detail="Not the owner of this agent")
+            async with client as c:
+                resp = await c.delete(f"/api/v2/agents/{AGENT_ID}/api-keys/{KEY_ID}")
+        assert resp.status_code == 403
+    finally:
+        app.dependency_overrides.clear()
+
+
+@pytest.mark.anyio
 async def test_key_hash_is_sha256():
     """SHA256 해시가 plaintext가 아닌지 확인."""
     from app.repositories.api_key import _generate_key
