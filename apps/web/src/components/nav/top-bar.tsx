@@ -2,6 +2,7 @@
 
 import { SidebarTrigger } from '@/components/ui/sidebar';
 import { cn } from '@/lib/utils';
+import { NotificationBell } from './notification-bell';
 import { useTopBar } from './top-bar-context';
 
 interface TopBarProps {
@@ -16,7 +17,10 @@ export function TopBar({ className }: TopBarProps) {
       <div className="flex min-w-0 flex-1 items-center gap-2">
         {title}
       </div>
-      {actions ? <div className="flex shrink-0 items-center gap-2">{actions}</div> : null}
+      <div className="flex shrink-0 items-center gap-1">
+        {actions}
+        <NotificationBell />
+      </div>
     </div>
   );
 }
