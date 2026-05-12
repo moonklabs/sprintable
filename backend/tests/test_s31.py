@@ -47,6 +47,7 @@ def _mock_member() -> MagicMock:
     m.type = "human"
     m.role = "admin"
     m.is_active = True
+    m.user_id = uuid.uuid4()
     return m
 
 
