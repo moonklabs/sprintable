@@ -95,12 +95,17 @@ async def test_agent_stream_registers_connection(mock_session, org_id):
     """GET /api/v2/events/stream 연결 시 _agent_connections에 등록됨."""
     member_id = uuid.uuid4()
 
-    # pending 없음 mock
+    # 1st execute: member org 소속 검증 → member_id 반환
+    # 2nd execute: pending 이벤트 조회 → 빈 목록
+    membership_result = MagicMock()
+    membership_result.scalar_one_or_none.return_value = member_id
+
     scalars_mock = MagicMock()
     scalars_mock.all.return_value = []
-    result_mock = MagicMock()
-    result_mock.scalars.return_value = scalars_mock
-    mock_session.execute.return_value = result_mock
+    pending_result = MagicMock()
+    pending_result.scalars.return_value = scalars_mock
+
+    mock_session.execute.side_effect = [membership_result, pending_result]
 
     from app.dependencies.auth import get_current_user, get_verified_org_id
     from app.dependencies.database import get_db
@@ -277,11 +282,17 @@ async def test_stream_delivers_pending_on_connect(mock_session, org_id):
         created_at=datetime.now(timezone.utc),
     )
 
+    # 1st execute: member org 소속 검증 → member_id 반환
+    # 2nd execute: pending 이벤트 조회
+    membership_result = MagicMock()
+    membership_result.scalar_one_or_none.return_value = member_id
+
     scalars_mock = MagicMock()
     scalars_mock.all.return_value = [pending_event]
-    result_mock = MagicMock()
-    result_mock.scalars.return_value = scalars_mock
-    mock_session.execute.return_value = result_mock
+    pending_result = MagicMock()
+    pending_result.scalars.return_value = scalars_mock
+
+    mock_session.execute.side_effect = [membership_result, pending_result]
 
     from app.dependencies.auth import get_current_user, get_verified_org_id
     from app.dependencies.database import get_db
@@ -351,3 +362,40 @@ async def test_agent_isolation_multiple_connections():
     finally:
         _agent_connections.pop(agent_a, None)
         _agent_connections.pop(agent_b, None)
+
+
+@pytest.mark.anyio
+async def test_stream_rejects_cross_org_member(mock_session, org_id):
+    """다른 org의 member_id로 stream 연결 시 404 반환."""
+    foreign_member_id = uuid.uuid4()
+
+    membership_result = MagicMock()
+    membership_result.scalar_one_or_none.return_value = None  # org 소속 아님
+    mock_session.execute.return_value = membership_result
+
+    from app.dependencies.auth import get_current_user, get_verified_org_id
+    from app.dependencies.database import get_db
+    from app.main import app
+
+    async def _db():
+        yield mock_session
+
+    async def _auth():
+        ctx = MagicMock()
+        ctx.user_id = str(uuid.uuid4())
+        ctx.claims = {}
+        return ctx
+
+    async def _org():
+        return org_id
+
+    app.dependency_overrides[get_db] = _db
+    app.dependency_overrides[get_current_user] = _auth
+    app.dependency_overrides[get_verified_org_id] = _org
+
+    try:
+        async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as c:
+            resp = await c.get(f"/api/v2/events/stream?member_id={foreign_member_id}")
+            assert resp.status_code == 404
+    finally:
+        app.dependency_overrides.clear()

@@ -163,6 +163,18 @@ async def agent_event_stream(
     - heartbeat: 30초마다 연결 유지
     - <event_type>: 이벤트버스 이벤트 실시간 수신
     """
+    from app.models.team import TeamMember
+
+    # member_id가 요청자 org 소속인지 검증
+    result = await db.execute(
+        select(TeamMember.id).where(
+            TeamMember.id == member_id,
+            TeamMember.org_id == org_id,
+        )
+    )
+    if result.scalar_one_or_none() is None:
+        raise HTTPException(status_code=404, detail="Member not found")
+
     member_id_str = str(member_id)
     queue: asyncio.Queue[dict] = asyncio.Queue(maxsize=200)
     _agent_connections[member_id_str] = queue
