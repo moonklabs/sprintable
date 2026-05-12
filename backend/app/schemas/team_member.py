@@ -46,5 +46,6 @@ class TeamMemberResponse(BaseModel):
     is_active: bool
     color: str
     agent_role: str | None = None
+    created_by: uuid.UUID | None = None
     created_at: datetime
     updated_at: datetime

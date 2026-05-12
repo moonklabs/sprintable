@@ -12,6 +12,7 @@ class MeResponse(BaseModel):
     id: uuid.UUID
     org_id: uuid.UUID
     project_id: uuid.UUID
+    user_id: uuid.UUID | None = None
     name: str
     type: str
     role: str

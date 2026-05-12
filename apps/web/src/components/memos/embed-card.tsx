@@ -2,6 +2,7 @@
 
 import { useCallback, useEffect, useRef, useState } from 'react';
 import Link from 'next/link';
+import { useRouter } from 'next/navigation';
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
 import { ExternalLink, X } from 'lucide-react';
@@ -218,10 +219,24 @@ function EntityPreviewModal({
 
 export function EmbedCard({ entity_type, entity_id, title, status }: EmbedCardData) {
   const [showModal, setShowModal] = useState(false);
+  const [navigating, setNavigating] = useState(false);
+  const router = useRouter();
   const icon = ENTITY_ICONS[entity_type] ?? '#';
   const colorClass = ENTITY_COLORS[entity_type] ?? 'border-border bg-muted text-foreground';
   const href = getEntityHref(entity_type, entity_id);
   const label = title ?? entity_id;
+
+  const handleDocClick = useCallback(async () => {
+    setNavigating(true);
+    try {
+      const res = await fetch(`/api/docs/${entity_id}`);
+      if (!res.ok) throw new Error();
+      const { data } = await res.json() as { data: { slug: string } };
+      router.push(`/docs/${data.slug}/view`);
+    } catch {
+      setNavigating(false);
+    }
+  }, [entity_id, router]);
 
   const inner = (
     <div className={`flex items-center gap-2 rounded-md border px-3 py-2 text-sm ${colorClass}`}>
@@ -230,8 +245,22 @@ export function EmbedCard({ entity_type, entity_id, title, status }: EmbedCardDa
       {status ? (
         <span className="ml-auto rounded px-1.5 py-0.5 text-xs bg-black/10 dark:bg-white/10">{status}</span>
       ) : null}
+      {navigating && <span className="ml-auto h-3 w-3 animate-spin rounded-full border-2 border-current border-t-transparent" />}
     </div>
   );
+
+  if (entity_type === 'doc') {
+    return (
+      <button
+        type="button"
+        onClick={handleDocClick}
+        disabled={navigating}
+        className="block w-full text-left transition-opacity hover:opacity-80 disabled:opacity-60"
+      >
+        {inner}
+      </button>
+    );
+  }
 
   return (
     <>
