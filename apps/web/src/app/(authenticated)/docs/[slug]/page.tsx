@@ -7,7 +7,8 @@ import { DocEditor } from '@/components/docs/doc-editor';
 import { useDocSync, type SaveStatus } from '@/components/docs/use-doc-sync';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
-import { Check, Copy, Trash2 } from 'lucide-react';
+import Link from 'next/link';
+import { Check, Copy, Eye, Trash2 } from 'lucide-react';
 import { useDocsLayout } from '../docs-context';
 
 interface DocDetail {
@@ -149,6 +150,11 @@ export default function DocSlugPage() {
           </div>
           <div className="flex items-center gap-3">
             <SaveStatusIndicator status={saveStatus} t={t} />
+            <Button asChild variant="ghost" size="sm" title={t('preview')}>
+              <Link href={`/docs/${slug}/view`}>
+                <Eye className="h-4 w-4" />
+              </Link>
+            </Button>
             <Button variant="ghost" size="sm" onClick={handleCopyMarkdown} title="마크다운 복사">
               {mdCopied ? <Check className="h-4 w-4 text-emerald-500" /> : <Copy className="h-4 w-4" />}
             </Button>
