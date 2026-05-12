@@ -118,6 +118,7 @@ export function DocsShellClient({ projectId }: DocsShellClientProps) {
   const [newSlug, setNewSlug] = useState('');
   const [newParentId, setNewParentId] = useState<string | null>(null);
   const [slugManuallyEdited, setSlugManuallyEdited] = useState(false);
+  const [showAdvancedOptions, setShowAdvancedOptions] = useState(false);
 
   const handleDocSaved = useCallback((doc: DocDetail) => {
     setSelectedDoc(doc);
@@ -184,7 +185,7 @@ export function DocsShellClient({ projectId }: DocsShellClientProps) {
     void fetchDoc(slug);
     const params = new URLSearchParams(searchParams);
     params.set('slug', slug);
-    router.replace(`?${params.toString()}`);
+    router.push(`?${params.toString()}`);
     setTreeDrawerOpen(false);
   }, [fetchDoc, router, searchParams]);
 
@@ -351,6 +352,7 @@ export function DocsShellClient({ projectId }: DocsShellClientProps) {
       setContent(data.content);
       setContentFormat(data.content_format || 'markdown');
       setShowCreate(false);
+      setShowAdvancedOptions(false);
       setNewTitle('');
       setNewSlug('');
       setNewContent('');
@@ -359,7 +361,7 @@ export function DocsShellClient({ projectId }: DocsShellClientProps) {
 
       const params = new URLSearchParams(searchParams);
       params.set('slug', data.slug);
-      router.replace(`?${params.toString()}`);
+      router.push(`?${params.toString()}`);
     } catch (error) {
       console.error('Failed to create doc:', error);
     }
@@ -536,14 +538,6 @@ export function DocsShellClient({ projectId }: DocsShellClientProps) {
                   />
                 </div>
                 <div>
-                  <label className="text-sm font-medium mb-2 block">{t('slugLabel')}</label>
-                  <Input
-                    value={newSlug}
-                    onChange={(e) => handleSlugChange(e.target.value)}
-                    placeholder={t('slugPlaceholder')}
-                  />
-                </div>
-                <div>
                   <label className="text-sm font-medium mb-2 block">{t('contentLabel')}</label>
                   <textarea
                     value={newContent}
@@ -551,6 +545,26 @@ export function DocsShellClient({ projectId }: DocsShellClientProps) {
                     placeholder={t('editorPlaceholder')}
                     className="w-full min-h-[220px] rounded-xl border border-border bg-muted/30 px-4 py-3 text-sm text-foreground resize-none placeholder:text-muted-foreground"
                   />
+                </div>
+                <div>
+                  <button
+                    type="button"
+                    onClick={() => setShowAdvancedOptions((prev) => !prev)}
+                    className="flex items-center gap-1 text-xs text-muted-foreground hover:text-foreground transition-colors"
+                  >
+                    <span>{showAdvancedOptions ? '▾' : '▸'}</span>
+                    <span>{t('advancedOptions')}</span>
+                  </button>
+                  {showAdvancedOptions && (
+                    <div className="mt-3">
+                      <label className="text-sm font-medium mb-2 block">{t('slugLabel')}</label>
+                      <Input
+                        value={newSlug}
+                        onChange={(e) => handleSlugChange(e.target.value)}
+                        placeholder={t('slugPlaceholder')}
+                      />
+                    </div>
+                  )}
                 </div>
                 <div className="flex gap-2">
                   <Button onClick={handleCreate} disabled={!newTitle.trim() || !newSlug.trim()}>

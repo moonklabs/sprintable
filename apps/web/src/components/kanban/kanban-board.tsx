@@ -204,7 +204,7 @@ export function KanbanBoard({ projectId }: KanbanBoardProps) {
     // URL에 스토리 ID 반영
     const params = new URLSearchParams(searchParams);
     params.set('story', story.id);
-    router.replace(`?${params.toString()}`, { scroll: false });
+    router.push(`?${params.toString()}`, { scroll: false });
 
     try {
       const res = await fetch(`/api/tasks?story_id=${story.id}&limit=20`);
