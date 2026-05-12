@@ -1,9 +1,13 @@
 """Shared pytest fixtures for backend tests."""
+import os
 import uuid
 from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 from httpx import ASGITransport, AsyncClient
+
+# 테스트 환경 기본 환경변수
+os.environ.setdefault("JWT_SECRET", "test-secret-key-for-pytest-only")
 
 
 @pytest.fixture

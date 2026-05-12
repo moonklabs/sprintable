@@ -37,6 +37,7 @@ async def list_invitations(
 async def create_invitation(
     body: CreateInvitation,
     repo: InvitationRepository = Depends(_get_repo),
+    _: None = Depends(require_admin),
 ) -> InvitationResponse:
     inv = await repo.create(
         email=body.email,
@@ -51,6 +52,7 @@ async def create_invitation(
 async def revoke_invitation(
     id: uuid.UUID,
     repo: InvitationRepository = Depends(_get_repo),
+    _: None = Depends(require_admin),
 ) -> InvitationResponse:
     inv = await repo.revoke(id)
     if inv is None:
@@ -62,6 +64,7 @@ async def revoke_invitation(
 async def resend_invitation(
     id: uuid.UUID,
     repo: InvitationRepository = Depends(_get_repo),
+    _: None = Depends(require_admin),
 ) -> InvitationResponse:
     inv = await repo.resend(id)
     if inv is None:

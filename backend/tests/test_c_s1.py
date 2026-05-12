@@ -35,6 +35,8 @@ def _make_user(
     totp_last_timestep: int | None = None,
     totp_fail_count: int = 0,
     totp_locked_until=None,
+    login_fail_count: int = 0,
+    login_locked_until=None,
 ) -> MagicMock:
     from app.core.security import hash_password
     u = MagicMock()
@@ -47,6 +49,8 @@ def _make_user(
     u.totp_last_timestep = totp_last_timestep
     u.totp_fail_count = totp_fail_count
     u.totp_locked_until = totp_locked_until
+    u.login_fail_count = login_fail_count
+    u.login_locked_until = login_locked_until
     u.org_id = uuid.uuid4()
     u.project_id = uuid.uuid4()
     u.role = "member"
@@ -228,7 +232,7 @@ async def test_register_new_user_201():
         session.execute = AsyncMock(return_value=result_none)
         with patch.dict("os.environ", {"JWT_SECRET": "test-secret"}):
             async with client as c:
-                resp = await c.post("/api/v2/auth/register", json={"email": "new@test.com", "password": "pass123"})
+                resp = await c.post("/api/v2/auth/register", json={"email": "new@test.com", "password": "TestPass1!", "tos_accepted": True})
         assert resp.status_code == 201
         body = resp.json()
         assert body["error"] is None
@@ -247,7 +251,7 @@ async def test_register_duplicate_email_409():
         result_existing.scalar_one_or_none.return_value = _make_user()
         session.execute = AsyncMock(return_value=result_existing)
         async with client as c:
-            resp = await c.post("/api/v2/auth/register", json={"email": "exists@test.com", "password": "pass"})
+            resp = await c.post("/api/v2/auth/register", json={"email": "exists@test.com", "password": "TestPass1!", "tos_accepted": True})
         assert resp.status_code == 409
         assert resp.json()["error"]["code"] == "EMAIL_TAKEN"
     finally:

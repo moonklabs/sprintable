@@ -37,16 +37,17 @@ export async function POST(request: Request) {
         return apiError('BAD_REQUEST', `memo_type '${body.memo_type}' requires at least one assignee`, 400);
       }
     }
-    const dbClient = undefined;
     const repo = await createMemoRepository();
     const teamMemberRepo = await createTeamMemberRepository();
     const projectRepo = await createProjectRepository();
-    const service = new MemoService(repo, dbClient, teamMemberRepo, projectRepo);
+    const service = new MemoService(repo, undefined, teamMemberRepo, projectRepo);
+    const { trigger_type, ...memoBody } = body;
     const memo = await service.create({
-      ...body,
+      ...memoBody,
       org_id: me.org_id,
       project_id: me.project_id,
       created_by: me.id,
+      ...(trigger_type ? { metadata: { trigger_type } } : {}),
     } as CreateMemoInput);
     return apiSuccess(memo, undefined, 201);
   } catch (err: unknown) {
@@ -78,9 +79,8 @@ export async function GET(request: Request) {
       limit: searchParams.get('limit') ? Number(searchParams.get('limit')) : undefined,
       cursor: searchParams.get('cursor'),
     }, { defaultLimit: 30, maxLimit: 100 });
-    const dbClient = undefined;
     const repo = await createMemoRepository();
-    const service = new MemoService(repo, dbClient);
+    const service = new MemoService(repo);
     const sentOnly = searchParams.get('sent') === 'true';
     const memos = await service.list({
       org_id: me.org_id,

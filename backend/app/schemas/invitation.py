@@ -1,9 +1,12 @@
 from __future__ import annotations
 
+import re
 import uuid
 from datetime import datetime
 
-from pydantic import BaseModel, ConfigDict
+from pydantic import BaseModel, ConfigDict, field_validator
+
+_EMAIL_RE = re.compile(r"^[a-zA-Z0-9._%+\-]+@[a-zA-Z0-9.\-]+\.[a-zA-Z]{2,}$")
 
 
 class CreateInvitation(BaseModel):
@@ -11,6 +14,14 @@ class CreateInvitation(BaseModel):
     role: str = "member"
     invited_by: uuid.UUID
     project_id: uuid.UUID | None = None
+
+    @field_validator("email")
+    @classmethod
+    def normalize_email(cls, v: str) -> str:
+        v = v.strip().lower()
+        if not _EMAIL_RE.match(v):
+            raise ValueError("Invalid email format")
+        return v
 
 
 class InvitationResponse(BaseModel):

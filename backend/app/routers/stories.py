@@ -240,6 +240,7 @@ async def update_story_status(
             "epic_id": str(story.epic_id) if story.epic_id else None,
             "epic_title": epic_title,
             "status": story.status,
+            "new_status": story.status,
             "old_status": old_status,
             "project_id": str(story.project_id),
             "org_id": str(org_id),

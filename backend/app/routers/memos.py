@@ -20,6 +20,30 @@ from app.schemas.memo import CreateMemo, CreateReply, MemoListResponse, MemoResp
 
 router = APIRouter(prefix="/api/v2/memos", tags=["memos"])
 
+_ENTITY_PATTERN = re.compile(
+    r"\(entity:(story|doc|epic|task):([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})\)",
+    re.IGNORECASE,
+)
+
+
+def _parse_entity_embeds(content: str) -> list:
+    """content 내 (entity:type:uuid) 패턴 파싱 → MemoEntityLinkCreate 리스트 (중복 제거)."""
+    from app.schemas.memo import MemoEntityLinkCreate
+    seen: set[tuple[str, str]] = set()
+    result = []
+    for i, m in enumerate(_ENTITY_PATTERN.finditer(content)):
+        entity_type, entity_id_str = m.group(1).lower(), m.group(2)
+        key = (entity_type, entity_id_str)
+        if key in seen:
+            continue
+        seen.add(key)
+        result.append(MemoEntityLinkCreate(
+            entity_type=entity_type,  # type: ignore[arg-type]
+            entity_id=uuid.UUID(entity_id_str),
+            position=i,
+        ))
+    return result
+
 
 async def _collect_reply_webhook_urls(
     db: AsyncSession,
@@ -98,6 +122,7 @@ async def list_memos(
     created_by: uuid.UUID | None = Query(default=None),
     status_filter: str | None = Query(default=None, alias="status"),
     q: str | None = Query(default=None),
+    trigger_type: str | None = Query(default=None),
     repo: MemoRepository = Depends(_get_repo),
 ) -> list[MemoListResponse]:
     filters: dict = {}
@@ -111,12 +136,19 @@ async def list_memos(
         filters["status"] = status_filter
     if q:
         filters["q"] = q
+    if trigger_type:
+        filters["trigger_type"] = trigger_type
     memos = await repo.list(**filters)
-    counts = await repo.get_entity_link_counts_batch([m.id for m in memos])
+    memo_ids = [m.id for m in memos]
+    counts = await repo.get_entity_link_counts_batch(memo_ids)
+    reply_counts = await repo.get_reply_counts_batch(memo_ids)
     results = []
     for m in memos:
         memo_dict = {k: v for k, v in m.__dict__.items() if not k.startswith("_")}
         memo_dict["embed_count"] = counts.get(m.id, 0)
+        rc, latest = reply_counts.get(m.id, (0, None))
+        memo_dict["reply_count"] = rc
+        memo_dict["latest_reply_at"] = latest
         results.append(MemoListResponse.model_validate(memo_dict))
     return results
 
@@ -138,10 +170,24 @@ async def create_memo(
         supersedes_id=body.supersedes_id,
         memo_metadata=body.memo_metadata,
     )
-    if body.embeds:
-        await repo.create_entity_links(memo.id, body.embeds)
+    if body.assigned_to_ids:
+        for member_id in body.assigned_to_ids:
+            session.add(MemoAssignee(
+                memo_id=memo.id,
+                member_id=member_id,
+                assigned_by=body.created_by,
+            ))
+        await session.flush()
+    parsed_embeds = _parse_entity_embeds(body.content or "")
+    all_embeds = list(body.embeds or []) + [
+        e for e in parsed_embeds
+        if not any(x.entity_type == e.entity_type and x.entity_id == e.entity_id for x in (body.embeds or []))
+    ]
+    if all_embeds:
+        await repo.create_entity_links(memo.id, all_embeds)
     publish_event(str(body.org_id), "memo_created", {"id": str(memo.id)})
-    if body.project_id:
+    _is_workflow_origin = (body.memo_metadata or {}).get("origin") == "workflow"
+    if body.project_id and not _is_workflow_origin:
         from app.services.workflow_pipeline import process_event
         from app.services.rule_evaluator import EventContext
         actor_name: str | None = None
@@ -178,7 +224,7 @@ async def create_memo(
         except Exception:
             pass
     memo_dict = {k: v for k, v in memo.__dict__.items() if not k.startswith("_")}
-    memo_dict["embed_count"] = len(body.embeds)
+    memo_dict["embed_count"] = len(all_embeds)
     return MemoListResponse.model_validate(memo_dict)
 
 

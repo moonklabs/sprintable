@@ -1,14 +1,26 @@
 from __future__ import annotations
 
+import os
 import secrets
 import uuid
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from urllib.parse import urlencode
 
 import httpx
 from fastapi import APIRouter, Depends, Request
 from fastapi.responses import JSONResponse
-from pydantic import BaseModel
+import re
+
+from pydantic import BaseModel, field_validator
+
+_EMAIL_RE = re.compile(r"^[a-zA-Z0-9._%+\-]+@[a-zA-Z0-9.\-]+\.[a-zA-Z]{2,}$")
+
+
+def _normalize_email(v: str) -> str:
+    v = v.strip().lower()
+    if not _EMAIL_RE.match(v):
+        raise ValueError("Invalid email format")
+    return v
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy import or_, select, update
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -17,7 +29,13 @@ from app.core.config import settings
 
 from app.core.security import (
     create_tokens,
+    create_password_reset_token,
+    create_email_verification_token,
+    create_oauth_state_token,
     decode_jwt,
+    decode_password_reset_token,
+    decode_email_verification_token,
+    decode_oauth_state_token,
     generate_totp_secret,
     get_totp_provisioning_uri,
     hash_password,
@@ -35,11 +53,30 @@ from app.dependencies.database import get_db
 from app.models.invitation import Invitation
 from app.models.project import OrgMember
 from app.models.team import TeamMember
+from app.models.login_audit_log import LoginAuditLog
 from app.models.user import RefreshToken, User
 
-from datetime import timedelta
-
 router = APIRouter(prefix="/api/v2/auth", tags=["auth"])
+
+
+async def _write_audit(
+    session: AsyncSession,
+    event_type: str,
+    *,
+    user_id: uuid.UUID | None = None,
+    email: str | None = None,
+    ip_address: str | None = None,
+    user_agent: str | None = None,
+    detail: str | None = None,
+) -> None:
+    session.add(LoginAuditLog(
+        event_type=event_type,
+        user_id=user_id,
+        email=email,
+        ip_address=ip_address,
+        user_agent=user_agent,
+        detail=detail,
+    ))
 
 
 def _ok(data: object, status_code: int = 200) -> JSONResponse:
@@ -60,10 +97,38 @@ class LoginRequest(BaseModel):
     password: str
     totp_code: str | None = None
 
+    @field_validator("email")
+    @classmethod
+    def normalize_email(cls, v: str) -> str:
+        return _normalize_email(v)
+
 
 class RegisterRequest(BaseModel):
     email: str
     password: str
+    tos_accepted: bool = False
+
+    @field_validator("email")
+    @classmethod
+    def normalize_email(cls, v: str) -> str:
+        return _normalize_email(v)
+
+    @field_validator("password")
+    @classmethod
+    def validate_password(cls, v: str) -> str:
+        if len(v) < 8:
+            raise ValueError("Password must be at least 8 characters long")
+        categories = [
+            bool(re.search(r"[A-Z]", v)),
+            bool(re.search(r"[a-z]", v)),
+            bool(re.search(r"\d", v)),
+            bool(re.search(r"[^A-Za-z0-9]", v)),
+        ]
+        if sum(categories) < 3:
+            raise ValueError(
+                "Password must include at least 3 of: uppercase letters, lowercase letters, digits, special characters"
+            )
+        return v
 
 
 class RefreshRequest(BaseModel):
@@ -76,6 +141,80 @@ class LogoutRequest(BaseModel):
 
 class TotpVerifyRequest(BaseModel):
     code: str
+
+
+class ForgotPasswordRequest(BaseModel):
+    email: str
+
+    @field_validator("email")
+    @classmethod
+    def normalize_email(cls, v: str) -> str:
+        return _normalize_email(v)
+
+
+class ResetPasswordRequest(BaseModel):
+    token: str
+    new_password: str
+
+    @field_validator("new_password")
+    @classmethod
+    def validate_password(cls, v: str) -> str:
+        if len(v) < 8:
+            raise ValueError("Password must be at least 8 characters long")
+        categories = [
+            bool(re.search(r"[A-Z]", v)),
+            bool(re.search(r"[a-z]", v)),
+            bool(re.search(r"\d", v)),
+            bool(re.search(r"[^A-Za-z0-9]", v)),
+        ]
+        if sum(categories) < 3:
+            raise ValueError(
+                "Password must include at least 3 of: uppercase letters, lowercase letters, digits, special characters"
+            )
+        return v
+
+
+class ChangePasswordRequest(BaseModel):
+    current_password: str
+    new_password: str
+
+    @field_validator("new_password")
+    @classmethod
+    def validate_password(cls, v: str) -> str:
+        if len(v) < 8:
+            raise ValueError("Password must be at least 8 characters long")
+        categories = [
+            bool(re.search(r"[A-Z]", v)),
+            bool(re.search(r"[a-z]", v)),
+            bool(re.search(r"\d", v)),
+            bool(re.search(r"[^A-Za-z0-9]", v)),
+        ]
+        if sum(categories) < 3:
+            raise ValueError(
+                "Password must include at least 3 of: uppercase letters, lowercase letters, digits, special characters"
+            )
+        return v
+
+
+class SetPasswordRequest(BaseModel):
+    new_password: str
+
+    @field_validator("new_password")
+    @classmethod
+    def validate_password(cls, v: str) -> str:
+        if len(v) < 8:
+            raise ValueError("Password must be at least 8 characters long")
+        categories = [
+            bool(re.search(r"[A-Z]", v)),
+            bool(re.search(r"[a-z]", v)),
+            bool(re.search(r"\d", v)),
+            bool(re.search(r"[^A-Za-z0-9]", v)),
+        ]
+        if sum(categories) < 3:
+            raise ValueError(
+                "Password must include at least 3 of: uppercase letters, lowercase letters, digits, special characters"
+            )
+        return v
 
 
 # ─── Helpers ──────────────────────────────────────────────────────────────────
@@ -187,6 +326,9 @@ async def register(
     body: RegisterRequest,
     session: AsyncSession = Depends(get_db),
 ) -> JSONResponse:
+    if not body.tos_accepted:
+        return _err("TOS_NOT_ACCEPTED", "You must accept the Terms of Service to register", 400)
+
     existing = await _get_user_by_email(session, body.email)
     if existing:
         return _err("EMAIL_TAKEN", "Email already registered", 409)
@@ -195,6 +337,8 @@ async def register(
         email=body.email,
         hashed_password=hash_password(body.password),
         is_active=True,
+        email_verified=False,
+        tos_accepted_at=datetime.now(timezone.utc),
     )
     session.add(user)
     try:
@@ -206,6 +350,23 @@ async def register(
     tokens = create_tokens(str(user.id), email=user.email, app_metadata=await _build_app_metadata(user, session))
     _, refresh_exp = create_refresh_token(str(user.id), expires_delta=timedelta(days=REFRESH_TOKEN_EXPIRE_DAYS))
     await _store_refresh_token(session, user, tokens["refresh_token"], refresh_exp)
+
+    # 이메일 인증 발송 (비동기 — 실패해도 가입은 완료)
+    try:
+        verification_token = create_email_verification_token(str(user.id))
+        app_url = os.getenv("NEXT_PUBLIC_APP_URL", "https://app.sprintable.ai")
+        verify_link = f"{app_url}/verify-email?token={verification_token}"
+        from app.services.email import send_email
+        send_email(
+            to=user.email,
+            subject="Sprintable 이메일 인증",
+            html_body=(
+                f"<p>아래 링크를 클릭하여 이메일 인증을 완료해 주세요. 24시간 유효합니다.</p>"
+                f"<p><a href='{verify_link}'>이메일 인증하기</a></p>"
+            ),
+        )
+    except Exception:
+        pass  # 이메일 발송 실패는 가입에 영향 없음
 
     return _ok(tokens, 201)
 
@@ -220,7 +381,41 @@ async def login(
     session: AsyncSession = Depends(get_db),
 ) -> JSONResponse:
     user = await _get_user_by_email(session, body.email)
+
+    # brute force lockout 체크
+    if user and user.login_locked_until:
+        if user.login_locked_until > datetime.now(timezone.utc):
+            remaining = int((user.login_locked_until - datetime.now(timezone.utc)).total_seconds())
+            return _err("ACCOUNT_LOCKED", f"Account locked. Try again in {remaining} seconds", 429)
+        # 잠금 해제 시간 경과 — 카운터 초기화
+        await session.execute(
+            update(User).where(User.id == user.id).values(login_fail_count=0, login_locked_until=None)
+        )
+
     if not user or not verify_password(body.password, user.hashed_password):
+        # 실패 카운터 증가
+        if user:
+            new_count = (user.login_fail_count or 0) + 1
+            locked_until = (
+                datetime.now(timezone.utc) + timedelta(minutes=5) if new_count >= 5 else None
+            )
+            await session.execute(
+                update(User).where(User.id == user.id).values(
+                    login_fail_count=new_count,
+                    login_locked_until=locked_until,
+                )
+            )
+        _ip = request.client.host if request.client else None
+        _ua = request.headers.get("user-agent")
+        await _write_audit(
+            session, "login_failure",
+            user_id=user.id if user else None,
+            email=body.email,
+            ip_address=_ip,
+            user_agent=_ua,
+            detail="INVALID_CREDENTIALS",
+        )
+        await session.commit()
         return _err("INVALID_CREDENTIALS", "Invalid email or password", 401)
 
     if user.totp_enabled:
@@ -261,9 +456,26 @@ async def login(
             )
         )
 
+    # 로그인 성공 — 실패 카운터 리셋
+    if user.login_fail_count or user.login_locked_until:
+        await session.execute(
+            update(User).where(User.id == user.id).values(login_fail_count=0, login_locked_until=None)
+        )
+
     tokens = create_tokens(str(user.id), email=user.email, app_metadata=await _build_app_metadata(user, session))
     _, refresh_exp = create_refresh_token(str(user.id), expires_delta=timedelta(days=REFRESH_TOKEN_EXPIRE_DAYS))
     await _store_refresh_token(session, user, tokens["refresh_token"], refresh_exp)
+
+    _ip = request.client.host if request.client else None
+    _ua = request.headers.get("user-agent")
+    await _write_audit(
+        session, "login_success",
+        user_id=user.id,
+        email=user.email,
+        ip_address=_ip,
+        user_agent=_ua,
+    )
+    await session.commit()
 
     return _ok(tokens)
 
@@ -360,6 +572,7 @@ async def totp_setup(
 
 @router.post("/totp/verify")
 async def totp_verify(
+    request: Request,
     body: TotpVerifyRequest,
     session: AsyncSession = Depends(get_db),
     auth: AuthContext = Depends(get_current_user),
@@ -375,6 +588,15 @@ async def totp_verify(
 
     await session.execute(
         update(User).where(User.id == user.id).values(totp_enabled=True)
+    )
+    _ip = request.client.host if request.client else None
+    _ua = request.headers.get("user-agent")
+    await _write_audit(
+        session, "2fa_enabled",
+        user_id=user.id,
+        email=user.email,
+        ip_address=_ip,
+        user_agent=_ua,
     )
     await session.commit()
     return _ok({"totp_enabled": True})
@@ -418,6 +640,7 @@ class OAuthCallbackRequest(BaseModel):
     provider: str
     code: str
     state: str
+    tos_accepted: bool = False
 
 
 @router.get("/oauth/{provider}/authorize")
@@ -425,7 +648,7 @@ async def oauth_authorize(provider: str) -> JSONResponse:
     if provider not in _OAUTH_CONFIGS:
         return _err("INVALID_PROVIDER", f"Unsupported provider: {provider}", 400)
     cfg = _OAUTH_CONFIGS[provider]
-    state = secrets.token_urlsafe(32)
+    state = create_oauth_state_token(provider)
     params = {
         "client_id": _client_id(provider),
         "redirect_uri": _redirect_uri(provider),
@@ -449,6 +672,12 @@ async def oauth_callback(
     if provider not in _OAUTH_CONFIGS:
         return _err("INVALID_PROVIDER", f"Unsupported provider: {provider}", 400)
     cfg = _OAUTH_CONFIGS[provider]
+
+    # state JWT 검증 (CSRF 방지)
+    try:
+        decode_oauth_state_token(body.state, provider)
+    except JWTError:
+        return _err("INVALID_STATE", "OAuth state is invalid or expired", 400)
 
     async with httpx.AsyncClient(timeout=15) as client:
         # 1. code → access_token 교환
@@ -513,11 +742,15 @@ async def oauth_callback(
             await session.commit()
             await session.refresh(user)
         else:
-            # 신규 유저 생성 (비밀번호 없음 — OAuth 전용)
+            # 신규 유저 생성 (비밀번호 없음 — OAuth 전용, 이메일 인증 완료)
+            if not body.tos_accepted:
+                return _err("TOS_NOT_ACCEPTED", "You must accept the Terms of Service to register", 400)
             user = User(
                 email=email,
                 hashed_password="",
                 is_active=True,
+                email_verified=True,
+                tos_accepted_at=datetime.now(timezone.utc),
                 **{f"{provider}_id": oauth_id},
             )
             session.add(user)
@@ -543,3 +776,154 @@ async def oauth_callback(
         "token_type": "bearer",
         "expires_in": ACCESS_TOKEN_EXPIRE_MINUTES * 60,
     })
+
+
+# ─── Password Reset ───────────────────────────────────────────────────────────
+
+@router.post("/forgot-password")
+async def forgot_password(
+    body: ForgotPasswordRequest,
+    session: AsyncSession = Depends(get_db),
+) -> JSONResponse:
+    user = await _get_user_by_email(session, body.email)
+    # 이메일 존재 여부와 무관하게 동일 응답 (사용자 열거 방지)
+    if user is not None:
+        token = create_password_reset_token(str(user.id), user.hashed_password)
+        app_url = os.getenv("NEXT_PUBLIC_APP_URL", "https://app.sprintable.ai")
+        reset_link = f"{app_url}/reset-password?token={token}"
+        from app.services.email import send_email
+        send_email(
+            to=user.email,
+            subject="Sprintable 비밀번호 재설정",
+            html_body=(
+                f"<p>비밀번호 재설정 링크입니다. 30분 내에 사용 바랍니다.</p>"
+                f"<p><a href='{reset_link}'>비밀번호 재설정</a></p>"
+                f"<p>요청하지 않으셨다면 이 메일을 무시하세요.</p>"
+            ),
+        )
+    return _ok({"message": "If the email exists, a reset link has been sent"})
+
+
+@router.post("/reset-password")
+async def reset_password(
+    body: ResetPasswordRequest,
+    session: AsyncSession = Depends(get_db),
+) -> JSONResponse:
+    try:
+        payload = decode_password_reset_token(body.token)
+    except JWTError:
+        return _err("INVALID_TOKEN", "Reset token is invalid or expired", 400)
+
+    user_id = payload.get("sub")
+    pw_sig = payload.get("pw_sig", "")
+
+    user = await _get_user_by_id(session, uuid.UUID(user_id))
+    if user is None:
+        return _err("USER_NOT_FOUND", "User not found", 404)
+
+    # pw_sig 불일치 시 이미 비밀번호 변경됨 → 토큰 무효
+    import hashlib as _hashlib
+    if _hashlib.sha256(user.hashed_password.encode()).hexdigest()[:16] != pw_sig:
+        return _err("INVALID_TOKEN", "Reset token has already been used", 400)
+
+    await session.execute(
+        update(User).where(User.id == user.id).values(hashed_password=hash_password(body.new_password))
+    )
+    return _ok({"message": "Password reset successfully"})
+
+
+@router.patch("/change-password")
+async def change_password(
+    body: ChangePasswordRequest,
+    session: AsyncSession = Depends(get_db),
+    auth: AuthContext = Depends(get_current_user),
+) -> JSONResponse:
+    user = await _get_user_by_id(session, uuid.UUID(auth.user_id))
+    if user is None:
+        return _err("USER_NOT_FOUND", "User not found", 404)
+
+    if not verify_password(body.current_password, user.hashed_password):
+        return _err("WRONG_PASSWORD", "Current password is incorrect", 400)
+
+    await session.execute(
+        update(User).where(User.id == user.id).values(hashed_password=hash_password(body.new_password))
+    )
+    return _ok({"message": "Password changed successfully"})
+
+
+# ─── POST /api/v2/auth/set-password ──────────────────────────────────────────
+
+@router.post("/set-password")
+async def set_password(
+    body: SetPasswordRequest,
+    session: AsyncSession = Depends(get_db),
+    auth: AuthContext = Depends(get_current_user),
+) -> JSONResponse:
+    """OAuth 전용 사용자 최초 비밀번호 설정 (hashed_password == "" 인 경우만 허용)."""
+    user = await _get_user_by_id(session, uuid.UUID(auth.user_id))
+    if user is None:
+        return _err("USER_NOT_FOUND", "User not found", 404)
+
+    if user.hashed_password:
+        return _err("ALREADY_HAS_PASSWORD", "User already has a password set", 400)
+
+    await session.execute(
+        update(User).where(User.id == user.id).values(hashed_password=hash_password(body.new_password))
+    )
+    await session.commit()
+    return _ok({"message": "Password set successfully"})
+
+
+# ─── Email Verification ───────────────────────────────────────────────────────
+
+@router.get("/verify-email")
+async def verify_email(
+    token: str,
+    session: AsyncSession = Depends(get_db),
+) -> JSONResponse:
+    try:
+        payload = decode_email_verification_token(token)
+    except JWTError:
+        return _err("INVALID_TOKEN", "Verification link is invalid or expired", 400)
+
+    user_id = payload.get("sub")
+    user = await _get_user_by_id(session, uuid.UUID(user_id))
+    if user is None:
+        return _err("USER_NOT_FOUND", "User not found", 404)
+
+    if user.email_verified:
+        return _ok({"message": "Email already verified"})
+
+    await session.execute(
+        update(User).where(User.id == user.id).values(email_verified=True)
+    )
+    return _ok({"message": "Email verified successfully"})
+
+
+@router.post("/resend-verification")
+@limiter.limit("3/hour")
+async def resend_verification(
+    request: Request,
+    session: AsyncSession = Depends(get_db),
+    auth: AuthContext = Depends(get_current_user),
+) -> JSONResponse:
+    user = await _get_user_by_id(session, uuid.UUID(auth.user_id))
+    if user is None:
+        return _err("USER_NOT_FOUND", "User not found", 404)
+
+    if user.email_verified:
+        return _ok({"message": "Email already verified"})
+
+    verification_token = create_email_verification_token(str(user.id))
+    app_url = os.getenv("NEXT_PUBLIC_APP_URL", "https://app.sprintable.ai")
+    verify_link = f"{app_url}/verify-email?token={verification_token}"
+    from app.services.email import send_email
+    send_email(
+        to=user.email,
+        subject="Sprintable 이메일 인증",
+        html_body=(
+            f"<p>아래 링크를 클릭하여 이메일 인증을 완료해 주세요. 24시간 유효합니다.</p>"
+            f"<p><a href='{verify_link}'>이메일 인증하기</a></p>"
+        ),
+    )
+    return _ok({"message": "Verification email sent"})

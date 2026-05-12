@@ -15,6 +15,8 @@ from app.core.config import settings
 __all__ = [
     "decode_jwt", "JWTError",
     "create_access_token", "create_refresh_token", "create_tokens",
+    "create_password_reset_token", "decode_password_reset_token",
+    "create_email_verification_token", "decode_email_verification_token",
     "hash_password", "verify_password",
     "generate_totp_secret", "verify_totp", "get_totp_provisioning_uri",
     "hash_token",
@@ -138,3 +140,84 @@ def verify_totp_with_timestep(secret: str, code: str) -> int | None:
 
 def get_totp_provisioning_uri(secret: str, email: str, issuer: str = "Sprintable") -> str:
     return pyotp.TOTP(secret).provisioning_uri(name=email, issuer_name=issuer)
+
+
+# ─── Password Reset Token ──────────────────────────────────────────────────────
+
+RESET_TOKEN_EXPIRE_MINUTES = 30
+
+
+def create_password_reset_token(user_id: str, hashed_password: str) -> str:
+    """30분 만료 reset token. pw_sig 포함으로 비밀번호 변경 후 자동 무효화."""
+    now = datetime.now(timezone.utc)
+    exp = now + timedelta(minutes=RESET_TOKEN_EXPIRE_MINUTES)
+    pw_sig = hashlib.sha256(hashed_password.encode()).hexdigest()[:16]
+    payload = {
+        "sub": user_id,
+        "type": "password_reset",
+        "pw_sig": pw_sig,
+        "iat": int(now.timestamp()),
+        "exp": int(exp.timestamp()),
+    }
+    return jwt.encode(payload, _get_secret(), algorithm="HS256")
+
+
+def decode_password_reset_token(token: str) -> dict:
+    """Reset token 검증. 만료/타입 불일치 시 JWTError."""
+    payload = decode_jwt(token)
+    if payload.get("type") != "password_reset":
+        raise JWTError("Invalid token type")
+    return payload
+
+
+# ─── Email Verification Token ─────────────────────────────────────────────────
+
+EMAIL_VERIFICATION_EXPIRE_HOURS = 24
+
+
+def create_email_verification_token(user_id: str) -> str:
+    """24시간 만료 이메일 인증 토큰."""
+    now = datetime.now(timezone.utc)
+    exp = now + timedelta(hours=EMAIL_VERIFICATION_EXPIRE_HOURS)
+    payload = {
+        "sub": user_id,
+        "type": "email_verification",
+        "iat": int(now.timestamp()),
+        "exp": int(exp.timestamp()),
+    }
+    return jwt.encode(payload, _get_secret(), algorithm="HS256")
+
+
+def decode_email_verification_token(token: str) -> dict:
+    """Email verification token 검증. 만료/타입 불일치 시 JWTError."""
+    payload = decode_jwt(token)
+    if payload.get("type") != "email_verification":
+        raise JWTError("Invalid token type")
+    return payload
+
+
+# ─── OAuth State Token ────────────────────────────────────────────────────────
+
+OAUTH_STATE_EXPIRE_MINUTES = 10
+
+
+def create_oauth_state_token(provider: str) -> str:
+    """10분 만료 OAuth state JWT. CSRF 방지용."""
+    now = datetime.now(timezone.utc)
+    exp = now + timedelta(minutes=OAUTH_STATE_EXPIRE_MINUTES)
+    payload = {
+        "type": "oauth_state",
+        "provider": provider,
+        "iat": int(now.timestamp()),
+        "exp": int(exp.timestamp()),
+    }
+    return jwt.encode(payload, _get_secret(), algorithm="HS256")
+
+
+def decode_oauth_state_token(token: str, expected_provider: str) -> None:
+    """OAuth state token 검증. 만료/타입/provider 불일치 시 JWTError."""
+    payload = decode_jwt(token)
+    if payload.get("type") != "oauth_state":
+        raise JWTError("Invalid state token type")
+    if payload.get("provider") != expected_provider:
+        raise JWTError("Provider mismatch in state token")

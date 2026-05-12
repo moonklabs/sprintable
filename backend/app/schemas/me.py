@@ -17,6 +17,7 @@ class MeResponse(BaseModel):
     role: str
     is_active: bool
     project_name: str | None = None
+    has_password: bool | None = None
 
 
 class UpdateMe(BaseModel):

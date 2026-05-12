@@ -23,6 +23,7 @@ from app.models.project import OrgMember, Project
 from app.models.project_setting import ProjectSetting
 from app.models.retro import RetroAction, RetroItem, RetroSession, RetroVote
 from app.models.reward import RewardLedger
+from app.models.login_audit_log import LoginAuditLog
 from app.models.standup import StandupEntry, StandupFeedback
 from app.models.team import TeamMember
 
@@ -73,6 +74,7 @@ __all__ = [
     "Story",
     "Task",
     "TeamMember",
+    "LoginAuditLog",
     "RefreshToken",
     "User",
     "WorkflowVersion",

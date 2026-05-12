@@ -31,6 +31,7 @@ class CreateMemo(BaseModel):
     memo_type: str = "memo"
     title: str | None = None
     assigned_to: uuid.UUID | None = None
+    assigned_to_ids: list[uuid.UUID] | None = None
     created_by: uuid.UUID | None = None
     supersedes_id: uuid.UUID | None = None
     memo_metadata: dict[str, Any] = {}
@@ -65,6 +66,8 @@ class MemoListResponse(BaseModel):
     created_at: datetime
     updated_at: datetime
     embed_count: int = 0
+    reply_count: int = 0
+    latest_reply_at: datetime | None = None
 
 
 class CreateReply(BaseModel):

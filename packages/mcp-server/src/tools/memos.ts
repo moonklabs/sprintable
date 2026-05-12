@@ -48,6 +48,7 @@ export function registerMemosTools(server: McpServer) {
     memo_type: z.string().optional(),
     assigned_to: z.string().optional().describe('Single team member ID (legacy, use assigned_to_ids for multiple)'),
     assigned_to_ids: z.array(z.string()).optional().describe('Team member IDs to assign (supports multiple assignees)'),
+    trigger_type: z.string().optional().describe('Workflow stage (kickoff, qa_request, review, merge_request)'),
   }, async ({ assigned_to, assigned_to_ids, ...rest }) => {
     try {
       const resolvedIds = assigned_to_ids ?? (assigned_to ? [assigned_to] : undefined);
