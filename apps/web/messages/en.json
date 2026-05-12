@@ -1075,7 +1075,8 @@
     "moveCircularError": "Cannot move a document into its own subtree",
     "movePermissionError": "You do not have permission to move documents here",
     "tagFilter": "Tags",
-    "clearFilter": "Clear filters"
+    "clearFilter": "Clear filters",
+    "advancedOptions": "Advanced options"
   },
   "rewards": {
     "title": "Rewards",

@@ -197,14 +197,18 @@ export function KanbanBoard({ projectId }: KanbanBoardProps) {
   useEffect(() => { void fetchData(); }, [fetchData]);
 
 
-  const handleStoryClick = useCallback(async (story: KanbanStory) => {
+  const handleStoryClick = useCallback(async (story: KanbanStory, { replace = false } = {}) => {
     setSelectedStory(story);
     setStoryTasksNextCursor(null);
 
     // URL에 스토리 ID 반영
     const params = new URLSearchParams(searchParams);
     params.set('story', story.id);
-    router.replace(`?${params.toString()}`, { scroll: false });
+    if (replace) {
+      router.replace(`?${params.toString()}`, { scroll: false });
+    } else {
+      router.push(`?${params.toString()}`, { scroll: false });
+    }
 
     try {
       const res = await fetch(`/api/tasks?story_id=${story.id}&limit=20`);
@@ -236,7 +240,7 @@ export function KanbanBoard({ projectId }: KanbanBoardProps) {
 
     const story = stories.find((s) => s.id === storyId);
     if (story) {
-      void handleStoryClick(story);
+      void handleStoryClick(story, { replace: true });
     } else if (stories.length > 0) {
       // 현재 보드에 없는 스토리 — 직접 fetch 후 패널 오픈
       fetch(`/api/stories/${storyId}`)
@@ -244,7 +248,7 @@ export function KanbanBoard({ projectId }: KanbanBoardProps) {
         .then((json) => {
           const fetched = json?.data as KanbanStory | undefined;
           if (fetched && selectedStoryRef.current?.id !== storyId) {
-            void handleStoryClick(fetched);
+            void handleStoryClick(fetched, { replace: true });
           }
         })
         .catch(() => {});
