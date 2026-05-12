@@ -1,20 +1,8 @@
-'use client';
+import { redirect } from 'next/navigation';
+import { DocsEmptyView } from './docs-empty-view';
 
-import { useDashboardContext } from '../../dashboard/dashboard-shell';
-import { DocsShellClient } from './docs-shell-client';
-import { useTranslations } from 'next-intl';
-
-export default function DocsPage() {
-  const { projectId } = useDashboardContext();
-  const t = useTranslations('docs');
-
-  if (!projectId) {
-    return (
-      <div className="flex h-64 items-center justify-center">
-        <p className="text-sm text-gray-400">{t('noProject')}</p>
-      </div>
-    );
-  }
-
-  return <DocsShellClient projectId={projectId} />;
+export default async function DocsPage({ searchParams }: { searchParams: Promise<{ slug?: string }> }) {
+  const { slug } = await searchParams;
+  if (slug) redirect(`/docs/${slug}`);
+  return <DocsEmptyView />;
 }
