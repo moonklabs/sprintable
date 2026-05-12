@@ -65,11 +65,8 @@ async def _client():
 async def test_create_api_key_201():
     client, session, app = await _client()
     try:
-        mock_result = MagicMock()
-        mock_result.scalar_one_or_none.return_value = AGENT_ID
-        session.execute = AsyncMock(return_value=mock_result)
-
-        with patch("app.repositories.api_key.ApiKeyRepository.create", new_callable=AsyncMock) as mock_create:
+        with patch("app.routers.api_keys.assert_agent_owner", new_callable=AsyncMock), \
+             patch("app.repositories.api_key.ApiKeyRepository.create", new_callable=AsyncMock) as mock_create:
             mock_create.return_value = (_mock_key(), PLAINTEXT)
 
             async with client as c:
@@ -86,11 +83,8 @@ async def test_create_api_key_201():
 async def test_list_agent_keys_200():
     client, session, app = await _client()
     try:
-        mock_result = MagicMock()
-        mock_result.scalar_one_or_none.return_value = AGENT_ID
-        session.execute = AsyncMock(return_value=mock_result)
-
-        with patch("app.repositories.api_key.ApiKeyRepository.list_by_member", new_callable=AsyncMock) as mock_list:
+        with patch("app.routers.api_keys.assert_agent_owner", new_callable=AsyncMock), \
+             patch("app.repositories.api_key.ApiKeyRepository.list_by_member", new_callable=AsyncMock) as mock_list:
             mock_list.return_value = [_mock_key()]
 
             async with client as c:
@@ -107,11 +101,8 @@ async def test_list_agent_keys_200():
 async def test_list_agent_keys_empty_200():
     client, session, app = await _client()
     try:
-        mock_result = MagicMock()
-        mock_result.scalar_one_or_none.return_value = AGENT_ID
-        session.execute = AsyncMock(return_value=mock_result)
-
-        with patch("app.repositories.api_key.ApiKeyRepository.list_by_member", new_callable=AsyncMock) as mock_list:
+        with patch("app.routers.api_keys.assert_agent_owner", new_callable=AsyncMock), \
+             patch("app.repositories.api_key.ApiKeyRepository.list_by_member", new_callable=AsyncMock) as mock_list:
             mock_list.return_value = []
 
             async with client as c:
@@ -163,12 +154,12 @@ async def test_rotate_key_404():
 async def test_agent_not_found_404():
     client, session, app = await _client()
     try:
-        mock_result = MagicMock()
-        mock_result.scalar_one_or_none.return_value = None
-        session.execute = AsyncMock(return_value=mock_result)
+        from fastapi import HTTPException as _HTTPException
+        with patch("app.routers.api_keys.assert_agent_owner", new_callable=AsyncMock) as mock_oa:
+            mock_oa.side_effect = _HTTPException(status_code=404, detail="Agent not found")
 
-        async with client as c:
-            resp = await c.get(f"/api/v2/agents/{uuid.uuid4()}/api-keys")
+            async with client as c:
+                resp = await c.get(f"/api/v2/agents/{uuid.uuid4()}/api-keys")
 
         assert resp.status_code == 404
     finally:
@@ -201,14 +192,11 @@ async def test_revoked_key_in_list():
     """list_by_member는 revoked 키도 포함해서 반환하는."""
     client, session, app = await _client()
     try:
-        mock_result = MagicMock()
-        mock_result.scalar_one_or_none.return_value = AGENT_ID
-        session.execute = AsyncMock(return_value=mock_result)
-
         revoked = _mock_key(revoked=True)
         active = _mock_key()
 
-        with patch("app.repositories.api_key.ApiKeyRepository.list_by_member", new_callable=AsyncMock) as mock_list:
+        with patch("app.routers.api_keys.assert_agent_owner", new_callable=AsyncMock), \
+             patch("app.repositories.api_key.ApiKeyRepository.list_by_member", new_callable=AsyncMock) as mock_list:
             mock_list.return_value = [active, revoked]
 
             async with client as c:

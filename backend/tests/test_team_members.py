@@ -26,6 +26,7 @@ def _mock_member(is_active: bool = True, type_: str = "human") -> MagicMock:
     m.is_active = is_active
     m.color = "#3385f8"
     m.agent_role = None
+    m.created_by = None
     m.created_at = datetime(2026, 5, 1, tzinfo=timezone.utc)
     m.updated_at = datetime(2026, 5, 1, tzinfo=timezone.utc)
     return m
