@@ -34,6 +34,11 @@ def mock_session():
     session.commit = AsyncMock()
     session.refresh = AsyncMock()
     session.execute = AsyncMock()
+    # begin_nested() returns an async context manager
+    nested_ctx = AsyncMock()
+    nested_ctx.__aenter__ = AsyncMock(return_value=None)
+    nested_ctx.__aexit__ = AsyncMock(return_value=False)
+    session.begin_nested = MagicMock(return_value=nested_ctx)
     return session
 
 
@@ -232,4 +237,72 @@ async def test_dispatch_no_push_for_human_recipient(mock_session, org_id, projec
             payload={},
         )
 
+    mock_push.assert_not_called()
+
+
+# ─── RC 이슈: savepoint로 세션 오염 방지 ─────────────────────────────────────
+
+@pytest.mark.anyio
+async def test_dispatch_uses_begin_nested_savepoint(mock_session, org_id, project_id):
+    """flush 실패 시 begin_nested() savepoint가 사용돼 outer session 보호됨."""
+    from app.services.eventbus import dispatch_memo_event
+
+    recipient_id = uuid.uuid4()
+    result_mock = MagicMock()
+    result_mock.all.return_value = [(recipient_id, "agent")]
+    mock_session.execute.return_value = result_mock
+
+    with patch("app.services.eventbus.settings") as mock_settings, \
+         patch("app.services.eventbus._push_to_agent"):
+        mock_settings.eventbus_enabled = True
+        await dispatch_memo_event(
+            mock_session,
+            org_id=org_id,
+            project_id=project_id,
+            event_type="memo_created",
+            source_entity_id=uuid.uuid4(),
+            sender_id=uuid.uuid4(),
+            recipient_ids=[recipient_id],
+            payload={},
+        )
+
+    mock_session.begin_nested.assert_called_once()
+
+
+@pytest.mark.anyio
+async def test_dispatch_flush_failure_does_not_corrupt_session(org_id, project_id):
+    """begin_nested 안에서 예외 발생 시 outer session은 정상 — add가 호출 안 됨."""
+    from app.services.eventbus import dispatch_memo_event
+
+    broken_session = AsyncMock()
+    broken_session.add = MagicMock()
+
+    # execute 성공 (members 조회)
+    result_mock = MagicMock()
+    result_mock.all.return_value = [(uuid.uuid4(), "agent")]
+    broken_session.execute.return_value = result_mock
+
+    # begin_nested context manager가 예외 발생
+    nested_ctx = AsyncMock()
+    nested_ctx.__aenter__ = AsyncMock(side_effect=Exception("DB savepoint failed"))
+    nested_ctx.__aexit__ = AsyncMock(return_value=False)
+    broken_session.begin_nested = MagicMock(return_value=nested_ctx)
+
+    with patch("app.services.eventbus.settings") as mock_settings, \
+         patch("app.services.eventbus._push_to_agent") as mock_push:
+        mock_settings.eventbus_enabled = True
+        # 예외가 밖으로 전파되지 않아야 함
+        await dispatch_memo_event(
+            broken_session,
+            org_id=org_id,
+            project_id=project_id,
+            event_type="memo_created",
+            source_entity_id=uuid.uuid4(),
+            sender_id=None,
+            recipient_ids=[uuid.uuid4()],
+            payload={},
+        )
+
+    # savepoint 실패 → add 호출 안 됨 + SSE push 안 됨
+    broken_session.add.assert_not_called()
     mock_push.assert_not_called()

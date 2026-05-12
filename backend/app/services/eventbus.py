@@ -38,6 +38,8 @@ async def dispatch_memo_event(
     if not recipient_ids:
         return
 
+    dispatches: list[tuple[Event, str, uuid.UUID]] = []
+
     try:
         result = await db.execute(
             select(TeamMember.id, TeamMember.type).where(
@@ -50,31 +52,33 @@ async def dispatch_memo_event(
             return
 
         now = datetime.now(timezone.utc)
-        dispatches: list[tuple[Event, str, uuid.UUID]] = []  # (event, member_type, member_id)
-        for member_id, member_type in members:
-            event = Event(
-                id=uuid.uuid4(),
-                org_id=org_id,
-                project_id=project_id,
-                event_type=event_type,
-                source_entity_type="memo",
-                source_entity_id=source_entity_id,
-                sender_id=sender_id,
-                recipient_id=member_id,
-                recipient_type=member_type,
-                payload=payload,
-                status="pending",
-                created_at=now,
-            )
-            dispatches.append((event, member_type, member_id))
-            db.add(event)
-
-        await db.flush()
-
-        # SSE 라우팅: 연결 중인 에이전트에게 즉시 enqueue (delivered 마킹은 SSE yield 후 처리)
-        for event, member_type, member_id in dispatches:
-            if member_type == "agent":
-                _push_to_agent(str(member_id), _event_to_payload(event))
+        # begin_nested()으로 savepoint — flush 실패 시 outer session 오염 방지
+        async with db.begin_nested():
+            for member_id, member_type in members:
+                event = Event(
+                    id=uuid.uuid4(),
+                    org_id=org_id,
+                    project_id=project_id,
+                    event_type=event_type,
+                    source_entity_type="memo",
+                    source_entity_id=source_entity_id,
+                    sender_id=sender_id,
+                    recipient_id=member_id,
+                    recipient_type=member_type,
+                    payload=payload,
+                    status="pending",
+                    created_at=now,
+                )
+                dispatches.append((event, member_type, member_id))
+                db.add(event)
 
     except Exception:
-        pass
+        return  # savepoint 롤백됨 — outer session 정상 유지
+
+    # SSE 라우팅: savepoint 밖에서 처리 (DB 오류와 무관)
+    for event, member_type, member_id in dispatches:
+        if member_type == "agent":
+            try:
+                _push_to_agent(str(member_id), _event_to_payload(event))
+            except Exception:
+                pass
