@@ -53,7 +53,7 @@ export default function DocSlugPage() {
   const router = useRouter();
   const t = useTranslations('docs');
 
-  const { projectId, setTree } = useDocsLayout();
+  const { projectId, setTree, pendingDocUpdate, clearPendingDocUpdate } = useDocsLayout();
 
   const [selectedDoc, setSelectedDoc] = useState<DocDetail | null>(null);
   const [title, setTitle] = useState('');
@@ -92,6 +92,14 @@ export default function DocSlugPage() {
   }, [projectId, slug]);
 
   useEffect(() => { void fetchDoc(); }, [fetchDoc]);
+
+  // layout handleRename PATCH 성공 후 updated_at 동기화 — useDocSync 기준선 desync 방지
+  useEffect(() => {
+    if (!pendingDocUpdate || !selectedDoc || pendingDocUpdate.id !== selectedDoc.id) return;
+    setSelectedDoc((prev) => prev ? { ...prev, title: pendingDocUpdate.title, updated_at: pendingDocUpdate.updated_at } : null);
+    setTitle(pendingDocUpdate.title);
+    clearPendingDocUpdate();
+  }, [pendingDocUpdate, selectedDoc, clearPendingDocUpdate]);
 
   const handleCopyMarkdown = useCallback(async () => {
     try {

@@ -12,7 +12,7 @@ import { ToastContainer, useToast } from '@/components/ui/toast';
 import { TopBarSlot } from '@/components/nav/top-bar-slot';
 import { ChevronDown, ChevronRight, Menu, Plus, X } from 'lucide-react';
 import { useDashboardContext } from '../../dashboard/dashboard-shell';
-import { DocsLayoutContext, type Doc } from './docs-context';
+import { DocsLayoutContext, type Doc, type DocUpdate } from './docs-context';
 
 export default function DocsLayout({ children }: { children: React.ReactNode }) {
   const router = useRouter();
@@ -31,6 +31,9 @@ export default function DocsLayout({ children }: { children: React.ReactNode }) 
   const [docsNextCursor, setDocsNextCursor] = useState<string | null>(null);
   const [docsLoadingMore, setDocsLoadingMore] = useState(false);
   const [tagsCollapsed, setTagsCollapsed] = useState(true);
+
+  const [pendingDocUpdate, setPendingDocUpdate] = useState<DocUpdate | null>(null);
+  const clearPendingDocUpdate = useCallback(() => setPendingDocUpdate(null), []);
 
   // Create form states
   const [showCreate, setShowCreate] = useState(false);
@@ -98,7 +101,12 @@ export default function DocsLayout({ children }: { children: React.ReactNode }) 
     setTree((prev) => prev.map((doc) => (doc.id === docId ? { ...doc, title: newName } : doc)));
     try {
       const res = await fetch(`/api/docs/${docId}`, { method: 'PATCH', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ title: newName }) });
-      if (!res.ok) await fetchTree();
+      if (!res.ok) {
+        await fetchTree();
+      } else {
+        const { data } = await res.json() as { data: { updated_at: string } };
+        setPendingDocUpdate({ id: docId, title: newName, updated_at: data.updated_at });
+      }
     } catch { await fetchTree(); }
   }, [fetchTree]);
 
@@ -249,7 +257,7 @@ export default function DocsLayout({ children }: { children: React.ReactNode }) 
   const mainContent = showCreate ? createForm : children;
 
   return (
-    <DocsLayoutContext.Provider value={{ projectId, setTree, handleNewDoc, fetchTree }}>
+    <DocsLayoutContext.Provider value={{ projectId, setTree, handleNewDoc, fetchTree, pendingDocUpdate, clearPendingDocUpdate }}>
       <TopBarSlot
         title={<h1 className="text-sm font-medium">{t('title')}</h1>}
         actions={<Button size="sm" variant="outline" onClick={handleNewDoc}><Plus className="mr-1.5 h-3.5 w-3.5" />{t('newDoc')}</Button>}

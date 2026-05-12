@@ -12,11 +12,19 @@ export interface Doc {
   is_folder?: boolean;
 }
 
+export interface DocUpdate {
+  id: string;
+  title: string;
+  updated_at: string;
+}
+
 interface DocsLayoutContextType {
   projectId: string | undefined;
   setTree: Dispatch<SetStateAction<Doc[]>>;
   handleNewDoc: () => void;
   fetchTree: () => Promise<void>;
+  pendingDocUpdate: DocUpdate | null;
+  clearPendingDocUpdate: () => void;
 }
 
 export const DocsLayoutContext = createContext<DocsLayoutContextType | null>(null);
