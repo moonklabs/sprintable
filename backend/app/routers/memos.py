@@ -14,6 +14,7 @@ from app.dependencies.auth import AuthContext, get_current_user, get_verified_or
 from app.dependencies.database import get_db
 from app.models.memo import MemoAssignee, MemoReply
 from app.models.team import TeamMember
+from app.models.webhook_config import WebhookConfig
 from app.repositories.memo import MemoReplyRepository, MemoRepository
 from app.routers.events import publish_event
 from app.schemas.memo import CreateMemo, CreateReply, MemoListResponse, MemoResponse, ReplyResponse, UpdateMemo
@@ -65,10 +66,9 @@ async def _collect_reply_webhook_urls(
     if not recipient_ids:
         return []
     rows = await db.execute(
-        select(TeamMember.webhook_url).where(
-            TeamMember.id.in_(recipient_ids),
-            TeamMember.is_active.is_(True),
-            TeamMember.webhook_url.isnot(None),
+        select(WebhookConfig.url).where(
+            WebhookConfig.member_id.in_(recipient_ids),
+            WebhookConfig.is_active.is_(True),
         )
     )
     return [row[0] for row in rows if row[0]]
@@ -156,6 +156,7 @@ async def list_memos(
 @router.post("", response_model=MemoListResponse, status_code=201)
 async def create_memo(
     body: CreateMemo,
+    background_tasks: BackgroundTasks,
     session: AsyncSession = Depends(get_db),
     _auth: AuthContext = Depends(get_current_user),
 ) -> MemoListResponse:
@@ -186,6 +187,27 @@ async def create_memo(
     if all_embeds:
         await repo.create_entity_links(memo.id, all_embeds)
     publish_event(str(body.org_id), "memo_created", {"id": str(memo.id)})
+    memo_recipient_ids: set[uuid.UUID] = set()
+    if body.assigned_to:
+        memo_recipient_ids.add(body.assigned_to)
+    if body.assigned_to_ids:
+        memo_recipient_ids.update(body.assigned_to_ids)
+    memo_recipient_ids.discard(body.created_by)
+    if memo_recipient_ids:
+        wh_rows = await session.execute(
+            select(WebhookConfig.url).where(
+                WebhookConfig.member_id.in_(memo_recipient_ids),
+                WebhookConfig.is_active.is_(True),
+            )
+        )
+        memo_webhook_urls = [row[0] for row in wh_rows if row[0]]
+        if memo_webhook_urls:
+            app_url = os.environ.get("NEXT_PUBLIC_APP_URL", "")
+            memo_url = f"{app_url}/memos?id={memo.id}" if app_url else ""
+            wh_content = f"**새 메모**\n{(body.content or '')[:500]}\n\nmemo_id: {memo.id}"
+            wh_title = body.title or "새 메모"
+            for wh_url in memo_webhook_urls:
+                background_tasks.add_task(_fire_webhook, wh_url, wh_content, wh_title, memo_url, str(memo.id))
     _is_workflow_origin = (body.memo_metadata or {}).get("origin") == "workflow"
     if body.project_id and not _is_workflow_origin:
         from app.services.workflow_pipeline import process_event
