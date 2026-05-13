@@ -346,9 +346,9 @@ async def add_reply(
     )
     publish_event(str(repo.org_id), "reply_created", {"id": str(reply.id), "memo_id": str(id)})
 
-    # E-EVENTBUS P4 S15: chat:message 이벤트 발행 (thread 참여자 전원 SSE 전달)
+    # E-EVENTBUS P4 S15: chat:message 이벤트 발행 + events 테이블 persist + SSE push
     try:
-        from app.routers.events import _push_to_agent
+        from app.routers.chats import _persist_and_push_chat_events
         chat_participants: set[uuid.UUID] = set()
         if memo.assigned_to:
             chat_participants.add(memo.assigned_to)
@@ -364,8 +364,7 @@ async def add_reply(
             "attachments": reply.attachments,
             "created_at": reply.created_at.isoformat(),
         }
-        for participant_id in chat_participants:
-            _push_to_agent(str(participant_id), chat_payload)
+        await _persist_and_push_chat_events(db, memo, reply, repo.org_id, body.created_by, chat_participants, chat_payload)
     except Exception:
         pass
 

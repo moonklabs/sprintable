@@ -9,12 +9,50 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.dependencies.auth import AuthContext, get_current_user, get_verified_org_id
 from app.dependencies.database import get_db
+from app.models.event import Event
 from app.models.memo import Memo, MemoReply
+from app.models.team import TeamMember
 from app.repositories.memo import MemoReplyRepository
 from app.routers.events import _push_to_agent
 from app.schemas.memo import ReplyResponse
 
 router = APIRouter(prefix="/api/v2/chats", tags=["chats"])
+
+
+async def _persist_and_push_chat_events(
+    db: AsyncSession,
+    memo: Memo,
+    reply: MemoReply,
+    org_id: uuid.UUID,
+    sender_id: uuid.UUID,
+    participants: set[uuid.UUID],
+    payload: dict,
+) -> None:
+    """chat:message Event를 events 테이블에 INSERT 후 SSE push (에이전트 대상)."""
+    if not participants or not memo.project_id:
+        return
+    member_types_result = await db.execute(
+        select(TeamMember.id, TeamMember.type).where(TeamMember.id.in_(participants))
+    )
+    member_type_map = {row[0]: row[1] for row in member_types_result.all()}
+    for participant_id in participants:
+        member_type = member_type_map.get(participant_id, "human")
+        event = Event(
+            project_id=memo.project_id,
+            org_id=org_id,
+            event_type="chat:message",
+            source_entity_type="memo_reply",
+            source_entity_id=reply.id,
+            sender_id=sender_id,
+            recipient_id=participant_id,
+            recipient_type=member_type,
+            payload=payload,
+            status="pending",
+        )
+        db.add(event)
+        if member_type == "agent":
+            _push_to_agent(str(participant_id), payload)
+    await db.flush()
 
 
 class ChatMessageRequest(BaseModel):
@@ -72,30 +110,28 @@ async def send_chat_message(
         attachments=body.attachments,
     )
 
-    await db.commit()
-
-    # chat:message 이벤트 → commit 완료 후 SSE 전달 (commit 실패 시 유령 SSE 방지)
+    chat_participants: set[uuid.UUID] = set()
+    if memo.assigned_to:
+        chat_participants.add(memo.assigned_to)
+    if memo.created_by:
+        chat_participants.add(memo.created_by)
+    chat_participants.discard(body.created_by)
+    chat_payload = {
+        "event_type": "chat:message",
+        "thread_id": str(thread_id),
+        "reply_id": str(reply.id),
+        "content": reply.content,
+        "created_by": str(reply.created_by),
+        "attachments": reply.attachments,
+        "created_at": reply.created_at.isoformat(),
+    }
+    # Event INSERT + SSE push (commit 전에 flush, 오프라인 에이전트도 poll_events로 조회 가능)
     try:
-        chat_participants: set[uuid.UUID] = set()
-        if memo.assigned_to:
-            chat_participants.add(memo.assigned_to)
-        if memo.created_by:
-            chat_participants.add(memo.created_by)
-        chat_participants.discard(body.created_by)
-        chat_payload = {
-            "event_type": "chat:message",
-            "thread_id": str(thread_id),
-            "reply_id": str(reply.id),
-            "content": reply.content,
-            "created_by": str(reply.created_by),
-            "attachments": reply.attachments,
-            "created_at": reply.created_at.isoformat(),
-        }
-        for participant_id in chat_participants:
-            _push_to_agent(str(participant_id), chat_payload)
+        await _persist_and_push_chat_events(db, memo, reply, org_id, body.created_by, chat_participants, chat_payload)
     except Exception:
         pass
 
+    await db.commit()
     return ReplyResponse.model_validate(reply)
 
 
@@ -135,28 +171,25 @@ async def send_chat_message_with_file(
         attachments=attachments,
     )
 
-    await db.commit()
-
-    # chat:message SSE 전달 (commit 완료 후)
+    chat_participants: set[uuid.UUID] = set()
+    if memo.assigned_to:
+        chat_participants.add(memo.assigned_to)
+    if memo.created_by:
+        chat_participants.add(memo.created_by)
+    chat_participants.discard(created_by)
+    chat_payload = {
+        "event_type": "chat:message",
+        "thread_id": str(thread_id),
+        "reply_id": str(reply.id),
+        "content": reply.content,
+        "created_by": str(reply.created_by),
+        "attachments": reply.attachments,
+        "created_at": reply.created_at.isoformat(),
+    }
     try:
-        chat_participants: set[uuid.UUID] = set()
-        if memo.assigned_to:
-            chat_participants.add(memo.assigned_to)
-        if memo.created_by:
-            chat_participants.add(memo.created_by)
-        chat_participants.discard(created_by)
-        chat_payload = {
-            "event_type": "chat:message",
-            "thread_id": str(thread_id),
-            "reply_id": str(reply.id),
-            "content": reply.content,
-            "created_by": str(reply.created_by),
-            "attachments": reply.attachments,
-            "created_at": reply.created_at.isoformat(),
-        }
-        for participant_id in chat_participants:
-            _push_to_agent(str(participant_id), chat_payload)
+        await _persist_and_push_chat_events(db, memo, reply, org_id, created_by, chat_participants, chat_payload)
     except Exception:
         pass
 
+    await db.commit()
     return ReplyResponse.model_validate(reply)
