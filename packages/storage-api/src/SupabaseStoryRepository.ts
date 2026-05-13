@@ -16,8 +16,9 @@ export class SupabaseStoryRepository implements IStoryRepository {
   }
 
   async backlog(projectId: string): Promise<Story[]> {
-    const all = await fastapiCall<Story[]>('GET', '/api/v2/stories', this.accessToken, { query: { project_id: projectId } });
-    return all.filter((s) => !s.sprint_id && !s.deleted_at);
+    return fastapiCall<Story[]>('GET', '/api/v2/stories', this.accessToken, {
+      query: { project_id: projectId, no_sprint: true },
+    });
   }
 
   async getById(id: string, _scope?: RepositoryScopeContext): Promise<Story> {

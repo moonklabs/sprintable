@@ -1,5 +1,8 @@
+from __future__ import annotations
+
 import uuid
 
+from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models.pm import Story
@@ -10,6 +13,18 @@ from app.schemas.story import STATUS_TRANSITIONS
 class StoryRepository(BaseRepository[Story]):
     def __init__(self, session: AsyncSession, org_id: uuid.UUID) -> None:
         super().__init__(Story, session, org_id)
+
+    async def list_backlog(self, project_id: uuid.UUID, limit: int = 1000) -> list[Story]:
+        """sprint 미배정 + 삭제되지 않은 스토리만 서버사이드 필터."""
+        result = await self.session.execute(
+            select(Story).where(
+                self._org_filter(),
+                Story.project_id == project_id,
+                Story.sprint_id.is_(None),
+                Story.deleted_at.is_(None),
+            ).limit(limit)
+        )
+        return list(result.scalars().all())
 
     async def transition_status(self, id: uuid.UUID) -> Story:
         story = await self.get(id)

@@ -12,11 +12,11 @@ class TeamMemberRepository(BaseRepository[TeamMember]):
     def __init__(self, session: AsyncSession, org_id: uuid.UUID) -> None:
         super().__init__(TeamMember, session, org_id)
 
-    async def list(self, **filters: Any) -> list[TeamMember]:
+    async def list(self, limit: int = 1000, **filters: Any) -> list[TeamMember]:  # type: ignore[override]
         q = select(TeamMember).where(self._org_filter())
         for attr, val in filters.items():
             q = q.where(getattr(TeamMember, attr) == val)
-        result = await self.session.execute(q)
+        result = await self.session.execute(q.limit(limit))
         return list(result.scalars().all())
 
     async def deactivate(self, id: uuid.UUID) -> bool:

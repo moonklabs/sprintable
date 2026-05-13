@@ -54,8 +54,14 @@ async def list_stories(
     sprint_id: uuid.UUID | None = Query(default=None),
     assignee_id: uuid.UUID | None = Query(default=None),
     status_filter: str | None = Query(default=None, alias="status"),
+    no_sprint: bool = Query(default=False, description="sprint 미배정 스토리만 반환"),
+    limit: int = Query(default=1000, ge=1, le=2000),
     repo: StoryRepository = Depends(_get_repo),
 ) -> list[StoryResponse]:
+    if no_sprint and project_id:
+        stories = await repo.list_backlog(project_id, limit=limit)
+        return [StoryResponse.model_validate(s) for s in stories]
+
     filters: dict = {}
     if project_id:
         filters["project_id"] = project_id
@@ -67,7 +73,7 @@ async def list_stories(
         filters["assignee_id"] = assignee_id
     if status_filter:
         filters["status"] = status_filter
-    stories = await repo.list(**filters)
+    stories = await repo.list(limit=limit, **filters)
     return [StoryResponse.model_validate(s) for s in stories]
 
 

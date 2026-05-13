@@ -5,6 +5,7 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.database import Base
+from app.models.base import SoftDeleteMixin
 
 T = TypeVar("T", bound=Base)
 
@@ -24,11 +25,13 @@ class BaseRepository(Generic[T]):
         )
         return result.scalar_one_or_none()
 
-    async def list(self, **filters: Any) -> list[T]:
+    async def list(self, limit: int = 1000, **filters: Any) -> list[T]:
         q = select(self.model).where(self._org_filter())
+        if issubclass(self.model, SoftDeleteMixin):
+            q = q.where(self.model.deleted_at.is_(None))  # type: ignore[attr-defined]
         for attr, val in filters.items():
             q = q.where(getattr(self.model, attr) == val)
-        result = await self.session.execute(q)
+        result = await self.session.execute(q.limit(limit))
         return list(result.scalars().all())
 
     async def create(self, **data: Any) -> T:
