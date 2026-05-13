@@ -5,7 +5,7 @@ from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from typing import Literal
 
-from fastapi import Depends, Header, HTTPException, Request, status
+from fastapi import Depends, Header, HTTPException, Query, Request, status
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -213,6 +213,50 @@ async def get_verified_org_id(
         await _verify_project_in_org(project_id, org_id, db, request)
 
     return org_id
+
+
+async def get_project_scoped_org_id(
+    project_id: uuid.UUID | None = Query(default=None),
+    auth: AuthContext = Depends(get_current_user),
+    x_org_id: str | None = Header(default=None, alias="X-Org-Id"),
+    db: AsyncSession = Depends(get_db),
+    request: Request = None,
+) -> uuid.UUID:
+    """project_id query param 또는 X-Project-Id 헤더가 있을 때, 해당 project의 org_id로
+    cross-org 접근을 허용. TeamMember.is_active 기반 검증. 미멤버 → 403.
+    project_id가 없으면 get_verified_org_id 동작과 동일."""
+    base_org_id = await get_verified_org_id(
+        auth=auth, x_org_id=x_org_id, x_project_id=None, db=db, request=request
+    )
+    if not project_id:
+        return base_org_id
+
+    from app.models.project import Project
+    result = await db.execute(
+        select(Project.org_id).where(Project.id == project_id)
+    )
+    project_org_id = result.scalar_one_or_none()
+    if not project_org_id:
+        return base_org_id
+
+    # project_id가 지정된 경우 org 동일 여부 무관하게 TeamMember 검증
+    # (동일 org 내 다른 project 미멤버 우회 방지)
+    from app.models.team import TeamMember
+    from sqlalchemy import or_
+    uid = uuid.UUID(auth.user_id)
+    member = await db.execute(
+        select(TeamMember.id).where(
+            or_(TeamMember.user_id == uid, TeamMember.id == uid),
+            TeamMember.project_id == project_id,
+            TeamMember.is_active.is_(True),
+        ).limit(1)
+    )
+    if member.scalar_one_or_none() is None:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="해당 프로젝트의 멤버가 아닌",
+        )
+    return project_org_id
 
 
 def get_org_scope(

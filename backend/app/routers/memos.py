@@ -10,7 +10,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 logger = logging.getLogger(__name__)
 
-from app.dependencies.auth import AuthContext, get_current_user, get_verified_org_id
+from app.dependencies.auth import AuthContext, get_current_user, get_project_scoped_org_id, get_verified_org_id
 from app.dependencies.database import get_db
 from app.models.memo import MemoAssignee, MemoReply
 from app.models.team import TeamMember
@@ -111,7 +111,7 @@ async def _resolve_author_role(db: AsyncSession, created_by: uuid.UUID | None) -
 
 def _get_repo(
     session: AsyncSession = Depends(get_db),
-    org_id: uuid.UUID = Depends(get_verified_org_id),
+    org_id: uuid.UUID = Depends(get_project_scoped_org_id),
 ) -> MemoRepository:
     return MemoRepository(session, org_id)
 

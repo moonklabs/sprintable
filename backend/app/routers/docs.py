@@ -6,7 +6,7 @@ from pydantic import BaseModel
 from sqlalchemy import delete, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.dependencies.auth import AuthContext, get_current_user, get_verified_org_id
+from app.dependencies.auth import AuthContext, get_current_user, get_project_scoped_org_id, get_verified_org_id
 from app.dependencies.database import get_db
 from app.models.doc import DocComment, DocRevision
 from app.models.team import TeamMember
@@ -18,7 +18,7 @@ router = APIRouter(prefix="/api/v2/docs", tags=["docs"])
 
 def _get_repo(
     session: AsyncSession = Depends(get_db),
-    org_id: uuid.UUID = Depends(get_verified_org_id),
+    org_id: uuid.UUID = Depends(get_project_scoped_org_id),
 ) -> DocRepository:
     return DocRepository(session, org_id)
 
@@ -112,6 +112,7 @@ class DocPreviewResponse(BaseModel):
 async def get_doc_preview(
     q: str = Query(..., description="slug or UUID"),
     db: AsyncSession = Depends(get_db),
+    auth: AuthContext = Depends(get_current_user),
     repo: DocRepository = Depends(_get_repo),
 ) -> DocPreviewResponse:
     from app.models.doc import Doc
@@ -124,8 +125,28 @@ async def get_doc_preview(
 
     result = await db.execute(stmt.limit(1))
     doc = result.scalar_one_or_none()
+
     if doc is None:
-        raise HTTPException(status_code=404, detail="Document not found")
+        # cross-org fallback: slug/uuid 기반 전체 org 조회 후 membership 검증
+        try:
+            doc_uuid2 = uuid.UUID(q)
+            fallback_stmt = select(Doc).where(Doc.id == doc_uuid2, Doc.deleted_at.is_(None))
+        except ValueError:
+            fallback_stmt = select(Doc).where(Doc.slug == q, Doc.deleted_at.is_(None))
+        fallback = await db.execute(fallback_stmt.limit(1))
+        doc = fallback.scalar_one_or_none()
+        if doc is None:
+            raise HTTPException(status_code=404, detail="Document not found")
+        uid = uuid.UUID(auth.user_id)
+        member = await db.execute(
+            select(TeamMember.id).where(
+                or_(TeamMember.user_id == uid, TeamMember.id == uid),
+                TeamMember.project_id == doc.project_id,
+                TeamMember.is_active.is_(True),
+            ).limit(1)
+        )
+        if member.scalar_one_or_none() is None:
+            raise HTTPException(status_code=403, detail="해당 프로젝트의 멤버가 아닌")
 
     return DocPreviewResponse(
         id=doc.id,
@@ -141,11 +162,30 @@ async def get_doc_preview(
 @router.get("/{id}", response_model=DocResponse)
 async def get_doc(
     id: uuid.UUID,
+    session: AsyncSession = Depends(get_db),
+    auth: AuthContext = Depends(get_current_user),
     repo: DocRepository = Depends(_get_repo),
 ) -> DocResponse:
     doc = await repo.get(id)
     if doc is None:
-        raise HTTPException(status_code=404, detail="Doc not found")
+        # cross-org fallback: project_id query param 없이 단일 id로 접근한 경우
+        from app.models.doc import Doc
+        result = await session.execute(
+            select(Doc).where(Doc.id == id, Doc.deleted_at.is_(None))
+        )
+        doc = result.scalar_one_or_none()
+        if doc is None:
+            raise HTTPException(status_code=404, detail="Doc not found")
+        uid = uuid.UUID(auth.user_id)
+        member = await session.execute(
+            select(TeamMember.id).where(
+                or_(TeamMember.user_id == uid, TeamMember.id == uid),
+                TeamMember.project_id == doc.project_id,
+                TeamMember.is_active.is_(True),
+            ).limit(1)
+        )
+        if member.scalar_one_or_none() is None:
+            raise HTTPException(status_code=403, detail="해당 프로젝트의 멤버가 아닌")
     return DocResponse.model_validate(doc)
 
 
