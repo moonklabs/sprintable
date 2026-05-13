@@ -16,7 +16,7 @@ export function registerRetroTools(server: McpServer) {
       const params = new URLSearchParams({ project_id });
       if (org_id) params.set('org_id', org_id);
       if (initiator_id) params.set('initiator_id', initiator_id);
-      const data = await pmApi(`/api/retro/${sprint_id}?${params}`);
+      const data = await pmApi(`/api/v2/retro/${sprint_id}?${params}`);
       return ok(data);
     } catch (e) {
       return err(e instanceof PmApiError ? e.message : String(e));
@@ -28,7 +28,7 @@ export function registerRetroTools(server: McpServer) {
     status: z.enum(['open', 'done']),
   }, async ({ action_id, status }) => {
     try {
-      const data = await pmApi(`/api/retro/actions/${action_id}`, {
+      const data = await pmApi(`/api/v2/retro/actions/${action_id}`, {
         method: 'PATCH',
         body: JSON.stringify({ status }),
       });
@@ -42,7 +42,7 @@ export function registerRetroTools(server: McpServer) {
     sprint_id: z.string(),
   }, async ({ sprint_id }) => {
     try {
-      const data = await pmApi(`/api/sprints/${sprint_id}/burndown`);
+      const data = await pmApi(`/api/v2/sprints/${sprint_id}/burndown`);
       return ok(data);
     } catch (e) {
       return err(e instanceof PmApiError ? e.message : String(e));
@@ -54,7 +54,7 @@ export function registerRetroTools(server: McpServer) {
     message: z.string().optional(),
   }, async ({ sprint_id, message }) => {
     try {
-      const data = await pmApi(`/api/sprints/${sprint_id}/kickoff`, {
+      const data = await pmApi(`/api/v2/sprints/${sprint_id}/kickoff`, {
         method: 'POST',
         body: JSON.stringify(message ? { message } : {}),
       });
@@ -69,7 +69,7 @@ export function registerRetroTools(server: McpServer) {
     date: z.string().describe('YYYY-MM-DD'),
   }, async ({ sprint_id, date }) => {
     try {
-      const data = await pmApi(`/api/sprints/${sprint_id}/checkin?date=${date}`);
+      const data = await pmApi(`/api/v2/sprints/${sprint_id}/checkin?date=${date}`);
       return ok(data);
     } catch (e) {
       return err(e instanceof PmApiError ? e.message : String(e));

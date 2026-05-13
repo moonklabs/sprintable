@@ -15,7 +15,7 @@ export function registerDocsTools(server: McpServer) {
       const params = new URLSearchParams({ project_id });
       if (tags?.length) params.set('tags', tags.join(','));
       else params.set('view', 'tree');
-      const data = await pmApi(`/api/docs?${params.toString()}`);
+      const data = await pmApi(`/api/v2/docs?${params.toString()}`);
       return ok(data);
     } catch (e) { return handleError(e); }
   });
@@ -25,7 +25,7 @@ export function registerDocsTools(server: McpServer) {
     slug: z.string(),
   }, async ({ project_id, slug }) => {
     try {
-      const data = await pmApi(`/api/docs?project_id=${encodeURIComponent(project_id)}&slug=${encodeURIComponent(slug)}`);
+      const data = await pmApi(`/api/v2/docs?project_id=${encodeURIComponent(project_id)}&slug=${encodeURIComponent(slug)}`);
       return ok(data);
     } catch (e) { return handleError(e); }
   });
@@ -41,7 +41,7 @@ export function registerDocsTools(server: McpServer) {
     tags: z.array(z.string()).optional(),
   }, async (body) => {
     try {
-      const data = await pmApi('/api/docs', { method: 'POST', body: JSON.stringify(body) });
+      const data = await pmApi('/api/v2/docs', { method: 'POST', body: JSON.stringify(body) });
       return ok(data);
     } catch (e) { return handleError(e); }
   });
@@ -58,7 +58,7 @@ export function registerDocsTools(server: McpServer) {
     force_overwrite: z.boolean().optional().describe('Skip conflict check and force write'),
   }, async ({ doc_id, ...updates }) => {
     try {
-      const data = await pmApi(`/api/docs/${encodeURIComponent(doc_id)}`, {
+      const data = await pmApi(`/api/v2/docs/${encodeURIComponent(doc_id)}`, {
         method: 'PATCH',
         body: JSON.stringify(updates),
       });
@@ -70,7 +70,7 @@ export function registerDocsTools(server: McpServer) {
     doc_id: z.string(),
   }, async ({ doc_id }) => {
     try {
-      await pmApi(`/api/docs/${encodeURIComponent(doc_id)}`, { method: 'DELETE' });
+      await pmApi(`/api/v2/docs/${encodeURIComponent(doc_id)}`, { method: 'DELETE' });
       return ok({ deleted: true });
     } catch (e) { return handleError(e); }
   });
@@ -83,7 +83,7 @@ export function registerDocsTools(server: McpServer) {
     try {
       const params = new URLSearchParams({ project_id, q: query });
       if (tags?.length) params.set('tags', tags.join(','));
-      const data = await pmApi(`/api/docs?${params.toString()}`);
+      const data = await pmApi(`/api/v2/docs?${params.toString()}`);
       return ok(data);
     } catch (e) { return handleError(e); }
   });

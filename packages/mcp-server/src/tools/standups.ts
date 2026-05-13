@@ -11,7 +11,7 @@ function err(message: string) {
 }
 
 export function registerStandupsTools(server: McpServer) {
-  // POST /api/standup/feedback
+  // POST /api/v2/standup/feedback
   server.tool(
     'review_standup',
     'Post a review/feedback on a standup entry',
@@ -24,7 +24,7 @@ export function registerStandupsTools(server: McpServer) {
       try {
         const body: Record<string, unknown> = { standup_entry_id, feedback_text };
         if (review_type !== undefined) body.review_type = review_type;
-        const data = await pmApi('/api/standup/feedback', { method: 'POST', body: JSON.stringify(body) });
+        const data = await pmApi('/api/v2/standup/feedback', { method: 'POST', body: JSON.stringify(body) });
         return ok(data);
       } catch (e) {
         return err(e instanceof PmApiError ? e.message : String(e));
@@ -32,7 +32,7 @@ export function registerStandupsTools(server: McpServer) {
     },
   );
 
-  // GET /api/standup/feedback/:entry_id
+  // GET /api/v2/standup/feedback/:entry_id
   server.tool(
     'get_standup_feedback',
     'Get all feedback for a standup entry',
@@ -41,7 +41,7 @@ export function registerStandupsTools(server: McpServer) {
     },
     async ({ standup_entry_id }) => {
       try {
-        const data = await pmApi(`/api/standup/feedback/${standup_entry_id}`);
+        const data = await pmApi(`/api/v2/standup/feedback/${standup_entry_id}`);
         return ok(data);
       } catch (e) {
         return err(e instanceof PmApiError ? e.message : String(e));

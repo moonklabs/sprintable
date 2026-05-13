@@ -20,7 +20,7 @@ export function registerStoriesTools(server: McpServer) {
       if (epic_id) params.set('epic_id', epic_id);
       if (assignee_id) params.set('assignee_id', assignee_id);
       if (status) params.set('status', status);
-      const data = await pmApi(`/api/stories?${params.toString()}`);
+      const data = await pmApi(`/api/v2/stories?${params.toString()}`);
       return ok(data);
     } catch (e) { return handleError(e); }
   });
@@ -29,7 +29,7 @@ export function registerStoriesTools(server: McpServer) {
     project_id: z.string().describe('Project ID'),
   }, async ({ project_id }) => {
     try {
-      const data = await pmApi(`/api/stories/backlog?project_id=${encodeURIComponent(project_id)}`);
+      const data = await pmApi(`/api/v2/stories/backlog?project_id=${encodeURIComponent(project_id)}`);
       return ok(data);
     } catch (e) { return handleError(e); }
   });
@@ -46,7 +46,7 @@ export function registerStoriesTools(server: McpServer) {
     acceptance_criteria: z.string().optional(),
   }, async (body) => {
     try {
-      const data = await pmApi('/api/stories', { method: 'POST', body: JSON.stringify(body) });
+      const data = await pmApi('/api/v2/stories', { method: 'POST', body: JSON.stringify(body) });
       return ok(data);
     } catch (e) { return handleError(e); }
   });
@@ -62,7 +62,7 @@ export function registerStoriesTools(server: McpServer) {
     epic_id: z.string().optional(),
   }, async ({ story_id, ...updates }) => {
     try {
-      const data = await pmApi(`/api/stories/${encodeURIComponent(story_id)}`, {
+      const data = await pmApi(`/api/v2/stories/${encodeURIComponent(story_id)}`, {
         method: 'PATCH',
         body: JSON.stringify(updates),
       });
@@ -74,7 +74,7 @@ export function registerStoriesTools(server: McpServer) {
     story_id: z.string(),
   }, async ({ story_id }) => {
     try {
-      await pmApi(`/api/stories/${encodeURIComponent(story_id)}`, { method: 'DELETE' });
+      await pmApi(`/api/v2/stories/${encodeURIComponent(story_id)}`, { method: 'DELETE' });
       return ok({ deleted: true });
     } catch (e) { return handleError(e); }
   });
@@ -84,7 +84,7 @@ export function registerStoriesTools(server: McpServer) {
     sprint_id: z.string(),
   }, async ({ story_id, sprint_id }) => {
     try {
-      const data = await pmApi(`/api/stories/${encodeURIComponent(story_id)}`, {
+      const data = await pmApi(`/api/v2/stories/${encodeURIComponent(story_id)}`, {
         method: 'PATCH',
         body: JSON.stringify({ sprint_id }),
       });
@@ -96,7 +96,7 @@ export function registerStoriesTools(server: McpServer) {
     story_id: z.string(),
   }, async ({ story_id }) => {
     try {
-      const data = await pmApi(`/api/stories/${encodeURIComponent(story_id)}`, {
+      const data = await pmApi(`/api/v2/stories/${encodeURIComponent(story_id)}`, {
         method: 'PATCH',
         body: JSON.stringify({ sprint_id: null }),
       });
@@ -109,7 +109,7 @@ export function registerStoriesTools(server: McpServer) {
     status: z.enum(['backlog', 'ready-for-dev', 'in-progress', 'in-review', 'done']),
   }, async ({ story_id, status }) => {
     try {
-      const data = await pmApi(`/api/stories/${encodeURIComponent(story_id)}/status`, {
+      const data = await pmApi(`/api/v2/stories/${encodeURIComponent(story_id)}/status`, {
         method: 'PATCH',
         body: JSON.stringify({ status }),
       });

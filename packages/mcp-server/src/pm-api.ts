@@ -43,15 +43,10 @@ export type PmApiInit = Omit<RequestInit, 'headers'> & {
  * @throws      {PmApiError} on non-2xx responses
  */
 export async function pmApi<T = unknown>(path: string, init: PmApiInit = {}): Promise<T> {
-  // /api/ 시작이지만 /api/v2/ 아닌 경로 → /api/v2/ 리라이트 (백엔드 직접 URL 대응)
-  const normalizedPath =
-    path.startsWith('/api/') && !path.startsWith('/api/v2/')
-      ? path.replace(/^\/api\//, '/api/v2/')
-      : path;
-  const url = `${_pmApiUrl}${normalizedPath}`;
+  const url = `${_pmApiUrl}${path}`;
   const headers: Record<string, string> = {
     Authorization: `Bearer ${_agentApiKey}`,
-    'x-api-key': _agentApiKey, // fallback for environments where Authorization header is stripped by CDN
+    'x-agent-api-key': _agentApiKey,
     'Content-Type': 'application/json',
     ...init.headers,
   };

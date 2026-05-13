@@ -60,7 +60,7 @@ export function registerWorkflowTools(server: McpServer) {
     async () => {
       try {
         // 1. Resolve own agent_id via API Key
-        const me = await pmApi<{ id: string; name: string; type: string }>('/api/me');
+        const me = await pmApi<{ id: string; name: string; type: string }>('/api/v2/me');
         const myId = me.id;
 
         // 2. Fetch all routing rules for the project

@@ -22,7 +22,7 @@ export function registerMemosTools(server: McpServer) {
       if (q) params.set('q', q);
       if (include_archived) params.set('include_archived', 'true');
       const qs = params.toString();
-      const data = await pmApi(`/api/memos${qs ? `?${qs}` : ''}`);
+      const data = await pmApi(`/api/v2/memos${qs ? `?${qs}` : ''}`);
       return ok(data);
     } catch (e) { return handleError(e); }
   });
@@ -36,7 +36,7 @@ export function registerMemosTools(server: McpServer) {
     story_id: z.string().optional(),
   }, async (body) => {
     try {
-      const data = await pmApi('/api/memos', { method: 'POST', body: JSON.stringify(body) });
+      const data = await pmApi('/api/v2/memos', { method: 'POST', body: JSON.stringify(body) });
       return ok(data);
     } catch (e) { return handleError(e); }
   });
@@ -53,7 +53,7 @@ export function registerMemosTools(server: McpServer) {
     try {
       const resolvedIds = assigned_to_ids ?? (assigned_to ? [assigned_to] : undefined);
       const payload = { ...rest, ...(resolvedIds ? { assigned_to_ids: resolvedIds } : {}) };
-      const data = await pmApi('/api/memos', { method: 'POST', body: JSON.stringify(payload) });
+      const data = await pmApi('/api/v2/memos', { method: 'POST', body: JSON.stringify(payload) });
       return ok(data);
     } catch (e) { return handleError(e); }
   });
@@ -71,7 +71,7 @@ export function registerMemosTools(server: McpServer) {
       if (created_by) params.set('created_by', created_by);
       if (status) params.set('status', status);
       const qs = params.toString();
-      const data = await pmApi(`/api/memos${qs ? `?${qs}` : ''}`);
+      const data = await pmApi(`/api/v2/memos${qs ? `?${qs}` : ''}`);
       return ok(data);
     } catch (e) { return handleError(e); }
   });
@@ -80,7 +80,7 @@ export function registerMemosTools(server: McpServer) {
     memo_id: z.string().describe('Memo ID'),
   }, async ({ memo_id }) => {
     try {
-      const data = await pmApi(`/api/memos/${encodeURIComponent(memo_id)}`);
+      const data = await pmApi(`/api/v2/memos/${encodeURIComponent(memo_id)}`);
       return ok(data);
     } catch (e) { return handleError(e); }
   });
@@ -95,7 +95,7 @@ export function registerMemosTools(server: McpServer) {
       const resolvedIds = assigned_to_ids ?? (assigned_to ? [assigned_to] : undefined);
       const payload: Record<string, unknown> = { content };
       if (resolvedIds) payload.assigned_to_ids = resolvedIds;
-      const data = await pmApi(`/api/memos/${encodeURIComponent(memo_id)}/replies`, {
+      const data = await pmApi(`/api/v2/memos/${encodeURIComponent(memo_id)}/replies`, {
         method: 'POST',
         body: JSON.stringify(payload),
       });
@@ -107,7 +107,7 @@ export function registerMemosTools(server: McpServer) {
     memo_id: z.string(),
   }, async ({ memo_id }) => {
     try {
-      const data = await pmApi(`/api/memos/${encodeURIComponent(memo_id)}/resolve`, {
+      const data = await pmApi(`/api/v2/memos/${encodeURIComponent(memo_id)}/resolve`, {
         method: 'PATCH',
       });
       return ok(data);

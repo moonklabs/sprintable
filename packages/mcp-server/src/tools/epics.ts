@@ -11,7 +11,7 @@ export function registerEpicsTools(server: McpServer) {
     project_id: z.string().describe('Project ID'),
   }, async ({ project_id }) => {
     try {
-      const data = await pmApi(`/api/epics?project_id=${encodeURIComponent(project_id)}`);
+      const data = await pmApi(`/api/v2/epics?project_id=${encodeURIComponent(project_id)}`);
       return ok(data);
     } catch (e) { return handleError(e); }
   });
@@ -27,7 +27,7 @@ export function registerEpicsTools(server: McpServer) {
     target_date: z.string().optional(),
   }, async (body) => {
     try {
-      const data = await pmApi('/api/epics', { method: 'POST', body: JSON.stringify(body) });
+      const data = await pmApi('/api/v2/epics', { method: 'POST', body: JSON.stringify(body) });
       return ok(data);
     } catch (e) { return handleError(e); }
   });
@@ -44,7 +44,7 @@ export function registerEpicsTools(server: McpServer) {
     target_date: z.string().optional(),
   }, async ({ epic_id, ...updates }) => {
     try {
-      const data = await pmApi(`/api/epics/${encodeURIComponent(epic_id)}`, {
+      const data = await pmApi(`/api/v2/epics/${encodeURIComponent(epic_id)}`, {
         method: 'PATCH',
         body: JSON.stringify(updates),
       });
@@ -56,7 +56,7 @@ export function registerEpicsTools(server: McpServer) {
     epic_id: z.string(),
   }, async ({ epic_id }) => {
     try {
-      await pmApi(`/api/epics/${encodeURIComponent(epic_id)}`, { method: 'DELETE' });
+      await pmApi(`/api/v2/epics/${encodeURIComponent(epic_id)}`, { method: 'DELETE' });
       return ok({ deleted: true });
     } catch (e) { return handleError(e); }
   });

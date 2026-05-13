@@ -11,7 +11,7 @@ export function registerRewardsTools(server: McpServer) {
     member_id: z.string(),
   }, async ({ project_id, member_id }) => {
     try {
-      const data = await pmApi(`/api/rewards?project_id=${project_id}&member_id=${member_id}&balance=true`);
+      const data = await pmApi(`/api/v2/rewards?project_id=${project_id}&member_id=${member_id}&balance=true`);
       return ok(data);
     } catch (e) {
       return err(e instanceof PmApiError ? e.message : String(e));
@@ -31,7 +31,7 @@ export function registerRewardsTools(server: McpServer) {
       const body: Record<string, unknown> = { project_id, member_id, amount, reason, granted_by };
       if (reference_type) body.reference_type = reference_type;
       if (reference_id) body.reference_id = reference_id;
-      const data = await pmApi('/api/rewards', { method: 'POST', body: JSON.stringify(body) });
+      const data = await pmApi('/api/v2/rewards', { method: 'POST', body: JSON.stringify(body) });
       return ok(data);
     } catch (e) {
       return err(e instanceof PmApiError ? e.message : String(e));
@@ -47,7 +47,7 @@ export function registerRewardsTools(server: McpServer) {
       const params = new URLSearchParams({ project_id, type: 'leaderboard' });
       if (period) params.set('period', period);
       if (limit !== undefined) params.set('limit', String(limit));
-      const data = await pmApi(`/api/rewards?${params.toString()}`);
+      const data = await pmApi(`/api/v2/rewards?${params.toString()}`);
       return ok(data);
     } catch (e) {
       return err(e instanceof PmApiError ? e.message : String(e));
