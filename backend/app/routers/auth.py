@@ -247,14 +247,14 @@ async def _build_app_metadata(user: User, session: AsyncSession) -> dict:
         member = result.scalar_one_or_none()
 
     if not member:
-        # fallback: 가장 최근 team_member (ASC→DESC 수정 — 가장 오래된 것 선택 버그 수정)
+        # fallback: 가장 오래된 team_member (ASC) — 최초 가입 project 우선
         result = await session.execute(
             select(TeamMember)
             .where(
                 or_(TeamMember.user_id == user.id, TeamMember.id == user.id),
                 TeamMember.is_active.is_(True),
             )
-            .order_by(TeamMember.created_at.desc())
+            .order_by(TeamMember.created_at.asc())
             .limit(1)
         )
         member = result.scalar_one_or_none()
@@ -308,6 +308,10 @@ async def _build_app_metadata(user: User, session: AsyncSession) -> dict:
 
     if not member:
         return {}
+
+    # login 시 last_project_id 자동 갱신 — 다음 로그인부터 last_project_id 우선 경로 사용
+    if getattr(user, "last_project_id", None) != member.project_id:
+        user.last_project_id = member.project_id
 
     # 소속 전체 project 목록 (알림/전환 UI용)
     all_members_result = await session.execute(
