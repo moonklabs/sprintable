@@ -38,6 +38,10 @@ class Doc(Base, OrgScopedMixin, TimestampMixin, SoftDeleteMixin):
     children: Mapped[list["Doc"]] = relationship("Doc", back_populates="parent", lazy="select")
     parent: Mapped["Doc | None"] = relationship("Doc", back_populates="children", remote_side=[id])
 
+    @property
+    def is_folder(self) -> bool:
+        return self.doc_type == "folder"
+
 
 class DocComment(Base, OrgScopedMixin):
     __tablename__ = "doc_comments"

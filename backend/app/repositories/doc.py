@@ -33,7 +33,7 @@ class DocRepository(BaseRepository[Doc]):
         )
         return result.scalar_one_or_none()
 
-    async def list_tree(self, project_id: uuid.UUID, parent_id: uuid.UUID | None = None) -> list[Doc]:
+    async def list_tree(self, project_id: uuid.UUID, parent_id: uuid.UUID | None = None, limit: int = 500) -> list[Doc]:
         """project 내 특정 parent 하위 docs 조회 (트리 1레벨)."""
         q = select(Doc).where(
             self._org_filter(),
@@ -44,11 +44,11 @@ class DocRepository(BaseRepository[Doc]):
             q = q.where(Doc.parent_id.is_(None))
         else:
             q = q.where(Doc.parent_id == parent_id)
-        q = q.order_by(Doc.sort_order)
+        q = q.order_by(Doc.sort_order).limit(limit)
         result = await self.session.execute(q)
         return list(result.scalars().all())
 
-    async def search_by_tags(self, project_id: uuid.UUID, tags: list[str]) -> list[Doc]:
+    async def search_by_tags(self, project_id: uuid.UUID, tags: list[str], limit: int = 500) -> list[Doc]:
         """tags 배열이 주어진 태그를 모두 포함하는 docs 조회 (@> 연산자)."""
         from sqlalchemy import cast
         from sqlalchemy.dialects.postgresql import ARRAY
@@ -59,6 +59,6 @@ class DocRepository(BaseRepository[Doc]):
             Doc.project_id == project_id,
             Doc.deleted_at.is_(None),
             Doc.tags.contains(cast(tags, ARRAY(Text))),
-        )
+        ).limit(limit)
         result = await self.session.execute(q)
         return list(result.scalars().all())

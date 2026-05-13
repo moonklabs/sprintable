@@ -44,6 +44,7 @@ class DocSummaryResponse(BaseModel):
     icon: str | None = None
     sort_order: int
     doc_type: str
+    is_folder: bool
     tags: list[str]
     updated_at: datetime
 
