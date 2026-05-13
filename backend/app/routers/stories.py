@@ -13,6 +13,7 @@ from app.models.team import TeamMember
 from app.repositories.story import StoryRepository
 from app.routers.events import publish_event
 from app.schemas.story import StoryCreate, StoryResponse, StoryStatusUpdate, StoryUpdate
+from app.services.notification_dispatch import dispatch_notification
 from app.services.webhook_dispatch import fire_webhooks
 from app.services.workflow_pipeline import process_event
 from app.services.rule_evaluator import EventContext
@@ -170,6 +171,18 @@ async def update_story(
             ))
         except Exception:
             pass
+        # E-EVENTBUS P3 S9: story_assigned → assignee에게 알림
+        if story.assignee_id and story.assignee_id != old_assignee_id:
+            await dispatch_notification(
+                db,
+                org_id=org_id,
+                event_type="story_assigned",
+                target_member_ids=[story.assignee_id],
+                title=f"스토리 담당자로 지정됨: {story.title}",
+                body=None,
+                reference_type="story",
+                reference_id=story.id,
+            )
         if actor_id:
             try:
                 db.add(StoryActivity(
@@ -263,6 +276,23 @@ async def update_story_status(
             ))
         except Exception:
             pass
+        # E-EVENTBUS P3 S9: story_status_changed → assignee + actor에게 알림
+        notify_ids: set[uuid.UUID] = set()
+        if story.assignee_id:
+            notify_ids.add(story.assignee_id)
+        if actor_id and actor_id != story.assignee_id:
+            notify_ids.add(actor_id)
+        if notify_ids:
+            await dispatch_notification(
+                db,
+                org_id=org_id,
+                event_type="story_status_changed",
+                target_member_ids=list(notify_ids),
+                title=f"스토리 상태 변경: {story.title} → {story.status}",
+                body=None,
+                reference_type="story",
+                reference_id=story.id,
+            )
         if actor_id:
             try:
                 db.add(StoryActivity(

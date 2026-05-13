@@ -15,6 +15,26 @@ import { cn } from '@/lib/utils';
 import { useDashboardContext } from '@/app/dashboard/dashboard-shell';
 import { useSseNotifications, type SseEventNotification } from '@/hooks/use-sse-notifications';
 
+type FilterTab = 'all' | 'memo' | 'story' | 'system';
+
+const FILTER_TABS: { value: FilterTab; label: string }[] = [
+  { value: 'all', label: '전체' },
+  { value: 'memo', label: '메모' },
+  { value: 'story', label: '스토리' },
+  { value: 'system', label: '시스템' },
+];
+
+function getNotificationTab(eventType: string): 'memo' | 'story' | 'system' {
+  if (eventType.startsWith('memo')) return 'memo';
+  if (
+    eventType.startsWith('story') ||
+    eventType.startsWith('task') ||
+    eventType === 'dispatched'
+  )
+    return 'story';
+  return 'system';
+}
+
 interface EventNotification {
   id: string;
   event_type: string;
@@ -118,11 +138,27 @@ function NotificationPanel({
   onNavigate,
   onClose,
 }: NotificationPanelProps) {
+  const [filterTab, setFilterTab] = useState<FilterTab>('all');
+  const [showUnreadOnly, setShowUnreadOnly] = useState(false);
+
   const loading = notifications === null;
   const hasUnread = notifications?.some((n) => !n.read_at) ?? false;
 
+  const filtered = notifications?.filter((n) => {
+    if (showUnreadOnly && n.read_at) return false;
+    if (filterTab !== 'all') return getNotificationTab(n.event_type) === filterTab;
+    return true;
+  }) ?? [];
+
+  const emptyMessage =
+    filterTab === 'memo' ? '메모 알림이 없습니다' :
+    filterTab === 'story' ? '스토리 알림이 없습니다' :
+    filterTab === 'system' ? '시스템 알림이 없습니다' :
+    '새 알림이 없습니다';
+
   return (
     <div className="flex h-full flex-col">
+      {/* 헤더 */}
       <div className="flex shrink-0 items-center justify-between border-b px-4 py-3">
         <span className="text-sm font-semibold">알림</span>
         <div className="flex items-center gap-1">
@@ -147,19 +183,53 @@ function NotificationPanel({
         </div>
       </div>
 
+      {/* 필터 탭 */}
+      <div className="flex shrink-0 overflow-x-auto border-b">
+        {FILTER_TABS.map((tab) => (
+          <button
+            key={tab.value}
+            type="button"
+            onClick={() => setFilterTab(tab.value)}
+            className={cn(
+              'shrink-0 px-3 py-2 text-xs font-medium transition',
+              filterTab === tab.value
+                ? 'border-b-2 border-primary text-foreground'
+                : 'text-muted-foreground hover:text-foreground',
+            )}
+          >
+            {tab.label}
+          </button>
+        ))}
+        <div className="ml-auto flex shrink-0 items-center px-3">
+          <button
+            type="button"
+            onClick={() => setShowUnreadOnly((v) => !v)}
+            className={cn(
+              'rounded-full px-2.5 py-0.5 text-[11px] font-medium transition',
+              showUnreadOnly
+                ? 'bg-primary text-primary-foreground'
+                : 'bg-muted text-muted-foreground hover:text-foreground',
+            )}
+          >
+            안읽음만
+          </button>
+        </div>
+      </div>
+
+      {/* 목록 */}
       <div className="min-h-0 flex-1 overflow-y-auto">
         {loading ? (
           <div className="flex items-center justify-center py-12 text-sm text-muted-foreground">
             로딩 중…
           </div>
-        ) : notifications?.length === 0 ? (
+        ) : filtered.length === 0 ? (
           <div className="flex flex-col items-center justify-center gap-2 py-12 text-sm text-muted-foreground">
             <Bell className="size-8 opacity-30" />
-            <span>새 알림이 없습니다</span>
+            <span>{emptyMessage}</span>
           </div>
         ) : (
           <ul>
-            {(notifications ?? []).map((n) => (
+            {filtered.map((n) => (
               <li key={n.id}>
                 <button
                   type="button"

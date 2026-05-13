@@ -1,12 +1,15 @@
 import uuid
 
 from fastapi import APIRouter, Depends, HTTPException, Query
+from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.dependencies.auth import AuthContext, get_current_user, get_verified_org_id
 from app.dependencies.database import get_db
+from app.models.pm import Story
 from app.repositories.task import TaskRepository
 from app.schemas.task import TaskCreate, TaskResponse, TaskUpdate
+from app.services.notification_dispatch import dispatch_notification
 
 router = APIRouter(prefix="/api/v2/tasks", tags=["tasks"])
 
@@ -69,11 +72,31 @@ async def update_task(
     id: uuid.UUID,
     body: TaskUpdate,
     repo: TaskRepository = Depends(_get_repo),
+    db: AsyncSession = Depends(get_db),
 ) -> TaskResponse:
+    task_before = await repo.get(id)
+    old_status = task_before.status if task_before else None
     data = body.model_dump(exclude_unset=True)
     task = await repo.update(id, **data)
     if task is None:
         raise HTTPException(status_code=404, detail="Task not found")
+    # E-EVENTBUS P3 S9: task_completed → story assignee에게 알림
+    if old_status != "done" and task.status == "done" and task.story_id:
+        story_result = await db.execute(
+            select(Story.assignee_id, Story.title, Story.org_id).where(Story.id == task.story_id)
+        )
+        story_row = story_result.one_or_none()
+        if story_row and story_row.assignee_id:
+            await dispatch_notification(
+                db,
+                org_id=repo.org_id,
+                event_type="task_completed",
+                target_member_ids=[story_row.assignee_id],
+                title=f"태스크 완료: {task.title}",
+                body=f"스토리: {story_row.title}" if story_row.title else None,
+                reference_type="task",
+                reference_id=task.id,
+            )
     return TaskResponse.model_validate(task)
 
 
