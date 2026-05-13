@@ -76,8 +76,13 @@ async def _resolve_api_key(raw_key: str, db: AsyncSession) -> AuthContext:
 
 async def get_current_user(
     credentials: HTTPAuthorizationCredentials | None = Depends(bearer_scheme),
+    x_agent_api_key: str | None = Header(default=None, alias="x-agent-api-key"),
     db: AsyncSession = Depends(get_db),
 ) -> AuthContext:
+    # x-agent-api-key 헤더 우선 처리 (SSE 브릿지 직접 연결용)
+    if x_agent_api_key and x_agent_api_key.startswith("sk_live_"):
+        return await _resolve_api_key(x_agent_api_key, db)
+
     if credentials is None:
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Missing Authorization header")
 

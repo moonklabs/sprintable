@@ -3,7 +3,7 @@
  * 이벤트 수신 시 stderr 출력, 연결 끊김 시 exponential backoff 재연결.
  */
 
-const BASE_DELAY_MS = 1_000;
+const BASE_DELAY_MS = 5_000;
 const MAX_DELAY_MS = 60_000;
 const JITTER_MS = 500;
 
@@ -69,11 +69,13 @@ export function startSseBridge(
   pmApiUrl: string,
   agentApiKey: string,
   memberId: string,
+  sseBackendUrl?: string,
 ): void {
-  const url = `${pmApiUrl.replace(/\/$/, '')}/api/v2/events/stream?member_id=${memberId}`;
+  const baseUrl = (sseBackendUrl ?? pmApiUrl).replace(/\/$/, '');
+  const url = `${baseUrl}/api/v2/events/stream?member_id=${memberId}`;
   const authHeaders = {
     Authorization: `Bearer ${agentApiKey}`,
-    'x-api-key': agentApiKey,
+    'x-agent-api-key': agentApiKey,
   };
 
   const run = async () => {
