@@ -946,24 +946,31 @@ describe('agent-runs tools via pmApi', () => {
     expect(result).toEqual({ data: { id: 'run-1', status: 'completed' } });
   });
 
-  it('poll_events calls GET /api/agent-runs with project_id', async () => {
+  it('poll_events calls GET /api/v2/events/pending with recipient_id', async () => {
     stubFetch((url) => {
-      expect(url).toContain('/api/agent-runs?');
-      expect(url).toContain('project_id=project-alpha');
-      return new Response(JSON.stringify({ data: [{ id: 'run-1' }, { id: 'run-2' }] }), { status: 200 });
+      expect(url).toContain('/api/v2/events/pending?');
+      expect(url).toContain('recipient_id=member-1');
+      return new Response(JSON.stringify([{ id: 'evt-1' }, { id: 'evt-2' }]), { status: 200 });
     });
 
-    const result = await harness.invoke('poll_events', { project_id: 'project-alpha' });
-    expect(result).toEqual({ data: [{ id: 'run-1' }, { id: 'run-2' }] });
+    const result = await harness.invoke('poll_events', { recipient_id: 'member-1' });
+    expect(result).toEqual([{ id: 'evt-1' }, { id: 'evt-2' }]);
   });
 
-  it('poll_events passes optional limit param', async () => {
+  it('poll_events passes optional event_type param', async () => {
     stubFetch((url) => {
-      expect(url).toContain('limit=5');
-      return new Response(JSON.stringify({ data: [] }), { status: 200 });
+      expect(url).toContain('event_type=dispatched');
+      return new Response(JSON.stringify([]), { status: 200 });
     });
 
-    await harness.invoke('poll_events', { project_id: 'project-alpha', limit: 5 });
+    await harness.invoke('poll_events', { recipient_id: 'member-1', event_type: 'dispatched' });
+  });
+
+  it('poll_events returns empty array when no pending events', async () => {
+    stubFetch(() => new Response(JSON.stringify([]), { status: 200 }));
+
+    const result = await harness.invoke('poll_events', { recipient_id: 'member-1' });
+    expect(result).toEqual([]);
   });
 
   it('propagates PmApiError on non-2xx response', async () => {
