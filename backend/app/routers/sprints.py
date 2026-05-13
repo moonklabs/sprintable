@@ -12,6 +12,7 @@ from app.models.standup import StandupEntry
 from app.models.team import TeamMember
 from app.repositories.sprint import SprintRepository
 from app.schemas.sprint import KickoffBody, SprintCreate, SprintResponse, SprintUpdate
+from app.services.notification_dispatch import dispatch_notification
 
 router = APIRouter(prefix="/api/v2/sprints", tags=["sprints"])
 
@@ -106,11 +107,33 @@ async def activate_sprint(
 async def close_sprint(
     id: uuid.UUID,
     repo: SprintRepository = Depends(_get_repo),
+    db: AsyncSession = Depends(get_db),
 ) -> SprintResponse:
     try:
         sprint = await repo.close(id)
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
+    # E-EVENTBUS P3 S9: sprint_closed → 프로젝트 전체 active 멤버에게 알림
+    if sprint.project_id:
+        members_result = await db.execute(
+            select(TeamMember.id).where(
+                TeamMember.project_id == sprint.project_id,
+                TeamMember.is_active.is_(True),
+                TeamMember.type == "human",
+            )
+        )
+        member_ids = [row[0] for row in members_result.all()]
+        if member_ids:
+            await dispatch_notification(
+                db,
+                org_id=repo.org_id,
+                event_type="sprint_closed",
+                target_member_ids=member_ids,
+                title=f"스프린트 종료: {sprint.title}",
+                body=None,
+                reference_type="sprint",
+                reference_id=sprint.id,
+            )
     return SprintResponse.model_validate(sprint)
 
 
