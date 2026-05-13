@@ -32,7 +32,7 @@ import { registerAuditTools } from './tools/audit.js';
 const PM_API_URL = process.env['PM_API_URL'] ?? '';
 const AGENT_API_KEY = process.env['AGENT_API_KEY'] ?? '';
 const MCP_API_KEY = process.env['MCP_API_KEY'] ?? '';
-const MEMBER_ID = process.env['MEMBER_ID'] ?? '';
+const MEMBER_ID = process.env['CURRENT_MEMBER_ID'] ?? process.env['MEMBER_ID'] ?? '';
 const MODE = process.env['MCP_MODE'] ?? 'stdio'; // 'stdio' | 'sse'
 const PORT = Number(process.env['MCP_PORT'] ?? '3100');
 
