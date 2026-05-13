@@ -232,17 +232,33 @@ async def _get_user_by_id(session: AsyncSession, user_id: uuid.UUID) -> User | N
 async def _build_app_metadata(user: User, session: AsyncSession) -> dict:
     from app.models.team import TeamMember
 
-    # 1. user_id 또는 PK(id)로 연결된 team_member 조회
-    result = await session.execute(
-        select(TeamMember)
-        .where(
-            or_(TeamMember.user_id == user.id, TeamMember.id == user.id),
-            TeamMember.is_active.is_(True),
+    # 1. last_project_id 우선 → 해당 project의 active team_member
+    member = None
+    if getattr(user, "last_project_id", None):
+        result = await session.execute(
+            select(TeamMember)
+            .where(
+                TeamMember.project_id == user.last_project_id,
+                or_(TeamMember.user_id == user.id, TeamMember.id == user.id),
+                TeamMember.is_active.is_(True),
+            )
+            .limit(1)
         )
-        .order_by(TeamMember.created_at.asc())
-        .limit(1)
-    )
-    member = result.scalar_one_or_none()
+        member = result.scalar_one_or_none()
+
+    if not member:
+        # fallback: 가장 최근 team_member (ASC→DESC 수정 — 가장 오래된 것 선택 버그 수정)
+        result = await session.execute(
+            select(TeamMember)
+            .where(
+                or_(TeamMember.user_id == user.id, TeamMember.id == user.id),
+                TeamMember.is_active.is_(True),
+            )
+            .order_by(TeamMember.created_at.desc())
+            .limit(1)
+        )
+        member = result.scalar_one_or_none()
+
     if member and member.user_id is None:
         member.user_id = user.id
 
@@ -293,10 +309,25 @@ async def _build_app_metadata(user: User, session: AsyncSession) -> dict:
     if not member:
         return {}
 
+    # 소속 전체 project 목록 (알림/전환 UI용)
+    all_members_result = await session.execute(
+        select(TeamMember)
+        .where(
+            or_(TeamMember.user_id == user.id, TeamMember.id == user.id),
+            TeamMember.is_active.is_(True),
+        )
+    )
+    all_members = all_members_result.scalars().all()
+    projects = [
+        {"id": str(m.project_id), "org_id": str(m.org_id), "role": m.role}
+        for m in all_members
+    ]
+
     return {
         "org_id": str(member.org_id),
         "project_id": str(member.project_id),
         "role": member.role,
+        "projects": projects,
     }
 
 
@@ -927,3 +958,54 @@ async def resend_verification(
         ),
     )
     return _ok({"message": "Verification email sent"})
+
+
+# ─── POST /api/v2/auth/switch-project ────────────────────────────────────────
+
+class SwitchProjectRequest(BaseModel):
+    project_id: uuid.UUID
+
+
+@router.post("/switch-project")
+async def switch_project(
+    body: SwitchProjectRequest,
+    session: AsyncSession = Depends(get_db),
+    auth: AuthContext = Depends(get_current_user),
+) -> JSONResponse:
+    """프로젝트 전환 — user.last_project_id 갱신 + 새 토큰 발급."""
+    user = await _get_user_by_id(session, uuid.UUID(auth.user_id))
+    if user is None:
+        return _err("USER_NOT_FOUND", "User not found", 404)
+
+    # 해당 project의 active team_member 검증 (cross-org 허용 — 멀티 org 사용자 지원)
+    result = await session.execute(
+        select(TeamMember)
+        .where(
+            TeamMember.project_id == body.project_id,
+            or_(TeamMember.user_id == user.id, TeamMember.id == user.id),
+            TeamMember.is_active.is_(True),
+        )
+        .limit(1)
+    )
+    member = result.scalar_one_or_none()
+    if member is None:
+        return _err("NOT_MEMBER", "Not an active member of this project", 403)
+
+    # last_project_id 갱신
+    user.last_project_id = body.project_id
+
+    # 기존 refresh token 무효화
+    await session.execute(
+        update(RefreshToken)
+        .where(RefreshToken.user_id == user.id, RefreshToken.revoked_at.is_(None))
+        .values(revoked_at=datetime.now(timezone.utc))
+    )
+
+    # 새 토큰 발급
+    app_metadata = await _build_app_metadata(user, session)
+    tokens = create_tokens(str(user.id), email=user.email, app_metadata=app_metadata)
+    _, refresh_exp = create_refresh_token(str(user.id), expires_delta=timedelta(days=REFRESH_TOKEN_EXPIRE_DAYS))
+    await _store_refresh_token(session, user, tokens["refresh_token"], refresh_exp)
+
+    await session.commit()
+    return _ok(tokens)
