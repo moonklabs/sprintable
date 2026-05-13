@@ -1,3 +1,4 @@
+import asyncio
 import os
 import re
 import uuid
@@ -92,6 +93,19 @@ def _fire_webhook(url: str, content: str, title: str, memo_url: str, memo_id: st
         logger.warning("reply webhook fire failed url=%s", url, exc_info=True)
 
 
+async def _retry_async(label: str, coro_fn, *args, retries: int = 3, **kwargs) -> None:
+    """코루틴 함수를 최대 retries회 재시도. 실패 시 warning 로그."""
+    for attempt in range(retries):
+        try:
+            await coro_fn(*args, **kwargs)
+            return
+        except Exception:
+            if attempt < retries - 1:
+                await asyncio.sleep(2 ** attempt)
+            else:
+                logger.warning("%s failed after %d attempts", label, retries, exc_info=True)
+
+
 async def _reply_side_effects_bg(
     memo_id: uuid.UUID,
     reply_id: uuid.UUID,
@@ -136,92 +150,89 @@ async def _reply_side_effects_bg(
             except Exception:
                 logger.warning("reply bg: chat events failed memo_id=%s", memo_id, exc_info=True)
 
-            # notification
+            # notification (최대 3회 재시도)
             notification_targets = [r for r in [memo.created_by] if r and r != sender_id]
             if notification_targets:
-                try:
-                    await dispatch_notification(
-                        db,
-                        org_id=org_id,
-                        event_type="memo_reply",
-                        target_member_ids=notification_targets,
-                        title=memo.title or "메모 답신",
-                        body=(reply.content or "")[:200],
-                        reference_type="memo",
-                        reference_id=memo_id,
-                    )
-                except Exception:
-                    logger.warning("reply bg: notification failed memo_id=%s", memo_id, exc_info=True)
+                await _retry_async(
+                    f"reply bg: notification memo_id={memo_id}",
+                    dispatch_notification,
+                    db,
+                    org_id=org_id,
+                    event_type="memo_reply",
+                    target_member_ids=notification_targets,
+                    title=memo.title or "메모 답신",
+                    body=(reply.content or "")[:200],
+                    reference_type="memo",
+                    reference_id=memo_id,
+                )
 
-            # eventbus
+            # eventbus (최대 3회 재시도)
             if project_id:
                 recipient_ids = [r for r in [memo.assigned_to, memo.created_by] if r and r != sender_id]
                 if recipient_ids:
-                    try:
-                        await dispatch_memo_event(
-                            db,
-                            org_id=org_id,
-                            project_id=project_id,
-                            event_type="memo_replied",
-                            source_entity_id=reply.id,
-                            sender_id=sender_id,
-                            recipient_ids=recipient_ids,
-                            payload={
-                                "content_preview": (reply.content or "")[:100],
-                                "sender_id": str(sender_id) if sender_id else None,
-                                "parent_memo_id": str(memo_id),
-                                "thread_id": str(memo_id),
-                            },
-                        )
-                    except Exception:
-                        logger.warning("reply bg: eventbus failed memo_id=%s", memo_id, exc_info=True)
+                    await _retry_async(
+                        f"reply bg: eventbus memo_id={memo_id}",
+                        dispatch_memo_event,
+                        db,
+                        org_id=org_id,
+                        project_id=project_id,
+                        event_type="memo_replied",
+                        source_entity_id=reply.id,
+                        sender_id=sender_id,
+                        recipient_ids=recipient_ids,
+                        payload={
+                            "content_preview": (reply.content or "")[:100],
+                            "sender_id": str(sender_id) if sender_id else None,
+                            "parent_memo_id": str(memo_id),
+                            "thread_id": str(memo_id),
+                        },
+                    )
 
-            # workflow pipeline
+            # workflow pipeline (최대 3회 재시도)
             if project_id:
-                try:
-                    from app.services.workflow_pipeline import process_event
-                    from app.services.rule_evaluator import EventContext
-                    author_role = await _resolve_author_role(db, reply.created_by)
-                    has_pr = bool(re.search(r"github\.com/.+/pull/\d+", reply.content or ""))
-                    story_link_result = await db.execute(
-                        select(MemoEntityLink.entity_id)
-                        .where(MemoEntityLink.memo_id == memo_id, MemoEntityLink.entity_type == "story")
-                        .limit(1)
+                from app.services.workflow_pipeline import process_event
+                from app.services.rule_evaluator import EventContext
+                author_role = await _resolve_author_role(db, reply.created_by)
+                has_pr = bool(re.search(r"github\.com/.+/pull/\d+", reply.content or ""))
+                story_link_result = await db.execute(
+                    select(MemoEntityLink.entity_id)
+                    .where(MemoEntityLink.memo_id == memo_id, MemoEntityLink.entity_type == "story")
+                    .limit(1)
+                )
+                linked_story_id = story_link_result.scalar_one_or_none()
+                actor_name: str | None = None
+                if reply.created_by:
+                    tm_result = await db.execute(
+                        select(TeamMember).where(TeamMember.id == reply.created_by).limit(1)
                     )
-                    linked_story_id = story_link_result.scalar_one_or_none()
-                    actor_name: str | None = None
-                    if reply.created_by:
-                        tm_result = await db.execute(
-                            select(TeamMember).where(TeamMember.id == reply.created_by).limit(1)
-                        )
-                        tm = tm_result.scalar_one_or_none()
-                        actor_name = tm.name if tm else None
-                    await process_event(
-                        db, org_id, project_id,
-                        EventContext(
-                            event_type="memo.reply_created",
-                            trigger_type_slug=_infer_trigger_type(memo.memo_type, reply.review_type),
-                            memo_type=memo.memo_type,
-                            memo_id=str(reply.id),
-                            actor_id=str(reply.created_by) if reply.created_by else None,
-                            metadata={
-                                "original_memo_id": str(memo_id),
-                                "original_memo_type": memo.memo_type,
-                                "original_title": memo.title,
-                                "reply_author_id": str(reply.created_by) if reply.created_by else None,
-                                "reply_author_role": author_role,
-                                "actor_name": actor_name,
-                                "actor_role": author_role,
-                                "review_type": reply.review_type,
-                                "has_pr_link": has_pr,
-                                "content_preview": (reply.content or "")[:200],
-                                "context_message": memo.title or (reply.content or "")[:100],
-                                "story_id": str(linked_story_id) if linked_story_id else None,
-                            },
-                        ),
-                    )
-                except Exception:
-                    logger.warning("reply bg: workflow pipeline failed memo_id=%s", memo_id, exc_info=True)
+                    tm = tm_result.scalar_one_or_none()
+                    actor_name = tm.name if tm else None
+                await _retry_async(
+                    f"reply bg: workflow pipeline memo_id={memo_id}",
+                    process_event,
+                    db, org_id, project_id,
+                    EventContext(
+                        event_type="memo.reply_created",
+                        trigger_type_slug=_infer_trigger_type(memo.memo_type, reply.review_type),
+                        memo_type=memo.memo_type,
+                        memo_id=str(reply.id),
+                        actor_id=str(reply.created_by) if reply.created_by else None,
+                        metadata={
+                            "original_memo_id": str(memo_id),
+                            "original_memo_type": memo.memo_type,
+                            "original_title": memo.title,
+                            "reply_author_id": str(reply.created_by) if reply.created_by else None,
+                            "reply_author_role": author_role,
+                            "actor_name": actor_name,
+                            "actor_role": author_role,
+                            "review_type": reply.review_type,
+                            "has_pr_link": has_pr,
+                            "content_preview": (reply.content or "")[:200],
+                            "context_message": memo.title or (reply.content or "")[:100],
+                            "story_id": str(linked_story_id) if linked_story_id else None,
+                        },
+                    ),
+                )
 
             await db.commit()
         except Exception:
@@ -245,55 +256,56 @@ async def _memo_side_effects_bg(
     async with async_session_factory() as db:
         try:
             if assigned_to:
-                try:
-                    await dispatch_notification(
-                        db,
-                        org_id=org_id,
-                        event_type="memo_received",
-                        target_member_ids=[assigned_to],
-                        title=title or "새 메모",
-                        body=(content or "")[:200],
-                        reference_type="memo",
-                        reference_id=memo_id,
-                    )
-                except Exception:
-                    logger.warning("memo bg: notification failed memo_id=%s", memo_id, exc_info=True)
+                await _retry_async(
+                    f"memo bg: notification memo_id={memo_id}",
+                    dispatch_notification,
+                    db,
+                    org_id=org_id,
+                    event_type="memo_received",
+                    target_member_ids=[assigned_to],
+                    title=title or "새 메모",
+                    body=(content or "")[:200],
+                    reference_type="memo",
+                    reference_id=memo_id,
+                )
 
             if assigned_to and project_id:
-                try:
-                    await dispatch_memo_event(
-                        db,
-                        org_id=org_id,
-                        project_id=project_id,
-                        event_type="memo_created",
-                        source_entity_id=memo_id,
-                        sender_id=created_by,
-                        recipient_ids=[assigned_to],
-                        payload={
-                            "title": title,
-                            "content_preview": (content or "")[:100],
-                            "sender_id": str(created_by) if created_by else None,
-                            "thread_id": str(memo_id),
-                        },
-                    )
-                except Exception:
-                    logger.warning("memo bg: eventbus failed memo_id=%s", memo_id, exc_info=True)
+                await _retry_async(
+                    f"memo bg: eventbus memo_id={memo_id}",
+                    dispatch_memo_event,
+                    db,
+                    org_id=org_id,
+                    project_id=project_id,
+                    event_type="memo_created",
+                    source_entity_id=memo_id,
+                    sender_id=created_by,
+                    recipient_ids=[assigned_to],
+                    payload={
+                        "title": title,
+                        "content_preview": (content or "")[:100],
+                        "sender_id": str(created_by) if created_by else None,
+                        "thread_id": str(memo_id),
+                    },
+                )
 
             if project_id:
-                try:
-                    from app.services.workflow_pipeline import process_event
-                    from app.services.rule_evaluator import EventContext
-                    actor_name: str | None = None
-                    actor_role: str | None = None
-                    if created_by:
-                        tm_result = await db.execute(
-                            select(TeamMember).where(TeamMember.id == created_by).limit(1)
-                        )
-                        tm = tm_result.scalar_one_or_none()
-                        if tm:
-                            actor_name = tm.name
-                            actor_role = tm.role
-                    await process_event(db, org_id, project_id, EventContext(
+                from app.services.workflow_pipeline import process_event
+                from app.services.rule_evaluator import EventContext
+                actor_name: str | None = None
+                actor_role: str | None = None
+                if created_by:
+                    tm_result = await db.execute(
+                        select(TeamMember).where(TeamMember.id == created_by).limit(1)
+                    )
+                    tm = tm_result.scalar_one_or_none()
+                    if tm:
+                        actor_name = tm.name
+                        actor_role = tm.role
+                await _retry_async(
+                    f"memo bg: workflow pipeline memo_id={memo_id}",
+                    process_event,
+                    db, org_id, project_id,
+                    EventContext(
                         event_type="memo_created",
                         trigger_type_slug="kickoff" if memo_type == "task" else None,
                         memo_type=memo_type,
@@ -309,9 +321,8 @@ async def _memo_side_effects_bg(
                             "actor_role": actor_role,
                             "context_message": title or (content or "")[:100],
                         },
-                    ))
-                except Exception:
-                    logger.warning("memo bg: workflow pipeline failed memo_id=%s", memo_id, exc_info=True)
+                    ),
+                )
 
             await db.commit()
         except Exception:

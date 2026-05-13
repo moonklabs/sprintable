@@ -32,6 +32,7 @@ async function connectOnce(url: string, headers: Record<string, string>): Promis
   const decoder = new TextDecoder();
   let eventType = 'message';
   let dataLines: string[] = [];
+  let remainder = '';
 
   const reader = response.body.getReader();
   try {
@@ -41,8 +42,11 @@ async function connectOnce(url: string, headers: Record<string, string>): Promis
         log('stream ended');
         break;
       }
-      const chunk = decoder.decode(value, { stream: true });
-      for (const rawLine of chunk.split('\n')) {
+      const text = decoder.decode(value, { stream: true });
+      const lines = (remainder + text).split('\n');
+      // 마지막 줄이 불완전할 수 있으므로 버퍼에 보관
+      remainder = lines.pop() ?? '';
+      for (const rawLine of lines) {
         const line = rawLine.trimEnd();
         if (line.startsWith('event:')) {
           eventType = line.slice(6).trim();
