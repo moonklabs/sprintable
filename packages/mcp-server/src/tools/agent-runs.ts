@@ -83,19 +83,19 @@ export function registerAgentRunsTools(server: McpServer) {
     },
   );
 
-  // GET /api/agent-runs?project_id=X&limit=N
+  // GET /api/v2/events/pending?recipient_id=X
   server.tool(
     'poll_events',
-    'Poll recent agent run events for a project',
+    'Poll pending dispatched events for this agent (recipient_id = this agent\'s member ID). Returns dispatched events with entity_type, entity_id, title, description payload.',
     {
-      project_id: z.string().describe('Project ID'),
-      limit: z.number().optional().describe('Max results (default: 20)'),
+      recipient_id: z.string().describe('Agent team member ID (this agent\'s member ID)'),
+      event_type: z.string().optional().describe('Filter by event type, e.g. "dispatched" (default: all pending)'),
     },
-    async ({ project_id, limit }) => {
+    async ({ recipient_id, event_type }) => {
       try {
-        const params = new URLSearchParams({ project_id });
-        if (limit !== undefined) params.set('limit', String(limit));
-        const data = await pmApi(`/api/agent-runs?${params.toString()}`);
+        const params = new URLSearchParams({ recipient_id });
+        if (event_type !== undefined) params.set('event_type', event_type);
+        const data = await pmApi(`/api/v2/events/pending?${params.toString()}`);
         return ok(data);
       } catch (e) {
         return err(e instanceof PmApiError ? e.message : String(e));
