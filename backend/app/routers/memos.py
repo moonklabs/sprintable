@@ -18,6 +18,7 @@ from app.models.webhook_config import WebhookConfig
 from app.repositories.memo import MemoReplyRepository, MemoRepository
 from app.routers.events import publish_event
 from app.services.eventbus import dispatch_memo_event
+from app.services.notification_dispatch import dispatch_notification
 from app.schemas.memo import CreateMemo, CreateReply, MemoListResponse, MemoResponse, ReplyResponse, UpdateMemo
 
 router = APIRouter(prefix="/api/v2/memos", tags=["memos"])
@@ -194,6 +195,18 @@ async def create_memo(
     if body.assigned_to_ids:
         memo_recipient_ids.update(body.assigned_to_ids)
     memo_recipient_ids.discard(body.created_by)
+    # E-EVENTBUS P3 S8: 알림 설정 필터 후 Notification INSERT
+    if body.assigned_to:
+        await dispatch_notification(
+            session,
+            org_id=body.org_id,
+            event_type="memo_received",
+            target_member_ids=[body.assigned_to],
+            title=body.title or "새 메모",
+            body=(body.content or "")[:200],
+            reference_type="memo",
+            reference_id=memo.id,
+        )
     # E-EVENTBUS S4: 이벤트버스 발행 (EVENTBUS_ENABLED=true 환경만)
     if body.assigned_to and body.project_id:
         await dispatch_memo_event(
@@ -331,6 +344,23 @@ async def add_reply(
         memo_id=id, content=body.content, created_by=body.created_by, review_type=body.review_type
     )
     publish_event(str(repo.org_id), "reply_created", {"id": str(reply.id), "memo_id": str(id)})
+
+    # E-EVENTBUS P3 S8: 알림 설정 필터 후 Notification INSERT (원 메모 작성자에게)
+    reply_notification_targets = [
+        r for r in [memo.created_by]
+        if r and r != body.created_by
+    ]
+    if reply_notification_targets:
+        await dispatch_notification(
+            db,
+            org_id=repo.org_id,
+            event_type="memo_reply",
+            target_member_ids=reply_notification_targets,
+            title=memo.title or "메모 답신",
+            body=(reply.content or "")[:200],
+            reference_type="memo",
+            reference_id=id,
+        )
 
     # E-EVENTBUS S4: 이벤트버스 발행 (EVENTBUS_ENABLED=true 환경만)
     if memo.project_id:
