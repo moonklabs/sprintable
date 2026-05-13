@@ -341,9 +341,32 @@ async def add_reply(
         raise HTTPException(status_code=404, detail="Memo not found")
     reply_repo = MemoReplyRepository(db)
     reply = await reply_repo.create(
-        memo_id=id, content=body.content, created_by=body.created_by, review_type=body.review_type
+        memo_id=id, content=body.content, created_by=body.created_by, review_type=body.review_type,
+        attachments=body.attachments,
     )
     publish_event(str(repo.org_id), "reply_created", {"id": str(reply.id), "memo_id": str(id)})
+
+    # E-EVENTBUS P4 S15: chat:message 이벤트 발행 + events 테이블 persist + SSE push
+    try:
+        from app.routers.chats import _persist_and_push_chat_events
+        chat_participants: set[uuid.UUID] = set()
+        if memo.assigned_to:
+            chat_participants.add(memo.assigned_to)
+        if memo.created_by:
+            chat_participants.add(memo.created_by)
+        chat_participants.discard(body.created_by)
+        chat_payload = {
+            "event_type": "chat:message",
+            "thread_id": str(id),
+            "reply_id": str(reply.id),
+            "content": reply.content,
+            "created_by": str(reply.created_by),
+            "attachments": reply.attachments,
+            "created_at": reply.created_at.isoformat(),
+        }
+        await _persist_and_push_chat_events(db, memo, reply, repo.org_id, body.created_by, chat_participants, chat_payload)
+    except Exception:
+        pass
 
     # E-EVENTBUS P3 S8: 알림 설정 필터 후 Notification INSERT (원 메모 작성자에게)
     reply_notification_targets = [

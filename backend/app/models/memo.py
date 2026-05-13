@@ -55,6 +55,7 @@ class MemoReply(Base):
     )
     content: Mapped[str] = mapped_column(Text, nullable=False)
     review_type: Mapped[str] = mapped_column(Text, nullable=False, default="comment")
+    attachments: Mapped[list] = mapped_column(JSONB, nullable=False, default=list)
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now(), nullable=False
     )
