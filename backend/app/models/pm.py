@@ -38,6 +38,9 @@ class Epic(Base, OrgScopedMixin, TimestampMixin):
     project_id: Mapped[uuid.UUID] = mapped_column(
         UUID(as_uuid=True), ForeignKey("projects.id", ondelete="CASCADE"), nullable=False, index=True
     )
+    assignee_id: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("team_members.id", ondelete="SET NULL"), nullable=True
+    )
     title: Mapped[str] = mapped_column(Text, nullable=False)
     status: Mapped[str] = mapped_column(String(20), nullable=False, default="active")
     priority: Mapped[str] = mapped_column(String(20), nullable=False, default="medium")

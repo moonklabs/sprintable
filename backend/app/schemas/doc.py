@@ -29,6 +29,7 @@ class DocUpdate(BaseModel):
     doc_type: str | None = None
     content_format: str | None = None
     tags: list[str] | None = None
+    assignee_id: uuid.UUID | None = None
 
 
 class DocResponse(BaseModel):
@@ -39,6 +40,7 @@ class DocResponse(BaseModel):
     org_id: uuid.UUID
     parent_id: uuid.UUID | None = None
     created_by: uuid.UUID | None = None
+    assignee_id: uuid.UUID | None = None
     title: str
     slug: str
     content: str
