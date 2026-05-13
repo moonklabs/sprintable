@@ -39,11 +39,11 @@ async def list_docs(
 
     if tags and project_id:
         tag_list = [t.strip() for t in tags.split(",") if t.strip()]
-        docs = await repo.search_by_tags(project_id, tag_list)
+        docs = await repo.search_by_tags(project_id, tag_list, limit=limit)
         return [DocSummaryResponse.model_validate(d) for d in docs]
 
     if project_id and parent_id is not None:
-        docs = await repo.list_tree(project_id, parent_id)
+        docs = await repo.list_tree(project_id, parent_id, limit=limit)
         return [DocSummaryResponse.model_validate(d) for d in docs]
 
     filters: dict = {}
