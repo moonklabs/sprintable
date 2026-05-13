@@ -1,6 +1,8 @@
 'use client';
 
 import { useCallback, useEffect, useRef, useState } from 'react';
+import { ChevronLeft } from 'lucide-react';
+import { useRouter } from 'next/navigation';
 import { ChatBubble } from './chat-bubble';
 import { ChatInput } from './chat-input';
 import type { ChatMessage } from '@/hooks/use-chat-sse';
@@ -30,6 +32,8 @@ function groupByDate(messages: ChatMessage[]): MessageGroup[] {
 }
 
 export function ChatView({ threadId, currentTeamMemberId, threadTitle }: ChatViewProps) {
+  const router = useRouter();
+  // key={threadId} on parent ensures fresh mount per thread — no reset useEffect needed
   const [messages, setMessages] = useState<ChatMessage[]>([]);
   const [loading, setLoading] = useState(true);
   const [cursor, setCursor] = useState<string | null>(null);
@@ -66,12 +70,8 @@ export function ChatView({ threadId, currentTeamMemberId, threadTitle }: ChatVie
     }
   }, [threadId]);
 
+  // Initial load — key={threadId} guarantees fresh component, so no reset needed
   useEffect(() => {
-    setLoading(true);
-    isFirstLoad.current = true;
-    setMessages([]);
-    setCursor(null);
-    setHasMore(false);
     void fetchMessages();
   }, [fetchMessages]);
 
@@ -131,18 +131,32 @@ export function ChatView({ threadId, currentTeamMemberId, threadTitle }: ChatVie
     setLoadingMore(true);
     await fetchMessages(cursor);
     if (scrollEl) {
-      const delta = scrollEl.scrollHeight - prevScrollHeight;
-      scrollEl.scrollTop += delta;
+      scrollEl.scrollTop += scrollEl.scrollHeight - prevScrollHeight;
     }
   }, [hasMore, cursor, loadingMore, fetchMessages]);
 
   const groups = groupByDate(messages);
 
   return (
-    <div className="flex h-full flex-col">
-      {/* Thread title */}
+    <div className="flex h-full flex-col overflow-hidden">
+      {/* Mobile back nav (< lg) */}
+      <div className="flex flex-shrink-0 items-center gap-2 border-b border-border/80 px-3 py-2 lg:hidden">
+        <button
+          type="button"
+          onClick={() => router.push('/memos')}
+          className="flex min-h-[44px] items-center gap-1 px-1 text-sm text-muted-foreground hover:text-foreground"
+        >
+          <ChevronLeft className="h-4 w-4" />
+          메모
+        </button>
+        {threadTitle && (
+          <span className="truncate text-sm font-medium text-foreground">{threadTitle}</span>
+        )}
+      </div>
+
+      {/* Desktop thread title (lg+) */}
       {threadTitle && (
-        <div className="flex-shrink-0 border-b border-border/80 px-4 py-2.5">
+        <div className="hidden flex-shrink-0 border-b border-border/80 px-4 py-2.5 lg:flex">
           <h2 className="truncate text-sm font-medium text-foreground">{threadTitle}</h2>
         </div>
       )}
@@ -163,7 +177,6 @@ export function ChatView({ threadId, currentTeamMemberId, threadTitle }: ChatVie
           </div>
         ) : (
           <div className="flex flex-col gap-4">
-            {/* Load more */}
             {hasMore && (
               <div className="flex justify-center">
                 <button
@@ -179,7 +192,6 @@ export function ChatView({ threadId, currentTeamMemberId, threadTitle }: ChatVie
 
             {groups.map((group) => (
               <div key={group.date} className="flex flex-col gap-3">
-                {/* Date separator */}
                 <div className="flex items-center gap-3">
                   <div className="h-px flex-1 bg-border/60" />
                   <span className="text-[11px] text-muted-foreground">{group.date}</span>

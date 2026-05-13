@@ -73,6 +73,7 @@ export default function MemoDetailPage() {
       />
       <div className="flex min-h-0 flex-1 flex-col bg-background overflow-hidden">
         <ChatView
+          key={id}
           threadId={id}
           currentTeamMemberId={currentTeamMemberId}
           threadTitle={memo?.title ?? undefined}
