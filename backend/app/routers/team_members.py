@@ -24,6 +24,7 @@ async def list_team_members(
     project_id: uuid.UUID | None = Query(default=None),
     type_filter: str | None = Query(default=None, alias="type"),
     is_active: bool | None = Query(default=True),
+    user_id: uuid.UUID | None = Query(default=None),
     repo: TeamMemberRepository = Depends(_get_repo),
 ) -> list[TeamMemberResponse]:
     filters: dict = {}
@@ -33,6 +34,8 @@ async def list_team_members(
         filters["type"] = type_filter
     if is_active is not None:
         filters["is_active"] = is_active
+    if user_id:
+        filters["user_id"] = user_id
     members = await repo.list(**filters)
     return [TeamMemberResponse.model_validate(m) for m in members]
 

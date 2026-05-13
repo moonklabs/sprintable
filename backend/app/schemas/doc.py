@@ -32,6 +32,23 @@ class DocUpdate(BaseModel):
     assignee_id: uuid.UUID | None = None
 
 
+class DocSummaryResponse(BaseModel):
+    """List endpoint용 — content 미포함으로 페이로드 최소화."""
+    model_config = ConfigDict(from_attributes=True)
+
+    id: uuid.UUID
+    project_id: uuid.UUID
+    parent_id: uuid.UUID | None = None
+    title: str
+    slug: str
+    icon: str | None = None
+    sort_order: int
+    doc_type: str
+    is_folder: bool
+    tags: list[str]
+    updated_at: datetime
+
+
 class DocResponse(BaseModel):
     model_config = ConfigDict(from_attributes=True)
 

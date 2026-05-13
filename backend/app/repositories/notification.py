@@ -15,14 +15,14 @@ class NotificationRepository(BaseRepository[Notification]):
     def __init__(self, session: AsyncSession, org_id: uuid.UUID) -> None:
         super().__init__(Notification, session, org_id)
 
-    async def list(self, user_id: uuid.UUID, is_read: bool | None = None) -> list[Notification]:
+    async def list(self, user_id: uuid.UUID, is_read: bool | None = None, limit: int = 200) -> list[Notification]:  # type: ignore[override]
         q = select(Notification).where(
             self._org_filter(),
             Notification.user_id == user_id,
         )
         if is_read is not None:
             q = q.where(Notification.is_read == is_read)
-        q = q.order_by(Notification.created_at.desc())
+        q = q.order_by(Notification.created_at.desc()).limit(limit)
         result = await self.session.execute(q)
         return list(result.scalars().all())
 
@@ -95,15 +95,15 @@ class InboxRepository(BaseRepository[InboxItem]):
         super().__init__(InboxItem, session, org_id)
 
     async def list(
-        self, assignee_member_id: uuid.UUID, state: str | None = None
-    ) -> list[InboxItem]:
+        self, assignee_member_id: uuid.UUID, state: str | None = None, limit: int = 200
+    ) -> list[InboxItem]:  # type: ignore[override]
         q = select(InboxItem).where(
             self._org_filter(),
             InboxItem.assignee_member_id == assignee_member_id,
         )
         if state is not None:
             q = q.where(InboxItem.state == state)
-        q = q.order_by(InboxItem.waiting_since.desc())
+        q = q.order_by(InboxItem.waiting_since.desc()).limit(limit)
         result = await self.session.execute(q)
         return list(result.scalars().all())
 

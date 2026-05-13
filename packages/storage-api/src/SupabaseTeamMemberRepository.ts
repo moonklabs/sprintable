@@ -14,8 +14,10 @@ export class SupabaseTeamMemberRepository implements ITeamMemberRepository {
 
   async getByUserId(userId: string, _orgId: string): Promise<TeamMember | null> {
     try {
-      const members = await fastapiCall<TeamMember[]>('GET', '/api/v2/team-members', this.accessToken);
-      return members.find((m) => (m as unknown as { user_id?: string }).user_id === userId) ?? null;
+      const members = await fastapiCall<TeamMember[]>('GET', '/api/v2/team-members', this.accessToken, {
+        query: { user_id: userId },
+      });
+      return members[0] ?? null;
     } catch { return null; }
   }
 

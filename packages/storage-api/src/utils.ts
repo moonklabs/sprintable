@@ -45,6 +45,7 @@ export async function fastapiCall<T>(
     method,
     headers,
     body: options?.body !== undefined ? JSON.stringify(options.body) : undefined,
+    signal: AbortSignal.timeout(30_000),
   });
 
   if (!res.ok) {
