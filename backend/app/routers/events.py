@@ -163,7 +163,6 @@ class EventResponse(BaseModel):
 async def agent_event_stream(
     request: Request,
     member_id: uuid.UUID = Query(...),
-    db: AsyncSession = Depends(get_db),
     org_id: uuid.UUID = Depends(get_verified_org_id),
 ):
     """GET /api/v2/events/stream?member_id={id} — 에이전트 전용 SSE 스트림.
@@ -172,17 +171,19 @@ async def agent_event_stream(
     - heartbeat: 30초마다 연결 유지
     - <event_type>: 이벤트버스 이벤트 실시간 수신
     """
+    from app.core.database import async_session_factory
     from app.models.team import TeamMember
 
-    # member_id가 요청자 org 소속인지 검증
-    result = await db.execute(
-        select(TeamMember.id).where(
-            TeamMember.id == member_id,
-            TeamMember.org_id == org_id,
+    # member_id가 요청자 org 소속인지 검증 — 개별 세션, 검증 후 즉시 반환
+    async with async_session_factory() as db:
+        result = await db.execute(
+            select(TeamMember.id).where(
+                TeamMember.id == member_id,
+                TeamMember.org_id == org_id,
+            )
         )
-    )
-    if result.scalar_one_or_none() is None:
-        raise HTTPException(status_code=404, detail="Member not found")
+        if result.scalar_one_or_none() is None:
+            raise HTTPException(status_code=404, detail="Member not found")
 
     member_id_str = str(member_id)
     queue: asyncio.Queue[dict] = asyncio.Queue(maxsize=200)
@@ -190,48 +191,50 @@ async def agent_event_stream(
 
     async def generate():
         try:
-            # 연결 즉시 pending 이벤트 백필 전달 (배치: 10건 청크)
-            result = await db.execute(
-                select(Event)
-                .where(
-                    Event.org_id == org_id,
-                    Event.recipient_id == member_id,
-                    Event.status == "pending",
+            # 연결 즉시 pending 이벤트 백필 전달 — 개별 세션, 완료 후 반환
+            async with async_session_factory() as db:
+                result = await db.execute(
+                    select(Event)
+                    .where(
+                        Event.org_id == org_id,
+                        Event.recipient_id == member_id,
+                        Event.status == "pending",
+                    )
+                    .order_by(Event.created_at.asc())
                 )
-                .order_by(Event.created_at.asc())
-            )
-            pending_events = result.scalars().all()
-            for i in range(0, len(pending_events), _SSE_BATCH_SIZE):
-                batch = pending_events[i : i + _SSE_BATCH_SIZE]
-                for evt in batch:
-                    data = _event_to_payload(evt)
-                    yield f"event: {evt.event_type}\ndata: {json.dumps(data)}\n\n"
-                    evt.status = "delivered"
-                    evt.delivered_at = datetime.now(timezone.utc)
-                if batch:
-                    await db.commit()
+                pending_events = result.scalars().all()
+                for i in range(0, len(pending_events), _SSE_BATCH_SIZE):
+                    batch = pending_events[i : i + _SSE_BATCH_SIZE]
+                    for evt in batch:
+                        data = _event_to_payload(evt)
+                        yield f"event: {evt.event_type}\ndata: {json.dumps(data)}\n\n"
+                        evt.status = "delivered"
+                        evt.delivered_at = datetime.now(timezone.utc)
+                    if batch:
+                        await db.commit()
 
-            # 신규 이벤트 리슨 — yield 후 delivered 마킹 (at-least-once)
+            # 신규 이벤트 리슨 — 대기 구간에서 커넥션 미점유, 이벤트마다 개별 세션
             while not await request.is_disconnected():
                 try:
                     event_data = await asyncio.wait_for(queue.get(), timeout=30.0)
                     event_type = event_data.get("event_type", "message")
                     yield f"event: {event_type}\ndata: {json.dumps(event_data)}\n\n"
-                    # yield 후 DB delivered 마킹 — 실제 전송 시도 후 처리
+                    # yield 후 DB delivered 마킹 — 개별 세션, 마킹 후 즉시 반환
                     if eid := event_data.get("event_id"):
                         try:
-                            r = await db.execute(
-                                select(Event).where(
-                                    Event.id == uuid.UUID(eid),
-                                    Event.status == "pending",
-                                    Event.org_id == org_id,
+                            async with async_session_factory() as db:
+                                r = await db.execute(
+                                    select(Event).where(
+                                        Event.id == uuid.UUID(eid),
+                                        Event.status == "pending",
+                                        Event.org_id == org_id,
+                                    )
                                 )
-                            )
-                            live_evt = r.scalar_one_or_none()
-                            if live_evt:
-                                live_evt.status = "delivered"
-                                live_evt.delivered_at = datetime.now(timezone.utc)
-                                await db.commit()
+                                live_evt = r.scalar_one_or_none()
+                                if live_evt:
+                                    live_evt.status = "delivered"
+                                    live_evt.delivered_at = datetime.now(timezone.utc)
+                                    await db.commit()
                         except Exception:
                             pass
                 except asyncio.TimeoutError:
