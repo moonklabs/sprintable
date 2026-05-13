@@ -255,6 +255,34 @@ export function KanbanBoard({ projectId }: KanbanBoardProps) {
     }
   }, [searchParams, stories, handleStoryClick]);
 
+  // URL에서 task_id 읽어서 해당 task의 story 패널 열기 (알림 딥링크 지원)
+  useEffect(() => {
+    const taskId = searchParams.get('task_id');
+    if (!taskId || stories.length === 0) return;
+
+    fetch(`/api/tasks/${taskId}`)
+      .then((r) => (r.ok ? r.json() : null))
+      .then((json) => {
+        const storyId = json?.data?.story_id as string | undefined;
+        if (!storyId || selectedStoryRef.current?.id === storyId) return;
+        const story = stories.find((s) => s.id === storyId);
+        if (story) {
+          void handleStoryClick(story, { replace: true });
+        } else {
+          fetch(`/api/stories/${storyId}`)
+            .then((r) => (r.ok ? r.json() : null))
+            .then((json2) => {
+              const fetched = json2?.data as KanbanStory | undefined;
+              if (fetched && selectedStoryRef.current?.id !== storyId) {
+                void handleStoryClick(fetched, { replace: true });
+              }
+            })
+            .catch(() => {});
+        }
+      })
+      .catch(() => {});
+  }, [searchParams, stories, handleStoryClick]);
+
   const filteredStories = stories.filter((s) => {
     if (selectedEpicId && s.epic_id !== selectedEpicId) return false;
     if (selectedAssigneeId && s.assignee_id !== selectedAssigneeId) return false;
