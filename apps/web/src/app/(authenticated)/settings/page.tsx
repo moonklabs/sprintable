@@ -26,6 +26,8 @@ import { OperatorDropdownSelect } from '@/components/ui/operator-dropdown-select
 import { SectionCard, SectionCardBody, SectionCardHeader } from '@/components/ui/section-card';
 import { Tabs, TabsList, TabsTrigger, TabsContent } from '@/components/ui/tabs';
 import { SidebarTrigger } from '@/components/ui/sidebar';
+import { ToastContainer, useToast } from '@/components/ui/toast';
+import { NOTIFICATION_TYPES } from '@/lib/notification-types';
 
 interface NotificationSetting {
   id: string;
@@ -69,7 +71,15 @@ interface ProjectMember {
   created_by?: string | null;
 }
 
-const EVENT_TYPES = ['story_assigned', 'memo_received', 'reward_granted', 'story_status_changed'];
+const NOTIFICATION_CATEGORIES = [
+  { key: 'memo', types: ['memo', 'memo_reply', 'memo_mention'] },
+  { key: 'story', types: ['story', 'story_assigned'] },
+  { key: 'task', types: ['task', 'task_assigned', 'task_completed'] },
+  { key: 'sprint', types: ['sprint_closed'] },
+  { key: 'system', types: ['info', 'warning', 'system', 'standup_reminder', 'reward', 'invitation'] },
+] as const satisfies ReadonlyArray<{ key: string; types: ReadonlyArray<(typeof NOTIFICATION_TYPES)[number]> }>;
+
+type NotificationCategoryKey = typeof NOTIFICATION_CATEGORIES[number]['key'];
 
 export default function SettingsPage() {
   const t = useTranslations('settings');
@@ -78,6 +88,7 @@ export default function SettingsPage() {
   const searchParamsHook = useSearchParams();
   const [activeTab, setActiveTab] = useState(() => searchParamsHook.get('tab') ?? 'profile');
   const [lnbOpen, setLnbOpen] = useState(false);
+  const { toasts, addToast, dismissToast } = useToast();
 
   const handleTabChange = (tab: string) => {
     setActiveTab(tab);
@@ -330,13 +341,7 @@ export default function SettingsPage() {
     }
   }, [activeTab]);
 
-  const toggleSetting = async (eventType: string, currentEnabled: boolean) => {
-    const newEnabled = !currentEnabled;
-    await fetch('/api/notification-settings', {
-      method: 'PUT',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ channel: 'in_app', event_type: eventType, enabled: newEnabled }),
-    });
+  const applySettingOptimistic = (eventType: string, newEnabled: boolean) => {
     setSettings((prev) => {
       const existing = prev.find((s) => s.event_type === eventType && s.channel === 'in_app');
       if (existing) return prev.map((s) => (s.id === existing.id ? { ...s, enabled: newEnabled } : s));
@@ -344,9 +349,59 @@ export default function SettingsPage() {
     });
   };
 
+  const toggleSetting = async (eventType: string, currentEnabled: boolean) => {
+    const newEnabled = !currentEnabled;
+    applySettingOptimistic(eventType, newEnabled);
+    try {
+      const res = await fetch('/api/notification-settings', {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ channel: 'in_app', event_type: eventType, enabled: newEnabled }),
+      });
+      if (!res.ok) {
+        applySettingOptimistic(eventType, currentEnabled);
+        addToast({ type: 'error', title: t('notificationSaveError') });
+      }
+    } catch {
+      applySettingOptimistic(eventType, currentEnabled);
+      addToast({ type: 'error', title: t('notificationSaveError') });
+    }
+  };
+
+  const toggleCategory = async (categoryKey: NotificationCategoryKey, enable: boolean) => {
+    const category = NOTIFICATION_CATEGORIES.find((c) => c.key === categoryKey);
+    if (!category) return;
+    const snapshot = Object.fromEntries(category.types.map((type) => [type, getEnabled(type)]));
+    category.types.forEach((type) => applySettingOptimistic(type, enable));
+    try {
+      const results = await Promise.all(
+        category.types.map((type) =>
+          fetch('/api/notification-settings', {
+            method: 'PUT',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ channel: 'in_app', event_type: type, enabled: enable }),
+          }),
+        ),
+      );
+      if (results.some((r) => !r.ok)) {
+        category.types.forEach((type) => applySettingOptimistic(type, snapshot[type] ?? !enable));
+        addToast({ type: 'error', title: t('notificationSaveError') });
+      }
+    } catch {
+      category.types.forEach((type) => applySettingOptimistic(type, snapshot[type] ?? !enable));
+      addToast({ type: 'error', title: t('notificationSaveError') });
+    }
+  };
+
   const getEnabled = (eventType: string) => {
     const setting = settings.find((s) => s.event_type === eventType && s.channel === 'in_app');
     return setting?.enabled ?? true;
+  };
+
+  const isCategoryAllEnabled = (categoryKey: NotificationCategoryKey) => {
+    const category = NOTIFICATION_CATEGORIES.find((c) => c.key === categoryKey);
+    if (!category) return false;
+    return category.types.every((type) => getEnabled(type));
   };
 
   const assignableMembers = useMemo(() => {
@@ -713,19 +768,77 @@ export default function SettingsPage() {
                       ))}
                     </div>
                   ) : (
-                    <div className="space-y-3">
-                      {EVENT_TYPES.map((eventType) => (
-                        <div key={eventType} className="flex items-center justify-between rounded-md border border-border bg-muted/30 p-3">
-                          <span className="text-sm text-foreground">{t(`event_${eventType}`)}</span>
-                          <button
-                            onClick={() => toggleSetting(eventType, getEnabled(eventType))}
-                            className={`relative h-6 w-11 rounded-full transition ${getEnabled(eventType) ? 'bg-primary' : 'bg-muted'}`}
-                            type="button"
-                          >
-                            <span className={`absolute top-0.5 h-5 w-5 rounded-full bg-white shadow transition ${getEnabled(eventType) ? 'left-[22px]' : 'left-0.5'}`} />
-                          </button>
+                    <div>
+                      {/* 채널 헤더 */}
+                      <div className="mb-3 flex items-center overflow-x-auto border-b pb-2">
+                        <span className="min-w-0 flex-1 text-xs text-muted-foreground">{t('notifications')}</span>
+                        <div className="ml-auto flex shrink-0 gap-6 pl-4 text-center text-xs font-medium text-muted-foreground">
+                          <span className="w-14">{t('notification_channel_in_app')}</span>
+                          <span className="w-14 opacity-40">{t('notification_channel_webhook')}</span>
+                          <span className="w-14 opacity-40">{t('notification_channel_email')}</span>
                         </div>
-                      ))}
+                      </div>
+
+                      {/* 카테고리 그룹 */}
+                      <div className="space-y-4">
+                        {NOTIFICATION_CATEGORIES.map((category) => {
+                          const allEnabled = isCategoryAllEnabled(category.key);
+                          return (
+                            <div key={category.key}>
+                              {/* 카테고리 헤더 */}
+                              <div className="mb-1 flex items-center justify-between">
+                                <span className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">
+                                  {t(`notification_category_${category.key}`)}
+                                </span>
+                                <button
+                                  type="button"
+                                  onClick={() => void toggleCategory(category.key, !allEnabled)}
+                                  className="text-xs text-muted-foreground transition hover:text-foreground"
+                                >
+                                  {allEnabled ? tc('disable_all') : tc('enable_all')}
+                                </button>
+                              </div>
+
+                              {/* 이벤트 행 */}
+                              <div className="space-y-1 rounded-md border border-border bg-muted/20">
+                                {category.types.map((eventType) => {
+                                  const enabled = getEnabled(eventType);
+                                  return (
+                                    <div
+                                      key={eventType}
+                                      className="flex items-center px-3 py-2.5"
+                                    >
+                                      <span className="min-w-0 flex-1 text-sm text-foreground">
+                                        {t(`event_${eventType}`)}
+                                      </span>
+                                      <div className="ml-auto flex shrink-0 items-center gap-6">
+                                        {/* in_app 토글 */}
+                                        <div className="flex w-14 justify-center">
+                                          <button
+                                            type="button"
+                                            onClick={() => void toggleSetting(eventType, enabled)}
+                                            className={`relative h-6 w-11 rounded-full transition ${enabled ? 'bg-primary' : 'bg-muted'}`}
+                                          >
+                                            <span className={`absolute top-0.5 h-5 w-5 rounded-full bg-white shadow transition ${enabled ? 'left-[22px]' : 'left-0.5'}`} />
+                                          </button>
+                                        </div>
+                                        {/* webhook - 준비 중 */}
+                                        <div className="flex w-14 justify-center">
+                                          <span className="text-[11px] text-muted-foreground opacity-40">{t('notification_coming_soon')}</span>
+                                        </div>
+                                        {/* email - 준비 중 */}
+                                        <div className="flex w-14 justify-center">
+                                          <span className="text-[11px] text-muted-foreground opacity-40">{t('notification_coming_soon')}</span>
+                                        </div>
+                                      </div>
+                                    </div>
+                                  );
+                                })}
+                              </div>
+                            </div>
+                          );
+                        })}
+                      </div>
                     </div>
                   )}
                 </SectionCardBody>
@@ -1439,6 +1552,7 @@ export default function SettingsPage() {
           </div>
         </div>
       ) : null}
+      <ToastContainer toasts={toasts} onDismiss={dismissToast} />
     </>
   );
 }
