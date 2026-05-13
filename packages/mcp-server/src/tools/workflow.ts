@@ -64,12 +64,12 @@ export function registerWorkflowTools(server: McpServer) {
         const myId = me.id;
 
         // 2. Fetch all routing rules for the project
-        const rules = await pmApi<RoutingRule[]>('/api/v1/agent-routing-rules');
+        const rules = await pmApi<RoutingRule[]>('/api/v2/agent-routing-rules');
 
         // 3. Fetch latest workflow version
         let latestVersion: WorkflowVersion | null = null;
         try {
-          const versions = await pmApi<WorkflowVersion[]>('/api/v1/workflow-versions');
+          const versions = await pmApi<WorkflowVersion[]>('/api/v2/workflow-versions');
           latestVersion = (Array.isArray(versions) && versions.length > 0 ? versions[0] : null) ?? null;
         } catch {
           // workflow_versions may not exist yet — graceful degradation
