@@ -306,18 +306,20 @@ async def create_event(
 @router.get("/pending", response_model=list[EventResponse])
 async def get_pending_events(
     recipient_id: uuid.UUID = Query(...),
+    event_type: str | None = Query(default=None),
     db: AsyncSession = Depends(get_db),
     org_id: uuid.UUID = Depends(get_verified_org_id),
 ) -> list[EventResponse]:
-    """GET /api/v2/events/pending?recipient_id={id} — 수신자별 pending 이벤트 목록."""
+    """GET /api/v2/events/pending?recipient_id={id}&event_type={type} — 수신자별 pending 이벤트 목록."""
+    filters = [
+        Event.org_id == org_id,
+        Event.recipient_id == recipient_id,
+        Event.status == "pending",
+    ]
+    if event_type:
+        filters.append(Event.event_type == event_type)
     result = await db.execute(
-        select(Event)
-        .where(
-            Event.org_id == org_id,
-            Event.recipient_id == recipient_id,
-            Event.status == "pending",
-        )
-        .order_by(Event.created_at.asc())
+        select(Event).where(*filters).order_by(Event.created_at.asc())
     )
     events = result.scalars().all()
     return [EventResponse.model_validate(e) for e in events]
