@@ -6,7 +6,7 @@ from pydantic import BaseModel
 from sqlalchemy import or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.dependencies.auth import AuthContext, get_current_user, get_verified_org_id
+from app.dependencies.auth import AuthContext, get_current_user, get_project_scoped_org_id, get_verified_org_id
 from app.dependencies.database import get_db
 from app.models.pm import Epic, Story, StoryActivity, StoryComment
 from app.models.team import TeamMember
@@ -41,7 +41,7 @@ async def _resolve_epic_title(db: AsyncSession, epic_id: uuid.UUID | None) -> st
 
 def _get_repo(
     session: AsyncSession = Depends(get_db),
-    org_id: uuid.UUID = Depends(get_verified_org_id),
+    org_id: uuid.UUID = Depends(get_project_scoped_org_id),
 ) -> StoryRepository:
     return StoryRepository(session, org_id)
 

@@ -5,7 +5,7 @@ from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.dependencies.auth import AuthContext, get_current_user, get_verified_org_id
+from app.dependencies.auth import AuthContext, get_current_user, get_project_scoped_org_id, get_verified_org_id
 from app.dependencies.database import get_db
 from app.models.standup import StandupEntry, StandupFeedback
 from app.repositories.standup import StandupEntryRepository, StandupFeedbackRepository
@@ -21,7 +21,7 @@ router = APIRouter(prefix="/api/v2/standups", tags=["standups"])
 
 def _get_repo(
     session: AsyncSession = Depends(get_db),
-    org_id: uuid.UUID = Depends(get_verified_org_id),
+    org_id: uuid.UUID = Depends(get_project_scoped_org_id),
 ) -> StandupEntryRepository:
     return StandupEntryRepository(session, org_id)
 
