@@ -72,7 +72,9 @@ async def send_chat_message(
         attachments=body.attachments,
     )
 
-    # chat:message 이벤트 → thread 참여자 SSE 전달
+    await db.commit()
+
+    # chat:message 이벤트 → commit 완료 후 SSE 전달 (commit 실패 시 유령 SSE 방지)
     try:
         chat_participants: set[uuid.UUID] = set()
         if memo.assigned_to:
@@ -94,7 +96,6 @@ async def send_chat_message(
     except Exception:
         pass
 
-    await db.commit()
     return ReplyResponse.model_validate(reply)
 
 
@@ -134,7 +135,9 @@ async def send_chat_message_with_file(
         attachments=attachments,
     )
 
-    # chat:message SSE 전달
+    await db.commit()
+
+    # chat:message SSE 전달 (commit 완료 후)
     try:
         chat_participants: set[uuid.UUID] = set()
         if memo.assigned_to:
@@ -156,5 +159,4 @@ async def send_chat_message_with_file(
     except Exception:
         pass
 
-    await db.commit()
     return ReplyResponse.model_validate(reply)

@@ -5,6 +5,7 @@ description = "Sprintable FastAPI backend — Phase B migration layer"
 requires-python = ">=3.12"
 dependencies = [
     "fastapi>=0.115.0",
+    "python-multipart>=0.0.9",
     "uvicorn[standard]>=0.32.0",
     "sqlalchemy[asyncio]>=2.0.0",
     "asyncpg>=0.30.0",
