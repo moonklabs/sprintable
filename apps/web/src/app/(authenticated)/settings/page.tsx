@@ -352,12 +352,17 @@ export default function SettingsPage() {
   const toggleSetting = async (eventType: string, currentEnabled: boolean) => {
     const newEnabled = !currentEnabled;
     applySettingOptimistic(eventType, newEnabled);
-    const res = await fetch('/api/notification-settings', {
-      method: 'PUT',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ channel: 'in_app', event_type: eventType, enabled: newEnabled }),
-    });
-    if (!res.ok) {
+    try {
+      const res = await fetch('/api/notification-settings', {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ channel: 'in_app', event_type: eventType, enabled: newEnabled }),
+      });
+      if (!res.ok) {
+        applySettingOptimistic(eventType, currentEnabled);
+        addToast({ type: 'error', title: t('notificationSaveError') });
+      }
+    } catch {
       applySettingOptimistic(eventType, currentEnabled);
       addToast({ type: 'error', title: t('notificationSaveError') });
     }
@@ -366,18 +371,24 @@ export default function SettingsPage() {
   const toggleCategory = async (categoryKey: NotificationCategoryKey, enable: boolean) => {
     const category = NOTIFICATION_CATEGORIES.find((c) => c.key === categoryKey);
     if (!category) return;
+    const snapshot = Object.fromEntries(category.types.map((type) => [type, getEnabled(type)]));
     category.types.forEach((type) => applySettingOptimistic(type, enable));
-    const results = await Promise.all(
-      category.types.map((type) =>
-        fetch('/api/notification-settings', {
-          method: 'PUT',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ channel: 'in_app', event_type: type, enabled: enable }),
-        }),
-      ),
-    );
-    if (results.some((r) => !r.ok)) {
-      category.types.forEach((type) => applySettingOptimistic(type, !enable));
+    try {
+      const results = await Promise.all(
+        category.types.map((type) =>
+          fetch('/api/notification-settings', {
+            method: 'PUT',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ channel: 'in_app', event_type: type, enabled: enable }),
+          }),
+        ),
+      );
+      if (results.some((r) => !r.ok)) {
+        category.types.forEach((type) => applySettingOptimistic(type, snapshot[type] ?? !enable));
+        addToast({ type: 'error', title: t('notificationSaveError') });
+      }
+    } catch {
+      category.types.forEach((type) => applySettingOptimistic(type, snapshot[type] ?? !enable));
       addToast({ type: 'error', title: t('notificationSaveError') });
     }
   };
