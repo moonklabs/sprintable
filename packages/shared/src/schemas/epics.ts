@@ -24,4 +24,5 @@ export const updateEpicSchema = z.object({
   success_criteria: z.string().optional().nullable(),
   target_sp: z.number().int().positive().optional().nullable(),
   target_date: z.string().optional().nullable(),
+  assignee_id: z.string().optional().nullable(),
 });

@@ -63,6 +63,8 @@ export function EntityDispatchPanel({
         body: JSON.stringify({ entity_type: entityType, entity_id: entityId, project_id: projectId }),
       });
       if (!dispatchRes.ok) throw new Error('dispatch failed');
+      const dispatchData = await dispatchRes.json() as { dispatched?: boolean };
+      if (!dispatchData.dispatched) throw new Error('dispatch not executed — assignee missing');
       addToast({ type: 'success', title: 'Dispatch 완료' });
     } catch {
       addToast({ type: 'error', title: 'Dispatch 실패. 다시 시도하겠는.' });
