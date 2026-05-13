@@ -30,7 +30,16 @@ async def get_me(
         where_clause = TeamMember.id == uid
     else:
         # JWT 인증: auth.user_id = user.id = TeamMember.user_id
-        where_clause = TeamMember.user_id == uid
+        # app_metadata.project_id로 멀티프로젝트 유저 분기 필수
+        project_id_str = auth.claims.get("app_metadata", {}).get("project_id")
+        if project_id_str:
+            try:
+                project_id = uuid.UUID(project_id_str)
+                where_clause = (TeamMember.user_id == uid) & (TeamMember.project_id == project_id)
+            except (ValueError, AttributeError):
+                where_clause = TeamMember.user_id == uid
+        else:
+            where_clause = TeamMember.user_id == uid
 
     result = await session.execute(
         select(TeamMember)

@@ -1,6 +1,7 @@
 'use client';
 
 import { useCallback, useEffect, useState } from 'react';
+import { useSearchParams } from 'next/navigation';
 import { useTranslations } from 'next-intl';
 import { Plus, X, Play, StopCircle, ChevronRight } from 'lucide-react';
 import { Badge } from '@/components/ui/badge';
@@ -151,6 +152,7 @@ function CreateDialog({ projectId, onCreated, onClose }: CreateDialogProps) {
 export function SprintsClient({ projectId }: SprintsClientProps) {
   const t = useTranslations('sprints');
   const tc = useTranslations('common');
+  const searchParams = useSearchParams();
 
   const [sprints, setSprints] = useState<Sprint[]>([]);
   const [loading, setLoading] = useState(true);
@@ -262,6 +264,14 @@ export function SprintsClient({ projectId }: SprintsClientProps) {
     setSelected(sprint);
     await loadSprintDetail(sprint);
   }, [loadSprintDetail]);
+
+  // ?id= 파라미터로 sprint 자동 선택 (알림 딥링크 지원)
+  useEffect(() => {
+    const sprintId = searchParams.get('id');
+    if (!sprintId || sprints.length === 0 || selected?.id === sprintId) return;
+    const sprint = sprints.find((s) => s.id === sprintId);
+    if (sprint) void handleSelect(sprint);
+  }, [searchParams, sprints, selected, handleSelect]);
 
   const handleActivate = async () => {
     if (!selected) return;
