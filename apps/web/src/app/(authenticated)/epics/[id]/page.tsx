@@ -9,6 +9,7 @@ import { ArrowLeft, Pencil, X } from 'lucide-react';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { TopBarSlot } from '@/components/nav/top-bar-slot';
+import { EntityDispatchPanel } from '@/components/dispatch/entity-dispatch-panel';
 
 type EpicStatus = 'draft' | 'active' | 'done' | 'archived';
 type EpicPriority = 'critical' | 'high' | 'medium' | 'low';
@@ -29,6 +30,8 @@ interface Epic {
   priority: EpicPriority;
   target_date?: string;
   target_sp?: number;
+  assignee_id?: string | null;
+  project_id?: string;
   created_at: string;
   stories?: Story[];
 }
@@ -159,11 +162,16 @@ export default function EpicDetailPage() {
   const [epic, setEpic] = useState<Epic | null>(null);
   const [loading, setLoading] = useState(true);
   const [isEditing, setIsEditing] = useState(false);
+  const [epicAssigneeId, setEpicAssigneeId] = useState<string | null>(null);
 
   useEffect(() => {
     fetch(`/api/epics/${id}`)
       .then((r) => r.ok ? r.json() : Promise.reject())
-      .then((json) => setEpic((json as { data: Epic }).data))
+      .then((json) => {
+        const data = (json as { data: Epic }).data;
+        setEpic(data);
+        setEpicAssigneeId(data.assignee_id ?? null);
+      })
       .catch(() => router.replace('/epics'))
       .finally(() => setLoading(false));
   }, [id, router]);
@@ -214,6 +222,20 @@ export default function EpicDetailPage() {
             {epic.target_sp != null && <span className="text-xs text-muted-foreground">목표 SP: {epic.target_sp}</span>}
           </div>
         </div>
+
+        {/* Dispatch */}
+        {epic.project_id && (
+          <div className="rounded-xl border border-border bg-muted/20 p-4">
+            <p className="mb-2 text-xs font-semibold uppercase tracking-wide text-muted-foreground">Dispatch</p>
+            <EntityDispatchPanel
+              entityType="epic"
+              entityId={epic.id}
+              projectId={epic.project_id}
+              currentAssigneeId={epicAssigneeId}
+              onAssigneePatched={(aid) => setEpicAssigneeId(aid)}
+            />
+          </div>
+        )}
 
         {/* Edit form */}
         {isEditing && (
