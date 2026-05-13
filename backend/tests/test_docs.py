@@ -18,6 +18,7 @@ def _mock_doc() -> MagicMock:
     d.project_id = PROJECT_ID
     d.parent_id = None
     d.created_by = None
+    d.assignee_id = None
     d.title = "Getting Started"
     d.slug = "getting-started"
     d.content = "# Hello"

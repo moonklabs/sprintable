@@ -16,6 +16,7 @@ def _mock_epic(status: str = "active") -> MagicMock:
     e.id = EPIC_ID
     e.org_id = ORG_ID
     e.project_id = PROJECT_ID
+    e.assignee_id = None
     e.title = "Epic 1"
     e.status = status
     e.priority = "medium"

@@ -40,35 +40,35 @@ async def _fetch_entity(
     entity_type: str,
     entity_id: uuid.UUID,
     org_id: uuid.UUID,
-) -> tuple[uuid.UUID | None, str | None, str | None]:
-    """(assignee_id, title, description) 반환."""
+) -> tuple[uuid.UUID | None, str | None, str | None, uuid.UUID | None]:
+    """(assignee_id, title, description, project_id) 반환."""
     if entity_type == "epic":
         row = await db.execute(
-            select(Epic.assignee_id, Epic.title, Epic.description).where(
+            select(Epic.assignee_id, Epic.title, Epic.description, Epic.project_id).where(
                 Epic.id == entity_id, Epic.org_id == org_id
             )
         )
         r = row.one_or_none()
     elif entity_type == "story":
         row = await db.execute(
-            select(Story.assignee_id, Story.title, Story.description).where(
+            select(Story.assignee_id, Story.title, Story.description, Story.project_id).where(
                 Story.id == entity_id, Story.org_id == org_id
             )
         )
         r = row.one_or_none()
     elif entity_type == "doc":
         row = await db.execute(
-            select(Doc.assignee_id, Doc.title, Doc.content).where(
+            select(Doc.assignee_id, Doc.title, Doc.content, Doc.project_id).where(
                 Doc.id == entity_id, Doc.org_id == org_id, Doc.deleted_at.is_(None)
             )
         )
         r = row.one_or_none()
     else:
-        return None, None, None
+        return None, None, None, None
 
     if r is None:
-        return None, None, None
-    return r[0], r[1], r[2]
+        return None, None, None, None
+    return r[0], r[1], r[2], r[3]
 
 
 @router.post("", response_model=DispatchResponse)
@@ -82,11 +82,13 @@ async def dispatch_entity(
     if body.entity_type not in _ENTITY_TYPES:
         raise HTTPException(status_code=400, detail=f"entity_type must be one of {_ENTITY_TYPES}")
 
-    assignee_id, title, description = await _fetch_entity(db, body.entity_type, body.entity_id, org_id)
+    assignee_id, title, description, entity_project_id = await _fetch_entity(db, body.entity_type, body.entity_id, org_id)
     if title is None:
         raise HTTPException(status_code=404, detail="Entity not found")
     if not assignee_id:
         return DispatchResponse(dispatched=False)
+    # entity의 실제 project_id 사용 (body.project_id 불일치 방지)
+    project_id = entity_project_id or body.project_id
 
     # assignee TeamMember 조회 (type: human/agent)
     member_result = await db.execute(
@@ -124,7 +126,7 @@ async def dispatch_entity(
     }
 
     event = Event(
-        project_id=body.project_id,
+        project_id=project_id,
         org_id=org_id,
         event_type=EventType.dispatched.value,
         source_entity_type=body.entity_type,
