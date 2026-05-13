@@ -236,10 +236,11 @@ async def get_project_scoped_org_id(
         select(Project.org_id).where(Project.id == project_id)
     )
     project_org_id = result.scalar_one_or_none()
-    if not project_org_id or project_org_id == base_org_id:
-        return project_org_id or base_org_id
+    if not project_org_id:
+        return base_org_id
 
-    # cross-org: 해당 project의 active TeamMember인지 검증
+    # project_id가 지정된 경우 org 동일 여부 무관하게 TeamMember 검증
+    # (동일 org 내 다른 project 미멤버 우회 방지)
     from app.models.team import TeamMember
     from sqlalchemy import or_
     uid = uuid.UUID(auth.user_id)

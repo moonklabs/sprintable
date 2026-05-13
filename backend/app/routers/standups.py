@@ -84,7 +84,7 @@ async def list_feedback(
     project_id: uuid.UUID = Query(...),
     date_filter: date = Query(..., alias="date"),
     db: AsyncSession = Depends(get_db),
-    org_id: uuid.UUID = Depends(get_verified_org_id),
+    org_id: uuid.UUID = Depends(get_project_scoped_org_id),
 ) -> list[FeedbackResponse]:
     q = (
         select(StandupFeedback)
