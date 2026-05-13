@@ -12,6 +12,8 @@ import {
   Zap,
 } from 'lucide-react';
 import { cn } from '@/lib/utils';
+import { useDashboardContext } from '@/app/dashboard/dashboard-shell';
+import { useSseNotifications, type SseEventNotification } from '@/hooks/use-sse-notifications';
 
 interface EventNotification {
   id: string;
@@ -21,6 +23,7 @@ interface EventNotification {
   payload: {
     summary?: string;
     sender_name?: string;
+    slug?: string;
     [key: string]: unknown;
   } | null;
   read_at: string | null;
@@ -209,6 +212,7 @@ function NotificationPanel({
 
 export function NotificationBell() {
   const router = useRouter();
+  const { currentTeamMemberId } = useDashboardContext();
   const [open, setOpen] = useState(false);
   const [unreadCount, setUnreadCount] = useState(0);
   // null = 로딩 중, array = 로드 완료
@@ -216,7 +220,36 @@ export function NotificationBell() {
   const containerRef = useRef<HTMLDivElement>(null);
   const intervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
 
-  // unread count 폴링 (30초)
+  // SSE 실시간 알림 수신
+  const handleSseNotification = useCallback((incoming: SseEventNotification) => {
+    // unread count 즉시 증가
+    setUnreadCount((c) => c + 1);
+    // 패널 열린 상태면 목록 맨 앞에 추가
+    setNotifications((prev) => {
+      if (prev === null) return prev;
+      const notification: EventNotification = {
+        id: incoming.id ?? crypto.randomUUID(),
+        event_type: incoming.event_type,
+        source_entity_type: incoming.source_entity_type,
+        source_entity_id: incoming.source_entity_id,
+        payload: incoming.payload,
+        read_at: null,
+        created_at: incoming.created_at,
+      };
+      return [notification, ...prev];
+    });
+    // 탭 비활성 상태에서 브라우저 알림 표시
+    if (document.hidden && 'Notification' in window && Notification.permission === 'granted') {
+      void new Notification(incoming.payload?.summary ?? incoming.event_type, {
+        body: incoming.payload?.sender_name ?? undefined,
+        icon: '/favicon.ico',
+      });
+    }
+  }, []);
+
+  useSseNotifications({ onNotification: handleSseNotification, memberId: currentTeamMemberId });
+
+  // unread count 폴링 (30초 — SSE 실패 보완)
   useEffect(() => {
     let cancelled = false;
     const poll = async () => {
@@ -234,13 +267,17 @@ export function NotificationBell() {
     };
   }, []);
 
-  // 패널 열릴 때 알림 목록 로드
+  // 패널 열릴 때 알림 목록 로드 + 브라우저 Notification 권한 요청
   useEffect(() => {
     if (!open) return;
     let cancelled = false;
     void fetchNotifications().then((data) => {
       if (!cancelled) setNotifications(data);
     });
+    // 브라우저 Notification 권한 — 최초 패널 오픈 시 요청
+    if ('Notification' in window && Notification.permission === 'default') {
+      void Notification.requestPermission();
+    }
     return () => { cancelled = true; };
   }, [open]);
 
