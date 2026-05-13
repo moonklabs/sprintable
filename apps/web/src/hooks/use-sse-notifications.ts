@@ -19,36 +19,48 @@ export interface SseEventNotification {
 
 interface UseSseNotificationsOptions {
   onNotification: (notification: SseEventNotification) => void;
+  memberId?: string;
   enabled?: boolean;
 }
 
-export function useSseNotifications({ onNotification, enabled = true }: UseSseNotificationsOptions) {
-  // ref로 callback 최신화 — EventSource Effect 재실행 방지
+// use-realtime-memos.ts와 동일한 backoff 전략
+const RECONNECT_DELAYS_MS = [5_000, 30_000, 60_000, 300_000];
+
+export function useSseNotifications({ onNotification, memberId, enabled = true }: UseSseNotificationsOptions) {
   const callbackRef = useRef(onNotification);
+  const memberIdRef = useRef(memberId);
   useEffect(() => { callbackRef.current = onNotification; }, [onNotification]);
+  useEffect(() => { memberIdRef.current = memberId; }, [memberId]);
 
   useEffect(() => {
-    if (!enabled) return;
+    if (!enabled || typeof EventSource === 'undefined') return;
 
     let es: EventSource | null = null;
     let retryTimer: ReturnType<typeof setTimeout> | null = null;
     let closed = false;
+    let reconnectAttempts = 0;
+
+    const handleData = (raw: string) => {
+      if (!raw || raw.trim() === '') return;
+      try {
+        const parsed = JSON.parse(raw) as SseEventNotification;
+        callbackRef.current(parsed);
+      } catch { /* heartbeat or malformed */ }
+    };
 
     const connect = () => {
       if (closed) return;
-      es = new EventSource('/api/event-stream', { withCredentials: true });
+      es?.close();
 
-      const handleData = (raw: string) => {
-        if (!raw || raw.trim() === '') return;
-        try {
-          const parsed = JSON.parse(raw) as SseEventNotification;
-          callbackRef.current(parsed);
-        } catch { /* noop — heartbeat or malformed */ }
-      };
+      const url = new URL('/api/event-stream', window.location.origin);
+      if (memberIdRef.current) url.searchParams.set('member_id', memberIdRef.current);
+
+      es = new EventSource(url.toString(), { withCredentials: true });
+
+      es.onopen = () => { reconnectAttempts = 0; };
 
       es.onmessage = (e: MessageEvent<string>) => handleData(e.data);
 
-      // named event 타입도 처리
       for (const eventName of ['event_notification', 'notification', 'new_notification']) {
         es.addEventListener(eventName, (e: Event) => {
           handleData((e as MessageEvent<string>).data);
@@ -58,9 +70,13 @@ export function useSseNotifications({ onNotification, enabled = true }: UseSseNo
       es.onerror = () => {
         es?.close();
         es = null;
-        if (!closed) {
-          // 3초 후 재연결
-          retryTimer = setTimeout(connect, 3000);
+        if (!closed && !retryTimer) {
+          const delay = RECONNECT_DELAYS_MS[Math.min(reconnectAttempts, RECONNECT_DELAYS_MS.length - 1)];
+          reconnectAttempts += 1;
+          retryTimer = setTimeout(() => {
+            retryTimer = null;
+            connect();
+          }, delay);
         }
       };
     };

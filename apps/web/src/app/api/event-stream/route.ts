@@ -1,9 +1,9 @@
-import { NextResponse } from 'next/server';
+import { NextRequest, NextResponse } from 'next/server';
 import { getServerSession } from '@/lib/db/server';
 
 const FASTAPI_URL = () => process.env['NEXT_PUBLIC_FASTAPI_URL'] ?? 'http://localhost:8000';
 
-export async function GET(): Promise<Response> {
+export async function GET(request: NextRequest): Promise<Response> {
   const session = await getServerSession();
   if (!session?.access_token) {
     return NextResponse.json(
@@ -12,7 +12,13 @@ export async function GET(): Promise<Response> {
     );
   }
 
-  const upstream = await fetch(`${FASTAPI_URL()}/api/v2/events/stream`, {
+  const { searchParams } = new URL(request.url);
+  const memberId = searchParams.get('member_id');
+
+  const upstreamUrl = new URL(`${FASTAPI_URL()}/api/v2/events/stream`);
+  if (memberId) upstreamUrl.searchParams.set('member_id', memberId);
+
+  const upstream = await fetch(upstreamUrl.toString(), {
     headers: { Authorization: `Bearer ${session.access_token}` },
   });
 

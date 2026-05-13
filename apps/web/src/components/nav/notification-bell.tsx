@@ -12,6 +12,7 @@ import {
   Zap,
 } from 'lucide-react';
 import { cn } from '@/lib/utils';
+import { useDashboardContext } from '@/app/dashboard/dashboard-shell';
 import { useSseNotifications, type SseEventNotification } from '@/hooks/use-sse-notifications';
 
 interface EventNotification {
@@ -211,6 +212,7 @@ function NotificationPanel({
 
 export function NotificationBell() {
   const router = useRouter();
+  const { currentTeamMemberId } = useDashboardContext();
   const [open, setOpen] = useState(false);
   const [unreadCount, setUnreadCount] = useState(0);
   // null = 로딩 중, array = 로드 완료
@@ -245,7 +247,7 @@ export function NotificationBell() {
     }
   }, []);
 
-  useSseNotifications({ onNotification: handleSseNotification });
+  useSseNotifications({ onNotification: handleSseNotification, memberId: currentTeamMemberId });
 
   // unread count 폴링 (30초 — SSE 실패 보완)
   useEffect(() => {
