@@ -1,88 +1,50 @@
 'use client';
 
 import { useCallback, useEffect, useState } from 'react';
-import { useAutoRefresh } from '@/hooks/use-auto-refresh';
 import { useParams, useRouter } from 'next/navigation';
 import { ChevronLeft, Plus } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { useTranslations } from 'next-intl';
-import { MemoThread } from '@/components/memos/memo-thread';
 import { TopBarSlot } from '@/components/nav/top-bar-slot';
+import { ChatView } from '@/components/chat/chat-view';
 import { useDashboardContext } from '../../../dashboard/dashboard-shell';
-import type { MemoDetailState } from '@/components/memos/memo-state';
 
-interface Member {
+interface MemoSummary {
   id: string;
-  name: string;
-  type: string;
+  title: string | null;
 }
 
 export default function MemoDetailPage() {
   const { id } = useParams<{ id: string }>();
   const router = useRouter();
   const t = useTranslations('memos');
-  const { currentTeamMemberId, projectId } = useDashboardContext();
+  const { currentTeamMemberId } = useDashboardContext();
 
-  const [memo, setMemo] = useState<MemoDetailState | null>(null);
-  const [members, setMembers] = useState<Member[]>([]);
-  const [loading, setLoading] = useState(true);
-  const [error, setError] = useState(false);
+  const [memo, setMemo] = useState<MemoSummary | null>(null);
 
-  const memberMap = Object.fromEntries(members.map((m) => [m.id, { name: m.name, type: m.type }]));
-
-  const fetchMemo = useCallback(async () => {
+  const fetchMemoTitle = useCallback(async () => {
     try {
       const res = await fetch(`/api/memos/${id}`);
-      if (!res.ok) throw new Error('Failed to fetch memo');
+      if (!res.ok) return;
       const { data } = await res.json();
-      setMemo(data);
+      setMemo({ id: data.id, title: data.title });
       await fetch(`/api/memos/${id}/read`, { method: 'PATCH' }).catch(() => null);
     } catch {
-      setError(true);
-    } finally {
-      setLoading(false);
+      // non-critical — ChatView will still render
     }
   }, [id]);
 
-  const fetchMembers = useCallback(async () => {
-    if (!projectId) return;
-    try {
-      const res = await fetch(`/api/team-members?project_id=${projectId}&is_active=true`);
-      if (!res.ok) return;
-      const { data } = await res.json();
-      setMembers(data ?? []);
-    } catch {
-      // non-critical
-    }
-  }, [projectId]);
-
   useEffect(() => {
-    void Promise.all([fetchMemo(), fetchMembers()]);
-  }, [fetchMemo, fetchMembers]);
+    void fetchMemoTitle();
+  }, [fetchMemoTitle]);
 
-  useAutoRefresh('memo-detail', () => void fetchMemo());
-
-  const handleReply = useCallback(async (content: string, mentionedIds?: string[]) => {
-    if (!memo) return;
-    const res = await fetch(`/api/memos/${memo.id}/replies`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ content, ...(mentionedIds && mentionedIds.length > 0 ? { assigned_to_ids: mentionedIds } : {}) }),
-    });
-    if (!res.ok) throw new Error('Failed to submit reply');
-    const { data: reply } = await res.json();
-    setMemo((prev) => prev ? { ...prev, replies: [...(prev.replies ?? []), reply] } : null);
-  }, [memo]);
-
-  const handleResolve = useCallback(async () => {
-    if (!memo) return;
-    const res = await fetch(`/api/memos/${memo.id}/resolve`, { method: 'PATCH' });
-    if (!res.ok) {
-      const body = await res.json().catch(() => ({}));
-      throw new Error(body?.error?.message ?? 'Failed to resolve memo');
-    }
-    setMemo((prev) => prev ? { ...prev, status: 'resolved' } : null);
-  }, [memo]);
+  if (!currentTeamMemberId) {
+    return (
+      <div className="flex h-64 items-center justify-center">
+        <p className="text-sm text-muted-foreground">{t('noTeamMember')}</p>
+      </div>
+    );
+  }
 
   return (
     <>
@@ -97,7 +59,7 @@ export default function MemoDetailPage() {
               <ChevronLeft className="h-4 w-4" />
               {t('title')}
             </button>
-            <span className="hidden text-sm font-medium lg:block">
+            <span className="hidden truncate text-sm font-medium lg:block">
               {memo?.title ?? t('title')}
             </span>
           </div>
@@ -109,26 +71,12 @@ export default function MemoDetailPage() {
           </Button>
         }
       />
-      <div className="flex min-h-0 flex-1 flex-col bg-background">
-        {loading && (
-          <div className="flex h-64 items-center justify-center">
-            <p className="text-sm text-muted-foreground">{t('loading')}</p>
-          </div>
-        )}
-        {!loading && error && (
-          <div className="flex h-64 items-center justify-center">
-            <p className="text-sm text-destructive">{t('loadError')}</p>
-          </div>
-        )}
-        {!loading && memo && currentTeamMemberId && (
-          <MemoThread
-            memo={memo}
-            currentUserId={currentTeamMemberId}
-            onReply={handleReply}
-            onResolve={handleResolve}
-            memberMap={memberMap}
-          />
-        )}
+      <div className="flex min-h-0 flex-1 flex-col bg-background overflow-hidden">
+        <ChatView
+          threadId={id}
+          currentTeamMemberId={currentTeamMemberId}
+          threadTitle={memo?.title ?? undefined}
+        />
       </div>
     </>
   );
