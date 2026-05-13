@@ -12,7 +12,7 @@ from app.core.rate_limit import limiter
 
 configure_logging(json_logs=os.getenv("APP_ENV", "development") != "development")
 _logger = logging.getLogger(__name__)
-from app.routers import account, agent_deployments, agent_personas, agent_routing_rules, agent_runs, agent_sessions, analytics, api_keys, audit_logs, auth, bridge, cron, current_project, dashboard, docs, entities, epics, event_notifications, events, health, hitl, integrations, invitations, me, meetings, members, memos, mockups, notifications, org_members, organizations, oss, policy_documents, presence, project_settings, projects, retros, rewards, sprints, standups, stories, subscription, tasks, team_members, webhooks, workflow_executions, workflow_report, workflow_templates, workflow_trigger, workflow_trigger_types, workflow_versions
+from app.routers import account, agent_deployments, agent_personas, agent_routing_rules, agent_runs, agent_sessions, analytics, api_keys, audit_logs, auth, bridge, cron, current_project, dashboard, dispatch, docs, entities, epics, event_notifications, events, health, hitl, integrations, invitations, me, meetings, members, memos, mockups, notifications, org_members, organizations, oss, policy_documents, presence, project_settings, projects, retros, rewards, sprints, standups, stories, subscription, tasks, team_members, webhooks, workflow_executions, workflow_report, workflow_templates, workflow_trigger, workflow_trigger_types, workflow_versions
 
 app = FastAPI(
     title="Sprintable API v2",
@@ -83,6 +83,7 @@ app.add_middleware(
 app.include_router(auth.router)
 app.include_router(health.router)
 app.include_router(events.router)
+app.include_router(dispatch.router)
 app.include_router(presence.router)
 app.include_router(sprints.router)
 app.include_router(epics.router)

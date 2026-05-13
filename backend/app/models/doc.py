@@ -23,6 +23,9 @@ class Doc(Base, OrgScopedMixin, TimestampMixin, SoftDeleteMixin):
     created_by: Mapped[uuid.UUID | None] = mapped_column(
         UUID(as_uuid=True), ForeignKey("team_members.id", ondelete="SET NULL"), nullable=True
     )
+    assignee_id: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("team_members.id", ondelete="SET NULL"), nullable=True
+    )
     title: Mapped[str] = mapped_column(Text, nullable=False)
     slug: Mapped[str] = mapped_column(Text, nullable=False)
     content: Mapped[str] = mapped_column(Text, nullable=False, default="")

@@ -29,6 +29,7 @@ class EpicUpdate(BaseModel):
     success_criteria: str | None = None
     target_sp: int | None = None
     target_date: date | None = None
+    assignee_id: uuid.UUID | None = None
 
 
 class EpicResponse(BaseModel):
@@ -37,6 +38,7 @@ class EpicResponse(BaseModel):
     id: uuid.UUID
     project_id: uuid.UUID
     org_id: uuid.UUID
+    assignee_id: uuid.UUID | None = None
     title: str
     status: str
     priority: str
