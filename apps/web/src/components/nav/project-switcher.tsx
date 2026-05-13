@@ -51,16 +51,30 @@ export function ProjectSwitcher({
     );
   }
 
+  // 단일 프로젝트 — 드롭다운 없이 이름만 표시
+  if (projects.length === 1) {
+    return (
+      <SidebarMenuButton className={cn('w-full cursor-default', className)} disabled>
+        <ProjectInitial name={currentProject?.projectName ?? 'S'} />
+        <span className="flex-1 truncate font-medium">
+          {currentProject?.projectName ?? projects[0]?.projectName ?? 'Sprintable'}
+        </span>
+      </SidebarMenuButton>
+    );
+  }
+
   async function switchProject(nextProjectId: string) {
     if (!nextProjectId || nextProjectId === currentProjectId || pending) return;
     setPending(true);
     try {
-      await fetch('/api/current-project', {
+      const res = await fetch('/api/switch-project', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ project_id: nextProjectId }),
       });
-      router.refresh();
+      if (res.ok) {
+        window.location.reload();
+      }
     } finally {
       setPending(false);
     }
