@@ -1,3 +1,4 @@
+import asyncio
 import os
 import re
 import uuid
@@ -12,7 +13,7 @@ logger = logging.getLogger(__name__)
 
 from app.dependencies.auth import AuthContext, get_current_user, get_project_scoped_org_id, get_verified_org_id
 from app.dependencies.database import get_db
-from app.models.memo import MemoAssignee, MemoReply
+from app.models.memo import Memo, MemoAssignee, MemoReply
 from app.models.team import TeamMember
 from app.models.webhook_config import WebhookConfig
 from app.repositories.memo import MemoReplyRepository, MemoRepository
@@ -90,6 +91,243 @@ def _fire_webhook(url: str, content: str, title: str, memo_url: str, memo_id: st
         httpx.post(url, json=payload, timeout=10)
     except Exception:  # noqa: BLE001
         logger.warning("reply webhook fire failed url=%s", url, exc_info=True)
+
+
+async def _retry_async(label: str, coro_fn, *args, retries: int = 3, **kwargs) -> None:
+    """코루틴 함수를 최대 retries회 재시도. 실패 시 warning 로그."""
+    for attempt in range(retries):
+        try:
+            await coro_fn(*args, **kwargs)
+            return
+        except Exception:
+            if attempt < retries - 1:
+                await asyncio.sleep(2 ** attempt)
+            else:
+                logger.warning("%s failed after %d attempts", label, retries, exc_info=True)
+
+
+async def _reply_side_effects_bg(
+    memo_id: uuid.UUID,
+    reply_id: uuid.UUID,
+    org_id: uuid.UUID,
+    project_id: uuid.UUID | None,
+    sender_id: uuid.UUID | None,
+) -> None:
+    """add_reply의 notification/eventbus/workflow side effects를 새 세션으로 백그라운드 처리."""
+    from app.core.database import async_session_factory
+    from app.routers.chats import _persist_and_push_chat_events
+    from app.models.memo import MemoEntityLink, MemoReply as MemoReplyModel
+
+    async with async_session_factory() as db:
+        try:
+            memo_result = await db.execute(select(Memo).where(Memo.id == memo_id).limit(1))
+            memo = memo_result.scalar_one_or_none()
+            if memo is None:
+                return
+            reply_result = await db.execute(select(MemoReplyModel).where(MemoReplyModel.id == reply_id).limit(1))
+            reply = reply_result.scalar_one_or_none()
+            if reply is None:
+                return
+
+            # chat events persist + SSE push
+            try:
+                chat_participants: set[uuid.UUID] = set()
+                if memo.assigned_to:
+                    chat_participants.add(memo.assigned_to)
+                if memo.created_by:
+                    chat_participants.add(memo.created_by)
+                chat_participants.discard(sender_id)
+                chat_payload = {
+                    "event_type": "chat:message",
+                    "thread_id": str(memo_id),
+                    "reply_id": str(reply_id),
+                    "content": reply.content,
+                    "created_by": str(reply.created_by),
+                    "attachments": reply.attachments,
+                    "created_at": reply.created_at.isoformat(),
+                }
+                await _persist_and_push_chat_events(db, memo, reply, org_id, sender_id, chat_participants, chat_payload)
+            except Exception:
+                logger.warning("reply bg: chat events failed memo_id=%s", memo_id, exc_info=True)
+
+            # notification (최대 3회 재시도)
+            notification_targets = [r for r in [memo.created_by] if r and r != sender_id]
+            if notification_targets:
+                await _retry_async(
+                    f"reply bg: notification memo_id={memo_id}",
+                    dispatch_notification,
+                    db,
+                    org_id=org_id,
+                    event_type="memo_reply",
+                    target_member_ids=notification_targets,
+                    title=memo.title or "메모 답신",
+                    body=(reply.content or "")[:200],
+                    reference_type="memo",
+                    reference_id=memo_id,
+                )
+
+            # eventbus (최대 3회 재시도)
+            if project_id:
+                recipient_ids = [r for r in [memo.assigned_to, memo.created_by] if r and r != sender_id]
+                if recipient_ids:
+                    await _retry_async(
+                        f"reply bg: eventbus memo_id={memo_id}",
+                        dispatch_memo_event,
+                        db,
+                        org_id=org_id,
+                        project_id=project_id,
+                        event_type="memo_replied",
+                        source_entity_id=reply.id,
+                        sender_id=sender_id,
+                        recipient_ids=recipient_ids,
+                        payload={
+                            "content_preview": (reply.content or "")[:100],
+                            "sender_id": str(sender_id) if sender_id else None,
+                            "parent_memo_id": str(memo_id),
+                            "thread_id": str(memo_id),
+                        },
+                    )
+
+            # workflow pipeline (최대 3회 재시도)
+            if project_id:
+                from app.services.workflow_pipeline import process_event
+                from app.services.rule_evaluator import EventContext
+                author_role = await _resolve_author_role(db, reply.created_by)
+                has_pr = bool(re.search(r"github\.com/.+/pull/\d+", reply.content or ""))
+                story_link_result = await db.execute(
+                    select(MemoEntityLink.entity_id)
+                    .where(MemoEntityLink.memo_id == memo_id, MemoEntityLink.entity_type == "story")
+                    .limit(1)
+                )
+                linked_story_id = story_link_result.scalar_one_or_none()
+                actor_name: str | None = None
+                if reply.created_by:
+                    tm_result = await db.execute(
+                        select(TeamMember).where(TeamMember.id == reply.created_by).limit(1)
+                    )
+                    tm = tm_result.scalar_one_or_none()
+                    actor_name = tm.name if tm else None
+                await _retry_async(
+                    f"reply bg: workflow pipeline memo_id={memo_id}",
+                    process_event,
+                    db, org_id, project_id,
+                    EventContext(
+                        event_type="memo.reply_created",
+                        trigger_type_slug=_infer_trigger_type(memo.memo_type, reply.review_type),
+                        memo_type=memo.memo_type,
+                        memo_id=str(reply.id),
+                        actor_id=str(reply.created_by) if reply.created_by else None,
+                        metadata={
+                            "original_memo_id": str(memo_id),
+                            "original_memo_type": memo.memo_type,
+                            "original_title": memo.title,
+                            "reply_author_id": str(reply.created_by) if reply.created_by else None,
+                            "reply_author_role": author_role,
+                            "actor_name": actor_name,
+                            "actor_role": author_role,
+                            "review_type": reply.review_type,
+                            "has_pr_link": has_pr,
+                            "content_preview": (reply.content or "")[:200],
+                            "context_message": memo.title or (reply.content or "")[:100],
+                            "story_id": str(linked_story_id) if linked_story_id else None,
+                        },
+                    ),
+                )
+
+            await db.commit()
+        except Exception:
+            await db.rollback()
+            logger.warning("reply side effects bg failed memo_id=%s", memo_id, exc_info=True)
+
+
+async def _memo_side_effects_bg(
+    memo_id: uuid.UUID,
+    org_id: uuid.UUID,
+    project_id: uuid.UUID | None,
+    assigned_to: uuid.UUID | None,
+    created_by: uuid.UUID | None,
+    title: str | None,
+    memo_type: str | None,
+    content: str | None,
+) -> None:
+    """create_memo의 notification/eventbus/workflow side effects를 새 세션으로 백그라운드 처리."""
+    from app.core.database import async_session_factory
+
+    async with async_session_factory() as db:
+        try:
+            if assigned_to:
+                await _retry_async(
+                    f"memo bg: notification memo_id={memo_id}",
+                    dispatch_notification,
+                    db,
+                    org_id=org_id,
+                    event_type="memo_received",
+                    target_member_ids=[assigned_to],
+                    title=title or "새 메모",
+                    body=(content or "")[:200],
+                    reference_type="memo",
+                    reference_id=memo_id,
+                )
+
+            if assigned_to and project_id:
+                await _retry_async(
+                    f"memo bg: eventbus memo_id={memo_id}",
+                    dispatch_memo_event,
+                    db,
+                    org_id=org_id,
+                    project_id=project_id,
+                    event_type="memo_created",
+                    source_entity_id=memo_id,
+                    sender_id=created_by,
+                    recipient_ids=[assigned_to],
+                    payload={
+                        "title": title,
+                        "content_preview": (content or "")[:100],
+                        "sender_id": str(created_by) if created_by else None,
+                        "thread_id": str(memo_id),
+                    },
+                )
+
+            if project_id:
+                from app.services.workflow_pipeline import process_event
+                from app.services.rule_evaluator import EventContext
+                actor_name: str | None = None
+                actor_role: str | None = None
+                if created_by:
+                    tm_result = await db.execute(
+                        select(TeamMember).where(TeamMember.id == created_by).limit(1)
+                    )
+                    tm = tm_result.scalar_one_or_none()
+                    if tm:
+                        actor_name = tm.name
+                        actor_role = tm.role
+                await _retry_async(
+                    f"memo bg: workflow pipeline memo_id={memo_id}",
+                    process_event,
+                    db, org_id, project_id,
+                    EventContext(
+                        event_type="memo_created",
+                        trigger_type_slug="kickoff" if memo_type == "task" else None,
+                        memo_type=memo_type,
+                        memo_id=str(memo_id),
+                        actor_id=str(created_by) if created_by else None,
+                        metadata={
+                            "memo_id": str(memo_id),
+                            "memo_type": memo_type,
+                            "title": title,
+                            "assigned_to_id": str(assigned_to) if assigned_to else None,
+                            "actor_id": str(created_by) if created_by else None,
+                            "actor_name": actor_name,
+                            "actor_role": actor_role,
+                            "context_message": title or (content or "")[:100],
+                        },
+                    ),
+                )
+
+            await db.commit()
+        except Exception:
+            await db.rollback()
+            logger.warning("memo side effects bg failed memo_id=%s", memo_id, exc_info=True)
 
 
 def _infer_trigger_type(memo_type: str | None, review_type: str | None) -> str:
@@ -195,35 +433,6 @@ async def create_memo(
     if body.assigned_to_ids:
         memo_recipient_ids.update(body.assigned_to_ids)
     memo_recipient_ids.discard(body.created_by)
-    # E-EVENTBUS P3 S8: 알림 설정 필터 후 Notification INSERT
-    if body.assigned_to:
-        await dispatch_notification(
-            session,
-            org_id=body.org_id,
-            event_type="memo_received",
-            target_member_ids=[body.assigned_to],
-            title=body.title or "새 메모",
-            body=(body.content or "")[:200],
-            reference_type="memo",
-            reference_id=memo.id,
-        )
-    # E-EVENTBUS S4: 이벤트버스 발행 (EVENTBUS_ENABLED=true 환경만)
-    if body.assigned_to and body.project_id:
-        await dispatch_memo_event(
-            session,
-            org_id=body.org_id,
-            project_id=body.project_id,
-            event_type="memo_created",
-            source_entity_id=memo.id,
-            sender_id=body.created_by,
-            recipient_ids=[body.assigned_to],
-            payload={
-                "title": body.title,
-                "content_preview": (body.content or "")[:100],
-                "sender_id": str(body.created_by) if body.created_by else None,
-                "thread_id": str(memo.id),
-            },
-        )
     if memo_recipient_ids:
         wh_rows = await session.execute(
             select(WebhookConfig.url).where(
@@ -240,42 +449,18 @@ async def create_memo(
             for wh_url in memo_webhook_urls:
                 background_tasks.add_task(_fire_webhook, wh_url, wh_content, wh_title, memo_url, str(memo.id))
     _is_workflow_origin = (body.memo_metadata or {}).get("origin") == "workflow"
-    if body.project_id and not _is_workflow_origin:
-        from app.services.workflow_pipeline import process_event
-        from app.services.rule_evaluator import EventContext
-        actor_name: str | None = None
-        actor_role: str | None = None
-        if body.created_by:
-            try:
-                tm_result = await session.execute(
-                    select(TeamMember).where(TeamMember.id == body.created_by).limit(1)
-                )
-                tm = tm_result.scalar_one_or_none()
-                if tm:
-                    actor_name = tm.name
-                    actor_role = tm.role
-            except Exception:
-                pass
-        try:
-            await process_event(session, body.org_id, body.project_id, EventContext(
-                event_type="memo_created",
-                trigger_type_slug="kickoff" if body.memo_type == "task" else None,
-                memo_type=body.memo_type,
-                memo_id=str(memo.id),
-                actor_id=str(body.created_by) if body.created_by else None,
-                metadata={
-                    "memo_id": str(memo.id),
-                    "memo_type": body.memo_type,
-                    "title": body.title,
-                    "assigned_to_id": str(body.assigned_to) if body.assigned_to else None,
-                    "actor_id": str(body.created_by) if body.created_by else None,
-                    "actor_name": actor_name,
-                    "actor_role": actor_role,
-                    "context_message": body.title or (body.content or "")[:100],
-                },
-            ))
-        except Exception:
-            pass
+    if not _is_workflow_origin:
+        background_tasks.add_task(
+            _memo_side_effects_bg,
+            memo_id=memo.id,
+            org_id=body.org_id,
+            project_id=body.project_id,
+            assigned_to=body.assigned_to,
+            created_by=body.created_by,
+            title=body.title,
+            memo_type=body.memo_type,
+            content=body.content,
+        )
     memo_dict = {k: v for k, v in memo.__dict__.items() if not k.startswith("_")}
     memo_dict["embed_count"] = len(all_embeds)
     return MemoListResponse.model_validate(memo_dict)
@@ -346,68 +531,6 @@ async def add_reply(
     )
     publish_event(str(repo.org_id), "reply_created", {"id": str(reply.id), "memo_id": str(id)})
 
-    # E-EVENTBUS P4 S15: chat:message 이벤트 발행 + events 테이블 persist + SSE push
-    try:
-        from app.routers.chats import _persist_and_push_chat_events
-        chat_participants: set[uuid.UUID] = set()
-        if memo.assigned_to:
-            chat_participants.add(memo.assigned_to)
-        if memo.created_by:
-            chat_participants.add(memo.created_by)
-        chat_participants.discard(body.created_by)
-        chat_payload = {
-            "event_type": "chat:message",
-            "thread_id": str(id),
-            "reply_id": str(reply.id),
-            "content": reply.content,
-            "created_by": str(reply.created_by),
-            "attachments": reply.attachments,
-            "created_at": reply.created_at.isoformat(),
-        }
-        await _persist_and_push_chat_events(db, memo, reply, repo.org_id, body.created_by, chat_participants, chat_payload)
-    except Exception:
-        pass
-
-    # E-EVENTBUS P3 S8: 알림 설정 필터 후 Notification INSERT (원 메모 작성자에게)
-    reply_notification_targets = [
-        r for r in [memo.created_by]
-        if r and r != body.created_by
-    ]
-    if reply_notification_targets:
-        await dispatch_notification(
-            db,
-            org_id=repo.org_id,
-            event_type="memo_reply",
-            target_member_ids=reply_notification_targets,
-            title=memo.title or "메모 답신",
-            body=(reply.content or "")[:200],
-            reference_type="memo",
-            reference_id=id,
-        )
-
-    # E-EVENTBUS S4: 이벤트버스 발행 (EVENTBUS_ENABLED=true 환경만)
-    if memo.project_id:
-        reply_recipient_ids = [
-            r for r in [memo.assigned_to, memo.created_by]
-            if r and r != body.created_by
-        ]
-        if reply_recipient_ids:
-            await dispatch_memo_event(
-                db,
-                org_id=repo.org_id,
-                project_id=memo.project_id,
-                event_type="memo_replied",
-                source_entity_id=reply.id,
-                sender_id=body.created_by,
-                recipient_ids=reply_recipient_ids,
-                payload={
-                    "content_preview": (reply.content or "")[:100],
-                    "sender_id": str(body.created_by) if body.created_by else None,
-                    "parent_memo_id": str(id),
-                    "thread_id": str(id),
-                },
-            )
-
     # 세션이 열려 있는 지금 webhook URLs 수집 후 BackgroundTasks에 HTTP 발송 위임
     webhook_urls = await _collect_reply_webhook_urls(
         db, id, memo.assigned_to, memo.created_by, body.created_by, body.assigned_to_ids
@@ -420,54 +543,15 @@ async def add_reply(
         for url in webhook_urls:
             background_tasks.add_task(_fire_webhook, url, content, title, memo_url, str(id))
 
-    if memo.project_id:
-        from app.services.workflow_pipeline import process_event
-        from app.services.rule_evaluator import EventContext
-        from app.models.memo import MemoEntityLink
-        try:
-            author_role = await _resolve_author_role(db, reply.created_by)
-            has_pr = bool(re.search(r"github\.com/.+/pull/\d+", reply.content or ""))
-            story_link_result = await db.execute(
-                select(MemoEntityLink.entity_id)
-                .where(MemoEntityLink.memo_id == id, MemoEntityLink.entity_type == "story")
-                .limit(1)
-            )
-            linked_story_id = story_link_result.scalar_one_or_none()
-            actor_name: str | None = None
-            if reply.created_by:
-                tm_result = await db.execute(
-                    select(TeamMember).where(TeamMember.id == reply.created_by).limit(1)
-                )
-                tm = tm_result.scalar_one_or_none()
-                actor_name = tm.name if tm else None
-            await process_event(
-                db,
-                repo.org_id,
-                memo.project_id,
-                EventContext(
-                    event_type="memo.reply_created",
-                    trigger_type_slug=_infer_trigger_type(memo.memo_type, reply.review_type),
-                    memo_type=memo.memo_type,
-                    memo_id=str(reply.id),
-                    actor_id=str(reply.created_by) if reply.created_by else None,
-                    metadata={
-                        "original_memo_id": str(id),
-                        "original_memo_type": memo.memo_type,
-                        "original_title": memo.title,
-                        "reply_author_id": str(reply.created_by) if reply.created_by else None,
-                        "reply_author_role": author_role,
-                        "actor_name": actor_name,
-                        "actor_role": author_role,
-                        "review_type": reply.review_type,
-                        "has_pr_link": has_pr,
-                        "content_preview": (reply.content or "")[:200],
-                        "context_message": memo.title or (reply.content or "")[:100],
-                        "story_id": str(linked_story_id) if linked_story_id else None,
-                    },
-                ),
-            )
-        except Exception:
-            pass
+    # chat events / notification / eventbus / workflow → 새 세션으로 백그라운드 처리
+    background_tasks.add_task(
+        _reply_side_effects_bg,
+        memo_id=id,
+        reply_id=reply.id,
+        org_id=repo.org_id,
+        project_id=memo.project_id,
+        sender_id=body.created_by,
+    )
 
     return ReplyResponse.model_validate(reply)
 
