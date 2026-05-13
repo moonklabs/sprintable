@@ -96,7 +96,7 @@ export function registerAgentRunsTools(server: McpServer) {
         const params = new URLSearchParams({ recipient_id });
         if (event_type !== undefined) params.set('event_type', event_type);
         const data = await pmApi(`/api/v2/events/pending?${params.toString()}`);
-        return ok(data);
+        return ok(data ?? []);
       } catch (e) {
         return err(e instanceof PmApiError ? e.message : String(e));
       }

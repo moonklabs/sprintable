@@ -63,6 +63,10 @@ export async function pmApi<T = unknown>(path: string, init: PmApiInit = {}): Pr
     throw new PmApiError(response.status, String(message), body);
   }
 
-  const json = (await response.json()) as { data?: T };
-  return json.data as T;
+  const json = await response.json();
+  // {data: T} 래핑 형식이면 .data, 아니면 직접 반환 (배열 등)
+  if (json !== null && typeof json === 'object' && !Array.isArray(json) && 'data' in json) {
+    return json.data as T;
+  }
+  return json as T;
 }

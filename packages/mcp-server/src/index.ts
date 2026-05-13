@@ -10,6 +10,7 @@ import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import { StdioServerTransport } from '@modelcontextprotocol/sdk/server/stdio.js';
 import { SSEServerTransport } from '@modelcontextprotocol/sdk/server/sse.js';
 import { configurePmApi } from './pm-api.js';
+import { startSseBridge } from './sse-bridge.js';
 import { registerCoreTools } from './tools/core.js';
 import { registerRetroTools } from './tools/retro.js';
 import { registerAnalyticsTools } from './tools/analytics.js';
@@ -31,6 +32,7 @@ import { registerAuditTools } from './tools/audit.js';
 const PM_API_URL = process.env['PM_API_URL'] ?? '';
 const AGENT_API_KEY = process.env['AGENT_API_KEY'] ?? '';
 const MCP_API_KEY = process.env['MCP_API_KEY'] ?? '';
+const MEMBER_ID = process.env['MEMBER_ID'] ?? '';
 const MODE = process.env['MCP_MODE'] ?? 'stdio'; // 'stdio' | 'sse'
 const PORT = Number(process.env['MCP_PORT'] ?? '3100');
 
@@ -106,6 +108,11 @@ async function main() {
     const transport = new StdioServerTransport();
     await server.connect(transport);
     console.error('Sprintable MCP Server (stdio) connected');
+
+    // FastAPI SSE 자동 연결 — MEMBER_ID 있을 때만
+    if (MEMBER_ID) {
+      startSseBridge(PM_API_URL, AGENT_API_KEY, MEMBER_ID);
+    }
   }
 }
 
