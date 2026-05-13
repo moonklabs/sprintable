@@ -31,13 +31,26 @@ function getEntityHref(notification: EventNotification): string | null {
   const { source_entity_type, source_entity_id } = notification;
   if (!source_entity_id) return null;
   switch (source_entity_type) {
-    case 'memo':   return `/memos?id=${source_entity_id}`;
-    case 'story':  return `/board?story_id=${source_entity_id}`;
-    case 'task':   return `/board?task_id=${source_entity_id}`;
-    case 'epic':   return `/epics/${source_entity_id}`;
-    case 'sprint': return `/sprints?id=${source_entity_id}`;
-    case 'doc':    return `/docs?id=${source_entity_id}`;
-    default:       return null;
+    case 'memo':
+      return `/memos?id=${source_entity_id}`;
+    case 'story':
+      // kanban-board.tsx는 searchParams.get('story') 키 사용
+      return `/board?story=${source_entity_id}`;
+    case 'task':
+      // kanban-board.tsx에서 task_id 파라미터 처리 — task → story 패널 자동 오픈
+      return `/board?task_id=${source_entity_id}`;
+    case 'epic':
+      return `/epics/${source_entity_id}`;
+    case 'sprint':
+      // sprints-client.tsx에서 id 파라미터 처리 추가됨
+      return `/sprints?id=${source_entity_id}`;
+    case 'doc': {
+      // docs-shell-client.tsx는 slug 파라미터 사용. payload에 slug가 있으면 deep link
+      const slug = notification.payload?.slug as string | undefined;
+      return slug ? `/docs?slug=${slug}` : `/docs`;
+    }
+    default:
+      return null;
   }
 }
 
