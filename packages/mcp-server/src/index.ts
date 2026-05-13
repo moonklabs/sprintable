@@ -33,6 +33,7 @@ const PM_API_URL = process.env['PM_API_URL'] ?? '';
 const AGENT_API_KEY = process.env['AGENT_API_KEY'] ?? '';
 const MCP_API_KEY = process.env['MCP_API_KEY'] ?? '';
 const MEMBER_ID = process.env['CURRENT_MEMBER_ID'] ?? process.env['MEMBER_ID'] ?? '';
+const SSE_BACKEND_URL = process.env['SSE_BACKEND_URL'] ?? '';
 const MODE = process.env['MCP_MODE'] ?? 'stdio'; // 'stdio' | 'sse'
 const PORT = Number(process.env['MCP_PORT'] ?? '3100');
 
@@ -111,7 +112,7 @@ async function main() {
 
     // FastAPI SSE 자동 연결 — MEMBER_ID 있을 때만
     if (MEMBER_ID) {
-      startSseBridge(PM_API_URL, AGENT_API_KEY, MEMBER_ID);
+      startSseBridge(PM_API_URL, AGENT_API_KEY, MEMBER_ID, SSE_BACKEND_URL || undefined);
     }
   }
 }
