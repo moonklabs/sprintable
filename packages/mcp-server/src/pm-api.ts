@@ -51,6 +51,21 @@ export async function pmApi<T = unknown>(path: string, init: PmApiInit = {}): Pr
     ...init.headers,
   };
 
+  // POST/PUT/PATCH body에 context 필드 자동 주입 (Next.js 프록시 제거 후 누락 필드 보완)
+  if (
+    init.method &&
+    ['POST', 'PUT', 'PATCH'].includes(init.method) &&
+    typeof init.body === 'string'
+  ) {
+    try {
+      const parsed = JSON.parse(init.body);
+      if (!parsed.project_id && process.env.PROJECT_ID) parsed.project_id = process.env.PROJECT_ID;
+      if (!parsed.created_by && process.env.CURRENT_MEMBER_ID) parsed.created_by = process.env.CURRENT_MEMBER_ID;
+      if (!parsed.org_id && process.env.ORG_ID) parsed.org_id = process.env.ORG_ID;
+      init = { ...init, body: JSON.stringify(parsed) };
+    } catch { /* body가 JSON이 아닌 경우 원본 유지 */ }
+  }
+
   const response = await fetch(url, { ...init, headers });
 
   if (!response.ok) {
