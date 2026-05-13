@@ -49,11 +49,16 @@ def mock_session():
 
 
 @pytest.fixture
-def auth_ctx():
+def org_id():
+    return uuid.uuid4()
+
+
+@pytest.fixture
+def auth_ctx(org_id):
     ctx = MagicMock()
     ctx.user_id = str(uuid.uuid4())
     ctx.email = "user@example.com"
-    ctx.claims = {}
+    ctx.claims = {"app_metadata": {"org_id": str(org_id)}}
     return ctx
 
 
@@ -167,6 +172,49 @@ async def test_switch_project_inactive_member_returns_403(client, mock_session, 
 
     resp = await client.post("/api/v2/auth/switch-project", json={"project_id": str(uuid.uuid4())})
     assert resp.status_code == 403
+
+
+# ─── AC5-4: cross-org 취약점 차단 ────────────────────────────────────────────
+
+@pytest.mark.anyio
+async def test_switch_project_cross_org_returns_403(mock_session, auth_ctx):
+    """다른 org의 project로 switch 시도 → 403 (org_id 조건으로 차단)."""
+    from app.dependencies.auth import get_current_user
+    from app.dependencies.database import get_db
+    from app.main import app
+
+    user = _make_user()
+    org_a = uuid.uuid4()
+    auth_ctx.user_id = str(user.id)
+    # JWT에 org A 설정
+    auth_ctx.claims = {"app_metadata": {"org_id": str(org_a)}}
+
+    async def _db():
+        yield mock_session
+
+    async def _auth():
+        return auth_ctx
+
+    app.dependency_overrides[get_db] = _db
+    app.dependency_overrides[get_current_user] = _auth
+
+    user_result = MagicMock()
+    user_result.scalar_one_or_none.return_value = user
+    # org_id == org_a 조건으로 org B project의 member 조회 시 None
+    member_result = MagicMock()
+    member_result.scalar_one_or_none.return_value = None
+    mock_session.execute.side_effect = [user_result, member_result]
+
+    try:
+        async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as c:
+            resp = await c.post(
+                "/api/v2/auth/switch-project",
+                json={"project_id": str(uuid.uuid4())},  # org B의 project_id
+            )
+        assert resp.status_code == 403
+        assert resp.json()["error"]["code"] == "NOT_MEMBER"
+    finally:
+        app.dependency_overrides.clear()
 
 
 # ─── AC2: _build_app_metadata last_project_id 우선 선택 ─────────────────────

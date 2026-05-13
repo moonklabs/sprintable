@@ -977,11 +977,18 @@ async def switch_project(
     if user is None:
         return _err("USER_NOT_FOUND", "User not found", 404)
 
-    # 해당 project의 active team_member 검증
+    # 현재 JWT org_id 추출 — cross-org 전환 차단
+    current_org_id_str = auth.claims.get("app_metadata", {}).get("org_id")
+    if not current_org_id_str:
+        return _err("INVALID_SESSION", "Missing org context in token", 403)
+    current_org_id = uuid.UUID(current_org_id_str)
+
+    # 해당 project의 active team_member 검증 (org_id 포함 — cross-org 차단)
     result = await session.execute(
         select(TeamMember)
         .where(
             TeamMember.project_id == body.project_id,
+            TeamMember.org_id == current_org_id,
             or_(TeamMember.user_id == user.id, TeamMember.id == user.id),
             TeamMember.is_active.is_(True),
         )
