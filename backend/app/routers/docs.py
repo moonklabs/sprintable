@@ -11,7 +11,7 @@ from app.dependencies.database import get_db
 from app.models.doc import DocComment, DocRevision
 from app.models.team import TeamMember
 from app.repositories.doc import DocRepository
-from app.schemas.doc import DocCreate, DocResponse, DocUpdate
+from app.schemas.doc import DocCreate, DocResponse, DocSummaryResponse, DocUpdate
 
 router = APIRouter(prefix="/api/v2/docs", tags=["docs"])
 
@@ -23,30 +23,36 @@ def _get_repo(
     return DocRepository(session, org_id)
 
 
-@router.get("", response_model=list[DocResponse])
+@router.get("", response_model=list[DocSummaryResponse])
 async def list_docs(
     project_id: uuid.UUID | None = Query(default=None),
     parent_id: uuid.UUID | None = Query(default=None),
     doc_type: str | None = Query(default=None),
     tags: str | None = Query(default=None, description="comma-separated tags"),
+    slug: str | None = Query(default=None),
+    limit: int = Query(default=500, ge=1, le=1000),
     repo: DocRepository = Depends(_get_repo),
-) -> list[DocResponse]:
+) -> list[DocSummaryResponse]:
+    if slug and project_id:
+        doc = await repo.get_by_slug(project_id, slug)
+        return [DocSummaryResponse.model_validate(doc)] if doc else []
+
     if tags and project_id:
         tag_list = [t.strip() for t in tags.split(",") if t.strip()]
         docs = await repo.search_by_tags(project_id, tag_list)
-        return [DocResponse.model_validate(d) for d in docs]
+        return [DocSummaryResponse.model_validate(d) for d in docs]
 
     if project_id and parent_id is not None:
         docs = await repo.list_tree(project_id, parent_id)
-        return [DocResponse.model_validate(d) for d in docs]
+        return [DocSummaryResponse.model_validate(d) for d in docs]
 
     filters: dict = {}
     if project_id:
         filters["project_id"] = project_id
     if doc_type:
         filters["doc_type"] = doc_type
-    docs = await repo.list(**filters)
-    return [DocResponse.model_validate(d) for d in docs]
+    docs = await repo.list(limit=limit, **filters)
+    return [DocSummaryResponse.model_validate(d) for d in docs]
 
 
 @router.post("", response_model=DocResponse, status_code=201)

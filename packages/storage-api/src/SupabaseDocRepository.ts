@@ -5,7 +5,14 @@ export class SupabaseDocRepository implements IDocRepository {
   constructor(private readonly accessToken: string = '') {}
 
   async list(filters: DocListFilters): Promise<DocSummary[]> {
-    return fastapiCall<DocSummary[]>('GET', '/api/v2/docs', this.accessToken, { query: { project_id: filters.project_id } });
+    return fastapiCall<DocSummary[]>('GET', '/api/v2/docs', this.accessToken, {
+      query: {
+        project_id: filters.project_id,
+        limit: filters.limit,
+        cursor: filters.cursor ?? undefined,
+        tags: filters.tags?.join(','),
+      },
+    });
   }
 
   async getTree(projectId: string): Promise<DocSummary[]> {
@@ -13,10 +20,12 @@ export class SupabaseDocRepository implements IDocRepository {
   }
 
   async getBySlug(projectId: string, slug: string): Promise<Doc> {
-    const docs = await fastapiCall<Doc[]>('GET', '/api/v2/docs', this.accessToken, { query: { project_id: projectId } });
-    const found = docs.find((d: Doc) => (d as unknown as { slug?: string }).slug === slug);
-    if (!found) throw new Error(`Doc not found: ${slug}`);
-    return found;
+    const summaries = await fastapiCall<DocSummary[]>('GET', '/api/v2/docs', this.accessToken, {
+      query: { project_id: projectId, slug },
+    });
+    const first = summaries[0];
+    if (!first) throw new Error(`Doc not found: ${slug}`);
+    return fastapiCall<Doc>('GET', `/api/v2/docs/${first.id}`, this.accessToken);
   }
 
   async getById(id: string, _scope?: RepositoryScopeContext): Promise<Doc> {
