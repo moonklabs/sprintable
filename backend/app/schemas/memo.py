@@ -75,6 +75,7 @@ class CreateReply(BaseModel):
     created_by: uuid.UUID
     review_type: str = "comment"
     assigned_to_ids: list[uuid.UUID] | None = None
+    attachments: list[dict] = []
 
 
 class ReplyResponse(BaseModel):
@@ -85,6 +86,7 @@ class ReplyResponse(BaseModel):
     created_by: uuid.UUID
     content: str
     review_type: str
+    attachments: list[dict] = []
     created_at: datetime
 
 

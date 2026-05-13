@@ -113,4 +113,32 @@ export function registerMemosTools(server: McpServer) {
       return ok(data);
     } catch (e) { return handleError(e); }
   });
+
+  // E-EVENTBUS P4 S15: 채팅 메시지 전송 — 에이전트가 thread에 즉시 응답
+  server.tool('send_chat_message', 'Send a chat message to a memo thread. Triggers real-time SSE delivery to all thread participants.', {
+    thread_id: z.string().describe('Memo ID (= thread ID)'),
+    content: z.string().describe('Message content'),
+    created_by: z.string().describe('Sender team member ID'),
+  }, async ({ thread_id, content, created_by }) => {
+    try {
+      const data = await pmApi(`/api/v2/chats/${encodeURIComponent(thread_id)}/messages`, {
+        method: 'POST',
+        body: JSON.stringify({ content, created_by, attachments: [] }),
+      });
+      return ok(data);
+    } catch (e) { return handleError(e); }
+  });
+
+  // 채팅 메시지 목록 조회
+  server.tool('list_chat_messages', 'List chat messages in a memo thread (chronological order)', {
+    thread_id: z.string().describe('Memo ID (= thread ID)'),
+    limit: z.number().optional().describe('Max messages (default: 50)'),
+  }, async ({ thread_id, limit }) => {
+    try {
+      const params = new URLSearchParams();
+      if (limit !== undefined) params.set('limit', String(limit));
+      const data = await pmApi(`/api/v2/chats/${encodeURIComponent(thread_id)}/messages?${params.toString()}`);
+      return ok(data);
+    } catch (e) { return handleError(e); }
+  });
 }
