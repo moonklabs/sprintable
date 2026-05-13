@@ -18,7 +18,7 @@ export function registerNotificationsTools(server: McpServer) {
       if (type) params.set('type', type);
       if (limit) params.set('limit', String(limit));
       const qs = params.toString();
-      const data = await pmApi(`/api/notifications${qs ? `?${qs}` : ''}`);
+      const data = await pmApi(`/api/v2/notifications${qs ? `?${qs}` : ''}`);
       return ok(data);
     } catch (e) { return handleError(e); }
   });
@@ -28,7 +28,7 @@ export function registerNotificationsTools(server: McpServer) {
     is_read: z.boolean().optional().describe('Read state (default: true)'),
   }, async ({ notification_id, is_read }) => {
     try {
-      const data = await pmApi('/api/notifications', {
+      const data = await pmApi('/api/v2/notifications', {
         method: 'PATCH',
         body: JSON.stringify({ id: notification_id, is_read: is_read ?? true }),
       });
@@ -40,7 +40,7 @@ export function registerNotificationsTools(server: McpServer) {
     type: z.string().optional().describe('Optional notification type filter'),
   }, async ({ type }) => {
     try {
-      const data = await pmApi('/api/notifications', {
+      const data = await pmApi('/api/v2/notifications', {
         method: 'PATCH',
         body: JSON.stringify({ markAllRead: true, ...(type ? { type } : {}) }),
       });

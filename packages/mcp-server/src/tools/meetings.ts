@@ -19,7 +19,7 @@ export function registerMeetingTools(server: McpServer) {
       if (date_to) params.set('date_to', date_to);
       if (limit !== undefined) params.set('limit', String(limit));
       const query = params.toString();
-      const data = await pmApi(`/api/meetings${query ? `?${query}` : ''}`);
+      const data = await pmApi(`/api/v2/meetings${query ? `?${query}` : ''}`);
       return ok(data);
     } catch (e) {
       return err(e instanceof PmApiError ? e.message : String(e));
@@ -30,7 +30,7 @@ export function registerMeetingTools(server: McpServer) {
     meeting_id: z.string(),
   }, async ({ meeting_id }) => {
     try {
-      const data = await pmApi(`/api/meetings/${meeting_id}`);
+      const data = await pmApi(`/api/v2/meetings/${meeting_id}`);
       return ok(data);
     } catch (e) {
       return err(e instanceof PmApiError ? e.message : String(e));
@@ -52,7 +52,7 @@ export function registerMeetingTools(server: McpServer) {
       if (duration_min !== undefined) body.duration_min = duration_min;
       if (participants) body.participants = participants;
       if (created_by) body.created_by = created_by;
-      const data = await pmApi('/api/meetings', { method: 'POST', body: JSON.stringify(body) });
+      const data = await pmApi('/api/v2/meetings', { method: 'POST', body: JSON.stringify(body) });
       return ok(data);
     } catch (e) {
       return err(e instanceof PmApiError ? e.message : String(e));
@@ -76,7 +76,7 @@ export function registerMeetingTools(server: McpServer) {
       for (const [k, v] of Object.entries(updates)) {
         if (v !== undefined) body[k] = v;
       }
-      const data = await pmApi(`/api/meetings/${meeting_id}`, { method: 'PUT', body: JSON.stringify(body) });
+      const data = await pmApi(`/api/v2/meetings/${meeting_id}`, { method: 'PUT', body: JSON.stringify(body) });
       return ok(data);
     } catch (e) {
       return err(e instanceof PmApiError ? e.message : String(e));
@@ -87,7 +87,7 @@ export function registerMeetingTools(server: McpServer) {
     meeting_id: z.string(),
   }, async ({ meeting_id }) => {
     try {
-      const data = await pmApi(`/api/meetings/${meeting_id}`, { method: 'DELETE' });
+      const data = await pmApi(`/api/v2/meetings/${meeting_id}`, { method: 'DELETE' });
       return ok(data);
     } catch (e) {
       return err(e instanceof PmApiError ? e.message : String(e));
@@ -98,7 +98,7 @@ export function registerMeetingTools(server: McpServer) {
     meeting_id: z.string(),
   }, async ({ meeting_id }) => {
     try {
-      const data = await pmApi(`/api/meetings/${meeting_id}/summary`, {
+      const data = await pmApi(`/api/v2/meetings/${meeting_id}/summary`, {
         method: 'POST',
         body: JSON.stringify({}),
       });

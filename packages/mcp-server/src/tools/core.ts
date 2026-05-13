@@ -15,7 +15,7 @@ export function registerCoreTools(server: McpServer) {
       if (project_id) params.set('project_id', project_id);
       if (current_member_id) params.set('current_member_id', current_member_id);
       const query = params.toString();
-      const data = await pmApi(`/api/members${query ? `?${query}` : ''}`);
+      const data = await pmApi(`/api/v2/members${query ? `?${query}` : ''}`);
       return ok(data);
     } catch (e) {
       return err(e instanceof PmApiError ? e.message : String(e));
@@ -29,7 +29,7 @@ export function registerCoreTools(server: McpServer) {
     try {
       const params = new URLSearchParams({ member_id });
       if (project_id) params.set('project_id', project_id);
-      const data = await pmApi(`/api/dashboard?${params}`);
+      const data = await pmApi(`/api/v2/dashboard?${params}`);
       return ok(data);
     } catch (e) {
       return err(e instanceof PmApiError ? e.message : String(e));

@@ -60,16 +60,16 @@ export function registerWorkflowTools(server: McpServer) {
     async () => {
       try {
         // 1. Resolve own agent_id via API Key
-        const me = await pmApi<{ id: string; name: string; type: string }>('/api/me');
+        const me = await pmApi<{ id: string; name: string; type: string }>('/api/v2/me');
         const myId = me.id;
 
         // 2. Fetch all routing rules for the project
-        const rules = await pmApi<RoutingRule[]>('/api/v1/agent-routing-rules');
+        const rules = await pmApi<RoutingRule[]>('/api/v2/agent-routing-rules');
 
         // 3. Fetch latest workflow version
         let latestVersion: WorkflowVersion | null = null;
         try {
-          const versions = await pmApi<WorkflowVersion[]>('/api/v1/workflow-versions');
+          const versions = await pmApi<WorkflowVersion[]>('/api/v2/workflow-versions');
           latestVersion = (Array.isArray(versions) && versions.length > 0 ? versions[0] : null) ?? null;
         } catch {
           // workflow_versions may not exist yet — graceful degradation

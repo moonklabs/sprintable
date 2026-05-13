@@ -14,7 +14,7 @@ export function registerStandupRetroTools(server: McpServer) {
     try {
       const params = new URLSearchParams({ member_id, date });
       if (project_id) params.set('project_id', project_id);
-      const data = await pmApi(`/api/standup?${params}`);
+      const data = await pmApi(`/api/v2/standup?${params}`);
       return ok(data);
     } catch (e) {
       return err(e instanceof PmApiError ? e.message : String(e));
@@ -35,7 +35,7 @@ export function registerStandupRetroTools(server: McpServer) {
       if (done !== undefined) body.done = done;
       if (plan !== undefined) body.plan = plan;
       if (blockers !== undefined) body.blockers = blockers;
-      const data = await pmApi('/api/standup', { method: 'POST', body: JSON.stringify(body) });
+      const data = await pmApi('/api/v2/standup', { method: 'POST', body: JSON.stringify(body) });
       return ok(data);
     } catch (e) {
       return err(e instanceof PmApiError ? e.message : String(e));
@@ -51,7 +51,7 @@ export function registerStandupRetroTools(server: McpServer) {
       const params = new URLSearchParams({ date });
       if (project_id) params.set('project_id', project_id);
       if (current_member_id) params.set('current_member_id', current_member_id);
-      const data = await pmApi(`/api/standup?${params}`);
+      const data = await pmApi(`/api/v2/standup?${params}`);
       return ok(data);
     } catch (e) {
       return err(e instanceof PmApiError ? e.message : String(e));
@@ -63,7 +63,7 @@ export function registerStandupRetroTools(server: McpServer) {
     date: z.string().describe('YYYY-MM-DD'),
   }, async ({ project_id, date }) => {
     try {
-      const data = await pmApi(`/api/standup/missing?project_id=${project_id}&date=${date}`);
+      const data = await pmApi(`/api/v2/standup/missing?project_id=${project_id}&date=${date}`);
       return ok(data);
     } catch (e) {
       return err(e instanceof PmApiError ? e.message : String(e));
@@ -77,7 +77,7 @@ export function registerStandupRetroTools(server: McpServer) {
     try {
       const params = new URLSearchParams({ project_id });
       if (limit !== undefined) params.set('limit', String(limit));
-      const data = await pmApi(`/api/standup/history?${params}`);
+      const data = await pmApi(`/api/v2/standup/history?${params}`);
       return ok(data);
     } catch (e) {
       return err(e instanceof PmApiError ? e.message : String(e));
@@ -93,7 +93,7 @@ export function registerStandupRetroTools(server: McpServer) {
       if (project_id) params.set('project_id', project_id);
       if (current_member_id) params.set('current_member_id', current_member_id);
       const query = params.toString();
-      const data = await pmApi(`/api/retro-sessions${query ? `?${query}` : ''}`);
+      const data = await pmApi(`/api/v2/retro-sessions${query ? `?${query}` : ''}`);
       return ok(data);
     } catch (e) {
       return err(e instanceof PmApiError ? e.message : String(e));
@@ -110,7 +110,7 @@ export function registerStandupRetroTools(server: McpServer) {
     try {
       const body: Record<string, unknown> = { project_id, org_id, title, created_by };
       if (sprint_id) body.sprint_id = sprint_id;
-      const data = await pmApi('/api/retro-sessions', { method: 'POST', body: JSON.stringify(body) });
+      const data = await pmApi('/api/v2/retro-sessions', { method: 'POST', body: JSON.stringify(body) });
       return ok(data);
     } catch (e) {
       return err(e instanceof PmApiError ? e.message : String(e));
@@ -123,7 +123,7 @@ export function registerStandupRetroTools(server: McpServer) {
     phase: z.enum(['collect', 'group', 'vote', 'discuss', 'action', 'closed']),
   }, async ({ project_id, session_id, phase }) => {
     try {
-      const data = await pmApi(`/api/retro-sessions/${session_id}?project_id=${project_id}`, {
+      const data = await pmApi(`/api/v2/retro-sessions/${session_id}?project_id=${project_id}`, {
         method: 'PATCH',
         body: JSON.stringify({ phase }),
       });
@@ -141,7 +141,7 @@ export function registerStandupRetroTools(server: McpServer) {
     author_id: z.string(),
   }, async ({ project_id, session_id, category, text, author_id }) => {
     try {
-      const data = await pmApi(`/api/retro-sessions/${session_id}/items?project_id=${project_id}`, {
+      const data = await pmApi(`/api/v2/retro-sessions/${session_id}/items?project_id=${project_id}`, {
         method: 'POST',
         body: JSON.stringify({ category, text, author_id }),
       });
@@ -158,7 +158,7 @@ export function registerStandupRetroTools(server: McpServer) {
     voter_id: z.string(),
   }, async ({ project_id, session_id, item_id, voter_id }) => {
     try {
-      const data = await pmApi(`/api/retro-sessions/${session_id}/items/${item_id}/vote?project_id=${project_id}`, {
+      const data = await pmApi(`/api/v2/retro-sessions/${session_id}/items/${item_id}/vote?project_id=${project_id}`, {
         method: 'POST',
         body: JSON.stringify({ voter_id }),
       });
@@ -177,7 +177,7 @@ export function registerStandupRetroTools(server: McpServer) {
     try {
       const body: Record<string, unknown> = { title };
       if (assignee_id) body.assignee_id = assignee_id;
-      const data = await pmApi(`/api/retro-sessions/${session_id}/actions?project_id=${project_id}`, {
+      const data = await pmApi(`/api/v2/retro-sessions/${session_id}/actions?project_id=${project_id}`, {
         method: 'POST',
         body: JSON.stringify(body),
       });
@@ -192,7 +192,7 @@ export function registerStandupRetroTools(server: McpServer) {
     session_id: z.string(),
   }, async ({ project_id, session_id }) => {
     try {
-      const data = await pmApi(`/api/retro-sessions/${session_id}/export?project_id=${project_id}`);
+      const data = await pmApi(`/api/v2/retro-sessions/${session_id}/export?project_id=${project_id}`);
       return ok(data);
     } catch (e) {
       return err(e instanceof PmApiError ? e.message : String(e));
@@ -208,7 +208,7 @@ export function registerStandupRetroTools(server: McpServer) {
     try {
       const params = new URLSearchParams({ member_id, date });
       if (project_id) params.set('project_id', project_id);
-      const data = await pmApi(`/api/standup?${params}`);
+      const data = await pmApi(`/api/v2/standup?${params}`);
       return ok(data);
     } catch (e) {
       return err(e instanceof PmApiError ? e.message : String(e));
@@ -229,7 +229,7 @@ export function registerStandupRetroTools(server: McpServer) {
       if (done !== undefined) body.done = done;
       if (plan !== undefined) body.plan = plan;
       if (blockers !== undefined) body.blockers = blockers;
-      const data = await pmApi('/api/standup', { method: 'POST', body: JSON.stringify(body) });
+      const data = await pmApi('/api/v2/standup', { method: 'POST', body: JSON.stringify(body) });
       return ok(data);
     } catch (e) {
       return err(e instanceof PmApiError ? e.message : String(e));
@@ -245,7 +245,7 @@ export function registerStandupRetroTools(server: McpServer) {
       const params = new URLSearchParams({ date });
       if (project_id) params.set('project_id', project_id);
       if (current_member_id) params.set('current_member_id', current_member_id);
-      const data = await pmApi(`/api/standup?${params}`);
+      const data = await pmApi(`/api/v2/standup?${params}`);
       return ok(data);
     } catch (e) {
       return err(e instanceof PmApiError ? e.message : String(e));
@@ -258,7 +258,7 @@ export function registerStandupRetroTools(server: McpServer) {
     phase: z.enum(['collect', 'group', 'vote', 'discuss', 'action', 'closed']),
   }, async ({ project_id, session_id, phase }) => {
     try {
-      const data = await pmApi(`/api/retro-sessions/${session_id}?project_id=${project_id}`, {
+      const data = await pmApi(`/api/v2/retro-sessions/${session_id}?project_id=${project_id}`, {
         method: 'PATCH',
         body: JSON.stringify({ phase }),
       });
@@ -276,7 +276,7 @@ export function registerStandupRetroTools(server: McpServer) {
     author_id: z.string(),
   }, async ({ project_id, session_id, category, text, author_id }) => {
     try {
-      const data = await pmApi(`/api/retro-sessions/${session_id}/items?project_id=${project_id}`, {
+      const data = await pmApi(`/api/v2/retro-sessions/${session_id}/items?project_id=${project_id}`, {
         method: 'POST',
         body: JSON.stringify({ category, text, author_id }),
       });
@@ -291,7 +291,7 @@ export function registerStandupRetroTools(server: McpServer) {
     session_id: z.string(),
   }, async ({ project_id, session_id }) => {
     try {
-      const data = await pmApi(`/api/retro-sessions/${session_id}/export?project_id=${project_id}`);
+      const data = await pmApi(`/api/v2/retro-sessions/${session_id}/export?project_id=${project_id}`);
       return ok(data);
     } catch (e) {
       return err(e instanceof PmApiError ? e.message : String(e));

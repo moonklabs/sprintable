@@ -14,7 +14,7 @@ export function registerSprintsTools(server: McpServer) {
     try {
       const params = new URLSearchParams({ project_id });
       if (status) params.set('status', status);
-      const data = await pmApi(`/api/sprints?${params.toString()}`);
+      const data = await pmApi(`/api/v2/sprints?${params.toString()}`);
       return ok(data);
     } catch (e) { return handleError(e); }
   });
@@ -23,7 +23,7 @@ export function registerSprintsTools(server: McpServer) {
     sprint_id: z.string(),
   }, async ({ sprint_id }) => {
     try {
-      const data = await pmApi(`/api/sprints/${encodeURIComponent(sprint_id)}/activate`, { method: 'POST' });
+      const data = await pmApi(`/api/v2/sprints/${encodeURIComponent(sprint_id)}/activate`, { method: 'POST' });
       return ok(data);
     } catch (e) { return handleError(e); }
   });
@@ -32,7 +32,7 @@ export function registerSprintsTools(server: McpServer) {
     sprint_id: z.string(),
   }, async ({ sprint_id }) => {
     try {
-      const data = await pmApi(`/api/sprints/${encodeURIComponent(sprint_id)}/close`, { method: 'POST' });
+      const data = await pmApi(`/api/v2/sprints/${encodeURIComponent(sprint_id)}/close`, { method: 'POST' });
       return ok(data);
     } catch (e) { return handleError(e); }
   });
@@ -41,7 +41,7 @@ export function registerSprintsTools(server: McpServer) {
     sprint_id: z.string(),
   }, async ({ sprint_id }) => {
     try {
-      const data = await pmApi(`/api/sprints/${encodeURIComponent(sprint_id)}/velocity`);
+      const data = await pmApi(`/api/v2/sprints/${encodeURIComponent(sprint_id)}/velocity`);
       return ok(data);
     } catch (e) { return handleError(e); }
   });
@@ -50,7 +50,7 @@ export function registerSprintsTools(server: McpServer) {
     sprint_id: z.string(),
   }, async ({ sprint_id }) => {
     try {
-      const data = await pmApi(`/api/sprints/${encodeURIComponent(sprint_id)}/summary`);
+      const data = await pmApi(`/api/v2/sprints/${encodeURIComponent(sprint_id)}/summary`);
       return ok(data);
     } catch (e) { return handleError(e); }
   });

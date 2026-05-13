@@ -19,7 +19,7 @@ export function registerTasksTools(server: McpServer) {
       if (story_id) params.set('story_id', story_id);
       if (assignee_id) params.set('assignee_id', assignee_id);
       if (status) params.set('status', status);
-      const data = await pmApi(`/api/tasks?${params.toString()}`);
+      const data = await pmApi(`/api/v2/tasks?${params.toString()}`);
       return ok(data);
     } catch (e) { return handleError(e); }
   });
@@ -31,7 +31,7 @@ export function registerTasksTools(server: McpServer) {
     try {
       const params = new URLSearchParams({ assignee_id });
       if (project_id) params.set('project_id', project_id);
-      const data = await pmApi(`/api/tasks?${params.toString()}`);
+      const data = await pmApi(`/api/v2/tasks?${params.toString()}`);
       return ok(data);
     } catch (e) { return handleError(e); }
   });
@@ -40,7 +40,7 @@ export function registerTasksTools(server: McpServer) {
     task_id: z.string(),
   }, async ({ task_id }) => {
     try {
-      const data = await pmApi(`/api/tasks/${encodeURIComponent(task_id)}`);
+      const data = await pmApi(`/api/v2/tasks/${encodeURIComponent(task_id)}`);
       return ok(data);
     } catch (e) { return handleError(e); }
   });
@@ -53,7 +53,7 @@ export function registerTasksTools(server: McpServer) {
     status: z.string().optional().describe('todo | in-progress | done (default: todo)'),
   }, async (body) => {
     try {
-      const data = await pmApi('/api/tasks', { method: 'POST', body: JSON.stringify(body) });
+      const data = await pmApi('/api/v2/tasks', { method: 'POST', body: JSON.stringify(body) });
       return ok(data);
     } catch (e) { return handleError(e); }
   });
@@ -65,7 +65,7 @@ export function registerTasksTools(server: McpServer) {
     story_points: z.number().nullable().optional(),
   }, async ({ task_id, ...updates }) => {
     try {
-      const data = await pmApi(`/api/tasks/${encodeURIComponent(task_id)}`, {
+      const data = await pmApi(`/api/v2/tasks/${encodeURIComponent(task_id)}`, {
         method: 'PATCH',
         body: JSON.stringify(updates),
       });
@@ -78,7 +78,7 @@ export function registerTasksTools(server: McpServer) {
     status: z.string().describe('todo | in-progress | done'),
   }, async ({ task_id, status }) => {
     try {
-      const data = await pmApi(`/api/tasks/${encodeURIComponent(task_id)}`, {
+      const data = await pmApi(`/api/v2/tasks/${encodeURIComponent(task_id)}`, {
         method: 'PATCH',
         body: JSON.stringify({ status }),
       });
@@ -90,7 +90,7 @@ export function registerTasksTools(server: McpServer) {
     task_id: z.string(),
   }, async ({ task_id }) => {
     try {
-      await pmApi(`/api/tasks/${encodeURIComponent(task_id)}`, { method: 'DELETE' });
+      await pmApi(`/api/v2/tasks/${encodeURIComponent(task_id)}`, { method: 'DELETE' });
       return ok({ deleted: true });
     } catch (e) { return handleError(e); }
   });

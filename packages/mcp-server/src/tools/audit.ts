@@ -24,7 +24,7 @@ export function registerAuditTools(server: McpServer) {
         if (limit !== undefined) params.set('limit', String(limit));
         if (cursor !== undefined) params.set('cursor', cursor);
         const qs = params.size > 0 ? `?${params.toString()}` : '';
-        const data = await pmApi(`/api/audit-logs${qs}`);
+        const data = await pmApi(`/api/v2/audit-logs${qs}`);
         return ok(data);
       } catch (e) {
         return err(e instanceof PmApiError ? e.message : String(e));

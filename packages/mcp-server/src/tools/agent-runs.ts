@@ -11,7 +11,7 @@ function err(message: string) {
 }
 
 export function registerAgentRunsTools(server: McpServer) {
-  // POST /api/agent-runs
+  // POST /api/v2/agent-runs
   server.tool(
     'emit_event',
     'Emit an agent run event (creates a new agent_runs record)',
@@ -42,7 +42,7 @@ export function registerAgentRunsTools(server: McpServer) {
         if (output_tokens !== undefined) body.output_tokens = output_tokens;
         if (started_at !== undefined) body.started_at = started_at;
         if (finished_at !== undefined) body.finished_at = finished_at;
-        const data = await pmApi('/api/agent-runs', { method: 'POST', body: JSON.stringify(body) });
+        const data = await pmApi('/api/v2/agent-runs', { method: 'POST', body: JSON.stringify(body) });
         return ok(data);
       } catch (e) {
         return err(e instanceof PmApiError ? e.message : String(e));
@@ -50,7 +50,7 @@ export function registerAgentRunsTools(server: McpServer) {
     },
   );
 
-  // PATCH /api/agent-runs/[id]
+  // PATCH /api/v2/agent-runs/[id]
   server.tool(
     'update_run_status',
     'Update an existing agent run status (supports retry chain)',
@@ -75,7 +75,7 @@ export function registerAgentRunsTools(server: McpServer) {
         if (cost_usd !== undefined) body.cost_usd = cost_usd;
         if (started_at !== undefined) body.started_at = started_at;
         if (finished_at !== undefined) body.finished_at = finished_at;
-        const data = await pmApi(`/api/agent-runs/${run_id}`, { method: 'PATCH', body: JSON.stringify(body) });
+        const data = await pmApi(`/api/v2/agent-runs/${run_id}`, { method: 'PATCH', body: JSON.stringify(body) });
         return ok(data);
       } catch (e) {
         return err(e instanceof PmApiError ? e.message : String(e));

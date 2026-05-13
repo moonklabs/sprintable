@@ -11,7 +11,7 @@ function err(message: string) {
 }
 
 export function registerAnalyticsTools(server: McpServer) {
-  // GET /api/analytics/overview
+  // GET /api/v2/analytics/overview
   server.tool(
     'get_project_overview',
     'Get project overview stats',
@@ -21,7 +21,7 @@ export function registerAnalyticsTools(server: McpServer) {
     async ({ project_id }) => {
       try {
         const params = new URLSearchParams({ project_id });
-        const data = await pmApi(`/api/analytics/overview?${params.toString()}`);
+        const data = await pmApi(`/api/v2/analytics/overview?${params.toString()}`);
         return ok(data);
       } catch (e) {
         return err(e instanceof PmApiError ? e.message : String(e));
@@ -29,7 +29,7 @@ export function registerAnalyticsTools(server: McpServer) {
     },
   );
 
-  // GET /api/analytics/workload
+  // GET /api/v2/analytics/workload
   server.tool(
     'get_member_workload',
     'Get workload for a member',
@@ -40,7 +40,7 @@ export function registerAnalyticsTools(server: McpServer) {
     async ({ project_id, member_id }) => {
       try {
         const params = new URLSearchParams({ project_id, member_id });
-        const data = await pmApi(`/api/analytics/workload?${params.toString()}`);
+        const data = await pmApi(`/api/v2/analytics/workload?${params.toString()}`);
         return ok(data);
       } catch (e) {
         return err(e instanceof PmApiError ? e.message : String(e));
@@ -48,7 +48,7 @@ export function registerAnalyticsTools(server: McpServer) {
     },
   );
 
-  // GET /api/analytics/velocity-history
+  // GET /api/v2/analytics/velocity-history
   server.tool(
     'get_sprint_velocity_history',
     'Get velocity across closed sprints',
@@ -58,7 +58,7 @@ export function registerAnalyticsTools(server: McpServer) {
     async ({ project_id }) => {
       try {
         const params = new URLSearchParams({ project_id });
-        const data = await pmApi(`/api/analytics/velocity-history?${params.toString()}`);
+        const data = await pmApi(`/api/v2/analytics/velocity-history?${params.toString()}`);
         return ok(data);
       } catch (e) {
         return err(e instanceof PmApiError ? e.message : String(e));
@@ -66,7 +66,7 @@ export function registerAnalyticsTools(server: McpServer) {
     },
   );
 
-  // GET /api/stories?q=
+  // GET /api/v2/stories?q=
   server.tool(
     'search_stories',
     'Search stories by title',
@@ -77,7 +77,7 @@ export function registerAnalyticsTools(server: McpServer) {
     async ({ project_id, query }) => {
       try {
         const params = new URLSearchParams({ project_id, q: query });
-        const data = await pmApi(`/api/stories?${params.toString()}`);
+        const data = await pmApi(`/api/v2/stories?${params.toString()}`);
         return ok(data);
       } catch (e) {
         return err(e instanceof PmApiError ? e.message : String(e));
@@ -85,7 +85,7 @@ export function registerAnalyticsTools(server: McpServer) {
     },
   );
 
-  // GET /api/stories?status=in-review
+  // GET /api/v2/stories?status=in-review
   server.tool(
     'get_blocked_stories',
     'Get stories with status in-review',
@@ -97,7 +97,7 @@ export function registerAnalyticsTools(server: McpServer) {
       try {
         const params = new URLSearchParams({ project_id, status: 'in-review' });
         if (sprint_id) params.set('sprint_id', sprint_id);
-        const data = await pmApi(`/api/stories?${params.toString()}`);
+        const data = await pmApi(`/api/v2/stories?${params.toString()}`);
         return ok(data);
       } catch (e) {
         return err(e instanceof PmApiError ? e.message : String(e));
@@ -105,7 +105,7 @@ export function registerAnalyticsTools(server: McpServer) {
     },
   );
 
-  // GET /api/stories?unassigned=true
+  // GET /api/v2/stories?unassigned=true
   server.tool(
     'get_unassigned_stories',
     'Get stories without assignee',
@@ -117,7 +117,7 @@ export function registerAnalyticsTools(server: McpServer) {
       try {
         const params = new URLSearchParams({ project_id, unassigned: 'true' });
         if (sprint_id) params.set('sprint_id', sprint_id);
-        const data = await pmApi(`/api/stories?${params.toString()}`);
+        const data = await pmApi(`/api/v2/stories?${params.toString()}`);
         return ok(data);
       } catch (e) {
         return err(e instanceof PmApiError ? e.message : String(e));
@@ -125,7 +125,7 @@ export function registerAnalyticsTools(server: McpServer) {
     },
   );
 
-  // GET /api/tasks?status_ne=done
+  // GET /api/v2/tasks?status_ne=done
   server.tool(
     'get_overdue_tasks',
     'Get incomplete tasks',
@@ -137,7 +137,7 @@ export function registerAnalyticsTools(server: McpServer) {
       try {
         const params = new URLSearchParams({ project_id, status_ne: 'done' });
         if (member_id) params.set('assignee_id', member_id);
-        const data = await pmApi(`/api/tasks?${params.toString()}`);
+        const data = await pmApi(`/api/v2/tasks?${params.toString()}`);
         return ok(data);
       } catch (e) {
         return err(e instanceof PmApiError ? e.message : String(e));
@@ -145,7 +145,7 @@ export function registerAnalyticsTools(server: McpServer) {
     },
   );
 
-  // GET /api/analytics/activity
+  // GET /api/v2/analytics/activity
   server.tool(
     'get_recent_activity',
     'Get recent project activity',
@@ -157,7 +157,7 @@ export function registerAnalyticsTools(server: McpServer) {
       try {
         const params = new URLSearchParams({ project_id });
         if (limit !== undefined) params.set('limit', String(limit));
-        const data = await pmApi(`/api/analytics/activity?${params.toString()}`);
+        const data = await pmApi(`/api/v2/analytics/activity?${params.toString()}`);
         return ok(data);
       } catch (e) {
         return err(e instanceof PmApiError ? e.message : String(e));
@@ -165,7 +165,7 @@ export function registerAnalyticsTools(server: McpServer) {
     },
   );
 
-  // PATCH /api/stories/:id — assign story to member
+  // PATCH /api/v2/stories/:id — assign story to member
   server.tool(
     'assign_story',
     'Assign story to a team member',
@@ -175,7 +175,7 @@ export function registerAnalyticsTools(server: McpServer) {
     },
     async ({ story_id, assignee_id }) => {
       try {
-        const data = await pmApi(`/api/stories/${story_id}`, {
+        const data = await pmApi(`/api/v2/stories/${story_id}`, {
           method: 'PATCH',
           body: JSON.stringify({ assignee_id }),
         });
@@ -186,7 +186,7 @@ export function registerAnalyticsTools(server: McpServer) {
     },
   );
 
-  // GET /api/analytics/epic-progress
+  // GET /api/v2/analytics/epic-progress
   server.tool(
     'get_epic_progress',
     'Get progress for an epic',
@@ -197,7 +197,7 @@ export function registerAnalyticsTools(server: McpServer) {
     async ({ project_id, epic_id }) => {
       try {
         const params = new URLSearchParams({ project_id, epic_id });
-        const data = await pmApi(`/api/analytics/epic-progress?${params.toString()}`);
+        const data = await pmApi(`/api/v2/analytics/epic-progress?${params.toString()}`);
         return ok(data);
       } catch (e) {
         return err(e instanceof PmApiError ? e.message : String(e));
@@ -205,7 +205,7 @@ export function registerAnalyticsTools(server: McpServer) {
     },
   );
 
-  // GET /api/analytics/agent-stats
+  // GET /api/v2/analytics/agent-stats
   server.tool(
     'get_agent_stats',
     'Get agent performance stats',
@@ -216,7 +216,7 @@ export function registerAnalyticsTools(server: McpServer) {
     async ({ project_id, agent_id }) => {
       try {
         const params = new URLSearchParams({ project_id, agent_id });
-        const data = await pmApi(`/api/analytics/agent-stats?${params.toString()}`);
+        const data = await pmApi(`/api/v2/analytics/agent-stats?${params.toString()}`);
         return ok(data);
       } catch (e) {
         return err(e instanceof PmApiError ? e.message : String(e));
@@ -224,7 +224,7 @@ export function registerAnalyticsTools(server: McpServer) {
     },
   );
 
-  // GET /api/analytics/health
+  // GET /api/v2/analytics/health
   server.tool(
     'get_project_health',
     'Get overall project health',
@@ -234,7 +234,7 @@ export function registerAnalyticsTools(server: McpServer) {
     async ({ project_id }) => {
       try {
         const params = new URLSearchParams({ project_id });
-        const data = await pmApi(`/api/analytics/health?${params.toString()}`);
+        const data = await pmApi(`/api/v2/analytics/health?${params.toString()}`);
         return ok(data);
       } catch (e) {
         return err(e instanceof PmApiError ? e.message : String(e));
