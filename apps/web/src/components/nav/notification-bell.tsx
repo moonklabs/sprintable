@@ -57,10 +57,8 @@ function getEntityHref(notification: EventNotification): string | null {
     case 'memo':
       return `/memos?id=${source_entity_id}`;
     case 'story':
-      // kanban-board.tsx는 searchParams.get('story') 키 사용
       return `/board?story=${source_entity_id}`;
     case 'task':
-      // kanban-board.tsx에서 task_id 파라미터 처리 — task → story 패널 자동 오픈
       return `/board?task_id=${source_entity_id}`;
     case 'epic':
       return `/epics/${source_entity_id}`;

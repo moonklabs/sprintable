@@ -10,6 +10,7 @@ import { Input } from '@/components/ui/input';
 import Link from 'next/link';
 import { Check, Copy, Eye, Trash2 } from 'lucide-react';
 import { useDocsLayout } from '../docs-context';
+import { EntityDispatchPanel } from '@/components/dispatch/entity-dispatch-panel';
 
 interface DocDetail {
   id: string;
@@ -23,6 +24,7 @@ interface DocDetail {
   is_folder?: boolean;
   doc_type?: string;
   org_id?: string;
+  assignee_id?: string | null;
 }
 
 const SAVE_STATUS_CLASS: Partial<Record<SaveStatus, string>> = {
@@ -166,6 +168,19 @@ export default function DocSlugPage() {
           </div>
         </div>
       </div>
+
+      {/* Dispatch */}
+      {projectId && (
+        <div className="flex-shrink-0 border-b border-border px-4 py-2 lg:px-6">
+          <EntityDispatchPanel
+            entityType="doc"
+            entityId={selectedDoc.id}
+            projectId={projectId}
+            currentAssigneeId={selectedDoc.assignee_id}
+            onAssigneePatched={(aid) => setSelectedDoc((prev) => prev ? { ...prev, assignee_id: aid } : prev)}
+          />
+        </div>
+      )}
 
       {/* Editor */}
       <div className="flex min-h-0 flex-1 flex-col overflow-hidden px-4 py-4 lg:px-6 lg:py-6">
