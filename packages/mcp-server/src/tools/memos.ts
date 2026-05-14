@@ -118,12 +118,11 @@ export function registerMemosTools(server: McpServer) {
   server.tool('send_chat_message', 'Send a chat message to a memo thread. Triggers real-time SSE delivery to all thread participants.', {
     thread_id: z.string().describe('Memo ID (= thread ID)'),
     content: z.string().describe('Message content'),
-    created_by: z.string().describe('Sender team member ID'),
-  }, async ({ thread_id, content, created_by }) => {
+  }, async ({ thread_id, content }) => {
     try {
       const data = await pmApi(`/api/v2/chats/${encodeURIComponent(thread_id)}/messages`, {
         method: 'POST',
-        body: JSON.stringify({ content, created_by, attachments: [] }),
+        body: JSON.stringify({ content, attachments: [] }),
       });
       return ok(data);
     } catch (e) { return handleError(e); }

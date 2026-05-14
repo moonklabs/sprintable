@@ -19,6 +19,26 @@ from app.routers.events import _push_to_agent, publish_event
 router = APIRouter(prefix="/api/v2/chats", tags=["chats"])
 
 
+async def _resolve_sender(auth: AuthContext, org_id: uuid.UUID, db: AsyncSession) -> TeamMember:
+    """auth context → sending TeamMember 조회.
+
+    API key 경로: auth.user_id = team_member.id (직접 조회)
+    JWT 경로: auth.user_id = supabase user_id → TeamMember.user_id 매핑
+    """
+    is_api_key = bool(auth.claims.get("app_metadata", {}).get("api_key_id"))
+    if is_api_key:
+        stmt = select(TeamMember).where(TeamMember.id == uuid.UUID(auth.user_id))
+    else:
+        stmt = select(TeamMember).where(
+            TeamMember.user_id == uuid.UUID(auth.user_id),
+            TeamMember.org_id == org_id,
+        )
+    member = (await db.execute(stmt)).scalar_one_or_none()
+    if member is None:
+        raise HTTPException(status_code=400, detail="Sender team member not found")
+    return member
+
+
 # ─── Chat message shape (matches ChatMessage TS interface) ─────────────────────
 
 def _to_chat_message(reply: MemoReply, sender: TeamMember) -> dict:
@@ -88,7 +108,6 @@ async def _persist_and_push_chat_events(
 
 class ChatMessageRequest(BaseModel):
     content: str
-    created_by: uuid.UUID
     attachments: list[dict] = []
 
 
@@ -161,16 +180,13 @@ async def send_chat_message(
     if memo is None:
         raise HTTPException(status_code=404, detail="Thread not found")
 
-    sender_result = await db.execute(select(TeamMember).where(TeamMember.id == body.created_by))
-    sender = sender_result.scalar_one_or_none()
-    if sender is None:
-        raise HTTPException(status_code=400, detail="Sender not found")
+    sender = await _resolve_sender(auth, org_id, db)
 
     reply_repo = MemoReplyRepository(db)
     reply = await reply_repo.create(
         memo_id=thread_id,
         content=body.content,
-        created_by=body.created_by,
+        created_by=sender.id,
         review_type="comment",
         attachments=body.attachments,
     )
@@ -180,7 +196,7 @@ async def send_chat_message(
         participants.add(memo.assigned_to)
     if memo.created_by:
         participants.add(memo.created_by)
-    participants.discard(body.created_by)
+    participants.discard(sender.id)
 
     try:
         await _persist_and_push_chat_events(db, memo, reply, org_id, sender, participants)
@@ -195,7 +211,6 @@ async def send_chat_message(
 async def send_chat_message_with_file(
     thread_id: uuid.UUID,
     content: Annotated[str, Form()],
-    created_by: Annotated[uuid.UUID, Form()],
     file: Annotated[UploadFile | None, File()] = None,
     db: AsyncSession = Depends(get_db),
     auth: AuthContext = Depends(get_current_user),
@@ -204,6 +219,7 @@ async def send_chat_message_with_file(
     """POST /api/v2/chats/{thread_id}/messages/upload — 파일 첨부 포함 채팅 메시지 전송.
 
     응답: { data: ChatMessage }
+    created_by는 auth context에서 파생 (form field 불필요).
     """
     memo_result = await db.execute(
         select(Memo).where(Memo.id == thread_id, Memo.org_id == org_id, Memo.deleted_at.is_(None))
@@ -212,10 +228,7 @@ async def send_chat_message_with_file(
     if memo is None:
         raise HTTPException(status_code=404, detail="Thread not found")
 
-    sender_result = await db.execute(select(TeamMember).where(TeamMember.id == created_by))
-    sender = sender_result.scalar_one_or_none()
-    if sender is None:
-        raise HTTPException(status_code=400, detail="Sender not found")
+    sender = await _resolve_sender(auth, org_id, db)
 
     attachments: list[dict] = []
     if file and file.filename:
@@ -230,7 +243,7 @@ async def send_chat_message_with_file(
     reply = await reply_repo.create(
         memo_id=thread_id,
         content=content,
-        created_by=created_by,
+        created_by=sender.id,
         review_type="comment",
         attachments=attachments,
     )
@@ -240,7 +253,7 @@ async def send_chat_message_with_file(
         participants.add(memo.assigned_to)
     if memo.created_by:
         participants.add(memo.created_by)
-    participants.discard(created_by)
+    participants.discard(sender.id)
 
     try:
         await _persist_and_push_chat_events(db, memo, reply, org_id, sender, participants)

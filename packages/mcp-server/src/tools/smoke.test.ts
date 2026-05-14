@@ -1513,7 +1513,7 @@ describe('meetings tools via pmApi', () => {
       expect(url).toBe('http://test-pm-api/api/v2/chats/thread-alpha/messages');
       expect(init?.method).toBe('POST');
       const body = JSON.parse(init?.body as string);
-      expect(body).toMatchObject({ content: '안녕하세요', created_by: 'member-1' });
+      expect(body).toMatchObject({ content: '안녕하세요' });
       // 백엔드: { data: ChatMessage } → pmApi extracts .data → ChatMessage
       return new Response(JSON.stringify({ data: mockMsg }), { status: 201 });
     });
@@ -1521,7 +1521,6 @@ describe('meetings tools via pmApi', () => {
     const result = await harness.invoke('send_chat_message', {
       thread_id: 'thread-alpha',
       content: '안녕하세요',
-      created_by: 'member-1',
     });
     // pmApi extracts .data → ok(ChatMessage) → parseResult → { data: ChatMessage }
     expect(result).toEqual({ data: mockMsg });
