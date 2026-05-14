@@ -1,11 +1,76 @@
 'use client';
 
+import ReactMarkdown, { defaultUrlTransform } from 'react-markdown';
+import remarkGfm from 'remark-gfm';
 import { Bot, User } from 'lucide-react';
 import type { ChatMessage } from '@/hooks/use-chat-sse';
+import { EntityChip, getEntityHref } from '@/components/memos/embed-card';
 
 interface ChatBubbleProps {
   message: ChatMessage;
   isMine: boolean;
+}
+
+// Convert @name tokens to markdown links so react-markdown v10 can render them via the `a` component.
+// Uses negative lookbehind to skip already-linked mentions (e.g. inside [...]).
+function prepareMentions(content: string): string {
+  return content.replace(/(?<![[(])@([\w가-힣]+)/g, '[@$1](mention:$1)');
+}
+
+function ChatMarkdown({ content, isMine }: { content: string; isMine: boolean }) {
+  const text = isMine ? 'text-primary-foreground' : 'text-foreground';
+  const muted = isMine ? 'text-primary-foreground/70' : 'text-muted-foreground';
+  const codeBg = isMine ? 'bg-primary-foreground/10 text-primary-foreground' : 'bg-muted text-foreground';
+  const border = isMine ? 'border-primary-foreground/30' : 'border-border';
+
+  const hasMention = /@[\w가-힣]+/.test(content);
+  const hasMarkdown = /[*_`#\[\]>~]|entity:/.test(content);
+
+  if (!hasMarkdown && !hasMention) {
+    return (
+      <span className={`whitespace-pre-wrap break-words text-sm leading-relaxed ${text}`}>
+        {content}
+      </span>
+    );
+  }
+
+  const prepared = hasMention ? prepareMentions(content) : content;
+
+  return (
+    <ReactMarkdown
+      remarkPlugins={[remarkGfm]}
+      urlTransform={(url) =>
+        url.startsWith('entity:') || url.startsWith('mention:') ? url : defaultUrlTransform(url)
+      }
+      components={{
+        p: ({ children }) => <p className={`mb-1.5 break-words text-sm leading-relaxed last:mb-0 ${text}`}>{children}</p>,
+        strong: ({ children }) => <strong className={`font-semibold ${text}`}>{children}</strong>,
+        em: ({ children }) => <em className={`italic ${text}`}>{children}</em>,
+        code: ({ children }) => <code className={`rounded px-1 py-0.5 font-mono text-xs ${codeBg}`}>{children}</code>,
+        pre: ({ children }) => <pre className={`mb-1.5 overflow-x-auto rounded-lg p-2.5 text-xs ${codeBg}`}>{children}</pre>,
+        ul: ({ children }) => <ul className={`mb-1.5 ml-4 list-disc space-y-0.5 text-sm ${text}`}>{children}</ul>,
+        ol: ({ children }) => <ol className={`mb-1.5 ml-4 list-decimal space-y-0.5 text-sm ${text}`}>{children}</ol>,
+        li: ({ children }) => <li className={`text-sm leading-relaxed ${text}`}>{children}</li>,
+        blockquote: ({ children }) => <blockquote className={`mb-1.5 border-l-2 pl-3 ${border} ${muted}`}>{children}</blockquote>,
+        a: ({ href, children }) => {
+          if (href?.startsWith('mention:')) {
+            return (
+              <span className={`font-medium ${isMine ? 'text-primary-foreground underline decoration-primary-foreground/40' : 'text-primary'}`}>
+                {children}
+              </span>
+            );
+          }
+          const m = href?.match(/^entity:(\w+):([0-9a-f-]+)$/i);
+          if (m) {
+            return <EntityChip entityType={m[1]!} entityId={m[2]!} label={String(children)} href={getEntityHref(m[1]!, m[2]!)} />;
+          }
+          return <a href={href} target="_blank" rel="noopener noreferrer" className={`underline underline-offset-2 ${text}`}>{children}</a>;
+        },
+      }}
+    >
+      {prepared}
+    </ReactMarkdown>
+  );
 }
 
 export function ChatBubble({ message, isMine }: ChatBubbleProps) {
@@ -39,12 +104,12 @@ export function ChatBubble({ message, isMine }: ChatBubbleProps) {
         </div>
 
         {/* Content */}
-        <div className={`rounded-2xl px-3.5 py-2 text-sm leading-relaxed whitespace-pre-wrap break-words ${
+        <div className={`rounded-2xl px-3.5 py-2 text-sm leading-relaxed break-words ${
           isMine
             ? 'rounded-tr-sm bg-primary text-primary-foreground'
             : 'rounded-tl-sm bg-muted text-foreground'
         }`}>
-          {message.content}
+          <ChatMarkdown content={message.content} isMine={isMine} />
         </div>
 
         {/* Attachments */}

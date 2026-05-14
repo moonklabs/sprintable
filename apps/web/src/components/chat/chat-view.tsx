@@ -13,6 +13,7 @@ interface ChatViewProps {
   threadId: string;
   currentTeamMemberId: string;
   threadTitle?: string | null;
+  projectId?: string;
 }
 
 interface MessageGroup {
@@ -31,7 +32,7 @@ function groupByDate(messages: ChatMessage[]): MessageGroup[] {
   return Object.entries(groups).map(([date, msgs]) => ({ date, messages: msgs }));
 }
 
-export function ChatView({ threadId, currentTeamMemberId, threadTitle }: ChatViewProps) {
+export function ChatView({ threadId, currentTeamMemberId, threadTitle, projectId }: ChatViewProps) {
   const router = useRouter();
   const [messages, setMessages] = useState<ChatMessage[]>([]);
   const [loading, setLoading] = useState(true);
@@ -103,11 +104,13 @@ export function ChatView({ threadId, currentTeamMemberId, threadTitle }: ChatVie
 
   useChatSse({ currentTeamMemberId, onNewMessage: handleNewMessage, onReplyCreated: handleReplyCreated });
 
-  const handleSend = useCallback(async (content: string) => {
+  const handleSend = useCallback(async (content: string, mentionedIds?: string[]) => {
+    const body: Record<string, unknown> = { content };
+    if (mentionedIds && mentionedIds.length > 0) body.mentioned_ids = mentionedIds;
     const res = await fetch(`/api/chats/${threadId}/messages`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ content }),
+      body: JSON.stringify(body),
     });
     if (!res.ok) throw new Error('Failed to send message');
     // Backend: { data: _to_chat_message }
@@ -243,7 +246,8 @@ export function ChatView({ threadId, currentTeamMemberId, threadTitle }: ChatVie
       <ChatInput
         onSend={handleSend}
         onUpload={handleUpload}
-        placeholder="메시지를 입력하세요… (Enter 전송 / Shift+Enter 줄바꿈)"
+        projectId={projectId}
+        placeholder="메시지를 입력하세요… (Enter 전송 / Shift+Enter 줄바꿈 / @ 멘션 / # 엔티티)"
       />
     </div>
   );

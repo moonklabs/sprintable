@@ -18,7 +18,7 @@ export default function MemoDetailPage() {
   const { id } = useParams<{ id: string }>();
   const router = useRouter();
   const t = useTranslations('memos');
-  const { currentTeamMemberId } = useDashboardContext();
+  const { currentTeamMemberId, projectId } = useDashboardContext();
 
   const [memo, setMemo] = useState<MemoSummary | null>(null);
 
@@ -77,6 +77,7 @@ export default function MemoDetailPage() {
           threadId={id}
           currentTeamMemberId={currentTeamMemberId}
           threadTitle={memo?.title ?? undefined}
+          projectId={projectId}
         />
       </div>
     </>
