@@ -22,21 +22,31 @@ logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/api/v2/chats", tags=["chats"])
 
 
-async def _resolve_sender(auth: AuthContext, org_id: uuid.UUID, db: AsyncSession) -> TeamMember:
+async def _resolve_sender(
+    auth: AuthContext,
+    org_id: uuid.UUID,
+    db: AsyncSession,
+    project_id: uuid.UUID | None = None,
+) -> TeamMember:
     """auth context → sending TeamMember 조회.
 
     API key 경로: auth.user_id = team_member.id (직접 조회)
-    JWT 경로: auth.user_id = supabase user_id → TeamMember.user_id 매핑
+    JWT 경로: auth.user_id = supabase user_id → TeamMember.user_id + project_id 매핑
+
+    project_id 필터: 동일 org 내 복수 project team_member 중 정확한 레코드 반환.
+    프론트 currentTeamMemberId는 last_project_id 기준 member → project_id 필터 필수.
     """
     is_api_key = bool(auth.claims.get("app_metadata", {}).get("api_key_id"))
     if is_api_key:
         stmt = select(TeamMember).where(TeamMember.id == uuid.UUID(auth.user_id))
     else:
-        stmt = select(TeamMember).where(
+        conditions = [
             TeamMember.user_id == uuid.UUID(auth.user_id),
             TeamMember.org_id == org_id,
-        )
-    # scalar_one_or_none → MultipleResultsFound (동일 org 내 복수 project에 team_member 중복 등록 케이스)
+        ]
+        if project_id:
+            conditions.append(TeamMember.project_id == project_id)
+        stmt = select(TeamMember).where(*conditions)
     member = (await db.execute(stmt)).scalars().first()
     if member is None:
         raise HTTPException(status_code=400, detail="Sender team member not found")
@@ -221,7 +231,7 @@ async def send_chat_message(
     if memo is None:
         raise HTTPException(status_code=404, detail="Thread not found")
 
-    sender = await _resolve_sender(auth, org_id, db)
+    sender = await _resolve_sender(auth, org_id, db, project_id=memo.project_id)
 
     reply_repo = MemoReplyRepository(db)
     reply = await reply_repo.create(
@@ -265,7 +275,7 @@ async def send_chat_message_with_file(
     if memo is None:
         raise HTTPException(status_code=404, detail="Thread not found")
 
-    sender = await _resolve_sender(auth, org_id, db)
+    sender = await _resolve_sender(auth, org_id, db, project_id=memo.project_id)
 
     attachments: list[dict] = []
     if file and file.filename:
