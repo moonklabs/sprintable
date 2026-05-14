@@ -1,6 +1,6 @@
 /**
  * SSE Bridge — MCP stdio 서버가 FastAPI /api/v2/events/stream 에 자동 연결.
- * 이벤트 수신 시 onEvent 콜백 호출 + stderr 출력.
+ * 이벤트 수신 시 onEvent 콜백 호출 + stderr 출력 + fakechat relay.
  * 연결 끊김 시 exponential backoff 재연결.
  */
 
@@ -16,6 +16,31 @@ function log(msg: string) {
 
 function delay(ms: number): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+async function relayToFakechat(eventType: string, data: unknown): Promise<void> {
+  const port = Number(process.env.FAKECHAT_PORT ?? 8787);
+  const id = `sse-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
+
+  let text: string;
+  if (typeof data === 'object' && data !== null) {
+    const d = data as Record<string, unknown>;
+    const sender = d.sender_name ?? d.sender ?? d.member_name ?? '';
+    const content = d.content ?? d.message ?? d.text ?? JSON.stringify(data);
+    text = sender ? `[${eventType}] ${sender}: ${content}` : `[${eventType}] ${content}`;
+  } else {
+    text = `[${eventType}] ${String(data)}`;
+  }
+
+  const form = new FormData();
+  form.set('id', id);
+  form.set('text', text);
+
+  const res = await fetch(`http://127.0.0.1:${port}/upload`, {
+    method: 'POST',
+    body: form,
+  });
+  if (!res.ok) throw new Error(`HTTP ${res.status}`);
 }
 
 async function connectOnce(
@@ -63,14 +88,18 @@ async function connectOnce(
             const dataStr = dataLines.join('\n');
             if (eventType !== 'heartbeat') {
               log(`event=${eventType} data=${dataStr}`);
-              if (onEvent) {
-                try {
-                  const parsed = JSON.parse(dataStr);
-                  onEvent(eventType, parsed);
-                } catch {
-                  onEvent(eventType, dataStr);
-                }
+              let parsed: unknown;
+              try {
+                parsed = JSON.parse(dataStr);
+              } catch {
+                parsed = dataStr;
               }
+              if (onEvent) {
+                onEvent(eventType, parsed);
+              }
+              relayToFakechat(eventType, parsed).catch((err) => {
+                log(`fakechat relay error: ${err instanceof Error ? err.message : String(err)}`);
+              });
             }
             eventType = 'message';
             dataLines = [];
