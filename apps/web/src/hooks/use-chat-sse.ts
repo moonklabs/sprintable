@@ -2,22 +2,36 @@
 
 import { useEffect, useRef, useState } from 'react';
 
-// Mirrors backend ReplyResponse schema
+// Mirrors backend _to_chat_message: { id, thread_id, sender: { id, name, type }, ... }
 export interface ChatMessage {
   id: string;
-  memo_id: string;       // thread ID (MemoReply.memo_id)
-  created_by: string;    // sender team_member_id
+  memo_id: string;       // backend: thread_id
+  created_by: string;    // backend: sender.id
   content: string;
   review_type?: string;
   attachments: Array<{ url?: string; name?: string; content_type?: string; filename?: string }>;
   created_at: string;
 }
 
+// Normalize backend _to_chat_message format → ChatMessage
+export function normalizeToMessage(raw: Record<string, unknown>): ChatMessage {
+  const sender = raw.sender as { id?: string } | undefined;
+  return {
+    id: (raw.id ?? '') as string,
+    memo_id: (raw.thread_id ?? raw.memo_id ?? '') as string,
+    created_by: (raw.created_by ?? sender?.id ?? '') as string,
+    content: (raw.content ?? '') as string,
+    attachments: (raw.attachments ?? []) as ChatMessage['attachments'],
+    created_at: (raw.created_at ?? '') as string,
+  };
+}
+
+// Backend SSE chat:message payload format (_to_chat_message)
 interface SseChatPayload {
+  id: string;
   thread_id: string;
-  reply_id: string;
   content: string;
-  created_by: string;
+  sender: { id: string; name?: string; type?: string };
   attachments: unknown[];
   created_at: string;
 }
@@ -75,19 +89,11 @@ export function useChatSse({ currentTeamMemberId, onNewMessage, onReplyCreated }
         }
       };
 
-      // chat:message — from agent-push events (when backend publishes via _push_to_agent)
+      // chat:message — backend _to_chat_message format: { id, thread_id, sender: { id }, ... }
       source.addEventListener('chat:message', (e: MessageEvent) => {
         try {
           const payload = JSON.parse(e.data as string) as SseChatPayload;
-          const msg: ChatMessage = {
-            id: payload.reply_id,
-            memo_id: payload.thread_id,
-            created_by: payload.created_by,
-            content: payload.content,
-            attachments: (payload.attachments ?? []) as ChatMessage['attachments'],
-            created_at: payload.created_at,
-          };
-          onNewMessageRef.current?.(msg);
+          onNewMessageRef.current?.(normalizeToMessage(payload as unknown as Record<string, unknown>));
         } catch { /* ignore parse errors */ }
       });
 

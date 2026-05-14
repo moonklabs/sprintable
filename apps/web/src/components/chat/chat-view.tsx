@@ -6,7 +6,7 @@ import { useRouter } from 'next/navigation';
 import { ChatBubble } from './chat-bubble';
 import { ChatInput } from './chat-input';
 import type { ChatMessage } from '@/hooks/use-chat-sse';
-import { useChatSse } from '@/hooks/use-chat-sse';
+import { normalizeToMessage, useChatSse } from '@/hooks/use-chat-sse';
 import { EmptyState } from '@/components/ui/empty-state';
 
 interface ChatViewProps {
@@ -53,10 +53,11 @@ export function ChatView({ threadId, currentTeamMemberId, threadTitle }: ChatVie
       if (before) params.set('before', before);
       const res = await fetch(`/api/chats/${threadId}/messages?${params.toString()}`);
       if (!res.ok) return;
-      // Backend returns list[ReplyResponse] directly (no { data, meta } wrapper)
-      const raw = await res.json() as ChatMessage[] | { data?: ChatMessage[]; meta?: { next_cursor?: string; has_more?: boolean } };
-      const data = Array.isArray(raw) ? raw : (raw.data ?? []);
-      const meta = Array.isArray(raw) ? null : raw.meta;
+      // Backend: { data: _to_chat_message[], meta: { next_cursor, has_more } }
+      const raw = await res.json() as Record<string, unknown>;
+      const rawData = (Array.isArray(raw) ? raw : (raw.data ?? [])) as Record<string, unknown>[];
+      const meta = Array.isArray(raw) ? null : raw.meta as { next_cursor?: string; has_more?: boolean } | undefined;
+      const data = rawData.map(normalizeToMessage);
       if (before) {
         setMessages((prev) => [...data, ...prev]);
       } else {
@@ -109,10 +110,10 @@ export function ChatView({ threadId, currentTeamMemberId, threadTitle }: ChatVie
       body: JSON.stringify({ content }),
     });
     if (!res.ok) throw new Error('Failed to send message');
-    // Backend returns ReplyResponse directly (no { data } wrapper)
-    const raw = await res.json() as ChatMessage | { data?: ChatMessage };
-    const msg = ('data' in raw && raw.data) ? raw.data : raw as ChatMessage;
-    addMessage(msg);
+    // Backend: { data: _to_chat_message }
+    const raw = await res.json() as Record<string, unknown>;
+    const payload = (raw.data ?? raw) as Record<string, unknown>;
+    addMessage(normalizeToMessage(payload));
   }, [threadId, addMessage]);
 
   const handleUpload = useCallback(async (file: File) => {
@@ -123,9 +124,9 @@ export function ChatView({ threadId, currentTeamMemberId, threadTitle }: ChatVie
       body: formData,
     });
     if (!res.ok) throw new Error('Failed to upload file');
-    const raw = await res.json() as ChatMessage | { data?: ChatMessage };
-    const msg = ('data' in raw && raw.data) ? raw.data : raw as ChatMessage;
-    addMessage(msg);
+    const raw = await res.json() as Record<string, unknown>;
+    const payload = (raw.data ?? raw) as Record<string, unknown>;
+    addMessage(normalizeToMessage(payload));
   }, [threadId, addMessage]);
 
   const handleLoadMore = useCallback(async () => {
