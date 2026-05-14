@@ -1,0 +1,16 @@
+{
+  "name": "@sprintable/fakechat",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Fake chat MCP plugin — localhost UI for SSE bridge testing",
+  "type": "module",
+  "bin": {
+    "fakechat": "./server.ts"
+  },
+  "scripts": {
+    "start": "bun run server.ts"
+  },
+  "dependencies": {
+    "@modelcontextprotocol/sdk": "^1.29.0"
+  }
+}
