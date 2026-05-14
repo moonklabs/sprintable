@@ -191,7 +191,10 @@ async def agent_event_stream(
 
     async def generate():
         try:
-            # 연결 즉시 pending 이벤트 백필 전달 — 개별 세션, 완료 후 반환
+            # 즉시 heartbeat → HTTP 응답 헤더 즉시 반환 (대량 백필 전 hang 방지)
+            yield "event: heartbeat\ndata: {}\n\n"
+
+            # 연결 즉시 pending 이벤트 백필 전달 — 최근 100건 LIMIT (무한 조회 방지)
             async with async_session_factory() as db:
                 result = await db.execute(
                     select(Event)
@@ -201,6 +204,7 @@ async def agent_event_stream(
                         Event.status == "pending",
                     )
                     .order_by(Event.created_at.asc())
+                    .limit(100)
                 )
                 pending_events = result.scalars().all()
                 for i in range(0, len(pending_events), _SSE_BATCH_SIZE):
