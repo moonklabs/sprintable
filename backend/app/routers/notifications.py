@@ -1,10 +1,12 @@
 import uuid
 
 from fastapi import APIRouter, Depends, HTTPException, Query
+from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.dependencies.auth import AuthContext, get_current_user, get_verified_org_id
 from app.dependencies.database import get_db
+from app.models.team import TeamMember
 from app.repositories.notification import InboxRepository, NotificationRepository, NotificationSettingRepository
 from app.schemas.notification import (
     InboxItemResponse,
@@ -15,6 +17,24 @@ from app.schemas.notification import (
 )
 
 router = APIRouter(prefix="/api/v2", tags=["notifications"])
+
+
+async def _resolve_notification_user_id(auth: AuthContext, db: AsyncSession) -> uuid.UUID:
+    """auth context → Notification.user_id (supabase user_id) 파생.
+
+    API key 경로: auth.user_id = team_member.id → TeamMember.user_id (supabase) 조회
+    JWT 경로: auth.user_id = supabase user_id → 직접 사용
+    """
+    is_api_key = bool(auth.claims.get("app_metadata", {}).get("api_key_id"))
+    if is_api_key:
+        result = await db.execute(
+            select(TeamMember.user_id).where(TeamMember.id == uuid.UUID(auth.user_id))
+        )
+        supabase_user_id = result.scalar_one_or_none()
+        if supabase_user_id is None:
+            raise HTTPException(status_code=400, detail="Team member supabase user_id not found")
+        return supabase_user_id
+    return uuid.UUID(auth.user_id)
 
 
 def _notif_repo(
@@ -33,28 +53,41 @@ def _inbox_repo(
 
 @router.get("/notifications", response_model=list[NotificationResponse])
 async def list_notifications(
-    user_id: uuid.UUID = Query(...),
-    is_read: bool | None = Query(default=None),
+    unread: bool | None = Query(default=None, description="True=읽지 않은 것만, False=읽은 것만"),
+    is_read: bool | None = Query(default=None, description="직접 is_read 지정 (unread 우선)"),
+    limit: int = Query(default=200, le=200),
+    db: AsyncSession = Depends(get_db),
+    auth: AuthContext = Depends(get_current_user),
     repo: NotificationRepository = Depends(_notif_repo),
 ) -> list[NotificationResponse]:
-    items = await repo.list(user_id=user_id, is_read=is_read)
+    """GET /api/v2/notifications — auth context에서 user_id 자동 파생.
+
+    MCP check_notifications 호환: unread=true → is_read=False 변환.
+    """
+    user_id = await _resolve_notification_user_id(auth, db)
+    resolved_is_read = (not unread) if unread is not None else is_read
+    items = await repo.list(user_id=user_id, is_read=resolved_is_read, limit=limit)
     return [NotificationResponse.model_validate(n) for n in items]
 
 
 @router.get("/notifications/count")
 async def count_unread(
-    user_id: uuid.UUID = Query(...),
+    db: AsyncSession = Depends(get_db),
+    auth: AuthContext = Depends(get_current_user),
     repo: NotificationRepository = Depends(_notif_repo),
 ) -> dict:
+    user_id = await _resolve_notification_user_id(auth, db)
     count = await repo.count_unread(user_id=user_id)
     return {"count": count}
 
 
 @router.patch("/notifications/mark-all-read", status_code=200)
 async def mark_all_read(
-    user_id: uuid.UUID = Query(...),
+    db: AsyncSession = Depends(get_db),
+    auth: AuthContext = Depends(get_current_user),
     repo: NotificationRepository = Depends(_notif_repo),
 ) -> dict:
+    user_id = await _resolve_notification_user_id(auth, db)
     await repo.mark_all_read(user_id=user_id)
     return {"ok": True}
 
