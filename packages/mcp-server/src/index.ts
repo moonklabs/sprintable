@@ -44,10 +44,10 @@ if (!PM_API_URL || !AGENT_API_KEY) {
 
 configurePmApi(PM_API_URL, AGENT_API_KEY);
 
-const server = new McpServer({
-  name: 'sprintable-mcp',
-  version: '0.0.1',
-});
+const server = new McpServer(
+  { name: 'sprintable-mcp', version: '0.0.1' },
+  { capabilities: { experimental: { 'claude/channel': {} } } },
+);
 
 // 도구 등록
 registerCoreTools(server);
@@ -113,13 +113,16 @@ async function main() {
     // FastAPI SSE 자동 연결 — MEMBER_ID 있을 때만
     if (MEMBER_ID) {
       startSseBridge(PM_API_URL, AGENT_API_KEY, MEMBER_ID, SSE_BACKEND_URL || undefined,
-        // 갭 1 해소: SSE 이벤트 수신 → MCP notifications/message로 Claude Code에 전달
+        // S32: notifications/claude/channel → conversation turn 자동 주입
         (eventType, data) => {
           server.server.notification({
-            method: 'notifications/message',
+            method: 'notifications/claude/channel',
             params: {
-              level: 'info',
-              data: JSON.stringify({ eventType, data }),
+              content: JSON.stringify({ eventType, data }),
+              meta: {
+                source: 'sprintable',
+                event_type: eventType,
+              },
             },
           }).catch(() => { /* 클라이언트 미지원 시 무시 */ });
         },
