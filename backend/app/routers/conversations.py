@@ -15,7 +15,7 @@ from app.dependencies.database import get_db
 from app.models.conversation import Conversation, ConversationMessage, ConversationParticipant
 from app.models.event import Event
 from app.models.team import TeamMember
-from app.routers.events import _push_to_agent, publish_event
+from app.routers.events import _push_to_agent
 
 logger = logging.getLogger(__name__)
 
@@ -97,10 +97,8 @@ async def _dispatch_conversation_event(
             status="pending",
         )
         db.add(event)
-        if m_type == "agent":
-            _push_to_agent(str(pid), {"event_type": "conversation:message", **payload})
-        else:
-            publish_event(str(org_id), "conversation:message", payload)
+        # human/agent 모두 per-member push — org 전체 브로드캐스트 방지
+        _push_to_agent(str(pid), {"event_type": "conversation:message", **payload})
 
     await db.flush()
 
