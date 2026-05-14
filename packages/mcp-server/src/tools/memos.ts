@@ -114,29 +114,31 @@ export function registerMemosTools(server: McpServer) {
     } catch (e) { return handleError(e); }
   });
 
-  // E-EVENTBUS P4 S15: 채팅 메시지 전송 — 에이전트가 thread에 즉시 응답
-  server.tool('send_chat_message', 'Send a chat message to a memo thread. Triggers real-time SSE delivery to all thread participants.', {
-    thread_id: z.string().describe('Memo ID (= thread ID)'),
+  // S41: conversations API로 라우팅 전환 (thread_id = conversation_id = memo.id)
+  server.tool('send_chat_message', 'Send a chat message to a thread (conversation). Triggers real-time SSE delivery to all participants.', {
+    thread_id: z.string().describe('Thread ID (memo ID = conversation ID)'),
     content: z.string().describe('Message content'),
   }, async ({ thread_id, content }) => {
     try {
-      const data = await pmApi(`/api/v2/chats/${encodeURIComponent(thread_id)}/messages`, {
+      const data = await pmApi(`/api/v2/conversations/${encodeURIComponent(thread_id)}/messages`, {
         method: 'POST',
-        body: JSON.stringify({ content, attachments: [] }),
+        body: JSON.stringify({ content }),
       });
       return ok(data);
     } catch (e) { return handleError(e); }
   });
 
-  // 채팅 메시지 목록 조회
-  server.tool('list_chat_messages', 'List chat messages in a memo thread (chronological order)', {
-    thread_id: z.string().describe('Memo ID (= thread ID)'),
-    limit: z.number().optional().describe('Max messages (default: 50)'),
-  }, async ({ thread_id, limit }) => {
+  // S41: conversations API로 라우팅 전환
+  server.tool('list_chat_messages', 'List chat messages in a thread (conversation, chronological order)', {
+    thread_id: z.string().describe('Thread ID (memo ID = conversation ID)'),
+    limit: z.number().optional().describe('Max messages (default: 30)'),
+    before: z.string().optional().describe('Cursor: ISO timestamp, fetch messages before this time'),
+  }, async ({ thread_id, limit, before }) => {
     try {
       const params = new URLSearchParams();
       if (limit !== undefined) params.set('limit', String(limit));
-      const data = await pmApi(`/api/v2/chats/${encodeURIComponent(thread_id)}/messages?${params.toString()}`);
+      if (before !== undefined) params.set('before', before);
+      const data = await pmApi(`/api/v2/conversations/${encodeURIComponent(thread_id)}/messages?${params.toString()}`);
       return ok(data);
     } catch (e) { return handleError(e); }
   });

@@ -1500,21 +1500,20 @@ describe('meetings tools via pmApi', () => {
 
   // ─── S17: Chat E2E MCP tool tests ────────────────────────────────────────────
 
-  it('send_chat_message calls POST /api/v2/chats/:thread_id/messages', async () => {
+  // S41: conversations API로 라우팅 전환
+  it('send_chat_message calls POST /api/v2/conversations/:thread_id/messages', async () => {
     const mockMsg = {
-      id: 'reply-1',
-      thread_id: 'thread-alpha',
+      id: 'msg-1',
+      conversation_id: 'thread-alpha',
       content: '안녕하세요',
       sender: { id: 'member-1', name: '윤재', type: 'human' },
-      attachments: [],
       created_at: '2026-05-14T01:00:00.000000',
     };
     stubFetch((url, init) => {
-      expect(url).toBe('http://test-pm-api/api/v2/chats/thread-alpha/messages');
+      expect(url).toBe('http://test-pm-api/api/v2/conversations/thread-alpha/messages');
       expect(init?.method).toBe('POST');
       const body = JSON.parse(init?.body as string);
       expect(body).toMatchObject({ content: '안녕하세요' });
-      // 백엔드: { data: ChatMessage } → pmApi extracts .data → ChatMessage
       return new Response(JSON.stringify({ data: mockMsg }), { status: 201 });
     });
 
@@ -1522,24 +1521,21 @@ describe('meetings tools via pmApi', () => {
       thread_id: 'thread-alpha',
       content: '안녕하세요',
     });
-    // pmApi extracts .data → ok(ChatMessage) → parseResult → { data: ChatMessage }
     expect(result).toEqual({ data: mockMsg });
   });
 
-  it('list_chat_messages calls GET /api/v2/chats/:thread_id/messages', async () => {
+  it('list_chat_messages calls GET /api/v2/conversations/:thread_id/messages', async () => {
     const mockMessages = [
       {
-        id: 'reply-1',
-        thread_id: 'thread-alpha',
+        id: 'msg-1',
+        conversation_id: 'thread-alpha',
         content: '안녕하세요',
         sender: { id: 'member-1', name: '윤재', type: 'human' },
-        attachments: [],
         created_at: '2026-05-14T01:00:00.000000',
       },
     ];
     stubFetch((url) => {
-      expect(url).toContain('http://test-pm-api/api/v2/chats/thread-alpha/messages');
-      // 백엔드: { data: [...], meta: {...} } → pmApi extracts .data → [...] 배열
+      expect(url).toContain('http://test-pm-api/api/v2/conversations/thread-alpha/messages');
       return new Response(
         JSON.stringify({ data: mockMessages, meta: { next_cursor: null, has_more: false } }),
         { status: 200 },
@@ -1550,7 +1546,6 @@ describe('meetings tools via pmApi', () => {
       thread_id: 'thread-alpha',
       limit: 30,
     });
-    // pmApi extracts .data (배열) → ok([...]) → parseResult → { data: [...] }
     expect(result).toEqual({ data: mockMessages });
   });
 });
