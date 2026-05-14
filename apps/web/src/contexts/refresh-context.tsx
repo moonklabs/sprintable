@@ -18,6 +18,7 @@ interface RefreshContextValue {
   setIntervalMs: (ms: number) => void;
   register: (key: string, fn: () => void) => void;
   unregister: (key: string) => void;
+  forceRefresh: (key?: string) => void;
 }
 
 const RefreshContext = createContext<RefreshContextValue | null>(null);
@@ -47,6 +48,14 @@ export function RefreshProvider({ children }: { children: React.ReactNode }) {
     registryRef.current.delete(key);
   }, []);
 
+  const forceRefresh = useCallback((key?: string) => {
+    if (key) {
+      registryRef.current.get(key)?.();
+    } else {
+      registryRef.current.forEach((fn) => fn());
+    }
+  }, []);
+
   useEffect(() => {
     if (intervalMs === 0) return;
     const id = setInterval(() => {
@@ -56,7 +65,7 @@ export function RefreshProvider({ children }: { children: React.ReactNode }) {
   }, [intervalMs]);
 
   return (
-    <RefreshContext.Provider value={{ intervalMs, setIntervalMs, register, unregister }}>
+    <RefreshContext.Provider value={{ intervalMs, setIntervalMs, register, unregister, forceRefresh }}>
       {children}
     </RefreshContext.Provider>
   );
