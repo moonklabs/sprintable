@@ -2,35 +2,45 @@
 
 import { useEffect, useRef, useState } from 'react';
 
+// Mirrors backend ReplyResponse schema
 export interface ChatMessage {
   id: string;
-  thread_id: string;
+  memo_id: string;       // thread ID (MemoReply.memo_id)
+  created_by: string;    // sender team_member_id
   content: string;
-  sender: {
-    id: string;
-    name: string;
-    type: 'human' | 'agent';
-  };
-  attachments?: Array<{ url: string; name: string; content_type: string }>;
+  review_type?: string;
+  attachments: Array<{ url?: string; name?: string; content_type?: string; filename?: string }>;
+  created_at: string;
+}
+
+interface SseChatPayload {
+  thread_id: string;
+  reply_id: string;
+  content: string;
+  created_by: string;
+  attachments: unknown[];
   created_at: string;
 }
 
 interface UseChatSseOptions {
   currentTeamMemberId?: string;
   onNewMessage?: (message: ChatMessage) => void;
+  onReplyCreated?: (memoId: string) => void;
 }
 
 const RECONNECT_DELAYS_MS = [5_000, 30_000, 60_000, 300_000];
 
-export function useChatSse({ currentTeamMemberId, onNewMessage }: UseChatSseOptions) {
+export function useChatSse({ currentTeamMemberId, onNewMessage, onReplyCreated }: UseChatSseOptions) {
   const [connected, setConnected] = useState(false);
   const sourceRef = useRef<EventSource | null>(null);
   const reconnectTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const reconnectAttemptsRef = useRef(0);
   const onNewMessageRef = useRef(onNewMessage);
+  const onReplyCreatedRef = useRef(onReplyCreated);
   const memberIdRef = useRef(currentTeamMemberId);
 
   useEffect(() => { onNewMessageRef.current = onNewMessage; }, [onNewMessage]);
+  useEffect(() => { onReplyCreatedRef.current = onReplyCreated; }, [onReplyCreated]);
   useEffect(() => { memberIdRef.current = currentTeamMemberId; }, [currentTeamMemberId]);
 
   useEffect(() => {
@@ -65,9 +75,27 @@ export function useChatSse({ currentTeamMemberId, onNewMessage }: UseChatSseOpti
         }
       };
 
+      // chat:message — from agent-push events (when backend publishes via _push_to_agent)
       source.addEventListener('chat:message', (e: MessageEvent) => {
         try {
-          onNewMessageRef.current?.(JSON.parse(e.data) as ChatMessage);
+          const payload = JSON.parse(e.data as string) as SseChatPayload;
+          const msg: ChatMessage = {
+            id: payload.reply_id,
+            memo_id: payload.thread_id,
+            created_by: payload.created_by,
+            content: payload.content,
+            attachments: (payload.attachments ?? []) as ChatMessage['attachments'],
+            created_at: payload.created_at,
+          };
+          onNewMessageRef.current?.(msg);
+        } catch { /* ignore parse errors */ }
+      });
+
+      // reply_created — from memos.py publish_event; use as refetch trigger
+      source.addEventListener('reply_created', (e: MessageEvent) => {
+        try {
+          const payload = JSON.parse(e.data as string) as { id?: string; memo_id?: string };
+          if (payload.memo_id) onReplyCreatedRef.current?.(payload.memo_id);
         } catch { /* ignore parse errors */ }
       });
     }
