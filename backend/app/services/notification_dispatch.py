@@ -94,7 +94,7 @@ async def dispatch_notification(
                     db.add(event)
                     inserted = True
             elif member_row.user_id:
-                # human: user_id 있는 경우만 Notification INSERT
+                # human: Notification INSERT (Inbox 호환) + Event INSERT (bell 패널용)
                 notification = Notification(
                     org_id=org_id,
                     user_id=member_row.user_id,
@@ -106,6 +106,20 @@ async def dispatch_notification(
                     reference_id=reference_id,
                 )
                 db.add(notification)
+                if member_row.project_id:
+                    event = Event(
+                        project_id=member_row.project_id,
+                        org_id=org_id,
+                        event_type="dispatched",
+                        source_entity_type=reference_type,
+                        source_entity_id=reference_id,
+                        sender_id=None,
+                        recipient_id=member_row.id,
+                        recipient_type="human",
+                        payload={"title": title, "body": body, "event_type": event_type},
+                        status="delivered",
+                    )
+                    db.add(event)
                 inserted = True
 
         if inserted:
