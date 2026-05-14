@@ -5,8 +5,10 @@ import { useEffect, useRef, useState } from 'react';
 // Mirrors backend _to_chat_message: { id, thread_id, sender: { id, name, type }, ... }
 export interface ChatMessage {
   id: string;
-  memo_id: string;       // backend: thread_id
-  created_by: string;    // backend: sender.id
+  memo_id: string;        // backend: thread_id
+  created_by: string;     // backend: sender.id
+  sender_name: string;    // backend: sender.name
+  sender_type: string;    // backend: sender.type ('human' | 'agent')
   content: string;
   review_type?: string;
   attachments: Array<{ url?: string; name?: string; content_type?: string; filename?: string }>;
@@ -15,11 +17,13 @@ export interface ChatMessage {
 
 // Normalize backend _to_chat_message format → ChatMessage
 export function normalizeToMessage(raw: Record<string, unknown>): ChatMessage {
-  const sender = raw.sender as { id?: string } | undefined;
+  const sender = raw.sender as { id?: string; name?: string; type?: string } | undefined;
   return {
     id: (raw.id ?? '') as string,
     memo_id: (raw.thread_id ?? raw.memo_id ?? '') as string,
     created_by: (raw.created_by ?? sender?.id ?? '') as string,
+    sender_name: (sender?.name ?? '') as string,
+    sender_type: (sender?.type ?? 'human') as string,
     content: (raw.content ?? '') as string,
     attachments: (raw.attachments ?? []) as ChatMessage['attachments'],
     created_at: (raw.created_at ?? '') as string,
