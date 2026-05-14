@@ -386,7 +386,8 @@ export function NotificationBell() {
     // 낙관적 업데이트
     setNotifications((prev) => prev ? prev.map((n) => ({ ...n, read_at: n.read_at ?? readAt })) : prev);
     setUnreadCount(0);
-    const res = await fetch('/api/event-notifications/read-all', { method: 'PATCH' });
+    const readAllParams = projectId ? `?project_id=${projectId}` : '';
+    const res = await fetch(`/api/event-notifications/read-all${readAllParams}`, { method: 'PATCH' });
     // 서버 실패 시 unread count 재폴링으로 보정
     if (!res.ok) {
       void fetchUnreadCount(projectId ?? undefined).then(setUnreadCount);
