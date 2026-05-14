@@ -94,33 +94,42 @@ async def dispatch_notification(
                     db.add(event)
                     inserted = True
             elif member_row.user_id:
-                # human: Notification INSERT (Inbox 호환) + Event INSERT (bell 패널용)
-                notification = Notification(
-                    org_id=org_id,
-                    user_id=member_row.user_id,
-                    type=event_type,
-                    title=title,
-                    body=body,
-                    is_read=False,
-                    reference_type=reference_type,
-                    reference_id=reference_id,
-                )
-                db.add(notification)
+                # human: Notification + Event 각각 독립 savepoint — 하나 실패해도 다른 쪽 롤백 방지
+                try:
+                    async with db.begin_nested():
+                        notification = Notification(
+                            org_id=org_id,
+                            user_id=member_row.user_id,
+                            type=event_type,
+                            title=title,
+                            body=body,
+                            is_read=False,
+                            reference_type=reference_type,
+                            reference_id=reference_id,
+                        )
+                        db.add(notification)
+                    inserted = True
+                except Exception:
+                    logger.warning("Notification INSERT failed member_id=%s event_type=%s", member_row.id, event_type)
                 if member_row.project_id:
-                    event = Event(
-                        project_id=member_row.project_id,
-                        org_id=org_id,
-                        event_type="dispatched",
-                        source_entity_type=reference_type,
-                        source_entity_id=reference_id,
-                        sender_id=None,
-                        recipient_id=member_row.id,
-                        recipient_type="human",
-                        payload={"title": title, "body": body, "event_type": event_type},
-                        status="delivered",
-                    )
-                    db.add(event)
-                inserted = True
+                    try:
+                        async with db.begin_nested():
+                            event = Event(
+                                project_id=member_row.project_id,
+                                org_id=org_id,
+                                event_type="dispatched",
+                                source_entity_type=reference_type,
+                                source_entity_id=reference_id,
+                                sender_id=None,
+                                recipient_id=member_row.id,
+                                recipient_type="human",
+                                payload={"title": title, "body": body, "event_type": event_type},
+                                status="delivered",
+                            )
+                            db.add(event)
+                        inserted = True
+                    except Exception:
+                        logger.warning("Event INSERT failed member_id=%s event_type=%s", member_row.id, event_type)
 
         if inserted:
             await db.flush()
