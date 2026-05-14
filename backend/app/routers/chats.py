@@ -1,4 +1,5 @@
-"""E-EVENTBUS P4 S15/S17: Chat 백엔드 — 실시간 메시지 이벤트 + E2E 연결."""
+"""E-EVENTBUS P4 S15/S17/S30: Chat 백엔드 — 실시간 메시지 이벤트 + E2E 연결."""
+import logging
 import uuid
 from datetime import datetime
 from typing import Annotated
@@ -15,6 +16,8 @@ from app.models.memo import Memo, MemoReply
 from app.models.team import TeamMember
 from app.repositories.memo import MemoReplyRepository
 from app.routers.events import _push_to_agent, publish_event
+
+logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/api/v2/chats", tags=["chats"])
 
@@ -71,7 +74,11 @@ async def _persist_and_push_chat_events(
     에이전트: _push_to_agent (agent SSE stream)
     사람: publish_event → /api/v2/events/memos SSE stream (Chat UI 실시간 수신)
     """
-    if not participants or not memo.project_id:
+    if not memo.project_id:
+        logger.warning("chat event skipped: memo.project_id is None memo_id=%s", reply.memo_id)
+        return
+    if not participants:
+        logger.warning("chat event skipped: participants empty memo_id=%s sender_id=%s", reply.memo_id, sender.id)
         return
 
     chat_msg = _to_chat_message(reply, sender)
@@ -202,7 +209,7 @@ async def send_chat_message(
         async with db.begin_nested():
             await _persist_and_push_chat_events(db, memo, reply, org_id, sender, participants)
     except Exception:
-        pass  # Event INSERT 실패 시 savepoint rollback — reply commit은 유지
+        logger.exception("chat event insert failed thread_id=%s reply_id=%s", thread_id, reply.id)
 
     await db.commit()
     return {"data": _to_chat_message(reply, sender)}
@@ -260,7 +267,7 @@ async def send_chat_message_with_file(
         async with db.begin_nested():
             await _persist_and_push_chat_events(db, memo, reply, org_id, sender, participants)
     except Exception:
-        pass  # Event INSERT 실패 시 savepoint rollback — reply commit은 유지
+        logger.exception("chat event insert failed (upload) thread_id=%s reply_id=%s", thread_id, reply.id)
 
     await db.commit()
     return {"data": _to_chat_message(reply, sender)}
