@@ -199,9 +199,10 @@ async def send_chat_message(
     participants.discard(sender.id)
 
     try:
-        await _persist_and_push_chat_events(db, memo, reply, org_id, sender, participants)
+        async with db.begin_nested():
+            await _persist_and_push_chat_events(db, memo, reply, org_id, sender, participants)
     except Exception:
-        pass
+        pass  # Event INSERT 실패 시 savepoint rollback — reply commit은 유지
 
     await db.commit()
     return {"data": _to_chat_message(reply, sender)}
@@ -256,9 +257,10 @@ async def send_chat_message_with_file(
     participants.discard(sender.id)
 
     try:
-        await _persist_and_push_chat_events(db, memo, reply, org_id, sender, participants)
+        async with db.begin_nested():
+            await _persist_and_push_chat_events(db, memo, reply, org_id, sender, participants)
     except Exception:
-        pass
+        pass  # Event INSERT 실패 시 savepoint rollback — reply commit은 유지
 
     await db.commit()
     return {"data": _to_chat_message(reply, sender)}
