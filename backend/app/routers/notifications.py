@@ -22,18 +22,21 @@ router = APIRouter(prefix="/api/v2", tags=["notifications"])
 async def _resolve_notification_user_id(auth: AuthContext, db: AsyncSession) -> uuid.UUID:
     """auth context → Notification.user_id (supabase user_id) 파생.
 
-    API key 경로: auth.user_id = team_member.id → TeamMember.user_id (supabase) 조회
+    API key 경로: auth.user_id = team_member.id → TeamMember.user_id (supabase) 조회.
+                  agent는 supabase user 없음(user_id=NULL) → team_member.id fallback
+                  (알림 dispatch 시 user_id IS NOT NULL 조건으로 agent 제외됨 → 빈 배열 200 반환)
     JWT 경로: auth.user_id = supabase user_id → 직접 사용
     """
     is_api_key = bool(auth.claims.get("app_metadata", {}).get("api_key_id"))
     if is_api_key:
         result = await db.execute(
-            select(TeamMember.user_id).where(TeamMember.id == uuid.UUID(auth.user_id))
+            select(TeamMember.id, TeamMember.user_id).where(TeamMember.id == uuid.UUID(auth.user_id))
         )
-        supabase_user_id = result.scalar_one_or_none()
-        if supabase_user_id is None:
-            raise HTTPException(status_code=400, detail="Team member supabase user_id not found")
-        return supabase_user_id
+        row = result.one_or_none()
+        if row is None:
+            raise HTTPException(status_code=400, detail="Team member not found")
+        member_id, supabase_user_id = row
+        return supabase_user_id or member_id  # agent: user_id=NULL → member.id fallback
     return uuid.UUID(auth.user_id)
 
 
