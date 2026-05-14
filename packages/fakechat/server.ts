@@ -190,37 +190,47 @@ function deliver(
   })
 }
 
-// S40: PID 파일 기록 + graceful shutdown
-writeFileSync(PID_FILE, String(process.pid))
-
+// S40: graceful shutdown — 자신의 PID 파일만 삭제 (신규 프로세스 파일 보호)
 function _cleanup(): void {
-  try { unlinkSync(PID_FILE) } catch {}
+  try {
+    const recorded = parseInt(readFileSync(PID_FILE, 'utf-8').trim(), 10)
+    if (recorded === process.pid) unlinkSync(PID_FILE)
+  } catch {}
 }
 
 process.on('SIGTERM', () => { _cleanup(); process.exit(0) })
 process.on('SIGINT', () => { _cleanup(); process.exit(0) })
 process.on('exit', _cleanup)
 
-// S40: EADDRINUSE → 기존 프로세스 SIGTERM → 3초 대기 → 재시도
+// S40: EADDRINUSE → 기존 PID 읽기(덮어쓰기 전) → SIGTERM → 3초 대기 → 재시도 → PID 기록
 function _startServer(): void {
+  // 기존 PID 파일을 먼저 읽어 보존 (덮어쓰기 전)
+  let existingPid: number | null = null
+  if (existsSync(PID_FILE)) {
+    try {
+      const raw = parseInt(readFileSync(PID_FILE, 'utf-8').trim(), 10)
+      if (!isNaN(raw) && raw !== process.pid) existingPid = raw
+    } catch {}
+  }
+
   try {
     _doServe()
+    // 서버 성공 후 PID 기록
+    writeFileSync(PID_FILE, String(process.pid))
   } catch (err: unknown) {
     if ((err as { code?: string }).code === 'EADDRINUSE') {
       process.stderr.write(`fakechat: port ${PORT} in use — killing existing process\n`)
-      if (existsSync(PID_FILE)) {
+      if (existingPid !== null) {
         try {
-          const existingPid = parseInt(readFileSync(PID_FILE, 'utf-8').trim(), 10)
-          if (!isNaN(existingPid) && existingPid !== process.pid) {
-            process.kill(existingPid, 'SIGTERM')
-            process.stderr.write(`fakechat: sent SIGTERM to pid ${existingPid}\n`)
-          }
+          process.kill(existingPid, 'SIGTERM')
+          process.stderr.write(`fakechat: sent SIGTERM to pid ${existingPid}\n`)
         } catch {}
       }
       // 3초 대기 후 재시도
       setTimeout(() => {
         try {
           _doServe()
+          writeFileSync(PID_FILE, String(process.pid))
           process.stderr.write(`fakechat: retry succeeded on port ${PORT}\n`)
         } catch (retryErr) {
           process.stderr.write(`fakechat: retry failed: ${retryErr}\n`)
