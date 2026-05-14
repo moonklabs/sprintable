@@ -17,7 +17,7 @@ from typing import Any
 from fastapi import APIRouter, Depends, HTTPException, Query, Request
 from fastapi.responses import StreamingResponse
 from pydantic import BaseModel, ConfigDict
-from sqlalchemy import delete, select, update
+from sqlalchemy import and_, delete, or_, select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.dependencies.auth import AuthContext, get_current_user, get_verified_org_id
@@ -310,14 +310,24 @@ async def create_event(
 async def get_pending_events(
     recipient_id: uuid.UUID = Query(...),
     event_type: str | None = Query(default=None),
+    include_recent_delivered_minutes: int = Query(default=30, le=120),
     db: AsyncSession = Depends(get_db),
     org_id: uuid.UUID = Depends(get_verified_org_id),
 ) -> list[EventResponse]:
-    """GET /api/v2/events/pending?recipient_id={id}&event_type={type} — 수신자별 pending 이벤트 목록."""
+    """GET /api/v2/events/pending — 수신자별 pending + 최근 N분 delivered 이벤트 목록.
+
+    include_recent_delivered_minutes: SSE로 delivered 마킹된 이벤트도 최근 N분 이내라면 반환.
+    → SSE 전달과 poll_events 폴링 간 충돌(갭 2) 해소.
+    """
+    cutoff = datetime.now(timezone.utc) - timedelta(minutes=include_recent_delivered_minutes)
+    status_filter = or_(
+        Event.status == "pending",
+        and_(Event.status == "delivered", Event.delivered_at >= cutoff),
+    )
     filters = [
         Event.org_id == org_id,
         Event.recipient_id == recipient_id,
-        Event.status == "pending",
+        status_filter,
     ]
     if event_type:
         filters.append(Event.event_type == event_type)

@@ -112,7 +112,18 @@ async function main() {
 
     // FastAPI SSE 자동 연결 — MEMBER_ID 있을 때만
     if (MEMBER_ID) {
-      startSseBridge(PM_API_URL, AGENT_API_KEY, MEMBER_ID, SSE_BACKEND_URL || undefined);
+      startSseBridge(PM_API_URL, AGENT_API_KEY, MEMBER_ID, SSE_BACKEND_URL || undefined,
+        // 갭 1 해소: SSE 이벤트 수신 → MCP notifications/message로 Claude Code에 전달
+        (eventType, data) => {
+          server.server.notification({
+            method: 'notifications/message',
+            params: {
+              level: 'info',
+              data: JSON.stringify({ eventType, data }),
+            },
+          }).catch(() => { /* 클라이언트 미지원 시 무시 */ });
+        },
+      );
     }
   }
 }
