@@ -23,11 +23,19 @@ async function relayToFakechat(eventType: string, data: unknown): Promise<void> 
   const id = `sse-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
 
   let text: string;
+  let threadId = '';
   if (typeof data === 'object' && data !== null) {
     const d = data as Record<string, unknown>;
-    const sender = d.sender_name ?? d.sender ?? d.member_name ?? '';
-    const content = d.content ?? d.message ?? d.text ?? JSON.stringify(data);
-    text = sender ? `[${eventType}] ${sender}: ${content}` : `[${eventType}] ${content}`;
+    // payload가 중첩된 경우(chat:message 이벤트) payload에서 꺼냄
+    const payload = (d.payload ?? d) as Record<string, unknown>;
+    const senderRaw = payload.sender ?? d.sender_name ?? d.member_name ?? '';
+    const senderName =
+      typeof senderRaw === 'object' && senderRaw !== null
+        ? String((senderRaw as Record<string, unknown>).name ?? '')
+        : String(senderRaw);
+    const content = payload.content ?? d.content ?? d.message ?? d.text ?? JSON.stringify(data);
+    text = senderName ? `[${eventType}] ${senderName}: ${content}` : `[${eventType}] ${content}`;
+    threadId = String(payload.thread_id ?? d.thread_id ?? '');
   } else {
     text = `[${eventType}] ${String(data)}`;
   }
@@ -35,6 +43,17 @@ async function relayToFakechat(eventType: string, data: unknown): Promise<void> 
   const form = new FormData();
   form.set('id', id);
   form.set('text', text);
+
+  // 역방향 relay를 위해 thread_id + callback 정보 포함
+  if (threadId) {
+    const pmApiUrl = (process.env.PM_API_URL ?? '').replace(/\/$/, '');
+    const agentApiKey = process.env.AGENT_API_KEY ?? '';
+    form.set('thread_id', threadId);
+    if (pmApiUrl && agentApiKey) {
+      form.set('reply_callback_url', `${pmApiUrl}/api/v2/chats/${threadId}/messages`);
+      form.set('reply_callback_api_key', agentApiKey);
+    }
+  }
 
   const res = await fetch(`http://127.0.0.1:${port}/upload`, {
     method: 'POST',
