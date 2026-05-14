@@ -50,6 +50,11 @@ _agent_connections: dict[str, set[asyncio.Queue[dict]]] = defaultdict(set)
 
 _SSE_BATCH_SIZE = 10  # 배치 전달 청크 크기
 
+# ─── S20: SSE 연결 수 전역 제한 ───────────────────────────────────────────────
+import os as _os
+_MAX_SSE_CONNECTIONS: int = int(_os.getenv("MAX_SSE_CONNECTIONS", "100"))
+_sse_connection_count: int = 0
+
 
 def _push_to_agent(member_id: str, payload: dict) -> bool:
     """연결 중인 에이전트 모든 큐에 SSE 페이로드 전송. True=1개 이상 전달, False=미연결."""
@@ -185,6 +190,12 @@ async def agent_event_stream(
         if result.scalar_one_or_none() is None:
             raise HTTPException(status_code=404, detail="Member not found")
 
+    # S20: 전역 연결 수 제한 — 초과 시 503
+    global _sse_connection_count
+    if _sse_connection_count >= _MAX_SSE_CONNECTIONS:
+        raise HTTPException(status_code=503, detail="SSE connection limit reached")
+    _sse_connection_count += 1
+
     member_id_str = str(member_id)
     queue: asyncio.Queue[dict] = asyncio.Queue(maxsize=200)
     _agent_connections[member_id_str].add(queue)
@@ -242,10 +253,15 @@ async def agent_event_stream(
                         except Exception:
                             pass
                 except asyncio.TimeoutError:
+                    # S20: heartbeat 후 즉시 disconnect 체크 — dead connection 조기 정리
                     yield "event: heartbeat\ndata: {}\n\n"
+                    if await request.is_disconnected():
+                        break
         except (asyncio.CancelledError, GeneratorExit):
             pass
         finally:
+            global _sse_connection_count
+            _sse_connection_count -= 1
             _agent_connections[member_id_str].discard(queue)
             if not _agent_connections[member_id_str]:
                 _agent_connections.pop(member_id_str, None)
