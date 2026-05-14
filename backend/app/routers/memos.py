@@ -131,22 +131,20 @@ async def _reply_side_effects_bg(
 
             # chat events persist + SSE push
             try:
-                chat_participants: set[uuid.UUID] = set()
-                if memo.assigned_to:
-                    chat_participants.add(memo.assigned_to)
-                if memo.created_by:
-                    chat_participants.add(memo.created_by)
-                chat_participants.discard(sender_id)
-                chat_payload = {
-                    "event_type": "chat:message",
-                    "thread_id": str(memo_id),
-                    "reply_id": str(reply_id),
-                    "content": reply.content,
-                    "created_by": str(reply.created_by),
-                    "attachments": reply.attachments,
-                    "created_at": reply.created_at.isoformat(),
-                }
-                await _persist_and_push_chat_events(db, memo, reply, org_id, sender_id, chat_participants, chat_payload)
+                from app.models.team import TeamMember as TeamMemberModel
+                sender_result = await db.execute(
+                    select(TeamMemberModel).where(TeamMemberModel.id == sender_id).limit(1)
+                )
+                sender_member = sender_result.scalar_one_or_none()
+                if sender_member:
+                    chat_participants: set[uuid.UUID] = set()
+                    if memo.assigned_to:
+                        chat_participants.add(memo.assigned_to)
+                    if memo.created_by:
+                        chat_participants.add(memo.created_by)
+                    chat_participants.discard(sender_id)
+                    async with db.begin_nested():
+                        await _persist_and_push_chat_events(db, memo, reply, org_id, sender_member, chat_participants)
             except Exception:
                 logger.warning("reply bg: chat events failed memo_id=%s", memo_id, exc_info=True)
 
