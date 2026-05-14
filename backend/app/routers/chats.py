@@ -12,7 +12,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.dependencies.auth import AuthContext, get_current_user, get_verified_org_id
 from app.dependencies.database import get_db
 from app.models.event import Event
-from app.models.memo import Memo, MemoReply
+from app.models.memo import Memo, MemoAssignee, MemoReply
 from app.models.team import TeamMember
 from app.repositories.memo import MemoReplyRepository
 from app.routers.events import _push_to_agent, publish_event
@@ -80,10 +80,19 @@ async def _build_participants(
 ) -> set[uuid.UUID]:
     """chat:message 이벤트 수신자 세트 구성.
 
-    assigned_to + created_by + 기존 thread reply senders 포함, 발신자 제거.
-    assigned_to=null + sender==created_by 케이스에서 participants가 비는 문제 해소.
+    memo_assignees(다중) + assigned_to(레거시 단일) + created_by + 기존 thread reply senders 포함, 발신자 제거.
     """
     participants: set[uuid.UUID] = set()
+
+    # 다중 수신자: memo_assignees 테이블
+    assignee_result = await db.execute(
+        select(MemoAssignee.member_id).where(MemoAssignee.memo_id == thread_id)
+    )
+    for row in assignee_result.all():
+        if row[0]:
+            participants.add(row[0])
+
+    # 레거시 단일 수신자 fallback
     if memo.assigned_to:
         participants.add(memo.assigned_to)
     if memo.created_by:

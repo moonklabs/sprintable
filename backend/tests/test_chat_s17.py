@@ -82,6 +82,11 @@ async def _make_client(auth_ctx=None):
     mock_session.flush = AsyncMock()
     mock_session.commit = AsyncMock()
 
+    nested_cm = AsyncMock()
+    nested_cm.__aenter__ = AsyncMock(return_value=None)
+    nested_cm.__aexit__ = AsyncMock(return_value=False)
+    mock_session.begin_nested = MagicMock(return_value=nested_cm)
+
     async def override_db():
         yield mock_session
 
@@ -110,10 +115,14 @@ async def test_send_chat_message_jwt_auth():
         mock_reply = _mock_reply("안녕")
         mock_member = _mock_member()
 
-        # session.execute: Memo 조회 → TeamMember(user_id) 조회
+        # session.execute: Memo → sender(scalars().first()) → MemoAssignee → MemoReply(prior)
+        sender_result = MagicMock()
+        sender_result.scalars.return_value.first.return_value = mock_member
         exec_results = [
-            MagicMock(scalar_one_or_none=MagicMock(return_value=mock_memo)),  # Memo
-            MagicMock(scalar_one_or_none=MagicMock(return_value=mock_member)),  # sender (JWT→user_id)
+            MagicMock(scalar_one_or_none=MagicMock(return_value=mock_memo)),   # Memo
+            sender_result,                                                       # sender (JWT→scalars().first())
+            MagicMock(all=MagicMock(return_value=[])),                          # MemoAssignee (없음)
+            MagicMock(all=MagicMock(return_value=[])),                          # MemoReply prior senders
         ]
         session.execute = AsyncMock(side_effect=exec_results)
 
@@ -148,9 +157,13 @@ async def test_send_chat_message_api_key_auth():
         mock_reply = _mock_reply()
         mock_member = _mock_member()
 
+        sender_result = MagicMock()
+        sender_result.scalars.return_value.first.return_value = mock_member
         exec_results = [
             MagicMock(scalar_one_or_none=MagicMock(return_value=mock_memo)),   # Memo
-            MagicMock(scalar_one_or_none=MagicMock(return_value=mock_member)), # sender (api_key→member.id)
+            sender_result,                                                       # sender (api_key→scalars().first())
+            MagicMock(all=MagicMock(return_value=[])),                          # MemoAssignee
+            MagicMock(all=MagicMock(return_value=[])),                          # MemoReply prior
         ]
         session.execute = AsyncMock(side_effect=exec_results)
 
@@ -212,9 +225,13 @@ async def test_send_chat_message_upload_no_created_by_field():
         mock_reply = _mock_reply("첨부 메시지")
         mock_member = _mock_member()
 
+        sender_result = MagicMock()
+        sender_result.scalars.return_value.first.return_value = mock_member
         exec_results = [
             MagicMock(scalar_one_or_none=MagicMock(return_value=mock_memo)),
-            MagicMock(scalar_one_or_none=MagicMock(return_value=mock_member)),
+            sender_result,                                  # sender (scalars().first())
+            MagicMock(all=MagicMock(return_value=[])),      # MemoAssignee
+            MagicMock(all=MagicMock(return_value=[])),      # MemoReply prior
         ]
         session.execute = AsyncMock(side_effect=exec_results)
 
@@ -265,3 +282,65 @@ async def test_list_chat_messages_before_cursor():
         assert body["meta"]["next_cursor"] is not None
     finally:
         app.dependency_overrides.clear()
+
+
+# ─── S34: multi-recipient — memo_assignees 기반 전체 수신자 broadcast ─────────
+
+AGENT_IDS = [uuid.uuid4() for _ in range(4)]  # 은와추쿠, 까심, 담롱, 미르코
+
+
+@pytest.mark.anyio
+async def test_build_participants_includes_all_assignees():
+    """S34: _build_participants가 memo_assignees 테이블의 전체 수신자를 포함하는지 검증."""
+    from app.routers.chats import _build_participants
+    from app.models.memo import Memo
+
+    sender_id = uuid.uuid4()
+    creator_id = uuid.uuid4()
+
+    mock_memo = MagicMock()
+    mock_memo.assigned_to = None   # 레거시 단일 필드 없음
+    mock_memo.created_by = creator_id
+
+    mock_db = AsyncMock()
+
+    # MemoAssignee 쿼리 → 4명 반환
+    assignee_rows = [(aid,) for aid in AGENT_IDS]
+    # MemoReply prior senders 쿼리 → 없음
+    mock_db.execute = AsyncMock(side_effect=[
+        MagicMock(all=MagicMock(return_value=assignee_rows)),  # MemoAssignee
+        MagicMock(all=MagicMock(return_value=[])),             # MemoReply prior
+    ])
+
+    thread_id = uuid.uuid4()
+    participants = await _build_participants(mock_db, mock_memo, thread_id, sender_id)
+
+    # 4명 에이전트 + creator 포함, sender 제외
+    for aid in AGENT_IDS:
+        assert aid in participants, f"assignee {aid} not in participants"
+    assert creator_id in participants
+    assert sender_id not in participants
+
+
+@pytest.mark.anyio
+async def test_build_participants_sender_excluded():
+    """S34: 발신자 본인은 participants에서 제외되는지 검증."""
+    from app.routers.chats import _build_participants
+
+    sender_id = AGENT_IDS[0]
+
+    mock_memo = MagicMock()
+    mock_memo.assigned_to = None
+    mock_memo.created_by = None
+
+    mock_db = AsyncMock()
+    # MemoAssignee: sender 포함 5명 반환
+    assignee_rows = [(aid,) for aid in AGENT_IDS]
+    mock_db.execute = AsyncMock(side_effect=[
+        MagicMock(all=MagicMock(return_value=assignee_rows)),
+        MagicMock(all=MagicMock(return_value=[])),
+    ])
+
+    participants = await _build_participants(mock_db, mock_memo, uuid.uuid4(), sender_id)
+    assert sender_id not in participants
+    assert len(participants) == len(AGENT_IDS) - 1
