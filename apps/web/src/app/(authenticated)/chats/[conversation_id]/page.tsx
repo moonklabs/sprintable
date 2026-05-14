@@ -39,6 +39,7 @@ export default function ConversationPage() {
           threadId={conversation_id}
           currentTeamMemberId={currentTeamMemberId}
           projectId={projectId}
+          apiPrefix="/api/conversations"
         />
       </div>
     </>

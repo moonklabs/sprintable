@@ -14,6 +14,7 @@ interface ChatViewProps {
   currentTeamMemberId: string;
   threadTitle?: string | null;
   projectId?: string;
+  apiPrefix?: string;
 }
 
 interface MessageGroup {
@@ -32,7 +33,7 @@ function groupByDate(messages: ChatMessage[]): MessageGroup[] {
   return Object.entries(groups).map(([date, msgs]) => ({ date, messages: msgs }));
 }
 
-export function ChatView({ threadId, currentTeamMemberId, threadTitle, projectId }: ChatViewProps) {
+export function ChatView({ threadId, currentTeamMemberId, threadTitle, projectId, apiPrefix = '/api/chats' }: ChatViewProps) {
   const router = useRouter();
   const [messages, setMessages] = useState<ChatMessage[]>([]);
   const [loading, setLoading] = useState(true);
@@ -52,7 +53,7 @@ export function ChatView({ threadId, currentTeamMemberId, threadTitle, projectId
     try {
       const params = new URLSearchParams({ limit: '50' });
       if (before) params.set('before', before);
-      const res = await fetch(`/api/chats/${threadId}/messages?${params.toString()}`);
+      const res = await fetch(`${apiPrefix}/${threadId}/messages?${params.toString()}`);
       if (!res.ok) return;
       // Backend: { data: _to_chat_message[], meta: { next_cursor, has_more } }
       const raw = await res.json() as Record<string, unknown>;
@@ -102,12 +103,24 @@ export function ChatView({ threadId, currentTeamMemberId, threadTitle, projectId
     fetchMessages();
   }, [threadId, fetchMessages]);
 
-  useChatSse({ currentTeamMemberId, onNewMessage: handleNewMessage, onReplyCreated: handleReplyCreated });
+  // HIGH-2: conversation:message SSE — payload uses conversation_id (normalizeToMessage maps it to memo_id)
+  const handleConversationMessage = useCallback((payload: Record<string, unknown>) => {
+    const conversationId = (payload.conversation_id ?? payload.id) as string | undefined;
+    if (conversationId !== threadId) return;
+    addMessage(normalizeToMessage(payload));
+  }, [threadId, addMessage]);
+
+  useChatSse({
+    currentTeamMemberId,
+    onNewMessage: handleNewMessage,
+    onReplyCreated: handleReplyCreated,
+    onConversationMessage: handleConversationMessage,
+  });
 
   const handleSend = useCallback(async (content: string, mentionedIds?: string[]) => {
     const body: Record<string, unknown> = { content };
     if (mentionedIds && mentionedIds.length > 0) body.mentioned_ids = mentionedIds;
-    const res = await fetch(`/api/chats/${threadId}/messages`, {
+    const res = await fetch(`${apiPrefix}/${threadId}/messages`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(body),

@@ -20,7 +20,8 @@ export function normalizeToMessage(raw: Record<string, unknown>): ChatMessage {
   const sender = raw.sender as { id?: string; name?: string; type?: string } | undefined;
   return {
     id: (raw.id ?? '') as string,
-    memo_id: (raw.thread_id ?? raw.memo_id ?? '') as string,
+    // conversation:message uses conversation_id; chat:message uses thread_id or memo_id
+    memo_id: (raw.thread_id ?? raw.memo_id ?? raw.conversation_id ?? '') as string,
     created_by: (raw.created_by ?? sender?.id ?? '') as string,
     sender_name: (sender?.name ?? '') as string,
     sender_type: (sender?.type ?? 'human') as string,
