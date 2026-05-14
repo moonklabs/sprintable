@@ -41,6 +41,7 @@ export function ChatView({ threadId, currentTeamMemberId, threadTitle }: ChatVie
   const [loadingMore, setLoadingMore] = useState(false);
   const bottomRef = useRef<HTMLDivElement>(null);
   const scrollRef = useRef<HTMLDivElement>(null);
+  const topSentinelRef = useRef<HTMLDivElement>(null);
   const isFirstLoad = useRef(true);
 
   const scrollToBottom = useCallback((smooth = false) => {
@@ -135,6 +136,25 @@ export function ChatView({ threadId, currentTeamMemberId, threadTitle }: ChatVie
     }
   }, [hasMore, cursor, loadingMore, fetchMessages]);
 
+  // Auto-load when scrolled to top (IntersectionObserver watches topSentinelRef inside scrollRef)
+  useEffect(() => {
+    const sentinel = topSentinelRef.current;
+    const container = scrollRef.current;
+    if (!sentinel || !container || loading) return;
+
+    const observer = new IntersectionObserver(
+      ([entry]) => {
+        if (entry?.isIntersecting && hasMore && !loadingMore) {
+          void handleLoadMore();
+        }
+      },
+      { root: container, threshold: 0 },
+    );
+
+    observer.observe(sentinel);
+    return () => observer.disconnect();
+  }, [loading, hasMore, loadingMore, handleLoadMore]);
+
   const groups = groupByDate(messages);
 
   return (
@@ -177,6 +197,8 @@ export function ChatView({ threadId, currentTeamMemberId, threadTitle }: ChatVie
           </div>
         ) : (
           <div className="flex flex-col gap-4">
+            {/* sentinel: IntersectionObserver triggers auto-load when scrolled to top */}
+            <div ref={topSentinelRef} className="h-px w-full" />
             {hasMore && (
               <div className="flex justify-center">
                 <button
