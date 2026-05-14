@@ -36,7 +36,8 @@ async def _resolve_sender(auth: AuthContext, org_id: uuid.UUID, db: AsyncSession
             TeamMember.user_id == uuid.UUID(auth.user_id),
             TeamMember.org_id == org_id,
         )
-    member = (await db.execute(stmt)).scalar_one_or_none()
+    # scalar_one_or_none → MultipleResultsFound (동일 org 내 복수 project에 team_member 중복 등록 케이스)
+    member = (await db.execute(stmt)).scalars().first()
     if member is None:
         raise HTTPException(status_code=400, detail="Sender team member not found")
     return member
