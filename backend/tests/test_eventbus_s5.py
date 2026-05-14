@@ -139,15 +139,15 @@ async def test_mark_read_sets_read_at(client, mock_session, member_id):
     event_id = uuid.uuid4()
     event = _make_event(id=event_id, recipient_id=member_id, read_at=None)
 
-    member_result = MagicMock()
-    member_result.scalar_one_or_none.return_value = member_id
     event_result = MagicMock()
     event_result.scalar_one_or_none.return_value = event
+    member_result = MagicMock()
+    member_result.scalar_one_or_none.return_value = member_id
 
     async def _refresh(obj):
         pass  # event already mutated
 
-    mock_session.execute.side_effect = [member_result, event_result]
+    mock_session.execute.side_effect = [event_result, member_result]
     mock_session.refresh.side_effect = _refresh
 
     resp = await client.patch(f"/api/v2/event-notifications/{event_id}/read")
@@ -163,15 +163,15 @@ async def test_mark_read_already_read_skips_commit(client, mock_session, member_
     now = datetime.now(timezone.utc)
     event = _make_event(id=event_id, recipient_id=member_id, read_at=now)
 
-    member_result = MagicMock()
-    member_result.scalar_one_or_none.return_value = member_id
     event_result = MagicMock()
     event_result.scalar_one_or_none.return_value = event
+    member_result = MagicMock()
+    member_result.scalar_one_or_none.return_value = member_id
 
     async def _refresh(obj):
         pass
 
-    mock_session.execute.side_effect = [member_result, event_result]
+    mock_session.execute.side_effect = [event_result, member_result]
     mock_session.refresh.side_effect = _refresh
 
     resp = await client.patch(f"/api/v2/event-notifications/{event_id}/read")
@@ -188,11 +188,11 @@ async def test_mark_read_other_user_returns_403(client, mock_session, member_id)
     other_member = uuid.uuid4()
     event = _make_event(id=event_id, recipient_id=other_member)  # 다른 사람 알림
 
-    member_result = MagicMock()
-    member_result.scalar_one_or_none.return_value = member_id
     event_result = MagicMock()
     event_result.scalar_one_or_none.return_value = event
-    mock_session.execute.side_effect = [member_result, event_result]
+    member_result = MagicMock()
+    member_result.scalar_one_or_none.return_value = member_id
+    mock_session.execute.side_effect = [event_result, member_result]
 
     resp = await client.patch(f"/api/v2/event-notifications/{event_id}/read")
     assert resp.status_code == 403
@@ -201,11 +201,9 @@ async def test_mark_read_other_user_returns_403(client, mock_session, member_id)
 @pytest.mark.anyio
 async def test_mark_read_not_found_returns_404(client, mock_session, member_id):
     """존재하지 않는 알림 PATCH → 404."""
-    member_result = MagicMock()
-    member_result.scalar_one_or_none.return_value = member_id
     event_result = MagicMock()
-    event_result.scalar_one_or_none.return_value = None
-    mock_session.execute.side_effect = [member_result, event_result]
+    event_result.scalar_one_or_none.return_value = None  # 이벤트 없음 → 즉시 404
+    mock_session.execute.side_effect = [event_result]
 
     resp = await client.patch(f"/api/v2/event-notifications/{uuid.uuid4()}/read")
     assert resp.status_code == 404

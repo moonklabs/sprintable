@@ -348,7 +348,7 @@ def test_auth_context_includes_org_id_from_jwt():
     import asyncio
     with patch.dict("os.environ", {"JWT_SECRET": "test-secret"}):
         from app.dependencies.auth import get_current_user
-        ctx = asyncio.run(get_current_user(credentials=creds, db=None))
+        ctx = asyncio.run(get_current_user(credentials=creds, x_agent_api_key=None, db=None))
 
     assert ctx.org_id == "org-abc"
     assert ctx.user_id == "user-1"

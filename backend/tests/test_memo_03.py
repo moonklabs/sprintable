@@ -113,14 +113,24 @@ async def test_workflow_origin_memo_skips_process_event():
 @pytest.mark.anyio
 async def test_normal_memo_calls_process_event():
     """origin 없는 일반 메모는 process_event 정상 호출됨."""
+    from contextlib import asynccontextmanager
+
     client, session, app = await _client()
     try:
         mock_memo = _mock_memo()
 
+        @asynccontextmanager
+        async def _bg_session_factory():
+            bg_session = AsyncMock()
+            bg_session.execute = AsyncMock(return_value=MagicMock())
+            bg_session.commit = AsyncMock()
+            yield bg_session
+
         with patch("app.repositories.memo.MemoRepository.create", new_callable=AsyncMock) as mock_create, \
              patch("app.repositories.memo.MemoRepository.create_entity_links", new_callable=AsyncMock), \
              patch("app.routers.memos.publish_event"), \
-             patch("app.services.workflow_pipeline.process_event", new_callable=AsyncMock) as mock_process:
+             patch("app.services.workflow_pipeline.process_event", new_callable=AsyncMock) as mock_process, \
+             patch("app.core.database.async_session_factory", _bg_session_factory):
             mock_create.return_value = mock_memo
             session.execute = AsyncMock(return_value=MagicMock())
 

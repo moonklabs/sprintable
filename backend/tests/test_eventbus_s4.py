@@ -134,21 +134,23 @@ async def test_dispatch_memo_replied_event(mock_session, org_id, project_id):
 # ─── AC4: 기존 웹훅 코드 여전히 존재하는지 ────────────────────────────────────
 
 def test_webhook_dispatch_still_exists_in_create_memo():
-    """create_memo에 기존 웹훅 디스패치 코드가 제거되지 않았는지."""
+    """create_memo/side_effects_bg에 기존 웹훅 + eventbus 연동이 있는지."""
     import inspect
     from app.routers import memos as memos_module
-    source = inspect.getsource(memos_module.create_memo)
-    assert "_fire_webhook" in source, "create_memo의 기존 웹훅 코드가 제거됨"
-    assert "dispatch_memo_event" in source, "create_memo에 eventbus 연동 없음"
+    create_src = inspect.getsource(memos_module.create_memo)
+    bg_src = inspect.getsource(memos_module._memo_side_effects_bg)
+    assert "_fire_webhook" in create_src or "_fire_webhook" in bg_src, "create_memo 웹훅 코드 제거됨"
+    assert "dispatch_memo_event" in bg_src, "_memo_side_effects_bg에 eventbus 연동 없음"
 
 
 def test_webhook_dispatch_still_exists_in_add_reply():
     """add_reply에 기존 웹훅 디스패치 코드가 제거되지 않았는지."""
     import inspect
     from app.routers import memos as memos_module
-    source = inspect.getsource(memos_module.add_reply)
-    assert "_fire_webhook" in source, "add_reply의 기존 웹훅 코드가 제거됨"
-    assert "dispatch_memo_event" in source, "add_reply에 eventbus 연동 없음"
+    src = inspect.getsource(memos_module.add_reply)
+    bg_src = inspect.getsource(memos_module._memo_side_effects_bg)
+    assert "_fire_webhook" in src, "add_reply의 기존 웹훅 코드가 제거됨"
+    assert "dispatch_memo_event" in bg_src, "eventbus 연동 없음"
 
 
 # ─── AC6: prod 환경 분기 — EVENTBUS_ENABLED 플래그 확인 ─────────────────────

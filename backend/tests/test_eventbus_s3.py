@@ -242,15 +242,22 @@ async def test_stream_batch_delivers_over_100_events(mock_session, org_id):
     app.dependency_overrides[get_current_user] = _auth
     app.dependency_overrides[get_verified_org_id] = _org
 
+    from contextlib import asynccontextmanager
+
+    @asynccontextmanager
+    async def _session_factory():
+        yield mock_session
+
     received_count = [0]
     try:
-        async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as c:
-            async with c.stream("GET", f"/api/v2/events/stream?member_id={member_id}") as resp:
-                async for line in resp.aiter_lines():
-                    if line.startswith("data:"):
-                        received_count[0] += 1
-                    if received_count[0] >= 110:
-                        break
+        with patch("app.core.database.async_session_factory", _session_factory):
+            async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as c:
+                async with c.stream("GET", f"/api/v2/events/stream?member_id={member_id}") as resp:
+                    async for line in resp.aiter_lines():
+                        if line.startswith("data:"):
+                            received_count[0] += 1
+                        if received_count[0] >= 110:
+                            break
     finally:
         app.dependency_overrides.clear()
         _agent_connections.pop(str(member_id), None)

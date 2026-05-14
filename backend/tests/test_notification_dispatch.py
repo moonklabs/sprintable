@@ -25,6 +25,11 @@ def mock_session():
     session.add = MagicMock()
     session.flush = AsyncMock()
     session.execute = AsyncMock()
+    session.refresh = AsyncMock()
+    nested_cm = AsyncMock()
+    nested_cm.__aenter__ = AsyncMock(return_value=None)
+    nested_cm.__aexit__ = AsyncMock(return_value=False)
+    session.begin_nested = MagicMock(return_value=nested_cm)
     return session
 
 
@@ -49,6 +54,8 @@ def _members_result(rows: list[tuple]) -> MagicMock:
         row = MagicMock()
         row.id = mid
         row.user_id = uid
+        row.type = "human"      # human → Notification INSERT
+        row.project_id = None   # None → Event INSERT 스킵 (1번 add)
         rows_mock.append(row)
     result.all.return_value = rows_mock
     return result

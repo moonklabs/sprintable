@@ -110,6 +110,7 @@ async def test_agent_stream_registers_connection(mock_session, org_id):
     from app.dependencies.auth import get_current_user, get_verified_org_id
     from app.dependencies.database import get_db
     from app.main import app
+    from contextlib import asynccontextmanager
 
     async def _db():
         yield mock_session
@@ -123,17 +124,22 @@ async def test_agent_stream_registers_connection(mock_session, org_id):
     async def _org():
         return org_id
 
+    @asynccontextmanager
+    async def _session_factory():
+        yield mock_session
+
     app.dependency_overrides[get_db] = _db
     app.dependency_overrides[get_current_user] = _auth
     app.dependency_overrides[get_verified_org_id] = _org
 
     try:
-        async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as c:
-            # SSE 스트림 연결 시작 후 즉시 해제
-            async with c.stream("GET", f"/api/v2/events/stream?member_id={member_id}") as resp:
-                assert resp.status_code == 200
-                # 연결 중 등록됐는지 확인
-                assert str(member_id) in _agent_connections
+        with patch("app.core.database.async_session_factory", _session_factory):
+            async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as c:
+                # SSE 스트림 연결 시작 후 즉시 해제
+                async with c.stream("GET", f"/api/v2/events/stream?member_id={member_id}") as resp:
+                    assert resp.status_code == 200
+                    # 연결 중 등록됐는지 확인
+                    assert str(member_id) in _agent_connections
     finally:
         app.dependency_overrides.clear()
         _agent_connections.pop(str(member_id), None)
@@ -146,7 +152,7 @@ async def test_push_to_agent_delivers_when_connected():
     """연결된 에이전트에게 _push_to_agent 호출 시 True 반환."""
     member_id = str(uuid.uuid4())
     queue: asyncio.Queue = asyncio.Queue(maxsize=10)
-    _agent_connections[member_id] = queue
+    _agent_connections[member_id] = {queue}  # set[Queue] 타입
 
     try:
         payload = {"event_type": "memo_created", "event_id": str(uuid.uuid4())}
@@ -217,7 +223,7 @@ async def test_create_event_delivered_when_agent_connected(client, mock_session)
 
     # 에이전트 연결 등록
     queue: asyncio.Queue = asyncio.Queue(maxsize=10)
-    _agent_connections[member_id_str] = queue
+    _agent_connections[member_id_str] = {queue}  # set[Queue] 타입
 
     member_result = MagicMock()
     member_result.scalar_one_or_none.return_value = "agent"
@@ -314,14 +320,21 @@ async def test_stream_delivers_pending_on_connect(mock_session, org_id):
     app.dependency_overrides[get_current_user] = _auth
     app.dependency_overrides[get_verified_org_id] = _org
 
+    from contextlib import asynccontextmanager
+
+    @asynccontextmanager
+    async def _session_factory():
+        yield mock_session
+
     received_lines: list[str] = []
     try:
-        async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as c:
-            async with c.stream("GET", f"/api/v2/events/stream?member_id={member_id}") as resp:
-                async for line in resp.aiter_lines():
-                    received_lines.append(line)
-                    if line.startswith("data:"):
-                        break  # 첫 이벤트 수신 후 종료
+        with patch("app.core.database.async_session_factory", _session_factory):
+            async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as c:
+                async with c.stream("GET", f"/api/v2/events/stream?member_id={member_id}") as resp:
+                    async for line in resp.aiter_lines():
+                        received_lines.append(line)
+                        if line.startswith("data:"):
+                            break  # 첫 이벤트 수신 후 종료
     finally:
         app.dependency_overrides.clear()
         _agent_connections.pop(str(member_id), None)
@@ -342,8 +355,8 @@ async def test_agent_isolation_multiple_connections():
 
     queue_a: asyncio.Queue = asyncio.Queue(maxsize=10)
     queue_b: asyncio.Queue = asyncio.Queue(maxsize=10)
-    _agent_connections[agent_a] = queue_a
-    _agent_connections[agent_b] = queue_b
+    _agent_connections[agent_a] = {queue_a}  # set[Queue] 타입
+    _agent_connections[agent_b] = {queue_b}
 
     try:
         payload_a = {"event_type": "memo_created", "for": "agent_a"}
@@ -393,9 +406,16 @@ async def test_stream_rejects_cross_org_member(mock_session, org_id):
     app.dependency_overrides[get_current_user] = _auth
     app.dependency_overrides[get_verified_org_id] = _org
 
+    from contextlib import asynccontextmanager
+
+    @asynccontextmanager
+    async def _session_factory():
+        yield mock_session
+
     try:
-        async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as c:
-            resp = await c.get(f"/api/v2/events/stream?member_id={foreign_member_id}")
-            assert resp.status_code == 404
+        with patch("app.core.database.async_session_factory", _session_factory):
+            async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as c:
+                resp = await c.get(f"/api/v2/events/stream?member_id={foreign_member_id}")
+                assert resp.status_code == 404
     finally:
         app.dependency_overrides.clear()
