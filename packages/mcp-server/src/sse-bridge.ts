@@ -1,11 +1,14 @@
 /**
  * SSE Bridge — MCP stdio 서버가 FastAPI /api/v2/events/stream 에 자동 연결.
- * 이벤트 수신 시 stderr 출력, 연결 끊김 시 exponential backoff 재연결.
+ * 이벤트 수신 시 onEvent 콜백 호출 + stderr 출력.
+ * 연결 끊김 시 exponential backoff 재연결.
  */
 
 const BASE_DELAY_MS = 5_000;
 const MAX_DELAY_MS = 60_000;
 const JITTER_MS = 500;
+
+export type SseBridgeEventHandler = (eventType: string, data: unknown) => void;
 
 function log(msg: string) {
   process.stderr.write(`[sse-bridge] ${msg}\n`);
@@ -15,7 +18,11 @@ function delay(ms: number): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, ms));
 }
 
-async function connectOnce(url: string, headers: Record<string, string>): Promise<void> {
+async function connectOnce(
+  url: string,
+  headers: Record<string, string>,
+  onEvent?: SseBridgeEventHandler,
+): Promise<void> {
   const response = await fetch(url, {
     headers: { ...headers, Accept: 'text/event-stream', 'Cache-Control': 'no-cache' },
   });
@@ -44,7 +51,6 @@ async function connectOnce(url: string, headers: Record<string, string>): Promis
       }
       const text = decoder.decode(value, { stream: true });
       const lines = (remainder + text).split('\n');
-      // 마지막 줄이 불완전할 수 있으므로 버퍼에 보관
       remainder = lines.pop() ?? '';
       for (const rawLine of lines) {
         const line = rawLine.trimEnd();
@@ -57,6 +63,14 @@ async function connectOnce(url: string, headers: Record<string, string>): Promis
             const dataStr = dataLines.join('\n');
             if (eventType !== 'heartbeat') {
               log(`event=${eventType} data=${dataStr}`);
+              if (onEvent) {
+                try {
+                  const parsed = JSON.parse(dataStr);
+                  onEvent(eventType, parsed);
+                } catch {
+                  onEvent(eventType, dataStr);
+                }
+              }
             }
             eventType = 'message';
             dataLines = [];
@@ -74,6 +88,7 @@ export function startSseBridge(
   agentApiKey: string,
   memberId: string,
   sseBackendUrl?: string,
+  onEvent?: SseBridgeEventHandler,
 ): void {
   const baseUrl = (sseBackendUrl ?? pmApiUrl).replace(/\/$/, '');
   const url = `${baseUrl}/api/v2/events/stream?member_id=${memberId}`;
@@ -86,8 +101,8 @@ export function startSseBridge(
     let attempt = 0;
     while (true) {
       try {
-        await connectOnce(url, authHeaders);
-        attempt = 0; // 정상 종료(서버 측 닫힘) 시 backoff 리셋
+        await connectOnce(url, authHeaders, onEvent);
+        attempt = 0;
       } catch (err) {
         log(`error: ${err instanceof Error ? err.message : String(err)}`);
       }
