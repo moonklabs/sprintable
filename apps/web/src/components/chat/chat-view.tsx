@@ -6,7 +6,7 @@ import { useRouter } from 'next/navigation';
 import { ChatBubble } from './chat-bubble';
 import { ChatInput } from './chat-input';
 import type { ChatMessage } from '@/hooks/use-chat-sse';
-import { useChatSse } from '@/hooks/use-chat-sse';
+import { normalizeToMessage, useChatSse } from '@/hooks/use-chat-sse';
 import { EmptyState } from '@/components/ui/empty-state';
 
 interface ChatViewProps {
@@ -33,12 +33,11 @@ function groupByDate(messages: ChatMessage[]): MessageGroup[] {
 
 export function ChatView({ threadId, currentTeamMemberId, threadTitle }: ChatViewProps) {
   const router = useRouter();
-  // key={threadId} on parent ensures fresh mount per thread — no reset useEffect needed
   const [messages, setMessages] = useState<ChatMessage[]>([]);
   const [loading, setLoading] = useState(true);
-  const [cursor, setCursor] = useState<string | null>(null);
-  const [hasMore, setHasMore] = useState(false);
   const [loadingMore, setLoadingMore] = useState(false);
+  const [hasMore, setHasMore] = useState(false);
+  const [cursor, setCursor] = useState<string | null>(null);
   const bottomRef = useRef<HTMLDivElement>(null);
   const scrollRef = useRef<HTMLDivElement>(null);
   const topSentinelRef = useRef<HTMLDivElement>(null);
@@ -50,18 +49,19 @@ export function ChatView({ threadId, currentTeamMemberId, threadTitle }: ChatVie
 
   const fetchMessages = useCallback(async (before?: string) => {
     try {
-      const params = new URLSearchParams({ limit: '30' });
+      const params = new URLSearchParams({ limit: '50' });
       if (before) params.set('before', before);
       const res = await fetch(`/api/chats/${threadId}/messages?${params.toString()}`);
       if (!res.ok) return;
-      const { data, meta } = await res.json() as {
-        data: ChatMessage[];
-        meta: { next_cursor?: string; has_more?: boolean };
-      };
+      // Backend: { data: _to_chat_message[], meta: { next_cursor, has_more } }
+      const raw = await res.json() as Record<string, unknown>;
+      const rawData = (Array.isArray(raw) ? raw : (raw.data ?? [])) as Record<string, unknown>[];
+      const meta = Array.isArray(raw) ? null : raw.meta as { next_cursor?: string; has_more?: boolean } | undefined;
+      const data = rawData.map(normalizeToMessage);
       if (before) {
-        setMessages((prev) => [...(data ?? []), ...prev]);
+        setMessages((prev) => [...data, ...prev]);
       } else {
-        setMessages(data ?? []);
+        setMessages(data);
       }
       setCursor(meta?.next_cursor ?? null);
       setHasMore(meta?.has_more ?? false);
@@ -71,9 +71,8 @@ export function ChatView({ threadId, currentTeamMemberId, threadTitle }: ChatVie
     }
   }, [threadId]);
 
-  // Initial load — key={threadId} guarantees fresh component, so no reset needed
   useEffect(() => {
-    void fetchMessages();
+    fetchMessages();
   }, [fetchMessages]);
 
   useEffect(() => {
@@ -83,16 +82,26 @@ export function ChatView({ threadId, currentTeamMemberId, threadTitle }: ChatVie
     }
   }, [loading, scrollToBottom]);
 
-  const handleNewMessage = useCallback((msg: ChatMessage) => {
-    if (msg.thread_id !== threadId) return;
+  const addMessage = useCallback((msg: ChatMessage) => {
     setMessages((prev) => {
       if (prev.some((m) => m.id === msg.id)) return prev;
       return [...prev, msg];
     });
     setTimeout(() => scrollToBottom(true), 50);
-  }, [threadId, scrollToBottom]);
+  }, [scrollToBottom]);
 
-  useChatSse({ currentTeamMemberId, onNewMessage: handleNewMessage });
+  const handleNewMessage = useCallback((msg: ChatMessage) => {
+    if (msg.memo_id !== threadId) return;
+    addMessage(msg);
+  }, [threadId, addMessage]);
+
+  const handleReplyCreated = useCallback((memoId: string) => {
+    if (memoId !== threadId) return;
+    // reply_created SSE: refetch to pick up messages not delivered via chat:message
+    fetchMessages();
+  }, [threadId, fetchMessages]);
+
+  useChatSse({ currentTeamMemberId, onNewMessage: handleNewMessage, onReplyCreated: handleReplyCreated });
 
   const handleSend = useCallback(async (content: string) => {
     const res = await fetch(`/api/chats/${threadId}/messages`, {
@@ -101,13 +110,11 @@ export function ChatView({ threadId, currentTeamMemberId, threadTitle }: ChatVie
       body: JSON.stringify({ content }),
     });
     if (!res.ok) throw new Error('Failed to send message');
-    const { data } = await res.json() as { data: ChatMessage };
-    setMessages((prev) => {
-      if (prev.some((m) => m.id === data.id)) return prev;
-      return [...prev, data];
-    });
-    setTimeout(() => scrollToBottom(true), 50);
-  }, [threadId, scrollToBottom]);
+    // Backend: { data: _to_chat_message }
+    const raw = await res.json() as Record<string, unknown>;
+    const payload = (raw.data ?? raw) as Record<string, unknown>;
+    addMessage(normalizeToMessage(payload));
+  }, [threadId, addMessage]);
 
   const handleUpload = useCallback(async (file: File) => {
     const formData = new FormData();
@@ -117,13 +124,10 @@ export function ChatView({ threadId, currentTeamMemberId, threadTitle }: ChatVie
       body: formData,
     });
     if (!res.ok) throw new Error('Failed to upload file');
-    const { data } = await res.json() as { data: ChatMessage };
-    setMessages((prev) => {
-      if (prev.some((m) => m.id === data.id)) return prev;
-      return [...prev, data];
-    });
-    setTimeout(() => scrollToBottom(true), 50);
-  }, [threadId, scrollToBottom]);
+    const raw = await res.json() as Record<string, unknown>;
+    const payload = (raw.data ?? raw) as Record<string, unknown>;
+    addMessage(normalizeToMessage(payload));
+  }, [threadId, addMessage]);
 
   const handleLoadMore = useCallback(async () => {
     if (!hasMore || !cursor || loadingMore) return;
@@ -224,7 +228,7 @@ export function ChatView({ threadId, currentTeamMemberId, threadTitle }: ChatVie
                   <ChatBubble
                     key={msg.id}
                     message={msg}
-                    isMine={msg.sender.id === currentTeamMemberId}
+                    isMine={msg.created_by === currentTeamMemberId}
                   />
                 ))}
               </div>

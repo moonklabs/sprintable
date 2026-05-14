@@ -2,35 +2,59 @@
 
 import { useEffect, useRef, useState } from 'react';
 
+// Mirrors backend _to_chat_message: { id, thread_id, sender: { id, name, type }, ... }
 export interface ChatMessage {
+  id: string;
+  memo_id: string;       // backend: thread_id
+  created_by: string;    // backend: sender.id
+  content: string;
+  review_type?: string;
+  attachments: Array<{ url?: string; name?: string; content_type?: string; filename?: string }>;
+  created_at: string;
+}
+
+// Normalize backend _to_chat_message format → ChatMessage
+export function normalizeToMessage(raw: Record<string, unknown>): ChatMessage {
+  const sender = raw.sender as { id?: string } | undefined;
+  return {
+    id: (raw.id ?? '') as string,
+    memo_id: (raw.thread_id ?? raw.memo_id ?? '') as string,
+    created_by: (raw.created_by ?? sender?.id ?? '') as string,
+    content: (raw.content ?? '') as string,
+    attachments: (raw.attachments ?? []) as ChatMessage['attachments'],
+    created_at: (raw.created_at ?? '') as string,
+  };
+}
+
+// Backend SSE chat:message payload format (_to_chat_message)
+interface SseChatPayload {
   id: string;
   thread_id: string;
   content: string;
-  sender: {
-    id: string;
-    name: string;
-    type: 'human' | 'agent';
-  };
-  attachments?: Array<{ url: string; name: string; content_type: string }>;
+  sender: { id: string; name?: string; type?: string };
+  attachments: unknown[];
   created_at: string;
 }
 
 interface UseChatSseOptions {
   currentTeamMemberId?: string;
   onNewMessage?: (message: ChatMessage) => void;
+  onReplyCreated?: (memoId: string) => void;
 }
 
 const RECONNECT_DELAYS_MS = [5_000, 30_000, 60_000, 300_000];
 
-export function useChatSse({ currentTeamMemberId, onNewMessage }: UseChatSseOptions) {
+export function useChatSse({ currentTeamMemberId, onNewMessage, onReplyCreated }: UseChatSseOptions) {
   const [connected, setConnected] = useState(false);
   const sourceRef = useRef<EventSource | null>(null);
   const reconnectTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const reconnectAttemptsRef = useRef(0);
   const onNewMessageRef = useRef(onNewMessage);
+  const onReplyCreatedRef = useRef(onReplyCreated);
   const memberIdRef = useRef(currentTeamMemberId);
 
   useEffect(() => { onNewMessageRef.current = onNewMessage; }, [onNewMessage]);
+  useEffect(() => { onReplyCreatedRef.current = onReplyCreated; }, [onReplyCreated]);
   useEffect(() => { memberIdRef.current = currentTeamMemberId; }, [currentTeamMemberId]);
 
   useEffect(() => {
@@ -65,9 +89,19 @@ export function useChatSse({ currentTeamMemberId, onNewMessage }: UseChatSseOpti
         }
       };
 
+      // chat:message — backend _to_chat_message format: { id, thread_id, sender: { id }, ... }
       source.addEventListener('chat:message', (e: MessageEvent) => {
         try {
-          onNewMessageRef.current?.(JSON.parse(e.data) as ChatMessage);
+          const payload = JSON.parse(e.data as string) as SseChatPayload;
+          onNewMessageRef.current?.(normalizeToMessage(payload as unknown as Record<string, unknown>));
+        } catch { /* ignore parse errors */ }
+      });
+
+      // reply_created — from memos.py publish_event; use as refetch trigger
+      source.addEventListener('reply_created', (e: MessageEvent) => {
+        try {
+          const payload = JSON.parse(e.data as string) as { id?: string; memo_id?: string };
+          if (payload.memo_id) onReplyCreatedRef.current?.(payload.memo_id);
         } catch { /* ignore parse errors */ }
       });
     }

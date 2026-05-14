@@ -6,6 +6,7 @@ import { useTranslations } from 'next-intl';
 import { MemoCreateForm } from '@/components/memos/memo-create-form';
 import { TopBarSlot } from '@/components/nav/top-bar-slot';
 import { useDashboardContext } from '../../../dashboard/dashboard-shell';
+import { useRefreshContext } from '@/contexts/refresh-context';
 
 interface Member {
   id: string;
@@ -16,6 +17,7 @@ export default function NewMemoPage() {
   const router = useRouter();
   const t = useTranslations('memos');
   const { projectId } = useDashboardContext();
+  const { forceRefresh } = useRefreshContext();
   const [members, setMembers] = useState<Member[]>([]);
 
   useEffect(() => {
@@ -41,12 +43,13 @@ export default function NewMemoPage() {
       });
       if (!res.ok) return false;
       const { data: newMemo } = await res.json();
+      forceRefresh('memo-list');
       router.push(`/memos/${newMemo.id}`);
       return true;
     } catch {
       return false;
     }
-  }, [projectId, router]);
+  }, [projectId, router, forceRefresh]);
 
   const handleCancel = useCallback(() => {
     router.push('/memos');
