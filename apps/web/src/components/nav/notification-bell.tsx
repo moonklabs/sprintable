@@ -94,8 +94,10 @@ function timeAgo(dateStr: string): string {
   return `${days}일 전`;
 }
 
-async function fetchNotifications(): Promise<EventNotification[]> {
-  const res = await fetch('/api/event-notifications?limit=30');
+async function fetchNotifications(projectId?: string): Promise<EventNotification[]> {
+  const params = new URLSearchParams({ limit: '30' });
+  if (projectId) params.set('project_id', projectId);
+  const res = await fetch(`/api/event-notifications?${params.toString()}`);
   if (!res.ok) return [];
   const json = (await res.json()) as unknown;
   if (Array.isArray(json)) return json as EventNotification[];
@@ -107,8 +109,9 @@ async function fetchNotifications(): Promise<EventNotification[]> {
   return [];
 }
 
-async function fetchUnreadCount(): Promise<number> {
-  const res = await fetch('/api/event-notifications/unread-count');
+async function fetchUnreadCount(projectId?: string): Promise<number> {
+  const params = projectId ? `?project_id=${projectId}` : '';
+  const res = await fetch(`/api/event-notifications/unread-count${params}`);
   if (!res.ok) return 0;
   const json = (await res.json()) as unknown;
   if (json && typeof json === 'object') {
@@ -280,7 +283,7 @@ function NotificationPanel({
 
 export function NotificationBell() {
   const router = useRouter();
-  const { currentTeamMemberId } = useDashboardContext();
+  const { currentTeamMemberId, projectId } = useDashboardContext();
   const [open, setOpen] = useState(false);
   const [unreadCount, setUnreadCount] = useState(0);
   // null = 로딩 중, array = 로드 완료
@@ -321,7 +324,7 @@ export function NotificationBell() {
   useEffect(() => {
     let cancelled = false;
     const poll = async () => {
-      const count = await fetchUnreadCount();
+      const count = await fetchUnreadCount(projectId ?? undefined);
       if (!cancelled) setUnreadCount(count);
     };
     void poll();
@@ -333,13 +336,13 @@ export function NotificationBell() {
       if (intervalRef.current) clearInterval(intervalRef.current);
       document.removeEventListener('visibilitychange', onVisibility);
     };
-  }, []);
+  }, [projectId]);
 
   // 패널 열릴 때 알림 목록 로드 + 브라우저 Notification 권한 요청
   useEffect(() => {
     if (!open) return;
     let cancelled = false;
-    void fetchNotifications().then((data) => {
+    void fetchNotifications(projectId ?? undefined).then((data) => {
       if (!cancelled) setNotifications(data);
     });
     // 브라우저 Notification 권한 — 최초 패널 오픈 시 요청
@@ -347,7 +350,7 @@ export function NotificationBell() {
       void Notification.requestPermission();
     }
     return () => { cancelled = true; };
-  }, [open]);
+  }, [open, projectId]);
 
   // 외부 클릭으로 패널 닫기 (데스크톱)
   useEffect(() => {
@@ -386,9 +389,9 @@ export function NotificationBell() {
     const res = await fetch('/api/event-notifications/read-all', { method: 'PATCH' });
     // 서버 실패 시 unread count 재폴링으로 보정
     if (!res.ok) {
-      void fetchUnreadCount().then(setUnreadCount);
+      void fetchUnreadCount(projectId ?? undefined).then(setUnreadCount);
     }
-  }, []);
+  }, [projectId]);
 
   const handleNavigate = useCallback(
     (notification: EventNotification) => {
