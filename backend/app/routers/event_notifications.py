@@ -19,23 +19,26 @@ router = APIRouter(prefix="/api/v2/event-notifications", tags=["event-notificati
 
 # ─── Helper ───────────────────────────────────────────────────────────────────
 
-async def _resolve_member_id(
+async def _resolve_member_ids(
     auth: AuthContext,
     org_id: uuid.UUID,
     db: AsyncSession,
-) -> uuid.UUID:
-    """JWT auth → 현재 사용자의 team_member_id 반환. 없으면 403."""
+) -> list[uuid.UUID]:
+    """JWT auth → 현재 사용자의 org 내 전체 team_member_id 목록 반환. 없으면 403.
+
+    multi-project 사용자는 org 내 복수 member를 가질 수 있어 전체 반환.
+    """
     user_id = uuid.UUID(str(auth.user_id))
     result = await db.execute(
         select(TeamMember.id).where(
             or_(TeamMember.user_id == user_id, TeamMember.id == user_id),
             TeamMember.org_id == org_id,
-        ).limit(1)
+        )
     )
-    member_id = result.scalar_one_or_none()
-    if member_id is None:
+    member_ids = [row[0] for row in result.all()]
+    if not member_ids:
         raise HTTPException(status_code=403, detail="Team member not found")
-    return member_id
+    return member_ids
 
 
 # ─── Pydantic schemas ─────────────────────────────────────────────────────────
@@ -70,10 +73,10 @@ async def list_notifications(
     auth: AuthContext = Depends(get_current_user),
 ) -> list[NotificationResponse]:
     """GET /api/v2/notifications — 현재 사용자의 알림 목록 (최신순)."""
-    member_id = await _resolve_member_id(auth, org_id, db)
+    member_ids = await _resolve_member_ids(auth, org_id, db)
     result = await db.execute(
         select(Event)
-        .where(Event.org_id == org_id, Event.recipient_id == member_id)
+        .where(Event.org_id == org_id, Event.recipient_id.in_(member_ids))
         .order_by(Event.created_at.desc())
         .limit(limit)
         .offset(offset)
@@ -89,11 +92,11 @@ async def get_unread_count(
     auth: AuthContext = Depends(get_current_user),
 ) -> dict:
     """GET /api/v2/notifications/unread-count — 읽지 않은 알림 수."""
-    member_id = await _resolve_member_id(auth, org_id, db)
+    member_ids = await _resolve_member_ids(auth, org_id, db)
     result = await db.execute(
         select(func.count()).where(
             Event.org_id == org_id,
-            Event.recipient_id == member_id,
+            Event.recipient_id.in_(member_ids),
             Event.read_at.is_(None),
         )
     )
@@ -109,7 +112,7 @@ async def mark_read(
     auth: AuthContext = Depends(get_current_user),
 ) -> NotificationResponse:
     """PATCH /api/v2/notifications/{id}/read — 단일 알림 읽음 처리."""
-    member_id = await _resolve_member_id(auth, org_id, db)
+    member_ids = await _resolve_member_ids(auth, org_id, db)
     result = await db.execute(
         select(Event).where(
             Event.id == event_id,
@@ -119,7 +122,7 @@ async def mark_read(
     event = result.scalar_one_or_none()
     if event is None:
         raise HTTPException(status_code=404, detail="Notification not found")
-    if event.recipient_id != member_id:
+    if event.recipient_id not in member_ids:
         raise HTTPException(status_code=403, detail="Access denied")
 
     if event.read_at is None:
@@ -136,13 +139,13 @@ async def mark_all_read(
     auth: AuthContext = Depends(get_current_user),
 ) -> dict:
     """PATCH /api/v2/notifications/read-all — 전체 읽음 처리."""
-    member_id = await _resolve_member_id(auth, org_id, db)
+    member_ids = await _resolve_member_ids(auth, org_id, db)
     now = datetime.now(timezone.utc)
     result = await db.execute(
         update(Event)
         .where(
             Event.org_id == org_id,
-            Event.recipient_id == member_id,
+            Event.recipient_id.in_(member_ids),
             Event.read_at.is_(None),
         )
         .values(read_at=now)
