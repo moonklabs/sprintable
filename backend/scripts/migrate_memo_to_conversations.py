@@ -24,7 +24,7 @@ from app.models.memo import Memo, MemoAssignee, MemoReply  # noqa: E402
 from app.models.conversation import Conversation, ConversationParticipant, ConversationMessage  # noqa: E402
 
 
-async def migrate(dry_run: bool = False) -> None:
+async def migrate(dry_run: bool = False, yes: bool = False) -> None:
     print(f"[migrate] {'DRY RUN — ' if dry_run else ''}memo → conversations 마이그레이션 시작인")
 
     async with async_session_factory() as db:
@@ -95,12 +95,17 @@ async def migrate(dry_run: bool = False) -> None:
                         member_id=pid,
                     ))
 
-                # conversation_messages
+                # conversation_messages (attachments → content에 포함)
                 for reply in replies:
+                    # MEDIUM-2: attachments 보존 — content에 JSON 블록으로 추가
+                    content = reply.content
+                    if reply.attachments:
+                        import json as _json
+                        content = f"{content}\n[attachments:{_json.dumps(reply.attachments)}]"
                     msg = ConversationMessage(
                         conversation_id=memo.id,
                         sender_id=reply.created_by,
-                        content=reply.content,
+                        content=content,
                         mentioned_ids=[],
                     )
                     msg.created_at = reply.created_at
@@ -110,16 +115,24 @@ async def migrate(dry_run: bool = False) -> None:
 
                 created_conv += 1
 
-        if not dry_run:
-            await db.commit()
-
-        print(f"[migrate] 완료인 — conversations: {created_conv}건, messages: {created_msg}건")
         if dry_run:
+            print(f"[migrate] DRY RUN — 변환 예정: conversations {created_conv}건, messages {created_msg}건인")
             print("[migrate] DRY RUN — 실제 DB 변경 없음인")
+            return
+
+        if not yes:
+            print(f"\n⚠️  경고: {created_conv}개 conversation, {created_msg}개 message를 생성합니다.")
+            print("    계속하려면 --yes 플래그를 추가하세요.")
+            import sys as _sys
+            _sys.exit(1)
+
+        await db.commit()
+        print(f"[migrate] 완료인 — conversations: {created_conv}건, messages: {created_msg}건")
 
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="memo → conversations 마이그레이션")
     parser.add_argument("--dry-run", action="store_true", help="DB 변경 없이 결과만 출력")
+    parser.add_argument("--yes", action="store_true", help="확인 없이 즉시 실행")
     args = parser.parse_args()
-    asyncio.run(migrate(dry_run=args.dry_run))
+    asyncio.run(migrate(dry_run=args.dry_run, yes=args.yes))
