@@ -59,6 +59,39 @@ def _to_chat_message(reply: MemoReply, sender: TeamMember) -> dict:
     }
 
 
+# ─── Participants helper ───────────────────────────────────────────────────────
+
+async def _build_participants(
+    db: AsyncSession,
+    memo: Memo,
+    thread_id: uuid.UUID,
+    sender_id: uuid.UUID,
+) -> set[uuid.UUID]:
+    """chat:message 이벤트 수신자 세트 구성.
+
+    assigned_to + created_by + 기존 thread reply senders 포함, 발신자 제거.
+    assigned_to=null + sender==created_by 케이스에서 participants가 비는 문제 해소.
+    """
+    participants: set[uuid.UUID] = set()
+    if memo.assigned_to:
+        participants.add(memo.assigned_to)
+    if memo.created_by:
+        participants.add(memo.created_by)
+
+    # 기존 thread 참여자 포함 (이전 reply sender)
+    prior_result = await db.execute(
+        select(MemoReply.created_by)
+        .where(MemoReply.memo_id == thread_id, MemoReply.created_by.isnot(None))
+        .distinct()
+    )
+    for row in prior_result.all():
+        if row[0]:
+            participants.add(row[0])
+
+    participants.discard(sender_id)
+    return participants
+
+
 # ─── Internal SSE push helper ──────────────────────────────────────────────────
 
 async def _persist_and_push_chat_events(
@@ -198,12 +231,7 @@ async def send_chat_message(
         attachments=body.attachments,
     )
 
-    participants: set[uuid.UUID] = set()
-    if memo.assigned_to:
-        participants.add(memo.assigned_to)
-    if memo.created_by:
-        participants.add(memo.created_by)
-    participants.discard(sender.id)
+    participants = await _build_participants(db, memo, thread_id, sender.id)
 
     try:
         async with db.begin_nested():
@@ -256,12 +284,7 @@ async def send_chat_message_with_file(
         attachments=attachments,
     )
 
-    participants: set[uuid.UUID] = set()
-    if memo.assigned_to:
-        participants.add(memo.assigned_to)
-    if memo.created_by:
-        participants.add(memo.created_by)
-    participants.discard(sender.id)
+    participants = await _build_participants(db, memo, thread_id, sender.id)
 
     try:
         async with db.begin_nested():
