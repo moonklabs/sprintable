@@ -13,6 +13,7 @@ import {
   Gauge,
   Inbox,
   LayoutDashboard,
+  MessageSquare,
   MessageSquareMore,
   Search,
   Settings,
@@ -169,6 +170,16 @@ export function AppSidebar({
                 >
                   <LayoutDashboard />
                   <span>{t('dashboard')}</span>
+                </SidebarMenuButton>
+              </SidebarMenuItem>
+              <SidebarMenuItem>
+                <SidebarMenuButton
+                  render={<Link href="/chats" />}
+                  isActive={isActive('/chats')}
+                  tooltip={t('chats')}
+                >
+                  <MessageSquare />
+                  <span>{t('chats')}</span>
                 </SidebarMenuButton>
               </SidebarMenuItem>
               <SidebarMenuItem>

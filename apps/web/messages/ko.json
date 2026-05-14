@@ -48,7 +48,8 @@
     "configure": "환경설정",
     "sprints": "스프린트",
     "search": "검색…",
-    "help": "도움말"
+    "help": "도움말",
+    "chats": "채팅"
   },
   "commandPalette": {
     "title": "커맨드 팔레트",
@@ -2105,5 +2106,20 @@
     "backlog": "백로그",
     "assign": "추가",
     "unassign": "제거"
+  },
+  "chats": {
+    "title": "채팅",
+    "dmSection": "DM",
+    "groupSection": "그룹 채팅",
+    "newConversation": "새 대화",
+    "noConversations": "대화가 없는",
+    "startNewConversation": "새 대화를 시작해보세요",
+    "selectMembers": "대화 상대 선택",
+    "groupTitle": "그룹 이름 (선택)",
+    "groupTitlePlaceholder": "그룹 채팅 이름",
+    "dmWith": "님과의 대화",
+    "noMessages": "첫 메시지를 보내보세요",
+    "create": "대화 시작",
+    "memoSection": "메모"
   }
 }

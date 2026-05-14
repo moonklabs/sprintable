@@ -44,21 +44,24 @@ interface UseChatSseOptions {
   currentTeamMemberId?: string;
   onNewMessage?: (message: ChatMessage) => void;
   onReplyCreated?: (memoId: string) => void;
+  onConversationMessage?: (payload: Record<string, unknown>) => void;
 }
 
 const RECONNECT_DELAYS_MS = [5_000, 30_000, 60_000, 300_000];
 
-export function useChatSse({ currentTeamMemberId, onNewMessage, onReplyCreated }: UseChatSseOptions) {
+export function useChatSse({ currentTeamMemberId, onNewMessage, onReplyCreated, onConversationMessage }: UseChatSseOptions) {
   const [connected, setConnected] = useState(false);
   const sourceRef = useRef<EventSource | null>(null);
   const reconnectTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const reconnectAttemptsRef = useRef(0);
   const onNewMessageRef = useRef(onNewMessage);
   const onReplyCreatedRef = useRef(onReplyCreated);
+  const onConversationMessageRef = useRef(onConversationMessage);
   const memberIdRef = useRef(currentTeamMemberId);
 
   useEffect(() => { onNewMessageRef.current = onNewMessage; }, [onNewMessage]);
   useEffect(() => { onReplyCreatedRef.current = onReplyCreated; }, [onReplyCreated]);
+  useEffect(() => { onConversationMessageRef.current = onConversationMessage; }, [onConversationMessage]);
   useEffect(() => { memberIdRef.current = currentTeamMemberId; }, [currentTeamMemberId]);
 
   useEffect(() => {
@@ -106,6 +109,14 @@ export function useChatSse({ currentTeamMemberId, onNewMessage, onReplyCreated }
         try {
           const payload = JSON.parse(e.data as string) as { id?: string; memo_id?: string };
           if (payload.memo_id) onReplyCreatedRef.current?.(payload.memo_id);
+        } catch { /* ignore parse errors */ }
+      });
+
+      // conversation:message — realtime update for conversation list
+      source.addEventListener('conversation:message', (e: MessageEvent) => {
+        try {
+          const payload = JSON.parse(e.data as string) as Record<string, unknown>;
+          onConversationMessageRef.current?.(payload);
         } catch { /* ignore parse errors */ }
       });
     }

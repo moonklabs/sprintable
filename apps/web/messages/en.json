@@ -48,7 +48,8 @@
     "configure": "Configure",
     "sprints": "Sprints",
     "search": "Search…",
-    "help": "Help"
+    "help": "Help",
+    "chats": "Chats"
   },
   "commandPalette": {
     "title": "Command palette",
@@ -2105,5 +2106,20 @@
     "backlog": "Backlog",
     "assign": "Add",
     "unassign": "Remove"
+  },
+  "chats": {
+    "title": "Chats",
+    "dmSection": "Direct Messages",
+    "groupSection": "Group Chats",
+    "newConversation": "New Conversation",
+    "noConversations": "No conversations yet",
+    "startNewConversation": "Start a new conversation",
+    "selectMembers": "Select members",
+    "groupTitle": "Group name (optional)",
+    "groupTitlePlaceholder": "Group chat name",
+    "dmWith": "DM",
+    "noMessages": "Send the first message",
+    "create": "Start chat",
+    "memoSection": "Memos"
   }
 }
