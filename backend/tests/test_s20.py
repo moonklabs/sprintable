@@ -7,6 +7,8 @@ from contextlib import asynccontextmanager
 from datetime import datetime, timezone
 from unittest.mock import AsyncMock, MagicMock, patch
 
+import anyio
+
 import pytest
 from httpx import ASGITransport, AsyncClient
 
@@ -200,13 +202,16 @@ async def test_connection_count_increments_and_decrements():
     try:
         with patch("app.core.database.async_session_factory", _factory):
             async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as c:
-                async with c.stream("GET", f"/api/v2/events/stream?member_id={member_id}") as resp:
-                    assert resp.status_code == 200
-                    # 연결 중 카운터 증가 확인
-                    assert ev_module._sse_connection_count == count_before + 1
-                    async for line in resp.aiter_lines():
-                        break  # 즉시 종료
-        # 종료 후 카운터 복원
+                # anyio.fail_after: 5초 내 미완료 시 강제 종료 → finally 카운터 감소 보장
+                with anyio.fail_after(5):
+                    async with c.stream("GET", f"/api/v2/events/stream?member_id={member_id}") as resp:
+                        assert resp.status_code == 200
+                        # 연결 중 카운터 증가 확인
+                        assert ev_module._sse_connection_count == count_before + 1
+                        async for line in resp.aiter_lines():
+                            break  # 첫 heartbeat 수신 후 즉시 종료
+        # 연결 종료 후 카운터 복원 대기
+        await asyncio.sleep(0.05)
         assert ev_module._sse_connection_count == count_before
     finally:
         app.dependency_overrides.clear()
@@ -274,8 +279,14 @@ async def test_concurrent_10_sse_connections_with_write():
     try:
         tasks = [asyncio.create_task(_connect_and_receive(i, agents[i])) for i in range(n_agents)]
         push_task = asyncio.create_task(_push_events())
-        await asyncio.gather(push_task, *tasks, return_exceptions=True)
+        results = await asyncio.gather(push_task, *tasks, return_exceptions=True)
+        # HIGH-2 수정: 연결 성공 및 이벤트 수신 검증
+        conn_results = results[1:]  # push_task 제외
+        successful = sum(1 for r in conn_results if not isinstance(r, Exception))
+        assert successful > 0, f"10개 중 0개 성공 — 결과: {conn_results}"
+        assert sum(received_counts) > 0, f"이벤트 미수신 — counts: {received_counts}"
         # 연결 수 카운터 정상 복원
+        await asyncio.sleep(0.05)
         assert ev_module._sse_connection_count == original_count
     finally:
         app.dependency_overrides.clear()
