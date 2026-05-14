@@ -11,31 +11,37 @@ interface ChatBubbleProps {
   isMine: boolean;
 }
 
+// Convert @name tokens to markdown links so react-markdown v10 can render them via the `a` component.
+// Uses negative lookbehind to skip already-linked mentions (e.g. inside [...]).
+function prepareMentions(content: string): string {
+  return content.replace(/(?<![[(])@([\w가-힣]+)/g, '[@$1](mention:$1)');
+}
+
 function ChatMarkdown({ content, isMine }: { content: string; isMine: boolean }) {
   const text = isMine ? 'text-primary-foreground' : 'text-foreground';
   const muted = isMine ? 'text-primary-foreground/70' : 'text-muted-foreground';
   const codeBg = isMine ? 'bg-primary-foreground/10 text-primary-foreground' : 'bg-muted text-foreground';
   const border = isMine ? 'border-primary-foreground/30' : 'border-border';
 
-  // Detect if content has markdown-like patterns to avoid unnecessary parsing overhead
+  const hasMention = /@[\w가-힣]+/.test(content);
   const hasMarkdown = /[*_`#\[\]>~]|entity:/.test(content);
 
-  if (!hasMarkdown) {
+  if (!hasMarkdown && !hasMention) {
     return (
       <span className={`whitespace-pre-wrap break-words text-sm leading-relaxed ${text}`}>
-        {content.split(/(@\w[\w가-힣]*)/).map((part, i) =>
-          part.startsWith('@') ? (
-            <span key={i} className={`font-medium ${isMine ? 'text-primary-foreground underline decoration-primary-foreground/40' : 'text-primary'}`}>{part}</span>
-          ) : part
-        )}
+        {content}
       </span>
     );
   }
 
+  const prepared = hasMention ? prepareMentions(content) : content;
+
   return (
     <ReactMarkdown
       remarkPlugins={[remarkGfm]}
-      urlTransform={(url) => url.startsWith('entity:') ? url : defaultUrlTransform(url)}
+      urlTransform={(url) =>
+        url.startsWith('entity:') || url.startsWith('mention:') ? url : defaultUrlTransform(url)
+      }
       components={{
         p: ({ children }) => <p className={`mb-1.5 break-words text-sm leading-relaxed last:mb-0 ${text}`}>{children}</p>,
         strong: ({ children }) => <strong className={`font-semibold ${text}`}>{children}</strong>,
@@ -47,30 +53,22 @@ function ChatMarkdown({ content, isMine }: { content: string; isMine: boolean })
         li: ({ children }) => <li className={`text-sm leading-relaxed ${text}`}>{children}</li>,
         blockquote: ({ children }) => <blockquote className={`mb-1.5 border-l-2 pl-3 ${border} ${muted}`}>{children}</blockquote>,
         a: ({ href, children }) => {
+          if (href?.startsWith('mention:')) {
+            return (
+              <span className={`font-medium ${isMine ? 'text-primary-foreground underline decoration-primary-foreground/40' : 'text-primary'}`}>
+                {children}
+              </span>
+            );
+          }
           const m = href?.match(/^entity:(\w+):([0-9a-f-]+)$/i);
           if (m) {
-            const entityType = m[1]!;
-            const entityId = m[2]!;
-            return <EntityChip entityType={entityType} entityId={entityId} label={String(children)} href={getEntityHref(entityType, entityId)} />;
+            return <EntityChip entityType={m[1]!} entityId={m[2]!} label={String(children)} href={getEntityHref(m[1]!, m[2]!)} />;
           }
           return <a href={href} target="_blank" rel="noopener noreferrer" className={`underline underline-offset-2 ${text}`}>{children}</a>;
         },
-        text: ({ children }) => {
-          const str = String(children);
-          if (!str.includes('@')) return <>{str}</>;
-          return (
-            <>
-              {str.split(/(@\w[\w가-힣]*)/).map((part, i) =>
-                part.startsWith('@') ? (
-                  <span key={i} className={`font-medium ${isMine ? 'text-primary-foreground underline decoration-primary-foreground/40' : 'text-primary'}`}>{part}</span>
-                ) : part
-              )}
-            </>
-          );
-        },
       }}
     >
-      {content}
+      {prepared}
     </ReactMarkdown>
   );
 }
