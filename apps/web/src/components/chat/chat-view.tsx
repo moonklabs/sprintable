@@ -240,13 +240,18 @@ export function ChatView({ threadId, currentTeamMemberId, threadTitle, projectId
                   <div className="h-px flex-1 bg-border/60" />
                 </div>
 
-                {group.messages.map((msg) => (
-                  <ChatBubble
-                    key={msg.id}
-                    message={msg}
-                    isMine={msg.created_by === currentTeamMemberId}
-                  />
-                ))}
+                {group.messages.map((msg, idx) => {
+                  const prev = group.messages[idx - 1];
+                  const isGrouped = Boolean(prev && prev.created_by === msg.created_by);
+                  return (
+                    <ChatBubble
+                      key={msg.id}
+                      message={msg}
+                      isMine={msg.created_by === currentTeamMemberId}
+                      isGrouped={isGrouped}
+                    />
+                  );
+                })}
               </div>
             ))}
 
