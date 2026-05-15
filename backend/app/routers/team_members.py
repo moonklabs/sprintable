@@ -1,13 +1,18 @@
+import os
 import uuid
 
 from fastapi import APIRouter, Depends, HTTPException, Query
+from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.dependencies.auth import AuthContext, get_current_user, get_verified_org_id
 from app.dependencies.database import get_db
 from app.dependencies.ownership import assert_agent_owner
+from app.models.team import TeamMember
 from app.repositories.team_member import TeamMemberRepository
 from app.schemas.team_member import TeamMemberCreate, TeamMemberResponse, TeamMemberUpdate
+
+_FAKECHAT_BASE_PORT = 8787
 
 router = APIRouter(prefix="/api/v2/team-members", tags=["team-members"])
 
@@ -40,14 +45,32 @@ async def list_team_members(
     return [TeamMemberResponse.model_validate(m) for m in members]
 
 
-@router.post("", response_model=TeamMemberResponse, status_code=201)
+@router.post("", status_code=201)
 async def create_team_member(
     body: TeamMemberCreate,
     session: AsyncSession = Depends(get_db),
     auth: AuthContext = Depends(get_current_user),
-) -> TeamMemberResponse:
+) -> dict:
     repo = TeamMemberRepository(session, body.org_id)
     created_by = uuid.UUID(auth.user_id) if body.type == "agent" else None
+
+    # AC1/AC2: agent 생성 시 fakechat_port 자동 할당 (project 내 중복 방지)
+    fakechat_port: int | None = None
+    if body.type == "agent":
+        existing_ports = {
+            r[0] for r in (await session.execute(
+                select(TeamMember.fakechat_port).where(
+                    TeamMember.project_id == body.project_id,
+                    TeamMember.type == "agent",
+                    TeamMember.fakechat_port.isnot(None),
+                )
+            )).all()
+        }
+        port = _FAKECHAT_BASE_PORT
+        while port in existing_ports:
+            port += 1
+        fakechat_port = port
+
     member = await repo.create(
         project_id=body.project_id,
         type=body.type,
@@ -60,10 +83,39 @@ async def create_team_member(
         color=body.color,
         agent_role=body.agent_role,
         created_by=created_by,
+        fakechat_port=fakechat_port,
     )
+
     from app.services.notification_preference_defaults import insert_default_preferences
     await insert_default_preferences(session, member.id, body.type)
-    return TeamMemberResponse.model_validate(member)
+
+    # AC3: agent 생성 시 API key 자동 생성 + response에 포함
+    api_key_plaintext: str | None = None
+    if body.type == "agent":
+        from app.repositories.api_key import ApiKeyRepository
+        api_key_repo = ApiKeyRepository(session)
+        _api_key_obj, api_key_plaintext = await api_key_repo.create(team_member_id=member.id)
+
+    # AC3: agent 응답에 fakechat_port + mcp_config 포함
+    response = TeamMemberResponse.model_validate(member).model_dump()
+    if body.type == "agent":
+        response["member_id"] = str(member.id)
+        # AC6: FAKECHAT_PORT 환경변수 호환 — DB 포트 우선, 없으면 환경변수 fallback
+        effective_port = fakechat_port or int(os.environ.get("FAKECHAT_PORT", _FAKECHAT_BASE_PORT))
+        response["fakechat_port"] = effective_port
+        response["api_key_created"] = bool(api_key_plaintext)
+        response["mcp_config"] = {
+            "mcpServers": {
+                "sprintable": {
+                    "type": "sse",
+                    "url": f"http://localhost:{effective_port}/sse",
+                }
+            }
+        }
+        if api_key_plaintext:
+            response["api_key"] = api_key_plaintext
+
+    return response
 
 
 @router.get("/{id}", response_model=TeamMemberResponse)
