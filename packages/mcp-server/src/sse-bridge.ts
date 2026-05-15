@@ -24,6 +24,7 @@ async function relayToFakechat(eventType: string, data: unknown): Promise<void> 
 
   let text: string;
   let threadId = '';
+  let isConversationEvent = false;
   if (typeof data === 'object' && data !== null) {
     const d = data as Record<string, unknown>;
     // payload가 중첩된 경우(chat:message 이벤트) payload에서 꺼냄
@@ -35,7 +36,9 @@ async function relayToFakechat(eventType: string, data: unknown): Promise<void> 
         : String(senderRaw);
     const content = payload.content ?? d.content ?? d.message ?? d.text ?? JSON.stringify(data);
     text = senderName ? `[${eventType}] ${senderName}: ${content}` : `[${eventType}] ${content}`;
-    threadId = String(payload.thread_id ?? d.thread_id ?? '');
+    const conversationId = String(payload.conversation_id ?? d.conversation_id ?? '');
+    threadId = String(payload.thread_id ?? d.thread_id ?? conversationId);
+    isConversationEvent = !!conversationId && !payload.thread_id && !d.thread_id;
   } else {
     text = `[${eventType}] ${String(data)}`;
   }
@@ -50,7 +53,10 @@ async function relayToFakechat(eventType: string, data: unknown): Promise<void> 
     const agentApiKey = process.env.AGENT_API_KEY ?? '';
     form.set('thread_id', threadId);
     if (pmApiUrl && agentApiKey) {
-      form.set('reply_callback_url', `${pmApiUrl}/api/v2/chats/${threadId}/messages`);
+      const callbackPath = isConversationEvent
+        ? `/api/v2/conversations/${threadId}/messages`
+        : `/api/v2/chats/${threadId}/messages`;
+      form.set('reply_callback_url', `${pmApiUrl}${callbackPath}`);
       form.set('reply_callback_api_key', agentApiKey);
     }
   }
