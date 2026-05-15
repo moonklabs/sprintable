@@ -192,6 +192,8 @@ async def slack_events(request: Request, session: AsyncSession = Depends(get_db)
                 norm_event.get("threadTs"),
                 message_ts=norm_event.get("messageTs"),
             )
+            if result.get("action") == "error":
+                raise ValueError(result["detail"])
             await session.commit()
             return _ok(result)
         except Exception:
@@ -381,6 +383,8 @@ async def teams_events(request: Request, session: AsyncSession = Depends(get_db)
                 norm_event.get("threadTs"),
                 message_ts=norm_event.get("messageTs"),
             )
+            if result.get("action") == "error":
+                raise ValueError(result["detail"])
             await session.commit()
             return JSONResponse({"ok": True, "result": result})
         except Exception:
