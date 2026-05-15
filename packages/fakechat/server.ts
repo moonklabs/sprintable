@@ -17,11 +17,26 @@ import { homedir } from 'os'
 import { join, extname, basename } from 'path'
 import type { ServerWebSocket } from 'bun'
 
-const PORT = Number(process.env.FAKECHAT_PORT ?? 8787)
+// CLAUDE_PROJECT_DIR is injected by Claude Code into all plugin subprocesses.
+// Read the project's .mcp.json to derive the per-agent port assignment without
+// requiring a separate env injection mechanism from the plugin system.
+function _portFromProjectDir(): number | null {
+  const dir = process.env.CLAUDE_PROJECT_DIR
+  if (!dir) return null
+  try {
+    const raw = readFileSync(join(dir, '.mcp.json'), 'utf-8')
+    const port = JSON.parse(raw)?.mcpServers?.sprintable?.env?.FAKECHAT_PORT
+    if (port) return Number(port)
+  } catch {}
+  return null
+}
+
+const PORT = Number(process.env.FAKECHAT_PORT ?? _portFromProjectDir() ?? 8787)
 const STATE_DIR = join(homedir(), '.claude', 'channels', 'fakechat')
 const INBOX_DIR = join(STATE_DIR, 'inbox')
 const OUTBOX_DIR = join(STATE_DIR, 'outbox')
-const PID_FILE = '/tmp/fakechat.pid'
+// Port-scoped PID file prevents agents on different ports from killing each other.
+const PID_FILE = `/tmp/fakechat-${PORT}.pid`
 
 type Msg = {
   id: string
