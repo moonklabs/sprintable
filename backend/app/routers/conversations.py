@@ -92,6 +92,7 @@ async def _dispatch_conversation_event(
     )).all()
     member_type_map = {r[0]: r[1] for r in member_rows}
 
+    events_to_push: list[tuple[str, Event]] = []
     for pid in participant_ids:
         m_type = member_type_map.get(pid, "human")
         event = Event(
@@ -107,10 +108,12 @@ async def _dispatch_conversation_event(
             status="pending",
         )
         db.add(event)
-        # human/agent 모두 per-member push — org 전체 브로드캐스트 방지
-        _push_to_agent(str(pid), {"event_type": "conversation:message", **payload})
+        events_to_push.append((str(pid), event))
 
+    # flush 후 event.id 확보 → event_id 포함 push (dedup 동작 보장)
     await db.flush()
+    for pid_str, event in events_to_push:
+        _push_to_agent(pid_str, {"event_id": str(event.id), "event_type": "conversation:message", **payload})
 
 
 # ─── Schemas ──────────────────────────────────────────────────────────────────
