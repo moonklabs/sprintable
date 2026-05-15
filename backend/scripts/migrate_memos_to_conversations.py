@@ -182,8 +182,18 @@ async def _migrate_one(db, memo: Memo) -> None:
 
 # ─── 롤백 ────────────────────────────────────────────────────────────────────
 
-async def rollback(dry_run: bool = False, yes: bool = False, output: str | None = None) -> dict:
-    """memo-origin conversation(conversation.id ∈ memo.id) 삭제. memo 원본 보존."""
+async def rollback(
+    dry_run: bool = False,
+    yes: bool = False,
+    output: str | None = None,
+    from_summary: str | None = None,
+) -> dict:
+    """memo-origin conversation 삭제. memo 원본 보존.
+
+    from_summary: migration summary JSON 경로.
+                  지정 시 해당 파일의 migrated IDs만 삭제 (안전).
+                  미지정 시 Memo.id ∈ Conversation.id 전체 대상 (경고).
+    """
     print(f"[rollback] {'DRY RUN — ' if dry_run else ''}롤백 시작")
 
     summary: dict = {
@@ -193,13 +203,30 @@ async def rollback(dry_run: bool = False, yes: bool = False, output: str | None 
     }
 
     async with async_session_factory() as db:
-        memo_ids = [r[0] for r in (await db.execute(select(Memo.id))).all()]
-        target_ids = [
-            r[0] for r in (await db.execute(
-                select(Conversation.id).where(Conversation.id.in_(memo_ids))
-            )).all()
-        ]
-        print(f"[rollback] 삭제 대상 (memo-origin): {len(target_ids)}건")
+        if from_summary:
+            # 안전 모드: 마이그레이션이 실제 생성한 IDs만 삭제
+            migration_data = json.loads(Path(from_summary).read_text())
+            migrated_memo_ids = [
+                uuid.UUID(entry["memo_id"]) for entry in migration_data.get("migrated", [])
+            ]
+            target_ids = [
+                r[0] for r in (await db.execute(
+                    select(Conversation.id).where(Conversation.id.in_(migrated_memo_ids))
+                )).all()
+            ]
+            print(f"[rollback] summary 기반 삭제 대상: {len(target_ids)}건 (from {from_summary})")
+        else:
+            # 경고 모드: Memo.id ∈ Conversation.id 전체 — skip된 conversation도 포함될 수 있음
+            print("[rollback] ⚠️  --rollback-from 미지정. 기존 이관된 conversation이 포함될 수 있음.")
+            print("          안전한 롤백을 위해 --rollback-from <summary.json> 사용을 권장하는.")
+            memo_ids = [r[0] for r in (await db.execute(select(Memo.id))).all()]
+            target_ids = [
+                r[0] for r in (await db.execute(
+                    select(Conversation.id).where(Conversation.id.in_(memo_ids))
+                )).all()
+            ]
+            print(f"[rollback] 삭제 대상 (memo-origin 전체): {len(target_ids)}건")
+
         summary["target_ids"] = [str(i) for i in target_ids]
 
         if dry_run:
@@ -247,10 +274,12 @@ if __name__ == "__main__":
     parser.add_argument("--dry-run", action="store_true", help="DB 변경 없이 카운트만 출력")
     parser.add_argument("--yes", action="store_true", help="확인 없이 즉시 실행")
     parser.add_argument("--rollback", action="store_true", help="마이그레이션 롤백 (memo-origin conversation 삭제)")
+    parser.add_argument("--rollback-from", type=str, default=None, dest="rollback_from",
+                        help="rollback 시 사용할 migration summary JSON 경로 (안전한 롤백 권장)")
     parser.add_argument("--output", type=str, default=None, help="JSON summary 저장 경로")
     args = parser.parse_args()
 
     if args.rollback:
-        asyncio.run(rollback(dry_run=args.dry_run, yes=args.yes, output=args.output))
+        asyncio.run(rollback(dry_run=args.dry_run, yes=args.yes, output=args.output, from_summary=args.rollback_from))
     else:
         asyncio.run(migrate(dry_run=args.dry_run, yes=args.yes, output=args.output))
