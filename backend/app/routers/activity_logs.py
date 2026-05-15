@@ -1,8 +1,9 @@
-"""S-C3: Activity Logs read-only API. CUD 없음."""
+"""S-C3: Activity Logs read-only API. CUD 없음. S-C4: EE RBAC 조건부 게이팅."""
+import logging
 import uuid
 from datetime import datetime
 
-from fastapi import APIRouter, Depends, HTTPException, Query
+from fastapi import APIRouter, Depends, Query
 from pydantic import BaseModel
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -10,6 +11,18 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.dependencies.auth import AuthContext, get_current_user, get_verified_org_id
 from app.dependencies.database import get_db
 from app.models.activity_log import ActivityLog
+
+logger = logging.getLogger(__name__)
+
+# S-C4: EE RBAC — CE 코드에 top-level import ee 금지. 조건부 로드.
+_ee_rbac_filter = None
+try:
+    from app.core.config import settings as _settings
+    if _settings.is_ee_enabled:
+        from ee.services.audit_rbac import filter_activity_by_role as _ee_rbac_filter  # type: ignore[assignment]
+        logger.info("activity_logs: EE RBAC filter loaded")
+except Exception:
+    pass
 
 router = APIRouter(prefix="/api/v2/activity-logs", tags=["activity-logs"])
 
@@ -51,6 +64,8 @@ async def list_activity_logs(
     org_id: uuid.UUID = Depends(get_verified_org_id),
     _auth: AuthContext = Depends(get_current_user),
 ) -> ActivityLogListResponse:
+    from app.models.team import TeamMember
+
     # AC5: org scope 필터 (외부 접근 불가 — get_verified_org_id가 403 처리)
     q = select(ActivityLog).where(ActivityLog.org_id == org_id)
 
@@ -68,6 +83,26 @@ async def list_activity_logs(
         q = q.where(ActivityLog.created_at >= from_)
     if to:
         q = q.where(ActivityLog.created_at <= to)
+
+    # S-C4: EE RBAC — is_ee_enabled 시 role별 가시성 필터 적용
+    ee_applied = False
+    if _ee_rbac_filter is not None:
+        try:
+            caller_tm = (await db.execute(
+                select(TeamMember).where(
+                    TeamMember.id == uuid.UUID(_auth.user_id),
+                    TeamMember.org_id == org_id,
+                ).limit(1)
+            )).scalar_one_or_none()
+            if caller_tm:
+                q = _ee_rbac_filter(q, caller_tm.role, caller_tm.id)
+                ee_applied = True
+                logger.info(
+                    "activity_logs EE RBAC applied role=%s member_id=%s",
+                    caller_tm.role, caller_tm.id,
+                )
+        except Exception:
+            logger.warning("activity_logs EE RBAC filter failed — fallback to flat log", exc_info=True)
 
     total_result = await db.execute(select(func.count()).select_from(q.subquery()))
     total = total_result.scalar_one()
