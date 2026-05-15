@@ -29,11 +29,11 @@ async def _inbound_to_conversation(
     author_id: uuid.UUID,
     content: str,
     external_thread_ts: str | None,
+    message_ts: str | None = None,
 ) -> dict:
     """external inbound → ConversationMessage 생성.
 
-    thread_ts 있으면 metadata.external_thread_ts 매핑으로 thread reply.
-    없으면 top-level message 생성.
+    RC1: root 저장 시 external_message_ts=message_ts, reply 탐색 시 동일 키로 root 검색.
     """
     from app.models.conversation import Conversation, ConversationMessage, ConversationParticipant
 
@@ -54,18 +54,22 @@ async def _inbound_to_conversation(
 
     thread_id: uuid.UUID | None = None
     if external_thread_ts:
-        # msg_metadata->>'external_thread_ts' 매핑으로 root message 탐색
-        from sqlalchemy import cast, String
-        from sqlalchemy.dialects.postgresql import JSONB
+        # RC1: external_message_ts == threadTs로 root 탐색
         root_candidate = (await session.execute(
             select(ConversationMessage).where(
                 ConversationMessage.conversation_id == conversation_id,
                 ConversationMessage.thread_id.is_(None),
-                ConversationMessage.msg_metadata["external_thread_ts"].as_string() == external_thread_ts,
+                ConversationMessage.msg_metadata["external_message_ts"].as_string() == external_thread_ts,
             ).limit(1)
         )).scalar_one_or_none()
         if root_candidate:
             thread_id = root_candidate.id
+
+    # RC1: root message에 external_message_ts 저장 (threadTs 없을 때만)
+    if thread_id is None and message_ts:
+        msg_metadata_val: dict | None = {"external_message_ts": message_ts}
+    else:
+        msg_metadata_val = None
 
     msg = ConversationMessage(
         conversation_id=conversation_id,
@@ -73,7 +77,7 @@ async def _inbound_to_conversation(
         content=content,
         mentioned_ids=[],
         thread_id=thread_id,
-        msg_metadata={"external_thread_ts": external_thread_ts} if external_thread_ts and not thread_id else None,
+        msg_metadata=msg_metadata_val,
     )
     session.add(msg)
     await session.flush()
@@ -186,11 +190,12 @@ async def slack_events(request: Request, session: AsyncSession = Depends(get_db)
                 author_id,
                 content,
                 norm_event.get("threadTs"),
+                message_ts=norm_event.get("messageTs"),
             )
             await session.commit()
             return _ok(result)
         except Exception:
-            pass  # conversation 실패 시 memo fallback
+            await session.rollback()  # RC2: dirty session 복구 후 memo fallback
 
     metadata = build_bridge_metadata("slack", norm_event)
     memo_id = await repo.create_memo(
@@ -374,11 +379,12 @@ async def teams_events(request: Request, session: AsyncSession = Depends(get_db)
                 author_id,
                 content,
                 norm_event.get("threadTs"),
+                message_ts=norm_event.get("messageTs"),
             )
             await session.commit()
             return JSONResponse({"ok": True, "result": result})
         except Exception:
-            pass  # conversation 실패 시 memo fallback
+            await session.rollback()  # RC2: dirty session 복구 후 memo fallback
 
     metadata = build_bridge_metadata("teams", norm_event)
     memo_id = await repo.create_memo(
