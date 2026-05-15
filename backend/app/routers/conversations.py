@@ -259,6 +259,9 @@ async def list_conversations(
             "id": str(conv.id),
             "type": conv.type,
             "title": conv.title,
+            "status": conv.status,
+            "resolved_by": str(conv.resolved_by) if conv.resolved_by else None,
+            "resolved_at": conv.resolved_at.isoformat() if conv.resolved_at else None,
             "participants": conv_participants.get(conv.id, []),
             "latest_message": {
                 "content": latest_msg.content,
