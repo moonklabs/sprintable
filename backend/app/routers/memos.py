@@ -455,7 +455,9 @@ async def create_memo(
     if body.assigned_to_ids:
         participant_ids.update(body.assigned_to_ids)
 
+    conv_id = uuid.uuid4()
     conv = Conversation(
+        id=conv_id,
         project_id=body.project_id,
         org_id=body.org_id,
         type="group",
@@ -465,7 +467,7 @@ async def create_memo(
     )
     session.add(conv)
     for pid in participant_ids:
-        session.add(ConversationParticipant(conversation_id=conv.id, member_id=pid))
+        session.add(ConversationParticipant(conversation_id=conv_id, member_id=pid))
     await session.flush()
 
     # AC2/AC3: entity_links + title → root message metadata 보존 (AC6: link 개수 손실 방지)
