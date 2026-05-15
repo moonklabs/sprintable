@@ -84,12 +84,13 @@ async def migrate(dry_run: bool = False, yes: bool = False, output: str | None =
 
         for memo in to_migrate:
             try:
-                await _migrate_one(db, memo)
+                async with db.begin_nested():  # savepoint — 실패 시 해당 memo만 롤백
+                    await _migrate_one(db, memo)
                 summary["migrated"].append({"memo_id": str(memo.id)})
             except Exception as exc:
                 print(f"  [error] memo {memo.id}: {exc}")
                 summary["errors"].append({"memo_id": str(memo.id), "error": str(exc)})
-                await db.rollback()
+                # begin_nested() 예외 시 자동 rollback to savepoint → 다음 memo 계속
 
         await db.commit()
         print(f"[migrate] 완료 — conversation {len(summary['migrated'])}건, 오류 {len(summary['errors'])}건")
