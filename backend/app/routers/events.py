@@ -14,7 +14,7 @@ from collections import defaultdict
 from datetime import datetime, timedelta, timezone
 from typing import Any
 
-from fastapi import APIRouter, Depends, HTTPException, Query, Request
+from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Query, Request
 from fastapi.responses import StreamingResponse
 from pydantic import BaseModel, ConfigDict
 from sqlalchemy import and_, delete, or_, select, update
@@ -285,6 +285,7 @@ async def agent_event_stream(
 @router.post("", response_model=EventResponse, status_code=201)
 async def create_event(
     body: CreateEventRequest,
+    background_tasks: BackgroundTasks,
     db: AsyncSession = Depends(get_db),
     org_id: uuid.UUID = Depends(get_verified_org_id),
 ) -> EventResponse:
@@ -292,6 +293,7 @@ async def create_event(
 
     recipient가 SSE 연결 중이면 즉시 전달 + status=delivered.
     미연결이면 status=pending 유지.
+    Channel Router(S-A6)로 preference 기반 채널 결정 후 전달.
     """
     from app.models.team import TeamMember
 
@@ -322,11 +324,26 @@ async def create_event(
     await db.commit()
     await db.refresh(event)
 
-    # SSE 라우팅: 연결 중인 에이전트에게 즉시 전달 (delivered 마킹은 SSE yield 후 처리)
-    if member_type == "agent":
-        _push_to_agent(str(body.recipient_id), _event_to_payload(event))
+    # S-A6: Channel Router 기반 dispatch (preference → sse/discord/etc.)
+    from app.services.dispatch_router import route_dispatch_event as _route_dispatch
+    background_tasks.add_task(_route_dispatch_bg, event.id)
 
     return EventResponse.model_validate(event)
+
+
+async def _route_dispatch_bg(event_id: uuid.UUID) -> None:
+    """BackgroundTask wrapper — 별도 DB 세션에서 dispatch routing."""
+    from app.core.database import async_session_factory
+    from app.services.dispatch_router import route_dispatch_event
+
+    async with async_session_factory() as db:
+        try:
+            await route_dispatch_event(event_id, db)
+        except Exception:
+            import logging
+            logging.getLogger(__name__).exception(
+                "dispatch routing failed event_id=%s", event_id
+            )
 
 
 @router.get("/pending", response_model=list[EventResponse])
