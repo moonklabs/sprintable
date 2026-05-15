@@ -8,7 +8,8 @@
     "fakechat": "./server.ts"
   },
   "scripts": {
-    "start": "bun run server.ts"
+    "start": "bun run server.ts",
+    "smoke": "bun smoke.ts"
   },
   "dependencies": {
     "@modelcontextprotocol/sdk": "^1.29.0"
