@@ -21,6 +21,75 @@ from app.utils.teams_verify import verify_teams_request
 router = APIRouter(prefix="/api/v2/bridge", tags=["bridge"])
 
 
+# ─── S-D2: conversation inbound helper ────────────────────────────────────────
+
+async def _inbound_to_conversation(
+    session: AsyncSession,
+    conversation_id: uuid.UUID,
+    author_id: uuid.UUID,
+    content: str,
+    external_thread_ts: str | None,
+    message_ts: str | None = None,
+) -> dict:
+    """external inbound → ConversationMessage 생성.
+
+    RC1: root 저장 시 external_message_ts=message_ts, reply 탐색 시 동일 키로 root 검색.
+    """
+    from app.models.conversation import Conversation, ConversationMessage, ConversationParticipant
+
+    conv = await session.get(Conversation, conversation_id)
+    if conv is None:
+        return {"action": "error", "detail": "conversation_not_found"}
+
+    # 참여자 등록 (없으면 추가)
+    existing_participant = (await session.execute(
+        select(ConversationParticipant.id).where(
+            ConversationParticipant.conversation_id == conversation_id,
+            ConversationParticipant.member_id == author_id,
+        )
+    )).scalar_one_or_none()
+    if existing_participant is None:
+        session.add(ConversationParticipant(conversation_id=conversation_id, member_id=author_id))
+        await session.flush()
+
+    thread_id: uuid.UUID | None = None
+    if external_thread_ts:
+        # RC1: external_message_ts == threadTs로 root 탐색
+        root_candidate = (await session.execute(
+            select(ConversationMessage).where(
+                ConversationMessage.conversation_id == conversation_id,
+                ConversationMessage.thread_id.is_(None),
+                ConversationMessage.msg_metadata["external_message_ts"].as_string() == external_thread_ts,
+            ).limit(1)
+        )).scalar_one_or_none()
+        if root_candidate:
+            thread_id = root_candidate.id
+
+    # RC1: root message에 external_message_ts 저장 (threadTs 없을 때만)
+    if thread_id is None and message_ts:
+        msg_metadata_val: dict | None = {"external_message_ts": message_ts}
+    else:
+        msg_metadata_val = None
+
+    msg = ConversationMessage(
+        conversation_id=conversation_id,
+        sender_id=author_id,
+        content=content,
+        mentioned_ids=[],
+        thread_id=thread_id,
+        msg_metadata=msg_metadata_val,
+    )
+    session.add(msg)
+    await session.flush()
+
+    return {
+        "action": "conversation_message_created",
+        "conversation_id": str(conversation_id),
+        "message_id": str(msg.id),
+        "thread_id": str(thread_id) if thread_id else None,
+    }
+
+
 # ─── helpers ──────────────────────────────────────────────────────────────────
 
 def _ok(data: object) -> JSONResponse:
@@ -109,14 +178,34 @@ async def slack_events(request: Request, session: AsyncSession = Depends(get_db)
         return _ok({"action": "ignored"})
 
     label = None if user_mapping else "Slack 연동 미설정 사용자"
-    metadata = build_bridge_metadata("slack", norm_event)
+    content = _memo_content("slack", norm_event, label)
 
+    # S-D2: conversation mapping 있으면 → ConversationMessage 생성 (fallback: memo)
+    conv_id_str = (mapping.config or {}).get("conversation_id")
+    if conv_id_str:
+        try:
+            result = await _inbound_to_conversation(
+                session,
+                uuid.UUID(conv_id_str),
+                author_id,
+                content,
+                norm_event.get("threadTs"),
+                message_ts=norm_event.get("messageTs"),
+            )
+            if result.get("action") == "error":
+                raise ValueError(result["detail"])
+            await session.commit()
+            return _ok(result)
+        except Exception:
+            await session.rollback()  # RC2: dirty session 복구 후 memo fallback
+
+    metadata = build_bridge_metadata("slack", norm_event)
     memo_id = await repo.create_memo(
         org_id=org_id,
         project_id=project_id,
         created_by=author_id,
         title=_memo_title(norm_event["messageText"], label),
-        content=_memo_content("slack", norm_event, label),
+        content=content,
         memo_type="memo",
         metadata=metadata,
         assigned_to=None,
@@ -280,14 +369,34 @@ async def teams_events(request: Request, session: AsyncSession = Depends(get_db)
     }
 
     label = None if user_mapping else "Microsoft Teams 연동 미설정 사용자"
-    metadata = build_bridge_metadata("teams", norm_event)
+    content = _memo_content("teams", norm_event, label)
 
+    # S-D2: conversation mapping 있으면 → ConversationMessage 생성 (fallback: memo)
+    conv_id_str = (mapping.config or {}).get("conversation_id")
+    if conv_id_str:
+        try:
+            result = await _inbound_to_conversation(
+                session,
+                uuid.UUID(conv_id_str),
+                author_id,
+                content,
+                norm_event.get("threadTs"),
+                message_ts=norm_event.get("messageTs"),
+            )
+            if result.get("action") == "error":
+                raise ValueError(result["detail"])
+            await session.commit()
+            return JSONResponse({"ok": True, "result": result})
+        except Exception:
+            await session.rollback()  # RC2: dirty session 복구 후 memo fallback
+
+    metadata = build_bridge_metadata("teams", norm_event)
     memo_id = await repo.create_memo(
         org_id=org_id,
         project_id=project_id,
         created_by=author_id,
         title=_memo_title(message_text, label),
-        content=_memo_content("teams", norm_event, label),
+        content=content,
         memo_type="memo",
         metadata=metadata,
         assigned_to=None,
