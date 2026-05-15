@@ -3,11 +3,13 @@ from __future__ import annotations
 
 import logging
 import uuid
+from collections import defaultdict
 from datetime import datetime, timezone
 
 from fastapi import APIRouter, Depends, HTTPException, Query
 from pydantic import BaseModel
 from sqlalchemy import and_, select
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.dependencies.auth import AuthContext, get_current_user, get_verified_org_id
@@ -117,6 +119,10 @@ class SendMessageRequest(BaseModel):
     mentioned_ids: list[uuid.UUID] = []
 
 
+class AddParticipantRequest(BaseModel):
+    member_id: uuid.UUID
+
+
 # ─── Endpoints ────────────────────────────────────────────────────────────────
 
 @router.post("", status_code=201)
@@ -198,6 +204,29 @@ async def list_conversations(
         .order_by(Conversation.updated_at.desc())
     )).scalars().all()
 
+    # participants 배치 조회 (N+1 방지)
+    conv_id_list = [c.id for c in convs]
+    p_rows = (await db.execute(
+        select(ConversationParticipant.conversation_id, ConversationParticipant.member_id)
+        .where(ConversationParticipant.conversation_id.in_(conv_id_list))
+    )).all()
+
+    all_member_ids = {r.member_id for r in p_rows}
+    member_rows = (await db.execute(
+        select(TeamMember.id, TeamMember.name, TeamMember.avatar_url)
+        .where(TeamMember.id.in_(all_member_ids))
+    )).all() if all_member_ids else []
+    member_map = {r.id: {"name": r.name, "avatar_url": r.avatar_url} for r in member_rows}
+
+    conv_participants: dict[uuid.UUID, list[dict]] = defaultdict(list)
+    for r in p_rows:
+        info = member_map.get(r.member_id, {})
+        conv_participants[r.conversation_id].append({
+            "member_id": str(r.member_id),
+            "name": info.get("name"),
+            "avatar_url": info.get("avatar_url"),
+        })
+
     result = []
     for conv in convs:
         latest_msg = (await db.execute(
@@ -211,6 +240,7 @@ async def list_conversations(
             "id": str(conv.id),
             "type": conv.type,
             "title": conv.title,
+            "participants": conv_participants.get(conv.id, []),
             "latest_message": {
                 "content": latest_msg.content,
                 "created_at": latest_msg.created_at.isoformat(),
@@ -268,6 +298,55 @@ async def list_messages(
     next_cursor = msgs[0].created_at.isoformat() if has_more and msgs else None
 
     return {"data": data, "meta": {"next_cursor": next_cursor, "has_more": has_more}}
+
+
+@router.post("/{conversation_id}/participants", status_code=201)
+async def add_participant(
+    conversation_id: uuid.UUID,
+    body: AddParticipantRequest,
+    db: AsyncSession = Depends(get_db),
+    auth: AuthContext = Depends(get_current_user),
+    org_id: uuid.UUID = Depends(get_verified_org_id),
+) -> dict:
+    """POST /api/v2/conversations/{id}/participants — 참여자 추가."""
+    sender = await _resolve_member(auth, org_id, db)
+
+    conv = (await db.execute(
+        select(Conversation).where(Conversation.id == conversation_id, Conversation.org_id == org_id)
+    )).scalar_one_or_none()
+    if conv is None:
+        raise HTTPException(status_code=404, detail="Conversation not found")
+
+    # 요청자 참여 여부 확인
+    is_participant = (await db.execute(
+        select(ConversationParticipant.id).where(
+            ConversationParticipant.conversation_id == conversation_id,
+            ConversationParticipant.member_id == sender.id,
+        )
+    )).scalar_one_or_none()
+    if is_participant is None:
+        raise HTTPException(status_code=403, detail="Not a participant")
+
+    # 추가 대상 멤버가 같은 org인지 확인
+    target = (await db.execute(
+        select(TeamMember).where(TeamMember.id == body.member_id, TeamMember.org_id == org_id)
+    )).scalar_one_or_none()
+    if target is None:
+        raise HTTPException(status_code=404, detail="Member not found")
+
+    try:
+        db.add(ConversationParticipant(conversation_id=conversation_id, member_id=body.member_id))
+        await db.commit()
+    except IntegrityError:
+        await db.rollback()
+        raise HTTPException(status_code=409, detail="Already a participant")
+
+    return {
+        "conversation_id": str(conversation_id),
+        "member_id": str(body.member_id),
+        "name": target.name,
+        "avatar_url": target.avatar_url,
+    }
 
 
 @router.post("/{conversation_id}/messages", status_code=201)
