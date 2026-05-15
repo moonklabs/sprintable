@@ -402,6 +402,14 @@ async def list_memos(
         conv_q = conv_q.where(Conversation.project_id == project_id)
     if status_filter:
         conv_q = conv_q.where(Conversation.status == status_filter)
+    # AC5: content/title LIKE 검색 fallback
+    if q:
+        from sqlalchemy import or_
+        conv_q = conv_q.where(
+            or_(
+                Conversation.title.ilike(f"%{q}%"),
+            )
+        )
     convs = (await repo.session.execute(conv_q)).scalars().all()
     for conv in convs:
         results.append(MemoListResponse.model_validate({
@@ -460,19 +468,34 @@ async def create_memo(
         session.add(ConversationParticipant(conversation_id=conv.id, member_id=pid))
     await session.flush()
 
+    # AC2/AC3: entity_links + title → root message metadata 보존 (AC6: link 개수 손실 방지)
+    parsed_embeds = _parse_entity_embeds(body.content or "")
+    all_embed_list = list(body.embeds or []) + [
+        e for e in parsed_embeds
+        if not any(x.entity_type == e.entity_type and x.entity_id == e.entity_id for x in (body.embeds or []))
+    ]
+    root_metadata: dict = {
+        "title": body.title,
+        "entity_links": [
+            {"entity_type": e.entity_type, "entity_id": str(e.entity_id)}
+            for e in all_embed_list
+        ],
+    }
+
     root_msg = ConversationMessage(
         conversation_id=conv.id,
         sender_id=body.created_by,
         content=body.content or "",
         mentioned_ids=[],
         thread_id=None,
+        metadata=root_metadata,
     )
     session.add(root_msg)
     await session.flush()
 
     logger.info(
-        "create_memo routed to conversation conversation_id=%s message_id=%s project_id=%s",
-        conv.id, root_msg.id, body.project_id,
+        "create_memo routed to conversation conversation_id=%s message_id=%s project_id=%s entity_links=%d",
+        conv.id, root_msg.id, body.project_id, len(all_embed_list),
     )
     publish_event(str(body.org_id), "memo_created", {"id": str(conv.id)})
 
@@ -563,7 +586,7 @@ async def get_memo(
                 "memo_id": id,
                 "created_by": r.sender_id,
                 "content": r.content,
-                "review_type": "comment",
+                "review_type": r.review_type or "comment",
                 "attachments": [],
                 "created_at": r.created_at,
             }) for r in reply_msgs
@@ -656,12 +679,15 @@ async def add_reply(
     root_msg = root_result.scalar_one_or_none()
 
     if root_msg is not None:
+        # AC4: review_type → ConversationMessage 컬럼 + metadata 보존
         reply_msg = ConversationMessage(
             conversation_id=id,
             sender_id=body.created_by,
             content=body.content or "",
             mentioned_ids=[],
             thread_id=root_msg.id,
+            review_type=body.review_type if body.review_type != "comment" else None,
+            metadata={"review_type": body.review_type} if body.review_type else None,
         )
         db.add(reply_msg)
         await db.flush()
