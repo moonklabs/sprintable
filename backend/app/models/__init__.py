@@ -16,6 +16,7 @@ from app.models.doc import Doc
 from app.models.invitation import Invitation
 from app.models.meeting import Meeting
 from app.models.memo import Memo, MemoDocLink, MemoRead, MemoReply
+from app.models.conversation_webhook_delivery import ConversationWebhookDelivery
 from app.models.notification import InboxItem, Notification, NotificationSetting
 from app.models.notification_preference import NotificationPreference
 from app.models.organization import Organization
@@ -59,6 +60,7 @@ __all__ = [
     "MemoRead",
     "MemoReply",
     "Notification",
+    "ConversationWebhookDelivery",
     "NotificationPreference",
     "NotificationSetting",
     "OrgMember",
