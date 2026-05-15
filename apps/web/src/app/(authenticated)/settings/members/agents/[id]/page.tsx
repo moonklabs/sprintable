@@ -4,7 +4,7 @@ import { useCallback, useEffect, useMemo, useState } from 'react';
 import { useParams, useRouter } from 'next/navigation';
 import Link from 'next/link';
 import { useTranslations } from 'next-intl';
-import { ArrowLeft, Check, Pencil, Plus, X } from 'lucide-react';
+import { ArrowLeft, Check, Copy, Pencil, Plus, X } from 'lucide-react';
 import { AgentApiKeyManager } from '@/components/agents/agent-api-key-manager';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
@@ -28,6 +28,7 @@ interface AgentMember {
   is_active: boolean;
   webhook_url: string | null;
   created_by: string | null;
+  fakechat_port: number | null;
 }
 
 interface WebhookConfig {
@@ -100,6 +101,7 @@ export default function AgentDetailPage() {
   const [freshApiKey, setFreshApiKey] = useState<string | null>(null);
   const [hasActiveKey, setHasActiveKey] = useState(false);
   const [mcpCopied, setMcpCopied] = useState(false);
+  const [fakechatMcpCopied, setFakechatMcpCopied] = useState(false);
 
   const [projects, setProjects] = useState<ProjectOption[]>([]);
   const [sameNameAgents, setSameNameAgents] = useState<AgentMember[]>([]);
@@ -315,6 +317,21 @@ export default function AgentDetailPage() {
     }
   };
 
+  const handleCopyFakechatMcp = async () => {
+    if (!agent?.fakechat_port) return;
+    const config = JSON.stringify(
+      { mcpServers: { sprintable: { type: 'sse', url: `http://localhost:${agent.fakechat_port}/sse` } } },
+      null, 2,
+    );
+    try {
+      await navigator.clipboard.writeText(config);
+      setFakechatMcpCopied(true);
+      setTimeout(() => setFakechatMcpCopied(false), 2000);
+    } catch {
+      addToast({ type: 'error', title: tc('error') });
+    }
+  };
+
   if (loading) {
     return (
       <div className="w-full max-w-3xl mx-auto p-6 space-y-4">
@@ -489,6 +506,52 @@ export default function AgentDetailPage() {
             <p className="text-xs text-amber-400">API Key를 먼저 발급하세요. 발급 직후 실제 키가 이 블록에 자동으로 포함됩니다.</p>
           ) : (
             <p className="text-xs text-muted-foreground">보안상 기존 키는 재표시되지 않습니다. 위 API Keys 섹션에서 새 키를 발급하면 실제 키가 포함된 Config가 여기에 자동으로 나타납니다.</p>
+          )}
+        </SectionCardBody>
+      </SectionCard>
+
+      {/* Fakechat 채널 (SSE) */}
+      <SectionCard>
+        <SectionCardHeader>
+          <div className="flex items-center justify-between w-full">
+            <div className="space-y-1">
+              <div className="flex items-center gap-2">
+                <h2 className="text-base font-semibold text-foreground">Fakechat 채널</h2>
+                <Badge variant="info">SSE</Badge>
+              </div>
+              <p className="text-sm text-muted-foreground">
+                이 에이전트의 로컬 SSE 채널 설정입니다. fakechat 서버가 해당 포트에서 실행되어야 합니다.
+              </p>
+            </div>
+            {agent.fakechat_port ? (
+              <Button variant="glass" size="sm" onClick={() => void handleCopyFakechatMcp()}>
+                {fakechatMcpCopied ? <Check className="h-3.5 w-3.5" /> : <><Copy className="h-3.5 w-3.5 mr-1" />Copy SSE Config</>}
+              </Button>
+            ) : null}
+          </div>
+        </SectionCardHeader>
+        <SectionCardBody className="space-y-3">
+          {agent.fakechat_port ? (
+            <>
+              <div className="flex items-center gap-3 text-sm">
+                <span className="text-muted-foreground">Port</span>
+                <code className="rounded bg-muted px-2 py-0.5 font-mono text-foreground">{agent.fakechat_port}</code>
+                <span className="text-muted-foreground">SSE URL</span>
+                <code className="rounded bg-muted px-2 py-0.5 font-mono text-xs text-foreground">
+                  http://localhost:{agent.fakechat_port}/sse
+                </code>
+              </div>
+              <pre className="overflow-x-auto rounded-md border border-border bg-muted/30 p-3 text-xs text-foreground/80">
+                {JSON.stringify(
+                  { mcpServers: { sprintable: { type: 'sse', url: `http://localhost:${agent.fakechat_port}/sse` } } },
+                  null, 2,
+                )}
+              </pre>
+            </>
+          ) : (
+            <p className="text-xs text-muted-foreground">
+              fakechat 포트 정보가 없습니다. 에이전트를 재생성하거나 관리자에게 문의하세요.
+            </p>
           )}
         </SectionCardBody>
       </SectionCard>
