@@ -49,7 +49,8 @@
     "sprints": "Sprints",
     "search": "Search…",
     "help": "Help",
-    "chats": "Chats"
+    "chats": "Chats",
+    "activity": "Activity Log"
   },
   "commandPalette": {
     "title": "Command palette",
@@ -2126,5 +2127,28 @@
     "participantsOthers": "{count} more",
     "forkInfo": "Adding someone to a DM creates a new group chat. The existing DM is preserved.",
     "adding": "Adding…"
+  },
+  "activityLog": {
+    "title": "Activity Log",
+    "eyebrow": "ACTIVITY",
+    "description": "Browse project activity — who did what, when, and on which entity.",
+    "colTime": "Time",
+    "colActor": "Actor",
+    "colAction": "Action",
+    "colEntity": "Entity",
+    "colContext": "Context",
+    "filterAll": "All",
+    "filterActor": "Actor",
+    "filterAction": "Action (type to filter)",
+    "filterEntityType": "Entity type",
+    "fromDate": "From date",
+    "toDate": "To date",
+    "emptyTitle": "No activity found",
+    "emptyDescription": "No activity matches the current filters. Try adjusting the date range or filters.",
+    "reload": "Reload",
+    "loadMore": "Load more",
+    "forbiddenTitle": "Access denied",
+    "forbiddenDescription": "You do not have permission to view the activity log.",
+    "noProject": "No project selected."
   }
 }
