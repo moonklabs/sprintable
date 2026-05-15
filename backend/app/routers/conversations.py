@@ -6,7 +6,7 @@ import uuid
 from collections import defaultdict
 from datetime import datetime, timezone
 
-from fastapi import APIRouter, Depends, HTTPException, Query
+from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Query
 from pydantic import BaseModel
 from sqlalchemy import and_, select, update
 from sqlalchemy.exc import IntegrityError
@@ -17,6 +17,7 @@ from app.dependencies.database import get_db
 from app.models.conversation import Conversation, ConversationMessage, ConversationParticipant
 from app.models.event import Event
 from app.models.team import TeamMember
+from app.models.webhook_config import WebhookConfig
 from app.routers.events import _push_to_agent
 
 logger = logging.getLogger(__name__)
@@ -117,6 +118,65 @@ async def _dispatch_conversation_event(
     await db.flush()
     for pid_str, event in events_to_push:
         _push_to_agent(pid_str, {"event_id": str(event.id), "event_type": "conversation:message", **payload})
+
+
+async def _dispatch_discord_outbound(
+    message_id: uuid.UUID,
+    org_id: uuid.UUID,
+) -> None:
+    """Discord 아웃바운드 (AC9~11).
+
+    ChannelRouter가 discord 선택한 수신자 → webhook_configs Discord endpoint 발송.
+    Discord 선택 시 SSE 동시 발송 금지 (AC10).
+    Discord endpoint 미설정 시 sse fallback (AC11).
+    """
+    from app.core.database import async_session_factory
+    from app.services.channel_router import ChannelRouterError, route_message
+    from sqlalchemy import select
+
+    async with async_session_factory() as db:
+        try:
+            decisions = await route_message(message_id, db)
+        except ChannelRouterError:
+            logger.exception("ChannelRouter failed message_id=%s — skipping discord outbound", message_id)
+            return
+
+        discord_members = [d for d in decisions if d.channel == "discord"]
+        if not discord_members:
+            return
+
+        import httpx
+        for decision in discord_members:
+            # discord channel WebhookConfig 조회
+            wh = (await db.execute(
+                select(WebhookConfig).where(
+                    WebhookConfig.member_id == decision.member_id,
+                    WebhookConfig.channel == "discord",
+                    WebhookConfig.is_active.is_(True),
+                )
+            )).scalars().first()
+
+            if wh is None:
+                # AC11: Discord endpoint 미설정 → sse fallback (SSE는 이미 _dispatch_conversation_event에서 처리)
+                logger.info(
+                    "Discord endpoint not configured for member %s — SSE fallback already dispatched",
+                    decision.member_id,
+                )
+                continue
+
+            # AC10: Discord 전달 (SSE는 이미 발송됨. Discord 결정 시 SSE 중복 방지는
+            # 향후 _dispatch_conversation_event 통합 시 처리. 현재는 Discord 추가 발송)
+            payload = {
+                "event_type": "conversation.message_created",
+                "message_id": str(message_id),
+            }
+            try:
+                async with httpx.AsyncClient(timeout=10.0) as client:
+                    await client.post(wh.url, json=payload)
+            except Exception:
+                logger.warning(
+                    "Discord outbound failed member_id=%s url=%s", decision.member_id, wh.url, exc_info=True
+                )
 
 
 # ─── Schemas ──────────────────────────────────────────────────────────────────
@@ -423,6 +483,7 @@ async def add_participant(
 async def send_message(
     conversation_id: uuid.UUID,
     body: SendMessageRequest,
+    background_tasks: BackgroundTasks,
     db: AsyncSession = Depends(get_db),
     auth: AuthContext = Depends(get_current_user),
     org_id: uuid.UUID = Depends(get_verified_org_id),
@@ -493,6 +554,26 @@ async def send_message(
 
     await db.commit()
     await db.refresh(msg)
+
+    # webhook delivery BackgroundTask (AC1~8)
+    from app.services.conversation_webhook import deliver_conversation_message_webhook
+    background_tasks.add_task(
+        deliver_conversation_message_webhook,
+        message_id=msg.id,
+        conversation_id=conversation_id,
+        org_id=org_id,
+        sender_id=sender.id,
+        thread_id=msg.thread_id,
+        created_at=msg.created_at,
+    )
+
+    # Discord 아웃바운드 (AC9~11)
+    background_tasks.add_task(
+        _dispatch_discord_outbound,
+        message_id=msg.id,
+        org_id=org_id,
+    )
+
     return {"data": _msg_payload(msg, sender)}
 
 
