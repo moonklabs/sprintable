@@ -12,7 +12,7 @@ from typing import Sequence
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.models.conversation import ConversationMessage, ConversationParticipant
+from app.models.conversation import Conversation, ConversationMessage, ConversationParticipant
 from app.models.notification_preference import NotificationPreference
 from app.models.team import TeamMember
 
@@ -70,14 +70,18 @@ async def route_message(
         )).all()
         member_type_map: dict[uuid.UUID, str] = {r[0]: r[1] for r in member_rows}
 
-        # 5. preference 배치 조회 — thread/conversation/global 3 scope
-        scope_ids_to_check: list[uuid.UUID | None] = []
+        # 5. preference 배치 조회 — thread/conversation/project/global 4 scope
+        # conversation의 project_id 조회 (project scope fallback용)
+        conv_project_id: uuid.UUID | None = (await db.execute(
+            select(Conversation.project_id).where(Conversation.id == msg.conversation_id)
+        )).scalar_one_or_none()
+
         scope_type_order: list[tuple[str, uuid.UUID | None]] = []
         if msg.thread_id:
             scope_type_order.append(("thread", msg.thread_id))
-            scope_ids_to_check.append(msg.thread_id)
         scope_type_order.append(("conversation", msg.conversation_id))
-        scope_ids_to_check.append(msg.conversation_id)
+        if conv_project_id:
+            scope_type_order.append(("project", conv_project_id))
         scope_type_order.append(("global", None))
 
         pref_rows = (await db.execute(
