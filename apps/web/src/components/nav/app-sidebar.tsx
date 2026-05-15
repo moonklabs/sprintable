@@ -9,6 +9,7 @@ import {
   Bot,
   CalendarDays,
   CircleHelp,
+  ClipboardList,
   FolderKanban,
   Gauge,
   Inbox,
@@ -274,6 +275,16 @@ export function AppSidebar({
                 >
                   <Bot />
                   <span>{t('agents')}</span>
+                </SidebarMenuButton>
+              </SidebarMenuItem>
+              <SidebarMenuItem>
+                <SidebarMenuButton
+                  render={<Link href="/activity" />}
+                  isActive={isActive('/activity')}
+                  tooltip={t('activity')}
+                >
+                  <ClipboardList />
+                  <span>{t('activity')}</span>
                 </SidebarMenuButton>
               </SidebarMenuItem>
             </SidebarMenu>
