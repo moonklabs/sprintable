@@ -48,6 +48,7 @@ async def deliver_conversation_message_webhook(
     message_id: uuid.UUID,
     conversation_id: uuid.UUID,
     org_id: uuid.UUID,
+    project_id: uuid.UUID,
     sender_id: uuid.UUID | None,
     thread_id: uuid.UUID | None,
     created_at: datetime,
@@ -65,6 +66,7 @@ async def deliver_conversation_message_webhook(
             wh_rows = (await db.execute(
                 select(WebhookConfig).where(
                     WebhookConfig.org_id == org_id,
+                    WebhookConfig.project_id == project_id,
                     WebhookConfig.is_active.is_(True),
                 )
             )).scalars().all()

@@ -164,15 +164,20 @@ async def _dispatch_discord_outbound(
                 )
                 continue
 
-            # AC10: Discord 전달 (SSE는 이미 발송됨. Discord 결정 시 SSE 중복 방지는
-            # 향후 _dispatch_conversation_event 통합 시 처리. 현재는 Discord 추가 발송)
-            payload = {
-                "event_type": "conversation.message_created",
-                "message_id": str(message_id),
-            }
+            # Discord URL이면 content/embeds 포맷, 아니면 generic JSON
+            is_discord_url = (
+                "discord.com/api/webhooks" in wh.url
+                or "discordapp.com/api/webhooks" in wh.url
+            )
+            content_text = f"[conversation:message] message_id: {message_id}"
+            if is_discord_url:
+                discord_payload: dict = {"content": content_text}
+            else:
+                discord_payload = {"event_type": "conversation.message_created", "message_id": str(message_id)}
+
             try:
                 async with httpx.AsyncClient(timeout=10.0) as client:
-                    await client.post(wh.url, json=payload)
+                    await client.post(wh.url, json=discord_payload)
             except Exception:
                 logger.warning(
                     "Discord outbound failed member_id=%s url=%s", decision.member_id, wh.url, exc_info=True
@@ -562,6 +567,7 @@ async def send_message(
         message_id=msg.id,
         conversation_id=conversation_id,
         org_id=org_id,
+        project_id=conv.project_id,
         sender_id=sender.id,
         thread_id=msg.thread_id,
         created_at=msg.created_at,
