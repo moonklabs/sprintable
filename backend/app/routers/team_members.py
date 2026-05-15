@@ -99,6 +99,7 @@ async def create_team_member(
     # AC3: agent 응답에 fakechat_port + mcp_config 포함
     response = TeamMemberResponse.model_validate(member).model_dump()
     if body.type == "agent":
+        response["member_id"] = str(member.id)
         # AC6: FAKECHAT_PORT 환경변수 호환 — DB 포트 우선, 없으면 환경변수 fallback
         effective_port = fakechat_port or int(os.environ.get("FAKECHAT_PORT", _FAKECHAT_BASE_PORT))
         response["fakechat_port"] = effective_port
