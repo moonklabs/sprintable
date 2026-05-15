@@ -82,6 +82,6 @@ class ConversationMessage(Base, TimestampMixin):
         DateTime(timezone=True), nullable=True
     )
     review_type: Mapped[str | None] = mapped_column(Text, nullable=True)
-    metadata: Mapped[dict | None] = mapped_column(JSONB, nullable=True)
+    msg_metadata: Mapped[dict | None] = mapped_column("metadata", JSONB, nullable=True)
 
     conversation: Mapped[Conversation] = relationship("Conversation", back_populates="messages")

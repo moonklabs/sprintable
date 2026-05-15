@@ -488,7 +488,7 @@ async def create_memo(
         content=body.content or "",
         mentioned_ids=[],
         thread_id=None,
-        metadata=root_metadata,
+        msg_metadata=root_metadata,
     )
     session.add(root_msg)
     await session.flush()
@@ -687,7 +687,7 @@ async def add_reply(
             mentioned_ids=[],
             thread_id=root_msg.id,
             review_type=body.review_type if body.review_type != "comment" else None,
-            metadata={"review_type": body.review_type} if body.review_type else None,
+            msg_metadata={"review_type": body.review_type} if body.review_type else None,
         )
         db.add(reply_msg)
         await db.flush()
