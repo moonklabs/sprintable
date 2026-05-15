@@ -124,9 +124,9 @@ export function registerMemosTools(server: McpServer) {
       // AC4: memo_id = conversation_id (S-B1 패턴). top-level root message 조회 → thread reply 생성
       let rootMsgId: string | undefined;
       try {
-        const msgs = await pmApi(`/api/v2/conversations/${encodeURIComponent(memo_id)}/messages?limit=1`) as Record<string, unknown>;
-        const data = (msgs.data ?? []) as Array<Record<string, unknown>>;
-        rootMsgId = data[0]?.id as string | undefined;
+        // pmApi already unwraps {data: [...]} → returns array directly
+        const msgs = await pmApi(`/api/v2/conversations/${encodeURIComponent(memo_id)}/messages?limit=1`) as Array<Record<string, unknown>>;
+        rootMsgId = msgs[0]?.id as string | undefined;
       } catch {
         // conversation 없음 → 기존 memos API fallback
       }
