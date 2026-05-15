@@ -28,7 +28,6 @@ def upgrade() -> None:
         sa.Column(
             "webhook_config_id",
             UUID(as_uuid=True),
-            sa.ForeignKey("webhook_configs.id", ondelete="SET NULL"),
             nullable=True,
             index=True,
         ),
