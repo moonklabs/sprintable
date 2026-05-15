@@ -334,6 +334,37 @@ async def add_participant(
     if target is None:
         raise HTTPException(status_code=404, detail="Member not found")
 
+    # DM → 기존 DM 유지, 기존 참여자 + 신규 참여자로 그룹 conversation fork
+    if conv.type == "dm":
+        existing_member_ids = (await db.execute(
+            select(ConversationParticipant.member_id)
+            .where(ConversationParticipant.conversation_id == conversation_id)
+        )).scalars().all()
+
+        new_conv = Conversation(
+            project_id=conv.project_id,
+            org_id=org_id,
+            type="group",
+            created_by=sender.id,
+        )
+        db.add(new_conv)
+        await db.flush()
+
+        all_member_ids = set(existing_member_ids) | {body.member_id}
+        for mid in all_member_ids:
+            db.add(ConversationParticipant(conversation_id=new_conv.id, member_id=mid))
+
+        await db.commit()
+        await db.refresh(new_conv)
+        return {
+            "conversation_id": str(new_conv.id),
+            "member_id": str(body.member_id),
+            "name": target.name,
+            "avatar_url": target.avatar_url,
+            "forked": True,
+        }
+
+    # group → 기존 conversation에 직접 추가
     try:
         db.add(ConversationParticipant(conversation_id=conversation_id, member_id=body.member_id))
         await db.commit()
@@ -346,6 +377,7 @@ async def add_participant(
         "member_id": str(body.member_id),
         "name": target.name,
         "avatar_url": target.avatar_url,
+        "forked": False,
     }
 
 
