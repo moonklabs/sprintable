@@ -21,6 +21,13 @@ class Conversation(Base, OrgScopedMixin, TimestampMixin):
     created_by: Mapped[uuid.UUID | None] = mapped_column(
         UUID(as_uuid=True), ForeignKey("team_members.id", ondelete="SET NULL"), nullable=True
     )
+    status: Mapped[str] = mapped_column(Text, nullable=False, default="open")  # open | resolved
+    resolved_by: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("team_members.id", ondelete="SET NULL"), nullable=True
+    )
+    resolved_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )
 
     participants: Mapped[list["ConversationParticipant"]] = relationship(
         "ConversationParticipant", back_populates="conversation", lazy="select"
