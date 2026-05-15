@@ -61,6 +61,8 @@ async def create_team_member(
         agent_role=body.agent_role,
         created_by=created_by,
     )
+    from app.services.notification_preference_defaults import insert_default_preferences
+    await insert_default_preferences(session, member.id, body.type)
     return TeamMemberResponse.model_validate(member)
 
 

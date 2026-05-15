@@ -119,6 +119,9 @@ async def accept_invitation(
                 role=inv.role,
             )
             session.add(new_member)
+            await session.flush()
+            from app.services.notification_preference_defaults import insert_default_preferences
+            await insert_default_preferences(session, new_member.id, "human")
 
     await session.flush()
     return {"ok": True, "org_id": str(inv.org_id), "project_id": str(inv.project_id) if inv.project_id else None}
