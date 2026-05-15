@@ -74,8 +74,12 @@ async def _dispatch_conversation_event(
     msg: ConversationMessage,
     org_id: uuid.UUID,
     sender: TeamMember,
+    exclude_ids: set[uuid.UUID] | None = None,
 ) -> None:
-    """conversation:message → 전 참여자 SSE dispatch + Event INSERT."""
+    """conversation:message → 전 참여자 SSE dispatch + Event INSERT.
+
+    exclude_ids: SSE 발송에서 제외할 member_id 집합 (Discord 수신자 등).
+    """
     if not conversation.project_id:
         return
 
@@ -86,7 +90,7 @@ async def _dispatch_conversation_event(
         select(ConversationParticipant.member_id)
         .where(ConversationParticipant.conversation_id == conversation.id)
     )).all()
-    participant_ids = {r[0] for r in rows} - {sender.id}
+    participant_ids = {r[0] for r in rows} - {sender.id} - (exclude_ids or set())
 
     if not participant_ids:
         return
@@ -548,9 +552,18 @@ async def send_message(
 
     await db.flush()
 
+    # AC10: Discord 수신자 파악 → SSE dispatch에서 제외 (동일 db 세션, flush 완료 상태)
+    discord_exclude_ids: set[uuid.UUID] = set()
+    try:
+        from app.services.channel_router import ChannelRouterError, route_message as _route
+        decisions = await _route(msg.id, db)
+        discord_exclude_ids = {d.member_id for d in decisions if d.channel == "discord"}
+    except Exception:
+        logger.warning("ChannelRouter pre-check failed message_id=%s — no SSE exclusion", msg.id)
+
     try:
         async with db.begin_nested():
-            await _dispatch_conversation_event(db, conv, msg, org_id, sender)
+            await _dispatch_conversation_event(db, conv, msg, org_id, sender, exclude_ids=discord_exclude_ids)
     except Exception:
         logger.exception("conversation event dispatch failed conversation_id=%s", conversation_id)
 
