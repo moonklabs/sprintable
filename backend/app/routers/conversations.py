@@ -134,6 +134,10 @@ class SendMessageRequest(BaseModel):
     thread_id: uuid.UUID | None = None
 
 
+class UpdateStatusRequest(BaseModel):
+    status: str  # open | resolved
+
+
 class AddParticipantRequest(BaseModel):
     member_id: uuid.UUID
 
@@ -487,3 +491,55 @@ async def send_message(
     await db.commit()
     await db.refresh(msg)
     return {"data": _msg_payload(msg, sender)}
+
+
+@router.patch("/{conversation_id}/status", status_code=200)
+async def update_conversation_status(
+    conversation_id: uuid.UUID,
+    body: UpdateStatusRequest,
+    db: AsyncSession = Depends(get_db),
+    auth: AuthContext = Depends(get_current_user),
+    org_id: uuid.UUID = Depends(get_verified_org_id),
+) -> dict:
+    """PATCH /api/v2/conversations/{id}/status — open/resolved 전환."""
+    if body.status not in ("open", "resolved"):
+        raise HTTPException(status_code=400, detail="Invalid status. Must be 'open' or 'resolved'")
+
+    conv = (await db.execute(
+        select(Conversation).where(Conversation.id == conversation_id, Conversation.org_id == org_id)
+    )).scalar_one_or_none()
+    if conv is None:
+        raise HTTPException(status_code=404, detail="Conversation not found")
+
+    requester = await _resolve_member(auth, org_id, db, project_id=conv.project_id)
+
+    # 참여자 검증
+    participant = (await db.execute(
+        select(ConversationParticipant.id).where(
+            ConversationParticipant.conversation_id == conversation_id,
+            ConversationParticipant.member_id == requester.id,
+        )
+    )).scalar_one_or_none()
+    if participant is None:
+        raise HTTPException(status_code=403, detail="Not a participant")
+
+    now = datetime.now(timezone.utc)
+    if body.status == "resolved":
+        conv.status = "resolved"
+        conv.resolved_by = requester.id
+        conv.resolved_at = now
+    else:
+        conv.status = "open"
+        conv.resolved_by = None
+        conv.resolved_at = None
+
+    conv.updated_at = now
+    await db.commit()
+    await db.refresh(conv)
+
+    return {
+        "id": str(conv.id),
+        "status": conv.status,
+        "resolved_by": str(conv.resolved_by) if conv.resolved_by else None,
+        "resolved_at": conv.resolved_at.isoformat() if conv.resolved_at else None,
+    }
