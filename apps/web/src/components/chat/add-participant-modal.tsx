@@ -57,8 +57,8 @@ export function AddParticipantModal({
         body: JSON.stringify({ member_id: selected }),
       });
       if (!res.ok) throw new Error('Failed to add participant');
-      const data = await res.json() as { id?: string };
-      onAdded(data.id);
+      const data = await res.json() as { conversation_id?: string; forked?: boolean };
+      onAdded(data.conversation_id);
     } catch {
       setError('참여자 추가에 실패했는. 다시 시도해보는.');
     } finally {
