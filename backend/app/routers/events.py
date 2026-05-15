@@ -220,21 +220,21 @@ async def agent_event_stream(
                 pending_events = result.scalars().all()
                 for i in range(0, len(pending_events), _SSE_BATCH_SIZE):
                     batch = pending_events[i : i + _SSE_BATCH_SIZE]
+                    batch_data = [_event_to_payload(evt) for evt in batch]
+                    # delivered 마킹 먼저 commit → 재연결 시 백필 중복 방지
                     for evt in batch:
-                        data = _event_to_payload(evt)
-                        yield f"event: {evt.event_type}\ndata: {json.dumps(data)}\n\n"
                         evt.status = "delivered"
                         evt.delivered_at = datetime.now(timezone.utc)
-                    if batch:
-                        await db.commit()
+                    await db.commit()
+                    for data, evt in zip(batch_data, batch):
+                        yield f"event: {evt.event_type}\ndata: {json.dumps(data)}\n\n"
 
             # 신규 이벤트 리슨 — 대기 구간에서 커넥션 미점유, 이벤트마다 개별 세션
             while not await request.is_disconnected():
                 try:
                     event_data = await asyncio.wait_for(queue.get(), timeout=30.0)
                     event_type = event_data.get("event_type", "message")
-                    yield f"event: {event_type}\ndata: {json.dumps(event_data)}\n\n"
-                    # yield 후 DB delivered 마킹 — 개별 세션, 마킹 후 즉시 반환
+                    # event_id 있으면 yield 전 pending 선점 — 백필과 실시간 큐 중복 방지
                     if eid := event_data.get("event_id"):
                         try:
                             async with async_session_factory() as db:
@@ -246,12 +246,15 @@ async def agent_event_stream(
                                     )
                                 )
                                 live_evt = r.scalar_one_or_none()
-                                if live_evt:
-                                    live_evt.status = "delivered"
-                                    live_evt.delivered_at = datetime.now(timezone.utc)
-                                    await db.commit()
+                                if live_evt is None:
+                                    # 이미 백필에서 delivered 마킹됨 → skip
+                                    continue
+                                live_evt.status = "delivered"
+                                live_evt.delivered_at = datetime.now(timezone.utc)
+                                await db.commit()
                         except Exception:
                             pass
+                    yield f"event: {event_type}\ndata: {json.dumps(event_data)}\n\n"
                 except asyncio.TimeoutError:
                     # S20: heartbeat 후 즉시 disconnect 체크 — dead connection 조기 정리
                     yield "event: heartbeat\ndata: {}\n\n"

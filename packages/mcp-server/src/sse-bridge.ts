@@ -122,9 +122,6 @@ async function connectOnce(
               if (onEvent) {
                 onEvent(eventType, parsed);
               }
-              relayToFakechat(eventType, parsed).catch((err) => {
-                log(`fakechat relay error: ${err instanceof Error ? err.message : String(err)}`);
-              });
             }
             eventType = 'message';
             dataLines = [];
@@ -136,6 +133,8 @@ async function connectOnce(
     reader.releaseLock();
   }
 }
+
+const _SEEN_IDS_MAX = 1000;
 
 export function startSseBridge(
   pmApiUrl: string,
@@ -151,11 +150,35 @@ export function startSseBridge(
     'x-agent-api-key': agentApiKey,
   };
 
+  // 재연결 후에도 유지 — 동일 event_id 중복 relay 방지
+  const seenIds = new Set<string>();
+
+  const wrappedOnEvent: SseBridgeEventHandler = (eventType, data) => {
+    if (typeof data === 'object' && data !== null) {
+      const eid = (data as Record<string, unknown>).event_id as string | undefined;
+      if (eid) {
+        if (seenIds.has(eid)) {
+          log(`dedup: skipping seen event_id=${eid}`);
+          return;
+        }
+        seenIds.add(eid);
+        if (seenIds.size > _SEEN_IDS_MAX) {
+          const oldest = seenIds.values().next().value as string;
+          seenIds.delete(oldest);
+        }
+      }
+    }
+    relayToFakechat(eventType, data).catch((err) => {
+      log(`fakechat relay error: ${err instanceof Error ? err.message : String(err)}`);
+    });
+    onEvent?.(eventType, data);
+  };
+
   const run = async () => {
     let attempt = 0;
     while (true) {
       try {
-        await connectOnce(url, authHeaders, onEvent);
+        await connectOnce(url, authHeaders, wrappedOnEvent);
         attempt = 0;
       } catch (err) {
         log(`error: ${err instanceof Error ? err.message : String(err)}`);
