@@ -25,6 +25,7 @@ class TeamMember(Base, OrgScopedMixin, TimestampMixin):
     is_active: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True)
     color: Mapped[str] = mapped_column(Text, nullable=False, default="#3385f8")
     agent_role: Mapped[str | None] = mapped_column(Text, nullable=True)
+    fakechat_port: Mapped[int | None] = mapped_column(nullable=True)
     created_by: Mapped[uuid.UUID | None] = mapped_column(
         UUID(as_uuid=True), ForeignKey("users.id", ondelete="SET NULL"), nullable=True
     )
