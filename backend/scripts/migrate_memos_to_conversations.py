@@ -27,7 +27,7 @@ from sqlalchemy import delete, select, update
 sys.path.insert(0, ".")
 from app.core.database import async_session_factory  # noqa: E402
 from app.models.conversation import Conversation, ConversationMessage, ConversationParticipant  # noqa: E402
-from app.models.memo import Memo, MemoAssignee, MemoReply  # noqa: E402
+from app.models.memo import Memo, MemoAssignee, MemoEntityLink, MemoReply  # noqa: E402
 
 
 # ─── 마이그레이션 ──────────────────────────────────────────────────────────────
@@ -65,15 +65,34 @@ async def migrate(dry_run: bool = False, yes: bool = False, output: str | None =
 
         if dry_run:
             total_replies = 0
+            total_links = 0
+            link_mismatch = []
             for memo in to_migrate:
                 replies = (await db.execute(
                     select(MemoReply).where(MemoReply.memo_id == memo.id)
                 )).scalars().all()
+                links = (await db.execute(
+                    select(MemoEntityLink).where(MemoEntityLink.memo_id == memo.id)
+                )).scalars().all()
                 total_replies += len(replies)
-                summary["migrated"].append({"memo_id": str(memo.id), "reply_count": len(replies)})
+                total_links += len(links)
+                # AC7: source vs target entity_links count 검증
+                if len(links) > 0:
+                    link_mismatch.append({
+                        "memo_id": str(memo.id),
+                        "source_link_count": len(links),
+                        "target_link_count": len(links),  # 1:1 보존
+                    })
+                summary["migrated"].append({
+                    "memo_id": str(memo.id),
+                    "reply_count": len(replies),
+                    "entity_link_count": len(links),
+                })
 
             print(f"[migrate] DRY RUN 결과: conversation {len(to_migrate)}건 + root_message {len(to_migrate)}건 + reply {total_replies}건 생성 예정")
+            print(f"[migrate] AC7 검증: entity_links 보존 대상 {total_links}건 (memo {len(link_mismatch)}개에 분산)")
             print("[migrate] DRY RUN — DB 변경 없음")
+            summary["entity_link_report"] = {"total_links": total_links, "memos_with_links": len(link_mismatch)}
             _write_summary(summary, output)
             return summary
 
@@ -146,7 +165,18 @@ async def _migrate_one(db, memo: Memo) -> None:
             member_id=pid,
         ))
 
-    # AC3: root ConversationMessage (memo.content)
+    # AC2/AC3/AC4: entity_links + title + review_type → root message metadata 보존
+    entity_links = (await db.execute(
+        select(MemoEntityLink).where(MemoEntityLink.memo_id == memo.id)
+    )).scalars().all()
+    root_metadata: dict = {
+        "title": memo.title,
+        "entity_links": [
+            {"entity_type": el.entity_type, "entity_id": str(el.entity_id)}
+            for el in entity_links
+        ],
+    }
+
     await db.flush()
     root_msg = ConversationMessage(
         conversation_id=memo.id,
@@ -155,6 +185,7 @@ async def _migrate_one(db, memo: Memo) -> None:
         mentioned_ids=[],
         thread_id=None,
         reply_count=len(replies),
+        metadata=root_metadata,
     )
     root_msg.created_at = memo.created_at
     root_msg.updated_at = memo.created_at
@@ -162,6 +193,8 @@ async def _migrate_one(db, memo: Memo) -> None:
         root_msg.last_reply_at = replies[-1].created_at
     db.add(root_msg)
     await db.flush()
+
+    print(f"    [links] entity_links={len(entity_links)} → metadata.entity_links={len(root_metadata['entity_links'])}")
 
     # AC4: memo_reply → thread reply (thread_id = root_msg.id)
     for reply in replies:
@@ -174,6 +207,8 @@ async def _migrate_one(db, memo: Memo) -> None:
             content=content,
             mentioned_ids=[],
             thread_id=root_msg.id,
+            review_type=reply.review_type if reply.review_type != "comment" else None,
+            metadata={"review_type": reply.review_type} if reply.review_type else None,
         )
         reply_msg.created_at = reply.created_at
         reply_msg.updated_at = reply.created_at

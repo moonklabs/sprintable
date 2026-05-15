@@ -2,7 +2,7 @@ import uuid
 from datetime import datetime
 
 from sqlalchemy import DateTime, ForeignKey, Text, UniqueConstraint, func
-from sqlalchemy.dialects.postgresql import ARRAY, UUID
+from sqlalchemy.dialects.postgresql import ARRAY, JSONB, UUID
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.core.database import Base
@@ -81,5 +81,7 @@ class ConversationMessage(Base, TimestampMixin):
     last_reply_at: Mapped[datetime | None] = mapped_column(
         DateTime(timezone=True), nullable=True
     )
+    review_type: Mapped[str | None] = mapped_column(Text, nullable=True)
+    metadata: Mapped[dict | None] = mapped_column(JSONB, nullable=True)
 
     conversation: Mapped[Conversation] = relationship("Conversation", back_populates="messages")
