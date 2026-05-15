@@ -185,7 +185,7 @@ async def _migrate_one(db, memo: Memo) -> None:
         mentioned_ids=[],
         thread_id=None,
         reply_count=len(replies),
-        metadata=root_metadata,
+        msg_metadata=root_metadata,
     )
     root_msg.created_at = memo.created_at
     root_msg.updated_at = memo.created_at
@@ -208,7 +208,7 @@ async def _migrate_one(db, memo: Memo) -> None:
             mentioned_ids=[],
             thread_id=root_msg.id,
             review_type=reply.review_type if reply.review_type != "comment" else None,
-            metadata={"review_type": reply.review_type} if reply.review_type else None,
+            msg_metadata={"review_type": reply.review_type} if reply.review_type else None,
         )
         reply_msg.created_at = reply.created_at
         reply_msg.updated_at = reply.created_at
