@@ -5,6 +5,7 @@ import uuid
 import logging
 from typing import Literal
 
+from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models.activity_log import ActivityLog
@@ -12,6 +13,46 @@ from app.models.activity_log import ActivityLog
 logger = logging.getLogger(__name__)
 
 ActorType = Literal["agent", "human"]
+
+
+async def record_activity_bg(
+    *,
+    org_id: uuid.UUID,
+    action: str,
+    actor_id: uuid.UUID | None = None,
+    actor_type: ActorType | None = None,
+    project_id: uuid.UUID | None = None,
+    entity_type: str | None = None,
+    entity_id: uuid.UUID | None = None,
+    context: dict | None = None,
+) -> None:
+    """BackgroundTask용 activity log 기록. 실패해도 caller에 영향 없음 (AC6)."""
+    from app.core.database import async_session_factory
+    from app.models.team import TeamMember
+
+    try:
+        async with async_session_factory() as db:
+            resolved_type: ActorType = actor_type or "human"
+            if actor_type is None and actor_id is not None:
+                tm = (await db.execute(
+                    select(TeamMember).where(TeamMember.id == actor_id).limit(1)
+                )).scalar_one_or_none()
+                if tm and tm.type in ("agent", "human"):
+                    resolved_type = tm.type  # type: ignore[assignment]
+
+            await ActivityLogService(db).record(
+                org_id=org_id,
+                action=action,
+                actor_id=actor_id,
+                actor_type=resolved_type,
+                project_id=project_id,
+                entity_type=entity_type,
+                entity_id=entity_id,
+                context=context,
+            )
+            await db.commit()
+    except Exception:
+        logger.warning("record_activity_bg failed action=%s actor_id=%s", action, actor_id, exc_info=True)
 
 
 class ActivityLogService:

@@ -1,7 +1,7 @@
 import uuid
 from datetime import datetime, timezone
 
-from fastapi import APIRouter, Body, Depends, HTTPException, Query
+from fastapi import APIRouter, BackgroundTasks, Body, Depends, HTTPException, Query
 from pydantic import BaseModel
 from sqlalchemy import or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -116,6 +116,7 @@ async def get_story(
 async def update_story(
     id: uuid.UUID,
     body: StoryUpdate,
+    background_tasks: BackgroundTasks,
     repo: StoryRepository = Depends(_get_repo),
     db: AsyncSession = Depends(get_db),
     auth: AuthContext = Depends(get_current_user),
@@ -204,6 +205,20 @@ async def update_story(
             except Exception:
                 pass
 
+    # S-C2: story_updated — actor가 agent인 경우 기록 (AC2, AC6)
+    if actor_id:
+        from app.services.activity_log import record_activity_bg
+        background_tasks.add_task(
+            record_activity_bg,
+            org_id=repo.org_id,
+            action="story_updated",
+            actor_id=actor_id,
+            project_id=story.project_id,
+            entity_type="story",
+            entity_id=id,
+            context={"fields": list(data.keys()), "story_title": story.title},
+        )
+
     return StoryResponse.model_validate(story)
 
 
@@ -222,6 +237,7 @@ async def delete_story(
 async def update_story_status(
     id: uuid.UUID,
     body: StoryStatusUpdate,
+    background_tasks: BackgroundTasks,
     repo: StoryRepository = Depends(_get_repo),
     db: AsyncSession = Depends(get_db),
     auth: AuthContext = Depends(get_current_user),
@@ -313,6 +329,20 @@ async def update_story_status(
                 await db.flush()
             except Exception:
                 pass
+
+    # S-C2: story_updated — actor가 agent인 경우 기록 (AC2, AC6)
+    if actor_id:
+        from app.services.activity_log import record_activity_bg
+        background_tasks.add_task(
+            record_activity_bg,
+            org_id=repo.org_id,
+            action="story_updated",
+            actor_id=actor_id,
+            project_id=story.project_id,
+            entity_type="story",
+            entity_id=id,
+            context={"old_status": old_status, "new_status": story.status, "story_title": story.title},
+        )
 
     return StoryResponse.model_validate(story)
 

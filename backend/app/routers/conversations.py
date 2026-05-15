@@ -593,6 +593,21 @@ async def send_message(
         org_id=org_id,
     )
 
+    # S-C2: agent sender인 경우에만 message_sent 기록 (AC2, AC4, AC5, AC6)
+    if sender.type == "agent":
+        from app.services.activity_log import record_activity_bg
+        background_tasks.add_task(
+            record_activity_bg,
+            org_id=org_id,
+            action="message_sent",
+            actor_id=sender.id,
+            actor_type="agent",
+            project_id=conv.project_id,
+            entity_type="conversation",
+            entity_id=conversation_id,
+            context={"message_id": str(msg.id)},
+        )
+
     return {"data": _msg_payload(msg, sender)}
 
 
