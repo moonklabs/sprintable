@@ -26,15 +26,23 @@ router = APIRouter(prefix="/api/v2/conversations", tags=["conversations"])
 
 # ─── Helpers ──────────────────────────────────────────────────────────────────
 
-async def _resolve_member(auth: AuthContext, org_id: uuid.UUID, db: AsyncSession) -> TeamMember:
+async def _resolve_member(
+    auth: AuthContext,
+    org_id: uuid.UUID,
+    db: AsyncSession,
+    project_id: uuid.UUID | None = None,
+) -> TeamMember:
     is_api_key = bool(auth.claims.get("app_metadata", {}).get("api_key_id"))
     if is_api_key:
         stmt = select(TeamMember).where(TeamMember.id == uuid.UUID(auth.user_id))
     else:
-        stmt = select(TeamMember).where(
+        filters = [
             TeamMember.user_id == uuid.UUID(auth.user_id),
             TeamMember.org_id == org_id,
-        )
+        ]
+        if project_id is not None:
+            filters.append(TeamMember.project_id == project_id)
+        stmt = select(TeamMember).where(*filters)
     member = (await db.execute(stmt)).scalars().first()
     if member is None:
         raise HTTPException(status_code=400, detail="Team member not found")
@@ -84,6 +92,7 @@ async def _dispatch_conversation_event(
     )).all()
     member_type_map = {r[0]: r[1] for r in member_rows}
 
+    events_to_push: list[tuple[str, Event]] = []
     for pid in participant_ids:
         m_type = member_type_map.get(pid, "human")
         event = Event(
@@ -99,10 +108,12 @@ async def _dispatch_conversation_event(
             status="pending",
         )
         db.add(event)
-        # human/agent 모두 per-member push — org 전체 브로드캐스트 방지
-        _push_to_agent(str(pid), {"event_type": "conversation:message", **payload})
+        events_to_push.append((str(pid), event))
 
+    # flush 후 event.id 확보 → event_id 포함 push (dedup 동작 보장)
     await db.flush()
+    for pid_str, event in events_to_push:
+        _push_to_agent(pid_str, {"event_id": str(event.id), "event_type": "conversation:message", **payload})
 
 
 # ─── Schemas ──────────────────────────────────────────────────────────────────
@@ -133,7 +144,7 @@ async def create_conversation(
     org_id: uuid.UUID = Depends(get_verified_org_id),
 ) -> dict:
     """POST /api/v2/conversations — dm/group 생성 (dm 중복 방지)."""
-    sender = await _resolve_member(auth, org_id, db)
+    sender = await _resolve_member(auth, org_id, db, project_id=body.project_id)
 
     # DM 중복 방지: 동일 participant pair의 dm이 이미 있으면 반환
     if body.type == "dm" and len(body.participant_ids) == 1:
@@ -186,7 +197,7 @@ async def list_conversations(
     org_id: uuid.UUID = Depends(get_verified_org_id),
 ) -> dict:
     """GET /api/v2/conversations — 최근 메시지 미리보기 + 참여 대화 목록."""
-    sender = await _resolve_member(auth, org_id, db)
+    sender = await _resolve_member(auth, org_id, db, project_id=project_id)
 
     conv_ids_result = await db.execute(
         select(ConversationParticipant.conversation_id).where(
@@ -261,7 +272,13 @@ async def list_messages(
     org_id: uuid.UUID = Depends(get_verified_org_id),
 ) -> dict:
     """GET /api/v2/conversations/{id}/messages — cursor 기반 페이지네이션."""
-    sender = await _resolve_member(auth, org_id, db)
+    conv_project_id = (await db.execute(
+        select(Conversation.project_id).where(Conversation.id == conversation_id, Conversation.org_id == org_id)
+    )).scalar_one_or_none()
+    if conv_project_id is None:
+        raise HTTPException(status_code=404, detail="Conversation not found")
+
+    sender = await _resolve_member(auth, org_id, db, project_id=conv_project_id)
 
     # 참여자 검증
     participant = (await db.execute(
@@ -309,13 +326,13 @@ async def add_participant(
     org_id: uuid.UUID = Depends(get_verified_org_id),
 ) -> dict:
     """POST /api/v2/conversations/{id}/participants — 참여자 추가."""
-    sender = await _resolve_member(auth, org_id, db)
-
     conv = (await db.execute(
         select(Conversation).where(Conversation.id == conversation_id, Conversation.org_id == org_id)
     )).scalar_one_or_none()
     if conv is None:
         raise HTTPException(status_code=404, detail="Conversation not found")
+
+    sender = await _resolve_member(auth, org_id, db, project_id=conv.project_id)
 
     # 요청자 참여 여부 확인
     is_participant = (await db.execute(
@@ -390,13 +407,13 @@ async def send_message(
     org_id: uuid.UUID = Depends(get_verified_org_id),
 ) -> dict:
     """POST /api/v2/conversations/{id}/messages — 전송 + SSE dispatch."""
-    sender = await _resolve_member(auth, org_id, db)
-
     conv = (await db.execute(
         select(Conversation).where(Conversation.id == conversation_id, Conversation.org_id == org_id)
     )).scalar_one_or_none()
     if conv is None:
         raise HTTPException(status_code=404, detail="Conversation not found")
+
+    sender = await _resolve_member(auth, org_id, db, project_id=conv.project_id)
 
     # 참여자 검증
     participant = (await db.execute(
