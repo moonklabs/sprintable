@@ -363,6 +363,8 @@ async def list_memos(
     trigger_type: str | None = Query(default=None),
     repo: MemoRepository = Depends(_get_repo),
 ) -> list[MemoListResponse]:
+    from app.models.conversation import Conversation
+
     filters: dict = {}
     if project_id:
         filters["project_id"] = project_id
@@ -378,6 +380,7 @@ async def list_memos(
         filters["trigger_type"] = trigger_type
     memos = await repo.list(**filters)
     memo_ids = [m.id for m in memos]
+    memo_id_set = {m.id for m in memos}
     counts = await repo.get_entity_link_counts_batch(memo_ids)
     reply_counts = await repo.get_reply_counts_batch(memo_ids)
     results = []
@@ -388,43 +391,92 @@ async def list_memos(
         memo_dict["reply_count"] = rc
         memo_dict["latest_reply_at"] = latest
         results.append(MemoListResponse.model_validate(memo_dict))
+
+    # AC4: conversation-backed memos (신규 생성, memo row 없는 것만)
+    conv_q = select(Conversation).where(
+        Conversation.org_id == repo.org_id,
+        Conversation.id.notin_(memo_id_set) if memo_id_set else True,
+        Conversation.deleted_at.is_(None) if hasattr(Conversation, "deleted_at") else True,
+    )
+    if project_id:
+        conv_q = conv_q.where(Conversation.project_id == project_id)
+    if status_filter:
+        conv_q = conv_q.where(Conversation.status == status_filter)
+    convs = (await repo.session.execute(conv_q)).scalars().all()
+    for conv in convs:
+        results.append(MemoListResponse.model_validate({
+            "id": conv.id,
+            "project_id": conv.project_id,
+            "org_id": conv.org_id,
+            "memo_type": "memo",
+            "title": conv.title,
+            "content": "",
+            "created_by": conv.created_by,
+            "assigned_to": None,
+            "status": conv.status or "open",
+            "supersedes_id": None,
+            "resolved_by": conv.resolved_by,
+            "resolved_at": conv.resolved_at,
+            "archived_at": None,
+            "memo_metadata": {},
+            "created_at": conv.created_at,
+            "updated_at": conv.updated_at,
+            "embed_count": 0,
+            "reply_count": 0,
+            "latest_reply_at": None,
+        }))
+
     return results
 
 
-@router.post("", response_model=MemoListResponse, status_code=201)
+@router.post("", status_code=201)
 async def create_memo(
     body: CreateMemo,
     background_tasks: BackgroundTasks,
     session: AsyncSession = Depends(get_db),
     _auth: AuthContext = Depends(get_current_user),
-) -> MemoListResponse:
-    repo = MemoRepository(session, body.org_id)
-    memo = await repo.create(
-        project_id=body.project_id,
-        content=body.content,
-        memo_type=body.memo_type,
-        title=body.title,
-        assigned_to=body.assigned_to,
-        created_by=body.created_by,
-        supersedes_id=body.supersedes_id,
-        memo_metadata=body.memo_metadata,
-    )
+) -> dict:
+    # AC1: conversation adapter로 라우팅 (memo row 미생성)
+    from app.models.conversation import Conversation, ConversationMessage, ConversationParticipant
+
+    participant_ids: set[uuid.UUID] = set()
+    if body.created_by:
+        participant_ids.add(body.created_by)
+    if body.assigned_to:
+        participant_ids.add(body.assigned_to)
     if body.assigned_to_ids:
-        for member_id in body.assigned_to_ids:
-            session.add(MemoAssignee(
-                memo_id=memo.id,
-                member_id=member_id,
-                assigned_by=body.created_by,
-            ))
-        await session.flush()
-    parsed_embeds = _parse_entity_embeds(body.content or "")
-    all_embeds = list(body.embeds or []) + [
-        e for e in parsed_embeds
-        if not any(x.entity_type == e.entity_type and x.entity_id == e.entity_id for x in (body.embeds or []))
-    ]
-    if all_embeds:
-        await repo.create_entity_links(memo.id, all_embeds)
-    publish_event(str(body.org_id), "memo_created", {"id": str(memo.id)})
+        participant_ids.update(body.assigned_to_ids)
+
+    conv = Conversation(
+        project_id=body.project_id,
+        org_id=body.org_id,
+        type="group",
+        title=body.title,
+        created_by=body.created_by,
+        status="open",
+    )
+    session.add(conv)
+    for pid in participant_ids:
+        session.add(ConversationParticipant(conversation_id=conv.id, member_id=pid))
+    await session.flush()
+
+    root_msg = ConversationMessage(
+        conversation_id=conv.id,
+        sender_id=body.created_by,
+        content=body.content or "",
+        mentioned_ids=[],
+        thread_id=None,
+    )
+    session.add(root_msg)
+    await session.flush()
+
+    logger.info(
+        "create_memo routed to conversation conversation_id=%s message_id=%s project_id=%s",
+        conv.id, root_msg.id, body.project_id,
+    )
+    publish_event(str(body.org_id), "memo_created", {"id": str(conv.id)})
+
+    # webhook + side effects
     memo_recipient_ids: set[uuid.UUID] = set()
     if body.assigned_to:
         memo_recipient_ids.add(body.assigned_to)
@@ -441,27 +493,45 @@ async def create_memo(
         memo_webhook_urls = [row[0] for row in wh_rows if row[0]]
         if memo_webhook_urls:
             app_url = os.environ.get("NEXT_PUBLIC_APP_URL", "")
-            memo_url = f"{app_url}/memos?id={memo.id}" if app_url else ""
-            wh_content = f"**새 메모**\n{(body.content or '')[:500]}\n\nmemo_id: {memo.id}"
+            memo_url = f"{app_url}/memos?id={conv.id}" if app_url else ""
+            wh_content = f"**새 메모**\n{(body.content or '')[:500]}\n\nmemo_id: {conv.id}"
             wh_title = body.title or "새 메모"
             for wh_url in memo_webhook_urls:
-                background_tasks.add_task(_fire_webhook, wh_url, wh_content, wh_title, memo_url, str(memo.id))
+                background_tasks.add_task(_fire_webhook, wh_url, wh_content, wh_title, memo_url, str(conv.id))
+
     _is_workflow_origin = (body.memo_metadata or {}).get("origin") == "workflow"
     if not _is_workflow_origin:
         background_tasks.add_task(
             _memo_side_effects_bg,
-            memo_id=memo.id,
+            memo_id=conv.id,
             org_id=body.org_id,
             project_id=body.project_id,
-            assigned_to=body.assigned_to,
+            assigned_to=body.assigned_to or (body.assigned_to_ids[0] if body.assigned_to_ids else None),
             created_by=body.created_by,
             title=body.title,
             memo_type=body.memo_type,
             content=body.content,
         )
-    memo_dict = {k: v for k, v in memo.__dict__.items() if not k.startswith("_")}
-    memo_dict["embed_count"] = len(all_embeds)
-    return MemoListResponse.model_validate(memo_dict)
+
+    # AC5: deprecated response (memo_id + conversation_id + message_id + deprecated)
+    return {
+        "id": str(conv.id),
+        "memo_id": str(conv.id),
+        "conversation_id": str(conv.id),
+        "message_id": str(root_msg.id),
+        "deprecated": True,
+        "project_id": str(body.project_id) if body.project_id else None,
+        "org_id": str(body.org_id),
+        "memo_type": body.memo_type or "memo",
+        "title": body.title,
+        "content": body.content,
+        "status": "open",
+        "created_at": conv.created_at.isoformat() if conv.created_at else None,
+        "updated_at": conv.updated_at.isoformat() if conv.updated_at else None,
+        "memo_metadata": body.memo_metadata or {},
+        "embed_count": 0,
+        "reply_count": 0,
+    }
 
 
 @router.get("/{id}", response_model=MemoResponse)
@@ -470,6 +540,62 @@ async def get_memo(
     db: AsyncSession = Depends(get_db),
     repo: MemoRepository = Depends(_get_repo),
 ) -> MemoResponse:
+    from app.models.conversation import Conversation, ConversationMessage
+
+    # AC3: conversation 우선 조회 (S-B1 마이그레이션 + 신규 생성)
+    conv = await db.get(Conversation, id)
+    if conv is not None:
+        root_result = await db.execute(
+            select(ConversationMessage)
+            .where(ConversationMessage.conversation_id == id, ConversationMessage.thread_id.is_(None))
+            .limit(1)
+        )
+        root_msg = root_result.scalar_one_or_none()
+        reply_results = await db.execute(
+            select(ConversationMessage)
+            .where(ConversationMessage.conversation_id == id, ConversationMessage.thread_id.isnot(None))
+            .order_by(ConversationMessage.created_at.asc())
+        )
+        reply_msgs = reply_results.scalars().all()
+        reply_items = [
+            ReplyResponse.model_validate({
+                "id": r.id,
+                "memo_id": id,
+                "created_by": r.sender_id,
+                "content": r.content,
+                "review_type": "comment",
+                "attachments": [],
+                "created_at": r.created_at,
+            }) for r in reply_msgs
+        ]
+        return MemoResponse.model_validate({
+            "id": conv.id,
+            "project_id": conv.project_id,
+            "org_id": conv.org_id,
+            "memo_type": "memo",
+            "title": conv.title,
+            "content": root_msg.content if root_msg else "",
+            "created_by": conv.created_by,
+            "assigned_to": None,
+            "status": conv.status or "open",
+            "supersedes_id": None,
+            "resolved_by": conv.resolved_by,
+            "resolved_at": conv.resolved_at,
+            "archived_at": None,
+            "memo_metadata": {},
+            "created_at": conv.created_at,
+            "updated_at": conv.updated_at,
+            "deleted_at": None,
+            "replies": reply_items,
+            "reply_count": len(reply_items),
+            "embeds": [],
+            "embed_count": 0,
+            "latest_reply_at": reply_msgs[-1].created_at if reply_msgs else None,
+        })
+
+    # AC7: fallback 로그
+    logger.info("get_memo memo_fallback_used=True memo_id=%s", id)
+
     memo = await repo.get(id)
     if memo is None:
         raise HTTPException(status_code=404, detail="Memo not found")
@@ -511,14 +637,67 @@ async def delete_memo(
     return {"ok": True}
 
 
-@router.post("/{id}/replies", response_model=ReplyResponse, status_code=201)
+@router.post("/{id}/replies", status_code=201)
 async def add_reply(
     id: uuid.UUID,
     body: CreateReply,
     background_tasks: BackgroundTasks,
     db: AsyncSession = Depends(get_db),
     repo: MemoRepository = Depends(_get_repo),
-) -> ReplyResponse:
+) -> dict:
+    from app.models.conversation import Conversation, ConversationMessage
+
+    # AC2: conversation thread reply로 라우팅 (memo_reply row 미생성)
+    root_result = await db.execute(
+        select(ConversationMessage)
+        .where(ConversationMessage.conversation_id == id, ConversationMessage.thread_id.is_(None))
+        .limit(1)
+    )
+    root_msg = root_result.scalar_one_or_none()
+
+    if root_msg is not None:
+        reply_msg = ConversationMessage(
+            conversation_id=id,
+            sender_id=body.created_by,
+            content=body.content or "",
+            mentioned_ids=[],
+            thread_id=root_msg.id,
+        )
+        db.add(reply_msg)
+        await db.flush()
+        logger.info(
+            "add_reply routed to conversation thread conversation_id=%s message_id=%s",
+            id, reply_msg.id,
+        )
+        # webhook 발송 (기존 참여자 수집)
+        conv = await db.get(Conversation, id)
+        if conv:
+            webhook_urls = await _collect_reply_webhook_urls(
+                db, id, None, conv.created_by, body.created_by, body.assigned_to_ids
+            )
+            if webhook_urls:
+                app_url = os.environ.get("NEXT_PUBLIC_APP_URL", "")
+                memo_url = f"{app_url}/memos?id={id}" if app_url else ""
+                wh_content = f"📩 **새 답신**\n{(body.content or '')[:500]}\n\nreply_id: {reply_msg.id}"
+                for url in webhook_urls:
+                    background_tasks.add_task(_fire_webhook, url, wh_content, conv.title or "메모 답신", memo_url, str(id))
+        # AC5: deprecated response
+        return {
+            "id": str(reply_msg.id),
+            "memo_id": str(id),
+            "conversation_id": str(id),
+            "message_id": str(reply_msg.id),
+            "deprecated": True,
+            "content": body.content,
+            "created_by": str(body.created_by),
+            "review_type": body.review_type,
+            "attachments": body.attachments or [],
+            "created_at": reply_msg.created_at.isoformat() if reply_msg.created_at else None,
+        }
+
+    # AC7: fallback 로그 (legacy memo path)
+    logger.info("add_reply memo_fallback_used=True memo_id=%s", id)
+
     memo = await repo.get(id)
     if memo is None:
         raise HTTPException(status_code=404, detail="Memo not found")
@@ -529,7 +708,6 @@ async def add_reply(
     )
     publish_event(str(repo.org_id), "reply_created", {"id": str(reply.id), "memo_id": str(id)})
 
-    # 세션이 열려 있는 지금 webhook URLs 수집 후 BackgroundTasks에 HTTP 발송 위임
     webhook_urls = await _collect_reply_webhook_urls(
         db, id, memo.assigned_to, memo.created_by, body.created_by, body.assigned_to_ids
     )
@@ -541,7 +719,6 @@ async def add_reply(
         for url in webhook_urls:
             background_tasks.add_task(_fire_webhook, url, content, title, memo_url, str(id))
 
-    # chat events / notification / eventbus / workflow → 새 세션으로 백그라운드 처리
     background_tasks.add_task(
         _reply_side_effects_bg,
         memo_id=id,
@@ -551,7 +728,8 @@ async def add_reply(
         sender_id=body.created_by,
     )
 
-    return ReplyResponse.model_validate(reply)
+    reply_dict = {k: v for k, v in reply.__dict__.items() if not k.startswith("_")}
+    return reply_dict
 
 
 @router.post("/{id}/resolve", response_model=MemoListResponse)
