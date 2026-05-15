@@ -59,10 +59,10 @@ async def route_dispatch_event(
     channel = pref.channel if pref else ("sse" if recipient_type == "agent" else "in_app")
     level = pref.level if pref else "all"
 
-    # AC3: agent + assigned event → mute 무시, 강제 delivery
+    # AC3: agent + assigned event → mute 무시, 강제 delivery (exact match)
     is_mandatory = (
         recipient_type == "agent"
-        and any(t in (event.event_type or "") for t in _AGENT_MANDATORY_TYPES)
+        and event.event_type in _AGENT_MANDATORY_TYPES
     )
     if level == "mute" and not is_mandatory:
         logger.debug("route_dispatch_event: mute skip event_id=%s recipient=%s", event_id, recipient_id)
