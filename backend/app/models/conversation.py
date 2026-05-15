@@ -64,5 +64,15 @@ class ConversationMessage(Base, TimestampMixin):
     mentioned_ids: Mapped[list[uuid.UUID]] = mapped_column(
         ARRAY(UUID(as_uuid=True)), nullable=False, default=list
     )
+    thread_id: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True),
+        ForeignKey("conversation_messages.id", ondelete="SET NULL"),
+        nullable=True,
+        index=True,
+    )
+    reply_count: Mapped[int] = mapped_column(nullable=False, default=0)
+    last_reply_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )
 
     conversation: Mapped[Conversation] = relationship("Conversation", back_populates="messages")

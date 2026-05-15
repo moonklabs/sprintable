@@ -8,7 +8,7 @@ from datetime import datetime, timezone
 
 from fastapi import APIRouter, Depends, HTTPException, Query
 from pydantic import BaseModel
-from sqlalchemy import and_, select
+from sqlalchemy import and_, select, update
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -53,6 +53,9 @@ def _msg_payload(msg: ConversationMessage, sender: TeamMember | None) -> dict:
     return {
         "id": str(msg.id),
         "conversation_id": str(msg.conversation_id),
+        "thread_id": str(msg.thread_id) if msg.thread_id else None,
+        "reply_count": msg.reply_count,
+        "last_reply_at": msg.last_reply_at.isoformat() if msg.last_reply_at else None,
         "content": msg.content,
         "mentioned_ids": [str(m) for m in (msg.mentioned_ids or [])],
         "sender": {
@@ -128,6 +131,7 @@ class CreateConversationRequest(BaseModel):
 class SendMessageRequest(BaseModel):
     content: str
     mentioned_ids: list[uuid.UUID] = []
+    thread_id: uuid.UUID | None = None
 
 
 class AddParticipantRequest(BaseModel):
@@ -267,11 +271,16 @@ async def list_messages(
     conversation_id: uuid.UUID,
     limit: int = Query(default=30, le=200),
     before: str | None = Query(default=None),
+    thread_id: uuid.UUID | None = Query(default=None),
     db: AsyncSession = Depends(get_db),
     auth: AuthContext = Depends(get_current_user),
     org_id: uuid.UUID = Depends(get_verified_org_id),
 ) -> dict:
-    """GET /api/v2/conversations/{id}/messages — cursor 기반 페이지네이션."""
+    """GET /api/v2/conversations/{id}/messages — cursor 기반 페이지네이션.
+
+    thread_id 미지정: top-level 메시지만 반환 (thread_id IS NULL).
+    thread_id 지정: 해당 thread의 reply 목록 반환.
+    """
     conv_project_id = (await db.execute(
         select(Conversation.project_id).where(Conversation.id == conversation_id, Conversation.org_id == org_id)
     )).scalar_one_or_none()
@@ -290,9 +299,14 @@ async def list_messages(
     if participant is None:
         raise HTTPException(status_code=403, detail="Not a participant")
 
+    if thread_id is None:
+        thread_filter = ConversationMessage.thread_id.is_(None)
+    else:
+        thread_filter = ConversationMessage.thread_id == thread_id
+
     stmt = (
         select(ConversationMessage)
-        .where(ConversationMessage.conversation_id == conversation_id)
+        .where(ConversationMessage.conversation_id == conversation_id, thread_filter)
         .order_by(ConversationMessage.created_at.desc())
         .limit(limit + 1)
     )
@@ -425,13 +439,40 @@ async def send_message(
     if participant is None:
         raise HTTPException(status_code=403, detail="Not a participant")
 
+    # thread_id 유효성 검증 — 같은 conversation의 top-level message만 허용
+    root_msg: ConversationMessage | None = None
+    if body.thread_id is not None:
+        root_msg = (await db.execute(
+            select(ConversationMessage).where(
+                ConversationMessage.id == body.thread_id,
+                ConversationMessage.conversation_id == conversation_id,
+            )
+        )).scalar_one_or_none()
+        if root_msg is None:
+            raise HTTPException(status_code=400, detail="Thread root not found in this conversation")
+        if root_msg.thread_id is not None:
+            raise HTTPException(status_code=400, detail="Cannot reply to a reply (single-level thread only)")
+
     msg = ConversationMessage(
         conversation_id=conversation_id,
         sender_id=sender.id,
         content=body.content,
         mentioned_ids=body.mentioned_ids,
+        thread_id=body.thread_id,
     )
     db.add(msg)
+
+    # reply인 경우 root message의 reply_count / last_reply_at 원자 업데이트
+    if root_msg is not None:
+        await db.execute(
+            update(ConversationMessage)
+            .where(ConversationMessage.id == body.thread_id)
+            .values(
+                reply_count=ConversationMessage.reply_count + 1,
+                last_reply_at=datetime.now(timezone.utc),
+            )
+        )
+
     await db.flush()
 
     try:
