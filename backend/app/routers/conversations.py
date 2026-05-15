@@ -8,7 +8,7 @@ from datetime import datetime, timezone
 
 from fastapi import APIRouter, Depends, HTTPException, Query
 from pydantic import BaseModel
-from sqlalchemy import and_, select
+from sqlalchemy import and_, select, update
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -462,11 +462,16 @@ async def send_message(
     )
     db.add(msg)
 
-    # reply인 경우 root message의 reply_count / last_reply_at 업데이트
+    # reply인 경우 root message의 reply_count / last_reply_at 원자 업데이트
     if root_msg is not None:
-        now = datetime.now(timezone.utc)
-        root_msg.reply_count = (root_msg.reply_count or 0) + 1
-        root_msg.last_reply_at = now
+        await db.execute(
+            update(ConversationMessage)
+            .where(ConversationMessage.id == body.thread_id)
+            .values(
+                reply_count=ConversationMessage.reply_count + 1,
+                last_reply_at=datetime.now(timezone.utc),
+            )
+        )
 
     await db.flush()
 
