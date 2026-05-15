@@ -109,3 +109,21 @@ async def route_dispatch_event(
     else:
         # in_app, telegram 등 — 현재 in_app은 SSE로 처리
         _push_to_agent(str(recipient_id), payload)
+
+    # S-C2: dispatch_triggered — agent recipient인 경우 기록 (AC2, AC6)
+    if recipient_type == "agent":
+        try:
+            from app.services.activity_log import record_activity_bg
+            import asyncio
+            asyncio.ensure_future(record_activity_bg(
+                org_id=event.org_id,
+                action="dispatch_triggered",
+                actor_id=recipient_id,
+                actor_type="agent",
+                project_id=getattr(event, "project_id", None),
+                entity_type="event",
+                entity_id=event_id,
+                context={"event_type": event.event_type, "channel": channel},
+            ))
+        except Exception:
+            logger.warning("dispatch record_activity_bg setup failed event_id=%s", event_id, exc_info=True)
