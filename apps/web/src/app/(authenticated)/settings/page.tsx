@@ -4,7 +4,7 @@ import { useEffect, useMemo, useState } from 'react';
 import Link from 'next/link';
 import { useRouter, useSearchParams } from 'next/navigation';
 import { useTranslations } from 'next-intl';
-import { BarChart2, Bell, Bot, CreditCard, FolderKanban, GitBranch, Key, Menu, Palette, Trash2, User, Users, X, Zap } from 'lucide-react';
+import { BarChart2, Bell, Bot, Check, CreditCard, FolderKanban, GitBranch, Key, Menu, Palette, Trash2, User, Users, X, Zap } from 'lucide-react';
 import { UsageDashboard } from '@/components/settings/usage-dashboard';
 import { AiSettingsSection } from '@/components/settings/ai-settings';
 import { MyProfileSection } from '@/components/settings/my-profile-section';
@@ -69,6 +69,14 @@ interface ProjectMember {
   is_active: boolean;
   webhook_url?: string | null;
   created_by?: string | null;
+  fakechat_port?: number | null;
+}
+
+interface NewAgentResult {
+  name: string;
+  fakechat_port: number | null;
+  mcp_config: Record<string, unknown> | null;
+  api_key: string | null;
 }
 
 const NOTIFICATION_CATEGORIES = [
@@ -153,6 +161,8 @@ export default function SettingsPage() {
   const [addingAgent, setAddingAgent] = useState(false);
   const [deactivatingAgentId, setDeactivatingAgentId] = useState<string | null>(null);
   const [agentActionMessage, setAgentActionMessage] = useState<{ type: 'success' | 'error'; text: string } | null>(null);
+  const [newAgentResult, setNewAgentResult] = useState<NewAgentResult | null>(null);
+  const [newAgentMcpCopied, setNewAgentMcpCopied] = useState(false);
   const [webhookEditing, setWebhookEditing] = useState<Record<string, string>>({});
   const [webhookSaving, setWebhookSaving] = useState<string | null>(null);
   const [webhookErrors, setWebhookErrors] = useState<Record<string, string>>({});
@@ -219,21 +229,37 @@ export default function SettingsPage() {
     if (!newAgentName.trim() || !newAgentProjectId || !orgId) return;
     setAddingAgent(true);
     setAgentActionMessage(null);
+    setNewAgentResult(null);
     const res = await fetch('/api/team-members', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ org_id: orgId, project_id: newAgentProjectId, name: newAgentName.trim(), type: 'agent', role: 'member' }),
     });
     if (res.ok) {
+      const json = await res.json() as { data?: { fakechat_port?: number | null; mcp_config?: Record<string, unknown> | null; api_key?: string | null } };
+      setNewAgentResult({
+        name: newAgentName.trim(),
+        fakechat_port: json.data?.fakechat_port ?? null,
+        mcp_config: json.data?.mcp_config ?? null,
+        api_key: json.data?.api_key ?? null,
+      });
       setNewAgentName('');
       setNewAgentProjectId('');
-      setAgentActionMessage({ type: 'success', text: t('agentAdded') });
       await refreshOrgAgents();
     } else {
-      const json = await res.json().catch(() => null);
+      const json = await res.json().catch(() => null) as { error?: { message?: string } } | null;
       setAgentActionMessage({ type: 'error', text: json?.error?.message ?? t('agentActionFailed') });
     }
     setAddingAgent(false);
+  };
+
+  const handleCopyNewAgentMcp = async () => {
+    if (!newAgentResult?.mcp_config) return;
+    try {
+      await navigator.clipboard.writeText(JSON.stringify(newAgentResult.mcp_config, null, 2));
+      setNewAgentMcpCopied(true);
+      setTimeout(() => setNewAgentMcpCopied(false), 2000);
+    } catch { /* noop */ }
   };
 
   const handleToggleAgentActive = async (agent: ProjectMember) => {
@@ -1021,6 +1047,47 @@ export default function SettingsPage() {
                         </div>
                       ) : null}
 
+                      {newAgentResult ? (
+                        <div className="rounded-md border border-emerald-500/30 bg-emerald-500/5 p-4 space-y-3">
+                          <div className="flex items-center justify-between">
+                            <p className="text-sm font-semibold text-emerald-500">
+                              {newAgentResult.name} 생성 완료
+                            </p>
+                            <button type="button" onClick={() => setNewAgentResult(null)} className="text-muted-foreground hover:text-foreground">
+                              <X className="size-3.5" />
+                            </button>
+                          </div>
+                          {newAgentResult.fakechat_port ? (
+                            <div className="flex items-center gap-2 text-xs">
+                              <Badge variant="info">SSE</Badge>
+                              <span className="font-mono text-foreground">Port: {newAgentResult.fakechat_port}</span>
+                              <span className="text-muted-foreground">— fakechat http://localhost:{newAgentResult.fakechat_port}/sse</span>
+                            </div>
+                          ) : null}
+                          {newAgentResult.api_key ? (
+                            <div className="space-y-1">
+                              <p className="text-xs font-medium text-foreground">API Key — 지금만 표시됩니다.</p>
+                              <code className="block break-all rounded bg-background border border-border p-2 text-xs font-mono text-foreground/80">
+                                {newAgentResult.api_key}
+                              </code>
+                            </div>
+                          ) : null}
+                          {newAgentResult.mcp_config ? (
+                            <div className="space-y-1">
+                              <div className="flex items-center justify-between">
+                                <p className="text-xs font-medium text-foreground">MCP Config (SSE)</p>
+                                <Button variant="glass" size="sm" onClick={() => void handleCopyNewAgentMcp()}>
+                                  {newAgentMcpCopied ? <Check className="size-3" /> : 'Copy'}
+                                </Button>
+                              </div>
+                              <pre className="overflow-x-auto rounded-md border border-border bg-muted/30 p-3 text-xs text-foreground/80">
+                                {JSON.stringify(newAgentResult.mcp_config, null, 2)}
+                              </pre>
+                            </div>
+                          ) : null}
+                        </div>
+                      ) : null}
+
                       {orgAgents.length > 0 ? (
                         <div className="space-y-2">
                           {orgAgents.map((agent) => {
@@ -1032,6 +1099,8 @@ export default function SettingsPage() {
                                   <div className="mt-1 flex flex-wrap items-center gap-2">
                                     <Badge variant="secondary">{t('agentMember')}</Badge>
                                     <Badge variant="outline">{agent.role}</Badge>
+                                    <Badge variant="info">SSE</Badge>
+                                    {agent.fakechat_port ? <span className="font-mono text-[11px] text-muted-foreground">:{agent.fakechat_port}</span> : null}
                                     <span className="text-xs text-muted-foreground">{projectName}</span>
                                     {currentUserId && agent.created_by === currentUserId ? <Badge variant="outline" className="border-primary/40 text-primary text-[10px]">{t('agentOwner')}</Badge> : null}
                                     {!agent.is_active ? <Badge variant="destructive">inactive</Badge> : null}
