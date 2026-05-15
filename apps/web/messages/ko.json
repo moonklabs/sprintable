@@ -2120,6 +2120,11 @@
     "dmWith": "님과의 대화",
     "noMessages": "첫 메시지를 보내보세요",
     "create": "대화 시작",
-    "memoSection": "메모"
+    "memoSection": "메모",
+    "addParticipants": "참여자 추가",
+    "addParticipantsTitle": "참여자 추가",
+    "participantsOthers": "외 {count}명",
+    "forkInfo": "DM에 참여자를 추가하면 새 그룹 채팅이 생성됩니다. 기존 DM은 유지됩니다.",
+    "adding": "추가 중…"
   }
 }

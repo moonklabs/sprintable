@@ -9,6 +9,12 @@ import { EmptyState } from '@/components/ui/empty-state';
 import { NewConversationModal } from './new-conversation-modal';
 import { useChatSse } from '@/hooks/use-chat-sse';
 
+interface Participant {
+  member_id: string;
+  name: string;
+  avatar_url?: string | null;
+}
+
 interface ConversationItem {
   id: string;
   type: 'dm' | 'group';
@@ -16,6 +22,7 @@ interface ConversationItem {
   latest_message: { content: string; created_at: string } | null;
   updated_at: string;
   unread_count?: number;
+  participants?: Participant[];
 }
 
 interface ChatListViewProps {
@@ -34,18 +41,43 @@ function formatTime(iso: string): string {
   return d.toLocaleDateString('ko-KR', { month: 'short', day: 'numeric' });
 }
 
+function formatParticipantNames(
+  participants: Participant[],
+  currentMemberId: string,
+  type: 'dm' | 'group',
+): string {
+  const others = participants.filter((p) => p.member_id !== currentMemberId);
+  if (others.length === 0) return type === 'dm' ? 'DM' : '그룹 채팅';
+  if (type === 'dm') return others[0]!.name;
+  const MAX = 3;
+  if (others.length <= MAX) return others.map((p) => p.name).join(', ');
+  const visible = others.slice(0, MAX).map((p) => p.name).join(', ');
+  return `${visible} 외 ${others.length - MAX}명`;
+}
+
 function ConversationRow({
   conv,
+  currentMemberId,
   onClick,
 }: {
   conv: ConversationItem;
+  currentMemberId: string;
   onClick: () => void;
 }) {
   const t = useTranslations('chats');
-  const displayName = conv.title ?? (conv.type === 'dm' ? t('dmWith') : '그룹 채팅');
+
+  const displayName = conv.title ??
+    (conv.participants && conv.participants.length > 0
+      ? formatParticipantNames(conv.participants, currentMemberId, conv.type)
+      : conv.type === 'dm' ? t('dmWith') : '그룹 채팅');
+
   const preview = conv.latest_message?.content ?? t('noMessages');
   const time = conv.latest_message?.created_at ?? conv.updated_at;
   const unread = conv.unread_count ?? 0;
+
+  const avatarInitial = conv.type === 'dm' && conv.participants
+    ? (conv.participants.find((p) => p.member_id !== currentMemberId)?.name.slice(0, 2) ?? 'DM')
+    : null;
 
   return (
     <button
@@ -59,7 +91,11 @@ function ConversationRow({
           ? 'bg-primary/15 text-primary'
           : 'bg-violet-100 text-violet-700 dark:bg-violet-900/40 dark:text-violet-300'
       }`}>
-        {conv.type === 'dm' ? <MessageSquare className="h-4 w-4" /> : <Users className="h-4 w-4" />}
+        {conv.type === 'dm' && avatarInitial
+          ? avatarInitial
+          : conv.type === 'dm'
+            ? <MessageSquare className="h-4 w-4" />
+            : <Users className="h-4 w-4" />}
       </div>
 
       {/* Info */}
@@ -176,6 +212,7 @@ export function ChatListView({ projectId, currentTeamMemberId }: ChatListViewPro
                   <ConversationRow
                     key={conv.id}
                     conv={conv}
+                    currentMemberId={currentTeamMemberId}
                     onClick={() => router.push(`/chats/${conv.id}`)}
                   />
                 ))}
@@ -192,6 +229,7 @@ export function ChatListView({ projectId, currentTeamMemberId }: ChatListViewPro
                   <ConversationRow
                     key={conv.id}
                     conv={conv}
+                    currentMemberId={currentTeamMemberId}
                     onClick={() => router.push(`/chats/${conv.id}`)}
                   />
                 ))}

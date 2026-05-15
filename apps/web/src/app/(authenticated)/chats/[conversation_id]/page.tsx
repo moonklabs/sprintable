@@ -2,14 +2,32 @@
 
 import { useCallback, useEffect, useState } from 'react';
 import { useParams, useRouter } from 'next/navigation';
-import { ChevronLeft } from 'lucide-react';
+import { ChevronLeft, UserPlus } from 'lucide-react';
 import { TopBarSlot } from '@/components/nav/top-bar-slot';
 import { ChatView } from '@/components/chat/chat-view';
+import { AddParticipantModal } from '@/components/chat/add-participant-modal';
 import { useDashboardContext } from '../../../dashboard/dashboard-shell';
+
+interface Participant {
+  member_id: string;
+  name: string;
+  avatar_url?: string | null;
+}
 
 interface ConversationMeta {
   title: string | null;
   type: 'dm' | 'group';
+  participants: Participant[];
+}
+
+function formatHeaderTitle(meta: ConversationMeta, currentMemberId: string): string {
+  if (meta.title) return meta.title;
+  const others = meta.participants.filter((p) => p.member_id !== currentMemberId);
+  if (others.length === 0) return meta.type === 'dm' ? 'DM' : '그룹 채팅';
+  if (meta.type === 'dm') return others[0]!.name;
+  const MAX = 3;
+  if (others.length <= MAX) return others.map((p) => p.name).join(', ');
+  return `${others.slice(0, MAX).map((p) => p.name).join(', ')} 외 ${others.length - MAX}명`;
 }
 
 export default function ConversationPage() {
@@ -17,19 +35,33 @@ export default function ConversationPage() {
   const router = useRouter();
   const { currentTeamMemberId, projectId } = useDashboardContext();
   const [meta, setMeta] = useState<ConversationMeta | null>(null);
+  const [showAddParticipant, setShowAddParticipant] = useState(false);
 
   const fetchMeta = useCallback(async () => {
     if (!projectId) return;
     try {
       const res = await fetch(`/api/conversations?project_id=${projectId}`);
       if (!res.ok) return;
-      const json = await res.json() as { data: Array<{ id: string; title: string | null; type: 'dm' | 'group' }> };
+      const json = await res.json() as {
+        data: Array<{ id: string; title: string | null; type: 'dm' | 'group'; participants?: Participant[] }>;
+      };
       const conv = json.data.find((c) => c.id === conversation_id);
-      if (conv) setMeta({ title: conv.title, type: conv.type });
+      if (conv) setMeta({ title: conv.title, type: conv.type, participants: conv.participants ?? [] });
     } catch { /* non-critical */ }
   }, [conversation_id, projectId]);
 
+  // eslint-disable-next-line react-hooks/set-state-in-effect
   useEffect(() => { void fetchMeta(); }, [fetchMeta]);
+
+  const handleParticipantAdded = useCallback((newConversationId?: string) => {
+    setShowAddParticipant(false);
+    if (newConversationId && newConversationId !== conversation_id) {
+      // DM → group fork: navigate to new group chat
+      router.push(`/chats/${newConversationId}`);
+    } else {
+      void fetchMeta();
+    }
+  }, [conversation_id, fetchMeta, router]);
 
   if (!currentTeamMemberId) {
     return (
@@ -39,25 +71,40 @@ export default function ConversationPage() {
     );
   }
 
-  const headerTitle = meta?.title ?? (meta?.type === 'dm' ? 'DM' : '그룹 채팅');
+  const headerTitle = meta
+    ? formatHeaderTitle(meta, currentTeamMemberId)
+    : (meta === null ? '채팅' : '로딩 중…');
 
   return (
     <>
       <TopBarSlot
         title={
-          <div className="flex items-center gap-1">
+          <div className="flex min-w-0 items-center gap-1">
             <button
               type="button"
               onClick={() => router.push('/chats')}
-              className="flex items-center gap-1 text-sm text-muted-foreground hover:text-foreground lg:hidden"
+              className="flex flex-shrink-0 items-center gap-1 text-sm text-muted-foreground hover:text-foreground"
             >
               <ChevronLeft className="h-4 w-4" />
-              채팅
+              <span className="lg:hidden">채팅</span>
             </button>
-            <span className="hidden truncate text-sm font-medium lg:block">
+            <span className="min-w-0 truncate text-sm font-medium text-foreground">
               {headerTitle}
             </span>
           </div>
+        }
+        actions={
+          meta && (
+            <button
+              type="button"
+              onClick={() => setShowAddParticipant(true)}
+              className="flex items-center gap-1.5 rounded-md px-2 py-1 text-xs text-muted-foreground transition hover:bg-muted hover:text-foreground"
+              title="참여자 추가"
+            >
+              <UserPlus className="h-3.5 w-3.5" />
+              <span className="hidden sm:inline">참여자 추가</span>
+            </button>
+          )
         }
       />
       <div className="flex min-h-0 flex-1 flex-col overflow-hidden bg-background">
@@ -68,8 +115,20 @@ export default function ConversationPage() {
           threadTitle={headerTitle}
           projectId={projectId}
           apiPrefix="/api/conversations"
+          backRoute="/chats"
         />
       </div>
+
+      {showAddParticipant && meta && projectId && (
+        <AddParticipantModal
+          conversationId={conversation_id}
+          conversationType={meta.type}
+          projectId={projectId}
+          existingParticipantIds={meta.participants.map((p) => p.member_id)}
+          onClose={() => setShowAddParticipant(false)}
+          onAdded={handleParticipantAdded}
+        />
+      )}
     </>
   );
 }

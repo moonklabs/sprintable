@@ -15,6 +15,7 @@ interface ChatViewProps {
   threadTitle?: string | null;
   projectId?: string;
   apiPrefix?: string;
+  backRoute?: string | null;
 }
 
 interface MessageGroup {
@@ -33,7 +34,7 @@ function groupByDate(messages: ChatMessage[]): MessageGroup[] {
   return Object.entries(groups).map(([date, msgs]) => ({ date, messages: msgs }));
 }
 
-export function ChatView({ threadId, currentTeamMemberId, threadTitle, projectId, apiPrefix = '/api/chats' }: ChatViewProps) {
+export function ChatView({ threadId, currentTeamMemberId, threadTitle, projectId, apiPrefix = '/api/chats', backRoute = '/memos' }: ChatViewProps) {
   const router = useRouter();
   const [messages, setMessages] = useState<ChatMessage[]>([]);
   const [loading, setLoading] = useState(true);
@@ -71,7 +72,7 @@ export function ChatView({ threadId, currentTeamMemberId, threadTitle, projectId
       setLoading(false);
       setLoadingMore(false);
     }
-  }, [threadId]);
+  }, [threadId, apiPrefix]);
 
   useEffect(() => {
     fetchMessages();
@@ -130,7 +131,7 @@ export function ChatView({ threadId, currentTeamMemberId, threadTitle, projectId
     const raw = await res.json() as Record<string, unknown>;
     const payload = (raw.data ?? raw) as Record<string, unknown>;
     addMessage(normalizeToMessage(payload));
-  }, [threadId, addMessage]);
+  }, [threadId, addMessage, apiPrefix]);
 
   const handleUpload = useCallback(async (file: File) => {
     const formData = new FormData();
@@ -179,20 +180,22 @@ export function ChatView({ threadId, currentTeamMemberId, threadTitle, projectId
 
   return (
     <div className="flex h-full flex-col overflow-hidden">
-      {/* Mobile back nav (< lg) */}
-      <div className="flex flex-shrink-0 items-center gap-2 border-b border-border/80 px-3 py-2 lg:hidden">
-        <button
-          type="button"
-          onClick={() => router.push('/memos')}
-          className="flex min-h-[44px] items-center gap-1 px-1 text-sm text-muted-foreground hover:text-foreground"
-        >
-          <ChevronLeft className="h-4 w-4" />
-          메모
-        </button>
-        {threadTitle && (
-          <span className="truncate text-sm font-medium text-foreground">{threadTitle}</span>
-        )}
-      </div>
+      {/* Mobile back nav (< lg) — only shown when backRoute is provided */}
+      {backRoute && (
+        <div className="flex flex-shrink-0 items-center gap-2 border-b border-border/80 px-3 py-2 lg:hidden">
+          <button
+            type="button"
+            onClick={() => router.push(backRoute)}
+            className="flex min-h-[44px] items-center gap-1 px-1 text-sm text-muted-foreground hover:text-foreground"
+          >
+            <ChevronLeft className="h-4 w-4" />
+            메모
+          </button>
+          {threadTitle && (
+            <span className="truncate text-sm font-medium text-foreground">{threadTitle}</span>
+          )}
+        </div>
+      )}
 
       {/* Desktop thread title (lg+) */}
       {threadTitle && (

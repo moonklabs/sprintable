@@ -2120,6 +2120,11 @@
     "dmWith": "DM",
     "noMessages": "Send the first message",
     "create": "Start chat",
-    "memoSection": "Memos"
+    "memoSection": "Memos",
+    "addParticipants": "Add Participants",
+    "addParticipantsTitle": "Add Participants",
+    "participantsOthers": "{count} more",
+    "forkInfo": "Adding someone to a DM creates a new group chat. The existing DM is preserved.",
+    "adding": "Adding…"
   }
 }
