@@ -697,8 +697,20 @@ async def add_reply(
             "add_reply routed to conversation thread conversation_id=%s message_id=%s",
             id, reply_msg.id,
         )
-        # webhook 발송 (기존 참여자 수집)
+        # CB-S7: SSE conversation:message 발행 (P0 — 수신자 화면 실시간 갱신)
         conv = await db.get(Conversation, id)
+        if conv:
+            sender_member = (await db.execute(
+                select(TeamMember).where(TeamMember.id == body.created_by)
+            )).scalar_one_or_none()
+            if sender_member:
+                try:
+                    from app.routers.conversations import _dispatch_conversation_event
+                    await _dispatch_conversation_event(db, conv, reply_msg, repo.org_id, sender_member)
+                except Exception:
+                    logger.warning("conversation event dispatch failed memo_id=%s", id, exc_info=True)
+
+        # webhook 발송 (기존 참여자 수집)
         if conv:
             webhook_urls = await _collect_reply_webhook_urls(
                 db, id, None, conv.created_by, body.created_by, body.assigned_to_ids
