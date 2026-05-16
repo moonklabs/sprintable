@@ -81,6 +81,10 @@ export function KanbanBoard({ projectId }: KanbanBoardProps) {
   const [epics, setEpics] = useState<KanbanEpic[]>([]);
   const [members, setMembers] = useState<KanbanMember[]>([]);
   const [loading, setLoading] = useState(true);
+  // CB-S4: status별 total count + cursor
+  const [columnTotals, setColumnTotals] = useState<Record<string, number>>({});
+  const [columnCursors, setColumnCursors] = useState<Record<string, string | null>>({});
+  const [loadingMoreColumns, setLoadingMoreColumns] = useState<Record<string, boolean>>({});
   const [nextCursor, setNextCursor] = useState<string | null>(null);
   const [epicsNextCursor, setEpicsNextCursor] = useState<string | null>(null);
   const [storyTasksNextCursor, setStoryTasksNextCursor] = useState<string | null>(null);
@@ -149,29 +153,55 @@ export function KanbanBoard({ projectId }: KanbanBoardProps) {
     if (userId) memberMap[userId] = m;
   }
 
+  // CB-S4: status별 stories fetch helper
+  const fetchStoriesByStatus = useCallback(async (status: string, cursor?: string): Promise<{ stories: KanbanStory[]; total: number; nextCursor: string | null }> => {
+    const params = new URLSearchParams();
+    if (projectId) params.set('project_id', projectId);
+    if (selectedSprintId) params.set('sprint_id', selectedSprintId);
+    params.set('status', status);
+    params.set('limit', status === 'done' ? '10' : '20');
+    if (cursor) params.set('cursor', cursor);
+    const res = await fetch(`/api/stories?${params}`);
+    if (!res.ok) return { stories: [], total: 0, nextCursor: null };
+    // RC: 헤더 대신 JSON body meta에서 cursor/total 읽기 (proxy 헤더 strip 방지)
+    const json = await res.json() as { data?: KanbanStory[]; meta?: { nextCursor?: string | null; hasMore?: boolean; total?: number } };
+    const stories = json.data ?? [];
+    const nextCursor = json.meta?.nextCursor ?? null;
+    const total = json.meta?.total ?? stories.length;
+    return { stories, total, nextCursor };
+  }, [projectId, selectedSprintId]);
+
   const fetchData = useCallback(async () => {
     setLoading(true);
     try {
-      const params = new URLSearchParams();
-      if (selectedSprintId) params.set('sprint_id', selectedSprintId);
-      if (projectId) params.set('project_id', projectId);
-
       const sprintParams = projectId ? `?project_id=${projectId}` : '';
       const epicParams = new URLSearchParams();
       if (projectId) epicParams.set('project_id', projectId);
       epicParams.set('limit', '20');
       const memberParams = projectId ? `?project_id=${projectId}` : '';
 
-      params.set('limit', '20');
-      const [storiesRes, sprintsRes, epicsRes, membersRes] = await Promise.all([
-        fetch(`/api/stories?${params}`),
+      // CB-S4: status별 5회 독립 호출
+      const statuses = COLUMNS.map((c) => c.id);
+      const [storyResults, sprintsRes, epicsRes, membersRes] = await Promise.all([
+        Promise.all(statuses.map((s) => fetchStoriesByStatus(s))),
         fetch(`/api/sprints${sprintParams}`),
         fetch(`/api/epics?${epicParams.toString()}`),
         fetch(`/api/team-members${memberParams}`),
       ]);
 
-      let storyIds: string[] = [];
-      if (storiesRes.ok) { const json = await storiesRes.json(); storyIds = (json.data ?? []).map((s: { id: string }) => s.id); setStories(json.data); setNextCursor(json.meta?.nextCursor ?? null); }
+      const allStories: KanbanStory[] = [];
+      const newTotals: Record<string, number> = {};
+      const newCursors: Record<string, string | null> = {};
+      statuses.forEach((s, i) => {
+        allStories.push(...storyResults[i].stories);
+        newTotals[s] = storyResults[i].total;
+        newCursors[s] = storyResults[i].nextCursor;
+      });
+      setStories(allStories);
+      setColumnTotals(newTotals);
+      setColumnCursors(newCursors);
+
+      let storyIds = allStories.map((s) => s.id);
       if (sprintsRes.ok) { const json = await sprintsRes.json(); setSprints(json.data); }
       if (epicsRes.ok) { const json = await epicsRes.json(); setEpics(json.data); setEpicsNextCursor(json.meta?.nextCursor ?? null); }
       if (membersRes.ok) { const json = await membersRes.json(); setMembers(json.data); }
@@ -192,7 +222,21 @@ export function KanbanBoard({ projectId }: KanbanBoardProps) {
     } finally {
       setLoading(false);
     }
-  }, [selectedSprintId, projectId]);
+  }, [selectedSprintId, projectId, fetchStoriesByStatus]);
+
+  // CB-S4: 컬럼별 "더 보기" 핸들러
+  const handleLoadMore = useCallback(async (status: string) => {
+    const cursor = columnCursors[status];
+    if (!cursor) return;
+    setLoadingMoreColumns((prev) => ({ ...prev, [status]: true }));
+    try {
+      const result = await fetchStoriesByStatus(status, cursor);
+      setStories((prev) => [...prev, ...result.stories]);
+      setColumnCursors((prev) => ({ ...prev, [status]: result.nextCursor }));
+    } finally {
+      setLoadingMoreColumns((prev) => ({ ...prev, [status]: false }));
+    }
+  }, [columnCursors, fetchStoriesByStatus]);
 
   useEffect(() => { void fetchData(); }, [fetchData]);
 
@@ -928,6 +972,10 @@ export function KanbanBoard({ projectId }: KanbanBoardProps) {
                     onWipDraftChange={(v) => handleWipLimitDraftChange(col.id, v)}
                     onCreateStory={handleCreateStory}
                     executionMap={executionMap}
+                    totalCount={columnTotals[col.id]}
+                    hasMore={!!columnCursors[col.id]}
+                    loadingMore={loadingMoreColumns[col.id] ?? false}
+                    onLoadMore={() => handleLoadMore(col.id)}
                   />
                 );
               })}

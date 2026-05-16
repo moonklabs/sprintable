@@ -55,7 +55,7 @@ export async function GET(request: Request) {
       project_id: searchParams.get('project_id') ?? undefined,
       q: searchParams.get('q') ?? undefined,
       unassigned: searchParams.get('unassigned') === 'true' ? true : undefined,
-      limit: pageInput.limit,
+      limit: pageInput.limit + 1,  // RC3: 오버페치 → buildCursorPageMeta hasMore 판단
       cursor: pageInput.cursor,
     });
     const { page, meta } = buildCursorPageMeta(stories, pageInput.limit, 'created_at');
