@@ -50,7 +50,8 @@
     "search": "Search…",
     "help": "Help",
     "chats": "Chats",
-    "activity": "Activity Log"
+    "activity": "Activity Log",
+    "epics": "Epics"
   },
   "commandPalette": {
     "title": "Command palette",

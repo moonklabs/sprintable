@@ -13,6 +13,7 @@ import {
   FolderKanban,
   Gauge,
   Inbox,
+  Layers,
   LayoutDashboard,
   MessageSquare,
   MessageSquareMore,
@@ -215,6 +216,16 @@ export function AppSidebar({
                   <FolderKanban />
                   <span>{t('board')}</span>
                   <KbdHint>B</KbdHint>
+                </SidebarMenuButton>
+              </SidebarMenuItem>
+              <SidebarMenuItem>
+                <SidebarMenuButton
+                  render={<Link href="/epics" />}
+                  isActive={isActive('/epics')}
+                  tooltip={t('epics')}
+                >
+                  <Layers />
+                  <span>{t('epics')}</span>
                 </SidebarMenuButton>
               </SidebarMenuItem>
               <SidebarMenuItem>
