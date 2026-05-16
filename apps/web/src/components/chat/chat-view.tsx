@@ -41,6 +41,7 @@ export function ChatView({ threadId, currentTeamMemberId, threadTitle, projectId
   const [loadingMore, setLoadingMore] = useState(false);
   const [hasMore, setHasMore] = useState(false);
   const [cursor, setCursor] = useState<string | null>(null);
+  const [showNewIndicator, setShowNewIndicator] = useState(false);
   const bottomRef = useRef<HTMLDivElement>(null);
   const scrollRef = useRef<HTMLDivElement>(null);
   const topSentinelRef = useRef<HTMLDivElement>(null);
@@ -48,6 +49,13 @@ export function ChatView({ threadId, currentTeamMemberId, threadTitle, projectId
 
   const scrollToBottom = useCallback((smooth = false) => {
     bottomRef.current?.scrollIntoView({ behavior: smooth ? 'smooth' : 'instant' });
+  }, []);
+
+  // AC2: 하단 50px 이내인지 판별
+  const isNearBottom = useCallback(() => {
+    const el = scrollRef.current;
+    if (!el) return true;
+    return el.scrollHeight - el.scrollTop - el.clientHeight <= 50;
   }, []);
 
   const fetchMessages = useCallback(async (before?: string) => {
@@ -90,8 +98,13 @@ export function ChatView({ threadId, currentTeamMemberId, threadTitle, projectId
       if (prev.some((m) => m.id === msg.id)) return prev;
       return [...prev, msg];
     });
-    setTimeout(() => scrollToBottom(true), 50);
-  }, [scrollToBottom]);
+    // AC2: 하단 근처(50px 이내)면 자동 스크롤, 아니면 새 메시지 인디케이터 표시
+    if (isNearBottom()) {
+      setTimeout(() => scrollToBottom(true), 50);
+    } else {
+      setShowNewIndicator(true);
+    }
+  }, [scrollToBottom, isNearBottom]);
 
   const handleNewMessage = useCallback((msg: ChatMessage) => {
     if (msg.memo_id !== threadId) return;
@@ -111,11 +124,17 @@ export function ChatView({ threadId, currentTeamMemberId, threadTitle, projectId
     addMessage(normalizeToMessage(payload));
   }, [threadId, addMessage]);
 
+  // AC4: 재연결 시 누락 메시지 backfill
+  const handleReconnect = useCallback(() => {
+    fetchMessages();
+  }, [fetchMessages]);
+
   useChatSse({
     currentTeamMemberId,
     onNewMessage: handleNewMessage,
     onReplyCreated: handleReplyCreated,
     onConversationMessage: handleConversationMessage,
+    onReconnect: handleReconnect,
   });
 
   const handleSend = useCallback(async (content: string, mentionedIds?: string[]) => {
@@ -156,6 +175,15 @@ export function ChatView({ threadId, currentTeamMemberId, threadTitle, projectId
       scrollEl.scrollTop += scrollEl.scrollHeight - prevScrollHeight;
     }
   }, [hasMore, cursor, loadingMore, fetchMessages]);
+
+  // 스크롤을 직접 내리면 인디케이터 자동 해제
+  useEffect(() => {
+    const el = scrollRef.current;
+    if (!el) return;
+    const onScroll = () => { if (isNearBottom()) setShowNewIndicator(false); };
+    el.addEventListener('scroll', onScroll, { passive: true });
+    return () => el.removeEventListener('scroll', onScroll);
+  }, [isNearBottom]);
 
   // Auto-load when scrolled to top (IntersectionObserver watches topSentinelRef inside scrollRef)
   useEffect(() => {
@@ -262,6 +290,19 @@ export function ChatView({ threadId, currentTeamMemberId, threadTitle, projectId
           </div>
         )}
       </div>
+
+      {/* AC2: 새 메시지 인디케이터 — 스크롤이 위에 있을 때만 표시 */}
+      {showNewIndicator && (
+        <div className="flex flex-shrink-0 justify-center py-1">
+          <button
+            type="button"
+            onClick={() => { setShowNewIndicator(false); scrollToBottom(true); }}
+            className="rounded-full border border-border bg-background px-3 py-1 text-xs font-medium text-primary shadow-sm transition-colors hover:bg-muted/50"
+          >
+            ↓ 새 메시지
+          </button>
+        </div>
+      )}
 
       {/* Input */}
       <ChatInput
