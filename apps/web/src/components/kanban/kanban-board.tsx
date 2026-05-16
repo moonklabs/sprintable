@@ -549,14 +549,15 @@ export function KanbanBoard({ projectId }: KanbanBoardProps) {
       });
 
       if (!res.ok) {
-        // Rollback
+        const json = await res.json().catch(() => null) as { error?: { message?: string } } | null;
+        addToast({ type: 'error', title: json?.error?.message ?? '스토리 삭제에 실패했습니다.' });
         await fetchData();
       }
     } catch {
-      // Rollback
+      addToast({ type: 'error', title: '스토리 삭제에 실패했습니다.' });
       await fetchData();
     }
-  }, [fetchData]);
+  }, [fetchData, addToast]);
 
   const handleKickoff = useCallback((_storyId: string, result: 'triggered' | 'no_match' | 'conflict' | 'error') => {
     const messages: Record<string, { title: string; type: 'success' | 'error' | 'info' | 'warning' }> = {
@@ -1080,6 +1081,10 @@ export function KanbanBoard({ projectId }: KanbanBoardProps) {
           onStoryUpdate={(updated) => {
             setSelectedStory(updated);
             setStories((prev) => prev.map((s) => s.id === updated.id ? { ...s, ...updated } : s));
+          }}
+          onDeleteSuccess={(id) => {
+            setStories((prev) => prev.filter((s) => s.id !== id));
+            setSelectedStory(null);
           }}
         />
       )}

@@ -1,15 +1,21 @@
 'use client';
 
-import { useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import { useTranslations } from 'next-intl';
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
 import rehypeSanitize from 'rehype-sanitize';
+import { Trash2 } from 'lucide-react';
 import type { KanbanStory, KanbanMember } from './types';
 import { Button } from '@/components/ui/button';
 import { Textarea } from '@/components/ui/textarea';
 import { StatusBadge } from '@/components/ui/status-badge';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
+import {
+  Dialog, DialogContent, DialogDescription,
+  DialogFooter, DialogHeader, DialogTitle,
+} from '@/components/ui/dialog';
+import { ToastContainer, useToast } from '@/components/ui/toast';
 
 interface Task {
   id: string;
@@ -41,6 +47,7 @@ interface StoryDetailPanelProps {
   onLoadMoreTasks?: () => void;
   onClose: () => void;
   onStoryUpdate?: (updated: KanbanStory) => void;
+  onDeleteSuccess?: (storyId: string) => void;
   memberMap?: Record<string, KanbanMember>;
   members?: KanbanMember[];
 }
@@ -78,8 +85,11 @@ function DescriptionViewer({ description }: { description: string }) {
   );
 }
 
-export function StoryDetailPanel({ story, tasks, nextTasksCursor = null, loadingMoreTasks = false, onLoadMoreTasks, onClose, onStoryUpdate, memberMap = {}, members = [] }: StoryDetailPanelProps) {
+export function StoryDetailPanel({ story, tasks, nextTasksCursor = null, loadingMoreTasks = false, onLoadMoreTasks, onClose, onStoryUpdate, onDeleteSuccess, memberMap = {}, members = [] }: StoryDetailPanelProps) {
   const t = useTranslations('board');
+  const { toasts, addToast, dismissToast } = useToast();
+  const [showDeleteConfirm, setShowDeleteConfirm] = useState(false);
+  const [deleting, setDeleting] = useState(false);
   const [comments, setComments] = useState<Comment[]>([]);
   const [activities, setActivities] = useState<Activity[]>([]);
   const [nextCommentsCursor, setNextCommentsCursor] = useState<string | null>(null);
@@ -102,6 +112,25 @@ export function StoryDetailPanel({ story, tasks, nextTasksCursor = null, loading
 
   const [editingAssignee, setEditingAssignee] = useState(false);
   const [savingAssignee, setSavingAssignee] = useState(false);
+
+  const handleDelete = useCallback(async () => {
+    setDeleting(true);
+    try {
+      const res = await fetch(`/api/stories/${story.id}`, { method: 'DELETE' });
+      if (!res.ok) {
+        const json = await res.json().catch(() => null) as { error?: { message?: string } } | null;
+        addToast({ type: 'error', title: json?.error?.message ?? '스토리 삭제에 실패했습니다.' });
+        return;
+      }
+      onDeleteSuccess?.(story.id);
+      onClose();
+    } catch {
+      addToast({ type: 'error', title: '스토리 삭제에 실패했습니다.' });
+    } finally {
+      setDeleting(false);
+      setShowDeleteConfirm(false);
+    }
+  }, [story.id, onDeleteSuccess, onClose, addToast]);
 
   const titleInputRef = useRef<HTMLInputElement>(null);
 
@@ -345,7 +374,17 @@ export function StoryDetailPanel({ story, tasks, nextTasksCursor = null, loading
             )}
             <StatusBadge status={story.status} label={statusLabel} />
           </div>
-          <button type="button" onClick={onClose} className="shrink-0 rounded-md border border-border px-3 py-2 text-muted-foreground transition hover:text-foreground hover:bg-muted/50">✕</button>
+          <div className="flex shrink-0 items-center gap-2">
+            <button
+              type="button"
+              onClick={() => setShowDeleteConfirm(true)}
+              className="flex items-center gap-1 rounded-md border border-destructive/40 px-2.5 py-1.5 text-xs text-destructive transition hover:bg-destructive/10"
+              aria-label={t('deleteStory')}
+            >
+              <Trash2 className="h-3.5 w-3.5" />
+            </button>
+            <button type="button" onClick={onClose} className="rounded-md border border-border px-3 py-2 text-muted-foreground transition hover:text-foreground hover:bg-muted/50">✕</button>
+          </div>
         </div>
         <div className="flex-1 overflow-y-auto p-5">
           <div className="space-y-5">
@@ -574,6 +613,33 @@ export function StoryDetailPanel({ story, tasks, nextTasksCursor = null, loading
         </div>
       </div>
     </div>
+
+      {/* Delete confirm dialog */}
+      <Dialog open={showDeleteConfirm} onOpenChange={setShowDeleteConfirm}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>스토리를 삭제하시겠습니까?</DialogTitle>
+            <DialogDescription>
+              이 작업은 되돌릴 수 없습니다. 스토리에 연결된 태스크도 함께 삭제됩니다.
+            </DialogDescription>
+          </DialogHeader>
+          <DialogFooter>
+            <Button variant="ghost" size="sm" onClick={() => setShowDeleteConfirm(false)} disabled={deleting}>
+              취소
+            </Button>
+            <Button
+              variant="destructive"
+              size="sm"
+              onClick={() => void handleDelete()}
+              disabled={deleting}
+            >
+              {deleting ? '삭제 중…' : '영구 삭제'}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      <ToastContainer toasts={toasts} onDismiss={dismissToast} />
     </>
   );
 }
