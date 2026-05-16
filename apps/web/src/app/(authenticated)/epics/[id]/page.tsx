@@ -14,6 +14,7 @@ import {
 } from '@/components/ui/dialog';
 import { TopBarSlot } from '@/components/nav/top-bar-slot';
 import { EntityDispatchPanel } from '@/components/dispatch/entity-dispatch-panel';
+import { ToastContainer, useToast } from '@/components/ui/toast';
 
 type EpicStatus = 'draft' | 'active' | 'done' | 'archived';
 type EpicPriority = 'critical' | 'high' | 'medium' | 'low';
@@ -209,6 +210,7 @@ function EpicEditInline({ epic, onSaved, onCancel }: { epic: Epic; onSaved: (e: 
 export default function EpicDetailPage() {
   const { id } = useParams<{ id: string }>();
   const router = useRouter();
+  const { toasts, addToast, dismissToast } = useToast();
   const [epic, setEpic] = useState<Epic | null>(null);
   const [loading, setLoading] = useState(true);
   const [isEditing, setIsEditing] = useState(false);
@@ -221,13 +223,19 @@ export default function EpicDetailPage() {
     setDeleting(true);
     try {
       const res = await fetch(`/api/epics/${epic.id}`, { method: 'DELETE' });
-      if (!res.ok) throw new Error();
+      if (!res.ok) {
+        const json = await res.json().catch(() => null) as { error?: { message?: string } } | null;
+        addToast({ type: 'error', title: json?.error?.message ?? '에픽 삭제에 실패했습니다.' });
+        return;
+      }
       router.replace('/epics');
+    } catch {
+      addToast({ type: 'error', title: '에픽 삭제에 실패했습니다.' });
     } finally {
       setDeleting(false);
       setShowDeleteConfirm(false);
     }
-  }, [epic, router]);
+  }, [epic, router, addToast]);
 
   useEffect(() => {
     fetch(`/api/epics/${id}`)
@@ -438,6 +446,8 @@ export default function EpicDetailPage() {
           </DialogFooter>
         </DialogContent>
       </Dialog>
+
+      <ToastContainer toasts={toasts} onDismiss={dismissToast} />
     </>
   );
 }

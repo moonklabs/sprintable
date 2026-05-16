@@ -12,6 +12,7 @@ import {
   Dialog, DialogContent, DialogDescription,
   DialogFooter, DialogHeader, DialogTitle,
 } from '@/components/ui/dialog';
+import { ToastContainer, useToast } from '@/components/ui/toast';
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -694,6 +695,7 @@ interface EpicsClientProps {
 export function EpicsClient({ projectId, orgId }: EpicsClientProps) {
   const t = useTranslations('epics');
   const router = useRouter();
+  const { toasts, addToast, dismissToast } = useToast();
   const [epics, setEpics] = useState<Epic[]>([]);
   const [selectedEpic, setSelectedEpic] = useState<Epic | null>(null);
   const [loading, setLoading] = useState(true);
@@ -756,14 +758,20 @@ export function EpicsClient({ projectId, orgId }: EpicsClientProps) {
     setEpics((prev) => prev.filter((e) => e.id !== id));
     setSelectedEpic((prev) => prev?.id === id ? null : prev);
     try {
-      await fetch(`/api/epics/${id}`, { method: 'DELETE' });
+      const res = await fetch(`/api/epics/${id}`, { method: 'DELETE' });
+      if (!res.ok) {
+        const json = await res.json().catch(() => null) as { error?: { message?: string } } | null;
+        addToast({ type: 'error', title: json?.error?.message ?? '에픽 삭제에 실패했습니다.' });
+        void fetchEpics();
+      }
     } catch {
+      addToast({ type: 'error', title: '에픽 삭제에 실패했습니다.' });
       void fetchEpics();
     } finally {
       setDeleting(false);
       setDeleteConfirmId(null);
     }
-  }, [fetchEpics]);
+  }, [fetchEpics, addToast]);
 
   const handleCreated = useCallback((epic: Epic) => {
     setEpics((prev) => [epic, ...prev]);
@@ -928,6 +936,8 @@ export function EpicsClient({ projectId, orgId }: EpicsClientProps) {
           </DialogFooter>
         </DialogContent>
       </Dialog>
+
+      <ToastContainer toasts={toasts} onDismiss={dismissToast} />
     </>
   );
 }
