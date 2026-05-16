@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useLayoutEffect, useRef, useState } from 'react';
 
 // Mirrors backend _to_chat_message: { id, thread_id, sender: { id, name, type }, ... }
 export interface ChatMessage {
@@ -46,11 +46,12 @@ interface UseChatSseOptions {
   onNewMessage?: (message: ChatMessage) => void;
   onReplyCreated?: (memoId: string) => void;
   onConversationMessage?: (payload: Record<string, unknown>) => void;
+  onReconnect?: () => void;
 }
 
 const RECONNECT_DELAYS_MS = [5_000, 30_000, 60_000, 300_000];
 
-export function useChatSse({ currentTeamMemberId, onNewMessage, onReplyCreated, onConversationMessage }: UseChatSseOptions) {
+export function useChatSse({ currentTeamMemberId, onNewMessage, onReplyCreated, onConversationMessage, onReconnect }: UseChatSseOptions) {
   const [connected, setConnected] = useState(false);
   const sourceRef = useRef<EventSource | null>(null);
   const reconnectTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -58,12 +59,16 @@ export function useChatSse({ currentTeamMemberId, onNewMessage, onReplyCreated, 
   const onNewMessageRef = useRef(onNewMessage);
   const onReplyCreatedRef = useRef(onReplyCreated);
   const onConversationMessageRef = useRef(onConversationMessage);
+  const onReconnectRef = useRef(onReconnect);
   const memberIdRef = useRef(currentTeamMemberId);
 
-  useEffect(() => { onNewMessageRef.current = onNewMessage; }, [onNewMessage]);
-  useEffect(() => { onReplyCreatedRef.current = onReplyCreated; }, [onReplyCreated]);
-  useEffect(() => { onConversationMessageRef.current = onConversationMessage; }, [onConversationMessage]);
-  useEffect(() => { memberIdRef.current = currentTeamMemberId; }, [currentTeamMemberId]);
+  // useLayoutEffect: DOM commit 후 동기 실행 — useEffect(비동기)보다 먼저 실행되어
+  // SSE 이벤트 도달 전에 ref가 항상 최신 콜백을 가리킴 (stale closure 방지)
+  useLayoutEffect(() => { onNewMessageRef.current = onNewMessage; }, [onNewMessage]);
+  useLayoutEffect(() => { onReplyCreatedRef.current = onReplyCreated; }, [onReplyCreated]);
+  useLayoutEffect(() => { onConversationMessageRef.current = onConversationMessage; }, [onConversationMessage]);
+  useLayoutEffect(() => { onReconnectRef.current = onReconnect; }, [onReconnect]);
+  useLayoutEffect(() => { memberIdRef.current = currentTeamMemberId; }, [currentTeamMemberId]);
 
   useEffect(() => {
     if (typeof EventSource === 'undefined') return;
@@ -79,8 +84,11 @@ export function useChatSse({ currentTeamMemberId, onNewMessage, onReplyCreated, 
       sourceRef.current = source;
 
       source.onopen = () => {
+        const isReconnect = reconnectAttemptsRef.current > 0;
         setConnected(true);
         reconnectAttemptsRef.current = 0;
+        // AC4: 재연결 시 backfill 트리거
+        if (isReconnect) onReconnectRef.current?.();
       };
 
       source.onerror = () => {
