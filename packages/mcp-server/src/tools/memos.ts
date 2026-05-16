@@ -187,6 +187,24 @@ export function registerMemosTools(server: McpServer) {
     } catch (e) { return handleError(e); }
   });
 
+  // CB-S11: create_conversation — memo 우회 없이 직접 대화 스레드 생성
+  server.tool('create_conversation', 'Create a new conversation thread. Returns conversation_id for use with send_chat_message / list_chat_messages.', {
+    participant_ids: z.array(z.string()).describe('Team member IDs to include in the conversation'),
+    title: z.string().optional().describe('Optional conversation title'),
+    project_id: z.string().optional().describe('Project ID (required by backend; use current project if omitted)'),
+  }, async ({ participant_ids, title, project_id }) => {
+    try {
+      const payload: Record<string, unknown> = {
+        type: 'group',
+        participant_ids,
+        project_id: project_id ?? '',
+      };
+      if (title) payload.title = title;
+      const conv = await pmApi('/api/v2/conversations', { method: 'POST', body: JSON.stringify(payload) }) as Record<string, unknown>;
+      return ok({ conversation_id: conv.id as string, ...conv });
+    } catch (e) { return handleError(e); }
+  });
+
   // S41: conversations API로 라우팅 전환
   server.tool('list_chat_messages', 'List chat messages in a thread (conversation, chronological order)', {
     thread_id: z.string().describe('Thread ID (memo ID = conversation ID)'),
