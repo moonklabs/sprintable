@@ -3,11 +3,15 @@
 import { useCallback, useEffect, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import { useTranslations } from 'next-intl';
-import { ChevronLeft, Plus, X } from 'lucide-react';
+import { ChevronLeft, Plus, Trash2, X } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { TopBarSlot } from '@/components/nav/top-bar-slot';
 import { Badge } from '@/components/ui/badge';
 import { EmptyState } from '@/components/ui/empty-state';
+import {
+  Dialog, DialogContent, DialogDescription,
+  DialogFooter, DialogHeader, DialogTitle,
+} from '@/components/ui/dialog';
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -390,9 +394,10 @@ interface EpicRowProps {
   epic: Epic;
   isSelected: boolean;
   onClick: () => void;
+  onDeleteRequest: (id: string) => void;
 }
 
-function EpicRow({ epic, isSelected, onClick }: EpicRowProps) {
+function EpicRow({ epic, isSelected, onClick, onDeleteRequest }: EpicRowProps) {
   const t = useTranslations('epics');
   const stories = epic.stories ?? [];
   const { done, total } = calcStoryProgress(stories);
@@ -415,14 +420,16 @@ function EpicRow({ epic, isSelected, onClick }: EpicRowProps) {
   };
 
   return (
-    <button
-      type="button"
-      onClick={onClick}
-      className={`w-full rounded-2xl border px-4 py-3.5 text-left transition-all duration-150 ${
+    <div
+      className={`group relative w-full rounded-2xl border px-4 py-3.5 text-left transition-all duration-150 cursor-pointer ${
         isSelected
           ? 'border-primary/40 bg-primary/5'
           : 'border-[color:var(--operator-border,hsl(var(--border)))] bg-[color:var(--operator-surface)] hover:border-primary/30 hover:bg-primary/5'
       }`}
+      onClick={onClick}
+      role="button"
+      tabIndex={0}
+      onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') onClick(); }}
     >
       <div className="space-y-2.5">
         <div className="flex items-start justify-between gap-2">
@@ -430,6 +437,14 @@ function EpicRow({ epic, isSelected, onClick }: EpicRowProps) {
           <div className="flex shrink-0 items-center gap-1.5">
             <Badge variant={statusBadgeVariant(epic.status)}>{statusLabel[epic.status]}</Badge>
             <Badge variant={priorityBadgeVariant(epic.priority)}>{priorityLabel[epic.priority]}</Badge>
+            <button
+              type="button"
+              aria-label={t('deleteEpic')}
+              onClick={(e) => { e.stopPropagation(); onDeleteRequest(epic.id); }}
+              className="hidden group-hover:flex items-center justify-center rounded-md p-1 text-muted-foreground hover:bg-destructive/10 hover:text-destructive transition-colors"
+            >
+              <Trash2 className="h-3.5 w-3.5" />
+            </button>
           </div>
         </div>
 
@@ -458,7 +473,7 @@ function EpicRow({ epic, isSelected, onClick }: EpicRowProps) {
           </div>
         ) : null}
       </div>
-    </button>
+    </div>
   );
 }
 
@@ -688,6 +703,8 @@ export function EpicsClient({ projectId, orgId }: EpicsClientProps) {
   const [epicsNextCursor, setEpicsNextCursor] = useState<string | null>(null);
   const [epicsLoadingMore, setEpicsLoadingMore] = useState(false);
   const [statusFilter, setStatusFilter] = useState<EpicStatus | 'all'>('all');
+  const [deleteConfirmId, setDeleteConfirmId] = useState<string | null>(null);
+  const [deleting, setDeleting] = useState(false);
 
   const fetchEpics = useCallback(async (cursor?: string | null) => {
     try {
@@ -733,6 +750,20 @@ export function EpicsClient({ projectId, orgId }: EpicsClientProps) {
     // AC5: 모든 디바이스에서 /epics/[id] 딥링크로 이동
     router.push(`/epics/${epic.id}`);
   }, [router]);
+
+  const handleDeleteEpic = useCallback(async (id: string) => {
+    setDeleting(true);
+    setEpics((prev) => prev.filter((e) => e.id !== id));
+    setSelectedEpic((prev) => prev?.id === id ? null : prev);
+    try {
+      await fetch(`/api/epics/${id}`, { method: 'DELETE' });
+    } catch {
+      void fetchEpics();
+    } finally {
+      setDeleting(false);
+      setDeleteConfirmId(null);
+    }
+  }, [fetchEpics]);
 
   const handleCreated = useCallback((epic: Epic) => {
     setEpics((prev) => [epic, ...prev]);
@@ -804,6 +835,7 @@ export function EpicsClient({ projectId, orgId }: EpicsClientProps) {
                 epic={epic}
                 isSelected={selectedEpic?.id === epic.id}
                 onClick={() => { void handleSelectEpic(epic); }}
+                onDeleteRequest={(id) => setDeleteConfirmId(id)}
               />
             ))}
             {epicsHasMore && (
@@ -871,6 +903,31 @@ export function EpicsClient({ projectId, orgId }: EpicsClientProps) {
           onClose={() => setShowCreate(false)}
         />
       ) : null}
+
+      {/* Delete confirm dialog */}
+      <Dialog open={!!deleteConfirmId} onOpenChange={(open) => { if (!open) setDeleteConfirmId(null); }}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>에픽을 삭제하시겠습니까?</DialogTitle>
+            <DialogDescription>
+              이 작업은 되돌릴 수 없습니다. 에픽에 포함된 스토리는 연결이 해제됩니다.
+            </DialogDescription>
+          </DialogHeader>
+          <DialogFooter>
+            <Button variant="ghost" size="sm" onClick={() => setDeleteConfirmId(null)} disabled={deleting}>
+              취소
+            </Button>
+            <Button
+              variant="destructive"
+              size="sm"
+              onClick={() => { if (deleteConfirmId) void handleDeleteEpic(deleteConfirmId); }}
+              disabled={deleting}
+            >
+              {deleting ? '삭제 중…' : '영구 삭제'}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
     </>
   );
 }

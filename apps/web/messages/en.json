@@ -2076,7 +2076,11 @@
     "notAssigned": "Not assigned",
     "spExceeded": "SP Over",
     "spExceededDetail": "{total}SP / target {target}SP exceeded",
-    "noStories": "No stories linked to this epic."
+    "noStories": "No stories linked to this epic.",
+    "deleteEpic": "Delete Epic",
+    "deleteConfirmTitle": "Delete Epic?",
+    "deleteConfirmDescription": "This is permanent and cannot be undone. All stories in this epic will be unlinked.",
+    "deleteConfirmButton": "Delete permanently"
   },
   "sprints": {
     "title": "Sprints",
