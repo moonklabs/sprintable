@@ -134,7 +134,7 @@ export function KanbanColumn({
             {label}
             {totalCount !== undefined && (
               <span className="ml-1 rounded-full bg-muted px-1.5 py-0.5 font-mono text-[10px] text-muted-foreground">
-                {totalCount}
+                {hasMore ? `${totalCount}+` : totalCount}
               </span>
             )}
           </h3>
