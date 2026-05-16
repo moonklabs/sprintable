@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useLayoutEffect, useRef, useState } from 'react';
 
 // Mirrors backend _to_chat_message: { id, thread_id, sender: { id, name, type }, ... }
 export interface ChatMessage {
@@ -60,10 +60,12 @@ export function useChatSse({ currentTeamMemberId, onNewMessage, onReplyCreated, 
   const onConversationMessageRef = useRef(onConversationMessage);
   const memberIdRef = useRef(currentTeamMemberId);
 
-  useEffect(() => { onNewMessageRef.current = onNewMessage; }, [onNewMessage]);
-  useEffect(() => { onReplyCreatedRef.current = onReplyCreated; }, [onReplyCreated]);
-  useEffect(() => { onConversationMessageRef.current = onConversationMessage; }, [onConversationMessage]);
-  useEffect(() => { memberIdRef.current = currentTeamMemberId; }, [currentTeamMemberId]);
+  // useLayoutEffect: DOM commit 후 동기 실행 — useEffect보다 먼저 실행되어
+  // SSE 이벤트 도달 전에 ref가 항상 최신 콜백을 가리킴 (stale closure 방지)
+  useLayoutEffect(() => { onNewMessageRef.current = onNewMessage; }, [onNewMessage]);
+  useLayoutEffect(() => { onReplyCreatedRef.current = onReplyCreated; }, [onReplyCreated]);
+  useLayoutEffect(() => { onConversationMessageRef.current = onConversationMessage; }, [onConversationMessage]);
+  useLayoutEffect(() => { memberIdRef.current = currentTeamMemberId; }, [currentTeamMemberId]);
 
   useEffect(() => {
     if (typeof EventSource === 'undefined') return;
