@@ -1,7 +1,7 @@
 import uuid
 from datetime import datetime, timezone
 
-from fastapi import APIRouter, BackgroundTasks, Body, Depends, HTTPException, Query
+from fastapi import APIRouter, BackgroundTasks, Body, Depends, HTTPException, Query, Response
 from pydantic import BaseModel
 from sqlalchemy import or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -56,10 +56,31 @@ async def list_stories(
     status_filter: str | None = Query(default=None, alias="status"),
     no_sprint: bool = Query(default=False, description="sprint 미배정 스토리만 반환"),
     limit: int = Query(default=1000, ge=1, le=2000),
+    cursor: str | None = Query(default=None, description="Cursor: ISO 8601 created_at, fetch before this time"),
+    response: Response = None,  # type: ignore[assignment]
     repo: StoryRepository = Depends(_get_repo),
 ) -> list[StoryResponse]:
+    from datetime import datetime
+
     if no_sprint and project_id:
         stories = await repo.list_backlog(project_id, limit=limit)
+        return [StoryResponse.model_validate(s) for s in stories]
+
+    # CB-S4: status + project_id 조합 시 board 쿼리 (order_by + cursor + done 7일 제한)
+    if status_filter and project_id:
+        cursor_dt = datetime.fromisoformat(cursor) if cursor else None
+        stories, total = await repo.list_board(
+            project_id=project_id,
+            status=status_filter,
+            limit=min(limit, 20) if status_filter == "done" else limit,
+            cursor=cursor_dt,
+            sprint_id=sprint_id,
+            assignee_id=assignee_id,
+        )
+        if response is not None:
+            response.headers["X-Total-Count"] = str(total)
+            if stories:
+                response.headers["X-Next-Cursor"] = stories[-1].created_at.isoformat()
         return [StoryResponse.model_validate(s) for s in stories]
 
     filters: dict = {}
