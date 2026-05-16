@@ -2076,7 +2076,11 @@
     "notAssigned": "미지정",
     "spExceeded": "SP 초과",
     "spExceededDetail": "{total}SP / 목표 {target}SP 초과",
-    "noStories": "이 에픽에 연결된 스토리가 없습니다."
+    "noStories": "이 에픽에 연결된 스토리가 없습니다.",
+    "deleteEpic": "에픽 삭제",
+    "deleteConfirmTitle": "에픽을 삭제하시겠습니까?",
+    "deleteConfirmDescription": "이 작업은 되돌릴 수 없습니다. 에픽에 포함된 스토리는 연결이 해제됩니다.",
+    "deleteConfirmButton": "영구 삭제"
   },
   "sprints": {
     "title": "스프린트",

@@ -5,11 +5,16 @@ import { useParams, useRouter } from 'next/navigation';
 import Link from 'next/link';
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
-import { ArrowLeft, Pencil, X } from 'lucide-react';
+import { ArrowLeft, Pencil, Trash2, X } from 'lucide-react';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
+import {
+  Dialog, DialogContent, DialogDescription,
+  DialogFooter, DialogHeader, DialogTitle,
+} from '@/components/ui/dialog';
 import { TopBarSlot } from '@/components/nav/top-bar-slot';
 import { EntityDispatchPanel } from '@/components/dispatch/entity-dispatch-panel';
+import { ToastContainer, useToast } from '@/components/ui/toast';
 
 type EpicStatus = 'draft' | 'active' | 'done' | 'archived';
 type EpicPriority = 'critical' | 'high' | 'medium' | 'low';
@@ -205,10 +210,32 @@ function EpicEditInline({ epic, onSaved, onCancel }: { epic: Epic; onSaved: (e: 
 export default function EpicDetailPage() {
   const { id } = useParams<{ id: string }>();
   const router = useRouter();
+  const { toasts, addToast, dismissToast } = useToast();
   const [epic, setEpic] = useState<Epic | null>(null);
   const [loading, setLoading] = useState(true);
   const [isEditing, setIsEditing] = useState(false);
   const [epicAssigneeId, setEpicAssigneeId] = useState<string | null>(null);
+  const [showDeleteConfirm, setShowDeleteConfirm] = useState(false);
+  const [deleting, setDeleting] = useState(false);
+
+  const handleDelete = useCallback(async () => {
+    if (!epic) return;
+    setDeleting(true);
+    try {
+      const res = await fetch(`/api/epics/${epic.id}`, { method: 'DELETE' });
+      if (!res.ok) {
+        const json = await res.json().catch(() => null) as { error?: { message?: string } } | null;
+        addToast({ type: 'error', title: json?.error?.message ?? '에픽 삭제에 실패했습니다.' });
+        return;
+      }
+      router.replace('/epics');
+    } catch {
+      addToast({ type: 'error', title: '에픽 삭제에 실패했습니다.' });
+    } finally {
+      setDeleting(false);
+      setShowDeleteConfirm(false);
+    }
+  }, [epic, router, addToast]);
 
   useEffect(() => {
     fetch(`/api/epics/${id}`)
@@ -253,14 +280,25 @@ export default function EpicDetailPage() {
         <div className="space-y-3">
           <div className="flex items-start justify-between gap-4">
             <h1 className="text-xl font-bold leading-tight">{epic.title}</h1>
-            <button
-              type="button"
-              onClick={() => setIsEditing((v) => !v)}
-              className="shrink-0 flex items-center gap-1.5 rounded-lg border border-border px-2.5 py-1.5 text-xs font-medium hover:bg-muted transition-colors"
-            >
-              {isEditing ? <X className="h-3.5 w-3.5" /> : <Pencil className="h-3.5 w-3.5" />}
-              {isEditing ? '취소' : '편집'}
-            </button>
+            <div className="flex shrink-0 items-center gap-2">
+              <button
+                type="button"
+                onClick={() => setIsEditing((v) => !v)}
+                className="flex items-center gap-1.5 rounded-lg border border-border px-2.5 py-1.5 text-xs font-medium hover:bg-muted transition-colors"
+              >
+                {isEditing ? <X className="h-3.5 w-3.5" /> : <Pencil className="h-3.5 w-3.5" />}
+                {isEditing ? '취소' : '편집'}
+              </button>
+              <button
+                type="button"
+                onClick={() => setShowDeleteConfirm(true)}
+                className="flex items-center gap-1.5 rounded-lg border border-destructive/40 px-2.5 py-1.5 text-xs font-medium text-destructive hover:bg-destructive/10 transition-colors"
+                aria-label="에픽 삭제"
+              >
+                <Trash2 className="h-3.5 w-3.5" />
+                삭제
+              </button>
+            </div>
           </div>
           <div className="flex flex-wrap items-center gap-2">
             <Badge variant={statusBadgeVariant(epic.status)}>{epic.status}</Badge>
@@ -383,6 +421,33 @@ export default function EpicDetailPage() {
           )}
         </section>
       </div>
+
+      {/* Delete confirm dialog */}
+      <Dialog open={showDeleteConfirm} onOpenChange={setShowDeleteConfirm}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>에픽을 삭제하시겠습니까?</DialogTitle>
+            <DialogDescription>
+              이 작업은 되돌릴 수 없습니다. 에픽에 포함된 스토리는 연결이 해제됩니다.
+            </DialogDescription>
+          </DialogHeader>
+          <DialogFooter>
+            <Button variant="ghost" size="sm" onClick={() => setShowDeleteConfirm(false)} disabled={deleting}>
+              취소
+            </Button>
+            <Button
+              variant="destructive"
+              size="sm"
+              onClick={() => void handleDelete()}
+              disabled={deleting}
+            >
+              {deleting ? '삭제 중…' : '영구 삭제'}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      <ToastContainer toasts={toasts} onDismiss={dismissToast} />
     </>
   );
 }
