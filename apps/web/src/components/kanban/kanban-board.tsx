@@ -163,10 +163,12 @@ export function KanbanBoard({ projectId }: KanbanBoardProps) {
     if (cursor) params.set('cursor', cursor);
     const res = await fetch(`/api/stories?${params}`);
     if (!res.ok) return { stories: [], total: 0, nextCursor: null };
-    const json = await res.json() as { data?: KanbanStory[] };
-    const total = parseInt(res.headers.get('X-Total-Count') ?? '0', 10);
-    const nc = res.headers.get('X-Next-Cursor');
-    return { stories: json.data ?? [], total, nextCursor: nc };
+    // RC: 헤더 대신 JSON body meta에서 cursor/total 읽기 (proxy 헤더 strip 방지)
+    const json = await res.json() as { data?: KanbanStory[]; meta?: { nextCursor?: string | null; hasMore?: boolean; total?: number } };
+    const stories = json.data ?? [];
+    const nextCursor = json.meta?.nextCursor ?? null;
+    const total = json.meta?.total ?? stories.length;
+    return { stories, total, nextCursor };
   }, [projectId, selectedSprintId]);
 
   const fetchData = useCallback(async () => {
