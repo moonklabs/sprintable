@@ -1,7 +1,7 @@
 'use client';
 
 import { useCallback, useEffect, useRef, useState } from 'react';
-import { ChevronLeft } from 'lucide-react';
+import { ChevronLeft, RefreshCw } from 'lucide-react';
 import { usePathname, useRouter } from 'next/navigation';
 import { ChatBubble } from './chat-bubble';
 import { ChatInput } from './chat-input';
@@ -47,6 +47,13 @@ export function ChatView({ threadId, currentTeamMemberId, threadTitle, projectId
   const scrollRef = useRef<HTMLDivElement>(null);
   const topSentinelRef = useRef<HTMLDivElement>(null);
   const isFirstLoad = useRef(true);
+  // CB-S8: render 후 스크롤 트리거용 ref (setTimeout 패턴 대체)
+  const shouldScrollToBottomRef = useRef(false);
+  // CB-S8: pull-to-refresh 터치 추적
+  const touchStartYRef = useRef<number | null>(null);
+  const [pullDistance, setPullDistance] = useState(0);
+  const [isRefreshing, setIsRefreshing] = useState(false);
+  const PULL_THRESHOLD = 64;
 
   const scrollToBottom = useCallback((smooth = false) => {
     bottomRef.current?.scrollIntoView({ behavior: smooth ? 'smooth' : 'instant' });
@@ -95,17 +102,18 @@ export function ChatView({ threadId, currentTeamMemberId, threadTitle, projectId
   }, [loading, scrollToBottom]);
 
   const addMessage = useCallback((msg: ChatMessage) => {
+    const nearBottom = isNearBottom();
     setMessages((prev) => {
       if (prev.some((m) => m.id === msg.id)) return prev;
       return [...prev, msg];
     });
-    // AC2: 하단 근처(50px 이내)면 자동 스크롤, 아니면 새 메시지 인디케이터 표시
-    if (isNearBottom()) {
-      setTimeout(() => scrollToBottom(true), 50);
+    // CB-S8: setTimeout 대신 ref 플래그 → render 완료 후 useEffect에서 스크롤
+    if (nearBottom) {
+      shouldScrollToBottomRef.current = true;
     } else {
       setShowNewIndicator(true);
     }
-  }, [scrollToBottom, isNearBottom]);
+  }, [isNearBottom]);
 
   const handleNewMessage = useCallback((msg: ChatMessage) => {
     if (msg.memo_id !== threadId) return;
@@ -137,6 +145,31 @@ export function ChatView({ threadId, currentTeamMemberId, threadTitle, projectId
     onConversationMessage: handleConversationMessage,
     onReconnect: handleReconnect,
   });
+
+  // CB-S8: 모바일 pull-to-refresh — 스크롤 최상단에서 아래로 당기면 새로고침
+  const handleTouchStart = useCallback((e: React.TouchEvent) => {
+    const el = scrollRef.current;
+    if (!el || el.scrollTop > 0) return;
+    touchStartYRef.current = e.touches[0]?.clientY ?? null;
+  }, []);
+
+  const handleTouchMove = useCallback((e: React.TouchEvent) => {
+    if (touchStartYRef.current === null) return;
+    const delta = (e.touches[0]?.clientY ?? 0) - touchStartYRef.current;
+    if (delta > 0) {
+      setPullDistance(Math.min(delta, PULL_THRESHOLD * 1.5));
+    }
+  }, []);
+
+  const handleTouchEnd = useCallback(async () => {
+    if (pullDistance >= PULL_THRESHOLD) {
+      setIsRefreshing(true);
+      await fetchMessages();
+      setIsRefreshing(false);
+    }
+    setPullDistance(0);
+    touchStartYRef.current = null;
+  }, [pullDistance, fetchMessages]);
 
   const handleSend = useCallback(async (content: string, mentionedIds?: string[]) => {
     const body: Record<string, unknown> = { content };
@@ -182,6 +215,14 @@ export function ChatView({ threadId, currentTeamMemberId, threadTitle, projectId
       scrollEl.scrollTop += scrollEl.scrollHeight - prevScrollHeight;
     }
   }, [hasMore, cursor, loadingMore, fetchMessages]);
+
+  // CB-S8: 매 render 후 플래그 확인 → DOM에 새 메시지 반영된 직후 스크롤
+  useEffect(() => {
+    if (shouldScrollToBottomRef.current) {
+      shouldScrollToBottomRef.current = false;
+      scrollToBottom(true);
+    }
+  });
 
   // 스크롤을 직접 내리면 인디케이터 자동 해제
   useEffect(() => {
@@ -240,7 +281,25 @@ export function ChatView({ threadId, currentTeamMemberId, threadTitle, projectId
       )}
 
       {/* Messages */}
-      <div ref={scrollRef} className="flex-1 overflow-y-auto px-4 py-3">
+      <div
+        ref={scrollRef}
+        className="relative flex-1 overflow-y-auto px-4 py-3"
+        onTouchStart={handleTouchStart}
+        onTouchMove={handleTouchMove}
+        onTouchEnd={() => void handleTouchEnd()}
+      >
+        {/* CB-S8: pull-to-refresh 인디케이터 */}
+        {(pullDistance > 0 || isRefreshing) && (
+          <div
+            className="pointer-events-none flex justify-center pb-2 transition-all"
+            style={{ height: isRefreshing ? 40 : pullDistance * 0.6 }}
+          >
+            <RefreshCw
+              className={`h-5 w-5 text-muted-foreground transition-transform ${isRefreshing ? 'animate-spin' : ''}`}
+              style={{ transform: `rotate(${(pullDistance / PULL_THRESHOLD) * 180}deg)` }}
+            />
+          </div>
+        )}
         {loading ? (
           <div className="flex h-full items-center justify-center">
             <p className="text-sm text-muted-foreground">불러오는 중…</p>
