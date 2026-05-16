@@ -560,12 +560,20 @@ async def send_message(
     # CB-S2: DM + 비참여자 멘션 → 자동 그룹 conversation fork (AC1, AC2)
     fork_info: dict | None = None
     if conv.type == "dm" and body.mentioned_ids:
+        # cross-org 차단: mentioned_ids를 현재 org 소속 member로 필터링
+        valid_member_ids = set((await db.execute(
+            select(TeamMember.id).where(
+                TeamMember.id.in_(body.mentioned_ids),
+                TeamMember.org_id == org_id,
+            )
+        )).scalars().all())
+
         current_participant_ids = set((await db.execute(
             select(ConversationParticipant.member_id)
             .where(ConversationParticipant.conversation_id == conversation_id)
         )).scalars().all())
 
-        non_participants = [mid for mid in body.mentioned_ids if mid not in current_participant_ids]
+        non_participants = [mid for mid in valid_member_ids if mid not in current_participant_ids]
         if non_participants:
             fork_conv_id = uuid.uuid4()
             fork_conv = Conversation(
@@ -578,7 +586,7 @@ async def send_message(
             db.add(fork_conv)
             await db.flush()
 
-            all_participant_ids = current_participant_ids | set(body.mentioned_ids)
+            all_participant_ids = current_participant_ids | valid_member_ids
             for mid in all_participant_ids:
                 db.add(ConversationParticipant(conversation_id=fork_conv_id, member_id=mid))
 
