@@ -124,6 +124,47 @@ async def _dispatch_conversation_event(
         _push_to_agent(pid_str, {"event_id": str(event.id), "event_type": "conversation:message", **payload})
 
 
+async def _dispatch_mention_events(
+    db: AsyncSession,
+    conversation: Conversation,
+    msg: ConversationMessage,
+    org_id: uuid.UUID,
+    sender: TeamMember,
+    mention_targets: set[uuid.UUID],
+) -> None:
+    """AC1: 멘션 대상에게 conversation:mention SSE 발송 (participant 여부 무관)."""
+    if not conversation.project_id or not mention_targets:
+        return
+
+    payload = _msg_payload(msg, sender)
+    member_rows = (await db.execute(
+        select(TeamMember.id, TeamMember.type).where(TeamMember.id.in_(mention_targets))
+    )).all()
+    member_type_map = {r[0]: r[1] for r in member_rows}
+
+    events_to_push: list[tuple[str, Event]] = []
+    for pid in mention_targets:
+        m_type = member_type_map.get(pid, "human")
+        event = Event(
+            project_id=conversation.project_id,
+            org_id=org_id,
+            event_type="conversation:mention",
+            source_entity_type="conversation_message",
+            source_entity_id=msg.id,
+            sender_id=sender.id,
+            recipient_id=pid,
+            recipient_type=m_type,
+            payload=payload,
+            status="pending",
+        )
+        db.add(event)
+        events_to_push.append((str(pid), event))
+
+    await db.flush()
+    for pid_str, event in events_to_push:
+        _push_to_agent(pid_str, {"event_id": str(event.id), "event_type": "conversation:mention", **payload})
+
+
 async def _dispatch_discord_outbound(
     message_id: uuid.UUID,
     org_id: uuid.UUID,
@@ -567,6 +608,16 @@ async def send_message(
     except Exception:
         logger.exception("conversation event dispatch failed conversation_id=%s", conversation_id)
 
+    # AC1: 멘션 대상에게 conversation:mention SSE 발송 (participant 여부 무관)
+    if msg.mentioned_ids:
+        mention_targets = set(msg.mentioned_ids) - {sender.id} - discord_exclude_ids
+        if mention_targets:
+            try:
+                async with db.begin_nested():
+                    await _dispatch_mention_events(db, conv, msg, org_id, sender, mention_targets)
+            except Exception:
+                logger.warning("mention event dispatch failed conversation_id=%s", conversation_id, exc_info=True)
+
     # conversation updated_at 갱신
     conv.updated_at = datetime.now(timezone.utc)
 
@@ -584,6 +635,7 @@ async def send_message(
         sender_id=sender.id,
         thread_id=msg.thread_id,
         created_at=msg.created_at,
+        mentioned_ids=list(msg.mentioned_ids) if msg.mentioned_ids else None,
     )
 
     # Discord 아웃바운드 (AC9~11)
