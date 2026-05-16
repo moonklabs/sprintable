@@ -729,16 +729,10 @@ export function EpicsClient({ projectId, orgId }: EpicsClientProps) {
     }
   }, []);
 
-  const handleSelectEpic = useCallback(async (epic: Epic) => {
-    // 모바일: 상세 페이지 직접 이동
-    if (typeof window !== 'undefined' && window.innerWidth < 1024) {
-      router.push(`/epics/${epic.id}`);
-      return;
-    }
-    setSelectedEpic(epic);
-    setMobileView('detail');
-    await fetchEpicDetail(epic.id);
-  }, [fetchEpicDetail, router]);
+  const handleSelectEpic = useCallback((epic: Epic) => {
+    // AC5: 모든 디바이스에서 /epics/[id] 딥링크로 이동
+    router.push(`/epics/${epic.id}`);
+  }, [router]);
 
   const handleCreated = useCallback((epic: Epic) => {
     setEpics((prev) => [epic, ...prev]);
