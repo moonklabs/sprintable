@@ -52,6 +52,7 @@ async def deliver_conversation_message_webhook(
     sender_id: uuid.UUID | None,
     thread_id: uuid.UUID | None,
     created_at: datetime,
+    mentioned_ids: list[uuid.UUID] | None = None,
 ) -> None:
     """BackgroundTask 진입점.
 
@@ -79,6 +80,8 @@ async def deliver_conversation_message_webhook(
             if not target_webhooks:
                 return
 
+            # AC2: mentioned_ids를 payload + 멘션 대상 에이전트 webhook 포함
+            mentioned_id_strs = [str(m) for m in (mentioned_ids or [])]
             payload = {
                 "event_type": _EVENT_TYPE,
                 "message_id": str(message_id),
@@ -86,7 +89,21 @@ async def deliver_conversation_message_webhook(
                 "sender_id": str(sender_id) if sender_id else None,
                 "thread_id": str(thread_id) if thread_id else None,
                 "created_at": created_at.isoformat(),
+                "mentioned_ids": mentioned_id_strs,
             }
+
+            # 멘션된 member에 속한 webhook도 추가 조회 (participant 여부 무관)
+            if mentioned_ids:
+                extra_wh_rows = (await db.execute(
+                    select(WebhookConfig).where(
+                        WebhookConfig.member_id.in_(mentioned_ids),
+                        WebhookConfig.is_active.is_(True),
+                    )
+                )).scalars().all()
+                existing_ids = {wh.id for wh in target_webhooks}
+                for wh in extra_wh_rows:
+                    if wh.id not in existing_ids:
+                        target_webhooks.append(wh)
 
             for wh in target_webhooks:
                 delivery = ConversationWebhookDelivery(

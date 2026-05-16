@@ -4,7 +4,6 @@
 """
 from __future__ import annotations
 
-import re
 import uuid
 from dataclasses import dataclass, field
 from typing import Sequence
@@ -127,10 +126,9 @@ async def route_message(
             if level == "mute":
                 continue
 
-            # mentions → @{member_id} 포함 여부 체크 (AC4)
+            # CB-S1 AC3: mentioned_ids 배열 기반 mentions 판단 (content regex 폐기)
             if level == "mentions":
-                pattern = rf"@{re.escape(str(rid))}"
-                if not re.search(pattern, msg.content or ""):
+                if not (msg.mentioned_ids and rid in msg.mentioned_ids):
                     continue
 
             decisions.append(DeliveryDecision(
