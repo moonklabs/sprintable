@@ -2,7 +2,7 @@
 
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { ChevronLeft } from 'lucide-react';
-import { useRouter } from 'next/navigation';
+import { usePathname, useRouter } from 'next/navigation';
 import { ChatBubble } from './chat-bubble';
 import { ChatInput } from './chat-input';
 import type { ChatMessage } from '@/hooks/use-chat-sse';
@@ -36,6 +36,7 @@ function groupByDate(messages: ChatMessage[]): MessageGroup[] {
 
 export function ChatView({ threadId, currentTeamMemberId, threadTitle, projectId, apiPrefix = '/api/chats', backRoute = '/memos' }: ChatViewProps) {
   const router = useRouter();
+  const pathname = usePathname();
   const [messages, setMessages] = useState<ChatMessage[]>([]);
   const [loading, setLoading] = useState(true);
   const [loadingMore, setLoadingMore] = useState(false);
@@ -146,11 +147,17 @@ export function ChatView({ threadId, currentTeamMemberId, threadTitle, projectId
       body: JSON.stringify(body),
     });
     if (!res.ok) throw new Error('Failed to send message');
-    // Backend: { data: _to_chat_message }
+    // Backend: { data: _to_chat_message } or { forked: true, forked_conversation_id, data }
     const raw = await res.json() as Record<string, unknown>;
+    // AC3: DM fork 응답 감지 → 새 그룹 conversation으로 자동 네비게이션
+    if (raw.forked === true && typeof raw.forked_conversation_id === 'string') {
+      const newPath = pathname.replace(threadId, raw.forked_conversation_id);
+      router.push(newPath);
+      return;
+    }
     const payload = (raw.data ?? raw) as Record<string, unknown>;
     addMessage(normalizeToMessage(payload));
-  }, [threadId, addMessage, apiPrefix]);
+  }, [threadId, addMessage, apiPrefix, pathname, router]);
 
   const handleUpload = useCallback(async (file: File) => {
     const formData = new FormData();
