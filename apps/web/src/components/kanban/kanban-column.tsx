@@ -56,11 +56,6 @@ interface KanbanColumnProps {
   // Inline create
   onCreateStory?: (columnId: string, title: string) => Promise<void> | void;
   executionMap?: Record<string, { status: string; rule_name?: string | null; completed_at?: string | null }>;
-  // CB-S4: board query
-  totalCount?: number;
-  hasMore?: boolean;
-  loadingMore?: boolean;
-  onLoadMore?: () => void;
 }
 
 export function KanbanColumn({
@@ -69,7 +64,6 @@ export function KanbanColumn({
   wipLimit, wipExceeded, wipEditing, wipDraft,
   onWipLimitEdit, onWipLimitSave, onWipLimitRemove, onWipDraftChange,
   onCreateStory, projectId, onKickoffStory, executionMap,
-  totalCount, hasMore, loadingMore, onLoadMore,
 }: KanbanColumnProps) {
   const { setNodeRef, isOver } = useDroppable({ id });
   const t = useTranslations('board');
@@ -132,11 +126,6 @@ export function KanbanColumn({
           <h3 className="flex items-center gap-2 text-xs font-semibold uppercase tracking-wider text-muted-foreground">
             <span className={`h-2 w-2 rounded-full ${statusColor.dot}`} aria-hidden="true" />
             {label}
-            {totalCount !== undefined && (
-              <span className="ml-1 rounded-full bg-muted px-1.5 py-0.5 font-mono text-[10px] text-muted-foreground">
-                {totalCount}
-              </span>
-            )}
           </h3>
           <div className="flex items-center gap-1.5">
             {/* AC1: WIP 초과 배지 */}
@@ -275,20 +264,6 @@ export function KanbanColumn({
           ))}
         </div>
       </SortableContextCompat>
-
-      {/* CB-S4: 더 보기 버튼 */}
-      {hasMore && (
-        <div className="mt-2 px-1">
-          <button
-            type="button"
-            onClick={onLoadMore}
-            disabled={loadingMore}
-            className="w-full rounded-md px-3 py-1.5 text-xs text-muted-foreground hover:bg-muted/50 disabled:opacity-50"
-          >
-            {loadingMore ? '불러오는 중...' : '더 보기'}
-          </button>
-        </div>
-      )}
     </div>
   );
 }
