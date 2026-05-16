@@ -62,7 +62,7 @@ interface EntityResult {
 
 interface ChatInputProps {
   onSend: (content: string, mentionedIds?: string[]) => Promise<void>;
-  onUpload: (file: File) => Promise<void>;
+  onUpload?: (file: File) => Promise<void>;
   disabled?: boolean;
   placeholder?: string;
   projectId?: string;
@@ -184,7 +184,7 @@ export function ChatInput({ onSend, onUpload, disabled, placeholder, projectId, 
 
     setSending(true);
     try {
-      if (pendingFile) {
+      if (pendingFile && onUpload) {
         await onUpload(pendingFile);
         setPendingFile(null);
       }

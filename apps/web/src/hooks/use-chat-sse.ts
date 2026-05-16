@@ -5,7 +5,7 @@ import { useEffect, useLayoutEffect, useRef, useState } from 'react';
 // Mirrors backend _to_chat_message: { id, thread_id, sender: { id, name, type }, ... }
 export interface ChatMessage {
   id: string;
-  memo_id: string;        // backend: thread_id
+  memo_id: string;        // backend: thread_id (conversation_id for group chats)
   created_by: string;     // backend: sender.id
   sender_name: string;    // backend: sender.name
   sender_type: string;    // backend: sender.type ('human' | 'agent')
@@ -13,6 +13,10 @@ export interface ChatMessage {
   review_type?: string;
   attachments: Array<{ url?: string; name?: string; content_type?: string; filename?: string }>;
   created_at: string;
+  // CB-S9: thread fields
+  parent_id?: string | null;    // null = top-level message; set = this is a thread reply
+  reply_count?: number;
+  last_reply_at?: string | null;
 }
 
 // Normalize backend _to_chat_message format → ChatMessage
@@ -28,6 +32,9 @@ export function normalizeToMessage(raw: Record<string, unknown>): ChatMessage {
     content: (raw.content ?? '') as string,
     attachments: (raw.attachments ?? []) as ChatMessage['attachments'],
     created_at: (raw.created_at ?? '') as string,
+    parent_id: (raw.parent_id ?? null) as string | null,
+    reply_count: (raw.reply_count ?? 0) as number,
+    last_reply_at: (raw.last_reply_at ?? null) as string | null,
   };
 }
 
