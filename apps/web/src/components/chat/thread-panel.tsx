@@ -127,7 +127,7 @@ export function ThreadPanel({
         {loading ? (
           <p className="text-center text-sm text-muted-foreground">불러오는 중…</p>
         ) : messages.length === 0 ? (
-          <p className="text-center text-sm text-muted-foreground">아직 답글이 없는.</p>
+          <p className="text-center text-sm text-muted-foreground">아직 답글이 없습니다.</p>
         ) : (
           <div className="flex flex-col gap-2">
             {messages.map((msg, idx) => {

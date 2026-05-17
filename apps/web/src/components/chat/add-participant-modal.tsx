@@ -60,7 +60,7 @@ export function AddParticipantModal({
       const data = await res.json() as { conversation_id?: string; forked?: boolean };
       onAdded(data.conversation_id);
     } catch {
-      setError('참여자 추가에 실패했는. 다시 시도해보는.');
+      setError('참여자 추가에 실패했습니다. 다시 시도해보세요.');
     } finally {
       setAdding(false);
     }

@@ -341,7 +341,7 @@ export default function EpicDetailPage() {
               {epic.description?.trim() ? (
                 <MdBody content={epic.description} />
               ) : (
-                <p className="text-sm italic text-muted-foreground">설명이 없는.</p>
+                <p className="text-sm italic text-muted-foreground">설명이 없습니다.</p>
               )}
             </section>
 
@@ -384,7 +384,7 @@ export default function EpicDetailPage() {
             스토리 ({stories.length})
           </h2>
           {stories.length === 0 ? (
-            <p className="text-sm italic text-muted-foreground">스토리가 없는.</p>
+            <p className="text-sm italic text-muted-foreground">스토리가 없습니다.</p>
           ) : (
             <div className="space-y-4">
               {storyGroups.map(({ status: groupStatus, items }) => (

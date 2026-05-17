@@ -213,7 +213,7 @@ export function AgentApiKeysSection({ projectId }: { projectId: string }) {
         <SectionCardHeader>
           <div className="space-y-1">
             <h2 className="text-base font-semibold">🔑 Agent API Keys</h2>
-            <p className="text-sm text-muted-foreground">에이전트 팀원의 API Key를 관리하는. MCP/HTTP API 전용 — UI 로그인 불가.</p>
+            <p className="text-sm text-muted-foreground">에이전트 팀원의 API Key를 관리합니다. MCP/HTTP API 전용 — UI 로그인 불가.</p>
           </div>
         </SectionCardHeader>
         <SectionCardBody>

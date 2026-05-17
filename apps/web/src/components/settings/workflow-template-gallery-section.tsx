@@ -174,7 +174,7 @@ export function WorkflowTemplateGallerySection({
       <SectionCardHeader>
         <div className="space-y-1">
           <h2 className="text-base font-semibold text-foreground">워크플로우 템플릿 갤러리</h2>
-          <p className="text-sm text-muted-foreground">템플릿을 선택해 라우팅 규칙을 자동 생성하는.</p>
+          <p className="text-sm text-muted-foreground">템플릿을 선택해 라우팅 규칙을 자동 생성합니다.</p>
         </div>
       </SectionCardHeader>
       <SectionCardBody>
@@ -215,7 +215,7 @@ export function WorkflowTemplateGallerySection({
           <div className="mt-6 rounded-lg border border-border bg-muted/30 p-4 space-y-4">
             <div>
               <h3 className="font-semibold text-sm text-foreground">{selected.name} — 역할 매핑</h3>
-              <p className="mt-0.5 text-xs text-muted-foreground">각 역할에 프로젝트 에이전트를 연결하는.</p>
+              <p className="mt-0.5 text-xs text-muted-foreground">각 역할에 프로젝트 에이전트를 연결하세요.</p>
             </div>
 
             {selected.rules_template && selected.rules_template.length > 0 && (
@@ -261,7 +261,7 @@ export function WorkflowTemplateGallerySection({
 
             {overwriteConfirm ? (
               <div className="flex items-center gap-2">
-                <p className="text-xs text-muted-foreground">기존 템플릿 규칙이 교체됩니다. 계속하는?</p>
+                <p className="text-xs text-muted-foreground">기존 템플릿 규칙이 교체됩니다. 계속하시겠습니까?</p>
                 <Button size="sm" variant="destructive" disabled={applying} onClick={() => void handleApply(true)}>
                   교체 적용
                 </Button>
