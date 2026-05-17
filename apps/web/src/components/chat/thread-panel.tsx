@@ -31,6 +31,8 @@ export function ThreadPanel({
   const [messages, setMessages] = useState<ChatMessage[]>([]);
   const [loading, setLoading] = useState(true);
   const bottomRef = useRef<HTMLDivElement>(null);
+  // AC6: CB-S8 패턴 — render 후 DOM 반영된 직후 스크롤 보장
+  const shouldScrollToBottomRef = useRef(false);
 
   const fetchThreadMessages = useCallback(async () => {
     try {
@@ -55,15 +57,23 @@ export function ThreadPanel({
     if (!loading) bottomRef.current?.scrollIntoView({ behavior: 'instant' });
   }, [loading]);
 
-  // AC10: Inject new messages from parent SSE (parent filters by thread_id)
+  // AC4/AC6: SSE 주입 + CB-S8 패턴 스크롤 (setTimeout 제거)
   useEffect(() => {
     if (!incomingMessage) return;
     setMessages((prev) => {
       if (prev.some((m) => m.id === incomingMessage.id)) return prev;
       return [...prev, incomingMessage];
     });
-    setTimeout(() => bottomRef.current?.scrollIntoView({ behavior: 'smooth' }), 50);
+    shouldScrollToBottomRef.current = true;
   }, [incomingMessage]);
+
+  // AC6: 매 render 후 플래그 확인 → DOM 업데이트 직후 스크롤 (bare useEffect)
+  useEffect(() => {
+    if (shouldScrollToBottomRef.current) {
+      shouldScrollToBottomRef.current = false;
+      bottomRef.current?.scrollIntoView({ behavior: 'smooth' });
+    }
+  });
 
   const handleSend = useCallback(async (content: string, mentionedIds?: string[]) => {
     const body: Record<string, unknown> = { content, thread_id: parentMessage.id };
@@ -83,7 +93,8 @@ export function ThreadPanel({
     });
     // P2 RC: SSE excludes own messages → manually bump parent reply_count
     onReplyAdded?.(parentMessage.id);
-    setTimeout(() => bottomRef.current?.scrollIntoView({ behavior: 'smooth' }), 50);
+    // AC3/AC6: optimistic update 후 render 완료 시 스크롤
+    shouldScrollToBottomRef.current = true;
   }, [conversationId, parentMessage.id, onReplyAdded]);
 
   return (
