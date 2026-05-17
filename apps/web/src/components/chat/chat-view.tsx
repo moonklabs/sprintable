@@ -47,6 +47,19 @@ export function ChatView({ threadId, currentTeamMemberId, threadTitle, projectId
   // CB-S9: 스레드 패널 상태
   const [activeThread, setActiveThread] = useState<ChatMessage | null>(null);
   const [threadIncoming, setThreadIncoming] = useState<ChatMessage | null>(null);
+  // fix: 스레드 열기 — 브라우저 히스토리에 entry 추가 → 뒤로가기 시 스레드 닫힘
+  const openThread = useCallback((message: ChatMessage) => {
+    setActiveThread(message);
+    window.history.pushState({ _sprintableThread: true }, '');
+  }, []);
+  // fix: 스레드 닫기 — history.back()으로 pushState entry 제거 (popstate가 setActiveThread(null) 처리)
+  const closeThread = useCallback(() => {
+    if ((window.history.state as Record<string, unknown> | null)?._sprintableThread) {
+      window.history.back();
+    } else {
+      setActiveThread(null);
+    }
+  }, []);
   const bottomRef = useRef<HTMLDivElement>(null);
   const scrollRef = useRef<HTMLDivElement>(null);
   const topSentinelRef = useRef<HTMLDivElement>(null);
@@ -163,6 +176,13 @@ export function ChatView({ threadId, currentTeamMemberId, threadTitle, projectId
     onConversationMessage: handleConversationMessage,
     onReconnect: handleReconnect,
   });
+
+  // fix: popstate — 뒤로가기 시 스레드 패널 닫기 (채팅 화면 유지)
+  useEffect(() => {
+    const handlePopState = () => setActiveThread(null);
+    window.addEventListener('popstate', handlePopState);
+    return () => window.removeEventListener('popstate', handlePopState);
+  }, []);
 
   // CB-S8: 모바일 pull-to-refresh — 스크롤 최상단에서 아래로 당기면 새로고침
   const handleTouchStart = useCallback((e: React.TouchEvent) => {
@@ -301,7 +321,7 @@ export function ChatView({ threadId, currentTeamMemberId, threadTitle, projectId
           <button
             type="button"
             onClick={() => {
-              if (isMobileThreadView) { setActiveThread(null); }
+              if (isMobileThreadView) { closeThread(); }
               else if (backRoute) { router.push(backRoute); }
             }}
             className="flex min-h-[44px] items-center gap-1 px-1 text-sm text-muted-foreground hover:text-foreground"
@@ -393,7 +413,7 @@ export function ChatView({ threadId, currentTeamMemberId, threadTitle, projectId
                           message={msg}
                           isMine={msg.created_by === currentTeamMemberId}
                           isGrouped={isGrouped}
-                          onOpenThread={setActiveThread}
+                          onOpenThread={openThread}
                           onDelete={handleDeleteMessage}
                         />
                       );
@@ -437,7 +457,7 @@ export function ChatView({ threadId, currentTeamMemberId, threadTitle, projectId
               conversationId={threadId}
               currentTeamMemberId={currentTeamMemberId}
               projectId={projectId}
-              onClose={() => setActiveThread(null)}
+              onClose={closeThread}
               incomingMessage={threadIncoming?.parent_id === activeThread.id ? threadIncoming : null}
               onReplyAdded={handleReplyAdded}
             />
