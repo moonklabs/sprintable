@@ -196,7 +196,7 @@ function EntityPreviewModal({
           ) : detail ? (
             <EntityDetail entityType={entityType} detail={detail} />
           ) : entityType === 'task' ? (
-            <p className="text-xs text-muted-foreground py-4">이 엔티티는 별도 페이지가 없는.</p>
+            <p className="text-xs text-muted-foreground py-4">이 엔티티는 별도 페이지가 없습니다.</p>
           ) : null}
         </div>
         {/* Footer */}

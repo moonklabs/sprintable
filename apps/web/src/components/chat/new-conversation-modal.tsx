@@ -60,7 +60,7 @@ export function NewConversationModal({ projectId, onClose, onCreated }: NewConve
       const data = await res.json() as { id: string };
       onCreated(data.id);
     } catch {
-      setError('대화 생성에 실패했는. 다시 시도해보는.');
+      setError('대화 생성에 실패했습니다. 다시 시도해보세요.');
     } finally {
       setCreating(false);
     }
