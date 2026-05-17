@@ -15,6 +15,8 @@ interface ThreadPanelProps {
   onClose: () => void;
   // Injected by parent SSE to push new thread messages
   incomingMessage?: ChatMessage | null;
+  // P2 RC: notify parent to increment reply_count when own reply sent
+  onReplyAdded?: (parentId: string) => void;
 }
 
 export function ThreadPanel({
@@ -24,6 +26,7 @@ export function ThreadPanel({
   projectId,
   onClose,
   incomingMessage,
+  onReplyAdded,
 }: ThreadPanelProps) {
   const [messages, setMessages] = useState<ChatMessage[]>([]);
   const [loading, setLoading] = useState(true);
@@ -78,8 +81,10 @@ export function ThreadPanel({
       if (prev.some((m) => m.id === msg.id)) return prev;
       return [...prev, msg];
     });
+    // P2 RC: SSE excludes own messages → manually bump parent reply_count
+    onReplyAdded?.(parentMessage.id);
     setTimeout(() => bottomRef.current?.scrollIntoView({ behavior: 'smooth' }), 50);
-  }, [conversationId, parentMessage.id]);
+  }, [conversationId, parentMessage.id, onReplyAdded]);
 
   return (
     <div className="flex h-full flex-col overflow-hidden border-l border-border bg-background">

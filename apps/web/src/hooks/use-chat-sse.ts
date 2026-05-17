@@ -32,7 +32,8 @@ export function normalizeToMessage(raw: Record<string, unknown>): ChatMessage {
     content: (raw.content ?? '') as string,
     attachments: (raw.attachments ?? []) as ChatMessage['attachments'],
     created_at: (raw.created_at ?? '') as string,
-    parent_id: (raw.parent_id ?? null) as string | null,
+    // P1 RC: backend sends thread_id as parent pointer; raw.parent_id may be absent
+    parent_id: (raw.parent_id ?? raw.thread_id ?? null) as string | null,
     reply_count: (raw.reply_count ?? 0) as number,
     last_reply_at: (raw.last_reply_at ?? null) as string | null,
   };

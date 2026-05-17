@@ -196,6 +196,17 @@ export function ChatView({ threadId, currentTeamMemberId, threadTitle, projectId
     setMessages((prev) => prev.filter((m) => m.id !== messageId));
   }, [apiPrefix, threadId]);
 
+  // P2 RC: 자신이 보낸 스레드 답글은 SSE 미수신 → 로컬에서 reply_count +1
+  const handleReplyAdded = useCallback((parentId: string) => {
+    setMessages((prev) =>
+      prev.map((m) =>
+        m.id === parentId
+          ? { ...m, reply_count: (m.reply_count ?? 0) + 1, last_reply_at: new Date().toISOString() }
+          : m,
+      ),
+    );
+  }, []);
+
   const handleSend = useCallback(async (content: string, mentionedIds?: string[]) => {
     const body: Record<string, unknown> = { content };
     if (mentionedIds && mentionedIds.length > 0) body.mentioned_ids = mentionedIds;
@@ -428,6 +439,7 @@ export function ChatView({ threadId, currentTeamMemberId, threadTitle, projectId
               projectId={projectId}
               onClose={() => setActiveThread(null)}
               incomingMessage={threadIncoming?.parent_id === activeThread.id ? threadIncoming : null}
+              onReplyAdded={handleReplyAdded}
             />
           </div>
         )}
