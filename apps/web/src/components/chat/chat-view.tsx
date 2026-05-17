@@ -47,18 +47,21 @@ export function ChatView({ threadId, currentTeamMemberId, threadTitle, projectId
   // CB-S9: 스레드 패널 상태
   const [activeThread, setActiveThread] = useState<ChatMessage | null>(null);
   const [threadIncoming, setThreadIncoming] = useState<ChatMessage | null>(null);
-  // fix: 스레드 열기 — 브라우저 히스토리에 entry 추가 → 뒤로가기 시 스레드 닫힘
+  // activeThread 열림 여부를 ref로 추적 — popstate 핸들러 stale closure 방지
+  const activeThreadRef = useRef(false);
+
+  // 스레드 열기: 현재 URL 유지한 채 history entry 추가
   const openThread = useCallback((message: ChatMessage) => {
     setActiveThread(message);
-    window.history.pushState({ _sprintableThread: true }, '');
+    activeThreadRef.current = true;
+    const url = window.location.pathname + window.location.search;
+    window.history.pushState({ _sprintableThread: true }, '', url);
   }, []);
-  // fix: 스레드 닫기 — history.back()으로 pushState entry 제거 (popstate가 setActiveThread(null) 처리)
+
+  // 스레드 닫기: history.back() 제거 — Next.js router와 충돌 방지 (P0 리그레션 원인)
   const closeThread = useCallback(() => {
-    if ((window.history.state as Record<string, unknown> | null)?._sprintableThread) {
-      window.history.back();
-    } else {
-      setActiveThread(null);
-    }
+    activeThreadRef.current = false;
+    setActiveThread(null);
   }, []);
   const bottomRef = useRef<HTMLDivElement>(null);
   const scrollRef = useRef<HTMLDivElement>(null);
@@ -177,9 +180,15 @@ export function ChatView({ threadId, currentTeamMemberId, threadTitle, projectId
     onReconnect: handleReconnect,
   });
 
-  // fix: popstate — 뒤로가기 시 스레드 패널 닫기 (채팅 화면 유지)
+  // fix: popstate — 스레드 열린 상태에서만 가로채기 (Next.js 네비게이션 비간섭)
   useEffect(() => {
-    const handlePopState = () => setActiveThread(null);
+    const handlePopState = (e: PopStateEvent) => {
+      if (!activeThreadRef.current) return; // 스레드 없으면 Next.js가 처리
+      // 스레드 닫기 + 현재 URL 재push → 실제 뒤로가기 취소, 채팅 화면 유지
+      activeThreadRef.current = false;
+      setActiveThread(null);
+      window.history.pushState(e.state ?? null, '', window.location.pathname + window.location.search);
+    };
     window.addEventListener('popstate', handlePopState);
     return () => window.removeEventListener('popstate', handlePopState);
   }, []);
