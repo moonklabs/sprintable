@@ -1,12 +1,16 @@
 # Sprintable
 
-**The project management platform where AI agents are teammates, not tools.**
+**The project management platform where AI agents are real-time, first-class team members — not tools.**
 
-Sprintable is built for teams that run AI agents alongside humans. Agents get their own identity, roles, and permissions — not just an API key. Work flows through **memos** (structured delegation units) and **webhooks** (agent wake-up signals), so every handoff is tracked, auditable, and queryable.
+Sprintable is built for teams that run AI agents alongside humans in real-time. Agents get their own identity, roles, and permissions. Work flows through **conversations** (threaded real-time channels) and **the SSE EventBus** (instant delivery to agents and humans alike), so every handoff is tracked, auditable, and queryable.
 
 Bring any agent that speaks MCP: Claude Code, Cursor, OpenClaw, or your own. Sprintable doesn't lock you into a framework — it's the coordination layer.
 
-> **BYOA** = Bring Your Own Agent. Sprintable is framework-agnostic. Any agent that can receive HTTP webhooks and call MCP tools works out of the box.
+> **BYOA** = Bring Your Own Agent. Sprintable is framework-agnostic. Any agent that can connect to an MCP server works out of the box.
+
+[![License: AGPL-3.0](https://img.shields.io/badge/License-AGPL%203.0-blue.svg)](https://www.gnu.org/licenses/agpl-3.0)
+[![Docker Pulls](https://img.shields.io/docker/pulls/moonklabs/sprintable)](https://hub.docker.com/r/moonklabs/sprintable)
+[![Discord](https://img.shields.io/discord/1234567890?label=Discord&logo=discord)](https://discord.gg/sprintable)
 
 ---
 
@@ -14,58 +18,96 @@ Bring any agent that speaks MCP: Claude Code, Cursor, OpenClaw, or your own. Spr
 
 You could use Linear with an MCP server and a single agent. For one agent, that might be enough.
 
-Sprintable solves a different problem: **multi-agent coordination**.
+Sprintable solves a different problem: **multi-agent coordination in real-time**.
 
 | | Linear / Jira | n8n + webhooks | Sprintable |
 |---|---|---|---|
 | Agents as team members (ID, roles, permissions) | No — agents are API integrations | No — agents are workflow nodes | **Yes — first-class team members** |
-| Multi-agent handoff (PO → Dev → QA → merge) | Manual or glue code | Possible but no PM data model | **Native memo-reply chains with workflow gates** |
+| Multi-agent handoff (PO → Dev → QA → merge) | Manual or glue code | Possible but no PM data model | **Native conversation threads with workflow gates** |
 | Sprint tracking + velocity for mixed teams | Human-only metrics | Not a PM tool | **Agents included in burndown, standup, velocity** |
 | Human-in-the-loop gates | Not modeled | Custom build | **Built-in: PO review, QA check, merge approval** |
-| Bring any agent framework | Vendor-specific | Framework-specific nodes | **MCP + HTTP webhooks = framework-agnostic** |
+| Bring any agent framework | Vendor-specific | Framework-specific nodes | **MCP + HTTP = framework-agnostic** |
+| Real-time SSE delivery to agents | No | Polling-based | **SSE EventBus — push, not poll** |
+| Threaded conversations with agents | No | No | **Slack-style threads, @mentions, reply chains** |
+| @mentions with identity routing | No | No | **@agent / @human → routed to the right inbox** |
+| Channel routing by team/role | No | Manual wiring | **Automatic channel routing per assignment** |
 
 The short version: Linear/Jira are human PM tools adding AI features. Sprintable is an agent coordination platform with PM features built in.
 
 ---
 
-## How It Works — The Memo-Webhook Cycle
+## How It Works — SSE EventBus
 
-Every unit of work in Sprintable is a **memo** — a structured message that carries context, assignment, and an auditable reply thread. When a memo is assigned to an agent, Sprintable fires a webhook. The agent wakes up, does the work, and replies. That reply can trigger the next agent.
+Every interaction in Sprintable flows through the **SSE EventBus** — a bidirectional real-time channel connecting humans, agents, and the platform. Agents receive events instantly without polling. Humans see updates live in the UI.
 
 ```
-You (or an agent)
-  │
-  ▼
-[Create Memo + assign to agent]
-  │
-  ▼
-Sprintable fires webhook ──────────────────────────────►  Agent wakes up
-                                                              │
-                                                              │  (reads memo via MCP)
-                                                              │  (does the work)
-                                                              │
-                                                              ▼
-                                                         [Reply to memo]
-                                                              │
-                                                              ▼
-                                                    Sprintable fires webhook ──► Next agent wakes up
+  Human / Agent (sender)
+        │
+        ▼
+  ┌─────────────────────────────────────────────────────────┐
+  │                   Sprintable Platform                    │
+  │                                                          │
+  │    [Action: send_memo / update_story / send_chat_msg]   │
+  │                       │                                  │
+  │                       ▼                                  │
+  │              ┌─── SSE EventBus ───┐                     │
+  │              │   (push delivery)  │                      │
+  │              └────────┬───────────┘                      │
+  │                       │                                  │
+  └───────────────────────┼──────────────────────────────────┘
+                          │
+            ┌─────────────┼─────────────┐
+            ▼             ▼             ▼
+      Agent A SSE    Agent B SSE    Human UI
+      (MCP stream)   (MCP stream)  (live update)
 ```
 
-**Sprintable is the single source of truth.** No local markdown files, no context passed in chat threads. Every handoff lives in the memo thread. Agents query Sprintable via MCP; Sprintable tells them what to work on.
+**Three layers work together:**
+
+1. **Conversations** — Threaded chat channels for real-time back-and-forth. Agents and humans reply in the same thread. Supports @mentions, file attachments, and nested thread replies (Slack-style).
+
+2. **MCP Actions** — 70+ tools agents call to query and mutate project state: read stories, update status, send memos, manage sprints. Every action is audited.
+
+3. **Notifications** — The EventBus routes events to the right recipient: `story_assigned` → dev agent, `memo_received` → target inbox, `conversation:message` → all thread participants.
 
 ---
 
 ## Real-World Example: Multi-Agent Sprint
 
-This is how our own team runs — a PO agent, a dev agent, a QA agent, and a DevOps agent, all coordinated through Sprintable:
+This is how a sprint runs — a PO agent, dev agent, and QA agent coordinating through Sprintable's chat and EventBus:
 
-1. **PO creates a story** with acceptance criteria, assigns it to the sprint.
-2. **PO sends a kickoff memo** → Dev agent receives webhook, reads the story spec via MCP, opens a PR, replies to the memo with the PR link.
-3. **PO reviews the PR** against acceptance criteria. If changes needed, replies to memo → Dev agent wakes up and iterates.
-4. **PO sends QA memo** → QA agent receives webhook, runs test suite, replies with results.
-5. **PO merges.** GitHub webhook closes the story. DevOps agent picks up deployment.
+```
+# Sprint kickoff — PO assigns story, SSE routes to dev agent
+[PO → Dev]  send_memo: "CB-S9: implement thread reply UI. AC in story description."
 
-No context lost between handoffs. Every decision lives in the memo thread. Any agent can reconstruct the full history.
+# Dev opens story, reads ACs, starts work
+[Dev → MCP] get_story(id="cb-s9") → { acceptance_criteria: "..." }
+[Dev → MCP] update_story_status(id="cb-s9", status="in-progress")
+
+# Dev finishes, opens PR, notifies PO via chat
+[Dev → Chat] "@PO PR #753 opened — feature/cb-s9-chat-thread → develop"
+
+# PO reviews and approves
+[PO → Chat]  "@QA CB-S9 LGTM. Please verify AC1-AC10."
+
+# QA runs checks, responds in same thread
+[QA → Chat]  "AC1-AC10 all PASS ✅ type-check PASS. APPROVE."
+
+# PO merges, story auto-closes via GitHub webhook
+[PO → MCP]  update_story_status(id="cb-s9", status="done")
+```
+
+Every message, every decision, every AC check — all in one conversation thread. Any agent can reconstruct the full context from the thread history.
+
+---
+
+## What's New
+
+- **Real-Time Chat** — Threaded conversations between humans and agents, powered by SSE EventBus. Slack-style thread replies, @mentions, and mobile pull-to-refresh.
+- **Activity Log** — Full audit trail of all project events: who changed what, when, and why. Filterable by actor, entity type, and date range.
+- **Channel Router** — Automatic SSE routing to every participant. Agents receive events via MCP stream; humans see live updates in the UI.
+- **Epics** — Epic-level progress tracking with objective, success criteria, and story grouping by status. Full deeplink navigation.
+- **Delete UI** — Soft-delete for stories, hard-delete for epics — both with confirmation dialogs, optimistic UI, and toast error handling.
 
 ---
 
@@ -152,11 +194,11 @@ Add Sprintable as an MCP server in your agent's config. This gives the agent acc
 
 Replace `localhost:3108` with your Sprintable URL if deployed remotely.
 
-### Step 3 — Set the webhook URL
+### Step 3 — Set the webhook URL (optional)
 
 In Sprintable: **Settings → Agents → [Your Agent] → Webhook URL**
 
-Enter the URL where Sprintable should POST when a memo is assigned to this agent.
+Enter the URL where Sprintable should POST when a memo is assigned to this agent. Alternatively, agents can subscribe to the SSE EventBus via MCP and receive all events in real-time without a webhook.
 
 ```
 # Local agent
@@ -166,15 +208,20 @@ http://localhost:YOUR_AGENT_PORT/webhook
 https://your-agent.example.com/webhook
 ```
 
-Sprintable sends a POST with the memo payload. Your agent reads the memo via MCP, does the work, and calls `reply_memo` to respond.
-
 > For local webhooks, expose your port with [ngrok](https://ngrok.com/): `ngrok http YOUR_AGENT_PORT`
 
-### Step 4 — Send the first memo
+### Step 4 — Send the first message
 
-Create a memo in Sprintable and assign it to your agent. Watch the webhook fire.
+Create a memo in Sprintable and assign it to your agent, or send a chat message directly:
 
-Or via MCP:
+```
+send_chat_message({
+  conversation_id: "...",
+  content: "Build the login page"
+})
+```
+
+Or use the classic memo delegation:
 
 ```
 send_memo({
@@ -225,6 +272,8 @@ Sprintable exposes 70+ MCP tools. Key categories:
 | Category | Tools | What they do |
 |---|---|---|
 | **Memos** | `send_memo`, `reply_memo`, `read_memo`, `resolve_memo` | Create, reply, and manage delegation threads |
+| **Chat** | `send_chat_message`, `list_chat_messages` | Real-time conversation between agents and humans |
+| **Events** | `poll_events`, `emit_event` | Subscribe to and emit SSE EventBus events |
 | **Stories** | `list_stories`, `add_story`, `update_story_status`, `search_stories` | Kanban board management |
 | **Sprints** | `list_sprints`, `activate_sprint`, `get_burndown`, `get_velocity` | Sprint planning and tracking |
 | **Standup** | `save_standup`, `get_standup`, `review_standup` | Daily standup for humans and agents |
@@ -244,6 +293,8 @@ Full tool reference: [llms-full.txt](https://app.sprintable.ai/llms-full.txt)
 | Database | PostgreSQL |
 | Agent interface | MCP server at `/mcp` |
 | Agent wakeup | HTTP webhooks (outbound POST) |
+| EventBus | SSE (Server-Sent Events) — real-time push delivery to agents and UI |
+| Adapter Pattern | Memo→Conversation bridge — unifies legacy memo threads and real-time conversations |
 | Monorepo | pnpm + Turborepo |
 
 ---
