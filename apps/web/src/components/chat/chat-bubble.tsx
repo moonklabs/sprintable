@@ -1,15 +1,24 @@
 'use client';
 
+import { useCallback, useRef, useState } from 'react';
 import ReactMarkdown, { defaultUrlTransform } from 'react-markdown';
 import remarkGfm from 'remark-gfm';
-import { Bot, User } from 'lucide-react';
+import { Bot, MessageSquare, User } from 'lucide-react';
 import type { ChatMessage } from '@/hooks/use-chat-sse';
 import { EntityChip, getEntityHref } from '@/components/memos/embed-card';
+import { MessageContextMenu } from './message-context-menu';
 
 interface ChatBubbleProps {
   message: ChatMessage;
   isMine: boolean;
   isGrouped?: boolean;
+  onOpenThread?: (message: ChatMessage) => void;
+  onDelete?: (messageId: string) => void;
+}
+
+interface ContextMenuState {
+  x: number;
+  y: number;
 }
 
 // Convert @name tokens to markdown links so react-markdown v10 can render them via the `a` component.
@@ -74,80 +83,173 @@ function ChatMarkdown({ content, isMine }: { content: string; isMine: boolean })
   );
 }
 
-export function ChatBubble({ message, isMine, isGrouped = false }: ChatBubbleProps) {
+const LONG_PRESS_MS = 500;
+
+export function ChatBubble({ message, isMine, isGrouped = false, onOpenThread, onDelete }: ChatBubbleProps) {
   const isAgent = message.sender_type === 'agent';
   const displayName = isMine ? '나' : (message.sender_name || '팀');
   const time = new Intl.DateTimeFormat('ko-KR', { hour: '2-digit', minute: '2-digit' }).format(new Date(message.created_at));
+  const replyCount = message.reply_count ?? 0;
+  const lastReplyAt = message.last_reply_at;
+
+  const [contextMenu, setContextMenu] = useState<ContextMenuState | null>(null);
+  const longPressTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const touchPosRef = useRef<{ x: number; y: number } | null>(null);
+
+  // AC1: 우클릭 컨텍스트 메뉴 (데스크톱)
+  const handleContextMenu = useCallback((e: React.MouseEvent) => {
+    e.preventDefault();
+    setContextMenu({ x: e.clientX, y: e.clientY });
+  }, []);
+
+  // AC2: 롱프레스 컨텍스트 메뉴 (모바일)
+  const handleTouchStart = useCallback((e: React.TouchEvent) => {
+    const touch = e.touches[0];
+    if (!touch) return;
+    touchPosRef.current = { x: touch.clientX, y: touch.clientY };
+    longPressTimerRef.current = setTimeout(() => {
+      if (touchPosRef.current) {
+        setContextMenu({ x: touchPosRef.current.x, y: touchPosRef.current.y });
+      }
+    }, LONG_PRESS_MS);
+  }, []);
+
+  const handleTouchEnd = useCallback(() => {
+    if (longPressTimerRef.current) {
+      clearTimeout(longPressTimerRef.current);
+      longPressTimerRef.current = null;
+    }
+    touchPosRef.current = null;
+  }, []);
+
+  const handleTouchMove = useCallback(() => {
+    if (longPressTimerRef.current) {
+      clearTimeout(longPressTimerRef.current);
+      longPressTimerRef.current = null;
+    }
+  }, []);
+
+  const handleCopy = useCallback(() => {
+    void navigator.clipboard.writeText(message.content);
+  }, [message.content]);
+
+  const handleDelete = useCallback(() => {
+    onDelete?.(message.id);
+  }, [message.id, onDelete]);
+
+  const handleOpenThread = useCallback(() => {
+    onOpenThread?.(message);
+  }, [message, onOpenThread]);
+
+  const lastReplyTime = lastReplyAt
+    ? new Intl.DateTimeFormat('ko-KR', { hour: '2-digit', minute: '2-digit' }).format(new Date(lastReplyAt))
+    : null;
 
   return (
-    <div className={`flex gap-2 ${isMine ? 'flex-row-reverse' : 'flex-row'} ${isGrouped ? 'mt-0.5' : 'mt-2'}`}>
-      {/* Avatar — hidden when grouped */}
-      {isGrouped ? (
-        <div className="w-7 flex-shrink-0" />
-      ) : (
-        <div className={`flex h-7 w-7 flex-shrink-0 items-center justify-center rounded-full text-xs font-medium ${
-          isAgent
-            ? 'bg-violet-100 text-violet-700 dark:bg-violet-900/40 dark:text-violet-300'
-            : isMine
-              ? 'bg-primary/20 text-primary'
-              : 'bg-muted text-muted-foreground'
-        }`}>
-          {isAgent ? <Bot className="h-3.5 w-3.5" /> : <User className="h-3.5 w-3.5" />}
-        </div>
-      )}
-
-      {/* Bubble + meta */}
-      <div className={`flex max-w-[72%] flex-col gap-0.5 ${isMine ? 'items-end' : 'items-start'}`}>
-        {/* Sender name — hidden when grouped */}
-        {!isGrouped && (
-          <div className="flex items-center gap-1.5">
-            <span className="text-[11px] font-medium text-muted-foreground">{displayName}</span>
-            {isAgent && (
-              <span className="rounded-sm bg-violet-100 px-1 py-0.5 text-[9px] font-semibold uppercase tracking-wide text-violet-700 dark:bg-violet-900/40 dark:text-violet-300">
-                AI
-              </span>
-            )}
+    <>
+      <div
+        className={`flex gap-2 ${isMine ? 'flex-row-reverse' : 'flex-row'} ${isGrouped ? 'mt-0.5' : 'mt-2'}`}
+        onContextMenu={handleContextMenu}
+        onTouchStart={handleTouchStart}
+        onTouchEnd={handleTouchEnd}
+        onTouchMove={handleTouchMove}
+      >
+        {/* Avatar — hidden when grouped */}
+        {isGrouped ? (
+          <div className="w-7 flex-shrink-0" />
+        ) : (
+          <div className={`flex h-7 w-7 flex-shrink-0 items-center justify-center rounded-full text-xs font-medium ${
+            isAgent
+              ? 'bg-violet-100 text-violet-700 dark:bg-violet-900/40 dark:text-violet-300'
+              : isMine
+                ? 'bg-primary/20 text-primary'
+                : 'bg-muted text-muted-foreground'
+          }`}>
+            {isAgent ? <Bot className="h-3.5 w-3.5" /> : <User className="h-3.5 w-3.5" />}
           </div>
         )}
 
-        {/* Content */}
-        <div className={`rounded-2xl px-3.5 py-2 text-sm leading-relaxed break-words ${
-          isMine
-            ? 'rounded-tr-sm bg-primary text-primary-foreground'
-            : 'rounded-tl-sm bg-muted text-foreground'
-        }`}>
-          <ChatMarkdown content={message.content} isMine={isMine} />
-        </div>
+        {/* Bubble + meta */}
+        <div className={`flex max-w-[72%] flex-col gap-0.5 ${isMine ? 'items-end' : 'items-start'}`}>
+          {/* Sender name — hidden when grouped */}
+          {!isGrouped && (
+            <div className="flex items-center gap-1.5">
+              <span className="text-[11px] font-medium text-muted-foreground">{displayName}</span>
+              {isAgent && (
+                <span className="rounded-sm bg-violet-100 px-1 py-0.5 text-[9px] font-semibold uppercase tracking-wide text-violet-700 dark:bg-violet-900/40 dark:text-violet-300">
+                  AI
+                </span>
+              )}
+            </div>
+          )}
 
-        {/* Attachments */}
-        {message.attachments && message.attachments.length > 0 && (
-          <div className="flex flex-col gap-1.5">
-            {message.attachments.map((att, i) => {
-              const href = att.url;
-              const label = att.name ?? att.filename ?? '첨부파일';
-              const isImage = att.content_type?.startsWith('image/');
-              return (
-                <a
-                  key={href ?? i}
-                  href={href}
-                  target="_blank"
-                  rel="noopener noreferrer"
-                  className="flex items-center gap-2 rounded-lg border border-border bg-background px-3 py-2 text-xs hover:bg-muted/50"
-                >
-                  {isImage && href ? (
-                    /* eslint-disable-next-line @next/next/no-img-element */
-                    <img src={href} alt={label} className="max-h-40 max-w-[240px] rounded object-contain" />
-                  ) : (
-                    <span className="truncate text-muted-foreground">{label}</span>
-                  )}
-                </a>
-              );
-            })}
+          {/* Content */}
+          <div className={`rounded-2xl px-3.5 py-2 text-sm leading-relaxed break-words ${
+            isMine
+              ? 'rounded-tr-sm bg-primary text-primary-foreground'
+              : 'rounded-tl-sm bg-muted text-foreground'
+          }`}>
+            <ChatMarkdown content={message.content} isMine={isMine} />
           </div>
-        )}
 
-        <time className="text-[10px] text-muted-foreground/70">{time}</time>
+          {/* Attachments */}
+          {message.attachments && message.attachments.length > 0 && (
+            <div className="flex flex-col gap-1.5">
+              {message.attachments.map((att, i) => {
+                const href = att.url;
+                const label = att.name ?? att.filename ?? '첨부파일';
+                const isImage = att.content_type?.startsWith('image/');
+                return (
+                  <a
+                    key={href ?? i}
+                    href={href}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="flex items-center gap-2 rounded-lg border border-border bg-background px-3 py-2 text-xs hover:bg-muted/50"
+                  >
+                    {isImage && href ? (
+                      /* eslint-disable-next-line @next/next/no-img-element */
+                      <img src={href} alt={label} className="max-h-40 max-w-[240px] rounded object-contain" />
+                    ) : (
+                      <span className="truncate text-muted-foreground">{label}</span>
+                    )}
+                  </a>
+                );
+              })}
+            </div>
+          )}
+
+          <time className="text-[10px] text-muted-foreground/70">{time}</time>
+
+          {/* AC5: 답글 수 표시 — reply_count > 0 */}
+          {replyCount > 0 && (
+            <button
+              type="button"
+              onClick={handleOpenThread}
+              className="mt-0.5 flex items-center gap-1.5 rounded-md px-1.5 py-1 text-xs font-medium text-primary transition-colors hover:bg-primary/8"
+            >
+              <MessageSquare className="h-3 w-3" />
+              {replyCount}개의 답글
+              {lastReplyTime && (
+                <span className="font-normal text-muted-foreground">{lastReplyTime}</span>
+              )}
+            </button>
+          )}
+        </div>
       </div>
-    </div>
+
+      {/* AC1/AC2: 컨텍스트 메뉴 */}
+      {contextMenu && (
+        <MessageContextMenu
+          x={contextMenu.x}
+          y={contextMenu.y}
+          isMine={isMine}
+          onReply={handleOpenThread}
+          onCopy={handleCopy}
+          onDelete={handleDelete}
+          onClose={() => setContextMenu(null)}
+        />
+      )}
+    </>
   );
 }
