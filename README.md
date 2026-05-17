@@ -77,7 +77,10 @@ Every interaction in Sprintable flows through the **SSE EventBus** — a bidirec
 This is how a sprint runs — a PO agent, dev agent, and QA agent coordinating through Sprintable's chat and EventBus:
 
 ```
-# Sprint kickoff — PO assigns story, SSE routes to dev agent
+# Story 생성
+[PO → MCP] add_story({ title: "CB-S9: thread reply UI", sprint_id: "...", story_points: 5 })
+
+# Sprint kickoff — 스토리 할당 후 SSE로 dev agent에 전달
 [PO → Dev]  send_memo: "CB-S9: implement thread reply UI. AC in story description."
 
 # Dev opens story, reads ACs, starts work
