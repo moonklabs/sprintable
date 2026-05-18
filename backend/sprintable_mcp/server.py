@@ -3,6 +3,11 @@ from mcp.types import TextContent
 
 from .config import settings
 from .response import ok
+from .tools.meetings import (
+    CreateMeetingInput, ListMeetingsInput, MeetingIdInput, UpdateMeetingInput,
+    create_meeting, delete_meeting, get_meeting, list_meetings,
+    trigger_ai_summary, update_meeting,
+)
 from .tools.memos import (
     CreateConversationInput, CreateMemoInput, ListChatMessagesInput,
     ListMemosInput, ListMyMemosInput, MemoIdInput, ReplyMemoInput, SendChatInput,
@@ -414,3 +419,41 @@ async def sprintable_create_conversation(args: CreateConversationInput) -> list[
 async def sprintable_list_chat_messages(args: ListChatMessagesInput) -> list[TextContent]:
     """conversation thread 메시지 목록 조회."""
     return await list_chat_messages(args)
+
+
+# ── Meetings (6개) ─────────────────────────────────────────────────────────────
+
+@mcp.tool()
+async def sprintable_list_meetings(args: ListMeetingsInput) -> list[TextContent]:
+    """프로젝트 미팅 목록 조회."""
+    return await list_meetings(args)
+
+
+@mcp.tool()
+async def sprintable_get_meeting(args: MeetingIdInput) -> list[TextContent]:
+    """미팅 상세 조회."""
+    return await get_meeting(args)
+
+
+@mcp.tool()
+async def sprintable_create_meeting(args: CreateMeetingInput) -> list[TextContent]:
+    """미팅 생성."""
+    return await create_meeting(args)
+
+
+@mcp.tool()
+async def sprintable_update_meeting(args: UpdateMeetingInput) -> list[TextContent]:
+    """미팅 수정 (raw_transcript/ai_summary/decisions/action_items 포함)."""
+    return await update_meeting(args)
+
+
+@mcp.tool()
+async def sprintable_delete_meeting(args: MeetingIdInput) -> list[TextContent]:
+    """미팅 소프트 삭제."""
+    return await delete_meeting(args)
+
+
+@mcp.tool()
+async def sprintable_trigger_ai_summary(args: MeetingIdInput) -> list[TextContent]:
+    """미팅 AI 요약 생성 트리거."""
+    return await trigger_ai_summary(args)
