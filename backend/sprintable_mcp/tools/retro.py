@@ -78,9 +78,11 @@ async def create_retro_session(args: CreateRetroSessionInput) -> list[TextConten
 async def vote_retro_item(args: VoteRetroItemInput) -> list[TextContent]:
     """레트로 아이템 투표."""
     try:
-        return ok(await client.post(
+        return ok(await client.request(
+            "POST",
             f"/api/v2/retro-sessions/{args.session_id}/items/{args.item_id}/vote",
             json={"voter_id": args.voter_id},
+            params={"project_id": client.project_id},
         ))
     except Exception as exc:
         return err(str(exc))
@@ -92,7 +94,12 @@ async def add_retro_action(args: AddRetroActionInput) -> list[TextContent]:
     if args.assignee_id:
         body["assignee_id"] = args.assignee_id
     try:
-        return ok(await client.post(f"/api/v2/retro-sessions/{args.session_id}/actions", json=body))
+        return ok(await client.request(
+            "POST",
+            f"/api/v2/retro-sessions/{args.session_id}/actions",
+            json=body,
+            params={"project_id": client.project_id},
+        ))
     except Exception as exc:
         return err(str(exc))
 
@@ -100,9 +107,11 @@ async def add_retro_action(args: AddRetroActionInput) -> list[TextContent]:
 async def change_retro_phase(args: ChangeRetroPhaseInput) -> list[TextContent]:
     """레트로 세션 단계 변경."""
     try:
-        return ok(await client.patch(
+        return ok(await client.request(
+            "PATCH",
             f"/api/v2/retro-sessions/{args.session_id}",
             json={"phase": args.phase},
+            params={"project_id": client.project_id},
         ))
     except Exception as exc:
         return err(str(exc))
@@ -111,9 +120,11 @@ async def change_retro_phase(args: ChangeRetroPhaseInput) -> list[TextContent]:
 async def add_retro_item(args: AddRetroItemInput) -> list[TextContent]:
     """레트로 아이템 추가 (good/bad/improve)."""
     try:
-        return ok(await client.post(
+        return ok(await client.request(
+            "POST",
             f"/api/v2/retro-sessions/{args.session_id}/items",
             json={"category": args.category, "text": args.text, "author_id": args.author_id},
+            params={"project_id": client.project_id},
         ))
     except Exception as exc:
         return err(str(exc))
