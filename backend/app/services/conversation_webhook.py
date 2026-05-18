@@ -124,9 +124,12 @@ async def deliver_conversation_message_webhook(
                     )
                 )).scalars().all()
                 existing_ids = {wh.id for wh in target_webhooks}
+                existing_urls = {wh.url for wh in target_webhooks}
                 for wh in extra_wh_rows:
-                    if wh.id not in existing_ids:
+                    if wh.id not in existing_ids and wh.url not in existing_urls:
                         target_webhooks.append(wh)
+                        existing_ids.add(wh.id)
+                        existing_urls.add(wh.url)
 
             if not target_webhooks:
                 return

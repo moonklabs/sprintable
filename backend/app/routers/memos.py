@@ -74,7 +74,7 @@ async def _collect_reply_webhook_urls(
             WebhookConfig.is_active.is_(True),
         )
     )
-    return [row[0] for row in rows if row[0]]
+    return list({row[0] for row in rows if row[0]})
 
 
 def _fire_webhook(url: str, content: str, title: str, memo_url: str, memo_id: str = "") -> None:
@@ -714,7 +714,14 @@ async def add_reply(
             if sender_member:
                 try:
                     from app.routers.conversations import _dispatch_conversation_event
-                    await _dispatch_conversation_event(db, conv, reply_msg, repo.org_id, sender_member)
+                    from app.services.channel_router import ChannelRouterError, route_message as _route
+                    discord_exclude_ids: set[uuid.UUID] = set()
+                    try:
+                        decisions = await _route(reply_msg.id, db)
+                        discord_exclude_ids = {d.member_id for d in decisions if d.channel == "discord"}
+                    except Exception:
+                        logger.warning("channel_router pre-check failed reply_msg_id=%s", reply_msg.id)
+                    await _dispatch_conversation_event(db, conv, reply_msg, repo.org_id, sender_member, exclude_ids=discord_exclude_ids)
                 except Exception:
                     logger.warning("conversation event dispatch failed memo_id=%s", id, exc_info=True)
 
