@@ -22,6 +22,11 @@ from .tools.tasks import (
     update_task, update_task_status,
 )
 from .schemas import SprintableInput
+from .tools.docs import (
+    CreateDocInput, DeleteDocInput, GetDocInput, ListDocsInput,
+    SearchDocsInput, UpdateDocInput,
+    create_doc, delete_doc, get_doc, list_docs, search_docs, update_doc,
+)
 from .tools.sprints import (
     CreateSprintInput, ListSprintsInput, SprintIdInput, UpdateSprintInput,
     activate_sprint, close_sprint, create_sprint, delete_sprint,
@@ -211,3 +216,41 @@ async def sprintable_update_sprint(args: UpdateSprintInput) -> list[TextContent]
 async def sprintable_delete_sprint(args: SprintIdInput) -> list[TextContent]:
     """스프린트 삭제."""
     return await delete_sprint(args)
+
+
+# ── Docs (6개) ─────────────────────────────────────────────────────────────────
+
+@mcp.tool()
+async def sprintable_list_docs(args: ListDocsInput) -> list[TextContent]:
+    """문서 목록 조회 (tree 또는 tag 필터)."""
+    return await list_docs(args)
+
+
+@mcp.tool()
+async def sprintable_get_doc(args: GetDocInput) -> list[TextContent]:
+    """slug로 문서 단건 조회."""
+    return await get_doc(args)
+
+
+@mcp.tool()
+async def sprintable_search_docs(args: SearchDocsInput) -> list[TextContent]:
+    """문서 제목/본문 검색."""
+    return await search_docs(args)
+
+
+@mcp.tool()
+async def sprintable_create_doc(args: CreateDocInput) -> list[TextContent]:
+    """문서 생성."""
+    return await create_doc(args)
+
+
+@mcp.tool()
+async def sprintable_update_doc(args: UpdateDocInput) -> list[TextContent]:
+    """문서 수정."""
+    return await update_doc(args)
+
+
+@mcp.tool()
+async def sprintable_delete_doc(args: DeleteDocInput) -> list[TextContent]:
+    """문서 소프트 삭제."""
+    return await delete_doc(args)
