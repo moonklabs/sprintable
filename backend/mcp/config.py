@@ -8,7 +8,7 @@ class McpSettings(BaseSettings):
         extra="ignore",
     )
 
-    sprintable_api_url: str = "http://localhost:8000"
+    sprintable_api_url: str = ""
     agent_api_key: str = ""
 
 
