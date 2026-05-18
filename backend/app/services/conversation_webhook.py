@@ -96,6 +96,7 @@ async def deliver_conversation_message_webhook(
             if member_ids_for_webhook:
                 extra_wh_rows = (await db.execute(
                     select(WebhookConfig).where(
+                        WebhookConfig.org_id == org_id,
                         WebhookConfig.member_id.in_(member_ids_for_webhook),
                         WebhookConfig.is_active.is_(True),
                     )
