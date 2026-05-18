@@ -1,11 +1,13 @@
 """python -m backend.mcp — Sprintable Python MCP server entry point."""
 
 import asyncio
+import contextlib
 import sys
 
 from .api_client import SprintableApiError, client
 from .config import settings
 from .server import mcp
+from .sse_bridge import start_sse_bridge
 
 
 def main() -> None:
@@ -29,7 +31,24 @@ def main() -> None:
         print(f"Error: auth context resolve failed: {exc}", file=sys.stderr)
         sys.exit(1)
 
-    mcp.run(transport="stdio")
+    asyncio.run(_run())
+
+
+async def _run() -> None:
+    """MCP stdio 서버 + SSE 브릿지를 동일 이벤트 루프에서 실행."""
+    sse_task = asyncio.create_task(
+        start_sse_bridge(
+            settings.sprintable_api_url,
+            settings.agent_api_key,
+            client.member_id,
+        )
+    )
+    try:
+        await mcp.run_stdio_async()
+    finally:
+        sse_task.cancel()
+        with contextlib.suppress(asyncio.CancelledError):
+            await sse_task
 
 
 if __name__ == "__main__":
