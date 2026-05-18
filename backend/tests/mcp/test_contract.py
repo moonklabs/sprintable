@@ -118,8 +118,22 @@ def test_project_id_not_in_schema(tool_name: str):
     ("sprintable_get_leaderboard_v2", "period"),
 ])
 def test_optional_fields_have_null_default(tool_name: str, optional_field: str):
-    """Optional 필드는 required에 포함되지 않고 default=null을 가져야 한다."""
+    """Optional 필드는 required에 포함되지 않고 default=null을 가져야 한다.
+
+    flat schema(top-level properties)와 $defs 래핑 스키마 양쪽 지원.
+    """
     schema = _TOOLS[tool_name].parameters
+    # flat schema: properties at top level
+    flat_props = schema.get("properties", {})
+    if optional_field in flat_props:
+        field_schema = flat_props[optional_field]
+        assert field_schema.get("default") is None, \
+            f"{tool_name}.{optional_field} default should be None"
+        required = schema.get("required", [])
+        assert optional_field not in required, \
+            f"{tool_name}.{optional_field} should not be in required"
+        return
+    # $defs-wrapped schema (legacy fallback)
     defs = schema.get("$defs", {})
     for model_schema in defs.values():
         props = model_schema.get("properties", {})
@@ -136,3 +150,19 @@ def test_optional_fields_have_null_default(tool_name: str, optional_field: str):
 
 def test_ping_tool_exists():
     assert "ping" in _TOOLS
+
+
+@pytest.mark.parametrize("tool_name", [
+    "sprintable_list_stories",
+    "sprintable_list_tasks",
+    "sprintable_list_sprints",
+    "sprintable_list_memos",
+    "sprintable_check_notifications",
+])
+def test_flat_schema_no_args_wrapper(tool_name: str):
+    """S4-2: 도구 스키마가 args 래핑 없이 top-level properties를 가져야 한다."""
+    schema = _TOOLS[tool_name].parameters
+    assert "args" not in schema.get("properties", {}), \
+        f"{tool_name}: 'args' wrapper detected in schema — flat params required"
+    assert schema.get("properties") is not None, \
+        f"{tool_name}: schema has no top-level properties"
