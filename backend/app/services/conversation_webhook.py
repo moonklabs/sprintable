@@ -26,6 +26,26 @@ _MAX_RETRIES = 3
 _BACKOFF_BASE = 1.0  # seconds
 
 
+_DISCORD_URL_PATTERNS = ("discord.com/api/webhooks", "discordapp.com/api/webhooks")
+
+
+def _is_discord_url(url: str) -> bool:
+    return any(pat in url for pat in _DISCORD_URL_PATTERNS)
+
+
+def _to_discord_payload(payload: dict) -> dict:
+    """Sprintable webhook payload → Discord content 포맷 변환."""
+    event_type = payload.get("event_type", "event")
+    conversation_id = payload.get("conversation_id", "")
+    sender_id = payload.get("sender_id") or ""
+    lines = [f"[{event_type}]"]
+    if conversation_id:
+        lines.append(f"conversation_id: {conversation_id}")
+    if sender_id:
+        lines.append(f"sender_id: {sender_id}")
+    return {"content": "\n".join(lines)}
+
+
 def _sign_payload(secret: str, body: bytes) -> str:
     """HMAC-SHA256 서명 — X-Hub-Signature-256 헤더용."""
     digest = hmac.new(secret.encode(), body, hashlib.sha256).hexdigest()
@@ -34,9 +54,11 @@ def _sign_payload(secret: str, body: bytes) -> str:
 
 async def _attempt_delivery(url: str, secret: str | None, payload: dict) -> None:
     """단일 webhook HTTP POST 시도. 실패 시 예외 raise."""
-    body = json.dumps(payload, default=str).encode()
+    discord = _is_discord_url(url)
+    delivery_payload = _to_discord_payload(payload) if discord else payload
+    body = json.dumps(delivery_payload, default=str).encode()
     headers: dict[str, str] = {"Content-Type": "application/json"}
-    if secret:
+    if secret and not discord:
         headers["X-Hub-Signature-256"] = _sign_payload(secret, body)
 
     async with httpx.AsyncClient(timeout=10.0) as client:
