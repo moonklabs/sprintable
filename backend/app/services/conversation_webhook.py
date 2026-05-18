@@ -42,10 +42,10 @@ def _to_discord_payload(payload: dict) -> dict:
     discord_content = f"📩 **새 메시지**"
     if content_text:
         discord_content += f"\n{content_text}"
+    if conversation_id:
+        discord_content += f"\n\nmemo_id: {conversation_id}"
     if thread_id:
-        discord_content += f"\n\nreply_id: {thread_id}"
-    elif conversation_id:
-        discord_content += f"\n\nconversation_id: {conversation_id}"
+        discord_content += f"\nreply_id: {thread_id}"
 
     result: dict = {"content": discord_content}
     app_url = __import__("os").environ.get("NEXT_PUBLIC_APP_URL", "")
