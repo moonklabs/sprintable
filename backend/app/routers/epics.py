@@ -3,7 +3,7 @@ import uuid
 from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.dependencies.auth import AuthContext, get_current_user, get_verified_org_id
+from app.dependencies.auth import AuthContext, enforce_body_context, get_current_user, get_verified_org_id
 from app.dependencies.database import get_db
 from app.repositories.epic import EpicRepository
 from app.schemas.epic import EpicCreate, EpicProgressResponse, EpicResponse, EpicUpdate
@@ -37,9 +37,16 @@ async def list_epics(
 async def create_epic(
     body: EpicCreate,
     session: AsyncSession = Depends(get_db),
-    _auth: AuthContext = Depends(get_current_user),
+    auth: AuthContext = Depends(get_current_user),
+    org_id: uuid.UUID = Depends(get_verified_org_id),
 ) -> EpicResponse:
-    repo = EpicRepository(session, body.org_id)
+    enforce_body_context(
+        auth_org_id=org_id,
+        body_org_id=body.org_id,
+        body_project_id=body.project_id,
+        auth_project_id=auth.claims.get("app_metadata", {}).get("project_id"),
+    )
+    repo = EpicRepository(session, org_id)
     epic = await repo.create(
         project_id=body.project_id,
         title=body.title,

@@ -3,7 +3,7 @@ import uuid
 from fastapi import APIRouter, Depends, Header, HTTPException, Query, status
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.dependencies.auth import AuthContext, get_current_user
+from app.dependencies.auth import AuthContext, enforce_body_context, get_current_user, get_verified_org_id
 from app.dependencies.database import get_db
 from app.repositories.meeting import MeetingRepository
 from app.schemas.meeting import MeetingCreate, MeetingResponse, MeetingUpdate
@@ -41,8 +41,15 @@ async def list_meetings(
 async def create_meeting(
     body: MeetingCreate,
     session: AsyncSession = Depends(get_db),
-    _auth: AuthContext = Depends(get_current_user),
+    auth: AuthContext = Depends(get_current_user),
+    org_id: uuid.UUID = Depends(get_verified_org_id),
 ) -> MeetingResponse:
+    enforce_body_context(
+        auth_org_id=org_id,
+        body_org_id=None,
+        body_project_id=body.project_id,
+        auth_project_id=auth.claims.get("app_metadata", {}).get("project_id"),
+    )
     repo = MeetingRepository(session, body.project_id)
     data = body.model_dump(exclude={"project_id"}, exclude_none=False)
     meeting = await repo.create(**{k: v for k, v in data.items() if v is not None or k in ("participants", "decisions", "action_items")})

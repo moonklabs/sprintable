@@ -6,7 +6,7 @@ from pydantic import BaseModel
 from sqlalchemy import delete, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.dependencies.auth import AuthContext, get_current_user, get_project_scoped_org_id, get_verified_org_id
+from app.dependencies.auth import AuthContext, enforce_body_context, get_current_user, get_project_scoped_org_id, get_verified_org_id
 from app.dependencies.database import get_db
 from app.models.doc import DocComment, DocRevision
 from app.models.team import TeamMember
@@ -59,9 +59,16 @@ async def list_docs(
 async def create_doc(
     body: DocCreate,
     session: AsyncSession = Depends(get_db),
-    _auth: AuthContext = Depends(get_current_user),
+    auth: AuthContext = Depends(get_current_user),
+    org_id: uuid.UUID = Depends(get_verified_org_id),
 ) -> DocResponse:
-    repo = DocRepository(session, body.org_id)
+    enforce_body_context(
+        auth_org_id=org_id,
+        body_org_id=body.org_id,
+        body_project_id=body.project_id,
+        auth_project_id=auth.claims.get("app_metadata", {}).get("project_id"),
+    )
+    repo = DocRepository(session, org_id)
     doc = await repo.create(
         project_id=body.project_id,
         title=body.title,
