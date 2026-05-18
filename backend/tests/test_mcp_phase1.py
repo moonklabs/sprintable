@@ -8,8 +8,8 @@ from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
-from mcp.api_client import SprintableApiError, SprintableClient
-from mcp.response import err, ok
+from sprintable_mcp.api_client import SprintableApiError, SprintableClient
+from sprintable_mcp.response import err, ok
 
 
 # ─── AC1/AC2: env fail-fast ────────────────────────────────────────────────

@@ -2,7 +2,7 @@
   "mcpServers": {
     "sprintable-python": {
       "command": "python",
-      "args": ["-m", "backend.mcp"],
+      "args": ["-m", "backend.sprintable_mcp"],
       "env": {
         "SPRINTABLE_API_URL": "https://api.sprintable.ai",
         "AGENT_API_KEY": "sk_live_..."
