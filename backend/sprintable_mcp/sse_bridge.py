@@ -1,21 +1,29 @@
 """SSE 브릿지 — /api/v2/events/stream httpx long-lived stream 연결.
 
 REST용 SprintableClient와 완전히 분리된 SSE 전용 httpx.AsyncClient 사용.
-relay(S5-3), backoff 상세(S5-5)는 후속 스토리에서 확장.
+backoff 상세(S5-5)는 후속 스토리에서 확장.
 """
 from __future__ import annotations
 
 import asyncio
+import json
 import sys
-from dataclasses import dataclass, field
+import time
+from dataclasses import dataclass
+from random import randint
 from typing import Any, Callable
 
 import httpx
+
+from .config import settings
 
 SseBridgeEventHandler = Callable[[str, Any], None]
 
 _BASE_DELAY = 1.0
 _MAX_DELAY = 10.0
+
+# relay 대상 이벤트 타입
+_RELAY_EVENT_TYPES = frozenset(["conversation:message", "conversation:mention"])
 
 
 def _log(msg: str) -> None:
@@ -88,6 +96,90 @@ class SseParser:
         return None
 
 
+# ── fakechat relay ─────────────────────────────────────────────────────────────
+
+def _build_relay_payload(event_type: str, data: object) -> tuple[str, str, bool]:
+    """SSE data에서 (text, thread_id, is_conversation_event) 추출."""
+    if not isinstance(data, dict):
+        return f"[{event_type}] {data}", "", False
+
+    d: dict = data
+    payload: dict = d.get("payload") if isinstance(d.get("payload"), dict) else d  # type: ignore[assignment]
+
+    sender_raw = payload.get("sender") or d.get("sender_name") or d.get("member_name") or ""
+    if isinstance(sender_raw, dict):
+        sender_name = str(sender_raw.get("name", ""))
+    else:
+        sender_name = str(sender_raw)
+
+    content = (
+        payload.get("content")
+        or d.get("content")
+        or d.get("message")
+        or d.get("text")
+        or json.dumps(data, ensure_ascii=False)
+    )
+
+    text = f"[{event_type}] {sender_name}: {content}" if sender_name else f"[{event_type}] {content}"
+
+    conversation_id = str(payload.get("conversation_id") or d.get("conversation_id") or "")
+    thread_id = str(payload.get("thread_id") or d.get("thread_id") or conversation_id)
+    is_conversation_event = bool(conversation_id) and not (
+        payload.get("thread_id") or d.get("thread_id")
+    )
+
+    return text, thread_id, is_conversation_event
+
+
+async def relay_to_fakechat(
+    event_type: str,
+    data_str: str,
+    api_url: str,
+    api_key: str,
+    fakechat_port: int,
+) -> None:
+    """SSE 이벤트 → fakechat /upload POST.
+
+    relay 대상: conversation:message, conversation:mention.
+    비대상 이벤트 및 모든 에러는 조용히 skip — MCP 동작에 영향 없음 (AC4).
+    """
+    if event_type not in _RELAY_EVENT_TYPES:
+        return
+
+    uid = f"sse-{int(time.time() * 1000)}-{randint(0, 999999):06d}"
+
+    try:
+        parsed: Any = json.loads(data_str)
+    except json.JSONDecodeError:
+        parsed = data_str
+
+    text, thread_id, is_conversation_event = _build_relay_payload(event_type, parsed)
+
+    form: dict[str, str] = {"id": uid, "text": text}
+
+    if thread_id:
+        base_url = api_url.rstrip("/")
+        form["thread_id"] = thread_id
+        if base_url and api_key:
+            callback_path = (
+                f"/api/v2/conversations/{thread_id}/messages"
+                if is_conversation_event
+                else f"/api/v2/chats/{thread_id}/messages"
+            )
+            form["reply_callback_url"] = f"{base_url}{callback_path}"
+            form["reply_callback_api_key"] = api_key
+
+    try:
+        async with httpx.AsyncClient(timeout=5.0) as client:
+            resp = await client.post(
+                f"http://127.0.0.1:{fakechat_port}/upload",
+                data=form,
+            )
+            resp.raise_for_status()
+    except Exception as exc:
+        _log(f"relay error: {exc}")
+
+
 # ── httpx SSE client ───────────────────────────────────────────────────────────
 
 def make_sse_client(api_url: str, api_key: str) -> httpx.AsyncClient:
@@ -145,14 +237,24 @@ async def start_sse_bridge(
     """SSE 브릿지 시작. 연결 실패 시 에러 로그 + 재연결 루프 진입.
 
     MCP stdio 서버와 동일한 이벤트 루프에서 asyncio.create_task()로 실행.
+    수신 이벤트는 fakechat relay (fire-and-forget) + on_event 콜백으로 전달.
     """
     _log(f"starting bridge for member_id={member_id}")
     client = make_sse_client(api_url, api_key)
+    port = settings.fakechat_port
+
+    def _relay_and_dispatch(event_type: str, data: Any) -> None:
+        asyncio.create_task(
+            relay_to_fakechat(event_type, str(data), api_url, api_key, port)
+        )
+        if on_event is not None:
+            on_event(event_type, data)
+
     attempt = 0
     try:
         while True:
             try:
-                await _connect_once(client, member_id, on_event)
+                await _connect_once(client, member_id, _relay_and_dispatch)
                 attempt = 0
             except Exception as exc:
                 _log(f"error: {exc}")
