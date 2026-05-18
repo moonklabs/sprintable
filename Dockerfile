@@ -7,7 +7,6 @@ COPY apps/web/package.json apps/web/package.json
 COPY packages/core-storage/package.json packages/core-storage/package.json
 COPY packages/shared/package.json packages/shared/package.json
 COPY packages/db/package.json packages/db/package.json
-COPY packages/mcp-server/package.json packages/mcp-server/package.json
 COPY packages/sdk/package.json packages/sdk/package.json
 COPY packages/storage-api/package.json packages/storage-api/package.json
 COPY ee/packages/storage-saas/package.json ee/packages/storage-saas/package.json
