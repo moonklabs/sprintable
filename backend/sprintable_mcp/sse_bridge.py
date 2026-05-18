@@ -1,7 +1,6 @@
 """SSE 브릿지 — /api/v2/events/stream httpx long-lived stream 연결.
 
 REST용 SprintableClient와 완전히 분리된 SSE 전용 httpx.AsyncClient 사용.
-backoff 상세(S5-5)는 후속 스토리에서 확장.
 """
 from __future__ import annotations
 
@@ -10,7 +9,7 @@ import json
 import sys
 import time
 from dataclasses import dataclass
-from random import randint
+from random import randint, uniform
 from typing import TYPE_CHECKING, Any, Callable
 
 import httpx
@@ -21,9 +20,12 @@ if TYPE_CHECKING:
     from mcp.server.session import ServerSession
 
 SseBridgeEventHandler = Callable[[str, Any], None]
+_SseInternalHandler = Callable[["SseEvent"], None]
 
 _BASE_DELAY = 1.0
 _MAX_DELAY = 10.0
+_JITTER_FACTOR = 0.5    # wait * uniform(0, 0.5) jitter
+_SEEN_IDS_MAX = 1000    # dedup window 크기
 
 # relay 대상 이벤트 타입
 _RELAY_EVENT_TYPES = frozenset(["conversation:message", "conversation:mention"])
@@ -75,7 +77,7 @@ class SseParser:
     """RFC 8895 SSE 라인 파서.
 
     `feed(line)` 한 라인씩 공급. 이벤트 완성(blank line) 시 SseEvent 반환.
-    `last_event_id`는 연결 재시도 시 dedup에 사용 (S5-5).
+    `last_event_id`는 reconnect dedup(S5-5)에 사용.
     """
 
     def __init__(self) -> None:
@@ -172,7 +174,7 @@ async def relay_to_fakechat(
     """SSE 이벤트 → fakechat /upload POST.
 
     relay 대상: conversation:message, conversation:mention.
-    비대상 이벤트 및 모든 에러는 조용히 skip — MCP 동작에 영향 없음 (AC4).
+    비대상 이벤트 및 모든 에러는 조용히 skip — MCP 동작에 영향 없음.
     """
     if event_type not in _RELAY_EVENT_TYPES:
         return
@@ -233,9 +235,12 @@ def make_sse_client(api_url: str, api_key: str) -> httpx.AsyncClient:
 async def _connect_once(
     client: httpx.AsyncClient,
     member_id: str,
-    on_event: SseBridgeEventHandler | None = None,
+    on_event: _SseInternalHandler | None = None,
 ) -> None:
-    """SSE 스트림에 한 번 연결해서 이벤트 수신. 스트림 종료 시 반환."""
+    """SSE 스트림에 한 번 연결해서 이벤트 수신. 스트림 종료 시 반환.
+
+    `async with client.stream(...)` context manager가 response.aclose() 보장.
+    """
     async with client.stream(
         "GET",
         "/api/v2/events/stream",
@@ -254,7 +259,7 @@ async def _connect_once(
                 if event.event_type != "heartbeat":
                     _log(f"event={event.event_type} data={event.data[:200]}")
                     if on_event is not None:
-                        on_event(event.event_type, event.data)
+                        on_event(event)  # SseEvent 전체 전달 → dedup/relay/notify
 
         _log("stream ended")
 
@@ -265,36 +270,51 @@ async def start_sse_bridge(
     member_id: str,
     on_event: SseBridgeEventHandler | None = None,
 ) -> None:
-    """SSE 브릿지 시작. 연결 실패 시 에러 로그 + 재연결 루프 진입.
+    """SSE 브릿지 시작. 연결 실패 시 에러 로그 + jitter exponential backoff 재연결.
 
-    MCP stdio 서버와 동일한 이벤트 루프에서 asyncio.create_task()로 실행.
-    수신 이벤트는 fakechat relay + MCP notification + on_event 콜백으로 전달.
+    - backoff: BASE * 2^attempt (max MAX_DELAY) + uniform(0, wait * JITTER_FACTOR)
+    - dedup: last_event_id 기반 최근 SEEN_IDS_MAX 건 중복 skip
+    - MCP stdio 서버와 동일 이벤트 루프에서 asyncio.create_task()로 실행
+    - graceful shutdown: CancelledError → finally: client.aclose()
     """
     _log(f"starting bridge for member_id={member_id}")
     client = make_sse_client(api_url, api_key)
     port = settings.fakechat_port
 
-    def _relay_and_dispatch(event_type: str, data: Any) -> None:
+    # dedup window — reconnect 시 중복 이벤트 skip (insertion-order dict)
+    seen_ids: dict[str, None] = {}
+
+    def _handle(event: SseEvent) -> None:
+        # event_id dedup
+        if event.last_event_id:
+            if event.last_event_id in seen_ids:
+                _log(f"dedup: skip event_id={event.last_event_id}")
+                return
+            seen_ids[event.last_event_id] = None
+            if len(seen_ids) > _SEEN_IDS_MAX:
+                del seen_ids[next(iter(seen_ids))]  # 가장 오래된 항목 제거
+
         asyncio.create_task(
-            relay_to_fakechat(event_type, str(data), api_url, api_key, port)
+            relay_to_fakechat(event.event_type, event.data, api_url, api_key, port)
         )
         asyncio.create_task(
-            _send_mcp_notification(event_type, str(data))
+            _send_mcp_notification(event.event_type, event.data)
         )
         if on_event is not None:
-            on_event(event_type, data)
+            on_event(event.event_type, event.data)
 
     attempt = 0
     try:
         while True:
             try:
-                await _connect_once(client, member_id, _relay_and_dispatch)
+                await _connect_once(client, member_id, _handle)
                 attempt = 0
             except Exception as exc:
                 _log(f"error: {exc}")
             attempt += 1
-            wait = min(_BASE_DELAY * 2 ** (attempt - 1), _MAX_DELAY)
-            _log(f"reconnecting in {wait:.1f}s (attempt {attempt})")
+            base_wait = min(_BASE_DELAY * 2 ** (attempt - 1), _MAX_DELAY)
+            wait = base_wait + uniform(0, base_wait * _JITTER_FACTOR)
+            _log(f"reconnecting in {wait:.2f}s (attempt {attempt})")
             await asyncio.sleep(wait)
     finally:
         await client.aclose()
