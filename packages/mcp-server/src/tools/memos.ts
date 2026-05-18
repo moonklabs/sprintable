@@ -125,7 +125,9 @@ export function registerMemosTools(server: McpServer) {
 
       if (rootMsgId) {
         // conversation thread reply
+        const resolvedIds = assigned_to_ids ?? (assigned_to ? [assigned_to] : undefined);
         const msgPayload: Record<string, unknown> = { content, thread_id: rootMsgId };
+        if (resolvedIds) msgPayload.mentioned_ids = resolvedIds;
         const msg = await pmApi(`/api/v2/conversations/${encodeURIComponent(memo_id)}/messages`, {
           method: 'POST', body: JSON.stringify(msgPayload),
         }) as Record<string, unknown>;
