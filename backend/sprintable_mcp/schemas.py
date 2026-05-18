@@ -44,6 +44,12 @@ class StoryPoints(int, Enum):
     twenty_one = 21
 
 
+class SprintStatus(str, Enum):
+    planning = "planning"
+    active = "active"
+    closed = "closed"
+
+
 class SprintableInput(BaseModel):
     """모든 Sprintable 도구 입력 공통 베이스.
 
