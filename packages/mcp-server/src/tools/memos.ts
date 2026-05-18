@@ -41,9 +41,9 @@ export function registerMemosTools(server: McpServer) {
     } catch (e) { return handleError(e); }
   });
 
-  // [DEPRECATED] send_memo — 내부적으로 conversation API로 라우팅됨 (S-B2).
+  // [DEPRECATED] send_memo — /api/v2/memos POST로 라우팅 (웹훅 발송 경로 복원, S-B2 버그 수정).
   // 기존 에이전트 호환성 유지. 스프린터블 운영이 send_memo 없이 검증된 후 제거 예정.
-  server.tool('send_memo', '[DEPRECATED] Send a memo. Internally routes to conversation API. Will be removed after memo-free sprint operation is validated.', {
+  server.tool('send_memo', '[DEPRECATED] Send a memo. Routes to /api/v2/memos which fires webhooks to assigned members. Will be removed after memo-free sprint operation is validated.', {
     project_id: z.string().optional(),
     title: z.string().optional(),
     content: z.string(),
@@ -51,29 +51,21 @@ export function registerMemosTools(server: McpServer) {
     assigned_to: z.string().optional().describe('Single team member ID (legacy, use assigned_to_ids for multiple)'),
     assigned_to_ids: z.array(z.string()).optional().describe('Team member IDs to assign (supports multiple assignees)'),
     trigger_type: z.string().optional().describe('Workflow stage (kickoff, qa_request, review, merge_request)'),
-  }, async ({ assigned_to, assigned_to_ids, project_id, content, title, ...rest }) => {
+  }, async ({ assigned_to, assigned_to_ids, project_id, content, title, memo_type, trigger_type }) => {
     try {
-      const resolvedIds = assigned_to_ids ?? (assigned_to ? [assigned_to] : undefined);
-
-      // AC3: conversation + root message 생성으로 라우팅
-      const convPayload: Record<string, unknown> = {
-        type: 'group',
+      const body: Record<string, unknown> = {
+        content,
         title: title ?? '(memo)',
-        participant_ids: resolvedIds ?? [],
         project_id: project_id ?? '',
+        assigned_to,
+        assigned_to_ids,
+        memo_type,
       };
-      const conv = await pmApi('/api/v2/conversations', { method: 'POST', body: JSON.stringify(convPayload) }) as Record<string, unknown>;
-      const conversationId = conv.id as string;
-
-      const msgPayload = { content };
-      const msg = await pmApi(`/api/v2/conversations/${encodeURIComponent(conversationId)}/messages`, {
-        method: 'POST', body: JSON.stringify(msgPayload),
-      }) as Record<string, unknown>;
-      const msgData = (msg.data ?? msg) as Record<string, unknown>;
-      const messageId = msgData.id as string;
-
-      // AC5: 기존 memo_id + 신규 conversation_id/message_id + deprecated
-      return ok({ memo_id: conversationId, conversation_id: conversationId, message_id: messageId, deprecated: true, ...rest });
+      if (trigger_type) {
+        body.memo_metadata = { trigger_type };
+      }
+      const data = await pmApi('/api/v2/memos', { method: 'POST', body: JSON.stringify(body) }) as Record<string, unknown>;
+      return ok({ ...data, deprecated: true, trigger_type });
     } catch (e) { return handleError(e); }
   });
 
