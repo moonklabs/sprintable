@@ -10,6 +10,7 @@ class McpSettings(BaseSettings):
 
     sprintable_api_url: str = ""
     agent_api_key: str = ""
+    fakechat_port: int = 8787
 
 
 settings = McpSettings()
