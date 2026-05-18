@@ -1016,3 +1016,24 @@ async def switch_project(
 
     await session.commit()
     return _ok(tokens)
+
+
+# ─── GET /api/v2/auth/me ─────────────────────────────────────────────────────
+
+class AuthMeResponse(BaseModel):
+    member_id: str
+    org_id: str | None
+    project_id: str | None
+
+
+@router.get("/me", response_model=AuthMeResponse)
+async def get_auth_me(
+    auth: AuthContext = Depends(get_current_user),
+) -> AuthMeResponse:
+    """API Key Bearer 인증으로 바인딩된 member_id, org_id, project_id 반환."""
+    meta = auth.claims.get("app_metadata", {})
+    return AuthMeResponse(
+        member_id=auth.user_id,
+        org_id=auth.org_id or meta.get("org_id"),
+        project_id=meta.get("project_id"),
+    )

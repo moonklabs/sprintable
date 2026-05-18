@@ -18,6 +18,9 @@ export class PmApiError extends Error {
 
 let _pmApiUrl: string;
 let _agentApiKey: string;
+let _memberId: string = '';
+let _orgId: string = '';
+let _projectId: string = '';
 
 /**
  * Call once at startup to configure the module-level credentials.
@@ -28,6 +31,18 @@ export function configurePmApi(pmApiUrl: string, agentApiKey: string): void {
   if (!agentApiKey) throw new Error('AGENT_API_KEY is required');
   _pmApiUrl = pmApiUrl.replace(/\/$/, ''); // strip trailing slash
   _agentApiKey = agentApiKey;
+}
+
+/**
+ * Call after configurePmApi() to resolve member_id/org_id/project_id from the API Key.
+ * Caches the result in module-level variables for use in request body injection.
+ */
+export async function resolveAuthContext(): Promise<{ memberId: string; orgId: string; projectId: string }> {
+  const res = await pmApi<{ member_id: string; org_id: string | null; project_id: string | null }>('/api/v2/auth/me');
+  _memberId = res.member_id ?? '';
+  _orgId = res.org_id ?? '';
+  _projectId = res.project_id ?? '';
+  return { memberId: _memberId, orgId: _orgId, projectId: _projectId };
 }
 
 export type PmApiInit = Omit<RequestInit, 'headers'> & {
@@ -59,9 +74,9 @@ export async function pmApi<T = unknown>(path: string, init: PmApiInit = {}): Pr
   ) {
     try {
       const parsed = JSON.parse(init.body);
-      if (!parsed.project_id && process.env.PROJECT_ID) parsed.project_id = process.env.PROJECT_ID;
-      if (!parsed.created_by && process.env.CURRENT_MEMBER_ID) parsed.created_by = process.env.CURRENT_MEMBER_ID;
-      if (!parsed.org_id && process.env.ORG_ID) parsed.org_id = process.env.ORG_ID;
+      if (!parsed.project_id && _projectId) parsed.project_id = _projectId;
+      if (!parsed.created_by && _memberId) parsed.created_by = _memberId;
+      if (!parsed.org_id && _orgId) parsed.org_id = _orgId;
       init = { ...init, body: JSON.stringify(parsed) };
     } catch { /* body가 JSON이 아닌 경우 원본 유지 */ }
   }

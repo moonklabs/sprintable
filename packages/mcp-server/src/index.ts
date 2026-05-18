@@ -9,7 +9,7 @@
 import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import { StdioServerTransport } from '@modelcontextprotocol/sdk/server/stdio.js';
 import { SSEServerTransport } from '@modelcontextprotocol/sdk/server/sse.js';
-import { configurePmApi } from './pm-api.js';
+import { configurePmApi, resolveAuthContext } from './pm-api.js';
 import { startSseBridge } from './sse-bridge.js';
 import { registerCoreTools } from './tools/core.js';
 import { registerRetroTools } from './tools/retro.js';
@@ -33,7 +33,6 @@ import { registerAuditTools } from './tools/audit.js';
 const PM_API_URL = process.env['PM_API_URL'] ?? '';
 const AGENT_API_KEY = process.env['AGENT_API_KEY'] ?? '';
 const MCP_API_KEY = process.env['MCP_API_KEY'] ?? '';
-const MEMBER_ID = process.env['CURRENT_MEMBER_ID'] ?? process.env['MEMBER_ID'] ?? '';
 const SSE_BACKEND_URL = process.env['SSE_BACKEND_URL'] ?? '';
 const MODE = process.env['MCP_MODE'] ?? 'stdio'; // 'stdio' | 'sse'
 const PORT = Number(process.env['MCP_PORT'] ?? '3100');
@@ -112,9 +111,19 @@ async function main() {
     await server.connect(transport);
     console.error('Sprintable MCP Server (stdio) connected');
 
-    // FastAPI SSE 자동 연결 — MEMBER_ID 있을 때만
-    if (MEMBER_ID) {
-      startSseBridge(PM_API_URL, AGENT_API_KEY, MEMBER_ID, SSE_BACKEND_URL || undefined,
+    // /api/v2/auth/me 로 context 자동 resolve
+    let memberId = '';
+    try {
+      const ctx = await resolveAuthContext();
+      memberId = ctx.memberId;
+      console.error(`Auth context resolved: member=${memberId}`);
+    } catch (err) {
+      console.error('Warning: auth/me resolve failed — SSE bridge disabled:', err);
+    }
+
+    // FastAPI SSE 자동 연결 — memberId 있을 때만
+    if (memberId) {
+      startSseBridge(PM_API_URL, AGENT_API_KEY, memberId, SSE_BACKEND_URL || undefined,
         // S32: notifications/claude/channel → conversation turn 자동 주입
         (eventType, data) => {
           server.server.notification({
