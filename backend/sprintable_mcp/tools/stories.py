@@ -16,6 +16,7 @@ class ListStoriesInput(SprintableInput):
     """
 
     sprint_id: str | None = None
+    epic_id: str | None = None
     status: StoryStatus | None = None
     priority: StoryPriority | None = None
     assignee_id: str | None = None
@@ -28,6 +29,8 @@ async def list_stories(args: ListStoriesInput) -> list[TextContent]:
         params["org_id"] = client.org_id
     if args.sprint_id:
         params["sprint_id"] = args.sprint_id
+    if args.epic_id:
+        params["epic_id"] = args.epic_id
     if args.status:
         params["status"] = args.status.value
     if args.priority:
