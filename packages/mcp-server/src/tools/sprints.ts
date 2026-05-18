@@ -54,4 +54,50 @@ export function registerSprintsTools(server: McpServer) {
       return ok(data);
     } catch (e) { return handleError(e); }
   });
+
+  server.tool('create_sprint', 'Create a new sprint', {
+    project_id: z.string().describe('Project ID'),
+    title: z.string().describe('Sprint title'),
+    start_date: z.string().optional().describe('Start date (ISO date, e.g. 2026-05-01)'),
+    end_date: z.string().optional().describe('End date (ISO date, e.g. 2026-05-14)'),
+    team_size: z.number().optional().describe('Team size'),
+  }, async ({ project_id, title, start_date, end_date, team_size }) => {
+    try {
+      const body: Record<string, unknown> = { project_id, title };
+      if (start_date) body.start_date = start_date;
+      if (end_date) body.end_date = end_date;
+      if (team_size !== undefined) body.team_size = team_size;
+      const data = await pmApi('/api/v2/sprints', { method: 'POST', body: JSON.stringify(body) });
+      return ok(data);
+    } catch (e) { return handleError(e); }
+  });
+
+  server.tool('update_sprint', 'Update sprint fields', {
+    sprint_id: z.string().describe('Sprint ID'),
+    title: z.string().optional().describe('Sprint title'),
+    start_date: z.string().optional().describe('Start date (ISO date)'),
+    end_date: z.string().optional().describe('End date (ISO date)'),
+    team_size: z.number().optional().describe('Team size'),
+  }, async ({ sprint_id, title, start_date, end_date, team_size }) => {
+    try {
+      const body: Record<string, unknown> = {};
+      if (title !== undefined) body.title = title;
+      if (start_date !== undefined) body.start_date = start_date;
+      if (end_date !== undefined) body.end_date = end_date;
+      if (team_size !== undefined) body.team_size = team_size;
+      const data = await pmApi(`/api/v2/sprints/${encodeURIComponent(sprint_id)}`, {
+        method: 'PATCH', body: JSON.stringify(body),
+      });
+      return ok(data);
+    } catch (e) { return handleError(e); }
+  });
+
+  server.tool('delete_sprint', 'Delete sprint', {
+    sprint_id: z.string().describe('Sprint ID'),
+  }, async ({ sprint_id }) => {
+    try {
+      const data = await pmApi(`/api/v2/sprints/${encodeURIComponent(sprint_id)}`, { method: 'DELETE' });
+      return ok(data);
+    } catch (e) { return handleError(e); }
+  });
 }
