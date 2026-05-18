@@ -22,6 +22,11 @@ from .tools.tasks import (
     update_task, update_task_status,
 )
 from .schemas import SprintableInput
+from .tools.sprints import (
+    CreateSprintInput, ListSprintsInput, SprintIdInput, UpdateSprintInput,
+    activate_sprint, close_sprint, create_sprint, delete_sprint,
+    get_velocity, list_sprints, sprint_summary, update_sprint,
+)
 
 mcp = FastMCP(
     name="sprintable-mcp-python",
@@ -156,3 +161,53 @@ async def sprintable_update_epic(args: UpdateEpicInput) -> list[TextContent]:
 async def sprintable_delete_epic(args: DeleteEpicInput) -> list[TextContent]:
     """에픽 삭제."""
     return await delete_epic(args)
+
+
+# ── Sprints (8개) ──────────────────────────────────────────────────────────────
+
+@mcp.tool()
+async def sprintable_list_sprints(args: ListSprintsInput) -> list[TextContent]:
+    """스프린트 목록 조회."""
+    return await list_sprints(args)
+
+
+@mcp.tool()
+async def sprintable_sprint_summary(args: SprintIdInput) -> list[TextContent]:
+    """스프린트 스토리 상태별 요약."""
+    return await sprint_summary(args)
+
+
+@mcp.tool()
+async def sprintable_activate_sprint(args: SprintIdInput) -> list[TextContent]:
+    """스프린트 활성화 (planning → active)."""
+    return await activate_sprint(args)
+
+
+@mcp.tool()
+async def sprintable_close_sprint(args: SprintIdInput) -> list[TextContent]:
+    """스프린트 종료 (active → closed)."""
+    return await close_sprint(args)
+
+
+@mcp.tool()
+async def sprintable_get_velocity(args: SprintIdInput) -> list[TextContent]:
+    """스프린트 벨로시티 조회."""
+    return await get_velocity(args)
+
+
+@mcp.tool()
+async def sprintable_create_sprint(args: CreateSprintInput) -> list[TextContent]:
+    """스프린트 생성."""
+    return await create_sprint(args)
+
+
+@mcp.tool()
+async def sprintable_update_sprint(args: UpdateSprintInput) -> list[TextContent]:
+    """스프린트 수정."""
+    return await update_sprint(args)
+
+
+@mcp.tool()
+async def sprintable_delete_sprint(args: SprintIdInput) -> list[TextContent]:
+    """스프린트 삭제."""
+    return await delete_sprint(args)
