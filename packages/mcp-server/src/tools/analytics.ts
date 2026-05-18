@@ -165,27 +165,6 @@ export function registerAnalyticsTools(server: McpServer) {
     },
   );
 
-  // PATCH /api/v2/stories/:id — assign story to member
-  server.tool(
-    'assign_story',
-    'Assign story to a team member',
-    {
-      story_id: z.string().describe('Story ID'),
-      assignee_id: z.string().describe('Team member ID to assign'),
-    },
-    async ({ story_id, assignee_id }) => {
-      try {
-        const data = await pmApi(`/api/v2/stories/${story_id}`, {
-          method: 'PATCH',
-          body: JSON.stringify({ assignee_id }),
-        });
-        return ok(data);
-      } catch (e) {
-        return err(e instanceof PmApiError ? e.message : String(e));
-      }
-    },
-  );
-
   // GET /api/v2/analytics/epic-progress
   server.tool(
     'get_epic_progress',

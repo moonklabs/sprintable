@@ -6,58 +6,6 @@ function err(msg: string) { return { content: [{ type: 'text' as const, text: `E
 function ok(data: unknown) { return { content: [{ type: 'text' as const, text: JSON.stringify(data, null, 2) }] }; }
 
 export function registerStandupRetroTools(server: McpServer) {
-  server.tool('get_standup', 'Get standup entry for member+date', {
-    project_id: z.string().optional().describe('Explicit project ID'),
-    member_id: z.string(),
-    date: z.string().describe('YYYY-MM-DD'),
-  }, async ({ project_id, member_id, date }) => {
-    try {
-      const params = new URLSearchParams({ member_id, date });
-      if (project_id) params.set('project_id', project_id);
-      const data = await pmApi(`/api/v2/standup?${params}`);
-      return ok(data);
-    } catch (e) {
-      return err(e instanceof PmApiError ? e.message : String(e));
-    }
-  });
-
-  server.tool('save_standup', 'Save/update standup entry (DB table)', {
-    project_id: z.string().optional(),
-    author_id: z.string(),
-    date: z.string().describe('YYYY-MM-DD'),
-    done: z.string().optional(),
-    plan: z.string().optional(),
-    blockers: z.string().optional(),
-  }, async ({ project_id, author_id, date, done, plan, blockers }) => {
-    try {
-      const body: Record<string, unknown> = { author_id, date };
-      if (project_id) body.project_id = project_id;
-      if (done !== undefined) body.done = done;
-      if (plan !== undefined) body.plan = plan;
-      if (blockers !== undefined) body.blockers = blockers;
-      const data = await pmApi('/api/v2/standup', { method: 'POST', body: JSON.stringify(body) });
-      return ok(data);
-    } catch (e) {
-      return err(e instanceof PmApiError ? e.message : String(e));
-    }
-  });
-
-  server.tool('list_standup_entries', 'List standup entries for date (DB)', {
-    project_id: z.string().optional(),
-    current_member_id: z.string().optional(),
-    date: z.string().describe('YYYY-MM-DD'),
-  }, async ({ project_id, current_member_id, date }) => {
-    try {
-      const params = new URLSearchParams({ date });
-      if (project_id) params.set('project_id', project_id);
-      if (current_member_id) params.set('current_member_id', current_member_id);
-      const data = await pmApi(`/api/v2/standup?${params}`);
-      return ok(data);
-    } catch (e) {
-      return err(e instanceof PmApiError ? e.message : String(e));
-    }
-  });
-
   server.tool('standup_missing', 'Get missing standup members for date', {
     project_id: z.string(),
     date: z.string().describe('YYYY-MM-DD'),
@@ -117,40 +65,6 @@ export function registerStandupRetroTools(server: McpServer) {
     }
   });
 
-  server.tool('change_retro_phase', 'Change retro session phase', {
-    project_id: z.string(),
-    session_id: z.string(),
-    phase: z.enum(['collect', 'group', 'vote', 'discuss', 'action', 'closed']),
-  }, async ({ project_id, session_id, phase }) => {
-    try {
-      const data = await pmApi(`/api/v2/retro-sessions/${session_id}?project_id=${project_id}`, {
-        method: 'PATCH',
-        body: JSON.stringify({ phase }),
-      });
-      return ok(data);
-    } catch (e) {
-      return err(e instanceof PmApiError ? e.message : String(e));
-    }
-  });
-
-  server.tool('add_retro_item', 'Add retro item', {
-    project_id: z.string(),
-    session_id: z.string(),
-    category: z.enum(['good', 'bad', 'improve']),
-    text: z.string(),
-    author_id: z.string(),
-  }, async ({ project_id, session_id, category, text, author_id }) => {
-    try {
-      const data = await pmApi(`/api/v2/retro-sessions/${session_id}/items?project_id=${project_id}`, {
-        method: 'POST',
-        body: JSON.stringify({ category, text, author_id }),
-      });
-      return ok(data);
-    } catch (e) {
-      return err(e instanceof PmApiError ? e.message : String(e));
-    }
-  });
-
   server.tool('vote_retro_item', 'Vote on retro item', {
     project_id: z.string(),
     session_id: z.string(),
@@ -187,19 +101,6 @@ export function registerStandupRetroTools(server: McpServer) {
     }
   });
 
-  server.tool('export_retro', 'Export retro as markdown', {
-    project_id: z.string(),
-    session_id: z.string(),
-  }, async ({ project_id, session_id }) => {
-    try {
-      const data = await pmApi(`/api/v2/retro-sessions/${session_id}/export?project_id=${project_id}`);
-      return ok(data);
-    } catch (e) {
-      return err(e instanceof PmApiError ? e.message : String(e));
-    }
-  });
-
-  // v2 aliases (same behavior, explicit naming)
   server.tool('get_standup_v2', 'Get standup entry for member+date (v2)', {
     project_id: z.string().optional().describe('Explicit project ID'),
     member_id: z.string(),

@@ -23,11 +23,8 @@ import { registerEpicsTools } from './tools/epics.js';
 import { registerRewardsTools } from './tools/rewards.js';
 import { registerMeetingTools } from './tools/meetings.js';
 import { registerMemosTools } from './tools/memos.js';
-import { registerActivityLogsTools } from './tools/activity-logs.js';
 import { registerNotificationsTools } from './tools/notifications.js';
-import { registerStandupsTools } from './tools/standups.js';
 import { registerAgentRunsTools } from './tools/agent-runs.js';
-import { registerWorkflowTools } from './tools/workflow.js';
 import { registerAuditTools } from './tools/audit.js';
 
 const PM_API_URL = process.env['PM_API_URL'] ?? '';
@@ -62,11 +59,8 @@ registerEpicsTools(server);
 registerRewardsTools(server);
 registerMeetingTools(server);
 registerMemosTools(server);
-registerActivityLogsTools(server);
 registerNotificationsTools(server);
-registerStandupsTools(server);
 registerAgentRunsTools(server);
-registerWorkflowTools(server);
 registerAuditTools(server);
 
 async function main() {

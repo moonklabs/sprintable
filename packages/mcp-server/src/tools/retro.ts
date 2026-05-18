@@ -38,32 +38,6 @@ export function registerRetroTools(server: McpServer) {
     }
   });
 
-  server.tool('get_burndown', 'Get burndown data for sprint', {
-    sprint_id: z.string(),
-  }, async ({ sprint_id }) => {
-    try {
-      const data = await pmApi(`/api/v2/sprints/${sprint_id}/burndown`);
-      return ok(data);
-    } catch (e) {
-      return err(e instanceof PmApiError ? e.message : String(e));
-    }
-  });
-
-  server.tool('kickoff_sprint', 'Kickoff sprint — send notification to all members', {
-    sprint_id: z.string(),
-    message: z.string().optional(),
-  }, async ({ sprint_id, message }) => {
-    try {
-      const data = await pmApi(`/api/v2/sprints/${sprint_id}/kickoff`, {
-        method: 'POST',
-        body: JSON.stringify(message ? { message } : {}),
-      });
-      return ok(data);
-    } catch (e) {
-      return err(e instanceof PmApiError ? e.message : String(e));
-    }
-  });
-
   server.tool('checkin_sprint', 'Sprint check-in — get progress + missing standups', {
     sprint_id: z.string(),
     date: z.string().describe('YYYY-MM-DD'),

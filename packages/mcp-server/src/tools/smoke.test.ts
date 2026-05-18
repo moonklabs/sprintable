@@ -9,7 +9,6 @@ import { registerSprintsTools } from './sprints';
 import { registerEpicsTools } from './epics';
 import { registerMemosTools } from './memos';
 import { registerNotificationsTools } from './notifications';
-import { registerStandupsTools } from './standups';
 import { registerAgentRunsTools } from './agent-runs';
 import { configurePmApi } from '../pm-api';
 import { registerRetroTools } from './retro';
@@ -52,7 +51,6 @@ function createHarness() {
   registerEpicsTools(server as never);
   registerMemosTools(server as never);
   registerNotificationsTools(server as never);
-  registerStandupsTools(server as never);
   registerAgentRunsTools(server as never);
 
   return {
@@ -808,91 +806,6 @@ describe('notifications tools via pmApi', () => {
   });
 });
 
-describe('standups tools via pmApi', () => {
-  let harness: ReturnType<typeof createHarness>;
-
-  beforeAll(() => {
-    configurePmApi('http://test-pm-api', 'test-agent-key');
-    harness = createHarness();
-  });
-
-  afterEach(() => {
-    vi.unstubAllGlobals();
-  });
-
-  function stubFetch(handler: (url: string, init?: RequestInit) => Response) {
-    vi.stubGlobal('fetch', (url: string, init?: RequestInit) => Promise.resolve(handler(url, init)));
-  }
-
-  it('get_standup calls GET /api/v2/standup with project_id, member_id, date', async () => {
-    stubFetch((url) => {
-      expect(url).toContain('/api/v2/standup?');
-      expect(url).toContain('project_id=project-alpha');
-      expect(url).toContain('member_id=member-alpha');
-      expect(url).toContain('date=2026-04-06');
-      return new Response(JSON.stringify({ data: { id: 'entry-1', author_id: 'member-alpha' } }), { status: 200 });
-    });
-
-    const result = await harness.invoke('get_standup', { project_id: 'project-alpha', member_id: 'member-alpha', date: '2026-04-06' });
-    expect(result).toEqual({ data: { id: 'entry-1', author_id: 'member-alpha' } });
-  });
-
-  it('save_standup calls POST /api/v2/standup with author_id and body fields', async () => {
-    stubFetch((url, init) => {
-      expect(url).toBe('http://test-pm-api/api/v2/standup');
-      expect(init?.method).toBe('POST');
-      const body = JSON.parse(init?.body as string);
-      expect(body).toMatchObject({ author_id: 'member-alpha', date: '2026-04-06', done: 'Finished S7', plan: 'Start S8' });
-      return new Response(JSON.stringify({ data: { id: 'entry-new', author_id: 'member-alpha' } }), { status: 200 });
-    });
-
-    const result = await harness.invoke('save_standup', { author_id: 'member-alpha', date: '2026-04-06', done: 'Finished S7', plan: 'Start S8' });
-    expect(result).toEqual({ data: { id: 'entry-new', author_id: 'member-alpha' } });
-  });
-
-  it('list_standup_entries calls GET /api/v2/standup with project_id and date', async () => {
-    stubFetch((url) => {
-      expect(url).toContain('/api/v2/standup?');
-      expect(url).toContain('project_id=project-alpha');
-      expect(url).toContain('date=2026-04-06');
-      return new Response(JSON.stringify({ data: [{ id: 'entry-1' }, { id: 'entry-2' }] }), { status: 200 });
-    });
-
-    const result = await harness.invoke('list_standup_entries', { project_id: 'project-alpha', date: '2026-04-06' });
-    expect(result).toEqual({ data: [{ id: 'entry-1' }, { id: 'entry-2' }] });
-  });
-
-  it('review_standup calls POST /api/v2/standup/feedback', async () => {
-    stubFetch((url, init) => {
-      expect(url).toBe('http://test-pm-api/api/v2/standup/feedback');
-      expect(init?.method).toBe('POST');
-      const body = JSON.parse(init?.body as string);
-      expect(body).toMatchObject({ standup_entry_id: 'entry-1', feedback_text: 'LGTM', review_type: 'approve' });
-      return new Response(JSON.stringify({ data: { id: 'fb-new', review_type: 'approve' } }), { status: 201 });
-    });
-
-    const result = await harness.invoke('review_standup', { standup_entry_id: 'entry-1', feedback_text: 'LGTM', review_type: 'approve' });
-    expect(result).toEqual({ data: { id: 'fb-new', review_type: 'approve' } });
-  });
-
-  it('get_standup_feedback calls GET /api/v2/standup/feedback/:entry_id', async () => {
-    stubFetch((url) => {
-      expect(url).toBe('http://test-pm-api/api/v2/standup/feedback/entry-1');
-      return new Response(JSON.stringify({ data: [{ id: 'fb-1', standup_entry_id: 'entry-1' }] }), { status: 200 });
-    });
-
-    const result = await harness.invoke('get_standup_feedback', { standup_entry_id: 'entry-1' });
-    expect(result).toEqual({ data: [{ id: 'fb-1', standup_entry_id: 'entry-1' }] });
-  });
-
-  it('propagates PmApiError on non-2xx response', async () => {
-    stubFetch(() => new Response(JSON.stringify({ error: { message: 'Not found' } }), { status: 404 }));
-
-    const result = await harness.invoke('get_standup', { project_id: 'project-alpha', member_id: 'member-missing', date: '2026-04-06' });
-    expect(result).toEqual({ error: 'Not found' });
-  });
-});
-
 describe('agent-runs tools via pmApi', () => {
   let harness: ReturnType<typeof createHarness>;
 
@@ -1064,19 +977,6 @@ describe('analytics tools via pmApi', () => {
     expect(result).toEqual({ data: [{ id: 'task-alpha', status: 'todo' }] });
   });
 
-  it('assign_story calls PATCH /api/v2/stories/:id with assignee_id', async () => {
-    stubFetch((url, init) => {
-      expect(url).toBe('http://test-pm-api/api/v2/stories/story-alpha');
-      expect(init?.method).toBe('PATCH');
-      const body = JSON.parse(init?.body as string);
-      expect(body).toEqual({ assignee_id: 'member-alpha' });
-      return new Response(JSON.stringify({ data: { id: 'story-alpha', assignee_id: 'member-alpha' } }), { status: 200 });
-    });
-
-    const result = await harness.invoke('assign_story', { story_id: 'story-alpha', assignee_id: 'member-alpha' });
-    expect(result).toEqual({ data: { id: 'story-alpha', assignee_id: 'member-alpha' } });
-  });
-
   it('get_epic_progress calls GET /api/v2/analytics/epic-progress', async () => {
     stubFetch((url) => {
       expect(url).toContain('/api/v2/analytics/epic-progress?');
@@ -1133,53 +1033,6 @@ describe('retro tools via pmApi', () => {
     expect(result).toEqual({ data: { id: 'retro-session-alpha', phase: 'collect' } });
   });
 
-  it('change_retro_phase calls PATCH /api/v2/retro-sessions/:id with phase', async () => {
-    stubFetch((url, init) => {
-      expect(url).toContain('/api/v2/retro-sessions/sprint-alpha?');
-      expect(init?.method).toBe('PATCH');
-      const body = JSON.parse(init?.body as string);
-      expect(body).toEqual({ phase: 'vote' });
-      return new Response(JSON.stringify({ data: { id: 'retro-session-alpha', phase: 'vote' } }), { status: 200 });
-    });
-
-    const result = await harness.invoke('change_retro_phase', { project_id: 'project-alpha', session_id: 'sprint-alpha', phase: 'vote' });
-    expect(result).toEqual({ data: { id: 'retro-session-alpha', phase: 'vote' } });
-  });
-
-  it('add_retro_item calls POST /api/v2/retro-sessions/:id/items', async () => {
-    stubFetch((url, init) => {
-      expect(url).toContain('/api/v2/retro-sessions/sprint-alpha/items?');
-      expect(init?.method).toBe('POST');
-      const body = JSON.parse(init?.body as string);
-      expect(body).toMatchObject({ category: 'good', text: 'Great teamwork', author_id: 'member-alpha' });
-      return new Response(JSON.stringify({ data: { id: 'item-new', category: 'good' } }), { status: 200 });
-    });
-
-    const result = await harness.invoke('add_retro_item', { project_id: 'project-alpha', session_id: 'sprint-alpha', category: 'good', text: 'Great teamwork', author_id: 'member-alpha' });
-    expect(result).toEqual({ data: { id: 'item-new', category: 'good' } });
-  });
-
-  it('get_burndown calls GET /api/v2/sprints/:id/burndown', async () => {
-    stubFetch((url) => {
-      expect(url).toBe('http://test-pm-api/api/v2/sprints/sprint-alpha/burndown');
-      return new Response(JSON.stringify({ data: { total_points: 13, done_points: 8, remaining_points: 5, completion_pct: 62 } }), { status: 200 });
-    });
-
-    const result = await harness.invoke('get_burndown', { sprint_id: 'sprint-alpha' });
-    expect(result).toEqual({ data: { total_points: 13, done_points: 8, remaining_points: 5, completion_pct: 62 } });
-  });
-
-  it('kickoff_sprint calls POST /api/v2/sprints/:id/kickoff', async () => {
-    stubFetch((url, init) => {
-      expect(url).toBe('http://test-pm-api/api/v2/sprints/sprint-alpha/kickoff');
-      expect(init?.method).toBe('POST');
-      return new Response(JSON.stringify({ data: { notified: 3 } }), { status: 200 });
-    });
-
-    const result = await harness.invoke('kickoff_sprint', { sprint_id: 'sprint-alpha', message: 'Let\'s go!' });
-    expect(result).toEqual({ data: { notified: 3 } });
-  });
-
   it('checkin_sprint calls GET /api/v2/sprints/:id/checkin with date', async () => {
     stubFetch((url) => {
       expect(url).toBe('http://test-pm-api/api/v2/sprints/sprint-alpha/checkin?date=2026-04-06');
@@ -1193,7 +1046,7 @@ describe('retro tools via pmApi', () => {
   it('propagates PmApiError on non-2xx response', async () => {
     stubFetch(() => new Response(JSON.stringify({ error: { message: 'Sprint not found' } }), { status: 404 }));
 
-    const result = await harness.invoke('get_burndown', { sprint_id: 'sprint-missing' });
+    const result = await harness.invoke('checkin_sprint', { sprint_id: 'sprint-missing', date: '2026-04-06' });
     expect(result).toEqual({ error: 'Sprint not found' });
   });
 });
