@@ -3,11 +3,27 @@
 import asyncio
 import contextlib
 import sys
+import types as _types
 
 from .api_client import SprintableApiError, client
 from .config import settings
 from .server import mcp
-from .sse_bridge import start_sse_bridge
+from .sse_bridge import register_session, start_sse_bridge
+
+
+def _patch_session_capture() -> None:
+    """lowlevel _handle_message를 패치해서 ServerSession을 register_session에 주입.
+
+    MCP 클라이언트가 첫 메시지(initialize)를 보내면 세션이 캡처됨.
+    이후 SSE 이벤트 → _send_mcp_notification에서 session.send_log_message 사용 가능.
+    """
+    orig = mcp._mcp_server._handle_message.__func__  # type: ignore[attr-defined]
+
+    async def _capturing(self, message, session, lifespan_ctx, raise_exc=False):
+        register_session(session)
+        return await orig(self, message, session, lifespan_ctx, raise_exc)
+
+    mcp._mcp_server._handle_message = _types.MethodType(_capturing, mcp._mcp_server)
 
 
 def main() -> None:
@@ -31,6 +47,7 @@ def main() -> None:
         print(f"Error: auth context resolve failed: {exc}", file=sys.stderr)
         sys.exit(1)
 
+    _patch_session_capture()
     asyncio.run(_run())
 
 
