@@ -14,6 +14,7 @@ router = APIRouter(prefix="/api/v2/meetings", tags=["meetings"])
 def _get_repo(
     session: AsyncSession = Depends(get_db),
     auth: AuthContext = Depends(get_current_user),
+    _org_id: uuid.UUID = Depends(get_verified_org_id),
     project_id_q: uuid.UUID | None = Query(default=None, alias="project_id"),
 ) -> MeetingRepository:
     pid = (str(project_id_q) if project_id_q else None) or auth.claims.get("app_metadata", {}).get("project_id")
