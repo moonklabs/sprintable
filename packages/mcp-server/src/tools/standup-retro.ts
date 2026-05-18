@@ -101,7 +101,7 @@ export function registerStandupRetroTools(server: McpServer) {
     }
   });
 
-  server.tool('get_standup_v2', 'Get standup entry for member+date (v2)', {
+  server.tool('get_standup', 'Get standup entry for member+date', {
     project_id: z.string().optional().describe('Explicit project ID'),
     member_id: z.string(),
     date: z.string().describe('YYYY-MM-DD'),
@@ -116,7 +116,7 @@ export function registerStandupRetroTools(server: McpServer) {
     }
   });
 
-  server.tool('save_standup_v2', 'Save/update standup entry (v2)', {
+  server.tool('save_standup', 'Save/update standup entry', {
     project_id: z.string().optional(),
     author_id: z.string(),
     date: z.string().describe('YYYY-MM-DD'),
@@ -137,7 +137,7 @@ export function registerStandupRetroTools(server: McpServer) {
     }
   });
 
-  server.tool('list_standup_entries_v2', 'List standup entries for date (v2)', {
+  server.tool('list_standup_entries', 'List standup entries for date', {
     project_id: z.string().optional(),
     current_member_id: z.string().optional(),
     date: z.string().describe('YYYY-MM-DD'),
@@ -153,7 +153,7 @@ export function registerStandupRetroTools(server: McpServer) {
     }
   });
 
-  server.tool('change_retro_phase_v2', 'Change retro session phase (v2)', {
+  server.tool('change_retro_phase', 'Change retro session phase', {
     project_id: z.string(),
     session_id: z.string(),
     phase: z.enum(['collect', 'group', 'vote', 'discuss', 'action', 'closed']),
@@ -169,7 +169,7 @@ export function registerStandupRetroTools(server: McpServer) {
     }
   });
 
-  server.tool('add_retro_item_v2', 'Add retro item (v2)', {
+  server.tool('add_retro_item', 'Add retro item', {
     project_id: z.string(),
     session_id: z.string(),
     category: z.enum(['good', 'bad', 'improve']),
@@ -187,7 +187,7 @@ export function registerStandupRetroTools(server: McpServer) {
     }
   });
 
-  server.tool('export_retro_v2', 'Export retro as markdown (v2)', {
+  server.tool('export_retro', 'Export retro as markdown', {
     project_id: z.string(),
     session_id: z.string(),
   }, async ({ project_id, session_id }) => {
