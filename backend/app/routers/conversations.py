@@ -674,6 +674,7 @@ async def send_message(
         thread_id=msg.thread_id,
         created_at=msg.created_at,
         mentioned_ids=list(msg.mentioned_ids) if msg.mentioned_ids else None,
+        content=msg.content,
     )
 
     # Discord 아웃바운드 (AC9~11)

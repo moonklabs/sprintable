@@ -34,16 +34,24 @@ def _is_discord_url(url: str) -> bool:
 
 
 def _to_discord_payload(payload: dict) -> dict:
-    """Sprintable webhook payload → Discord content 포맷 변환."""
-    event_type = payload.get("event_type", "event")
+    """Sprintable webhook payload → Discord content 포맷 변환 (_fire_webhook 스타일)."""
+    content_text = (payload.get("content") or "")[:500]
     conversation_id = payload.get("conversation_id", "")
-    sender_id = payload.get("sender_id") or ""
-    lines = [f"[{event_type}]"]
-    if conversation_id:
-        lines.append(f"conversation_id: {conversation_id}")
-    if sender_id:
-        lines.append(f"sender_id: {sender_id}")
-    return {"content": "\n".join(lines)}
+    thread_id = payload.get("thread_id") or ""
+
+    discord_content = f"📩 **새 메시지**"
+    if content_text:
+        discord_content += f"\n{content_text}"
+    if thread_id:
+        discord_content += f"\n\nreply_id: {thread_id}"
+    elif conversation_id:
+        discord_content += f"\n\nconversation_id: {conversation_id}"
+
+    result: dict = {"content": discord_content}
+    app_url = __import__("os").environ.get("NEXT_PUBLIC_APP_URL", "")
+    if app_url and conversation_id:
+        result["embeds"] = [{"title": "대화 보기", "url": f"{app_url}/memos?id={conversation_id}"}]
+    return result
 
 
 def _sign_payload(secret: str, body: bytes) -> str:
@@ -75,6 +83,7 @@ async def deliver_conversation_message_webhook(
     thread_id: uuid.UUID | None,
     created_at: datetime,
     mentioned_ids: list[uuid.UUID] | None = None,
+    content: str | None = None,
 ) -> None:
     """BackgroundTask 진입점.
 
@@ -143,6 +152,7 @@ async def deliver_conversation_message_webhook(
                 "thread_id": str(thread_id) if thread_id else None,
                 "created_at": created_at.isoformat(),
                 "mentioned_ids": mentioned_id_strs,
+                "content": content,
             }
 
             for wh in target_webhooks:
