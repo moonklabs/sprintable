@@ -3,6 +3,13 @@ from mcp.types import TextContent
 
 from .config import settings
 from .response import ok
+from .tools.memos import (
+    CreateConversationInput, CreateMemoInput, ListChatMessagesInput,
+    ListMemosInput, ListMyMemosInput, MemoIdInput, ReplyMemoInput, SendChatInput,
+    create_conversation, create_memo, list_chat_messages,
+    list_memos, list_my_memos, read_memo, reply_memo, resolve_memo,
+    send_chat_message, send_memo,
+)
 from .tools.analytics import (
     ActivityInput, AgentStatsInput, EpicProgressInput, OverdueMemberInput,
     SearchStoriesInput, SprintFilterInput, WorkloadInput,
@@ -345,3 +352,65 @@ async def sprintable_list_team_members(args: SprintableInput) -> list[TextConten
 async def sprintable_my_dashboard(args: DashboardInput) -> list[TextContent]:
     """팀원 대시보드 요약 조회."""
     return await my_dashboard(args)
+
+
+# ── Memos + Chat (10개) ────────────────────────────────────────────────────────
+
+@mcp.tool()
+async def sprintable_list_memos(args: ListMemosInput) -> list[TextContent]:
+    """메모 목록 조회."""
+    return await list_memos(args)
+
+
+@mcp.tool()
+async def sprintable_create_memo(args: CreateMemoInput) -> list[TextContent]:
+    """메모 생성."""
+    return await create_memo(args)
+
+
+@mcp.tool()
+async def sprintable_send_memo(args: CreateMemoInput) -> list[TextContent]:
+    """[DEPRECATED] 메모 발송. create_memo와 동일 경로."""
+    return await send_memo(args)
+
+
+@mcp.tool()
+async def sprintable_list_my_memos(args: ListMyMemosInput) -> list[TextContent]:
+    """내 메모 목록 조회 (담당/작성)."""
+    return await list_my_memos(args)
+
+
+@mcp.tool()
+async def sprintable_read_memo(args: MemoIdInput) -> list[TextContent]:
+    """메모 읽기 (conversation 우선, 없으면 memos fallback)."""
+    return await read_memo(args)
+
+
+@mcp.tool()
+async def sprintable_reply_memo(args: ReplyMemoInput) -> list[TextContent]:
+    """[DEPRECATED] 메모 답신 (conversation thread reply로 라우팅)."""
+    return await reply_memo(args)
+
+
+@mcp.tool()
+async def sprintable_resolve_memo(args: MemoIdInput) -> list[TextContent]:
+    """메모 해결 처리."""
+    return await resolve_memo(args)
+
+
+@mcp.tool()
+async def sprintable_send_chat_message(args: SendChatInput) -> list[TextContent]:
+    """conversation thread에 채팅 메시지 발송."""
+    return await send_chat_message(args)
+
+
+@mcp.tool()
+async def sprintable_create_conversation(args: CreateConversationInput) -> list[TextContent]:
+    """새 conversation thread 생성."""
+    return await create_conversation(args)
+
+
+@mcp.tool()
+async def sprintable_list_chat_messages(args: ListChatMessagesInput) -> list[TextContent]:
+    """conversation thread 메시지 목록 조회."""
+    return await list_chat_messages(args)
