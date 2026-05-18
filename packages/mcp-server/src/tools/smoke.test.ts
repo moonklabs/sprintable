@@ -1067,7 +1067,7 @@ describe('standup-retro tools via pmApi', () => {
     vi.stubGlobal('fetch', (url: string, init?: RequestInit) => Promise.resolve(handler(url, init)));
   }
 
-  it('get_standup_v2 calls GET /api/v2/standup with member_id and date', async () => {
+  it('get_standup calls GET /api/v2/standup with member_id and date', async () => {
     stubFetch((url) => {
       expect(url).toContain('/api/v2/standup?');
       expect(url).toContain('member_id=member-alpha');
@@ -1076,11 +1076,11 @@ describe('standup-retro tools via pmApi', () => {
       return new Response(JSON.stringify({ data: { id: 'standup-1', author_id: 'member-alpha' } }), { status: 200 });
     });
 
-    const result = await harness.invoke('get_standup_v2', { project_id: 'project-alpha', member_id: 'member-alpha', date: '2026-04-06' });
+    const result = await harness.invoke('get_standup', { project_id: 'project-alpha', member_id: 'member-alpha', date: '2026-04-06' });
     expect(result).toEqual({ data: { id: 'standup-1', author_id: 'member-alpha' } });
   });
 
-  it('save_standup_v2 calls POST /api/v2/standup with body fields', async () => {
+  it('save_standup calls POST /api/v2/standup with body fields', async () => {
     stubFetch((url, init) => {
       expect(url).toBe('http://test-pm-api/api/v2/standup');
       expect(init?.method).toBe('POST');
@@ -1089,18 +1089,18 @@ describe('standup-retro tools via pmApi', () => {
       return new Response(JSON.stringify({ data: { id: 'standup-new', author_id: 'member-alpha' } }), { status: 200 });
     });
 
-    const result = await harness.invoke('save_standup_v2', { author_id: 'member-alpha', date: '2026-04-06', done: 'Done', plan: 'Plan' });
+    const result = await harness.invoke('save_standup', { author_id: 'member-alpha', date: '2026-04-06', done: 'Done', plan: 'Plan' });
     expect(result).toEqual({ data: { id: 'standup-new', author_id: 'member-alpha' } });
   });
 
-  it('list_standup_entries_v2 calls GET /api/v2/standup with date param', async () => {
+  it('list_standup_entries calls GET /api/v2/standup with date param', async () => {
     stubFetch((url) => {
       expect(url).toContain('/api/v2/standup?');
       expect(url).toContain('date=2026-04-06');
       return new Response(JSON.stringify({ data: [{ id: 'standup-1' }] }), { status: 200 });
     });
 
-    const result = await harness.invoke('list_standup_entries_v2', { project_id: 'project-alpha', date: '2026-04-06' });
+    const result = await harness.invoke('list_standup_entries', { project_id: 'project-alpha', date: '2026-04-06' });
     expect(result).toEqual({ data: [{ id: 'standup-1' }] });
   });
 
@@ -1151,7 +1151,7 @@ describe('standup-retro tools via pmApi', () => {
     expect(result).toEqual({ data: { id: 'session-new', title: 'Sprint 1 Retro' } });
   });
 
-  it('change_retro_phase_v2 calls PATCH /api/v2/retro-sessions/:id with phase', async () => {
+  it('change_retro_phase calls PATCH /api/v2/retro-sessions/:id with phase', async () => {
     stubFetch((url, init) => {
       expect(url).toContain('/api/v2/retro-sessions/session-1?');
       expect(url).toContain('project_id=project-alpha');
@@ -1161,11 +1161,11 @@ describe('standup-retro tools via pmApi', () => {
       return new Response(JSON.stringify({ data: { id: 'session-1', phase: 'group' } }), { status: 200 });
     });
 
-    const result = await harness.invoke('change_retro_phase_v2', { project_id: 'project-alpha', session_id: 'session-1', phase: 'group' });
+    const result = await harness.invoke('change_retro_phase', { project_id: 'project-alpha', session_id: 'session-1', phase: 'group' });
     expect(result).toEqual({ data: { id: 'session-1', phase: 'group' } });
   });
 
-  it('add_retro_item_v2 calls POST /api/v2/retro-sessions/:id/items', async () => {
+  it('add_retro_item calls POST /api/v2/retro-sessions/:id/items', async () => {
     stubFetch((url, init) => {
       expect(url).toContain('/api/v2/retro-sessions/session-1/items?');
       expect(init?.method).toBe('POST');
@@ -1174,18 +1174,18 @@ describe('standup-retro tools via pmApi', () => {
       return new Response(JSON.stringify({ data: { id: 'item-new', category: 'good' } }), { status: 200 });
     });
 
-    const result = await harness.invoke('add_retro_item_v2', { project_id: 'project-alpha', session_id: 'session-1', category: 'good', text: 'Great work', author_id: 'member-alpha' });
+    const result = await harness.invoke('add_retro_item', { project_id: 'project-alpha', session_id: 'session-1', category: 'good', text: 'Great work', author_id: 'member-alpha' });
     expect(result).toEqual({ data: { id: 'item-new', category: 'good' } });
   });
 
-  it('export_retro_v2 calls GET /api/v2/retro-sessions/:id/export', async () => {
+  it('export_retro calls GET /api/v2/retro-sessions/:id/export', async () => {
     stubFetch((url) => {
       expect(url).toContain('/api/v2/retro-sessions/session-1/export?');
       expect(url).toContain('project_id=project-alpha');
       return new Response(JSON.stringify({ data: { markdown: '# Retro\n' } }), { status: 200 });
     });
 
-    const result = await harness.invoke('export_retro_v2', { project_id: 'project-alpha', session_id: 'session-1' });
+    const result = await harness.invoke('export_retro', { project_id: 'project-alpha', session_id: 'session-1' });
     expect(result).toEqual({ data: { markdown: '# Retro\n' } });
   });
 
