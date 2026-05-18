@@ -21,6 +21,29 @@ class StoryPriority(str, Enum):
     low = "low"
 
 
+class TaskStatus(str, Enum):
+    todo = "todo"
+    in_progress = "in-progress"
+    done = "done"
+
+
+class EpicStatus(str, Enum):
+    draft = "draft"
+    active = "active"
+    done = "done"
+    archived = "archived"
+
+
+class StoryPoints(int, Enum):
+    one = 1
+    two = 2
+    three = 3
+    five = 5
+    eight = 8
+    thirteen = 13
+    twenty_one = 21
+
+
 class SprintableInput(BaseModel):
     """모든 Sprintable 도구 입력 공통 베이스.
 
