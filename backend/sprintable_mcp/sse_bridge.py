@@ -11,11 +11,14 @@ import sys
 import time
 from dataclasses import dataclass
 from random import randint
-from typing import Any, Callable
+from typing import TYPE_CHECKING, Any, Callable
 
 import httpx
 
 from .config import settings
+
+if TYPE_CHECKING:
+    from mcp.server.session import ServerSession
 
 SseBridgeEventHandler = Callable[[str, Any], None]
 
@@ -29,6 +32,34 @@ _RELAY_EVENT_TYPES = frozenset(["conversation:message", "conversation:mention"])
 def _log(msg: str) -> None:
     sys.stderr.write(f"[sse-bridge] {msg}\n")
     sys.stderr.flush()
+
+
+# ── MCP Session Registry ───────────────────────────────────────────────────────
+
+_active_session: ServerSession | None = None
+
+
+def register_session(session: ServerSession) -> None:
+    """활성 MCP ServerSession 등록. __main__.py _handle_message 패치에서 호출."""
+    global _active_session
+    _active_session = session
+
+
+async def _send_mcp_notification(event_type: str, data_str: str) -> None:
+    """SSE 이벤트를 MCP log notification으로 클라이언트에 전송.
+
+    세션 미등록 또는 에러 시 조용히 skip — MCP 도구 호출에 영향 없음.
+    """
+    if _active_session is None:
+        return
+    try:
+        await _active_session.send_log_message(
+            level="info",
+            data={"event_type": event_type, "data": data_str},
+            logger="sprintable.sse",
+        )
+    except Exception as exc:
+        _log(f"notification error: {exc}")
 
 
 # ── SSE Parser ─────────────────────────────────────────────────────────────────
@@ -237,7 +268,7 @@ async def start_sse_bridge(
     """SSE 브릿지 시작. 연결 실패 시 에러 로그 + 재연결 루프 진입.
 
     MCP stdio 서버와 동일한 이벤트 루프에서 asyncio.create_task()로 실행.
-    수신 이벤트는 fakechat relay (fire-and-forget) + on_event 콜백으로 전달.
+    수신 이벤트는 fakechat relay + MCP notification + on_event 콜백으로 전달.
     """
     _log(f"starting bridge for member_id={member_id}")
     client = make_sse_client(api_url, api_key)
@@ -246,6 +277,9 @@ async def start_sse_bridge(
     def _relay_and_dispatch(event_type: str, data: Any) -> None:
         asyncio.create_task(
             relay_to_fakechat(event_type, str(data), api_url, api_key, port)
+        )
+        asyncio.create_task(
+            _send_mcp_notification(event_type, str(data))
         )
         if on_event is not None:
             on_event(event_type, data)
