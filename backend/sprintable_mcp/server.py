@@ -3,6 +3,19 @@ from mcp.types import TextContent
 
 from .config import settings
 from .response import ok
+from .tools.retro import (
+    AddRetroActionInput, AddRetroItemInput, ChangeRetroPhaseInput,
+    CreateRetroSessionInput, ExportRetroInput, ListRetroSessionsInput, VoteRetroItemInput,
+    add_retro_action, add_retro_item, change_retro_phase, create_retro_session,
+    export_retro, list_retro_sessions, vote_retro_item,
+)
+from .tools.standup import (
+    CheckinSprintInput, GetRetroSessionInput, GetStandupInput,
+    ListStandupEntriesInput, SaveStandupInput, StandupDateInput, StandupHistoryInput,
+    UpdateRetroActionStatusInput,
+    checkin_sprint, get_retro_session, get_standup, list_standup_entries,
+    save_standup, standup_history, standup_missing, update_retro_action_status,
+)
 from .tools.meetings import (
     CreateMeetingInput, ListMeetingsInput, MeetingIdInput, UpdateMeetingInput,
     create_meeting, delete_meeting, get_meeting, list_meetings,
@@ -457,3 +470,97 @@ async def sprintable_delete_meeting(args: MeetingIdInput) -> list[TextContent]:
 async def sprintable_trigger_ai_summary(args: MeetingIdInput) -> list[TextContent]:
     """미팅 AI 요약 생성 트리거."""
     return await trigger_ai_summary(args)
+
+
+# ── Standup (8개) ──────────────────────────────────────────────────────────────
+
+@mcp.tool()
+async def sprintable_standup_missing(args: StandupDateInput) -> list[TextContent]:
+    """스탠드업 미제출 멤버 조회."""
+    return await standup_missing(args)
+
+
+@mcp.tool()
+async def sprintable_standup_history(args: StandupHistoryInput) -> list[TextContent]:
+    """최근 스탠드업 히스토리 조회."""
+    return await standup_history(args)
+
+
+@mcp.tool()
+async def sprintable_get_standup(args: GetStandupInput) -> list[TextContent]:
+    """멤버+날짜 기준 스탠드업 조회."""
+    return await get_standup(args)
+
+
+@mcp.tool()
+async def sprintable_save_standup(args: SaveStandupInput) -> list[TextContent]:
+    """스탠드업 저장/업데이트."""
+    return await save_standup(args)
+
+
+@mcp.tool()
+async def sprintable_list_standup_entries(args: ListStandupEntriesInput) -> list[TextContent]:
+    """날짜 기준 스탠드업 목록 조회."""
+    return await list_standup_entries(args)
+
+
+@mcp.tool()
+async def sprintable_get_retro_session_by_sprint(args: GetRetroSessionInput) -> list[TextContent]:
+    """스프린트 레트로 세션 조회 (없으면 생성)."""
+    return await get_retro_session(args)
+
+
+@mcp.tool()
+async def sprintable_update_retro_action_status(args: UpdateRetroActionStatusInput) -> list[TextContent]:
+    """레트로 액션 아이템 상태 변경."""
+    return await update_retro_action_status(args)
+
+
+@mcp.tool()
+async def sprintable_checkin_sprint(args: CheckinSprintInput) -> list[TextContent]:
+    """스프린트 체크인 — 진행률 + 스탠드업 미제출 현황."""
+    return await checkin_sprint(args)
+
+
+# ── Retro (7개) ────────────────────────────────────────────────────────────────
+
+@mcp.tool()
+async def sprintable_list_retro_sessions(args: ListRetroSessionsInput) -> list[TextContent]:
+    """레트로 세션 목록 조회."""
+    return await list_retro_sessions(args)
+
+
+@mcp.tool()
+async def sprintable_create_retro_session(args: CreateRetroSessionInput) -> list[TextContent]:
+    """레트로 세션 생성."""
+    return await create_retro_session(args)
+
+
+@mcp.tool()
+async def sprintable_vote_retro_item(args: VoteRetroItemInput) -> list[TextContent]:
+    """레트로 아이템 투표."""
+    return await vote_retro_item(args)
+
+
+@mcp.tool()
+async def sprintable_add_retro_action(args: AddRetroActionInput) -> list[TextContent]:
+    """레트로 액션 아이템 추가."""
+    return await add_retro_action(args)
+
+
+@mcp.tool()
+async def sprintable_change_retro_phase(args: ChangeRetroPhaseInput) -> list[TextContent]:
+    """레트로 세션 단계 변경."""
+    return await change_retro_phase(args)
+
+
+@mcp.tool()
+async def sprintable_add_retro_item(args: AddRetroItemInput) -> list[TextContent]:
+    """레트로 아이템 추가 (good/bad/improve)."""
+    return await add_retro_item(args)
+
+
+@mcp.tool()
+async def sprintable_export_retro(args: ExportRetroInput) -> list[TextContent]:
+    """레트로 마크다운 내보내기."""
+    return await export_retro(args)
