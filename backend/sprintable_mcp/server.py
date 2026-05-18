@@ -3,6 +3,15 @@ from mcp.types import TextContent
 
 from .config import settings
 from .response import ok
+from .tools.analytics import (
+    ActivityInput, AgentStatsInput, EpicProgressInput, OverdueMemberInput,
+    SearchStoriesInput, SprintFilterInput, WorkloadInput,
+    get_agent_stats, get_blocked_stories, get_epic_progress,
+    get_member_workload, get_overdue_tasks, get_project_health,
+    get_project_overview, get_recent_activity, get_sprint_velocity_history,
+    get_unassigned_stories, search_stories,
+)
+from .tools.core import DashboardInput, list_team_members, my_dashboard
 from .tools.epics import (
     AddEpicInput, DeleteEpicInput, ListEpicsInput, UpdateEpicInput,
     add_epic, delete_epic, list_epics, update_epic,
@@ -254,3 +263,85 @@ async def sprintable_update_doc(args: UpdateDocInput) -> list[TextContent]:
 async def sprintable_delete_doc(args: DeleteDocInput) -> list[TextContent]:
     """문서 소프트 삭제."""
     return await delete_doc(args)
+
+
+# ── Analytics (11개) ───────────────────────────────────────────────────────────
+
+@mcp.tool()
+async def sprintable_get_project_overview(args: SprintableInput) -> list[TextContent]:
+    """프로젝트 개요 통계 조회."""
+    return await get_project_overview(args)
+
+
+@mcp.tool()
+async def sprintable_get_member_workload(args: WorkloadInput) -> list[TextContent]:
+    """팀원 워크로드 조회."""
+    return await get_member_workload(args)
+
+
+@mcp.tool()
+async def sprintable_get_sprint_velocity_history(args: SprintableInput) -> list[TextContent]:
+    """스프린트 벨로시티 히스토리 조회."""
+    return await get_sprint_velocity_history(args)
+
+
+@mcp.tool()
+async def sprintable_search_stories(args: SearchStoriesInput) -> list[TextContent]:
+    """스토리 제목 검색."""
+    return await search_stories(args)
+
+
+@mcp.tool()
+async def sprintable_get_blocked_stories(args: SprintFilterInput) -> list[TextContent]:
+    """in-review 상태 스토리 목록 (블로킹 스토리)."""
+    return await get_blocked_stories(args)
+
+
+@mcp.tool()
+async def sprintable_get_unassigned_stories(args: SprintFilterInput) -> list[TextContent]:
+    """담당자 미지정 스토리 목록."""
+    return await get_unassigned_stories(args)
+
+
+@mcp.tool()
+async def sprintable_get_overdue_tasks(args: OverdueMemberInput) -> list[TextContent]:
+    """미완료 태스크 목록."""
+    return await get_overdue_tasks(args)
+
+
+@mcp.tool()
+async def sprintable_get_recent_activity(args: ActivityInput) -> list[TextContent]:
+    """최근 프로젝트 활동 조회."""
+    return await get_recent_activity(args)
+
+
+@mcp.tool()
+async def sprintable_get_epic_progress(args: EpicProgressInput) -> list[TextContent]:
+    """에픽 진행 현황 조회."""
+    return await get_epic_progress(args)
+
+
+@mcp.tool()
+async def sprintable_get_agent_stats(args: AgentStatsInput) -> list[TextContent]:
+    """에이전트 성과 통계 조회."""
+    return await get_agent_stats(args)
+
+
+@mcp.tool()
+async def sprintable_get_project_health(args: SprintableInput) -> list[TextContent]:
+    """프로젝트 전체 건강도 조회."""
+    return await get_project_health(args)
+
+
+# ── Core (2개) ─────────────────────────────────────────────────────────────────
+
+@mcp.tool()
+async def sprintable_list_team_members(args: SprintableInput) -> list[TextContent]:
+    """프로젝트 팀 멤버 목록 조회."""
+    return await list_team_members(args)
+
+
+@mcp.tool()
+async def sprintable_my_dashboard(args: DashboardInput) -> list[TextContent]:
+    """팀원 대시보드 요약 조회."""
+    return await my_dashboard(args)
