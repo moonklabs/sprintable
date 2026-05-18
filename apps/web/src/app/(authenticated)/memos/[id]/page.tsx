@@ -1,6 +1,6 @@
 'use client';
 
-import { useCallback, useEffect, useState } from 'react';
+import { useEffect, useState } from 'react';
 import { useParams, useRouter } from 'next/navigation';
 import { ChevronLeft, Plus } from 'lucide-react';
 import { Button } from '@/components/ui/button';
@@ -22,21 +22,21 @@ export default function MemoDetailPage() {
 
   const [memo, setMemo] = useState<MemoSummary | null>(null);
 
-  const fetchMemoTitle = useCallback(async () => {
-    try {
-      const res = await fetch(`/api/memos/${id}`);
-      if (!res.ok) return;
-      const { data } = await res.json();
-      setMemo({ id: data.id, title: data.title });
-      await fetch(`/api/memos/${id}/read`, { method: 'PATCH' }).catch(() => null);
-    } catch {
-      // non-critical — ChatView will still render
-    }
-  }, [id]);
-
   useEffect(() => {
-    void fetchMemoTitle();
-  }, [fetchMemoTitle]);
+    let cancelled = false;
+    (async () => {
+      try {
+        const res = await fetch(`/api/memos/${id}`);
+        if (!res.ok || cancelled) return;
+        const { data } = await res.json();
+        if (!cancelled) setMemo({ id: data.id, title: data.title });
+        await fetch(`/api/memos/${id}/read`, { method: 'PATCH' }).catch(() => null);
+      } catch {
+        // non-critical — ChatView will still render
+      }
+    })();
+    return () => { cancelled = true; };
+  }, [id]);
 
   if (!currentTeamMemberId) {
     return (
