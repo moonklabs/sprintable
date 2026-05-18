@@ -78,11 +78,25 @@ async def deliver_conversation_message_webhook(
                 if not wh.events or _EVENT_TYPE in wh.events
             ]
 
-            # AC2: 멘션된 member에 속한 webhook도 추가 조회 (early return 전, participant 여부 무관)
-            if mentioned_ids:
+            # AC2: member webhook 조회 — mentioned_ids 없으면 대화 참여자 전원(sender 제외) 대상
+            member_ids_for_webhook: list[uuid.UUID] = list(mentioned_ids) if mentioned_ids else []
+            if not member_ids_for_webhook:
+                from app.models.conversation import ConversationParticipant
+                participant_member_ids = (await db.execute(
+                    select(ConversationParticipant.member_id).where(
+                        ConversationParticipant.conversation_id == conversation_id,
+                        *(
+                            [ConversationParticipant.member_id != sender_id]
+                            if sender_id else []
+                        ),
+                    )
+                )).scalars().all()
+                member_ids_for_webhook = list(participant_member_ids)
+
+            if member_ids_for_webhook:
                 extra_wh_rows = (await db.execute(
                     select(WebhookConfig).where(
-                        WebhookConfig.member_id.in_(mentioned_ids),
+                        WebhookConfig.member_id.in_(member_ids_for_webhook),
                         WebhookConfig.is_active.is_(True),
                     )
                 )).scalars().all()
