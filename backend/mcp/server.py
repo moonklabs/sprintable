@@ -1,6 +1,8 @@
 from mcp.server.fastmcp import FastMCP
+from mcp.types import TextContent
 
 from .config import settings
+from .response import ok
 
 mcp = FastMCP(
     name="sprintable-mcp-python",
@@ -12,6 +14,6 @@ mcp = FastMCP(
 
 
 @mcp.tool()
-def ping() -> str:
+def ping() -> list[TextContent]:
     """서버 생존 확인용 smoke tool."""
-    return "pong"
+    return ok({"status": "pong"})
