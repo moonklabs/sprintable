@@ -4,8 +4,8 @@
  * 연결 끊김 시 exponential backoff 재연결.
  */
 
-const BASE_DELAY_MS = 5_000;
-const MAX_DELAY_MS = 60_000;
+const BASE_DELAY_MS = 1_000;
+const MAX_DELAY_MS = 10_000;
 const JITTER_MS = 500;
 
 export type SseBridgeEventHandler = (eventType: string, data: unknown) => void;
