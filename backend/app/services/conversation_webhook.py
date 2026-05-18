@@ -72,10 +72,10 @@ async def deliver_conversation_message_webhook(
                 )
             )).scalars().all()
 
-            # conversation.message_created 이벤트 구독 중인 webhook만 필터
+            # events가 NULL/빈 배열이면 전체 이벤트 구독으로 간주 (backwards compatible)
             target_webhooks = [
                 wh for wh in wh_rows
-                if _EVENT_TYPE in (wh.events or [])
+                if not wh.events or _EVENT_TYPE in wh.events
             ]
 
             # AC2: 멘션된 member에 속한 webhook도 추가 조회 (early return 전, participant 여부 무관)
