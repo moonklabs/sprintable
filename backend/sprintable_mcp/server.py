@@ -3,6 +3,19 @@ from mcp.types import TextContent
 
 from .config import settings
 from .response import ok
+from .tools.agent_runs import (
+    EmitEventInput, PollEventsInput, UpdateRunStatusInput,
+    emit_event, poll_events, update_run_status,
+)
+from .tools.audit import ListAuditLogsInput, list_audit_logs
+from .tools.notifications import (
+    CheckNotificationsInput, MarkAllNotificationsReadInput, MarkNotificationReadInput,
+    check_notifications, mark_all_notifications_read, mark_notification_read,
+)
+from .tools.rewards import (
+    GetLeaderboardInput, GetWalletInput, GiveRewardInput,
+    get_leaderboard_v2, get_wallet, give_reward,
+)
 from .tools.retro import (
     AddRetroActionInput, AddRetroItemInput, ChangeRetroPhaseInput,
     CreateRetroSessionInput, ExportRetroInput, ListRetroSessionsInput, VoteRetroItemInput,
@@ -564,3 +577,71 @@ async def sprintable_add_retro_item(args: AddRetroItemInput) -> list[TextContent
 async def sprintable_export_retro(args: ExportRetroInput) -> list[TextContent]:
     """레트로 마크다운 내보내기."""
     return await export_retro(args)
+
+
+# ── Rewards (3개) ──────────────────────────────────────────────────────────────
+
+@mcp.tool()
+async def sprintable_get_wallet(args: GetWalletInput) -> list[TextContent]:
+    """팀원 보상 잔액 조회."""
+    return await get_wallet(args)
+
+
+@mcp.tool()
+async def sprintable_give_reward(args: GiveRewardInput) -> list[TextContent]:
+    """팀원 보상/패널티 지급."""
+    return await give_reward(args)
+
+
+@mcp.tool()
+async def sprintable_get_leaderboard_v2(args: GetLeaderboardInput) -> list[TextContent]:
+    """보상 리더보드 조회."""
+    return await get_leaderboard_v2(args)
+
+
+# ── Notifications (3개) ────────────────────────────────────────────────────────
+
+@mcp.tool()
+async def sprintable_check_notifications(args: CheckNotificationsInput) -> list[TextContent]:
+    """알림 목록 조회."""
+    return await check_notifications(args)
+
+
+@mcp.tool()
+async def sprintable_mark_notification_read(args: MarkNotificationReadInput) -> list[TextContent]:
+    """알림 읽음 처리."""
+    return await mark_notification_read(args)
+
+
+@mcp.tool()
+async def sprintable_mark_all_notifications_read(args: MarkAllNotificationsReadInput) -> list[TextContent]:
+    """전체 알림 읽음 처리."""
+    return await mark_all_notifications_read(args)
+
+
+# ── Audit (1개) ────────────────────────────────────────────────────────────────
+
+@mcp.tool()
+async def sprintable_list_audit_logs(args: ListAuditLogsInput) -> list[TextContent]:
+    """권한 감사 로그 조회."""
+    return await list_audit_logs(args)
+
+
+# ── Agent Runs (3개) ───────────────────────────────────────────────────────────
+
+@mcp.tool()
+async def sprintable_emit_event(args: EmitEventInput) -> list[TextContent]:
+    """에이전트 런 이벤트 발행."""
+    return await emit_event(args)
+
+
+@mcp.tool()
+async def sprintable_update_run_status(args: UpdateRunStatusInput) -> list[TextContent]:
+    """에이전트 런 상태 업데이트."""
+    return await update_run_status(args)
+
+
+@mcp.tool()
+async def sprintable_poll_events(args: PollEventsInput) -> list[TextContent]:
+    """에이전트 수신 대기 이벤트 폴링."""
+    return await poll_events(args)
