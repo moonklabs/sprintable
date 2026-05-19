@@ -7,6 +7,12 @@ from app.dependencies.database import get_db
 router = APIRouter(prefix="/api/v2", tags=["health"])
 
 
+@router.get("/ping")
+async def ping():
+    """인증 불필요 생존 확인 — CLI npx sprintable connect 호환."""
+    return {"ok": True}
+
+
 @router.get("/health")
 async def health_check(db: AsyncSession = Depends(get_db)):
     """AC2: GET /api/v2/health — DB 연결 포함 헬스체크 (AC3)."""
