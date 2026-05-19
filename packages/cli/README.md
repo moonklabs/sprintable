@@ -1,6 +1,6 @@
 # sprintable
 
-AI 에이전트를 Sprintable에 1줄로 연결합니다.
+Connect your AI agent to Sprintable in one command.
 
 ## Quick Start
 
@@ -8,25 +8,25 @@ AI 에이전트를 Sprintable에 1줄로 연결합니다.
 npx sprintable connect
 ```
 
-> 실행 즉시 API URL · API Key 프롬프트 → 자동 연결 → 에이전트 재시작하면 완료
+> Enter your API URL and API Key when prompted — your agent is connected in under 2 minutes.
 
 ---
 
-## 설치
+## Installation
 
 ```bash
-# npx로 설치 없이 바로 실행 (권장)
+# Run directly with npx (recommended — no install needed)
 npx sprintable connect
 
-# 전역 설치 후 실행
+# Or install globally
 npm install -g sprintable
 sprintable connect
 ```
 
-## 에이전트 타입 선택
+## Agent Types
 
 ```bash
-# Claude Code (기본)
+# Claude Code (default)
 npx sprintable connect --agent claude-code
 
 # Cursor
@@ -39,28 +39,28 @@ npx sprintable connect --agent vscode
 npx sprintable connect --agent windsurf
 ```
 
-## 진행 순서
+## How It Works
 
-1. **API URL** 입력 (기본: `https://app.sprintable.ai`)
-2. **Admin API Key** 입력 (Sprintable 설정 → API Keys)
-3. 연결 확인 자동 수행
-4. **프로젝트** 선택
-5. **에이전트 이름** 입력
-6. 자동으로 에이전트 등록 + API key 발급
-7. 설정 파일 자동 저장
+1. Enter your **API URL** (default: `https://app.sprintable.ai`)
+2. Enter your **Admin API Key** (Sprintable → Settings → API Keys)
+3. Connection is verified automatically
+4. Select your **project**
+5. Enter an **agent name**
+6. Agent is registered and an API key is issued automatically
+7. Config file is written to disk
 
-에이전트 클라이언트 재시작 후 `sprintable_ping` 도구가 보이면 연결 완료입니다.
+Restart your agent client — when you see the `sprintable_ping` tool, you're connected.
 
-## 생성되는 설정 파일
+## Config File Locations
 
-| 에이전트 | 경로 |
-|---------|------|
+| Agent | Path |
+|-------|------|
 | Claude Code | `~/.mcp.json` |
 | Cursor | `~/.cursor/mcp.json` |
 | VS Code | `~/.vscode/settings.json` |
 | Windsurf | `~/.codeium/windsurf/mcp_config.json` |
 
-## 요구사항
+## Requirements
 
-- Node.js 20 이상
-- Sprintable 계정 + 프로젝트
+- Node.js 20+
+- A Sprintable account with at least one project

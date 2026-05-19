@@ -1,6 +1,6 @@
 {
   "name": "sprintable",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "description": "Connect your AI agent to Sprintable in one command",
   "type": "module",
   "bin": {
