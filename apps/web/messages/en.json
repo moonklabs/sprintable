@@ -2187,14 +2187,5 @@
     "doneStories": "Done Stories",
     "assignedStories": "Assigned",
     "avgLeadTime": "Avg Lead Time"
-  },
-  "agentPresence": {
-    "title": "Agent Team",
-    "description": "Live presence status of your AI agents.",
-    "liveLabel": "Live",
-    "empty": "No agents deployed yet.",
-    "status_online": "Online",
-    "status_idle": "Idle",
-    "status_offline": "Offline"
   }
 }

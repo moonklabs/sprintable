@@ -12,7 +12,6 @@ import { Button } from '@/components/ui/button';
 import { OperatorStatCard } from '@/components/ui/operator-stat-card';
 import { formatLocaleDateOnly, formatLocaleDateTime } from '@/lib/i18n';
 import { WidgetRefreshTime } from '@/components/ui/widget-refresh-time';
-import { AgentPresencePanel, type AgentPresenceMember } from '@/components/agents/agent-presence-panel';
 import { DashboardActivityTimeline } from '@/components/activity/dashboard-activity-timeline';
 
 export default async function DashboardPage() {
@@ -42,12 +41,6 @@ export default async function DashboardPage() {
     { query: { project_id: projectId, member_type: 'agent' } },
   ).catch(() => null);
   const hasActiveAgent = (agentsData ?? []).some((a) => a.is_active);
-
-  // Agent presence panel: initial SSR data
-  const agentPresenceData = await fastapiCall<AgentPresenceMember[]>(
-    'GET', '/api/v2/team-members', session.access_token,
-    { query: { project_id: projectId, type: 'agent' } },
-  ).catch(() => null);
 
   interface DashboardData {
     my_stories: Array<{ id: string; title: string; status: string; story_points: number | null }>;
@@ -259,11 +252,6 @@ export default async function DashboardPage() {
           <DashboardActivityTimeline
             projectId={projectId}
             currentTeamMemberId={teamMemberId}
-          />
-
-          <AgentPresencePanel
-            initialMembers={agentPresenceData ?? []}
-            projectId={projectId}
           />
         </div>
       </div>
