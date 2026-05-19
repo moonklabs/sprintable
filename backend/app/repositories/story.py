@@ -87,7 +87,9 @@ class StoryRepository(BaseRepository[Story]):
         assert updated is not None
         return updated
 
-    async def set_status(self, id: uuid.UUID, new_status: str) -> Story:
+    async def set_status(
+        self, id: uuid.UUID, new_status: str, violation_level: str = "block"
+    ) -> Story:
         story = await self.get(id)
         if story is None:
             raise ValueError(f"Story {id} not found")
@@ -102,9 +104,11 @@ class StoryRepository(BaseRepository[Story]):
         current_idx = list(STORY_STATUSES).index(story.status)
         new_idx = list(STORY_STATUSES).index(new_status)
         if new_idx != current_idx + 1:
-            raise ValueError(
-                f"Non-sequential transition not allowed: {story.status} → {new_status}"
-            )
+            # AC1: warn 모드이면 hard block 우회 → 전이 허용 (violation 이벤트는 caller에서 발행)
+            if violation_level != "warn":
+                raise ValueError(
+                    f"Non-sequential transition not allowed: {story.status} → {new_status}"
+                )
 
         updated = await self.update(id, status=new_status)
         assert updated is not None
