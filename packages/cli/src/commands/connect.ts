@@ -1,9 +1,9 @@
 import input from "@inquirer/input";
 import password from "@inquirer/password";
 import confirm from "@inquirer/confirm";
-import { readFileSync, writeFileSync, existsSync } from "node:fs";
+import { readFileSync, writeFileSync, existsSync, mkdirSync } from "node:fs";
 import { homedir } from "node:os";
-import { join } from "node:path";
+import { join, dirname } from "node:path";
 
 const SERVER_NAME = "sprintable";
 
@@ -54,6 +54,7 @@ export function writeMcpConfig(configPath: string, apiUrl: string, apiKey: strin
     },
   };
   config.mcpServers = servers;
+  mkdirSync(dirname(configPath), { recursive: true });
   writeFileSync(configPath, JSON.stringify(config, null, 2) + "\n", "utf-8");
 }
 
@@ -69,7 +70,7 @@ export async function connectCommand(opts: ConnectOptions = {}): Promise<void> {
 
   const apiUrl = await input({
     message: "Sprintable API URL",
-    default: "https://api.sprintable.ai",
+    default: "https://app.sprintable.ai",
     validate: (v) => (v.startsWith("http") ? true : "http(s):// 로 시작해야 합니다"),
   });
 
