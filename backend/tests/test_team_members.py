@@ -33,6 +33,8 @@ def _mock_member(is_active: bool = True, type_: str = "human") -> MagicMock:
     m.last_seen_at = None
     m.active_story_id = None
     m.agent_status = None
+    # S2-4: active_story inject용 (None으로 고정)
+    m.active_story = None
     return m
 
 

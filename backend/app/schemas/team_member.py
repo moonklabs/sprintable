@@ -8,6 +8,12 @@ _ONLINE_THRESHOLD = timedelta(minutes=5)
 _IDLE_THRESHOLD = timedelta(minutes=30)
 
 
+class ActiveStorySummary(BaseModel):
+    id: uuid.UUID
+    title: str
+    status: str
+
+
 class TeamMemberCreate(BaseModel):
     project_id: uuid.UUID
     org_id: uuid.UUID
@@ -56,6 +62,8 @@ class TeamMemberResponse(BaseModel):
     last_seen_at: datetime | None = None
     active_story_id: uuid.UUID | None = None
     agent_status: str | None = None
+    # S2-4: active_story 요약 — router에서 inject
+    active_story: ActiveStorySummary | None = None
 
     # S2-3: computed presence_status — 조회 시점 실시간 계산
     @computed_field
@@ -72,5 +80,8 @@ class TeamMemberResponse(BaseModel):
         if delta <= _ONLINE_THRESHOLD:
             return "online"
         if delta <= _IDLE_THRESHOLD:
+            return "idle"
+        # AC7: claim 중이면 offline 강등 방지 → idle 유지
+        if self.active_story_id is not None:
             return "idle"
         return "offline"
