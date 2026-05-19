@@ -16,6 +16,15 @@ class ClaimStoryInput(SprintableInput):
     story_id: str
 
 
+class LockFilesInput(SprintableInput):
+    file_paths: list[str]
+    story_id: str | None = None
+
+
+class UnlockFilesInput(SprintableInput):
+    file_paths: list[str]
+
+
 async def list_team_members(args: SprintableInput) -> list[TextContent]:
     """프로젝트 팀 멤버 목록 조회."""
     params: dict = {"project_id": client.project_id}
@@ -43,6 +52,37 @@ async def claim_story(args: ClaimStoryInput) -> list[TextContent]:
         result = await client.post(
             f"/api/v2/team-members/{client.member_id}/claim",
             json={"story_id": args.story_id},
+        )
+        return ok(result)
+    except Exception as exc:
+        return err(str(exc))
+
+
+async def lock_files(args: LockFilesInput) -> list[TextContent]:
+    """파일 작업 시작 선언 — 동시 수정 충돌 경고 반환."""
+    if not client.member_id:
+        return err("member_id not resolved")
+    try:
+        body: dict = {"file_paths": args.file_paths}
+        if args.story_id:
+            body["story_id"] = args.story_id
+        result = await client.post(
+            f"/api/v2/team-members/{client.member_id}/file-lock",
+            json=body,
+        )
+        return ok(result)
+    except Exception as exc:
+        return err(str(exc))
+
+
+async def unlock_files(args: UnlockFilesInput) -> list[TextContent]:
+    """파일 작업 완료 선언 — lock 해제."""
+    if not client.member_id:
+        return err("member_id not resolved")
+    try:
+        result = await client.post(
+            f"/api/v2/team-members/{client.member_id}/file-unlock",
+            json={"file_paths": args.file_paths},
         )
         return ok(result)
     except Exception as exc:
