@@ -64,6 +64,7 @@ export function useChatSse({ currentTeamMemberId, onNewMessage, onReplyCreated, 
   const sourceRef = useRef<EventSource | null>(null);
   const reconnectTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const reconnectAttemptsRef = useRef(0);
+  const lastEventIdRef = useRef<string | null>(null);
   const onNewMessageRef = useRef(onNewMessage);
   const onReplyCreatedRef = useRef(onReplyCreated);
   const onConversationMessageRef = useRef(onConversationMessage);
@@ -87,6 +88,7 @@ export function useChatSse({ currentTeamMemberId, onNewMessage, onReplyCreated, 
 
       const url = new URL('/api/v2/events/memos', window.location.origin);
       if (memberIdRef.current) url.searchParams.set('member_id', memberIdRef.current);
+      if (lastEventIdRef.current) url.searchParams.set('last_event_id', lastEventIdRef.current);
 
       const source = new EventSource(url.toString());
       sourceRef.current = source;
@@ -115,6 +117,7 @@ export function useChatSse({ currentTeamMemberId, onNewMessage, onReplyCreated, 
 
       // chat:message — backend _to_chat_message format: { id, thread_id, sender: { id }, ... }
       source.addEventListener('chat:message', (e: MessageEvent) => {
+        if (e.lastEventId) lastEventIdRef.current = e.lastEventId;
         try {
           const payload = JSON.parse(e.data as string) as SseChatPayload;
           onNewMessageRef.current?.(normalizeToMessage(payload as unknown as Record<string, unknown>));
@@ -123,6 +126,7 @@ export function useChatSse({ currentTeamMemberId, onNewMessage, onReplyCreated, 
 
       // reply_created — from memos.py publish_event; use as refetch trigger
       source.addEventListener('reply_created', (e: MessageEvent) => {
+        if (e.lastEventId) lastEventIdRef.current = e.lastEventId;
         try {
           const payload = JSON.parse(e.data as string) as { id?: string; memo_id?: string };
           if (payload.memo_id) onReplyCreatedRef.current?.(payload.memo_id);
@@ -131,6 +135,7 @@ export function useChatSse({ currentTeamMemberId, onNewMessage, onReplyCreated, 
 
       // conversation:message — realtime update for conversation list
       source.addEventListener('conversation:message', (e: MessageEvent) => {
+        if (e.lastEventId) lastEventIdRef.current = e.lastEventId;
         try {
           const payload = JSON.parse(e.data as string) as Record<string, unknown>;
           onConversationMessageRef.current?.(payload);

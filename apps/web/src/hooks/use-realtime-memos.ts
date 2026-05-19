@@ -34,6 +34,7 @@ export function useRealtimeMemos({ currentTeamMemberId, onNewMemo, onNewReply, o
   const sourceRef = useRef<EventSource | null>(null);
   const reconnectTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const reconnectAttemptsRef = useRef(0);
+  const lastEventIdRef = useRef<string | null>(null);
   const onNewMemoRef = useRef(onNewMemo);
   const onNewReplyRef = useRef(onNewReply);
   const onMemoUpdatedRef = useRef(onMemoUpdated);
@@ -55,6 +56,7 @@ export function useRealtimeMemos({ currentTeamMemberId, onNewMemo, onNewReply, o
 
       const url = new URL('/api/v2/events/memos', window.location.origin);
       if (currentTeamMemberIdRef.current) url.searchParams.set('member_id', currentTeamMemberIdRef.current);
+      if (lastEventIdRef.current) url.searchParams.set('last_event_id', lastEventIdRef.current);
 
       const source = new EventSource(url.toString());
       sourceRef.current = source;
@@ -80,6 +82,7 @@ export function useRealtimeMemos({ currentTeamMemberId, onNewMemo, onNewReply, o
       };
 
       source.addEventListener('memo_created', (e: MessageEvent) => {
+        if (e.lastEventId) lastEventIdRef.current = e.lastEventId;
         try {
           const memo = JSON.parse(e.data) as RealtimeMemo;
           const isAssignedToMe = Boolean(currentTeamMemberIdRef.current && memo.assigned_to === currentTeamMemberIdRef.current);
@@ -88,12 +91,14 @@ export function useRealtimeMemos({ currentTeamMemberId, onNewMemo, onNewReply, o
       });
 
       source.addEventListener('memo_updated', (e: MessageEvent) => {
+        if (e.lastEventId) lastEventIdRef.current = e.lastEventId;
         try {
           onMemoUpdatedRef.current?.(JSON.parse(e.data) as RealtimeMemo);
         } catch { /* ignore parse errors */ }
       });
 
       source.addEventListener('reply_created', (e: MessageEvent) => {
+        if (e.lastEventId) lastEventIdRef.current = e.lastEventId;
         try {
           onNewReplyRef.current?.(JSON.parse(e.data) as RealtimeReply);
         } catch { /* ignore parse errors */ }
