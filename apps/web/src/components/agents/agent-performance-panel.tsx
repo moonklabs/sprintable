@@ -14,12 +14,10 @@ interface AgentMember {
 }
 
 interface AgentStats {
-  total_runs: number;
   completed: number;
-  failed: number;
-  total_tokens: number;
-  total_cost_usd: number;
-  avg_duration_ms: number;
+  total_stories: number;
+  done_story_points: number;
+  avg_lead_time_ms: number;
 }
 
 interface SprintVelocityItem {
@@ -192,21 +190,21 @@ export function AgentPerformancePanel() {
                           <CheckCircle className="size-3" />
                           <span className="text-base font-bold">{agent.stats?.completed ?? 0}</span>
                         </div>
-                        <div className="mt-0.5 text-[10px] text-muted-foreground">{t('completed')}</div>
+                        <div className="mt-0.5 text-[10px] text-muted-foreground">{t('doneStories')}</div>
                       </div>
                       <div className="rounded-md bg-muted/50 px-2 py-2">
                         <div className="flex items-center justify-center gap-1 text-primary">
                           <Zap className="size-3" />
-                          <span className="text-base font-bold">{agent.stats?.total_runs ?? 0}</span>
+                          <span className="text-base font-bold">{agent.stats?.total_stories ?? 0}</span>
                         </div>
-                        <div className="mt-0.5 text-[10px] text-muted-foreground">{t('totalRuns')}</div>
+                        <div className="mt-0.5 text-[10px] text-muted-foreground">{t('assignedStories')}</div>
                       </div>
                       <div className="rounded-md bg-muted/50 px-2 py-2">
                         <div className="flex items-center justify-center gap-1 text-muted-foreground">
                           <Clock className="size-3" />
-                          <span className="text-base font-bold">{formatDuration(agent.stats?.avg_duration_ms ?? 0)}</span>
+                          <span className="text-base font-bold">{formatDuration(agent.stats?.avg_lead_time_ms ?? 0)}</span>
                         </div>
-                        <div className="mt-0.5 text-[10px] text-muted-foreground">{t('avgDuration')}</div>
+                        <div className="mt-0.5 text-[10px] text-muted-foreground">{t('avgLeadTime')}</div>
                       </div>
                     </div>
                   </div>
