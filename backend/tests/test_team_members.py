@@ -29,6 +29,10 @@ def _mock_member(is_active: bool = True, type_: str = "human") -> MagicMock:
     m.created_by = None
     m.created_at = datetime(2026, 5, 1, tzinfo=timezone.utc)
     m.updated_at = datetime(2026, 5, 1, tzinfo=timezone.utc)
+    # S2-1: presence 필드
+    m.last_seen_at = None
+    m.active_story_id = None
+    m.agent_status = None
     return m
 
 
