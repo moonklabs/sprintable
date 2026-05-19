@@ -2,6 +2,7 @@ import uuid
 from datetime import datetime
 
 from sqlalchemy import Boolean, DateTime, ForeignKey, String, Text, UniqueConstraint, func
+from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.dialects.postgresql import UUID
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
@@ -15,6 +16,8 @@ class Project(Base, OrgScopedMixin, TimestampMixin, SoftDeleteMixin):
     id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
     name: Mapped[str] = mapped_column(Text, nullable=False)
     description: Mapped[str | None] = mapped_column(Text, nullable=True)
+    # S3-2: warn(default) | block
+    violation_level: Mapped[str] = mapped_column(String(10), nullable=False, default="warn")
 
     # relationships (string refs to avoid circular imports)
     team_members: Mapped[list["TeamMember"]] = relationship("TeamMember", back_populates="project", lazy="select")
