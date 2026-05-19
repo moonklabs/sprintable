@@ -38,8 +38,8 @@ def upgrade() -> None:
         BEGIN
             IF NOT EXISTS (
                 SELECT 1 FROM pg_constraint
-                WHERE conname = 'stories_pkey'
-                  AND conrelid = 'stories'::regclass
+                WHERE conrelid = 'stories'::regclass
+                  AND contype = 'p'
             ) THEN
                 ALTER TABLE stories ADD PRIMARY KEY (id);
             END IF;
