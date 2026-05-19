@@ -117,6 +117,7 @@ async def memo_event_stream(
     request: Request,
     auth: AuthContext = Depends(get_current_user),
     member_id: str | None = Query(default=None),
+    last_event_id: str | None = Query(default=None),  # AC2: reconnect 판별
 ):
     """GET /api/v2/events/memos — SSE 스트림.
 
@@ -125,19 +126,33 @@ async def memo_event_stream(
     - memo_created: 새 메모 INSERT
     - memo_updated: 메모 UPDATE
     - reply_created: 새 메모 답글 INSERT
+
+    AC1: 모든 이벤트에 id: 필드 발행 → 브라우저 Last-Event-ID 자동 추적
+    AC2: last_event_id 파라미터 또는 Last-Event-ID 헤더로 재연결 판별
     """
     org_id = auth.claims.get("app_metadata", {}).get("org_id", auth.user_id)
+
+    # Last-Event-ID 헤더도 지원 (브라우저 EventSource 자동 전달)
+    _last_eid = last_event_id or request.headers.get("last-event-id")
+    _is_reconnect = _last_eid is not None
+
     queue: asyncio.Queue[dict] = asyncio.Queue(maxsize=100)
     _subscribers[org_id].add(queue)
 
     async def generate():
         try:
+            # 초기 heartbeat — HTTP 응답 헤더 즉시 플러시, 재연결 여부 client에 알림
+            reconnect_flag = "true" if _is_reconnect else "false"
+            yield f"event: heartbeat\ndata: {{\"reconnect\":{reconnect_flag}}}\n\n"
+
             while not await request.is_disconnected():
                 try:
                     event = await asyncio.wait_for(queue.get(), timeout=30.0)
                     event_type = event.get("type", "message")
                     data = {k: v for k, v in event.items() if k != "type"}
-                    yield f"event: {event_type}\ndata: {json.dumps(data)}\n\n"
+                    # AC1: event_id 우선, 없으면 uuid 생성
+                    eid = data.get("event_id") or str(uuid.uuid4())
+                    yield f"event: {event_type}\nid: {eid}\ndata: {json.dumps(data)}\n\n"
                 except asyncio.TimeoutError:
                     yield "event: heartbeat\ndata: {}\n\n"
         except (asyncio.CancelledError, GeneratorExit):
