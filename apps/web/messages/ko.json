@@ -2158,6 +2158,23 @@
     "forbiddenDescription": "활동 로그를 조회할 권한이 없습니다.",
     "noProject": "선택된 프로젝트가 없습니다."
   },
+  "activityTimeline": {
+    "title": "최근 활동",
+    "description": "팀의 최근 10건 활동 실시간 피드입니다.",
+    "viewAll": "더 보기",
+    "empty": "아직 기록된 활동이 없습니다.",
+    "unknownActor": "시스템",
+    "actionStoryStatus": "스토리 {entity} 상태 변경",
+    "actionStoryCreated": "스토리 {entity} 생성",
+    "actionMemoCreated": "메모 {entity} 발송",
+    "actionMemoReplied": "{entity} 답신",
+    "actionMemoResolved": "메모 {entity} 해결",
+    "actionRunCompleted": "실행 {entity} 완료",
+    "actionRunFailed": "실행 {entity} 실패",
+    "actionSprintStarted": "스프린트 {entity} 시작",
+    "actionSprintClosed": "스프린트 {entity} 종료",
+    "actionDocCreated": "문서 {entity} 생성"
+  },
   "agentPerformance": {
     "loading": "퍼포먼스 데이터 로딩 중...",
     "agentStatsTitle": "에이전트 통계",

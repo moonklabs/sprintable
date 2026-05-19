@@ -2158,6 +2158,23 @@
     "forbiddenDescription": "You do not have permission to view the activity log.",
     "noProject": "No project selected."
   },
+  "activityTimeline": {
+    "title": "Recent Activity",
+    "description": "Live feed of the last 10 team actions.",
+    "viewAll": "View all",
+    "empty": "No activity recorded yet.",
+    "unknownActor": "System",
+    "actionStoryStatus": "updated story {entity}",
+    "actionStoryCreated": "created story {entity}",
+    "actionMemoCreated": "sent memo {entity}",
+    "actionMemoReplied": "replied to {entity}",
+    "actionMemoResolved": "resolved memo {entity}",
+    "actionRunCompleted": "completed run {entity}",
+    "actionRunFailed": "failed run {entity}",
+    "actionSprintStarted": "started sprint {entity}",
+    "actionSprintClosed": "closed sprint {entity}",
+    "actionDocCreated": "created doc {entity}"
+  },
   "agentPerformance": {
     "loading": "Loading performance data...",
     "agentStatsTitle": "Agent Stats",
