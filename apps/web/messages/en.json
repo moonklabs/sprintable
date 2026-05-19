@@ -2155,5 +2155,14 @@
     "forbiddenTitle": "Access denied",
     "forbiddenDescription": "You do not have permission to view the activity log.",
     "noProject": "No project selected."
+  },
+  "agentPresence": {
+    "title": "Agent Team",
+    "description": "Live presence status of your AI agents.",
+    "liveLabel": "Live",
+    "empty": "No agents deployed yet.",
+    "status_online": "Online",
+    "status_idle": "Idle",
+    "status_offline": "Offline"
   }
 }

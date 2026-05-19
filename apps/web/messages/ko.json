@@ -2155,5 +2155,14 @@
     "forbiddenTitle": "접근 권한 없음",
     "forbiddenDescription": "활동 로그를 조회할 권한이 없습니다.",
     "noProject": "선택된 프로젝트가 없습니다."
+  },
+  "agentPresence": {
+    "title": "에이전트 팀",
+    "description": "AI 에이전트의 실시간 활동 상태입니다.",
+    "liveLabel": "실시간",
+    "empty": "배포된 에이전트가 없습니다.",
+    "status_online": "온라인",
+    "status_idle": "유휴",
+    "status_offline": "오프라인"
   }
 }
