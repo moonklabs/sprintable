@@ -18,6 +18,15 @@ class StandupUpsert(BaseModel):
     plan_story_ids: list[uuid.UUID] = []
 
 
+class StandupSaveBody(BaseModel):
+    date: date
+    sprint_id: uuid.UUID | None = None
+    done: str | None = None
+    plan: str | None = None
+    blockers: str | None = None
+    plan_story_ids: list[uuid.UUID] = []
+
+
 class StandupEntryResponse(BaseModel):
     model_config = ConfigDict(from_attributes=True)
 
