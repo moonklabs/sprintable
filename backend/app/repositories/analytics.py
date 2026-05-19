@@ -206,25 +206,23 @@ class AnalyticsRepository:
         if member_r.scalar_one_or_none() is None:
             return None  # type: ignore[return-value]
 
-        # AC1/2/3/4: stories 기반 실제 기여 지표로 재정의
+        # stories 기반 실제 기여 지표
         stories_r = await self.session.execute(
             select(Story.status, Story.story_points, Story.created_at, Story.updated_at)
             .where(
                 Story.assignee_id == agent_id,
                 Story.org_id == self.org_id,
+                Story.deleted_at.is_(None),
             )
         )
         all_stories = stories_r.all()
         done_stories = [s for s in all_stories if s[0] == "done"]
 
-        # AC3: done 스토리 story_points 합계
         done_sp = sum((s[1] or 0) for s in done_stories)
 
-        # AC4: done 스토리 평균 리드타임 (updated_at - created_at 근사값)
         lead_times_ms: list[int] = []
         for s in done_stories:
-            created = s[2]
-            updated = s[3]
+            created, updated = s[2], s[3]
             if created and updated:
                 if created.tzinfo is None:
                     created = created.replace(tzinfo=timezone.utc)
@@ -236,17 +234,16 @@ class AnalyticsRepository:
         avg_lead_time_ms = round(sum(lead_times_ms) / len(lead_times_ms)) if lead_times_ms else 0
 
         return {
-            # AC1: done 스토리 수
             "completed": len(done_stories),
-            # AC2: 전체 배정 스토리 수
             "total_stories": len(all_stories),
-            # AC3: done 스토리 SP 합계
             "done_story_points": done_sp,
-            # AC4: 평균 리드타임 (ms)
             "avg_lead_time_ms": avg_lead_time_ms,
-            # 하위 호환 필드 유지 (프론트 라벨 변경 전까지)
+            # 스키마 하위 호환 필드
             "total_runs": len(all_stories),
-            "failed": sum(1 for s in all_stories if s[0] not in ("done", "in-progress", "in-review", "ready-for-dev", "backlog")),
+            "failed": 0,
+            "total_tokens": 0,
+            "total_cost_usd": 0.0,
+            "avg_duration_ms": 0,
         }
 
     async def get_project_health(self, project_id: uuid.UUID) -> dict:

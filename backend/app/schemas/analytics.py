@@ -100,12 +100,17 @@ class EpicProgressResponse(BaseModel):
 
 
 class AgentStatsResponse(BaseModel):
-    total_runs: int
+    # S2-1 신규 지표 (stories 기반)
     completed: int
-    failed: int
-    total_tokens: int
-    total_cost_usd: float
-    avg_duration_ms: int
+    total_stories: int = 0
+    done_story_points: int = 0
+    avg_lead_time_ms: int = 0
+    # 하위 호환 필드 (기본값 0으로 안전하게 유지)
+    total_runs: int = 0
+    failed: int = 0
+    total_tokens: int = 0
+    total_cost_usd: float = 0.0
+    avg_duration_ms: int = 0
 
 
 class ActiveSprintInfo(BaseModel):
