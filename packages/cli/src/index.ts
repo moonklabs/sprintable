@@ -1,5 +1,5 @@
 #!/usr/bin/env node
-import { Command } from "commander";
+import { Command, Option } from "commander";
 import { connectCommand } from "./commands/connect.js";
 
 const program = new Command();
@@ -12,10 +12,10 @@ program
 program
   .command("connect")
   .description("Sprintable MCP 서버를 에이전트 설정 파일에 등록합니다")
-  .option(
-    "--agent <type>",
-    "에이전트 타입: claude-code | cursor | windsurf (기본: claude-code)",
-    "claude-code"
+  .addOption(
+    new Option("--agent <type>", "에이전트 타입 (기본: claude-code)")
+      .choices(["claude-code", "cursor", "windsurf"])
+      .default("claude-code")
   )
   .action(async (opts: { agent?: string }) => {
     try {
