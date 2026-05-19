@@ -1,14 +1,19 @@
 """Sprintable MCP 서버 — 88개 도구 등록 (flat schema)."""
 from __future__ import annotations
 
+import asyncio
 import inspect
+import logging
 from typing import get_type_hints
+
+logger = logging.getLogger(__name__)
 
 from mcp.server.fastmcp import FastMCP
 from mcp.types import TextContent
 from pydantic import BaseModel
 from pydantic.fields import PydanticUndefined
 
+from .api_client import client
 from .config import settings
 from .response import ok
 from .schemas import SprintableInput
@@ -89,6 +94,15 @@ from .tools.tasks import (
 )
 
 
+async def _heartbeat_fire_forget() -> None:
+    """AC3/4: tool 호출 완료 후 fire-and-forget. 실패해도 tool 결과에 영향 없음."""
+    try:
+        if client.member_id:
+            await client.patch(f"/api/v2/team-members/{client.member_id}/heartbeat")
+    except Exception as exc:
+        logger.warning("heartbeat failed (ignored): %s", exc)
+
+
 def _flat(name: str, doc: str, input_cls: type[BaseModel], fn):
     """BaseModel → flat inspect.Signature so FastMCP emits top-level params."""
     try:
@@ -114,7 +128,9 @@ def _flat(name: str, doc: str, input_cls: type[BaseModel], fn):
         )
 
     async def wrapper(**kwargs):
-        return await fn(input_cls(**kwargs))
+        result = await fn(input_cls(**kwargs))
+        asyncio.create_task(_heartbeat_fire_forget())
+        return result
 
     wrapper.__name__ = name
     wrapper.__qualname__ = name
@@ -135,8 +151,9 @@ mcp = FastMCP(
 
 
 @mcp.tool()
-def ping() -> list[TextContent]:
+async def ping() -> list[TextContent]:
     """서버 생존 확인용 smoke tool."""
+    asyncio.create_task(_heartbeat_fire_forget())
     return ok({"status": "pong"})
 
 

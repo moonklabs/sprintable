@@ -1,5 +1,6 @@
 import os
 import uuid
+from datetime import datetime, timezone
 
 from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy import select
@@ -146,6 +147,22 @@ async def update_team_member(
     data = body.model_dump(exclude_unset=True)
     updated = await repo.update(id, **data)
     return TeamMemberResponse.model_validate(updated)
+
+
+@router.patch("/{id}/heartbeat")
+async def heartbeat(
+    id: uuid.UUID,
+    session: AsyncSession = Depends(get_db),
+    org_id: uuid.UUID = Depends(get_verified_org_id),
+) -> dict:
+    """AC1/2: last_seen_at = NOW(), agent_status = online 갱신."""
+    repo = TeamMemberRepository(session, org_id)
+    member = await repo.get(id)
+    if member is None:
+        raise HTTPException(status_code=404, detail="Team member not found")
+    now = datetime.now(timezone.utc)
+    await repo.update(id, last_seen_at=now, agent_status="online")
+    return {"ok": True, "last_seen_at": now.isoformat()}
 
 
 @router.delete("/{id}", status_code=200)
