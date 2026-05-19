@@ -58,16 +58,24 @@ _sse_connection_count: int = 0
 # ─── S6-1: Backfill 볼륨 제어 ─────────────────────────────────────────────────
 _BACKFILL_THRESHOLD_SECONDS: int = int(_os.getenv("BACKFILL_THRESHOLD_SECONDS", "300"))
 _BACKFILL_MAX_EVENTS: int = int(_os.getenv("BACKFILL_MAX_EVENTS", "50"))
+# S0-1: 초기 연결(last_event_id=None) 시 backfill 상한 — 재연결과 구분하여 중복 방지
+_BACKFILL_INITIAL_EVENTS: int = int(_os.getenv("BACKFILL_INITIAL_EVENTS", "5"))
 
 
-def _compute_backfill_mode(ref_ts: "datetime | None", now: "datetime") -> tuple[bool, int]:
+def _compute_backfill_mode(
+    ref_ts: "datetime | None",
+    now: "datetime",
+    initial: bool = False,
+) -> tuple[bool, int]:
     """(exceed_threshold, limit) — threshold 초과 여부와 사용할 LIMIT 반환.
 
     exceed_threshold=True  → DESC 최신 N건 조회
     exceed_threshold=False → ASC 전량 조회 (max 100)
+    initial=True: last_event_id=None 초기 연결 — BACKFILL_INITIAL_EVENTS 상한 적용
     """
     if ref_ts is None:
-        return True, _BACKFILL_MAX_EVENTS
+        limit = _BACKFILL_INITIAL_EVENTS if initial else _BACKFILL_MAX_EVENTS
+        return True, limit
     _ref = ref_ts if ref_ts.tzinfo else ref_ts.replace(tzinfo=timezone.utc)
     exceed = (now - _ref) > timedelta(seconds=_BACKFILL_THRESHOLD_SECONDS)
     return exceed, (_BACKFILL_MAX_EVENTS if exceed else 100)
@@ -239,7 +247,9 @@ async def agent_event_stream(
                         ref_ts = ts if ts.tzinfo else ts.replace(tzinfo=timezone.utc)
 
                 _ref = ref_ts if ref_ts is None or ref_ts.tzinfo else ref_ts.replace(tzinfo=timezone.utc)
-                exceed, limit = _compute_backfill_mode(_ref, now)
+                # S0-1: 초기 연결(last_event_id=None, since_timestamp=None)은 INITIAL 상한 적용
+                is_initial = last_event_id is None and since_timestamp is None
+                exceed, limit = _compute_backfill_mode(_ref, now, initial=is_initial)
                 if exceed:
                     # threshold 초과: 최근 N건만 (최신순 → 역순 전달로 시간 순서 보존)
                     result = await db.execute(
