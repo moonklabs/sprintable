@@ -49,6 +49,23 @@ async def claim_story(args: ClaimStoryInput) -> list[TextContent]:
         return err(str(exc))
 
 
+async def get_workflow_guide(args: SprintableInput) -> list[TextContent]:
+    """현재 프로젝트 워크플로우 가이드 텍스트 반환 (에이전트 system prompt 주입용)."""
+    try:
+        recipes = await client.get(
+            "/api/v2/workflow-recipes",
+            params={"project_id": client.project_id},
+        )
+        if not recipes:
+            return ok({"guide": "등록된 워크플로우 레시피가 없습니다.", "recipes": []})
+        first = recipes[0]
+        recipe_id = first.get("id") or first.get("slug")
+        guide_data = await client.get(f"/api/v2/workflow-recipes/{recipe_id}/guide")
+        return ok(guide_data)
+    except Exception as exc:
+        return err(str(exc))
+
+
 async def unclaim_story(args: SprintableInput) -> list[TextContent]:
     """작업 중인 스토리 claim 해제 — active_story_id = NULL."""
     if not client.member_id:

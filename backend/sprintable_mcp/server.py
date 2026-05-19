@@ -32,7 +32,7 @@ from .tools.analytics import (
 from .tools.audit import ListAuditLogsInput, list_audit_logs
 from .tools.core import (
     ClaimStoryInput, DashboardInput,
-    claim_story, list_team_members, my_dashboard, unclaim_story,
+    claim_story, get_workflow_guide, list_team_members, my_dashboard, unclaim_story,
 )
 from .tools.docs import (
     CreateDocInput, DeleteDocInput, GetDocInput, ListDocsInput,
@@ -314,6 +314,9 @@ _TOOL_DEFS: list[tuple] = [
     ("sprintable_unclaim_story",
      "작업 중인 스토리 claim 해제 — active_story_id = NULL.",
      SprintableInput, unclaim_story),
+    ("sprintable_get_workflow_guide",
+     "현재 프로젝트 워크플로우 가이드 텍스트 반환 — 에이전트 system prompt 주입용.",
+     SprintableInput, get_workflow_guide),
     # Memos + Chat (10)
     ("sprintable_list_memos",
      "메모 목록 조회.",
