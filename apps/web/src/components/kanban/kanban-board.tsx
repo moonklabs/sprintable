@@ -201,7 +201,7 @@ export function KanbanBoard({ projectId }: KanbanBoardProps) {
       setColumnTotals(newTotals);
       setColumnCursors(newCursors);
 
-      let storyIds = allStories.map((s) => s.id);
+      const storyIds = allStories.map((s) => s.id);
       if (sprintsRes.ok) { const json = await sprintsRes.json(); setSprints(json.data); }
       if (epicsRes.ok) { const json = await epicsRes.json(); setEpics(json.data); setEpicsNextCursor(json.meta?.nextCursor ?? null); }
       if (membersRes.ok) { const json = await membersRes.json(); setMembers(json.data); }

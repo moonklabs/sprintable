@@ -26,6 +26,34 @@ _MAX_RETRIES = 3
 _BACKOFF_BASE = 1.0  # seconds
 
 
+_DISCORD_URL_PATTERNS = ("discord.com/api/webhooks", "discordapp.com/api/webhooks")
+
+
+def _is_discord_url(url: str) -> bool:
+    return any(pat in url for pat in _DISCORD_URL_PATTERNS)
+
+
+def _to_discord_payload(payload: dict) -> dict:
+    """Sprintable webhook payload → Discord content 포맷 변환 (_fire_webhook 스타일)."""
+    content_text = (payload.get("content") or "")[:500]
+    conversation_id = payload.get("conversation_id", "")
+    thread_id = payload.get("thread_id") or ""
+
+    discord_content = f"📩 **새 메시지**"
+    if content_text:
+        discord_content += f"\n{content_text}"
+    if conversation_id:
+        discord_content += f"\n\nmemo_id: {conversation_id}"
+    if thread_id:
+        discord_content += f"\nreply_id: {thread_id}"
+
+    result: dict = {"content": discord_content}
+    app_url = __import__("os").environ.get("NEXT_PUBLIC_APP_URL", "")
+    if app_url and conversation_id:
+        result["embeds"] = [{"title": "대화 보기", "url": f"{app_url}/memos?id={conversation_id}"}]
+    return result
+
+
 def _sign_payload(secret: str, body: bytes) -> str:
     """HMAC-SHA256 서명 — X-Hub-Signature-256 헤더용."""
     digest = hmac.new(secret.encode(), body, hashlib.sha256).hexdigest()
@@ -34,9 +62,11 @@ def _sign_payload(secret: str, body: bytes) -> str:
 
 async def _attempt_delivery(url: str, secret: str | None, payload: dict) -> None:
     """단일 webhook HTTP POST 시도. 실패 시 예외 raise."""
-    body = json.dumps(payload, default=str).encode()
+    discord = _is_discord_url(url)
+    delivery_payload = _to_discord_payload(payload) if discord else payload
+    body = json.dumps(delivery_payload, default=str).encode()
     headers: dict[str, str] = {"Content-Type": "application/json"}
-    if secret:
+    if secret and not discord:
         headers["X-Hub-Signature-256"] = _sign_payload(secret, body)
 
     async with httpx.AsyncClient(timeout=10.0) as client:
@@ -53,6 +83,7 @@ async def deliver_conversation_message_webhook(
     thread_id: uuid.UUID | None,
     created_at: datetime,
     mentioned_ids: list[uuid.UUID] | None = None,
+    content: str | None = None,
 ) -> None:
     """BackgroundTask 진입점.
 
@@ -72,24 +103,42 @@ async def deliver_conversation_message_webhook(
                 )
             )).scalars().all()
 
-            # conversation.message_created 이벤트 구독 중인 webhook만 필터
+            # events가 NULL/빈 배열이면 전체 이벤트 구독으로 간주 (backwards compatible)
             target_webhooks = [
                 wh for wh in wh_rows
-                if _EVENT_TYPE in (wh.events or [])
+                if not wh.events or _EVENT_TYPE in wh.events
             ]
 
-            # AC2: 멘션된 member에 속한 webhook도 추가 조회 (early return 전, participant 여부 무관)
-            if mentioned_ids:
+            # AC2: member webhook 조회 — mentioned_ids 없으면 대화 참여자 전원(sender 제외) 대상
+            member_ids_for_webhook: list[uuid.UUID] = list(mentioned_ids) if mentioned_ids else []
+            if not member_ids_for_webhook:
+                from app.models.conversation import ConversationParticipant
+                participant_member_ids = (await db.execute(
+                    select(ConversationParticipant.member_id).where(
+                        ConversationParticipant.conversation_id == conversation_id,
+                        *(
+                            [ConversationParticipant.member_id != sender_id]
+                            if sender_id else []
+                        ),
+                    )
+                )).scalars().all()
+                member_ids_for_webhook = list(participant_member_ids)
+
+            if member_ids_for_webhook:
                 extra_wh_rows = (await db.execute(
                     select(WebhookConfig).where(
-                        WebhookConfig.member_id.in_(mentioned_ids),
+                        WebhookConfig.org_id == org_id,
+                        WebhookConfig.member_id.in_(member_ids_for_webhook),
                         WebhookConfig.is_active.is_(True),
                     )
                 )).scalars().all()
                 existing_ids = {wh.id for wh in target_webhooks}
+                existing_urls = {wh.url for wh in target_webhooks}
                 for wh in extra_wh_rows:
-                    if wh.id not in existing_ids:
+                    if wh.id not in existing_ids and wh.url not in existing_urls:
                         target_webhooks.append(wh)
+                        existing_ids.add(wh.id)
+                        existing_urls.add(wh.url)
 
             if not target_webhooks:
                 return
@@ -103,6 +152,7 @@ async def deliver_conversation_message_webhook(
                 "thread_id": str(thread_id) if thread_id else None,
                 "created_at": created_at.isoformat(),
                 "mentioned_ids": mentioned_id_strs,
+                "content": content,
             }
 
             for wh in target_webhooks:

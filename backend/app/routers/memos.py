@@ -11,7 +11,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 logger = logging.getLogger(__name__)
 
-from app.dependencies.auth import AuthContext, get_current_user, get_project_scoped_org_id, get_verified_org_id
+from app.dependencies.auth import AuthContext, enforce_body_context, get_current_user, get_project_scoped_org_id, get_verified_org_id
 from app.dependencies.database import get_db
 from app.models.memo import Memo, MemoAssignee, MemoReply
 from app.models.team import TeamMember
@@ -74,7 +74,7 @@ async def _collect_reply_webhook_urls(
             WebhookConfig.is_active.is_(True),
         )
     )
-    return [row[0] for row in rows if row[0]]
+    return list({row[0] for row in rows if row[0]})
 
 
 def _fire_webhook(url: str, content: str, title: str, memo_url: str, memo_id: str = "") -> None:
@@ -442,10 +442,18 @@ async def create_memo(
     body: CreateMemo,
     background_tasks: BackgroundTasks,
     session: AsyncSession = Depends(get_db),
-    _auth: AuthContext = Depends(get_current_user),
+    auth: AuthContext = Depends(get_current_user),
+    org_id: uuid.UUID = Depends(get_verified_org_id),
 ) -> dict:
     # AC1: conversation adapter로 라우팅 (memo row 미생성)
     from app.models.conversation import Conversation, ConversationMessage, ConversationParticipant
+
+    enforce_body_context(
+        auth_org_id=org_id,
+        body_org_id=body.org_id,
+        body_project_id=body.project_id,
+        auth_project_id=auth.claims.get("app_metadata", {}).get("project_id"),
+    )
 
     participant_ids: set[uuid.UUID] = set()
     if body.created_by:
@@ -459,7 +467,7 @@ async def create_memo(
     conv = Conversation(
         id=conv_id,
         project_id=body.project_id,
-        org_id=body.org_id,
+        org_id=org_id,
         type="group",
         title=body.title,
         created_by=body.created_by,
@@ -499,7 +507,7 @@ async def create_memo(
         "create_memo routed to conversation conversation_id=%s message_id=%s project_id=%s entity_links=%d",
         conv.id, root_msg.id, body.project_id, len(all_embed_list),
     )
-    publish_event(str(body.org_id), "memo_created", {"id": str(conv.id)})
+    publish_event(str(org_id), "memo_created", {"id": str(conv.id)})
 
     # webhook + side effects
     memo_recipient_ids: set[uuid.UUID] = set()
@@ -529,7 +537,7 @@ async def create_memo(
         background_tasks.add_task(
             _memo_side_effects_bg,
             memo_id=conv.id,
-            org_id=body.org_id,
+            org_id=org_id,
             project_id=body.project_id,
             assigned_to=body.assigned_to or (body.assigned_to_ids[0] if body.assigned_to_ids else None),
             created_by=body.created_by,
@@ -546,7 +554,7 @@ async def create_memo(
         "message_id": str(root_msg.id),
         "deprecated": True,
         "project_id": str(body.project_id) if body.project_id else None,
-        "org_id": str(body.org_id),
+        "org_id": str(org_id),
         "memo_type": body.memo_type or "memo",
         "title": body.title,
         "content": body.content,
@@ -706,7 +714,14 @@ async def add_reply(
             if sender_member:
                 try:
                     from app.routers.conversations import _dispatch_conversation_event
-                    await _dispatch_conversation_event(db, conv, reply_msg, repo.org_id, sender_member)
+                    from app.services.channel_router import ChannelRouterError, route_message as _route
+                    discord_exclude_ids: set[uuid.UUID] = set()
+                    try:
+                        decisions = await _route(reply_msg.id, db)
+                        discord_exclude_ids = {d.member_id for d in decisions if d.channel == "discord"}
+                    except Exception:
+                        logger.warning("channel_router pre-check failed reply_msg_id=%s", reply_msg.id)
+                    await _dispatch_conversation_event(db, conv, reply_msg, repo.org_id, sender_member, exclude_ids=discord_exclude_ids)
                 except Exception:
                     logger.warning("conversation event dispatch failed memo_id=%s", id, exc_info=True)
 

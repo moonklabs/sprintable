@@ -10,6 +10,8 @@ substitutions:
   _AR_REPO: sprintable
   _DEPLOY_ENV: dev
   _FASTAPI_URL: https://sprintable-backend-dev-787818285179.asia-northeast3.run.app
+  _BACKEND_MIN_INSTANCES: '1'
+  _BACKEND_MAX_INSTANCES: '3'
 
 steps:
   # ─── Frontend (Next.js standalone) ────────────────────────────────────────
@@ -88,6 +90,8 @@ steps:
       - sprintable-backend-${_DEPLOY_ENV}
       - --image=${_AR_REGION}-docker.pkg.dev/${PROJECT_ID}/${_AR_REPO}/backend:${COMMIT_SHA}
       - --region=${_AR_REGION}
+      - --min-instances=${_BACKEND_MIN_INSTANCES}
+      - --max-instances=${_BACKEND_MAX_INSTANCES}
       - --quiet
     waitFor: [push-backend]
 

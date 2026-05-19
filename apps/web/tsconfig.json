@@ -30,8 +30,6 @@
       "@ee/*": ["../../ee/packages/*"],
       "@moonklabs/storage-saas": ["../../ee/packages/storage-saas/src/index.ts"],
       "@moonklabs/storage-saas/*": ["../../ee/packages/storage-saas/src/*"],
-      "@moonklabs/mcp-server-saas": ["../../ee/packages/mcp-server-saas/src/index.ts"],
-      "@moonklabs/mcp-server-saas/*": ["../../ee/packages/mcp-server-saas/src/*"]
     }
   },
   "include": [

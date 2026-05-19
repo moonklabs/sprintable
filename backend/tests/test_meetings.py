@@ -6,6 +6,7 @@ from unittest.mock import AsyncMock, MagicMock, patch
 import pytest
 from httpx import ASGITransport, AsyncClient
 
+ORG_ID = uuid.uuid4()
 PROJECT_ID = uuid.uuid4()
 MEETING_ID = uuid.uuid4()
 
@@ -41,7 +42,7 @@ async def _client():
     ctx = MagicMock()
     ctx.user_id = str(uuid.uuid4())
     ctx.email = "test@example.com"
-    ctx.claims = {}
+    ctx.claims = {"app_metadata": {"org_id": str(ORG_ID), "project_id": str(PROJECT_ID)}}
 
     mock_session = AsyncMock()
 

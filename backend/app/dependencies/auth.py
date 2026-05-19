@@ -324,6 +324,19 @@ def require_project_access(
     return project_id
 
 
+def enforce_body_context(
+    auth_org_id: uuid.UUID,
+    body_org_id: uuid.UUID | None = None,
+    body_project_id: uuid.UUID | None = None,
+    auth_project_id: str | None = None,
+) -> None:
+    """AC6/AC7: body의 org_id/project_id가 auth context와 불일치 시 403."""
+    if body_org_id is not None and body_org_id != auth_org_id:
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="body.org_id가 auth context와 불일치인")
+    if auth_project_id and body_project_id is not None and str(body_project_id) != str(auth_project_id):
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="body.project_id가 auth context와 불일치인")
+
+
 async def _verify_project_in_org(
     project_id: uuid.UUID,
     org_id: uuid.UUID,
