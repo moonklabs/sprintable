@@ -287,7 +287,8 @@ async def update_story_status(
         raise HTTPException(status_code=400, detail=_violation.reason or "워크플로우 위반으로 상태 전이가 거부되었습니다.")
 
     try:
-        story = await repo.set_status(id, body.status)
+        # AC2: violation_level 전달 → warn 모드이면 set_status hard block 우회
+        story = await repo.set_status(id, body.status, violation_level=_violation_level)
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
 
