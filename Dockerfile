@@ -10,7 +10,6 @@ COPY packages/db/package.json packages/db/package.json
 COPY packages/sdk/package.json packages/sdk/package.json
 COPY packages/storage-api/package.json packages/storage-api/package.json
 COPY ee/packages/storage-saas/package.json ee/packages/storage-saas/package.json
-COPY ee/packages/mcp-server-saas/package.json ee/packages/mcp-server-saas/package.json
 RUN pnpm install --frozen-lockfile --ignore-scripts
 
 # ─── Stage 2: Build ───
