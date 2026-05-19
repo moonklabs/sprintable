@@ -120,7 +120,7 @@ function getFailureHeadline(failure: AgentDeploymentCard['latest_failed_run']) {
 
 const AUTO_REFRESH_INTERVAL = 30_000;
 
-export function AgentsDashboard({ deployments: initialDeployments }: { deployments: AgentDeploymentCard[] }) {
+export function AgentsDashboard({ deployments: initialDeployments, hideTopBar = false }: { deployments: AgentDeploymentCard[]; hideTopBar?: boolean }) {
   const locale = useLocale();
   const t = useTranslations('agents');
   const tr = useTranslations('agentRuns');
@@ -233,15 +233,17 @@ export function AgentsDashboard({ deployments: initialDeployments }: { deploymen
 
   return (
     <>
-      <TopBarSlot
-          title={<h1 className="text-sm font-medium">{t('statusTitle')}</h1>}
-          actions={
-            <Link href="/agents/deploy" className={buttonVariants({ variant: 'outline', size: 'sm' })}>
-              <Rocket className="mr-1.5 size-3.5" />
-              {t('openWizard')}
-            </Link>
-          }
-        />
+      {!hideTopBar && (
+        <TopBarSlot
+            title={<h1 className="text-sm font-medium">{t('statusTitle')}</h1>}
+            actions={
+              <Link href="/agents/deploy" className={buttonVariants({ variant: 'outline', size: 'sm' })}>
+                <Rocket className="mr-1.5 size-3.5" />
+                {t('openWizard')}
+              </Link>
+            }
+          />
+      )}
       <div className="flex min-h-0 flex-1 flex-col overflow-y-auto p-6">
         <div className="rounded-xl border border-border bg-background">
           <div className="flex flex-col gap-3 border-b border-border/60 px-4 py-3 sm:flex-row sm:items-center sm:justify-between">

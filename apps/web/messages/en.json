@@ -1859,7 +1859,9 @@
     "workflowVersionPreviewTitle": "Version {version} snapshot",
     "workflowVersionAddedRules": "+{count}",
     "workflowVersionRemovedRules": "-{count}",
-    "workflowVersionChangedRules": "~{count}"
+    "workflowVersionChangedRules": "~{count}",
+    "tabDeployments": "Deployments",
+    "tabPerformance": "Performance"
   },
   "agentRuns": {
     "eyebrow": "RUN HISTORY",
@@ -2155,6 +2157,19 @@
     "forbiddenTitle": "Access denied",
     "forbiddenDescription": "You do not have permission to view the activity log.",
     "noProject": "No project selected."
+  },
+  "agentPerformance": {
+    "loading": "Loading performance data...",
+    "agentStatsTitle": "Agent Stats",
+    "agentStatsDescription": "Completed runs, total executions, and average processing time per agent.",
+    "velocityTitle": "Team Velocity",
+    "velocityDescription": "Story points delivered per sprint (last 5 sprints).",
+    "leaderboardTitle": "Leaderboard",
+    "leaderboardDescription": "Agents ranked by total reward balance.",
+    "noAgents": "No agents deployed yet.",
+    "completed": "Completed",
+    "totalRuns": "Total Runs",
+    "avgDuration": "Avg Time"
   },
   "agentPresence": {
     "title": "Agent Team",

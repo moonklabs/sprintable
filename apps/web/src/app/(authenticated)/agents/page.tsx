@@ -1,5 +1,5 @@
-import { AgentsDashboard } from '@/components/agents/agents-dashboard';
+import { AgentsPageTabs } from '@/components/agents/agents-page-tabs';
 
 export default async function AgentsPage() {
-  return <AgentsDashboard deployments={[]} />;
+  return <AgentsPageTabs deployments={[]} />;
 }
