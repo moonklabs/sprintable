@@ -235,16 +235,22 @@ def make_sse_client(api_url: str, api_key: str) -> httpx.AsyncClient:
 async def _connect_once(
     client: httpx.AsyncClient,
     member_id: str,
+    last_event_id: str = "",
     on_event: _SseInternalHandler | None = None,
 ) -> None:
     """SSE 스트림에 한 번 연결해서 이벤트 수신. 스트림 종료 시 반환.
 
     `async with client.stream(...)` context manager가 response.aclose() 보장.
+    last_event_id 전달 시 서버가 해당 이벤트 이후 backfill만 반환.
     """
+    params: dict[str, str] = {"member_id": member_id}
+    if last_event_id:
+        params["last_event_id"] = last_event_id
+
     async with client.stream(
         "GET",
         "/api/v2/events/stream",
-        params={"member_id": member_id},
+        params=params,
         headers={"Accept": "text/event-stream", "Cache-Control": "no-cache"},
     ) as response:
         if response.status_code != 200:
@@ -283,8 +289,11 @@ async def start_sse_bridge(
 
     # dedup window — reconnect 시 중복 이벤트 skip (insertion-order dict)
     seen_ids: dict[str, None] = {}
+    # S6-1: 마지막 수신 event_id — 재연결 시 backfill 기준점으로 전달
+    _current_last_event_id: str = ""
 
     def _handle(event: SseEvent) -> None:
+        nonlocal _current_last_event_id
         # event_id dedup
         if event.last_event_id:
             if event.last_event_id in seen_ids:
@@ -293,6 +302,7 @@ async def start_sse_bridge(
             seen_ids[event.last_event_id] = None
             if len(seen_ids) > _SEEN_IDS_MAX:
                 del seen_ids[next(iter(seen_ids))]  # 가장 오래된 항목 제거
+            _current_last_event_id = event.last_event_id
 
         asyncio.create_task(
             relay_to_fakechat(event.event_type, event.data, api_url, api_key, port)
@@ -307,7 +317,7 @@ async def start_sse_bridge(
     try:
         while True:
             try:
-                await _connect_once(client, member_id, _handle)
+                await _connect_once(client, member_id, _current_last_event_id, _handle)
                 attempt = 0
             except Exception as exc:
                 _log(f"error: {exc}")
