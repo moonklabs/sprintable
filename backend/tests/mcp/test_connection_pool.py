@@ -85,7 +85,7 @@ async def test_no_pool_leak_after_10_reconnects():
 
     reconnect_count = 0
 
-    async def mock_connect(client, member_id, on_event=None):
+    async def mock_connect(client, member_id, last_event_id="", on_event=None):
         nonlocal reconnect_count
         reconnect_count += 1
         if reconnect_count >= 10:
