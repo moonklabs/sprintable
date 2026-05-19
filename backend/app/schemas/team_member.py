@@ -49,3 +49,7 @@ class TeamMemberResponse(BaseModel):
     created_by: uuid.UUID | None = None
     created_at: datetime
     updated_at: datetime
+    # S2-1: Presence 필드
+    last_seen_at: datetime | None = None
+    active_story_id: uuid.UUID | None = None
+    agent_status: str | None = None
