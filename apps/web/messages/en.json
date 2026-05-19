@@ -2161,15 +2161,15 @@
   "agentPerformance": {
     "loading": "Loading performance data...",
     "agentStatsTitle": "Agent Stats",
-    "agentStatsDescription": "Completed runs, total executions, and average processing time per agent.",
+    "agentStatsDescription": "Done stories, assigned stories, and average lead time per agent.",
     "velocityTitle": "Team Velocity",
     "velocityDescription": "Story points delivered per sprint (last 5 sprints).",
     "leaderboardTitle": "Leaderboard",
     "leaderboardDescription": "Agents ranked by total reward balance.",
     "noAgents": "No agents deployed yet.",
-    "completed": "Completed",
-    "totalRuns": "Total Runs",
-    "avgDuration": "Avg Time"
+    "doneStories": "Done Stories",
+    "assignedStories": "Assigned",
+    "avgLeadTime": "Avg Lead Time"
   },
   "agentPresence": {
     "title": "Agent Team",

@@ -2161,15 +2161,15 @@
   "agentPerformance": {
     "loading": "퍼포먼스 데이터 로딩 중...",
     "agentStatsTitle": "에이전트 통계",
-    "agentStatsDescription": "에이전트별 완료 실행 수, 총 실행 수, 평균 처리 시간입니다.",
+    "agentStatsDescription": "에이전트별 완료 스토리, 배정 스토리, 평균 리드타임입니다.",
     "velocityTitle": "팀 벨로시티",
     "velocityDescription": "스프린트별 완료 스토리 포인트 (최근 5 스프린트).",
     "leaderboardTitle": "리더보드",
     "leaderboardDescription": "보상 잔액 기준 에이전트 순위입니다.",
     "noAgents": "배포된 에이전트가 없습니다.",
-    "completed": "완료",
-    "totalRuns": "총 실행",
-    "avgDuration": "평균 시간"
+    "doneStories": "완료 스토리",
+    "assignedStories": "배정 스토리",
+    "avgLeadTime": "평균 리드타임"
   },
   "agentPresence": {
     "title": "에이전트 팀",
