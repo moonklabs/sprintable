@@ -30,7 +30,10 @@ from .tools.analytics import (
     get_unassigned_stories, search_stories,
 )
 from .tools.audit import ListAuditLogsInput, list_audit_logs
-from .tools.core import DashboardInput, list_team_members, my_dashboard
+from .tools.core import (
+    ClaimStoryInput, DashboardInput,
+    claim_story, list_team_members, my_dashboard, unclaim_story,
+)
 from .tools.docs import (
     CreateDocInput, DeleteDocInput, GetDocInput, ListDocsInput,
     SearchDocsInput, UpdateDocInput,
@@ -298,13 +301,19 @@ _TOOL_DEFS: list[tuple] = [
     ("sprintable_get_project_health",
      "프로젝트 전체 건강도 조회.",
      SprintableInput, get_project_health),
-    # Core (2)
+    # Core (4)
     ("sprintable_list_team_members",
      "프로젝트 팀 멤버 목록 조회.",
      SprintableInput, list_team_members),
     ("sprintable_my_dashboard",
      "팀원 대시보드 요약 조회.",
      DashboardInput, my_dashboard),
+    ("sprintable_claim_story",
+     "현재 작업 중인 스토리를 claim — active_story_id 갱신, 중복 배정 방지.",
+     ClaimStoryInput, claim_story),
+    ("sprintable_unclaim_story",
+     "작업 중인 스토리 claim 해제 — active_story_id = NULL.",
+     SprintableInput, unclaim_story),
     # Memos + Chat (10)
     ("sprintable_list_memos",
      "메모 목록 조회.",

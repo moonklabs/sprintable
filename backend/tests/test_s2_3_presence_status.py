@@ -43,6 +43,7 @@ def _mock_member(type_: str = "agent", last_seen_at=None):
     m.last_seen_at = last_seen_at
     m.active_story_id = None
     m.agent_status = None
+    m.active_story = None
     return m
 
 
