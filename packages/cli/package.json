@@ -1,0 +1,35 @@
+{
+  "name": "sprintable",
+  "version": "0.1.0",
+  "description": "Connect your AI agent to Sprintable in one command",
+  "type": "module",
+  "bin": {
+    "sprintable": "./dist/index.js"
+  },
+  "files": [
+    "dist"
+  ],
+  "scripts": {
+    "build": "tsc",
+    "dev": "tsc --watch",
+    "type-check": "tsc --noEmit",
+    "test": "vitest run"
+  },
+  "dependencies": {
+    "@inquirer/input": "^4.1.9",
+    "@inquirer/password": "^4.0.13",
+    "@inquirer/confirm": "^5.1.9",
+    "commander": "^14.0.0"
+  },
+  "devDependencies": {
+    "@types/node": "^22.0.0",
+    "typescript": "^5.7.0",
+    "vitest": "^2.0.0"
+  },
+  "engines": {
+    "node": ">=20.0.0"
+  },
+  "publishConfig": {
+    "access": "public"
+  }
+}
