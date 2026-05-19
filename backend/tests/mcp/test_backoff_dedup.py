@@ -10,7 +10,7 @@ from sprintable_mcp.sse_bridge import (
     _BASE_DELAY,
     _JITTER_FACTOR,
     _MAX_DELAY,
-    _SEEN_IDS_MAX,
+    SeenIdsCache,
     SseEvent,
     start_sse_bridge,
 )
@@ -54,22 +54,21 @@ async def test_dedup_passes_new_event_id():
 
 @pytest.mark.asyncio
 async def test_dedup_evicts_oldest_when_full():
-    """seen_ids가 SEEN_IDS_MAX 초과 시 가장 오래된 항목 제거."""
-    seen_ids: dict[str, None] = {}
-    for i in range(_SEEN_IDS_MAX):
-        seen_ids[f"eid-{i}"] = None
+    """SeenIdsCache: max_size 초과 시 가장 오래된 항목 LRU eviction."""
+    max_size = 10
+    cache = SeenIdsCache(max_size=max_size, ttl_seconds=3600)
+    for i in range(max_size):
+        cache.add(f"eid-{i}")
 
-    assert len(seen_ids) == _SEEN_IDS_MAX
+    assert len(cache) == max_size
 
-    # 새 항목 추가 → 가장 오래된 eid-0 제거
-    new_id = f"eid-{_SEEN_IDS_MAX}"
-    seen_ids[new_id] = None
-    if len(seen_ids) > _SEEN_IDS_MAX:
-        del seen_ids[next(iter(seen_ids))]
+    # 새 항목 추가 → "eid-0"(LRU 최고령) 제거
+    new_id = f"eid-{max_size}"
+    cache.add(new_id)
 
-    assert len(seen_ids) == _SEEN_IDS_MAX
-    assert "eid-0" not in seen_ids
-    assert new_id in seen_ids
+    assert len(cache) == max_size
+    assert "eid-0" not in cache
+    assert new_id in cache
 
 
 @pytest.mark.asyncio

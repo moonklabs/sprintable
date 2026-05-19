@@ -8,6 +8,7 @@ import asyncio
 import json
 import sys
 import time
+from collections import OrderedDict
 from dataclasses import dataclass
 from random import randint, uniform
 from typing import TYPE_CHECKING, Any, Callable
@@ -25,10 +26,58 @@ _SseInternalHandler = Callable[["SseEvent"], None]
 _BASE_DELAY = 1.0
 _MAX_DELAY = 10.0
 _JITTER_FACTOR = 0.5    # wait * uniform(0, 0.5) jitter
-_SEEN_IDS_MAX = 1000    # dedup window 크기
 
 # relay 대상 이벤트 타입
 _RELAY_EVENT_TYPES = frozenset(["conversation:message", "conversation:mention"])
+
+
+# ── SeenIdsCache: LRU + TTL dedup 캐시 (S6-2) ────────────────────────────────
+
+class SeenIdsCache:
+    """LRU + TTL 기반 SSE dedup 캐시.
+
+    - max_size 초과: LRU eviction (가장 오래 미사용 항목 제거)
+    - TTL 만료: __contains__ 접근 시 lazy 제거 + add() 시 배치 정리
+    - eviction 발동 시 DEBUG 로그 출력
+    """
+
+    def __init__(self, max_size: int, ttl_seconds: float) -> None:
+        self._max_size = max_size
+        self._ttl = ttl_seconds
+        self._store: OrderedDict[str, float] = OrderedDict()
+
+    def __contains__(self, event_id: str) -> bool:
+        if event_id not in self._store:
+            return False
+        added_at = self._store[event_id]
+        if time.monotonic() - added_at > self._ttl:
+            del self._store[event_id]
+            _log(f"[debug] ttl-evict event_id={event_id}")
+            return False
+        self._store.move_to_end(event_id)
+        return True
+
+    def add(self, event_id: str) -> None:
+        """event_id 추가. 이미 존재하면 LRU 갱신."""
+        if event_id in self._store:
+            self._store.move_to_end(event_id)
+            return
+        self._evict_expired()
+        self._store[event_id] = time.monotonic()
+        while len(self._store) > self._max_size:
+            oldest_id, _ = self._store.popitem(last=False)
+            _log(f"[debug] lru-evict max_size={self._max_size} event_id={oldest_id}")
+
+    def _evict_expired(self) -> None:
+        now = time.monotonic()
+        expired = [k for k, v in self._store.items() if now - v > self._ttl]
+        for k in expired:
+            del self._store[k]
+        if expired:
+            _log(f"[debug] ttl-batch-evict count={len(expired)}")
+
+    def __len__(self) -> int:
+        return len(self._store)
 
 
 def _log(msg: str) -> None:
@@ -279,7 +328,7 @@ async def start_sse_bridge(
     """SSE 브릿지 시작. 연결 실패 시 에러 로그 + jitter exponential backoff 재연결.
 
     - backoff: BASE * 2^attempt (max MAX_DELAY) + uniform(0, wait * JITTER_FACTOR)
-    - dedup: last_event_id 기반 최근 SEEN_IDS_MAX 건 중복 skip
+    - dedup: SeenIdsCache (LRU + TTL) 기반 중복 skip
     - MCP stdio 서버와 동일 이벤트 루프에서 asyncio.create_task()로 실행
     - graceful shutdown: CancelledError → finally: client.aclose()
     """
@@ -287,8 +336,11 @@ async def start_sse_bridge(
     client = make_sse_client(api_url, api_key)
     port = settings.fakechat_port
 
-    # dedup window — reconnect 시 중복 이벤트 skip (insertion-order dict)
-    seen_ids: dict[str, None] = {}
+    # S6-2: LRU + TTL dedup 캐시 (환경변수 기반 설정)
+    seen_ids = SeenIdsCache(
+        max_size=settings.sse_seen_ids_max_size,
+        ttl_seconds=settings.sse_seen_ids_ttl_seconds,
+    )
     # S6-1: 마지막 수신 event_id — 재연결 시 backfill 기준점으로 전달
     _current_last_event_id: str = ""
 
@@ -299,9 +351,7 @@ async def start_sse_bridge(
             if event.last_event_id in seen_ids:
                 _log(f"dedup: skip event_id={event.last_event_id}")
                 return
-            seen_ids[event.last_event_id] = None
-            if len(seen_ids) > _SEEN_IDS_MAX:
-                del seen_ids[next(iter(seen_ids))]  # 가장 오래된 항목 제거
+            seen_ids.add(event.last_event_id)
             _current_last_event_id = event.last_event_id
 
         asyncio.create_task(
