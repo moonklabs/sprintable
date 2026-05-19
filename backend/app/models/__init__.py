@@ -28,6 +28,7 @@ from app.models.reward import RewardLedger
 from app.models.login_audit_log import LoginAuditLog
 from app.models.standup import StandupEntry, StandupFeedback
 from app.models.team import TeamMember
+from app.models.file_lock import FileLock
 
 __all__ = [
     "AgentAuditLog",

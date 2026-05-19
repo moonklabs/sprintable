@@ -31,8 +31,9 @@ from .tools.analytics import (
 )
 from .tools.audit import ListAuditLogsInput, list_audit_logs
 from .tools.core import (
-    ClaimStoryInput, DashboardInput,
-    claim_story, get_workflow_guide, list_team_members, my_dashboard, unclaim_story,
+    ClaimStoryInput, DashboardInput, LockFilesInput, UnlockFilesInput,
+    claim_story, get_workflow_guide, list_team_members, lock_files,
+    my_dashboard, unclaim_story, unlock_files,
 )
 from .tools.docs import (
     CreateDocInput, DeleteDocInput, GetDocInput, ListDocsInput,
@@ -317,6 +318,12 @@ _TOOL_DEFS: list[tuple] = [
     ("sprintable_get_workflow_guide",
      "현재 프로젝트 워크플로우 가이드 텍스트 반환 — 에이전트 system prompt 주입용.",
      SprintableInput, get_workflow_guide),
+    ("sprintable_lock_files",
+     "파일 작업 시작 선언 — 동시 수정 충돌 경고 반환. 작업 완료 후 반드시 unlock_files 호출.",
+     LockFilesInput, lock_files),
+    ("sprintable_unlock_files",
+     "파일 작업 완료 선언 — lock 해제.",
+     UnlockFilesInput, unlock_files),
     # Memos + Chat (10)
     ("sprintable_list_memos",
      "메모 목록 조회.",

@@ -229,12 +229,15 @@ async def unclaim_story(
     session: AsyncSession = Depends(get_db),
     org_id: uuid.UUID = Depends(get_verified_org_id),
 ) -> dict:
-    """AC2: active_story_id = NULL."""
+    """AC2: active_story_id = NULL. AC7: file lock 자동 해제."""
     repo = TeamMemberRepository(session, org_id)
     member = await repo.get(id)
     if member is None:
         raise HTTPException(status_code=404, detail="Team member not found")
     await repo.update(id, active_story_id=None)
+    # AC7: unclaim 시 해당 멤버의 모든 file lock 해제
+    from app.routers.file_locks import release_all_file_locks
+    await release_all_file_locks(session, id)
     return {"unclaimed": True}
 
 
