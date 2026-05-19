@@ -60,6 +60,19 @@ _BACKFILL_THRESHOLD_SECONDS: int = int(_os.getenv("BACKFILL_THRESHOLD_SECONDS", 
 _BACKFILL_MAX_EVENTS: int = int(_os.getenv("BACKFILL_MAX_EVENTS", "50"))
 
 
+def _compute_backfill_mode(ref_ts: "datetime | None", now: "datetime") -> tuple[bool, int]:
+    """(exceed_threshold, limit) — threshold 초과 여부와 사용할 LIMIT 반환.
+
+    exceed_threshold=True  → DESC 최신 N건 조회
+    exceed_threshold=False → ASC 전량 조회 (max 100)
+    """
+    if ref_ts is None:
+        return True, _BACKFILL_MAX_EVENTS
+    _ref = ref_ts if ref_ts.tzinfo else ref_ts.replace(tzinfo=timezone.utc)
+    exceed = (now - _ref) > timedelta(seconds=_BACKFILL_THRESHOLD_SECONDS)
+    return exceed, (_BACKFILL_MAX_EVENTS if exceed else 100)
+
+
 def _push_to_agent(member_id: str, payload: dict) -> bool:
     """연결 중인 에이전트 모든 큐에 SSE 페이로드 전송. True=1개 이상 전달, False=미연결."""
     queues = _agent_connections.get(member_id)
@@ -214,7 +227,6 @@ async def agent_event_stream(
             # S6-1: pending 이벤트 백필 — threshold 기반 볼륨 제어
             async with async_session_factory() as db:
                 now = datetime.now(timezone.utc)
-                threshold = timedelta(seconds=_BACKFILL_THRESHOLD_SECONDS)
 
                 # 기준 시각 결정: last_event_id > since_timestamp > None 우선순위
                 ref_ts: datetime | None = since_timestamp
@@ -226,8 +238,9 @@ async def agent_event_stream(
                     if ts is not None:
                         ref_ts = ts if ts.tzinfo else ts.replace(tzinfo=timezone.utc)
 
-                _ref = (ref_ts if ref_ts is None or ref_ts.tzinfo else ref_ts.replace(tzinfo=timezone.utc))
-                if _ref is None or (now - _ref) > threshold:
+                _ref = ref_ts if ref_ts is None or ref_ts.tzinfo else ref_ts.replace(tzinfo=timezone.utc)
+                exceed, limit = _compute_backfill_mode(_ref, now)
+                if exceed:
                     # threshold 초과: 최근 N건만 (최신순 → 역순 전달로 시간 순서 보존)
                     result = await db.execute(
                         select(Event)
@@ -237,7 +250,7 @@ async def agent_event_stream(
                             Event.status == "pending",
                         )
                         .order_by(Event.created_at.desc())
-                        .limit(_BACKFILL_MAX_EVENTS)
+                        .limit(limit)
                     )
                     pending_events = list(reversed(result.scalars().all()))
                 else:
@@ -248,7 +261,16 @@ async def agent_event_stream(
                         Event.status == "pending",
                     ]
                     if _ref is not None:
-                        where_clauses.append(Event.created_at > _ref)
+                        if last_event_id is not None:
+                            # 복합 커서: 동일 타임스탬프 이벤트 누락 방지
+                            where_clauses.append(
+                                or_(
+                                    Event.created_at > _ref,
+                                    and_(Event.created_at == _ref, Event.id > last_event_id),
+                                )
+                            )
+                        else:
+                            where_clauses.append(Event.created_at > _ref)
                     result = await db.execute(
                         select(Event)
                         .where(*where_clauses)
@@ -293,8 +315,9 @@ async def agent_event_stream(
                                 await db.commit()
                         except Exception:
                             pass
-                    eid_field = f"id: {eid}\n" if eid else ""
-                    yield f"event: {event_type}\n{eid_field}data: {json.dumps(event_data)}\n\n"
+                    # event_id 없는 경로(chats direct push 등)도 id: 보장 — 재연결 추적 약화 방지
+                    _live_id = eid or str(uuid.uuid4())
+                    yield f"event: {event_type}\nid: {_live_id}\ndata: {json.dumps(event_data)}\n\n"
                 except asyncio.TimeoutError:
                     # S20: heartbeat 후 즉시 disconnect 체크 — dead connection 조기 정리
                     yield "event: heartbeat\ndata: {}\n\n"
