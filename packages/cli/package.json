@@ -19,7 +19,8 @@
     "@inquirer/input": "^4.1.9",
     "@inquirer/password": "^4.0.13",
     "@inquirer/confirm": "^5.1.9",
-    "commander": "^14.0.0"
+    "commander": "^14.0.0",
+    "@inquirer/select": "^4.0.9"
   },
   "devDependencies": {
     "@types/node": "^22.0.0",
