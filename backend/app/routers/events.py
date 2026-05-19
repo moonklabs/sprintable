@@ -55,6 +55,10 @@ import os as _os
 _MAX_SSE_CONNECTIONS: int = int(_os.getenv("MAX_SSE_CONNECTIONS", "100"))
 _sse_connection_count: int = 0
 
+# ─── S6-1: Backfill 볼륨 제어 ─────────────────────────────────────────────────
+_BACKFILL_THRESHOLD_SECONDS: int = int(_os.getenv("BACKFILL_THRESHOLD_SECONDS", "300"))
+_BACKFILL_MAX_EVENTS: int = int(_os.getenv("BACKFILL_MAX_EVENTS", "50"))
+
 
 def _push_to_agent(member_id: str, payload: dict) -> bool:
     """연결 중인 에이전트 모든 큐에 SSE 페이로드 전송. True=1개 이상 전달, False=미연결."""
@@ -169,6 +173,8 @@ async def agent_event_stream(
     request: Request,
     member_id: uuid.UUID = Query(...),
     org_id: uuid.UUID = Depends(get_verified_org_id),
+    since_timestamp: datetime | None = Query(default=None),
+    last_event_id: uuid.UUID | None = Query(default=None),
 ):
     """GET /api/v2/events/stream?member_id={id} — 에이전트 전용 SSE 스트림.
 
@@ -205,29 +211,62 @@ async def agent_event_stream(
             # 즉시 heartbeat → HTTP 응답 헤더 즉시 반환 (대량 백필 전 hang 방지)
             yield "event: heartbeat\ndata: {}\n\n"
 
-            # 연결 즉시 pending 이벤트 백필 전달 — 최근 100건 LIMIT (무한 조회 방지)
+            # S6-1: pending 이벤트 백필 — threshold 기반 볼륨 제어
             async with async_session_factory() as db:
-                result = await db.execute(
-                    select(Event)
-                    .where(
+                now = datetime.now(timezone.utc)
+                threshold = timedelta(seconds=_BACKFILL_THRESHOLD_SECONDS)
+
+                # 기준 시각 결정: last_event_id > since_timestamp > None 우선순위
+                ref_ts: datetime | None = since_timestamp
+                if last_event_id is not None:
+                    ts_row = await db.execute(
+                        select(Event.created_at).where(Event.id == last_event_id)
+                    )
+                    ts = ts_row.scalar_one_or_none()
+                    if ts is not None:
+                        ref_ts = ts if ts.tzinfo else ts.replace(tzinfo=timezone.utc)
+
+                _ref = (ref_ts if ref_ts is None or ref_ts.tzinfo else ref_ts.replace(tzinfo=timezone.utc))
+                if _ref is None or (now - _ref) > threshold:
+                    # threshold 초과: 최근 N건만 (최신순 → 역순 전달로 시간 순서 보존)
+                    result = await db.execute(
+                        select(Event)
+                        .where(
+                            Event.org_id == org_id,
+                            Event.recipient_id == member_id,
+                            Event.status == "pending",
+                        )
+                        .order_by(Event.created_at.desc())
+                        .limit(_BACKFILL_MAX_EVENTS)
+                    )
+                    pending_events = list(reversed(result.scalars().all()))
+                else:
+                    # threshold 이내: ref_ts 이후 전량 (최대 100건)
+                    where_clauses: list[Any] = [
                         Event.org_id == org_id,
                         Event.recipient_id == member_id,
                         Event.status == "pending",
+                    ]
+                    if _ref is not None:
+                        where_clauses.append(Event.created_at > _ref)
+                    result = await db.execute(
+                        select(Event)
+                        .where(*where_clauses)
+                        .order_by(Event.created_at.asc())
+                        .limit(100)
                     )
-                    .order_by(Event.created_at.asc())
-                    .limit(100)
-                )
-                pending_events = result.scalars().all()
+                    pending_events = result.scalars().all()
+
                 for i in range(0, len(pending_events), _SSE_BATCH_SIZE):
                     batch = pending_events[i : i + _SSE_BATCH_SIZE]
                     batch_data = [_event_to_payload(evt) for evt in batch]
                     # delivered 마킹 먼저 commit → 재연결 시 백필 중복 방지
                     for evt in batch:
                         evt.status = "delivered"
-                        evt.delivered_at = datetime.now(timezone.utc)
+                        evt.delivered_at = now
                     await db.commit()
                     for data, evt in zip(batch_data, batch):
-                        yield f"event: {evt.event_type}\ndata: {json.dumps(data)}\n\n"
+                        yield f"event: {evt.event_type}\nid: {evt.id}\ndata: {json.dumps(data)}\n\n"
 
             # 신규 이벤트 리슨 — 대기 구간에서 커넥션 미점유, 이벤트마다 개별 세션
             while not await request.is_disconnected():
@@ -254,7 +293,8 @@ async def agent_event_stream(
                                 await db.commit()
                         except Exception:
                             pass
-                    yield f"event: {event_type}\ndata: {json.dumps(event_data)}\n\n"
+                    eid_field = f"id: {eid}\n" if eid else ""
+                    yield f"event: {event_type}\n{eid_field}data: {json.dumps(event_data)}\n\n"
                 except asyncio.TimeoutError:
                     # S20: heartbeat 후 즉시 disconnect 체크 — dead connection 조기 정리
                     yield "event: heartbeat\ndata: {}\n\n"
