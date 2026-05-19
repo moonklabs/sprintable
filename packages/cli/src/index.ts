@@ -1,6 +1,7 @@
 #!/usr/bin/env node
 import { Command, Option } from "commander";
 import { connectCommand } from "./commands/connect.js";
+import { SUPPORTED_AGENTS } from "./adapters/registry.js";
 
 const program = new Command();
 
@@ -14,7 +15,7 @@ program
   .description("Sprintable MCP 서버를 에이전트 설정 파일에 등록합니다")
   .addOption(
     new Option("--agent <type>", "에이전트 타입 (기본: claude-code)")
-      .choices(["claude-code", "cursor", "windsurf"])
+      .choices(SUPPORTED_AGENTS)
       .default("claude-code")
   )
   .action(async (opts: { agent?: string }) => {
