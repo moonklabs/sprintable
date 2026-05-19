@@ -4,10 +4,15 @@
   "description": "Connect your AI agent to Sprintable in one command",
   "type": "module",
   "bin": {
-    "sprintable": "./dist/index.js"
+    "sprintable": "dist/index.js"
   },
   "files": [
-    "dist"
+    "dist",
+    "README.md",
+    "!dist/**/*.test.js",
+    "!dist/**/*.test.d.ts",
+    "!dist/**/*.test.js.map",
+    "!dist/**/*.test.d.ts.map"
   ],
   "scripts": {
     "build": "tsc",

@@ -1,0 +1,6 @@
+src/
+*.test.ts
+*.test.js
+*.test.d.ts
+smoke-test.sh
+tsconfig.json
