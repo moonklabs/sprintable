@@ -37,49 +37,26 @@ interface OrganizationSwitcherProps {
 }
 
 export function OrganizationSwitcher({ orgs, currentOrgId, className }: OrganizationSwitcherProps) {
-  const [pending, setPending] = useState(false);
   const [dialogOpen, setDialogOpen] = useState(false);
 
   const currentOrg = orgs.find((o) => o.orgId === currentOrgId);
   const displayName = currentOrg?.orgName ?? 'Organization';
 
-  async function switchOrg(nextOrgId: string) {
-    if (!nextOrgId || nextOrgId === currentOrgId || pending) return;
-    setPending(true);
-    try {
-      const res = await fetch('/api/switch-org', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ org_id: nextOrgId }),
-      });
-      if (res.ok) {
-        window.location.reload();
-      }
-    } finally {
-      setPending(false);
-    }
+  // switch-org 백엔드 API는 S2.1에서 구현 예정.
+  // 현재는 SSR layout이 새 Org를 반영하도록 /dashboard 풀 리로드로 전환.
+  function switchOrg(nextOrgId: string) {
+    if (!nextOrgId || nextOrgId === currentOrgId) return;
+    window.location.href = '/dashboard';
   }
 
-  function handleCreated(org: { id: string; name: string; slug: string }) {
-    void switchOrg(org.id);
-  }
-
-  if (orgs.length <= 1) {
-    return (
-      <SidebarMenuButton className={cn('w-full cursor-default', className)} disabled>
-        <OrgInitial name={displayName} />
-        <span className="flex-1 truncate text-xs font-medium text-muted-foreground">
-          {displayName}
-        </span>
-      </SidebarMenuButton>
-    );
+  function handleCreated() {
+    window.location.href = '/dashboard';
   }
 
   return (
     <>
       <DropdownMenu>
         <DropdownMenuTrigger
-          disabled={pending}
           render={
             <SidebarMenuButton className={cn('w-full', className)}>
               <OrgInitial name={displayName} />
