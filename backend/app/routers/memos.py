@@ -6,7 +6,8 @@ import logging
 
 import httpx
 from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Query
-from sqlalchemy import select
+from sqlalchemy import func, select
+from sqlalchemy import update as sa_update
 from sqlalchemy.ext.asyncio import AsyncSession
 
 logger = logging.getLogger(__name__)
@@ -463,20 +464,55 @@ async def create_memo(
     if body.assigned_to_ids:
         participant_ids.update(body.assigned_to_ids)
 
-    conv_id = uuid.uuid4()
-    conv = Conversation(
-        id=conv_id,
-        project_id=body.project_id,
-        org_id=org_id,
-        type="group",
-        title=body.title,
-        created_by=body.created_by,
-        status="open",
-    )
-    session.add(conv)
-    for pid in participant_ids:
-        session.add(ConversationParticipant(conversation_id=conv_id, member_id=pid))
-    await session.flush()
+    # find-or-create: 동일 participant 집합의 기존 open conversation 재사용
+    existing_conv: Conversation | None = None
+    if participant_ids:
+        ref_pid = next(iter(participant_ids))
+        candidate_conv_ids = (await session.execute(
+            select(ConversationParticipant.conversation_id)
+            .join(Conversation, Conversation.id == ConversationParticipant.conversation_id)
+            .where(
+                ConversationParticipant.member_id == ref_pid,
+                Conversation.org_id == org_id,
+                Conversation.project_id == body.project_id,
+                Conversation.type == "group",
+                Conversation.status == "open",
+            )
+        )).scalars().all()
+
+        for cid in candidate_conv_ids:
+            members = set((await session.execute(
+                select(ConversationParticipant.member_id)
+                .where(ConversationParticipant.conversation_id == cid)
+            )).scalars().all())
+            if members == participant_ids:
+                existing_conv = (await session.execute(
+                    select(Conversation).where(Conversation.id == cid)
+                )).scalar_one_or_none()
+                break
+
+    if existing_conv is not None:
+        conv = existing_conv
+        await session.execute(
+            sa_update(Conversation)
+            .where(Conversation.id == conv.id)
+            .values(updated_at=func.now())
+        )
+    else:
+        conv_id = uuid.uuid4()
+        conv = Conversation(
+            id=conv_id,
+            project_id=body.project_id,
+            org_id=org_id,
+            type="group",
+            title=body.title,
+            created_by=body.created_by,
+            status="open",
+        )
+        session.add(conv)
+        for pid in participant_ids:
+            session.add(ConversationParticipant(conversation_id=conv_id, member_id=pid))
+        await session.flush()
 
     # AC2/AC3: entity_links + title → root message metadata 보존 (AC6: link 개수 손실 방지)
     parsed_embeds = _parse_entity_embeds(body.content or "")
