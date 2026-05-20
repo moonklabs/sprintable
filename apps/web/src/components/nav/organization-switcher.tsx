@@ -37,16 +37,27 @@ interface OrganizationSwitcherProps {
 }
 
 export function OrganizationSwitcher({ orgs, currentOrgId, className }: OrganizationSwitcherProps) {
+  const [pending, setPending] = useState(false);
   const [dialogOpen, setDialogOpen] = useState(false);
 
   const currentOrg = orgs.find((o) => o.orgId === currentOrgId);
   const displayName = currentOrg?.orgName ?? 'Organization';
 
-  // switch-org 백엔드 API는 S2.1에서 구현 예정.
-  // 현재는 SSR layout이 새 Org를 반영하도록 /dashboard 풀 리로드로 전환.
-  function switchOrg(nextOrgId: string) {
-    if (!nextOrgId || nextOrgId === currentOrgId) return;
-    window.location.href = '/dashboard';
+  async function switchOrg(nextOrgId: string) {
+    if (!nextOrgId || nextOrgId === currentOrgId || pending) return;
+    setPending(true);
+    try {
+      const res = await fetch('/api/switch-org', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ org_id: nextOrgId }),
+      });
+      if (res.ok) {
+        window.location.href = '/dashboard';
+      }
+    } finally {
+      setPending(false);
+    }
   }
 
   function handleCreated(orgId: string) {
@@ -57,6 +68,7 @@ export function OrganizationSwitcher({ orgs, currentOrgId, className }: Organiza
     <>
       <DropdownMenu>
         <DropdownMenuTrigger
+          disabled={pending}
           render={
             <SidebarMenuButton className={cn('w-full', className)}>
               <OrgInitial name={displayName} />
@@ -75,6 +87,7 @@ export function OrganizationSwitcher({ orgs, currentOrgId, className }: Organiza
             {orgs.map((org) => (
               <DropdownMenuItem
                 key={org.orgId}
+                disabled={pending}
                 onClick={() => void switchOrg(org.orgId)}
               >
                 <OrgInitial name={org.orgName} />
