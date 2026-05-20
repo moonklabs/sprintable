@@ -430,15 +430,16 @@ async def list_messages(
 
     sender = await _resolve_member(auth, org_id, db, project_id=conv_project_id)
 
-    # 참여자 검증
-    participant = (await db.execute(
-        select(ConversationParticipant.id).where(
-            ConversationParticipant.conversation_id == conversation_id,
-            ConversationParticipant.member_id == sender.id,
-        )
-    )).scalar_one_or_none()
-    if participant is None:
-        raise HTTPException(status_code=403, detail="Not a participant")
+    # 참여자 검증 — owner/admin은 에이전트 대화 열람 허용
+    if sender.role not in ("owner", "admin"):
+        participant = (await db.execute(
+            select(ConversationParticipant.id).where(
+                ConversationParticipant.conversation_id == conversation_id,
+                ConversationParticipant.member_id == sender.id,
+            )
+        )).scalar_one_or_none()
+        if participant is None:
+            raise HTTPException(status_code=403, detail="Not a participant")
 
     if thread_id is None:
         thread_filter = ConversationMessage.thread_id.is_(None)
