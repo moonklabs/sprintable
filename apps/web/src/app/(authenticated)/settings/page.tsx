@@ -350,14 +350,15 @@ export default function SettingsPage() {
         setCurrentProjectId(projectId);
         setOrgId(orgId);
 
-        // org 상세 정보 로드
+        // org 상세 정보 로드 — list API에서 orgId로 필터 (단건 API 미구현)
         if (orgId) {
-          const orgRes = await fetch(`/api/organizations/${orgId}`).catch(() => null);
-          if (orgRes?.ok) {
-            const orgJson = await orgRes.json() as { data?: { id: string; name: string; slug: string; plan?: string; role?: string } };
-            if (orgJson.data) {
-              setOrgInfo(orgJson.data);
-              setEditOrgName(orgJson.data.name);
+          const orgListRes = await fetch('/api/organizations').catch(() => null);
+          if (orgListRes?.ok) {
+            const orgListJson = await orgListRes.json() as { data?: Array<{ id: string; name: string; slug: string; plan?: string; role?: string }> };
+            const found = (orgListJson.data ?? []).find((o) => o.id === orgId);
+            if (found) {
+              setOrgInfo(found);
+              setEditOrgName(found.name);
             }
           }
         }
@@ -957,7 +958,7 @@ export default function SettingsPage() {
                       <div className="space-y-4">
                         <div className="space-y-1.5">
                           <label className="text-sm font-medium text-foreground">이름</label>
-                          {isAdmin ? (
+                          {(orgInfo.role === 'owner' || orgInfo.role === 'admin') ? (
                             <div className="flex items-center gap-2">
                               <input
                                 className="flex-1 rounded-md border border-input bg-background px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-ring"
