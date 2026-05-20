@@ -91,3 +91,24 @@ def test_list_org_members_filters_deleted():
     source = inspect.getsource(org_members.list_org_members)
     assert "deleted_at" in source
     assert "NULL" in source or "null" in source.lower()
+
+
+# ─── BUG-1: GET /api/v2/organizations/{id} 엔드포인트 ────────────────────────
+
+def test_get_organization_endpoint_exists():
+    """GET /{id} 엔드포인트 존재."""
+    from app.routers import organizations
+    methods_paths = [(list(r.methods or []), r.path) for r in organizations.router.routes]
+    has_get_by_id = any(
+        "GET" in m and "{id}" in p and "impact" not in p
+        for m, p in methods_paths
+    )
+    assert has_get_by_id
+
+
+def test_get_organization_checks_membership():
+    """get_organization 소스에 membership 확인 로직 존재."""
+    from app.routers import organizations
+    source = inspect.getsource(organizations.get_organization)
+    assert "get_member_role" in source
+    assert "404" in source

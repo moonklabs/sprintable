@@ -75,6 +75,22 @@ async def create_organization(
     return OrganizationResponse.model_validate(org)
 
 
+@router.get("/{id}", response_model=OrganizationResponse)
+async def get_organization(
+    id: uuid.UUID,
+    auth: AuthContext = Depends(get_current_user),
+    repo: OrganizationRepository = Depends(_get_repo),
+) -> OrganizationResponse:
+    """단일 Organization 조회 — 소속 멤버만."""
+    role = await repo.get_member_role(org_id=id, user_id=uuid.UUID(auth.user_id))
+    if role is None:
+        raise HTTPException(status_code=404, detail="Organization not found")
+    org = await repo.get(id)
+    if org is None:
+        raise HTTPException(status_code=404, detail="Organization not found")
+    return OrganizationResponse.model_validate(org)
+
+
 @router.patch("/{id}", response_model=OrganizationResponse)
 async def update_organization(
     id: uuid.UUID,
