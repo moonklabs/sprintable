@@ -215,11 +215,13 @@ def test_switch_org_endpoint_returns_project_id_in_source():
 # ─── AC6: org_id fallback ────────────────────────────────────────────────────
 
 def test_switch_org_has_org_id_fallback_in_source():
-    """team_member 없는 경우에도 org_id fallback 처리 소스 존재."""
+    """team_member is None 조건으로 org_id 강제 덮어쓰기 (old org_id 오염 방지)."""
     import inspect
     from app.routers import auth as auth_module
     source = inspect.getsource(auth_module.switch_organization)
-    assert 'app_metadata["org_id"]' in source or "org_id" in source
+    # 반드시 team_member is None 조건으로 org_id를 직접 설정해야 함
+    assert "team_member is None" in source
+    assert 'app_metadata["org_id"] = str(body.org_id)' in source
 
 
 # ─── Schema 검증 ─────────────────────────────────────────────────────────────

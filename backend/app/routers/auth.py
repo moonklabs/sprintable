@@ -1073,8 +1073,9 @@ async def switch_organization(
 
     # 새 토큰 발급 — _build_app_metadata가 last_project_id 기준으로 org_id 반영
     app_metadata = await _build_app_metadata(user, session)
-    # team_member 없이 org_id만 있는 경우 (org 가입 후 프로젝트 미배정) fallback
-    if not app_metadata.get("org_id"):
+    # team_member 없는 경우(org 가입 후 프로젝트 미배정): _build_app_metadata는
+    # 이전 last_project_id 기준으로 old org_id를 반환할 수 있으므로 무조건 덮어씀
+    if team_member is None:
         app_metadata["org_id"] = str(body.org_id)
 
     tokens = create_tokens(str(user.id), email=user.email, app_metadata=app_metadata)
