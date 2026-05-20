@@ -166,6 +166,10 @@ export function OnboardingForm({ initialStep, initialOrgId }: OnboardingFormProp
       body: JSON.stringify({ project_id: project.id }),
     }).catch(() => null);
 
+    if (initialStep === 'project') {
+      window.location.href = '/dashboard';
+      return;
+    }
     setStep('agent');
     setLoading(false);
   };
