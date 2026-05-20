@@ -60,11 +60,18 @@ export function OnboardingForm() {
     setOrgSlug(
       name
         .toLowerCase()
-        .replace(/[^a-z0-9가-힣\s-]/g, '')
+        .replace(/[^a-z0-9\s-]/g, '')
         .replace(/\s+/g, '-')
+        .replace(/-+/g, '-')
         .slice(0, 50),
     );
   };
+
+  const handleOrgSlugChange = (value: string) => {
+    setOrgSlug(value.toLowerCase().replace(/[^a-z0-9-]/g, '').slice(0, 50));
+  };
+
+  const slugValid = /^[a-z0-9][a-z0-9-]{0,48}[a-z0-9]$|^[a-z0-9]$/.test(orgSlug);
 
   const handleCopy = async (text: string, key: string) => {
     try {
@@ -261,15 +268,19 @@ export function OnboardingForm() {
               <input
                 type="text"
                 value={orgSlug}
-                onChange={(e) => setOrgSlug(e.target.value)}
+                onChange={(e) => handleOrgSlugChange(e.target.value)}
                 placeholder={t('slugPlaceholder')}
                 className="mt-1 w-full rounded-lg border border-gray-300 px-3 py-2 text-sm focus:border-blue-500 focus:outline-none focus:ring-1 focus:ring-blue-500"
               />
-              <p className="mt-1 text-xs text-gray-400">sprintable.app/{orgSlug || '...'}</p>
+              {orgSlug && !slugValid ? (
+                <p className="mt-1 text-xs text-red-500">영소문자, 숫자, 하이픈만 사용 가능합니다</p>
+              ) : (
+                <p className="mt-1 text-xs text-gray-400">sprintable.app/{orgSlug || '...'}</p>
+              )}
             </div>
             <button
               onClick={handleCreateOrg}
-              disabled={!orgName.trim() || !orgSlug.trim() || loading}
+              disabled={!orgName.trim() || !orgSlug.trim() || !slugValid || loading}
               className="w-full rounded-lg bg-blue-600 px-4 py-2 text-sm font-medium text-white transition hover:bg-blue-700 disabled:opacity-50"
             >
               {loading ? t('creating') : t('createOrg')}
