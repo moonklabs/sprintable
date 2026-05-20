@@ -8,7 +8,7 @@ from datetime import datetime, timezone
 
 from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Query
 from pydantic import BaseModel
-from sqlalchemy import and_, select, update
+from sqlalchemy import and_, func, select, update
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -311,6 +311,8 @@ async def create_conversation(
 async def list_conversations(
     project_id: uuid.UUID = Query(...),
     include_agent_conversations: bool = Query(default=False),
+    limit: int = Query(default=30, ge=1, le=100),
+    offset: int = Query(default=0, ge=0),
     db: AsyncSession = Depends(get_db),
     auth: AuthContext = Depends(get_current_user),
     org_id: uuid.UUID = Depends(get_verified_org_id),
@@ -349,12 +351,22 @@ async def list_conversations(
             conv_ids.update(r[0] for r in agent_conv_result.all())
 
     if not conv_ids:
-        return {"data": []}
+        return {"data": [], "total": 0, "limit": limit, "offset": offset}
+
+    conv_filter = (
+        Conversation.id.in_(conv_ids),
+        Conversation.org_id == org_id,
+        Conversation.project_id == project_id,
+    )
+    total = (await db.execute(
+        select(func.count()).select_from(Conversation).where(*conv_filter)
+    )).scalar_one()
 
     convs = (await db.execute(
         select(Conversation)
-        .where(Conversation.id.in_(conv_ids), Conversation.org_id == org_id, Conversation.project_id == project_id)
+        .where(*conv_filter)
         .order_by(Conversation.updated_at.desc())
+        .limit(limit).offset(offset)
     )).scalars().all()
 
     # participants 배치 조회 (N+1 방지)
@@ -404,7 +416,7 @@ async def list_conversations(
             "updated_at": conv.updated_at.isoformat(),
         })
 
-    return {"data": result}
+    return {"data": result, "total": total, "limit": limit, "offset": offset}
 
 
 @router.get("/{conversation_id}/messages")
