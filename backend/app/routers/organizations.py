@@ -8,13 +8,26 @@ from app.dependencies.auth import AuthContext, get_current_user
 from app.dependencies.database import get_db
 from app.models.user import User
 from app.repositories.organization import OrganizationRepository
-from app.schemas.organization import CreateOrganization, OrganizationResponse
+from app.schemas.organization import CreateOrganization, MyOrganizationResponse, OrganizationResponse
 
 router = APIRouter(prefix="/api/v2/organizations", tags=["organizations"])
 
 
 def _get_repo(session: AsyncSession = Depends(get_db)) -> OrganizationRepository:
     return OrganizationRepository(session)
+
+
+@router.get("", response_model=list[MyOrganizationResponse])
+async def list_my_organizations(
+    auth: AuthContext = Depends(get_current_user),
+    repo: OrganizationRepository = Depends(_get_repo),
+) -> list[MyOrganizationResponse]:
+    """인증된 사용자가 속한 Organization 목록 조회."""
+    items = await repo.list_for_user(uuid.UUID(auth.user_id))
+    return [
+        MyOrganizationResponse(id=o.id, name=o.name, slug=o.slug, plan=o.plan, role=o.role)
+        for o in items
+    ]
 
 
 @router.post("", response_model=OrganizationResponse, status_code=201)

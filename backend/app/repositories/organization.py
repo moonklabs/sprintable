@@ -1,12 +1,23 @@
 from __future__ import annotations
 
 import uuid
+from dataclasses import dataclass
 
 from sqlalchemy import select, text
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models.organization import Organization
+from app.models.project import OrgMember
+
+
+@dataclass
+class OrganizationWithRole:
+    id: uuid.UUID
+    name: str
+    slug: str
+    plan: str
+    role: str
 
 
 class OrganizationRepository:
@@ -42,6 +53,28 @@ class OrganizationRepository:
                 {"org_id": str(org.id), "member_id": str(owner_member_id)},
             )
         return org
+
+    async def list_for_user(self, user_id: uuid.UUID) -> list[OrganizationWithRole]:
+        """사용자가 org_members로 속한 Organization 목록 반환 (name ASC)."""
+        result = await self.session.execute(
+            select(
+                Organization.id,
+                Organization.name,
+                Organization.slug,
+                Organization.plan,
+                OrgMember.role,
+            )
+            .join(OrgMember, OrgMember.org_id == Organization.id)
+            .where(
+                OrgMember.user_id == user_id,
+                OrgMember.deleted_at.is_(None),
+            )
+            .order_by(Organization.name.asc())
+        )
+        return [
+            OrganizationWithRole(id=row.id, name=row.name, slug=row.slug, plan=row.plan, role=row.role)
+            for row in result.all()
+        ]
 
     async def delete(self, org_id: uuid.UUID, requester_member_id: uuid.UUID) -> dict:
         org = await self.get(org_id)
