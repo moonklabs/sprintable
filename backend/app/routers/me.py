@@ -49,7 +49,7 @@ async def get_me(
     )
     member = result.scalars().first()
 
-    if member is None and not is_api_key:
+    if member is None and not is_api_key and not member_id:
         # fallback: org_members 기반 응답 — human TM 없는 org-members-only 환경 (E-ENTITY-CLEANUP S5 이후)
         org_id_str = auth.claims.get("app_metadata", {}).get("org_id")
         project_id_str = auth.claims.get("app_metadata", {}).get("project_id")
