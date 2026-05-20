@@ -1,8 +1,8 @@
 'use client';
 
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import { useRouter } from 'next/navigation';
-import { Check, ChevronDown, Plus, Settings } from 'lucide-react';
+import { Check, ChevronDown, Loader2, Plus, Settings } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import {
   DropdownMenu,
@@ -47,7 +47,7 @@ interface UnifiedSwitcherProps {
 
 function OrgInitial({ name }: { name: string }) {
   return (
-    <span className="flex h-5 w-5 shrink-0 items-center justify-center rounded-sm bg-brand text-[10px] font-semibold text-brand-foreground">
+    <span className="flex h-4 w-4 shrink-0 items-center justify-center rounded-sm bg-brand text-[9px] font-semibold text-brand-foreground">
       {name.charAt(0).toUpperCase()}
     </span>
   );
@@ -62,17 +62,48 @@ export function UnifiedSwitcher({
 }: UnifiedSwitcherProps) {
   const router = useRouter();
   const [pending, setPending] = useState(false);
+  const [open, setOpen] = useState(false);
   const [createOrgOpen, setCreateOrgOpen] = useState(false);
   const [createProjectOpen, setCreateProjectOpen] = useState(false);
   const [newProjectName, setNewProjectName] = useState('');
   const [newProjectDesc, setNewProjectDesc] = useState('');
   const [creating, setCreating] = useState(false);
 
+  // 다른 조직의 프로젝트를 lazy fetch
+  const [otherOrgProjects, setOtherOrgProjects] = useState<Record<string, ProjectItem[]>>({});
+  const [loadingOrgIds, setLoadingOrgIds] = useState<Set<string>>(new Set());
+
   const currentOrg = orgs.find((o) => o.orgId === currentOrgId);
   const currentProject = projects.find((p) => p.projectId === currentProjectId);
+  const otherOrgs = orgs.filter((o) => o.orgId !== currentOrgId);
 
   const displayOrg = currentOrg?.orgName ?? 'Organization';
   const displayProject = currentProject?.projectName ?? '';
+
+  // 드롭다운 열릴 때 다른 조직의 프로젝트 fetch
+  useEffect(() => {
+    if (!open) return;
+    for (const org of otherOrgs) {
+      if (otherOrgProjects[org.orgId] !== undefined || loadingOrgIds.has(org.orgId)) continue;
+      setLoadingOrgIds((prev) => new Set([...prev, org.orgId]));
+      fetch(`/api/projects?org_id=${encodeURIComponent(org.orgId)}`)
+        .then((r) => r.ok ? r.json() : null)
+        .then((data: { data?: Array<{ id?: string; projectId?: string; name?: string; projectName?: string }> } | null) => {
+          const mapped = (data?.data ?? []).map((p) => ({
+            projectId: p.id ?? p.projectId ?? '',
+            projectName: p.name ?? p.projectName ?? '',
+          }));
+          setOtherOrgProjects((prev) => ({ ...prev, [org.orgId]: mapped }));
+        })
+        .catch(() => {
+          setOtherOrgProjects((prev) => ({ ...prev, [org.orgId]: [] }));
+        })
+        .finally(() => {
+          setLoadingOrgIds((prev) => { const n = new Set(prev); n.delete(org.orgId); return n; });
+        });
+    }
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [open]);
 
   async function switchOrg(nextOrgId: string) {
     if (!nextOrgId || nextOrgId === currentOrgId || pending) return;
@@ -86,6 +117,28 @@ export function UnifiedSwitcher({
       if (res.ok) {
         window.location.href = '/dashboard';
       }
+    } finally {
+      setPending(false);
+    }
+  }
+
+  async function switchOrgAndProject(nextOrgId: string, projectId: string) {
+    if (pending) return;
+    setPending(true);
+    try {
+      const orgRes = await fetch('/api/switch-org', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ org_id: nextOrgId }),
+      });
+      if (!orgRes.ok) return;
+      // org 전환 후 project 전환 (쿠키는 Set-Cookie로 이미 갱신됨)
+      await fetch('/api/switch-project', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ project_id: projectId }),
+      }).catch(() => null);
+      window.location.href = '/dashboard';
     } finally {
       setPending(false);
     }
@@ -139,18 +192,16 @@ export function UnifiedSwitcher({
     window.location.href = `/onboarding?step=project&orgId=${orgId}`;
   }
 
-  const otherOrgs = orgs.filter((o) => o.orgId !== currentOrgId);
-
   return (
     <>
-      <DropdownMenu>
+      <DropdownMenu open={open} onOpenChange={setOpen}>
         <DropdownMenuTrigger
           disabled={pending}
           render={
             <SidebarMenuButton className={cn('w-full', className)}>
               <OrgInitial name={displayOrg} />
               <span className="flex min-w-0 flex-1 flex-col truncate text-left">
-                <span className="truncate text-xs font-medium text-muted-foreground leading-tight">
+                <span className="truncate text-[10px] font-medium text-muted-foreground leading-tight">
                   {displayOrg}
                 </span>
                 {displayProject && (
@@ -163,12 +214,15 @@ export function UnifiedSwitcher({
             </SidebarMenuButton>
           }
         />
-        <DropdownMenuContent className="w-auto min-w-60" align="start" side="bottom" sideOffset={4}>
-          {/* 현재 조직 + 프로젝트 */}
+        <DropdownMenuContent className="w-auto min-w-64" align="start" side="bottom" sideOffset={4}>
+          {/* 현재 조직 */}
           <DropdownMenuGroup>
-            <div className="flex items-center justify-between px-2 py-1">
-              <DropdownMenuLabel className="p-0 text-xs text-muted-foreground">
-                {displayOrg}
+            <div className="flex items-center justify-between px-2 py-1.5">
+              <DropdownMenuLabel className="p-0 text-[11px] font-semibold text-muted-foreground uppercase tracking-wide">
+                <span className="flex items-center gap-1.5">
+                  <OrgInitial name={displayOrg} />
+                  {displayOrg}
+                </span>
               </DropdownMenuLabel>
               <button
                 type="button"
@@ -183,48 +237,74 @@ export function UnifiedSwitcher({
               <DropdownMenuItem
                 key={project.projectId}
                 disabled={pending}
-                className="pl-4"
+                className="pl-5"
                 onClick={() => void switchProject(project.projectId)}
               >
-                <span className="flex-1 truncate">{project.projectName}</span>
+                <span className="flex-1 truncate text-sm">{project.projectName}</span>
                 {project.projectId === currentProjectId && (
-                  <Check className="h-3.5 w-3.5 text-primary" />
+                  <Check className="h-3.5 w-3.5 shrink-0 text-primary" />
                 )}
               </DropdownMenuItem>
             ))}
-            <DropdownMenuItem className="pl-4 text-muted-foreground" onClick={() => setCreateProjectOpen(true)}>
+            <DropdownMenuItem className="pl-5 text-muted-foreground" onClick={() => setCreateProjectOpen(true)}>
               <Plus className="h-3.5 w-3.5" />
-              <span>새 프로젝트</span>
+              <span className="text-sm">새 프로젝트</span>
             </DropdownMenuItem>
           </DropdownMenuGroup>
 
-          {/* 다른 조직들 */}
-          {otherOrgs.length > 0 && (
-            <>
-              <DropdownMenuSeparator />
-              {otherOrgs.map((org) => (
-                <DropdownMenuGroup key={org.orgId}>
-                  <DropdownMenuItem
-                    disabled={pending}
-                    onClick={() => void switchOrg(org.orgId)}
-                  >
-                    <OrgInitial name={org.orgName} />
-                    <div className="flex flex-1 flex-col truncate">
-                      <span className="truncate text-sm">{org.orgName}</span>
-                      {org.role && (
-                        <span className="text-[10px] text-muted-foreground capitalize">{org.role}</span>
-                      )}
+          {/* 다른 조직들 — 각 조직 아래에 프로젝트 표시 */}
+          {otherOrgs.map((org) => {
+            const orgProjects = otherOrgProjects[org.orgId];
+            const isLoading = loadingOrgIds.has(org.orgId);
+            return (
+              <div key={org.orgId}>
+                <DropdownMenuSeparator />
+                <DropdownMenuGroup>
+                  <div className="px-2 py-1.5">
+                    <DropdownMenuLabel className="p-0 text-[11px] font-semibold text-muted-foreground uppercase tracking-wide">
+                      <span className="flex items-center gap-1.5">
+                        <OrgInitial name={org.orgName} />
+                        {org.orgName}
+                        {org.role && (
+                          <span className="text-[9px] font-normal capitalize normal-case opacity-60">{org.role}</span>
+                        )}
+                      </span>
+                    </DropdownMenuLabel>
+                  </div>
+                  {isLoading ? (
+                    <div className="flex items-center gap-2 pl-5 py-1.5 text-xs text-muted-foreground">
+                      <Loader2 className="h-3 w-3 animate-spin" />
+                      <span>로딩 중...</span>
                     </div>
-                  </DropdownMenuItem>
+                  ) : orgProjects && orgProjects.length > 0 ? (
+                    orgProjects.map((project) => (
+                      <DropdownMenuItem
+                        key={project.projectId}
+                        disabled={pending}
+                        className="pl-5"
+                        onClick={() => void switchOrgAndProject(org.orgId, project.projectId)}
+                      >
+                        <span className="flex-1 truncate text-sm">{project.projectName}</span>
+                      </DropdownMenuItem>
+                    ))
+                  ) : (
+                    <DropdownMenuItem
+                      disabled={pending}
+                      className="pl-5 text-muted-foreground"
+                      onClick={() => void switchOrg(org.orgId)}
+                    >
+                      <span className="text-sm">이 조직으로 전환</span>
+                    </DropdownMenuItem>
+                  )}
                 </DropdownMenuGroup>
-              ))}
-            </>
-          )}
+              </div>
+            );
+          })}
 
           <DropdownMenuSeparator />
           <DropdownMenuItem onClick={() => setCreateOrgOpen(true)}>
             <Plus className="h-3.5 w-3.5" />
-            <span>새 Organization 만들기</span>
+            <span className="text-sm">새 Organization 만들기</span>
           </DropdownMenuItem>
         </DropdownMenuContent>
       </DropdownMenu>
