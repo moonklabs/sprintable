@@ -4,6 +4,7 @@ from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.core.config import settings
 from app.dependencies.auth import AuthContext, get_current_user, get_verified_org_id
 from app.dependencies.database import get_db
 from app.repositories.project import ProjectRepository
@@ -34,6 +35,12 @@ async def create_project(
     auth: AuthContext = Depends(get_current_user),
 ) -> ProjectResponse:
     repo = ProjectRepository(session, body.org_id)
+
+    # EE: Free 플랜 project 생성 제한 (OSS에서는 로드되지 않음)
+    if settings.is_ee_enabled:
+        from ee.plan_limits import check_project_create_limit  # type: ignore[import]
+        await check_project_create_limit(session, body.org_id)
+
     project = await repo.create(name=body.name, description=body.description)
 
     # Auto-attach org-level team members (project_id IS NULL) to new project
