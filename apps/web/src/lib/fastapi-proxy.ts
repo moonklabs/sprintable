@@ -102,7 +102,7 @@ export async function proxyToFastapi(
   if (authHeader) headers['Authorization'] = authHeader;
 
   // 일부 헤더 forward
-  for (const h of ['x-forwarded-for', 'x-real-ip', 'x-api-key']) {
+  for (const h of ['x-forwarded-for', 'x-real-ip', 'x-api-key', 'x-org-id']) {
     const v = request.headers.get(h);
     if (v) headers[h] = v;
   }

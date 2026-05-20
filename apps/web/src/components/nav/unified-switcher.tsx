@@ -86,7 +86,7 @@ export function UnifiedSwitcher({
     for (const org of otherOrgs) {
       if (otherOrgProjects[org.orgId] !== undefined || loadingOrgIds.has(org.orgId)) continue;
       setLoadingOrgIds((prev) => new Set([...prev, org.orgId]));
-      fetch(`/api/projects?org_id=${encodeURIComponent(org.orgId)}`)
+      fetch(`/api/projects`, { headers: { 'X-Org-Id': org.orgId } })
         .then((r) => r.ok ? r.json() : null)
         .then((data: { data?: Array<{ id?: string; projectId?: string; name?: string; projectName?: string }> } | null) => {
           const mapped = (data?.data ?? []).map((p) => ({
