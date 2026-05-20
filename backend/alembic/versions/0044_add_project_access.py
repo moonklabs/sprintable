@@ -17,6 +17,23 @@ depends_on = None
 
 
 def upgrade() -> None:
+    # org_members.id에 PK constraint가 없으면 추가 (Supabase 생성 테이블 보정)
+    op.execute(
+        """
+        DO $$
+        BEGIN
+            IF NOT EXISTS (
+                SELECT 1 FROM pg_constraint
+                WHERE conrelid = 'org_members'::regclass
+                  AND contype = 'p'
+            ) THEN
+                ALTER TABLE org_members ADD PRIMARY KEY (id);
+            END IF;
+        END
+        $$;
+        """
+    )
+
     op.create_table(
         "project_access",
         sa.Column("id", sa.UUID(as_uuid=True), primary_key=True, server_default=sa.text("gen_random_uuid()")),
