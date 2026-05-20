@@ -110,6 +110,10 @@ export default function SettingsPage() {
 
   const [orgId, setOrgId] = useState<string | null>(null);
   const [currentProjectId, setCurrentProjectId] = useState<string | null>(null);
+  const [orgInfo, setOrgInfo] = useState<{ id: string; name: string; slug: string; plan?: string; role?: string } | null>(null);
+  const [editOrgName, setEditOrgName] = useState('');
+  const [savingOrgName, setSavingOrgName] = useState(false);
+  const [orgNameError, setOrgNameError] = useState('');
   const [projectMemberships] = useState<Array<{ projectId: string; projectName: string }>>([]);
   const [settings, setSettings] = useState<NotificationSetting[]>([]);
   const [loading, setLoading] = useState(true);
@@ -166,6 +170,28 @@ export default function SettingsPage() {
   const [webhookEditing, setWebhookEditing] = useState<Record<string, string>>({});
   const [webhookSaving, setWebhookSaving] = useState<string | null>(null);
   const [webhookErrors, setWebhookErrors] = useState<Record<string, string>>({});
+
+  const handleSaveOrgName = async () => {
+    if (!orgInfo || !editOrgName.trim() || savingOrgName) return;
+    setSavingOrgName(true);
+    setOrgNameError('');
+    try {
+      const res = await fetch(`/api/organizations/${orgInfo.id}`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ name: editOrgName.trim() }),
+      });
+      const json = await res.json() as { data?: { name: string }; error?: { message?: string } };
+      if (!res.ok) {
+        setOrgNameError(json.error?.message ?? t('orgNameSaveFailed'));
+      } else {
+        setOrgInfo((prev) => prev ? { ...prev, name: json.data?.name ?? editOrgName.trim() } : prev);
+        addToast({ type: 'success', title: t('orgNameSaved') });
+      }
+    } finally {
+      setSavingOrgName(false);
+    }
+  };
 
   const refreshProjects = async () => {
     const endpoint = orgId ? `/api/projects?org_id=${encodeURIComponent(orgId)}` : '/api/projects';
@@ -323,6 +349,18 @@ export default function SettingsPage() {
         const orgId = projectJson?.data?.org_id ?? null;
         setCurrentProjectId(projectId);
         setOrgId(orgId);
+
+        // org 상세 정보 로드
+        if (orgId) {
+          const orgRes = await fetch(`/api/organizations/${orgId}`).catch(() => null);
+          if (orgRes?.ok) {
+            const orgJson = await orgRes.json() as { data?: { id: string; name: string; slug: string; plan?: string; role?: string } };
+            if (orgJson.data) {
+              setOrgInfo(orgJson.data);
+              setEditOrgName(orgJson.data.name);
+            }
+          }
+        }
 
         // Get notification settings
         const settingsRes = await fetch('/api/notification-settings');
@@ -690,6 +728,10 @@ export default function SettingsPage() {
             {adminChecked ? (
               <>
                 <span className="truncate px-2 pb-1 pt-4 text-[10px] font-medium uppercase tracking-wider text-muted-foreground/70">{t('organizationSettings')}</span>
+                <TabsTrigger value="organization">
+                  <FolderKanban className="h-4 w-4" />
+                  Organization
+                </TabsTrigger>
                 <TabsTrigger value="projects">
                   <FolderKanban className="h-4 w-4" />
                   {t('tabProjects')}
@@ -899,6 +941,75 @@ export default function SettingsPage() {
                   </>
                 ) : null}
               </div>
+            </TabsContent>
+
+            <TabsContent value="organization">
+              <SectionCard>
+                <SectionCardHeader>
+                  <div className="space-y-1">
+                    <h2 className="text-base font-semibold text-foreground">Organization 설정</h2>
+                    <p className="text-sm text-muted-foreground">Organization 기본 정보를 확인하고 수정합니다.</p>
+                  </div>
+                </SectionCardHeader>
+                <SectionCardBody className="space-y-6">
+                  {orgInfo ? (
+                    <>
+                      <div className="space-y-4">
+                        <div className="space-y-1.5">
+                          <label className="text-sm font-medium text-foreground">이름</label>
+                          {isAdmin ? (
+                            <div className="flex items-center gap-2">
+                              <input
+                                className="flex-1 rounded-md border border-input bg-background px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-ring"
+                                value={editOrgName}
+                                onChange={(e) => setEditOrgName(e.target.value)}
+                                onKeyDown={(e) => { if (e.key === 'Enter') void handleSaveOrgName(); }}
+                              />
+                              <Button
+                                variant="hero"
+                                size="sm"
+                                disabled={!editOrgName.trim() || editOrgName === orgInfo.name || savingOrgName}
+                                onClick={() => void handleSaveOrgName()}
+                              >
+                                {savingOrgName ? '저장 중…' : '저장'}
+                              </Button>
+                            </div>
+                          ) : (
+                            <p className="rounded-md border border-input bg-muted/30 px-3 py-2 text-sm text-foreground">{orgInfo.name}</p>
+                          )}
+                          {orgNameError && <p className="text-xs text-destructive">{orgNameError}</p>}
+                        </div>
+
+                        <div className="space-y-1.5">
+                          <label className="text-sm font-medium text-foreground">Slug</label>
+                          <p className="rounded-md border border-input bg-muted/30 px-3 py-2 font-mono text-sm text-muted-foreground">{orgInfo.slug}</p>
+                          <p className="text-xs text-muted-foreground">slug는 변경할 수 없습니다.</p>
+                        </div>
+
+                        {orgInfo.plan && (
+                          <div className="space-y-1.5">
+                            <label className="text-sm font-medium text-foreground">플랜</label>
+                            <p className="rounded-md border border-input bg-muted/30 px-3 py-2 text-sm text-foreground capitalize">{orgInfo.plan}</p>
+                          </div>
+                        )}
+
+                        {orgInfo.role && (
+                          <div className="space-y-1.5">
+                            <label className="text-sm font-medium text-foreground">내 역할</label>
+                            <p className="rounded-md border border-input bg-muted/30 px-3 py-2 text-sm text-foreground capitalize">{orgInfo.role}</p>
+                          </div>
+                        )}
+                      </div>
+                    </>
+                  ) : (
+                    <div className="space-y-3">
+                      {[1, 2, 3].map((i) => (
+                        <div key={i} className="h-10 animate-pulse rounded-md bg-muted" />
+                      ))}
+                    </div>
+                  )}
+                </SectionCardBody>
+              </SectionCard>
             </TabsContent>
 
             <TabsContent value="projects">

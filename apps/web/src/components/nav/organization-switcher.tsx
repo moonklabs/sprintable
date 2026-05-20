@@ -1,7 +1,7 @@
 'use client';
 
 import { useState } from 'react';
-import { Check, ChevronDown, Plus } from 'lucide-react';
+import { Check, ChevronDown, Plus, Settings } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import {
   DropdownMenu,
@@ -104,6 +104,10 @@ export function OrganizationSwitcher({ orgs, currentOrgId, className }: Organiza
             ))}
           </DropdownMenuGroup>
           <DropdownMenuSeparator />
+          <DropdownMenuItem onClick={() => { window.location.href = '/settings?tab=organization'; }}>
+            <Settings className="h-3.5 w-3.5" />
+            <span>Organization 설정</span>
+          </DropdownMenuItem>
           <DropdownMenuItem onClick={() => setDialogOpen(true)}>
             <Plus className="h-3.5 w-3.5" />
             <span>새 Organization 만들기</span>
