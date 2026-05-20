@@ -1062,12 +1062,16 @@ async def switch_organization(
         .values(revoked_at=datetime.now(timezone.utc))
     )
 
+    # _build_app_metadata 호출 전에 target project_id 고정
+    # (내부에서 user.last_project_id를 이전 org TM으로 덮어쓰므로 먼저 캡처)
+    target_project_id = user.last_project_id
+
     # 새 토큰 발급 — switch-org 목적 자체가 org 전환이므로 target org_id + project_id 모두 덮어씀
     app_metadata = await _build_app_metadata(user, session)
     app_metadata["org_id"] = str(body.org_id)
-    # project_id도 대상 org 기준으로 명시 설정 — _build_app_metadata fallback이 이전 org project 반환하는 문제 해결
-    if user.last_project_id:
-        app_metadata["project_id"] = str(user.last_project_id)
+    # 캡처해둔 target project_id로 덮어쓰기 — _build_app_metadata 내부 fallback 값 무효화
+    if target_project_id:
+        app_metadata["project_id"] = str(target_project_id)
     else:
         app_metadata.pop("project_id", None)
 
