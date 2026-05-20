@@ -43,18 +43,7 @@ async def create_project(
 
     project = await repo.create(name=body.name, description=body.description)
 
-    # Auto-attach org-level AGENT team_members (project_id IS NULL) to new project.
-    # Human members no longer need team_member records — access is via org_members (E-ENTITY-CLEANUP S5).
-    await session.execute(
-        text(
-            "INSERT INTO project_memberships (project_id, team_member_id)"
-            " SELECT :project_id, id FROM team_members"
-            " WHERE org_id = :org_id AND project_id IS NULL AND is_active = TRUE AND type = 'agent'"
-            " ON CONFLICT DO NOTHING"
-        ),
-        {"org_id": str(body.org_id), "project_id": str(project.id)},
-    )
-
+    # project_memberships 테이블 미존재 — agent 자동 첨부는 agent 생성 시 project_id로 직접 연결.
     # Ensure the creating user is in org_members (opt-out model: org membership = project access).
     if auth.user_id:
         await session.execute(
