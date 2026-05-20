@@ -43,6 +43,10 @@ class Settings(BaseSettings):
     # E-EVENTBUS: dev=true, prod=false (기존 웹훅 병행 운영)
     eventbus_enabled: bool = False
 
+    # Polar Billing SDK
+    polar_access_token: str = ""
+    polar_sandbox: bool = True  # dev=True(sandbox), prod=False
+
     @property
     def is_ee_enabled(self) -> bool:
         return self.license_consent.lower() == "agreed"
