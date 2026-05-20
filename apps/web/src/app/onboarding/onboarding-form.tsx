@@ -32,15 +32,20 @@ function buildMcpConfig(apiKey: string) {
 type Step = 'org' | 'project' | 'agent' | 'connect';
 const STEPS: Step[] = ['org', 'project', 'agent', 'connect'];
 
-export function OnboardingForm() {
+interface OnboardingFormProps {
+  initialStep?: Step;
+  initialOrgId?: string;
+}
+
+export function OnboardingForm({ initialStep, initialOrgId }: OnboardingFormProps = {}) {
   const t = useTranslations('onboarding');
 
-  const [step, setStep] = useState<Step>('org');
+  const [step, setStep] = useState<Step>(initialStep ?? 'org');
   const [orgName, setOrgName] = useState('');
   const [orgSlug, setOrgSlug] = useState('');
   const [projectName, setProjectName] = useState('');
   const [projectDesc, setProjectDesc] = useState('');
-  const [orgId, setOrgId] = useState<string | null>(null);
+  const [orgId, setOrgId] = useState<string | null>(initialOrgId ?? null);
   const [projectId, setProjectId] = useState<string | null>(null);
   const [agentName, setAgentName] = useState('My Agent');
   const [agentRole, setAgentRole] = useState('developer');

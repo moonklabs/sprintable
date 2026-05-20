@@ -25,7 +25,7 @@ function toSlug(name: string): string {
 interface CreateOrganizationDialogProps {
   open: boolean;
   onOpenChange: (open: boolean) => void;
-  onCreated: () => void;
+  onCreated: (orgId: string) => void;
 }
 
 export function CreateOrganizationDialog({
@@ -86,7 +86,7 @@ export function CreateOrganizationDialog({
         return;
       }
       handleClose(false);
-      onCreated();
+      onCreated(json.data.id);
     } finally {
       setCreating(false);
     }
