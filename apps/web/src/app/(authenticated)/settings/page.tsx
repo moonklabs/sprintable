@@ -7,6 +7,7 @@ import { useTranslations } from 'next-intl';
 import { BarChart2, Bell, Bot, Check, CreditCard, FolderKanban, GitBranch, Key, Menu, Palette, Trash2, User, Users, X, Zap } from 'lucide-react';
 import { UsageDashboard } from '@/components/settings/usage-dashboard';
 import { OrgMembersSection } from '@/components/settings/org-members-section';
+
 import { AiSettingsSection } from '@/components/settings/ai-settings';
 import { MyProfileSection } from '@/components/settings/my-profile-section';
 import { ByomKeyManagement } from '@/components/settings/byom-key-management';
@@ -29,6 +30,14 @@ import { Tabs, TabsList, TabsTrigger, TabsContent } from '@/components/ui/tabs';
 import { SidebarTrigger } from '@/components/ui/sidebar';
 import { ToastContainer, useToast } from '@/components/ui/toast';
 import { NOTIFICATION_TYPES } from '@/lib/notification-types';
+import { isEEEnabled } from '@/lib/ee';
+import dynamic from 'next/dynamic';
+
+// TypeScript 정적 해석을 위해 unconditional import — 조건부 렌더링은 JSX isEEEnabled() 체크로 처리
+const BillingTab = dynamic(
+  () => import('@/ee/components/billing/billing-tab').then((m) => ({ default: m.BillingTab })),
+  { ssr: false },
+);
 
 interface NotificationSetting {
   id: string;
@@ -803,6 +812,12 @@ export default function SettingsPage() {
                       <CreditCard className="h-4 w-4" />
                       {t('tabSubscription')}
                     </TabsTrigger>
+                    {isEEEnabled() && (
+                      <TabsTrigger value="billing">
+                        <CreditCard className="h-4 w-4" />
+                        Billing
+                      </TabsTrigger>
+                    )}
                     <TabsTrigger value="usage">
                       <BarChart2 className="h-4 w-4" />
                       {t('tabUsage')}
@@ -1728,6 +1743,12 @@ export default function SettingsPage() {
                 />
               </TabsContent>
             ) : null}
+
+            {isEEEnabled() && BillingTab && orgId && (
+              <TabsContent value="billing">
+                <BillingTab orgId={orgId} />
+              </TabsContent>
+            )}
 
             <TabsContent value="danger">
               <SectionCard className="border-destructive/20 bg-destructive/10">
