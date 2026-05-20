@@ -38,6 +38,7 @@ export function CreateOrganizationDialog({
   const [slugTouched, setSlugTouched] = useState(false);
   const [creating, setCreating] = useState(false);
   const [error, setError] = useState('');
+  const [planLimitHit, setPlanLimitHit] = useState(false);
 
   const slugError = slug && !SLUG_REGEX.test(slug)
     ? '영소문자, 숫자, 하이픈만 사용 가능합니다 (시작/끝은 영소문자 또는 숫자)'
@@ -61,6 +62,7 @@ export function CreateOrganizationDialog({
       setSlug('');
       setSlugTouched(false);
       setError('');
+      setPlanLimitHit(false);
     }
     onOpenChange(nextOpen);
   }
@@ -76,9 +78,14 @@ export function CreateOrganizationDialog({
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ name: name.trim(), slug: slug.trim() }),
       });
-      const json = await res.json() as { data?: { id: string; name: string; slug: string }; error?: { message?: string } };
+      const json = await res.json() as { data?: { id: string; name: string; slug: string }; error?: { message?: string }; detail?: { code?: string; message?: string } | string };
       if (!res.ok) {
-        setError(json.error?.message ?? 'Organization 생성에 실패했습니다.');
+        const detail = typeof json.detail === 'object' ? json.detail : null;
+        if (res.status === 402 && detail?.code === 'PLAN_LIMIT_EXCEEDED') {
+          setPlanLimitHit(true);
+          return;
+        }
+        setError(json.error?.message ?? (typeof json.detail === 'string' ? json.detail : null) ?? 'Organization 생성에 실패했습니다.');
         return;
       }
       if (!json.data) {
@@ -101,6 +108,18 @@ export function CreateOrganizationDialog({
           <DialogTitle>새 Organization 만들기</DialogTitle>
         </DialogHeader>
         <form onSubmit={(e) => void handleSubmit(e)} className="space-y-4">
+          {planLimitHit && (
+            <div className="rounded-md border border-amber-200 bg-amber-50 px-3 py-3 text-sm space-y-1">
+              <p className="font-medium text-amber-800">Free 플랜 Organization 한도 초과</p>
+              <p className="text-amber-700">Free 플랜은 Organization 1개까지만 생성할 수 있습니다.</p>
+              <a
+                href="/settings?tab=billing"
+                className="inline-block mt-1 text-xs font-medium text-amber-800 underline underline-offset-2 hover:text-amber-900"
+              >
+                Team 또는 Pro로 업그레이드하기 →
+              </a>
+            </div>
+          )}
           {error && (
             <div className="rounded-md bg-destructive/10 px-3 py-2 text-sm text-destructive">
               {error}

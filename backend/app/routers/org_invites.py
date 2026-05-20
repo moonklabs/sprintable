@@ -4,6 +4,7 @@ from datetime import datetime, timezone
 from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.core.config import settings
 from app.dependencies.auth import AuthContext, get_current_user
 from app.dependencies.database import get_db
 from app.repositories.org_invite import OrgInviteRepository
@@ -58,6 +59,11 @@ async def create_org_invite(
 ) -> OrgInviteResponse:
     """초대 생성 — owner/admin만 가능. 이미 가입된 email이나 중복 초대 시 409."""
     await _require_owner_or_admin(id, auth, org_repo)
+
+    # EE: Free 플랜 member 초대 제한 (OSS에서는 로드되지 않음)
+    if settings.is_ee_enabled:
+        from ee.plan_limits import check_member_invite_limit  # type: ignore[import]
+        await check_member_invite_limit(session, id)
 
     if await invite_repo.is_already_member(org_id=id, email=body.email):
         raise HTTPException(status_code=409, detail="Email already a member of this organization")
