@@ -696,7 +696,10 @@ async def send_message(
             project_id=conv.project_id,
             entity_type="conversation",
             entity_id=conversation_id,
-            context={"message_id": str(msg.id)},
+            context={
+                "message_id": str(msg.id),
+                "content_preview": msg.content[:80] if msg.content else "",
+            },
         )
 
     response: dict = {"data": _msg_payload(msg, sender)}
