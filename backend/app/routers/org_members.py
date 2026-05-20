@@ -2,7 +2,7 @@ import uuid
 from datetime import datetime, timezone
 
 from fastapi import APIRouter, Depends, HTTPException, status
-from sqlalchemy import update
+from sqlalchemy import text, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.dependencies.auth import AuthContext, get_current_user, get_verified_org_id
@@ -38,9 +38,36 @@ async def _require_admin(
 @router.get("", response_model=list[OrgMemberResponse])
 async def list_org_members(
     repo: OrgMemberRepository = Depends(_get_repo),
+    session: AsyncSession = Depends(get_db),
+    org_id: uuid.UUID = Depends(get_verified_org_id),
 ) -> list[OrgMemberResponse]:
-    members = await repo.list()
-    return [OrgMemberResponse.model_validate(m) for m in members]
+    """org_members + users JOIN — email 포함 응답."""
+    result = await session.execute(
+        text(
+            """
+            SELECT om.id, om.org_id, om.user_id, om.role,
+                   om.created_at, om.deleted_at,
+                   u.email
+            FROM org_members om
+            LEFT JOIN users u ON u.id = om.user_id
+            WHERE om.org_id = :org_id AND om.deleted_at IS NULL
+            ORDER BY om.created_at
+            """
+        ),
+        {"org_id": str(org_id)},
+    )
+    return [
+        OrgMemberResponse(
+            id=row.id,
+            org_id=row.org_id,
+            user_id=row.user_id,
+            role=row.role,
+            created_at=row.created_at,
+            deleted_at=row.deleted_at,
+            email=row.email,
+        )
+        for row in result
+    ]
 
 
 @router.post("", response_model=OrgMemberResponse, status_code=201)
