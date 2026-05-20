@@ -76,6 +76,27 @@ class OrganizationRepository:
             for row in result.all()
         ]
 
+    async def get_member_role(self, org_id: uuid.UUID, user_id: uuid.UUID) -> str | None:
+        """org_members에서 user의 role 반환. 미소속 시 None."""
+        result = await self.session.execute(
+            select(OrgMember.role).where(
+                OrgMember.org_id == org_id,
+                OrgMember.user_id == user_id,
+                OrgMember.deleted_at.is_(None),
+            )
+        )
+        return result.scalar_one_or_none()
+
+    async def update_name(self, org_id: uuid.UUID, name: str) -> Organization | None:
+        """Organization 이름 수정 후 갱신된 객체 반환. 미존재 시 None."""
+        org = await self.get(org_id)
+        if org is None:
+            return None
+        org.name = name
+        await self.session.flush()
+        await self.session.refresh(org)
+        return org
+
     async def delete(self, org_id: uuid.UUID, requester_member_id: uuid.UUID) -> dict:
         org = await self.get(org_id)
         if org is None:

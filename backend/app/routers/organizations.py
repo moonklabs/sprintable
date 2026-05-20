@@ -8,7 +8,7 @@ from app.dependencies.auth import AuthContext, get_current_user
 from app.dependencies.database import get_db
 from app.models.user import User
 from app.repositories.organization import OrganizationRepository
-from app.schemas.organization import CreateOrganization, MyOrganizationResponse, OrganizationResponse
+from app.schemas.organization import CreateOrganization, MyOrganizationResponse, OrganizationResponse, UpdateOrganization
 
 router = APIRouter(prefix="/api/v2/organizations", tags=["organizations"])
 
@@ -59,6 +59,29 @@ async def create_organization(
         )
         await session.commit()
 
+    return OrganizationResponse.model_validate(org)
+
+
+@router.patch("/{id}", response_model=OrganizationResponse)
+async def update_organization(
+    id: uuid.UUID,
+    body: UpdateOrganization,
+    auth: AuthContext = Depends(get_current_user),
+    repo: OrganizationRepository = Depends(_get_repo),
+    session: AsyncSession = Depends(get_db),
+) -> OrganizationResponse:
+    """Organization 이름 수정 — owner/admin만 가능."""
+    role = await repo.get_member_role(org_id=id, user_id=uuid.UUID(auth.user_id))
+    if role is None:
+        raise HTTPException(status_code=404, detail="Organization not found")
+    if role not in ("owner", "admin"):
+        raise HTTPException(status_code=403, detail="owner or admin role required")
+
+    org = await repo.update_name(org_id=id, name=body.name)
+    if org is None:
+        raise HTTPException(status_code=404, detail="Organization not found")
+
+    await session.commit()
     return OrganizationResponse.model_validate(org)
 
 

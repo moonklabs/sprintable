@@ -31,3 +31,7 @@ class MyOrganizationResponse(BaseModel):
     slug: str
     plan: str
     role: str
+
+
+class UpdateOrganization(BaseModel):
+    name: str
