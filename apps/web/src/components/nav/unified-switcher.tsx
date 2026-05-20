@@ -115,7 +115,8 @@ export function UnifiedSwitcher({
         body: JSON.stringify({ org_id: nextOrgId }),
       });
       if (res.ok) {
-        window.location.href = '/dashboard';
+        router.refresh();
+        router.push('/dashboard');
       }
     } finally {
       setPending(false);
@@ -138,7 +139,8 @@ export function UnifiedSwitcher({
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ project_id: projectId }),
       }).catch(() => null);
-      window.location.href = '/dashboard';
+      router.refresh();
+      router.push('/dashboard');
     } finally {
       setPending(false);
     }

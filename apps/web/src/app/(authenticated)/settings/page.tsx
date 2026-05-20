@@ -1,6 +1,7 @@
 'use client';
 
 import { useEffect, useMemo, useState } from 'react';
+import { useDashboardContext } from '@/app/dashboard/dashboard-shell';
 import Link from 'next/link';
 import { useRouter, useSearchParams } from 'next/navigation';
 import { useTranslations } from 'next-intl';
@@ -105,6 +106,7 @@ export default function SettingsPage() {
   const tc = useTranslations('common');
   const router = useRouter();
   const searchParamsHook = useSearchParams();
+  const { orgId: ctxOrgId, orgMemberships } = useDashboardContext();
   const [activeTab, setActiveTab] = useState(() => searchParamsHook.get('tab') ?? 'profile');
   const [lnbOpen, setLnbOpen] = useState(false);
   const { toasts, addToast, dismissToast } = useToast();
@@ -186,6 +188,10 @@ export default function SettingsPage() {
   const [webhookEditing, setWebhookEditing] = useState<Record<string, string>>({});
   const [webhookSaving, setWebhookSaving] = useState<string | null>(null);
   const [webhookErrors, setWebhookErrors] = useState<Record<string, string>>({});
+
+  // DashboardCtx에서 현재 org의 role을 derive — fetch 완료 전에도 올바른 role 반영
+  const ctxRole = orgMemberships.find(o => o.orgId === (orgId ?? ctxOrgId))?.role;
+  const currentOrgRole = (orgInfo?.role ?? ctxRole ?? 'member') as string;
 
   const handleOpenDeleteOrg = async () => {
     if (!orgInfo) return;
@@ -1022,7 +1028,7 @@ export default function SettingsPage() {
                       <div className="space-y-4">
                         <div className="space-y-1.5">
                           <label className="text-sm font-medium text-foreground">이름</label>
-                          {(orgInfo.role === 'owner' || orgInfo.role === 'admin') ? (
+                          {(currentOrgRole === 'owner' || currentOrgRole === 'admin') ? (
                             <div className="flex items-center gap-2">
                               <input
                                 className="flex-1 rounded-md border border-input bg-background px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-ring"
@@ -1058,10 +1064,10 @@ export default function SettingsPage() {
                           </div>
                         )}
 
-                        {orgInfo.role && (
+                        {currentOrgRole && (
                           <div className="space-y-1.5">
                             <label className="text-sm font-medium text-foreground">내 역할</label>
-                            <p className="rounded-md border border-input bg-muted/30 px-3 py-2 text-sm text-foreground capitalize">{orgInfo.role}</p>
+                            <p className="rounded-md border border-input bg-muted/30 px-3 py-2 text-sm text-foreground capitalize">{currentOrgRole}</p>
                           </div>
                         )}
                       </div>
@@ -1075,7 +1081,7 @@ export default function SettingsPage() {
                   )}
                 </SectionCardBody>
               </SectionCard>
-              {orgInfo?.role === 'owner' && (
+              {currentOrgRole === 'owner' && (
                 <SectionCard className="border-destructive/20 bg-destructive/10 mt-6">
                   <SectionCardHeader className="border-b border-destructive/20">
                     <div className="space-y-1">
@@ -1094,7 +1100,7 @@ export default function SettingsPage() {
 
             <TabsContent value="org-members">
               {orgId && orgInfo ? (
-                <OrgMembersSection orgId={orgId} currentRole={orgInfo.role ?? 'member'} />
+                <OrgMembersSection orgId={orgId} currentRole={currentOrgRole} />
               ) : (
                 <div className="space-y-3">
                   {[1, 2, 3].map((i) => <div key={i} className="h-12 animate-pulse rounded-md bg-muted" />)}
@@ -1216,7 +1222,7 @@ export default function SettingsPage() {
                 <div className="mt-6">
                   <ProjectAccessSection
                     projectId={currentProjectId}
-                    currentRole={orgInfo.role ?? 'member'}
+                    currentRole={currentOrgRole}
                   />
                 </div>
               )}
