@@ -60,11 +60,11 @@ def test_project_access_endpoints():
     assert has_get and has_post and has_delete
 
 
-def test_project_access_create_defaults_blocked():
-    """ProjectAccessCreate 기본 permission='blocked'."""
+def test_project_access_create_defaults_denied():
+    """ProjectAccessCreate 기본 permission='denied' (full spec: 'allowed'|'denied')."""
     from app.routers.project_access import ProjectAccessCreate
     obj = ProjectAccessCreate(org_member_id="00000000-0000-0000-0000-000000000001")
-    assert obj.permission == "blocked"
+    assert obj.permission == "denied"
 
 
 def test_project_access_response_schema():

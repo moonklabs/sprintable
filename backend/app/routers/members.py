@@ -49,7 +49,7 @@ async def list_members(
                   SELECT 1 FROM project_access pa
                   WHERE pa.org_member_id = om.id
                     AND pa.project_id = :project_id
-                    AND pa.permission = 'blocked'
+                    AND pa.permission = 'denied'
               )
             ORDER BY name
             """

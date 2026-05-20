@@ -17,7 +17,7 @@ router = APIRouter(prefix="/api/v2/projects", tags=["project-access"])
 
 class ProjectAccessCreate(BaseModel):
     org_member_id: uuid.UUID
-    permission: str = "blocked"
+    permission: str = "denied"
 
 
 class ProjectAccessResponse(BaseModel):
@@ -76,8 +76,8 @@ async def create_project_access(
 ) -> ProjectAccessResponse:
     """프로젝트 접근 제어 레코드 생성 (기본 permission=blocked) — owner/admin만."""
     await _require_owner_or_admin(project_id, auth, session)
-    if body.permission not in ("member", "blocked"):
-        raise HTTPException(status_code=400, detail="permission must be 'member' or 'blocked'")
+    if body.permission not in ("allowed", "denied"):
+        raise HTTPException(status_code=400, detail="permission must be 'allowed' or 'denied'")
     existing = await session.execute(
         select(ProjectAccess).where(
             ProjectAccess.project_id == project_id,
