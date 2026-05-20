@@ -23,3 +23,5 @@ class OrgInviteResponse(BaseModel):
     accepted_at: datetime | None
     created_by: uuid.UUID | None
     created_at: datetime
+    email_sent_at: datetime | None = None
+    email_error: str | None = None

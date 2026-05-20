@@ -1,4 +1,5 @@
 import uuid
+from datetime import datetime, timezone
 
 from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -8,6 +9,7 @@ from app.dependencies.database import get_db
 from app.repositories.org_invite import OrgInviteRepository
 from app.repositories.organization import OrganizationRepository
 from app.schemas.org_invite import CreateOrgInvite, OrgInviteResponse
+from app.services.org_invite_email import send_invite_email
 
 router = APIRouter(prefix="/api/v2/organizations", tags=["org-invites"])
 
@@ -70,6 +72,49 @@ async def create_org_invite(
         raise HTTPException(status_code=409, detail="Invite already exists for this email")
 
     await session.commit()
+
+    # 이메일 발송 (비동기 fire-and-forget — 실패해도 초대 레코드는 유지)
+    org = await invite_repo.session.get(
+        __import__("app.models.organization", fromlist=["Organization"]).Organization, id
+    )
+    org_name = org.name if org else str(id)
+    error = send_invite_email(to=invite.email, org_name=org_name, token=invite.token, role=invite.role)
+    sent_at = None if error else datetime.now(timezone.utc)
+    await invite_repo.update_email_result(invite.id, sent_at=sent_at, error=error)
+    await session.commit()
+
+    await session.refresh(invite)
+    return OrgInviteResponse.model_validate(invite)
+
+
+@router.post("/{id}/invites/{invite_id}/resend", response_model=OrgInviteResponse)
+async def resend_org_invite(
+    id: uuid.UUID,
+    invite_id: uuid.UUID,
+    auth: AuthContext = Depends(get_current_user),
+    invite_repo: OrgInviteRepository = Depends(_get_invite_repo),
+    org_repo: OrganizationRepository = Depends(_get_org_repo),
+    session: AsyncSession = Depends(get_db),
+) -> OrgInviteResponse:
+    """초대 재발송 — expires_at 갱신 + 이메일 재발송. owner/admin만 가능."""
+    await _require_owner_or_admin(id, auth, org_repo)
+
+    invite = await invite_repo.resend(invite_id=invite_id, org_id=id)
+    if invite is None:
+        raise HTTPException(status_code=404, detail="Pending invite not found")
+
+    await session.commit()
+
+    org = await invite_repo.session.get(
+        __import__("app.models.organization", fromlist=["Organization"]).Organization, id
+    )
+    org_name = org.name if org else str(id)
+    error = send_invite_email(to=invite.email, org_name=org_name, token=invite.token, role=invite.role)
+    sent_at = None if error else datetime.now(timezone.utc)
+    await invite_repo.update_email_result(invite.id, sent_at=sent_at, error=error)
+    await session.commit()
+
+    await session.refresh(invite)
     return OrgInviteResponse.model_validate(invite)
 
 
