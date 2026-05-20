@@ -310,6 +310,7 @@ async def create_conversation(
 @router.get("")
 async def list_conversations(
     project_id: uuid.UUID = Query(...),
+    include_agent_conversations: bool = Query(default=False),
     db: AsyncSession = Depends(get_db),
     auth: AuthContext = Depends(get_current_user),
     org_id: uuid.UUID = Depends(get_verified_org_id),
@@ -317,12 +318,35 @@ async def list_conversations(
     """GET /api/v2/conversations — 최근 메시지 미리보기 + 참여 대화 목록."""
     sender = await _resolve_member(auth, org_id, db, project_id=project_id)
 
+    # AC5: include_agent_conversations는 owner/admin만 허용
+    if include_agent_conversations and sender.role not in ("owner", "admin"):
+        raise HTTPException(status_code=403, detail="Only owner/admin can view agent conversations.")
+
     conv_ids_result = await db.execute(
         select(ConversationParticipant.conversation_id).where(
             ConversationParticipant.member_id == sender.id
         )
     )
-    conv_ids = [r[0] for r in conv_ids_result.all()]
+    conv_ids = set(r[0] for r in conv_ids_result.all())
+
+    # AC1/2: project 내 agent type member가 participant인 conversation 포함
+    if include_agent_conversations:
+        agent_ids_result = await db.execute(
+            select(TeamMember.id).where(
+                TeamMember.project_id == project_id,
+                TeamMember.org_id == org_id,
+                TeamMember.type == "agent",
+                TeamMember.is_active.is_(True),
+            )
+        )
+        agent_ids = [r[0] for r in agent_ids_result.all()]
+        if agent_ids:
+            agent_conv_result = await db.execute(
+                select(ConversationParticipant.conversation_id).where(
+                    ConversationParticipant.member_id.in_(agent_ids)
+                )
+            )
+            conv_ids.update(r[0] for r in agent_conv_result.all())
 
     if not conv_ids:
         return {"data": []}
