@@ -183,11 +183,15 @@ async def test_create_organization_409_slug_conflict():
 async def test_delete_organization_200():
     client, session, app = await _client()
     try:
-        with patch("app.repositories.organization.OrganizationRepository.delete", new_callable=AsyncMock) as mock_del:
+        with patch("app.repositories.organization.OrganizationRepository.delete_by_user", new_callable=AsyncMock) as mock_del:
             mock_del.return_value = {"ok": True}
 
             async with client as c:
-                resp = await c.delete(f"/api/v2/organizations/{ORG_ENTRY_ID}?requester_member_id={MEMBER_ID}")
+                resp = await c.request(
+                    "DELETE",
+                    f"/api/v2/organizations/{ORG_ENTRY_ID}",
+                    json={"confirmation": "Test Org"},
+                )
 
         assert resp.status_code == 200
         assert resp.json()["ok"] is True
@@ -199,11 +203,15 @@ async def test_delete_organization_200():
 async def test_delete_organization_403_not_owner():
     client, session, app = await _client()
     try:
-        with patch("app.repositories.organization.OrganizationRepository.delete", new_callable=AsyncMock) as mock_del:
+        with patch("app.repositories.organization.OrganizationRepository.delete_by_user", new_callable=AsyncMock) as mock_del:
             mock_del.return_value = {"ok": False, "reason": "forbidden"}
 
             async with client as c:
-                resp = await c.delete(f"/api/v2/organizations/{ORG_ENTRY_ID}?requester_member_id={MEMBER_ID}")
+                resp = await c.request(
+                    "DELETE",
+                    f"/api/v2/organizations/{ORG_ENTRY_ID}",
+                    json={"confirmation": "Test Org"},
+                )
 
         assert resp.status_code == 403
     finally:
