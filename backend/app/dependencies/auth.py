@@ -193,7 +193,8 @@ async def get_verified_org_id(
         _check_api_key_scope(auth, request.method)
 
     jwt_org_id = auth.claims.get("app_metadata", {}).get("org_id")
-    raw = jwt_org_id or x_org_id
+    # X-Org-Id 헤더 우선 — org 전환 프리뷰(unified-switcher) 지원. 항상 membership 검증.
+    raw = x_org_id or jwt_org_id
     if not raw:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
@@ -204,8 +205,8 @@ async def get_verified_org_id(
     except ValueError:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Invalid org_id format")
 
-    if not jwt_org_id and x_org_id:
-        # 헤더 fallback 사용 시에만 membership 검증 — JWT org_id는 발급 시 검증됨
+    if x_org_id:
+        # 헤더 사용 시 항상 membership 검증 (JWT org_id와 다를 수 있음)
         await _verify_org_membership(auth.user_id, org_id, db, request)
 
     jwt_project_id = auth.claims.get("app_metadata", {}).get("project_id")
