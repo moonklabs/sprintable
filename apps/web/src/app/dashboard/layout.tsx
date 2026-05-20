@@ -10,9 +10,9 @@ interface MemberContext {
 }
 
 interface OrgMembership {
-  org_id: string;
-  org_name: string;
-  org_slug: string;
+  id: string;
+  name: string;
+  slug: string;
   role: string;
 }
 
@@ -44,9 +44,9 @@ export default async function DashboardLayout({
 
   const rawOrgs: OrgMembership[] = orgsRes?.ok ? ((await orgsRes.json()) as OrgMembership[]) : [];
   const orgMemberships = rawOrgs.map((o) => ({
-    orgId: o.org_id,
-    orgName: o.org_name,
-    orgSlug: o.org_slug,
+    orgId: o.id,
+    orgName: o.name,
+    orgSlug: o.slug,
     role: o.role,
   }));
 
