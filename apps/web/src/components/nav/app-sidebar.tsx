@@ -25,8 +25,7 @@ import { LogoutButton } from '@/app/dashboard/logout-button';
 import { LocaleSwitcher } from '@/components/locale-switcher';
 import { ThemeToggle } from '@/components/nav/theme-toggle';
 import { CommandPalette } from '@/components/command-palette/command-palette';
-import { ProjectSwitcher } from '@/components/nav/project-switcher';
-import { OrganizationSwitcher, type OrgSwitcherItem } from '@/components/nav/organization-switcher';
+import { UnifiedSwitcher, type OrgSwitcherItem } from '@/components/nav/unified-switcher';
 import {
   Sidebar,
   SidebarContent,
@@ -47,7 +46,6 @@ interface AppSidebarProps {
   orgId?: string;
   orgMemberships?: OrgSwitcherItem[];
   projectId?: string;
-  projectName?: string;
   projectMemberships: Array<{ projectId: string; projectName: string }>;
 }
 
@@ -63,7 +61,6 @@ export function AppSidebar({
   orgId,
   orgMemberships = [],
   projectId,
-  projectName,
   projectMemberships,
 }: AppSidebarProps) {
   const pathname = usePathname();
@@ -125,25 +122,13 @@ export function AppSidebar({
   return (
     <Sidebar variant="inset" collapsible="offcanvas">
       <SidebarHeader className="py-3">
-        {orgMemberships.length > 0 && (
-          <OrganizationSwitcher
-            orgs={orgMemberships}
-            currentOrgId={orgId}
-            className="w-full"
-          />
-        )}
-        {projectMemberships.length > 0 ? (
-          <ProjectSwitcher
-            projects={projectMemberships}
-            currentProjectId={projectId}
-            orgId={orgId}
-            className="w-full"
-          />
-        ) : (
-          <div className="truncate px-2 py-1 text-sm font-medium text-sidebar-foreground">
-            {projectName ?? 'Sprintable'}
-          </div>
-        )}
+        <UnifiedSwitcher
+          orgs={orgMemberships}
+          currentOrgId={orgId}
+          projects={projectMemberships}
+          currentProjectId={projectId}
+          className="w-full"
+        />
         <button
           type="button"
           onClick={openPalette}

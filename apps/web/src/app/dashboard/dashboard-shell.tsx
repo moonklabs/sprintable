@@ -8,7 +8,7 @@ import { TopBar } from '@/components/nav/top-bar';
 import { TopBarProvider } from '@/components/nav/top-bar-context';
 import { SidebarProvider, SidebarInset } from '@/components/ui/sidebar';
 import { RefreshProvider } from '@/contexts/refresh-context';
-import type { OrgSwitcherItem } from '@/components/nav/organization-switcher';
+import type { OrgSwitcherItem } from '@/components/nav/unified-switcher';
 
 export interface DashboardProjectOption {
   projectId: string;
@@ -55,7 +55,6 @@ export function DashboardShell({
             <AppSidebar
               currentTeamMemberId={currentTeamMemberId}
               projectId={projectId}
-              projectName={projectName}
               projectMemberships={projectMemberships}
               orgId={orgId}
               orgMemberships={orgMemberships}
