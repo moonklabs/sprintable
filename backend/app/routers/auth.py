@@ -1018,6 +1018,75 @@ async def switch_project(
     return _ok(tokens)
 
 
+# ─── POST /api/v2/auth/switch-org ────────────────────────────────────────────
+
+class SwitchOrganizationRequest(BaseModel):
+    org_id: uuid.UUID
+
+
+@router.post("/switch-org")
+async def switch_organization(
+    body: SwitchOrganizationRequest,
+    session: AsyncSession = Depends(get_db),
+    auth: AuthContext = Depends(get_current_user),
+) -> JSONResponse:
+    """Organization 전환 — org_members 검증 + last_project_id 갱신 + 새 토큰 발급."""
+    user = await _get_user_by_id(session, uuid.UUID(auth.user_id))
+    if user is None:
+        return _err("USER_NOT_FOUND", "User not found", 404)
+
+    # org_members 소속 여부 확인
+    membership = await session.execute(
+        select(OrgMember)
+        .where(
+            OrgMember.org_id == body.org_id,
+            OrgMember.user_id == user.id,
+            OrgMember.deleted_at.is_(None),
+        )
+        .limit(1)
+    )
+    if membership.scalar_one_or_none() is None:
+        return _err("NOT_ORG_MEMBER", "Not a member of this organization", 403)
+
+    # 대상 org의 team_member 조회 → last_project_id 갱신
+    member_in_org = await session.execute(
+        select(TeamMember)
+        .where(
+            TeamMember.org_id == body.org_id,
+            or_(TeamMember.user_id == user.id, TeamMember.id == user.id),
+            TeamMember.is_active.is_(True),
+        )
+        .order_by(TeamMember.created_at.asc())
+        .limit(1)
+    )
+    team_member = member_in_org.scalar_one_or_none()
+
+    if team_member is not None:
+        user.last_project_id = team_member.project_id
+
+    # 기존 refresh token 무효화
+    await session.execute(
+        update(RefreshToken)
+        .where(RefreshToken.user_id == user.id, RefreshToken.revoked_at.is_(None))
+        .values(revoked_at=datetime.now(timezone.utc))
+    )
+
+    # 새 토큰 발급 — _build_app_metadata가 last_project_id 기준으로 org_id 반영
+    app_metadata = await _build_app_metadata(user, session)
+    # team_member 없이 org_id만 있는 경우 (org 가입 후 프로젝트 미배정) fallback
+    if not app_metadata.get("org_id"):
+        app_metadata["org_id"] = str(body.org_id)
+
+    tokens = create_tokens(str(user.id), email=user.email, app_metadata=app_metadata)
+    _, refresh_exp = create_refresh_token(str(user.id), expires_delta=timedelta(days=REFRESH_TOKEN_EXPIRE_DAYS))
+    await _store_refresh_token(session, user, tokens["refresh_token"], refresh_exp)
+
+    await session.commit()
+
+    project_id = app_metadata.get("project_id") or (str(team_member.project_id) if team_member else None)
+    return _ok({**tokens, "project_id": project_id})
+
+
 # ─── GET /api/v2/auth/me ─────────────────────────────────────────────────────
 
 class AuthMeResponse(BaseModel):
