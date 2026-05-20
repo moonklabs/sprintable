@@ -12,7 +12,7 @@ from __future__ import annotations
 
 import uuid
 from datetime import datetime, timedelta, timezone
-from unittest.mock import AsyncMock, MagicMock
+from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
@@ -121,16 +121,21 @@ async def test_owner_can_create_invite():
         mock_invite_repo = MagicMock()
         mock_invite_repo.is_already_member = AsyncMock(return_value=False)
         mock_invite_repo.create = AsyncMock(return_value=_mock_invite())
+        mock_invite_repo.update_email_result = AsyncMock()
+        mock_invite_repo.session = MagicMock()
+        mock_invite_repo.session.get = AsyncMock(return_value=None)
 
         app.dependency_overrides[_get_org_repo] = lambda: mock_org_repo
         app.dependency_overrides[_get_invite_repo] = lambda: mock_invite_repo
         session.commit = AsyncMock()
+        session.refresh = AsyncMock()
 
-        async with client as c:
-            resp = await c.post(
-                f"/api/v2/organizations/{ORG_ID}/invites",
-                json={"email": "new@example.com", "role": "member"},
-            )
+        with patch("app.routers.org_invites.send_invite_email", return_value=None):
+            async with client as c:
+                resp = await c.post(
+                    f"/api/v2/organizations/{ORG_ID}/invites",
+                    json={"email": "new@example.com", "role": "member"},
+                )
 
         assert resp.status_code == 201
         data = resp.json()
@@ -152,16 +157,21 @@ async def test_admin_can_create_invite():
         mock_invite_repo = MagicMock()
         mock_invite_repo.is_already_member = AsyncMock(return_value=False)
         mock_invite_repo.create = AsyncMock(return_value=_mock_invite())
+        mock_invite_repo.update_email_result = AsyncMock()
+        mock_invite_repo.session = MagicMock()
+        mock_invite_repo.session.get = AsyncMock(return_value=None)
 
         app.dependency_overrides[_get_org_repo] = lambda: mock_org_repo
         app.dependency_overrides[_get_invite_repo] = lambda: mock_invite_repo
         session.commit = AsyncMock()
+        session.refresh = AsyncMock()
 
-        async with client as c:
-            resp = await c.post(
-                f"/api/v2/organizations/{ORG_ID}/invites",
-                json={"email": "new@example.com", "role": "member"},
-            )
+        with patch("app.routers.org_invites.send_invite_email", return_value=None):
+            async with client as c:
+                resp = await c.post(
+                    f"/api/v2/organizations/{ORG_ID}/invites",
+                    json={"email": "new@example.com", "role": "member"},
+                )
 
         assert resp.status_code == 201
     finally:
