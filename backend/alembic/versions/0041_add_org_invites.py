@@ -43,10 +43,17 @@ def upgrade() -> None:
             server_default=sa.func.now(),
             nullable=False,
         ),
-        # 동일 org + email 중복 초대 방지
-        sa.UniqueConstraint("organization_id", "email", name="uq_org_invites_org_email"),
+    )
+    # pending 상태에서만 org+email 유니크 — revoke 후 재초대 허용
+    op.create_index(
+        "uq_org_invites_org_email_pending",
+        "org_invites",
+        ["organization_id", "email"],
+        unique=True,
+        postgresql_where=sa.text("status = 'pending'"),
     )
 
 
 def downgrade() -> None:
+    op.drop_index("uq_org_invites_org_email_pending", table_name="org_invites")
     op.drop_table("org_invites")

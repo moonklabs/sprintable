@@ -32,6 +32,17 @@ class OrgInviteRepository:
         )
         return result.scalar_one_or_none() is not None
 
+    async def has_pending_invite(self, org_id: uuid.UUID, email: str) -> bool:
+        """같은 org+email의 pending 초대가 이미 존재하는지 확인."""
+        result = await self.session.execute(
+            select(OrgInvite.id).where(
+                OrgInvite.organization_id == org_id,
+                OrgInvite.email == email.lower().strip(),
+                OrgInvite.status == "pending",
+            ).limit(1)
+        )
+        return result.scalar_one_or_none() is not None
+
     async def create(
         self,
         org_id: uuid.UUID,
@@ -39,7 +50,9 @@ class OrgInviteRepository:
         role: str,
         created_by: uuid.UUID,
     ) -> OrgInvite | None:
-        """초대 생성. 중복(org+email) 시 None 반환."""
+        """초대 생성. pending 중복(org+email) 시 None 반환 (revoke 후 재초대 허용)."""
+        if await self.has_pending_invite(org_id=org_id, email=email):
+            return None
         now = datetime.now(timezone.utc)
         invite = OrgInvite(
             organization_id=org_id,
