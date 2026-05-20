@@ -51,7 +51,7 @@ from app.core.rate_limit import limiter
 from app.dependencies.auth import AuthContext, get_current_user
 from app.dependencies.database import get_db
 from app.models.invitation import Invitation
-from app.models.project import OrgMember
+from app.models.project import OrgMember, Project
 from app.models.team import TeamMember
 from app.models.login_audit_log import LoginAuditLog
 from app.models.user import RefreshToken, User
@@ -1043,6 +1043,17 @@ async def switch_organization(
 
     if team_member is not None:
         user.last_project_id = team_member.project_id
+    else:
+        # team_member 없음 (opt-out 모델) — 대상 org의 첫 project로 last_project_id 갱신.
+        # 미설정 시 _build_app_metadata가 이전 org project_id를 JWT에 심어 context 불일치 발생.
+        first_proj_result = await session.execute(
+            select(Project)
+            .where(Project.org_id == body.org_id, Project.deleted_at.is_(None))
+            .order_by(Project.created_at.asc())
+            .limit(1)
+        )
+        first_proj = first_proj_result.scalar_one_or_none()
+        user.last_project_id = first_proj.id if first_proj else None
 
     # 기존 refresh token 무효화
     await session.execute(
