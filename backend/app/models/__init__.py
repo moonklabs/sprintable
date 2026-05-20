@@ -30,6 +30,7 @@ from app.models.standup import StandupEntry, StandupFeedback
 from app.models.team import TeamMember
 from app.models.file_lock import FileLock
 from app.models.org_invite import OrgInvite
+from app.models.project_access import ProjectAccess
 
 __all__ = [
     "AgentAuditLog",
@@ -67,6 +68,7 @@ __all__ = [
     "NotificationSetting",
     "OrgInvite",
     "OrgMember",
+    "ProjectAccess",
     "Organization",
     "Project",
     "ProjectSetting",
