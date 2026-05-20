@@ -3,6 +3,8 @@
 이 라우터는 EE_ENABLED 환경에서만 main.py에 등록됨.
 OSS 빌드(is_ee_enabled=False)에서는 import되지 않아 403 방어 불필요.
 """
+import hashlib
+import hmac
 import logging
 import uuid
 from datetime import datetime, timezone
@@ -10,7 +12,7 @@ from datetime import datetime, timezone
 import httpx
 from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Request
 from pydantic import BaseModel
-from sqlalchemy import select
+from sqlalchemy import select, text
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.config import settings
@@ -194,6 +196,18 @@ async def create_checkout_session(
     }
 
 
+def _verify_polar_signature(raw_body: bytes, signature_header: str | None) -> bool:
+    """Polar HMAC-SHA256 signature 검증. secret 미설정 시 검증 스킵 (dev sandbox)."""
+    secret = settings.polar_webhook_secret
+    if not secret:
+        logger.warning("POLAR_WEBHOOK_SECRET not set — skipping signature verification (dev only)")
+        return True
+    if not signature_header:
+        return False
+    expected = hmac.new(secret.encode(), raw_body, hashlib.sha256).hexdigest()
+    return hmac.compare_digest(expected, signature_header.removeprefix("sha256="))
+
+
 @router.post("/webhook")
 async def polar_webhook(
     request: Request,
@@ -201,28 +215,87 @@ async def polar_webhook(
     session: AsyncSession = Depends(get_db),
     _ee: None = Depends(_require_ee),
 ) -> dict:
-    """Polar 웹훅 수신 — checkout.completed 시 Subscription 상태 갱신."""
+    """Polar 웹훅 수신 — signature 검증 + 이벤트별 Subscription 갱신 + 멱등 처리."""
+    raw_body = await request.body()
+
+    # AC2: Signature 검증
+    signature = request.headers.get("X-Polar-Webhook-Signature") or request.headers.get("webhook-signature")
+    if not _verify_polar_signature(raw_body, signature):
+        raise HTTPException(status_code=401, detail="Invalid webhook signature")
+
     try:
-        payload = await request.json()
+        import json as _json
+        payload = _json.loads(raw_body)
     except Exception:
         raise HTTPException(status_code=400, detail="Invalid JSON payload")
 
+    event_id = payload.get("id") or payload.get("event_id")
     event_type = payload.get("type")
-    logger.info("Polar webhook received: %s", event_type)
+    logger.info("Polar webhook received: %s (id=%s)", event_type, event_id)
 
+    # AC5: 멱등 처리 — 이미 처리된 event_id 스킵
+    if event_id:
+        dup = await session.execute(
+            text("SELECT 1 FROM polar_webhook_events WHERE event_id = :eid"),
+            {"eid": str(event_id)},
+        )
+        if dup.first() is not None:
+            logger.info("Duplicate webhook event %s — skipped", event_id)
+            return {"ok": True, "duplicate": True}
+        await session.execute(
+            text("INSERT INTO polar_webhook_events (event_id, event_type) VALUES (:eid, :etype)"),
+            {"eid": str(event_id), "etype": event_type or "unknown"},
+        )
+        await session.commit()
+
+    data = payload.get("data", {})
+
+    # AC3: checkout.completed → Subscription 활성화
     if event_type == "checkout.completed":
-        data = payload.get("data", {})
         metadata = data.get("metadata", {})
         org_id_str = metadata.get("org_id")
         product = data.get("product", {})
         tier = "pro" if "pro" in (product.get("name", "")).lower() else "team"
         billing_cycle = "yearly" if "yearly" in str(data.get("product_price", {}).get("type", "")).lower() else "monthly"
-
         if org_id_str:
             background_tasks.add_task(
                 _update_subscription, session, uuid.UUID(org_id_str), tier, billing_cycle,
-                data.get("customer_id"), data.get("subscription_id"),
+                data.get("customer_id"), data.get("subscription_id"), "active",
             )
+
+    # AC4: subscription.updated → status/tier 갱신
+    elif event_type == "subscription.updated":
+        metadata = data.get("metadata", {})
+        org_id_str = metadata.get("org_id")
+        if not org_id_str:
+            # polar_subscription_id로 역추적
+            polar_sub_id = data.get("id")
+            sub_row = await session.execute(
+                select(OrgSubscription.org_id).where(OrgSubscription.polar_subscription_id == polar_sub_id)
+            )
+            org_row = sub_row.first()
+            org_id_str = str(org_row[0]) if org_row else None
+        if org_id_str:
+            new_status = data.get("status", "active")
+            product = data.get("product", {})
+            tier = "pro" if "pro" in (product.get("name", "")).lower() else "team"
+            billing_cycle = "yearly" if data.get("recurring_interval") == "year" else "monthly"
+            background_tasks.add_task(
+                _update_subscription, session, uuid.UUID(org_id_str), tier, billing_cycle,
+                data.get("customer_id"), data.get("id"), new_status,
+            )
+
+    # AC4: subscription.canceled → status=cancelled
+    elif event_type in ("subscription.canceled", "subscription.cancelled"):
+        polar_sub_id = data.get("id")
+        sub_row = await session.execute(
+            select(OrgSubscription).where(OrgSubscription.polar_subscription_id == polar_sub_id)
+        )
+        sub = sub_row.scalar_one_or_none()
+        if sub:
+            sub.status = "cancelled"
+            await session.commit()
+            logger.info("Subscription cancelled for polar_sub_id=%s", polar_sub_id)
 
     return {"ok": True}
 
@@ -234,6 +307,7 @@ async def _update_subscription(
     billing_cycle: str,
     polar_customer_id: str | None,
     polar_subscription_id: str | None,
+    status: str = "active",
 ) -> None:
     """Subscription 레코드 upsert."""
     from sqlalchemy.dialects.postgresql import insert as pg_insert
@@ -251,7 +325,7 @@ async def _update_subscription(
         )
         .on_conflict_do_update(
             index_elements=["org_id"],
-            set_={"tier": tier, "billing_cycle": billing_cycle, "status": "active",
+            set_={"tier": tier, "billing_cycle": billing_cycle, "status": status,
                   "polar_customer_id": polar_customer_id or "", "updated_at": now},
         )
     )
