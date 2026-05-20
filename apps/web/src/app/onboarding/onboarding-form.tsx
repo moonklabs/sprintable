@@ -3,6 +3,8 @@
 import { useState } from 'react';
 import Link from 'next/link';
 import { UpgradeModal } from '@/components/ui/upgrade-modal';
+import { Button } from '@/components/ui/button';
+import { OperatorInput, OperatorTextarea, OperatorSelect } from '@/components/ui/operator-control';
 import { useTranslations } from 'next-intl';
 
 function getAppOrigin() {
@@ -179,7 +181,6 @@ export function OnboardingForm({ initialStep, initialOrgId }: OnboardingFormProp
     setLoading(true);
     setError('');
 
-    // 에이전트 팀원 생성
     const memberRes = await fetch('/api/team-members', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
@@ -205,7 +206,6 @@ export function OnboardingForm({ initialStep, initialOrgId }: OnboardingFormProp
       return;
     }
 
-    // API 키 자동 발급
     const keyRes = await fetch(`/api/agents/${agentId}/api-key`, { method: 'POST' });
     const keyJson = await keyRes.json() as { data?: { api_key: string } };
     if (keyRes.ok && keyJson.data?.api_key) {
@@ -221,29 +221,29 @@ export function OnboardingForm({ initialStep, initialOrgId }: OnboardingFormProp
   };
 
   return (
-    <div className="flex min-h-screen items-center justify-center bg-gray-50">
-      <div className="w-full max-w-md space-y-6 rounded-2xl bg-white p-4 shadow-lg sm:p-8">
-        {/* Progress bar */}
-        <div className="space-y-1">
-          <div className="flex justify-between text-xs text-gray-400">
+    <div className="flex min-h-screen items-center justify-center bg-background px-4">
+      <div className="w-full max-w-md space-y-6 rounded-2xl border border-border bg-card p-6 shadow-lg sm:p-8">
+        {/* 진행 표시줄 */}
+        <div className="space-y-1.5">
+          <div className="flex justify-between text-xs text-muted-foreground">
             <span>{t('stepOf', { current: stepIndex + 1, total: STEPS.length })}</span>
           </div>
-          <div className="h-1.5 w-full rounded-full bg-gray-100">
+          <div className="h-1.5 w-full rounded-full bg-muted">
             <div
-              className="h-1.5 rounded-full bg-blue-600 transition-all duration-300"
+              className="h-1.5 rounded-full bg-primary transition-all duration-300"
               style={{ width: `${((stepIndex + 1) / STEPS.length) * 100}%` }}
             />
           </div>
         </div>
 
         <div className="text-center">
-          <h1 className="text-2xl font-bold text-gray-900">
+          <h1 className="text-2xl font-bold text-foreground">
             {step === 'org' && t('createOrg')}
             {step === 'project' && t('createProject')}
             {step === 'agent' && t('createAgent')}
             {step === 'connect' && t('connectAgent')}
           </h1>
-          <p className="mt-2 text-sm text-gray-500">
+          <p className="mt-2 text-sm text-muted-foreground">
             {step === 'org' && t('welcome')}
             {step === 'project' && t('projectSubtitle', { orgName })}
             {step === 'agent' && t('agentSubtitle')}
@@ -252,178 +252,183 @@ export function OnboardingForm({ initialStep, initialOrgId }: OnboardingFormProp
         </div>
 
         {error && (
-          <div className="rounded-lg bg-red-50 p-3 text-sm text-red-600">
+          <div className="rounded-lg border border-destructive/20 bg-destructive/10 p-3 text-sm text-destructive">
             {error}
           </div>
         )}
 
         {step === 'org' && (
           <div className="space-y-4">
-            <div>
-              <label className="block text-sm font-medium text-gray-700">{t('orgName')}</label>
-              <input
+            <div className="space-y-1.5">
+              <label className="text-sm font-medium text-foreground">{t('orgName')}</label>
+              <OperatorInput
                 type="text"
                 value={orgName}
                 onChange={(e) => handleOrgNameChange(e.target.value)}
                 placeholder={t('orgNamePlaceholder')}
-                className="mt-1 w-full rounded-lg border border-gray-300 px-3 py-2 text-sm focus:border-blue-500 focus:outline-none focus:ring-1 focus:ring-blue-500"
               />
             </div>
-            <div>
-              <label className="block text-sm font-medium text-gray-700">{t('slug')}</label>
-              <input
+            <div className="space-y-1.5">
+              <label className="text-sm font-medium text-foreground">{t('slug')}</label>
+              <OperatorInput
                 type="text"
                 value={orgSlug}
                 onChange={(e) => handleOrgSlugChange(e.target.value)}
                 placeholder={t('slugPlaceholder')}
-                className="mt-1 w-full rounded-lg border border-gray-300 px-3 py-2 text-sm focus:border-blue-500 focus:outline-none focus:ring-1 focus:ring-blue-500"
               />
               {orgSlug && !slugValid ? (
-                <p className="mt-1 text-xs text-red-500">영소문자, 숫자, 하이픈만 사용 가능합니다</p>
+                <p className="text-xs text-destructive">영소문자, 숫자, 하이픈만 사용 가능합니다</p>
               ) : (
-                <p className="mt-1 text-xs text-gray-400">sprintable.app/{orgSlug || '...'}</p>
+                <p className="text-xs text-muted-foreground">sprintable.app/{orgSlug || '...'}</p>
               )}
             </div>
-            <button
-              onClick={handleCreateOrg}
+            <Button
+              variant="hero"
+              size="lg"
+              className="w-full"
+              onClick={() => void handleCreateOrg()}
               disabled={!orgName.trim() || !orgSlug.trim() || !slugValid || loading}
-              className="w-full rounded-lg bg-blue-600 px-4 py-2 text-sm font-medium text-white transition hover:bg-blue-700 disabled:opacity-50"
             >
               {loading ? t('creating') : t('createOrg')}
-            </button>
+            </Button>
           </div>
         )}
 
         {step === 'project' && (
           <div className="space-y-4">
-            <div>
-              <label className="block text-sm font-medium text-gray-700">{t('projectName')}</label>
-              <input
+            <div className="space-y-1.5">
+              <label className="text-sm font-medium text-foreground">{t('projectName')}</label>
+              <OperatorInput
                 type="text"
                 value={projectName}
                 onChange={(e) => setProjectName(e.target.value)}
                 placeholder={t('projectNamePlaceholder')}
-                className="mt-1 w-full rounded-lg border border-gray-300 px-3 py-2 text-sm focus:border-blue-500 focus:outline-none focus:ring-1 focus:ring-blue-500"
               />
             </div>
-            <div>
-              <label className="block text-sm font-medium text-gray-700">{t('projectDesc')}</label>
-              <textarea
+            <div className="space-y-1.5">
+              <label className="text-sm font-medium text-foreground">{t('projectDesc')}</label>
+              <OperatorTextarea
                 value={projectDesc}
                 onChange={(e) => setProjectDesc(e.target.value)}
                 placeholder={t('projectDescPlaceholder')}
                 rows={3}
-                className="mt-1 w-full rounded-lg border border-gray-300 px-3 py-2 text-sm focus:border-blue-500 focus:outline-none focus:ring-1 focus:ring-blue-500"
               />
             </div>
-            <button
-              onClick={handleCreateProject}
+            <Button
+              variant="hero"
+              size="lg"
+              className="w-full"
+              onClick={() => void handleCreateProject()}
               disabled={!projectName.trim() || loading}
-              className="w-full rounded-lg bg-blue-600 px-4 py-2 text-sm font-medium text-white transition hover:bg-blue-700 disabled:opacity-50"
             >
               {loading ? t('creating') : t('createProjectAction')}
-            </button>
+            </Button>
           </div>
         )}
 
         {step === 'agent' && (
           <div className="space-y-4">
-            <div>
-              <label className="block text-sm font-medium text-gray-700">{t('agentName')}</label>
-              <input
+            <div className="space-y-1.5">
+              <label className="text-sm font-medium text-foreground">{t('agentName')}</label>
+              <OperatorInput
                 type="text"
                 value={agentName}
                 onChange={(e) => setAgentName(e.target.value)}
                 placeholder={t('agentNamePlaceholder')}
-                className="mt-1 w-full rounded-lg border border-gray-300 px-3 py-2 text-sm focus:border-blue-500 focus:outline-none focus:ring-1 focus:ring-blue-500"
               />
             </div>
-            <div>
-              <label className="block text-sm font-medium text-gray-700">{t('agentRole')}</label>
-              <select
+            <div className="space-y-1.5">
+              <label className="text-sm font-medium text-foreground">{t('agentRole')}</label>
+              <OperatorSelect
                 value={agentRole}
                 onChange={(e) => setAgentRole(e.target.value)}
-                className="mt-1 w-full rounded-lg border border-gray-300 px-3 py-2 text-sm focus:border-blue-500 focus:outline-none focus:ring-1 focus:ring-blue-500"
               >
                 {AGENT_ROLES.map((r) => (
                   <option key={r} value={r}>{r}</option>
                 ))}
-              </select>
+              </OperatorSelect>
             </div>
-            <button
-              onClick={handleCreateAgent}
+            <Button
+              variant="hero"
+              size="lg"
+              className="w-full"
+              onClick={() => void handleCreateAgent()}
               disabled={!agentName.trim() || loading}
-              className="w-full rounded-lg bg-blue-600 px-4 py-2 text-sm font-medium text-white transition hover:bg-blue-700 disabled:opacity-50"
             >
               {loading ? t('creating') : t('createAgentAction')}
-            </button>
-            <button
+            </Button>
+            <Button
+              variant="glass"
+              size="lg"
+              className="w-full"
               onClick={handleFinish}
-              className="w-full rounded-lg border border-gray-300 px-4 py-2 text-sm font-medium text-gray-600 transition hover:bg-gray-50"
             >
               {t('skip')}
-            </button>
+            </Button>
           </div>
         )}
 
         {step === 'connect' && (
           <div className="space-y-4">
             {newApiKey ? (
-              <div className="rounded-md border border-gray-200 bg-gray-50 p-3 space-y-2">
+              <div className="rounded-md border border-border bg-muted/30 p-3 space-y-2">
                 <div className="flex items-center justify-between gap-2">
-                  <p className="text-xs font-semibold text-gray-700">{t('mcpConfigTitle')}</p>
+                  <p className="text-xs font-semibold text-foreground">{t('mcpConfigTitle')}</p>
                   <button
+                    type="button"
                     onClick={() => void handleCopy(buildMcpConfig(newApiKey), 'mcp')}
-                    className="rounded border border-gray-300 px-2 py-1 text-xs text-gray-600 hover:bg-gray-100 transition"
+                    className="rounded border border-border px-2 py-1 text-xs text-muted-foreground hover:bg-muted transition-colors"
                   >
                     {copied === 'mcp' ? '✓ Copied' : 'Copy'}
                   </button>
                 </div>
-                <pre className="overflow-x-auto rounded bg-white border border-gray-100 p-2 text-xs text-gray-700">
+                <pre className="overflow-x-auto rounded-md border border-border bg-background p-2 text-xs text-foreground">
                   {buildMcpConfig(newApiKey)}
                 </pre>
               </div>
             ) : (
-              <div className="rounded-md border border-amber-200 bg-amber-50 p-3 space-y-2">
-                <p className="text-sm text-amber-800">{t('apiKeyFailedMembers')}</p>
+              <div className="rounded-md border border-amber-500/20 bg-amber-500/10 p-3 space-y-2">
+                <p className="text-sm text-amber-600 dark:text-amber-400">{t('apiKeyFailedMembers')}</p>
                 <Link
                   href="/settings?tab=members"
-                  className="inline-block rounded border border-amber-400 bg-white px-3 py-1 text-xs font-medium text-amber-700 hover:bg-amber-50 transition"
+                  className="inline-block rounded border border-amber-500/30 bg-background px-3 py-1 text-xs font-medium text-amber-600 hover:bg-amber-500/10 transition-colors dark:text-amber-400"
                 >
                   {t('goToMembersAgents')} →
                 </Link>
               </div>
             )}
 
-            <div className="rounded-md border border-gray-200 bg-gray-50 p-3 space-y-2">
+            <div className="rounded-md border border-border bg-muted/30 p-3 space-y-2">
               <div className="flex items-center justify-between gap-2">
-                <p className="text-xs font-semibold text-gray-700">{t('promptTitle')}</p>
+                <p className="text-xs font-semibold text-foreground">{t('promptTitle')}</p>
                 <button
+                  type="button"
                   onClick={() => void handleCopy(LLMS_PROMPT(), 'prompt')}
-                  className="rounded border border-gray-300 px-2 py-1 text-xs text-gray-600 hover:bg-gray-100 transition"
+                  className="rounded border border-border px-2 py-1 text-xs text-muted-foreground hover:bg-muted transition-colors"
                 >
                   {copied === 'prompt' ? '✓ Copied' : 'Copy'}
                 </button>
               </div>
-              <p className="break-all rounded bg-white border border-gray-100 p-2 text-xs text-gray-700">
+              <p className="break-all rounded-md border border-border bg-background p-2 text-xs text-foreground">
                 {LLMS_PROMPT()}
               </p>
             </div>
 
-            {/* Members > Agents 경로 안내 */}
-            <div className="rounded-md border border-gray-100 bg-gray-50 px-3 py-2 text-xs text-gray-500">
+            <div className="rounded-md border border-border bg-muted/30 px-3 py-2 text-xs text-muted-foreground">
               에이전트 추가 및 API Key 관리:{' '}
-              <Link href="/settings?tab=members" className="font-medium text-blue-600 hover:underline">
+              <Link href="/settings?tab=members" className="font-medium text-primary hover:underline">
                 Settings → Members → Agents
               </Link>
             </div>
 
-            <button
+            <Button
+              variant="hero"
+              size="lg"
+              className="w-full"
               onClick={handleFinish}
-              className="w-full rounded-lg bg-blue-600 px-4 py-2 text-sm font-medium text-white transition hover:bg-blue-700"
             >
               {t('finish')}
-            </button>
+            </Button>
           </div>
         )}
       </div>
