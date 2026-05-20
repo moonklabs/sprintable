@@ -278,6 +278,15 @@ async def test_list_invites_owner():
 
 # ─── Schema 검증 ─────────────────────────────────────────────────────────────
 
+def test_list_pending_filters_expired_in_source():
+    """list_pending 소스에 expires_at > now 필터 존재."""
+    import inspect
+    from app.repositories.org_invite import OrgInviteRepository
+    source = inspect.getsource(OrgInviteRepository.list_pending)
+    assert "expires_at" in source
+    assert "now" in source
+
+
 def test_create_org_invite_schema():
     from app.schemas.org_invite import CreateOrgInvite
     fields = set(CreateOrgInvite.model_fields.keys())

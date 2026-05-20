@@ -71,10 +71,15 @@ class OrgInviteRepository:
         return invite
 
     async def list_pending(self, org_id: uuid.UUID) -> list[OrgInvite]:
-        """pending 상태 초대 목록 (최신순)."""
+        """pending + 미만료 초대 목록 (최신순)."""
+        now = datetime.now(timezone.utc)
         result = await self.session.execute(
             select(OrgInvite)
-            .where(OrgInvite.organization_id == org_id, OrgInvite.status == "pending")
+            .where(
+                OrgInvite.organization_id == org_id,
+                OrgInvite.status == "pending",
+                OrgInvite.expires_at > now,
+            )
             .order_by(OrgInvite.created_at.desc())
         )
         return list(result.scalars().all())
