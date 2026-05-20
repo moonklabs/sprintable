@@ -67,17 +67,21 @@ async def get_my_memberships(
     session: AsyncSession = Depends(get_db),
     auth: AuthContext = Depends(get_current_user),
 ) -> list[dict]:
+    current_org_id: str | None = auth.claims.get("app_metadata", {}).get("org_id")
+    where_clauses = [
+        or_(
+            TeamMember.id == uuid.UUID(auth.user_id),
+            TeamMember.user_id == uuid.UUID(auth.user_id),
+        ),
+        TeamMember.is_active.is_(True),
+        TeamMember.type == "human",
+    ]
+    if current_org_id:
+        where_clauses.append(TeamMember.org_id == uuid.UUID(current_org_id))
     result = await session.execute(
         select(TeamMember)
         .options(joinedload(TeamMember.project))
-        .where(
-            or_(
-                TeamMember.id == uuid.UUID(auth.user_id),
-                TeamMember.user_id == uuid.UUID(auth.user_id),
-            ),
-            TeamMember.is_active.is_(True),
-            TeamMember.type == "human",
-        )
+        .where(*where_clauses)
         .order_by(TeamMember.created_at)
     )
     members = result.scalars().all()
