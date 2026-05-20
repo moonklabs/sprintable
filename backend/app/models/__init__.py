@@ -29,6 +29,7 @@ from app.models.login_audit_log import LoginAuditLog
 from app.models.standup import StandupEntry, StandupFeedback
 from app.models.team import TeamMember
 from app.models.file_lock import FileLock
+from app.models.org_invite import OrgInvite
 
 __all__ = [
     "AgentAuditLog",
@@ -64,6 +65,7 @@ __all__ = [
     "ConversationWebhookDelivery",
     "NotificationPreference",
     "NotificationSetting",
+    "OrgInvite",
     "OrgMember",
     "Organization",
     "Project",
