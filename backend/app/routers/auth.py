@@ -1062,9 +1062,14 @@ async def switch_organization(
         .values(revoked_at=datetime.now(timezone.utc))
     )
 
-    # 새 토큰 발급 — switch-org 목적 자체가 org 전환이므로 target org_id 무조건 덮어씀
+    # 새 토큰 발급 — switch-org 목적 자체가 org 전환이므로 target org_id + project_id 모두 덮어씀
     app_metadata = await _build_app_metadata(user, session)
     app_metadata["org_id"] = str(body.org_id)
+    # project_id도 대상 org 기준으로 명시 설정 — _build_app_metadata fallback이 이전 org project 반환하는 문제 해결
+    if user.last_project_id:
+        app_metadata["project_id"] = str(user.last_project_id)
+    else:
+        app_metadata.pop("project_id", None)
 
     tokens = create_tokens(str(user.id), email=user.email, app_metadata=app_metadata)
     _, refresh_exp = create_refresh_token(str(user.id), expires_delta=timedelta(days=REFRESH_TOKEN_EXPIRE_DAYS))
