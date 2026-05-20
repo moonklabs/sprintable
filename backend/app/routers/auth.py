@@ -1071,12 +1071,9 @@ async def switch_organization(
         .values(revoked_at=datetime.now(timezone.utc))
     )
 
-    # 새 토큰 발급 — _build_app_metadata가 last_project_id 기준으로 org_id 반영
+    # 새 토큰 발급 — switch-org 목적 자체가 org 전환이므로 target org_id 무조건 덮어씀
     app_metadata = await _build_app_metadata(user, session)
-    # team_member 없는 경우(org 가입 후 프로젝트 미배정): _build_app_metadata는
-    # 이전 last_project_id 기준으로 old org_id를 반환할 수 있으므로 무조건 덮어씀
-    if team_member is None:
-        app_metadata["org_id"] = str(body.org_id)
+    app_metadata["org_id"] = str(body.org_id)
 
     tokens = create_tokens(str(user.id), email=user.email, app_metadata=app_metadata)
     _, refresh_exp = create_refresh_token(str(user.id), expires_delta=timedelta(days=REFRESH_TOKEN_EXPIRE_DAYS))
