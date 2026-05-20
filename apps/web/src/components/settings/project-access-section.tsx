@@ -54,10 +54,10 @@ export function ProjectAccessSection({ projectId, currentRole }: ProjectAccessSe
   }, [projectId]);
 
   const isBlocked = (orgMemberId: string) =>
-    accessRecords.some((r) => r.org_member_id === orgMemberId && r.permission === 'blocked');
+    accessRecords.some((r) => r.org_member_id === orgMemberId && r.permission === 'denied');
 
   const getRecord = (orgMemberId: string) =>
-    accessRecords.find((r) => r.org_member_id === orgMemberId && r.permission === 'blocked');
+    accessRecords.find((r) => r.org_member_id === orgMemberId && r.permission === 'denied');
 
   const handleToggle = async (member: OrgMember) => {
     if (!canManage || toggling) return;
@@ -78,7 +78,7 @@ export function ProjectAccessSection({ projectId, currentRole }: ProjectAccessSe
         const res = await fetch(`/api/projects/${projectId}/access`, {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ org_member_id: member.id, permission: 'blocked' }),
+          body: JSON.stringify({ org_member_id: member.id, permission: 'denied' }),
         });
         if (res.ok) {
           setMessage({ type: 'success', text: '접근이 차단됐습니다.' });

@@ -31,7 +31,7 @@ class ProjectAccess(Base):
         nullable=False,
         index=True,
     )
-    permission: Mapped[str] = mapped_column(Text, nullable=False, default="member", server_default="member")
+    permission: Mapped[str] = mapped_column(Text, nullable=False, default="allowed", server_default="allowed")
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now(), nullable=False
     )
