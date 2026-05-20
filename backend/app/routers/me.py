@@ -7,6 +7,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.dependencies.auth import AuthContext, get_current_user
 from app.dependencies.database import get_db
+from app.models.project import OrgMember
 from app.models.team import TeamMember
 from app.models.user import User
 from app.schemas.me import MeResponse, UpdateMe
@@ -47,8 +48,43 @@ async def get_me(
         .where(where_clause)
     )
     member = result.scalars().first()
+
+    if member is None and not is_api_key:
+        # fallback: org_members 기반 응답 — human TM 없는 org-members-only 환경 (E-ENTITY-CLEANUP S5 이후)
+        org_id_str = auth.claims.get("app_metadata", {}).get("org_id")
+        project_id_str = auth.claims.get("app_metadata", {}).get("project_id")
+        if org_id_str:
+            om_result = await session.execute(
+                select(OrgMember).where(
+                    OrgMember.org_id == uuid.UUID(org_id_str),
+                    OrgMember.user_id == uid,
+                    OrgMember.deleted_at.is_(None),
+                )
+            )
+            org_member = om_result.scalar_one_or_none()
+            if org_member:
+                user_result = await session.execute(select(User).where(User.id == uid))
+                user = user_result.scalar_one_or_none()
+                name = user.email if user else str(uid)
+                try:
+                    proj_id = uuid.UUID(project_id_str) if project_id_str else org_member.org_id
+                except (ValueError, AttributeError):
+                    proj_id = org_member.org_id
+                return MeResponse(
+                    id=org_member.id,
+                    org_id=org_member.org_id,
+                    project_id=proj_id,
+                    user_id=uid,
+                    name=name,
+                    type="human",
+                    role=org_member.role,
+                    is_active=True,
+                    has_password=bool(user.hashed_password) if user else None,
+                )
+
     if member is None:
         raise HTTPException(status_code=404, detail="Member not found")
+
     data = MeResponse.model_validate(member)
     data.project_name = member.project.name if member.project else None
     data.user_id = member.user_id
