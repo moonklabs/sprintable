@@ -136,6 +136,7 @@ export function AppSidebar({
           <ProjectSwitcher
             projects={projectMemberships}
             currentProjectId={projectId}
+            orgId={orgId}
             className="w-full"
           />
         ) : (

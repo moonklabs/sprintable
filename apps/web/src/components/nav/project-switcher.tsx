@@ -41,10 +41,12 @@ function ProjectInitial({ name }: { name: string }) {
 export function ProjectSwitcher({
   projects,
   currentProjectId,
+  orgId,
   className,
 }: {
   projects: ProjectSwitcherItem[];
   currentProjectId?: string;
+  orgId?: string;
   className?: string;
 }) {
   const router = useRouter();
@@ -63,7 +65,7 @@ export function ProjectSwitcher({
       const res = await fetch('/api/projects', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ name: newName.trim(), description: newDesc.trim() || null }),
+        body: JSON.stringify({ name: newName.trim(), description: newDesc.trim() || null, ...(orgId ? { org_id: orgId } : {}) }),
       });
       if (!res.ok) return;
       const data = await res.json() as { id?: string; data?: { id: string } };
