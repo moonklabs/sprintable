@@ -1,9 +1,8 @@
 import uuid
-from typing import Any
 
-from fastapi import APIRouter, Depends, HTTPException, Query
+from fastapi import APIRouter, Depends, Query
 from pydantic import BaseModel, ConfigDict
-from sqlalchemy import select
+from sqlalchemy import select, text
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.dependencies.auth import AuthContext, get_current_user
@@ -30,11 +29,45 @@ async def list_members(
     session: AsyncSession = Depends(get_db),
     _auth: AuthContext = Depends(get_current_user),
 ) -> list[MemberResponse]:
-    result = await session.execute(
+    """프로젝트 멤버 목록.
+
+    Human: org_members + project_access JOIN (opt-out 모델 — 레코드 없음 = 접근 허용).
+    Agent: team_members(type=agent) 그대로 유지.
+    """
+    result: list[MemberResponse] = []
+
+    # Human members — org_members에 속하고 project_access 'blocked' 제외
+    human_rows = await session.execute(
+        text(
+            """
+            SELECT om.id, COALESCE(u.email, '') AS name, om.role
+            FROM org_members om
+            JOIN users u ON u.id = om.user_id
+            JOIN projects p ON p.org_id = om.org_id AND p.id = :project_id
+            WHERE om.deleted_at IS NULL
+              AND NOT EXISTS (
+                  SELECT 1 FROM project_access pa
+                  WHERE pa.org_member_id = om.id
+                    AND pa.project_id = :project_id
+                    AND pa.permission = 'blocked'
+              )
+            ORDER BY name
+            """
+        ),
+        {"project_id": str(project_id)},
+    )
+    for row in human_rows:
+        result.append(MemberResponse(id=row[0], name=row[1], type="human", role=row[2], is_active=True))
+
+    # Agent members — team_members(type=agent)은 기존 그대로
+    agent_result = await session.execute(
         select(TeamMember).where(
             TeamMember.project_id == project_id,
+            TeamMember.type == "agent",
             TeamMember.is_active.is_(True),
         ).order_by(TeamMember.name)
     )
-    members = result.scalars().all()
-    return [MemberResponse.model_validate(m) for m in members]
+    for agent in agent_result.scalars().all():
+        result.append(MemberResponse.model_validate(agent))
+
+    return result
