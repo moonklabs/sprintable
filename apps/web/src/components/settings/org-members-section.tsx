@@ -56,11 +56,11 @@ export function OrgMembersSection({ orgId, currentRole }: OrgMembersSectionProps
       fetch(`/api/organizations/${orgId}/invites`).catch(() => null),
     ]);
     if (membersRes?.ok) {
-      const raw = await membersRes.json() as { data?: Array<{ id: string; user_id: string; role: 'owner' | 'admin' | 'member'; created_at: string }> };
+      const raw = await membersRes.json() as { data?: Array<{ id: string; user_id: string; email?: string | null; role: 'owner' | 'admin' | 'member'; created_at: string }> };
       setMembers((raw.data ?? []).map((m) => ({
         id: m.id,
         user_id: m.user_id,
-        name: m.user_id.slice(0, 8),
+        name: m.email || m.user_id.slice(0, 8),
         role: m.role,
         joined_at: m.created_at,
       })));
