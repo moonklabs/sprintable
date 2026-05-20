@@ -43,30 +43,27 @@ async def create_project(
 
     project = await repo.create(name=body.name, description=body.description)
 
-    # Auto-attach org-level team members (project_id IS NULL) to new project
+    # Auto-attach org-level AGENT team_members (project_id IS NULL) to new project.
+    # Human members no longer need team_member records — access is via org_members (E-ENTITY-CLEANUP S5).
     await session.execute(
         text(
             "INSERT INTO project_memberships (project_id, team_member_id)"
             " SELECT :project_id, id FROM team_members"
-            " WHERE org_id = :org_id AND project_id IS NULL AND is_active = TRUE"
+            " WHERE org_id = :org_id AND project_id IS NULL AND is_active = TRUE AND type = 'agent'"
             " ON CONFLICT DO NOTHING"
         ),
         {"org_id": str(body.org_id), "project_id": str(project.id)},
     )
 
-    # OSS bootstrap: 프로젝트 생성 시 인증 유저 team_member 자동 생성
-    # (Supabase trg_org_bootstrap_owner 대체 — project_id가 확정된 이 시점에 생성)
+    # Ensure the creating user is in org_members (opt-out model: org membership = project access).
     if auth.user_id:
         await session.execute(
             text(
-                "INSERT INTO team_members"
-                " (id, org_id, project_id, user_id, name, type, role, is_active, color)"
-                " SELECT gen_random_uuid(), :org_id, :project_id, :user_id,"
-                "        COALESCE(u.email, 'owner'), 'human', 'member', true, '#4F46E5'"
-                " FROM users u WHERE u.id = :user_id"
-                " ON CONFLICT DO NOTHING"
+                "INSERT INTO org_members (id, org_id, user_id, role)"
+                " VALUES (gen_random_uuid(), :org_id, :user_id, 'member')"
+                " ON CONFLICT (org_id, user_id) DO NOTHING"
             ),
-            {"org_id": str(body.org_id), "project_id": str(project.id), "user_id": auth.user_id},
+            {"org_id": str(body.org_id), "user_id": auth.user_id},
         )
 
     await session.commit()
