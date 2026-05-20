@@ -2,7 +2,6 @@
 
 import { useState } from 'react';
 import Link from 'next/link';
-import { useRouter } from 'next/navigation';
 import { UpgradeModal } from '@/components/ui/upgrade-modal';
 import { useTranslations } from 'next-intl';
 
@@ -34,7 +33,6 @@ type Step = 'org' | 'project' | 'agent' | 'connect';
 const STEPS: Step[] = ['org', 'project', 'agent', 'connect'];
 
 export function OnboardingForm() {
-  const router = useRouter();
   const t = useTranslations('onboarding');
 
   const [step, setStep] = useState<Step>('org');
@@ -210,8 +208,7 @@ export function OnboardingForm() {
   };
 
   const handleFinish = () => {
-    router.push('/dashboard');
-    router.refresh();
+    window.location.href = '/dashboard';
   };
 
   return (
