@@ -147,6 +147,8 @@ function applyConversationMessageUpdate(
   return [item, ...updated];
 }
 
+const PAGE_LIMIT = 30;
+
 export function ChatListView({ projectId, currentTeamMemberId }: ChatListViewProps) {
   const t = useTranslations('chats');
   const router = useRouter();
@@ -154,6 +156,11 @@ export function ChatListView({ projectId, currentTeamMemberId }: ChatListViewPro
   const [allConversations, setAllConversations] = useState<ConversationItem[]>([]);
   const [isAdminOrOwner, setIsAdminOrOwner] = useState(false);
   const [loading, setLoading] = useState(true);
+  const [loadingMore, setLoadingMore] = useState(false);
+  const [myOffset, setMyOffset] = useState(0);
+  const [myTotal, setMyTotal] = useState(0);
+  const [agentOffset, setAgentOffset] = useState(0);
+  const [agentTotal, setAgentTotal] = useState(0);
   const [showModal, setShowModal] = useState(false);
 
   const convsRef = useRef(conversations);
@@ -170,33 +177,44 @@ export function ChatListView({ projectId, currentTeamMemberId }: ChatListViewPro
     void checkRole();
   }, []);
 
-  const fetchConversations = useCallback(async () => {
+  const fetchConversations = useCallback(async (nextOffset = 0, append = false) => {
     try {
-      const res = await fetch(`/api/conversations?project_id=${projectId}`);
+      const res = await fetch(
+        `/api/conversations?project_id=${projectId}&limit=${PAGE_LIMIT}&offset=${nextOffset}`
+      );
       if (!res.ok) return;
-      const json = await res.json() as { data: ConversationItem[] };
-      setConversations(json.data ?? []);
+      const json = await res.json() as { data: ConversationItem[]; total: number };
+      const items = json.data ?? [];
+      setConversations((prev) => append ? [...prev, ...items] : items);
+      setMyOffset(nextOffset + items.length);
+      setMyTotal(json.total ?? 0);
     } finally {
       setLoading(false);
+      setLoadingMore(false);
     }
   }, [projectId]);
 
-  const fetchAllConversations = useCallback(async () => {
-    const res = await fetch(`/api/conversations?project_id=${projectId}&include_agent_conversations=true`);
+  const fetchAllConversations = useCallback(async (nextOffset = 0, append = false) => {
+    const res = await fetch(
+      `/api/conversations?project_id=${projectId}&include_agent_conversations=true&limit=${PAGE_LIMIT}&offset=${nextOffset}`
+    );
     if (!res.ok) return;
-    const json = await res.json() as { data: ConversationItem[] };
-    setAllConversations(json.data ?? []);
+    const json = await res.json() as { data: ConversationItem[]; total: number };
+    const items = json.data ?? [];
+    setAllConversations((prev) => append ? [...prev, ...items] : items);
+    setAgentOffset(nextOffset + items.length);
+    setAgentTotal(json.total ?? 0);
   }, [projectId]);
 
-  useEffect(() => { void fetchConversations(); }, [fetchConversations]);
+  useEffect(() => { void fetchConversations(0, false); }, [fetchConversations]);
 
   useEffect(() => {
-    if (isAdminOrOwner) void fetchAllConversations();
+    if (isAdminOrOwner) void fetchAllConversations(0, false);
   }, [isAdminOrOwner, fetchAllConversations]);
 
   const handleConversationMessage = useCallback((payload: { conversation_id?: string; content?: string; created_at?: string }) => {
-    setConversations((prev) => applyConversationMessageUpdate(prev, payload, () => void fetchConversations()));
-    setAllConversations((prev) => applyConversationMessageUpdate(prev, payload, () => void fetchAllConversations()));
+    setConversations((prev) => applyConversationMessageUpdate(prev, payload, () => void fetchConversations(0, false)));
+    setAllConversations((prev) => applyConversationMessageUpdate(prev, payload, () => void fetchAllConversations(0, false)));
   }, [fetchConversations, fetchAllConversations]);
 
   useChatSse({
@@ -245,6 +263,16 @@ export function ChatListView({ projectId, currentTeamMemberId }: ChatListViewPro
           ))}
         </div>
       )}
+      {conversations.length < myTotal && (
+        <button
+          type="button"
+          onClick={() => { setLoadingMore(true); void fetchConversations(myOffset, true); }}
+          disabled={loadingMore}
+          className="w-full rounded-lg py-2 text-xs text-muted-foreground transition hover:text-foreground disabled:opacity-50"
+        >
+          {loadingMore ? '불러오는 중…' : `더 보기 (${myTotal - conversations.length}건)`}
+        </button>
+      )}
     </div>
   );
 
@@ -260,6 +288,15 @@ export function ChatListView({ projectId, currentTeamMemberId }: ChatListViewPro
       {agentOnlyConvs.map((conv) => (
         <ConversationRow key={conv.id} conv={conv} currentMemberId={currentTeamMemberId} isAgentConv onClick={() => router.push(`/chats/${conv.id}`)} />
       ))}
+      {allConversations.length < agentTotal && (
+        <button
+          type="button"
+          onClick={() => void fetchAllConversations(agentOffset, true)}
+          className="w-full rounded-lg py-2 text-xs text-muted-foreground transition hover:text-foreground"
+        >
+          더 보기 ({agentTotal - allConversations.length}건)
+        </button>
+      )}
     </div>
   );
 
