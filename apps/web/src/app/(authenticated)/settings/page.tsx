@@ -7,6 +7,7 @@ import { useTranslations } from 'next-intl';
 import { BarChart2, Bell, Bot, Check, CreditCard, FolderKanban, GitBranch, Key, Menu, Palette, Trash2, User, Users, X, Zap } from 'lucide-react';
 import { UsageDashboard } from '@/components/settings/usage-dashboard';
 import { OrgMembersSection } from '@/components/settings/org-members-section';
+import { ProjectAccessSection } from '@/components/settings/project-access-section';
 
 import { AiSettingsSection } from '@/components/settings/ai-settings';
 import { MyProfileSection } from '@/components/settings/my-profile-section';
@@ -1210,6 +1211,15 @@ export default function SettingsPage() {
                   ) : null}
                 </SectionCardBody>
               </SectionCard>
+
+              {currentProjectId && orgInfo && (
+                <div className="mt-6">
+                  <ProjectAccessSection
+                    projectId={currentProjectId}
+                    currentRole={orgInfo.role ?? 'member'}
+                  />
+                </div>
+              )}
             </TabsContent>
 
             <TabsContent value="members">

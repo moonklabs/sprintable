@@ -52,12 +52,18 @@ export function OrgMembersSection({ orgId, currentRole }: OrgMembersSectionProps
 
   const refreshData = async () => {
     const [membersRes, invitesRes] = await Promise.all([
-      fetch(`/api/organizations/${orgId}/members`).catch(() => null),
+      fetch('/api/org-members').catch(() => null),
       fetch(`/api/organizations/${orgId}/invites`).catch(() => null),
     ]);
     if (membersRes?.ok) {
-      const json = await membersRes.json() as { data?: OrgMember[] };
-      setMembers(json.data ?? []);
+      const raw = await membersRes.json() as { data?: Array<{ id: string; user_id: string; role: 'owner' | 'admin' | 'member'; created_at: string }> };
+      setMembers((raw.data ?? []).map((m) => ({
+        id: m.id,
+        user_id: m.user_id,
+        name: m.user_id.slice(0, 8),
+        role: m.role,
+        joined_at: m.created_at,
+      })));
     }
     if (invitesRes?.ok) {
       const json = await invitesRes.json() as { data?: OrgInvite[] };
@@ -94,7 +100,7 @@ export function OrgMembersSection({ orgId, currentRole }: OrgMembersSectionProps
   const handleChangeRole = async (memberId: string, newRole: 'admin' | 'member') => {
     setChangingRoleId(memberId);
     setActionMessage(null);
-    const res = await fetch(`/api/organizations/${orgId}/members/${memberId}`, {
+    const res = await fetch(`/api/org-members/${memberId}`, {
       method: 'PATCH',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ role: newRole }),
@@ -112,7 +118,7 @@ export function OrgMembersSection({ orgId, currentRole }: OrgMembersSectionProps
   const handleRemove = async (memberId: string) => {
     setRemovingId(memberId);
     setActionMessage(null);
-    const res = await fetch(`/api/organizations/${orgId}/members/${memberId}`, { method: 'DELETE' });
+    const res = await fetch(`/api/org-members/${memberId}`, { method: 'DELETE' });
     if (res.ok) {
       setActionMessage({ type: 'success', text: '멤버가 제거됐습니다.' });
       setShowRemoveConfirm(null);
