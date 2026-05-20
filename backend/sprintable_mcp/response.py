@@ -5,7 +5,7 @@ import json
 import uuid
 from datetime import date, datetime
 
-from mcp.types import CallToolResult, TextContent
+from mcp.types import TextContent
 
 
 def _default_serializer(obj: object) -> str:
@@ -22,9 +22,6 @@ def ok(data: object) -> list[TextContent]:
     return [TextContent(type="text", text=json.dumps(data, indent=2, ensure_ascii=False, default=_default_serializer))]
 
 
-def err(msg: str) -> CallToolResult:
-    """오류 응답 — isError=True CallToolResult 반환. 에이전트가 에러로 구분 가능."""
-    return CallToolResult(
-        content=[TextContent(type="text", text=f"Error: {msg}")],
-        isError=True,
-    )
+def err(msg: str) -> list[TextContent]:
+    """오류 응답 — ok()와 동일한 list[TextContent] 반환. 에러 prefix로 에이전트 구분."""
+    return [TextContent(type="text", text=f"Error: {msg}")]
