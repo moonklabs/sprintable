@@ -74,7 +74,7 @@ async def create_project_access(
     auth: AuthContext = Depends(get_current_user),
     session: AsyncSession = Depends(get_db),
 ) -> ProjectAccessResponse:
-    """프로젝트 접근 제어 레코드 생성 (기본 permission=blocked) — owner/admin만."""
+    """프로젝트 접근 제어 레코드 생성 (permission: 'allowed'|'denied') — owner/admin만."""
     await _require_owner_or_admin(project_id, auth, session)
     if body.permission not in ("allowed", "denied"):
         raise HTTPException(status_code=400, detail="permission must be 'allowed' or 'denied'")
