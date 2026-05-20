@@ -20,6 +20,7 @@ def _mock_member(role: str = "member", user_id: uuid.UUID | None = None) -> Magi
     m.role = role
     m.created_at = datetime(2026, 5, 1, tzinfo=timezone.utc)
     m.deleted_at = None
+    m.email = None  # OrgMemberResponse.email: str | None
     return m
 
 
@@ -57,8 +58,18 @@ async def _client(caller_role: str = "admin"):
 async def test_list_org_members_200():
     client, session, app, _ = await _client()
     try:
+        # list_org_members uses raw SQL text() — result is iterable rows with named attrs
+        mock_row = MagicMock()
+        mock_row.id = MEMBER_ID
+        mock_row.org_id = ORG_ID
+        mock_row.user_id = USER_ID
+        mock_row.role = "member"
+        mock_row.created_at = datetime(2026, 5, 1, tzinfo=timezone.utc)
+        mock_row.deleted_at = None
+        mock_row.email = "test@example.com"
+
         mock_result = MagicMock()
-        mock_result.scalars.return_value.all.return_value = [_mock_member()]
+        mock_result.__iter__ = MagicMock(return_value=iter([mock_row]))
         session.execute = AsyncMock(return_value=mock_result)
 
         async with client as c:
@@ -67,6 +78,7 @@ async def test_list_org_members_200():
         assert resp.status_code == 200
         assert len(resp.json()) == 1
         assert resp.json()[0]["role"] == "member"
+        assert resp.json()[0]["email"] == "test@example.com"
     finally:
         app.dependency_overrides.clear()
 
