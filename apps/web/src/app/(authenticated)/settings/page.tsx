@@ -788,7 +788,7 @@ export default function SettingsPage() {
                 </TabsTrigger>
                 <TabsTrigger value="org-members">
                   <Users className="h-4 w-4" />
-                  Members
+                  Org Members
                 </TabsTrigger>
                 <TabsTrigger value="projects">
                   <FolderKanban className="h-4 w-4" />
@@ -796,7 +796,7 @@ export default function SettingsPage() {
                 </TabsTrigger>
                 <TabsTrigger value="members">
                   <Users className="h-4 w-4" />
-                  {t('tabMembers')}
+                  Team Members
                 </TabsTrigger>
                 {isAdmin ? (
                   <>
