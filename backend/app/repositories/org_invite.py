@@ -90,6 +90,39 @@ class OrgInviteRepository:
         )
         return result.scalar_one_or_none()
 
+    async def update_email_result(
+        self, invite_id: uuid.UUID, *, sent_at: datetime | None, error: str | None
+    ) -> None:
+        """이메일 발송 결과를 invite 레코드에 기록."""
+        result = await self.session.execute(
+            select(OrgInvite).where(OrgInvite.id == invite_id)
+        )
+        invite = result.scalar_one_or_none()
+        if invite is None:
+            return
+        invite.email_sent_at = sent_at
+        invite.email_error = error
+        await self.session.flush()
+
+    async def resend(self, invite_id: uuid.UUID, org_id: uuid.UUID) -> OrgInvite | None:
+        """재발송: expires_at 갱신 + email 트래킹 초기화. 해당 org pending 초대만 대상."""
+        result = await self.session.execute(
+            select(OrgInvite).where(
+                OrgInvite.id == invite_id,
+                OrgInvite.organization_id == org_id,
+                OrgInvite.status == "pending",
+            )
+        )
+        invite = result.scalar_one_or_none()
+        if invite is None:
+            return None
+        invite.expires_at = datetime.now(timezone.utc) + timedelta(days=_INVITE_EXPIRE_DAYS)
+        invite.email_sent_at = None
+        invite.email_error = None
+        await self.session.flush()
+        await self.session.refresh(invite)
+        return invite
+
     async def revoke(self, invite_id: uuid.UUID, org_id: uuid.UUID) -> OrgInvite | None:
         result = await self.session.execute(
             select(OrgInvite).where(
