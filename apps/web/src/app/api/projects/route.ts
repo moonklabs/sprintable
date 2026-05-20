@@ -22,7 +22,8 @@ export async function POST(request: Request) {
     if (!me) return ApiErrors.unauthorized();
 
     const body = await request.json().catch(() => ({})) as Record<string, unknown>;
-    const enriched = { ...body, org_id: me.org_id };
+    // 온보딩처럼 클라이언트가 org_id를 명시한 경우 그대로 신뢰; FastAPI가 소속 Org 권한 검증
+    const enriched = { ...body, org_id: body.org_id ?? me.org_id };
 
     const syntheticRequest = new Request(request.url, {
       method: 'POST',
