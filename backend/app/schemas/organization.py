@@ -3,13 +3,21 @@ from __future__ import annotations
 import uuid
 from datetime import datetime
 
-from pydantic import BaseModel, ConfigDict
+from pydantic import BaseModel, ConfigDict, field_validator
 
 
 class CreateOrganization(BaseModel):
     name: str
     slug: str
     owner_member_id: uuid.UUID | None = None
+
+    @field_validator("name", "slug")
+    @classmethod
+    def not_empty(cls, v: str) -> str:
+        stripped = v.strip()
+        if not stripped:
+            raise ValueError("must not be empty")
+        return stripped
 
 
 class OrganizationResponse(BaseModel):
