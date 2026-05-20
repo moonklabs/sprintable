@@ -35,3 +35,13 @@ class MyOrganizationResponse(BaseModel):
 
 class UpdateOrganization(BaseModel):
     name: str
+
+
+class OrgImpactResponse(BaseModel):
+    project_count: int
+    member_count: int
+    has_active_subscription: bool
+
+
+class DeleteOrganization(BaseModel):
+    confirmation: str

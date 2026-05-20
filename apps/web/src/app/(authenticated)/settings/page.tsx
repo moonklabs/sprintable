@@ -114,6 +114,11 @@ export default function SettingsPage() {
   const [editOrgName, setEditOrgName] = useState('');
   const [savingOrgName, setSavingOrgName] = useState(false);
   const [orgNameError, setOrgNameError] = useState('');
+  const [showDeleteOrgConfirm, setShowDeleteOrgConfirm] = useState(false);
+  const [deleteOrgConfirmName, setDeleteOrgConfirmName] = useState('');
+  const [deletingOrg, setDeletingOrg] = useState(false);
+  const [orgImpact, setOrgImpact] = useState<{ project_count: number; member_count: number; has_active_subscription: boolean } | null>(null);
+  const [orgImpactLoading, setOrgImpactLoading] = useState(false);
   const [projectMemberships] = useState<Array<{ projectId: string; projectName: string }>>([]);
   const [settings, setSettings] = useState<NotificationSetting[]>([]);
   const [loading, setLoading] = useState(true);
@@ -170,6 +175,44 @@ export default function SettingsPage() {
   const [webhookEditing, setWebhookEditing] = useState<Record<string, string>>({});
   const [webhookSaving, setWebhookSaving] = useState<string | null>(null);
   const [webhookErrors, setWebhookErrors] = useState<Record<string, string>>({});
+
+  const handleOpenDeleteOrg = async () => {
+    if (!orgInfo) return;
+    setShowDeleteOrgConfirm(true);
+    setDeleteOrgConfirmName('');
+    setOrgImpact(null);
+    setOrgImpactLoading(true);
+    try {
+      const res = await fetch(`/api/organizations/${orgInfo.id}/impact`).catch(() => null);
+      if (res?.ok) {
+        const json = await res.json() as { data?: { project_count: number; member_count: number; has_active_subscription: boolean } };
+        setOrgImpact(json.data ?? null);
+      }
+    } finally {
+      setOrgImpactLoading(false);
+    }
+  };
+
+  const handleDeleteOrg = async () => {
+    if (!orgInfo || deleteOrgConfirmName !== orgInfo.name || deletingOrg) return;
+    setDeletingOrg(true);
+    try {
+      const res = await fetch(`/api/organizations/${orgInfo.id}`, {
+        method: 'DELETE',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ confirmation: orgInfo.name }),
+      });
+      if (res.ok) {
+        window.location.href = '/onboarding';
+      } else {
+        const json = await res.json().catch(() => null) as { error?: { message?: string } } | null;
+        addToast({ type: 'error', title: json?.error?.message ?? 'Organization 삭제에 실패했습니다.' });
+        setShowDeleteOrgConfirm(false);
+      }
+    } finally {
+      setDeletingOrg(false);
+    }
+  };
 
   const handleSaveOrgName = async () => {
     if (!orgInfo || !editOrgName.trim() || savingOrgName) return;
@@ -1011,6 +1054,21 @@ export default function SettingsPage() {
                   )}
                 </SectionCardBody>
               </SectionCard>
+              {orgInfo?.role === 'owner' && (
+                <SectionCard className="border-destructive/20 bg-destructive/10 mt-6">
+                  <SectionCardHeader className="border-b border-destructive/20">
+                    <div className="space-y-1">
+                      <h2 className="text-base font-semibold text-destructive">위험 구역</h2>
+                      <p className="text-sm text-destructive/80">Organization을 삭제하면 모든 Project, Member, 데이터가 영구적으로 제거됩니다.</p>
+                    </div>
+                  </SectionCardHeader>
+                  <SectionCardBody>
+                    <Button variant="destructive" onClick={() => void handleOpenDeleteOrg()}>
+                      Organization 삭제
+                    </Button>
+                  </SectionCardBody>
+                </SectionCard>
+              )}
             </TabsContent>
 
             <TabsContent value="projects">
@@ -1676,6 +1734,66 @@ export default function SettingsPage() {
           </div>
         </div>
       </Tabs>
+
+      {showDeleteOrgConfirm && orgInfo ? (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 p-4">
+          <div className="w-full max-w-md rounded-xl border border-destructive/30 bg-card p-6 shadow-md space-y-4">
+            <h3 className="text-lg font-semibold text-destructive">Organization 삭제</h3>
+
+            {/* 영향도 */}
+            {orgImpactLoading ? (
+              <div className="space-y-2">
+                {[1, 2, 3].map((i) => <div key={i} className="h-6 animate-pulse rounded bg-muted" />)}
+              </div>
+            ) : orgImpact ? (
+              <div className="rounded-md border border-border bg-muted/30 p-3 space-y-1 text-sm">
+                <p className="text-muted-foreground">삭제 시 영향 범위:</p>
+                <ul className="space-y-0.5 text-foreground">
+                  <li>• Project <span className="font-semibold">{orgImpact.project_count}개</span> 영구 삭제</li>
+                  <li>• Member <span className="font-semibold">{orgImpact.member_count}명</span> 접근 불가</li>
+                  {orgImpact.has_active_subscription && (
+                    <li className="text-amber-400">• 활성 구독이 있습니다 — 삭제 전 구독을 취소해주세요.</li>
+                  )}
+                </ul>
+              </div>
+            ) : (
+              <p className="text-sm text-muted-foreground">영향도 정보를 불러올 수 없습니다. 계속 진행해도 됩니다.</p>
+            )}
+
+            <div className="space-y-1.5">
+              <label className="text-sm font-medium text-foreground">
+                확인을 위해 Organization 이름 <span className="font-mono text-destructive">{orgInfo.name}</span>을 입력하세요.
+              </label>
+              <input
+                className="w-full rounded-md border border-input bg-background px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-destructive"
+                placeholder={orgInfo.name}
+                value={deleteOrgConfirmName}
+                onChange={(e) => setDeleteOrgConfirmName(e.target.value)}
+                autoFocus
+              />
+            </div>
+
+            <div className="flex gap-3 pt-1">
+              <Button
+                variant="glass"
+                className="flex-1"
+                onClick={() => { setShowDeleteOrgConfirm(false); setDeleteOrgConfirmName(''); }}
+                disabled={deletingOrg}
+              >
+                취소
+              </Button>
+              <Button
+                variant="destructive"
+                className="flex-1"
+                onClick={() => void handleDeleteOrg()}
+                disabled={deleteOrgConfirmName !== orgInfo.name || deletingOrg || (orgImpact?.has_active_subscription ?? false)}
+              >
+                {deletingOrg ? '삭제 중…' : '영구 삭제'}
+              </Button>
+            </div>
+          </div>
+        </div>
+      ) : null}
 
       {showDeleteConfirm ? (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 p-4">

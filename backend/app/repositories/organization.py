@@ -3,12 +3,19 @@ from __future__ import annotations
 import uuid
 from dataclasses import dataclass
 
-from sqlalchemy import select, text
+from sqlalchemy import func, select, text
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models.organization import Organization
-from app.models.project import OrgMember
+from app.models.project import OrgMember, Project
+
+
+@dataclass
+class OrgImpact:
+    project_count: int
+    member_count: int
+    has_active_subscription: bool
 
 
 @dataclass
@@ -96,6 +103,65 @@ class OrganizationRepository:
         await self.session.flush()
         await self.session.refresh(org)
         return org
+
+    async def get_impact(self, org_id: uuid.UUID) -> OrgImpact:
+        """삭제 전 영향도 조회 — project 수, member 수, 활성 subscription 여부."""
+        proj_count_row = await self.session.execute(
+            select(func.count()).select_from(Project).where(
+                Project.org_id == org_id,
+                Project.deleted_at.is_(None),
+            )
+        )
+        project_count = proj_count_row.scalar() or 0
+
+        member_count_row = await self.session.execute(
+            select(func.count()).select_from(OrgMember).where(
+                OrgMember.org_id == org_id,
+                OrgMember.deleted_at.is_(None),
+            )
+        )
+        member_count = member_count_row.scalar() or 0
+
+        sub_row = await self.session.execute(
+            text(
+                "SELECT 1 FROM org_subscriptions"
+                " WHERE org_id = :org_id AND status = 'active' LIMIT 1"
+            ),
+            {"org_id": str(org_id)},
+        )
+        has_active_subscription = sub_row.first() is not None
+
+        return OrgImpact(
+            project_count=project_count,
+            member_count=member_count,
+            has_active_subscription=has_active_subscription,
+        )
+
+    async def delete_by_user(self, org_id: uuid.UUID, user_id: uuid.UUID, confirmation: str) -> dict:
+        """owner 전용 삭제 — user_id로 직접 권한 검증 + confirmation 문자열 검사."""
+        org = await self.get(org_id)
+        if org is None:
+            return {"ok": False, "reason": "not_found"}
+
+        role = await self.get_member_role(org_id=org_id, user_id=user_id)
+        if role != "owner":
+            return {"ok": False, "reason": "forbidden"}
+
+        if confirmation != org.name:
+            return {"ok": False, "reason": "confirmation_mismatch"}
+
+        sub_check = await self.session.execute(
+            text(
+                "SELECT 1 FROM org_subscriptions"
+                " WHERE org_id = :org_id AND status = 'active' LIMIT 1"
+            ),
+            {"org_id": str(org_id)},
+        )
+        if sub_check.first() is not None:
+            return {"ok": False, "reason": "active_subscription"}
+
+        await self.session.delete(org)
+        return {"ok": True}
 
     async def delete(self, org_id: uuid.UUID, requester_member_id: uuid.UUID) -> dict:
         org = await self.get(org_id)
