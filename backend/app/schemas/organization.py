@@ -21,3 +21,13 @@ class OrganizationResponse(BaseModel):
     plan: str
     created_at: datetime
     updated_at: datetime
+
+
+class MyOrganizationResponse(BaseModel):
+    """내 Organization 목록 조회 응답 — role 포함."""
+
+    id: uuid.UUID
+    name: str
+    slug: str
+    plan: str
+    role: str
