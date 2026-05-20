@@ -159,15 +159,13 @@ async def list_activity_logs(
                 entity_title_map[(etype, row.id)] = row.title
 
     def _enrich(log: ActivityLog) -> ActivityLogItem:
-        return ActivityLogItem.model_validate(
-            log,
-            update={
-                "actor_name": actor_name_map.get(log.actor_id) if log.actor_id else None,
-                "entity_title": entity_title_map.get((log.entity_type, log.entity_id))
-                if log.entity_type and log.entity_id
-                else None,
-            },
-        )
+        base = ActivityLogItem.model_validate(log)
+        return base.model_copy(update={
+            "actor_name": actor_name_map.get(log.actor_id) if log.actor_id else None,
+            "entity_title": entity_title_map.get((log.entity_type, log.entity_id))
+            if log.entity_type and log.entity_id
+            else None,
+        })
 
     return ActivityLogListResponse(
         items=[_enrich(item) for item in items],
