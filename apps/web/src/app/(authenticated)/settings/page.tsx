@@ -33,9 +33,11 @@ import { NOTIFICATION_TYPES } from '@/lib/notification-types';
 import { isEEEnabled } from '@/lib/ee';
 import dynamic from 'next/dynamic';
 
-const BillingTab = isEEEnabled()
-  ? dynamic(() => import('@/ee/components/billing/billing-tab').then((m) => ({ default: m.BillingTab })), { ssr: false })
-  : null;
+// TypeScript 정적 해석을 위해 unconditional import — 조건부 렌더링은 JSX isEEEnabled() 체크로 처리
+const BillingTab = dynamic(
+  () => import('@/ee/components/billing/billing-tab').then((m) => ({ default: m.BillingTab })),
+  { ssr: false },
+);
 
 interface NotificationSetting {
   id: string;
