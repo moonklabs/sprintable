@@ -46,6 +46,7 @@ class Settings(BaseSettings):
     # Polar Billing SDK
     polar_access_token: str = ""
     polar_sandbox: bool = True  # dev=True(sandbox), prod=False
+    polar_webhook_secret: str = ""  # HMAC signature 검증용
 
     @property
     def is_ee_enabled(self) -> bool:
