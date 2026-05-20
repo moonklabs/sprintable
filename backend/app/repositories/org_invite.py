@@ -3,12 +3,25 @@ from __future__ import annotations
 import uuid
 from datetime import datetime, timedelta, timezone
 
+from dataclasses import dataclass
+
 from sqlalchemy import select
+from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models.org_invite import OrgInvite
+from app.models.organization import Organization
 from app.models.project import OrgMember
+
+
+@dataclass
+class InvitePreview:
+    org_name: str
+    role: str
+    status: str
+    expires_at: datetime
+    email: str
 
 _INVITE_EXPIRE_DAYS = 7
 
@@ -122,6 +135,63 @@ class OrgInviteRepository:
         await self.session.flush()
         await self.session.refresh(invite)
         return invite
+
+    async def get_preview(self, token: str) -> InvitePreview | None:
+        """token으로 초대 + org 이름 조회. 미존재 시 None."""
+        result = await self.session.execute(
+            select(OrgInvite, Organization.name)
+            .join(Organization, Organization.id == OrgInvite.organization_id)
+            .where(OrgInvite.token == token)
+        )
+        row = result.first()
+        if row is None:
+            return None
+        invite, org_name = row
+        now = datetime.now(timezone.utc)
+        effective_status = (
+            "expired" if invite.status == "pending" and invite.expires_at < now else invite.status
+        )
+        return InvitePreview(
+            org_name=org_name,
+            role=invite.role,
+            status=effective_status,
+            expires_at=invite.expires_at,
+            email=invite.email,
+        )
+
+    async def accept(self, token: str, user_id: uuid.UUID, user_email: str) -> dict:
+        """초대 수락. 성공 시 org_id/role 반환. 실패 시 reason 포함."""
+        result = await self.session.execute(
+            select(OrgInvite).where(OrgInvite.token == token)
+        )
+        invite = result.scalar_one_or_none()
+        if invite is None:
+            return {"ok": False, "reason": "not_found"}
+        if invite.status == "accepted":
+            return {"ok": False, "reason": "already_accepted"}
+        if invite.status != "pending":
+            return {"ok": False, "reason": "invalid_status"}
+        if invite.expires_at < datetime.now(timezone.utc):
+            return {"ok": False, "reason": "expired"}
+        if invite.email.lower() != user_email.lower():
+            return {"ok": False, "reason": "email_mismatch"}
+
+        # org_member 생성 (중복 시 무시)
+        await self.session.execute(
+            pg_insert(OrgMember)
+            .values(
+                org_id=invite.organization_id,
+                user_id=user_id,
+                role=invite.role,
+            )
+            .on_conflict_do_nothing(constraint="uq_org_members_org_user")
+        )
+
+        invite.status = "accepted"
+        invite.accepted_at = datetime.now(timezone.utc)
+        await self.session.flush()
+
+        return {"ok": True, "org_id": str(invite.organization_id), "role": invite.role}
 
     async def revoke(self, invite_id: uuid.UUID, org_id: uuid.UUID) -> OrgInvite | None:
         result = await self.session.execute(
