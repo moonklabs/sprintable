@@ -49,8 +49,8 @@ export function OrganizationSwitcher({ orgs, currentOrgId, className }: Organiza
     window.location.href = '/dashboard';
   }
 
-  function handleCreated() {
-    window.location.href = '/dashboard';
+  function handleCreated(orgId: string) {
+    window.location.href = `/onboarding?step=project&orgId=${orgId}`;
   }
 
   return (
