@@ -6,6 +6,7 @@ import { useRouter, useSearchParams } from 'next/navigation';
 import { useTranslations } from 'next-intl';
 import { BarChart2, Bell, Bot, Check, CreditCard, FolderKanban, GitBranch, Key, Menu, Palette, Trash2, User, Users, X, Zap } from 'lucide-react';
 import { UsageDashboard } from '@/components/settings/usage-dashboard';
+import { OrgMembersSection } from '@/components/settings/org-members-section';
 import { AiSettingsSection } from '@/components/settings/ai-settings';
 import { MyProfileSection } from '@/components/settings/my-profile-section';
 import { ByomKeyManagement } from '@/components/settings/byom-key-management';
@@ -776,6 +777,10 @@ export default function SettingsPage() {
                   <FolderKanban className="h-4 w-4" />
                   Organization
                 </TabsTrigger>
+                <TabsTrigger value="org-members">
+                  <Users className="h-4 w-4" />
+                  Members
+                </TabsTrigger>
                 <TabsTrigger value="projects">
                   <FolderKanban className="h-4 w-4" />
                   {t('tabProjects')}
@@ -1068,6 +1073,16 @@ export default function SettingsPage() {
                     </Button>
                   </SectionCardBody>
                 </SectionCard>
+              )}
+            </TabsContent>
+
+            <TabsContent value="org-members">
+              {orgId && orgInfo ? (
+                <OrgMembersSection orgId={orgId} currentRole={orgInfo.role ?? 'member'} />
+              ) : (
+                <div className="space-y-3">
+                  {[1, 2, 3].map((i) => <div key={i} className="h-12 animate-pulse rounded-md bg-muted" />)}
+                </div>
               )}
             </TabsContent>
 
