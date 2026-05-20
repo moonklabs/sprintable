@@ -266,14 +266,25 @@ async def agent_event_stream(
                 is_initial = last_event_id is None and since_timestamp is None
                 exceed, limit = _compute_backfill_mode(_ref, now, initial=is_initial)
                 if exceed:
-                    # threshold 초과: 최근 N건만 (최신순 → 역순 전달로 시간 순서 보존)
+                    # threshold 초과: _ref 이후 최근 N건만 (최신순 → 역순 전달로 시간 순서 보존)
+                    exceed_clauses: list[Any] = [
+                        Event.org_id == org_id,
+                        Event.recipient_id == member_id,
+                        Event.status == "pending",
+                    ]
+                    if _ref is not None:
+                        if last_event_id is not None:
+                            exceed_clauses.append(
+                                or_(
+                                    Event.created_at > _ref,
+                                    and_(Event.created_at == _ref, Event.id > last_event_id),
+                                )
+                            )
+                        else:
+                            exceed_clauses.append(Event.created_at > _ref)
                     result = await db.execute(
                         select(Event)
-                        .where(
-                            Event.org_id == org_id,
-                            Event.recipient_id == member_id,
-                            Event.status == "pending",
-                        )
+                        .where(*exceed_clauses)
                         .order_by(Event.created_at.desc())
                         .limit(limit)
                     )
