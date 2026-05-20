@@ -117,7 +117,7 @@ export default function SettingsPage() {
   const [showDeleteOrgConfirm, setShowDeleteOrgConfirm] = useState(false);
   const [deleteOrgConfirmName, setDeleteOrgConfirmName] = useState('');
   const [deletingOrg, setDeletingOrg] = useState(false);
-  const [orgImpact, setOrgImpact] = useState<{ project_count: number; member_count: number; subscription_active: boolean } | null>(null);
+  const [orgImpact, setOrgImpact] = useState<{ project_count: number; member_count: number; has_active_subscription: boolean } | null>(null);
   const [orgImpactLoading, setOrgImpactLoading] = useState(false);
   const [projectMemberships] = useState<Array<{ projectId: string; projectName: string }>>([]);
   const [settings, setSettings] = useState<NotificationSetting[]>([]);
@@ -185,7 +185,7 @@ export default function SettingsPage() {
     try {
       const res = await fetch(`/api/organizations/${orgInfo.id}/impact`).catch(() => null);
       if (res?.ok) {
-        const json = await res.json() as { data?: { project_count: number; member_count: number; subscription_active: boolean } };
+        const json = await res.json() as { data?: { project_count: number; member_count: number; has_active_subscription: boolean } };
         setOrgImpact(json.data ?? null);
       }
     } finally {
@@ -1751,7 +1751,7 @@ export default function SettingsPage() {
                 <ul className="space-y-0.5 text-foreground">
                   <li>• Project <span className="font-semibold">{orgImpact.project_count}개</span> 영구 삭제</li>
                   <li>• Member <span className="font-semibold">{orgImpact.member_count}명</span> 접근 불가</li>
-                  {orgImpact.subscription_active && (
+                  {orgImpact.has_active_subscription && (
                     <li className="text-amber-400">• 활성 구독이 있습니다 — 삭제 전 구독을 취소해주세요.</li>
                   )}
                 </ul>
@@ -1786,7 +1786,7 @@ export default function SettingsPage() {
                 variant="destructive"
                 className="flex-1"
                 onClick={() => void handleDeleteOrg()}
-                disabled={deleteOrgConfirmName !== orgInfo.name || deletingOrg || (orgImpact?.subscription_active ?? false)}
+                disabled={deleteOrgConfirmName !== orgInfo.name || deletingOrg || (orgImpact?.has_active_subscription ?? false)}
               >
                 {deletingOrg ? '삭제 중…' : '영구 삭제'}
               </Button>
