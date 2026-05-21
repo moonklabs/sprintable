@@ -27,6 +27,7 @@ import {
   Minus,
   FileText,
   GitBranch,
+  ChevronRight,
 } from 'lucide-react';
 
 export interface SlashMenuItem {
@@ -170,6 +171,20 @@ export const slashMenuCategories: SlashMenuCategory[] = [
   {
     label: '고급',
     items: [
+      {
+        title: 'Toggle',
+        description: '접기/펼치기 블록',
+        icon: ChevronRight,
+        command: (editor, range) =>
+          editor.chain().focus().deleteRange(range).insertContent({
+            type: 'toggleBlock',
+            attrs: { open: false },
+            content: [
+              { type: 'toggleSummary', content: [{ type: 'text', text: '토글 제목' }] },
+              { type: 'toggleContent', content: [{ type: 'paragraph' }] },
+            ],
+          }).run(),
+      },
       {
         title: 'Page Embed',
         description: '다른 문서 임베드',

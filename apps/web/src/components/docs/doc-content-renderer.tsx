@@ -102,8 +102,22 @@ export function DocContentRenderer({
       return () => button.removeEventListener('click', handleClick);
     });
 
+    // Toggle block click handlers (viewer)
+    const toggleSummaries = Array.from(root.querySelectorAll<HTMLElement>('[data-type="toggleSummary"]'));
+    const toggleCleanup = toggleSummaries.map((summary) => {
+      const handleClick = () => {
+        const block = summary.closest<HTMLElement>('[data-type="toggleBlock"]');
+        if (!block) return;
+        const isOpen = block.getAttribute('data-open') === 'true';
+        block.setAttribute('data-open', String(!isOpen));
+      };
+      summary.addEventListener('click', handleClick);
+      return () => summary.removeEventListener('click', handleClick);
+    });
+
     return () => {
       cleanup.forEach((dispose) => dispose());
+      toggleCleanup.forEach((dispose) => dispose());
     };
   }, [codeCopiedLabel, codeCopyLabel, content, contentFormat]);
 

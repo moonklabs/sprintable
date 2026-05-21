@@ -47,6 +47,22 @@ turndown.addRule('compactListItem', {
   },
 });
 
+// Preserve toggle blocks as raw HTML — must be before generic block rules
+turndown.addRule('toggleBlock', {
+  filter: (node) =>
+    node.nodeName === 'DIV' &&
+    (node as HTMLElement).getAttribute('data-type') === 'toggleBlock',
+  replacement: (_content, node) => {
+    const el = node as HTMLElement;
+    const isOpen = el.getAttribute('data-open') === 'true';
+    const summaryEl = el.querySelector('[data-type="toggleSummary"]');
+    const contentEl = el.querySelector('[data-type="toggleContent"]');
+    const summaryHtml = summaryEl ? summaryEl.innerHTML : '';
+    const contentHtml = contentEl ? contentEl.innerHTML : '';
+    return `\n<div data-type="toggleBlock" data-open="${isOpen}"><div data-type="toggleSummary">${summaryHtml}</div><div data-type="toggleContent">${contentHtml}</div></div>\n`;
+  },
+});
+
 // Preserve page-embed atoms — must be before the generic block rule
 turndown.addRule('pageEmbed', {
   filter: (node) => node.nodeName === 'DIV' && node.hasAttribute('data-page-embed'),
@@ -136,10 +152,16 @@ export function markdownToHtml(rawMd: string): string {
     return `\x00CODEBLOCK${idx}\x00`;
   });
 
-  // Protect page-embed atoms — they are written as raw HTML by htmlToMarkdown() and
-  // must survive the HTML-escape pass below intact.
+  // Protect page-embed and toggle atoms — written as raw HTML by htmlToMarkdown()
+  // and must survive the HTML-escape pass below intact.
   const atomPlaceholders: string[] = [];
   html = html.replace(/<div\s+data-page-embed[^>]*><\/div>/g, (m) => {
+    const idx = atomPlaceholders.length;
+    atomPlaceholders.push(m);
+    return `\x00ATOM${idx}\x00`;
+  });
+  // Toggle blocks are stored as single-line raw HTML by the Turndown rule above
+  html = html.replace(/^<div data-type="toggleBlock"[^\n]*<\/div>$/gm, (m) => {
     const idx = atomPlaceholders.length;
     atomPlaceholders.push(m);
     return `\x00ATOM${idx}\x00`;
