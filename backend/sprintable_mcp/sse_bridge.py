@@ -346,13 +346,24 @@ async def start_sse_bridge(
 
     def _handle(event: SseEvent) -> None:
         nonlocal _current_last_event_id
-        # event_id dedup
+        # id: 필드 우선 dedup
         if event.last_event_id:
             if event.last_event_id in seen_ids:
                 _log(f"dedup: skip event_id={event.last_event_id}")
                 return
             seen_ids.add(event.last_event_id)
             _current_last_event_id = event.last_event_id
+        else:
+            # id: 필드 없을 때 data.event_id fallback dedup — 백필/live id 불일치 방어
+            try:
+                _data_eid = json.loads(event.data).get("event_id") if event.data else None
+                if _data_eid:
+                    if _data_eid in seen_ids:
+                        _log(f"dedup(data): skip event_id={_data_eid}")
+                        return
+                    seen_ids.add(_data_eid)
+            except (json.JSONDecodeError, AttributeError):
+                pass
 
         # MCP notification: webhook 유무·backfill 여부 무관하게 항상 발송 (AC-4)
         asyncio.create_task(

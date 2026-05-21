@@ -373,8 +373,9 @@ async def agent_event_stream(
                         except Exception:
                             pass
                     # event_id 없는 경로(chats direct push 등)도 id: 보장 — 재연결 추적 약화 방지
+                    # is_backfill: False 명시 + event_id 동기화 — SeenIdsCache dedup 및 relay 필터 정합성
                     _live_id = eid or str(uuid.uuid4())
-                    yield f"event: {event_type}\nid: {_live_id}\ndata: {json.dumps(event_data)}\n\n"
+                    yield f"event: {event_type}\nid: {_live_id}\ndata: {json.dumps({**event_data, 'event_id': _live_id, 'is_backfill': False})}\n\n"
                 except asyncio.TimeoutError:
                     # S20: heartbeat 후 즉시 disconnect 체크 — dead connection 조기 정리
                     yield "event: heartbeat\ndata: {}\n\n"
