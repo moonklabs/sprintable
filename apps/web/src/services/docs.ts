@@ -165,8 +165,7 @@ export class DocsService {
       if (error) throw error;
       return data;
     }
-    // OSS: title-only search via list (content search not supported in SQLite repo)
-    const all = await this.repo.list({ project_id: projectId, limit: input?.limit, cursor: input?.cursor ?? undefined });
-    return all.filter((d) => d.title.toLowerCase().includes(query.toLowerCase()));
+    // OSS / API: pass q to repo.list which forwards to FastAPI search_full_text()
+    return this.repo.list({ project_id: projectId, q: query, limit: input?.limit, cursor: input?.cursor ?? undefined, tags: input?.tags });
   }
 }

@@ -78,6 +78,8 @@ export function DocsShellClient({ projectId }: DocsShellClientProps) {
   const [tagsCollapsed, setTagsCollapsed] = useState(true);
   const [searchQuery, setSearchQuery] = useState('');
   const [searchResults, setSearchResults] = useState<Array<{ id: string; title: string; slug: string; snippet?: string }>>([]);
+  const sanitizeSnippet = (html: string) =>
+    html.replace(/<(?!\/?(?:b|mark)\b)[^>]+>/gi, '');
   const [searchLoading, setSearchLoading] = useState(false);
   const searchTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
@@ -487,7 +489,7 @@ export function DocsShellClient({ projectId }: DocsShellClientProps) {
                     {result.snippet && (
                       <span
                         className="line-clamp-2 text-[11px] leading-relaxed text-[color:var(--operator-muted)] [&_mark]:rounded [&_mark]:bg-yellow-400/40 [&_mark]:text-[color:var(--operator-foreground)] [&_mark]:px-0.5 [&_b]:rounded [&_b]:bg-yellow-400/40 [&_b]:font-normal [&_b]:text-[color:var(--operator-foreground)] [&_b]:px-0.5"
-                        dangerouslySetInnerHTML={{ __html: result.snippet }}
+                        dangerouslySetInnerHTML={{ __html: sanitizeSnippet(result.snippet) }}
                       />
                     )}
                   </button>

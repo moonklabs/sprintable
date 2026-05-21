@@ -11,6 +11,7 @@ export class SupabaseDocRepository implements IDocRepository {
         limit: filters.limit,
         cursor: filters.cursor ?? undefined,
         tags: filters.tags?.join(','),
+        q: filters.q,
       },
     });
   }
