@@ -60,6 +60,21 @@ turndown.addRule('imageWithWidth', {
   },
 });
 
+// Preserve columns block as raw HTML
+turndown.addRule('columnsBlock', {
+  filter: (node) =>
+    node.nodeName === 'DIV' &&
+    (node as HTMLElement).getAttribute('data-type') === 'columnsBlock',
+  replacement: (_content, node) => {
+    const el = node as HTMLElement;
+    const cols = el.getAttribute('data-cols') ?? '2';
+    const columnsHtml = Array.from(el.querySelectorAll('[data-type="columnBlock"]'))
+      .map((col) => `<div data-type="columnBlock">${(col as HTMLElement).innerHTML}</div>`)
+      .join('');
+    return `\n<div data-type="columnsBlock" data-cols="${cols}">${columnsHtml}</div>\n`;
+  },
+});
+
 // Preserve math block nodes as raw HTML
 turndown.addRule('mathBlock', {
   filter: (node) =>
@@ -228,6 +243,12 @@ export function markdownToHtml(rawMd: string): string {
   // and must survive the HTML-escape pass below intact.
   const atomPlaceholders: string[] = [];
   html = html.replace(/<div\s+data-page-embed[^>]*><\/div>/g, (m) => {
+    const idx = atomPlaceholders.length;
+    atomPlaceholders.push(m);
+    return `\x00ATOM${idx}\x00`;
+  });
+  // Columns blocks — may span multiple lines, protect by start tag
+  html = html.replace(/^<div data-type="columnsBlock"[\s\S]*?<\/div>\s*<\/div>$/gm, (m) => {
     const idx = atomPlaceholders.length;
     atomPlaceholders.push(m);
     return `\x00ATOM${idx}\x00`;

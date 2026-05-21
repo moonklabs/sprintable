@@ -322,6 +322,17 @@
 .tiptap-content .tiptap ul[data-type="taskList"] li[data-type="taskItem"] > div { flex: 1; min-width: 0; }
 .tiptap-content .tiptap ul[data-type="taskList"] li[data-type="taskItem"][data-checked="true"] > div p { text-decoration: line-through; opacity: 0.55; }
 
+/* ─── Column layout ─── */
+[data-type="columnsBlock"] > [data-type="columnBlock"],
+.tiptap [data-type="columnsBlock"] > .contents > [data-type="columnBlock"] { min-width: 0; }
+[data-type="columnBlock"] { min-width: 0; padding: 0.5rem; border-radius: 0.5rem; border: 1px solid transparent; }
+[data-type="columnBlock"]:focus-within { border-color: hsl(var(--border)); }
+/* Viewer grid (no NodeViewContent wrapper) */
+[data-type="columnsBlock"] { display: grid; gap: 1rem; }
+[data-type="columnsBlock"][data-cols="2"] { grid-template-columns: repeat(2, 1fr); }
+[data-type="columnsBlock"][data-cols="3"] { grid-template-columns: repeat(3, 1fr); }
+@media (max-width: 640px) { [data-type="columnsBlock"] { grid-template-columns: 1fr !important; } }
+
 /* ─── Toggle block ─── */
 [data-type="toggleBlock"][data-open="false"] > [data-type="toggleContent"],
 .tiptap [data-type="toggleBlock"][data-open="false"] > [data-type="toggleContent"] { display: none; }

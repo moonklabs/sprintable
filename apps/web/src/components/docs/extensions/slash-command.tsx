@@ -31,6 +31,7 @@ import {
   Paperclip,
   Globe,
   Sigma,
+  Columns2,
 } from 'lucide-react';
 
 export interface SlashMenuItem {
@@ -213,6 +214,20 @@ export const slashMenuCategories: SlashMenuCategory[] = [
   {
     label: '고급',
     items: [
+      {
+        title: 'Columns',
+        description: '2단/3단 컬럼 레이아웃',
+        icon: Columns2,
+        command: (editor, range) =>
+          editor.chain().focus().deleteRange(range).insertContent({
+            type: 'columnsBlock',
+            attrs: { columns: 2 },
+            content: [
+              { type: 'columnBlock', content: [{ type: 'paragraph' }] },
+              { type: 'columnBlock', content: [{ type: 'paragraph' }] },
+            ],
+          }).run(),
+      },
       {
         title: 'Math Block',
         description: 'LaTeX 블록 수식',
