@@ -47,6 +47,7 @@ class DocSummaryResponse(BaseModel):
     is_folder: bool
     tags: list[str]
     updated_at: datetime
+    snippet: str | None = None
 
 
 class DocResponse(BaseModel):
