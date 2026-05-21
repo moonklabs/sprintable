@@ -707,28 +707,6 @@ async def send_message(
     await db.commit()
     await db.refresh(msg)
 
-    # Phase 6-1: human 발신 메시지 → process_event 훅
-    # agent sender는 제외 — agent 응답이 다시 트리거해 무한 루프 생기는 것 방지
-    if sender.type != "agent" and conv.project_id:
-        try:
-            from app.services.workflow_pipeline import process_event
-            from app.services.rule_evaluator import EventContext as WorkflowEventContext
-            await process_event(db, org_id, conv.project_id, WorkflowEventContext(
-                event_type="message.created",
-                trigger_type_slug="kickoff",
-                actor_id=str(sender.id),
-                metadata={
-                    "conversation_id": str(conversation_id),
-                    "message_id": str(msg.id),
-                    "content_preview": (msg.content or "")[:200],
-                    "project_id": str(conv.project_id),
-                    "org_id": str(org_id),
-                    "sender_type": sender.type,
-                },
-            ))
-        except Exception:
-            logger.warning("process_event failed for message.created message_id=%s", msg.id, exc_info=True)
-
     # commit 완료 후 SSE push — Event가 DB에 커밋된 상태에서 push해야 race condition 없음
     for pid_str, sse_payload in pending_sse_pushes:
         _push_to_agent(pid_str, sse_payload)
