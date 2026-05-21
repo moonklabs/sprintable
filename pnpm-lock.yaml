@@ -123,6 +123,9 @@ importers:
       jose:
         specifier: ^6.2.3
         version: 6.2.3
+      katex:
+        specifier: ^0.16.47
+        version: 0.16.47
       lucide-react:
         specifier: ^1.7.0
         version: 1.7.0(react@19.2.4)

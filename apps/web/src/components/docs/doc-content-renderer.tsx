@@ -4,6 +4,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import type { MutableRefObject, ReactNode, RefObject } from 'react';
 import { getShikiHighlighter, resolveLanguage } from './lib/shiki-highlighter';
 import { detectEmbedService } from './extensions/embed-node';
+import { renderKatex } from './extensions/math-node';
 import { renderMermaid } from './lib/mermaid-renderer';
 import ReactMarkdown from 'react-markdown';
 import DOMPurify from 'dompurify';
@@ -101,6 +102,33 @@ export function DocContentRenderer({
 
       button.addEventListener('click', handleClick);
       return () => button.removeEventListener('click', handleClick);
+    });
+
+    // Math block rendering (viewer)
+    const mathBlocks = Array.from(root.querySelectorAll<HTMLElement>('[data-type="mathBlock"]'));
+    mathBlocks.forEach((block) => {
+      const latex = block.getAttribute('data-latex') ?? block.textContent ?? '';
+      if (!latex.trim()) return;
+      void renderKatex(latex, true).then(({ html: katexHtml, error }) => {
+        if (error) {
+          block.innerHTML = `<div class="rounded-lg border border-red-500/30 bg-red-500/10 p-3 text-xs text-red-400 font-mono">${escapeHtmlText(error)}</div>`;
+        } else {
+          block.innerHTML = `<div class="flex justify-center overflow-x-auto py-3 [&_.katex]:text-[color:var(--operator-foreground)]">${katexHtml}</div>`;
+        }
+      });
+    });
+
+    const mathInlines = Array.from(root.querySelectorAll<HTMLElement>('[data-type="mathInline"]'));
+    mathInlines.forEach((span) => {
+      const latex = span.textContent ?? '';
+      if (!latex.trim()) return;
+      void renderKatex(latex, false).then(({ html: katexHtml, error }) => {
+        if (error) {
+          span.className = 'rounded bg-red-500/10 px-1 text-xs text-red-400 font-mono';
+        } else {
+          span.innerHTML = katexHtml;
+        }
+      });
     });
 
     // Embed block handlers (viewer)

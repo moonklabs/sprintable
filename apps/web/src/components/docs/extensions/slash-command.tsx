@@ -30,6 +30,7 @@ import {
   ChevronRight,
   Paperclip,
   Globe,
+  Sigma,
 } from 'lucide-react';
 
 export interface SlashMenuItem {
@@ -212,6 +213,26 @@ export const slashMenuCategories: SlashMenuCategory[] = [
   {
     label: '고급',
     items: [
+      {
+        title: 'Math Block',
+        description: 'LaTeX 블록 수식',
+        icon: Sigma,
+        command: (editor, range) =>
+          editor.chain().focus().deleteRange(range).insertContent({
+            type: 'mathBlock',
+            content: [{ type: 'text', text: 'E = mc^2' }],
+          }).run(),
+      },
+      {
+        title: 'Math Inline',
+        description: 'LaTeX 인라인 수식',
+        icon: Sigma,
+        command: (editor, range) =>
+          editor.chain().focus().deleteRange(range).insertContent({
+            type: 'mathInline',
+            content: [{ type: 'text', text: 'x^2' }],
+          }).run(),
+      },
       {
         title: 'Toggle',
         description: '접기/펼치기 블록',
