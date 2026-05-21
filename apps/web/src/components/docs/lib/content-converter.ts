@@ -13,6 +13,19 @@ const turndown = new TurndownService({
 // TipTap handles structural formatting; no inline text escaping is needed.
 (turndown as unknown as { escape: (str: string) => string }).escape = (str: string) => str;
 
+// TaskList item rule — converts Tiptap taskItem nodes to GFM task list syntax (- [x] / - [ ])
+// Must be registered before the generic compactListItem rule so it wins for taskItem elements.
+turndown.addRule('taskListItem', {
+  filter: (node) =>
+    node.nodeName === 'LI' &&
+    (node as HTMLElement).getAttribute('data-type') === 'taskItem',
+  replacement: (content, node) => {
+    const checked = (node as HTMLElement).getAttribute('data-checked') === 'true';
+    const clean = content.replace(/^\n+/, '').replace(/\n\s*\n/g, '\n').trimEnd();
+    return `- [${checked ? 'x' : ' '}] ${clean}\n`;
+  },
+});
+
 // Custom list item rule — produces compact format regardless of whether
 // TipTap wrapped the content in <p> tags (which it always does via schema normalization).
 // Without this, Turndown outputs "loose" lists with blank lines between items:
@@ -31,6 +44,125 @@ turndown.addRule('compactListItem', {
       return `${index}. ${clean}\n`;
     }
     return `- ${clean}\n`;
+  },
+});
+
+// Preserve image width — Turndown strips style from <img>; serialize as raw HTML for round-trip
+turndown.addRule('imageWithWidth', {
+  filter: (node) =>
+    node.nodeName === 'IMG' && !!(node as HTMLElement).style.width,
+  replacement: (_content, node) => {
+    const el = node as HTMLImageElement;
+    const src = el.getAttribute('src') ?? '';
+    const alt = el.getAttribute('alt') ?? '';
+    const width = el.style.width;
+    return `\n<img src="${src}" alt="${alt}" style="width:${width};max-width:100%;height:auto">\n`;
+  },
+});
+
+// Preserve wiki link inline nodes as raw HTML
+turndown.addRule('wikiLink', {
+  filter: (node) =>
+    node.nodeName === 'SPAN' &&
+    (node as HTMLElement).getAttribute('data-type') === 'wikiLink',
+  replacement: (_content, node) => {
+    const el = node as HTMLElement;
+    const safeAttr = (s: string) =>
+      s.replace(/&/g, '&amp;').replace(/"/g, '&quot;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+    const docId = safeAttr(el.getAttribute('data-doc-id') ?? '');
+    const title = safeAttr(el.getAttribute('data-title') ?? el.textContent ?? '');
+    const slug = safeAttr(el.getAttribute('data-slug') ?? '');
+    return `<span data-type="wikiLink" data-doc-id="${docId}" data-title="${title}" data-slug="${slug}">${title}</span>`;
+  },
+});
+
+// Preserve columns block as raw HTML
+turndown.addRule('columnsBlock', {
+  filter: (node) =>
+    node.nodeName === 'DIV' &&
+    (node as HTMLElement).getAttribute('data-type') === 'columnsBlock',
+  replacement: (_content, node) => {
+    const el = node as HTMLElement;
+    const cols = el.getAttribute('data-cols') ?? '2';
+    const columnsHtml = Array.from(el.querySelectorAll('[data-type="columnBlock"]'))
+      .map((col) => `<div data-type="columnBlock">${(col as HTMLElement).innerHTML}</div>`)
+      .join('');
+    return `\n<div data-type="columnsBlock" data-cols="${cols}">${columnsHtml}</div>\n`;
+  },
+});
+
+// Preserve math block nodes as raw HTML
+turndown.addRule('mathBlock', {
+  filter: (node) =>
+    node.nodeName === 'DIV' &&
+    (node as HTMLElement).getAttribute('data-type') === 'mathBlock',
+  replacement: (_content, node) => {
+    const el = node as HTMLElement;
+    const latex = el.textContent ?? '';
+    const safeAttr = (s: string) =>
+      s.replace(/&/g, '&amp;').replace(/"/g, '&quot;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+    return `\n<div data-type="mathBlock" data-latex="${safeAttr(latex)}">${safeAttr(latex)}</div>\n`;
+  },
+});
+
+// Preserve math inline nodes as raw HTML
+turndown.addRule('mathInline', {
+  filter: (node) =>
+    node.nodeName === 'SPAN' &&
+    (node as HTMLElement).getAttribute('data-type') === 'mathInline',
+  replacement: (_content, node) => {
+    const el = node as HTMLElement;
+    const latex = el.textContent ?? '';
+    const safeAttr = (s: string) =>
+      s.replace(/&/g, '&amp;').replace(/"/g, '&quot;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+    return `<span data-type="mathInline">${safeAttr(latex)}</span>`;
+  },
+});
+
+// Preserve embed blocks as raw HTML
+turndown.addRule('embedBlock', {
+  filter: (node) =>
+    node.nodeName === 'DIV' &&
+    (node as HTMLElement).getAttribute('data-type') === 'embedBlock',
+  replacement: (_content, node) => {
+    const el = node as HTMLElement;
+    const safeAttr = (s: string) =>
+      s.replace(/&/g, '&amp;').replace(/"/g, '&quot;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+    const url = safeAttr(el.getAttribute('data-url') ?? '');
+    return `\n<div data-type="embedBlock" data-url="${url}"></div>\n`;
+  },
+});
+
+// Preserve file attachment blocks as raw HTML
+turndown.addRule('fileAttachment', {
+  filter: (node) =>
+    node.nodeName === 'DIV' &&
+    (node as HTMLElement).getAttribute('data-type') === 'fileAttachment',
+  replacement: (_content, node) => {
+    const el = node as HTMLElement;
+    const safeAttr = (s: string) =>
+      s.replace(/&/g, '&amp;').replace(/"/g, '&quot;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+    const filename = safeAttr(el.getAttribute('data-filename') ?? '');
+    const size = safeAttr(el.getAttribute('data-size') ?? '0');
+    const mimeType = safeAttr(el.getAttribute('data-mime-type') ?? '');
+    const data = el.getAttribute('data-file-data') ?? '';
+    return `\n<div data-type="fileAttachment" data-filename="${filename}" data-size="${size}" data-mime-type="${mimeType}" data-file-data="${data}"></div>\n`;
+  },
+});
+
+// Preserve toggle blocks as raw HTML — must be before generic block rules
+turndown.addRule('toggleBlock', {
+  filter: (node) =>
+    node.nodeName === 'DIV' &&
+    (node as HTMLElement).getAttribute('data-type') === 'toggleBlock',
+  replacement: (_content, node) => {
+    const el = node as HTMLElement;
+    const isOpen = el.getAttribute('data-open') === 'true';
+    const summaryEl = el.querySelector('[data-type="toggleSummary"]');
+    const contentEl = el.querySelector('[data-type="toggleContent"]');
+    const summaryHtml = summaryEl ? summaryEl.innerHTML : '';
+    const contentHtml = contentEl ? contentEl.innerHTML : '';
+    return `\n<div data-type="toggleBlock" data-open="${isOpen}"><div data-type="toggleSummary">${summaryHtml}</div><div data-type="toggleContent">${contentHtml}</div></div>\n`;
   },
 });
 
@@ -115,16 +247,66 @@ export function markdownToHtml(rawMd: string): string {
   // Extract fenced code blocks first to prevent other transforms from modifying their content.
   // Subsequent regex passes use gm flags which would otherwise corrupt multi-line code blocks.
   const codeBlockPlaceholders: string[] = [];
-  let html = md.replace(/```(\w*)\n([\s\S]*?)```/g, (_m, _lang, code) => {
+  let html = md.replace(/```(\w*)\n([\s\S]*?)```/g, (_m, lang, code) => {
     const idx = codeBlockPlaceholders.length;
-    codeBlockPlaceholders.push(`<pre><code>${escapeHtml(code.trimEnd())}</code></pre>`);
+    const langAttrs = lang ? ` data-language="${lang}" class="language-${lang}"` : '';
+    const codeClass = lang ? ` class="language-${lang}"` : '';
+    codeBlockPlaceholders.push(`<pre${langAttrs}><code${codeClass}>${escapeHtml(code.trimEnd())}</code></pre>`);
     return `\x00CODEBLOCK${idx}\x00`;
   });
 
-  // Protect page-embed atoms — they are written as raw HTML by htmlToMarkdown() and
-  // must survive the HTML-escape pass below intact.
+  // Protect page-embed and toggle atoms — written as raw HTML by htmlToMarkdown()
+  // and must survive the HTML-escape pass below intact.
   const atomPlaceholders: string[] = [];
   html = html.replace(/<div\s+data-page-embed[^>]*><\/div>/g, (m) => {
+    const idx = atomPlaceholders.length;
+    atomPlaceholders.push(m);
+    return `\x00ATOM${idx}\x00`;
+  });
+  // Columns blocks — may span multiple lines, protect by start tag
+  html = html.replace(/^<div data-type="columnsBlock"[\s\S]*?<\/div>\s*<\/div>$/gm, (m) => {
+    const idx = atomPlaceholders.length;
+    atomPlaceholders.push(m);
+    return `\x00ATOM${idx}\x00`;
+  });
+  // Math blocks — stored as single-line raw HTML
+  html = html.replace(/^<div data-type="mathBlock"[^\n]*<\/div>$/gm, (m) => {
+    const idx = atomPlaceholders.length;
+    atomPlaceholders.push(m);
+    return `\x00ATOM${idx}\x00`;
+  });
+  // Wiki link spans
+  html = html.replace(/<span data-type="wikiLink"[^>]*>[^<]*<\/span>/g, (m) => {
+    const idx = atomPlaceholders.length;
+    atomPlaceholders.push(m);
+    return `\x00ATOM${idx}\x00`;
+  });
+  // Math inline — protect span tags
+  html = html.replace(/<span data-type="mathInline">[^<]*<\/span>/g, (m) => {
+    const idx = atomPlaceholders.length;
+    atomPlaceholders.push(m);
+    return `\x00ATOM${idx}\x00`;
+  });
+  // Embed blocks — stored as single-line raw HTML
+  html = html.replace(/^<div data-type="embedBlock"[^\n]*><\/div>$/gm, (m) => {
+    const idx = atomPlaceholders.length;
+    atomPlaceholders.push(m);
+    return `\x00ATOM${idx}\x00`;
+  });
+  // File attachment blocks — stored as single-line raw HTML
+  html = html.replace(/^<div data-type="fileAttachment"[^\n]*><\/div>$/gm, (m) => {
+    const idx = atomPlaceholders.length;
+    atomPlaceholders.push(m);
+    return `\x00ATOM${idx}\x00`;
+  });
+  // Toggle blocks are stored as single-line raw HTML by the Turndown rule above
+  html = html.replace(/^<div data-type="toggleBlock"[^\n]*<\/div>$/gm, (m) => {
+    const idx = atomPlaceholders.length;
+    atomPlaceholders.push(m);
+    return `\x00ATOM${idx}\x00`;
+  });
+  // Images with width style — serialized as raw HTML by imageWithWidth Turndown rule
+  html = html.replace(/^<img\s[^>]*style="width:[^"]*"[^>]*>$/gm, (m) => {
     const idx = atomPlaceholders.length;
     atomPlaceholders.push(m);
     return `\x00ATOM${idx}\x00`;
@@ -207,6 +389,19 @@ export function markdownToHtml(rawMd: string): string {
     }
 
     return `<ol>${items.map((item) => `<li><p>${item}</p></li>`).join('')}</ol>`;
+  });
+
+  // Task lists (GFM: - [ ] / - [x]) — must be before unordered list rule
+  html = html.replace(/(?:^-\s+\[[ x]\]\s+.+(?:\n|$))+/gm, (listBlock) => {
+    const items = listBlock.trim().split('\n').filter(Boolean);
+    const listItems = items.map((line) => {
+      const match = line.match(/^-\s+\[([ x])\]\s+(.+)$/);
+      if (!match) return '';
+      const checked = match[1] === 'x';
+      const text = match[2] ?? '';
+      return `<li data-type="taskItem" data-checked="${checked}"><label><input type="checkbox"${checked ? ' checked' : ''}></label><div><p>${text}</p></div></li>`;
+    }).filter(Boolean).join('');
+    return `<ul data-type="taskList">${listItems}</ul>`;
   });
 
   // Unordered lists

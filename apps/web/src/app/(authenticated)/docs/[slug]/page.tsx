@@ -1,14 +1,19 @@
 'use client';
 
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import { useParams, useRouter } from 'next/navigation';
 import { useTranslations } from 'next-intl';
 import { DocEditor } from '@/components/docs/doc-editor';
 import { useDocSync, type SaveStatus } from '@/components/docs/use-doc-sync';
-import { Button } from '@/components/ui/button';
-import { Input } from '@/components/ui/input';
 import Link from 'next/link';
-import { Check, Copy, Eye, Trash2 } from 'lucide-react';
+import { Check, Copy, Eye, MoreHorizontal, Trash2 } from 'lucide-react';
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuSeparator,
+  DropdownMenuTrigger,
+} from '@/components/ui/dropdown-menu';
 import { useDocsLayout } from '../docs-context';
 import { EntityDispatchPanel } from '@/components/dispatch/entity-dispatch-panel';
 
@@ -55,10 +60,14 @@ export default function DocSlugPage() {
   const slug = typeof params.slug === 'string' ? params.slug : '';
   const router = useRouter();
   const t = useTranslations('docs');
+  // 신규 문서 자동 포커스: URL ?new=1 파라미터를 ref로 처리 (useSearchParams Suspense 이슈 방지)
+  const isNewRef = useRef(typeof window !== 'undefined' && new URLSearchParams(window.location.search).get('new') === '1');
+  const isNew = isNewRef.current;
 
   const { projectId, setTree, pendingDocUpdate, clearPendingDocUpdate } = useDocsLayout();
 
   const [selectedDoc, setSelectedDoc] = useState<DocDetail | null>(null);
+  const [docLoading, setDocLoading] = useState(true);
   const [title, setTitle] = useState('');
   const [content, setContent] = useState('');
   const [contentFormat, setContentFormat] = useState<'markdown' | 'html'>('markdown');
@@ -69,6 +78,12 @@ export default function DocSlugPage() {
     setSelectedDoc(doc);
     setTree((prev) => prev.map((d) => (d.id === doc.id ? { ...d, title: doc.title } : d)));
   }, [setTree]);
+
+  const handleTitleChange = useCallback((value: string) => {
+    setTitle(value);
+    setSelectedDoc((prev) => (prev ? { ...prev, title: value } : null));
+    setTree((prev) => prev.map((d) => (d.id === selectedDoc?.id ? { ...d, title: value } : d)));
+  }, [selectedDoc?.id, setTree]);
 
   const { status: saveStatus, isDirty, save } = useDocSync<DocDetail>({
     docId: selectedDoc?.id ?? null,
@@ -81,16 +96,27 @@ export default function DocSlugPage() {
 
   const fetchDoc = useCallback(async () => {
     if (!projectId || !slug) return;
+    setDocLoading(true);
     try {
       const res = await fetch(`/api/docs?project_id=${projectId}&slug=${slug}`);
-      if (!res.ok) throw new Error('Failed to fetch doc');
-      const { data } = await res.json();
+      if (!res.ok) {
+        setSelectedDoc(null);
+        return;
+      }
+      const json = await res.json();
+      const data = json?.data ?? null;
+      if (!data) {
+        setSelectedDoc(null);
+        return;
+      }
       setSelectedDoc(data);
-      setTitle(data.title);
-      setContent(data.content);
-      setContentFormat(data.content_format || 'markdown');
+      setTitle(data.title ?? '');
+      setContent(data.content ?? '');
+      setContentFormat(data.content_format ?? 'markdown');
     } catch {
       setSelectedDoc(null);
+    } finally {
+      setDocLoading(false);
     }
   }, [projectId, slug]);
 
@@ -129,7 +155,7 @@ export default function DocSlugPage() {
     router.push(`/docs/${targetSlug}`);
   }, [router]);
 
-  if (!selectedDoc) {
+  if (docLoading) {
     return (
       <div className="flex h-full items-center justify-center">
         <p className="text-sm text-[color:var(--operator-muted)]">{t('loading')}</p>
@@ -137,38 +163,51 @@ export default function DocSlugPage() {
     );
   }
 
+  if (!selectedDoc) {
+    return (
+      <div className="flex h-full items-center justify-center">
+        <p className="text-sm text-muted-foreground">{t('notFound')}</p>
+      </div>
+    );
+  }
+
+  const docActions = (
+    <DropdownMenu>
+      <DropdownMenuTrigger className="inline-flex h-8 w-8 items-center justify-center rounded-md text-muted-foreground transition-colors hover:bg-accent hover:text-accent-foreground">
+        <MoreHorizontal className="h-4 w-4" />
+      </DropdownMenuTrigger>
+      <DropdownMenuContent align="end" className="w-48">
+        {saveStatus !== 'idle' && (
+          <>
+            <div className="flex items-center px-2 py-1.5">
+              <SaveStatusIndicator status={saveStatus} t={t} />
+            </div>
+            <DropdownMenuSeparator />
+          </>
+        )}
+        <DropdownMenuItem onClick={handleCopyMarkdown}>
+          {mdCopied ? <Check className="mr-2 h-4 w-4 text-emerald-500" /> : <Copy className="mr-2 h-4 w-4" />}
+          {t('copyMarkdown')}
+        </DropdownMenuItem>
+        <DropdownMenuItem render={<Link href={`/docs/${slug}/view`} />}>
+          <Eye className="mr-2 h-4 w-4" />
+          {t('preview')}
+        </DropdownMenuItem>
+        {selectedDoc.doc_type !== 'sprint_report' && (
+          <>
+            <DropdownMenuSeparator />
+            <DropdownMenuItem onClick={handleDelete} className="text-destructive focus:text-destructive">
+              <Trash2 className="mr-2 h-4 w-4" />
+              {t('deleteDoc')}
+            </DropdownMenuItem>
+          </>
+        )}
+      </DropdownMenuContent>
+    </DropdownMenu>
+  );
+
   return (
     <div className="flex h-full flex-col overflow-hidden">
-      {/* Header */}
-      <div className="flex-shrink-0 border-b border-border px-4 py-3 lg:px-6 lg:py-5">
-        <div className="flex items-center justify-between gap-4">
-          <div className="flex-1 min-w-0">
-            <Input
-              value={title}
-              onChange={(e) => setTitle(e.target.value)}
-              className="border-none bg-transparent px-0 text-2xl font-semibold focus-visible:ring-0"
-              placeholder={t('titlePlaceholder')}
-            />
-          </div>
-          <div className="flex items-center gap-3">
-            <SaveStatusIndicator status={saveStatus} t={t} />
-            <Button asChild variant="ghost" size="sm" title={t('preview')}>
-              <Link href={`/docs/${slug}/view`}>
-                <Eye className="h-4 w-4" />
-              </Link>
-            </Button>
-            <Button variant="ghost" size="sm" onClick={handleCopyMarkdown} title="마크다운 복사">
-              {mdCopied ? <Check className="h-4 w-4 text-emerald-500" /> : <Copy className="h-4 w-4" />}
-            </Button>
-            {selectedDoc.doc_type !== 'sprint_report' && (
-              <Button variant="ghost" size="sm" onClick={handleDelete}>
-                <Trash2 className="h-4 w-4" />
-              </Button>
-            )}
-          </div>
-        </div>
-      </div>
-
       {/* Dispatch */}
       {projectId && (
         <div className="flex-shrink-0 border-b border-border px-4 py-2 lg:px-6">
@@ -196,6 +235,11 @@ export default function DocSlugPage() {
           onSave={save}
           autosave={autosave}
           onAutosaveToggle={setAutosave}
+          title={title}
+          onTitleChange={handleTitleChange}
+          titlePlaceholder={t('titlePlaceholder')}
+          titleAutoFocus={isNew || !title}
+          actions={docActions}
           labels={{
             contentFormat: t('contentFormat'),
             markdown: t('formatMarkdown'),

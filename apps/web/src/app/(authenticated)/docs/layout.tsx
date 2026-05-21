@@ -4,13 +4,11 @@ import { useCallback, useEffect, useState } from 'react';
 import { useParams, useRouter } from 'next/navigation';
 import { useTranslations } from 'next-intl';
 import { DocTree } from '@/components/docs/doc-tree';
-import { DocsShell } from '@/components/docs/docs-shell';
 import { Button } from '@/components/ui/button';
 import { EmptyState } from '@/components/ui/empty-state';
-import { Input } from '@/components/ui/input';
 import { ToastContainer, useToast } from '@/components/ui/toast';
 import { TopBarSlot } from '@/components/nav/top-bar-slot';
-import { ChevronDown, ChevronRight, Menu, Plus, X } from 'lucide-react';
+import { ChevronDown, ChevronLeft, ChevronRight, Menu, Plus, X } from 'lucide-react';
 import { useDashboardContext } from '../../dashboard/dashboard-shell';
 import { DocsLayoutContext, type Doc, type DocUpdate } from './docs-context';
 
@@ -35,14 +33,20 @@ export default function DocsLayout({ children }: { children: React.ReactNode }) 
   const [pendingDocUpdate, setPendingDocUpdate] = useState<DocUpdate | null>(null);
   const clearPendingDocUpdate = useCallback(() => setPendingDocUpdate(null), []);
 
-  // Create form states
-  const [showCreate, setShowCreate] = useState(false);
-  const [newTitle, setNewTitle] = useState('');
-  const [newContent, setNewContent] = useState('');
-  const [newSlug, setNewSlug] = useState('');
-  const [newParentId, setNewParentId] = useState<string | null>(null);
-  const [slugManuallyEdited, setSlugManuallyEdited] = useState(false);
-  const [showAdvancedOptions, setShowAdvancedOptions] = useState(false);
+  const [sidebarCollapsed, setSidebarCollapsed] = useState(() => {
+    if (typeof window === 'undefined') return false;
+    return localStorage.getItem('docs-sidebar-collapsed') === 'true';
+  });
+
+  const handleToggleSidebar = useCallback(() => {
+    setSidebarCollapsed((prev) => {
+      const next = !prev;
+      localStorage.setItem('docs-sidebar-collapsed', String(next));
+      return next;
+    });
+  }, []);
+
+  const [isCreating, setIsCreating] = useState(false);
 
   const fetchTree = useCallback(async (tags?: string[], cursor?: string | null) => {
     if (!projectId) return;
@@ -118,49 +122,29 @@ export default function DocsLayout({ children }: { children: React.ReactNode }) 
     } catch { await fetchTree(); }
   }, [fetchTree]);
 
-  const generateSlug = useCallback((s: string): string =>
-    s.toLowerCase().trim().replace(/\s+/g, '-').replace(/[^\wㄱ-힝-]/g, '').replace(/-+/g, '-').replace(/^-|-$/g, ''),
-  []);
-
-  const handleNewTitleChange = useCallback((val: string) => {
-    setNewTitle(val);
-    if (!slugManuallyEdited) setNewSlug(generateSlug(val));
-  }, [slugManuallyEdited, generateSlug]);
-
-  const handleSlugChange = useCallback((val: string) => {
-    setNewSlug(val);
-    setSlugManuallyEdited(true);
-  }, []);
-
-  const handleAddChild = useCallback(async (parentId: string) => {
-    setNewParentId(parentId);
-    setShowCreate(true);
-    setNewTitle(''); setNewContent(''); setNewSlug(''); setSlugManuallyEdited(false);
-  }, []);
-
-  const handleNewDoc = useCallback(() => {
-    setShowCreate(true);
-    setNewTitle(''); setNewSlug(''); setNewContent(''); setNewParentId(null); setSlugManuallyEdited(false);
-  }, []);
-
-  const handleCreate = useCallback(async () => {
-    if (!projectId || !newTitle.trim() || !newSlug.trim()) return;
+  const createDoc = useCallback(async (parentId: string | null = null) => {
+    if (!projectId || isCreating) return;
+    setIsCreating(true);
+    const slug = `untitled-${Date.now()}`;
     try {
       const res = await fetch('/api/docs', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ project_id: projectId, title: newTitle, slug: newSlug, content: newContent, content_format: 'markdown', parent_id: newParentId }),
+        body: JSON.stringify({ project_id: projectId, title: 'Untitled', slug, content: '', content_format: 'markdown', parent_id: parentId }),
       });
       if (!res.ok) throw new Error('Failed to create doc');
       const { data } = await res.json();
       setTree((prev) => [{ id: data.id, parent_id: data.parent_id || null, title: data.title, slug: data.slug, icon: data.icon || null, sort_order: data.sort_order || 0, is_folder: data.is_folder || false }, ...prev]);
-      setShowCreate(false); setShowAdvancedOptions(false);
-      setNewTitle(''); setNewSlug(''); setNewContent(''); setNewParentId(null); setSlugManuallyEdited(false);
-      router.push(`/docs/${data.slug}`);
+      router.push(`/docs/${data.slug}?new=1`);
     } catch {
-      // create failed
+      addToast({ title: t('createFailed'), type: 'error' });
+    } finally {
+      setIsCreating(false);
     }
-  }, [projectId, newTitle, newSlug, newContent, newParentId, router]);
+  }, [projectId, isCreating, router, addToast, t]);
+
+  const handleNewDoc = useCallback(() => { void createDoc(null); }, [createDoc]);
+  const handleAddChild = useCallback((parentId: string) => createDoc(parentId), [createDoc]);
 
   const sidebarContent = (
     <>
@@ -212,61 +196,43 @@ export default function DocsLayout({ children }: { children: React.ReactNode }) 
     </>
   );
 
-  const createForm = (
-    <div className="flex h-full flex-col">
-      <div className="flex-shrink-0 border-b border-border px-4 py-3 lg:px-6 lg:py-5">
-        <div className="flex items-center justify-between">
-          <div className="space-y-1">
-            <p className="text-[11px] font-semibold uppercase tracking-[0.2em] text-muted-foreground">Draft</p>
-            <h2 className="text-2xl font-semibold">{t('newDoc')}</h2>
-          </div>
-          <Button variant="ghost" size="sm" onClick={() => { setShowCreate(false); setNewParentId(null); }}><X className="h-4 w-4" /></Button>
-        </div>
-      </div>
-      <div className="flex-1 overflow-y-auto px-4 py-4 lg:px-6 lg:py-6">
-        <div className="max-w-3xl space-y-5">
-          <div>
-            <label className="text-sm font-medium mb-2 block">{t('titleLabel')}</label>
-            <Input value={newTitle} onChange={(e) => handleNewTitleChange(e.target.value)} placeholder={t('titlePlaceholder')} />
-          </div>
-          <div>
-            <label className="text-sm font-medium mb-2 block">{t('contentLabel')}</label>
-            <textarea value={newContent} onChange={(e) => setNewContent(e.target.value)} placeholder={t('editorPlaceholder')} className="w-full min-h-[220px] rounded-xl border border-border bg-muted/30 px-4 py-3 text-sm text-foreground resize-none placeholder:text-muted-foreground" />
-          </div>
-          <div>
-            <button type="button" onClick={() => setShowAdvancedOptions((prev) => !prev)} className="flex items-center gap-1 text-xs text-muted-foreground hover:text-foreground transition-colors">
-              <span>{showAdvancedOptions ? '▾' : '▸'}</span>
-              <span>{t('advancedOptions')}</span>
-            </button>
-            {showAdvancedOptions && (
-              <div className="mt-3">
-                <label className="text-sm font-medium mb-2 block">{t('slugLabel')}</label>
-                <Input value={newSlug} onChange={(e) => handleSlugChange(e.target.value)} placeholder={t('slugPlaceholder')} />
-              </div>
-            )}
-          </div>
-          <div className="flex gap-2">
-            <Button onClick={handleCreate} disabled={!newTitle.trim() || !newSlug.trim()}>{tc('create')}</Button>
-            <Button variant="ghost" onClick={() => { setShowCreate(false); setNewParentId(null); }}>{tc('cancel')}</Button>
-          </div>
-        </div>
-      </div>
-    </div>
-  );
-
-  const mainContent = showCreate ? createForm : children;
 
   return (
     <DocsLayoutContext.Provider value={{ projectId, setTree, handleNewDoc, fetchTree, pendingDocUpdate, clearPendingDocUpdate }}>
       <TopBarSlot
         title={<h1 className="text-sm font-medium">{t('title')}</h1>}
-        actions={<Button size="sm" variant="outline" onClick={handleNewDoc}><Plus className="mr-1.5 h-3.5 w-3.5" />{t('newDoc')}</Button>}
+        actions={<Button size="sm" variant="outline" onClick={handleNewDoc} disabled={isCreating}><Plus className="mr-1.5 h-3.5 w-3.5" />{isCreating ? t('loading') : t('newDoc')}</Button>}
       />
 
       {/* Desktop: 2-panel (lg+) */}
-      <DocsShell sidebar={sidebarContent} className="hidden min-h-0 flex-1 lg:flex">
-        {mainContent}
-      </DocsShell>
+      <div className="hidden min-h-0 flex-1 overflow-hidden lg:flex">
+        {!sidebarCollapsed && (
+          <aside className="relative flex w-[300px] flex-shrink-0 flex-col overflow-y-auto border-r border-border/80 bg-background">
+            <button
+              type="button"
+              onClick={handleToggleSidebar}
+              title={t('hideSidebar')}
+              className="absolute right-2 top-2 z-10 rounded p-1 text-muted-foreground transition-colors hover:bg-accent hover:text-foreground"
+            >
+              <ChevronLeft className="size-4" />
+            </button>
+            {sidebarContent}
+          </aside>
+        )}
+        <section className="relative flex min-w-0 flex-1 flex-col overflow-hidden bg-background">
+          {sidebarCollapsed && (
+            <button
+              type="button"
+              onClick={handleToggleSidebar}
+              title={t('openSidebar')}
+              className="absolute left-2 top-2 z-10 rounded p-1 text-muted-foreground transition-colors hover:bg-accent hover:text-foreground"
+            >
+              <ChevronRight className="size-4" />
+            </button>
+          )}
+          {children}
+        </section>
+      </div>
 
       {/* Mobile: content + tree drawer (< lg) */}
       <div className="flex flex-1 flex-col overflow-hidden lg:hidden">
@@ -277,7 +243,7 @@ export default function DocsLayout({ children }: { children: React.ReactNode }) 
           </button>
         </div>
         <div className="flex min-h-0 flex-1 flex-col overflow-hidden bg-background">
-          {mainContent}
+          {children}
         </div>
         {treeDrawerOpen && (
           <>

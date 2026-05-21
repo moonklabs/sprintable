@@ -1,7 +1,11 @@
 'use client';
 
-import { useCallback, useEffect, useMemo, useRef } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import type { MutableRefObject, ReactNode, RefObject } from 'react';
+import { getShikiHighlighter, resolveLanguage } from './lib/shiki-highlighter';
+import { detectEmbedService } from './extensions/embed-node';
+import { renderKatex } from './extensions/math-node';
+import { renderMermaid } from './lib/mermaid-renderer';
 import ReactMarkdown from 'react-markdown';
 import DOMPurify from 'dompurify';
 import remarkGfm from 'remark-gfm';
@@ -50,6 +54,29 @@ export function DocContentRenderer({
       heading.id = seen === 0 ? baseId : `${baseId}-${seen + 1}`;
     });
 
+    // HTML format code blocks: apply Shiki highlighting via DOM
+    if (contentFormat === 'html') {
+      const preTags = Array.from(root.querySelectorAll<HTMLPreElement>('pre'));
+      preTags.forEach((pre) => {
+        const codeEl = pre.querySelector('code');
+        const text = codeEl?.textContent ?? pre.textContent ?? '';
+        if (!text.trim()) return;
+        const lang = codeEl?.className.replace('language-', '').split(' ')[0]
+          ?? pre.getAttribute('data-language')
+          ?? null;
+        void getShikiHighlighter().then((shiki) => {
+          const highlighted = shiki.codeToHtml(text, {
+            lang: resolveLanguage(lang),
+            theme: 'dark-plus',
+          });
+          const wrapper = document.createElement('div');
+          wrapper.innerHTML = highlighted;
+          wrapper.className = '[&_pre]:!bg-transparent [&_pre]:!m-0 [&_pre]:p-4 [&_pre]:text-[13px] [&_pre]:leading-6 [&_code]:!bg-transparent overflow-x-auto';
+          if (pre.parentElement) pre.replaceWith(wrapper);
+        }).catch(() => { /* fallback: keep original pre */ });
+      });
+    }
+
     const buttons = Array.from(root.querySelectorAll<HTMLButtonElement>('[data-doc-copy-button="true"]'));
     const cleanup = buttons.map((button) => {
       const handleClick = async () => {
@@ -77,8 +104,136 @@ export function DocContentRenderer({
       return () => button.removeEventListener('click', handleClick);
     });
 
+    // Wiki link click handlers (viewer)
+    const wikiLinks = Array.from(root.querySelectorAll<HTMLElement>('[data-type="wikiLink"]'));
+    const wikiCleanup = wikiLinks.map((span) => {
+      const slug = span.getAttribute('data-slug') ?? '';
+      const title = span.getAttribute('data-title') ?? span.textContent ?? '';
+      span.className = 'inline-flex cursor-pointer items-center gap-0.5 rounded px-1 py-0.5 text-[0.9em] bg-[color:var(--operator-primary)]/10 text-[color:var(--operator-primary-soft)] hover:bg-[color:var(--operator-primary)]/20 transition-colors';
+      span.title = title;
+      const handleClick = () => { if (slug) window.location.href = `/docs/${slug}`; };
+      span.addEventListener('click', handleClick);
+      return () => span.removeEventListener('click', handleClick);
+    });
+
+    // Math block rendering (viewer)
+    const mathBlocks = Array.from(root.querySelectorAll<HTMLElement>('[data-type="mathBlock"]'));
+    mathBlocks.forEach((block) => {
+      const latex = block.getAttribute('data-latex') ?? block.textContent ?? '';
+      if (!latex.trim()) return;
+      void renderKatex(latex, true).then(({ html: katexHtml, error }) => {
+        if (error) {
+          block.innerHTML = `<div class="rounded-lg border border-red-500/30 bg-red-500/10 p-3 text-xs text-red-400 font-mono">${escapeHtmlText(error)}</div>`;
+        } else {
+          block.innerHTML = `<div class="flex justify-center overflow-x-auto py-3 [&_.katex]:text-[color:var(--operator-foreground)]">${katexHtml}</div>`;
+        }
+      });
+    });
+
+    const mathInlines = Array.from(root.querySelectorAll<HTMLElement>('[data-type="mathInline"]'));
+    mathInlines.forEach((span) => {
+      const latex = span.textContent ?? '';
+      if (!latex.trim()) return;
+      void renderKatex(latex, false).then(({ html: katexHtml, error }) => {
+        if (error) {
+          span.className = 'rounded bg-red-500/10 px-1 text-xs text-red-400 font-mono';
+        } else {
+          span.innerHTML = katexHtml;
+        }
+      });
+    });
+
+    // Embed block handlers (viewer)
+    const embedBlocks = Array.from(root.querySelectorAll<HTMLElement>('[data-type="embedBlock"]'));
+    embedBlocks.forEach((block) => {
+      const url = block.getAttribute('data-url') ?? '';
+      if (!url) return;
+      const { type, embedUrl } = detectEmbedService(url);
+      block.innerHTML = '';
+      if (type === 'youtube') {
+        const wrapper = document.createElement('div');
+        wrapper.className = 'aspect-video w-full overflow-hidden rounded-xl border border-border';
+        const iframe = document.createElement('iframe');
+        iframe.src = embedUrl;
+        iframe.title = 'YouTube video';
+        iframe.allow = 'accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture';
+        iframe.allowFullscreen = true;
+        iframe.className = 'h-full w-full';
+        wrapper.appendChild(iframe);
+        block.appendChild(wrapper);
+      } else if (type === 'figma') {
+        const wrapper = document.createElement('div');
+        wrapper.className = 'h-[480px] w-full overflow-hidden rounded-xl border border-border';
+        const iframe = document.createElement('iframe');
+        iframe.src = embedUrl;
+        iframe.title = 'Figma embed';
+        iframe.allow = 'fullscreen';
+        iframe.allowFullscreen = true;
+        iframe.className = 'h-full w-full';
+        wrapper.appendChild(iframe);
+        block.appendChild(wrapper);
+      } else {
+        const a = document.createElement('a');
+        a.href = url;
+        a.target = '_blank';
+        a.rel = 'noopener noreferrer';
+        a.className = 'flex items-center gap-3 rounded-xl border border-border bg-muted/20 px-4 py-3 text-sm transition-colors hover:bg-muted/40 no-underline';
+        a.textContent = url;
+        block.appendChild(a);
+      }
+    });
+
+    // File attachment download handlers (viewer)
+    const fileBlocks = Array.from(root.querySelectorAll<HTMLElement>('[data-type="fileAttachment"]'));
+    const fileCleanup = fileBlocks.map((block) => {
+      const filename = block.getAttribute('data-filename') ?? 'file';
+      const data = block.getAttribute('data-file-data') ?? '';
+      const size = Number(block.getAttribute('data-size') ?? 0);
+      const sizeLabel = size < 1024 * 1024
+        ? `${(size / 1024).toFixed(1)} KB`
+        : `${(size / (1024 * 1024)).toFixed(1)} MB`;
+
+      block.innerHTML = `
+        <div class="flex items-center gap-3 rounded-xl border border-[hsl(var(--border))] bg-[hsl(var(--muted))]/20 px-4 py-3 cursor-pointer hover:bg-[hsl(var(--muted))]/40 transition-colors">
+          <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="flex-shrink-0 text-[color:var(--operator-muted)]"><path d="M14.5 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V7.5L14.5 2z"/><polyline points="14 2 14 8 20 8"/></svg>
+          <div class="min-w-0 flex-1">
+            <p class="truncate text-sm font-medium">${escapeHtmlText(filename)}</p>
+            <p class="text-xs opacity-60">${escapeHtmlText(sizeLabel)}</p>
+          </div>
+          <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="flex-shrink-0 opacity-50"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>
+        </div>`;
+
+      const handleClick = () => {
+        if (!data) return;
+        const a = document.createElement('a');
+        a.href = data;
+        a.download = filename;
+        document.body.appendChild(a);
+        a.click();
+        document.body.removeChild(a);
+      };
+      block.addEventListener('click', handleClick);
+      return () => block.removeEventListener('click', handleClick);
+    });
+
+    // Toggle block click handlers (viewer)
+    const toggleSummaries = Array.from(root.querySelectorAll<HTMLElement>('[data-type="toggleSummary"]'));
+    const toggleCleanup = toggleSummaries.map((summary) => {
+      const handleClick = () => {
+        const block = summary.closest<HTMLElement>('[data-type="toggleBlock"]');
+        if (!block) return;
+        const isOpen = block.getAttribute('data-open') === 'true';
+        block.setAttribute('data-open', String(!isOpen));
+      };
+      summary.addEventListener('click', handleClick);
+      return () => summary.removeEventListener('click', handleClick);
+    });
+
     return () => {
       cleanup.forEach((dispose) => dispose());
+      wikiCleanup.forEach((dispose) => dispose());
+      fileCleanup.forEach((dispose) => dispose());
+      toggleCleanup.forEach((dispose) => dispose());
     };
   }, [codeCopiedLabel, codeCopyLabel, content, contentFormat]);
 
@@ -148,30 +303,120 @@ export function DocContentRenderer({
               <table>{children}</table>
             </div>
           ),
-          pre: ({ children }) => (
-            <div data-doc-code-shell="true">
-              <div data-doc-code-actions="true">
-                <button
-                  type="button"
-                  data-doc-copy-button="true"
-                  className="transition hover:border-[color:var(--operator-primary)]/35 hover:text-[color:var(--operator-foreground)]"
-                >
-                  {codeCopyLabel}
-                </button>
-              </div>
-              <pre>{children}</pre>
-            </div>
-          ),
+          pre: ({ children }) => <>{children}</>,
           code: (props) => {
             const { children, className: codeClassName } = props as { children?: ReactNode; className?: string };
             const childText = Array.isArray(children) ? children.join('') : String(children ?? '');
             const inline = !String(codeClassName ?? '').includes('language-') && !childText.includes('\n');
-            return inline ? <code>{children}</code> : <code className={codeClassName}>{children}</code>;
+            if (!inline) {
+              const lang = String(codeClassName ?? '').replace('language-', '') || null;
+              if (lang === 'mermaid') {
+                return <MermaidReadonlyBlock code={childText} />;
+              }
+              return (
+                <ShikiCodeBlock
+                  code={childText}
+                  language={lang}
+                  copyLabel={codeCopyLabel}
+                  copiedLabel={codeCopiedLabel}
+                />
+              );
+            }
+            return <code>{children}</code>;
           },
         }}
       >
         {content}
       </ReactMarkdown>
+    </div>
+  );
+}
+
+function MermaidReadonlyBlock({ code }: { code: string }) {
+  const [svg, setSvg] = useState('');
+  const [error, setError] = useState('');
+
+  useEffect(() => {
+    if (!code.trim()) return;
+    let cancelled = false;
+    void renderMermaid(code).then(({ svg: rendered }) => {
+      if (!cancelled) { setSvg(rendered); setError(''); }
+    }).catch((err: unknown) => {
+      if (!cancelled) { setError(err instanceof Error ? err.message : '렌더링 실패'); setSvg(''); }
+    });
+    return () => { cancelled = true; };
+  }, [code]);
+
+  if (error) {
+    return <div className="not-prose my-4 rounded-xl border border-red-500/30 bg-red-500/10 p-3 text-xs text-red-400">{error}</div>;
+  }
+  if (!svg) {
+    return <div className="not-prose my-4 rounded-xl border border-slate-700 bg-[#0b1120] p-4 text-xs text-slate-500">렌더링 중...</div>;
+  }
+  return (
+    <div
+      className="not-prose my-4 flex justify-center rounded-xl border border-slate-700 bg-[#0b1120] p-4 [&_svg]:h-auto [&_svg]:max-w-full"
+      dangerouslySetInnerHTML={{ __html: svg }}
+    />
+  );
+}
+
+function ShikiCodeBlock({
+  code, language, copyLabel, copiedLabel,
+}: {
+  code: string;
+  language: string | null;
+  copyLabel: string;
+  copiedLabel: string;
+}) {
+  const [html, setHtml] = useState('');
+  const [copied, setCopied] = useState(false);
+
+  useEffect(() => {
+    if (!code.trim()) return;
+    let cancelled = false;
+    void (async () => {
+      try {
+        const shiki = await getShikiHighlighter();
+        if (cancelled) return;
+        const lang = resolveLanguage(language);
+        setHtml(shiki.codeToHtml(code, { lang, theme: 'dark-plus' }));
+      } catch { /* fallback to plain */ }
+    })();
+    return () => { cancelled = true; };
+  }, [code, language]);
+
+  const handleCopy = useCallback(async () => {
+    try {
+      if (typeof navigator !== 'undefined' && navigator.clipboard?.writeText) {
+        await navigator.clipboard.writeText(code);
+      }
+    } catch { /* unavailable */ }
+    setCopied(true);
+    window.setTimeout(() => setCopied(false), 1600);
+  }, [code]);
+
+  return (
+    <div data-doc-code-shell="true" className="not-prose my-6 overflow-hidden rounded-2xl border border-slate-700 bg-[#0b1120]">
+      <div data-doc-code-actions="true" className="flex justify-end px-3 pt-2">
+        <button
+          type="button"
+          onClick={handleCopy}
+          className="rounded-full border border-slate-600 bg-slate-700/50 px-3 py-1.5 text-[11px] font-medium uppercase tracking-[0.18em] text-slate-300 transition hover:border-slate-400 hover:text-slate-100"
+        >
+          {copied ? copiedLabel : copyLabel}
+        </button>
+      </div>
+      {html ? (
+        <div
+          dangerouslySetInnerHTML={{ __html: html }}
+          className="overflow-x-auto [&_pre]:!m-0 [&_pre]:!bg-transparent [&_pre]:p-4 [&_pre]:text-[13px] [&_pre]:leading-6 [&_code]:!bg-transparent"
+        />
+      ) : (
+        <pre className="overflow-x-auto p-4 text-[13px] leading-6 text-slate-200">
+          <code>{code}</code>
+        </pre>
+      )}
     </div>
   );
 }

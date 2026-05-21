@@ -62,3 +62,31 @@ class DocRepository(BaseRepository[Doc]):
         ).limit(limit)
         result = await self.session.execute(q)
         return list(result.scalars().all())
+
+    async def search_full_text(
+        self, project_id: uuid.UUID, query: str, limit: int = 50
+    ) -> list[tuple[Doc, str | None]]:
+        """tsvector 기반 전문 검색. ts_rank 내림차순. snippet 포함."""
+        from sqlalchemy import func, literal_column
+
+        tsquery = func.plainto_tsquery("simple", query)
+        snippet_expr = func.ts_headline(
+            "simple",
+            Doc.content,
+            tsquery,
+            literal_column("'MaxWords=30, MinWords=15, ShortWord=3, MaxFragments=1'"),
+        )
+
+        stmt = (
+            select(Doc, snippet_expr.label("snippet"))
+            .where(
+                self._org_filter(),
+                Doc.project_id == project_id,
+                Doc.deleted_at.is_(None),
+                Doc.search_vector.op("@@")(tsquery),
+            )
+            .order_by(func.ts_rank(Doc.search_vector, tsquery).desc())
+            .limit(limit)
+        )
+        result = await self.session.execute(stmt)
+        return [(row.Doc, row.snippet) for row in result]

@@ -61,6 +61,7 @@ export interface UpdateDocInput {
 export interface DocListFilters extends PaginationOptions {
   project_id: string;
   tags?: string[];
+  q?: string;
 }
 
 export interface IDocRepository {
