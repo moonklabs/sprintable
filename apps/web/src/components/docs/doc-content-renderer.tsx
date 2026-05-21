@@ -3,6 +3,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import type { MutableRefObject, ReactNode, RefObject } from 'react';
 import { getShikiHighlighter, resolveLanguage } from './lib/shiki-highlighter';
+import { detectEmbedService } from './extensions/embed-node';
 import { renderMermaid } from './lib/mermaid-renderer';
 import ReactMarkdown from 'react-markdown';
 import DOMPurify from 'dompurify';
@@ -100,6 +101,46 @@ export function DocContentRenderer({
 
       button.addEventListener('click', handleClick);
       return () => button.removeEventListener('click', handleClick);
+    });
+
+    // Embed block handlers (viewer)
+    const embedBlocks = Array.from(root.querySelectorAll<HTMLElement>('[data-type="embedBlock"]'));
+    embedBlocks.forEach((block) => {
+      const url = block.getAttribute('data-url') ?? '';
+      if (!url) return;
+      const { type, embedUrl } = detectEmbedService(url);
+      block.innerHTML = '';
+      if (type === 'youtube') {
+        const wrapper = document.createElement('div');
+        wrapper.className = 'aspect-video w-full overflow-hidden rounded-xl border border-border';
+        const iframe = document.createElement('iframe');
+        iframe.src = embedUrl;
+        iframe.title = 'YouTube video';
+        iframe.allow = 'accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture';
+        iframe.allowFullscreen = true;
+        iframe.className = 'h-full w-full';
+        wrapper.appendChild(iframe);
+        block.appendChild(wrapper);
+      } else if (type === 'figma') {
+        const wrapper = document.createElement('div');
+        wrapper.className = 'h-[480px] w-full overflow-hidden rounded-xl border border-border';
+        const iframe = document.createElement('iframe');
+        iframe.src = embedUrl;
+        iframe.title = 'Figma embed';
+        iframe.allow = 'fullscreen';
+        iframe.allowFullscreen = true;
+        iframe.className = 'h-full w-full';
+        wrapper.appendChild(iframe);
+        block.appendChild(wrapper);
+      } else {
+        const a = document.createElement('a');
+        a.href = url;
+        a.target = '_blank';
+        a.rel = 'noopener noreferrer';
+        a.className = 'flex items-center gap-3 rounded-xl border border-border bg-muted/20 px-4 py-3 text-sm transition-colors hover:bg-muted/40 no-underline';
+        a.textContent = url;
+        block.appendChild(a);
+      }
     });
 
     // File attachment download handlers (viewer)

@@ -60,6 +60,20 @@ turndown.addRule('imageWithWidth', {
   },
 });
 
+// Preserve embed blocks as raw HTML
+turndown.addRule('embedBlock', {
+  filter: (node) =>
+    node.nodeName === 'DIV' &&
+    (node as HTMLElement).getAttribute('data-type') === 'embedBlock',
+  replacement: (_content, node) => {
+    const el = node as HTMLElement;
+    const safeAttr = (s: string) =>
+      s.replace(/&/g, '&amp;').replace(/"/g, '&quot;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+    const url = safeAttr(el.getAttribute('data-url') ?? '');
+    return `\n<div data-type="embedBlock" data-url="${url}"></div>\n`;
+  },
+});
+
 // Preserve file attachment blocks as raw HTML
 turndown.addRule('fileAttachment', {
   filter: (node) =>
@@ -186,6 +200,12 @@ export function markdownToHtml(rawMd: string): string {
   // and must survive the HTML-escape pass below intact.
   const atomPlaceholders: string[] = [];
   html = html.replace(/<div\s+data-page-embed[^>]*><\/div>/g, (m) => {
+    const idx = atomPlaceholders.length;
+    atomPlaceholders.push(m);
+    return `\x00ATOM${idx}\x00`;
+  });
+  // Embed blocks — stored as single-line raw HTML
+  html = html.replace(/^<div data-type="embedBlock"[^\n]*><\/div>$/gm, (m) => {
     const idx = atomPlaceholders.length;
     atomPlaceholders.push(m);
     return `\x00ATOM${idx}\x00`;

@@ -29,6 +29,7 @@ import {
   GitBranch,
   ChevronRight,
   Paperclip,
+  Globe,
 } from 'lucide-react';
 
 export interface SlashMenuItem {
@@ -176,6 +177,18 @@ export const slashMenuCategories: SlashMenuCategory[] = [
             });
           };
           input.click();
+        },
+      },
+      {
+        title: 'Embed',
+        description: '외부 URL 임베드',
+        icon: Globe,
+        command: (editor, range) => {
+          const url = window.prompt('임베드할 URL을 입력하세요 (YouTube, Figma 등):');
+          editor.chain().focus().deleteRange(range).run();
+          if (url?.trim()) {
+            editor.commands.insertContent({ type: 'embedBlock', attrs: { url: url.trim() } });
+          }
         },
       },
       {
