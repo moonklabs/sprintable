@@ -1,9 +1,30 @@
 import { Extension } from '@tiptap/core';
 import { Plugin, PluginKey } from '@tiptap/pm/state';
 import type { EditorView } from '@tiptap/pm/view';
+import { MAX_FILE_BYTES, fileToDataUrl, formatFileSize } from './file-node';
 
-const MAX_BYTES = 1 * 1024 * 1024; // 1 MB
+const MAX_IMAGE_BYTES = 1 * 1024 * 1024; // 1 MB — images are compressed above this
 const MAX_DIM = 1920;
+
+function dispatchFileSizeError(file: File): void {
+  window.dispatchEvent(new CustomEvent('docs:file-size-error', {
+    detail: { message: `파일 크기가 5MB를 초과합니다. (${formatFileSize(file.size)})` },
+  }));
+}
+
+function insertFileAttachment(view: EditorView, file: File, dataUrl: string, pos?: number): void {
+  const { schema, selection } = view.state;
+  const nodeType = schema.nodes['fileAttachment'];
+  if (!nodeType) return;
+  const node = nodeType.create({
+    filename: file.name,
+    size: file.size,
+    mimeType: file.type,
+    data: dataUrl,
+  });
+  const insertPos = pos ?? selection.anchor;
+  view.dispatch(view.state.tr.insert(insertPos, node));
+}
 
 async function processImageFile(file: File): Promise<string> {
   return new Promise((resolve, reject) => {
@@ -11,7 +32,7 @@ async function processImageFile(file: File): Promise<string> {
     reader.onerror = () => reject(new Error('FileReader 오류'));
     reader.onload = (e) => {
       const dataUrl = e.target?.result as string;
-      if (file.size <= MAX_BYTES) {
+      if (file.size <= MAX_IMAGE_BYTES) {
         resolve(dataUrl);
         return;
       }
@@ -34,7 +55,7 @@ async function processImageFile(file: File): Promise<string> {
 
         let quality = 0.85;
         let compressed = canvas.toDataURL('image/jpeg', quality);
-        while (compressed.length * 0.75 > MAX_BYTES && quality > 0.3) {
+        while (compressed.length * 0.75 > MAX_IMAGE_BYTES && quality > 0.3) {
           quality = Math.max(0.3, quality - 0.1);
           compressed = canvas.toDataURL('image/jpeg', quality);
         }
@@ -68,16 +89,24 @@ export const ImageUploadExtension = Extension.create({
             const dragEvent = event as DragEvent;
             const files = dragEvent.dataTransfer?.files;
             if (!files || files.length === 0) return false;
-            const images = Array.from(files).filter((f) => f.type.startsWith('image/'));
-            if (images.length === 0) return false;
 
+            const allFiles = Array.from(files);
+            const images = allFiles.filter((f) => f.type.startsWith('image/'));
+            const nonImages = allFiles.filter((f) => !f.type.startsWith('image/'));
+
+            if (images.length === 0 && nonImages.length === 0) return false;
             dragEvent.preventDefault();
+
             const coords = view.posAtCoords({ left: dragEvent.clientX, top: dragEvent.clientY });
+            const basePos = coords?.pos ?? view.state.selection.anchor;
 
             void Promise.all(images.map(processImageFile)).then((srcs) => {
-              srcs.forEach((src, i) => {
-                insertImageSrc(view, src, (coords?.pos ?? view.state.selection.anchor) + i);
-              });
+              srcs.forEach((src, i) => insertImageSrc(view, src, basePos + i));
+            });
+
+            nonImages.forEach((file) => {
+              if (file.size > MAX_FILE_BYTES) { dispatchFileSizeError(file); return; }
+              void fileToDataUrl(file).then((dataUrl) => insertFileAttachment(view, file, dataUrl, basePos));
             });
 
             return true;
