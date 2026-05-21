@@ -75,13 +75,14 @@ async def _dispatch_conversation_event(
     org_id: uuid.UUID,
     sender: TeamMember,
     exclude_ids: set[uuid.UUID] | None = None,
-) -> None:
-    """conversation:message → 전 참여자 SSE dispatch + Event INSERT.
+) -> list[tuple[str, dict]]:
+    """conversation:message → Event INSERT + flush. push 페이로드 반환 (commit 후 호출).
 
     exclude_ids: SSE 발송에서 제외할 member_id 집합 (Discord 수신자 등).
+    반환값: [(pid_str, payload)] — db.commit() 완료 후 _push_to_agent() 호출용.
     """
     if not conversation.project_id:
-        return
+        return []
 
     payload = _msg_payload(msg, sender)
 
@@ -93,7 +94,7 @@ async def _dispatch_conversation_event(
     participant_ids = {r[0] for r in rows} - {sender.id} - (exclude_ids or set())
 
     if not participant_ids:
-        return
+        return []
 
     member_rows = (await db.execute(
         select(TeamMember.id, TeamMember.type).where(TeamMember.id.in_(participant_ids))
@@ -118,10 +119,10 @@ async def _dispatch_conversation_event(
         db.add(event)
         events_to_push.append((str(pid), event))
 
-    # flush 후 event.id 확보 → event_id 포함 push (dedup 동작 보장)
+    # flush로 event.id 확보 — push는 호출측에서 commit 후 수행 (race condition 방지)
     await db.flush()
-    for pid_str, event in events_to_push:
-        _push_to_agent(pid_str, {"event_id": str(event.id), "event_type": "conversation:message", **payload})
+    return [(pid_str, {"event_id": str(event.id), "event_type": "conversation:message", **payload})
+            for pid_str, event in events_to_push]
 
 
 async def _dispatch_mention_events(
@@ -131,10 +132,13 @@ async def _dispatch_mention_events(
     org_id: uuid.UUID,
     sender: TeamMember,
     mention_targets: set[uuid.UUID],
-) -> None:
-    """AC1: 멘션 대상에게 conversation:mention SSE 발송 (participant 여부 무관)."""
+) -> list[tuple[str, dict]]:
+    """AC1: 멘션 대상에게 conversation:mention Event INSERT + flush. push 페이로드 반환 (commit 후 호출).
+
+    반환값: [(pid_str, payload)] — db.commit() 완료 후 _push_to_agent() 호출용.
+    """
     if not conversation.project_id or not mention_targets:
-        return
+        return []
 
     payload = _msg_payload(msg, sender)
     member_rows = (await db.execute(
@@ -160,9 +164,10 @@ async def _dispatch_mention_events(
         db.add(event)
         events_to_push.append((str(pid), event))
 
+    # flush로 event.id 확보 — push는 호출측에서 commit 후 수행 (race condition 방지)
     await db.flush()
-    for pid_str, event in events_to_push:
-        _push_to_agent(pid_str, {"event_id": str(event.id), "event_type": "conversation:mention", **payload})
+    return [(pid_str, {"event_id": str(event.id), "event_type": "conversation:mention", **payload})
+            for pid_str, event in events_to_push]
 
 
 async def _dispatch_discord_outbound(
@@ -677,9 +682,10 @@ async def send_message(
     except Exception:
         logger.warning("ChannelRouter pre-check failed message_id=%s — no SSE exclusion", msg.id)
 
+    pending_sse_pushes: list[tuple[str, dict]] = []
     try:
         async with db.begin_nested():
-            await _dispatch_conversation_event(db, conv, msg, org_id, sender, exclude_ids=discord_exclude_ids)
+            pending_sse_pushes += await _dispatch_conversation_event(db, conv, msg, org_id, sender, exclude_ids=discord_exclude_ids)
     except Exception:
         logger.exception("conversation event dispatch failed conversation_id=%s", conversation_id)
 
@@ -689,7 +695,7 @@ async def send_message(
         if mention_targets:
             try:
                 async with db.begin_nested():
-                    await _dispatch_mention_events(db, conv, msg, org_id, sender, mention_targets)
+                    pending_sse_pushes += await _dispatch_mention_events(db, conv, msg, org_id, sender, mention_targets)
             except Exception:
                 logger.warning("mention event dispatch failed conversation_id=%s", conversation_id, exc_info=True)
 
@@ -698,6 +704,10 @@ async def send_message(
 
     await db.commit()
     await db.refresh(msg)
+
+    # commit 완료 후 SSE push — Event가 DB에 커밋된 상태에서 push해야 race condition 없음
+    for pid_str, sse_payload in pending_sse_pushes:
+        _push_to_agent(pid_str, sse_payload)
 
     # webhook delivery BackgroundTask (AC1~8)
     from app.services.conversation_webhook import deliver_conversation_message_webhook
