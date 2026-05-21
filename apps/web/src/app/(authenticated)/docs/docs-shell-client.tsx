@@ -486,7 +486,7 @@ export function DocsShellClient({ projectId }: DocsShellClientProps) {
                     </span>
                     {result.snippet && (
                       <span
-                        className="line-clamp-2 text-[11px] leading-relaxed text-[color:var(--operator-muted)] [&_mark]:rounded [&_mark]:bg-yellow-400/40 [&_mark]:text-[color:var(--operator-foreground)] [&_mark]:px-0.5"
+                        className="line-clamp-2 text-[11px] leading-relaxed text-[color:var(--operator-muted)] [&_mark]:rounded [&_mark]:bg-yellow-400/40 [&_mark]:text-[color:var(--operator-foreground)] [&_mark]:px-0.5 [&_b]:rounded [&_b]:bg-yellow-400/40 [&_b]:font-normal [&_b]:text-[color:var(--operator-foreground)] [&_b]:px-0.5"
                         dangerouslySetInnerHTML={{ __html: result.snippet }}
                       />
                     )}
