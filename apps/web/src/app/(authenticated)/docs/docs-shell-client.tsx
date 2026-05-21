@@ -1,6 +1,6 @@
 'use client';
 
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import { useRouter, useSearchParams } from 'next/navigation';
 import { useTranslations } from 'next-intl';
 import { DocTree } from '@/components/docs/doc-tree';
@@ -10,7 +10,7 @@ import { Button } from '@/components/ui/button';
 import { EmptyState } from '@/components/ui/empty-state';
 import { Input } from '@/components/ui/input';
 import { ToastContainer, useToast } from '@/components/ui/toast';
-import { ChevronDown, ChevronRight, Plus, X, Menu } from 'lucide-react';
+import { ChevronDown, ChevronRight, Plus, X, Menu, Search, FileText } from 'lucide-react';
 import { DocsShell } from '@/components/docs/docs-shell';
 import { TopBarSlot } from '@/components/nav/top-bar-slot';
 
@@ -76,6 +76,10 @@ export function DocsShellClient({ projectId }: DocsShellClientProps) {
   const [docsNextCursor, setDocsNextCursor] = useState<string | null>(null);
   const [docsLoadingMore, setDocsLoadingMore] = useState(false);
   const [tagsCollapsed, setTagsCollapsed] = useState(true);
+  const [searchQuery, setSearchQuery] = useState('');
+  const [searchResults, setSearchResults] = useState<Array<{ id: string; title: string; slug: string; snippet?: string }>>([]);
+  const [searchLoading, setSearchLoading] = useState(false);
+  const searchTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   // Always-editable content states
   const [title, setTitle] = useState('');
@@ -134,6 +138,25 @@ export function DocsShellClient({ projectId }: DocsShellClientProps) {
       setDocsLoadingMore(false);
     }
   }, [projectId]);
+
+  // Full-text search with debounce
+  useEffect(() => {
+    if (searchTimerRef.current) clearTimeout(searchTimerRef.current);
+    if (!searchQuery.trim() || !projectId) { setSearchResults([]); setSearchLoading(false); return; }
+
+    setSearchLoading(true);
+    searchTimerRef.current = setTimeout(() => {
+      void fetch(`/api/docs?project_id=${projectId}&q=${encodeURIComponent(searchQuery.trim())}&limit=20`)
+        .then((r) => r.ok ? r.json() : null)
+        .then((data: { data?: Array<{ id: string; title: string; slug: string; snippet?: string }> } | null) => {
+          setSearchResults(data?.data ?? []);
+        })
+        .catch(() => { setSearchResults([]); })
+        .finally(() => { setSearchLoading(false); });
+    }, 300);
+
+    return () => { if (searchTimerRef.current) clearTimeout(searchTimerRef.current); };
+  }, [searchQuery, projectId]);
 
   const fetchDoc = useCallback(async (slug: string) => {
     if (!projectId) return;
@@ -371,6 +394,29 @@ export function DocsShellClient({ projectId }: DocsShellClientProps) {
 
   const sidebarContent = (
     <>
+      {/* Full-text search input */}
+      <div className="border-b border-border/60 px-3 py-2">
+        <div className="relative">
+          <Search className="absolute left-2.5 top-1/2 size-3.5 -translate-y-1/2 text-[color:var(--operator-muted)]" />
+          <input
+            type="text"
+            value={searchQuery}
+            onChange={(e) => setSearchQuery(e.target.value)}
+            placeholder="문서 검색..."
+            className="w-full rounded-lg border border-border/60 bg-muted/30 py-1.5 pl-8 pr-7 text-xs outline-none placeholder:text-[color:var(--operator-muted)] focus:border-[color:var(--operator-primary)]/40 focus:bg-muted/50"
+          />
+          {searchQuery && (
+            <button
+              type="button"
+              onClick={() => setSearchQuery('')}
+              className="absolute right-2 top-1/2 -translate-y-1/2 text-[color:var(--operator-muted)] hover:text-foreground"
+            >
+              <X className="size-3" />
+            </button>
+          )}
+        </div>
+      </div>
+
       {/* Tag filter — AC1 접기/펼치기 */}
       {(() => {
         const allTags = [...new Set(tree.flatMap((d) => (d as unknown as { tags?: string[] | null }).tags ?? []))];
@@ -419,7 +465,37 @@ export function DocsShellClient({ projectId }: DocsShellClientProps) {
         );
       })()}
       <div className="flex-1 overflow-y-auto p-2">
-        {tree.length === 0 ? (
+        {/* Search results */}
+        {searchQuery.trim() ? (
+          searchLoading ? (
+            <p className="py-4 text-center text-xs text-[color:var(--operator-muted)]">검색 중...</p>
+          ) : searchResults.length === 0 ? (
+            <p className="py-4 text-center text-xs text-[color:var(--operator-muted)]">검색 결과 없음</p>
+          ) : (
+            <ul className="space-y-1">
+              {searchResults.map((result) => (
+                <li key={result.id}>
+                  <button
+                    type="button"
+                    onClick={() => handleSelectDoc(result.slug)}
+                    className="flex w-full flex-col items-start gap-1 rounded-xl px-3 py-2 text-left transition-colors hover:bg-muted/60"
+                  >
+                    <span className="flex items-center gap-1.5 text-xs font-medium text-[color:var(--operator-foreground)]">
+                      <FileText className="size-3.5 flex-shrink-0 text-[color:var(--operator-muted)]" />
+                      {result.title}
+                    </span>
+                    {result.snippet && (
+                      <span
+                        className="line-clamp-2 text-[11px] leading-relaxed text-[color:var(--operator-muted)] [&_mark]:rounded [&_mark]:bg-yellow-400/40 [&_mark]:text-[color:var(--operator-foreground)] [&_mark]:px-0.5"
+                        dangerouslySetInnerHTML={{ __html: result.snippet }}
+                      />
+                    )}
+                  </button>
+                </li>
+              ))}
+            </ul>
+          )
+        ) : tree.length === 0 ? (
           <EmptyState
             title={t('title')}
             description={t('selectDoc')}
