@@ -73,9 +73,17 @@ export function UnifiedSwitcher({
   const [otherOrgProjects, setOtherOrgProjects] = useState<Record<string, ProjectItem[]>>({});
   const [loadingOrgIds, setLoadingOrgIds] = useState<Set<string>>(new Set());
 
-  const currentOrg = orgs.find((o) => o.orgId === currentOrgId);
+  // Optimistic org 상태 — API 성공 즉시 UI에 반영, router.refresh() 완료 후 서버 값과 동기화
+  const [localOrgId, setLocalOrgId] = useState<string | undefined>(currentOrgId);
+
+  // 서버에서 새 currentOrgId가 내려오면 (router.refresh() 완료 후) 로컬 상태 동기화
+  useEffect(() => {
+    setLocalOrgId(currentOrgId);
+  }, [currentOrgId]);
+
+  const currentOrg = orgs.find((o) => o.orgId === localOrgId);
   const currentProject = projects.find((p) => p.projectId === currentProjectId);
-  const otherOrgs = orgs.filter((o) => o.orgId !== currentOrgId);
+  const otherOrgs = orgs.filter((o) => o.orgId !== localOrgId);
 
   const displayOrg = currentOrg?.orgName ?? 'Organization';
   const displayProject = currentProject?.projectName ?? '';
@@ -106,8 +114,10 @@ export function UnifiedSwitcher({
   }, [open]);
 
   async function switchOrg(nextOrgId: string) {
-    if (!nextOrgId || nextOrgId === currentOrgId || pending) return;
+    if (!nextOrgId || nextOrgId === localOrgId || pending) return;
+    const prevOrgId = localOrgId;
     setPending(true);
+    setLocalOrgId(nextOrgId); // optimistic: 즉시 사이드바 org명 갱신
     try {
       const res = await fetch('/api/switch-org', {
         method: 'POST',
@@ -116,7 +126,8 @@ export function UnifiedSwitcher({
       });
       if (res.ok) {
         router.refresh();
-        router.push('/dashboard');
+      } else {
+        setLocalOrgId(prevOrgId); // API 실패 시 롤백
       }
     } finally {
       setPending(false);
@@ -125,14 +136,19 @@ export function UnifiedSwitcher({
 
   async function switchOrgAndProject(nextOrgId: string, projectId: string) {
     if (pending) return;
+    const prevOrgId = localOrgId;
     setPending(true);
+    setLocalOrgId(nextOrgId); // optimistic: 즉시 사이드바 org명 갱신
     try {
       const orgRes = await fetch('/api/switch-org', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ org_id: nextOrgId }),
       });
-      if (!orgRes.ok) return;
+      if (!orgRes.ok) {
+        setLocalOrgId(prevOrgId);
+        return;
+      }
       // org 전환 후 project 전환 (쿠키는 Set-Cookie로 이미 갱신됨)
       await fetch('/api/switch-project', {
         method: 'POST',
@@ -140,7 +156,6 @@ export function UnifiedSwitcher({
         body: JSON.stringify({ project_id: projectId }),
       }).catch(() => null);
       router.refresh();
-      router.push('/dashboard');
     } finally {
       setPending(false);
     }
