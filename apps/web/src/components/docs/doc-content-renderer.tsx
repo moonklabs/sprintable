@@ -1,7 +1,8 @@
 'use client';
 
-import { useCallback, useEffect, useMemo, useRef } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import type { MutableRefObject, ReactNode, RefObject } from 'react';
+import { getShikiHighlighter, resolveLanguage } from './lib/shiki-highlighter';
 import ReactMarkdown from 'react-markdown';
 import DOMPurify from 'dompurify';
 import remarkGfm from 'remark-gfm';
@@ -49,6 +50,29 @@ export function DocContentRenderer({
       headingCounts.set(baseId, seen + 1);
       heading.id = seen === 0 ? baseId : `${baseId}-${seen + 1}`;
     });
+
+    // HTML format code blocks: apply Shiki highlighting via DOM
+    if (contentFormat === 'html') {
+      const preTags = Array.from(root.querySelectorAll<HTMLPreElement>('pre'));
+      preTags.forEach((pre) => {
+        const codeEl = pre.querySelector('code');
+        const text = codeEl?.textContent ?? pre.textContent ?? '';
+        if (!text.trim()) return;
+        const lang = codeEl?.className.replace('language-', '').split(' ')[0]
+          ?? pre.getAttribute('data-language')
+          ?? null;
+        void getShikiHighlighter().then((shiki) => {
+          const highlighted = shiki.codeToHtml(text, {
+            lang: resolveLanguage(lang),
+            theme: 'dark-plus',
+          });
+          const wrapper = document.createElement('div');
+          wrapper.innerHTML = highlighted;
+          wrapper.className = '[&_pre]:!bg-transparent [&_pre]:!m-0 [&_pre]:p-4 [&_pre]:text-[13px] [&_pre]:leading-6 [&_code]:!bg-transparent overflow-x-auto';
+          if (pre.parentElement) pre.replaceWith(wrapper);
+        }).catch(() => { /* fallback: keep original pre */ });
+      });
+    }
 
     const buttons = Array.from(root.querySelectorAll<HTMLButtonElement>('[data-doc-copy-button="true"]'));
     const cleanup = buttons.map((button) => {
@@ -148,30 +172,88 @@ export function DocContentRenderer({
               <table>{children}</table>
             </div>
           ),
-          pre: ({ children }) => (
-            <div data-doc-code-shell="true">
-              <div data-doc-code-actions="true">
-                <button
-                  type="button"
-                  data-doc-copy-button="true"
-                  className="transition hover:border-[color:var(--operator-primary)]/35 hover:text-[color:var(--operator-foreground)]"
-                >
-                  {codeCopyLabel}
-                </button>
-              </div>
-              <pre>{children}</pre>
-            </div>
-          ),
+          pre: ({ children }) => <>{children}</>,
           code: (props) => {
             const { children, className: codeClassName } = props as { children?: ReactNode; className?: string };
             const childText = Array.isArray(children) ? children.join('') : String(children ?? '');
             const inline = !String(codeClassName ?? '').includes('language-') && !childText.includes('\n');
-            return inline ? <code>{children}</code> : <code className={codeClassName}>{children}</code>;
+            if (!inline) {
+              const lang = String(codeClassName ?? '').replace('language-', '') || null;
+              return (
+                <ShikiCodeBlock
+                  code={childText}
+                  language={lang}
+                  copyLabel={codeCopyLabel}
+                  copiedLabel={codeCopiedLabel}
+                />
+              );
+            }
+            return <code>{children}</code>;
           },
         }}
       >
         {content}
       </ReactMarkdown>
+    </div>
+  );
+}
+
+function ShikiCodeBlock({
+  code, language, copyLabel, copiedLabel,
+}: {
+  code: string;
+  language: string | null;
+  copyLabel: string;
+  copiedLabel: string;
+}) {
+  const [html, setHtml] = useState('');
+  const [copied, setCopied] = useState(false);
+
+  useEffect(() => {
+    if (!code.trim()) return;
+    let cancelled = false;
+    void (async () => {
+      try {
+        const shiki = await getShikiHighlighter();
+        if (cancelled) return;
+        const lang = resolveLanguage(language);
+        setHtml(shiki.codeToHtml(code, { lang, theme: 'dark-plus' }));
+      } catch { /* fallback to plain */ }
+    })();
+    return () => { cancelled = true; };
+  }, [code, language]);
+
+  const handleCopy = useCallback(async () => {
+    try {
+      if (typeof navigator !== 'undefined' && navigator.clipboard?.writeText) {
+        await navigator.clipboard.writeText(code);
+      }
+    } catch { /* unavailable */ }
+    setCopied(true);
+    window.setTimeout(() => setCopied(false), 1600);
+  }, [code]);
+
+  return (
+    <div data-doc-code-shell="true" className="not-prose my-6 overflow-hidden rounded-2xl border border-slate-700 bg-[#0b1120]">
+      <div data-doc-code-actions="true" className="flex justify-end px-3 pt-2">
+        <button
+          type="button"
+          onClick={handleCopy}
+          className="rounded-full border border-slate-600 bg-slate-700/50 px-3 py-1.5 text-[11px] font-medium uppercase tracking-[0.18em] text-slate-300 transition hover:border-slate-400 hover:text-slate-100"
+        >
+          {copied ? copiedLabel : copyLabel}
+        </button>
+      </div>
+      {html ? (
+        <div
+          dangerouslySetInnerHTML={{ __html: html }}
+          className="overflow-x-auto [&_pre]:!m-0 [&_pre]:!bg-transparent [&_pre]:p-4 [&_pre]:text-[13px] [&_pre]:leading-6 [&_code]:!bg-transparent"
+        />
+      ) : (
+        <pre className="overflow-x-auto p-4 text-[13px] leading-6 text-slate-200">
+          <code>{code}</code>
+        </pre>
+      )}
     </div>
   );
 }
