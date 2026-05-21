@@ -315,6 +315,12 @@
 .tiptap-content .tiptap .ProseMirror-selectednode { outline: 2px solid var(--tiptap-selection); border-radius: 4px; }
 .tiptap-content .tiptap a { color: var(--tiptap-link); text-decoration: underline; }
 .tiptap-content .tiptap div[data-callout] { border-left: 3px solid var(--tiptap-callout-border); background: var(--tiptap-callout-bg); padding: 12px 16px; border-radius: 0 6px 6px 0; margin: 8px 0; }
+.tiptap-content .tiptap ul[data-type="taskList"] { list-style: none; padding-left: 0; }
+.tiptap-content .tiptap ul[data-type="taskList"] li[data-type="taskItem"] { display: flex; align-items: flex-start; gap: 8px; margin: 2px 0; }
+.tiptap-content .tiptap ul[data-type="taskList"] li[data-type="taskItem"] > label { flex-shrink: 0; padding-top: 3px; cursor: pointer; }
+.tiptap-content .tiptap ul[data-type="taskList"] li[data-type="taskItem"] > label input[type="checkbox"] { cursor: pointer; width: 15px; height: 15px; accent-color: var(--tiptap-link); }
+.tiptap-content .tiptap ul[data-type="taskList"] li[data-type="taskItem"] > div { flex: 1; min-width: 0; }
+.tiptap-content .tiptap ul[data-type="taskList"] li[data-type="taskItem"][data-checked="true"] > div p { text-decoration: line-through; opacity: 0.55; }
 
 /* ─── Typography utilities ─── */
 .text-display {

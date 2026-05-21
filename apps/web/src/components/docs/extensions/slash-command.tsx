@@ -18,6 +18,7 @@ import {
   Heading3,
   List,
   ListOrdered,
+  ListTodo,
   Code,
   Quote,
   Lightbulb,
@@ -82,6 +83,13 @@ export const slashMenuCategories: SlashMenuCategory[] = [
         icon: ListOrdered,
         command: (editor, range) =>
           editor.chain().focus().deleteRange(range).toggleOrderedList().run(),
+      },
+      {
+        title: 'Checklist',
+        description: '체크리스트',
+        icon: ListTodo,
+        command: (editor, range) =>
+          editor.chain().focus().deleteRange(range).toggleTaskList().run(),
       },
     ],
   },

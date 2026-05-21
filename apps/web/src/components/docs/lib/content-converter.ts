@@ -13,6 +13,19 @@ const turndown = new TurndownService({
 // TipTap handles structural formatting; no inline text escaping is needed.
 (turndown as unknown as { escape: (str: string) => string }).escape = (str: string) => str;
 
+// TaskList item rule — converts Tiptap taskItem nodes to GFM task list syntax (- [x] / - [ ])
+// Must be registered before the generic compactListItem rule so it wins for taskItem elements.
+turndown.addRule('taskListItem', {
+  filter: (node) =>
+    node.nodeName === 'LI' &&
+    (node as HTMLElement).getAttribute('data-type') === 'taskItem',
+  replacement: (content, node) => {
+    const checked = (node as HTMLElement).getAttribute('data-checked') === 'true';
+    const clean = content.replace(/^\n+/, '').replace(/\n\s*\n/g, '\n').trimEnd();
+    return `- [${checked ? 'x' : ' '}] ${clean}\n`;
+  },
+});
+
 // Custom list item rule — produces compact format regardless of whether
 // TipTap wrapped the content in <p> tags (which it always does via schema normalization).
 // Without this, Turndown outputs "loose" lists with blank lines between items:
@@ -207,6 +220,19 @@ export function markdownToHtml(rawMd: string): string {
     }
 
     return `<ol>${items.map((item) => `<li><p>${item}</p></li>`).join('')}</ol>`;
+  });
+
+  // Task lists (GFM: - [ ] / - [x]) — must be before unordered list rule
+  html = html.replace(/(?:^-\s+\[[ x]\]\s+.+(?:\n|$))+/gm, (listBlock) => {
+    const items = listBlock.trim().split('\n').filter(Boolean);
+    const listItems = items.map((line) => {
+      const match = line.match(/^-\s+\[([ x])\]\s+(.+)$/);
+      if (!match) return '';
+      const checked = match[1] === 'x';
+      const text = match[2] ?? '';
+      return `<li data-type="taskItem" data-checked="${checked}"><label><input type="checkbox"${checked ? ' checked' : ''}></label><div><p>${text}</p></div></li>`;
+    }).filter(Boolean).join('');
+    return `<ul data-type="taskList">${listItems}</ul>`;
   });
 
   // Unordered lists
