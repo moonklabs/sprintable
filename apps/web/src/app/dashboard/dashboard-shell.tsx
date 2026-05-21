@@ -8,6 +8,7 @@ import { TopBar } from '@/components/nav/top-bar';
 import { TopBarProvider } from '@/components/nav/top-bar-context';
 import { SidebarProvider, SidebarInset } from '@/components/ui/sidebar';
 import { RefreshProvider } from '@/contexts/refresh-context';
+import type { OrgSwitcherItem } from '@/components/nav/unified-switcher';
 
 export interface DashboardProjectOption {
   projectId: string;
@@ -20,9 +21,10 @@ interface DashboardContext {
   projectId?: string;
   projectName?: string;
   projectMemberships: DashboardProjectOption[];
+  orgMemberships: OrgSwitcherItem[];
 }
 
-const DashboardCtx = createContext<DashboardContext>({ projectMemberships: [] });
+const DashboardCtx = createContext<DashboardContext>({ projectMemberships: [], orgMemberships: [] });
 
 export function useDashboardContext() {
   return useContext(DashboardCtx);
@@ -38,13 +40,14 @@ export function DashboardShell({
   projectId,
   projectName,
   projectMemberships,
+  orgMemberships,
   children,
 }: DashboardShellProps) {
   const pathname = usePathname();
   const showTopBar = !pathname.startsWith('/settings');
 
   return (
-    <DashboardCtx.Provider value={{ currentTeamMemberId, orgId, projectId, projectName, projectMemberships }}>
+    <DashboardCtx.Provider value={{ currentTeamMemberId, orgId, projectId, projectName, projectMemberships, orgMemberships }}>
       <RefreshProvider>
       <RealtimeProvider currentTeamMemberId={currentTeamMemberId}>
         <TopBarProvider>
@@ -52,8 +55,9 @@ export function DashboardShell({
             <AppSidebar
               currentTeamMemberId={currentTeamMemberId}
               projectId={projectId}
-              projectName={projectName}
               projectMemberships={projectMemberships}
+              orgId={orgId}
+              orgMemberships={orgMemberships}
             />
             <SidebarInset className="relative flex flex-col overflow-hidden">
               {showTopBar && <TopBar />}

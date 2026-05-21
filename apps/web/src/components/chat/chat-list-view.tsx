@@ -2,10 +2,11 @@
 
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { useRouter } from 'next/navigation';
-import { MessageSquare, Plus, Users } from 'lucide-react';
+import { Bot, MessageSquare, Plus, Users } from 'lucide-react';
 import { useTranslations } from 'next-intl';
 import { Button } from '@/components/ui/button';
 import { EmptyState } from '@/components/ui/empty-state';
+import { Tabs, TabsList, TabsTrigger, TabsContent } from '@/components/ui/tabs';
 import { NewConversationModal } from './new-conversation-modal';
 import { useChatSse } from '@/hooks/use-chat-sse';
 
@@ -58,10 +59,12 @@ function formatParticipantNames(
 function ConversationRow({
   conv,
   currentMemberId,
+  isAgentConv,
   onClick,
 }: {
   conv: ConversationItem;
   currentMemberId: string;
+  isAgentConv?: boolean;
   onClick: () => void;
 }) {
   const t = useTranslations('chats');
@@ -75,7 +78,7 @@ function ConversationRow({
   const time = conv.latest_message?.created_at ?? conv.updated_at;
   const unread = conv.unread_count ?? 0;
 
-  const avatarInitial = conv.type === 'dm' && conv.participants
+  const avatarInitial = !isAgentConv && conv.type === 'dm' && conv.participants
     ? (conv.participants.find((p) => p.member_id !== currentMemberId)?.name.slice(0, 2) ?? 'DM')
     : null;
 
@@ -87,15 +90,19 @@ function ConversationRow({
     >
       {/* Avatar */}
       <div className={`flex h-9 w-9 flex-shrink-0 items-center justify-center rounded-full text-sm font-medium ${
-        conv.type === 'dm'
-          ? 'bg-primary/15 text-primary'
-          : 'bg-violet-100 text-violet-700 dark:bg-violet-900/40 dark:text-violet-300'
-      }`}>
-        {conv.type === 'dm' && avatarInitial
-          ? avatarInitial
+        isAgentConv
+          ? 'bg-amber-100 text-amber-700 dark:bg-amber-900/40 dark:text-amber-300'
           : conv.type === 'dm'
-            ? <MessageSquare className="h-4 w-4" />
-            : <Users className="h-4 w-4" />}
+            ? 'bg-primary/15 text-primary'
+            : 'bg-violet-100 text-violet-700 dark:bg-violet-900/40 dark:text-violet-300'
+      }`}>
+        {isAgentConv
+          ? <Bot className="h-4 w-4" />
+          : conv.type === 'dm' && avatarInitial
+            ? avatarInitial
+            : conv.type === 'dm'
+              ? <MessageSquare className="h-4 w-4" />
+              : <Users className="h-4 w-4" />}
       </div>
 
       {/* Info */}
@@ -117,50 +124,98 @@ function ConversationRow({
   );
 }
 
+function applyConversationMessageUpdate(
+  prev: ConversationItem[],
+  payload: { conversation_id?: string; content?: string; created_at?: string },
+  onRefetch: () => void,
+): ConversationItem[] {
+  const { conversation_id, content, created_at } = payload;
+  if (!conversation_id) return prev;
+  const idx = prev.findIndex((c) => c.id === conversation_id);
+  if (idx === -1) {
+    onRefetch();
+    return prev;
+  }
+  const updated = [...prev];
+  const item = { ...updated[idx]! };
+  if (content && created_at) {
+    item.latest_message = { content, created_at };
+    item.updated_at = created_at;
+    item.unread_count = (item.unread_count ?? 0) + 1;
+  }
+  updated.splice(idx, 1);
+  return [item, ...updated];
+}
+
+const PAGE_LIMIT = 30;
+
 export function ChatListView({ projectId, currentTeamMemberId }: ChatListViewProps) {
   const t = useTranslations('chats');
   const router = useRouter();
   const [conversations, setConversations] = useState<ConversationItem[]>([]);
+  const [allConversations, setAllConversations] = useState<ConversationItem[]>([]);
+  const [isAdminOrOwner, setIsAdminOrOwner] = useState(false);
   const [loading, setLoading] = useState(true);
+  const [loadingMore, setLoadingMore] = useState(false);
+  const [myOffset, setMyOffset] = useState(0);
+  const [myTotal, setMyTotal] = useState(0);
+  const [agentOffset, setAgentOffset] = useState(0);
+  const [agentTotal, setAgentTotal] = useState(0);
   const [showModal, setShowModal] = useState(false);
+
   const convsRef = useRef(conversations);
   useEffect(() => { convsRef.current = conversations; }, [conversations]);
 
-  const fetchConversations = useCallback(async () => {
-    try {
-      const res = await fetch(`/api/conversations?project_id=${projectId}`);
+  useEffect(() => {
+    async function checkRole() {
+      const res = await fetch('/api/me');
       if (!res.ok) return;
-      const json = await res.json() as { data: ConversationItem[] };
-      setConversations(json.data ?? []);
+      const json = await res.json() as { data?: { role?: string } };
+      const role = json.data?.role ?? 'member';
+      setIsAdminOrOwner(role === 'admin' || role === 'owner');
+    }
+    void checkRole();
+  }, []);
+
+  const fetchConversations = useCallback(async (nextOffset = 0, append = false) => {
+    try {
+      const res = await fetch(
+        `/api/conversations?project_id=${projectId}&limit=${PAGE_LIMIT}&offset=${nextOffset}`
+      );
+      if (!res.ok) return;
+      const json = await res.json() as { data: ConversationItem[]; total: number };
+      const items = json.data ?? [];
+      setConversations((prev) => append ? [...prev, ...items] : items);
+      setMyOffset(nextOffset + items.length);
+      setMyTotal(json.total ?? 0);
     } finally {
       setLoading(false);
+      setLoadingMore(false);
     }
   }, [projectId]);
 
-  useEffect(() => { void fetchConversations(); }, [fetchConversations]);
+  const fetchAllConversations = useCallback(async (nextOffset = 0, append = false) => {
+    const res = await fetch(
+      `/api/conversations?project_id=${projectId}&include_agent_conversations=true&limit=${PAGE_LIMIT}&offset=${nextOffset}`
+    );
+    if (!res.ok) return;
+    const json = await res.json() as { data: ConversationItem[]; total: number };
+    const items = json.data ?? [];
+    setAllConversations((prev) => append ? [...prev, ...items] : items);
+    setAgentOffset(nextOffset + items.length);
+    setAgentTotal(json.total ?? 0);
+  }, [projectId]);
 
-  // AC5: SSE conversation:message → 목록 갱신
+  useEffect(() => { void fetchConversations(0, false); }, [fetchConversations]);
+
+  useEffect(() => {
+    if (isAdminOrOwner) void fetchAllConversations(0, false);
+  }, [isAdminOrOwner, fetchAllConversations]);
+
   const handleConversationMessage = useCallback((payload: { conversation_id?: string; content?: string; created_at?: string }) => {
-    const { conversation_id, content, created_at } = payload;
-    if (!conversation_id) return;
-    setConversations((prev) => {
-      const idx = prev.findIndex((c) => c.id === conversation_id);
-      if (idx === -1) {
-        // 새 대화 등장 시 전체 리페치
-        void fetchConversations();
-        return prev;
-      }
-      const updated = [...prev];
-      const item = { ...updated[idx]! };
-      if (content && created_at) {
-        item.latest_message = { content, created_at };
-        item.updated_at = created_at;
-        item.unread_count = (item.unread_count ?? 0) + 1;
-      }
-      updated.splice(idx, 1);
-      return [item, ...updated];
-    });
-  }, [fetchConversations]);
+    setConversations((prev) => applyConversationMessageUpdate(prev, payload, () => void fetchConversations(0, false)));
+    setAllConversations((prev) => applyConversationMessageUpdate(prev, payload, () => void fetchAllConversations(0, false)));
+  }, [fetchConversations, fetchAllConversations]);
 
   useChatSse({
     currentTeamMemberId,
@@ -175,6 +230,76 @@ export function ChatListView({ projectId, currentTeamMemberId }: ChatListViewPro
   const dmConvs = conversations.filter((c) => c.type === 'dm');
   const groupConvs = conversations.filter((c) => c.type === 'group');
 
+  const myConvIds = new Set(conversations.map((c) => c.id));
+  const agentOnlyConvs = allConversations.filter((c) => !myConvIds.has(c.id));
+
+  const myConversationList = loading ? (
+    <div className="flex h-full items-center justify-center">
+      <p className="text-sm text-muted-foreground">불러오는 중…</p>
+    </div>
+  ) : conversations.length === 0 ? (
+    <div className="flex h-full items-center justify-center">
+      <EmptyState title={t('noConversations')} description={t('startNewConversation')} className="w-full max-w-xs" />
+    </div>
+  ) : (
+    <div className="space-y-4">
+      {dmConvs.length > 0 && (
+        <div>
+          <p className="mb-1 px-3 text-[11px] font-semibold uppercase tracking-wide text-muted-foreground">
+            {t('dmSection')}
+          </p>
+          {dmConvs.map((conv) => (
+            <ConversationRow key={conv.id} conv={conv} currentMemberId={currentTeamMemberId} onClick={() => router.push(`/chats/${conv.id}`)} />
+          ))}
+        </div>
+      )}
+      {groupConvs.length > 0 && (
+        <div>
+          <p className="mb-1 px-3 text-[11px] font-semibold uppercase tracking-wide text-muted-foreground">
+            {t('groupSection')}
+          </p>
+          {groupConvs.map((conv) => (
+            <ConversationRow key={conv.id} conv={conv} currentMemberId={currentTeamMemberId} onClick={() => router.push(`/chats/${conv.id}`)} />
+          ))}
+        </div>
+      )}
+      {conversations.length < myTotal && (
+        <button
+          type="button"
+          onClick={() => { setLoadingMore(true); void fetchConversations(myOffset, true); }}
+          disabled={loadingMore}
+          className="w-full rounded-lg py-2 text-xs text-muted-foreground transition hover:text-foreground disabled:opacity-50"
+        >
+          {loadingMore ? '불러오는 중…' : `더 보기 (${myTotal - conversations.length}건)`}
+        </button>
+      )}
+    </div>
+  );
+
+  const agentConversationList = agentOnlyConvs.length === 0 ? (
+    <div className="flex h-full items-center justify-center">
+      <EmptyState title={t('noAgentConversations')} description="" className="w-full max-w-xs" />
+    </div>
+  ) : (
+    <div>
+      <p className="mb-1 px-3 text-[11px] font-semibold uppercase tracking-wide text-muted-foreground">
+        {t('agentSection')}
+      </p>
+      {agentOnlyConvs.map((conv) => (
+        <ConversationRow key={conv.id} conv={conv} currentMemberId={currentTeamMemberId} isAgentConv onClick={() => router.push(`/chats/${conv.id}`)} />
+      ))}
+      {allConversations.length < agentTotal && (
+        <button
+          type="button"
+          onClick={() => void fetchAllConversations(agentOffset, true)}
+          className="w-full rounded-lg py-2 text-xs text-muted-foreground transition hover:text-foreground"
+        >
+          더 보기 ({agentTotal - allConversations.length}건)
+        </button>
+      )}
+    </div>
+  );
+
   return (
     <div className="flex h-full flex-col">
       {/* Header */}
@@ -186,58 +311,24 @@ export function ChatListView({ projectId, currentTeamMemberId }: ChatListViewPro
         </Button>
       </div>
 
-      {/* List */}
-      <div className="flex-1 overflow-y-auto px-2 py-2">
-        {loading ? (
-          <div className="flex h-full items-center justify-center">
-            <p className="text-sm text-muted-foreground">불러오는 중…</p>
-          </div>
-        ) : conversations.length === 0 ? (
-          <div className="flex h-full items-center justify-center">
-            <EmptyState
-              title={t('noConversations')}
-              description={t('startNewConversation')}
-              className="w-full max-w-xs"
-            />
-          </div>
-        ) : (
-          <div className="space-y-4">
-            {/* DM section */}
-            {dmConvs.length > 0 && (
-              <div>
-                <p className="mb-1 px-3 text-[11px] font-semibold uppercase tracking-wide text-muted-foreground">
-                  {t('dmSection')}
-                </p>
-                {dmConvs.map((conv) => (
-                  <ConversationRow
-                    key={conv.id}
-                    conv={conv}
-                    currentMemberId={currentTeamMemberId}
-                    onClick={() => router.push(`/chats/${conv.id}`)}
-                  />
-                ))}
-              </div>
-            )}
-
-            {/* Group section */}
-            {groupConvs.length > 0 && (
-              <div>
-                <p className="mb-1 px-3 text-[11px] font-semibold uppercase tracking-wide text-muted-foreground">
-                  {t('groupSection')}
-                </p>
-                {groupConvs.map((conv) => (
-                  <ConversationRow
-                    key={conv.id}
-                    conv={conv}
-                    currentMemberId={currentTeamMemberId}
-                    onClick={() => router.push(`/chats/${conv.id}`)}
-                  />
-                ))}
-              </div>
-            )}
-          </div>
-        )}
-      </div>
+      {isAdminOrOwner ? (
+        <Tabs defaultValue="my" className="flex min-h-0 flex-1 flex-col">
+          <TabsList className="mx-4 mt-2 w-auto self-start">
+            <TabsTrigger value="my">{t('myChatsTab')}</TabsTrigger>
+            <TabsTrigger value="agent">{t('agentChatsTab')}</TabsTrigger>
+          </TabsList>
+          <TabsContent value="my" className="flex-1 overflow-y-auto px-2 py-2">
+            {myConversationList}
+          </TabsContent>
+          <TabsContent value="agent" className="flex-1 overflow-y-auto px-2 py-2">
+            {agentConversationList}
+          </TabsContent>
+        </Tabs>
+      ) : (
+        <div className="flex-1 overflow-y-auto px-2 py-2">
+          {myConversationList}
+        </div>
+      )}
 
       {showModal && (
         <NewConversationModal

@@ -1,0 +1,209 @@
+from __future__ import annotations
+
+import uuid
+from datetime import datetime, timedelta, timezone
+
+from dataclasses import dataclass
+
+from sqlalchemy import select
+from sqlalchemy.dialects.postgresql import insert as pg_insert
+from sqlalchemy.exc import IntegrityError
+from sqlalchemy.ext.asyncio import AsyncSession
+
+from app.models.org_invite import OrgInvite
+from app.models.organization import Organization
+from app.models.project import OrgMember
+
+
+@dataclass
+class InvitePreview:
+    org_name: str
+    role: str
+    status: str
+    expires_at: datetime
+    email: str
+
+_INVITE_EXPIRE_DAYS = 7
+
+
+class OrgInviteRepository:
+    def __init__(self, session: AsyncSession) -> None:
+        self.session = session
+
+    async def is_already_member(self, org_id: uuid.UUID, email: str) -> bool:
+        """해당 org에 이미 가입된 email 여부 확인."""
+        from app.models.user import User
+        result = await self.session.execute(
+            select(OrgMember.id)
+            .join(User, User.id == OrgMember.user_id)
+            .where(
+                OrgMember.org_id == org_id,
+                User.email == email.lower().strip(),
+                OrgMember.deleted_at.is_(None),
+            )
+            .limit(1)
+        )
+        return result.scalar_one_or_none() is not None
+
+    async def has_pending_invite(self, org_id: uuid.UUID, email: str) -> bool:
+        """같은 org+email의 pending 초대가 이미 존재하는지 확인."""
+        result = await self.session.execute(
+            select(OrgInvite.id).where(
+                OrgInvite.organization_id == org_id,
+                OrgInvite.email == email.lower().strip(),
+                OrgInvite.status == "pending",
+            ).limit(1)
+        )
+        return result.scalar_one_or_none() is not None
+
+    async def create(
+        self,
+        org_id: uuid.UUID,
+        email: str,
+        role: str,
+        created_by: uuid.UUID,
+    ) -> OrgInvite | None:
+        """초대 생성. pending 중복(org+email) 시 None 반환 (revoke 후 재초대 허용)."""
+        if await self.has_pending_invite(org_id=org_id, email=email):
+            return None
+        now = datetime.now(timezone.utc)
+        invite = OrgInvite(
+            organization_id=org_id,
+            email=email.lower().strip(),
+            role=role,
+            expires_at=now + timedelta(days=_INVITE_EXPIRE_DAYS),
+            created_by=created_by,
+        )
+        self.session.add(invite)
+        try:
+            await self.session.flush()
+            await self.session.refresh(invite)
+        except IntegrityError:
+            await self.session.rollback()
+            return None
+        return invite
+
+    async def list_pending(self, org_id: uuid.UUID) -> list[OrgInvite]:
+        """pending + 미만료 초대 목록 (최신순)."""
+        now = datetime.now(timezone.utc)
+        result = await self.session.execute(
+            select(OrgInvite)
+            .where(
+                OrgInvite.organization_id == org_id,
+                OrgInvite.status == "pending",
+                OrgInvite.expires_at > now,
+            )
+            .order_by(OrgInvite.created_at.desc())
+        )
+        return list(result.scalars().all())
+
+    async def get_by_token(self, token: str) -> OrgInvite | None:
+        result = await self.session.execute(
+            select(OrgInvite).where(OrgInvite.token == token)
+        )
+        return result.scalar_one_or_none()
+
+    async def update_email_result(
+        self, invite_id: uuid.UUID, *, sent_at: datetime | None, error: str | None
+    ) -> None:
+        """이메일 발송 결과를 invite 레코드에 기록."""
+        result = await self.session.execute(
+            select(OrgInvite).where(OrgInvite.id == invite_id)
+        )
+        invite = result.scalar_one_or_none()
+        if invite is None:
+            return
+        invite.email_sent_at = sent_at
+        invite.email_error = error
+        await self.session.flush()
+
+    async def resend(self, invite_id: uuid.UUID, org_id: uuid.UUID) -> OrgInvite | None:
+        """재발송: expires_at 갱신 + email 트래킹 초기화. 해당 org pending 초대만 대상."""
+        result = await self.session.execute(
+            select(OrgInvite).where(
+                OrgInvite.id == invite_id,
+                OrgInvite.organization_id == org_id,
+                OrgInvite.status == "pending",
+            )
+        )
+        invite = result.scalar_one_or_none()
+        if invite is None:
+            return None
+        invite.expires_at = datetime.now(timezone.utc) + timedelta(days=_INVITE_EXPIRE_DAYS)
+        invite.email_sent_at = None
+        invite.email_error = None
+        await self.session.flush()
+        await self.session.refresh(invite)
+        return invite
+
+    async def get_preview(self, token: str) -> InvitePreview | None:
+        """token으로 초대 + org 이름 조회. 미존재 시 None."""
+        result = await self.session.execute(
+            select(OrgInvite, Organization.name)
+            .join(Organization, Organization.id == OrgInvite.organization_id)
+            .where(OrgInvite.token == token)
+        )
+        row = result.first()
+        if row is None:
+            return None
+        invite, org_name = row
+        now = datetime.now(timezone.utc)
+        effective_status = (
+            "expired" if invite.status == "pending" and invite.expires_at < now else invite.status
+        )
+        return InvitePreview(
+            org_name=org_name,
+            role=invite.role,
+            status=effective_status,
+            expires_at=invite.expires_at,
+            email=invite.email,
+        )
+
+    async def accept(self, token: str, user_id: uuid.UUID, user_email: str) -> dict:
+        """초대 수락. 성공 시 org_id/role 반환. 실패 시 reason 포함."""
+        result = await self.session.execute(
+            select(OrgInvite).where(OrgInvite.token == token)
+        )
+        invite = result.scalar_one_or_none()
+        if invite is None:
+            return {"ok": False, "reason": "not_found"}
+        if invite.status == "accepted":
+            return {"ok": False, "reason": "already_accepted"}
+        if invite.status != "pending":
+            return {"ok": False, "reason": "invalid_status"}
+        if invite.expires_at < datetime.now(timezone.utc):
+            return {"ok": False, "reason": "expired"}
+        if invite.email.lower() != user_email.lower():
+            return {"ok": False, "reason": "email_mismatch"}
+
+        # org_member 생성 (중복 시 무시)
+        await self.session.execute(
+            pg_insert(OrgMember)
+            .values(
+                org_id=invite.organization_id,
+                user_id=user_id,
+                role=invite.role,
+            )
+            .on_conflict_do_nothing(constraint="uq_org_members_org_user")
+        )
+
+        invite.status = "accepted"
+        invite.accepted_at = datetime.now(timezone.utc)
+        await self.session.flush()
+
+        return {"ok": True, "org_id": str(invite.organization_id), "role": invite.role}
+
+    async def revoke(self, invite_id: uuid.UUID, org_id: uuid.UUID) -> OrgInvite | None:
+        result = await self.session.execute(
+            select(OrgInvite).where(
+                OrgInvite.id == invite_id,
+                OrgInvite.organization_id == org_id,
+            )
+        )
+        invite = result.scalar_one_or_none()
+        if invite is None:
+            return None
+        invite.status = "revoked"
+        await self.session.flush()
+        await self.session.refresh(invite)
+        return invite

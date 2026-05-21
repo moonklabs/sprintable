@@ -21,6 +21,7 @@
     ],
     "paths": {
       "@/*": ["./src/*"],
+      "@/ee/*": ["./src/ee/*", "./src/ee-stubs/*"],
       "@sprintable/shared": ["../../packages/shared/src/index.ts"],
       "@sprintable/shared/*": ["../../packages/shared/src/*"],
       "@sprintable/core-storage": ["../../packages/core-storage/src/index.ts"],

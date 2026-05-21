@@ -51,7 +51,7 @@ from app.core.rate_limit import limiter
 from app.dependencies.auth import AuthContext, get_current_user
 from app.dependencies.database import get_db
 from app.models.invitation import Invitation
-from app.models.project import OrgMember
+from app.models.project import OrgMember, Project
 from app.models.team import TeamMember
 from app.models.login_audit_log import LoginAuditLog
 from app.models.user import RefreshToken, User
@@ -281,27 +281,7 @@ async def _build_app_metadata(user: User, session: AsyncSession) -> dict:
                 .values(org_id=inv.org_id, user_id=user.id, role=inv.role)
                 .on_conflict_do_nothing(constraint="uq_org_members_org_user")
             )
-            if inv.project_id:
-                existing_tm = await session.execute(
-                    select(TeamMember).where(
-                        TeamMember.project_id == inv.project_id,
-                        TeamMember.user_id == user.id,
-                        TeamMember.is_active.is_(True),
-                    )
-                )
-                if not existing_tm.scalar_one_or_none():
-                    new_member = TeamMember(
-                        org_id=inv.org_id,
-                        project_id=inv.project_id,
-                        user_id=user.id,
-                        type="human",
-                        name=inv.email.split("@")[0],
-                        role=inv.role,
-                    )
-                    session.add(new_member)
-                    await session.flush()
-                    from app.services.notification_preference_defaults import insert_default_preferences
-                    await insert_default_preferences(session, new_member.id, "human")
+            # human team_member 생성 제거 — org_members 기반 opt-out 모델로 이전 (E-ENTITY-CLEANUP S5).
             await session.flush()
             return {
                 "org_id": str(inv.org_id),
@@ -1016,6 +996,93 @@ async def switch_project(
 
     await session.commit()
     return _ok(tokens)
+
+
+# ─── POST /api/v2/auth/switch-org ────────────────────────────────────────────
+
+class SwitchOrganizationRequest(BaseModel):
+    org_id: uuid.UUID
+
+
+@router.post("/switch-org")
+async def switch_organization(
+    body: SwitchOrganizationRequest,
+    session: AsyncSession = Depends(get_db),
+    auth: AuthContext = Depends(get_current_user),
+) -> JSONResponse:
+    """Organization 전환 — org_members 검증 + last_project_id 갱신 + 새 토큰 발급."""
+    user = await _get_user_by_id(session, uuid.UUID(auth.user_id))
+    if user is None:
+        return _err("USER_NOT_FOUND", "User not found", 404)
+
+    # org_members 소속 여부 확인
+    membership = await session.execute(
+        select(OrgMember)
+        .where(
+            OrgMember.org_id == body.org_id,
+            OrgMember.user_id == user.id,
+            OrgMember.deleted_at.is_(None),
+        )
+        .limit(1)
+    )
+    if membership.scalar_one_or_none() is None:
+        return _err("NOT_ORG_MEMBER", "Not a member of this organization", 403)
+
+    # 대상 org의 team_member 조회 → last_project_id 갱신
+    member_in_org = await session.execute(
+        select(TeamMember)
+        .where(
+            TeamMember.org_id == body.org_id,
+            or_(TeamMember.user_id == user.id, TeamMember.id == user.id),
+            TeamMember.is_active.is_(True),
+        )
+        .order_by(TeamMember.created_at.asc())
+        .limit(1)
+    )
+    team_member = member_in_org.scalar_one_or_none()
+
+    if team_member is not None:
+        user.last_project_id = team_member.project_id
+    else:
+        # team_member 없음 (opt-out 모델) — 대상 org의 첫 project로 last_project_id 갱신.
+        # 미설정 시 _build_app_metadata가 이전 org project_id를 JWT에 심어 context 불일치 발생.
+        first_proj_result = await session.execute(
+            select(Project)
+            .where(Project.org_id == body.org_id, Project.deleted_at.is_(None))
+            .order_by(Project.created_at.asc())
+            .limit(1)
+        )
+        first_proj = first_proj_result.scalar_one_or_none()
+        user.last_project_id = first_proj.id if first_proj else None
+
+    # 기존 refresh token 무효화
+    await session.execute(
+        update(RefreshToken)
+        .where(RefreshToken.user_id == user.id, RefreshToken.revoked_at.is_(None))
+        .values(revoked_at=datetime.now(timezone.utc))
+    )
+
+    # _build_app_metadata 호출 전에 target project_id 고정
+    # (내부에서 user.last_project_id를 이전 org TM으로 덮어쓰므로 먼저 캡처)
+    target_project_id = user.last_project_id
+
+    # 새 토큰 발급 — switch-org 목적 자체가 org 전환이므로 target org_id + project_id 모두 덮어씀
+    app_metadata = await _build_app_metadata(user, session)
+    app_metadata["org_id"] = str(body.org_id)
+    # 캡처해둔 target project_id로 덮어쓰기 — _build_app_metadata 내부 fallback 값 무효화
+    if target_project_id:
+        app_metadata["project_id"] = str(target_project_id)
+    else:
+        app_metadata.pop("project_id", None)
+
+    tokens = create_tokens(str(user.id), email=user.email, app_metadata=app_metadata)
+    _, refresh_exp = create_refresh_token(str(user.id), expires_delta=timedelta(days=REFRESH_TOKEN_EXPIRE_DAYS))
+    await _store_refresh_token(session, user, tokens["refresh_token"], refresh_exp)
+
+    await session.commit()
+
+    project_id = app_metadata.get("project_id") or (str(team_member.project_id) if team_member else None)
+    return _ok({**tokens, "project_id": project_id})
 
 
 # ─── GET /api/v2/auth/me ─────────────────────────────────────────────────────

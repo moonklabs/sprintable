@@ -25,7 +25,7 @@ import { LogoutButton } from '@/app/dashboard/logout-button';
 import { LocaleSwitcher } from '@/components/locale-switcher';
 import { ThemeToggle } from '@/components/nav/theme-toggle';
 import { CommandPalette } from '@/components/command-palette/command-palette';
-import { ProjectSwitcher } from '@/components/nav/project-switcher';
+import { UnifiedSwitcher, type OrgSwitcherItem } from '@/components/nav/unified-switcher';
 import {
   Sidebar,
   SidebarContent,
@@ -43,8 +43,9 @@ import {
 
 interface AppSidebarProps {
   currentTeamMemberId?: string;
+  orgId?: string;
+  orgMemberships?: OrgSwitcherItem[];
   projectId?: string;
-  projectName?: string;
   projectMemberships: Array<{ projectId: string; projectName: string }>;
 }
 
@@ -57,8 +58,9 @@ function KbdHint({ children }: { children: React.ReactNode }) {
 }
 
 export function AppSidebar({
+  orgId,
+  orgMemberships = [],
   projectId,
-  projectName,
   projectMemberships,
 }: AppSidebarProps) {
   const pathname = usePathname();
@@ -120,17 +122,13 @@ export function AppSidebar({
   return (
     <Sidebar variant="inset" collapsible="offcanvas">
       <SidebarHeader className="py-3">
-        {projectMemberships.length > 0 ? (
-          <ProjectSwitcher
-            projects={projectMemberships}
-            currentProjectId={projectId}
-            className="w-full"
-          />
-        ) : (
-          <div className="truncate px-2 py-1 text-sm font-medium text-sidebar-foreground">
-            {projectName ?? 'Sprintable'}
-          </div>
-        )}
+        <UnifiedSwitcher
+          orgs={orgMemberships}
+          currentOrgId={orgId}
+          projects={projectMemberships}
+          currentProjectId={projectId}
+          className="w-full"
+        />
         <button
           type="button"
           onClick={openPalette}

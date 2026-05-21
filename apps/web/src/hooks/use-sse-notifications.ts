@@ -39,8 +39,10 @@ export function useSseNotifications({ onNotification, memberId, enabled = true }
     let retryTimer: ReturnType<typeof setTimeout> | null = null;
     let closed = false;
     let reconnectAttempts = 0;
+    let lastEventId: string | null = null;
 
-    const handleData = (raw: string) => {
+    const handleData = (raw: string, eventId?: string) => {
+      if (eventId) lastEventId = eventId;
       if (!raw || raw.trim() === '') return;
       try {
         const parsed = JSON.parse(raw) as SseEventNotification;
@@ -54,16 +56,18 @@ export function useSseNotifications({ onNotification, memberId, enabled = true }
 
       const url = new URL('/api/event-stream', window.location.origin);
       if (memberIdRef.current) url.searchParams.set('member_id', memberIdRef.current);
+      if (lastEventId) url.searchParams.set('last_event_id', lastEventId);
 
       es = new EventSource(url.toString(), { withCredentials: true });
 
       es.onopen = () => { reconnectAttempts = 0; };
 
-      es.onmessage = (e: MessageEvent<string>) => handleData(e.data);
+      es.onmessage = (e: MessageEvent<string>) => handleData(e.data, e.lastEventId || undefined);
 
       for (const eventName of ['event_notification', 'notification', 'new_notification']) {
         es.addEventListener(eventName, (e: Event) => {
-          handleData((e as MessageEvent<string>).data);
+          const me = e as MessageEvent<string>;
+          handleData(me.data, me.lastEventId || undefined);
         });
       }
 

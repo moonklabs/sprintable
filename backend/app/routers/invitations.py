@@ -101,27 +101,8 @@ async def accept_invitation(
         .on_conflict_do_nothing(constraint="uq_org_members_org_user")
     )
 
-    if inv.project_id:
-        existing_tm = await session.execute(
-            select(TeamMember).where(
-                TeamMember.project_id == inv.project_id,
-                TeamMember.user_id == user_id,
-                TeamMember.is_active.is_(True),
-            )
-        )
-        if not existing_tm.scalar_one_or_none():
-            new_member = TeamMember(
-                org_id=inv.org_id,
-                project_id=inv.project_id,
-                user_id=user_id,
-                type="human",
-                name=inv.email.split("@")[0],
-                role=inv.role,
-            )
-            session.add(new_member)
-            await session.flush()
-            from app.services.notification_preference_defaults import insert_default_preferences
-            await insert_default_preferences(session, new_member.id, "human")
+    # human team_member 생성 제거 — org_members 기반 opt-out 모델로 이전 (E-ENTITY-CLEANUP S5).
+    # project_id가 있더라도 org_member로 이미 프로젝트 접근 허용됨.
 
     await session.flush()
     return {"ok": True, "org_id": str(inv.org_id), "project_id": str(inv.project_id) if inv.project_id else None}

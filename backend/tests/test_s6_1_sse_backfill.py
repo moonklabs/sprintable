@@ -262,3 +262,34 @@ def test_live_event_yield_always_has_id_field():
     source = inspect.getsource(ev_module.agent_event_stream)
     assert "_live_id = eid or str(uuid.uuid4())" in source
     assert "id: {_live_id}" in source
+
+
+# ─── AC3 P0-FIX: exceed_threshold 브랜치 _ref 필터 검증 ─────────────────────
+
+def test_exceed_branch_applies_ref_filter():
+    """exceed 브랜치 소스에 _ref 기반 시간 필터가 포함됨 (P0-FIX)."""
+    import inspect
+    from app.routers import events as ev_module
+    source = inspect.getsource(ev_module.agent_event_stream)
+    # exceed_clauses 변수명으로 _ref 필터 적용 여부 확인
+    assert "exceed_clauses" in source
+
+
+def test_exceed_branch_has_composite_cursor():
+    """exceed 브랜치 소스에 복합 커서 조건이 포함됨 (P0-FIX: last_event_id 필터)."""
+    import inspect
+    from app.routers import events as ev_module
+    source = inspect.getsource(ev_module.agent_event_stream)
+    # within/exceed 양쪽 모두 복합 커서 OR 조건 사용 확인
+    # 두 번 이상 나타나야 exceed 브랜치에도 추가된 것
+    assert source.count("Event.created_at == _ref") >= 2
+    assert source.count("Event.id > last_event_id") >= 2
+
+
+def test_exceed_branch_ref_filter_before_old_events():
+    """_compute_backfill_mode 초과 + _ref 있을 때 exceed_clauses에 필터 추가 로직 소스 검증."""
+    import inspect
+    from app.routers import events as ev_module
+    source = inspect.getsource(ev_module.agent_event_stream)
+    # exceed 분기에서 _ref is not None 조건으로 필터를 동적으로 추가함
+    assert source.count("_ref is not None") >= 2

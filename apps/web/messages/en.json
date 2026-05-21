@@ -1859,7 +1859,9 @@
     "workflowVersionPreviewTitle": "Version {version} snapshot",
     "workflowVersionAddedRules": "+{count}",
     "workflowVersionRemovedRules": "-{count}",
-    "workflowVersionChangedRules": "~{count}"
+    "workflowVersionChangedRules": "~{count}",
+    "tabDeployments": "Deployments",
+    "tabPerformance": "Performance"
   },
   "agentRuns": {
     "eyebrow": "RUN HISTORY",
@@ -2126,6 +2128,10 @@
     "dmWith": "DM",
     "noMessages": "Send the first message",
     "create": "Start chat",
+    "myChatsTab": "My Chats",
+    "agentChatsTab": "Agent Chats",
+    "agentSection": "Agents",
+    "noAgentConversations": "No agent conversations yet",
     "memoSection": "Memos",
     "addParticipants": "Add Participants",
     "addParticipantsTitle": "Add Participants",
@@ -2155,5 +2161,35 @@
     "forbiddenTitle": "Access denied",
     "forbiddenDescription": "You do not have permission to view the activity log.",
     "noProject": "No project selected."
+  },
+  "activityTimeline": {
+    "title": "Recent Activity",
+    "description": "Live feed of the last 10 team actions.",
+    "viewAll": "View all",
+    "empty": "No activity recorded yet.",
+    "unknownActor": "System",
+    "actionStoryStatus": "updated story {entity}",
+    "actionStoryCreated": "created story {entity}",
+    "actionMemoCreated": "sent memo {entity}",
+    "actionMemoReplied": "replied to {entity}",
+    "actionMemoResolved": "resolved memo {entity}",
+    "actionRunCompleted": "completed run {entity}",
+    "actionRunFailed": "failed run {entity}",
+    "actionSprintStarted": "started sprint {entity}",
+    "actionSprintClosed": "closed sprint {entity}",
+    "actionDocCreated": "created doc {entity}"
+  },
+  "agentPerformance": {
+    "loading": "Loading performance data...",
+    "agentStatsTitle": "Agent Stats",
+    "agentStatsDescription": "Done stories, assigned stories, and average lead time per agent.",
+    "velocityTitle": "Team Velocity",
+    "velocityDescription": "Story points delivered per sprint (last 5 sprints).",
+    "leaderboardTitle": "Leaderboard",
+    "leaderboardDescription": "Agents ranked by total reward balance.",
+    "noAgents": "No agents deployed yet.",
+    "doneStories": "Done Stories",
+    "assignedStories": "Assigned",
+    "avgLeadTime": "Avg Lead Time"
   }
 }

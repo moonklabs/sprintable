@@ -1,16 +1,48 @@
 import os
 import uuid
+from datetime import datetime, timezone
 
 from fastapi import APIRouter, Depends, HTTPException, Query
+from pydantic import BaseModel
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.dependencies.auth import AuthContext, get_current_user, get_verified_org_id
 from app.dependencies.database import get_db
 from app.dependencies.ownership import assert_agent_owner
+from app.models.pm import Story
 from app.models.team import TeamMember
 from app.repositories.team_member import TeamMemberRepository
-from app.schemas.team_member import TeamMemberCreate, TeamMemberResponse, TeamMemberUpdate
+from app.schemas.team_member import (
+    ActiveStorySummary, TeamMemberCreate, TeamMemberResponse, TeamMemberUpdate,
+)
+
+
+class ClaimBody(BaseModel):
+    story_id: uuid.UUID
+
+
+async def _inject_active_stories(
+    members: list, session: AsyncSession
+) -> list[TeamMemberResponse]:
+    """AC6: active_story_id → stories batch 조회 후 inject."""
+    ids = {m.active_story_id for m in members if m.active_story_id}
+    stories: dict[uuid.UUID, Story] = {}
+    if ids:
+        result = await session.execute(select(Story).where(Story.id.in_(ids)))
+        for s in result.scalars().all():
+            stories[s.id] = s
+
+    out = []
+    for m in members:
+        resp = TeamMemberResponse.model_validate(m)
+        if m.active_story_id and m.active_story_id in stories:
+            s = stories[m.active_story_id]
+            resp = resp.model_copy(update={
+                "active_story": ActiveStorySummary(id=s.id, title=s.title, status=s.status)
+            })
+        out.append(resp)
+    return out
 
 _FAKECHAT_BASE_PORT = 8787
 
@@ -31,6 +63,7 @@ async def list_team_members(
     is_active: bool | None = Query(default=True),
     user_id: uuid.UUID | None = Query(default=None),
     repo: TeamMemberRepository = Depends(_get_repo),
+    session: AsyncSession = Depends(get_db),
 ) -> list[TeamMemberResponse]:
     filters: dict = {}
     if project_id:
@@ -42,7 +75,7 @@ async def list_team_members(
     if user_id:
         filters["user_id"] = user_id
     members = await repo.list(**filters)
-    return [TeamMemberResponse.model_validate(m) for m in members]
+    return await _inject_active_stories(members, session)
 
 
 @router.post("", status_code=201)
@@ -51,6 +84,12 @@ async def create_team_member(
     session: AsyncSession = Depends(get_db),
     auth: AuthContext = Depends(get_current_user),
 ) -> dict:
+    # Human member 생성은 org invite 플로우로 이전 (E-ENTITY-CLEANUP S4)
+    if body.type == "human":
+        raise HTTPException(
+            status_code=410,
+            detail="Human member creation via team-members is deprecated. Use org invites (/api/v2/organizations/{id}/invites) instead.",
+        )
     repo = TeamMemberRepository(session, body.org_id)
     created_by = uuid.UUID(auth.user_id) if body.type == "agent" else None
 
@@ -146,6 +185,66 @@ async def update_team_member(
     data = body.model_dump(exclude_unset=True)
     updated = await repo.update(id, **data)
     return TeamMemberResponse.model_validate(updated)
+
+
+@router.patch("/{id}/heartbeat")
+async def heartbeat(
+    id: uuid.UUID,
+    session: AsyncSession = Depends(get_db),
+    org_id: uuid.UUID = Depends(get_verified_org_id),
+) -> dict:
+    """AC1/2: last_seen_at = NOW(), agent_status = online 갱신."""
+    repo = TeamMemberRepository(session, org_id)
+    member = await repo.get(id)
+    if member is None:
+        raise HTTPException(status_code=404, detail="Team member not found")
+    now = datetime.now(timezone.utc)
+    await repo.update(id, last_seen_at=now, agent_status="online")
+    return {"ok": True, "last_seen_at": now.isoformat()}
+
+
+@router.post("/{id}/claim")
+async def claim_story(
+    id: uuid.UUID,
+    body: ClaimBody,
+    session: AsyncSession = Depends(get_db),
+    org_id: uuid.UUID = Depends(get_verified_org_id),
+) -> dict:
+    """AC1/3: active_story_id 갱신 + story 존재 검증."""
+    repo = TeamMemberRepository(session, org_id)
+    member = await repo.get(id)
+    if member is None:
+        raise HTTPException(status_code=404, detail="Team member not found")
+
+    # AC3: story가 해당 project에 존재하는지 검증
+    story_result = await session.execute(
+        select(Story).where(Story.id == body.story_id, Story.project_id == member.project_id)
+    )
+    story = story_result.scalar_one_or_none()
+    if story is None:
+        raise HTTPException(status_code=400, detail="Story not found in this project")
+
+    now = datetime.now(timezone.utc)
+    await repo.update(id, active_story_id=body.story_id, agent_status="online", last_seen_at=now)
+    return {"claimed": True, "story_id": str(body.story_id)}
+
+
+@router.post("/{id}/unclaim")
+async def unclaim_story(
+    id: uuid.UUID,
+    session: AsyncSession = Depends(get_db),
+    org_id: uuid.UUID = Depends(get_verified_org_id),
+) -> dict:
+    """AC2: active_story_id = NULL. AC7: file lock 자동 해제."""
+    repo = TeamMemberRepository(session, org_id)
+    member = await repo.get(id)
+    if member is None:
+        raise HTTPException(status_code=404, detail="Team member not found")
+    await repo.update(id, active_story_id=None)
+    # AC7: unclaim 시 해당 멤버의 모든 file lock 해제
+    from app.routers.file_locks import release_all_file_locks
+    await release_all_file_locks(session, id)
+    return {"unclaimed": True}
 
 
 @router.delete("/{id}", status_code=200)

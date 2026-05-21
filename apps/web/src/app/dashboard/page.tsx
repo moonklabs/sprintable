@@ -12,6 +12,7 @@ import { Button } from '@/components/ui/button';
 import { OperatorStatCard } from '@/components/ui/operator-stat-card';
 import { formatLocaleDateOnly, formatLocaleDateTime } from '@/lib/i18n';
 import { WidgetRefreshTime } from '@/components/ui/widget-refresh-time';
+import { DashboardActivityTimeline } from '@/components/activity/dashboard-activity-timeline';
 
 export default async function DashboardPage() {
   const fetchedAt = new Date().toISOString();
@@ -247,6 +248,11 @@ export default async function DashboardPage() {
               <div className="pt-1"><WidgetRefreshTime fetchedAt={fetchedAt} /></div>
             </SectionCardBody>
           </SectionCard>
+
+          <DashboardActivityTimeline
+            projectId={projectId}
+            currentTeamMemberId={teamMemberId}
+          />
         </div>
       </div>
     </div>

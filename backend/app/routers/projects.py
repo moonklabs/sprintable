@@ -4,6 +4,7 @@ from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.core.config import settings
 from app.dependencies.auth import AuthContext, get_current_user, get_verified_org_id
 from app.dependencies.database import get_db
 from app.repositories.project import ProjectRepository
@@ -34,32 +35,24 @@ async def create_project(
     auth: AuthContext = Depends(get_current_user),
 ) -> ProjectResponse:
     repo = ProjectRepository(session, body.org_id)
+
+    # EE: Free 플랜 project 생성 제한 (OSS에서는 로드되지 않음)
+    if settings.is_ee_enabled:
+        from ee.plan_limits import check_project_create_limit  # type: ignore[import]
+        await check_project_create_limit(session, body.org_id)
+
     project = await repo.create(name=body.name, description=body.description)
 
-    # Auto-attach org-level team members (project_id IS NULL) to new project
-    await session.execute(
-        text(
-            "INSERT INTO project_memberships (project_id, team_member_id)"
-            " SELECT :project_id, id FROM team_members"
-            " WHERE org_id = :org_id AND project_id IS NULL AND is_active = TRUE"
-            " ON CONFLICT DO NOTHING"
-        ),
-        {"org_id": str(body.org_id), "project_id": str(project.id)},
-    )
-
-    # OSS bootstrap: 프로젝트 생성 시 인증 유저 team_member 자동 생성
-    # (Supabase trg_org_bootstrap_owner 대체 — project_id가 확정된 이 시점에 생성)
+    # project_memberships 테이블 미존재 — agent 자동 첨부는 agent 생성 시 project_id로 직접 연결.
+    # Ensure the creating user is in org_members (opt-out model: org membership = project access).
     if auth.user_id:
         await session.execute(
             text(
-                "INSERT INTO team_members"
-                " (id, org_id, project_id, user_id, name, type, role, is_active, color)"
-                " SELECT gen_random_uuid(), :org_id, :project_id, :user_id,"
-                "        COALESCE(u.email, 'owner'), 'human', 'member', true, '#4F46E5'"
-                " FROM users u WHERE u.id = :user_id"
-                " ON CONFLICT DO NOTHING"
+                "INSERT INTO org_members (id, org_id, user_id, role)"
+                " VALUES (gen_random_uuid(), :org_id, :user_id, 'member')"
+                " ON CONFLICT (org_id, user_id) DO NOTHING"
             ),
-            {"org_id": str(body.org_id), "project_id": str(project.id), "user_id": auth.user_id},
+            {"org_id": str(body.org_id), "user_id": auth.user_id},
         )
 
     await session.commit()

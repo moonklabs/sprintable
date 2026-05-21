@@ -25,3 +25,4 @@ class OrgMemberResponse(BaseModel):
     role: str
     created_at: datetime
     deleted_at: datetime | None = None
+    email: str | None = None

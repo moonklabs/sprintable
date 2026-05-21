@@ -12,7 +12,7 @@ from app.core.rate_limit import limiter
 
 configure_logging(json_logs=os.getenv("APP_ENV", "development") != "development")
 _logger = logging.getLogger(__name__)
-from app.routers import account, activity_logs, agent_deployments, agent_personas, agent_routing_rules, agent_runs, agent_sessions, analytics, api_keys, audit_logs, auth, bridge, chats, conversations, cron, current_project, dashboard, dispatch, docs, entities, epics, event_notifications, events, health, hitl, integrations, invitations, me, meetings, members, memos, mockups, notification_preferences, notifications, org_members, organizations, oss, policy_documents, presence, project_settings, projects, retros, rewards, sprints, standups, stories, subscription, tasks, team_members, webhooks, workflow_executions, workflow_report, workflow_templates, workflow_trigger, workflow_trigger_types, workflow_versions
+from app.routers import account, activity_logs, agent_deployments, agent_personas, agent_routing_rules, agent_runs, agent_sessions, analytics, api_keys, audit_logs, auth, bridge, chats, conversations, cron, current_project, dashboard, dispatch, docs, entities, epics, event_notifications, events, file_locks, health, hitl, integrations, invite_accept, invitations, me, meetings, members, memos, mockups, notification_preferences, notifications, org_invites, org_members, organizations, oss, policy_documents, presence, project_access, project_settings, projects, retros, rewards, sprints, standups, stories, subscription, tasks, team_members, webhooks, workflow_executions, workflow_recipes, workflow_report, workflow_templates, workflow_trigger, workflow_trigger_types, workflow_versions
 
 app = FastAPI(
     title="Sprintable API v2",
@@ -95,6 +95,7 @@ app.include_router(docs.router)
 app.include_router(meetings.router)
 app.include_router(stories.router)
 app.include_router(projects.router)
+app.include_router(project_access.router)
 app.include_router(team_members.router)
 app.include_router(org_members.router)
 app.include_router(standups.router)
@@ -112,6 +113,8 @@ app.include_router(dashboard.router)
 app.include_router(current_project.router)
 app.include_router(members.router)
 app.include_router(organizations.router)
+app.include_router(org_invites.router)
+app.include_router(invite_accept.router)
 app.include_router(me.router)
 app.include_router(project_settings.router)
 app.include_router(webhooks.router)
@@ -133,6 +136,8 @@ app.include_router(workflow_versions.router)
 app.include_router(workflow_trigger_types.router)
 app.include_router(workflow_executions.router)
 app.include_router(workflow_templates.router)
+app.include_router(workflow_recipes.router)
+app.include_router(file_locks.router)
 app.include_router(workflow_report.router)
 app.include_router(workflow_trigger.router)
 app.include_router(mockups.router)

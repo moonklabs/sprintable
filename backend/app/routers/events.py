@@ -58,16 +58,24 @@ _sse_connection_count: int = 0
 # ─── S6-1: Backfill 볼륨 제어 ─────────────────────────────────────────────────
 _BACKFILL_THRESHOLD_SECONDS: int = int(_os.getenv("BACKFILL_THRESHOLD_SECONDS", "300"))
 _BACKFILL_MAX_EVENTS: int = int(_os.getenv("BACKFILL_MAX_EVENTS", "50"))
+# S0-1: 초기 연결(last_event_id=None) 시 backfill 상한 — 재연결과 구분하여 중복 방지
+_BACKFILL_INITIAL_EVENTS: int = int(_os.getenv("BACKFILL_INITIAL_EVENTS", "5"))
 
 
-def _compute_backfill_mode(ref_ts: "datetime | None", now: "datetime") -> tuple[bool, int]:
+def _compute_backfill_mode(
+    ref_ts: "datetime | None",
+    now: "datetime",
+    initial: bool = False,
+) -> tuple[bool, int]:
     """(exceed_threshold, limit) — threshold 초과 여부와 사용할 LIMIT 반환.
 
     exceed_threshold=True  → DESC 최신 N건 조회
     exceed_threshold=False → ASC 전량 조회 (max 100)
+    initial=True: last_event_id=None 초기 연결 — BACKFILL_INITIAL_EVENTS 상한 적용
     """
     if ref_ts is None:
-        return True, _BACKFILL_MAX_EVENTS
+        limit = _BACKFILL_INITIAL_EVENTS if initial else _BACKFILL_MAX_EVENTS
+        return True, limit
     _ref = ref_ts if ref_ts.tzinfo else ref_ts.replace(tzinfo=timezone.utc)
     exceed = (now - _ref) > timedelta(seconds=_BACKFILL_THRESHOLD_SECONDS)
     return exceed, (_BACKFILL_MAX_EVENTS if exceed else 100)
@@ -109,6 +117,7 @@ async def memo_event_stream(
     request: Request,
     auth: AuthContext = Depends(get_current_user),
     member_id: str | None = Query(default=None),
+    last_event_id: str | None = Query(default=None),  # AC2: reconnect 판별
 ):
     """GET /api/v2/events/memos — SSE 스트림.
 
@@ -117,19 +126,33 @@ async def memo_event_stream(
     - memo_created: 새 메모 INSERT
     - memo_updated: 메모 UPDATE
     - reply_created: 새 메모 답글 INSERT
+
+    AC1: 모든 이벤트에 id: 필드 발행 → 브라우저 Last-Event-ID 자동 추적
+    AC2: last_event_id 파라미터 또는 Last-Event-ID 헤더로 재연결 판별
     """
     org_id = auth.claims.get("app_metadata", {}).get("org_id", auth.user_id)
+
+    # Last-Event-ID 헤더도 지원 (브라우저 EventSource 자동 전달)
+    _last_eid = last_event_id or request.headers.get("last-event-id")
+    _is_reconnect = _last_eid is not None
+
     queue: asyncio.Queue[dict] = asyncio.Queue(maxsize=100)
     _subscribers[org_id].add(queue)
 
     async def generate():
         try:
+            # 초기 heartbeat — HTTP 응답 헤더 즉시 플러시, 재연결 여부 client에 알림
+            reconnect_flag = "true" if _is_reconnect else "false"
+            yield f"event: heartbeat\ndata: {{\"reconnect\":{reconnect_flag}}}\n\n"
+
             while not await request.is_disconnected():
                 try:
                     event = await asyncio.wait_for(queue.get(), timeout=30.0)
                     event_type = event.get("type", "message")
                     data = {k: v for k, v in event.items() if k != "type"}
-                    yield f"event: {event_type}\ndata: {json.dumps(data)}\n\n"
+                    # AC1: event_id 우선, 없으면 uuid 생성
+                    eid = data.get("event_id") or str(uuid.uuid4())
+                    yield f"event: {event_type}\nid: {eid}\ndata: {json.dumps(data)}\n\n"
                 except asyncio.TimeoutError:
                     yield "event: heartbeat\ndata: {}\n\n"
         except (asyncio.CancelledError, GeneratorExit):
@@ -239,16 +262,29 @@ async def agent_event_stream(
                         ref_ts = ts if ts.tzinfo else ts.replace(tzinfo=timezone.utc)
 
                 _ref = ref_ts if ref_ts is None or ref_ts.tzinfo else ref_ts.replace(tzinfo=timezone.utc)
-                exceed, limit = _compute_backfill_mode(_ref, now)
+                # S0-1: 초기 연결(last_event_id=None, since_timestamp=None)은 INITIAL 상한 적용
+                is_initial = last_event_id is None and since_timestamp is None
+                exceed, limit = _compute_backfill_mode(_ref, now, initial=is_initial)
                 if exceed:
-                    # threshold 초과: 최근 N건만 (최신순 → 역순 전달로 시간 순서 보존)
+                    # threshold 초과: _ref 이후 최근 N건만 (최신순 → 역순 전달로 시간 순서 보존)
+                    exceed_clauses: list[Any] = [
+                        Event.org_id == org_id,
+                        Event.recipient_id == member_id,
+                        Event.status == "pending",
+                    ]
+                    if _ref is not None:
+                        if last_event_id is not None:
+                            exceed_clauses.append(
+                                or_(
+                                    Event.created_at > _ref,
+                                    and_(Event.created_at == _ref, Event.id > last_event_id),
+                                )
+                            )
+                        else:
+                            exceed_clauses.append(Event.created_at > _ref)
                     result = await db.execute(
                         select(Event)
-                        .where(
-                            Event.org_id == org_id,
-                            Event.recipient_id == member_id,
-                            Event.status == "pending",
-                        )
+                        .where(*exceed_clauses)
                         .order_by(Event.created_at.desc())
                         .limit(limit)
                     )

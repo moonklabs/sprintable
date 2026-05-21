@@ -3,13 +3,21 @@ from __future__ import annotations
 import uuid
 from datetime import datetime
 
-from pydantic import BaseModel, ConfigDict
+from pydantic import BaseModel, ConfigDict, field_validator
 
 
 class CreateOrganization(BaseModel):
     name: str
     slug: str
     owner_member_id: uuid.UUID | None = None
+
+    @field_validator("name", "slug")
+    @classmethod
+    def not_empty(cls, v: str) -> str:
+        stripped = v.strip()
+        if not stripped:
+            raise ValueError("must not be empty")
+        return stripped
 
 
 class OrganizationResponse(BaseModel):
@@ -21,3 +29,27 @@ class OrganizationResponse(BaseModel):
     plan: str
     created_at: datetime
     updated_at: datetime
+
+
+class MyOrganizationResponse(BaseModel):
+    """내 Organization 목록 조회 응답 — role 포함."""
+
+    id: uuid.UUID
+    name: str
+    slug: str
+    plan: str
+    role: str
+
+
+class UpdateOrganization(BaseModel):
+    name: str
+
+
+class OrgImpactResponse(BaseModel):
+    project_count: int
+    member_count: int
+    has_active_subscription: bool
+
+
+class DeleteOrganization(BaseModel):
+    confirmation: str

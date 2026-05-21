@@ -1,11 +1,15 @@
 'use client';
 
 import { useEffect, useMemo, useState } from 'react';
+import { useDashboardContext } from '@/app/dashboard/dashboard-shell';
 import Link from 'next/link';
 import { useRouter, useSearchParams } from 'next/navigation';
 import { useTranslations } from 'next-intl';
 import { BarChart2, Bell, Bot, Check, CreditCard, FolderKanban, GitBranch, Key, Menu, Palette, Trash2, User, Users, X, Zap } from 'lucide-react';
 import { UsageDashboard } from '@/components/settings/usage-dashboard';
+import { OrgMembersSection } from '@/components/settings/org-members-section';
+import { ProjectAccessSection } from '@/components/settings/project-access-section';
+
 import { AiSettingsSection } from '@/components/settings/ai-settings';
 import { MyProfileSection } from '@/components/settings/my-profile-section';
 import { ByomKeyManagement } from '@/components/settings/byom-key-management';
@@ -28,6 +32,14 @@ import { Tabs, TabsList, TabsTrigger, TabsContent } from '@/components/ui/tabs';
 import { SidebarTrigger } from '@/components/ui/sidebar';
 import { ToastContainer, useToast } from '@/components/ui/toast';
 import { NOTIFICATION_TYPES } from '@/lib/notification-types';
+import { isEEEnabled } from '@/lib/ee';
+import dynamic from 'next/dynamic';
+
+// TypeScript 정적 해석을 위해 unconditional import — 조건부 렌더링은 JSX isEEEnabled() 체크로 처리
+const BillingTab = dynamic(
+  () => import('@/ee/components/billing/billing-tab').then((m) => ({ default: m.BillingTab })),
+  { ssr: false },
+);
 
 interface NotificationSetting {
   id: string;
@@ -94,6 +106,7 @@ export default function SettingsPage() {
   const tc = useTranslations('common');
   const router = useRouter();
   const searchParamsHook = useSearchParams();
+  const { orgId: ctxOrgId, orgMemberships } = useDashboardContext();
   const [activeTab, setActiveTab] = useState(() => searchParamsHook.get('tab') ?? 'profile');
   const [lnbOpen, setLnbOpen] = useState(false);
   const { toasts, addToast, dismissToast } = useToast();
@@ -110,6 +123,15 @@ export default function SettingsPage() {
 
   const [orgId, setOrgId] = useState<string | null>(null);
   const [currentProjectId, setCurrentProjectId] = useState<string | null>(null);
+  const [orgInfo, setOrgInfo] = useState<{ id: string; name: string; slug: string; plan?: string; role?: string } | null>(null);
+  const [editOrgName, setEditOrgName] = useState('');
+  const [savingOrgName, setSavingOrgName] = useState(false);
+  const [orgNameError, setOrgNameError] = useState('');
+  const [showDeleteOrgConfirm, setShowDeleteOrgConfirm] = useState(false);
+  const [deleteOrgConfirmName, setDeleteOrgConfirmName] = useState('');
+  const [deletingOrg, setDeletingOrg] = useState(false);
+  const [orgImpact, setOrgImpact] = useState<{ project_count: number; member_count: number; has_active_subscription: boolean } | null>(null);
+  const [orgImpactLoading, setOrgImpactLoading] = useState(false);
   const [projectMemberships] = useState<Array<{ projectId: string; projectName: string }>>([]);
   const [settings, setSettings] = useState<NotificationSetting[]>([]);
   const [loading, setLoading] = useState(true);
@@ -166,6 +188,70 @@ export default function SettingsPage() {
   const [webhookEditing, setWebhookEditing] = useState<Record<string, string>>({});
   const [webhookSaving, setWebhookSaving] = useState<string | null>(null);
   const [webhookErrors, setWebhookErrors] = useState<Record<string, string>>({});
+
+  // DashboardCtx에서 현재 org의 role을 derive — fetch 완료 전에도 올바른 role 반영
+  const ctxRole = orgMemberships.find(o => o.orgId === (orgId ?? ctxOrgId))?.role;
+  const currentOrgRole = (orgInfo?.role ?? ctxRole ?? 'member') as string;
+
+  const handleOpenDeleteOrg = async () => {
+    if (!orgInfo) return;
+    setShowDeleteOrgConfirm(true);
+    setDeleteOrgConfirmName('');
+    setOrgImpact(null);
+    setOrgImpactLoading(true);
+    try {
+      const res = await fetch(`/api/organizations/${orgInfo.id}/impact`).catch(() => null);
+      if (res?.ok) {
+        const json = await res.json() as { data?: { project_count: number; member_count: number; has_active_subscription: boolean } };
+        setOrgImpact(json.data ?? null);
+      }
+    } finally {
+      setOrgImpactLoading(false);
+    }
+  };
+
+  const handleDeleteOrg = async () => {
+    if (!orgInfo || deleteOrgConfirmName !== orgInfo.name || deletingOrg) return;
+    setDeletingOrg(true);
+    try {
+      const res = await fetch(`/api/organizations/${orgInfo.id}`, {
+        method: 'DELETE',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ confirmation: orgInfo.name }),
+      });
+      if (res.ok) {
+        window.location.href = '/onboarding';
+      } else {
+        const json = await res.json().catch(() => null) as { error?: { message?: string } } | null;
+        addToast({ type: 'error', title: json?.error?.message ?? 'Organization 삭제에 실패했습니다.' });
+        setShowDeleteOrgConfirm(false);
+      }
+    } finally {
+      setDeletingOrg(false);
+    }
+  };
+
+  const handleSaveOrgName = async () => {
+    if (!orgInfo || !editOrgName.trim() || savingOrgName) return;
+    setSavingOrgName(true);
+    setOrgNameError('');
+    try {
+      const res = await fetch(`/api/organizations/${orgInfo.id}`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ name: editOrgName.trim() }),
+      });
+      const json = await res.json() as { data?: { name: string }; error?: { message?: string } };
+      if (!res.ok) {
+        setOrgNameError(json.error?.message ?? t('orgNameSaveFailed'));
+      } else {
+        setOrgInfo((prev) => prev ? { ...prev, name: json.data?.name ?? editOrgName.trim() } : prev);
+        addToast({ type: 'success', title: t('orgNameSaved') });
+      }
+    } finally {
+      setSavingOrgName(false);
+    }
+  };
 
   const refreshProjects = async () => {
     const endpoint = orgId ? `/api/projects?org_id=${encodeURIComponent(orgId)}` : '/api/projects';
@@ -323,6 +409,19 @@ export default function SettingsPage() {
         const orgId = projectJson?.data?.org_id ?? null;
         setCurrentProjectId(projectId);
         setOrgId(orgId);
+
+        // org 상세 정보 로드 — list API에서 orgId로 필터 (단건 API 미구현)
+        if (orgId) {
+          const orgListRes = await fetch('/api/organizations').catch(() => null);
+          if (orgListRes?.ok) {
+            const orgListJson = await orgListRes.json() as { data?: Array<{ id: string; name: string; slug: string; plan?: string; role?: string }> };
+            const found = (orgListJson.data ?? []).find((o) => o.id === orgId);
+            if (found) {
+              setOrgInfo(found);
+              setEditOrgName(found.name);
+            }
+          }
+        }
 
         // Get notification settings
         const settingsRes = await fetch('/api/notification-settings');
@@ -690,13 +789,21 @@ export default function SettingsPage() {
             {adminChecked ? (
               <>
                 <span className="truncate px-2 pb-1 pt-4 text-[10px] font-medium uppercase tracking-wider text-muted-foreground/70">{t('organizationSettings')}</span>
+                <TabsTrigger value="organization">
+                  <FolderKanban className="h-4 w-4" />
+                  Organization
+                </TabsTrigger>
+                <TabsTrigger value="org-members">
+                  <Users className="h-4 w-4" />
+                  Org Members
+                </TabsTrigger>
                 <TabsTrigger value="projects">
                   <FolderKanban className="h-4 w-4" />
                   {t('tabProjects')}
                 </TabsTrigger>
                 <TabsTrigger value="members">
                   <Users className="h-4 w-4" />
-                  {t('tabMembers')}
+                  Team Members
                 </TabsTrigger>
                 {isAdmin ? (
                   <>
@@ -712,6 +819,12 @@ export default function SettingsPage() {
                       <CreditCard className="h-4 w-4" />
                       {t('tabSubscription')}
                     </TabsTrigger>
+                    {isEEEnabled() && (
+                      <TabsTrigger value="billing">
+                        <CreditCard className="h-4 w-4" />
+                        Billing
+                      </TabsTrigger>
+                    )}
                     <TabsTrigger value="usage">
                       <BarChart2 className="h-4 w-4" />
                       {t('tabUsage')}
@@ -901,6 +1014,100 @@ export default function SettingsPage() {
               </div>
             </TabsContent>
 
+            <TabsContent value="organization">
+              <SectionCard>
+                <SectionCardHeader>
+                  <div className="space-y-1">
+                    <h2 className="text-base font-semibold text-foreground">Organization 설정</h2>
+                    <p className="text-sm text-muted-foreground">Organization 기본 정보를 확인하고 수정합니다.</p>
+                  </div>
+                </SectionCardHeader>
+                <SectionCardBody className="space-y-6">
+                  {orgInfo ? (
+                    <>
+                      <div className="space-y-4">
+                        <div className="space-y-1.5">
+                          <label className="text-sm font-medium text-foreground">이름</label>
+                          {(currentOrgRole === 'owner' || currentOrgRole === 'admin') ? (
+                            <div className="flex items-center gap-2">
+                              <input
+                                className="flex-1 rounded-md border border-input bg-background px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-ring"
+                                value={editOrgName}
+                                onChange={(e) => setEditOrgName(e.target.value)}
+                                onKeyDown={(e) => { if (e.key === 'Enter') void handleSaveOrgName(); }}
+                              />
+                              <Button
+                                variant="hero"
+                                size="sm"
+                                disabled={!editOrgName.trim() || editOrgName === orgInfo.name || savingOrgName}
+                                onClick={() => void handleSaveOrgName()}
+                              >
+                                {savingOrgName ? '저장 중…' : '저장'}
+                              </Button>
+                            </div>
+                          ) : (
+                            <p className="rounded-md border border-input bg-muted/30 px-3 py-2 text-sm text-foreground">{orgInfo.name}</p>
+                          )}
+                          {orgNameError && <p className="text-xs text-destructive">{orgNameError}</p>}
+                        </div>
+
+                        <div className="space-y-1.5">
+                          <label className="text-sm font-medium text-foreground">Slug</label>
+                          <p className="rounded-md border border-input bg-muted/30 px-3 py-2 font-mono text-sm text-muted-foreground">{orgInfo.slug}</p>
+                          <p className="text-xs text-muted-foreground">slug는 변경할 수 없습니다.</p>
+                        </div>
+
+                        {orgInfo.plan && (
+                          <div className="space-y-1.5">
+                            <label className="text-sm font-medium text-foreground">플랜</label>
+                            <p className="rounded-md border border-input bg-muted/30 px-3 py-2 text-sm text-foreground capitalize">{orgInfo.plan}</p>
+                          </div>
+                        )}
+
+                        {currentOrgRole && (
+                          <div className="space-y-1.5">
+                            <label className="text-sm font-medium text-foreground">내 역할</label>
+                            <p className="rounded-md border border-input bg-muted/30 px-3 py-2 text-sm text-foreground capitalize">{currentOrgRole}</p>
+                          </div>
+                        )}
+                      </div>
+                    </>
+                  ) : (
+                    <div className="space-y-3">
+                      {[1, 2, 3].map((i) => (
+                        <div key={i} className="h-10 animate-pulse rounded-md bg-muted" />
+                      ))}
+                    </div>
+                  )}
+                </SectionCardBody>
+              </SectionCard>
+              {currentOrgRole === 'owner' && (
+                <SectionCard className="border-destructive/20 bg-destructive/10 mt-6">
+                  <SectionCardHeader className="border-b border-destructive/20">
+                    <div className="space-y-1">
+                      <h2 className="text-base font-semibold text-destructive">위험 구역</h2>
+                      <p className="text-sm text-destructive/80">Organization을 삭제하면 모든 Project, Member, 데이터가 영구적으로 제거됩니다.</p>
+                    </div>
+                  </SectionCardHeader>
+                  <SectionCardBody>
+                    <Button variant="destructive" onClick={() => void handleOpenDeleteOrg()}>
+                      Organization 삭제
+                    </Button>
+                  </SectionCardBody>
+                </SectionCard>
+              )}
+            </TabsContent>
+
+            <TabsContent value="org-members">
+              {orgId && orgInfo ? (
+                <OrgMembersSection orgId={orgId} currentRole={currentOrgRole} />
+              ) : (
+                <div className="space-y-3">
+                  {[1, 2, 3].map((i) => <div key={i} className="h-12 animate-pulse rounded-md bg-muted" />)}
+                </div>
+              )}
+            </TabsContent>
+
             <TabsContent value="projects">
               <SectionCard>
                 <SectionCardHeader>
@@ -1010,6 +1217,15 @@ export default function SettingsPage() {
                   ) : null}
                 </SectionCardBody>
               </SectionCard>
+
+              {currentProjectId && orgInfo && (
+                <div className="mt-6">
+                  <ProjectAccessSection
+                    projectId={currentProjectId}
+                    currentRole={currentOrgRole}
+                  />
+                </div>
+              )}
             </TabsContent>
 
             <TabsContent value="members">
@@ -1544,6 +1760,12 @@ export default function SettingsPage() {
               </TabsContent>
             ) : null}
 
+            {isEEEnabled() && BillingTab && orgId && (
+              <TabsContent value="billing">
+                <BillingTab orgId={orgId} />
+              </TabsContent>
+            )}
+
             <TabsContent value="danger">
               <SectionCard className="border-destructive/20 bg-destructive/10">
                 <SectionCardHeader className="border-b border-destructive/20">
@@ -1564,6 +1786,66 @@ export default function SettingsPage() {
           </div>
         </div>
       </Tabs>
+
+      {showDeleteOrgConfirm && orgInfo ? (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 p-4">
+          <div className="w-full max-w-md rounded-xl border border-destructive/30 bg-card p-6 shadow-md space-y-4">
+            <h3 className="text-lg font-semibold text-destructive">Organization 삭제</h3>
+
+            {/* 영향도 */}
+            {orgImpactLoading ? (
+              <div className="space-y-2">
+                {[1, 2, 3].map((i) => <div key={i} className="h-6 animate-pulse rounded bg-muted" />)}
+              </div>
+            ) : orgImpact ? (
+              <div className="rounded-md border border-border bg-muted/30 p-3 space-y-1 text-sm">
+                <p className="text-muted-foreground">삭제 시 영향 범위:</p>
+                <ul className="space-y-0.5 text-foreground">
+                  <li>• Project <span className="font-semibold">{orgImpact.project_count}개</span> 영구 삭제</li>
+                  <li>• Member <span className="font-semibold">{orgImpact.member_count}명</span> 접근 불가</li>
+                  {orgImpact.has_active_subscription && (
+                    <li className="text-amber-400">• 활성 구독이 있습니다 — 삭제 전 구독을 취소해주세요.</li>
+                  )}
+                </ul>
+              </div>
+            ) : (
+              <p className="text-sm text-muted-foreground">영향도 정보를 불러올 수 없습니다. 계속 진행해도 됩니다.</p>
+            )}
+
+            <div className="space-y-1.5">
+              <label className="text-sm font-medium text-foreground">
+                확인을 위해 Organization 이름 <span className="font-mono text-destructive">{orgInfo.name}</span>을 입력하세요.
+              </label>
+              <input
+                className="w-full rounded-md border border-input bg-background px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-destructive"
+                placeholder={orgInfo.name}
+                value={deleteOrgConfirmName}
+                onChange={(e) => setDeleteOrgConfirmName(e.target.value)}
+                autoFocus
+              />
+            </div>
+
+            <div className="flex gap-3 pt-1">
+              <Button
+                variant="glass"
+                className="flex-1"
+                onClick={() => { setShowDeleteOrgConfirm(false); setDeleteOrgConfirmName(''); }}
+                disabled={deletingOrg}
+              >
+                취소
+              </Button>
+              <Button
+                variant="destructive"
+                className="flex-1"
+                onClick={() => void handleDeleteOrg()}
+                disabled={deleteOrgConfirmName !== orgInfo.name || deletingOrg || (orgImpact?.has_active_subscription ?? false)}
+              >
+                {deletingOrg ? '삭제 중…' : '영구 삭제'}
+              </Button>
+            </div>
+          </div>
+        </div>
+      ) : null}
 
       {showDeleteConfirm ? (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 p-4">

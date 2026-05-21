@@ -9,6 +9,13 @@ interface MemberContext {
   project_name: string;
 }
 
+interface OrgMembership {
+  id: string;
+  name: string;
+  slug: string;
+  role: string;
+}
+
 export default async function DashboardLayout({
   children,
 }: {
@@ -20,9 +27,10 @@ export default async function DashboardLayout({
   const fastapiUrl = process.env['NEXT_PUBLIC_FASTAPI_URL'] ?? 'http://localhost:8000';
   const authHeader = { Authorization: `Bearer ${session.access_token}` };
 
-  const [meRes, membershipsRes] = await Promise.all([
+  const [meRes, membershipsRes, orgsRes] = await Promise.all([
     fetch(`${fastapiUrl}/api/v2/me`, { headers: authHeader, cache: 'no-store' }).catch(() => null),
     fetch(`${fastapiUrl}/api/v2/me/memberships`, { headers: authHeader, cache: 'no-store' }).catch(() => null),
+    fetch(`${fastapiUrl}/api/v2/organizations`, { headers: authHeader, cache: 'no-store' }).catch(() => null),
   ]);
 
   if (!meRes || meRes.status === 401) redirect('/login');
@@ -34,6 +42,14 @@ export default async function DashboardLayout({
     ? memberships
     : me ? [{ projectId: me.project_id, projectName: me.project_name }] : [];
 
+  const rawOrgs: OrgMembership[] = orgsRes?.ok ? ((await orgsRes.json()) as OrgMembership[]) : [];
+  const orgMemberships = rawOrgs.map((o) => ({
+    orgId: o.id,
+    orgName: o.name,
+    orgSlug: o.slug,
+    role: o.role,
+  }));
+
   return (
     <DashboardShell
       currentTeamMemberId={me?.id}
@@ -41,6 +57,7 @@ export default async function DashboardLayout({
       projectId={me?.project_id}
       projectName={me?.project_name ?? undefined}
       projectMemberships={projectMemberships}
+      orgMemberships={orgMemberships}
     >
       {children}
     </DashboardShell>

@@ -17,6 +17,7 @@ from app.services.notification_dispatch import dispatch_notification
 from app.services.webhook_dispatch import fire_webhooks
 from app.services.workflow_pipeline import process_event
 from app.services.rule_evaluator import EventContext
+from app.services.workflow_violation import build_violation_event, check_transition
 
 router = APIRouter(prefix="/api/v2/stories", tags=["stories"])
 
@@ -272,8 +273,22 @@ async def update_story_status(
 ) -> StoryResponse:
     story_before = await repo.get(id)
     old_status = story_before.status if story_before else None
+
+    # AC1/AC5/AC7: violation 체크 — block 모드면 전이 거부
+    from app.models.project import Project as ProjectModel
+    _proj_result = await db.execute(
+        select(ProjectModel).where(ProjectModel.id == story_before.project_id)
+    ) if story_before else None
+    _proj = _proj_result.scalar_one_or_none() if _proj_result else None
+    _violation_level = getattr(_proj, "violation_level", "warn") if _proj else "warn"
+
+    _violation = check_transition(old_status, body.status, _violation_level)
+    if _violation.violated and _violation_level == "block":
+        raise HTTPException(status_code=400, detail=_violation.reason or "워크플로우 위반으로 상태 전이가 거부되었습니다.")
+
     try:
-        story = await repo.set_status(id, body.status)
+        # AC2: violation_level 전달 → warn 모드이면 set_status hard block 우회
+        story = await repo.set_status(id, body.status, violation_level=_violation_level)
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
 
@@ -283,6 +298,26 @@ async def update_story_status(
 
     if old_status != story.status:
         org_id = repo.org_id
+        # AC2/3/4/6: warn 모드 위반 — 전이는 정상 진행, 이벤트+웹훅만 발행
+        if _violation.violated and _violation_level == "warn":
+            _v_event = build_violation_event(
+                story_id=str(id),
+                story_title=story.title,
+                project_id=str(story.project_id),
+                org_id=str(org_id),
+                old_status=old_status,
+                new_status=story.status,
+                reason=_violation.reason or "워크플로우 위반 감지",
+                severity="warn",
+            )
+            try:
+                publish_event(str(org_id), "workflow_violation", _v_event)
+            except Exception:
+                pass
+            try:
+                await fire_webhooks(db, org_id, "workflow_violation", _v_event)
+            except Exception:
+                pass
         actor_id: uuid.UUID | None = None
         actor_name: str | None = None
         actor_role: str | None = None

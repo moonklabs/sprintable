@@ -224,10 +224,8 @@ async def test_accept_invitation_creates_org_and_team_member():
         inv = _mock_invitation("pending")
         inv_result = MagicMock()
         inv_result.scalar_one_or_none.return_value = inv
-        tm_result = MagicMock()
-        tm_result.scalar_one_or_none.return_value = None  # 중복 없음
         org_exec_result = MagicMock()
-        session.execute = AsyncMock(side_effect=[inv_result, org_exec_result, tm_result])
+        session.execute = AsyncMock(side_effect=[inv_result, org_exec_result])
         session.flush = AsyncMock()
         session.add = MagicMock()
 
@@ -237,10 +235,8 @@ async def test_accept_invitation_creates_org_and_team_member():
         assert resp.status_code == 200
         assert resp.json()["org_id"] == str(ORG_ID)
         assert resp.json()["project_id"] == str(PROJECT_ID)
-        # OrgMember INSERT + TeamMember 중복체크 실행 확인
-        assert session.execute.call_count == 3
-        # TeamMember session.add 호출 확인
-        assert session.add.called
+        # OrgMember INSERT만 — human TeamMember 생성 제거됨 (E-ENTITY-CLEANUP S5)
+        assert session.execute.call_count == 2
         assert session.flush.called
     finally:
         app.dependency_overrides.clear()

@@ -1,14 +1,19 @@
 """Sprintable MCP 서버 — 88개 도구 등록 (flat schema)."""
 from __future__ import annotations
 
+import asyncio
 import inspect
+import logging
 from typing import get_type_hints
+
+logger = logging.getLogger(__name__)
 
 from mcp.server.fastmcp import FastMCP
 from mcp.types import TextContent
 from pydantic import BaseModel
 from pydantic.fields import PydanticUndefined
 
+from .api_client import client
 from .config import settings
 from .response import ok
 from .schemas import SprintableInput
@@ -25,7 +30,11 @@ from .tools.analytics import (
     get_unassigned_stories, search_stories,
 )
 from .tools.audit import ListAuditLogsInput, list_audit_logs
-from .tools.core import DashboardInput, list_team_members, my_dashboard
+from .tools.core import (
+    ClaimStoryInput, DashboardInput, LockFilesInput, UnlockFilesInput,
+    claim_story, get_workflow_guide, list_team_members, lock_files,
+    my_dashboard, unclaim_story, unlock_files,
+)
 from .tools.docs import (
     CreateDocInput, DeleteDocInput, GetDocInput, ListDocsInput,
     SearchDocsInput, UpdateDocInput,
@@ -89,6 +98,15 @@ from .tools.tasks import (
 )
 
 
+async def _heartbeat_fire_forget() -> None:
+    """AC3/4: tool 호출 완료 후 fire-and-forget. 실패해도 tool 결과에 영향 없음."""
+    try:
+        if client.member_id:
+            await client.patch(f"/api/v2/team-members/{client.member_id}/heartbeat")
+    except Exception as exc:
+        logger.warning("heartbeat failed (ignored): %s", exc)
+
+
 def _flat(name: str, doc: str, input_cls: type[BaseModel], fn):
     """BaseModel → flat inspect.Signature so FastMCP emits top-level params."""
     try:
@@ -114,7 +132,9 @@ def _flat(name: str, doc: str, input_cls: type[BaseModel], fn):
         )
 
     async def wrapper(**kwargs):
-        return await fn(input_cls(**kwargs))
+        result = await fn(input_cls(**kwargs))
+        asyncio.create_task(_heartbeat_fire_forget())
+        return result
 
     wrapper.__name__ = name
     wrapper.__qualname__ = name
@@ -135,8 +155,9 @@ mcp = FastMCP(
 
 
 @mcp.tool()
-def ping() -> list[TextContent]:
+async def ping() -> list[TextContent]:
     """서버 생존 확인용 smoke tool."""
+    asyncio.create_task(_heartbeat_fire_forget())
     return ok({"status": "pong"})
 
 
@@ -281,13 +302,28 @@ _TOOL_DEFS: list[tuple] = [
     ("sprintable_get_project_health",
      "프로젝트 전체 건강도 조회.",
      SprintableInput, get_project_health),
-    # Core (2)
+    # Core (4)
     ("sprintable_list_team_members",
      "프로젝트 팀 멤버 목록 조회.",
      SprintableInput, list_team_members),
     ("sprintable_my_dashboard",
      "팀원 대시보드 요약 조회.",
      DashboardInput, my_dashboard),
+    ("sprintable_claim_story",
+     "현재 작업 중인 스토리를 claim — active_story_id 갱신, 중복 배정 방지.",
+     ClaimStoryInput, claim_story),
+    ("sprintable_unclaim_story",
+     "작업 중인 스토리 claim 해제 — active_story_id = NULL.",
+     SprintableInput, unclaim_story),
+    ("sprintable_get_workflow_guide",
+     "현재 프로젝트 워크플로우 가이드 텍스트 반환 — 에이전트 system prompt 주입용.",
+     SprintableInput, get_workflow_guide),
+    ("sprintable_lock_files",
+     "파일 작업 시작 선언 — 동시 수정 충돌 경고 반환. 작업 완료 후 반드시 unlock_files 호출.",
+     LockFilesInput, lock_files),
+    ("sprintable_unlock_files",
+     "파일 작업 완료 선언 — lock 해제.",
+     UnlockFilesInput, unlock_files),
     # Memos + Chat (10)
     ("sprintable_list_memos",
      "메모 목록 조회.",

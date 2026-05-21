@@ -1,6 +1,7 @@
 """S-C3: Activity Logs read-only API. CUD 없음. S-C4: EE RBAC 조건부 게이팅."""
 import logging
 import uuid
+from collections import defaultdict
 from datetime import datetime
 
 from fastapi import APIRouter, Depends, Query
@@ -26,6 +27,23 @@ except Exception:
 
 router = APIRouter(prefix="/api/v2/activity-logs", tags=["activity-logs"])
 
+_ENTITY_TITLE_MODELS: dict[str, type] = {}
+
+
+def _get_entity_models() -> dict[str, type]:
+    if not _ENTITY_TITLE_MODELS:
+        from app.models.conversation import Conversation
+        from app.models.doc import Doc
+        from app.models.pm import Epic, Story, Task
+        _ENTITY_TITLE_MODELS.update({
+            "story": Story,
+            "epic": Epic,
+            "task": Task,
+            "doc": Doc,
+            "conversation": Conversation,
+        })
+    return _ENTITY_TITLE_MODELS
+
 
 class ActivityLogItem(BaseModel):
     id: uuid.UUID
@@ -38,6 +56,8 @@ class ActivityLogItem(BaseModel):
     entity_id: uuid.UUID | None
     context: dict
     created_at: datetime
+    actor_name: str | None = None
+    entity_title: str | None = None
 
     model_config = {"from_attributes": True}
 
@@ -112,8 +132,43 @@ async def list_activity_logs(
     )
     items = items_result.scalars().all()
 
+    # batch resolve actor_name via team_members
+    actor_ids = {item.actor_id for item in items if item.actor_id}
+    actor_name_map: dict[uuid.UUID, str] = {}
+    if actor_ids:
+        from app.models.team import TeamMember
+        tm_rows = (await db.execute(
+            select(TeamMember.id, TeamMember.name).where(TeamMember.id.in_(actor_ids))
+        )).all()
+        actor_name_map = {row.id: row.name for row in tm_rows}
+
+    # batch resolve entity_title per entity_type
+    entity_ids_by_type: dict[str, set[uuid.UUID]] = defaultdict(set)
+    for item in items:
+        if item.entity_id and item.entity_type:
+            entity_ids_by_type[item.entity_type].add(item.entity_id)
+
+    entity_title_map: dict[tuple[str, uuid.UUID], str | None] = {}
+    for etype, eids in entity_ids_by_type.items():
+        model = _get_entity_models().get(etype)
+        if model:
+            rows = (await db.execute(
+                select(model.id, model.title).where(model.id.in_(eids))
+            )).all()
+            for row in rows:
+                entity_title_map[(etype, row.id)] = row.title
+
+    def _enrich(log: ActivityLog) -> ActivityLogItem:
+        base = ActivityLogItem.model_validate(log)
+        return base.model_copy(update={
+            "actor_name": actor_name_map.get(log.actor_id) if log.actor_id else None,
+            "entity_title": entity_title_map.get((log.entity_type, log.entity_id))
+            if log.entity_type and log.entity_id
+            else None,
+        })
+
     return ActivityLogListResponse(
-        items=[ActivityLogItem.model_validate(item) for item in items],
+        items=[_enrich(item) for item in items],
         total=total,
         limit=limit,
         offset=offset,
