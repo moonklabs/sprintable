@@ -25,6 +25,7 @@ import { ToggleBlock, ToggleSummary, ToggleContent } from './extensions/toggle-b
 import { FileAttachmentNode } from './extensions/file-node';
 import { EmbedBlock } from './extensions/embed-node';
 import { MathBlockNode, MathInlineNode } from './extensions/math-node';
+import { ColumnsBlock, ColumnBlock } from './extensions/column-layout';
 import { markdownToHtml, htmlToMarkdown } from './lib/content-converter';
 
 type ContentFormat = 'markdown' | 'html';
@@ -121,6 +122,8 @@ export function DocEditor({
       EmbedBlock,
       MathBlockNode,
       MathInlineNode,
+      ColumnsBlock,
+      ColumnBlock,
       SlashCommandExtension,
       PageEmbedExtension.configure({ currentDocId, onNavigate }),
     ],
