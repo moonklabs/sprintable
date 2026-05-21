@@ -30,9 +30,18 @@ async def list_docs(
     doc_type: str | None = Query(default=None),
     tags: str | None = Query(default=None, description="comma-separated tags"),
     slug: str | None = Query(default=None),
+    q: str | None = Query(default=None, description="전문 검색 — 제목 + 본문"),
     limit: int = Query(default=500, ge=1, le=1000),
     repo: DocRepository = Depends(_get_repo),
 ) -> list[DocSummaryResponse]:
+    # AC1 + AC3: 전문 검색 — project_id 필수
+    if q and project_id:
+        results = await repo.search_full_text(project_id, q.strip(), limit=min(limit, 50))
+        return [
+            DocSummaryResponse.model_validate(doc).model_copy(update={"snippet": snippet})
+            for doc, snippet in results
+        ]
+
     if slug and project_id:
         doc = await repo.get_by_slug(project_id, slug)
         return [DocSummaryResponse.model_validate(doc)] if doc else []

@@ -1,9 +1,11 @@
 import uuid
 from datetime import datetime
-from typing import List
+from typing import Any, List
 
-from sqlalchemy import DateTime, ForeignKey, Integer, Text, func
-from sqlalchemy.dialects.postgresql import ARRAY, UUID
+from typing import Any
+
+from sqlalchemy import Computed, DateTime, ForeignKey, Integer, Text, func
+from sqlalchemy.dialects.postgresql import ARRAY, TSVECTOR, UUID
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.core.database import Base
@@ -34,6 +36,14 @@ class Doc(Base, OrgScopedMixin, TimestampMixin, SoftDeleteMixin):
     doc_type: Mapped[str] = mapped_column(Text, nullable=False, default="page")
     content_format: Mapped[str] = mapped_column(Text, nullable=False, default="markdown")
     tags: Mapped[List[str]] = mapped_column(ARRAY(Text), nullable=False, default=list)
+    search_vector: Mapped[Any] = mapped_column(
+        TSVECTOR,
+        Computed(
+            "to_tsvector('simple', coalesce(title, '') || ' ' || coalesce(content, ''))",
+            persisted=True,
+        ),
+        nullable=True,
+    )
 
     children: Mapped[list["Doc"]] = relationship("Doc", back_populates="parent", lazy="select")
     parent: Mapped["Doc | None"] = relationship("Doc", back_populates="children", remote_side=[id])
