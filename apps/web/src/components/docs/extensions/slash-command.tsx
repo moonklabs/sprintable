@@ -11,117 +11,189 @@ import {
   useRef,
 } from 'react';
 import type { Editor, Range } from '@tiptap/core';
+import type { FC } from 'react';
+import {
+  Heading1,
+  Heading2,
+  Heading3,
+  List,
+  ListOrdered,
+  Code,
+  Quote,
+  Lightbulb,
+  Table,
+  ImageIcon,
+  Minus,
+  FileText,
+} from 'lucide-react';
 
 export interface SlashMenuItem {
   title: string;
-  icon: string;
+  description: string;
+  icon: FC<{ className?: string }>;
   command: (editor: Editor, range: Range) => void;
 }
 
-export const defaultSlashItems: SlashMenuItem[] = [
+export interface SlashMenuCategory {
+  label: string;
+  items: SlashMenuItem[];
+}
+
+export const slashMenuCategories: SlashMenuCategory[] = [
   {
-    title: 'Heading 1',
-    icon: 'H1',
-    command: (editor, range) =>
-      editor.chain().focus().deleteRange(range).toggleHeading({ level: 1 }).run(),
+    label: '텍스트',
+    items: [
+      {
+        title: 'Heading 1',
+        description: '큰 제목',
+        icon: Heading1,
+        command: (editor, range) =>
+          editor.chain().focus().deleteRange(range).toggleHeading({ level: 1 }).run(),
+      },
+      {
+        title: 'Heading 2',
+        description: '중간 제목',
+        icon: Heading2,
+        command: (editor, range) =>
+          editor.chain().focus().deleteRange(range).toggleHeading({ level: 2 }).run(),
+      },
+      {
+        title: 'Heading 3',
+        description: '작은 제목',
+        icon: Heading3,
+        command: (editor, range) =>
+          editor.chain().focus().deleteRange(range).toggleHeading({ level: 3 }).run(),
+      },
+    ],
   },
   {
-    title: 'Heading 2',
-    icon: 'H2',
-    command: (editor, range) =>
-      editor.chain().focus().deleteRange(range).toggleHeading({ level: 2 }).run(),
+    label: '리스트',
+    items: [
+      {
+        title: 'Bullet List',
+        description: '순서 없는 목록',
+        icon: List,
+        command: (editor, range) =>
+          editor.chain().focus().deleteRange(range).toggleBulletList().run(),
+      },
+      {
+        title: 'Ordered List',
+        description: '순서 있는 목록',
+        icon: ListOrdered,
+        command: (editor, range) =>
+          editor.chain().focus().deleteRange(range).toggleOrderedList().run(),
+      },
+    ],
   },
   {
-    title: 'Heading 3',
-    icon: 'H3',
-    command: (editor, range) =>
-      editor.chain().focus().deleteRange(range).toggleHeading({ level: 3 }).run(),
+    label: '블록',
+    items: [
+      {
+        title: 'Code Block',
+        description: '코드 블록',
+        icon: Code,
+        command: (editor, range) =>
+          editor.chain().focus().deleteRange(range).toggleCodeBlock().run(),
+      },
+      {
+        title: 'Blockquote',
+        description: '인용구',
+        icon: Quote,
+        command: (editor, range) =>
+          editor.chain().focus().deleteRange(range).toggleBlockquote().run(),
+      },
+      {
+        title: 'Callout',
+        description: '강조 박스',
+        icon: Lightbulb,
+        command: (editor, range) =>
+          editor
+            .chain()
+            .focus()
+            .deleteRange(range)
+            .insertContent({ type: 'callout', content: [{ type: 'paragraph' }] })
+            .run(),
+      },
+      {
+        title: 'Table',
+        description: '표 삽입',
+        icon: Table,
+        command: (editor, range) =>
+          editor
+            .chain()
+            .focus()
+            .deleteRange(range)
+            .insertTable({ rows: 3, cols: 3, withHeaderRow: true })
+            .run(),
+      },
+    ],
   },
   {
-    title: 'Bullet List',
-    icon: '•',
-    command: (editor, range) =>
-      editor.chain().focus().deleteRange(range).toggleBulletList().run(),
+    label: '미디어',
+    items: [
+      {
+        title: 'Image',
+        description: '이미지 삽입',
+        icon: ImageIcon,
+        command: (editor, range) => {
+          const url = window.prompt('Image URL:');
+          if (url) editor.chain().focus().deleteRange(range).setImage({ src: url }).run();
+        },
+      },
+    ],
   },
   {
-    title: 'Ordered List',
-    icon: '1.',
-    command: (editor, range) =>
-      editor.chain().focus().deleteRange(range).toggleOrderedList().run(),
-  },
-  {
-    title: 'Code Block',
-    icon: '<>',
-    command: (editor, range) =>
-      editor.chain().focus().deleteRange(range).toggleCodeBlock().run(),
-  },
-  {
-    title: 'Blockquote',
-    icon: '"',
-    command: (editor, range) =>
-      editor.chain().focus().deleteRange(range).toggleBlockquote().run(),
-  },
-  {
-    title: 'Callout',
-    icon: '💡',
-    command: (editor, range) =>
-      editor
-        .chain()
-        .focus()
-        .deleteRange(range)
-        .insertContent({
-          type: 'callout',
-          content: [{ type: 'paragraph' }],
-        })
-        .run(),
-  },
-  {
-    title: 'Table',
-    icon: '⊞',
-    command: (editor, range) =>
-      editor
-        .chain()
-        .focus()
-        .deleteRange(range)
-        .insertTable({ rows: 3, cols: 3, withHeaderRow: true })
-        .run(),
-  },
-  {
-    title: 'Image',
-    icon: '🖼',
-    command: (editor, range) => {
-      const url = window.prompt('Image URL:');
-      if (url) {
-        editor.chain().focus().deleteRange(range).setImage({ src: url }).run();
-      }
-    },
-  },
-  {
-    title: 'Horizontal Rule',
-    icon: '—',
-    command: (editor, range) =>
-      editor.chain().focus().deleteRange(range).setHorizontalRule().run(),
-  },
-  {
-    title: 'Page Embed',
-    icon: '📄',
-    command: (editor, range) =>
-      editor.chain().focus().deleteRange(range).insertPageEmbed().run(),
+    label: '고급',
+    items: [
+      {
+        title: 'Page Embed',
+        description: '다른 문서 임베드',
+        icon: FileText,
+        command: (editor, range) =>
+          editor.chain().focus().deleteRange(range).insertPageEmbed().run(),
+      },
+      {
+        title: 'Horizontal Rule',
+        description: '구분선',
+        icon: Minus,
+        command: (editor, range) =>
+          editor.chain().focus().deleteRange(range).setHorizontalRule().run(),
+      },
+    ],
   },
 ];
+
+export const defaultSlashItems: SlashMenuItem[] =
+  slashMenuCategories.flatMap((c) => c.items);
 
 interface SlashMenuRef {
   onKeyDown: (event: KeyboardEvent) => boolean;
 }
 
+function groupByCategory(
+  items: SlashMenuItem[],
+  categories: SlashMenuCategory[],
+): { label: string; items: SlashMenuItem[] }[] {
+  return categories
+    .map((cat) => ({
+      label: cat.label,
+      items: cat.items.filter((item) => items.includes(item)),
+    }))
+    .filter((group) => group.items.length > 0);
+}
+
 const SlashMenu = forwardRef<
   SlashMenuRef,
-  { items: SlashMenuItem[]; command: (item: SlashMenuItem) => void }
->(function SlashMenu({ items, command }, ref) {
+  {
+    items: SlashMenuItem[];
+    categories: SlashMenuCategory[];
+    query: string;
+    command: (item: SlashMenuItem) => void;
+  }
+>(function SlashMenu({ items, categories, query, command }, ref) {
   const [selectedIndex, setSelectedIndex] = useState(0);
   const containerRef = useRef<HTMLDivElement>(null);
 
-  // Clamp index when items shrink; reset handled via keyboard navigation
   const safeIndex = items.length > 0 ? Math.min(selectedIndex, items.length - 1) : 0;
 
   const onKeyDown = useCallback(
@@ -135,66 +207,80 @@ const SlashMenu = forwardRef<
         return true;
       }
       if (event.key === 'Enter') {
-        const idx = items.length > 0 ? Math.min(selectedIndex, items.length - 1) : 0;
-        const item = items[idx];
+        const item = items[safeIndex];
         if (item) command(item);
         return true;
       }
       return false;
     },
-    [items, selectedIndex, command],
+    [items, safeIndex, command],
   );
 
   useImperativeHandle(ref, () => ({ onKeyDown }), [onKeyDown]);
 
   if (items.length === 0) return null;
 
+  const grouped = query === '' ? groupByCategory(items, categories) : null;
+
+  const renderItem = (item: SlashMenuItem, flatIndex: number) => {
+    const isActive = flatIndex === safeIndex;
+    const Icon = item.icon;
+    return (
+      <button
+        key={item.title}
+        type="button"
+        data-active={isActive}
+        className={`flex w-full items-center gap-2.5 rounded-lg px-2.5 py-1.5 text-left text-sm transition-colors ${
+          isActive
+            ? 'bg-[color:var(--operator-primary)]/14 text-[color:var(--operator-primary-soft)]'
+            : 'text-[color:var(--operator-foreground)] hover:bg-white/6'
+        }`}
+        onClick={() => command(item)}
+      >
+        <span className={`flex h-7 w-7 flex-shrink-0 items-center justify-center rounded-md border border-border/60 ${isActive ? 'border-[color:var(--operator-primary)]/30 bg-[color:var(--operator-primary)]/10' : 'bg-muted/40'}`}>
+          <Icon className={`size-3.5 ${isActive ? 'text-[color:var(--operator-primary-soft)]' : 'text-[color:var(--operator-muted)]'}`} />
+        </span>
+        <span className="flex min-w-0 flex-col">
+          <span className="text-xs font-medium leading-tight">{item.title}</span>
+          <span className="truncate text-[11px] text-[color:var(--operator-muted)]">{item.description}</span>
+        </span>
+      </button>
+    );
+  };
+
   return (
     <div
       ref={containerRef}
-      className="max-h-64 overflow-y-auto rounded-xl border border-white/10 bg-[color:var(--operator-surface)] p-1 shadow-lg"
+      className="max-h-72 w-64 overflow-y-auto rounded-xl border border-white/10 bg-[color:var(--operator-surface)] p-1 shadow-lg"
     >
-      {items.map((item, index) => (
-        <button
-          key={item.title}
-          type="button"
-          data-active={index === safeIndex}
-          className={`flex w-full items-center gap-2 rounded-lg px-3 py-1.5 text-left text-sm transition-colors ${
-            index === safeIndex
-              ? 'bg-[color:var(--operator-primary)]/14 text-[color:var(--operator-primary-soft)]'
-              : 'text-[color:var(--operator-foreground)] hover:bg-white/6'
-          }`}
-          onClick={() => command(item)}
-        >
-          <span className="w-5 text-center text-xs font-bold text-[color:var(--operator-muted)]">
-            {item.icon}
-          </span>
-          <span>{item.title}</span>
-        </button>
-      ))}
+      {grouped ? (
+        grouped.map((group) => (
+          <div key={group.label}>
+            <p className="px-2.5 pb-0.5 pt-1.5 text-[10px] font-semibold uppercase tracking-[0.15em] text-[color:var(--operator-muted)]">
+              {group.label}
+            </p>
+            {group.items.map((item) => {
+              const flatIndex = items.indexOf(item);
+              return renderItem(item, flatIndex);
+            })}
+          </div>
+        ))
+      ) : (
+        items.map((item, index) => renderItem(item, index))
+      )}
     </div>
   );
 });
 
-/** Estimated max-height of the dropdown (matches `max-h-64` = 16rem at 16px/rem). */
-const MENU_ESTIMATED_HEIGHT = 256;
+/** Estimated max-height of the dropdown (matches `max-h-72` = 18rem at 16px/rem). */
+const MENU_ESTIMATED_HEIGHT = 288;
 /** Estimated min-width of the dropdown for initial right-edge clamping. */
-const MENU_ESTIMATED_WIDTH = 240;
+const MENU_ESTIMATED_WIDTH = 256;
 /** Gap between caret anchor and popup edge, in px. */
 const CARET_GAP = 4;
 /** Minimum distance from viewport edges, in px. */
 const VIEWPORT_MARGIN = 8;
 
-/**
- * Pure function that computes the {top, left} for the slash-hint popup so it
- * stays fully within the viewport regardless of scroll position.
- *
- * - Prefers positioning below the caret anchor.
- * - Flips above when insufficient space below and more space is available above.
- * - Clamps both axes to stay within the viewport.
- *
- * Exported for unit testing.
- */
 export function calculatePopupPosition(
   anchorRect: DOMRect,
   popupHeight: number,
@@ -207,17 +293,13 @@ export function calculatePopupPosition(
 
   let top: number;
   if (spaceBelow >= popupHeight || spaceBelow >= spaceAbove) {
-    // Enough room below, or more room below than above → open downward
     top = anchorRect.bottom + CARET_GAP;
   } else {
-    // Flip upward
     top = anchorRect.top - CARET_GAP - popupHeight;
   }
 
-  // Clamp vertically so the popup never extends outside the viewport
   top = Math.max(VIEWPORT_MARGIN, Math.min(top, viewportHeight - popupHeight - VIEWPORT_MARGIN));
 
-  // Clamp horizontally
   const left = Math.max(
     VIEWPORT_MARGIN,
     Math.min(anchorRect.left, viewportWidth - popupWidth - VIEWPORT_MARGIN),
@@ -226,13 +308,6 @@ export function calculatePopupPosition(
   return { top, left };
 }
 
-/**
- * Applies viewport-aware positioning to the popup element.
- *
- * 1. Computes an initial position with estimated dimensions (no flash).
- * 2. After React has flushed the render (double rAF), re-measures the actual
- *    popup dimensions and fine-tunes the position.
- */
 function applyPosition(
   popup: HTMLElement,
   clientRectFn: (() => DOMRect | null) | null | undefined,
@@ -243,12 +318,10 @@ function applyPosition(
   const vw = window.innerWidth;
   const vh = window.innerHeight;
 
-  // Initial estimate — avoids visible jump on first render
   const initial = calculatePopupPosition(rect, MENU_ESTIMATED_HEIGHT, MENU_ESTIMATED_WIDTH, vw, vh);
   popup.style.top = `${initial.top}px`;
   popup.style.left = `${initial.left}px`;
 
-  // Fine-tune after React's concurrent render has painted (double rAF)
   requestAnimationFrame(() => {
     requestAnimationFrame(() => {
       if (!popup.isConnected) return;
@@ -270,6 +343,7 @@ function createSuggestionRenderer() {
     onStart(props: {
       editor: Editor;
       range: Range;
+      query: string;
       items: SlashMenuItem[];
       command: (item: SlashMenuItem) => void;
       clientRect?: (() => DOMRect | null) | null;
@@ -284,36 +358,31 @@ function createSuggestionRenderer() {
       root = createRoot(popup);
       root.render(
         <SlashMenu
-          ref={(r) => {
-            menuRef = r;
-          }}
+          ref={(r) => { menuRef = r; }}
           items={props.items}
-          command={(item) => {
-            item.command(props.editor, props.range);
-          }}
+          categories={slashMenuCategories}
+          query={props.query}
+          command={(item) => { item.command(props.editor, props.range); }}
         />,
       );
     },
     onUpdate(props: {
       editor: Editor;
       range: Range;
+      query: string;
       items: SlashMenuItem[];
       command: (item: SlashMenuItem) => void;
       clientRect?: (() => DOMRect | null) | null;
     }) {
-      if (popup) {
-        applyPosition(popup, props.clientRect);
-      }
+      if (popup) applyPosition(popup, props.clientRect);
 
       root?.render(
         <SlashMenu
-          ref={(r) => {
-            menuRef = r;
-          }}
+          ref={(r) => { menuRef = r; }}
           items={props.items}
-          command={(item) => {
-            item.command(props.editor, props.range);
-          }}
+          categories={slashMenuCategories}
+          query={props.query}
+          command={(item) => { item.command(props.editor, props.range); }}
         />,
       );
     },
