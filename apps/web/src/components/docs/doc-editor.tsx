@@ -26,6 +26,7 @@ import { FileAttachmentNode } from './extensions/file-node';
 import { EmbedBlock } from './extensions/embed-node';
 import { MathBlockNode, MathInlineNode } from './extensions/math-node';
 import { ColumnsBlock, ColumnBlock } from './extensions/column-layout';
+import { WikiLinkNode, createWikiLinkSuggestion } from './extensions/wiki-link';
 import { DocToc } from './doc-toc';
 import { type DocHeading, slugifyHeading } from './doc-heading-utils';
 import { markdownToHtml, htmlToMarkdown } from './lib/content-converter';
@@ -40,6 +41,7 @@ export function DocEditor({
   currentDocId,
   onNavigate,
   onFileError,
+  projectId,
   onChange,
   onSave,
   isDirty = false,
@@ -58,6 +60,7 @@ export function DocEditor({
   currentDocId?: string;
   onNavigate?: (slug: string) => void;
   onFileError?: (message: string) => void;
+  projectId?: string;
   onChange: (value: string) => void;
   onContentFormatChange?: (format: ContentFormat) => void;
   onSave?: () => Promise<boolean>;
@@ -128,6 +131,11 @@ export function DocEditor({
       MathInlineNode,
       ColumnsBlock,
       ColumnBlock,
+      WikiLinkNode.configure({
+        projectId,
+        onNavigate,
+        suggestion: createWikiLinkSuggestion(projectId),
+      }),
       SlashCommandExtension,
       PageEmbedExtension.configure({ currentDocId, onNavigate }),
     ],

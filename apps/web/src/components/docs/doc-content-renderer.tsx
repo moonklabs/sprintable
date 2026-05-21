@@ -104,6 +104,18 @@ export function DocContentRenderer({
       return () => button.removeEventListener('click', handleClick);
     });
 
+    // Wiki link click handlers (viewer)
+    const wikiLinks = Array.from(root.querySelectorAll<HTMLElement>('[data-type="wikiLink"]'));
+    const wikiCleanup = wikiLinks.map((span) => {
+      const slug = span.getAttribute('data-slug') ?? '';
+      const title = span.getAttribute('data-title') ?? span.textContent ?? '';
+      span.className = 'inline-flex cursor-pointer items-center gap-0.5 rounded px-1 py-0.5 text-[0.9em] bg-[color:var(--operator-primary)]/10 text-[color:var(--operator-primary-soft)] hover:bg-[color:var(--operator-primary)]/20 transition-colors';
+      span.title = title;
+      const handleClick = () => { if (slug) window.location.href = `/docs/${slug}`; };
+      span.addEventListener('click', handleClick);
+      return () => span.removeEventListener('click', handleClick);
+    });
+
     // Math block rendering (viewer)
     const mathBlocks = Array.from(root.querySelectorAll<HTMLElement>('[data-type="mathBlock"]'));
     mathBlocks.forEach((block) => {
@@ -219,6 +231,7 @@ export function DocContentRenderer({
 
     return () => {
       cleanup.forEach((dispose) => dispose());
+      wikiCleanup.forEach((dispose) => dispose());
       fileCleanup.forEach((dispose) => dispose());
       toggleCleanup.forEach((dispose) => dispose());
     };

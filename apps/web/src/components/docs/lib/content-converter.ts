@@ -60,6 +60,22 @@ turndown.addRule('imageWithWidth', {
   },
 });
 
+// Preserve wiki link inline nodes as raw HTML
+turndown.addRule('wikiLink', {
+  filter: (node) =>
+    node.nodeName === 'SPAN' &&
+    (node as HTMLElement).getAttribute('data-type') === 'wikiLink',
+  replacement: (_content, node) => {
+    const el = node as HTMLElement;
+    const safeAttr = (s: string) =>
+      s.replace(/&/g, '&amp;').replace(/"/g, '&quot;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+    const docId = safeAttr(el.getAttribute('data-doc-id') ?? '');
+    const title = safeAttr(el.getAttribute('data-title') ?? el.textContent ?? '');
+    const slug = safeAttr(el.getAttribute('data-slug') ?? '');
+    return `<span data-type="wikiLink" data-doc-id="${docId}" data-title="${title}" data-slug="${slug}">${title}</span>`;
+  },
+});
+
 // Preserve columns block as raw HTML
 turndown.addRule('columnsBlock', {
   filter: (node) =>
@@ -255,6 +271,12 @@ export function markdownToHtml(rawMd: string): string {
   });
   // Math blocks — stored as single-line raw HTML
   html = html.replace(/^<div data-type="mathBlock"[^\n]*<\/div>$/gm, (m) => {
+    const idx = atomPlaceholders.length;
+    atomPlaceholders.push(m);
+    return `\x00ATOM${idx}\x00`;
+  });
+  // Wiki link spans
+  html = html.replace(/<span data-type="wikiLink"[^>]*>[^<]*<\/span>/g, (m) => {
     const idx = atomPlaceholders.length;
     atomPlaceholders.push(m);
     return `\x00ATOM${idx}\x00`;
