@@ -1,6 +1,7 @@
 'use client';
 
 import { useEffect, useCallback, useRef, useState } from 'react';
+import React from 'react';
 import { useEditor, EditorContent } from '@tiptap/react';
 import StarterKit from '@tiptap/starter-kit';
 import Link from '@tiptap/extension-link';
@@ -30,6 +31,11 @@ export function DocEditor({
   isDirty = false,
   autosave = true,
   onAutosaveToggle,
+  title,
+  onTitleChange,
+  titlePlaceholder,
+  titleAutoFocus,
+  actions,
   labels,
 }: {
   value: string;
@@ -43,6 +49,11 @@ export function DocEditor({
   isDirty?: boolean;
   autosave?: boolean;
   onAutosaveToggle?: (enabled: boolean) => void;
+  title?: string;
+  onTitleChange?: (value: string) => void;
+  titlePlaceholder?: string;
+  titleAutoFocus?: boolean;
+  actions?: React.ReactNode;
   labels: {
     contentFormat: string;
     markdown: string;
@@ -144,8 +155,42 @@ export function DocEditor({
     editor.chain().focus().insertTable({ rows: 3, cols: 3, withHeaderRow: true }).run();
   }, [editor]);
 
+  const titleRef = useRef<HTMLTextAreaElement>(null);
+
+  const autoResizeTitle = useCallback((el: HTMLTextAreaElement) => {
+    el.style.height = 'auto';
+    el.style.height = `${el.scrollHeight}px`;
+  }, []);
+
+  useEffect(() => {
+    if (titleRef.current) autoResizeTitle(titleRef.current);
+  }, [title, autoResizeTitle]);
+
   return (
     <div className="flex h-full flex-col overflow-hidden rounded-2xl border border-border/60 bg-background">
+      {/* Inline title (Notion style) */}
+      {title !== undefined && (
+        <div className="flex flex-shrink-0 items-start justify-between gap-2 px-6 pb-2 pt-8">
+          <textarea
+            ref={titleRef}
+            value={title}
+            onChange={(e) => {
+              onTitleChange?.(e.target.value);
+              autoResizeTitle(e.target);
+            }}
+            placeholder={titlePlaceholder ?? 'Untitled'}
+            autoFocus={titleAutoFocus}
+            rows={1}
+            className="w-full resize-none overflow-hidden bg-transparent text-4xl font-bold leading-tight outline-none placeholder:text-muted-foreground/40"
+          />
+          {actions && (
+            <div className="flex flex-shrink-0 items-center gap-1 pt-1">
+              {actions}
+            </div>
+          )}
+        </div>
+      )}
+
       {/* Tab bar + toolbar */}
       <div className="flex flex-shrink-0 flex-wrap items-center justify-between gap-2 border-b border-border/60 px-3 py-2">
         {/* View mode tabs */}
