@@ -1,7 +1,7 @@
 'use client';
 
 import { useEffect, useCallback, useRef, useState } from 'react';
-import React from 'react';
+import React, { type RefObject } from 'react';
 import { useEditor, EditorContent } from '@tiptap/react';
 import { BubbleMenu } from '@tiptap/react/menus';
 import StarterKit from '@tiptap/starter-kit';
@@ -26,6 +26,8 @@ import { FileAttachmentNode } from './extensions/file-node';
 import { EmbedBlock } from './extensions/embed-node';
 import { MathBlockNode, MathInlineNode } from './extensions/math-node';
 import { ColumnsBlock, ColumnBlock } from './extensions/column-layout';
+import { DocToc } from './doc-toc';
+import { type DocHeading, slugifyHeading } from './doc-heading-utils';
 import { markdownToHtml, htmlToMarkdown } from './lib/content-converter';
 
 type ContentFormat = 'markdown' | 'html';
@@ -87,6 +89,8 @@ export function DocEditor({
 }) {
   const suppressUpdateRef = useRef(false);
   const [viewMode, setViewMode] = useState<ViewMode>('preview');
+  const [tocHeadings, setTocHeadings] = useState<DocHeading[]>([]);
+  const editorContentRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
     if (!onFileError) return;
@@ -145,6 +149,49 @@ export function DocEditor({
     editor.setEditable(editable);
   }, [editor, editable]);
 
+  // Extract TOC headings from editor + assign IDs to heading DOM elements
+  useEffect(() => {
+    if (!editor) return;
+
+    const update = () => {
+      const counts = new Map<string, number>();
+      const headings: DocHeading[] = [];
+
+      editor.state.doc.descendants((node) => {
+        if (node.type.name === 'heading') {
+          const text = node.textContent.trim();
+          if (!text) return true;
+          const baseId = slugifyHeading(text);
+          const seen = counts.get(baseId) ?? 0;
+          counts.set(baseId, seen + 1);
+          headings.push({
+            level: node.attrs.level as 1 | 2 | 3,
+            text,
+            id: seen === 0 ? baseId : `${baseId}-${seen + 1}`,
+          });
+        }
+        return true;
+      });
+
+      setTocHeadings(headings);
+
+      // Assign IDs to heading DOM elements
+      const root = editorContentRef.current;
+      if (!root) return;
+      const idCounts = new Map<string, number>();
+      root.querySelectorAll<HTMLElement>('h1, h2, h3').forEach((el) => {
+        const baseId = slugifyHeading(el.textContent ?? '');
+        const seen2 = idCounts.get(baseId) ?? 0;
+        idCounts.set(baseId, seen2 + 1);
+        el.id = seen2 === 0 ? baseId : `${baseId}-${seen2 + 1}`;
+      });
+    };
+
+    update();
+    editor.on('update', update);
+    return () => { editor.off('update', update); };
+  }, [editor]);
+
   useEffect(() => {
     if (!editor) return;
     const currentHtml = editor.getHTML();
@@ -173,6 +220,12 @@ export function DocEditor({
     },
     [contentFormat, onChange],
   );
+
+  const scrollToHeading = useCallback((id: string) => {
+    const root = editorContentRef.current;
+    const el = root?.querySelector<HTMLElement>(`#${CSS.escape(id)}`);
+    el?.scrollIntoView({ behavior: 'smooth', block: 'start' });
+  }, []);
 
   const addLink = useCallback(() => {
     if (!editor) return;
@@ -306,6 +359,8 @@ export function DocEditor({
             </ToolbarButton>
           </div>
         ) : null}
+        {/* TOC — always in toolbar when ≥3 headings */}
+        <DocToc headings={tocHeadings} onHeadingClick={scrollToHeading} />
       </div>
 
       {/* Floating bubble toolbar — visible on text selection in preview mode */}
@@ -377,7 +432,7 @@ export function DocEditor({
           placeholder={labels.placeholder}
         />
       ) : (
-        <div className="tiptap-editor-wrapper flex-1 overflow-y-auto p-3">
+        <div ref={editorContentRef as RefObject<HTMLDivElement>} className="tiptap-editor-wrapper flex-1 overflow-y-auto p-3">
           <EditorContent editor={editor} className="tiptap-content h-full outline-none" />
         </div>
       )}
