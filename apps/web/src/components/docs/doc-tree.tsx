@@ -1,11 +1,49 @@
 'use client';
 
 import { useState, useCallback, useEffect, useRef } from 'react';
+import { createPortal } from 'react-dom';
 import { ChevronDown, ChevronRight, FileText, Folder, FolderOpen, MoreVertical } from 'lucide-react';
 import { DndContext, DragEndEvent, PointerSensor, useSensor, useSensors, closestCenter } from '@dnd-kit/core';
 import { SortableContext, useSortable, verticalListSortingStrategy } from '@dnd-kit/sortable';
 import { CSS } from '@dnd-kit/utilities';
 import { cn } from '@/lib/utils';
+
+// ─── Preview Card ─────────────────────────────────────────────────────────────
+
+function extractSnippet(content: string, maxChars = 200): string {
+  return content
+    .replace(/<[^>]+>/g, ' ')
+    .replace(/[#*_`\[\]>~]/g, ' ')
+    .replace(/\s+/g, ' ')
+    .trim()
+    .slice(0, maxChars);
+}
+
+function DocPreviewCard({ title, snippet, x, y }: { title: string; snippet: string; x: number; y: number }) {
+  const CARD_WIDTH = 280;
+  const CARD_EST_HEIGHT = 120;
+  const GAP = 12;
+
+  const left = x + GAP + CARD_WIDTH > window.innerWidth
+    ? Math.max(8, x - GAP - CARD_WIDTH)
+    : x + GAP;
+  const top = Math.min(y, window.innerHeight - CARD_EST_HEIGHT - 8);
+
+  return createPortal(
+    <div
+      style={{ position: 'fixed', left, top, width: CARD_WIDTH, zIndex: 9999, pointerEvents: 'none' }}
+      className="rounded-xl border border-border bg-background p-3 shadow-lg"
+    >
+      <p className="mb-1 text-xs font-semibold text-[color:var(--operator-foreground)] truncate">{title}</p>
+      {snippet ? (
+        <p className="text-[11px] leading-relaxed text-[color:var(--operator-muted)] line-clamp-4">{snippet}</p>
+      ) : (
+        <p className="text-[11px] text-[color:var(--operator-muted)] opacity-60">내용 없음</p>
+      )}
+    </div>,
+    document.body,
+  );
+}
 
 interface Doc {
   id: string;
@@ -46,6 +84,7 @@ interface DocTreeProps {
   onDelete?: (docId: string) => Promise<void>;
   onAddChild?: (parentId: string) => Promise<void>;
   emptyFolderLabel?: string;
+  projectId?: string;
 }
 
 function TreeNode({
@@ -59,6 +98,7 @@ function TreeNode({
   onAddChild,
   depth = 0,
   emptyFolderLabel = 'No child docs',
+  projectId,
 }: {
   doc: Doc;
   allDocs: Doc[];
@@ -70,6 +110,7 @@ function TreeNode({
   onAddChild?: (parentId: string) => Promise<void>;
   depth?: number;
   emptyFolderLabel?: string;
+  projectId?: string;
 }) {
   const childDocs = allDocs.filter((entry) => entry.parent_id === doc.id).sort((a, b) => a.sort_order - b.sort_order);
   const hasChildren = childDocs.length > 0;
@@ -78,6 +119,32 @@ function TreeNode({
   const [contextMenuOpen, setContextMenuOpen] = useState(false);
   const isSelected = selectedSlug === doc.slug;
   const menuRef = useRef<HTMLDivElement>(null);
+
+  // Preview state
+  const [preview, setPreview] = useState<{ title: string; snippet: string } | null>(null);
+  const [previewPos, setPreviewPos] = useState({ x: 0, y: 0 });
+  const hoverTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  const handleMouseEnter = useCallback((e: React.MouseEvent) => {
+    const { clientX, clientY } = e;
+    hoverTimerRef.current = setTimeout(() => {
+      if (!projectId) return;
+      void fetch(`/api/docs?project_id=${projectId}&slug=${encodeURIComponent(doc.slug)}&limit=1`)
+        .then((r) => r.ok ? r.json() : null)
+        .then((data: { data?: Array<{ title: string; content?: string }> } | null) => {
+          const d = data?.data?.[0];
+          if (!d) return;
+          setPreview({ title: d.title, snippet: extractSnippet(d.content ?? '') });
+          setPreviewPos({ x: clientX, y: clientY });
+        })
+        .catch(() => { /* ignore */ });
+    }, 300);
+  }, [doc.slug, projectId]);
+
+  const handleMouseLeave = useCallback(() => {
+    if (hoverTimerRef.current) { clearTimeout(hoverTimerRef.current); hoverTimerRef.current = null; }
+    setPreview(null);
+  }, []);
 
   const { attributes, listeners, setNodeRef, transform, transition, isDragging } = useSortable({
     id: doc.id,
@@ -138,9 +205,12 @@ function TreeNode({
   return (
     <div ref={setNodeRef} style={style}>
       <div className="group relative">
+        {preview && <DocPreviewCard title={preview.title} snippet={preview.snippet} x={previewPos.x} y={previewPos.y} />}
         <button
           onClick={handleClick}
           onContextMenu={handleContextMenu}
+          onMouseEnter={handleMouseEnter}
+          onMouseLeave={handleMouseLeave}
           className={cn(
             'flex w-full items-center gap-2 rounded-2xl pl-3 pr-7 py-2 text-left text-[13px] transition-all',
             isSelected
@@ -207,6 +277,7 @@ function TreeNode({
                   onAddChild={onAddChild}
                   depth={depth + 1}
                   emptyFolderLabel={emptyFolderLabel}
+                  projectId={projectId}
                 />
               ))}
             </SortableContext>
@@ -224,7 +295,7 @@ function TreeNode({
   );
 }
 
-export function DocTree({ docs, selectedSlug, onSelect, onReorder, onMove, onMoveDenied, onRename, onDelete, onAddChild, emptyFolderLabel }: DocTreeProps) {
+export function DocTree({ docs, selectedSlug, onSelect, onReorder, onMove, onMoveDenied, onRename, onDelete, onAddChild, emptyFolderLabel, projectId }: DocTreeProps) {
   const rootDocs = docs.filter((entry) => !entry.parent_id).sort((a, b) => a.sort_order - b.sort_order);
   const sensors = useSensors(useSensor(PointerSensor, { activationConstraint: { distance: 5 } }));
 
@@ -293,7 +364,7 @@ export function DocTree({ docs, selectedSlug, onSelect, onReorder, onMove, onMov
       <SortableContext items={rootDocs.map((d) => d.id)} strategy={verticalListSortingStrategy}>
         <nav className="space-y-1">
           {rootDocs.map((doc) => (
-            <TreeNode key={doc.id} doc={doc} allDocs={docs} selectedSlug={selectedSlug} onSelect={onSelect} onReorder={onReorder} onRename={onRename} onDelete={onDelete} onAddChild={onAddChild} depth={0} emptyFolderLabel={emptyFolderLabel} />
+            <TreeNode key={doc.id} doc={doc} allDocs={docs} selectedSlug={selectedSlug} onSelect={onSelect} onReorder={onReorder} onRename={onRename} onDelete={onDelete} onAddChild={onAddChild} depth={0} emptyFolderLabel={emptyFolderLabel} projectId={projectId} />
           ))}
         </nav>
       </SortableContext>

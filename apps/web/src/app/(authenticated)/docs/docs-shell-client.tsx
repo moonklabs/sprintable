@@ -443,6 +443,7 @@ export function DocsShellClient({ projectId }: DocsShellClientProps) {
               onRename={handleRename}
               onDelete={handleDeleteDoc}
               onAddChild={handleAddChild}
+              projectId={projectId}
             />
             {docsHasMore && (
               <div className="px-2 py-1">
