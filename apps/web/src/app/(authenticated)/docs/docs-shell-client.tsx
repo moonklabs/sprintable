@@ -547,6 +547,7 @@ export function DocsShellClient({ projectId }: DocsShellClientProps) {
                 currentDocId={selectedDoc.id}
                 onNavigate={handleSelectDoc}
                 onFileError={(msg) => addToast({ title: msg, type: 'error' })}
+                projectId={projectId}
                 onChange={setContent}
                 onContentFormatChange={setContentFormat}
                 isDirty={isDirty}
