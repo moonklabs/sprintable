@@ -20,6 +20,7 @@ import { CalloutNode } from './extensions/callout-node';
 import { SlashCommandExtension } from './extensions/slash-command';
 import { PageEmbedExtension } from './extensions/page-embed-node';
 import { CodeBlockWithCopy } from './extensions/code-block-copy';
+import { ToggleBlock, ToggleSummary, ToggleContent } from './extensions/toggle-block';
 import { markdownToHtml, htmlToMarkdown } from './lib/content-converter';
 
 type ContentFormat = 'markdown' | 'html';
@@ -96,6 +97,9 @@ export function DocEditor({
       TableHeader,
       Placeholder.configure({ placeholder: labels.placeholder }),
       CalloutNode,
+      ToggleBlock,
+      ToggleSummary,
+      ToggleContent,
       SlashCommandExtension,
       PageEmbedExtension.configure({ currentDocId, onNavigate }),
     ],

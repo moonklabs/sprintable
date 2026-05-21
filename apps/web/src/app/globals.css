@@ -322,6 +322,14 @@
 .tiptap-content .tiptap ul[data-type="taskList"] li[data-type="taskItem"] > div { flex: 1; min-width: 0; }
 .tiptap-content .tiptap ul[data-type="taskList"] li[data-type="taskItem"][data-checked="true"] > div p { text-decoration: line-through; opacity: 0.55; }
 
+/* ─── Toggle block ─── */
+[data-type="toggleBlock"][data-open="false"] > [data-type="toggleContent"],
+.tiptap [data-type="toggleBlock"][data-open="false"] > [data-type="toggleContent"] { display: none; }
+[data-type="toggleContent"],
+.tiptap [data-type="toggleContent"] { padding-left: 1.25rem; margin-left: 0.875rem; border-left: 2px solid hsl(var(--border)); margin-top: 0.25rem; }
+[data-type="toggleSummary"],
+.tiptap [data-type="toggleSummary"] { cursor: pointer; }
+
 /* ─── Typography utilities ─── */
 .text-display {
   font-size: 2rem;
