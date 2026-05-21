@@ -1,7 +1,7 @@
 'use client';
 
-import { useCallback, useEffect, useState } from 'react';
-import { useParams, useRouter, useSearchParams } from 'next/navigation';
+import { useCallback, useEffect, useRef, useState } from 'react';
+import { useParams, useRouter } from 'next/navigation';
 import { useTranslations } from 'next-intl';
 import { DocEditor } from '@/components/docs/doc-editor';
 import { useDocSync, type SaveStatus } from '@/components/docs/use-doc-sync';
@@ -59,13 +59,15 @@ export default function DocSlugPage() {
   const params = useParams();
   const slug = typeof params.slug === 'string' ? params.slug : '';
   const router = useRouter();
-  const searchParams = useSearchParams();
-  const isNew = searchParams.get('new') === '1';
   const t = useTranslations('docs');
+  // 신규 문서 자동 포커스: URL ?new=1 파라미터를 ref로 처리 (useSearchParams Suspense 이슈 방지)
+  const isNewRef = useRef(typeof window !== 'undefined' && new URLSearchParams(window.location.search).get('new') === '1');
+  const isNew = isNewRef.current;
 
   const { projectId, setTree, pendingDocUpdate, clearPendingDocUpdate } = useDocsLayout();
 
   const [selectedDoc, setSelectedDoc] = useState<DocDetail | null>(null);
+  const [docLoading, setDocLoading] = useState(true);
   const [title, setTitle] = useState('');
   const [content, setContent] = useState('');
   const [contentFormat, setContentFormat] = useState<'markdown' | 'html'>('markdown');
@@ -94,16 +96,27 @@ export default function DocSlugPage() {
 
   const fetchDoc = useCallback(async () => {
     if (!projectId || !slug) return;
+    setDocLoading(true);
     try {
       const res = await fetch(`/api/docs?project_id=${projectId}&slug=${slug}`);
-      if (!res.ok) throw new Error('Failed to fetch doc');
-      const { data } = await res.json();
+      if (!res.ok) {
+        setSelectedDoc(null);
+        return;
+      }
+      const json = await res.json();
+      const data = json?.data ?? null;
+      if (!data) {
+        setSelectedDoc(null);
+        return;
+      }
       setSelectedDoc(data);
-      setTitle(data.title);
-      setContent(data.content);
-      setContentFormat(data.content_format || 'markdown');
+      setTitle(data.title ?? '');
+      setContent(data.content ?? '');
+      setContentFormat(data.content_format ?? 'markdown');
     } catch {
       setSelectedDoc(null);
+    } finally {
+      setDocLoading(false);
     }
   }, [projectId, slug]);
 
@@ -142,10 +155,18 @@ export default function DocSlugPage() {
     router.push(`/docs/${targetSlug}`);
   }, [router]);
 
-  if (!selectedDoc) {
+  if (docLoading) {
     return (
       <div className="flex h-full items-center justify-center">
         <p className="text-sm text-[color:var(--operator-muted)]">{t('loading')}</p>
+      </div>
+    );
+  }
+
+  if (!selectedDoc) {
+    return (
+      <div className="flex h-full items-center justify-center">
+        <p className="text-sm text-muted-foreground">{t('notFound')}</p>
       </div>
     );
   }
