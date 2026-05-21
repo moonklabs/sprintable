@@ -42,6 +42,14 @@ def publish_event(org_id: str, event_type: str, data: dict) -> None:
             dead.append(q)
     for q in dead:
         _subscribers[org_id].discard(q)
+    # 다른 인스턴스에 전파 — 실패 시 로컬 전파는 정상 유지
+    try:
+        from app.services.pg_pubsub import pg_notify
+        asyncio.get_running_loop().create_task(
+            pg_notify("org", org_id, event_type, data)
+        )
+    except RuntimeError:
+        pass  # 이벤트 루프 없음 (테스트 등)
 
 
 # ─── Agent connection registry (S2/S3: 에이전트별 SSE) ───────────────────────
@@ -84,18 +92,25 @@ def _compute_backfill_mode(
 def _push_to_agent(member_id: str, payload: dict) -> bool:
     """연결 중인 에이전트 모든 큐에 SSE 페이로드 전송. True=1개 이상 전달, False=미연결."""
     queues = _agent_connections.get(member_id)
-    if not queues:
-        return False
     pushed = False
-    dead: list[asyncio.Queue] = []
-    for q in list(queues):
-        try:
-            q.put_nowait(payload)
-            pushed = True
-        except asyncio.QueueFull:
-            dead.append(q)
-    for q in dead:
-        queues.discard(q)
+    if queues:
+        dead: list[asyncio.Queue] = []
+        for q in list(queues):
+            try:
+                q.put_nowait(payload)
+                pushed = True
+            except asyncio.QueueFull:
+                dead.append(q)
+        for q in dead:
+            queues.discard(q)
+    # 로컬 전파 여부와 무관하게 다른 인스턴스에 전파 — 미연결 시에도 필요
+    try:
+        from app.services.pg_pubsub import pg_notify
+        asyncio.get_running_loop().create_task(
+            pg_notify("agent", member_id, payload.get("event_type", ""), payload)
+        )
+    except RuntimeError:
+        pass  # 이벤트 루프 없음 (테스트 등)
     return pushed
 
 
