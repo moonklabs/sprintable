@@ -354,12 +354,22 @@ async def start_sse_bridge(
             seen_ids.add(event.last_event_id)
             _current_last_event_id = event.last_event_id
 
-        asyncio.create_task(
-            relay_to_fakechat(event.event_type, event.data, api_url, api_key, port)
-        )
+        # MCP notification: webhook 유무·backfill 여부 무관하게 항상 발송 (AC-4)
         asyncio.create_task(
             _send_mcp_notification(event.event_type, event.data)
         )
+
+        # relay 조건: (1) backfill 아님, (2) webhook 미설정
+        _relay = True
+        try:
+            _relay = not json.loads(event.data).get("is_backfill", False)
+        except (json.JSONDecodeError, AttributeError):
+            pass
+        if _relay and not settings.has_webhook:
+            asyncio.create_task(
+                relay_to_fakechat(event.event_type, event.data, api_url, api_key, port)
+            )
+
         if on_event is not None:
             on_event(event.event_type, event.data)
 
