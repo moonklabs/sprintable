@@ -26,6 +26,7 @@ import {
   ImageIcon,
   Minus,
   FileText,
+  GitBranch,
 } from 'lucide-react';
 
 export interface SlashMenuItem {
@@ -147,6 +148,22 @@ export const slashMenuCategories: SlashMenuCategory[] = [
           const url = window.prompt('Image URL:');
           if (url) editor.chain().focus().deleteRange(range).setImage({ src: url }).run();
         },
+      },
+      {
+        title: 'Mermaid Diagram',
+        description: '다이어그램 삽입',
+        icon: GitBranch,
+        command: (editor, range) =>
+          editor
+            .chain()
+            .focus()
+            .deleteRange(range)
+            .insertContent({
+              type: 'codeBlock',
+              attrs: { language: 'mermaid' },
+              content: [{ type: 'text', text: 'flowchart TD\n    A[시작] --> B[끝]' }],
+            })
+            .run(),
       },
     ],
   },

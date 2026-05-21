@@ -3,6 +3,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import type { MutableRefObject, ReactNode, RefObject } from 'react';
 import { getShikiHighlighter, resolveLanguage } from './lib/shiki-highlighter';
+import { renderMermaid } from './lib/mermaid-renderer';
 import ReactMarkdown from 'react-markdown';
 import DOMPurify from 'dompurify';
 import remarkGfm from 'remark-gfm';
@@ -179,6 +180,9 @@ export function DocContentRenderer({
             const inline = !String(codeClassName ?? '').includes('language-') && !childText.includes('\n');
             if (!inline) {
               const lang = String(codeClassName ?? '').replace('language-', '') || null;
+              if (lang === 'mermaid') {
+                return <MermaidReadonlyBlock code={childText} />;
+              }
               return (
                 <ShikiCodeBlock
                   code={childText}
@@ -195,6 +199,35 @@ export function DocContentRenderer({
         {content}
       </ReactMarkdown>
     </div>
+  );
+}
+
+function MermaidReadonlyBlock({ code }: { code: string }) {
+  const [svg, setSvg] = useState('');
+  const [error, setError] = useState('');
+
+  useEffect(() => {
+    if (!code.trim()) return;
+    let cancelled = false;
+    void renderMermaid(code).then(({ svg: rendered }) => {
+      if (!cancelled) { setSvg(rendered); setError(''); }
+    }).catch((err: unknown) => {
+      if (!cancelled) { setError(err instanceof Error ? err.message : '렌더링 실패'); setSvg(''); }
+    });
+    return () => { cancelled = true; };
+  }, [code]);
+
+  if (error) {
+    return <div className="not-prose my-4 rounded-xl border border-red-500/30 bg-red-500/10 p-3 text-xs text-red-400">{error}</div>;
+  }
+  if (!svg) {
+    return <div className="not-prose my-4 rounded-xl border border-slate-700 bg-[#0b1120] p-4 text-xs text-slate-500">렌더링 중...</div>;
+  }
+  return (
+    <div
+      className="not-prose my-4 flex justify-center rounded-xl border border-slate-700 bg-[#0b1120] p-4 [&_svg]:h-auto [&_svg]:max-w-full"
+      dangerouslySetInnerHTML={{ __html: svg }}
+    />
   );
 }
 
