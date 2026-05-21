@@ -51,6 +51,29 @@ export function DocContentRenderer({
       heading.id = seen === 0 ? baseId : `${baseId}-${seen + 1}`;
     });
 
+    // HTML format code blocks: apply Shiki highlighting via DOM
+    if (contentFormat === 'html') {
+      const preTags = Array.from(root.querySelectorAll<HTMLPreElement>('pre'));
+      preTags.forEach((pre) => {
+        const codeEl = pre.querySelector('code');
+        const text = codeEl?.textContent ?? pre.textContent ?? '';
+        if (!text.trim()) return;
+        const lang = codeEl?.className.replace('language-', '').split(' ')[0]
+          ?? pre.getAttribute('data-language')
+          ?? null;
+        void getShikiHighlighter().then((shiki) => {
+          const highlighted = shiki.codeToHtml(text, {
+            lang: resolveLanguage(lang),
+            theme: 'dark-plus',
+          });
+          const wrapper = document.createElement('div');
+          wrapper.innerHTML = highlighted;
+          wrapper.className = '[&_pre]:!bg-transparent [&_pre]:!m-0 [&_pre]:p-4 [&_pre]:text-[13px] [&_pre]:leading-6 [&_code]:!bg-transparent overflow-x-auto';
+          if (pre.parentElement) pre.replaceWith(wrapper);
+        }).catch(() => { /* fallback: keep original pre */ });
+      });
+    }
+
     const buttons = Array.from(root.querySelectorAll<HTMLButtonElement>('[data-doc-copy-button="true"]'));
     const cleanup = buttons.map((button) => {
       const handleClick = async () => {

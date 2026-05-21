@@ -128,9 +128,11 @@ export function markdownToHtml(rawMd: string): string {
   // Extract fenced code blocks first to prevent other transforms from modifying their content.
   // Subsequent regex passes use gm flags which would otherwise corrupt multi-line code blocks.
   const codeBlockPlaceholders: string[] = [];
-  let html = md.replace(/```(\w*)\n([\s\S]*?)```/g, (_m, _lang, code) => {
+  let html = md.replace(/```(\w*)\n([\s\S]*?)```/g, (_m, lang, code) => {
     const idx = codeBlockPlaceholders.length;
-    codeBlockPlaceholders.push(`<pre><code>${escapeHtml(code.trimEnd())}</code></pre>`);
+    const langAttrs = lang ? ` data-language="${lang}" class="language-${lang}"` : '';
+    const codeClass = lang ? ` class="language-${lang}"` : '';
+    codeBlockPlaceholders.push(`<pre${langAttrs}><code${codeClass}>${escapeHtml(code.trimEnd())}</code></pre>`);
     return `\x00CODEBLOCK${idx}\x00`;
   });
 

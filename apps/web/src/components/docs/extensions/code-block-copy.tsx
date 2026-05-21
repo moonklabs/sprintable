@@ -25,15 +25,18 @@ function CodeBlockView({ node, editor, selected }: ReactNodeViewProps) {
   const isEditing = isEditable && selected;
 
   useEffect(() => {
-    if (!code.trim()) { setHighlightedHtml(''); return; }
     let cancelled = false;
     void (async () => {
       try {
-        const shiki = await getShikiHighlighter();
-        if (cancelled) return;
-        const html = shiki.codeToHtml(code, { lang: resolvedLang, theme: 'dark-plus' });
-        setHighlightedHtml(html);
-      } catch { /* fallback to plain */ }
+        const html = code.trim()
+          ? await getShikiHighlighter().then((shiki) =>
+              shiki.codeToHtml(code, { lang: resolvedLang, theme: 'dark-plus' }),
+            )
+          : '';
+        if (!cancelled) setHighlightedHtml(html);
+      } catch {
+        if (!cancelled) setHighlightedHtml('');
+      }
     })();
     return () => { cancelled = true; };
   }, [code, resolvedLang]);
