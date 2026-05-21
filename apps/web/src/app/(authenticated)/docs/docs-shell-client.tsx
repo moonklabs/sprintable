@@ -546,6 +546,7 @@ export function DocsShellClient({ projectId }: DocsShellClientProps) {
                 editable={selectedDoc.doc_type !== 'sprint_report'}
                 currentDocId={selectedDoc.id}
                 onNavigate={handleSelectDoc}
+                onFileError={(msg) => addToast({ title: msg, type: 'error' })}
                 onChange={setContent}
                 onContentFormatChange={setContentFormat}
                 isDirty={isDirty}

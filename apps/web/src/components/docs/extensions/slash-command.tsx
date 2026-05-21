@@ -28,6 +28,7 @@ import {
   FileText,
   GitBranch,
   ChevronRight,
+  Paperclip,
 } from 'lucide-react';
 
 export interface SlashMenuItem {
@@ -148,6 +149,33 @@ export const slashMenuCategories: SlashMenuCategory[] = [
         command: (editor, range) => {
           const url = window.prompt('Image URL:');
           if (url) editor.chain().focus().deleteRange(range).setImage({ src: url }).run();
+        },
+      },
+      {
+        title: 'File',
+        description: '파일 첨부',
+        icon: Paperclip,
+        command: (editor, range) => {
+          editor.chain().focus().deleteRange(range).run();
+          const input = document.createElement('input');
+          input.type = 'file';
+          input.onchange = async () => {
+            const file = input.files?.[0];
+            if (!file) return;
+            const { MAX_FILE_BYTES: maxBytes, fileToDataUrl: toDataUrl, formatFileSize: fmtSize } = await import('./file-node');
+            if (file.size > maxBytes) {
+              window.dispatchEvent(new CustomEvent('docs:file-size-error', {
+                detail: { message: `파일 크기가 5MB를 초과합니다. (${fmtSize(file.size)})` },
+              }));
+              return;
+            }
+            const dataUrl = await toDataUrl(file);
+            editor.commands.insertContent({
+              type: 'fileAttachment',
+              attrs: { filename: file.name, size: file.size, mimeType: file.type, data: dataUrl },
+            });
+          };
+          input.click();
         },
       },
       {

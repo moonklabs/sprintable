@@ -22,6 +22,7 @@ import { SlashCommandExtension } from './extensions/slash-command';
 import { PageEmbedExtension } from './extensions/page-embed-node';
 import { CodeBlockWithCopy } from './extensions/code-block-copy';
 import { ToggleBlock, ToggleSummary, ToggleContent } from './extensions/toggle-block';
+import { FileAttachmentNode } from './extensions/file-node';
 import { markdownToHtml, htmlToMarkdown } from './lib/content-converter';
 
 type ContentFormat = 'markdown' | 'html';
@@ -33,6 +34,7 @@ export function DocEditor({
   editable = true,
   currentDocId,
   onNavigate,
+  onFileError,
   onChange,
   onSave,
   isDirty = false,
@@ -50,6 +52,7 @@ export function DocEditor({
   editable?: boolean;
   currentDocId?: string;
   onNavigate?: (slug: string) => void;
+  onFileError?: (message: string) => void;
   onChange: (value: string) => void;
   onContentFormatChange?: (format: ContentFormat) => void;
   onSave?: () => Promise<boolean>;
@@ -82,6 +85,16 @@ export function DocEditor({
   const suppressUpdateRef = useRef(false);
   const [viewMode, setViewMode] = useState<ViewMode>('preview');
 
+  useEffect(() => {
+    if (!onFileError) return;
+    const handleFileSizeError = (e: Event) => {
+      const msg = (e as CustomEvent<{ message: string }>).detail.message;
+      onFileError(msg);
+    };
+    window.addEventListener('docs:file-size-error', handleFileSizeError);
+    return () => window.removeEventListener('docs:file-size-error', handleFileSizeError);
+  }, [onFileError]);
+
   const editor = useEditor({
     immediatelyRender: false,
     extensions: [
@@ -102,6 +115,7 @@ export function DocEditor({
       ToggleBlock,
       ToggleSummary,
       ToggleContent,
+      FileAttachmentNode,
       SlashCommandExtension,
       PageEmbedExtension.configure({ currentDocId, onNavigate }),
     ],

@@ -60,6 +60,23 @@ turndown.addRule('imageWithWidth', {
   },
 });
 
+// Preserve file attachment blocks as raw HTML
+turndown.addRule('fileAttachment', {
+  filter: (node) =>
+    node.nodeName === 'DIV' &&
+    (node as HTMLElement).getAttribute('data-type') === 'fileAttachment',
+  replacement: (_content, node) => {
+    const el = node as HTMLElement;
+    const safeAttr = (s: string) =>
+      s.replace(/&/g, '&amp;').replace(/"/g, '&quot;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+    const filename = safeAttr(el.getAttribute('data-filename') ?? '');
+    const size = safeAttr(el.getAttribute('data-size') ?? '0');
+    const mimeType = safeAttr(el.getAttribute('data-mime-type') ?? '');
+    const data = el.getAttribute('data-file-data') ?? '';
+    return `\n<div data-type="fileAttachment" data-filename="${filename}" data-size="${size}" data-mime-type="${mimeType}" data-file-data="${data}"></div>\n`;
+  },
+});
+
 // Preserve toggle blocks as raw HTML — must be before generic block rules
 turndown.addRule('toggleBlock', {
   filter: (node) =>
@@ -169,6 +186,12 @@ export function markdownToHtml(rawMd: string): string {
   // and must survive the HTML-escape pass below intact.
   const atomPlaceholders: string[] = [];
   html = html.replace(/<div\s+data-page-embed[^>]*><\/div>/g, (m) => {
+    const idx = atomPlaceholders.length;
+    atomPlaceholders.push(m);
+    return `\x00ATOM${idx}\x00`;
+  });
+  // File attachment blocks — stored as single-line raw HTML
+  html = html.replace(/^<div data-type="fileAttachment"[^\n]*><\/div>$/gm, (m) => {
     const idx = atomPlaceholders.length;
     atomPlaceholders.push(m);
     return `\x00ATOM${idx}\x00`;
