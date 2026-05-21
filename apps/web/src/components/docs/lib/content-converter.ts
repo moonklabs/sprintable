@@ -60,6 +60,34 @@ turndown.addRule('imageWithWidth', {
   },
 });
 
+// Preserve math block nodes as raw HTML
+turndown.addRule('mathBlock', {
+  filter: (node) =>
+    node.nodeName === 'DIV' &&
+    (node as HTMLElement).getAttribute('data-type') === 'mathBlock',
+  replacement: (_content, node) => {
+    const el = node as HTMLElement;
+    const latex = el.textContent ?? '';
+    const safeAttr = (s: string) =>
+      s.replace(/&/g, '&amp;').replace(/"/g, '&quot;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+    return `\n<div data-type="mathBlock" data-latex="${safeAttr(latex)}">${safeAttr(latex)}</div>\n`;
+  },
+});
+
+// Preserve math inline nodes as raw HTML
+turndown.addRule('mathInline', {
+  filter: (node) =>
+    node.nodeName === 'SPAN' &&
+    (node as HTMLElement).getAttribute('data-type') === 'mathInline',
+  replacement: (_content, node) => {
+    const el = node as HTMLElement;
+    const latex = el.textContent ?? '';
+    const safeAttr = (s: string) =>
+      s.replace(/&/g, '&amp;').replace(/"/g, '&quot;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+    return `<span data-type="mathInline">${safeAttr(latex)}</span>`;
+  },
+});
+
 // Preserve embed blocks as raw HTML
 turndown.addRule('embedBlock', {
   filter: (node) =>
@@ -200,6 +228,18 @@ export function markdownToHtml(rawMd: string): string {
   // and must survive the HTML-escape pass below intact.
   const atomPlaceholders: string[] = [];
   html = html.replace(/<div\s+data-page-embed[^>]*><\/div>/g, (m) => {
+    const idx = atomPlaceholders.length;
+    atomPlaceholders.push(m);
+    return `\x00ATOM${idx}\x00`;
+  });
+  // Math blocks — stored as single-line raw HTML
+  html = html.replace(/^<div data-type="mathBlock"[^\n]*<\/div>$/gm, (m) => {
+    const idx = atomPlaceholders.length;
+    atomPlaceholders.push(m);
+    return `\x00ATOM${idx}\x00`;
+  });
+  // Math inline — protect span tags
+  html = html.replace(/<span data-type="mathInline">[^<]*<\/span>/g, (m) => {
     const idx = atomPlaceholders.length;
     atomPlaceholders.push(m);
     return `\x00ATOM${idx}\x00`;

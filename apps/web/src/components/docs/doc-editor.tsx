@@ -24,6 +24,7 @@ import { CodeBlockWithCopy } from './extensions/code-block-copy';
 import { ToggleBlock, ToggleSummary, ToggleContent } from './extensions/toggle-block';
 import { FileAttachmentNode } from './extensions/file-node';
 import { EmbedBlock } from './extensions/embed-node';
+import { MathBlockNode, MathInlineNode } from './extensions/math-node';
 import { markdownToHtml, htmlToMarkdown } from './lib/content-converter';
 
 type ContentFormat = 'markdown' | 'html';
@@ -118,6 +119,8 @@ export function DocEditor({
       ToggleContent,
       FileAttachmentNode,
       EmbedBlock,
+      MathBlockNode,
+      MathInlineNode,
       SlashCommandExtension,
       PageEmbedExtension.configure({ currentDocId, onNavigate }),
     ],
