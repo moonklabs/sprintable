@@ -67,9 +67,11 @@ turndown.addRule('fileAttachment', {
     (node as HTMLElement).getAttribute('data-type') === 'fileAttachment',
   replacement: (_content, node) => {
     const el = node as HTMLElement;
-    const filename = el.getAttribute('data-filename') ?? '';
-    const size = el.getAttribute('data-size') ?? '0';
-    const mimeType = el.getAttribute('data-mime-type') ?? '';
+    const safeAttr = (s: string) =>
+      s.replace(/&/g, '&amp;').replace(/"/g, '&quot;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+    const filename = safeAttr(el.getAttribute('data-filename') ?? '');
+    const size = safeAttr(el.getAttribute('data-size') ?? '0');
+    const mimeType = safeAttr(el.getAttribute('data-mime-type') ?? '');
     const data = el.getAttribute('data-file-data') ?? '';
     return `\n<div data-type="fileAttachment" data-filename="${filename}" data-size="${size}" data-mime-type="${mimeType}" data-file-data="${data}"></div>\n`;
   },
