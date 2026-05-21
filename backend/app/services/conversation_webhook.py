@@ -133,20 +133,21 @@ async def deliver_conversation_message_webhook(
                     )
                 )).scalars().all()
 
-                # channel_router 결정 조회 — sse 결정 멤버의 member webhook 스킵 (이중 발송 방지)
+                # channel_router 결정 조회 — sse/discord 결정 멤버의 member webhook 스킵 (이중 발송 방지)
+                # sse: SSE로 이미 전달 / discord: discord_outbound BackgroundTask가 전담
                 from app.services.channel_router import route_message as _route
-                sse_member_ids: set[uuid.UUID] = set()
+                routed_member_ids: set[uuid.UUID] = set()
                 try:
                     decisions = await _route(message_id, db)
-                    sse_member_ids = {d.member_id for d in decisions if d.channel == "sse"}
+                    routed_member_ids = {d.member_id for d in decisions if d.channel in ("sse", "discord")}
                 except Exception:
-                    logger.warning("channel_router failed message_id=%s — sse filtering skipped", message_id)
+                    logger.warning("channel_router failed message_id=%s — member webhook dedup skipped", message_id)
 
                 existing_ids = {wh.id for wh in target_webhooks}
                 existing_urls = {wh.url for wh in target_webhooks}
                 for wh in extra_wh_rows:
-                    if wh.member_id in sse_member_ids:
-                        continue  # channel_router → sse: member webhook 발송 생략
+                    if wh.member_id in routed_member_ids:
+                        continue  # channel_router → sse/discord: member webhook 발송 생략
                     if wh.id not in existing_ids and wh.url not in existing_urls:
                         target_webhooks.append(wh)
                         existing_ids.add(wh.id)
