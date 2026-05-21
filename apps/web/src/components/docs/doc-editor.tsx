@@ -3,14 +3,17 @@
 import { useEffect, useCallback, useRef, useState } from 'react';
 import React from 'react';
 import { useEditor, EditorContent } from '@tiptap/react';
+import { BubbleMenu } from '@tiptap/react/menus';
 import StarterKit from '@tiptap/starter-kit';
 import Link from '@tiptap/extension-link';
 import Image from '@tiptap/extension-image';
+import Highlight from '@tiptap/extension-highlight';
 import { Table } from '@tiptap/extension-table';
 import TableRow from '@tiptap/extension-table-row';
 import TableCell from '@tiptap/extension-table-cell';
 import TableHeader from '@tiptap/extension-table-header';
 import Placeholder from '@tiptap/extension-placeholder';
+import { Bold, Italic, Strikethrough, Code, Link2, Highlighter } from 'lucide-react';
 import { CalloutNode } from './extensions/callout-node';
 import { SlashCommandExtension } from './extensions/slash-command';
 import { PageEmbedExtension } from './extensions/page-embed-node';
@@ -82,6 +85,7 @@ export function DocEditor({
       CodeBlockWithCopy,
       Link.configure({ openOnClick: false }),
       Image,
+      Highlight,
       Table.configure({ resizable: true }),
       TableRow,
       TableCell,
@@ -272,6 +276,65 @@ export function DocEditor({
         ) : null}
       </div>
 
+      {/* Floating bubble toolbar — visible on text selection in preview mode */}
+      {editor && editable && viewMode === 'preview' && (
+        <BubbleMenu
+          editor={editor}
+          className="flex items-center gap-0.5 rounded-lg border border-border/60 bg-background p-1 shadow-lg"
+        >
+          <BubbleButton
+            active={editor.isActive('bold')}
+            onClick={() => editor.chain().focus().toggleBold().run()}
+            title="굵게 (Ctrl+B)"
+          >
+            <Bold className="size-3.5" />
+          </BubbleButton>
+          <BubbleButton
+            active={editor.isActive('italic')}
+            onClick={() => editor.chain().focus().toggleItalic().run()}
+            title="기울임 (Ctrl+I)"
+          >
+            <Italic className="size-3.5" />
+          </BubbleButton>
+          <BubbleButton
+            active={editor.isActive('strike')}
+            onClick={() => editor.chain().focus().toggleStrike().run()}
+            title="취소선"
+          >
+            <Strikethrough className="size-3.5" />
+          </BubbleButton>
+          <BubbleButton
+            active={editor.isActive('code')}
+            onClick={() => editor.chain().focus().toggleCode().run()}
+            title="인라인 코드"
+          >
+            <Code className="size-3.5" />
+          </BubbleButton>
+          <span className="mx-0.5 h-4 w-px bg-border/60" />
+          <BubbleButton
+            active={editor.isActive('link')}
+            onClick={() => {
+              if (editor.isActive('link')) {
+                editor.chain().focus().unsetLink().run();
+              } else {
+                const url = window.prompt('URL:');
+                if (url) editor.chain().focus().setLink({ href: url }).run();
+              }
+            }}
+            title="링크"
+          >
+            <Link2 className="size-3.5" />
+          </BubbleButton>
+          <BubbleButton
+            active={editor.isActive('highlight')}
+            onClick={() => editor.chain().focus().toggleHighlight().run()}
+            title="형광펜"
+          >
+            <Highlighter className="size-3.5" />
+          </BubbleButton>
+        </BubbleMenu>
+      )}
+
       {/* Editor content — fills remaining height */}
       {viewMode === 'markdown' ? (
         <textarea
@@ -324,6 +387,33 @@ export function DocEditor({
         </div>
       ) : null}
     </div>
+  );
+}
+
+function BubbleButton({
+  active,
+  onClick,
+  title,
+  children,
+}: {
+  active: boolean;
+  onClick: () => void;
+  title?: string;
+  children: React.ReactNode;
+}) {
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      title={title}
+      className={`rounded-md p-1.5 transition-colors ${
+        active
+          ? 'bg-primary/14 text-primary'
+          : 'text-muted-foreground hover:bg-accent hover:text-foreground'
+      }`}
+    >
+      {children}
+    </button>
   );
 }
 
