@@ -9,6 +9,7 @@ COPY packages/shared/package.json packages/shared/package.json
 COPY packages/db/package.json packages/db/package.json
 COPY packages/sdk/package.json packages/sdk/package.json
 COPY packages/storage-api/package.json packages/storage-api/package.json
+COPY packages/cli/package.json packages/cli/package.json
 COPY ee/packages/storage-saas/package.json ee/packages/storage-saas/package.json
 RUN pnpm install --frozen-lockfile --ignore-scripts
 
