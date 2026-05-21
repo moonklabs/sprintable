@@ -743,6 +743,7 @@ async def add_reply(
         )
         # CB-S7: SSE conversation:message 발행 (P0 — 수신자 화면 실시간 갱신)
         conv = await db.get(Conversation, id)
+        pending_sse_pushes: list[tuple[str, dict]] = []
         if conv:
             sender_member = (await db.execute(
                 select(TeamMember).where(TeamMember.id == body.created_by)
@@ -757,9 +758,15 @@ async def add_reply(
                         discord_exclude_ids = {d.member_id for d in decisions if d.channel == "discord"}
                     except Exception:
                         logger.warning("channel_router pre-check failed reply_msg_id=%s", reply_msg.id)
-                    await _dispatch_conversation_event(db, conv, reply_msg, repo.org_id, sender_member, exclude_ids=discord_exclude_ids)
+                    pending_sse_pushes = await _dispatch_conversation_event(db, conv, reply_msg, repo.org_id, sender_member, exclude_ids=discord_exclude_ids)
                 except Exception:
                     logger.warning("conversation event dispatch failed memo_id=%s", id, exc_info=True)
+
+        # commit 후 SSE push — Event 커밋 완료 상태에서 push해야 race condition 없음
+        await db.commit()
+        from app.routers.events import _push_to_agent
+        for pid_str, sse_payload in pending_sse_pushes:
+            _push_to_agent(pid_str, sse_payload)
 
         # webhook 발송 (기존 참여자 수집)
         if conv:

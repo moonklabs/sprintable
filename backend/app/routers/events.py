@@ -31,8 +31,11 @@ router = APIRouter(prefix="/api/v2/events", tags=["events"])
 _subscribers: dict[str, set[asyncio.Queue[dict]]] = defaultdict(set)
 
 
-def publish_event(org_id: str, event_type: str, data: dict) -> None:
-    """다른 라우터에서 이벤트를 발행할 때 호출."""
+def publish_event(org_id: str, event_type: str, data: dict, _from_listener: bool = False) -> None:
+    """다른 라우터에서 이벤트를 발행할 때 호출.
+
+    _from_listener=True: LISTEN 수신기에서 호출 시 pg_notify 재발행 금지 (무한 루프 차단).
+    """
     payload = {"type": event_type, **data}
     dead: list[asyncio.Queue] = []
     for q in _subscribers.get(org_id, set()):
@@ -42,6 +45,14 @@ def publish_event(org_id: str, event_type: str, data: dict) -> None:
             dead.append(q)
     for q in dead:
         _subscribers[org_id].discard(q)
+    if not _from_listener:
+        try:
+            from app.services.pg_pubsub import pg_notify
+            asyncio.get_running_loop().create_task(
+                pg_notify("org", org_id, event_type, data)
+            )
+        except RuntimeError:
+            pass  # 이벤트 루프 없음 (테스트 등)
 
 
 # ─── Agent connection registry (S2/S3: 에이전트별 SSE) ───────────────────────
@@ -81,21 +92,31 @@ def _compute_backfill_mode(
     return exceed, (_BACKFILL_MAX_EVENTS if exceed else 100)
 
 
-def _push_to_agent(member_id: str, payload: dict) -> bool:
-    """연결 중인 에이전트 모든 큐에 SSE 페이로드 전송. True=1개 이상 전달, False=미연결."""
+def _push_to_agent(member_id: str, payload: dict, _from_listener: bool = False) -> bool:
+    """연결 중인 에이전트 모든 큐에 SSE 페이로드 전송. True=1개 이상 전달, False=미연결.
+
+    _from_listener=True: LISTEN 수신기에서 호출 시 pg_notify 재발행 금지 (무한 루프 차단).
+    """
     queues = _agent_connections.get(member_id)
-    if not queues:
-        return False
     pushed = False
-    dead: list[asyncio.Queue] = []
-    for q in list(queues):
+    if queues:
+        dead: list[asyncio.Queue] = []
+        for q in list(queues):
+            try:
+                q.put_nowait(payload)
+                pushed = True
+            except asyncio.QueueFull:
+                dead.append(q)
+        for q in dead:
+            queues.discard(q)
+    if not _from_listener:
         try:
-            q.put_nowait(payload)
-            pushed = True
-        except asyncio.QueueFull:
-            dead.append(q)
-    for q in dead:
-        queues.discard(q)
+            from app.services.pg_pubsub import pg_notify
+            asyncio.get_running_loop().create_task(
+                pg_notify("agent", member_id, payload.get("event_type", ""), payload)
+            )
+        except RuntimeError:
+            pass  # 이벤트 루프 없음 (테스트 등)
     return pushed
 
 
@@ -324,7 +345,7 @@ async def agent_event_stream(
                         evt.delivered_at = now
                     await db.commit()
                     for data, evt in zip(batch_data, batch):
-                        yield f"event: {evt.event_type}\nid: {evt.id}\ndata: {json.dumps(data)}\n\n"
+                        yield f"event: {evt.event_type}\nid: {evt.id}\ndata: {json.dumps({**data, 'is_backfill': True})}\n\n"
 
             # 신규 이벤트 리슨 — 대기 구간에서 커넥션 미점유, 이벤트마다 개별 세션
             while not await request.is_disconnected():
