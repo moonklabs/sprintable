@@ -1110,6 +1110,8 @@
     "advancedOptions": "Advanced options",
     "preview": "Preview",
     "editDoc": "Edit",
+    "copyMarkdown": "Copy Markdown",
+    "deleteDoc": "Delete",
     "notFound": "Document not found"
   },
   "rewards": {

@@ -1110,6 +1110,8 @@
     "advancedOptions": "고급 옵션",
     "preview": "미리보기",
     "editDoc": "편집",
+    "copyMarkdown": "마크다운 복사",
+    "deleteDoc": "삭제",
     "notFound": "문서를 찾을 수 없는"
   },
   "rewards": {

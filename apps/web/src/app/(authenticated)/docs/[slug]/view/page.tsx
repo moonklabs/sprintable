@@ -56,22 +56,19 @@ export default function DocViewPage() {
 
   return (
     <div className="flex h-full flex-col overflow-hidden">
-      {/* Header */}
-      <div className="flex-shrink-0 border-b border-border px-4 py-3 lg:px-6 lg:py-4">
-        <div className="flex items-center justify-between gap-4">
-          <h1 className="truncate text-xl font-semibold">{doc.title}</h1>
-          <Button asChild size="sm" variant="outline">
-            <Link href={`/docs/${slug}`}>
-              <Edit2 className="mr-1.5 h-3.5 w-3.5" />
-              {t('editDoc')}
-            </Link>
-          </Button>
-        </div>
-      </div>
-
       {/* Content */}
       <div className="flex-1 overflow-y-auto px-4 py-6 lg:px-8 lg:py-8">
         <div className="mx-auto max-w-3xl">
+          {/* Inline title (Notion style — same layout as editor) */}
+          <div className="mb-6 flex items-start justify-between gap-4">
+            <h1 className="flex-1 break-words text-4xl font-bold leading-tight">{doc.title}</h1>
+            <Button asChild size="sm" variant="ghost" className="mt-1 flex-shrink-0">
+              <Link href={`/docs/${slug}`}>
+                <Edit2 className="mr-1.5 h-3.5 w-3.5" />
+                {t('editDoc')}
+              </Link>
+            </Button>
+          </div>
           <DocContentRenderer
             content={doc.content}
             contentFormat={doc.content_format ?? 'markdown'}

@@ -10,7 +10,7 @@ import { Button } from '@/components/ui/button';
 import { EmptyState } from '@/components/ui/empty-state';
 import { Input } from '@/components/ui/input';
 import { ToastContainer, useToast } from '@/components/ui/toast';
-import { ChevronDown, ChevronRight, Plus, X, Trash2, Copy, Check, Menu } from 'lucide-react';
+import { ChevronDown, ChevronRight, Plus, X, Menu } from 'lucide-react';
 import { DocsShell } from '@/components/docs/docs-shell';
 import { TopBarSlot } from '@/components/nav/top-bar-slot';
 
@@ -55,21 +55,6 @@ export function getDocSaveStatusText(status: SaveStatus, t: (key: string) => str
   return map[status] ?? null;
 }
 
-const SAVE_STATUS_CLASS: Partial<Record<SaveStatus, string>> = {
-  saving: 'text-[color:var(--operator-muted)]',
-  saved: 'text-emerald-500/70',
-  unsaved: 'text-amber-500/70',
-  error: 'text-rose-500',
-  conflict: 'text-rose-500',
-  'remote-changed': 'text-amber-500',
-};
-
-function SaveStatusIndicator({ status, t }: { status: SaveStatus; t: ReturnType<typeof useTranslations> }) {
-  const text = getDocSaveStatusText(status, t);
-  if (!text) return null;
-
-  return <span className={`shrink-0 text-xs ${SAVE_STATUS_CLASS[status] ?? ''}`}>{text}</span>;
-}
 
 /**
  * Docs shell with 2-panel layout (tree + content).
@@ -96,20 +81,7 @@ export function DocsShellClient({ projectId }: DocsShellClientProps) {
   const [title, setTitle] = useState('');
   const [content, setContent] = useState('');
   const [contentFormat, setContentFormat] = useState<'markdown' | 'html'>('markdown');
-  const [mdCopied, setMdCopied] = useState(false);
   const [autosave, setAutosave] = useState(true);
-
-  const handleCopyMarkdown = useCallback(async () => {
-    try {
-      if (typeof navigator !== 'undefined' && navigator.clipboard?.writeText) {
-        await navigator.clipboard.writeText(content);
-      }
-    } catch {
-      // clipboard unavailable
-    }
-    setMdCopied(true);
-    window.setTimeout(() => setMdCopied(false), 1600);
-  }, [content]);
 
   // Create form states
   const [showCreate, setShowCreate] = useState(false);
@@ -367,22 +339,6 @@ export function DocsShellClient({ projectId }: DocsShellClientProps) {
     }
   }, [projectId, newTitle, newSlug, newContent, newParentId, router, searchParams]);
 
-  const handleDelete = useCallback(async () => {
-    if (!selectedDoc || !projectId) return;
-    if (!confirm(t('confirmDelete'))) return;
-
-    try {
-      const res = await fetch(`/api/docs/${selectedDoc.id}`, { method: 'DELETE' });
-
-      if (!res.ok) throw new Error('Failed to delete doc');
-
-      setTree((prev) => prev.filter((doc) => doc.id !== selectedDoc.id));
-      setSelectedDoc(null);
-      router.replace('/docs');
-    } catch (error) {
-      console.error('Failed to delete doc:', error);
-    }
-  }, [selectedDoc, projectId, router, t]);
 
   useEffect(() => {
     void fetchTree(selectedTags.length ? selectedTags : undefined);
@@ -582,31 +538,6 @@ export function DocsShellClient({ projectId }: DocsShellClientProps) {
           </div>
         ) : selectedDoc ? (
           <div className="flex h-full flex-col overflow-hidden">
-            {/* Header */}
-            <div className="flex-shrink-0 border-b border-border px-4 py-3 lg:px-6 lg:py-5">
-              <div className="flex items-center justify-between gap-4">
-                <div className="flex-1 min-w-0">
-                  <Input
-                    value={title}
-                    onChange={(e) => setTitle(e.target.value)}
-                    className="border-none bg-transparent px-0 text-2xl font-semibold focus-visible:ring-0"
-                    placeholder={t('titlePlaceholder')}
-                  />
-                </div>
-                <div className="flex items-center gap-3">
-                  <SaveStatusIndicator status={saveStatus} t={t} />
-                  <Button variant="ghost" size="sm" onClick={handleCopyMarkdown} title="마크다운 복사">
-                    {mdCopied ? <Check className="h-4 w-4 text-emerald-500" /> : <Copy className="h-4 w-4" />}
-                  </Button>
-                  {selectedDoc.doc_type !== 'sprint_report' && (
-                    <Button variant="ghost" size="sm" onClick={handleDelete}>
-                      <Trash2 className="h-4 w-4" />
-                    </Button>
-                  )}
-                </div>
-              </div>
-            </div>
-
             {/* Content — fills remaining height */}
             <div className="flex min-h-0 flex-1 flex-col overflow-hidden px-4 py-4 lg:px-6 lg:py-6">
               <DocEditor
@@ -621,6 +552,12 @@ export function DocsShellClient({ projectId }: DocsShellClientProps) {
                 onSave={save}
                 autosave={autosave}
                 onAutosaveToggle={setAutosave}
+                title={title}
+                onTitleChange={(v) => {
+                  setTitle(v);
+                  setTree((prev) => prev.map((d) => (d.id === selectedDoc.id ? { ...d, title: v } : d)));
+                }}
+                titlePlaceholder={t('titlePlaceholder')}
                 labels={{
                   contentFormat: t('contentFormat'),
                   markdown: t('formatMarkdown'),
