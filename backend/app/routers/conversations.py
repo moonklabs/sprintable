@@ -18,7 +18,7 @@ from app.models.conversation import Conversation, ConversationMessage, Conversat
 from app.models.event import Event
 from app.models.team import TeamMember
 from app.models.webhook_config import WebhookConfig
-from app.routers.events import _push_to_agent
+from app.routers.events import _push_to_agent, publish_event
 
 logger = logging.getLogger(__name__)
 
@@ -708,6 +708,9 @@ async def send_message(
     # commit 완료 후 SSE push — Event가 DB에 커밋된 상태에서 push해야 race condition 없음
     for pid_str, sse_payload in pending_sse_pushes:
         _push_to_agent(pid_str, sse_payload)
+    # 브라우저 SSE 구독자에게 1회 발행 (루프 밖 — 중복 방지)
+    if pending_sse_pushes:
+        publish_event(str(org_id), "conversation:message", {"conversation_id": str(conversation_id)})
 
     # webhook delivery BackgroundTask (AC1~8)
     from app.services.conversation_webhook import deliver_conversation_message_webhook
