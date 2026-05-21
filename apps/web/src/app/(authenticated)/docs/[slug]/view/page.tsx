@@ -1,10 +1,12 @@
 'use client';
 
-import { useEffect, useState } from 'react';
+import { useEffect, useState, useRef, useCallback } from 'react';
 import { useParams } from 'next/navigation';
 import Link from 'next/link';
 import { useTranslations } from 'next-intl';
 import { DocContentRenderer } from '@/components/docs/doc-content-renderer';
+import { DocToc } from '@/components/docs/doc-toc';
+import { extractDocHeadings } from '@/components/docs/doc-heading-utils';
 import { Button } from '@/components/ui/button';
 import { Edit2 } from 'lucide-react';
 import { useDocsLayout } from '../../docs-context';
@@ -27,6 +29,11 @@ export default function DocViewPage() {
   const { projectId } = useDocsLayout();
 
   const [doc, setDoc] = useState<DocState>(null);
+  const contentRef = useRef<HTMLDivElement | null>(null);
+
+  const scrollToHeading = useCallback((id: string) => {
+    contentRef.current?.querySelector<HTMLElement>(`#${CSS.escape(id)}`)?.scrollIntoView({ behavior: 'smooth', block: 'start' });
+  }, []);
 
   useEffect(() => {
     if (!projectId || !slug) return;
@@ -62,16 +69,23 @@ export default function DocViewPage() {
           {/* Inline title (Notion style — same layout as editor) */}
           <div className="mb-6 flex items-start justify-between gap-4">
             <h1 className="flex-1 break-words text-4xl font-bold leading-tight">{doc.title}</h1>
-            <Button asChild size="sm" variant="ghost" className="mt-1 flex-shrink-0">
-              <Link href={`/docs/${slug}`}>
-                <Edit2 className="mr-1.5 h-3.5 w-3.5" />
-                {t('editDoc')}
-              </Link>
-            </Button>
+            <div className="mt-1 flex flex-shrink-0 items-center gap-2">
+              <DocToc
+                headings={extractDocHeadings(doc.content, doc.content_format ?? 'markdown')}
+                onHeadingClick={scrollToHeading}
+              />
+              <Button asChild size="sm" variant="ghost">
+                <Link href={`/docs/${slug}`}>
+                  <Edit2 className="mr-1.5 h-3.5 w-3.5" />
+                  {t('editDoc')}
+                </Link>
+              </Button>
+            </div>
           </div>
           <DocContentRenderer
             content={doc.content}
             contentFormat={doc.content_format ?? 'markdown'}
+            contentRef={contentRef}
             codeCopyLabel={t('codeCopy')}
             codeCopiedLabel={t('codeCopied')}
           />
