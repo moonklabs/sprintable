@@ -1112,6 +1112,7 @@
     "editDoc": "편집",
     "copyMarkdown": "마크다운 복사",
     "deleteDoc": "삭제",
+    "createFailed": "문서 생성에 실패했습니다",
     "notFound": "문서를 찾을 수 없는"
   },
   "rewards": {
