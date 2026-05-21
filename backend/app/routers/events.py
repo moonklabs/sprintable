@@ -324,7 +324,7 @@ async def agent_event_stream(
                         evt.delivered_at = now
                     await db.commit()
                     for data, evt in zip(batch_data, batch):
-                        yield f"event: {evt.event_type}\nid: {evt.id}\ndata: {json.dumps(data)}\n\n"
+                        yield f"event: {evt.event_type}\nid: {evt.id}\ndata: {json.dumps({**data, 'is_backfill': True})}\n\n"
 
             # 신규 이벤트 리슨 — 대기 구간에서 커넥션 미점유, 이벤트마다 개별 세션
             while not await request.is_disconnected():
