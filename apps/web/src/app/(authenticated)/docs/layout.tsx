@@ -277,18 +277,7 @@ export default function DocsLayout({ children }: { children: React.ReactNode }) 
 
       {/* Desktop: 2-panel (lg+) */}
       <div className="hidden min-h-0 flex-1 overflow-hidden lg:flex">
-        {sidebarCollapsed ? (
-          <div className="flex flex-shrink-0 border-r border-border/80">
-            <button
-              type="button"
-              onClick={handleToggleSidebar}
-              title={t('openSidebar')}
-              className="flex h-full w-8 items-start justify-center pt-3 text-muted-foreground transition-colors hover:bg-accent hover:text-foreground"
-            >
-              <ChevronRight className="size-4" />
-            </button>
-          </div>
-        ) : (
+        {!sidebarCollapsed && (
           <aside className="relative flex w-[300px] flex-shrink-0 flex-col overflow-y-auto border-r border-border/80 bg-background">
             <button
               type="button"
@@ -301,7 +290,17 @@ export default function DocsLayout({ children }: { children: React.ReactNode }) 
             {sidebarContent}
           </aside>
         )}
-        <section className="flex min-w-0 flex-1 flex-col overflow-hidden bg-background">
+        <section className="relative flex min-w-0 flex-1 flex-col overflow-hidden bg-background">
+          {sidebarCollapsed && (
+            <button
+              type="button"
+              onClick={handleToggleSidebar}
+              title={t('openSidebar')}
+              className="absolute left-2 top-2 z-10 rounded p-1 text-muted-foreground transition-colors hover:bg-accent hover:text-foreground"
+            >
+              <ChevronRight className="size-4" />
+            </button>
+          )}
           {mainContent}
         </section>
       </div>
