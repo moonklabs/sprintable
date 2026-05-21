@@ -22,12 +22,12 @@ export async function connectCommand(opts: ConnectOptions = {}): Promise<void> {
   const apiUrl = await input({
     message: "Sprintable API URL",
     default: "https://app.sprintable.ai",
-    validate: (v) => (v.startsWith("http") ? true : "http(s):// 로 시작해야 합니다"),
+    validate: (v: string) => (v.startsWith("http") ? true : "http(s):// 로 시작해야 합니다"),
   });
 
   const adminKey = await password({
     message: "Admin API Key (팀 관리자 권한)",
-    validate: (v) => (v.trim().length > 0 ? true : "API Key를 입력하세요"),
+    validate: (v: string) => (v.trim().length > 0 ? true : "API Key를 입력하세요"),
   });
 
   // ── 2. 연결 확인 ─────────────────────────────────────────────────────────
@@ -67,7 +67,7 @@ export async function connectCommand(opts: ConnectOptions = {}): Promise<void> {
   } catch {
     projectId = await input({
       message: "Project ID (UUID)",
-      validate: (v) => (v.trim().length > 0 ? true : "Project ID를 입력하세요"),
+      validate: (v: string) => (v.trim().length > 0 ? true : "Project ID를 입력하세요"),
     });
   }
 
@@ -75,7 +75,7 @@ export async function connectCommand(opts: ConnectOptions = {}): Promise<void> {
   const agentName = await input({
     message: "에이전트 이름",
     default: "My Agent",
-    validate: (v) => (v.trim().length > 0 ? true : "이름을 입력하세요"),
+    validate: (v: string) => (v.trim().length > 0 ? true : "이름을 입력하세요"),
   });
 
   // ── 6. AC6: 이미 등록된 member 확인 ─────────────────────────────────────
@@ -94,7 +94,7 @@ export async function connectCommand(opts: ConnectOptions = {}): Promise<void> {
         console.log("\n기존 에이전트를 사용합니다. API key를 직접 입력하세요.");
         finalApiKey = await password({
           message: "기존 Agent API Key",
-          validate: (v) => (v.trim().length > 0 ? true : "API Key를 입력하세요"),
+          validate: (v: string) => (v.trim().length > 0 ? true : "API Key를 입력하세요"),
         });
         adapter.writeConfig(apiUrl, finalApiKey.trim());
         _printSuccess(adapter.configPath, agent);
