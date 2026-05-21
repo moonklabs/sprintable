@@ -3,6 +3,7 @@
 import { useState, useEffect, useCallback, useRef } from 'react';
 import { Node, mergeAttributes } from '@tiptap/core';
 import Suggestion, { type SuggestionOptions } from '@tiptap/suggestion';
+import { PluginKey } from '@tiptap/pm/state';
 import { ReactNodeViewRenderer, NodeViewWrapper, type ReactNodeViewProps } from '@tiptap/react';
 import { createRoot, type Root } from 'react-dom/client';
 import { FileText, AlertCircle } from 'lucide-react';
@@ -121,6 +122,7 @@ export const WikiLinkNode = Node.create<WikiLinkOptions>({
     return [
       Suggestion({
         editor: this.editor,
+        pluginKey: new PluginKey('wikiLinkSuggestion'),
         ...this.options.suggestion,
       }),
     ];
