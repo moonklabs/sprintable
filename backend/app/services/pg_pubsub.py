@@ -24,16 +24,12 @@ async def pg_notify(
     event_type: str,
     data: dict,
 ) -> None:
-    """PostgreSQL NOTIFY 단발 발행. 실패 시 경고 로그만 — 예외 전파 금지.
+    """PostgreSQL NOTIFY 단발 발행. SQLAlchemy 기존 풀 재활용.
 
     target: "org" | "agent"
     target_id: org_id | member_id (str)
+    실패 시 경고 로그만 — 예외 전파 금지.
     """
-    import asyncpg
-    from app.core.config import settings
-
-    raw_url = settings.database_url.replace("postgresql+asyncpg://", "postgresql://", 1)
-
     payload: dict = {
         "instance_id": INSTANCE_ID,
         "target": target,
@@ -50,11 +46,14 @@ async def pg_notify(
         payload_str = json.dumps(payload, default=str)
 
     try:
-        conn = await asyncpg.connect(raw_url)
-        try:
-            await conn.execute("SELECT pg_notify($1, $2)", _CHANNEL, payload_str)
-        finally:
-            await conn.close()
+        from sqlalchemy import text
+        from app.core.database import async_session_factory
+        async with async_session_factory() as session:
+            await session.execute(
+                text("SELECT pg_notify(:ch, :pl)"),
+                {"ch": _CHANNEL, "pl": payload_str},
+            )
+            await session.commit()
     except Exception as exc:
         logger.warning(
             "pg_notify failed channel=%s target=%s target_id=%s: %s",
