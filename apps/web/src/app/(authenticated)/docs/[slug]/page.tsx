@@ -1,7 +1,7 @@
 'use client';
 
 import { useCallback, useEffect, useState } from 'react';
-import { useParams, useRouter } from 'next/navigation';
+import { useParams, useRouter, useSearchParams } from 'next/navigation';
 import { useTranslations } from 'next-intl';
 import { DocEditor } from '@/components/docs/doc-editor';
 import { useDocSync, type SaveStatus } from '@/components/docs/use-doc-sync';
@@ -59,6 +59,8 @@ export default function DocSlugPage() {
   const params = useParams();
   const slug = typeof params.slug === 'string' ? params.slug : '';
   const router = useRouter();
+  const searchParams = useSearchParams();
+  const isNew = searchParams.get('new') === '1';
   const t = useTranslations('docs');
 
   const { projectId, setTree, pendingDocUpdate, clearPendingDocUpdate } = useDocsLayout();
@@ -215,7 +217,7 @@ export default function DocSlugPage() {
           title={title}
           onTitleChange={handleTitleChange}
           titlePlaceholder={t('titlePlaceholder')}
-          titleAutoFocus={!title}
+          titleAutoFocus={isNew || !title}
           actions={docActions}
           labels={{
             contentFormat: t('contentFormat'),
