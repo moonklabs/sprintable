@@ -47,6 +47,19 @@ turndown.addRule('compactListItem', {
   },
 });
 
+// Preserve image width — Turndown strips style from <img>; serialize as raw HTML for round-trip
+turndown.addRule('imageWithWidth', {
+  filter: (node) =>
+    node.nodeName === 'IMG' && !!(node as HTMLElement).style.width,
+  replacement: (_content, node) => {
+    const el = node as HTMLImageElement;
+    const src = el.getAttribute('src') ?? '';
+    const alt = el.getAttribute('alt') ?? '';
+    const width = el.style.width;
+    return `\n<img src="${src}" alt="${alt}" style="width:${width};max-width:100%;height:auto">\n`;
+  },
+});
+
 // Preserve toggle blocks as raw HTML — must be before generic block rules
 turndown.addRule('toggleBlock', {
   filter: (node) =>
@@ -162,6 +175,12 @@ export function markdownToHtml(rawMd: string): string {
   });
   // Toggle blocks are stored as single-line raw HTML by the Turndown rule above
   html = html.replace(/^<div data-type="toggleBlock"[^\n]*<\/div>$/gm, (m) => {
+    const idx = atomPlaceholders.length;
+    atomPlaceholders.push(m);
+    return `\x00ATOM${idx}\x00`;
+  });
+  // Images with width style — serialized as raw HTML by imageWithWidth Turndown rule
+  html = html.replace(/^<img\s[^>]*style="width:[^"]*"[^>]*>$/gm, (m) => {
     const idx = atomPlaceholders.length;
     atomPlaceholders.push(m);
     return `\x00ATOM${idx}\x00`;
