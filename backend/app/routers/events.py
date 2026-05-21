@@ -31,8 +31,11 @@ router = APIRouter(prefix="/api/v2/events", tags=["events"])
 _subscribers: dict[str, set[asyncio.Queue[dict]]] = defaultdict(set)
 
 
-def publish_event(org_id: str, event_type: str, data: dict) -> None:
-    """다른 라우터에서 이벤트를 발행할 때 호출."""
+def publish_event(org_id: str, event_type: str, data: dict, _from_listener: bool = False) -> None:
+    """다른 라우터에서 이벤트를 발행할 때 호출.
+
+    _from_listener=True: LISTEN 수신기에서 호출 시 pg_notify 재발행 금지 (무한 루프 차단).
+    """
     payload = {"type": event_type, **data}
     dead: list[asyncio.Queue] = []
     for q in _subscribers.get(org_id, set()):
@@ -42,14 +45,14 @@ def publish_event(org_id: str, event_type: str, data: dict) -> None:
             dead.append(q)
     for q in dead:
         _subscribers[org_id].discard(q)
-    # 다른 인스턴스에 전파 — 실패 시 로컬 전파는 정상 유지
-    try:
-        from app.services.pg_pubsub import pg_notify
-        asyncio.get_running_loop().create_task(
-            pg_notify("org", org_id, event_type, data)
-        )
-    except RuntimeError:
-        pass  # 이벤트 루프 없음 (테스트 등)
+    if not _from_listener:
+        try:
+            from app.services.pg_pubsub import pg_notify
+            asyncio.get_running_loop().create_task(
+                pg_notify("org", org_id, event_type, data)
+            )
+        except RuntimeError:
+            pass  # 이벤트 루프 없음 (테스트 등)
 
 
 # ─── Agent connection registry (S2/S3: 에이전트별 SSE) ───────────────────────
@@ -89,8 +92,11 @@ def _compute_backfill_mode(
     return exceed, (_BACKFILL_MAX_EVENTS if exceed else 100)
 
 
-def _push_to_agent(member_id: str, payload: dict) -> bool:
-    """연결 중인 에이전트 모든 큐에 SSE 페이로드 전송. True=1개 이상 전달, False=미연결."""
+def _push_to_agent(member_id: str, payload: dict, _from_listener: bool = False) -> bool:
+    """연결 중인 에이전트 모든 큐에 SSE 페이로드 전송. True=1개 이상 전달, False=미연결.
+
+    _from_listener=True: LISTEN 수신기에서 호출 시 pg_notify 재발행 금지 (무한 루프 차단).
+    """
     queues = _agent_connections.get(member_id)
     pushed = False
     if queues:
@@ -103,14 +109,14 @@ def _push_to_agent(member_id: str, payload: dict) -> bool:
                 dead.append(q)
         for q in dead:
             queues.discard(q)
-    # 로컬 전파 여부와 무관하게 다른 인스턴스에 전파 — 미연결 시에도 필요
-    try:
-        from app.services.pg_pubsub import pg_notify
-        asyncio.get_running_loop().create_task(
-            pg_notify("agent", member_id, payload.get("event_type", ""), payload)
-        )
-    except RuntimeError:
-        pass  # 이벤트 루프 없음 (테스트 등)
+    if not _from_listener:
+        try:
+            from app.services.pg_pubsub import pg_notify
+            asyncio.get_running_loop().create_task(
+                pg_notify("agent", member_id, payload.get("event_type", ""), payload)
+            )
+        except RuntimeError:
+            pass  # 이벤트 루프 없음 (테스트 등)
     return pushed
 
 
