@@ -4,13 +4,12 @@ import { useCallback, useEffect, useState } from 'react';
 import { useParams, useRouter } from 'next/navigation';
 import { useTranslations } from 'next-intl';
 import { DocTree } from '@/components/docs/doc-tree';
-import { DocsShell } from '@/components/docs/docs-shell';
 import { Button } from '@/components/ui/button';
 import { EmptyState } from '@/components/ui/empty-state';
 import { Input } from '@/components/ui/input';
 import { ToastContainer, useToast } from '@/components/ui/toast';
 import { TopBarSlot } from '@/components/nav/top-bar-slot';
-import { ChevronDown, ChevronRight, Menu, Plus, X } from 'lucide-react';
+import { ChevronDown, ChevronLeft, ChevronRight, Menu, Plus, X } from 'lucide-react';
 import { useDashboardContext } from '../../dashboard/dashboard-shell';
 import { DocsLayoutContext, type Doc, type DocUpdate } from './docs-context';
 
@@ -34,6 +33,19 @@ export default function DocsLayout({ children }: { children: React.ReactNode }) 
 
   const [pendingDocUpdate, setPendingDocUpdate] = useState<DocUpdate | null>(null);
   const clearPendingDocUpdate = useCallback(() => setPendingDocUpdate(null), []);
+
+  const [sidebarCollapsed, setSidebarCollapsed] = useState(() => {
+    if (typeof window === 'undefined') return false;
+    return localStorage.getItem('docs-sidebar-collapsed') === 'true';
+  });
+
+  const handleToggleSidebar = useCallback(() => {
+    setSidebarCollapsed((prev) => {
+      const next = !prev;
+      localStorage.setItem('docs-sidebar-collapsed', String(next));
+      return next;
+    });
+  }, []);
 
   // Create form states
   const [showCreate, setShowCreate] = useState(false);
@@ -264,9 +276,35 @@ export default function DocsLayout({ children }: { children: React.ReactNode }) 
       />
 
       {/* Desktop: 2-panel (lg+) */}
-      <DocsShell sidebar={sidebarContent} className="hidden min-h-0 flex-1 lg:flex">
-        {mainContent}
-      </DocsShell>
+      <div className="hidden min-h-0 flex-1 overflow-hidden lg:flex">
+        {sidebarCollapsed ? (
+          <div className="flex flex-shrink-0 border-r border-border/80">
+            <button
+              type="button"
+              onClick={handleToggleSidebar}
+              title={t('openSidebar')}
+              className="flex h-full w-8 items-start justify-center pt-3 text-muted-foreground transition-colors hover:bg-accent hover:text-foreground"
+            >
+              <ChevronRight className="size-4" />
+            </button>
+          </div>
+        ) : (
+          <aside className="relative flex w-[300px] flex-shrink-0 flex-col overflow-y-auto border-r border-border/80 bg-background">
+            <button
+              type="button"
+              onClick={handleToggleSidebar}
+              title={t('hideSidebar')}
+              className="absolute right-2 top-2 z-10 rounded p-1 text-muted-foreground transition-colors hover:bg-accent hover:text-foreground"
+            >
+              <ChevronLeft className="size-4" />
+            </button>
+            {sidebarContent}
+          </aside>
+        )}
+        <section className="flex min-w-0 flex-1 flex-col overflow-hidden bg-background">
+          {mainContent}
+        </section>
+      </div>
 
       {/* Mobile: content + tree drawer (< lg) */}
       <div className="flex flex-1 flex-col overflow-hidden lg:hidden">
