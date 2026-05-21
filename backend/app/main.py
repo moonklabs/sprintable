@@ -1,5 +1,7 @@
+import asyncio
 import logging
 import os
+from contextlib import asynccontextmanager
 
 from fastapi import FastAPI, HTTPException, Request
 from fastapi.middleware.cors import CORSMiddleware
@@ -12,6 +14,22 @@ from app.core.rate_limit import limiter
 
 configure_logging(json_logs=os.getenv("APP_ENV", "development") != "development")
 _logger = logging.getLogger(__name__)
+
+
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    from app.services.pg_pubsub import listen_loop
+    task = asyncio.create_task(listen_loop())
+    try:
+        yield
+    finally:
+        task.cancel()
+        try:
+            await task
+        except asyncio.CancelledError:
+            pass
+
+
 from app.routers import account, activity_logs, agent_deployments, agent_personas, agent_routing_rules, agent_runs, agent_sessions, analytics, api_keys, audit_logs, auth, bridge, chats, conversations, cron, current_project, dashboard, dispatch, docs, entities, epics, event_notifications, events, file_locks, health, hitl, integrations, invite_accept, invitations, me, meetings, members, memos, mockups, notification_preferences, notifications, org_invites, org_members, organizations, oss, policy_documents, presence, project_access, project_settings, projects, retros, rewards, sprints, standups, stories, subscription, tasks, team_members, webhooks, workflow_executions, workflow_recipes, workflow_report, workflow_templates, workflow_trigger, workflow_trigger_types, workflow_versions
 
 app = FastAPI(
@@ -20,6 +38,7 @@ app = FastAPI(
     version="0.1.0",
     docs_url="/api/v2/_swagger" if settings.debug else None,
     redoc_url=None,
+    lifespan=lifespan,
 )
 
 _HTTP_CODE_MAP: dict[int, str] = {
