@@ -23,15 +23,26 @@ function MermaidBlockView({ node, editor, selected }: ReactNodeViewProps) {
   const showCode = isEditable && selected;
 
   useEffect(() => {
-    if (!code.trim()) { setSvg(''); setError(''); return; }
     let cancelled = false;
-    void renderMermaid(code).then(({ svg: rendered }) => {
-      if (!cancelled) { setSvg(rendered); setError(''); }
-    }).catch((err: unknown) => {
-      if (!cancelled) { setError(err instanceof Error ? err.message : '렌더링 실패'); setSvg(''); }
-    });
+    void (async () => {
+      if (!code.trim()) {
+        setSvg('');
+        setError('');
+        return;
+      }
+      try {
+        const { svg: rendered } = await renderMermaid(code);
+        if (!cancelled) { setSvg(rendered); setError(''); }
+      } catch (err: unknown) {
+        if (!cancelled) { setError(err instanceof Error ? err.message : '렌더링 실패'); setSvg(''); }
+      }
+    })();
     return () => { cancelled = true; };
   }, [code]);
+
+  const handlePreviewClick = useCallback(() => {
+    if (isEditable) editor?.commands.focus();
+  }, [editor, isEditable]);
 
   return (
     <NodeViewWrapper className="my-4 not-prose" data-mermaid-id={id}>
@@ -43,14 +54,19 @@ function MermaidBlockView({ node, editor, selected }: ReactNodeViewProps) {
           )}
         </div>
 
-        {/* Code editor — visible when editing */}
+        {/* Code editor — visible when selected */}
         <pre className={`border-t border-slate-700/50 p-4 text-[13px] leading-6 text-slate-200 ${showCode ? '' : 'hidden'}`}>
           <NodeViewContent />
         </pre>
 
-        {/* SVG preview */}
+        {/* SVG preview — click triggers focus + selection to enter edit mode */}
         {!showCode && (
-          <div className="px-4 pb-4" contentEditable={false}>
+          <div
+            className="px-4 pb-4"
+            contentEditable={false}
+            onClick={handlePreviewClick}
+            style={{ cursor: isEditable ? 'pointer' : 'default' }}
+          >
             {error ? (
               <div className="rounded-xl border border-red-500/30 bg-red-500/10 p-3 text-xs text-red-400">
                 {error}
@@ -70,20 +86,15 @@ function MermaidBlockView({ node, editor, selected }: ReactNodeViewProps) {
   );
 }
 
-// ─── Main Code Block View ─────────────────────────────────────────────────────
+// ─── Shiki Code Block View ────────────────────────────────────────────────────
 
-function CodeBlockView(props: ReactNodeViewProps) {
-  const { node, editor, selected } = props;
-  const language = (node.attrs as { language?: string }).language ?? null;
-  if (language === 'mermaid') {
-    return <MermaidBlockView {...props} />;
-  }
-
+function ShikiBlockView({ node, editor, selected }: ReactNodeViewProps) {
   const [copied, setCopied] = useState(false);
   const [highlightedHtml, setHighlightedHtml] = useState('');
   const [showLangMenu, setShowLangMenu] = useState(false);
   const langMenuRef = useRef<HTMLDivElement>(null);
 
+  const language = (node.attrs as { language?: string }).language ?? null;
   const resolvedLang = resolveLanguage(language);
   const langLabel = language ? (LANGUAGE_LABELS[language] ?? language) : 'text';
   const code = node.textContent;
@@ -203,6 +214,14 @@ function CodeBlockView(props: ReactNodeViewProps) {
       </div>
     </NodeViewWrapper>
   );
+}
+
+// ─── Dispatcher ───────────────────────────────────────────────────────────────
+
+function CodeBlockView(props: ReactNodeViewProps) {
+  const language = (props.node.attrs as { language?: string }).language ?? null;
+  if (language === 'mermaid') return <MermaidBlockView {...props} />;
+  return <ShikiBlockView {...props} />;
 }
 
 export const CodeBlockWithCopy = Node.create({
