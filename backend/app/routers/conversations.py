@@ -710,7 +710,7 @@ async def send_message(
         _push_to_agent(pid_str, sse_payload)
     # 브라우저 SSE 구독자에게 1회 발행 (루프 밖 — 중복 방지)
     if pending_sse_pushes:
-        publish_event(str(org_id), "conversation:message", {"conversation_id": str(conversation_id)})
+        publish_event(str(org_id), "conversation:message", _msg_payload(msg, sender))
 
     # webhook delivery BackgroundTask (AC1~8)
     from app.services.conversation_webhook import deliver_conversation_message_webhook
