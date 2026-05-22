@@ -70,6 +70,29 @@ async def upsert_standup(
     return StandupEntryResponse.model_validate(entry)
 
 
+@router.put("", response_model=StandupEntryResponse)
+async def update_standup(
+    body: StandupUpsert,
+    session: AsyncSession = Depends(get_db),
+    _auth: AuthContext = Depends(get_current_user),
+) -> StandupEntryResponse:
+    org_id = body.org_id or (_auth.org_id and uuid.UUID(_auth.org_id)) or None
+    if not org_id:
+        raise HTTPException(status_code=400, detail="org_id required")
+    repo = StandupEntryRepository(session, org_id)
+    entry = await repo.upsert(
+        project_id=body.project_id,
+        author_id=body.author_id,
+        date=body.date,
+        sprint_id=body.sprint_id,
+        done=body.done,
+        plan=body.plan,
+        blockers=body.blockers,
+        plan_story_ids=body.plan_story_ids,
+    )
+    return StandupEntryResponse.model_validate(entry)
+
+
 @router.get("/missing", response_model=list[uuid.UUID])
 async def get_missing_standups(
     project_id: uuid.UUID = Query(...),
