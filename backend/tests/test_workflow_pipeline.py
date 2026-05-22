@@ -6,7 +6,8 @@ from unittest.mock import AsyncMock, MagicMock, patch
 import pytest
 
 from app.services.rule_evaluator import EvaluationResult, EventContext
-from app.services.workflow_pipeline import _build_memo_content, _build_memo_title, process_event
+from app.services.workflow_pipeline import _execute_side_effects, process_event
+from app.repositories.agent_routing_rule import _normalize_action
 
 ORG_ID = uuid.uuid4()
 PROJECT_ID = uuid.uuid4()
@@ -37,25 +38,6 @@ def _mock_session() -> AsyncMock:
     return s
 
 
-# ── _build_memo helpers ───────────────────────────────────────────────────────
-
-def test_build_memo_title_known_event():
-    ctx = EventContext(event_type="story.status_changed")
-    assert _build_memo_title(ctx) == "스토리 상태 변경"
-
-
-def test_build_memo_title_unknown_event():
-    ctx = EventContext(event_type="custom.event")
-    assert "custom.event" in _build_memo_title(ctx)
-
-
-def test_build_memo_content_includes_event_type():
-    ctx = EventContext(event_type="story.status_changed", trigger_type_slug="status_changed")
-    content = _build_memo_content(ctx)
-    assert "story.status_changed" in content
-    assert "status_changed" in content
-
-
 # ── process_event ─────────────────────────────────────────────────────────────
 
 @pytest.mark.asyncio
@@ -70,38 +52,11 @@ async def test_process_event_no_match_returns_early():
 
 
 @pytest.mark.asyncio
-async def test_process_event_report_sends_memo():
-    session = _mock_session()
-    ctx = EventContext(event_type="story.status_changed", trigger_type_slug="status_changed")
-    result = _make_result(matched=True, mode="process_and_report")
-    with patch("app.services.workflow_pipeline.evaluate", new=AsyncMock(return_value=result)), \
-         patch("app.services.workflow_pipeline._send_memo", new=AsyncMock()) as mock_send:
-        await process_event(session, ORG_ID, PROJECT_ID, ctx)
-    mock_send.assert_awaited_once()
-    call_kwargs = mock_send.call_args
-    assert call_kwargs.args[3] == AGENT_ID
-
-
-@pytest.mark.asyncio
-async def test_process_event_forward_sends_to_forward_agent():
-    fwd_id = uuid.uuid4()
-    session = _mock_session()
-    ctx = EventContext(event_type="e")
-    result = _make_result(matched=True, mode="process_and_forward", forward_to=str(fwd_id))
-    with patch("app.services.workflow_pipeline.evaluate", new=AsyncMock(return_value=result)), \
-         patch("app.services.workflow_pipeline._send_memo", new=AsyncMock()) as mock_send:
-        await process_event(session, ORG_ID, PROJECT_ID, ctx)
-    mock_send.assert_awaited_once()
-    assert mock_send.call_args.args[3] == fwd_id
-
-
-@pytest.mark.asyncio
 async def test_process_event_updates_log_status_to_completed():
     session = _mock_session()
     ctx = EventContext(event_type="e")
     result = _make_result(matched=True)
-    with patch("app.services.workflow_pipeline.evaluate", new=AsyncMock(return_value=result)), \
-         patch("app.services.workflow_pipeline._send_memo", new=AsyncMock()):
+    with patch("app.services.workflow_pipeline.evaluate", new=AsyncMock(return_value=result)):
         await process_event(session, ORG_ID, PROJECT_ID, ctx)
     # session.execute called: 1 running update + 1 completed update
     assert session.execute.call_count >= 2
@@ -113,18 +68,8 @@ async def test_process_event_logs_failed_on_error():
     ctx = EventContext(event_type="e")
     result = _make_result(matched=True)
     with patch("app.services.workflow_pipeline.evaluate", new=AsyncMock(return_value=result)), \
-         patch("app.services.workflow_pipeline._send_memo", side_effect=Exception("boom")):
+         patch("app.services.workflow_pipeline._execute_side_effects", side_effect=Exception("boom")):
         await process_event(session, ORG_ID, PROJECT_ID, ctx)
-    # verify failed status update was called
-    execute_calls = session.execute.call_args_list
-    statuses = []
-    for call in execute_calls:
-        stmt = call.args[0] if call.args else None
-        if stmt is not None and hasattr(stmt, "_values"):
-            v = dict(stmt._values)
-            if "status" in v:
-                statuses.append(str(v["status"].value if hasattr(v["status"], "value") else v["status"]))
-    # At minimum 2 execute calls happened (running + failed)
     assert session.execute.call_count >= 2
 
 
@@ -135,15 +80,10 @@ async def test_process_event_independent_of_webhook():
     result = _make_result(matched=False)
     with patch("app.services.workflow_pipeline.evaluate", new=AsyncMock(return_value=result)):
         await process_event(session, ORG_ID, PROJECT_ID, ctx)
-    # Should complete without touching any webhook code
     assert True
 
 
 # ── side_effects tests (S4-3) ─────────────────────────────────────────────────
-
-from app.services.workflow_pipeline import _execute_side_effects
-from app.repositories.agent_routing_rule import _normalize_action
-
 
 def _make_result_with_side_effects(side_effects: list) -> EvaluationResult:
     action = {
@@ -191,29 +131,6 @@ async def test_side_effect_loop_prevention():
     with patch("app.services.workflow_pipeline.evaluate", new=AsyncMock()) as mock_eval:
         await process_event(session, ORG_ID, PROJECT_ID, ctx)
     mock_eval.assert_not_awaited()
-
-
-@pytest.mark.asyncio
-async def test_side_effect_partial_failure_memo_sent():
-    session = _mock_session()
-    ctx = EventContext(event_type="e", metadata={})
-    result = _make_result_with_side_effects([{"type": "update_status", "target_status": "in-review"}])
-    with patch("app.services.workflow_pipeline.evaluate", new=AsyncMock(return_value=result)), \
-         patch("app.services.workflow_pipeline._send_memo", new=AsyncMock()) as mock_send, \
-         patch("app.services.workflow_pipeline._execute_side_effects", side_effect=Exception("se_fail")):
-        await process_event(session, ORG_ID, PROJECT_ID, ctx)
-    mock_send.assert_awaited_once()
-
-
-@pytest.mark.asyncio
-async def test_side_effect_empty_backward_compat():
-    session = _mock_session()
-    ctx = EventContext(event_type="e")
-    result = _make_result(matched=True, mode="process_and_report")
-    with patch("app.services.workflow_pipeline.evaluate", new=AsyncMock(return_value=result)), \
-         patch("app.services.workflow_pipeline._send_memo", new=AsyncMock()) as mock_send:
-        await process_event(session, ORG_ID, PROJECT_ID, ctx)
-    mock_send.assert_awaited_once()
 
 
 def test_normalize_action_side_effects():

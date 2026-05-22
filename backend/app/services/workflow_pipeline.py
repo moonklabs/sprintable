@@ -1,7 +1,7 @@
 """Workflow Pipeline — Phase 3 Event-to-Rule pipeline.
 
 Internal service; no API endpoint exposed.
-Calls rule_evaluator.evaluate() and executes matched action (send/forward memo).
+Calls rule_evaluator.evaluate() and executes matched action.
 """
 from __future__ import annotations
 
@@ -14,55 +14,6 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models.workflow_execution_log import WorkflowExecutionLog
 from app.services.rule_evaluator import EventContext, evaluate
-
-
-def _build_memo_title(ctx: EventContext) -> str:
-    titles = {
-        "story.status_changed": "스토리 상태 변경",
-        "story.assignee_changed": "스토리 담당자 변경",
-        "memo.created": "새 메모",
-        "memo_created": "새 메모",
-    }
-    return titles.get(ctx.event_type, f"[{ctx.event_type}] 이벤트")
-
-
-def _build_memo_content(ctx: EventContext) -> str:
-    lines = [f"**이벤트:** {ctx.event_type}"]
-    if ctx.trigger_type_slug:
-        lines.append(f"**트리거:** {ctx.trigger_type_slug}")
-    if ctx.memo_type:
-        lines.append(f"**메모 타입:** {ctx.memo_type}")
-    if ctx.memo_id:
-        lines.append(f"**메모 ID:** {ctx.memo_id}")
-    for k, v in (ctx.metadata or {}).items():
-        lines.append(f"**{k}:** {v}")
-    return "\n".join(lines)
-
-
-async def _send_memo(
-    session: AsyncSession,
-    org_id: uuid.UUID,
-    project_id: uuid.UUID,
-    agent_id: uuid.UUID,
-    ctx: EventContext,
-) -> None:
-    from app.repositories.memo import MemoRepository
-    repo = MemoRepository(session, org_id)
-    created_by: uuid.UUID | None = None
-    if ctx.actor_id:
-        try:
-            created_by = uuid.UUID(str(ctx.actor_id))
-        except ValueError:
-            pass
-    await repo.create(
-        project_id=project_id,
-        content=_build_memo_content(ctx),
-        memo_type="task",
-        title=_build_memo_title(ctx),
-        assigned_to=agent_id,
-        created_by=created_by,
-        memo_metadata={"origin": "workflow"},
-    )
 
 
 async def _execute_side_effects(
@@ -102,29 +53,6 @@ async def _execute_side_effects(
                             .where(Story.id == uuid.UUID(str(story_id_str)), Story.org_id == org_id)
                             .values(assignee_id=member_id)
                         )
-            elif effect_type == "resolve_memos" and story_id_str:
-                from app.models.memo import Memo, MemoEntityLink
-                link_result = await session.execute(
-                    select(MemoEntityLink.memo_id)
-                    .where(
-                        MemoEntityLink.entity_type == "story",
-                        MemoEntityLink.entity_id == uuid.UUID(str(story_id_str)),
-                    )
-                )
-                memo_ids = [row.memo_id for row in link_result]
-                if memo_ids:
-                    await session.execute(
-                        update(Memo)
-                        .where(
-                            Memo.id.in_(memo_ids),
-                            Memo.status == "open",
-                            Memo.deleted_at.is_(None),
-                        )
-                        .values(
-                            status="resolved",
-                            resolved_at=datetime.now(timezone.utc),
-                        )
-                    )
         except Exception:
             pass
 
@@ -170,21 +98,8 @@ async def process_event(
         )
 
     action = result.action
-    mode = action.get("auto_reply_mode", "process_and_report")
 
     try:
-        if mode == "process_and_report" and result.target_agent_id:
-            await _send_memo(session, org_id, project_id, result.target_agent_id, ctx)
-
-        elif mode == "process_and_forward":
-            fwd_str = action.get("forward_to_agent_id")
-            if fwd_str:
-                try:
-                    fwd_id = uuid.UUID(str(fwd_str))
-                    await _send_memo(session, org_id, project_id, fwd_id, ctx)
-                except ValueError:
-                    raise ValueError(f"Invalid forward_to_agent_id: {fwd_str}")
-
         side_effects = (action or {}).get("side_effects", [])
         if side_effects:
             await _execute_side_effects(session, org_id, side_effects, ctx)

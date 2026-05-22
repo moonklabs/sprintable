@@ -13,10 +13,8 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.dependencies.auth import AuthContext, get_current_user
 from app.dependencies.database import get_db
-from app.models.memo import MemoAssignee
 from app.models.pm import Story
 from app.models.team import TeamMember
-from app.repositories.memo import MemoRepository
 from app.repositories.story import StoryRepository
 
 logger = logging.getLogger(__name__)
@@ -47,41 +45,26 @@ _TRANSITIONS: dict[str, dict[str, Any]] = {
     "kickoff": {
         "next_stage": "dev",
         "next_role": "dev",
-        "memo_type": "task",
-        "memo_title_prefix": "[DEV 킥오프]",
-        "memo_content": "DEV 착수 요청인. story.description 확인 후 즉시 착수 바라는.",
         "story_status": "in-progress",
     },
     "dev": {
         "next_stage": "review",
         "next_role": "po",
-        "memo_type": "task",
-        "memo_title_prefix": "[REVIEW 요청]",
-        "memo_content": "개발 완료. PR 리뷰 요청드리는.",
         "story_status": "in-review",
     },
     "review": {
         "next_stage": "qa",
         "next_role": "qa",
-        "memo_type": "task",
-        "memo_title_prefix": "[QA 킥오프]",
-        "memo_content": "PO 리뷰 LGTM. QA 검수 요청드리는.",
         "story_status": None,
     },
     "qa": {
         "next_stage": "merge",
         "next_role": "po",
-        "memo_type": "task",
-        "memo_title_prefix": "[MERGE 요청]",
-        "memo_content": "QA APPROVE. 머지 요청드리는.",
         "story_status": None,
     },
     "merge": {
         "next_stage": "done",
         "next_role": None,
-        "memo_type": None,
-        "memo_title_prefix": None,
-        "memo_content": None,
         "story_status": "done",
     },
 }
@@ -132,7 +115,6 @@ async def report_done(
 
     transition = _TRANSITIONS[body.stage]
     next_stage: str = transition["next_stage"]
-    next_role: str | None = transition["next_role"]
     story_status: str | None = transition["story_status"]
 
     # 스토리 상태 업데이트
@@ -140,57 +122,10 @@ async def report_done(
         story_repo = StoryRepository(session, story.org_id)
         await story_repo.update(story.id, status=story_status)
 
-    # 메모 발송
-    memo_id: uuid.UUID | None = None
-    if next_role and transition["memo_type"]:
-        next_member_id = _ROLE_TO_MEMBER.get(next_role)
-        if next_member_id is None:
-            raise HTTPException(
-                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-                detail=f"No member mapping for role '{next_role}'",
-            )
-
-        story_title = story.title or str(story.id)
-        title = f"{transition['memo_title_prefix']} {story_title}"
-        content_parts = [transition["memo_content"]]
-        if body.context:
-            content_parts.append(f"\n\n**Context:**\n{json.dumps(body.context, indent=2, ensure_ascii=False)}")
-
-        memo_repo = MemoRepository(session, story.org_id)
-        memo = await memo_repo.create(
-            project_id=story.project_id,
-            content="\n".join(content_parts),
-            memo_type=transition["memo_type"],
-            title=title,
-            assigned_to=next_member_id,
-            created_by=body.agent_id,
-        )
-        session.add(MemoAssignee(
-            memo_id=memo.id,
-            member_id=next_member_id,
-            assigned_by=body.agent_id,
-        ))
-        await session.flush()
-        memo_id = memo.id
-
-        # 수신자 webhook_url 조회 후 백그라운드 발송
-        wh_result = await session.execute(
-            select(TeamMember.webhook_url).where(
-                TeamMember.id == next_member_id,
-                TeamMember.is_active.is_(True),
-                TeamMember.webhook_url.isnot(None),
-            )
-        )
-        webhook_url = wh_result.scalar_one_or_none()
-        if webhook_url:
-            app_base_url = os.getenv("NEXT_PUBLIC_APP_URL", "https://app.sprintable.ai")
-            memo_url = f"{app_base_url}/memos?id={memo.id}"
-            background_tasks.add_task(_fire_webhook, webhook_url, title, title, memo_url, str(memo.id))
-
     return ReportDoneResponse(
         story_id=body.story_id,
         completed_stage=body.stage,
         next_stage=next_stage,
-        memo_id=memo_id,
+        memo_id=None,
         story_status=story_status,
     )
