@@ -1,9 +1,11 @@
 """POST /api/v2/workflow/report-done — 에이전트 작업 완료 보고 + 다음 단계 자동 트리거."""
 import json
+import logging
 import os
 import uuid
 from typing import Any
 
+import httpx
 from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, status
 from pydantic import BaseModel
 from sqlalchemy import select
@@ -16,7 +18,24 @@ from app.models.pm import Story
 from app.models.team import TeamMember
 from app.repositories.memo import MemoRepository
 from app.repositories.story import StoryRepository
-from app.routers.memos import _fire_webhook
+
+logger = logging.getLogger(__name__)
+
+
+def _fire_webhook(url: str, content: str, title: str, memo_url: str, memo_id: str = "") -> None:
+    try:
+        full_content = content
+        if memo_id:
+            full_content = f"{content}\n\nmemo_id: {memo_id}"
+        if "discord.com/api/webhooks" in url or "discordapp.com/api/webhooks" in url:
+            payload: dict = {"content": full_content}
+            if memo_url:
+                payload["embeds"] = [{"title": title, "url": memo_url}]
+        else:
+            payload = {"text": full_content}
+        httpx.post(url, json=payload, timeout=10)
+    except Exception:  # noqa: BLE001
+        logger.warning("reply webhook fire failed url=%s", url, exc_info=True)
 
 router = APIRouter(prefix="/api/v2/workflow", tags=["workflow"])
 

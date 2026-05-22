@@ -33,23 +33,6 @@ EVENT_TAXONOMY: dict[str, list[EventParam]] = {
         EventParam("actor_id", "uuid", False, "실행자 team_member UUID"),
         EventParam("timestamp", "str", True, "ISO 8601 UTC 타임스탬프"),
     ],
-    "memo_created": [
-        EventParam("memo_id", "uuid", True, "메모 UUID"),
-        EventParam("memo_type", "str", True, "메모 타입 (task/memo/request 등)"),
-        EventParam("title", "str", False, "메모 제목"),
-        EventParam("assigned_to_id", "uuid", False, "수신자 team_member UUID"),
-        EventParam("actor_id", "uuid", False, "발신자 team_member UUID"),
-    ],
-    "memo.reply_created": [
-        EventParam("original_memo_id", "uuid", True, "원 메모 UUID"),
-        EventParam("original_memo_type", "str", False, "원 메모 타입"),
-        EventParam("original_title", "str", False, "원 메모 제목"),
-        EventParam("reply_author_id", "uuid", True, "답신자 team_member UUID"),
-        EventParam("reply_author_role", "str", False, "답신자 역할 (human/agent/member 등)"),
-        EventParam("review_type", "str", False, "리뷰 타입 (approve/request_changes/comment 등)"),
-        EventParam("has_pr_link", "bool", False, "답신 본문에 PR 링크 포함 여부"),
-        EventParam("content_preview", "str", False, "답신 본문 앞 200자"),
-    ],
     "manual_trigger": [
         EventParam("story_id", "str", True, "트리거된 스토리 UUID"),
         EventParam("actor_id", "uuid", False, "실행자 user UUID"),

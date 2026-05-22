@@ -30,7 +30,7 @@ async def lifespan(app: FastAPI):
             pass
 
 
-from app.routers import account, activity_logs, agent_deployments, agent_personas, agent_routing_rules, agent_runs, agent_sessions, analytics, api_keys, audit_logs, auth, bridge, chats, conversations, cron, current_project, dashboard, dispatch, docs, entities, epics, event_notifications, events, file_locks, health, hitl, integrations, invite_accept, invitations, me, meetings, members, memos, mockups, notification_preferences, notifications, org_invites, org_members, organizations, oss, policy_documents, presence, project_access, project_settings, projects, retros, rewards, sprints, standups, stories, subscription, tasks, team_members, webhooks, workflow_executions, workflow_recipes, workflow_report, workflow_templates, workflow_trigger, workflow_trigger_types, workflow_versions
+from app.routers import account, activity_logs, agent_deployments, agent_personas, agent_routing_rules, agent_runs, agent_sessions, analytics, api_keys, audit_logs, auth, bridge, chats, conversations, cron, current_project, dashboard, dispatch, docs, entities, epics, event_notifications, events, file_locks, health, hitl, integrations, invite_accept, invitations, me, meetings, members, mockups, notification_preferences, notifications, org_invites, org_members, organizations, oss, policy_documents, presence, project_access, project_settings, projects, retros, rewards, sprints, standups, stories, subscription, tasks, team_members, webhooks, workflow_executions, workflow_recipes, workflow_report, workflow_templates, workflow_trigger, workflow_trigger_types, workflow_versions
 
 app = FastAPI(
     title="Sprintable API v2",
@@ -119,7 +119,6 @@ app.include_router(team_members.router)
 app.include_router(org_members.router)
 app.include_router(standups.router)
 app.include_router(retros.router)
-app.include_router(memos.router)
 app.include_router(entities.router)
 app.include_router(event_notifications.router)
 app.include_router(notifications.router)
