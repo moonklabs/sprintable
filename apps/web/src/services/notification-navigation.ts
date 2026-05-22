@@ -21,10 +21,6 @@ function buildDocHref(slug: string, commentId?: string) {
   return `/docs?${params.toString()}`;
 }
 
-function buildMemoHref(memoId: string) {
-  return `/memos?id=${memoId}`;
-}
-
 export async function attachNotificationHrefs<T extends NotificationReference>(
   db: any | undefined,
   notifications: T[],
@@ -69,10 +65,6 @@ export async function attachNotificationHrefs<T extends NotificationReference>(
 
     if (!referenceId) {
       return { ...notification, href: null };
-    }
-
-    if (notification.reference_type === 'memo') {
-      return { ...notification, href: buildMemoHref(referenceId) };
     }
 
     if (notification.reference_type === 'task') {

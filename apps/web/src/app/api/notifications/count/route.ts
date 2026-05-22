@@ -12,9 +12,8 @@ export async function GET(request: Request) {
 
     const repo = await createNotificationRepository();
     const all = await repo.list({ user_id: me.id, is_read: false, limit: 200 });
-    const memoUnreadCount = all.filter((n) => n.type?.startsWith('memo')).length;
     const inboxUnreadCount = all.length;
-    return apiSuccess({ memoUnreadCount, inboxUnreadCount });
+    return apiSuccess({ inboxUnreadCount });
   } catch (err: unknown) {
     return handleApiError(err);
   }

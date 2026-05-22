@@ -57,7 +57,7 @@ export async function POST(request: Request) {
       after_decision: result.data.after_decision ?? null,
       from_agent_id: result.data.from_agent_id ?? null,
       story_id: result.data.story_id ?? null,
-      memo_id: result.data.memo_id ?? null,
+      memo_id: null,
       priority: result.data.priority,
       source_type: 'webhook',
       source_id: result.data.source_id,
