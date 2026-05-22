@@ -181,6 +181,30 @@ async def create_team_member(
         )
         session.add(audit)
 
+    # AP-S2: agent가 agent를 생성한 경우 owner/admin human에게 알림 발송
+    if actor is not None and actor.type == "agent" and member.type == "agent":
+        from app.services.notification_dispatch import dispatch_notification
+        admin_result = await session.execute(
+            select(TeamMember.id).where(
+                TeamMember.org_id == org_id,
+                TeamMember.type == "human",
+                TeamMember.role.in_(["owner", "admin"]),
+                TeamMember.is_active.is_(True),
+            )
+        )
+        admin_ids = [row[0] for row in admin_result.all()]
+        if admin_ids:
+            await dispatch_notification(
+                session,
+                org_id=org_id,
+                event_type="agent_joined",
+                target_member_ids=admin_ids,
+                title=f"새 에이전트 합류: {member.name}",
+                body=f"{actor.name}(에이전트)이 {member.name}을 생성했습니다.",
+                reference_type="team_member",
+                reference_id=member.id,
+            )
+
     # AC3: agent 생성 시 API key 자동 생성 + response에 포함
     api_key_plaintext: str | None = None
     if body.type == "agent":
