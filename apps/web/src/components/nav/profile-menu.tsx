@@ -1,7 +1,10 @@
 'use client';
 
 import Link from 'next/link';
+import { useRouter } from 'next/navigation';
+import { useTranslations } from 'next-intl';
 import { ChevronsUpDown, Settings, LogOut } from 'lucide-react';
+import { logoutUser } from '@/lib/db/client';
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -23,7 +26,15 @@ function getInitial(name: string): string {
 }
 
 export function ProfileMenu({ name, email }: ProfileMenuProps) {
+  const router = useRouter();
+  const t = useTranslations('common');
   const displayLabel = email ?? name;
+
+  const handleLogout = async () => {
+    await logoutUser();
+    router.push('/login');
+    router.refresh();
+  };
 
   return (
     <DropdownMenu>
@@ -51,10 +62,9 @@ export function ProfileMenu({ name, email }: ProfileMenuProps) {
           </Link>
         </DropdownMenuItem>
         <DropdownMenuSeparator />
-        {/* DS-S2에서 LogoutButton 통합 예정 */}
-        <DropdownMenuItem disabled className="flex items-center gap-2 text-muted-foreground">
+        <DropdownMenuItem onClick={() => void handleLogout()} className="flex items-center gap-2 text-destructive focus:bg-destructive/10 focus:text-destructive">
           <LogOut className="size-4" />
-          로그아웃
+          {t('logout')}
         </DropdownMenuItem>
       </DropdownMenuContent>
     </DropdownMenu>
