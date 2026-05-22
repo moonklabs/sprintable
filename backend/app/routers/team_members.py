@@ -78,18 +78,54 @@ async def list_team_members(
     return await _inject_active_stories(members, session)
 
 
+_ROLE_RANK: dict[str, int] = {"owner": 4, "admin": 3, "manager": 2, "member": 1}
+
+
+async def _resolve_actor(auth: AuthContext, session: AsyncSession, org_id: uuid.UUID) -> TeamMember | None:
+    """auth context → TeamMember 조회. API Key: user_id = member.id, JWT: user_id = supabase user_id."""
+    is_api_key = bool(auth.claims.get("app_metadata", {}).get("api_key_id"))
+    if is_api_key:
+        result = await session.execute(
+            select(TeamMember).where(TeamMember.id == uuid.UUID(auth.user_id))
+        )
+    else:
+        result = await session.execute(
+            select(TeamMember).where(
+                TeamMember.user_id == uuid.UUID(auth.user_id),
+                TeamMember.org_id == org_id,
+            )
+        )
+    return result.scalars().first()
+
+
 @router.post("", status_code=201)
 async def create_team_member(
     body: TeamMemberCreate,
     session: AsyncSession = Depends(get_db),
     auth: AuthContext = Depends(get_current_user),
+    org_id: uuid.UUID = Depends(get_verified_org_id),
 ) -> dict:
+    # AC1/AC2: agent actor의 can_manage_members 체크
+    actor = await _resolve_actor(auth, session, org_id)
+    if actor is not None and actor.type == "agent":
+        if not actor.can_manage_members:
+            raise HTTPException(status_code=403, detail="Agent does not have can_manage_members permission")
+        # AC3: target.role > actor.role → 403 (격상 차단)
+        target_rank = _ROLE_RANK.get(body.role, 1)
+        actor_rank = _ROLE_RANK.get(actor.role, 1)
+        if target_rank > actor_rank:
+            raise HTTPException(status_code=403, detail="Cannot assign role higher than your own")
+        # AC4: target.alias(name) == actor.name → 400 (self-replication 차단)
+        if body.name == actor.name:
+            raise HTTPException(status_code=400, detail="Agent cannot create a member with the same name as itself")
+
     # Human member 생성은 org invite 플로우로 이전 (E-ENTITY-CLEANUP S4)
     if body.type == "human":
         raise HTTPException(
             status_code=410,
             detail="Human member creation via team-members is deprecated. Use org invites (/api/v2/organizations/{id}/invites) instead.",
         )
+
     repo = TeamMemberRepository(session, body.org_id)
     created_by = uuid.UUID(auth.user_id) if body.type == "agent" else None
 
@@ -127,6 +163,23 @@ async def create_team_member(
 
     from app.services.notification_preference_defaults import insert_default_preferences
     await insert_default_preferences(session, member.id, body.type)
+
+    # AC5: audit_log에 creator_id, creator_type 기록
+    if actor is not None:
+        from app.models.audit import AuditLog
+        audit = AuditLog(
+            org_id=org_id,
+            actor_id=actor.id,
+            action="team_member.create",
+            target_user_id=member.id,
+            audit_metadata={
+                "creator_id": str(actor.id),
+                "creator_type": actor.type,
+                "target_type": member.type,
+                "target_role": member.role,
+            },
+        )
+        session.add(audit)
 
     # AC3: agent 생성 시 API key 자동 생성 + response에 포함
     api_key_plaintext: str | None = None
