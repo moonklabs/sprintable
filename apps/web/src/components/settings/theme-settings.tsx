@@ -24,14 +24,14 @@ export function ThemeSettings() {
     <SectionCard>
       <SectionCardHeader>
         <div className="space-y-1">
-          <h2 className="text-base font-semibold text-[color:var(--operator-foreground)]">🎨 테마 설정</h2>
-          <p className="text-sm text-[color:var(--operator-muted)]">라이트 모드, 다크 모드 또는 시스템 설정을 따를 수 있습니다.</p>
+          <h2 className="text-base font-semibold text-foreground">🎨 테마 설정</h2>
+          <p className="text-sm text-muted-foreground">라이트 모드, 다크 모드 또는 시스템 설정을 따를 수 있습니다.</p>
         </div>
       </SectionCardHeader>
       <SectionCardBody>
         <div className="space-y-4">
           <div>
-            <label className="block text-sm font-medium mb-2 text-[color:var(--operator-foreground)]">
+            <label className="block text-sm font-medium mb-2 text-foreground">
               테마 선택
             </label>
             <OperatorDropdownSelect
@@ -46,8 +46,8 @@ export function ThemeSettings() {
           </div>
 
           {theme === 'system' && (
-            <p className="text-sm text-[color:var(--operator-muted)]">
-              현재 시스템 설정: <span className="font-medium text-[color:var(--operator-foreground)]">{currentTheme === 'dark' ? '다크 모드' : '라이트 모드'}</span>
+            <p className="text-sm text-muted-foreground">
+              현재 시스템 설정: <span className="font-medium text-foreground">{currentTheme === 'dark' ? '다크 모드' : '라이트 모드'}</span>
             </p>
           )}
         </div>

@@ -56,7 +56,7 @@ function WikiLinkView({ node, editor }: ReactNodeViewProps) {
         className={`inline-flex cursor-pointer items-center gap-0.5 rounded px-1 py-0.5 text-[0.9em] transition-colors ${
           isNotFound
             ? 'bg-red-500/10 text-red-500 hover:bg-red-500/20'
-            : 'bg-[color:var(--operator-primary)]/10 text-[color:var(--operator-primary-soft)] hover:bg-[color:var(--operator-primary)]/20'
+            : 'bg-brand/10 text-[color:var(--operator-primary-soft)] hover:bg-brand/20'
         }`}
       >
         {isNotFound
@@ -153,14 +153,14 @@ function WikiLinkMenu({
 
   if (items.length === 0) {
     return (
-      <div className="w-56 rounded-xl border border-white/10 bg-[color:var(--operator-surface)] p-3 text-xs text-[color:var(--operator-muted)] shadow-lg">
+      <div className="w-56 rounded-xl border border-white/10 bg-card p-3 text-xs text-muted-foreground shadow-lg">
         문서를 찾을 수 없습니다
       </div>
     );
   }
 
   return (
-    <div ref={menuRef} className="max-h-64 w-56 overflow-y-auto rounded-xl border border-white/10 bg-[color:var(--operator-surface)] p-1 shadow-lg">
+    <div ref={menuRef} className="max-h-64 w-56 overflow-y-auto rounded-xl border border-white/10 bg-card p-1 shadow-lg">
       {items.map((item, i) => (
         <button
           key={item.id}
@@ -168,11 +168,11 @@ function WikiLinkMenu({
           onClick={() => command(item)}
           className={`flex w-full items-center gap-2 rounded-lg px-2.5 py-1.5 text-left text-sm transition-colors ${
             i === selectedIndex
-              ? 'bg-[color:var(--operator-primary)]/14 text-[color:var(--operator-primary-soft)]'
-              : 'text-[color:var(--operator-foreground)] hover:bg-white/6'
+              ? 'bg-brand/14 text-[color:var(--operator-primary-soft)]'
+              : 'text-foreground hover:bg-white/6'
           }`}
         >
-          <FileText className="size-3.5 flex-shrink-0 text-[color:var(--operator-muted)]" />
+          <FileText className="size-3.5 flex-shrink-0 text-muted-foreground" />
           <span className="truncate text-xs">{item.title}</span>
         </button>
       ))}

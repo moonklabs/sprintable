@@ -178,7 +178,7 @@ export default function InboxPage() {
           <div className="flex items-center gap-2">
             <h1 className="text-sm font-medium">{t('title')}</h1>
             {unreadCount > 0 ? (
-              <span className="text-sm tabular-nums text-[color:var(--operator-muted)]">{unreadCount}</span>
+              <span className="text-sm tabular-nums text-muted-foreground">{unreadCount}</span>
             ) : null}
           </div>
         }
@@ -194,19 +194,19 @@ export default function InboxPage() {
 
         {workflowExecs.length > 0 && (
           <div className="shrink-0 border-b border-border/80 px-4 py-3">
-            <p className="mb-2 text-[11px] font-medium uppercase tracking-wide text-[color:var(--operator-muted)]">워크플로우 실행</p>
+            <p className="mb-2 text-[11px] font-medium uppercase tracking-wide text-muted-foreground">워크플로우 실행</p>
             <div className="flex flex-col gap-1.5">
               {workflowExecs.slice(0, 5).map((exec) => (
-                <div key={exec.id} className="flex items-center gap-2 rounded-lg bg-[color:var(--operator-surface-soft)]/55 px-3 py-2 text-xs">
+                <div key={exec.id} className="flex items-center gap-2 rounded-lg bg-muted/55 px-3 py-2 text-xs">
                   {exec.status === 'matched' ? (
                     <Zap className="h-3.5 w-3.5 shrink-0 text-amber-500" />
                   ) : (
-                    <ZapOff className="h-3.5 w-3.5 shrink-0 text-[color:var(--operator-muted)]" />
+                    <ZapOff className="h-3.5 w-3.5 shrink-0 text-muted-foreground" />
                   )}
-                  <span className="min-w-0 flex-1 truncate text-[color:var(--operator-foreground)]">
+                  <span className="min-w-0 flex-1 truncate text-foreground">
                     {exec.rule_name ?? exec.event_type}
                   </span>
-                  <span className="shrink-0 text-[10px] text-[color:var(--operator-muted)]">
+                  <span className="shrink-0 text-[10px] text-muted-foreground">
                     {exec.completed_at ? new Date(exec.completed_at).toLocaleString() : new Date(exec.created_at).toLocaleString()}
                   </span>
                 </div>
@@ -222,12 +222,12 @@ export default function InboxPage() {
             {loading ? (
               <div className="space-y-2">
                 {[1, 2, 3, 4, 5].map((i) => (
-                  <div key={i} className="h-16 animate-pulse rounded-xl bg-[color:var(--operator-surface-soft)]" />
+                  <div key={i} className="h-16 animate-pulse rounded-xl bg-muted" />
                 ))}
               </div>
             ) : notifications.length === 0 ? (
               <div className="flex flex-col items-center justify-center px-6 py-12 text-center">
-                <p className="text-sm text-[color:var(--operator-muted)]">{t('noNotifications')}</p>
+                <p className="text-sm text-muted-foreground">{t('noNotifications')}</p>
               </div>
             ) : (
               <div className="space-y-1.5">
@@ -240,10 +240,10 @@ export default function InboxPage() {
                       onClick={() => void selectNotification(notification)}
                       className={`w-full rounded-xl border p-3 text-left transition ${
                         isSelected
-                          ? 'border-[color:var(--operator-primary)]/35 bg-[color:var(--operator-primary)]/15'
+                          ? 'border-[color:var(--operator-primary)]/35 bg-brand/15'
                           : notification.is_read
-                            ? 'border-white/8 bg-[color:var(--operator-surface-soft)]/55 hover:border-[color:var(--operator-primary)]/20 hover:bg-white/5'
-                            : 'border-[color:var(--operator-primary)]/18 bg-[color:var(--operator-primary)]/8 hover:bg-[color:var(--operator-primary)]/12'
+                            ? 'border-white/8 bg-muted/55 hover:border-[color:var(--operator-primary)]/20 hover:bg-white/5'
+                            : 'border-[color:var(--operator-primary)]/18 bg-brand/8 hover:bg-brand/12'
                       }`}
                     >
                       <div className="flex items-start gap-3">
@@ -252,16 +252,16 @@ export default function InboxPage() {
                         </div>
                         <div className="min-w-0 flex-1 space-y-1">
                           <div className="flex items-start justify-between gap-2">
-                            <p className={`truncate text-sm ${notification.is_read ? 'text-[color:var(--operator-muted)]' : 'font-semibold text-[color:var(--operator-foreground)]'}`}>
+                            <p className={`truncate text-sm ${notification.is_read ? 'text-muted-foreground' : 'font-semibold text-foreground'}`}>
                               {notification.title}
                             </p>
-                            <span className="shrink-0 text-[11px] text-[color:var(--operator-muted)]">{formatTime(notification.created_at)}</span>
+                            <span className="shrink-0 text-[11px] text-muted-foreground">{formatTime(notification.created_at)}</span>
                           </div>
                           {notification.body ? (
-                            <p className="line-clamp-1 text-xs text-[color:var(--operator-muted)]">{notification.body}</p>
+                            <p className="line-clamp-1 text-xs text-muted-foreground">{notification.body}</p>
                           ) : null}
                           {!notification.is_read ? (
-                            <span className="inline-block h-1.5 w-1.5 rounded-full bg-[color:var(--operator-primary)]" />
+                            <span className="inline-block h-1.5 w-1.5 rounded-full bg-brand" />
                           ) : null}
                         </div>
                       </div>
@@ -284,16 +284,16 @@ export default function InboxPage() {
                 <div className="min-w-0 flex-1 space-y-2">
                   <div className="flex flex-wrap items-center gap-2">
                     <Badge variant="outline">{getInboxNotificationLabel(t, selectedNotification.type)}</Badge>
-                    <span className="text-xs text-[color:var(--operator-muted)]">
+                    <span className="text-xs text-muted-foreground">
                       {t('receivedAt')} · {new Date(selectedNotification.created_at).toLocaleString()}
                     </span>
                   </div>
-                  <h2 className="text-lg font-semibold text-[color:var(--operator-foreground)]">{selectedNotification.title}</h2>
+                  <h2 className="text-lg font-semibold text-foreground">{selectedNotification.title}</h2>
                 </div>
               </div>
 
               {selectedNotification.body ? (
-                <div className="rounded-xl border border-white/8 bg-[color:var(--operator-surface-soft)]/55 p-4 text-sm leading-6 text-[color:var(--operator-foreground)] whitespace-pre-wrap">
+                <div className="rounded-xl border border-white/8 bg-muted/55 p-4 text-sm leading-6 text-foreground whitespace-pre-wrap">
                   {selectedNotification.body}
                 </div>
               ) : null}
@@ -319,10 +319,10 @@ export default function InboxPage() {
             </div>
           ) : (
             <div className="flex flex-1 flex-col items-center justify-center gap-3 px-6 py-12 text-center">
-              <div className="flex size-14 items-center justify-center rounded-2xl bg-[color:var(--operator-surface-soft)]/55">
-                <InboxIcon className="size-6 text-[color:var(--operator-muted)]" />
+              <div className="flex size-14 items-center justify-center rounded-2xl bg-muted/55">
+                <InboxIcon className="size-6 text-muted-foreground" />
               </div>
-              <p className="text-sm font-medium text-[color:var(--operator-muted)]">{t('selectToView')}</p>
+              <p className="text-sm font-medium text-muted-foreground">{t('selectToView')}</p>
             </div>
           )}
         </div>

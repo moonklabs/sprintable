@@ -109,7 +109,7 @@ export function DocContentRenderer({
     const wikiCleanup = wikiLinks.map((span) => {
       const slug = span.getAttribute('data-slug') ?? '';
       const title = span.getAttribute('data-title') ?? span.textContent ?? '';
-      span.className = 'inline-flex cursor-pointer items-center gap-0.5 rounded px-1 py-0.5 text-[0.9em] bg-[color:var(--operator-primary)]/10 text-[color:var(--operator-primary-soft)] hover:bg-[color:var(--operator-primary)]/20 transition-colors';
+      span.className = 'inline-flex cursor-pointer items-center gap-0.5 rounded px-1 py-0.5 text-[0.9em] bg-brand/10 text-[color:var(--operator-primary-soft)] hover:bg-brand/20 transition-colors';
       span.title = title;
       const handleClick = () => { if (slug) window.location.href = `/docs/${slug}`; };
       span.addEventListener('click', handleClick);
@@ -125,7 +125,7 @@ export function DocContentRenderer({
         if (error) {
           block.innerHTML = `<div class="rounded-lg border border-red-500/30 bg-red-500/10 p-3 text-xs text-red-400 font-mono">${escapeHtmlText(error)}</div>`;
         } else {
-          block.innerHTML = `<div class="flex justify-center overflow-x-auto py-3 [&_.katex]:text-[color:var(--operator-foreground)]">${katexHtml}</div>`;
+          block.innerHTML = `<div class="flex justify-center overflow-x-auto py-3 [&_.katex]:text-foreground">${katexHtml}</div>`;
         }
       });
     });
@@ -195,7 +195,7 @@ export function DocContentRenderer({
 
       block.innerHTML = `
         <div class="flex items-center gap-3 rounded-xl border border-[hsl(var(--border))] bg-[hsl(var(--muted))]/20 px-4 py-3 cursor-pointer hover:bg-[hsl(var(--muted))]/40 transition-colors">
-          <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="flex-shrink-0 text-[color:var(--operator-muted)]"><path d="M14.5 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V7.5L14.5 2z"/><polyline points="14 2 14 8 20 8"/></svg>
+          <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="flex-shrink-0 text-muted-foreground"><path d="M14.5 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V7.5L14.5 2z"/><polyline points="14 2 14 8 20 8"/></svg>
           <div class="min-w-0 flex-1">
             <p class="truncate text-sm font-medium">${escapeHtmlText(filename)}</p>
             <p class="text-xs opacity-60">${escapeHtmlText(sizeLabel)}</p>
@@ -244,13 +244,13 @@ export function DocContentRenderer({
   }, [codeCopyLabel, content, contentFormat, headings]);
 
   const rootClassName = cn(
-    'doc-renderer prose dark:prose-invert prose-sm max-w-none text-[color:var(--operator-foreground)]',
+    'doc-renderer prose dark:prose-invert prose-sm max-w-none text-foreground',
     '[&_h1]:scroll-mt-24 [&_h1]:text-3xl [&_h1]:font-bold [&_h1]:tracking-tight',
     '[&_h2]:scroll-mt-24 [&_h2]:mt-10 [&_h2]:text-2xl [&_h2]:font-semibold',
     '[&_h3]:scroll-mt-24 [&_h3]:mt-8 [&_h3]:text-xl [&_h3]:font-semibold',
-    '[&_p]:leading-7 [&_p]:text-[color:var(--operator-foreground)]/92',
+    '[&_p]:leading-7 [&_p]:text-foreground/92',
     '[&_a]:text-[color:var(--operator-primary-soft)] [&_a]:underline [&_a]:underline-offset-4',
-    '[&_blockquote]:rounded-2xl [&_blockquote]:border-l-4 [&_blockquote]:border-[color:var(--operator-primary)]/45 [&_blockquote]:bg-[color:var(--operator-primary)]/8 [&_blockquote]:px-4 [&_blockquote]:py-3 [&_blockquote]:text-[color:var(--operator-foreground)]/88',
+    '[&_blockquote]:rounded-2xl [&_blockquote]:border-l-4 [&_blockquote]:border-[color:var(--operator-primary)]/45 [&_blockquote]:bg-brand/8 [&_blockquote]:px-4 [&_blockquote]:py-3 [&_blockquote]:text-foreground/88',
     '[&_img]:max-h-[32rem] [&_img]:w-full [&_img]:rounded-2xl [&_img]:border [&_img]:border-border [&_img]:object-contain',
     '[&_table]:w-full [&_table]:border-collapse [&_table]:overflow-hidden [&_table]:rounded-2xl [&_table]:border [&_table]:border-border [&_table]:bg-muted/20',
     '[&_thead]:bg-muted/50 [&_th]:border [&_th]:border-border [&_th]:px-3 [&_th]:py-2 [&_th]:text-left [&_th]:font-semibold',
@@ -262,7 +262,7 @@ export function DocContentRenderer({
     '[&_pre_code]:bg-transparent [&_pre_code]:p-0',
     '[&_[data-doc-code-shell="true"]]:not-prose [&_[data-doc-code-shell="true"]]:my-6',
     '[&_[data-doc-code-actions="true"]]:mb-2 [&_[data-doc-code-actions="true"]]:flex [&_[data-doc-code-actions="true"]]:justify-end',
-    '[&_[data-doc-copy-button="true"]]:rounded-full [&_[data-doc-copy-button="true"]]:border [&_[data-doc-copy-button="true"]]:border-border [&_[data-doc-copy-button="true"]]:bg-muted/50 [&_[data-doc-copy-button="true"]]:px-3 [&_[data-doc-copy-button="true"]]:py-1.5 [&_[data-doc-copy-button="true"]]:text-[11px] [&_[data-doc-copy-button="true"]]:font-medium [&_[data-doc-copy-button="true"]]:uppercase [&_[data-doc-copy-button="true"]]:tracking-[0.18em] [&_[data-doc-copy-button="true"]]:text-[color:var(--operator-muted)]',
+    '[&_[data-doc-copy-button="true"]]:rounded-full [&_[data-doc-copy-button="true"]]:border [&_[data-doc-copy-button="true"]]:border-border [&_[data-doc-copy-button="true"]]:bg-muted/50 [&_[data-doc-copy-button="true"]]:px-3 [&_[data-doc-copy-button="true"]]:py-1.5 [&_[data-doc-copy-button="true"]]:text-[11px] [&_[data-doc-copy-button="true"]]:font-medium [&_[data-doc-copy-button="true"]]:uppercase [&_[data-doc-copy-button="true"]]:tracking-[0.18em] [&_[data-doc-copy-button="true"]]:text-muted-foreground',
     className,
   );
 
@@ -449,7 +449,7 @@ function decorateHtmlContent(content: string, headings: ReturnType<typeof extrac
     return [
       '<div data-doc-code-shell="true">',
       '<div data-doc-code-actions="true">',
-      `<button type="button" data-doc-copy-button="true" class="transition hover:border-[color:var(--operator-primary)]/35 hover:text-[color:var(--operator-foreground)]">${escapeHtmlText(codeCopyLabel)}</button>`,
+      `<button type="button" data-doc-copy-button="true" class="transition hover:border-[color:var(--operator-primary)]/35 hover:text-foreground">${escapeHtmlText(codeCopyLabel)}</button>`,
       '</div>',
       `<pre>${inner}</pre>`,
       '</div>',

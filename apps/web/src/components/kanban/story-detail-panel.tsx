@@ -53,7 +53,7 @@ interface StoryDetailPanelProps {
 
 function taskTone(status: string) {
   if (status === 'done') return 'bg-emerald-300';
-  if (status === 'in-progress') return 'bg-[color:var(--operator-primary)]';
+  if (status === 'in-progress') return 'bg-brand';
   return 'bg-white/20';
 }
 
@@ -505,7 +505,7 @@ export function StoryDetailPanel({ story, tasks, nextTasksCursor = null, loading
 
               <TabsContent value="tasks" className="mt-4 space-y-2">
                 {tasks.length === 0 ? (
-                  <p className="text-sm text-[color:var(--operator-muted)]">{t('noTasks')}</p>
+                  <p className="text-sm text-muted-foreground">{t('noTasks')}</p>
                 ) : (
                   <>
                     <ul className="space-y-2">
@@ -554,9 +554,9 @@ export function StoryDetailPanel({ story, tasks, nextTasksCursor = null, loading
 
                 {/* Comments list */}
                 {loadingComments ? (
-                  <p className="text-sm text-[color:var(--operator-muted)]">{t('loading')}</p>
+                  <p className="text-sm text-muted-foreground">{t('loading')}</p>
                 ) : comments.length === 0 ? (
-                  <p className="text-sm text-[color:var(--operator-muted)]">No comments yet</p>
+                  <p className="text-sm text-muted-foreground">No comments yet</p>
                 ) : (
                   <>
                     <ul className="space-y-3">
@@ -582,9 +582,9 @@ export function StoryDetailPanel({ story, tasks, nextTasksCursor = null, loading
 
               <TabsContent value="activity" className="mt-4 space-y-2">
                 {loadingActivities ? (
-                  <p className="text-sm text-[color:var(--operator-muted)]">{t('loading')}</p>
+                  <p className="text-sm text-muted-foreground">{t('loading')}</p>
                 ) : activities.length === 0 ? (
-                  <p className="text-sm text-[color:var(--operator-muted)]">No activity yet</p>
+                  <p className="text-sm text-muted-foreground">No activity yet</p>
                 ) : (
                   <>
                     <ul className="space-y-2">

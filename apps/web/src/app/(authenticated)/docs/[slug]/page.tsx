@@ -33,7 +33,7 @@ interface DocDetail {
 }
 
 const SAVE_STATUS_CLASS: Partial<Record<SaveStatus, string>> = {
-  saving: 'text-[color:var(--operator-muted)]',
+  saving: 'text-muted-foreground',
   saved: 'text-emerald-500/70',
   unsaved: 'text-amber-500/70',
   error: 'text-rose-500',
@@ -158,7 +158,7 @@ export default function DocSlugPage() {
   if (docLoading) {
     return (
       <div className="flex h-full items-center justify-center">
-        <p className="text-sm text-[color:var(--operator-muted)]">{t('loading')}</p>
+        <p className="text-sm text-muted-foreground">{t('loading')}</p>
       </div>
     );
   }

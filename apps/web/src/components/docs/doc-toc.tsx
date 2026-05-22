@@ -42,7 +42,7 @@ export function DocToc({ headings, onHeadingClick, className }: DocTocProps) {
         onClick={() => setOpen((v) => !v)}
         className={`flex items-center gap-1.5 rounded-lg border px-2.5 py-1 text-xs font-medium transition ${
           open
-            ? 'border-[color:var(--operator-primary)]/50 bg-[color:var(--operator-primary)]/10 text-[color:var(--operator-primary-soft)]'
+            ? 'border-[color:var(--operator-primary)]/50 bg-brand/10 text-[color:var(--operator-primary-soft)]'
             : 'border-border/60 bg-card text-foreground hover:border-[color:var(--operator-primary)]/50 hover:text-[color:var(--operator-primary-soft)]'
         }`}
         title="목차"
@@ -54,11 +54,11 @@ export function DocToc({ headings, onHeadingClick, className }: DocTocProps) {
       {open && (
         <div className="absolute right-0 top-full z-50 mt-1.5 w-64 overflow-hidden rounded-xl border border-border bg-background shadow-lg">
           <div className="flex items-center justify-between border-b border-border/60 px-3 py-2">
-            <span className="text-xs font-semibold text-[color:var(--operator-foreground)]">목차</span>
+            <span className="text-xs font-semibold text-foreground">목차</span>
             <button
               type="button"
               onClick={() => setOpen(false)}
-              className="rounded p-0.5 text-[color:var(--operator-muted)] hover:bg-muted hover:text-foreground"
+              className="rounded p-0.5 text-muted-foreground hover:bg-muted hover:text-foreground"
             >
               <X className="size-3.5" />
             </button>
@@ -71,13 +71,13 @@ export function DocToc({ headings, onHeadingClick, className }: DocTocProps) {
                 onClick={() => handleClick(heading.id)}
                 className={`flex w-full items-start px-3 py-1.5 text-left text-xs transition-colors hover:bg-muted/60 ${
                   heading.level === 1
-                    ? 'font-semibold text-[color:var(--operator-foreground)]'
+                    ? 'font-semibold text-foreground'
                     : heading.level === 2
-                      ? 'pl-5 text-[color:var(--operator-foreground)]/80'
-                      : 'pl-7 text-[color:var(--operator-muted)]'
+                      ? 'pl-5 text-foreground/80'
+                      : 'pl-7 text-muted-foreground'
                 }`}
               >
-                <span className="mr-1.5 mt-px flex-shrink-0 text-[color:var(--operator-muted)]">
+                <span className="mr-1.5 mt-px flex-shrink-0 text-muted-foreground">
                   {heading.level === 1 ? '◆' : heading.level === 2 ? '◇' : '·'}
                 </span>
                 <span className="truncate">{heading.text}</span>

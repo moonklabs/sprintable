@@ -53,7 +53,7 @@ function ToggleSummaryView({ getPos, editor }: ReactNodeViewProps) {
         type="button"
         contentEditable={false}
         onClick={handleToggle}
-        className="flex h-5 w-5 flex-shrink-0 items-center justify-center rounded text-[color:var(--operator-muted)] transition-colors hover:bg-muted hover:text-[color:var(--operator-foreground)]"
+        className="flex h-5 w-5 flex-shrink-0 items-center justify-center rounded text-muted-foreground transition-colors hover:bg-muted hover:text-foreground"
         aria-label={isOpen ? '접기' : '펼치기'}
       >
         {isOpen

@@ -136,11 +136,11 @@ export function DecisionsWaiting({ onChange }: DecisionsWaitingProps = {}) {
   return (
     <section
       data-testid="decisions-waiting"
-      className="border-b border-white/8 bg-[color:var(--operator-surface-soft)]/40 px-4 py-3"
+      className="border-b border-white/8 bg-muted/40 px-4 py-3"
     >
       <header className="mb-2 flex items-center gap-2">
-        <Sparkles className="size-4 text-[color:var(--operator-primary)]" />
-        <h2 className="text-sm font-semibold text-[color:var(--operator-foreground)]">
+        <Sparkles className="size-4 text-brand" />
+        <h2 className="text-sm font-semibold text-foreground">
           {t('decisionsWaiting')}
         </h2>
         <Badge variant="outline" className="tabular-nums">
@@ -161,7 +161,7 @@ export function DecisionsWaiting({ onChange }: DecisionsWaitingProps = {}) {
             <li
               key={item.id}
               data-testid={`decision-item-${item.id}`}
-              className="rounded-xl border border-white/8 bg-[color:var(--operator-surface-soft)]/55 p-3"
+              className="rounded-xl border border-white/8 bg-muted/55 p-3"
             >
               <div className="flex items-start justify-between gap-3">
                 <div className="min-w-0 flex-1 space-y-1">
@@ -175,18 +175,18 @@ export function DecisionsWaiting({ onChange }: DecisionsWaitingProps = {}) {
                       </Badge>
                     ) : null}
                     {item.origin_chain.length > 0 ? (
-                      <span className="text-[11px] text-[color:var(--operator-muted)]">
+                      <span className="text-[11px] text-muted-foreground">
                         {item.origin_chain
                           .map((n) => `${ORIGIN_LABEL[n.type]} · ${n.id.slice(0, 8)}`)
                           .join(' → ')}
                       </span>
                     ) : null}
                   </div>
-                  <p className="text-sm font-medium text-[color:var(--operator-foreground)]">
+                  <p className="text-sm font-medium text-foreground">
                     {item.title}
                   </p>
                   {item.agent_summary ? (
-                    <p className="line-clamp-2 text-xs text-[color:var(--operator-muted)]">
+                    <p className="line-clamp-2 text-xs text-muted-foreground">
                       {item.agent_summary}
                     </p>
                   ) : null}

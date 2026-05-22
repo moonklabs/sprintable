@@ -66,7 +66,7 @@ function ListStoryRow({ story, epicMap, memberMap, onStoryClick, onChangeStatus 
             <Badge variant={PRIORITY_BADGE[story.priority] ?? 'default'} className="text-[10px] capitalize">{story.priority as string}</Badge>
           )}
           {story.story_points != null && (
-            <span className="text-[10px] text-[color:var(--operator-muted)]">{t('storyPointsBadge', { count: story.story_points })}</span>
+            <span className="text-[10px] text-muted-foreground">{t('storyPointsBadge', { count: story.story_points })}</span>
           )}
         </div>
         <p className="mt-1 text-sm font-medium text-foreground line-clamp-2 relative z-10">{story.title}</p>

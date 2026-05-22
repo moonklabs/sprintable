@@ -180,11 +180,11 @@ export function ByomKeyManagement({ projectId }: { projectId: string }) {
       <SectionCard>
         <SectionCardHeader>
           <div className="space-y-1">
-            <h2 className="text-base font-semibold text-[color:var(--operator-foreground)]">{t('title')}</h2>
+            <h2 className="text-base font-semibold text-foreground">{t('title')}</h2>
           </div>
         </SectionCardHeader>
         <SectionCardBody>
-          <div className="h-24 animate-pulse rounded-2xl bg-[color:var(--operator-surface-soft)]" />
+          <div className="h-24 animate-pulse rounded-2xl bg-muted" />
         </SectionCardBody>
       </SectionCard>
     );
@@ -195,27 +195,27 @@ export function ByomKeyManagement({ projectId }: { projectId: string }) {
       <SectionCard>
         <SectionCardHeader>
           <div className="space-y-1">
-            <h2 className="text-base font-semibold text-[color:var(--operator-foreground)]">{t('title')}</h2>
-            <p className="text-sm text-[color:var(--operator-muted)]">{t('description')}</p>
+            <h2 className="text-base font-semibold text-foreground">{t('title')}</h2>
+            <p className="text-sm text-muted-foreground">{t('description')}</p>
           </div>
         </SectionCardHeader>
         <SectionCardBody className="space-y-4">
           {/* Saved key summary */}
           {savedKey ? (
-            <div className="flex items-center justify-between rounded-2xl border border-white/8 bg-[color:var(--operator-surface-soft)]/55 px-4 py-3">
+            <div className="flex items-center justify-between rounded-2xl border border-white/8 bg-muted/55 px-4 py-3">
               <div className="space-y-1">
                 <div className="flex items-center gap-2">
                   <Badge variant="info">{PROVIDER_LABELS[savedKey.provider]}</Badge>
                   {savedKey.model ? <Badge variant="outline">{savedKey.model}</Badge> : null}
                 </div>
-                <div className="flex items-center gap-2 text-xs text-[color:var(--operator-muted)]">
+                <div className="flex items-center gap-2 text-xs text-muted-foreground">
                   <span>{t('savedKeyLabel')}</span>
-                  <code className="rounded bg-white/5 px-1.5 py-0.5 font-mono text-[color:var(--operator-foreground)]">
+                  <code className="rounded bg-white/5 px-1.5 py-0.5 font-mono text-foreground">
                     {savedKey.maskedKey}
                   </code>
                 </div>
                 {savedKey.baseUrl ? (
-                  <div className="text-xs text-[color:var(--operator-muted)]">
+                  <div className="text-xs text-muted-foreground">
                     {t('baseUrlSavedLabel')} <code className="rounded bg-white/5 px-1.5 py-0.5">{savedKey.baseUrl}</code>
                   </div>
                 ) : null}
@@ -233,7 +233,7 @@ export function ByomKeyManagement({ projectId }: { projectId: string }) {
           {/* Key input form */}
           <div className="space-y-3">
             <div>
-              <label className="mb-1.5 block text-xs font-medium uppercase tracking-[0.18em] text-[color:var(--operator-muted)]">
+              <label className="mb-1.5 block text-xs font-medium uppercase tracking-[0.18em] text-muted-foreground">
                 {t('providerLabel')}
               </label>
               <OperatorDropdownSelect
@@ -249,7 +249,7 @@ export function ByomKeyManagement({ projectId }: { projectId: string }) {
             </div>
 
             <div>
-              <label className="mb-1.5 block text-xs font-medium uppercase tracking-[0.18em] text-[color:var(--operator-muted)]">
+              <label className="mb-1.5 block text-xs font-medium uppercase tracking-[0.18em] text-muted-foreground">
                 {t('apiKeyLabel')}
               </label>
               <div className="flex gap-2">
@@ -268,7 +268,7 @@ export function ByomKeyManagement({ projectId }: { projectId: string }) {
                   <button
                     type="button"
                     onClick={() => setShowKey((prev) => !prev)}
-                    className="absolute right-3 top-1/2 -translate-y-1/2 text-xs text-[color:var(--operator-muted)] hover:text-[color:var(--operator-foreground)] transition"
+                    className="absolute right-3 top-1/2 -translate-y-1/2 text-xs text-muted-foreground hover:text-foreground transition"
                     aria-label={showKey ? t('hideKey') : t('showKey')}
                   >
                     {showKey ? t('hideKey') : t('showKey')}
@@ -279,7 +279,7 @@ export function ByomKeyManagement({ projectId }: { projectId: string }) {
 
             {requiresBaseUrl ? (
               <div>
-                <label className="mb-1.5 block text-xs font-medium uppercase tracking-[0.18em] text-[color:var(--operator-muted)]">
+                <label className="mb-1.5 block text-xs font-medium uppercase tracking-[0.18em] text-muted-foreground">
                   {t('baseUrlLabel')}
                 </label>
                 <OperatorInput
@@ -293,7 +293,7 @@ export function ByomKeyManagement({ projectId }: { projectId: string }) {
                   }}
                   placeholder={t('baseUrlPlaceholder')}
                 />
-                <p className="mt-1 text-xs text-[color:var(--operator-muted)]">{t('baseUrlHint')}</p>
+                <p className="mt-1 text-xs text-muted-foreground">{t('baseUrlHint')}</p>
               </div>
             ) : null}
 
@@ -352,9 +352,9 @@ export function ByomKeyManagement({ projectId }: { projectId: string }) {
       {/* Delete confirmation dialog */}
       {showDeleteConfirm ? (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 p-4">
-          <div className="w-full max-w-sm rounded-3xl border border-white/10 bg-[color:var(--operator-panel)] p-6 shadow-xl backdrop-blur-xl">
+          <div className="w-full max-w-sm rounded-3xl border border-white/10 bg-muted p-6 shadow-xl backdrop-blur-xl">
             <h3 className="text-lg font-semibold text-rose-100">{t('deleteConfirmTitle')}</h3>
-            <p className="mt-2 text-sm text-[color:var(--operator-muted)]">{t('deleteConfirmDesc')}</p>
+            <p className="mt-2 text-sm text-muted-foreground">{t('deleteConfirmDesc')}</p>
             <div className="mt-6 flex gap-3">
               <Button variant="glass" className="flex-1" onClick={() => setShowDeleteConfirm(false)}>
                 {tc('cancel')}
