@@ -5,7 +5,6 @@ import Link from 'next/link';
 import { useTranslations, useLocale } from 'next-intl';
 import { Activity, ChevronRight } from 'lucide-react';
 import { SectionCard, SectionCardBody, SectionCardHeader } from '@/components/ui/section-card';
-import { useRealtimeMemos } from '@/hooks/use-realtime-memos';
 
 interface ActivityLogItem {
   id: string;
@@ -21,7 +20,6 @@ interface ActivityLogItem {
 
 interface DashboardActivityTimelineProps {
   projectId: string;
-  currentTeamMemberId?: string;
 }
 
 const LIMIT = 10;
@@ -82,7 +80,7 @@ function RelativeTime({ iso, locale }: { iso: string; locale: string }) {
   return <span className="shrink-0 text-[11px] text-muted-foreground">{label}</span>;
 }
 
-export function DashboardActivityTimeline({ projectId, currentTeamMemberId }: DashboardActivityTimelineProps) {
+export function DashboardActivityTimeline({ projectId }: DashboardActivityTimelineProps) {
   const t = useTranslations('activityTimeline');
   const locale = useLocale();
   const [items, setItems] = useState<ActivityLogItem[]>([]);
@@ -122,14 +120,6 @@ export function DashboardActivityTimeline({ projectId, currentTeamMemberId }: Da
       document.removeEventListener('visibilitychange', handleVisibility);
     };
   }, [fetchItems]);
-
-  // SSE: refresh on memo events
-  useRealtimeMemos({
-    currentTeamMemberId,
-    onNewMemo: () => { void fetchItems(); },
-    onNewReply: () => { void fetchItems(); },
-    onMemoUpdated: () => { void fetchItems(); },
-  });
 
   return (
     <SectionCard className="col-span-full">
