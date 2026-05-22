@@ -6,7 +6,6 @@ from datetime import datetime, timezone
 from sqlalchemy import func, select, text
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.models.memo import Memo
 from app.models.pm import Epic, Sprint, Story, Task
 from app.models.team import TeamMember
 
@@ -41,13 +40,6 @@ class AnalyticsRepository:
         )
         task_count = tasks_r.scalar_one()
 
-        memos_r = await self.session.execute(
-            select(Memo.status).where(
-                Memo.project_id == project_id, Memo.org_id == self.org_id, Memo.deleted_at.is_(None)
-            )
-        )
-        memo_rows = memos_r.all()
-
         members_r = await self.session.execute(
             select(TeamMember.type).where(
                 TeamMember.project_id == project_id, TeamMember.org_id == self.org_id, TeamMember.is_active.is_(True)
@@ -67,10 +59,7 @@ class AnalyticsRepository:
                 "total_points": sum((r[1] or 0) for r in story_rows),
             },
             "tasks": task_count,
-            "memos": {
-                "total": len(memo_rows),
-                "open": sum(1 for r in memo_rows if r[0] == "open"),
-            },
+            "memos": {"total": 0, "open": 0},
             "members": {
                 "total": len(member_rows),
                 "humans": sum(1 for r in member_rows if r[0] == "human"),
@@ -131,14 +120,6 @@ class AnalyticsRepository:
         )
         story_rows = stories_r.all()
 
-        memos_r = await self.session.execute(
-            select(Memo.id, Memo.title, Memo.status, Memo.created_at)
-            .where(Memo.project_id == project_id, Memo.org_id == self.org_id, Memo.deleted_at.is_(None))
-            .order_by(Memo.created_at.desc())
-            .limit(limit)
-        )
-        memo_rows = memos_r.all()
-
         agents_r = await self.session.execute(
             select(TeamMember.id).where(
                 TeamMember.project_id == project_id, TeamMember.org_id == self.org_id,
@@ -166,9 +147,7 @@ class AnalyticsRepository:
             "recent_stories": [
                 {"id": r[0], "title": r[1], "status": r[2], "updated_at": r[3]} for r in story_rows
             ],
-            "recent_memos": [
-                {"id": r[0], "title": r[1], "status": r[2], "created_at": r[3]} for r in memo_rows
-            ],
+            "recent_memos": [],
             "recent_agent_runs": agent_runs,
         }
 
@@ -254,13 +233,7 @@ class AnalyticsRepository:
         )
         sprint_row = sprint_r.first()
 
-        open_memos_r = await self.session.execute(
-            select(func.count()).select_from(Memo).where(
-                Memo.project_id == project_id, Memo.org_id == self.org_id,
-                Memo.status == "open", Memo.deleted_at.is_(None),
-            )
-        )
-        open_memo_count = open_memos_r.scalar_one()
+        open_memo_count = 0
 
         unassigned_r = await self.session.execute(
             select(func.count()).select_from(Story).where(
