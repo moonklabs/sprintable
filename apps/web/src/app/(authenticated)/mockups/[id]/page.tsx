@@ -72,7 +72,7 @@ export default function MockupViewerPage() {
     const props = getComponentProps(comp);
     const style: React.CSSProperties = {
       ...(props as React.CSSProperties),
-      outline: isSelected ? '2px solid var(--operator-primary)' : undefined,
+      outline: isSelected ? '2px solid var(--brand)' : undefined,
       outlineOffset: isSelected ? '2px' : undefined,
       cursor: 'pointer',
       transition: 'all 150ms ease',
@@ -121,7 +121,7 @@ export default function MockupViewerPage() {
         <div>
           <div className="border-b border-border/80 px-4 py-3">
             <div className="flex flex-wrap items-center justify-between gap-3">
-              <div className="text-sm font-semibold text-[color:var(--operator-foreground)]">{t('title')}</div>
+              <div className="text-sm font-semibold text-foreground">{t('title')}</div>
               {scenarios.length > 0 ? (
                 <OperatorSelect
                   value={activeScenario}
@@ -135,7 +135,7 @@ export default function MockupViewerPage() {
             </div>
           </div>
           <div className="px-4 py-4">
-            <div className="rounded-3xl border border-white/8 bg-[color:var(--operator-surface-soft)]/35 p-4" onClick={() => setSelectedId(null)}>
+            <div className="rounded-3xl border border-white/8 bg-muted/35 p-4" onClick={() => setSelectedId(null)}>
               <div className={`mx-auto bg-white text-black shadow-lg ${isMobile ? 'w-[375px] rounded-[2rem] border-4 border-gray-800 p-4' : 'w-full max-w-4xl rounded-2xl p-6'}`}>
                 {rootComponents.length === 0 ? (
                   <div className="py-16 text-center text-sm text-gray-400">{t('noMockups')}</div>
@@ -150,7 +150,7 @@ export default function MockupViewerPage() {
         <div>
           <div className="border-b border-border/80 px-4 py-3">
             <div className="flex items-center justify-between gap-3">
-              <div className="text-sm font-semibold text-[color:var(--operator-foreground)]">{selectedComponent?.component_type ?? t('selectComponent')}</div>
+              <div className="text-sm font-semibold text-foreground">{selectedComponent?.component_type ?? t('selectComponent')}</div>
               <Button variant="glass" size="sm" onClick={() => setSelectedId(null)} disabled={!selectedComponent}>✕</Button>
             </div>
           </div>
@@ -158,15 +158,15 @@ export default function MockupViewerPage() {
             {selectedComponent ? (
               <div className="space-y-4">
                 {selectedComponent.spec_description ? (
-                  <div className="prose prose-sm max-w-none text-[color:var(--operator-muted)] prose-headings:text-[color:var(--operator-foreground)] prose-strong:text-[color:var(--operator-foreground)] prose-p:text-[color:var(--operator-muted)] prose-li:text-[color:var(--operator-muted)]">
+                  <div className="prose prose-sm max-w-none text-muted-foreground prose-headings:text-foreground prose-strong:text-foreground prose-p:text-muted-foreground prose-li:text-muted-foreground">
                     <ReactMarkdown>{selectedComponent.spec_description}</ReactMarkdown>
                   </div>
                 ) : (
-                  <p className="text-sm text-[color:var(--operator-muted)]">{t('noSpec')}</p>
+                  <p className="text-sm text-muted-foreground">{t('noSpec')}</p>
                 )}
                 <div>
-                  <h4 className="text-xs font-medium uppercase tracking-[0.18em] text-[color:var(--operator-muted)]">{t('props')}</h4>
-                  <pre className="mt-2 overflow-x-auto rounded-2xl border border-white/8 bg-[color:var(--operator-surface-soft)]/55 p-3 text-xs text-[color:var(--operator-foreground)]">{JSON.stringify(getComponentProps(selectedComponent), null, 2)}</pre>
+                  <h4 className="text-xs font-medium uppercase tracking-[0.18em] text-muted-foreground">{t('props')}</h4>
+                  <pre className="mt-2 overflow-x-auto rounded-2xl border border-white/8 bg-muted/55 p-3 text-xs text-foreground">{JSON.stringify(getComponentProps(selectedComponent), null, 2)}</pre>
                 </div>
               </div>
             ) : (

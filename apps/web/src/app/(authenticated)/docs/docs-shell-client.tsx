@@ -388,7 +388,7 @@ export function DocsShellClient({ projectId }: DocsShellClientProps) {
       <>
         <TopBarSlot title={<h1 className="text-sm font-medium">{t('title')}</h1>} />
         <div className="flex h-64 items-center justify-center">
-          <p className="text-sm text-[color:var(--operator-muted)]">{t('loading')}</p>
+          <p className="text-sm text-muted-foreground">{t('loading')}</p>
         </div>
       </>
     );
@@ -399,19 +399,19 @@ export function DocsShellClient({ projectId }: DocsShellClientProps) {
       {/* Full-text search input */}
       <div className="border-b border-border/60 px-3 py-2">
         <div className="relative">
-          <Search className="absolute left-2.5 top-1/2 size-3.5 -translate-y-1/2 text-[color:var(--operator-muted)]" />
+          <Search className="absolute left-2.5 top-1/2 size-3.5 -translate-y-1/2 text-muted-foreground" />
           <input
             type="text"
             value={searchQuery}
             onChange={(e) => setSearchQuery(e.target.value)}
             placeholder="문서 검색..."
-            className="w-full rounded-lg border border-border/60 bg-muted/30 py-1.5 pl-8 pr-7 text-xs outline-none placeholder:text-[color:var(--operator-muted)] focus:border-[color:var(--operator-primary)]/40 focus:bg-muted/50"
+            className="w-full rounded-lg border border-border/60 bg-muted/30 py-1.5 pl-8 pr-7 text-xs outline-none placeholder:text-muted-foreground focus:border-brand/40 focus:bg-muted/50"
           />
           {searchQuery && (
             <button
               type="button"
               onClick={() => setSearchQuery('')}
-              className="absolute right-2 top-1/2 -translate-y-1/2 text-[color:var(--operator-muted)] hover:text-foreground"
+              className="absolute right-2 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground"
             >
               <X className="size-3" />
             </button>
@@ -470,9 +470,9 @@ export function DocsShellClient({ projectId }: DocsShellClientProps) {
         {/* Search results */}
         {searchQuery.trim() ? (
           searchLoading ? (
-            <p className="py-4 text-center text-xs text-[color:var(--operator-muted)]">검색 중...</p>
+            <p className="py-4 text-center text-xs text-muted-foreground">검색 중...</p>
           ) : searchResults.length === 0 ? (
-            <p className="py-4 text-center text-xs text-[color:var(--operator-muted)]">검색 결과 없음</p>
+            <p className="py-4 text-center text-xs text-muted-foreground">검색 결과 없음</p>
           ) : (
             <ul className="space-y-1">
               {searchResults.map((result) => (
@@ -482,13 +482,13 @@ export function DocsShellClient({ projectId }: DocsShellClientProps) {
                     onClick={() => handleSelectDoc(result.slug)}
                     className="flex w-full flex-col items-start gap-1 rounded-xl px-3 py-2 text-left transition-colors hover:bg-muted/60"
                   >
-                    <span className="flex items-center gap-1.5 text-xs font-medium text-[color:var(--operator-foreground)]">
-                      <FileText className="size-3.5 flex-shrink-0 text-[color:var(--operator-muted)]" />
+                    <span className="flex items-center gap-1.5 text-xs font-medium text-foreground">
+                      <FileText className="size-3.5 flex-shrink-0 text-muted-foreground" />
                       {result.title}
                     </span>
                     {result.snippet && (
                       <span
-                        className="line-clamp-2 text-[11px] leading-relaxed text-[color:var(--operator-muted)] [&_mark]:rounded [&_mark]:bg-yellow-400/40 [&_mark]:text-[color:var(--operator-foreground)] [&_mark]:px-0.5 [&_b]:rounded [&_b]:bg-yellow-400/40 [&_b]:font-normal [&_b]:text-[color:var(--operator-foreground)] [&_b]:px-0.5"
+                        className="line-clamp-2 text-[11px] leading-relaxed text-muted-foreground [&_mark]:rounded [&_mark]:bg-yellow-400/40 [&_mark]:text-foreground [&_mark]:px-0.5 [&_b]:rounded [&_b]:bg-yellow-400/40 [&_b]:font-normal [&_b]:text-foreground [&_b]:px-0.5"
                         dangerouslySetInnerHTML={{ __html: sanitizeSnippet(result.snippet) }}
                       />
                     )}
@@ -699,7 +699,7 @@ export function DocsShellClient({ projectId }: DocsShellClientProps) {
           <button
             type="button"
             onClick={() => setTreeDrawerOpen(true)}
-            className="flex min-h-[44px] items-center gap-2 text-sm text-[color:var(--operator-muted)] hover:text-[color:var(--operator-foreground)]"
+            className="flex min-h-[44px] items-center gap-2 text-sm text-muted-foreground hover:text-foreground"
             aria-label="문서 트리 열기"
           >
             <Menu className="size-4" />

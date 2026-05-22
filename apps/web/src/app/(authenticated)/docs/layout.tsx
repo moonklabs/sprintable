@@ -237,7 +237,7 @@ export default function DocsLayout({ children }: { children: React.ReactNode }) 
       {/* Mobile: content + tree drawer (< lg) */}
       <div className="flex flex-1 flex-col overflow-hidden lg:hidden">
         <div className="flex-shrink-0 flex items-center gap-2 border-b border-border/80 bg-background px-4 py-2">
-          <button type="button" onClick={() => setTreeDrawerOpen(true)} className="flex min-h-[44px] items-center gap-2 text-sm text-[color:var(--operator-muted)] hover:text-[color:var(--operator-foreground)]" aria-label="문서 트리 열기">
+          <button type="button" onClick={() => setTreeDrawerOpen(true)} className="flex min-h-[44px] items-center gap-2 text-sm text-muted-foreground hover:text-foreground" aria-label="문서 트리 열기">
             <Menu className="size-4" />
             <span>{t('title')}</span>
           </button>

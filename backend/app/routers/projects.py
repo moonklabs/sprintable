@@ -33,13 +33,14 @@ async def create_project(
     body: ProjectCreate,
     session: AsyncSession = Depends(get_db),
     auth: AuthContext = Depends(get_current_user),
+    org_id: uuid.UUID = Depends(get_verified_org_id),
 ) -> ProjectResponse:
-    repo = ProjectRepository(session, body.org_id)
+    repo = ProjectRepository(session, org_id)
 
     # EE: Free 플랜 project 생성 제한 (OSS에서는 로드되지 않음)
     if settings.is_ee_enabled:
         from ee.plan_limits import check_project_create_limit  # type: ignore[import]
-        await check_project_create_limit(session, body.org_id)
+        await check_project_create_limit(session, org_id)
 
     project = await repo.create(name=body.name, description=body.description)
 
@@ -52,7 +53,7 @@ async def create_project(
                 " VALUES (gen_random_uuid(), :org_id, :user_id, 'member')"
                 " ON CONFLICT (org_id, user_id) DO NOTHING"
             ),
-            {"org_id": str(body.org_id), "user_id": auth.user_id},
+            {"org_id": str(org_id), "user_id": auth.user_id},
         )
 
     await session.commit()

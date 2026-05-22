@@ -111,12 +111,12 @@ export function PolicyDocBrowser({ projectId, t }: PolicyDocBrowserProps) {
   const policyPanelToggleLabel = policyPanelInlineOpen || policyPanelDrawerOpen ? t('hidePolicySprints') : t('openPolicySprints');
 
   const renderSprintSidebar = ({ mode, closePanel }: { mode: 'inline' | 'drawer'; closePanel: () => void }) => (
-    <GlassPanel className="flex h-full min-h-0 flex-col overflow-hidden border-white/8 bg-[color:var(--operator-surface-soft)]/75">
+    <GlassPanel className="flex h-full min-h-0 flex-col overflow-hidden border-white/8 bg-muted/75">
       <div className="space-y-4 overflow-y-auto p-4">
         <div className="flex items-start justify-between gap-3">
           <div>
-            <div className="text-[11px] font-semibold uppercase tracking-[0.22em] text-[color:var(--operator-muted)]">{t('policySprints')}</div>
-            <p className="mt-2 text-sm text-[color:var(--operator-muted)]">{t('policySprintsDescription')}</p>
+            <div className="text-[11px] font-semibold uppercase tracking-[0.22em] text-muted-foreground">{t('policySprints')}</div>
+            <p className="mt-2 text-sm text-muted-foreground">{t('policySprintsDescription')}</p>
           </div>
           {mode === 'drawer' ? (
             <Button variant="glass" size="icon-sm" aria-label={t('hidePolicySprints')} onClick={closePanel}>
@@ -125,9 +125,9 @@ export function PolicyDocBrowser({ projectId, t }: PolicyDocBrowserProps) {
           ) : null}
         </div>
         {loading && sprints.length === 0 ? (
-          <p className="text-sm text-[color:var(--operator-muted)]">{t('loading')}</p>
+          <p className="text-sm text-muted-foreground">{t('loading')}</p>
         ) : sprints.length === 0 ? (
-          <p className="text-sm text-[color:var(--operator-muted)]">{t('noSprints')}</p>
+          <p className="text-sm text-muted-foreground">{t('noSprints')}</p>
         ) : (
           <div className="space-y-2">
             {sprints.map((sprint) => {
@@ -143,12 +143,12 @@ export function PolicyDocBrowser({ projectId, t }: PolicyDocBrowserProps) {
                   className={cn(
                     'w-full rounded-2xl border px-3 py-3 text-left text-sm transition-all',
                     isSelected
-                      ? 'border-[color:var(--operator-primary)]/20 bg-[color:var(--operator-primary)]/14 text-[color:var(--operator-primary-soft)]'
-                      : 'border-white/8 bg-white/5 text-[color:var(--operator-foreground)]/88 hover:bg-white/8',
+                      ? 'border-brand/20 bg-brand/14 text-[color:var(--brand-soft)]'
+                      : 'border-white/8 bg-white/5 text-foreground/88 hover:bg-white/8',
                   )}
                 >
                   <div className="font-medium">{sprint.title}</div>
-                  {isActive ? <div className="mt-1 text-[11px] text-[color:var(--operator-tertiary)]">{t('activeSprint')}</div> : null}
+                  {isActive ? <div className="mt-1 text-[11px] text-info">{t('activeSprint')}</div> : null}
                 </button>
               );
             })}
@@ -166,7 +166,7 @@ export function PolicyDocBrowser({ projectId, t }: PolicyDocBrowserProps) {
           {policyPanelToggleLabel}
         </Button>
         {selectedSprintId ? (
-          <div className="rounded-full border border-white/8 bg-white/5 px-3 py-1.5 text-xs text-[color:var(--operator-muted)]">
+          <div className="rounded-full border border-white/8 bg-white/5 px-3 py-1.5 text-xs text-muted-foreground">
             {sprints.find((sprint) => sprint.id === selectedSprintId)?.title ?? t('policySprints')}
           </div>
         ) : null}
@@ -186,23 +186,23 @@ export function PolicyDocBrowser({ projectId, t }: PolicyDocBrowserProps) {
             <div className="border-b border-white/8 px-4 py-4">
               <div className="space-y-3">
                 <div>
-                  <div className="text-sm font-semibold text-[color:var(--operator-foreground)]">{t('policyEpics')}</div>
-                  <div className="mt-1 text-sm text-[color:var(--operator-muted)]">{t('policyEpicsDescription')}</div>
+                  <div className="text-sm font-semibold text-foreground">{t('policyEpics')}</div>
+                  <div className="mt-1 text-sm text-muted-foreground">{t('policyEpicsDescription')}</div>
                 </div>
                 <input
                   type="text"
                   value={query}
                   onChange={(event) => setQuery(event.target.value)}
                   placeholder={t('policySearchPlaceholder')}
-                  className="w-full rounded-2xl border border-white/8 bg-[color:var(--operator-surface-soft)]/90 px-4 py-2.5 text-sm text-[color:var(--operator-foreground)] placeholder:text-[color:var(--operator-muted)] focus:border-[color:var(--operator-primary)]/20 focus:outline-none"
+                  className="w-full rounded-2xl border border-white/8 bg-muted/90 px-4 py-2.5 text-sm text-foreground placeholder:text-muted-foreground focus:border-brand/20 focus:outline-none"
                 />
               </div>
             </div>
             <div className="px-4 py-4">
               {loading ? (
-                <p className="text-sm text-[color:var(--operator-muted)]">{t('loading')}</p>
+                <p className="text-sm text-muted-foreground">{t('loading')}</p>
               ) : docs.length === 0 ? (
-                <p className="text-sm text-[color:var(--operator-muted)]">{t('noPolicyEpics')}</p>
+                <p className="text-sm text-muted-foreground">{t('noPolicyEpics')}</p>
               ) : (
                 <div className="space-y-2">
                   {docs.map((doc) => {
@@ -217,8 +217,8 @@ export function PolicyDocBrowser({ projectId, t }: PolicyDocBrowserProps) {
                         className={cn(
                           'w-full rounded-2xl border px-3 py-3 text-left text-sm transition-all',
                           isSelected
-                            ? 'border-[color:var(--operator-primary)]/20 bg-[color:var(--operator-primary)]/14 text-[color:var(--operator-primary-soft)]'
-                            : 'border-white/8 bg-white/5 text-[color:var(--operator-foreground)]/88 hover:bg-white/8',
+                            ? 'border-brand/20 bg-brand/14 text-[color:var(--brand-soft)]'
+                            : 'border-white/8 bg-white/5 text-foreground/88 hover:bg-white/8',
                         )}
                       >
                         <div className="font-medium">{doc.title || doc.epic?.title || t('untitledPolicyDoc')}</div>
@@ -234,18 +234,18 @@ export function PolicyDocBrowser({ projectId, t }: PolicyDocBrowserProps) {
             <div className="border-b border-white/8 px-4 py-4">
               <div className="flex items-center justify-between gap-3">
                 <div>
-                  <div className="text-sm font-semibold text-[color:var(--operator-foreground)]">{selectedDoc?.title || selectedDoc?.epic?.title || t('selectPolicyEpic')}</div>
-                  {selectedDoc ? <div className="mt-1 text-xs text-[color:var(--operator-muted)]">{t('lastUpdated')}: {new Date(selectedDoc.updated_at).toLocaleString()}</div> : null}
+                  <div className="text-sm font-semibold text-foreground">{selectedDoc?.title || selectedDoc?.epic?.title || t('selectPolicyEpic')}</div>
+                  {selectedDoc ? <div className="mt-1 text-xs text-muted-foreground">{t('lastUpdated')}: {new Date(selectedDoc.updated_at).toLocaleString()}</div> : null}
                 </div>
               </div>
             </div>
             <div className="px-4 py-4">
               {selectedDoc ? (
-                <div className="prose prose-invert prose-sm max-w-none text-[color:var(--operator-foreground)]">
+                <div className="prose prose-invert prose-sm max-w-none text-foreground">
                   <ReactMarkdown>{selectedDoc.content?.trim() || t('emptyPolicyEpic')}</ReactMarkdown>
                 </div>
               ) : (
-                <div className="flex min-h-[280px] items-center justify-center text-sm text-[color:var(--operator-muted)]">
+                <div className="flex min-h-[280px] items-center justify-center text-sm text-muted-foreground">
                   {t('selectPolicyEpic')}
                 </div>
               )}

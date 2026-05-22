@@ -5,7 +5,7 @@ from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.dependencies.auth import AuthContext, get_current_user, get_project_scoped_org_id, get_verified_org_id
+from app.dependencies.auth import AuthContext, get_current_user, get_verified_org_id
 from app.dependencies.database import get_db
 from app.models.pm import Story
 from app.models.standup import StandupEntry
@@ -19,7 +19,7 @@ router = APIRouter(prefix="/api/v2/sprints", tags=["sprints"])
 
 def _get_repo(
     session: AsyncSession = Depends(get_db),
-    org_id: uuid.UUID = Depends(get_project_scoped_org_id),
+    org_id: uuid.UUID = Depends(get_verified_org_id),
 ) -> SprintRepository:
     return SprintRepository(session, org_id)
 
@@ -44,8 +44,9 @@ async def create_sprint(
     body: SprintCreate,
     session: AsyncSession = Depends(get_db),
     _auth: AuthContext = Depends(get_current_user),
+    org_id: uuid.UUID = Depends(get_verified_org_id),
 ) -> SprintResponse:
-    repo = SprintRepository(session, body.org_id)
+    repo = SprintRepository(session, org_id)
     sprint = await repo.create(
         project_id=body.project_id,
         title=body.title,

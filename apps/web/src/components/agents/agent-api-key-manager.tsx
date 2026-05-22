@@ -3,7 +3,7 @@
 import { useState, useEffect, useCallback } from 'react';
 import { Check, Copy } from 'lucide-react';
 import { Button } from '@/components/ui/button';
-import { Card } from '@/components/ui/card';
+import { SectionCard } from '@/components/ui/section-card';
 import {
   Dialog,
   DialogContent,
@@ -13,7 +13,6 @@ import {
   DialogTitle,
 } from '@/components/ui/dialog';
 import { Input } from '@/components/ui/input';
-import { Label } from '@/components/ui/label';
 import { useToast } from '@/components/ui/toast';
 
 const SCOPES = ['read', 'write', 'admin'] as const;
@@ -189,7 +188,7 @@ export function AgentApiKeyManager({ agentId, agentName, onNewKey }: AgentApiKey
   const hasActiveKey = activeKeys.length > 0 || generatedKey !== null;
 
   return (
-    <Card className="p-6">
+    <SectionCard className="p-6">
       <div className="flex items-start justify-between mb-4">
         <div>
           <h3 className="text-lg font-semibold">API Keys - {agentName}</h3>
@@ -332,9 +331,10 @@ export function AgentApiKeyManager({ agentId, agentName, onNewKey }: AgentApiKey
           {generatedKey && (
             <div className="space-y-4">
               <div className="space-y-2">
-                <Label>API Key</Label>
+                <label htmlFor="generated-api-key" className="text-sm font-medium leading-none text-foreground select-none">API Key</label>
                 <div className="flex gap-2">
                   <Input
+                    id="generated-api-key"
                     value={generatedKey}
                     readOnly
                     className="font-mono text-sm"
@@ -378,6 +378,6 @@ export function AgentApiKeyManager({ agentId, agentName, onNewKey }: AgentApiKey
           </DialogFooter>
         </DialogContent>
       </Dialog>
-    </Card>
+    </SectionCard>
   );
 }

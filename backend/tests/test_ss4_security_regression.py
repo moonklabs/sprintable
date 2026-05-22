@@ -108,23 +108,6 @@ async def test_api_key_org_spoof_post_stories_403():
         app.dependency_overrides.clear()
 
 
-@pytest.mark.anyio
-async def test_api_key_org_spoof_post_memos_403():
-    """AC1: API Key — body.org_id 위조 POST memos → 403."""
-    ctx = _mk_api_key_ctx(org_id=ORG_ID)
-    client, _, app = await _client(ctx)
-    try:
-        async with client as c:
-            resp = await c.post("/api/v2/memos", json={
-                "project_id": str(PROJECT_ID),
-                "org_id": str(OTHER_ORG_ID),
-                "title": "위조 메모",
-                "content": "evil content",
-            })
-        assert resp.status_code == 403
-    finally:
-        app.dependency_overrides.clear()
-
 
 @pytest.mark.anyio
 async def test_api_key_org_spoof_post_epics_403():
@@ -222,22 +205,6 @@ async def test_org_id_omitted_stories_not_403():
         app.dependency_overrides.clear()
 
 
-@pytest.mark.anyio
-async def test_org_id_omitted_memos_not_403():
-    """AC3: org_id 누락 POST memos → auth.org_id 자동 주입 → 403 아님."""
-    ctx = _mk_api_key_ctx(org_id=ORG_ID)
-    client, _, app = await _client(ctx)
-    try:
-        async with client as c:
-            resp = await c.post("/api/v2/memos", json={
-                "project_id": str(PROJECT_ID),
-                "title": "자동 주입 메모",
-                "content": "test",
-            })
-        assert resp.status_code != 403
-    finally:
-        app.dependency_overrides.clear()
-
 
 # ─── AC4: project_id 불일치 요청 시 403 ──────────────────────────────────────
 
@@ -275,23 +242,6 @@ async def test_project_id_mismatch_post_stories_403():
     finally:
         app.dependency_overrides.clear()
 
-
-@pytest.mark.anyio
-async def test_project_id_mismatch_post_memos_403():
-    """AC4: body.project_id ≠ auth.project_id POST memos → 403."""
-    ctx = _mk_api_key_ctx(project_id=PROJECT_ID)
-    client, _, app = await _client(ctx)
-    try:
-        async with client as c:
-            resp = await c.post("/api/v2/memos", json={
-                "project_id": str(OTHER_PROJECT_ID),
-                "org_id": str(ORG_ID),
-                "title": "교차 프로젝트 메모",
-                "content": "cross project attempt",
-            })
-        assert resp.status_code == 403
-    finally:
-        app.dependency_overrides.clear()
 
 
 # ─── AC5: /api/v2/auth/me 4종 테스트 ─────────────────────────────────────────

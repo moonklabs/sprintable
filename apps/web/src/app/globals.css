@@ -138,20 +138,9 @@
   --scrollbar-thumb-hover: oklch(0 0 0 / 18%);
   --scrollbar-track: transparent;
 
-  /* Operator aliases — for feature components (mockups, theme-settings) */
-  --operator-bg: var(--background);
-  --operator-surface: var(--card);
-  --operator-surface-soft: var(--muted);
-  --operator-panel: var(--muted);
-  --operator-foreground: var(--foreground);
-  --operator-muted: var(--muted-foreground);
-  --operator-primary: var(--brand);
-  --operator-primary-soft: oklch(0.90 0.06 258);
-  --operator-primary-strong: oklch(0.45 0.20 258);
-  --operator-primary-contrast: oklch(0.96 0.03 258);
-  --operator-tertiary: var(--info);
-  --operator-outline: var(--border);
-  --operator-danger: var(--destructive);
+  --brand-soft: oklch(0.90 0.06 258);
+  --brand-strong: oklch(0.45 0.20 258);
+  --brand-contrast: oklch(0.96 0.03 258);
 
   /* Tiptap editor */
   --tiptap-code-bg: oklch(0.22 0 0);
@@ -217,20 +206,9 @@
   --scrollbar-thumb-hover: oklch(1 0 0 / 18%);
   --scrollbar-track: transparent;
 
-  /* Operator aliases — dark mode */
-  --operator-bg: var(--background);
-  --operator-surface: var(--card);
-  --operator-surface-soft: var(--muted);
-  --operator-panel: var(--muted);
-  --operator-foreground: var(--foreground);
-  --operator-muted: var(--muted-foreground);
-  --operator-primary: var(--brand);
-  --operator-primary-soft: oklch(0.80 0.10 258);
-  --operator-primary-strong: oklch(0.55 0.22 258);
-  --operator-primary-contrast: oklch(0.22 0.05 258);
-  --operator-tertiary: var(--info);
-  --operator-outline: var(--border);
-  --operator-danger: var(--destructive);
+  --brand-soft: oklch(0.80 0.10 258);
+  --brand-strong: oklch(0.55 0.22 258);
+  --brand-contrast: oklch(0.22 0.05 258);
 
   /* Tiptap editor (dark) */
   --tiptap-code-bg: oklch(0.22 0 0);
@@ -340,50 +318,3 @@
 .tiptap [data-type="toggleContent"] { padding-left: 1.25rem; margin-left: 0.875rem; border-left: 2px solid hsl(var(--border)); margin-top: 0.25rem; }
 [data-type="toggleSummary"],
 .tiptap [data-type="toggleSummary"] { cursor: pointer; }
-
-/* ─── Typography utilities ─── */
-.text-display {
-  font-size: 2rem;
-  font-weight: 600;
-  letter-spacing: -0.03em;
-  line-height: 1.1;
-}
-.text-h1 {
-  font-size: 1.5rem;
-  font-weight: 600;
-  letter-spacing: -0.02em;
-  line-height: 1.2;
-}
-.text-h2 {
-  font-size: 1.25rem;
-  font-weight: 600;
-  letter-spacing: -0.01em;
-  line-height: 1.3;
-}
-.text-h3 {
-  font-size: 1rem;
-  font-weight: 500;
-  letter-spacing: 0;
-  line-height: 1.4;
-}
-.text-body {
-  font-size: 0.875rem;
-  font-weight: 400;
-  line-height: 1.6;
-}
-.text-small {
-  font-size: 0.75rem;
-  font-weight: 400;
-  line-height: 1.5;
-}
-.text-label {
-  font-size: 0.6875rem;
-  font-weight: 500;
-  letter-spacing: 0.08em;
-  text-transform: uppercase;
-}
-.text-mono {
-  font-family: var(--font-mono), ui-monospace, monospace;
-  font-size: 0.8125rem;
-  letter-spacing: -0.01em;
-}

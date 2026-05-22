@@ -230,10 +230,10 @@ export function SlackIntegrationSettingsSection() {
           <div className="flex flex-col gap-3 lg:flex-row lg:items-start lg:justify-between">
             <div className="space-y-1">
               <div className="flex items-center gap-2">
-                <MessageSquareShare className="size-4 text-[color:var(--operator-primary-soft)]" />
-                <h2 className="text-base font-semibold text-[color:var(--operator-foreground)]">{t('title')}</h2>
+                <MessageSquareShare className="size-4 text-[color:var(--brand-soft)]" />
+                <h2 className="text-base font-semibold text-foreground">{t('title')}</h2>
               </div>
-              <p className="text-sm text-[color:var(--operator-muted)]">{t('description')}</p>
+              <p className="text-sm text-muted-foreground">{t('description')}</p>
             </div>
             <div className="flex flex-wrap items-center gap-2">
               <Badge variant={data.status === 'connected' ? 'success' : data.status === 'channel_fetch_error' ? 'destructive' : 'outline'}>
@@ -245,15 +245,15 @@ export function SlackIntegrationSettingsSection() {
         </SectionCardHeader>
         <SectionCardBody className="space-y-4">
           <div className="grid gap-4 xl:grid-cols-[minmax(0,1.35fr)_360px]">
-            <GlassPanel className="overflow-hidden border-white/8 bg-[color:var(--operator-surface-soft)]/40">
+            <GlassPanel className="overflow-hidden border-white/8 bg-muted/40">
               <div className="border-b border-white/8 px-5 py-4">
                 <div className="flex flex-wrap items-start justify-between gap-3">
                   <div className="space-y-1">
-                    <p className="text-xs uppercase tracking-[0.24em] text-[color:var(--operator-muted)]">{t('workspaceLabel')}</p>
-                    <h3 className="text-lg font-semibold text-[color:var(--operator-foreground)]">
+                    <p className="text-xs uppercase tracking-[0.24em] text-muted-foreground">{t('workspaceLabel')}</p>
+                    <h3 className="text-lg font-semibold text-foreground">
                       {data.workspace?.team_name ?? t('workspaceDisconnected')}
                     </h3>
-                    <p className="text-sm text-[color:var(--operator-muted)]">
+                    <p className="text-sm text-muted-foreground">
                       {data.workspace?.team_id ? t('workspaceConnectedSummary', { teamId: data.workspace.team_id }) : t('workspaceDisconnectedSummary')}
                     </p>
                   </div>
@@ -272,27 +272,27 @@ export function SlackIntegrationSettingsSection() {
               </div>
               <div className="grid gap-3 px-5 py-4 sm:grid-cols-3">
                 <div className="rounded-2xl border border-white/8 bg-black/10 px-4 py-3">
-                  <p className="text-xs uppercase tracking-[0.2em] text-[color:var(--operator-muted)]">{t('metricChannels')}</p>
-                  <p className="mt-2 text-2xl font-semibold text-[color:var(--operator-foreground)]">{data.channels.length}</p>
+                  <p className="text-xs uppercase tracking-[0.2em] text-muted-foreground">{t('metricChannels')}</p>
+                  <p className="mt-2 text-2xl font-semibold text-foreground">{data.channels.length}</p>
                 </div>
                 <div className="rounded-2xl border border-white/8 bg-black/10 px-4 py-3">
-                  <p className="text-xs uppercase tracking-[0.2em] text-[color:var(--operator-muted)]">{t('metricMapped')}</p>
-                  <p className="mt-2 text-2xl font-semibold text-[color:var(--operator-foreground)]">{data.mappings.length}</p>
+                  <p className="text-xs uppercase tracking-[0.2em] text-muted-foreground">{t('metricMapped')}</p>
+                  <p className="mt-2 text-2xl font-semibold text-foreground">{data.mappings.length}</p>
                 </div>
                 <div className="rounded-2xl border border-white/8 bg-black/10 px-4 py-3">
-                  <p className="text-xs uppercase tracking-[0.2em] text-[color:var(--operator-muted)]">{t('metricDirty')}</p>
-                  <p className="mt-2 text-2xl font-semibold text-[color:var(--operator-foreground)]">{allDirtyChannels.length}</p>
+                  <p className="text-xs uppercase tracking-[0.2em] text-muted-foreground">{t('metricDirty')}</p>
+                  <p className="mt-2 text-2xl font-semibold text-foreground">{allDirtyChannels.length}</p>
                 </div>
               </div>
             </GlassPanel>
 
-            <GlassPanel className="border-white/8 bg-[color:var(--operator-surface-soft)]/40 p-5">
+            <GlassPanel className="border-white/8 bg-muted/40 p-5">
               <div className="space-y-3">
-                <div className="flex items-center gap-2 text-sm font-medium text-[color:var(--operator-foreground)]">
+                <div className="flex items-center gap-2 text-sm font-medium text-foreground">
                   <CheckCircle2 className="size-4 text-emerald-300" />
                   {t('actionPanelTitle')}
                 </div>
-                <p className="text-sm text-[color:var(--operator-muted)]">{t('actionPanelDescription')}</p>
+                <p className="text-sm text-muted-foreground">{t('actionPanelDescription')}</p>
                 <Button variant="hero" size="lg" className="w-full" disabled={allDirtyChannels.length === 0 || saving} onClick={() => void handleSaveAll()}>
                   {saving ? <Loader2 className="mr-2 size-4 animate-spin" /> : null}
                   {allDirtyChannels.length > 0 ? t('savePending', { count: allDirtyChannels.length }) : t('saveIdle')}
@@ -301,7 +301,7 @@ export function SlackIntegrationSettingsSection() {
                   {loading ? <Loader2 className="mr-2 size-4 animate-spin" /> : <RefreshCcw className="mr-2 size-4" />}
                   {t('refresh')}
                 </Button>
-                <div className="rounded-2xl border border-white/8 bg-black/10 px-4 py-3 text-xs text-[color:var(--operator-muted)]">
+                <div className="rounded-2xl border border-white/8 bg-black/10 px-4 py-3 text-xs text-muted-foreground">
                   {t('helperText')}
                 </div>
               </div>
@@ -322,23 +322,23 @@ export function SlackIntegrationSettingsSection() {
 
           <div className="flex flex-col gap-3 md:flex-row md:items-center md:justify-between">
             <label className="relative block w-full md:max-w-sm">
-              <Search className="pointer-events-none absolute left-3 top-1/2 size-4 -translate-y-1/2 text-[color:var(--operator-muted)]" />
+              <Search className="pointer-events-none absolute left-3 top-1/2 size-4 -translate-y-1/2 text-muted-foreground" />
               <OperatorInput value={search} onChange={(event) => setSearch(event.target.value)} placeholder={t('searchPlaceholder')} className="pl-9" />
             </label>
-            <p className="text-xs text-[color:var(--operator-muted)]">{t('resultCount', { count: filteredChannels.length })}</p>
+            <p className="text-xs text-muted-foreground">{t('resultCount', { count: filteredChannels.length })}</p>
           </div>
 
           {loading ? (
             <div className="grid gap-3">
               {[1, 2, 3].map((item) => (
-                <div key={item} className="h-28 animate-pulse rounded-3xl border border-white/8 bg-[color:var(--operator-surface-soft)]/45" />
+                <div key={item} className="h-28 animate-pulse rounded-3xl border border-white/8 bg-muted/45" />
               ))}
             </div>
           ) : data.status === 'disconnected' ? (
-            <GlassPanel className="border-dashed border-white/14 bg-[color:var(--operator-surface-soft)]/28 p-6 text-center">
-              <MessageSquareShare className="mx-auto size-9 text-[color:var(--operator-primary-soft)]" />
-              <h3 className="mt-4 text-lg font-semibold text-[color:var(--operator-foreground)]">{t('disconnectedTitle')}</h3>
-              <p className="mx-auto mt-2 max-w-2xl text-sm text-[color:var(--operator-muted)]">{t('disconnectedBody')}</p>
+            <GlassPanel className="border-dashed border-white/14 bg-muted/28 p-6 text-center">
+              <MessageSquareShare className="mx-auto size-9 text-[color:var(--brand-soft)]" />
+              <h3 className="mt-4 text-lg font-semibold text-foreground">{t('disconnectedTitle')}</h3>
+              <p className="mx-auto mt-2 max-w-2xl text-sm text-muted-foreground">{t('disconnectedBody')}</p>
               <div className="mt-5 flex flex-wrap items-center justify-center gap-3">
                 <Button variant="hero" size="lg" disabled={!data.connect_url} onClick={() => data.connect_url && (window.location.href = data.connect_url)}>
                   <MessageSquareShare className="mr-2 size-4" />
@@ -351,10 +351,10 @@ export function SlackIntegrationSettingsSection() {
               </div>
             </GlassPanel>
           ) : filteredChannels.length === 0 ? (
-            <GlassPanel className="border-dashed border-white/14 bg-[color:var(--operator-surface-soft)]/28 p-6 text-center">
-              <MessageSquareShare className="mx-auto size-9 text-[color:var(--operator-primary-soft)]" />
-              <h3 className="mt-4 text-lg font-semibold text-[color:var(--operator-foreground)]">{t('emptyTitle')}</h3>
-              <p className="mx-auto mt-2 max-w-2xl text-sm text-[color:var(--operator-muted)]">{t('emptyBody')}</p>
+            <GlassPanel className="border-dashed border-white/14 bg-muted/28 p-6 text-center">
+              <MessageSquareShare className="mx-auto size-9 text-[color:var(--brand-soft)]" />
+              <h3 className="mt-4 text-lg font-semibold text-foreground">{t('emptyTitle')}</h3>
+              <p className="mx-auto mt-2 max-w-2xl text-sm text-muted-foreground">{t('emptyBody')}</p>
             </GlassPanel>
           ) : (
             <div className="grid gap-3">
@@ -366,28 +366,28 @@ export function SlackIntegrationSettingsSection() {
                 const mappedElsewhere = Boolean(currentProjectId && currentMapping?.project_id && currentMapping.project_id !== currentProjectId);
 
                 return (
-                  <GlassPanel key={channel.id} className="border-white/8 bg-[color:var(--operator-surface-soft)]/42 p-4">
+                  <GlassPanel key={channel.id} className="border-white/8 bg-muted/42 p-4">
                     <div className="flex flex-col gap-4 xl:flex-row xl:items-start xl:justify-between">
                       <div className="space-y-3">
                         <div className="flex flex-wrap items-center gap-2">
-                          <h3 className="text-sm font-semibold text-[color:var(--operator-foreground)]">#{channel.name}</h3>
+                          <h3 className="text-sm font-semibold text-foreground">#{channel.name}</h3>
                           {channel.is_private ? <Badge variant="outline">{t('privateBadge')}</Badge> : <Badge variant="outline">{t('publicBadge')}</Badge>}
                           {channel.is_member ? <Badge variant="success">{t('joinedBadge')}</Badge> : <Badge variant="outline">{t('notJoinedBadge')}</Badge>}
                           {mappedElsewhere ? <Badge variant="info">{t('mappedElsewhereBadge')}</Badge> : null}
                         </div>
-                        <div className="flex flex-wrap items-center gap-3 text-xs text-[color:var(--operator-muted)]">
+                        <div className="flex flex-wrap items-center gap-3 text-xs text-muted-foreground">
                           <span>{t('channelId', { id: channel.id })}</span>
                           {channel.member_count ? <span>{t('memberCount', { count: channel.member_count })}</span> : null}
                         </div>
                         <div className="rounded-2xl border border-white/8 bg-black/10 px-3 py-3 text-sm">
-                          <p className="text-[color:var(--operator-muted)]">{t('mappedProjectLabel')}</p>
-                          <p className="mt-1 font-medium text-[color:var(--operator-foreground)]">{currentMapping?.project_name ?? t('unmapped')}</p>
+                          <p className="text-muted-foreground">{t('mappedProjectLabel')}</p>
+                          <p className="mt-1 font-medium text-foreground">{currentMapping?.project_name ?? t('unmapped')}</p>
                         </div>
                       </div>
 
                       <div className="grid flex-1 gap-3 xl:max-w-xl xl:grid-cols-[minmax(0,1fr)_auto]">
                         <div className="space-y-2">
-                          <label className="text-xs uppercase tracking-[0.18em] text-[color:var(--operator-muted)]">{t('selectProjectLabel')}</label>
+                          <label className="text-xs uppercase tracking-[0.18em] text-muted-foreground">{t('selectProjectLabel')}</label>
                           <OperatorDropdownSelect
                             value={selectedProjectId}
                             onValueChange={(v) => setSelectedProjects((prev) => ({ ...prev, [channel.id]: v }))}
@@ -427,7 +427,7 @@ export function SlackIntegrationSettingsSection() {
                           </Button>
                         </div>
                         {mappedElsewhere ? (
-                          <div className="xl:col-span-2 rounded-2xl border border-[color:var(--operator-primary)]/18 bg-[color:var(--operator-primary)]/10 px-3 py-3 text-sm text-[color:var(--operator-primary-soft)]">
+                          <div className="xl:col-span-2 rounded-2xl border border-brand/18 bg-brand/10 px-3 py-3 text-sm text-[color:var(--brand-soft)]">
                             {t('mappedElsewhereHint', { project: currentMapping?.project_name ?? t('unknownProject') })}
                           </div>
                         ) : null}
@@ -448,11 +448,11 @@ export function SlackIntegrationSettingsSection() {
 
       {allDirtyChannels.length > 0 ? (
         <div className="fixed inset-x-3 bottom-24 z-40 sm:bottom-6 lg:static lg:inset-auto lg:z-auto">
-          <GlassPanel className="border-[color:var(--operator-primary)]/20 bg-[color:var(--operator-panel)]/92 p-3 shadow-[0_24px_60px_rgba(0,0,0,0.45)]">
+          <GlassPanel className="border-brand/20 bg-muted/92 p-3 shadow-[0_24px_60px_rgba(0,0,0,0.45)]">
             <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
               <div>
-                <p className="text-sm font-medium text-[color:var(--operator-foreground)]">{t('stickyBarTitle', { count: allDirtyChannels.length })}</p>
-                <p className="text-xs text-[color:var(--operator-muted)]">{t('stickyBarBody')}</p>
+                <p className="text-sm font-medium text-foreground">{t('stickyBarTitle', { count: allDirtyChannels.length })}</p>
+                <p className="text-xs text-muted-foreground">{t('stickyBarBody')}</p>
               </div>
               <Button variant="hero" size="lg" disabled={saving} onClick={() => void handleSaveAll()}>
                 {saving ? <Loader2 className="mr-2 size-4 animate-spin" /> : null}
@@ -464,10 +464,10 @@ export function SlackIntegrationSettingsSection() {
       ) : null}
 
       <Dialog open={Boolean(remapConflict)} onOpenChange={(open) => { if (!open) setRemapConflict(null); }}>
-        <DialogContent className="max-w-lg rounded-3xl border border-white/10 bg-[color:var(--operator-panel)] text-[color:var(--operator-foreground)] shadow-[0_30px_80px_rgba(0,0,0,0.42)]">
+        <DialogContent className="max-w-lg rounded-3xl border border-white/10 bg-muted text-foreground shadow-[0_30px_80px_rgba(0,0,0,0.42)]">
           <DialogHeader>
             <DialogTitle>{t('remapDialogTitle')}</DialogTitle>
-            <DialogDescription className="text-[color:var(--operator-muted)]">
+            <DialogDescription className="text-muted-foreground">
               {remapConflict ? t('remapDialogBody', { channel: `#${remapConflict.channelName}`, project: remapConflict.existingProjectName }) : ''}
             </DialogDescription>
           </DialogHeader>

@@ -73,8 +73,8 @@ function EmbedView({ node, updateAttributes, selected }: ReactNodeViewProps) {
     <NodeViewWrapper as="div" className="my-4 not-prose" contentEditable={false}>
       {/* URL editor — visible when block is selected */}
       {selected && (
-        <div className="mb-2 flex items-center gap-2 rounded-xl border border-[color:var(--operator-primary)]/30 bg-[color:var(--operator-primary)]/6 px-3 py-2">
-          <Link2 className="size-3.5 flex-shrink-0 text-[color:var(--operator-muted)]" />
+        <div className="mb-2 flex items-center gap-2 rounded-xl border border-brand/30 bg-brand/6 px-3 py-2">
+          <Link2 className="size-3.5 flex-shrink-0 text-muted-foreground" />
           <input
             ref={inputRef}
             value={editUrl}
@@ -82,7 +82,7 @@ function EmbedView({ node, updateAttributes, selected }: ReactNodeViewProps) {
             onKeyDown={handleKeyDown}
             onBlur={applyUrl}
             placeholder="URL 입력 후 Enter"
-            className="flex-1 bg-transparent text-sm outline-none placeholder:text-[color:var(--operator-muted)]/60"
+            className="flex-1 bg-transparent text-sm outline-none placeholder:text-muted-foreground/60"
           />
         </div>
       )}
@@ -119,13 +119,13 @@ function EmbedView({ node, updateAttributes, selected }: ReactNodeViewProps) {
               rel="noopener noreferrer"
               className="flex items-center gap-3 rounded-xl border border-border bg-muted/20 px-4 py-3 text-sm transition-colors hover:bg-muted/40"
             >
-              <ExternalLink className="size-4 flex-shrink-0 text-[color:var(--operator-muted)]" />
-              <span className="min-w-0 flex-1 truncate text-[color:var(--operator-foreground)]/80">{url}</span>
+              <ExternalLink className="size-4 flex-shrink-0 text-muted-foreground" />
+              <span className="min-w-0 flex-1 truncate text-foreground/80">{url}</span>
             </a>
           )}
         </>
       ) : (
-        <div className="flex items-center gap-2 rounded-xl border border-dashed border-border px-4 py-4 text-sm text-[color:var(--operator-muted)]">
+        <div className="flex items-center gap-2 rounded-xl border border-dashed border-border px-4 py-4 text-sm text-muted-foreground">
           <Link2 className="size-4" />
           <span>블록을 선택해 URL을 입력하세요</span>
         </div>

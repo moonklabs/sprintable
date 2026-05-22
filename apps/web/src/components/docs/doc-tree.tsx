@@ -34,11 +34,11 @@ function DocPreviewCard({ title, snippet, x, y }: { title: string; snippet: stri
       style={{ position: 'fixed', left, top, width: CARD_WIDTH, zIndex: 9999, pointerEvents: 'none' }}
       className="rounded-xl border border-border bg-background p-3 shadow-lg"
     >
-      <p className="mb-1 text-xs font-semibold text-[color:var(--operator-foreground)] truncate">{title}</p>
+      <p className="mb-1 text-xs font-semibold text-foreground truncate">{title}</p>
       {snippet ? (
-        <p className="text-[11px] leading-relaxed text-[color:var(--operator-muted)] line-clamp-4">{snippet}</p>
+        <p className="text-[11px] leading-relaxed text-muted-foreground line-clamp-4">{snippet}</p>
       ) : (
-        <p className="text-[11px] text-[color:var(--operator-muted)] opacity-60">내용 없음</p>
+        <p className="text-[11px] text-muted-foreground opacity-60">내용 없음</p>
       )}
     </div>,
     document.body,
@@ -283,7 +283,7 @@ function TreeNode({
             </SortableContext>
           ) : (
             <p
-              className="py-1 text-[11px] italic text-[color:var(--operator-muted)]"
+              className="py-1 text-[11px] italic text-muted-foreground"
               style={{ paddingLeft: `${Math.min((depth + 1) * 14 + 24, 88)}px` }}
             >
               {emptyFolderLabel}

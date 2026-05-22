@@ -107,12 +107,12 @@ export function AgentHitlPolicyEditor() {
     return (
       <SectionCard>
         <SectionCardHeader>
-          <h2 className="text-base font-semibold text-[color:var(--operator-foreground)]">{t('policyLoadingTitle')}</h2>
+          <h2 className="text-base font-semibold text-foreground">{t('policyLoadingTitle')}</h2>
         </SectionCardHeader>
         <SectionCardBody>
           <div className="space-y-3">
             {[1, 2, 3].map((item) => (
-              <div key={item} className="h-28 animate-pulse rounded-3xl bg-[color:var(--operator-surface-soft)]" />
+              <div key={item} className="h-28 animate-pulse rounded-3xl bg-muted" />
             ))}
           </div>
         </SectionCardBody>
@@ -124,7 +124,7 @@ export function AgentHitlPolicyEditor() {
     return (
       <SectionCard>
         <SectionCardHeader>
-          <h2 className="text-base font-semibold text-[color:var(--operator-foreground)]">{t('policyTitle')}</h2>
+          <h2 className="text-base font-semibold text-foreground">{t('policyTitle')}</h2>
         </SectionCardHeader>
         <SectionCardBody className="space-y-3">
           <p className="text-sm text-amber-100">{error ?? t('policyLoadFailed')}</p>
@@ -138,9 +138,9 @@ export function AgentHitlPolicyEditor() {
     <div className="space-y-4">
       <div className="flex flex-wrap items-center justify-between gap-3 rounded-3xl border border-white/8 bg-white/4 px-4 py-4">
         <div>
-          <p className="text-xs font-semibold uppercase tracking-[0.24em] text-[color:var(--operator-muted)]">{t('policyEyebrow')}</p>
-          <h2 className="mt-1 text-lg font-semibold text-[color:var(--operator-foreground)]">{t('policyTitle')}</h2>
-          <p className="mt-1 text-sm text-[color:var(--operator-muted)]">{t('policyBody')}</p>
+          <p className="text-xs font-semibold uppercase tracking-[0.24em] text-muted-foreground">{t('policyEyebrow')}</p>
+          <h2 className="mt-1 text-lg font-semibold text-foreground">{t('policyTitle')}</h2>
+          <p className="mt-1 text-sm text-muted-foreground">{t('policyBody')}</p>
         </div>
         <div className="flex flex-wrap items-center gap-2">
           {savedAt ? <Badge variant="success">{t('policySaved')}</Badge> : null}
@@ -159,10 +159,10 @@ export function AgentHitlPolicyEditor() {
         <SectionCard>
           <SectionCardHeader>
             <div className="flex items-center gap-2">
-              <ShieldAlert className="size-4 text-[color:var(--operator-primary-soft)]" />
+              <ShieldAlert className="size-4 text-[color:var(--brand-soft)]" />
               <div>
-                <h3 className="text-base font-semibold text-[color:var(--operator-foreground)]">{t('catalogTitle')}</h3>
-                <p className="text-sm text-[color:var(--operator-muted)]">{t('catalogBody')}</p>
+                <h3 className="text-base font-semibold text-foreground">{t('catalogTitle')}</h3>
+                <p className="text-sm text-muted-foreground">{t('catalogBody')}</p>
               </div>
             </div>
           </SectionCardHeader>
@@ -174,8 +174,8 @@ export function AgentHitlPolicyEditor() {
                   <Badge variant="outline">{t(`requestType_${item.default_request_type}`)}</Badge>
                   <Badge variant="chip">{t(`timeoutClass_${item.default_timeout_class}`)}</Badge>
                 </div>
-                <p className="mt-3 text-sm font-semibold text-[color:var(--operator-foreground)]">{t(`catalog_${item.key}_title`)}</p>
-                <p className="mt-2 text-sm text-[color:var(--operator-muted)]">{t(`catalog_${item.key}_body`)}</p>
+                <p className="mt-3 text-sm font-semibold text-foreground">{t(`catalog_${item.key}_title`)}</p>
+                <p className="mt-2 text-sm text-muted-foreground">{t(`catalog_${item.key}_body`)}</p>
               </div>
             ))}
           </SectionCardBody>
@@ -184,10 +184,10 @@ export function AgentHitlPolicyEditor() {
         <SectionCard>
           <SectionCardHeader>
             <div className="flex items-center gap-2">
-              <CheckCircle2 className="size-4 text-[color:var(--operator-primary-soft)]" />
+              <CheckCircle2 className="size-4 text-[color:var(--brand-soft)]" />
               <div>
-                <h3 className="text-base font-semibold text-[color:var(--operator-foreground)]">{t('approvalTitle')}</h3>
-                <p className="text-sm text-[color:var(--operator-muted)]">{t('approvalBody')}</p>
+                <h3 className="text-base font-semibold text-foreground">{t('approvalTitle')}</h3>
+                <p className="text-sm text-muted-foreground">{t('approvalBody')}</p>
               </div>
             </div>
           </SectionCardHeader>
@@ -199,17 +199,17 @@ export function AgentHitlPolicyEditor() {
                   <Badge variant="outline">{t(`timeoutClass_${rule.timeout_class}`)}</Badge>
                 </div>
                 <div>
-                  <p className="text-sm font-semibold text-[color:var(--operator-foreground)]">{t(`approval_${rule.key}_title`)}</p>
-                  <p className="mt-1 text-sm text-[color:var(--operator-muted)]">{t(`approval_${rule.key}_body`)}</p>
+                  <p className="text-sm font-semibold text-foreground">{t(`approval_${rule.key}_title`)}</p>
+                  <p className="mt-1 text-sm text-muted-foreground">{t(`approval_${rule.key}_body`)}</p>
                 </div>
                 <div className="grid gap-3 md:grid-cols-2">
-                  <label className="space-y-2 text-xs font-semibold uppercase tracking-[0.2em] text-[color:var(--operator-muted)]">
+                  <label className="space-y-2 text-xs font-semibold uppercase tracking-[0.2em] text-muted-foreground">
                     <span>{t('approvalRequestTypeLabel')}</span>
-                    <div className="flex h-10 items-center rounded-2xl border border-white/10 bg-[color:var(--operator-surface-soft)] px-3 text-sm font-medium normal-case tracking-normal text-[color:var(--operator-foreground)]">
+                    <div className="flex h-10 items-center rounded-2xl border border-white/10 bg-muted px-3 text-sm font-medium normal-case tracking-normal text-foreground">
                       {t('requestType_approval')}
                     </div>
                   </label>
-                  <label className="space-y-2 text-xs font-semibold uppercase tracking-[0.2em] text-[color:var(--operator-muted)]">
+                  <label className="space-y-2 text-xs font-semibold uppercase tracking-[0.2em] text-muted-foreground">
                     <span>{t('approvalTimeoutClassLabel')}</span>
                     <OperatorSelect value={rule.timeout_class} onChange={(event) => updateApprovalRule(rule.key, event.target.value)}>
                       {policy.timeout_classes.map((timeoutClass) => (
@@ -226,10 +226,10 @@ export function AgentHitlPolicyEditor() {
         <SectionCard>
           <SectionCardHeader>
             <div className="flex items-center gap-2">
-              <Clock3 className="size-4 text-[color:var(--operator-primary-soft)]" />
+              <Clock3 className="size-4 text-[color:var(--brand-soft)]" />
               <div>
-                <h3 className="text-base font-semibold text-[color:var(--operator-foreground)]">{t('timeoutTitle')}</h3>
-                <p className="text-sm text-[color:var(--operator-muted)]">{t('timeoutBody')}</p>
+                <h3 className="text-base font-semibold text-foreground">{t('timeoutTitle')}</h3>
+                <p className="text-sm text-muted-foreground">{t('timeoutBody')}</p>
               </div>
             </div>
           </SectionCardHeader>
@@ -245,11 +245,11 @@ export function AgentHitlPolicyEditor() {
                     ))}
                   </div>
                   <div>
-                    <p className="text-sm font-semibold text-[color:var(--operator-foreground)]">{t(`timeout_${timeoutClass.key}_title`)}</p>
-                    <p className="mt-1 text-sm text-[color:var(--operator-muted)]">{t(`timeout_${timeoutClass.key}_body`)}</p>
+                    <p className="text-sm font-semibold text-foreground">{t(`timeout_${timeoutClass.key}_title`)}</p>
+                    <p className="mt-1 text-sm text-muted-foreground">{t(`timeout_${timeoutClass.key}_body`)}</p>
                   </div>
                   <div className="grid gap-3">
-                    <label className="space-y-2 text-xs font-semibold uppercase tracking-[0.2em] text-[color:var(--operator-muted)]">
+                    <label className="space-y-2 text-xs font-semibold uppercase tracking-[0.2em] text-muted-foreground">
                       <span>{t('timeoutDurationLabel')}</span>
                       <OperatorInput
                         type="number"
@@ -259,7 +259,7 @@ export function AgentHitlPolicyEditor() {
                         onChange={(event) => updateTimeoutClass(timeoutClass.key, 'duration_minutes', event.target.value)}
                       />
                     </label>
-                    <label className="space-y-2 text-xs font-semibold uppercase tracking-[0.2em] text-[color:var(--operator-muted)]">
+                    <label className="space-y-2 text-xs font-semibold uppercase tracking-[0.2em] text-muted-foreground">
                       <span>{t('timeoutReminderLabel')}</span>
                       <OperatorInput
                         type="number"
@@ -269,7 +269,7 @@ export function AgentHitlPolicyEditor() {
                         onChange={(event) => updateTimeoutClass(timeoutClass.key, 'reminder_minutes_before', event.target.value)}
                       />
                     </label>
-                    <label className="space-y-2 text-xs font-semibold uppercase tracking-[0.2em] text-[color:var(--operator-muted)]">
+                    <label className="space-y-2 text-xs font-semibold uppercase tracking-[0.2em] text-muted-foreground">
                       <span>{t('timeoutEscalationLabel')}</span>
                       <OperatorSelect value={timeoutClass.escalation_mode} onChange={(event) => updateTimeoutClass(timeoutClass.key, 'escalation_mode', event.target.value)}>
                         {ESCALATION_MODE_OPTIONS.map((mode) => (
@@ -288,15 +288,15 @@ export function AgentHitlPolicyEditor() {
       <SectionCard>
         <SectionCardHeader>
           <div className="flex items-center gap-2">
-            <AlertTriangle className="size-4 text-[color:var(--operator-primary-soft)]" />
+            <AlertTriangle className="size-4 text-[color:var(--brand-soft)]" />
             <div>
-              <h3 className="text-base font-semibold text-[color:var(--operator-foreground)]">{t('policySummaryTitle')}</h3>
-              <p className="text-sm text-[color:var(--operator-muted)]">{t('policySummaryBody')}</p>
+              <h3 className="text-base font-semibold text-foreground">{t('policySummaryTitle')}</h3>
+              <p className="text-sm text-muted-foreground">{t('policySummaryBody')}</p>
             </div>
           </div>
         </SectionCardHeader>
         <SectionCardBody>
-          <pre className="whitespace-pre-wrap rounded-3xl border border-white/10 bg-slate-950/40 px-4 py-4 text-sm text-[color:var(--operator-muted)]">{policy.prompt_summary}</pre>
+          <pre className="whitespace-pre-wrap rounded-3xl border border-white/10 bg-slate-950/40 px-4 py-4 text-sm text-muted-foreground">{policy.prompt_summary}</pre>
         </SectionCardBody>
       </SectionCard>
     </div>

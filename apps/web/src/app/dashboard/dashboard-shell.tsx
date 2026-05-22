@@ -20,6 +20,7 @@ interface DashboardContext {
   orgId?: string;
   projectId?: string;
   projectName?: string;
+  userName?: string;
   projectMemberships: DashboardProjectOption[];
   orgMemberships: OrgSwitcherItem[];
 }
@@ -39,6 +40,7 @@ export function DashboardShell({
   orgId,
   projectId,
   projectName,
+  userName,
   projectMemberships,
   orgMemberships,
   children,
@@ -47,7 +49,7 @@ export function DashboardShell({
   const showTopBar = !pathname.startsWith('/settings');
 
   return (
-    <DashboardCtx.Provider value={{ currentTeamMemberId, orgId, projectId, projectName, projectMemberships, orgMemberships }}>
+    <DashboardCtx.Provider value={{ currentTeamMemberId, orgId, projectId, projectName, userName, projectMemberships, orgMemberships }}>
       <RefreshProvider>
       <RealtimeProvider currentTeamMemberId={currentTeamMemberId}>
         <TopBarProvider>
@@ -58,6 +60,7 @@ export function DashboardShell({
               projectMemberships={projectMemberships}
               orgId={orgId}
               orgMemberships={orgMemberships}
+              userName={userName}
             />
             <SidebarInset className="relative flex flex-col overflow-hidden">
               {showTopBar && <TopBar />}

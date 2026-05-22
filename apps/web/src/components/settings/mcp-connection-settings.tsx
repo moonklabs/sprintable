@@ -180,8 +180,8 @@ export function McpConnectionSettings({ projectId }: { projectId: string }) {
     <SectionCard>
       <SectionCardHeader>
         <div className="space-y-1">
-          <h2 className="text-base font-semibold text-[color:var(--operator-foreground)]">{t('title')}</h2>
-          <p className="text-sm text-[color:var(--operator-muted)]">{t('description')}</p>
+          <h2 className="text-base font-semibold text-foreground">{t('title')}</h2>
+          <p className="text-sm text-muted-foreground">{t('description')}</p>
         </div>
       </SectionCardHeader>
       <SectionCardBody className="space-y-4">
@@ -192,22 +192,22 @@ export function McpConnectionSettings({ projectId }: { projectId: string }) {
         ) : null}
 
         {loading ? (
-          <div className="h-32 animate-pulse rounded-2xl bg-[color:var(--operator-surface-soft)]" />
+          <div className="h-32 animate-pulse rounded-2xl bg-muted" />
         ) : (
           <div className="space-y-4">
             {connections.map((connection) => {
               const isOAuth = connection.authStrategy === 'oauth';
               const canSave = !isOAuth && Boolean(secretDrafts[connection.serverKey]?.trim());
               return (
-                <div key={connection.serverKey} className="rounded-3xl border border-white/10 bg-[color:var(--operator-surface-soft)]/45 p-4">
+                <div key={connection.serverKey} className="rounded-3xl border border-white/10 bg-muted/45 p-4">
                   <div className="flex flex-wrap items-start justify-between gap-3">
                     <div className="space-y-2">
                       <div className="flex items-center gap-2">
-                        <h3 className="text-sm font-semibold text-[color:var(--operator-foreground)]">{connection.displayName}</h3>
+                        <h3 className="text-sm font-semibold text-foreground">{connection.displayName}</h3>
                         <Badge variant={STATUS_VARIANTS[connection.status]}>{t(`status.${connection.status}`)}</Badge>
                         <Badge variant="outline">{t(`auth.${connection.authStrategy}`)}</Badge>
                       </div>
-                      <div className="space-y-1 text-xs text-[color:var(--operator-muted)]">
+                      <div className="space-y-1 text-xs text-muted-foreground">
                         {connection.label ? <div>{t('labelValue', { label: connection.label })}</div> : null}
                         {connection.maskedSecret ? <div>{t('maskedSecretValue', { secret: connection.maskedSecret })}</div> : null}
                         <div>{t('toolCountValue', { count: connection.toolNames.length })}</div>
@@ -275,8 +275,8 @@ export function McpConnectionSettings({ projectId }: { projectId: string }) {
 
         <div className="rounded-3xl border border-dashed border-white/10 p-4">
           <div className="space-y-1">
-            <h3 className="text-sm font-semibold text-[color:var(--operator-foreground)]">{t('customRequestTitle')}</h3>
-            <p className="text-sm text-[color:var(--operator-muted)]">{t('customRequestDescription')}</p>
+            <h3 className="text-sm font-semibold text-foreground">{t('customRequestTitle')}</h3>
+            <p className="text-sm text-muted-foreground">{t('customRequestDescription')}</p>
           </div>
           <div className="mt-4 space-y-3">
             <OperatorInput value={requestName} onChange={(event) => setRequestName(event.target.value)} placeholder={t('requestNamePlaceholder')} />

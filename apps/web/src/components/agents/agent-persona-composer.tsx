@@ -292,7 +292,7 @@ export function AgentPersonaComposer({
                         const checked = selectedToolNames.includes(option.name);
                         return (
                           <label key={option.name} className={`flex items-start gap-3 rounded-md border px-3 py-3 text-sm ${checked ? 'border-primary/40 bg-primary/10' : 'border-border bg-muted/30'}`}>
-                            <input type="checkbox" checked={checked} onChange={() => handleToggleTool(option.name)} className="mt-1 h-4 w-4 accent-[color:var(--operator-primary)]" />
+                            <input type="checkbox" checked={checked} onChange={() => handleToggleTool(option.name)} className="mt-1 h-4 w-4 accent-brand" />
                             <span className="space-y-1">
                               <span className="block font-medium text-foreground">{option.name}</span>
                               <span className="block text-xs text-muted-foreground">{option.source === 'mcp' ? t('personaComposerMcpToolHint') : t('personaComposerBuiltInToolHint')}</span>

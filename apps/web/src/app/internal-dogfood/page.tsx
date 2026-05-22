@@ -60,11 +60,11 @@ export default async function InternalDogfoodPage({ searchParams }: PageProps) {
         {createdMemoId || createdStoryId ? (
           <SectionCard>
             <SectionCardHeader>
-              <div className="text-sm font-semibold text-[color:var(--operator-foreground)]">생성 결과</div>
+              <div className="text-sm font-semibold text-foreground">생성 결과</div>
             </SectionCardHeader>
-            <SectionCardBody className="space-y-2 text-sm text-[color:var(--operator-muted)]">
-              {createdMemoId ? <div>memo created: <span className="font-mono text-[color:var(--operator-foreground)]">{createdMemoId}</span></div> : null}
-              {createdStoryId ? <div>story created: <span className="font-mono text-[color:var(--operator-foreground)]">{createdStoryId}</span></div> : null}
+            <SectionCardBody className="space-y-2 text-sm text-muted-foreground">
+              {createdMemoId ? <div>memo created: <span className="font-mono text-foreground">{createdMemoId}</span></div> : null}
+              {createdStoryId ? <div>story created: <span className="font-mono text-foreground">{createdStoryId}</span></div> : null}
             </SectionCardBody>
           </SectionCard>
         ) : null}
@@ -72,7 +72,7 @@ export default async function InternalDogfoodPage({ searchParams }: PageProps) {
         {!actor ? (
           <SectionCard>
             <SectionCardHeader>
-              <div className="text-sm font-semibold text-[color:var(--operator-foreground)]">내부 세션 열기</div>
+              <div className="text-sm font-semibold text-foreground">내부 세션 열기</div>
             </SectionCardHeader>
             <SectionCardBody className="space-y-4">
               {actors.length ? (
@@ -100,20 +100,20 @@ export default async function InternalDogfoodPage({ searchParams }: PageProps) {
           <>
             <SectionCard>
               <SectionCardHeader>
-                <div className="text-sm font-semibold text-[color:var(--operator-foreground)]">현재 세션</div>
+                <div className="text-sm font-semibold text-foreground">현재 세션</div>
               </SectionCardHeader>
-              <SectionCardBody className="grid gap-2 text-sm text-[color:var(--operator-muted)] md:grid-cols-2">
-                <div>actor: <span className="font-medium text-[color:var(--operator-foreground)]">{actor.name}</span></div>
-                <div>project: <span className="font-medium text-[color:var(--operator-foreground)]">{actor.project_name}</span></div>
-                <div>team member id: <span className="font-mono text-[color:var(--operator-foreground)]">{actor.id}</span></div>
-                <div>project id: <span className="font-mono text-[color:var(--operator-foreground)]">{actor.project_id}</span></div>
+              <SectionCardBody className="grid gap-2 text-sm text-muted-foreground md:grid-cols-2">
+                <div>actor: <span className="font-medium text-foreground">{actor.name}</span></div>
+                <div>project: <span className="font-medium text-foreground">{actor.project_name}</span></div>
+                <div>team member id: <span className="font-mono text-foreground">{actor.id}</span></div>
+                <div>project id: <span className="font-mono text-foreground">{actor.project_id}</span></div>
               </SectionCardBody>
             </SectionCard>
 
             <div className="grid gap-6 lg:grid-cols-2">
               <SectionCard>
                 <SectionCardHeader>
-                  <div className="text-sm font-semibold text-[color:var(--operator-foreground)]">메모 생성</div>
+                  <div className="text-sm font-semibold text-foreground">메모 생성</div>
                 </SectionCardHeader>
                 <SectionCardBody>
                   <form action="/api/internal-dogfood/memos" method="post" className="space-y-4">
@@ -140,7 +140,7 @@ export default async function InternalDogfoodPage({ searchParams }: PageProps) {
 
               <SectionCard>
                 <SectionCardHeader>
-                  <div className="text-sm font-semibold text-[color:var(--operator-foreground)]">스토리 생성</div>
+                  <div className="text-sm font-semibold text-foreground">스토리 생성</div>
                 </SectionCardHeader>
                 <SectionCardBody>
                   <form action="/api/internal-dogfood/stories" method="post" className="space-y-4">
@@ -184,10 +184,10 @@ export default async function InternalDogfoodPage({ searchParams }: PageProps) {
         )}
 
         <SectionCard>
-          <SectionCardBody className="text-sm text-[color:var(--operator-muted)]">
+          <SectionCardBody className="text-sm text-muted-foreground">
             이 경로는 임시 Moonlabs 내부 dogfooding 전용인. auth plane 복구 후 env flag를 내리면 바로 비활성화되는 구조인.
             {' '}
-            <Link href="/login" className="text-[color:var(--operator-primary-soft)] underline">일반 로그인 페이지로 이동</Link>
+            <Link href="/login" className="text-[color:var(--brand-soft)] underline">일반 로그인 페이지로 이동</Link>
           </SectionCardBody>
         </SectionCard>
       </div>

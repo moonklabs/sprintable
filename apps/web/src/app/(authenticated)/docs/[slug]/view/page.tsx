@@ -48,7 +48,7 @@ export default function DocViewPage() {
   if (doc === null) {
     return (
       <div className="flex h-full items-center justify-center">
-        <p className="text-sm text-[color:var(--operator-muted)]">{t('loading')}</p>
+        <p className="text-sm text-muted-foreground">{t('loading')}</p>
       </div>
     );
   }

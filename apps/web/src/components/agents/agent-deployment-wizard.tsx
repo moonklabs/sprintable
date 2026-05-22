@@ -721,7 +721,7 @@ export function AgentDeploymentWizard({
                         type="checkbox"
                         checked={overwriteRoutingRules}
                         onChange={(event) => setOverwriteRoutingRules(event.target.checked)}
-                        className="mt-1 h-4 w-4 accent-[color:var(--operator-primary)]"
+                        className="mt-1 h-4 w-4 accent-brand"
                       />
                       <span>{t('autoRoutingOverwriteConfirm')}</span>
                     </label>

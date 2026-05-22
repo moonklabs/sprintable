@@ -224,15 +224,15 @@ export function AgentRunDetail({
   if (loading) {
     return (
       <div className="space-y-4">
-        <div className="h-24 animate-pulse rounded-2xl bg-[color:var(--operator-surface-soft)]" />
-        <div className="h-64 animate-pulse rounded-2xl bg-[color:var(--operator-surface-soft)]" />
+        <div className="h-24 animate-pulse rounded-2xl bg-muted" />
+        <div className="h-64 animate-pulse rounded-2xl bg-muted" />
       </div>
     );
   }
 
   if (!run) {
     return (
-      <div className="py-20 text-center text-[color:var(--operator-muted)]">
+      <div className="py-20 text-center text-muted-foreground">
         {tc('noData')}
       </div>
     );
@@ -284,7 +284,7 @@ export function AgentRunDetail({
               <Badge variant={STATUS_BADGE_VARIANT[run.status] ?? 'outline'}>
                 {t(`status_${run.status}`)}
               </Badge>
-              <span className="text-xs text-[color:var(--operator-muted)]">
+              <span className="text-xs text-muted-foreground">
                 {t('startedAt')}: {toLocaleStr(run.started_at, locale)}
               </span>
               {run.status === 'failed' && failureDisposition && (
@@ -293,7 +293,7 @@ export function AgentRunDetail({
                 </Badge>
               )}
               {run.finished_at && (
-                <span className="text-xs text-[color:var(--operator-muted)]">
+                <span className="text-xs text-muted-foreground">
                   {t('finishedAt')}: {toLocaleStr(run.finished_at, locale)}
                 </span>
               )}
@@ -317,7 +317,7 @@ export function AgentRunDetail({
 
             {Array.isArray(run.billing_notes) && run.billing_notes.length > 0 && (
               <div className="mb-4 rounded-2xl border border-white/8 bg-white/4 px-4 py-3">
-                <p className="text-sm font-medium text-[color:var(--operator-foreground)]">{t('billingNotesLabel')}</p>
+                <p className="text-sm font-medium text-foreground">{t('billingNotesLabel')}</p>
                 <div className="mt-2 flex flex-wrap gap-2">
                   {run.billing_notes.map((note) => (
                     <Badge key={note} variant="chip">{note}</Badge>
@@ -348,14 +348,14 @@ export function AgentRunDetail({
             {/* Result summary */}
             {run.result_summary && (
               <div className="mb-4 rounded-2xl border border-white/8 bg-white/4 px-4 py-3">
-                <p className="text-sm font-medium text-[color:var(--operator-foreground)]">{t('resultSummary')}</p>
-                <p className="mt-1 text-sm text-[color:var(--operator-muted)]">{run.result_summary}</p>
+                <p className="text-sm font-medium text-foreground">{t('resultSummary')}</p>
+                <p className="mt-1 text-sm text-muted-foreground">{run.result_summary}</p>
               </div>
             )}
 
             {retrievalDiagnostics && (
               <div className="mb-4 rounded-2xl border border-white/8 bg-white/4 px-4 py-3">
-                <p className="text-sm font-medium text-[color:var(--operator-foreground)]">{t('memoryRetrievalTitle')}</p>
+                <p className="text-sm font-medium text-foreground">{t('memoryRetrievalTitle')}</p>
                 <div className="mt-3 grid gap-3 md:grid-cols-2">
                   <MemoryBucketCard
                     label={t('memoryRetrievalSession')}
@@ -374,7 +374,7 @@ export function AgentRunDetail({
                     injectedIdsLabel={t('memoryRetrievalInjectedIds')}
                   />
                 </div>
-                <div className="mt-3 flex flex-wrap gap-2 text-xs text-[color:var(--operator-muted)]">
+                <div className="mt-3 flex flex-wrap gap-2 text-xs text-muted-foreground">
                   <Badge variant="chip">{t('memoryRetrievalTotalInjected')}: {retrievalDiagnostics.totalInjected}</Badge>
                   <Badge variant="chip">{t('memoryRetrievalDropped')}: {retrievalDiagnostics.droppedByTokenBudget}</Badge>
                 </div>
@@ -383,8 +383,8 @@ export function AgentRunDetail({
 
             {compactionPolicy && (
               <div className="mb-4 rounded-2xl border border-white/8 bg-white/4 px-4 py-3">
-                <p className="text-sm font-medium text-[color:var(--operator-foreground)]">{t('memoryCompactionTitle')}</p>
-                <p className="mt-1 text-sm text-[color:var(--operator-muted)]">
+                <p className="text-sm font-medium text-foreground">{t('memoryCompactionTitle')}</p>
+                <p className="mt-1 text-sm text-muted-foreground">
                   {t('memoryCompactionThresholds', {
                     minImportance: compactionPolicy.thresholds.minImportance,
                     maxAgeDays: compactionPolicy.thresholds.maxAgeDays,
@@ -395,7 +395,7 @@ export function AgentRunDetail({
                   <CriteriaList title={t('memoryCompactionKeep')} items={compactionPolicy.keepCriteria} />
                   <CriteriaList title={t('memoryCompactionDelete')} items={compactionPolicy.deleteCriteria} />
                 </div>
-                <div className="mt-3 flex flex-wrap gap-2 text-xs text-[color:var(--operator-muted)]">
+                <div className="mt-3 flex flex-wrap gap-2 text-xs text-muted-foreground">
                   {Object.entries(compactionPolicy.typeQuota).map(([type, quota]) => (
                     <Badge key={type} variant="chip">{type}: {quota}</Badge>
                   ))}
@@ -405,7 +405,7 @@ export function AgentRunDetail({
 
             {run.continuity_debug && (
               <div className="mb-4 rounded-2xl border border-white/8 bg-white/4 px-4 py-3">
-                <p className="text-sm font-medium text-[color:var(--operator-foreground)]">{t('continuityDebugTitle')}</p>
+                <p className="text-sm font-medium text-foreground">{t('continuityDebugTitle')}</p>
                 <div className="mt-3 grid gap-3 md:grid-cols-2 xl:grid-cols-4">
                   <MetaCard label={t('sessionId')} value={run.continuity_debug.sessionId ?? '-'} />
                   <MetaCard label={t('continuitySnapshotPresent')} value={run.continuity_debug.snapshotPresent ? t('booleanYes') : t('booleanNo')} />
@@ -417,11 +417,11 @@ export function AgentRunDetail({
 
             {/* Timeline */}
             <div>
-              <h3 className="mb-3 text-sm font-semibold text-[color:var(--operator-foreground)]">
+              <h3 className="mb-3 text-sm font-semibold text-foreground">
                 {t('timeline')} ({timeline.length})
               </h3>
               {timeline.length === 0 ? (
-                <p className="text-sm text-[color:var(--operator-muted)]">{t('noTimelineEntries')}</p>
+                <p className="text-sm text-muted-foreground">{t('noTimelineEntries')}</p>
               ) : (
                 <div className="relative space-y-0">
                   {/* Vertical line */}
@@ -438,7 +438,7 @@ export function AgentRunDetail({
                           hasError
                             ? 'border-red-400 bg-red-400/20'
                             : isLlm
-                              ? 'border-[color:var(--operator-primary)] bg-[color:var(--operator-primary)]/20'
+                              ? 'border-brand bg-brand/20'
                               : 'border-emerald-400 bg-emerald-400/20'
                         }`} />
                         <div className="min-w-0 flex-1 rounded-xl border border-white/8 bg-white/4 px-3 py-2">
@@ -446,19 +446,19 @@ export function AgentRunDetail({
                             <Badge variant={isLlm ? 'info' : isTool ? (hasError ? 'destructive' : 'success') : 'outline'} className="text-[10px]">
                               {isLlm ? 'LLM' : isTool ? 'TOOL' : (entry.type ?? 'step')}
                             </Badge>
-                            <span className="text-xs font-medium text-[color:var(--operator-foreground)]">
+                            <span className="text-xs font-medium text-foreground">
                               {isLlm ? (entry.model ?? 'LLM call') : display.name}
                             </span>
                             {display.source && (
                               <Badge variant="chip" className="text-[10px]">{display.source}</Badge>
                             )}
                             {display.durationMs != null && (
-                              <span className="text-[10px] text-[color:var(--operator-muted)]">
+                              <span className="text-[10px] text-muted-foreground">
                                 {formatDuration(display.durationMs)}
                               </span>
                             )}
                             {display.tokens && (
-                              <span className="text-[10px] text-[color:var(--operator-muted)]">
+                              <span className="text-[10px] text-muted-foreground">
                                 {display.tokens.input ?? 0}/{display.tokens.output ?? 0} tok
                               </span>
                             )}
@@ -484,11 +484,11 @@ export function AgentRunDetail({
             </div>
 
             <div className="mt-6">
-              <h3 className="mb-3 text-sm font-semibold text-[color:var(--operator-foreground)]">
+              <h3 className="mb-3 text-sm font-semibold text-foreground">
                 {t('toolAuditTrail')} ({toolAuditTrail.length})
               </h3>
               {toolAuditTrail.length === 0 ? (
-                <p className="text-sm text-[color:var(--operator-muted)]">{t('noToolAuditEntries')}</p>
+                <p className="text-sm text-muted-foreground">{t('noToolAuditEntries')}</p>
               ) : (
                 <div className="space-y-3">
                   {toolAuditTrail.map((entry) => {
@@ -511,61 +511,61 @@ export function AgentRunDetail({
                           <Badge variant={outcome === 'denied' ? 'destructive' : outcome === 'failed' ? 'secondary' : 'success'}>
                             {outcome === 'denied' ? t('toolAuditOutcomeDenied') : outcome === 'failed' ? t('toolAuditOutcomeFailed') : t('toolAuditOutcomeAllowed')}
                           </Badge>
-                          <span className="text-sm font-medium text-[color:var(--operator-foreground)]">{toolName}</span>
+                          <span className="text-sm font-medium text-foreground">{toolName}</span>
                           {toolSource ? <Badge variant="chip">{t(`toolAuditSource_${toolSource}`)}</Badge> : null}
-                          <span className="text-xs text-[color:var(--operator-muted)]">{toLocaleStr(entry.created_at, locale)}</span>
+                          <span className="text-xs text-muted-foreground">{toLocaleStr(entry.created_at, locale)}</span>
                         </div>
-                        <div className="mt-2 grid gap-2 text-sm text-[color:var(--operator-muted)] md:grid-cols-2">
+                        <div className="mt-2 grid gap-2 text-sm text-muted-foreground md:grid-cols-2">
                           <div>
                             <span className="text-xs uppercase tracking-[0.16em]">{t('toolAuditActorLabel')}</span>
-                            <p className="mt-1 text-[color:var(--operator-foreground)]">{entry.actor_name ?? run.agent_name ?? t('unknownAgent')}</p>
+                            <p className="mt-1 text-foreground">{entry.actor_name ?? run.agent_name ?? t('unknownAgent')}</p>
                           </div>
                           <div>
                             <span className="text-xs uppercase tracking-[0.16em]">{t('toolAuditEventLabel')}</span>
-                            <p className="mt-1 break-all text-[color:var(--operator-foreground)]">{entry.event_type}</p>
+                            <p className="mt-1 break-all text-foreground">{entry.event_type}</p>
                           </div>
                           {reasonCode ? (
                             <div>
                               <span className="text-xs uppercase tracking-[0.16em]">{t('toolAuditReasonCodeLabel')}</span>
-                              <p className="mt-1 break-all text-[color:var(--operator-foreground)]">{reasonCode}</p>
+                              <p className="mt-1 break-all text-foreground">{reasonCode}</p>
                             </div>
                           ) : null}
                           {durationMs != null ? (
                             <div>
                               <span className="text-xs uppercase tracking-[0.16em]">{t('duration')}</span>
-                              <p className="mt-1 text-[color:var(--operator-foreground)]">{formatDuration(durationMs)}</p>
+                              <p className="mt-1 text-foreground">{formatDuration(durationMs)}</p>
                             </div>
                           ) : null}
                           {serverName ? (
                             <div>
                               <span className="text-xs uppercase tracking-[0.16em]">{t('toolAuditServerLabel')}</span>
-                              <p className="mt-1 text-[color:var(--operator-foreground)]">{serverName}</p>
+                              <p className="mt-1 text-foreground">{serverName}</p>
                             </div>
                           ) : null}
                         </div>
                         {operatorReason ? (
                           <div className="mt-3 rounded-2xl border border-white/8 bg-white/3 px-3 py-3">
-                            <p className="text-xs font-semibold uppercase tracking-[0.16em] text-[color:var(--operator-muted)]">{t('toolAuditOperatorReasonLabel')}</p>
-                            <p className="mt-1 text-sm text-[color:var(--operator-foreground)]">{operatorReason}</p>
+                            <p className="text-xs font-semibold uppercase tracking-[0.16em] text-muted-foreground">{t('toolAuditOperatorReasonLabel')}</p>
+                            <p className="mt-1 text-sm text-foreground">{operatorReason}</p>
                           </div>
                         ) : null}
                         {userReason ? (
                           <div className="mt-3 rounded-2xl border border-white/8 bg-white/3 px-3 py-3">
-                            <p className="text-xs font-semibold uppercase tracking-[0.16em] text-[color:var(--operator-muted)]">{t('toolAuditUserReasonLabel')}</p>
-                            <p className="mt-1 text-sm text-[color:var(--operator-foreground)]">{userReason}</p>
+                            <p className="text-xs font-semibold uppercase tracking-[0.16em] text-muted-foreground">{t('toolAuditUserReasonLabel')}</p>
+                            <p className="mt-1 text-sm text-foreground">{userReason}</p>
                           </div>
                         ) : null}
                         {nextAction ? (
                           <div className="mt-3 rounded-2xl border border-white/8 bg-white/3 px-3 py-3">
-                            <p className="text-xs font-semibold uppercase tracking-[0.16em] text-[color:var(--operator-muted)]">{t('toolAuditNextActionLabel')}</p>
-                            <p className="mt-1 text-sm text-[color:var(--operator-foreground)]">{nextAction}</p>
+                            <p className="text-xs font-semibold uppercase tracking-[0.16em] text-muted-foreground">{t('toolAuditNextActionLabel')}</p>
+                            <p className="mt-1 text-sm text-foreground">{nextAction}</p>
                           </div>
                         ) : null}
                         {error ? (
                           <p className="mt-3 text-sm text-red-300/80">{error}</p>
                         ) : null}
                         {!operatorReason && !userReason && !nextAction && detailSummary ? (
-                          <p className="mt-3 text-sm text-[color:var(--operator-muted)]">{detailSummary}</p>
+                          <p className="mt-3 text-sm text-muted-foreground">{detailSummary}</p>
                         ) : null}
                       </div>
                     );
@@ -584,11 +584,11 @@ export function AgentRunDetail({
 function StatCard({ icon, label, value }: { icon: React.ReactNode; label: string; value: string }) {
   return (
     <div className="rounded-2xl border border-white/8 bg-white/4 px-4 py-3">
-      <div className="flex items-center gap-2 text-[color:var(--operator-muted)]">
+      <div className="flex items-center gap-2 text-muted-foreground">
         {icon}
         <span className="text-xs">{label}</span>
       </div>
-      <p className="mt-1 text-lg font-semibold text-[color:var(--operator-foreground)]">{value}</p>
+      <p className="mt-1 text-lg font-semibold text-foreground">{value}</p>
     </div>
   );
 }
@@ -596,8 +596,8 @@ function StatCard({ icon, label, value }: { icon: React.ReactNode; label: string
 function MetaCard({ label, value }: { label: string; value: string }) {
   return (
     <div className="rounded-2xl border border-white/8 bg-white/3 px-4 py-3">
-      <p className="text-xs text-[color:var(--operator-muted)]">{label}</p>
-      <p className="mt-1 break-all text-sm font-medium text-[color:var(--operator-foreground)]">{value}</p>
+      <p className="text-xs text-muted-foreground">{label}</p>
+      <p className="mt-1 break-all text-sm font-medium text-foreground">{value}</p>
     </div>
   );
 }
@@ -618,8 +618,8 @@ function MemoryBucketCard({
   injectedIdsLabel: string;
 }) {
   return (
-    <div className="rounded-2xl border border-white/8 bg-white/3 px-4 py-3 text-sm text-[color:var(--operator-muted)]">
-      <p className="font-medium text-[color:var(--operator-foreground)]">{label}</p>
+    <div className="rounded-2xl border border-white/8 bg-white/3 px-4 py-3 text-sm text-muted-foreground">
+      <p className="font-medium text-foreground">{label}</p>
       <div className="mt-2 space-y-1">
         <p>{queriedLabel}: {bucket.queriedCount}</p>
         <p>{inScopeLabel}: {bucket.inScopeCount}</p>
@@ -633,8 +633,8 @@ function MemoryBucketCard({
 function CriteriaList({ title, items }: { title: string; items: string[] }) {
   return (
     <div className="rounded-2xl border border-white/8 bg-white/3 px-4 py-3">
-      <p className="text-sm font-medium text-[color:var(--operator-foreground)]">{title}</p>
-      <ul className="mt-2 list-disc space-y-1 pl-5 text-sm text-[color:var(--operator-muted)]">
+      <p className="text-sm font-medium text-foreground">{title}</p>
+      <ul className="mt-2 list-disc space-y-1 pl-5 text-sm text-muted-foreground">
         {items.map((item) => <li key={item}>{item}</li>)}
       </ul>
     </div>

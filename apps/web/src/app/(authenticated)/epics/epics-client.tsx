@@ -99,12 +99,12 @@ function ProgressBar({ done, total, label }: ProgressBarProps) {
   return (
     <div className="space-y-1">
       {label ? (
-        <div className="flex items-center justify-between text-xs text-[color:var(--operator-muted)]">
+        <div className="flex items-center justify-between text-xs text-muted-foreground">
           <span>{label}</span>
           <span>{done} / {total}</span>
         </div>
       ) : null}
-      <div className="h-1.5 w-full overflow-hidden rounded-full bg-[color:var(--operator-border,hsl(var(--border)))]">
+      <div className="h-1.5 w-full overflow-hidden rounded-full bg-border">
         <div
           className="h-full rounded-full bg-primary transition-all duration-300"
           style={{ width: `${pct}%` }}
@@ -171,35 +171,35 @@ function EpicCreateForm({ projectId, orgId, onCreated, onCancel }: EpicCreateFor
   return (
     <form onSubmit={(e) => { void handleSubmit(e); }} className="space-y-4">
       <div className="space-y-1.5">
-        <label className="text-xs font-medium text-[color:var(--operator-muted)]">{t('fieldTitle')}</label>
+        <label className="text-xs font-medium text-muted-foreground">{t('fieldTitle')}</label>
         <input
           type="text"
           value={title}
           onChange={(e) => setTitle(e.target.value)}
           placeholder={t('fieldTitlePlaceholder')}
           required
-          className="w-full rounded-xl border border-[color:var(--operator-border,hsl(var(--border)))] bg-[color:var(--operator-surface)] px-3 py-2 text-sm text-[color:var(--operator-foreground)] placeholder:text-[color:var(--operator-muted)] focus:outline-none focus:ring-2 focus:ring-primary/40"
+          className="w-full rounded-xl border border-border bg-card px-3 py-2 text-sm text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-2 focus:ring-primary/40"
         />
       </div>
 
       <div className="space-y-1.5">
-        <label className="text-xs font-medium text-[color:var(--operator-muted)]">{t('fieldDescription')}</label>
+        <label className="text-xs font-medium text-muted-foreground">{t('fieldDescription')}</label>
         <textarea
           value={description}
           onChange={(e) => setDescription(e.target.value)}
           placeholder={t('fieldDescriptionPlaceholder')}
           rows={3}
-          className="w-full resize-none rounded-xl border border-[color:var(--operator-border,hsl(var(--border)))] bg-[color:var(--operator-surface)] px-3 py-2 text-sm text-[color:var(--operator-foreground)] placeholder:text-[color:var(--operator-muted)] focus:outline-none focus:ring-2 focus:ring-primary/40"
+          className="w-full resize-none rounded-xl border border-border bg-card px-3 py-2 text-sm text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-2 focus:ring-primary/40"
         />
       </div>
 
       <div className="grid grid-cols-2 gap-3">
         <div className="space-y-1.5">
-          <label className="text-xs font-medium text-[color:var(--operator-muted)]">{t('fieldPriority')}</label>
+          <label className="text-xs font-medium text-muted-foreground">{t('fieldPriority')}</label>
           <select
             value={priority}
             onChange={(e) => setPriority(e.target.value as EpicPriority)}
-            className="w-full rounded-xl border border-[color:var(--operator-border,hsl(var(--border)))] bg-[color:var(--operator-surface)] px-3 py-2 text-sm text-[color:var(--operator-foreground)] focus:outline-none focus:ring-2 focus:ring-primary/40"
+            className="w-full rounded-xl border border-border bg-card px-3 py-2 text-sm text-foreground focus:outline-none focus:ring-2 focus:ring-primary/40"
           >
             <option value="critical">{t('priorityCritical')}</option>
             <option value="high">{t('priorityHigh')}</option>
@@ -209,25 +209,25 @@ function EpicCreateForm({ projectId, orgId, onCreated, onCancel }: EpicCreateFor
         </div>
 
         <div className="space-y-1.5">
-          <label className="text-xs font-medium text-[color:var(--operator-muted)]">{t('fieldTargetSp')}</label>
+          <label className="text-xs font-medium text-muted-foreground">{t('fieldTargetSp')}</label>
           <input
             type="number"
             min="0"
             value={targetSp}
             onChange={(e) => setTargetSp(e.target.value)}
             placeholder="0"
-            className="w-full rounded-xl border border-[color:var(--operator-border,hsl(var(--border)))] bg-[color:var(--operator-surface)] px-3 py-2 text-sm text-[color:var(--operator-foreground)] placeholder:text-[color:var(--operator-muted)] focus:outline-none focus:ring-2 focus:ring-primary/40"
+            className="w-full rounded-xl border border-border bg-card px-3 py-2 text-sm text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-2 focus:ring-primary/40"
           />
         </div>
       </div>
 
       <div className="space-y-1.5">
-        <label className="text-xs font-medium text-[color:var(--operator-muted)]">{t('fieldTargetDate')}</label>
+        <label className="text-xs font-medium text-muted-foreground">{t('fieldTargetDate')}</label>
         <input
           type="date"
           value={targetDate}
           onChange={(e) => setTargetDate(e.target.value)}
-          className="w-full rounded-xl border border-[color:var(--operator-border,hsl(var(--border)))] bg-[color:var(--operator-surface)] px-3 py-2 text-sm text-[color:var(--operator-foreground)] focus:outline-none focus:ring-2 focus:ring-primary/40"
+          className="w-full rounded-xl border border-border bg-card px-3 py-2 text-sm text-foreground focus:outline-none focus:ring-2 focus:ring-primary/40"
         />
       </div>
 
@@ -301,33 +301,33 @@ function EpicEditForm({ epic, onSaved, onCancel }: EpicEditFormProps) {
   return (
     <form onSubmit={(e) => { void handleSubmit(e); }} className="space-y-4">
       <div className="space-y-1.5">
-        <label className="text-xs font-medium text-[color:var(--operator-muted)]">{t('fieldTitle')}</label>
+        <label className="text-xs font-medium text-muted-foreground">{t('fieldTitle')}</label>
         <input
           type="text"
           value={title}
           onChange={(e) => setTitle(e.target.value)}
           required
-          className="w-full rounded-xl border border-[color:var(--operator-border,hsl(var(--border)))] bg-[color:var(--operator-surface)] px-3 py-2 text-sm text-[color:var(--operator-foreground)] placeholder:text-[color:var(--operator-muted)] focus:outline-none focus:ring-2 focus:ring-primary/40"
+          className="w-full rounded-xl border border-border bg-card px-3 py-2 text-sm text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-2 focus:ring-primary/40"
         />
       </div>
 
       <div className="space-y-1.5">
-        <label className="text-xs font-medium text-[color:var(--operator-muted)]">{t('fieldDescription')}</label>
+        <label className="text-xs font-medium text-muted-foreground">{t('fieldDescription')}</label>
         <textarea
           value={description}
           onChange={(e) => setDescription(e.target.value)}
           rows={3}
-          className="w-full resize-none rounded-xl border border-[color:var(--operator-border,hsl(var(--border)))] bg-[color:var(--operator-surface)] px-3 py-2 text-sm text-[color:var(--operator-foreground)] placeholder:text-[color:var(--operator-muted)] focus:outline-none focus:ring-2 focus:ring-primary/40"
+          className="w-full resize-none rounded-xl border border-border bg-card px-3 py-2 text-sm text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-2 focus:ring-primary/40"
         />
       </div>
 
       <div className="grid grid-cols-2 gap-3">
         <div className="space-y-1.5">
-          <label className="text-xs font-medium text-[color:var(--operator-muted)]">{t('fieldStatus')}</label>
+          <label className="text-xs font-medium text-muted-foreground">{t('fieldStatus')}</label>
           <select
             value={status}
             onChange={(e) => setStatus(e.target.value as EpicStatus)}
-            className="w-full rounded-xl border border-[color:var(--operator-border,hsl(var(--border)))] bg-[color:var(--operator-surface)] px-3 py-2 text-sm text-[color:var(--operator-foreground)] focus:outline-none focus:ring-2 focus:ring-primary/40"
+            className="w-full rounded-xl border border-border bg-card px-3 py-2 text-sm text-foreground focus:outline-none focus:ring-2 focus:ring-primary/40"
           >
             <option value="draft">{t('statusDraft')}</option>
             <option value="active">{t('statusActive')}</option>
@@ -337,11 +337,11 @@ function EpicEditForm({ epic, onSaved, onCancel }: EpicEditFormProps) {
         </div>
 
         <div className="space-y-1.5">
-          <label className="text-xs font-medium text-[color:var(--operator-muted)]">{t('fieldPriority')}</label>
+          <label className="text-xs font-medium text-muted-foreground">{t('fieldPriority')}</label>
           <select
             value={priority}
             onChange={(e) => setPriority(e.target.value as EpicPriority)}
-            className="w-full rounded-xl border border-[color:var(--operator-border,hsl(var(--border)))] bg-[color:var(--operator-surface)] px-3 py-2 text-sm text-[color:var(--operator-foreground)] focus:outline-none focus:ring-2 focus:ring-primary/40"
+            className="w-full rounded-xl border border-border bg-card px-3 py-2 text-sm text-foreground focus:outline-none focus:ring-2 focus:ring-primary/40"
           >
             <option value="critical">{t('priorityCritical')}</option>
             <option value="high">{t('priorityHigh')}</option>
@@ -353,24 +353,24 @@ function EpicEditForm({ epic, onSaved, onCancel }: EpicEditFormProps) {
 
       <div className="grid grid-cols-2 gap-3">
         <div className="space-y-1.5">
-          <label className="text-xs font-medium text-[color:var(--operator-muted)]">{t('fieldTargetDate')}</label>
+          <label className="text-xs font-medium text-muted-foreground">{t('fieldTargetDate')}</label>
           <input
             type="date"
             value={targetDate}
             onChange={(e) => setTargetDate(e.target.value)}
-            className="w-full rounded-xl border border-[color:var(--operator-border,hsl(var(--border)))] bg-[color:var(--operator-surface)] px-3 py-2 text-sm text-[color:var(--operator-foreground)] focus:outline-none focus:ring-2 focus:ring-primary/40"
+            className="w-full rounded-xl border border-border bg-card px-3 py-2 text-sm text-foreground focus:outline-none focus:ring-2 focus:ring-primary/40"
           />
         </div>
 
         <div className="space-y-1.5">
-          <label className="text-xs font-medium text-[color:var(--operator-muted)]">{t('fieldTargetSp')}</label>
+          <label className="text-xs font-medium text-muted-foreground">{t('fieldTargetSp')}</label>
           <input
             type="number"
             min="0"
             value={targetSp}
             onChange={(e) => setTargetSp(e.target.value)}
             placeholder="0"
-            className="w-full rounded-xl border border-[color:var(--operator-border,hsl(var(--border)))] bg-[color:var(--operator-surface)] px-3 py-2 text-sm text-[color:var(--operator-foreground)] placeholder:text-[color:var(--operator-muted)] focus:outline-none focus:ring-2 focus:ring-primary/40"
+            className="w-full rounded-xl border border-border bg-card px-3 py-2 text-sm text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-2 focus:ring-primary/40"
           />
         </div>
       </div>
@@ -425,7 +425,7 @@ function EpicRow({ epic, isSelected, onClick, onDeleteRequest }: EpicRowProps) {
       className={`group relative w-full rounded-2xl border px-4 py-3.5 text-left transition-all duration-150 cursor-pointer ${
         isSelected
           ? 'border-primary/40 bg-primary/5'
-          : 'border-[color:var(--operator-border,hsl(var(--border)))] bg-[color:var(--operator-surface)] hover:border-primary/30 hover:bg-primary/5'
+          : 'border-border bg-card hover:border-primary/30 hover:bg-primary/5'
       }`}
       onClick={onClick}
       role="button"
@@ -434,7 +434,7 @@ function EpicRow({ epic, isSelected, onClick, onDeleteRequest }: EpicRowProps) {
     >
       <div className="space-y-2.5">
         <div className="flex items-start justify-between gap-2">
-          <p className="text-sm font-semibold leading-snug text-[color:var(--operator-foreground)]">{epic.title}</p>
+          <p className="text-sm font-semibold leading-snug text-foreground">{epic.title}</p>
           <div className="flex shrink-0 items-center gap-1.5">
             <Badge variant={statusBadgeVariant(epic.status)}>{statusLabel[epic.status]}</Badge>
             <Badge variant={priorityBadgeVariant(epic.priority)}>{priorityLabel[epic.priority]}</Badge>
@@ -450,10 +450,10 @@ function EpicRow({ epic, isSelected, onClick, onDeleteRequest }: EpicRowProps) {
         </div>
 
         {epic.description?.trim() ? (
-          <p className="text-xs text-[color:var(--operator-muted)] line-clamp-1">{epic.description.split('\n')[0]?.replace(/^#+\s*/, '')}</p>
+          <p className="text-xs text-muted-foreground line-clamp-1">{epic.description.split('\n')[0]?.replace(/^#+\s*/, '')}</p>
         ) : null}
 
-        <div className="flex items-center gap-3 text-xs text-[color:var(--operator-muted)]">
+        <div className="flex items-center gap-3 text-xs text-muted-foreground">
           {epic.target_date ? (
             <span>{t('targetDate')}: {formatDate(epic.target_date)}</span>
           ) : null}
@@ -466,7 +466,7 @@ function EpicRow({ epic, isSelected, onClick, onDeleteRequest }: EpicRowProps) {
         </div>
 
         {total > 0 ? (
-          <div className="h-1.5 w-full overflow-hidden rounded-full bg-[color:var(--operator-border,hsl(var(--border)))]">
+          <div className="h-1.5 w-full overflow-hidden rounded-full bg-border">
             <div
               className="h-full rounded-full bg-primary transition-all duration-300"
               style={{ width: `${pct}%` }}
@@ -518,7 +518,7 @@ function EpicDetailPanel({ epic, onUpdate, onClose }: EpicDetailPanelProps) {
           <button
             type="button"
             onClick={onClose}
-            className="flex items-center gap-1 text-xs text-[color:var(--operator-muted)] transition-colors hover:text-[color:var(--operator-foreground)] lg:hidden"
+            className="flex items-center gap-1 text-xs text-muted-foreground transition-colors hover:text-foreground lg:hidden"
           >
             <ChevronLeft className="size-3.5" />
             {t('backToList')}
@@ -542,7 +542,7 @@ function EpicDetailPanel({ epic, onUpdate, onClose }: EpicDetailPanelProps) {
           <button
             type="button"
             onClick={onClose}
-            className="hidden rounded-xl p-1.5 text-[color:var(--operator-muted)] transition-colors hover:bg-[color:var(--operator-surface-soft)] hover:text-[color:var(--operator-foreground)] lg:block"
+            className="hidden rounded-xl p-1.5 text-muted-foreground transition-colors hover:bg-muted hover:text-foreground lg:block"
           >
             <X className="size-4" />
           </button>
@@ -562,18 +562,18 @@ function EpicDetailPanel({ epic, onUpdate, onClose }: EpicDetailPanelProps) {
         ) : (
           <div className="space-y-6">
             {/* Title */}
-            <h2 className="text-base font-bold text-[color:var(--operator-foreground)]">{epic.title}</h2>
+            <h2 className="text-base font-bold text-foreground">{epic.title}</h2>
 
             {/* Meta grid */}
             <div className="grid grid-cols-2 gap-3">
-              <div className="rounded-xl bg-[color:var(--operator-surface-soft,hsl(var(--muted)))] px-3 py-2.5">
-                <p className="text-[10px] font-semibold uppercase tracking-[0.18em] text-[color:var(--operator-muted)]">{t('targetDate')}</p>
-                <p className="mt-1 text-sm font-medium text-[color:var(--operator-foreground)]">{formatDate(epic.target_date)}</p>
+              <div className="rounded-xl bg-muted px-3 py-2.5">
+                <p className="text-[10px] font-semibold uppercase tracking-[0.18em] text-muted-foreground">{t('targetDate')}</p>
+                <p className="mt-1 text-sm font-medium text-foreground">{formatDate(epic.target_date)}</p>
               </div>
-              <div className="rounded-xl bg-[color:var(--operator-surface-soft,hsl(var(--muted)))] px-3 py-2.5">
-                <p className="text-[10px] font-semibold uppercase tracking-[0.18em] text-[color:var(--operator-muted)]">{t('targetSp')}</p>
+              <div className="rounded-xl bg-muted px-3 py-2.5">
+                <p className="text-[10px] font-semibold uppercase tracking-[0.18em] text-muted-foreground">{t('targetSp')}</p>
                 <div className="mt-1 flex items-center gap-1.5">
-                  <p className="text-sm font-medium text-[color:var(--operator-foreground)]">{epic.target_sp !== undefined ? epic.target_sp : '—'}</p>
+                  <p className="text-sm font-medium text-foreground">{epic.target_sp !== undefined ? epic.target_sp : '—'}</p>
                   {spExceeded ? (
                     <span className="rounded-full bg-destructive/10 px-1.5 py-0.5 text-[10px] font-semibold text-destructive">{t('spExceeded')}</span>
                   ) : null}
@@ -583,20 +583,20 @@ function EpicDetailPanel({ epic, onUpdate, onClose }: EpicDetailPanelProps) {
 
             {/* Description */}
             <div className="space-y-1.5">
-              <p className="text-[10px] font-semibold uppercase tracking-[0.18em] text-[color:var(--operator-muted)]">{t('description')}</p>
-              <p className="text-sm leading-relaxed text-[color:var(--operator-foreground)]">
-                {epic.description?.trim() ? epic.description : <span className="italic text-[color:var(--operator-muted)]">{t('noDescription')}</span>}
+              <p className="text-[10px] font-semibold uppercase tracking-[0.18em] text-muted-foreground">{t('description')}</p>
+              <p className="text-sm leading-relaxed text-foreground">
+                {epic.description?.trim() ? epic.description : <span className="italic text-muted-foreground">{t('noDescription')}</span>}
               </p>
             </div>
 
             {/* Progress */}
             <div className="space-y-3">
-              <p className="text-[10px] font-semibold uppercase tracking-[0.18em] text-[color:var(--operator-muted)]">{t('storiesProgress')}</p>
+              <p className="text-[10px] font-semibold uppercase tracking-[0.18em] text-muted-foreground">{t('storiesProgress')}</p>
               <ProgressBar done={storyProgress.done} total={storyProgress.total} label={`${t('doneStories')} / ${t('totalStories')}`} />
               {spProgress.total > 0 ? (
                 <>
                   <div className="flex items-center gap-2">
-                    <p className="text-[10px] font-semibold uppercase tracking-[0.18em] text-[color:var(--operator-muted)]">{t('spProgress')}</p>
+                    <p className="text-[10px] font-semibold uppercase tracking-[0.18em] text-muted-foreground">{t('spProgress')}</p>
                     {spExceeded ? (
                       <span className="rounded-full bg-destructive/10 px-1.5 py-0.5 text-[10px] font-semibold text-destructive">
                         {t('spExceededDetail', { total: spProgress.total, target: epic.target_sp ?? 0 })}
@@ -610,7 +610,7 @@ function EpicDetailPanel({ epic, onUpdate, onClose }: EpicDetailPanelProps) {
 
             {/* Story list */}
             <div className="space-y-2">
-              <p className="text-[10px] font-semibold uppercase tracking-[0.18em] text-[color:var(--operator-muted)]">{t('stories')}</p>
+              <p className="text-[10px] font-semibold uppercase tracking-[0.18em] text-muted-foreground">{t('stories')}</p>
               {stories.length > 0 ? (
                 <div className="space-y-1.5">
                   {stories.map((story) => (
@@ -618,12 +618,12 @@ function EpicDetailPanel({ epic, onUpdate, onClose }: EpicDetailPanelProps) {
                       key={story.id}
                       type="button"
                       onClick={() => router.push(`/board?story=${story.id}`)}
-                      className="flex w-full items-center justify-between rounded-xl border border-[color:var(--operator-border,hsl(var(--border)))] px-3 py-2 text-left transition-colors hover:border-primary/30 hover:bg-primary/5"
+                      className="flex w-full items-center justify-between rounded-xl border border-border px-3 py-2 text-left transition-colors hover:border-primary/30 hover:bg-primary/5"
                     >
-                      <p className="text-sm text-[color:var(--operator-foreground)]">{story.title}</p>
+                      <p className="text-sm text-foreground">{story.title}</p>
                       <div className="flex shrink-0 items-center gap-2">
                         {story.story_points !== undefined ? (
-                          <span className="text-xs text-[color:var(--operator-muted)]">{story.story_points} SP</span>
+                          <span className="text-xs text-muted-foreground">{story.story_points} SP</span>
                         ) : null}
                         <Badge variant={story.status === 'done' ? 'success' : 'secondary'} className="text-[10px]">
                           {story.status}
@@ -633,7 +633,7 @@ function EpicDetailPanel({ epic, onUpdate, onClose }: EpicDetailPanelProps) {
                   ))}
                 </div>
               ) : (
-                <p className="text-sm italic text-[color:var(--operator-muted)]">{t('noStories')}</p>
+                <p className="text-sm italic text-muted-foreground">{t('noStories')}</p>
               )}
             </div>
           </div>
@@ -663,13 +663,13 @@ function CreateModal({ projectId, orgId, onCreated, onClose }: CreateModalProps)
         onClick={onClose}
         aria-label={t('cancel')}
       />
-      <div className="relative z-10 w-full max-w-md rounded-2xl border border-[color:var(--operator-border,hsl(var(--border)))] bg-[color:var(--operator-surface)] p-6 shadow-xl">
+      <div className="relative z-10 w-full max-w-md rounded-2xl border border-border bg-card p-6 shadow-xl">
         <div className="mb-4 flex items-center justify-between">
-          <h2 className="text-base font-bold text-[color:var(--operator-foreground)]">{t('createEpic')}</h2>
+          <h2 className="text-base font-bold text-foreground">{t('createEpic')}</h2>
           <button
             type="button"
             onClick={onClose}
-            className="rounded-xl p-1.5 text-[color:var(--operator-muted)] transition-colors hover:bg-[color:var(--operator-surface-soft)] hover:text-[color:var(--operator-foreground)]"
+            className="rounded-xl p-1.5 text-muted-foreground transition-colors hover:bg-muted hover:text-foreground"
           >
             <X className="size-4" />
           </button>
@@ -793,7 +793,7 @@ export function EpicsClient({ projectId, orgId }: EpicsClientProps) {
       <>
         <TopBarSlot title={<h1 className="text-sm font-medium">{t('title')}</h1>} />
         <div className="flex h-64 items-center justify-center">
-          <p className="text-sm text-[color:var(--operator-muted)]">{t('loading')}</p>
+          <p className="text-sm text-muted-foreground">{t('loading')}</p>
         </div>
       </>
     );
@@ -802,7 +802,7 @@ export function EpicsClient({ projectId, orgId }: EpicsClientProps) {
   const filteredEpics = statusFilter === 'all' ? epics : epics.filter((e) => e.status === statusFilter);
 
   const listPanel = (
-    <div className="flex h-full min-h-0 flex-col overflow-hidden bg-[color:var(--operator-surface-soft)]/35">
+    <div className="flex h-full min-h-0 flex-col overflow-hidden bg-muted/35">
 
       {/* Status filter */}
       <div className="flex shrink-0 gap-1 px-4 pt-3 pb-1 flex-wrap">
@@ -814,7 +814,7 @@ export function EpicsClient({ projectId, orgId }: EpicsClientProps) {
             className={`rounded-lg border px-2.5 py-1 text-xs font-medium transition-colors ${
               statusFilter === s
                 ? 'border-primary/40 bg-primary/10 text-primary'
-                : 'border-[color:var(--operator-border,hsl(var(--border)))] text-[color:var(--operator-muted)] hover:bg-muted/50'
+                : 'border-border text-muted-foreground hover:bg-muted/50'
             }`}
           >
             {s === 'all' ? t('filterAll') : s}

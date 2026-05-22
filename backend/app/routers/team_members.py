@@ -126,7 +126,7 @@ async def create_team_member(
             detail="Human member creation via team-members is deprecated. Use org invites (/api/v2/organizations/{id}/invites) instead.",
         )
 
-    repo = TeamMemberRepository(session, body.org_id)
+    repo = TeamMemberRepository(session, org_id)
     created_by = uuid.UUID(auth.user_id) if body.type == "agent" else None
 
     # AC1/AC2: agent 생성 시 fakechat_port 자동 할당 (project 내 중복 방지)

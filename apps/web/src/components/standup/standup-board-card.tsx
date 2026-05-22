@@ -32,19 +32,19 @@ export function StandupBoardCard({
   const commentCount = feedback.filter((f) => f.review_type === 'comment').length;
 
   return (
-    <div className={cn('flex flex-col rounded-xl border border-border bg-card shadow-sm', isCurrentUser && 'ring-1 ring-[color:var(--operator-primary)]/40')}>
+    <div className={cn('flex flex-col rounded-xl border border-border bg-card shadow-sm', isCurrentUser && 'ring-1 ring-brand/40')}>
       {/* Header */}
       <div className="flex flex-wrap items-start justify-between gap-2 px-4 pt-4">
         <div className="min-w-0 flex-1 space-y-1">
           <div className="flex flex-wrap items-center gap-1.5">
-            <span className="text-sm font-semibold text-[color:var(--operator-foreground)]">{member.name}</span>
+            <span className="text-sm font-semibold text-foreground">{member.name}</span>
             {isCurrentUser && <Badge variant="info">{t('you')}</Badge>}
             <Badge variant={member.type === 'agent' ? 'secondary' : 'outline'}>
               {member.type === 'agent' ? t('agent') : t('human')}
             </Badge>
           </div>
           {activeSprintTitle ? (
-            <span className="text-xs text-[color:var(--operator-muted)]">{activeSprintTitle}</span>
+            <span className="text-xs text-muted-foreground">{activeSprintTitle}</span>
           ) : null}
         </div>
         {isCurrentUser && onEdit ? (
@@ -60,27 +60,27 @@ export function StandupBoardCard({
           <>
             <div className="space-y-1">
               <div className="text-xs font-semibold uppercase tracking-wider text-emerald-400">{t('doneLabel')}</div>
-              <p className={cn('whitespace-pre-wrap text-sm line-clamp-3', entry.done ? 'text-[color:var(--operator-foreground)]/90' : 'text-[color:var(--operator-muted)]')}>
+              <p className={cn('whitespace-pre-wrap text-sm line-clamp-3', entry.done ? 'text-foreground/90' : 'text-muted-foreground')}>
                 {entry.done || t('emptySection')}
               </p>
             </div>
             <div className="space-y-1">
-              <div className="text-xs font-semibold uppercase tracking-wider text-[color:var(--operator-primary-soft)]">{t('planLabel')}</div>
-              <p className={cn('whitespace-pre-wrap text-sm line-clamp-3', entry.plan ? 'text-[color:var(--operator-foreground)]/90' : 'text-[color:var(--operator-muted)]')}>
+              <div className="text-xs font-semibold uppercase tracking-wider text-[color:var(--brand-soft)]">{t('planLabel')}</div>
+              <p className={cn('whitespace-pre-wrap text-sm line-clamp-3', entry.plan ? 'text-foreground/90' : 'text-muted-foreground')}>
                 {entry.plan || t('emptySection')}
               </p>
             </div>
             {entry.blockers ? (
               <div className="space-y-1">
                 <div className="text-xs font-semibold uppercase tracking-wider text-rose-300">{t('blockersLabel')}</div>
-                <p className="whitespace-pre-wrap text-sm text-[color:var(--operator-foreground)]/90 line-clamp-3">
+                <p className="whitespace-pre-wrap text-sm text-foreground/90 line-clamp-3">
                   {entry.blockers}
                 </p>
               </div>
             ) : null}
           </>
         ) : (
-          <p className="text-sm text-[color:var(--operator-muted)]">{t('notWrittenYet')}</p>
+          <p className="text-sm text-muted-foreground">{t('notWrittenYet')}</p>
         )}
       </div>
 
@@ -91,7 +91,7 @@ export function StandupBoardCard({
           {requestCount > 0 ? <Badge variant="destructive">{t('feedbackRequestChangesCount', { count: requestCount })}</Badge> : null}
           {commentCount > 0 ? <Badge variant="info">{t('feedbackCommentCount', { count: commentCount })}</Badge> : null}
           {feedback.length === 0 ? (
-            <span className="text-xs text-[color:var(--operator-muted)]">{t('feedbackCount', { count: 0 })}</span>
+            <span className="text-xs text-muted-foreground">{t('feedbackCount', { count: 0 })}</span>
           ) : null}
         </div>
         {entry && !isCurrentUser ? (

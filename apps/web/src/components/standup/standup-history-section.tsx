@@ -47,7 +47,7 @@ export function StandupHistorySection({ projectId, memberNameById = {} }: Props)
   return (
     <section className="mt-8 space-y-3">
       <div className="flex items-center gap-2">
-        <h2 className="text-sm font-semibold text-[color:var(--operator-foreground)]">
+        <h2 className="text-sm font-semibold text-foreground">
           {t('history', { defaultValue: '📋 작성 이력' })}
         </h2>
         <Badge variant="chip">{entries.length}</Badge>
