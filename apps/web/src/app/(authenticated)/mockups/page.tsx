@@ -9,7 +9,6 @@ import { OperatorInput } from '@/components/ui/operator-control';
 import { EmptyState } from '@/components/ui/empty-state';
 import { TopBarSlot } from '@/components/nav/top-bar-slot';
 import { PageSkeleton } from '@/components/ui/page-skeleton';
-import { UpgradeModal } from '@/components/ui/upgrade-modal';
 
 interface MockupPage {
   id: string;
@@ -32,7 +31,6 @@ export default function MockupsPage() {
   const [newSlug, setNewSlug] = useState('');
   const [newViewport, setNewViewport] = useState<'desktop' | 'mobile'>('desktop');
   const [creating, setCreating] = useState(false);
-  const [upgradeMsg, setUpgradeMsg] = useState<string | null>(null);
 
   useEffect(() => {
     fetch('/api/mockups').then((r) => r.ok ? r.json() : null).then((json) => {
@@ -57,9 +55,6 @@ export default function MockupsPage() {
       setShowCreate(false);
     } else {
       const errJson = await res.json().catch(() => null);
-      if (errJson?.error?.code === 'UPGRADE_REQUIRED') {
-        setUpgradeMsg(errJson.error.message);
-      }
     }
     setCreating(false);
   };
@@ -164,7 +159,6 @@ export default function MockupsPage() {
         )}
       </div>
 
-      {upgradeMsg ? <UpgradeModal message={upgradeMsg} onClose={() => setUpgradeMsg(null)} /> : null}
     </>
   );
 }
