@@ -47,6 +47,12 @@ const nextConfig: NextConfig = {
       },
     ];
   },
+  async redirects() {
+    return [
+      { source: '/memos', destination: '/inbox', permanent: true },
+      { source: '/memos/:path*', destination: '/inbox', permanent: true },
+    ];
+  },
   async rewrites() {
     const fastapiUrl = process.env.NEXT_PUBLIC_FASTAPI_URL ?? 'http://localhost:8000';
     return [
