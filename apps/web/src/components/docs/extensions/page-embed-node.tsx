@@ -153,18 +153,18 @@ function PageEmbedView({ node, updateAttributes, extension }: ReactNodeViewProps
           onSubmit={handleSubmit}
           className="flex items-center gap-2 rounded-xl border border-white/10 bg-white/4 px-4 py-3"
         >
-          <FileText className="size-4 shrink-0 text-[color:var(--operator-muted)]" />
+          <FileText className="size-4 shrink-0 text-muted-foreground" />
           <input
             type="text"
             value={inputSlug}
             onChange={(e) => setInputSlug(e.target.value)}
             placeholder="Enter document slug or ID…"
-            className="flex-1 bg-transparent text-sm outline-none placeholder:text-[color:var(--operator-muted)]"
+            className="flex-1 bg-transparent text-sm outline-none placeholder:text-muted-foreground"
             autoFocus
           />
           <button
             type="submit"
-            className="rounded-lg bg-[color:var(--operator-primary)]/14 px-3 py-1 text-xs font-medium text-[color:var(--operator-primary-soft)] hover:bg-[color:var(--operator-primary)]/24"
+            className="rounded-lg bg-brand/14 px-3 py-1 text-xs font-medium text-[color:var(--operator-primary-soft)] hover:bg-brand/24"
           >
             Embed
           </button>
@@ -177,7 +177,7 @@ function PageEmbedView({ node, updateAttributes, extension }: ReactNodeViewProps
   if (loading) {
     return (
       <NodeViewWrapper data-testid="page-embed-loading">
-        <div className="flex items-center gap-2 rounded-xl border border-white/8 bg-white/4 px-4 py-3 text-sm text-[color:var(--operator-muted)]">
+        <div className="flex items-center gap-2 rounded-xl border border-white/8 bg-white/4 px-4 py-3 text-sm text-muted-foreground">
           <RefreshCw className="size-4 shrink-0 animate-spin" />
           <span>Loading document…</span>
         </div>
@@ -190,8 +190,8 @@ function PageEmbedView({ node, updateAttributes, extension }: ReactNodeViewProps
     return (
       <NodeViewWrapper data-testid="page-embed-error">
         <div className="flex items-center gap-2 rounded-xl border border-white/8 bg-white/4 px-4 py-3">
-          <AlertCircle className="size-4 shrink-0 text-[color:var(--operator-muted)]" />
-          <span className="flex-1 text-sm text-[color:var(--operator-muted)]">{error}</span>
+          <AlertCircle className="size-4 shrink-0 text-muted-foreground" />
+          <span className="flex-1 text-sm text-muted-foreground">{error}</span>
           <button
             type="button"
             onClick={handleReset}
@@ -215,7 +215,7 @@ function PageEmbedView({ node, updateAttributes, extension }: ReactNodeViewProps
           onKeyDown={(e) => {
             if (e.key === 'Enter' || e.key === ' ') onNavigate?.(doc.slug);
           }}
-          className="group flex cursor-pointer items-center gap-3 rounded-xl border border-white/8 bg-white/4 px-4 py-3 transition-colors hover:border-[color:var(--operator-primary)]/30 hover:bg-[color:var(--operator-primary)]/6"
+          className="group flex cursor-pointer items-center gap-3 rounded-xl border border-white/8 bg-white/4 px-4 py-3 transition-colors hover:border-[color:var(--operator-primary)]/30 hover:bg-brand/6"
         >
           {doc.icon ? (
             <span className="shrink-0 text-lg">{doc.icon}</span>
@@ -223,10 +223,10 @@ function PageEmbedView({ node, updateAttributes, extension }: ReactNodeViewProps
             <FileText className="size-5 shrink-0 text-[color:var(--operator-primary-soft)]" />
           )}
           <div className="min-w-0 flex-1">
-            <p className="truncate text-sm font-medium text-[color:var(--operator-foreground)]">
+            <p className="truncate text-sm font-medium text-foreground">
               {doc.title}
             </p>
-            <p className="text-xs text-[color:var(--operator-muted)]">/{doc.slug}</p>
+            <p className="text-xs text-muted-foreground">/{doc.slug}</p>
           </div>
           <button
             type="button"
@@ -234,7 +234,7 @@ function PageEmbedView({ node, updateAttributes, extension }: ReactNodeViewProps
               e.stopPropagation();
               handleReset();
             }}
-            className="text-xs text-[color:var(--operator-muted)] opacity-0 transition group-hover:opacity-100 hover:text-[color:var(--operator-foreground)]"
+            className="text-xs text-muted-foreground opacity-0 transition group-hover:opacity-100 hover:text-foreground"
           >
             Change
           </button>

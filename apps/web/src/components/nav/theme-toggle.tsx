@@ -30,7 +30,7 @@ export function ThemeToggle({ className = '' }: { className?: string }) {
             className={`rounded-xl p-1.5 transition ${
               isActive
                 ? 'bg-primary text-primary-foreground shadow-sm'
-                : 'text-[color:var(--operator-muted)] hover:bg-[color:var(--operator-surface-soft)] hover:text-[color:var(--operator-foreground)]'
+                : 'text-muted-foreground hover:bg-muted hover:text-foreground'
             }`}
           >
             <Icon className="size-4" />

@@ -349,17 +349,17 @@ const SlashMenu = forwardRef<
         data-active={isActive}
         className={`flex w-full items-center gap-2.5 rounded-lg px-2.5 py-1.5 text-left text-sm transition-colors ${
           isActive
-            ? 'bg-[color:var(--operator-primary)]/14 text-[color:var(--operator-primary-soft)]'
-            : 'text-[color:var(--operator-foreground)] hover:bg-white/6'
+            ? 'bg-brand/14 text-[color:var(--operator-primary-soft)]'
+            : 'text-foreground hover:bg-white/6'
         }`}
         onClick={() => command(item)}
       >
-        <span className={`flex h-7 w-7 flex-shrink-0 items-center justify-center rounded-md border border-border/60 ${isActive ? 'border-[color:var(--operator-primary)]/30 bg-[color:var(--operator-primary)]/10' : 'bg-muted/40'}`}>
-          <Icon className={`size-3.5 ${isActive ? 'text-[color:var(--operator-primary-soft)]' : 'text-[color:var(--operator-muted)]'}`} />
+        <span className={`flex h-7 w-7 flex-shrink-0 items-center justify-center rounded-md border border-border/60 ${isActive ? 'border-[color:var(--operator-primary)]/30 bg-brand/10' : 'bg-muted/40'}`}>
+          <Icon className={`size-3.5 ${isActive ? 'text-[color:var(--operator-primary-soft)]' : 'text-muted-foreground'}`} />
         </span>
         <span className="flex min-w-0 flex-col">
           <span className="text-xs font-medium leading-tight">{item.title}</span>
-          <span className="truncate text-[11px] text-[color:var(--operator-muted)]">{item.description}</span>
+          <span className="truncate text-[11px] text-muted-foreground">{item.description}</span>
         </span>
       </button>
     );
@@ -368,12 +368,12 @@ const SlashMenu = forwardRef<
   return (
     <div
       ref={containerRef}
-      className="max-h-72 w-64 overflow-y-auto rounded-xl border border-white/10 bg-[color:var(--operator-surface)] p-1 shadow-lg"
+      className="max-h-72 w-64 overflow-y-auto rounded-xl border border-white/10 bg-card p-1 shadow-lg"
     >
       {grouped ? (
         grouped.map((group) => (
           <div key={group.label}>
-            <p className="px-2.5 pb-0.5 pt-1.5 text-[10px] font-semibold uppercase tracking-[0.15em] text-[color:var(--operator-muted)]">
+            <p className="px-2.5 pb-0.5 pt-1.5 text-[10px] font-semibold uppercase tracking-[0.15em] text-muted-foreground">
               {group.label}
             </p>
             {group.items.map((item) => {

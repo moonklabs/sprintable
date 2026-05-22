@@ -44,18 +44,18 @@ function FileAttachmentView({ node }: ReactNodeViewProps) {
   return (
     <NodeViewWrapper as="div" className="my-3 not-prose">
       <div className="flex items-center gap-3 rounded-xl border border-border bg-muted/20 px-4 py-3">
-        <div className="flex h-9 w-9 flex-shrink-0 items-center justify-center rounded-lg bg-[color:var(--operator-primary)]/10 text-[color:var(--operator-primary-soft)]">
+        <div className="flex h-9 w-9 flex-shrink-0 items-center justify-center rounded-lg bg-brand/10 text-[color:var(--operator-primary-soft)]">
           <FileIcon className="size-4" />
         </div>
         <div className="min-w-0 flex-1">
-          <p className="truncate text-sm font-medium text-[color:var(--operator-foreground)]">{filename}</p>
-          <p className="text-xs text-[color:var(--operator-muted)]">{formatFileSize(size)}</p>
+          <p className="truncate text-sm font-medium text-foreground">{filename}</p>
+          <p className="text-xs text-muted-foreground">{formatFileSize(size)}</p>
         </div>
         <button
           type="button"
           contentEditable={false}
           onClick={handleDownload}
-          className="flex-shrink-0 rounded-lg border border-border p-2 text-[color:var(--operator-muted)] transition-colors hover:border-[color:var(--operator-primary)]/40 hover:text-[color:var(--operator-primary-soft)]"
+          className="flex-shrink-0 rounded-lg border border-border p-2 text-muted-foreground transition-colors hover:border-[color:var(--operator-primary)]/40 hover:text-[color:var(--operator-primary-soft)]"
           aria-label="파일 다운로드"
         >
           <DownloadIcon className="size-4" />

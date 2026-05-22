@@ -58,7 +58,7 @@ interface MockupEditorShellProps {
 
 const GRID_SIZE = 16;
 const SNAP_THRESHOLD = 6;
-const TINY_BUTTON_CLASS = 'rounded-xl border border-white/10 bg-[color:var(--operator-surface-soft)]/55 px-2.5 py-1.5 text-[11px] text-[color:var(--operator-foreground)] transition hover:border-[color:var(--operator-primary)]/18 hover:bg-white/8 disabled:cursor-not-allowed disabled:opacity-50';
+const TINY_BUTTON_CLASS = 'rounded-xl border border-white/10 bg-muted/55 px-2.5 py-1.5 text-[11px] text-foreground transition hover:border-[color:var(--operator-primary)]/18 hover:bg-white/8 disabled:cursor-not-allowed disabled:opacity-50';
 
 function cloneState(components: MockupComponent[]) {
   return cloneMockupComponents(components);
@@ -799,7 +799,7 @@ export function MockupEditorShell({ mockupId }: MockupEditorShellProps) {
 
   if (loading) return <PageSkeleton />;
   if (isMobileView) {
-    return <div className="flex min-h-screen items-center justify-center p-6 text-sm text-[color:var(--operator-muted)]">{t('desktopOnly')}</div>;
+    return <div className="flex min-h-screen items-center justify-center p-6 text-sm text-muted-foreground">{t('desktopOnly')}</div>;
   }
 
   const stageScale = zoom / 100;
@@ -829,7 +829,7 @@ export function MockupEditorShell({ mockupId }: MockupEditorShellProps) {
         className="select-none"
       >
         <div
-          className={`relative h-full w-full overflow-hidden rounded-2xl border bg-white shadow-sm transition ${isSelected ? 'border-[color:var(--operator-primary)] ring-2 ring-[color:var(--operator-primary)]/25' : 'border-white/10 hover:border-[color:var(--operator-primary)]/18'} ${canContainChildren ? 'bg-[color:var(--operator-panel)]/70' : ''}`}
+          className={`relative h-full w-full overflow-hidden rounded-2xl border bg-white shadow-sm transition ${isSelected ? 'border-[color:var(--operator-primary)] ring-2 ring-[color:var(--operator-primary)]/25' : 'border-white/10 hover:border-[color:var(--operator-primary)]/18'} ${canContainChildren ? 'bg-muted/70' : ''}`}
           onMouseDown={(event) => {
             if (event.button !== 0) return;
             event.stopPropagation();
@@ -854,7 +854,7 @@ export function MockupEditorShell({ mockupId }: MockupEditorShellProps) {
             </div>
           ) : null}
           {selectedIds.length > 1 && isSelected ? (
-            <div className="pointer-events-none absolute right-2 top-2 rounded-full bg-[color:var(--operator-primary)] px-2 py-0.5 text-[10px] font-medium text-white shadow-sm">
+            <div className="pointer-events-none absolute right-2 top-2 rounded-full bg-brand px-2 py-0.5 text-[10px] font-medium text-white shadow-sm">
               ✓
             </div>
           ) : null}
@@ -868,7 +868,7 @@ export function MockupEditorShell({ mockupId }: MockupEditorShellProps) {
     );
   }
 
-  const panelButtonClass = 'rounded-2xl border border-white/10 bg-[color:var(--operator-surface-soft)]/55 px-3 py-2 text-xs text-[color:var(--operator-foreground)] transition hover:border-[color:var(--operator-primary)]/18 hover:bg-white/8 disabled:cursor-not-allowed disabled:opacity-50';
+  const panelButtonClass = 'rounded-2xl border border-white/10 bg-muted/55 px-3 py-2 text-xs text-foreground transition hover:border-[color:var(--operator-primary)]/18 hover:bg-white/8 disabled:cursor-not-allowed disabled:opacity-50';
 
   return (
     <div className="space-y-4">
@@ -880,10 +880,10 @@ export function MockupEditorShell({ mockupId }: MockupEditorShellProps) {
               setTitle(event.target.value);
               setHasChanges(true);
             }}
-            className="min-w-0 flex-1 rounded-2xl border border-white/10 bg-[color:var(--operator-panel)] px-4 py-3 text-sm font-semibold text-[color:var(--operator-foreground)] outline-none ring-0 placeholder:text-[color:var(--operator-muted)]"
+            className="min-w-0 flex-1 rounded-2xl border border-white/10 bg-muted px-4 py-3 text-sm font-semibold text-foreground outline-none ring-0 placeholder:text-muted-foreground"
             placeholder={t('titlePlaceholder')}
           />
-          <span className="rounded-full border border-white/10 bg-[color:var(--operator-surface-soft)]/55 px-3 py-1 text-[11px] text-[color:var(--operator-muted)]">
+          <span className="rounded-full border border-white/10 bg-muted/55 px-3 py-1 text-[11px] text-muted-foreground">
             {components.length} {t('components')}
           </span>
           <span className={`rounded-full px-3 py-1 text-[11px] ${hasChanges ? 'bg-amber-500/15 text-amber-400' : 'border border-white/10 bg-emerald-500/10 text-emerald-400'}`}>
@@ -892,7 +892,7 @@ export function MockupEditorShell({ mockupId }: MockupEditorShellProps) {
         </div>
         <div className="flex flex-wrap items-center gap-2">
           <button type="button" className={panelButtonClass} onClick={() => setZoom((current) => Math.max(25, current - 25))}>-</button>
-          <span className="rounded-2xl border border-white/10 bg-[color:var(--operator-surface-soft)]/55 px-3 py-2 text-xs text-[color:var(--operator-muted)]">{zoom}%</span>
+          <span className="rounded-2xl border border-white/10 bg-muted/55 px-3 py-2 text-xs text-muted-foreground">{zoom}%</span>
           <button type="button" className={panelButtonClass} onClick={() => setZoom((current) => Math.min(400, current + 25))}>+</button>
           <button type="button" className={panelButtonClass} onClick={() => setZoom(100)}>{t('resetZoom')}</button>
           <button type="button" className={panelButtonClass} onClick={() => setShowGrid((current) => !current)}>{showGrid ? t('gridOn') : t('gridOff')}</button>
@@ -909,11 +909,11 @@ export function MockupEditorShell({ mockupId }: MockupEditorShellProps) {
       </div>
 
       <div className="grid gap-4 xl:grid-cols-[300px_minmax(0,1fr)_340px]">
-        <aside className="rounded-3xl border border-white/10 bg-[color:var(--operator-panel)]/82 p-4 shadow-[0_18px_50px_rgba(0,0,0,0.24)] backdrop-blur-xl">
+        <aside className="rounded-3xl border border-white/10 bg-muted/82 p-4 shadow-[0_18px_50px_rgba(0,0,0,0.24)] backdrop-blur-xl">
           <div className="mb-4 flex items-center justify-between gap-2">
             <div>
-              <div className="text-xs font-semibold uppercase tracking-[0.18em] text-[color:var(--operator-muted)]">{t('components')}</div>
-              <div className="text-[11px] text-[color:var(--operator-muted)]">{t('treeCanvasSync')}</div>
+              <div className="text-xs font-semibold uppercase tracking-[0.18em] text-muted-foreground">{t('components')}</div>
+              <div className="text-[11px] text-muted-foreground">{t('treeCanvasSync')}</div>
             </div>
           </div>
           <div className="space-y-2">
@@ -921,20 +921,20 @@ export function MockupEditorShell({ mockupId }: MockupEditorShellProps) {
               <button
                 key={item.type}
                 type="button"
-                className="flex w-full items-center justify-between rounded-2xl border border-white/10 bg-[color:var(--operator-surface-soft)]/55 px-3 py-2 text-left text-xs text-[color:var(--operator-foreground)] transition hover:border-[color:var(--operator-primary)]/18 hover:bg-white/8"
+                className="flex w-full items-center justify-between rounded-2xl border border-white/10 bg-muted/55 px-3 py-2 text-left text-xs text-foreground transition hover:border-[color:var(--operator-primary)]/18 hover:bg-white/8"
                 onClick={() => createComponent(item.type)}
               >
                 <span className="flex items-center gap-2"><span>{item.icon}</span> {item.type}</span>
-                <span className="text-[10px] text-[color:var(--operator-muted)]">{getDefaultComponentSize(item.type).w}×{getDefaultComponentSize(item.type).h}</span>
+                <span className="text-[10px] text-muted-foreground">{getDefaultComponentSize(item.type).w}×{getDefaultComponentSize(item.type).h}</span>
               </button>
             ))}
           </div>
 
           <div className="mt-6">
-            <div className="mb-3 text-xs font-semibold uppercase tracking-[0.18em] text-[color:var(--operator-muted)]">{t('scenarios')}</div>
+            <div className="mb-3 text-xs font-semibold uppercase tracking-[0.18em] text-muted-foreground">{t('scenarios')}</div>
             <div className="space-y-1">
               {scenarios.map((scenario) => (
-                <div key={scenario.id} className={`flex items-center gap-2 rounded-2xl px-2 py-1.5 ${activeScenarioId === scenario.id ? 'bg-[color:var(--operator-primary)]/12' : ''}`}>
+                <div key={scenario.id} className={`flex items-center gap-2 rounded-2xl px-2 py-1.5 ${activeScenarioId === scenario.id ? 'bg-brand/12' : ''}`}>
                   {editingScenarioId === scenario.id ? (
                     <input
                       value={editingName}
@@ -944,7 +944,7 @@ export function MockupEditorShell({ mockupId }: MockupEditorShellProps) {
                         if (event.key === 'Enter') void renameScenario(scenario.id);
                       }}
                       autoFocus
-                      className="w-full rounded-xl border border-white/10 bg-[color:var(--operator-surface-soft)] px-2 py-1 text-xs text-[color:var(--operator-foreground)] outline-none"
+                      className="w-full rounded-xl border border-white/10 bg-muted px-2 py-1 text-xs text-foreground outline-none"
                     />
                   ) : (
                     <button
@@ -954,7 +954,7 @@ export function MockupEditorShell({ mockupId }: MockupEditorShellProps) {
                         setEditingScenarioId(scenario.id);
                         setEditingName(scenario.name);
                       }}
-                      className="flex-1 truncate text-left text-xs text-[color:var(--operator-foreground)]"
+                      className="flex-1 truncate text-left text-xs text-foreground"
                     >
                       {scenario.is_default ? `⭐ ${t('defaultScenario')}` : scenario.name}
                     </button>
@@ -964,40 +964,40 @@ export function MockupEditorShell({ mockupId }: MockupEditorShellProps) {
                   ) : null}
                 </div>
               ))}
-              <button type="button" className="w-full rounded-2xl border border-dashed border-white/12 px-3 py-2 text-xs text-[color:var(--operator-muted)] transition hover:border-[color:var(--operator-primary)]/24 hover:text-[color:var(--operator-primary-soft)]" onClick={() => void addScenario()}>
+              <button type="button" className="w-full rounded-2xl border border-dashed border-white/12 px-3 py-2 text-xs text-muted-foreground transition hover:border-[color:var(--operator-primary)]/24 hover:text-[color:var(--operator-primary-soft)]" onClick={() => void addScenario()}>
                 + {t('addScenario')}
               </button>
             </div>
           </div>
 
           <div className="mt-6">
-            <div className="mb-3 text-xs font-semibold uppercase tracking-[0.18em] text-[color:var(--operator-muted)]">{t('componentTree')}</div>
+            <div className="mb-3 text-xs font-semibold uppercase tracking-[0.18em] text-muted-foreground">{t('componentTree')}</div>
             <div className="space-y-0.5">
               {buildTreeNodeRows(renderedNodes).map(({ node, depth }) => (
                 <button
                   key={node.component.id}
                   type="button"
                   onClick={(event) => handleTreeSelect(node.component.id, event)}
-                  className={`flex w-full items-center gap-2 rounded-2xl px-2 py-1.5 text-left text-[11px] transition ${selectedIds.includes(node.component.id) ? 'bg-[color:var(--operator-primary)]/12 text-[color:var(--operator-primary-soft)]' : 'text-[color:var(--operator-muted)] hover:bg-white/8'}`}
+                  className={`flex w-full items-center gap-2 rounded-2xl px-2 py-1.5 text-left text-[11px] transition ${selectedIds.includes(node.component.id) ? 'bg-brand/12 text-[color:var(--operator-primary-soft)]' : 'text-muted-foreground hover:bg-white/8'}`}
                   style={{ paddingLeft: `${8 + depth * 14}px` }}
                 >
                   <span className="text-[10px]">{componentPaletteEntry(node.component.component_type)?.icon ?? '⬚'}</span>
                   <span className="truncate">{node.component.component_type}</span>
-                  <span className="ml-auto text-[10px] text-[color:var(--operator-muted)]">z:{node.box.zIndex}</span>
+                  <span className="ml-auto text-[10px] text-muted-foreground">z:{node.box.zIndex}</span>
                 </button>
               ))}
-              {!renderedNodes.length ? <div className="rounded-2xl border border-dashed border-white/12 px-3 py-6 text-center text-xs text-[color:var(--operator-muted)]">{t('dragHere')}</div> : null}
+              {!renderedNodes.length ? <div className="rounded-2xl border border-dashed border-white/12 px-3 py-6 text-center text-xs text-muted-foreground">{t('dragHere')}</div> : null}
             </div>
           </div>
         </aside>
 
-        <main className="rounded-3xl border border-white/10 bg-[color:var(--operator-panel)]/82 p-4 shadow-[0_18px_50px_rgba(0,0,0,0.24)] backdrop-blur-xl" onMouseDown={(event) => {
+        <main className="rounded-3xl border border-white/10 bg-muted/82 p-4 shadow-[0_18px_50px_rgba(0,0,0,0.24)] backdrop-blur-xl" onMouseDown={(event) => {
           if (event.target === event.currentTarget) clearSelection();
         }}>
           <div className="mb-3 flex items-center justify-between gap-3">
-            <div className="flex flex-wrap items-center gap-2 text-xs text-[color:var(--operator-muted)]">
-              <span className="rounded-full border border-white/10 bg-[color:var(--operator-surface-soft)]/55 px-3 py-1">{selectedIds.length ? `${selectedIds.length} ${t('selected')}` : t('selectComponent')}</span>
-              {selectedIds.length > 1 ? <span className="rounded-full border border-white/10 bg-[color:var(--operator-surface-soft)]/55 px-3 py-1">{t('multiSelect')}</span> : null}
+            <div className="flex flex-wrap items-center gap-2 text-xs text-muted-foreground">
+              <span className="rounded-full border border-white/10 bg-muted/55 px-3 py-1">{selectedIds.length ? `${selectedIds.length} ${t('selected')}` : t('selectComponent')}</span>
+              {selectedIds.length > 1 ? <span className="rounded-full border border-white/10 bg-muted/55 px-3 py-1">{t('multiSelect')}</span> : null}
             </div>
             <div className="flex flex-wrap gap-2">
               <button type="button" className={TINY_BUTTON_CLASS} onClick={() => applyAlignment('left')} disabled={selectedIds.length < 2}>{t('alignLeft')}</button>
@@ -1059,30 +1059,30 @@ export function MockupEditorShell({ mockupId }: MockupEditorShellProps) {
           </div>
         </main>
 
-        <aside className="rounded-3xl border border-white/10 bg-[color:var(--operator-panel)]/82 p-4 shadow-[0_18px_50px_rgba(0,0,0,0.24)] backdrop-blur-xl">
+        <aside className="rounded-3xl border border-white/10 bg-muted/82 p-4 shadow-[0_18px_50px_rgba(0,0,0,0.24)] backdrop-blur-xl">
           {showVersions ? (
             <div>
-              <div className="mb-3 text-sm font-semibold text-[color:var(--operator-foreground)]">{t('versionHistory')}</div>
+              <div className="mb-3 text-sm font-semibold text-foreground">{t('versionHistory')}</div>
               <div className="space-y-2">
                 {versions.length ? versions.map((version) => (
-                  <div key={version.id} className="rounded-2xl border border-white/8 bg-[color:var(--operator-surface-soft)]/55 p-3">
+                  <div key={version.id} className="rounded-2xl border border-white/8 bg-muted/55 p-3">
                     <div className="flex items-center justify-between gap-2">
                       <div>
-                        <div className="text-xs font-medium text-[color:var(--operator-foreground)]">v{version.version}</div>
-                        <div className="text-[10px] text-[color:var(--operator-muted)]">{new Date(version.created_at).toLocaleString()}</div>
+                        <div className="text-xs font-medium text-foreground">v{version.version}</div>
+                        <div className="text-[10px] text-muted-foreground">{new Date(version.created_at).toLocaleString()}</div>
                       </div>
                       <button type="button" className={TINY_BUTTON_CLASS} onClick={() => void restoreVersion(version.id)}>{t('restore')}</button>
                     </div>
                   </div>
-                )) : <div className="rounded-2xl border border-dashed border-white/12 px-3 py-6 text-center text-xs text-[color:var(--operator-muted)]">{t('noVersions')}</div>}
+                )) : <div className="rounded-2xl border border-dashed border-white/12 px-3 py-6 text-center text-xs text-muted-foreground">{t('noVersions')}</div>}
               </div>
             </div>
           ) : selectedComponent ? (
             <div>
               <div className="mb-3 flex items-center justify-between gap-2">
                 <div>
-                  <div className="text-sm font-semibold text-[color:var(--operator-foreground)]">{selectedComponent.component_type}</div>
-                  <div className="text-[10px] text-[color:var(--operator-muted)]">{selectedComponent.id}</div>
+                  <div className="text-sm font-semibold text-foreground">{selectedComponent.component_type}</div>
+                  <div className="text-[10px] text-muted-foreground">{selectedComponent.id}</div>
                 </div>
                 <button type="button" className={TINY_BUTTON_CLASS} onClick={deleteSelection}>{t('deleteSelected')}</button>
               </div>
@@ -1090,24 +1090,24 @@ export function MockupEditorShell({ mockupId }: MockupEditorShellProps) {
               <div className="space-y-2">
                 {Object.entries(selectedComponent.props).map(([key, value]) => (
                   <div key={key}>
-                    <label className="mb-1 block text-[10px] font-medium uppercase tracking-[0.16em] text-[color:var(--operator-muted)]">{key}</label>
+                    <label className="mb-1 block text-[10px] font-medium uppercase tracking-[0.16em] text-muted-foreground">{key}</label>
                     <input
                       type={typeof value === 'number' ? 'number' : 'text'}
                       value={typeof value === 'object' && value !== null ? JSON.stringify(value) : String(value ?? '')}
                       onChange={(event) => updateSelectedProp(key, event.target.value)}
-                      className="w-full rounded-2xl border border-white/10 bg-[color:var(--operator-surface-soft)] px-3 py-2 text-xs text-[color:var(--operator-foreground)] outline-none"
+                      className="w-full rounded-2xl border border-white/10 bg-muted px-3 py-2 text-xs text-foreground outline-none"
                     />
                   </div>
                 ))}
               </div>
 
               <div className="mt-4">
-                <label className="mb-1 block text-[10px] font-medium uppercase tracking-[0.16em] text-[color:var(--operator-muted)]">{t('specDescription')}</label>
+                <label className="mb-1 block text-[10px] font-medium uppercase tracking-[0.16em] text-muted-foreground">{t('specDescription')}</label>
                 <textarea
                   value={selectedComponent.spec_description ?? ''}
                   onChange={(event) => updateSelectedSpec(event.target.value)}
                   rows={5}
-                  className="w-full rounded-2xl border border-white/10 bg-[color:var(--operator-surface-soft)] px-3 py-2 text-xs text-[color:var(--operator-foreground)] outline-none"
+                  className="w-full rounded-2xl border border-white/10 bg-muted px-3 py-2 text-xs text-foreground outline-none"
                   placeholder={t('markdownPlaceholder')}
                 />
               </div>
@@ -1118,7 +1118,7 @@ export function MockupEditorShell({ mockupId }: MockupEditorShellProps) {
                   if (!scenario) return null;
                   const overrides = scenario.override_props[selectedComponent.id] ?? {};
                   return (
-                    <div className="mt-4 rounded-2xl border border-[color:var(--operator-primary)]/20 bg-[color:var(--operator-primary)]/10 p-3">
+                    <div className="mt-4 rounded-2xl border border-[color:var(--operator-primary)]/20 bg-brand/10 p-3">
                       <div className="mb-2 text-[10px] font-semibold uppercase tracking-[0.16em] text-[color:var(--operator-primary-soft)]">
                         {scenario.is_default ? t('defaultScenario') : scenario.name} {t('overrides')}
                       </div>
@@ -1139,7 +1139,7 @@ export function MockupEditorShell({ mockupId }: MockupEditorShellProps) {
                                 }
                                 await saveScenarioOverrides(activeScenarioId, nextOverrides);
                               }}
-                              className="w-full rounded-2xl border border-white/10 bg-[color:var(--operator-panel)] px-3 py-2 text-xs text-[color:var(--operator-foreground)] outline-none"
+                              className="w-full rounded-2xl border border-white/10 bg-muted px-3 py-2 text-xs text-foreground outline-none"
                             />
                           </div>
                         ))}
@@ -1150,7 +1150,7 @@ export function MockupEditorShell({ mockupId }: MockupEditorShellProps) {
               ) : null}
             </div>
           ) : (
-            <div className="rounded-2xl border border-dashed border-white/12 px-3 py-6 text-center text-sm text-[color:var(--operator-muted)]">
+            <div className="rounded-2xl border border-dashed border-white/12 px-3 py-6 text-center text-sm text-muted-foreground">
               {t('selectComponent')}
             </div>
           )}

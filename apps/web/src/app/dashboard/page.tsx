@@ -139,7 +139,7 @@ export default async function DashboardPage() {
               {/* Assigned Stories */}
               {assignedStories && assignedStories.length > 0 ? (
                 <div>
-                  <div className="mb-2 text-sm font-medium text-[color:var(--operator-foreground)]">{t('assignedToMe')}</div>
+                  <div className="mb-2 text-sm font-medium text-foreground">{t('assignedToMe')}</div>
                   <div className="space-y-2">
                     {assignedStories.map((story) => (
                       <div key={story.id} className="flex items-center justify-between rounded-md border border-border bg-muted/30 px-4 py-2">

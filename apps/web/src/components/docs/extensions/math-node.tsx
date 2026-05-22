@@ -48,14 +48,14 @@ function MathBlockView({ node, selected }: ReactNodeViewProps) {
       <div className="rounded-xl border border-border bg-muted/10">
         {/* Header */}
         <div className="flex items-center justify-between px-3 py-2" contentEditable={false}>
-          <span className="text-[11px] font-medium uppercase tracking-[0.12em] text-[color:var(--operator-muted)]">math</span>
+          <span className="text-[11px] font-medium uppercase tracking-[0.12em] text-muted-foreground">math</span>
           {selected && (
-            <span className="text-[11px] text-[color:var(--operator-muted)]">LaTeX 편집 중</span>
+            <span className="text-[11px] text-muted-foreground">LaTeX 편집 중</span>
           )}
         </div>
 
         {/* LaTeX editor — visible when selected */}
-        <pre className={`border-t border-border/50 p-4 text-[13px] leading-6 text-[color:var(--operator-foreground)] font-mono ${showEdit ? '' : 'hidden'}`}>
+        <pre className={`border-t border-border/50 p-4 text-[13px] leading-6 text-foreground font-mono ${showEdit ? '' : 'hidden'}`}>
           <NodeViewContent />
         </pre>
 
@@ -67,10 +67,10 @@ function MathBlockView({ node, selected }: ReactNodeViewProps) {
             ) : html ? (
               <div
                 dangerouslySetInnerHTML={{ __html: html }}
-                className="flex justify-center overflow-x-auto [&_.katex]:text-[color:var(--operator-foreground)]"
+                className="flex justify-center overflow-x-auto [&_.katex]:text-foreground"
               />
             ) : (
-              <p className="text-xs text-[color:var(--operator-muted)] text-center">수식을 입력하세요 (LaTeX)</p>
+              <p className="text-xs text-muted-foreground text-center">수식을 입력하세요 (LaTeX)</p>
             )}
           </div>
         )}
@@ -109,7 +109,7 @@ function MathInlineView({ node }: ReactNodeViewProps) {
       <NodeViewWrapper as="span" contentEditable={false}>
         <span
           dangerouslySetInnerHTML={{ __html: html }}
-          className="[&_.katex]:text-[color:var(--operator-foreground)]"
+          className="[&_.katex]:text-foreground"
         />
       </NodeViewWrapper>
     );

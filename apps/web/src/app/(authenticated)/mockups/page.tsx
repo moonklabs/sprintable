@@ -74,11 +74,11 @@ export default function MockupsPage() {
 
       {showCreate ? (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 p-4">
-          <div className="w-full max-w-md rounded-3xl border border-white/10 bg-[color:var(--operator-panel)] p-6 shadow-xl backdrop-blur-xl">
-            <h3 className="mb-4 text-lg font-semibold text-[color:var(--operator-foreground)]">{t('createMockup')}</h3>
+          <div className="w-full max-w-md rounded-3xl border border-white/10 bg-muted p-6 shadow-xl backdrop-blur-xl">
+            <h3 className="mb-4 text-lg font-semibold text-foreground">{t('createMockup')}</h3>
             <div className="space-y-3">
               <div>
-                <label className="text-xs font-medium uppercase tracking-[0.18em] text-[color:var(--operator-muted)]">{t('titlePlaceholder')}</label>
+                <label className="text-xs font-medium uppercase tracking-[0.18em] text-muted-foreground">{t('titlePlaceholder')}</label>
                 <OperatorInput
                   type="text"
                   value={newTitle}
@@ -91,7 +91,7 @@ export default function MockupsPage() {
                 />
               </div>
               <div>
-                <label className="text-xs font-medium uppercase tracking-[0.18em] text-[color:var(--operator-muted)]">{t('slug')}</label>
+                <label className="text-xs font-medium uppercase tracking-[0.18em] text-muted-foreground">{t('slug')}</label>
                 <OperatorInput
                   type="text"
                   value={newSlug}
@@ -101,7 +101,7 @@ export default function MockupsPage() {
                 />
               </div>
               <div>
-                <label className="text-xs font-medium uppercase tracking-[0.18em] text-[color:var(--operator-muted)]">{t('viewport')}</label>
+                <label className="text-xs font-medium uppercase tracking-[0.18em] text-muted-foreground">{t('viewport')}</label>
                 <div className="mt-1 flex gap-2">
                   <Button variant={newViewport === 'desktop' ? 'hero' : 'glass'} size="sm" onClick={() => setNewViewport('desktop')}>🖥 {t('desktop')}</Button>
                   <Button variant={newViewport === 'mobile' ? 'hero' : 'glass'} size="sm" onClick={() => setNewViewport('mobile')}>📱 {t('mobile')}</Button>
@@ -127,12 +127,12 @@ export default function MockupsPage() {
               <button
                 key={mockup.id}
                 type="button"
-                className="group rounded-3xl border border-white/8 bg-[color:var(--operator-surface-soft)]/55 p-4 text-left transition hover:border-[color:var(--operator-primary)]/18 hover:bg-white/8"
+                className="group rounded-3xl border border-white/8 bg-muted/55 p-4 text-left transition hover:border-[color:var(--operator-primary)]/18 hover:bg-white/8"
                 onClick={() => router.push(`/mockups/${mockup.id}`)}
               >
                 <div className="flex items-start justify-between gap-3">
                   <div>
-                    <h3 className="text-sm font-semibold text-[color:var(--operator-foreground)]">{mockup.title}</h3>
+                    <h3 className="text-sm font-semibold text-foreground">{mockup.title}</h3>
                     <div className="mt-2 flex flex-wrap items-center gap-2">
                       <Badge variant="outline">{mockup.category}</Badge>
                       <Badge variant="info">v{mockup.version}</Badge>
@@ -140,7 +140,7 @@ export default function MockupsPage() {
                   </div>
                   <span className="text-lg">{mockup.viewport === 'mobile' ? '📱' : '🖥'}</span>
                 </div>
-                <div className="mt-3 text-xs text-[color:var(--operator-muted)]">{new Date(mockup.created_at).toLocaleDateString()}</div>
+                <div className="mt-3 text-xs text-muted-foreground">{new Date(mockup.created_at).toLocaleDateString()}</div>
                 <div className="mt-3 opacity-0 transition group-hover:opacity-100">
                   <Button
                     variant="glass"

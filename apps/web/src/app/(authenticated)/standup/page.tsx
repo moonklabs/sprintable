@@ -411,16 +411,16 @@ export default function StandupPage() {
                   onClick={() => setSprintExpanded((prev) => !prev)}
                 >
                   <div className="space-y-0.5">
-                    <h2 className="text-sm font-semibold text-[color:var(--operator-foreground)]">{t('currentSprint')}</h2>
+                    <h2 className="text-sm font-semibold text-foreground">{t('currentSprint')}</h2>
                     {activeSprint ? (
-                      <p className="text-xs text-[color:var(--operator-muted)]">{activeSprint.title} · {t('sprintStoryCount', { count: stories.length })}</p>
+                      <p className="text-xs text-muted-foreground">{activeSprint.title} · {t('sprintStoryCount', { count: stories.length })}</p>
                     ) : (
-                      <p className="text-xs text-[color:var(--operator-muted)]">{t('noActiveSprint')}</p>
+                      <p className="text-xs text-muted-foreground">{t('noActiveSprint')}</p>
                     )}
                   </div>
                   <div className="flex items-center gap-2">
                     <Badge variant="outline">{t('taskProgress', { done: doneTasks, total: totalTasks })}</Badge>
-                    <span className="text-xs text-[color:var(--operator-muted)]">{sprintExpanded ? t('collapseSprintStories') : t('expandSprintStories')}</span>
+                    <span className="text-xs text-muted-foreground">{sprintExpanded ? t('collapseSprintStories') : t('expandSprintStories')}</span>
                   </div>
                 </button>
 
@@ -429,7 +429,7 @@ export default function StandupPage() {
                     {loading ? (
                       <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-3">
                         {[1, 2, 3].map((item) => (
-                          <div key={item} className="h-28 animate-pulse rounded-2xl bg-[color:var(--operator-surface-soft)]" />
+                          <div key={item} className="h-28 animate-pulse rounded-2xl bg-muted" />
                         ))}
                       </div>
                     ) : activeSprint ? (
@@ -439,10 +439,10 @@ export default function StandupPage() {
                             {stories.map((story) => (
                               <div key={story.id} className="rounded-2xl border border-border/70 bg-background p-4 shadow-sm">
                                 <div className="flex flex-wrap items-center justify-between gap-2">
-                                  <p className="text-sm font-medium text-[color:var(--operator-foreground)]">{story.title}</p>
+                                  <p className="text-sm font-medium text-foreground">{story.title}</p>
                                   <Badge variant="outline">{story.status}</Badge>
                                 </div>
-                                <div className="mt-2 flex flex-wrap items-center gap-2 text-xs text-[color:var(--operator-muted)]">
+                                <div className="mt-2 flex flex-wrap items-center gap-2 text-xs text-muted-foreground">
                                   <Badge variant="chip">{story.assignee_name ?? t('unknown')}</Badge>
                                   <span>{t('taskProgress', { done: story.done_task_count, total: story.task_count })}</span>
                                 </div>
@@ -507,18 +507,18 @@ export default function StandupPage() {
               {loading ? (
                 <section className="space-y-3">
                   <div className="flex items-center gap-2">
-                    <h2 className="text-sm font-semibold text-[color:var(--operator-foreground)]">👤 {t('people')}</h2>
+                    <h2 className="text-sm font-semibold text-foreground">👤 {t('people')}</h2>
                   </div>
                   <div className="grid grid-cols-1 gap-4 md:grid-cols-2 xl:grid-cols-3">
                     {[1, 2, 3].map((item) => (
-                      <div key={item} className="h-48 animate-pulse rounded-xl bg-[color:var(--operator-surface-soft)]" />
+                      <div key={item} className="h-48 animate-pulse rounded-xl bg-muted" />
                     ))}
                   </div>
                 </section>
               ) : humanMembers.length > 0 ? (
                 <section className="space-y-3">
                   <div className="flex flex-wrap items-center justify-between gap-2">
-                    <h2 className="text-sm font-semibold text-[color:var(--operator-foreground)]">👤 {t('people')}</h2>
+                    <h2 className="text-sm font-semibold text-foreground">👤 {t('people')}</h2>
                     <Badge variant="chip">{t('memberCount', { count: humanMembers.length })}</Badge>
                   </div>
                   <div className="grid grid-cols-1 gap-4 md:grid-cols-2 xl:grid-cols-3">
@@ -531,7 +531,7 @@ export default function StandupPage() {
                         return (
                           <div key={member.id} className="col-span-full rounded-xl border border-[color:var(--operator-primary)]/40 bg-card p-4 shadow-sm space-y-4">
                             <div className="flex flex-wrap items-center justify-between gap-2">
-                              <h3 className="text-sm font-semibold text-[color:var(--operator-foreground)]">{t('selfEditTitle')}</h3>
+                              <h3 className="text-sm font-semibold text-foreground">{t('selfEditTitle')}</h3>
                               <Button variant="ghost" size="sm" onClick={() => setEditingSelf(false)}>{t('cancel')}</Button>
                             </div>
 
@@ -567,7 +567,7 @@ export default function StandupPage() {
 
                             <div className="space-y-3 rounded-xl border border-border/70 bg-muted/10 p-3">
                               <div className="flex flex-wrap items-center justify-between gap-2">
-                                <p className="text-xs font-semibold uppercase tracking-wider text-[color:var(--operator-muted)]">{t('linkedStories')}</p>
+                                <p className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">{t('linkedStories')}</p>
                                 <Badge variant="outline">{t('linkedStoryCount', { count: planStoryIds.length })}</Badge>
                               </div>
                               {storyPickerStories.length > 0 ? (
@@ -603,7 +603,7 @@ export default function StandupPage() {
                                   })}
                                 </div>
                               ) : (
-                                <p className="text-sm text-[color:var(--operator-muted)]">{t('noSprintStories')}</p>
+                                <p className="text-sm text-muted-foreground">{t('noSprintStories')}</p>
                               )}
                             </div>
 
@@ -639,7 +639,7 @@ export default function StandupPage() {
               {!loading && agentMembers.length > 0 ? (
                 <section className="space-y-3">
                   <div className="flex flex-wrap items-center justify-between gap-2">
-                    <h2 className="text-sm font-semibold text-[color:var(--operator-foreground)]">🤖 {t('agents')}</h2>
+                    <h2 className="text-sm font-semibold text-foreground">🤖 {t('agents')}</h2>
                     <Badge variant="chip">{t('memberCount', { count: agentMembers.length })}</Badge>
                   </div>
                   <div className="grid grid-cols-1 gap-4 md:grid-cols-2 xl:grid-cols-3">
