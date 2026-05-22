@@ -49,12 +49,9 @@ from .tools.meetings import (
     create_meeting, delete_meeting, get_meeting, list_meetings,
     trigger_ai_summary, update_meeting,
 )
-from .tools.memos import (
-    CreateConversationInput, CreateMemoInput, ListChatMessagesInput,
-    ListMemosInput, ListMyMemosInput, MemoIdInput, ReplyMemoInput, SendChatInput,
-    create_conversation, create_memo, list_chat_messages,
-    list_memos, list_my_memos, read_memo, reply_memo, resolve_memo,
-    send_chat_message, send_memo,
+from .tools.chat import (
+    CreateConversationInput, ListChatMessagesInput, SendChatInput,
+    create_conversation, list_chat_messages, send_chat_message,
 )
 from .tools.notifications import (
     CheckNotificationsInput, MarkAllNotificationsReadInput, MarkNotificationReadInput,
@@ -324,28 +321,7 @@ _TOOL_DEFS: list[tuple] = [
     ("sprintable_unlock_files",
      "파일 작업 완료 선언 — lock 해제.",
      UnlockFilesInput, unlock_files),
-    # Memos + Chat (10)
-    ("sprintable_list_memos",
-     "메모 목록 조회.",
-     ListMemosInput, list_memos),
-    ("sprintable_create_memo",
-     "메모 생성.",
-     CreateMemoInput, create_memo),
-    ("sprintable_send_memo",
-     "[DEPRECATED] 메모 발송. create_memo와 동일 경로.",
-     CreateMemoInput, send_memo),
-    ("sprintable_list_my_memos",
-     "내 메모 목록 조회 (담당/작성).",
-     ListMyMemosInput, list_my_memos),
-    ("sprintable_read_memo",
-     "메모 읽기 (conversation 우선, 없으면 memos fallback).",
-     MemoIdInput, read_memo),
-    ("sprintable_reply_memo",
-     "[DEPRECATED] 메모 답신 (conversation thread reply로 라우팅).",
-     ReplyMemoInput, reply_memo),
-    ("sprintable_resolve_memo",
-     "메모 해결 처리.",
-     MemoIdInput, resolve_memo),
+    # Chat (3)
     ("sprintable_send_chat_message",
      "conversation thread에 채팅 메시지 발송.",
      SendChatInput, send_chat_message),
