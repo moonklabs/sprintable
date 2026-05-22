@@ -445,10 +445,12 @@ async def list_messages(
     if conv_project_id is None:
         raise HTTPException(status_code=404, detail="Conversation not found")
 
-    sender = await _resolve_member(auth, org_id, db, project_id=conv_project_id)
+    # owner/admin: org-level 조회 (project 소속 무관 접근), member: project-level 유지
+    sender = await _resolve_member(auth, org_id, db, project_id=None)
 
-    # 참여자 검증 — owner/admin은 에이전트 대화 열람 허용
     if sender.role not in ("owner", "admin"):
+        # project isolation 보존 — project 소속 member 재확인
+        sender = await _resolve_member(auth, org_id, db, project_id=conv_project_id)
         participant = (await db.execute(
             select(ConversationParticipant.id).where(
                 ConversationParticipant.conversation_id == conversation_id,
