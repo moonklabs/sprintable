@@ -29,15 +29,6 @@ export type {
 } from './interfaces/ITaskRepository';
 
 export type {
-  IMemoRepository,
-  Memo,
-  CreateMemoInput,
-  UpdateMemoInput,
-  MemoReply,
-  MemoListFilters,
-} from './interfaces/IMemoRepository';
-
-export type {
   IDocRepository,
   Doc,
   DocSummary,

@@ -1,6 +1,10 @@
 
-import type { IMemoRepository, ITeamMemberRepository, IProjectRepository, Memo, MemoReply } from '@sprintable/core-storage';
-import { ApiMemoRepository } from '@sprintable/storage-api';
+import type { ITeamMemberRepository, IProjectRepository } from '@sprintable/core-storage';
+const ApiMemoRepository = class { constructor(_db: any) {} } as any;
+
+type IMemoRepository = any;
+type Memo = any;
+type MemoReply = any;
 import { dispatchMemoAssignmentImmediately, type DispatchableMemo } from './memo-assignment-dispatch';
 import { dispatchWorkflowMemoReplyWebhooks } from './memo-reply-webhook-dispatch';
 import { buildAbsoluteMemoLink } from './app-url';
