@@ -119,7 +119,7 @@ export function DashboardActivityTimeline({ projectId }: DashboardActivityTimeli
   }, [fetchItems]);
 
   return (
-    <SectionCard className="col-span-full">
+    <SectionCard className="xl:col-span-2">
       <SectionCardHeader>
         <div className="flex items-center justify-between gap-3">
           <div className="flex items-center gap-2">
