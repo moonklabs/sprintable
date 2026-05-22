@@ -20,7 +20,6 @@ import {
   Settings,
   Users,
 } from 'lucide-react';
-import { LogoutButton } from '@/app/dashboard/logout-button';
 import { LocaleSwitcher } from '@/components/locale-switcher';
 import { ThemeToggle } from '@/components/nav/theme-toggle';
 import { CommandPalette } from '@/components/command-palette/command-palette';
@@ -320,7 +319,6 @@ export function AppSidebar({
             <CircleHelp className="size-4" />
           </Link>
         </div>
-        <LogoutButton />
       </SidebarFooter>
 
       <SidebarRail />

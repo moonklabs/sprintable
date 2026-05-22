@@ -3,7 +3,6 @@ import { redirect } from 'next/navigation';
 import { getServerSession } from '@/lib/db/server';
 import { fastapiCall } from '@sprintable/storage-api';
 import { getLocale, getTranslations } from 'next-intl/server';
-import { LogoutButton } from './logout-button';
 import { SectionCard, SectionCardBody, SectionCardHeader } from '@/components/ui/section-card';
 import { EmptyState } from '@/components/ui/empty-state';
 import { StatusBadge } from '@/components/ui/status-badge';
@@ -66,11 +65,6 @@ export default async function DashboardPage() {
       <div className="mx-auto max-w-7xl space-y-6">
         <TopBarSlot
           title={<h1 className="text-sm font-medium">{t('title')}</h1>}
-          actions={
-            <div className="flex items-center gap-2">
-              <LogoutButton />
-            </div>
-          }
         />
 
         {/* Agent connection banner — shown only when no active agents */}
