@@ -5,7 +5,6 @@ import Link from 'next/link';
 import { useTranslations, useLocale } from 'next-intl';
 import { Activity, ChevronRight } from 'lucide-react';
 import { SectionCard, SectionCardBody, SectionCardHeader } from '@/components/ui/section-card';
-import { useRealtimeMemos } from '@/hooks/use-realtime-memos';
 
 interface ActivityLogItem {
   id: string;
@@ -21,7 +20,6 @@ interface ActivityLogItem {
 
 interface DashboardActivityTimelineProps {
   projectId: string;
-  currentTeamMemberId?: string;
 }
 
 const LIMIT = 10;
@@ -47,9 +45,6 @@ function formatAction(action: string, entityType: string | null, entityTitle: st
   switch (action) {
     case 'story.status_changed': return t('actionStoryStatus', { entity });
     case 'story.created': return t('actionStoryCreated', { entity });
-    case 'memo.created': return t('actionMemoCreated', { entity });
-    case 'memo.replied': return t('actionMemoReplied', { entity });
-    case 'memo.resolved': return t('actionMemoResolved', { entity });
     case 'agent_run.completed': return t('actionRunCompleted', { entity });
     case 'agent_run.failed': return t('actionRunFailed', { entity });
     case 'sprint.started': return t('actionSprintStarted', { entity });
@@ -82,7 +77,7 @@ function RelativeTime({ iso, locale }: { iso: string; locale: string }) {
   return <span className="shrink-0 text-[11px] text-muted-foreground">{label}</span>;
 }
 
-export function DashboardActivityTimeline({ projectId, currentTeamMemberId }: DashboardActivityTimelineProps) {
+export function DashboardActivityTimeline({ projectId }: DashboardActivityTimelineProps) {
   const t = useTranslations('activityTimeline');
   const locale = useLocale();
   const [items, setItems] = useState<ActivityLogItem[]>([]);
@@ -122,14 +117,6 @@ export function DashboardActivityTimeline({ projectId, currentTeamMemberId }: Da
       document.removeEventListener('visibilitychange', handleVisibility);
     };
   }, [fetchItems]);
-
-  // SSE: refresh on memo events
-  useRealtimeMemos({
-    currentTeamMemberId,
-    onNewMemo: () => { void fetchItems(); },
-    onNewReply: () => { void fetchItems(); },
-    onMemoUpdated: () => { void fetchItems(); },
-  });
 
   return (
     <SectionCard className="col-span-full">

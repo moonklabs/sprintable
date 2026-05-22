@@ -7,7 +7,6 @@ import {
   BookOpen,
   CheckCheck,
   FolderKanban,
-  MessageSquareMore,
   X,
   Zap,
 } from 'lucide-react';
@@ -15,17 +14,15 @@ import { cn } from '@/lib/utils';
 import { useDashboardContext } from '@/app/dashboard/dashboard-shell';
 import { useSseNotifications, type SseEventNotification } from '@/hooks/use-sse-notifications';
 
-type FilterTab = 'all' | 'memo' | 'story' | 'system';
+type FilterTab = 'all' | 'story' | 'system';
 
 const FILTER_TABS: { value: FilterTab; label: string }[] = [
   { value: 'all', label: '전체' },
-  { value: 'memo', label: '메모' },
   { value: 'story', label: '스토리' },
   { value: 'system', label: '시스템' },
 ];
 
-function getNotificationTab(eventType: string): 'memo' | 'story' | 'system' {
-  if (eventType.startsWith('memo')) return 'memo';
+function getNotificationTab(eventType: string): 'story' | 'system' {
   if (
     eventType.startsWith('story') ||
     eventType.startsWith('task') ||
@@ -54,8 +51,6 @@ function getEntityHref(notification: EventNotification): string | null {
   const { source_entity_type, source_entity_id } = notification;
   if (!source_entity_id) return null;
   switch (source_entity_type) {
-    case 'memo':
-      return `/memos?id=${source_entity_id}`;
     case 'story':
       return `/board?story=${source_entity_id}`;
     case 'task':
@@ -76,7 +71,6 @@ function getEntityHref(notification: EventNotification): string | null {
 }
 
 function getEventIcon(eventType: string) {
-  if (eventType.startsWith('memo')) return <MessageSquareMore className="size-4" />;
   if (eventType.startsWith('story') || eventType.startsWith('status')) return <FolderKanban className="size-4" />;
   if (eventType === 'dispatched') return <Zap className="size-4" />;
   if (eventType.startsWith('doc')) return <BookOpen className="size-4" />;
@@ -152,7 +146,6 @@ function NotificationPanel({
   }) ?? [];
 
   const emptyMessage =
-    filterTab === 'memo' ? '메모 알림이 없습니다' :
     filterTab === 'story' ? '스토리 알림이 없습니다' :
     filterTab === 'system' ? '시스템 알림이 없습니다' :
     '새 알림이 없습니다';

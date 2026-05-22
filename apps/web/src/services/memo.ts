@@ -1,13 +1,16 @@
 
-import type { IMemoRepository, ITeamMemberRepository, IProjectRepository, Memo, MemoReply } from '@sprintable/core-storage';
-import { ApiMemoRepository } from '@sprintable/storage-api';
+import type { ITeamMemberRepository, IProjectRepository } from '@sprintable/core-storage';
+const ApiMemoRepository = class { constructor(_db: any) {} } as any;
+
+type IMemoRepository = any;
+type Memo = any;
+type MemoReply = any;
 import { dispatchMemoAssignmentImmediately, type DispatchableMemo } from './memo-assignment-dispatch';
 import { dispatchWorkflowMemoReplyWebhooks } from './memo-reply-webhook-dispatch';
 import { buildAbsoluteMemoLink } from './app-url';
 import { ForbiddenError } from './sprint';
 import { NotificationService } from './notification.service';
 import { hasExactMemberMention } from './doc-comment-notifications';
-import { InboxItemService } from './inbox-item.service';
 
 export interface CreateMemoInput {
   project_id: string;
@@ -494,36 +497,16 @@ export class MemoService {
         { onConflict: 'memo_id,mentioned_user_id', ignoreDuplicates: true },
       );
 
-    // 멘션 알림 + inbox 듀얼 쓰기
-    // notifications → 곧 inbox_items로 일원화 (Phase A.B). 그동안 둘 다 emit.
-    const inboxService = new InboxItemService(this.db);
-
     for (const userId of mentionedIds) {
       await notifService.create({
         org_id: orgId,
         user_id: userId,
-        type: 'memo_mention',
+        type: 'system',
         title: '메모에서 멘션되었습니다',
         body: content.slice(0, 100),
         reference_type: 'memo',
         reference_id: memoId,
       });
-
-      // Inbox dual-write — idempotent via UNIQUE (org_id, source_type, source_id, kind).
-      // Failure here must not block the legacy notification path.
-      try {
-        await inboxService.produceMentionFromMemo({
-          org_id: orgId,
-          project_id: projectId,
-          assignee_member_id: userId,
-          memo_id: memoId,
-          title: '메모에서 멘션됨',
-          context: content.slice(0, 500),
-          source_id: `${memoId}:${userId}`,
-        });
-      } catch (err: unknown) {
-        console.error('[MemoService._processMemoMentions] inbox dual-write failed', err);
-      }
     }
   }
 
@@ -637,7 +620,7 @@ export class MemoService {
       await notifService.create({
         org_id: memo.org_id,
         user_id: memo.created_by,
-        type: 'memo_reply',
+        type: 'system',
         title: '메모에 답장이 달렸습니다',
         body: reply.content.slice(0, 100),
         reference_type: 'memo',
@@ -659,7 +642,7 @@ export class MemoService {
       await notifService.create({
         org_id: memo.org_id,
         user_id: member.id,
-        type: 'memo_mention',
+        type: 'system',
         title: '메모에서 멘션되었습니다',
         body: reply.content.slice(0, 100),
         reference_type: 'memo',

@@ -5,7 +5,7 @@ import { useDashboardContext } from '@/app/dashboard/dashboard-shell';
 import Link from 'next/link';
 import { useRouter, useSearchParams } from 'next/navigation';
 import { useTranslations } from 'next-intl';
-import { BarChart2, Bell, Bot, Check, CreditCard, FolderKanban, GitBranch, Key, Menu, Palette, Trash2, User, Users, X, Zap } from 'lucide-react';
+import { BarChart2, Bell, Bot, Check, CreditCard, FolderKanban, GitBranch, Menu, Palette, Trash2, User, Users, X, Zap } from 'lucide-react';
 import { UsageDashboard } from '@/components/settings/usage-dashboard';
 import { OrgMembersSection } from '@/components/settings/org-members-section';
 import { ProjectAccessSection } from '@/components/settings/project-access-section';
@@ -14,7 +14,6 @@ import { AiSettingsSection } from '@/components/settings/ai-settings';
 import { MyProfileSection } from '@/components/settings/my-profile-section';
 import { ByomKeyManagement } from '@/components/settings/byom-key-management';
 import { McpConnectionSettings } from '@/components/settings/mcp-connection-settings';
-import { SlackIntegrationSettingsSection } from '@/components/settings/slack-integration-settings';
 import { WorkflowTriggerTypesSection } from '@/components/settings/workflow-trigger-types-section';
 import { WorkflowExecutionHistorySection } from '@/components/settings/workflow-execution-history-section';
 import { WorkflowTemplateGallerySection } from '@/components/settings/workflow-template-gallery-section';
@@ -92,7 +91,7 @@ interface NewAgentResult {
 }
 
 const NOTIFICATION_CATEGORIES = [
-  { key: 'memo', types: ['memo', 'memo_reply', 'memo_mention'] },
+
   { key: 'story', types: ['story', 'story_assigned'] },
   { key: 'task', types: ['task', 'task_assigned', 'task_completed'] },
   { key: 'sprint', types: ['sprint_closed'] },
@@ -765,25 +764,29 @@ export default function SettingsPage() {
               <Palette className="h-4 w-4" />
               {t('tabAppearance')}
             </TabsTrigger>
-            {currentProjectId && isAdmin ? (
-              <TabsTrigger value="api-keys">
-                <Key className="h-4 w-4" />
-                {t('tabApiKeys')}
+            <TabsTrigger value="notifications">
+              <Bell className="h-4 w-4" />
+              {t('tabNotifications')}
+            </TabsTrigger>
+
+            <span className="px-2 pb-1 pt-4 text-[10px] font-medium uppercase tracking-wider text-muted-foreground/70">{t('projectSettings')}</span>
+            {currentProjectId ? (
+              <TabsTrigger value="ai">
+                <Bot className="h-4 w-4" />
+                {t('tabAiAgents')}
               </TabsTrigger>
             ) : null}
-
-            {currentProjectId ? (
-              <>
-                <span className="px-2 pb-1 pt-4 text-[10px] font-medium uppercase tracking-wider text-muted-foreground/70">{t('projectSettings')}</span>
-                <TabsTrigger value="notifications">
-                  <Bell className="h-4 w-4" />
-                  {t('tabNotifications')}
-                </TabsTrigger>
-                <TabsTrigger value="ai">
-                  <Bot className="h-4 w-4" />
-                  {t('tabAiAgents')}
-                </TabsTrigger>
-              </>
+            {adminChecked ? (
+              <TabsTrigger value="members">
+                <Users className="h-4 w-4" />
+                Team Members
+              </TabsTrigger>
+            ) : null}
+            {adminChecked && isAdmin ? (
+              <TabsTrigger value="workflow">
+                <GitBranch className="h-4 w-4" />
+                {t('tabWorkflow')}
+              </TabsTrigger>
             ) : null}
 
             {adminChecked ? (
@@ -801,36 +804,32 @@ export default function SettingsPage() {
                   <FolderKanban className="h-4 w-4" />
                   {t('tabProjects')}
                 </TabsTrigger>
-                <TabsTrigger value="members">
-                  <Users className="h-4 w-4" />
-                  Team Members
-                </TabsTrigger>
                 {isAdmin ? (
-                  <>
-                    <TabsTrigger value="integrations">
-                      <Zap className="h-4 w-4" />
-                      {t('tabIntegrations')}
-                    </TabsTrigger>
-                    <TabsTrigger value="workflow">
-                      <GitBranch className="h-4 w-4" />
-                      {t('tabWorkflow')}
-                    </TabsTrigger>
-                    <TabsTrigger value="subscription">
-                      <CreditCard className="h-4 w-4" />
-                      {t('tabSubscription')}
-                    </TabsTrigger>
-                    {isEEEnabled() && (
-                      <TabsTrigger value="billing">
-                        <CreditCard className="h-4 w-4" />
-                        Billing
-                      </TabsTrigger>
-                    )}
-                    <TabsTrigger value="usage">
-                      <BarChart2 className="h-4 w-4" />
-                      {t('tabUsage')}
-                    </TabsTrigger>
-                  </>
+                  <TabsTrigger value="webhooks">
+                    <Zap className="h-4 w-4" />
+                    Webhooks
+                  </TabsTrigger>
                 ) : null}
+              </>
+            ) : null}
+
+            {adminChecked && isAdmin ? (
+              <>
+                <span className="truncate px-2 pb-1 pt-4 text-[10px] font-medium uppercase tracking-wider text-muted-foreground/70">{t('billing')}</span>
+                <TabsTrigger value="subscription">
+                  <CreditCard className="h-4 w-4" />
+                  {t('tabSubscription')}
+                </TabsTrigger>
+                {isEEEnabled() && (
+                  <TabsTrigger value="billing">
+                    <CreditCard className="h-4 w-4" />
+                    Billing
+                  </TabsTrigger>
+                )}
+                <TabsTrigger value="usage">
+                  <BarChart2 className="h-4 w-4" />
+                  {t('tabUsage')}
+                </TabsTrigger>
               </>
             ) : null}
 
@@ -1640,65 +1639,62 @@ export default function SettingsPage() {
             </TabsContent>
 
             {adminChecked && isAdmin ? (
-            <TabsContent value="integrations">
-              <div className="space-y-6">
-                <SlackIntegrationSettingsSection />
-                <SectionCard>
-                  <SectionCardHeader>
-                    <div className="space-y-1">
-                      <h2 className="text-base font-semibold text-foreground">{t('webhooks')}</h2>
-                      <p className="text-sm text-muted-foreground">{t('webhookDescription')}</p>
-                    </div>
-                  </SectionCardHeader>
-                  <SectionCardBody className="space-y-4">
-                    <div className="space-y-2">
-                      {webhooks.map((webhook) => (
-                        <div key={webhook.id} className="flex items-center justify-between gap-3 rounded-md border border-border bg-muted/30 px-3 py-3 text-xs">
-                          <span className="truncate text-foreground">{webhook.url}</span>
-                          <span className="shrink-0 text-muted-foreground">{webhook.projects?.name ?? t('defaultWebhook')}</span>
-                        </div>
-                      ))}
-                    </div>
-                    <div className="grid gap-3 md:grid-cols-[minmax(0,1fr)_220px_auto]">
-                      <OperatorInput
-                        type="url"
-                        value={newWebhookUrl}
-                        onChange={(e) => setNewWebhookUrl(e.target.value)}
-                        placeholder={t('webhookUrlPlaceholder')}
-                      />
-                      <OperatorDropdownSelect
-                        value={newWebhookProjectId}
-                        onValueChange={(v) => setNewWebhookProjectId(v)}
-                        options={[
-                          { value: '', label: t('defaultWebhook') },
-                          ...projects.map((project) => ({ value: project.id, label: project.name })),
-                        ]}
-                      />
-                      <Button
-                        variant="hero"
-                        size="lg"
-                        onClick={async () => {
-                          if (!newWebhookUrl.trim()) return;
-                          await fetch('/api/webhooks/config', {
-                            method: 'PUT',
-                            headers: { 'Content-Type': 'application/json' },
-                            body: JSON.stringify({ url: newWebhookUrl.trim(), project_id: newWebhookProjectId || null }),
-                          });
-                          setNewWebhookUrl('');
-                          setNewWebhookProjectId('');
-                          const res = await fetch('/api/webhooks/config');
-                          if (res.ok) {
-                            const j = await res.json();
-                            setWebhooks(j.data ?? []);
-                          }
-                        }}
-                      >
-                        {tc('save')}
-                      </Button>
-                    </div>
-                  </SectionCardBody>
-                </SectionCard>
-              </div>
+            <TabsContent value="webhooks">
+              <SectionCard>
+                <SectionCardHeader>
+                  <div className="space-y-1">
+                    <h2 className="text-base font-semibold text-foreground">{t('webhooks')}</h2>
+                    <p className="text-sm text-muted-foreground">{t('webhookDescription')}</p>
+                  </div>
+                </SectionCardHeader>
+                <SectionCardBody className="space-y-4">
+                  <div className="space-y-2">
+                    {webhooks.map((webhook) => (
+                      <div key={webhook.id} className="flex items-center justify-between gap-3 rounded-md border border-border bg-muted/30 px-3 py-3 text-xs">
+                        <span className="truncate text-foreground">{webhook.url}</span>
+                        <span className="shrink-0 text-muted-foreground">{webhook.projects?.name ?? t('defaultWebhook')}</span>
+                      </div>
+                    ))}
+                  </div>
+                  <div className="grid gap-3 md:grid-cols-[minmax(0,1fr)_220px_auto]">
+                    <OperatorInput
+                      type="url"
+                      value={newWebhookUrl}
+                      onChange={(e) => setNewWebhookUrl(e.target.value)}
+                      placeholder={t('webhookUrlPlaceholder')}
+                    />
+                    <OperatorDropdownSelect
+                      value={newWebhookProjectId}
+                      onValueChange={(v) => setNewWebhookProjectId(v)}
+                      options={[
+                        { value: '', label: t('defaultWebhook') },
+                        ...projects.map((project) => ({ value: project.id, label: project.name })),
+                      ]}
+                    />
+                    <Button
+                      variant="hero"
+                      size="lg"
+                      onClick={async () => {
+                        if (!newWebhookUrl.trim()) return;
+                        await fetch('/api/webhooks/config', {
+                          method: 'PUT',
+                          headers: { 'Content-Type': 'application/json' },
+                          body: JSON.stringify({ url: newWebhookUrl.trim(), project_id: newWebhookProjectId || null }),
+                        });
+                        setNewWebhookUrl('');
+                        setNewWebhookProjectId('');
+                        const res = await fetch('/api/webhooks/config');
+                        if (res.ok) {
+                          const j = await res.json();
+                          setWebhooks(j.data ?? []);
+                        }
+                      }}
+                    >
+                      {tc('save')}
+                    </Button>
+                  </div>
+                </SectionCardBody>
+              </SectionCard>
             </TabsContent>
             ) : null}
 

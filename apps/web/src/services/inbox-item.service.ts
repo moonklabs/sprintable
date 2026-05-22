@@ -63,21 +63,6 @@ export class InboxItemService {
     });
   }
 
-  /**
-   * Convenience producer: memo @mention → mention inbox item.
-   */
-  async produceMentionFromMemo(args: ProduceApprovalArgs & { memo_id: string }): Promise<InboxItem> {
-    return this.create({
-      ...args,
-      kind: 'mention',
-      source_type: 'memo_mention',
-      source_id: `${args.memo_id}:${args.assignee_member_id}`,
-      memo_id: args.memo_id,
-      origin_chain: args.origin_chain ?? [{ type: 'memo', id: args.memo_id }],
-      priority: args.priority ?? 'normal',
-    });
-  }
-
   private async getRepo() {
     return createInboxItemRepository();
   }

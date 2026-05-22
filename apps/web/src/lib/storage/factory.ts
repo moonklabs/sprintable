@@ -2,7 +2,6 @@ import type {
   IEpicRepository,
   IStoryRepository,
   ITaskRepository,
-  IMemoRepository,
   IDocRepository,
   IProjectRepository,
   ISprintRepository,
@@ -45,11 +44,6 @@ export async function createStoryRepository(): Promise<IStoryRepository> {
 export async function createTaskRepository(): Promise<ITaskRepository> {
   const { ApiTaskRepository } = await import('@sprintable/storage-api');
   return new ApiTaskRepository(await getSpAt());
-}
-
-export async function createMemoRepository(): Promise<IMemoRepository> {
-  const { ApiMemoRepository } = await import('@sprintable/storage-api');
-  return new ApiMemoRepository(await getSpAt());
 }
 
 export async function createDocRepository(): Promise<IDocRepository> {
