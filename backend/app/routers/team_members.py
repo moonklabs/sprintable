@@ -119,9 +119,12 @@ async def create_team_member(
         if body.name == actor.name:
             raise HTTPException(status_code=400, detail="Agent cannot create a member with the same name as itself")
 
-    # Human member 생성 금지 (type=human → 403)
+    # Human member 생성은 org invite 플로우로 이전 (E-ENTITY-CLEANUP S4)
     if body.type == "human":
-        raise HTTPException(status_code=403, detail="Human member creation via this endpoint is not allowed")
+        raise HTTPException(
+            status_code=410,
+            detail="Human member creation via team-members is deprecated. Use org invites (/api/v2/organizations/{id}/invites) instead.",
+        )
 
     repo = TeamMemberRepository(session, body.org_id)
     created_by = uuid.UUID(auth.user_id) if body.type == "agent" else None
