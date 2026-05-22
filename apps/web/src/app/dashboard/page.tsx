@@ -10,7 +10,7 @@ import { StatusBadge } from '@/components/ui/status-badge';
 import { TopBarSlot } from '@/components/nav/top-bar-slot';
 import { Button } from '@/components/ui/button';
 import { OperatorStatCard } from '@/components/ui/operator-stat-card';
-import { formatLocaleDateOnly, formatLocaleDateTime } from '@/lib/i18n';
+import { formatLocaleDateOnly } from '@/lib/i18n';
 import { WidgetRefreshTime } from '@/components/ui/widget-refresh-time';
 import { DashboardActivityTimeline } from '@/components/activity/dashboard-activity-timeline';
 
@@ -18,7 +18,6 @@ export default async function DashboardPage() {
   const fetchedAt = new Date().toISOString();
   const locale = await getLocale();
   const t = await getTranslations('dashboard');
-  const shellT = await getTranslations('shell');
   const getSprintStatusLabel = (status: string) => {
     if (status === 'active') return t('statusActive');
     return status;
@@ -45,7 +44,6 @@ export default async function DashboardPage() {
   interface DashboardData {
     my_stories: Array<{ id: string; title: string; status: string; story_points: number | null }>;
     my_tasks: Array<{ id: string; title: string; status: string }>;
-    open_memos: Array<{ id: string; title: string | null; status: string }>;
   }
 
   const dashboardData = await fastapiCall<DashboardData>(
@@ -54,9 +52,7 @@ export default async function DashboardPage() {
   ).catch(() => null);
 
   const activeSprints: Array<{ id: string; title: string; status: string; start_date: string; end_date: string }> = [];
-  const recentMemos = (dashboardData?.open_memos ?? []).map((m) => ({ id: m.id, title: m.title, content: '', created_at: '' }));
   const docs: Array<{ id: string; title: string; slug: string }> = [];
-  const policyDocuments: Array<{ id: string; title: string; created_at: string }> = [];
   const assignedStories = dashboardData?.my_stories ?? [];
 
   // Calculate story counts by status
@@ -74,9 +70,6 @@ export default async function DashboardPage() {
           title={<h1 className="text-sm font-medium">{t('title')}</h1>}
           actions={
             <div className="flex items-center gap-2">
-              <Button asChild variant="outline" size="sm">
-                <Link href="/memos">{shellT('openMemosCta')}</Link>
-              </Button>
               <LogoutButton />
             </div>
           }
@@ -103,10 +96,9 @@ export default async function DashboardPage() {
                 <StatusBadge status="active" label={t('statusActive')} />
               </div>
             </SectionCardHeader>
-            <SectionCardBody className="grid gap-3 md:grid-cols-3">
+            <SectionCardBody className="grid gap-3 md:grid-cols-2">
               <OperatorStatCard label={t('projects')} value={1} hint={t('projectsHint')} />
               <OperatorStatCard label={t('activeSprints')} value={activeSprints?.length ?? 0} hint={t('activeSprintsHint')} />
-              <OperatorStatCard label={t('openMemos')} value={recentMemos?.length ?? 0} hint={t('openMemosHint')} />
             </SectionCardBody>
           </SectionCard>
 
@@ -206,43 +198,6 @@ export default async function DashboardPage() {
                   title={t('noDocsYet')}
                   description={t('noDocsYetDescription')}
                   action={<Button asChild size="sm" variant="outline"><Link href="/docs">{t('writeDocs')}</Link></Button>}
-                />
-              )}
-              <div className="pt-1"><WidgetRefreshTime fetchedAt={fetchedAt} /></div>
-            </SectionCardBody>
-          </SectionCard>
-
-          <SectionCard>
-            <SectionCardHeader><div className="text-sm font-semibold text-foreground">{t('policyDocs')}</div></SectionCardHeader>
-            <SectionCardBody className="space-y-2">
-              {(policyDocuments ?? []).length ? policyDocuments!.map((doc) => (
-                <div key={doc.id} className="rounded-md border border-border bg-muted/30 px-3 py-2">
-                  <div className="font-medium text-foreground">{doc.title}</div>
-                  <div className="text-xs text-muted-foreground">{formatLocaleDateTime(doc.created_at, locale)}</div>
-                </div>
-              )) : <EmptyState title={t('noPolicyDocs')} description={t('noPolicyDocsDescription')} />}
-              <div className="pt-1"><WidgetRefreshTime fetchedAt={fetchedAt} /></div>
-            </SectionCardBody>
-          </SectionCard>
-
-          <SectionCard>
-            <SectionCardHeader>
-              <div className="flex items-center justify-between gap-3">
-                <div className="text-sm font-semibold text-foreground">{t('unreadMemos')}</div>
-                <Link href="/memos" className="text-sm text-primary">{shellT('openMemosCta')}</Link>
-              </div>
-            </SectionCardHeader>
-            <SectionCardBody className="space-y-2">
-              {(recentMemos ?? []).length ? recentMemos!.map((memo) => (
-                <div key={memo.id} className="rounded-md border border-border bg-muted/30 px-3 py-2">
-                  <div className="font-medium text-foreground">{memo.title ?? memo.content.slice(0, 60)}</div>
-                  <div className="text-xs text-muted-foreground">{formatLocaleDateTime(memo.created_at, locale)}</div>
-                </div>
-              )) : (
-                <EmptyState
-                  title={t('noOpenMemos')}
-                  description={t('noOpenMemosDescription')}
-                  action={<Button asChild size="sm" variant="outline"><Link href="/memos">{t('writeMemo')}</Link></Button>}
                 />
               )}
               <div className="pt-1"><WidgetRefreshTime fetchedAt={fetchedAt} /></div>
