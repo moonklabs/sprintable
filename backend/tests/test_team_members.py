@@ -33,6 +33,7 @@ def _mock_member(is_active: bool = True, type_: str = "human") -> MagicMock:
     m.last_seen_at = None
     m.active_story_id = None
     m.agent_status = None
+    m.can_manage_members = False
     # S2-4: active_story inject용 (None으로 고정)
     m.active_story = None
     return m
@@ -107,19 +108,31 @@ async def test_list_filter_by_type_200():
 async def test_create_team_member_201():
     client, session, app = await _client()
     try:
-        with patch("app.repositories.base.BaseRepository.create", new_callable=AsyncMock) as mock_create:
-            mock_create.return_value = _mock_member()
+        # fakechat_port 쿼리 응답 mock
+        mock_result = MagicMock()
+        mock_result.scalars.return_value.first.return_value = None  # _resolve_actor → non-agent
+        mock_result.all.return_value = []  # fakechat_port 쿼리 → 기존 포트 없음
+        session.execute = AsyncMock(return_value=mock_result)
+
+        with patch("app.routers.team_members._resolve_actor", new=AsyncMock(return_value=None)), \
+             patch("app.repositories.base.BaseRepository.create", new_callable=AsyncMock) as mock_create, \
+             patch("app.services.notification_preference_defaults.insert_default_preferences", new_callable=AsyncMock), \
+             patch("app.repositories.api_key.ApiKeyRepository.create", new_callable=AsyncMock) as mock_api_key:
+            agent_mock = _mock_member(type_="agent")
+            agent_mock.name = "TestBot"
+            mock_create.return_value = agent_mock
+            mock_api_key.return_value = (MagicMock(), "sk_test_xxx")
 
             async with client as c:
                 resp = await c.post("/api/v2/team-members", json={
                     "project_id": str(PROJECT_ID),
                     "org_id": str(ORG_ID),
-                    "type": "human",
-                    "name": "Alice",
+                    "type": "agent",
+                    "name": "TestBot",
                 })
 
         assert resp.status_code == 201
-        assert resp.json()["name"] == "Alice"
+        assert resp.json()["name"] == "TestBot"
     finally:
         app.dependency_overrides.clear()
 
