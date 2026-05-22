@@ -138,19 +138,9 @@
   --scrollbar-thumb-hover: oklch(0 0 0 / 18%);
   --scrollbar-track: transparent;
 
-  /* Operator aliases — for feature components (mockups, theme-settings) */
-  --operator-bg: var(--background);
-  --operator-surface: var(--card);
-  --operator-panel: var(--muted);
-  --operator-foreground: var(--foreground);
-  --operator-muted: var(--muted-foreground);
-  --operator-primary: var(--brand);
   --brand-soft: oklch(0.90 0.06 258);
   --brand-strong: oklch(0.45 0.20 258);
   --brand-contrast: oklch(0.96 0.03 258);
-  --operator-tertiary: var(--info);
-  --operator-outline: var(--border);
-  --operator-danger: var(--destructive);
 
   /* Tiptap editor */
   --tiptap-code-bg: oklch(0.22 0 0);
@@ -216,19 +206,9 @@
   --scrollbar-thumb-hover: oklch(1 0 0 / 18%);
   --scrollbar-track: transparent;
 
-  /* Operator aliases — dark mode */
-  --operator-bg: var(--background);
-  --operator-surface: var(--card);
-  --operator-panel: var(--muted);
-  --operator-foreground: var(--foreground);
-  --operator-muted: var(--muted-foreground);
-  --operator-primary: var(--brand);
   --brand-soft: oklch(0.80 0.10 258);
   --brand-strong: oklch(0.55 0.22 258);
   --brand-contrast: oklch(0.22 0.05 258);
-  --operator-tertiary: var(--info);
-  --operator-outline: var(--border);
-  --operator-danger: var(--destructive);
 
   /* Tiptap editor (dark) */
   --tiptap-code-bg: oklch(0.22 0 0);
