@@ -105,37 +105,6 @@ const MAX_RESULT_TOKENS = 768;
 const MAX_FIELD_CHARS = 480;
 const MAX_LIST_ITEMS = 10;
 
-const createMemoSchema = z.object({
-  title: z.string().trim().min(1).max(200).optional(),
-  content: z.string().trim().min(1).max(20_000),
-  memo_type: z.string().trim().min(1).max(64).optional(),
-  assigned_to: z.string().uuid().nullable().optional(),
-});
-
-const replyMemoSchema = z.object({
-  memo_id: z.string().uuid().optional(),
-  content: z.string().trim().min(1).max(20_000),
-  review_type: z.string().trim().min(1).max(64).optional(),
-});
-
-const updateMemoSchema = z.object({
-  memo_id: z.string().uuid().optional(),
-  title: z.string().trim().min(1).max(200).optional(),
-  content: z.string().trim().min(1).max(20_000).optional(),
-  memo_type: z.string().trim().min(1).max(64).optional(),
-  status: z.string().trim().min(1).max(64).optional(),
-  assigned_to: z.string().uuid().nullable().optional(),
-}).refine((value) => Object.keys(value).some((key) => key !== 'memo_id'), {
-  message: 'at least one field must be updated',
-});
-
-const listMemosSchema = z.object({
-  limit: z.coerce.number().int().min(1).max(MAX_LIST_ITEMS).optional(),
-  status: z.string().trim().min(1).max(64).optional(),
-  memo_type: z.string().trim().min(1).max(64).optional(),
-  assigned_to: z.string().uuid().optional(),
-});
-
 const createStorySchema = z.object({
   title: z.string().trim().min(1).max(200),
   description: z.string().trim().max(20_000).nullable().optional(),
@@ -344,63 +313,6 @@ export class AgentBuiltinToolService {
         legacyResolveMemoSchema.parse(rawArgs);
         const resolved = await this.memoService.resolve(ctx.memo.id, ctx.agent.id);
         return { memo_id: resolved.id, status: resolved.status };
-      }
-      case 'create_memo': {
-        const args = createMemoSchema.parse(rawArgs);
-        if (args.assigned_to) await this.ensureMemberInScope(args.assigned_to, ctx);
-        const memo = await this.memoService.create({
-          project_id: ctx.memo.project_id,
-          org_id: ctx.memo.org_id,
-          title: args.title ?? null,
-          content: args.content,
-          memo_type: args.memo_type,
-          assigned_to: args.assigned_to ?? null,
-          created_by: ctx.agent.id,
-        });
-        return { memo: this.presentMemo(memo as MemoScope) };
-      }
-      case 'reply_memo': {
-        const args = replyMemoSchema.parse(rawArgs);
-        return this.replyMemoInternal(args, ctx);
-      }
-      case 'update_memo': {
-        const args = updateMemoSchema.parse(rawArgs);
-        const memo = await this.getMemoInScope(args.memo_id ?? ctx.memo.id, ctx);
-        if (args.assigned_to) await this.ensureMemberInScope(args.assigned_to, ctx);
-
-        const patch: Record<string, unknown> = {};
-        if (args.title !== undefined) patch.title = args.title.trim();
-        if (args.content !== undefined) patch.content = args.content.trim();
-        if (args.memo_type !== undefined) patch.memo_type = args.memo_type.trim();
-        if (args.status !== undefined) patch.status = args.status.trim();
-        if (args.assigned_to !== undefined) patch.assigned_to = args.assigned_to;
-
-        const { data, error } = await this.db
-          .from('memos')
-          .update(patch)
-          .eq('id', memo.id)
-          .eq('org_id', ctx.memo.org_id)
-          .eq('project_id', ctx.memo.project_id)
-          .select('id, org_id, project_id, title, content, memo_type, status, assigned_to, created_by, created_at, updated_at')
-          .single();
-
-        // memo_assignees upsert — trg_memo_assignees_notify 발동하여 알림 보장
-        if (!error && data && args.assigned_to) {
-          await this.db
-            .from('memo_assignees')
-            .upsert(
-              { memo_id: memo.id, member_id: args.assigned_to, assigned_by: ctx.memo.created_by },
-              { onConflict: 'memo_id,member_id', ignoreDuplicates: true },
-            );
-        }
-
-        if (error || !data) throw error ?? new Error('memo update failed');
-        return { memo: this.presentMemo(data as MemoScope) };
-      }
-      case 'list_memos': {
-        const args = listMemosSchema.parse(rawArgs);
-        if (args.assigned_to) await this.ensureMemberInScope(args.assigned_to, ctx);
-        return this.listMemosInternal(args, ctx);
       }
       case 'create_story': {
         const args = createStorySchema.parse(rawArgs);
