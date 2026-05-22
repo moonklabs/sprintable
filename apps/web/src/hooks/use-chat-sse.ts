@@ -86,7 +86,7 @@ export function useChatSse({ currentTeamMemberId, onNewMessage, onReplyCreated, 
       sourceRef.current?.close();
       sourceRef.current = null;
 
-      const url = new URL('/api/v2/events/memos', window.location.origin);
+      const url = new URL('/api/event-stream', window.location.origin);
       if (memberIdRef.current) url.searchParams.set('member_id', memberIdRef.current);
       if (lastEventIdRef.current) url.searchParams.set('last_event_id', lastEventIdRef.current);
 
