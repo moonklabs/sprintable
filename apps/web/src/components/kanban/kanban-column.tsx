@@ -132,11 +132,6 @@ export function KanbanColumn({
           <h3 className="flex items-center gap-2 text-xs font-semibold uppercase tracking-wider text-muted-foreground">
             <span className={`h-2 w-2 rounded-full ${statusColor.dot}`} aria-hidden="true" />
             {label}
-            {totalCount !== undefined && (
-              <span className="ml-1 rounded-full bg-muted px-1.5 py-0.5 font-mono text-[10px] text-muted-foreground">
-                {hasMore ? `${totalCount}+` : totalCount}
-              </span>
-            )}
           </h3>
           <div className="flex items-center gap-1.5">
             {/* AC1: WIP 초과 배지 */}
@@ -156,7 +151,7 @@ export function KanbanColumn({
               variant="secondary"
               className={`rounded-full px-2.5 font-mono text-[11px] shadow-sm ${wipExceeded ? 'bg-destructive/15 text-destructive' : ''}`}
             >
-              {stories.length}
+              {totalCount !== undefined ? (hasMore ? `${totalCount}+` : totalCount) : stories.length}
             </Badge>
             {/* AC5: WIP limit 편집 버튼 */}
             <button
