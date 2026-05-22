@@ -8,6 +8,7 @@ import { logoutUser } from '@/lib/db/client';
 import {
   DropdownMenu,
   DropdownMenuContent,
+  DropdownMenuGroup,
   DropdownMenuItem,
   DropdownMenuLabel,
   DropdownMenuSeparator,
@@ -48,12 +49,14 @@ export function ProfileMenu({ name, email }: ProfileMenuProps) {
         <ChevronsUpDown className="size-3.5 shrink-0 text-sidebar-foreground/60" />
       </DropdownMenuTrigger>
       <DropdownMenuContent side="top" align="start" className="w-56">
-        <DropdownMenuLabel className="flex flex-col gap-0.5">
-          <span className="text-sm font-medium">{name}</span>
-          {displayLabel !== name && (
-            <span className="text-xs font-normal text-muted-foreground">{displayLabel}</span>
-          )}
-        </DropdownMenuLabel>
+        <DropdownMenuGroup>
+          <DropdownMenuLabel className="flex flex-col gap-0.5">
+            <span className="text-sm font-medium">{name}</span>
+            {displayLabel !== name && (
+              <span className="text-xs font-normal text-muted-foreground">{displayLabel}</span>
+            )}
+          </DropdownMenuLabel>
+        </DropdownMenuGroup>
         <DropdownMenuSeparator />
         <DropdownMenuItem render={<Link href="/settings" />}>
           <Settings className="size-4" />
