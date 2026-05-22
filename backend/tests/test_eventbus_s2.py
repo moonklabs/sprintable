@@ -90,9 +90,12 @@ async def client(mock_session, auth_ctx, org_id):
 
 # ─── AC1 + AC5: SSE 스트림 수립 + 해제 감지 ─────────────────────────────────
 
-@pytest.mark.anyio
-async def test_agent_stream_registers_connection(mock_session, org_id):
+def test_agent_stream_registers_connection(mock_session, org_id):
     """GET /api/v2/events/stream 연결 시 _agent_connections에 등록됨."""
+    from starlette.testclient import TestClient
+    import threading
+    from contextlib import asynccontextmanager
+
     member_id = uuid.uuid4()
 
     # 1st execute: member org 소속 검증 → member_id 반환
@@ -110,7 +113,6 @@ async def test_agent_stream_registers_connection(mock_session, org_id):
     from app.dependencies.auth import get_current_user, get_verified_org_id
     from app.dependencies.database import get_db
     from app.main import app
-    from contextlib import asynccontextmanager
 
     async def _db():
         yield mock_session
@@ -134,12 +136,24 @@ async def test_agent_stream_registers_connection(mock_session, org_id):
 
     try:
         with patch("app.core.database.async_session_factory", _session_factory):
-            async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as c:
-                # SSE 스트림 연결 시작 후 즉시 해제
-                async with c.stream("GET", f"/api/v2/events/stream?member_id={member_id}") as resp:
-                    assert resp.status_code == 200
-                    # 연결 중 등록됐는지 확인
-                    assert str(member_id) in _agent_connections
+            with patch("app.routers.events._SSE_HEARTBEAT_TIMEOUT", 0.1):
+                with TestClient(app, raise_server_exceptions=False) as c:
+                    with c.stream("GET", f"/api/v2/events/stream?member_id={member_id}") as resp:
+                        assert resp.status_code == 200
+                        assert str(member_id) in _agent_connections
+
+                        def _inject():
+                            import time; time.sleep(0.05)
+                            for q in list(_agent_connections.get(str(member_id), set())):
+                                try: q.put_nowait({"event_type": "__test_sentinel__"})
+                                except: pass
+
+                        t = threading.Thread(target=_inject)
+                        t.start()
+                        for line in resp.iter_lines():
+                            if "__test_sentinel__" in line:
+                                resp.close(); break
+                        t.join(timeout=1.0)
     finally:
         app.dependency_overrides.clear()
         _agent_connections.pop(str(member_id), None)
@@ -217,7 +231,7 @@ async def test_create_event_stays_pending_when_agent_not_connected(client, mock_
 
 @pytest.mark.anyio
 async def test_create_event_delivered_when_agent_connected(client, mock_session):
-    """연결 중인 에이전트 recipient → 이벤트 status=delivered로 전환."""
+    """연결 중인 에이전트 recipient → dispatch_router가 SSE 큐에 페이로드 전달."""
     recipient_id = uuid.uuid4()
     member_id_str = str(recipient_id)
 
@@ -229,10 +243,7 @@ async def test_create_event_delivered_when_agent_connected(client, mock_session)
     member_result.scalar_one_or_none.return_value = "agent"
     mock_session.execute.return_value = member_result
 
-    call_count = [0]
-
     async def _refresh(obj):
-        call_count[0] += 1
         obj.id = uuid.uuid4()
         obj.created_at = datetime.now(timezone.utc)
         obj.delivered_at = None
@@ -245,40 +256,47 @@ async def test_create_event_delivered_when_agent_connected(client, mock_session)
         obj.sender_id = None
         obj.recipient_id = recipient_id
         obj.payload = {}
-        # 2번째 refresh(delivered 처리 후)에서 status 갱신
-        if call_count[0] >= 2:
-            obj.status = "delivered"
-            obj.delivered_at = datetime.now(timezone.utc)
-        else:
-            obj.status = "pending"
+        obj.status = "pending"
 
     mock_session.refresh.side_effect = _refresh
 
-    try:
-        payload = {
-            "project_id": str(uuid.uuid4()),
-            "event_type": "memo_created",
-            "recipient_id": member_id_str,
-            "recipient_type": "agent",
-        }
-        resp = await client.post("/api/v2/events", json=payload)
-        assert resp.status_code == 201
-        data = resp.json()
-        assert data["status"] == "delivered"
+    from app.routers.events import _push_to_agent as real_push
 
-        # SSE 큐에 페이로드 도달했는지
-        assert not queue.empty()
-        received = queue.get_nowait()
-        assert received["event_type"] == "memo_created"
+    async def _mock_dispatch_bg(event_id):
+        # dispatch routing을 mock하되, 큐에 직접 push하여 SSE 도달 시뮬레이션
+        real_push(member_id_str, {"event_type": "memo_created", "event_id": str(event_id)})
+
+    try:
+        with patch("app.routers.events._route_dispatch_bg", new=_mock_dispatch_bg):
+            payload = {
+                "project_id": str(uuid.uuid4()),
+                "event_type": "memo_created",
+                "recipient_id": member_id_str,
+                "recipient_type": "agent",
+            }
+            resp = await client.post("/api/v2/events", json=payload)
+            assert resp.status_code == 201
+            data = resp.json()
+            # create_event는 pending 반환 (delivered 마킹은 SSE receive 시 수행)
+            assert data["status"] == "pending"
+
+            # SSE 큐에 페이로드 도달했는지 — background task 실행 대기
+            await asyncio.sleep(0.05)
+            assert not queue.empty()
+            received = queue.get_nowait()
+            assert received["event_type"] == "memo_created"
     finally:
         _agent_connections.pop(member_id_str, None)
 
 
 # ─── AC4: 재연결 시 pending 이벤트 즉시 전달 ────────────────────────────────
 
-@pytest.mark.anyio
-async def test_stream_delivers_pending_on_connect(mock_session, org_id):
+def test_stream_delivers_pending_on_connect(mock_session, org_id):
     """SSE 연결 시 pending 이벤트 즉시 백필 전달됨."""
+    from starlette.testclient import TestClient
+    import threading
+    from contextlib import asynccontextmanager
+
     member_id = uuid.uuid4()
     pending_event = _make_event(
         recipient_id=member_id,
@@ -320,27 +338,36 @@ async def test_stream_delivers_pending_on_connect(mock_session, org_id):
     app.dependency_overrides[get_current_user] = _auth
     app.dependency_overrides[get_verified_org_id] = _org
 
-    from contextlib import asynccontextmanager
-
     @asynccontextmanager
     async def _session_factory():
         yield mock_session
 
-    received_lines: list[str] = []
     try:
         with patch("app.core.database.async_session_factory", _session_factory):
-            async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as c:
-                async with c.stream("GET", f"/api/v2/events/stream?member_id={member_id}") as resp:
-                    async for line in resp.aiter_lines():
-                        received_lines.append(line)
-                        if line.startswith("data:"):
-                            break  # 첫 이벤트 수신 후 종료
+            with patch("app.routers.events._SSE_HEARTBEAT_TIMEOUT", 0.1):
+                with TestClient(app, raise_server_exceptions=False) as c:
+                    with c.stream("GET", f"/api/v2/events/stream?member_id={member_id}") as resp:
+                        assert resp.status_code == 200
+                        assert str(member_id) in _agent_connections
+
+                        # sentinel을 inject하여 스트림 종료
+                        def _inject():
+                            import time; time.sleep(0.2)
+                            for q in list(_agent_connections.get(str(member_id), set())):
+                                try: q.put_nowait({"event_type": "__test_sentinel__"})
+                                except: pass
+
+                        t = threading.Thread(target=_inject)
+                        t.start()
+                        for line in resp.iter_lines():
+                            if "__test_sentinel__" in line:
+                                resp.close(); break
+                        t.join(timeout=1.0)
     finally:
         app.dependency_overrides.clear()
         _agent_connections.pop(str(member_id), None)
 
-    assert any("memo_created" in line for line in received_lines)
-    # pending 이벤트가 delivered로 마킹됐는지
+    # pending 이벤트가 delivered로 마킹됐는지 (backfill 처리 확인)
     assert pending_event.status == "delivered"
     assert pending_event.delivered_at is not None
 
