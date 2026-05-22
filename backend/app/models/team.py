@@ -38,6 +38,7 @@ class TeamMember(Base, OrgScopedMixin, TimestampMixin):
         UUID(as_uuid=True), ForeignKey("stories.id", ondelete="SET NULL"), nullable=True
     )
     agent_status: Mapped[str | None] = mapped_column(String(20), nullable=True)
+    can_manage_members: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
 
     project: Mapped["Project"] = relationship("Project", back_populates="team_members")
 
