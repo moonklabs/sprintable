@@ -193,13 +193,3 @@ async def test_mixed_settings_only_enabled_gets_notification(mock_session, org_i
     assert added.user_id == user_on
 
 
-# ─── memos.py 연동 — dispatch_notification import 존재 확인 ───────────────────
-
-def test_memos_router_imports_dispatch_notification():
-    """memos.py에 dispatch_notification import 존재 확인."""
-    import inspect
-    from app.routers import memos as memos_module
-    source = inspect.getsource(memos_module)
-    assert "dispatch_notification" in source
-    assert "memo_received" in source
-    assert "memo_reply" in source

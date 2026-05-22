@@ -1,6 +1,5 @@
 """report-done API 단위 테스트."""
 import uuid
-from datetime import datetime, timezone
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
@@ -10,7 +9,6 @@ ORG_ID = uuid.uuid4()
 PROJECT_ID = uuid.uuid4()
 STORY_ID = uuid.uuid4()
 AGENT_ID = uuid.UUID("9cac9d96-5474-45f7-941e-787407597b52")
-MEMO_ID = uuid.uuid4()
 
 _PO_ID = uuid.UUID("05f52181-ea2a-42be-b9a8-9a418b72feb1")
 _DEV_ID = uuid.UUID("9cac9d96-5474-45f7-941e-787407597b52")
@@ -25,14 +23,6 @@ def _mock_story(status: str = "in-progress") -> MagicMock:
     s.title = "테스트 스토리"
     s.status = status
     return s
-
-
-def _mock_memo() -> MagicMock:
-    m = MagicMock()
-    m.id = MEMO_ID
-    m.org_id = ORG_ID
-    m.project_id = PROJECT_ID
-    return m
 
 
 @pytest.fixture
@@ -104,7 +94,7 @@ async def test_story_not_found_404():
 
 @pytest.mark.anyio
 async def test_kickoff_to_dev():
-    """kickoff 완료 → DEV 킥오프 메모 발송 + 스토리 in-progress 전환."""
+    """kickoff 완료 → 스토리 in-progress 전환, memo_id=None."""
     client, session, app = await _client()
     try:
         story = _mock_story(status="ready-for-dev")
@@ -112,12 +102,8 @@ async def test_kickoff_to_dev():
         mock_result.scalar_one_or_none.return_value = story
         session.execute = AsyncMock(return_value=mock_result)
 
-        with (
-            patch("app.repositories.story.StoryRepository.update", new_callable=AsyncMock) as mock_update,
-            patch("app.repositories.memo.MemoRepository.create", new_callable=AsyncMock) as mock_create,
-        ):
+        with patch("app.repositories.story.StoryRepository.update", new_callable=AsyncMock) as mock_update:
             mock_update.return_value = story
-            mock_create.return_value = _mock_memo()
 
             async with client as c:
                 resp = await c.post("/api/v2/workflow/report-done", json={
@@ -131,16 +117,15 @@ async def test_kickoff_to_dev():
         assert data["completed_stage"] == "kickoff"
         assert data["next_stage"] == "dev"
         assert data["story_status"] == "in-progress"
-        assert data["memo_id"] is not None
+        assert data["memo_id"] is None
         mock_update.assert_called_once()
-        mock_create.assert_called_once()
     finally:
         app.dependency_overrides.clear()
 
 
 @pytest.mark.anyio
 async def test_dev_to_review():
-    """dev 완료 → PO 리뷰 메모 발송, 스토리 상태 변경 없음."""
+    """dev 완료 → 스토리 in-review 전환, memo_id=None."""
     client, session, app = await _client()
     try:
         story = _mock_story(status="in-progress")
@@ -148,8 +133,8 @@ async def test_dev_to_review():
         mock_result.scalar_one_or_none.return_value = story
         session.execute = AsyncMock(return_value=mock_result)
 
-        with patch("app.repositories.memo.MemoRepository.create", new_callable=AsyncMock) as mock_create:
-            mock_create.return_value = _mock_memo()
+        with patch("app.repositories.story.StoryRepository.update", new_callable=AsyncMock) as mock_update:
+            mock_update.return_value = story
 
             async with client as c:
                 resp = await c.post("/api/v2/workflow/report-done", json={
@@ -163,7 +148,7 @@ async def test_dev_to_review():
         assert data["completed_stage"] == "dev"
         assert data["next_stage"] == "review"
         assert data["story_status"] == "in-review"
-        assert data["memo_id"] is not None
+        assert data["memo_id"] is None
     finally:
         app.dependency_overrides.clear()
 
@@ -209,9 +194,7 @@ async def test_context_field_accepted():
         mock_result.scalar_one_or_none.return_value = story
         session.execute = AsyncMock(return_value=mock_result)
 
-        with patch("app.repositories.memo.MemoRepository.create", new_callable=AsyncMock) as mock_create:
-            mock_create.return_value = _mock_memo()
-
+        with patch("app.repositories.story.StoryRepository.update", new_callable=AsyncMock, return_value=story):
             async with client as c:
                 resp = await c.post("/api/v2/workflow/report-done", json={
                     "story_id": str(STORY_ID),
@@ -238,10 +221,7 @@ async def test_all_valid_stages():
             mock_result.scalar_one_or_none.return_value = story
             session.execute = AsyncMock(return_value=mock_result)
 
-            with (
-                patch("app.repositories.story.StoryRepository.update", new_callable=AsyncMock, return_value=story),
-                patch("app.repositories.memo.MemoRepository.create", new_callable=AsyncMock, return_value=_mock_memo()),
-            ):
+            with patch("app.repositories.story.StoryRepository.update", new_callable=AsyncMock, return_value=story):
                 async with client as c:
                     resp = await c.post("/api/v2/workflow/report-done", json={
                         "story_id": str(STORY_ID),
