@@ -45,9 +45,6 @@ function formatAction(action: string, entityType: string | null, entityTitle: st
   switch (action) {
     case 'story.status_changed': return t('actionStoryStatus', { entity });
     case 'story.created': return t('actionStoryCreated', { entity });
-    case 'memo.created': return t('actionMemoCreated', { entity });
-    case 'memo.replied': return t('actionMemoReplied', { entity });
-    case 'memo.resolved': return t('actionMemoResolved', { entity });
     case 'agent_run.completed': return t('actionRunCompleted', { entity });
     case 'agent_run.failed': return t('actionRunFailed', { entity });
     case 'sprint.started': return t('actionSprintStarted', { entity });

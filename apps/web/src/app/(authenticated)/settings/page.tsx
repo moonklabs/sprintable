@@ -91,7 +91,7 @@ interface NewAgentResult {
 }
 
 const NOTIFICATION_CATEGORIES = [
-  { key: 'memo', types: ['memo', 'memo_reply', 'memo_mention'] },
+
   { key: 'story', types: ['story', 'story_assigned'] },
   { key: 'task', types: ['task', 'task_assigned', 'task_completed'] },
   { key: 'sprint', types: ['sprint_closed'] },
