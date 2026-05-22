@@ -462,7 +462,7 @@
     "usageTab": "사용량",
     "personalSettings": "개인 설정",
     "projectSettings": "프로젝트 설정",
-    "organizationSettings": "조직 설정",
+    "organizationSettings": "조직",
     "billing": "결제",
     "usage": "사용량",
     "slackIntegration": {
