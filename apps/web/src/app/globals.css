@@ -141,7 +141,6 @@
   /* Operator aliases — for feature components (mockups, theme-settings) */
   --operator-bg: var(--background);
   --operator-surface: var(--card);
-  --operator-surface-soft: var(--muted);
   --operator-panel: var(--muted);
   --operator-foreground: var(--foreground);
   --operator-muted: var(--muted-foreground);
@@ -220,7 +219,6 @@
   /* Operator aliases — dark mode */
   --operator-bg: var(--background);
   --operator-surface: var(--card);
-  --operator-surface-soft: var(--muted);
   --operator-panel: var(--muted);
   --operator-foreground: var(--foreground);
   --operator-muted: var(--muted-foreground);
