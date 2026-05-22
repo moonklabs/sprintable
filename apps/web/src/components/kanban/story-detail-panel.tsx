@@ -8,7 +8,6 @@ import rehypeSanitize from 'rehype-sanitize';
 import { Trash2 } from 'lucide-react';
 import type { KanbanStory, KanbanMember } from './types';
 import { Button } from '@/components/ui/button';
-import { Textarea } from '@/components/ui/textarea';
 import { StatusBadge } from '@/components/ui/status-badge';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import {
@@ -465,11 +464,11 @@ export function StoryDetailPanel({ story, tasks, nextTasksCursor = null, loading
               </div>
               {editingDescription ? (
                 <div className="mt-2 space-y-2">
-                  <Textarea
+                  <textarea
                     value={descriptionDraft}
                     onChange={(e) => setDescriptionDraft(e.target.value)}
                     placeholder="Markdown 형식으로 작성하세요..."
-                    className="min-h-[160px] resize-y font-mono text-sm"
+                    className="flex field-sizing-content min-h-[160px] w-full resize-y rounded-lg border border-input bg-transparent px-2.5 py-2 font-mono text-sm outline-none transition-colors placeholder:text-muted-foreground focus-visible:border-ring focus-visible:ring-3 focus-visible:ring-ring/50 disabled:cursor-not-allowed disabled:opacity-50"
                     autoFocus
                   />
                   <div className="flex gap-2">
@@ -531,11 +530,11 @@ export function StoryDetailPanel({ story, tasks, nextTasksCursor = null, loading
               <TabsContent value="comments" className="mt-4 space-y-4">
                 {/* Comment input */}
                 <div className="space-y-2">
-                  <Textarea
+                  <textarea
                     placeholder="Add a comment..."
                     value={commentInput}
                     onChange={(e) => setCommentInput(e.target.value)}
-                    className="min-h-[80px] resize-none"
+                    className="flex field-sizing-content min-h-[80px] w-full resize-none rounded-lg border border-input bg-transparent px-2.5 py-2 text-sm outline-none transition-colors placeholder:text-muted-foreground focus-visible:border-ring focus-visible:ring-3 focus-visible:ring-ring/50 disabled:cursor-not-allowed disabled:opacity-50"
                     onKeyDown={(e) => {
                       if (e.key === 'Enter' && (e.metaKey || e.ctrlKey)) {
                         void handleSubmitComment();

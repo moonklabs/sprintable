@@ -9,9 +9,7 @@ import { EmptyState } from '@/components/ui/empty-state';
 import { StatusBadge } from '@/components/ui/status-badge';
 import { TopBarSlot } from '@/components/nav/top-bar-slot';
 import { Button } from '@/components/ui/button';
-import { OperatorStatCard } from '@/components/ui/operator-stat-card';
 import { formatLocaleDateOnly } from '@/lib/i18n';
-import { WidgetRefreshTime } from '@/components/ui/widget-refresh-time';
 import { DashboardActivityTimeline } from '@/components/activity/dashboard-activity-timeline';
 
 export default async function DashboardPage() {
@@ -97,8 +95,16 @@ export default async function DashboardPage() {
               </div>
             </SectionCardHeader>
             <SectionCardBody className="grid gap-3 md:grid-cols-2">
-              <OperatorStatCard label={t('projects')} value={1} hint={t('projectsHint')} />
-              <OperatorStatCard label={t('activeSprints')} value={activeSprints?.length ?? 0} hint={t('activeSprintsHint')} />
+              <div className="rounded-md border border-border bg-muted/30 p-4">
+                <div className="text-xs font-medium text-muted-foreground">{t('projects')}</div>
+                <div className="mt-0.5 text-3xl font-bold tracking-tight text-foreground">1</div>
+                <div className="mt-1.5 text-xs text-muted-foreground">{t('projectsHint')}</div>
+              </div>
+              <div className="rounded-md border border-border bg-muted/30 p-4">
+                <div className="text-xs font-medium text-muted-foreground">{t('activeSprints')}</div>
+                <div className="mt-0.5 text-3xl font-bold tracking-tight text-foreground">{activeSprints?.length ?? 0}</div>
+                <div className="mt-1.5 text-xs text-muted-foreground">{t('activeSprintsHint')}</div>
+              </div>
             </SectionCardBody>
           </SectionCard>
 
@@ -157,7 +163,7 @@ export default async function DashboardPage() {
                   action={<Button asChild size="sm" variant="outline"><Link href="/board">{t('viewBoard')}</Link></Button>}
                 />
               )}
-              <div className="pt-1"><WidgetRefreshTime fetchedAt={fetchedAt} /></div>
+              <div className="pt-1"><span className="text-xs text-muted-foreground">{new Date(fetchedAt).toLocaleTimeString('ko-KR', { hour: '2-digit', minute: '2-digit' })} 기준</span></div>
             </SectionCardBody>
           </SectionCard>
 
@@ -181,7 +187,7 @@ export default async function DashboardPage() {
                   action={<Button asChild size="sm" variant="outline"><Link href="/sprints">{t('startSprint')}</Link></Button>}
                 />
               )}
-              <div className="pt-1"><WidgetRefreshTime fetchedAt={fetchedAt} /></div>
+              <div className="pt-1"><span className="text-xs text-muted-foreground">{new Date(fetchedAt).toLocaleTimeString('ko-KR', { hour: '2-digit', minute: '2-digit' })} 기준</span></div>
             </SectionCardBody>
           </SectionCard>
 
@@ -200,7 +206,7 @@ export default async function DashboardPage() {
                   action={<Button asChild size="sm" variant="outline"><Link href="/docs">{t('writeDocs')}</Link></Button>}
                 />
               )}
-              <div className="pt-1"><WidgetRefreshTime fetchedAt={fetchedAt} /></div>
+              <div className="pt-1"><span className="text-xs text-muted-foreground">{new Date(fetchedAt).toLocaleTimeString('ko-KR', { hour: '2-digit', minute: '2-digit' })} 기준</span></div>
             </SectionCardBody>
           </SectionCard>
 
