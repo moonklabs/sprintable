@@ -163,16 +163,18 @@ async def update_story(
     # 변경사항 먼저 commit — side effects 에러가 rollback시키지 않도록
     await db.commit()
 
+    # S-C2: 모든 스토리 업데이트에서 actor resolve — assignee 변경 여부와 무관하게 공통 적용
+    actor_id: uuid.UUID | None = None
+    actor_name: str | None = None
+    actor_role: str | None = None
+    try:
+        actor_id = await _resolve_team_member_id(auth, repo.org_id, db)
+        actor_name, actor_role = await _resolve_actor_info(db, actor_id)
+    except Exception:
+        pass
+
     if "assignee_id" in data and old_assignee_id != story.assignee_id:
         org_id = repo.org_id
-        actor_id: uuid.UUID | None = None
-        actor_name: str | None = None
-        actor_role: str | None = None
-        try:
-            actor_id = await _resolve_team_member_id(auth, org_id, db)
-            actor_name, actor_role = await _resolve_actor_info(db, actor_id)
-        except Exception:
-            pass
         epic_title: str | None = None
         try:
             epic_title = await _resolve_epic_title(db, story.epic_id)
@@ -296,6 +298,16 @@ async def update_story_status(
     # 내부 DB 에러가 트랜잭션을 aborted 상태로 만들어 status 변경까지 rollback하는 버그 방지
     await db.commit()
 
+    # S-C2: 모든 스토리 업데이트에서 actor resolve — status 변경 여부와 무관하게 공통 적용
+    actor_id: uuid.UUID | None = None
+    actor_name: str | None = None
+    actor_role: str | None = None
+    try:
+        actor_id = await _resolve_team_member_id(auth, repo.org_id, db)
+        actor_name, actor_role = await _resolve_actor_info(db, actor_id)
+    except Exception:
+        pass
+
     if old_status != story.status:
         org_id = repo.org_id
         # AC2/3/4/6: warn 모드 위반 — 전이는 정상 진행, 이벤트+웹훅만 발행
@@ -318,14 +330,6 @@ async def update_story_status(
                 await fire_webhooks(db, org_id, "workflow_violation", _v_event)
             except Exception:
                 pass
-        actor_id: uuid.UUID | None = None
-        actor_name: str | None = None
-        actor_role: str | None = None
-        try:
-            actor_id = await _resolve_team_member_id(auth, org_id, db)
-            actor_name, actor_role = await _resolve_actor_info(db, actor_id)
-        except Exception:
-            pass
         epic_title: str | None = None
         try:
             epic_title = await _resolve_epic_title(db, story.epic_id)
