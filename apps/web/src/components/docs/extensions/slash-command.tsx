@@ -349,13 +349,13 @@ const SlashMenu = forwardRef<
         data-active={isActive}
         className={`flex w-full items-center gap-2.5 rounded-lg px-2.5 py-1.5 text-left text-sm transition-colors ${
           isActive
-            ? 'bg-brand/14 text-[color:var(--operator-primary-soft)]'
+            ? 'bg-brand/14 text-[color:var(--brand-soft)]'
             : 'text-foreground hover:bg-white/6'
         }`}
         onClick={() => command(item)}
       >
-        <span className={`flex h-7 w-7 flex-shrink-0 items-center justify-center rounded-md border border-border/60 ${isActive ? 'border-[color:var(--operator-primary)]/30 bg-brand/10' : 'bg-muted/40'}`}>
-          <Icon className={`size-3.5 ${isActive ? 'text-[color:var(--operator-primary-soft)]' : 'text-muted-foreground'}`} />
+        <span className={`flex h-7 w-7 flex-shrink-0 items-center justify-center rounded-md border border-border/60 ${isActive ? 'border-brand/30 bg-brand/10' : 'bg-muted/40'}`}>
+          <Icon className={`size-3.5 ${isActive ? 'text-[color:var(--brand-soft)]' : 'text-muted-foreground'}`} />
         </span>
         <span className="flex min-w-0 flex-col">
           <span className="text-xs font-medium leading-tight">{item.title}</span>

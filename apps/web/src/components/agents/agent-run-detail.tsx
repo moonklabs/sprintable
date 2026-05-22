@@ -438,7 +438,7 @@ export function AgentRunDetail({
                           hasError
                             ? 'border-red-400 bg-red-400/20'
                             : isLlm
-                              ? 'border-[color:var(--operator-primary)] bg-brand/20'
+                              ? 'border-brand bg-brand/20'
                               : 'border-emerald-400 bg-emerald-400/20'
                         }`} />
                         <div className="min-w-0 flex-1 rounded-xl border border-white/8 bg-white/4 px-3 py-2">

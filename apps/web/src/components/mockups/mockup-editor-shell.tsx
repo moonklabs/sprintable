@@ -58,7 +58,7 @@ interface MockupEditorShellProps {
 
 const GRID_SIZE = 16;
 const SNAP_THRESHOLD = 6;
-const TINY_BUTTON_CLASS = 'rounded-xl border border-white/10 bg-muted/55 px-2.5 py-1.5 text-[11px] text-foreground transition hover:border-[color:var(--operator-primary)]/18 hover:bg-white/8 disabled:cursor-not-allowed disabled:opacity-50';
+const TINY_BUTTON_CLASS = 'rounded-xl border border-white/10 bg-muted/55 px-2.5 py-1.5 text-[11px] text-foreground transition hover:border-brand/18 hover:bg-white/8 disabled:cursor-not-allowed disabled:opacity-50';
 
 function cloneState(components: MockupComponent[]) {
   return cloneMockupComponents(components);
@@ -829,7 +829,7 @@ export function MockupEditorShell({ mockupId }: MockupEditorShellProps) {
         className="select-none"
       >
         <div
-          className={`relative h-full w-full overflow-hidden rounded-2xl border bg-white shadow-sm transition ${isSelected ? 'border-[color:var(--operator-primary)] ring-2 ring-[color:var(--operator-primary)]/25' : 'border-white/10 hover:border-[color:var(--operator-primary)]/18'} ${canContainChildren ? 'bg-muted/70' : ''}`}
+          className={`relative h-full w-full overflow-hidden rounded-2xl border bg-white shadow-sm transition ${isSelected ? 'border-brand ring-2 ring-brand/25' : 'border-white/10 hover:border-brand/18'} ${canContainChildren ? 'bg-muted/70' : ''}`}
           onMouseDown={(event) => {
             if (event.button !== 0) return;
             event.stopPropagation();
@@ -868,7 +868,7 @@ export function MockupEditorShell({ mockupId }: MockupEditorShellProps) {
     );
   }
 
-  const panelButtonClass = 'rounded-2xl border border-white/10 bg-muted/55 px-3 py-2 text-xs text-foreground transition hover:border-[color:var(--operator-primary)]/18 hover:bg-white/8 disabled:cursor-not-allowed disabled:opacity-50';
+  const panelButtonClass = 'rounded-2xl border border-white/10 bg-muted/55 px-3 py-2 text-xs text-foreground transition hover:border-brand/18 hover:bg-white/8 disabled:cursor-not-allowed disabled:opacity-50';
 
   return (
     <div className="space-y-4">
@@ -921,7 +921,7 @@ export function MockupEditorShell({ mockupId }: MockupEditorShellProps) {
               <button
                 key={item.type}
                 type="button"
-                className="flex w-full items-center justify-between rounded-2xl border border-white/10 bg-muted/55 px-3 py-2 text-left text-xs text-foreground transition hover:border-[color:var(--operator-primary)]/18 hover:bg-white/8"
+                className="flex w-full items-center justify-between rounded-2xl border border-white/10 bg-muted/55 px-3 py-2 text-left text-xs text-foreground transition hover:border-brand/18 hover:bg-white/8"
                 onClick={() => createComponent(item.type)}
               >
                 <span className="flex items-center gap-2"><span>{item.icon}</span> {item.type}</span>
@@ -964,7 +964,7 @@ export function MockupEditorShell({ mockupId }: MockupEditorShellProps) {
                   ) : null}
                 </div>
               ))}
-              <button type="button" className="w-full rounded-2xl border border-dashed border-white/12 px-3 py-2 text-xs text-muted-foreground transition hover:border-[color:var(--operator-primary)]/24 hover:text-[color:var(--operator-primary-soft)]" onClick={() => void addScenario()}>
+              <button type="button" className="w-full rounded-2xl border border-dashed border-white/12 px-3 py-2 text-xs text-muted-foreground transition hover:border-brand/24 hover:text-[color:var(--brand-soft)]" onClick={() => void addScenario()}>
                 + {t('addScenario')}
               </button>
             </div>
@@ -978,7 +978,7 @@ export function MockupEditorShell({ mockupId }: MockupEditorShellProps) {
                   key={node.component.id}
                   type="button"
                   onClick={(event) => handleTreeSelect(node.component.id, event)}
-                  className={`flex w-full items-center gap-2 rounded-2xl px-2 py-1.5 text-left text-[11px] transition ${selectedIds.includes(node.component.id) ? 'bg-brand/12 text-[color:var(--operator-primary-soft)]' : 'text-muted-foreground hover:bg-white/8'}`}
+                  className={`flex w-full items-center gap-2 rounded-2xl px-2 py-1.5 text-left text-[11px] transition ${selectedIds.includes(node.component.id) ? 'bg-brand/12 text-[color:var(--brand-soft)]' : 'text-muted-foreground hover:bg-white/8'}`}
                   style={{ paddingLeft: `${8 + depth * 14}px` }}
                 >
                   <span className="text-[10px]">{componentPaletteEntry(node.component.component_type)?.icon ?? '⬚'}</span>
@@ -1118,14 +1118,14 @@ export function MockupEditorShell({ mockupId }: MockupEditorShellProps) {
                   if (!scenario) return null;
                   const overrides = scenario.override_props[selectedComponent.id] ?? {};
                   return (
-                    <div className="mt-4 rounded-2xl border border-[color:var(--operator-primary)]/20 bg-brand/10 p-3">
-                      <div className="mb-2 text-[10px] font-semibold uppercase tracking-[0.16em] text-[color:var(--operator-primary-soft)]">
+                    <div className="mt-4 rounded-2xl border border-brand/20 bg-brand/10 p-3">
+                      <div className="mb-2 text-[10px] font-semibold uppercase tracking-[0.16em] text-[color:var(--brand-soft)]">
                         {scenario.is_default ? t('defaultScenario') : scenario.name} {t('overrides')}
                       </div>
                       <div className="space-y-2">
                         {Object.keys(selectedComponent.props).map((key) => (
                           <div key={key}>
-                            <label className="mb-1 block text-[10px] font-medium uppercase tracking-[0.16em] text-[color:var(--operator-primary-soft)]">{key}</label>
+                            <label className="mb-1 block text-[10px] font-medium uppercase tracking-[0.16em] text-[color:var(--brand-soft)]">{key}</label>
                             <input
                               value={String(overrides[key] ?? '')}
                               placeholder={String(selectedComponent.props[key] ?? '')}

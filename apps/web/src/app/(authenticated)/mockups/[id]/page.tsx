@@ -72,7 +72,7 @@ export default function MockupViewerPage() {
     const props = getComponentProps(comp);
     const style: React.CSSProperties = {
       ...(props as React.CSSProperties),
-      outline: isSelected ? '2px solid var(--operator-primary)' : undefined,
+      outline: isSelected ? '2px solid var(--brand)' : undefined,
       outlineOffset: isSelected ? '2px' : undefined,
       cursor: 'pointer',
       transition: 'all 150ms ease',

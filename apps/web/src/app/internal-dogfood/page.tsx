@@ -187,7 +187,7 @@ export default async function InternalDogfoodPage({ searchParams }: PageProps) {
           <SectionCardBody className="text-sm text-muted-foreground">
             이 경로는 임시 Moonlabs 내부 dogfooding 전용인. auth plane 복구 후 env flag를 내리면 바로 비활성화되는 구조인.
             {' '}
-            <Link href="/login" className="text-[color:var(--operator-primary-soft)] underline">일반 로그인 페이지로 이동</Link>
+            <Link href="/login" className="text-[color:var(--brand-soft)] underline">일반 로그인 페이지로 이동</Link>
           </SectionCardBody>
         </SectionCard>
       </div>

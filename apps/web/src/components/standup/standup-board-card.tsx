@@ -32,7 +32,7 @@ export function StandupBoardCard({
   const commentCount = feedback.filter((f) => f.review_type === 'comment').length;
 
   return (
-    <div className={cn('flex flex-col rounded-xl border border-border bg-card shadow-sm', isCurrentUser && 'ring-1 ring-[color:var(--operator-primary)]/40')}>
+    <div className={cn('flex flex-col rounded-xl border border-border bg-card shadow-sm', isCurrentUser && 'ring-1 ring-brand/40')}>
       {/* Header */}
       <div className="flex flex-wrap items-start justify-between gap-2 px-4 pt-4">
         <div className="min-w-0 flex-1 space-y-1">
@@ -65,7 +65,7 @@ export function StandupBoardCard({
               </p>
             </div>
             <div className="space-y-1">
-              <div className="text-xs font-semibold uppercase tracking-wider text-[color:var(--operator-primary-soft)]">{t('planLabel')}</div>
+              <div className="text-xs font-semibold uppercase tracking-wider text-[color:var(--brand-soft)]">{t('planLabel')}</div>
               <p className={cn('whitespace-pre-wrap text-sm line-clamp-3', entry.plan ? 'text-foreground/90' : 'text-muted-foreground')}>
                 {entry.plan || t('emptySection')}
               </p>

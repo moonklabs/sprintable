@@ -146,9 +146,9 @@
   --operator-foreground: var(--foreground);
   --operator-muted: var(--muted-foreground);
   --operator-primary: var(--brand);
-  --operator-primary-soft: oklch(0.90 0.06 258);
-  --operator-primary-strong: oklch(0.45 0.20 258);
-  --operator-primary-contrast: oklch(0.96 0.03 258);
+  --brand-soft: oklch(0.90 0.06 258);
+  --brand-strong: oklch(0.45 0.20 258);
+  --brand-contrast: oklch(0.96 0.03 258);
   --operator-tertiary: var(--info);
   --operator-outline: var(--border);
   --operator-danger: var(--destructive);
@@ -225,9 +225,9 @@
   --operator-foreground: var(--foreground);
   --operator-muted: var(--muted-foreground);
   --operator-primary: var(--brand);
-  --operator-primary-soft: oklch(0.80 0.10 258);
-  --operator-primary-strong: oklch(0.55 0.22 258);
-  --operator-primary-contrast: oklch(0.22 0.05 258);
+  --brand-soft: oklch(0.80 0.10 258);
+  --brand-strong: oklch(0.55 0.22 258);
+  --brand-contrast: oklch(0.22 0.05 258);
   --operator-tertiary: var(--info);
   --operator-outline: var(--border);
   --operator-danger: var(--destructive);

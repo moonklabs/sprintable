@@ -104,7 +104,7 @@ function ProgressBar({ done, total, label }: ProgressBarProps) {
           <span>{done} / {total}</span>
         </div>
       ) : null}
-      <div className="h-1.5 w-full overflow-hidden rounded-full bg-[color:var(--operator-border,hsl(var(--border)))]">
+      <div className="h-1.5 w-full overflow-hidden rounded-full bg-border">
         <div
           className="h-full rounded-full bg-primary transition-all duration-300"
           style={{ width: `${pct}%` }}
@@ -178,7 +178,7 @@ function EpicCreateForm({ projectId, orgId, onCreated, onCancel }: EpicCreateFor
           onChange={(e) => setTitle(e.target.value)}
           placeholder={t('fieldTitlePlaceholder')}
           required
-          className="w-full rounded-xl border border-[color:var(--operator-border,hsl(var(--border)))] bg-card px-3 py-2 text-sm text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-2 focus:ring-primary/40"
+          className="w-full rounded-xl border border-border bg-card px-3 py-2 text-sm text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-2 focus:ring-primary/40"
         />
       </div>
 
@@ -189,7 +189,7 @@ function EpicCreateForm({ projectId, orgId, onCreated, onCancel }: EpicCreateFor
           onChange={(e) => setDescription(e.target.value)}
           placeholder={t('fieldDescriptionPlaceholder')}
           rows={3}
-          className="w-full resize-none rounded-xl border border-[color:var(--operator-border,hsl(var(--border)))] bg-card px-3 py-2 text-sm text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-2 focus:ring-primary/40"
+          className="w-full resize-none rounded-xl border border-border bg-card px-3 py-2 text-sm text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-2 focus:ring-primary/40"
         />
       </div>
 
@@ -199,7 +199,7 @@ function EpicCreateForm({ projectId, orgId, onCreated, onCancel }: EpicCreateFor
           <select
             value={priority}
             onChange={(e) => setPriority(e.target.value as EpicPriority)}
-            className="w-full rounded-xl border border-[color:var(--operator-border,hsl(var(--border)))] bg-card px-3 py-2 text-sm text-foreground focus:outline-none focus:ring-2 focus:ring-primary/40"
+            className="w-full rounded-xl border border-border bg-card px-3 py-2 text-sm text-foreground focus:outline-none focus:ring-2 focus:ring-primary/40"
           >
             <option value="critical">{t('priorityCritical')}</option>
             <option value="high">{t('priorityHigh')}</option>
@@ -216,7 +216,7 @@ function EpicCreateForm({ projectId, orgId, onCreated, onCancel }: EpicCreateFor
             value={targetSp}
             onChange={(e) => setTargetSp(e.target.value)}
             placeholder="0"
-            className="w-full rounded-xl border border-[color:var(--operator-border,hsl(var(--border)))] bg-card px-3 py-2 text-sm text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-2 focus:ring-primary/40"
+            className="w-full rounded-xl border border-border bg-card px-3 py-2 text-sm text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-2 focus:ring-primary/40"
           />
         </div>
       </div>
@@ -227,7 +227,7 @@ function EpicCreateForm({ projectId, orgId, onCreated, onCancel }: EpicCreateFor
           type="date"
           value={targetDate}
           onChange={(e) => setTargetDate(e.target.value)}
-          className="w-full rounded-xl border border-[color:var(--operator-border,hsl(var(--border)))] bg-card px-3 py-2 text-sm text-foreground focus:outline-none focus:ring-2 focus:ring-primary/40"
+          className="w-full rounded-xl border border-border bg-card px-3 py-2 text-sm text-foreground focus:outline-none focus:ring-2 focus:ring-primary/40"
         />
       </div>
 
@@ -307,7 +307,7 @@ function EpicEditForm({ epic, onSaved, onCancel }: EpicEditFormProps) {
           value={title}
           onChange={(e) => setTitle(e.target.value)}
           required
-          className="w-full rounded-xl border border-[color:var(--operator-border,hsl(var(--border)))] bg-card px-3 py-2 text-sm text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-2 focus:ring-primary/40"
+          className="w-full rounded-xl border border-border bg-card px-3 py-2 text-sm text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-2 focus:ring-primary/40"
         />
       </div>
 
@@ -317,7 +317,7 @@ function EpicEditForm({ epic, onSaved, onCancel }: EpicEditFormProps) {
           value={description}
           onChange={(e) => setDescription(e.target.value)}
           rows={3}
-          className="w-full resize-none rounded-xl border border-[color:var(--operator-border,hsl(var(--border)))] bg-card px-3 py-2 text-sm text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-2 focus:ring-primary/40"
+          className="w-full resize-none rounded-xl border border-border bg-card px-3 py-2 text-sm text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-2 focus:ring-primary/40"
         />
       </div>
 
@@ -327,7 +327,7 @@ function EpicEditForm({ epic, onSaved, onCancel }: EpicEditFormProps) {
           <select
             value={status}
             onChange={(e) => setStatus(e.target.value as EpicStatus)}
-            className="w-full rounded-xl border border-[color:var(--operator-border,hsl(var(--border)))] bg-card px-3 py-2 text-sm text-foreground focus:outline-none focus:ring-2 focus:ring-primary/40"
+            className="w-full rounded-xl border border-border bg-card px-3 py-2 text-sm text-foreground focus:outline-none focus:ring-2 focus:ring-primary/40"
           >
             <option value="draft">{t('statusDraft')}</option>
             <option value="active">{t('statusActive')}</option>
@@ -341,7 +341,7 @@ function EpicEditForm({ epic, onSaved, onCancel }: EpicEditFormProps) {
           <select
             value={priority}
             onChange={(e) => setPriority(e.target.value as EpicPriority)}
-            className="w-full rounded-xl border border-[color:var(--operator-border,hsl(var(--border)))] bg-card px-3 py-2 text-sm text-foreground focus:outline-none focus:ring-2 focus:ring-primary/40"
+            className="w-full rounded-xl border border-border bg-card px-3 py-2 text-sm text-foreground focus:outline-none focus:ring-2 focus:ring-primary/40"
           >
             <option value="critical">{t('priorityCritical')}</option>
             <option value="high">{t('priorityHigh')}</option>
@@ -358,7 +358,7 @@ function EpicEditForm({ epic, onSaved, onCancel }: EpicEditFormProps) {
             type="date"
             value={targetDate}
             onChange={(e) => setTargetDate(e.target.value)}
-            className="w-full rounded-xl border border-[color:var(--operator-border,hsl(var(--border)))] bg-card px-3 py-2 text-sm text-foreground focus:outline-none focus:ring-2 focus:ring-primary/40"
+            className="w-full rounded-xl border border-border bg-card px-3 py-2 text-sm text-foreground focus:outline-none focus:ring-2 focus:ring-primary/40"
           />
         </div>
 
@@ -370,7 +370,7 @@ function EpicEditForm({ epic, onSaved, onCancel }: EpicEditFormProps) {
             value={targetSp}
             onChange={(e) => setTargetSp(e.target.value)}
             placeholder="0"
-            className="w-full rounded-xl border border-[color:var(--operator-border,hsl(var(--border)))] bg-card px-3 py-2 text-sm text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-2 focus:ring-primary/40"
+            className="w-full rounded-xl border border-border bg-card px-3 py-2 text-sm text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-2 focus:ring-primary/40"
           />
         </div>
       </div>
@@ -425,7 +425,7 @@ function EpicRow({ epic, isSelected, onClick, onDeleteRequest }: EpicRowProps) {
       className={`group relative w-full rounded-2xl border px-4 py-3.5 text-left transition-all duration-150 cursor-pointer ${
         isSelected
           ? 'border-primary/40 bg-primary/5'
-          : 'border-[color:var(--operator-border,hsl(var(--border)))] bg-card hover:border-primary/30 hover:bg-primary/5'
+          : 'border-border bg-card hover:border-primary/30 hover:bg-primary/5'
       }`}
       onClick={onClick}
       role="button"
@@ -466,7 +466,7 @@ function EpicRow({ epic, isSelected, onClick, onDeleteRequest }: EpicRowProps) {
         </div>
 
         {total > 0 ? (
-          <div className="h-1.5 w-full overflow-hidden rounded-full bg-[color:var(--operator-border,hsl(var(--border)))]">
+          <div className="h-1.5 w-full overflow-hidden rounded-full bg-border">
             <div
               className="h-full rounded-full bg-primary transition-all duration-300"
               style={{ width: `${pct}%` }}
@@ -566,11 +566,11 @@ function EpicDetailPanel({ epic, onUpdate, onClose }: EpicDetailPanelProps) {
 
             {/* Meta grid */}
             <div className="grid grid-cols-2 gap-3">
-              <div className="rounded-xl bg-[color:var(--operator-surface-soft,hsl(var(--muted)))] px-3 py-2.5">
+              <div className="rounded-xl bg-muted px-3 py-2.5">
                 <p className="text-[10px] font-semibold uppercase tracking-[0.18em] text-muted-foreground">{t('targetDate')}</p>
                 <p className="mt-1 text-sm font-medium text-foreground">{formatDate(epic.target_date)}</p>
               </div>
-              <div className="rounded-xl bg-[color:var(--operator-surface-soft,hsl(var(--muted)))] px-3 py-2.5">
+              <div className="rounded-xl bg-muted px-3 py-2.5">
                 <p className="text-[10px] font-semibold uppercase tracking-[0.18em] text-muted-foreground">{t('targetSp')}</p>
                 <div className="mt-1 flex items-center gap-1.5">
                   <p className="text-sm font-medium text-foreground">{epic.target_sp !== undefined ? epic.target_sp : '—'}</p>
@@ -618,7 +618,7 @@ function EpicDetailPanel({ epic, onUpdate, onClose }: EpicDetailPanelProps) {
                       key={story.id}
                       type="button"
                       onClick={() => router.push(`/board?story=${story.id}`)}
-                      className="flex w-full items-center justify-between rounded-xl border border-[color:var(--operator-border,hsl(var(--border)))] px-3 py-2 text-left transition-colors hover:border-primary/30 hover:bg-primary/5"
+                      className="flex w-full items-center justify-between rounded-xl border border-border px-3 py-2 text-left transition-colors hover:border-primary/30 hover:bg-primary/5"
                     >
                       <p className="text-sm text-foreground">{story.title}</p>
                       <div className="flex shrink-0 items-center gap-2">
@@ -663,7 +663,7 @@ function CreateModal({ projectId, orgId, onCreated, onClose }: CreateModalProps)
         onClick={onClose}
         aria-label={t('cancel')}
       />
-      <div className="relative z-10 w-full max-w-md rounded-2xl border border-[color:var(--operator-border,hsl(var(--border)))] bg-card p-6 shadow-xl">
+      <div className="relative z-10 w-full max-w-md rounded-2xl border border-border bg-card p-6 shadow-xl">
         <div className="mb-4 flex items-center justify-between">
           <h2 className="text-base font-bold text-foreground">{t('createEpic')}</h2>
           <button
@@ -814,7 +814,7 @@ export function EpicsClient({ projectId, orgId }: EpicsClientProps) {
             className={`rounded-lg border px-2.5 py-1 text-xs font-medium transition-colors ${
               statusFilter === s
                 ? 'border-primary/40 bg-primary/10 text-primary'
-                : 'border-[color:var(--operator-border,hsl(var(--border)))] text-muted-foreground hover:bg-muted/50'
+                : 'border-border text-muted-foreground hover:bg-muted/50'
             }`}
           >
             {s === 'all' ? t('filterAll') : s}

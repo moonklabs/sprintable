@@ -164,7 +164,7 @@ function PageEmbedView({ node, updateAttributes, extension }: ReactNodeViewProps
           />
           <button
             type="submit"
-            className="rounded-lg bg-brand/14 px-3 py-1 text-xs font-medium text-[color:var(--operator-primary-soft)] hover:bg-brand/24"
+            className="rounded-lg bg-brand/14 px-3 py-1 text-xs font-medium text-[color:var(--brand-soft)] hover:bg-brand/24"
           >
             Embed
           </button>
@@ -195,7 +195,7 @@ function PageEmbedView({ node, updateAttributes, extension }: ReactNodeViewProps
           <button
             type="button"
             onClick={handleReset}
-            className="text-xs text-[color:var(--operator-primary-soft)] hover:underline"
+            className="text-xs text-[color:var(--brand-soft)] hover:underline"
           >
             Change
           </button>
@@ -215,12 +215,12 @@ function PageEmbedView({ node, updateAttributes, extension }: ReactNodeViewProps
           onKeyDown={(e) => {
             if (e.key === 'Enter' || e.key === ' ') onNavigate?.(doc.slug);
           }}
-          className="group flex cursor-pointer items-center gap-3 rounded-xl border border-white/8 bg-white/4 px-4 py-3 transition-colors hover:border-[color:var(--operator-primary)]/30 hover:bg-brand/6"
+          className="group flex cursor-pointer items-center gap-3 rounded-xl border border-white/8 bg-white/4 px-4 py-3 transition-colors hover:border-brand/30 hover:bg-brand/6"
         >
           {doc.icon ? (
             <span className="shrink-0 text-lg">{doc.icon}</span>
           ) : (
-            <FileText className="size-5 shrink-0 text-[color:var(--operator-primary-soft)]" />
+            <FileText className="size-5 shrink-0 text-[color:var(--brand-soft)]" />
           )}
           <div className="min-w-0 flex-1">
             <p className="truncate text-sm font-medium text-foreground">
