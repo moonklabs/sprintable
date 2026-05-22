@@ -5,7 +5,7 @@ from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.dependencies.auth import AuthContext, get_current_user, get_project_scoped_org_id, get_verified_org_id
+from app.dependencies.auth import AuthContext, get_current_user, get_verified_org_id
 from app.dependencies.database import get_db
 from app.models.standup import StandupEntry, StandupFeedback
 from app.repositories.standup import StandupEntryRepository, StandupFeedbackRepository
@@ -21,7 +21,7 @@ router = APIRouter(prefix="/api/v2/standups", tags=["standups"])
 
 def _get_repo(
     session: AsyncSession = Depends(get_db),
-    org_id: uuid.UUID = Depends(get_project_scoped_org_id),
+    org_id: uuid.UUID = Depends(get_verified_org_id),
 ) -> StandupEntryRepository:
     return StandupEntryRepository(session, org_id)
 
@@ -52,10 +52,8 @@ async def upsert_standup(
     body: StandupUpsert,
     session: AsyncSession = Depends(get_db),
     _auth: AuthContext = Depends(get_current_user),
+    org_id: uuid.UUID = Depends(get_verified_org_id),
 ) -> StandupEntryResponse:
-    org_id = body.org_id or (_auth.org_id and uuid.UUID(_auth.org_id)) or None
-    if not org_id:
-        raise HTTPException(status_code=400, detail="org_id required")
     repo = StandupEntryRepository(session, org_id)
     entry = await repo.upsert(
         project_id=body.project_id,
@@ -107,7 +105,7 @@ async def list_feedback(
     project_id: uuid.UUID = Query(...),
     date_filter: date = Query(..., alias="date"),
     db: AsyncSession = Depends(get_db),
-    org_id: uuid.UUID = Depends(get_project_scoped_org_id),
+    org_id: uuid.UUID = Depends(get_verified_org_id),
 ) -> list[FeedbackResponse]:
     q = (
         select(StandupFeedback)
@@ -139,17 +137,18 @@ async def add_feedback(
     body: FeedbackCreate,
     session: AsyncSession = Depends(get_db),
     _auth: AuthContext = Depends(get_current_user),
+    org_id: uuid.UUID = Depends(get_verified_org_id),
 ) -> FeedbackResponse:
     from app.schemas.standup import REVIEW_TYPES
     if body.review_type not in REVIEW_TYPES:
         raise HTTPException(status_code=400, detail=f"review_type must be one of: {', '.join(REVIEW_TYPES)}")
 
-    entry_repo = StandupEntryRepository(session, body.org_id)
+    entry_repo = StandupEntryRepository(session, org_id)
     entry = await entry_repo.get(id)
     if entry is None:
         raise HTTPException(status_code=404, detail="Standup entry not found")
 
-    fb_repo = StandupFeedbackRepository(session, body.org_id)
+    fb_repo = StandupFeedbackRepository(session, org_id)
     feedback = await fb_repo.create(
         project_id=body.project_id,
         sprint_id=body.sprint_id,

@@ -54,8 +54,9 @@ async def create_session(
     body: CreateSession,
     db: AsyncSession = Depends(get_db),
     _auth: AuthContext = Depends(get_current_user),
+    org_id: uuid.UUID = Depends(get_verified_org_id),
 ) -> SessionListResponse:
-    repo = RetroSessionRepository(db, body.org_id)
+    repo = RetroSessionRepository(db, org_id)
     session = await repo.create(
         project_id=body.project_id,
         title=body.title,
