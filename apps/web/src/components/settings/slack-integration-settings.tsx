@@ -230,7 +230,7 @@ export function SlackIntegrationSettingsSection() {
           <div className="flex flex-col gap-3 lg:flex-row lg:items-start lg:justify-between">
             <div className="space-y-1">
               <div className="flex items-center gap-2">
-                <MessageSquareShare className="size-4 text-[color:var(--operator-primary-soft)]" />
+                <MessageSquareShare className="size-4 text-[color:var(--brand-soft)]" />
                 <h2 className="text-base font-semibold text-foreground">{t('title')}</h2>
               </div>
               <p className="text-sm text-muted-foreground">{t('description')}</p>
@@ -336,7 +336,7 @@ export function SlackIntegrationSettingsSection() {
             </div>
           ) : data.status === 'disconnected' ? (
             <GlassPanel className="border-dashed border-white/14 bg-muted/28 p-6 text-center">
-              <MessageSquareShare className="mx-auto size-9 text-[color:var(--operator-primary-soft)]" />
+              <MessageSquareShare className="mx-auto size-9 text-[color:var(--brand-soft)]" />
               <h3 className="mt-4 text-lg font-semibold text-foreground">{t('disconnectedTitle')}</h3>
               <p className="mx-auto mt-2 max-w-2xl text-sm text-muted-foreground">{t('disconnectedBody')}</p>
               <div className="mt-5 flex flex-wrap items-center justify-center gap-3">
@@ -352,7 +352,7 @@ export function SlackIntegrationSettingsSection() {
             </GlassPanel>
           ) : filteredChannels.length === 0 ? (
             <GlassPanel className="border-dashed border-white/14 bg-muted/28 p-6 text-center">
-              <MessageSquareShare className="mx-auto size-9 text-[color:var(--operator-primary-soft)]" />
+              <MessageSquareShare className="mx-auto size-9 text-[color:var(--brand-soft)]" />
               <h3 className="mt-4 text-lg font-semibold text-foreground">{t('emptyTitle')}</h3>
               <p className="mx-auto mt-2 max-w-2xl text-sm text-muted-foreground">{t('emptyBody')}</p>
             </GlassPanel>
@@ -427,7 +427,7 @@ export function SlackIntegrationSettingsSection() {
                           </Button>
                         </div>
                         {mappedElsewhere ? (
-                          <div className="xl:col-span-2 rounded-2xl border border-[color:var(--operator-primary)]/18 bg-brand/10 px-3 py-3 text-sm text-[color:var(--operator-primary-soft)]">
+                          <div className="xl:col-span-2 rounded-2xl border border-brand/18 bg-brand/10 px-3 py-3 text-sm text-[color:var(--brand-soft)]">
                             {t('mappedElsewhereHint', { project: currentMapping?.project_name ?? t('unknownProject') })}
                           </div>
                         ) : null}
@@ -448,7 +448,7 @@ export function SlackIntegrationSettingsSection() {
 
       {allDirtyChannels.length > 0 ? (
         <div className="fixed inset-x-3 bottom-24 z-40 sm:bottom-6 lg:static lg:inset-auto lg:z-auto">
-          <GlassPanel className="border-[color:var(--operator-primary)]/20 bg-muted/92 p-3 shadow-[0_24px_60px_rgba(0,0,0,0.45)]">
+          <GlassPanel className="border-brand/20 bg-muted/92 p-3 shadow-[0_24px_60px_rgba(0,0,0,0.45)]">
             <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
               <div>
                 <p className="text-sm font-medium text-foreground">{t('stickyBarTitle', { count: allDirtyChannels.length })}</p>

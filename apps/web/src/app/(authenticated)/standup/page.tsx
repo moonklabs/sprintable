@@ -448,7 +448,7 @@ export default function StandupPage() {
                                 </div>
                                 <div className="mt-2 h-2 overflow-hidden rounded-full bg-white/10">
                                   <div
-                                    className="h-full rounded-full bg-[linear-gradient(135deg,var(--operator-primary),var(--operator-primary-strong))]"
+                                    className="h-full rounded-full bg-[linear-gradient(135deg,var(--brand),var(--brand-strong))]"
                                     style={{ width: `${story.task_count > 0 ? Math.round((story.done_task_count / story.task_count) * 100) : 0}%` }}
                                   />
                                 </div>
@@ -529,7 +529,7 @@ export default function StandupPage() {
 
                       if (isCurrentUser && editingSelf) {
                         return (
-                          <div key={member.id} className="col-span-full rounded-xl border border-[color:var(--operator-primary)]/40 bg-card p-4 shadow-sm space-y-4">
+                          <div key={member.id} className="col-span-full rounded-xl border border-brand/40 bg-card p-4 shadow-sm space-y-4">
                             <div className="flex flex-wrap items-center justify-between gap-2">
                               <h3 className="text-sm font-semibold text-foreground">{t('selfEditTitle')}</h3>
                               <Button variant="ghost" size="sm" onClick={() => setEditingSelf(false)}>{t('cancel')}</Button>
@@ -546,7 +546,7 @@ export default function StandupPage() {
                                 />
                               </div>
                               <div>
-                                <label className="mb-2 block text-xs font-semibold uppercase tracking-wider text-[color:var(--operator-primary-soft)]">{t('plan')}</label>
+                                <label className="mb-2 block text-xs font-semibold uppercase tracking-wider text-[color:var(--brand-soft)]">{t('plan')}</label>
                                 <OperatorTextarea
                                   value={plan}
                                   onChange={(event) => setPlan(event.target.value)}

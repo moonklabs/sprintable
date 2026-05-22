@@ -49,7 +49,7 @@ function ImageView({ node, updateAttributes, selected }: ReactNodeViewProps) {
         draggable={false}
         style={{ width: width ? `${width}px` : undefined, maxWidth: '100%', height: 'auto', display: 'block' }}
         className={`rounded-xl border border-border object-contain transition-shadow ${
-          selected ? 'ring-2 ring-[color:var(--operator-primary)] ring-offset-1' : ''
+          selected ? 'ring-2 ring-brand ring-offset-1' : ''
         } ${isResizing ? 'select-none' : ''}`}
       />
       {selected && (

@@ -229,7 +229,7 @@ export function StandupReviewCard({
                 </p>
               </div>
               <div className="rounded-md border border-border bg-muted/30 p-3">
-                <div className="text-xs font-medium uppercase tracking-[0.18em] text-[color:var(--operator-primary-soft)]">{t('planLabel')}</div>
+                <div className="text-xs font-medium uppercase tracking-[0.18em] text-[color:var(--brand-soft)]">{t('planLabel')}</div>
                 <p className={cn('mt-2 whitespace-pre-wrap text-sm text-foreground/90', !entry.plan && 'text-muted-foreground')}>
                   {entry.plan || t('emptySection')}
                 </p>

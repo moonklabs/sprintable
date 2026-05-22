@@ -109,7 +109,7 @@ export function DocContentRenderer({
     const wikiCleanup = wikiLinks.map((span) => {
       const slug = span.getAttribute('data-slug') ?? '';
       const title = span.getAttribute('data-title') ?? span.textContent ?? '';
-      span.className = 'inline-flex cursor-pointer items-center gap-0.5 rounded px-1 py-0.5 text-[0.9em] bg-brand/10 text-[color:var(--operator-primary-soft)] hover:bg-brand/20 transition-colors';
+      span.className = 'inline-flex cursor-pointer items-center gap-0.5 rounded px-1 py-0.5 text-[0.9em] bg-brand/10 text-[color:var(--brand-soft)] hover:bg-brand/20 transition-colors';
       span.title = title;
       const handleClick = () => { if (slug) window.location.href = `/docs/${slug}`; };
       span.addEventListener('click', handleClick);
@@ -249,8 +249,8 @@ export function DocContentRenderer({
     '[&_h2]:scroll-mt-24 [&_h2]:mt-10 [&_h2]:text-2xl [&_h2]:font-semibold',
     '[&_h3]:scroll-mt-24 [&_h3]:mt-8 [&_h3]:text-xl [&_h3]:font-semibold',
     '[&_p]:leading-7 [&_p]:text-foreground/92',
-    '[&_a]:text-[color:var(--operator-primary-soft)] [&_a]:underline [&_a]:underline-offset-4',
-    '[&_blockquote]:rounded-2xl [&_blockquote]:border-l-4 [&_blockquote]:border-[color:var(--operator-primary)]/45 [&_blockquote]:bg-brand/8 [&_blockquote]:px-4 [&_blockquote]:py-3 [&_blockquote]:text-foreground/88',
+    '[&_a]:text-[color:var(--brand-soft)] [&_a]:underline [&_a]:underline-offset-4',
+    '[&_blockquote]:rounded-2xl [&_blockquote]:border-l-4 [&_blockquote]:border-brand/45 [&_blockquote]:bg-brand/8 [&_blockquote]:px-4 [&_blockquote]:py-3 [&_blockquote]:text-foreground/88',
     '[&_img]:max-h-[32rem] [&_img]:w-full [&_img]:rounded-2xl [&_img]:border [&_img]:border-border [&_img]:object-contain',
     '[&_table]:w-full [&_table]:border-collapse [&_table]:overflow-hidden [&_table]:rounded-2xl [&_table]:border [&_table]:border-border [&_table]:bg-muted/20',
     '[&_thead]:bg-muted/50 [&_th]:border [&_th]:border-border [&_th]:px-3 [&_th]:py-2 [&_th]:text-left [&_th]:font-semibold',
@@ -449,7 +449,7 @@ function decorateHtmlContent(content: string, headings: ReturnType<typeof extrac
     return [
       '<div data-doc-code-shell="true">',
       '<div data-doc-code-actions="true">',
-      `<button type="button" data-doc-copy-button="true" class="transition hover:border-[color:var(--operator-primary)]/35 hover:text-foreground">${escapeHtmlText(codeCopyLabel)}</button>`,
+      `<button type="button" data-doc-copy-button="true" class="transition hover:border-brand/35 hover:text-foreground">${escapeHtmlText(codeCopyLabel)}</button>`,
       '</div>',
       `<pre>${inner}</pre>`,
       '</div>',

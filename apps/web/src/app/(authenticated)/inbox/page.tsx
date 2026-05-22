@@ -240,10 +240,10 @@ export default function InboxPage() {
                       onClick={() => void selectNotification(notification)}
                       className={`w-full rounded-xl border p-3 text-left transition ${
                         isSelected
-                          ? 'border-[color:var(--operator-primary)]/35 bg-brand/15'
+                          ? 'border-brand/35 bg-brand/15'
                           : notification.is_read
-                            ? 'border-white/8 bg-muted/55 hover:border-[color:var(--operator-primary)]/20 hover:bg-white/5'
-                            : 'border-[color:var(--operator-primary)]/18 bg-brand/8 hover:bg-brand/12'
+                            ? 'border-white/8 bg-muted/55 hover:border-brand/20 hover:bg-white/5'
+                            : 'border-brand/18 bg-brand/8 hover:bg-brand/12'
                       }`}
                     >
                       <div className="flex items-start gap-3">

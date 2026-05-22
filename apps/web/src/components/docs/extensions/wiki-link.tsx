@@ -56,7 +56,7 @@ function WikiLinkView({ node, editor }: ReactNodeViewProps) {
         className={`inline-flex cursor-pointer items-center gap-0.5 rounded px-1 py-0.5 text-[0.9em] transition-colors ${
           isNotFound
             ? 'bg-red-500/10 text-red-500 hover:bg-red-500/20'
-            : 'bg-brand/10 text-[color:var(--operator-primary-soft)] hover:bg-brand/20'
+            : 'bg-brand/10 text-[color:var(--brand-soft)] hover:bg-brand/20'
         }`}
       >
         {isNotFound
@@ -168,7 +168,7 @@ function WikiLinkMenu({
           onClick={() => command(item)}
           className={`flex w-full items-center gap-2 rounded-lg px-2.5 py-1.5 text-left text-sm transition-colors ${
             i === selectedIndex
-              ? 'bg-brand/14 text-[color:var(--operator-primary-soft)]'
+              ? 'bg-brand/14 text-[color:var(--brand-soft)]'
               : 'text-foreground hover:bg-white/6'
           }`}
         >

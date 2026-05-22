@@ -159,7 +159,7 @@ export function AgentHitlPolicyEditor() {
         <SectionCard>
           <SectionCardHeader>
             <div className="flex items-center gap-2">
-              <ShieldAlert className="size-4 text-[color:var(--operator-primary-soft)]" />
+              <ShieldAlert className="size-4 text-[color:var(--brand-soft)]" />
               <div>
                 <h3 className="text-base font-semibold text-foreground">{t('catalogTitle')}</h3>
                 <p className="text-sm text-muted-foreground">{t('catalogBody')}</p>
@@ -184,7 +184,7 @@ export function AgentHitlPolicyEditor() {
         <SectionCard>
           <SectionCardHeader>
             <div className="flex items-center gap-2">
-              <CheckCircle2 className="size-4 text-[color:var(--operator-primary-soft)]" />
+              <CheckCircle2 className="size-4 text-[color:var(--brand-soft)]" />
               <div>
                 <h3 className="text-base font-semibold text-foreground">{t('approvalTitle')}</h3>
                 <p className="text-sm text-muted-foreground">{t('approvalBody')}</p>
@@ -226,7 +226,7 @@ export function AgentHitlPolicyEditor() {
         <SectionCard>
           <SectionCardHeader>
             <div className="flex items-center gap-2">
-              <Clock3 className="size-4 text-[color:var(--operator-primary-soft)]" />
+              <Clock3 className="size-4 text-[color:var(--brand-soft)]" />
               <div>
                 <h3 className="text-base font-semibold text-foreground">{t('timeoutTitle')}</h3>
                 <p className="text-sm text-muted-foreground">{t('timeoutBody')}</p>
@@ -288,7 +288,7 @@ export function AgentHitlPolicyEditor() {
       <SectionCard>
         <SectionCardHeader>
           <div className="flex items-center gap-2">
-            <AlertTriangle className="size-4 text-[color:var(--operator-primary-soft)]" />
+            <AlertTriangle className="size-4 text-[color:var(--brand-soft)]" />
             <div>
               <h3 className="text-base font-semibold text-foreground">{t('policySummaryTitle')}</h3>
               <p className="text-sm text-muted-foreground">{t('policySummaryBody')}</p>

@@ -127,7 +127,7 @@ export default function MockupsPage() {
               <button
                 key={mockup.id}
                 type="button"
-                className="group rounded-3xl border border-white/8 bg-muted/55 p-4 text-left transition hover:border-[color:var(--operator-primary)]/18 hover:bg-white/8"
+                className="group rounded-3xl border border-white/8 bg-muted/55 p-4 text-left transition hover:border-brand/18 hover:bg-white/8"
                 onClick={() => router.push(`/mockups/${mockup.id}`)}
               >
                 <div className="flex items-start justify-between gap-3">

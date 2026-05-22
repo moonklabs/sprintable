@@ -405,7 +405,7 @@ export function DocsShellClient({ projectId }: DocsShellClientProps) {
             value={searchQuery}
             onChange={(e) => setSearchQuery(e.target.value)}
             placeholder="문서 검색..."
-            className="w-full rounded-lg border border-border/60 bg-muted/30 py-1.5 pl-8 pr-7 text-xs outline-none placeholder:text-muted-foreground focus:border-[color:var(--operator-primary)]/40 focus:bg-muted/50"
+            className="w-full rounded-lg border border-border/60 bg-muted/30 py-1.5 pl-8 pr-7 text-xs outline-none placeholder:text-muted-foreground focus:border-brand/40 focus:bg-muted/50"
           />
           {searchQuery && (
             <button

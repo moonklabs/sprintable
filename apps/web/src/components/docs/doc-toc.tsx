@@ -42,8 +42,8 @@ export function DocToc({ headings, onHeadingClick, className }: DocTocProps) {
         onClick={() => setOpen((v) => !v)}
         className={`flex items-center gap-1.5 rounded-lg border px-2.5 py-1 text-xs font-medium transition ${
           open
-            ? 'border-[color:var(--operator-primary)]/50 bg-brand/10 text-[color:var(--operator-primary-soft)]'
-            : 'border-border/60 bg-card text-foreground hover:border-[color:var(--operator-primary)]/50 hover:text-[color:var(--operator-primary-soft)]'
+            ? 'border-brand/50 bg-brand/10 text-[color:var(--brand-soft)]'
+            : 'border-border/60 bg-card text-foreground hover:border-brand/50 hover:text-[color:var(--brand-soft)]'
         }`}
         title="목차"
       >

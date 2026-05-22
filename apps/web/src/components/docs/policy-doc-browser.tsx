@@ -143,7 +143,7 @@ export function PolicyDocBrowser({ projectId, t }: PolicyDocBrowserProps) {
                   className={cn(
                     'w-full rounded-2xl border px-3 py-3 text-left text-sm transition-all',
                     isSelected
-                      ? 'border-[color:var(--operator-primary)]/20 bg-brand/14 text-[color:var(--operator-primary-soft)]'
+                      ? 'border-brand/20 bg-brand/14 text-[color:var(--brand-soft)]'
                       : 'border-white/8 bg-white/5 text-foreground/88 hover:bg-white/8',
                   )}
                 >
@@ -194,7 +194,7 @@ export function PolicyDocBrowser({ projectId, t }: PolicyDocBrowserProps) {
                   value={query}
                   onChange={(event) => setQuery(event.target.value)}
                   placeholder={t('policySearchPlaceholder')}
-                  className="w-full rounded-2xl border border-white/8 bg-muted/90 px-4 py-2.5 text-sm text-foreground placeholder:text-muted-foreground focus:border-[color:var(--operator-primary)]/20 focus:outline-none"
+                  className="w-full rounded-2xl border border-white/8 bg-muted/90 px-4 py-2.5 text-sm text-foreground placeholder:text-muted-foreground focus:border-brand/20 focus:outline-none"
                 />
               </div>
             </div>
@@ -217,7 +217,7 @@ export function PolicyDocBrowser({ projectId, t }: PolicyDocBrowserProps) {
                         className={cn(
                           'w-full rounded-2xl border px-3 py-3 text-left text-sm transition-all',
                           isSelected
-                            ? 'border-[color:var(--operator-primary)]/20 bg-brand/14 text-[color:var(--operator-primary-soft)]'
+                            ? 'border-brand/20 bg-brand/14 text-[color:var(--brand-soft)]'
                             : 'border-white/8 bg-white/5 text-foreground/88 hover:bg-white/8',
                         )}
                       >
