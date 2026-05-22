@@ -56,6 +56,7 @@ class TeamMemberResponse(BaseModel):
     color: str
     agent_role: str | None = None
     created_by: uuid.UUID | None = None
+    can_manage_members: bool = False
     created_at: datetime
     updated_at: datetime
     # S2-1: Presence 필드
