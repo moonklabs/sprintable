@@ -7,6 +7,7 @@ interface MemberContext {
   org_id: string;
   project_id: string;
   project_name: string;
+  name: string;
 }
 
 interface OrgMembership {
@@ -56,6 +57,7 @@ export default async function DashboardLayout({
       orgId={me?.org_id}
       projectId={me?.project_id}
       projectName={me?.project_name ?? undefined}
+      userName={me?.name}
       projectMemberships={projectMemberships}
       orgMemberships={orgMemberships}
     >

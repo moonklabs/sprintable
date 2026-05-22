@@ -24,6 +24,7 @@ import { LogoutButton } from '@/app/dashboard/logout-button';
 import { LocaleSwitcher } from '@/components/locale-switcher';
 import { ThemeToggle } from '@/components/nav/theme-toggle';
 import { CommandPalette } from '@/components/command-palette/command-palette';
+import { ProfileMenu } from '@/components/nav/profile-menu';
 import { UnifiedSwitcher, type OrgSwitcherItem } from '@/components/nav/unified-switcher';
 import {
   Sidebar,
@@ -46,6 +47,7 @@ interface AppSidebarProps {
   orgMemberships?: OrgSwitcherItem[];
   projectId?: string;
   projectMemberships: Array<{ projectId: string; projectName: string }>;
+  userName?: string;
 }
 
 function KbdHint({ children }: { children: React.ReactNode }) {
@@ -61,6 +63,7 @@ export function AppSidebar({
   orgMemberships = [],
   projectId,
   projectMemberships,
+  userName,
 }: AppSidebarProps) {
   const pathname = usePathname();
   const t = useTranslations('nav');
@@ -301,7 +304,8 @@ export function AppSidebar({
         </SidebarGroup>
       </SidebarContent>
 
-      <SidebarFooter className="p-2">
+      <SidebarFooter className="space-y-2 p-2">
+        {userName && <ProfileMenu name={userName} />}
         <div className="flex items-center justify-between gap-1">
           <div className="flex items-center gap-1">
             <LocaleSwitcher />
