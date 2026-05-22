@@ -13,7 +13,6 @@ import {
   Gauge,
   Inbox,
   LayoutDashboard,
-  MessageSquareMore,
   Search,
   Settings,
   Users,
@@ -58,7 +57,6 @@ export function AppSidebar({
 }: AppSidebarProps) {
   const pathname = usePathname();
   const t = useTranslations('nav');
-  const [memoUnreadCount, setMemoUnreadCount] = useState(0);
   const [inboxUnreadCount, setInboxUnreadCount] = useState(0);
   const [paletteOpen, setPaletteOpen] = useState(false);
 
@@ -80,14 +78,7 @@ export function AppSidebar({
   useEffect(() => {
     async function fetchUnread() {
       try {
-        const [memoRes, inboxRes] = await Promise.all([
-          fetch('/api/notifications?unread=true&type=memo'),
-          fetch('/api/notifications?unread=true'),
-        ]);
-        if (memoRes.ok) {
-          const json = await memoRes.json() as { meta?: { unreadCount?: number } };
-          setMemoUnreadCount(json.meta?.unreadCount ?? 0);
-        }
+        const inboxRes = await fetch('/api/notifications?unread=true');
         if (inboxRes.ok) {
           const json = await inboxRes.json() as { meta?: { unreadCount?: number } };
           setInboxUnreadCount(json.meta?.unreadCount ?? 0);
@@ -160,21 +151,6 @@ export function AppSidebar({
                 >
                   <LayoutDashboard />
                   <span>{t('dashboard')}</span>
-                </SidebarMenuButton>
-              </SidebarMenuItem>
-              <SidebarMenuItem>
-                <SidebarMenuButton
-                  render={<Link href="/memos" />}
-                  isActive={isActive('/memos')}
-                  tooltip={t('memos')}
-                >
-                  <MessageSquareMore />
-                  <span>{t('memos')}</span>
-                  {memoUnreadCount > 0 ? (
-                    <SidebarMenuBadge>
-                      {memoUnreadCount > 9 ? '9+' : memoUnreadCount}
-                    </SidebarMenuBadge>
-                  ) : null}
                 </SidebarMenuButton>
               </SidebarMenuItem>
             </SidebarMenu>

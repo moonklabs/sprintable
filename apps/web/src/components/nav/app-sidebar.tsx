@@ -16,7 +16,6 @@ import {
   Layers,
   LayoutDashboard,
   MessageSquare,
-  MessageSquareMore,
   Search,
   Settings,
   Users,
@@ -65,7 +64,6 @@ export function AppSidebar({
 }: AppSidebarProps) {
   const pathname = usePathname();
   const t = useTranslations('nav');
-  const [memoUnreadCount, setMemoUnreadCount] = useState(0);
   const [inboxUnreadCount, setInboxUnreadCount] = useState(0);
   const [paletteOpen, setPaletteOpen] = useState(false);
 
@@ -94,7 +92,6 @@ export function AppSidebar({
         if (!res.ok || cancelled) return;
         const json = await res.json() as { data?: { memoUnreadCount?: number; inboxUnreadCount?: number } };
         if (!cancelled) {
-          setMemoUnreadCount(json.data?.memoUnreadCount ?? 0);
           setInboxUnreadCount(json.data?.inboxUnreadCount ?? 0);
         }
       } catch { /* noop */ }
@@ -180,21 +177,6 @@ export function AppSidebar({
                 >
                   <MessageSquare />
                   <span>{t('chats')}</span>
-                </SidebarMenuButton>
-              </SidebarMenuItem>
-              <SidebarMenuItem>
-                <SidebarMenuButton
-                  render={<Link href="/memos" />}
-                  isActive={isActive('/memos')}
-                  tooltip={t('memos')}
-                >
-                  <MessageSquareMore />
-                  <span>{t('memos')}</span>
-                  {memoUnreadCount > 0 ? (
-                    <SidebarMenuBadge>
-                      {memoUnreadCount > 9 ? '9+' : memoUnreadCount}
-                    </SidebarMenuBadge>
-                  ) : null}
                 </SidebarMenuButton>
               </SidebarMenuItem>
             </SidebarMenu>
