@@ -1,4 +1,4 @@
-"""S3-6: 시스템 콜 계약 검증 — 88개 도구 등록 + 스키마 무결성 (Phase 3 완료)."""
+"""S3-6: 시스템 콜 계약 검증 — 86개 도구 등록 + 스키마 무결성 (Phase 3 완료)."""
 from __future__ import annotations
 
 import os
@@ -41,11 +41,8 @@ EXPECTED_TOOLS = {
     "sprintable_get_project_health",
     # core (2)
     "sprintable_list_team_members", "sprintable_my_dashboard",
-    # memos + chat (10)
-    "sprintable_list_memos", "sprintable_create_memo", "sprintable_send_memo",
-    "sprintable_list_my_memos", "sprintable_read_memo", "sprintable_reply_memo",
-    "sprintable_resolve_memo", "sprintable_send_chat_message",
-    "sprintable_create_conversation", "sprintable_list_chat_messages",
+    # chat (3)
+    "sprintable_send_chat_message", "sprintable_create_conversation", "sprintable_list_chat_messages",
     # meetings (6)
     "sprintable_list_meetings", "sprintable_get_meeting", "sprintable_create_meeting",
     "sprintable_update_meeting", "sprintable_delete_meeting", "sprintable_trigger_ai_summary",
@@ -73,7 +70,7 @@ EXPECTED_TOOLS = {
 
 
 def test_total_tool_count():
-    assert len(_TOOLS) == 88
+    assert len(_TOOLS) == 86
 
 
 def test_all_expected_tools_registered():
@@ -88,7 +85,6 @@ def test_all_expected_tools_registered():
     "sprintable_list_epics",
     "sprintable_list_sprints",
     "sprintable_list_docs",
-    "sprintable_list_memos",
     "sprintable_list_meetings",
     "sprintable_list_retro_sessions",
 ])
@@ -108,8 +104,6 @@ def test_project_id_not_in_schema(tool_name: str):
     ("sprintable_add_story", "description"),
     ("sprintable_create_sprint", "start_date"),
     ("sprintable_create_doc", "content"),
-    ("sprintable_list_memos", "assigned_to"),
-    ("sprintable_list_memos", "status"),
     ("sprintable_list_meetings", "meeting_type"),
     ("sprintable_create_meeting", "date"),
     ("sprintable_check_notifications", "unread"),
@@ -156,7 +150,6 @@ def test_ping_tool_exists():
     "sprintable_list_stories",
     "sprintable_list_tasks",
     "sprintable_list_sprints",
-    "sprintable_list_memos",
     "sprintable_check_notifications",
 ])
 def test_flat_schema_no_args_wrapper(tool_name: str):
