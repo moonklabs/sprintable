@@ -251,7 +251,6 @@ export default async function DashboardPage() {
 
           <DashboardActivityTimeline
             projectId={projectId}
-            currentTeamMemberId={teamMemberId}
           />
         </div>
       </div>

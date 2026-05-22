@@ -5,7 +5,7 @@ import ReactMarkdown, { defaultUrlTransform } from 'react-markdown';
 import remarkGfm from 'remark-gfm';
 import { Bot, MessageSquare, User } from 'lucide-react';
 import type { ChatMessage } from '@/hooks/use-chat-sse';
-import { EntityChip, getEntityHref } from '@/components/memos/embed-card';
+import { EntityChip, getEntityHref } from '@/components/chat/embed-card';
 import { MessageContextMenu } from './message-context-menu';
 
 interface ChatBubbleProps {
