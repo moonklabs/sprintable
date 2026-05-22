@@ -331,9 +331,10 @@ export function AgentApiKeyManager({ agentId, agentName, onNewKey }: AgentApiKey
           {generatedKey && (
             <div className="space-y-4">
               <div className="space-y-2">
-                <label className="text-sm font-medium text-foreground">API Key</label>
+                <label htmlFor="generated-api-key" className="text-sm font-medium leading-none text-foreground select-none">API Key</label>
                 <div className="flex gap-2">
                   <Input
+                    id="generated-api-key"
                     value={generatedKey}
                     readOnly
                     className="font-mono text-sm"
