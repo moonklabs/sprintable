@@ -55,11 +55,9 @@ export function ProfileMenu({ name, email }: ProfileMenuProps) {
           )}
         </DropdownMenuLabel>
         <DropdownMenuSeparator />
-        <DropdownMenuItem>
-          <Link href="/settings" className="flex w-full items-center gap-2">
-            <Settings className="size-4" />
-            설정
-          </Link>
+        <DropdownMenuItem render={<Link href="/settings" />}>
+          <Settings className="size-4" />
+          설정
         </DropdownMenuItem>
         <DropdownMenuSeparator />
         <DropdownMenuItem onClick={() => void handleLogout()} className="flex items-center gap-2 text-destructive focus:bg-destructive/10 focus:text-destructive">
