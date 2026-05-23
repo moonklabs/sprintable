@@ -65,6 +65,7 @@ _SSE_BATCH_SIZE = 10  # 배치 전달 청크 크기
 import os as _os
 _MAX_SSE_CONNECTIONS: int = int(_os.getenv("MAX_SSE_CONNECTIONS", "100"))
 _sse_connection_count: int = 0
+_SSE_HEARTBEAT_TIMEOUT: float = float(_os.getenv("SSE_HEARTBEAT_TIMEOUT", "30"))
 
 # ─── S6-1: Backfill 볼륨 제어 ─────────────────────────────────────────────────
 _BACKFILL_THRESHOLD_SECONDS: int = int(_os.getenv("BACKFILL_THRESHOLD_SECONDS", "300"))
@@ -293,7 +294,7 @@ async def agent_event_stream(
             # 신규 이벤트 리슨 — 대기 구간에서 커넥션 미점유, 이벤트마다 개별 세션
             while not await request.is_disconnected():
                 try:
-                    event_data = await asyncio.wait_for(queue.get(), timeout=30.0)
+                    event_data = await asyncio.wait_for(queue.get(), timeout=_SSE_HEARTBEAT_TIMEOUT)
                     event_type = event_data.get("event_type", "message")
                     # event_id 있으면 yield 전 pending 선점 — 백필과 실시간 큐 중복 방지
                     if eid := event_data.get("event_id"):

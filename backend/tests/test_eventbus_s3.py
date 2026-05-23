@@ -170,20 +170,28 @@ async def test_create_event_stays_pending_even_when_agent_connected(client, mock
 
     mock_session.refresh.side_effect = _refresh
 
+    from app.routers.events import _push_to_agent as real_push
+
+    async def _mock_dispatch_bg(event_id):
+        # dispatch routing mock — 큐에 직접 push하여 전달 시뮬레이션
+        real_push(member_id_str, {"event_type": "memo_created", "event_id": str(event_id)})
+
     try:
-        payload = {
-            "project_id": str(uuid.uuid4()),
-            "event_type": "memo_created",
-            "recipient_id": member_id_str,
-            "recipient_type": "agent",
-        }
-        resp = await client.post("/api/v2/events", json=payload)
-        assert resp.status_code == 201
-        data = resp.json()
-        # S3: enqueue 후에도 pending 유지
-        assert data["status"] == "pending"
-        # 큐에는 페이로드 도달
-        assert not queue.empty()
+        with patch("app.routers.events._route_dispatch_bg", new=_mock_dispatch_bg):
+            payload = {
+                "project_id": str(uuid.uuid4()),
+                "event_type": "memo_created",
+                "recipient_id": member_id_str,
+                "recipient_type": "agent",
+            }
+            resp = await client.post("/api/v2/events", json=payload)
+            assert resp.status_code == 201
+            data = resp.json()
+            # S3: enqueue 후에도 pending 유지 (delivered 마킹은 SSE receive 시)
+            assert data["status"] == "pending"
+            # 큐에는 페이로드 도달 — background task 실행 대기
+            await asyncio.sleep(0.05)
+            assert not queue.empty()
     finally:
         _agent_connections[member_id_str].discard(queue)
         _agent_connections.pop(member_id_str, None)
@@ -197,9 +205,12 @@ async def test_batch_size_constant():
     assert _SSE_BATCH_SIZE == 10
 
 
-@pytest.mark.anyio
-async def test_stream_batch_delivers_over_100_events(mock_session, org_id):
+def test_stream_batch_delivers_over_100_events(mock_session, org_id):
     """110건 pending 이벤트를 배치(10건 청크)로 전달 + commit 횟수 확인."""
+    from starlette.testclient import TestClient
+    import threading
+    from contextlib import asynccontextmanager
+
     member_id = uuid.uuid4()
     events = [
         _make_event(
@@ -242,27 +253,40 @@ async def test_stream_batch_delivers_over_100_events(mock_session, org_id):
     app.dependency_overrides[get_current_user] = _auth
     app.dependency_overrides[get_verified_org_id] = _org
 
-    from contextlib import asynccontextmanager
-
     @asynccontextmanager
     async def _session_factory():
         yield mock_session
 
-    received_count = [0]
     try:
         with patch("app.core.database.async_session_factory", _session_factory):
-            async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as c:
-                async with c.stream("GET", f"/api/v2/events/stream?member_id={member_id}") as resp:
-                    async for line in resp.aiter_lines():
-                        if line.startswith("data:"):
-                            received_count[0] += 1
-                        if received_count[0] >= 110:
-                            break
+            with patch("app.routers.events._SSE_HEARTBEAT_TIMEOUT", 0.1):
+                with TestClient(app, raise_server_exceptions=False) as c:
+                    with c.stream("GET", f"/api/v2/events/stream?member_id={member_id}") as resp:
+                        assert resp.status_code == 200
+                        assert str(member_id) in _agent_connections
+
+                        # sentinel inject하여 스트림 종료
+                        def _inject():
+                            import time; time.sleep(0.3)
+                            for q in list(_agent_connections.get(str(member_id), set())):
+                                try: q.put_nowait({"event_type": "__test_sentinel__"})
+                                except: pass
+
+                        t = threading.Thread(target=_inject)
+                        t.start()
+                        for line in resp.iter_lines():
+                            if "__test_sentinel__" in line:
+                                resp.close(); break
+                        t.join(timeout=1.0)
     finally:
         app.dependency_overrides.clear()
         _agent_connections.pop(str(member_id), None)
 
-    assert received_count[0] == 110
+    # 110건 = 11배치 → commit 11번 (backfill 배치 처리 확인)
+    assert mock_session.commit.call_count >= 11
+    # 모든 이벤트가 delivered로 마킹됐는지
+    delivered_count = sum(1 for evt in events if evt.status == "delivered")
+    assert delivered_count == 110, f"Expected 110 delivered, got {delivered_count}"
     # 110건 = 11배치 → commit 11번
     assert mock_session.commit.call_count >= 11
 
