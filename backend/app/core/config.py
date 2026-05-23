@@ -48,6 +48,10 @@ class Settings(BaseSettings):
     polar_sandbox: bool = True  # dev=True(sandbox), prod=False
     polar_webhook_secret: str = ""  # HMAC signature 검증용
 
+    # Rate limiting (E-OA1:S5)
+    rate_limit_backend: str = "memory"  # "memory" | "redis"
+    redis_url: str = "redis://localhost:6379/0"
+
     @property
     def is_ee_enabled(self) -> bool:
         return self.license_consent.lower() == "agreed"
