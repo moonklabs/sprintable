@@ -1821,7 +1821,15 @@
     "workflowVersionRemovedRules": "삭제 {count}",
     "workflowVersionChangedRules": "변경 {count}",
     "tabDeployments": "배포",
-    "tabPerformance": "퍼포먼스"
+    "tabPerformance": "퍼포먼스",
+    "autoBadge": "Auto",
+    "autoTooltip": "{name} 에이전트가 생성함",
+    "createdBy": "생성자: {name}",
+    "createdByUnknown": "—",
+    "canManageMembersLabel": "멤버 관리",
+    "toggleSuccessTitle": "권한 변경 완료",
+    "toggleFailedTitle": "권한 변경 실패",
+    "toggleFailedBody": "다시 시도해 주세요"
   },
   "agentRuns": {
     "eyebrow": "실행 기록",

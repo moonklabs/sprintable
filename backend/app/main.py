@@ -30,7 +30,7 @@ async def lifespan(app: FastAPI):
             pass
 
 
-from app.routers import account, activity_logs, agent_deployments, agent_personas, agent_routing_rules, agent_runs, agent_sessions, analytics, api_keys, audit_logs, auth, bridge, conversations, cron, current_project, dashboard, dispatch, docs, entities, epics, event_notifications, events, file_locks, health, hitl, integrations, invite_accept, invitations, me, meetings, members, mockups, notification_preferences, notifications, org_invites, org_members, organizations, oss, plan_features, policy_documents, presence, project_access, project_settings, projects, retros, rewards, sprints, standups, stories, subscription, tasks, team_members, webhooks, workflow_executions, workflow_recipes, workflow_report, workflow_templates, workflow_trigger, workflow_trigger_types, workflow_versions
+from app.routers import account, activity_logs, agent_deployments, agent_personas, agent_routing_rules, agent_runs, agent_sessions, analytics, api_keys, audit_logs, auth, bridge, conversations, cron, current_project, dashboard, dispatch, docs, entities, epics, event_notifications, events, file_locks, health, hitl, integrations, invite_accept, invitations, me, meetings, members, mockups, notification_preferences, notifications, open_api_keys, org_invites, org_members, organizations, oss, plan_features, policy_documents, presence, project_access, project_settings, projects, retros, rewards, sprints, standups, stories, subscription, tasks, team_members, webhooks, workflow_executions, workflow_recipes, workflow_report, workflow_templates, workflow_trigger, workflow_trigger_types, workflow_versions
 
 app = FastAPI(
     title="Sprintable API v2",
@@ -159,6 +159,7 @@ app.include_router(workflow_report.router)
 app.include_router(workflow_trigger.router)
 app.include_router(mockups.router)
 app.include_router(plan_features.router)
+app.include_router(open_api_keys.router)
 
 if settings.is_ee_enabled:
     from ee.routers import billing  # type: ignore[import]

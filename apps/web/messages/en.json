@@ -1821,7 +1821,15 @@
     "workflowVersionRemovedRules": "-{count}",
     "workflowVersionChangedRules": "~{count}",
     "tabDeployments": "Deployments",
-    "tabPerformance": "Performance"
+    "tabPerformance": "Performance",
+    "autoBadge": "Auto",
+    "autoTooltip": "Created by {name}",
+    "createdBy": "Created by {name}",
+    "createdByUnknown": "—",
+    "canManageMembersLabel": "Manage members",
+    "toggleSuccessTitle": "Permission updated",
+    "toggleFailedTitle": "Permission update failed",
+    "toggleFailedBody": "Please try again"
   },
   "agentRuns": {
     "eyebrow": "RUN HISTORY",
