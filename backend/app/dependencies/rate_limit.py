@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import time
 import uuid
 
 from fastapi import Depends, HTTPException, Request, Response
@@ -10,7 +11,7 @@ from app.dependencies.auth import AuthContext, get_current_user
 from app.dependencies.database import get_db
 from app.models.plan_feature import PlanFeature
 from app.models.project_api_key import ProjectApiKey
-from app.services.rate_limiter import TIER_LIMITS, get_rate_limiter, hash_api_key
+from app.services.rate_limiter import TIER_LIMITS, WINDOW_SECS, get_rate_limiter, hash_api_key
 
 _PK_PREFIX = "pk_live_"
 
@@ -77,15 +78,22 @@ class RateLimitDependency:
 
         limiter = get_rate_limiter()
         allowed, remaining, retry_after = await limiter.check(rate_key, limit)
+        reset_at = str(int(time.time()) + WINDOW_SECS)
 
         response.headers["X-RateLimit-Limit"] = str(limit)
         response.headers["X-RateLimit-Remaining"] = str(remaining)
+        response.headers["X-RateLimit-Reset"] = reset_at
 
         if not allowed:
-            response.headers["Retry-After"] = str(retry_after)
             raise HTTPException(
                 status_code=429,
                 detail={"code": "RATE_LIMITED", "message": "Too many requests", "retry_after": retry_after},
+                headers={
+                    "Retry-After": str(retry_after),
+                    "X-RateLimit-Limit": str(limit),
+                    "X-RateLimit-Remaining": "0",
+                    "X-RateLimit-Reset": reset_at,
+                },
             )
 
 
