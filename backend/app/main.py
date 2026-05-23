@@ -48,6 +48,7 @@ _HTTP_CODE_MAP: dict[int, str] = {
     404: "NOT_FOUND",
     409: "CONFLICT",
     422: "UNPROCESSABLE_ENTITY",
+    429: "RATE_LIMITED",
 }
 
 
@@ -57,6 +58,7 @@ async def http_exception_handler(request: Request, exc: HTTPException) -> JSONRe
     return JSONResponse(
         status_code=exc.status_code,
         content={"data": None, "error": {"code": code, "message": str(exc.detail)}, "meta": None},
+        headers=exc.headers,
     )
 
 
