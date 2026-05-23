@@ -1,6 +1,6 @@
 'use client';
 
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import { useTranslations } from 'next-intl';
 import Link from 'next/link';
 import { Rocket } from 'lucide-react';
@@ -18,6 +18,25 @@ interface AgentsPageTabsProps {
 export function AgentsPageTabs({ deployments }: AgentsPageTabsProps) {
   const t = useTranslations('agents');
   const [activeTab, setActiveTab] = useState<Tab>('deployments');
+  const [canManageMembers, setCanManageMembers] = useState(false);
+
+  useEffect(() => {
+    async function loadMe() {
+      try {
+        const res = await fetch('/api/me');
+        if (!res.ok) return;
+        const json = await res.json() as { data?: { role?: string; type?: string } };
+        const role = json.data?.role ?? 'member';
+        const type = json.data?.type ?? 'human';
+        setCanManageMembers(
+          (role === 'owner' || role === 'admin') && type === 'human',
+        );
+      } catch {
+        // silently skip — default false (deny)
+      }
+    }
+    void loadMe();
+  }, []);
 
   return (
     <>
@@ -47,7 +66,7 @@ export function AgentsPageTabs({ deployments }: AgentsPageTabsProps) {
           </div>
         }
         actions={
-          activeTab === 'deployments' ? (
+          activeTab === 'deployments' && canManageMembers ? (
             <Link href="/agents/deploy" className={buttonVariants({ variant: 'outline', size: 'sm' })}>
               <Rocket className="mr-1.5 size-3.5" />
               {t('openWizard')}
@@ -56,7 +75,7 @@ export function AgentsPageTabs({ deployments }: AgentsPageTabsProps) {
         }
       />
       {activeTab === 'deployments' ? (
-        <AgentsDashboard deployments={deployments} hideTopBar />
+        <AgentsDashboard deployments={deployments} hideTopBar canManageMembers={canManageMembers} />
       ) : (
         <AgentPerformancePanel />
       )}
