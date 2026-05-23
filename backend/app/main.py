@@ -48,6 +48,7 @@ _HTTP_CODE_MAP: dict[int, str] = {
     404: "NOT_FOUND",
     409: "CONFLICT",
     422: "UNPROCESSABLE_ENTITY",
+    429: "RATE_LIMITED",
 }
 
 
