@@ -101,6 +101,7 @@ export function AgentApiKeyManager({ agentId, agentName, onNewKey }: AgentApiKey
   };
 
   const revokeAllAndGenerate = async () => {
+    if (!agentId) return;
     setRevokeConfirmDialog(false);
     setLoading(true);
     try {
@@ -119,6 +120,7 @@ export function AgentApiKeyManager({ agentId, agentName, onNewKey }: AgentApiKey
   };
 
   const revokeApiKey = async (keyId: string) => {
+    if (!agentId) return;
     if (!confirm('Are you sure you want to revoke this API key?')) return;
 
     setLoading(true);

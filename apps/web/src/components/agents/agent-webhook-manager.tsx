@@ -21,6 +21,7 @@ export function AgentWebhookManager({ agentId, agentName, currentWebhookUrl }: A
   const { addToast } = useToast();
 
   const handleSave = async () => {
+    if (!agentId) return;
     const trimmed = webhookUrl.trim();
     if (trimmed && !/^https:\/\//i.test(trimmed)) {
       addToast({ title: 'Webhook URL must start with https://', type: 'error' });
