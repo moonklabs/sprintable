@@ -61,22 +61,12 @@ export default function RetroSessionPage() {
     setLoading(true);
     setLoadError(null);
     try {
-      const [sessionRes, itemsRes, actionsRes] = await Promise.all([
-        fetch(`/api/retro-sessions/${sessionId}?project_id=${projectId}`),
-        fetch(`/api/retro-sessions/${sessionId}/items?project_id=${projectId}`),
-        fetch(`/api/retro-sessions/${sessionId}/actions?project_id=${projectId}`),
-      ]);
-      if (!sessionRes.ok) throw new Error(`HTTP ${sessionRes.status}`);
-      const sessionJson = await sessionRes.json() as { data: RetroSessionRecord };
-      setSession(sessionJson.data);
-      if (itemsRes.ok) {
-        const itemsJson = await itemsRes.json() as { data: RetroItemRecord[] };
-        setItems(itemsJson.data ?? []);
-      }
-      if (actionsRes.ok) {
-        const actionsJson = await actionsRes.json() as { data: RetroActionRecord[] };
-        setActions(actionsJson.data ?? []);
-      }
+      const res = await fetch(`/api/retro-sessions/${sessionId}?project_id=${projectId}`);
+      if (!res.ok) throw new Error(`HTTP ${res.status}`);
+      const json = await res.json() as { data: RetroSessionRecord & { items?: RetroItemRecord[]; actions?: RetroActionRecord[] } };
+      setSession(json.data);
+      setItems(json.data.items ?? []);
+      setActions(json.data.actions ?? []);
     } catch {
       setLoadError(t('loadFailed'));
     } finally {
