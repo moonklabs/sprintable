@@ -24,13 +24,17 @@ router = APIRouter(prefix="/api/v2/stories", tags=["stories"])
 
 async def _resolve_actor_info(
     db: AsyncSession, actor_id: uuid.UUID | None
-) -> tuple[str | None, str | None]:
-    """Returns (name, role) for a TeamMember ID."""
+) -> tuple[str | None, str | None, str | None]:
+    """Returns (name, role, member_type) for a TeamMember ID."""
     if not actor_id:
-        return None, None
+        return None, None, None
     result = await db.execute(select(TeamMember).where(TeamMember.id == actor_id).limit(1))
     member = result.scalar_one_or_none()
-    return (member.name if member else None, member.role if member else None)
+    return (
+        member.name if member else None,
+        member.role if member else None,
+        member.type if member else None,
+    )
 
 
 async def _resolve_epic_title(db: AsyncSession, epic_id: uuid.UUID | None) -> str | None:
@@ -167,9 +171,10 @@ async def update_story(
     actor_id: uuid.UUID | None = None
     actor_name: str | None = None
     actor_role: str | None = None
+    actor_type: str | None = None
     try:
         actor_id = await _resolve_team_member_id(auth, repo.org_id, db)
-        actor_name, actor_role = await _resolve_actor_info(db, actor_id)
+        actor_name, actor_role, actor_type = await _resolve_actor_info(db, actor_id)
     except Exception:
         pass
 
@@ -193,6 +198,8 @@ async def update_story(
             "actor_id": str(actor_id) if actor_id else None,
             "actor_name": actor_name,
             "actor_role": actor_role,
+            "source_agent_id": str(actor_id) if (actor_id and actor_type == "agent") else None,
+            "assignees": [str(story.assignee_id)] if story.assignee_id else [],
             "timestamp": datetime.now(timezone.utc).isoformat(),
         }
         publish_event(str(org_id), "story.assignee_changed", event_data)
@@ -302,9 +309,10 @@ async def update_story_status(
     actor_id: uuid.UUID | None = None
     actor_name: str | None = None
     actor_role: str | None = None
+    actor_type: str | None = None
     try:
         actor_id = await _resolve_team_member_id(auth, repo.org_id, db)
-        actor_name, actor_role = await _resolve_actor_info(db, actor_id)
+        actor_name, actor_role, actor_type = await _resolve_actor_info(db, actor_id)
     except Exception:
         pass
 
@@ -349,6 +357,8 @@ async def update_story_status(
             "actor_id": str(actor_id) if actor_id else None,
             "actor_name": actor_name,
             "actor_role": actor_role,
+            "source_agent_id": str(actor_id) if (actor_id and actor_type == "agent") else None,
+            "assignees": [str(story.assignee_id)] if story.assignee_id else [],
             "timestamp": datetime.now(timezone.utc).isoformat(),
         }
         publish_event(str(org_id), "story.status_changed", event_data)

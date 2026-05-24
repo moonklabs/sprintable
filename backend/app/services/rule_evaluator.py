@@ -36,6 +36,8 @@ class EventMetadata(BaseModel):
     memo_type: str | None = None
     title: str | None = None
     context_message: str | None = None
+    source_agent_id: str | None = None
+    assignees: list[str] | None = None
 
 
 @dataclass
