@@ -62,8 +62,10 @@
     "goInbox": "인박스로 이동",
     "goDashboard": "대시보드로 이동",
     "goBoard": "보드로 이동",
+    "goMemos": "메모로 이동",
     "goAgents": "에이전트로 이동",
-    "goDocs": "문서로 이동"
+    "goDocs": "문서로 이동",
+    "documents": "문서"
   },
   "dashboard": {
     "title": "대시보드",

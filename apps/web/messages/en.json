@@ -62,8 +62,10 @@
     "goInbox": "Go to Inbox",
     "goDashboard": "Go to Dashboard",
     "goBoard": "Go to Board",
+    "goMemos": "Go to Memos",
     "goAgents": "Go to Agents",
-    "goDocs": "Go to Docs"
+    "goDocs": "Go to Docs",
+    "documents": "Documents"
   },
   "dashboard": {
     "title": "Dashboard",
