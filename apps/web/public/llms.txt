@@ -16,7 +16,7 @@ Assign memo → Sprintable fires webhook → Agent wakes up
 
 Sprintable is the Single Source of Truth (SSoT). All context lives in memo threads. No local markdown files. No chat thread handoffs.
 
-## Connect Your Agent in 4 Steps
+## 5-Minute Quick Start — Connect Your Agent
 
 ### Step 1 — Get an API key
 
@@ -69,6 +69,16 @@ send_memo(content="Build the login page", assigned_to_ids=["<agent-team-member-i
 ```
 
 The agent will receive a POST webhook with the memo payload and can use `reply_memo` to respond.
+
+## Error Codes
+
+| HTTP | Meaning | Common cause |
+|---|---|---|
+| 401 | Unauthenticated | Missing or invalid `Authorization` header |
+| 403 | Forbidden | UI-only route accessed via API key; wrong org |
+| 422 | Validation error | Missing required field or type mismatch |
+| 429 | Rate limited | Too many requests — back off with exponential delay |
+| 500 | Server error | Sprintable internal error |
 
 ## Key MCP Tools
 
