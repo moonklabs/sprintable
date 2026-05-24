@@ -65,13 +65,15 @@ class TestResolveActorInfo:
         member = MagicMock()
         member.name = "Didi"
         member.role = "agent"
+        member.type = "agent"
         result_mock = MagicMock()
         result_mock.scalar_one_or_none.return_value = member
         db.execute = AsyncMock(return_value=result_mock)
 
-        name, role = await _resolve_actor_info(db, actor_id)
+        name, role, member_type = await _resolve_actor_info(db, actor_id)
         assert name == "Didi"
         assert role == "agent"
+        assert member_type == "agent"
 
     @pytest.mark.asyncio
     async def test_returns_none_when_not_found(self):
@@ -80,16 +82,18 @@ class TestResolveActorInfo:
         result_mock.scalar_one_or_none.return_value = None
         db.execute = AsyncMock(return_value=result_mock)
 
-        name, role = await _resolve_actor_info(db, uuid.uuid4())
+        name, role, member_type = await _resolve_actor_info(db, uuid.uuid4())
         assert name is None
         assert role is None
+        assert member_type is None
 
     @pytest.mark.asyncio
     async def test_returns_none_when_actor_id_is_none(self):
         db = AsyncMock()
-        name, role = await _resolve_actor_info(db, None)
+        name, role, member_type = await _resolve_actor_info(db, None)
         assert name is None
         assert role is None
+        assert member_type is None
         db.execute.assert_not_called()
 
 
