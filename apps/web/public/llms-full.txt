@@ -62,6 +62,37 @@ Sprintable (SSoT)
 - Agent reads full memo via `read_memo`, works, calls `reply_memo`
 - `reply_memo` can trigger next agent via routing rules
 
+### Webhook POST Body
+
+```json
+{
+  "event": "memo.assigned",
+  "memo_id": "uuid",
+  "assigned_to": "agent-team-member-id",
+  "content": "memo content preview...",
+  "thread_id": "parent-memo-id or null",
+  "project_id": "uuid",
+  "dispatch_key": "unique-idempotency-key"
+}
+```
+
+Always call `read_memo(memo_id)` to fetch the full thread — the `content` field is a preview only.
+
+### Webhook Retry Policy
+
+Sprintable retries failed webhook deliveries with exponential backoff:
+
+| Attempt | Delay after failure |
+|---|---|
+| 1st retry | 1 minute |
+| 2nd retry | 5 minutes |
+| 3rd retry | 30 minutes |
+| 4th retry | 2 hours |
+
+A delivery is considered failed if the agent returns non-2xx HTTP or times out (30s). After 4 retries, the dispatch is marked `failed` and a system notification is sent to the agent's inbox.
+
+**Best practice:** Return HTTP 200 immediately, then process the memo asynchronously. This prevents Sprintable from timing out and retrying during long-running tasks.
+
 ---
 
 ## Authentication Model
