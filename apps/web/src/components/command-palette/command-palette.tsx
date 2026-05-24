@@ -1,6 +1,6 @@
 'use client';
 
-import { useMemo, useRef, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import { useTranslations } from 'next-intl';
 import { Dialog as DialogPrimitive } from '@base-ui/react/dialog';
@@ -25,6 +25,13 @@ interface CommandItem {
   shortcut?: string[];
 }
 
+interface DocResult {
+  id: string;
+  title: string;
+  slug: string;
+  icon: string | null;
+}
+
 const ITEMS: CommandItem[] = [
   { id: 'go-inbox', group: 'navigate', icon: Inbox, labelKey: 'goInbox', href: '/inbox', shortcut: ['G', 'I'] },
   { id: 'go-dashboard', group: 'navigate', icon: LayoutDashboard, labelKey: 'goDashboard', href: '/dashboard', shortcut: ['G', 'D'] },
@@ -37,14 +44,17 @@ const ITEMS: CommandItem[] = [
 export interface CommandPaletteProps {
   open: boolean;
   onOpenChange: (open: boolean) => void;
+  projectId?: string;
 }
 
-export function CommandPalette({ open, onOpenChange }: CommandPaletteProps) {
+export function CommandPalette({ open, onOpenChange, projectId }: CommandPaletteProps) {
   const router = useRouter();
   const t = useTranslations('commandPalette');
   const [query, setQuery] = useState('');
   const [activeIndex, setActiveIndex] = useState(0);
+  const [docResults, setDocResults] = useState<DocResult[]>([]);
   const listRef = useRef<HTMLDivElement>(null);
+  const debounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   const filtered = useMemo(() => {
     const q = query.trim().toLowerCase();
@@ -52,38 +62,84 @@ export function CommandPalette({ open, onOpenChange }: CommandPaletteProps) {
     return ITEMS.filter((item) => t(item.labelKey).toLowerCase().includes(q));
   }, [query, t]);
 
-  // Clamp active index to filtered range during render (avoid cascading effects).
+  // Docs search with debounce
+  useEffect(() => {
+    if (debounceRef.current) clearTimeout(debounceRef.current);
+
+    const q = query.trim();
+    if (!q || !projectId) {
+      setDocResults([]);
+      return;
+    }
+
+    debounceRef.current = setTimeout(async () => {
+      try {
+        const res = await fetch(`/api/docs?project_id=${encodeURIComponent(projectId)}&q=${encodeURIComponent(q)}&limit=5`);
+        if (!res.ok) return;
+        const json = await res.json() as { data?: DocResult[] };
+        setDocResults(json.data ?? []);
+      } catch {
+        // ignore network errors
+      }
+    }, 300);
+
+    return () => {
+      if (debounceRef.current) clearTimeout(debounceRef.current);
+    };
+  }, [query, projectId]);
+
+  // Reset doc results when palette closes
+  useEffect(() => {
+    if (!open) setDocResults([]);
+  }, [open]);
+
+  // Total items for keyboard navigation: navigate items first, then doc results
+  const totalCount = filtered.length + docResults.length;
+
+  // Clamp active index to total range during render (avoid cascading effects).
   const clampedActiveIndex =
-    filtered.length === 0 ? 0 : Math.min(Math.max(activeIndex, 0), filtered.length - 1);
+    totalCount === 0 ? 0 : Math.min(Math.max(activeIndex, 0), totalCount - 1);
 
   function handleOpenChange(next: boolean) {
     if (!next) {
       setQuery('');
       setActiveIndex(0);
+      setDocResults([]);
     }
     onOpenChange(next);
   }
 
-  function handleSelect(item: CommandItem) {
+  function handleSelectNav(item: CommandItem) {
     router.push(item.href);
+    handleOpenChange(false);
+  }
+
+  function handleSelectDoc(doc: DocResult) {
+    router.push(`/docs/${doc.slug}`);
     handleOpenChange(false);
   }
 
   function handleKeyDown(event: React.KeyboardEvent<HTMLInputElement>) {
     if (event.key === 'ArrowDown') {
       event.preventDefault();
-      setActiveIndex(Math.min(filtered.length - 1, clampedActiveIndex + 1));
+      setActiveIndex(Math.min(totalCount - 1, clampedActiveIndex + 1));
     } else if (event.key === 'ArrowUp') {
       event.preventDefault();
       setActiveIndex(Math.max(0, clampedActiveIndex - 1));
     } else if (event.key === 'Enter') {
       event.preventDefault();
-      const item = filtered[clampedActiveIndex];
-      if (item) handleSelect(item);
+      if (clampedActiveIndex < filtered.length) {
+        const item = filtered[clampedActiveIndex];
+        if (item) handleSelectNav(item);
+      } else {
+        const doc = docResults[clampedActiveIndex - filtered.length];
+        if (doc) handleSelectDoc(doc);
+      }
     }
   }
 
   const navigateItems = filtered.filter((item) => item.group === 'navigate');
+  const hasResults = navigateItems.length > 0 || docResults.length > 0;
 
   return (
     <DialogPrimitive.Root open={open} onOpenChange={handleOpenChange}>
@@ -122,21 +178,32 @@ export function CommandPalette({ open, onOpenChange }: CommandPaletteProps) {
           </div>
 
           <div ref={listRef} className="max-h-80 overflow-y-auto p-2">
-            {filtered.length === 0 ? (
+            {!hasResults ? (
               <div className="px-3 py-6 text-center text-sm text-muted-foreground">
                 {t('noResults')}
               </div>
             ) : (
-              navigateItems.length > 0 && (
-                <CommandGroup
-                  label={t('navigate')}
-                  items={navigateItems}
-                  activeIndex={clampedActiveIndex}
-                  filteredItems={filtered}
-                  onSelect={handleSelect}
-                  t={t}
-                />
-              )
+              <>
+                {navigateItems.length > 0 && (
+                  <CommandGroup
+                    label={t('navigate')}
+                    items={navigateItems}
+                    activeIndex={clampedActiveIndex}
+                    filteredItems={filtered}
+                    onSelect={handleSelectNav}
+                    t={t}
+                  />
+                )}
+                {docResults.length > 0 && (
+                  <DocGroup
+                    label={t('documents')}
+                    docs={docResults}
+                    activeIndexOffset={filtered.length}
+                    activeIndex={clampedActiveIndex}
+                    onSelect={handleSelectDoc}
+                  />
+                )}
+              </>
             )}
           </div>
         </DialogPrimitive.Popup>
@@ -193,6 +260,45 @@ function CommandGroup({ label, items, filteredItems, activeIndex, onSelect, t }:
                     ))}
                   </span>
                 ) : null}
+              </button>
+            </li>
+          );
+        })}
+      </ul>
+    </div>
+  );
+}
+
+interface DocGroupProps {
+  label: string;
+  docs: DocResult[];
+  activeIndexOffset: number;
+  activeIndex: number;
+  onSelect: (doc: DocResult) => void;
+}
+
+function DocGroup({ label, docs, activeIndexOffset, activeIndex, onSelect }: DocGroupProps) {
+  return (
+    <div className="flex flex-col">
+      <div className="px-2 pt-1.5 pb-1 text-[10px] font-medium uppercase tracking-wider text-muted-foreground">
+        {label}
+      </div>
+      <ul className="flex flex-col">
+        {docs.map((doc, i) => {
+          const active = activeIndexOffset + i === activeIndex;
+          return (
+            <li key={doc.id}>
+              <button
+                type="button"
+                onClick={() => onSelect(doc)}
+                className={cn(
+                  'flex w-full items-center gap-2 rounded-md px-2 py-2 text-left text-sm transition-colors',
+                  active ? 'bg-accent text-accent-foreground' : 'text-foreground hover:bg-accent/60',
+                )}
+                data-active={active || undefined}
+              >
+                <BookOpen className="size-4 shrink-0 text-muted-foreground" />
+                <span className="flex-1 truncate">{doc.icon ? `${doc.icon} ` : ''}{doc.title}</span>
               </button>
             </li>
           );
