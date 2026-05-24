@@ -9,9 +9,10 @@ import uuid
 from datetime import datetime, timezone
 from typing import Any
 
-from sqlalchemy import select, update
+from sqlalchemy import func, select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.models.agent_routing_rule import AgentRoutingRule
 from app.models.workflow_execution_log import WorkflowExecutionLog
 from app.services.rule_evaluator import EventContext, evaluate
 
@@ -83,6 +84,17 @@ async def process_event(
     ctx: EventContext,
 ) -> None:
     if ctx.is_side_effect:
+        return
+
+    count_result = await session.execute(
+        select(func.count()).select_from(AgentRoutingRule).where(
+            AgentRoutingRule.org_id == org_id,
+            AgentRoutingRule.project_id == project_id,
+            AgentRoutingRule.is_enabled.is_(True),
+            AgentRoutingRule.deleted_at.is_(None),
+        )
+    )
+    if (count_result.scalar_one() or 0) == 0:
         return
 
     result = await evaluate(session, org_id, project_id, ctx)
