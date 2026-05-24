@@ -37,6 +37,103 @@ interface Notification {
   created_at: string;
 }
 
+function AgentJoinedDetailPanel({
+  notification,
+  t,
+  addToast,
+  onRevoked,
+}: {
+  notification: Notification;
+  t: (key: string) => string;
+  addToast: (toast: { title: string; type?: 'success' | 'error' }) => void;
+  onRevoked: () => void;
+}) {
+  const [confirming, setConfirming] = useState(false);
+  const [revoking, setRevoking] = useState(false);
+
+  async function handleRevoke() {
+    if (!notification.reference_id) return;
+    setRevoking(true);
+    try {
+      const res = await fetch(`/api/team-members/${notification.reference_id}`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ is_active: false }),
+      });
+      if (res.ok) {
+        addToast({ title: t('revoke_success'), type: 'success' });
+        onRevoked();
+      } else {
+        addToast({ title: t('revoke_failed'), type: 'error' });
+      }
+    } catch {
+      addToast({ title: t('revoke_failed'), type: 'error' });
+    } finally {
+      setRevoking(false);
+      setConfirming(false);
+    }
+  }
+
+  return (
+    <div className="flex flex-1 flex-col gap-4 px-6 py-6">
+      <div className="flex items-start gap-3">
+        <div className="flex size-12 shrink-0 items-center justify-center rounded-2xl bg-white/6 text-xl">
+          🤖
+        </div>
+        <div className="min-w-0 flex-1 space-y-2">
+          <div className="flex flex-wrap items-center gap-2">
+            <Badge variant="outline">{t('filter_agent_joined')}</Badge>
+            <span className="text-xs text-muted-foreground">
+              {t('receivedAt')} · {new Date(notification.created_at).toLocaleString()}
+            </span>
+          </div>
+          <h2 className="text-lg font-semibold text-foreground">{notification.title}</h2>
+        </div>
+      </div>
+
+      {notification.body ? (
+        <div className="rounded-xl border border-white/8 bg-muted/55 p-4 text-sm leading-6 text-foreground whitespace-pre-wrap">
+          {notification.body}
+        </div>
+      ) : null}
+
+      {notification.reference_id ? (
+        <div className="flex flex-wrap items-center gap-2 pt-2">
+          {confirming ? (
+            <>
+              <span className="text-sm text-muted-foreground">{t('revoke_agent_confirm')}</span>
+              <Button
+                variant="destructive"
+                size="sm"
+                onClick={() => void handleRevoke()}
+                disabled={revoking}
+              >
+                {revoking ? '…' : t('revoke_agent')}
+              </Button>
+              <Button
+                variant="glass"
+                size="sm"
+                onClick={() => setConfirming(false)}
+                disabled={revoking}
+              >
+                {t('cancel')}
+              </Button>
+            </>
+          ) : (
+            <Button
+              variant="destructive"
+              size="sm"
+              onClick={() => setConfirming(true)}
+            >
+              {t('revoke_agent')}
+            </Button>
+          )}
+        </div>
+      ) : null}
+    </div>
+  );
+}
+
 async function fetchInboxNotifications(typeFilter: string) {
   const params = new URLSearchParams();
   if (typeFilter) params.set('type', typeFilter);
@@ -60,7 +157,7 @@ export default function InboxPage() {
   const [loading, setLoading] = useState(true);
   const [workflowExecs, setWorkflowExecs] = useState<WorkflowExecItem[]>([]);
   const [selectedId, setSelectedId] = useState<string | null>(null);
-  const { toasts, dismissToast } = useToast();
+  const { toasts, addToast, dismissToast } = useToast();
 
   const refreshNotifications = useCallback(async () => {
     const result = await fetchInboxNotifications('');
@@ -276,6 +373,14 @@ export default function InboxPage() {
         {/* Right: detail panel */}
         <div className="flex min-w-0 flex-1 flex-col overflow-y-auto">
           {selectedNotification ? (
+            selectedNotification.type === 'agent_joined' ? (
+              <AgentJoinedDetailPanel
+                notification={selectedNotification}
+                t={t}
+                addToast={addToast}
+                onRevoked={() => void refreshNotifications()}
+              />
+            ) : (
             <div className="flex flex-1 flex-col gap-4 px-6 py-6">
               <div className="flex items-start gap-3">
                 <div className="flex size-12 shrink-0 items-center justify-center rounded-2xl bg-white/6 text-xl">
@@ -317,6 +422,7 @@ export default function InboxPage() {
                 ) : null}
               </div>
             </div>
+            )
           ) : (
             <div className="flex flex-1 flex-col items-center justify-center gap-3 px-6 py-12 text-center">
               <div className="flex size-14 items-center justify-center rounded-2xl bg-muted/55">
