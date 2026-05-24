@@ -53,6 +53,21 @@ function wipLimitKey(projectId: string | undefined, status: string): string {
   return `wip_limit_${projectId ?? 'default'}_${status}`;
 }
 
+// Done 컬럼 collapse localStorage
+function doneCollapseKey(projectId: string | undefined): string {
+  return `done_collapsed_${projectId ?? 'default'}`;
+}
+
+function loadDoneCollapse(projectId: string | undefined): boolean {
+  if (typeof window === 'undefined') return false;
+  return localStorage.getItem(doneCollapseKey(projectId)) === 'true';
+}
+
+function saveDoneCollapse(projectId: string | undefined, collapsed: boolean): void {
+  if (typeof window === 'undefined') return;
+  localStorage.setItem(doneCollapseKey(projectId), String(collapsed));
+}
+
 function loadWipLimit(projectId: string | undefined, status: string): number | null {
   if (typeof window === 'undefined') return null;
   const raw = localStorage.getItem(wipLimitKey(projectId, status));
@@ -112,6 +127,21 @@ export function KanbanBoard({ projectId }: KanbanBoardProps) {
     if (storyId) params.set('story', storyId);
     router.replace(`/board${params.size > 0 ? `?${params.toString()}` : ''}`, { scroll: false });
   }, [router, searchParams]);
+
+  // BOARD-03: done 컬럼 collapse 상태
+  const [doneCollapsed, setDoneCollapsed] = useState(false);
+
+  useEffect(() => {
+    setDoneCollapsed(loadDoneCollapse(projectId));
+  }, [projectId]);
+
+  const handleToggleDoneCollapse = useCallback(() => {
+    setDoneCollapsed((prev) => {
+      const next = !prev;
+      saveDoneCollapse(projectId, next);
+      return next;
+    });
+  }, [projectId]);
 
   // AC1/AC5: WIP limit 상태 — 컬럼별 { limit: number|null, editing: boolean, draft: string }
   const [wipLimits, setWipLimits] = useState<Record<string, { limit: number | null; editing: boolean; draft: string }>>(() => {
@@ -977,6 +1007,8 @@ export function KanbanBoard({ projectId }: KanbanBoardProps) {
                     hasMore={!!columnCursors[col.id]}
                     loadingMore={loadingMoreColumns[col.id] ?? false}
                     onLoadMore={() => handleLoadMore(col.id)}
+                    collapsed={col.id === 'done' ? doneCollapsed : undefined}
+                    onToggleCollapse={col.id === 'done' ? handleToggleDoneCollapse : undefined}
                   />
                 );
               })}
