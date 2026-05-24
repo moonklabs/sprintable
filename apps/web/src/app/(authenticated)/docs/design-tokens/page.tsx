@@ -1,7 +1,5 @@
 'use client';
 
-import { useEffect, useState } from 'react';
-
 interface ColorToken {
   name: string;
   var: string;
@@ -94,12 +92,13 @@ const RADIUS_TOKENS: RadiusToken[] = [
   { name: '4xl', var: '--radius-4xl', tailwind: 'rounded-4xl' },
 ];
 
-function readVar(el: Element, name: string): string {
-  return getComputedStyle(el).getPropertyValue(name).trim();
+function readVar(name: string): string {
+  if (typeof window === 'undefined') return '';
+  return getComputedStyle(document.documentElement).getPropertyValue(name).trim();
 }
 
-function ColorSwatch({ token, el }: { token: ColorToken; el: Element }) {
-  const value = readVar(el, token.var);
+function ColorSwatch({ token }: { token: ColorToken }) {
+  const value = readVar(token.var);
   return (
     <div className="flex items-center gap-3">
       <div
@@ -108,7 +107,7 @@ function ColorSwatch({ token, el }: { token: ColorToken; el: Element }) {
       />
       <div className="min-w-0 flex-1">
         <p className="truncate text-xs font-medium text-foreground">{token.name}</p>
-        <p className="truncate font-mono text-[10px] text-muted-foreground">{value || token.var}</p>
+        <p suppressHydrationWarning className="truncate font-mono text-[10px] text-muted-foreground">{value || token.var}</p>
       </div>
       <code className="shrink-0 rounded bg-muted/60 px-1.5 py-0.5 font-mono text-[10px] text-muted-foreground">
         {token.tailwind}
@@ -118,19 +117,6 @@ function ColorSwatch({ token, el }: { token: ColorToken; el: Element }) {
 }
 
 export default function DesignTokensPage() {
-  const [root, setRoot] = useState<Element | null>(null);
-
-  useEffect(() => {
-    setRoot(document.documentElement);
-  }, []);
-
-  const darkRef = (el: HTMLDivElement | null) => {
-    // no-op — dark div reads vars relative to itself
-    void el;
-  };
-
-  if (!root) return null;
-
   return (
     <div className="min-h-full overflow-y-auto px-6 py-8">
       <div className="mx-auto max-w-4xl space-y-12">
@@ -152,7 +138,7 @@ export default function DesignTokensPage() {
                 </h3>
                 <div className="grid grid-cols-1 gap-2 sm:grid-cols-2">
                   {group.tokens.map((token) => (
-                    <ColorSwatch key={token.var} token={token} el={root} />
+                    <ColorSwatch key={token.var} token={token} />
                   ))}
                 </div>
               </div>
@@ -186,7 +172,7 @@ export default function DesignTokensPage() {
           <h2 className="mb-4 text-base font-semibold text-foreground">Border Radius</h2>
           <div className="flex flex-wrap gap-4">
             {RADIUS_TOKENS.map((token) => {
-              const value = readVar(root, token.var);
+              const value = readVar(token.var);
               return (
                 <div key={token.var} className="flex flex-col items-center gap-2">
                   <div
@@ -195,7 +181,7 @@ export default function DesignTokensPage() {
                   />
                   <div className="text-center">
                     <p className="text-xs font-medium text-foreground">{token.name}</p>
-                    <p className="font-mono text-[10px] text-muted-foreground">{value || '—'}</p>
+                    <p suppressHydrationWarning className="font-mono text-[10px] text-muted-foreground">{value || '—'}</p>
                   </div>
                 </div>
               );
@@ -209,7 +195,7 @@ export default function DesignTokensPage() {
           <p className="mb-4 text-sm text-muted-foreground">
             Brand swatches resolved inside a scoped <code className="rounded bg-muted px-1 font-mono text-xs">.dark</code> container.
           </p>
-          <div ref={darkRef} className="dark rounded-xl border border-border/60 bg-background p-6">
+          <div className="dark rounded-xl border border-border/60 bg-background p-6">
             <p className="mb-4 text-xs font-medium uppercase tracking-wider text-muted-foreground">
               Brand — dark mode
             </p>
