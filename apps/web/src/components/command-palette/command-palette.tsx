@@ -68,7 +68,6 @@ export function CommandPalette({ open, onOpenChange, projectId }: CommandPalette
 
     const q = query.trim();
     if (!q || !projectId) {
-      setDocResults([]);
       return;
     }
 
@@ -88,13 +87,11 @@ export function CommandPalette({ open, onOpenChange, projectId }: CommandPalette
     };
   }, [query, projectId]);
 
-  // Reset doc results when palette closes
-  useEffect(() => {
-    if (!open) setDocResults([]);
-  }, [open]);
+  // Gate doc results on active query to avoid showing stale results
+  const displayedDocResults = useMemo(() => query.trim() ? docResults : [], [query, docResults]);
 
   // Total items for keyboard navigation: navigate items first, then doc results
-  const totalCount = filtered.length + docResults.length;
+  const totalCount = filtered.length + displayedDocResults.length;
 
   // Clamp active index to total range during render (avoid cascading effects).
   const clampedActiveIndex =
@@ -132,14 +129,14 @@ export function CommandPalette({ open, onOpenChange, projectId }: CommandPalette
         const item = filtered[clampedActiveIndex];
         if (item) handleSelectNav(item);
       } else {
-        const doc = docResults[clampedActiveIndex - filtered.length];
+        const doc = displayedDocResults[clampedActiveIndex - filtered.length];
         if (doc) handleSelectDoc(doc);
       }
     }
   }
 
   const navigateItems = filtered.filter((item) => item.group === 'navigate');
-  const hasResults = navigateItems.length > 0 || docResults.length > 0;
+  const hasResults = navigateItems.length > 0 || displayedDocResults.length > 0;
 
   return (
     <DialogPrimitive.Root open={open} onOpenChange={handleOpenChange}>
@@ -194,10 +191,10 @@ export function CommandPalette({ open, onOpenChange, projectId }: CommandPalette
                     t={t}
                   />
                 )}
-                {docResults.length > 0 && (
+                {displayedDocResults.length > 0 && (
                   <DocGroup
                     label={t('documents')}
-                    docs={docResults}
+                    docs={displayedDocResults}
                     activeIndexOffset={filtered.length}
                     activeIndex={clampedActiveIndex}
                     onSelect={handleSelectDoc}
