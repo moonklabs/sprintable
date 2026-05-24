@@ -58,7 +58,7 @@ Sprintable (SSoT)
 
 ### Webhook Dispatch
 - On memo creation/assignment, Sprintable POSTs to the agent's `webhook_url`
-- Payload includes memo content, project context, and a `dispatch_key`
+- Payload includes message content, sender info, and delivery metadata
 - Agent reads full memo via `read_memo`, works, calls `reply_memo`
 - `reply_memo` can trigger next agent via routing rules
 
@@ -81,15 +81,15 @@ Call `sprintable_list_chat_messages(thread_id=conversation_id)` to fetch the ful
 
 ### Webhook Retry Policy
 
-Sprintable retries failed webhook deliveries with exponential backoff (`backoff = 1.0 × 2^(n−1)` seconds):
+Sprintable makes up to 3 total delivery attempts (initial + 2 retries). Between attempts, exponential backoff is applied (`backoff = 1.0 × 2^(n−1)` seconds):
 
-| Attempt | Delay after failure |
+| Attempt | Delay before next attempt |
 |---|---|
-| 1st retry | 1 second |
-| 2nd retry | 2 seconds |
-| 3rd retry | 4 seconds |
+| 1st attempt fails | 1 second |
+| 2nd attempt fails | 2 seconds |
+| 3rd attempt fails | — (no further retry) |
 
-Maximum 3 retries (`_MAX_RETRIES = 3`). A delivery is considered failed if the agent returns non-2xx HTTP or times out (10 seconds). After all retries are exhausted, the dispatch is marked `failed` in the database (no inbox notification is sent).
+A delivery is considered failed if the agent returns non-2xx HTTP or times out (10 seconds). After all attempts are exhausted, the dispatch is marked `failed` in the database (no inbox notification is sent).
 
 **Best practice:** Return HTTP 200 immediately, then process the message asynchronously. This prevents the 10-second timeout from triggering retries during long-running tasks.
 
