@@ -195,6 +195,25 @@ async def slack_events(request: Request, session: AsyncSession = Depends(get_db)
             if result.get("action") == "error":
                 raise ValueError(result["detail"])
             await session.commit()
+            # Phase 6-1: bridge inbound message → process_event 훅
+            try:
+                from app.services.workflow_pipeline import process_event
+                from app.services.rule_evaluator import EventContext
+                await process_event(session, org_id, project_id, EventContext(
+                    event_type="message.created",
+                    trigger_type_slug="kickoff",
+                    actor_id=str(author_id),
+                    metadata={
+                        "conversation_id": conv_id_str,
+                        "message_id": result.get("message_id"),
+                        "content_preview": (content or "")[:200],
+                        "platform": "slack",
+                        "project_id": str(project_id),
+                        "org_id": str(org_id),
+                    },
+                ))
+            except Exception:
+                pass
             return _ok(result)
         except Exception:
             await session.rollback()  # RC2: dirty session 복구 후 memo fallback
@@ -386,6 +405,25 @@ async def teams_events(request: Request, session: AsyncSession = Depends(get_db)
             if result.get("action") == "error":
                 raise ValueError(result["detail"])
             await session.commit()
+            # Phase 6-1: bridge inbound message → process_event 훅
+            try:
+                from app.services.workflow_pipeline import process_event
+                from app.services.rule_evaluator import EventContext
+                await process_event(session, org_id, project_id, EventContext(
+                    event_type="message.created",
+                    trigger_type_slug="kickoff",
+                    actor_id=str(author_id),
+                    metadata={
+                        "conversation_id": conv_id_str,
+                        "message_id": result.get("message_id"),
+                        "content_preview": (content or "")[:200],
+                        "platform": "teams",
+                        "project_id": str(project_id),
+                        "org_id": str(org_id),
+                    },
+                ))
+            except Exception:
+                pass
             return JSONResponse({"ok": True, "result": result})
         except Exception:
             await session.rollback()  # RC2: dirty session 복구 후 memo fallback
