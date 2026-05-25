@@ -16,7 +16,7 @@ import TableRow from '@tiptap/extension-table-row';
 import TableCell from '@tiptap/extension-table-cell';
 import TableHeader from '@tiptap/extension-table-header';
 import Placeholder from '@tiptap/extension-placeholder';
-import { Bold, Italic, Strikethrough, Code, Link2, Highlighter } from 'lucide-react';
+import { Bold, Italic, Strikethrough, Code, Link2, Highlighter, Undo2, Redo2 } from 'lucide-react';
 import { CalloutNode } from './extensions/callout-node';
 import { SlashCommandExtension } from './extensions/slash-command';
 import { PageEmbedExtension } from './extensions/page-embed-node';
@@ -315,6 +315,21 @@ export function DocEditor({
         {viewMode === 'preview' && editor ? (
           <div className="hidden md:flex flex-wrap items-center gap-1.5">
             <ToolbarButton
+              active={false}
+              disabled={!editor.can().undo()}
+              onClick={() => editor.chain().focus().undo().run()}
+            >
+              <Undo2 className="size-3.5" />
+            </ToolbarButton>
+            <ToolbarButton
+              active={false}
+              disabled={!editor.can().redo()}
+              onClick={() => editor.chain().focus().redo().run()}
+            >
+              <Redo2 className="size-3.5" />
+            </ToolbarButton>
+            <Sep />
+            <ToolbarButton
               active={editor.isActive('heading', { level: 1 })}
               onClick={() => editor.chain().focus().toggleHeading({ level: 1 }).run()}
             >
@@ -496,6 +511,21 @@ export function DocEditor({
         >
           <div className="flex overflow-x-auto items-center gap-1 px-2 py-2" onMouseDown={(e) => e.preventDefault()}>
             <ToolbarButton
+              active={false}
+              disabled={!editor.can().undo()}
+              onClick={() => editor.chain().focus().undo().run()}
+            >
+              <Undo2 className="size-3.5" />
+            </ToolbarButton>
+            <ToolbarButton
+              active={false}
+              disabled={!editor.can().redo()}
+              onClick={() => editor.chain().focus().redo().run()}
+            >
+              <Redo2 className="size-3.5" />
+            </ToolbarButton>
+            <Sep />
+            <ToolbarButton
               active={editor.isActive('heading', { level: 1 })}
               onClick={() => editor.chain().focus().toggleHeading({ level: 1 }).run()}
             >
@@ -580,20 +610,25 @@ function BubbleButton({
 function ToolbarButton({
   active,
   onClick,
+  disabled,
   children,
 }: {
   active: boolean;
   onClick: () => void;
+  disabled?: boolean;
   children: React.ReactNode;
 }) {
   return (
     <button
       type="button"
       onClick={onClick}
+      disabled={disabled}
       className={`rounded-lg border px-2.5 py-1 text-xs font-medium transition ${
-        active
-          ? 'border-primary/50 bg-primary/14 text-primary'
-          : 'border-border/60 bg-card text-foreground hover:border-primary/50 hover:text-primary'
+        disabled
+          ? 'cursor-not-allowed border-border/40 bg-card text-muted-foreground opacity-50'
+          : active
+            ? 'border-primary/50 bg-primary/14 text-primary'
+            : 'border-border/60 bg-card text-foreground hover:border-primary/50 hover:text-primary'
       }`}
     >
       {children}
