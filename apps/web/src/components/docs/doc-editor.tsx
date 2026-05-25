@@ -30,6 +30,7 @@ import { WikiLinkNode, createWikiLinkSuggestion } from './extensions/wiki-link';
 import { DocToc } from './doc-toc';
 import { type DocHeading, slugifyHeading } from './doc-heading-utils';
 import { markdownToHtml, htmlToMarkdown } from './lib/content-converter';
+import { MobileSelectionMenu, isMobileDevice } from './mobile-selection-menu';
 
 type ContentFormat = 'markdown' | 'html';
 type ViewMode = 'preview' | 'markdown';
@@ -399,8 +400,10 @@ export function DocEditor({
 
       {/* Floating bubble toolbar — visible on text selection in preview mode */}
       {editor && editable && viewMode === 'preview' && (
+        <>
         <BubbleMenu
           editor={editor}
+          shouldShow={() => !isMobileDevice()}
           className="flex items-center gap-0.5 rounded-lg border border-border/60 bg-background p-1 shadow-lg"
         >
           <BubbleButton
@@ -454,6 +457,8 @@ export function DocEditor({
             <Highlighter className="size-3.5" />
           </BubbleButton>
         </BubbleMenu>
+        <MobileSelectionMenu editor={editor} />
+        </>
       )}
 
       {/* Editor content — fills remaining height */}
