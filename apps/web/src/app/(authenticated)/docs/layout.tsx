@@ -6,6 +6,8 @@ import { useTranslations } from 'next-intl';
 import { DocTree } from '@/components/docs/doc-tree';
 import { RecentsSection } from '@/components/docs/recents-section';
 import { useRecentDocs } from '@/components/docs/use-recent-docs';
+import { TreeSearchInput } from '@/components/docs/tree-search-input';
+import { useTreeFilter } from '@/components/docs/use-tree-filter';
 import { Button } from '@/components/ui/button';
 import { EmptyState } from '@/components/ui/empty-state';
 import { ToastContainer, useToast } from '@/components/ui/toast';
@@ -32,6 +34,8 @@ export default function DocsLayout({ children }: { children: React.ReactNode }) 
   const [docsNextCursor, setDocsNextCursor] = useState<string | null>(null);
   const [docsLoadingMore, setDocsLoadingMore] = useState(false);
   const [tagsCollapsed, setTagsCollapsed] = useState(true);
+  const [searchQuery, setSearchQuery] = useState('');
+  const { isSearching, visibleIds, matchedIds } = useTreeFilter(tree, searchQuery);
 
   const [pendingDocUpdate, setPendingDocUpdate] = useState<DocUpdate | null>(null);
   const clearPendingDocUpdate = useCallback(() => setPendingDocUpdate(null), []);
@@ -152,7 +156,18 @@ export default function DocsLayout({ children }: { children: React.ReactNode }) 
 
   const sidebarContent = (
     <>
-      {(() => {
+      <TreeSearchInput
+        value={searchQuery}
+        onChange={setSearchQuery}
+        onClear={() => setSearchQuery('')}
+        isSearching={isSearching}
+        matchCount={matchedIds.size}
+        placeholder={t('searchTree')}
+        clearLabel={t('clearSearch')}
+        noResultsLabel={t('searchNoResults')}
+        resultCountLabel={(n) => t('searchResultCount', { count: n })}
+      />
+      {!isSearching && (() => {
         const allTags = [...new Set(tree.flatMap((d) => (d as unknown as { tags?: string[] | null }).tags ?? []))];
         if (allTags.length === 0) return null;
         return (
@@ -186,16 +201,18 @@ export default function DocsLayout({ children }: { children: React.ReactNode }) 
           <EmptyState title={t('title')} description={t('selectDoc')} className="mt-2 bg-background/70" action={<Button size="sm" onClick={handleNewDoc}><Plus className="mr-1 h-4 w-4" />{t('newDoc')}</Button>} />
         ) : (
           <>
-            <RecentsSection
-              recentSlugs={recentSlugs}
-              docs={tree}
-              selectedSlug={currentSlug}
-              onSelect={handleSelectDoc}
-              label={t('recentDocs')}
-              emptyLabel={t('noRecentDocs')}
-            />
-            <DocTree docs={tree} selectedSlug={currentSlug} onSelect={handleSelectDoc} onReorder={handleReorder} onMove={handleMove} onMoveDenied={handleMoveDenied} onRename={handleRename} onDelete={handleDeleteDoc} onAddChild={handleAddChild} projectId={projectId} />
-            {docsHasMore && (
+            {!isSearching && (
+              <RecentsSection
+                recentSlugs={recentSlugs}
+                docs={tree}
+                selectedSlug={currentSlug}
+                onSelect={handleSelectDoc}
+                label={t('recentDocs')}
+                emptyLabel={t('noRecentDocs')}
+              />
+            )}
+            <DocTree docs={tree} selectedSlug={currentSlug} onSelect={handleSelectDoc} onReorder={handleReorder} onMove={handleMove} onMoveDenied={handleMoveDenied} onRename={handleRename} onDelete={handleDeleteDoc} onAddChild={handleAddChild} projectId={projectId} visibleIds={visibleIds} matchedIds={matchedIds} searchQuery={searchQuery} isSearching={isSearching} />
+            {!isSearching && docsHasMore && (
               <div className="px-2 py-1">
                 <Button variant="ghost" size="sm" className="w-full text-xs text-muted-foreground" disabled={docsLoadingMore} onClick={() => { if (!docsNextCursor || docsLoadingMore) return; setDocsLoadingMore(true); void fetchTree(selectedTags.length ? selectedTags : undefined, docsNextCursor); }}>
                   {docsLoadingMore ? tc('loading') : tc('loadMore')}
