@@ -1064,6 +1064,7 @@
     "statusConflict": "Conflict: another user edited this document",
     "statusRemoteChanged": "This document was updated remotely",
     "statusError": "Save failed",
+    "retry": "Retry",
     "conflictReload": "Reload latest",
     "conflictOverwrite": "Overwrite with my changes",
     "remoteRefresh": "Refresh",
