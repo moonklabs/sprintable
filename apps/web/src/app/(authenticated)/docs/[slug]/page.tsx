@@ -311,7 +311,6 @@ export default function DocSlugPage() {
                 currentDocId={selectedDoc.id}
                 tree={tree}
                 onExpandFolder={expandFolder}
-                onNavigateDoc={handleNavigate}
                 ariaLabel={t('breadcrumbAriaLabel')}
               />
             ) : null

@@ -10,28 +10,23 @@ interface DocBreadcrumbProps {
   currentDocId: string;
   tree: Doc[];
   onExpandFolder: (id: string) => void;
-  onNavigateDoc: (slug: string) => void;
   ariaLabel: string;
 }
 
-export function DocBreadcrumb({ currentDocId, tree, onExpandFolder, onNavigateDoc, ariaLabel }: DocBreadcrumbProps) {
+export function DocBreadcrumb({ currentDocId, tree, onExpandFolder, ariaLabel }: DocBreadcrumbProps) {
   const path = buildDocPath(currentDocId, tree);
 
   const handleSegmentClick = useCallback((doc: Doc, isCurrent: boolean) => {
     if (isCurrent) return;
-    if (doc.is_folder) {
-      const ancestors = buildDocPath(doc.id, tree);
-      for (const ancestor of ancestors) {
-        if (ancestor.is_folder) onExpandFolder(ancestor.id);
-      }
-      requestAnimationFrame(() => {
-        const el = document.querySelector(`[data-doc-id="${doc.id}"]`);
-        el?.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
-      });
-    } else {
-      onNavigateDoc(doc.slug);
+    const ancestors = buildDocPath(doc.id, tree);
+    for (const ancestor of ancestors) {
+      if (ancestor.is_folder) onExpandFolder(ancestor.id);
     }
-  }, [onExpandFolder, onNavigateDoc, tree]);
+    requestAnimationFrame(() => {
+      const el = document.querySelector(`[data-doc-id="${doc.id}"]`);
+      el?.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+    });
+  }, [onExpandFolder, tree]);
 
   if (path.length <= 1) return null;
 
