@@ -488,11 +488,13 @@ export function DocEditor({
       {/* Mobile sticky bottom toolbar — appears on editor focus in preview mode */}
       {editor && editable && viewMode === 'preview' && (
         <div
+          role="toolbar"
+          aria-label={labels.toolbar}
           className={`fixed bottom-0 left-0 right-0 z-30 border-t border-border/60 bg-background/95 pb-[env(safe-area-inset-bottom)] backdrop-blur-sm transition-transform duration-200 md:hidden ${
-            isFocused ? 'translate-y-0' : 'translate-y-full'
+            isFocused ? 'translate-y-0' : 'translate-y-full pointer-events-none'
           }`}
         >
-          <div className="flex flex-wrap items-center gap-1 px-2 py-2">
+          <div className="flex overflow-x-auto items-center gap-1 px-2 py-2">
             <ToolbarButton
               active={editor.isActive('heading', { level: 1 })}
               onClick={() => editor.chain().focus().toggleHeading({ level: 1 }).run()}

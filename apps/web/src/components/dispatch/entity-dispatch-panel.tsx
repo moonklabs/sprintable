@@ -38,13 +38,17 @@ export function EntityDispatchPanel({
 
   useEffect(() => {
     if (!moreOpen) return;
-    const handler = (e: MouseEvent) => {
+    const handler = (e: MouseEvent | TouchEvent) => {
       if (moreRef.current && !moreRef.current.contains(e.target as Node)) {
         setMoreOpen(false);
       }
     };
-    document.addEventListener('mousedown', handler);
-    return () => document.removeEventListener('mousedown', handler);
+    document.addEventListener('mousedown', handler as EventListener);
+    document.addEventListener('touchstart', handler as EventListener);
+    return () => {
+      document.removeEventListener('mousedown', handler as EventListener);
+      document.removeEventListener('touchstart', handler as EventListener);
+    };
   }, [moreOpen]);
 
   useEffect(() => {
