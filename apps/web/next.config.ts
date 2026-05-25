@@ -37,7 +37,7 @@ const nextConfig: NextConfig = {
   output: 'standalone',
   outputFileTracingRoot: path.resolve(__dirname, '../..'),
   outputFileTracingIncludes: {
-    '/(authenticated)/docs/design-tokens': ['./src/app/globals.css'],
+    '/docs/design-tokens': ['./src/app/globals.css'],
   },
   devIndicators: {
     position: 'bottom-right',
