@@ -217,6 +217,7 @@ export default function DocSlugPage() {
             projectId={projectId}
             currentAssigneeId={selectedDoc.assignee_id}
             onAssigneePatched={(aid) => setSelectedDoc((prev) => prev ? { ...prev, assignee_id: aid } : prev)}
+            mobileMode="assignee-only"
           />
         </div>
       )}
