@@ -1,6 +1,6 @@
 'use client';
 
-import { useCallback, useState } from 'react';
+import { useCallback, useEffect, useState } from 'react';
 
 const PREFIX = 'docs:tree:expanded:';
 
@@ -29,6 +29,10 @@ export function useTreeExpanded(projectId: string | undefined) {
   const [collapsedIds, setCollapsedIds] = useState<Set<string>>(() =>
     key ? readCollapsed(key) : new Set()
   );
+
+  useEffect(() => {
+    setCollapsedIds(key ? readCollapsed(key) : new Set());
+  }, [key]);
 
   const isExpanded = useCallback(
     (id: string, _defaultValue = true) => !collapsedIds.has(id),
