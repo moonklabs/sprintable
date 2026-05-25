@@ -17,6 +17,7 @@ import {
 } from '@/components/ui/dropdown-menu';
 import { useDocsLayout } from '../docs-context';
 import { EntityDispatchPanel } from '@/components/dispatch/entity-dispatch-panel';
+import { DocBreadcrumb } from '@/components/docs/doc-breadcrumb';
 
 interface DocDetail {
   id: string;
@@ -127,7 +128,7 @@ export default function DocSlugPage() {
   const isNewRef = useRef(typeof window !== 'undefined' && new URLSearchParams(window.location.search).get('new') === '1');
   const isNew = isNewRef.current;
 
-  const { projectId, setTree, pendingDocUpdate, clearPendingDocUpdate } = useDocsLayout();
+  const { projectId, tree, setTree, pendingDocUpdate, clearPendingDocUpdate, expandFolder } = useDocsLayout();
 
   const [selectedDoc, setSelectedDoc] = useState<DocDetail | null>(null);
   const [docLoading, setDocLoading] = useState(true);
@@ -304,6 +305,16 @@ export default function DocSlugPage() {
           onTitleChange={handleTitleChange}
           titlePlaceholder={t('titlePlaceholder')}
           titleAutoFocus={isNew || !title}
+          breadcrumb={
+            tree.length > 0 && selectedDoc ? (
+              <DocBreadcrumb
+                currentDocId={selectedDoc.id}
+                tree={tree}
+                onExpandFolder={expandFolder}
+                ariaLabel={t('breadcrumbAriaLabel')}
+              />
+            ) : null
+          }
           actions={docActions}
           labels={{
             contentFormat: t('contentFormat'),

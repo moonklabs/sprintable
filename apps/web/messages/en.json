@@ -1058,6 +1058,7 @@
     "toolbarRedo": "Redo",
     "recentDocs": "Recent",
     "noRecentDocs": "No recent docs",
+    "breadcrumbAriaLabel": "Document path",
     "statusSaved": "Saved",
     "statusSaving": "Saving...",
     "statusUnsaved": "Unsaved changes",
