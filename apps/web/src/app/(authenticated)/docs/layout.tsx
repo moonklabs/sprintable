@@ -264,7 +264,7 @@ export default function DocsLayout({ children }: { children: React.ReactNode }) 
         </div>
         {/* Swipe drawer overlay */}
         <div
-          className="fixed inset-0 z-40 bg-foreground/40"
+          className="fixed inset-0 z-40 bg-foreground/40 lg:hidden"
           style={{
             opacity: drawerProgress,
             pointerEvents: drawerProgress > 0.05 ? 'auto' : 'none',
@@ -275,7 +275,7 @@ export default function DocsLayout({ children }: { children: React.ReactNode }) 
         />
         {/* Swipe drawer panel */}
         <div
-          className="fixed inset-y-0 left-0 z-50 flex w-[280px] flex-col overflow-hidden bg-background shadow-xl"
+          className="fixed inset-y-0 left-0 z-50 flex w-[280px] flex-col overflow-hidden bg-background shadow-xl lg:hidden"
           style={{
             transform: `translateX(${(drawerProgress - 1) * 100}%)`,
             transition: drawerDragging ? 'none' : 'transform 280ms cubic-bezier(0.4,0,0.2,1)',

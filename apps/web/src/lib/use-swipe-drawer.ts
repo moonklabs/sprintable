@@ -31,6 +31,7 @@ export function useSwipeDrawer(
 
   useEffect(() => {
     const onTouchStart = (e: TouchEvent) => {
+      if (window.matchMedia('(min-width: 1024px)').matches) return;
       const touch = e.touches[0];
       if (!touch) return;
       const x = touch.clientX;
