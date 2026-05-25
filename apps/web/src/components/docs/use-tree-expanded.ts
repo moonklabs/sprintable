@@ -53,5 +53,16 @@ export function useTreeExpanded(projectId: string | undefined) {
     [key, collapsedIds],
   );
 
-  return { isExpanded, toggleExpanded };
+  const expandFolder = useCallback(
+    (id: string) => {
+      if (!key) return;
+      const current = new Set<string>(collapsedIds);
+      current.delete(id);
+      writeCollapsed(key, current);
+      listeners.forEach((l) => l());
+    },
+    [key, collapsedIds],
+  );
+
+  return { isExpanded, toggleExpanded, expandFolder };
 }

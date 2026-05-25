@@ -1058,6 +1058,7 @@
     "toolbarRedo": "다시 실행",
     "recentDocs": "최근 방문",
     "noRecentDocs": "방문 기록 없음",
+    "breadcrumbAriaLabel": "문서 경로",
     "statusSaved": "저장 완료",
     "statusSaving": "저장 중...",
     "statusUnsaved": "변경사항 있음",

@@ -51,6 +51,7 @@ export function DocEditor({
   onTitleChange,
   titlePlaceholder,
   titleAutoFocus,
+  breadcrumb,
   actions,
   labels,
 }: {
@@ -71,6 +72,7 @@ export function DocEditor({
   onTitleChange?: (value: string) => void;
   titlePlaceholder?: string;
   titleAutoFocus?: boolean;
+  breadcrumb?: React.ReactNode;
   actions?: React.ReactNode;
   labels: {
     contentFormat: string;
@@ -274,9 +276,15 @@ export function DocEditor({
 
   return (
     <div className="flex h-full flex-col overflow-hidden rounded-2xl border border-border/60 bg-background max-md:h-[100dvh]">
+      {/* Breadcrumb (위치: title 위) */}
+      {breadcrumb && (
+        <div className="flex-shrink-0 px-6 pt-4">
+          {breadcrumb}
+        </div>
+      )}
       {/* Inline title (Notion style) */}
       {title !== undefined && (
-        <div className="flex flex-shrink-0 items-start justify-between gap-2 px-6 pb-2 pt-8">
+        <div className={`flex flex-shrink-0 items-start justify-between gap-2 px-6 pb-2 ${breadcrumb ? 'pt-4' : 'pt-8'}`}>
           <textarea
             ref={titleRef}
             value={title}

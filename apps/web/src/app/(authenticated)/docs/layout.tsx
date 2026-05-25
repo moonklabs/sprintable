@@ -8,6 +8,7 @@ import { RecentsSection } from '@/components/docs/recents-section';
 import { useRecentDocs } from '@/components/docs/use-recent-docs';
 import { TreeSearchInput } from '@/components/docs/tree-search-input';
 import { useTreeFilter } from '@/components/docs/use-tree-filter';
+import { useTreeExpanded } from '@/components/docs/use-tree-expanded';
 import { Button } from '@/components/ui/button';
 import { EmptyState } from '@/components/ui/empty-state';
 import { ToastContainer, useToast } from '@/components/ui/toast';
@@ -24,6 +25,7 @@ export default function DocsLayout({ children }: { children: React.ReactNode }) 
   const tc = useTranslations('common');
   const { projectId } = useDashboardContext();
   const { recentSlugs, pushRecent } = useRecentDocs(projectId);
+  const { expandFolder } = useTreeExpanded(projectId);
   const { toasts, addToast, dismissToast } = useToast();
 
   const [tree, setTree] = useState<Doc[]>([]);
@@ -227,7 +229,7 @@ export default function DocsLayout({ children }: { children: React.ReactNode }) 
 
 
   return (
-    <DocsLayoutContext.Provider value={{ projectId, setTree, handleNewDoc, fetchTree, pendingDocUpdate, clearPendingDocUpdate }}>
+    <DocsLayoutContext.Provider value={{ projectId, tree, setTree, handleNewDoc, fetchTree, pendingDocUpdate, clearPendingDocUpdate, expandFolder }}>
       <TopBarSlot
         title={<h1 className="text-sm font-medium">{t('title')}</h1>}
         actions={<Button size="sm" variant="outline" onClick={handleNewDoc} disabled={isCreating}><Plus className="mr-1.5 h-3.5 w-3.5" />{isCreating ? t('loading') : t('newDoc')}</Button>}
