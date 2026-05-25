@@ -56,6 +56,19 @@ interface Doc {
   is_folder?: boolean;
 }
 
+function HighlightedText({ text, query }: { text: string; query: string }) {
+  if (!query) return <>{text}</>;
+  const idx = text.toLowerCase().indexOf(query.toLowerCase());
+  if (idx === -1) return <>{text}</>;
+  return (
+    <>
+      {text.slice(0, idx)}
+      <mark className="bg-amber-500/20 text-inherit">{text.slice(idx, idx + query.length)}</mark>
+      {text.slice(idx + query.length)}
+    </>
+  );
+}
+
 /**
  * Returns true if `nodeId` is a descendant of `ancestorId` in the doc tree.
  * Used to prevent circular moves (dropping a node into its own subtree).
@@ -86,6 +99,10 @@ interface DocTreeProps {
   onAddChild?: (parentId: string) => Promise<void>;
   emptyFolderLabel?: string;
   projectId?: string;
+  visibleIds?: Set<string>;
+  matchedIds?: Set<string>;
+  searchQuery?: string;
+  isSearching?: boolean;
 }
 
 function TreeNode({
@@ -102,6 +119,10 @@ function TreeNode({
   projectId,
   isExpanded,
   onToggleExpanded,
+  visibleIds,
+  matchedIds,
+  searchQuery = '',
+  isSearching = false,
 }: {
   doc: Doc;
   allDocs: Doc[];
@@ -116,11 +137,15 @@ function TreeNode({
   projectId?: string;
   isExpanded: (id: string, defaultValue?: boolean) => boolean;
   onToggleExpanded: (id: string) => void;
+  visibleIds?: Set<string>;
+  matchedIds?: Set<string>;
+  searchQuery?: string;
+  isSearching?: boolean;
 }) {
   const childDocs = allDocs.filter((entry) => entry.parent_id === doc.id).sort((a, b) => a.sort_order - b.sort_order);
   const hasChildren = childDocs.length > 0;
   const isFolder = Boolean(doc.is_folder || hasChildren);
-  const expanded = isExpanded(doc.id);
+  const expanded = isSearching ? true : isExpanded(doc.id);
   const [contextMenuOpen, setContextMenuOpen] = useState(false);
   const isSelected = selectedSlug === doc.slug;
   const menuRef = useRef<HTMLDivElement>(null);
@@ -207,6 +232,8 @@ function TreeNode({
     setContextMenuOpen(false);
   }, [doc.id, onAddChild]);
 
+  if (isSearching && !visibleIds?.has(doc.id)) return null;
+
   return (
     <div ref={setNodeRef} style={style}>
       <div className="group relative">
@@ -239,7 +266,9 @@ function TreeNode({
           ) : (
             <FileText className="size-4 shrink-0 text-muted-foreground" />
           )}
-          <span className="flex-1 truncate">{doc.title}</span>
+          <span className="flex-1 truncate">
+            <HighlightedText text={doc.title} query={isSearching ? searchQuery : ''} />
+          </span>
         </button>
         <div
           role="button"
@@ -286,6 +315,10 @@ function TreeNode({
                   projectId={projectId}
                   isExpanded={isExpanded}
                   onToggleExpanded={onToggleExpanded}
+                  visibleIds={visibleIds}
+                  matchedIds={matchedIds}
+                  searchQuery={searchQuery}
+                  isSearching={isSearching}
                 />
               ))}
             </SortableContext>
@@ -303,7 +336,7 @@ function TreeNode({
   );
 }
 
-export function DocTree({ docs, selectedSlug, onSelect, onReorder, onMove, onMoveDenied, onRename, onDelete, onAddChild, emptyFolderLabel, projectId }: DocTreeProps) {
+export function DocTree({ docs, selectedSlug, onSelect, onReorder, onMove, onMoveDenied, onRename, onDelete, onAddChild, emptyFolderLabel, projectId, visibleIds, matchedIds, searchQuery, isSearching }: DocTreeProps) {
   const rootDocs = docs.filter((entry) => !entry.parent_id).sort((a, b) => a.sort_order - b.sort_order);
   const sensors = useSensors(useSensor(PointerSensor, { activationConstraint: { distance: 5 } }));
   const { isExpanded, toggleExpanded } = useTreeExpanded(projectId);
@@ -373,7 +406,7 @@ export function DocTree({ docs, selectedSlug, onSelect, onReorder, onMove, onMov
       <SortableContext items={rootDocs.map((d) => d.id)} strategy={verticalListSortingStrategy}>
         <nav className="space-y-1">
           {rootDocs.map((doc) => (
-            <TreeNode key={doc.id} doc={doc} allDocs={docs} selectedSlug={selectedSlug} onSelect={onSelect} onReorder={onReorder} onRename={onRename} onDelete={onDelete} onAddChild={onAddChild} depth={0} emptyFolderLabel={emptyFolderLabel} projectId={projectId} isExpanded={isExpanded} onToggleExpanded={toggleExpanded} />
+            <TreeNode key={doc.id} doc={doc} allDocs={docs} selectedSlug={selectedSlug} onSelect={onSelect} onReorder={onReorder} onRename={onRename} onDelete={onDelete} onAddChild={onAddChild} depth={0} emptyFolderLabel={emptyFolderLabel} projectId={projectId} isExpanded={isExpanded} onToggleExpanded={toggleExpanded} visibleIds={visibleIds} matchedIds={matchedIds} searchQuery={searchQuery} isSearching={isSearching} />
           ))}
         </nav>
       </SortableContext>
