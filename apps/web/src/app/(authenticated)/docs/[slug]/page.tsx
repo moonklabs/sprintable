@@ -5,6 +5,7 @@ import { useParams, useRouter } from 'next/navigation';
 import { useTranslations } from 'next-intl';
 import { DocEditor } from '@/components/docs/doc-editor';
 import { useDocSync, type SaveStatus } from '@/components/docs/use-doc-sync';
+import { htmlToMarkdown } from '@/components/docs/lib/content-converter';
 import Link from 'next/link';
 import { Check, Copy, Eye, MoreHorizontal, Trash2 } from 'lucide-react';
 import {
@@ -131,14 +132,15 @@ export default function DocSlugPage() {
   }, [pendingDocUpdate, selectedDoc, clearPendingDocUpdate]);
 
   const handleCopyMarkdown = useCallback(async () => {
+    const md = contentFormat === 'markdown' ? content : htmlToMarkdown(content);
     try {
       if (typeof navigator !== 'undefined' && navigator.clipboard?.writeText) {
-        await navigator.clipboard.writeText(content);
+        await navigator.clipboard.writeText(md);
       }
     } catch { /* clipboard unavailable */ }
     setMdCopied(true);
     window.setTimeout(() => setMdCopied(false), 1600);
-  }, [content]);
+  }, [content, contentFormat]);
 
   const handleDelete = useCallback(async () => {
     if (!selectedDoc || !projectId) return;
@@ -172,38 +174,45 @@ export default function DocSlugPage() {
   }
 
   const docActions = (
-    <DropdownMenu>
-      <DropdownMenuTrigger className="inline-flex h-8 w-8 items-center justify-center rounded-md text-muted-foreground transition-colors hover:bg-accent hover:text-accent-foreground">
-        <MoreHorizontal className="h-4 w-4" />
-      </DropdownMenuTrigger>
-      <DropdownMenuContent align="end" className="w-48">
-        {saveStatus !== 'idle' && (
-          <>
-            <div className="flex items-center px-2 py-1.5">
-              <SaveStatusIndicator status={saveStatus} t={t} />
-            </div>
-            <DropdownMenuSeparator />
-          </>
-        )}
-        <DropdownMenuItem onClick={handleCopyMarkdown}>
-          {mdCopied ? <Check className="mr-2 h-4 w-4 text-emerald-500" /> : <Copy className="mr-2 h-4 w-4" />}
-          {t('copyMarkdown')}
-        </DropdownMenuItem>
-        <DropdownMenuItem render={<Link href={`/docs/${slug}/view`} />}>
-          <Eye className="mr-2 h-4 w-4" />
-          {t('preview')}
-        </DropdownMenuItem>
-        {selectedDoc.doc_type !== 'sprint_report' && (
-          <>
-            <DropdownMenuSeparator />
-            <DropdownMenuItem onClick={handleDelete} className="text-destructive focus:text-destructive">
-              <Trash2 className="mr-2 h-4 w-4" />
-              {t('deleteDoc')}
-            </DropdownMenuItem>
-          </>
-        )}
-      </DropdownMenuContent>
-    </DropdownMenu>
+    <>
+      <button
+        type="button"
+        onClick={handleCopyMarkdown}
+        title={t('copyMarkdown')}
+        aria-label={t('copyMarkdown')}
+        className="inline-flex h-8 w-8 items-center justify-center rounded-md text-muted-foreground transition-colors hover:bg-accent hover:text-accent-foreground"
+      >
+        {mdCopied ? <Check className="h-4 w-4 text-emerald-500" /> : <Copy className="h-4 w-4" />}
+      </button>
+      <DropdownMenu>
+        <DropdownMenuTrigger className="inline-flex h-8 w-8 items-center justify-center rounded-md text-muted-foreground transition-colors hover:bg-accent hover:text-accent-foreground">
+          <MoreHorizontal className="h-4 w-4" />
+        </DropdownMenuTrigger>
+        <DropdownMenuContent align="end" className="w-48">
+          {saveStatus !== 'idle' && (
+            <>
+              <div className="flex items-center px-2 py-1.5">
+                <SaveStatusIndicator status={saveStatus} t={t} />
+              </div>
+              <DropdownMenuSeparator />
+            </>
+          )}
+          <DropdownMenuItem render={<Link href={`/docs/${slug}/view`} />}>
+            <Eye className="mr-2 h-4 w-4" />
+            {t('preview')}
+          </DropdownMenuItem>
+          {selectedDoc.doc_type !== 'sprint_report' && (
+            <>
+              <DropdownMenuSeparator />
+              <DropdownMenuItem onClick={handleDelete} className="text-destructive focus:text-destructive">
+                <Trash2 className="mr-2 h-4 w-4" />
+                {t('deleteDoc')}
+              </DropdownMenuItem>
+            </>
+          )}
+        </DropdownMenuContent>
+      </DropdownMenu>
+    </>
   );
 
   return (
