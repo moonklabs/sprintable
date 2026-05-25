@@ -88,6 +88,8 @@ export function DocEditor({
     code: string;
     link: string;
     autosave: string;
+    undo: string;
+    redo: string;
   };
 }) {
   const suppressUpdateRef = useRef(false);
@@ -317,6 +319,7 @@ export function DocEditor({
             <ToolbarButton
               active={false}
               disabled={!editor.can().undo()}
+              ariaLabel={labels.undo}
               onClick={() => editor.chain().focus().undo().run()}
             >
               <Undo2 className="size-3.5" />
@@ -324,6 +327,7 @@ export function DocEditor({
             <ToolbarButton
               active={false}
               disabled={!editor.can().redo()}
+              ariaLabel={labels.redo}
               onClick={() => editor.chain().focus().redo().run()}
             >
               <Redo2 className="size-3.5" />
@@ -513,6 +517,7 @@ export function DocEditor({
             <ToolbarButton
               active={false}
               disabled={!editor.can().undo()}
+              ariaLabel={labels.undo}
               onClick={() => editor.chain().focus().undo().run()}
             >
               <Undo2 className="size-3.5" />
@@ -520,6 +525,7 @@ export function DocEditor({
             <ToolbarButton
               active={false}
               disabled={!editor.can().redo()}
+              ariaLabel={labels.redo}
               onClick={() => editor.chain().focus().redo().run()}
             >
               <Redo2 className="size-3.5" />
@@ -611,11 +617,13 @@ function ToolbarButton({
   active,
   onClick,
   disabled,
+  ariaLabel,
   children,
 }: {
   active: boolean;
   onClick: () => void;
   disabled?: boolean;
+  ariaLabel?: string;
   children: React.ReactNode;
 }) {
   return (
@@ -623,6 +631,7 @@ function ToolbarButton({
       type="button"
       onClick={onClick}
       disabled={disabled}
+      aria-label={ariaLabel}
       className={`rounded-lg border px-2.5 py-1 text-xs font-medium transition ${
         disabled
           ? 'cursor-not-allowed border-border/40 bg-card text-muted-foreground opacity-50'

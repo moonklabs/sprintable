@@ -1054,6 +1054,8 @@
     "toolbarQuote": "Quote",
     "toolbarCode": "Code",
     "toolbarLink": "Link",
+    "toolbarUndo": "Undo",
+    "toolbarRedo": "Redo",
     "statusSaved": "Saved",
     "statusSaving": "Saving...",
     "statusUnsaved": "Unsaved changes",
