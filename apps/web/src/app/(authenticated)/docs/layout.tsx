@@ -13,6 +13,7 @@ import { TopBarSlot } from '@/components/nav/top-bar-slot';
 import { ChevronDown, ChevronLeft, ChevronRight, Menu, Plus, X } from 'lucide-react';
 import { useDashboardContext } from '../../dashboard/dashboard-shell';
 import { DocsLayoutContext, type Doc, type DocUpdate } from './docs-context';
+import { useSwipeDrawer } from '@/lib/use-swipe-drawer';
 
 export default function DocsLayout({ children }: { children: React.ReactNode }) {
   const router = useRouter();
@@ -150,6 +151,10 @@ export default function DocsLayout({ children }: { children: React.ReactNode }) 
   const handleNewDoc = useCallback(() => { void createDoc(null); }, [createDoc]);
   const handleAddChild = useCallback((parentId: string) => createDoc(parentId), [createDoc]);
 
+  const openDrawer = useCallback(() => setTreeDrawerOpen(true), []);
+  const closeDrawer = useCallback(() => setTreeDrawerOpen(false), []);
+  const { progress: drawerProgress, dragging: drawerDragging } = useSwipeDrawer(treeDrawerOpen, openDrawer, closeDrawer);
+
   const sidebarContent = (
     <>
       {(() => {
@@ -257,18 +262,32 @@ export default function DocsLayout({ children }: { children: React.ReactNode }) 
         <div className="flex min-h-0 flex-1 flex-col overflow-hidden bg-background">
           {children}
         </div>
-        {treeDrawerOpen && (
-          <>
-            <div className="fixed inset-0 z-40 bg-black/50" onClick={() => setTreeDrawerOpen(false)} aria-hidden="true" />
-            <div className="fixed inset-y-0 left-0 z-50 flex w-[280px] flex-col overflow-hidden bg-background shadow-xl">
-              <div className="flex flex-shrink-0 items-center justify-between border-b border-border/80 px-4 py-3">
-                <span className="text-sm font-medium text-foreground">{t('title')}</span>
-                <button type="button" onClick={() => setTreeDrawerOpen(false)} className="rounded p-1 text-muted-foreground hover:text-foreground" aria-label="닫기"><X className="size-4" /></button>
-              </div>
-              <div className="flex-1 overflow-y-auto">{sidebarContent}</div>
-            </div>
-          </>
-        )}
+        {/* Swipe drawer overlay */}
+        <div
+          className="fixed inset-0 z-40 bg-foreground/40"
+          style={{
+            opacity: drawerProgress,
+            pointerEvents: drawerProgress > 0.05 ? 'auto' : 'none',
+            transition: drawerDragging ? 'none' : 'opacity 280ms cubic-bezier(0.4,0,0.2,1)',
+          }}
+          onClick={closeDrawer}
+          aria-hidden="true"
+        />
+        {/* Swipe drawer panel */}
+        <div
+          className="fixed inset-y-0 left-0 z-50 flex w-[280px] flex-col overflow-hidden bg-background shadow-xl"
+          style={{
+            transform: `translateX(${(drawerProgress - 1) * 100}%)`,
+            transition: drawerDragging ? 'none' : 'transform 280ms cubic-bezier(0.4,0,0.2,1)',
+          }}
+          aria-hidden={drawerProgress === 0}
+        >
+          <div className="flex flex-shrink-0 items-center justify-between border-b border-border/80 px-4 py-3">
+            <span className="text-sm font-medium text-foreground">{t('title')}</span>
+            <button type="button" onClick={closeDrawer} className="rounded p-1 text-muted-foreground hover:text-foreground" aria-label="닫기"><X className="size-4" /></button>
+          </div>
+          <div className="flex-1 overflow-y-auto">{sidebarContent}</div>
+        </div>
       </div>
 
       <ToastContainer toasts={toasts} onDismiss={dismissToast} />
