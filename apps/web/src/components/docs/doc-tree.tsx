@@ -212,6 +212,7 @@ function TreeNode({
       <div className="group relative">
         {preview && <DocPreviewCard title={preview.title} snippet={preview.snippet} x={previewPos.x} y={previewPos.y} />}
         <button
+          data-doc-id={doc.id}
           onClick={handleClick}
           onContextMenu={handleContextMenu}
           onMouseEnter={handleMouseEnter}
