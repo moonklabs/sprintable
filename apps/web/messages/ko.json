@@ -1064,6 +1064,7 @@
     "statusConflict": "충돌: 다른 사용자가 이 문서를 수정했습니다",
     "statusRemoteChanged": "이 문서가 원격에서 업데이트되었습니다",
     "statusError": "저장 실패",
+    "retry": "재시도",
     "conflictReload": "최신 버전 불러오기",
     "conflictOverwrite": "내 변경사항으로 덮어쓰기",
     "remoteRefresh": "새로고침",
