@@ -5,6 +5,7 @@ import { useParams, useRouter } from 'next/navigation';
 import { useTranslations } from 'next-intl';
 import { DocEditor } from '@/components/docs/doc-editor';
 import { useDocSync, type SaveStatus } from '@/components/docs/use-doc-sync';
+import { htmlToMarkdown } from '@/components/docs/lib/content-converter';
 import Link from 'next/link';
 import { Check, Copy, Eye, MoreHorizontal, Trash2 } from 'lucide-react';
 import {
@@ -131,14 +132,15 @@ export default function DocSlugPage() {
   }, [pendingDocUpdate, selectedDoc, clearPendingDocUpdate]);
 
   const handleCopyMarkdown = useCallback(async () => {
+    const md = contentFormat === 'markdown' ? content : htmlToMarkdown(content);
     try {
       if (typeof navigator !== 'undefined' && navigator.clipboard?.writeText) {
-        await navigator.clipboard.writeText(content);
+        await navigator.clipboard.writeText(md);
       }
     } catch { /* clipboard unavailable */ }
     setMdCopied(true);
     window.setTimeout(() => setMdCopied(false), 1600);
-  }, [content]);
+  }, [content, contentFormat]);
 
   const handleDelete = useCallback(async () => {
     if (!selectedDoc || !projectId) return;
