@@ -7,6 +7,7 @@ import { DndContext, DragEndEvent, PointerSensor, useSensor, useSensors, closest
 import { SortableContext, useSortable, verticalListSortingStrategy } from '@dnd-kit/sortable';
 import { CSS } from '@dnd-kit/utilities';
 import { cn } from '@/lib/utils';
+import { useTreeExpanded } from './use-tree-expanded';
 
 // ─── Preview Card ─────────────────────────────────────────────────────────────
 
@@ -99,6 +100,8 @@ function TreeNode({
   depth = 0,
   emptyFolderLabel = 'No child docs',
   projectId,
+  isExpanded,
+  onToggleExpanded,
 }: {
   doc: Doc;
   allDocs: Doc[];
@@ -111,11 +114,13 @@ function TreeNode({
   depth?: number;
   emptyFolderLabel?: string;
   projectId?: string;
+  isExpanded: (id: string, defaultValue?: boolean) => boolean;
+  onToggleExpanded: (id: string) => void;
 }) {
   const childDocs = allDocs.filter((entry) => entry.parent_id === doc.id).sort((a, b) => a.sort_order - b.sort_order);
   const hasChildren = childDocs.length > 0;
   const isFolder = Boolean(doc.is_folder || hasChildren);
-  const [expanded, setExpanded] = useState(true);
+  const expanded = isExpanded(doc.id);
   const [contextMenuOpen, setContextMenuOpen] = useState(false);
   const isSelected = selectedSlug === doc.slug;
   const menuRef = useRef<HTMLDivElement>(null);
@@ -171,9 +176,9 @@ function TreeNode({
   }, [contextMenuOpen]);
 
   const handleClick = useCallback(() => {
-    if (isFolder) setExpanded((prev) => !prev);
+    if (isFolder) onToggleExpanded(doc.id);
     onSelect(doc.slug);
-  }, [isFolder, doc.slug, onSelect]);
+  }, [isFolder, doc.id, doc.slug, onSelect, onToggleExpanded]);
 
   const handleContextMenu = useCallback((e: React.MouseEvent) => {
     e.preventDefault();
@@ -278,6 +283,8 @@ function TreeNode({
                   depth={depth + 1}
                   emptyFolderLabel={emptyFolderLabel}
                   projectId={projectId}
+                  isExpanded={isExpanded}
+                  onToggleExpanded={onToggleExpanded}
                 />
               ))}
             </SortableContext>
@@ -298,6 +305,7 @@ function TreeNode({
 export function DocTree({ docs, selectedSlug, onSelect, onReorder, onMove, onMoveDenied, onRename, onDelete, onAddChild, emptyFolderLabel, projectId }: DocTreeProps) {
   const rootDocs = docs.filter((entry) => !entry.parent_id).sort((a, b) => a.sort_order - b.sort_order);
   const sensors = useSensors(useSensor(PointerSensor, { activationConstraint: { distance: 5 } }));
+  const { isExpanded, toggleExpanded } = useTreeExpanded(projectId);
 
   const handleDragEnd = useCallback(async (event: DragEndEvent) => {
     const { active, over } = event;
@@ -364,7 +372,7 @@ export function DocTree({ docs, selectedSlug, onSelect, onReorder, onMove, onMov
       <SortableContext items={rootDocs.map((d) => d.id)} strategy={verticalListSortingStrategy}>
         <nav className="space-y-1">
           {rootDocs.map((doc) => (
-            <TreeNode key={doc.id} doc={doc} allDocs={docs} selectedSlug={selectedSlug} onSelect={onSelect} onReorder={onReorder} onRename={onRename} onDelete={onDelete} onAddChild={onAddChild} depth={0} emptyFolderLabel={emptyFolderLabel} projectId={projectId} />
+            <TreeNode key={doc.id} doc={doc} allDocs={docs} selectedSlug={selectedSlug} onSelect={onSelect} onReorder={onReorder} onRename={onRename} onDelete={onDelete} onAddChild={onAddChild} depth={0} emptyFolderLabel={emptyFolderLabel} projectId={projectId} isExpanded={isExpanded} onToggleExpanded={toggleExpanded} />
           ))}
         </nav>
       </SortableContext>
