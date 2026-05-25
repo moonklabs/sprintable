@@ -1054,6 +1054,8 @@
     "toolbarQuote": "인용",
     "toolbarCode": "코드",
     "toolbarLink": "링크",
+    "toolbarUndo": "실행 취소",
+    "toolbarRedo": "다시 실행",
     "statusSaved": "저장 완료",
     "statusSaving": "저장 중...",
     "statusUnsaved": "변경사항 있음",

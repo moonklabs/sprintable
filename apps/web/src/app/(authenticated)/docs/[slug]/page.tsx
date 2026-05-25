@@ -257,6 +257,8 @@ export default function DocSlugPage() {
             code: t('toolbarCode'),
             link: t('toolbarLink'),
             autosave: t('autosave'),
+            undo: t('toolbarUndo'),
+            redo: t('toolbarRedo'),
           }}
         />
       </div>
