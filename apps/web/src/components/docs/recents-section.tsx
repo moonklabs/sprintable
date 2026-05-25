@@ -32,6 +32,7 @@ export function RecentsSection({ recentSlugs, docs, selectedSlug, onSelect, labe
       <button
         type="button"
         onClick={() => setCollapsed((v) => !v)}
+        aria-expanded={!collapsed}
         className="flex w-full items-center gap-1.5 px-3 py-1.5 text-[11px] text-muted-foreground hover:text-foreground"
       >
         {collapsed ? <ChevronRight className="size-3 shrink-0" /> : <ChevronDown className="size-3 shrink-0" />}
