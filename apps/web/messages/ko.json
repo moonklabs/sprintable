@@ -1045,7 +1045,7 @@
     "previewTab": "미리보기",
     "toolbar": "툴바",
     "toolbarHint": "선택 영역에 서식을 바로 삽입합니다. Markdown/HTML 전환도 지원해 주세요",
-    "editorPlaceholder": "문서 내용을 입력하세요",
+    "editorPlaceholder": "\"/\" 입력으로 블록 추가, 입력 시작",
     "toolbarH1": "H1",
     "toolbarH2": "H2",
     "toolbarBold": "굵게",

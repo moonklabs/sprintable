@@ -1045,7 +1045,7 @@
     "previewTab": "Preview",
     "toolbar": "Toolbar",
     "toolbarHint": "Apply formatting snippets to the current selection and switch between Markdown and HTML.",
-    "editorPlaceholder": "Start writing your document",
+    "editorPlaceholder": "Type \"/\" for blocks, or just start writing",
     "toolbarH1": "H1",
     "toolbarH2": "H2",
     "toolbarBold": "Bold",

@@ -123,7 +123,11 @@ export function DocEditor({
       TableRow,
       TableCell,
       TableHeader,
-      Placeholder.configure({ placeholder: labels.placeholder }),
+      Placeholder.configure({
+        placeholder: labels.placeholder,
+        showOnlyCurrent: false,
+        includeChildren: true,
+      }),
       CalloutNode,
       ToggleBlock,
       ToggleSummary,
