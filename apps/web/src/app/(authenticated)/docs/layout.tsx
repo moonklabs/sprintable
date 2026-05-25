@@ -4,6 +4,8 @@ import { useCallback, useEffect, useState } from 'react';
 import { useParams, useRouter } from 'next/navigation';
 import { useTranslations } from 'next-intl';
 import { DocTree } from '@/components/docs/doc-tree';
+import { RecentsSection } from '@/components/docs/recents-section';
+import { useRecentDocs } from '@/components/docs/use-recent-docs';
 import { Button } from '@/components/ui/button';
 import { EmptyState } from '@/components/ui/empty-state';
 import { ToastContainer, useToast } from '@/components/ui/toast';
@@ -19,6 +21,7 @@ export default function DocsLayout({ children }: { children: React.ReactNode }) 
   const t = useTranslations('docs');
   const tc = useTranslations('common');
   const { projectId } = useDashboardContext();
+  const { recentSlugs, pushRecent } = useRecentDocs(projectId);
   const { toasts, addToast, dismissToast } = useToast();
 
   const [tree, setTree] = useState<Doc[]>([]);
@@ -76,9 +79,10 @@ export default function DocsLayout({ children }: { children: React.ReactNode }) 
   useEffect(() => { void fetchTree(selectedTags.length ? selectedTags : undefined); }, [fetchTree, selectedTags]);
 
   const handleSelectDoc = useCallback((slug: string) => {
+    pushRecent(slug);
     router.push(`/docs/${slug}`);
     setTreeDrawerOpen(false);
-  }, [router]);
+  }, [router, pushRecent]);
 
   const handleReorder = useCallback(async (docId: string, newSortOrder: number) => {
     setTree((prev) => prev.map((doc) => (doc.id === docId ? { ...doc, sort_order: newSortOrder } : doc)));
@@ -182,7 +186,15 @@ export default function DocsLayout({ children }: { children: React.ReactNode }) 
           <EmptyState title={t('title')} description={t('selectDoc')} className="mt-2 bg-background/70" action={<Button size="sm" onClick={handleNewDoc}><Plus className="mr-1 h-4 w-4" />{t('newDoc')}</Button>} />
         ) : (
           <>
-            <DocTree docs={tree} selectedSlug={currentSlug} onSelect={handleSelectDoc} onReorder={handleReorder} onMove={handleMove} onMoveDenied={handleMoveDenied} onRename={handleRename} onDelete={handleDeleteDoc} onAddChild={handleAddChild} />
+            <RecentsSection
+              recentSlugs={recentSlugs}
+              docs={tree}
+              selectedSlug={currentSlug}
+              onSelect={handleSelectDoc}
+              label={t('recentDocs')}
+              emptyLabel={t('noRecentDocs')}
+            />
+            <DocTree docs={tree} selectedSlug={currentSlug} onSelect={handleSelectDoc} onReorder={handleReorder} onMove={handleMove} onMoveDenied={handleMoveDenied} onRename={handleRename} onDelete={handleDeleteDoc} onAddChild={handleAddChild} projectId={projectId} />
             {docsHasMore && (
               <div className="px-2 py-1">
                 <Button variant="ghost" size="sm" className="w-full text-xs text-muted-foreground" disabled={docsLoadingMore} onClick={() => { if (!docsNextCursor || docsLoadingMore) return; setDocsLoadingMore(true); void fetchTree(selectedTags.length ? selectedTags : undefined, docsNextCursor); }}>

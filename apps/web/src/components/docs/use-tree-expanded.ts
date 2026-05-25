@@ -1,55 +1,56 @@
 'use client';
 
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useMemo, useSyncExternalStore } from 'react';
 
 const PREFIX = 'docs:tree:expanded:';
 
-function readCollapsed(key: string): Set<string> {
-  if (typeof window === 'undefined') return new Set();
-  try {
-    const raw = localStorage.getItem(key);
-    if (!raw) return new Set();
-    const parsed = JSON.parse(raw) as unknown;
-    return Array.isArray(parsed) ? new Set(parsed as string[]) : new Set();
-  } catch {
-    return new Set();
-  }
+const listeners = new Set<() => void>();
+
+function subscribe(cb: () => void) {
+  listeners.add(cb);
+  return () => { listeners.delete(cb); };
+}
+
+function readRaw(key: string): string {
+  if (typeof window === 'undefined') return '[]';
+  return window.localStorage.getItem(key) ?? '[]';
 }
 
 function writeCollapsed(key: string, ids: Set<string>): void {
   if (typeof window === 'undefined') return;
-  try {
-    localStorage.setItem(key, JSON.stringify([...ids]));
-  } catch { /* silent fallback */ }
+  try { window.localStorage.setItem(key, JSON.stringify([...ids])); } catch { /* silent fallback */ }
 }
 
 export function useTreeExpanded(projectId: string | undefined) {
   const key = projectId ? `${PREFIX}${projectId}` : null;
 
-  const [collapsedIds, setCollapsedIds] = useState<Set<string>>(() =>
-    key ? readCollapsed(key) : new Set()
+  const raw = useSyncExternalStore(
+    subscribe,
+    () => (key ? readRaw(key) : '[]'),
+    () => '[]',
   );
 
-  useEffect(() => {
-    setCollapsedIds(key ? readCollapsed(key) : new Set());
-  }, [key]);
+  const collapsedIds = useMemo<Set<string>>(() => {
+    try {
+      const parsed = JSON.parse(raw) as unknown;
+      return Array.isArray(parsed) ? new Set<string>(parsed as string[]) : new Set<string>();
+    } catch { return new Set<string>(); }
+  }, [raw]);
 
   const isExpanded = useCallback(
     (id: string, _defaultValue = true) => !collapsedIds.has(id),
-    [collapsedIds]
+    [collapsedIds],
   );
 
   const toggleExpanded = useCallback(
     (id: string) => {
-      setCollapsedIds((prev) => {
-        const next = new Set(prev);
-        if (next.has(id)) next.delete(id);
-        else next.add(id);
-        if (key) writeCollapsed(key, next);
-        return next;
-      });
+      if (!key) return;
+      const current = new Set<string>(collapsedIds);
+      if (current.has(id)) current.delete(id); else current.add(id);
+      writeCollapsed(key, current);
+      listeners.forEach((l) => l());
     },
-    [key]
+    [key, collapsedIds],
   );
 
   return { isExpanded, toggleExpanded };
