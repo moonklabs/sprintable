@@ -284,7 +284,7 @@ export function DocEditor({
       )}
       {/* Inline title (Notion style) */}
       {title !== undefined && (
-        <div className="flex flex-shrink-0 items-start justify-between gap-2 px-6 pb-2 pt-4">
+        <div className={`flex flex-shrink-0 items-start justify-between gap-2 px-6 pb-2 ${breadcrumb ? 'pt-4' : 'pt-8'}`}>
           <textarea
             ref={titleRef}
             value={title}
