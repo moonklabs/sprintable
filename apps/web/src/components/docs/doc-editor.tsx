@@ -443,7 +443,7 @@ export function DocEditor({
           placeholder={labels.placeholder}
         />
       ) : (
-        <div ref={editorContentRef as RefObject<HTMLDivElement>} className="tiptap-editor-wrapper flex-1 overflow-y-auto p-3 max-md:pb-20">
+        <div ref={editorContentRef as RefObject<HTMLDivElement>} className="tiptap-editor-wrapper flex-1 overflow-y-auto p-3 max-md:pb-20 max-md:min-h-[50vh]">
           <EditorContent editor={editor} className="tiptap-content h-full outline-none" />
         </div>
       )}
@@ -494,7 +494,7 @@ export function DocEditor({
             isFocused ? 'translate-y-0' : 'translate-y-full pointer-events-none'
           }`}
         >
-          <div className="flex overflow-x-auto items-center gap-1 px-2 py-2">
+          <div className="flex overflow-x-auto items-center gap-1 px-2 py-2" onMouseDown={(e) => e.preventDefault()}>
             <ToolbarButton
               active={editor.isActive('heading', { level: 1 })}
               onClick={() => editor.chain().focus().toggleHeading({ level: 1 }).run()}
