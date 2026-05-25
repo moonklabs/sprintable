@@ -232,7 +232,7 @@ function TreeNode({
     setContextMenuOpen(false);
   }, [doc.id, onAddChild]);
 
-  if (isSearching && visibleIds && visibleIds.size > 0 && !visibleIds.has(doc.id)) return null;
+  if (isSearching && !visibleIds?.has(doc.id)) return null;
 
   return (
     <div ref={setNodeRef} style={style}>
