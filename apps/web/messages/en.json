@@ -1056,6 +1056,8 @@
     "toolbarLink": "Link",
     "toolbarUndo": "Undo",
     "toolbarRedo": "Redo",
+    "recentDocs": "Recent",
+    "noRecentDocs": "No recent docs",
     "statusSaved": "Saved",
     "statusSaving": "Saving...",
     "statusUnsaved": "Unsaved changes",
