@@ -43,15 +43,19 @@ function InlineSaveIndicator({
   t: ReturnType<typeof useTranslations>;
 }) {
   const [show, setShow] = useState(false);
+  const [fading, setFading] = useState(false);
 
   useEffect(() => {
     // eslint-disable-next-line react-hooks/set-state-in-effect
-    if (status === 'idle') { setShow(false); return; }
+    if (status === 'idle') { setShow(false); setFading(false); return; }
     // eslint-disable-next-line react-hooks/set-state-in-effect
     setShow(true);
+    // eslint-disable-next-line react-hooks/set-state-in-effect
+    setFading(false);
     if (status !== 'saved') return;
-    const timer = setTimeout(() => setShow(false), 1600);
-    return () => clearTimeout(timer);
+    const t1 = setTimeout(() => setFading(true), 200);
+    const t2 = setTimeout(() => setShow(false), 1600);
+    return () => { clearTimeout(t1); clearTimeout(t2); };
   }, [status]);
 
   if (!show) return null;
@@ -65,7 +69,7 @@ function InlineSaveIndicator({
   }
   if (status === 'saved') {
     return (
-      <span aria-label={t('statusSaved')} title={t('statusSaved')} className="flex items-center">
+      <span aria-label={t('statusSaved')} title={t('statusSaved')} className={`flex items-center transition-opacity duration-[1400ms] ${fading ? 'opacity-0' : 'opacity-100'}`}>
         <span className="size-2 rounded-full bg-emerald-500/70" />
       </span>
     );
