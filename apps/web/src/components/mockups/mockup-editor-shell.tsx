@@ -886,7 +886,7 @@ export function MockupEditorShell({ mockupId }: MockupEditorShellProps) {
           <span className="rounded-full border border-white/10 bg-muted/55 px-3 py-1 text-[11px] text-muted-foreground">
             {components.length} {t('components')}
           </span>
-          <span className={`rounded-full px-3 py-1 text-[11px] ${hasChanges ? 'bg-amber-500/15 text-amber-400' : 'border border-white/10 bg-emerald-500/10 text-emerald-400'}`}>
+          <span className={`rounded-full px-3 py-1 text-[11px] ${hasChanges ? 'bg-warning-tint text-warning' : 'border border-border bg-success-tint text-success'}`}>
             {saving ? t('saving') : hasChanges ? t('unsaved') : t('saved')}
           </span>
         </div>

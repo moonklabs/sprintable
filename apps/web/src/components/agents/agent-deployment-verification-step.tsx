@@ -3,6 +3,7 @@
 import Link from 'next/link';
 import { AlertTriangle, CheckCircle2, Loader2 } from 'lucide-react';
 import { useTranslations } from 'next-intl';
+import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert';
 import { Badge } from '@/components/ui/badge';
 import { Button, buttonVariants } from '@/components/ui/button';
 import { GlassPanel } from '@/components/ui/glass-panel';
