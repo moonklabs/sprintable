@@ -106,7 +106,15 @@
     "viewBoard": "보드 보기",
     "writeDocs": "문서 작성",
     "noAgentBanner": "AI 에이전트를 연결하면 더 많은 일을 위임할 수 있어요",
-    "noAgentBannerCta": "에이전트 연결"
+    "noAgentBannerCta": "에이전트 연결",
+    "newStory": "새 스토리",
+    "standup": "스탠드업",
+    "sprintCycle": "스프린트 사이클",
+    "inProgressStories": "처리 중 스토리",
+    "hitlPending": "HITL 대기",
+    "hitlPendingDesc": "승인 게이트 대기 (준비 중)",
+    "sprintCycleProgress": "기간 진행",
+    "agentsActive": "{count}명 활성"
   },
   "board": {
     "title": "칸반 보드",
