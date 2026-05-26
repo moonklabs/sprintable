@@ -45,7 +45,7 @@ async def create_project(
     project = await repo.create(name=body.name, description=body.description)
 
     # project_memberships 테이블 미존재 — agent 자동 첨부는 agent 생성 시 project_id로 직접 연결.
-    # Ensure the creating user is in org_members (opt-out model: org membership = project access).
+    # Ensure the creating user is in org_members and team_members.
     if auth.user_id:
         await session.execute(
             text(
@@ -54,6 +54,22 @@ async def create_project(
                 " ON CONFLICT (org_id, user_id) DO NOTHING"
             ),
             {"org_id": str(org_id), "user_id": auth.user_id},
+        )
+        # Auto-create team_members row so SSE and project-scoped auth work immediately.
+        member_name = (auth.email or auth.user_id).split("@")[0]
+        await session.execute(
+            text(
+                "INSERT INTO team_members"
+                " (id, org_id, project_id, user_id, type, name, role, is_active, color, can_manage_members)"
+                " VALUES (gen_random_uuid(), :org_id, :project_id, :user_id,"
+                "         'human', :name, 'owner', true, '#3385f8', true)"
+            ),
+            {
+                "org_id": str(org_id),
+                "project_id": str(project.id),
+                "user_id": auth.user_id,
+                "name": member_name,
+            },
         )
 
     await session.commit()
