@@ -15,6 +15,7 @@ from app.models.webhook_config import WebhookConfig
 from app.models.doc import Doc
 from app.models.invitation import Invitation
 from app.models.meeting import Meeting
+from app.models.conversation import Conversation, ConversationMessage, ConversationParticipant
 from app.models.conversation_webhook_delivery import ConversationWebhookDelivery
 from app.models.notification import InboxItem, Notification, NotificationSetting
 from app.models.notification_preference import NotificationPreference
@@ -58,6 +59,9 @@ __all__ = [
     "Invitation",
     "Meeting",
     "Notification",
+    "Conversation",
+    "ConversationMessage",
+    "ConversationParticipant",
     "ConversationWebhookDelivery",
     "NotificationPreference",
     "NotificationSetting",
