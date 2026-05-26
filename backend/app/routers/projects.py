@@ -50,8 +50,8 @@ async def create_project(
         await session.execute(
             text(
                 "INSERT INTO org_members (id, org_id, user_id, role)"
-                " VALUES (gen_random_uuid(), :org_id, :user_id, 'owner')"
-                " ON CONFLICT (org_id, user_id) DO UPDATE SET role = 'owner'"
+                " VALUES (gen_random_uuid(), :org_id, :user_id, 'member')"
+                " ON CONFLICT (org_id, user_id) DO NOTHING"
             ),
             {"org_id": str(org_id), "user_id": auth.user_id},
         )
