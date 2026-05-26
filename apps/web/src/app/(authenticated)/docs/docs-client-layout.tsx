@@ -1,6 +1,6 @@
 'use client';
 
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useMemo, useState } from 'react';
 import { cn } from '@/lib/utils';
 import { useTopBar } from '@/components/nav/top-bar-context';
 import { useMediaQuery } from '@/lib/use-media-query';
@@ -174,6 +174,20 @@ export function DocsClientLayout({ children }: { children: React.ReactNode }) {
   const closeDrawer = useCallback(() => setTreeDrawerOpen(false), []);
   const { progress: drawerProgress, dragging: drawerDragging } = useSwipeDrawer(treeDrawerOpen, openDrawer, closeDrawer);
 
+  const topBarTitle = useMemo(
+    () => <h1 className="text-sm font-medium">{t('title')}</h1>,
+    [t]
+  );
+  const topBarActions = useMemo(
+    () => (
+      <Button size="sm" variant="outline" onClick={handleNewDoc} disabled={isCreating}>
+        <Plus className="mr-1.5 h-3.5 w-3.5" />
+        {isCreating ? t('loading') : t('newDoc')}
+      </Button>
+    ),
+    [handleNewDoc, isCreating, t]
+  );
+
   const sidebarContent = (
     <>
       <TreeSearchInput
@@ -249,8 +263,8 @@ export function DocsClientLayout({ children }: { children: React.ReactNode }) {
   return (
     <DocsLayoutContext.Provider value={{ projectId, tree, setTree, handleNewDoc, fetchTree, pendingDocUpdate, clearPendingDocUpdate, expandFolder }}>
       <TopBarSlot
-        title={<h1 className="text-sm font-medium">{t('title')}</h1>}
-        actions={<Button size="sm" variant="outline" onClick={handleNewDoc} disabled={isCreating}><Plus className="mr-1.5 h-3.5 w-3.5" />{isCreating ? t('loading') : t('newDoc')}</Button>}
+        title={topBarTitle}
+        actions={topBarActions}
       />
 
       {/* Unified: children rendered exactly once — sidebar responsive via breakpoint classes */}
