@@ -1,7 +1,7 @@
 import os
 from logging.config import fileConfig
 
-from sqlalchemy import engine_from_config, pool
+from sqlalchemy import engine_from_config, inspect, pool
 from alembic import context
 
 config = context.config
@@ -25,7 +25,6 @@ def get_url() -> str:
     return url.replace("postgresql+asyncpg://", "postgresql+psycopg2://").replace("postgresql+asyncpg+ssl://", "postgresql+psycopg2://")
 
 
-
 def run_migrations_offline() -> None:
     context.configure(
         url=get_url(),
@@ -42,6 +41,26 @@ def run_migrations_online() -> None:
     cfg["sqlalchemy.url"] = get_url()
     connectable = engine_from_config(cfg, prefix="sqlalchemy.", poolclass=pool.NullPool)
     with connectable.connect() as connection:
+        insp = inspect(connection)
+        # Fresh OSS DB: no application tables and no prior alembic stamp.
+        # Skip the incremental migration chain — create all tables at once and
+        # stamp to head so subsequent `alembic upgrade head` calls are no-ops.
+        # Existing SaaS/Cloud SQL DBs already have tables and an alembic_version
+        # row, so they follow the normal incremental path below.
+        is_fresh = (
+            not insp.has_table("alembic_version")
+            and not insp.has_table("organizations")
+        )
+        if is_fresh:
+            from alembic.runtime.migration import MigrationContext as _MigCtx
+            from alembic.script import ScriptDirectory
+            Base.metadata.create_all(bind=connection)
+            script_dir = ScriptDirectory.from_config(config)
+            migration_ctx = _MigCtx.configure(connection)
+            migration_ctx.stamp(script_dir, "head")
+            connection.commit()
+            return
+
         context.configure(connection=connection, target_metadata=target_metadata)
         with context.begin_transaction():
             context.run_migrations()
