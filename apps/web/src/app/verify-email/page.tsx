@@ -42,22 +42,22 @@ export default function VerifyEmailPage() {
   }, [token]);
 
   return (
-    <div className="flex min-h-screen items-center justify-center bg-gray-50">
-      <div className="w-full max-w-sm space-y-6 rounded-2xl bg-white p-4 shadow-lg sm:p-8 text-center">
+    <div className="flex min-h-screen items-center justify-center bg-muted">
+      <div className="w-full max-w-sm space-y-6 rounded-2xl bg-background p-4 shadow-lg sm:p-8 text-center">
         <div className="flex flex-col items-center gap-3">
-          <SprintableLogo variant="stacked" className="text-gray-900" markClassName="h-14" wordmarkClassName="h-5" />
+          <SprintableLogo variant="stacked" className="text-foreground" markClassName="h-14" wordmarkClassName="h-5" />
         </div>
 
         {status === 'loading' && (
-          <p className="text-sm text-gray-500">이메일 인증 중...</p>
+          <p className="text-sm text-muted-foreground">이메일 인증 중...</p>
         )}
 
         {status === 'success' && (
           <div className="space-y-4">
-            <p className="text-sm font-medium text-green-600">{message}</p>
+            <p className="text-sm font-medium text-success">{message}</p>
             <button
               onClick={() => router.push('/inbox')}
-              className="flex w-full min-h-[44px] items-center justify-center rounded-lg bg-blue-600 px-4 py-3 text-sm font-medium text-white transition hover:bg-blue-700"
+              className="flex w-full min-h-[44px] items-center justify-center rounded-lg bg-brand px-4 py-3 text-sm font-medium text-brand-foreground transition hover:bg-brand/90"
             >
               시작하기
             </button>
@@ -66,8 +66,8 @@ export default function VerifyEmailPage() {
 
         {status === 'error' && (
           <div className="space-y-4">
-            <p className="text-sm text-red-600">{message}</p>
-            <Link href="/login" className="block text-sm font-medium text-blue-600 hover:text-blue-700">
+            <p className="text-sm text-destructive">{message}</p>
+            <Link href="/login" className="block text-sm font-medium text-brand hover:text-brand/80">
               로그인으로 돌아가기
             </Link>
           </div>

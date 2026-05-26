@@ -50,22 +50,22 @@ export default function InvitePage() {
   };
 
   return (
-    <div className="flex min-h-screen items-center justify-center bg-gray-50">
-      <div className="w-full max-w-sm rounded-2xl bg-white p-8 text-center shadow-lg">
+    <div className="flex min-h-screen items-center justify-center bg-muted">
+      <div className="w-full max-w-sm rounded-2xl bg-background p-8 text-center shadow-lg">
         {(status === 'checking' || status === 'accepting' || status === 'login-required') && (
-          <p className="text-gray-500">{t('loading')}</p>
+          <p className="text-muted-foreground">{t('loading')}</p>
         )}
         {status === 'success' && (
           <div>
             <div className="mb-3 text-4xl">🎉</div>
-            <p className="text-lg font-semibold text-green-600">{t('success')}</p>
-            <p className="mt-2 text-sm text-gray-500">{t('redirecting')}</p>
+            <p className="text-lg font-semibold text-success">{t('success')}</p>
+            <p className="mt-2 text-sm text-muted-foreground">{t('redirecting')}</p>
           </div>
         )}
         {status === 'error' && (
           <div>
             <div className="mb-3 text-4xl">❌</div>
-            <p className="text-sm text-red-600">{errorMsg}</p>
+            <p className="text-sm text-destructive">{errorMsg}</p>
           </div>
         )}
       </div>
