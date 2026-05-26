@@ -52,10 +52,13 @@ def run_migrations_online() -> None:
             and not insp.has_table("organizations")
         )
         if is_fresh:
+            from alembic.runtime.migration import MigrationContext as _MigCtx
+            from alembic.script import ScriptDirectory
             Base.metadata.create_all(bind=connection)
-            context.configure(connection=connection, target_metadata=target_metadata)
-            with context.begin_transaction():
-                context.stamp("head")
+            script_dir = ScriptDirectory.from_config(config)
+            migration_ctx = _MigCtx.configure(connection)
+            migration_ctx.stamp(script_dir, "head")
+            connection.commit()
             return
 
         context.configure(connection=connection, target_metadata=target_metadata)
