@@ -60,9 +60,9 @@ async def create_project(
         await session.execute(
             text(
                 "INSERT INTO team_members"
-                " (id, org_id, project_id, user_id, type, name, role, is_active, color)"
+                " (id, org_id, project_id, user_id, type, name, role, is_active, color, can_manage_members)"
                 " VALUES (gen_random_uuid(), :org_id, :project_id, :user_id,"
-                "         'human', :name, 'owner', true, '#3385f8')"
+                "         'human', :name, 'owner', true, '#3385f8', true)"
             ),
             {
                 "org_id": str(org_id),
