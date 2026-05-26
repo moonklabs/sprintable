@@ -291,7 +291,7 @@ export default function DocsLayout({ children }: { children: React.ReactNode }) 
             'sticky top-12 z-20 transition-transform',
             '[transition-duration:var(--gnb-hide-duration)]',
             '[transition-timing-function:var(--gnb-hide-easing)]',
-            gnbHidden && '-translate-y-[calc(100%+48px)]',
+            gnbHidden && '-translate-y-[calc(100%+var(--gnb-mobile-height))]',
           )}
         >
           <button type="button" onClick={() => setTreeDrawerOpen(true)} className="flex min-h-[44px] items-center gap-2 text-sm text-muted-foreground hover:text-foreground" aria-label="문서 트리 열기">
