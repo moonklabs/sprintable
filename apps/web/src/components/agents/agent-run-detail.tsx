@@ -329,21 +329,19 @@ export function AgentRunDetail({
 
             {/* Error message for failed runs */}
             {run.status === 'failed' && errorDisplay.message && (
-              <div className="mb-4 rounded-2xl border border-red-500/20 bg-red-500/10 px-4 py-3">
-                <div className="flex items-start gap-3">
-                  <AlertTriangle className="mt-0.5 size-5 shrink-0 text-red-400" />
-                  <div>
-                    <p className="text-sm font-semibold text-red-300">{t('errorLabel')}</p>
-                    <p className="mt-1 text-sm text-red-200/80">{errorDisplay.message}</p>
-                    {errorDisplay.code && (
-                      <p className="mt-1 text-xs text-red-200/60">{t('errorCodeLabel')}: {errorDisplay.code}</p>
-                    )}
-                    {failureDisposition === 'retry_scheduled' && run.next_retry_at && (
-                      <p className="mt-1 text-xs text-red-200/60">{t('nextRetryAt')}: {toLocaleStr(run.next_retry_at, locale)}</p>
-                    )}
-                  </div>
-                </div>
-              </div>
+              <Alert variant="destructive" className="mb-4">
+                <AlertTriangle className="size-4" />
+                <AlertDescription>
+                  <p className="font-semibold">{t('errorLabel')}</p>
+                  <p className="mt-1">{errorDisplay.message}</p>
+                  {errorDisplay.code && (
+                    <p className="mt-1 text-xs opacity-75">{t('errorCodeLabel')}: {errorDisplay.code}</p>
+                  )}
+                  {failureDisposition === 'retry_scheduled' && run.next_retry_at && (
+                    <p className="mt-1 text-xs opacity-75">{t('nextRetryAt')}: {toLocaleStr(run.next_retry_at, locale)}</p>
+                  )}
+                </AlertDescription>
+              </Alert>
             )}
 
             {/* Result summary */}

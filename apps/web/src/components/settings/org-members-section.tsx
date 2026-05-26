@@ -1,6 +1,7 @@
 'use client';
 
 import { useEffect, useState } from 'react';
+import { Alert, AlertDescription } from '@/components/ui/alert';
 import { Button } from '@/components/ui/button';
 import { SectionCard, SectionCardBody, SectionCardHeader } from '@/components/ui/section-card';
 import { Badge } from '@/components/ui/badge';
@@ -184,9 +185,9 @@ export function OrgMembersSection({ orgId, currentRole }: OrgMembersSectionProps
               </Button>
             </div>
             {inviteResult && (
-              <div className={`rounded-md border p-3 text-xs break-all ${inviteResult.type === 'success' ? 'border-emerald-500/20 bg-emerald-500/10 text-emerald-600 dark:text-emerald-400' : 'border-destructive/20 bg-destructive/10 text-destructive'}`}>
-                {inviteResult.text}
-              </div>
+              <Alert variant={inviteResult.type === 'success' ? 'success' : 'destructive'}>
+                <AlertDescription className="break-all">{inviteResult.text}</AlertDescription>
+              </Alert>
             )}
           </SectionCardBody>
         </SectionCard>
@@ -194,9 +195,9 @@ export function OrgMembersSection({ orgId, currentRole }: OrgMembersSectionProps
 
       {/* 액션 메시지 */}
       {actionMessage && (
-        <div className={`rounded-md border p-3 text-xs ${actionMessage.type === 'success' ? 'border-emerald-500/20 bg-emerald-500/10 text-emerald-600 dark:text-emerald-400' : 'border-destructive/20 bg-destructive/10 text-destructive'}`}>
-          {actionMessage.text}
-        </div>
+        <Alert variant={actionMessage.type === 'success' ? 'success' : 'destructive'}>
+          <AlertDescription>{actionMessage.text}</AlertDescription>
+        </Alert>
       )}
 
       {/* 멤버 목록 */}
