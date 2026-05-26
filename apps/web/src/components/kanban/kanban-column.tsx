@@ -25,9 +25,9 @@ const SortableContextCompat = SortableContext as unknown as ComponentType<Sortab
 const STATUS_COLOR: Record<string, { dot: string; tint: string }> = {
   'backlog': { dot: 'bg-muted-foreground/40', tint: 'bg-muted/40' },
   'ready-for-dev': { dot: 'bg-muted-foreground/60', tint: 'bg-muted/40' },
-  'in-progress': { dot: 'bg-amber-500', tint: 'bg-amber-400/8' },
-  'in-review': { dot: 'bg-emerald-500', tint: 'bg-emerald-400/8' },
-  'done': { dot: 'bg-emerald-600', tint: 'bg-emerald-500/12' },
+  'in-progress': { dot: 'bg-warning', tint: 'bg-warning-tint' },
+  'in-review': { dot: 'bg-success', tint: 'bg-success-tint' },
+  'done': { dot: 'bg-success', tint: 'bg-success-tint' },
 };
 
 interface KanbanColumnProps {
@@ -114,7 +114,7 @@ export function KanbanColumn({
     : isOver && isValidTarget
       ? 'bg-primary/5 ring-1 ring-primary/20'
       : isValidTarget
-        ? 'bg-emerald-400/5'
+        ? 'bg-success/5'
         : isInvalidTarget
           ? 'bg-muted/20 opacity-45'
           : statusColor.tint;
@@ -125,7 +125,7 @@ export function KanbanColumn({
       className={`flex h-full flex-col rounded-xl p-3 transition ${collapsed ? 'w-[52px] min-w-[52px]' : 'w-[280px] min-w-[240px]'} ${colClass}`}
     >
       {isDragging && isValidTarget && (
-        <div className="mb-3 rounded-xl border border-emerald-400/20 bg-emerald-400/8 px-2 py-1 text-center text-[10px] font-medium uppercase tracking-widest text-emerald-400/70">
+        <div className="mb-3 rounded-xl border border-success-border/30 bg-success-tint px-2 py-1 text-center text-[10px] font-medium uppercase tracking-widest text-success/70">
           {t('validDrop')}
         </div>
       )}

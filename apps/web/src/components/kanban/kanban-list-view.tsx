@@ -48,11 +48,11 @@ function ListStoryRow({ story, epicMap, memberMap, onStoryClick, onChangeStatus 
   return (
     <div className={`relative flex items-center gap-3 rounded-lg border px-4 py-3 transition-all ${
       story.assignee_id && memberMap[story.assignee_id]?.type === 'agent'
-        ? 'border-cyan-500/50 bg-background shadow-[0_0_15px_rgba(6,182,212,0.15)] hover:border-cyan-400 hover:shadow-[0_0_20px_rgba(6,182,212,0.25)]'
+        ? 'border-accent-claim/50 bg-background shadow-[0_0_15px_color-mix(in_oklch,var(--accent-claim),transparent_85%)] hover:border-accent-claim/80 hover:shadow-[0_0_20px_color-mix(in_oklch,var(--accent-claim),transparent_75%)]'
         : 'border-border bg-background hover:border-primary/30 hover:bg-muted/50'
     }`}>
       {story.assignee_id && memberMap[story.assignee_id]?.type === 'agent' && (
-        <div className="absolute inset-0 pointer-events-none rounded-lg border border-transparent bg-gradient-to-r from-cyan-500/10 to-purple-500/10 opacity-50" />
+        <div className="absolute inset-0 pointer-events-none rounded-lg border border-transparent bg-gradient-to-r from-accent-claim/10 to-purple-500/10 opacity-50" />
       )}
       <button
         className="min-h-[44px] flex-1 text-left"
@@ -74,10 +74,10 @@ function ListStoryRow({ story, epicMap, memberMap, onStoryClick, onChangeStatus 
           <div className="mt-1 flex items-center gap-2 relative z-10">
             <p className="text-xs text-muted-foreground">{memberMap[story.assignee_id].name}</p>
             {memberMap[story.assignee_id].type === 'agent' && (
-              <div className="flex items-center gap-1.5 text-[10px] font-mono text-cyan-600 dark:text-cyan-400">
+              <div className="flex items-center gap-1.5 text-[10px] font-mono text-accent-claim">
                 <span className="relative flex h-1.5 w-1.5">
-                  <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-cyan-400 opacity-75"></span>
-                  <span className="relative inline-flex rounded-full h-1.5 w-1.5 bg-cyan-500"></span>
+                  <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-accent-claim opacity-75"></span>
+                  <span className="relative inline-flex rounded-full h-1.5 w-1.5 bg-accent-claim"></span>
                 </span>
                 <span>&gt; Agent active</span>
               </div>
