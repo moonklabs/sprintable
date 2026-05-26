@@ -1,5 +1,6 @@
 import Link from 'next/link';
 import { redirect } from 'next/navigation';
+import { FileText } from 'lucide-react';
 import { getServerSession } from '@/lib/db/server';
 import { fastapiCall } from '@sprintable/storage-api';
 import { getLocale, getTranslations } from 'next-intl/server';
@@ -31,12 +32,12 @@ export default async function DashboardPage() {
   const projectId = me.project_id;
   const teamMemberId = me.id;
 
-  // Agent connection banner: check if any active agent exists
-  const agentsData = await fastapiCall<Array<{ id: string; is_active: boolean; type: string }>>(
+  const agentsData = await fastapiCall<Array<{ id: string; name: string | null; is_active: boolean; type: string }>>(
     'GET', '/api/v2/members', session.access_token,
     { query: { project_id: projectId, member_type: 'agent' } },
   ).catch(() => null);
   const hasActiveAgent = (agentsData ?? []).some((a) => a.is_active);
+  const activeAgents = (agentsData ?? []).filter((a) => a.is_active);
 
   interface DashboardData {
     my_stories: Array<{ id: string; title: string; status: string; story_points: number | null }>;
@@ -52,7 +53,20 @@ export default async function DashboardPage() {
   const docs: Array<{ id: string; title: string; slug: string }> = [];
   const assignedStories = dashboardData?.my_stories ?? [];
 
-  // Calculate story counts by status
+  const activeSprint = activeSprints[0] ?? null;
+  const msPerDay = 1000 * 60 * 60 * 24;
+  const today = new Date();
+  const sprintDay = activeSprint
+    ? Math.max(1, Math.ceil((today.getTime() - new Date(activeSprint.start_date).getTime()) / msPerDay))
+    : null;
+  const sprintTotal = activeSprint
+    ? Math.ceil((new Date(activeSprint.end_date).getTime() - new Date(activeSprint.start_date).getTime()) / msPerDay)
+    : null;
+  const sprintProgress =
+    sprintDay !== null && sprintTotal !== null && sprintTotal > 0
+      ? Math.min(Math.round((sprintDay / sprintTotal) * 100), 100)
+      : null;
+
   const storyCounts = {
     inProgress: assignedStories.filter((s) => s.status === 'in-progress').length,
     inReview: assignedStories.filter((s) => s.status === 'in-review').length,
@@ -61,51 +75,123 @@ export default async function DashboardPage() {
   };
 
   return (
-    <div className="min-h-full p-4 md:p-6">
-      <div className="mx-auto max-w-7xl space-y-6">
+    <div className="min-h-full p-4 lg:p-6">
+      <div className="mx-auto max-w-7xl space-y-5">
         <TopBarSlot
           title={<h1 className="text-sm font-medium">{t('title')}</h1>}
         />
+
+        {/* Hero Strip */}
+        <section
+          className="relative overflow-hidden rounded-xl border border-brand/20 px-6 py-5"
+          style={{ background: 'var(--brand-contrast)' }}
+        >
+          <div
+            className="pointer-events-none absolute inset-0"
+            aria-hidden="true"
+            style={{
+              background: 'radial-gradient(ellipse at 78% 50%, var(--brand-soft) 0%, transparent 65%)',
+              opacity: 0.55,
+            }}
+          />
+          <div className="relative flex flex-col gap-5 lg:flex-row lg:items-center lg:justify-between">
+            <div className="space-y-3">
+              {activeSprint && (
+                <span className="inline-flex items-center gap-1.5 rounded-full border border-brand/30 bg-brand/10 px-3 py-1 text-[11px] font-semibold uppercase tracking-widest text-brand">
+                  {activeSprint.title} · DAY {sprintDay} / {sprintTotal}
+                </span>
+              )}
+              <div className="flex flex-wrap gap-2">
+                <Button asChild size="sm">
+                  <Link href="/board">{t('openBoard')}</Link>
+                </Button>
+                <Button asChild size="sm" variant="outline">
+                  <Link href="/board?view=new">새 스토리</Link>
+                </Button>
+                <Button asChild size="sm" variant="outline">
+                  <Link href="/standup">스탠드업</Link>
+                </Button>
+              </div>
+            </div>
+
+            {activeAgents.length > 0 && (
+              <div className="flex items-center gap-3">
+                <div className="flex -space-x-2">
+                  {activeAgents.slice(0, 6).map((agent) => (
+                    <div
+                      key={agent.id}
+                      className="flex size-8 shrink-0 items-center justify-center rounded-full border-2 border-background bg-brand/20 text-[11px] font-bold text-brand"
+                      title={agent.name ?? agent.type}
+                    >
+                      {(agent.name ?? agent.type).charAt(0).toUpperCase()}
+                    </div>
+                  ))}
+                </div>
+                <p className="text-xs text-muted-foreground">{activeAgents.length}명 활성</p>
+              </div>
+            )}
+          </div>
+        </section>
 
         {/* Agent connection banner — shown only when no active agents */}
         {!hasActiveAgent && (
           <div className="flex items-center justify-between gap-3 rounded-lg border border-blue-200 bg-blue-50 px-4 py-3 dark:border-blue-800 dark:bg-blue-950">
             <p className="text-sm text-blue-900 dark:text-blue-100">{t('noAgentBanner')}</p>
-            <Button asChild size="sm" variant="outline" className="shrink-0 border-blue-300 text-blue-800 hover:bg-blue-100 dark:border-blue-700 dark:text-blue-200 dark:hover:bg-blue-900">
+            <Button
+              asChild
+              size="sm"
+              variant="outline"
+              className="shrink-0 border-blue-300 text-blue-800 hover:bg-blue-100 dark:border-blue-700 dark:text-blue-200 dark:hover:bg-blue-900"
+            >
               <Link href="/settings?tab=api-keys">{t('noAgentBannerCta')}</Link>
             </Button>
           </div>
         )}
 
-        <div className="grid gap-4 md:grid-cols-3">
-          <SectionCard className="col-span-full">
-            <SectionCardHeader>
-              <div className="flex items-center justify-between gap-3">
-                <div>
-                  <div className="text-sm font-semibold text-foreground">{t('commandCenter')}</div>
-                  <div className="text-sm text-muted-foreground">{t('commandCenterDescription')}</div>
-                </div>
-                <StatusBadge status="active" label={t('statusActive')} />
-              </div>
-            </SectionCardHeader>
-            <SectionCardBody className="grid gap-3 md:grid-cols-2">
-              <div className="rounded-md border border-border bg-muted/30 p-4">
-                <div className="text-xs font-medium text-muted-foreground">{t('projects')}</div>
-                <div className="mt-0.5 text-3xl font-bold tracking-tight text-foreground">1</div>
-                <div className="mt-1.5 text-xs text-muted-foreground">{t('projectsHint')}</div>
-              </div>
-              <div className="rounded-md border border-border bg-muted/30 p-4">
-                <div className="text-xs font-medium text-muted-foreground">{t('activeSprints')}</div>
-                <div className="mt-0.5 text-3xl font-bold tracking-tight text-foreground">{activeSprints?.length ?? 0}</div>
-                <div className="mt-1.5 text-xs text-muted-foreground">{t('activeSprintsHint')}</div>
-              </div>
-            </SectionCardBody>
-          </SectionCard>
+        {/* KPI 4 cards */}
+        <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
+          <div className="rounded-xl border border-border bg-card p-4">
+            <p className="text-xs font-medium text-muted-foreground">{t('projects')}</p>
+            <p className="mt-1 text-3xl font-bold tracking-tight text-foreground">1</p>
+            <p className="mt-1.5 text-xs text-muted-foreground">{t('projectsHint')}</p>
+          </div>
 
-        {/* Fix: outer parent is `grid md:grid-cols-3`, so this nested grid
-            needs col-span-full to span all 3 outer columns; without it, the
-            5 cards below get squeezed into 1/3 of the page width. */}
-        <div className="col-span-full grid gap-4 xl:grid-cols-3">
+          {activeSprint ? (
+            <div
+              className="rounded-xl border border-brand/20 p-4"
+              style={{ background: 'var(--brand-contrast)' }}
+            >
+              <p className="text-xs font-medium text-muted-foreground">스프린트 사이클</p>
+              <p className="mt-1 text-3xl font-bold tracking-tight text-brand">
+                {sprintDay}
+                <span className="text-lg font-medium text-muted-foreground">/{sprintTotal}일</span>
+              </p>
+              <p className="mt-1.5 truncate text-xs text-muted-foreground">{activeSprint.title}</p>
+            </div>
+          ) : (
+            <div className="rounded-xl border border-border bg-card p-4">
+              <p className="text-xs font-medium text-muted-foreground">{t('activeSprints')}</p>
+              <p className="mt-1 text-3xl font-bold tracking-tight text-foreground">0</p>
+              <p className="mt-1.5 text-xs text-muted-foreground">{t('activeSprintsHint')}</p>
+            </div>
+          )}
+
+          <div className="rounded-xl border border-warning-border bg-warning-tint p-4">
+            <p className="text-xs font-medium text-muted-foreground">{t('inProgress')}</p>
+            <p className="mt-1 text-3xl font-bold tracking-tight text-warning">{storyCounts.inProgress}</p>
+            <p className="mt-1.5 text-xs text-muted-foreground">처리 중 스토리</p>
+          </div>
+
+          <div className="rounded-xl border border-info-border bg-info-tint p-4">
+            <p className="text-xs font-medium text-muted-foreground">HITL 대기</p>
+            <p className="mt-1 text-3xl font-bold tracking-tight text-info">—</p>
+            <p className="mt-1.5 text-xs text-muted-foreground">승인 게이트 대기 (준비 중)</p>
+          </div>
+        </div>
+
+        {/* Main content grid */}
+        <div className="grid gap-4 xl:grid-cols-3">
+          {/* Pending Work */}
           <SectionCard className="xl:col-span-2">
             <SectionCardHeader>
               <div className="flex items-center justify-between gap-3">
@@ -116,35 +202,64 @@ export default async function DashboardPage() {
               </div>
             </SectionCardHeader>
             <SectionCardBody className="space-y-4">
-              {/* Story Status Counts */}
-              <div className="grid grid-cols-1 gap-3 min-[360px]:grid-cols-2 md:grid-cols-4">
-                <div className="rounded-md border border-border bg-muted/30 px-4 py-3">
-                  <div className="text-2xl font-bold text-primary">{storyCounts.inProgress}</div>
+              {/* Status chips */}
+              <div className="grid grid-cols-2 gap-2 sm:grid-cols-4">
+                <div
+                  className="rounded-lg border border-brand/20 px-4 py-3"
+                  style={{ background: 'var(--brand-contrast)' }}
+                >
+                  <div className="text-2xl font-bold text-brand">{storyCounts.inProgress}</div>
                   <div className="text-xs text-muted-foreground">{t('inProgress')}</div>
                 </div>
-                <div className="rounded-md border border-border bg-muted/30 px-4 py-3">
-                  <div className="text-2xl font-bold text-primary">{storyCounts.inReview}</div>
+                <div className="rounded-lg border border-warning-border bg-warning-tint px-4 py-3">
+                  <div className="text-2xl font-bold text-warning">{storyCounts.inReview}</div>
                   <div className="text-xs text-muted-foreground">{t('inReview')}</div>
                 </div>
-                <div className="rounded-md border border-border bg-muted/30 px-4 py-3">
-                  <div className={`text-2xl font-bold ${storyCounts.blocked > 0 ? 'text-destructive' : 'text-foreground'}`}>{storyCounts.blocked}</div>
+                <div
+                  className={`rounded-lg border px-4 py-3 ${
+                    storyCounts.blocked > 0
+                      ? 'border-destructive-border bg-destructive-tint'
+                      : 'border-border bg-muted/30'
+                  }`}
+                >
+                  <div
+                    className={`text-2xl font-bold ${
+                      storyCounts.blocked > 0 ? 'text-destructive' : 'text-foreground'
+                    }`}
+                  >
+                    {storyCounts.blocked}
+                  </div>
                   <div className="text-xs text-muted-foreground">{t('blocked')}</div>
                 </div>
-                <div className="rounded-md border border-border bg-muted/30 px-4 py-3">
-                  <div className="text-2xl font-bold text-foreground">{storyCounts.open}</div>
+                <div className="rounded-lg border border-info-border bg-info-tint px-4 py-3">
+                  <div className="text-2xl font-bold text-info">{storyCounts.open}</div>
                   <div className="text-xs text-muted-foreground">{t('openStories')}</div>
                 </div>
               </div>
 
               {/* Assigned Stories */}
-              {assignedStories && assignedStories.length > 0 ? (
+              {assignedStories.length > 0 ? (
                 <div>
                   <div className="mb-2 text-sm font-medium text-foreground">{t('assignedToMe')}</div>
-                  <div className="space-y-2">
+                  <div className="space-y-1.5">
                     {assignedStories.map((story) => (
-                      <div key={story.id} className="flex items-center justify-between rounded-md border border-border bg-muted/30 px-4 py-2">
-                        <div className="min-w-0 flex-1">
-                          <div className="truncate font-medium text-foreground">{story.title}</div>
+                      <div
+                        key={story.id}
+                        className="flex items-center justify-between rounded-lg border border-border bg-card px-4 py-2.5 transition hover:bg-muted/40"
+                      >
+                        <div className="flex min-w-0 flex-1 items-center gap-2.5">
+                          <span
+                            className={`size-2 shrink-0 rounded-full ${
+                              story.status === 'in-progress'
+                                ? 'bg-brand'
+                                : story.status === 'in-review'
+                                  ? 'bg-warning'
+                                  : story.status === 'blocked'
+                                    ? 'bg-destructive'
+                                    : 'bg-muted-foreground'
+                            }`}
+                          />
+                          <span className="truncate text-sm font-medium text-foreground">{story.title}</span>
                         </div>
                         <StatusBadge status={story.status} label={story.status} />
                       </div>
@@ -154,62 +269,122 @@ export default async function DashboardPage() {
               ) : (
                 <EmptyState
                   title={t('noAssignedStories')}
-                  action={<Button asChild size="sm" variant="outline"><Link href="/board">{t('viewBoard')}</Link></Button>}
+                  action={
+                    <Button asChild size="sm" variant="outline">
+                      <Link href="/board">{t('viewBoard')}</Link>
+                    </Button>
+                  }
                 />
               )}
-              <div className="pt-1"><span className="text-xs text-muted-foreground">{new Date(fetchedAt).toLocaleTimeString('ko-KR', { hour: '2-digit', minute: '2-digit' })} 기준</span></div>
+              <div className="pt-1">
+                <span className="text-xs text-muted-foreground">
+                  {new Date(fetchedAt).toLocaleTimeString('ko-KR', { hour: '2-digit', minute: '2-digit' })} 기준
+                </span>
+              </div>
             </SectionCardBody>
           </SectionCard>
 
+          {/* Sprint Health */}
           <SectionCard>
-            <SectionCardHeader><div className="text-sm font-semibold text-foreground">{t('sprintHealth')}</div></SectionCardHeader>
+            <SectionCardHeader>
+              <div className="text-sm font-semibold text-foreground">{t('sprintHealth')}</div>
+            </SectionCardHeader>
             <SectionCardBody className="space-y-3">
-              {(activeSprints ?? []).length ? activeSprints!.map((s) => (
-                <Link
-                  key={s.id}
-                  href={`/board?sprint_id=${s.id}`}
-                  className="block rounded-md border border-border bg-muted/30 p-3 transition hover:bg-muted"
-                >
-                  <div className="font-medium text-foreground">{s.title}</div>
-                  <div className="mt-1 text-xs text-muted-foreground">{formatLocaleDateOnly(s.start_date, locale)} ~ {formatLocaleDateOnly(s.end_date, locale)}</div>
-                  <div className="mt-2"><StatusBadge status={s.status} label={getSprintStatusLabel(s.status)} /></div>
-                </Link>
-              )) : (
+              {activeSprints.length > 0 ? (
+                activeSprints.map((s) => (
+                  <Link
+                    key={s.id}
+                    href={`/board?sprint_id=${s.id}`}
+                    className="block rounded-lg border border-border bg-card p-4 transition hover:bg-muted/40"
+                  >
+                    <div className="flex items-start justify-between gap-2">
+                      <div className="min-w-0 flex-1">
+                        <p className="truncate font-semibold text-foreground">{s.title}</p>
+                        <p className="mt-0.5 text-xs text-muted-foreground">
+                          {formatLocaleDateOnly(s.start_date, locale)} ~ {formatLocaleDateOnly(s.end_date, locale)}
+                        </p>
+                      </div>
+                      <StatusBadge status={s.status} label={getSprintStatusLabel(s.status)} />
+                    </div>
+                    {s.id === activeSprint?.id && sprintProgress !== null && (
+                      <div className="mt-3 space-y-1">
+                        <div className="flex items-center justify-between text-xs text-muted-foreground">
+                          <span>기간 진행</span>
+                          <span>{sprintProgress}%</span>
+                        </div>
+                        <div className="h-1.5 overflow-hidden rounded-full bg-muted">
+                          <div
+                            className="h-full rounded-full bg-brand transition-all"
+                            style={{ width: `${sprintProgress}%` }}
+                          />
+                        </div>
+                      </div>
+                    )}
+                  </Link>
+                ))
+              ) : (
                 <EmptyState
                   title={t('noActiveSprints')}
                   description={t('noActiveSprintsDescription')}
-                  action={<Button asChild size="sm" variant="outline"><Link href="/sprints">{t('startSprint')}</Link></Button>}
+                  action={
+                    <Button asChild size="sm" variant="outline">
+                      <Link href="/sprints">{t('startSprint')}</Link>
+                    </Button>
+                  }
                 />
               )}
-              <div className="pt-1"><span className="text-xs text-muted-foreground">{new Date(fetchedAt).toLocaleTimeString('ko-KR', { hour: '2-digit', minute: '2-digit' })} 기준</span></div>
+              <div className="pt-1">
+                <span className="text-xs text-muted-foreground">
+                  {new Date(fetchedAt).toLocaleTimeString('ko-KR', { hour: '2-digit', minute: '2-digit' })} 기준
+                </span>
+              </div>
             </SectionCardBody>
           </SectionCard>
 
+          {/* Recent Docs */}
           <SectionCard>
-            <SectionCardHeader><div className="text-sm font-semibold text-foreground">{t('recentDocs')}</div></SectionCardHeader>
+            <SectionCardHeader>
+              <div className="text-sm font-semibold text-foreground">{t('recentDocs')}</div>
+            </SectionCardHeader>
             <SectionCardBody className="space-y-2">
-              {(docs ?? []).length ? docs!.map((doc) => (
-                <div key={doc.id} className="rounded-md border border-border bg-muted/30 px-3 py-2">
-                  <div className="font-medium text-foreground">{doc.title}</div>
-                  <div className="text-xs text-muted-foreground">/{doc.slug}</div>
-                </div>
-              )) : (
+              {docs.length > 0 ? (
+                docs.map((doc) => (
+                  <Link
+                    key={doc.id}
+                    href={`/docs/${doc.slug}`}
+                    className="flex items-center gap-3 rounded-lg border border-border bg-card px-3 py-2.5 transition hover:bg-muted/40"
+                  >
+                    <div className="flex size-8 shrink-0 items-center justify-center rounded-md bg-muted">
+                      <FileText className="size-4 text-muted-foreground" />
+                    </div>
+                    <div className="min-w-0 flex-1">
+                      <p className="truncate text-sm font-medium text-foreground">{doc.title}</p>
+                      <p className="text-xs text-muted-foreground">/{doc.slug}</p>
+                    </div>
+                  </Link>
+                ))
+              ) : (
                 <EmptyState
                   title={t('noDocsYet')}
                   description={t('noDocsYetDescription')}
-                  action={<Button asChild size="sm" variant="outline"><Link href="/docs">{t('writeDocs')}</Link></Button>}
+                  action={
+                    <Button asChild size="sm" variant="outline">
+                      <Link href="/docs">{t('writeDocs')}</Link>
+                    </Button>
+                  }
                 />
               )}
-              <div className="pt-1"><span className="text-xs text-muted-foreground">{new Date(fetchedAt).toLocaleTimeString('ko-KR', { hour: '2-digit', minute: '2-digit' })} 기준</span></div>
+              <div className="pt-1">
+                <span className="text-xs text-muted-foreground">
+                  {new Date(fetchedAt).toLocaleTimeString('ko-KR', { hour: '2-digit', minute: '2-digit' })} 기준
+                </span>
+              </div>
             </SectionCardBody>
           </SectionCard>
 
-          <DashboardActivityTimeline
-            projectId={projectId}
-          />
+          <DashboardActivityTimeline projectId={projectId} />
         </div>
       </div>
-    </div>
     </div>
   );
 }
