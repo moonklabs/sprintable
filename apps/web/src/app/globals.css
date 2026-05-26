@@ -37,6 +37,12 @@
   animation: onboarding-enter 0.4s ease both;
 }
 
+/* DS-S11: Skeleton shimmer */
+@keyframes skeleton-shimmer {
+  0%   { background-position: -200% 0; }
+  100% { background-position:  200% 0; }
+}
+
 @theme inline {
   --font-heading: var(--font-sans);
   --font-sans: var(--font-sans);
@@ -91,6 +97,12 @@
   --gnb-mobile-height: 48px;
   --gnb-hide-duration: 250ms;
   --gnb-hide-easing: cubic-bezier(0.4, 0, 0.2, 1);
+
+  /* DS-S11: Loading Skeleton */
+  --skeleton-base: var(--muted);
+  --skeleton-highlight: color-mix(in oklch, var(--muted) 60%, var(--background) 40%);
+  --skeleton-duration: 1.5s;
+  --animate-skeleton-shimmer: skeleton-shimmer 1.5s linear infinite;
 }
 
 /* ─── Light Mode (OKLCH zinc) ─── */

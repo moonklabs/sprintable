@@ -1,5 +1,5 @@
-import { PageSkeleton } from '@/components/ui/page-skeleton';
+import { KanbanSkeleton } from '@/components/kanban/kanban-skeleton';
 
 export default function Loading() {
-  return <PageSkeleton />;
+  return <KanbanSkeleton />;
 }
