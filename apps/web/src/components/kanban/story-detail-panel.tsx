@@ -52,9 +52,9 @@ interface StoryDetailPanelProps {
 }
 
 function taskTone(status: string) {
-  if (status === 'done') return 'bg-emerald-300';
+  if (status === 'done') return 'bg-success';
   if (status === 'in-progress') return 'bg-brand';
-  return 'bg-white/20';
+  return 'bg-background/20';
 }
 
 function DescriptionViewer({ description }: { description: string }) {
@@ -331,7 +331,7 @@ export function StoryDetailPanel({ story, tasks, nextTasksCursor = null, loading
     <>
       {/* Backdrop */}
       <div
-        className="fixed inset-0 z-40 bg-black/40 backdrop-blur-sm lg:bg-transparent"
+        className="fixed inset-0 z-40 bg-overlay-backdrop backdrop-blur-sm lg:bg-transparent"
         onClick={onClose}
       />
 

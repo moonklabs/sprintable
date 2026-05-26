@@ -499,11 +499,11 @@ export function DocEditor({
               <span>{labels.autosave}</span>
               <span
                 className={`relative inline-flex h-[18px] w-[30px] flex-shrink-0 items-center rounded-full transition-colors ${
-                  autosave ? 'bg-emerald-500' : 'bg-muted-foreground/30'
+                  autosave ? 'bg-success' : 'bg-muted-foreground/30'
                 }`}
               >
                 <span
-                  className={`inline-block h-3 w-3 transform rounded-full bg-white shadow-sm transition-transform ${
+                  className={`inline-block h-3 w-3 transform rounded-full bg-background shadow-sm transition-transform ${
                     autosave ? 'translate-x-[14px]' : 'translate-x-[3px]'
                   }`}
                 />

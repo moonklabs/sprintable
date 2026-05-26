@@ -284,7 +284,7 @@ export function StandupReviewCard({
           <EmptyState
             title={t('noEntryForMember')}
             description={isOwnEntry ? t('yourEntryPending') : t('noEntryForMemberDescription')}
-            className="bg-black/10"
+            className="bg-foreground/10"
           />
         )}
 

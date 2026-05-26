@@ -71,14 +71,14 @@ function InlineSaveIndicator({
   if (status === 'saved') {
     return (
       <span aria-label={t('statusSaved')} title={t('statusSaved')} className={`flex items-center transition-opacity duration-[1400ms] ${fading ? 'opacity-0' : 'opacity-100'}`}>
-        <span className="size-2 rounded-full bg-emerald-500/70" />
+        <span className="size-2 rounded-full bg-success" />
       </span>
     );
   }
   if (status === 'unsaved') {
     return (
       <span aria-label={t('statusUnsaved')} title={t('statusUnsaved')} className="flex items-center">
-        <span className="size-2 rounded-full bg-amber-500/70" />
+        <span className="size-2 rounded-full bg-warning" />
       </span>
     );
   }
@@ -87,7 +87,7 @@ function InlineSaveIndicator({
       <button type="button" onClick={onAction}
         aria-label={`${t('statusError')} · ${t('retry')}`}
         title={`${t('statusError')} · ${t('retry')}`}
-        className="flex max-w-[120px] items-center gap-1 truncate text-xs text-rose-500 hover:text-rose-600 md:max-w-none"
+        className="flex max-w-[120px] items-center gap-1 truncate text-xs text-destructive hover:text-destructive/80 md:max-w-none"
       >
         <XCircle className="size-3.5 shrink-0" />
         <span className="truncate">{t('statusError')} · {t('retry')}</span>
@@ -98,7 +98,7 @@ function InlineSaveIndicator({
     return (
       <button type="button" onClick={onAction}
         aria-label={t('statusConflict')} title={t('statusConflict')}
-        className="flex max-w-[120px] items-center gap-1 truncate text-xs text-rose-500 hover:text-rose-600 md:max-w-none"
+        className="flex max-w-[120px] items-center gap-1 truncate text-xs text-destructive hover:text-destructive/80 md:max-w-none"
       >
         <AlertTriangle className="size-3.5 shrink-0" />
         <span className="truncate">{t('statusConflict')}</span>
@@ -109,7 +109,7 @@ function InlineSaveIndicator({
     return (
       <button type="button" onClick={onAction}
         aria-label={t('statusRemoteChanged')} title={t('statusRemoteChanged')}
-        className="flex max-w-[120px] items-center gap-1 truncate text-xs text-amber-500 hover:text-amber-600 md:max-w-none"
+        className="flex max-w-[120px] items-center gap-1 truncate text-xs text-warning hover:text-warning/80 md:max-w-none"
       >
         <RotateCw className="size-3.5 shrink-0" />
         <span className="truncate">{t('statusRemoteChanged')}</span>
@@ -246,7 +246,7 @@ export default function DocSlugPage() {
         aria-label={t('copyMarkdown')}
         className="inline-flex h-8 w-8 items-center justify-center rounded-md text-muted-foreground transition-colors hover:bg-accent hover:text-accent-foreground"
       >
-        {mdCopied ? <Check className="h-4 w-4 text-emerald-500" /> : <Copy className="h-4 w-4" />}
+        {mdCopied ? <Check className="h-4 w-4 text-success" /> : <Copy className="h-4 w-4" />}
       </button>
       <DropdownMenu>
         <DropdownMenuTrigger className="inline-flex h-8 w-8 items-center justify-center rounded-md text-muted-foreground transition-colors hover:bg-accent hover:text-accent-foreground">

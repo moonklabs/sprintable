@@ -492,7 +492,7 @@ export function DocsShellClient({ projectId }: DocsShellClientProps) {
                     </span>
                     {result.snippet && (
                       <span
-                        className="line-clamp-2 text-[11px] leading-relaxed text-muted-foreground [&_mark]:rounded [&_mark]:bg-yellow-400/40 [&_mark]:text-foreground [&_mark]:px-0.5 [&_b]:rounded [&_b]:bg-yellow-400/40 [&_b]:font-normal [&_b]:text-foreground [&_b]:px-0.5"
+                        className="line-clamp-2 text-[11px] leading-relaxed text-muted-foreground [&_mark]:rounded [&_mark]:bg-highlight-search-bg [&_mark]:text-foreground [&_mark]:px-0.5 [&_b]:rounded [&_b]:bg-highlight-search-bg [&_b]:font-normal [&_b]:text-foreground [&_b]:px-0.5"
                         dangerouslySetInnerHTML={{ __html: sanitizeSnippet(result.snippet) }}
                       />
                     )}
@@ -728,7 +728,7 @@ export function DocsShellClient({ projectId }: DocsShellClientProps) {
         {treeDrawerOpen && (
           <>
             <div
-              className="fixed inset-0 z-40 bg-black/50"
+              className="fixed inset-0 z-40 bg-overlay-backdrop"
               onClick={() => setTreeDrawerOpen(false)}
               aria-hidden="true"
             />

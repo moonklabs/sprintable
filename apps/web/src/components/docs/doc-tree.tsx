@@ -63,7 +63,7 @@ function HighlightedText({ text, query }: { text: string; query: string }) {
   return (
     <>
       {text.slice(0, idx)}
-      <mark className="bg-amber-500/20 text-inherit">{text.slice(idx, idx + query.length)}</mark>
+      <mark className="bg-highlight-search-bg text-inherit">{text.slice(idx, idx + query.length)}</mark>
       {text.slice(idx + query.length)}
     </>
   );
