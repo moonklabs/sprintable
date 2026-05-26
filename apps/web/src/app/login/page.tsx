@@ -91,7 +91,7 @@ export default function LoginPage() {
               inputMode="numeric"
               maxLength={6}
               placeholder="6-digit authenticator code"
-              className="w-full rounded-lg border border-gray-300 px-4 py-3 text-center text-lg text-gray-900 font-mono tracking-widest focus:outline-none focus:ring-2 focus:ring-blue-500"
+              className="w-full rounded-lg border border-border px-4 py-3 text-center text-lg text-foreground font-mono tracking-widest focus:outline-none focus:ring-2 focus:ring-brand"
               value={totpCode}
               onChange={(e) => setTotpCode(e.target.value.replace(/\D/g, '').slice(0, 6))}
               onKeyDown={(e) => e.key === 'Enter' && handleLogin()}

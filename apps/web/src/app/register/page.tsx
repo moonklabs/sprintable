@@ -93,7 +93,7 @@ export default function RegisterPage() {
             type="password"
             placeholder="Password"
             autoComplete="new-password"
-            className={`w-full rounded-lg border px-4 py-3 text-sm text-gray-900 focus:outline-none focus:ring-2 focus:ring-blue-500 ${
+            className={`w-full rounded-lg border px-4 py-3 text-sm text-foreground focus:outline-none focus:ring-2 focus:ring-brand ${
               showRules && !isPasswordValid ? 'border-destructive' : 'border-border'
             }`}
             value={password}
