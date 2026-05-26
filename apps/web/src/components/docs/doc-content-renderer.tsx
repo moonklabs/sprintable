@@ -123,7 +123,7 @@ export function DocContentRenderer({
       if (!latex.trim()) return;
       void renderKatex(latex, true).then(({ html: katexHtml, error }) => {
         if (error) {
-          block.innerHTML = `<div class="rounded-lg border border-red-500/30 bg-red-500/10 p-3 text-xs text-red-400 font-mono">${escapeHtmlText(error)}</div>`;
+          block.innerHTML = `<div class="rounded-lg border border-destructive/30 bg-destructive/10 p-3 text-xs text-destructive font-mono">${escapeHtmlText(error)}</div>`;
         } else {
           block.innerHTML = `<div class="flex justify-center overflow-x-auto py-3 [&_.katex]:text-foreground">${katexHtml}</div>`;
         }
@@ -136,7 +136,7 @@ export function DocContentRenderer({
       if (!latex.trim()) return;
       void renderKatex(latex, false).then(({ html: katexHtml, error }) => {
         if (error) {
-          span.className = 'rounded bg-red-500/10 px-1 text-xs text-red-400 font-mono';
+          span.className = 'rounded bg-destructive/10 px-1 text-xs text-destructive font-mono';
         } else {
           span.innerHTML = katexHtml;
         }
@@ -348,7 +348,7 @@ function MermaidReadonlyBlock({ code }: { code: string }) {
   }, [code]);
 
   if (error) {
-    return <div className="not-prose my-4 rounded-xl border border-red-500/30 bg-red-500/10 p-3 text-xs text-red-400">{error}</div>;
+    return <div className="not-prose my-4 rounded-xl border border-destructive-border bg-destructive-tint p-3 text-xs text-destructive">{error}</div>;
   }
   if (!svg) {
     return <div className="not-prose my-4 rounded-xl border border-slate-700 bg-[#0b1120] p-4 text-xs text-slate-500">렌더링 중...</div>;
