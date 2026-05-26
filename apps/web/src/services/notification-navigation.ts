@@ -16,9 +16,7 @@ interface DocRow {
 }
 
 function buildDocHref(slug: string, commentId?: string) {
-  const params = new URLSearchParams({ slug });
-  if (commentId) params.set('commentId', commentId);
-  return `/docs?${params.toString()}`;
+  return commentId ? `/docs/${slug}?commentId=${commentId}` : `/docs/${slug}`;
 }
 
 export async function attachNotificationHrefs<T extends NotificationReference>(
@@ -65,6 +63,10 @@ export async function attachNotificationHrefs<T extends NotificationReference>(
 
     if (!referenceId) {
       return { ...notification, href: null };
+    }
+
+    if (notification.reference_type === 'memo') {
+      return { ...notification, href: `/memos?id=${referenceId}` };
     }
 
     if (notification.reference_type === 'task') {

@@ -63,7 +63,7 @@ function getEntityHref(notification: EventNotification): string | null {
     case 'doc': {
       // docs-shell-client.tsx는 slug 파라미터 사용. payload에 slug가 있으면 deep link
       const slug = notification.payload?.slug as string | undefined;
-      return slug ? `/docs?slug=${slug}` : `/docs`;
+      return slug ? `/docs/${slug}` : `/docs`;
     }
     default:
       return null;
