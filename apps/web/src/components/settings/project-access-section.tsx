@@ -1,6 +1,7 @@
 'use client';
 
 import { useEffect, useState } from 'react';
+import { Alert, AlertDescription } from '@/components/ui/alert';
 import { SectionCard, SectionCardBody, SectionCardHeader } from '@/components/ui/section-card';
 import { Badge } from '@/components/ui/badge';
 
@@ -112,9 +113,9 @@ export function ProjectAccessSection({ projectId, currentRole }: ProjectAccessSe
       </SectionCardHeader>
       <SectionCardBody className="space-y-3">
         {message && (
-          <div className={`rounded-md border p-2 text-xs ${message.type === 'success' ? 'border-emerald-500/20 bg-emerald-500/10 text-emerald-600 dark:text-emerald-400' : 'border-destructive/20 bg-destructive/10 text-destructive'}`}>
-            {message.text}
-          </div>
+          <Alert variant={message.type === 'success' ? 'success' : 'destructive'}>
+            <AlertDescription>{message.text}</AlertDescription>
+          </Alert>
         )}
         {orgMembers.length === 0 ? (
           <p className="text-sm text-muted-foreground">조직 멤버가 없습니다.</p>
@@ -139,7 +140,7 @@ export function ProjectAccessSection({ projectId, currentRole }: ProjectAccessSe
                       type="button"
                       disabled={toggling === member.id}
                       onClick={() => void handleToggle(member)}
-                      className={`rounded-md px-2 py-0.5 text-xs font-medium transition-colors ${blocked ? 'bg-emerald-500/10 text-emerald-600 hover:bg-emerald-500/20 dark:text-emerald-400' : 'bg-destructive/10 text-destructive hover:bg-destructive/20'} disabled:opacity-50`}
+                      className={`rounded-md px-2 py-0.5 text-xs font-medium transition-colors ${blocked ? 'bg-success-tint text-success hover:bg-success/20' : 'bg-destructive/10 text-destructive hover:bg-destructive/20'} disabled:opacity-50`}
                     >
                       {toggling === member.id ? '...' : blocked ? '허용' : '차단'}
                     </button>

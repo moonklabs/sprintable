@@ -149,7 +149,7 @@ export function DecisionsWaiting({ onChange }: DecisionsWaitingProps = {}) {
       </header>
 
       {error ? (
-        <p className="mb-2 text-xs text-red-400" role="alert">
+        <p className="mb-2 text-xs text-destructive" role="alert">
           {t('decisionsErrorRetry')}
         </p>
       ) : null}
@@ -170,7 +170,7 @@ export function DecisionsWaiting({ onChange }: DecisionsWaitingProps = {}) {
                       {item.kind}
                     </Badge>
                     {item.priority === 'high' ? (
-                      <Badge className="bg-red-500/15 text-red-300 text-[10px] uppercase">
+                      <Badge className="bg-destructive/15 text-destructive text-[10px] uppercase">
                         {t('priorityHigh')}
                       </Badge>
                     ) : null}

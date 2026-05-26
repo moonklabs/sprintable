@@ -3,6 +3,7 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { useSearchParams } from 'next/navigation';
 import { useTranslations } from 'next-intl';
+import { Alert, AlertDescription } from '@/components/ui/alert';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { OperatorInput, OperatorTextarea } from '@/components/ui/operator-control';
@@ -186,9 +187,9 @@ export function McpConnectionSettings({ projectId }: { projectId: string }) {
       </SectionCardHeader>
       <SectionCardBody className="space-y-4">
         {message ? (
-          <div className={`rounded-2xl border px-3 py-2 text-xs ${message.type === 'success' ? 'border-emerald-400/20 bg-emerald-400/10 text-emerald-200' : 'border-rose-400/20 bg-rose-500/10 text-rose-200'}`}>
-            {message.text}
-          </div>
+          <Alert variant={message.type === 'success' ? 'success' : 'destructive'}>
+            <AlertDescription>{message.text}</AlertDescription>
+          </Alert>
         ) : null}
 
         {loading ? (
@@ -212,7 +213,7 @@ export function McpConnectionSettings({ projectId }: { projectId: string }) {
                         {connection.maskedSecret ? <div>{t('maskedSecretValue', { secret: connection.maskedSecret })}</div> : null}
                         <div>{t('toolCountValue', { count: connection.toolNames.length })}</div>
                         {connection.validatedAt ? <div>{t('validatedAtValue', { date: new Date(connection.validatedAt).toLocaleString() })}</div> : null}
-                        {connection.lastError ? <div className="text-rose-200">{connection.lastError}</div> : null}
+                        {connection.lastError ? <div className="text-destructive">{connection.lastError}</div> : null}
                       </div>
                     </div>
 

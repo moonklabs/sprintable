@@ -2,6 +2,7 @@
 
 import { useEffect, useState } from 'react';
 import { useTranslations } from 'next-intl';
+import { Alert, AlertDescription } from '@/components/ui/alert';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { OperatorInput } from '@/components/ui/operator-control';
@@ -149,9 +150,9 @@ export function WorkflowTriggerTypesSection() {
       </SectionCardHeader>
       <SectionCardBody className="space-y-4">
         {actionMessage ? (
-          <div className={`rounded-md border p-3 text-xs ${actionMessage.type === 'success' ? 'border-emerald-500/20 bg-emerald-500/10 text-emerald-600 dark:text-emerald-400' : 'border-destructive/20 bg-destructive/10 text-destructive'}`}>
-            {actionMessage.text}
-          </div>
+          <Alert variant={actionMessage.type === 'success' ? 'success' : 'destructive'}>
+            <AlertDescription>{actionMessage.text}</AlertDescription>
+          </Alert>
         ) : null}
 
         {loading ? (

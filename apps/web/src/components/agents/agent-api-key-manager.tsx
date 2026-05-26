@@ -211,7 +211,7 @@ export function AgentApiKeyManager({ agentId, agentName, onNewKey }: AgentApiKey
               onClick={() => void copyOnboardingMessage(generatedKey ?? (activeKeys[0] ? `${activeKeys[0].key_prefix}...` : ''))}
               className="gap-1.5"
             >
-              {copiedOnboarding ? <Check className="h-3.5 w-3.5 text-emerald-500" /> : <Copy className="h-3.5 w-3.5" />}
+              {copiedOnboarding ? <Check className="h-3.5 w-3.5 text-success" /> : <Copy className="h-3.5 w-3.5" />}
               온보딩 메시지 복사
             </Button>
             <Button
@@ -344,7 +344,7 @@ export function AgentApiKeyManager({ agentId, agentName, onNewKey }: AgentApiKey
                     className="font-mono text-sm"
                   />
                   <Button onClick={() => void copyToClipboard(generatedKey)} className="gap-1.5 shrink-0">
-                    {copiedKey ? <Check className="h-3.5 w-3.5 text-emerald-500" /> : <Copy className="h-3.5 w-3.5" />}
+                    {copiedKey ? <Check className="h-3.5 w-3.5 text-success" /> : <Copy className="h-3.5 w-3.5" />}
                     {copiedKey ? 'Copied!' : 'Copy'}
                   </Button>
                 </div>
@@ -364,7 +364,7 @@ export function AgentApiKeyManager({ agentId, agentName, onNewKey }: AgentApiKey
                   className="mt-2 gap-1.5"
                   onClick={() => void copyOnboardingMessage(generatedKey)}
                 >
-                  {copiedOnboarding ? <Check className="h-3.5 w-3.5 text-emerald-500" /> : <Copy className="h-3.5 w-3.5" />}
+                  {copiedOnboarding ? <Check className="h-3.5 w-3.5 text-success" /> : <Copy className="h-3.5 w-3.5" />}
                   온보딩 메시지 복사
                 </Button>
               </div>

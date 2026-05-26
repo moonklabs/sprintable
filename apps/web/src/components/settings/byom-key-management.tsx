@@ -2,6 +2,7 @@
 
 import { useCallback, useEffect, useState } from 'react';
 import { useTranslations } from 'next-intl';
+import { Alert, AlertDescription } from '@/components/ui/alert';
 import { Button } from '@/components/ui/button';
 import { OperatorInput } from '@/components/ui/operator-control';
 import { OperatorDropdownSelect } from '@/components/ui/operator-dropdown-select';
@@ -299,31 +300,21 @@ export function ByomKeyManagement({ projectId }: { projectId: string }) {
 
             {/* Validation result */}
             {validationResult === 'success' ? (
-              <div className="rounded-2xl border border-emerald-400/20 bg-emerald-400/10 px-3 py-2 text-xs text-emerald-200">
-                {t('validationSuccess')}
-              </div>
+              <Alert variant="success"><AlertDescription>{t('validationSuccess')}</AlertDescription></Alert>
             ) : null}
             {validationResult === 'error' ? (
-              <div className="rounded-2xl border border-rose-400/20 bg-rose-500/10 px-3 py-2 text-xs text-rose-200">
-                {t('validationError')}
-              </div>
+              <Alert variant="destructive"><AlertDescription>{t('validationError')}</AlertDescription></Alert>
             ) : null}
 
             {/* Save result */}
             {saveResult === 'success' ? (
-              <div className="rounded-2xl border border-emerald-400/20 bg-emerald-400/10 px-3 py-2 text-xs text-emerald-200">
-                {t('saveSuccess')}
-              </div>
+              <Alert variant="success"><AlertDescription>{t('saveSuccess')}</AlertDescription></Alert>
             ) : null}
             {deleteMessage ? (
-              <div className="rounded-2xl border border-emerald-400/20 bg-emerald-400/10 px-3 py-2 text-xs text-emerald-200">
-                {deleteMessage}
-              </div>
+              <Alert variant="success"><AlertDescription>{deleteMessage}</AlertDescription></Alert>
             ) : null}
             {saveResult === 'error' && saveError ? (
-              <div className="rounded-2xl border border-rose-400/20 bg-rose-500/10 px-3 py-2 text-xs text-rose-200">
-                {saveError}
-              </div>
+              <Alert variant="destructive"><AlertDescription>{saveError}</AlertDescription></Alert>
             ) : null}
 
             {/* Action buttons */}

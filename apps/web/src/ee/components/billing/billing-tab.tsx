@@ -36,7 +36,7 @@ const TIER_BADGE: Record<string, string> = {
 const STATUS_BADGE: Record<string, string> = {
   active: 'bg-green-100 text-green-700',
   past_due: 'bg-yellow-100 text-yellow-700',
-  cancelled: 'bg-red-100 text-red-700',
+  cancelled: 'bg-destructive-tint text-destructive',
 };
 
 const PLAN_PRICES: Record<string, { monthly: number; yearly: number }> = {

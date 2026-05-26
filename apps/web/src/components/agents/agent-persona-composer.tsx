@@ -4,6 +4,7 @@ import Link from 'next/link';
 import { useEffect, useMemo, useState } from 'react';
 import { useTranslations } from 'next-intl';
 import type { PersonaChangeHistoryEntry, PersonaPermissionBoundary, PersonaVersionMetadata } from '@/lib/persona-governance-contract';
+import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { EmptyState } from '@/components/ui/empty-state';
@@ -326,14 +327,16 @@ export function AgentPersonaComposer({
         ) : null}
 
         {createdPersona ? (
-          <div className="rounded-md border border-emerald-500/20 bg-emerald-500/10 px-4 py-4 text-sm text-emerald-600 dark:text-emerald-400">
-            <p className="font-semibold">{t('personaComposerSuccessTitle', { name: createdPersona.name })}</p>
-            <p className="mt-1 text-emerald-200/90">{t('personaComposerSuccessBody', { slug: createdPersona.slug })}</p>
-            <div className="mt-3 flex flex-wrap gap-3">
-              <Link href="/agents/deploy" className="text-sm font-medium underline-offset-4 hover:underline">{t('backToWizard')}</Link>
-              <button type="button" onClick={() => setCreatedPersona(null)} className="text-sm font-medium underline-offset-4 hover:underline">{t('personaComposerCreateAnother')}</button>
-            </div>
-          </div>
+          <Alert variant="success">
+            <AlertTitle>{t('personaComposerSuccessTitle', { name: createdPersona.name })}</AlertTitle>
+            <AlertDescription>
+              <p>{t('personaComposerSuccessBody', { slug: createdPersona.slug })}</p>
+              <div className="mt-3 flex flex-wrap gap-3">
+                <Link href="/agents/deploy" className="text-sm font-medium underline-offset-4 hover:underline">{t('backToWizard')}</Link>
+                <button type="button" onClick={() => setCreatedPersona(null)} className="text-sm font-medium underline-offset-4 hover:underline">{t('personaComposerCreateAnother')}</button>
+              </div>
+            </AlertDescription>
+          </Alert>
         ) : null}
       </div>
 
