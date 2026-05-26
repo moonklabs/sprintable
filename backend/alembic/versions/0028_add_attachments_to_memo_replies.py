@@ -15,6 +15,14 @@ depends_on = None
 
 
 def upgrade() -> None:
+    # OSS fresh installs never have `memo_replies` (SaaS-only, retired in E-MEMO-RETIRE).
+    conn = op.get_bind()
+    memo_replies_exists = conn.execute(
+        sa.text("SELECT EXISTS (SELECT 1 FROM information_schema.tables WHERE table_schema='public' AND table_name='memo_replies')")
+    ).scalar()
+    if not memo_replies_exists:
+        return
+
     op.add_column(
         "memo_replies",
         sa.Column("attachments", JSONB, nullable=False, server_default="[]"),

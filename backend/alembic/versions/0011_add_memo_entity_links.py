@@ -15,6 +15,16 @@ depends_on = None
 
 
 def upgrade() -> None:
+    # OSS fresh installs never have a `memos` table (SaaS-only, retired in E-MEMO-RETIRE).
+    # Skip the entire migration when memos doesn't exist so `alembic upgrade head`
+    # succeeds on a clean OSS database.
+    conn = op.get_bind()
+    memos_exists = conn.execute(
+        sa.text("SELECT EXISTS (SELECT 1 FROM information_schema.tables WHERE table_schema='public' AND table_name='memos')")
+    ).scalar()
+    if not memos_exists:
+        return
+
     # Guard: prod DB에 memos PK가 누락된 경우 복구 (FK 생성 선행 조건)
     op.execute("""
         DO $$ BEGIN
