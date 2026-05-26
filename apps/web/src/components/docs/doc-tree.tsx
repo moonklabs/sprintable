@@ -2,7 +2,7 @@
 
 import { useState, useCallback, useEffect, useRef } from 'react';
 import { createPortal } from 'react-dom';
-import { ChevronDown, ChevronRight, FileText, Folder, FolderOpen, MoreVertical } from 'lucide-react';
+import { ChevronDown, ChevronRight, FileText, Folder, FolderOpen, GripVertical, MoreVertical } from 'lucide-react';
 import { DndContext, DragEndEvent, PointerSensor, useSensor, useSensors, closestCenter } from '@dnd-kit/core';
 import { SortableContext, useSortable, verticalListSortingStrategy } from '@dnd-kit/sortable';
 import { CSS } from '@dnd-kit/utilities';
@@ -238,6 +238,15 @@ function TreeNode({
     <div ref={setNodeRef} style={style}>
       <div className="group relative">
         {preview && <DocPreviewCard title={preview.title} snippet={preview.snippet} x={previewPos.x} y={previewPos.y} />}
+        {/* Drag handle — listeners isolated here to avoid blocking click */}
+        <div
+          {...attributes}
+          {...listeners}
+          className="absolute top-1/2 z-10 -translate-y-1/2 cursor-grab touch-none opacity-0 transition group-hover:opacity-100"
+          style={{ left: `${Math.min(depth * 14 + 4, 68)}px` }}
+        >
+          <GripVertical className="size-3 text-muted-foreground" />
+        </div>
         <button
           data-doc-id={doc.id}
           onClick={handleClick}
@@ -251,8 +260,6 @@ function TreeNode({
               : 'text-foreground/88 hover:bg-muted hover:text-foreground',
           )}
           style={{ paddingLeft: `${Math.min(depth * 14 + 8, 72)}px` }}
-          {...attributes}
-          {...listeners}
         >
           {isFolder ? (
             expanded ? <ChevronDown className="size-3.5 shrink-0 text-muted-foreground" /> : <ChevronRight className="size-3.5 shrink-0 text-muted-foreground" />
