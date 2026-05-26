@@ -106,7 +106,15 @@
     "viewBoard": "View board",
     "writeDocs": "Write a doc",
     "noAgentBanner": "Connect an AI agent to delegate more work automatically",
-    "noAgentBannerCta": "Connect agent"
+    "noAgentBannerCta": "Connect agent",
+    "newStory": "New story",
+    "standup": "Standup",
+    "sprintCycle": "Sprint cycle",
+    "inProgressStories": "In-progress stories",
+    "hitlPending": "HITL pending",
+    "hitlPendingDesc": "Approval gate waiting (coming soon)",
+    "sprintCycleProgress": "Time elapsed",
+    "agentsActive": "{count} active"
   },
   "board": {
     "title": "Kanban Board",

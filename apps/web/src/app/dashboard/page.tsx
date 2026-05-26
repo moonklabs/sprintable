@@ -106,10 +106,10 @@ export default async function DashboardPage() {
                   <Link href="/board">{t('openBoard')}</Link>
                 </Button>
                 <Button asChild size="sm" variant="outline">
-                  <Link href="/board?view=new">새 스토리</Link>
+                  <Link href="/board?view=new">{t('newStory')}</Link>
                 </Button>
                 <Button asChild size="sm" variant="outline">
-                  <Link href="/standup">스탠드업</Link>
+                  <Link href="/standup">{t('standup')}</Link>
                 </Button>
               </div>
             </div>
@@ -127,7 +127,7 @@ export default async function DashboardPage() {
                     </div>
                   ))}
                 </div>
-                <p className="text-xs text-muted-foreground">{activeAgents.length}명 활성</p>
+                <p className="text-xs text-muted-foreground">{t('agentsActive', { count: activeAgents.length })}</p>
               </div>
             )}
           </div>
@@ -161,7 +161,7 @@ export default async function DashboardPage() {
               className="rounded-xl border border-brand/20 p-4"
               style={{ background: 'var(--brand-contrast)' }}
             >
-              <p className="text-xs font-medium text-muted-foreground">스프린트 사이클</p>
+              <p className="text-xs font-medium text-muted-foreground">{t('sprintCycle')}</p>
               <p className="mt-1 text-3xl font-bold tracking-tight text-brand">
                 {sprintDay}
                 <span className="text-lg font-medium text-muted-foreground">/{sprintTotal}일</span>
@@ -179,13 +179,13 @@ export default async function DashboardPage() {
           <div className="rounded-xl border border-warning-border bg-warning-tint p-4">
             <p className="text-xs font-medium text-muted-foreground">{t('inProgress')}</p>
             <p className="mt-1 text-3xl font-bold tracking-tight text-warning">{storyCounts.inProgress}</p>
-            <p className="mt-1.5 text-xs text-muted-foreground">처리 중 스토리</p>
+            <p className="mt-1.5 text-xs text-muted-foreground">{t('inProgressStories')}</p>
           </div>
 
           <div className="rounded-xl border border-info-border bg-info-tint p-4">
-            <p className="text-xs font-medium text-muted-foreground">HITL 대기</p>
+            <p className="text-xs font-medium text-muted-foreground">{t('hitlPending')}</p>
             <p className="mt-1 text-3xl font-bold tracking-tight text-info">—</p>
-            <p className="mt-1.5 text-xs text-muted-foreground">승인 게이트 대기 (준비 중)</p>
+            <p className="mt-1.5 text-xs text-muted-foreground">{t('hitlPendingDesc')}</p>
           </div>
         </div>
 
@@ -309,7 +309,7 @@ export default async function DashboardPage() {
                     {s.id === activeSprint?.id && sprintProgress !== null && (
                       <div className="mt-3 space-y-1">
                         <div className="flex items-center justify-between text-xs text-muted-foreground">
-                          <span>기간 진행</span>
+                          <span>{t('sprintCycleProgress')}</span>
                           <span>{sprintProgress}%</span>
                         </div>
                         <div className="h-1.5 overflow-hidden rounded-full bg-muted">
