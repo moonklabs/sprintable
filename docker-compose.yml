@@ -1,5 +1,6 @@
 # Sprintable — self-hosted / local development
-# Usage: cp .env.example .env  &&  docker compose up -d
+# Quick start: make up          (auto-generates .env with random secrets)
+# Manual:      python3 scripts/init-env.py && docker compose up -d
 
 services:
   db:
