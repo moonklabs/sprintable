@@ -9,6 +9,7 @@ import { Badge } from '@/components/ui/badge';
 import { Button, buttonVariants } from '@/components/ui/button';
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from '@/components/ui/dialog';
 import { OperatorInput, OperatorSelect } from '@/components/ui/operator-control';
+import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert';
 import { SectionCard, SectionCardBody, SectionCardHeader } from '@/components/ui/section-card';
 import { ToastContainer, useToast } from '@/components/ui/toast';
 import { AgentDeploymentVerificationStep } from '@/components/agents/agent-deployment-verification-step';
@@ -589,18 +590,20 @@ export function AgentDeploymentWizard({
           </div>
 
           {modelMode === 'byom' ? (
-            <div className={`rounded-md border px-4 py-3 text-sm ${defaults.hasProjectApiKey ? 'border-sky-500/20 bg-sky-500/10 text-sky-600 dark:text-sky-400' : 'border-amber-500/20 bg-amber-500/10 text-amber-600 dark:text-amber-400'}`}>
-              <p>{defaults.hasProjectApiKey ? t('byomHintWithDefaults', { provider: deploymentProviderLabel }) : t('byomHintWithoutDefaults')}</p>
-              {!defaults.hasProjectApiKey ? (
-                <div className="mt-3">
-                  <Link href="/dashboard/settings" className={buttonVariants({ variant: 'glass', size: 'sm' })}>{t('configureProjectAi')}</Link>
-                </div>
-              ) : null}
-            </div>
+            <Alert variant={defaults.hasProjectApiKey ? 'info' : 'warning'}>
+              <AlertDescription>
+                <p>{defaults.hasProjectApiKey ? t('byomHintWithDefaults', { provider: deploymentProviderLabel }) : t('byomHintWithoutDefaults')}</p>
+                {!defaults.hasProjectApiKey ? (
+                  <div className="mt-3">
+                    <Link href="/dashboard/settings" className={buttonVariants({ variant: 'glass', size: 'sm' })}>{t('configureProjectAi')}</Link>
+                  </div>
+                ) : null}
+              </AlertDescription>
+            </Alert>
           ) : (
-            <div className="rounded-md border border-emerald-500/20 bg-emerald-500/10 px-4 py-3 text-sm text-emerald-600 dark:text-emerald-400">
-              {t('managedHint')}
-            </div>
+            <Alert variant="success">
+              <AlertDescription>{t('managedHint')}</AlertDescription>
+            </Alert>
           )}
         </div>
       );
@@ -711,23 +714,21 @@ export function AgentDeploymentWizard({
             )}
 
             {autoRoutingPreview.requiresOverwriteConfirmation && autoRoutingPreview.rules.length > 0 ? (
-              <div className="mt-4 rounded-md border border-amber-500/20 bg-amber-500/10 px-4 py-4 text-sm text-amber-600 dark:text-amber-400">
-                <div className="flex items-start gap-3">
-                  <AlertTriangle className="mt-0.5 size-4 shrink-0" />
-                  <div className="space-y-3">
-                    <p>{t('autoRoutingOverwriteWarning', { count: autoRoutingPreview.existingRuleCount })}</p>
-                    <label className="flex items-start gap-3 text-sm text-amber-50">
-                      <input
-                        type="checkbox"
-                        checked={overwriteRoutingRules}
-                        onChange={(event) => setOverwriteRoutingRules(event.target.checked)}
-                        className="mt-1 h-4 w-4 accent-brand"
-                      />
-                      <span>{t('autoRoutingOverwriteConfirm')}</span>
-                    </label>
-                  </div>
-                </div>
-              </div>
+              <Alert variant="warning" className="mt-4">
+                <AlertTriangle className="size-4" />
+                <AlertDescription className="space-y-3">
+                  <p>{t('autoRoutingOverwriteWarning', { count: autoRoutingPreview.existingRuleCount })}</p>
+                  <label className="flex items-start gap-3 text-sm">
+                    <input
+                      type="checkbox"
+                      checked={overwriteRoutingRules}
+                      onChange={(event) => setOverwriteRoutingRules(event.target.checked)}
+                      className="mt-1 h-4 w-4 accent-brand"
+                    />
+                    <span>{t('autoRoutingOverwriteConfirm')}</span>
+                  </label>
+                </AlertDescription>
+              </Alert>
             ) : null}
           </div>
 
@@ -759,20 +760,17 @@ export function AgentDeploymentWizard({
 
             {preflight ? (
               preflight.ok ? (
-                <div className="mt-4 rounded-md border border-emerald-500/20 bg-emerald-500/10 px-4 py-4 text-sm text-emerald-600 dark:text-emerald-400">
-                  <div className="flex items-start gap-3">
-                    <CheckCircle2 className="mt-0.5 size-4 shrink-0" />
-                    <div className="space-y-1">
-                      <p>{t('deployPreflightReadyBody')}</p>
-                      <p className="text-xs text-emerald-200">{t('deployPreflightMcpOk', { count: preflight.mcp_validation_errors.length })}</p>
-                    </div>
-                  </div>
-                </div>
+                <Alert variant="success" className="mt-4">
+                  <CheckCircle2 className="size-4" />
+                  <AlertDescription className="space-y-1">
+                    <p>{t('deployPreflightReadyBody')}</p>
+                    <p className="text-xs opacity-75">{t('deployPreflightMcpOk', { count: preflight.mcp_validation_errors.length })}</p>
+                  </AlertDescription>
+                </Alert>
               ) : (
-                <div className="mt-4 space-y-3 rounded-md border border-amber-500/20 bg-amber-500/10 px-4 py-4 text-sm text-amber-600 dark:text-amber-400">
-                  <div className="flex items-start gap-3">
-                    <AlertTriangle className="mt-0.5 size-4 shrink-0" />
-                    <div className="space-y-3">
+                <Alert variant="warning" className="mt-4">
+                  <AlertTriangle className="size-4" />
+                  <AlertDescription className="space-y-3">
                       <p>{t('deployPreflightBlockedBody')}</p>
                       <ul className="list-disc space-y-1 pl-4">
                         {preflight.blocking_reasons.map((reason) => (
@@ -781,7 +779,7 @@ export function AgentDeploymentWizard({
                       </ul>
                       {preflight.mcp_validation_errors.length > 0 ? (
                         <div>
-                          <p className="font-medium text-amber-50">{t('deployPreflightMcpErrorsTitle')}</p>
+                          <p className="font-medium">{t('deployPreflightMcpErrorsTitle')}</p>
                           <ul className="mt-2 list-disc space-y-1 pl-4">
                             {preflight.mcp_validation_errors.map((reason) => (
                               <li key={reason}>{reason}</li>
@@ -790,8 +788,8 @@ export function AgentDeploymentWizard({
                         </div>
                       ) : null}
                     </div>
-                  </div>
-                </div>
+                  </AlertDescription>
+                </Alert>
               )
             ) : (
               <div className="mt-4 rounded-md border border-dashed border-border bg-muted/30 px-4 py-4 text-sm text-muted-foreground">
@@ -856,9 +854,9 @@ export function AgentDeploymentWizard({
                 const active = index === step;
                 const complete = index < step;
                 return (
-                  <div key={key} className={`rounded-md border px-4 py-3 transition ${active ? 'border-primary/40 bg-primary/10' : complete ? 'border-emerald-500/20 bg-emerald-500/10' : 'border-border bg-muted/30'}`}>
+                  <div key={key} className={`rounded-md border px-4 py-3 transition ${active ? 'border-primary/40 bg-primary/10' : complete ? 'border-success-border bg-success-tint' : 'border-border bg-muted/30'}`}>
                     <div className="flex items-center gap-3">
-                      <div className={`flex size-9 items-center justify-center rounded-md ${active ? 'bg-primary/20 text-primary' : complete ? 'bg-emerald-500/20 text-emerald-600 dark:text-emerald-400' : 'bg-muted text-muted-foreground'}`}>
+                      <div className={`flex size-9 items-center justify-center rounded-md ${active ? 'bg-primary/20 text-primary' : complete ? 'bg-success-tint text-success' : 'bg-muted text-muted-foreground'}`}>
                         {complete ? <CheckCircle2 className="size-4" /> : <Icon className="size-4" />}
                       </div>
                       <div>
@@ -923,12 +921,10 @@ export function AgentDeploymentWizard({
             <DialogTitle>{t('deployFailedTitle')}</DialogTitle>
             <DialogDescription className="text-muted-foreground">{failureMessage ?? t('deployFailedBody')}</DialogDescription>
           </DialogHeader>
-          <div className="rounded-md border border-amber-500/20 bg-amber-500/10 px-4 py-3 text-sm text-amber-600 dark:text-amber-400">
-            <div className="flex items-start gap-3">
-              <AlertTriangle className="mt-0.5 size-4 shrink-0" />
-              <p>{t('deployFailedHint')}</p>
-            </div>
-          </div>
+          <Alert variant="warning">
+            <AlertTriangle className="size-4" />
+            <AlertDescription>{t('deployFailedHint')}</AlertDescription>
+          </Alert>
           <DialogFooter className="border-t border-border bg-transparent">
             <Button variant="glass" onClick={() => setFailureMessage(null)}>{tc('close')}</Button>
           </DialogFooter>

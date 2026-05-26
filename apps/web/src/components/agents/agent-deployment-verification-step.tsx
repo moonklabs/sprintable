@@ -49,15 +49,11 @@ export function AgentDeploymentVerificationStep({
         <p className="text-sm text-muted-foreground">{t('verifyStepBody')}</p>
       </div>
 
-      <div className={`rounded-2xl px-4 py-4 text-sm ${verificationCompleted ? 'border border-emerald-400/18 bg-emerald-400/10 text-emerald-100' : 'border border-amber-400/16 bg-amber-400/10 text-amber-100'}`}>
-        <div className="flex items-start gap-3">
-          {verificationCompleted ? <CheckCircle2 className="mt-0.5 size-4 shrink-0" /> : <AlertTriangle className="mt-0.5 size-4 shrink-0" />}
-          <div className="space-y-1">
-            <p className="font-medium">{verificationCompleted ? t('verificationCompletedTitle') : t('verificationPendingTitle')}</p>
-            <p>{verificationCompleted ? t('verificationCompletedBody', { name: deploymentName }) : t('verificationPendingBody', { name: deploymentName })}</p>
-          </div>
-        </div>
-      </div>
+      <Alert variant={verificationCompleted ? 'success' : 'warning'}>
+        {verificationCompleted ? <CheckCircle2 className="size-4" /> : <AlertTriangle className="size-4" />}
+        <AlertTitle>{verificationCompleted ? t('verificationCompletedTitle') : t('verificationPendingTitle')}</AlertTitle>
+        <AlertDescription>{verificationCompleted ? t('verificationCompletedBody', { name: deploymentName }) : t('verificationPendingBody', { name: deploymentName })}</AlertDescription>
+      </Alert>
 
       <div className="grid gap-3 md:grid-cols-4">
         <GlassPanel className="border-white/8 bg-muted/35 p-4">

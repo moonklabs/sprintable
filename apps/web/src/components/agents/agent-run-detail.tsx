@@ -2,6 +2,7 @@
 
 import { useEffect, useState } from 'react';
 import { useTranslations } from 'next-intl';
+import { Alert, AlertDescription } from '@/components/ui/alert';
 import { AlertTriangle, ArrowLeft, CheckCircle2, Clock3, Cpu, Hash, RefreshCw, Zap } from 'lucide-react';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
@@ -436,10 +437,10 @@ export function AgentRunDetail({
                       <div key={idx} className="relative flex gap-4 pb-4 pl-9">
                         <div className={`absolute left-2.5 top-1.5 size-3 rounded-full border-2 ${
                           hasError
-                            ? 'border-red-400 bg-red-400/20'
+                            ? 'border-destructive bg-destructive/20'
                             : isLlm
                               ? 'border-brand bg-brand/20'
-                              : 'border-emerald-400 bg-emerald-400/20'
+                              : 'border-success bg-success-tint'
                         }`} />
                         <div className="min-w-0 flex-1 rounded-xl border border-white/8 bg-white/4 px-3 py-2">
                           <div className="flex flex-wrap items-center gap-2">
