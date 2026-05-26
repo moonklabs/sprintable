@@ -86,6 +86,11 @@
   --radius-2xl: calc(var(--radius) * 1.8);
   --radius-3xl: calc(var(--radius) * 2.2);
   --radius-4xl: calc(var(--radius) * 2.6);
+
+  /* GNB hide-on-scroll (D-DOCS-MOB-3) */
+  --gnb-mobile-height: 48px;
+  --gnb-hide-duration: 250ms;
+  --gnb-hide-easing: cubic-bezier(0.4, 0, 0.2, 1);
 }
 
 /* ─── Light Mode (OKLCH zinc) ─── */

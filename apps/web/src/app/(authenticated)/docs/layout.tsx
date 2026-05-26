@@ -1,6 +1,10 @@
 'use client';
 
 import { useCallback, useEffect, useState } from 'react';
+import { cn } from '@/lib/utils';
+import { useTopBar } from '@/components/nav/top-bar-context';
+import { useMediaQuery } from '@/lib/use-media-query';
+import { useHideOnScroll } from '@/lib/use-hide-on-scroll';
 import { useParams, useRouter } from 'next/navigation';
 import { useTranslations } from 'next-intl';
 import { DocTree } from '@/components/docs/doc-tree';
@@ -28,6 +32,15 @@ export default function DocsLayout({ children }: { children: React.ReactNode }) 
   const { recentSlugs, pushRecent } = useRecentDocs(projectId);
   const { expandFolder } = useTreeExpanded(projectId);
   const { toasts, addToast, dismissToast } = useToast();
+
+  const { scrollContainer, setHidden } = useTopBar();
+  const isMobile = useMediaQuery('(max-width: 1023px)');
+  const gnbHidden = useHideOnScroll({ enabled: isMobile, scrollContainer });
+
+  useEffect(() => {
+    setHidden(gnbHidden);
+    return () => setHidden(false);
+  }, [gnbHidden, setHidden]);
 
   const [tree, setTree] = useState<Doc[]>([]);
   const [loading, setLoading] = useState(true);
@@ -272,7 +285,15 @@ export default function DocsLayout({ children }: { children: React.ReactNode }) 
 
       {/* Mobile: content + tree drawer (< lg) */}
       <div className="flex flex-1 flex-col overflow-hidden lg:hidden">
-        <div className="flex-shrink-0 flex items-center gap-2 border-b border-border/80 bg-background px-4 py-2">
+        <div
+          className={cn(
+            'flex-shrink-0 flex items-center gap-2 border-b border-border/80 bg-background px-4 py-2',
+            'sticky top-12 z-20 transition-transform',
+            '[transition-duration:var(--gnb-hide-duration)]',
+            '[transition-timing-function:var(--gnb-hide-easing)]',
+            gnbHidden && '-translate-y-[calc(100%+var(--gnb-mobile-height))]',
+          )}
+        >
           <button type="button" onClick={() => setTreeDrawerOpen(true)} className="flex min-h-[44px] items-center gap-2 text-sm text-muted-foreground hover:text-foreground" aria-label="문서 트리 열기">
             <Menu className="size-4" />
             <span>{t('title')}</span>
