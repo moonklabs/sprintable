@@ -28,7 +28,7 @@ class AgentRun(Base):
         UUID(as_uuid=True), ForeignKey("stories.id", ondelete="SET NULL"), nullable=True
     )
     memo_id: Mapped[uuid.UUID | None] = mapped_column(
-        UUID(as_uuid=True), ForeignKey("memos.id", ondelete="SET NULL"), nullable=True
+        UUID(as_uuid=True), nullable=True
     )
     trigger: Mapped[str] = mapped_column(Text, nullable=False, default="manual")
     model: Mapped[str | None] = mapped_column(Text, nullable=True)
