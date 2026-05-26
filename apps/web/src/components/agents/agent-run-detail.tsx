@@ -462,13 +462,13 @@ export function AgentRunDetail({
                               </span>
                             )}
                             {hasError ? (
-                              <AlertTriangle className="size-3.5 text-red-400" />
+                              <AlertTriangle className="size-3.5 text-destructive" />
                             ) : (
                               <CheckCircle2 className="size-3.5 text-emerald-400/60" />
                             )}
                           </div>
                           {hasError && (
-                            <div className="mt-1 space-y-1 text-xs text-red-300/80">
+                            <div className="mt-1 space-y-1 text-xs text-destructive/80">
                               <p>{display.error}</p>
                               {display.userReason ? <p>{display.userReason}</p> : null}
                               {display.nextAction ? <p>{display.nextAction}</p> : null}
@@ -561,7 +561,7 @@ export function AgentRunDetail({
                           </div>
                         ) : null}
                         {error ? (
-                          <p className="mt-3 text-sm text-red-300/80">{error}</p>
+                          <p className="mt-3 text-sm text-destructive/80">{error}</p>
                         ) : null}
                         {!operatorReason && !userReason && !nextAction && detailSummary ? (
                           <p className="mt-3 text-sm text-muted-foreground">{detailSummary}</p>

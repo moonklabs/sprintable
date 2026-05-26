@@ -446,7 +446,7 @@ export function AgentsDashboard({ deployments: initialDeployments, hideTopBar = 
                           {t('tokenUsageToday', { count: deployment.tokens_today })}
                         </span>
                         {deployment.pending_hitl_count > 0 && (
-                          <span className="inline-flex items-center gap-1 text-amber-200 sm:col-span-2 xl:col-span-4">
+                          <span className="inline-flex items-center gap-1 text-warning sm:col-span-2 xl:col-span-4">
                             <TriangleAlert className="size-3.5" />
                             {t('hitlDeadlineLabel', {
                               countdown: formatHitlCountdown(deployment.next_hitl_deadline_at, t) ?? t('hitlDeadlineUnknown'),
@@ -477,7 +477,7 @@ export function AgentsDashboard({ deployments: initialDeployments, hideTopBar = 
                         </Button>
                       )}
                       <div className="flex items-center gap-2 text-xs text-muted-foreground">
-                        {deployment.status === 'DEPLOY_FAILED' ? <TriangleAlert className="size-4 text-amber-300" /> : <Clock3 className="size-4" />}
+                        {deployment.status === 'DEPLOY_FAILED' ? <TriangleAlert className="size-4 text-warning" /> : <Clock3 className="size-4" />}
                         <span>
                           {deployment.last_run_at
                             ? t('lastRunAt', { time: formatLocalTime(deployment.last_run_at, locale) })

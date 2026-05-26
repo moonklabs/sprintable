@@ -199,7 +199,7 @@ function MockupNodeContent({ component }: { component: MockupComponent }) {
 
   if (type === 'Alert') {
     return (
-      <div className="flex h-full items-center rounded-2xl border border-amber-200 bg-amber-50 px-3 text-xs text-amber-900">
+      <div className="flex h-full items-center rounded-2xl border border-warning-border bg-warning-tint px-3 text-xs text-foreground">
         {text}
       </div>
     );
@@ -960,7 +960,7 @@ export function MockupEditorShell({ mockupId }: MockupEditorShellProps) {
                     </button>
                   )}
                   {!scenario.is_default ? (
-                    <button type="button" className="text-xs text-rose-300 hover:text-rose-200" onClick={() => void deleteScenario(scenario.id)}>✕</button>
+                    <button type="button" className="text-xs text-destructive hover:text-destructive/80" onClick={() => void deleteScenario(scenario.id)}>✕</button>
                   ) : null}
                 </div>
               ))}

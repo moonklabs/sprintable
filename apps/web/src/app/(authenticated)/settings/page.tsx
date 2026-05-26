@@ -1264,9 +1264,9 @@ export default function SettingsPage() {
                       ) : null}
 
                       {newAgentResult ? (
-                        <div className="rounded-md border border-emerald-500/30 bg-emerald-500/5 p-4 space-y-3">
+                        <div className="rounded-md border border-success-border bg-success-tint p-4 space-y-3">
                           <div className="flex items-center justify-between">
-                            <p className="text-sm font-semibold text-emerald-500">
+                            <p className="text-sm font-semibold text-success">
                               {newAgentResult.name} 생성 완료
                             </p>
                             <button type="button" onClick={() => setNewAgentResult(null)} className="text-muted-foreground hover:text-foreground">
@@ -1460,7 +1460,7 @@ export default function SettingsPage() {
                                   </button>
                                   <button
                                     type="button"
-                                    className="rounded border border-rose-400/30 px-2 py-0.5 text-xs text-rose-400 transition-colors hover:border-rose-300/50 hover:text-rose-300 disabled:opacity-50"
+                                    className="rounded border border-destructive-border px-2 py-0.5 text-xs text-destructive transition-colors hover:bg-destructive-tint disabled:opacity-50"
                                     disabled={revokingInviteId === invitation.id}
                                     onClick={() => handleRevokeInvite(invitation.id)}
                                   >
@@ -1470,7 +1470,7 @@ export default function SettingsPage() {
                               ) : null}
                             </div>
                             {resendResult?.id === invitation.id ? (
-                              <p className="mt-1 break-all px-1 text-xs text-amber-200">{t('inviteLinkCopied')}: {resendResult.url}</p>
+                              <p className="mt-1 break-all px-1 text-xs text-warning">{t('inviteLinkCopied')}: {resendResult.url}</p>
                             ) : null}
                           </div>
                         ))}
@@ -1801,7 +1801,7 @@ export default function SettingsPage() {
                   <li>• Project <span className="font-semibold">{orgImpact.project_count}개</span> 영구 삭제</li>
                   <li>• Member <span className="font-semibold">{orgImpact.member_count}명</span> 접근 불가</li>
                   {orgImpact.has_active_subscription && (
-                    <li className="text-amber-400">• 활성 구독이 있습니다 — 삭제 전 구독을 취소해주세요.</li>
+                    <li className="text-warning">• 활성 구독이 있습니다 — 삭제 전 구독을 취소해주세요.</li>
                   )}
                 </ul>
               </div>

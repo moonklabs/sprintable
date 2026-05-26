@@ -140,7 +140,7 @@ export function ProjectAccessSection({ projectId, currentRole }: ProjectAccessSe
                       type="button"
                       disabled={toggling === member.id}
                       onClick={() => void handleToggle(member)}
-                      className={`rounded-md px-2 py-0.5 text-xs font-medium transition-colors ${blocked ? 'bg-emerald-500/10 text-emerald-600 hover:bg-emerald-500/20 dark:text-emerald-400' : 'bg-destructive/10 text-destructive hover:bg-destructive/20'} disabled:opacity-50`}
+                      className={`rounded-md px-2 py-0.5 text-xs font-medium transition-colors ${blocked ? 'bg-success-tint text-success hover:bg-success/20' : 'bg-destructive/10 text-destructive hover:bg-destructive/20'} disabled:opacity-50`}
                     >
                       {toggling === member.id ? '...' : blocked ? '허용' : '차단'}
                     </button>

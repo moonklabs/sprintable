@@ -79,7 +79,7 @@ export function SetPasswordSection() {
       </SectionCardHeader>
       <SectionCardBody className="space-y-4">
         {message && (
-          <p className={`text-sm ${message.type === 'success' ? 'text-emerald-400' : 'text-rose-400'}`}>
+          <p className={`text-sm ${message.type === 'success' ? 'text-success' : 'text-destructive'}`}>
             {message.text}
           </p>
         )}
@@ -111,7 +111,7 @@ export function SetPasswordSection() {
           {showRules && (
             <ul className="space-y-1 text-xs">
               <PasswordRuleItem met={rules.length} label="At least 8 characters" />
-              <li className={`flex items-center gap-1.5 ${categoriesMet >= 3 ? 'text-emerald-500' : 'text-muted-foreground'}`}>
+              <li className={`flex items-center gap-1.5 ${categoriesMet >= 3 ? 'text-success' : 'text-muted-foreground'}`}>
                 <span>{categoriesMet >= 3 ? '✓' : '○'}</span>
                 <span>At least 3 of: uppercase, lowercase, digit, special character ({categoriesMet}/3)</span>
               </li>
@@ -119,7 +119,7 @@ export function SetPasswordSection() {
           )}
 
           {touched && confirm && !isConfirmValid && (
-            <p className="text-xs text-rose-400">Passwords do not match.</p>
+            <p className="text-xs text-destructive">Passwords do not match.</p>
           )}
 
           <button
@@ -137,7 +137,7 @@ export function SetPasswordSection() {
 
 function PasswordRuleItem({ met, label }: { met: boolean; label: string }) {
   return (
-    <li className={`flex items-center gap-1.5 ${met ? 'text-emerald-500' : 'text-muted-foreground'}`}>
+    <li className={`flex items-center gap-1.5 ${met ? 'text-success' : 'text-muted-foreground'}`}>
       <span>{met ? '✓' : '○'}</span>
       <span>{label}</span>
     </li>
