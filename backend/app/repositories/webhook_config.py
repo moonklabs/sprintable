@@ -43,6 +43,7 @@ class WebhookConfigRepository:
         project_id: uuid.UUID | None = None,
         events: list[str] | None = None,
         is_active: bool = True,
+        secret: str | None = None,
     ) -> WebhookConfig:
         existing = await self.session.execute(
             select(WebhookConfig).where(
@@ -60,6 +61,7 @@ class WebhookConfigRepository:
                 project_id=project_id,
                 events=events or [],
                 is_active=is_active,
+                secret=secret or None,
             )
             self.session.add(config)
         else:
@@ -68,6 +70,8 @@ class WebhookConfigRepository:
             if events is not None:
                 config.events = events
             config.is_active = is_active
+            if secret is not None:
+                config.secret = secret or None
 
         await self.session.flush()
         await self.session.refresh(config)
