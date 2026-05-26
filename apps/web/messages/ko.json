@@ -1097,7 +1097,7 @@
     "copyMarkdown": "마크다운 복사",
     "deleteDoc": "삭제",
     "createFailed": "문서 생성에 실패했습니다",
-    "notFound": "문서를 찾을 수 없는"
+    "notFound": "문서를 찾을 수 없습니다"
   },
   "rewards": {
     "title": "리워드",
@@ -2087,7 +2087,7 @@
     "dmSection": "DM",
     "groupSection": "그룹 채팅",
     "newConversation": "새 대화",
-    "noConversations": "대화가 없는",
+    "noConversations": "대화가 없습니다",
     "startNewConversation": "새 대화를 시작해보세요",
     "selectMembers": "대화 상대 선택",
     "groupTitle": "그룹 이름 (선택)",
@@ -2098,7 +2098,7 @@
     "myChatsTab": "내 대화",
     "agentChatsTab": "에이전트 대화",
     "agentSection": "에이전트",
-    "noAgentConversations": "에이전트 대화가 없는",
+    "noAgentConversations": "에이전트 대화가 없습니다",
     "addParticipants": "참여자 추가",
     "addParticipantsTitle": "참여자 추가",
     "participantsOthers": "외 {count}명",
