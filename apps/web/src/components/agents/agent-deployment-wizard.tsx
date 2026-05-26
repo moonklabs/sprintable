@@ -787,7 +787,6 @@ export function AgentDeploymentWizard({
                           </ul>
                         </div>
                       ) : null}
-                    </div>
                   </AlertDescription>
                 </Alert>
               )
