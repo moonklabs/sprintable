@@ -253,10 +253,11 @@ export default function DocsLayout({ children }: { children: React.ReactNode }) 
         actions={<Button size="sm" variant="outline" onClick={handleNewDoc} disabled={isCreating}><Plus className="mr-1.5 h-3.5 w-3.5" />{isCreating ? t('loading') : t('newDoc')}</Button>}
       />
 
-      {/* Desktop: 2-panel (lg+) */}
-      <div className="hidden min-h-0 flex-1 overflow-hidden lg:flex">
+      {/* Unified: children rendered exactly once — sidebar responsive via breakpoint classes */}
+      <div className="flex min-h-0 flex-1 overflow-hidden">
+        {/* Desktop sidebar — hidden on mobile */}
         {!sidebarCollapsed && (
-          <aside className="relative flex w-[300px] flex-shrink-0 flex-col overflow-y-auto border-r border-border/80 bg-background">
+          <aside className="relative hidden w-[300px] flex-shrink-0 flex-col overflow-y-auto border-r border-border/80 bg-background lg:flex">
             <button
               type="button"
               onClick={handleToggleSidebar}
@@ -269,40 +270,35 @@ export default function DocsLayout({ children }: { children: React.ReactNode }) 
           </aside>
         )}
         <section className="relative flex min-w-0 flex-1 flex-col overflow-hidden bg-background">
+          {/* Mobile drawer trigger bar */}
+          <div
+            className={cn(
+              'flex-shrink-0 flex items-center gap-2 border-b border-border/80 bg-background px-4 py-2 lg:hidden',
+              'sticky top-12 z-20 transition-transform',
+              '[transition-duration:var(--gnb-hide-duration)]',
+              '[transition-timing-function:var(--gnb-hide-easing)]',
+              gnbHidden && '-translate-y-[calc(100%+var(--gnb-mobile-height))]',
+            )}
+          >
+            <button type="button" onClick={() => setTreeDrawerOpen(true)} className="flex min-h-[44px] items-center gap-2 text-sm text-muted-foreground hover:text-foreground" aria-label="문서 트리 열기">
+              <Menu className="size-4" />
+              <span>{t('title')}</span>
+            </button>
+          </div>
+          {/* Desktop collapsed sidebar open button */}
           {sidebarCollapsed && (
             <button
               type="button"
               onClick={handleToggleSidebar}
               title={t('openSidebar')}
-              className="absolute left-2 top-2 z-10 rounded p-1 text-muted-foreground transition-colors hover:bg-accent hover:text-foreground"
+              className="absolute left-2 top-2 z-10 hidden rounded p-1 text-muted-foreground transition-colors hover:bg-accent hover:text-foreground lg:block"
             >
               <ChevronRight className="size-4" />
             </button>
           )}
           {children}
         </section>
-      </div>
-
-      {/* Mobile: content + tree drawer (< lg) */}
-      <div className="flex flex-1 flex-col overflow-hidden lg:hidden">
-        <div
-          className={cn(
-            'flex-shrink-0 flex items-center gap-2 border-b border-border/80 bg-background px-4 py-2',
-            'sticky top-12 z-20 transition-transform',
-            '[transition-duration:var(--gnb-hide-duration)]',
-            '[transition-timing-function:var(--gnb-hide-easing)]',
-            gnbHidden && '-translate-y-[calc(100%+var(--gnb-mobile-height))]',
-          )}
-        >
-          <button type="button" onClick={() => setTreeDrawerOpen(true)} className="flex min-h-[44px] items-center gap-2 text-sm text-muted-foreground hover:text-foreground" aria-label="문서 트리 열기">
-            <Menu className="size-4" />
-            <span>{t('title')}</span>
-          </button>
-        </div>
-        <div className="flex min-h-0 flex-1 flex-col overflow-hidden bg-background">
-          {children}
-        </div>
-        {/* Swipe drawer overlay */}
+        {/* Mobile swipe drawer overlay */}
         <div
           className="fixed inset-0 z-40 bg-foreground/40 lg:hidden"
           style={{
@@ -313,7 +309,7 @@ export default function DocsLayout({ children }: { children: React.ReactNode }) 
           onClick={closeDrawer}
           aria-hidden="true"
         />
-        {/* Swipe drawer panel */}
+        {/* Mobile swipe drawer panel */}
         <div
           className="fixed inset-y-0 left-0 z-50 flex w-[280px] flex-col overflow-hidden bg-background shadow-xl lg:hidden"
           style={{
