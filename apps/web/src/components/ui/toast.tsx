@@ -22,8 +22,16 @@ function Toast({ item, onDismiss }: ToastProps) {
   }, [item.id, onDismiss]);
 
   const borderColor = item.isHighlight
-    ? 'border-l-4 border-l-primary'
-    : 'border-l-4 border-l-border';
+    ? 'border-l-4 border-l-brand'
+    : item.type === 'success'
+      ? 'border-l-4 border-l-success'
+      : item.type === 'warning'
+        ? 'border-l-4 border-l-warning'
+        : item.type === 'error'
+          ? 'border-l-4 border-l-destructive'
+          : item.type === 'info'
+            ? 'border-l-4 border-l-info'
+            : 'border-l-4 border-l-border';
 
   return (
     <div className={`animate-slide-in rounded-lg border border-border bg-popover p-4 shadow-lg ${borderColor}`}>
