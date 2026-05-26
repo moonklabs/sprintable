@@ -1,5 +1,5 @@
-import { PageSkeleton } from '@/components/ui/page-skeleton';
+import { DocsListSkeleton } from '@/components/docs/docs-list-skeleton';
 
 export default function Loading() {
-  return <PageSkeleton />;
+  return <DocsListSkeleton />;
 }
