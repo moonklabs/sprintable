@@ -10,9 +10,18 @@ interface TopBarProps {
 }
 
 export function TopBar({ className }: TopBarProps) {
-  const { title, actions } = useTopBar();
+  const { title, actions, hidden } = useTopBar();
   return (
-    <div className={cn('flex h-12 shrink-0 items-center gap-2 border-b px-4', className)}>
+    <div
+      className={cn(
+        'flex h-12 shrink-0 items-center gap-2 border-b px-4',
+        'sticky top-0 z-30 bg-background transition-transform',
+        '[transition-duration:var(--gnb-hide-duration)]',
+        '[transition-timing-function:var(--gnb-hide-easing)]',
+        hidden && '-translate-y-full',
+        className,
+      )}
+    >
       <SidebarTrigger className="mr-2 md:hidden" />
       <div className="flex min-w-0 flex-1 items-center gap-2">
         {title}
