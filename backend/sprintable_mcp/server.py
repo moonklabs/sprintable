@@ -1,4 +1,4 @@
-"""Sprintable MCP 서버 — 88개 도구 등록 (flat schema)."""
+"""Sprintable MCP 서버 — 91개 도구 등록 (flat schema)."""
 from __future__ import annotations
 
 import asyncio
@@ -92,6 +92,10 @@ from .tools.tasks import (
     ListTasksInput, UpdateTaskInput, UpdateTaskStatusInput,
     add_task, delete_task, get_task, list_my_tasks, list_tasks,
     update_task, update_task_status,
+)
+from .tools.webhooks import (
+    DeleteWebhookConfigInput, ListWebhookConfigsInput, UpsertWebhookConfigInput,
+    delete_webhook_config, list_webhook_configs, upsert_webhook_config,
 )
 
 
@@ -431,6 +435,16 @@ _TOOL_DEFS: list[tuple] = [
     ("sprintable_poll_events",
      "에이전트 수신 대기 이벤트 폴링.",
      PollEventsInput, poll_events),
+    # Webhooks (3)
+    ("sprintable_list_webhook_configs",
+     "Webhook config 목록 조회.",
+     ListWebhookConfigsInput, list_webhook_configs),
+    ("sprintable_upsert_webhook_config",
+     "Webhook config 생성/수정. secret 설정 시 HMAC 서명 활성화.",
+     UpsertWebhookConfigInput, upsert_webhook_config),
+    ("sprintable_delete_webhook_config",
+     "Webhook config 삭제.",
+     DeleteWebhookConfigInput, delete_webhook_config),
 ]
 
 for _name, _doc, _cls, _fn in _TOOL_DEFS:

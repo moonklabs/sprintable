@@ -38,6 +38,7 @@ async def upsert_webhook_config(
         project_id=body.project_id,
         events=body.events,
         is_active=body.is_active,
+        secret=body.secret,
     )
     return WebhookConfigResponse.model_validate(config)
 

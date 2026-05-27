@@ -1,5 +1,6 @@
 # Sprintable — self-hosted / local development
-# Usage: cp .env.example .env  &&  docker compose up -d
+# Quick start: make up          (auto-generates .env with random secrets)
+# Manual:      python3 scripts/init-env.py && docker compose up -d
 
 services:
   db:
@@ -58,6 +59,7 @@ services:
       PORT: 3108
       APP_BASE_URL: ${APP_BASE_URL:-http://localhost:3108}
       NEXT_PUBLIC_APP_URL: ${APP_BASE_URL:-http://localhost:3108}
+      NEXT_PUBLIC_FASTAPI_URL: http://backend:8000
       JWT_SECRET: ${JWT_SECRET:-change-me-in-production-min-32-chars}
     ports:
       - "${PORT:-3108}:3108"
