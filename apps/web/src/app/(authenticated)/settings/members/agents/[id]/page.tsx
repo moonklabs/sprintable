@@ -220,7 +220,7 @@ export default function AgentDetailPage() {
   const handleSaveWebhook = async () => {
     const trimmed = webhookUrl.trim();
     if (trimmed && !isWebhookUrlAllowed(trimmed)) {
-      addToast({ type: 'error', title: 'HTTPS URL 또는 로컬 HTTP URL만 허용됩니다' });
+      addToast({ type: 'error', title: t('webhookUrlInvalid') });
       return;
     }
     if (!agent) return;
@@ -293,7 +293,7 @@ export default function AgentDetailPage() {
     if (!newProjectResult) return;
     const trimmed = newProjectResult.webhookUrl.trim();
     if (trimmed && !isWebhookUrlAllowed(trimmed)) {
-      addToast({ type: 'error', title: 'HTTPS URL 또는 로컬 HTTP URL만 허용됩니다' });
+      addToast({ type: 'error', title: t('webhookUrlInvalid') });
       return;
     }
     setNewProjectResult((prev) => prev ? { ...prev, savingWebhook: true } : null);

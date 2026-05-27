@@ -602,6 +602,7 @@
     "tabOrgMembers": "Org Members",
     "tabWebhooks": "Webhooks",
     "tabBilling": "Billing",
+    "webhookUrlInvalid": "Only HTTPS URLs or local HTTP URLs are allowed",
     "tabIntegrations": "Integrations",
     "tabWorkflow": "Workflow",
     "workflowTitle": "Workflow Trigger Types",

@@ -602,6 +602,7 @@
     "tabOrgMembers": "조직 멤버",
     "tabWebhooks": "웹훅",
     "tabBilling": "결제",
+    "webhookUrlInvalid": "HTTPS URL 또는 로컬 HTTP URL만 허용됩니다",
     "tabIntegrations": "연동",
     "tabWorkflow": "워크플로우",
     "workflowTitle": "워크플로우 트리거 타입",

@@ -703,7 +703,7 @@ export default function SettingsPage() {
   const handleSaveWebhookUrl = async (memberId: string) => {
     const url = (webhookEditing[memberId] ?? '').trim();
     if (url && !isWebhookUrlAllowed(url)) {
-      setWebhookErrors((prev) => ({ ...prev, [memberId]: 'HTTPS URL만 허용됩니다 (https://)' }));
+      setWebhookErrors((prev) => ({ ...prev, [memberId]: t('webhookUrlInvalid') }));
       return;
     }
     setWebhookErrors((prev) => ({ ...prev, [memberId]: '' }));
