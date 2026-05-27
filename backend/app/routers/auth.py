@@ -22,7 +22,7 @@ def _normalize_email(v: str) -> str:
         raise ValueError("Invalid email format")
     return v
 from sqlalchemy.exc import IntegrityError
-from sqlalchemy import or_, select, update
+from sqlalchemy import or_, select, text, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.config import settings
@@ -290,6 +290,46 @@ async def _build_app_metadata(user: User, session: AsyncSession) -> dict:
             }
 
     if not member:
+        # Path 4: org_members fallback — team_member 없지만 org에는 등록된 사용자
+        # 해당 org의 첫 project에 team_member 자동 생성 후 반환. 이후 로그인은 Path 1/2로 정상 진입.
+        org_member_result = await session.execute(
+            select(OrgMember)
+            .where(OrgMember.user_id == user.id, OrgMember.deleted_at.is_(None))
+            .order_by(OrgMember.created_at.asc())
+            .limit(1)
+        )
+        org_member = org_member_result.scalar_one_or_none()
+        if org_member:
+            project_result = await session.execute(
+                select(Project)
+                .where(Project.org_id == org_member.org_id, Project.deleted_at.is_(None))
+                .order_by(Project.created_at.asc())
+                .limit(1)
+            )
+            project = project_result.scalar_one_or_none()
+            if project:
+                member_name = (user.email or str(user.id)).split("@")[0]
+                await session.execute(
+                    text(
+                        "INSERT INTO team_members"
+                        " (id, org_id, project_id, user_id, type, name, role, is_active, color, can_manage_members)"
+                        " VALUES (gen_random_uuid(), :org_id, :project_id, :user_id,"
+                        "         'human', :name, :role, true, '#3385f8', false)"
+                    ),
+                    {
+                        "org_id": str(org_member.org_id),
+                        "project_id": str(project.id),
+                        "user_id": str(user.id),
+                        "name": member_name,
+                        "role": org_member.role,
+                    },
+                )
+                await session.flush()
+                return {
+                    "org_id": str(org_member.org_id),
+                    "project_id": str(project.id),
+                    "role": org_member.role,
+                }
         return {}
 
     # login 시 last_project_id 자동 갱신 — 다음 로그인부터 last_project_id 우선 경로 사용
