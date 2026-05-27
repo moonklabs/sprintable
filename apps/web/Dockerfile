@@ -29,6 +29,8 @@ ENV NEXT_TELEMETRY_DISABLED=1
 # rewrites()가 빌드 시점에 routes-manifest.json으로 베이크인되므로 ARG로 주입 필요
 ARG NEXT_PUBLIC_FASTAPI_URL
 ENV NEXT_PUBLIC_FASTAPI_URL=${NEXT_PUBLIC_FASTAPI_URL}
+ARG NEXT_PUBLIC_OAUTH_ENABLED
+ENV NEXT_PUBLIC_OAUTH_ENABLED=${NEXT_PUBLIC_OAUTH_ENABLED}
 RUN pnpm build
 
 # ─── 런타임 ──────────────────────────────────────────────────────────────────

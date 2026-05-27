@@ -28,6 +28,8 @@ steps:
       - ${_AR_REGION}-docker.pkg.dev/${PROJECT_ID}/${_AR_REPO}/frontend:latest-${_DEPLOY_ENV}
       - --build-arg
       - NEXT_PUBLIC_FASTAPI_URL=${_FASTAPI_URL}
+      - --build-arg
+      - NEXT_PUBLIC_OAUTH_ENABLED=true
       - .
     env:
       - DOCKER_BUILDKIT=1
