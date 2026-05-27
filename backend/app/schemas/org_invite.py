@@ -25,3 +25,4 @@ class OrgInviteResponse(BaseModel):
     created_at: datetime
     email_sent_at: datetime | None = None
     email_error: str | None = None
+    invite_url: str | None = None
