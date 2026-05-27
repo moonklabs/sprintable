@@ -1,6 +1,7 @@
 'use client';
 
 import { useEffect, useState } from 'react';
+import { Check, Copy } from 'lucide-react';
 import { Alert, AlertDescription } from '@/components/ui/alert';
 import { Button } from '@/components/ui/button';
 import { SectionCard, SectionCardBody, SectionCardHeader } from '@/components/ui/section-card';
@@ -47,6 +48,7 @@ export function OrgMembersSection({ orgId, currentRole }: OrgMembersSectionProps
   const [actionMessage, setActionMessage] = useState<{ type: 'success' | 'error'; text: string } | null>(null);
   const [resendingId, setResendingId] = useState<string | null>(null);
   const [revokingId, setRevokingId] = useState<string | null>(null);
+  const [copiedInviteId, setCopiedInviteId] = useState<string | null>(null);
 
   const canManage = currentRole === 'owner' || currentRole === 'admin';
   const isOwner = currentRole === 'owner';
@@ -152,6 +154,17 @@ export function OrgMembersSection({ orgId, currentRole }: OrgMembersSectionProps
       </div>
     );
   }
+
+  const handleCopyInviteLink = async (inviteId: string, url: string | undefined) => {
+    if (!url) return;
+    try {
+      await navigator.clipboard.writeText(url);
+      setCopiedInviteId(inviteId);
+      setTimeout(() => setCopiedInviteId(null), 1500);
+    } catch {
+      setActionMessage({ type: 'error', text: '클립보드 복사에 실패했습니다.' });
+    }
+  };
 
   return (
     <div className="space-y-6">
@@ -275,6 +288,20 @@ export function OrgMembersSection({ orgId, currentRole }: OrgMembersSectionProps
                 </div>
                 {canManage && (
                   <div className="flex shrink-0 gap-1">
+                    <Button
+                      size="sm"
+                      variant="glass"
+                      disabled={!invite.invite_url}
+                      onClick={() => void handleCopyInviteLink(invite.id, invite.invite_url)}
+                      title={invite.invite_url ? '초대 링크 복사' : '링크 사용 불가'}
+                      className={copiedInviteId === invite.id ? 'text-success bg-success/12 border-success/30' : ''}
+                    >
+                      {copiedInviteId === invite.id ? (
+                        <><Check className="h-3 w-3 mr-1" />복사됨</>
+                      ) : (
+                        <><Copy className="h-3 w-3 mr-1" />링크 복사</>
+                      )}
+                    </Button>
                     <Button size="sm" variant="glass" disabled={resendingId === invite.id} onClick={() => void handleResendInvite(invite.id)}>
                       {resendingId === invite.id ? '...' : '재발송'}
                     </Button>
