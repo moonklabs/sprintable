@@ -101,6 +101,12 @@ const NOTIFICATION_CATEGORIES = [
 
 type NotificationCategoryKey = typeof NOTIFICATION_CATEGORIES[number]['key'];
 
+function isWebhookUrlAllowed(url: string): boolean {
+  if (!url) return true;
+  if (/^https:\/\//i.test(url)) return true;
+  return /^http:\/\/(localhost|127\.\d+\.\d+\.\d+|192\.168\.\d+\.\d+|10\.\d+\.\d+\.\d+|172\.(1[6-9]|2\d|3[01])\.\d+\.\d+)/i.test(url);
+}
+
 export default function SettingsPage() {
   const t = useTranslations('settings');
   const tc = useTranslations('common');
@@ -696,7 +702,7 @@ export default function SettingsPage() {
 
   const handleSaveWebhookUrl = async (memberId: string) => {
     const url = (webhookEditing[memberId] ?? '').trim();
-    if (url && !/^https:\/\//i.test(url)) {
+    if (url && !isWebhookUrlAllowed(url)) {
       setWebhookErrors((prev) => ({ ...prev, [memberId]: 'HTTPS URL만 허용됩니다 (https://)' }));
       return;
     }
@@ -780,7 +786,7 @@ export default function SettingsPage() {
             {adminChecked ? (
               <TabsTrigger value="members">
                 <Users className="h-4 w-4" />
-                Team Members
+                {t('tabMembers')}
               </TabsTrigger>
             ) : null}
             {adminChecked && isAdmin ? (
@@ -795,11 +801,11 @@ export default function SettingsPage() {
                 <span className="truncate px-2 pb-1 pt-4 text-[10px] font-medium uppercase tracking-wider text-muted-foreground/70">{t('organizationSettings')}</span>
                 <TabsTrigger value="organization">
                   <FolderKanban className="h-4 w-4" />
-                  Organization
+                  {t('tabOrganization')}
                 </TabsTrigger>
                 <TabsTrigger value="org-members">
                   <Users className="h-4 w-4" />
-                  Org Members
+                  {t('tabOrgMembers')}
                 </TabsTrigger>
                 <TabsTrigger value="projects">
                   <FolderKanban className="h-4 w-4" />
@@ -808,7 +814,7 @@ export default function SettingsPage() {
                 {isAdmin ? (
                   <TabsTrigger value="webhooks">
                     <Zap className="h-4 w-4" />
-                    Webhooks
+                    {t('tabWebhooks')}
                   </TabsTrigger>
                 ) : null}
               </>
@@ -817,14 +823,16 @@ export default function SettingsPage() {
             {adminChecked && isAdmin ? (
               <>
                 <span className="truncate px-2 pb-1 pt-4 text-[10px] font-medium uppercase tracking-wider text-muted-foreground/70">{t('billing')}</span>
-                <TabsTrigger value="subscription">
-                  <CreditCard className="h-4 w-4" />
-                  {t('tabSubscription')}
-                </TabsTrigger>
+                {isEEEnabled() && (
+                  <TabsTrigger value="subscription">
+                    <CreditCard className="h-4 w-4" />
+                    {t('tabSubscription')}
+                  </TabsTrigger>
+                )}
                 {isEEEnabled() && (
                   <TabsTrigger value="billing">
                     <CreditCard className="h-4 w-4" />
-                    Billing
+                    {t('tabBilling')}
                   </TabsTrigger>
                 )}
                 <TabsTrigger value="usage">
@@ -961,14 +969,16 @@ export default function SettingsPage() {
                                             <span className={`absolute top-0.5 h-5 w-5 rounded-full bg-white shadow transition ${enabled ? 'left-[22px]' : 'left-0.5'}`} />
                                           </button>
                                         </div>
-                                        {/* webhook - 준비 중 */}
-                                        <div className="flex w-14 justify-center">
-                                          <span className="text-[11px] text-muted-foreground opacity-40">{t('notification_coming_soon')}</span>
-                                        </div>
-                                        {/* email - 준비 중 */}
-                                        <div className="flex w-14 justify-center">
-                                          <span className="text-[11px] text-muted-foreground opacity-40">{t('notification_coming_soon')}</span>
-                                        </div>
+                                        {isEEEnabled() && (
+                                          <div className="flex w-14 justify-center">
+                                            <span className="text-[11px] text-muted-foreground opacity-40">{t('notification_coming_soon')}</span>
+                                          </div>
+                                        )}
+                                        {isEEEnabled() && (
+                                          <div className="flex w-14 justify-center">
+                                            <span className="text-[11px] text-muted-foreground opacity-40">{t('notification_coming_soon')}</span>
+                                          </div>
+                                        )}
                                       </div>
                                     </div>
                                   );
