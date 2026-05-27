@@ -3,7 +3,7 @@
 import { useEffect, useState } from 'react';
 import Link from 'next/link';
 import { useTranslations } from 'next-intl';
-import { Plus } from 'lucide-react';
+import { Plus, X } from 'lucide-react';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { EmptyState } from '@/components/ui/empty-state';
@@ -29,12 +29,14 @@ const PHASE_VARIANTS: Record<string, 'success' | 'info' | 'outline' | 'secondary
 
 export default function RetroPage() {
   const t = useTranslations('retro');
+  const tc = useTranslations('common');
   const shellT = useTranslations('shell');
   const { projectId, orgId } = useDashboardContext();
   const [sessions, setSessions] = useState<RetroSession[]>([]);
   const [loading, setLoading] = useState(true);
   const [title, setTitle] = useState('');
   const [creating, setCreating] = useState(false);
+  const [showCreateForm, setShowCreateForm] = useState(false);
   const [createError, setCreateError] = useState<string | null>(null);
   const [loadError, setLoadError] = useState<string | null>(null);
 
@@ -79,6 +81,7 @@ export default function RetroPage() {
       const json = await res.json();
       setSessions((prev) => [json.data, ...prev]);
       setTitle('');
+      setShowCreateForm(false);
     } catch (err) {
       setCreateError(err instanceof Error ? err.message : 'Failed to create session');
     } finally {
@@ -111,36 +114,39 @@ export default function RetroPage() {
       <TopBarSlot
         title={<h1 className="text-sm font-medium">{t('title')}</h1>}
         actions={
-          <Button size="sm" variant="outline" onClick={() => document.getElementById('retro-title-input')?.focus()}>
-            <Plus className="mr-1.5 h-3.5 w-3.5" />
-            {t('newSession')}
+          <Button size="sm" variant="outline" onClick={() => setShowCreateForm((v) => !v)}>
+            {showCreateForm ? (
+              <><X className="mr-1.5 h-3.5 w-3.5" />{tc('cancel')}</>
+            ) : (
+              <><Plus className="mr-1.5 h-3.5 w-3.5" />{t('newSession')}</>
+            )}
           </Button>
         }
       />
 
       <div className="flex min-h-0 flex-1 flex-col gap-0 overflow-y-auto">
-        {/* Create new session */}
-        <div className="flex-shrink-0 border-b border-border/80 px-6 py-4">
-          <p className="mb-3 text-xs font-medium uppercase tracking-[0.18em] text-muted-foreground">
-            {t('newSession')}
-          </p>
-          <div className="flex gap-2">
-            <Input
-              id="retro-title-input"
-              value={title}
-              onChange={(e) => setTitle(e.target.value)}
-              onKeyDown={(e) => { if (e.key === 'Enter') void handleCreate(); }}
-              placeholder={t('newSessionPlaceholder')}
-              className="flex-1"
-            />
-            <Button variant="default" onClick={handleCreate} disabled={!title.trim() || !orgId || creating}>
-              {creating ? t('creating') : t('create')}
-            </Button>
+        {/* Create new session — toggle via TopBar button */}
+        {showCreateForm && (
+          <div className="flex-shrink-0 border-b border-border/80 px-6 py-4">
+            <div className="flex gap-2">
+              <Input
+                id="retro-title-input"
+                value={title}
+                onChange={(e) => setTitle(e.target.value)}
+                onKeyDown={(e) => { if (e.key === 'Enter') void handleCreate(); }}
+                placeholder={t('newSessionPlaceholder')}
+                className="flex-1"
+                autoFocus
+              />
+              <Button variant="default" onClick={handleCreate} disabled={!title.trim() || !orgId || creating}>
+                {creating ? t('creating') : t('create')}
+              </Button>
+            </div>
+            {createError ? (
+              <p className="mt-2 text-xs text-destructive">{createError}</p>
+            ) : null}
           </div>
-          {createError ? (
-            <p className="mt-2 text-xs text-destructive">{createError}</p>
-          ) : null}
-        </div>
+        )}
 
         {/* Session list */}
         <div className="flex-1 px-6 py-4">
