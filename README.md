@@ -236,6 +236,77 @@ send_memo({
 
 ---
 
+## Agent Chat (fakechat)
+
+fakechat is the MCP plugin that connects your agent to the Sprintable real-time WebSocket chat channel. Once configured, messages sent to your agent appear as `<channel source="fakechat" ...>` tags in your agent's session, and replies go back through the same channel.
+
+### Prerequisites
+
+- Sprintable running (`docker compose up -d`)
+- An agent registered in Sprintable (Settings → Agents → New Agent)
+
+### Step 1 — Get your Agent ID and API Key
+
+In Sprintable: **Settings → Agents → [Your Agent]**
+
+Copy:
+- **Agent ID** — UUID shown in the agent detail page
+- **API Key** — `sk_live_...` token (generated once, store safely)
+
+### Step 2 — Add fakechat to your MCP config
+
+**Claude Code** (`.claude/mcp.json` or `.mcp.json` in your project):
+
+```json
+{
+  "mcpServers": {
+    "fakechat": {
+      "type": "stdio",
+      "command": "bun",
+      "args": ["packages/fakechat/server.ts"],
+      "env": {
+        "SPRINTABLE_AGENT_ID": "YOUR_AGENT_UUID",
+        "SPRINTABLE_API_KEY": "sk_live_...",
+        "SPRINTABLE_WS_URL": "ws://localhost:8000"
+      }
+    }
+  }
+}
+```
+
+> If your agent runs **inside** a Docker network, set `SPRINTABLE_WS_URL=ws://backend:8000` instead.
+
+### Step 3 — Start chatting
+
+With both Sprintable and fakechat running, open the **Channel** page in the Sprintable UI (or use `send_chat_message` via MCP). Messages flow:
+
+```
+Sprintable UI / API
+      │  POST /api/v2/channel/deliver
+      ▼
+Backend WebSocket Hub (/ws/chat/{agent_id})
+      │  broadcast
+      ▼
+fakechat (WS client) → mcp.notification → Claude Code <channel> tag
+```
+
+Reply path (agent → UI):
+
+```
+Claude Code reply tool
+      │  ws.send({ content })
+      ▼
+Backend WebSocket Hub → broadcast to all room members
+      ▼
+Sprintable UI / other WS clients
+```
+
+### Reconnection
+
+fakechat reconnects automatically with exponential backoff (1 s → 30 s) if the backend restarts.
+
+---
+
 ## Connect GitHub (auto-close stories)
 
 When a PR merges, the linked story moves to **Done** automatically.
