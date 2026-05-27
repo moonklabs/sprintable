@@ -284,6 +284,9 @@ export default function AgentDetailPage() {
         return;
       }
       await fetchWebhookConfigs(agent.project_id);
+    } catch {
+      setWebhookActive(!next);
+      addToast({ type: 'error', title: tc('error') });
     } finally {
       setSavingWebhook(false);
     }
