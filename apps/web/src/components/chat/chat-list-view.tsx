@@ -2,9 +2,8 @@
 
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { useRouter } from 'next/navigation';
-import { Bot, MessageSquare, Plus, Users } from 'lucide-react';
+import { Bot, MessageSquare, Users } from 'lucide-react';
 import { useTranslations } from 'next-intl';
-import { Button } from '@/components/ui/button';
 import { EmptyState } from '@/components/ui/empty-state';
 import { Tabs, TabsList, TabsTrigger, TabsContent } from '@/components/ui/tabs';
 import { NewConversationModal } from './new-conversation-modal';
@@ -29,6 +28,8 @@ interface ConversationItem {
 interface ChatListViewProps {
   projectId: string;
   currentTeamMemberId: string;
+  open?: boolean;
+  onOpenChange?: (v: boolean) => void;
 }
 
 function formatTime(iso: string): string {
@@ -149,7 +150,7 @@ function applyConversationMessageUpdate(
 
 const PAGE_LIMIT = 30;
 
-export function ChatListView({ projectId, currentTeamMemberId }: ChatListViewProps) {
+export function ChatListView({ projectId, currentTeamMemberId, open, onOpenChange }: ChatListViewProps) {
   const t = useTranslations('chats');
   const router = useRouter();
   const [conversations, setConversations] = useState<ConversationItem[]>([]);
@@ -161,7 +162,9 @@ export function ChatListView({ projectId, currentTeamMemberId }: ChatListViewPro
   const [myTotal, setMyTotal] = useState(0);
   const [agentOffset, setAgentOffset] = useState(0);
   const [agentTotal, setAgentTotal] = useState(0);
-  const [showModal, setShowModal] = useState(false);
+  const [internalShowModal, setInternalShowModal] = useState(false);
+  const showModal = open !== undefined ? open : internalShowModal;
+  const setShowModal = onOpenChange ?? setInternalShowModal;
 
   const convsRef = useRef(conversations);
   useEffect(() => { convsRef.current = conversations; }, [conversations]);
@@ -302,15 +305,6 @@ export function ChatListView({ projectId, currentTeamMemberId }: ChatListViewPro
 
   return (
     <div className="flex h-full flex-col">
-      {/* Header */}
-      <div className="flex flex-shrink-0 items-center justify-between border-b border-border/80 px-4 py-3">
-        <h2 className="text-sm font-semibold text-foreground">{t('title')}</h2>
-        <Button size="sm" variant="outline" onClick={() => setShowModal(true)}>
-          <Plus className="mr-1.5 h-3.5 w-3.5" />
-          {t('newConversation')}
-        </Button>
-      </div>
-
       {isAdminOrOwner ? (
         <Tabs defaultValue="my" className="flex min-h-0 flex-1 flex-col">
           <TabsList className="mx-4 mt-2 w-auto self-start">
