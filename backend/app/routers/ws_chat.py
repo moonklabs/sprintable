@@ -11,14 +11,14 @@ from collections import defaultdict
 from datetime import datetime, timezone
 
 from fastapi import APIRouter, Query, WebSocket, WebSocketDisconnect
-from sqlalchemy import select
+from sqlalchemy import and_, select
 
 from sqlalchemy.exc import IntegrityError
 
 from app.core.database import async_session_factory
 from app.core.security import JWTError, decode_jwt, hash_token
 from app.models.api_key import ApiKey
-from app.models.conversation import Conversation, ConversationMessage
+from app.models.conversation import Conversation, ConversationMessage, ConversationParticipant
 from app.models.team import TeamMember
 
 logger = logging.getLogger(__name__)
@@ -71,40 +71,49 @@ async def _authenticate(api_key: str | None, token: str | None) -> TeamMember | 
 
 async def _get_or_create_conversation(
     agent_id: uuid.UUID,
+    caller_id: uuid.UUID,
     org_id: uuid.UUID,
     project_id: uuid.UUID,
 ) -> uuid.UUID:
-    """agent_id 기반 ws-chat 전용 conversation 조회 또는 생성. conversation.id 반환."""
-    title = f"ws-chat:{agent_id}"
+    """에이전트↔사용자 쌍의 DM conversation 조회 또는 생성. conversation.id 반환."""
     async with async_session_factory() as db:
+        # 에이전트가 참가한 conversation_id 서브쿼리
+        agent_conv_ids = (
+            select(ConversationParticipant.conversation_id)
+            .where(ConversationParticipant.member_id == agent_id)
+            .scalar_subquery()
+        )
+        # 두 멤버가 모두 참가한 DM conversation 조회
         conv = (await db.execute(
-            select(Conversation).where(
+            select(Conversation)
+            .join(ConversationParticipant, and_(
+                ConversationParticipant.conversation_id == Conversation.id,
+                ConversationParticipant.member_id == caller_id,
+            ))
+            .where(
+                Conversation.id.in_(agent_conv_ids),
+                Conversation.type == "dm",
                 Conversation.org_id == org_id,
-                Conversation.project_id == project_id,
-                Conversation.title == title,
+                Conversation.status != "deleted",
             )
+            .limit(1)
         )).scalar_one_or_none()
+
         if conv is None:
-            try:
-                conv = Conversation(
-                    org_id=org_id,
-                    project_id=project_id,
-                    type="group",
-                    title=title,
-                    created_by=agent_id,
-                )
-                db.add(conv)
-                await db.commit()
-                await db.refresh(conv)
-            except IntegrityError:
-                await db.rollback()
-                conv = (await db.execute(
-                    select(Conversation).where(
-                        Conversation.org_id == org_id,
-                        Conversation.project_id == project_id,
-                        Conversation.title == title,
-                    )
-                )).scalar_one()
+            conv = Conversation(
+                org_id=org_id,
+                project_id=project_id,
+                type="dm",
+                title=None,
+                created_by=agent_id,
+            )
+            db.add(conv)
+            await db.flush()
+            db.add(ConversationParticipant(conversation_id=conv.id, member_id=agent_id))
+            db.add(ConversationParticipant(conversation_id=conv.id, member_id=caller_id))
+            await db.commit()
+            await db.refresh(conv)
+
         return conv.id
 
 
@@ -167,7 +176,7 @@ async def ws_chat_hub(
         return
 
     conv_id = await _get_or_create_conversation(
-        agent_id, agent_member.org_id, agent_member.project_id
+        agent_id, caller.id, agent_member.org_id, agent_member.project_id
     )
 
     try:
