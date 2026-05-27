@@ -2129,7 +2129,11 @@
     "addParticipantsTitle": "참여자 추가",
     "participantsOthers": "외 {count}명",
     "forkInfo": "DM에 참여자를 추가하면 새 그룹 채팅이 생성됩니다. 기존 DM은 유지됩니다.",
-    "adding": "추가 중…"
+    "adding": "추가 중…",
+    "you": "나",
+    "agent": "에이전트",
+    "personCount": "{count}명",
+    "agentCount": "나 + {count}명의 에이전트"
   },
   "activityLog": {
     "title": "활동 로그",
