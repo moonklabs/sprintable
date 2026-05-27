@@ -32,7 +32,7 @@ function WaveformCanvas({ analyser }: { analyser: AnalyserNode | null }) {
       analyser.getByteTimeDomainData(data);
       ctx.clearRect(0, 0, canvas.width, canvas.height);
       ctx.beginPath();
-      ctx.strokeStyle = '#ef4444';
+      ctx.strokeStyle = getComputedStyle(document.documentElement).getPropertyValue('--destructive').trim() || '#ef4444';
       ctx.lineWidth = 2;
       const sliceWidth = canvas.width / data.length;
       let x = 0;
@@ -50,7 +50,7 @@ function WaveformCanvas({ analyser }: { analyser: AnalyserNode | null }) {
     return () => cancelAnimationFrame(rafRef.current);
   }, [analyser]);
 
-  return <canvas ref={canvasRef} width={240} height={48} className="w-full max-w-[240px] rounded bg-gray-900" />;
+  return <canvas ref={canvasRef} width={240} height={48} className="w-full max-w-[240px] rounded bg-foreground/90" />;
 }
 
 // ─── Progress Bar (AC7) ───
@@ -58,13 +58,13 @@ function WaveformCanvas({ analyser }: { analyser: AnalyserNode | null }) {
 function SttProgressBar({ progress, label }: { progress: number; label: string }) {
   return (
     <div className="mt-2">
-      <div className="mb-1 flex items-center justify-between text-xs text-gray-500">
+      <div className="mb-1 flex items-center justify-between text-xs text-muted-foreground">
         <span>{label}</span>
         <span>{progress}%</span>
       </div>
-      <div className="h-2 w-full overflow-hidden rounded-full bg-gray-200">
+      <div className="h-2 w-full overflow-hidden rounded-full bg-muted">
         <div
-          className="h-full rounded-full bg-blue-500 transition-all duration-300"
+          className="h-full rounded-full bg-brand transition-all duration-300"
           style={{ width: `${Math.min(progress, 100)}%` }}
         />
       </div>
@@ -101,12 +101,12 @@ function DropZone({ onFile, t }: { onFile: (file: File) => void; t: (key: string
       onDrop={handleDrop}
       onClick={() => inputRef.current?.click()}
       className={`mt-3 flex cursor-pointer flex-col items-center rounded-lg border-2 border-dashed p-4 text-center transition-colors ${
-        dragging ? 'border-blue-400 bg-blue-50' : 'border-gray-300 hover:border-gray-400'
+        dragging ? 'border-brand/40 bg-brand/5' : 'border-border hover:border-border/70'
       }`}
     >
       <span className="text-2xl">📁</span>
-      <span className="mt-1 text-xs text-gray-500">{t('dropAudioFile')}</span>
-      <span className="text-[10px] text-gray-400">{t('supportedFormats')}</span>
+      <span className="mt-1 text-xs text-muted-foreground">{t('dropAudioFile')}</span>
+      <span className="text-[10px] text-muted-foreground/60">{t('supportedFormats')}</span>
       <input
         ref={inputRef}
         type="file"
@@ -299,18 +299,18 @@ export function AudioRecorder({
     `${String(Math.floor(s / 60)).padStart(2, '0')}:${String(s % 60).padStart(2, '0')}`;
 
   return (
-    <div className="rounded-lg border bg-white p-4">
+    <div className="rounded-lg border bg-background p-4">
       {/* 에러 표시 */}
-      {errorCode && <p className="mb-2 text-xs text-red-500">{t(ERROR_I18N_MAP[errorCode])}</p>}
-      {sttError && <p className="mb-2 text-xs text-yellow-600">{sttError}</p>}
-      {fileError && <p className="mb-2 text-xs text-red-500">{fileError}</p>}
+      {errorCode && <p className="mb-2 text-xs text-destructive">{t(ERROR_I18N_MAP[errorCode])}</p>}
+      {sttError && <p className="mb-2 text-xs text-warning">{sttError}</p>}
+      {fileError && <p className="mb-2 text-xs text-destructive">{fileError}</p>}
 
       {/* 녹음 상태 (AC2 + AC11 모바일 반응형) */}
       <div className="mb-3 flex flex-wrap items-center gap-2 sm:gap-3">
         {isRecording && (
           <>
-            <span className="h-2 w-2 shrink-0 animate-pulse rounded-full bg-red-500" />
-            <span className="shrink-0 font-mono text-sm text-gray-700">{formatDuration(duration)}</span>
+            <span className="h-2 w-2 shrink-0 animate-pulse rounded-full bg-destructive" />
+            <span className="shrink-0 font-mono text-sm text-foreground/80">{formatDuration(duration)}</span>
             <div className="w-full sm:w-auto">
               <WaveformCanvas analyser={analyser} />
             </div>
@@ -323,14 +323,14 @@ export function AudioRecorder({
         {!isRecording ? (
           <button
             onClick={handleStart}
-            className="flex items-center gap-2 rounded-lg bg-red-600 px-4 py-2 text-sm font-medium text-white hover:bg-red-700"
+            className="flex items-center gap-2 rounded-lg bg-destructive px-4 py-2 text-sm font-medium text-background hover:bg-destructive/90"
           >
             🎙 {t('startRecording')}
           </button>
         ) : (
           <button
             onClick={handleStop}
-            className="flex items-center gap-2 rounded-lg bg-gray-700 px-4 py-2 text-sm font-medium text-white hover:bg-gray-800"
+            className="flex items-center gap-2 rounded-lg bg-foreground/80 px-4 py-2 text-sm font-medium text-background hover:bg-foreground/90"
           >
             ⏹ {t('stopRecording')}
           </button>

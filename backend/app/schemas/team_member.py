@@ -37,6 +37,7 @@ class TeamMemberUpdate(BaseModel):
     color: str | None = None
     agent_role: str | None = None
     is_active: bool | None = None
+    can_manage_members: bool | None = None
 
 
 class TeamMemberResponse(BaseModel):

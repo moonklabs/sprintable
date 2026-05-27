@@ -36,6 +36,9 @@ const nextConfig: NextConfig = {
   allowedDevOrigins: process.env['NEXT_DEV_ALLOWED_ORIGINS']?.split(',').map((s) => s.trim()).filter(Boolean) ?? [],
   output: 'standalone',
   outputFileTracingRoot: path.resolve(__dirname, '../..'),
+  outputFileTracingIncludes: {
+    '/docs/design-tokens': ['./src/app/globals.css'],
+  },
   devIndicators: {
     position: 'bottom-right',
   },

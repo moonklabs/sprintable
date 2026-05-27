@@ -45,9 +45,9 @@ describe('attachNotificationHrefs', () => {
 
     expect(notifications).toEqual([
       expect.objectContaining({ id: 'notif-1', href: '/memos?id=memo-1' }),
-      expect.objectContaining({ id: 'notif-2', href: '/docs?slug=ops-guide&commentId=comment-1' }),
+      expect.objectContaining({ id: 'notif-2', href: '/docs/ops-guide?commentId=comment-1' }),
       expect.objectContaining({ id: 'notif-3', href: '/docs' }),
-      expect.objectContaining({ id: 'notif-4', href: '/docs?slug=runbook' }),
+      expect.objectContaining({ id: 'notif-4', href: '/docs/runbook' }),
       expect.objectContaining({ id: 'notif-5', href: null }),
     ]);
   });

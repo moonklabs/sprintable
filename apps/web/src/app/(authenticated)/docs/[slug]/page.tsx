@@ -5,8 +5,9 @@ import { useParams, useRouter } from 'next/navigation';
 import { useTranslations } from 'next-intl';
 import { DocEditor } from '@/components/docs/doc-editor';
 import { useDocSync, type SaveStatus } from '@/components/docs/use-doc-sync';
+import { htmlToMarkdown } from '@/components/docs/lib/content-converter';
 import Link from 'next/link';
-import { Check, Copy, Eye, MoreHorizontal, Trash2 } from 'lucide-react';
+import { AlertTriangle, Check, Copy, Eye, Loader2, MoreHorizontal, RotateCw, Trash2, XCircle } from 'lucide-react';
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -16,6 +17,7 @@ import {
 } from '@/components/ui/dropdown-menu';
 import { useDocsLayout } from '../docs-context';
 import { EntityDispatchPanel } from '@/components/dispatch/entity-dispatch-panel';
+import { DocBreadcrumb } from '@/components/docs/doc-breadcrumb';
 
 interface DocDetail {
   id: string;
@@ -32,27 +34,89 @@ interface DocDetail {
   assignee_id?: string | null;
 }
 
-const SAVE_STATUS_CLASS: Partial<Record<SaveStatus, string>> = {
-  saving: 'text-muted-foreground',
-  saved: 'text-emerald-500/70',
-  unsaved: 'text-amber-500/70',
-  error: 'text-rose-500',
-  conflict: 'text-rose-500',
-  'remote-changed': 'text-amber-500',
-};
+function InlineSaveIndicator({
+  status,
+  onAction,
+  t,
+}: {
+  status: SaveStatus;
+  onAction: () => void;
+  t: ReturnType<typeof useTranslations>;
+}) {
+  const [show, setShow] = useState(false);
+  const [fading, setFading] = useState(false);
 
-function SaveStatusIndicator({ status, t }: { status: SaveStatus; t: ReturnType<typeof useTranslations> }) {
-  const map: Partial<Record<SaveStatus, string>> = {
-    saving: t('statusSaving'),
-    saved: t('statusSaved'),
-    unsaved: t('statusUnsaved'),
-    error: t('statusError'),
-    conflict: t('statusConflict'),
-    'remote-changed': t('statusRemoteChanged'),
-  };
-  const text = map[status] ?? null;
-  if (!text) return null;
-  return <span className={`shrink-0 text-xs ${SAVE_STATUS_CLASS[status] ?? ''}`}>{text}</span>;
+  useEffect(() => {
+    // eslint-disable-next-line react-hooks/set-state-in-effect
+    if (status === 'idle') { setShow(false); setFading(false); return; }
+    // eslint-disable-next-line react-hooks/set-state-in-effect
+    setShow(true);
+    // eslint-disable-next-line react-hooks/set-state-in-effect
+    setFading(false);
+    if (status !== 'saved') return;
+    const t1 = setTimeout(() => setFading(true), 200);
+    const t2 = setTimeout(() => setShow(false), 1600);
+    return () => { clearTimeout(t1); clearTimeout(t2); };
+  }, [status]);
+
+  if (!show) return null;
+
+  if (status === 'saving') {
+    return (
+      <span aria-label={t('statusSaving')} title={t('statusSaving')} className="flex items-center">
+        <Loader2 className="size-3.5 animate-spin text-muted-foreground" />
+      </span>
+    );
+  }
+  if (status === 'saved') {
+    return (
+      <span aria-label={t('statusSaved')} title={t('statusSaved')} className={`flex items-center transition-opacity duration-[1400ms] ${fading ? 'opacity-0' : 'opacity-100'}`}>
+        <span className="size-2 rounded-full bg-success" />
+      </span>
+    );
+  }
+  if (status === 'unsaved') {
+    return (
+      <span aria-label={t('statusUnsaved')} title={t('statusUnsaved')} className="flex items-center">
+        <span className="size-2 rounded-full bg-warning" />
+      </span>
+    );
+  }
+  if (status === 'error') {
+    return (
+      <button type="button" onClick={onAction}
+        aria-label={`${t('statusError')} · ${t('retry')}`}
+        title={`${t('statusError')} · ${t('retry')}`}
+        className="flex max-w-[120px] items-center gap-1 truncate text-xs text-destructive hover:text-destructive/80 md:max-w-none"
+      >
+        <XCircle className="size-3.5 shrink-0" />
+        <span className="truncate">{t('statusError')} · {t('retry')}</span>
+      </button>
+    );
+  }
+  if (status === 'conflict') {
+    return (
+      <button type="button" onClick={onAction}
+        aria-label={t('statusConflict')} title={t('statusConflict')}
+        className="flex max-w-[120px] items-center gap-1 truncate text-xs text-destructive hover:text-destructive/80 md:max-w-none"
+      >
+        <AlertTriangle className="size-3.5 shrink-0" />
+        <span className="truncate">{t('statusConflict')}</span>
+      </button>
+    );
+  }
+  if (status === 'remote-changed') {
+    return (
+      <button type="button" onClick={onAction}
+        aria-label={t('statusRemoteChanged')} title={t('statusRemoteChanged')}
+        className="flex max-w-[120px] items-center gap-1 truncate text-xs text-warning hover:text-warning/80 md:max-w-none"
+      >
+        <RotateCw className="size-3.5 shrink-0" />
+        <span className="truncate">{t('statusRemoteChanged')}</span>
+      </button>
+    );
+  }
+  return null;
 }
 
 export default function DocSlugPage() {
@@ -64,7 +128,7 @@ export default function DocSlugPage() {
   const isNewRef = useRef(typeof window !== 'undefined' && new URLSearchParams(window.location.search).get('new') === '1');
   const isNew = isNewRef.current;
 
-  const { projectId, setTree, pendingDocUpdate, clearPendingDocUpdate } = useDocsLayout();
+  const { projectId, tree, setTree, pendingDocUpdate, clearPendingDocUpdate, expandFolder } = useDocsLayout();
 
   const [selectedDoc, setSelectedDoc] = useState<DocDetail | null>(null);
   const [docLoading, setDocLoading] = useState(true);
@@ -131,14 +195,15 @@ export default function DocSlugPage() {
   }, [pendingDocUpdate, selectedDoc, clearPendingDocUpdate]);
 
   const handleCopyMarkdown = useCallback(async () => {
+    const md = contentFormat === 'markdown' ? content : htmlToMarkdown(content);
     try {
       if (typeof navigator !== 'undefined' && navigator.clipboard?.writeText) {
-        await navigator.clipboard.writeText(content);
+        await navigator.clipboard.writeText(md);
       }
     } catch { /* clipboard unavailable */ }
     setMdCopied(true);
     window.setTimeout(() => setMdCopied(false), 1600);
-  }, [content]);
+  }, [content, contentFormat]);
 
   const handleDelete = useCallback(async () => {
     if (!selectedDoc || !projectId) return;
@@ -172,38 +237,38 @@ export default function DocSlugPage() {
   }
 
   const docActions = (
-    <DropdownMenu>
-      <DropdownMenuTrigger className="inline-flex h-8 w-8 items-center justify-center rounded-md text-muted-foreground transition-colors hover:bg-accent hover:text-accent-foreground">
-        <MoreHorizontal className="h-4 w-4" />
-      </DropdownMenuTrigger>
-      <DropdownMenuContent align="end" className="w-48">
-        {saveStatus !== 'idle' && (
-          <>
-            <div className="flex items-center px-2 py-1.5">
-              <SaveStatusIndicator status={saveStatus} t={t} />
-            </div>
-            <DropdownMenuSeparator />
-          </>
-        )}
-        <DropdownMenuItem onClick={handleCopyMarkdown}>
-          {mdCopied ? <Check className="mr-2 h-4 w-4 text-emerald-500" /> : <Copy className="mr-2 h-4 w-4" />}
-          {t('copyMarkdown')}
-        </DropdownMenuItem>
-        <DropdownMenuItem render={<Link href={`/docs/${slug}/view`} />}>
-          <Eye className="mr-2 h-4 w-4" />
-          {t('preview')}
-        </DropdownMenuItem>
-        {selectedDoc.doc_type !== 'sprint_report' && (
-          <>
-            <DropdownMenuSeparator />
-            <DropdownMenuItem onClick={handleDelete} className="text-destructive focus:text-destructive">
-              <Trash2 className="mr-2 h-4 w-4" />
-              {t('deleteDoc')}
-            </DropdownMenuItem>
-          </>
-        )}
-      </DropdownMenuContent>
-    </DropdownMenu>
+    <>
+      <InlineSaveIndicator status={saveStatus} onAction={save} t={t} />
+      <button
+        type="button"
+        onClick={handleCopyMarkdown}
+        title={t('copyMarkdown')}
+        aria-label={t('copyMarkdown')}
+        className="inline-flex h-8 w-8 items-center justify-center rounded-md text-muted-foreground transition-colors hover:bg-accent hover:text-accent-foreground"
+      >
+        {mdCopied ? <Check className="h-4 w-4 text-success" /> : <Copy className="h-4 w-4" />}
+      </button>
+      <DropdownMenu>
+        <DropdownMenuTrigger className="inline-flex h-8 w-8 items-center justify-center rounded-md text-muted-foreground transition-colors hover:bg-accent hover:text-accent-foreground">
+          <MoreHorizontal className="h-4 w-4" />
+        </DropdownMenuTrigger>
+        <DropdownMenuContent align="end" className="w-48">
+          <DropdownMenuItem render={<Link href={`/docs/${slug}/view`} />}>
+            <Eye className="mr-2 h-4 w-4" />
+            {t('preview')}
+          </DropdownMenuItem>
+          {selectedDoc.doc_type !== 'sprint_report' && (
+            <>
+              <DropdownMenuSeparator />
+              <DropdownMenuItem onClick={handleDelete} className="text-destructive focus:text-destructive">
+                <Trash2 className="mr-2 h-4 w-4" />
+                {t('deleteDoc')}
+              </DropdownMenuItem>
+            </>
+          )}
+        </DropdownMenuContent>
+      </DropdownMenu>
+    </>
   );
 
   return (
@@ -217,6 +282,7 @@ export default function DocSlugPage() {
             projectId={projectId}
             currentAssigneeId={selectedDoc.assignee_id}
             onAssigneePatched={(aid) => setSelectedDoc((prev) => prev ? { ...prev, assignee_id: aid } : prev)}
+            mobileMode="assignee-only"
           />
         </div>
       )}
@@ -239,6 +305,16 @@ export default function DocSlugPage() {
           onTitleChange={handleTitleChange}
           titlePlaceholder={t('titlePlaceholder')}
           titleAutoFocus={isNew || !title}
+          breadcrumb={
+            tree.length > 0 && selectedDoc ? (
+              <DocBreadcrumb
+                currentDocId={selectedDoc.id}
+                tree={tree}
+                onExpandFolder={expandFolder}
+                ariaLabel={t('breadcrumbAriaLabel')}
+              />
+            ) : null
+          }
           actions={docActions}
           labels={{
             contentFormat: t('contentFormat'),
@@ -256,6 +332,8 @@ export default function DocSlugPage() {
             code: t('toolbarCode'),
             link: t('toolbarLink'),
             autosave: t('autosave'),
+            undo: t('toolbarUndo'),
+            redo: t('toolbarRedo'),
           }}
         />
       </div>

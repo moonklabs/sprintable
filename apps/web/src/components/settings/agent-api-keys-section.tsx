@@ -352,7 +352,7 @@ export function AgentApiKeysSection({ projectId }: { projectId: string }) {
                     </Button>
                   </div>
                   {webhookErrors[agent.id] ? (
-                    <p className="text-xs text-red-600">{webhookErrors[agent.id]}</p>
+                    <p className="text-xs text-destructive">{webhookErrors[agent.id]}</p>
                   ) : null}
                 </div>
               </div>

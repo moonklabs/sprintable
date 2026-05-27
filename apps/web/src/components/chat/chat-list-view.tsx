@@ -91,7 +91,7 @@ function ConversationRow({
       {/* Avatar */}
       <div className={`flex h-9 w-9 flex-shrink-0 items-center justify-center rounded-full text-sm font-medium ${
         isAgentConv
-          ? 'bg-amber-100 text-amber-700 dark:bg-amber-900/40 dark:text-amber-300'
+          ? 'bg-warning-tint text-warning'
           : conv.type === 'dm'
             ? 'bg-primary/15 text-primary'
             : 'bg-violet-100 text-violet-700 dark:bg-violet-900/40 dark:text-violet-300'

@@ -3,9 +3,11 @@
 import Link from 'next/link';
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { useLocale, useTranslations } from 'next-intl';
-import { Bot, Clock3, History, Pause, Play, RefreshCw, Rocket, TriangleAlert, Zap } from 'lucide-react';
+import { Bot, Clock3, History, Pause, Play, RefreshCw, Rocket, TriangleAlert, User, Zap } from 'lucide-react';
 import { Badge } from '@/components/ui/badge';
 import { Button, buttonVariants } from '@/components/ui/button';
+import { Switch } from '@/components/ui/switch';
+import { Label } from '@/components/ui/label';
 import { TopBarSlot } from '@/components/nav/top-bar-slot';
 import { ToastContainer, useToast } from '@/components/ui/toast';
 import {
@@ -16,6 +18,11 @@ import {
   DialogHeader,
   DialogTitle,
 } from '@/components/ui/dialog';
+import {
+  Tooltip,
+  TooltipContent,
+  TooltipTrigger,
+} from '@/components/ui/tooltip';
 import { getDeploymentHealthState, getDeploymentRecoveryCueKeys, hasActiveFailureSignal } from '@/services/agent-deployment-console';
 import { getTriggerMemoHref } from '@/services/agent-run-history';
 
@@ -45,6 +52,17 @@ export interface AgentDeploymentCard {
     next_retry_at: string | null;
     can_manual_retry: boolean;
   } | null;
+  agent_id?: string;
+}
+
+interface TeamMemberInfo {
+  id: string;
+  name: string;
+  type: 'human' | 'agent';
+  role: string;
+  user_id: string | null;
+  can_manage_members: boolean;
+  created_by: string | null;
 }
 
 type TransitionAction = { deploymentId: string; name: string; targetStatus: 'ACTIVE' | 'SUSPENDED' };
@@ -120,7 +138,13 @@ function getFailureHeadline(failure: AgentDeploymentCard['latest_failed_run']) {
 
 const AUTO_REFRESH_INTERVAL = 30_000;
 
-export function AgentsDashboard({ deployments: initialDeployments, hideTopBar = false }: { deployments: AgentDeploymentCard[]; hideTopBar?: boolean }) {
+interface AgentsDashboardProps {
+  deployments: AgentDeploymentCard[];
+  hideTopBar?: boolean;
+  canManageMembers?: boolean;
+}
+
+export function AgentsDashboard({ deployments: initialDeployments, hideTopBar = false, canManageMembers = false }: AgentsDashboardProps) {
   const locale = useLocale();
   const t = useTranslations('agents');
   const tr = useTranslations('agentRuns');
@@ -133,9 +157,31 @@ export function AgentsDashboard({ deployments: initialDeployments, hideTopBar = 
   const [pendingAction, setPendingAction] = useState<TransitionAction | null>(null);
   const [transitioning, setTransitioning] = useState(false);
   const intervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
+  const [teamMembersMap, setTeamMembersMap] = useState<Map<string, TeamMemberInfo>>(new Map());
+  const [userIdToMemberMap, setUserIdToMemberMap] = useState<Map<string, TeamMemberInfo>>(new Map());
 
   useEffect(() => {
     setLastRefreshed(new Date());
+  }, []);
+
+  useEffect(() => {
+    async function loadTeamMembers() {
+      try {
+        const res = await fetch('/api/team-members');
+        if (!res.ok) return;
+        const json = await res.json() as { data: TeamMemberInfo[] | null };
+        const members = json.data ?? [];
+        const byId = new Map(members.map((m) => [m.id, m]));
+        const byUserId = new Map(
+          members.filter((m) => m.user_id).map((m) => [m.user_id as string, m]),
+        );
+        setTeamMembersMap(byId);
+        setUserIdToMemberMap(byUserId);
+      } catch {
+        // silently skip
+      }
+    }
+    void loadTeamMembers();
   }, []);
 
   // Show deploy success toast from sessionStorage (S462 compat)
@@ -229,6 +275,41 @@ export function AgentsDashboard({ deployments: initialDeployments, hideTopBar = 
     }
   };
 
+  const handleToggleCanManage = async (deploymentId: string, newValue: boolean) => {
+    const target = deployments.find((d) => d.id === deploymentId);
+    const agentMember = target?.agent_id ? teamMembersMap.get(target.agent_id) : null;
+    if (!agentMember) return;
+    setTeamMembersMap((prev) => {
+      const next = new Map(prev);
+      next.set(agentMember.id, { ...agentMember, can_manage_members: newValue });
+      return next;
+    });
+    try {
+      const res = await fetch(`/api/team-members/${agentMember.id}`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ can_manage_members: newValue }),
+      });
+      if (!res.ok) {
+        setTeamMembersMap((prev) => {
+          const next = new Map(prev);
+          next.set(agentMember.id, { ...agentMember, can_manage_members: !newValue });
+          return next;
+        });
+        addToast({ title: t('toggleFailedTitle'), body: t('toggleFailedBody'), type: 'warning' });
+      } else {
+        addToast({ title: t('toggleSuccessTitle'), type: 'success' });
+      }
+    } catch {
+      setTeamMembersMap((prev) => {
+        const next = new Map(prev);
+        next.set(agentMember.id, { ...agentMember, can_manage_members: !newValue });
+        return next;
+      });
+      addToast({ title: t('toggleFailedTitle'), body: t('toggleFailedBody'), type: 'warning' });
+    }
+  };
+
   const isSuspendAction = pendingAction?.targetStatus === 'SUSPENDED';
 
   return (
@@ -237,10 +318,12 @@ export function AgentsDashboard({ deployments: initialDeployments, hideTopBar = 
         <TopBarSlot
             title={<h1 className="text-sm font-medium">{t('statusTitle')}</h1>}
             actions={
-              <Link href="/agents/deploy" className={buttonVariants({ variant: 'outline', size: 'sm' })}>
-                <Rocket className="mr-1.5 size-3.5" />
-                {t('openWizard')}
-              </Link>
+              canManageMembers ? (
+                <Link href="/agents/deploy" className={buttonVariants({ variant: 'outline', size: 'sm' })}>
+                  <Rocket className="mr-1.5 size-3.5" />
+                  {t('openWizard')}
+                </Link>
+              ) : null
             }
           />
       )}
@@ -273,10 +356,12 @@ export function AgentsDashboard({ deployments: initialDeployments, hideTopBar = 
                   <Bot className="mx-auto size-10 text-primary" />
                   <h3 className="mt-4 text-lg font-semibold text-foreground">{t('emptyDeploymentsTitle')}</h3>
                   <p className="mt-2 text-sm text-muted-foreground">{t('emptyDeploymentsBody')}</p>
-                  <div className="mt-6 flex flex-wrap justify-center gap-2">
-                    <Link href="/agents/workflow" className={buttonVariants({ variant: 'glass', size: 'lg' })}>{t('workflowEditorCta')}</Link>
-                    <Link href="/agents/deploy" className={buttonVariants({ variant: 'hero', size: 'lg' })}>{t('openWizard')}</Link>
-                  </div>
+                  {canManageMembers && (
+                    <div className="mt-6 flex flex-wrap justify-center gap-2">
+                      <Link href="/agents/workflow" className={buttonVariants({ variant: 'glass', size: 'lg' })}>{t('workflowEditorCta')}</Link>
+                      <Link href="/agents/deploy" className={buttonVariants({ variant: 'hero', size: 'lg' })}>{t('openWizard')}</Link>
+                    </div>
+                  )}
                 </div>
                 <div className="grid gap-3 md:grid-cols-3">
                   {([
@@ -297,6 +382,12 @@ export function AgentsDashboard({ deployments: initialDeployments, hideTopBar = 
               const recoveryCues = getDeploymentRecoveryCueKeys(deployment);
               const latestFailure = hasActiveFailureSignal(deployment) ? deployment.latest_failed_run : null;
 
+              const agentMember = deployment.agent_id ? teamMembersMap.get(deployment.agent_id) : null;
+              const creatorMember = agentMember?.created_by ? userIdToMemberMap.get(agentMember.created_by) : null;
+              const isAutoOnboarded = creatorMember?.type === 'agent';
+              const creatorName = creatorMember?.name ?? null;
+              const canManageToggle = agentMember?.can_manage_members ?? false;
+
               return (
                 <div key={deployment.id} className="rounded-md border border-border bg-muted/30 px-4 py-4">
                   <div className="flex flex-col gap-3 lg:flex-row lg:items-start lg:justify-between">
@@ -315,12 +406,34 @@ export function AgentsDashboard({ deployments: initialDeployments, hideTopBar = 
                             {t('hitlPendingBadge', { count: deployment.pending_hitl_count })}
                           </Badge>
                         )}
+                        {isAutoOnboarded && (
+                          <Tooltip>
+                            <TooltipTrigger>
+                              <Badge variant="secondary" className="px-1.5 py-0 text-[10px] font-medium leading-4">
+                                {t('autoBadge')}
+                              </Badge>
+                            </TooltipTrigger>
+                            <TooltipContent>
+                              {t('autoTooltip', { name: creatorName ?? '' })}
+                            </TooltipContent>
+                          </Tooltip>
+                        )}
                       </div>
                       <p className="text-sm text-muted-foreground">
                         {deployment.persona_name
                           ? t('statusPersonaLine', { agent: deployment.agent_name, persona: deployment.persona_name })
                           : t('statusAgentLine', { agent: deployment.agent_name })}
                       </p>
+                      {agentMember && (
+                        <div className="flex items-center gap-1.5 text-xs text-muted-foreground">
+                          {creatorMember?.type === 'agent' ? (
+                            <Bot className="size-3.5" aria-hidden="true" />
+                          ) : (
+                            <User className="size-3.5" aria-hidden="true" />
+                          )}
+                          <span>{t('createdBy', { name: creatorName ?? t('createdByUnknown') })}</span>
+                        </div>
+                      )}
                       <div className="grid gap-2 text-xs text-muted-foreground sm:grid-cols-2 xl:grid-cols-4">
                         <span>{t('statusRuntime', { runtime: deployment.runtime })}</span>
                         <span>{t('statusModel', { model: deployment.model ?? t('statusModelUnknown') })}</span>
@@ -333,7 +446,7 @@ export function AgentsDashboard({ deployments: initialDeployments, hideTopBar = 
                           {t('tokenUsageToday', { count: deployment.tokens_today })}
                         </span>
                         {deployment.pending_hitl_count > 0 && (
-                          <span className="inline-flex items-center gap-1 text-amber-200 sm:col-span-2 xl:col-span-4">
+                          <span className="inline-flex items-center gap-1 text-warning sm:col-span-2 xl:col-span-4">
                             <TriangleAlert className="size-3.5" />
                             {t('hitlDeadlineLabel', {
                               countdown: formatHitlCountdown(deployment.next_hitl_deadline_at, t) ?? t('hitlDeadlineUnknown'),
@@ -364,7 +477,7 @@ export function AgentsDashboard({ deployments: initialDeployments, hideTopBar = 
                         </Button>
                       )}
                       <div className="flex items-center gap-2 text-xs text-muted-foreground">
-                        {deployment.status === 'DEPLOY_FAILED' ? <TriangleAlert className="size-4 text-amber-300" /> : <Clock3 className="size-4" />}
+                        {deployment.status === 'DEPLOY_FAILED' ? <TriangleAlert className="size-4 text-warning" /> : <Clock3 className="size-4" />}
                         <span>
                           {deployment.last_run_at
                             ? t('lastRunAt', { time: formatLocalTime(deployment.last_run_at, locale) })
@@ -374,6 +487,23 @@ export function AgentsDashboard({ deployments: initialDeployments, hideTopBar = 
                       <span className="text-[11px] text-muted-foreground">
                         {t('statusUpdatedAt', { time: formatLocalTime(deployment.updated_at, locale) })}
                       </span>
+                      {agentMember && (
+                        <div className="flex items-center gap-2 rounded-md border border-border/40 bg-background/60 px-2.5 py-1.5">
+                          <Switch
+                            id={`can-manage-${deployment.id}`}
+                            checked={canManageToggle}
+                            onCheckedChange={(v) => void handleToggleCanManage(deployment.id, v)}
+                            disabled={!canManageMembers}
+                            className="data-[state=checked]:bg-primary"
+                          />
+                          <Label
+                            htmlFor={`can-manage-${deployment.id}`}
+                            className="cursor-pointer text-xs text-muted-foreground"
+                          >
+                            {t('canManageMembersLabel')}
+                          </Label>
+                        </div>
+                      )}
                     </div>
                   </div>
 

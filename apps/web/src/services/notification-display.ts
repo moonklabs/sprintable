@@ -13,6 +13,7 @@ export const NOTIFICATION_TYPE_ICONS: Record<string, string> = {
   standup_reminder: '🧍',
   story_assigned: '📌',
   invitation: '✉️',
+  agent_joined: '🤖',
 };
 
 export const INBOX_FILTER_TYPES = ['', ...NOTIFICATION_TYPES] as const;
@@ -46,6 +47,8 @@ export function getInboxNotificationLabel(
       return t('filter_story_assigned');
     case 'invitation':
       return t('filter_invitation');
+    case 'agent_joined':
+      return t('filter_agent_joined');
     default:
       return type;
   }

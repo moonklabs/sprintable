@@ -53,7 +53,7 @@ export default function MfaPage() {
             onKeyDown={(e) => e.key === 'Enter' && handleVerify()}
             autoFocus
           />
-          {error && <p className="text-sm text-red-600">{error}</p>}
+          {error && <p className="text-sm text-destructive">{error}</p>}
           <button
             onClick={handleVerify}
             disabled={loading || code.length !== 6}

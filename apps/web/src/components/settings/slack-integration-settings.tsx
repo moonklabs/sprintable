@@ -4,6 +4,7 @@ import { useEffect, useMemo, useState } from 'react';
 import { useTranslations } from 'next-intl';
 import { AlertTriangle, CheckCircle2, Loader2, MessageSquareShare, RefreshCcw, Search } from 'lucide-react';
 import { useDashboardContext } from '@/app/dashboard/dashboard-shell';
+import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import {
@@ -309,15 +310,11 @@ export function SlackIntegrationSettingsSection() {
           </div>
 
           {data.status === 'channel_fetch_error' ? (
-            <div className="rounded-2xl border border-amber-400/20 bg-amber-400/10 px-4 py-3 text-sm text-amber-100">
-              <div className="flex items-start gap-3">
-                <AlertTriangle className="mt-0.5 size-4 shrink-0" />
-                <div className="space-y-1">
-                  <p className="font-medium">{t('fetchErrorTitle')}</p>
-                  <p className="text-amber-100/80">{data.error?.message ?? t('fetchErrorBody')}</p>
-                </div>
-              </div>
-            </div>
+            <Alert variant="warning">
+              <AlertTriangle className="size-4" />
+              <AlertTitle>{t('fetchErrorTitle')}</AlertTitle>
+              <AlertDescription>{data.error?.message ?? t('fetchErrorBody')}</AlertDescription>
+            </Alert>
           ) : null}
 
           <div className="flex flex-col gap-3 md:flex-row md:items-center md:justify-between">
@@ -432,9 +429,9 @@ export function SlackIntegrationSettingsSection() {
                           </div>
                         ) : null}
                         {isDirty ? (
-                          <div className="xl:col-span-2 rounded-2xl border border-amber-400/16 bg-amber-400/10 px-3 py-3 text-sm text-amber-100">
-                            {t('pendingHint', { project: selectedProjectName ?? t('unknownProject') })}
-                          </div>
+                          <Alert variant="warning" className="xl:col-span-2">
+                            <AlertDescription>{t('pendingHint', { project: selectedProjectName ?? t('unknownProject') })}</AlertDescription>
+                          </Alert>
                         ) : null}
                       </div>
                     </div>
@@ -471,12 +468,10 @@ export function SlackIntegrationSettingsSection() {
               {remapConflict ? t('remapDialogBody', { channel: `#${remapConflict.channelName}`, project: remapConflict.existingProjectName }) : ''}
             </DialogDescription>
           </DialogHeader>
-          <div className="rounded-2xl border border-amber-400/16 bg-amber-400/10 px-4 py-3 text-sm text-amber-100">
-            <div className="flex items-start gap-3">
-              <AlertTriangle className="mt-0.5 size-4 shrink-0" />
-              <p>{t('remapDialogWarning')}</p>
-            </div>
-          </div>
+          <Alert variant="warning">
+            <AlertTriangle className="size-4" />
+            <AlertDescription>{t('remapDialogWarning')}</AlertDescription>
+          </Alert>
           <DialogFooter className="border-t border-white/8 bg-transparent">
             <Button variant="glass" onClick={() => setRemapConflict(null)}>{tc('cancel')}</Button>
             <Button variant="hero" onClick={() => void handleConfirmRemap()} disabled={saving}>

@@ -57,7 +57,7 @@ export function AiSummarizeButton({ meetingId, hasTranscript, guardedFetch, onRe
 
       {/* AC6: 에러 표시 (AC9: i18n) */}
       {error && (
-        <p className="text-xs text-red-500">
+        <p className="text-xs text-destructive">
           {error.includes('NO_API_KEY') ? t('aiKeyRequired')
             : error.includes('NO_TRANSCRIPT') ? t('transcriptRequired')
             : error.includes('Monthly') || error.includes('monthly') ? t('aiMonthlyLimit')

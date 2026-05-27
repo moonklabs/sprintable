@@ -322,7 +322,7 @@ export function AppSidebar({
       </SidebarFooter>
 
       <SidebarRail />
-      <CommandPalette open={paletteOpen} onOpenChange={setPaletteOpen} />
+      <CommandPalette open={paletteOpen} onOpenChange={setPaletteOpen} projectId={projectId} />
     </Sidebar>
   );
 }

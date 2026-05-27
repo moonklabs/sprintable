@@ -63,10 +63,10 @@ export default function RetroSessionPage() {
     try {
       const res = await fetch(`/api/retro-sessions/${sessionId}?project_id=${projectId}`);
       if (!res.ok) throw new Error(`HTTP ${res.status}`);
-      const json = await res.json() as { data: { session: RetroSessionRecord; items: RetroItemRecord[]; actions: RetroActionRecord[] } };
-      setSession(json.data.session);
-      setItems(json.data.items);
-      setActions(json.data.actions);
+      const json = await res.json() as { data: RetroSessionRecord & { items?: RetroItemRecord[]; actions?: RetroActionRecord[] } };
+      setSession(json.data);
+      setItems(json.data.items ?? []);
+      setActions(json.data.actions ?? []);
     } catch {
       setLoadError(t('loadFailed'));
     } finally {

@@ -16,7 +16,7 @@ import TableRow from '@tiptap/extension-table-row';
 import TableCell from '@tiptap/extension-table-cell';
 import TableHeader from '@tiptap/extension-table-header';
 import Placeholder from '@tiptap/extension-placeholder';
-import { Bold, Italic, Strikethrough, Code, Link2, Highlighter } from 'lucide-react';
+import { Bold, Italic, Strikethrough, Code, Link2, Highlighter, Undo2, Redo2 } from 'lucide-react';
 import { CalloutNode } from './extensions/callout-node';
 import { SlashCommandExtension } from './extensions/slash-command';
 import { PageEmbedExtension } from './extensions/page-embed-node';
@@ -30,6 +30,7 @@ import { WikiLinkNode, createWikiLinkSuggestion } from './extensions/wiki-link';
 import { DocToc } from './doc-toc';
 import { type DocHeading, slugifyHeading } from './doc-heading-utils';
 import { markdownToHtml, htmlToMarkdown } from './lib/content-converter';
+import { MobileSelectionMenu, isMobileDevice } from './mobile-selection-menu';
 
 type ContentFormat = 'markdown' | 'html';
 type ViewMode = 'preview' | 'markdown';
@@ -51,6 +52,7 @@ export function DocEditor({
   onTitleChange,
   titlePlaceholder,
   titleAutoFocus,
+  breadcrumb,
   actions,
   labels,
 }: {
@@ -71,6 +73,7 @@ export function DocEditor({
   onTitleChange?: (value: string) => void;
   titlePlaceholder?: string;
   titleAutoFocus?: boolean;
+  breadcrumb?: React.ReactNode;
   actions?: React.ReactNode;
   labels: {
     contentFormat: string;
@@ -88,11 +91,14 @@ export function DocEditor({
     code: string;
     link: string;
     autosave: string;
+    undo: string;
+    redo: string;
   };
 }) {
   const suppressUpdateRef = useRef(false);
   const [viewMode, setViewMode] = useState<ViewMode>('preview');
   const [tocHeadings, setTocHeadings] = useState<DocHeading[]>([]);
+  const [isFocused, setIsFocused] = useState(false);
   const editorContentRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
@@ -120,7 +126,11 @@ export function DocEditor({
       TableRow,
       TableCell,
       TableHeader,
-      Placeholder.configure({ placeholder: labels.placeholder }),
+      Placeholder.configure({
+        placeholder: labels.placeholder,
+        showOnlyCurrent: false,
+        includeChildren: true,
+      }),
       CalloutNode,
       ToggleBlock,
       ToggleSummary,
@@ -150,6 +160,8 @@ export function DocEditor({
         onChange(html);
       }
     },
+    onFocus: () => setIsFocused(true),
+    onBlur: () => setIsFocused(false),
   });
 
   useEffect(() => {
@@ -264,10 +276,16 @@ export function DocEditor({
   }, [title, autoResizeTitle]);
 
   return (
-    <div className="flex h-full flex-col overflow-hidden rounded-2xl border border-border/60 bg-background">
+    <div className="flex h-full flex-col overflow-hidden rounded-2xl border border-border/60 bg-background max-md:h-[100dvh]">
+      {/* Breadcrumb (위치: title 위) */}
+      {breadcrumb && (
+        <div className="flex-shrink-0 px-6 pt-4">
+          {breadcrumb}
+        </div>
+      )}
       {/* Inline title (Notion style) */}
       {title !== undefined && (
-        <div className="flex flex-shrink-0 items-start justify-between gap-2 px-6 pb-2 pt-8">
+        <div className={`flex flex-shrink-0 items-start justify-between gap-2 px-6 pb-2 ${breadcrumb ? 'pt-4' : 'pt-8'}`}>
           <textarea
             ref={titleRef}
             value={title}
@@ -278,7 +296,7 @@ export function DocEditor({
             placeholder={titlePlaceholder ?? 'Untitled'}
             autoFocus={titleAutoFocus}
             rows={1}
-            className="w-full resize-none overflow-hidden bg-transparent text-4xl font-bold leading-tight outline-none placeholder:text-muted-foreground/40"
+            className="w-full resize-none overflow-hidden bg-transparent text-4xl max-md:text-2xl font-bold leading-tight outline-none placeholder:text-muted-foreground/40"
           />
           {actions && (
             <div className="flex flex-shrink-0 items-center gap-1 pt-1">
@@ -308,9 +326,26 @@ export function DocEditor({
           ))}
         </div>
 
-        {/* Toolbar — only in preview mode */}
+        {/* Toolbar — only in preview mode, desktop only (mobile uses sticky bottom toolbar) */}
         {viewMode === 'preview' && editor ? (
-          <div className="flex flex-wrap items-center gap-1.5">
+          <div className="hidden md:flex flex-wrap items-center gap-1.5">
+            <ToolbarButton
+              active={false}
+              disabled={!editor.can().undo()}
+              ariaLabel={labels.undo}
+              onClick={() => editor.chain().focus().undo().run()}
+            >
+              <Undo2 className="size-3.5" />
+            </ToolbarButton>
+            <ToolbarButton
+              active={false}
+              disabled={!editor.can().redo()}
+              ariaLabel={labels.redo}
+              onClick={() => editor.chain().focus().redo().run()}
+            >
+              <Redo2 className="size-3.5" />
+            </ToolbarButton>
+            <Sep />
             <ToolbarButton
               active={editor.isActive('heading', { level: 1 })}
               onClick={() => editor.chain().focus().toggleHeading({ level: 1 }).run()}
@@ -373,8 +408,10 @@ export function DocEditor({
 
       {/* Floating bubble toolbar — visible on text selection in preview mode */}
       {editor && editable && viewMode === 'preview' && (
+        <>
         <BubbleMenu
           editor={editor}
+          shouldShow={() => !isMobileDevice()}
           className="flex items-center gap-0.5 rounded-lg border border-border/60 bg-background p-1 shadow-lg"
         >
           <BubbleButton
@@ -428,6 +465,8 @@ export function DocEditor({
             <Highlighter className="size-3.5" />
           </BubbleButton>
         </BubbleMenu>
+        <MobileSelectionMenu editor={editor} />
+        </>
       )}
 
       {/* Editor content — fills remaining height */}
@@ -440,7 +479,7 @@ export function DocEditor({
           placeholder={labels.placeholder}
         />
       ) : (
-        <div ref={editorContentRef as RefObject<HTMLDivElement>} className="tiptap-editor-wrapper flex-1 overflow-y-auto p-3">
+        <div ref={editorContentRef as RefObject<HTMLDivElement>} className="tiptap-editor-wrapper flex-1 overflow-y-auto p-3 max-md:pb-20 max-md:min-h-[50vh]">
           <EditorContent editor={editor} className="tiptap-content h-full outline-none" />
         </div>
       )}
@@ -460,11 +499,11 @@ export function DocEditor({
               <span>{labels.autosave}</span>
               <span
                 className={`relative inline-flex h-[18px] w-[30px] flex-shrink-0 items-center rounded-full transition-colors ${
-                  autosave ? 'bg-emerald-500' : 'bg-muted-foreground/30'
+                  autosave ? 'bg-success' : 'bg-muted-foreground/30'
                 }`}
               >
                 <span
-                  className={`inline-block h-3 w-3 transform rounded-full bg-white shadow-sm transition-transform ${
+                  className={`inline-block h-3 w-3 transform rounded-full bg-background shadow-sm transition-transform ${
                     autosave ? 'translate-x-[14px]' : 'translate-x-[3px]'
                   }`}
                 />
@@ -481,6 +520,85 @@ export function DocEditor({
           </button>
         </div>
       ) : null}
+
+      {/* Mobile sticky bottom toolbar — appears on editor focus in preview mode */}
+      {editor && editable && viewMode === 'preview' && (
+        <div
+          role="toolbar"
+          aria-label={labels.toolbar}
+          className={`fixed bottom-0 left-0 right-0 z-30 border-t border-border/60 bg-background/95 pb-[env(safe-area-inset-bottom)] backdrop-blur-sm transition-transform duration-200 md:hidden ${
+            isFocused ? 'translate-y-0' : 'translate-y-full pointer-events-none'
+          }`}
+        >
+          <div className="flex overflow-x-auto items-center gap-1 px-2 py-2" onMouseDown={(e) => e.preventDefault()}>
+            <ToolbarButton
+              active={false}
+              disabled={!editor.can().undo()}
+              ariaLabel={labels.undo}
+              onClick={() => editor.chain().focus().undo().run()}
+            >
+              <Undo2 className="size-3.5" />
+            </ToolbarButton>
+            <ToolbarButton
+              active={false}
+              disabled={!editor.can().redo()}
+              ariaLabel={labels.redo}
+              onClick={() => editor.chain().focus().redo().run()}
+            >
+              <Redo2 className="size-3.5" />
+            </ToolbarButton>
+            <Sep />
+            <ToolbarButton
+              active={editor.isActive('heading', { level: 1 })}
+              onClick={() => editor.chain().focus().toggleHeading({ level: 1 }).run()}
+            >
+              {labels.h1}
+            </ToolbarButton>
+            <ToolbarButton
+              active={editor.isActive('heading', { level: 2 })}
+              onClick={() => editor.chain().focus().toggleHeading({ level: 2 }).run()}
+            >
+              {labels.h2}
+            </ToolbarButton>
+            <Sep />
+            <ToolbarButton
+              active={editor.isActive('bold')}
+              onClick={() => editor.chain().focus().toggleBold().run()}
+            >
+              {labels.bold}
+            </ToolbarButton>
+            <ToolbarButton
+              active={editor.isActive('italic')}
+              onClick={() => editor.chain().focus().toggleItalic().run()}
+            >
+              {labels.italic}
+            </ToolbarButton>
+            <Sep />
+            <ToolbarButton
+              active={editor.isActive('bulletList')}
+              onClick={() => editor.chain().focus().toggleBulletList().run()}
+            >
+              {labels.bullet}
+            </ToolbarButton>
+            <ToolbarButton
+              active={editor.isActive('blockquote')}
+              onClick={() => editor.chain().focus().toggleBlockquote().run()}
+            >
+              {labels.quote}
+            </ToolbarButton>
+            <ToolbarButton
+              active={editor.isActive('codeBlock')}
+              onClick={() => editor.chain().focus().toggleCodeBlock().run()}
+            >
+              {labels.code}
+            </ToolbarButton>
+            <Sep />
+            <ToolbarButton active={false} onClick={addLink}>
+              {labels.link}
+            </ToolbarButton>
+          </div>
+        </div>
+      )}
     </div>
   );
 }
@@ -515,20 +633,28 @@ function BubbleButton({
 function ToolbarButton({
   active,
   onClick,
+  disabled,
+  ariaLabel,
   children,
 }: {
   active: boolean;
   onClick: () => void;
+  disabled?: boolean;
+  ariaLabel?: string;
   children: React.ReactNode;
 }) {
   return (
     <button
       type="button"
       onClick={onClick}
+      disabled={disabled}
+      aria-label={ariaLabel}
       className={`rounded-lg border px-2.5 py-1 text-xs font-medium transition ${
-        active
-          ? 'border-primary/50 bg-primary/14 text-primary'
-          : 'border-border/60 bg-card text-foreground hover:border-primary/50 hover:text-primary'
+        disabled
+          ? 'cursor-not-allowed border-border/40 bg-card text-muted-foreground opacity-50'
+          : active
+            ? 'border-primary/50 bg-primary/14 text-primary'
+            : 'border-border/60 bg-card text-foreground hover:border-primary/50 hover:text-primary'
       }`}
     >
       {children}

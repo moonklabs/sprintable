@@ -171,12 +171,12 @@ export function StoryCard({ story, epicName, assignee, onClick, onEdit, onChange
       onContextMenu={handleContextMenu}
       className={`group relative cursor-pointer overflow-hidden rounded-lg p-3 transition ${
         assignee?.type === 'agent'
-          ? 'bg-[linear-gradient(135deg,rgba(6,182,212,0.08),rgba(168,85,247,0.04))] ring-1 ring-cyan-500/30 hover:ring-cyan-400/60'
+          ? 'bg-gradient-to-br from-accent-claim/8 to-purple-500/4 ring-1 ring-accent-claim/30 hover:ring-accent-claim/60'
           : 'bg-background shadow-sm hover:shadow-md hover:bg-background'
       }`}
     >
       {assignee?.type === 'agent' && (
-        <div className="absolute inset-0 pointer-events-none rounded-lg border border-transparent bg-gradient-to-r from-cyan-500/10 to-purple-500/10 opacity-50" />
+        <div className="absolute inset-0 pointer-events-none rounded-lg border border-transparent bg-gradient-to-r from-accent-claim/10 to-purple-500/10 opacity-50" />
       )}
       {epicName && story.epic_id ? (
         <Badge variant={getEpicColor(story.epic_id)} className="mb-3 max-w-full">
@@ -189,7 +189,7 @@ export function StoryCard({ story, epicName, assignee, onClick, onEdit, onChange
           {assignee ? (
             <div className={`flex h-6 w-6 items-center justify-center rounded-full border text-[10px] font-medium ${
               assignee.type === 'agent' 
-                ? 'border-cyan-500/30 bg-cyan-500/10 text-cyan-600 dark:text-cyan-400' 
+                ? 'border-accent-claim/30 bg-accent-claim/10 text-accent-claim'
                 : 'border-border bg-muted text-muted-foreground'
             }`} title={assignee.name}>
               {getInitials(assignee.name)}
@@ -198,10 +198,10 @@ export function StoryCard({ story, epicName, assignee, onClick, onEdit, onChange
             <div />
           )}
           {assignee?.type === 'agent' && (
-            <div className="flex items-center gap-1.5 text-[10px] font-mono text-cyan-600 dark:text-cyan-400">
+            <div className="flex items-center gap-1.5 text-[10px] font-mono text-accent-claim">
               <span className="relative flex h-1.5 w-1.5">
-                <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-cyan-400 opacity-75"></span>
-                <span className="relative inline-flex rounded-full h-1.5 w-1.5 bg-cyan-500"></span>
+                <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-accent-claim opacity-75"></span>
+                <span className="relative inline-flex rounded-full h-1.5 w-1.5 bg-accent-claim"></span>
               </span>
               <span>&gt; Agent active</span>
             </div>
@@ -222,7 +222,7 @@ export function StoryCard({ story, epicName, assignee, onClick, onEdit, onChange
               className="flex h-5 w-5 items-center justify-center"
             >
               {lastExecution.status === 'matched' ? (
-                <Zap className="h-3 w-3 text-amber-500" />
+                <Zap className="h-3 w-3 text-warning" />
               ) : (
                 <ZapOff className="h-3 w-3 text-muted-foreground/40" />
               )}

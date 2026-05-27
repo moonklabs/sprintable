@@ -32,29 +32,29 @@ export function InviteAcceptClient({ token, orgName, role, email }: InviteAccept
   };
 
   return (
-    <div className="flex min-h-screen items-center justify-center bg-gray-50">
-      <div className="w-full max-w-sm rounded-2xl bg-white p-8 shadow-lg space-y-6">
+    <div className="flex min-h-screen items-center justify-center bg-muted">
+      <div className="w-full max-w-sm rounded-2xl bg-background p-8 shadow-lg space-y-6">
         <div className="text-center space-y-2">
-          <h1 className="text-2xl font-bold text-gray-900">Organization 초대</h1>
-          <p className="text-sm text-gray-500">
-            <span className="font-semibold text-gray-800">{orgName}</span>에서 초대했습니다.
+          <h1 className="text-2xl font-bold text-foreground">Organization 초대</h1>
+          <p className="text-sm text-muted-foreground">
+            <span className="font-semibold text-foreground/85">{orgName}</span>에서 초대했습니다.
           </p>
-          {email && <p className="text-xs text-gray-400">{email} 계정으로 가입됩니다.</p>}
+          {email && <p className="text-xs text-muted-foreground/60">{email} 계정으로 가입됩니다.</p>}
         </div>
 
-        <div className="rounded-lg border border-gray-200 bg-gray-50 px-4 py-3">
+        <div className="rounded-lg border border-border bg-muted px-4 py-3">
           <div className="flex items-center justify-between text-sm">
-            <span className="text-gray-500">Organization</span>
-            <span className="font-medium text-gray-800">{orgName}</span>
+            <span className="text-muted-foreground">Organization</span>
+            <span className="font-medium text-foreground/85">{orgName}</span>
           </div>
           <div className="mt-2 flex items-center justify-between text-sm">
-            <span className="text-gray-500">역할</span>
-            <span className="font-medium text-gray-800 capitalize">{role}</span>
+            <span className="text-muted-foreground">역할</span>
+            <span className="font-medium text-foreground/85 capitalize">{role}</span>
           </div>
         </div>
 
         {result ? (
-          <div className={`rounded-lg p-3 text-sm text-center ${result.type === 'success' ? 'bg-emerald-50 text-emerald-700' : 'bg-red-50 text-red-600'}`}>
+          <div className={`rounded-lg p-3 text-sm text-center ${result.type === 'success' ? 'bg-success-bg text-success border border-success-border' : 'bg-destructive-bg text-destructive border border-destructive-border'}`}>
             {result.text}
           </div>
         ) : (
@@ -68,7 +68,7 @@ export function InviteAcceptClient({ token, orgName, role, email }: InviteAccept
             </Button>
             <a
               href="/dashboard"
-              className="block text-center text-sm text-gray-500 hover:text-gray-700"
+              className="block text-center text-sm text-muted-foreground hover:text-foreground/70"
             >
               거절 (나중에)
             </a>

@@ -199,7 +199,7 @@ function MockupNodeContent({ component }: { component: MockupComponent }) {
 
   if (type === 'Alert') {
     return (
-      <div className="flex h-full items-center rounded-2xl border border-amber-200 bg-amber-50 px-3 text-xs text-amber-900">
+      <div className="flex h-full items-center rounded-2xl border border-warning-border bg-warning-tint px-3 text-xs text-foreground">
         {text}
       </div>
     );
@@ -886,7 +886,7 @@ export function MockupEditorShell({ mockupId }: MockupEditorShellProps) {
           <span className="rounded-full border border-white/10 bg-muted/55 px-3 py-1 text-[11px] text-muted-foreground">
             {components.length} {t('components')}
           </span>
-          <span className={`rounded-full px-3 py-1 text-[11px] ${hasChanges ? 'bg-amber-500/15 text-amber-400' : 'border border-white/10 bg-emerald-500/10 text-emerald-400'}`}>
+          <span className={`rounded-full px-3 py-1 text-[11px] ${hasChanges ? 'bg-warning-tint text-warning' : 'border border-border bg-success-tint text-success'}`}>
             {saving ? t('saving') : hasChanges ? t('unsaved') : t('saved')}
           </span>
         </div>
@@ -960,7 +960,7 @@ export function MockupEditorShell({ mockupId }: MockupEditorShellProps) {
                     </button>
                   )}
                   {!scenario.is_default ? (
-                    <button type="button" className="text-xs text-rose-300 hover:text-rose-200" onClick={() => void deleteScenario(scenario.id)}>✕</button>
+                    <button type="button" className="text-xs text-destructive hover:text-destructive/80" onClick={() => void deleteScenario(scenario.id)}>✕</button>
                   ) : null}
                 </div>
               ))}

@@ -2,6 +2,7 @@
 
 import { useEffect, useState } from 'react';
 import { useTranslations } from 'next-intl';
+import { Alert, AlertDescription } from '@/components/ui/alert';
 import { AlertTriangle, ArrowLeft, CheckCircle2, Clock3, Cpu, Hash, RefreshCw, Zap } from 'lucide-react';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
@@ -328,21 +329,19 @@ export function AgentRunDetail({
 
             {/* Error message for failed runs */}
             {run.status === 'failed' && errorDisplay.message && (
-              <div className="mb-4 rounded-2xl border border-red-500/20 bg-red-500/10 px-4 py-3">
-                <div className="flex items-start gap-3">
-                  <AlertTriangle className="mt-0.5 size-5 shrink-0 text-red-400" />
-                  <div>
-                    <p className="text-sm font-semibold text-red-300">{t('errorLabel')}</p>
-                    <p className="mt-1 text-sm text-red-200/80">{errorDisplay.message}</p>
-                    {errorDisplay.code && (
-                      <p className="mt-1 text-xs text-red-200/60">{t('errorCodeLabel')}: {errorDisplay.code}</p>
-                    )}
-                    {failureDisposition === 'retry_scheduled' && run.next_retry_at && (
-                      <p className="mt-1 text-xs text-red-200/60">{t('nextRetryAt')}: {toLocaleStr(run.next_retry_at, locale)}</p>
-                    )}
-                  </div>
-                </div>
-              </div>
+              <Alert variant="destructive" className="mb-4">
+                <AlertTriangle className="size-4" />
+                <AlertDescription>
+                  <p className="font-semibold">{t('errorLabel')}</p>
+                  <p className="mt-1">{errorDisplay.message}</p>
+                  {errorDisplay.code && (
+                    <p className="mt-1 text-xs opacity-75">{t('errorCodeLabel')}: {errorDisplay.code}</p>
+                  )}
+                  {failureDisposition === 'retry_scheduled' && run.next_retry_at && (
+                    <p className="mt-1 text-xs opacity-75">{t('nextRetryAt')}: {toLocaleStr(run.next_retry_at, locale)}</p>
+                  )}
+                </AlertDescription>
+              </Alert>
             )}
 
             {/* Result summary */}
@@ -436,10 +435,10 @@ export function AgentRunDetail({
                       <div key={idx} className="relative flex gap-4 pb-4 pl-9">
                         <div className={`absolute left-2.5 top-1.5 size-3 rounded-full border-2 ${
                           hasError
-                            ? 'border-red-400 bg-red-400/20'
+                            ? 'border-destructive bg-destructive/20'
                             : isLlm
                               ? 'border-brand bg-brand/20'
-                              : 'border-emerald-400 bg-emerald-400/20'
+                              : 'border-success bg-success-tint'
                         }`} />
                         <div className="min-w-0 flex-1 rounded-xl border border-white/8 bg-white/4 px-3 py-2">
                           <div className="flex flex-wrap items-center gap-2">
@@ -463,13 +462,13 @@ export function AgentRunDetail({
                               </span>
                             )}
                             {hasError ? (
-                              <AlertTriangle className="size-3.5 text-red-400" />
+                              <AlertTriangle className="size-3.5 text-destructive" />
                             ) : (
                               <CheckCircle2 className="size-3.5 text-emerald-400/60" />
                             )}
                           </div>
                           {hasError && (
-                            <div className="mt-1 space-y-1 text-xs text-red-300/80">
+                            <div className="mt-1 space-y-1 text-xs text-destructive/80">
                               <p>{display.error}</p>
                               {display.userReason ? <p>{display.userReason}</p> : null}
                               {display.nextAction ? <p>{display.nextAction}</p> : null}
@@ -562,7 +561,7 @@ export function AgentRunDetail({
                           </div>
                         ) : null}
                         {error ? (
-                          <p className="mt-3 text-sm text-red-300/80">{error}</p>
+                          <p className="mt-3 text-sm text-destructive/80">{error}</p>
                         ) : null}
                         {!operatorReason && !userReason && !nextAction && detailSummary ? (
                           <p className="mt-3 text-sm text-muted-foreground">{detailSummary}</p>

@@ -25,6 +25,7 @@ import {
   ArrowDown, ArrowUp, Ban, Bot, ClipboardCheck,
   Route, Save, ShieldCheck, Smartphone, Trash2, TriangleAlert, User, RotateCcw,
 } from 'lucide-react';
+import { Alert, AlertDescription } from '@/components/ui/alert';
 import { Badge } from '@/components/ui/badge';
 import { Button, buttonVariants } from '@/components/ui/button';
 import { PageHeader } from '@/components/ui/page-header';
@@ -775,9 +776,9 @@ function AgentWorkflowEditorInner({ initialMembers, initialRules, projectName }:
                 </select>
               </div>
               {dryRunSurface === 'draft' && draftWorkflow.error ? (
-                <div className="rounded-md border border-amber-500/30 bg-amber-500/10 px-4 py-3 text-sm text-amber-600 dark:text-amber-400">
-                  {t('workflowDraftInvalidBody', { error: draftWorkflow.error })}
-                </div>
+                <Alert variant="warning">
+                  <AlertDescription>{t('workflowDraftInvalidBody', { error: draftWorkflow.error })}</AlertDescription>
+                </Alert>
               ) : (
                 <div className="space-y-3 rounded-md border border-border bg-muted/30 p-4">
                   <div className="flex flex-wrap items-center justify-between gap-2">
@@ -859,9 +860,9 @@ function AgentWorkflowEditorInner({ initialMembers, initialRules, projectName }:
                 <Badge variant="outline">{t('workflowRolloutRemovedRules', { count: workflowDiff.removedRules })}</Badge>
               </div>
               {draftWorkflow.error ? (
-                <div className="rounded-md border border-amber-500/30 bg-amber-500/10 px-4 py-3 text-sm text-amber-600 dark:text-amber-400">
-                  {t('workflowDraftInvalidBody', { error: draftWorkflow.error })}
-                </div>
+                <Alert variant="warning">
+                  <AlertDescription>{t('workflowDraftInvalidBody', { error: draftWorkflow.error })}</AlertDescription>
+                </Alert>
               ) : !hasDraftChanges ? (
                 <div className="rounded-md border border-border bg-muted/30 px-4 py-3 text-sm text-muted-foreground">
                   {t('workflowRolloutNoChanges')}

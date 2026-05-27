@@ -217,13 +217,13 @@ export function StandupReviewCard({
       </div>
 
       <div className="mt-4 space-y-4">
-        {actionError ? <p className="text-sm text-rose-300">{actionError}</p> : null}
+        {actionError ? <p className="text-sm text-destructive">{actionError}</p> : null}
 
         {entry ? (
           <>
             <div className="grid gap-3 md:grid-cols-3">
               <div className="rounded-md border border-border bg-muted/30 p-3">
-                <div className="text-xs font-medium uppercase tracking-[0.18em] text-emerald-300">{t('doneLabel')}</div>
+                <div className="text-xs font-medium uppercase tracking-[0.18em] text-success">{t('doneLabel')}</div>
                 <p className={cn('mt-2 whitespace-pre-wrap text-sm text-foreground/90', !entry.done && 'text-muted-foreground')}>
                   {entry.done || t('emptySection')}
                 </p>
@@ -235,7 +235,7 @@ export function StandupReviewCard({
                 </p>
               </div>
               <div className="rounded-md border border-border bg-muted/30 p-3">
-                <div className="text-xs font-medium uppercase tracking-[0.18em] text-rose-300">{t('blockersLabel')}</div>
+                <div className="text-xs font-medium uppercase tracking-[0.18em] text-destructive">{t('blockersLabel')}</div>
                 <p className={cn('mt-2 whitespace-pre-wrap text-sm text-foreground/90', !entry.blockers && 'text-muted-foreground')}>
                   {entry.blockers || t('emptySection')}
                 </p>
@@ -284,7 +284,7 @@ export function StandupReviewCard({
           <EmptyState
             title={t('noEntryForMember')}
             description={isOwnEntry ? t('yourEntryPending') : t('noEntryForMemberDescription')}
-            className="bg-black/10"
+            className="bg-foreground/10"
           />
         )}
 

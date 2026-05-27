@@ -659,7 +659,7 @@ function CreateModal({ projectId, orgId, onCreated, onClose }: CreateModalProps)
     <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
       <button
         type="button"
-        className="absolute inset-0 bg-black/50 backdrop-blur-[2px]"
+        className="absolute inset-0 bg-overlay-backdrop backdrop-blur-[2px]"
         onClick={onClose}
         aria-label={t('cancel')}
       />

@@ -22,6 +22,7 @@ import { RefreshSettings } from '@/components/settings/refresh-settings';
 import { StandupDeadlineSection } from '@/components/settings/standup-deadline-section';
 import { TwoFactorSection } from '@/components/settings/two-factor-section';
 import { SetPasswordSection } from '@/components/settings/set-password-section';
+import { Alert, AlertDescription } from '@/components/ui/alert';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { OperatorInput } from '@/components/ui/operator-control';
@@ -99,6 +100,12 @@ const NOTIFICATION_CATEGORIES = [
 ] as const satisfies ReadonlyArray<{ key: string; types: ReadonlyArray<(typeof NOTIFICATION_TYPES)[number]> }>;
 
 type NotificationCategoryKey = typeof NOTIFICATION_CATEGORIES[number]['key'];
+
+function isWebhookUrlAllowed(url: string): boolean {
+  if (!url) return true;
+  if (/^https:\/\//i.test(url)) return true;
+  return /^http:\/\/(localhost|127\.\d+\.\d+\.\d+|192\.168\.\d+\.\d+|10\.\d+\.\d+\.\d+|172\.(1[6-9]|2\d|3[01])\.\d+\.\d+)/i.test(url);
+}
 
 export default function SettingsPage() {
   const t = useTranslations('settings');
@@ -695,8 +702,8 @@ export default function SettingsPage() {
 
   const handleSaveWebhookUrl = async (memberId: string) => {
     const url = (webhookEditing[memberId] ?? '').trim();
-    if (url && !/^https:\/\//i.test(url)) {
-      setWebhookErrors((prev) => ({ ...prev, [memberId]: 'HTTPS URL만 허용됩니다 (https://)' }));
+    if (url && !isWebhookUrlAllowed(url)) {
+      setWebhookErrors((prev) => ({ ...prev, [memberId]: t('webhookUrlInvalid') }));
       return;
     }
     setWebhookErrors((prev) => ({ ...prev, [memberId]: '' }));
@@ -779,7 +786,7 @@ export default function SettingsPage() {
             {adminChecked ? (
               <TabsTrigger value="members">
                 <Users className="h-4 w-4" />
-                Team Members
+                {t('tabMembers')}
               </TabsTrigger>
             ) : null}
             {adminChecked && isAdmin ? (
@@ -794,11 +801,11 @@ export default function SettingsPage() {
                 <span className="truncate px-2 pb-1 pt-4 text-[10px] font-medium uppercase tracking-wider text-muted-foreground/70">{t('organizationSettings')}</span>
                 <TabsTrigger value="organization">
                   <FolderKanban className="h-4 w-4" />
-                  Organization
+                  {t('tabOrganization')}
                 </TabsTrigger>
                 <TabsTrigger value="org-members">
                   <Users className="h-4 w-4" />
-                  Org Members
+                  {t('tabOrgMembers')}
                 </TabsTrigger>
                 <TabsTrigger value="projects">
                   <FolderKanban className="h-4 w-4" />
@@ -807,7 +814,7 @@ export default function SettingsPage() {
                 {isAdmin ? (
                   <TabsTrigger value="webhooks">
                     <Zap className="h-4 w-4" />
-                    Webhooks
+                    {t('tabWebhooks')}
                   </TabsTrigger>
                 ) : null}
               </>
@@ -816,14 +823,16 @@ export default function SettingsPage() {
             {adminChecked && isAdmin ? (
               <>
                 <span className="truncate px-2 pb-1 pt-4 text-[10px] font-medium uppercase tracking-wider text-muted-foreground/70">{t('billing')}</span>
-                <TabsTrigger value="subscription">
-                  <CreditCard className="h-4 w-4" />
-                  {t('tabSubscription')}
-                </TabsTrigger>
+                {isEEEnabled() && (
+                  <TabsTrigger value="subscription">
+                    <CreditCard className="h-4 w-4" />
+                    {t('tabSubscription')}
+                  </TabsTrigger>
+                )}
                 {isEEEnabled() && (
                   <TabsTrigger value="billing">
                     <CreditCard className="h-4 w-4" />
-                    Billing
+                    {t('tabBilling')}
                   </TabsTrigger>
                 )}
                 <TabsTrigger value="usage">
@@ -960,14 +969,16 @@ export default function SettingsPage() {
                                             <span className={`absolute top-0.5 h-5 w-5 rounded-full bg-white shadow transition ${enabled ? 'left-[22px]' : 'left-0.5'}`} />
                                           </button>
                                         </div>
-                                        {/* webhook - 준비 중 */}
-                                        <div className="flex w-14 justify-center">
-                                          <span className="text-[11px] text-muted-foreground opacity-40">{t('notification_coming_soon')}</span>
-                                        </div>
-                                        {/* email - 준비 중 */}
-                                        <div className="flex w-14 justify-center">
-                                          <span className="text-[11px] text-muted-foreground opacity-40">{t('notification_coming_soon')}</span>
-                                        </div>
+                                        {isEEEnabled() && (
+                                          <div className="flex w-14 justify-center">
+                                            <span className="text-[11px] text-muted-foreground opacity-40">{t('notification_coming_soon')}</span>
+                                          </div>
+                                        )}
+                                        {isEEEnabled() && (
+                                          <div className="flex w-14 justify-center">
+                                            <span className="text-[11px] text-muted-foreground opacity-40">{t('notification_coming_soon')}</span>
+                                          </div>
+                                        )}
                                       </div>
                                     </div>
                                   );
@@ -1188,9 +1199,9 @@ export default function SettingsPage() {
                   </div>
 
                   {projectActionMessage ? (
-                    <div className={`rounded-md border p-3 text-xs ${projectActionMessage.type === 'success' ? 'border-emerald-500/20 bg-emerald-500/10 text-emerald-600 dark:text-emerald-400' : 'border-destructive/20 bg-destructive/10 text-destructive'}`}>
-                      {projectActionMessage.text}
-                    </div>
+                    <Alert variant={projectActionMessage.type === 'success' ? 'success' : 'destructive'}>
+                      <AlertDescription>{projectActionMessage.text}</AlertDescription>
+                    </Alert>
                   ) : null}
 
                   {isAdmin ? (
@@ -1210,9 +1221,9 @@ export default function SettingsPage() {
                       </Button>
                     </div>
                   ) : adminChecked ? (
-                    <div className="rounded-md border border-amber-500/20 bg-amber-500/10 px-4 py-3 text-sm text-amber-600 dark:text-amber-400">
-                      {t('projectAdminRequired')}
-                    </div>
+                    <Alert variant="warning">
+                      <AlertDescription>{t('projectAdminRequired')}</AlertDescription>
+                    </Alert>
                   ) : null}
                 </SectionCardBody>
               </SectionCard>
@@ -1257,15 +1268,15 @@ export default function SettingsPage() {
                     </SectionCardHeader>
                     <SectionCardBody className="space-y-4">
                       {agentActionMessage ? (
-                        <div className={`rounded-md border p-3 text-xs ${agentActionMessage.type === 'success' ? 'border-emerald-500/20 bg-emerald-500/10 text-emerald-600 dark:text-emerald-400' : 'border-destructive/20 bg-destructive/10 text-destructive'}`}>
-                          {agentActionMessage.text}
-                        </div>
+                        <Alert variant={agentActionMessage.type === 'success' ? 'success' : 'destructive'}>
+                          <AlertDescription>{agentActionMessage.text}</AlertDescription>
+                        </Alert>
                       ) : null}
 
                       {newAgentResult ? (
-                        <div className="rounded-md border border-emerald-500/30 bg-emerald-500/5 p-4 space-y-3">
+                        <div className="rounded-md border border-success-border bg-success-tint p-4 space-y-3">
                           <div className="flex items-center justify-between">
-                            <p className="text-sm font-semibold text-emerald-500">
+                            <p className="text-sm font-semibold text-success">
                               {newAgentResult.name} 생성 완료
                             </p>
                             <button type="button" onClick={() => setNewAgentResult(null)} className="text-muted-foreground hover:text-foreground">
@@ -1430,9 +1441,9 @@ export default function SettingsPage() {
                     </div>
 
                     {inviteResult ? (
-                      <div className="rounded-md border border-emerald-500/20 bg-emerald-500/10 p-3 text-xs text-emerald-600 dark:text-emerald-400 break-all">
-                        {t('inviteLinkCopied')}: {inviteResult}
-                      </div>
+                      <Alert variant="success">
+                        <AlertDescription className="break-all">{t('inviteLinkCopied')}: {inviteResult}</AlertDescription>
+                      </Alert>
                     ) : null}
 
                     {invitations.length > 0 ? (
@@ -1444,7 +1455,7 @@ export default function SettingsPage() {
                               <span className="shrink-0 text-muted-foreground">
                                 {invitation.projects?.name ?? t('orgWide')}
                               </span>
-                              <span className={`shrink-0 ${invitation.status === 'accepted' ? 'text-emerald-300' : invitation.status === 'revoked' ? 'text-muted-foreground line-through' : new Date(invitation.expires_at) < new Date() ? 'text-rose-300' : 'text-amber-200'}`}>
+                              <span className={`shrink-0 ${invitation.status === 'accepted' ? 'text-success' : invitation.status === 'revoked' ? 'text-muted-foreground line-through' : new Date(invitation.expires_at) < new Date() ? 'text-destructive' : 'text-warning'}`}>
                                 {invitation.status === 'accepted' ? t('accepted') : invitation.status === 'revoked' ? t('revoked') : new Date(invitation.expires_at) < new Date() ? t('expired') : t('pending')}
                               </span>
                               {invitation.status === 'pending' ? (
@@ -1459,7 +1470,7 @@ export default function SettingsPage() {
                                   </button>
                                   <button
                                     type="button"
-                                    className="rounded border border-rose-400/30 px-2 py-0.5 text-xs text-rose-400 transition-colors hover:border-rose-300/50 hover:text-rose-300 disabled:opacity-50"
+                                    className="rounded border border-destructive-border px-2 py-0.5 text-xs text-destructive transition-colors hover:bg-destructive-tint disabled:opacity-50"
                                     disabled={revokingInviteId === invitation.id}
                                     onClick={() => handleRevokeInvite(invitation.id)}
                                   >
@@ -1469,7 +1480,7 @@ export default function SettingsPage() {
                               ) : null}
                             </div>
                             {resendResult?.id === invitation.id ? (
-                              <p className="mt-1 break-all px-1 text-xs text-amber-200">{t('inviteLinkCopied')}: {resendResult.url}</p>
+                              <p className="mt-1 break-all px-1 text-xs text-warning">{t('inviteLinkCopied')}: {resendResult.url}</p>
                             ) : null}
                           </div>
                         ))}
@@ -1513,9 +1524,9 @@ export default function SettingsPage() {
                       </Button>
                     </div>
                     {projectInviteResult ? (
-                      <div className={`rounded-md border p-3 text-xs break-all ${projectInviteResult.type === 'success' ? 'border-emerald-500/20 bg-emerald-500/10 text-emerald-600 dark:text-emerald-400' : 'border-destructive/20 bg-destructive/10 text-destructive'}`}>
-                        {projectInviteResult.text}
-                      </div>
+                      <Alert variant={projectInviteResult.type === 'success' ? 'success' : 'destructive'}>
+                        <AlertDescription className="break-all">{projectInviteResult.text}</AlertDescription>
+                      </Alert>
                     ) : null}
                   </SectionCardBody>
                 </SectionCard>
@@ -1555,9 +1566,9 @@ export default function SettingsPage() {
                     ) : null}
 
                     {memberActionMessage ? (
-                      <div className={`rounded-md border p-3 text-xs ${memberActionMessage.type === 'success' ? 'border-emerald-500/20 bg-emerald-500/10 text-emerald-600 dark:text-emerald-400' : 'border-destructive/20 bg-destructive/10 text-destructive'}`}>
-                        {memberActionMessage.text}
-                      </div>
+                      <Alert variant={memberActionMessage.type === 'success' ? 'success' : 'destructive'}>
+                        <AlertDescription>{memberActionMessage.text}</AlertDescription>
+                      </Alert>
                     ) : null}
 
                     <div className="space-y-2">
@@ -1708,7 +1719,7 @@ export default function SettingsPage() {
             </TabsContent>
             ) : null}
 
-            {adminChecked && isAdmin ? (
+            {isEEEnabled() && adminChecked && isAdmin ? (
             <TabsContent value="subscription">
               <SectionCard>
                 <SectionCardHeader>
@@ -1719,9 +1730,9 @@ export default function SettingsPage() {
                 </SectionCardHeader>
                 <SectionCardBody className="space-y-3">
                   {graceUntil && new Date(graceUntil) > new Date() ? (
-                    <p className="rounded-md border border-amber-500/30 bg-amber-500/10 px-3 py-2 text-sm text-amber-300">
-                      {t('gracePeriodNotice', { date: new Date(graceUntil).toLocaleDateString('ko-KR') })}
-                    </p>
+                    <Alert variant="warning">
+                      <AlertDescription>{t('gracePeriodNotice', { date: new Date(graceUntil).toLocaleDateString('ko-KR') })}</AlertDescription>
+                    </Alert>
                   ) : null}
                   <Button
                     variant="glass"
@@ -1800,7 +1811,7 @@ export default function SettingsPage() {
                   <li>• Project <span className="font-semibold">{orgImpact.project_count}개</span> 영구 삭제</li>
                   <li>• Member <span className="font-semibold">{orgImpact.member_count}명</span> 접근 불가</li>
                   {orgImpact.has_active_subscription && (
-                    <li className="text-amber-400">• 활성 구독이 있습니다 — 삭제 전 구독을 취소해주세요.</li>
+                    <li className="text-warning">• 활성 구독이 있습니다 — 삭제 전 구독을 취소해주세요.</li>
                   )}
                 </ul>
               </div>

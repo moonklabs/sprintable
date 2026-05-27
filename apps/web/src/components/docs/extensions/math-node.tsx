@@ -63,7 +63,7 @@ function MathBlockView({ node, selected }: ReactNodeViewProps) {
         {!showEdit && (
           <div className="px-4 pb-4" contentEditable={false}>
             {error ? (
-              <div className="rounded-lg border border-red-500/30 bg-red-500/10 p-3 text-xs text-red-400 font-mono">{error}</div>
+              <div className="rounded-lg border border-destructive-border bg-destructive-tint p-3 text-xs text-destructive font-mono">{error}</div>
             ) : html ? (
               <div
                 dangerouslySetInnerHTML={{ __html: html }}
@@ -98,7 +98,7 @@ function MathInlineView({ node }: ReactNodeViewProps) {
 
   if (error) {
     return (
-      <NodeViewWrapper as="span" className="rounded bg-red-500/10 px-1 text-xs text-red-400 font-mono">
+      <NodeViewWrapper as="span" className="rounded bg-destructive-tint px-1 text-xs text-destructive font-mono">
         {latex}
       </NodeViewWrapper>
     );

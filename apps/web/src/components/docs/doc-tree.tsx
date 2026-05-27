@@ -2,11 +2,12 @@
 
 import { useState, useCallback, useEffect, useRef } from 'react';
 import { createPortal } from 'react-dom';
-import { ChevronDown, ChevronRight, FileText, Folder, FolderOpen, MoreVertical } from 'lucide-react';
+import { ChevronDown, ChevronRight, FileText, Folder, FolderOpen, GripVertical, MoreVertical } from 'lucide-react';
 import { DndContext, DragEndEvent, PointerSensor, useSensor, useSensors, closestCenter } from '@dnd-kit/core';
 import { SortableContext, useSortable, verticalListSortingStrategy } from '@dnd-kit/sortable';
 import { CSS } from '@dnd-kit/utilities';
 import { cn } from '@/lib/utils';
+import { useTreeExpanded } from './use-tree-expanded';
 
 // ─── Preview Card ─────────────────────────────────────────────────────────────
 
@@ -55,6 +56,19 @@ interface Doc {
   is_folder?: boolean;
 }
 
+function HighlightedText({ text, query }: { text: string; query: string }) {
+  if (!query) return <>{text}</>;
+  const idx = text.toLowerCase().indexOf(query.toLowerCase());
+  if (idx === -1) return <>{text}</>;
+  return (
+    <>
+      {text.slice(0, idx)}
+      <mark className="bg-highlight-search-bg text-inherit">{text.slice(idx, idx + query.length)}</mark>
+      {text.slice(idx + query.length)}
+    </>
+  );
+}
+
 /**
  * Returns true if `nodeId` is a descendant of `ancestorId` in the doc tree.
  * Used to prevent circular moves (dropping a node into its own subtree).
@@ -85,6 +99,10 @@ interface DocTreeProps {
   onAddChild?: (parentId: string) => Promise<void>;
   emptyFolderLabel?: string;
   projectId?: string;
+  visibleIds?: Set<string>;
+  matchedIds?: Set<string>;
+  searchQuery?: string;
+  isSearching?: boolean;
 }
 
 function TreeNode({
@@ -99,6 +117,12 @@ function TreeNode({
   depth = 0,
   emptyFolderLabel = 'No child docs',
   projectId,
+  isExpanded,
+  onToggleExpanded,
+  visibleIds,
+  matchedIds,
+  searchQuery = '',
+  isSearching = false,
 }: {
   doc: Doc;
   allDocs: Doc[];
@@ -111,11 +135,17 @@ function TreeNode({
   depth?: number;
   emptyFolderLabel?: string;
   projectId?: string;
+  isExpanded: (id: string, defaultValue?: boolean) => boolean;
+  onToggleExpanded: (id: string) => void;
+  visibleIds?: Set<string>;
+  matchedIds?: Set<string>;
+  searchQuery?: string;
+  isSearching?: boolean;
 }) {
   const childDocs = allDocs.filter((entry) => entry.parent_id === doc.id).sort((a, b) => a.sort_order - b.sort_order);
   const hasChildren = childDocs.length > 0;
   const isFolder = Boolean(doc.is_folder || hasChildren);
-  const [expanded, setExpanded] = useState(true);
+  const expanded = isSearching ? true : isExpanded(doc.id);
   const [contextMenuOpen, setContextMenuOpen] = useState(false);
   const isSelected = selectedSlug === doc.slug;
   const menuRef = useRef<HTMLDivElement>(null);
@@ -171,9 +201,9 @@ function TreeNode({
   }, [contextMenuOpen]);
 
   const handleClick = useCallback(() => {
-    if (isFolder) setExpanded((prev) => !prev);
+    if (isFolder) onToggleExpanded(doc.id);
     onSelect(doc.slug);
-  }, [isFolder, doc.slug, onSelect]);
+  }, [isFolder, doc.id, doc.slug, onSelect, onToggleExpanded]);
 
   const handleContextMenu = useCallback((e: React.MouseEvent) => {
     e.preventDefault();
@@ -202,11 +232,23 @@ function TreeNode({
     setContextMenuOpen(false);
   }, [doc.id, onAddChild]);
 
+  if (isSearching && !visibleIds?.has(doc.id)) return null;
+
   return (
     <div ref={setNodeRef} style={style}>
       <div className="group relative">
         {preview && <DocPreviewCard title={preview.title} snippet={preview.snippet} x={previewPos.x} y={previewPos.y} />}
+        {/* Drag handle — listeners isolated here to avoid blocking click */}
+        <div
+          {...attributes}
+          {...listeners}
+          className="absolute top-1/2 z-10 -translate-y-1/2 cursor-grab touch-none opacity-0 transition group-hover:opacity-100"
+          style={{ left: `${Math.min(depth * 14 + 4, 68)}px` }}
+        >
+          <GripVertical className="size-3 text-muted-foreground" />
+        </div>
         <button
+          data-doc-id={doc.id}
           onClick={handleClick}
           onContextMenu={handleContextMenu}
           onMouseEnter={handleMouseEnter}
@@ -218,8 +260,6 @@ function TreeNode({
               : 'text-foreground/88 hover:bg-muted hover:text-foreground',
           )}
           style={{ paddingLeft: `${Math.min(depth * 14 + 8, 72)}px` }}
-          {...attributes}
-          {...listeners}
         >
           {isFolder ? (
             expanded ? <ChevronDown className="size-3.5 shrink-0 text-muted-foreground" /> : <ChevronRight className="size-3.5 shrink-0 text-muted-foreground" />
@@ -233,7 +273,9 @@ function TreeNode({
           ) : (
             <FileText className="size-4 shrink-0 text-muted-foreground" />
           )}
-          <span className="flex-1 truncate">{doc.title}</span>
+          <span className="flex-1 truncate">
+            <HighlightedText text={doc.title} query={isSearching ? searchQuery : ''} />
+          </span>
         </button>
         <div
           role="button"
@@ -278,6 +320,12 @@ function TreeNode({
                   depth={depth + 1}
                   emptyFolderLabel={emptyFolderLabel}
                   projectId={projectId}
+                  isExpanded={isExpanded}
+                  onToggleExpanded={onToggleExpanded}
+                  visibleIds={visibleIds}
+                  matchedIds={matchedIds}
+                  searchQuery={searchQuery}
+                  isSearching={isSearching}
                 />
               ))}
             </SortableContext>
@@ -295,9 +343,10 @@ function TreeNode({
   );
 }
 
-export function DocTree({ docs, selectedSlug, onSelect, onReorder, onMove, onMoveDenied, onRename, onDelete, onAddChild, emptyFolderLabel, projectId }: DocTreeProps) {
+export function DocTree({ docs, selectedSlug, onSelect, onReorder, onMove, onMoveDenied, onRename, onDelete, onAddChild, emptyFolderLabel, projectId, visibleIds, matchedIds, searchQuery, isSearching }: DocTreeProps) {
   const rootDocs = docs.filter((entry) => !entry.parent_id).sort((a, b) => a.sort_order - b.sort_order);
   const sensors = useSensors(useSensor(PointerSensor, { activationConstraint: { distance: 5 } }));
+  const { isExpanded, toggleExpanded } = useTreeExpanded(projectId);
 
   const handleDragEnd = useCallback(async (event: DragEndEvent) => {
     const { active, over } = event;
@@ -364,7 +413,7 @@ export function DocTree({ docs, selectedSlug, onSelect, onReorder, onMove, onMov
       <SortableContext items={rootDocs.map((d) => d.id)} strategy={verticalListSortingStrategy}>
         <nav className="space-y-1">
           {rootDocs.map((doc) => (
-            <TreeNode key={doc.id} doc={doc} allDocs={docs} selectedSlug={selectedSlug} onSelect={onSelect} onReorder={onReorder} onRename={onRename} onDelete={onDelete} onAddChild={onAddChild} depth={0} emptyFolderLabel={emptyFolderLabel} projectId={projectId} />
+            <TreeNode key={doc.id} doc={doc} allDocs={docs} selectedSlug={selectedSlug} onSelect={onSelect} onReorder={onReorder} onRename={onRename} onDelete={onDelete} onAddChild={onAddChild} depth={0} emptyFolderLabel={emptyFolderLabel} projectId={projectId} isExpanded={isExpanded} onToggleExpanded={toggleExpanded} visibleIds={visibleIds} matchedIds={matchedIds} searchQuery={searchQuery} isSearching={isSearching} />
           ))}
         </nav>
       </SortableContext>

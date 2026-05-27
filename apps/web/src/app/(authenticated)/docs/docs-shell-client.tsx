@@ -5,6 +5,8 @@ import { useRouter, useSearchParams } from 'next/navigation';
 import { useTranslations } from 'next-intl';
 import { DocTree } from '@/components/docs/doc-tree';
 import { DocEditor } from '@/components/docs/doc-editor';
+import { useRecentDocs } from '@/components/docs/use-recent-docs';
+import { RecentsSection } from '@/components/docs/recents-section';
 import { useDocSync, type SaveStatus } from '@/components/docs/use-doc-sync';
 import { Button } from '@/components/ui/button';
 import { EmptyState } from '@/components/ui/empty-state';
@@ -76,6 +78,7 @@ export function DocsShellClient({ projectId }: DocsShellClientProps) {
   const [docsNextCursor, setDocsNextCursor] = useState<string | null>(null);
   const [docsLoadingMore, setDocsLoadingMore] = useState(false);
   const [tagsCollapsed, setTagsCollapsed] = useState(true);
+  const { recentSlugs, pushRecent } = useRecentDocs(projectId);
   const [searchQuery, setSearchQuery] = useState('');
   const [searchResults, setSearchResults] = useState<Array<{ id: string; title: string; slug: string; snippet?: string }>>([]);
   const sanitizeSnippet = (html: string) =>
@@ -184,7 +187,8 @@ export function DocsShellClient({ projectId }: DocsShellClientProps) {
     params.set('slug', slug);
     router.push(`?${params.toString()}`);
     setTreeDrawerOpen(false);
-  }, [fetchDoc, router, searchParams]);
+    pushRecent(slug);
+  }, [fetchDoc, router, searchParams, pushRecent]);
 
   const handleReorder = useCallback(async (docId: string, newSortOrder: number) => {
     setTree((prev) =>
@@ -488,7 +492,7 @@ export function DocsShellClient({ projectId }: DocsShellClientProps) {
                     </span>
                     {result.snippet && (
                       <span
-                        className="line-clamp-2 text-[11px] leading-relaxed text-muted-foreground [&_mark]:rounded [&_mark]:bg-yellow-400/40 [&_mark]:text-foreground [&_mark]:px-0.5 [&_b]:rounded [&_b]:bg-yellow-400/40 [&_b]:font-normal [&_b]:text-foreground [&_b]:px-0.5"
+                        className="line-clamp-2 text-[11px] leading-relaxed text-muted-foreground [&_mark]:rounded [&_mark]:bg-highlight-search-bg [&_mark]:text-foreground [&_mark]:px-0.5 [&_b]:rounded [&_b]:bg-highlight-search-bg [&_b]:font-normal [&_b]:text-foreground [&_b]:px-0.5"
                         dangerouslySetInnerHTML={{ __html: sanitizeSnippet(result.snippet) }}
                       />
                     )}
@@ -511,6 +515,14 @@ export function DocsShellClient({ projectId }: DocsShellClientProps) {
           />
         ) : (
           <>
+            <RecentsSection
+              recentSlugs={recentSlugs}
+              docs={tree}
+              selectedSlug={selectedDoc?.slug || null}
+              onSelect={handleSelectDoc}
+              label={t('recentDocs')}
+              emptyLabel={t('noRecentDocs')}
+            />
             <DocTree
               docs={tree}
               selectedSlug={selectedDoc?.slug || null}
@@ -655,6 +667,8 @@ export function DocsShellClient({ projectId }: DocsShellClientProps) {
                   code: t('toolbarCode'),
                   link: t('toolbarLink'),
                   autosave: t('autosave'),
+                  undo: t('toolbarUndo'),
+                  redo: t('toolbarRedo'),
                 }}
               />
             </div>
@@ -714,7 +728,7 @@ export function DocsShellClient({ projectId }: DocsShellClientProps) {
         {treeDrawerOpen && (
           <>
             <div
-              className="fixed inset-0 z-40 bg-black/50"
+              className="fixed inset-0 z-40 bg-overlay-backdrop"
               onClick={() => setTreeDrawerOpen(false)}
               aria-hidden="true"
             />

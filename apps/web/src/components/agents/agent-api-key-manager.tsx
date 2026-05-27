@@ -51,12 +51,13 @@ export function AgentApiKeyManager({ agentId, agentName, onNewKey }: AgentApiKey
     `아래의 정보를 읽고 온보딩하기 바람.\nsprintable agent name : ${agentName}\nsprintable agent api key : ${apiKey}\n${LLMS_URL}`;
 
   const loadApiKeys = useCallback(async () => {
+    if (!agentId) return;
     setLoading(true);
     try {
       const response = await fetch(`/api/agents/${agentId}/api-key`);
       if (!response.ok) throw new Error('Failed to load API keys');
-      const result = await response.json();
-      setApiKeys(result.data || []);
+      const result = await response.json() as { data?: ApiKey[] };
+      setApiKeys(result.data ?? []);
     } catch (error) {
       addToast({
         type: 'error',
@@ -74,6 +75,7 @@ export function AgentApiKeyManager({ agentId, agentName, onNewKey }: AgentApiKey
   }, [loadApiKeys]);
 
   const generateApiKey = async () => {
+    if (!agentId) return;
     setLoading(true);
     try {
       const response = await fetch(`/api/agents/${agentId}/api-key`, {
@@ -82,8 +84,8 @@ export function AgentApiKeyManager({ agentId, agentName, onNewKey }: AgentApiKey
         body: JSON.stringify({ scope: selectedScopes }),
       });
       if (!response.ok) throw new Error('Failed to generate API key');
-      const result = await response.json();
-      const rawKey = result.data.api_key as string;
+      const result = await response.json() as { data?: { api_key?: string } };
+      const rawKey = (result.data?.api_key ?? '') as string;
       setGeneratedKey(rawKey);
       onNewKey?.(rawKey);
       await loadApiKeys();
@@ -99,6 +101,7 @@ export function AgentApiKeyManager({ agentId, agentName, onNewKey }: AgentApiKey
   };
 
   const revokeAllAndGenerate = async () => {
+    if (!agentId) return;
     setRevokeConfirmDialog(false);
     setLoading(true);
     try {
@@ -117,6 +120,7 @@ export function AgentApiKeyManager({ agentId, agentName, onNewKey }: AgentApiKey
   };
 
   const revokeApiKey = async (keyId: string) => {
+    if (!agentId) return;
     if (!confirm('Are you sure you want to revoke this API key?')) return;
 
     setLoading(true);
@@ -207,7 +211,7 @@ export function AgentApiKeyManager({ agentId, agentName, onNewKey }: AgentApiKey
               onClick={() => void copyOnboardingMessage(generatedKey ?? (activeKeys[0] ? `${activeKeys[0].key_prefix}...` : ''))}
               className="gap-1.5"
             >
-              {copiedOnboarding ? <Check className="h-3.5 w-3.5 text-emerald-500" /> : <Copy className="h-3.5 w-3.5" />}
+              {copiedOnboarding ? <Check className="h-3.5 w-3.5 text-success" /> : <Copy className="h-3.5 w-3.5" />}
               온보딩 메시지 복사
             </Button>
             <Button
@@ -340,7 +344,7 @@ export function AgentApiKeyManager({ agentId, agentName, onNewKey }: AgentApiKey
                     className="font-mono text-sm"
                   />
                   <Button onClick={() => void copyToClipboard(generatedKey)} className="gap-1.5 shrink-0">
-                    {copiedKey ? <Check className="h-3.5 w-3.5 text-emerald-500" /> : <Copy className="h-3.5 w-3.5" />}
+                    {copiedKey ? <Check className="h-3.5 w-3.5 text-success" /> : <Copy className="h-3.5 w-3.5" />}
                     {copiedKey ? 'Copied!' : 'Copy'}
                   </Button>
                 </div>
@@ -360,7 +364,7 @@ export function AgentApiKeyManager({ agentId, agentName, onNewKey }: AgentApiKey
                   className="mt-2 gap-1.5"
                   onClick={() => void copyOnboardingMessage(generatedKey)}
                 >
-                  {copiedOnboarding ? <Check className="h-3.5 w-3.5 text-emerald-500" /> : <Copy className="h-3.5 w-3.5" />}
+                  {copiedOnboarding ? <Check className="h-3.5 w-3.5 text-success" /> : <Copy className="h-3.5 w-3.5" />}
                   온보딩 메시지 복사
                 </Button>
               </div>

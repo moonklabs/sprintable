@@ -5,7 +5,7 @@ import { useRef, useState } from 'react';
 import { useDroppable } from '@dnd-kit/core';
 import { SortableContext, verticalListSortingStrategy } from '@dnd-kit/sortable';
 import { useTranslations } from 'next-intl';
-import { Plus } from 'lucide-react';
+import { ChevronDown, ChevronUp, Plus } from 'lucide-react';
 import { StoryCard } from './story-card';
 import type { KanbanStory, KanbanMember } from './types';
 import { VALID_TRANSITIONS } from './types';
@@ -25,9 +25,9 @@ const SortableContextCompat = SortableContext as unknown as ComponentType<Sortab
 const STATUS_COLOR: Record<string, { dot: string; tint: string }> = {
   'backlog': { dot: 'bg-muted-foreground/40', tint: 'bg-muted/40' },
   'ready-for-dev': { dot: 'bg-muted-foreground/60', tint: 'bg-muted/40' },
-  'in-progress': { dot: 'bg-amber-500', tint: 'bg-amber-400/8' },
-  'in-review': { dot: 'bg-emerald-500', tint: 'bg-emerald-400/8' },
-  'done': { dot: 'bg-emerald-600', tint: 'bg-emerald-500/12' },
+  'in-progress': { dot: 'bg-warning', tint: 'bg-warning-tint' },
+  'in-review': { dot: 'bg-success', tint: 'bg-success-tint' },
+  'done': { dot: 'bg-success', tint: 'bg-success-tint' },
 };
 
 interface KanbanColumnProps {
@@ -61,6 +61,9 @@ interface KanbanColumnProps {
   hasMore?: boolean;
   loadingMore?: boolean;
   onLoadMore?: () => void;
+  // BOARD-03: done column collapse
+  collapsed?: boolean;
+  onToggleCollapse?: () => void;
 }
 
 export function KanbanColumn({
@@ -70,6 +73,7 @@ export function KanbanColumn({
   onWipLimitEdit, onWipLimitSave, onWipLimitRemove, onWipDraftChange,
   onCreateStory, projectId, onKickoffStory, executionMap,
   totalCount, hasMore, loadingMore, onLoadMore,
+  collapsed, onToggleCollapse,
 }: KanbanColumnProps) {
   const { setNodeRef, isOver } = useDroppable({ id });
   const t = useTranslations('board');
@@ -110,7 +114,7 @@ export function KanbanColumn({
     : isOver && isValidTarget
       ? 'bg-primary/5 ring-1 ring-primary/20'
       : isValidTarget
-        ? 'bg-emerald-400/5'
+        ? 'bg-success/5'
         : isInvalidTarget
           ? 'bg-muted/20 opacity-45'
           : statusColor.tint;
@@ -118,69 +122,101 @@ export function KanbanColumn({
   return (
     <div
       ref={setNodeRef}
-      className={`flex h-full w-[280px] min-w-[240px] flex-col rounded-xl p-3 transition ${colClass}`}
+      className={`flex h-full flex-col rounded-xl p-3 transition ${collapsed ? 'w-[52px] min-w-[52px]' : 'w-[280px] min-w-[240px]'} ${colClass}`}
     >
       {isDragging && isValidTarget && (
-        <div className="mb-3 rounded-xl border border-emerald-400/20 bg-emerald-400/8 px-2 py-1 text-center text-[10px] font-medium uppercase tracking-widest text-emerald-400/70">
+        <div className="mb-3 rounded-xl border border-success-border/30 bg-success-tint px-2 py-1 text-center text-[10px] font-medium uppercase tracking-widest text-success/70">
           {t('validDrop')}
         </div>
       )}
 
       {/* 컬럼 헤더 */}
-      <div className="mb-3 flex flex-col gap-2">
-        <div className="flex items-center justify-between gap-3">
-          <h3 className="flex items-center gap-2 text-xs font-semibold uppercase tracking-wider text-muted-foreground">
-            <span className={`h-2 w-2 rounded-full ${statusColor.dot}`} aria-hidden="true" />
-            {label}
-          </h3>
-          <div className="flex items-center gap-1.5">
-            {/* AC1: WIP 초과 배지 */}
-            {wipExceeded && (
-              <Badge variant="destructive" className="rounded-full px-2 font-mono text-[10px]">
-                {t('wipLimitExceeded')}
-              </Badge>
-            )}
-            {/* AC1: WIP limit 배지 (설정된 경우) */}
-            {wipLimit !== null && wipLimit !== undefined && !wipExceeded && (
-              <Badge variant="secondary" className="rounded-full px-2 font-mono text-[10px] text-muted-foreground">
-                {t('wipLimitLabel')}: {wipLimit}
-              </Badge>
-            )}
-            {/* 카드 수 배지 */}
-            <Badge
-              variant="secondary"
-              className={`rounded-full px-2.5 font-mono text-[11px] shadow-sm ${wipExceeded ? 'bg-destructive/15 text-destructive' : ''}`}
-            >
-              {totalCount !== undefined ? (hasMore ? `${totalCount}+` : totalCount) : stories.length}
-            </Badge>
-            {/* AC5: WIP limit 편집 버튼 */}
-            <button
-              type="button"
-              aria-label={t('wipLimitSet')}
-              title={t('wipLimitSet')}
-              onClick={onWipLimitEdit}
-              className="flex h-5 w-5 items-center justify-center rounded text-muted-foreground/60 transition hover:text-foreground"
-            >
-              <svg width="12" height="12" viewBox="0 0 16 16" fill="none" xmlns="http://www.w3.org/2000/svg" aria-hidden="true">
-                <path d="M11.013 1.427a1.75 1.75 0 012.474 2.474L4.92 12.47l-3.265.905.905-3.265 8.453-8.683z" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"/>
-              </svg>
-            </button>
-            {onCreateStory ? (
+      <div className={`mb-3 flex flex-col gap-2 ${collapsed ? 'items-center' : ''}`}>
+        <div className={`flex gap-3 ${collapsed ? 'flex-col items-center' : 'items-center justify-between'}`}>
+          {collapsed ? (
+            <>
               <button
                 type="button"
-                aria-label={t('addStory')}
-                title={t('addStory')}
-                onClick={startCompose}
-                className="flex h-5 w-5 items-center justify-center rounded text-muted-foreground/60 transition hover:bg-muted hover:text-foreground"
+                aria-label="Expand done column"
+                onClick={onToggleCollapse}
+                className="flex h-5 w-5 items-center justify-center rounded text-muted-foreground/60 transition hover:text-foreground"
               >
-                <Plus className="h-3.5 w-3.5" />
+                <ChevronDown className="h-3.5 w-3.5" />
               </button>
-            ) : null}
-          </div>
+              <Badge
+                variant="secondary"
+                className={`rounded-full px-2 font-mono text-[11px] shadow-sm ${wipExceeded ? 'bg-destructive/15 text-destructive' : ''}`}
+              >
+                {totalCount !== undefined ? (hasMore ? `${totalCount}+` : totalCount) : stories.length}
+              </Badge>
+            </>
+          ) : (
+            <>
+              <h3 className="flex items-center gap-2 text-xs font-semibold uppercase tracking-wider text-muted-foreground">
+                <span className={`h-2 w-2 rounded-full ${statusColor.dot}`} aria-hidden="true" />
+                {label}
+              </h3>
+              <div className="flex items-center gap-1.5">
+                {/* AC1: WIP 초과 배지 */}
+                {wipExceeded && (
+                  <Badge variant="destructive" className="rounded-full px-2 font-mono text-[10px]">
+                    {t('wipLimitExceeded')}
+                  </Badge>
+                )}
+                {/* AC1: WIP limit 배지 (설정된 경우) */}
+                {wipLimit !== null && wipLimit !== undefined && !wipExceeded && (
+                  <Badge variant="secondary" className="rounded-full px-2 font-mono text-[10px] text-muted-foreground">
+                    {t('wipLimitLabel')}: {wipLimit}
+                  </Badge>
+                )}
+                {/* 카드 수 배지 */}
+                <Badge
+                  variant="secondary"
+                  className={`rounded-full px-2.5 font-mono text-[11px] shadow-sm ${wipExceeded ? 'bg-destructive/15 text-destructive' : ''}`}
+                >
+                  {totalCount !== undefined ? (hasMore ? `${totalCount}+` : totalCount) : stories.length}
+                </Badge>
+                {/* AC5: WIP limit 편집 버튼 */}
+                <button
+                  type="button"
+                  aria-label={t('wipLimitSet')}
+                  title={t('wipLimitSet')}
+                  onClick={onWipLimitEdit}
+                  className="flex h-5 w-5 items-center justify-center rounded text-muted-foreground/60 transition hover:text-foreground"
+                >
+                  <svg width="12" height="12" viewBox="0 0 16 16" fill="none" xmlns="http://www.w3.org/2000/svg" aria-hidden="true">
+                    <path d="M11.013 1.427a1.75 1.75 0 012.474 2.474L4.92 12.47l-3.265.905.905-3.265 8.453-8.683z" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"/>
+                  </svg>
+                </button>
+                {/* BOARD-03: done 컬럼 접기 버튼 */}
+                {onToggleCollapse && (
+                  <button
+                    type="button"
+                    aria-label="Collapse done column"
+                    onClick={onToggleCollapse}
+                    className="flex h-5 w-5 items-center justify-center rounded text-muted-foreground/60 transition hover:text-foreground"
+                  >
+                    <ChevronUp className="h-3.5 w-3.5" />
+                  </button>
+                )}
+                {onCreateStory ? (
+                  <button
+                    type="button"
+                    aria-label={t('addStory')}
+                    title={t('addStory')}
+                    onClick={startCompose}
+                    className="flex h-5 w-5 items-center justify-center rounded text-muted-foreground/60 transition hover:bg-muted hover:text-foreground"
+                  >
+                    <Plus className="h-3.5 w-3.5" />
+                  </button>
+                ) : null}
+              </div>
+            </>
+          )}
         </div>
 
         {/* AC5: WIP limit 편집 UI */}
-        {wipEditing && (
+        {!collapsed && wipEditing && (
           <div className="flex items-center gap-2">
             <Input
               ref={inputRef}
@@ -206,7 +242,7 @@ export function KanbanColumn({
         )}
       </div>
 
-      {composing ? (
+      {!collapsed && composing ? (
         <div className="mb-2 rounded-xl border border-primary/30 bg-background/50 p-2">
           <Input
             autoFocus
@@ -245,44 +281,48 @@ export function KanbanColumn({
         </div>
       ) : null}
 
-      <SortableContextCompat items={stories.map((s) => s.id)} strategy={verticalListSortingStrategy}>
-        <div className="flex min-h-0 min-w-0 flex-1 flex-col gap-2 overflow-y-auto [&>*]:shrink-0">
-          {stories.length === 0 && !composing ? (
-            <div className="flex min-h-[100px] items-center justify-center px-4 text-center">
-              <p className="text-xs text-muted-foreground/60">{t('noStories')}</p>
+      {!collapsed && (
+        <>
+          <SortableContextCompat items={stories.map((s) => s.id)} strategy={verticalListSortingStrategy}>
+            <div className="flex min-h-0 min-w-0 flex-1 flex-col gap-2 overflow-y-auto [&>*]:shrink-0">
+              {stories.length === 0 && !composing ? (
+                <div className="flex min-h-[100px] items-center justify-center px-4 text-center">
+                  <p className="text-xs text-muted-foreground/60">{t('noStories')}</p>
+                </div>
+              ) : null}
+              {stories.map((story) => (
+                <StoryCard
+                  key={story.id}
+                  story={story}
+                  epicName={story.epic_id ? epicMap[story.epic_id] : undefined}
+                  assignee={story.assignee_id ? memberMap[story.assignee_id] : undefined}
+                  onClick={() => onStoryClick(story)}
+                  onEdit={onEditStory}
+                  onChangeStatus={onChangeStatus}
+                  onAssign={onAssignStory}
+                  onDelete={onDeleteStory}
+                  projectId={projectId}
+                  onKickoff={onKickoffStory}
+                  lastExecution={executionMap?.[story.id] ?? null}
+                />
+              ))}
             </div>
-          ) : null}
-          {stories.map((story) => (
-            <StoryCard
-              key={story.id}
-              story={story}
-              epicName={story.epic_id ? epicMap[story.epic_id] : undefined}
-              assignee={story.assignee_id ? memberMap[story.assignee_id] : undefined}
-              onClick={() => onStoryClick(story)}
-              onEdit={onEditStory}
-              onChangeStatus={onChangeStatus}
-              onAssign={onAssignStory}
-              onDelete={onDeleteStory}
-              projectId={projectId}
-              onKickoff={onKickoffStory}
-              lastExecution={executionMap?.[story.id] ?? null}
-            />
-          ))}
-        </div>
-      </SortableContextCompat>
+          </SortableContextCompat>
 
-      {/* CB-S4: 더 보기 버튼 */}
-      {hasMore && (
-        <div className="mt-2 px-1">
-          <button
-            type="button"
-            onClick={onLoadMore}
-            disabled={loadingMore}
-            className="w-full rounded-md px-3 py-1.5 text-xs text-muted-foreground hover:bg-muted/50 disabled:opacity-50"
-          >
-            {loadingMore ? '불러오는 중...' : '더 보기'}
-          </button>
-        </div>
+          {/* CB-S4: 더 보기 버튼 */}
+          {hasMore && (
+            <div className="mt-2 px-1">
+              <button
+                type="button"
+                onClick={onLoadMore}
+                disabled={loadingMore}
+                className="w-full rounded-md px-3 py-1.5 text-xs text-muted-foreground hover:bg-muted/50 disabled:opacity-50"
+              >
+                {loadingMore ? '불러오는 중...' : '더 보기'}
+              </button>
+            </div>
+          )}
+        </>
       )}
     </div>
   );
