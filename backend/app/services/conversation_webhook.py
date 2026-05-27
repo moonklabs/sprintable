@@ -140,6 +140,18 @@ async def deliver_conversation_message_webhook(
                         existing_ids.add(wh.id)
                         existing_urls.add(wh.url)
 
+            # 웹훅 없는 멤버 → 내장 /chats 경로로 fallback (conversations router에서 처리)
+            webhook_covered_ids: set[uuid.UUID] = {
+                wh.member_id for wh in target_webhooks if wh.member_id is not None
+            }
+            fallback_ids = [mid for mid in member_ids_for_webhook if mid not in webhook_covered_ids]
+            if fallback_ids:
+                logger.debug(
+                    "conversation webhook: %d member(s) without webhook — in-app fallback applies message_id=%s",
+                    len(fallback_ids),
+                    message_id,
+                )
+
             if not target_webhooks:
                 return
 
