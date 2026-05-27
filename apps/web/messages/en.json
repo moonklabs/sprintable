@@ -2129,7 +2129,11 @@
     "addParticipantsTitle": "Add Participants",
     "participantsOthers": "{count} more",
     "forkInfo": "Adding someone to a DM creates a new group chat. The existing DM is preserved.",
-    "adding": "Adding…"
+    "adding": "Adding…",
+    "you": "You",
+    "agent": "Agent",
+    "personCount": "{count} people",
+    "agentCount": "You + {count} agents"
   },
   "activityLog": {
     "title": "Activity Log",
