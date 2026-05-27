@@ -33,6 +33,10 @@ services:
       JWT_SECRET: ${JWT_SECRET:-change-me-in-production-min-32-chars}
       SECRET_KEY: ${SECRET_KEY:-change-me-in-production-min-32-chars}
       DEBUG: "True"
+      # Agent chat file uploads (POST /api/v2/channel/upload)
+      CHANNEL_FILES_DIR: /app/data/channel_files
+    volumes:
+      - ./data/channel_files:/app/data/channel_files
     command: >
       sh -c "python bootstrap.py && uvicorn app.main:app --host 0.0.0.0 --port 8000"
     ports:
