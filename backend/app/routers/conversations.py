@@ -383,10 +383,10 @@ async def list_conversations(
 
     all_member_ids = {r.member_id for r in p_rows}
     member_rows = (await db.execute(
-        select(TeamMember.id, TeamMember.name, TeamMember.avatar_url)
+        select(TeamMember.id, TeamMember.name, TeamMember.avatar_url, TeamMember.type)
         .where(TeamMember.id.in_(all_member_ids))
     )).all() if all_member_ids else []
-    member_map = {r.id: {"name": r.name, "avatar_url": r.avatar_url} for r in member_rows}
+    member_map = {r.id: {"name": r.name, "avatar_url": r.avatar_url, "type": r.type} for r in member_rows}
 
     conv_participants: dict[uuid.UUID, list[dict]] = defaultdict(list)
     for r in p_rows:
@@ -395,6 +395,7 @@ async def list_conversations(
             "member_id": str(r.member_id),
             "name": info.get("name"),
             "avatar_url": info.get("avatar_url"),
+            "type": info.get("type", "human"),
         })
 
     result = []
