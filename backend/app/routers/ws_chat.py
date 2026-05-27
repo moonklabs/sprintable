@@ -13,6 +13,8 @@ from datetime import datetime, timezone
 from fastapi import APIRouter, Query, WebSocket, WebSocketDisconnect
 from sqlalchemy import select
 
+from sqlalchemy.exc import IntegrityError
+
 from app.core.database import async_session_factory
 from app.core.security import JWTError, decode_jwt, hash_token
 from app.models.api_key import ApiKey
@@ -83,16 +85,26 @@ async def _get_or_create_conversation(
             )
         )).scalar_one_or_none()
         if conv is None:
-            conv = Conversation(
-                org_id=org_id,
-                project_id=project_id,
-                type="group",
-                title=title,
-                created_by=agent_id,
-            )
-            db.add(conv)
-            await db.commit()
-            await db.refresh(conv)
+            try:
+                conv = Conversation(
+                    org_id=org_id,
+                    project_id=project_id,
+                    type="group",
+                    title=title,
+                    created_by=agent_id,
+                )
+                db.add(conv)
+                await db.commit()
+                await db.refresh(conv)
+            except IntegrityError:
+                await db.rollback()
+                conv = (await db.execute(
+                    select(Conversation).where(
+                        Conversation.org_id == org_id,
+                        Conversation.project_id == project_id,
+                        Conversation.title == title,
+                    )
+                )).scalar_one()
         return conv.id
 
 
@@ -132,15 +144,25 @@ async def ws_chat_hub(
     _rooms[room_key].add(websocket)
     logger.info("ws_chat: connected agent_id=%s caller=%s", agent_id, caller.id)
 
-    # agent의 org_id/project_id 조회 (room 초기화용)
+    # agent의 org_id/project_id 조회 (room 초기화용) — type='agent' 한정
     async with async_session_factory() as db:
         agent_member = (await db.execute(
-            select(TeamMember).where(TeamMember.id == agent_id)
+            select(TeamMember).where(
+                TeamMember.id == agent_id,
+                TeamMember.type == "agent",
+            )
         )).scalar_one_or_none()
 
     if agent_member is None:
         await websocket.send_text(json.dumps({"error": "agent not found"}))
         await websocket.close(code=4004)
+        _rooms[room_key].discard(websocket)
+        return
+
+    # org 교차 검증 — caller가 agent와 동일 org 소속인지 확인
+    if agent_member.org_id != caller.org_id:
+        await websocket.send_text(json.dumps({"error": "forbidden"}))
+        await websocket.close(code=4003, reason="Forbidden")
         _rooms[room_key].discard(websocket)
         return
 
