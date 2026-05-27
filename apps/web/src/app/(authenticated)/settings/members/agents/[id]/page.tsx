@@ -77,6 +77,12 @@ function buildMcpConfig(apiKey: string) {
   );
 }
 
+function isWebhookUrlAllowed(url: string): boolean {
+  if (!url) return true;
+  if (/^https:\/\//i.test(url)) return true;
+  return /^http:\/\/(localhost|127\.\d+\.\d+\.\d+|192\.168\.\d+\.\d+|10\.\d+\.\d+\.\d+|172\.(1[6-9]|2\d|3[01])\.\d+\.\d+)/i.test(url);
+}
+
 export default function AgentDetailPage() {
   const t = useTranslations('settings');
   const tc = useTranslations('common');
@@ -213,8 +219,8 @@ export default function AgentDetailPage() {
 
   const handleSaveWebhook = async () => {
     const trimmed = webhookUrl.trim();
-    if (trimmed && !/^https:\/\//i.test(trimmed)) {
-      addToast({ type: 'error', title: 'Webhook URL must start with https://' });
+    if (trimmed && !isWebhookUrlAllowed(trimmed)) {
+      addToast({ type: 'error', title: t('webhookUrlInvalid') });
       return;
     }
     if (!agent) return;
@@ -286,8 +292,8 @@ export default function AgentDetailPage() {
   const handleSaveNewProjectWebhook = async () => {
     if (!newProjectResult) return;
     const trimmed = newProjectResult.webhookUrl.trim();
-    if (trimmed && !/^https:\/\//i.test(trimmed)) {
-      addToast({ type: 'error', title: 'Webhook URL must start with https://' });
+    if (trimmed && !isWebhookUrlAllowed(trimmed)) {
+      addToast({ type: 'error', title: t('webhookUrlInvalid') });
       return;
     }
     setNewProjectResult((prev) => prev ? { ...prev, savingWebhook: true } : null);
