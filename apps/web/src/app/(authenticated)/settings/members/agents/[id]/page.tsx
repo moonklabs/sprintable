@@ -5,6 +5,7 @@ import { useParams, useRouter } from 'next/navigation';
 import Link from 'next/link';
 import { useTranslations } from 'next-intl';
 import { ArrowLeft, Check, Copy, Pencil, Plus, X } from 'lucide-react';
+import { Switch } from '@/components/ui/switch';
 import { AgentApiKeyManager } from '@/components/agents/agent-api-key-manager';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
@@ -77,6 +78,11 @@ function buildMcpConfig(apiKey: string) {
   );
 }
 
+function getWebhookState(configs: WebhookConfig[]): 'empty' | 'active' | 'paused' {
+  if (!configs.length) return 'empty';
+  return configs[0].is_active ? 'active' : 'paused';
+}
+
 function isWebhookUrlAllowed(url: string): boolean {
   if (!url) return true;
   if (/^https:\/\//i.test(url)) return true;
@@ -102,6 +108,7 @@ export default function AgentDetailPage() {
 
   const [webhookConfigs, setWebhookConfigs] = useState<WebhookConfig[]>([]);
   const [webhookUrl, setWebhookUrl] = useState('');
+  const [webhookActive, setWebhookActive] = useState(false);
   const [savingWebhook, setSavingWebhook] = useState(false);
 
   const [freshApiKey, setFreshApiKey] = useState<string | null>(null);
@@ -181,6 +188,10 @@ export default function AgentDetailPage() {
     void fetchSameNameAgents(agent.name);
   }, [agent, fetchWebhookConfigs, fetchSameNameAgents]);
 
+  useEffect(() => {
+    setWebhookActive(webhookConfigs[0]?.is_active ?? false);
+  }, [webhookConfigs]);
+
   const assignedProjectIds = useMemo(() => {
     const ids = new Set(sameNameAgents.map((a) => a.project_id));
     if (agent) ids.add(agent.project_id);
@@ -235,7 +246,7 @@ export default function AgentDetailPage() {
         const res = await fetch('/api/webhooks/config', {
           method: 'PUT',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ member_id: id, url: trimmed, project_id: agent.project_id }),
+          body: JSON.stringify({ member_id: id, url: trimmed, project_id: agent.project_id, is_active: webhookActive }),
         });
         if (!res.ok) {
           const json = await res.json().catch(() => null) as { error?: { message?: string } } | null;
@@ -244,6 +255,34 @@ export default function AgentDetailPage() {
         }
       }
       addToast({ type: 'success', title: 'Webhook URL saved' });
+      await fetchWebhookConfigs(agent.project_id);
+    } finally {
+      setSavingWebhook(false);
+    }
+  };
+
+  const handleToggle = async (next: boolean) => {
+    if (!agent) return;
+    setWebhookActive(next);
+    if (!webhookConfigs[0]) return;
+    setSavingWebhook(true);
+    try {
+      const res = await fetch('/api/webhooks/config', {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          member_id: id,
+          url: webhookConfigs[0].url,
+          project_id: agent.project_id,
+          is_active: next,
+        }),
+      });
+      if (!res.ok) {
+        setWebhookActive(!next);
+        const json = await res.json().catch(() => null) as { error?: { message?: string } } | null;
+        addToast({ type: 'error', title: json?.error?.message ?? tc('error') });
+        return;
+      }
       await fetchWebhookConfigs(agent.project_id);
     } finally {
       setSavingWebhook(false);
@@ -456,34 +495,65 @@ export default function AgentDetailPage() {
         />
       )}
 
-      {/* Webhook 설정 */}
-      <SectionCard>
-        <SectionCardHeader>
-          <div className="space-y-1">
-            <h2 className="text-base font-semibold text-foreground">Webhook URL</h2>
-            <p className="text-sm text-muted-foreground">이 에이전트로 이벤트가 발생할 때 POST로 전송됩니다. HTTPS 필수.</p>
-          </div>
-        </SectionCardHeader>
-        <SectionCardBody className="space-y-3">
-          <div className="flex gap-2">
-            <OperatorInput
-              type="url"
-              value={webhookUrl}
-              onChange={(e) => setWebhookUrl(e.target.value)}
-              placeholder="https://your-agent.example.com/webhook"
-              className="flex-1 font-mono text-xs"
-            />
-            <Button variant="hero" size="sm" onClick={() => void handleSaveWebhook()} disabled={savingWebhook}>
-              {savingWebhook ? '...' : tc('save')}
-            </Button>
-          </div>
-          {webhookConfigs[0] ? (
-            <p className="text-xs text-muted-foreground truncate font-mono">
-              Current: {webhookConfigs[0].url}
-            </p>
-          ) : null}
-        </SectionCardBody>
-      </SectionCard>
+      {/* Notification channel section */}
+      {(() => {
+        const webhookState = getWebhookState(webhookConfigs);
+        return (
+          <SectionCard>
+            <SectionCardHeader>
+              <div className="space-y-1">
+                <div className="flex items-center gap-2 flex-wrap">
+                  <h2 className="text-base font-semibold text-foreground">{t('notificationChannel')}</h2>
+                  {webhookState === 'empty' && <Badge variant="info">{t('webhookStatusEmpty')}</Badge>}
+                  {webhookState === 'active' && <Badge variant="success">{t('webhookStatusActive')}</Badge>}
+                  {webhookState === 'paused' && (
+                    <>
+                      <Badge variant="secondary">{t('webhookStatusInactive')}</Badge>
+                      <Badge variant="info">{t('webhookStatusFallback')}</Badge>
+                    </>
+                  )}
+                </div>
+                <p className="text-sm text-muted-foreground">
+                  {webhookState === 'empty' && t('webhookHelperEmpty')}
+                  {webhookState === 'active' && t('webhookHelperActive')}
+                  {webhookState === 'paused' && t('webhookHelperPaused')}
+                </p>
+              </div>
+            </SectionCardHeader>
+            <SectionCardBody className="space-y-3">
+              <div className="flex items-center justify-between gap-4">
+                <div className="flex-1 min-w-0">
+                  <p className="text-sm font-medium">{t('webhookEnabledToggle')}</p>
+                  <p className="text-xs text-muted-foreground mt-0.5">{t('webhookEnabledHelp')}</p>
+                </div>
+                <Switch
+                  checked={webhookActive}
+                  onCheckedChange={(next) => void handleToggle(next)}
+                  disabled={savingWebhook}
+                />
+              </div>
+              <div className="flex gap-2">
+                <OperatorInput
+                  type="url"
+                  value={webhookUrl}
+                  onChange={(e) => setWebhookUrl(e.target.value)}
+                  placeholder="https://your-agent.example.com/webhook"
+                  className="flex-1 font-mono text-xs"
+                  disabled={!webhookActive}
+                />
+                <Button
+                  variant="hero"
+                  size="sm"
+                  onClick={() => void handleSaveWebhook()}
+                  disabled={savingWebhook || !webhookActive || !webhookUrl.trim()}
+                >
+                  {savingWebhook ? '...' : tc('save')}
+                </Button>
+              </div>
+            </SectionCardBody>
+          </SectionCard>
+        );
+      })()}
 
       {/* MCP Config */}
       <SectionCard>
