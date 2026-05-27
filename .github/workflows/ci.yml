@@ -11,6 +11,50 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
+  alembic-fresh-db:
+    name: Alembic upgrade head (fresh DB)
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_USER: sprintable
+          POSTGRES_PASSWORD: sprintable
+          POSTGRES_DB: sprintable_test
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd pg_isready
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v5
+        with:
+          version: 'latest'
+
+      - name: alembic upgrade head (fresh DB)
+        working-directory: backend
+        env:
+          ALEMBIC_DATABASE_URL: postgresql+psycopg2://sprintable:sprintable@localhost:5432/sprintable_test
+          DATABASE_URL: postgresql+asyncpg://sprintable:sprintable@localhost:5432/sprintable_test
+          JWT_SECRET: ci-test-secret-at-least-32-chars-long
+          SECRET_KEY: ci-test-secret-at-least-32-chars-long
+        run: uv run alembic upgrade head
+
+      - name: Verify tables created
+        run: |
+          PGPASSWORD=sprintable psql -h localhost -U sprintable -d sprintable_test -c \
+            "SELECT count(*) FROM information_schema.tables WHERE table_schema='public' AND table_type='BASE TABLE';" \
+            | grep -E "^\s+[0-9]+"
+
   backend-test:
     name: Backend pytest
     runs-on: ubuntu-latest
