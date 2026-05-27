@@ -737,23 +737,40 @@ async def send_message(
     # 브라우저 SSE 구독자에게 1회 발행 — pending 유무와 무관하게 commit 후 항상 발행
     publish_event(str(org_id), "conversation:message", _msg_payload(msg, sender))
 
-    # ws_chat WebSocket 브로드캐스트 — ws-chat 전용 conversation이면 WS 허브로 실시간 전달
-    if conv.title and conv.title.startswith("ws-chat:") and conv.created_by:
-        try:
-            from app.routers.ws_chat import _broadcast
-            await _broadcast(
-                str(conv.created_by),
-                json.dumps({
+    # ws_chat WebSocket 브로드캐스트 — agent 참가자 room에 실시간 전달 (conv.type/title 무관)
+    try:
+        from app.routers.ws_chat import _broadcast, _rooms
+
+        if _rooms:  # 활성 WS 연결 없으면 쿼리 스킵
+            # ConversationParticipant 중 agent type 멤버 수집
+            agent_result = await db.execute(
+                select(TeamMember.id)
+                .join(ConversationParticipant, ConversationParticipant.member_id == TeamMember.id)
+                .where(
+                    ConversationParticipant.conversation_id == conversation_id,
+                    TeamMember.type == "agent",
+                )
+            )
+            agent_ids: set[str] = {str(row[0]) for row in agent_result.all()}
+
+            # ws-chat 전용 conv 호환 — created_by 포함 (participant 테이블에 없는 경우 대비)
+            if conv.created_by:
+                agent_ids.add(str(conv.created_by))
+
+            if agent_ids:
+                ws_payload = json.dumps({
                     "id": str(msg.id),
                     "conversation_id": str(conversation_id),
                     "sender_id": str(sender.id),
                     "sender_name": sender.name,
                     "content": msg.content,
                     "ts": msg.created_at.isoformat(),
-                }),
-            )
-        except Exception:
-            logger.warning("ws_chat broadcast failed message_id=%s", msg.id, exc_info=True)
+                })
+                for aid in agent_ids:
+                    if aid in _rooms:
+                        await _broadcast(aid, ws_payload)
+    except Exception:
+        logger.warning("ws_chat broadcast failed message_id=%s", msg.id, exc_info=True)
 
     # webhook delivery BackgroundTask (AC1~8)
     from app.services.conversation_webhook import deliver_conversation_message_webhook
