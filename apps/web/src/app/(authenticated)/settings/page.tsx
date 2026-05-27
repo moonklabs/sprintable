@@ -1719,7 +1719,7 @@ export default function SettingsPage() {
             </TabsContent>
             ) : null}
 
-            {adminChecked && isAdmin ? (
+            {isEEEnabled() && adminChecked && isAdmin ? (
             <TabsContent value="subscription">
               <SectionCard>
                 <SectionCardHeader>
