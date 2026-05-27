@@ -16,6 +16,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.models.event import Event
 from app.models.notification import Notification, NotificationSetting
 from app.models.team import TeamMember
+from app.models.webhook_config import WebhookConfig
 
 logger = logging.getLogger(__name__)
 
@@ -64,6 +65,20 @@ async def dispatch_notification(
         if not enabled_member_ids:
             return
 
+        # 활성 webhook_configs가 있는 멤버 집합 — 웹훅 채널로 전달되므로 내장 알림 스킵
+        webhook_member_ids: set[uuid.UUID] = set()
+        try:
+            wh_rows = await db.execute(
+                select(WebhookConfig.member_id).where(
+                    WebhookConfig.member_id.in_(enabled_member_ids),
+                    WebhookConfig.is_active.is_(True),
+                    WebhookConfig.member_id.isnot(None),
+                )
+            )
+            webhook_member_ids = {row for row in wh_rows.scalars().all()}
+        except Exception:
+            logger.warning("dispatch_notification: webhook_configs lookup failed — no skip applied")
+
         # BUG-2 수정: user_id.isnot(None) 필터 제거 — agent는 user_id=NULL이므로 제외됐던 문제
         # type 및 project_id도 함께 조회
         members_result = await db.execute(
@@ -77,6 +92,12 @@ async def dispatch_notification(
         inserted = False
         for member_row in members:
             if member_row.type == "agent":
+                # 활성 웹훅 있는 에이전트 → 외부 채널로 전달되므로 내장 Event 스킵
+                if member_row.id in webhook_member_ids:
+                    logger.debug(
+                        "dispatch_notification: skip agent %s — has active webhook", member_row.id
+                    )
+                    continue
                 # BUG-3 수정: agent → Notification 대신 events 테이블 INSERT
                 if member_row.project_id:
                     event = Event(

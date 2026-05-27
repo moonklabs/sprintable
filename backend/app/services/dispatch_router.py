@@ -70,7 +70,34 @@ async def route_dispatch_event(
 
     payload = _event_to_payload(event)
 
-    if channel == "sse":
+    # webhook_configs 조회 — 활성 웹훅이 있으면 channel 설정에 관계없이 외부로 전달
+    active_wh = (await db.execute(
+        select(WebhookConfig).where(
+            WebhookConfig.member_id == recipient_id,
+            WebhookConfig.is_active.is_(True),
+        )
+    )).scalars().first()
+
+    if active_wh and channel == "sse":
+        # 웹훅 설정된 에이전트 → 내장 SSE 스킵, 외부 웹훅으로만 전달
+        import httpx
+        is_discord_url = (
+            "discord.com/api/webhooks" in active_wh.url
+            or "discordapp.com/api/webhooks" in active_wh.url
+        )
+        ext_payload = (
+            {"content": f"[{event.event_type}] {payload.get('payload', {}).get('title', event.event_type)}"}
+            if is_discord_url
+            else payload
+        )
+        try:
+            async with httpx.AsyncClient(timeout=10.0) as client:
+                await client.post(active_wh.url, json=ext_payload)
+        except Exception:
+            logger.warning(
+                "dispatch_router: external POST failed member=%s url=%s", recipient_id, active_wh.url, exc_info=True
+            )
+    elif channel == "sse":
         _push_to_agent(str(recipient_id), payload)
 
     elif channel == "discord":
