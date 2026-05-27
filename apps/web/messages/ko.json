@@ -67,6 +67,19 @@
     "goDocs": "문서로 이동",
     "documents": "문서"
   },
+  "channel": {
+    "title": "채널 채팅",
+    "missingAgentId": "agent_id 파라미터가 필요합니다.",
+    "connecting": "연결 중…",
+    "empty": "메시지가 없습니다.",
+    "attachment": "첨부 파일",
+    "reply": "답장",
+    "cancelReply": "답장 취소",
+    "removeFile": "파일 제거",
+    "attachFile": "파일 첨부",
+    "inputPlaceholder": "메시지를 입력하세요… (Enter 전송 / Shift+Enter 줄바꿈)",
+    "send": "전송"
+  },
   "dashboard": {
     "title": "대시보드",
     "projects": "프로젝트",

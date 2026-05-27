@@ -67,6 +67,19 @@
     "goDocs": "Go to Docs",
     "documents": "Documents"
   },
+  "channel": {
+    "title": "Channel Chat",
+    "missingAgentId": "agent_id parameter is required.",
+    "connecting": "Connecting…",
+    "empty": "No messages.",
+    "attachment": "Attachment",
+    "reply": "Reply",
+    "cancelReply": "Cancel reply",
+    "removeFile": "Remove file",
+    "attachFile": "Attach file",
+    "inputPlaceholder": "Type a message… (Enter to send, Shift+Enter for new line)",
+    "send": "Send"
+  },
   "dashboard": {
     "title": "Dashboard",
     "projects": "Projects",
