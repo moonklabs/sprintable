@@ -2,6 +2,7 @@
 
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { useSearchParams } from 'next/navigation';
+import { useTranslations } from 'next-intl';
 import { Paperclip, Send, X } from 'lucide-react';
 import { useDashboardContext } from '@/app/dashboard/dashboard-shell';
 import { TopBarSlot } from '@/components/nav/top-bar-slot';
@@ -33,6 +34,7 @@ function fmtTime(ts: string): string {
 }
 
 export default function ChannelPage() {
+  const t = useTranslations('channel');
   const searchParams = useSearchParams();
   const agentId = searchParams.get('agent_id');
   const { currentTeamMemberId } = useDashboardContext();
@@ -146,16 +148,16 @@ export default function ChannelPage() {
   if (!agentId) {
     return (
       <div className="flex h-64 items-center justify-center">
-        <p className="text-sm text-muted-foreground">agent_id 파라미터가 필요합니다.</p>
+        <p className="text-sm text-muted-foreground">{t('missingAgentId')}</p>
       </div>
     );
   }
 
   const statusDot =
     wsStatus === 'connected'
-      ? 'bg-green-500'
+      ? 'bg-success'
       : wsStatus === 'connecting'
-        ? 'bg-yellow-500 animate-pulse'
+        ? 'bg-warning animate-pulse'
         : 'bg-muted-foreground';
 
   return (
@@ -163,7 +165,7 @@ export default function ChannelPage() {
       <TopBarSlot
         title={
           <div className="flex items-center gap-2">
-            <span className="text-sm font-medium text-foreground">채널 채팅</span>
+            <span className="text-sm font-medium text-foreground">{t('title')}</span>
             <span className={`h-2 w-2 rounded-full ${statusDot}`} title={wsStatus} />
           </div>
         }
@@ -174,13 +176,11 @@ export default function ChannelPage() {
         <section className="flex-1 overflow-y-auto px-4 py-4">
           {messages.length === 0 && (
             <p className="py-8 text-center text-sm text-muted-foreground">
-              {wsStatus === 'connecting' ? '연결 중…' : '메시지가 없습니다.'}
+              {wsStatus === 'connecting' ? t('connecting') : t('empty')}
             </p>
           )}
           {messages.map((msg) => {
             const isOwn = msg.senderId === currentTeamMemberId;
-            const replyTarget = replyTo === msg.id ? msg : null;
-            void replyTarget;
 
             return (
               <div
@@ -206,14 +206,14 @@ export default function ChannelPage() {
                         download
                         className="mt-1 block text-xs underline opacity-80"
                       >
-                        [첨부 파일]
+                        [{t('attachment')}]
                       </a>
                     )}
                     <button
                       type="button"
                       onClick={() => setReplyTo(msg.id)}
                       className={`absolute ${isOwn ? '-left-6' : '-right-6'} top-1 hidden text-muted-foreground group-hover:block`}
-                      title="답장"
+                      title={t('reply')}
                     >
                       ↩
                     </button>
@@ -236,13 +236,13 @@ export default function ChannelPage() {
             <div className="mb-2 flex items-center gap-2 rounded-md bg-muted px-3 py-1.5 text-xs text-muted-foreground">
               <span>
                 ↩{' '}
-                {(msgMapRef.current.get(replyTo)?.content ?? '').slice(0, 40) || '첨부 파일'}
+                {(msgMapRef.current.get(replyTo)?.content ?? '').slice(0, 40) || t('attachment')}
               </span>
               <button
                 type="button"
                 onClick={() => setReplyTo(null)}
                 className="ml-auto"
-                aria-label="답장 취소"
+                aria-label={t('cancelReply')}
               >
                 <X className="h-3 w-3" />
               </button>
@@ -256,7 +256,7 @@ export default function ChannelPage() {
                 type="button"
                 onClick={() => setPendingFile(null)}
                 className="ml-auto flex-shrink-0"
-                aria-label="파일 제거"
+                aria-label={t('removeFile')}
               >
                 <X className="h-3 w-3" />
               </button>
@@ -268,7 +268,7 @@ export default function ChannelPage() {
               onChange={(e) => setInput(e.target.value)}
               onKeyDown={handleKeyDown}
               rows={2}
-              placeholder="메시지를 입력하세요… (Enter 전송 / Shift+Enter 줄바꿈)"
+              placeholder={t('inputPlaceholder')}
               className="min-h-[44px] flex-1 resize-none rounded-lg border border-border bg-background px-3 py-2 text-sm text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-1 focus:ring-ring"
             />
             <input
@@ -282,7 +282,7 @@ export default function ChannelPage() {
               variant="ghost"
               size="icon"
               onClick={() => fileInputRef.current?.click()}
-              title="파일 첨부"
+              title={t('attachFile')}
             >
               <Paperclip className="h-4 w-4" />
             </Button>
@@ -291,7 +291,7 @@ export default function ChannelPage() {
               size="icon"
               onClick={() => void sendMessage()}
               disabled={!input.trim() && !pendingFile}
-              title="전송"
+              title={t('send')}
             >
               <Send className="h-4 w-4" />
             </Button>
