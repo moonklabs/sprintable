@@ -94,6 +94,7 @@ async def _get_or_create_conversation(
                 Conversation.id.in_(agent_conv_ids),
                 Conversation.type == "dm",
                 Conversation.org_id == org_id,
+                Conversation.project_id == project_id,
                 Conversation.status != "deleted",
             )
             .limit(1)
