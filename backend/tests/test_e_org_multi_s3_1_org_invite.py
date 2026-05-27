@@ -35,6 +35,7 @@ def _mock_invite(email: str = "new@example.com", role: str = "member") -> MagicM
     i.created_at = datetime.now(timezone.utc)
     i.email_sent_at = None
     i.email_error = None
+    i.invite_url = None
     return i
 
 
