@@ -2,7 +2,11 @@
  * S-COMM-08: sprintable onboard — 에이전트 온보딩 가이드 CLI
  *
  * AC1: 에이전트 종류 선택 (Claude Code / Hermes / Codex / OpenClaw / 기타)
- * AC2: Claude Code → fakechat 플러그인 설치 안내 + alias 자동 설정
+ * AC2: Claude Code → fakechat 플러그인 설치 안내 + shell/PS 자동 설정
+ *   - win32:  PowerShell $PROFILE function 주입
+ *   - darwin: .zshrc alias 주입
+ *   - linux:  .bashrc / .zshrc alias 주입
+ *   - 기타:   수동 설정 가이드 출력
  * AC3: 기타 에이전트 → API Key + SSE inbox URL + 구독 방법 안내
  */
 import select from "@inquirer/select";
@@ -19,18 +23,42 @@ export type OnboardAgentType =
   | "openclaw"
   | "other";
 
+export type SupportedPlatform = "win32" | "darwin" | "linux" | "unsupported";
+
 const FAKECHAT_CHANNEL = "plugin:fakechat:ws://localhost:8787";
 const FAKECHAT_PLUGIN = "@sprintable/fakechat";
 
-const SHELL_RC_FILES = [
-  join(homedir(), ".zshrc"),
-  join(homedir(), ".bashrc"),
-  join(homedir(), ".bash_profile"),
-];
+// ─── 플랫폼 감지 ──────────────────────────────────────────────────────────────
 
-/** 첫 번째 존재하는 RC 파일 반환. 없으면 .zshrc (신규 생성) */
-export function detectRcFile(): string {
-  return SHELL_RC_FILES.find((f) => existsSync(f)) ?? SHELL_RC_FILES[0];
+export function detectPlatform(): SupportedPlatform {
+  const p = process.platform;
+  if (p === "win32") return "win32";
+  if (p === "darwin") return "darwin";
+  if (p === "linux") return "linux";
+  return "unsupported";
+}
+
+// ─── Unix: RC 파일 + alias 로직 ───────────────────────────────────────────────
+
+const UNIX_RC_FILES: Record<SupportedPlatform, string[]> = {
+  darwin: [
+    join(homedir(), ".zshrc"),
+    join(homedir(), ".bash_profile"),
+    join(homedir(), ".bashrc"),
+  ],
+  linux: [
+    join(homedir(), ".bashrc"),
+    join(homedir(), ".zshrc"),
+    join(homedir(), ".bash_profile"),
+  ],
+  win32: [],
+  unsupported: [],
+};
+
+/** 첫 번째 존재하는 RC 파일 반환. 없으면 플랫폼 기본값 (신규 생성 대상). */
+export function detectRcFile(platform: SupportedPlatform = detectPlatform()): string {
+  const candidates = UNIX_RC_FILES[platform] ?? [];
+  return candidates.find((f) => existsSync(f)) ?? candidates[0] ?? join(homedir(), ".bashrc");
 }
 
 /** RC 파일에서 alias claude=... 라인과 기존 커맨드 추출 */
@@ -43,31 +71,128 @@ export function parseClaudeAlias(
 }
 
 /** RC 파일 내용에 fakechat 채널 추가 후 반환. 이미 있으면 원본 반환. */
-export function injectFakechatAlias(content: string, rcFile: string): string {
+export function injectFakechatAlias(content: string, _rcFile: string): string {
   const existing = parseClaudeAlias(content);
 
   if (existing) {
+    if (existing.cmd.includes("fakechat")) return content;
     if (existing.cmd.includes("--channels")) {
-      // 이미 --channels 있음 — fakechat만 추가
-      if (existing.cmd.includes("fakechat")) return content;
       const updated = `${existing.cmd} ${FAKECHAT_CHANNEL}`;
-      return content.replace(
-        existing.line,
-        `alias claude="${updated}"`,
-      );
+      return content.replace(existing.line, `alias claude="${updated}"`);
     }
     const updated = `${existing.cmd} --channels "${FAKECHAT_CHANNEL}"`;
     return content.replace(existing.line, `alias claude="${updated}"`);
   }
 
-  // alias 없음 → 새로 추가
   const newAlias = `\n# Added by sprintable onboard\nalias claude="claude --channels '${FAKECHAT_CHANNEL}'"\n`;
   return content + newAlias;
 }
 
-// ─── AC2: Claude Code 온보딩 ──────────────────────────────────────────────────
+// ─── Windows: PowerShell profile 로직 ────────────────────────────────────────
+
+/** PowerShell $PROFILE 경로 후보 목록 (PS 7+ 우선, 5.1 fallback) */
+export function getPowerShellProfiles(): string[] {
+  const home = homedir();
+  return [
+    join(home, "Documents", "PowerShell", "profile.ps1"),           // PS 7+
+    join(home, "Documents", "WindowsPowerShell", "profile.ps1"),     // PS 5.1
+  ];
+}
+
+export function detectPowerShellProfile(): string {
+  return getPowerShellProfiles().find((f) => existsSync(f)) ?? getPowerShellProfiles()[0];
+}
+
+/** PowerShell profile에서 function claude { ... } 블록 탐지 */
+export function parsePowerShellClaudeFunction(content: string): boolean {
+  return /^function\s+claude\s*\{/m.test(content);
+}
+
+/** PowerShell profile에 fakechat 채널 function 주입 */
+export function injectFakechatPowerShell(content: string): string {
+  if (parsePowerShellClaudeFunction(content)) {
+    if (content.includes("fakechat")) return content;
+    // 기존 function 교체: --channels 추가
+    return content.replace(
+      /^(function\s+claude\s*\{[^}]*)\}/m,
+      `function claude { claude.exe --channels '${FAKECHAT_CHANNEL}' @args }`,
+    );
+  }
+  const newFn = `\n# Added by sprintable onboard\nfunction claude { claude.exe --channels '${FAKECHAT_CHANNEL}' @args }\n`;
+  return content + newFn;
+}
+
+// ─── AC2: Claude Code 온보딩 — 플랫폼 분기 ───────────────────────────────────
+
+async function _applyUnixAlias(platform: SupportedPlatform): Promise<void> {
+  const rcFile = detectRcFile(platform);
+  const content = existsSync(rcFile) ? readFileSync(rcFile, "utf-8") : "";
+  const existing = parseClaudeAlias(content);
+
+  if (existing) {
+    console.log(`   기존 alias 발견 (${rcFile}):`);
+    console.log(`   ${existing.line}\n`);
+    if (existing.cmd.includes("fakechat")) {
+      console.log("   ✅ 이미 fakechat 채널이 포함되어 있습니다.\n");
+      return;
+    }
+  } else {
+    console.log(`   ${rcFile}에서 alias claude=... 를 찾지 못했습니다.\n`);
+  }
+
+  const updated = injectFakechatAlias(content, rcFile);
+  const newAlias = parseClaudeAlias(updated);
+  const preview = newAlias?.line ?? `alias claude="claude --channels '${FAKECHAT_CHANNEL}'"`;
+  console.log("   적용될 alias:");
+  console.log(`   ${preview}\n`);
+
+  const ok = await confirm({
+    message: `${rcFile}에 자동으로 적용할까요?`,
+    default: true,
+  });
+  if (ok) {
+    writeFileSync(rcFile, updated, "utf-8");
+    console.log(`\n   ✅ ${rcFile} 업데이트 완료.`);
+    console.log("   터미널 재시작 또는:\n");
+    console.log(`   $ source ${rcFile}\n`);
+  } else {
+    console.log(`\n   수동으로 ${rcFile}에 다음을 추가하세요:\n`);
+    console.log(`   ${preview}\n`);
+  }
+}
+
+async function _applyWindowsAlias(): Promise<void> {
+  const psProfile = detectPowerShellProfile();
+  const content = existsSync(psProfile) ? readFileSync(psProfile, "utf-8") : "";
+
+  if (parsePowerShellClaudeFunction(content) && content.includes("fakechat")) {
+    console.log("   ✅ PowerShell profile에 이미 fakechat 채널이 포함되어 있습니다.\n");
+    return;
+  }
+
+  const fnLine = `function claude { claude.exe --channels '${FAKECHAT_CHANNEL}' @args }`;
+  console.log(`   PowerShell profile: ${psProfile}`);
+  console.log("\n   추가될 function:");
+  console.log(`   ${fnLine}\n`);
+
+  const ok = await confirm({
+    message: `${psProfile}에 자동으로 추가할까요?`,
+    default: true,
+  });
+  if (ok) {
+    const updated = injectFakechatPowerShell(content);
+    writeFileSync(psProfile, updated, "utf-8");
+    console.log(`\n   ✅ ${psProfile} 업데이트 완료.`);
+    console.log("   PowerShell을 재시작하거나 다음을 실행하세요:\n");
+    console.log(`   . $PROFILE\n`);
+  } else {
+    console.log(`\n   수동으로 ${psProfile}에 다음을 추가하세요:\n`);
+    console.log(`   ${fnLine}\n`);
+  }
+}
 
 async function onboardClaudeCode(): Promise<void> {
+  const platform = detectPlatform();
   console.log("\n── Claude Code 온보딩 ──────────────────────────────────────\n");
 
   // Step 1: fakechat 플러그인 설치 안내
@@ -84,63 +209,20 @@ async function onboardClaudeCode(): Promise<void> {
     return;
   }
 
-  // Step 2: alias 설정
-  console.log("\n2️⃣  shell alias 설정\n");
+  // Step 2: alias / function 설정
+  console.log("\n2️⃣  채널 alias 설정\n");
 
-  const rcFile = detectRcFile();
-  const content = existsSync(rcFile) ? readFileSync(rcFile, "utf-8") : "";
-  const existing = parseClaudeAlias(content);
-
-  if (existing) {
-    console.log(`   기존 alias 발견 (${rcFile}):`);
-    console.log(`   ${existing.line}\n`);
-
-    if (existing.cmd.includes("fakechat")) {
-      console.log("   ✅ 이미 fakechat 채널이 포함되어 있습니다.\n");
-    } else {
-      const updated = injectFakechatAlias(content, rcFile);
-      const newAlias = parseClaudeAlias(updated);
-
-      console.log("   변경될 alias:");
-      console.log(`   ${newAlias?.line ?? "(변경 없음)"}\n`);
-
-      const ok = await confirm({
-        message: `${rcFile}에 자동으로 적용할까요?`,
-        default: true,
-      });
-      if (ok) {
-        writeFileSync(rcFile, updated, "utf-8");
-        console.log(`\n   ✅ ${rcFile} 업데이트 완료.`);
-        console.log("   터미널 재시작 또는 다음 명령어 실행:\n");
-        console.log(`   $ source ${rcFile}\n`);
-      } else {
-        console.log(`\n   수동으로 다음 라인을 ${rcFile}에 추가하세요:\n`);
-        console.log(`   ${newAlias?.line}\n`);
-      }
-    }
+  if (platform === "win32") {
+    await _applyWindowsAlias();
+  } else if (platform === "darwin" || platform === "linux") {
+    await _applyUnixAlias(platform);
   } else {
-    console.log(`   ${rcFile}에서 alias claude=... 를 찾지 못했습니다.\n`);
-    const newLine = `alias claude="claude --channels '${FAKECHAT_CHANNEL}'"`;
-    console.log("   추가될 alias:");
-    console.log(`   ${newLine}\n`);
-
-    const ok = await confirm({
-      message: `${rcFile}에 자동으로 추가할까요?`,
-      default: true,
-    });
-    if (ok) {
-      const updated = injectFakechatAlias(content, rcFile);
-      writeFileSync(rcFile, updated, "utf-8");
-      console.log(`\n   ✅ ${rcFile} 업데이트 완료.`);
-      console.log("   터미널 재시작 또는:\n");
-      console.log(`   $ source ${rcFile}\n`);
-    } else {
-      console.log(`\n   수동으로 ${rcFile}에 다음을 추가하세요:\n`);
-      console.log(`   ${newLine}\n`);
-    }
+    console.log("   지원하지 않는 플랫폼입니다. 수동으로 설정하세요:\n");
+    console.log(`   alias claude="claude --channels '${FAKECHAT_CHANNEL}'"\n`);
+    console.log("   shell 설정 파일(~/.bashrc, ~/.zshrc 등)에 위 라인을 추가하세요.\n");
   }
 
-  // Step 3: 채널 확인 명령어
+  // Step 3: 채널 확인
   console.log("3️⃣  연결 확인\n");
   console.log("   Claude Code를 재시작한 뒤 등록된 채널 목록 확인:");
   console.log("\n   $ claude --channels\n");
@@ -152,7 +234,6 @@ async function onboardClaudeCode(): Promise<void> {
 async function onboardOther(agentLabel: string): Promise<void> {
   console.log(`\n── ${agentLabel} 온보딩 ────────────────────────────────────────\n`);
 
-  // Step 1: API Key 확인
   console.log("1️⃣  Agent API Key 확인\n");
   console.log("   아직 발급받지 않았다면 먼저 connect 명령어를 실행하세요:");
   console.log("\n   $ sprintable connect\n");
@@ -170,26 +251,20 @@ async function onboardOther(agentLabel: string): Promise<void> {
 
   const base = apiUrl.replace(/\/$/, "");
 
-  // Step 2: SSE inbox URL 안내
   console.log("\n2️⃣  SSE inbox 구독\n");
-  console.log("   에이전트 ID를 먼저 조회하세요:");
+  console.log("   에이전트 ID 조회:");
   console.log(`\n   $ curl -H "x-agent-api-key: ${apiKey.trim()}" ${base}/api/v2/auth/me\n`);
-  console.log("   응답의 member_id가 에이전트 ID입니다.\n");
   console.log("   이벤트 스트림 구독 (SSE):");
   console.log(`\n   $ curl -N -H "x-agent-api-key: ${apiKey.trim()}" \\`);
   console.log(`       "${base}/api/v2/events/stream?recipient_id=<AGENT_ID>"\n`);
 
-  // Step 3: 외부 POST (inbox webhook)
   console.log("3️⃣  외부 서비스 → 에이전트 inbox 전송\n");
-  console.log("   외부 시스템에서 에이전트에게 이벤트를 보내는 방법:");
-  console.log(`\n   $ curl -X POST ${base}/api/v2/agent-inbox/<AGENT_ID>/webhook \\`);
+  console.log(`   $ curl -X POST ${base}/api/v2/agent-inbox/<AGENT_ID>/webhook \\`);
   console.log(`       -H "Content-Type: application/json" \\`);
   console.log(`       -d '{"event_type":"your_event","data":"payload"}'\n`);
-  console.log("   ※ 운영 환경에서는 AGENT_INBOX_WEBHOOK_SECRET 환경변수로 HMAC 서명을 설정하세요.\n");
 
-  console.log("4️⃣  Node.js / Python 구독 예시\n");
-  console.log("   Node.js:");
-  console.log(`\n   import { EventSource } from "eventsource";`);
+  console.log("4️⃣  Node.js 구독 예시\n");
+  console.log(`   import { EventSource } from "eventsource";`);
   console.log(`   const es = new EventSource(\`${base}/api/v2/events/stream?recipient_id=<AGENT_ID>\`, {`);
   console.log(`     headers: { "x-agent-api-key": "${apiKey.trim().substring(0, 8)}..." },`);
   console.log(`   });`);
