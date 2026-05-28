@@ -5,6 +5,7 @@ import { Check, Copy } from 'lucide-react';
 import { Alert, AlertDescription } from '@/components/ui/alert';
 import { Button } from '@/components/ui/button';
 import { MemberRow } from '@/components/ui/member-row';
+import { RemoveOrgMemberDialog } from '@/components/settings/remove-org-member-dialog';
 import { SectionCard, SectionCardBody, SectionCardHeader } from '@/components/ui/section-card';
 import { Badge } from '@/components/ui/badge';
 import { OperatorInput } from '@/components/ui/operator-control';
@@ -44,7 +45,7 @@ export function OrgMembersSection({ orgId, currentRole }: OrgMembersSectionProps
   const [inviteResult, setInviteResult] = useState<{ type: 'success' | 'error'; text: string } | null>(null);
 
   const [removingId, setRemovingId] = useState<string | null>(null);
-  const [showRemoveConfirm, setShowRemoveConfirm] = useState<string | null>(null);
+  const [removeDialogMemberId, setRemoveDialogMemberId] = useState<string | null>(null);
   const [changingRoleId, setChangingRoleId] = useState<string | null>(null);
   const [actionMessage, setActionMessage] = useState<{ type: 'success' | 'error'; text: string } | null>(null);
   const [resendingId, setResendingId] = useState<string | null>(null);
@@ -126,7 +127,6 @@ export function OrgMembersSection({ orgId, currentRole }: OrgMembersSectionProps
     const res = await fetch(`/api/org-members/${memberId}`, { method: 'DELETE' });
     if (res.ok) {
       setActionMessage({ type: 'success', text: '멤버가 제거됐습니다.' });
-      setShowRemoveConfirm(null);
       await refreshData();
     } else {
       const json = await res.json().catch(() => null) as { error?: { message?: string } } | null;
@@ -248,18 +248,9 @@ export function OrgMembersSection({ orgId, currentRole }: OrgMembersSectionProps
                       <Badge variant={isThisOwner ? 'info' : 'secondary'} className="capitalize">{member.role}</Badge>
                     )}
                     {canEdit && (
-                      showRemoveConfirm === member.id ? (
-                        <div className="flex gap-1">
-                          <Button size="sm" variant="destructive" onClick={() => void handleRemove(member.id)} disabled={removingId === member.id}>
-                            {removingId === member.id ? '...' : '확인'}
-                          </Button>
-                          <Button size="sm" variant="ghost" onClick={() => setShowRemoveConfirm(null)}>취소</Button>
-                        </div>
-                      ) : (
-                        <Button size="sm" variant="glass" onClick={() => setShowRemoveConfirm(member.id)}>
-                          제거
-                        </Button>
-                      )
+                      <Button size="sm" variant="glass" onClick={() => setRemoveDialogMemberId(member.id)}>
+                        제거
+                      </Button>
                     )}
                   </>
                 }
@@ -271,6 +262,22 @@ export function OrgMembersSection({ orgId, currentRole }: OrgMembersSectionProps
           )}
         </SectionCardBody>
       </SectionCard>
+
+      {removeDialogMemberId ? (() => {
+        const target = members.find((m) => m.id === removeDialogMemberId);
+        if (!target) return null;
+        return (
+          <RemoveOrgMemberDialog
+            open
+            member={{ id: target.id, name: target.name, email: target.email }}
+            onCancel={() => setRemoveDialogMemberId(null)}
+            onConfirm={async () => {
+              await handleRemove(target.id);
+              setRemoveDialogMemberId(null);
+            }}
+          />
+        );
+      })() : null}
 
       {/* 초대 대기 목록 */}
       {invites.length > 0 && (
