@@ -1196,7 +1196,9 @@
     "redirecting": "대시보드로 이동 중...",
     "loading": "로딩 중...",
     "invalidToken": "유효하지 않은 초대 링크입니다.",
-    "acceptFailed": "초대 수락에 실패했습니다."
+    "acceptFailed": "초대 수락에 실패했습니다.",
+    "accepting": "수락 중...",
+    "authFailed": "인증에 실패했습니다. 다시 시도해주세요."
   },
   "mockup": {
     "title": "목업",
