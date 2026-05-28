@@ -54,14 +54,14 @@ READ_ONLY_TOOLS = [
 
 
 @pytest.mark.anyio
-async def test_tools_list_86_tools():
-    """tools/list 응답에서 86개 도구 전량 확인."""
+async def test_tools_list_89_tools():
+    """tools/list 응답에서 89개 도구 전량 확인."""
     async with stdio_client(_SERVER_PARAMS) as (read, write):
         async with ClientSession(read, write) as session:
             await session.initialize()
             result = await session.list_tools()
             tool_names = {t.name for t in result.tools}
-            assert len(tool_names) == 86, f"도구 수 불일치: {len(tool_names)}"
+            assert len(tool_names) == 89, f"도구 수 불일치: {len(tool_names)}"
 
 
 @pytest.mark.anyio

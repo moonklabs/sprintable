@@ -1,4 +1,4 @@
-"""S3-6: 시스템 콜 계약 검증 — 86개 도구 등록 + 스키마 무결성 (Phase 3 완료)."""
+"""S3-6: 시스템 콜 계약 검증 — 89개 도구 등록 + 스키마 무결성 (Phase 3 완료)."""
 from __future__ import annotations
 
 import os
@@ -64,13 +64,21 @@ EXPECTED_TOOLS = {
     "sprintable_list_audit_logs",
     # agent_runs (3)
     "sprintable_emit_event", "sprintable_update_run_status", "sprintable_poll_events",
+    # stories extended (2)
+    "sprintable_claim_story", "sprintable_unclaim_story",
+    # webhooks (3)
+    "sprintable_list_webhook_configs", "sprintable_upsert_webhook_config", "sprintable_delete_webhook_config",
+    # workflow (1)
+    "sprintable_get_workflow_guide",
+    # file locks (2)
+    "sprintable_lock_files", "sprintable_unlock_files",
     # smoke
     "ping",
 }
 
 
 def test_total_tool_count():
-    assert len(_TOOLS) == 86
+    assert len(_TOOLS) == 89
 
 
 def test_all_expected_tools_registered():
