@@ -8,6 +8,7 @@ export async function GET(request: Request) {
   const { searchParams } = new URL(request.url);
   const provider = searchParams.get('provider');
   const tosAccepted = searchParams.get('tos_accepted') === 'true';
+  const inviteToken = searchParams.get('invite_token');
   const origin = resolveAppUrl(null);
 
   if (!provider || !['google', 'github'].includes(provider)) {
@@ -37,6 +38,15 @@ export async function GET(request: Request) {
   });
   if (tosAccepted) {
     cookieStore.set(`oauth_tos_${provider}`, 'true', {
+      httpOnly: true,
+      secure: process.env.NODE_ENV === 'production',
+      sameSite: 'lax',
+      maxAge: 300,
+      path: '/',
+    });
+  }
+  if (inviteToken) {
+    cookieStore.set(`oauth_invite_token_${provider}`, inviteToken, {
       httpOnly: true,
       secure: process.env.NODE_ENV === 'production',
       sameSite: 'lax',

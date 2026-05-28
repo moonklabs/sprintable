@@ -31,8 +31,10 @@ export async function GET(request: Request, { params }: RouteParams) {
   const cookieStore = await cookies();
   const storedState = cookieStore.get(`oauth_state_${provider}`)?.value;
   const tosAccepted = cookieStore.get(`oauth_tos_${provider}`)?.value === 'true';
+  const inviteToken = cookieStore.get(`oauth_invite_token_${provider}`)?.value ?? null;
   cookieStore.delete(`oauth_state_${provider}`);
   cookieStore.delete(`oauth_tos_${provider}`);
+  cookieStore.delete(`oauth_invite_token_${provider}`);
 
   if (!storedState || storedState !== state) {
     return NextResponse.redirect(`${origin}/login?error=csrf_mismatch`);
@@ -42,7 +44,7 @@ export async function GET(request: Request, { params }: RouteParams) {
   const fastapiRes = await fetch(`${FASTAPI_URL()}/api/v2/auth/oauth/callback`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ provider, code, state, tos_accepted: tosAccepted }),
+    body: JSON.stringify({ provider, code, state, tos_accepted: tosAccepted, invite_token: inviteToken }),
   }).catch(() => null);
 
   if (!fastapiRes?.ok) {
@@ -58,7 +60,8 @@ export async function GET(request: Request, { params }: RouteParams) {
     return NextResponse.redirect(`${origin}/login?error=oauth_no_token`);
   }
 
-  const res = NextResponse.redirect(`${origin}/inbox`);
+  const destination = inviteToken ? `${origin}/dashboard` : `${origin}/inbox`;
+  const res = NextResponse.redirect(destination);
   res.cookies.set(SP_AT_COOKIE, access_token, { ...cookieBase(), maxAge: 15 * 60 });
   res.cookies.set(SP_RT_COOKIE, refresh_token, { ...cookieBase(), maxAge: 30 * 24 * 60 * 60 });
   return res;

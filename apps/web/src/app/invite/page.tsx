@@ -10,7 +10,7 @@ import { cn } from '@/lib/utils';
 interface InvitePreview {
   org_id: string;
   org_name: string;
-  inviter_name: string;
+  inviter_name?: string;
   inviter_email?: string;
   role: 'admin' | 'member';
   expires_at: string;
@@ -189,11 +189,19 @@ export default function InvitePage() {
           <div className="rounded-lg border border-border bg-muted/30 px-4 py-3 text-sm animate-in fade-in slide-in-from-bottom-2 duration-500 delay-200 fill-mode-backwards">
             <div className="flex items-center justify-between gap-3">
               <div className="min-w-0">
-                <div className="truncate font-medium text-foreground">
-                  {preview.inviter_name}님이 초대했어요
-                </div>
-                {preview.inviter_email && (
-                  <div className="truncate text-xs text-muted-foreground">{preview.inviter_email}</div>
+                {preview.inviter_name ? (
+                  <>
+                    <div className="truncate font-medium text-foreground">
+                      {preview.inviter_name}님이 초대했어요
+                    </div>
+                    {preview.inviter_email && (
+                      <div className="truncate text-xs text-muted-foreground">{preview.inviter_email}</div>
+                    )}
+                  </>
+                ) : (
+                  <div className="truncate font-medium text-foreground">
+                    {preview.org_name}에서 초대했어요
+                  </div>
                 )}
               </div>
               <span className="shrink-0 rounded-md border border-border bg-background px-2 py-0.5 text-xs capitalize text-muted-foreground">
