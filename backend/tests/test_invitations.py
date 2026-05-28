@@ -25,6 +25,9 @@ def _mock_invitation(status: str = "pending") -> MagicMock:
     inv.expires_at = datetime.now(timezone.utc) + timedelta(days=7)
     inv.accepted_at = None
     inv.created_at = datetime(2026, 4, 30, tzinfo=timezone.utc)
+    inv.email_sent_at = None
+    inv.email_error = None
+    inv.invite_url = None
     return inv
 
 
@@ -97,7 +100,12 @@ async def test_list_invitations_with_project_filter_200():
 async def test_create_invitation_201():
     client, session, app = await _client()
     try:
-        with patch("app.repositories.invitation.InvitationRepository.create", new_callable=AsyncMock) as mock_create:
+        with (
+            patch("app.repositories.invitation.InvitationRepository.create", new_callable=AsyncMock) as mock_create,
+            patch("app.routers.invitations.send_invite_email", return_value=None),
+            patch("app.routers.invitations._get_org_name", new=AsyncMock(return_value="TestOrg")),
+            patch("app.repositories.invitation.InvitationRepository.update_email_result", new_callable=AsyncMock),
+        ):
             mock_create.return_value = _mock_invitation()
 
             async with client as c:
@@ -151,7 +159,12 @@ async def test_resend_invitation_200():
     try:
         refreshed = _mock_invitation("pending")
         refreshed.token = "newtokenhex"
-        with patch("app.repositories.invitation.InvitationRepository.resend", new_callable=AsyncMock) as mock_resend:
+        with (
+            patch("app.repositories.invitation.InvitationRepository.resend", new_callable=AsyncMock) as mock_resend,
+            patch("app.routers.invitations.send_invite_email", return_value=None),
+            patch("app.routers.invitations._get_org_name", new=AsyncMock(return_value="TestOrg")),
+            patch("app.repositories.invitation.InvitationRepository.update_email_result", new_callable=AsyncMock),
+        ):
             mock_resend.return_value = refreshed
 
             async with client as c:
