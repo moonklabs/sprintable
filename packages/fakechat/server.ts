@@ -13,14 +13,12 @@ import {
   ListToolsRequestSchema,
   CallToolRequestSchema,
 } from '@modelcontextprotocol/sdk/types.js'
-import { mkdirSync, statSync, copyFileSync } from 'fs'
-import { homedir } from 'os'
-import { join, extname, basename } from 'path'
-
-const STATE_DIR = join(homedir(), '.claude', 'channels', 'fakechat')
-const OUTBOX_DIR = join(STATE_DIR, 'outbox')
 
 const SPRINTABLE_WS_BASE = (process.env.SPRINTABLE_WS_URL ?? 'ws://localhost:8000').replace(/\/$/, '')
+const SPRINTABLE_API_URL = (
+  process.env.SPRINTABLE_API_URL
+  ?? SPRINTABLE_WS_BASE.replace(/^wss:\/\//, 'https://').replace(/^ws:\/\//, 'http://')
+)
 const SPRINTABLE_AGENT_ID = process.env.SPRINTABLE_AGENT_ID ?? ''
 const SPRINTABLE_API_KEY = process.env.SPRINTABLE_API_KEY ?? ''
 
@@ -46,13 +44,11 @@ mcp.setRequestHandler(ListToolsRequestSchema, async () => ({
   tools: [
     {
       name: 'reply',
-      description: 'Send a message to the Sprintable backend WebSocket. Pass reply_to for quote-reply, files for attachments.',
+      description: 'Send a message via POST /api/v2/conversations/{id}/messages. Requires an active conversation (message received first).',
       inputSchema: {
         type: 'object',
         properties: {
           text: { type: 'string' },
-          reply_to: { type: 'string' },
-          files: { type: 'array', items: { type: 'string' } },
         },
         required: ['text'],
       },
@@ -75,25 +71,22 @@ mcp.setRequestHandler(CallToolRequestSchema, async req => {
     switch (req.params.name) {
       case 'reply': {
         const text = args.text as string
-        const replyTo = args.reply_to as string | undefined
-        const files = (args.files as string[] | undefined) ?? []
+        const meta = latestInboundMeta
+        if (!meta?.replyCallbackUrl) throw new Error('no active conversation to reply to')
 
-        mkdirSync(OUTBOX_DIR, { recursive: true })
-        let fileInfo: { name: string } | undefined
-        if (files[0]) {
-          const f = files[0]
-          const st = statSync(f)
-          if (st.size > 50 * 1024 * 1024) throw new Error(`file too large: ${f}`)
-          const ext = extname(f).toLowerCase()
-          const out = `${Date.now()}-${Math.random().toString(36).slice(2, 8)}${ext}`
-          copyFileSync(f, join(OUTBOX_DIR, out))
-          fileInfo = { name: basename(f) }
+        const resp = await fetch(meta.replyCallbackUrl, {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            'Authorization': `Bearer ${meta.replyCallbackApiKey}`,
+            'x-agent-api-key': meta.replyCallbackApiKey,
+          },
+          body: JSON.stringify({ content: text }),
+        })
+        if (!resp.ok) {
+          const body = await resp.text().catch(() => '')
+          throw new Error(`API error ${resp.status}: ${body}`)
         }
-
-        const payload: Record<string, unknown> = { content: text }
-        if (replyTo) payload.reply_to = replyTo
-        if (fileInfo) payload.file_name = fileInfo.name
-        _wsSend(JSON.stringify(payload))
 
         return { content: [{ type: 'text', text: 'sent' }] }
       }
@@ -181,10 +174,16 @@ function _connectWs(): void {
         content?: string
         sender_id?: string
         sender_name?: string
+        conversation_id?: string
         ts?: string
       }
       if (msg.id && msg.content) {
-        deliver(msg.id, msg.content)
+        const meta = msg.conversation_id ? {
+          thread_id: msg.conversation_id,
+          reply_callback_url: `${SPRINTABLE_API_URL}/api/v2/conversations/${msg.conversation_id}/messages`,
+          reply_callback_api_key: SPRINTABLE_API_KEY,
+        } : undefined
+        deliver(msg.id, msg.content, undefined, meta)
       }
     } catch {}
   }
