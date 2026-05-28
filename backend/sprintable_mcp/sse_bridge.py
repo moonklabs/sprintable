@@ -10,13 +10,10 @@ import sys
 import time
 from collections import OrderedDict
 from dataclasses import dataclass
-from datetime import datetime, timezone
-from random import uniform
+from random import randint, uniform
 from typing import TYPE_CHECKING, Any, Callable
 
 import httpx
-from mcp.shared.session import ServerMessageMetadata, SessionMessage
-from mcp.types import JSONRPCMessage, JSONRPCNotification
 
 from .config import settings
 
@@ -29,6 +26,10 @@ _SseInternalHandler = Callable[["SseEvent"], None]
 _BASE_DELAY = 1.0
 _MAX_DELAY = 10.0
 _JITTER_FACTOR = 0.5    # wait * uniform(0, 0.5) jitter
+
+# relay 대상 이벤트 타입
+_RELAY_EVENT_TYPES = frozenset(["conversation:message", "conversation:mention"])
+
 
 # ── SeenIdsCache: LRU + TTL dedup 캐시 (S6-2) ────────────────────────────────
 
@@ -96,47 +97,18 @@ def register_session(session: ServerSession) -> None:
 
 
 async def _send_mcp_notification(event_type: str, data_str: str) -> None:
-    """SSE 이벤트를 notifications/claude/channel 로 Claude Code 세션에 전송.
+    """SSE 이벤트를 MCP log notification으로 클라이언트에 전송.
 
-    send_log_message는 MCP logging spec이라 Claude Code가 대화 입력으로 인식 안 함 (오스카군 실검증).
-    JSONRPCNotification을 _write_stream에 직접 write하여 fakechat TS SDK와 동일 경로로 전송.
     세션 미등록 또는 에러 시 조용히 skip — MCP 도구 호출에 영향 없음.
     """
     if _active_session is None:
         return
     try:
-        # data_str 파싱으로 meta 필드 구성
-        try:
-            payload = json.loads(data_str) if data_str else {}
-        except (json.JSONDecodeError, TypeError):
-            payload = {}
-
-        event_id = payload.get("event_id") or payload.get("id") or ""
-        conversation_id = payload.get("conversation_id") or payload.get("source_entity_id") or ""
-        ts = datetime.now(timezone.utc).isoformat()
-
-        meta: dict[str, Any] = {
-            "chat_id": "web",
-            "message_id": str(event_id) if event_id else "",
-            "user": "web",
-            "ts": ts,
-        }
-        if conversation_id:
-            meta["thread_id"] = str(conversation_id)
-
-        # content: 이벤트 타입 + 주요 필드 요약 (Claude Code 채널 입력으로 인식되는 텍스트)
-        content = data_str or f"(event_type={event_type})"
-
-        notification = JSONRPCNotification(
-            jsonrpc="2.0",
-            method="notifications/claude/channel",
-            params={"content": content, "meta": meta},
+        await _active_session.send_log_message(
+            level="info",
+            data={"event_type": event_type, "data": data_str},
+            logger="sprintable.sse",
         )
-        session_message = SessionMessage(
-            message=JSONRPCMessage(notification),
-            metadata=None,
-        )
-        await _active_session._write_stream.send(session_message)
     except Exception as exc:
         _log(f"notification error: {exc}")
 
@@ -204,6 +176,90 @@ class SseParser:
         # unknown field — ignore per spec
 
         return None
+
+
+# ── fakechat relay ────────────────────────────────────────────────────────────
+
+def _build_relay_payload(event_type: str, data: object) -> tuple[str, str, bool]:
+    """SSE data에서 (text, thread_id, is_conversation_event) 추출."""
+    if not isinstance(data, dict):
+        return f"[{event_type}] {data}", "", False
+
+    d: dict = data
+    payload: dict = d.get("payload") if isinstance(d.get("payload"), dict) else d  # type: ignore[assignment]
+
+    sender_raw = payload.get("sender") or d.get("sender_name") or d.get("member_name") or ""
+    if isinstance(sender_raw, dict):
+        sender_name = str(sender_raw.get("name", ""))
+    else:
+        sender_name = str(sender_raw)
+
+    content = (
+        payload.get("content")
+        or d.get("content")
+        or d.get("message")
+        or d.get("text")
+        or json.dumps(data, ensure_ascii=False)
+    )
+
+    text = f"[{event_type}] {sender_name}: {content}" if sender_name else f"[{event_type}] {content}"
+
+    conversation_id = str(payload.get("conversation_id") or d.get("conversation_id") or "")
+    thread_id = str(payload.get("thread_id") or d.get("thread_id") or conversation_id)
+    is_conversation_event = bool(conversation_id) and not (
+        payload.get("thread_id") or d.get("thread_id")
+    )
+
+    return text, thread_id, is_conversation_event
+
+
+async def relay_to_fakechat(
+    event_type: str,
+    data_str: str,
+    api_url: str,
+    api_key: str,
+    fakechat_port: int,
+) -> None:
+    """SSE 이벤트 → fakechat /upload POST.
+
+    relay 대상: conversation:message, conversation:mention.
+    비대상 이벤트 및 모든 에러는 조용히 skip — MCP 동작에 영향 없음.
+    """
+    if event_type not in _RELAY_EVENT_TYPES:
+        return
+
+    uid = f"sse-{int(time.time() * 1000)}-{randint(0, 999999):06d}"
+
+    try:
+        parsed: Any = json.loads(data_str)
+    except json.JSONDecodeError:
+        parsed = data_str
+
+    text, thread_id, is_conversation_event = _build_relay_payload(event_type, parsed)
+
+    form: dict[str, str] = {"id": uid, "text": text}
+
+    if thread_id:
+        base_url = api_url.rstrip("/")
+        form["thread_id"] = thread_id
+        if base_url and api_key:
+            callback_path = (
+                f"/api/v2/conversations/{thread_id}/messages"
+                if is_conversation_event
+                else f"/api/v2/chats/{thread_id}/messages"
+            )
+            form["reply_callback_url"] = f"{base_url}{callback_path}"
+            form["reply_callback_api_key"] = api_key
+
+    try:
+        async with httpx.AsyncClient(timeout=5.0) as client:
+            resp = await client.post(
+                f"http://127.0.0.1:{fakechat_port}/upload",
+                data=form,
+            )
+            resp.raise_for_status()
+    except Exception as exc:
+        _log(f"relay error: {exc}")
 
 
 # ── httpx SSE client ───────────────────────────────────────────────────────────
@@ -278,6 +334,7 @@ async def start_sse_bridge(
     """
     _log(f"starting bridge for member_id={member_id}")
     client = make_sse_client(api_url, api_key)
+    port = settings.fakechat_port
 
     # S6-2: LRU + TTL dedup 캐시 (환경변수 기반 설정)
     seen_ids = SeenIdsCache(
@@ -312,6 +369,17 @@ async def start_sse_bridge(
         asyncio.create_task(
             _send_mcp_notification(event.event_type, event.data)
         )
+
+        # relay 조건: (1) backfill 아님, (2) webhook 미설정
+        _relay = True
+        try:
+            _relay = not json.loads(event.data).get("is_backfill", False)
+        except (json.JSONDecodeError, AttributeError):
+            pass
+        if _relay and not settings.has_webhook:
+            asyncio.create_task(
+                relay_to_fakechat(event.event_type, event.data, api_url, api_key, port)
+            )
 
         if on_event is not None:
             on_event(event.event_type, event.data)
