@@ -75,6 +75,7 @@ interface InvitationItem {
 interface ProjectMember {
   id: string;
   name: string;
+  email?: string;
   type: 'human' | 'agent';
   role: string;
   user_id: string | null;
@@ -175,10 +176,7 @@ export default function SettingsPage() {
   const [currentUserId, setCurrentUserId] = useState<string | null>(null);
   const [deletingProjectId, setDeletingProjectId] = useState<string | null>(null);
   const [deleteProjectConfirmId, setDeleteProjectConfirmId] = useState<string | null>(null);
-  const [projectInviteEmail, setProjectInviteEmail] = useState('');
-  const [projectInviteProjectId, setProjectInviteProjectId] = useState('');
-  const [projectInviting, setProjectInviting] = useState(false);
-  const [projectInviteResult, setProjectInviteResult] = useState<{ type: 'success' | 'error'; text: string } | null>(null);
+
   const [revokingInviteId, setRevokingInviteId] = useState<string | null>(null);
   const [resendingInviteId, setResendingInviteId] = useState<string | null>(null);
   const [resendResult, setResendResult] = useState<{ id: string; url: string } | null>(null);
@@ -678,28 +676,6 @@ export default function SettingsPage() {
     setDeleteProjectConfirmId(null);
   };
 
-  const handleProjectInvite = async () => {
-    if (!projectInviteEmail.trim() || !projectInviteProjectId) return;
-    setProjectInviting(true);
-    setProjectInviteResult(null);
-
-    const res = await fetch(`/api/projects/${projectInviteProjectId}/invitations`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ email: projectInviteEmail.trim(), role: 'member' }),
-    });
-
-    if (res.ok) {
-      const json = await res.json();
-      setProjectInviteResult({ type: 'success', text: `${t('projectInviteSent')} ${json.data.invite_url}` });
-      setProjectInviteEmail('');
-    } else {
-      const json = await res.json().catch(() => null);
-      setProjectInviteResult({ type: 'error', text: json?.error?.message ?? t('projectInviteFailed') });
-    }
-
-    setProjectInviting(false);
-  };
 
   const handleSaveWebhookUrl = async (memberId: string) => {
     const url = (webhookEditing[memberId] ?? '').trim();
@@ -1491,47 +1467,6 @@ export default function SettingsPage() {
                 </SectionCard>
                 ) : null}
 
-                {isAdmin ? (
-                <SectionCard>
-                  <SectionCardHeader>
-                    <div className="space-y-1">
-                      <h2 className="text-base font-semibold text-foreground">{t('projectInviteTitle')}</h2>
-                      <p className="text-sm text-muted-foreground">{t('projectInviteDescription')}</p>
-                    </div>
-                  </SectionCardHeader>
-                  <SectionCardBody className="space-y-4">
-                    <div className="flex flex-col gap-3 md:flex-row">
-                      <OperatorInput
-                        type="email"
-                        value={projectInviteEmail}
-                        onChange={(e) => setProjectInviteEmail(e.target.value)}
-                        placeholder={t('emailPlaceholder')}
-                      />
-                      <OperatorDropdownSelect
-                        value={projectInviteProjectId}
-                        onValueChange={(v) => setProjectInviteProjectId(v)}
-                        options={[
-                          { value: '', label: t('selectProject') },
-                          ...projects.map((project) => ({ value: project.id, label: project.name })),
-                        ]}
-                      />
-                      <Button
-                        variant="hero"
-                        size="lg"
-                        onClick={handleProjectInvite}
-                        disabled={projectInviting || !projectInviteEmail.trim() || !projectInviteProjectId}
-                      >
-                        {projectInviting ? '...' : t('invite')}
-                      </Button>
-                    </div>
-                    {projectInviteResult ? (
-                      <Alert variant={projectInviteResult.type === 'success' ? 'success' : 'destructive'}>
-                        <AlertDescription className="break-all">{projectInviteResult.text}</AlertDescription>
-                      </Alert>
-                    ) : null}
-                  </SectionCardBody>
-                </SectionCard>
-                ) : null}
 
                 <SectionCard>
                   <SectionCardHeader>
@@ -1557,7 +1492,10 @@ export default function SettingsPage() {
                         disabled={!memberProjectId || assignableMembers.length === 0}
                         options={[
                           { value: '', label: assignableMembers.length ? t('chooseMember') : t('noAssignableMembers') },
-                          ...assignableMembers.map((member) => ({ value: member.user_id ?? '', label: member.name })),
+                          ...assignableMembers.map((member) => ({
+                            value: member.user_id ?? '',
+                            label: member.email ? `${member.name} · ${member.email}` : member.name,
+                          })),
                         ]}
                       />
                       <Button variant="hero" size="lg" onClick={handleAddProjectMember} disabled={!memberProjectId || !selectedOrgMemberUserId || addingMember}>
@@ -1639,8 +1577,9 @@ export default function SettingsPage() {
                           );
                         })
                       ) : (
-                        <div className="rounded-md border border-dashed border-border px-3 py-6 text-sm text-muted-foreground">
-                          {t('noProjectMembers')}
+                        <div className="space-y-1 rounded-md border border-dashed border-border px-3 py-6 text-sm text-muted-foreground">
+                          <p>{t('noProjectMembers')}</p>
+                          <p className="text-xs">{t('noProjectMembersHint')}</p>
                         </div>
                       )}
                     </div>

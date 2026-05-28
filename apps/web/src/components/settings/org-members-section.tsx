@@ -175,8 +175,10 @@ export function OrgMembersSection({ orgId, currentRole }: OrgMembersSectionProps
         <SectionCard>
           <SectionCardHeader>
             <div className="space-y-1">
-              <h2 className="text-base font-semibold text-foreground">멤버 초대</h2>
-              <p className="text-sm text-muted-foreground">이메일로 Organization에 초대합니다.</p>
+              <h2 className="text-base font-semibold text-foreground">조직 전체 멤버</h2>
+              <p className="text-sm text-muted-foreground">
+                여기서 새 멤버를 초대할 수 있습니다. 초대된 멤버는 조직에 합류한 후, 프로젝트별로 별도 추가됩니다.
+              </p>
             </div>
           </SectionCardHeader>
           <SectionCardBody className="space-y-4">
