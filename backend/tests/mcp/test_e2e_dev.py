@@ -15,11 +15,12 @@ from mcp.client.stdio import StdioServerParameters, stdio_client
 
 _API_URL = os.environ.get("SPRINTABLE_API_URL", "")
 _API_KEY = os.environ.get("AGENT_API_KEY", "")
+_CI = os.environ.get("CI", "")
 _BACKEND_DIR = str(Path(__file__).parents[2])  # backend/
 
 pytestmark = pytest.mark.skipif(
-    not (_API_URL and _API_KEY),
-    reason="SPRINTABLE_API_URL + AGENT_API_KEY 미설정 — dev E2E skip",
+    not (_API_URL and _API_KEY) or bool(_CI),
+    reason="SPRINTABLE_API_URL + AGENT_API_KEY 미설정 또는 CI 환경 — dev E2E skip",
 )
 
 _SERVER_PARAMS = StdioServerParameters(
