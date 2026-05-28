@@ -1196,7 +1196,9 @@
     "redirecting": "Redirecting to dashboard...",
     "loading": "Loading...",
     "invalidToken": "Invalid invitation link.",
-    "acceptFailed": "Failed to accept invitation."
+    "acceptFailed": "Failed to accept invitation.",
+    "accepting": "Accepting invitation...",
+    "authFailed": "Authentication failed. Please try again."
   },
   "mockup": {
     "title": "Mockups",
