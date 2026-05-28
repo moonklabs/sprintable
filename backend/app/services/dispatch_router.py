@@ -3,12 +3,18 @@
 dispatch event(story_assigned 등 lifecycle event)에 대해
 NotificationPreference 기반 채널 결정 후 전달.
 conversation_messages row를 생성하지 않음 (AC5).
+
+S-COMM-02: webhook_url 없는 에이전트 → SSE inbox 기본 수신.
+           webhook_url 있는 에이전트 → HTTP POST + HMAC + retry 3회 + SSE fallback.
 """
 from __future__ import annotations
 
+import asyncio
+import json as _json
 import logging
 import uuid
 
+import httpx
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -20,6 +26,41 @@ logger = logging.getLogger(__name__)
 
 # agent가 받을 때 mute를 무시하는 event_type 패턴 (AC3)
 _AGENT_MANDATORY_TYPES = {"story_assigned", "story_reassigned", "task_assigned"}
+
+_WEBHOOK_MAX_RETRIES = 3
+_WEBHOOK_BACKOFF_BASE = 1.0  # seconds: 1s, 2s, 4s
+
+
+async def _post_with_retry(
+    url: str,
+    payload: dict,
+    secret: str | None,
+    member_id: str,
+) -> bool:
+    """HMAC 서명 + exponential backoff webhook POST (AC3/AC5).
+    성공 시 True, 전량 실패 시 False (호출자가 SSE fallback 담당 — AC4).
+    """
+    from app.services.webhook_dispatch import _build_signature_headers
+
+    body = _json.dumps(payload)
+    headers = {"Content-Type": "application/json", **_build_signature_headers(secret, body)}
+
+    for attempt in range(_WEBHOOK_MAX_RETRIES):
+        try:
+            async with httpx.AsyncClient(timeout=10.0) as client:
+                resp = await client.post(url, content=body, headers=headers)
+                if resp.status_code < 500:
+                    return True  # 2xx / 4xx — 재시도 무의미한 응답 포함
+        except Exception:
+            logger.warning(
+                "webhook POST attempt %d/%d failed member=%s",
+                attempt + 1, _WEBHOOK_MAX_RETRIES, member_id, exc_info=True,
+            )
+        if attempt < _WEBHOOK_MAX_RETRIES - 1:
+            await asyncio.sleep(_WEBHOOK_BACKOFF_BASE * (2 ** attempt))
+
+    logger.warning("webhook POST all retries exhausted member=%s url=%s — SSE fallback", member_id, url)
+    return False
 
 _VALID_CHANNELS = {"sse", "discord", "telegram", "in_app"}
 
@@ -79,8 +120,7 @@ async def route_dispatch_event(
     )).scalars().first()
 
     if active_wh and channel == "sse":
-        # 웹훅 설정된 에이전트 → 내장 SSE 스킵, 외부 웹훅으로만 전달
-        import httpx
+        # AC2: webhook URL로 POST — HMAC 서명 + exponential backoff retry
         is_discord_url = (
             "discord.com/api/webhooks" in active_wh.url
             or "discordapp.com/api/webhooks" in active_wh.url
@@ -90,14 +130,14 @@ async def route_dispatch_event(
             if is_discord_url
             else payload
         )
-        try:
-            async with httpx.AsyncClient(timeout=10.0) as client:
-                await client.post(active_wh.url, json=ext_payload)
-        except Exception:
-            logger.warning(
-                "dispatch_router: external POST failed member=%s url=%s", recipient_id, active_wh.url, exc_info=True
-            )
+        # Discord URL은 secret 미적용 (Discord 자체 인증 방식 사용)
+        secret = None if is_discord_url else active_wh.secret
+        success = await _post_with_retry(active_wh.url, ext_payload, secret, str(recipient_id))
+        if not success:
+            # AC4: 재시도 전량 실패 → SSE inbox fallback (이벤트 유실 방지)
+            _push_to_agent(str(recipient_id), payload)
     elif channel == "sse":
+        # AC1: webhook 없는 에이전트 → SSE stream 기본 수신
         _push_to_agent(str(recipient_id), payload)
 
     elif channel == "discord":
@@ -126,13 +166,9 @@ async def route_dispatch_event(
                 if is_discord_url
                 else payload
             )
-            try:
-                async with httpx.AsyncClient(timeout=10.0) as client:
-                    await client.post(wh.url, json=discord_payload)
-            except Exception:
-                logger.warning(
-                    "route_dispatch_event: discord POST failed member=%s", recipient_id, exc_info=True
-                )
+            success = await _post_with_retry(wh.url, discord_payload, None if is_discord_url else wh.secret, str(recipient_id))
+            if not success:
+                _push_to_agent(str(recipient_id), payload)
     else:
         # in_app, telegram 등 — 현재 in_app은 SSE로 처리
         _push_to_agent(str(recipient_id), payload)
