@@ -73,7 +73,7 @@ test.describe('Sprint Retro - Final Comprehensive Tests', () => {
     const sessionLink = page.locator('a[href*="/retro/"]').first();
     
     if (await sessionLink.isVisible().catch(() => false)) {
-      const href = await sessionLink.getAttribute('href');
+      const _href = await sessionLink.getAttribute('href');
       await sessionLink.click();
       
       await page.waitForLoadState('networkidle');

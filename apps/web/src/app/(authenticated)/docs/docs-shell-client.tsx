@@ -108,7 +108,7 @@ export function DocsShellClient({ projectId }: DocsShellClientProps) {
     );
   }, []);
 
-  const { status: saveStatus, isDirty, save } = useDocSync<DocDetail>({
+  const { status: _saveStatus, isDirty, save } = useDocSync<DocDetail>({
     docId: selectedDoc?.id ?? null,
     savePayload: { title, content, content_format: contentFormat },
     serverUpdatedAt: selectedDoc?.updated_at ?? null,
