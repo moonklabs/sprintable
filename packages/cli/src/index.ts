@@ -1,6 +1,7 @@
 #!/usr/bin/env node
 import { Command, Option } from "commander";
 import { connectCommand } from "./commands/connect.js";
+import { onboardCommand } from "./commands/onboard.js";
 import { SUPPORTED_AGENTS } from "./adapters/registry.js";
 
 const program = new Command();
@@ -21,6 +22,21 @@ program
   .action(async (opts: { agent?: string }) => {
     try {
       await connectCommand({ agent: opts.agent as "claude-code" | "cursor" | "windsurf" });
+    } catch (err) {
+      if (err instanceof Error && err.name === "ExitPromptError") {
+        console.log("\n취소되었습니다.");
+        process.exit(0);
+      }
+      throw err;
+    }
+  });
+
+program
+  .command("onboard")
+  .description("에이전트 종류별 Sprintable 온보딩 가이드")
+  .action(async () => {
+    try {
+      await onboardCommand();
     } catch (err) {
       if (err instanceof Error && err.name === "ExitPromptError") {
         console.log("\n취소되었습니다.");
