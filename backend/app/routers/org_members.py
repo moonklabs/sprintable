@@ -172,7 +172,7 @@ async def delete_org_member(
     if existing.role == "owner":
         raise HTTPException(status_code=403, detail="조직 owner는 삭제할 수 없습니다")
     await _revoke_user_refresh_tokens(repo.session, existing.user_id)
-    # AC4: cascade — team_members is_active = False
+    # cascade — team_members is_active = False
     await session.execute(
         text(
             """
@@ -182,6 +182,11 @@ async def delete_org_member(
             """
         ),
         {"org_id": str(org_id), "user_id": str(existing.user_id)},
+    )
+    # S-MBR-10 AC5: project_access grant 레코드 삭제 (soft delete는 FK CASCADE 미트리거)
+    await session.execute(
+        text("DELETE FROM project_access WHERE org_member_id = :om_id"),
+        {"om_id": str(id)},
     )
     ok = await repo.soft_delete(id)
     if not ok:
