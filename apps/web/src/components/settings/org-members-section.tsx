@@ -4,6 +4,7 @@ import { useEffect, useState } from 'react';
 import { Check, Copy } from 'lucide-react';
 import { Alert, AlertDescription } from '@/components/ui/alert';
 import { Button } from '@/components/ui/button';
+import { MemberRow } from '@/components/ui/member-row';
 import { SectionCard, SectionCardBody, SectionCardHeader } from '@/components/ui/section-card';
 import { Badge } from '@/components/ui/badge';
 import { OperatorInput } from '@/components/ui/operator-control';
@@ -63,7 +64,8 @@ export function OrgMembersSection({ orgId, currentRole }: OrgMembersSectionProps
       setMembers((raw.data ?? []).map((m) => ({
         id: m.id,
         user_id: m.user_id,
-        name: m.email || m.user_id.slice(0, 8),
+        name: m.email?.split('@')[0] ?? m.user_id?.slice(0, 8) ?? '?',
+        email: m.email ?? undefined,
         role: m.role,
         joined_at: m.created_at,
       })));
@@ -223,46 +225,43 @@ export function OrgMembersSection({ orgId, currentRole }: OrgMembersSectionProps
             const isThisOwner = member.role === 'owner';
             const canEdit = isOwner && !isThisOwner;
             return (
-              <div key={member.id} className="flex items-center justify-between gap-3 rounded-md border border-border bg-muted/30 px-3 py-3 text-sm">
-                <div className="min-w-0">
-                  <div className="font-medium text-foreground">{member.name}</div>
-                  {member.email && <div className="text-xs text-muted-foreground">{member.email}</div>}
-                  {member.joined_at && (
-                    <div className="text-xs text-muted-foreground">
-                      {new Date(member.joined_at).toLocaleDateString('ko-KR')} 가입
-                    </div>
-                  )}
-                </div>
-                <div className="flex shrink-0 items-center gap-2">
-                  {canEdit ? (
-                    <select
-                      className="rounded-md border border-input bg-background px-2 py-1 text-xs focus:outline-none focus:ring-1 focus:ring-ring"
-                      value={member.role}
-                      disabled={changingRoleId === member.id}
-                      onChange={(e) => void handleChangeRole(member.id, e.target.value as 'admin' | 'member')}
-                    >
-                      <option value="admin">Admin</option>
-                      <option value="member">Member</option>
-                    </select>
-                  ) : (
-                    <Badge variant={isThisOwner ? 'info' : 'secondary'} className="capitalize">{member.role}</Badge>
-                  )}
-                  {canEdit && (
-                    showRemoveConfirm === member.id ? (
-                      <div className="flex gap-1">
-                        <Button size="sm" variant="destructive" onClick={() => void handleRemove(member.id)} disabled={removingId === member.id}>
-                          {removingId === member.id ? '...' : '확인'}
-                        </Button>
-                        <Button size="sm" variant="ghost" onClick={() => setShowRemoveConfirm(null)}>취소</Button>
-                      </div>
+              <MemberRow
+                key={member.id}
+                name={member.name}
+                email={member.email}
+                meta={member.joined_at ? `${new Date(member.joined_at).toLocaleDateString('ko-KR')} 가입` : undefined}
+                actions={
+                  <>
+                    {canEdit ? (
+                      <select
+                        className="rounded-md border border-input bg-background px-2 py-1 text-xs focus:outline-none focus:ring-1 focus:ring-ring"
+                        value={member.role}
+                        disabled={changingRoleId === member.id}
+                        onChange={(e) => void handleChangeRole(member.id, e.target.value as 'admin' | 'member')}
+                      >
+                        <option value="admin">Admin</option>
+                        <option value="member">Member</option>
+                      </select>
                     ) : (
-                      <Button size="sm" variant="glass" onClick={() => setShowRemoveConfirm(member.id)}>
-                        제거
-                      </Button>
-                    )
-                  )}
-                </div>
-              </div>
+                      <Badge variant={isThisOwner ? 'info' : 'secondary'} className="capitalize">{member.role}</Badge>
+                    )}
+                    {canEdit && (
+                      showRemoveConfirm === member.id ? (
+                        <div className="flex gap-1">
+                          <Button size="sm" variant="destructive" onClick={() => void handleRemove(member.id)} disabled={removingId === member.id}>
+                            {removingId === member.id ? '...' : '확인'}
+                          </Button>
+                          <Button size="sm" variant="ghost" onClick={() => setShowRemoveConfirm(null)}>취소</Button>
+                        </div>
+                      ) : (
+                        <Button size="sm" variant="glass" onClick={() => setShowRemoveConfirm(member.id)}>
+                          제거
+                        </Button>
+                      )
+                    )}
+                  </>
+                }
+              />
             );
           })}
           {members.length === 0 && (
@@ -279,39 +278,39 @@ export function OrgMembersSection({ orgId, currentRole }: OrgMembersSectionProps
           </SectionCardHeader>
           <SectionCardBody className="space-y-2">
             {invites.map((invite) => (
-              <div key={invite.id} className="flex items-center justify-between gap-3 rounded-md border border-border bg-muted/30 px-3 py-3 text-xs">
-                <div className="min-w-0">
-                  <div className="font-medium text-foreground">{invite.email}</div>
-                  <div className="text-muted-foreground">
-                    {invite.role} · 만료: {new Date(invite.expires_at).toLocaleDateString('ko-KR')}
-                  </div>
-                </div>
-                {canManage && (
-                  <div className="flex shrink-0 gap-1">
-                    <Button
-                      size="sm"
-                      variant="glass"
-                      disabled={!invite.invite_url}
-                      onClick={() => void handleCopyInviteLink(invite.id, invite.invite_url)}
-                      title={invite.invite_url ? '초대 링크 복사' : '링크 사용 불가'}
-                      className={copiedInviteId === invite.id ? 'text-success bg-success/12 border-success/30' : ''}
-                    >
-                      {copiedInviteId === invite.id ? (
-                        <><Check className="h-3 w-3 mr-1" />복사됨</>
-                      ) : (
-                        <><Copy className="h-3 w-3 mr-1" />링크 복사</>
-                      )}
-                    </Button>
-                    <Button size="sm" variant="glass" disabled={resendingId === invite.id} onClick={() => void handleResendInvite(invite.id)}>
-                      {resendingId === invite.id ? '...' : '재발송'}
-                    </Button>
-                    <Button size="sm" variant="glass" disabled={revokingId === invite.id} onClick={() => void handleRevokeInvite(invite.id)}
-                      className="text-destructive hover:bg-destructive/10">
-                      {revokingId === invite.id ? '...' : '취소'}
-                    </Button>
-                  </div>
-                )}
-              </div>
+              <MemberRow
+                key={invite.id}
+                name={invite.email}
+                meta={`${invite.role} · 만료: ${new Date(invite.expires_at).toLocaleDateString('ko-KR')}`}
+                emphasis="subtle"
+                actions={
+                  canManage ? (
+                    <div className="flex shrink-0 gap-1">
+                      <Button
+                        size="sm"
+                        variant="glass"
+                        disabled={!invite.invite_url}
+                        onClick={() => void handleCopyInviteLink(invite.id, invite.invite_url)}
+                        title={invite.invite_url ? '초대 링크 복사' : '링크 사용 불가'}
+                        className={copiedInviteId === invite.id ? 'text-success bg-success/12 border-success/30' : ''}
+                      >
+                        {copiedInviteId === invite.id ? (
+                          <><Check className="h-3 w-3 mr-1" />복사됨</>
+                        ) : (
+                          <><Copy className="h-3 w-3 mr-1" />링크 복사</>
+                        )}
+                      </Button>
+                      <Button size="sm" variant="glass" disabled={resendingId === invite.id} onClick={() => void handleResendInvite(invite.id)}>
+                        {resendingId === invite.id ? '...' : '재발송'}
+                      </Button>
+                      <Button size="sm" variant="glass" disabled={revokingId === invite.id} onClick={() => void handleRevokeInvite(invite.id)}
+                        className="text-destructive hover:bg-destructive/10">
+                        {revokingId === invite.id ? '...' : '취소'}
+                      </Button>
+                    </div>
+                  ) : undefined
+                }
+              />
             ))}
           </SectionCardBody>
         </SectionCard>
