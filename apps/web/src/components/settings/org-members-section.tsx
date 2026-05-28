@@ -64,7 +64,8 @@ export function OrgMembersSection({ orgId, currentRole }: OrgMembersSectionProps
       setMembers((raw.data ?? []).map((m) => ({
         id: m.id,
         user_id: m.user_id,
-        name: m.email || m.user_id.slice(0, 8),
+        name: m.email?.split('@')[0] ?? m.user_id?.slice(0, 8) ?? '?',
+        email: m.email ?? undefined,
         role: m.role,
         joined_at: m.created_at,
       })));
