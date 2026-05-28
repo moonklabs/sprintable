@@ -172,6 +172,44 @@ async def test_receive_inbox_webhook_creates_event():
 
 # ─── config 필드 존재 확인 ────────────────────────────────────────────────────
 
+@pytest.mark.anyio
+async def test_receive_inbox_webhook_calls_push_to_agent():
+    """commit 후 _push_to_agent 호출로 SSE 즉시 push (AC4)."""
+    from app.routers.agent_inbox import receive_inbox_webhook
+
+    org_id = uuid.uuid4()
+    project_id = uuid.uuid4()
+    agent_id = uuid.uuid4()
+
+    body = json.dumps({"event_type": "inbox_webhook"}).encode()
+    mock_request = MagicMock()
+    mock_request.body = AsyncMock(return_value=body)
+
+    mock_db = AsyncMock()
+    lookup_result = MagicMock()
+    lookup_result.one_or_none.return_value = (org_id, project_id)
+    mock_db.execute = AsyncMock(return_value=lookup_result)
+
+    mock_event = MagicMock()
+    mock_event.id = uuid.uuid4()
+    mock_db.add = MagicMock(side_effect=lambda obj: setattr(obj, "id", mock_event.id))
+    mock_db.commit = AsyncMock()
+    mock_db.refresh = AsyncMock()
+
+    with patch("app.routers.agent_inbox.settings") as mock_settings:
+        mock_settings.agent_inbox_webhook_secret = ""
+        with patch("app.routers.agent_inbox.Event") as MockEvent:
+            MockEvent.return_value = mock_event
+            with patch("app.routers.events._push_to_agent") as mock_push:
+                await receive_inbox_webhook(
+                    agent_id=agent_id,
+                    request=mock_request,
+                    db=mock_db,
+                    x_sprintable_signature=None,
+                )
+                mock_push.assert_called_once_with(str(agent_id), {"event_type": "inbox_webhook"})
+
+
 def test_agent_inbox_webhook_secret_in_config():
     """Settings에 agent_inbox_webhook_secret 필드 존재."""
     from app.core.config import Settings

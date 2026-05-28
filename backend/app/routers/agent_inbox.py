@@ -88,4 +88,8 @@ async def receive_inbox_webhook(
     await db.commit()
     await db.refresh(event)
 
+    # AC4: SSE 즉시 push (연결 중인 에이전트에게 바로 전달)
+    from app.routers.events import _push_to_agent
+    _push_to_agent(str(agent_id), payload)
+
     return {"ok": True, "event_id": str(event.id)}
