@@ -60,7 +60,8 @@ def test_presence_status_computed_field_exists():
 def test_presence_status_online():
     """AC2: last_seen_at 4분 전 → online."""
     from app.schemas.team_member import TeamMemberResponse
-    m = _mock_member(last_seen_at=NOW - timedelta(minutes=4))
+    now = datetime.now(timezone.utc)
+    m = _mock_member(last_seen_at=now - timedelta(minutes=4))
     resp = TeamMemberResponse.model_validate(m)
     assert resp.presence_status == "online"
 
@@ -100,7 +101,8 @@ def test_presence_status_null_for_human():
 def test_presence_status_boundary_just_under_5min():
     """AC2: 4분59초 전 → online (5분 경계 이내)."""
     from app.schemas.team_member import TeamMemberResponse
-    m = _mock_member(last_seen_at=NOW - timedelta(minutes=4, seconds=59))
+    now = datetime.now(timezone.utc)
+    m = _mock_member(last_seen_at=now - timedelta(minutes=4, seconds=59))
     resp = TeamMemberResponse.model_validate(m)
     assert resp.presence_status == "online"
 
@@ -108,7 +110,8 @@ def test_presence_status_boundary_just_under_5min():
 def test_presence_status_boundary_just_under_30min():
     """AC3: 29분59초 전 → idle (30분 경계 이내)."""
     from app.schemas.team_member import TeamMemberResponse
-    m = _mock_member(last_seen_at=NOW - timedelta(minutes=29, seconds=59))
+    now = datetime.now(timezone.utc)
+    m = _mock_member(last_seen_at=now - timedelta(minutes=29, seconds=59))
     resp = TeamMemberResponse.model_validate(m)
     assert resp.presence_status == "idle"
 

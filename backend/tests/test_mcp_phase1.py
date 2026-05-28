@@ -127,8 +127,9 @@ def test_ok_serializes_uuid():
 # ─── S1-4: err() 포맷 ──────────────────────────────────────────────────────
 
 def test_err_returns_call_tool_result_with_is_error():
+    # err() returns list[TextContent] (mcp SDK pattern — isError not on list)
     result = err("something went wrong")
-    assert result.isError is True
-    assert len(result.content) == 1
-    assert result.content[0].type == "text"
-    assert result.content[0].text == "Error: something went wrong"
+    assert isinstance(result, list)
+    assert len(result) == 1
+    assert result[0].type == "text"
+    assert result[0].text == "Error: something went wrong"

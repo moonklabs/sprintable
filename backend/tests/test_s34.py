@@ -21,6 +21,7 @@ def _mock_config(is_active: bool = True) -> MagicMock:
     c.events = ["memo.created", "story.updated"]
     c.channel = "generic"
     c.is_active = is_active
+    c.secret = None
     c.created_at = datetime(2026, 4, 30, tzinfo=timezone.utc)
     return c
 

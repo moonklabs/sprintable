@@ -98,6 +98,7 @@ async def test_create_epic_org_id_mismatch_403():
         app.dependency_overrides.clear()
 
 
+@pytest.mark.xfail(reason="E-MEMO-RETIRE S3-3: /api/v2/memos 라우터 제거됨 — 404 반환", strict=False)
 @pytest.mark.anyio
 async def test_create_memo_org_id_mismatch_403():
     """AC6: memos POST — body.org_id ≠ auth.org_id → 403."""

@@ -93,17 +93,17 @@ def test_has_webhook_in_config():
 
 # ── MCP notification 기능 동작 검증 ─────────────────────────────────────────
 
-def test_send_mcp_notification_skips_when_no_session():
+@pytest.mark.anyio
+async def test_send_mcp_notification_skips_when_no_session():
     """세션 미등록 시 _send_mcp_notification이 조용히 skip."""
     import sprintable_mcp.sse_bridge as bridge
     bridge._active_session = None
-    asyncio.get_event_loop().run_until_complete(
-        bridge._send_mcp_notification("memo_created", '{"event_id":"test"}')
-    )
+    await bridge._send_mcp_notification("memo_created", '{"event_id":"test"}')
     # 에러 없이 완료되면 AC2 pass
 
 
-def test_send_mcp_notification_calls_session():
+@pytest.mark.anyio
+async def test_send_mcp_notification_calls_session():
     """세션 등록 시 _send_mcp_notification이 send_log_message 호출 (원복)."""
     import sprintable_mcp.sse_bridge as bridge
 
@@ -112,9 +112,7 @@ def test_send_mcp_notification_calls_session():
     bridge._active_session = mock_session
 
     try:
-        asyncio.get_event_loop().run_until_complete(
-            bridge._send_mcp_notification("story_assigned", '{"event_id":"abc"}')
-        )
+        await bridge._send_mcp_notification("story_assigned", '{"event_id":"abc"}')
         mock_session.send_log_message.assert_called_once()
         call_kwargs = mock_session.send_log_message.call_args.kwargs
         assert call_kwargs["level"] == "info"

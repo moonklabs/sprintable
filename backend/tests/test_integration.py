@@ -151,6 +151,7 @@ async def test_retros_list_via_conftest(test_client, mock_session, project_id):
 
 # ── Sprint 5: S26~S31 도메인 통합 테스트 ─────────────────────────────────────
 
+@pytest.mark.xfail(reason="E-MEMO-RETIRE S3-3: /api/v2/memos 라우터 제거됨", strict=False)
 @pytest.mark.anyio
 async def test_memos_list_via_conftest(test_client, mock_session, project_id):
     """GET /api/v2/memos 200."""

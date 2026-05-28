@@ -73,6 +73,20 @@ class BridgeInboundRepository:
             return None
         return mapping
 
+    async def create_memo(
+        self,
+        org_id: uuid.UUID,
+        project_id: uuid.UUID,
+        created_by: uuid.UUID,
+        title: str,
+        content: str,
+        memo_type: str,
+        metadata: "dict[str, Any]",
+        assigned_to: "uuid.UUID | None",
+    ) -> str:
+        # Memos are retired (E-MEMO-RETIRE S3-3); channels should use conversation_id mapping.
+        raise NotImplementedError("Memo creation is retired. Configure conversation_id in channel mapping.")
+
     async def find_fallback_author(self, org_id: uuid.UUID, project_id: uuid.UUID) -> uuid.UUID | None:
         for member_type in ("agent", "human"):
             result = await self.session.execute(

@@ -208,13 +208,22 @@ async def test_list_conversations():
         conv_ids_result = MagicMock()
         conv_ids_result.all.return_value = [(CONV_ID,)]
 
+        total_result = MagicMock()
+        total_result.scalar_one.return_value = 1
+
         convs_result = MagicMock()
         convs_result.scalars.return_value.all.return_value = [mock_conv]
+
+        p_rows_result = MagicMock()
+        p_rows_result.all.return_value = []
 
         latest_msg_result = MagicMock()
         latest_msg_result.scalar_one_or_none.return_value = mock_msg
 
-        session.execute = AsyncMock(side_effect=[member_result, conv_ids_result, convs_result, latest_msg_result])
+        session.execute = AsyncMock(side_effect=[
+            member_result, conv_ids_result, total_result,
+            convs_result, p_rows_result, latest_msg_result,
+        ])
 
         async with client as c:
             resp = await c.get(f"/api/v2/conversations?project_id={PROJECT_ID}")
@@ -237,13 +246,14 @@ async def test_list_messages_response_shape():
     client, session, app = await _make_client()
     try:
         mock_member = _make_member()
+        mock_member.role = "owner"  # skip participant check branch
         mock_msg = _make_msg()
+
+        conv_project_result = MagicMock()
+        conv_project_result.scalar_one_or_none.return_value = PROJECT_ID
 
         member_result = MagicMock()
         member_result.scalars.return_value.first.return_value = mock_member
-
-        participant_result = MagicMock()
-        participant_result.scalar_one_or_none.return_value = uuid.uuid4()
 
         msgs_result = MagicMock()
         msgs_result.scalars.return_value.all.return_value = [mock_msg]
@@ -251,7 +261,7 @@ async def test_list_messages_response_shape():
         sender_result = MagicMock()
         sender_result.scalars.return_value.all.return_value = [mock_member]
 
-        session.execute = AsyncMock(side_effect=[member_result, participant_result, msgs_result, sender_result])
+        session.execute = AsyncMock(side_effect=[conv_project_result, member_result, msgs_result, sender_result])
 
         async with client as c:
             resp = await c.get(f"/api/v2/conversations/{CONV_ID}/messages")
