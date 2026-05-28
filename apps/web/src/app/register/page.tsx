@@ -21,6 +21,7 @@ function countCategories(rules: ReturnType<typeof checkPasswordRules>) {
 
 export default function RegisterPage() {
   const router = useRouter();
+  const [displayName, setDisplayName] = useState('');
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [passwordTouched, setPasswordTouched] = useState(false);
@@ -33,7 +34,7 @@ export default function RegisterPage() {
   const isPasswordValid = rules.length && categoriesMet >= 3;
 
   const handleRegister = async () => {
-    if (!email.trim() || !password.trim()) return;
+    if (!displayName.trim() || !email.trim() || !password.trim()) return;
     if (!tosAccepted) return;
     if (!isPasswordValid) {
       setPasswordTouched(true);
@@ -45,7 +46,7 @@ export default function RegisterPage() {
       const res = await fetch('/api/auth/register', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ email: email.trim(), password, tos_accepted: true }),
+        body: JSON.stringify({ email: email.trim(), password, display_name: displayName.trim(), tos_accepted: true }),
       });
       const json = await res.json() as { data?: { ok: boolean }; error?: { message: string } };
       if (!res.ok || !json.data?.ok) {
@@ -79,6 +80,16 @@ export default function RegisterPage() {
         </div>
 
         <div className="space-y-3">
+          <input
+            type="text"
+            placeholder="Name"
+            autoComplete="name"
+            className="w-full rounded-lg border border-border px-4 py-3 text-sm text-foreground focus:outline-none focus:ring-2 focus:ring-brand"
+            value={displayName}
+            onChange={(e) => setDisplayName(e.target.value)}
+            onKeyDown={(e) => e.key === 'Enter' && handleRegister()}
+            disabled={loading}
+          />
           <input
             type="email"
             placeholder="Email"
@@ -134,7 +145,7 @@ export default function RegisterPage() {
           {error && <p className="text-sm text-destructive">{error}</p>}
           <button
             onClick={handleRegister}
-            disabled={loading || !email.trim() || !password.trim() || !tosAccepted}
+            disabled={loading || !displayName.trim() || !email.trim() || !password.trim() || !tosAccepted}
             className="flex w-full min-h-[44px] items-center justify-center rounded-lg bg-brand px-4 py-3 text-sm font-medium text-brand-foreground transition hover:bg-brand/90 disabled:opacity-50"
           >
             {loading ? 'Creating account...' : 'Sign up'}
