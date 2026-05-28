@@ -24,10 +24,10 @@ def test_members_endpoint_uses_org_members_join():
 
 
 def test_members_endpoint_opt_out_logic():
-    """list_members 소스에 'blocked' 제외 opt-out 로직 존재."""
+    """list_members 소스에 'denied' 제외 opt-out 로직 존재 (S-MBR-03: owner/admin 예외 포함)."""
     from app.routers import members
     source = inspect.getsource(members.list_members)
-    assert "blocked" in source
+    assert "denied" in source
     assert "NOT EXISTS" in source or "not exists" in source.lower()
 
 

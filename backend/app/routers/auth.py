@@ -365,6 +365,23 @@ async def _build_app_metadata(user: User, session: AsyncSession) -> dict:
     if getattr(user, "last_project_id", None) != member.project_id:
         user.last_project_id = member.project_id
 
+    # S-MBR-03: org owner/admin → project role 상속 (AC1/AC2)
+    # org_members.role이 team_members.role보다 높으면 org role을 effective role로 사용.
+    _ROLE_RANK: dict[str, int] = {"owner": 4, "admin": 3, "manager": 2, "member": 1}
+    org_roles_result = await session.execute(
+        select(OrgMember.org_id, OrgMember.role).where(
+            OrgMember.user_id == user.id,
+            OrgMember.deleted_at.is_(None),
+        )
+    )
+    org_role_map: dict = {str(row[0]): row[1] for row in org_roles_result.all()}
+
+    def _effective_role(project_role: str, org_id_str: str) -> str:
+        org_r = org_role_map.get(org_id_str, "")
+        if _ROLE_RANK.get(org_r, 0) > _ROLE_RANK.get(project_role, 0):
+            return org_r
+        return project_role
+
     # 소속 전체 project 목록 (알림/전환 UI용)
     all_members_result = await session.execute(
         select(TeamMember)
@@ -375,14 +392,18 @@ async def _build_app_metadata(user: User, session: AsyncSession) -> dict:
     )
     all_members = all_members_result.scalars().all()
     projects = [
-        {"id": str(m.project_id), "org_id": str(m.org_id), "role": m.role}
+        {
+            "id": str(m.project_id),
+            "org_id": str(m.org_id),
+            "role": _effective_role(m.role, str(m.org_id)),
+        }
         for m in all_members
     ]
 
     return {
         "org_id": str(member.org_id),
         "project_id": str(member.project_id),
-        "role": member.role,
+        "role": _effective_role(member.role, str(member.org_id)),
         "projects": projects,
     }
 

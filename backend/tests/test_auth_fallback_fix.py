@@ -35,6 +35,13 @@ def _make_member(project_id=None, org_id=None, days_ago=0) -> MagicMock:
     return m
 
 
+def _org_roles_empty() -> MagicMock:
+    """S-MBR-03: org_roles 쿼리 mock — 결과 없음 (role 상속 없음)."""
+    r = MagicMock()
+    r.all.return_value = []
+    return r
+
+
 # ─── AC1: fallback ASC 복원 ───────────────────────────────────────────────────
 
 @pytest.mark.anyio
@@ -58,7 +65,7 @@ async def test_fallback_uses_oldest_member_when_no_last_project():
     all_result = MagicMock()
     all_result.scalars.return_value = all_scalars
 
-    session.execute.side_effect = [fallback_result, all_result]
+    session.execute.side_effect = [fallback_result, _org_roles_empty(), all_result]
 
     result = await _build_app_metadata(user, session)
 
@@ -82,7 +89,7 @@ async def test_login_auto_sets_last_project_id_when_null():
     all_scalars.all.return_value = [oldest_member]
     all_result = MagicMock()
     all_result.scalars.return_value = all_scalars
-    session.execute.side_effect = [fallback_result, all_result]
+    session.execute.side_effect = [fallback_result, _org_roles_empty(), all_result]
 
     await _build_app_metadata(user, session)
 
@@ -110,7 +117,7 @@ async def test_existing_last_project_id_preserved():
     all_scalars.all.return_value = [preferred_member]
     all_result = MagicMock()
     all_result.scalars.return_value = all_scalars
-    session.execute.side_effect = [last_project_result, all_result]
+    session.execute.side_effect = [last_project_result, _org_roles_empty(), all_result]
 
     result = await _build_app_metadata(user, session)
 
@@ -140,7 +147,7 @@ async def test_login_updates_last_project_id_if_changed():
     all_scalars.all.return_value = [new_member]
     all_result = MagicMock()
     all_result.scalars.return_value = all_scalars
-    session.execute.side_effect = [last_project_result, fallback_result, all_result]
+    session.execute.side_effect = [last_project_result, fallback_result, _org_roles_empty(), all_result]
 
     result = await _build_app_metadata(user, session)
 

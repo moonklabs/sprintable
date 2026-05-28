@@ -108,11 +108,13 @@ async def test_switch_project_success_returns_new_tokens(client, mock_session, a
     last_project_result = MagicMock()
     last_project_result.scalar_one_or_none.return_value = member
 
+    org_roles_result = MagicMock(); org_roles_result.all.return_value = []
     mock_session.execute.side_effect = [
         user_result,         # _get_user_by_id
         member_result,       # validate membership
         revoke_result,       # revoke old refresh tokens
         last_project_result, # _build_app_metadata: last_project_id member 조회
+        org_roles_result,    # _build_app_metadata: org roles (S-MBR-03)
         all_members_result,  # _build_app_metadata: all projects
     ]
 
@@ -198,7 +200,8 @@ async def test_build_app_metadata_uses_last_project_id():
     all_result = MagicMock()
     all_result.scalars.return_value = all_scalars
 
-    session.execute.side_effect = [last_project_result, all_result]
+    org_roles_result = MagicMock(); org_roles_result.all.return_value = []
+    session.execute.side_effect = [last_project_result, org_roles_result, all_result]
 
     result = await _build_app_metadata(user, session)
 
@@ -226,7 +229,8 @@ async def test_build_app_metadata_fallback_desc_when_no_last_project():
     all_result = MagicMock()
     all_result.scalars.return_value = all_scalars
 
-    session.execute.side_effect = [fallback_result, all_result]
+    org_roles_result = MagicMock(); org_roles_result.all.return_value = []
+    session.execute.side_effect = [fallback_result, org_roles_result, all_result]
 
     result = await _build_app_metadata(user, session)
 

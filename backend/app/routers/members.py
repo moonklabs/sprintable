@@ -36,7 +36,8 @@ async def list_members(
     """
     result: list[MemberResponse] = []
 
-    # Human members — org_members에 속하고 project_access 'blocked' 제외
+    # Human members — org_members에 속하고 project_access 'denied' 제외.
+    # S-MBR-03 AC1/AC2/AC4: org owner/admin은 denied 레코드 있어도 항상 포함 (역할 상속).
     human_rows = await session.execute(
         text(
             """
@@ -45,11 +46,14 @@ async def list_members(
             JOIN users u ON u.id = om.user_id
             JOIN projects p ON p.org_id = om.org_id AND p.id = :project_id
             WHERE om.deleted_at IS NULL
-              AND NOT EXISTS (
-                  SELECT 1 FROM project_access pa
-                  WHERE pa.org_member_id = om.id
-                    AND pa.project_id = :project_id
-                    AND pa.permission = 'denied'
+              AND (
+                om.role IN ('owner', 'admin')
+                OR NOT EXISTS (
+                    SELECT 1 FROM project_access pa
+                    WHERE pa.org_member_id = om.id
+                      AND pa.project_id = :project_id
+                      AND pa.permission = 'denied'
+                )
               )
             ORDER BY name
             """
