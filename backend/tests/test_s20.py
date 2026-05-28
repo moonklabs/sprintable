@@ -80,8 +80,8 @@ def test_heartbeat_disconnect_check_clears_connection():
 
     async def _auth():
         ctx = MagicMock()
-        ctx.user_id = str(uuid.uuid4())
-        ctx.claims = {}
+        ctx.user_id = str(member_id)  # API key: user_id = team_member.id
+        ctx.claims = {"app_metadata": {"api_key_id": "test-key", "org_id": str(org)}}
         return ctx
 
     async def _org():
@@ -143,8 +143,8 @@ async def test_sse_connection_limit_returns_503():
 
     async def _auth():
         ctx = MagicMock()
-        ctx.user_id = str(uuid.uuid4())
-        ctx.claims = {}
+        ctx.user_id = str(member_id)  # API key: user_id = team_member.id
+        ctx.claims = {"app_metadata": {"api_key_id": "test-key", "org_id": str(org)}}
         return ctx
 
     async def _org():
@@ -197,8 +197,8 @@ def test_connection_count_increments_and_decrements():
 
     async def _auth():
         ctx = MagicMock()
-        ctx.user_id = str(uuid.uuid4())
-        ctx.claims = {}
+        ctx.user_id = str(member_id)  # API key: user_id = team_member.id
+        ctx.claims = {"app_metadata": {"api_key_id": "test-key", "org_id": str(org)}}
         return ctx
 
     async def _org():
