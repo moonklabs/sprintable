@@ -51,6 +51,7 @@ from app.core.rate_limit import limiter
 from app.dependencies.auth import AuthContext, get_current_user
 from app.dependencies.database import get_db
 from app.models.invitation import Invitation
+from app.models.org_invite import OrgInvite
 from app.models.project import OrgMember, Project
 from app.models.team import TeamMember
 from app.models.login_audit_log import LoginAuditLog
@@ -263,18 +264,20 @@ async def _build_app_metadata(user: User, session: AsyncSession) -> dict:
         member.user_id = user.id
 
     if not member:
-        # 2. 이메일로 pending 초대 조회 → 자동 수락 + org_member + team_member 생성
+        # 2. 이메일로 pending 초대 조회 → 자동 수락 + org_member 생성
+        # 2a. Invitation (invitations 테이블 — /api/v2/invitations 경로)
+        now = datetime.now(timezone.utc)
         inv_result = await session.execute(
             select(Invitation).where(
                 Invitation.email == user.email,
                 Invitation.status == "pending",
-                Invitation.expires_at > datetime.now(timezone.utc),
+                Invitation.expires_at > now,
             ).order_by(Invitation.created_at.asc()).limit(1)
         )
         inv = inv_result.scalar_one_or_none()
         if inv:
             inv.status = "accepted"
-            inv.accepted_at = datetime.now(timezone.utc)
+            inv.accepted_at = now
             from sqlalchemy.dialects.postgresql import insert as pg_insert
             await session.execute(
                 pg_insert(OrgMember)
@@ -287,6 +290,32 @@ async def _build_app_metadata(user: User, session: AsyncSession) -> dict:
                 "org_id": str(inv.org_id),
                 "project_id": str(inv.project_id) if inv.project_id else "",
                 "role": inv.role,
+            }
+
+        # 2b. OrgInvite (org_invites 테이블 — /api/v2/invites 경로)
+        # invite link 가입 후 explicit accept 없이 로그인 시 자동 수락 fallback.
+        org_inv_result = await session.execute(
+            select(OrgInvite).where(
+                OrgInvite.email == user.email.lower(),
+                OrgInvite.status == "pending",
+                OrgInvite.expires_at > now,
+            ).order_by(OrgInvite.created_at.asc()).limit(1)
+        )
+        org_inv = org_inv_result.scalar_one_or_none()
+        if org_inv:
+            from sqlalchemy.dialects.postgresql import insert as pg_insert
+            await session.execute(
+                pg_insert(OrgMember)
+                .values(org_id=org_inv.organization_id, user_id=user.id, role=org_inv.role)
+                .on_conflict_do_nothing(constraint="uq_org_members_org_user")
+            )
+            org_inv.status = "accepted"
+            org_inv.accepted_at = now
+            await session.flush()
+            return {
+                "org_id": str(org_inv.organization_id),
+                "project_id": "",
+                "role": org_inv.role,
             }
 
     if not member:
