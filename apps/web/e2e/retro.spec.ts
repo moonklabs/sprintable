@@ -1,4 +1,4 @@
-import { test, expect, Page } from '@playwright/test';
+import { test, expect } from '@playwright/test';
 
 const BASE_URL = 'http://localhost:3108';
 
@@ -217,12 +217,12 @@ test.describe('Sprint Retro E2E Tests', () => {
     
     // Check initial phase
     const collectText = page.locator('text=Collect').first();
-    const initialPhase = await collectText.isVisible();
+    const _initialPhase = await collectText.isVisible();
     
     console.log('✓ TC9: Stepper phase verification completed');
   });
 
-  test('TC10: Console errors check', async ({ page, context }) => {
+  test('TC10: Console errors check', async ({ page, context: _context }) => {
     // Capture console messages
     const consoleLogs: string[] = [];
     const consoleErrors: string[] = [];

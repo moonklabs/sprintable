@@ -10,6 +10,7 @@ AC4: .mcp.json 전 에이전트 Python 경로 확인
 from __future__ import annotations
 
 import json
+import os
 import subprocess
 import sys
 from pathlib import Path
@@ -139,6 +140,8 @@ def test_agent_mcp_json_uses_python(mcp_path: Path):
 def test_own_mcp_json_python_path():
     """은와추쿠군 .mcp.json — sprintable_mcp Python 경로 확인."""
     path = Path.home() / ".neoclaw-nwachukwu/state/actors/nwachukwu/workspace/.mcp.json"
+    if not path.exists() or os.environ.get("CI"):
+        pytest.skip("CI 환경 또는 .mcp.json 없음 — local only")
     servers = _check_mcp_json(path)
     sprintable = {k: v for k, v in servers.items() if "sprintable" in k.lower()}
     assert sprintable, f".mcp.json에 sprintable 서버 없음: {path}"

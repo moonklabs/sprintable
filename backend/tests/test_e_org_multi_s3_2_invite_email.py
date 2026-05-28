@@ -36,6 +36,7 @@ def _mock_invite(email: str = "new@example.com") -> MagicMock:
     i.created_at = now
     i.email_sent_at = now
     i.email_error = None
+    i.invite_url = None
     return i
 
 

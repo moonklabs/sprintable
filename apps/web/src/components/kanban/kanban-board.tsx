@@ -252,7 +252,7 @@ export function KanbanBoard({ projectId }: KanbanBoardProps) {
     } finally {
       setLoading(false);
     }
-  }, [selectedSprintId, projectId, fetchStoriesByStatus]);
+  }, [projectId, fetchStoriesByStatus]);
 
   // CB-S4: 컬럼별 "더 보기" 핸들러
   const handleLoadMore = useCallback(async (status: string) => {

@@ -44,7 +44,7 @@ export function WorkflowExecutionHistorySection({ projectId }: { projectId: stri
   const [loading, setLoading] = useState(true);
   const [expandedId, setExpandedId] = useState<string | null>(null);
 
-  const fetch = async (off: number) => {
+  const fetchLogs = async (off: number) => {
     if (!projectId) return;
     setLoading(true);
     try {
@@ -62,7 +62,8 @@ export function WorkflowExecutionHistorySection({ projectId }: { projectId: stri
     }
   };
 
-  useEffect(() => { void fetch(0); }, [projectId]);
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  useEffect(() => { void fetchLogs(0); }, [projectId]);
 
   const hasPrev = offset > 0;
   const hasNext = offset + LIMIT < total;
@@ -131,10 +132,10 @@ export function WorkflowExecutionHistorySection({ projectId }: { projectId: stri
                 {offset + 1}–{Math.min(offset + LIMIT, total)} / {total}
               </span>
               <div className="flex gap-2">
-                <Button variant="glass" size="sm" disabled={!hasPrev} onClick={() => void fetch(offset - LIMIT)}>
+                <Button variant="glass" size="sm" disabled={!hasPrev} onClick={() => void fetchLogs(offset - LIMIT)}>
                   ‹
                 </Button>
-                <Button variant="glass" size="sm" disabled={!hasNext} onClick={() => void fetch(offset + LIMIT)}>
+                <Button variant="glass" size="sm" disabled={!hasNext} onClick={() => void fetchLogs(offset + LIMIT)}>
                   ›
                 </Button>
               </div>

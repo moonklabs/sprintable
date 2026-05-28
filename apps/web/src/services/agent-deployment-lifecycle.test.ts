@@ -500,7 +500,7 @@ describe('AgentDeploymentLifecycleService', () => {
   });
 
   it('applies the automatic PO and Dev routing template when the project mix matches', async () => {
-    const { db, state } = createDbStub({
+    const { db, state: _state } = createDbStub({
       deployments: [{
         id: 'deployment-po',
         org_id: 'org-1',

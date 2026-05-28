@@ -8,6 +8,7 @@ AC5: soak 테스트 PASS 이력 확인
 """
 from __future__ import annotations
 
+import os
 import subprocess
 import sys
 from datetime import datetime, timedelta, timezone
@@ -18,8 +19,8 @@ import pytest
 # ─── AC1: Python MCP 실기동 확인 ─────────────────────────────────────────────
 
 @pytest.mark.skipif(
-    sys.platform not in ("linux", "darwin"),
-    reason="ps aux는 Unix only",
+    sys.platform not in ("linux", "darwin") or bool(os.environ.get("CI")),
+    reason="ps aux는 Unix only 또는 CI 환경 — local only",
 )
 def test_python_mcp_instances_running():
     """ps aux 기준 sprintable_mcp Python 인스턴스 5개 이상 실기동."""

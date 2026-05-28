@@ -736,7 +736,7 @@ export function EpicsClient({ projectId, orgId }: EpicsClientProps) {
     await fetchEpics(epicsNextCursor);
   }, [epicsHasMore, epicsNextCursor, epicsLoadingMore, fetchEpics]);
 
-  const fetchEpicDetail = useCallback(async (id: string) => {
+  const _fetchEpicDetail = useCallback(async (id: string) => {
     try {
       const res = await fetch(`/api/epics/${id}`);
       if (!res.ok) throw new Error('Failed to fetch epic');

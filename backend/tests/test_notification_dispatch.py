@@ -94,8 +94,10 @@ async def test_no_setting_defaults_to_enabled(mock_session, org_id):
     user_id = uuid.uuid4()
 
     settings = _settings_result([])  # 설정 없음
+    wh_result = MagicMock()
+    wh_result.scalars.return_value.all.return_value = []
     members = _members_result([(member_id, user_id)])
-    mock_session.execute.side_effect = [settings, members]
+    mock_session.execute.side_effect = [settings, wh_result, members]
 
     await dispatch_notification(
         mock_session,
@@ -124,8 +126,10 @@ async def test_enabled_setting_creates_notification(mock_session, org_id):
     user_id = uuid.uuid4()
 
     settings = _settings_result([(member_id, True)])
+    wh_result = MagicMock()
+    wh_result.scalars.return_value.all.return_value = []
     members = _members_result([(member_id, user_id)])
-    mock_session.execute.side_effect = [settings, members]
+    mock_session.execute.side_effect = [settings, wh_result, members]
 
     await dispatch_notification(
         mock_session,
@@ -177,8 +181,10 @@ async def test_mixed_settings_only_enabled_gets_notification(mock_session, org_i
     user_on = uuid.uuid4()
 
     settings = _settings_result([(member_on, True), (member_off, False)])
+    wh_result = MagicMock()
+    wh_result.scalars.return_value.all.return_value = []
     members = _members_result([(member_on, user_on)])
-    mock_session.execute.side_effect = [settings, members]
+    mock_session.execute.side_effect = [settings, wh_result, members]
 
     await dispatch_notification(
         mock_session,

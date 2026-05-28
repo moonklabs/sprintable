@@ -27,6 +27,7 @@ def _mock_doc() -> MagicMock:
     d.doc_type = "page"
     d.content_format = "markdown"
     d.tags = []
+    d.snippet = None
     d.created_at = datetime(2026, 5, 1, tzinfo=timezone.utc)
     d.updated_at = datetime(2026, 5, 1, tzinfo=timezone.utc)
     return d

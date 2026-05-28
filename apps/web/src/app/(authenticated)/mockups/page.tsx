@@ -54,7 +54,7 @@ export default function MockupsPage() {
       setNewSlug('');
       setShowCreate(false);
     } else {
-      const errJson = await res.json().catch(() => null);
+      await res.json().catch(() => null);
     }
     setCreating(false);
   };

@@ -44,7 +44,6 @@ export function OrgMembersSection({ orgId, currentRole }: OrgMembersSectionProps
   const [inviting, setInviting] = useState(false);
   const [inviteResult, setInviteResult] = useState<{ type: 'success' | 'error'; text: string } | null>(null);
 
-  const [removingId, setRemovingId] = useState<string | null>(null);
   const [removeDialogMemberId, setRemoveDialogMemberId] = useState<string | null>(null);
   const [changingRoleId, setChangingRoleId] = useState<string | null>(null);
   const [actionMessage, setActionMessage] = useState<{ type: 'success' | 'error'; text: string } | null>(null);
@@ -122,7 +121,6 @@ export function OrgMembersSection({ orgId, currentRole }: OrgMembersSectionProps
   };
 
   const handleRemove = async (memberId: string) => {
-    setRemovingId(memberId);
     setActionMessage(null);
     const res = await fetch(`/api/org-members/${memberId}`, { method: 'DELETE' });
     if (res.ok) {
@@ -132,7 +130,6 @@ export function OrgMembersSection({ orgId, currentRole }: OrgMembersSectionProps
       const json = await res.json().catch(() => null) as { error?: { message?: string } } | null;
       setActionMessage({ type: 'error', text: json?.error?.message ?? '멤버 제거에 실패했습니다.' });
     }
-    setRemovingId(null);
   };
 
   const handleResendInvite = async (inviteId: string) => {

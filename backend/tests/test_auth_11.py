@@ -90,6 +90,7 @@ def _make_member(role: str = "member") -> MagicMock:
     m.role = role
     m.created_at = datetime(2026, 5, 1, tzinfo=timezone.utc)
     m.deleted_at = None
+    m.email = None
     return m
 
 
