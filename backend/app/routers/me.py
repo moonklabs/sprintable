@@ -95,6 +95,20 @@ async def get_me(
         if user:
             data.has_password = bool(user.hashed_password)
 
+    # S-MBR-03: org owner/admin → effective role 상속. /me role이 JWT role과 일치하도록.
+    if not is_api_key and member.user_id:
+        _ROLE_RANK: dict[str, int] = {"owner": 4, "admin": 3, "manager": 2, "member": 1}
+        org_role_result = await session.execute(
+            select(OrgMember.role).where(
+                OrgMember.org_id == member.org_id,
+                OrgMember.user_id == member.user_id,
+                OrgMember.deleted_at.is_(None),
+            )
+        )
+        org_role = org_role_result.scalar_one_or_none()
+        if org_role and _ROLE_RANK.get(org_role, 0) > _ROLE_RANK.get(data.role, 0):
+            data = data.model_copy(update={"role": org_role})
+
     return data
 
 

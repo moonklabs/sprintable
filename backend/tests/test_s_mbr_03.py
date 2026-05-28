@@ -109,6 +109,115 @@ def test_unknown_org_preserves_project_role():
 import pytest
 
 
+# ─── AC1/AC2: /me 엔드포인트 role 상속 ─────────────────────────────────────────
+
+def test_me_router_has_org_role_override():
+    """me.py get_me 소스에 org role override 로직이 포함됨."""
+    import app.routers.me as me_module
+    source = inspect.getsource(me_module.get_me)
+    assert "_ROLE_RANK" in source
+    assert "org_role" in source
+    assert "model_copy" in source
+
+
+@pytest.mark.anyio
+async def test_get_me_org_admin_role_override():
+    """GET /me: team_member.role=member + org_member.role=admin → role=admin 반환 (AC2)."""
+    from app.routers.me import get_me
+    from app.dependencies.auth import AuthContext
+
+    member_id = uuid.uuid4()
+    org_id = uuid.uuid4()
+    project_id = uuid.uuid4()
+    user_id = uuid.uuid4()
+
+    mock_member = MagicMock()
+    mock_member.id = member_id
+    mock_member.org_id = org_id
+    mock_member.project_id = project_id
+    mock_member.user_id = user_id
+    mock_member.type = "human"
+    mock_member.name = "test"
+    mock_member.role = "member"  # project level: member
+    mock_member.is_active = True
+    mock_member.project_name = None  # MeResponse 직렬화 필수
+    mock_member.has_password = None
+    mock_member.project = MagicMock()
+    mock_member.project.name = "Test Project"
+
+    mock_session = AsyncMock()
+    member_result = MagicMock()
+    member_result.scalars.return_value.first.return_value = mock_member
+
+    user_result = MagicMock()
+    mock_user = MagicMock()
+    mock_user.hashed_password = None
+    user_result.scalar_one_or_none.return_value = mock_user
+
+    org_role_result = MagicMock()
+    org_role_result.scalar_one_or_none.return_value = "admin"  # org level: admin
+
+    mock_session.execute = AsyncMock(side_effect=[member_result, user_result, org_role_result])
+
+    auth = AuthContext(
+        user_id=str(user_id),
+        email="test@example.com",
+        claims={"app_metadata": {"org_id": str(org_id), "project_id": str(project_id)}},
+        org_id=str(org_id),
+    )
+
+    result = await get_me(member_id=None, session=mock_session, auth=auth)
+    assert result.role == "admin"
+
+
+@pytest.mark.anyio
+async def test_get_me_project_role_higher_preserved():
+    """GET /me: team_member.role=admin + org_member.role=member → role=admin 유지."""
+    from app.routers.me import get_me
+    from app.dependencies.auth import AuthContext
+
+    member_id = uuid.uuid4()
+    org_id = uuid.uuid4()
+    project_id = uuid.uuid4()
+    user_id = uuid.uuid4()
+
+    mock_member = MagicMock()
+    mock_member.id = member_id
+    mock_member.org_id = org_id
+    mock_member.project_id = project_id
+    mock_member.user_id = user_id
+    mock_member.type = "human"
+    mock_member.name = "test"
+    mock_member.role = "admin"  # project level: admin (높음)
+    mock_member.is_active = True
+    mock_member.project_name = None
+    mock_member.has_password = None
+    mock_member.project = MagicMock()
+    mock_member.project.name = "Test Project"
+
+    mock_session = AsyncMock()
+    member_result = MagicMock()
+    member_result.scalars.return_value.first.return_value = mock_member
+
+    user_result = MagicMock()
+    user_result.scalar_one_or_none.return_value = MagicMock(hashed_password=None)
+
+    org_role_result = MagicMock()
+    org_role_result.scalar_one_or_none.return_value = "member"  # org level: member (낮음)
+
+    mock_session.execute = AsyncMock(side_effect=[member_result, user_result, org_role_result])
+
+    auth = AuthContext(
+        user_id=str(user_id),
+        email="test@example.com",
+        claims={"app_metadata": {"org_id": str(org_id), "project_id": str(project_id)}},
+        org_id=str(org_id),
+    )
+
+    result = await get_me(member_id=None, session=mock_session, auth=auth)
+    assert result.role == "admin"  # 기존 높은 role 유지
+
+
 @pytest.mark.anyio
 async def test_list_members_owner_always_included():
     """AC4: org owner는 denied project_access 레코드가 있어도 목록에 포함됨.
