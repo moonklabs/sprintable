@@ -124,15 +124,65 @@ async def update_org_member(
     return OrgMemberResponse.model_validate(member)
 
 
+@router.get("/{id}/affected-projects")
+async def get_affected_projects(
+    id: uuid.UUID,
+    repo: OrgMemberRepository = Depends(_require_admin),
+    session: AsyncSession = Depends(get_db),
+    org_id: uuid.UUID = Depends(get_verified_org_id),
+) -> list[dict]:
+    """해당 org member가 참여 중인 프로젝트 목록 반환 (AC1/AC2/AC3)."""
+    from app.models.team import TeamMember
+    from app.models.project import Project
+    member = await repo.get(id)
+    if member is None:
+        raise HTTPException(status_code=404, detail="Org member not found")
+    result = await session.execute(
+        text(
+            """
+            SELECT DISTINCT p.id AS project_id, p.name AS project_name, tm.role
+            FROM team_members tm
+            JOIN projects p ON p.id = tm.project_id
+            WHERE tm.org_id = :org_id
+              AND tm.user_id = :user_id
+              AND tm.is_active = true
+              AND p.deleted_at IS NULL
+            ORDER BY p.name
+            """
+        ),
+        {"org_id": str(org_id), "user_id": str(member.user_id)},
+    )
+    return [
+        {"project_id": str(row.project_id), "project_name": row.project_name, "role": row.role}
+        for row in result
+    ]
+
+
 @router.delete("/{id}", status_code=200)
 async def delete_org_member(
     id: uuid.UUID,
     repo: OrgMemberRepository = Depends(_require_admin),
+    session: AsyncSession = Depends(get_db),
+    org_id: uuid.UUID = Depends(get_verified_org_id),
 ) -> dict:
     existing = await repo.get(id)
     if existing is None:
         raise HTTPException(status_code=404, detail="Org member not found")
+    # AC5: owner guard — owner는 삭제 불가
+    if existing.role == "owner":
+        raise HTTPException(status_code=403, detail="조직 owner는 삭제할 수 없습니다")
     await _revoke_user_refresh_tokens(repo.session, existing.user_id)
+    # AC4: cascade — team_members is_active = False
+    await session.execute(
+        text(
+            """
+            UPDATE team_members
+            SET is_active = false
+            WHERE org_id = :org_id AND user_id = :user_id AND is_active = true
+            """
+        ),
+        {"org_id": str(org_id), "user_id": str(existing.user_id)},
+    )
     ok = await repo.soft_delete(id)
     if not ok:
         raise HTTPException(status_code=404, detail="Org member not found")
