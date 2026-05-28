@@ -27,6 +27,7 @@ import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { OperatorInput } from '@/components/ui/operator-control';
 import { OperatorDropdownSelect } from '@/components/ui/operator-dropdown-select';
+import { MemberRow } from '@/components/ui/member-row';
 import { SectionCard, SectionCardBody, SectionCardHeader } from '@/components/ui/section-card';
 import { Tabs, TabsList, TabsTrigger, TabsContent } from '@/components/ui/tabs';
 import { SidebarTrigger } from '@/components/ui/sidebar';
@@ -1578,23 +1579,23 @@ export default function SettingsPage() {
                           const isEditingWebhook = member.id in webhookEditing;
                           const currentWebhookUrl = member.webhook_url ?? '';
                           return (
-                          <div key={member.id} className="rounded-md border border-border bg-muted/30 px-3 py-3 text-sm space-y-2">
-                            <div className="flex items-center justify-between gap-3">
-                              <div className="min-w-0">
-                                <div className="font-medium text-foreground">{member.name}</div>
-                                <div className="mt-1 flex flex-wrap items-center gap-2">
+                          <div key={member.id} className="space-y-1">
+                            <MemberRow
+                              name={member.name}
+                              actions={
+                                <>
                                   <Badge variant={member.type === 'agent' ? 'secondary' : 'info'}>{member.type === 'agent' ? t('agentMember') : t('humanMember')}</Badge>
                                   <Badge variant="outline">{member.role}</Badge>
-                                </div>
-                              </div>
-                              {isAdmin ? (
-                              <Button variant="glass" size="sm" onClick={() => handleRemoveProjectMember(member.id)} disabled={removingMemberId === member.id}>
-                                {removingMemberId === member.id ? '...' : t('removeFromProject')}
-                              </Button>
-                              ) : null}
-                            </div>
-                            {/* Webhook URL */}
-                            <div className="flex items-center gap-2">
+                                  {isAdmin ? (
+                                    <Button variant="glass" size="sm" onClick={() => handleRemoveProjectMember(member.id)} disabled={removingMemberId === member.id}>
+                                      {removingMemberId === member.id ? '...' : t('removeFromProject')}
+                                    </Button>
+                                  ) : null}
+                                </>
+                              }
+                            />
+                            {/* Webhook URL block — row 하단 별도 영역 유지 */}
+                            <div className="flex items-center gap-2 px-1">
                               {isEditingWebhook ? (
                                 <>
                                   <input
