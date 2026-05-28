@@ -24,21 +24,21 @@ def test_members_endpoint_uses_org_members_join():
 
 
 def test_members_endpoint_opt_out_logic():
-    """list_members 소스에 'denied' 제외 opt-out 로직 존재 (S-MBR-03: owner/admin 예외 포함)."""
+    """list_members 소스에 grant 로직 존재 (S-MBR-10: grant 모델 전환, owner/admin 예외 포함)."""
     from app.routers import members
     source = inspect.getsource(members.list_members)
-    assert "denied" in source
-    assert "NOT EXISTS" in source or "not exists" in source.lower()
+    assert "granted" in source
+    assert "EXISTS" in source.upper()
 
 
-# ─── AC2: 레코드 없음 = 접근 허용 ────────────────────────────────────────────
+# ─── AC2: grant 레코드 없는 owner/admin은 항상 포함 ───────────────────────────
 
 def test_members_includes_all_org_members_by_default():
-    """list_members 쿼리에서 project_access 없는 org_member는 기본 포함됨."""
+    """list_members 쿼리에서 owner/admin은 grant 없어도 항상 포함됨 (S-MBR-03 유지)."""
     from app.routers import members
     source = inspect.getsource(members.list_members)
-    # opt-out: NOT EXISTS(blocked) → 허용. blocked 레코드 없으면 포함
-    assert "NOT EXISTS" in source or "blocked" in source
+    assert "owner" in source
+    assert "admin" in source
 
 
 # ─── AC3: project_access CRUD ────────────────────────────────────────────────
@@ -60,11 +60,11 @@ def test_project_access_endpoints():
     assert has_get and has_post and has_delete
 
 
-def test_project_access_create_defaults_denied():
-    """ProjectAccessCreate 기본 permission='denied' (full spec: 'allowed'|'denied')."""
+def test_project_access_create_defaults_granted():
+    """ProjectAccessCreate 기본 permission='granted' (S-MBR-10: grant 모델)."""
     from app.routers.project_access import ProjectAccessCreate
     obj = ProjectAccessCreate(org_member_id="00000000-0000-0000-0000-000000000001")
-    assert obj.permission == "denied"
+    assert obj.permission == "granted"
 
 
 def test_project_access_response_schema():

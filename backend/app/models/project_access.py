@@ -9,9 +9,9 @@ from app.core.database import Base
 
 
 class ProjectAccess(Base):
-    """프로젝트별 접근 제어 (opt-out 모델: 레코드 없음 = 접근 허용).
+    """프로젝트별 접근 제어 (grant 모델: 레코드 있음 = 접근 허용, 레코드 없음 = no access).
 
-    OrgMember가 특정 프로젝트에 대해 명시적 권한이 필요할 때만 레코드 생성.
+    S-MBR-10: opt-out → grant 전환. org Owner/Admin은 레코드 없이도 항상 접근 가능.
     """
     __tablename__ = "project_access"
     __table_args__ = (
@@ -31,7 +31,7 @@ class ProjectAccess(Base):
         nullable=False,
         index=True,
     )
-    permission: Mapped[str] = mapped_column(Text, nullable=False, default="allowed", server_default="allowed")
+    permission: Mapped[str] = mapped_column(Text, nullable=False, default="granted", server_default="granted")
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now(), nullable=False
     )
