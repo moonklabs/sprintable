@@ -107,7 +107,9 @@ class LoginRequest(BaseModel):
 class RegisterRequest(BaseModel):
     email: str
     password: str
+    display_name: str  # AC3: 필수
     tos_accepted: bool = False
+    invite_token: str | None = None  # AC2: 초대 토큰 (가입 후 자동 수락)
 
     @field_validator("email")
     @classmethod
@@ -219,6 +221,28 @@ class SetPasswordRequest(BaseModel):
 
 
 # ─── Helpers ──────────────────────────────────────────────────────────────────
+
+async def _auto_accept_invitation(session: AsyncSession, user: User, invite_token: str) -> None:
+    """가입 시 invite_token이 있으면 해당 초대 자동 수락 + org_member 생성."""
+    from app.models.invitation import Invitation
+    result = await session.execute(
+        select(Invitation).where(Invitation.token == invite_token)
+    )
+    inv = result.scalar_one_or_none()
+    if inv is None or inv.status != "pending" or inv.expires_at < datetime.now(timezone.utc):
+        return
+    if inv.email.lower() != user.email.lower():
+        return
+    inv.status = "accepted"
+    inv.accepted_at = datetime.now(timezone.utc)
+    from sqlalchemy.dialects.postgresql import insert as pg_insert
+    await session.execute(
+        pg_insert(OrgMember)
+        .values(org_id=inv.org_id, user_id=user.id, role=inv.role)
+        .on_conflict_do_nothing(constraint="uq_org_members_org_user")
+    )
+    await session.flush()
+
 
 async def _get_user_by_email(session: AsyncSession, email: str) -> User | None:
     result = await session.execute(select(User).where(User.email == email, User.is_active.is_(True)))
@@ -444,6 +468,7 @@ async def register(
     user = User(
         email=body.email,
         hashed_password=hash_password(body.password),
+        display_name=body.display_name.strip() or body.email.split("@")[0],
         is_active=True,
         email_verified=False,
         tos_accepted_at=datetime.now(timezone.utc),
@@ -454,6 +479,10 @@ async def register(
     except IntegrityError:
         await session.rollback()
         return _err("EMAIL_TAKEN", "Email already registered", 409)
+
+    # AC2: invite_token 있으면 가입 후 자동 수락
+    if body.invite_token:
+        await _auto_accept_invitation(session, user, body.invite_token)
 
     tokens = create_tokens(str(user.id), email=user.email, app_metadata=await _build_app_metadata(user, session))
     _, refresh_exp = create_refresh_token(str(user.id), expires_delta=timedelta(days=REFRESH_TOKEN_EXPIRE_DAYS))
@@ -749,6 +778,7 @@ class OAuthCallbackRequest(BaseModel):
     code: str
     state: str
     tos_accepted: bool = False
+    invite_token: str | None = None  # AC4: OAuth 가입 시 초대 자동 수락
 
 
 @router.get("/oauth/{provider}/authorize")
@@ -863,11 +893,17 @@ async def oauth_callback(
             )
             session.add(user)
             try:
-                await session.commit()
-                await session.refresh(user)
+                await session.flush()
             except IntegrityError:
                 await session.rollback()
                 return _err("EMAIL_CONFLICT", "Email already registered", 409)
+
+            # AC4: invite_token 있으면 신규 OAuth 유저도 자동 수락
+            if body.invite_token:
+                await _auto_accept_invitation(session, user, body.invite_token)
+
+            await session.commit()
+            await session.refresh(user)
 
     # 4. JWT 발급
     from datetime import timedelta

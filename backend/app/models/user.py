@@ -24,6 +24,7 @@ class User(Base):
     totp_last_timestep: Mapped[int | None] = mapped_column(nullable=True)
     totp_fail_count: Mapped[int] = mapped_column(nullable=False, default=0)
     totp_locked_until: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    display_name: Mapped[str | None] = mapped_column(Text, nullable=True)
     google_id: Mapped[str | None] = mapped_column(Text, nullable=True, unique=True, index=True)
     github_id: Mapped[str | None] = mapped_column(Text, nullable=True, unique=True, index=True)
     last_project_id: Mapped[uuid.UUID | None] = mapped_column(

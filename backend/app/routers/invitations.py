@@ -11,7 +11,7 @@ from app.dependencies.database import get_db
 from app.models.invitation import Invitation
 from app.models.project import OrgMember
 from app.repositories.invitation import InvitationRepository
-from app.schemas.invitation import AcceptInvitation, CreateInvitation, InvitationResponse
+from app.schemas.invitation import AcceptInvitation, CreateInvitation, InvitationPreviewResponse, InvitationResponse
 from app.services.org_invite_email import send_invite_email
 
 router = APIRouter(prefix="/api/v2/invitations", tags=["invitations"])
@@ -126,6 +126,36 @@ async def resend_invitation(
 
     await session.refresh(inv)
     return _to_response(inv)
+
+
+@router.get("/preview", response_model=InvitationPreviewResponse)
+async def preview_invitation(
+    token: str = Query(...),
+    session: AsyncSession = Depends(get_db),
+) -> InvitationPreviewResponse:
+    """인증 없이 초대 미리보기 — 가입 전 org 정보 표시용 (AC1)."""
+    result = await session.execute(
+        select(Invitation).where(Invitation.token == token)
+    )
+    inv = result.scalar_one_or_none()
+    if inv is None or inv.status != "pending" or inv.expires_at < datetime.now(timezone.utc):
+        raise HTTPException(status_code=400, detail="Invalid, expired, or already used token")
+
+    row = await session.execute(
+        text("SELECT name FROM organizations WHERE id = :id"),
+        {"id": str(inv.org_id)},
+    )
+    org_row = row.first()
+    org_name = org_row[0] if org_row else str(inv.org_id)
+
+    return InvitationPreviewResponse(
+        org_name=org_name,
+        org_id=inv.org_id,
+        email=inv.email,
+        role=inv.role,
+        status=inv.status,
+        expires_at=inv.expires_at,
+    )
 
 
 @router.post("/accept", status_code=200)
