@@ -11,6 +11,8 @@ import asyncio
 import inspect
 from unittest.mock import AsyncMock, MagicMock, patch
 
+import pytest
+
 
 # ── AC1: relay_to_fakechat 복구 ───────────────────────────────────────────────
 
