@@ -221,6 +221,14 @@ async def agent_event_stream(
             if member_row.user_id is None or str(member_row.user_id) != auth.user_id:
                 raise HTTPException(status_code=403, detail="Cannot subscribe to another member's stream")
 
+    # AC1(S-COMM-05): Last-Event-ID 헤더 우선, 쿼리 파라미터 fallback (RFC 8895)
+    _header_last_id = request.headers.get("Last-Event-ID") or request.headers.get("last-event-id")
+    if _header_last_id and last_event_id is None:
+        try:
+            last_event_id = uuid.UUID(_header_last_id)
+        except (ValueError, AttributeError):
+            pass
+
     # S20: 전역 연결 수 제한 — 초과 시 503
     global _sse_connection_count
     if _sse_connection_count >= _MAX_SSE_CONNECTIONS:
@@ -490,8 +498,11 @@ async def mark_delivered(
 
 # ─── S3: 큐 관리 (expired + cleanup) ─────────────────────────────────────────
 
-_EXPIRE_DAYS = 30
-_CLEANUP_DAYS = 7
+_EXPIRE_DAYS = 30  # pending → expired 후 이 기간 보관 (AC3: 최소 1일 이상)
+_CLEANUP_DAYS = 7   # delivered 이벤트 삭제 주기 (AC3: 최소 1일 이상)
+_EVENT_RETENTION_MIN_HOURS = 24  # S-COMM-05 AC3: 최소 보관 시간 (문서화 목적)
+assert _EXPIRE_DAYS * 24 >= _EVENT_RETENTION_MIN_HOURS, "Event retention must be >= 24h"
+assert _CLEANUP_DAYS * 24 >= _EVENT_RETENTION_MIN_HOURS, "Event cleanup must be >= 24h"
 
 
 @router.post("/expire-stale", status_code=200)
