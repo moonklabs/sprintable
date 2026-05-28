@@ -45,12 +45,12 @@ function ChainBadge({ length }: { length: number }) {
 
 export function WorkflowTemplateGallerySection({
   projectId,
-  orgId,
+  orgId: _orgId,
 }: {
   projectId: string;
   orgId?: string;
 }) {
-  const t = useTranslations('settings');
+  const _t = useTranslations('settings');
 
   const [templates, setTemplates] = useState<WorkflowTemplate[]>([]);
   const [agents, setAgents] = useState<TeamMember[]>([]);
