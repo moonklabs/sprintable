@@ -1,0 +1,228 @@
+/**
+ * S-COMM-08: sprintable onboard — 에이전트 온보딩 가이드 CLI
+ *
+ * AC1: 에이전트 종류 선택 (Claude Code / Hermes / Codex / OpenClaw / 기타)
+ * AC2: Claude Code → fakechat 플러그인 설치 안내 + alias 자동 설정
+ * AC3: 기타 에이전트 → API Key + SSE inbox URL + 구독 방법 안내
+ */
+import select from "@inquirer/select";
+import confirm from "@inquirer/confirm";
+import input from "@inquirer/input";
+import { existsSync, readFileSync, writeFileSync } from "node:fs";
+import { homedir } from "node:os";
+import { join } from "node:path";
+
+export type OnboardAgentType =
+  | "claude-code"
+  | "hermes"
+  | "codex"
+  | "openclaw"
+  | "other";
+
+const FAKECHAT_CHANNEL = "plugin:fakechat:ws://localhost:8787";
+const FAKECHAT_PLUGIN = "@sprintable/fakechat";
+
+const SHELL_RC_FILES = [
+  join(homedir(), ".zshrc"),
+  join(homedir(), ".bashrc"),
+  join(homedir(), ".bash_profile"),
+];
+
+/** 첫 번째 존재하는 RC 파일 반환. 없으면 .zshrc (신규 생성) */
+export function detectRcFile(): string {
+  return SHELL_RC_FILES.find((f) => existsSync(f)) ?? SHELL_RC_FILES[0];
+}
+
+/** RC 파일에서 alias claude=... 라인과 기존 커맨드 추출 */
+export function parseClaudeAlias(
+  content: string,
+): { line: string; cmd: string } | null {
+  const match = content.match(/^(alias\s+claude\s*=\s*["'](.*)["'])\s*$/m);
+  if (!match) return null;
+  return { line: match[1], cmd: match[2] };
+}
+
+/** RC 파일 내용에 fakechat 채널 추가 후 반환. 이미 있으면 원본 반환. */
+export function injectFakechatAlias(content: string, rcFile: string): string {
+  const existing = parseClaudeAlias(content);
+
+  if (existing) {
+    if (existing.cmd.includes("--channels")) {
+      // 이미 --channels 있음 — fakechat만 추가
+      if (existing.cmd.includes("fakechat")) return content;
+      const updated = `${existing.cmd} ${FAKECHAT_CHANNEL}`;
+      return content.replace(
+        existing.line,
+        `alias claude="${updated}"`,
+      );
+    }
+    const updated = `${existing.cmd} --channels "${FAKECHAT_CHANNEL}"`;
+    return content.replace(existing.line, `alias claude="${updated}"`);
+  }
+
+  // alias 없음 → 새로 추가
+  const newAlias = `\n# Added by sprintable onboard\nalias claude="claude --channels '${FAKECHAT_CHANNEL}'"\n`;
+  return content + newAlias;
+}
+
+// ─── AC2: Claude Code 온보딩 ──────────────────────────────────────────────────
+
+async function onboardClaudeCode(): Promise<void> {
+  console.log("\n── Claude Code 온보딩 ──────────────────────────────────────\n");
+
+  // Step 1: fakechat 플러그인 설치 안내
+  console.log("1️⃣  fakechat 플러그인 설치\n");
+  console.log(`   Claude Code 플러그인 마켓에서 '${FAKECHAT_PLUGIN}'을 설치하세요:`);
+  console.log(`\n   $ claude plugin install ${FAKECHAT_PLUGIN}\n`);
+
+  const installed = await confirm({
+    message: "fakechat 플러그인 설치가 완료되었나요?",
+    default: true,
+  });
+  if (!installed) {
+    console.log("\n설치 후 다시 실행해 주세요: sprintable onboard");
+    return;
+  }
+
+  // Step 2: alias 설정
+  console.log("\n2️⃣  shell alias 설정\n");
+
+  const rcFile = detectRcFile();
+  const content = existsSync(rcFile) ? readFileSync(rcFile, "utf-8") : "";
+  const existing = parseClaudeAlias(content);
+
+  if (existing) {
+    console.log(`   기존 alias 발견 (${rcFile}):`);
+    console.log(`   ${existing.line}\n`);
+
+    if (existing.cmd.includes("fakechat")) {
+      console.log("   ✅ 이미 fakechat 채널이 포함되어 있습니다.\n");
+    } else {
+      const updated = injectFakechatAlias(content, rcFile);
+      const newAlias = parseClaudeAlias(updated);
+
+      console.log("   변경될 alias:");
+      console.log(`   ${newAlias?.line ?? "(변경 없음)"}\n`);
+
+      const ok = await confirm({
+        message: `${rcFile}에 자동으로 적용할까요?`,
+        default: true,
+      });
+      if (ok) {
+        writeFileSync(rcFile, updated, "utf-8");
+        console.log(`\n   ✅ ${rcFile} 업데이트 완료.`);
+        console.log("   터미널 재시작 또는 다음 명령어 실행:\n");
+        console.log(`   $ source ${rcFile}\n`);
+      } else {
+        console.log(`\n   수동으로 다음 라인을 ${rcFile}에 추가하세요:\n`);
+        console.log(`   ${newAlias?.line}\n`);
+      }
+    }
+  } else {
+    console.log(`   ${rcFile}에서 alias claude=... 를 찾지 못했습니다.\n`);
+    const newLine = `alias claude="claude --channels '${FAKECHAT_CHANNEL}'"`;
+    console.log("   추가될 alias:");
+    console.log(`   ${newLine}\n`);
+
+    const ok = await confirm({
+      message: `${rcFile}에 자동으로 추가할까요?`,
+      default: true,
+    });
+    if (ok) {
+      const updated = injectFakechatAlias(content, rcFile);
+      writeFileSync(rcFile, updated, "utf-8");
+      console.log(`\n   ✅ ${rcFile} 업데이트 완료.`);
+      console.log("   터미널 재시작 또는:\n");
+      console.log(`   $ source ${rcFile}\n`);
+    } else {
+      console.log(`\n   수동으로 ${rcFile}에 다음을 추가하세요:\n`);
+      console.log(`   ${newLine}\n`);
+    }
+  }
+
+  // Step 3: 채널 확인 명령어
+  console.log("3️⃣  연결 확인\n");
+  console.log("   Claude Code를 재시작한 뒤 등록된 채널 목록 확인:");
+  console.log("\n   $ claude --channels\n");
+  console.log("   fakechat 채널이 보이면 온보딩 완료입니다. 🎉\n");
+}
+
+// ─── AC3: 기타 에이전트 온보딩 ────────────────────────────────────────────────
+
+async function onboardOther(agentLabel: string): Promise<void> {
+  console.log(`\n── ${agentLabel} 온보딩 ────────────────────────────────────────\n`);
+
+  // Step 1: API Key 확인
+  console.log("1️⃣  Agent API Key 확인\n");
+  console.log("   아직 발급받지 않았다면 먼저 connect 명령어를 실행하세요:");
+  console.log("\n   $ sprintable connect\n");
+
+  const apiKey = await input({
+    message: "Agent API Key (sk_live_...)",
+    validate: (v) => (v.trim().length > 0 ? true : "API Key를 입력하세요"),
+  });
+
+  const apiUrl = await input({
+    message: "Sprintable API URL",
+    default: "https://app.sprintable.ai",
+    validate: (v) => (v.startsWith("http") ? true : "http(s)://로 시작해야 합니다"),
+  });
+
+  const base = apiUrl.replace(/\/$/, "");
+
+  // Step 2: SSE inbox URL 안내
+  console.log("\n2️⃣  SSE inbox 구독\n");
+  console.log("   에이전트 ID를 먼저 조회하세요:");
+  console.log(`\n   $ curl -H "x-agent-api-key: ${apiKey.trim()}" ${base}/api/v2/auth/me\n`);
+  console.log("   응답의 member_id가 에이전트 ID입니다.\n");
+  console.log("   이벤트 스트림 구독 (SSE):");
+  console.log(`\n   $ curl -N -H "x-agent-api-key: ${apiKey.trim()}" \\`);
+  console.log(`       "${base}/api/v2/events/stream?recipient_id=<AGENT_ID>"\n`);
+
+  // Step 3: 외부 POST (inbox webhook)
+  console.log("3️⃣  외부 서비스 → 에이전트 inbox 전송\n");
+  console.log("   외부 시스템에서 에이전트에게 이벤트를 보내는 방법:");
+  console.log(`\n   $ curl -X POST ${base}/api/v2/agent-inbox/<AGENT_ID>/webhook \\`);
+  console.log(`       -H "Content-Type: application/json" \\`);
+  console.log(`       -d '{"event_type":"your_event","data":"payload"}'\n`);
+  console.log("   ※ 운영 환경에서는 AGENT_INBOX_WEBHOOK_SECRET 환경변수로 HMAC 서명을 설정하세요.\n");
+
+  console.log("4️⃣  Node.js / Python 구독 예시\n");
+  console.log("   Node.js:");
+  console.log(`\n   import { EventSource } from "eventsource";`);
+  console.log(`   const es = new EventSource(\`${base}/api/v2/events/stream?recipient_id=<AGENT_ID>\`, {`);
+  console.log(`     headers: { "x-agent-api-key": "${apiKey.trim().substring(0, 8)}..." },`);
+  console.log(`   });`);
+  console.log(`   es.onmessage = (e) => console.log(JSON.parse(e.data));\n`);
+
+  console.log("   온보딩 완료! 도움이 필요하면: https://docs.sprintable.ai 🎉\n");
+}
+
+// ─── AC1: 에이전트 선택 진입점 ────────────────────────────────────────────────
+
+export async function onboardCommand(): Promise<void> {
+  console.log("\n🚀 Sprintable 에이전트 온보딩\n");
+
+  const agentType = await select<OnboardAgentType>({
+    message: "에이전트 종류를 선택하세요",
+    choices: [
+      { name: "Claude Code", value: "claude-code" },
+      { name: "Hermes", value: "hermes" },
+      { name: "Codex", value: "codex" },
+      { name: "OpenClaw", value: "openclaw" },
+      { name: "기타 (API / SSE 직접 구독)", value: "other" },
+    ],
+  });
+
+  if (agentType === "claude-code") {
+    await onboardClaudeCode();
+  } else {
+    const labelMap: Record<string, string> = {
+      hermes: "Hermes",
+      codex: "Codex",
+      openclaw: "OpenClaw",
+      other: "기타 에이전트",
+    };
+    await onboardOther(labelMap[agentType] ?? agentType);
+  }
+}
