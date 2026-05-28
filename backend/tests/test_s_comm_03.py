@@ -1,9 +1,10 @@
 """S-COMM-03: fakechat relay 제거 검증 테스트.
 
 AC1: relay_to_fakechat 함수 제거 — sse_bridge에 존재하지 않음.
-AC2: _send_mcp_notification 유지 — 모든 이벤트에 MCP notification 발송.
+AC2: _send_mcp_notification 유지 — 모든 이벤트에 notifications/claude/channel 발송.
 AC3: MCP notification은 backfill·webhook 여부 무관하게 항상 발송.
 AC4: has_webhook / fakechat_port 설정 제거됨.
+FIX: send_log_message → _write_stream.send(JSONRPCNotification) 교체 (오스카군 실검증).
 """
 from __future__ import annotations
 
@@ -97,21 +98,47 @@ def test_send_mcp_notification_skips_when_no_session():
     # 에러 없이 완료되면 AC2 pass
 
 
-def test_send_mcp_notification_calls_session():
-    """세션 등록 시 _send_mcp_notification이 send_log_message 호출."""
+def test_send_mcp_notification_uses_write_stream():
+    """세션 등록 시 _send_mcp_notification이 _write_stream.send로 channel notification 전송 (FIX)."""
     import sprintable_mcp.sse_bridge as bridge
+    from mcp.types import JSONRPCNotification
 
+    mock_write_stream = AsyncMock()
     mock_session = MagicMock()
-    mock_session.send_log_message = AsyncMock()
+    mock_session._write_stream = mock_write_stream
     bridge._active_session = mock_session
 
     try:
         asyncio.get_event_loop().run_until_complete(
-            bridge._send_mcp_notification("story_assigned", '{"event_id":"abc"}')
+            bridge._send_mcp_notification("story_assigned", '{"event_id":"abc","conversation_id":"def"}')
         )
-        mock_session.send_log_message.assert_called_once()
-        call_kwargs = mock_session.send_log_message.call_args.kwargs
-        assert call_kwargs["level"] == "info"
-        assert call_kwargs["data"]["event_type"] == "story_assigned"
+        mock_write_stream.send.assert_called_once()
+        sent_arg = mock_write_stream.send.call_args.args[0]
+        # JSONRPCMessage 래핑 확인
+        notification = sent_arg.message.root
+        assert isinstance(notification, JSONRPCNotification)
+        assert notification.method == "notifications/claude/channel"
+        assert notification.params["meta"]["message_id"] == "abc"
+        assert notification.params["meta"]["thread_id"] == "def"
+        assert notification.params["content"] == '{"event_id":"abc","conversation_id":"def"}'
     finally:
         bridge._active_session = None
+
+
+def test_send_mcp_notification_no_send_log_message():
+    """_send_mcp_notification이 send_log_message()를 호출하지 않아야 함 (FIX)."""
+    import inspect
+    import sprintable_mcp.sse_bridge as bridge
+    source = inspect.getsource(bridge._send_mcp_notification)
+    # 호출 패턴(괄호 포함)으로 체크 — docstring 언급과 구분
+    assert "send_log_message(" not in source, (
+        "_send_mcp_notification must not call send_log_message() (replaced by _write_stream.send)"
+    )
+
+
+def test_send_mcp_notification_uses_channel_method():
+    """_send_mcp_notification 소스에 notifications/claude/channel method가 있어야 함 (FIX)."""
+    import inspect
+    import sprintable_mcp.sse_bridge as bridge
+    source = inspect.getsource(bridge._send_mcp_notification)
+    assert "notifications/claude/channel" in source

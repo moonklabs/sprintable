@@ -10,10 +10,13 @@ import sys
 import time
 from collections import OrderedDict
 from dataclasses import dataclass
+from datetime import datetime, timezone
 from random import uniform
 from typing import TYPE_CHECKING, Any, Callable
 
 import httpx
+from mcp.shared.session import ServerMessageMetadata, SessionMessage
+from mcp.types import JSONRPCMessage, JSONRPCNotification
 
 from .config import settings
 
@@ -93,18 +96,47 @@ def register_session(session: ServerSession) -> None:
 
 
 async def _send_mcp_notification(event_type: str, data_str: str) -> None:
-    """SSE 이벤트를 MCP log notification으로 클라이언트에 전송.
+    """SSE 이벤트를 notifications/claude/channel 로 Claude Code 세션에 전송.
 
+    send_log_message는 MCP logging spec이라 Claude Code가 대화 입력으로 인식 안 함 (오스카군 실검증).
+    JSONRPCNotification을 _write_stream에 직접 write하여 fakechat TS SDK와 동일 경로로 전송.
     세션 미등록 또는 에러 시 조용히 skip — MCP 도구 호출에 영향 없음.
     """
     if _active_session is None:
         return
     try:
-        await _active_session.send_log_message(
-            level="info",
-            data={"event_type": event_type, "data": data_str},
-            logger="sprintable.sse",
+        # data_str 파싱으로 meta 필드 구성
+        try:
+            payload = json.loads(data_str) if data_str else {}
+        except (json.JSONDecodeError, TypeError):
+            payload = {}
+
+        event_id = payload.get("event_id") or payload.get("id") or ""
+        conversation_id = payload.get("conversation_id") or payload.get("source_entity_id") or ""
+        ts = datetime.now(timezone.utc).isoformat()
+
+        meta: dict[str, Any] = {
+            "chat_id": "web",
+            "message_id": str(event_id) if event_id else "",
+            "user": "web",
+            "ts": ts,
+        }
+        if conversation_id:
+            meta["thread_id"] = str(conversation_id)
+
+        # content: 이벤트 타입 + 주요 필드 요약 (Claude Code 채널 입력으로 인식되는 텍스트)
+        content = data_str or f"(event_type={event_type})"
+
+        notification = JSONRPCNotification(
+            jsonrpc="2.0",
+            method="notifications/claude/channel",
+            params={"content": content, "meta": meta},
         )
+        session_message = SessionMessage(
+            message=JSONRPCMessage(notification),
+            metadata=None,
+        )
+        await _active_session._write_stream.send(session_message)
     except Exception as exc:
         _log(f"notification error: {exc}")
 
