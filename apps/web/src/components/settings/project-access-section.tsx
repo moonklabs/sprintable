@@ -5,6 +5,7 @@ import { Shield, ShieldOff, Loader2 } from 'lucide-react';
 import { Alert, AlertDescription } from '@/components/ui/alert';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
+import { MemberRow } from '@/components/ui/member-row';
 import { SectionCard, SectionCardBody, SectionCardHeader } from '@/components/ui/section-card';
 import { cn } from '@/lib/utils';
 
@@ -161,70 +162,63 @@ export function ProjectAccessSection({ projectId, currentRole }: ProjectAccessSe
               const toggling = togglingId === member.id;
 
               return (
-                <div
+                <MemberRow
                   key={member.id}
+                  name={member.name}
+                  email={member.email}
                   className={cn(
-                    'flex items-center justify-between gap-3 px-3 py-3 transition-opacity duration-200',
+                    'border-0 rounded-none bg-transparent transition-opacity duration-200',
                     !granted && !isOwner && 'opacity-60',
                   )}
-                >
-                  <div className="min-w-0 flex-1">
-                    <div className="truncate text-sm font-medium text-foreground">
-                      {member.name}
-                    </div>
-                    {member.email && (
-                      <div className="truncate text-xs text-muted-foreground">
-                        {member.email}
-                      </div>
-                    )}
-                  </div>
-                  <div className="flex shrink-0 items-center gap-2">
-                    {granted && grant ? (
-                      <Badge variant="outline" className="capitalize text-xs">
-                        {grant.role}
-                      </Badge>
-                    ) : isOwner ? (
-                      <Badge variant="info" className="capitalize text-xs">
-                        {member.role}
-                      </Badge>
-                    ) : null}
-                    {isOwner ? (
-                      <span className="inline-flex items-center gap-1 text-xs text-muted-foreground">
-                        <Shield className="h-3 w-3" />
-                        상시 허용
-                      </span>
-                    ) : canManage ? (
-                      <Button
-                        variant="glass"
-                        size="sm"
-                        disabled={toggling}
-                        onClick={() => void handleToggle(member)}
-                        className={cn(
-                          'min-w-[72px] gap-1 transition-colors',
-                          granted
-                            ? 'border-success/40 bg-success-tint text-success hover:bg-success/15'
-                            : 'border-border text-muted-foreground hover:bg-muted/40',
-                        )}
-                      >
-                        {toggling ? (
-                          <Loader2 className="h-3 w-3 animate-spin" />
-                        ) : granted ? (
-                          <><Shield className="h-3 w-3" />허용</>
-                        ) : (
-                          <><ShieldOff className="h-3 w-3" />차단</>
-                        )}
-                      </Button>
-                    ) : (
-                      <span className={cn(
-                        'inline-flex items-center gap-1 text-xs',
-                        granted ? 'text-success' : 'text-muted-foreground',
-                      )}>
-                        {granted ? <Shield className="h-3 w-3" /> : <ShieldOff className="h-3 w-3" />}
-                        {granted ? '허용' : '차단'}
-                      </span>
-                    )}
-                  </div>
-                </div>
+                  actions={
+                    <>
+                      {granted && grant ? (
+                        <Badge variant="outline" className="capitalize text-xs">
+                          {grant.role}
+                        </Badge>
+                      ) : isOwner ? (
+                        <Badge variant="info" className="capitalize text-xs">
+                          {member.role}
+                        </Badge>
+                      ) : null}
+                      {isOwner ? (
+                        <span className="inline-flex items-center gap-1 text-xs text-muted-foreground">
+                          <Shield className="h-3 w-3" />
+                          상시 허용
+                        </span>
+                      ) : canManage ? (
+                        <Button
+                          variant="glass"
+                          size="sm"
+                          disabled={toggling}
+                          onClick={() => void handleToggle(member)}
+                          className={cn(
+                            'min-w-[72px] gap-1 transition-colors',
+                            granted
+                              ? 'border-success/40 bg-success-tint text-success hover:bg-success/15'
+                              : 'border-border text-muted-foreground hover:bg-muted/40',
+                          )}
+                        >
+                          {toggling ? (
+                            <Loader2 className="h-3 w-3 animate-spin" />
+                          ) : granted ? (
+                            <><Shield className="h-3 w-3" />허용</>
+                          ) : (
+                            <><ShieldOff className="h-3 w-3" />차단</>
+                          )}
+                        </Button>
+                      ) : (
+                        <span className={cn(
+                          'inline-flex items-center gap-1 text-xs',
+                          granted ? 'text-success' : 'text-muted-foreground',
+                        )}>
+                          {granted ? <Shield className="h-3 w-3" /> : <ShieldOff className="h-3 w-3" />}
+                          {granted ? '허용' : '차단'}
+                        </span>
+                      )}
+                    </>
+                  }
+                />
               );
             })}
           </div>
