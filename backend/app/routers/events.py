@@ -23,6 +23,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.dependencies.auth import AuthContext, get_current_user, get_verified_org_id
 from app.dependencies.database import get_db
 from app.models.event import Event
+from app.models.team import TeamMember
 
 router = APIRouter(prefix="/api/v2/events", tags=["events"])
 
@@ -172,30 +173,53 @@ class EventResponse(BaseModel):
 @router.get("/stream")
 async def agent_event_stream(
     request: Request,
-    member_id: uuid.UUID = Query(...),
+    member_id: uuid.UUID | None = Query(default=None),  # AC2: API key 시 자동 추출, JWT 시 필수
+    auth: AuthContext = Depends(get_current_user),  # AC1: Bearer {API_KEY} 또는 JWT — 없으면 401 (AC3)
     org_id: uuid.UUID = Depends(get_verified_org_id),
     since_timestamp: datetime | None = Query(default=None),
     last_event_id: uuid.UUID | None = Query(default=None),
 ):
-    """GET /api/v2/events/stream?member_id={id} — 에이전트 전용 SSE 스트림.
+    """GET /api/v2/events/stream — 에이전트 전용 SSE 스트림.
+
+    인증: Authorization: Bearer {API_KEY} 또는 JWT.
+    API Key 사용 시 member_id 자동 추출 — 쿼리 파라미터 불필요.
+    JWT 사용 시 member_id 쿼리 파라미터 필수.
 
     이벤트:
     - heartbeat: 30초마다 연결 유지
     - <event_type>: 이벤트버스 이벤트 실시간 수신
     """
     from app.core.database import async_session_factory
-    from app.models.team import TeamMember
 
-    # member_id가 요청자 org 소속인지 검증 — 개별 세션, 검증 후 즉시 반환
+    is_api_key = bool(auth.claims.get("app_metadata", {}).get("api_key_id"))
+
+    # AC2: API key → member_id 자동 추출 (auth.user_id = team_member.id)
+    if is_api_key:
+        resolved_member_id = uuid.UUID(auth.user_id)
+        # query param이 명시된 경우 일치 여부 검증 — AC4
+        if member_id is not None and member_id != resolved_member_id:
+            raise HTTPException(status_code=403, detail="API key can only subscribe to its own stream")
+    else:
+        if member_id is None:
+            raise HTTPException(status_code=400, detail="member_id query parameter required")
+        resolved_member_id = member_id
+
+    # member_id가 org 소속인지 검증 + AC4: JWT 경로에서 타인 stream 접근 차단
     async with async_session_factory() as db:
         result = await db.execute(
-            select(TeamMember.id).where(
-                TeamMember.id == member_id,
+            select(TeamMember).where(
+                TeamMember.id == resolved_member_id,
                 TeamMember.org_id == org_id,
             )
         )
-        if result.scalar_one_or_none() is None:
+        member_row = result.scalar_one_or_none()
+        if member_row is None:
             raise HTTPException(status_code=404, detail="Member not found")
+
+        # AC4: JWT 사용자는 자신의 team_member(user_id 일치)에만 구독 허용
+        if not is_api_key:
+            if member_row.user_id is None or str(member_row.user_id) != auth.user_id:
+                raise HTTPException(status_code=403, detail="Cannot subscribe to another member's stream")
 
     # S20: 전역 연결 수 제한 — 초과 시 503
     global _sse_connection_count
@@ -203,7 +227,7 @@ async def agent_event_stream(
         raise HTTPException(status_code=503, detail="SSE connection limit reached")
     _sse_connection_count += 1
 
-    member_id_str = str(member_id)
+    member_id_str = str(resolved_member_id)
     queue: asyncio.Queue[dict] = asyncio.Queue(maxsize=200)
     _agent_connections[member_id_str].add(queue)
 
@@ -234,7 +258,7 @@ async def agent_event_stream(
                     # threshold 초과: _ref 이후 최근 N건만 (최신순 → 역순 전달로 시간 순서 보존)
                     exceed_clauses: list[Any] = [
                         Event.org_id == org_id,
-                        Event.recipient_id == member_id,
+                        Event.recipient_id == resolved_member_id,
                         Event.status == "pending",
                     ]
                     if _ref is not None:
@@ -258,7 +282,7 @@ async def agent_event_stream(
                     # threshold 이내: ref_ts 이후 전량 (최대 100건)
                     where_clauses: list[Any] = [
                         Event.org_id == org_id,
-                        Event.recipient_id == member_id,
+                        Event.recipient_id == resolved_member_id,
                         Event.status == "pending",
                     ]
                     if _ref is not None:
