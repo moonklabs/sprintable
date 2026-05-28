@@ -376,7 +376,7 @@ export default function SettingsPage() {
 
     const [projectMemberRes, orgMemberRes] = await Promise.all([
       fetch(`/api/team-members?project_id=${projectId}`),
-      fetch('/api/team-members?include_inactive=true'),
+      fetch('/api/org-members'),
     ]);
 
     if (projectMemberRes.ok) {
@@ -386,7 +386,18 @@ export default function SettingsPage() {
 
     if (orgMemberRes.ok) {
       const json = await orgMemberRes.json();
-      setOrgMembers((json.data ?? []) as ProjectMember[]);
+      type OrgMemberRow = { id: string; user_id: string; role: string; email?: string; deleted_at?: string | null };
+      const mapped: ProjectMember[] = (json.data ?? []).map((row: OrgMemberRow) => ({
+        id: row.id,
+        name: row.email ?? row.user_id,
+        email: row.email,
+        type: 'human' as const,
+        role: row.role,
+        user_id: row.user_id,
+        project_id: projectId,
+        is_active: !row.deleted_at,
+      }));
+      setOrgMembers(mapped);
     }
   };
 
