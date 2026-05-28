@@ -45,6 +45,7 @@ async def test_register_without_tos_400():
             resp = await c.post("/api/v2/auth/register", json={
                 "email": "new@example.com",
                 "password": "TestPass1!",
+                "display_name": "Test User",
                 "tos_accepted": False,
             })
         assert resp.status_code == 400
@@ -62,6 +63,7 @@ async def test_register_without_tos_field_400():
             resp = await c.post("/api/v2/auth/register", json={
                 "email": "new@example.com",
                 "password": "TestPass1!",
+                "display_name": "Test User",
             })
         assert resp.status_code == 400
         assert resp.json()["error"]["code"] == "TOS_NOT_ACCEPTED"

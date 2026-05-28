@@ -42,5 +42,14 @@ class InvitationResponse(BaseModel):
     invite_url: str | None = None
 
 
+class InvitationPreviewResponse(BaseModel):
+    org_name: str
+    org_id: uuid.UUID
+    email: str
+    role: str
+    status: str
+    expires_at: datetime
+
+
 class AcceptInvitation(BaseModel):
     token: str

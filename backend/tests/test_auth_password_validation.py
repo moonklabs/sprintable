@@ -6,7 +6,7 @@ from app.routers.auth import RegisterRequest
 
 
 def _make(password: str) -> RegisterRequest:
-    return RegisterRequest(email="test@example.com", password=password)
+    return RegisterRequest(email="test@example.com", password=password, display_name="Test")
 
 
 def test_valid_password_upper_lower_digit():
