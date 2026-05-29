@@ -144,7 +144,7 @@ Claude Code 세션 (MCP stdio)
 |--------------|------------------|----------------|------|
 | **Claude Code** | MCP (stdio) | fakechat — WS→MCP notification 주입 | 이 harness 세션이 이 패턴 |
 | **Hermes** (장기 실행 서버) | MCP (stdio) | SSE (`GET /api/v2/events/stream`) | 상시 연결 유지, backfill 지원 |
-| **Webhook 에이전트** (서버리스·슬리핑) | MCP (stdio) | webhook (`TeamMember.webhook_url` POST) | 이벤트 수신 시만 깨어남 |
+| **Webhook 에이전트** (서버리스·슬리핑) | MCP (stdio) | webhook (`webhook_configs.url` POST) | 이벤트 수신 시만 깨어남 |
 | **외부 통합** (Slack·Discord 봇 등) | MCP (stdio) | Inbox webhook (`/agent-inbox/{id}/webhook`) → EventBus → SSE relay | HMAC 검증 필수 |
 | **SSE 불가 환경** | MCP (stdio) | `poll_events` MCP tool (폴링 fallback) | SSE 연결 불가 시 사용 |
 
