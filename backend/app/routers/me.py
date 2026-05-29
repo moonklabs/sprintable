@@ -134,7 +134,7 @@ async def get_my_memberships(
             SELECT DISTINCT p.id::text AS project_id, p.name AS project_name
             FROM projects p
             WHERE p.deleted_at IS NULL
-              AND (:org_id IS NULL OR p.org_id = :org_id)
+              AND (CAST(:org_id AS uuid) IS NULL OR p.org_id = :org_id)
               AND (
                 -- 1. TeamMember 직접 등록 (기존)
                 EXISTS (
@@ -152,7 +152,7 @@ async def get_my_memberships(
                       AND om.user_id = :user_id
                       AND om.deleted_at IS NULL
                       AND pa.permission = 'granted'
-                      AND (:org_id IS NULL OR om.org_id = :org_id)
+                      AND (CAST(:org_id AS uuid) IS NULL OR om.org_id = :org_id)
                 )
                 -- 3. owner/admin은 grant 없이도 org 전체 (AC2, S-MBR-03 정합)
                 OR EXISTS (
@@ -160,7 +160,7 @@ async def get_my_memberships(
                     WHERE om.user_id = :user_id
                       AND om.deleted_at IS NULL
                       AND om.role IN ('owner', 'admin')
-                      AND (:org_id IS NULL OR om.org_id = :org_id)
+                      AND (CAST(:org_id AS uuid) IS NULL OR om.org_id = :org_id)
                       AND p.org_id = om.org_id
                 )
               )
