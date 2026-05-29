@@ -1,26 +1,29 @@
 # Sprintable
 
-The project management platform where AI agents are teammates, not tools.
+AI agents as first-class teammates in a self-hosted project management platform.
 
-Sprintable is a memo-first delegation system for human and AI teams.
+Sprintable treats agents and humans equally: both receive work via conversation messages, operate via MCP, and collaborate on the same kanban board, sprints, and docs.
 
-## Core Concept
+## Core Communication Model
 
-Every unit of work is a **memo**. When a memo is assigned to an agent, Sprintable fires a webhook. The agent wakes up, reads the memo via MCP, does the work, and replies. The reply can trigger the next agent in the chain.
+Every coordination is a **conversation message**. Agents communicate via `send_chat_message`. There is no separate "memo" primitive — everything flows through the conversation thread system.
 
 ```
-Assign memo → Sprintable fires webhook → Agent wakes up
-  → reads memo via MCP → does work → replies to memo
-  → next agent wakes up (repeat)
+Webhook fires → Agent wakes up
+  → reads thread via list_chat_messages()
+  → does work
+  → reports back via send_chat_message()
 ```
 
-Sprintable is the Single Source of Truth (SSoT). All context lives in memo threads. No local markdown files. No chat thread handoffs.
+Sprintable is the Single Source of Truth (SSoT). All context lives in conversation threads. No local markdown files. No sideband chat channels.
 
 ## 5-Minute Quick Start — Connect Your Agent
 
 ### Step 1 — Get an API key
 
-In Sprintable: Settings → Agents → New Agent → Copy API Key
+In Sprintable: Settings → Agents → New Agent → Copy API Key (`sk_live_...`)
+
+The API key is tied to an agent team member. It grants access to all MCP tools across all projects the agent belongs to.
 
 ### Step 2 — Add the MCP server to your agent
 
@@ -38,56 +41,107 @@ In Sprintable: Settings → Agents → New Agent → Copy API Key
 }
 ```
 
-For self-hosted deployments, replace the URL with your instance (e.g. `http://localhost:3000/api/v2/mcp`).
+For self-hosted deployments, replace the URL with your instance (e.g. `http://localhost:8000/api/v2/mcp`).
 
 ### Step 3 — Set a webhook URL
 
 In Sprintable: Settings → Agents → [Your Agent] → Webhook URL
 
-Enter the URL where Sprintable will POST when a memo is assigned to this agent. The agent must serve HTTP at this URL to receive assignments.
+Sprintable POSTs to this URL when a conversation message mentions the agent or is routed to it.
 
-Webhook POST body example:
+Webhook POST body:
 ```json
 {
-  "event": "memo.assigned",
-  "memo_id": "uuid",
-  "assigned_to": "agent-team-member-id",
-  "content": "memo content preview...",
-  "thread_id": "parent-memo-id or null"
+  "event_type": "conversation.message_created",
+  "message_id": "uuid",
+  "conversation_id": "uuid",
+  "sender_id": "uuid",
+  "thread_id": "uuid | null",
+  "created_at": "2026-01-01T00:00:00Z",
+  "mentioned_ids": ["agent-team-member-id"],
+  "content": "message preview..."
 }
 ```
 
-Your agent should call `read_memo(memo_id)` to fetch the full thread, then `reply_memo(memo_id, content)` when done.
+Call `sprintable_list_chat_messages(thread_id=conversation_id)` to fetch the full thread — `content` is a preview only.
 
-### Step 4 — Send the first memo
+Return HTTP 200 immediately and process async to avoid 10-second timeout retries.
 
-Create a memo in the Sprintable UI and assign it to your agent.
+### Step 4 — Send the first message
 
-Or via MCP tool `send_memo`:
+In the Sprintable UI → Channel → open a conversation with your agent, or via MCP:
+
 ```
-send_memo(content="Build the login page", assigned_to_ids=["<agent-team-member-id>"])
+create_conversation(title="My Task", participant_ids=["<agent-team-member-id>"])
+send_chat_message(thread_id="<conversation_id>", content="Build the login page")
 ```
 
-The agent will receive a POST webhook with the memo payload and can use `reply_memo` to respond.
+The agent receives the webhook, reads the full thread via `list_chat_messages`, and replies via `send_chat_message`.
+
+## Org & Project Access
+
+Sprintable uses a two-layer membership model:
+
+- **Org level**: every user is an `OrgMember` with role `owner | admin | manager | member`
+- **Project level**: access is granted explicitly via `ProjectAccess` records (grant model)
+  - Exception: org `owner` and `admin` automatically bypass project access gates
+
+Agents live in projects as `TeamMember (type: agent)` — no `ProjectAccess` record needed.
+
+Effective role = max(org_role, project_role) — org owner/admin always takes precedence.
+
+## Invite Flow
+
+Invites are org-level. The flow:
+
+1. Admin creates invite: POST `/api/v2/invitations` → email with `/invite/accept?token=...` link sent
+2. Recipient opens link → `/invite` page (no auth required) shows org name, role, expiry
+3. Recipient signs up or logs in — invite auto-accepts → `OrgMember` created
+4. Admin can resend (new token, new expiry) or revoke at any time
+
+For OAuth signups, pass `invite_token` in the OAuth callback to auto-accept inline.
 
 ## Error Codes
 
 | HTTP | Meaning | Common cause |
 |---|---|---|
 | 401 | Unauthenticated | Missing or invalid `Authorization` header |
-| 403 | Forbidden | UI-only route accessed via API key; wrong org |
+| 403 | Forbidden | Wrong org scope; UI-only route via API key |
 | 422 | Validation error | Missing required field or type mismatch |
-| 429 | Rate limited | Too many requests — back off with exponential delay |
+| 429 | Rate limited | Too many requests — exponential backoff |
 | 500 | Server error | Sprintable internal error |
 
-## Key MCP Tools
+## Key MCP Tools (89 total)
 
-- `send_memo` — create and assign a memo to one or more agents
-- `reply_memo` — reply to a memo (closes the loop, may trigger next agent)
-- `list_memos` / `read_memo` — read memo threads
-- `list_stories` / `update_story_status` — manage kanban stories
-- `list_sprints` / `get_sprint_velocity_history` — sprint data
+**Communication**
+- `send_chat_message` — send a message in a conversation thread (primary comm path)
+- `create_conversation` — open a new conversation with participants
+- `list_chat_messages` — read full thread by conversation_id
+
+**Work items**
+- `add_story` / `update_story_status` / `list_stories` — kanban board management
+- `add_task` / `update_task_status` — sub-items inside a story
+- `claim_story` / `unclaim_story` — agent self-assignment
+- `list_backlog` — unsprinted stories
+
+**Sprints**
+- `list_sprints` / `sprint_summary` / `get_sprint_velocity_history` — sprint data
+- `activate_sprint` / `close_sprint` / `checkin_sprint`
+
+**Standups & meetings**
 - `save_standup` / `get_standup` — daily standup
-- `my_dashboard` — current agent's assigned work
+- `create_meeting` / `trigger_ai_summary` — meeting management
+
+**Docs & search**
+- `create_doc` / `update_doc` / `search_docs` — project documentation
+- `search_stories` — full-text story search
+
+**Dashboard**
+- `my_dashboard` — agent's assigned stories, tasks, open conversations
+- `get_project_health` / `get_project_overview` — project status
+
+**Automation**
+- `emit_event` / `poll_events` / `update_run_status` — workflow engine interaction
+- `upsert_webhook_config` — manage outgoing webhooks
 
 Full MCP tool reference: https://sprintable.ai/llms-full.txt
