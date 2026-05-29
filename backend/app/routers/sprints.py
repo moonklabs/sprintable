@@ -184,9 +184,10 @@ async def sprint_summary(
         "total_points": total_points,
         "done_points": done_points,
         "completion_pct": completion_pct,
+        # 실제 DB에 존재하는 상태값 기준 동적 생성 — 하드코딩 시 enum 불일치 위험 방지
         "by_status": {
-            status: {"count": status_counts.get(status, 0), "points": status_points.get(status, 0)}
-            for status in ["todo", "in_progress", "review", "done", "blocked"]
+            status: {"count": count, "points": status_points.get(status, 0)}
+            for status, count in status_counts.items()
         },
     }
 
