@@ -1,7 +1,7 @@
 import uuid
 
 from fastapi import APIRouter, Depends, HTTPException, Query
-from sqlalchemy import or_, select
+from sqlalchemy import or_, select, text
 from sqlalchemy.orm import joinedload
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -117,31 +117,59 @@ async def get_my_memberships(
     session: AsyncSession = Depends(get_db),
     auth: AuthContext = Depends(get_current_user),
 ) -> list[dict]:
+    """현재 사용자가 접근할 수 있는 프로젝트 목록 (스위처 소스).
+
+    S-MBR-FIX: TeamMember 기반 ∪ ProjectAccess grant 기반 ∪ owner/admin org 전체.
+    members.py list_members grant 패턴(S-MBR-10) 정합.
+    """
     current_org_id: str | None = auth.claims.get("app_metadata", {}).get("org_id")
-    where_clauses = [
-        or_(
-            TeamMember.id == uuid.UUID(auth.user_id),
-            TeamMember.user_id == uuid.UUID(auth.user_id),
+    user_id = auth.user_id
+    org_id_param = current_org_id  # None 허용 — org 미확정 시 전체 org 기준
+
+    rows = await session.execute(
+        text(
+            """
+            SELECT DISTINCT p.id::text AS project_id, p.name AS project_name
+            FROM projects p
+            WHERE p.deleted_at IS NULL
+              AND (:org_id IS NULL OR p.org_id = :org_id::uuid)
+              AND (
+                -- 1. TeamMember 직접 등록 (기존)
+                EXISTS (
+                    SELECT 1 FROM team_members tm
+                    WHERE tm.project_id = p.id
+                      AND (tm.id = :user_id::uuid OR tm.user_id = :user_id::uuid)
+                      AND tm.is_active = true
+                      AND tm.type = 'human'
+                )
+                -- 2. ProjectAccess grant (S-MBR-10, members.py 패턴 정합)
+                OR EXISTS (
+                    SELECT 1 FROM project_access pa
+                    JOIN org_members om ON pa.org_member_id = om.id
+                    WHERE pa.project_id = p.id
+                      AND om.user_id = :user_id::uuid
+                      AND om.deleted_at IS NULL
+                      AND pa.permission = 'granted'
+                      AND (:org_id IS NULL OR om.org_id = :org_id::uuid)
+                )
+                -- 3. owner/admin은 grant 없이도 org 전체 (AC2, S-MBR-03 정합)
+                OR EXISTS (
+                    SELECT 1 FROM org_members om
+                    WHERE om.user_id = :user_id::uuid
+                      AND om.deleted_at IS NULL
+                      AND om.role IN ('owner', 'admin')
+                      AND (:org_id IS NULL OR om.org_id = :org_id::uuid)
+                      AND p.org_id = om.org_id
+                )
+              )
+            ORDER BY project_name
+            """
         ),
-        TeamMember.is_active.is_(True),
-        TeamMember.type == "human",
-    ]
-    if current_org_id:
-        where_clauses.append(TeamMember.org_id == uuid.UUID(current_org_id))
-    result = await session.execute(
-        select(TeamMember)
-        .options(joinedload(TeamMember.project))
-        .where(*where_clauses)
-        .order_by(TeamMember.created_at)
+        {"user_id": user_id, "org_id": org_id_param},
     )
-    members = result.scalars().all()
     return [
-        {
-            "projectId": str(m.project_id),
-            "projectName": m.project.name if m.project else "Untitled Project",
-        }
-        for m in members
-        if m.project_id
+        {"projectId": row.project_id, "projectName": row.project_name}
+        for row in rows
     ]
 
 
