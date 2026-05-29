@@ -186,7 +186,7 @@ async def create_team_member(
         audit = AuditLog(
             org_id=org_id,
             actor_id=actor.id,
-            action="team_member.create",
+            action="member_added",  # CHECK (action IN ('member_added','member_removed','role_changed'))
             target_user_id=member.id,
             audit_metadata={
                 "creator_id": str(actor.id),
