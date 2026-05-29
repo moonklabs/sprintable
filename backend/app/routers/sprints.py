@@ -151,6 +151,46 @@ async def kickoff_sprint(
     return {"notified": 0, "sprint_id": str(id), "message": body.message}
 
 
+@router.get("/{id}/summary")
+async def sprint_summary(
+    id: uuid.UUID,
+    db: AsyncSession = Depends(get_db),
+    repo: SprintRepository = Depends(_get_repo),
+) -> dict:
+    """GET /api/v2/sprints/{id}/summary — 스프린트 스토리 상태별 집계 (AC3 S-STANDUP-FIX)."""
+    sprint = await repo.get(id)
+    if sprint is None:
+        raise HTTPException(status_code=404, detail="Sprint not found")
+
+    stories_result = await db.execute(
+        select(Story.status, Story.story_points).where(Story.sprint_id == id)
+    )
+    stories = stories_result.all()
+
+    status_counts: dict[str, int] = {}
+    status_points: dict[str, int] = {}
+    for s in stories:
+        status_counts[s.status] = status_counts.get(s.status, 0) + 1
+        status_points[s.status] = status_points.get(s.status, 0) + (s.story_points or 0)
+
+    total_stories = len(stories)
+    total_points = sum(s.story_points or 0 for s in stories)
+    done_points = status_points.get("done", 0)
+    completion_pct = round((done_points / total_points) * 100) if total_points > 0 else 0
+
+    return {
+        "sprint_id": str(id),
+        "total_stories": total_stories,
+        "total_points": total_points,
+        "done_points": done_points,
+        "completion_pct": completion_pct,
+        "by_status": {
+            status: {"count": status_counts.get(status, 0), "points": status_points.get(status, 0)}
+            for status in ["todo", "in_progress", "review", "done", "blocked"]
+        },
+    }
+
+
 @router.get("/{id}/checkin")
 async def checkin_sprint(
     id: uuid.UUID,
