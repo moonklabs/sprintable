@@ -123,8 +123,12 @@ async def get_my_memberships(
     members.py list_members grant 패턴(S-MBR-10) 정합.
     """
     current_org_id: str | None = auth.claims.get("app_metadata", {}).get("org_id")
-    user_id = auth.user_id
-    org_id_param = current_org_id  # None 허용 — org 미확정 시 전체 org 기준
+    # uuid.UUID 객체로 바인딩:
+    # - ::uuid 캐스트: asyncpg text()에서 :param::uuid가 syntax error 유발
+    # - :param IS NULL: asyncpg가 타입 추론 불가 → AmbiguousParameterError
+    # 해결: uuid.UUID 객체로 바인딩 + IS NULL 체크는 CAST(:org_id AS uuid) 함수형 사용
+    user_id_param = uuid.UUID(auth.user_id)
+    org_id_param: uuid.UUID | None = uuid.UUID(current_org_id) if current_org_id else None
 
     rows = await session.execute(
         text(
@@ -132,13 +136,13 @@ async def get_my_memberships(
             SELECT DISTINCT p.id::text AS project_id, p.name AS project_name
             FROM projects p
             WHERE p.deleted_at IS NULL
-              AND (:org_id IS NULL OR p.org_id = :org_id::uuid)
+              AND (CAST(:org_id AS uuid) IS NULL OR p.org_id = :org_id)
               AND (
                 -- 1. TeamMember 직접 등록 (기존)
                 EXISTS (
                     SELECT 1 FROM team_members tm
                     WHERE tm.project_id = p.id
-                      AND (tm.id = :user_id::uuid OR tm.user_id = :user_id::uuid)
+                      AND (tm.id = :user_id OR tm.user_id = :user_id)
                       AND tm.is_active = true
                       AND tm.type = 'human'
                 )
@@ -147,25 +151,25 @@ async def get_my_memberships(
                     SELECT 1 FROM project_access pa
                     JOIN org_members om ON pa.org_member_id = om.id
                     WHERE pa.project_id = p.id
-                      AND om.user_id = :user_id::uuid
+                      AND om.user_id = :user_id
                       AND om.deleted_at IS NULL
                       AND pa.permission = 'granted'
-                      AND (:org_id IS NULL OR om.org_id = :org_id::uuid)
+                      AND (CAST(:org_id AS uuid) IS NULL OR om.org_id = :org_id)
                 )
                 -- 3. owner/admin은 grant 없이도 org 전체 (AC2, S-MBR-03 정합)
                 OR EXISTS (
                     SELECT 1 FROM org_members om
-                    WHERE om.user_id = :user_id::uuid
+                    WHERE om.user_id = :user_id
                       AND om.deleted_at IS NULL
                       AND om.role IN ('owner', 'admin')
-                      AND (:org_id IS NULL OR om.org_id = :org_id::uuid)
+                      AND (CAST(:org_id AS uuid) IS NULL OR om.org_id = :org_id)
                       AND p.org_id = om.org_id
                 )
               )
             ORDER BY project_name
             """
         ),
-        {"user_id": user_id, "org_id": org_id_param},
+        {"user_id": user_id_param, "org_id": org_id_param},
     )
     return [
         {"projectId": row.project_id, "projectName": row.project_name}
