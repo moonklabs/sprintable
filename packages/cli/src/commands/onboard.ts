@@ -273,6 +273,71 @@ async function onboardOther(agentLabel: string): Promise<void> {
   console.log("   온보딩 완료! 도움이 필요하면: https://docs.sprintable.ai 🎉\n");
 }
 
+// ─── Hermes webhook route preset 온보딩 ──────────────────────────────────────
+
+async function onboardHermes(): Promise<void> {
+  console.log("\n── Hermes 웹훅 라우터 온보딩 ─────────────────────────────────────\n");
+
+  const agentId = await input({
+    message: "내 Agent ID (team_member UUID)",
+    validate: (v) => (v.trim().length > 0 ? true : "Agent ID를 입력하세요"),
+  });
+
+  const webhookSecret = await input({
+    message: "Webhook Secret (Settings → Webhooks → Secret)",
+    validate: (v) => (v.trim().length > 0 ? true : "Webhook Secret을 입력하세요"),
+  });
+
+  const id = agentId.trim();
+  const secret = webhookSecret.trim();
+
+  console.log("\n1️⃣  Webhook 등록\n");
+  console.log("   Sprintable Settings → Webhooks → Add Config");
+  console.log("   events: [\"conversation.message_created\"]");
+  console.log(`   secret: ${secret.substring(0, 4)}...(위 입력값)\n`);
+
+  console.log("2️⃣  인바운드 payload 구조 (conversation_webhook.py 기준)\n");
+  console.log("   {");
+  console.log('     "event_type": "conversation.message_created",');
+  console.log('     "message_id": "<uuid>",');
+  console.log('     "conversation_id": "<uuid>",      // {conversation_id}');
+  console.log('     "sender_id": "<uuid | null>",     // {sender_id}');
+  console.log('     "thread_id": "<uuid | null>",');
+  console.log('     "created_at": "<ISO8601>",');
+  console.log('     "mentioned_ids": ["<uuid>", ...],');
+  console.log('     "content": "<preview>"            // 전문은 list_chat_messages로 조회');
+  console.log("   }");
+  console.log("   서명 헤더: X-Hub-Signature-256: sha256=<HMAC-SHA256 hex>\n");
+
+  console.log("3️⃣  Route 처리 보일러플레이트 (Python)\n");
+  console.log("   import hashlib, hmac, json");
+  console.log("   from fastapi import FastAPI, Request, HTTPException\n");
+  console.log(`   MY_AGENT_ID = "${id}"`);
+  console.log(`   WEBHOOK_SECRET = "${secret.substring(0, 4)}..."\n`);
+  console.log("   @app.post('/webhook')");
+  console.log("   async def handle(request: Request):");
+  console.log("       raw = await request.body()");
+  console.log("       sig = request.headers.get('X-Hub-Signature-256')");
+  console.log("       expected = 'sha256=' + hmac.new(WEBHOOK_SECRET.encode(), raw, hashlib.sha256).hexdigest()");
+  console.log("       if not hmac.compare_digest(expected, sig or ''):");
+  console.log("           raise HTTPException(401)");
+  console.log("       payload = json.loads(raw)");
+  console.log("       __raw__ = json.dumps(payload)              # {__raw__}: LLM prompt 주입용");
+  console.log("       conversation_id = payload['conversation_id']");
+  console.log("       sender_id = payload.get('sender_id')");
+  console.log("       # self-loop guard (AC2)");
+  console.log("       if sender_id == MY_AGENT_ID:");
+  console.log("           return {'status': 'ignored'}");
+  console.log("       # MCP: sprintable_send_chat_message(thread_id=conversation_id, content=...)");
+  console.log("       return {'status': 'ok'}\n");
+
+  console.log("4️⃣  MCP tool 참조\n");
+  console.log("   답신: sprintable_send_chat_message(thread_id=<conversation_id>, content=...)");
+  console.log("   전문: sprintable_list_chat_messages(thread_id=<conversation_id>)\n");
+
+  console.log("   전체 템플릿: docs/hermes-webhook-route-preset.md 🎉\n");
+}
+
 // ─── AC1: 에이전트 선택 진입점 ────────────────────────────────────────────────
 
 export async function onboardCommand(): Promise<void> {
@@ -291,9 +356,10 @@ export async function onboardCommand(): Promise<void> {
 
   if (agentType === "claude-code") {
     await onboardClaudeCode();
+  } else if (agentType === "hermes") {
+    await onboardHermes();
   } else {
     const labelMap: Record<string, string> = {
-      hermes: "Hermes",
       codex: "Codex",
       openclaw: "OpenClaw",
       other: "기타 에이전트",
