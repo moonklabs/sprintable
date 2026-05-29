@@ -216,7 +216,7 @@ async def _update_delivery_status(
 async def mark_agent_replied(conversation_id: uuid.UUID) -> None:
     """에이전트 답신 시 해당 conversation의 최근 gateway_accepted delivery → agent_replied."""
     from app.core.database import async_session_factory
-    from app.models.conversation_message import ConversationMessage
+    from app.models.conversation import ConversationMessage  # ConversationMessage는 conversation.py에 정의됨
     from sqlalchemy import select
 
     async with async_session_factory() as db:
