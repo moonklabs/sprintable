@@ -303,6 +303,7 @@ async function onboardHermes(): Promise<void> {
   console.log('     "conversation_id": "<uuid>",      // {conversation_id}');
   console.log('     "sender_id": "<uuid | null>",     // {sender_id}');
   console.log('     "thread_id": "<uuid | null>",');
+  console.log('     "created_at": "<ISO8601>",');
   console.log('     "mentioned_ids": ["<uuid>", ...],');
   console.log('     "content": "<preview>"            // 전문은 list_chat_messages로 조회');
   console.log("   }");

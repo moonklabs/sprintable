@@ -16,6 +16,7 @@ Sprintable이 `conversation.message_created` 이벤트 발생 시 `webhook_confi
   "conversation_id": "<uuid>",
   "sender_id": "<uuid | null>",
   "thread_id": "<uuid | null>",
+  "created_at": "<ISO8601>",
   "mentioned_ids": ["<uuid>", "..."],
   "content": "<preview — 전문은 sprintable_list_chat_messages로 조회>"
 }
