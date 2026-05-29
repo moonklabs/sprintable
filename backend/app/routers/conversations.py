@@ -108,7 +108,7 @@ async def _dispatch_conversation_event(
         event = Event(
             project_id=conversation.project_id,
             org_id=org_id,
-            event_type="conversation:message",
+            event_type="conversation.message_created",  # canonical (S-COMM-12)
             source_entity_type="conversation_message",
             source_entity_id=msg.id,
             sender_id=sender.id,
@@ -122,7 +122,7 @@ async def _dispatch_conversation_event(
 
     # flush로 event.id 확보 — push는 호출측에서 commit 후 수행 (race condition 방지)
     await db.flush()
-    return [(pid_str, {"event_id": str(event.id), "event_type": "conversation:message", **payload})
+    return [(pid_str, {"event_id": str(event.id), "event_type": "conversation.message_created", **payload})
             for pid_str, event in events_to_push]
 
 
@@ -735,7 +735,7 @@ async def send_message(
     for pid_str, sse_payload in pending_sse_pushes:
         _push_to_agent(pid_str, sse_payload)
     # 브라우저 SSE 구독자에게 1회 발행 — pending 유무와 무관하게 commit 후 항상 발행
-    publish_event(str(org_id), "conversation:message", _msg_payload(msg, sender))
+    publish_event(str(org_id), "conversation.message_created", _msg_payload(msg, sender))  # canonical (S-COMM-12)
 
     # ws_chat WebSocket 브로드캐스트 — agent 참가자 room에 실시간 전달 (conv.type/title 무관)
     try:
@@ -793,6 +793,11 @@ async def send_message(
         message_id=msg.id,
         org_id=org_id,
     )
+
+    # S-COMM-12 AC1: agent 답신 시 해당 conversation의 최근 gateway_accepted delivery → agent_replied
+    if sender.type == "agent":
+        from app.services.conversation_webhook import mark_agent_replied
+        background_tasks.add_task(mark_agent_replied, conversation_id)
 
     # S-C2: agent sender인 경우에만 message_sent 기록 (AC2, AC4, AC5, AC6)
     if sender.type == "agent":

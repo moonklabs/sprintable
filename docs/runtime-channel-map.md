@@ -100,7 +100,8 @@ Sprintable (Server-Sent Events stream)
          poll_events MCP tool 또는 webhook으로 수신.
 ```
 
-> **이벤트명 표기 불일치**: SSE는 콜론 표기(`conversation:message`), webhook은 점 표기(`conversation.message_created`)로 현재 통일되지 않음. 통일 작업은 S-COMM-12(backlog) 예정.
+> **이벤트명 통일 완료 (S-COMM-12)**: canonical = `conversation.message_created` (점 표기). SSE와 webhook 모두 동일 이름 사용.
+> 전환기 하위호환: SSE는 canonical 수신 시 `conversation:message` (레거시 alias)도 병행 emit (`sse_bridge.py`). 기존 consumer 코드가 레거시 이름으로 동작 중이라면 canonical로 점진 전환 권장.
 
 poll_events MCP tool: SSE를 열 수 없는 환경에서 동일 이벤트를 폴링으로 수신하는 fallback.
 
