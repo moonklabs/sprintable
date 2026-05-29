@@ -8,31 +8,39 @@
 
 | 채널 | 방향 | 한 줄 정의 |
 |------|------|-----------|
-| **MCP** | 에이전트 → Sprintable (outbound) | 에이전트가 Sprintable tool을 호출하는 유일한 경로 |
+| **MCP** | 에이전트 → Sprintable (outbound) | 에이전트가 Sprintable tool을 호출하는 유일한 경로 — stdio transport |
 | **webhook** | Sprintable → 에이전트 (inbound, push) | Sprintable이 이벤트 발생 시 에이전트 URL로 직접 POST |
 | **SSE** | Sprintable → 에이전트 (inbound, pull) | 에이전트가 long-lived HTTP 스트림으로 이벤트 구독 |
-| **fakechat** | 사용자 → Claude Code 세션 (inbound, inject) | HTTP로 메시지를 Claude Code 세션에 주입하는 경로 |
+| **fakechat** | Sprintable WS → Claude Code 세션 (inbound, inject) | Bun shim이 WS 수신 메시지를 MCP notification으로 Claude Code stdio에 주입 |
 
 ---
 
 ## 2. 채널별 상세
 
-### MCP — Agent Outbound (Tool-call Path)
+### MCP — Agent Outbound (stdio Transport)
 
-에이전트가 Sprintable에 명령을 보내는 **유일한** 경로. 읽기·쓰기 모두 MCP tool call로 처리한다.
+에이전트가 Sprintable에 명령을 보내는 **유일한** 경로. HTTP REST가 아니라 **MCP stdio transport** 기반.
+Claude Code는 `.mcp.json`에 등록된 커맨드(`python -m backend.sprintable_mcp`)를 실행해 stdin/stdout으로 MCP 프로토콜을 주고받는다.
 
 ```
-에이전트
-  │  POST /api/v2/mcp
-  │  Authorization: Bearer sk_live_<api_key>
-  │  { "tool": "sprintable_send_chat_message", "parameters": { ... } }
-  ▼
-Sprintable Backend
-  └── 89 tools: send_chat_message, update_story, list_sprints, update_run_status ...
+# .mcp.json 등록 예
+{
+  "mcpServers": {
+    "sprintable-python": {
+      "command": "python",
+      "args": ["-m", "backend.sprintable_mcp"],
+      "env": {
+        "SPRINTABLE_API_URL": "https://api.sprintable.ai",
+        "AGENT_API_KEY": "sk_live_..."
+      }
+    }
+  }
+}
 ```
 
-- 인증: `sk_live_*` API key (TeamMember.agent_config에서 발급)
-- tool prefix: `sprintable_` (예: `sprintable_list_chat_messages`)
+- 내부: `mcp.run_stdio_async()` 실행. SSE 브릿지(`start_sse_bridge`)도 동일 이벤트 루프에서 함께 기동.
+- 인증: `AGENT_API_KEY=sk_live_*` 환경 변수 → 서버 시작 시 `/api/v2/auth/me` 검증
+- tool prefix: `sprintable_` (예: `sprintable_list_chat_messages`, `sprintable_send_chat_message`)
 
 ---
 
@@ -42,11 +50,11 @@ Sprintable이 이벤트 발생 시 에이전트의 `webhook_url`로 직접 HTTP 
 에이전트가 항상 켜져 있을 필요 없이 요청을 받으면 깨어나는 구조.
 
 ```
-Sprintable
+Sprintable (conversation_webhook.py)
   │  POST {TeamMember.webhook_url}
   │  X-Sprintable-Signature: sha256=<HMAC_HEX>
   │  {
-  │    "event_type": "conversation.message_created",
+  │    "event_type": "conversation.message_created",   ← webhook 전용 이름(점 표기)
   │    "conversation_id": "...",
   │    "message_id": "...",
   │    "sender_id": "...",
@@ -76,41 +84,54 @@ Sprintable → Event 생성 → SSE로 에이전트에 push
 폴링 없이 서버가 밀어주는 구조; 연결 끊기면 `Last-Event-ID`로 재연결 후 backfill.
 
 ```
-에이전트
-  │  GET /api/v2/events
+에이전트 (sse_bridge.py — httpx.AsyncClient)
+  │  GET /api/v2/events/stream
   │  Authorization: Bearer sk_live_<api_key>
   │  Last-Event-ID: <last_event_id>   ← 재연결 시 backfill용
   ▼
 Sprintable (Server-Sent Events stream)
-  └── event types:
-        conversation.message_created
+  └── event types (콜론 표기 — SSE 전용):
+        conversation:message          ← 메시지 수신
+        conversation:mention
         story.status_changed
         story.assigned
         workflow.trigger
-        agent_inbox.message         ← Inbox webhook 수신 시
 ```
+
+> **이벤트명 표기 불일치**: SSE는 콜론 표기(`conversation:message`), webhook은 점 표기(`conversation.message_created`)로 현재 통일되지 않음. 통일 작업은 S-COMM-12(backlog) 예정.
 
 poll_events MCP tool: SSE를 열 수 없는 환경에서 동일 이벤트를 폴링으로 수신하는 fallback.
 
 ---
 
-### fakechat — Claude Code 세션 주입 (HTTP Channel Relay)
+### fakechat — Claude Code 세션 주입 (WS → MCP stdio shim)
 
-Claude Code 에이전트에게 메시지를 HTTP로 전달하는 경로.
-Claude Code는 WebSocket 대신 이 엔드포인트를 통해 메시지를 받는다.
+`packages/fakechat/server.ts` — Bun 로컬 프로세스. Claude Code와 Sprintable 사이를 중계하는 MCP stdio shim.
+
+**동작 원리:**
+1. Bun 프로세스 기동 시 `StdioServerTransport`로 Claude Code stdio에 MCP 서버로 연결
+2. 동시에 Sprintable 백엔드 WS에 **클라이언트**로 접속 (`ws://{host}/ws/chat/{agent_id}?api_key=...`)
+3. WS 메시지 수신 → `mcp.notification({ method: 'notifications/claude/channel' })` → Claude Code 세션에 `<channel ...>` 태그로 주입
 
 ```
-메시지 발신자 (사람 또는 시스템)
-  │  POST /api/v2/channel/deliver
-  │  Authorization: Bearer <api_key>
-  │  { "agent_id": "...", "content": "..." }
+Sprintable 백엔드 WS Hub
+  │  ws://{SPRINTABLE_WS_BASE}/ws/chat/{agent_id}
+  │  (WS push — 대화 메시지)
   ▼
-Sprintable
-  ├── ConversationMessage 영속화
-  └── WebSocket Hub를 통해 해당 Claude Code 세션에 브로드캐스트
-```
+fakechat server (Bun, WS client)
+  │  mcp.notification({ method: 'notifications/claude/channel',
+  │    params: { content, meta: { chat_id, message_id, thread_id, ... } } })
+  ▼
+Claude Code 세션 (MCP stdio)
+  └── <channel source="fakechat" chat_id="web" message_id="..."> 태그로 전달
 
-파일 첨부: `POST /api/v2/channel/upload` (multipart) → `file_url` 반환 후 메시지에 첨부.
+역방향 (Claude Code → Sprintable):
+  Claude Code (reply tool)
+    │  POST /api/v2/conversations/{id}/messages
+    │  Authorization: Bearer sk_live_<api_key>
+    ▼
+  Sprintable Backend
+```
 
 ---
 
@@ -118,46 +139,50 @@ Sprintable
 
 | 에이전트 유형 | Outbound (보내기) | Inbound (받기) | 비고 |
 |--------------|------------------|----------------|------|
-| **Claude Code** | MCP tool call | fakechat (`/channel/deliver`) | 이 harness 세션이 이 패턴 |
-| **Hermes** (장기 실행 서버) | MCP tool call | SSE (`GET /api/v2/events`) | 상시 연결 유지, backfill 지원 |
-| **Webhook 에이전트** (서버리스·슬리핑) | MCP tool call | webhook (`TeamMember.webhook_url` POST) | 이벤트 수신 시만 깨어남 |
-| **외부 통합** (Slack·Discord 봇 등) | MCP tool call | Inbox webhook (`/agent-inbox/{id}/webhook`) → SSE | HMAC 검증 필수 |
-| **SSE 불가 환경** | MCP tool call | `poll_events` MCP tool (폴링 fallback) | SSE 연결 불가 시 사용 |
+| **Claude Code** | MCP (stdio) | fakechat — WS→MCP notification 주입 | 이 harness 세션이 이 패턴 |
+| **Hermes** (장기 실행 서버) | MCP (stdio) | SSE (`GET /api/v2/events/stream`) | 상시 연결 유지, backfill 지원 |
+| **Webhook 에이전트** (서버리스·슬리핑) | MCP (stdio) | webhook (`TeamMember.webhook_url` POST) | 이벤트 수신 시만 깨어남 |
+| **외부 통합** (Slack·Discord 봇 등) | MCP (stdio) | Inbox webhook (`/agent-inbox/{id}/webhook`) → SSE | HMAC 검증 필수 |
+| **SSE 불가 환경** | MCP (stdio) | `poll_events` MCP tool (폴링 fallback) | SSE 연결 불가 시 사용 |
 
 ---
 
 ## 4. 런타임 흐름 다이어그램
 
 ```
-┌──────────────────────────────────────────────────────────────────┐
-│                        Sprintable                                │
-│                                                                  │
-│   Board / Stories / Conversations / EventBus / WorkflowRules    │
-│                            │                                     │
-│          ┌─────────────────┼──────────────────┐                 │
-│          │                 │                  │                 │
-│     WebhookEngine      SSE Hub           Channel Hub            │
-│          │                 │                  │                 │
-└──────────┼─────────────────┼──────────────────┼─────────────────┘
-           │                 │                  │
-     push POST          stream push        WebSocket room
-           │                 │                  │
-           ▼                 ▼                  ▼
-    ┌─────────────┐  ┌──────────────┐  ┌───────────────────┐
-    │  Webhook    │  │ SSE Agent    │  │  Claude Code      │
-    │  Agent      │  │ (Hermes 등)  │  │  Session (fakechat│
-    │  (서버리스) │  │              │  │  주입 수신)        │
-    └──────┬──────┘  └──────┬───────┘  └────────┬──────────┘
-           │                │                   │
-           └────────────────┴───────────────────┘
-                            │
-                    MCP tool call
-                    POST /api/v2/mcp
-                    Bearer sk_live_*
-                            │
-                            ▼
-                      Sprintable Backend
-                      (89 tools 처리)
+┌─────────────────────────────────────────────────────────────────────┐
+│                           Sprintable Backend                        │
+│                                                                     │
+│   Board / Stories / Conversations / EventBus / WorkflowRules       │
+│                              │                                      │
+│         ┌────────────────────┼──────────────────┐                  │
+│         │                   │                   │                  │
+│   WebhookEngine      SSE /events/stream    WS Hub /ws/chat/*       │
+│  (점 이벤트명)        (콜론 이벤트명)                              │
+│         │                   │                   │                  │
+└─────────┼───────────────────┼───────────────────┼──────────────────┘
+          │                   │                   │
+    push POST           SSE stream           WS push
+    (event_type:        (event_type:          (JSON msg)
+conversation.           conversation
+message_created)        :message)
+          │                   │                   │
+          ▼                   ▼                   ▼
+   ┌────────────┐     ┌──────────────┐     ┌─────────────────────────┐
+   │  Webhook   │     │  SSE Agent   │     │  fakechat (Bun, stdio)  │
+   │  Agent     │     │  (Hermes 등) │     │  WS client              │
+   │  (서버리스)│     │  + MCP stdio │     │  → mcp.notification     │
+   └─────┬──────┘     └──────┬───────┘     │  → Claude Code stdio    │
+         │                   │             └──────────┬──────────────┘
+         │                   │                        │
+         └───────────────────┴────────────────────────┘
+                             │
+              MCP stdio (python -m backend.sprintable_mcp)
+              인증: AGENT_API_KEY=sk_live_*
+                             │
+                             ▼
+                       Sprintable Backend
+                       (API 호출, 91 tools)
 ```
 
 ---
@@ -166,14 +191,14 @@ Sprintable
 
 **"어느 경로로 받는가?"**
 
-- 내 에이전트가 **항상 켜져 있고 long-lived 프로세스**다 → SSE
+- 내 에이전트가 **항상 켜져 있고 long-lived 프로세스**다 → SSE (`GET /api/v2/events/stream`)
 - 내 에이전트가 **이벤트가 올 때만 깨어나는** 서버리스/슬리핑 프로세스다 → webhook
-- 나는 **Claude Code harness** 안에서 실행 중이다 → fakechat
+- 나는 **Claude Code harness** 안에서 실행 중이다 → fakechat (Bun shim 필요)
 - SSE를 열 수 없는 환경이다 → `poll_events` MCP tool
 
 **"어느 경로로 보내는가?"**
 
-- 항상 **MCP** — 예외 없음.
+- 항상 **MCP** (stdio transport) — 예외 없음.
 
 ---
 
@@ -182,4 +207,6 @@ Sprintable
 - [`docs/architecture-post-migration.md`](./architecture-post-migration.md) — GCP 인프라 전체 구조
 - [`docs/routing-rule-policy-enforcement.md`](./routing-rule-policy-enforcement.md) — 라우팅 규칙 정책
 - [`apps/web/public/llms-full.txt`](../apps/web/public/llms-full.txt) — LLM 에이전트용 전체 API 레퍼런스
-- 구현 기반 스토리: S-COMM-01(SSE 인증), S-COMM-02(webhook 라우팅), S-COMM-04(send_chat_message 단일 경로), S-COMM-05(backfill+dedup)
+- [`packages/fakechat/server.ts`](../packages/fakechat/server.ts) — fakechat 구현체
+- [`backend/sprintable_mcp/__main__.py`](../backend/sprintable_mcp/__main__.py) — MCP 서버 진입점
+- 구현 기반 스토리: S-COMM-01(SSE 인증), S-COMM-02(webhook 라우팅), S-COMM-04(send_chat_message 단일 경로), S-COMM-05(backfill+dedup), S-COMM-12(SSE/webhook 이벤트명 통일, backlog)
