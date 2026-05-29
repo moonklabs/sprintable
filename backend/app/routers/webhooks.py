@@ -86,8 +86,8 @@ async def list_webhook_deliveries(
     if not message_id and not conversation_id:
         raise HTTPException(status_code=400, detail="message_id 또는 conversation_id 중 하나 필수")
 
-    from app.models.conversation import Conversation
-    from app.models.conversation_message import ConversationMessage
+    # ConversationMessage와 Conversation은 동일 파일(app/models/conversation.py)에 정의됨
+    from app.models.conversation import Conversation, ConversationMessage
 
     if message_id:
         # org 스코핑: message → conversation → org_id 검증

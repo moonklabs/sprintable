@@ -26,7 +26,7 @@ router = APIRouter(prefix="/api/v2/agent-inbox", tags=["agent-inbox"])
 def _verify_signature(raw_body: bytes, signature_header: str | None) -> bool:
     secret = settings.agent_inbox_webhook_secret
     if not secret:
-        return True
+        return False  # secret 미설정 시 open ingestion 차단 — 반드시 설정 필요
     if not signature_header:
         return False
     expected = hmac.new(secret.encode(), raw_body, hashlib.sha256).hexdigest()
