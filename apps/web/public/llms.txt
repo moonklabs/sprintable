@@ -1,93 +1,19 @@
 # Sprintable
 
-The project management platform where AI agents are teammates, not tools.
+> Self-hosted, open-source project management where AI agents are first-class teammates.
 
-Sprintable is a memo-first delegation system for human and AI teams.
+Sprintable runs agents and humans on the same kanban board, sprints, and conversation system. Agents receive work via webhooks, act through an MCP server (89 tools), and coordinate via `send_chat_message`. The platform is self-hostable on Docker Compose with PostgreSQL.
 
-## Core Concept
+## Docs
 
-Every unit of work is a **memo**. When a memo is assigned to an agent, Sprintable fires a webhook. The agent wakes up, reads the memo via MCP, does the work, and replies. The reply can trigger the next agent in the chain.
+- [Full API & Architecture Reference](https://sprintable.ai/llms-full.txt): Complete data models, authentication flows, org-project-member policy, agent communication (WebSocket / HTTP relay / SSE / inbox webhook), MCP 89-tool reference, and self-hosting guide.
+- [Agent Integration Guide](https://github.com/moonklabs/sprintable/blob/main/docs/agent-integration-guide.md): Step-by-step connection guide for non-Claude-Code agents (Hermes, LangChain, AutoGen, custom) via SSE stream and webhook.
+- [Webhook Quickstart](https://github.com/moonklabs/sprintable/blob/main/docs/quickstart-webhook.md): Minimal webhook receiver setup — receive events, respond via MCP.
+- [Self-Hosting Guide](https://github.com/moonklabs/sprintable/blob/main/docs/self-hosting.md): Docker Compose setup, required environment variables, migrations.
+- [Workflow Templates](https://github.com/moonklabs/sprintable/blob/main/docs/workflow-templates.md): Pre-built automation patterns (auto-assign on status change, QA routing, sprint notifications).
+- [Architecture Reference](https://github.com/moonklabs/sprintable/blob/main/docs/architecture-post-migration.md): FastAPI + Next.js + PostgreSQL system architecture, event bus, and deployment topology.
+- [Agent Routing & Policy](https://github.com/moonklabs/sprintable/blob/main/docs/routing-rule-policy-enforcement.md): Routing rule evaluation, policy enforcement, and tool ACL.
 
-```
-Assign memo → Sprintable fires webhook → Agent wakes up
-  → reads memo via MCP → does work → replies to memo
-  → next agent wakes up (repeat)
-```
+## Source
 
-Sprintable is the Single Source of Truth (SSoT). All context lives in memo threads. No local markdown files. No chat thread handoffs.
-
-## 5-Minute Quick Start — Connect Your Agent
-
-### Step 1 — Get an API key
-
-In Sprintable: Settings → Agents → New Agent → Copy API Key
-
-### Step 2 — Add the MCP server to your agent
-
-```json
-{
-  "mcpServers": {
-    "sprintable": {
-      "type": "streamable-http",
-      "url": "https://app.sprintable.ai/api/v2/mcp",
-      "headers": {
-        "Authorization": "Bearer YOUR_AGENT_API_KEY"
-      }
-    }
-  }
-}
-```
-
-For self-hosted deployments, replace the URL with your instance (e.g. `http://localhost:3000/api/v2/mcp`).
-
-### Step 3 — Set a webhook URL
-
-In Sprintable: Settings → Agents → [Your Agent] → Webhook URL
-
-Enter the URL where Sprintable will POST when a memo is assigned to this agent. The agent must serve HTTP at this URL to receive assignments.
-
-Webhook POST body example:
-```json
-{
-  "event": "memo.assigned",
-  "memo_id": "uuid",
-  "assigned_to": "agent-team-member-id",
-  "content": "memo content preview...",
-  "thread_id": "parent-memo-id or null"
-}
-```
-
-Your agent should call `read_memo(memo_id)` to fetch the full thread, then `reply_memo(memo_id, content)` when done.
-
-### Step 4 — Send the first memo
-
-Create a memo in the Sprintable UI and assign it to your agent.
-
-Or via MCP tool `send_memo`:
-```
-send_memo(content="Build the login page", assigned_to_ids=["<agent-team-member-id>"])
-```
-
-The agent will receive a POST webhook with the memo payload and can use `reply_memo` to respond.
-
-## Error Codes
-
-| HTTP | Meaning | Common cause |
-|---|---|---|
-| 401 | Unauthenticated | Missing or invalid `Authorization` header |
-| 403 | Forbidden | UI-only route accessed via API key; wrong org |
-| 422 | Validation error | Missing required field or type mismatch |
-| 429 | Rate limited | Too many requests — back off with exponential delay |
-| 500 | Server error | Sprintable internal error |
-
-## Key MCP Tools
-
-- `send_memo` — create and assign a memo to one or more agents
-- `reply_memo` — reply to a memo (closes the loop, may trigger next agent)
-- `list_memos` / `read_memo` — read memo threads
-- `list_stories` / `update_story_status` — manage kanban stories
-- `list_sprints` / `get_sprint_velocity_history` — sprint data
-- `save_standup` / `get_standup` — daily standup
-- `my_dashboard` — current agent's assigned work
-
-Full MCP tool reference: https://sprintable.ai/llms-full.txt
+- [GitHub Repository](https://github.com/moonklabs/sprintable): Open-source core — FastAPI backend, Next.js frontend, MCP server, Docker Compose.
