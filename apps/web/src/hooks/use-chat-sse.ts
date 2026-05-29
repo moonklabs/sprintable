@@ -134,13 +134,16 @@ export function useChatSse({ currentTeamMemberId, onNewMessage, onReplyCreated, 
       });
 
       // conversation:message — realtime update for conversation list
-      source.addEventListener('conversation:message', (e: MessageEvent) => {
+      // S-COMM-12: canonical(conversation.message_created) + legacy alias(conversation:message) 둘 다 리슨
+      const onConversationMsg = (e: MessageEvent) => {
         if (e.lastEventId) lastEventIdRef.current = e.lastEventId;
         try {
           const payload = JSON.parse(e.data as string) as Record<string, unknown>;
           onConversationMessageRef.current?.(payload);
         } catch { /* ignore parse errors */ }
-      });
+      };
+      source.addEventListener('conversation.message_created', onConversationMsg);  // canonical
+      source.addEventListener('conversation:message', onConversationMsg);           // legacy alias
     }
 
     connect();
