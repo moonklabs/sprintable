@@ -1,22 +1,26 @@
 'use client';
 
 import { useEffect, useState } from 'react';
+import { Shield, ShieldOff, Loader2 } from 'lucide-react';
 import { Alert, AlertDescription } from '@/components/ui/alert';
-import { SectionCard, SectionCardBody, SectionCardHeader } from '@/components/ui/section-card';
 import { Badge } from '@/components/ui/badge';
+import { Button } from '@/components/ui/button';
+import { MemberRow } from '@/components/ui/member-row';
+import { SectionCard, SectionCardBody, SectionCardHeader } from '@/components/ui/section-card';
+import { cn } from '@/lib/utils';
 
 interface OrgMember {
-  id: string;
+  id: string;            // org_member.id
   user_id: string;
-  role: 'owner' | 'admin' | 'member';
-  created_at: string;
+  name: string;
+  email?: string;
+  role: 'owner' | 'admin' | 'member';     // org-level role
 }
 
-interface AccessRecord {
-  id: string;
+interface ProjectGrant {
+  id: string;             // grant record id
   org_member_id: string;
-  project_id: string;
-  permission: string;
+  role: 'owner' | 'admin' | 'member';     // project-level role
 }
 
 interface ProjectAccessSectionProps {
@@ -26,89 +30,116 @@ interface ProjectAccessSectionProps {
 
 export function ProjectAccessSection({ projectId, currentRole }: ProjectAccessSectionProps) {
   const [orgMembers, setOrgMembers] = useState<OrgMember[]>([]);
-  const [accessRecords, setAccessRecords] = useState<AccessRecord[]>([]);
+  const [grants, setGrants] = useState<ProjectGrant[]>([]);
   const [loading, setLoading] = useState(true);
-  const [toggling, setToggling] = useState<string | null>(null);
+  const [togglingId, setTogglingId] = useState<string | null>(null);
   const [message, setMessage] = useState<{ type: 'success' | 'error'; text: string } | null>(null);
 
   const canManage = currentRole === 'owner' || currentRole === 'admin';
 
   const refreshData = async () => {
-    const [membersRes, accessRes] = await Promise.all([
+    setLoading(true);
+    const [membersRes, grantsRes] = await Promise.all([
       fetch('/api/org-members').catch(() => null),
       fetch(`/api/projects/${projectId}/access`).catch(() => null),
     ]);
     if (membersRes?.ok) {
-      const json = await membersRes.json() as OrgMember[] | { data?: OrgMember[] };
-      setOrgMembers(Array.isArray(json) ? json : (json.data ?? []));
+      const json = await membersRes.json() as { data?: OrgMember[] };
+      setOrgMembers(json.data ?? []);
     }
-    if (accessRes?.ok) {
-      const json = await accessRes.json() as AccessRecord[] | { data?: AccessRecord[] };
-      setAccessRecords(Array.isArray(json) ? json : (json.data ?? []));
+    if (grantsRes?.ok) {
+      const json = await grantsRes.json() as { data?: ProjectGrant[] };
+      setGrants(json.data ?? []);
     }
     setLoading(false);
   };
 
   useEffect(() => {
     void refreshData();
-  // eslint-disable-next-line react-hooks/exhaustive-deps
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [projectId]);
 
-  const isBlocked = (orgMemberId: string) =>
-    accessRecords.some((r) => r.org_member_id === orgMemberId && r.permission === 'denied');
-
-  const getRecord = (orgMemberId: string) =>
-    accessRecords.find((r) => r.org_member_id === orgMemberId && r.permission === 'denied');
+  const getGrant = (orgMemberId: string) =>
+    grants.find((g) => g.org_member_id === orgMemberId);
 
   const handleToggle = async (member: OrgMember) => {
-    if (!canManage || toggling) return;
-    setToggling(member.id);
+    if (!canManage || togglingId) return;
+    setTogglingId(member.id);
     setMessage(null);
+
+    const existing = getGrant(member.id);
     try {
-      if (isBlocked(member.id)) {
-        const record = getRecord(member.id);
-        if (!record) return;
-        const res = await fetch(`/api/projects/${projectId}/access/${record.id}`, { method: 'DELETE' });
+      if (existing) {
+        // 차단 — DELETE grant
+        const res = await fetch(`/api/projects/${projectId}/access/${existing.id}`, { method: 'DELETE' });
         if (res.ok) {
-          setMessage({ type: 'success', text: '접근 허용으로 변경됐습니다.' });
+          setMessage({ type: 'success', text: `${member.name} 접근 권한 해제됨` });
           await refreshData();
         } else {
-          setMessage({ type: 'error', text: '변경에 실패했습니다.' });
+          setMessage({ type: 'error', text: '권한 해제 실패' });
         }
       } else {
+        // 허용 — POST grant
         const res = await fetch(`/api/projects/${projectId}/access`, {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ org_member_id: member.id, permission: 'denied' }),
+          body: JSON.stringify({ org_member_id: member.id, role: member.role }),
         });
         if (res.ok) {
-          setMessage({ type: 'success', text: '접근이 차단됐습니다.' });
+          setMessage({ type: 'success', text: `${member.name} 접근 권한 부여됨` });
           await refreshData();
         } else {
-          setMessage({ type: 'error', text: '변경에 실패했습니다.' });
+          setMessage({ type: 'error', text: '권한 부여 실패' });
         }
       }
     } finally {
-      setToggling(null);
+      setTogglingId(null);
     }
   };
 
   if (loading) {
     return (
-      <div className="space-y-2">
-        {[1, 2, 3].map((i) => <div key={i} className="h-10 animate-pulse rounded-md bg-muted" />)}
-      </div>
+      <SectionCard>
+        <SectionCardHeader>
+          <div className="space-y-1">
+            <h2 className="text-base font-semibold text-foreground">접근 권한</h2>
+            <p className="text-sm text-muted-foreground">불러오는 중...</p>
+          </div>
+        </SectionCardHeader>
+        <SectionCardBody>
+          <div className="space-y-1 divide-y divide-border">
+            {[1, 2, 3].map((i) => (
+              <div key={i} className="flex items-center gap-3 px-3 py-3">
+                <div className="flex-1 space-y-1.5">
+                  <div className="h-4 w-32 animate-pulse rounded bg-muted" />
+                  <div className="h-3 w-48 animate-pulse rounded bg-muted/60" />
+                </div>
+                <div className="h-7 w-20 animate-pulse rounded bg-muted" />
+              </div>
+            ))}
+          </div>
+        </SectionCardBody>
+      </SectionCard>
     );
   }
+
+  const grantedCount = grants.length;
+  const totalCount = orgMembers.length;
 
   return (
     <SectionCard>
       <SectionCardHeader>
-        <div className="space-y-1">
-          <h2 className="text-base font-semibold text-foreground">프로젝트 접근 권한</h2>
-          <p className="text-sm text-muted-foreground">
-            조직 멤버별 이 프로젝트 접근 권한을 관리합니다. 차단된 멤버는 이 프로젝트를 볼 수 없습니다.
-          </p>
+        <div className="flex items-start justify-between gap-3">
+          <div className="space-y-1">
+            <h2 className="text-base font-semibold text-foreground">접근 권한</h2>
+            <p className="text-sm text-muted-foreground">
+              조직 구성원 중 본 프로젝트 접근을 허용한 사람을 선택합니다.
+            </p>
+          </div>
+          <div className="shrink-0 text-right text-xs text-muted-foreground tabular-nums">
+            <div className="font-medium text-foreground">{grantedCount} / {totalCount}</div>
+            <div>허용됨</div>
+          </div>
         </div>
       </SectionCardHeader>
       <SectionCardBody className="space-y-3">
@@ -117,38 +148,80 @@ export function ProjectAccessSection({ projectId, currentRole }: ProjectAccessSe
             <AlertDescription>{message.text}</AlertDescription>
           </Alert>
         )}
+
         {orgMembers.length === 0 ? (
-          <p className="text-sm text-muted-foreground">조직 멤버가 없습니다.</p>
+          <p className="rounded-md border border-dashed border-border px-3 py-6 text-sm text-muted-foreground">
+            조직 구성원이 없습니다. 조직 구성원 탭에서 먼저 초대하세요.
+          </p>
         ) : (
-          orgMembers.map((member) => {
-            const blocked = isBlocked(member.id);
-            const isOwner = member.role === 'owner';
-            return (
-              <div key={member.id} className="flex items-center justify-between gap-3 rounded-md border border-border bg-muted/30 px-3 py-2 text-sm">
-                <div className="min-w-0">
-                  <div className="font-mono text-xs text-muted-foreground truncate">{member.user_id}</div>
-                  <Badge variant={isOwner ? 'info' : 'secondary'} className="capitalize mt-0.5">{member.role}</Badge>
-                </div>
-                <div className="flex shrink-0 items-center gap-2">
-                  {blocked ? (
-                    <Badge variant="destructive" className="text-[10px]">차단됨</Badge>
-                  ) : (
-                    <Badge variant="secondary" className="text-[10px]">허용</Badge>
+          <div className="divide-y divide-border overflow-hidden rounded-md border border-border">
+            {orgMembers.map((member) => {
+              const grant = getGrant(member.id);
+              const granted = !!grant;
+              const isOwner = member.role === 'owner';   // org owner = always granted, 토글 불가
+              const toggling = togglingId === member.id;
+
+              return (
+                <MemberRow
+                  key={member.id}
+                  name={member.name}
+                  email={member.email}
+                  className={cn(
+                    'border-0 rounded-none bg-transparent transition-opacity duration-200',
+                    !granted && !isOwner && 'opacity-60',
                   )}
-                  {canManage && !isOwner && (
-                    <button
-                      type="button"
-                      disabled={toggling === member.id}
-                      onClick={() => void handleToggle(member)}
-                      className={`rounded-md px-2 py-0.5 text-xs font-medium transition-colors ${blocked ? 'bg-success-tint text-success hover:bg-success/20' : 'bg-destructive/10 text-destructive hover:bg-destructive/20'} disabled:opacity-50`}
-                    >
-                      {toggling === member.id ? '...' : blocked ? '허용' : '차단'}
-                    </button>
-                  )}
-                </div>
-              </div>
-            );
-          })
+                  actions={
+                    <>
+                      {granted && grant ? (
+                        <Badge variant="outline" className="capitalize text-xs">
+                          {grant.role}
+                        </Badge>
+                      ) : isOwner ? (
+                        <Badge variant="info" className="capitalize text-xs">
+                          {member.role}
+                        </Badge>
+                      ) : null}
+                      {isOwner ? (
+                        <span className="inline-flex items-center gap-1 text-xs text-muted-foreground">
+                          <Shield className="h-3 w-3" />
+                          상시 허용
+                        </span>
+                      ) : canManage ? (
+                        <Button
+                          variant="glass"
+                          size="sm"
+                          disabled={toggling}
+                          onClick={() => void handleToggle(member)}
+                          className={cn(
+                            'min-w-[72px] gap-1 transition-colors',
+                            granted
+                              ? 'border-success/40 bg-success-tint text-success hover:bg-success/15'
+                              : 'border-border text-muted-foreground hover:bg-muted/40',
+                          )}
+                        >
+                          {toggling ? (
+                            <Loader2 className="h-3 w-3 animate-spin" />
+                          ) : granted ? (
+                            <><Shield className="h-3 w-3" />허용</>
+                          ) : (
+                            <><ShieldOff className="h-3 w-3" />차단</>
+                          )}
+                        </Button>
+                      ) : (
+                        <span className={cn(
+                          'inline-flex items-center gap-1 text-xs',
+                          granted ? 'text-success' : 'text-muted-foreground',
+                        )}>
+                          {granted ? <Shield className="h-3 w-3" /> : <ShieldOff className="h-3 w-3" />}
+                          {granted ? '허용' : '차단'}
+                        </span>
+                      )}
+                    </>
+                  }
+                />
+              );
+            })}
+          </div>
         )}
       </SectionCardBody>
     </SectionCard>

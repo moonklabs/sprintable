@@ -1,0 +1,315 @@
+# Sprintable 비-Claude Code 에이전트 연동 가이드
+
+이 문서는 Claude Code 외 에이전트(Hermes, LangChain, AutoGen, 직접 구현체 등)를
+Sprintable SSE 스트림에 연결하고, 메시지를 발신하는 3단계 연동 절차를 안내한다.
+
+---
+
+## 사전 요구 사항
+
+| 항목 | 설명 |
+|------|------|
+| Sprintable 조직/프로젝트 | 이미 생성되어 있어야 함 |
+| 본인(member) JWT | API Key 발급에 필요 (이후 에이전트는 API Key만 사용). 관리자 권한 불필요 — 일반 member도 에이전트 생성·API Key 발급 가능. |
+| `curl` ≥ 7.68 또는 `httpie` ≥ 3.x | smoke test 및 SSE 수신 확인용 |
+| Sprintable API Base URL | 예: `https://api.sprintable.ai` |
+
+이 가이드의 모든 예시에서 아래 변수를 먼저 설정한다.
+
+```bash
+export BASE_URL="https://api.sprintable.ai"   # 또는 http://localhost:8000
+export MEMBER_TOKEN="<본인 JWT>"
+export ORG_ID="<org UUID>"
+export PROJECT_ID="<project UUID>"
+```
+
+---
+
+## Step 1: 에이전트 등록 + API Key 발급
+
+### 1-1. 에이전트 TeamMember 생성
+
+```bash
+# curl
+curl -s -X POST "$BASE_URL/api/v2/team-members" \
+  -H "Authorization: Bearer $MEMBER_TOKEN" \
+  -H "X-Org-Id: $ORG_ID" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "type": "agent",
+    "name": "my-agent",
+    "role": "member",
+    "project_id": "'"$PROJECT_ID"'"
+  }' | tee /tmp/agent.json
+
+export AGENT_ID=$(jq -r '.id' /tmp/agent.json)
+echo "AGENT_ID=$AGENT_ID"
+```
+
+```bash
+# httpie
+http POST "$BASE_URL/api/v2/team-members" \
+  "Authorization:Bearer $MEMBER_TOKEN" \
+  "X-Org-Id:$ORG_ID" \
+  type=agent name=my-agent role=member project_id="$PROJECT_ID"
+```
+
+### 1-2. API Key 발급
+
+```bash
+# curl
+curl -s -X POST "$BASE_URL/api/v2/agents/$AGENT_ID/api-keys" \
+  -H "Authorization: Bearer $MEMBER_TOKEN" \
+  -H "X-Org-Id: $ORG_ID" \
+  -H "Content-Type: application/json" \
+  -d '{"scope": null}' | tee /tmp/apikey.json
+
+export AGENT_API_KEY=$(jq -r '.api_key' /tmp/apikey.json)
+echo "AGENT_API_KEY=$AGENT_API_KEY"
+```
+
+```bash
+# httpie
+http POST "$BASE_URL/api/v2/agents/$AGENT_ID/api-keys" \
+  "Authorization:Bearer $MEMBER_TOKEN" \
+  "X-Org-Id:$ORG_ID" \
+  scope:=null
+```
+
+> API Key 형식: `sk_live_<32자 난수>`. 발급 시 한 번만 평문으로 반환되므로 안전한 곳에 보관한다.
+
+---
+
+## Step 2: SSE 스트림 구독
+
+에이전트는 `GET /api/v2/events/stream` 을 구독하여 실시간 이벤트를 수신한다.
+API Key 사용 시 `member_id` 파라미터는 불필요하다 (서버가 자동 추출).
+
+### 2-1. 초기 연결
+
+```bash
+# curl — SSE 스트림 (Ctrl-C로 중단)
+curl -N \
+  -H "Authorization: Bearer $AGENT_API_KEY" \
+  -H "X-Org-Id: $ORG_ID" \
+  -H "Accept: text/event-stream" \
+  "$BASE_URL/api/v2/events/stream"
+```
+
+```bash
+# httpie
+http --stream GET "$BASE_URL/api/v2/events/stream" \
+  "Authorization:Bearer $AGENT_API_KEY" \
+  "X-Org-Id:$ORG_ID" \
+  "Accept:text/event-stream"
+```
+
+정상 연결 시 아래와 같은 SSE 라인이 수신된다:
+
+```
+: connected
+
+id: 3fa85f64-5717-4562-b3fc-2c963f66afa6
+event: conversation.message_created
+data: {"event_type":"conversation.message_created","event_id":"3fa85f64-...","conversation_id":"...","sender_id":"...","is_backfill":false}
+```
+
+> 현재 SSE relay 대상: `conversation.message_created` (canonical, S-COMM-12) +
+> `conversation:message` (legacy alias, 전환기 병행 emit — 점진 전환 권장).
+> 이전 `memo_created` 이벤트는 deprecated됨.
+
+### 2-2. 재연결 — Last-Event-ID 헤더로 backfill (RFC 8895)
+
+연결이 끊겼다가 재연결할 때 `Last-Event-ID` 헤더를 전달하면
+서버는 해당 ID 이후의 미수신 이벤트를 backfill하여 전송한다.
+
+```bash
+export LAST_EVENT_ID="3fa85f64-5717-4562-b3fc-2c963f66afa6"  # 마지막 수신 id: 값
+
+curl -N \
+  -H "Authorization: Bearer $AGENT_API_KEY" \
+  -H "X-Org-Id: $ORG_ID" \
+  -H "Accept: text/event-stream" \
+  -H "Last-Event-ID: $LAST_EVENT_ID" \
+  "$BASE_URL/api/v2/events/stream"
+```
+
+- backfill 이벤트 payload에는 `"is_backfill": true` 플래그가 포함된다.
+- 동일 event_id는 중복 전송되지 않는다 (서버사이드 dedup).
+- pending 이벤트는 최소 24시간 보관된다 (재연결 backfill 가능 기간).
+
+---
+
+## Step 3: 메시지 발신 (send_chat_message)
+
+에이전트가 conversation에 답장을 보낼 때는
+`POST /api/v2/conversations/{id}/messages` 를 사용한다.
+
+```bash
+export CONVERSATION_ID="<conversation UUID>"  # SSE 이벤트 payload의 conversation_id
+
+# curl
+curl -s -X POST "$BASE_URL/api/v2/conversations/$CONVERSATION_ID/messages" \
+  -H "Authorization: Bearer $AGENT_API_KEY" \
+  -H "X-Org-Id: $ORG_ID" \
+  -H "Content-Type: application/json" \
+  -d '{"content": "안녕하세요, 처리 완료했습니다."}'
+```
+
+```bash
+# httpie
+http POST "$BASE_URL/api/v2/conversations/$CONVERSATION_ID/messages" \
+  "Authorization:Bearer $AGENT_API_KEY" \
+  "X-Org-Id:$ORG_ID" \
+  content="안녕하세요, 처리 완료했습니다."
+```
+
+응답 예시:
+
+```json
+{
+  "id": "c1d2e3f4-...",
+  "conversation_id": "...",
+  "content": "안녕하세요, 처리 완료했습니다.",
+  "sender": { "id": "...", "name": "my-agent", "type": "agent" },
+  "created_at": "2026-05-28T07:00:00Z"
+}
+```
+
+---
+
+## Hermes config.yaml 예시
+
+`sprintable_mcp` 패키지를 Hermes MCP server로 등록하는 예시 (`config.yaml`).
+
+```yaml
+# ~/.hermes/config.yaml  (또는 프로젝트 루트 hermes.config.yaml)
+mcpServers:
+  sprintable:
+    command: python
+    args:
+      - -m
+      - sprintable_mcp
+    env:
+      SPRINTABLE_API_URL: "https://api.sprintable.ai"
+      AGENT_API_KEY: "sk_live_<your-key>"
+    # Hermes: 서버 기동 대기 (선택)
+    startupTimeout: 10
+```
+
+> `sprintable_mcp` 패키지 설치: `pip install sprintable-mcp` 또는
+> `uv add sprintable-mcp` (pypi 배포 전에는 `pip install -e ./backend`).
+
+Claude Code `.mcp.json` 형식이라면:
+
+```json
+{
+  "mcpServers": {
+    "sprintable": {
+      "command": "python",
+      "args": ["-m", "sprintable_mcp"],
+      "env": {
+        "SPRINTABLE_API_URL": "https://api.sprintable.ai",
+        "AGENT_API_KEY": "sk_live_..."
+      }
+    }
+  }
+}
+```
+
+---
+
+## Smoke Test — curl로 전체 플로우 검증
+
+아래 스크립트는 Step 1~3 전체를 순서대로 실행한다.
+`jq`와 `curl`이 설치되어 있어야 한다.
+
+```bash
+#!/usr/bin/env bash
+set -euo pipefail
+
+BASE_URL="${BASE_URL:-http://localhost:8000}"
+MEMBER_TOKEN="${MEMBER_TOKEN:?set MEMBER_TOKEN}"
+ORG_ID="${ORG_ID:?set ORG_ID}"
+PROJECT_ID="${PROJECT_ID:?set PROJECT_ID}"
+
+echo "=== Step 1: 에이전트 등록 ==="
+AGENT=$(curl -sf -X POST "$BASE_URL/api/v2/team-members" \
+  -H "Authorization: Bearer $MEMBER_TOKEN" \
+  -H "X-Org-Id: $ORG_ID" \
+  -H "Content-Type: application/json" \
+  -d "{\"type\":\"agent\",\"name\":\"smoke-agent-$$\",\"role\":\"member\",\"project_id\":\"$PROJECT_ID\"}")
+AGENT_ID=$(echo "$AGENT" | jq -r '.id')
+echo "  agent_id: $AGENT_ID"
+
+echo "=== Step 2: API Key 발급 ==="
+KEY_RESP=$(curl -sf -X POST "$BASE_URL/api/v2/agents/$AGENT_ID/api-keys" \
+  -H "Authorization: Bearer $MEMBER_TOKEN" \
+  -H "X-Org-Id: $ORG_ID" \
+  -H "Content-Type: application/json" \
+  -d '{}')
+API_KEY=$(echo "$KEY_RESP" | jq -r '.api_key')
+echo "  api_key: ${API_KEY:0:16}..."
+
+echo "=== Step 3: SSE 연결 확인 (3초) ==="
+STREAM_OUT=$(curl -sf -N \
+  --max-time 3 \
+  -H "Authorization: Bearer $API_KEY" \
+  -H "X-Org-Id: $ORG_ID" \
+  -H "Accept: text/event-stream" \
+  "$BASE_URL/api/v2/events/stream" 2>&1 || true)
+if echo "$STREAM_OUT" | grep -q ": connected"; then
+  echo "  SSE 연결: OK"
+else
+  echo "  SSE 응답 (첫 줄): $(echo "$STREAM_OUT" | head -1)"
+  echo "  WARNING: 'connected' heartbeat 미수신 — 연결 확인 필요"
+fi
+
+echo ""
+echo "=== Smoke Test PASS ==="
+echo "  AGENT_ID=$AGENT_ID"
+echo "  API_KEY=${API_KEY:0:16}..."
+echo ""
+echo "메시지 발신 테스트는 conversation_id 확보 후 아래 명령으로:"
+echo "  curl -X POST \$BASE_URL/api/v2/conversations/<id>/messages \\"
+echo "    -H \"Authorization: Bearer $API_KEY\" \\"
+echo "    -H \"X-Org-Id: $ORG_ID\" \\"
+echo "    -H \"Content-Type: application/json\" \\"
+echo "    -d '{\"content\": \"hello from smoke-agent\"}'"
+```
+
+스크립트 실행:
+
+```bash
+chmod +x smoke_test.sh
+BASE_URL=http://localhost:8000 MEMBER_TOKEN=... ORG_ID=... PROJECT_ID=... ./smoke_test.sh
+```
+
+기대 출력:
+
+```
+=== Step 1: 에이전트 등록 ===
+  agent_id: <UUID>
+=== Step 2: API Key 발급 ===
+  api_key: sk_live_xxxxxxxx...
+=== Step 3: SSE 연결 확인 (3초) ===
+  SSE 연결: OK
+=== Smoke Test PASS ===
+```
+
+---
+
+## 참고
+
+| 항목 | 값 |
+|------|-----|
+| SSE 엔드포인트 | `GET /api/v2/events/stream` |
+| 메시지 발신 | `POST /api/v2/conversations/{id}/messages` |
+| 인증 헤더 | `Authorization: Bearer sk_live_...` |
+| Org 헤더 | `X-Org-Id: <org UUID>` |
+| 재연결 헤더 | `Last-Event-ID: <last received event UUID>` |
+| 이벤트 보관 | pending 최소 24시간 (30일 보관 후 만료) |
+
+관련 문서:
+- [quickstart-webhook.md](quickstart-webhook.md) — GitHub webhook 연동
+- [managed-agent-deployment-contract.md](managed-agent-deployment-contract.md) — 에이전트 배포 계약

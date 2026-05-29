@@ -133,8 +133,10 @@ export function useChatSse({ currentTeamMemberId, onNewMessage, onReplyCreated, 
         } catch { /* ignore parse errors */ }
       });
 
-      // conversation:message — realtime update for conversation list
-      source.addEventListener('conversation:message', (e: MessageEvent) => {
+      // conversation.message_created — realtime update for conversation list
+      // S-COMM-12: canonical 이름만 리슨. server가 legacy(conversation:message)도 병행 emit하므로
+      // 외부 consumer 하위호환은 server 레벨에서 처리됨 — 프론트가 둘 다 받으면 2회 발화됨.
+      source.addEventListener('conversation.message_created', (e: MessageEvent) => {
         if (e.lastEventId) lastEventIdRef.current = e.lastEventId;
         try {
           const payload = JSON.parse(e.data as string) as Record<string, unknown>;

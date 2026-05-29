@@ -48,6 +48,9 @@ class Settings(BaseSettings):
     polar_sandbox: bool = True  # dev=True(sandbox), prod=False
     polar_webhook_secret: str = ""  # HMAC signature 검증용
 
+    # S-COMM-07: 에이전트 inbox webhook HMAC 검증 시크릿
+    agent_inbox_webhook_secret: str = ""
+
     # Rate limiting (E-OA1:S5)
     rate_limit_backend: str = "memory"  # "memory" | "redis"
     redis_url: str = "redis://localhost:6379/0"

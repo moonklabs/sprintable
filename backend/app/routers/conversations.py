@@ -1,6 +1,7 @@
 """E-EVENTBUS P7-A S37: conversations 테이블 + Chat API."""
 from __future__ import annotations
 
+import json
 import logging
 import uuid
 from collections import defaultdict
@@ -107,7 +108,7 @@ async def _dispatch_conversation_event(
         event = Event(
             project_id=conversation.project_id,
             org_id=org_id,
-            event_type="conversation:message",
+            event_type="conversation.message_created",  # canonical (S-COMM-12)
             source_entity_type="conversation_message",
             source_entity_id=msg.id,
             sender_id=sender.id,
@@ -121,7 +122,7 @@ async def _dispatch_conversation_event(
 
     # flush로 event.id 확보 — push는 호출측에서 commit 후 수행 (race condition 방지)
     await db.flush()
-    return [(pid_str, {"event_id": str(event.id), "event_type": "conversation:message", **payload})
+    return [(pid_str, {"event_id": str(event.id), "event_type": "conversation.message_created", **payload})
             for pid_str, event in events_to_push]
 
 
@@ -383,10 +384,10 @@ async def list_conversations(
 
     all_member_ids = {r.member_id for r in p_rows}
     member_rows = (await db.execute(
-        select(TeamMember.id, TeamMember.name, TeamMember.avatar_url)
+        select(TeamMember.id, TeamMember.name, TeamMember.avatar_url, TeamMember.type)
         .where(TeamMember.id.in_(all_member_ids))
     )).all() if all_member_ids else []
-    member_map = {r.id: {"name": r.name, "avatar_url": r.avatar_url} for r in member_rows}
+    member_map = {r.id: {"name": r.name, "avatar_url": r.avatar_url, "type": r.type} for r in member_rows}
 
     conv_participants: dict[uuid.UUID, list[dict]] = defaultdict(list)
     for r in p_rows:
@@ -395,6 +396,7 @@ async def list_conversations(
             "member_id": str(r.member_id),
             "name": info.get("name"),
             "avatar_url": info.get("avatar_url"),
+            "type": info.get("type", "human"),
         })
 
     result = []
@@ -733,7 +735,42 @@ async def send_message(
     for pid_str, sse_payload in pending_sse_pushes:
         _push_to_agent(pid_str, sse_payload)
     # 브라우저 SSE 구독자에게 1회 발행 — pending 유무와 무관하게 commit 후 항상 발행
-    publish_event(str(org_id), "conversation:message", _msg_payload(msg, sender))
+    publish_event(str(org_id), "conversation.message_created", _msg_payload(msg, sender))  # canonical (S-COMM-12)
+
+    # ws_chat WebSocket 브로드캐스트 — agent 참가자 room에 실시간 전달 (conv.type/title 무관)
+    try:
+        from app.routers.ws_chat import _broadcast, _rooms
+
+        if _rooms:  # 활성 WS 연결 없으면 쿼리 스킵
+            # ConversationParticipant 중 agent type 멤버 수집
+            agent_result = await db.execute(
+                select(TeamMember.id)
+                .join(ConversationParticipant, ConversationParticipant.member_id == TeamMember.id)
+                .where(
+                    ConversationParticipant.conversation_id == conversation_id,
+                    TeamMember.type == "agent",
+                )
+            )
+            agent_ids: set[str] = {str(row[0]) for row in agent_result.all()}
+
+            # ws-chat 전용 conv 호환 — created_by 포함 (participant 테이블에 없는 경우 대비)
+            if conv.created_by:
+                agent_ids.add(str(conv.created_by))
+
+            if agent_ids:
+                ws_payload = json.dumps({
+                    "id": str(msg.id),
+                    "conversation_id": str(conversation_id),
+                    "sender_id": str(sender.id),
+                    "sender_name": sender.name,
+                    "content": msg.content,
+                    "ts": msg.created_at.isoformat(),
+                })
+                for aid in agent_ids:
+                    if aid in _rooms:
+                        await _broadcast(aid, ws_payload)
+    except Exception:
+        logger.warning("ws_chat broadcast failed message_id=%s", msg.id, exc_info=True)
 
     # webhook delivery BackgroundTask (AC1~8)
     from app.services.conversation_webhook import deliver_conversation_message_webhook
@@ -756,6 +793,11 @@ async def send_message(
         message_id=msg.id,
         org_id=org_id,
     )
+
+    # S-COMM-12 AC1: agent 답신 시 해당 conversation의 최근 gateway_accepted delivery → agent_replied
+    if sender.type == "agent":
+        from app.services.conversation_webhook import mark_agent_replied
+        background_tasks.add_task(mark_agent_replied, conversation_id)
 
     # S-C2: agent sender인 경우에만 message_sent 기록 (AC2, AC4, AC5, AC6)
     if sender.type == "agent":

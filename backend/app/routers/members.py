@@ -31,12 +31,13 @@ async def list_members(
 ) -> list[MemberResponse]:
     """프로젝트 멤버 목록.
 
-    Human: org_members + project_access JOIN (opt-out 모델 — 레코드 없음 = 접근 허용).
+    Human: org_members + project_access JOIN (grant 모델 — 레코드 있음 = 접근 허용).
     Agent: team_members(type=agent) 그대로 유지.
     """
     result: list[MemberResponse] = []
 
-    # Human members — org_members에 속하고 project_access 'blocked' 제외
+    # Human members — org owner/admin은 grant 없이도 항상 포함 (S-MBR-03).
+    # Org member는 명시적 granted 레코드가 있어야 포함 (S-MBR-10).
     human_rows = await session.execute(
         text(
             """
@@ -45,11 +46,14 @@ async def list_members(
             JOIN users u ON u.id = om.user_id
             JOIN projects p ON p.org_id = om.org_id AND p.id = :project_id
             WHERE om.deleted_at IS NULL
-              AND NOT EXISTS (
-                  SELECT 1 FROM project_access pa
-                  WHERE pa.org_member_id = om.id
-                    AND pa.project_id = :project_id
-                    AND pa.permission = 'denied'
+              AND (
+                om.role IN ('owner', 'admin')
+                OR EXISTS (
+                    SELECT 1 FROM project_access pa
+                    WHERE pa.org_member_id = om.id
+                      AND pa.project_id = :project_id
+                      AND pa.permission = 'granted'
+                )
               )
             ORDER BY name
             """

@@ -10,7 +10,7 @@ import uuid
 # ─── RegisterRequest ──────────────────────────────────────────────────────────
 
 def test_register_valid_email():
-    r = RegisterRequest(email="User@Example.COM", password="TestPass1!")
+    r = RegisterRequest(email="User@Example.COM", password="TestPass1!", display_name="Test")
     assert r.email == "user@example.com"
 
 
@@ -26,7 +26,7 @@ def test_register_invalid_email_no_domain():
 
 
 def test_register_email_strips_whitespace():
-    r = RegisterRequest(email="  user@example.com  ", password="TestPass1!")
+    r = RegisterRequest(email="  user@example.com  ", password="TestPass1!", display_name="Test")
     assert r.email == "user@example.com"
 
 
@@ -61,6 +61,6 @@ def test_invitation_invalid_email():
 
 def test_same_email_different_case_normalizes_to_same():
     """대소문자 다른 동일 이메일이 동일 값으로 정규화되는 것 확인."""
-    r1 = RegisterRequest(email="Test@Email.com", password="TestPass1!")
-    r2 = RegisterRequest(email="test@email.com", password="TestPass1!")
+    r1 = RegisterRequest(email="Test@Email.com", password="TestPass1!", display_name="Test")
+    r2 = RegisterRequest(email="test@email.com", password="TestPass1!", display_name="Test")
     assert r1.email == r2.email

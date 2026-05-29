@@ -15,6 +15,15 @@ from app.services.org_invite_email import send_invite_email
 router = APIRouter(prefix="/api/v2/organizations", tags=["org-invites"])
 
 
+def _to_response(invite) -> OrgInviteResponse:
+    """Invitation ORM → OrgInviteResponse. pending + 미만료인 경우만 invite_url 세팅."""
+    base = OrgInviteResponse.model_validate(invite)
+    invite_url = None
+    if invite.status == "pending" and invite.expires_at > datetime.now(timezone.utc):
+        invite_url = f"{settings.app_url}/invite/accept?token={invite.token}"
+    return base.model_copy(update={"invite_url": invite_url})
+
+
 def _get_invite_repo(session: AsyncSession = Depends(get_db)) -> OrgInviteRepository:
     return OrgInviteRepository(session)
 
@@ -45,7 +54,7 @@ async def list_org_invites(
     """pending 초대 목록 — owner/admin만 조회 가능."""
     await _require_owner_or_admin(id, auth, org_repo)
     items = await invite_repo.list_pending(org_id=id)
-    return [OrgInviteResponse.model_validate(i) for i in items]
+    return [_to_response(i) for i in items]
 
 
 @router.post("/{id}/invites", response_model=OrgInviteResponse, status_code=201)
@@ -90,7 +99,7 @@ async def create_org_invite(
     await session.commit()
 
     await session.refresh(invite)
-    return OrgInviteResponse.model_validate(invite)
+    return _to_response(invite)
 
 
 @router.post("/{id}/invites/{invite_id}/resend", response_model=OrgInviteResponse)
@@ -121,7 +130,7 @@ async def resend_org_invite(
     await session.commit()
 
     await session.refresh(invite)
-    return OrgInviteResponse.model_validate(invite)
+    return _to_response(invite)
 
 
 @router.delete("/{id}/invites/{invite_id}", response_model=OrgInviteResponse)
@@ -141,4 +150,4 @@ async def revoke_org_invite(
         raise HTTPException(status_code=404, detail="Invite not found")
 
     await session.commit()
-    return OrgInviteResponse.model_validate(invite)
+    return _to_response(invite)

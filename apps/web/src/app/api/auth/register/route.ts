@@ -10,12 +10,18 @@ export async function POST(request: Request) {
   const csrfError = verifyCsrfOrigin(request);
   if (csrfError) return csrfError;
 
-  const body = await request.json() as { email: string; password: string; name?: string; tos_accepted?: boolean };
+  const body = await request.json() as { email: string; password: string; display_name?: string; tos_accepted?: boolean; invite_token?: string };
 
   const fastapiRes = await fetch(`${FASTAPI_URL()}/api/v2/auth/register`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ email: body.email, password: body.password, tos_accepted: body.tos_accepted ?? false }),
+    body: JSON.stringify({
+      email: body.email,
+      password: body.password,
+      display_name: body.display_name ?? body.email.split('@')[0],
+      tos_accepted: body.tos_accepted ?? false,
+      ...(body.invite_token ? { invite_token: body.invite_token } : {}),
+    }),
   });
 
   const json = await fastapiRes.json() as { data?: { access_token: string; refresh_token: string; token_type: string }; error?: { code: string; message: string } };

@@ -242,8 +242,8 @@ def test_stream_batch_delivers_over_100_events(mock_session, org_id):
 
     async def _auth():
         ctx = MagicMock()
-        ctx.user_id = str(uuid.uuid4())
-        ctx.claims = {}
+        ctx.user_id = str(member_id)  # API key: user_id = team_member.id
+        ctx.claims = {"app_metadata": {"api_key_id": "test-key", "org_id": str(org_id)}}
         return ctx
 
     async def _org():

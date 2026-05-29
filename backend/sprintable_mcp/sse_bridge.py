@@ -28,7 +28,18 @@ _MAX_DELAY = 10.0
 _JITTER_FACTOR = 0.5    # wait * uniform(0, 0.5) jitter
 
 # relay 대상 이벤트 타입
-_RELAY_EVENT_TYPES = frozenset(["conversation:message", "conversation:mention"])
+# S-COMM-12: canonical = conversation.message_created (점 표기)
+# conversation:message (콜론) 는 전환기 하위호환용 — 신규 emit 없으나 유지
+_RELAY_EVENT_TYPES = frozenset([
+    "conversation.message_created",  # canonical (S-COMM-12)
+    "conversation:message",          # legacy alias, deprecated
+    "conversation:mention",
+])
+
+# canonical → legacy alias 매핑 (전환기 하위호환 병행 emit)
+_EVENT_TYPE_LEGACY_ALIASES: dict[str, str] = {
+    "conversation.message_created": "conversation:message",
+}
 
 
 # ── SeenIdsCache: LRU + TTL dedup 캐시 (S6-2) ────────────────────────────────
@@ -178,7 +189,7 @@ class SseParser:
         return None
 
 
-# ── fakechat relay ─────────────────────────────────────────────────────────────
+# ── fakechat relay ────────────────────────────────────────────────────────────
 
 def _build_relay_payload(event_type: str, data: object) -> tuple[str, str, bool]:
     """SSE data에서 (text, thread_id, is_conversation_event) 추출."""
@@ -369,6 +380,9 @@ async def start_sse_bridge(
         asyncio.create_task(
             _send_mcp_notification(event.event_type, event.data)
         )
+        # S-COMM-12: canonical 이벤트 수신 시 legacy alias도 병행 emit (전환기 하위호환)
+        if _alias := _EVENT_TYPE_LEGACY_ALIASES.get(event.event_type):
+            asyncio.create_task(_send_mcp_notification(_alias, event.data))
 
         # relay 조건: (1) backfill 아님, (2) webhook 미설정
         _relay = True

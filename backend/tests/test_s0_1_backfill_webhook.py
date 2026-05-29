@@ -139,6 +139,7 @@ def test_relay_filters_non_conversation_events():
 
 # ─── AC5: memo 경로 기능 영향 없음 ───────────────────────────────────────────
 
+@pytest.mark.xfail(reason="E-MEMO-RETIRE S3-3: send_memo 도구 제거됨", strict=False)
 def test_send_memo_tool_still_registered():
     """send_memo 도구가 MCP 서버에 등록되어 있음."""
     import os
@@ -149,6 +150,7 @@ def test_send_memo_tool_still_registered():
     assert "sprintable_send_memo" in tools
 
 
+@pytest.mark.xfail(reason="E-MEMO-RETIRE S3-3: reply_memo 도구 제거됨", strict=False)
 def test_reply_memo_tool_still_registered():
     """reply_memo 도구가 MCP 서버에 등록되어 있음."""
     import os

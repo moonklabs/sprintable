@@ -108,7 +108,7 @@ export function DocsShellClient({ projectId }: DocsShellClientProps) {
     );
   }, []);
 
-  const { status: saveStatus, isDirty, save } = useDocSync<DocDetail>({
+  const { status: _saveStatus, isDirty, save } = useDocSync<DocDetail>({
     docId: selectedDoc?.id ?? null,
     savePayload: { title, content, content_format: contentFormat },
     serverUpdatedAt: selectedDoc?.updated_at ?? null,
@@ -676,8 +676,7 @@ export function DocsShellClient({ projectId }: DocsShellClientProps) {
   ) : (
     <div className="flex h-full items-center justify-center p-4 lg:p-6">
       <EmptyState
-        title={t('title')}
-        description={t('selectDoc')}
+        title={t('selectDoc')}
         className="w-full max-w-lg bg-background/70"
         action={
           <Button size="sm" onClick={handleNewDoc}>
@@ -717,7 +716,6 @@ export function DocsShellClient({ projectId }: DocsShellClientProps) {
             aria-label="문서 트리 열기"
           >
             <Menu className="size-4" />
-            <span>{t('title')}</span>
           </button>
         </div>
         {/* Content area — always visible on mobile */}
@@ -733,8 +731,7 @@ export function DocsShellClient({ projectId }: DocsShellClientProps) {
               aria-hidden="true"
             />
             <div className="fixed inset-y-0 left-0 z-50 flex w-[280px] flex-col overflow-hidden bg-background shadow-xl">
-              <div className="flex flex-shrink-0 items-center justify-between border-b border-border/80 px-4 py-3">
-                <span className="text-sm font-medium text-foreground">{t('title')}</span>
+              <div className="flex flex-shrink-0 items-center justify-end border-b border-border/80 px-4 py-3">
                 <button
                   type="button"
                   onClick={() => setTreeDrawerOpen(false)}

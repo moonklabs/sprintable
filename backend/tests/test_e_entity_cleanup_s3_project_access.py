@@ -96,12 +96,12 @@ def test_model_docstring_documents_optout():
     assert "opt-out" in source or "레코드 없음" in source
 
 
-def test_permission_default_is_allowed():
-    """permission 컬럼 기본값 'allowed' (full spec: 'allowed'|'denied')."""
+def test_permission_default_is_granted():
+    """permission 컬럼 기본값 'granted' (S-MBR-10: grant 모델 전환)."""
     from app.models.project_access import ProjectAccess
     perm_col = ProjectAccess.__table__.columns["permission"]
     default = str(perm_col.server_default.arg) if perm_col.server_default else None
-    assert default == "allowed"
+    assert default == "granted"
 
 
 # ─── AC5: cascade 삭제 (FK) ──────────────────────────────────────────────────

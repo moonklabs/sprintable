@@ -119,6 +119,22 @@ async def create_team_member(
         if body.name == actor.name:
             raise HTTPException(status_code=400, detail="Agent cannot create a member with the same name as itself")
 
+    # S-MBR-02: user_id 있으면 org_members 선행 검증
+    if body.user_id is not None:
+        from app.models.project import OrgMember
+        _org_check = await session.execute(
+            select(OrgMember).where(
+                OrgMember.org_id == org_id,
+                OrgMember.user_id == body.user_id,
+                OrgMember.deleted_at.is_(None),
+            )
+        )
+        if _org_check.scalar_one_or_none() is None:
+            raise HTTPException(
+                status_code=400,
+                detail={"code": "USER_NOT_IN_ORG", "message": "먼저 조직에 초대해야 합니다"},
+            )
+
     # Human member 생성은 org invite 플로우로 이전 (E-ENTITY-CLEANUP S4)
     if body.type == "human":
         raise HTTPException(

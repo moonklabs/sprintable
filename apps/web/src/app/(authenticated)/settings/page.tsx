@@ -27,6 +27,7 @@ import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { OperatorInput } from '@/components/ui/operator-control';
 import { OperatorDropdownSelect } from '@/components/ui/operator-dropdown-select';
+import { MemberRow } from '@/components/ui/member-row';
 import { SectionCard, SectionCardBody, SectionCardHeader } from '@/components/ui/section-card';
 import { Tabs, TabsList, TabsTrigger, TabsContent } from '@/components/ui/tabs';
 import { SidebarTrigger } from '@/components/ui/sidebar';
@@ -74,6 +75,7 @@ interface InvitationItem {
 interface ProjectMember {
   id: string;
   name: string;
+  email?: string;
   type: 'human' | 'agent';
   role: string;
   user_id: string | null;
@@ -174,10 +176,7 @@ export default function SettingsPage() {
   const [currentUserId, setCurrentUserId] = useState<string | null>(null);
   const [deletingProjectId, setDeletingProjectId] = useState<string | null>(null);
   const [deleteProjectConfirmId, setDeleteProjectConfirmId] = useState<string | null>(null);
-  const [projectInviteEmail, setProjectInviteEmail] = useState('');
-  const [projectInviteProjectId, setProjectInviteProjectId] = useState('');
-  const [projectInviting, setProjectInviting] = useState(false);
-  const [projectInviteResult, setProjectInviteResult] = useState<{ type: 'success' | 'error'; text: string } | null>(null);
+
   const [revokingInviteId, setRevokingInviteId] = useState<string | null>(null);
   const [resendingInviteId, setResendingInviteId] = useState<string | null>(null);
   const [resendResult, setResendResult] = useState<{ id: string; url: string } | null>(null);
@@ -377,7 +376,7 @@ export default function SettingsPage() {
 
     const [projectMemberRes, orgMemberRes] = await Promise.all([
       fetch(`/api/team-members?project_id=${projectId}`),
-      fetch('/api/team-members?include_inactive=true'),
+      fetch('/api/org-members'),
     ]);
 
     if (projectMemberRes.ok) {
@@ -387,7 +386,18 @@ export default function SettingsPage() {
 
     if (orgMemberRes.ok) {
       const json = await orgMemberRes.json();
-      setOrgMembers((json.data ?? []) as ProjectMember[]);
+      type OrgMemberRow = { id: string; user_id: string; role: string; email?: string; deleted_at?: string | null };
+      const mapped: ProjectMember[] = (json.data ?? []).map((row: OrgMemberRow) => ({
+        id: row.id,
+        name: row.email ?? row.user_id,
+        email: row.email,
+        type: 'human' as const,
+        role: row.role,
+        user_id: row.user_id,
+        project_id: projectId,
+        is_active: !row.deleted_at,
+      }));
+      setOrgMembers(mapped);
     }
   };
 
@@ -677,28 +687,6 @@ export default function SettingsPage() {
     setDeleteProjectConfirmId(null);
   };
 
-  const handleProjectInvite = async () => {
-    if (!projectInviteEmail.trim() || !projectInviteProjectId) return;
-    setProjectInviting(true);
-    setProjectInviteResult(null);
-
-    const res = await fetch(`/api/projects/${projectInviteProjectId}/invitations`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ email: projectInviteEmail.trim(), role: 'member' }),
-    });
-
-    if (res.ok) {
-      const json = await res.json();
-      setProjectInviteResult({ type: 'success', text: `${t('projectInviteSent')} ${json.data.invite_url}` });
-      setProjectInviteEmail('');
-    } else {
-      const json = await res.json().catch(() => null);
-      setProjectInviteResult({ type: 'error', text: json?.error?.message ?? t('projectInviteFailed') });
-    }
-
-    setProjectInviting(false);
-  };
 
   const handleSaveWebhookUrl = async (memberId: string) => {
     const url = (webhookEditing[memberId] ?? '').trim();
@@ -1228,14 +1216,6 @@ export default function SettingsPage() {
                 </SectionCardBody>
               </SectionCard>
 
-              {currentProjectId && orgInfo && (
-                <div className="mt-6">
-                  <ProjectAccessSection
-                    projectId={currentProjectId}
-                    currentRole={currentOrgRole}
-                  />
-                </div>
-              )}
             </TabsContent>
 
             <TabsContent value="members">
@@ -1380,271 +1360,15 @@ export default function SettingsPage() {
                   </SectionCard>
                 </div>
               ) : (
-              <div className="space-y-6">
-                {isAdmin ? (
-                <SectionCard>
-                  <SectionCardHeader>
-                    <div className="space-y-1">
-                      <h2 className="text-base font-semibold text-foreground">{t('inviteMembers')}</h2>
-                      <p className="text-sm text-muted-foreground">{t('inviteDescription')}</p>
-                    </div>
-                  </SectionCardHeader>
-                  <SectionCardBody className="space-y-4">
-                    <div className="flex flex-col gap-3 md:flex-row">
-                      <OperatorInput
-                        type="email"
-                        value={inviteEmail}
-                        onChange={(e) => setInviteEmail(e.target.value)}
-                        placeholder={t('emailPlaceholder')}
-                      />
-                      <OperatorDropdownSelect
-                        value={inviteProjectId}
-                        onValueChange={(v) => setInviteProjectId(v)}
-                        options={[
-                          { value: '', label: t('orgWideInvite') },
-                          ...projects.map((project) => ({ value: project.id, label: project.name })),
-                        ]}
-                      />
-                      <OperatorDropdownSelect
-                        value={inviteRole}
-                        onValueChange={(v) => setInviteRole(v as 'member' | 'admin')}
-                        options={[
-                          { value: 'member', label: 'Member' },
-                          { value: 'admin', label: 'Admin' },
-                        ]}
-                      />
-                      <Button
-                        variant="hero"
-                        size="lg"
-                        onClick={async () => {
-                          if (!inviteEmail.trim()) return;
-                          setInviting(true);
-                          const res = await fetch('/api/invitations', {
-                            method: 'POST',
-                            headers: { 'Content-Type': 'application/json' },
-                            body: JSON.stringify({ email: inviteEmail.trim(), role: inviteRole, ...(inviteProjectId ? { project_id: inviteProjectId } : {}) }),
-                          });
-                          if (res.ok) {
-                            const json = await res.json();
-                            setInviteResult(json.data.invite_url);
-                            setInviteEmail('');
-                            setInviteProjectId('');
-                            setInviteRole('member');
-                            await refreshInvitations();
-                          }
-                          setInviting(false);
-                        }}
-                        disabled={inviting}
-                      >
-                        {inviting ? '...' : t('invite')}
-                      </Button>
-                    </div>
-
-                    {inviteResult ? (
-                      <Alert variant="success">
-                        <AlertDescription className="break-all">{t('inviteLinkCopied')}: {inviteResult}</AlertDescription>
-                      </Alert>
-                    ) : null}
-
-                    {invitations.length > 0 ? (
-                      <div className="space-y-2">
-                        {invitations.map((invitation) => (
-                          <div key={invitation.id}>
-                            <div className="flex items-center justify-between gap-2 rounded-md border border-border bg-muted/30 px-3 py-3 text-xs">
-                              <span className="text-foreground">{invitation.email}</span>
-                              <span className="shrink-0 text-muted-foreground">
-                                {invitation.projects?.name ?? t('orgWide')}
-                              </span>
-                              <span className={`shrink-0 ${invitation.status === 'accepted' ? 'text-success' : invitation.status === 'revoked' ? 'text-muted-foreground line-through' : new Date(invitation.expires_at) < new Date() ? 'text-destructive' : 'text-warning'}`}>
-                                {invitation.status === 'accepted' ? t('accepted') : invitation.status === 'revoked' ? t('revoked') : new Date(invitation.expires_at) < new Date() ? t('expired') : t('pending')}
-                              </span>
-                              {invitation.status === 'pending' ? (
-                                <div className="flex shrink-0 gap-1">
-                                  <button
-                                    type="button"
-                                    className="rounded border border-border px-2 py-0.5 text-xs text-muted-foreground transition-colors hover:border-foreground/30 hover:text-foreground disabled:opacity-50"
-                                    disabled={resendingInviteId === invitation.id}
-                                    onClick={() => handleResendInvite(invitation.id)}
-                                  >
-                                    {resendingInviteId === invitation.id ? '...' : t('resend')}
-                                  </button>
-                                  <button
-                                    type="button"
-                                    className="rounded border border-destructive-border px-2 py-0.5 text-xs text-destructive transition-colors hover:bg-destructive-tint disabled:opacity-50"
-                                    disabled={revokingInviteId === invitation.id}
-                                    onClick={() => handleRevokeInvite(invitation.id)}
-                                  >
-                                    {revokingInviteId === invitation.id ? '...' : t('revoke')}
-                                  </button>
-                                </div>
-                              ) : null}
-                            </div>
-                            {resendResult?.id === invitation.id ? (
-                              <p className="mt-1 break-all px-1 text-xs text-warning">{t('inviteLinkCopied')}: {resendResult.url}</p>
-                            ) : null}
-                          </div>
-                        ))}
-                      </div>
-                    ) : null}
-                  </SectionCardBody>
-                </SectionCard>
-                ) : null}
-
-                {isAdmin ? (
-                <SectionCard>
-                  <SectionCardHeader>
-                    <div className="space-y-1">
-                      <h2 className="text-base font-semibold text-foreground">{t('projectInviteTitle')}</h2>
-                      <p className="text-sm text-muted-foreground">{t('projectInviteDescription')}</p>
-                    </div>
-                  </SectionCardHeader>
-                  <SectionCardBody className="space-y-4">
-                    <div className="flex flex-col gap-3 md:flex-row">
-                      <OperatorInput
-                        type="email"
-                        value={projectInviteEmail}
-                        onChange={(e) => setProjectInviteEmail(e.target.value)}
-                        placeholder={t('emailPlaceholder')}
-                      />
-                      <OperatorDropdownSelect
-                        value={projectInviteProjectId}
-                        onValueChange={(v) => setProjectInviteProjectId(v)}
-                        options={[
-                          { value: '', label: t('selectProject') },
-                          ...projects.map((project) => ({ value: project.id, label: project.name })),
-                        ]}
-                      />
-                      <Button
-                        variant="hero"
-                        size="lg"
-                        onClick={handleProjectInvite}
-                        disabled={projectInviting || !projectInviteEmail.trim() || !projectInviteProjectId}
-                      >
-                        {projectInviting ? '...' : t('invite')}
-                      </Button>
-                    </div>
-                    {projectInviteResult ? (
-                      <Alert variant={projectInviteResult.type === 'success' ? 'success' : 'destructive'}>
-                        <AlertDescription className="break-all">{projectInviteResult.text}</AlertDescription>
-                      </Alert>
-                    ) : null}
-                  </SectionCardBody>
-                </SectionCard>
-                ) : null}
-
-                <SectionCard>
-                  <SectionCardHeader>
-                    <div className="space-y-1">
-                      <h2 className="text-base font-semibold text-foreground">{t('memberManagement')}</h2>
-                      <p className="text-sm text-muted-foreground">{t('memberManagementDescription')}</p>
-                    </div>
-                  </SectionCardHeader>
-                  <SectionCardBody className="space-y-4">
-                    {isAdmin ? (
-                    <div className="grid gap-3 md:grid-cols-[220px_minmax(0,1fr)_auto]">
-                      <OperatorDropdownSelect
-                        value={memberProjectId}
-                        onValueChange={(v) => setMemberProjectId(v)}
-                        options={[
-                          { value: '', label: t('selectProject') },
-                          ...projects.map((project) => ({ value: project.id, label: project.name })),
-                        ]}
-                      />
-                      <OperatorDropdownSelect
-                        value={selectedOrgMemberUserId}
-                        onValueChange={(v) => setSelectedOrgMemberUserId(v)}
-                        disabled={!memberProjectId || assignableMembers.length === 0}
-                        options={[
-                          { value: '', label: assignableMembers.length ? t('chooseMember') : t('noAssignableMembers') },
-                          ...assignableMembers.map((member) => ({ value: member.user_id ?? '', label: member.name })),
-                        ]}
-                      />
-                      <Button variant="hero" size="lg" onClick={handleAddProjectMember} disabled={!memberProjectId || !selectedOrgMemberUserId || addingMember}>
-                        {addingMember ? '...' : t('addToProject')}
-                      </Button>
-                    </div>
-                    ) : null}
-
-                    {memberActionMessage ? (
-                      <Alert variant={memberActionMessage.type === 'success' ? 'success' : 'destructive'}>
-                        <AlertDescription>{memberActionMessage.text}</AlertDescription>
-                      </Alert>
-                    ) : null}
-
-                    <div className="space-y-2">
-                      <div className="text-xs font-medium uppercase tracking-[0.18em] text-muted-foreground">{t('projectMembers')}</div>
-                      {projectMembers.filter((m) => m.type === 'human').length > 0 ? (
-                        projectMembers.filter((m) => m.type === 'human').map((member) => {
-                          const isEditingWebhook = member.id in webhookEditing;
-                          const currentWebhookUrl = member.webhook_url ?? '';
-                          return (
-                          <div key={member.id} className="rounded-md border border-border bg-muted/30 px-3 py-3 text-sm space-y-2">
-                            <div className="flex items-center justify-between gap-3">
-                              <div className="min-w-0">
-                                <div className="font-medium text-foreground">{member.name}</div>
-                                <div className="mt-1 flex flex-wrap items-center gap-2">
-                                  <Badge variant={member.type === 'agent' ? 'secondary' : 'info'}>{member.type === 'agent' ? t('agentMember') : t('humanMember')}</Badge>
-                                  <Badge variant="outline">{member.role}</Badge>
-                                </div>
-                              </div>
-                              {isAdmin ? (
-                              <Button variant="glass" size="sm" onClick={() => handleRemoveProjectMember(member.id)} disabled={removingMemberId === member.id}>
-                                {removingMemberId === member.id ? '...' : t('removeFromProject')}
-                              </Button>
-                              ) : null}
-                            </div>
-                            {/* Webhook URL */}
-                            <div className="flex items-center gap-2">
-                              {isEditingWebhook ? (
-                                <>
-                                  <input
-                                    type="url"
-                                    value={webhookEditing[member.id]}
-                                    onChange={(e) => {
-                                      setWebhookEditing((prev) => ({ ...prev, [member.id]: e.target.value }));
-                                      setWebhookErrors((prev) => ({ ...prev, [member.id]: '' }));
-                                    }}
-                                    onKeyDown={(e) => { if (e.key === 'Enter') void handleSaveWebhookUrl(member.id); if (e.key === 'Escape') setWebhookEditing((prev) => { const next = { ...prev }; delete next[member.id]; return next; }); }}
-                                    placeholder="https://your-webhook.example.com"
-                                    className="flex-1 rounded-md border border-border bg-background px-2 py-1 font-mono text-xs text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-1 focus:ring-ring"
-                                    autoFocus
-                                  />
-                                  <Button size="sm" variant="outline" className="shrink-0 h-7 text-xs" disabled={webhookSaving === member.id} onClick={() => void handleSaveWebhookUrl(member.id)}>
-                                    {webhookSaving === member.id ? '...' : '저장'}
-                                  </Button>
-                                  <Button size="sm" variant="ghost" className="shrink-0 h-7 text-xs" onClick={() => setWebhookEditing((prev) => { const next = { ...prev }; delete next[member.id]; return next; })}>
-                                    취소
-                                  </Button>
-                                </>
-                              ) : (
-                                <button
-                                  type="button"
-                                  className="flex-1 text-left text-xs text-muted-foreground hover:text-foreground transition-colors"
-                                  title={currentWebhookUrl || 'Webhook URL 설정'}
-                                  onClick={() => setWebhookEditing((prev) => ({ ...prev, [member.id]: currentWebhookUrl }))}
-                                >
-                                  {currentWebhookUrl ? (
-                                    <span className="font-mono">{currentWebhookUrl.length > 50 ? `${currentWebhookUrl.slice(0, 50)}…` : currentWebhookUrl}</span>
-                                  ) : (
-                                    <span className="italic">Webhook URL 설정…</span>
-                                  )}
-                                </button>
-                              )}
-                            </div>
-                            {webhookErrors[member.id] ? (
-                              <p className="text-xs text-destructive">{webhookErrors[member.id]}</p>
-                            ) : null}
-                          </div>
-                          );
-                        })
-                      ) : (
-                        <div className="rounded-md border border-dashed border-border px-3 py-6 text-sm text-muted-foreground">
-                          {t('noProjectMembers')}
-                        </div>
-                      )}
-                    </div>
-                  </SectionCardBody>
-                </SectionCard>
+              <div>
+                {currentProjectId ? (
+                  <ProjectAccessSection
+                    projectId={currentProjectId}
+                    currentRole={currentOrgRole}
+                  />
+                ) : (
+                  <p className="text-sm text-muted-foreground">프로젝트를 선택해주세요.</p>
+                )}
               </div>
               )}
             </TabsContent>

@@ -37,6 +37,18 @@ class InvitationResponse(BaseModel):
     expires_at: datetime
     accepted_at: datetime | None = None
     created_at: datetime
+    email_sent_at: datetime | None = None
+    email_error: str | None = None
+    invite_url: str | None = None
+
+
+class InvitationPreviewResponse(BaseModel):
+    org_name: str
+    org_id: uuid.UUID
+    email: str
+    role: str
+    status: str
+    expires_at: datetime
 
 
 class AcceptInvitation(BaseModel):

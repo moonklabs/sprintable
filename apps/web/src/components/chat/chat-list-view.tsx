@@ -2,9 +2,8 @@
 
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { useRouter } from 'next/navigation';
-import { Bot, MessageSquare, Plus, Users } from 'lucide-react';
+import { Bot, MessageSquare, Users } from 'lucide-react';
 import { useTranslations } from 'next-intl';
-import { Button } from '@/components/ui/button';
 import { EmptyState } from '@/components/ui/empty-state';
 import { Tabs, TabsList, TabsTrigger, TabsContent } from '@/components/ui/tabs';
 import { NewConversationModal } from './new-conversation-modal';
@@ -14,6 +13,7 @@ interface Participant {
   member_id: string;
   name: string;
   avatar_url?: string | null;
+  type?: 'agent' | 'human';
 }
 
 interface ConversationItem {
@@ -29,6 +29,8 @@ interface ConversationItem {
 interface ChatListViewProps {
   projectId: string;
   currentTeamMemberId: string;
+  open?: boolean;
+  onOpenChange?: (v: boolean) => void;
 }
 
 function formatTime(iso: string): string {
@@ -46,14 +48,23 @@ function formatParticipantNames(
   participants: Participant[],
   currentMemberId: string,
   type: 'dm' | 'group',
+  t: (key: string, values?: Record<string, string | number>) => string,
 ): string {
   const others = participants.filter((p) => p.member_id !== currentMemberId);
-  if (others.length === 0) return type === 'dm' ? 'DM' : '그룹 채팅';
+  if (others.length === 0) return type === 'dm' ? 'DM' : t('groupSection');
   if (type === 'dm') return others[0]!.name;
   const MAX = 3;
   if (others.length <= MAX) return others.map((p) => p.name).join(', ');
   const visible = others.slice(0, MAX).map((p) => p.name).join(', ');
-  return `${visible} 외 ${others.length - MAX}명`;
+  return `${visible} ${t('participantsOthers', { count: others.length - MAX })}`;
+}
+
+function getOtherParticipants(participants: Participant[], currentMemberId: string): Participant[] {
+  return participants.filter((p) => p.member_id !== currentMemberId);
+}
+
+function hasAgentParticipant(participants: Participant[]): boolean {
+  return participants.some((p) => p.type === 'agent');
 }
 
 function ConversationRow({
@@ -71,8 +82,8 @@ function ConversationRow({
 
   const displayName = conv.title ??
     (conv.participants && conv.participants.length > 0
-      ? formatParticipantNames(conv.participants, currentMemberId, conv.type)
-      : conv.type === 'dm' ? t('dmWith') : '그룹 채팅');
+      ? formatParticipantNames(conv.participants, currentMemberId, conv.type, t)
+      : conv.type === 'dm' ? t('dmWith') : t('groupSection'));
 
   const preview = conv.latest_message?.content ?? t('noMessages');
   const time = conv.latest_message?.created_at ?? conv.updated_at;
@@ -81,6 +92,54 @@ function ConversationRow({
   const avatarInitial = !isAgentConv && conv.type === 'dm' && conv.participants
     ? (conv.participants.find((p) => p.member_id !== currentMemberId)?.name.slice(0, 2) ?? 'DM')
     : null;
+
+  const others = conv.participants ? getOtherParticipants(conv.participants, currentMemberId) : [];
+  const isAgentInConv = conv.participants ? hasAgentParticipant(conv.participants) : false;
+  const agentCount = others.filter((p) => p.type === 'agent').length;
+
+  const participantLayer = conv.participants && conv.participants.length > 0 ? (
+    conv.type === 'dm' ? (
+      <div className="mt-0.5 flex items-center gap-1 text-[11px] text-muted-foreground">
+        <span className="rounded bg-muted px-1 py-0.5 font-medium text-muted-foreground">{t('you')}</span>
+        <span>↔</span>
+        <span className="max-w-[80px] truncate rounded bg-muted px-1 py-0.5 font-medium text-muted-foreground">
+          {others[0]?.name ?? '...'}
+        </span>
+        {isAgentInConv && (
+          <span className="flex-shrink-0 rounded border border-brand/30 bg-brand/12 px-1.5 py-0.5 text-[10px] font-medium text-brand-strong">
+            {t('agent')}
+          </span>
+        )}
+      </div>
+    ) : (
+      <div className="mt-0.5 flex items-center gap-1.5 text-[11px] text-muted-foreground">
+        <div className="flex -space-x-1.5">
+          {others.slice(0, 3).map((p) => (
+            <div
+              key={p.member_id}
+              className="relative flex h-[18px] w-[18px] flex-shrink-0 items-center justify-center rounded-full bg-muted text-[9px] font-medium text-muted-foreground ring-1 ring-background"
+            >
+              {p.name.slice(0, 1)}
+              {p.type === 'agent' && (
+                <span className="absolute -bottom-px -right-px h-[6px] w-[6px] rounded-full bg-brand-strong ring-1 ring-background" />
+              )}
+            </div>
+          ))}
+          {others.length > 3 && (
+            <div className="flex h-[18px] w-[18px] flex-shrink-0 items-center justify-center rounded-full bg-muted text-[9px] font-medium text-muted-foreground ring-1 ring-background">
+              +{others.length - 3}
+            </div>
+          )}
+        </div>
+        <span className="truncate">
+          {isAgentInConv && agentCount > 0
+            ? t('agentCount', { count: agentCount })
+            : `${t('personCount', { count: others.length + 1 })} · ${others.slice(0, 2).map((p) => p.name).join(', ')}${others.length > 2 ? ` ${t('participantsOthers', { count: others.length - 2 })}` : ''}`
+          }
+        </span>
+      </div>
+    )
+  ) : null;
 
   return (
     <button
@@ -111,6 +170,7 @@ function ConversationRow({
           <span className="truncate text-sm font-medium text-foreground">{displayName}</span>
           <span className="flex-shrink-0 text-[10px] text-muted-foreground">{formatTime(time)}</span>
         </div>
+        {participantLayer}
         <div className="flex items-center justify-between gap-1">
           <p className="truncate text-xs text-muted-foreground">{preview}</p>
           {unread > 0 && (
@@ -149,7 +209,7 @@ function applyConversationMessageUpdate(
 
 const PAGE_LIMIT = 30;
 
-export function ChatListView({ projectId, currentTeamMemberId }: ChatListViewProps) {
+export function ChatListView({ projectId, currentTeamMemberId, open, onOpenChange }: ChatListViewProps) {
   const t = useTranslations('chats');
   const router = useRouter();
   const [conversations, setConversations] = useState<ConversationItem[]>([]);
@@ -161,7 +221,9 @@ export function ChatListView({ projectId, currentTeamMemberId }: ChatListViewPro
   const [myTotal, setMyTotal] = useState(0);
   const [agentOffset, setAgentOffset] = useState(0);
   const [agentTotal, setAgentTotal] = useState(0);
-  const [showModal, setShowModal] = useState(false);
+  const [internalShowModal, setInternalShowModal] = useState(false);
+  const showModal = open !== undefined ? open : internalShowModal;
+  const setShowModal = onOpenChange ?? setInternalShowModal;
 
   const convsRef = useRef(conversations);
   useEffect(() => { convsRef.current = conversations; }, [conversations]);
@@ -302,15 +364,6 @@ export function ChatListView({ projectId, currentTeamMemberId }: ChatListViewPro
 
   return (
     <div className="flex h-full flex-col">
-      {/* Header */}
-      <div className="flex flex-shrink-0 items-center justify-between border-b border-border/80 px-4 py-3">
-        <h2 className="text-sm font-semibold text-foreground">{t('title')}</h2>
-        <Button size="sm" variant="outline" onClick={() => setShowModal(true)}>
-          <Plus className="mr-1.5 h-3.5 w-3.5" />
-          {t('newConversation')}
-        </Button>
-      </div>
-
       {isAdminOrOwner ? (
         <Tabs defaultValue="my" className="flex min-h-0 flex-1 flex-col">
           <TabsList className="mx-4 mt-2 w-auto self-start">

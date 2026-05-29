@@ -1,7 +1,7 @@
 'use client';
 
-import { useState, useEffect, useCallback } from 'react';
-import { Node, Mark, mergeAttributes } from '@tiptap/core';
+import { useState, useEffect } from 'react';
+import { Node, mergeAttributes } from '@tiptap/core';
 import { ReactNodeViewRenderer, NodeViewWrapper, NodeViewContent, type ReactNodeViewProps } from '@tiptap/react';
 
 // ─── KaTeX Renderer ───────────────────────────────────────────────────────────

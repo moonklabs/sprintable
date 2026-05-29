@@ -78,6 +78,16 @@ class InvitationRepository:
         await self.session.refresh(inv)
         return inv
 
+    async def update_email_result(
+        self, id: uuid.UUID, *, sent_at: datetime | None, error: str | None
+    ) -> None:
+        inv = await self.get(id)
+        if inv is None:
+            return
+        inv.email_sent_at = sent_at
+        inv.email_error = error
+        await self.session.flush()
+
     async def accept(self, token: str) -> Invitation | None:
         inv = await self.get_by_token(token)
         if inv is None:

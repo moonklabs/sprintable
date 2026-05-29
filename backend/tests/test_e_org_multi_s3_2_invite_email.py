@@ -36,6 +36,7 @@ def _mock_invite(email: str = "new@example.com") -> MagicMock:
     i.created_at = now
     i.email_sent_at = now
     i.email_error = None
+    i.invite_url = None
     return i
 
 
@@ -89,7 +90,7 @@ def test_send_invite_email_includes_token():
     def _mock_send(to, subject, html_body):
         sent_bodies.append(html_body)
 
-    with patch("app.services.email.send_email", side_effect=_mock_send):
+    with patch("app.services.org_invite_email.send_email", side_effect=_mock_send):
         result = send_invite_email(to="x@y.com", org_name="Test", token="tok123", role="member")
 
     assert result is None
@@ -168,7 +169,7 @@ def test_send_invite_email_returns_error_on_failure():
     """send_invite_email 실패 시 오류 문자열 반환."""
     from app.services.org_invite_email import send_invite_email
 
-    with patch("app.services.email.send_email", side_effect=Exception("SMTP fail")):
+    with patch("app.services.org_invite_email.send_email", side_effect=Exception("SMTP fail")):
         result = send_invite_email(to="x@y.com", org_name="Test", token="tok", role="member")
 
     assert result is not None

@@ -22,7 +22,7 @@ def _normalize_email(v: str) -> str:
         raise ValueError("Invalid email format")
     return v
 from sqlalchemy.exc import IntegrityError
-from sqlalchemy import or_, select, update
+from sqlalchemy import or_, select, text, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.config import settings
@@ -51,6 +51,7 @@ from app.core.rate_limit import limiter
 from app.dependencies.auth import AuthContext, get_current_user
 from app.dependencies.database import get_db
 from app.models.invitation import Invitation
+from app.models.org_invite import OrgInvite
 from app.models.project import OrgMember, Project
 from app.models.team import TeamMember
 from app.models.login_audit_log import LoginAuditLog
@@ -106,7 +107,9 @@ class LoginRequest(BaseModel):
 class RegisterRequest(BaseModel):
     email: str
     password: str
+    display_name: str  # AC3: 필수
     tos_accepted: bool = False
+    invite_token: str | None = None  # AC2: 초대 토큰 (가입 후 자동 수락)
 
     @field_validator("email")
     @classmethod
@@ -219,6 +222,28 @@ class SetPasswordRequest(BaseModel):
 
 # ─── Helpers ──────────────────────────────────────────────────────────────────
 
+async def _auto_accept_invitation(session: AsyncSession, user: User, invite_token: str) -> None:
+    """가입 시 invite_token이 있으면 해당 초대 자동 수락 + org_member 생성."""
+    from app.models.invitation import Invitation
+    result = await session.execute(
+        select(Invitation).where(Invitation.token == invite_token)
+    )
+    inv = result.scalar_one_or_none()
+    if inv is None or inv.status != "pending" or inv.expires_at < datetime.now(timezone.utc):
+        return
+    if inv.email.lower() != user.email.lower():
+        return
+    inv.status = "accepted"
+    inv.accepted_at = datetime.now(timezone.utc)
+    from sqlalchemy.dialects.postgresql import insert as pg_insert
+    await session.execute(
+        pg_insert(OrgMember)
+        .values(org_id=inv.org_id, user_id=user.id, role=inv.role)
+        .on_conflict_do_nothing(constraint="uq_org_members_org_user")
+    )
+    await session.flush()
+
+
 async def _get_user_by_email(session: AsyncSession, email: str) -> User | None:
     result = await session.execute(select(User).where(User.email == email, User.is_active.is_(True)))
     return result.scalar_one_or_none()
@@ -263,18 +288,20 @@ async def _build_app_metadata(user: User, session: AsyncSession) -> dict:
         member.user_id = user.id
 
     if not member:
-        # 2. 이메일로 pending 초대 조회 → 자동 수락 + org_member + team_member 생성
+        # 2. 이메일로 pending 초대 조회 → 자동 수락 + org_member 생성
+        # 2a. Invitation (invitations 테이블 — /api/v2/invitations 경로)
+        now = datetime.now(timezone.utc)
         inv_result = await session.execute(
             select(Invitation).where(
                 Invitation.email == user.email,
                 Invitation.status == "pending",
-                Invitation.expires_at > datetime.now(timezone.utc),
+                Invitation.expires_at > now,
             ).order_by(Invitation.created_at.asc()).limit(1)
         )
         inv = inv_result.scalar_one_or_none()
         if inv:
             inv.status = "accepted"
-            inv.accepted_at = datetime.now(timezone.utc)
+            inv.accepted_at = now
             from sqlalchemy.dialects.postgresql import insert as pg_insert
             await session.execute(
                 pg_insert(OrgMember)
@@ -289,12 +316,95 @@ async def _build_app_metadata(user: User, session: AsyncSession) -> dict:
                 "role": inv.role,
             }
 
+        # 2b. OrgInvite (org_invites 테이블 — /api/v2/invites 경로)
+        # invite link 가입 후 explicit accept 없이 로그인 시 자동 수락 fallback.
+        org_inv_result = await session.execute(
+            select(OrgInvite).where(
+                OrgInvite.email == user.email.lower(),
+                OrgInvite.status == "pending",
+                OrgInvite.expires_at > now,
+            ).order_by(OrgInvite.created_at.asc()).limit(1)
+        )
+        org_inv = org_inv_result.scalar_one_or_none()
+        if org_inv:
+            from sqlalchemy.dialects.postgresql import insert as pg_insert
+            await session.execute(
+                pg_insert(OrgMember)
+                .values(org_id=org_inv.organization_id, user_id=user.id, role=org_inv.role)
+                .on_conflict_do_nothing(constraint="uq_org_members_org_user")
+            )
+            org_inv.status = "accepted"
+            org_inv.accepted_at = now
+            await session.flush()
+            return {
+                "org_id": str(org_inv.organization_id),
+                "project_id": "",
+                "role": org_inv.role,
+            }
+
     if not member:
+        # Path 4: org_members fallback — team_member 없지만 org에는 등록된 사용자
+        # 해당 org의 첫 project에 team_member 자동 생성 후 반환. 이후 로그인은 Path 1/2로 정상 진입.
+        org_member_result = await session.execute(
+            select(OrgMember)
+            .where(OrgMember.user_id == user.id, OrgMember.deleted_at.is_(None))
+            .order_by(OrgMember.created_at.asc())
+            .limit(1)
+        )
+        org_member = org_member_result.scalar_one_or_none()
+        if org_member:
+            project_result = await session.execute(
+                select(Project)
+                .where(Project.org_id == org_member.org_id, Project.deleted_at.is_(None))
+                .order_by(Project.created_at.asc())
+                .limit(1)
+            )
+            project = project_result.scalar_one_or_none()
+            if project:
+                member_name = (user.email or str(user.id)).split("@")[0]
+                await session.execute(
+                    text(
+                        "INSERT INTO team_members"
+                        " (id, org_id, project_id, user_id, type, name, role, is_active, color, can_manage_members)"
+                        " VALUES (gen_random_uuid(), :org_id, :project_id, :user_id,"
+                        "         'human', :name, :role, true, '#3385f8', false)"
+                    ),
+                    {
+                        "org_id": str(org_member.org_id),
+                        "project_id": str(project.id),
+                        "user_id": str(user.id),
+                        "name": member_name,
+                        "role": org_member.role,
+                    },
+                )
+                await session.flush()
+                return {
+                    "org_id": str(org_member.org_id),
+                    "project_id": str(project.id),
+                    "role": org_member.role,
+                }
         return {}
 
     # login 시 last_project_id 자동 갱신 — 다음 로그인부터 last_project_id 우선 경로 사용
     if getattr(user, "last_project_id", None) != member.project_id:
         user.last_project_id = member.project_id
+
+    # S-MBR-03: org owner/admin → project role 상속 (AC1/AC2)
+    # org_members.role이 team_members.role보다 높으면 org role을 effective role로 사용.
+    _ROLE_RANK: dict[str, int] = {"owner": 4, "admin": 3, "manager": 2, "member": 1}
+    org_roles_result = await session.execute(
+        select(OrgMember.org_id, OrgMember.role).where(
+            OrgMember.user_id == user.id,
+            OrgMember.deleted_at.is_(None),
+        )
+    )
+    org_role_map: dict = {str(row[0]): row[1] for row in org_roles_result.all()}
+
+    def _effective_role(project_role: str, org_id_str: str) -> str:
+        org_r = org_role_map.get(org_id_str, "")
+        if _ROLE_RANK.get(org_r, 0) > _ROLE_RANK.get(project_role, 0):
+            return org_r
+        return project_role
 
     # 소속 전체 project 목록 (알림/전환 UI용)
     all_members_result = await session.execute(
@@ -306,14 +416,18 @@ async def _build_app_metadata(user: User, session: AsyncSession) -> dict:
     )
     all_members = all_members_result.scalars().all()
     projects = [
-        {"id": str(m.project_id), "org_id": str(m.org_id), "role": m.role}
+        {
+            "id": str(m.project_id),
+            "org_id": str(m.org_id),
+            "role": _effective_role(m.role, str(m.org_id)),
+        }
         for m in all_members
     ]
 
     return {
         "org_id": str(member.org_id),
         "project_id": str(member.project_id),
-        "role": member.role,
+        "role": _effective_role(member.role, str(member.org_id)),
         "projects": projects,
     }
 
@@ -354,6 +468,7 @@ async def register(
     user = User(
         email=body.email,
         hashed_password=hash_password(body.password),
+        display_name=body.display_name.strip() or body.email.split("@")[0],
         is_active=True,
         email_verified=False,
         tos_accepted_at=datetime.now(timezone.utc),
@@ -364,6 +479,10 @@ async def register(
     except IntegrityError:
         await session.rollback()
         return _err("EMAIL_TAKEN", "Email already registered", 409)
+
+    # AC2: invite_token 있으면 가입 후 자동 수락
+    if body.invite_token:
+        await _auto_accept_invitation(session, user, body.invite_token)
 
     tokens = create_tokens(str(user.id), email=user.email, app_metadata=await _build_app_metadata(user, session))
     _, refresh_exp = create_refresh_token(str(user.id), expires_delta=timedelta(days=REFRESH_TOKEN_EXPIRE_DAYS))
@@ -659,6 +778,7 @@ class OAuthCallbackRequest(BaseModel):
     code: str
     state: str
     tos_accepted: bool = False
+    invite_token: str | None = None  # AC4: OAuth 가입 시 초대 자동 수락
 
 
 @router.get("/oauth/{provider}/authorize")
@@ -773,11 +893,17 @@ async def oauth_callback(
             )
             session.add(user)
             try:
-                await session.commit()
-                await session.refresh(user)
+                await session.flush()
             except IntegrityError:
                 await session.rollback()
                 return _err("EMAIL_CONFLICT", "Email already registered", 409)
+
+            # AC4: invite_token 있으면 신규 OAuth 유저도 자동 수락
+            if body.invite_token:
+                await _auto_accept_invitation(session, user, body.invite_token)
+
+            await session.commit()
+            await session.refresh(user)
 
     # 4. JWT 발급
     from datetime import timedelta
