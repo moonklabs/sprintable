@@ -2,6 +2,7 @@
 import { Command, Option } from "commander";
 import { connectCommand } from "./commands/connect.js";
 import { onboardCommand } from "./commands/onboard.js";
+import { healthCheckCommand } from "./commands/health-check.js";
 import { SUPPORTED_AGENTS } from "./adapters/registry.js";
 
 const program = new Command();
@@ -37,6 +38,21 @@ program
   .action(async () => {
     try {
       await onboardCommand();
+    } catch (err) {
+      if (err instanceof Error && err.name === "ExitPromptError") {
+        console.log("\n취소되었습니다.");
+        process.exit(0);
+      }
+      throw err;
+    }
+  });
+
+program
+  .command("health-check")
+  .description("E2E 통신 경로 전체 검증 (메시지→SSE→reply→확인)")
+  .action(async () => {
+    try {
+      await healthCheckCommand();
     } catch (err) {
       if (err instanceof Error && err.name === "ExitPromptError") {
         console.log("\n취소되었습니다.");

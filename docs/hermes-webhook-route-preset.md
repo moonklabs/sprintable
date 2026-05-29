@@ -89,18 +89,21 @@ async def handle_webhook(request: Request):
 ### Node.js 예시
 
 ```typescript
-import { createHmac } from "node:crypto"
+import { createHmac, timingSafeEqual } from "node:crypto"
 import express from "express"
 
 const MY_AGENT_ID = "your-agent-team-member-uuid"
 const WEBHOOK_SECRET = "your-webhook-secret"
 
 app.post("/webhook", express.raw({ type: "application/json" }), (req, res) => {
-  // 서명 검증
-  const sig = req.headers["x-hub-signature-256"] as string
+  // 서명 검증 — timingSafeEqual로 timing-attack 방어
+  const sig = req.headers["x-hub-signature-256"] as string | undefined
   const expected = "sha256=" + createHmac("sha256", WEBHOOK_SECRET)
     .update(req.body).digest("hex")
-  if (!WEBHOOK_SECRET || sig !== expected) {
+  // 길이 불일치 시 timingSafeEqual이 RangeError를 throw하므로 선가드 필수
+  const a = Buffer.from(sig ?? "")
+  const b = Buffer.from(expected)
+  if (!WEBHOOK_SECRET || !sig || a.length !== b.length || !timingSafeEqual(a, b)) {
     return res.status(401).json({ error: "Invalid signature" })
   }
 
