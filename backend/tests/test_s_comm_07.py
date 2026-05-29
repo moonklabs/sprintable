@@ -33,13 +33,13 @@ def test_agent_inbox_router_prefix():
 
 # ─── AC3: HMAC 서명 검증 로직 ─────────────────────────────────────────────────
 
-def test_verify_signature_passes_when_no_secret():
-    """secret 미설정 시 서명 없어도 통과 (dev 환경)."""
+def test_verify_signature_rejects_when_no_secret():
+    """secret 미설정 시 서명 없어도 거부 (secure-by-default, S-COMM-FIX AC2)."""
     from app.routers.agent_inbox import _verify_signature
     with patch("app.routers.agent_inbox.settings") as mock_settings:
         mock_settings.agent_inbox_webhook_secret = ""
-        assert _verify_signature(b"body", None) is True
-        assert _verify_signature(b"body", "sha256=anything") is True
+        assert _verify_signature(b"body", None) is False
+        assert _verify_signature(b"body", "sha256=anything") is False
 
 
 def test_verify_signature_rejects_missing_header():
@@ -73,12 +73,16 @@ def test_verify_signature_rejects_wrong_hmac():
 
 @pytest.mark.anyio
 async def test_receive_inbox_webhook_404_when_agent_not_found():
-    """없는 agent_id → 404."""
+    """없는 agent_id + 유효 서명 → 404 (서명 통과 후 agent 조회 실패)."""
     from fastapi import HTTPException
     from app.routers.agent_inbox import receive_inbox_webhook
 
+    secret = "testsecret"
+    body = b'{"event_type":"test"}'
+    sig = "sha256=" + hmac.new(secret.encode(), body, hashlib.sha256).hexdigest()
+
     mock_request = MagicMock()
-    mock_request.body = AsyncMock(return_value=b'{"event_type":"test"}')
+    mock_request.body = AsyncMock(return_value=body)
 
     mock_db = AsyncMock()
     mock_result = MagicMock()
@@ -86,13 +90,13 @@ async def test_receive_inbox_webhook_404_when_agent_not_found():
     mock_db.execute = AsyncMock(return_value=mock_result)
 
     with patch("app.routers.agent_inbox.settings") as mock_settings:
-        mock_settings.agent_inbox_webhook_secret = ""
+        mock_settings.agent_inbox_webhook_secret = secret
         with pytest.raises(HTTPException) as exc_info:
             await receive_inbox_webhook(
                 agent_id=uuid.uuid4(),
                 request=mock_request,
                 db=mock_db,
-                x_sprintable_signature=None,
+                x_sprintable_signature=sig,
             )
     assert exc_info.value.status_code == 404
 
@@ -154,20 +158,52 @@ async def test_receive_inbox_webhook_creates_event():
     mock_db.commit = AsyncMock()
     mock_db.refresh = AsyncMock()
 
+    secret = "testsecret"
+    sig = "sha256=" + hmac.new(secret.encode(), body, hashlib.sha256).hexdigest()
+
     with patch("app.routers.agent_inbox.settings") as mock_settings:
-        mock_settings.agent_inbox_webhook_secret = ""
+        mock_settings.agent_inbox_webhook_secret = secret
         with patch("app.routers.agent_inbox.Event") as MockEvent:
             MockEvent.return_value = mock_event
             result = await receive_inbox_webhook(
                 agent_id=agent_id,
                 request=mock_request,
                 db=mock_db,
-                x_sprintable_signature=None,
+                x_sprintable_signature=sig,
             )
 
     assert result["ok"] is True
     assert "event_id" in result
     mock_db.commit.assert_awaited_once()
+
+
+@pytest.mark.anyio
+async def test_receive_inbox_webhook_401_when_no_secret_or_no_sig():
+    """무서명 또는 secret 미설정 → 401 (secure-by-default 회귀 방지, S-COMM-FIX AC2)."""
+    from fastapi import HTTPException
+    from app.routers.agent_inbox import receive_inbox_webhook
+
+    mock_request = MagicMock()
+    mock_request.body = AsyncMock(return_value=b'{"event_type":"test"}')
+    mock_db = AsyncMock()
+
+    # case A: secret 없음 + 서명 없음
+    with patch("app.routers.agent_inbox.settings") as mock_settings:
+        mock_settings.agent_inbox_webhook_secret = ""
+        with pytest.raises(HTTPException) as exc_info:
+            await receive_inbox_webhook(
+                agent_id=uuid.uuid4(), request=mock_request, db=mock_db, x_sprintable_signature=None
+            )
+    assert exc_info.value.status_code == 401
+
+    # case B: secret 있음 + 서명 없음
+    with patch("app.routers.agent_inbox.settings") as mock_settings:
+        mock_settings.agent_inbox_webhook_secret = "testsecret"
+        with pytest.raises(HTTPException) as exc_info:
+            await receive_inbox_webhook(
+                agent_id=uuid.uuid4(), request=mock_request, db=mock_db, x_sprintable_signature=None
+            )
+    assert exc_info.value.status_code == 401
 
 
 # ─── config 필드 존재 확인 ────────────────────────────────────────────────────
@@ -196,8 +232,11 @@ async def test_receive_inbox_webhook_calls_push_to_agent():
     mock_db.commit = AsyncMock()
     mock_db.refresh = AsyncMock()
 
+    secret = "testsecret"
+    sig = "sha256=" + hmac.new(secret.encode(), body, hashlib.sha256).hexdigest()
+
     with patch("app.routers.agent_inbox.settings") as mock_settings:
-        mock_settings.agent_inbox_webhook_secret = ""
+        mock_settings.agent_inbox_webhook_secret = secret
         with patch("app.routers.agent_inbox.Event") as MockEvent:
             MockEvent.return_value = mock_event
             with patch("app.routers.events._push_to_agent") as mock_push:
@@ -205,7 +244,7 @@ async def test_receive_inbox_webhook_calls_push_to_agent():
                     agent_id=agent_id,
                     request=mock_request,
                     db=mock_db,
-                    x_sprintable_signature=None,
+                    x_sprintable_signature=sig,
                 )
                 mock_push.assert_called_once_with(str(agent_id), {"event_type": "inbox_webhook"})
 
