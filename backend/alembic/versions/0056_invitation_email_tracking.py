@@ -13,8 +13,14 @@ depends_on = None
 
 
 def upgrade() -> None:
-    op.add_column("invitations", sa.Column("email_sent_at", sa.DateTime(timezone=True), nullable=True))
-    op.add_column("invitations", sa.Column("email_error", sa.Text, nullable=True))
+    # idempotent: 컬럼이 이미 존재하면 무시 — dev 버전 정합용 (S-MIG-FIX AC2)
+    conn = op.get_bind()
+    insp = sa.inspect(conn)
+    existing_cols = {c["name"] for c in insp.get_columns("invitations")}
+    if "email_sent_at" not in existing_cols:
+        op.add_column("invitations", sa.Column("email_sent_at", sa.DateTime(timezone=True), nullable=True))
+    if "email_error" not in existing_cols:
+        op.add_column("invitations", sa.Column("email_error", sa.Text, nullable=True))
 
 
 def downgrade() -> None:
