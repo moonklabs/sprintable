@@ -172,7 +172,7 @@ async def deliver_conversation_message_webhook(
                     id=uuid.uuid4(),
                     message_id=message_id,
                     webhook_config_id=wh.id,
-                    status="pending",
+                    status="event_created",  # 4단계: event_created → webhook_posted → gateway_accepted → agent_replied
                     attempt_count=0,
                 )
                 db.add(delivery)
@@ -189,29 +189,81 @@ async def deliver_conversation_message_webhook(
             logger.exception("conversation webhook schedule failed message_id=%s", message_id)
 
 
+async def _update_delivery_status(
+    delivery_id: uuid.UUID,
+    status: str,
+    attempt_count: int | None = None,
+    last_error: str | None = None,
+) -> None:
+    """delivery 상태 업데이트 — 별도 세션."""
+    from app.core.database import async_session_factory
+    from sqlalchemy import select
+
+    async with async_session_factory() as db:
+        delivery = (await db.execute(
+            select(ConversationWebhookDelivery).where(ConversationWebhookDelivery.id == delivery_id)
+        )).scalar_one_or_none()
+        if delivery:
+            delivery.status = status
+            delivery.updated_at = datetime.now(timezone.utc)
+            if attempt_count is not None:
+                delivery.attempt_count = attempt_count
+            if last_error is not None:
+                delivery.last_error = last_error
+            await db.commit()
+
+
+async def mark_agent_replied(conversation_id: uuid.UUID) -> None:
+    """에이전트 답신 시 해당 conversation의 최근 gateway_accepted delivery → agent_replied."""
+    from app.core.database import async_session_factory
+    from app.models.conversation_message import ConversationMessage
+    from sqlalchemy import select
+
+    async with async_session_factory() as db:
+        # conversation의 최근 메시지 id 목록 조회 후 delivery 검색
+        msg_ids = (await db.execute(
+            select(ConversationMessage.id)
+            .where(ConversationMessage.conversation_id == conversation_id)
+            .order_by(ConversationMessage.created_at.desc())
+            .limit(20)
+        )).scalars().all()
+
+        if not msg_ids:
+            return
+
+        delivery = (await db.execute(
+            select(ConversationWebhookDelivery)
+            .where(
+                ConversationWebhookDelivery.message_id.in_(msg_ids),
+                ConversationWebhookDelivery.status == "gateway_accepted",
+            )
+            .order_by(ConversationWebhookDelivery.created_at.desc())
+            .limit(1)
+        )).scalar_one_or_none()
+
+        if delivery:
+            delivery.status = "agent_replied"
+            delivery.updated_at = datetime.now(timezone.utc)
+            await db.commit()
+
+
 async def _retry_deliver(
     delivery_id: uuid.UUID,
     url: str,
     secret: str | None,
     payload: dict,
 ) -> None:
-    """최대 3회 retry + exponential backoff."""
-    from app.core.database import async_session_factory
-    from sqlalchemy import select
+    """최대 3회 retry + exponential backoff.
+
+    상태 전이: event_created → webhook_posted → gateway_accepted (성공) / failed (영구실패)
+    """
+    # 첫 attempt 전: webhook_posted
+    await _update_delivery_status(delivery_id, "webhook_posted")
 
     for attempt in range(1, _MAX_RETRIES + 1):
         try:
             await _attempt_delivery(url, secret, payload)
-
-            async with async_session_factory() as db:
-                delivery = (await db.execute(
-                    select(ConversationWebhookDelivery).where(ConversationWebhookDelivery.id == delivery_id)
-                )).scalar_one_or_none()
-                if delivery:
-                    delivery.status = "delivered"
-                    delivery.attempt_count = attempt
-                    delivery.updated_at = datetime.now(timezone.utc)
-                    await db.commit()
+            await _update_delivery_status(delivery_id, "gateway_accepted", attempt_count=attempt)
             return
 
         except Exception as exc:
@@ -228,13 +280,6 @@ async def _retry_deliver(
                     "webhook delivery failed permanently delivery_id=%s: %s",
                     delivery_id, error_msg,
                 )
-                async with async_session_factory() as db:
-                    delivery = (await db.execute(
-                        select(ConversationWebhookDelivery).where(ConversationWebhookDelivery.id == delivery_id)
-                    )).scalar_one_or_none()
-                    if delivery:
-                        delivery.status = "failed"
-                        delivery.attempt_count = attempt
-                        delivery.last_error = error_msg
-                        delivery.updated_at = datetime.now(timezone.utc)
-                        await db.commit()
+                await _update_delivery_status(
+                    delivery_id, "failed", attempt_count=attempt, last_error=error_msg
+                )

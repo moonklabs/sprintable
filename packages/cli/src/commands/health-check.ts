@@ -80,8 +80,9 @@ async function waitForSseEvent(
             conversation_id?: string
             id?: string  // conversations.py:55 _msg_payload: "id": str(msg.id)
           }
+          // S-COMM-12: canonical(conversation.message_created) + legacy alias(conversation:message) 모두 허용
           if (
-            payload.event_type === "conversation:message" &&
+            (payload.event_type === "conversation.message_created" || payload.event_type === "conversation:message") &&
             payload.conversation_id === conversationId
           ) {
             clearTimeout(timer)
