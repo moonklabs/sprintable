@@ -78,7 +78,7 @@ async function waitForSseEvent(
           const payload = JSON.parse(line.slice(5).trim()) as {
             event_type?: string
             conversation_id?: string
-            message_id?: string
+            id?: string  // conversations.py:55 _msg_payload: "id": str(msg.id)
           }
           if (
             payload.event_type === "conversation:message" &&
@@ -86,7 +86,7 @@ async function waitForSseEvent(
           ) {
             clearTimeout(timer)
             reader.cancel().catch(() => {})
-            return { received: true, messageId: payload.message_id }
+            return { received: true, messageId: payload.id }
           }
         } catch {
           // non-JSON data line, skip
@@ -237,16 +237,22 @@ export async function healthCheckCommand(): Promise<void> {
   }
 
   // SSE 수신 대기
-  // 주의: 발신자 self-echo 여부는 서버 설정에 따라 다를 수 있음.
-  // self-echo가 안 되는 환경에서는 Step 5가 FAIL로 나올 수 있음.
+  // 서버는 발신자(sender.id)를 SSE 배포 대상에서 명시적으로 제외함
+  // (conversations.py:95: participant_ids - {sender.id})
+  // → CLI 단독 실행(보내는 에이전트 == 듣는 에이전트)에서는 항상 타임아웃.
+  // 2명 이상 참여 대화에서만 상대방 SSE 수신이 PASS 가능.
   try {
     const sseResult = await ssePromise
     if (sseResult.received) {
-      pass(5, "SSE conversation:message 수신 (agent inbound 검증)", `message_id=${sseResult.messageId ?? "?"}`)
+      pass(5, "SSE conversation:message 수신 (agent inbound 검증)", `id=${sseResult.messageId ?? "?"}`)
       passed++
     } else {
-      fail(5, "SSE conversation:message 수신", `${STEP_TIMEOUT_MS / 1000}s 내 이벤트 미도착 — SSE 연결 또는 대화 참여 확인`)
-      failed++
+      warn(
+        "Step 5: SSE conversation:message 수신",
+        "self-echo 미수신 — 서버가 발신자를 SSE 대상에서 제외하는 설계(conversations.py:95). " +
+        "2명 이상 참여 대화에서 상대방 API key로 리슨해야 PASS.",
+      )
+      // 구조적 한계이므로 FAIL 아닌 WARN — 전체 결과에 미포함
     }
   } catch (err) {
     fail(5, "SSE 수신 대기", String(err))
