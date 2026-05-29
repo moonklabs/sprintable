@@ -127,8 +127,9 @@ Claude Code 세션 (MCP stdio)
 
 역방향 (Claude Code → Sprintable):
   Claude Code (reply tool)
-    │  POST /api/v2/conversations/{id}/messages
-    │  Authorization: Bearer sk_live_<api_key>
+    │  fetch(meta.replyCallbackUrl, { method: 'POST' })
+    │  ← replyCallbackUrl은 고정 경로가 아닌 수신 메시지 payload에서 추출
+    │    (ws_chat.py → 메시지 수신 시 callback URL 포함해서 전송)
     ▼
   Sprintable Backend
 ```
