@@ -52,7 +52,7 @@ class CheckinSprintInput(SprintableInput):
 async def standup_missing(args: StandupDateInput) -> list[TextContent]:
     """스탠드업 미제출 멤버 조회."""
     try:
-        return ok(await client.get("/api/v2/standup/missing", params={"project_id": client.project_id, "date": args.date}))
+        return ok(await client.get("/api/v2/standups/missing", params={"project_id": client.project_id, "date": args.date}))
     except Exception as exc:
         return err(str(exc))
 
@@ -63,16 +63,17 @@ async def standup_history(args: StandupHistoryInput) -> list[TextContent]:
     if args.limit is not None:
         params["limit"] = str(args.limit)
     try:
-        return ok(await client.get("/api/v2/standup/history", params=params))
+        return ok(await client.get("/api/v2/standups/history", params=params))
     except Exception as exc:
         return err(str(exc))
 
 
 async def get_standup(args: GetStandupInput) -> list[TextContent]:
     """멤버+날짜 기준 스탠드업 조회."""
-    params: dict = {"member_id": args.member_id, "date": args.date, "project_id": client.project_id}
+    # standups.py:34 author_id 파라미터 (MCP 입력은 member_id → author_id 매핑)
+    params: dict = {"author_id": args.member_id, "date": args.date, "project_id": client.project_id}
     try:
-        return ok(await client.get("/api/v2/standup", params=params))
+        return ok(await client.get("/api/v2/standups", params=params))
     except Exception as exc:
         return err(str(exc))
 
@@ -85,7 +86,7 @@ async def save_standup(args: SaveStandupInput) -> list[TextContent]:
         if val is not None:
             body[field] = val
     try:
-        return ok(await client.post("/api/v2/standup", json=body))
+        return ok(await client.post("/api/v2/standups", json=body))
     except Exception as exc:
         return err(str(exc))
 
@@ -93,7 +94,7 @@ async def save_standup(args: SaveStandupInput) -> list[TextContent]:
 async def list_standup_entries(args: ListStandupEntriesInput) -> list[TextContent]:
     """날짜 기준 스탠드업 목록 조회."""
     try:
-        return ok(await client.get("/api/v2/standup", params={"project_id": client.project_id, "date": args.date}))
+        return ok(await client.get("/api/v2/standups", params={"project_id": client.project_id, "date": args.date}))
     except Exception as exc:
         return err(str(exc))
 

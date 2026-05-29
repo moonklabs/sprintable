@@ -89,6 +89,17 @@ async def update_standup(
     return StandupEntryResponse.model_validate(entry)
 
 
+@router.get("/history", response_model=list[StandupEntryResponse])
+async def list_standup_history(
+    project_id: uuid.UUID = Query(...),
+    limit: int = Query(default=30, ge=1, le=200),
+    repo: StandupEntryRepository = Depends(_get_repo),
+) -> list[StandupEntryResponse]:
+    """GET /api/v2/standups/history — 최근 N개 스탠드업 히스토리 조회 (AC2 S-STANDUP-FIX)."""
+    entries = await repo.list(project_id=project_id, limit=limit)
+    return [StandupEntryResponse.model_validate(e) for e in entries]
+
+
 @router.get("/missing", response_model=list[uuid.UUID])
 async def get_missing_standups(
     project_id: uuid.UUID = Query(...),
