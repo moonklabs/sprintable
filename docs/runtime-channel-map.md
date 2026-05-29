@@ -46,13 +46,14 @@ Claude Code는 `.mcp.json`에 등록된 커맨드(`python -m backend.sprintable_
 
 ### webhook — Inbound Push (서버 → 에이전트)
 
-Sprintable이 이벤트 발생 시 에이전트의 `webhook_url`로 직접 HTTP POST를 보내는 방식.
+Sprintable이 이벤트 발생 시 `webhook_configs.url`로 직접 HTTP POST를 보내는 방식.
+(migration `0023` 이후 `TeamMember.webhook_url`은 stale — 실제 발송 모델은 `webhook_configs` 테이블 기준)
 에이전트가 항상 켜져 있을 필요 없이 요청을 받으면 깨어나는 구조.
 
 ```
 Sprintable (conversation_webhook.py)
-  │  POST {TeamMember.webhook_url}
-  │  X-Sprintable-Signature: sha256=<HMAC_HEX>
+  │  POST {webhook_configs.url}
+  │  X-Hub-Signature-256: sha256=<HMAC_HEX>
   │  {
   │    "event_type": "conversation.message_created",   ← webhook 전용 이름(점 표기)
   │    "conversation_id": "...",
@@ -90,12 +91,13 @@ Sprintable → Event 생성 → SSE로 에이전트에 push
   │  Last-Event-ID: <last_event_id>   ← 재연결 시 backfill용
   ▼
 Sprintable (Server-Sent Events stream)
-  └── event types (콜론 표기 — SSE 전용):
-        conversation:message          ← 메시지 수신
+  └── 현재 SSE relay 대상 (`_RELAY_EVENT_TYPES`, sse_bridge.py:31):
+        conversation:message          ← 메시지 수신 (콜론 표기)
         conversation:mention
-        story.status_changed
-        story.assigned
-        workflow.trigger
+
+      ※ story.status_changed · story.assignee_changed · manual_trigger 등
+         event_taxonomy.py에 정의된 이벤트는 현재 SSE 미중계.
+         poll_events MCP tool 또는 webhook으로 수신.
 ```
 
 > **이벤트명 표기 불일치**: SSE는 콜론 표기(`conversation:message`), webhook은 점 표기(`conversation.message_created`)로 현재 통일되지 않음. 통일 작업은 S-COMM-12(backlog) 예정.
@@ -127,9 +129,9 @@ Claude Code 세션 (MCP stdio)
 
 역방향 (Claude Code → Sprintable):
   Claude Code (reply tool)
-    │  fetch(meta.replyCallbackUrl, { method: 'POST' })
-    │  ← replyCallbackUrl은 고정 경로가 아닌 수신 메시지 payload에서 추출
-    │    (ws_chat.py → 메시지 수신 시 callback URL 포함해서 전송)
+    │  fetch(replyCallbackUrl, { method: 'POST' })
+    │  ← fakechat이 WS payload의 conversation_id로 URL 직접 구성 (server.ts:183)
+    │    `${SPRINTABLE_API_URL}/api/v2/conversations/${msg.conversation_id}/messages`
     ▼
   Sprintable Backend
 ```
@@ -143,7 +145,7 @@ Claude Code 세션 (MCP stdio)
 | **Claude Code** | MCP (stdio) | fakechat — WS→MCP notification 주입 | 이 harness 세션이 이 패턴 |
 | **Hermes** (장기 실행 서버) | MCP (stdio) | SSE (`GET /api/v2/events/stream`) | 상시 연결 유지, backfill 지원 |
 | **Webhook 에이전트** (서버리스·슬리핑) | MCP (stdio) | webhook (`TeamMember.webhook_url` POST) | 이벤트 수신 시만 깨어남 |
-| **외부 통합** (Slack·Discord 봇 등) | MCP (stdio) | Inbox webhook (`/agent-inbox/{id}/webhook`) → SSE | HMAC 검증 필수 |
+| **외부 통합** (Slack·Discord 봇 등) | MCP (stdio) | Inbox webhook (`/agent-inbox/{id}/webhook`) → EventBus → SSE relay | HMAC 검증 필수 |
 | **SSE 불가 환경** | MCP (stdio) | `poll_events` MCP tool (폴링 fallback) | SSE 연결 불가 시 사용 |
 
 ---
@@ -159,7 +161,7 @@ Claude Code 세션 (MCP stdio)
 │         ┌────────────────────┼──────────────────┐                  │
 │         │                   │                   │                  │
 │   WebhookEngine      SSE /events/stream    WS Hub /ws/chat/*       │
-│  (점 이벤트명)        (콜론 이벤트명)                              │
+│  (점 이벤트명)        (콜론, 2종 relay)                            │
 │         │                   │                   │                  │
 └─────────┼───────────────────┼───────────────────┼──────────────────┘
           │                   │                   │
