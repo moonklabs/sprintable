@@ -225,8 +225,9 @@ export async function healthCheckCommand(): Promise<void> {
       const body = await resp.text().catch(() => "")
       throw new Error(`HTTP ${resp.status}: ${body}`)
     }
-    const data = (await resp.json()) as { id?: string }
-    sentMessageId = data.id
+    // conversations.py:815: response = {"data": _msg_payload(...)}
+    const data = (await resp.json()) as { data?: { id?: string } }
+    sentMessageId = data.data?.id
     pass(4, "메시지 발신 (POST /api/v2/conversations/{id}/messages)", `message_id=${sentMessageId ?? "?"}`)
     passed++
   } catch (err) {
@@ -236,6 +237,8 @@ export async function healthCheckCommand(): Promise<void> {
   }
 
   // SSE 수신 대기
+  // 주의: 발신자 self-echo 여부는 서버 설정에 따라 다를 수 있음.
+  // self-echo가 안 되는 환경에서는 Step 5가 FAIL로 나올 수 있음.
   try {
     const sseResult = await ssePromise
     if (sseResult.received) {
@@ -251,6 +254,7 @@ export async function healthCheckCommand(): Promise<void> {
   }
 
   // ── Step 6: MCP reply (에이전트 답신) ───────────────────────────────────
+  // 실 agent 왕복이 아닌 send-plumbing 검증 (standalone CLI 한계)
   let replyMessageId: string | undefined
   try {
     const resp = await fetch(`${apiUrl}/api/v2/conversations/${convId}/messages`, {
@@ -262,9 +266,10 @@ export async function healthCheckCommand(): Promise<void> {
       const body = await resp.text().catch(() => "")
       throw new Error(`HTTP ${resp.status}: ${body}`)
     }
-    const data = (await resp.json()) as { id?: string }
-    replyMessageId = data.id
-    pass(6, "MCP reply (POST /api/v2/conversations/{id}/messages)", `reply_id=${replyMessageId ?? "?"}`)
+    // conversations.py:815: response = {"data": _msg_payload(...)}
+    const data = (await resp.json()) as { data?: { id?: string } }
+    replyMessageId = data.data?.id
+    pass(6, "MCP reply — send-plumbing 검증 (POST /api/v2/conversations/{id}/messages)", `reply_id=${replyMessageId ?? "?"}`)
     passed++
   } catch (err) {
     fail(6, "MCP reply", String(err))
