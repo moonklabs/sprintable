@@ -16,7 +16,12 @@ depends_on = None
 
 
 def upgrade() -> None:
-    op.add_column("users", sa.Column("display_name", sa.Text, nullable=True))
+    # idempotent: 컬럼이 이미 존재하면(수동 ADD 포함) 무시 — dev 버전 정합용 (S-MIG-FIX AC2)
+    conn = op.get_bind()
+    insp = sa.inspect(conn)
+    existing_cols = {c["name"] for c in insp.get_columns("users")}
+    if "display_name" not in existing_cols:
+        op.add_column("users", sa.Column("display_name", sa.Text, nullable=True))
     op.execute(
         "UPDATE users SET display_name = split_part(email, '@', 1) WHERE display_name IS NULL"
     )

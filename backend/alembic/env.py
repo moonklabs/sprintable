@@ -64,6 +64,7 @@ def run_migrations_online() -> None:
         context.configure(connection=connection, target_metadata=target_metadata)
         with context.begin_transaction():
             context.run_migrations()
+        connection.commit()  # 명시적 커밋 — run_migrations 후 alembic_version 전진 보장
 
 
 if context.is_offline_mode():
