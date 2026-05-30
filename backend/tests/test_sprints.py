@@ -562,3 +562,118 @@ async def test_close_sprint_scores_outcome_hit():
         assert data["outcome_status"] == "hit"
     finally:
         app.dependency_overrides.clear()
+
+
+# ── E-OUTCOME-LOOP S5: GA4 채점 테스트 ───────────────────────────────────────
+
+from app.services.outcome_scorer import score_ga4_outcome
+
+
+class TestScoreGa4Outcome:
+    """score_ga4_outcome 단위 테스트 (GA4 클라이언트 mock)."""
+
+    def test_ga4_hit_when_actual_ge_target(self):
+        """GA4 회수값 >= target, direction='up' → hit."""
+        md = {
+            "source": "ga4", "metric": "MAU", "target": 1000, "direction": "up",
+            "property_id": "291556226", "ga4_metric": "activeUsers", "date_range_days": 30,
+        }
+        with patch("app.services.ga4_client.fetch_ga4_metric", return_value=1500.0):
+            r = score_ga4_outcome(md)
+        assert r["outcome_status"] == "hit"
+        assert r["outcome_result"]["actual"] == 1500.0
+        assert r["outcome_result"]["metric"] == "MAU"
+
+    def test_ga4_miss_when_actual_lt_target(self):
+        """GA4 회수값 < target, direction='up' → miss."""
+        md = {
+            "source": "ga4", "metric": "MAU", "target": 1000, "direction": "up",
+            "property_id": "291556226", "ga4_metric": "activeUsers", "date_range_days": 30,
+        }
+        with patch("app.services.ga4_client.fetch_ga4_metric", return_value=800.0):
+            r = score_ga4_outcome(md)
+        assert r["outcome_status"] == "miss"
+
+    def test_ga4_down_hit(self):
+        """GA4 회수값 <= target, direction='down' → hit."""
+        md = {
+            "source": "ga4", "metric": "bounce", "target": 50, "direction": "down",
+            "property_id": "291556226", "ga4_metric": "sessions", "date_range_days": 7,
+        }
+        with patch("app.services.ga4_client.fetch_ga4_metric", return_value=40.0):
+            r = score_ga4_outcome(md)
+        assert r["outcome_status"] == "hit"
+
+    def test_ga4_fetch_failure_returns_pending(self):
+        """GA4 회수 실패(None) → pending (인증 불가 등)."""
+        md = {
+            "source": "ga4", "metric": "MAU", "target": 1000, "direction": "up",
+            "property_id": "291556226", "ga4_metric": "activeUsers", "date_range_days": 30,
+        }
+        with patch("app.services.ga4_client.fetch_ga4_metric", return_value=None):
+            r = score_ga4_outcome(md)
+        assert r["outcome_status"] == "pending"
+        assert r["outcome_result"] is None
+
+    def test_ga4_boundary_exact_target(self):
+        """경계값: actual == target, direction='up' → hit."""
+        md = {
+            "source": "ga4", "metric": "users", "target": 500, "direction": "up",
+            "property_id": "291556226", "ga4_metric": "newUsers", "date_range_days": 14,
+        }
+        with patch("app.services.ga4_client.fetch_ga4_metric", return_value=500.0):
+            r = score_ga4_outcome(md)
+        assert r["outcome_status"] == "hit"
+
+
+class TestGa4MetricDefinitionValidation:
+    """GA4 metric_definition 구조 검증 테스트."""
+
+    def _validate(self, v):
+        from app.schemas.story import _validate_metric_definition
+        return _validate_metric_definition(v)
+
+    def test_ga4_valid_passes(self):
+        """GA4 필수 필드 모두 있으면 통과."""
+        md = {
+            "source": "ga4", "metric": "MAU", "target": 1000, "direction": "up",
+            "property_id": "291556226", "ga4_metric": "activeUsers", "date_range_days": 30,
+        }
+        assert self._validate(md) is not None
+
+    def test_ga4_missing_property_id_raises(self):
+        """property_id 없으면 ValueError."""
+        md = {
+            "source": "ga4", "metric": "MAU", "target": 1000, "direction": "up",
+            "ga4_metric": "activeUsers", "date_range_days": 30,
+        }
+        with pytest.raises(ValueError, match="property_id"):
+            self._validate(md)
+
+    def test_ga4_unknown_metric_raises(self):
+        """지원하지 않는 ga4_metric → ValueError (garbage-in 차단)."""
+        md = {
+            "source": "ga4", "metric": "m", "target": 10, "direction": "up",
+            "property_id": "123", "ga4_metric": "customBadMetric", "date_range_days": 30,
+        }
+        with pytest.raises(ValueError, match="ga4_metric"):
+            self._validate(md)
+
+    def test_ga4_invalid_date_range_days_raises(self):
+        """date_range_days <= 0 → ValueError."""
+        md = {
+            "source": "ga4", "metric": "m", "target": 10, "direction": "up",
+            "property_id": "123", "ga4_metric": "activeUsers", "date_range_days": 0,
+        }
+        with pytest.raises(ValueError, match="date_range_days"):
+            self._validate(md)
+
+    def test_ga4_source_in_score_sprint_returns_pending(self):
+        """close() 호출 시 GA4 source → pending (지연 채점 cron으로)."""
+        md = {
+            "source": "ga4", "metric": "MAU", "target": 1000, "direction": "up",
+            "property_id": "291556226", "ga4_metric": "activeUsers", "date_range_days": 30,
+        }
+        r = score_sprint_outcome(md, velocity=30, backlog_remaining=0, total_points=30)
+        assert r is not None
+        assert r["outcome_status"] == "pending"

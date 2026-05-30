@@ -343,7 +343,7 @@ async def test_status_backward_transition_400(from_status: str, to_status: str):
 
 # ── E-OUTCOME-LOOP S2: 의도필드 + metric_definition 검증 ──────────────────────
 
-_VALID_METRIC = {"metric": "MAU", "source": "ga4", "target": 1000, "direction": "up"}
+_VALID_METRIC = {"metric": "velocity", "source": "internal_ops", "target": 30, "direction": "up"}
 
 
 @pytest.mark.anyio

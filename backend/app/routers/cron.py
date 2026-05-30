@@ -186,3 +186,76 @@ async def retry_agent_runs(
     except Exception as exc:
         logger.exception("cron error: %s", exc)
         return _err("INTERNAL_ERROR", "Internal server error", 500)
+
+
+# ─── POST /api/v2/internal/cron/score-ga4-outcomes ────────────────────────────
+
+@router.post("/score-ga4-outcomes")
+async def score_ga4_outcomes(
+    request: Request,
+    session: AsyncSession = Depends(get_db),
+) -> JSONResponse:
+    """E-OUTCOME-LOOP S5: GA4 지연 채점 잡.
+
+    measure_after <= now AND outcome_status = 'pending' AND source = 'ga4'인
+    story·sprint를 GA4 Data API로 채점.
+    """
+    verify_cron(request)
+
+    from app.models.pm import Sprint, Story
+    from app.services.outcome_scorer import score_ga4_outcome
+
+    now = datetime.now(timezone.utc)
+    scored: list[dict] = []
+    failed: list[dict] = []
+
+    try:
+        # Sprint GA4 채점
+        sprint_result = await session.execute(
+            select(Sprint).where(
+                Sprint.outcome_status == "pending",
+                Sprint.measure_after.isnot(None),
+                Sprint.measure_after <= now,
+            )
+        )
+        for sprint in sprint_result.scalars().all():
+            md = sprint.metric_definition
+            if not md or md.get("source") != "ga4":
+                continue
+            try:
+                scoring = score_ga4_outcome(md)
+                sprint.outcome_status = scoring["outcome_status"]
+                sprint.outcome_result = scoring["outcome_result"]
+                scored.append({"type": "sprint", "id": str(sprint.id), "outcome_status": scoring["outcome_status"]})
+            except Exception as exc:
+                logger.warning("ga4 sprint scoring failed id=%s: %s", sprint.id, exc)
+                failed.append({"type": "sprint", "id": str(sprint.id), "error": str(exc)})
+
+        # Story GA4 채점
+        story_result = await session.execute(
+            select(Story).where(
+                Story.outcome_status == "pending",
+                Story.measure_after.isnot(None),
+                Story.measure_after <= now,
+                Story.deleted_at.is_(None),
+            )
+        )
+        for story in story_result.scalars().all():
+            md = story.metric_definition
+            if not md or md.get("source") != "ga4":
+                continue
+            try:
+                scoring = score_ga4_outcome(md)
+                story.outcome_status = scoring["outcome_status"]
+                story.outcome_result = scoring["outcome_result"]
+                scored.append({"type": "story", "id": str(story.id), "outcome_status": scoring["outcome_status"]})
+            except Exception as exc:
+                logger.warning("ga4 story scoring failed id=%s: %s", story.id, exc)
+                failed.append({"type": "story", "id": str(story.id), "error": str(exc)})
+
+        await session.commit()
+
+        return _ok({"scored": scored, "failed": failed, "total": len(scored) + len(failed)})
+    except Exception as exc:
+        logger.exception("cron error: %s", exc)
+        return _err("INTERNAL_ERROR", "Internal server error", 500)
