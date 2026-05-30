@@ -1,9 +1,10 @@
 'use client';
 import { useTranslations } from 'next-intl';
 import { cn } from '@/lib/utils';
+import type { OutcomeResult } from '@sprintable/core-storage';
 import { OutcomeStatusBadge, type OutcomeStatus } from './outcome-status-badge';
 
-export interface OutcomeResult { metric: string; target: number; actual: number; direction: 'up' | 'down'; scored_at: string; }
+export type { OutcomeResult };
 interface Props { status: OutcomeStatus; hypothesis?: string | null; result?: OutcomeResult | null; pendingMetricLabel?: string; }
 const fmt = (n: number) => (Number.isInteger(n) ? String(n) : n.toFixed(2));
 

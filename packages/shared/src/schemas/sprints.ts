@@ -1,11 +1,5 @@
 import { z } from 'zod/v4';
-
-const metricDefinitionSchema = z.object({
-  metric: z.string().min(1),
-  source: z.enum(['internal_ops', 'ga4', 'manual']),
-  target: z.number(),
-  direction: z.enum(['up', 'down']),
-});
+import { metricDefinitionSchema } from './outcome';
 
 export const createSprintSchema = z.object({
   project_id: z.string().min(1),

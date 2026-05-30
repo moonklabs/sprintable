@@ -1,20 +1,7 @@
 import type { PaginationOptions } from '../types';
 import type { RepositoryScopeContext } from './IEpicRepository';
-
-export interface MetricDefinition {
-  metric: string;
-  source: 'internal_ops' | 'ga4' | 'manual';
-  target: number;
-  direction: 'up' | 'down';
-}
-
-export interface OutcomeResult {
-  metric: string;
-  target: number;
-  actual: number;
-  direction: 'up' | 'down';
-  scored_at: string;
-}
+import type { MetricDefinition, OutcomeResult } from './outcome';
+export type { MetricDefinition, OutcomeResult } from './outcome';
 
 export interface Sprint {
   id: string;
