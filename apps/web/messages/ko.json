@@ -2194,5 +2194,32 @@
     "doneStories": "완료 스토리",
     "assignedStories": "배정 스토리",
     "avgLeadTime": "평균 리드타임"
+  },
+  "outcomeLoop": {
+    "resultLabel": "결과 기록",
+    "statusHit": "적중",
+    "statusMiss": "빗나감",
+    "statusPending": "측정 대기",
+    "hypothesisLabel": "세웠던 가설",
+    "target": "목표",
+    "actual": "실제",
+    "scoredSuffix": "채점",
+    "forwardNote": "다음 계획의 참고 기록",
+    "pendingNote": "측정 대기 중 — 스프린트 종료 시 자동 채점된다.",
+    "addIntent": "성과 의도 추가 (선택)",
+    "intentLabel": "성과 의도",
+    "optional": "선택",
+    "hypothesisField": "성공 가설",
+    "hypothesisPlaceholder": "이 스프린트가 성공이라면 무엇이 달라지는가?",
+    "metricField": "성과 지표",
+    "dirUp": "이상이면 적중",
+    "dirDown": "이하면 적중",
+    "targetPlaceholder": "목표값",
+    "externalSourceNote": "internal_ops 지표만 종료 시 자동 채점된다. 그 외 소스는 '측정 대기'로 기록된다.",
+    "measureAfterField": "측정 시점",
+    "measureAfterHint": "비우면 스프린트 종료 시점에 측정된다.",
+    "metric_velocity": "벨로시티",
+    "metric_backlog_remaining": "백로그 잔여",
+    "metric_progress": "진행률"
   }
 }

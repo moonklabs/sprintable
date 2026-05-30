@@ -1,6 +1,21 @@
 import type { PaginationOptions } from '../types';
 import type { RepositoryScopeContext } from './IEpicRepository';
 
+export interface MetricDefinition {
+  metric: string;
+  source: 'internal_ops' | 'ga4' | 'manual';
+  target: number;
+  direction: 'up' | 'down';
+}
+
+export interface OutcomeResult {
+  metric: string;
+  target: number;
+  actual: number;
+  direction: 'up' | 'down';
+  scored_at: string;
+}
+
 export interface Sprint {
   id: string;
   org_id: string;
@@ -13,6 +28,11 @@ export interface Sprint {
   velocity: number | null;
   duration: number;
   report_doc_id: string | null;
+  success_hypothesis: string | null;
+  metric_definition: MetricDefinition | null;
+  measure_after: string | null;
+  outcome_status: 'n_a' | 'pending' | 'hit' | 'miss' | null;
+  outcome_result: OutcomeResult | null;
   created_at: string;
   updated_at: string;
 }
@@ -24,6 +44,9 @@ export interface CreateSprintInput {
   start_date: string;
   end_date: string;
   team_size?: number;
+  success_hypothesis?: string | null;
+  metric_definition?: MetricDefinition | null;
+  measure_after?: string | null;
 }
 
 export interface UpdateSprintInput {
@@ -35,6 +58,9 @@ export interface UpdateSprintInput {
   velocity?: number | null;
   duration?: number;
   report_doc_id?: string | null;
+  success_hypothesis?: string | null;
+  metric_definition?: MetricDefinition | null;
+  measure_after?: string | null;
 }
 
 export interface SprintListFilters extends PaginationOptions {

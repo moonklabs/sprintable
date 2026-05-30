@@ -2194,5 +2194,32 @@
     "doneStories": "Done Stories",
     "assignedStories": "Assigned",
     "avgLeadTime": "Avg Lead Time"
+  },
+  "outcomeLoop": {
+    "resultLabel": "Outcome",
+    "statusHit": "On target",
+    "statusMiss": "Off target",
+    "statusPending": "Awaiting",
+    "hypothesisLabel": "Hypothesis",
+    "target": "Target",
+    "actual": "Actual",
+    "scoredSuffix": "scored",
+    "forwardNote": "A note for the next plan",
+    "pendingNote": "Awaiting measurement — auto-scored when sprint closes.",
+    "addIntent": "Add outcome intent (optional)",
+    "intentLabel": "Outcome intent",
+    "optional": "optional",
+    "hypothesisField": "Success hypothesis",
+    "hypothesisPlaceholder": "What would be different if this sprint succeeds?",
+    "metricField": "Success metric",
+    "dirUp": "Hit if above",
+    "dirDown": "Hit if below",
+    "targetPlaceholder": "Target value",
+    "externalSourceNote": "Only internal_ops metrics are auto-scored on close. Others stay pending.",
+    "measureAfterField": "Measure after",
+    "measureAfterHint": "Leave blank to measure at sprint close.",
+    "metric_velocity": "Velocity",
+    "metric_backlog_remaining": "Backlog remaining",
+    "metric_progress": "Progress"
   }
 }
