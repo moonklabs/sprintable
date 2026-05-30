@@ -65,7 +65,8 @@
     "goMemos": "Go to Memos",
     "goAgents": "Go to Agents",
     "goDocs": "Go to Docs",
-    "documents": "Documents"
+    "documents": "Documents",
+    "goSprints": "Go to Sprints"
   },
   "channel": {
     "title": "Channel Chat",

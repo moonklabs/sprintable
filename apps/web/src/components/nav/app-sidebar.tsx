@@ -8,6 +8,7 @@ import {
   BookOpen,
   Bot,
   CalendarDays,
+  CalendarRange,
   CircleHelp,
   ClipboardList,
   FolderKanban,
@@ -198,6 +199,16 @@ export function AppSidebar({
                   <FolderKanban />
                   <span>{t('board')}</span>
                   <KbdHint>B</KbdHint>
+                </SidebarMenuButton>
+              </SidebarMenuItem>
+              <SidebarMenuItem>
+                <SidebarMenuButton
+                  render={<Link href="/sprints" />}
+                  isActive={isActive('/sprints')}
+                  tooltip={t('sprints')}
+                >
+                  <CalendarRange />
+                  <span>{t('sprints')}</span>
                 </SidebarMenuButton>
               </SidebarMenuItem>
               <SidebarMenuItem>

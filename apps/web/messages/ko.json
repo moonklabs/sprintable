@@ -65,7 +65,8 @@
     "goMemos": "메모로 이동",
     "goAgents": "에이전트로 이동",
     "goDocs": "문서로 이동",
-    "documents": "문서"
+    "documents": "문서",
+    "goSprints": "스프린트로 이동"
   },
   "channel": {
     "title": "채널 채팅",
