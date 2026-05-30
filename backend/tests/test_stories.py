@@ -27,6 +27,12 @@ def _mock_story(status: str = "backlog") -> MagicMock:
     s.description = None
     s.acceptance_criteria = None
     s.position = None
+    # E-OUTCOME-LOOP: 신규 필드 (MagicMock이 반환하는 MagicMock 객체가 Pydantic 검증 실패하므로 명시 세팅)
+    s.success_hypothesis = None
+    s.metric_definition = None
+    s.measure_after = None
+    s.outcome_status = "n_a"
+    s.outcome_result = None
     s.created_at = datetime(2026, 5, 1, tzinfo=timezone.utc)
     s.updated_at = datetime(2026, 5, 1, tzinfo=timezone.utc)
     return s
@@ -331,5 +337,104 @@ async def test_status_backward_transition_400(from_status: str, to_status: str):
             )
 
         assert resp.status_code == 400
+    finally:
+        app.dependency_overrides.clear()
+
+
+# ── E-OUTCOME-LOOP S2: 의도필드 + metric_definition 검증 ──────────────────────
+
+_VALID_METRIC = {"metric": "velocity", "source": "internal_ops", "target": 30, "direction": "up"}
+
+
+@pytest.mark.anyio
+async def test_create_story_with_intent_fields_201():
+    """create에 의도필드(success_hypothesis·metric_definition·measure_after) 전달 → 201 (AC1/AC2)."""
+    client, session, app = await _client()
+    try:
+        story = _mock_story()
+        story.success_hypothesis = "MAU 10% 증가"
+        story.metric_definition = _VALID_METRIC
+        story.measure_after = datetime(2026, 7, 1, tzinfo=timezone.utc)
+
+        with patch("app.repositories.base.BaseRepository.create", new_callable=AsyncMock) as mock_create:
+            mock_create.return_value = story
+
+            async with client as c:
+                resp = await c.post("/api/v2/stories", json={
+                    "project_id": str(PROJECT_ID),
+                    "org_id": str(ORG_ID),
+                    "title": "Outcome Story",
+                    "success_hypothesis": "MAU 10% 증가",
+                    "metric_definition": _VALID_METRIC,
+                    "measure_after": "2026-07-01T00:00:00Z",
+                })
+
+        assert resp.status_code == 201
+        _, kwargs = mock_create.call_args
+        assert kwargs.get("success_hypothesis") == "MAU 10% 증가"
+        assert kwargs.get("metric_definition") == _VALID_METRIC
+    finally:
+        app.dependency_overrides.clear()
+
+
+@pytest.mark.anyio
+@pytest.mark.parametrize("bad_metric,desc", [
+    ({"source": "ga4", "target": 100, "direction": "up"}, "metric 키 누락"),
+    ({"metric": "MAU", "source": "bad_src", "target": 100, "direction": "up"}, "source 비정상값"),
+    ({"metric": "MAU", "source": "ga4", "target": 100, "direction": "sideways"}, "direction 비정상값"),
+    ({"metric": "MAU", "source": "ga4", "target": 100}, "direction 키 누락"),
+])
+async def test_create_story_invalid_metric_definition_422(bad_metric: dict, desc: str):
+    """metric_definition 구조 오류 → 422 (AC3)."""
+    client, session, app = await _client()
+    try:
+        async with client as c:
+            resp = await c.post("/api/v2/stories", json={
+                "project_id": str(PROJECT_ID),
+                "org_id": str(ORG_ID),
+                "title": "Test",
+                "metric_definition": bad_metric,
+            })
+        assert resp.status_code == 422, f"expected 422 for {desc}"
+    finally:
+        app.dependency_overrides.clear()
+
+
+@pytest.mark.anyio
+async def test_update_story_invalid_metric_definition_422():
+    """update metric_definition 구조 오류 → 422 (AC3)."""
+    client, session, app = await _client()
+    try:
+        async with client as c:
+            resp = await c.patch(f"/api/v2/stories/{STORY_ID}", json={
+                "metric_definition": {"bad": "structure"},
+            })
+        assert resp.status_code == 422
+    finally:
+        app.dependency_overrides.clear()
+
+
+@pytest.mark.anyio
+async def test_create_story_outcome_fields_ignored():
+    """create 시 outcome_status/outcome_result는 무시 — 채점잡 전용 (AC4)."""
+    client, session, app = await _client()
+    try:
+        story = _mock_story()
+        with patch("app.repositories.base.BaseRepository.create", new_callable=AsyncMock) as mock_create:
+            mock_create.return_value = story
+
+            async with client as c:
+                resp = await c.post("/api/v2/stories", json={
+                    "project_id": str(PROJECT_ID),
+                    "org_id": str(ORG_ID),
+                    "title": "Test",
+                    "outcome_status": "achieved",
+                    "outcome_result": {"score": 90},
+                })
+
+        assert resp.status_code == 201
+        _, kwargs = mock_create.call_args
+        assert "outcome_status" not in kwargs, "outcome_status가 create에 전달되면 안됨"
+        assert "outcome_result" not in kwargs, "outcome_result가 create에 전달되면 안됨"
     finally:
         app.dependency_overrides.clear()

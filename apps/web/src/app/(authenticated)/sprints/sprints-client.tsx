@@ -7,6 +7,9 @@ import { Plus, X, Play, StopCircle, ChevronRight } from 'lucide-react';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { TopBarSlot } from '@/components/nav/top-bar-slot';
+import { OutcomeIntentFields, type OutcomeIntentValue, type MetricDefinition } from '@/components/outcome/outcome-intent-fields';
+import { OutcomeResultCard, type OutcomeResult } from '@/components/outcome/outcome-result-card';
+import type { OutcomeStatus } from '@/components/outcome/outcome-status-badge';
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -19,6 +22,11 @@ interface Sprint {
   duration: number;
   velocity: number | null;
   report_doc_id: string | null;
+  success_hypothesis: string | null;
+  metric_definition: MetricDefinition | null;
+  measure_after: string | null;
+  outcome_status: OutcomeStatus | null;
+  outcome_result: OutcomeResult | null;
 }
 
 interface Story {
@@ -66,6 +74,7 @@ function CreateDialog({ projectId, onCreated, onClose }: CreateDialogProps) {
   const [title, setTitle] = useState('');
   const [startDate, setStartDate] = useState('');
   const [endDate, setEndDate] = useState('');
+  const [intent, setIntent] = useState<OutcomeIntentValue>({ success_hypothesis: '', metric_definition: null, measure_after: '' });
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
@@ -75,10 +84,15 @@ function CreateDialog({ projectId, onCreated, onClose }: CreateDialogProps) {
     setSubmitting(true);
     setError(null);
     try {
+      const payload = {
+        success_hypothesis: intent.success_hypothesis.trim() || null,
+        metric_definition: intent.metric_definition,
+        measure_after: intent.measure_after ? `${intent.measure_after}T00:00:00Z` : null,
+      };
       const res = await fetch('/api/sprints', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ title: title.trim(), start_date: startDate, end_date: endDate, project_id: projectId }),
+        body: JSON.stringify({ title: title.trim(), start_date: startDate, end_date: endDate, project_id: projectId, ...payload }),
       });
       if (!res.ok) throw new Error(await res.text());
       const { data } = await res.json() as { data: Sprint };
@@ -134,6 +148,7 @@ function CreateDialog({ projectId, onCreated, onClose }: CreateDialogProps) {
               />
             </div>
           </div>
+          <OutcomeIntentFields value={intent} onChange={setIntent} />
           {error ? <p className="text-xs text-destructive">{error}</p> : null}
           <div className="flex justify-end gap-2 pt-1">
             <Button type="button" variant="ghost" size="sm" onClick={onClose}>{t('cancel')}</Button>
@@ -419,6 +434,18 @@ export function SprintsClient({ projectId }: SprintsClientProps) {
         </Button>
       ) : null}
       {actionError ? <p className="mb-3 text-xs text-destructive">{actionError}</p> : null}
+
+      {/* Outcome result card */}
+      {selected.outcome_status && selected.outcome_status !== 'n_a' ? (
+        <div className="mb-4">
+          <OutcomeResultCard
+            status={selected.outcome_status}
+            hypothesis={selected.success_hypothesis}
+            result={selected.outcome_result as OutcomeResult | null}
+            pendingMetricLabel={selected.metric_definition?.metric}
+          />
+        </div>
+      ) : null}
 
       {/* Burndown */}
       {loadingBurndown ? (

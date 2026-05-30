@@ -25,6 +25,12 @@ def _mock_sprint(status: str = "planning") -> MagicMock:
     s.team_size = None
     s.duration = 14
     s.report_doc_id = None
+    # E-OUTCOME-LOOP: 신규 필드 (MagicMock 반환 객체가 Pydantic 검증 실패하므로 명시 세팅)
+    s.success_hypothesis = None
+    s.metric_definition = None
+    s.measure_after = None
+    s.outcome_status = "n_a"
+    s.outcome_result = None
     from datetime import datetime, timezone
     s.created_at = datetime(2026, 5, 1, tzinfo=timezone.utc)
     s.updated_at = datetime(2026, 5, 1, tzinfo=timezone.utc)
@@ -296,3 +302,378 @@ async def test_kickoff_sprint_200():
         assert body["sprint_id"] == str(SPRINT_ID)
     finally:
         app.dependency_overrides.clear()
+
+
+# ── E-OUTCOME-LOOP S2: 의도필드 + metric_definition 검증 ──────────────────────
+
+_VALID_METRIC = {"metric": "retention", "source": "internal_ops", "target": 0.8, "direction": "up"}
+
+
+@pytest.mark.anyio
+async def test_create_sprint_with_intent_fields_201():
+    """create에 의도필드 전달 → 201 + repo.create에 의도필드 전달 확인 (AC1/AC2)."""
+    client, session, app = await _client()
+    try:
+        sprint = _mock_sprint()
+        sprint.success_hypothesis = "Retention 80% 달성"
+        sprint.metric_definition = _VALID_METRIC
+        sprint.measure_after = None
+
+        with patch("app.repositories.base.BaseRepository.create", new_callable=AsyncMock) as mock_create:
+            mock_create.return_value = sprint
+
+            async with client as c:
+                resp = await c.post("/api/v2/sprints", json={
+                    "project_id": str(PROJECT_ID),
+                    "org_id": str(ORG_ID),
+                    "title": "Outcome Sprint",
+                    "success_hypothesis": "Retention 80% 달성",
+                    "metric_definition": _VALID_METRIC,
+                })
+
+        assert resp.status_code == 201
+        _, kwargs = mock_create.call_args
+        assert kwargs.get("success_hypothesis") == "Retention 80% 달성"
+        assert kwargs.get("metric_definition") == _VALID_METRIC
+    finally:
+        app.dependency_overrides.clear()
+
+
+@pytest.mark.anyio
+@pytest.mark.parametrize("bad_metric,desc", [
+    ({"source": "manual", "target": 0.8, "direction": "up"}, "metric 키 누락"),
+    ({"metric": "retention", "source": "unknown", "target": 0.8, "direction": "up"}, "source 비정상값"),
+    ({"metric": "retention", "source": "manual", "target": 0.8, "direction": "flat"}, "direction 비정상값"),
+])
+async def test_create_sprint_invalid_metric_definition_422(bad_metric: dict, desc: str):
+    """metric_definition 구조 오류 → 422 (AC3)."""
+    client, session, app = await _client()
+    try:
+        async with client as c:
+            resp = await c.post("/api/v2/sprints", json={
+                "project_id": str(PROJECT_ID),
+                "org_id": str(ORG_ID),
+                "title": "Test Sprint",
+                "metric_definition": bad_metric,
+            })
+        assert resp.status_code == 422, f"expected 422 for {desc}"
+    finally:
+        app.dependency_overrides.clear()
+
+
+@pytest.mark.anyio
+async def test_update_sprint_invalid_metric_definition_422():
+    """update metric_definition 구조 오류 → 422 (AC3)."""
+    client, session, app = await _client()
+    try:
+        async with client as c:
+            resp = await c.patch(f"/api/v2/sprints/{SPRINT_ID}", json={
+                "metric_definition": {"bad": "structure"},
+            })
+        assert resp.status_code == 422
+    finally:
+        app.dependency_overrides.clear()
+
+
+
+
+# ── E-OUTCOME-LOOP S3: 채점 로직 테스트 ──────────────────────────────────────
+
+from app.services.outcome_scorer import score_sprint_outcome
+
+_V = 0  # velocity placeholder
+_B = 0  # backlog_remaining placeholder
+_T = 0  # total_points placeholder
+
+
+class TestScoreSprintOutcome:
+    """outcome_scorer.score_sprint_outcome 단위 테스트 (metric 이름 ↔ actual 분기 포함)."""
+
+    def test_no_metric_definition_returns_none(self):
+        """metric_definition 없음 → None (n_a 유지)."""
+        assert score_sprint_outcome(None, 30, 5, 100) is None
+        assert score_sprint_outcome({}, 30, 5, 100) is None
+
+    def test_external_source_returns_pending(self):
+        """external source(ga4/manual) → pending."""
+        for src in ("ga4", "manual"):
+            r = score_sprint_outcome(
+                {"source": src, "metric": "velocity", "target": 100, "direction": "up"},
+                velocity=50, backlog_remaining=2, total_points=100,
+            )
+            assert r is not None
+            assert r["outcome_status"] == "pending"
+            assert r["outcome_result"] is None
+
+    def test_unknown_metric_returns_pending(self):
+        """지원하지 않는 metric → pending (오채점 차단)."""
+        r = score_sprint_outcome(
+            {"source": "internal_ops", "metric": "custom_metric", "target": 50, "direction": "up"},
+            velocity=60, backlog_remaining=0, total_points=100,
+        )
+        assert r is not None
+        assert r["outcome_status"] == "pending"
+
+    # ── velocity metric ──────────────────────────────────────────────────────
+
+    def test_velocity_up_hit(self):
+        """metric=velocity, direction='up', actual >= target → hit."""
+        r = score_sprint_outcome(
+            {"source": "internal_ops", "metric": "velocity", "target": 30, "direction": "up"},
+            velocity=30, backlog_remaining=0, total_points=30,
+        )
+        assert r is not None
+        assert r["outcome_status"] == "hit"
+        assert r["outcome_result"]["actual"] == 30.0
+        assert r["outcome_result"]["metric"] == "velocity"
+
+    def test_velocity_up_miss(self):
+        """metric=velocity, direction='up', actual < target → miss."""
+        r = score_sprint_outcome(
+            {"source": "internal_ops", "metric": "velocity", "target": 50, "direction": "up"},
+            velocity=30, backlog_remaining=0, total_points=50,
+        )
+        assert r is not None
+        assert r["outcome_status"] == "miss"
+
+    def test_velocity_boundary_exact_target_is_hit(self):
+        """경계값: velocity == target, direction='up' → hit."""
+        r = score_sprint_outcome(
+            {"source": "internal_ops", "metric": "velocity", "target": 42, "direction": "up"},
+            velocity=42, backlog_remaining=0, total_points=42,
+        )
+        assert r is not None
+        assert r["outcome_status"] == "hit"
+
+    def test_zero_velocity_miss(self):
+        """velocity=0, direction='up', target>0 → miss."""
+        r = score_sprint_outcome(
+            {"source": "internal_ops", "metric": "velocity", "target": 10, "direction": "up"},
+            velocity=0, backlog_remaining=5, total_points=10,
+        )
+        assert r is not None
+        assert r["outcome_status"] == "miss"
+
+    # ── backlog_remaining metric ─────────────────────────────────────────────
+
+    def test_backlog_remaining_down_hit(self):
+        """metric=backlog_remaining, direction='down', backlog<=target → hit."""
+        r = score_sprint_outcome(
+            {"source": "internal_ops", "metric": "backlog_remaining", "target": 3, "direction": "down"},
+            velocity=20, backlog_remaining=2, total_points=25,
+        )
+        assert r is not None
+        assert r["outcome_status"] == "hit"
+        assert r["outcome_result"]["actual"] == 2.0
+        assert r["outcome_result"]["metric"] == "backlog_remaining"
+
+    def test_backlog_remaining_down_miss(self):
+        """metric=backlog_remaining, direction='down', backlog>target → miss."""
+        r = score_sprint_outcome(
+            {"source": "internal_ops", "metric": "backlog_remaining", "target": 0, "direction": "down"},
+            velocity=20, backlog_remaining=1, total_points=25,
+        )
+        assert r is not None
+        assert r["outcome_status"] == "miss"
+        assert r["outcome_result"]["actual"] == 1.0
+
+    def test_backlog_remaining_dogfood_zero_target(self):
+        """dogfood: backlog_remaining=0 → target=0, down → hit."""
+        r = score_sprint_outcome(
+            {"source": "internal_ops", "metric": "backlog_remaining", "target": 0, "direction": "down"},
+            velocity=30, backlog_remaining=0, total_points=30,
+        )
+        assert r is not None
+        assert r["outcome_status"] == "hit"
+
+    def test_backlog_remaining_does_not_use_velocity(self):
+        """backlog_remaining metric은 velocity가 아닌 backlog_remaining을 actual로 사용."""
+        # velocity=999 지만 backlog_remaining=5 → target=3 초과 → miss
+        r = score_sprint_outcome(
+            {"source": "internal_ops", "metric": "backlog_remaining", "target": 3, "direction": "down"},
+            velocity=999, backlog_remaining=5, total_points=999,
+        )
+        assert r is not None
+        assert r["outcome_status"] == "miss"
+        assert r["outcome_result"]["actual"] == 5.0
+
+    # ── progress metric ──────────────────────────────────────────────────────
+
+    def test_progress_up_hit(self):
+        """metric=progress, direction='up', progress>=target → hit."""
+        # velocity=80 / total_points=100 → progress=80.0
+        r = score_sprint_outcome(
+            {"source": "internal_ops", "metric": "progress", "target": 80, "direction": "up"},
+            velocity=80, backlog_remaining=2, total_points=100,
+        )
+        assert r is not None
+        assert r["outcome_status"] == "hit"
+        assert r["outcome_result"]["actual"] == 80.0
+
+    def test_progress_zero_total_points(self):
+        """total_points=0 → progress=0.0, target>0 → miss (zero division safe)."""
+        r = score_sprint_outcome(
+            {"source": "internal_ops", "metric": "progress", "target": 50, "direction": "up"},
+            velocity=0, backlog_remaining=0, total_points=0,
+        )
+        assert r is not None
+        assert r["outcome_status"] == "miss"
+        assert r["outcome_result"]["actual"] == 0.0
+
+    # ── output 필드 ──────────────────────────────────────────────────────────
+
+    def test_outcome_result_contains_required_fields(self):
+        """outcome_result에 metric·target·actual·direction·scored_at 포함."""
+        md = {"source": "internal_ops", "metric": "velocity", "target": 20, "direction": "up"}
+        r = score_sprint_outcome(md, velocity=25, backlog_remaining=0, total_points=25)
+        assert r is not None
+        result = r["outcome_result"]
+        for key in ("metric", "target", "actual", "direction", "scored_at"):
+            assert key in result, f"outcome_result에 {key} 없음"
+
+
+@pytest.mark.anyio
+async def test_close_sprint_scores_outcome_hit():
+    """sprint close 시 metric_definition 있으면 채점 → outcome_status hit/miss 반영."""
+    client, session, app = await _client()
+    try:
+        sprint = _mock_sprint("active")
+        sprint.metric_definition = {
+            "metric": "velocity", "source": "internal_ops", "target": 10, "direction": "up"
+        }
+        sprint.outcome_status = "n_a"
+
+        closed = _mock_sprint("closed")
+        closed.outcome_status = "hit"
+        closed.outcome_result = {"metric": "velocity", "target": 10.0, "actual": 14.0, "direction": "up", "scored_at": "2026-05-30T00:00:00+00:00"}
+
+        mock_result = MagicMock()
+        mock_result.scalar_one_or_none.return_value = sprint
+        session.execute = AsyncMock(return_value=mock_result)
+
+        with patch("app.repositories.sprint.SprintRepository.close", new_callable=AsyncMock) as mock_close:
+            mock_close.return_value = closed
+
+            async with client as c:
+                resp = await c.post(f"/api/v2/sprints/{SPRINT_ID}/close")
+
+        assert resp.status_code == 200
+        data = resp.json()
+        assert data["outcome_status"] == "hit"
+    finally:
+        app.dependency_overrides.clear()
+
+
+# ── E-OUTCOME-LOOP S5: GA4 채점 테스트 ───────────────────────────────────────
+
+from app.services.outcome_scorer import score_ga4_outcome
+
+
+class TestScoreGa4Outcome:
+    """score_ga4_outcome 단위 테스트 (GA4 클라이언트 mock)."""
+
+    def test_ga4_hit_when_actual_ge_target(self):
+        """GA4 회수값 >= target, direction='up' → hit."""
+        md = {
+            "source": "ga4", "metric": "MAU", "target": 1000, "direction": "up",
+            "property_id": "291556226", "ga4_metric": "activeUsers", "date_range_days": 30,
+        }
+        with patch("app.services.ga4_client.fetch_ga4_metric", return_value=1500.0):
+            r = score_ga4_outcome(md)
+        assert r["outcome_status"] == "hit"
+        assert r["outcome_result"]["actual"] == 1500.0
+        assert r["outcome_result"]["metric"] == "MAU"
+
+    def test_ga4_miss_when_actual_lt_target(self):
+        """GA4 회수값 < target, direction='up' → miss."""
+        md = {
+            "source": "ga4", "metric": "MAU", "target": 1000, "direction": "up",
+            "property_id": "291556226", "ga4_metric": "activeUsers", "date_range_days": 30,
+        }
+        with patch("app.services.ga4_client.fetch_ga4_metric", return_value=800.0):
+            r = score_ga4_outcome(md)
+        assert r["outcome_status"] == "miss"
+
+    def test_ga4_down_hit(self):
+        """GA4 회수값 <= target, direction='down' → hit."""
+        md = {
+            "source": "ga4", "metric": "bounce", "target": 50, "direction": "down",
+            "property_id": "291556226", "ga4_metric": "sessions", "date_range_days": 7,
+        }
+        with patch("app.services.ga4_client.fetch_ga4_metric", return_value=40.0):
+            r = score_ga4_outcome(md)
+        assert r["outcome_status"] == "hit"
+
+    def test_ga4_fetch_failure_returns_pending(self):
+        """GA4 회수 실패(None) → pending (인증 불가 등)."""
+        md = {
+            "source": "ga4", "metric": "MAU", "target": 1000, "direction": "up",
+            "property_id": "291556226", "ga4_metric": "activeUsers", "date_range_days": 30,
+        }
+        with patch("app.services.ga4_client.fetch_ga4_metric", return_value=None):
+            r = score_ga4_outcome(md)
+        assert r["outcome_status"] == "pending"
+        assert r["outcome_result"] is None
+
+    def test_ga4_boundary_exact_target(self):
+        """경계값: actual == target, direction='up' → hit."""
+        md = {
+            "source": "ga4", "metric": "users", "target": 500, "direction": "up",
+            "property_id": "291556226", "ga4_metric": "newUsers", "date_range_days": 14,
+        }
+        with patch("app.services.ga4_client.fetch_ga4_metric", return_value=500.0):
+            r = score_ga4_outcome(md)
+        assert r["outcome_status"] == "hit"
+
+
+class TestGa4MetricDefinitionValidation:
+    """GA4 metric_definition 구조 검증 테스트."""
+
+    def _validate(self, v):
+        from app.schemas.story import _validate_metric_definition
+        return _validate_metric_definition(v)
+
+    def test_ga4_valid_passes(self):
+        """GA4 필수 필드 모두 있으면 통과."""
+        md = {
+            "source": "ga4", "metric": "MAU", "target": 1000, "direction": "up",
+            "property_id": "291556226", "ga4_metric": "activeUsers", "date_range_days": 30,
+        }
+        assert self._validate(md) is not None
+
+    def test_ga4_missing_property_id_raises(self):
+        """property_id 없으면 ValueError."""
+        md = {
+            "source": "ga4", "metric": "MAU", "target": 1000, "direction": "up",
+            "ga4_metric": "activeUsers", "date_range_days": 30,
+        }
+        with pytest.raises(ValueError, match="property_id"):
+            self._validate(md)
+
+    def test_ga4_unknown_metric_raises(self):
+        """지원하지 않는 ga4_metric → ValueError (garbage-in 차단)."""
+        md = {
+            "source": "ga4", "metric": "m", "target": 10, "direction": "up",
+            "property_id": "123", "ga4_metric": "customBadMetric", "date_range_days": 30,
+        }
+        with pytest.raises(ValueError, match="ga4_metric"):
+            self._validate(md)
+
+    def test_ga4_invalid_date_range_days_raises(self):
+        """date_range_days <= 0 → ValueError."""
+        md = {
+            "source": "ga4", "metric": "m", "target": 10, "direction": "up",
+            "property_id": "123", "ga4_metric": "activeUsers", "date_range_days": 0,
+        }
+        with pytest.raises(ValueError, match="date_range_days"):
+            self._validate(md)
+
+    def test_ga4_source_in_score_sprint_returns_pending(self):
+        """close() 호출 시 GA4 source → pending (지연 채점 cron으로)."""
+        md = {
+            "source": "ga4", "metric": "MAU", "target": 1000, "direction": "up",
+            "property_id": "291556226", "ga4_metric": "activeUsers", "date_range_days": 30,
+        }
+        r = score_sprint_outcome(md, velocity=30, backlog_remaining=0, total_points=30)
+        assert r is not None
+        assert r["outcome_status"] == "pending"

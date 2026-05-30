@@ -3,6 +3,7 @@ import { Inter, Geist_Mono, Source_Serif_4 } from "next/font/google";
 import { NextIntlClientProvider } from 'next-intl';
 import { getLocale, getMessages } from 'next-intl/server';
 import { ThemeProvider } from '@/components/providers/theme-provider';
+import { GoogleAnalytics } from '@/components/google-analytics';
 import "./globals.css";
 
 const inter = Inter({
@@ -45,6 +46,7 @@ export default async function RootLayout({
       suppressHydrationWarning
     >
       <body className="h-full">
+        <GoogleAnalytics />
         <ThemeProvider
           attribute="class"
           defaultTheme="system"

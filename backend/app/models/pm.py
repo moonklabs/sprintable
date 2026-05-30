@@ -2,7 +2,7 @@ import uuid
 from datetime import date, datetime
 
 from sqlalchemy import BigInteger, Date, DateTime, ForeignKey, Integer, String, Text, func
-from sqlalchemy.dialects.postgresql import UUID
+from sqlalchemy.dialects.postgresql import JSONB, UUID
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.core.database import Base
@@ -26,6 +26,13 @@ class Sprint(Base, OrgScopedMixin, TimestampMixin):
     velocity: Mapped[int | None] = mapped_column(Integer, nullable=True)
     team_size: Mapped[int | None] = mapped_column(Integer, nullable=True)
     duration: Mapped[int] = mapped_column(Integer, nullable=False, default=14)
+    # E-OUTCOME-LOOP: 의도 필드 (intent)
+    success_hypothesis: Mapped[str | None] = mapped_column(Text, nullable=True)
+    metric_definition: Mapped[dict | None] = mapped_column(JSONB, nullable=True)
+    measure_after: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    # E-OUTCOME-LOOP: 채점 필드 (outcome, 채점잡 전용)
+    outcome_status: Mapped[str] = mapped_column(String(20), nullable=False, server_default="n_a")
+    outcome_result: Mapped[dict | None] = mapped_column(JSONB, nullable=True)
 
     project: Mapped["Project"] = relationship("Project", back_populates="sprints")
     stories: Mapped[list["Story"]] = relationship("Story", back_populates="sprint", lazy="select")
@@ -80,6 +87,13 @@ class Story(Base, OrgScopedMixin, TimestampMixin, SoftDeleteMixin):
     description: Mapped[str | None] = mapped_column(Text, nullable=True)
     acceptance_criteria: Mapped[str | None] = mapped_column(Text, nullable=True)
     position: Mapped[int | None] = mapped_column(BigInteger, nullable=True)
+    # E-OUTCOME-LOOP: 의도 필드 (intent)
+    success_hypothesis: Mapped[str | None] = mapped_column(Text, nullable=True)
+    metric_definition: Mapped[dict | None] = mapped_column(JSONB, nullable=True)
+    measure_after: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    # E-OUTCOME-LOOP: 채점 필드 (outcome, 채점잡 전용)
+    outcome_status: Mapped[str] = mapped_column(String(20), nullable=False, server_default="n_a")
+    outcome_result: Mapped[dict | None] = mapped_column(JSONB, nullable=True)
 
     epic: Mapped[Epic | None] = relationship("Epic", back_populates="stories")
     sprint: Mapped[Sprint | None] = relationship("Sprint", back_populates="stories")

@@ -1,4 +1,5 @@
 import { z } from 'zod/v4';
+import { metricDefinitionSchema } from './outcome';
 
 export const STORY_STATUSES = ['backlog', 'ready-for-dev', 'in-progress', 'in-review', 'done'] as const;
 export const STORY_PRIORITIES = ['critical', 'high', 'medium', 'low'] as const;
@@ -36,6 +37,9 @@ export const createStorySchema = z.object({
   description: z.string().optional().nullable(),
   acceptance_criteria: z.string().optional().nullable(),
   meeting_id: z.string().uuid().optional().nullable(),
+  success_hypothesis: z.string().optional().nullable(),
+  metric_definition: metricDefinitionSchema.optional().nullable(),
+  measure_after: z.string().datetime().optional().nullable(),
 });
 
 export const updateStorySchema = z.object({
@@ -49,6 +53,9 @@ export const updateStorySchema = z.object({
   sprint_id: z.string().optional().nullable(),
   assignee_id: z.string().optional().nullable(),
   position: z.number().int().optional().nullable(),
+  success_hypothesis: z.string().optional().nullable(),
+  metric_definition: metricDefinitionSchema.optional().nullable(),
+  measure_after: z.string().datetime().optional().nullable(),
 });
 
 const bulkUpdateItemSchema = z.object({

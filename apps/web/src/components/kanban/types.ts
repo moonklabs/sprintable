@@ -1,3 +1,5 @@
+import type { MetricDefinition, OutcomeResult } from '@sprintable/core-storage';
+
 export interface KanbanStory {
   id: string;
   title: string;
@@ -9,6 +11,11 @@ export interface KanbanStory {
   sprint_id: string | null;
   description: string | null;
   position: number | null;
+  success_hypothesis: string | null;
+  metric_definition: MetricDefinition | null;
+  measure_after: string | null;
+  outcome_status: 'n_a' | 'pending' | 'hit' | 'miss' | null;
+  outcome_result: OutcomeResult | null;
 }
 
 export interface KanbanEpic {
