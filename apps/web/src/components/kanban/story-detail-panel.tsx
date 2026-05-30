@@ -116,6 +116,7 @@ export function StoryDetailPanel({ story, tasks, nextTasksCursor = null, loading
     metric_definition: story.metric_definition ?? null,
     measure_after: story.measure_after ? story.measure_after.slice(0, 10) : '',
   });
+  const [intentOpen, setIntentOpen] = useState(!!story.success_hypothesis || !!story.metric_definition);
   const [savingIntent, setSavingIntent] = useState(false);
 
   const [editingAssignee, setEditingAssignee] = useState(false);
@@ -150,6 +151,7 @@ export function StoryDetailPanel({ story, tasks, nextTasksCursor = null, loading
       metric_definition: story.metric_definition ?? null,
       measure_after: story.measure_after ? story.measure_after.slice(0, 10) : '',
     });
+    setIntentOpen(!!story.success_hypothesis || !!story.metric_definition);
   }, [story.id, story.title, story.description, story.success_hypothesis, story.metric_definition, story.measure_after]);
 
   useEffect(() => {
@@ -532,13 +534,17 @@ export function StoryDetailPanel({ story, tasks, nextTasksCursor = null, loading
               <OutcomeIntentFields
                 value={intent}
                 onChange={setIntent}
-                defaultOpen={!!story.success_hypothesis || !!story.metric_definition}
+                open={intentOpen}
+                onOpenChange={setIntentOpen}
+                context="story"
               />
-              <div className="flex justify-end gap-2">
-                <Button size="sm" onClick={() => { void handleSaveIntent(); }} disabled={savingIntent}>
-                  {savingIntent ? t('loading') : t('save')}
-                </Button>
-              </div>
+              {intentOpen ? (
+                <div className="flex justify-end gap-2">
+                  <Button size="sm" onClick={() => { void handleSaveIntent(); }} disabled={savingIntent}>
+                    {savingIntent ? t('loading') : t('save')}
+                  </Button>
+                </div>
+              ) : null}
             </div>
 
             {/* Tabs for Tasks, Comments, Activity */}
