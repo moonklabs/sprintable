@@ -53,6 +53,9 @@ async def create_sprint(
         start_date=body.start_date,
         end_date=body.end_date,
         team_size=body.team_size,
+        success_hypothesis=body.success_hypothesis,
+        metric_definition=body.metric_definition,
+        measure_after=body.measure_after,
     )
     return SprintResponse.model_validate(sprint)
 
