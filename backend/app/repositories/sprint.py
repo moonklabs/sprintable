@@ -49,6 +49,11 @@ class SprintRepository(BaseRepository[Sprint]):
         done_stories = result.scalars().all()
         velocity = sum(s.story_points or 0 for s in done_stories)
 
-        updated = await self.update(id, status="closed", velocity=velocity)
+        # E-OUTCOME-LOOP S3: velocity 계산 직후 채점 (비파괴 — 기존 close 로직 무변경)
+        from app.services.outcome_scorer import score_sprint_outcome
+        scoring = score_sprint_outcome(sprint.metric_definition, velocity)
+        extra = scoring if scoring is not None else {}
+
+        updated = await self.update(id, status="closed", velocity=velocity, **extra)
         assert updated is not None
         return updated

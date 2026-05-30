@@ -373,3 +373,134 @@ async def test_update_sprint_invalid_metric_definition_422():
         assert resp.status_code == 422
     finally:
         app.dependency_overrides.clear()
+
+
+# ── E-OUTCOME-LOOP S3: 채점 로직 테스트 ──────────────────────────────────────
+
+from app.services.outcome_scorer import score_sprint_outcome
+
+
+class TestScoreSprintOutcome:
+    """outcome_scorer.score_sprint_outcome 단위 테스트."""
+
+    def test_no_metric_definition_returns_none(self):
+        """metric_definition 없음 → None (n_a 유지)."""
+        assert score_sprint_outcome(None, 30) is None
+        assert score_sprint_outcome({}, 30) is None
+
+    def test_external_source_returns_pending(self):
+        """external source(ga4/manual) → pending."""
+        for src in ("ga4", "manual"):
+            r = score_sprint_outcome(
+                {"source": src, "metric": "m", "target": 100, "direction": "up"}, 50
+            )
+            assert r is not None
+            assert r["outcome_status"] == "pending"
+            assert r["outcome_result"] is None
+
+    def test_up_direction_hit_when_actual_ge_target(self):
+        """direction='up', actual >= target → hit."""
+        r = score_sprint_outcome(
+            {"source": "internal_ops", "metric": "velocity", "target": 30, "direction": "up"},
+            velocity=30,
+        )
+        assert r is not None
+        assert r["outcome_status"] == "hit"
+        assert r["outcome_result"]["actual"] == 30.0
+        assert r["outcome_result"]["target"] == 30.0
+        assert "scored_at" in r["outcome_result"]
+
+    def test_up_direction_miss_when_actual_lt_target(self):
+        """direction='up', actual < target → miss."""
+        r = score_sprint_outcome(
+            {"source": "internal_ops", "metric": "velocity", "target": 50, "direction": "up"},
+            velocity=30,
+        )
+        assert r is not None
+        assert r["outcome_status"] == "miss"
+
+    def test_down_direction_hit_when_actual_le_target(self):
+        """direction='down', actual <= target → hit."""
+        r = score_sprint_outcome(
+            {"source": "internal_ops", "metric": "backlog", "target": 5, "direction": "down"},
+            velocity=3,
+        )
+        assert r is not None
+        assert r["outcome_status"] == "hit"
+
+    def test_down_direction_miss_when_actual_gt_target(self):
+        """direction='down', actual > target → miss."""
+        r = score_sprint_outcome(
+            {"source": "internal_ops", "metric": "backlog", "target": 5, "direction": "down"},
+            velocity=8,
+        )
+        assert r is not None
+        assert r["outcome_status"] == "miss"
+
+    def test_boundary_exact_target_up_is_hit(self):
+        """경계값: actual == target, direction='up' → hit."""
+        r = score_sprint_outcome(
+            {"source": "internal_ops", "metric": "velocity", "target": 42, "direction": "up"},
+            velocity=42,
+        )
+        assert r is not None
+        assert r["outcome_status"] == "hit"
+
+    def test_boundary_exact_target_down_is_hit(self):
+        """경계값: actual == target, direction='down' → hit."""
+        r = score_sprint_outcome(
+            {"source": "internal_ops", "metric": "backlog", "target": 10, "direction": "down"},
+            velocity=10,
+        )
+        assert r is not None
+        assert r["outcome_status"] == "hit"
+
+    def test_zero_velocity_with_up_direction(self):
+        """velocity=0, direction='up', target>0 → miss."""
+        r = score_sprint_outcome(
+            {"source": "internal_ops", "metric": "velocity", "target": 10, "direction": "up"},
+            velocity=0,
+        )
+        assert r is not None
+        assert r["outcome_status"] == "miss"
+
+    def test_outcome_result_contains_required_fields(self):
+        """outcome_result에 metric·target·actual·direction·scored_at 포함."""
+        md = {"source": "internal_ops", "metric": "velocity", "target": 20, "direction": "up"}
+        r = score_sprint_outcome(md, velocity=25)
+        assert r is not None
+        result = r["outcome_result"]
+        for key in ("metric", "target", "actual", "direction", "scored_at"):
+            assert key in result, f"outcome_result에 {key} 없음"
+
+
+@pytest.mark.anyio
+async def test_close_sprint_scores_outcome_hit():
+    """sprint close 시 metric_definition 있으면 채점 → outcome_status hit/miss 반영."""
+    client, session, app = await _client()
+    try:
+        sprint = _mock_sprint("active")
+        sprint.metric_definition = {
+            "metric": "velocity", "source": "internal_ops", "target": 10, "direction": "up"
+        }
+        sprint.outcome_status = "n_a"
+
+        closed = _mock_sprint("closed")
+        closed.outcome_status = "hit"
+        closed.outcome_result = {"metric": "velocity", "target": 10.0, "actual": 14.0, "direction": "up", "scored_at": "2026-05-30T00:00:00+00:00"}
+
+        mock_result = MagicMock()
+        mock_result.scalar_one_or_none.return_value = sprint
+        session.execute = AsyncMock(return_value=mock_result)
+
+        with patch("app.repositories.sprint.SprintRepository.close", new_callable=AsyncMock) as mock_close:
+            mock_close.return_value = closed
+
+            async with client as c:
+                resp = await c.post(f"/api/v2/sprints/{SPRINT_ID}/close")
+
+        assert resp.status_code == 200
+        data = resp.json()
+        assert data["outcome_status"] == "hit"
+    finally:
+        app.dependency_overrides.clear()
