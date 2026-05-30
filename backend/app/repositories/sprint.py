@@ -39,16 +39,25 @@ class SprintRepository(BaseRepository[Sprint]):
         if sprint.status != "active":
             raise ValueError(f"Cannot close sprint with status: {sprint.status}")
 
-        result = await self.session.execute(
+        all_result = await self.session.execute(
             select(Story).where(
                 Story.sprint_id == id,
-                Story.status == "done",
                 Story.deleted_at.is_(None),
             )
         )
-        done_stories = result.scalars().all()
+        all_stories = all_result.scalars().all()
+        done_stories = [s for s in all_stories if s.status == "done"]
         velocity = sum(s.story_points or 0 for s in done_stories)
 
-        updated = await self.update(id, status="closed", velocity=velocity)
+        # E-OUTCOME-LOOP S3: velocity 계산 직후 채점 (비파괴 — 기존 close 로직 무변경)
+        from app.services.outcome_scorer import score_sprint_outcome
+        backlog_remaining = len([s for s in all_stories if s.status != "done"])
+        total_points = sum(s.story_points or 0 for s in all_stories)
+        scoring = score_sprint_outcome(
+            sprint.metric_definition, velocity, backlog_remaining, total_points
+        )
+        extra = scoring if scoring is not None else {}
+
+        updated = await self.update(id, status="closed", velocity=velocity, **extra)
         assert updated is not None
         return updated
