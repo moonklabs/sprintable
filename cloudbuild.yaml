@@ -12,6 +12,7 @@ substitutions:
   _FASTAPI_URL: https://sprintable-backend-dev-787818285179.asia-northeast3.run.app
   _BACKEND_MIN_INSTANCES: '1'
   _BACKEND_MAX_INSTANCES: '3'
+  _GA4_MEASUREMENT_ID: ""  # dev 기본값 빈 문자열 — prod 트리거에서 G-RYHFE7XM3X 주입
 
 steps:
   # ─── Frontend (Next.js standalone) ────────────────────────────────────────
@@ -30,6 +31,8 @@ steps:
       - NEXT_PUBLIC_FASTAPI_URL=${_FASTAPI_URL}
       - --build-arg
       - NEXT_PUBLIC_OAUTH_ENABLED=true
+      - --build-arg
+      - NEXT_PUBLIC_GA4_MEASUREMENT_ID=${_GA4_MEASUREMENT_ID}
       - .
     env:
       - DOCKER_BUILDKIT=1
