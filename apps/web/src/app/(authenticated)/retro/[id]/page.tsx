@@ -11,6 +11,8 @@ import { OperatorTextarea } from '@/components/ui/operator-control';
 import { TopBarSlot } from '@/components/nav/top-bar-slot';
 import { useDashboardContext } from '../../../dashboard/dashboard-shell';
 import type { RetroActionRecord, RetroItemRecord, RetroSessionPhase, RetroSessionRecord } from '@/services/retro-session';
+import { OutcomeResultCard, type OutcomeResult } from '@/components/outcome/outcome-result-card';
+import type { OutcomeStatus } from '@/components/outcome/outcome-status-badge';
 
 type RetroItemCategory = 'good' | 'bad' | 'improve';
 
@@ -47,6 +49,25 @@ export default function RetroSessionPage() {
   const [advancing, setAdvancing] = useState(false);
   const [advanceError, setAdvanceError] = useState<string | null>(null);
   const [votedItemIds, setVotedItemIds] = useState<Set<string>>(new Set());
+
+  const [sprintOutcome, setSprintOutcome] = useState<{
+    status: OutcomeStatus; hypothesis: string | null; result: OutcomeResult | null; metric?: string;
+  } | null>(null);
+
+  useEffect(() => {
+    if (!session?.sprint_id) { setSprintOutcome(null); return; }
+    let cancelled = false;
+    void (async () => {
+      const res = await fetch(`/api/sprints/${session.sprint_id}`);
+      if (!res.ok || cancelled) return;
+      const { data } = await res.json() as { data?: { outcome_status?: string; success_hypothesis?: string | null; outcome_result?: OutcomeResult | null; metric_definition?: { metric?: string } | null } };
+      if (data?.outcome_status && data.outcome_status !== 'n_a') {
+        setSprintOutcome({ status: data.outcome_status as OutcomeStatus, hypothesis: data.success_hypothesis ?? null,
+          result: data.outcome_result ?? null, metric: data.metric_definition?.metric });
+      } else setSprintOutcome(null);
+    })();
+    return () => { cancelled = true; };
+  }, [session?.sprint_id]);
 
   const [newItemText, setNewItemText] = useState<Record<RetroItemCategory, string>>({ good: '', bad: '', improve: '' });
   const [addingItem, setAddingItem] = useState<RetroItemCategory | null>(null);
@@ -277,6 +298,19 @@ export default function RetroSessionPage() {
             />
           ) : (
             <>
+              {/* Linked sprint outcome card */}
+              {sprintOutcome ? (
+                <div className="space-y-2">
+                  <p className="text-[10px] font-semibold uppercase tracking-[0.18em] text-muted-foreground">{t('linkedSprintOutcome')}</p>
+                  <OutcomeResultCard
+                    status={sprintOutcome.status}
+                    hypothesis={sprintOutcome.hypothesis}
+                    result={sprintOutcome.result}
+                    pendingMetricLabel={sprintOutcome.metric}
+                  />
+                </div>
+              ) : null}
+
               {/* Items grid */}
               {showItems ? (
                 <div className="grid grid-cols-1 gap-4 md:grid-cols-3">

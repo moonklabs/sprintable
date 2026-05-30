@@ -1023,7 +1023,8 @@
     "advanceFailed": "단계 전환에 실패했습니다.",
     "addItemFailed": "항목 추가에 실패했습니다.",
     "voteFailed": "투표에 실패했습니다.",
-    "addActionFailed": "액션 추가에 실패했습니다."
+    "addActionFailed": "액션 추가에 실패했습니다.",
+    "linkedSprintOutcome": "연결된 스프린트 성과"
   },
   "docs": {
     "title": "문서",
