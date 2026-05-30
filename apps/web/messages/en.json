@@ -1023,7 +1023,8 @@
     "advanceFailed": "Failed to advance phase.",
     "addItemFailed": "Failed to add item.",
     "voteFailed": "Failed to vote.",
-    "addActionFailed": "Failed to add action."
+    "addActionFailed": "Failed to add action.",
+    "linkedSprintOutcome": "Linked sprint outcome"
   },
   "docs": {
     "title": "Documentation",
