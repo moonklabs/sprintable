@@ -66,7 +66,7 @@ export class SprintService {
   }
 
   async update(id: string, input: UpdateSprintInput) {
-    const ALLOWED_FIELDS: (keyof UpdateSprintInput)[] = ['title', 'start_date', 'end_date', 'team_size'];
+    const ALLOWED_FIELDS: (keyof UpdateSprintInput)[] = ['title', 'start_date', 'end_date', 'team_size', 'success_hypothesis', 'metric_definition', 'measure_after'];
     const sanitized: Record<string, unknown> = {};
     for (const key of ALLOWED_FIELDS) { if (key in input) sanitized[key] = input[key]; }
     if (Object.keys(sanitized).length === 0) throw new Error('No valid fields to update');
