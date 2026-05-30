@@ -2,7 +2,24 @@ import uuid
 from datetime import datetime
 from typing import Any
 
-from pydantic import BaseModel, ConfigDict
+from pydantic import BaseModel, ConfigDict, field_validator
+
+_METRIC_SOURCES = frozenset({"internal_ops", "ga4", "manual"})
+_METRIC_DIRECTIONS = frozenset({"up", "down"})
+
+
+def _validate_metric_definition(v: dict | None) -> dict | None:
+    """metric_definition 구조 검증: {metric, source, target, direction} 필수."""
+    if v is None:
+        return v
+    missing = {"metric", "source", "target", "direction"} - v.keys()
+    if missing:
+        raise ValueError(f"metric_definition에 필수 키 누락: {missing}")
+    if v["source"] not in _METRIC_SOURCES:
+        raise ValueError(f"metric_definition.source must be one of {_METRIC_SOURCES}")
+    if v["direction"] not in _METRIC_DIRECTIONS:
+        raise ValueError(f"metric_definition.direction must be one of {_METRIC_DIRECTIONS}")
+    return v
 
 STORY_STATUSES = ("backlog", "ready-for-dev", "in-progress", "in-review", "done")
 STATUS_TRANSITIONS: dict[str, str] = {
@@ -32,6 +49,11 @@ class StoryCreate(BaseModel):
     metric_definition: dict[str, Any] | None = None
     measure_after: datetime | None = None
 
+    @field_validator("metric_definition")
+    @classmethod
+    def validate_metric_definition(cls, v: dict | None) -> dict | None:
+        return _validate_metric_definition(v)
+
 
 class StoryUpdate(BaseModel):
     title: str | None = None
@@ -49,6 +71,11 @@ class StoryUpdate(BaseModel):
     metric_definition: dict[str, Any] | None = None
     measure_after: datetime | None = None
     # outcome_status/outcome_result는 Update 제외 — 채점잡 전용
+
+    @field_validator("metric_definition")
+    @classmethod
+    def validate_metric_definition(cls, v: dict | None) -> dict | None:
+        return _validate_metric_definition(v)
 
 
 class StoryStatusUpdate(BaseModel):

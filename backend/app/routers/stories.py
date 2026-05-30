@@ -130,6 +130,9 @@ async def create_story(
         description=body.description,
         acceptance_criteria=body.acceptance_criteria,
         position=body.position,
+        success_hypothesis=body.success_hypothesis,
+        metric_definition=body.metric_definition,
+        measure_after=body.measure_after,
     )
     return StoryResponse.model_validate(story)
 

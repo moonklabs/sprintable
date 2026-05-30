@@ -302,3 +302,74 @@ async def test_kickoff_sprint_200():
         assert body["sprint_id"] == str(SPRINT_ID)
     finally:
         app.dependency_overrides.clear()
+
+
+# ── E-OUTCOME-LOOP S2: 의도필드 + metric_definition 검증 ──────────────────────
+
+_VALID_METRIC = {"metric": "retention", "source": "internal_ops", "target": 0.8, "direction": "up"}
+
+
+@pytest.mark.anyio
+async def test_create_sprint_with_intent_fields_201():
+    """create에 의도필드 전달 → 201 + repo.create에 의도필드 전달 확인 (AC1/AC2)."""
+    client, session, app = await _client()
+    try:
+        sprint = _mock_sprint()
+        sprint.success_hypothesis = "Retention 80% 달성"
+        sprint.metric_definition = _VALID_METRIC
+        sprint.measure_after = None
+
+        with patch("app.repositories.base.BaseRepository.create", new_callable=AsyncMock) as mock_create:
+            mock_create.return_value = sprint
+
+            async with client as c:
+                resp = await c.post("/api/v2/sprints", json={
+                    "project_id": str(PROJECT_ID),
+                    "org_id": str(ORG_ID),
+                    "title": "Outcome Sprint",
+                    "success_hypothesis": "Retention 80% 달성",
+                    "metric_definition": _VALID_METRIC,
+                })
+
+        assert resp.status_code == 201
+        _, kwargs = mock_create.call_args
+        assert kwargs.get("success_hypothesis") == "Retention 80% 달성"
+        assert kwargs.get("metric_definition") == _VALID_METRIC
+    finally:
+        app.dependency_overrides.clear()
+
+
+@pytest.mark.anyio
+@pytest.mark.parametrize("bad_metric,desc", [
+    ({"source": "manual", "target": 0.8, "direction": "up"}, "metric 키 누락"),
+    ({"metric": "retention", "source": "unknown", "target": 0.8, "direction": "up"}, "source 비정상값"),
+    ({"metric": "retention", "source": "manual", "target": 0.8, "direction": "flat"}, "direction 비정상값"),
+])
+async def test_create_sprint_invalid_metric_definition_422(bad_metric: dict, desc: str):
+    """metric_definition 구조 오류 → 422 (AC3)."""
+    client, session, app = await _client()
+    try:
+        async with client as c:
+            resp = await c.post("/api/v2/sprints", json={
+                "project_id": str(PROJECT_ID),
+                "org_id": str(ORG_ID),
+                "title": "Test Sprint",
+                "metric_definition": bad_metric,
+            })
+        assert resp.status_code == 422, f"expected 422 for {desc}"
+    finally:
+        app.dependency_overrides.clear()
+
+
+@pytest.mark.anyio
+async def test_update_sprint_invalid_metric_definition_422():
+    """update metric_definition 구조 오류 → 422 (AC3)."""
+    client, session, app = await _client()
+    try:
+        async with client as c:
+            resp = await c.patch(f"/api/v2/sprints/{SPRINT_ID}", json={
+                "metric_definition": {"bad": "structure"},
+            })
+        assert resp.status_code == 422
+    finally:
+        app.dependency_overrides.clear()

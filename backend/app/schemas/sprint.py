@@ -2,7 +2,8 @@ import uuid
 from datetime import date, datetime
 from typing import Any
 
-from pydantic import BaseModel, ConfigDict
+from pydantic import BaseModel, ConfigDict, field_validator
+from app.schemas.story import _validate_metric_definition
 
 
 class SprintBase(BaseModel):
@@ -14,6 +15,11 @@ class SprintBase(BaseModel):
     success_hypothesis: str | None = None
     metric_definition: dict[str, Any] | None = None
     measure_after: datetime | None = None
+
+    @field_validator("metric_definition")
+    @classmethod
+    def validate_metric_definition(cls, v: dict | None) -> dict | None:
+        return _validate_metric_definition(v)
 
 
 class SprintCreate(SprintBase):
@@ -35,6 +41,11 @@ class SprintUpdate(BaseModel):
     metric_definition: dict[str, Any] | None = None
     measure_after: datetime | None = None
     # outcome_status/outcome_result는 Update 제외 — 채점잡 전용
+
+    @field_validator("metric_definition")
+    @classmethod
+    def validate_metric_definition(cls, v: dict | None) -> dict | None:
+        return _validate_metric_definition(v)
 
 
 class SprintResponse(SprintBase):
