@@ -212,13 +212,12 @@ export function StoryDetailPanel({ story, tasks, nextTasksCursor = null, loading
     if (updated) onStoryUpdate?.({ ...story, description: updated.description });
   };
 
-  const handleSaveIntent = async (newIntent: OutcomeIntentValue) => {
-    setIntent(newIntent);
+  const handleSaveIntent = async () => {
     setSavingIntent(true);
     await patchStory({
-      success_hypothesis: newIntent.success_hypothesis.trim() || null,
-      metric_definition: newIntent.metric_definition,
-      measure_after: newIntent.measure_after ? `${newIntent.measure_after}T00:00:00Z` : null,
+      success_hypothesis: intent.success_hypothesis.trim() || null,
+      metric_definition: intent.metric_definition,
+      measure_after: intent.measure_after ? `${intent.measure_after}T00:00:00Z` : null,
     });
     setSavingIntent(false);
   };
@@ -532,10 +531,14 @@ export function StoryDetailPanel({ story, tasks, nextTasksCursor = null, loading
               ) : null}
               <OutcomeIntentFields
                 value={intent}
-                onChange={(v) => { void handleSaveIntent(v); }}
+                onChange={setIntent}
                 defaultOpen={!!story.success_hypothesis || !!story.metric_definition}
               />
-              {savingIntent ? <p className="text-[11px] text-muted-foreground">저장 중...</p> : null}
+              <div className="flex justify-end gap-2">
+                <Button size="sm" onClick={() => { void handleSaveIntent(); }} disabled={savingIntent}>
+                  {savingIntent ? t('loading') : t('save')}
+                </Button>
+              </div>
             </div>
 
             {/* Tabs for Tasks, Comments, Activity */}
