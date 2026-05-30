@@ -1,5 +1,6 @@
 import type { PaginationOptions } from '../types';
 import type { RepositoryScopeContext } from './IEpicRepository';
+import type { MetricDefinition, OutcomeResult } from './outcome';
 
 export interface Story {
   id: string;
@@ -15,6 +16,11 @@ export interface Story {
   description: string | null;
   acceptance_criteria: string | null;
   position: number | null;
+  success_hypothesis: string | null;
+  metric_definition: MetricDefinition | null;
+  measure_after: string | null;
+  outcome_status: 'n_a' | 'pending' | 'hit' | 'miss' | null;
+  outcome_result: OutcomeResult | null;
   created_at: string;
   updated_at: string;
   deleted_at: string | null;
@@ -33,6 +39,9 @@ export interface CreateStoryInput {
   description?: string | null;
   acceptance_criteria?: string | null;
   meeting_id?: string | null;
+  success_hypothesis?: string | null;
+  metric_definition?: MetricDefinition | null;
+  measure_after?: string | null;
 }
 
 export interface UpdateStoryInput {
@@ -46,6 +55,9 @@ export interface UpdateStoryInput {
   sprint_id?: string | null;
   assignee_id?: string | null;
   position?: number | null;
+  success_hypothesis?: string | null;
+  metric_definition?: MetricDefinition | null;
+  measure_after?: string | null;
 }
 
 export interface BulkUpdateItem {

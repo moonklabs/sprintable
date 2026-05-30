@@ -91,6 +91,7 @@ export class StoryService {
     const ALLOWED_FIELDS: (keyof UpdateStoryInput)[] = [
       'title', 'status', 'priority', 'story_points', 'description', 'acceptance_criteria',
       'epic_id', 'sprint_id', 'assignee_id', 'position',
+      'success_hypothesis', 'metric_definition', 'measure_after',
     ];
     const sanitized: Record<string, unknown> = {};
     for (const key of ALLOWED_FIELDS) {

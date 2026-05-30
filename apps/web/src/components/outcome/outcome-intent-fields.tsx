@@ -2,8 +2,9 @@
 import { useState } from 'react';
 import { useTranslations } from 'next-intl';
 import { cn } from '@/lib/utils';
+import type { MetricDefinition } from '@sprintable/core-storage';
 
-export interface MetricDefinition { metric: string; source: 'internal_ops' | 'ga4' | 'manual'; target: number; direction: 'up' | 'down'; }
+export type { MetricDefinition };
 export interface OutcomeIntentValue { success_hypothesis: string; metric_definition: MetricDefinition | null; measure_after: string; }
 const INTERNAL_METRICS = ['velocity', 'backlog_remaining', 'progress'] as const;
 

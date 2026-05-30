@@ -1,5 +1,6 @@
 export * from './errors';
 export * from './types';
+export type { MetricDefinition, OutcomeResult } from './interfaces/outcome';
 
 export type {
   IEpicRepository,
