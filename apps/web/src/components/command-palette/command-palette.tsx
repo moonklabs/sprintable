@@ -7,6 +7,7 @@ import { Dialog as DialogPrimitive } from '@base-ui/react/dialog';
 import {
   BookOpen,
   Bot,
+  CalendarRange,
   FolderKanban,
   Inbox,
   LayoutDashboard,
@@ -36,6 +37,7 @@ const ITEMS: CommandItem[] = [
   { id: 'go-inbox', group: 'navigate', icon: Inbox, labelKey: 'goInbox', href: '/inbox', shortcut: ['G', 'I'] },
   { id: 'go-dashboard', group: 'navigate', icon: LayoutDashboard, labelKey: 'goDashboard', href: '/dashboard', shortcut: ['G', 'D'] },
   { id: 'go-board', group: 'navigate', icon: FolderKanban, labelKey: 'goBoard', href: '/board', shortcut: ['G', 'B'] },
+  { id: 'go-sprints', group: 'navigate', icon: CalendarRange, labelKey: 'goSprints', href: '/sprints' },
   { id: 'go-memos', group: 'navigate', icon: MessageSquareMore, labelKey: 'goMemos', href: '/memos', shortcut: ['G', 'M'] },
   { id: 'go-agents', group: 'navigate', icon: Bot, labelKey: 'goAgents', href: '/agents', shortcut: ['G', 'A'] },
   { id: 'go-docs', group: 'navigate', icon: BookOpen, labelKey: 'goDocs', href: '/docs', shortcut: ['G', 'S'] },
