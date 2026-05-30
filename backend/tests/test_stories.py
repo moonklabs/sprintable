@@ -27,6 +27,12 @@ def _mock_story(status: str = "backlog") -> MagicMock:
     s.description = None
     s.acceptance_criteria = None
     s.position = None
+    # E-OUTCOME-LOOP: 신규 필드 (MagicMock이 반환하는 MagicMock 객체가 Pydantic 검증 실패하므로 명시 세팅)
+    s.success_hypothesis = None
+    s.metric_definition = None
+    s.measure_after = None
+    s.outcome_status = "n_a"
+    s.outcome_result = None
     s.created_at = datetime(2026, 5, 1, tzinfo=timezone.utc)
     s.updated_at = datetime(2026, 5, 1, tzinfo=timezone.utc)
     return s
