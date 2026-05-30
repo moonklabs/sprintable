@@ -8,15 +8,29 @@ export type { MetricDefinition };
 export interface OutcomeIntentValue { success_hypothesis: string; metric_definition: MetricDefinition | null; measure_after: string; }
 const INTERNAL_METRICS = ['velocity', 'backlog_remaining', 'progress'] as const;
 
-export function OutcomeIntentFields({ value, onChange, defaultOpen = false }:
-  { value: OutcomeIntentValue; onChange: (v: OutcomeIntentValue) => void; defaultOpen?: boolean }) {
+interface OutcomeIntentFieldsProps {
+  value: OutcomeIntentValue;
+  onChange: (v: OutcomeIntentValue) => void;
+  defaultOpen?: boolean;
+  open?: boolean;
+  onOpenChange?: (open: boolean) => void;
+  context?: 'sprint' | 'story';
+}
+
+export function OutcomeIntentFields({ value, onChange, defaultOpen = false, open: controlledOpen, onOpenChange, context = 'sprint' }: OutcomeIntentFieldsProps) {
   const t = useTranslations('outcomeLoop');
-  const [open, setOpen] = useState(defaultOpen || !!value.success_hypothesis || !!value.metric_definition);
+  const [internalOpen, setInternalOpen] = useState(defaultOpen || !!value.success_hypothesis || !!value.metric_definition);
+  const open = controlledOpen !== undefined ? controlledOpen : internalOpen;
+  const setOpen = (next: boolean) => {
+    setInternalOpen(next);
+    onOpenChange?.(next);
+  };
   const md = value.metric_definition;
   const setMd = (patch: Partial<MetricDefinition>) => {
     const base: MetricDefinition = md ?? { metric: 'velocity', source: 'internal_ops', target: 0, direction: 'up' };
     onChange({ ...value, metric_definition: { ...base, ...patch } });
   };
+  const placeholder = context === 'story' ? t('hypothesisPlaceholder_story') : t('hypothesisPlaceholder');
   if (!open) return (
     <button type="button" onClick={() => setOpen(true)}
       className="w-full rounded-xl border border-dashed border-border py-2.5 text-sm text-muted-foreground transition hover:border-primary hover:text-primary">
@@ -33,7 +47,7 @@ export function OutcomeIntentFields({ value, onChange, defaultOpen = false }:
       <div className="space-y-1">
         <label className="text-xs font-medium text-muted-foreground">{t('hypothesisField')}</label>
         <textarea rows={2} value={value.success_hypothesis} onChange={(e) => onChange({ ...value, success_hypothesis: e.target.value })}
-          placeholder={t('hypothesisPlaceholder')}
+          placeholder={placeholder}
           className="w-full resize-y rounded-xl border border-border bg-background px-3 py-2 text-sm text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-2 focus:ring-primary/40" />
       </div>
       <div className="space-y-1">
