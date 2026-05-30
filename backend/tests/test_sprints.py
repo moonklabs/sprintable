@@ -25,6 +25,12 @@ def _mock_sprint(status: str = "planning") -> MagicMock:
     s.team_size = None
     s.duration = 14
     s.report_doc_id = None
+    # E-OUTCOME-LOOP: 신규 필드 (MagicMock 반환 객체가 Pydantic 검증 실패하므로 명시 세팅)
+    s.success_hypothesis = None
+    s.metric_definition = None
+    s.measure_after = None
+    s.outcome_status = "n_a"
+    s.outcome_result = None
     from datetime import datetime, timezone
     s.created_at = datetime(2026, 5, 1, tzinfo=timezone.utc)
     s.updated_at = datetime(2026, 5, 1, tzinfo=timezone.utc)
