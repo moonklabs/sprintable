@@ -1,5 +1,6 @@
 import uuid
 from datetime import datetime
+from typing import Any
 
 from pydantic import BaseModel, ConfigDict
 
@@ -26,6 +27,10 @@ class StoryCreate(BaseModel):
     description: str | None = None
     acceptance_criteria: str | None = None
     position: int | None = None
+    # E-OUTCOME-LOOP: 의도 필드
+    success_hypothesis: str | None = None
+    metric_definition: dict[str, Any] | None = None
+    measure_after: datetime | None = None
 
 
 class StoryUpdate(BaseModel):
@@ -39,6 +44,11 @@ class StoryUpdate(BaseModel):
     description: str | None = None
     acceptance_criteria: str | None = None
     position: int | None = None
+    # E-OUTCOME-LOOP: 의도 필드 (Update 허용)
+    success_hypothesis: str | None = None
+    metric_definition: dict[str, Any] | None = None
+    measure_after: datetime | None = None
+    # outcome_status/outcome_result는 Update 제외 — 채점잡 전용
 
 
 class StoryStatusUpdate(BaseModel):
@@ -62,5 +72,12 @@ class StoryResponse(BaseModel):
     description: str | None = None
     acceptance_criteria: str | None = None
     position: int | None = None
+    # E-OUTCOME-LOOP: 의도 필드
+    success_hypothesis: str | None = None
+    metric_definition: dict[str, Any] | None = None
+    measure_after: datetime | None = None
+    # E-OUTCOME-LOOP: 채점 필드
+    outcome_status: str = "n_a"
+    outcome_result: dict[str, Any] | None = None
     created_at: datetime
     updated_at: datetime
