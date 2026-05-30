@@ -375,99 +375,157 @@ async def test_update_sprint_invalid_metric_definition_422():
         app.dependency_overrides.clear()
 
 
+
+
 # ── E-OUTCOME-LOOP S3: 채점 로직 테스트 ──────────────────────────────────────
 
 from app.services.outcome_scorer import score_sprint_outcome
 
+_V = 0  # velocity placeholder
+_B = 0  # backlog_remaining placeholder
+_T = 0  # total_points placeholder
+
 
 class TestScoreSprintOutcome:
-    """outcome_scorer.score_sprint_outcome 단위 테스트."""
+    """outcome_scorer.score_sprint_outcome 단위 테스트 (metric 이름 ↔ actual 분기 포함)."""
 
     def test_no_metric_definition_returns_none(self):
         """metric_definition 없음 → None (n_a 유지)."""
-        assert score_sprint_outcome(None, 30) is None
-        assert score_sprint_outcome({}, 30) is None
+        assert score_sprint_outcome(None, 30, 5, 100) is None
+        assert score_sprint_outcome({}, 30, 5, 100) is None
 
     def test_external_source_returns_pending(self):
         """external source(ga4/manual) → pending."""
         for src in ("ga4", "manual"):
             r = score_sprint_outcome(
-                {"source": src, "metric": "m", "target": 100, "direction": "up"}, 50
+                {"source": src, "metric": "velocity", "target": 100, "direction": "up"},
+                velocity=50, backlog_remaining=2, total_points=100,
             )
             assert r is not None
             assert r["outcome_status"] == "pending"
             assert r["outcome_result"] is None
 
-    def test_up_direction_hit_when_actual_ge_target(self):
-        """direction='up', actual >= target → hit."""
+    def test_unknown_metric_returns_pending(self):
+        """지원하지 않는 metric → pending (오채점 차단)."""
+        r = score_sprint_outcome(
+            {"source": "internal_ops", "metric": "custom_metric", "target": 50, "direction": "up"},
+            velocity=60, backlog_remaining=0, total_points=100,
+        )
+        assert r is not None
+        assert r["outcome_status"] == "pending"
+
+    # ── velocity metric ──────────────────────────────────────────────────────
+
+    def test_velocity_up_hit(self):
+        """metric=velocity, direction='up', actual >= target → hit."""
         r = score_sprint_outcome(
             {"source": "internal_ops", "metric": "velocity", "target": 30, "direction": "up"},
-            velocity=30,
+            velocity=30, backlog_remaining=0, total_points=30,
         )
         assert r is not None
         assert r["outcome_status"] == "hit"
         assert r["outcome_result"]["actual"] == 30.0
-        assert r["outcome_result"]["target"] == 30.0
-        assert "scored_at" in r["outcome_result"]
+        assert r["outcome_result"]["metric"] == "velocity"
 
-    def test_up_direction_miss_when_actual_lt_target(self):
-        """direction='up', actual < target → miss."""
+    def test_velocity_up_miss(self):
+        """metric=velocity, direction='up', actual < target → miss."""
         r = score_sprint_outcome(
             {"source": "internal_ops", "metric": "velocity", "target": 50, "direction": "up"},
-            velocity=30,
+            velocity=30, backlog_remaining=0, total_points=50,
         )
         assert r is not None
         assert r["outcome_status"] == "miss"
 
-    def test_down_direction_hit_when_actual_le_target(self):
-        """direction='down', actual <= target → hit."""
-        r = score_sprint_outcome(
-            {"source": "internal_ops", "metric": "backlog", "target": 5, "direction": "down"},
-            velocity=3,
-        )
-        assert r is not None
-        assert r["outcome_status"] == "hit"
-
-    def test_down_direction_miss_when_actual_gt_target(self):
-        """direction='down', actual > target → miss."""
-        r = score_sprint_outcome(
-            {"source": "internal_ops", "metric": "backlog", "target": 5, "direction": "down"},
-            velocity=8,
-        )
-        assert r is not None
-        assert r["outcome_status"] == "miss"
-
-    def test_boundary_exact_target_up_is_hit(self):
-        """경계값: actual == target, direction='up' → hit."""
+    def test_velocity_boundary_exact_target_is_hit(self):
+        """경계값: velocity == target, direction='up' → hit."""
         r = score_sprint_outcome(
             {"source": "internal_ops", "metric": "velocity", "target": 42, "direction": "up"},
-            velocity=42,
+            velocity=42, backlog_remaining=0, total_points=42,
         )
         assert r is not None
         assert r["outcome_status"] == "hit"
 
-    def test_boundary_exact_target_down_is_hit(self):
-        """경계값: actual == target, direction='down' → hit."""
-        r = score_sprint_outcome(
-            {"source": "internal_ops", "metric": "backlog", "target": 10, "direction": "down"},
-            velocity=10,
-        )
-        assert r is not None
-        assert r["outcome_status"] == "hit"
-
-    def test_zero_velocity_with_up_direction(self):
+    def test_zero_velocity_miss(self):
         """velocity=0, direction='up', target>0 → miss."""
         r = score_sprint_outcome(
             {"source": "internal_ops", "metric": "velocity", "target": 10, "direction": "up"},
-            velocity=0,
+            velocity=0, backlog_remaining=5, total_points=10,
         )
         assert r is not None
         assert r["outcome_status"] == "miss"
+
+    # ── backlog_remaining metric ─────────────────────────────────────────────
+
+    def test_backlog_remaining_down_hit(self):
+        """metric=backlog_remaining, direction='down', backlog<=target → hit."""
+        r = score_sprint_outcome(
+            {"source": "internal_ops", "metric": "backlog_remaining", "target": 3, "direction": "down"},
+            velocity=20, backlog_remaining=2, total_points=25,
+        )
+        assert r is not None
+        assert r["outcome_status"] == "hit"
+        assert r["outcome_result"]["actual"] == 2.0
+        assert r["outcome_result"]["metric"] == "backlog_remaining"
+
+    def test_backlog_remaining_down_miss(self):
+        """metric=backlog_remaining, direction='down', backlog>target → miss."""
+        r = score_sprint_outcome(
+            {"source": "internal_ops", "metric": "backlog_remaining", "target": 0, "direction": "down"},
+            velocity=20, backlog_remaining=1, total_points=25,
+        )
+        assert r is not None
+        assert r["outcome_status"] == "miss"
+        assert r["outcome_result"]["actual"] == 1.0
+
+    def test_backlog_remaining_dogfood_zero_target(self):
+        """dogfood: backlog_remaining=0 → target=0, down → hit."""
+        r = score_sprint_outcome(
+            {"source": "internal_ops", "metric": "backlog_remaining", "target": 0, "direction": "down"},
+            velocity=30, backlog_remaining=0, total_points=30,
+        )
+        assert r is not None
+        assert r["outcome_status"] == "hit"
+
+    def test_backlog_remaining_does_not_use_velocity(self):
+        """backlog_remaining metric은 velocity가 아닌 backlog_remaining을 actual로 사용."""
+        # velocity=999 지만 backlog_remaining=5 → target=3 초과 → miss
+        r = score_sprint_outcome(
+            {"source": "internal_ops", "metric": "backlog_remaining", "target": 3, "direction": "down"},
+            velocity=999, backlog_remaining=5, total_points=999,
+        )
+        assert r is not None
+        assert r["outcome_status"] == "miss"
+        assert r["outcome_result"]["actual"] == 5.0
+
+    # ── progress metric ──────────────────────────────────────────────────────
+
+    def test_progress_up_hit(self):
+        """metric=progress, direction='up', progress>=target → hit."""
+        # velocity=80 / total_points=100 → progress=80.0
+        r = score_sprint_outcome(
+            {"source": "internal_ops", "metric": "progress", "target": 80, "direction": "up"},
+            velocity=80, backlog_remaining=2, total_points=100,
+        )
+        assert r is not None
+        assert r["outcome_status"] == "hit"
+        assert r["outcome_result"]["actual"] == 80.0
+
+    def test_progress_zero_total_points(self):
+        """total_points=0 → progress=0.0, target>0 → miss (zero division safe)."""
+        r = score_sprint_outcome(
+            {"source": "internal_ops", "metric": "progress", "target": 50, "direction": "up"},
+            velocity=0, backlog_remaining=0, total_points=0,
+        )
+        assert r is not None
+        assert r["outcome_status"] == "miss"
+        assert r["outcome_result"]["actual"] == 0.0
+
+    # ── output 필드 ──────────────────────────────────────────────────────────
 
     def test_outcome_result_contains_required_fields(self):
         """outcome_result에 metric·target·actual·direction·scored_at 포함."""
         md = {"source": "internal_ops", "metric": "velocity", "target": 20, "direction": "up"}
-        r = score_sprint_outcome(md, velocity=25)
+        r = score_sprint_outcome(md, velocity=25, backlog_remaining=0, total_points=25)
         assert r is not None
         result = r["outcome_result"]
         for key in ("metric", "target", "actual", "direction", "scored_at"):
