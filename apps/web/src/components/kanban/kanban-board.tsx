@@ -278,6 +278,20 @@ export function KanbanBoard({ projectId }: KanbanBoardProps) {
         if (labelsRes.ok) {
           const labelsJson = await labelsRes.json() as LabelData[];
           setOrgLabels(labelsJson);
+          try {
+            const ilRes = await fetch('/api/item-labels?item_type=story');
+            if (ilRes.ok) {
+              const itemLabels = await ilRes.json() as { item_id: string; label_id: string }[];
+              const map: Record<string, LabelData[]> = {};
+              for (const il of itemLabels) {
+                const label = labelsJson.find((l) => l.id === il.label_id);
+                if (label) (map[il.item_id] ??= []).push(label);
+              }
+              setStoryLabelsMap(map);
+            }
+          } catch {
+            // non-critical
+          }
         }
       } catch {
         // non-critical
