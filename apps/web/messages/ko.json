@@ -2257,6 +2257,7 @@
     "cleanPasses": "무정정",
     "corrections": "정정",
     "correctionRounds": "정정 {count}회",
-    "byRole": "역할별"
+    "byRole": "역할별",
+    "gateTabLabel": "게이트"
   }
 }
