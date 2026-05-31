@@ -2122,7 +2122,13 @@
     "noSprintStories": "배정된 스토리가 없습니다.",
     "backlog": "백로그",
     "assign": "추가",
-    "unassign": "제거"
+    "unassign": "제거",
+    "planSection": "실행 계획",
+    "goalLabel": "목표",
+    "goalPlaceholder": "이번 스프린트에서 무엇을 완수하는가?",
+    "capacityLabel": "공수",
+    "teamSizeLabel": "인원",
+    "hypothesisSection": "효과 가설"
   },
   "chats": {
     "title": "채팅",
