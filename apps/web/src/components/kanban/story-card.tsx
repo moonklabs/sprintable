@@ -51,6 +51,7 @@ interface StoryCardProps {
 
 export function StoryCard({ story, epicName, assignee, onClick, onEdit, onChangeStatus, onAssign, onDelete, projectId, onKickoff, lastExecution, blockedBy = [], labels = [], gates = [] }: StoryCardProps) {
   const t = useTranslations('board');
+  const tCage = useTranslations('cage');
   const [contextMenuOpen, setContextMenuOpen] = useState(false);
   const [statusMenuOpen, setStatusMenuOpen] = useState(false);
   const [triggering, setTriggering] = useState(false);
@@ -202,7 +203,7 @@ export function StoryCard({ story, epicName, assignee, onClick, onEdit, onChange
           {gates.filter((g) => g.status === 'pending').map((gate) => (
             <Badge key={gate.id} variant="info" className="gap-1">
               <span>⏸</span>
-              <span>{gate.gate_type} {t('gatePending')}</span>
+              <span>{gate.gate_type} {tCage('gatePending')}</span>
             </Badge>
           ))}
         </div>
