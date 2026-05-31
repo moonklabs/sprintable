@@ -23,7 +23,7 @@ import { KanbanListView } from './kanban-list-view';
 import { KanbanSkeleton } from './kanban-skeleton';
 import { StoryDetailPanel } from './story-detail-panel';
 import { StoryCard } from './story-card';
-import { COLUMNS, VALID_TRANSITIONS, type KanbanStory, type KanbanSprint, type KanbanEpic, type KanbanMember, type ColumnId } from './types';
+import { COLUMNS, VALID_TRANSITIONS, type KanbanStory, type KanbanSprint, type KanbanEpic, type KanbanMember, type ColumnId, type DependencyEdge } from './types';
 
 type DragOverlayCompatProps = {
   children?: React.ReactNode;
@@ -165,6 +165,7 @@ export function KanbanBoard({ projectId }: KanbanBoardProps) {
   }, [projectId]);
 
   const [executionMap, setExecutionMap] = useState<Record<string, { status: string; rule_name?: string | null; completed_at?: string | null }>>({});
+  const [blockedByMap, setBlockedByMap] = useState<Record<string, string[]>>({});
 
   const [selectedStory, setSelectedStory] = useState<KanbanStory | null>(null);
   const selectedStoryRef = useRef<KanbanStory | null>(null);
@@ -248,6 +249,23 @@ export function KanbanBoard({ projectId }: KanbanBoardProps) {
         } catch {
           // non-critical — skip silently
         }
+      }
+
+      try {
+        const graphRes = await fetch('/api/dependencies/graph?item_type=story');
+        if (graphRes.ok) {
+          const graphJson = await graphRes.json() as { edges?: DependencyEdge[] };
+          const map: Record<string, string[]> = {};
+          for (const edge of graphJson.edges ?? []) {
+            if (edge.dep_type === 'blocks') {
+              if (!map[edge.to_id]) map[edge.to_id] = [];
+              map[edge.to_id].push(edge.from_id);
+            }
+          }
+          setBlockedByMap(map);
+        }
+      } catch {
+        // non-critical
       }
     } finally {
       setLoading(false);
@@ -1003,6 +1021,7 @@ export function KanbanBoard({ projectId }: KanbanBoardProps) {
                     onWipDraftChange={(v) => handleWipLimitDraftChange(col.id, v)}
                     onCreateStory={handleCreateStory}
                     executionMap={executionMap}
+                    blockedByMap={blockedByMap}
                     totalCount={columnTotals[col.id]}
                     hasMore={!!columnCursors[col.id]}
                     loadingMore={loadingMoreColumns[col.id] ?? false}

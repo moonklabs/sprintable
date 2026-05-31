@@ -192,7 +192,8 @@
     "kickoffTriggered": "Workflow triggered",
     "kickoffNoMatch": "No matching rule found",
     "kickoffConflict": "Workflow already triggered recently",
-    "kickoffError": "Failed to trigger workflow"
+    "kickoffError": "Failed to trigger workflow",
+    "blockedBy": "blocked by {count}"
   },
   "memos": {
     "title": "Memos",

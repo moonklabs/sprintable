@@ -192,7 +192,8 @@
     "kickoffTriggered": "워크플로우가 실행되었습니다",
     "kickoffNoMatch": "매칭되는 규칙이 없습니다",
     "kickoffConflict": "최근 실행된 워크플로우가 있습니다",
-    "kickoffError": "워크플로우 실행에 실패했습니다"
+    "kickoffError": "워크플로우 실행에 실패했습니다",
+    "blockedBy": "{count}개에 의해 차단됨"
   },
   "memos": {
     "title": "메모",

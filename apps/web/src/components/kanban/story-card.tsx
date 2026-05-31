@@ -6,7 +6,7 @@ import { CSS } from '@dnd-kit/utilities';
 import { useTranslations } from 'next-intl';
 import type { KanbanStory, KanbanMember } from './types';
 import { Badge } from '@/components/ui/badge';
-import { ChevronRight, Rocket, Zap, ZapOff } from 'lucide-react';
+import { AlertTriangle, ChevronRight, Rocket, Zap, ZapOff } from 'lucide-react';
 
 const EPIC_COLORS = [
   'info',
@@ -43,9 +43,10 @@ interface StoryCardProps {
   projectId?: string;
   onKickoff?: (storyId: string, result: 'triggered' | 'no_match' | 'conflict' | 'error') => void;
   lastExecution?: WorkflowExecStatus | null;
+  blockedBy?: string[];
 }
 
-export function StoryCard({ story, epicName, assignee, onClick, onEdit, onChangeStatus, onAssign, onDelete, projectId, onKickoff, lastExecution }: StoryCardProps) {
+export function StoryCard({ story, epicName, assignee, onClick, onEdit, onChangeStatus, onAssign, onDelete, projectId, onKickoff, lastExecution, blockedBy = [] }: StoryCardProps) {
   const t = useTranslations('board');
   const [contextMenuOpen, setContextMenuOpen] = useState(false);
   const [statusMenuOpen, setStatusMenuOpen] = useState(false);
@@ -179,9 +180,17 @@ export function StoryCard({ story, epicName, assignee, onClick, onEdit, onChange
         <div className="absolute inset-0 pointer-events-none rounded-lg border border-transparent bg-gradient-to-r from-accent-claim/10 to-purple-500/10 opacity-50" />
       )}
       {epicName && story.epic_id ? (
-        <Badge variant={getEpicColor(story.epic_id)} className="mb-3 max-w-full">
+        <Badge variant={getEpicColor(story.epic_id)} className="mb-2 max-w-full">
           <span className="min-w-0 truncate leading-none">{epicName}</span>
         </Badge>
+      ) : null}
+      {blockedBy.length > 0 && story.status !== 'done' ? (
+        <div className="mb-2 flex flex-wrap gap-1">
+          <Badge variant="warning" className="gap-1">
+            <AlertTriangle className="size-3 shrink-0" />
+            <span>{t('blockedBy', { count: blockedBy.length })}</span>
+          </Badge>
+        </div>
       ) : null}
       <p className="relative z-10 line-clamp-2 text-sm font-medium leading-5 text-foreground">{story.title}</p>
       <div className="relative z-10 mt-3 flex items-center justify-between gap-2">

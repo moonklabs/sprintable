@@ -5,8 +5,8 @@ import { useTranslations } from 'next-intl';
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
 import rehypeSanitize from 'rehype-sanitize';
-import { Trash2 } from 'lucide-react';
-import type { KanbanStory, KanbanMember } from './types';
+import { AlertTriangle, GitFork, Trash2 } from 'lucide-react';
+import type { KanbanStory, KanbanMember, DependencyEdge } from './types';
 import { OutcomeIntentFields, type OutcomeIntentValue } from '@/components/outcome/outcome-intent-fields';
 import { OutcomeResultCard, type OutcomeResult } from '@/components/outcome/outcome-result-card';
 import { Button } from '@/components/ui/button';
@@ -122,6 +122,9 @@ export function StoryDetailPanel({ story, tasks, nextTasksCursor = null, loading
   const [editingAssignee, setEditingAssignee] = useState(false);
   const [savingAssignee, setSavingAssignee] = useState(false);
 
+  const [deps, setDeps] = useState<DependencyEdge[]>([]);
+  const [loadingDeps, setLoadingDeps] = useState(false);
+
   const handleDelete = useCallback(async () => {
     setDeleting(true);
     try {
@@ -160,6 +163,18 @@ export function StoryDetailPanel({ story, tasks, nextTasksCursor = null, loading
       titleInputRef.current?.select();
     }
   }, [editingTitle]);
+
+  useEffect(() => {
+    setLoadingDeps(true);
+    fetch(`/api/dependencies?item_type=story&item_id=${story.id}`)
+      .then((r) => (r.ok ? r.json() : null))
+      .then((json) => {
+        const raw = Array.isArray(json) ? json : [];
+        setDeps(raw as DependencyEdge[]);
+      })
+      .catch(() => {})
+      .finally(() => setLoadingDeps(false));
+  }, [story.id]);
 
   const statusKeyMap: Record<string, 'backlog' | 'readyForDev' | 'inProgress' | 'inReview' | 'done'> = {
     backlog: 'backlog',
@@ -520,6 +535,36 @@ export function StoryDetailPanel({ story, tasks, nextTasksCursor = null, loading
                 </button>
               )}
             </div>
+
+            {/* Dependencies — per-item graph v1 */}
+            {(loadingDeps || deps.length > 0) && (
+              <div>
+                <div className="mb-2 flex items-center gap-1.5 text-[10px] font-mono uppercase tracking-wider text-muted-foreground">
+                  <GitFork className="size-3" />
+                  <span>Dependencies</span>
+                </div>
+                {loadingDeps ? (
+                  <p className="text-xs text-muted-foreground">{t('loading')}</p>
+                ) : (
+                  <div className="space-y-1.5">
+                    {deps.filter((d) => d.dep_type === 'blocks' && d.to_id === story.id).map((d) => (
+                      <div key={d.id} className="flex items-center gap-2 rounded-md border border-warning-border bg-warning-tint px-2.5 py-1.5 text-xs text-warning">
+                        <AlertTriangle className="size-3 shrink-0" />
+                        <span className="font-medium">Blocked by</span>
+                        <span className="font-mono text-warning/80">#{d.from_id.slice(0, 6)}</span>
+                      </div>
+                    ))}
+                    {deps.filter((d) => d.dep_type === 'blocks' && d.from_id === story.id).map((d) => (
+                      <div key={d.id} className="flex items-center gap-2 rounded-md border border-border bg-muted/40 px-2.5 py-1.5 text-xs text-muted-foreground">
+                        <GitFork className="size-3 shrink-0" />
+                        <span className="font-medium">Blocking</span>
+                        <span className="font-mono">#{d.to_id.slice(0, 6)}</span>
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </div>
+            )}
 
             {/* Outcome intent + result */}
             <div className="space-y-3">
