@@ -272,11 +272,13 @@ async def delete_story(
 ) -> dict:
     from app.repositories.dependency import DependencyRepository
     from app.repositories.label import ItemLabelRepository
+    from app.repositories.participation import ParticipationRepository
     ok = await repo.delete(id)
     if not ok:
         raise HTTPException(status_code=404, detail="Story not found")
     await DependencyRepository(session, org_id).delete_by_item(id, "story")
     await ItemLabelRepository(session, org_id).delete_by_item(id, "story")
+    await ParticipationRepository(session, org_id).delete_by_story(id)
     return {"ok": True}
 
 
