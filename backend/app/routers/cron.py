@@ -281,7 +281,7 @@ async def score_ga4_outcomes(
                     total = len(rows)
                     done = sum(1 for s in rows if s == "done")
                     pct = round((done / total * 100) if total > 0 else 0.0, 2)
-                    result = score_epic_outcome(md, pct, total, done)
+                    result = score_epic_outcome(md, pct)
                     if result is None:
                         continue
                     scoring = result

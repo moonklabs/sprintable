@@ -114,16 +114,12 @@ def score_sprint_outcome(
 def score_epic_outcome(
     metric_definition: dict[str, Any] | None,
     completion_pct: float,
-    total_stories: int,
-    done_stories: int,
 ) -> dict[str, Any] | None:
     """internal_ops 기반 에픽 채점 (cron 호출).
 
     Args:
         metric_definition: epic.metric_definition JSONB
-        completion_pct:    하위 스토리 완료율 (done_stories / total_stories * 100)
-        total_stories:     에픽 하위 전체 스토리 수
-        done_stories:      완료(done) 스토리 수
+        completion_pct:    하위 스토리 완료율 (done_stories / total_stories * 100), 호출자가 계산
 
     Returns:
         None → n_a 유지
