@@ -185,13 +185,14 @@ class AnalyticsRepository:
         if member_r.scalar_one_or_none() is None:
             return None  # type: ignore[return-value]
 
-        # stories 기반 실제 기여 지표
+        # stories 기반 실제 기여 지표 (is_excluded=true 오염 데이터 제외)
         stories_r = await self.session.execute(
             select(Story.status, Story.story_points, Story.created_at, Story.updated_at)
             .where(
                 Story.assignee_id == agent_id,
                 Story.org_id == self.org_id,
                 Story.deleted_at.is_(None),
+                Story.is_excluded.is_(False),
             )
         )
         all_stories = stories_r.all()

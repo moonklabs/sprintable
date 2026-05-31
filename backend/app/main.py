@@ -30,7 +30,7 @@ async def lifespan(app: FastAPI):
             pass
 
 
-from app.routers import account, activity_logs, agent_deployments, agent_inbox, agent_personas, agent_routing_rules, agent_runs, agent_sessions, analytics, api_keys, audit_logs, auth, bridge, channel, conversations, cron, current_project, dashboard, dependencies, dispatch, docs, entities, epics, event_notifications, events, file_locks, health, hitl, integrations, invite_accept, invitations, labels, me, meetings, members, mockups, notification_preferences, notifications, open_api_keys, org_invites, org_members, organizations, oss, participation, plan_features, policy_documents, presence, project_access, project_settings, projects, retros, rewards, sprints, standups, stories, subscription, tasks, team_members, verdicts, webhooks, workflow_executions, workflow_recipes, workflow_report, workflow_templates, workflow_trigger, workflow_trigger_types, workflow_versions, ws_chat
+from app.routers import account, activity_logs, agent_deployments, agent_inbox, agent_personas, agent_routing_rules, agent_runs, agent_sessions, analytics, api_keys, audit_logs, auth, bridge, channel, conversations, cron, current_project, dashboard, dependencies, dispatch, docs, entities, epics, event_notifications, events, exclusion, file_locks, health, hitl, integrations, invite_accept, invitations, labels, me, meetings, members, mockups, notification_preferences, notifications, open_api_keys, org_invites, org_members, organizations, oss, participation, plan_features, policy_documents, presence, project_access, project_settings, projects, retros, rewards, sprints, standups, stories, subscription, tasks, team_members, verdicts, webhooks, workflow_executions, workflow_recipes, workflow_report, workflow_templates, workflow_trigger, workflow_trigger_types, workflow_versions, ws_chat
 
 app = FastAPI(
     title="Sprintable API v2",
@@ -115,6 +115,7 @@ app.include_router(labels.router)
 app.include_router(labels.item_label_router)
 app.include_router(participation.router)
 app.include_router(verdicts.router)
+app.include_router(exclusion.router)
 app.include_router(tasks.router)
 app.include_router(docs.router)
 app.include_router(meetings.router)

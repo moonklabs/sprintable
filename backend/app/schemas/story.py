@@ -88,6 +88,8 @@ class StoryUpdate(BaseModel):
     metric_definition: dict[str, Any] | None = None
     measure_after: datetime | None = None
     # outcome_status/outcome_result는 Update 제외 — 채점잡 전용
+    # E-CAGE-REFEREE P1: 오염 마킹 (PO 직접 플래그, 자동 대량 마킹 금지)
+    is_excluded: bool | None = None
 
     @field_validator("metric_definition")
     @classmethod
@@ -123,5 +125,7 @@ class StoryResponse(BaseModel):
     # E-OUTCOME-LOOP: 채점 필드
     outcome_status: str = "n_a"
     outcome_result: dict[str, Any] | None = None
+    # E-CAGE-REFEREE P1: 오염 마킹
+    is_excluded: bool = False
     created_at: datetime
     updated_at: datetime
