@@ -25,6 +25,9 @@ def _mock_sprint(status: str = "planning") -> MagicMock:
     s.team_size = None
     s.duration = 14
     s.report_doc_id = None
+    # E-BOARD-SCHEMA S4: 신규 2필드
+    s.goal = None
+    s.capacity = None
     # E-OUTCOME-LOOP: 신규 필드 (MagicMock 반환 객체가 Pydantic 검증 실패하므로 명시 세팅)
     s.success_hypothesis = None
     s.metric_definition = None
@@ -677,3 +680,89 @@ class TestGa4MetricDefinitionValidation:
         r = score_sprint_outcome(md, velocity=30, backlog_remaining=0, total_points=30)
         assert r is not None
         assert r["outcome_status"] == "pending"
+
+
+# ── E-BOARD-SCHEMA S4: goal/capacity round-trip 테스트 ────────────────────────
+
+@pytest.mark.anyio
+async def test_create_sprint_with_goal_capacity_201():
+    """sprint create 시 goal·capacity 필드가 라우터→repo.create까지 실제 전달됨을 검증."""
+    sprint = _mock_sprint()
+    sprint.goal = "유저 온보딩 플로우 완성"
+    sprint.capacity = 40
+
+    client, session, app = await _client()
+    try:
+        with patch("app.repositories.base.BaseRepository.create", new_callable=AsyncMock) as mock_create:
+            mock_create.return_value = sprint
+            async with client as c:
+                resp = await c.post("/api/v2/sprints", json={
+                    "project_id": str(PROJECT_ID),
+                    "org_id": str(ORG_ID),
+                    "title": "Sprint 1",
+                    "goal": "유저 온보딩 플로우 완성",
+                    "capacity": 40,
+                })
+        assert resp.status_code == 201
+        assert resp.json()["goal"] == "유저 온보딩 플로우 완성"
+        assert resp.json()["capacity"] == 40
+        # 라우터가 실제로 goal/capacity를 repo.create에 전달했는지 검증
+        call_kwargs = mock_create.call_args[1]
+        assert call_kwargs.get("goal") == "유저 온보딩 플로우 완성"
+        assert call_kwargs.get("capacity") == 40
+    finally:
+        app.dependency_overrides.clear()
+
+
+@pytest.mark.anyio
+async def test_update_sprint_goal_capacity_200():
+    """sprint update 시 goal·capacity 업데이트 검증."""
+    updated = _mock_sprint()
+    updated.goal = "API 안정화"
+    updated.capacity = 30
+
+    client, session, app = await _client()
+    try:
+        with patch("app.repositories.base.BaseRepository.update", new_callable=AsyncMock) as mock_update:
+            mock_update.return_value = updated
+            async with client as c:
+                resp = await c.patch(f"/api/v2/sprints/{SPRINT_ID}", json={
+                    "goal": "API 안정화",
+                    "capacity": 30,
+                })
+        assert resp.status_code == 200
+        assert resp.json()["goal"] == "API 안정화"
+        assert resp.json()["capacity"] == 30
+    finally:
+        app.dependency_overrides.clear()
+
+
+@pytest.mark.anyio
+async def test_sprint_goal_independent_from_success_hypothesis():
+    """goal(실행목표)과 success_hypothesis(효과가설)가 독립 필드임을 검증."""
+    sprint = _mock_sprint()
+    sprint.goal = "온보딩 완성"
+    sprint.success_hypothesis = "DAU 20% 증가 기대"
+    sprint.capacity = 35
+
+    client, session, app = await _client()
+    try:
+        with patch("app.repositories.base.BaseRepository.create", new_callable=AsyncMock) as mock_create:
+            mock_create.return_value = sprint
+            async with client as c:
+                resp = await c.post("/api/v2/sprints", json={
+                    "project_id": str(PROJECT_ID),
+                    "org_id": str(ORG_ID),
+                    "title": "Sprint 1",
+                    "goal": "온보딩 완성",
+                    "success_hypothesis": "DAU 20% 증가 기대",
+                    "capacity": 35,
+                })
+        assert resp.status_code == 201
+        body = resp.json()
+        assert body["goal"] == "온보딩 완성"
+        assert body["success_hypothesis"] == "DAU 20% 증가 기대"
+        assert body["goal"] != body["success_hypothesis"]
+        assert body["capacity"] == 35
+    finally:
+        app.dependency_overrides.clear()
