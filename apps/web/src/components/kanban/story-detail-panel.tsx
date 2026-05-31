@@ -5,9 +5,10 @@ import { useTranslations } from 'next-intl';
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
 import rehypeSanitize from 'rehype-sanitize';
-import { AlertTriangle, GitFork, Tag, Trash2, X } from 'lucide-react';
+import { AlertTriangle, GitFork, Plus, Tag, Trash2, X } from 'lucide-react';
 import type { KanbanStory, KanbanMember, DependencyEdge } from './types';
 import { LabelChip, LABEL_PRESET_COLORS, type LabelData } from '@/components/ui/label-chip';
+import { DependencyGraph } from './dependency-graph';
 import { OutcomeIntentFields, type OutcomeIntentValue } from '@/components/outcome/outcome-intent-fields';
 import { OutcomeResultCard, type OutcomeResult } from '@/components/outcome/outcome-result-card';
 import { Button } from '@/components/ui/button';
@@ -54,6 +55,7 @@ interface StoryDetailPanelProps {
   members?: KanbanMember[];
   storyMap?: Record<string, { title: string; status: string }>;
   onNavigate?: (storyId: string) => void;
+  projectId?: string;
 }
 
 function taskTone(status: string) {
@@ -89,7 +91,7 @@ function DescriptionViewer({ description }: { description: string }) {
   );
 }
 
-export function StoryDetailPanel({ story, tasks, nextTasksCursor = null, loadingMoreTasks = false, onLoadMoreTasks, onClose, onStoryUpdate, onDeleteSuccess, memberMap = {}, members = [], storyMap = {}, onNavigate }: StoryDetailPanelProps) {
+export function StoryDetailPanel({ story, tasks, nextTasksCursor = null, loadingMoreTasks = false, onLoadMoreTasks, onClose, onStoryUpdate, onDeleteSuccess, memberMap = {}, members = [], storyMap = {}, onNavigate, projectId }: StoryDetailPanelProps) {
   const t = useTranslations('board');
   const { toasts, addToast, dismissToast } = useToast();
   const [showDeleteConfirm, setShowDeleteConfirm] = useState(false);
@@ -127,6 +129,11 @@ export function StoryDetailPanel({ story, tasks, nextTasksCursor = null, loading
 
   const [deps, setDeps] = useState<DependencyEdge[]>([]);
   const [loadingDeps, setLoadingDeps] = useState(false);
+  const [showAddDep, setShowAddDep] = useState(false);
+  const [depQuery, setDepQuery] = useState('');
+  const [depQueryResults, setDepQueryResults] = useState<{ id: string; title: string }[]>([]);
+  const [depType, setDepType] = useState<'blocks' | 'depends_on'>('blocks');
+  const [addingDep, setAddingDep] = useState(false);
 
   const [storyLabels, setStoryLabels] = useState<(LabelData & { itemLabelId: string })[]>([]);
   const [orgLabels, setOrgLabels] = useState<LabelData[]>([]);
@@ -232,6 +239,56 @@ export function StoryDetailPanel({ story, tasks, nextTasksCursor = null, loading
     } finally {
       setCreatingLabel(false);
     }
+  };
+
+  useEffect(() => {
+    if (!depQuery.trim() || depQuery.length < 2) { setDepQueryResults([]); return; }
+    const tid = setTimeout(() => {
+      const params = new URLSearchParams({ q: depQuery });
+      if (projectId) params.set('project_id', projectId);
+      fetch(`/api/stories?${params}`)
+        .then((r) => r.ok ? r.json() : null)
+        .then((json) => {
+          const results = (json?.data ?? []) as { id: string; title: string }[];
+          setDepQueryResults(results.filter((s) => s.id !== story.id).slice(0, 6));
+        })
+        .catch(() => {});
+    }, 300);
+    return () => clearTimeout(tid);
+  }, [depQuery, story.id, projectId]);
+
+  const handleAddDep = async (targetId: string) => {
+    setAddingDep(true);
+    try {
+      const res = await fetch('/api/dependencies', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ from_id: story.id, to_id: targetId, dep_type: depType, item_type: 'story' }),
+      });
+      if (res.ok) {
+        const dep = await res.json() as DependencyEdge;
+        setDeps((prev) => [...prev, dep]);
+        setDepQuery('');
+        setDepQueryResults([]);
+        setShowAddDep(false);
+      } else if (res.status === 409) {
+        addToast({ type: 'warning', title: '이미 연결된 의존성인.' });
+      } else if (res.status === 422) {
+        const json = await res.json().catch(() => null) as { detail?: string } | null;
+        addToast({ type: 'error', title: json?.detail?.includes('사이클') ? '사이클이 발생하는 의존성인.' : '잘못된 의존성인 (자기참조 불가).' });
+      } else {
+        addToast({ type: 'error', title: '의존성 추가에 실패했는.' });
+      }
+    } catch {
+      addToast({ type: 'error', title: '의존성 추가에 실패했는.' });
+    } finally {
+      setAddingDep(false);
+    }
+  };
+
+  const handleRemoveDep = async (depId: string) => {
+    const res = await fetch(`/api/dependencies/${depId}`, { method: 'DELETE' });
+    if (res.ok) setDeps((prev) => prev.filter((d) => d.id !== depId));
   };
 
   useEffect(() => {
@@ -703,55 +760,171 @@ export function StoryDetailPanel({ story, tasks, nextTasksCursor = null, loading
               )}
             </div>
 
-            {/* Dependencies — per-item graph v1 */}
-            {(loadingDeps || deps.length > 0) && (
-              <div>
-                <div className="mb-2 flex items-center gap-1.5 text-[10px] font-mono uppercase tracking-wider text-muted-foreground">
+            {/* Dependencies — v2 (그래프 + 추가 + 경고) */}
+            <div>
+              <div className="mb-2 flex items-center justify-between">
+                <div className="flex items-center gap-1.5 text-[10px] font-mono uppercase tracking-wider text-muted-foreground">
                   <GitFork className="size-3" />
                   <span>Dependencies</span>
                 </div>
-                {loadingDeps ? (
-                  <p className="text-xs text-muted-foreground">{t('loading')}</p>
-                ) : (
-                  <div className="space-y-1.5">
-                    {deps.filter((d) => d.dep_type === 'blocks' && d.to_id === story.id).map((d) => {
-                      const blocker = storyMap[d.from_id];
-                      return (
-                        <button
-                          key={d.id}
-                          type="button"
-                          onClick={() => onNavigate?.(d.from_id)}
-                          className="flex w-full items-center gap-2 rounded-md border border-warning-border bg-warning-tint px-2.5 py-1.5 text-xs text-warning transition hover:bg-warning-tint/70 disabled:pointer-events-none"
-                          disabled={!onNavigate}
-                        >
+                <button
+                  type="button"
+                  onClick={() => setShowAddDep((v) => !v)}
+                  className="flex items-center gap-0.5 rounded px-1.5 py-0.5 text-[10px] text-muted-foreground hover:bg-muted transition-colors"
+                >
+                  <Plus className="size-3" />추가
+                </button>
+              </div>
+
+              {/* 미완선행 경고 strip */}
+              {(() => {
+                const incompletePreds = deps.filter((d) =>
+                  (d.dep_type === 'blocks' && d.to_id === story.id) ||
+                  (d.dep_type === 'depends_on' && d.from_id === story.id)
+                ).filter((d) => {
+                  const otherId = d.dep_type === 'blocks' ? d.from_id : d.to_id;
+                  return storyMap[otherId]?.status !== 'done';
+                });
+                if (incompletePreds.length === 0) return null;
+                return (
+                  <div className="mb-2 flex items-center gap-1.5 rounded-md border border-warning-border bg-warning-tint px-2.5 py-1.5 text-xs text-warning">
+                    <AlertTriangle className="size-3 shrink-0" />
+                    <span>미완료 선행 {incompletePreds.length}건 — 시작 전 확인 권장</span>
+                  </div>
+                );
+              })()}
+
+              {loadingDeps ? (
+                <p className="text-xs text-muted-foreground">{t('loading')}</p>
+              ) : (
+                <div className="space-y-1.5">
+                  {/* 컴팩트 그래프 */}
+                  {deps.length > 0 && (
+                    <div className="mb-2 rounded-lg border border-border bg-muted/10 p-2">
+                      <DependencyGraph
+                        storyId={story.id}
+                        deps={deps}
+                        storyMap={storyMap}
+                        onNavigate={onNavigate}
+                      />
+                    </div>
+                  )}
+
+                  {/* Blocked by (blocks && to_id=story) */}
+                  {deps.filter((d) => d.dep_type === 'blocks' && d.to_id === story.id).map((d) => {
+                    const blocker = storyMap[d.from_id];
+                    return (
+                      <div key={d.id} className="group flex w-full items-center gap-2 rounded-md border border-warning-border bg-warning-tint px-2.5 py-1.5 text-xs text-warning">
+                        <button type="button" onClick={() => onNavigate?.(d.from_id)} className="flex min-w-0 flex-1 items-center gap-2 text-left" disabled={!onNavigate}>
                           <AlertTriangle className="size-3 shrink-0" />
                           <span className="font-medium shrink-0">Blocked by</span>
-                          <span className="min-w-0 truncate text-left">{blocker?.title ?? `#${d.from_id.slice(0, 6)}`}</span>
+                          <span className="min-w-0 truncate">{blocker?.title ?? `#${d.from_id.slice(0, 6)}`}</span>
                           {blocker?.status ? <span className="ml-auto shrink-0 font-mono text-[10px] opacity-60">{blocker.status}</span> : null}
                         </button>
-                      );
-                    })}
-                    {deps.filter((d) => d.dep_type === 'blocks' && d.from_id === story.id).map((d) => {
-                      const blocked = storyMap[d.to_id];
-                      return (
-                        <button
-                          key={d.id}
-                          type="button"
-                          onClick={() => onNavigate?.(d.to_id)}
-                          className="flex w-full items-center gap-2 rounded-md border border-border bg-muted/40 px-2.5 py-1.5 text-xs text-muted-foreground transition hover:bg-muted/60 disabled:pointer-events-none"
-                          disabled={!onNavigate}
-                        >
+                        <button type="button" onClick={() => void handleRemoveDep(d.id)} className="hidden shrink-0 rounded p-0.5 hover:bg-warning/20 group-hover:block" aria-label="Remove">
+                          <X className="size-3" />
+                        </button>
+                      </div>
+                    );
+                  })}
+
+                  {/* Blocking (blocks && from_id=story) */}
+                  {deps.filter((d) => d.dep_type === 'blocks' && d.from_id === story.id).map((d) => {
+                    const blocked = storyMap[d.to_id];
+                    return (
+                      <div key={d.id} className="group flex w-full items-center gap-2 rounded-md border border-border bg-muted/40 px-2.5 py-1.5 text-xs text-muted-foreground">
+                        <button type="button" onClick={() => onNavigate?.(d.to_id)} className="flex min-w-0 flex-1 items-center gap-2 text-left" disabled={!onNavigate}>
                           <GitFork className="size-3 shrink-0" />
                           <span className="font-medium shrink-0">Blocking</span>
-                          <span className="min-w-0 truncate text-left">{blocked?.title ?? `#${d.to_id.slice(0, 6)}`}</span>
+                          <span className="min-w-0 truncate">{blocked?.title ?? `#${d.to_id.slice(0, 6)}`}</span>
                           {blocked?.status ? <span className="ml-auto shrink-0 font-mono text-[10px] opacity-60">{blocked.status}</span> : null}
                         </button>
-                      );
-                    })}
+                        <button type="button" onClick={() => void handleRemoveDep(d.id)} className="hidden shrink-0 rounded p-0.5 hover:bg-muted group-hover:block" aria-label="Remove">
+                          <X className="size-3" />
+                        </button>
+                      </div>
+                    );
+                  })}
+
+                  {/* Depends on (depends_on && from_id=story) — B4 */}
+                  {deps.filter((d) => d.dep_type === 'depends_on' && d.from_id === story.id).map((d) => {
+                    const target = storyMap[d.to_id];
+                    return (
+                      <div key={d.id} className="group flex w-full items-center gap-2 rounded-md border border-border bg-muted/20 px-2.5 py-1.5 text-xs text-muted-foreground">
+                        <button type="button" onClick={() => onNavigate?.(d.to_id)} className="flex min-w-0 flex-1 items-center gap-2 text-left" disabled={!onNavigate}>
+                          <GitFork className="size-3 shrink-0 rotate-90" />
+                          <span className="font-medium shrink-0">Depends on</span>
+                          <span className="min-w-0 truncate">{target?.title ?? `#${d.to_id.slice(0, 6)}`}</span>
+                          {target?.status ? <span className="ml-auto shrink-0 font-mono text-[10px] opacity-60">{target.status}</span> : null}
+                        </button>
+                        <button type="button" onClick={() => void handleRemoveDep(d.id)} className="hidden shrink-0 rounded p-0.5 hover:bg-muted group-hover:block" aria-label="Remove">
+                          <X className="size-3" />
+                        </button>
+                      </div>
+                    );
+                  })}
+
+                  {/* Depended by (depends_on && to_id=story) — B4 */}
+                  {deps.filter((d) => d.dep_type === 'depends_on' && d.to_id === story.id).map((d) => {
+                    const source = storyMap[d.from_id];
+                    return (
+                      <div key={d.id} className="group flex w-full items-center gap-2 rounded-md border border-border bg-muted/20 px-2.5 py-1.5 text-xs text-muted-foreground">
+                        <button type="button" onClick={() => onNavigate?.(d.from_id)} className="flex min-w-0 flex-1 items-center gap-2 text-left" disabled={!onNavigate}>
+                          <GitFork className="size-3 shrink-0 -rotate-90" />
+                          <span className="font-medium shrink-0">Depended by</span>
+                          <span className="min-w-0 truncate">{source?.title ?? `#${d.from_id.slice(0, 6)}`}</span>
+                          {source?.status ? <span className="ml-auto shrink-0 font-mono text-[10px] opacity-60">{source.status}</span> : null}
+                        </button>
+                        <button type="button" onClick={() => void handleRemoveDep(d.id)} className="hidden shrink-0 rounded p-0.5 hover:bg-muted group-hover:block" aria-label="Remove">
+                          <X className="size-3" />
+                        </button>
+                      </div>
+                    );
+                  })}
+                </div>
+              )}
+
+              {/* + 의존성 추가 폼 */}
+              {showAddDep && (
+                <div className="mt-2 space-y-2 rounded-lg border border-border bg-muted/20 p-2">
+                  <div className="flex gap-1">
+                    {(['blocks', 'depends_on'] as const).map((type) => (
+                      <button
+                        key={type}
+                        type="button"
+                        onClick={() => setDepType(type)}
+                        className={`rounded px-2 py-0.5 text-[10px] font-medium transition ${depType === type ? 'bg-primary text-primary-foreground' : 'bg-muted text-muted-foreground hover:text-foreground'}`}
+                      >
+                        {type === 'blocks' ? '차단' : '의존'}
+                      </button>
+                    ))}
                   </div>
-                )}
-              </div>
-            )}
+                  <input
+                    type="text"
+                    value={depQuery}
+                    onChange={(e) => setDepQuery(e.target.value)}
+                    placeholder="스토리 제목으로 검색..."
+                    className="w-full rounded border border-border bg-background px-2 py-1 text-xs focus:outline-none focus:ring-1 focus:ring-primary/40"
+                  />
+                  {depQueryResults.length > 0 && (
+                    <ul className="max-h-32 overflow-y-auto rounded border border-border bg-background">
+                      {depQueryResults.map((s) => (
+                        <li key={s.id}>
+                          <button
+                            type="button"
+                            onClick={() => void handleAddDep(s.id)}
+                            disabled={addingDep}
+                            className="w-full px-2 py-1.5 text-left text-xs hover:bg-muted truncate disabled:opacity-50"
+                          >
+                            {s.title}
+                          </button>
+                        </li>
+                      ))}
+                    </ul>
+                  )}
+                </div>
+              )}
+            </div>
 
             {/* Outcome intent + result */}
             <div className="space-y-3">
