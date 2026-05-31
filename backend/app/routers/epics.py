@@ -109,10 +109,14 @@ async def update_epic(
 async def delete_epic(
     id: uuid.UUID,
     repo: EpicRepository = Depends(_get_repo),
+    session: AsyncSession = Depends(get_db),
+    org_id: uuid.UUID = Depends(get_verified_org_id),
 ) -> dict:
+    from app.repositories.dependency import DependencyRepository
     ok = await repo.delete(id)
     if not ok:
         raise HTTPException(status_code=404, detail="Epic not found")
+    await DependencyRepository(session, org_id).delete_by_item(id, "epic")
     return {"ok": True}
 
 
