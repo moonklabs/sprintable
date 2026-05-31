@@ -12,9 +12,9 @@ interface DependencyGraphProps {
 const MAX_SIDE = 4;
 
 function nodeColor(status: string | undefined, isCurrent: boolean) {
-  if (isCurrent) return { fill: 'var(--color-brand, #6366f1)', text: '#fff', stroke: 'var(--color-brand, #6366f1)' };
-  if (status === 'done') return { fill: 'var(--color-success-tint, #d1fae5)', text: 'var(--color-success, #059669)', stroke: 'var(--color-success-border, #6ee7b7)' };
-  return { fill: 'var(--color-info-tint, #e0f2fe)', text: 'var(--color-info, #0284c7)', stroke: 'var(--color-info-border, #7dd3fc)' };
+  if (isCurrent) return { fill: 'var(--color-brand)', text: 'var(--color-brand-foreground)', stroke: 'var(--color-brand)' };
+  if (status === 'done') return { fill: 'var(--color-success-tint)', text: 'var(--color-success)', stroke: 'var(--color-success-border)' };
+  return { fill: 'var(--color-info-tint)', text: 'var(--color-info)', stroke: 'var(--color-info-border)' };
 }
 
 export function DependencyGraph({ storyId, deps, storyMap, onNavigate }: DependencyGraphProps) {
