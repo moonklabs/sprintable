@@ -56,7 +56,7 @@ export function TrustScoreCard({ memberId, compact = false }: TrustScoreCardProp
   useEffect(() => {
     fetch(`/api/trust-scores?member_id=${memberId}`)
       .then((r) => r.ok ? r.json() : null)
-      .then((json) => setData(((json as { data?: TrustScoreData } | null)?.data ?? null)))
+      .then((json) => setData((json as TrustScoreData | null)))
       .catch(() => {})
       .finally(() => setLoading(false));
   }, [memberId]);
