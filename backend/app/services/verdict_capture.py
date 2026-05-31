@@ -136,3 +136,74 @@ async def capture_pr_ci_verdict(
         recorded.append("ci")
 
     return {"recorded": recorded, "skipped_reason": None}
+
+
+# ── QA·디자인 게이트 verdict 포착 ───────────────────────────────────────────────
+
+async def ensure_review_participation(
+    session: AsyncSession,
+    org_id: uuid.UUID,
+    story_id: uuid.UUID,
+    member_id: uuid.UUID,
+    role_key: str,
+) -> Participation | None:
+    """QA·디자인 역할 participation ensure — 없으면 생성, 있으면 반환.
+
+    implementation(default) 역할 upsert와 달리, QA/디자인은 assignee가 아닌
+    게이트키퍼가 별도로 생성되므로 ensure(없으면 create).
+    role_key가 org에 없으면 None → skip.
+    """
+    from app.repositories.participation import ParticipationRepository
+
+    role_r = await session.execute(
+        select(ParticipationRole).where(
+            ParticipationRole.org_id == org_id,
+            ParticipationRole.key == role_key,
+        ).limit(1)
+    )
+    role = role_r.scalar_one_or_none()
+    if role is None:
+        return None
+
+    p_repo = ParticipationRepository(session, org_id)
+    if not await p_repo.exists(story_id, member_id, role.id):
+        return await p_repo.create(story_id=story_id, member_id=member_id, role_id=role.id)
+
+    existing_r = await session.execute(
+        select(Participation).where(
+            Participation.org_id == org_id,
+            Participation.story_id == story_id,
+            Participation.member_id == member_id,
+            Participation.role_id == role.id,
+        ).limit(1)
+    )
+    return existing_r.scalar_one_or_none()
+
+
+async def capture_review_verdict(
+    session: AsyncSession,
+    org_id: uuid.UUID,
+    story_id: uuid.UUID,
+    role_key: str,
+    member_id: uuid.UUID,
+    result: str | None,
+    rounds: int | None = None,
+) -> dict[str, Any]:
+    """QA/디자인 게이트 결과를 verdict로 기록.
+
+    role_key: 'qa' | 'design' (org participation_role.key)
+    result: 'pass' | 'fail' | None
+    멱등: record_verdict uq(participation_id, source) upsert.
+    role 없거나 story 없으면 skip(거짓기록 금지).
+    """
+    participation = await ensure_review_participation(session, org_id, story_id, member_id, role_key)
+    if participation is None:
+        return {"recorded": False, "skipped_reason": f"no_{role_key}_role"}
+
+    await record_verdict(
+        session, org_id, participation.id,
+        source=role_key,
+        result=result,
+        rounds=rounds,
+    )
+    return {"recorded": True, "source": role_key, "result": result, "skipped_reason": None}
