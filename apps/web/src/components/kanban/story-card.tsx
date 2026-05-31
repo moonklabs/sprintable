@@ -46,9 +46,10 @@ interface StoryCardProps {
   lastExecution?: WorkflowExecStatus | null;
   blockedBy?: string[];
   labels?: { id: string; name: string; color: string | null }[];
+  gates?: { id: string; gate_type: string; status: string }[];
 }
 
-export function StoryCard({ story, epicName, assignee, onClick, onEdit, onChangeStatus, onAssign, onDelete, projectId, onKickoff, lastExecution, blockedBy = [], labels = [] }: StoryCardProps) {
+export function StoryCard({ story, epicName, assignee, onClick, onEdit, onChangeStatus, onAssign, onDelete, projectId, onKickoff, lastExecution, blockedBy = [], labels = [], gates = [] }: StoryCardProps) {
   const t = useTranslations('board');
   const [contextMenuOpen, setContextMenuOpen] = useState(false);
   const [statusMenuOpen, setStatusMenuOpen] = useState(false);
@@ -186,8 +187,8 @@ export function StoryCard({ story, epicName, assignee, onClick, onEdit, onChange
           <span className="min-w-0 truncate leading-none">{epicName}</span>
         </Badge>
       ) : null}
-      {/* Zone A meta row — dep 뱃지 + label 칩 */}
-      {(blockedBy.length > 0 && story.status !== 'done') || labels.length > 0 ? (
+      {/* Zone A meta row — dep 뱃지 + label 칩 + gate 뱃지 */}
+      {(blockedBy.length > 0 && story.status !== 'done') || labels.length > 0 || gates.filter((g) => g.status === 'pending').length > 0 ? (
         <div className="mb-2 flex flex-wrap gap-1">
           {blockedBy.length > 0 && story.status !== 'done' ? (
             <Badge variant="warning" className="gap-1">
@@ -197,6 +198,12 @@ export function StoryCard({ story, epicName, assignee, onClick, onEdit, onChange
           ) : null}
           {labels.map((label) => (
             <LabelChip key={label.id} label={label} />
+          ))}
+          {gates.filter((g) => g.status === 'pending').map((gate) => (
+            <Badge key={gate.id} variant="info" className="gap-1">
+              <span>⏸</span>
+              <span>{gate.gate_type} {t('gatePending')}</span>
+            </Badge>
           ))}
         </div>
       ) : null}
