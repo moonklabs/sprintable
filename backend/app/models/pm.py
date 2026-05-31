@@ -1,7 +1,7 @@
 import uuid
 from datetime import date, datetime
 
-from sqlalchemy import BigInteger, Date, DateTime, ForeignKey, Integer, String, Text, func
+from sqlalchemy import BigInteger, Boolean, Date, DateTime, ForeignKey, Integer, String, Text, func
 from sqlalchemy.dialects.postgresql import JSONB, UUID
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
@@ -98,6 +98,8 @@ class Story(Base, OrgScopedMixin, TimestampMixin, SoftDeleteMixin):
     description: Mapped[str | None] = mapped_column(Text, nullable=True)
     acceptance_criteria: Mapped[str | None] = mapped_column(Text, nullable=True)
     position: Mapped[int | None] = mapped_column(BigInteger, nullable=True)
+    # E-CAGE-REFEREE P1: 데이터 오염 마킹 (삭제 아닌 플래그, 신뢰점수 집계 제외용)
+    is_excluded: Mapped[bool] = mapped_column(Boolean, nullable=False, server_default="false", default=False)
     # E-OUTCOME-LOOP: 의도 필드 (intent)
     success_hypothesis: Mapped[str | None] = mapped_column(Text, nullable=True)
     metric_definition: Mapped[dict | None] = mapped_column(JSONB, nullable=True)
