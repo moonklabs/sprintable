@@ -25,6 +25,12 @@ def _mock_epic(status: str = "active") -> MagicMock:
     e.success_criteria = None
     e.target_sp = None
     e.target_date = None
+    # E-BOARD-SCHEMA S1: outcome 필드
+    e.success_hypothesis = None
+    e.metric_definition = None
+    e.measure_after = None
+    e.outcome_status = "n_a"
+    e.outcome_result = None
     e.created_at = datetime(2026, 5, 1, tzinfo=timezone.utc)
     e.updated_at = datetime(2026, 5, 1, tzinfo=timezone.utc)
     return e

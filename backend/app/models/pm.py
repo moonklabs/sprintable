@@ -56,6 +56,13 @@ class Epic(Base, OrgScopedMixin, TimestampMixin):
     success_criteria: Mapped[str | None] = mapped_column(Text, nullable=True)
     target_sp: Mapped[int | None] = mapped_column(Integer, nullable=True)
     target_date: Mapped[date | None] = mapped_column(Date, nullable=True)
+    # E-BOARD-SCHEMA: 의도 필드 (intent)
+    success_hypothesis: Mapped[str | None] = mapped_column(Text, nullable=True)
+    metric_definition: Mapped[dict | None] = mapped_column(JSONB, nullable=True)
+    measure_after: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    # E-BOARD-SCHEMA: 채점 필드 (outcome, 채점잡 전용)
+    outcome_status: Mapped[str] = mapped_column(String(20), nullable=False, server_default="n_a")
+    outcome_result: Mapped[dict | None] = mapped_column(JSONB, nullable=True)
 
     project: Mapped["Project"] = relationship("Project", back_populates="epics")
     stories: Mapped[list["Story"]] = relationship("Story", back_populates="epic", lazy="select")

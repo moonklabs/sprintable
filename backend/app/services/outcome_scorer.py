@@ -1,11 +1,10 @@
-"""E-OUTCOME-LOOP S3/S5: 스프린트·스토리 종료 채점 서비스.
+"""E-OUTCOME-LOOP S3/S5 + E-BOARD-SCHEMA S1: 스프린트·스토리·에픽 종료 채점 서비스.
 
-채점 대상: metric_definition 채워진 sprint/story.
+채점 대상: metric_definition 채워진 sprint/story/epic.
 소스별 처리:
   - source='internal_ops': metric 이름으로 actual 분기.
-      velocity          → done story points 합산
-      backlog_remaining → 미완료(done 아닌) 스토리 수
-      progress          → 완료율 (done_points / total_points * 100)
+      [sprint/story] velocity, backlog_remaining, progress
+      [epic]         completion_pct → 하위 스토리 완료율 (done_stories / total_stories * 100)
       그 외             → pending (오채점 차단)
   - source='ga4': GA4 Data API runReport로 실제값 회수 (S5).
       property_id + ga4_metric + date_range_days 필수.
@@ -20,8 +19,10 @@ from __future__ import annotations
 from datetime import datetime, timezone
 from typing import Any
 
-# internal_ops에서 지원하는 metric 이름 → 회수 키 매핑
+# internal_ops에서 지원하는 metric 이름 (sprint/story 전용)
 _INTERNAL_OPS_METRICS = frozenset({"velocity", "backlog_remaining", "progress"})
+# internal_ops에서 지원하는 epic 전용 metric
+_EPIC_INTERNAL_OPS_METRICS = frozenset({"completion_pct"})
 
 
 def _apply_direction(actual: float, target: float, direction: str) -> str | None:
@@ -95,6 +96,51 @@ def score_sprint_outcome(
         actual_raw = float(backlog_remaining)
     elif metric == "progress":
         actual_raw = round((velocity / total_points * 100) if total_points > 0 else 0.0, 2)
+    else:
+        return {"outcome_status": "pending", "outcome_result": None}
+
+    try:
+        target_f = float(target)  # type: ignore[arg-type]
+    except (TypeError, ValueError):
+        return {"outcome_status": "pending", "outcome_result": None}
+
+    verdict = _apply_direction(actual_raw, target_f, direction or "")
+    if verdict is None:
+        return {"outcome_status": "pending", "outcome_result": None}
+
+    return _build_result(verdict, metric, target_f, actual_raw, direction)
+
+
+def score_epic_outcome(
+    metric_definition: dict[str, Any] | None,
+    completion_pct: float,
+) -> dict[str, Any] | None:
+    """internal_ops 기반 에픽 채점 (cron 호출).
+
+    Args:
+        metric_definition: epic.metric_definition JSONB
+        completion_pct:    하위 스토리 완료율 (done_stories / total_stories * 100), 호출자가 계산
+
+    Returns:
+        None → n_a 유지
+        dict → update에 적용할 kwargs
+    """
+    if not metric_definition:
+        return None
+
+    source = metric_definition.get("source")
+    metric = metric_definition.get("metric")
+    target = metric_definition.get("target")
+    direction = metric_definition.get("direction")
+
+    if source == "ga4":
+        return {"outcome_status": "pending", "outcome_result": None}
+
+    if source != "internal_ops":
+        return {"outcome_status": "pending", "outcome_result": None}
+
+    if metric == "completion_pct":
+        actual_raw: float = round(completion_pct, 2)
     else:
         return {"outcome_status": "pending", "outcome_result": None}
 

@@ -202,8 +202,8 @@ async def score_ga4_outcomes(
     """
     verify_cron(request)
 
-    from app.models.pm import Sprint, Story
-    from app.services.outcome_scorer import score_ga4_outcome
+    from app.models.pm import Epic, Sprint, Story
+    from app.services.outcome_scorer import score_epic_outcome, score_ga4_outcome
 
     now = datetime.now(timezone.utc)
     scored: list[dict] = []
@@ -252,6 +252,48 @@ async def score_ga4_outcomes(
             except Exception as exc:
                 logger.warning("ga4 story scoring failed id=%s: %s", story.id, exc)
                 failed.append({"type": "story", "id": str(story.id), "error": str(exc)})
+
+        # Epic 채점 (GA4 + internal_ops)
+        epic_result = await session.execute(
+            select(Epic).where(
+                Epic.outcome_status == "pending",
+                Epic.measure_after.isnot(None),
+                Epic.measure_after <= now,
+            )
+        )
+        for epic in epic_result.scalars().all():
+            md = epic.metric_definition
+            if not md:
+                continue
+            source = md.get("source")
+            try:
+                if source == "ga4":
+                    scoring = score_ga4_outcome(md)
+                elif source == "internal_ops":
+                    # 하위 스토리 진행률 계산
+                    story_rows = await session.execute(
+                        select(Story.status).where(
+                            Story.epic_id == epic.id,
+                            Story.deleted_at.is_(None),
+                        )
+                    )
+                    rows = story_rows.scalars().all()
+                    total = len(rows)
+                    done = sum(1 for s in rows if s == "done")
+                    pct = round((done / total * 100) if total > 0 else 0.0, 2)
+                    result = score_epic_outcome(md, pct)
+                    if result is None:
+                        continue
+                    scoring = result
+                else:
+                    scoring = {"outcome_status": "pending", "outcome_result": None}
+                # status는 건드리지 않음 — outcome_status/outcome_result만 기록
+                epic.outcome_status = scoring["outcome_status"]
+                epic.outcome_result = scoring["outcome_result"]
+                scored.append({"type": "epic", "id": str(epic.id), "outcome_status": scoring["outcome_status"]})
+            except Exception as exc:
+                logger.warning("epic scoring failed id=%s: %s", epic.id, exc)
+                failed.append({"type": "epic", "id": str(epic.id), "error": str(exc)})
 
         await session.commit()
 
