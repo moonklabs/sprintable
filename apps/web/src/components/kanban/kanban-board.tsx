@@ -1137,6 +1137,11 @@ export function KanbanBoard({ projectId }: KanbanBoardProps) {
             setStories((prev) => prev.filter((s) => s.id !== id));
             setSelectedStory(null);
           }}
+          storyMap={Object.fromEntries(stories.map((s) => [s.id, { title: s.title, status: s.status }]))}
+          onNavigate={(storyId) => {
+            const s = stories.find((x) => x.id === storyId);
+            if (s) void handleStoryClick(s);
+          }}
         />
       )}
     </div>

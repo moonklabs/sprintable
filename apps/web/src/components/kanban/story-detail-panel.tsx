@@ -51,6 +51,8 @@ interface StoryDetailPanelProps {
   onDeleteSuccess?: (storyId: string) => void;
   memberMap?: Record<string, KanbanMember>;
   members?: KanbanMember[];
+  storyMap?: Record<string, { title: string; status: string }>;
+  onNavigate?: (storyId: string) => void;
 }
 
 function taskTone(status: string) {
@@ -86,7 +88,7 @@ function DescriptionViewer({ description }: { description: string }) {
   );
 }
 
-export function StoryDetailPanel({ story, tasks, nextTasksCursor = null, loadingMoreTasks = false, onLoadMoreTasks, onClose, onStoryUpdate, onDeleteSuccess, memberMap = {}, members = [] }: StoryDetailPanelProps) {
+export function StoryDetailPanel({ story, tasks, nextTasksCursor = null, loadingMoreTasks = false, onLoadMoreTasks, onClose, onStoryUpdate, onDeleteSuccess, memberMap = {}, members = [], storyMap = {}, onNavigate }: StoryDetailPanelProps) {
   const t = useTranslations('board');
   const { toasts, addToast, dismissToast } = useToast();
   const [showDeleteConfirm, setShowDeleteConfirm] = useState(false);
@@ -547,20 +549,40 @@ export function StoryDetailPanel({ story, tasks, nextTasksCursor = null, loading
                   <p className="text-xs text-muted-foreground">{t('loading')}</p>
                 ) : (
                   <div className="space-y-1.5">
-                    {deps.filter((d) => d.dep_type === 'blocks' && d.to_id === story.id).map((d) => (
-                      <div key={d.id} className="flex items-center gap-2 rounded-md border border-warning-border bg-warning-tint px-2.5 py-1.5 text-xs text-warning">
-                        <AlertTriangle className="size-3 shrink-0" />
-                        <span className="font-medium">Blocked by</span>
-                        <span className="font-mono text-warning/80">#{d.from_id.slice(0, 6)}</span>
-                      </div>
-                    ))}
-                    {deps.filter((d) => d.dep_type === 'blocks' && d.from_id === story.id).map((d) => (
-                      <div key={d.id} className="flex items-center gap-2 rounded-md border border-border bg-muted/40 px-2.5 py-1.5 text-xs text-muted-foreground">
-                        <GitFork className="size-3 shrink-0" />
-                        <span className="font-medium">Blocking</span>
-                        <span className="font-mono">#{d.to_id.slice(0, 6)}</span>
-                      </div>
-                    ))}
+                    {deps.filter((d) => d.dep_type === 'blocks' && d.to_id === story.id).map((d) => {
+                      const blocker = storyMap[d.from_id];
+                      return (
+                        <button
+                          key={d.id}
+                          type="button"
+                          onClick={() => onNavigate?.(d.from_id)}
+                          className="flex w-full items-center gap-2 rounded-md border border-warning-border bg-warning-tint px-2.5 py-1.5 text-xs text-warning transition hover:bg-warning-tint/70 disabled:pointer-events-none"
+                          disabled={!onNavigate}
+                        >
+                          <AlertTriangle className="size-3 shrink-0" />
+                          <span className="font-medium shrink-0">Blocked by</span>
+                          <span className="min-w-0 truncate text-left">{blocker?.title ?? `#${d.from_id.slice(0, 6)}`}</span>
+                          {blocker?.status ? <span className="ml-auto shrink-0 font-mono text-[10px] opacity-60">{blocker.status}</span> : null}
+                        </button>
+                      );
+                    })}
+                    {deps.filter((d) => d.dep_type === 'blocks' && d.from_id === story.id).map((d) => {
+                      const blocked = storyMap[d.to_id];
+                      return (
+                        <button
+                          key={d.id}
+                          type="button"
+                          onClick={() => onNavigate?.(d.to_id)}
+                          className="flex w-full items-center gap-2 rounded-md border border-border bg-muted/40 px-2.5 py-1.5 text-xs text-muted-foreground transition hover:bg-muted/60 disabled:pointer-events-none"
+                          disabled={!onNavigate}
+                        >
+                          <GitFork className="size-3 shrink-0" />
+                          <span className="font-medium shrink-0">Blocking</span>
+                          <span className="min-w-0 truncate text-left">{blocked?.title ?? `#${d.to_id.slice(0, 6)}`}</span>
+                          {blocked?.status ? <span className="ml-auto shrink-0 font-mono text-[10px] opacity-60">{blocked.status}</span> : null}
+                        </button>
+                      );
+                    })}
                   </div>
                 )}
               </div>

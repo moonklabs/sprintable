@@ -184,7 +184,8 @@ export function StoryCard({ story, epicName, assignee, onClick, onEdit, onChange
           <span className="min-w-0 truncate leading-none">{epicName}</span>
         </Badge>
       ) : null}
-      {blockedBy.length > 0 && story.status !== 'done' ? (
+      {/* Zone A meta row — FE-LABEL도 이 컨테이너 안에 칩 추가 예정 */}
+      {(blockedBy.length > 0 && story.status !== 'done') ? (
         <div className="mb-2 flex flex-wrap gap-1">
           <Badge variant="warning" className="gap-1">
             <AlertTriangle className="size-3 shrink-0" />
