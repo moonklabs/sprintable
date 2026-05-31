@@ -15,6 +15,9 @@ import {
 import { TopBarSlot } from '@/components/nav/top-bar-slot';
 import { EntityDispatchPanel } from '@/components/dispatch/entity-dispatch-panel';
 import { ToastContainer, useToast } from '@/components/ui/toast';
+import { OutcomeStatusBadge } from '@/components/outcome/outcome-status-badge';
+import { OutcomeResultCard, type OutcomeResult } from '@/components/outcome/outcome-result-card';
+import { OutcomeIntentFields, type OutcomeIntentValue } from '@/components/outcome/outcome-intent-fields';
 
 type EpicStatus = 'draft' | 'active' | 'done' | 'archived';
 type EpicPriority = 'critical' | 'high' | 'medium' | 'low';
@@ -42,6 +45,11 @@ interface Epic {
   project_id?: string;
   created_at: string;
   stories?: Story[];
+  success_hypothesis?: string | null;
+  metric_definition?: Record<string, unknown> | null;
+  measure_after?: string | null;
+  outcome_status?: 'n_a' | 'pending' | 'hit' | 'miss' | null;
+  outcome_result?: Record<string, unknown> | null;
 }
 
 // ─── Story status order for grouping ─────────────────────────────────────────
@@ -143,6 +151,11 @@ function EpicEditInline({ epic, onSaved, onCancel }: { epic: Epic; onSaved: (e: 
   const [priority, setPriority] = useState<EpicPriority>(epic.priority);
   const [targetDate, setTargetDate] = useState(epic.target_date?.slice(0, 10) ?? '');
   const [targetSp, setTargetSp] = useState(epic.target_sp !== undefined && epic.target_sp !== null ? String(epic.target_sp) : '');
+  const [intent, setIntent] = useState<OutcomeIntentValue>({
+    success_hypothesis: epic.success_hypothesis ?? '',
+    metric_definition: (epic.metric_definition as import('@sprintable/core-storage').MetricDefinition | null) ?? null,
+    measure_after: epic.measure_after?.slice(0, 10) ?? '',
+  });
   const [saving, setSaving] = useState(false);
 
   const handleSave = useCallback(async () => {
@@ -159,6 +172,9 @@ function EpicEditInline({ epic, onSaved, onCancel }: { epic: Epic; onSaved: (e: 
           success_criteria: successCriteria.trim() || undefined,
           status,
           priority,
+          success_hypothesis: intent.success_hypothesis.trim() || null,
+          metric_definition: intent.metric_definition ?? null,
+          measure_after: intent.measure_after || null,
           ...(targetDate ? { target_date: targetDate } : {}),
           ...(targetSp ? { target_sp: Number(targetSp) } : {}),
         }),
@@ -169,7 +185,7 @@ function EpicEditInline({ epic, onSaved, onCancel }: { epic: Epic; onSaved: (e: 
     } finally {
       setSaving(false);
     }
-  }, [title, description, objective, successCriteria, status, priority, targetDate, targetSp, epic, onSaved]);
+  }, [title, description, objective, successCriteria, status, priority, targetDate, targetSp, intent, epic, onSaved]);
 
   const inputCls = 'w-full rounded-lg border border-border bg-background px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-primary/40';
 
@@ -195,6 +211,7 @@ function EpicEditInline({ epic, onSaved, onCancel }: { epic: Epic; onSaved: (e: 
         <input type="date" value={targetDate} onChange={(e) => setTargetDate(e.target.value)} className={inputCls} />
         <input type="number" min="0" value={targetSp} onChange={(e) => setTargetSp(e.target.value)} className={inputCls} placeholder="목표 SP" />
       </div>
+      <OutcomeIntentFields value={intent} onChange={setIntent} context="epic" />
       <div className="flex justify-end gap-2">
         <Button variant="ghost" size="sm" onClick={onCancel}>취소</Button>
         <Button size="sm" disabled={saving || !title.trim()} onClick={() => void handleSave()}>
@@ -303,6 +320,7 @@ export default function EpicDetailPage() {
           <div className="flex flex-wrap items-center gap-2">
             <Badge variant={statusBadgeVariant(epic.status)}>{epic.status}</Badge>
             <Badge variant={priorityBadgeVariant(epic.priority)}>{epic.priority}</Badge>
+            {epic.outcome_status && epic.outcome_status !== 'n_a' ? <OutcomeStatusBadge status={epic.outcome_status} /> : null}
             {epic.target_date && <span className="text-xs text-muted-foreground">마감: {formatDate(epic.target_date)}</span>}
             {epic.target_sp != null && <span className="text-xs text-muted-foreground">목표 SP: {epic.target_sp}</span>}
           </div>
@@ -335,6 +353,16 @@ export default function EpicDetailPage() {
 
         {!isEditing && (
           <>
+            {/* Outcome result */}
+            {epic.outcome_status && epic.outcome_status !== 'n_a' ? (
+              <OutcomeResultCard
+                status={epic.outcome_status}
+                hypothesis={epic.success_hypothesis ?? null}
+                result={(epic.outcome_result as OutcomeResult | null) ?? null}
+                pendingMetricLabel={(epic.metric_definition as { metric?: string } | null)?.metric ?? undefined}
+              />
+            ) : null}
+
             {/* Description */}
             <section className="space-y-2">
               <h2 className="text-xs font-semibold uppercase tracking-widest text-muted-foreground">설명</h2>
