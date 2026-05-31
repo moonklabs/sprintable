@@ -26,6 +26,10 @@ class Sprint(Base, OrgScopedMixin, TimestampMixin):
     velocity: Mapped[int | None] = mapped_column(Integer, nullable=True)
     team_size: Mapped[int | None] = mapped_column(Integer, nullable=True)
     duration: Mapped[int] = mapped_column(Integer, nullable=False, default=14)
+    # E-BOARD-SCHEMA S4: 스프린트 목표·공수 (goal=실행목표, success_hypothesis=효과가설과 별개)
+    goal: Mapped[str | None] = mapped_column(Text, nullable=True)
+    # capacity=가용 공수(SP), team_size=인원수와 별개
+    capacity: Mapped[int | None] = mapped_column(Integer, nullable=True)
     # E-OUTCOME-LOOP: 의도 필드 (intent)
     success_hypothesis: Mapped[str | None] = mapped_column(Text, nullable=True)
     metric_definition: Mapped[dict | None] = mapped_column(JSONB, nullable=True)
