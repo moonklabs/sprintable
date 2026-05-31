@@ -2,6 +2,7 @@
 import uuid
 
 from fastapi import APIRouter, Depends, HTTPException
+from pydantic import BaseModel
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -19,6 +20,7 @@ from app.schemas.hitl_config import (
     ResolveRequest,
     ResolveResponse,
 )
+from app.services.disposition_advisor import DEFAULT_MIN_VERDICTS, get_disposition_recommendation
 from app.services.gate_resolver import resolve_disposition
 
 router = APIRouter(prefix="/api/v2/gate-config", tags=["gate-config"])
@@ -195,3 +197,111 @@ async def resolve(
         role_id=body.role_id,
         gate_type=body.gate_type,
     )
+
+
+# ── 동적 조절 추천 + 적용 ──────────────────────────────────────────────────────
+
+class RecommendRequest(BaseModel):
+    member_id: uuid.UUID
+    role_id: uuid.UUID
+    role_key: str
+    gate_type: str
+    min_verdicts: int = DEFAULT_MIN_VERDICTS
+    window_days: int = 90
+
+
+class ApplyRecommendationRequest(BaseModel):
+    member_id: uuid.UUID
+    gate_type: str
+    disposition: str
+    apply_as: str = "member"  # "member" | "org_role"
+    role_id: uuid.UUID | None = None
+
+
+@router.post("/recommendations/suggest")
+async def suggest_adjustment(
+    body: RecommendRequest,
+    session: AsyncSession = Depends(get_db),
+    org_id: uuid.UUID = Depends(get_verified_org_id),
+    _auth=Depends(get_current_user),
+) -> dict:
+    """신뢰점수 기반 disposition 조정 추천 (조회만, 자동 적용 없음).
+
+    인간이 추천을 검토 후 /recommendations/apply로 승인해야 반영됨.
+    저표본 가드: min_verdicts 미달 시 추천 없음.
+    """
+    return await get_disposition_recommendation(
+        session=session,
+        org_id=org_id,
+        member_id=body.member_id,
+        role_id=body.role_id,
+        role_key=body.role_key,
+        gate_type=body.gate_type,
+        min_verdicts=body.min_verdicts,
+        window_days=body.window_days,
+    )
+
+
+@router.post("/recommendations/apply")
+async def apply_adjustment(
+    body: ApplyRecommendationRequest,
+    session: AsyncSession = Depends(get_db),
+    org_id: uuid.UUID = Depends(get_verified_org_id),
+    _auth=Depends(get_current_user),
+) -> dict:
+    """인간 승인 후 override 적용.
+
+    ⚠️ 자동 호출 금지 — 반드시 인간이 추천 검토 후 명시 호출.
+    apply_as='member': member_gate_override upsert.
+    apply_as='org_role': org_gate_override upsert (role_id 필수).
+    """
+    from app.models.hitl_config import DISPOSITIONS
+
+    if body.disposition not in DISPOSITIONS:
+        raise HTTPException(status_code=422, detail=f"disposition must be one of {sorted(DISPOSITIONS)}")
+
+    if body.apply_as == "member":
+        r = await session.execute(
+            select(MemberGateOverride).where(
+                MemberGateOverride.org_id == org_id,
+                MemberGateOverride.member_id == body.member_id,
+                MemberGateOverride.gate_type == body.gate_type,
+            ).limit(1)
+        )
+        mo = r.scalar_one_or_none()
+        if mo is None:
+            mo = MemberGateOverride(
+                id=uuid.uuid4(), org_id=org_id,
+                member_id=body.member_id, gate_type=body.gate_type,
+                disposition=body.disposition,
+            )
+            session.add(mo)
+        else:
+            mo.disposition = body.disposition
+        await session.flush()
+        return {"applied": True, "apply_as": "member", "disposition": body.disposition}
+
+    if body.apply_as == "org_role":
+        if body.role_id is None:
+            raise HTTPException(status_code=422, detail="role_id required for org_role apply")
+        r = await session.execute(
+            select(OrgGateOverride).where(
+                OrgGateOverride.org_id == org_id,
+                OrgGateOverride.role_id == body.role_id,
+                OrgGateOverride.gate_type == body.gate_type,
+            ).limit(1)
+        )
+        oo = r.scalar_one_or_none()
+        if oo is None:
+            oo = OrgGateOverride(
+                id=uuid.uuid4(), org_id=org_id,
+                role_id=body.role_id, gate_type=body.gate_type,
+                disposition=body.disposition,
+            )
+            session.add(oo)
+        else:
+            oo.disposition = body.disposition
+        await session.flush()
+        return {"applied": True, "apply_as": "org_role", "disposition": body.disposition}
+
+    raise HTTPException(status_code=422, detail="apply_as must be 'member' or 'org_role'")

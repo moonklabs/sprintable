@@ -4,7 +4,7 @@ from datetime import datetime, timezone
 from typing import Any
 
 from fastapi import APIRouter, Depends, HTTPException, Query
-from pydantic import BaseModel, ConfigDict
+from pydantic import BaseModel, ConfigDict, field_validator
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -24,10 +24,26 @@ class GateCreateRequest(BaseModel):
     role_id: uuid.UUID
     neutral_facts: dict[str, Any] | None = None
 
+    @field_validator("gate_type")
+    @classmethod
+    def validate_gate_type(cls, v: str) -> str:
+        from app.models.hitl_config import GATE_TYPES
+        if v not in GATE_TYPES:
+            raise ValueError(f"gate_type must be one of {sorted(GATE_TYPES)}")
+        return v
+
 
 class GateTransitionRequest(BaseModel):
     status: str
     resolver_id: uuid.UUID | None = None
+
+    @field_validator("status")
+    @classmethod
+    def validate_status(cls, v: str) -> str:
+        from app.models.gate import GATE_STATUSES
+        if v not in GATE_STATUSES:
+            raise ValueError(f"status must be one of {sorted(GATE_STATUSES)}")
+        return v
 
 
 class GateResponse(BaseModel):
