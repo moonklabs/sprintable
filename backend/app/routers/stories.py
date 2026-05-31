@@ -271,10 +271,12 @@ async def delete_story(
     org_id: uuid.UUID = Depends(get_verified_org_id),
 ) -> dict:
     from app.repositories.dependency import DependencyRepository
+    from app.repositories.label import ItemLabelRepository
     ok = await repo.delete(id)
     if not ok:
         raise HTTPException(status_code=404, detail="Story not found")
     await DependencyRepository(session, org_id).delete_by_item(id, "story")
+    await ItemLabelRepository(session, org_id).delete_by_item(id, "story")
     return {"ok": True}
 
 
