@@ -1,5 +1,6 @@
 import uuid
 from datetime import date, datetime
+from typing import Any
 
 from pydantic import BaseModel, ConfigDict
 
@@ -18,6 +19,9 @@ class EpicCreate(BaseModel):
     success_criteria: str | None = None
     target_sp: int | None = None
     target_date: date | None = None
+    success_hypothesis: str | None = None
+    metric_definition: dict[str, Any] | None = None
+    measure_after: datetime | None = None
 
 
 class EpicUpdate(BaseModel):
@@ -30,6 +34,9 @@ class EpicUpdate(BaseModel):
     target_sp: int | None = None
     target_date: date | None = None
     assignee_id: uuid.UUID | None = None
+    success_hypothesis: str | None = None
+    metric_definition: dict[str, Any] | None = None
+    measure_after: datetime | None = None
 
 
 class EpicResponse(BaseModel):
@@ -47,6 +54,11 @@ class EpicResponse(BaseModel):
     success_criteria: str | None = None
     target_sp: int | None = None
     target_date: date | None = None
+    success_hypothesis: str | None = None
+    metric_definition: dict[str, Any] | None = None
+    measure_after: datetime | None = None
+    outcome_status: str = "n_a"
+    outcome_result: dict[str, Any] | None = None
     created_at: datetime
     updated_at: datetime
 
