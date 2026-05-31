@@ -15,7 +15,6 @@ from sqlalchemy.dialects.postgresql import UUID
 from sqlalchemy.orm import Mapped, mapped_column
 
 from app.core.database import Base
-from app.models.base import OrgScopedMixin
 
 POSTURES = frozenset({"conservative", "balanced", "permissive"})
 DISPOSITIONS = frozenset({"allow_auto", "ask", "deny"})
