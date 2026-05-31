@@ -4,6 +4,7 @@ import { useCallback, useEffect, useState } from 'react';
 import { Button } from '@/components/ui/button';
 import { OperatorInput } from '@/components/ui/operator-control';
 import { SectionCard, SectionCardBody, SectionCardHeader } from '@/components/ui/section-card';
+import { TrustScoreCard } from '@/components/cage/trust-score-card';
 
 interface MyProfile {
   id: string;
@@ -99,6 +100,12 @@ export function MyProfileSection() {
             <span className="w-20 shrink-0 text-muted-foreground">역할</span>
             <span>{profile.role}</span>
           </div>
+        </div>
+
+        {/* 신뢰점수 카드 */}
+        <div className="pt-2">
+          <p className="mb-2 text-xs font-medium text-muted-foreground">신뢰 점수</p>
+          <TrustScoreCard memberId={profile.id} />
         </div>
       </SectionCardBody>
     </SectionCard>

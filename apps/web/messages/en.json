@@ -2236,5 +2236,17 @@
     "hypothesisPlaceholder_story": "What would be different if this story succeeds?",
     "metric_completion_pct": "Completion %",
     "hypothesisPlaceholder_epic": "What outcome do we expect by completing this epic?"
+  },
+  "cage": {
+    "trustScoreLabel": "Clean Pass Rate",
+    "trustScoreWindowHint": "Last {days} days",
+    "trustScoreNoData": "No review data yet",
+    "trustScoreNoDataHint": "Score will appear after first review",
+    "trustScorePending": "Pending",
+    "totalReviews": "Reviews",
+    "cleanPasses": "Clean",
+    "corrections": "Rounds",
+    "correctionRounds": "{count} correction(s)",
+    "byRole": "By Role"
   }
 }

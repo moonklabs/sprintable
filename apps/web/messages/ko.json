@@ -2236,5 +2236,17 @@
     "hypothesisPlaceholder_story": "이 스토리가 성공이라면 무엇이 달라지는가?",
     "metric_completion_pct": "완료율 %",
     "hypothesisPlaceholder_epic": "이 에픽을 완수하면 어떤 성과를 기대하는가?"
+  },
+  "cage": {
+    "trustScoreLabel": "무정정 통과율",
+    "trustScoreWindowHint": "최근 {days}일",
+    "trustScoreNoData": "검수 데이터 없음",
+    "trustScoreNoDataHint": "첫 검수 후 점수가 표시됩니다",
+    "trustScorePending": "측정 대기",
+    "totalReviews": "전체",
+    "cleanPasses": "무정정",
+    "corrections": "정정",
+    "correctionRounds": "정정 {count}회",
+    "byRole": "역할별"
   }
 }
