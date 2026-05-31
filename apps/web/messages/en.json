@@ -2122,7 +2122,13 @@
     "noSprintStories": "No stories assigned to this sprint.",
     "backlog": "Backlog",
     "assign": "Add",
-    "unassign": "Remove"
+    "unassign": "Remove",
+    "planSection": "Execution Plan",
+    "goalLabel": "Goal",
+    "goalPlaceholder": "What will the team complete this sprint?",
+    "capacityLabel": "Capacity",
+    "teamSizeLabel": "Team Size",
+    "hypothesisSection": "Outcome Hypothesis"
   },
   "chats": {
     "title": "Chats",
