@@ -5,8 +5,8 @@ import { useTranslations } from 'next-intl';
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
 import rehypeSanitize from 'rehype-sanitize';
-import { Trash2 } from 'lucide-react';
-import type { KanbanStory, KanbanMember } from './types';
+import { AlertTriangle, GitFork, Trash2 } from 'lucide-react';
+import type { KanbanStory, KanbanMember, DependencyEdge } from './types';
 import { OutcomeIntentFields, type OutcomeIntentValue } from '@/components/outcome/outcome-intent-fields';
 import { OutcomeResultCard, type OutcomeResult } from '@/components/outcome/outcome-result-card';
 import { Button } from '@/components/ui/button';
@@ -51,6 +51,8 @@ interface StoryDetailPanelProps {
   onDeleteSuccess?: (storyId: string) => void;
   memberMap?: Record<string, KanbanMember>;
   members?: KanbanMember[];
+  storyMap?: Record<string, { title: string; status: string }>;
+  onNavigate?: (storyId: string) => void;
 }
 
 function taskTone(status: string) {
@@ -86,7 +88,7 @@ function DescriptionViewer({ description }: { description: string }) {
   );
 }
 
-export function StoryDetailPanel({ story, tasks, nextTasksCursor = null, loadingMoreTasks = false, onLoadMoreTasks, onClose, onStoryUpdate, onDeleteSuccess, memberMap = {}, members = [] }: StoryDetailPanelProps) {
+export function StoryDetailPanel({ story, tasks, nextTasksCursor = null, loadingMoreTasks = false, onLoadMoreTasks, onClose, onStoryUpdate, onDeleteSuccess, memberMap = {}, members = [], storyMap = {}, onNavigate }: StoryDetailPanelProps) {
   const t = useTranslations('board');
   const { toasts, addToast, dismissToast } = useToast();
   const [showDeleteConfirm, setShowDeleteConfirm] = useState(false);
@@ -121,6 +123,9 @@ export function StoryDetailPanel({ story, tasks, nextTasksCursor = null, loading
 
   const [editingAssignee, setEditingAssignee] = useState(false);
   const [savingAssignee, setSavingAssignee] = useState(false);
+
+  const [deps, setDeps] = useState<DependencyEdge[]>([]);
+  const [loadingDeps, setLoadingDeps] = useState(false);
 
   const handleDelete = useCallback(async () => {
     setDeleting(true);
@@ -160,6 +165,18 @@ export function StoryDetailPanel({ story, tasks, nextTasksCursor = null, loading
       titleInputRef.current?.select();
     }
   }, [editingTitle]);
+
+  useEffect(() => {
+    setLoadingDeps(true);
+    fetch(`/api/dependencies?item_type=story&item_id=${story.id}`)
+      .then((r) => (r.ok ? r.json() : null))
+      .then((json) => {
+        const raw = Array.isArray(json) ? json : [];
+        setDeps(raw as DependencyEdge[]);
+      })
+      .catch(() => {})
+      .finally(() => setLoadingDeps(false));
+  }, [story.id]);
 
   const statusKeyMap: Record<string, 'backlog' | 'readyForDev' | 'inProgress' | 'inReview' | 'done'> = {
     backlog: 'backlog',
@@ -520,6 +537,56 @@ export function StoryDetailPanel({ story, tasks, nextTasksCursor = null, loading
                 </button>
               )}
             </div>
+
+            {/* Dependencies — per-item graph v1 */}
+            {(loadingDeps || deps.length > 0) && (
+              <div>
+                <div className="mb-2 flex items-center gap-1.5 text-[10px] font-mono uppercase tracking-wider text-muted-foreground">
+                  <GitFork className="size-3" />
+                  <span>Dependencies</span>
+                </div>
+                {loadingDeps ? (
+                  <p className="text-xs text-muted-foreground">{t('loading')}</p>
+                ) : (
+                  <div className="space-y-1.5">
+                    {deps.filter((d) => d.dep_type === 'blocks' && d.to_id === story.id).map((d) => {
+                      const blocker = storyMap[d.from_id];
+                      return (
+                        <button
+                          key={d.id}
+                          type="button"
+                          onClick={() => onNavigate?.(d.from_id)}
+                          className="flex w-full items-center gap-2 rounded-md border border-warning-border bg-warning-tint px-2.5 py-1.5 text-xs text-warning transition hover:bg-warning-tint/70 disabled:pointer-events-none"
+                          disabled={!onNavigate}
+                        >
+                          <AlertTriangle className="size-3 shrink-0" />
+                          <span className="font-medium shrink-0">Blocked by</span>
+                          <span className="min-w-0 truncate text-left">{blocker?.title ?? `#${d.from_id.slice(0, 6)}`}</span>
+                          {blocker?.status ? <span className="ml-auto shrink-0 font-mono text-[10px] opacity-60">{blocker.status}</span> : null}
+                        </button>
+                      );
+                    })}
+                    {deps.filter((d) => d.dep_type === 'blocks' && d.from_id === story.id).map((d) => {
+                      const blocked = storyMap[d.to_id];
+                      return (
+                        <button
+                          key={d.id}
+                          type="button"
+                          onClick={() => onNavigate?.(d.to_id)}
+                          className="flex w-full items-center gap-2 rounded-md border border-border bg-muted/40 px-2.5 py-1.5 text-xs text-muted-foreground transition hover:bg-muted/60 disabled:pointer-events-none"
+                          disabled={!onNavigate}
+                        >
+                          <GitFork className="size-3 shrink-0" />
+                          <span className="font-medium shrink-0">Blocking</span>
+                          <span className="min-w-0 truncate text-left">{blocked?.title ?? `#${d.to_id.slice(0, 6)}`}</span>
+                          {blocked?.status ? <span className="ml-auto shrink-0 font-mono text-[10px] opacity-60">{blocked.status}</span> : null}
+                        </button>
+                      );
+                    })}
+                  </div>
+                )}
+              </div>
+            )}
 
             {/* Outcome intent + result */}
             <div className="space-y-3">

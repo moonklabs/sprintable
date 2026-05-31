@@ -16,6 +16,14 @@ export interface KanbanStory {
   measure_after: string | null;
   outcome_status: 'n_a' | 'pending' | 'hit' | 'miss' | null;
   outcome_result: OutcomeResult | null;
+  blocked_by?: string[];
+}
+
+export interface DependencyEdge {
+  id: string;
+  from_id: string;
+  to_id: string;
+  dep_type: 'blocks' | 'depends_on';
 }
 
 export interface KanbanEpic {
