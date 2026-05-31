@@ -450,3 +450,28 @@ async def test_delete_epic_cleans_up_dependencies():
             mock_cleanup.assert_called_once_with(epic_id, "epic")
     finally:
         app.dependency_overrides.clear()
+
+
+@pytest.mark.anyio
+async def test_delete_sprint_cleans_up_dependencies():
+    """스프린트 삭제 시 연관 의존행 cleanup 호출 검증."""
+    from unittest.mock import patch
+
+    sprint_id = uuid.uuid4()
+    mock_session = AsyncMock()
+    mock_result = MagicMock()
+    mock_result.scalar_one_or_none.return_value = MagicMock()
+    mock_session.execute = AsyncMock(return_value=mock_result)
+    mock_session.delete = AsyncMock()
+    mock_session.flush = AsyncMock()
+
+    client, app = await _make_client(mock_session)
+    try:
+        with patch("app.repositories.dependency.DependencyRepository.delete_by_item", new_callable=AsyncMock) as mock_cleanup:
+            mock_cleanup.return_value = 0
+            async with client as c:
+                resp = await c.delete(f"/api/v2/sprints/{sprint_id}")
+            assert resp.status_code == 200
+            mock_cleanup.assert_called_once_with(sprint_id, "sprint")
+    finally:
+        app.dependency_overrides.clear()
