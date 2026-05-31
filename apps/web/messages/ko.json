@@ -2238,6 +2238,16 @@
     "hypothesisPlaceholder_epic": "이 에픽을 완수하면 어떤 성과를 기대하는가?"
   },
   "cage": {
+    "gatePending": "게이트 대기",
+    "gateApprove": "승인",
+    "gateReject": "반려",
+    "gateRejectTitle": "게이트 반려",
+    "gateRejectNotePlaceholder": "사유 (선택)",
+    "gateRejectConfirm": "반려 확정",
+    "gateInboxLoading": "게이트 조회 중...",
+    "gateInboxEmpty": "대기 중인 게이트 없음",
+    "gateInboxEmptyHint": "검수 대기 중인 게이트가 여기 표시됩니다",
+    "cancel": "취소",
     "trustScoreLabel": "무정정 통과율",
     "trustScoreWindowHint": "최근 {days}일",
     "trustScoreNoData": "검수 데이터 없음",

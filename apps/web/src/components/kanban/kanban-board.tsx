@@ -23,7 +23,7 @@ import { KanbanListView } from './kanban-list-view';
 import { KanbanSkeleton } from './kanban-skeleton';
 import { StoryDetailPanel } from './story-detail-panel';
 import { StoryCard } from './story-card';
-import { COLUMNS, VALID_TRANSITIONS, type KanbanStory, type KanbanSprint, type KanbanEpic, type KanbanMember, type ColumnId, type DependencyEdge } from './types';
+import { COLUMNS, VALID_TRANSITIONS, type KanbanStory, type KanbanSprint, type KanbanEpic, type KanbanMember, type ColumnId, type DependencyEdge, type GateItem } from './types';
 import type { LabelData } from '@/components/ui/label-chip';
 
 type DragOverlayCompatProps = {
@@ -171,6 +171,7 @@ export function KanbanBoard({ projectId }: KanbanBoardProps) {
   const [storyLabelsMap, setStoryLabelsMap] = useState<Record<string, LabelData[]>>({});
   const [selectedLabelIds, setSelectedLabelIds] = useState<string[]>([]);
   const [labelSearch, setLabelSearch] = useState('');
+  const [storyGatesMap, setStoryGatesMap] = useState<Record<string, { id: string; gate_type: string; status: string }[]>>({});
 
   const [selectedStory, setSelectedStory] = useState<KanbanStory | null>(null);
   const selectedStoryRef = useRef<KanbanStory | null>(null);
@@ -292,6 +293,21 @@ export function KanbanBoard({ projectId }: KanbanBoardProps) {
           } catch {
             // non-critical
           }
+        }
+      } catch {
+        // non-critical
+      }
+
+      try {
+        const gatesRes = await fetch('/api/gates?status=pending&work_item_type=story');
+        if (gatesRes.ok) {
+          const gatesJson = await gatesRes.json() as GateItem[];
+          const gmap: Record<string, { id: string; gate_type: string; status: string }[]> = {};
+          for (const g of gatesJson) {
+            if (!gmap[g.work_item_id]) gmap[g.work_item_id] = [];
+            gmap[g.work_item_id].push({ id: g.id, gate_type: g.gate_type, status: g.status });
+          }
+          setStoryGatesMap(gmap);
         }
       } catch {
         // non-critical
@@ -1117,6 +1133,7 @@ export function KanbanBoard({ projectId }: KanbanBoardProps) {
                     executionMap={executionMap}
                     blockedByMap={blockedByMap}
                     storyLabelsMap={storyLabelsMap}
+                    storyGatesMap={storyGatesMap}
                     totalCount={columnTotals[col.id]}
                     hasMore={!!columnCursors[col.id]}
                     loadingMore={loadingMoreColumns[col.id] ?? false}
