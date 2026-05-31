@@ -686,7 +686,7 @@ class TestGa4MetricDefinitionValidation:
 
 @pytest.mark.anyio
 async def test_create_sprint_with_goal_capacity_201():
-    """sprint create 시 goal·capacity 필드 전달·반환 검증."""
+    """sprint create 시 goal·capacity 필드가 라우터→repo.create까지 실제 전달됨을 검증."""
     sprint = _mock_sprint()
     sprint.goal = "유저 온보딩 플로우 완성"
     sprint.capacity = 40
@@ -706,6 +706,10 @@ async def test_create_sprint_with_goal_capacity_201():
         assert resp.status_code == 201
         assert resp.json()["goal"] == "유저 온보딩 플로우 완성"
         assert resp.json()["capacity"] == 40
+        # 라우터가 실제로 goal/capacity를 repo.create에 전달했는지 검증
+        call_kwargs = mock_create.call_args[1]
+        assert call_kwargs.get("goal") == "유저 온보딩 플로우 완성"
+        assert call_kwargs.get("capacity") == 40
     finally:
         app.dependency_overrides.clear()
 
