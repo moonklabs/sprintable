@@ -380,7 +380,6 @@ async def test_graph_endpoint_200():
 @pytest.mark.anyio
 async def test_org_isolation_create():
     """다른 org의 의존성는 다른 org에서 안 보임 (org_id 스코프)."""
-    # DependencyRepository.list_by_item은 org_id 필터 포함 — 별도 org 레코드 미반환
     mock_session = AsyncMock()
     mock_result = MagicMock()
     mock_result.scalars.return_value.all.return_value = []  # 다른 org라 0건
@@ -392,5 +391,62 @@ async def test_org_isolation_create():
             resp = await c.get(f"/api/v2/dependencies?item_type=story&item_id={FROM_ID}")
         assert resp.status_code == 200
         assert resp.json() == []
+    finally:
+        app.dependency_overrides.clear()
+
+
+@pytest.mark.anyio
+async def test_delete_story_cleans_up_dependencies():
+    """스토리 삭제 시 연관 의존행 cleanup 호출 검증 (폴리모픽 cascade 보상).
+
+    흐름: DELETE /stories/{id} → repo.delete() → DependencyRepository.delete_by_item() 호출.
+    이 테스트는 delete_by_item이 실제로 와이어링됐는지 검증 — seed로 우회 없이.
+    """
+    from unittest.mock import patch, AsyncMock as AM
+
+    story_id = uuid.uuid4()
+    mock_session = AsyncMock()
+
+    # StoryRepository.delete → story 찾고 삭제
+    mock_result = MagicMock()
+    mock_result.scalar_one_or_none.return_value = MagicMock()  # 스토리 존재
+    mock_session.execute = AsyncMock(return_value=mock_result)
+    mock_session.delete = AsyncMock()
+    mock_session.flush = AsyncMock()
+
+    client, app = await _make_client(mock_session)
+    try:
+        with patch("app.repositories.dependency.DependencyRepository.delete_by_item", new_callable=AsyncMock) as mock_cleanup:
+            mock_cleanup.return_value = 1
+            async with client as c:
+                resp = await c.delete(f"/api/v2/stories/{story_id}")
+            assert resp.status_code == 200
+            # delete_by_item(story_id, "story") 호출됐는지 검증
+            mock_cleanup.assert_called_once_with(story_id, "story")
+    finally:
+        app.dependency_overrides.clear()
+
+
+@pytest.mark.anyio
+async def test_delete_epic_cleans_up_dependencies():
+    """에픽 삭제 시 연관 의존행 cleanup 호출 검증."""
+    from unittest.mock import patch
+
+    epic_id = uuid.uuid4()
+    mock_session = AsyncMock()
+    mock_result = MagicMock()
+    mock_result.scalar_one_or_none.return_value = MagicMock()
+    mock_session.execute = AsyncMock(return_value=mock_result)
+    mock_session.delete = AsyncMock()
+    mock_session.flush = AsyncMock()
+
+    client, app = await _make_client(mock_session)
+    try:
+        with patch("app.repositories.dependency.DependencyRepository.delete_by_item", new_callable=AsyncMock) as mock_cleanup:
+            mock_cleanup.return_value = 2
+            async with client as c:
+                resp = await c.delete(f"/api/v2/epics/{epic_id}")
+            assert resp.status_code == 200
+            mock_cleanup.assert_called_once_with(epic_id, "epic")
     finally:
         app.dependency_overrides.clear()

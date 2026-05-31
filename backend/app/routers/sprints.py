@@ -88,10 +88,14 @@ async def update_sprint(
 async def delete_sprint(
     id: uuid.UUID,
     repo: SprintRepository = Depends(_get_repo),
+    session: AsyncSession = Depends(get_db),
+    org_id: uuid.UUID = Depends(get_verified_org_id),
 ) -> dict:
+    from app.repositories.dependency import DependencyRepository
     ok = await repo.delete(id)
     if not ok:
         raise HTTPException(status_code=404, detail="Sprint not found")
+    await DependencyRepository(session, org_id).delete_by_item(id, "sprint")
     return {"ok": True}
 
 

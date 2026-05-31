@@ -267,10 +267,14 @@ async def update_story(
 async def delete_story(
     id: uuid.UUID,
     repo: StoryRepository = Depends(_get_repo),
+    session: AsyncSession = Depends(get_db),
+    org_id: uuid.UUID = Depends(get_verified_org_id),
 ) -> dict:
+    from app.repositories.dependency import DependencyRepository
     ok = await repo.delete(id)
     if not ok:
         raise HTTPException(status_code=404, detail="Story not found")
+    await DependencyRepository(session, org_id).delete_by_item(id, "story")
     return {"ok": True}
 
 
