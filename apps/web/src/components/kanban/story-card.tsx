@@ -7,6 +7,7 @@ import { useTranslations } from 'next-intl';
 import type { KanbanStory, KanbanMember } from './types';
 import { Badge } from '@/components/ui/badge';
 import { AlertTriangle, ChevronRight, Rocket, Zap, ZapOff } from 'lucide-react';
+import { LabelChip } from '@/components/ui/label-chip';
 
 const EPIC_COLORS = [
   'info',
@@ -44,9 +45,10 @@ interface StoryCardProps {
   onKickoff?: (storyId: string, result: 'triggered' | 'no_match' | 'conflict' | 'error') => void;
   lastExecution?: WorkflowExecStatus | null;
   blockedBy?: string[];
+  labels?: { id: string; name: string; color: string | null }[];
 }
 
-export function StoryCard({ story, epicName, assignee, onClick, onEdit, onChangeStatus, onAssign, onDelete, projectId, onKickoff, lastExecution, blockedBy = [] }: StoryCardProps) {
+export function StoryCard({ story, epicName, assignee, onClick, onEdit, onChangeStatus, onAssign, onDelete, projectId, onKickoff, lastExecution, blockedBy = [], labels = [] }: StoryCardProps) {
   const t = useTranslations('board');
   const [contextMenuOpen, setContextMenuOpen] = useState(false);
   const [statusMenuOpen, setStatusMenuOpen] = useState(false);
@@ -184,13 +186,18 @@ export function StoryCard({ story, epicName, assignee, onClick, onEdit, onChange
           <span className="min-w-0 truncate leading-none">{epicName}</span>
         </Badge>
       ) : null}
-      {/* Zone A meta row — FE-LABEL도 이 컨테이너 안에 칩 추가 예정 */}
-      {(blockedBy.length > 0 && story.status !== 'done') ? (
+      {/* Zone A meta row — dep 뱃지 + label 칩 */}
+      {(blockedBy.length > 0 && story.status !== 'done') || labels.length > 0 ? (
         <div className="mb-2 flex flex-wrap gap-1">
-          <Badge variant="warning" className="gap-1">
-            <AlertTriangle className="size-3 shrink-0" />
-            <span>{t('blockedBy', { count: blockedBy.length })}</span>
-          </Badge>
+          {blockedBy.length > 0 && story.status !== 'done' ? (
+            <Badge variant="warning" className="gap-1">
+              <AlertTriangle className="size-3 shrink-0" />
+              <span>{t('blockedBy', { count: blockedBy.length })}</span>
+            </Badge>
+          ) : null}
+          {labels.map((label) => (
+            <LabelChip key={label.id} label={label} />
+          ))}
         </div>
       ) : null}
       <p className="relative z-10 line-clamp-2 text-sm font-medium leading-5 text-foreground">{story.title}</p>

@@ -17,6 +17,7 @@ export interface KanbanStory {
   outcome_status: 'n_a' | 'pending' | 'hit' | 'miss' | null;
   outcome_result: OutcomeResult | null;
   blocked_by?: string[];
+  labels?: { id: string; name: string; color: string | null }[];
 }
 
 export interface DependencyEdge {

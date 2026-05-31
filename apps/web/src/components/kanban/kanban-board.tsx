@@ -24,6 +24,7 @@ import { KanbanSkeleton } from './kanban-skeleton';
 import { StoryDetailPanel } from './story-detail-panel';
 import { StoryCard } from './story-card';
 import { COLUMNS, VALID_TRANSITIONS, type KanbanStory, type KanbanSprint, type KanbanEpic, type KanbanMember, type ColumnId, type DependencyEdge } from './types';
+import type { LabelData } from '@/components/ui/label-chip';
 
 type DragOverlayCompatProps = {
   children?: React.ReactNode;
@@ -166,6 +167,10 @@ export function KanbanBoard({ projectId }: KanbanBoardProps) {
 
   const [executionMap, setExecutionMap] = useState<Record<string, { status: string; rule_name?: string | null; completed_at?: string | null }>>({});
   const [blockedByMap, setBlockedByMap] = useState<Record<string, string[]>>({});
+  const [orgLabels, setOrgLabels] = useState<LabelData[]>([]);
+  const [storyLabelsMap, setStoryLabelsMap] = useState<Record<string, LabelData[]>>({});
+  const [selectedLabelIds, setSelectedLabelIds] = useState<string[]>([]);
+  const [labelSearch, setLabelSearch] = useState('');
 
   const [selectedStory, setSelectedStory] = useState<KanbanStory | null>(null);
   const selectedStoryRef = useRef<KanbanStory | null>(null);
@@ -263,6 +268,16 @@ export function KanbanBoard({ projectId }: KanbanBoardProps) {
             }
           }
           setBlockedByMap(map);
+        }
+      } catch {
+        // non-critical
+      }
+
+      try {
+        const labelsRes = await fetch('/api/labels');
+        if (labelsRes.ok) {
+          const labelsJson = await labelsRes.json() as LabelData[];
+          setOrgLabels(labelsJson);
         }
       } catch {
         // non-critical
@@ -382,6 +397,11 @@ export function KanbanBoard({ projectId }: KanbanBoardProps) {
       const assignee = s.assignee_id ? memberMap[s.assignee_id] : null;
       if (assigneeTypeFilter === 'agent' && assignee?.type !== 'agent') return false;
       if (assigneeTypeFilter === 'human' && assignee?.type === 'agent') return false;
+    }
+    if (selectedLabelIds.length > 0) {
+      const storyLabelIds = (storyLabelsMap[s.id] ?? []).map((l) => l.id);
+      const hasAny = selectedLabelIds.some((id) => storyLabelIds.includes(id));
+      if (!hasAny) return false;
     }
     if (searchQuery) {
       const q = searchQuery.toLowerCase();
@@ -922,6 +942,66 @@ export function KanbanBoard({ projectId }: KanbanBoardProps) {
               </div>
             </DropdownMenuContent>
           </DropdownMenu>
+
+          {/* Label chip filter */}
+          {orgLabels.length > 0 && (
+            <DropdownMenu onOpenChange={(open) => { if (!open) setLabelSearch(''); }}>
+              <DropdownMenuTrigger
+                render={
+                  <button
+                    type="button"
+                    className={`flex h-7 items-center gap-1 rounded-md border px-2 text-xs font-medium transition-colors ${
+                      selectedLabelIds.length > 0
+                        ? 'border-primary/40 bg-primary/10 text-primary'
+                        : 'border-border/60 text-muted-foreground hover:border-border hover:text-foreground'
+                    }`}
+                  >
+                    <span className="max-w-[80px] truncate">
+                      {selectedLabelIds.length > 0 ? t('labelsActive', { count: selectedLabelIds.length }) : t('allLabels')}
+                    </span>
+                    <ChevronDown className="size-3 shrink-0" />
+                  </button>
+                }
+              />
+              <DropdownMenuContent align="start" className="w-56">
+                <div className="p-1">
+                  <Input
+                    autoFocus
+                    value={labelSearch}
+                    onChange={(e) => setLabelSearch(e.target.value)}
+                    onKeyDown={(e) => e.stopPropagation()}
+                    placeholder={t('searchLabels')}
+                    className="h-7 text-xs"
+                  />
+                </div>
+                <DropdownMenuSeparator />
+                <div className="max-h-[50vh] overflow-y-auto">
+                  <DropdownMenuGroup>
+                    <DropdownMenuItem onClick={() => setSelectedLabelIds([])}>
+                      <span className="flex-1">{t('allLabels')}</span>
+                      {selectedLabelIds.length === 0 && <Check className="size-3.5 text-primary" />}
+                    </DropdownMenuItem>
+                    {orgLabels
+                      .filter((l) => l.name.toLowerCase().includes(labelSearch.toLowerCase()))
+                      .map((label) => (
+                        <DropdownMenuItem
+                          key={label.id}
+                          onClick={() => setSelectedLabelIds((prev) =>
+                            prev.includes(label.id) ? prev.filter((id) => id !== label.id) : [...prev, label.id]
+                          )}
+                        >
+                          <span className="flex items-center gap-1.5 flex-1 truncate">
+                            <span className="h-2 w-2 shrink-0 rounded-full" style={{ backgroundColor: label.color ?? '#8A8F98' }} />
+                            {label.name}
+                          </span>
+                          {selectedLabelIds.includes(label.id) && <Check className="size-3.5 text-primary" />}
+                        </DropdownMenuItem>
+                      ))}
+                  </DropdownMenuGroup>
+                </div>
+              </DropdownMenuContent>
+            </DropdownMenu>
+          )}
         </div>
 
         {/* Right: search + view toggle */}
@@ -1022,6 +1102,7 @@ export function KanbanBoard({ projectId }: KanbanBoardProps) {
                     onCreateStory={handleCreateStory}
                     executionMap={executionMap}
                     blockedByMap={blockedByMap}
+                    storyLabelsMap={storyLabelsMap}
                     totalCount={columnTotals[col.id]}
                     hasMore={!!columnCursors[col.id]}
                     loadingMore={loadingMoreColumns[col.id] ?? false}
