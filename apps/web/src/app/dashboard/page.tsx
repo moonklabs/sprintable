@@ -11,6 +11,7 @@ import { TopBarSlot } from '@/components/nav/top-bar-slot';
 import { Button } from '@/components/ui/button';
 import { formatLocaleDateOnly } from '@/lib/i18n';
 import { DashboardActivityTimeline } from '@/components/activity/dashboard-activity-timeline';
+import { TrustScoreCard } from '@/components/cage/trust-score-card';
 
 export default async function DashboardPage() {
   const fetchedAt = new Date().toISOString();
@@ -96,11 +97,16 @@ export default async function DashboardPage() {
           />
           <div className="relative flex flex-col gap-5 lg:flex-row lg:items-center lg:justify-between">
             <div className="space-y-3">
-              {activeSprint && (
-                <span className="inline-flex items-center gap-1.5 rounded-full border border-brand/30 bg-brand/10 px-3 py-1 text-[11px] font-semibold uppercase tracking-widest text-brand">
-                  {activeSprint.title} · DAY {sprintDay} / {sprintTotal}
-                </span>
-              )}
+              <div className="flex flex-wrap items-center gap-2">
+                {activeSprint && (
+                  <span className="inline-flex items-center gap-1.5 rounded-full border border-brand/30 bg-brand/10 px-3 py-1 text-[11px] font-semibold uppercase tracking-widest text-brand">
+                    {activeSprint.title} · DAY {sprintDay} / {sprintTotal}
+                  </span>
+                )}
+                <Link href="/settings" className="inline-flex items-center gap-1.5">
+                  <TrustScoreCard memberId={teamMemberId} compact />
+                </Link>
+              </div>
               <div className="flex flex-wrap gap-2">
                 <Button asChild size="sm">
                   <Link href="/board">{t('openBoard')}</Link>

@@ -2247,6 +2247,16 @@
     "gateInboxLoading": "Loading gates...",
     "gateInboxEmpty": "No pending gates",
     "gateInboxEmptyHint": "Gates awaiting your review will appear here",
-    "cancel": "Cancel"
+    "cancel": "Cancel",
+    "trustScoreLabel": "Clean Pass Rate",
+    "trustScoreWindowHint": "Last {days} days",
+    "trustScoreNoData": "No review data yet",
+    "trustScoreNoDataHint": "Score will appear after first review",
+    "trustScorePending": "Pending",
+    "totalReviews": "Reviews",
+    "cleanPasses": "Clean",
+    "corrections": "Rounds",
+    "correctionRounds": "{count} correction(s)",
+    "byRole": "By Role"
   }
 }
