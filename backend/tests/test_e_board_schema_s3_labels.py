@@ -401,3 +401,44 @@ async def test_org_isolation_item_labels():
         assert resp.json() == []
     finally:
         app.dependency_overrides.clear()
+
+
+# ── item_id Optional 일괄 조회 테스트 (FE-LABEL 언블락커) ────────────────────
+
+@pytest.mark.anyio
+async def test_list_item_labels_bulk_no_item_id():
+    """GET /item-labels?item_type=story (item_id 생략) → org 전체 일괄 반환."""
+    mock_session = AsyncMock()
+    mock_result = MagicMock()
+    mock_result.scalars.return_value.all.return_value = [
+        _mock_item_label(item_id=uuid.uuid4()),
+        _mock_item_label(item_id=uuid.uuid4()),
+    ]
+    mock_session.execute = AsyncMock(return_value=mock_result)
+
+    client, app = await _make_client(mock_session)
+    try:
+        async with client as c:
+            resp = await c.get("/api/v2/item-labels?item_type=story")  # item_id 생략
+        assert resp.status_code == 200
+        assert len(resp.json()) == 2
+    finally:
+        app.dependency_overrides.clear()
+
+
+@pytest.mark.anyio
+async def test_list_item_labels_single_still_works():
+    """item_id 지정 시 기존 단건 동작 비파괴."""
+    mock_session = AsyncMock()
+    mock_result = MagicMock()
+    mock_result.scalars.return_value.all.return_value = [_mock_item_label()]
+    mock_session.execute = AsyncMock(return_value=mock_result)
+
+    client, app = await _make_client(mock_session)
+    try:
+        async with client as c:
+            resp = await c.get(f"/api/v2/item-labels?item_type=story&item_id={ITEM_ID}")
+        assert resp.status_code == 200
+        assert len(resp.json()) == 1
+    finally:
+        app.dependency_overrides.clear()
