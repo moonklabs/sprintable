@@ -2257,6 +2257,7 @@
     "cleanPasses": "Clean",
     "corrections": "Rounds",
     "correctionRounds": "{count} correction(s)",
-    "byRole": "By Role"
+    "byRole": "By Role",
+    "gateTabLabel": "Gates"
   }
 }

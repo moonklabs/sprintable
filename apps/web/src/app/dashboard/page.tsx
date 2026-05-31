@@ -188,11 +188,11 @@ export default async function DashboardPage() {
             <p className="mt-1.5 text-xs text-muted-foreground">{t('inProgressStories')}</p>
           </div>
 
-          <div className="rounded-xl border border-info-border bg-info-tint p-4">
+          <Link href="/inbox?tab=gates" className="block rounded-xl border border-info-border bg-info-tint p-4 transition hover:bg-info-tint/70">
             <p className="text-xs font-medium text-muted-foreground">{t('hitlPending')}</p>
             <p className="mt-1 text-3xl font-bold tracking-tight text-info">—</p>
             <p className="mt-1.5 text-xs text-muted-foreground">{t('hitlPendingDesc')}</p>
-          </div>
+          </Link>
         </div>
 
         {/* Main content grid */}
