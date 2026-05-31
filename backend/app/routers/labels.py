@@ -110,13 +110,16 @@ async def attach_label(
 @item_label_router.get("", response_model=list[ItemLabelResponse])
 async def list_item_labels(
     item_type: str = Query(...),
-    item_id: uuid.UUID = Query(...),
+    item_id: uuid.UUID | None = Query(default=None),
     repo: ItemLabelRepository = Depends(_get_item_label_repo),
     _auth=Depends(get_current_user),
 ) -> list[ItemLabelResponse]:
     if item_type not in ITEM_TYPES:
         raise HTTPException(status_code=422, detail=f"item_type must be one of {sorted(ITEM_TYPES)}")
-    items = await repo.list_by_item(item_id, item_type)
+    if item_id is not None:
+        items = await repo.list_by_item(item_id, item_type)
+    else:
+        items = await repo.list_by_type(item_type)
     return [ItemLabelResponse.model_validate(i) for i in items]
 
 

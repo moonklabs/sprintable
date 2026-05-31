@@ -5,8 +5,9 @@ import { useTranslations } from 'next-intl';
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
 import rehypeSanitize from 'rehype-sanitize';
-import { AlertTriangle, GitFork, Trash2 } from 'lucide-react';
+import { AlertTriangle, GitFork, Tag, Trash2, X } from 'lucide-react';
 import type { KanbanStory, KanbanMember, DependencyEdge } from './types';
+import { LabelChip, LABEL_PRESET_COLORS, type LabelData } from '@/components/ui/label-chip';
 import { OutcomeIntentFields, type OutcomeIntentValue } from '@/components/outcome/outcome-intent-fields';
 import { OutcomeResultCard, type OutcomeResult } from '@/components/outcome/outcome-result-card';
 import { Button } from '@/components/ui/button';
@@ -127,6 +128,14 @@ export function StoryDetailPanel({ story, tasks, nextTasksCursor = null, loading
   const [deps, setDeps] = useState<DependencyEdge[]>([]);
   const [loadingDeps, setLoadingDeps] = useState(false);
 
+  const [storyLabels, setStoryLabels] = useState<(LabelData & { itemLabelId: string })[]>([]);
+  const [orgLabels, setOrgLabels] = useState<LabelData[]>([]);
+  const [loadingLabels, setLoadingLabels] = useState(false);
+  const [showLabelPicker, setShowLabelPicker] = useState(false);
+  const [newLabelName, setNewLabelName] = useState('');
+  const [newLabelColor, setNewLabelColor] = useState<string>(LABEL_PRESET_COLORS[0]);
+  const [creatingLabel, setCreatingLabel] = useState(false);
+
   const handleDelete = useCallback(async () => {
     setDeleting(true);
     try {
@@ -165,6 +174,65 @@ export function StoryDetailPanel({ story, tasks, nextTasksCursor = null, loading
       titleInputRef.current?.select();
     }
   }, [editingTitle]);
+
+  useEffect(() => {
+    setLoadingLabels(true);
+    Promise.all([
+      fetch(`/api/item-labels?item_type=story&item_id=${story.id}`).then((r) => r.ok ? r.json() : []),
+      fetch('/api/labels').then((r) => r.ok ? r.json() : []),
+    ])
+      .then(([itemLabels, allLabels]) => {
+        const all = allLabels as LabelData[];
+        setOrgLabels(all);
+        const labelMap = Object.fromEntries(all.map((l) => [l.id, l]));
+        const attached = (itemLabels as { id: string; label_id: string }[]).map((il) => ({
+          ...(labelMap[il.label_id] ?? { id: il.label_id, name: il.label_id.slice(0, 6), color: null }),
+          itemLabelId: il.id,
+        }));
+        setStoryLabels(attached);
+      })
+      .catch(() => {})
+      .finally(() => setLoadingLabels(false));
+  }, [story.id]);
+
+  const handleAttachLabel = async (labelId: string) => {
+    if (storyLabels.some((l) => l.id === labelId)) return;
+    const res = await fetch('/api/item-labels', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ label_id: labelId, item_id: story.id, item_type: 'story' }),
+    });
+    if (res.ok) {
+      const il = await res.json() as { id: string; label_id: string };
+      const label = orgLabels.find((l) => l.id === labelId);
+      if (label) setStoryLabels((prev) => [...prev, { ...label, itemLabelId: il.id }]);
+    }
+  };
+
+  const handleDetachLabel = async (itemLabelId: string) => {
+    const res = await fetch(`/api/item-labels/${itemLabelId}`, { method: 'DELETE' });
+    if (res.ok) setStoryLabels((prev) => prev.filter((l) => l.itemLabelId !== itemLabelId));
+  };
+
+  const handleCreateLabel = async () => {
+    if (!newLabelName.trim()) return;
+    setCreatingLabel(true);
+    try {
+      const res = await fetch('/api/labels', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ name: newLabelName.trim(), color: newLabelColor }),
+      });
+      if (res.ok) {
+        const newLabel = await res.json() as LabelData;
+        setOrgLabels((prev) => [...prev, newLabel]);
+        setNewLabelName('');
+        await handleAttachLabel(newLabel.id);
+      }
+    } finally {
+      setCreatingLabel(false);
+    }
+  };
 
   useEffect(() => {
     setLoadingDeps(true);
@@ -535,6 +603,103 @@ export function StoryDetailPanel({ story, tasks, nextTasksCursor = null, loading
                 >
                   + {t('addDescription')}
                 </button>
+              )}
+            </div>
+
+            {/* Labels */}
+            <div>
+              <div className="mb-2 flex items-center justify-between">
+                <div className="flex items-center gap-1.5 text-[10px] font-mono uppercase tracking-wider text-muted-foreground">
+                  <Tag className="size-3" />
+                  <span>Labels</span>
+                </div>
+                <button
+                  type="button"
+                  onClick={() => setShowLabelPicker((v) => !v)}
+                  className="rounded px-1.5 py-0.5 text-[10px] text-muted-foreground hover:bg-muted transition-colors"
+                >
+                  {showLabelPicker ? '닫기' : '+ 추가'}
+                </button>
+              </div>
+
+              {loadingLabels ? (
+                <p className="text-xs text-muted-foreground">{t('loading')}</p>
+              ) : (
+                <>
+                  {storyLabels.length > 0 ? (
+                    <div className="mb-2 flex flex-wrap gap-1.5">
+                      {storyLabels.map((label) => (
+                        <span key={label.itemLabelId} className="group relative inline-flex">
+                          <LabelChip label={label} />
+                          <button
+                            type="button"
+                            onClick={() => void handleDetachLabel(label.itemLabelId)}
+                            className="absolute -right-1 -top-1 hidden h-3.5 w-3.5 items-center justify-center rounded-full bg-muted-foreground/20 text-foreground hover:bg-destructive/80 hover:text-destructive-foreground group-hover:flex"
+                            aria-label={`Remove ${label.name}`}
+                          >
+                            <X className="size-2" />
+                          </button>
+                        </span>
+                      ))}
+                    </div>
+                  ) : (
+                    <p className="mb-2 text-xs text-muted-foreground/60">라벨 없음</p>
+                  )}
+
+                  {showLabelPicker && (
+                    <div className="space-y-2 rounded-lg border border-border bg-muted/20 p-2">
+                      {/* Existing org labels */}
+                      {orgLabels.filter((l) => !storyLabels.some((sl) => sl.id === l.id)).length > 0 && (
+                        <div className="flex flex-wrap gap-1">
+                          {orgLabels
+                            .filter((l) => !storyLabels.some((sl) => sl.id === l.id))
+                            .map((label) => (
+                              <button
+                                key={label.id}
+                                type="button"
+                                onClick={() => void handleAttachLabel(label.id)}
+                                className="inline-flex items-center gap-1.5 rounded-full border border-border bg-background px-2 py-0.5 text-xs text-foreground transition hover:bg-muted"
+                              >
+                                <span className="h-2 w-2 shrink-0 rounded-full" style={{ backgroundColor: label.color ?? '#8A8F98' }} />
+                                {label.name}
+                              </button>
+                            ))}
+                        </div>
+                      )}
+                      {/* New label form */}
+                      <div className="flex items-center gap-1.5">
+                        <div className="flex gap-1">
+                          {LABEL_PRESET_COLORS.map((hex) => (
+                            <button
+                              key={hex}
+                              type="button"
+                              onClick={() => setNewLabelColor(hex)}
+                              className={`h-4 w-4 rounded-full border-2 transition ${newLabelColor === hex ? 'border-foreground' : 'border-transparent'}`}
+                              style={{ backgroundColor: hex }}
+                              aria-label={hex}
+                            />
+                          ))}
+                        </div>
+                        <input
+                          type="text"
+                          value={newLabelName}
+                          onChange={(e) => setNewLabelName(e.target.value)}
+                          onKeyDown={(e) => { if (e.key === 'Enter') void handleCreateLabel(); }}
+                          placeholder="새 라벨 이름"
+                          className="min-w-0 flex-1 rounded border border-border bg-background px-2 py-1 text-xs focus:outline-none focus:ring-1 focus:ring-primary/40"
+                        />
+                        <button
+                          type="button"
+                          onClick={() => void handleCreateLabel()}
+                          disabled={!newLabelName.trim() || creatingLabel}
+                          className="rounded bg-primary px-2 py-1 text-xs text-primary-foreground disabled:opacity-50 hover:bg-primary/90 transition"
+                        >
+                          {creatingLabel ? '...' : '생성'}
+                        </button>
+                      </div>
+                    </div>
+                  )}
+                </>
               )}
             </div>
 

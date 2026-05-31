@@ -26,6 +26,16 @@ class ItemLabelRepository(BaseRepository[ItemLabel]):
         )
         return list(result.scalars().all())
 
+    async def list_by_type(self, item_type: str) -> list[ItemLabel]:
+        """item_id 생략 시 org 전체 item_type별 일괄 조회."""
+        result = await self.session.execute(
+            select(ItemLabel).where(
+                ItemLabel.org_id == self.org_id,
+                ItemLabel.item_type == item_type,
+            )
+        )
+        return list(result.scalars().all())
+
     async def list_by_label(self, label_id: uuid.UUID) -> list[ItemLabel]:
         result = await self.session.execute(
             select(ItemLabel).where(
