@@ -32,6 +32,13 @@ class OrgGateOverrideCreate(BaseModel):
     gate_type: str
     disposition: str
 
+    @field_validator("gate_type")
+    @classmethod
+    def validate_gate_type(cls, v: str) -> str:
+        if v not in GATE_TYPES:
+            raise ValueError(f"gate_type must be one of {sorted(GATE_TYPES)}")
+        return v
+
     @field_validator("disposition")
     @classmethod
     def validate_disposition(cls, v: str) -> str:
@@ -55,6 +62,13 @@ class MemberGateOverrideCreate(BaseModel):
     member_id: uuid.UUID
     gate_type: str
     disposition: str
+
+    @field_validator("gate_type")
+    @classmethod
+    def validate_gate_type(cls, v: str) -> str:
+        if v not in GATE_TYPES:
+            raise ValueError(f"gate_type must be one of {sorted(GATE_TYPES)}")
+        return v
 
     @field_validator("disposition")
     @classmethod

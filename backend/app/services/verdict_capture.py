@@ -113,6 +113,8 @@ async def capture_pr_ci_verdict(
 
     recorded: list[str] = []
 
+    from app.services.gate_service import resolve_gate_from_verdict
+
     # source=pr: 머지 여부 + rounds
     if merged:
         rounds = await fetch_pr_review_rounds(repo, pr_number)
@@ -122,6 +124,13 @@ async def capture_pr_ci_verdict(
             result="pass",
             rounds=rounds if rounds > 0 else None,
         )
+        # verdict → 대응 게이트 해소 (게이트 없거나 오류면 graceful skip)
+        try:
+            await resolve_gate_from_verdict(
+                session, org_id, story_id, "story", "pr", "pass"
+            )
+        except Exception:
+            pass
         recorded.append("pr")
 
     # source=ci: CI 결과
@@ -133,6 +142,12 @@ async def capture_pr_ci_verdict(
             result=normalized,
             rounds=None,
         )
+        try:
+            await resolve_gate_from_verdict(
+                session, org_id, story_id, "story", "ci", normalized
+            )
+        except Exception:
+            pass
         recorded.append("ci")
 
     return {"recorded": recorded, "skipped_reason": None}
@@ -200,10 +215,19 @@ async def capture_review_verdict(
     if participation is None:
         return {"recorded": False, "skipped_reason": f"no_{role_key}_role"}
 
+    from app.services.gate_service import resolve_gate_from_verdict
+
     await record_verdict(
         session, org_id, participation.id,
         source=role_key,
         result=result,
         rounds=rounds,
     )
+    # verdict → 대응 게이트 해소 (게이트 없거나 오류면 graceful skip)
+    try:
+        await resolve_gate_from_verdict(
+            session, org_id, story_id, "story", role_key, result
+        )
+    except Exception:
+        pass
     return {"recorded": True, "source": role_key, "result": result, "skipped_reason": None}
