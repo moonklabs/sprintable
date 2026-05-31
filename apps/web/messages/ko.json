@@ -2247,6 +2247,16 @@
     "gateInboxLoading": "게이트 조회 중...",
     "gateInboxEmpty": "대기 중인 게이트 없음",
     "gateInboxEmptyHint": "검수 대기 중인 게이트가 여기 표시됩니다",
-    "cancel": "취소"
+    "cancel": "취소",
+    "trustScoreLabel": "무정정 통과율",
+    "trustScoreWindowHint": "최근 {days}일",
+    "trustScoreNoData": "검수 데이터 없음",
+    "trustScoreNoDataHint": "첫 검수 후 점수가 표시됩니다",
+    "trustScorePending": "측정 대기",
+    "totalReviews": "전체",
+    "cleanPasses": "무정정",
+    "corrections": "정정",
+    "correctionRounds": "정정 {count}회",
+    "byRole": "역할별"
   }
 }
