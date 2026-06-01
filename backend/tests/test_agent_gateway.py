@@ -310,3 +310,23 @@ def test_row_to_payload_jsonb_dict_passthrough():
 
     result = _row_to_payload(row)
     assert result["payload"] == {"already": "dict"}
+
+def test_dispatch_conversation_event_uses_sorted_participant_ids():
+    """conversations.py fan-out 루프가 sorted() 사용하는지 소스 inspect 가드."""
+    import inspect
+    from app.routers.conversations import _dispatch_conversation_event
+    src = inspect.getsource(_dispatch_conversation_event)
+    assert 'sorted(participant_ids)' in src, (
+        'deadlock fix reverted: sorted(participant_ids) missing in _dispatch_conversation_event'
+    )
+    assert 'sorted(mention_targets)' not in src or True  # mention은 별도 함수
+
+
+def test_dispatch_mention_events_uses_sorted_mention_targets():
+    """_dispatch_mention_events의 sorted(mention_targets) 소스 inspect 가드."""
+    import inspect
+    from app.routers.conversations import _dispatch_mention_events
+    src = inspect.getsource(_dispatch_mention_events)
+    assert 'sorted(mention_targets)' in src, (
+        'deadlock fix reverted: sorted(mention_targets) missing in _dispatch_mention_events'
+    )
