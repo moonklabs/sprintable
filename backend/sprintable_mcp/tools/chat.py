@@ -50,6 +50,8 @@ async def send_chat_message(args: SendChatInput) -> list[TextContent]:
 
 async def create_conversation(args: CreateConversationInput) -> list[TextContent]:
     """새 conversation thread 생성."""
+    if not client.project_id:
+        return err("project_id not set — agent must be bound to a project before creating conversations")
     body: dict = {
         "type": "group",
         "participant_ids": args.participant_ids,
