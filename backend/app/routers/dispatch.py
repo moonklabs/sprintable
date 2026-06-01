@@ -141,9 +141,7 @@ async def dispatch_entity(
     await db.flush()
     await db.refresh(event)
 
-    if member_type == "agent":
-        _push_to_agent(str(assignee_id), _event_to_payload(event))
-    else:
+    if member_type != "agent":
         await dispatch_notification(
             db,
             org_id=org_id,
@@ -155,7 +153,13 @@ async def dispatch_entity(
             reference_id=body.entity_id,
         )
 
-    await db.commit()
+    await db.commit()  # commit 후 seq 확정
+
+    # agent: commit 후 wake (gateway_seq 확정 보장, 이중전달 방지)
+    if member_type == "agent" and event.gateway_seq is not None:
+        _wake_agent(str(assignee_id), event.gateway_seq)
+    elif member_type == "agent":
+        _push_to_agent(str(assignee_id), _event_to_payload(event))
     return DispatchResponse(
         dispatched=True,
         event_id=event.id,
