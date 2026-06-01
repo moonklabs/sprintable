@@ -17,6 +17,7 @@ from app.dependencies.auth import AuthContext, get_current_user, get_verified_or
 from app.dependencies.database import get_db
 from app.models.conversation import Conversation, ConversationMessage, ConversationParticipant
 from app.models.event import Event
+from app.models.project import OrgMember
 from app.models.team import TeamMember
 from app.models.webhook_config import WebhookConfig
 from app.routers.events import _push_to_agent, publish_event
@@ -30,25 +31,63 @@ router = APIRouter(prefix="/api/v2/conversations", tags=["conversations"])
 # ─── Helpers ──────────────────────────────────────────────────────────────────
 
 async def _enforce_agent_creator_policy(
-    sender: "ResolvedMember",
+    sender: "ResolvedMember | TeamMember",
     participant_ids: list[uuid.UUID],
     db: AsyncSession,
 ) -> None:
-    """⭐ 불변식: 휴먼↔에이전트 대화는 에이전트 creator가 참가자여야 함."""
+    """⭐ 불변식: 휴먼↔에이전트 대화 — 각 에이전트의 creator가 참가자(sender ∪ participant_ids)에 있어야.
+
+    전제: 에이전트 없거나 휴먼 없으면(에이전트↔에이전트) skip.
+    """
     if not participant_ids:
         return
+
+    all_ids = set(participant_ids) | {sender.id}
+
+    # 에이전트 participant 조회
     agent_tms = (await db.execute(
         select(TeamMember).where(
-            TeamMember.id.in_(participant_ids),
+            TeamMember.id.in_(all_ids),
             TeamMember.type == "agent",
         )
     )).scalars().all()
+    if not agent_tms:
+        return  # 에이전트 없음 → skip
+
+    agent_ids = {a.id for a in agent_tms}
+    non_agent_ids = all_ids - agent_ids
+    if not non_agent_ids:
+        return  # 에이전트↔에이전트 → creator 무관 허용
+
+    # 참가자 집합의 user_id 수집 (sender + 나머지 non-agent participants)
+    human_user_ids: set[uuid.UUID] = set()
+    sender_user_id = getattr(sender, "user_id", None) or getattr(sender, "user_id", None)
+    if sender_user_id is not None and sender.id in non_agent_ids:
+        human_user_ids.add(sender_user_id)
+
+    remaining_ids = non_agent_ids - {sender.id}
+    if remaining_ids:
+        # TeamMember에서 user_id 조회
+        tm_humans = (await db.execute(
+            select(TeamMember).where(TeamMember.id.in_(remaining_ids))
+        )).scalars().all()
+        human_user_ids.update(tm.user_id for tm in tm_humans if tm.user_id)
+
+        # OrgMember에서 user_id 조회 (grant-only 휴먼)
+        tm_found_ids = {tm.id for tm in tm_humans}
+        om_ids = remaining_ids - tm_found_ids
+        if om_ids:
+            oms = (await db.execute(
+                select(OrgMember).where(OrgMember.id.in_(om_ids))
+            )).scalars().all()
+            human_user_ids.update(om.user_id for om in oms if om.user_id)
+
+    # 각 에이전트의 created_by가 참가자 user_id 집합에 있는지 확인
     for agent_tm in agent_tms:
         if agent_tm.created_by is None:
             raise HTTPException(status_code=403, detail="Agent has no creator — conversation not allowed")
-        requestor_user_id = getattr(sender, "user_id", None)
-        if requestor_user_id is not None and agent_tm.created_by != requestor_user_id:
-            raise HTTPException(status_code=403, detail="Only the agent's creator can start this conversation")
+        if agent_tm.created_by not in human_user_ids:
+            raise HTTPException(status_code=403, detail="Agent's creator must be a participant in this conversation")
 
 
 async def _resolve_member(

@@ -171,108 +171,111 @@ async def test_lookup_members_falls_back_to_org_member():
     assert result[ORG_MEMBER_ID].type == "human"
 
 
-# ── 인가 불변식 (create_conversation) ────────────────────────────────────────
+# ── _enforce_agent_creator_policy 유닛 테스트 ────────────────────────────────
 
 @pytest.mark.anyio
-async def test_create_conversation_rejects_non_creator():
-    """에이전트 creator가 아닌 휴먼이 대화 생성 시도 → 403."""
-    from app.main import app
-    from app.dependencies.auth import get_current_user, get_verified_org_id
-    from app.dependencies.database import get_db
-    from httpx import ASGITransport, AsyncClient
-
-    agent_id = uuid.uuid4()
-    creator_user_id = uuid.uuid4()  # 에이전트의 실제 creator
-    requestor_user_id = USER_ID     # 요청자 (다른 유저)
-
-    # ResolvedMember for requestor
-    sender = ResolvedMember(
-        id=ORG_MEMBER_ID, user_id=requestor_user_id,
-        name="user@test.com", type="human", role="member",
-        org_id=ORG_ID, project_id=PROJECT_ID,
-    )
-
-    agent_tm = MagicMock()
-    agent_tm.id = agent_id
-    agent_tm.type = "agent"
-    agent_tm.created_by = creator_user_id  # 다른 user.id
-
+async def test_policy_skip_no_agents():
+    """에이전트 없음 → 정책 skip."""
+    from app.routers.conversations import _enforce_agent_creator_policy
     session = AsyncMock()
-    agent_result = MagicMock(); agent_result.scalars.return_value.all.return_value = [agent_tm]
-
-    async def override_db():
-        yield session
-
-    app.dependency_overrides[get_db] = override_db
-    app.dependency_overrides[get_current_user] = lambda: _make_auth()
-    app.dependency_overrides[get_verified_org_id] = lambda: ORG_ID
-
-    with patch("app.routers.conversations._resolve_member", return_value=sender), \
-         patch("app.routers.conversations.resolve_member", return_value=sender):
-        session.execute = AsyncMock(return_value=agent_result)
-        async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as c:
-            resp = await c.post("/api/v2/conversations", json={
-                "type": "dm",
-                "participant_ids": [str(agent_id)],
-                "project_id": str(PROJECT_ID),
-            })
-
-    app.dependency_overrides.clear()
-    assert resp.status_code == 403
+    no_agents = MagicMock(); no_agents.scalars.return_value.all.return_value = []
+    session.execute = AsyncMock(return_value=no_agents)
+    sender = ResolvedMember(id=ORG_MEMBER_ID, user_id=USER_ID, name="u", type="human", role="member", org_id=ORG_ID)
+    await _enforce_agent_creator_policy(sender, [uuid.uuid4()], session)  # 예외 없음
 
 
 @pytest.mark.anyio
-async def test_create_conversation_creator_allowed():
-    """에이전트 creator가 대화 생성 → 403 아님."""
-    from app.main import app
-    from app.dependencies.auth import get_current_user, get_verified_org_id
-    from app.dependencies.database import get_db
-    from httpx import ASGITransport, AsyncClient
+async def test_policy_skip_agents_only():
+    """에이전트↔에이전트 (휴먼 없음) → creator 무관 허용."""
+    from app.routers.conversations import _enforce_agent_creator_policy
+    agent1_id, agent2_id = uuid.uuid4(), uuid.uuid4()
+    sender_agent = MagicMock()
+    sender_agent.id = agent1_id
+    sender_agent.type = "agent"
+    sender_agent.user_id = None
 
-    agent_id = uuid.uuid4()
-    conv_id = uuid.uuid4()
-
-    # sender = creator
-    sender = ResolvedMember(
-        id=ORG_MEMBER_ID, user_id=USER_ID,
-        name="creator@test.com", type="human", role="member",
-        org_id=ORG_ID, project_id=PROJECT_ID,
-    )
-
-    agent_tm = MagicMock()
-    agent_tm.id = agent_id
-    agent_tm.type = "agent"
-    agent_tm.created_by = USER_ID  # 동일한 user.id
-
-    conv = MagicMock()
-    conv.id = conv_id
-    conv.type = "dm"
-    conv.title = None
+    agent2_tm = MagicMock()
+    agent2_tm.id = agent2_id
+    agent2_tm.type = "agent"
+    agent2_tm.created_by = None  # creator 없어도 OK
 
     session = AsyncMock()
-    agent_result = MagicMock(); agent_result.scalars.return_value.all.return_value = [agent_tm]
-    dm_dedup = MagicMock(); dm_dedup.scalars.return_value.all.return_value = []  # 기존 DM 없음
-    session.execute = AsyncMock(side_effect=[agent_result, dm_dedup])
-    session.add = MagicMock()
-    session.flush = AsyncMock()
-    session.commit = AsyncMock()
-    session.refresh = AsyncMock(side_effect=lambda obj: setattr(obj, "id", conv_id) or setattr(obj, "type", "dm") or setattr(obj, "title", None))
+    agents_result = MagicMock(); agents_result.scalars.return_value.all.return_value = [sender_agent, agent2_tm]
+    session.execute = AsyncMock(return_value=agents_result)
 
-    async def override_db():
-        yield session
+    await _enforce_agent_creator_policy(sender_agent, [agent2_id], session)  # 403 없음
 
-    app.dependency_overrides[get_db] = override_db
-    app.dependency_overrides[get_current_user] = lambda: _make_auth()
-    app.dependency_overrides[get_verified_org_id] = lambda: ORG_ID
 
-    with patch("app.routers.conversations._resolve_member", return_value=sender), \
-         patch("app.routers.conversations.resolve_member", return_value=sender):
-        async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as c:
-            resp = await c.post("/api/v2/conversations", json={
-                "type": "dm",
-                "participant_ids": [str(agent_id)],
-                "project_id": str(PROJECT_ID),
-            })
+@pytest.mark.anyio
+async def test_policy_creator_in_participants_group():
+    """그룹: 비-creator 휴먼이 [에이전트+creator+자기] 열기 → 허용(creator가 참가자에 있음)."""
+    from app.routers.conversations import _enforce_agent_creator_policy
+    agent_id = uuid.uuid4()
+    creator_user_id = uuid.uuid4()
+    creator_member_id = uuid.uuid4()
+    requestor_member_id = ORG_MEMBER_ID  # 다른 유저
 
-    app.dependency_overrides.clear()
-    assert resp.status_code != 403
+    sender = ResolvedMember(
+        id=requestor_member_id, user_id=USER_ID, name="u", type="human", role="member", org_id=ORG_ID
+    )
+
+    agent_tm = MagicMock(); agent_tm.id = agent_id; agent_tm.type = "agent"; agent_tm.created_by = creator_user_id
+
+    session = AsyncMock()
+    # 1st execute: agent 조회 (all_ids에서)
+    agents_result = MagicMock(); agents_result.scalars.return_value.all.return_value = [agent_tm]
+    # 2nd execute: remaining TM 조회 → creator_member_id가 TM
+    creator_tm = MagicMock(); creator_tm.id = creator_member_id; creator_tm.user_id = creator_user_id
+    tms_result = MagicMock(); tms_result.scalars.return_value.all.return_value = [creator_tm]
+    session.execute = AsyncMock(side_effect=[agents_result, tms_result])
+
+    # creator_member_id가 participant_ids에 있음
+    await _enforce_agent_creator_policy(sender, [agent_id, creator_member_id], session)  # 예외 없음
+
+
+@pytest.mark.anyio
+async def test_policy_creator_not_in_participants_403():
+    """그룹: 에이전트 creator가 참가자에 없음 → 403."""
+    from app.routers.conversations import _enforce_agent_creator_policy
+    from fastapi import HTTPException
+    agent_id = uuid.uuid4()
+    creator_user_id = uuid.uuid4()
+
+    sender = ResolvedMember(
+        id=ORG_MEMBER_ID, user_id=USER_ID, name="u", type="human", role="member", org_id=ORG_ID
+    )
+
+    agent_tm = MagicMock(); agent_tm.id = agent_id; agent_tm.type = "agent"; agent_tm.created_by = creator_user_id
+
+    session = AsyncMock()
+    agents_result = MagicMock(); agents_result.scalars.return_value.all.return_value = [agent_tm]
+    # remaining TM 없음
+    empty_tms = MagicMock(); empty_tms.scalars.return_value.all.return_value = []
+    empty_oms = MagicMock(); empty_oms.scalars.return_value.all.return_value = []
+    session.execute = AsyncMock(side_effect=[agents_result, empty_tms, empty_oms])
+
+    with pytest.raises(HTTPException) as exc_info:
+        await _enforce_agent_creator_policy(sender, [agent_id], session)
+    assert exc_info.value.status_code == 403
+
+
+@pytest.mark.anyio
+async def test_policy_no_creator_in_human_conversation_403():
+    """creator 없는 에이전트 + 휴먼 대화 → 403."""
+    from app.routers.conversations import _enforce_agent_creator_policy
+    from fastapi import HTTPException
+    agent_id = uuid.uuid4()
+
+    sender = ResolvedMember(
+        id=ORG_MEMBER_ID, user_id=USER_ID, name="u", type="human", role="member", org_id=ORG_ID
+    )
+
+    agent_tm = MagicMock(); agent_tm.id = agent_id; agent_tm.type = "agent"; agent_tm.created_by = None
+
+    session = AsyncMock()
+    agents_result = MagicMock(); agents_result.scalars.return_value.all.return_value = [agent_tm]
+    session.execute = AsyncMock(return_value=agents_result)
+
+    with pytest.raises(HTTPException) as exc_info:
+        await _enforce_agent_creator_policy(sender, [agent_id], session)
+    assert exc_info.value.status_code == 403
