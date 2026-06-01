@@ -451,20 +451,16 @@ async def list_conversations(
     )).all()
 
     all_member_ids = {r.member_id for r in p_rows}
-    member_rows = (await db.execute(
-        select(TeamMember.id, TeamMember.name, TeamMember.avatar_url, TeamMember.type)
-        .where(TeamMember.id.in_(all_member_ids))
-    )).all() if all_member_ids else []
-    member_map = {r.id: {"name": r.name, "avatar_url": r.avatar_url, "type": r.type} for r in member_rows}
+    resolved_map = await lookup_members_by_ids(all_member_ids, db) if all_member_ids else {}
 
     conv_participants: dict[uuid.UUID, list[dict]] = defaultdict(list)
     for r in p_rows:
-        info = member_map.get(r.member_id, {})
+        resolved = resolved_map.get(r.member_id)
         conv_participants[r.conversation_id].append({
             "member_id": str(r.member_id),
-            "name": info.get("name"),
-            "avatar_url": info.get("avatar_url"),
-            "type": info.get("type", "human"),
+            "name": resolved.name if resolved else str(r.member_id)[:8],
+            "avatar_url": getattr(resolved, "avatar_url", None) if resolved else None,
+            "type": resolved.type if resolved else "human",
         })
 
     result = []

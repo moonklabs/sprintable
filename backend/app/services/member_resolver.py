@@ -137,4 +137,15 @@ async def lookup_members_by_ids(
                 project_id=None,
             )
 
+    # orphan/삭제 멤버: TM도 OrgMember도 아닌 ID → fallback(크래시 방지)
+    for mid in ids:
+        if mid not in result:
+            result[mid] = ResolvedMember(
+                id=mid, user_id=None,
+                name=str(mid)[:8],
+                type="human", role="member",
+                org_id=uuid.UUID(int=0),
+                project_id=None,
+            )
+
     return result
