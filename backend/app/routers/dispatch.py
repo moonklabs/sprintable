@@ -143,7 +143,6 @@ async def dispatch_entity(
     # per-recipient dense seq 발급 (agent recipient만 — commit 순서 직렬화 보장)
     if member_type == "agent":
         await assign_recipient_seq(db, event)
-    await db.refresh(event)
 
     if member_type != "agent":
         await dispatch_notification(

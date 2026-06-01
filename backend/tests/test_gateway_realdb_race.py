@@ -583,3 +583,84 @@ async def test_send_message_creates_event_with_recipient_seq_no_generated_always
         await cleanup.close()
         await conn_setup.close()
         await engine.dispose()
+
+@pytest.mark.anyio
+async def test_dispatch_agent_event_recipient_seq_not_null_after_refresh_removal():
+    """CP2: dispatch 경로 — db.refresh 제거 후 recipient_seq NULL 덮어쓰기 없음.
+
+    refresh 잔존 시: assign_recipient_seq(2523) → refresh(NULL) → commit(NULL) → FAIL.
+    fix 후: assign_recipient_seq(2523) → commit(2523) → DB row recipient_seq=2523.
+    """
+    import asyncpg
+    from sqlalchemy.ext.asyncio import create_async_engine, AsyncSession
+    from sqlalchemy.orm import sessionmaker
+    from app.services.event_seq import assign_recipient_seq
+    from app.models.event import Event
+
+    engine = create_async_engine(
+        _ASYNCPG_URL.replace("postgresql://", "postgresql+asyncpg://"),
+        echo=False,
+    )
+    async_session = sessionmaker(engine, class_=AsyncSession, expire_on_commit=False)
+
+    conn_setup = await asyncpg.connect(_ASYNCPG_URL)
+    agent_id = uuid.uuid4()
+    org_id = None
+    project_id = None
+
+    try:
+        await conn_setup.execute("BEGIN")
+        org_id, project_id = await _make_test_org_and_project(conn_setup)
+        await conn_setup.execute("COMMIT")
+
+        event_id = None
+        assigned_seq = None
+
+        async with async_session() as db:
+            event = Event(
+                id=uuid.uuid4(),
+                org_id=org_id,
+                project_id=project_id,
+                event_type="dispatched",
+                recipient_id=agent_id,
+                recipient_type="agent",
+                payload={"entity": "story"},
+                status="pending",
+            )
+            db.add(event)
+            await db.flush()
+
+            # dispatch.py 실제 경로 시뮬
+            await assign_recipient_seq(db, event)
+            assigned_seq = event.recipient_seq
+            # ↓ db.refresh(event) 없음 — 이게 fix. 있으면 None으로 덮어씌워짐.
+            await db.commit()
+            event_id = event.id
+
+        # 1. in-memory: refresh 전 값 보존
+        assert assigned_seq is not None and assigned_seq > 0, (
+            f"recipient_seq was None after assign_recipient_seq — refresh may have reset it: {assigned_seq}"
+        )
+
+        # 2. DB 영속: commit 후 실제 row의 recipient_seq 확인
+        db_seq = await conn_setup.fetchval(
+            "SELECT recipient_seq FROM events WHERE id = $1", event_id
+        )
+        assert db_seq == assigned_seq, (
+            f"DB recipient_seq({db_seq}) != assigned_seq({assigned_seq}). "
+            "refresh may have overwritten in-memory value before commit."
+        )
+
+    finally:
+        cleanup = await asyncpg.connect(_ASYNCPG_URL)
+        try:
+            await cleanup.execute("DELETE FROM events WHERE recipient_id = $1", agent_id)
+            await cleanup.execute("DELETE FROM agent_event_seqs WHERE recipient_id = $1", agent_id)
+            if project_id:
+                await cleanup.execute("DELETE FROM projects WHERE id = $1", project_id)
+            if org_id:
+                await cleanup.execute("DELETE FROM organizations WHERE id = $1", org_id)
+        except: pass
+        await cleanup.close()
+        await conn_setup.close()
+        await engine.dispose()
