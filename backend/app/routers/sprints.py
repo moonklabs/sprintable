@@ -53,6 +53,8 @@ async def create_sprint(
         start_date=body.start_date,
         end_date=body.end_date,
         team_size=body.team_size,
+        goal=body.goal,
+        capacity=body.capacity,
         success_hypothesis=body.success_hypothesis,
         metric_definition=body.metric_definition,
         measure_after=body.measure_after,
@@ -88,10 +90,16 @@ async def update_sprint(
 async def delete_sprint(
     id: uuid.UUID,
     repo: SprintRepository = Depends(_get_repo),
+    session: AsyncSession = Depends(get_db),
+    org_id: uuid.UUID = Depends(get_verified_org_id),
 ) -> dict:
+    from app.repositories.dependency import DependencyRepository
+    from app.repositories.label import ItemLabelRepository
     ok = await repo.delete(id)
     if not ok:
         raise HTTPException(status_code=404, detail="Sprint not found")
+    await DependencyRepository(session, org_id).delete_by_item(id, "sprint")
+    await ItemLabelRepository(session, org_id).delete_by_item(id, "sprint")
     return {"ok": True}
 
 

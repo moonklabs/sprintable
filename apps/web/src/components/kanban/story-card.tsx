@@ -6,7 +6,8 @@ import { CSS } from '@dnd-kit/utilities';
 import { useTranslations } from 'next-intl';
 import type { KanbanStory, KanbanMember } from './types';
 import { Badge } from '@/components/ui/badge';
-import { ChevronRight, Rocket, Zap, ZapOff } from 'lucide-react';
+import { AlertTriangle, ChevronRight, Rocket, Zap, ZapOff } from 'lucide-react';
+import { LabelChip } from '@/components/ui/label-chip';
 
 const EPIC_COLORS = [
   'info',
@@ -43,10 +44,14 @@ interface StoryCardProps {
   projectId?: string;
   onKickoff?: (storyId: string, result: 'triggered' | 'no_match' | 'conflict' | 'error') => void;
   lastExecution?: WorkflowExecStatus | null;
+  blockedBy?: string[];
+  labels?: { id: string; name: string; color: string | null }[];
+  gates?: { id: string; gate_type: string; status: string }[];
 }
 
-export function StoryCard({ story, epicName, assignee, onClick, onEdit, onChangeStatus, onAssign, onDelete, projectId, onKickoff, lastExecution }: StoryCardProps) {
+export function StoryCard({ story, epicName, assignee, onClick, onEdit, onChangeStatus, onAssign, onDelete, projectId, onKickoff, lastExecution, blockedBy = [], labels = [], gates = [] }: StoryCardProps) {
   const t = useTranslations('board');
+  const tCage = useTranslations('cage');
   const [contextMenuOpen, setContextMenuOpen] = useState(false);
   const [statusMenuOpen, setStatusMenuOpen] = useState(false);
   const [triggering, setTriggering] = useState(false);
@@ -179,9 +184,29 @@ export function StoryCard({ story, epicName, assignee, onClick, onEdit, onChange
         <div className="absolute inset-0 pointer-events-none rounded-lg border border-transparent bg-gradient-to-r from-accent-claim/10 to-purple-500/10 opacity-50" />
       )}
       {epicName && story.epic_id ? (
-        <Badge variant={getEpicColor(story.epic_id)} className="mb-3 max-w-full">
+        <Badge variant={getEpicColor(story.epic_id)} className="mb-2 max-w-full">
           <span className="min-w-0 truncate leading-none">{epicName}</span>
         </Badge>
+      ) : null}
+      {/* Zone A meta row — dep 뱃지 + label 칩 + gate 뱃지 */}
+      {(blockedBy.length > 0 && story.status !== 'done') || labels.length > 0 || gates.filter((g) => g.status === 'pending').length > 0 ? (
+        <div className="mb-2 flex flex-wrap gap-1">
+          {blockedBy.length > 0 && story.status !== 'done' ? (
+            <Badge variant="warning" className="gap-1">
+              <AlertTriangle className="size-3 shrink-0" />
+              <span>{t('blockedBy', { count: blockedBy.length })}</span>
+            </Badge>
+          ) : null}
+          {labels.map((label) => (
+            <LabelChip key={label.id} label={label} />
+          ))}
+          {gates.filter((g) => g.status === 'pending').map((gate) => (
+            <Badge key={gate.id} variant="info" className="gap-1">
+              <span>⏸</span>
+              <span>{gate.gate_type} {tCage('gatePending')}</span>
+            </Badge>
+          ))}
+        </div>
       ) : null}
       <p className="relative z-10 line-clamp-2 text-sm font-medium leading-5 text-foreground">{story.title}</p>
       <div className="relative z-10 mt-3 flex items-center justify-between gap-2">

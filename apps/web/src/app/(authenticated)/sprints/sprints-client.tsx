@@ -22,6 +22,9 @@ interface Sprint {
   duration: number;
   velocity: number | null;
   report_doc_id: string | null;
+  goal: string | null;
+  capacity: number | null;
+  team_size: number | null;
   success_hypothesis: string | null;
   metric_definition: MetricDefinition | null;
   measure_after: string | null;
@@ -74,6 +77,9 @@ function CreateDialog({ projectId, onCreated, onClose }: CreateDialogProps) {
   const [title, setTitle] = useState('');
   const [startDate, setStartDate] = useState('');
   const [endDate, setEndDate] = useState('');
+  const [goal, setGoal] = useState('');
+  const [capacity, setCapacity] = useState('');
+  const [teamSize, setTeamSize] = useState('');
   const [intent, setIntent] = useState<OutcomeIntentValue>({ success_hypothesis: '', metric_definition: null, measure_after: '' });
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -85,6 +91,9 @@ function CreateDialog({ projectId, onCreated, onClose }: CreateDialogProps) {
     setError(null);
     try {
       const payload = {
+        goal: goal.trim() || null,
+        capacity: capacity ? Number(capacity) : null,
+        team_size: teamSize ? Number(teamSize) : null,
         success_hypothesis: intent.success_hypothesis.trim() || null,
         metric_definition: intent.metric_definition,
         measure_after: intent.measure_after ? `${intent.measure_after}T00:00:00Z` : null,
@@ -148,7 +157,61 @@ function CreateDialog({ projectId, onCreated, onClose }: CreateDialogProps) {
               />
             </div>
           </div>
-          <OutcomeIntentFields value={intent} onChange={setIntent} />
+          {/* ⎈ 실행 계획 */}
+          <div className="space-y-2 rounded-xl border border-border bg-muted/20 p-3">
+            <p className="text-[10px] font-semibold uppercase tracking-[0.18em] text-muted-foreground">⎈ {t('planSection')}</p>
+            <div className="space-y-1">
+              <label className="text-xs font-medium text-muted-foreground">{t('goalLabel')}</label>
+              <input
+                type="text"
+                value={goal}
+                onChange={(e) => setGoal(e.target.value)}
+                placeholder={t('goalPlaceholder')}
+                className="w-full rounded-xl border border-border bg-background px-3 py-2 text-sm text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-2 focus:ring-primary/40"
+              />
+            </div>
+            <div className="grid grid-cols-2 gap-2">
+              <div className="space-y-1">
+                <label className="flex items-center gap-1 text-xs font-medium text-muted-foreground">
+                  <span>⏲</span>{t('capacityLabel')}
+                </label>
+                <div className="relative">
+                  <input
+                    type="number"
+                    min="0"
+                    value={capacity}
+                    onChange={(e) => setCapacity(e.target.value)}
+                    placeholder="0"
+                    className="w-full rounded-xl border border-border bg-background px-3 py-2 pr-8 text-sm text-foreground tabular-nums placeholder:text-muted-foreground focus:outline-none focus:ring-2 focus:ring-primary/40"
+                  />
+                  <span className="absolute right-2.5 top-1/2 -translate-y-1/2 text-[10px] text-muted-foreground">SP</span>
+                </div>
+              </div>
+              <div className="space-y-1">
+                <label className="flex items-center gap-1 text-xs font-medium text-muted-foreground">
+                  <span>👤</span>{t('teamSizeLabel')}
+                </label>
+                <div className="relative">
+                  <input
+                    type="number"
+                    min="1"
+                    value={teamSize}
+                    onChange={(e) => setTeamSize(e.target.value)}
+                    placeholder="0"
+                    className="w-full rounded-xl border border-border bg-background px-3 py-2 pr-6 text-sm text-foreground tabular-nums placeholder:text-muted-foreground focus:outline-none focus:ring-2 focus:ring-primary/40"
+                  />
+                  <span className="absolute right-2.5 top-1/2 -translate-y-1/2 text-[10px] text-muted-foreground">명</span>
+                </div>
+              </div>
+            </div>
+          </div>
+
+          {/* ◎ 효과 가설 */}
+          <div className="space-y-1.5">
+            <p className="text-[10px] font-semibold uppercase tracking-[0.18em] text-muted-foreground">◎ {t('hypothesisSection')}</p>
+            <OutcomeIntentFields value={intent} onChange={setIntent} />
+          </div>
+
           {error ? <p className="text-xs text-destructive">{error}</p> : null}
           <div className="flex justify-end gap-2 pt-1">
             <Button type="button" variant="ghost" size="sm" onClick={onClose}>{t('cancel')}</Button>
@@ -419,6 +482,36 @@ export function SprintsClient({ projectId }: SprintsClientProps) {
           <X className="size-4" />
         </Button>
       </div>
+
+      {/* Goal */}
+      {selected.goal ? (
+        <p className="mb-3 rounded-lg border border-border bg-muted/20 px-3 py-2 text-sm text-foreground">
+          <span className="mr-1.5 text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">⎈ 목표</span>
+          {selected.goal}
+        </p>
+      ) : null}
+
+      {/* Plan stats */}
+      {(selected.capacity != null || selected.team_size != null) ? (
+        <div className="mb-4 flex flex-wrap gap-2">
+          {selected.capacity != null ? (
+            <span className="flex items-center gap-1 rounded-md border border-border bg-muted/30 px-2.5 py-1 text-xs font-medium tabular-nums text-foreground">
+              <span className="text-muted-foreground">⏲</span>
+              {selected.capacity}<span className="ml-0.5 text-muted-foreground">SP</span>
+            </span>
+          ) : null}
+          {selected.team_size != null ? (
+            <span className="flex items-center gap-1 rounded-md border border-border bg-muted/30 px-2.5 py-1 text-xs font-medium tabular-nums text-foreground">
+              <span className="text-muted-foreground">👤</span>
+              {selected.team_size}<span className="ml-0.5 text-muted-foreground">명</span>
+            </span>
+          ) : null}
+          <span className="flex items-center gap-1 rounded-md border border-border bg-muted/30 px-2.5 py-1 text-xs font-medium tabular-nums text-foreground">
+            <span className="text-muted-foreground">📅</span>
+            {selected.duration}{t('days')}
+          </span>
+        </div>
+      ) : null}
 
       {/* Action buttons */}
       {selected.status === 'planning' ? (

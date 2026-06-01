@@ -56,6 +56,9 @@ interface KanbanColumnProps {
   // Inline create
   onCreateStory?: (columnId: string, title: string) => Promise<void> | void;
   executionMap?: Record<string, { status: string; rule_name?: string | null; completed_at?: string | null }>;
+  blockedByMap?: Record<string, string[]>;
+  storyLabelsMap?: Record<string, { id: string; name: string; color: string | null }[]>;
+  storyGatesMap?: Record<string, { id: string; gate_type: string; status: string }[]>;
   // CB-S4: board query
   totalCount?: number;
   hasMore?: boolean;
@@ -71,7 +74,7 @@ export function KanbanColumn({
   onEditStory, onChangeStatus, onAssignStory, onDeleteStory,
   wipLimit, wipExceeded, wipEditing, wipDraft,
   onWipLimitEdit, onWipLimitSave, onWipLimitRemove, onWipDraftChange,
-  onCreateStory, projectId, onKickoffStory, executionMap,
+  onCreateStory, projectId, onKickoffStory, executionMap, blockedByMap, storyLabelsMap, storyGatesMap,
   totalCount, hasMore, loadingMore, onLoadMore,
   collapsed, onToggleCollapse,
 }: KanbanColumnProps) {
@@ -304,6 +307,9 @@ export function KanbanColumn({
                   projectId={projectId}
                   onKickoff={onKickoffStory}
                   lastExecution={executionMap?.[story.id] ?? null}
+                  blockedBy={blockedByMap?.[story.id] ?? []}
+                  labels={storyLabelsMap?.[story.id] ?? []}
+                  gates={storyGatesMap?.[story.id] ?? []}
                 />
               ))}
             </div>

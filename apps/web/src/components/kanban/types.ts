@@ -16,6 +16,29 @@ export interface KanbanStory {
   measure_after: string | null;
   outcome_status: 'n_a' | 'pending' | 'hit' | 'miss' | null;
   outcome_result: OutcomeResult | null;
+  blocked_by?: string[];
+  labels?: { id: string; name: string; color: string | null }[];
+  gates?: { id: string; gate_type: string; status: string }[];
+}
+
+export interface GateItem {
+  id: string;
+  work_item_id: string;
+  work_item_type: string;
+  gate_type: string;
+  status: string;
+  resolver_id: string | null;
+  resolved_at: string | null;
+  neutral_facts: Record<string, unknown> | null;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface DependencyEdge {
+  id: string;
+  from_id: string;
+  to_id: string;
+  dep_type: 'blocks' | 'depends_on';
 }
 
 export interface KanbanEpic {

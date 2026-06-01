@@ -49,6 +49,7 @@ from app.core.security import (
 )
 from app.core.rate_limit import limiter
 from app.dependencies.auth import AuthContext, get_current_user
+from app.services.project_auth import has_project_access, first_accessible_project_id
 from app.dependencies.database import get_db
 from app.models.invitation import Invitation
 from app.models.org_invite import OrgInvite
@@ -1090,18 +1091,8 @@ async def switch_project(
     if user is None:
         return _err("USER_NOT_FOUND", "User not found", 404)
 
-    # 해당 project의 active team_member 검증 (cross-org 허용 — 멀티 org 사용자 지원)
-    result = await session.execute(
-        select(TeamMember)
-        .where(
-            TeamMember.project_id == body.project_id,
-            or_(TeamMember.user_id == user.id, TeamMember.id == user.id),
-            TeamMember.is_active.is_(True),
-        )
-        .limit(1)
-    )
-    member = result.scalar_one_or_none()
-    if member is None:
+    # 인가 체크 — team_member ∪ project_access(granted) ∪ owner/admin (me/memberships 3-branch 정합)
+    if not await has_project_access(session, user.id, body.project_id):
         return _err("NOT_MEMBER", "Not an active member of this project", 403)
 
     # last_project_id 갱신
@@ -1154,32 +1145,8 @@ async def switch_organization(
     if membership.scalar_one_or_none() is None:
         return _err("NOT_ORG_MEMBER", "Not a member of this organization", 403)
 
-    # 대상 org의 team_member 조회 → last_project_id 갱신
-    member_in_org = await session.execute(
-        select(TeamMember)
-        .where(
-            TeamMember.org_id == body.org_id,
-            or_(TeamMember.user_id == user.id, TeamMember.id == user.id),
-            TeamMember.is_active.is_(True),
-        )
-        .order_by(TeamMember.created_at.asc())
-        .limit(1)
-    )
-    team_member = member_in_org.scalar_one_or_none()
-
-    if team_member is not None:
-        user.last_project_id = team_member.project_id
-    else:
-        # team_member 없음 (opt-out 모델) — 대상 org의 첫 project로 last_project_id 갱신.
-        # 미설정 시 _build_app_metadata가 이전 org project_id를 JWT에 심어 context 불일치 발생.
-        first_proj_result = await session.execute(
-            select(Project)
-            .where(Project.org_id == body.org_id, Project.deleted_at.is_(None))
-            .order_by(Project.created_at.asc())
-            .limit(1)
-        )
-        first_proj = first_proj_result.scalar_one_or_none()
-        user.last_project_id = first_proj.id if first_proj else None
+    # 대상 org의 접근 가능한 첫 project 해소 — team_member > grant > org 첫 project (grant 유저 포함)
+    user.last_project_id = await first_accessible_project_id(session, user.id, body.org_id)
 
     # 기존 refresh token 무효화
     await session.execute(

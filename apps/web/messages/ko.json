@@ -192,7 +192,22 @@
     "kickoffTriggered": "워크플로우가 실행되었습니다",
     "kickoffNoMatch": "매칭되는 규칙이 없습니다",
     "kickoffConflict": "최근 실행된 워크플로우가 있습니다",
-    "kickoffError": "워크플로우 실행에 실패했습니다"
+    "kickoffError": "워크플로우 실행에 실패했습니다",
+    "blockedBy": "{count}개에 의해 차단됨",
+    "allLabels": "모든 라벨",
+    "labelsActive": "{count}개 라벨",
+    "searchLabels": "라벨 검색...",
+    "dep": {
+      "duplicateConnection": "이미 연결된 의존성",
+      "cycleDetected": "사이클이 발생하는 의존성",
+      "invalidSelf": "잘못된 의존성 (자기참조 불가)",
+      "addFailed": "의존성 추가 실패",
+      "add": "추가",
+      "typeBlocks": "차단",
+      "typeDepends": "의존",
+      "searchPlaceholder": "스토리 제목으로 검색...",
+      "incompletePreds": "미완료 선행 {count}건 — 시작 전 확인 권장"
+    }
   },
   "memos": {
     "title": "메모",
@@ -2118,7 +2133,13 @@
     "noSprintStories": "배정된 스토리가 없습니다.",
     "backlog": "백로그",
     "assign": "추가",
-    "unassign": "제거"
+    "unassign": "제거",
+    "planSection": "실행 계획",
+    "goalLabel": "목표",
+    "goalPlaceholder": "이번 스프린트에서 무엇을 완수하는가?",
+    "capacityLabel": "공수",
+    "teamSizeLabel": "인원",
+    "hypothesisSection": "효과 가설"
   },
   "chats": {
     "title": "채팅",
@@ -2223,6 +2244,31 @@
     "metric_velocity": "벨로시티",
     "metric_backlog_remaining": "백로그 잔여",
     "metric_progress": "진행률",
-    "hypothesisPlaceholder_story": "이 스토리가 성공이라면 무엇이 달라지는가?"
+    "hypothesisPlaceholder_story": "이 스토리가 성공이라면 무엇이 달라지는가?",
+    "metric_completion_pct": "완료율 %",
+    "hypothesisPlaceholder_epic": "이 에픽을 완수하면 어떤 성과를 기대하는가?"
+  },
+  "cage": {
+    "gatePending": "게이트 대기",
+    "gateApprove": "승인",
+    "gateReject": "반려",
+    "gateRejectTitle": "게이트 반려",
+    "gateRejectNotePlaceholder": "사유 (선택)",
+    "gateRejectConfirm": "반려 확정",
+    "gateInboxLoading": "게이트 조회 중...",
+    "gateInboxEmpty": "대기 중인 게이트 없음",
+    "gateInboxEmptyHint": "검수 대기 중인 게이트가 여기 표시됩니다",
+    "cancel": "취소",
+    "trustScoreLabel": "무정정 통과율",
+    "trustScoreWindowHint": "최근 {days}일",
+    "trustScoreNoData": "검수 데이터 없음",
+    "trustScoreNoDataHint": "첫 검수 후 점수가 표시됩니다",
+    "trustScorePending": "측정 대기",
+    "totalReviews": "전체",
+    "cleanPasses": "무정정",
+    "corrections": "정정",
+    "correctionRounds": "정정 {count}회",
+    "byRole": "역할별",
+    "gateTabLabel": "게이트"
   }
 }

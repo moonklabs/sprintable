@@ -192,7 +192,22 @@
     "kickoffTriggered": "Workflow triggered",
     "kickoffNoMatch": "No matching rule found",
     "kickoffConflict": "Workflow already triggered recently",
-    "kickoffError": "Failed to trigger workflow"
+    "kickoffError": "Failed to trigger workflow",
+    "blockedBy": "blocked by {count}",
+    "allLabels": "All Labels",
+    "labelsActive": "{count} label(s)",
+    "searchLabels": "Search labels...",
+    "dep": {
+      "duplicateConnection": "Dependency already linked",
+      "cycleDetected": "Dependency creates a cycle",
+      "invalidSelf": "Invalid dependency (self-reference not allowed)",
+      "addFailed": "Failed to add dependency",
+      "add": "Add",
+      "typeBlocks": "Blocks",
+      "typeDepends": "Depends",
+      "searchPlaceholder": "Search by story title...",
+      "incompletePreds": "{count} incomplete predecessor(s) — check before starting"
+    }
   },
   "memos": {
     "title": "Memos",
@@ -2118,7 +2133,13 @@
     "noSprintStories": "No stories assigned to this sprint.",
     "backlog": "Backlog",
     "assign": "Add",
-    "unassign": "Remove"
+    "unassign": "Remove",
+    "planSection": "Execution Plan",
+    "goalLabel": "Goal",
+    "goalPlaceholder": "What will the team complete this sprint?",
+    "capacityLabel": "Capacity",
+    "teamSizeLabel": "Team Size",
+    "hypothesisSection": "Outcome Hypothesis"
   },
   "chats": {
     "title": "Chats",
@@ -2223,6 +2244,31 @@
     "metric_velocity": "Velocity",
     "metric_backlog_remaining": "Backlog remaining",
     "metric_progress": "Progress",
-    "hypothesisPlaceholder_story": "What would be different if this story succeeds?"
+    "hypothesisPlaceholder_story": "What would be different if this story succeeds?",
+    "metric_completion_pct": "Completion %",
+    "hypothesisPlaceholder_epic": "What outcome do we expect by completing this epic?"
+  },
+  "cage": {
+    "gatePending": "gate pending",
+    "gateApprove": "Approve",
+    "gateReject": "Reject",
+    "gateRejectTitle": "Reject gate",
+    "gateRejectNotePlaceholder": "Reason (optional)",
+    "gateRejectConfirm": "Confirm reject",
+    "gateInboxLoading": "Loading gates...",
+    "gateInboxEmpty": "No pending gates",
+    "gateInboxEmptyHint": "Gates awaiting your review will appear here",
+    "cancel": "Cancel",
+    "trustScoreLabel": "Clean Pass Rate",
+    "trustScoreWindowHint": "Last {days} days",
+    "trustScoreNoData": "No review data yet",
+    "trustScoreNoDataHint": "Score will appear after first review",
+    "trustScorePending": "Pending",
+    "totalReviews": "Reviews",
+    "cleanPasses": "Clean",
+    "corrections": "Rounds",
+    "correctionRounds": "{count} correction(s)",
+    "byRole": "By Role",
+    "gateTabLabel": "Gates"
   }
 }

@@ -33,6 +33,13 @@ async def list_epics(
     return [EpicResponse.model_validate(e) for e in epics]
 
 
+def _resolve_outcome_status(metric_definition: object, measure_after: object, current_status: str = "n_a") -> str:
+    """intent가 완전히 선언(md+ma 둘 다 세팅)되면 n_a→pending 전이."""
+    if metric_definition and measure_after and current_status == "n_a":
+        return "pending"
+    return current_status
+
+
 @router.post("", response_model=EpicResponse, status_code=201)
 async def create_epic(
     body: EpicCreate,
@@ -57,6 +64,10 @@ async def create_epic(
         success_criteria=body.success_criteria,
         target_sp=body.target_sp,
         target_date=body.target_date,
+        success_hypothesis=body.success_hypothesis,
+        metric_definition=body.metric_definition,
+        measure_after=body.measure_after,
+        outcome_status=_resolve_outcome_status(body.metric_definition, body.measure_after),
     )
     return EpicResponse.model_validate(epic)
 
@@ -78,7 +89,16 @@ async def update_epic(
     body: EpicUpdate,
     repo: EpicRepository = Depends(_get_repo),
 ) -> EpicResponse:
+    current = await repo.get(id)
+    if current is None:
+        raise HTTPException(status_code=404, detail="Epic not found")
     data = body.model_dump(exclude_unset=True)
+    # intent가 이번 업데이트로 완성되면 n_a→pending 전이
+    effective_md = data.get("metric_definition", current.metric_definition)
+    effective_ma = data.get("measure_after", current.measure_after)
+    new_status = _resolve_outcome_status(effective_md, effective_ma, current.outcome_status)
+    if new_status != current.outcome_status:
+        data["outcome_status"] = new_status
     epic = await repo.update(id, **data)
     if epic is None:
         raise HTTPException(status_code=404, detail="Epic not found")
@@ -89,10 +109,16 @@ async def update_epic(
 async def delete_epic(
     id: uuid.UUID,
     repo: EpicRepository = Depends(_get_repo),
+    session: AsyncSession = Depends(get_db),
+    org_id: uuid.UUID = Depends(get_verified_org_id),
 ) -> dict:
+    from app.repositories.dependency import DependencyRepository
+    from app.repositories.label import ItemLabelRepository
     ok = await repo.delete(id)
     if not ok:
         raise HTTPException(status_code=404, detail="Epic not found")
+    await DependencyRepository(session, org_id).delete_by_item(id, "epic")
+    await ItemLabelRepository(session, org_id).delete_by_item(id, "epic")
     return {"ok": True}
 
 

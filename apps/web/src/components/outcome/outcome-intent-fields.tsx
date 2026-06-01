@@ -6,7 +6,7 @@ import type { MetricDefinition } from '@sprintable/core-storage';
 
 export type { MetricDefinition };
 export interface OutcomeIntentValue { success_hypothesis: string; metric_definition: MetricDefinition | null; measure_after: string; }
-const INTERNAL_METRICS = ['velocity', 'backlog_remaining', 'progress'] as const;
+const INTERNAL_METRICS = ['velocity', 'backlog_remaining', 'progress', 'completion_pct'] as const;
 
 interface OutcomeIntentFieldsProps {
   value: OutcomeIntentValue;
@@ -14,7 +14,7 @@ interface OutcomeIntentFieldsProps {
   defaultOpen?: boolean;
   open?: boolean;
   onOpenChange?: (open: boolean) => void;
-  context?: 'sprint' | 'story';
+  context?: 'sprint' | 'story' | 'epic';
 }
 
 export function OutcomeIntentFields({ value, onChange, defaultOpen = false, open: controlledOpen, onOpenChange, context = 'sprint' }: OutcomeIntentFieldsProps) {
@@ -30,7 +30,7 @@ export function OutcomeIntentFields({ value, onChange, defaultOpen = false, open
     const base: MetricDefinition = md ?? { metric: 'velocity', source: 'internal_ops', target: 0, direction: 'up' };
     onChange({ ...value, metric_definition: { ...base, ...patch } });
   };
-  const placeholder = context === 'story' ? t('hypothesisPlaceholder_story') : t('hypothesisPlaceholder');
+  const placeholder = context === 'story' ? t('hypothesisPlaceholder_story') : context === 'epic' ? t('hypothesisPlaceholder_epic') : t('hypothesisPlaceholder');
   if (!open) return (
     <button type="button" onClick={() => setOpen(true)}
       className="w-full rounded-xl border border-dashed border-border py-2.5 text-sm text-muted-foreground transition hover:border-primary hover:text-primary">

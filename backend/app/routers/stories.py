@@ -103,6 +103,20 @@ async def list_stories(
     return [StoryResponse.model_validate(s) for s in stories]
 
 
+async def _upsert_assignee_participation(
+    session: AsyncSession, org_id: uuid.UUID, story_id: uuid.UUID, assignee_id: uuid.UUID
+) -> None:
+    """assignee 설정 시 implementation(default) 역할 participation 자동 upsert (멱등)."""
+    from app.repositories.participation import ParticipationRepository, ParticipationRoleRepository
+    role_repo = ParticipationRoleRepository(session, org_id)
+    default_role = await role_repo.get_default()
+    if default_role is None:
+        return
+    p_repo = ParticipationRepository(session, org_id)
+    if not await p_repo.exists(story_id, assignee_id, default_role.id):
+        await p_repo.create(story_id=story_id, member_id=assignee_id, role_id=default_role.id)
+
+
 @router.post("", response_model=StoryResponse, status_code=201)
 async def create_story(
     body: StoryCreate,
@@ -134,6 +148,9 @@ async def create_story(
         metric_definition=body.metric_definition,
         measure_after=body.measure_after,
     )
+    # E-CAGE-REFEREE: assignee 설정 시 implementation 역할 participation 자동 생성
+    if body.assignee_id:
+        await _upsert_assignee_participation(session, org_id, story.id, body.assignee_id)
     return StoryResponse.model_validate(story)
 
 
@@ -166,6 +183,10 @@ async def update_story(
     story = await repo.update(id, **data)
     if story is None:
         raise HTTPException(status_code=404, detail="Story not found")
+
+    # E-CAGE-REFEREE: assignee 변경(신규 세팅) 시 implementation 역할 participation 자동 upsert
+    if "assignee_id" in data and story.assignee_id:
+        await _upsert_assignee_participation(db, repo.org_id, story.id, story.assignee_id)
 
     # 변경사항 먼저 commit — side effects 에러가 rollback시키지 않도록
     await db.commit()
@@ -267,10 +288,18 @@ async def update_story(
 async def delete_story(
     id: uuid.UUID,
     repo: StoryRepository = Depends(_get_repo),
+    session: AsyncSession = Depends(get_db),
+    org_id: uuid.UUID = Depends(get_verified_org_id),
 ) -> dict:
+    from app.repositories.dependency import DependencyRepository
+    from app.repositories.label import ItemLabelRepository
+    from app.repositories.participation import ParticipationRepository
     ok = await repo.delete(id)
     if not ok:
         raise HTTPException(status_code=404, detail="Story not found")
+    await DependencyRepository(session, org_id).delete_by_item(id, "story")
+    await ItemLabelRepository(session, org_id).delete_by_item(id, "story")
+    await ParticipationRepository(session, org_id).delete_by_story(id)
     return {"ok": True}
 
 

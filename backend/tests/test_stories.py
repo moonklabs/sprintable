@@ -27,6 +27,8 @@ def _mock_story(status: str = "backlog") -> MagicMock:
     s.description = None
     s.acceptance_criteria = None
     s.position = None
+    # E-CAGE-REFEREE P1: 오염 마킹 필드
+    s.is_excluded = False
     # E-OUTCOME-LOOP: 신규 필드 (MagicMock이 반환하는 MagicMock 객체가 Pydantic 검증 실패하므로 명시 세팅)
     s.success_hypothesis = None
     s.metric_definition = None

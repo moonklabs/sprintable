@@ -1,13 +1,14 @@
 'use client';
 
 import { useCallback, useEffect, useMemo, useState } from 'react';
-import { useRouter } from 'next/navigation';
+import { useRouter, useSearchParams } from 'next/navigation';
 import { useTranslations } from 'next-intl';
 import { Inbox as InboxIcon, Zap, ZapOff } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { TopBarSlot } from '@/components/nav/top-bar-slot';
 import { Badge } from '@/components/ui/badge';
 import { DecisionsWaiting } from '@/components/inbox/decisions-waiting';
+import { GateInbox } from '@/components/cage/gate-inbox';
 import { useDashboardContext } from '../../dashboard/dashboard-shell';
 import { useToast, ToastContainer } from '@/components/ui/toast';
 import {
@@ -150,8 +151,11 @@ async function fetchInboxNotifications(typeFilter: string) {
 
 export default function InboxPage() {
   const router = useRouter();
+  const searchParams = useSearchParams();
   const t = useTranslations('inbox');
+  const tCage = useTranslations('cage');
   const { currentTeamMemberId, projectId } = useDashboardContext();
+  const activeTab = searchParams.get('tab') ?? 'notifications';
   const [notifications, setNotifications] = useState<Notification[]>([]);
   const [unreadCount, setUnreadCount] = useState(0);
   const [loading, setLoading] = useState(true);
@@ -287,6 +291,37 @@ export default function InboxPage() {
       />
 
       <div className="flex min-h-0 flex-1 flex-col overflow-hidden">
+        {/* 탭 — 알림 / 게이트 */}
+        <div className="flex shrink-0 border-b border-border/80 px-4">
+          {([
+            { key: 'notifications', label: t('title') },
+            { key: 'gates', label: tCage('gateTabLabel') },
+          ] as { key: string; label: string }[]).map(({ key, label }) => (
+            <button
+              key={key}
+              type="button"
+              onClick={() => router.replace(`/inbox${key === 'notifications' ? '' : `?tab=${key}`}`, { scroll: false })}
+              className={`border-b-2 px-4 py-2.5 text-xs font-medium transition-colors ${
+                activeTab === key
+                  ? 'border-primary text-foreground'
+                  : 'border-transparent text-muted-foreground hover:text-foreground'
+              }`}
+            >
+              {label}
+            </button>
+          ))}
+        </div>
+
+        {activeTab === 'gates' ? (
+          <div className="flex-1 overflow-y-auto p-4">
+            {currentTeamMemberId ? (
+              <GateInbox memberId={currentTeamMemberId} />
+            ) : (
+              <p className="text-xs text-muted-foreground">{t('loading')}</p>
+            )}
+          </div>
+        ) : (
+        <>
         <DecisionsWaiting onChange={() => void refreshNotifications()} />
 
         {workflowExecs.length > 0 && (
@@ -433,6 +468,8 @@ export default function InboxPage() {
           )}
         </div>
         </div>
+        </>
+        )}
       </div>
 
       <ToastContainer toasts={toasts} onDismiss={dismissToast} />

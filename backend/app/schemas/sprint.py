@@ -11,7 +11,10 @@ class SprintBase(BaseModel):
     start_date: date | None = None
     end_date: date | None = None
     team_size: int | None = None
-    # E-OUTCOME-LOOP: 의도 필드
+    # E-BOARD-SCHEMA S4: 실행 목표(goal)·가용 공수(capacity)
+    goal: str | None = None
+    capacity: int | None = None
+    # E-OUTCOME-LOOP: 효과 가설(success_hypothesis) — goal(실행 목표)과 별개
     success_hypothesis: str | None = None
     metric_definition: dict[str, Any] | None = None
     measure_after: datetime | None = None
@@ -36,6 +39,9 @@ class SprintUpdate(BaseModel):
     velocity: int | None = None
     duration: int | None = None
     report_doc_id: uuid.UUID | None = None
+    # E-BOARD-SCHEMA S4
+    goal: str | None = None
+    capacity: int | None = None
     # E-OUTCOME-LOOP: 의도 필드 (Update 허용)
     success_hypothesis: str | None = None
     metric_definition: dict[str, Any] | None = None
