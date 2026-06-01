@@ -1,3 +1,4 @@
+from app.models.agent_event_seq import AgentEventSeq
 from app.models.agent_gateway import AgentEventCursor, AgentGatewaySession
 from app.models.agent_deployment import AgentAuditLog, AgentDeployment, AgentPersona
 from app.models.agent_routing_rule import AgentRoutingRule

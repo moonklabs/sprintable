@@ -1,6 +1,6 @@
-"""E-AGENT-GATEWAY Phase 0: gateway_seq 기반 SSE 스트림 + ACK.
+"""E-AGENT-GATEWAY Phase 0: per-recipient dense seq 기반 SSE 스트림 + ACK.
 
-이중전달 fix: status 변이 폐기 → gateway_seq > start_seq 단조 커서.
+이중전달 fix: per-recipient dense commit-ordered seq (recipient_seq).
 start_seq = max(acked_seq DB, Last-Event-ID 헤더)
 backfill = live-tail = 동일 쿼리 → 겹침 0.
 """
@@ -36,7 +36,7 @@ _BACKFILL_LIMIT: int = int(os.getenv("AGENT_GATEWAY_BACKFILL_LIMIT", "100"))
 def wake_agent(agent_id: str, seq: int, _from_listener: bool = False) -> None:
     """신규 이벤트 커밋 후 에이전트 SSE 큐에 wake 신호 전송.
 
-    에이전트는 신호 수신 후 gateway_seq > current_seq 조회 (payload 미포함).
+    에이전트는 신호 수신 후 recipient_seq > cursor 조회 (payload 미포함).
     _from_listener=True: pg_notify 재발행 금지.
     """
     payload = {"__wake__": True, "seq": seq}
@@ -67,9 +67,9 @@ async def _fetch_events(
     after_seq: int,
     limit: int,
 ) -> list:
-    """gateway_seq > after_seq인 visible 이벤트 반환 (raw rows).
+    """recipient_seq > after_seq인 visible 이벤트 반환 (raw rows).
 
-    정렬: gateway_seq ASC. visible이면 전달 — 커서 전진은 호출자가 결정.
+    정렬: recipient_seq ASC. per-recipient dense → gap-free.
     gap-free 보장은 acked_seq 재스캔(caller)이 담당; 이 함수는 단순 조회.
     """
     rows = await session.execute(
@@ -77,7 +77,7 @@ async def _fetch_events(
             SELECT
                 e.id::text            AS event_id,
                 e.event_type,
-                e.gateway_seq,
+                e.recipient_seq,
                 e.source_entity_type,
                 e.source_entity_id::text AS source_entity_id,
                 e.sender_id::text     AS sender_id,
@@ -85,8 +85,8 @@ async def _fetch_events(
                 e.created_at
             FROM events e
             WHERE e.recipient_id = :agent_id::uuid
-              AND e.gateway_seq > :after_seq
-            ORDER BY e.gateway_seq ASC
+              AND e.recipient_seq > :after_seq
+            ORDER BY e.recipient_seq ASC
             LIMIT :limit
         """),
         {"agent_id": str(agent_id), "after_seq": after_seq, "limit": limit},
@@ -99,7 +99,7 @@ def _row_to_payload(row: object) -> dict:
     return {
         "event_id": row.event_id,  # type: ignore[attr-defined]
         "event_type": row.event_type,  # type: ignore[attr-defined]
-        "gateway_seq": row.gateway_seq,  # type: ignore[attr-defined]
+        "recipient_seq": row.recipient_seq,  # type: ignore[attr-defined]
         "source": {
             "type": row.source_entity_type,  # type: ignore[attr-defined]
             "id": row.source_entity_id,  # type: ignore[attr-defined]
@@ -114,7 +114,7 @@ def _row_to_payload(row: object) -> dict:
 
 def _push_to_agent_v2(member_id: str, payload: dict, _from_listener: bool = False) -> bool:
     """구 _push_to_agent 호출부 호환 — gateway_seq 있으면 wake_agent로 위임."""
-    seq = payload.get("gateway_seq")
+    seq = payload.get("recipient_seq") or payload.get("gateway_seq")
     if seq is not None:
         wake_agent(member_id, int(seq), _from_listener=_from_listener)
         return True
@@ -199,7 +199,7 @@ async def agent_stream(
             backfill_floor = start_seq  # 이번 백필 내 중복 방지
             for row in rows:
                 data = _row_to_payload(row)
-                gseq = row.gateway_seq or 0
+                gseq = row.recipient_seq or 0
                 if gseq > backfill_floor:  # 중복 방지
                     _sse = json.dumps({**data, "is_backfill": True})
                     yield f"event: {row.event_type}\nid: {gseq}\ndata: {_sse}\n\n"
@@ -220,7 +220,7 @@ async def agent_stream(
 
                         wake_floor = scan_from  # 이번 wake 내 중복 방지
                         for row in new_rows:
-                            gseq = row.gateway_seq or 0
+                            gseq = row.recipient_seq or 0
                             if gseq > wake_floor:
                                 data = _row_to_payload(row)
                                 _sse = json.dumps({**data, "is_backfill": False})

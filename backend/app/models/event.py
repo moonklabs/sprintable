@@ -59,6 +59,7 @@ class Event(Base, OrgScopedMixin):
     payload: Mapped[dict] = mapped_column(JSONB, nullable=False, default=dict)
     status: Mapped[str] = mapped_column(Text, nullable=False, default=EventStatus.pending.value)
     gateway_seq: Mapped[int | None] = mapped_column(nullable=True)
+    recipient_seq: Mapped[int | None] = mapped_column(nullable=True)
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now(), nullable=False
     )

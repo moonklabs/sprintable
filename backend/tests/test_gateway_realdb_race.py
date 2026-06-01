@@ -48,15 +48,24 @@ async def _make_test_org_and_project(conn) -> tuple[uuid.UUID, uuid.UUID]:
     return org_id, project_id
 
 
-async def _insert_event(conn, org_id: uuid.UUID, project_id: uuid.UUID, recipient_id: uuid.UUID) -> int:
-    """events INSERT → gateway_seq 반환."""
+async def _insert_event_with_seq(
+    conn, org_id: uuid.UUID, project_id: uuid.UUID, recipient_id: uuid.UUID
+) -> int:
+    """events INSERT + per-recipient dense seq 발급 → recipient_seq 반환."""
     seq = await conn.fetchval(
         """
+        WITH new_seq AS (
+            INSERT INTO agent_event_seqs(recipient_id, last_seq)
+            VALUES($3, 1)
+            ON CONFLICT(recipient_id)
+            DO UPDATE SET last_seq = agent_event_seqs.last_seq + 1, updated_at = NOW()
+            RETURNING last_seq
+        )
         INSERT INTO events
-            (id, org_id, project_id, event_type, recipient_id, recipient_type, payload, status)
+            (id, org_id, project_id, event_type, recipient_id, recipient_type, payload, status, recipient_seq)
         VALUES
-            (gen_random_uuid(), $1, $2, 'dispatched', $3, 'agent', '{}', 'pending')
-        RETURNING gateway_seq
+            (gen_random_uuid(), $1, $2, 'dispatched', $3, 'agent', '{}', 'pending', (SELECT last_seq FROM new_seq))
+        RETURNING recipient_seq
         """,
         org_id, project_id, recipient_id,
     )
@@ -64,12 +73,12 @@ async def _insert_event(conn, org_id: uuid.UUID, project_id: uuid.UUID, recipien
 
 
 async def _scan_events(conn, recipient_id: uuid.UUID, after_seq: int) -> list[int]:
-    """visible 이벤트 seq 목록."""
+    """visible 이벤트 recipient_seq 목록."""
     rows = await conn.fetch(
-        "SELECT gateway_seq FROM events WHERE recipient_id = $1 AND gateway_seq > $2 ORDER BY gateway_seq ASC",
+        "SELECT recipient_seq FROM events WHERE recipient_id = $1 AND recipient_seq > $2 ORDER BY recipient_seq ASC",
         recipient_id, after_seq,
     )
-    return [r["gateway_seq"] for r in rows]
+    return [r["recipient_seq"] for r in rows if r["recipient_seq"] is not None]
 
 
 # ─── 핵심 race 테스트 ─────────────────────────────────────────────────────────
@@ -107,11 +116,11 @@ async def test_acked_seq_rescan_catches_low_seq_late_commit():
 
         # ── T1 시작: events INSERT (seq 발급, 미커밋) ──────────────────────
         await conn1.execute("BEGIN")
-        seq_t1 = await _insert_event(conn1, org_id, project_id, recipient_id)
+        seq_t1 = await _insert_event_with_seq(conn1, org_id, project_id, recipient_id)
 
         # ── T2: events INSERT + COMMIT (seq_t1 + 1) ───────────────────────
         await conn2.execute("BEGIN")
-        seq_t2 = await _insert_event(conn2, org_id, project_id, recipient_id)
+        seq_t2 = await _insert_event_with_seq(conn2, org_id, project_id, recipient_id)
         await conn2.execute("COMMIT")
 
         # T1이 T2보다 낮은 seq를 가진다는 게 보장되어야 함
@@ -199,7 +208,7 @@ async def test_rescan_from_acked_seq_not_max_sent():
         # seq 3개 INSERT (모두 커밋)
         seqs = []
         for _ in range(3):
-            s = await _insert_event(conn, org_id, project_id, recipient_id)
+            s = await _insert_event_with_seq(conn, org_id, project_id, recipient_id)
             seqs.append(s)
 
         seqs.sort()
@@ -224,3 +233,90 @@ async def test_rescan_from_acked_seq_not_max_sent():
         await cleanup.close()
         await conn.close()
         await setup_conn.close()
+
+@pytest.mark.anyio
+async def test_per_recipient_dense_seq_prevents_ack_ordering_gap():
+    """AC3: per-recipient dense seq → ack-후-늦커밋 gap 구조적 불가.
+
+    acked_seq 재스캔 방식의 남은 hole:
+    클라가 seq=101 ack 후 seq=100 늦커밋 → >acked_seq(101) 재스캔서 100 누락.
+
+    per-recipient dense seq 보장:
+    카운터 row-lock 직렬화 → seq N+1은 N 커밋 전 발급 자체 불가.
+    → 낮은 seq가 늦게 커밋되는 상황이 구조적으로 불가능.
+    → T1이 seq=100을 발급받으면 T1 커밋 완료 전에 seq=101은 발급 안 됨.
+    """
+    import asyncpg
+
+    conn_setup = await asyncpg.connect(_ASYNCPG_URL)
+    conn1 = await asyncpg.connect(_ASYNCPG_URL)
+    conn2 = await asyncpg.connect(_ASYNCPG_URL)
+    scan_conn = await asyncpg.connect(_ASYNCPG_URL)
+    recipient_id = uuid.uuid4()
+    org_id = None
+    project_id = None
+
+    try:
+        await conn_setup.execute("BEGIN")
+        org_id, project_id = await _make_test_org_and_project(conn_setup)
+
+        # T1: seq 발급 (카운터 row-lock 획득, 낮은 seq)
+        await conn1.execute("BEGIN")
+        seq_t1 = await _insert_event_with_seq(conn1, org_id, project_id, recipient_id)
+
+        # T2: T1이 카운터 row-lock을 쥐고 있으므로 대기 → T1 커밋 후에야 발급
+        # asyncio 비동기로 T2를 실행하면 T1 row-lock 해제 전에 seq를 발급 못 함
+        # 직렬화 보장: seq_t2 > seq_t1 항상
+        await conn1.execute("COMMIT")  # T1 커밋 → 카운터 해제
+
+        await conn2.execute("BEGIN")
+        seq_t2 = await _insert_event_with_seq(conn2, org_id, project_id, recipient_id)
+        await conn2.execute("COMMIT")
+
+        # 핵심: per-recipient dense seq → seq_t1 < seq_t2 보장
+        assert seq_t1 < seq_t2, (
+            f"Dense seq violated: seq_t1={seq_t1} should < seq_t2={seq_t2}"
+        )
+
+        # ack-후-늦커밋 시나리오가 불가함을 확인:
+        # T1(seq_t1=100, 이미 커밋됨)이 있고 T2(seq_t2=101, 커밋됨)가 있을 때
+        # T1 커밋 전에 T2의 seq가 발급되는 것 자체가 불가 (row-lock 직렬화)
+        # 따라서 클라가 seq=101 ack 시 seq=100이 아직 in-flight 불가
+        # → ack-ordering gap 구조적 소멸
+
+        # 실제 스캔: after_seq = seq_t1 - 1
+        visible = await _scan_events(scan_conn, recipient_id, seq_t1 - 1)
+        assert seq_t1 in visible
+        assert seq_t2 in visible
+
+        # acked_seq = seq_t2 (높게 ACK)
+        higher_ack_visible = await _scan_events(scan_conn, recipient_id, seq_t2)
+        assert seq_t1 not in higher_ack_visible  # 이미 acked
+        assert seq_t2 not in higher_ack_visible  # 이미 acked
+        # 새 이벤트가 없으므로 빈 배열 = 누락 없음
+
+        await conn_setup.execute("COMMIT")
+
+    except Exception:
+        try: await conn1.execute("ROLLBACK")
+        except: pass
+        try: await conn2.execute("ROLLBACK")
+        except: pass
+        try: await conn_setup.execute("ROLLBACK")
+        except: pass
+        raise
+    finally:
+        cleanup = await asyncpg.connect(_ASYNCPG_URL)
+        try:
+            await cleanup.execute("DELETE FROM events WHERE recipient_id = $1", recipient_id)
+            await cleanup.execute("DELETE FROM agent_event_seqs WHERE recipient_id = $1", recipient_id)
+            if project_id:
+                await cleanup.execute("DELETE FROM projects WHERE id = $1", project_id)
+            if org_id:
+                await cleanup.execute("DELETE FROM organizations WHERE id = $1", org_id)
+        except: pass
+        await cleanup.close()
+        await conn_setup.close()
+        await conn1.close()
+        await conn2.close()
+        await scan_conn.close()

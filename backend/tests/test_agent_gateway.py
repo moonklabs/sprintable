@@ -1,4 +1,4 @@
-"""E-AGENT-GATEWAY Phase 0: gateway_seq 커서 + ACK + 이중전달 fix 테스트."""
+"""E-AGENT-GATEWAY Phase 0: recipient_seq 커서 + ACK + 이중전달 fix 테스트."""
 from __future__ import annotations
 
 import uuid
@@ -47,15 +47,15 @@ def test_wake_agent_puts_wake_signal():
 
 # ── _push_to_agent_v2 backward compat ─────────────────────────────────────────
 
-def test_push_v2_with_gateway_seq_calls_wake():
-    """gateway_seq 있는 payload → wake_agent 호출."""
+def test_push_v2_with_recipient_seq_calls_wake():
+    """recipient_seq 있는 payload → wake_agent 호출."""
     with patch("app.routers.agent_gateway.wake_agent") as mock_wake:
-        _push_to_agent_v2(str(AGENT_ID), {"event_type": "test", "gateway_seq": 5})
+        _push_to_agent_v2(str(AGENT_ID), {"event_type": "test", "recipient_seq": 5})
         mock_wake.assert_called_once_with(str(AGENT_ID), 5, _from_listener=False)
 
 
-def test_push_v2_without_gateway_seq_falls_back():
-    """gateway_seq 없는 payload → 레거시 _push_to_agent 호출."""
+def test_push_v2_without_recipient_seq_falls_back():
+    """recipient_seq 없는 payload → 레거시 _push_to_agent 호출."""
     with patch("app.routers.events._push_to_agent") as mock_legacy:
         mock_legacy.return_value = False
         _push_to_agent_v2(str(AGENT_ID), {"event_type": "test"})
@@ -186,18 +186,18 @@ def test_dispatch_mock_structure_commit_after():
 
 @pytest.mark.anyio
 async def test_fetch_events_returns_rows_above_seq():
-    """`_fetch_events`: gateway_seq > after_seq인 행 반환."""
+    """`_fetch_events`: recipient_seq > after_seq인 행 반환."""
     from app.routers.agent_gateway import _fetch_events
 
     session = AsyncMock()
     row = MagicMock()
-    row.gateway_seq = 101
+    row.recipient_seq = 101
     result = MagicMock(); result.fetchall.return_value = [row]
     session.execute = AsyncMock(return_value=result)
 
     rows = await _fetch_events(session, AGENT_ID, 100, 100)
     assert len(rows) == 1
-    assert rows[0].gateway_seq == 101
+    assert rows[0].recipient_seq == 101
 
 
 @pytest.mark.anyio
@@ -212,25 +212,25 @@ async def test_visibility_gap_covered_by_acked_seq_rescan():
 
     # wake1: acked_seq=100, T2(seq=101) visible
     session1 = AsyncMock()
-    t2 = MagicMock(); t2.gateway_seq = 101
+    t2 = MagicMock(); t2.recipient_seq = 101
     r1 = MagicMock(); r1.fetchall.return_value = [t2]
     session1.execute = AsyncMock(return_value=r1)
 
     rows1 = await _fetch_events(session1, AGENT_ID, 100, 100)
     assert len(rows1) == 1
-    assert rows1[0].gateway_seq == 101
+    assert rows1[0].recipient_seq == 101
 
     # wake2: acked_seq still 100 (미ACK), T1 커밋됨
     session2 = AsyncMock()
-    t1 = MagicMock(); t1.gateway_seq = 100
-    t2_2 = MagicMock(); t2_2.gateway_seq = 101
+    t1 = MagicMock(); t1.recipient_seq = 100
+    t2_2 = MagicMock(); t2_2.recipient_seq = 101
     r2 = MagicMock(); r2.fetchall.return_value = [t1, t2_2]
     session2.execute = AsyncMock(return_value=r2)
 
     # acked_seq=100 재스캔 → T1(100), T2(101) 둘 다 나옴
     rows2 = await _fetch_events(session2, AGENT_ID, 99, 100)  # scan_from = acked_seq = 99 기준 예시
     assert len(rows2) == 2
-    seqs = [r.gateway_seq for r in rows2]
+    seqs = [r.recipient_seq for r in rows2]
     assert 100 in seqs  # T1 잡힘!
     assert 101 in seqs  # T2도 잡힘
 
@@ -244,7 +244,7 @@ async def test_wake_floor_prevents_intra_wake_duplicates():
     # seq=100, 101, 102 반환
     rows_data = []
     for i in [100, 101, 102]:
-        r = MagicMock(); r.gateway_seq = i
+        r = MagicMock(); r.recipient_seq = i
         rows_data.append(r)
     result = MagicMock(); result.fetchall.return_value = rows_data
     session.execute = AsyncMock(return_value=result)
@@ -254,9 +254,9 @@ async def test_wake_floor_prevents_intra_wake_duplicates():
     wake_floor = 99
     yielded = []
     for row in rows:
-        if row.gateway_seq > wake_floor:
-            yielded.append(row.gateway_seq)
-            wake_floor = row.gateway_seq
+        if row.recipient_seq > wake_floor:
+            yielded.append(row.recipient_seq)
+            wake_floor = row.recipient_seq
     assert yielded == [100, 101, 102]  # 순서대로, 중복 없음
 
 
