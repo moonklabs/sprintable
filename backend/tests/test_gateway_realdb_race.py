@@ -320,3 +320,138 @@ async def test_per_recipient_dense_seq_prevents_ack_ordering_gap():
         await conn1.close()
         await conn2.close()
         await scan_conn.close()
+
+@pytest.mark.anyio
+async def test_unsorted_counter_acquires_cause_deadlock():
+    """교차 락 순서(unsorted)이면 PostgreSQL deadlock(40P01) 발생함을 확인.
+
+    pre-fix 상황 시뮬: conn1=A락→B시도, conn2=B락→A시도 → circular wait.
+    이 테스트에서 deadlock이 재현되지 않으면 테스트 자체가 약한 것.
+    """
+    import asyncio
+    import asyncpg
+
+    agent_a_id = uuid.uuid4()
+    agent_b_id = uuid.uuid4()
+    conn_setup = await asyncpg.connect(_ASYNCPG_URL)
+    conn1 = await asyncpg.connect(_ASYNCPG_URL)
+    conn2 = await asyncpg.connect(_ASYNCPG_URL)
+
+    # deadlock_timeout 단축 (기본 1s → 500ms 이내 재현)
+    await conn1.execute("SET deadlock_timeout = '500ms'")
+    await conn2.execute("SET deadlock_timeout = '500ms'")
+
+    try:
+        # 카운터 row 사전 생성 (없으면 INSERT가 배타 락 아니라 row-lock 안 걸림)
+        await conn_setup.execute("BEGIN")
+        for rid in [agent_a_id, agent_b_id]:
+            await conn_setup.execute(
+                "INSERT INTO agent_event_seqs(recipient_id, last_seq) VALUES($1, 0) ON CONFLICT DO NOTHING",
+                rid,
+            )
+        await conn_setup.execute("COMMIT")
+
+        # conn1: A 선점
+        await conn1.execute("BEGIN")
+        await conn1.execute(
+            "UPDATE agent_event_seqs SET last_seq=last_seq+1 WHERE recipient_id=$1", agent_a_id
+        )
+
+        # conn2: B 선점
+        await conn2.execute("BEGIN")
+        await conn2.execute(
+            "UPDATE agent_event_seqs SET last_seq=last_seq+1 WHERE recipient_id=$1", agent_b_id
+        )
+
+        # 교차 시도 → deadlock
+        async def conn1_try_b():
+            await conn1.execute(
+                "UPDATE agent_event_seqs SET last_seq=last_seq+1 WHERE recipient_id=$1", agent_b_id
+            )
+
+        async def conn2_try_a():
+            await conn2.execute(
+                "UPDATE agent_event_seqs SET last_seq=last_seq+1 WHERE recipient_id=$1", agent_a_id
+            )
+
+        results = await asyncio.gather(
+            conn1_try_b(), conn2_try_a(), return_exceptions=True
+        )
+        errors = [r for r in results if isinstance(r, Exception)]
+        # 한쪽은 deadlock 에러여야 함 (40P01)
+        deadlock_errors = [e for e in errors if "40P01" in str(e) or "deadlock" in str(e).lower()]
+        assert len(deadlock_errors) >= 1, (
+            f"Expected at least one deadlock(40P01) but got: {errors}"
+        )
+
+    finally:
+        for c in [conn1, conn2]:
+            try: await c.execute("ROLLBACK")
+            except: pass
+            await c.close()
+        cleanup = await asyncpg.connect(_ASYNCPG_URL)
+        try:
+            for rid in [agent_a_id, agent_b_id]:
+                await cleanup.execute("DELETE FROM agent_event_seqs WHERE recipient_id=$1", rid)
+        except: pass
+        await cleanup.close()
+        await conn_setup.close()
+
+
+@pytest.mark.anyio
+async def test_sorted_counter_acquires_no_deadlock():
+    """sorted 락 순서이면 deadlock 없음.
+
+    conversations.py `sorted(participant_ids)` fix 검증.
+    conn1, conn2 모두 A→B 순서로 락 획득 → no circular wait.
+    """
+    import asyncio
+    import asyncpg
+
+    agent_a_id = uuid.uuid4()
+    agent_b_id = uuid.uuid4()
+    conn_setup = await asyncpg.connect(_ASYNCPG_URL)
+    conn1 = await asyncpg.connect(_ASYNCPG_URL)
+    conn2 = await asyncpg.connect(_ASYNCPG_URL)
+
+    await conn_setup.execute("BEGIN")
+    for rid in [agent_a_id, agent_b_id]:
+        await conn_setup.execute(
+            "INSERT INTO agent_event_seqs(recipient_id, last_seq) VALUES($1, 0) ON CONFLICT DO NOTHING",
+            rid,
+        )
+    await conn_setup.execute("COMMIT")
+
+    async def sorted_acquire(conn, recipients):
+        await conn.execute("BEGIN")
+        try:
+            for rid in sorted(recipients):  # ← sorted: conversations.py의 fix
+                await conn.execute(
+                    "UPDATE agent_event_seqs SET last_seq=last_seq+1 WHERE recipient_id=$1", rid
+                )
+            await conn.execute("COMMIT")
+            return True
+        except Exception as e:
+            await conn.execute("ROLLBACK")
+            return str(e)
+
+    try:
+        results = await asyncio.gather(
+            sorted_acquire(conn1, [agent_a_id, agent_b_id]),
+            sorted_acquire(conn2, [agent_a_id, agent_b_id]),
+            return_exceptions=True,
+        )
+        deadlocks = [r for r in results if isinstance(r, str) and 'deadlock' in r.lower()]
+        assert len(deadlocks) == 0, f"sorted order still causes deadlock: {deadlocks}"
+        # 양쪽 모두 성공해야 함
+        assert all(r is True for r in results), f"Expected both to succeed, got {results}"
+    finally:
+        await conn1.close()
+        await conn2.close()
+        cleanup = await asyncpg.connect(_ASYNCPG_URL)
+        try:
+            for rid in [agent_a_id, agent_b_id]:
+                await cleanup.execute("DELETE FROM agent_event_seqs WHERE recipient_id=$1", rid)
+        except: pass
+        await cleanup.close()
+        await conn_setup.close()
