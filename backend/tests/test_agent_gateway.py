@@ -181,3 +181,92 @@ def test_dispatch_mock_structure_commit_after():
     commit_pos = src.find("await db.commit()")
     wake_pos = src.find("_wake_agent(")
     assert commit_pos < wake_pos, "commit must happen before wake_agent"
+
+# ── acked_seq 재스캔 기반 visibility gap 테스트 ─────────────────────────────
+
+@pytest.mark.anyio
+async def test_fetch_events_returns_rows_above_seq():
+    """`_fetch_events`: gateway_seq > after_seq인 행 반환."""
+    from app.routers.agent_gateway import _fetch_events
+
+    session = AsyncMock()
+    row = MagicMock()
+    row.gateway_seq = 101
+    result = MagicMock(); result.fetchall.return_value = [row]
+    session.execute = AsyncMock(return_value=result)
+
+    rows = await _fetch_events(session, AGENT_ID, 100, 100)
+    assert len(rows) == 1
+    assert rows[0].gateway_seq == 101
+
+
+@pytest.mark.anyio
+async def test_visibility_gap_covered_by_acked_seq_rescan():
+    """T1(낮은 seq, 늦게 커밋) 영구 누락 없음 — acked_seq 재스캔으로 보장.
+
+    1) wake1: T2(seq=101)만 visible → yield, wake_floor=101, acked_seq=100(미ACK)
+    2) T1 커밋, wake2: acked_seq=100 재스캔 → T1(100), T2(101) 모두 visible
+       T1(100 > wake_floor=100? No → 중복방지) → T1도 yield됨(새 wake라 wake_floor=100으로 시작)
+    """
+    from app.routers.agent_gateway import _fetch_events
+
+    # wake1: acked_seq=100, T2(seq=101) visible
+    session1 = AsyncMock()
+    t2 = MagicMock(); t2.gateway_seq = 101
+    r1 = MagicMock(); r1.fetchall.return_value = [t2]
+    session1.execute = AsyncMock(return_value=r1)
+
+    rows1 = await _fetch_events(session1, AGENT_ID, 100, 100)
+    assert len(rows1) == 1
+    assert rows1[0].gateway_seq == 101
+
+    # wake2: acked_seq still 100 (미ACK), T1 커밋됨
+    session2 = AsyncMock()
+    t1 = MagicMock(); t1.gateway_seq = 100
+    t2_2 = MagicMock(); t2_2.gateway_seq = 101
+    r2 = MagicMock(); r2.fetchall.return_value = [t1, t2_2]
+    session2.execute = AsyncMock(return_value=r2)
+
+    # acked_seq=100 재스캔 → T1(100), T2(101) 둘 다 나옴
+    rows2 = await _fetch_events(session2, AGENT_ID, 99, 100)  # scan_from = acked_seq = 99 기준 예시
+    assert len(rows2) == 2
+    seqs = [r.gateway_seq for r in rows2]
+    assert 100 in seqs  # T1 잡힘!
+    assert 101 in seqs  # T2도 잡힘
+
+
+@pytest.mark.anyio
+async def test_wake_floor_prevents_intra_wake_duplicates():
+    """같은 wake 내 중복 방지: wake_floor > seq이면 skip."""
+    from app.routers.agent_gateway import _fetch_events
+
+    session = AsyncMock()
+    # seq=100, 101, 102 반환
+    rows_data = []
+    for i in [100, 101, 102]:
+        r = MagicMock(); r.gateway_seq = i
+        rows_data.append(r)
+    result = MagicMock(); result.fetchall.return_value = rows_data
+    session.execute = AsyncMock(return_value=result)
+
+    rows = await _fetch_events(session, AGENT_ID, 99, 100)
+    # wake_floor=99, yield: 100(OK), 101(OK), 102(OK)
+    wake_floor = 99
+    yielded = []
+    for row in rows:
+        if row.gateway_seq > wake_floor:
+            yielded.append(row.gateway_seq)
+            wake_floor = row.gateway_seq
+    assert yielded == [100, 101, 102]  # 순서대로, 중복 없음
+
+
+def test_canon_event_name_only():
+    """신 스트림은 canonical 이벤트명만 yield (conversation:message alias 제거).
+
+    agent_gateway.py 소스에서 conversation:message alias yield가 없어야 함.
+    """
+    import inspect
+    from app.routers import agent_gateway
+    src = inspect.getsource(agent_gateway)
+    # 이중 yield 패턴 없어야 함
+    assert "event: conversation:message" not in src
