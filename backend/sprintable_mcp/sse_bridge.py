@@ -3,6 +3,7 @@
 REST용 SprintableClient와 완전히 분리된 SSE 전용 httpx.AsyncClient 사용.
 """
 from __future__ import annotations
+import os
 
 import asyncio
 import json
@@ -303,15 +304,26 @@ async def _connect_once(
     `async with client.stream(...)` context manager가 response.aclose() 보장.
     last_event_id 전달 시 서버가 해당 이벤트 이후 backfill만 반환.
     """
-    params: dict[str, str] = {"member_id": member_id}
-    if last_event_id:
-        params["last_event_id"] = last_event_id
+    # AGENT_GATEWAY_V2: 신 엔드포인트 우선 + 구 fallback
+    _use_v2 = os.getenv("AGENT_GATEWAY_V2", "0") not in ("0", "false", "")
+    if _use_v2:
+        _path = "/api/v2/agent/stream"
+        _headers: dict = {"Accept": "text/event-stream", "Cache-Control": "no-cache"}
+        if last_event_id:
+            _headers["Last-Event-ID"] = last_event_id
+        _params: dict[str, str] = {}
+    else:
+        _path = "/api/v2/events/stream"
+        _params = {"member_id": member_id}
+        _headers = {"Accept": "text/event-stream", "Cache-Control": "no-cache"}
+        if last_event_id:
+            _params["last_event_id"] = last_event_id
 
     async with client.stream(
         "GET",
-        "/api/v2/events/stream",
-        params=params,
-        headers={"Accept": "text/event-stream", "Cache-Control": "no-cache"},
+        _path,
+        params=_params,
+        headers=_headers,
     ) as response:
         if response.status_code != 200:
             raise RuntimeError(f"SSE connect failed: HTTP {response.status_code}")
