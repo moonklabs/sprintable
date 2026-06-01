@@ -15,7 +15,7 @@ from datetime import datetime, timezone
 from fastapi import APIRouter, Depends, HTTPException, Query, Request
 from fastapi.responses import StreamingResponse
 from pydantic import BaseModel
-from sqlalchemy import select, update
+from sqlalchemy import select, text, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.dependencies.auth import AuthContext, get_current_user
@@ -58,6 +58,56 @@ def wake_agent(agent_id: str, seq: int, _from_listener: bool = False) -> None:
             )
         except RuntimeError:
             pass
+
+
+
+async def _fetch_events(
+    session: AsyncSession,
+    agent_id: uuid.UUID,
+    after_seq: int,
+    limit: int,
+) -> list:
+    """gateway_seq > after_seq인 visible 이벤트 반환 (raw rows).
+
+    정렬: gateway_seq ASC. visible이면 전달 — 커서 전진은 호출자가 결정.
+    gap-free 보장은 acked_seq 재스캔(caller)이 담당; 이 함수는 단순 조회.
+    """
+    rows = await session.execute(
+        text("""
+            SELECT
+                e.id::text            AS event_id,
+                e.event_type,
+                e.gateway_seq,
+                e.source_entity_type,
+                e.source_entity_id::text AS source_entity_id,
+                e.sender_id::text     AS sender_id,
+                e.payload,
+                e.created_at
+            FROM events e
+            WHERE e.recipient_id = :agent_id::uuid
+              AND e.gateway_seq > :after_seq
+            ORDER BY e.gateway_seq ASC
+            LIMIT :limit
+        """),
+        {"agent_id": str(agent_id), "after_seq": after_seq, "limit": limit},
+    )
+    return rows.fetchall()
+
+
+def _row_to_payload(row: object) -> dict:
+    """_fetch_events row → SSE payload dict."""
+    return {
+        "event_id": row.event_id,  # type: ignore[attr-defined]
+        "event_type": row.event_type,  # type: ignore[attr-defined]
+        "gateway_seq": row.gateway_seq,  # type: ignore[attr-defined]
+        "source": {
+            "type": row.source_entity_type,  # type: ignore[attr-defined]
+            "id": row.source_entity_id,  # type: ignore[attr-defined]
+        },
+        "sender_id": row.sender_id,  # type: ignore[attr-defined]
+        "payload": row.payload,  # type: ignore[attr-defined]
+        "created_at": row.created_at.isoformat(),  # type: ignore[attr-defined]
+    }
 
 
 # ─── backward compat: 구 _push_to_agent 호환 래퍼 ────────────────────────────
@@ -131,62 +181,57 @@ async def agent_stream(
     _agent_connections[agent_id_str].add(queue)
 
     async def generate():
-        nonlocal start_seq
+        """gap-free ordered-at-least-once SSE 스트림.
+
+        커서 전략: acked_seq(durable) 재스캔.
+        - 매 wake마다 `gateway_seq > acked_seq` DB 재스캔 → 늦게 커밋된 낮은 seq도 반드시 잡힘.
+        - wake_floor: 이번 wake 내 yield한 최대 seq (같은 wake 안 중복 방지용).
+        - acked_seq는 클라이언트 POST /ack 로만 전진 — 서버가 자동 전진 안 함.
+        - 클라이언트는 seq 기반 dedup(같은 seq 두 번 받아도 한 번 처리) 필수.
+        """
         try:
             yield "event: heartbeat\ndata: {}\n\n"
 
-            # 초기 백필 — gateway_seq > start_seq
+            # 초기 백필 — acked_seq(=start_seq)부터 재스캔
             async with async_session_factory() as db:
-                rows = (await db.execute(
-                    select(Event)
-                    .where(
-                        Event.recipient_id == agent_id,
-                        Event.gateway_seq > start_seq,
-                    )
-                    .order_by(Event.gateway_seq.asc())
-                    .limit(_BACKFILL_LIMIT)
-                )).scalars().all()
+                rows = await _fetch_events(db, agent_id, start_seq, _BACKFILL_LIMIT)
 
-            for evt in rows:
-                data = _event_to_payload(evt)
-                gseq = evt.gateway_seq or 0
-                _sse = json.dumps({**data, "gateway_seq": gseq, "is_backfill": True})
-                yield f"event: {evt.event_type}\nid: {gseq}\ndata: {_sse}\n\n"
-                if gseq > start_seq:
-                    start_seq = gseq
+            backfill_floor = start_seq  # 이번 백필 내 중복 방지
+            for row in rows:
+                data = _row_to_payload(row)
+                gseq = row.gateway_seq or 0
+                if gseq > backfill_floor:  # 중복 방지
+                    _sse = json.dumps({**data, "is_backfill": True})
+                    yield f"event: {row.event_type}\nid: {gseq}\ndata: {_sse}\n\n"
+                    backfill_floor = gseq
 
-            # 실시간 — wake 신호 → DB 재조회 (status 변이 폐기)
+            # 실시간 — wake 신호 → acked_seq부터 DB 재스캔
             while not await request.is_disconnected():
                 try:
                     signal = await asyncio.wait_for(queue.get(), timeout=_SSE_HEARTBEAT)
                     if signal.get("__wake__"):
-                        # wake 신호: DB에서 새 이벤트 조회
+                        # 최신 acked_seq 조회 (클라이언트가 ACK 보냈을 수 있음)
                         async with async_session_factory() as db:
-                            new_rows = (await db.execute(
-                                select(Event)
-                                .where(
-                                    Event.recipient_id == agent_id,
-                                    Event.gateway_seq > start_seq,
-                                )
-                                .order_by(Event.gateway_seq.asc())
-                                .limit(_BACKFILL_LIMIT)
-                            )).scalars().all()
-                        for evt in new_rows:
-                            data = _event_to_payload(evt)
-                            gseq = evt.gateway_seq or 0
-                            _sse = json.dumps({**data, "gateway_seq": gseq, "is_backfill": False})
-                            if evt.event_type == "conversation.message_created":
-                                yield f"event: conversation:message\nid: {gseq}\ndata: {_sse}\n\n"
-                            yield f"event: {evt.event_type}\nid: {gseq}\ndata: {_sse}\n\n"
-                            if gseq > start_seq:
-                                start_seq = gseq
+                            cur = (await db.execute(
+                                select(AgentEventCursor).where(AgentEventCursor.agent_id == agent_id)
+                            )).scalar_one_or_none()
+                            scan_from = max(start_seq, cur.acked_seq if cur else 0)
+                            new_rows = await _fetch_events(db, agent_id, scan_from, _BACKFILL_LIMIT)
+
+                        wake_floor = scan_from  # 이번 wake 내 중복 방지
+                        for row in new_rows:
+                            gseq = row.gateway_seq or 0
+                            if gseq > wake_floor:
+                                data = _row_to_payload(row)
+                                _sse = json.dumps({**data, "is_backfill": False})
+                                # AC2: 카논 이벤트명 only
+                                yield f"event: {row.event_type}\nid: {gseq}\ndata: {_sse}\n\n"
+                                wake_floor = gseq
                     else:
                         # 레거시 직접 push (AGENT_GATEWAY_V2 미적용 경로)
                         event_type = signal.get("event_type", "message")
                         _live_id = signal.get("event_id") or str(uuid.uuid4())
                         _sse = json.dumps({**signal, "is_backfill": False})
-                        if event_type == "conversation.message_created":
-                            yield f"event: conversation:message\nid: {_live_id}\ndata: {_sse}\n\n"
                         yield f"event: {event_type}\nid: {_live_id}\ndata: {_sse}\n\n"
                 except asyncio.TimeoutError:
                     yield "event: heartbeat\ndata: {}\n\n"
