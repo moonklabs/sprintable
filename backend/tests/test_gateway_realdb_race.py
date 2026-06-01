@@ -510,3 +510,76 @@ async def test_fetch_events_real_db_recipient_seq():
         await cleanup.close()
         await conn_setup.close()
         await engine.dispose()
+
+@pytest.mark.anyio
+async def test_send_message_creates_event_with_recipient_seq_no_generated_always_error():
+    """통합: conversation 메시지 전송 → ORM Event INSERT → recipient_seq 부여 + GeneratedAlwaysError 0.
+
+    gateway_seq GENERATED ALWAYS 잔존 시 반드시 FAIL (진짜 가드).
+    """
+    import asyncpg
+    from sqlalchemy.ext.asyncio import create_async_engine, AsyncSession
+    from sqlalchemy.orm import sessionmaker
+    from app.services.event_seq import assign_recipient_seq
+    from app.models.event import Event
+
+    engine = create_async_engine(
+        _ASYNCPG_URL.replace("postgresql://", "postgresql+asyncpg://"),
+        echo=False,
+    )
+    async_session = sessionmaker(engine, class_=AsyncSession, expire_on_commit=False)
+
+    conn_setup = await asyncpg.connect(_ASYNCPG_URL)
+    agent_id = uuid.uuid4()
+    org_id = None
+    project_id = None
+
+    try:
+        await conn_setup.execute("BEGIN")
+        org_id, project_id = await _make_test_org_and_project(conn_setup)
+        await conn_setup.execute("COMMIT")
+
+        # 실 SQLAlchemy ORM으로 Event INSERT + assign_recipient_seq
+        async with async_session() as db:
+            event = Event(
+                id=uuid.uuid4(),
+                org_id=org_id,
+                project_id=project_id,
+                event_type="conversation.message_created",
+                recipient_id=agent_id,
+                recipient_type="agent",
+                payload={"content": "gw-integration-test"},
+                status="pending",
+            )
+            db.add(event)
+            await db.flush()
+            # per-recipient seq 발급 (같은 트랜잭션)
+            await assign_recipient_seq(db, event)
+            await db.commit()
+
+        # recipient_seq 부여됐는지 확인
+        assert event.recipient_seq is not None and event.recipient_seq > 0, (
+            f"recipient_seq not assigned: {event.recipient_seq}"
+        )
+
+        # _fetch_events로 스트림 조회 가능한지 확인 (CAST fix 검증 포함)
+        from app.routers.agent_gateway import _fetch_events
+        async with async_session() as db:
+            rows = await _fetch_events(db, agent_id, 0, 10)
+
+        assert len(rows) >= 1
+        assert rows[0].recipient_seq == event.recipient_seq
+
+    finally:
+        cleanup = await asyncpg.connect(_ASYNCPG_URL)
+        try:
+            await cleanup.execute("DELETE FROM events WHERE recipient_id = $1", agent_id)
+            await cleanup.execute("DELETE FROM agent_event_seqs WHERE recipient_id = $1", agent_id)
+            if project_id:
+                await cleanup.execute("DELETE FROM projects WHERE id = $1", project_id)
+            if org_id:
+                await cleanup.execute("DELETE FROM organizations WHERE id = $1", org_id)
+        except: pass
+        await cleanup.close()
+        await conn_setup.close()
+        await engine.dispose()
