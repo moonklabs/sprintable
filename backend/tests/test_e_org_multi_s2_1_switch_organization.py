@@ -129,7 +129,9 @@ async def test_switch_org_success_returns_tokens():
 
         with patch("app.routers.auth.create_tokens") as mock_create_tokens, \
              patch("app.routers.auth.create_refresh_token") as mock_crt, \
-             patch("app.routers.auth._store_refresh_token") as mock_store:
+             patch("app.routers.auth._store_refresh_token") as mock_store, \
+             patch("app.routers.auth.first_accessible_project_id", new_callable=AsyncMock) as mock_fap:
+            mock_fap.return_value = PROJECT_A
             mock_create_tokens.return_value = {
                 "access_token": "new_at",
                 "refresh_token": "new_rt",
