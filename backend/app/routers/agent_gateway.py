@@ -84,7 +84,7 @@ async def _fetch_events(
                 e.payload,
                 e.created_at
             FROM events e
-            WHERE e.recipient_id = :agent_id::uuid
+            WHERE e.recipient_id = CAST(:agent_id AS uuid)
               AND e.recipient_seq > :after_seq
             ORDER BY e.recipient_seq ASC
             LIMIT :limit

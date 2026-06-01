@@ -455,3 +455,58 @@ async def test_sorted_counter_acquires_no_deadlock():
         except: pass
         await cleanup.close()
         await conn_setup.close()
+
+@pytest.mark.anyio
+async def test_fetch_events_real_db_recipient_seq():
+    """CP2: _fetch_events 실 SQLAlchemy AsyncSession + 실DB — CAST(:agent_id AS uuid) 문법 확인.
+
+    수정 전 `:agent_id::uuid`이면 PostgresSyntaxError 발생.
+    수정 후 `CAST(:agent_id AS uuid)`이면 정상 조회.
+    """
+    import asyncpg
+    from sqlalchemy.ext.asyncio import create_async_engine, AsyncSession
+    from sqlalchemy.orm import sessionmaker
+    from app.routers.agent_gateway import _fetch_events
+
+    engine = create_async_engine(_ASYNCPG_URL.replace("postgresql://", "postgresql+asyncpg://"), echo=False)
+    async_session = sessionmaker(engine, class_=AsyncSession, expire_on_commit=False)
+
+    agent_id = uuid.uuid4()
+    conn_setup = await asyncpg.connect(_ASYNCPG_URL)
+    try:
+        await conn_setup.execute("BEGIN")
+        org_id, project_id = await _make_test_org_and_project(conn_setup)
+        # recipient_seq 있는 이벤트 INSERT
+        seq = await conn_setup.fetchval("""
+            WITH ns AS (
+                INSERT INTO agent_event_seqs(recipient_id, last_seq) VALUES($1, 1)
+                ON CONFLICT(recipient_id) DO UPDATE SET last_seq = agent_event_seqs.last_seq + 1
+                RETURNING last_seq
+            )
+            INSERT INTO events(id, org_id, project_id, event_type, recipient_id, recipient_type, payload, status, recipient_seq)
+            VALUES(gen_random_uuid(), $2, $3, 'dispatched', $1, 'agent', '{"k": "v"}', 'pending', (SELECT last_seq FROM ns))
+            RETURNING recipient_seq
+        """, agent_id, org_id, project_id)
+        await conn_setup.execute("COMMIT")
+
+        # CAST(:agent_id AS uuid) 문법으로 _fetch_events 실행
+        async with async_session() as db:
+            rows = await _fetch_events(db, agent_id, 0, 10)
+
+        assert len(rows) >= 1
+        assert rows[0].recipient_seq == seq
+        assert isinstance(rows[0].payload, (dict, str))  # jsonb
+
+    finally:
+        cleanup = await asyncpg.connect(_ASYNCPG_URL)
+        try:
+            await cleanup.execute("DELETE FROM events WHERE recipient_id = $1", agent_id)
+            await cleanup.execute("DELETE FROM agent_event_seqs WHERE recipient_id = $1", agent_id)
+            if project_id:
+                await cleanup.execute("DELETE FROM projects WHERE id = $1", project_id)
+            if org_id:
+                await cleanup.execute("DELETE FROM organizations WHERE id = $1", org_id)
+        except: pass
+        await cleanup.close()
+        await conn_setup.close()
+        await engine.dispose()
