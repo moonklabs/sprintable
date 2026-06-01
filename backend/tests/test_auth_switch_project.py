@@ -252,3 +252,61 @@ def test_migration_0026_exists():
 def test_user_model_has_last_project_id():
     from app.models.user import User
     assert hasattr(User, "last_project_id")
+
+# ─── grant-only 유저 컨텍스트 가드 ──────────────────────────────────────────
+
+@pytest.mark.anyio
+async def test_switch_project_grant_only_user_token_has_target_project_id(client, mock_session, auth_ctx):
+    """grant-only 유저(team_member 없는 프로젝트) switch → 반환 토큰 project_id == target.
+
+    _build_app_metadata fallback이 last_project_id를 덮어써도 app_metadata override로 수정 보장.
+    """
+    user = _make_user()
+    auth_ctx.user_id = str(user.id)
+    target_project = uuid.uuid4()
+
+    # has_project_access → True (grant 존재)
+    access_result = MagicMock()
+    access_result.scalar_one_or_none.return_value = 1
+    # revoke
+    revoke_result = MagicMock()
+    # _build_app_metadata: last_project_id 기반 TM 없음 → fallback TM(sprintable)
+    fallback_member = _make_member(project_id=uuid.uuid4())  # 다른 project!
+    fallback_result = MagicMock()
+    fallback_result.scalar_one_or_none.return_value = fallback_member
+    # org roles
+    org_roles_result = MagicMock(); org_roles_result.all.return_value = []
+    # all_members
+    all_scalars = MagicMock(); all_scalars.all.return_value = [fallback_member]
+    all_result = MagicMock(); all_result.scalars.return_value = all_scalars
+
+    mock_session.execute.side_effect = [
+        MagicMock(**{"scalar_one_or_none.return_value": user}),  # _get_user_by_id
+        access_result,      # has_project_access
+        revoke_result,      # revoke tokens
+        fallback_result,    # _build_app_metadata TM 조회 (fallback → 다른 project)
+        org_roles_result,   # _build_app_metadata org roles
+        all_result,         # _build_app_metadata all projects
+    ]
+
+    captured_metadata = {}
+
+    def mock_create_tokens(user_id, *, email, app_metadata):
+        captured_metadata.update(app_metadata)
+        return {
+            "access_token": "tok",
+            "refresh_token": "ref",
+            "token_type": "bearer",
+            "refresh_expires_at": "2026-06-12T00:00:00Z",
+        }
+
+    with patch("app.routers.auth.create_tokens", side_effect=mock_create_tokens), \
+         patch("app.routers.auth._store_refresh_token"):
+        resp = await client.post("/api/v2/auth/switch-project", json={"project_id": str(target_project)})
+
+    assert resp.status_code == 200
+    # 핵심: app_metadata.project_id가 fallback(sprintable)이 아닌 target이어야 함
+    assert captured_metadata.get("project_id") == str(target_project)
+    # user.last_project_id도 target으로 재설정됐는지
+    assert user.last_project_id == target_project
+

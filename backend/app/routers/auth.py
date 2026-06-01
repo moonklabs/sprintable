@@ -1095,8 +1095,10 @@ async def switch_project(
     if not await has_project_access(session, user.id, body.project_id):
         return _err("NOT_MEMBER", "Not an active member of this project", 403)
 
-    # last_project_id 갱신
-    user.last_project_id = body.project_id
+    # target 캡처 — _build_app_metadata가 내부 fallback으로 last_project_id를 덮어쓰므로 먼저 고정
+    # (switch_org auth.py:1158-1165 동일 패턴)
+    target_project_id = body.project_id
+    user.last_project_id = target_project_id
 
     # 기존 refresh token 무효화
     await session.execute(
@@ -1105,8 +1107,11 @@ async def switch_project(
         .values(revoked_at=datetime.now(timezone.utc))
     )
 
-    # 새 토큰 발급
+    # 새 토큰 발급 — _build_app_metadata 후 project_id override (grant-only 유저 fallback 무효화)
     app_metadata = await _build_app_metadata(user, session)
+    app_metadata["project_id"] = str(target_project_id)
+    user.last_project_id = target_project_id  # _build_app_metadata가 덮어쓴 경우 재설정
+
     tokens = create_tokens(str(user.id), email=user.email, app_metadata=app_metadata)
     _, refresh_exp = create_refresh_token(str(user.id), expires_delta=timedelta(days=REFRESH_TOKEN_EXPIRE_DAYS))
     await _store_refresh_token(session, user, tokens["refresh_token"], refresh_exp)
