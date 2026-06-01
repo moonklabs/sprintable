@@ -89,6 +89,7 @@ async def transition_gate(
     gate_id: uuid.UUID,
     new_status: str,
     resolver_id: uuid.UUID | None = None,
+    note: str | None = None,
 ) -> Gate:
     """게이트 상태 전이 — 불법 전이 시 ValueError 발생."""
     gate_r = await session.execute(
@@ -107,6 +108,8 @@ async def transition_gate(
     gate.status = new_status
     gate.resolver_id = resolver_id
     gate.resolved_at = datetime.now(timezone.utc)
+    if new_status == "rejected" and note:
+        gate.resolution_note = note
     await session.flush()
     await session.refresh(gate)
     return gate

@@ -29,6 +29,7 @@ export interface GateItem {
   status: string;
   resolver_id: string | null;
   resolved_at: string | null;
+  resolution_note: string | null;
   neutral_facts: Record<string, unknown> | null;
   created_at: string;
   updated_at: string;

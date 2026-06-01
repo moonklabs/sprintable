@@ -36,6 +36,7 @@ class GateCreateRequest(BaseModel):
 class GateTransitionRequest(BaseModel):
     status: str
     resolver_id: uuid.UUID | None = None
+    note: str | None = None
 
     @field_validator("status")
     @classmethod
@@ -57,6 +58,7 @@ class GateResponse(BaseModel):
     status: str
     resolver_id: uuid.UUID | None = None
     resolved_at: datetime | None = None
+    resolution_note: str | None = None
     neutral_facts: dict[str, Any] | None = None
     created_at: datetime
     updated_at: datetime
@@ -112,7 +114,7 @@ async def transition_gate_endpoint(
     _auth=Depends(get_current_user),
 ) -> GateResponse:
     try:
-        gate = await transition_gate(session, org_id, id, body.status, body.resolver_id)
+        gate = await transition_gate(session, org_id, id, body.status, body.resolver_id, body.note)
         await session.commit()
         return GateResponse.model_validate(gate)
     except ValueError as e:

@@ -19,14 +19,20 @@ interface RejectModalState {
 export function GateInbox({ memberId }: GateInboxProps) {
   const t = useTranslations('cage');
   const [gates, setGates] = useState<GateItem[]>([]);
+  const [rejectedGates, setRejectedGates] = useState<GateItem[]>([]);
   const [loading, setLoading] = useState(true);
   const [resolving, setResolving] = useState<string | null>(null);
   const [rejectModal, setRejectModal] = useState<RejectModalState | null>(null);
 
   const fetchGates = () => {
-    fetch('/api/gates?status=pending')
-      .then((r) => r.ok ? r.json() : [])
-      .then((json) => setGates(json as GateItem[]))
+    Promise.all([
+      fetch('/api/gates?status=pending').then((r) => r.ok ? r.json() : []),
+      fetch('/api/gates?status=rejected').then((r) => r.ok ? r.json() : []),
+    ])
+      .then(([pending, rejected]) => {
+        setGates(pending as GateItem[]);
+        setRejectedGates((rejected as GateItem[]).filter((g) => g.resolution_note));
+      })
       .catch(() => {})
       .finally(() => setLoading(false));
   };
@@ -54,7 +60,7 @@ export function GateInbox({ memberId }: GateInboxProps) {
       const res = await fetch(`/api/gates/${rejectModal.gateId}/transition`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ status: 'rejected', resolver_id: memberId }),
+        body: JSON.stringify({ status: 'rejected', resolver_id: memberId, note: rejectModal.note || null }),
       });
       if (res.ok) {
         setGates((prev) => prev.filter((g) => g.id !== rejectModal.gateId));
@@ -110,6 +116,22 @@ export function GateInbox({ memberId }: GateInboxProps) {
             </div>
           </div>
         ))
+      )}
+
+      {/* 반려 사유 히스토리 */}
+      {rejectedGates.length > 0 && (
+        <div className="mt-4 space-y-1.5">
+          <p className="text-[11px] font-medium text-muted-foreground">{t('gateRejectedHistory')}</p>
+          {rejectedGates.map((gate) => (
+            <div key={gate.id} className="rounded-xl border border-destructive/20 bg-destructive/5 px-3 py-2">
+              <div className="flex items-center gap-2">
+                <XCircle className="size-3 shrink-0 text-destructive/60" />
+                <span className="text-[10px] text-muted-foreground">{gate.gate_type} · #{gate.work_item_id.slice(0, 6)}</span>
+              </div>
+              <p className="mt-1 text-xs text-foreground/80">{gate.resolution_note}</p>
+            </div>
+          ))}
+        </div>
       )}
 
       {/* 반려 모달 */}
