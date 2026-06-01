@@ -90,7 +90,7 @@ function ConversationRow({
   const unread = conv.unread_count ?? 0;
 
   const avatarInitial = !isAgentConv && conv.type === 'dm' && conv.participants
-    ? (conv.participants.find((p) => p.member_id !== currentMemberId)?.name.slice(0, 2) ?? 'DM')
+    ? (conv.participants.find((p) => p.member_id !== currentMemberId)?.name?.slice(0, 2) ?? 'DM')
     : null;
 
   const others = conv.participants ? getOtherParticipants(conv.participants, currentMemberId) : [];
@@ -119,7 +119,7 @@ function ConversationRow({
               key={p.member_id}
               className="relative flex h-[18px] w-[18px] flex-shrink-0 items-center justify-center rounded-full bg-muted text-[9px] font-medium text-muted-foreground ring-1 ring-background"
             >
-              {p.name.slice(0, 1)}
+              {p.name?.slice(0, 1) ?? '?'}
               {p.type === 'agent' && (
                 <span className="absolute -bottom-px -right-px h-[6px] w-[6px] rounded-full bg-brand-strong ring-1 ring-background" />
               )}
@@ -134,7 +134,7 @@ function ConversationRow({
         <span className="truncate">
           {isAgentInConv && agentCount > 0
             ? t('agentCount', { count: agentCount })
-            : `${t('personCount', { count: others.length + 1 })} · ${others.slice(0, 2).map((p) => p.name).join(', ')}${others.length > 2 ? ` ${t('participantsOthers', { count: others.length - 2 })}` : ''}`
+            : `${t('personCount', { count: others.length + 1 })} · ${others.slice(0, 2).map((p) => p.name ?? '?').join(', ')}${others.length > 2 ? ` ${t('participantsOthers', { count: others.length - 2 })}` : ''}`
           }
         </span>
       </div>
