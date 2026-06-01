@@ -54,6 +54,15 @@ def _make_msg(msg_id: uuid.UUID | None = None) -> MagicMock:
     return m
 
 
+
+
+@pytest.fixture(autouse=True)
+def _skip_agent_policy(monkeypatch):
+    """기존 conversations 테스트는 에이전트 인가 불변식을 별도 테스트에서 검증 — 여기서 skip."""
+    async def _noop(*args, **kwargs):
+        pass
+    monkeypatch.setattr("app.routers.conversations._enforce_agent_creator_policy", _noop)
+
 async def _make_client(session=None):
     from app.main import app
     from app.dependencies.auth import get_current_user, get_verified_org_id
