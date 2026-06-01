@@ -16,12 +16,25 @@ target_metadata = Base.metadata
 
 
 def get_url() -> str:
-    # ALEMBIC_DATABASE_URL: sync URL (docker-compose 전용, 명시적 분리)
+    # ALEMBIC_DATABASE_URL: sync psycopg2 URL (Cloud Run 잡 전용)
     alembic_url = os.environ.get("ALEMBIC_DATABASE_URL")
     if alembic_url:
         return alembic_url
+
     url = os.environ.get("DATABASE_URL", config.get_main_option("sqlalchemy.url", ""))
-    # fallback: asyncpg → psycopg2 변환
+
+    # /cloudsql 소켓 URL 감지: Cloud Run 앱용 URL이라 마이그 잡 불사용.
+    # ALEMBIC_DATABASE_URL(Private-IP psycopg2) 없으면 명시적 에러.
+    if "/cloudsql/" in url or "host=/cloudsql/" in url:
+        alembic_fallback = os.environ.get("ALEMBIC_DATABASE_URL")
+        if not alembic_fallback:
+            raise RuntimeError(
+                "DATABASE_URL uses /cloudsql socket (Cloud Run app URL). "
+                "Set ALEMBIC_DATABASE_URL to a Private-IP psycopg2 URL for the migrate job."
+            )
+        return alembic_fallback
+
+    # asyncpg → psycopg2 변환 (로컬·CI)
     return url.replace("postgresql+asyncpg://", "postgresql+psycopg2://").replace("postgresql+asyncpg+ssl://", "postgresql+psycopg2://")
 
 
