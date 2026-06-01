@@ -61,7 +61,7 @@ async def _enforce_agent_creator_policy(
 
     # 참가자 집합의 user_id 수집 (sender + 나머지 non-agent participants)
     human_user_ids: set[uuid.UUID] = set()
-    sender_user_id = getattr(sender, "user_id", None) or getattr(sender, "user_id", None)
+    sender_user_id = getattr(sender, "user_id", None)
     if sender_user_id is not None and sender.id in non_agent_ids:
         human_user_ids.add(sender_user_id)
 
