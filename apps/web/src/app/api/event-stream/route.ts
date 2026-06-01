@@ -14,13 +14,16 @@ export async function GET(request: NextRequest): Promise<Response> {
 
   const { searchParams } = new URL(request.url);
   const memberId = searchParams.get('member_id');
+  const lastEventId = searchParams.get('last_event_id') ?? request.headers.get('Last-Event-ID');
 
   const upstreamUrl = new URL(`${FASTAPI_URL()}/api/v2/events/stream`);
   if (memberId) upstreamUrl.searchParams.set('member_id', memberId);
+  if (lastEventId) upstreamUrl.searchParams.set('last_event_id', lastEventId);
 
-  const upstream = await fetch(upstreamUrl.toString(), {
-    headers: { Authorization: `Bearer ${session.access_token}` },
-  });
+  const upstreamHeaders: Record<string, string> = { Authorization: `Bearer ${session.access_token}` };
+  if (lastEventId) upstreamHeaders['Last-Event-ID'] = lastEventId;
+
+  const upstream = await fetch(upstreamUrl.toString(), { headers: upstreamHeaders });
 
   if (!upstream.ok) {
     return NextResponse.json(
