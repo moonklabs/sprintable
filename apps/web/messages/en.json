@@ -2247,6 +2247,7 @@
     "gateInboxLoading": "Loading gates...",
     "gateInboxEmpty": "No pending gates",
     "gateInboxEmptyHint": "Gates awaiting your review will appear here",
+    "gateRejectedHistory": "Recent rejection reasons",
     "cancel": "Cancel",
     "trustScoreLabel": "Clean Pass Rate",
     "trustScoreWindowHint": "Last {days} days",

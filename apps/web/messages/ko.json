@@ -2247,6 +2247,7 @@
     "gateInboxLoading": "게이트 조회 중...",
     "gateInboxEmpty": "대기 중인 게이트 없음",
     "gateInboxEmptyHint": "검수 대기 중인 게이트가 여기 표시됩니다",
+    "gateRejectedHistory": "최근 반려 사유",
     "cancel": "취소",
     "trustScoreLabel": "무정정 통과율",
     "trustScoreWindowHint": "최근 {days}일",

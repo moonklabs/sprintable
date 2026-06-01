@@ -285,6 +285,75 @@ async def test_capture_pr_wires_gate_resolution():
         mock_gate.assert_called_once_with(session, ORG_ID, STORY_ID, "story", "pr", "pass")
 
 
+# ── resolution_note 영속화 ────────────────────────────────────────────────────
+
+@pytest.mark.anyio
+async def test_transition_rejected_saves_note():
+    """rejected 전이 시 note가 resolution_note로 저장."""
+    from app.services.gate_service import transition_gate
+
+    gate = MagicMock()
+    gate.id = GATE_ID
+    gate.org_id = ORG_ID
+    gate.status = "pending"
+
+    session = AsyncMock()
+    gate_r = MagicMock()
+    gate_r.scalar_one_or_none.return_value = gate
+    session.execute = AsyncMock(return_value=gate_r)
+    session.flush = AsyncMock()
+    session.refresh = AsyncMock()
+
+    await transition_gate(session, ORG_ID, GATE_ID, "rejected", MEMBER_ID, "코드 품질 미달")
+    assert gate.status == "rejected"
+    assert gate.resolution_note == "코드 품질 미달"
+
+
+@pytest.mark.anyio
+async def test_transition_approved_does_not_save_note():
+    """approved 전이 시 note 전달해도 resolution_note 저장 안 함."""
+    from app.services.gate_service import transition_gate
+
+    gate = MagicMock()
+    gate.id = GATE_ID
+    gate.org_id = ORG_ID
+    gate.status = "pending"
+
+    session = AsyncMock()
+    gate_r = MagicMock()
+    gate_r.scalar_one_or_none.return_value = gate
+    session.execute = AsyncMock(return_value=gate_r)
+    session.flush = AsyncMock()
+    session.refresh = AsyncMock()
+
+    await transition_gate(session, ORG_ID, GATE_ID, "approved", MEMBER_ID, "의미없는 노트")
+    assert gate.status == "approved"
+    assert not hasattr(gate, "resolution_note") or gate.resolution_note != "의미없는 노트"
+
+
+@pytest.mark.anyio
+async def test_transition_rejected_empty_note_graceful():
+    """rejected 전이 시 note=None이면 resolution_note 건드리지 않음."""
+    from app.services.gate_service import transition_gate
+
+    gate = MagicMock()
+    gate.id = GATE_ID
+    gate.org_id = ORG_ID
+    gate.status = "pending"
+    gate.resolution_note = None
+
+    session = AsyncMock()
+    gate_r = MagicMock()
+    gate_r.scalar_one_or_none.return_value = gate
+    session.execute = AsyncMock(return_value=gate_r)
+    session.flush = AsyncMock()
+    session.refresh = AsyncMock()
+
+    await transition_gate(session, ORG_ID, GATE_ID, "rejected", MEMBER_ID, None)
+    assert gate.status == "rejected"
+    assert gate.resolution_note is None
+
+
 # ── org 격리 ──────────────────────────────────────────────────────────────────
 
 @pytest.mark.anyio
