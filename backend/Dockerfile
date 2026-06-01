@@ -15,6 +15,7 @@ COPY ee/ ee/
 COPY alembic.ini .
 COPY alembic/ alembic/
 COPY bootstrap.py .
+COPY scripts/migrate.sh scripts/migrate.sh
 
 # non-root 사용자 생성 + /app 소유권 변경 (uv .venv 포함)
 RUN useradd --create-home --shell /bin/bash appuser \
