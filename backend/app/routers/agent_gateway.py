@@ -105,7 +105,8 @@ def _row_to_payload(row: object) -> dict:
             "id": row.source_entity_id,  # type: ignore[attr-defined]
         },
         "sender_id": row.sender_id,  # type: ignore[attr-defined]
-        "payload": row.payload,  # type: ignore[attr-defined]
+        "payload": (json.loads(row.payload)  # type: ignore[attr-defined]
+                   if isinstance(row.payload, str) else row.payload),
         "created_at": row.created_at.isoformat(),  # type: ignore[attr-defined]
     }
 

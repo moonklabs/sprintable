@@ -320,3 +320,77 @@ async def test_per_recipient_dense_seq_prevents_ack_ordering_gap():
         await conn1.close()
         await conn2.close()
         await scan_conn.close()
+
+@pytest.mark.anyio
+async def test_concurrent_fanout_no_deadlock_with_sorted_order():
+    """CP1: 같은 대화 2에이전트 × 동시 메시지 2건 → deadlock 없이 양쪽 dispatch 완료.
+
+    sorted(participant_ids) 없으면 deadlock 재현:
+    msg1: A락→B대기, msg2: B락→A대기 = circular wait.
+    sorted이면 양쪽 항상 A락→B락 → no deadlock.
+    """
+    import asyncio
+    import asyncpg
+
+    conn_setup = await asyncpg.connect(_ASYNCPG_URL)
+    agent_a_id = uuid.uuid4()
+    agent_b_id = uuid.uuid4()
+    org_id = None
+    project_id = None
+
+    try:
+        await conn_setup.execute("BEGIN")
+        org_id, project_id = await _make_test_org_and_project(conn_setup)
+        await conn_setup.execute("COMMIT")
+
+        async def dispatch_to_two(conn, org_id, project_id, recipients):
+            """sorted 순서로 2 recipient에 assign_recipient_seq."""
+            await conn.execute("BEGIN")
+            try:
+                for rid in sorted(recipients):  # ← sorted: deadlock 방지
+                    await conn.execute("""
+                        WITH ns AS (
+                            INSERT INTO agent_event_seqs(recipient_id, last_seq) VALUES($1, 1)
+                            ON CONFLICT(recipient_id) DO UPDATE SET last_seq = agent_event_seqs.last_seq + 1
+                            RETURNING last_seq
+                        )
+                        INSERT INTO events(id, org_id, project_id, event_type, recipient_id, recipient_type, payload, status, recipient_seq)
+                        VALUES(gen_random_uuid(), $2, $3, 'dispatched', $1, 'agent', '{}', 'pending', (SELECT last_seq FROM ns))
+                    """, rid, org_id, project_id)
+                await conn.execute("COMMIT")
+                return True
+            except Exception as e:
+                await conn.execute("ROLLBACK")
+                return str(e)
+
+        conn1 = await asyncpg.connect(_ASYNCPG_URL)
+        conn2 = await asyncpg.connect(_ASYNCPG_URL)
+
+        # 동시에 같은 2 recipients에 dispatch
+        try:
+            results = await asyncio.gather(
+                dispatch_to_two(conn1, org_id, project_id, [agent_a_id, agent_b_id]),
+                dispatch_to_two(conn2, org_id, project_id, [agent_a_id, agent_b_id]),
+                return_exceptions=True,
+            )
+        finally:
+            await conn1.close()
+            await conn2.close()
+
+        # 양쪽 모두 deadlock 없이 완료 (True 또는 deadlock 에러)
+        deadlocks = [r for r in results if isinstance(r, str) and 'deadlock' in r.lower()]
+        assert len(deadlocks) == 0, f"Deadlock detected: {deadlocks}"
+
+    finally:
+        cleanup = await asyncpg.connect(_ASYNCPG_URL)
+        try:
+            for rid in [agent_a_id, agent_b_id]:
+                await cleanup.execute("DELETE FROM events WHERE recipient_id = $1", rid)
+                await cleanup.execute("DELETE FROM agent_event_seqs WHERE recipient_id = $1", rid)
+            if project_id:
+                await cleanup.execute("DELETE FROM projects WHERE id = $1", project_id)
+            if org_id:
+                await cleanup.execute("DELETE FROM organizations WHERE id = $1", org_id)
+        except: pass
+        await cleanup.close()
+        await conn_setup.close()

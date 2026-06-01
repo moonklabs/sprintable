@@ -169,7 +169,7 @@ async def _dispatch_conversation_event(
     member_type_map = {r[0]: r[1] for r in member_rows}
 
     events_to_push: list[tuple[str, Event]] = []
-    for pid in participant_ids:
+    for pid in sorted(participant_ids):  # deadlock 방지: 일관 락 순서
         m_type = member_type_map.get(pid, "human")
         event = Event(
             project_id=conversation.project_id,
@@ -219,7 +219,7 @@ async def _dispatch_mention_events(
     member_type_map = {r[0]: r[1] for r in member_rows}
 
     events_to_push: list[tuple[str, Event]] = []
-    for pid in mention_targets:
+    for pid in sorted(mention_targets):  # deadlock 방지: 일관 락 순서
         m_type = member_type_map.get(pid, "human")
         event = Event(
             project_id=conversation.project_id,

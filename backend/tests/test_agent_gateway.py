@@ -270,3 +270,43 @@ def test_canon_event_name_only():
     src = inspect.getsource(agent_gateway)
     # 이중 yield 패턴 없어야 함
     assert "event: conversation:message" not in src
+
+# ── jsonb payload 이중인코딩 방지 ────────────────────────────────────────────
+
+def test_row_to_payload_jsonb_not_double_encoded():
+    """_row_to_payload: jsonb str 수신 시 json.loads → payload는 dict."""
+    from app.routers.agent_gateway import _row_to_payload
+    import json
+
+    row = MagicMock()
+    row.event_id = str(uuid.uuid4())
+    row.event_type = "dispatched"
+    row.recipient_seq = 42
+    row.source_entity_type = "story"
+    row.source_entity_id = str(uuid.uuid4())
+    row.sender_id = None
+    row.payload = '{"key": "value"}'  # str (asyncpg jsonb)
+    row.created_at = MagicMock(isoformat=lambda: "2026-06-01T00:00:00+00:00")
+
+    result = _row_to_payload(row)
+    # payload가 str이 아닌 dict여야 함
+    assert isinstance(result["payload"], dict), f"payload should be dict, got {type(result['payload'])}"
+    assert result["payload"] == {"key": "value"}
+
+
+def test_row_to_payload_jsonb_dict_passthrough():
+    """_row_to_payload: payload가 이미 dict이면 그대로."""
+    from app.routers.agent_gateway import _row_to_payload
+
+    row = MagicMock()
+    row.event_id = str(uuid.uuid4())
+    row.event_type = "dispatched"
+    row.recipient_seq = 43
+    row.source_entity_type = None
+    row.source_entity_id = None
+    row.sender_id = None
+    row.payload = {"already": "dict"}
+    row.created_at = MagicMock(isoformat=lambda: "2026-06-01T00:00:00+00:00")
+
+    result = _row_to_payload(row)
+    assert result["payload"] == {"already": "dict"}
