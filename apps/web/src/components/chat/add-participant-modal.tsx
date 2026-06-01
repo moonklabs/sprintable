@@ -106,7 +106,7 @@ export function AddParticipantModal({
                     }`}
                   >
                     <div className="flex h-6 w-6 flex-shrink-0 items-center justify-center rounded-full bg-muted text-[10px] font-medium text-muted-foreground">
-                      {m.name.slice(0, 2).toUpperCase()}
+                      {m.name?.slice(0, 2)?.toUpperCase() ?? '?'}
                     </div>
                     <span className="flex-1 truncate">{m.name}</span>
                     {m.type === 'agent' && (
