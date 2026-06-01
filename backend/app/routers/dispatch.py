@@ -14,6 +14,7 @@ from app.models.event import Event, EventType
 from app.models.pm import Epic, Story
 from app.models.team import TeamMember
 from app.routers.events import _event_to_payload, _push_to_agent
+from app.services.event_seq import assign_recipient_seq
 from app.services.notification_dispatch import dispatch_notification
 
 router = APIRouter(prefix="/api/v2/dispatch", tags=["dispatch"])
@@ -139,6 +140,9 @@ async def dispatch_entity(
     )
     db.add(event)
     await db.flush()
+    # per-recipient dense seq 발급 (agent recipient만 — commit 순서 직렬화 보장)
+    if member_type == "agent":
+        await assign_recipient_seq(db, event)
     await db.refresh(event)
 
     if member_type != "agent":
@@ -156,10 +160,11 @@ async def dispatch_entity(
     await db.commit()  # commit 후 seq 확정
 
     # agent: commit 후 wake (gateway_seq 확정 보장, 이중전달 방지)
-    if member_type == "agent" and event.gateway_seq is not None:
-        _wake_agent(str(assignee_id), event.gateway_seq)
-    elif member_type == "agent":
-        _push_to_agent(str(assignee_id), _event_to_payload(event))
+    if member_type == "agent":
+        if event.recipient_seq is not None:
+            _wake_agent(str(assignee_id), event.recipient_seq)
+        else:
+            _push_to_agent(str(assignee_id), _event_to_payload(event))
     return DispatchResponse(
         dispatched=True,
         event_id=event.id,
