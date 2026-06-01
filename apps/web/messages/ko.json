@@ -196,7 +196,18 @@
     "blockedBy": "{count}개에 의해 차단됨",
     "allLabels": "모든 라벨",
     "labelsActive": "{count}개 라벨",
-    "searchLabels": "라벨 검색..."
+    "searchLabels": "라벨 검색...",
+    "dep": {
+      "duplicateConnection": "이미 연결된 의존성",
+      "cycleDetected": "사이클이 발생하는 의존성",
+      "invalidSelf": "잘못된 의존성 (자기참조 불가)",
+      "addFailed": "의존성 추가 실패",
+      "add": "추가",
+      "typeBlocks": "차단",
+      "typeDepends": "의존",
+      "searchPlaceholder": "스토리 제목으로 검색...",
+      "incompletePreds": "미완료 선행 {count}건 — 시작 전 확인 권장"
+    }
   },
   "memos": {
     "title": "메모",

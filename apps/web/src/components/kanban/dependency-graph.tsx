@@ -62,7 +62,7 @@ export function DependencyGraph({ storyId, deps, storyMap, onNavigate }: Depende
     >
       {/* Left nodes */}
       {leftVisible.map((d, i) => {
-        const otherId = d.dep_type === 'blocks' ? d.from_id : d.from_id;
+        const otherId = d.from_id;
         const status = storyMap[otherId]?.status;
         const { fill, text, stroke } = nodeColor(status, false);
         const y = sideY(i, leftCount);
@@ -97,7 +97,7 @@ export function DependencyGraph({ storyId, deps, storyMap, onNavigate }: Depende
 
       {/* Right nodes */}
       {rightVisible.map((d, i) => {
-        const otherId = d.dep_type === 'blocks' ? d.to_id : d.to_id;
+        const otherId = d.to_id;
         const status = storyMap[otherId]?.status;
         const { fill, text, stroke } = nodeColor(status, false);
         const y = sideY(i, rightCount);

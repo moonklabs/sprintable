@@ -272,15 +272,15 @@ export function StoryDetailPanel({ story, tasks, nextTasksCursor = null, loading
         setDepQueryResults([]);
         setShowAddDep(false);
       } else if (res.status === 409) {
-        addToast({ type: 'warning', title: '이미 연결된 의존성인.' });
+        addToast({ type: 'warning', title: t('dep.duplicateConnection') });
       } else if (res.status === 422) {
         const json = await res.json().catch(() => null) as { detail?: string } | null;
-        addToast({ type: 'error', title: json?.detail?.includes('사이클') ? '사이클이 발생하는 의존성인.' : '잘못된 의존성인 (자기참조 불가).' });
+        addToast({ type: 'error', title: json?.detail?.includes('사이클') ? t('dep.cycleDetected') : t('dep.invalidSelf') });
       } else {
-        addToast({ type: 'error', title: '의존성 추가에 실패했는.' });
+        addToast({ type: 'error', title: t('dep.addFailed') });
       }
     } catch {
-      addToast({ type: 'error', title: '의존성 추가에 실패했는.' });
+      addToast({ type: 'error', title: t('dep.addFailed') });
     } finally {
       setAddingDep(false);
     }
@@ -772,7 +772,7 @@ export function StoryDetailPanel({ story, tasks, nextTasksCursor = null, loading
                   onClick={() => setShowAddDep((v) => !v)}
                   className="flex items-center gap-0.5 rounded px-1.5 py-0.5 text-[10px] text-muted-foreground hover:bg-muted transition-colors"
                 >
-                  <Plus className="size-3" />추가
+                  <Plus className="size-3" />{t('dep.add')}
                 </button>
               </div>
 
@@ -789,7 +789,7 @@ export function StoryDetailPanel({ story, tasks, nextTasksCursor = null, loading
                 return (
                   <div className="mb-2 flex items-center gap-1.5 rounded-md border border-warning-border bg-warning-tint px-2.5 py-1.5 text-xs text-warning">
                     <AlertTriangle className="size-3 shrink-0" />
-                    <span>미완료 선행 {incompletePreds.length}건 — 시작 전 확인 권장</span>
+                    <span>{t('dep.incompletePreds', { count: incompletePreds.length })}</span>
                   </div>
                 );
               })()}
@@ -895,7 +895,7 @@ export function StoryDetailPanel({ story, tasks, nextTasksCursor = null, loading
                         onClick={() => setDepType(type)}
                         className={`rounded px-2 py-0.5 text-[10px] font-medium transition ${depType === type ? 'bg-primary text-primary-foreground' : 'bg-muted text-muted-foreground hover:text-foreground'}`}
                       >
-                        {type === 'blocks' ? '차단' : '의존'}
+                        {type === 'blocks' ? t('dep.typeBlocks') : t('dep.typeDepends')}
                       </button>
                     ))}
                   </div>
@@ -903,7 +903,7 @@ export function StoryDetailPanel({ story, tasks, nextTasksCursor = null, loading
                     type="text"
                     value={depQuery}
                     onChange={(e) => setDepQuery(e.target.value)}
-                    placeholder="스토리 제목으로 검색..."
+                    placeholder={t('dep.searchPlaceholder')}
                     className="w-full rounded border border-border bg-background px-2 py-1 text-xs focus:outline-none focus:ring-1 focus:ring-primary/40"
                   />
                   {depQueryResults.length > 0 && (

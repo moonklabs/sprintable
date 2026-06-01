@@ -196,7 +196,18 @@
     "blockedBy": "blocked by {count}",
     "allLabels": "All Labels",
     "labelsActive": "{count} label(s)",
-    "searchLabels": "Search labels..."
+    "searchLabels": "Search labels...",
+    "dep": {
+      "duplicateConnection": "Dependency already linked",
+      "cycleDetected": "Dependency creates a cycle",
+      "invalidSelf": "Invalid dependency (self-reference not allowed)",
+      "addFailed": "Failed to add dependency",
+      "add": "Add",
+      "typeBlocks": "Blocks",
+      "typeDepends": "Depends",
+      "searchPlaceholder": "Search by story title...",
+      "incompletePreds": "{count} incomplete predecessor(s) — check before starting"
+    }
   },
   "memos": {
     "title": "Memos",
