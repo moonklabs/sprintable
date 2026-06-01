@@ -17,9 +17,11 @@ from app.dependencies.auth import AuthContext, get_current_user, get_verified_or
 from app.dependencies.database import get_db
 from app.models.conversation import Conversation, ConversationMessage, ConversationParticipant
 from app.models.event import Event
+from app.models.project import OrgMember
 from app.models.team import TeamMember
 from app.models.webhook_config import WebhookConfig
 from app.routers.events import _push_to_agent, publish_event
+from app.services.member_resolver import ResolvedMember, lookup_members_by_ids, resolve_member
 
 logger = logging.getLogger(__name__)
 
@@ -28,30 +30,93 @@ router = APIRouter(prefix="/api/v2/conversations", tags=["conversations"])
 
 # ─── Helpers ──────────────────────────────────────────────────────────────────
 
+async def _enforce_agent_creator_policy(
+    sender: "ResolvedMember | TeamMember",
+    participant_ids: list[uuid.UUID],
+    db: AsyncSession,
+) -> None:
+    """⭐ 불변식: 휴먼↔에이전트 대화 — 각 에이전트의 creator가 참가자(sender ∪ participant_ids)에 있어야.
+
+    전제: 에이전트 없거나 휴먼 없으면(에이전트↔에이전트) skip.
+    """
+    if not participant_ids:
+        return
+
+    all_ids = set(participant_ids) | {sender.id}
+
+    # 에이전트 participant 조회
+    agent_tms = (await db.execute(
+        select(TeamMember).where(
+            TeamMember.id.in_(all_ids),
+            TeamMember.type == "agent",
+        )
+    )).scalars().all()
+    if not agent_tms:
+        return  # 에이전트 없음 → skip
+
+    agent_ids = {a.id for a in agent_tms}
+    non_agent_ids = all_ids - agent_ids
+    if not non_agent_ids:
+        return  # 에이전트↔에이전트 → creator 무관 허용
+
+    # 참가자 집합의 user_id 수집 (sender + 나머지 non-agent participants)
+    human_user_ids: set[uuid.UUID] = set()
+    sender_user_id = getattr(sender, "user_id", None)
+    if sender_user_id is not None and sender.id in non_agent_ids:
+        human_user_ids.add(sender_user_id)
+
+    remaining_ids = non_agent_ids - {sender.id}
+    if remaining_ids:
+        # TeamMember에서 user_id 조회
+        tm_humans = (await db.execute(
+            select(TeamMember).where(TeamMember.id.in_(remaining_ids))
+        )).scalars().all()
+        human_user_ids.update(tm.user_id for tm in tm_humans if tm.user_id)
+
+        # OrgMember에서 user_id 조회 (grant-only 휴먼)
+        tm_found_ids = {tm.id for tm in tm_humans}
+        om_ids = remaining_ids - tm_found_ids
+        if om_ids:
+            oms = (await db.execute(
+                select(OrgMember).where(OrgMember.id.in_(om_ids))
+            )).scalars().all()
+            human_user_ids.update(om.user_id for om in oms if om.user_id)
+
+    # 각 에이전트의 created_by가 참가자 user_id 집합에 있는지 확인
+    for agent_tm in agent_tms:
+        if agent_tm.created_by is None:
+            raise HTTPException(status_code=403, detail="Agent has no creator — conversation not allowed")
+        if agent_tm.created_by not in human_user_ids:
+            raise HTTPException(status_code=403, detail="Agent's creator must be a participant in this conversation")
+
+
 async def _resolve_member(
     auth: AuthContext,
     org_id: uuid.UUID,
     db: AsyncSession,
     project_id: uuid.UUID | None = None,
-) -> TeamMember:
+) -> "ResolvedMember | TeamMember":
+    """TeamMember 우선; grant-only 휴먼이면 ResolvedMember(org_member.id) 반환."""
     is_api_key = bool(auth.claims.get("app_metadata", {}).get("api_key_id"))
     if is_api_key:
-        stmt = select(TeamMember).where(TeamMember.id == uuid.UUID(auth.user_id))
-    else:
-        filters = [
-            TeamMember.user_id == uuid.UUID(auth.user_id),
-            TeamMember.org_id == org_id,
-        ]
-        if project_id is not None:
-            filters.append(TeamMember.project_id == project_id)
-        stmt = select(TeamMember).where(*filters)
-    member = (await db.execute(stmt)).scalars().first()
-    if member is None:
-        raise HTTPException(status_code=400, detail="Team member not found")
-    return member
+        tm = (await db.execute(select(TeamMember).where(TeamMember.id == uuid.UUID(auth.user_id)))).scalars().first()
+        if tm is None:
+            raise HTTPException(status_code=400, detail="Team member not found")
+        return tm
+
+    # JWT 휴먼: team_member 먼저 시도
+    filters = [TeamMember.user_id == uuid.UUID(auth.user_id), TeamMember.org_id == org_id]
+    if project_id is not None:
+        filters.append(TeamMember.project_id == project_id)
+    tm = (await db.execute(select(TeamMember).where(*filters))).scalars().first()
+    if tm is not None:
+        return tm
+
+    # team_member 없음 (grant-only 휴먼) → org_member 경로
+    return await resolve_member(auth, org_id, db, project_id=project_id)
 
 
-def _msg_payload(msg: ConversationMessage, sender: TeamMember | None) -> dict:
+def _msg_payload(msg: ConversationMessage, sender: "ResolvedMember | TeamMember | None") -> dict:
     return {
         "id": str(msg.id),
         "conversation_id": str(msg.conversation_id),
@@ -74,7 +139,7 @@ async def _dispatch_conversation_event(
     conversation: Conversation,
     msg: ConversationMessage,
     org_id: uuid.UUID,
-    sender: TeamMember,
+    sender: "ResolvedMember | TeamMember",
     exclude_ids: set[uuid.UUID] | None = None,
 ) -> list[tuple[str, dict]]:
     """conversation:message → Event INSERT + flush. push 페이로드 반환 (commit 후 호출).
@@ -269,6 +334,9 @@ async def create_conversation(
 ) -> dict:
     """POST /api/v2/conversations — dm/group 생성 (dm 중복 방지)."""
     sender = await _resolve_member(auth, org_id, db, project_id=body.project_id)
+
+    # ⭐ 인가 불변식: 휴먼↔에이전트 대화 — 에이전트 creator 동석 필수
+    await _enforce_agent_creator_policy(sender, body.participant_ids, db)
 
     # DM 중복 방지: 동일 participant pair의 dm이 이미 있으면 반환
     if body.type == "dm" and len(body.participant_ids) == 1:
@@ -485,8 +553,7 @@ async def list_messages(
     msgs = list(reversed(rows[:limit]))
 
     sender_ids = {m.sender_id for m in msgs if m.sender_id}
-    members = (await db.execute(select(TeamMember).where(TeamMember.id.in_(sender_ids)))).scalars().all()
-    member_map = {m.id: m for m in members}
+    member_map = await lookup_members_by_ids(sender_ids, db)
 
     data = [_msg_payload(m, member_map.get(m.sender_id)) for m in msgs]
     next_cursor = msgs[0].created_at.isoformat() if has_more and msgs else None
