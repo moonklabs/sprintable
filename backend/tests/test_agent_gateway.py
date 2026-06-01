@@ -179,7 +179,7 @@ def test_dispatch_mock_structure_commit_after():
     src = inspect.getsource(dispatch)
     # commit이 wake_agent/push 보다 앞에 나와야 함
     commit_pos = src.find("await db.commit()")
-    wake_pos = src.find("_wake_agent(")
+    wake_pos = src.find("wake_agent(")
     assert commit_pos < wake_pos, "commit must happen before wake_agent"
 
 # ── acked_seq 재스캔 기반 visibility gap 테스트 ─────────────────────────────

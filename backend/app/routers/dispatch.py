@@ -13,6 +13,7 @@ from app.models.doc import Doc
 from app.models.event import Event, EventType
 from app.models.pm import Epic, Story
 from app.models.team import TeamMember
+from app.routers.agent_gateway import wake_agent
 from app.routers.events import _event_to_payload, _push_to_agent
 from app.services.event_seq import assign_recipient_seq
 from app.services.notification_dispatch import dispatch_notification
@@ -161,7 +162,7 @@ async def dispatch_entity(
     # agent: commit 후 wake (gateway_seq 확정 보장, 이중전달 방지)
     if member_type == "agent":
         if event.recipient_seq is not None:
-            _wake_agent(str(assignee_id), event.recipient_seq)
+            wake_agent(str(assignee_id), event.recipient_seq)
         else:
             _push_to_agent(str(assignee_id), _event_to_payload(event))
     return DispatchResponse(
