@@ -762,8 +762,10 @@ async def send_message(
     try:
         async with db.begin_nested():
             pending_sse_pushes += await _dispatch_conversation_event(db, conv, msg, org_id, sender, exclude_ids=discord_exclude_ids)
-    except Exception:
-        logger.exception("conversation event dispatch failed conversation_id=%s", conversation_id)
+    except Exception as _dispatch_err:
+        # dispatch 실패를 삼키지 않고 surface — 게이트웨이 이벤트 미생성 무음 방지
+        logger.error("conversation event dispatch failed conversation_id=%s", conversation_id, exc_info=True)
+        raise HTTPException(status_code=500, detail="event dispatch failed") from _dispatch_err
 
     # AC1: 멘션 대상에게 conversation:mention SSE 발송 (participant 여부 무관)
     if msg.mentioned_ids:

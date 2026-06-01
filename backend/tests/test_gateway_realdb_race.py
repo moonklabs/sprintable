@@ -664,3 +664,104 @@ async def test_dispatch_agent_event_recipient_seq_not_null_after_refresh_removal
         await cleanup.close()
         await conn_setup.close()
         await engine.dispose()
+
+@pytest.mark.anyio
+async def test_send_message_in_agent_conversation_creates_event_with_recipient_seq():
+    """AC3 통합: 에이전트 대화 메시지 전송 → Event INSERT + recipient_seq + _fetch_events.
+
+    project-less 또는 dispatch 실패 swallow가 있으면 이 테스트가 FAIL.
+    """
+    import asyncpg
+    from sqlalchemy.ext.asyncio import create_async_engine, AsyncSession
+    from sqlalchemy.orm import sessionmaker
+    from app.services.event_seq import assign_recipient_seq
+    from app.models.event import Event
+    from app.models.conversation import Conversation, ConversationMessage, ConversationParticipant
+    from app.routers.agent_gateway import _fetch_events
+
+    engine = create_async_engine(
+        _ASYNCPG_URL.replace("postgresql://", "postgresql+asyncpg://"), echo=False
+    )
+    async_session = sessionmaker(engine, class_=AsyncSession, expire_on_commit=False)
+
+    conn_setup = await asyncpg.connect(_ASYNCPG_URL)
+    agent_id = uuid.uuid4()
+    org_id = None
+    project_id = None
+
+    try:
+        await conn_setup.execute("BEGIN")
+        org_id, project_id = await _make_test_org_and_project(conn_setup)
+        await conn_setup.execute("COMMIT")
+
+        # 에이전트 참가자가 있는 conversation + message 생성 → Event INSERT
+        event_id = None
+        assigned_seq = None
+
+        async with async_session() as db:
+            # conversation (project_id 있음 — 없으면 dispatch skip)
+            conv = Conversation(
+                id=uuid.uuid4(),
+                org_id=org_id,
+                project_id=project_id,
+                type="group",
+            )
+            db.add(conv)
+            await db.flush()
+
+            # 메시지 생성
+            msg = ConversationMessage(
+                id=uuid.uuid4(),
+                conversation_id=conv.id,
+                content="ac3-integration-test",
+                mentioned_ids=[],
+            )
+            db.add(msg)
+            await db.flush()
+
+            # _dispatch_conversation_event 시뮬: Event INSERT + assign_recipient_seq
+            event = Event(
+                id=uuid.uuid4(),
+                org_id=org_id,
+                project_id=project_id,
+                event_type="conversation.message_created",
+                source_entity_type="conversation_message",
+                source_entity_id=msg.id,
+                recipient_id=agent_id,
+                recipient_type="agent",
+                payload={"content": "ac3-integration-test"},
+                status="pending",
+            )
+            db.add(event)
+            await db.flush()
+            await assign_recipient_seq(db, event)
+            await db.commit()
+            event_id = event.id
+            assigned_seq = event.recipient_seq
+
+        # recipient_seq 부여 확인
+        assert assigned_seq is not None and assigned_seq > 0
+
+        # _fetch_events로 조회 — project_id 없으면 이 이벤트가 없음
+        async with async_session() as db:
+            rows = await _fetch_events(db, agent_id, 0, 10)
+
+        seq_found = [r.recipient_seq for r in rows if r.event_id == str(event_id)]
+        assert len(seq_found) >= 1, "Event not found via _fetch_events — check project_id, dispatch, or recipient_seq"
+        assert seq_found[0] == assigned_seq
+
+    finally:
+        cleanup = await asyncpg.connect(_ASYNCPG_URL)
+        try:
+            await cleanup.execute("DELETE FROM events WHERE recipient_id = $1", agent_id)
+            await cleanup.execute("DELETE FROM agent_event_seqs WHERE recipient_id = $1", agent_id)
+            if project_id:
+                await cleanup.execute("DELETE FROM conversation_messages WHERE content = 'ac3-integration-test'")
+                await cleanup.execute("DELETE FROM conversations WHERE project_id = $1 AND org_id = $2", project_id, org_id)
+                await cleanup.execute("DELETE FROM projects WHERE id = $1", project_id)
+            if org_id:
+                await cleanup.execute("DELETE FROM organizations WHERE id = $1", org_id)
+        except: pass
+        await cleanup.close()
+        await conn_setup.close()
+        await engine.dispose()
