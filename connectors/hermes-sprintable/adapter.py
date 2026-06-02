@@ -195,7 +195,7 @@ class SprintableAdapter(BasePlatformAdapter):
             return
 
         conversation_id = payload.get("conversation_id") or payload.get("thread_id") or data.get("conversation_id") or ev_id
-        sender = payload.get("sender") or {}
+        sender = data.get("sender") or payload.get("sender") or {}  # AC1: data top-level 우선
         sender_id = sender.get("id") or data.get("sender_id") or "sprintable"
         sender_name = sender.get("name") or sender_id
 
@@ -310,6 +310,8 @@ def register(ctx) -> None:
         validate_config=validate_config,
         is_connected=is_connected,
         required_env=["AGENT_API_KEY"],
+        allowed_users_env="SPRINTABLE_ALLOWED_USERS",
+        allow_all_env="SPRINTABLE_ALLOW_ALL_USERS",
         install_hint="pip install httpx   # already a Hermes dependency",
         env_enablement_fn=_env_enablement,
         emoji="🏃",
