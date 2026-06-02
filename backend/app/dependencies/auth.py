@@ -10,6 +10,7 @@ from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.core.database import async_session_factory
 from app.core.security import JWTError, decode_jwt, hash_token
 from app.dependencies.database import get_db
 
@@ -400,3 +401,91 @@ async def get_scope_context(
     project_id_raw = jwt_project_id or x_project_id
     project_id = uuid.UUID(str(project_id_raw)) if project_id_raw else None
     return {"org_id": org_id, "project_id": project_id, "user_id": auth.user_id}
+
+
+# ─── SSE/스트림 전용 auth (커넥션 비점유) ──────────────────────────────────────
+# P0 connection leak fix (#abaf6279):
+# get_current_user/get_verified_org_id는 Depends(get_db)로 요청 수명 동안 세션을
+# 점유한다. SSE 같은 long-lived 응답에서는 API key 해석의 team_members 쿼리가
+# 연 커넥션이 yield 구간 내내 idle-in-transaction으로 잔존 → max_connections 포화.
+# 아래 streaming 변형은 자체 단명 세션(async with)으로 즉시 닫아 미점유를 보장한다.
+
+
+async def get_current_user_streaming(
+    credentials: HTTPAuthorizationCredentials | None = Depends(bearer_scheme),
+    x_agent_api_key: str | None = Header(default=None, alias="x-agent-api-key"),
+) -> AuthContext:
+    """get_current_user의 SSE 전용 변형 — get_db 미점유.
+
+    API key 경로는 자체 단명 세션으로 _resolve_api_key 후 즉시 close →
+    스트림 yield 구간에 커넥션을 들고 있지 않음. JWT 경로는 DB 불필요(기존과 동일).
+    """
+    if x_agent_api_key and x_agent_api_key.startswith("sk_live_"):
+        async with async_session_factory() as db:
+            return await _resolve_api_key(x_agent_api_key, db)
+
+    if credentials is None:
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Missing Authorization header")
+
+    token = credentials.credentials
+    if token.startswith("sk_live_"):
+        async with async_session_factory() as db:
+            return await _resolve_api_key(token, db)
+
+    try:
+        payload = decode_jwt(token)
+    except JWTError as exc:
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid token") from exc
+
+    user_id: str | None = payload.get("sub")
+    if not user_id:
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Token missing sub claim")
+
+    return AuthContext(
+        user_id=user_id,
+        email=payload.get("email"),
+        claims=payload,
+        org_id=payload.get("app_metadata", {}).get("org_id"),
+    )
+
+
+async def get_verified_org_id_streaming(
+    auth: AuthContext = Depends(get_current_user_streaming),
+    x_org_id: str | None = Header(default=None, alias="X-Org-Id"),
+    x_project_id: str | None = Header(default=None, alias="X-Project-Id"),
+    request: Request = None,
+) -> uuid.UUID:
+    """get_verified_org_id의 SSE 전용 변형 — get_db 미점유.
+
+    멤버십/프로젝트 검증이 필요한 경우에만 자체 단명 세션으로 검증 후 close.
+    API key + claims org_id(헤더 없음) 경로는 DB 쿼리조차 없음.
+    """
+    if request is not None:
+        _check_api_key_scope(auth, request.method)
+
+    jwt_org_id = auth.claims.get("app_metadata", {}).get("org_id")
+    raw = x_org_id or jwt_org_id
+    if not raw:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="org_id required (X-Org-Id header or JWT app_metadata)",
+        )
+    try:
+        org_id = uuid.UUID(str(raw))
+    except ValueError:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Invalid org_id format")
+
+    if x_org_id:
+        async with async_session_factory() as db:
+            await _verify_org_membership(auth.user_id, org_id, db, request)
+
+    jwt_project_id = auth.claims.get("app_metadata", {}).get("project_id")
+    if not jwt_project_id and x_project_id:
+        try:
+            project_id = uuid.UUID(x_project_id)
+        except ValueError:
+            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Invalid X-Project-Id format")
+        async with async_session_factory() as db:
+            await _verify_project_in_org(project_id, org_id, db, request)
+
+    return org_id
