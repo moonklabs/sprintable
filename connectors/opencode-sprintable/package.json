@@ -1,0 +1,11 @@
+{
+  "name": "@sprintable/opencode-adapter",
+  "version": "0.1.0",
+  "description": "Sprintable Gateway adapter for OpenCode",
+  "type": "module",
+  "main": "./index.ts",
+  "peerDependencies": {
+    "@opencode-ai/plugin": ">=1.0.0",
+    "@opencode-ai/sdk": ">=1.0.0"
+  }
+}
