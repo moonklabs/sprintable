@@ -23,6 +23,8 @@ hermes plugins enable sprintable-platform
 # 4. 환경 변수 설정
 export AGENT_API_KEY=sk_live_...            # Sprintable agent API key (필수)
 export SPRINTABLE_API_URL=https://...       # Backend URL (미설정 시 dev 기본값)
+export SPRINTABLE_ALLOWED_USERS=0caee743,...  # 허용 member_id (comma-sep, 미설정 시 전체 허용)
+# export SPRINTABLE_ALLOW_ALL_USERS=1       # 모든 발신자 허용 (allowlist 우회)
 
 # 5. Hermes 재시작
 hermes gateway restart

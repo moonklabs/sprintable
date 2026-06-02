@@ -21,3 +21,11 @@ optional_env:
     description: "Sprintable backend base URL (default: dev backend)"
     prompt: "Sprintable API URL (or empty for dev)"
     password: false
+  - name: SPRINTABLE_ALLOWED_USERS
+    description: "Comma-separated Sprintable team_member IDs allowed to trigger replies (e.g. 0caee743,...). Empty = allow all."
+    prompt: "Allowed Sprintable member IDs (comma-sep, or empty for all)"
+    password: false
+  - name: SPRINTABLE_ALLOW_ALL_USERS
+    description: "Set to '1' or 'true' to allow all senders regardless of SPRINTABLE_ALLOWED_USERS."
+    prompt: "Allow all users? (1=yes)"
+    password: false
