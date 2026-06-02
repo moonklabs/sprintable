@@ -116,27 +116,6 @@ def test_send_message_webhook_background_task_in_source():
     assert "content=msg.content" in source
 
 
-# ─── AC4: conversation:message SSE relay 대상 확인 ───────────────────────────
-
-def test_conversation_message_in_relay_event_types():
-    """sse_bridge._RELAY_EVENT_TYPES에 conversation:message 포함."""
-    from sprintable_mcp.sse_bridge import _RELAY_EVENT_TYPES
-    assert "conversation:message" in _RELAY_EVENT_TYPES
-
-
-def test_conversation_mention_in_relay_event_types():
-    """sse_bridge._RELAY_EVENT_TYPES에 conversation:mention 포함."""
-    from sprintable_mcp.sse_bridge import _RELAY_EVENT_TYPES
-    assert "conversation:mention" in _RELAY_EVENT_TYPES
-
-
-def test_relay_filters_non_conversation_events():
-    """chat:message 같은 비대상 이벤트는 relay 대상 외."""
-    from sprintable_mcp.sse_bridge import _RELAY_EVENT_TYPES
-    assert "chat:message" not in _RELAY_EVENT_TYPES
-    assert "memo_created" not in _RELAY_EVENT_TYPES
-
-
 # ─── AC5: memo 경로 기능 영향 없음 ───────────────────────────────────────────
 
 @pytest.mark.xfail(reason="E-MEMO-RETIRE S3-3: send_memo 도구 제거됨", strict=False)

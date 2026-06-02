@@ -21,6 +21,7 @@ from app.models.project import OrgMember
 from app.models.team import TeamMember
 from app.models.webhook_config import WebhookConfig
 from app.routers.events import _push_to_agent, publish_event
+from app.services.event_seq import assign_recipient_seq
 from app.services.member_resolver import ResolvedMember, lookup_members_by_ids, resolve_member
 
 logger = logging.getLogger(__name__)
@@ -168,7 +169,7 @@ async def _dispatch_conversation_event(
     member_type_map = {r[0]: r[1] for r in member_rows}
 
     events_to_push: list[tuple[str, Event]] = []
-    for pid in participant_ids:
+    for pid in sorted(participant_ids):  # deadlock 방지: 일관 락 순서
         m_type = member_type_map.get(pid, "human")
         event = Event(
             project_id=conversation.project_id,
@@ -185,9 +186,14 @@ async def _dispatch_conversation_event(
         db.add(event)
         events_to_push.append((str(pid), event))
 
-    # flush로 event.id 확보 — push는 호출측에서 commit 후 수행 (race condition 방지)
+    # flush로 event.id 확보
     await db.flush()
-    return [(pid_str, {"event_id": str(event.id), "event_type": "conversation.message_created", **payload})
+    # per-recipient dense seq 발급 (agent recipient만)
+    for pid_str, event in events_to_push:
+        if member_type_map.get(event.recipient_id, "human") == "agent":
+            await assign_recipient_seq(db, event)
+    return [(pid_str, {"event_id": str(event.id), "event_type": "conversation.message_created", **payload,
+                       "recipient_seq": event.recipient_seq})
             for pid_str, event in events_to_push]
 
 
@@ -213,7 +219,7 @@ async def _dispatch_mention_events(
     member_type_map = {r[0]: r[1] for r in member_rows}
 
     events_to_push: list[tuple[str, Event]] = []
-    for pid in mention_targets:
+    for pid in sorted(mention_targets):  # deadlock 방지: 일관 락 순서
         m_type = member_type_map.get(pid, "human")
         event = Event(
             project_id=conversation.project_id,
@@ -230,8 +236,11 @@ async def _dispatch_mention_events(
         db.add(event)
         events_to_push.append((str(pid), event))
 
-    # flush로 event.id 확보 — push는 호출측에서 commit 후 수행 (race condition 방지)
+    # flush로 event.id 확보
     await db.flush()
+    for _, event in events_to_push:
+        if member_type_map.get(event.recipient_id, "human") == "agent":
+            await assign_recipient_seq(db, event)
     return [(pid_str, {"event_id": str(event.id), "event_type": "conversation:mention", **payload})
             for pid_str, event in events_to_push]
 
@@ -753,8 +762,10 @@ async def send_message(
     try:
         async with db.begin_nested():
             pending_sse_pushes += await _dispatch_conversation_event(db, conv, msg, org_id, sender, exclude_ids=discord_exclude_ids)
-    except Exception:
-        logger.exception("conversation event dispatch failed conversation_id=%s", conversation_id)
+    except Exception as _dispatch_err:
+        # dispatch 실패를 삼키지 않고 surface — 게이트웨이 이벤트 미생성 무음 방지
+        logger.error("conversation event dispatch failed conversation_id=%s", conversation_id, exc_info=True)
+        raise HTTPException(status_code=500, detail="event dispatch failed") from _dispatch_err
 
     # AC1: 멘션 대상에게 conversation:mention SSE 발송 (participant 여부 무관)
     if msg.mentioned_ids:
