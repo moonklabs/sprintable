@@ -37,6 +37,18 @@ def test_agent_event_stream_uses_streaming_auth_deps():
     assert "Depends(get_db)" not in src, "SSE 핸들러는 get_db를 요청 수명 동안 점유하면 안 됨"
 
 
+def test_agent_gateway_stream_uses_streaming_auth_dep():
+    """agent_gateway.agent_stream(SSE)도 비점유 streaming auth 사용 (#abaf6279 후속).
+
+    잔존 leak: agent_stream이 get_current_user(get_db 점유)를 쓰면 API key 해석
+    team_members 쿼리 커넥션이 SSE 수명 내내 idle-in-transaction 잔존.
+    """
+    from app.routers import agent_gateway
+    src = inspect.getsource(agent_gateway.agent_stream)
+    assert "get_current_user_streaming" in src, "agent SSE 스트림은 비점유 auth 사용 필수"
+    assert "Depends(get_current_user)" not in src, "agent SSE 스트림은 점유형 get_current_user 금지"
+
+
 # ─── CP1: streaming auth dep이 get_db를 파라미터로 받지 않음 (비점유 보장) ──────
 
 def test_streaming_auth_deps_do_not_depend_on_get_db():
