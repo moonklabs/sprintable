@@ -11,7 +11,7 @@ import { useChatSse } from '@/hooks/use-chat-sse';
 
 interface Participant {
   member_id: string;
-  name: string;
+  name: string | null;
   avatar_url?: string | null;
   type?: 'agent' | 'human';
 }
@@ -52,10 +52,10 @@ function formatParticipantNames(
 ): string {
   const others = participants.filter((p) => p.member_id !== currentMemberId);
   if (others.length === 0) return type === 'dm' ? 'DM' : t('groupSection');
-  if (type === 'dm') return others[0]!.name;
+  if (type === 'dm') return others[0]?.name ?? '?';
   const MAX = 3;
-  if (others.length <= MAX) return others.map((p) => p.name).join(', ');
-  const visible = others.slice(0, MAX).map((p) => p.name).join(', ');
+  if (others.length <= MAX) return others.map((p) => p.name ?? '?').join(', ');
+  const visible = others.slice(0, MAX).map((p) => p.name ?? '?').join(', ');
   return `${visible} ${t('participantsOthers', { count: others.length - MAX })}`;
 }
 

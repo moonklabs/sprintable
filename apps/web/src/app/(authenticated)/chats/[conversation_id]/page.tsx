@@ -10,7 +10,7 @@ import { useDashboardContext } from '../../../dashboard/dashboard-shell';
 
 interface Participant {
   member_id: string;
-  name: string;
+  name: string | null;
   avatar_url?: string | null;
 }
 
@@ -24,10 +24,10 @@ function formatHeaderTitle(meta: ConversationMeta, currentMemberId: string): str
   if (meta.title) return meta.title;
   const others = meta.participants.filter((p) => p.member_id !== currentMemberId);
   if (others.length === 0) return meta.type === 'dm' ? 'DM' : '그룹 채팅';
-  if (meta.type === 'dm') return others[0]!.name;
+  if (meta.type === 'dm') return others[0]?.name ?? '?';
   const MAX = 3;
-  if (others.length <= MAX) return others.map((p) => p.name).join(', ');
-  return `${others.slice(0, MAX).map((p) => p.name).join(', ')} 외 ${others.length - MAX}명`;
+  if (others.length <= MAX) return others.map((p) => p.name ?? '?').join(', ');
+  return `${others.slice(0, MAX).map((p) => p.name ?? '?').join(', ')} 외 ${others.length - MAX}명`;
 }
 
 export default function ConversationPage() {
