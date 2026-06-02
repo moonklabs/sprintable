@@ -64,7 +64,7 @@ def test_heartbeat_disconnect_check_clears_connection():
     """heartbeat timeout 후 is_disconnected=True → queue가 _agent_connections에서 제거됨."""
     from starlette.testclient import TestClient
     import threading
-    from app.dependencies.auth import get_current_user, get_verified_org_id
+    from app.dependencies.auth import get_current_user, get_verified_org_id, get_current_user_streaming, get_verified_org_id_streaming
     from app.dependencies.database import get_db
     from app.main import app
 
@@ -94,6 +94,8 @@ def test_heartbeat_disconnect_check_clears_connection():
     app.dependency_overrides[get_db] = _db
     app.dependency_overrides[get_current_user] = _auth
     app.dependency_overrides[get_verified_org_id] = _org
+    app.dependency_overrides[get_current_user_streaming] = _auth
+    app.dependency_overrides[get_verified_org_id_streaming] = _org
 
     try:
         with patch("app.core.database.async_session_factory", _factory):
@@ -127,7 +129,7 @@ def test_heartbeat_disconnect_check_clears_connection():
 @pytest.mark.anyio
 async def test_sse_connection_limit_returns_503():
     """MAX_SSE_CONNECTIONS 초과 연결 시 503 반환."""
-    from app.dependencies.auth import get_current_user, get_verified_org_id
+    from app.dependencies.auth import get_current_user, get_verified_org_id, get_current_user_streaming, get_verified_org_id_streaming
     from app.dependencies.database import get_db
     from app.main import app
     import app.routers.events as ev_module
@@ -157,6 +159,8 @@ async def test_sse_connection_limit_returns_503():
     app.dependency_overrides[get_db] = _db
     app.dependency_overrides[get_current_user] = _auth
     app.dependency_overrides[get_verified_org_id] = _org
+    app.dependency_overrides[get_current_user_streaming] = _auth
+    app.dependency_overrides[get_verified_org_id_streaming] = _org
 
     original_count = ev_module._sse_connection_count
     original_max = ev_module._MAX_SSE_CONNECTIONS
@@ -181,7 +185,7 @@ def test_connection_count_increments_and_decrements():
     from starlette.testclient import TestClient
     import threading
     import time
-    from app.dependencies.auth import get_current_user, get_verified_org_id
+    from app.dependencies.auth import get_current_user, get_verified_org_id, get_current_user_streaming, get_verified_org_id_streaming
     from app.dependencies.database import get_db
     from app.main import app
     import app.routers.events as ev_module
@@ -211,6 +215,8 @@ def test_connection_count_increments_and_decrements():
     app.dependency_overrides[get_db] = _db
     app.dependency_overrides[get_current_user] = _auth
     app.dependency_overrides[get_verified_org_id] = _org
+    app.dependency_overrides[get_current_user_streaming] = _auth
+    app.dependency_overrides[get_verified_org_id_streaming] = _org
 
     count_before = ev_module._sse_connection_count
     try:
