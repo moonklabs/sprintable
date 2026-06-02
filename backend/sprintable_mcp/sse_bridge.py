@@ -1,4 +1,4 @@
-"""SSE 브릿지 — /api/v2/events/stream httpx long-lived stream 연결.
+"""SSE 브릿지 — /api/v2/agent/stream httpx long-lived stream 연결.
 
 REST용 SprintableClient와 완전히 분리된 SSE 전용 httpx.AsyncClient 사용.
 """
@@ -11,15 +11,12 @@ import sys
 import time
 from collections import OrderedDict
 from dataclasses import dataclass
-from random import randint, uniform
-from typing import TYPE_CHECKING, Any, Callable
+from random import uniform
+from typing import Any, Callable
 
 import httpx
 
 from .config import settings
-
-if TYPE_CHECKING:
-    from mcp.server.session import ServerSession
 
 SseBridgeEventHandler = Callable[[str, Any], None]
 _SseInternalHandler = Callable[["SseEvent"], None]
@@ -27,20 +24,6 @@ _SseInternalHandler = Callable[["SseEvent"], None]
 _BASE_DELAY = 1.0
 _MAX_DELAY = 10.0
 _JITTER_FACTOR = 0.5    # wait * uniform(0, 0.5) jitter
-
-# relay 대상 이벤트 타입
-# S-COMM-12: canonical = conversation.message_created (점 표기)
-# conversation:message (콜론) 는 전환기 하위호환용 — 신규 emit 없으나 유지
-_RELAY_EVENT_TYPES = frozenset([
-    "conversation.message_created",  # canonical (S-COMM-12)
-    "conversation:message",          # legacy alias, deprecated
-    "conversation:mention",
-])
-
-# canonical → legacy alias 매핑 (전환기 하위호환 병행 emit)
-_EVENT_TYPE_LEGACY_ALIASES: dict[str, str] = {
-    "conversation.message_created": "conversation:message",
-}
 
 
 # ── SeenIdsCache: LRU + TTL dedup 캐시 (S6-2) ────────────────────────────────
@@ -97,32 +80,6 @@ def _log(msg: str) -> None:
     sys.stderr.flush()
 
 
-# ── MCP Session Registry ───────────────────────────────────────────────────────
-
-_active_session: ServerSession | None = None
-
-
-def register_session(session: ServerSession) -> None:
-    """활성 MCP ServerSession 등록. __main__.py _handle_message 패치에서 호출."""
-    global _active_session
-    _active_session = session
-
-
-async def _send_mcp_notification(event_type: str, data_str: str) -> None:
-    """SSE 이벤트를 MCP log notification으로 클라이언트에 전송.
-
-    세션 미등록 또는 에러 시 조용히 skip — MCP 도구 호출에 영향 없음.
-    """
-    if _active_session is None:
-        return
-    try:
-        await _active_session.send_log_message(
-            level="info",
-            data={"event_type": event_type, "data": data_str},
-            logger="sprintable.sse",
-        )
-    except Exception as exc:
-        _log(f"notification error: {exc}")
 
 
 # ── SSE Parser ─────────────────────────────────────────────────────────────────
@@ -190,88 +147,6 @@ class SseParser:
         return None
 
 
-# ── fakechat relay ────────────────────────────────────────────────────────────
-
-def _build_relay_payload(event_type: str, data: object) -> tuple[str, str, bool]:
-    """SSE data에서 (text, thread_id, is_conversation_event) 추출."""
-    if not isinstance(data, dict):
-        return f"[{event_type}] {data}", "", False
-
-    d: dict = data
-    payload: dict = d.get("payload") if isinstance(d.get("payload"), dict) else d  # type: ignore[assignment]
-
-    sender_raw = payload.get("sender") or d.get("sender_name") or d.get("member_name") or ""
-    if isinstance(sender_raw, dict):
-        sender_name = str(sender_raw.get("name", ""))
-    else:
-        sender_name = str(sender_raw)
-
-    content = (
-        payload.get("content")
-        or d.get("content")
-        or d.get("message")
-        or d.get("text")
-        or json.dumps(data, ensure_ascii=False)
-    )
-
-    text = f"[{event_type}] {sender_name}: {content}" if sender_name else f"[{event_type}] {content}"
-
-    conversation_id = str(payload.get("conversation_id") or d.get("conversation_id") or "")
-    thread_id = str(payload.get("thread_id") or d.get("thread_id") or conversation_id)
-    is_conversation_event = bool(conversation_id) and not (
-        payload.get("thread_id") or d.get("thread_id")
-    )
-
-    return text, thread_id, is_conversation_event
-
-
-async def relay_to_fakechat(
-    event_type: str,
-    data_str: str,
-    api_url: str,
-    api_key: str,
-    fakechat_port: int,
-) -> None:
-    """SSE 이벤트 → fakechat /upload POST.
-
-    relay 대상: conversation:message, conversation:mention.
-    비대상 이벤트 및 모든 에러는 조용히 skip — MCP 동작에 영향 없음.
-    """
-    if event_type not in _RELAY_EVENT_TYPES:
-        return
-
-    uid = f"sse-{int(time.time() * 1000)}-{randint(0, 999999):06d}"
-
-    try:
-        parsed: Any = json.loads(data_str)
-    except json.JSONDecodeError:
-        parsed = data_str
-
-    text, thread_id, is_conversation_event = _build_relay_payload(event_type, parsed)
-
-    form: dict[str, str] = {"id": uid, "text": text}
-
-    if thread_id:
-        base_url = api_url.rstrip("/")
-        form["thread_id"] = thread_id
-        if base_url and api_key:
-            callback_path = (
-                f"/api/v2/conversations/{thread_id}/messages"
-                if is_conversation_event
-                else f"/api/v2/chats/{thread_id}/messages"
-            )
-            form["reply_callback_url"] = f"{base_url}{callback_path}"
-            form["reply_callback_api_key"] = api_key
-
-    try:
-        async with httpx.AsyncClient(timeout=5.0) as client:
-            resp = await client.post(
-                f"http://127.0.0.1:{fakechat_port}/upload",
-                data=form,
-            )
-            resp.raise_for_status()
-    except Exception as exc:
-        _log(f"relay error: {exc}")
 
 
 # ── httpx SSE client ───────────────────────────────────────────────────────────
@@ -360,7 +235,6 @@ async def start_sse_bridge(
 
     _log(f"starting bridge for member_id={member_id}")
     sse_client = make_sse_client(api_url, api_key)
-    port = settings.fakechat_port
     _use_v2 = os.getenv("AGENT_GATEWAY_V2", "0") not in ("0", "false", "")
 
     # S6-2: LRU + TTL dedup 캐시 (환경변수 기반 설정)
@@ -424,25 +298,6 @@ async def start_sse_bridge(
                     seen_ids.add(_data_eid)
             except (json.JSONDecodeError, AttributeError):
                 pass
-
-        # MCP notification: webhook 유무·backfill 여부 무관하게 항상 발송 (AC-4)
-        asyncio.create_task(
-            _send_mcp_notification(event.event_type, event.data)
-        )
-        # S-COMM-12: canonical 이벤트 수신 시 legacy alias도 병행 emit (전환기 하위호환)
-        if _alias := _EVENT_TYPE_LEGACY_ALIASES.get(event.event_type):
-            asyncio.create_task(_send_mcp_notification(_alias, event.data))
-
-        # relay 조건: (1) backfill 아님, (2) webhook 미설정
-        _relay = True
-        try:
-            _relay = not json.loads(event.data).get("is_backfill", False)
-        except (json.JSONDecodeError, AttributeError):
-            pass
-        if _relay and not settings.has_webhook:
-            asyncio.create_task(
-                relay_to_fakechat(event.event_type, event.data, api_url, api_key, port)
-            )
 
         if on_event is not None:
             on_event(event.event_type, event.data)
