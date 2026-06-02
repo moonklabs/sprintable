@@ -352,12 +352,16 @@ async def start_sse_bridge(
 
     - backoff: BASE * 2^attempt (max MAX_DELAY) + uniform(0, wait * JITTER_FACTOR)
     - dedup: SeenIdsCache (LRU + TTL) 기반 중복 skip
+    - ack: AGENT_GATEWAY_V2 경로에서 주입 성공 후 POST /agent/events/ack (contiguous-max)
     - MCP stdio 서버와 동일 이벤트 루프에서 asyncio.create_task()로 실행
-    - graceful shutdown: CancelledError → finally: client.aclose()
+    - graceful shutdown: CancelledError → finally: ack flush + client.aclose()
     """
+    from .api_client import client as rest_client
+
     _log(f"starting bridge for member_id={member_id}")
-    client = make_sse_client(api_url, api_key)
+    sse_client = make_sse_client(api_url, api_key)
     port = settings.fakechat_port
+    _use_v2 = os.getenv("AGENT_GATEWAY_V2", "0") not in ("0", "false", "")
 
     # S6-2: LRU + TTL dedup 캐시 (환경변수 기반 설정)
     seen_ids = SeenIdsCache(
@@ -366,6 +370,39 @@ async def start_sse_bridge(
     )
     # S6-1: 마지막 수신 event_id — 재연결 시 backfill 기준점으로 전달
     _current_last_event_id: str = ""
+
+    # ── Ack 상태 (AGENT_GATEWAY_V2 전용) ─────────────────────────────────────
+    _pending_seqs: set[int] = set()   # 주입 완료, ack 대기 중인 seq
+    _last_acked: list[int] = [0]      # nonlocal 공유용 1-elem 리스트
+
+    async def _send_ack(seq: int) -> None:
+        """POST /api/v2/agent/events/ack — 에러 시 조용히 skip."""
+        try:
+            await rest_client.post("/api/v2/agent/events/ack", json={"seq": seq})
+            _log(f"ack seq={seq}")
+        except Exception as exc:
+            _log(f"ack error seq={seq}: {exc}")
+
+    def _schedule_ack_if_ready() -> None:
+        """pending에서 _last_acked 기준 연속 최고 seq 계산 후 ack 스케줄.
+
+        초기(_last_acked=0) + 재연결 후 높은 seq로 시작하는 경우:
+        첫 수신 seq의 직전을 base로 앵커링해 갭-없음 보장.
+        """
+        if not _pending_seqs:
+            return
+        base = _last_acked[0]
+        if base == 0:
+            # 첫 이벤트 — server는 acked_seq 이후부터 보내므로 min(seq)-1을 base로
+            base = min(_pending_seqs) - 1
+            _last_acked[0] = base
+        current = base
+        while (current + 1) in _pending_seqs:
+            _pending_seqs.discard(current + 1)
+            current += 1
+        if current > base:
+            _last_acked[0] = current
+            asyncio.create_task(_send_ack(current))
 
     def _handle(event: SseEvent) -> None:
         nonlocal _current_last_event_id
@@ -410,11 +447,28 @@ async def start_sse_bridge(
         if on_event is not None:
             on_event(event.event_type, event.data)
 
+        # AC1-3: AGENT_GATEWAY_V2 경로에서 주입 성공 후 ack — heartbeat 제외
+        if _use_v2 and event.event_type != "heartbeat":
+            seq: int | None = None
+            if event.last_event_id:
+                try:
+                    seq = int(event.last_event_id)
+                except ValueError:
+                    pass
+            if seq is None:
+                try:
+                    seq = int(json.loads(event.data).get("recipient_seq") or 0) or None
+                except (json.JSONDecodeError, AttributeError, ValueError):
+                    pass
+            if seq:
+                _pending_seqs.add(seq)
+                _schedule_ack_if_ready()
+
     attempt = 0
     try:
         while True:
             try:
-                await _connect_once(client, member_id, _current_last_event_id, _handle)
+                await _connect_once(sse_client, member_id, _current_last_event_id, _handle)
                 attempt = 0
             except Exception as exc:
                 _log(f"error: {exc}")
@@ -424,4 +478,18 @@ async def start_sse_bridge(
             _log(f"reconnecting in {wait:.2f}s (attempt {attempt})")
             await asyncio.sleep(wait)
     finally:
-        await client.aclose()
+        # AC3: shutdown 시 미ack pending seq flush — contiguous-max (CP1: max() 갭 위험 제거)
+        if _use_v2 and _pending_seqs:
+            base = _last_acked[0]
+            if base == 0:
+                base = min(_pending_seqs) - 1
+            current = base
+            while (current + 1) in _pending_seqs:
+                _pending_seqs.discard(current + 1)
+                current += 1
+            if current > base:
+                try:
+                    await _send_ack(current)
+                except Exception:
+                    pass
+        await sse_client.aclose()
