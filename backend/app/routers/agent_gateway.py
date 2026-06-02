@@ -1,8 +1,8 @@
-"""E-AGENT-GATEWAY Phase 0: per-recipient dense seq 기반 SSE 스트림 + ACK.
+"""E-AGENT-GATEWAY Phase 0: per-recipient dense seq ê¸°ë° SSE ì¤í¸ë¦¼ + ACK.
 
-이중전달 fix: per-recipient dense commit-ordered seq (recipient_seq).
-start_seq = max(acked_seq DB, Last-Event-ID 헤더)
-backfill = live-tail = 동일 쿼리 → 겹침 0.
+ì´ì¤ì ë¬ fix: per-recipient dense commit-ordered seq (recipient_seq).
+start_seq = max(acked_seq DB, Last-Event-ID í¤ë)
+backfill = live-tail = ëì¼ ì¿¼ë¦¬ â ê²¹ì¹¨ 0.
 """
 from __future__ import annotations
 
@@ -18,7 +18,7 @@ from pydantic import BaseModel
 from sqlalchemy import select, text, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.dependencies.auth import AuthContext, get_current_user
+from app.dependencies.auth import AuthContext, get_current_user, get_current_user_streaming
 from app.core.database import async_session_factory
 from app.dependencies.database import get_db
 from app.models.agent_gateway import AgentEventCursor, AgentGatewaySession
@@ -31,13 +31,13 @@ router = APIRouter(prefix="/api/v2/agent", tags=["agent-gateway"])
 _SSE_HEARTBEAT: float = float(os.getenv("SSE_HEARTBEAT_TIMEOUT", "30"))
 _BACKFILL_LIMIT: int = int(os.getenv("AGENT_GATEWAY_BACKFILL_LIMIT", "100"))
 
-# ─── wake_agent: commit 후 큐 알림 ────────────────────────────────────────────
+# âââ wake_agent: commit í í ìë¦¼ ââââââââââââââââââââââââââââââââââââââââââââ
 
 def wake_agent(agent_id: str, seq: int, _from_listener: bool = False) -> None:
-    """신규 이벤트 커밋 후 에이전트 SSE 큐에 wake 신호 전송.
+    """ì ê· ì´ë²¤í¸ ì»¤ë° í ìì´ì í¸ SSE íì wake ì í¸ ì ì¡.
 
-    에이전트는 신호 수신 후 recipient_seq > cursor 조회 (payload 미포함).
-    _from_listener=True: pg_notify 재발행 금지.
+    ìì´ì í¸ë ì í¸ ìì  í recipient_seq > cursor ì¡°í (payload ë¯¸í¬í¨).
+    _from_listener=True: pg_notify ì¬ë°í ê¸ì§.
     """
     payload = {"__wake__": True, "seq": seq}
     queues = _agent_connections.get(agent_id)
@@ -67,10 +67,10 @@ async def _fetch_events(
     after_seq: int,
     limit: int,
 ) -> list:
-    """recipient_seq > after_seq인 visible 이벤트 반환 (raw rows).
+    """recipient_seq > after_seqì¸ visible ì´ë²¤í¸ ë°í (raw rows).
 
-    정렬: recipient_seq ASC. per-recipient dense → gap-free.
-    gap-free 보장은 acked_seq 재스캔(caller)이 담당; 이 함수는 단순 조회.
+    ì ë ¬: recipient_seq ASC. per-recipient dense â gap-free.
+    gap-free ë³´ì¥ì acked_seq ì¬ì¤ìº(caller)ì´ ë´ë¹; ì´ í¨ìë ë¨ì ì¡°í.
     """
     rows = await session.execute(
         text("""
@@ -95,7 +95,7 @@ async def _fetch_events(
 
 
 def _row_to_payload(row: object) -> dict:
-    """_fetch_events row → SSE payload dict."""
+    """_fetch_events row â SSE payload dict."""
     return {
         "event_id": row.event_id,  # type: ignore[attr-defined]
         "event_type": row.event_type,  # type: ignore[attr-defined]
@@ -111,29 +111,31 @@ def _row_to_payload(row: object) -> dict:
     }
 
 
-# ─── backward compat: 구 _push_to_agent 호환 래퍼 ────────────────────────────
+# âââ backward compat: êµ¬ _push_to_agent í¸í ëí¼ ââââââââââââââââââââââââââââ
 
 def _push_to_agent_v2(member_id: str, payload: dict, _from_listener: bool = False) -> bool:
-    """구 _push_to_agent 호출부 호환 — gateway_seq 있으면 wake_agent로 위임."""
+    """êµ¬ _push_to_agent í¸ì¶ë¶ í¸í â gateway_seq ìì¼ë©´ wake_agentë¡ ìì."""
     seq = payload.get("recipient_seq") or payload.get("gateway_seq")
     if seq is not None:
         wake_agent(member_id, int(seq), _from_listener=_from_listener)
         return True
-    # gateway_seq 없는 경우(레거시 경로): 기존 큐 직접 push fallback
+    # gateway_seq ìë ê²½ì°(ë ê±°ì ê²½ë¡): ê¸°ì¡´ í ì§ì  push fallback
     from app.routers.events import _push_to_agent as _legacy_push
     return _legacy_push(member_id, payload, _from_listener=_from_listener)
 
 
-# ─── GET /api/v2/agent/stream ─────────────────────────────────────────────────
+# âââ GET /api/v2/agent/stream âââââââââââââââââââââââââââââââââââââââââââââââââ
 
 @router.get("/stream")
 async def agent_stream(
     request: Request,
-    auth: AuthContext = Depends(get_current_user),
+    # P0(#abaf6279 íì): SSE long-lived ìì²­ì´ get_db ì¸ìì ì ì íë©´ API key í´ì
+    # team_members ì¿¼ë¦¬ ì»¤ë¥ìì´ idle-in-transaction ìì¡´ → ë¹ì ì  streaming ë³í ì¬ì©.
+    auth: AuthContext = Depends(get_current_user_streaming),
 ) -> StreamingResponse:
-    """gateway_seq 기반 SSE 스트림 (API키 전용).
+    """gateway_seq ê¸°ë° SSE ì¤í¸ë¦¼ (APIí¤ ì ì©).
 
-    Last-Event-ID 헤더 = 마지막 수신 gateway_seq.
+    Last-Event-ID í¤ë = ë§ì§ë§ ìì  gateway_seq.
     start_seq = max(DB acked_seq, Last-Event-ID).
     """
     is_api_key = bool(auth.claims.get("app_metadata", {}).get("api_key_id"))
@@ -142,7 +144,7 @@ async def agent_stream(
 
     agent_id = uuid.UUID(auth.user_id)
 
-    # agent_id 검증
+    # agent_id ê²ì¦
     async with async_session_factory() as db:
         tm = (await db.execute(
             select(TeamMember).where(TeamMember.id == agent_id, TeamMember.type == "agent")
@@ -150,13 +152,13 @@ async def agent_stream(
         if tm is None:
             raise HTTPException(status_code=404, detail="Agent not found")
 
-        # acked_seq DB 조회
+        # acked_seq DB ì¡°í
         cursor = (await db.execute(
             select(AgentEventCursor).where(AgentEventCursor.agent_id == agent_id)
         )).scalar_one_or_none()
         acked_seq: int = cursor.acked_seq if cursor else 0
 
-        # 세션 등록
+        # ì¸ì ë±ë¡
         session_rec = AgentGatewaySession(
             id=uuid.uuid4(),
             agent_id=agent_id,
@@ -166,7 +168,7 @@ async def agent_stream(
         db.add(session_rec)
         await db.commit()
 
-    # Last-Event-ID 헤더 파싱 (gateway_seq)
+    # Last-Event-ID í¤ë íì± (gateway_seq)
     last_event_id_hdr = request.headers.get("Last-Event-ID") or request.headers.get("last-event-id")
     header_seq: int = 0
     if last_event_id_hdr:
@@ -182,36 +184,36 @@ async def agent_stream(
     _agent_connections[agent_id_str].add(queue)
 
     async def generate():
-        """gap-free ordered-at-least-once SSE 스트림.
+        """gap-free ordered-at-least-once SSE ì¤í¸ë¦¼.
 
-        커서 전략: acked_seq(durable) 재스캔.
-        - 매 wake마다 `gateway_seq > acked_seq` DB 재스캔 → 늦게 커밋된 낮은 seq도 반드시 잡힘.
-        - wake_floor: 이번 wake 내 yield한 최대 seq (같은 wake 안 중복 방지용).
-        - acked_seq는 클라이언트 POST /ack 로만 전진 — 서버가 자동 전진 안 함.
-        - 클라이언트는 seq 기반 dedup(같은 seq 두 번 받아도 한 번 처리) 필수.
+        ì»¤ì ì ëµ: acked_seq(durable) ì¬ì¤ìº.
+        - ë§¤ wakeë§ë¤ `gateway_seq > acked_seq` DB ì¬ì¤ìº â ë¦ê² ì»¤ë°ë ë®ì seqë ë°ëì ì¡í.
+        - wake_floor: ì´ë² wake ë´ yieldí ìµë seq (ê°ì wake ì ì¤ë³µ ë°©ì§ì©).
+        - acked_seqë í´ë¼ì´ì¸í¸ POST /ack ë¡ë§ ì ì§ â ìë²ê° ìë ì ì§ ì í¨.
+        - í´ë¼ì´ì¸í¸ë seq ê¸°ë° dedup(ê°ì seq ë ë² ë°ìë í ë² ì²ë¦¬) íì.
         """
         try:
             yield "event: heartbeat\ndata: {}\n\n"
 
-            # 초기 백필 — acked_seq(=start_seq)부터 재스캔
+            # ì´ê¸° ë°±í â acked_seq(=start_seq)ë¶í° ì¬ì¤ìº
             async with async_session_factory() as db:
                 rows = await _fetch_events(db, agent_id, start_seq, _BACKFILL_LIMIT)
 
-            backfill_floor = start_seq  # 이번 백필 내 중복 방지
+            backfill_floor = start_seq  # ì´ë² ë°±í ë´ ì¤ë³µ ë°©ì§
             for row in rows:
                 data = _row_to_payload(row)
                 gseq = row.recipient_seq or 0
-                if gseq > backfill_floor:  # 중복 방지
+                if gseq > backfill_floor:  # ì¤ë³µ ë°©ì§
                     _sse = json.dumps({**data, "is_backfill": True})
                     yield f"event: {row.event_type}\nid: {gseq}\ndata: {_sse}\n\n"
                     backfill_floor = gseq
 
-            # 실시간 — wake 신호 → acked_seq부터 DB 재스캔
+            # ì¤ìê° â wake ì í¸ â acked_seqë¶í° DB ì¬ì¤ìº
             while not await request.is_disconnected():
                 try:
                     signal = await asyncio.wait_for(queue.get(), timeout=_SSE_HEARTBEAT)
                     if signal.get("__wake__"):
-                        # 최신 acked_seq 조회 (클라이언트가 ACK 보냈을 수 있음)
+                        # ìµì  acked_seq ì¡°í (í´ë¼ì´ì¸í¸ê° ACK ë³´ëì ì ìì)
                         async with async_session_factory() as db:
                             cur = (await db.execute(
                                 select(AgentEventCursor).where(AgentEventCursor.agent_id == agent_id)
@@ -219,17 +221,17 @@ async def agent_stream(
                             scan_from = max(start_seq, cur.acked_seq if cur else 0)
                             new_rows = await _fetch_events(db, agent_id, scan_from, _BACKFILL_LIMIT)
 
-                        wake_floor = scan_from  # 이번 wake 내 중복 방지
+                        wake_floor = scan_from  # ì´ë² wake ë´ ì¤ë³µ ë°©ì§
                         for row in new_rows:
                             gseq = row.recipient_seq or 0
                             if gseq > wake_floor:
                                 data = _row_to_payload(row)
                                 _sse = json.dumps({**data, "is_backfill": False})
-                                # AC2: 카논 이벤트명 only
+                                # AC2: ì¹´ë¼ ì´ë²¤í¸ëª only
                                 yield f"event: {row.event_type}\nid: {gseq}\ndata: {_sse}\n\n"
                                 wake_floor = gseq
                     else:
-                        # 레거시 직접 push (AGENT_GATEWAY_V2 미적용 경로)
+                        # ë ê±°ì ì§ì  push (AGENT_GATEWAY_V2 ë¯¸ì ì© ê²½ë¡)
                         event_type = signal.get("event_type", "message")
                         _live_id = signal.get("event_id") or str(uuid.uuid4())
                         _sse = json.dumps({**signal, "is_backfill": False})
@@ -256,7 +258,7 @@ async def agent_stream(
     )
 
 
-# ─── POST /api/v2/agent/events/ack ────────────────────────────────────────────
+# âââ POST /api/v2/agent/events/ack ââââââââââââââââââââââââââââââââââââââââââââ
 
 class AckRequest(BaseModel):
     seq: int
@@ -268,14 +270,14 @@ async def ack_event(
     db: AsyncSession = Depends(get_db),
     auth: AuthContext = Depends(get_current_user),
 ) -> dict:
-    """에이전트가 처리 완료한 gateway_seq ACK — agent_event_cursors 갱신."""
+    """ìì´ì í¸ê° ì²ë¦¬ ìë£í gateway_seq ACK â agent_event_cursors ê°±ì ."""
     is_api_key = bool(auth.claims.get("app_metadata", {}).get("api_key_id"))
     if not is_api_key:
         raise HTTPException(status_code=403, detail="API key required")
 
     agent_id = uuid.UUID(auth.user_id)
 
-    # UPSERT acked_seq (더 높은 값만 갱신)
+    # UPSERT acked_seq (ë ëì ê°ë§ ê°±ì )
     existing = (await db.execute(
         select(AgentEventCursor).where(AgentEventCursor.agent_id == agent_id)
     )).scalar_one_or_none()
