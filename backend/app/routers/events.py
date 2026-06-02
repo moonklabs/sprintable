@@ -20,7 +20,13 @@ from pydantic import BaseModel, ConfigDict
 from sqlalchemy import and_, delete, or_, select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.dependencies.auth import AuthContext, get_current_user, get_verified_org_id
+from app.dependencies.auth import (
+    AuthContext,
+    get_current_user,
+    get_current_user_streaming,
+    get_verified_org_id,
+    get_verified_org_id_streaming,
+)
 from app.dependencies.database import get_db
 from app.models.event import Event
 from app.models.team import TeamMember
@@ -174,8 +180,8 @@ class EventResponse(BaseModel):
 async def agent_event_stream(
     request: Request,
     member_id: uuid.UUID | None = Query(default=None),  # AC2: API key 시 자동 추출, JWT 시 필수
-    auth: AuthContext = Depends(get_current_user),  # AC1: Bearer {API_KEY} 또는 JWT — 없으면 401 (AC3)
-    org_id: uuid.UUID = Depends(get_verified_org_id),
+    auth: AuthContext = Depends(get_current_user_streaming),  # AC1: Bearer {API_KEY} 또는 JWT — 없으면 401 (AC3). P0(#abaf6279): SSE 커넥션 비점유 변형
+    org_id: uuid.UUID = Depends(get_verified_org_id_streaming),
     since_timestamp: datetime | None = Query(default=None),
     last_event_id: uuid.UUID | None = Query(default=None),
 ):
@@ -315,37 +321,37 @@ async def agent_event_stream(
                 for i in range(0, len(pending_events), _SSE_BATCH_SIZE):
                     batch = pending_events[i : i + _SSE_BATCH_SIZE]
                     batch_data = [_event_to_payload(evt) for evt in batch]
-                    # delivered 마킹 먼저 commit → 재연결 시 백필 중복 방지
+                    # 1c22da3e fix: yield 먼저 → 성공 후 delivered 마킹.
+                    # 선마킹 시 yield(클라 disconnect 등) 실패하면 이벤트가 delivered로
+                    # 남아 영구 누락. 후마킹 + 클라 seen_ids dedup 으로 손실 0(재전송 허용).
+                    for data, evt in zip(batch_data, batch):
+                        yield f"event: {evt.event_type}\nid: {evt.id}\ndata: {json.dumps({**data, 'is_backfill': True})}\n\n"
                     for evt in batch:
                         evt.status = "delivered"
                         evt.delivered_at = now
                     await db.commit()
-                    for data, evt in zip(batch_data, batch):
-                        yield f"event: {evt.event_type}\nid: {evt.id}\ndata: {json.dumps({**data, 'is_backfill': True})}\n\n"
 
             # 신규 이벤트 리슨 — 대기 구간에서 커넥션 미점유, 이벤트마다 개별 세션
             while not await request.is_disconnected():
                 try:
                     event_data = await asyncio.wait_for(queue.get(), timeout=_SSE_HEARTBEAT_TIMEOUT)
                     event_type = event_data.get("event_type", "message")
-                    # event_id 있으면 yield 전 pending 선점 — 백필과 실시간 큐 중복 방지
-                    if eid := event_data.get("event_id"):
+                    # 1c22da3e fix: yield 전엔 pending 여부만 확인(skip 판정, 마킹 X),
+                    # delivered 마킹은 yield 성공 후로 미룬다 → yield 실패 시 영구 누락 방지.
+                    eid = event_data.get("event_id")
+                    if eid:
                         try:
                             async with async_session_factory() as db:
                                 r = await db.execute(
-                                    select(Event).where(
+                                    select(Event.status).where(
                                         Event.id == uuid.UUID(eid),
-                                        Event.status == "pending",
                                         Event.org_id == org_id,
                                     )
                                 )
-                                live_evt = r.scalar_one_or_none()
-                                if live_evt is None:
-                                    # 이미 백필에서 delivered 마킹됨 → skip
+                                _status = r.scalar_one_or_none()
+                                if _status is not None and _status != "pending":
+                                    # 이미 백필/타 연결에서 delivered → 중복 skip
                                     continue
-                                live_evt.status = "delivered"
-                                live_evt.delivered_at = datetime.now(timezone.utc)
-                                await db.commit()
                         except Exception:
                             pass
                     # event_id 없는 경로(chats direct push 등)도 id: 보장 — 재연결 추적 약화 방지
@@ -356,6 +362,18 @@ async def agent_event_stream(
                     if event_type == "conversation.message_created":
                         yield f"event: conversation:message\nid: {_live_id}\ndata: {_sse_data}\n\n"
                     yield f"event: {event_type}\nid: {_live_id}\ndata: {_sse_data}\n\n"
+                    # yield 성공 후 delivered 마킹 (1c22da3e: 손실 방지, dup은 클라 dedup)
+                    if eid:
+                        try:
+                            async with async_session_factory() as db:
+                                await db.execute(
+                                    update(Event)
+                                    .where(Event.id == uuid.UUID(eid), Event.status == "pending")
+                                    .values(status="delivered", delivered_at=datetime.now(timezone.utc))
+                                )
+                                await db.commit()
+                        except Exception:
+                            pass
                 except asyncio.TimeoutError:
                     # S20: heartbeat 후 즉시 disconnect 체크 — dead connection 조기 정리
                     yield "event: heartbeat\ndata: {}\n\n"
