@@ -203,19 +203,79 @@ async def test_no_duplicate_injection_via_seen_ids():
 
 
 @pytest.mark.anyio
+async def test_send_ack_calls_correct_endpoint():
+    """CP2: _send_ack가 POST /api/v2/agent/events/ack + {"seq": N} 호출 단언.
+
+    ack 로직 제거 시 반드시 FAIL — 동어반복 방지.
+    """
+    import asyncio
+    import os
+    from unittest.mock import patch
+
+    from sprintable_mcp import api_client
+    from sprintable_mcp.sse_bridge import SseEvent, start_sse_bridge
+
+    acked_payloads: list[dict] = []
+    ack_received: asyncio.Event = asyncio.Event()
+
+    async def mock_post(path: str, *, json: dict | None = None):
+        if path == "/api/v2/agent/events/ack":
+            acked_payloads.append({"path": path, "json": json})
+            ack_received.set()
+        return {}
+
+    # SSE 스트림: seq=77 이벤트 1개 emit 후 즉시 종료
+    async def mock_connect_once(client, member_id, last_event_id, on_event):
+        on_event(SseEvent(
+            event_type="dispatched",
+            data='{"recipient_seq": 77, "is_backfill": false}',
+            last_event_id="77",
+        ))
+
+    with patch.object(api_client.client, "post", side_effect=mock_post), \
+         patch("sprintable_mcp.sse_bridge._connect_once", side_effect=mock_connect_once), \
+         patch.dict(os.environ, {"AGENT_GATEWAY_V2": "1"}):
+
+        task = asyncio.create_task(
+            start_sse_bridge("http://test-api", "test-key", "test-member")
+        )
+        try:
+            await asyncio.wait_for(ack_received.wait(), timeout=2.0)
+        finally:
+            task.cancel()
+            try:
+                await task
+            except (asyncio.CancelledError, Exception):
+                pass
+
+    assert acked_payloads, "_send_ack was never called — ack 로직 누락"
+    assert acked_payloads[0]["path"] == "/api/v2/agent/events/ack", (
+        f"Wrong endpoint: {acked_payloads[0]['path']}"
+    )
+    assert acked_payloads[0]["json"] == {"seq": 77}, (
+        f"Wrong payload: {acked_payloads[0]['json']}"
+    )
+
+
+@pytest.mark.anyio
 async def test_contiguous_ack_only():
     """ack는 연속 최고 seq만 — 갭 있으면 갭 직전까지만 ack.
 
     seq 1,2,4 수신: pending={1,2,4}, base=0 → contiguous max=2 (4는 갭)
     seq 3 수신: pending={3,4} → contiguous max=4
     """
-    # _schedule_ack_if_ready 로직을 인라인 검증
+    # _schedule_ack_if_ready 로직을 인라인 검증 (앵커링 포함)
     pending: set[int] = set()
     last_acked = [0]
 
     def _compute(seq: int) -> int | None:
         pending.add(seq)
+        if not pending:
+            return None
         base = last_acked[0]
+        if base == 0:
+            base = min(pending) - 1
+            last_acked[0] = base
         current = base
         while (current + 1) in pending:
             pending.discard(current + 1)
@@ -225,7 +285,7 @@ async def test_contiguous_ack_only():
             return current
         return None
 
-    assert _compute(1) == 1
+    assert _compute(1) == 1   # base=0 → anchored to 0 (min=1, 1-1=0)
     assert _compute(2) == 2
     assert _compute(4) is None, "gap at 3 — should not ack beyond 2"
     assert last_acked[0] == 2

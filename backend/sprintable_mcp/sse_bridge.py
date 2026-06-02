@@ -384,8 +384,18 @@ async def start_sse_bridge(
             _log(f"ack error seq={seq}: {exc}")
 
     def _schedule_ack_if_ready() -> None:
-        """pending에서 _last_acked 기준 연속 최고 seq 계산 후 ack 스케줄."""
+        """pending에서 _last_acked 기준 연속 최고 seq 계산 후 ack 스케줄.
+
+        초기(_last_acked=0) + 재연결 후 높은 seq로 시작하는 경우:
+        첫 수신 seq의 직전을 base로 앵커링해 갭-없음 보장.
+        """
+        if not _pending_seqs:
+            return
         base = _last_acked[0]
+        if base == 0:
+            # 첫 이벤트 — server는 acked_seq 이후부터 보내므로 min(seq)-1을 base로
+            base = min(_pending_seqs) - 1
+            _last_acked[0] = base
         current = base
         while (current + 1) in _pending_seqs:
             _pending_seqs.discard(current + 1)
@@ -468,12 +478,18 @@ async def start_sse_bridge(
             _log(f"reconnecting in {wait:.2f}s (attempt {attempt})")
             await asyncio.sleep(wait)
     finally:
-        # AC3: shutdown 시 미ack pending seq flush
+        # AC3: shutdown 시 미ack pending seq flush — contiguous-max (CP1: max() 갭 위험 제거)
         if _use_v2 and _pending_seqs:
-            flush_seq = max(_pending_seqs)
-            if flush_seq > _last_acked[0]:
+            base = _last_acked[0]
+            if base == 0:
+                base = min(_pending_seqs) - 1
+            current = base
+            while (current + 1) in _pending_seqs:
+                _pending_seqs.discard(current + 1)
+                current += 1
+            if current > base:
                 try:
-                    await _send_ack(flush_seq)
+                    await _send_ack(current)
                 except Exception:
                     pass
         await sse_client.aclose()
