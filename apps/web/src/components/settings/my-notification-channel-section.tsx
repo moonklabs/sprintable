@@ -111,8 +111,9 @@ export function MyNotificationChannelSection({ projectId, projectName }: MyNotif
   };
 
   const handleToggle = async (next: boolean) => {
-    if (!memberId || !webhookConfigs[0]) return;
+    if (!memberId) return;
     setWebhookActive(next);
+    if (!webhookConfigs[0]) return;
     setSavingWebhook(true);
     try {
       await fetch('/api/webhooks/config', {
@@ -175,7 +176,7 @@ export function MyNotificationChannelSection({ projectId, projectName }: MyNotif
             type="url"
             value={webhookUrl}
             onChange={(e) => setWebhookUrl(e.target.value)}
-            placeholder="https://your-endpoint.example.com/webhook"
+            placeholder={t('webhookUrlPlaceholder')}
             className="flex-1 font-mono text-xs"
             disabled={!webhookActive}
           />
