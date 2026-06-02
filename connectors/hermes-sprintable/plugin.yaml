@@ -1,0 +1,23 @@
+name: sprintable-platform
+label: Sprintable
+kind: platform
+version: 1.0.0
+description: >
+  Sprintable Agent Gateway dial-out adapter for Hermes Agent.
+  Holds a long-lived OUTBOUND SSE connection to the Sprintable gateway
+  (/api/v2/agent/stream) — no inbound domain or tunnel required — and
+  injects each delivered project message into the running hermes session
+  as a new turn, posting the agent's reply back to the Sprintable
+  Conversations API. Acks consumed events to keep the server cursor
+  advancing (no backfill re-flood on reconnect). httpx only.
+author: ortega
+requires_env:
+  - name: AGENT_API_KEY
+    description: "Sprintable agent API key (Bearer)"
+    prompt: "Sprintable agent API key"
+    password: true
+optional_env:
+  - name: SPRINTABLE_API_URL
+    description: "Sprintable backend base URL (default: dev backend)"
+    prompt: "Sprintable API URL (or empty for dev)"
+    password: false
