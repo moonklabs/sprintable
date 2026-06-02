@@ -48,7 +48,8 @@ export async function runSprintableSSE(opts: {
   apiUrl?: string
   apiKey: string
   onMessage: OnMessage
-}): Promise<never> {
+  signal?: AbortSignal
+}): Promise<void> {
   const { apiKey, onMessage } = opts
   const apiUrl = (opts.apiUrl ?? DEFAULT_API_URL).replace(/\/$/, '')
 
@@ -195,16 +196,22 @@ export async function runSprintableSSE(opts: {
 
   // main loop
   while (true) {
+    if (opts.signal?.aborted) return
     const t0 = Date.now()
     try {
       await consume()
     } catch (e) {
+      if (opts.signal?.aborted) return
       process.stderr.write(`[sprintable-sse] error: ${e}\n`)
     }
+    if (opts.signal?.aborted) return
     if (Date.now() - t0 >= 60_000) backoffIdx = 0
     const delay = RECONNECT_BACKOFF[Math.min(backoffIdx, RECONNECT_BACKOFF.length - 1)]
     process.stderr.write(`[sprintable-sse] reconnecting in ${delay}ms\n`)
-    await Bun.sleep(delay)
+    await new Promise<void>((resolve) => {
+      const timer = setTimeout(resolve, delay)
+      opts.signal?.addEventListener('abort', () => { clearTimeout(timer); resolve() }, { once: true })
+    })
     backoffIdx++
   }
 }
