@@ -462,3 +462,39 @@ async def filter_org_member_ids(
         )).scalars().all())
 
     return tm_ids | om_ids
+
+
+async def canonicalize_member_id(
+    member_id: uuid.UUID,
+    session: AsyncSession,
+) -> uuid.UUID:
+    """레거시 식별자를 canonical members.id로 정규화 — AC3-2/AC3-3 read-cut 방향.
+
+    레거시 휴먼 team_member.id는 member_identity_aliases로 canonical(org_member.id) 치환,
+    그 외(이미 canonical org_member.id·에이전트 team_member.id)는 그대로(orphan-safe).
+    COALESCE(alias.member_id, id) 동형.
+    """
+    aliased = (
+        await session.execute(
+            select(MemberIdentityAlias.member_id).where(MemberIdentityAlias.alias_id == member_id)
+        )
+    ).scalar_one_or_none()
+    return aliased or member_id
+
+
+async def canonicalize_member_ids(
+    member_ids: set[uuid.UUID],
+    session: AsyncSession,
+) -> dict[uuid.UUID, uuid.UUID]:
+    """배치 정규화 — {원본 id: canonical id}. alias 없으면 자기 자신(orphan-safe)."""
+    if not member_ids:
+        return {}
+    rows = (
+        await session.execute(
+            select(MemberIdentityAlias.alias_id, MemberIdentityAlias.member_id).where(
+                MemberIdentityAlias.alias_id.in_(member_ids)
+            )
+        )
+    ).all()
+    alias_map = {a: m for a, m in rows}
+    return {mid: alias_map.get(mid, mid) for mid in member_ids}
