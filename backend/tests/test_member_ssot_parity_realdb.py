@@ -203,41 +203,99 @@ async def test_apikey_resolve_parity_legacy_vs_anchor():
         await engine.dispose()
 
 
+NEW_TM = uuid.UUID("b5000000-0000-0000-0000-0000000000b9")
+NEW_APIKEY = uuid.UUID("b7000000-0000-0000-0000-0000000000b9")
+
+
+async def _make_new_agent_tm(session):
+    """members/profile/apikey 없는 신규 agent team_member 삽입(재실행 정리 포함). TeamMember ORM 반환."""
+    from sqlalchemy import select, text
+    from app.models.team import TeamMember
+    await session.execute(text("DELETE FROM agent_api_keys WHERE id=:i"), {"i": str(NEW_APIKEY)})
+    await session.execute(text("DELETE FROM agent_project_profiles WHERE member_id=:i"), {"i": str(NEW_TM)})
+    await session.execute(text("DELETE FROM members WHERE id=:i"), {"i": str(NEW_TM)})
+    await session.execute(text("DELETE FROM team_members WHERE id=:i"), {"i": str(NEW_TM)})
+    await session.execute(text(
+        "INSERT INTO team_members (id,project_id,org_id,user_id,type,name,role,color,can_manage_members,is_active,created_by,agent_role,fakechat_port) "
+        "VALUES (:id,:p,:o,NULL,'agent','NewBot','member','#fff',false,true,:cb,'dev',9199)"
+    ), {"id": str(NEW_TM), "p": str(P1), "o": str(ORG), "cb": str(U_OWNER)})
+    await session.commit()
+    return (await session.execute(select(TeamMember).where(TeamMember.id == NEW_TM))).scalar_one()
+
+
 @pytest.mark.anyio
-async def test_apikey_insert_without_member_row_no_fk_violation():
-    """⚠️ H1 회귀: agent_api_keys.member_id에 members 없는 값(신규 agent 시뮬) INSERT가 FK 위반
-    없이 성공 — dual-write가 신규 agent 생성(auto API key)을 깨지 않음(생명선·머지 안전)."""
+async def test_agent_anchor_writesync_creates_members_and_profile():
+    """⚠️ 생명선 AC3-1b AC1: 신규 agent 생성 write-sync가 members(id=tm.id·type=agent·owner=생성휴먼)
+    + agent_project_profiles(member=tm.id·런타임 미러)를 만든다 → cut-on 무중단·project_id 해소·FK 충족."""
     from sqlalchemy import text
     from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
+    from app.services.agent_anchor_sync import sync_agent_anchor_on_create
 
     engine = create_async_engine(_ASYNC_URL)
     Session = async_sessionmaker(engine, expire_on_commit=False)
     try:
         async with Session() as s:
             await _seed(s)
-        # members에 없는 team_member(AG1은 members 있으니 새 tm 생성) + 그 id로 api_key dual-write
-        new_tm = uuid.UUID("b5000000-0000-0000-0000-0000000000b9")
+            tm = await _make_new_agent_tm(s)
+            await sync_agent_anchor_on_create(s, tm, created_by=U_OWNER)
+            await s.commit()
         async with Session() as s:
-            await s.execute(text("DELETE FROM agent_api_keys WHERE id=:i"), {"i": "b7000000-0000-0000-0000-0000000000b9"})
-            await s.execute(text("DELETE FROM team_members WHERE id=:i"), {"i": str(new_tm)})
-            await s.execute(text(
-                "INSERT INTO team_members (id,project_id,org_id,user_id,type,name,role,color,can_manage_members,is_active,created_by) "
-                "VALUES (:id,:p,:o,NULL,'agent','NewBot','member','#fff',false,true,:cb)"
-            ), {"id": str(new_tm), "p": str(P1), "o": str(ORG), "cb": str(U_OWNER)})
-            # dual-write: member_id=team_member_id (members 행 없음) — FK 없으므로 성공해야
+            m = (await s.execute(text(
+                "SELECT type, owner_member_id, name, is_active FROM members WHERE id=:i"), {"i": str(NEW_TM)})).first()
+            prof = (await s.execute(text(
+                "SELECT project_id, agent_role, fakechat_port FROM agent_project_profiles WHERE member_id=:i"), {"i": str(NEW_TM)})).first()
+        assert m is not None and m.type == "agent" and m.is_active is True, "members(agent) 미생성"
+        assert str(m.owner_member_id) == str(OM_OWNER), f"owner_member_id=생성 휴먼 member 아님: {m.owner_member_id}"
+        assert prof is not None and str(prof.project_id) == str(P1) and prof.agent_role == "dev", "agent_project_profiles 미생성/미러 불일치"
+
+        # 멱등: 재호출해도 중복/에러 없음
+        async with Session() as s:
+            from sqlalchemy import select
+            from app.models.team import TeamMember
+            tmobj = (await s.execute(select(TeamMember).where(TeamMember.id == NEW_TM))).scalar_one()
+            await sync_agent_anchor_on_create(s, tmobj, created_by=U_OWNER)
+            await s.commit()
+            prof_cnt = (await s.execute(text(
+                "SELECT count(*) FROM agent_project_profiles WHERE member_id=:i"), {"i": str(NEW_TM)})).scalar_one()
+            assert prof_cnt == 1, f"멱등 위반: profile {prof_cnt}건"
+    finally:
+        await engine.dispose()
+
+
+@pytest.mark.anyio
+async def test_apikey_insert_after_writesync_succeeds_and_absent_member_violates_fk():
+    """⚠️ 생명선 AC3-1b AC3: 0080 FK 재추가 후 — write-sync로 members 선행 시 신규 agent api_key
+    INSERT 성공(H1을 올바른 방식으로 해소), members 부재 member_id는 FK 위반(트랩#7/8 가드)."""
+    from sqlalchemy import text
+    from sqlalchemy.exc import IntegrityError
+    from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
+    from app.services.agent_anchor_sync import sync_agent_anchor_on_create
+
+    engine = create_async_engine(_ASYNC_URL)
+    Session = async_sessionmaker(engine, expire_on_commit=False)
+    try:
+        async with Session() as s:
+            await _seed(s)
+            tm = await _make_new_agent_tm(s)
+            await sync_agent_anchor_on_create(s, tm, created_by=U_OWNER)  # members 선행
+            await s.commit()
+        # write-sync 후 api_key INSERT(member_id=tm.id) → FK 충족 성공
+        async with Session() as s:
             await s.execute(text(
                 "INSERT INTO agent_api_keys (id,team_member_id,member_id,key_prefix,key_hash,scope) "
                 "VALUES (:id,:tm,:m,'sk_live_b9','hashb9',ARRAY['read','write'])"
-            ), {"id": "b7000000-0000-0000-0000-0000000000b9", "tm": str(new_tm), "m": str(new_tm)})
+            ), {"id": str(NEW_APIKEY), "tm": str(NEW_TM), "m": str(NEW_TM)})
             await s.commit()
-        # 검증: 삽입됨 + member_id가 members에 없음(FK 미적용 확인)
+            cnt = (await s.execute(text("SELECT count(*) FROM agent_api_keys WHERE id=:i"), {"i": str(NEW_APIKEY)})).scalar_one()
+            assert cnt == 1, "write-sync 후 api_key INSERT 실패(H1 회귀)"
+        # members 부재 member_id → FK 위반(0080 재추가 입증)
+        absent = uuid.UUID("b5000000-0000-0000-0000-0000000000ba")
         async with Session() as s:
-            cnt = (await s.execute(text(
-                "SELECT count(*) FROM agent_api_keys WHERE id='b7000000-0000-0000-0000-0000000000b9'"
-            ))).scalar_one()
-            assert cnt == 1
-            orphan = (await s.execute(text(
-                "SELECT count(*) FROM members WHERE id=:i"), {"i": str(new_tm)})).scalar_one()
-            assert orphan == 0  # members 없음에도 INSERT 성공 = FK 없음
+            with pytest.raises(IntegrityError):
+                await s.execute(text(
+                    "INSERT INTO agent_api_keys (id,team_member_id,member_id,key_prefix,key_hash) "
+                    "VALUES (gen_random_uuid(),:tm,:m,'sk_live_ba','hashba')"
+                ), {"tm": str(absent), "m": str(absent)})
+                await s.commit()
     finally:
         await engine.dispose()

@@ -177,6 +177,12 @@ async def create_team_member(
         fakechat_port=fakechat_port,
     )
 
+    # E-MEMBER-SSOT AC3-1b: 신규 agent 앵커 write-sync(members + agent_project_profiles).
+    # ⚠️ api_key 자동생성(아래)보다 선행 — agent_api_keys.member_id→members FK(0080) 충족 + cut-on 무중단.
+    if body.type == "agent":
+        from app.services.agent_anchor_sync import sync_agent_anchor_on_create
+        await sync_agent_anchor_on_create(session, member, created_by)
+
     from app.services.notification_preference_defaults import insert_default_preferences
     await insert_default_preferences(session, member.id, body.type)
 
