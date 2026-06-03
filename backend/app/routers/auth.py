@@ -22,7 +22,7 @@ def _normalize_email(v: str) -> str:
         raise ValueError("Invalid email format")
     return v
 from sqlalchemy.exc import IntegrityError
-from sqlalchemy import or_, select, text, update
+from sqlalchemy import or_, select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.config import settings
@@ -53,7 +53,7 @@ from app.services.project_auth import has_project_access, first_accessible_proje
 from app.dependencies.database import get_db
 from app.models.invitation import Invitation
 from app.models.org_invite import OrgInvite
-from app.models.project import OrgMember, Project
+from app.models.project import OrgMember
 from app.models.team import TeamMember
 from app.models.login_audit_log import LoginAuditLog
 from app.models.user import RefreshToken, User
@@ -344,8 +344,11 @@ async def _build_app_metadata(user: User, session: AsyncSession) -> dict:
             }
 
     if not member:
-        # Path 4: org_members fallback — team_member 없지만 org에는 등록된 사용자
-        # 해당 org의 첫 project에 team_member 자동 생성 후 반환. 이후 로그인은 Path 1/2로 정상 진입.
+        # Path 4: org_members fallback — team_member 없지만 org에는 등록된 사용자.
+        # AC2-2b(3dfcada4): team_member auto-INSERT 제거 — org-member 휴먼 로그인마다 곱연산
+        #   team_member를 재생산하던 드리프트 소스(AC2-2 무효화). org-member 휴먼은 AC2-2의
+        #   has_project_access/grant 경로로 인가되므로 team_member 행 없이 로그인·진입 정상.
+        # 착지 project는 first_accessible_project_id(team_member ∪ grant ∪ owner/admin)로 결정.
         org_member_result = await session.execute(
             select(OrgMember)
             .where(OrgMember.user_id == user.id, OrgMember.deleted_at.is_(None))
@@ -354,36 +357,12 @@ async def _build_app_metadata(user: User, session: AsyncSession) -> dict:
         )
         org_member = org_member_result.scalar_one_or_none()
         if org_member:
-            project_result = await session.execute(
-                select(Project)
-                .where(Project.org_id == org_member.org_id, Project.deleted_at.is_(None))
-                .order_by(Project.created_at.asc())
-                .limit(1)
-            )
-            project = project_result.scalar_one_or_none()
-            if project:
-                member_name = (user.email or str(user.id)).split("@")[0]
-                await session.execute(
-                    text(
-                        "INSERT INTO team_members"
-                        " (id, org_id, project_id, user_id, type, name, role, is_active, color, can_manage_members)"
-                        " VALUES (gen_random_uuid(), :org_id, :project_id, :user_id,"
-                        "         'human', :name, :role, true, '#3385f8', false)"
-                    ),
-                    {
-                        "org_id": str(org_member.org_id),
-                        "project_id": str(project.id),
-                        "user_id": str(user.id),
-                        "name": member_name,
-                        "role": org_member.role,
-                    },
-                )
-                await session.flush()
-                return {
-                    "org_id": str(org_member.org_id),
-                    "project_id": str(project.id),
-                    "role": org_member.role,
-                }
+            project_id = await first_accessible_project_id(session, user.id, org_member.org_id)
+            return {
+                "org_id": str(org_member.org_id),
+                "project_id": str(project_id) if project_id else "",
+                "role": org_member.role,
+            }
         return {}
 
     # login 시 last_project_id 자동 갱신 — 다음 로그인부터 last_project_id 우선 경로 사용
