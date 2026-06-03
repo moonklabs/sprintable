@@ -54,16 +54,17 @@ def upgrade() -> None:
 
     # mentioned_ids(배열): 원소별 alias 치환
     op.execute("ALTER TABLE conversation_messages ADD COLUMN IF NOT EXISTS mentioned_ids_v2 uuid[]")
+    # E1(QA): 빈 배열 '{}'도 v2='{}'로 보존(array_length>0 제거 + COALESCE) — NULL(필드없음) vs
+    # '{}'(빈 멘션) 의미 불일치 방지. unnest('{}')→0행→array_agg=NULL→COALESCE로 '{}'.
     op.execute(
         """
-        UPDATE conversation_messages SET mentioned_ids_v2 = (
-            SELECT array_agg(COALESCE(a.member_id, e) ORDER BY ord)
-            FROM unnest(mentioned_ids) WITH ORDINALITY AS t(e, ord)
-            LEFT JOIN member_identity_aliases a ON a.alias_id = t.e
+        UPDATE conversation_messages SET mentioned_ids_v2 = COALESCE(
+            (SELECT array_agg(COALESCE(a.member_id, t.e) ORDER BY ord)
+             FROM unnest(mentioned_ids) WITH ORDINALITY AS t(e, ord)
+             LEFT JOIN member_identity_aliases a ON a.alias_id = t.e),
+            '{}'::uuid[]
         )
-        WHERE mentioned_ids IS NOT NULL
-          AND array_length(mentioned_ids, 1) > 0
-          AND mentioned_ids_v2 IS NULL
+        WHERE mentioned_ids IS NOT NULL AND mentioned_ids_v2 IS NULL
         """
     )
 
