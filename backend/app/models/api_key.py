@@ -16,8 +16,11 @@ class ApiKey(Base):
         UUID(as_uuid=True), ForeignKey("team_members.id", ondelete="CASCADE"), nullable=False, index=True
     )
     # E-MEMBER-SSOT AC3-1: canonical members.id 미러 (team_member_id와 1:1 dual-write, 0075 ID 보존).
-    # FK는 신규 agent 생성 깨짐(QA H1) 방지로 현재 무FK — AC3-1b(anchor write-sync) 후 재추가. nullable.
-    member_id: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True), nullable=True, index=True)
+    # AC3-1b(0080): anchor write-sync로 신규 agent members 선행 보장 → FK 재추가(QA H1 해소).
+    # ondelete SET NULL(미러 — 실삭제는 team_member_id CASCADE가 처리). nullable.
+    member_id: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("members.id", ondelete="SET NULL"), nullable=True, index=True
+    )
     key_prefix: Mapped[str] = mapped_column(Text, nullable=False)
     key_hash: Mapped[str] = mapped_column(Text, nullable=False)
     scope: Mapped[list | None] = mapped_column(ARRAY(Text), nullable=True)
