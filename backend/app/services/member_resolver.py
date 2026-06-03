@@ -132,12 +132,17 @@ async def _resolve_member_anchor(
         )).scalars().first()
         if m is None:
             raise HTTPException(status_code=400, detail="Team member not found")
-        # placement(역할/프로젝트) — 에이전트 member.id = team_member.id (1:1)
+        # placement(역할/프로젝트) — 0075에서 에이전트 member.id = team_member.id **1:1**(team_member별
+        # 1 member)이라 placement/profile도 1행. 멀티프로젝트 에이전트는 N개의 (member,team_member)로
+        # 분리되며 API키 auth.user_id는 그중 하나를 지정 → 단일 placement 해소(legacy tm.role/project_id와 동일).
+        # ORDER BY created_at: 1:1 위반(미래 데이터) 시에도 결정적 — parity 안정성.
         role = (await session.execute(
-            select(ProjectAccess.role).where(ProjectAccess.member_id == m.id).limit(1)
+            select(ProjectAccess.role).where(ProjectAccess.member_id == m.id)
+            .order_by(ProjectAccess.created_at.asc()).limit(1)
         )).scalar_one_or_none()
         proj = (await session.execute(
-            select(AgentProjectProfile.project_id).where(AgentProjectProfile.member_id == m.id).limit(1)
+            select(AgentProjectProfile.project_id).where(AgentProjectProfile.member_id == m.id)
+            .order_by(AgentProjectProfile.created_at.asc()).limit(1)
         )).scalar_one_or_none()
         return ResolvedMember(
             id=m.id,
