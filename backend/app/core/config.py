@@ -43,6 +43,11 @@ class Settings(BaseSettings):
     # E-EVENTBUS: dev=true, prod=false (기존 웹훅 병행 운영)
     eventbus_enabled: bool = False
 
+    # E-MEMBER-SSOT AC2-3: 신원 해소를 anchor(members+member_identity_aliases) 기반으로 전환하는
+    # shadow 플래그. off(기본)=레거시 resolver(org_members/team_members). on=anchor resolver.
+    # 라이브 cutover는 AC3-1 — 여기선 shadow(parity 검증용), 기본 off라 실 read 경로 무변경.
+    member_ssot_resolver_shadow: bool = False
+
     # Polar Billing SDK
     polar_access_token: str = ""
     polar_sandbox: bool = True  # dev=True(sandbox), prod=False
