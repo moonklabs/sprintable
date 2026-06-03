@@ -115,12 +115,14 @@ async def test_anchor_lookup_direct_member(monkeypatch):
 
     session = AsyncMock()
     # Member.in_(ids) → [m]
-    session.execute = AsyncMock(side_effect=[_result(all_=[m])])
+    # Member.in_ → [m]  /  User email batch(M1) → [(user_id, email)]
+    session.execute = AsyncMock(side_effect=[_result(all_=[m]), _result(rows=[(m.user_id, "h@test.com")])])
 
     out = await mr.lookup_members_by_ids({mid}, session)
     assert out[mid].id == mid
     assert out[mid].type == "human"
     assert out[mid].role == "member"
+    assert out[mid].name == "h@test.com"  # M1: 휴먼 name=email
 
 
 @pytest.mark.anyio
@@ -140,6 +142,7 @@ async def test_anchor_lookup_alias_canonicalizes(monkeypatch):
         _result(all_=[]),                              # Member.in_ → 직접 매칭 없음
         _result(rows=[(legacy_tm_id, canonical_id)]),  # alias rows (.all())
         _result(all_=[canon]),                         # Member.in_(target) → canonical
+        _result(rows=[(canon.user_id, "c@test.com")]), # User email batch(M1, canon=human)
     ])
 
     out = await mr.lookup_members_by_ids({legacy_tm_id}, session)

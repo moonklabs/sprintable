@@ -298,19 +298,33 @@ async def _lookup_members_by_ids_anchor(
             if tgt is not None:
                 resolved_member_for[alias_id] = tgt
 
-    # 에이전트 placement(role/project_id) 배치 조회
+    # 에이전트 placement(role/project_id) 배치 조회 — H1: ORDER BY created_at ASC로 결정성
+    # (단일 resolve와 동일 기준). setdefault + 정렬이라 member별 earliest placement가 선택됨.
     agent_ids = [m.id for m in resolved_member_for.values() if m.type == "agent"]
     role_by_member: dict[uuid.UUID, str] = {}
     proj_by_member: dict[uuid.UUID, uuid.UUID] = {}
     if agent_ids:
         for mid_, role in (await session.execute(
-            select(ProjectAccess.member_id, ProjectAccess.role).where(ProjectAccess.member_id.in_(agent_ids))
+            select(ProjectAccess.member_id, ProjectAccess.role)
+            .where(ProjectAccess.member_id.in_(agent_ids))
+            .order_by(ProjectAccess.created_at.asc())
         )).all():
             role_by_member.setdefault(mid_, role)
         for mid_, pid in (await session.execute(
-            select(AgentProjectProfile.member_id, AgentProjectProfile.project_id).where(AgentProjectProfile.member_id.in_(agent_ids))
+            select(AgentProjectProfile.member_id, AgentProjectProfile.project_id)
+            .where(AgentProjectProfile.member_id.in_(agent_ids))
+            .order_by(AgentProjectProfile.created_at.asc())
         )).all():
             proj_by_member.setdefault(mid_, pid)
+
+    # M1: 휴먼 display name은 users.email로 정합(레거시 OrgMember path + 단일 resolve와 동일).
+    human_user_ids = {m.user_id for m in resolved_member_for.values() if m.type == "human" and m.user_id}
+    email_by_user: dict[uuid.UUID, str] = {}
+    if human_user_ids:
+        for uid_, email in (await session.execute(
+            select(User.id, User.email).where(User.id.in_(human_user_ids))
+        )).all():
+            email_by_user[uid_] = email
 
     for orig_id, m in resolved_member_for.items():
         if m.type == "agent":
@@ -321,8 +335,9 @@ async def _lookup_members_by_ids_anchor(
             )
         else:
             result[orig_id] = ResolvedMember(
-                id=m.id, user_id=m.user_id, name=m.name, type="human",
-                role=m.org_role or "member", org_id=m.org_id, project_id=None,
+                id=m.id, user_id=m.user_id,
+                name=email_by_user.get(m.user_id) if m.user_id else str(m.id),
+                type="human", role=m.org_role or "member", org_id=m.org_id, project_id=None,
             )
 
     # 3. 진짜 orphan(member/alias 모두 없음) — telemetry-only + 크래시 방지 placeholder
