@@ -339,8 +339,13 @@ async def test_get_missing_canonical_single_identity():
             await _seed(s)
             await s.execute(text("DELETE FROM standup_entries WHERE project_id=:p AND date=:d"),
                             {"p": str(P1), "d": _SD_DATE})
+            # ⚠️ 실 grant 플로우 모사: create_project_access는 member_id를 NULL로 둔다(org_member_id만).
+            # branch2가 member_id 키면 OM_MEM 누락(신규 grant-only 휴먼 미표시) → org_member_id 키여야 함.
+            await s.execute(text(
+                "UPDATE project_access SET member_id=NULL WHERE project_id=:p AND org_member_id=:m"),
+                {"p": str(P1), "m": str(OM_MEM)})
             await s.commit()
-        # roster(P1) = owner(OM_OWNER) ∪ grant(OM_MEM) ∪ 레거시 휴먼 tm(TM_OWNER→OM_OWNER) = {OWNER, MEM}
+        # roster(P1) = owner(OM_OWNER) ∪ grant(OM_MEM, member_id=NULL) ∪ 레거시 휴먼 tm(TM_OWNER→OM_OWNER)
         async with Session() as s:
             missing = set(await StandupEntryRepository(s, ORG).get_missing(P1, _SD_DATE))
         assert missing == {OM_OWNER, OM_MEM}, f"roster 불일치: {missing}"

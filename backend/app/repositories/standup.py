@@ -19,11 +19,14 @@ _MISSING_SQL = text(
         FROM org_members om
         WHERE om.org_id = :org AND om.deleted_at IS NULL AND om.role IN ('owner','admin')
         UNION
-        -- 2) project_access grant (휴먼: member_id = org_member.id)
-        SELECT pa.member_id AS cid
+        -- 2) project_access grant (휴먼: canonical = org_member.id). ⚠️ 실 grant 플로우
+        --    (create_project_access)는 org_member_id만 세팅하고 member_id는 NULL로 둔다(0075 백필분만
+        --    member_id 채워짐) → member_id 키는 신규 grant-only 휴먼을 누락. org_member_id로 집계.
+        --    (에이전트 direct placement는 org_member_id NULL이라 자연 제외 — 휴먼 grant만.)
+        SELECT pa.org_member_id AS cid
         FROM project_access pa
-        JOIN org_members om2 ON om2.id = pa.member_id AND om2.deleted_at IS NULL
-        WHERE pa.project_id = :proj AND pa.permission = 'granted' AND pa.member_id IS NOT NULL
+        JOIN org_members om2 ON om2.id = pa.org_member_id AND om2.deleted_at IS NULL
+        WHERE pa.project_id = :proj AND pa.permission = 'granted' AND pa.org_member_id IS NOT NULL
         UNION
         -- 3) 레거시 휴먼 team_member → canonical(alias)
         SELECT a.member_id AS cid
