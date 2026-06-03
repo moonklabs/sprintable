@@ -294,6 +294,7 @@ export default function StandupPage() {
         method: 'PUT',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
+          project_id: projectId,
           date,
           done,
           plan,
