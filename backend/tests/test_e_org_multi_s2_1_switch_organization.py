@@ -224,6 +224,59 @@ def test_switch_org_unconditionally_sets_org_id():
     assert 'app_metadata["org_id"] = str(body.org_id)' in source
 
 
+# ─── AC2-2 회귀: 접근 가능 project 없는 org 전환 → 500 금지 (8a5f260c) ─────────
+
+@pytest.mark.anyio
+async def test_switch_org_no_accessible_project_returns_200_null_project():
+    """first_accessible_project_id=None(접근 project 없음)이어도 undefined team_member
+    참조로 500나지 않고 200 + project_id null 반환 (8a5f260c switch500 회귀)."""
+    client, session, app = await _client()
+    try:
+        user = _mock_user()
+        org_member = _mock_org_member(ORG_B, USER_ID)
+
+        call_count = 0
+
+        def _execute_side_effect(stmt, *args, **kwargs):
+            nonlocal call_count
+            call_count += 1
+            result = MagicMock()
+            if call_count == 1:
+                result.scalar_one_or_none.return_value = user      # _get_user_by_id
+            elif call_count == 2:
+                result.scalar_one_or_none.return_value = org_member  # org 소속 확인
+            else:
+                # 이후 _build_app_metadata 등: project/team_member 미존재
+                result.scalar_one_or_none.return_value = None
+                result.scalars.return_value.all.return_value = []
+            return result
+
+        session.execute = AsyncMock(side_effect=_execute_side_effect)
+        session.commit = AsyncMock()
+        session.add = MagicMock()
+
+        with patch("app.routers.auth.create_tokens") as mock_create_tokens, \
+             patch("app.routers.auth.create_refresh_token") as mock_crt, \
+             patch("app.routers.auth._store_refresh_token") as mock_store, \
+             patch("app.routers.auth.first_accessible_project_id", new_callable=AsyncMock) as mock_fap:
+            mock_fap.return_value = None  # 접근 가능 project 없음
+            mock_create_tokens.return_value = {
+                "access_token": "new_at", "refresh_token": "new_rt",
+                "token_type": "bearer", "expires_in": 900,
+                "refresh_expires_at": "2026-06-20T00:00:00",
+            }
+            mock_crt.return_value = ("new_rt", datetime(2026, 6, 20, tzinfo=timezone.utc))
+            mock_store.return_value = None
+
+            async with client as c:
+                resp = await c.post("/api/v2/auth/switch-org", json={"org_id": str(ORG_B)})
+
+        assert resp.status_code == 200
+        assert resp.json()["data"]["project_id"] is None
+    finally:
+        app.dependency_overrides.clear()
+
+
 # ─── Schema 검증 ─────────────────────────────────────────────────────────────
 
 def test_switch_organization_request_schema():

@@ -230,8 +230,8 @@ async def get_project_scoped_org_id(
     request: Request = None,
 ) -> uuid.UUID:
     """project_id query param 또는 X-Project-Id 헤더가 있을 때, 해당 project의 org_id로
-    cross-org 접근을 허용. TeamMember.is_active 기반 검증. 미멤버 → 403.
-    project_id가 없으면 get_verified_org_id 동작과 동일."""
+    cross-org 접근을 허용. has_project_access(team_member ∪ grant ∪ owner/admin) 기반 검증.
+    미인가 → 403. project_id가 없으면 get_verified_org_id 동작과 동일."""
     base_org_id = await get_verified_org_id(
         auth=auth, x_org_id=x_org_id, x_project_id=None, db=db, request=request
     )
@@ -246,32 +246,13 @@ async def get_project_scoped_org_id(
     if not project_org_id:
         return base_org_id
 
-    # Org owner/admin은 모든 project에 접근 가능 — team_members 체크 우선 bypass.
-    # project 생성 직후 team_members 미생성 상태(OSS fresh install)에서도 접근 허용.
-    from app.models.project import OrgMember
-    uid = uuid.UUID(auth.user_id)
-    org_role_row = await db.execute(
-        select(OrgMember.role).where(
-            OrgMember.org_id == project_org_id,
-            OrgMember.user_id == uid,
-            OrgMember.deleted_at.is_(None),
-        )
-    )
-    if org_role_row.scalar_one_or_none() in ("owner", "admin"):
-        return project_org_id
-
-    # project_id가 지정된 경우 org 동일 여부 무관하게 TeamMember 검증
-    # (동일 org 내 다른 project 미멤버 우회 방지)
-    from app.models.team import TeamMember
-    from sqlalchemy import or_
-    member = await db.execute(
-        select(TeamMember.id).where(
-            or_(TeamMember.user_id == uid, TeamMember.id == uid),
-            TeamMember.project_id == project_id,
-            TeamMember.is_active.is_(True),
-        ).limit(1)
-    )
-    if member.scalar_one_or_none() is None:
+    # E-MEMBER-SSOT AC2-2: "TeamMember 존재 = 인가" 대신 has_project_access SSOT로 전환.
+    # team_member(active) ∪ project_access(granted) ∪ owner/admin org-wide 3-branch이므로
+    #   - owner/admin은 rowless 접근 유지 (OSS fresh install, team_members 미생성 포함)
+    #   - grant-only 휴먼(project_access)도 project 접근 허용 (740e3b7e 에픽403 해소)
+    #   - 동일 org 내 다른 project 미멤버 우회 방지(project 스코프)는 그대로 유지
+    from app.services.project_auth import has_project_access
+    if not await has_project_access(db, uuid.UUID(auth.user_id), project_id, project_org_id):
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
             detail="해당 프로젝트의 멤버가 아닌",

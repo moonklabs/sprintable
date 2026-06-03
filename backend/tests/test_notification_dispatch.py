@@ -150,6 +150,45 @@ async def test_enabled_setting_creates_notification(mock_session, org_id):
     assert added.is_read is False
 
 
+# ─── AC2-2: grant-only 휴먼(org_member)도 Notification 수신 (silent drop 방지) ──
+
+@pytest.mark.anyio
+async def test_grant_only_human_gets_notification(mock_session, org_id):
+    """team_member 없는 grant-only 휴먼(org_member만)도 in-app Notification 생성."""
+    from app.services.notification_dispatch import dispatch_notification
+
+    om_id = uuid.uuid4()
+    user_id = uuid.uuid4()
+
+    settings = _settings_result([])            # 설정 없음 → 기본 enabled
+    wh_result = MagicMock()
+    wh_result.scalars.return_value.all.return_value = []
+    tm_result = _members_result([])            # team_member 없음
+    om_row = MagicMock()
+    om_row.id = om_id
+    om_row.user_id = user_id
+    om_result = MagicMock()
+    om_result.all.return_value = [om_row]      # org_member fallback
+    mock_session.execute.side_effect = [settings, wh_result, tm_result, om_result]
+
+    await dispatch_notification(
+        mock_session,
+        org_id=org_id,
+        event_type="dispatched",
+        target_member_ids=[om_id],
+        title="그랜트 알림",
+        body="내용",
+        reference_type="epic",
+        reference_id=uuid.uuid4(),
+    )
+
+    # org_member.user_id 기반 Notification 생성 (silent drop 아님)
+    mock_session.add.assert_called_once()
+    added = mock_session.add.call_args[0][0]
+    assert added.user_id == user_id
+    assert added.title == "그랜트 알림"
+
+
 # ─── 빈 target → 즉시 반환 ────────────────────────────────────────────────────
 
 @pytest.mark.anyio
