@@ -107,27 +107,34 @@ def upgrade() -> None:
     op.execute("ALTER TABLE project_access ALTER COLUMN org_member_id DROP DEFAULT")
 
     # ── 3. 백필: members (휴먼 먼저 — 에이전트 owner가 휴먼 member 참조) ────────
-    # 휴먼: members.id = org_members.id (Phase0 ID 보존), org_role = org_members.role
+    # 휴먼: members.id = org_members.id (Phase0 ID 보존), org_role = org_members.role.
+    #   ⚠️ 실 DB 데이터 정합: org_members.org_id/user_id는 FK가 없어 orphan 가능.
+    #   - user_id는 u.id(LEFT JOIN 검증값) 사용 → orphan user_id면 NULL (members.user_id FK 위반 방지)
+    #   - org_id는 organizations와 JOIN → orphan org_id 행은 스킵 (members.org_id NOT NULL FK 위반 방지)
     op.execute(
         """
         INSERT INTO members (id, org_id, type, user_id, owner_member_id, name, org_role, is_active, created_at, updated_at)
-        SELECT om.id, om.org_id, 'human', om.user_id, NULL,
+        SELECT om.id, om.org_id, 'human', u.id, NULL,
                COALESCE(u.display_name, u.email, om.user_id::text),
                om.role, true, om.created_at, now()
         FROM org_members om
+        JOIN organizations o ON o.id = om.org_id
         LEFT JOIN users u ON u.id = om.user_id
         WHERE om.deleted_at IS NULL
         ON CONFLICT (id) DO NOTHING
         """
     )
-    # 에이전트: members.id = team_members.id (1:1 ID 보존), owner = created_by 휴먼 member
+    # 에이전트: members.id = team_members.id (1:1 ID 보존), owner = created_by 휴먼 member.
+    #   org_id는 organizations JOIN으로 검증(orphan org 스킵).
     op.execute(
         """
         INSERT INTO members (id, org_id, type, user_id, owner_member_id, name, avatar_url, org_role, is_active, created_at, updated_at)
         SELECT tm.id, tm.org_id, 'agent', NULL, owner.id, tm.name, tm.avatar_url, NULL, tm.is_active, tm.created_at, now()
         FROM team_members tm
+        JOIN organizations o ON o.id = tm.org_id
         LEFT JOIN org_members owner
                ON owner.org_id = tm.org_id AND owner.user_id = tm.created_by AND owner.deleted_at IS NULL
+              AND EXISTS (SELECT 1 FROM members m WHERE m.id = owner.id)
         WHERE tm.type = 'agent'
         ON CONFLICT (id) DO NOTHING
         """
@@ -141,21 +148,31 @@ def upgrade() -> None:
         FROM team_members tm
         JOIN org_members om
           ON om.org_id = tm.org_id AND om.user_id = tm.user_id AND om.deleted_at IS NULL
+        JOIN members m ON m.id = om.id   -- 휴먼 member가 실제 생성됐을 때만(orphan org 스킵분 제외)
         WHERE tm.type = 'human'
         ON CONFLICT (alias_id) DO NOTHING
         """
     )
 
     # ── 5. 백필: project_access ──────────────────────────────────────────────
-    # 휴먼 기존 grant: member_id = org_member_id (휴먼 members.id = org_members.id)
-    op.execute("UPDATE project_access SET member_id = org_member_id WHERE member_id IS NULL AND org_member_id IS NOT NULL")
-    # 에이전트 direct placement: team_members.type='agent' → project_access 행 신설
+    # 휴먼 기존 grant: member_id = org_member_id (휴먼 members.id = org_members.id).
+    #   member가 실제 생성된 org_member만 (orphan org 스킵분은 NOT VALID FK 위반 방지 위해 제외).
+    op.execute(
+        """
+        UPDATE project_access SET member_id = org_member_id
+        WHERE member_id IS NULL AND org_member_id IS NOT NULL
+          AND EXISTS (SELECT 1 FROM members m WHERE m.id = project_access.org_member_id)
+        """
+    )
+    # 에이전트 direct placement: team_members.type='agent' → project_access 행 신설.
+    #   에이전트 member가 생성된 경우만(orphan org 스킵분 제외).
     op.execute(
         """
         INSERT INTO project_access (id, project_id, org_member_id, member_id, permission, role, color, can_manage_members, access_source, created_at)
         SELECT gen_random_uuid(), tm.project_id, NULL, tm.id, 'granted', tm.role, tm.color, tm.can_manage_members, 'direct', tm.created_at
         FROM team_members tm
         WHERE tm.type = 'agent' AND tm.is_active = true
+          AND EXISTS (SELECT 1 FROM members m WHERE m.id = tm.id)
           AND NOT EXISTS (
               SELECT 1 FROM project_access pa
               WHERE pa.project_id = tm.project_id AND pa.member_id = tm.id
@@ -172,6 +189,7 @@ def upgrade() -> None:
                tm.fakechat_port, tm.last_seen_at, tm.active_story_id, tm.agent_status, tm.created_at, now()
         FROM team_members tm
         WHERE tm.type = 'agent'
+          AND EXISTS (SELECT 1 FROM members m WHERE m.id = tm.id)   -- 에이전트 member 생성분만
         ON CONFLICT (project_id, member_id) DO NOTHING
         """
     )
