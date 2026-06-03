@@ -366,3 +366,73 @@ async def test_get_missing_canonical_single_identity():
         assert m3 == set(), f"레거시 id 제출이 canonical로 인식 안 됨(#1167 회귀): {m3}"
     finally:
         await engine.dispose()
+
+
+# ── 0080 hotfix: 가드 VALIDATE의 bad>0(RAISE NOTICE) 분기 syntax 검증(트랩#4 실DB-only) ──────────
+_FK_0080 = "fk_agent_api_keys_member_id_members"
+_GUARD_DO_0080 = f"""
+DO $$
+DECLARE bad int;
+BEGIN
+    SELECT count(*) INTO bad FROM agent_api_keys ak
+    WHERE ak.member_id IS NOT NULL
+      AND NOT EXISTS (SELECT 1 FROM members m WHERE m.id = ak.member_id);
+    IF bad = 0 THEN
+        ALTER TABLE agent_api_keys VALIDATE CONSTRAINT {_FK_0080};
+    ELSE
+        RAISE NOTICE 'agent_api_keys.member_id FK NOT VALID 유지: members 부재 row % 건 — AC2 감사·보정 후 재VALIDATE 필요', bad;
+    END IF;
+END $$;
+"""
+
+
+@pytest.mark.anyio
+async def test_0080_guard_validate_raise_branch_bad_gt0():
+    """⚠️ 트랩#4(실DB-only): 0080 가드 VALIDATE의 bad>0(RAISE NOTICE) 분기가 syntax-valid해야 한다.
+    CI fresh-DB는 bad=0(VALIDATE 분기)라 RAISE 분기 미발현 — members 부재 active key가 실재하는 dev에서만
+    터졌던 `too many parameters for RAISE`(%% vs % 회귀) 가드. 위반행을 FK 추가 전 INSERT(NOT VALID도
+    신규검증) → FK NOT VALID → 가드 DO 실행이 크래시 없이 NOT VALID 유지하는지."""
+    from sqlalchemy import text
+    from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
+
+    engine = create_async_engine(_ASYNC_URL)
+    Session = async_sessionmaker(engine, expire_on_commit=False)
+    bad_key = uuid.UUID("b7000000-0000-0000-0000-0000000000c0")
+    absent_member = uuid.UUID("b9000000-0000-0000-0000-0000000000c0")
+    try:
+        async with Session() as s:
+            await _seed(s)
+            await s.execute(text("DELETE FROM agent_api_keys WHERE id=:i"), {"i": str(bad_key)})
+            for fk in (_FK_0080, "agent_api_keys_member_id_fkey"):
+                await s.execute(text(f"ALTER TABLE agent_api_keys DROP CONSTRAINT IF EXISTS {fk}"))
+            # FK 부재 상태에서 위반행 INSERT(member_id가 members에 없음) — bad>0 모사
+            await s.execute(text(
+                "INSERT INTO agent_api_keys (id,team_member_id,member_id,key_prefix,key_hash,scope) "
+                "VALUES (:id,:tm,:m,'sk_live_c0','hashc0',ARRAY['read','write'])"
+            ), {"id": str(bad_key), "tm": str(AG1), "m": str(absent_member)})
+            await s.execute(text(
+                f"ALTER TABLE agent_api_keys ADD CONSTRAINT {_FK_0080} "
+                f"FOREIGN KEY (member_id) REFERENCES members(id) ON DELETE SET NULL NOT VALID"
+            ))
+            await s.commit()
+        # 가드 DO 실행 — bad>0 → RAISE NOTICE 분기. SyntaxError 없이 통과해야(%% 회귀 가드)
+        async with Session() as s:
+            await s.execute(text(_GUARD_DO_0080))
+            await s.commit()
+        # FK는 NOT VALID 유지(가드가 VALIDATE 안 함)
+        async with Session() as s:
+            convalidated = (await s.execute(text(
+                "SELECT convalidated FROM pg_constraint WHERE conname=:n"), {"n": _FK_0080})).scalar_one()
+        assert convalidated is False, "bad>0인데 FK가 VALIDATE됨(가드 오작동)"
+    finally:
+        async with Session() as s:
+            await s.execute(text("DELETE FROM agent_api_keys WHERE id=:i"), {"i": str(bad_key)})
+            await s.execute(text(f"ALTER TABLE agent_api_keys DROP CONSTRAINT IF EXISTS {_FK_0080}"))
+            # 모델 baseline FK 복원(NOT VALID — 검증 실패 없이 재실행/타테스트 오염 방지)
+            await s.execute(text("ALTER TABLE agent_api_keys DROP CONSTRAINT IF EXISTS agent_api_keys_member_id_fkey"))
+            await s.execute(text(
+                "ALTER TABLE agent_api_keys ADD CONSTRAINT agent_api_keys_member_id_fkey "
+                "FOREIGN KEY (member_id) REFERENCES members(id) ON DELETE SET NULL NOT VALID"
+            ))
+            await s.commit()
+        await engine.dispose()
