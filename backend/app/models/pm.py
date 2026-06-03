@@ -49,8 +49,10 @@ class Epic(Base, OrgScopedMixin, TimestampMixin):
     project_id: Mapped[uuid.UUID] = mapped_column(
         UUID(as_uuid=True), ForeignKey("projects.id", ondelete="CASCADE"), nullable=False, index=True
     )
+    # E-MEMBER-SSOT AC3-2: team_members FK 완화 — grant-only 휴먼(org_member.id) 할당 500 해소
+    # (migration 0078). canonical 식별자는 assignee_id_v2. 컬럼·nullable 유지.
     assignee_id: Mapped[uuid.UUID | None] = mapped_column(
-        UUID(as_uuid=True), ForeignKey("team_members.id", ondelete="SET NULL"), nullable=True
+        UUID(as_uuid=True), nullable=True
     )
     title: Mapped[str] = mapped_column(Text, nullable=False)
     status: Mapped[str] = mapped_column(String(20), nullable=False, default="active")
@@ -85,8 +87,10 @@ class Story(Base, OrgScopedMixin, TimestampMixin, SoftDeleteMixin):
     sprint_id: Mapped[uuid.UUID | None] = mapped_column(
         UUID(as_uuid=True), ForeignKey("sprints.id", ondelete="SET NULL"), nullable=True
     )
+    # E-MEMBER-SSOT AC3-2: team_members FK 완화 — grant-only 휴먼(org_member.id) 할당 500 해소
+    # (migration 0078). canonical 식별자는 assignee_id_v2. 컬럼·nullable 유지.
     assignee_id: Mapped[uuid.UUID | None] = mapped_column(
-        UUID(as_uuid=True), ForeignKey("team_members.id", ondelete="SET NULL"), nullable=True
+        UUID(as_uuid=True), nullable=True
     )
     meeting_id: Mapped[uuid.UUID | None] = mapped_column(
         UUID(as_uuid=True), ForeignKey("meetings.id", ondelete="SET NULL"), nullable=True
@@ -120,8 +124,10 @@ class Task(Base, OrgScopedMixin, TimestampMixin, SoftDeleteMixin):
     story_id: Mapped[uuid.UUID] = mapped_column(
         UUID(as_uuid=True), ForeignKey("stories.id", ondelete="CASCADE"), nullable=False, index=True
     )
+    # E-MEMBER-SSOT AC3-2: team_members FK 완화 — grant-only 휴먼(org_member.id) 할당 500 해소
+    # (migration 0078). canonical 식별자는 assignee_id_v2. 컬럼·nullable 유지.
     assignee_id: Mapped[uuid.UUID | None] = mapped_column(
-        UUID(as_uuid=True), ForeignKey("team_members.id", ondelete="SET NULL"), nullable=True
+        UUID(as_uuid=True), nullable=True
     )
     title: Mapped[str] = mapped_column(Text, nullable=False)
     status: Mapped[str] = mapped_column(String(20), nullable=False, default="todo")
