@@ -29,6 +29,7 @@ class ResolvedMember:
     role: str
     org_id: uuid.UUID
     project_id: uuid.UUID | None = field(default=None)
+    avatar_url: str | None = field(default=None)
 
 
 async def resolve_member(
@@ -149,3 +150,81 @@ async def lookup_members_by_ids(
             )
 
     return result
+
+
+async def resolve_member_identity(
+    member_id: uuid.UUID,
+    org_id: uuid.UUID,
+    session: AsyncSession,
+) -> ResolvedMember | None:
+    """단일 member_id(team_member.id | org_member.id)를 org 범위에서 신원 해소.
+
+    TeamMember(에이전트 + 레거시 휴먼) 우선, 없으면 OrgMember(grant-only 휴먼) 조회.
+    org 미소속이면 None — 호출부가 404/403 처리. lookup_members_by_ids와 달리
+    orphan fallback이 없어 인가/존재 검증에 안전하게 쓸 수 있는.
+    """
+    tm = (await session.execute(
+        select(TeamMember).where(
+            TeamMember.id == member_id,
+            TeamMember.org_id == org_id,
+        )
+    )).scalars().first()
+    if tm is not None:
+        return ResolvedMember(
+            id=tm.id, user_id=tm.user_id, name=tm.name, type=tm.type,
+            role=tm.role, org_id=tm.org_id, project_id=tm.project_id,
+            avatar_url=tm.avatar_url,
+        )
+
+    om = (await session.execute(
+        select(OrgMember).where(
+            OrgMember.id == member_id,
+            OrgMember.org_id == org_id,
+            OrgMember.deleted_at.is_(None),
+        )
+    )).scalar_one_or_none()
+    if om is None:
+        return None
+
+    user = (await session.execute(
+        select(User).where(User.id == om.user_id)
+    )).scalar_one_or_none()
+    return ResolvedMember(
+        id=om.id, user_id=om.user_id,
+        name=user.email if user else str(om.id),
+        type="human", role=om.role, org_id=om.org_id,
+        project_id=None, avatar_url=None,
+    )
+
+
+async def filter_org_member_ids(
+    member_ids: set[uuid.UUID],
+    org_id: uuid.UUID,
+    session: AsyncSession,
+) -> set[uuid.UUID]:
+    """member_ids 중 org 소속(team_member 또는 org_member)인 것만 반환.
+
+    cross-org 차단용 — grant-only 휴먼(org_member)도 포함하므로 멘션/포크에서 누락되지 않는.
+    """
+    if not member_ids:
+        return set()
+
+    tm_ids = set((await session.execute(
+        select(TeamMember.id).where(
+            TeamMember.id.in_(member_ids),
+            TeamMember.org_id == org_id,
+        )
+    )).scalars().all())
+
+    remaining = member_ids - tm_ids
+    om_ids: set[uuid.UUID] = set()
+    if remaining:
+        om_ids = set((await session.execute(
+            select(OrgMember.id).where(
+                OrgMember.id.in_(remaining),
+                OrgMember.org_id == org_id,
+                OrgMember.deleted_at.is_(None),
+            )
+        )).scalars().all())
+
+    return tm_ids | om_ids

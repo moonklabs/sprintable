@@ -415,8 +415,11 @@ async def test_stream_rejects_cross_org_member(mock_session, org_id):
     """다른 org의 member_id로 stream 연결 시 404 반환."""
     foreign_member_id = uuid.uuid4()
 
+    # E-MEMBER-SSOT Phase 0: resolve_member_identity는 TeamMember(.scalars().first())
+    # → OrgMember(.scalar_one_or_none()) 순으로 조회 — 둘 다 미소속이어야 404
     membership_result = MagicMock()
-    membership_result.scalar_one_or_none.return_value = None  # org 소속 아님
+    membership_result.scalars.return_value.first.return_value = None  # TeamMember 미소속
+    membership_result.scalar_one_or_none.return_value = None  # OrgMember 미소속
     mock_session.execute.return_value = membership_result
 
     from app.dependencies.auth import get_current_user, get_verified_org_id, get_current_user_streaming, get_verified_org_id_streaming
