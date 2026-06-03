@@ -680,12 +680,24 @@ async def send_message(
     if participant is None:
         raise HTTPException(status_code=403, detail="Not a participant")
 
+    # cross-org 차단: mentioned_ids를 현재 org 소속 member로 일괄 필터링 (QA B1).
+    # E-MEMBER-SSOT Phase 0: 저장·DM포크·group 멘션 발송 모든 경로에 org 필터를 한 번 적용.
+    #   grant-only 휴먼(org_member) 멘션은 포함하고, cross-org UUID는 저장/발송 전에 제거.
+    #   group conversation은 fork 분기가 없어 별도 필터가 누락돼 있던 것을 여기서 함께 막는.
+    valid_mentioned_ids: list[uuid.UUID] = []
+    if body.mentioned_ids:
+        _org_member_ids = await filter_org_member_ids(set(body.mentioned_ids), org_id, db)
+        # 원본 순서 보존 + 중복 제거
+        _seen: set[uuid.UUID] = set()
+        for mid in body.mentioned_ids:
+            if mid in _org_member_ids and mid not in _seen:
+                _seen.add(mid)
+                valid_mentioned_ids.append(mid)
+
     # CB-S2: DM + 비참여자 멘션 → 자동 그룹 conversation fork (AC1, AC2)
     fork_info: dict | None = None
-    if conv.type == "dm" and body.mentioned_ids:
-        # cross-org 차단: mentioned_ids를 현재 org 소속 member로 필터링
-        # E-MEMBER-SSOT Phase 0: grant-only 휴먼(org_member) 멘션도 포크 대상에 포함
-        valid_member_ids = await filter_org_member_ids(set(body.mentioned_ids), org_id, db)
+    if conv.type == "dm" and valid_mentioned_ids:
+        valid_member_ids = set(valid_mentioned_ids)
 
         current_participant_ids = set((await db.execute(
             select(ConversationParticipant.member_id)
@@ -732,7 +744,7 @@ async def send_message(
         conversation_id=conversation_id,
         sender_id=sender.id,
         content=body.content,
-        mentioned_ids=body.mentioned_ids,
+        mentioned_ids=valid_mentioned_ids,
         thread_id=body.thread_id,
     )
     db.add(msg)
