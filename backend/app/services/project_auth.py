@@ -67,9 +67,12 @@ async def first_accessible_project_id(
     user_id: uuid.UUID,
     org_id: uuid.UUID,
 ) -> uuid.UUID | None:
-    """switch_org 후 착지할 첫 접근 가능 project.
+    """switch_org/로그인 후 착지할 첫 **접근 가능** project.
 
-    우선순위: team_member 등록 project > grant project > org 첫 project.
+    우선순위: team_member 등록 project > grant project > (owner/admin인 경우) org 첫 project.
+    ⚠️ has_project_access와 정합 필수 — grant-less 일반 member에게 접근 불가 project를 반환하면
+    프론트는 project 있다 여기나 project-scoped API 전부 403(B4). 따라서 3번째 fallback(org 첫
+    project)은 **owner/admin org-wide 접근권 보유자에 한정**. 그 외엔 접근 가능 project 없으면 None.
     """
     # 1. team_member 등록 project (기존 우선순위 유지)
     tm_row = await session.execute(
@@ -113,17 +116,25 @@ async def first_accessible_project_id(
     if (val := grant_row.scalar_one_or_none()) is not None:
         return uuid.UUID(str(val))
 
-    # 3. org 첫 project (기존 fallback)
+    # 3. org 첫 project — owner/admin만 (org-wide 접근권 보유, has_project_access owner/admin 분기와 일치).
+    #    일반 member는 접근 가능 project(team_member/grant) 없으면 None → 착지 project 없음(접근 불가 project 반환 금지, B4).
     first_row = await session.execute(
         text(
             """
-            SELECT id FROM projects
-            WHERE org_id = :org_id AND deleted_at IS NULL
-            ORDER BY created_at ASC
+            SELECT p.id FROM projects p
+            WHERE p.org_id = :org_id AND p.deleted_at IS NULL
+              AND EXISTS (
+                  SELECT 1 FROM org_members om
+                  WHERE om.user_id = :user_id
+                    AND om.org_id = :org_id
+                    AND om.deleted_at IS NULL
+                    AND om.role IN ('owner', 'admin')
+              )
+            ORDER BY p.created_at ASC
             LIMIT 1
             """
         ),
-        {"org_id": org_id},
+        {"user_id": user_id, "org_id": org_id},
     )
     if (val := first_row.scalar_one_or_none()) is not None:
         return uuid.UUID(str(val))

@@ -203,16 +203,17 @@ async def test_path4_org_member_only_no_insert_uses_first_accessible(monkeypatch
 
 
 @pytest.mark.anyio
-async def test_path4_no_accessible_project_returns_empty_project(monkeypatch):
-    """org-member 있으나 접근 가능 project 없으면 project_id 빈 문자열 (500/INSERT 없음)."""
-    from app.routers import auth as auth_mod
+async def test_path4_grant_less_member_no_accessible_project_empty():
+    """B4 회귀: org에 project 있어도 grant-less 일반 member(team_member·grant·owner/admin 전무)는
+    접근 가능 project 없음 → project_id="". first_accessible를 patch하지 않고 실 동작(3쿼리 전부 None)
+    으로 검증 — 접근 불가 project를 착지로 반환하던 회귀 차단."""
     from app.routers.auth import _build_app_metadata
 
     user = _make_user(last_project_id=None)
     org_id = uuid.uuid4()
     org_member = MagicMock()
     org_member.org_id = org_id
-    org_member.role = "admin"
+    org_member.role = "member"  # 일반 member — owner/admin 아님
 
     none_res = MagicMock()
     none_res.scalar_one_or_none.return_value = None
@@ -220,8 +221,42 @@ async def test_path4_no_accessible_project_returns_empty_project(monkeypatch):
     om_res.scalar_one_or_none.return_value = org_member
 
     session = AsyncMock()
-    session.execute.side_effect = [none_res, none_res, none_res, om_res]
-    monkeypatch.setattr(auth_mod, "first_accessible_project_id", AsyncMock(return_value=None))
+    # Path4: fallback_tm(None)·invitation(None)·orginvite(None)·org_member(found)
+    # + first_accessible: tm(None)·grant(None)·owner/admin-org-project(None — member라 EXISTS 실패)
+    session.execute.side_effect = [none_res, none_res, none_res, om_res, none_res, none_res, none_res]
 
     result = await _build_app_metadata(user, session)
-    assert result == {"org_id": str(org_id), "project_id": "", "role": "admin"}
+    assert result == {"org_id": str(org_id), "project_id": "", "role": "member"}
+
+
+# ─── B4: first_accessible_project_id 3번째 fallback owner/admin 전용 ───────────
+
+@pytest.mark.anyio
+async def test_first_accessible_grant_less_member_returns_none():
+    """grant-less 일반 member: team_member·grant 없고 owner/admin 아니면 None (접근 불가 project 반환 금지)."""
+    from app.services.project_auth import first_accessible_project_id
+
+    none_res = MagicMock()
+    none_res.scalar_one_or_none.return_value = None
+    session = AsyncMock()
+    session.execute.side_effect = [none_res, none_res, none_res]  # tm·grant·owner/admin-project 전부 None
+
+    result = await first_accessible_project_id(session, uuid.uuid4(), uuid.uuid4())
+    assert result is None
+
+
+@pytest.mark.anyio
+async def test_first_accessible_owner_admin_returns_org_first_project():
+    """owner/admin: team_member·grant 없어도 org 첫 project 반환(org-wide 접근권)."""
+    from app.services.project_auth import first_accessible_project_id
+
+    proj = uuid.uuid4()
+    none_res = MagicMock()
+    none_res.scalar_one_or_none.return_value = None
+    proj_res = MagicMock()
+    proj_res.scalar_one_or_none.return_value = proj  # owner/admin EXISTS 통과 → org 첫 project
+    session = AsyncMock()
+    session.execute.side_effect = [none_res, none_res, proj_res]
+
+    result = await first_accessible_project_id(session, uuid.uuid4(), uuid.uuid4())
+    assert result == proj
