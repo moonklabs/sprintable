@@ -25,21 +25,12 @@ def upgrade() -> None:
     # 백필: member_id = team_member_id (1:1 ID 보존)
     op.execute(f"UPDATE {_TABLE} SET member_id = team_member_id WHERE member_id IS NULL")
     op.execute(f"CREATE INDEX IF NOT EXISTS ix_agent_api_keys_member_id ON {_TABLE} (member_id)")
-    # NOT VALID FK — 기존 행 검증 보류(members 백필이 agent team_member.id 보존하므로 정합)
-    op.execute(
-        """
-        DO $$ BEGIN
-            IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conname = 'fk_agent_api_keys_member') THEN
-                ALTER TABLE agent_api_keys
-                    ADD CONSTRAINT fk_agent_api_keys_member
-                    FOREIGN KEY (member_id) REFERENCES members(id) ON DELETE CASCADE NOT VALID;
-            END IF;
-        END $$;
-        """
-    )
+    # ⚠️ FK는 의도적으로 생략(QA H1): NOT VALID FK도 신규 INSERT는 검증하므로, 신규 agent 생성 시
+    # auto API key dual-write(member_id=team_member_id)가 아직 members 행이 없어 FK 위반→agent 생성
+    # 500(생명선). dual-write는 유지(forward-compat, 기존 agent는 0075 members 보존)하되 FK는
+    # 신규 agent의 members/agent_project_profiles 동기화(AC3-x anchor write-sync) 완료 후 cutover에서 추가.
 
 
 def downgrade() -> None:
-    op.execute("ALTER TABLE agent_api_keys DROP CONSTRAINT IF EXISTS fk_agent_api_keys_member")
-    op.execute(f"DROP INDEX IF EXISTS ix_agent_api_keys_member_id")
+    op.execute("DROP INDEX IF EXISTS ix_agent_api_keys_member_id")
     op.execute(f"ALTER TABLE {_TABLE} DROP COLUMN IF EXISTS member_id")
