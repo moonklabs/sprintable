@@ -992,7 +992,8 @@
     "selfEditTitle": "내 스탠드업 편집",
     "expandSprintStories": "스프린트 스토리 보기",
     "collapseSprintStories": "접기",
-    "feedbackDialogTitle": "{name} 피드백"
+    "feedbackDialogTitle": "{name} 피드백",
+    "history": "📋 작성 이력"
   },
   "retro": {
     "title": "스프린트 회고",
