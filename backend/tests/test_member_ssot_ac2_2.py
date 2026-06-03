@@ -21,6 +21,18 @@ def anyio_backend():
     return "asyncio"
 
 
+# ── B2: notification_preferences.member_id team_members FK 제거 ───────────────
+
+def test_notification_preferences_member_id_has_no_team_members_fk():
+    """B2 회귀: member_id의 team_members FK가 제거돼 grant-only 휴먼(org_member.id)
+    upsert 시 FK violation 500이 나지 않음 (migration 0073)."""
+    from app.models.notification_preference import NotificationPreference
+
+    member_col = NotificationPreference.__table__.c.member_id
+    referred_tables = {fk.column.table.name for fk in member_col.foreign_keys}
+    assert "team_members" not in referred_tables
+
+
 # ── get_project_scoped_org_id: has_project_access 위임 (740e3b7e) ─────────────
 
 @pytest.mark.anyio

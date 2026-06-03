@@ -87,7 +87,29 @@ async def dispatch_notification(
                 TeamMember.org_id == org_id,
             )
         )
-        members = members_result.all()
+        members = list(members_result.all())
+
+        # E-MEMBER-SSOT AC2-2: grant-only 휴먼(team_member 없음)은 org_member로 해소해
+        # in-app Notification 누락(silent drop) 방지. org_member는 project 스코프가 없으므로
+        # human Notification만 생성(Event는 project_id 필요 → skip). Notification은 user_id
+        # 기반이고 FK가 없어 org_member.id 사용에 제약 없음.
+        matched_ids = {m.id for m in members}
+        missing_ids = [mid for mid in enabled_member_ids if mid not in matched_ids]
+        if missing_ids:
+            from types import SimpleNamespace
+
+            from app.models.project import OrgMember
+            om_result = await db.execute(
+                select(OrgMember.id, OrgMember.user_id).where(
+                    OrgMember.id.in_(missing_ids),
+                    OrgMember.org_id == org_id,
+                    OrgMember.deleted_at.is_(None),
+                )
+            )
+            for om in om_result.all():
+                members.append(
+                    SimpleNamespace(id=om.id, user_id=om.user_id, type="human", project_id=None)
+                )
 
         inserted = False
         for member_row in members:
