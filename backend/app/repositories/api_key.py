@@ -48,6 +48,7 @@ class ApiKeyRepository:
             expires_at = datetime.now(timezone.utc) + timedelta(days=90)
         key = ApiKey(
             team_member_id=team_member_id,
+            member_id=team_member_id,  # AC3-1 dual-write: agent member.id = team_member.id (1:1)
             key_prefix=prefix,
             key_hash=key_hash,
             scope=scope,

@@ -40,6 +40,8 @@ TM_OWNER = uuid.UUID("b5000000-0000-0000-0000-000000000001")  # 레거시 휴먼
 AG1 = uuid.UUID("b5000000-0000-0000-0000-0000000000a1")       # 멀티프로젝트 agent — proj1
 AG2 = uuid.UUID("b5000000-0000-0000-0000-0000000000a2")       # 멀티프로젝트 agent — proj2
 ORPHAN = uuid.UUID("bf000000-0000-0000-0000-000000000000")
+APIKEY_ID = uuid.UUID("b7000000-0000-0000-0000-000000000001")
+APIKEY_RAW = "sk_live_" + "0" * 64
 
 
 def _auth(uid, api_key=False):
@@ -97,6 +99,14 @@ async def _seed(session):
     ]
     for s in stmts:
         await session.execute(text(s))
+    # AC3-1: agent API key (team_member_id=member_id=AG1, 1:1) — dual-write 상태 모사
+    from app.core.security import hash_token
+    await session.execute(text(
+        "DELETE FROM agent_api_keys WHERE id=:id"), {"id": str(APIKEY_ID)})
+    await session.execute(text(
+        "INSERT INTO agent_api_keys (id,team_member_id,member_id,key_prefix,key_hash,scope) "
+        "VALUES (:id,:tm,:m,:pfx,:h,ARRAY['read','write'])"
+    ), {"id": str(APIKEY_ID), "tm": str(AG1), "m": str(AG1), "pfx": "sk_live_0", "h": hash_token(APIKEY_RAW)})
     await session.commit()
 
 
@@ -159,4 +169,35 @@ async def test_lookup_members_parity_identity_and_canonicalization():
         assert anchor[TM_OWNER].id == OM_OWNER
     finally:
         mr.settings.member_ssot_resolver_shadow = False
+        await engine.dispose()
+
+
+@pytest.mark.anyio
+async def test_apikey_resolve_parity_legacy_vs_anchor():
+    """⚠️ 생명선: _resolve_api_key가 flag off(team_member) vs on(member)에서 **동일 AuthContext**
+    (user_id·org_id·project_id·scope·api_key_id) — API key 인증 신원 무중단 입증."""
+    from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
+    from app.core import config as _cfg
+    from app.dependencies.auth import _resolve_api_key
+    from app.services import member_resolver as mr
+
+    engine = create_async_engine(_ASYNC_URL)
+    Session = async_sessionmaker(engine, expire_on_commit=False)
+    try:
+        async with Session() as s:
+            await _seed(s)
+
+        _cfg.settings.member_ssot_apikey_cut = False
+        async with Session() as s:
+            legacy = await _resolve_api_key(APIKEY_RAW, s)
+        _cfg.settings.member_ssot_apikey_cut = True
+        async with Session() as s:
+            anchor = await _resolve_api_key(APIKEY_RAW, s)
+
+        assert legacy.user_id == anchor.user_id, f"user_id 불일치(무중단 위반): {legacy.user_id} vs {anchor.user_id}"
+        assert legacy.org_id == anchor.org_id
+        assert legacy.claims["app_metadata"] == anchor.claims["app_metadata"], \
+            f"app_metadata 불일치: {legacy.claims['app_metadata']} vs {anchor.claims['app_metadata']}"
+    finally:
+        _cfg.settings.member_ssot_apikey_cut = False
         await engine.dispose()
