@@ -990,7 +990,8 @@
     "selfEditTitle": "Edit my standup",
     "expandSprintStories": "Show sprint stories",
     "collapseSprintStories": "Collapse",
-    "feedbackDialogTitle": "Feedback on {name}"
+    "feedbackDialogTitle": "Feedback on {name}",
+    "history": "📋 Standup History"
   },
   "retro": {
     "title": "Sprint Retro",
