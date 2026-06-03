@@ -49,7 +49,7 @@ def upgrade() -> None:
             IF bad = 0 THEN
                 ALTER TABLE agent_api_keys VALIDATE CONSTRAINT {_FK};
             ELSE
-                RAISE NOTICE 'agent_api_keys.member_id FK NOT VALID 유지: members 부재 row %% 건 — AC2 감사·보정 후 재VALIDATE 필요', bad;
+                RAISE NOTICE 'agent_api_keys.member_id FK NOT VALID 유지: members 부재 row % 건 — AC2 감사·보정 후 재VALIDATE 필요', bad;
             END IF;
         END $$;
         """
