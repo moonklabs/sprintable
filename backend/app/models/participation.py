@@ -30,8 +30,9 @@ class Participation(Base, OrgScopedMixin):
     story_id: Mapped[uuid.UUID] = mapped_column(
         UUID(as_uuid=True), ForeignKey("stories.id", ondelete="CASCADE"), nullable=False, index=True
     )
+    # E-MEMBER-SSOT AC3-2: team_members FK 완화(grant-only write 500 해소, 0079). canonical=member_id_v2.
     member_id: Mapped[uuid.UUID] = mapped_column(
-        UUID(as_uuid=True), ForeignKey("team_members.id", ondelete="CASCADE"), nullable=False, index=True
+        UUID(as_uuid=True), nullable=False, index=True
     )
     role_id: Mapped[uuid.UUID] = mapped_column(
         UUID(as_uuid=True), ForeignKey("participation_role.id", ondelete="CASCADE"), nullable=False
