@@ -20,6 +20,14 @@ def anyio_backend():
     return "asyncio"
 
 
+@pytest.fixture(autouse=True)
+def _pin_legacy_resolver(monkeypatch):
+    """이 파일은 레거시 resolver(org_members/team_members) 경로를 검증 — AC2-3 shadow
+    플래그가 전역 on이어도 레거시 경로로 고정(anchor 경로는 test_member_ssot_resolver_shadow.py)."""
+    import app.services.member_resolver as _mr
+    monkeypatch.setattr(_mr.settings, "member_ssot_resolver_shadow", False)
+
+
 def _make_auth(user_id: uuid.UUID = USER_ID, is_api_key: bool = False) -> MagicMock:
     ctx = MagicMock()
     ctx.user_id = str(user_id)

@@ -55,6 +55,13 @@ jobs:
             "SELECT count(*) FROM information_schema.tables WHERE table_schema='public' AND table_type='BASE TABLE';" \
             | grep -E "^\s+[0-9]+"
 
+      - name: member-ssot resolver parity (real-DB legacy vs anchor 0-diff)
+        working-directory: backend
+        env:
+          ALEMBIC_DATABASE_URL: postgresql+psycopg2://sprintable:sprintable@localhost:5432/sprintable_test
+          JWT_SECRET: ci-test-secret-at-least-32-chars-long
+        run: uv run pytest tests/test_member_ssot_parity_realdb.py -q
+
   backend-test:
     name: Backend pytest
     runs-on: ubuntu-latest
