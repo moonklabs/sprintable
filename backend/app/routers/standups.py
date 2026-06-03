@@ -16,7 +16,7 @@ from app.schemas.standup import (
     StandupSelfUpdate,
     StandupUpsert,
 )
-from app.services.member_resolver import resolve_auth_member
+from app.services.member_resolver import canonicalize_member_id, resolve_member
 
 router = APIRouter(prefix="/api/v2/standups", tags=["standups"])
 
@@ -40,7 +40,9 @@ async def list_standups(
     if project_id:
         filters["project_id"] = project_id
     if author_id:
-        filters["author_id"] = author_id
+        # AC3-3(T3, #1167 회귀 방지): 조회 필터도 canonical 정규화 — 카드가 레거시 team_member.id로
+        # 조회해도 canonical 저장분과 매칭(raw 필터면 saved-but-not-displayed 재발).
+        filters["author_id"] = await canonicalize_member_id(author_id, repo.session)
     if sprint_id:
         filters["sprint_id"] = sprint_id
     if date_filter:
@@ -56,10 +58,13 @@ async def upsert_standup(
     _auth: AuthContext = Depends(get_current_user),
     org_id: uuid.UUID = Depends(get_verified_org_id),
 ) -> StandupEntryResponse:
+    # AC3-3: 작성자 신원을 canonical members.id로 정규화(레거시 휴먼 team_member.id → alias 치환).
+    # write↔read(카드/missing) 동일 canonical 정합 — #1167 회귀(API 200≠카드표시) 방지.
+    author_id = await canonicalize_member_id(body.author_id, session)
     repo = StandupEntryRepository(session, org_id)
     entry = await repo.upsert(
         project_id=body.project_id,
-        author_id=body.author_id,
+        author_id=author_id,
         date=body.date,
         sprint_id=body.sprint_id,
         done=body.done,
@@ -77,17 +82,17 @@ async def update_standup(
     auth: AuthContext = Depends(get_current_user),
     org_id: uuid.UUID = Depends(get_verified_org_id),
 ) -> StandupEntryResponse:
-    """PUT /api/v2/standups — 본인 스탠드업 self-save (SID:6a1e8b1d).
+    """PUT /api/v2/standups — 본인 스탠드업 self-save (SID:6a1e8b1d → AC3-3 canonical 이행).
 
-    author_id는 인증 유저(resolve_auth_member)에서 server-side 도출 — 클라 바디 author_id를
+    author_id는 인증 유저(resolve_member)에서 server-side 도출 — 클라 바디 author_id를
     받지 않아 타인 스탠드업 위조를 차단(본인만 수정). project_id는 바디 수용.
 
-    author_id는 team_member 우선(있으면 team_member.id) → 없으면 org_member.id(grant-only).
-    스탠드업 카드(`/api/team-members` 기반)가 team_member.id로 매칭하므로, team_member가 있는
-    휴먼은 team_member.id로 저장해야 저장분이 카드에 표시된다(org_member.id-always는 카드와
-    어긋나 "미작성"으로 보이던 라이브 2차 버그 해소). grant-only는 org_member.id(카드 표시는 AC3-3).
+    AC3-3: author_id = **canonical members.id**(휴먼=org_member.id, 에이전트=team_member.id).
+    #1167은 카드(`/api/team-members`, team_member.id 매칭)와 정렬하려 team_member.id로 저장하던
+    transitional 정렬이었으나, AC3-3에서 write(author/feedback)·카드 display·missing-calc를 **모두
+    canonical로 함께** 옮겨 멀티프로젝트 휴먼 단일 신원(48e653e9 해소) + saved-but-not-displayed 회귀 0.
     """
-    member = await resolve_auth_member(auth, org_id, session, project_id=body.project_id)
+    member = await resolve_member(auth, org_id, session, project_id=body.project_id)
     repo = StandupEntryRepository(session, org_id)
     entry = await repo.upsert(
         project_id=body.project_id,
@@ -170,12 +175,14 @@ async def add_feedback(
     if entry is None:
         raise HTTPException(status_code=404, detail="Standup entry not found")
 
+    # AC3-3 (트랩#9 co-write): feedback 작성자도 author_id와 동일 canonical members.id로 정규화.
+    feedback_by_id = await canonicalize_member_id(body.feedback_by_id, session)
     fb_repo = StandupFeedbackRepository(session, org_id)
     feedback = await fb_repo.create(
         project_id=body.project_id,
         sprint_id=body.sprint_id,
         standup_entry_id=id,
-        feedback_by_id=body.feedback_by_id,
+        feedback_by_id=feedback_by_id,
         review_type=body.review_type,
         feedback_text=body.feedback_text,
     )

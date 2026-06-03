@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import os
 import uuid
+from datetime import date as _date
 from unittest.mock import MagicMock
 
 import pytest
@@ -297,6 +298,72 @@ async def test_apikey_insert_after_writesync_succeeds_and_absent_member_violates
                     "VALUES (gen_random_uuid(),:tm,:m,'sk_live_ba','hashba')"
                 ), {"tm": str(absent), "m": str(absent)})
                 await s.commit()
+    finally:
+        await engine.dispose()
+
+
+_SD = "2026-06-04"  # standup 테스트 날짜
+_SD_DATE = _date.fromisoformat(_SD)
+
+
+@pytest.mark.anyio
+async def test_canonicalize_member_id_alias_and_passthrough():
+    """AC3-3: 레거시 휴먼 team_member.id → canonical(org_member.id), 직접 canonical/agent는 그대로."""
+    from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
+    from app.services.member_resolver import canonicalize_member_id
+
+    engine = create_async_engine(_ASYNC_URL)
+    Session = async_sessionmaker(engine, expire_on_commit=False)
+    try:
+        async with Session() as s:
+            await _seed(s)
+            assert await canonicalize_member_id(TM_OWNER, s) == OM_OWNER  # 레거시 휴먼 → canonical
+            assert await canonicalize_member_id(OM_MEM, s) == OM_MEM      # 이미 canonical
+            assert await canonicalize_member_id(AG1, s) == AG1            # 에이전트 passthrough
+    finally:
+        await engine.dispose()
+
+
+@pytest.mark.anyio
+async def test_get_missing_canonical_single_identity():
+    """⚠️ AC3-3 핵심: missing 산정이 effective 휴먼 access를 canonical로 집계 — 레거시 team_member.id로
+    제출해도 canonical로 인식(#1167 무회귀), 멀티프로젝트 단일 신원."""
+    from sqlalchemy import text
+    from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
+    from app.repositories.standup import StandupEntryRepository
+
+    engine = create_async_engine(_ASYNC_URL)
+    Session = async_sessionmaker(engine, expire_on_commit=False)
+    try:
+        async with Session() as s:
+            await _seed(s)
+            await s.execute(text("DELETE FROM standup_entries WHERE project_id=:p AND date=:d"),
+                            {"p": str(P1), "d": _SD_DATE})
+            await s.commit()
+        # roster(P1) = owner(OM_OWNER) ∪ grant(OM_MEM) ∪ 레거시 휴먼 tm(TM_OWNER→OM_OWNER) = {OWNER, MEM}
+        async with Session() as s:
+            missing = set(await StandupEntryRepository(s, ORG).get_missing(P1, _SD_DATE))
+        assert missing == {OM_OWNER, OM_MEM}, f"roster 불일치: {missing}"
+
+        # OM_MEM이 canonical로 제출 → missing에서 빠짐
+        async with Session() as s:
+            await s.execute(text(
+                "INSERT INTO standup_entries (id,org_id,project_id,author_id,date,plan_story_ids) "
+                "VALUES (gen_random_uuid(),:o,:p,:a,:d,'{}')"
+            ), {"o": str(ORG), "p": str(P1), "a": str(OM_MEM), "d": _SD_DATE})
+            await s.commit()
+            m2 = set(await StandupEntryRepository(s, ORG).get_missing(P1, _SD_DATE))
+        assert m2 == {OM_OWNER}, f"canonical 제출 미반영: {m2}"
+
+        # 레거시 team_member.id(TM_OWNER)로 제출해도 canonical(OM_OWNER)로 인식 → missing 비게
+        async with Session() as s:
+            await s.execute(text(
+                "INSERT INTO standup_entries (id,org_id,project_id,author_id,date,plan_story_ids) "
+                "VALUES (gen_random_uuid(),:o,:p,:a,:d,'{}')"
+            ), {"o": str(ORG), "p": str(P1), "a": str(TM_OWNER), "d": _SD_DATE})
+            await s.commit()
+            m3 = set(await StandupEntryRepository(s, ORG).get_missing(P1, _SD_DATE))
+        assert m3 == set(), f"레거시 id 제출이 canonical로 인식 안 됨(#1167 회귀): {m3}"
     finally:
         await engine.dispose()
 
