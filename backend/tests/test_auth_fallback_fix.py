@@ -154,3 +154,74 @@ async def test_login_updates_last_project_id_if_changed():
     assert result["project_id"] == str(new_member.project_id)
     # last_project_id가 새 project_id로 갱신됐는지
     assert user.last_project_id == new_member.project_id
+
+
+# ─── AC2-2b: Path4 team_member auto-INSERT 제거 (드리프트 차단, story 3dfcada4) ──
+
+def test_path4_no_team_member_auto_insert_in_source():
+    """_build_app_metadata에 team_members auto-INSERT 코드 부재 — org-member 휴먼
+    로그인마다 곱연산 team_member 재생산하던 드리프트 소스 제거 확인."""
+    import inspect
+    from app.routers import auth as auth_mod
+
+    src = inspect.getsource(auth_mod._build_app_metadata)
+    assert "INSERT INTO team_members" not in src
+
+
+@pytest.mark.anyio
+async def test_path4_org_member_only_no_insert_uses_first_accessible(monkeypatch):
+    """org-member-only 휴먼(team_member 없음) → auto-INSERT 안 하고
+    first_accessible_project_id 기반 project_id 반환."""
+    from app.routers import auth as auth_mod
+    from app.routers.auth import _build_app_metadata
+
+    user = _make_user(last_project_id=None)
+    org_id = uuid.uuid4()
+    proj_id = uuid.uuid4()
+    org_member = MagicMock()
+    org_member.org_id = org_id
+    org_member.role = "member"
+
+    none_res = MagicMock()
+    none_res.scalar_one_or_none.return_value = None
+    om_res = MagicMock()
+    om_res.scalar_one_or_none.return_value = org_member
+
+    session = AsyncMock()
+    # fallback team_member(None) → Invitation(None) → OrgInvite(None) → org_member(found)
+    session.execute.side_effect = [none_res, none_res, none_res, om_res]
+
+    monkeypatch.setattr(auth_mod, "first_accessible_project_id", AsyncMock(return_value=proj_id))
+
+    result = await _build_app_metadata(user, session)
+
+    assert result == {"org_id": str(org_id), "project_id": str(proj_id), "role": "member"}
+    # team_member INSERT 시도 없음
+    for call in session.execute.call_args_list:
+        stmt = str(call.args[0]) if call.args else ""
+        assert "INSERT INTO team_members" not in stmt
+
+
+@pytest.mark.anyio
+async def test_path4_no_accessible_project_returns_empty_project(monkeypatch):
+    """org-member 있으나 접근 가능 project 없으면 project_id 빈 문자열 (500/INSERT 없음)."""
+    from app.routers import auth as auth_mod
+    from app.routers.auth import _build_app_metadata
+
+    user = _make_user(last_project_id=None)
+    org_id = uuid.uuid4()
+    org_member = MagicMock()
+    org_member.org_id = org_id
+    org_member.role = "admin"
+
+    none_res = MagicMock()
+    none_res.scalar_one_or_none.return_value = None
+    om_res = MagicMock()
+    om_res.scalar_one_or_none.return_value = org_member
+
+    session = AsyncMock()
+    session.execute.side_effect = [none_res, none_res, none_res, om_res]
+    monkeypatch.setattr(auth_mod, "first_accessible_project_id", AsyncMock(return_value=None))
+
+    result = await _build_app_metadata(user, session)
+    assert result == {"org_id": str(org_id), "project_id": "", "role": "admin"}
