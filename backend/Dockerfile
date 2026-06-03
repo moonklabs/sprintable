@@ -16,6 +16,10 @@ COPY alembic.ini .
 COPY alembic/ alembic/
 COPY bootstrap.py .
 COPY scripts/migrate.sh scripts/migrate.sh
+# E-MEMBER-SSOT 검증/감사 스크립트 — migrate-dev 잡 클론(command 오버라이드)으로 in-VPC 실행
+# (scripts는 namespace 패키지 — `python -m scripts.<name>`로 /app 기준 실행)
+COPY scripts/verify_grant_only_story_assign.py scripts/verify_grant_only_story_assign.py
+COPY scripts/audit_apikey_member_anchor.py scripts/audit_apikey_member_anchor.py
 
 # non-root 사용자 생성 + /app 소유권 변경 (uv .venv 포함)
 RUN useradd --create-home --shell /bin/bash appuser \
