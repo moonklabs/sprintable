@@ -279,3 +279,186 @@ async def test_policy_no_creator_in_human_conversation_403():
     with pytest.raises(HTTPException) as exc_info:
         await _enforce_agent_creator_policy(sender, [agent_id], session)
     assert exc_info.value.status_code == 403
+
+
+# ── QA B1 보강: resolve_member_identity 2단 조회 + org 필터 독립 검증 ──────────
+
+@pytest.mark.anyio
+async def test_resolve_member_identity_prefers_team_member():
+    """TM 존재 시 OrgMember 조회 없이 TM 반환 (TM 우선, 단 1회 execute)."""
+    from app.services.member_resolver import resolve_member_identity
+
+    tm = _make_team_member(ttype="agent")
+    tm.avatar_url = "http://a/x.png"
+    tm_result = MagicMock()
+    tm_result.scalars.return_value.first.return_value = tm
+
+    session = AsyncMock()
+    session.execute = AsyncMock(side_effect=[tm_result])
+
+    resolved = await resolve_member_identity(AGENT_TM_ID, ORG_ID, session)
+    assert resolved is not None
+    assert resolved.id == AGENT_TM_ID
+    assert resolved.type == "agent"
+    assert resolved.avatar_url == "http://a/x.png"
+    # TM 매칭 시 OrgMember 조회를 하지 않음 — 1회 execute
+    assert session.execute.await_count == 1
+
+
+@pytest.mark.anyio
+async def test_resolve_member_identity_falls_back_to_org_member():
+    """TM 없으면 OrgMember로 fallback — TM→OM→User 3단 독립 조회."""
+    from app.services.member_resolver import resolve_member_identity
+
+    om = _make_org_member()
+    user = MagicMock(); user.email = "human@test.com"; user.id = USER_ID
+
+    tm_result = MagicMock()
+    tm_result.scalars.return_value.first.return_value = None  # TeamMember 미존재
+    om_result = MagicMock()
+    om_result.scalar_one_or_none.return_value = om            # OrgMember 존재
+    user_result = MagicMock()
+    user_result.scalar_one_or_none.return_value = user
+
+    session = AsyncMock()
+    session.execute = AsyncMock(side_effect=[tm_result, om_result, user_result])
+
+    resolved = await resolve_member_identity(ORG_MEMBER_ID, ORG_ID, session)
+    assert resolved is not None
+    assert resolved.id == ORG_MEMBER_ID
+    assert resolved.type == "human"
+    assert resolved.user_id == USER_ID
+    assert resolved.name == "human@test.com"
+    # 2단(+User) 조회 확정
+    assert session.execute.await_count == 3
+
+
+@pytest.mark.anyio
+async def test_resolve_member_identity_none_when_not_in_org():
+    """TM·OM 둘 다 없으면 None — orphan fallback 없음(404 유도)."""
+    from app.services.member_resolver import resolve_member_identity
+
+    tm_result = MagicMock()
+    tm_result.scalars.return_value.first.return_value = None
+    om_result = MagicMock()
+    om_result.scalar_one_or_none.return_value = None
+
+    session = AsyncMock()
+    session.execute = AsyncMock(side_effect=[tm_result, om_result])
+
+    resolved = await resolve_member_identity(uuid.uuid4(), ORG_ID, session)
+    assert resolved is None
+    assert session.execute.await_count == 2
+
+
+# ── QA B1 보강: filter_org_member_ids 2단 조회 + cross-org 차단 검증 ───────────
+
+@pytest.mark.anyio
+async def test_filter_org_member_ids_keeps_tm_and_om_drops_foreign():
+    """TM∪OM 소속만 통과, cross-org/orphan은 제거 — 2단 독립 조회."""
+    from app.services.member_resolver import filter_org_member_ids
+
+    tm_id, om_id, foreign_id = uuid.uuid4(), uuid.uuid4(), uuid.uuid4()
+
+    tm_result = MagicMock()
+    tm_result.scalars.return_value.all.return_value = [tm_id]   # TeamMember 소속
+    om_result = MagicMock()
+    om_result.scalars.return_value.all.return_value = [om_id]   # OrgMember 소속
+
+    session = AsyncMock()
+    session.execute = AsyncMock(side_effect=[tm_result, om_result])
+
+    out = await filter_org_member_ids({tm_id, om_id, foreign_id}, ORG_ID, session)
+    assert out == {tm_id, om_id}
+    assert foreign_id not in out
+    # TeamMember 후 잔여(om_id, foreign_id)에 대해 OrgMember 2단 조회
+    assert session.execute.await_count == 2
+
+
+@pytest.mark.anyio
+async def test_filter_org_member_ids_skips_om_query_when_all_team_members():
+    """전부 TeamMember면 OrgMember 조회 스킵 — 1회 execute."""
+    from app.services.member_resolver import filter_org_member_ids
+
+    a, b = uuid.uuid4(), uuid.uuid4()
+    tm_result = MagicMock()
+    tm_result.scalars.return_value.all.return_value = [a, b]
+
+    session = AsyncMock()
+    session.execute = AsyncMock(side_effect=[tm_result])
+
+    out = await filter_org_member_ids({a, b}, ORG_ID, session)
+    assert out == {a, b}
+    assert session.execute.await_count == 1
+
+
+@pytest.mark.anyio
+async def test_filter_org_member_ids_empty_short_circuits():
+    """빈 입력은 쿼리 없이 빈 집합."""
+    from app.services.member_resolver import filter_org_member_ids
+
+    session = AsyncMock()
+    session.execute = AsyncMock()
+
+    out = await filter_org_member_ids(set(), ORG_ID, session)
+    assert out == set()
+    session.execute.assert_not_awaited()
+
+
+# ── 2차 버그 가드: resolve_auth_member team_member-first (스탠드업 카드 매칭) ────
+
+@pytest.mark.anyio
+async def test_resolve_auth_member_prefers_team_member():
+    """JWT 휴먼에 team_member 있으면 team_member.id 반환(카드 매칭) — org_member 조회 안 함."""
+    from app.services.member_resolver import resolve_auth_member
+
+    auth = _make_auth()  # JWT
+    tm = _make_team_member(ttype="human")
+    tm_result = MagicMock()
+    tm_result.scalars.return_value.first.return_value = tm
+
+    session = AsyncMock()
+    session.execute = AsyncMock(side_effect=[tm_result])
+
+    resolved = await resolve_auth_member(auth, ORG_ID, session, project_id=PROJECT_ID)
+    assert resolved is tm  # team_member.id 그대로 (org_member.id-always 아님)
+    assert session.execute.await_count == 1  # team_member 매칭 시 org_member 조회 스킵
+
+
+@pytest.mark.anyio
+async def test_resolve_auth_member_falls_back_to_org_member():
+    """team_member 없으면(grant-only) resolve_member(org_member.id)로 fallback."""
+    from app.services import member_resolver as mr
+    from app.services.member_resolver import ResolvedMember, resolve_auth_member
+
+    auth = _make_auth()
+    tm_result = MagicMock()
+    tm_result.scalars.return_value.first.return_value = None  # team_member 없음
+
+    session = AsyncMock()
+    session.execute = AsyncMock(side_effect=[tm_result])
+
+    om_member = ResolvedMember(
+        id=ORG_MEMBER_ID, user_id=USER_ID, name="u", type="human", role="member", org_id=ORG_ID
+    )
+    with patch.object(mr, "resolve_member", new=AsyncMock(return_value=om_member)) as mock_rm:
+        resolved = await resolve_auth_member(auth, ORG_ID, session, project_id=PROJECT_ID)
+    assert resolved.id == ORG_MEMBER_ID
+    mock_rm.assert_awaited_once()
+
+
+@pytest.mark.anyio
+async def test_resolve_auth_member_api_key_returns_team_member():
+    """API키(에이전트)는 team_member.id 반환."""
+    from app.services.member_resolver import resolve_auth_member
+
+    auth = _make_auth(is_api_key=True)
+    tm = _make_team_member()
+    tm_result = MagicMock()
+    tm_result.scalars.return_value.first.return_value = tm
+
+    session = AsyncMock()
+    session.execute = AsyncMock(side_effect=[tm_result])
+
+    resolved = await resolve_auth_member(auth, ORG_ID, session)
+    assert resolved is tm

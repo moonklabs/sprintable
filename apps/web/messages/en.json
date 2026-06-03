@@ -698,7 +698,9 @@
     "agentMcpDescription": "Paste this into Claude Code or any MCP client to connect as this agent.",
     "agentMcpKeyRequired": "Generate an API key first to include the real key in the config.",
     "ownershipDenied": "Permission denied. Only the agent owner or admin can edit.",
-    "agentOwner": "my agent"
+    "agentOwner": "my agent",
+    "webhookHelperEmptyHuman": "Set a webhook URL and enable the toggle to receive your mentions and events for this project at an external endpoint. Other projects require separate configuration.",
+    "webhookHelperActiveHuman": "Your mentions and event notifications for this project are forwarded to the configured URL. Other projects require separate configuration."
   },
   "landing": {
     "navProduct": "Overview",
@@ -990,7 +992,8 @@
     "selfEditTitle": "Edit my standup",
     "expandSprintStories": "Show sprint stories",
     "collapseSprintStories": "Collapse",
-    "feedbackDialogTitle": "Feedback on {name}"
+    "feedbackDialogTitle": "Feedback on {name}",
+    "history": "📋 Standup History"
   },
   "retro": {
     "title": "Sprint Retro",

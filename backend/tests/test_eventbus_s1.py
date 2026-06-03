@@ -130,8 +130,10 @@ async def test_create_event_stores_in_db(client, mock_session):
 
 @pytest.mark.anyio
 async def test_create_event_recipient_not_found_returns_404(client, mock_session):
+    # E-MEMBER-SSOT Phase 0: resolve_member_identity는 TeamMember → OrgMember 순 조회
     member_result = MagicMock()
-    member_result.scalar_one_or_none.return_value = None
+    member_result.scalars.return_value.first.return_value = None  # TeamMember 없음
+    member_result.scalar_one_or_none.return_value = None  # OrgMember 없음
     mock_session.execute.return_value = member_result
 
     payload = {
@@ -206,8 +208,18 @@ async def test_recipient_type_resolved_from_db(client, mock_session):
     recipient_id = uuid.uuid4()
     captured = {}
 
+    # E-MEMBER-SSOT Phase 0: recipient는 resolve_member_identity가 반환한 멤버의 type 사용
+    tm = MagicMock()
+    tm.id = recipient_id
+    tm.type = "human"
+    tm.user_id = uuid.uuid4()
+    tm.name = "휴먼"
+    tm.role = "member"
+    tm.org_id = uuid.uuid4()
+    tm.project_id = None
+    tm.avatar_url = None
     member_result = MagicMock()
-    member_result.scalar_one_or_none.return_value = "human"
+    member_result.scalars.return_value.first.return_value = tm
     mock_session.execute.return_value = member_result
 
     original_add = mock_session.add.side_effect
@@ -271,8 +283,18 @@ async def test_mark_delivered_cross_org_returns_404(client, mock_session):
 async def test_create_event_uses_verified_org(client, mock_session, org_id):
     """POST 시 body의 org_id가 아닌 verified org_id가 Event에 설정돼야 함."""
     captured = {}
+    # E-MEMBER-SSOT Phase 0: agent recipient → resolve_member_identity가 TeamMember 반환
+    tm = MagicMock()
+    tm.id = uuid.uuid4()
+    tm.type = "agent"
+    tm.user_id = None
+    tm.name = "agent"
+    tm.role = "member"
+    tm.org_id = org_id
+    tm.project_id = None
+    tm.avatar_url = None
     member_result = MagicMock()
-    member_result.scalar_one_or_none.return_value = "agent"
+    member_result.scalars.return_value.first.return_value = tm
     mock_session.execute.return_value = member_result
 
     def capture_add(obj):

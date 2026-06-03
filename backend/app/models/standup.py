@@ -19,8 +19,11 @@ class StandupEntry(Base, OrgScopedMixin, TimestampMixin):
     sprint_id: Mapped[uuid.UUID | None] = mapped_column(
         UUID(as_uuid=True), ForeignKey("sprints.id", ondelete="SET NULL"), nullable=True
     )
+    # E-MEMBER-SSOT(6a1e8b1d): team_members FK 완화 — resolve_member가 grant-only 휴먼에
+    # org_member.id(canonical member.id 방향)를 반환하므로 team_members FK 제약 제거.
+    # migration 0074에서 DROP (0069 conv/events·0073 notif 동일 패턴). 컬럼·인덱스 유지.
     author_id: Mapped[uuid.UUID] = mapped_column(
-        UUID(as_uuid=True), ForeignKey("team_members.id", ondelete="CASCADE"), nullable=False, index=True
+        UUID(as_uuid=True), nullable=False, index=True
     )
     date: Mapped[date] = mapped_column(Date, nullable=False, index=True)
     done: Mapped[str | None] = mapped_column(Text, nullable=True)
@@ -48,8 +51,11 @@ class StandupFeedback(Base, OrgScopedMixin, TimestampMixin):
     standup_entry_id: Mapped[uuid.UUID] = mapped_column(
         UUID(as_uuid=True), ForeignKey("standup_entries.id", ondelete="CASCADE"), nullable=False, index=True
     )
+    # E-MEMBER-SSOT(6a1e8b1d): team_members FK 선제 완화 — author_id와 동일 anchor 방향(canonical
+    # member.id). 현재 add_feedback는 클라 body.feedback_by_id를 쓰지만, 동일 latent B-bug
+    # 방지 위해 같은 migration 0074에서 동반 DROP. 컬럼·인덱스 유지.
     feedback_by_id: Mapped[uuid.UUID] = mapped_column(
-        UUID(as_uuid=True), ForeignKey("team_members.id", ondelete="CASCADE"), nullable=False, index=True
+        UUID(as_uuid=True), nullable=False, index=True
     )
     review_type: Mapped[str] = mapped_column(Text, nullable=False, default="comment")
     feedback_text: Mapped[str] = mapped_column(Text, nullable=False)

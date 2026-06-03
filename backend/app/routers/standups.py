@@ -13,8 +13,10 @@ from app.schemas.standup import (
     FeedbackCreate,
     FeedbackResponse,
     StandupEntryResponse,
+    StandupSelfUpdate,
     StandupUpsert,
 )
+from app.services.member_resolver import resolve_auth_member
 
 router = APIRouter(prefix="/api/v2/standups", tags=["standups"])
 
@@ -70,15 +72,26 @@ async def upsert_standup(
 
 @router.put("", response_model=StandupEntryResponse)
 async def update_standup(
-    body: StandupUpsert,
+    body: StandupSelfUpdate,
     session: AsyncSession = Depends(get_db),
-    _auth: AuthContext = Depends(get_current_user),
+    auth: AuthContext = Depends(get_current_user),
     org_id: uuid.UUID = Depends(get_verified_org_id),
 ) -> StandupEntryResponse:
+    """PUT /api/v2/standups — 본인 스탠드업 self-save (SID:6a1e8b1d).
+
+    author_id는 인증 유저(resolve_auth_member)에서 server-side 도출 — 클라 바디 author_id를
+    받지 않아 타인 스탠드업 위조를 차단(본인만 수정). project_id는 바디 수용.
+
+    author_id는 team_member 우선(있으면 team_member.id) → 없으면 org_member.id(grant-only).
+    스탠드업 카드(`/api/team-members` 기반)가 team_member.id로 매칭하므로, team_member가 있는
+    휴먼은 team_member.id로 저장해야 저장분이 카드에 표시된다(org_member.id-always는 카드와
+    어긋나 "미작성"으로 보이던 라이브 2차 버그 해소). grant-only는 org_member.id(카드 표시는 AC3-3).
+    """
+    member = await resolve_auth_member(auth, org_id, session, project_id=body.project_id)
     repo = StandupEntryRepository(session, org_id)
     entry = await repo.upsert(
         project_id=body.project_id,
-        author_id=body.author_id,
+        author_id=member.id,
         date=body.date,
         sprint_id=body.sprint_id,
         done=body.done,

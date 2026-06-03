@@ -16,6 +16,7 @@ from app.models.team import TeamMember
 from app.routers.agent_gateway import wake_agent
 from app.routers.events import _event_to_payload, _push_to_agent
 from app.services.event_seq import assign_recipient_seq
+from app.services.member_resolver import resolve_member_identity
 from app.services.notification_dispatch import dispatch_notification
 
 router = APIRouter(prefix="/api/v2/dispatch", tags=["dispatch"])
@@ -92,17 +93,17 @@ async def dispatch_entity(
     # entity의 실제 project_id 사용 (body.project_id 불일치 방지)
     project_id = entity_project_id or body.project_id
 
-    # assignee TeamMember 조회 (type: human/agent)
-    member_result = await db.execute(
-        select(TeamMember.type).where(TeamMember.id == assignee_id, TeamMember.org_id == org_id)
-    )
-    member_row = member_result.one_or_none()
-    if not member_row:
+    # assignee 신원 해소 (type: human/agent)
+    # E-MEMBER-SSOT AC2-2: TeamMember-only 검증 → resolve_member_identity (TM∪OM).
+    #   grant-only 휴먼/polymorphic assignee도 수용해 dispatched:False 오탐 방지 (7f8066a3).
+    assignee_member = await resolve_member_identity(assignee_id, org_id, db)
+    if assignee_member is None:
         return DispatchResponse(dispatched=False, assignee_id=assignee_id)
 
-    member_type = member_row[0]
+    member_type = assignee_member.type
 
-    # sender_id: 현재 auth user의 TeamMember id
+    # sender_id: 현재 auth user의 member id (team_member 우선, grant-only 휴먼은 org_member)
+    # B1 교훈 — assignee뿐 아니라 sender 경로도 일관되게 grant-only 수용.
     sender_id: uuid.UUID | None = None
     try:
         uid = uuid.UUID(auth.user_id)
@@ -113,8 +114,18 @@ async def dispatch_entity(
                 TeamMember.is_active.is_(True),
             ).limit(1)
         )
-        sender_row = sender_result.scalar_one_or_none()
-        sender_id = sender_row
+        sender_id = sender_result.scalar_one_or_none()
+        if sender_id is None:
+            # grant-only 휴먼 디스패처 → org_member.id를 sender로 사용
+            from app.models.project import OrgMember
+            om_result = await db.execute(
+                select(OrgMember.id).where(
+                    OrgMember.user_id == uid,
+                    OrgMember.org_id == org_id,
+                    OrgMember.deleted_at.is_(None),
+                ).limit(1)
+            )
+            sender_id = om_result.scalar_one_or_none()
     except Exception:
         pass
 

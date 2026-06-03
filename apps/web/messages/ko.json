@@ -698,7 +698,9 @@
     "agentMcpDescription": "Claude Code나 MCP 클라이언트에 붙여넣으면 이 에이전트로 Sprintable에 연결됩니다.",
     "agentMcpKeyRequired": "API Key를 먼저 발급하면 실제 키가 포함된 설정을 복사할 수 있습니다.",
     "ownershipDenied": "권한이 없습니다. 에이전트 소유자 또는 관리자만 수정할 수 있습니다.",
-    "agentOwner": "내 에이전트"
+    "agentOwner": "내 에이전트",
+    "webhookHelperEmptyHuman": "현재 프로젝트의 내 멘션·이벤트를 외부 URL로 받으려면 Webhook URL을 설정하고 토글을 켜세요. 다른 프로젝트는 해당 프로젝트에서 별도 설정이 필요합니다.",
+    "webhookHelperActiveHuman": "현재 프로젝트의 내 멘션·이벤트 알림이 설정된 URL로 전송됩니다. 다른 프로젝트의 멘션은 별도 설정이 필요합니다."
   },
   "landing": {
     "navProduct": "개요",
@@ -990,7 +992,8 @@
     "selfEditTitle": "내 스탠드업 편집",
     "expandSprintStories": "스프린트 스토리 보기",
     "collapseSprintStories": "접기",
-    "feedbackDialogTitle": "{name} 피드백"
+    "feedbackDialogTitle": "{name} 피드백",
+    "history": "📋 작성 이력"
   },
   "retro": {
     "title": "스프린트 회고",

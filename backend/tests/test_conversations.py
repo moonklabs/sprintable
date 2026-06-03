@@ -356,3 +356,71 @@ async def test_send_message_403_non_participant():
         assert resp.status_code == 403
     finally:
         app.dependency_overrides.clear()
+
+
+# ─── QA B1 회귀: cross-org 멘션 저장·발송 필터 (DM fork 외 group 공통 경로) ─────
+
+@pytest.mark.anyio
+async def test_send_message_filters_cross_org_mentions_group():
+    """group 대화에서 cross-org 멘션이 저장·발송 양쪽에서 제거된다 (QA B1)."""
+    from app.models.conversation import ConversationMessage
+
+    client, session, app = await _make_client()
+    try:
+        valid_id = uuid.uuid4()
+        cross_org_id = uuid.uuid4()
+
+        mock_member = _make_member()
+        mock_conv = _make_conv(conv_type="group")
+
+        conv_result = MagicMock()
+        conv_result.scalar_one_or_none.return_value = mock_conv
+        member_result = MagicMock()
+        member_result.scalars.return_value.first.return_value = mock_member
+        participant_result = MagicMock()
+        participant_result.scalar_one_or_none.return_value = uuid.uuid4()
+
+        # 실제 코드 순서: conv → _resolve_member(TM) → participant
+        session.execute = AsyncMock(side_effect=[conv_result, member_result, participant_result])
+
+        captured = {}
+        def _capture_add(obj):
+            if isinstance(obj, ConversationMessage):
+                captured["mentioned_ids"] = list(obj.mentioned_ids or [])
+        session.add.side_effect = _capture_add
+
+        async def _refresh(obj):
+            obj.id = uuid.uuid4()
+            obj.conversation_id = CONV_ID
+            obj.sender_id = MEMBER_ID
+            obj.content = "안녕"
+            obj.created_at = datetime(2026, 5, 14, 12, 0, tzinfo=timezone.utc)
+        session.refresh.side_effect = _refresh
+
+        mention_calls = {}
+        async def _capture_mention(db, conversation, msg, org_id, sender, mention_targets):
+            mention_calls["targets"] = set(mention_targets)
+            return []
+
+        with patch("app.routers.conversations.filter_org_member_ids",
+                   new=AsyncMock(return_value={valid_id})), \
+             patch("app.routers.conversations._dispatch_conversation_event",
+                   new=AsyncMock(return_value=[])), \
+             patch("app.routers.conversations._dispatch_mention_events",
+                   side_effect=_capture_mention), \
+             patch("app.services.channel_router.route_message",
+                   new=AsyncMock(return_value=[])), \
+             patch("app.services.workflow_pipeline.process_event", new=AsyncMock()):
+            async with client as c:
+                resp = await c.post(
+                    f"/api/v2/conversations/{CONV_ID}/messages",
+                    json={"content": "안녕", "mentioned_ids": [str(valid_id), str(cross_org_id)]},
+                )
+
+        assert resp.status_code == 201
+        # 저장: cross-org 제거, org 소속만 + 순서 보존
+        assert captured["mentioned_ids"] == [valid_id]
+        # 멘션 이벤트 발송: cross-org 미포함, valid만
+        assert mention_calls.get("targets") == {valid_id}
+    finally:
+        app.dependency_overrides.clear()

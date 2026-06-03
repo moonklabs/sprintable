@@ -67,7 +67,7 @@ def auth_ctx(org_id):
 
 @pytest.fixture
 async def client(mock_session, auth_ctx, org_id):
-    from app.dependencies.auth import get_current_user, get_verified_org_id
+    from app.dependencies.auth import get_current_user, get_verified_org_id, get_current_user_streaming, get_verified_org_id_streaming
     from app.dependencies.database import get_db
     from app.main import app
 
@@ -83,6 +83,8 @@ async def client(mock_session, auth_ctx, org_id):
     app.dependency_overrides[get_db] = _db
     app.dependency_overrides[get_current_user] = _auth
     app.dependency_overrides[get_verified_org_id] = _org
+    app.dependency_overrides[get_current_user_streaming] = _auth
+    app.dependency_overrides[get_verified_org_id_streaming] = _org
     async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as c:
         yield c
     app.dependency_overrides.clear()
@@ -110,7 +112,7 @@ def test_agent_stream_registers_connection(mock_session, org_id):
 
     mock_session.execute.side_effect = [membership_result, pending_result]
 
-    from app.dependencies.auth import get_current_user, get_verified_org_id
+    from app.dependencies.auth import get_current_user, get_verified_org_id, get_current_user_streaming, get_verified_org_id_streaming
     from app.dependencies.database import get_db
     from app.main import app
 
@@ -133,6 +135,8 @@ def test_agent_stream_registers_connection(mock_session, org_id):
     app.dependency_overrides[get_db] = _db
     app.dependency_overrides[get_current_user] = _auth
     app.dependency_overrides[get_verified_org_id] = _org
+    app.dependency_overrides[get_current_user_streaming] = _auth
+    app.dependency_overrides[get_verified_org_id_streaming] = _org
 
     try:
         with patch("app.core.database.async_session_factory", _session_factory):
@@ -318,7 +322,7 @@ def test_stream_delivers_pending_on_connect(mock_session, org_id):
 
     mock_session.execute.side_effect = [membership_result, pending_result]
 
-    from app.dependencies.auth import get_current_user, get_verified_org_id
+    from app.dependencies.auth import get_current_user, get_verified_org_id, get_current_user_streaming, get_verified_org_id_streaming
     from app.dependencies.database import get_db
     from app.main import app
 
@@ -337,6 +341,8 @@ def test_stream_delivers_pending_on_connect(mock_session, org_id):
     app.dependency_overrides[get_db] = _db
     app.dependency_overrides[get_current_user] = _auth
     app.dependency_overrides[get_verified_org_id] = _org
+    app.dependency_overrides[get_current_user_streaming] = _auth
+    app.dependency_overrides[get_verified_org_id_streaming] = _org
 
     @asynccontextmanager
     async def _session_factory():
@@ -409,11 +415,14 @@ async def test_stream_rejects_cross_org_member(mock_session, org_id):
     """다른 org의 member_id로 stream 연결 시 404 반환."""
     foreign_member_id = uuid.uuid4()
 
+    # E-MEMBER-SSOT Phase 0: resolve_member_identity는 TeamMember(.scalars().first())
+    # → OrgMember(.scalar_one_or_none()) 순으로 조회 — 둘 다 미소속이어야 404
     membership_result = MagicMock()
-    membership_result.scalar_one_or_none.return_value = None  # org 소속 아님
+    membership_result.scalars.return_value.first.return_value = None  # TeamMember 미소속
+    membership_result.scalar_one_or_none.return_value = None  # OrgMember 미소속
     mock_session.execute.return_value = membership_result
 
-    from app.dependencies.auth import get_current_user, get_verified_org_id
+    from app.dependencies.auth import get_current_user, get_verified_org_id, get_current_user_streaming, get_verified_org_id_streaming
     from app.dependencies.database import get_db
     from app.main import app
 
@@ -432,6 +441,8 @@ async def test_stream_rejects_cross_org_member(mock_session, org_id):
     app.dependency_overrides[get_db] = _db
     app.dependency_overrides[get_current_user] = _auth
     app.dependency_overrides[get_verified_org_id] = _org
+    app.dependency_overrides[get_current_user_streaming] = _auth
+    app.dependency_overrides[get_verified_org_id_streaming] = _org
 
     from contextlib import asynccontextmanager
 
