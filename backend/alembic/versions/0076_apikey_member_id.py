@@ -1,7 +1,8 @@
 """E-MEMBER-SSOT AC3-1: agent_api_keys.member_id 추가 + 백필 (canonical members.id).
 
 0075에서 agent member.id = team_member.id **1:1**이라 member_id = team_member_id 백필이
-ID 보존 = API key 인증 신원 불변(무중단 핵심). NOT VALID FK(기존 행 검증 보류).
+ID 보존 = API key 인증 신원 불변(무중단 핵심). member_id FK는 신규 INSERT 검증이 신규 agent
+생성을 깨므로(QA H1) **생략** — AC3-1b(anchor write-sync) 후 cutover에서 재추가.
 additive·가역 — 코드 cut은 config 플래그(member_ssot_apikey_cut, 기본 off) 뒤.
 
 Revision ID: 0076

@@ -15,8 +15,8 @@ class ApiKey(Base):
     team_member_id: Mapped[uuid.UUID] = mapped_column(
         UUID(as_uuid=True), ForeignKey("team_members.id", ondelete="CASCADE"), nullable=False, index=True
     )
-    # E-MEMBER-SSOT AC3-1: canonical members.id (dual-write, 0075서 agent member.id=team_member.id 1:1).
-    # member_id→members NOT VALID FK는 migration 0076. nullable(기존 키 백필 전/레거시 호환).
+    # E-MEMBER-SSOT AC3-1: canonical members.id 미러 (team_member_id와 1:1 dual-write, 0075 ID 보존).
+    # FK는 신규 agent 생성 깨짐(QA H1) 방지로 현재 무FK — AC3-1b(anchor write-sync) 후 재추가. nullable.
     member_id: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True), nullable=True, index=True)
     key_prefix: Mapped[str] = mapped_column(Text, nullable=False)
     key_hash: Mapped[str] = mapped_column(Text, nullable=False)
