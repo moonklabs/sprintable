@@ -152,6 +152,41 @@ async def lookup_members_by_ids(
     return result
 
 
+async def resolve_auth_member(
+    auth: AuthContext,
+    org_id: uuid.UUID,
+    session: AsyncSession,
+    project_id: uuid.UUID | None = None,
+) -> "ResolvedMember | TeamMember":
+    """인증 주체의 멤버 신원 — team_member 우선, 없으면 org_member(grant-only).
+
+    resolve_member(JWT→org_member.id-always)와 달리 team_member가 있으면 그 id를 반환한다.
+    team_member.id로 매칭하는 표시 경로(스탠드업 카드 `/api/team-members`, 대화 참가자 등)와
+    write author/sender id를 일치시키기 위함 — org_member.id-always는 표시 경로와 어긋난다.
+
+    API키(에이전트): team_member.id. JWT 휴먼: team_member(project 스코프) 우선 → org_member.
+    conversations._resolve_member와 동형 — 공유 SSOT.
+    """
+    is_api_key = bool(auth.claims.get("app_metadata", {}).get("api_key_id"))
+    if is_api_key:
+        tm = (await session.execute(
+            select(TeamMember).where(TeamMember.id == uuid.UUID(auth.user_id))
+        )).scalars().first()
+        if tm is None:
+            raise HTTPException(status_code=400, detail="Team member not found")
+        return tm
+
+    filters = [TeamMember.user_id == uuid.UUID(auth.user_id), TeamMember.org_id == org_id]
+    if project_id is not None:
+        filters.append(TeamMember.project_id == project_id)
+    tm = (await session.execute(select(TeamMember).where(*filters))).scalars().first()
+    if tm is not None:
+        return tm
+
+    # team_member 없음(grant-only 휴먼) → org_member 경로 (has_project_access 검증 포함)
+    return await resolve_member(auth, org_id, session, project_id=project_id)
+
+
 async def resolve_member_identity(
     member_id: uuid.UUID,
     org_id: uuid.UUID,
