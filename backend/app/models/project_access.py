@@ -1,7 +1,7 @@
 import uuid
 from datetime import datetime
 
-from sqlalchemy import DateTime, ForeignKey, Text, UniqueConstraint, func
+from sqlalchemy import Boolean, DateTime, ForeignKey, Text, UniqueConstraint, func
 from sqlalchemy.dialects.postgresql import UUID
 from sqlalchemy.orm import Mapped, mapped_column
 
@@ -35,3 +35,14 @@ class ProjectAccess(Base):
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now(), nullable=False
     )
+
+    # E-MEMBER-SSOT AC2-1: 앵커 placement 컬럼 (additive — 코드 cutover 없음, 백필로 채움).
+    # member_id → members.id FK는 마이그 0075에서 NOT VALID로 추가(기존 행 검증 보류).
+    member_id: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True), nullable=True, index=True)
+    role: Mapped[str] = mapped_column(Text, nullable=False, default="member", server_default="member")
+    color: Mapped[str] = mapped_column(Text, nullable=False, default="#3385f8", server_default="#3385f8")
+    can_manage_members: Mapped[bool] = mapped_column(
+        Boolean, nullable=False, default=False, server_default="false"
+    )
+    access_source: Mapped[str] = mapped_column(Text, nullable=False, default="direct", server_default="direct")
+    inherited_from_member_id: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True), nullable=True)

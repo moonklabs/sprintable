@@ -33,8 +33,12 @@ from app.models.team import TeamMember
 from app.models.file_lock import FileLock
 from app.models.org_invite import OrgInvite
 from app.models.project_access import ProjectAccess
+from app.models.member import AgentProjectProfile, Member, MemberIdentityAlias
 
 __all__ = [
+    "AgentProjectProfile",
+    "Member",
+    "MemberIdentityAlias",
     "AgentAuditLog",
     "AgentDeployment",
     "AgentPersona",
