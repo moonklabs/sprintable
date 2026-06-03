@@ -403,3 +403,62 @@ async def test_filter_org_member_ids_empty_short_circuits():
     out = await filter_org_member_ids(set(), ORG_ID, session)
     assert out == set()
     session.execute.assert_not_awaited()
+
+
+# ── 2차 버그 가드: resolve_auth_member team_member-first (스탠드업 카드 매칭) ────
+
+@pytest.mark.anyio
+async def test_resolve_auth_member_prefers_team_member():
+    """JWT 휴먼에 team_member 있으면 team_member.id 반환(카드 매칭) — org_member 조회 안 함."""
+    from app.services.member_resolver import resolve_auth_member
+
+    auth = _make_auth()  # JWT
+    tm = _make_team_member(ttype="human")
+    tm_result = MagicMock()
+    tm_result.scalars.return_value.first.return_value = tm
+
+    session = AsyncMock()
+    session.execute = AsyncMock(side_effect=[tm_result])
+
+    resolved = await resolve_auth_member(auth, ORG_ID, session, project_id=PROJECT_ID)
+    assert resolved is tm  # team_member.id 그대로 (org_member.id-always 아님)
+    assert session.execute.await_count == 1  # team_member 매칭 시 org_member 조회 스킵
+
+
+@pytest.mark.anyio
+async def test_resolve_auth_member_falls_back_to_org_member():
+    """team_member 없으면(grant-only) resolve_member(org_member.id)로 fallback."""
+    from app.services import member_resolver as mr
+    from app.services.member_resolver import ResolvedMember, resolve_auth_member
+
+    auth = _make_auth()
+    tm_result = MagicMock()
+    tm_result.scalars.return_value.first.return_value = None  # team_member 없음
+
+    session = AsyncMock()
+    session.execute = AsyncMock(side_effect=[tm_result])
+
+    om_member = ResolvedMember(
+        id=ORG_MEMBER_ID, user_id=USER_ID, name="u", type="human", role="member", org_id=ORG_ID
+    )
+    with patch.object(mr, "resolve_member", new=AsyncMock(return_value=om_member)) as mock_rm:
+        resolved = await resolve_auth_member(auth, ORG_ID, session, project_id=PROJECT_ID)
+    assert resolved.id == ORG_MEMBER_ID
+    mock_rm.assert_awaited_once()
+
+
+@pytest.mark.anyio
+async def test_resolve_auth_member_api_key_returns_team_member():
+    """API키(에이전트)는 team_member.id 반환."""
+    from app.services.member_resolver import resolve_auth_member
+
+    auth = _make_auth(is_api_key=True)
+    tm = _make_team_member()
+    tm_result = MagicMock()
+    tm_result.scalars.return_value.first.return_value = tm
+
+    session = AsyncMock()
+    session.execute = AsyncMock(side_effect=[tm_result])
+
+    resolved = await resolve_auth_member(auth, ORG_ID, session)
+    assert resolved is tm
