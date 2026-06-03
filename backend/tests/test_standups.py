@@ -219,3 +219,87 @@ async def test_add_feedback_invalid_type_400():
         assert resp.status_code == 400
     finally:
         app.dependency_overrides.clear()
+
+
+# ─── B3 회귀: standup team_members FK 완화 (migration 0074) ───────────────────
+
+def test_standup_entries_author_id_has_no_team_members_fk():
+    """B3: author_id의 team_members FK 제거 — resolve_member가 반환한 org_member.id
+    upsert 시 실DB FK violation 500이 나지 않음 (migration 0074)."""
+    from app.models.standup import StandupEntry
+
+    col = StandupEntry.__table__.c.author_id
+    referred = {fk.column.table.name for fk in col.foreign_keys}
+    assert "team_members" not in referred
+
+
+def test_standup_feedback_feedback_by_id_has_no_team_members_fk():
+    """feedback_by_id도 동일 anchor 방향 — team_members FK 선제 완화 (migration 0074)."""
+    from app.models.standup import StandupFeedback
+
+    col = StandupFeedback.__table__.c.feedback_by_id
+    referred = {fk.column.table.name for fk in col.foreign_keys}
+    assert "team_members" not in referred
+
+
+# ─── SID:6a1e8b1d 회귀: self-save PUT — author_id server 도출 + 위조 차단 ──────
+
+@pytest.mark.anyio
+async def test_update_standup_self_save_no_author_id_200():
+    """PUT self-save: author_id 없는 바디(date/done/...)도 422 아닌 200 — author_id는
+    resolve_member로 server 도출."""
+    client, session, app = await _client()
+    try:
+        derived_member_id = uuid.uuid4()
+        member = MagicMock()
+        member.id = derived_member_id
+        entry = _mock_entry()
+        entry.author_id = derived_member_id
+
+        with patch("app.routers.standups.resolve_member", new=AsyncMock(return_value=member)), \
+             patch("app.repositories.standup.StandupEntryRepository.upsert", new_callable=AsyncMock) as mock_upsert:
+            mock_upsert.return_value = entry
+            async with client as c:
+                resp = await c.put("/api/v2/standups", json={
+                    "project_id": str(PROJECT_ID),
+                    "date": str(TODAY),
+                    "done": "오늘 한 일",
+                    "plan": "내일 할 일",
+                    "sprint_id": None,
+                    "plan_story_ids": [],
+                    # author_id 미전송 — 그래도 200
+                })
+        assert resp.status_code == 200
+        # author_id는 resolve_member 도출값으로 upsert
+        assert mock_upsert.call_args.kwargs["author_id"] == derived_member_id
+    finally:
+        app.dependency_overrides.clear()
+
+
+@pytest.mark.anyio
+async def test_update_standup_ignores_client_author_id():
+    """PUT self-save: 클라가 author_id 위조 전송해도 무시하고 server 도출값 사용(위조 차단)."""
+    client, session, app = await _client()
+    try:
+        derived = uuid.uuid4()
+        forged = uuid.uuid4()
+        member = MagicMock()
+        member.id = derived
+        entry = _mock_entry()
+        entry.author_id = derived
+
+        with patch("app.routers.standups.resolve_member", new=AsyncMock(return_value=member)), \
+             patch("app.repositories.standup.StandupEntryRepository.upsert", new_callable=AsyncMock) as mock_upsert:
+            mock_upsert.return_value = entry
+            async with client as c:
+                resp = await c.put("/api/v2/standups", json={
+                    "project_id": str(PROJECT_ID),
+                    "date": str(TODAY),
+                    "author_id": str(forged),  # 위조 시도 — 무시돼야
+                    "done": "x",
+                })
+        assert resp.status_code == 200
+        assert mock_upsert.call_args.kwargs["author_id"] == derived
+        assert mock_upsert.call_args.kwargs["author_id"] != forged
+    finally:
+        app.dependency_overrides.clear()
