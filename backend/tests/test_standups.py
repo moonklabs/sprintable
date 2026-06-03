@@ -221,6 +221,27 @@ async def test_add_feedback_invalid_type_400():
         app.dependency_overrides.clear()
 
 
+# ─── B3 회귀: standup team_members FK 완화 (migration 0074) ───────────────────
+
+def test_standup_entries_author_id_has_no_team_members_fk():
+    """B3: author_id의 team_members FK 제거 — resolve_member가 반환한 org_member.id
+    upsert 시 실DB FK violation 500이 나지 않음 (migration 0074)."""
+    from app.models.standup import StandupEntry
+
+    col = StandupEntry.__table__.c.author_id
+    referred = {fk.column.table.name for fk in col.foreign_keys}
+    assert "team_members" not in referred
+
+
+def test_standup_feedback_feedback_by_id_has_no_team_members_fk():
+    """feedback_by_id도 동일 anchor 방향 — team_members FK 선제 완화 (migration 0074)."""
+    from app.models.standup import StandupFeedback
+
+    col = StandupFeedback.__table__.c.feedback_by_id
+    referred = {fk.column.table.name for fk in col.foreign_keys}
+    assert "team_members" not in referred
+
+
 # ─── SID:6a1e8b1d 회귀: self-save PUT — author_id server 도출 + 위조 차단 ──────
 
 @pytest.mark.anyio
