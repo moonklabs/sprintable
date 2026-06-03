@@ -8,7 +8,6 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.dependencies.auth import AuthContext, get_current_user, get_verified_org_id
 from app.dependencies.database import get_db
 from app.models.pm import Story
-from app.models.standup import StandupEntry
 from app.models.team import TeamMember
 from app.repositories.sprint import SprintRepository
 from app.schemas.sprint import KickoffBody, SprintCreate, SprintResponse, SprintUpdate
@@ -224,30 +223,29 @@ async def checkin_sprint(
     )
     stories = stories_result.all()
 
-    members_result = await db.execute(
-        select(TeamMember.id, TeamMember.name).where(
-            TeamMember.project_id == sprint.project_id,
-            TeamMember.is_active.is_(True),
-        )
-    )
-    members = members_result.all()
+    # AC3-3(T3, #1167 회귀 방지): standup 미제출자를 canonical members.id로 집계 — team_members vs raw
+    # author_id 직접 비교는 canonical 저장분을 못 보고 레거시 휴먼을 "제출했는데 missing"으로 오판한다.
+    # repository.get_missing(effective 휴먼 access ∪ alias 정규화)와 동일 SSOT. 이름은 members(canonical).
+    from app.models.member import Member
+    from app.repositories.standup import StandupEntryRepository
 
-    standup_result = await db.execute(
-        select(StandupEntry.author_id).where(
-            StandupEntry.project_id == sprint.project_id,
-            StandupEntry.date == checkin_date,
-        )
+    missing_ids = await StandupEntryRepository(db, repo.org_id).get_missing(
+        sprint.project_id, checkin_date
     )
-    standup_author_ids = {row.author_id for row in standup_result}
+    name_map: dict[uuid.UUID, str] = {}
+    if missing_ids:
+        name_rows = await db.execute(
+            select(Member.id, Member.name).where(Member.id.in_(missing_ids))
+        )
+        name_map = {mid: nm for mid, nm in name_rows.all()}
 
     total_stories = len(stories)
     total_points = sum(s.story_points or 0 for s in stories)
     done_points = sum(s.story_points or 0 for s in stories if s.status == "done")
     completion_pct = round((done_points / total_points) * 100) if total_points > 0 else 0
     missing_standups = [
-        {"id": str(m.id), "name": m.name}
-        for m in members
-        if m.id not in standup_author_ids
+        {"id": str(mid), "name": name_map.get(mid, str(mid))}
+        for mid in missing_ids
     ]
 
     return {

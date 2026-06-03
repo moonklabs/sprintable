@@ -40,7 +40,9 @@ async def list_standups(
     if project_id:
         filters["project_id"] = project_id
     if author_id:
-        filters["author_id"] = author_id
+        # AC3-3(T3, #1167 회귀 방지): 조회 필터도 canonical 정규화 — 카드가 레거시 team_member.id로
+        # 조회해도 canonical 저장분과 매칭(raw 필터면 saved-but-not-displayed 재발).
+        filters["author_id"] = await canonicalize_member_id(author_id, repo.session)
     if sprint_id:
         filters["sprint_id"] = sprint_id
     if date_filter:
