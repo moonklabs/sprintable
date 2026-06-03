@@ -29,7 +29,7 @@ from app.dependencies.auth import (
 )
 from app.dependencies.database import get_db
 from app.models.event import Event
-from app.models.team import TeamMember
+from app.services.member_resolver import resolve_member_identity
 
 router = APIRouter(prefix="/api/v2/events", tags=["events"])
 
@@ -211,18 +211,13 @@ async def agent_event_stream(
         resolved_member_id = member_id
 
     # member_id가 org 소속인지 검증 + AC4: JWT 경로에서 타인 stream 접근 차단
+    # E-MEMBER-SSOT Phase 0: team_member 강요 제거 — grant-only 휴먼(org_member)도 구독 허용
     async with async_session_factory() as db:
-        result = await db.execute(
-            select(TeamMember).where(
-                TeamMember.id == resolved_member_id,
-                TeamMember.org_id == org_id,
-            )
-        )
-        member_row = result.scalar_one_or_none()
+        member_row = await resolve_member_identity(resolved_member_id, org_id, db)
         if member_row is None:
             raise HTTPException(status_code=404, detail="Member not found")
 
-        # AC4: JWT 사용자는 자신의 team_member(user_id 일치)에만 구독 허용
+        # AC4: JWT 사용자는 자신의 신원(user_id 일치)에만 구독 허용
         if not is_api_key:
             if member_row.user_id is None or str(member_row.user_id) != auth.user_id:
                 raise HTTPException(status_code=403, detail="Cannot subscribe to another member's stream")
@@ -414,18 +409,12 @@ async def create_event(
     미연결이면 status=pending 유지.
     Channel Router(S-A6)로 preference 기반 채널 결정 후 전달.
     """
-    from app.models.team import TeamMember
-
     # recipient가 동일 org 소속인지 + type 확정
-    result = await db.execute(
-        select(TeamMember.type).where(
-            TeamMember.id == body.recipient_id,
-            TeamMember.org_id == org_id,
-        )
-    )
-    member_type = result.scalar_one_or_none()
-    if member_type is None:
+    # E-MEMBER-SSOT Phase 0: grant-only 휴먼(org_member)도 수신자로 허용
+    recipient = await resolve_member_identity(body.recipient_id, org_id, db)
+    if recipient is None:
         raise HTTPException(status_code=404, detail="Recipient not found")
+    member_type = recipient.type
 
     event = Event(
         project_id=body.project_id,

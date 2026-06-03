@@ -22,7 +22,13 @@ from app.models.team import TeamMember
 from app.models.webhook_config import WebhookConfig
 from app.routers.events import _push_to_agent, publish_event
 from app.services.event_seq import assign_recipient_seq
-from app.services.member_resolver import ResolvedMember, lookup_members_by_ids, resolve_member
+from app.services.member_resolver import (
+    ResolvedMember,
+    filter_org_member_ids,
+    lookup_members_by_ids,
+    resolve_member,
+    resolve_member_identity,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -594,9 +600,8 @@ async def add_participant(
         raise HTTPException(status_code=403, detail="Not a participant")
 
     # 추가 대상 멤버가 같은 org인지 확인
-    target = (await db.execute(
-        select(TeamMember).where(TeamMember.id == body.member_id, TeamMember.org_id == org_id)
-    )).scalar_one_or_none()
+    # E-MEMBER-SSOT Phase 0: grant-only 휴먼(org_member)도 참가자로 추가 허용
+    target = await resolve_member_identity(body.member_id, org_id, db)
     if target is None:
         raise HTTPException(status_code=404, detail="Member not found")
 
@@ -679,12 +684,8 @@ async def send_message(
     fork_info: dict | None = None
     if conv.type == "dm" and body.mentioned_ids:
         # cross-org 차단: mentioned_ids를 현재 org 소속 member로 필터링
-        valid_member_ids = set((await db.execute(
-            select(TeamMember.id).where(
-                TeamMember.id.in_(body.mentioned_ids),
-                TeamMember.org_id == org_id,
-            )
-        )).scalars().all())
+        # E-MEMBER-SSOT Phase 0: grant-only 휴먼(org_member) 멘션도 포크 대상에 포함
+        valid_member_ids = await filter_org_member_ids(set(body.mentioned_ids), org_id, db)
 
         current_participant_ids = set((await db.execute(
             select(ConversationParticipant.member_id)
