@@ -1179,7 +1179,9 @@ async def switch_organization(
 
     await session.commit()
 
-    project_id = app_metadata.get("project_id") or (str(team_member.project_id) if team_member else None)
+    # E-MEMBER-SSOT AC2-2: undefined team_member 참조 제거 (8a5f260c switch500 해소).
+    # project_id는 위에서 target_project_id(effective access 기반)로 이미 확정/제거됨.
+    project_id = app_metadata.get("project_id")
     return _ok({**tokens, "project_id": project_id})
 
 
