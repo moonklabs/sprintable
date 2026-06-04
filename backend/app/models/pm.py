@@ -50,7 +50,8 @@ class Epic(Base, OrgScopedMixin, TimestampMixin):
         UUID(as_uuid=True), ForeignKey("projects.id", ondelete="CASCADE"), nullable=False, index=True
     )
     # E-MEMBER-SSOT AC3-2: team_members FK 완화 — grant-only 휴먼(org_member.id) 할당 500 해소
-    # (migration 0078). canonical 식별자는 assignee_id_v2. 컬럼·nullable 유지.
+    # (0078). canonical은 legacy 컬럼이 canonicalize_member_id로 보유((A) resolver-cutover);
+    # 백필-only vestigial assignee_id_v2는 0090서 DROP. 컬럼·nullable 유지.
     assignee_id: Mapped[uuid.UUID | None] = mapped_column(
         UUID(as_uuid=True), nullable=True
     )
@@ -88,7 +89,8 @@ class Story(Base, OrgScopedMixin, TimestampMixin, SoftDeleteMixin):
         UUID(as_uuid=True), ForeignKey("sprints.id", ondelete="SET NULL"), nullable=True
     )
     # E-MEMBER-SSOT AC3-2: team_members FK 완화 — grant-only 휴먼(org_member.id) 할당 500 해소
-    # (migration 0078). canonical 식별자는 assignee_id_v2. 컬럼·nullable 유지.
+    # (0078). canonical은 legacy 컬럼이 canonicalize_member_id로 보유((A) resolver-cutover);
+    # 백필-only vestigial assignee_id_v2는 0090서 DROP. 컬럼·nullable 유지.
     assignee_id: Mapped[uuid.UUID | None] = mapped_column(
         UUID(as_uuid=True), nullable=True
     )
@@ -125,7 +127,8 @@ class Task(Base, OrgScopedMixin, TimestampMixin, SoftDeleteMixin):
         UUID(as_uuid=True), ForeignKey("stories.id", ondelete="CASCADE"), nullable=False, index=True
     )
     # E-MEMBER-SSOT AC3-2: team_members FK 완화 — grant-only 휴먼(org_member.id) 할당 500 해소
-    # (migration 0078). canonical 식별자는 assignee_id_v2. 컬럼·nullable 유지.
+    # (0078). canonical은 legacy 컬럼이 canonicalize_member_id로 보유((A) resolver-cutover);
+    # 백필-only vestigial assignee_id_v2는 0090서 DROP. 컬럼·nullable 유지.
     assignee_id: Mapped[uuid.UUID | None] = mapped_column(
         UUID(as_uuid=True), nullable=True
     )
