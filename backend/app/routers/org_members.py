@@ -183,6 +183,14 @@ async def delete_org_member(
         ),
         {"org_id": str(org_id), "user_id": str(existing.user_id)},
     )
+    # AC3-4 2-1 dual-write: 뷰가 is_active를 members서 읽으므로 동시 반영(cutover 전 동기).
+    await session.execute(
+        text(
+            "UPDATE members SET is_active = false"
+            " WHERE org_id = :org_id AND user_id = :user_id AND is_active = true"
+        ),
+        {"org_id": str(org_id), "user_id": str(existing.user_id)},
+    )
     # S-MBR-10 AC5: project_access grant 레코드 삭제 (soft delete는 FK CASCADE 미트리거)
     await session.execute(
         text("DELETE FROM project_access WHERE org_member_id = :om_id"),

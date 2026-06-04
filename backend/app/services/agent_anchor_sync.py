@@ -16,10 +16,9 @@ from __future__ import annotations
 import uuid
 
 from sqlalchemy import select
+from sqlalchemy import update as sa_update
 from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.ext.asyncio import AsyncSession
-
-from sqlalchemy import select
 
 from app.models.member import AgentProjectProfile, Member
 from app.models.project import OrgMember
@@ -92,6 +91,26 @@ async def sync_agent_anchor_on_create(
         .on_conflict_do_nothing()  # (project_id, member_id) UNIQUE + (project_id, fakechat_port) 부분 UNIQUE 모두 흡수
     )
 
+    # 3. project_access direct placement (AC3-4 2-1, G3): 0075 §5 에이전트 placement 동형.
+    #    AC3-4 뷰가 role/can_manage를 project_access서 읽으므로 신규 agent도 placement 필요(누락 시 뷰서
+    #    role 기본값). member_id=tm.id(canonical), org_member_id=NULL(에이전트). ON CONFLICT 멱등.
+    from app.models.project_access import ProjectAccess
+    await session.execute(
+        pg_insert(ProjectAccess.__table__)
+        .values(
+            id=uuid.uuid4(),
+            project_id=team_member.project_id,
+            org_member_id=None,
+            member_id=team_member.id,
+            permission="granted",
+            role=team_member.role,
+            color=team_member.color,
+            can_manage_members=team_member.can_manage_members,
+            access_source="direct",
+        )
+        .on_conflict_do_nothing()  # (project_id, member_id) 부분 UNIQUE 흡수(멱등)
+    )
+
     # api_key 자동생성(create_team_member)이 같은 트랜잭션에서 members FK를 즉시 보도록 flush
     await session.flush()
 
@@ -149,3 +168,21 @@ async def ensure_human_member(session: AsyncSession, org_member_id: uuid.UUID) -
     )
     await session.flush()
     return True
+
+
+async def sync_agent_profile_presence(session: AsyncSession, member_id: uuid.UUID, **fields) -> None:
+    """AC3-4 2-1 dual-write: 에이전트 presence를 agent_project_profiles에도 반영(team_members UPDATE와 동시).
+
+    AC3-4 뷰가 last_seen_at/active_story_id/agent_status를 agent_project_profiles서 읽으므로 cutover 전
+    동기 유지. member_id(=agent team_member.id, 1:1)로 단일 profile 행 UPDATE. 행 없으면 0건(무해).
+    cutover(2-2) 후 레거시 team_members UPDATE 제거 시 이 경로가 유일 write가 된다.
+    """
+    allowed = {"last_seen_at", "active_story_id", "agent_status"}
+    upd = {k: v for k, v in fields.items() if k in allowed}
+    if not upd:
+        return
+    await session.execute(
+        sa_update(AgentProjectProfile.__table__)
+        .where(AgentProjectProfile.__table__.c.member_id == member_id)
+        .values(**upd)
+    )
