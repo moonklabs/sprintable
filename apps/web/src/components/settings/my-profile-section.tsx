@@ -1,6 +1,7 @@
 'use client';
 
 import { useCallback, useEffect, useState } from 'react';
+import { useTranslations } from 'next-intl';
 import { Button } from '@/components/ui/button';
 import { OperatorInput } from '@/components/ui/operator-control';
 import { SectionCard, SectionCardBody, SectionCardHeader } from '@/components/ui/section-card';
@@ -15,6 +16,8 @@ interface MyProfile {
 }
 
 export function MyProfileSection() {
+  const t = useTranslations('settings');
+  const tc = useTranslations('common');
   const [profile, setProfile] = useState<MyProfile | null>(null);
   const [editName, setEditName] = useState('');
   const [editing, setEditing] = useState(false);
@@ -42,7 +45,7 @@ export function MyProfileSection() {
         body: JSON.stringify({ name: editName.trim() }),
       });
       if (!res.ok) {
-        setError('저장 실패인. 다시 시도 바라는.');
+        setError(t('profileSaveError'));
         return;
       }
       const json = await res.json() as { data: MyProfile };
@@ -53,20 +56,20 @@ export function MyProfileSection() {
     }
   };
 
-  if (!profile) return <div className="text-sm text-muted-foreground">Loading...</div>;
+  if (!profile) return <div className="text-sm text-muted-foreground">{tc('loading')}</div>;
 
   return (
     <SectionCard>
       <SectionCardHeader>
         <div className="space-y-1">
-          <h2 className="text-base font-semibold">My Profile</h2>
-          <p className="text-sm text-muted-foreground">내 계정 정보인.</p>
+          <h2 className="text-base font-semibold">{t('profileTitle')}</h2>
+          <p className="text-sm text-muted-foreground">{t('profileDescription')}</p>
         </div>
       </SectionCardHeader>
       <SectionCardBody className="space-y-4">
         <div className="grid gap-3 text-sm">
           <div className="flex items-center gap-4">
-            <span className="w-20 shrink-0 text-muted-foreground">이름</span>
+            <span className="w-20 shrink-0 text-muted-foreground">{t('profileName')}</span>
             {editing ? (
               <div className="flex items-center gap-2">
                 <OperatorInput
@@ -76,35 +79,35 @@ export function MyProfileSection() {
                   autoFocus
                 />
                 <Button size="sm" disabled={saving} onClick={() => void handleSave()}>
-                  {saving ? '...' : '저장'}
+                  {saving ? tc('loading') : tc('save')}
                 </Button>
                 <Button size="sm" variant="ghost" disabled={saving} onClick={() => { setEditing(false); setEditName(profile.name); }}>
-                  취소
+                  {tc('cancel')}
                 </Button>
               </div>
             ) : (
               <div className="flex items-center gap-2">
                 <span>{profile.name}</span>
                 <Button size="sm" variant="ghost" className="h-6 text-xs" onClick={() => setEditing(true)}>
-                  편집
+                  {t('profileEdit')}
                 </Button>
               </div>
             )}
           </div>
           {error && <p className="text-xs text-destructive">{error}</p>}
           <div className="flex items-center gap-4">
-            <span className="w-20 shrink-0 text-muted-foreground">이메일</span>
+            <span className="w-20 shrink-0 text-muted-foreground">{t('profileEmail')}</span>
             <span className="text-muted-foreground">{profile.email ?? '—'}</span>
           </div>
           <div className="flex items-center gap-4">
-            <span className="w-20 shrink-0 text-muted-foreground">역할</span>
+            <span className="w-20 shrink-0 text-muted-foreground">{t('profileRole')}</span>
             <span>{profile.role}</span>
           </div>
         </div>
 
         {/* 신뢰점수 카드 */}
         <div className="pt-2">
-          <p className="mb-2 text-xs font-medium text-muted-foreground">신뢰 점수</p>
+          <p className="mb-2 text-xs font-medium text-muted-foreground">{t('profileTrustScore')}</p>
           <TrustScoreCard memberId={profile.id} />
         </div>
       </SectionCardBody>
