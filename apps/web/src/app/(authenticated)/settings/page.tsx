@@ -110,13 +110,24 @@ function isWebhookUrlAllowed(url: string): boolean {
   return /^http:\/\/(localhost|127\.\d+\.\d+\.\d+|192\.168\.\d+\.\d+|10\.\d+\.\d+\.\d+|172\.(1[6-9]|2\d|3[01])\.\d+\.\d+)/i.test(url);
 }
 
+// E-SETTINGS-IA: deprecate(숨김)된 settings 탭. 컴포넌트/route는 보존(reversible) —
+// 탭 트리거·콘텐츠·딥링크(?tab=)만 차단한다. 재노출 시 이 set에서 제거만 하면 IA 위치 복원.
+const HIDDEN_SETTINGS_TABS = new Set<string>(['ai']);
+const DEFAULT_SETTINGS_TAB = 'profile';
+
+// ?tab= 딥링크가 숨김 탭을 가리키면 기본 탭으로 폴백 (빈 화면 방지).
+function resolveSettingsTab(tab: string | null): string {
+  if (!tab || HIDDEN_SETTINGS_TABS.has(tab)) return DEFAULT_SETTINGS_TAB;
+  return tab;
+}
+
 export default function SettingsPage() {
   const t = useTranslations('settings');
   const tc = useTranslations('common');
   const router = useRouter();
   const searchParamsHook = useSearchParams();
   const { orgId: ctxOrgId, orgMemberships } = useDashboardContext();
-  const [activeTab, setActiveTab] = useState(() => searchParamsHook.get('tab') ?? 'profile');
+  const [activeTab, setActiveTab] = useState(() => resolveSettingsTab(searchParamsHook.get('tab')));
   const [lnbOpen, setLnbOpen] = useState(false);
   const { toasts, addToast, dismissToast } = useToast();
 
@@ -127,7 +138,7 @@ export default function SettingsPage() {
 
   useEffect(() => {
     const tab = searchParamsHook.get('tab');
-    if (tab) setActiveTab(tab);
+    if (tab) setActiveTab(resolveSettingsTab(tab));
   }, [searchParamsHook]);
 
   const [orgId, setOrgId] = useState<string | null>(null);
@@ -766,7 +777,7 @@ export default function SettingsPage() {
             </TabsTrigger>
 
             <span className="px-2 pb-1 pt-4 text-[10px] font-medium uppercase tracking-wider text-muted-foreground/70">{t('projectSettings')}</span>
-            {currentProjectId ? (
+            {currentProjectId && !HIDDEN_SETTINGS_TABS.has('ai') ? (
               <TabsTrigger value="ai">
                 <Bot className="h-4 w-4" />
                 {t('tabAiAgents')}
@@ -1007,17 +1018,21 @@ export default function SettingsPage() {
               </div>
             </TabsContent>
 
-            <TabsContent value="ai">
-              <div className="space-y-6">
-                {currentProjectId ? (
-                  <>
-                    <AiSettingsSection projectId={currentProjectId} />
-                    <McpConnectionSettings projectId={currentProjectId} />
-                    <ByomKeyManagement projectId={currentProjectId} />
-                  </>
-                ) : null}
-              </div>
-            </TabsContent>
+            {/* E-SETTINGS-IA: deprecate 숨김. activeTab은 resolveSettingsTab로 'ai' 도달 불가지만,
+                content도 gate off하여 딥링크/forceMount 어떤 경로로도 렌더 안 되게 한다. 컴포넌트는 보존. */}
+            {!HIDDEN_SETTINGS_TABS.has('ai') ? (
+              <TabsContent value="ai">
+                <div className="space-y-6">
+                  {currentProjectId ? (
+                    <>
+                      <AiSettingsSection projectId={currentProjectId} />
+                      <McpConnectionSettings projectId={currentProjectId} />
+                      <ByomKeyManagement projectId={currentProjectId} />
+                    </>
+                  ) : null}
+                </div>
+              </TabsContent>
+            ) : null}
 
             <TabsContent value="organization">
               <SectionCard>
