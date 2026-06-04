@@ -751,3 +751,66 @@ async def test_ac3_4_team_members_projection_view():
             assert legacy_kind == "r", f"team_members_legacy 물리테이블 부재: {legacy_kind}"
     finally:
         await engine.dispose()
+
+
+# ── 0089(AC3-5 ①) project_access FK 가드 VALIDATE의 bad>0 분기(트랩#4b 실DB-only) ───────────────
+_GUARD_DO_0089_MEMBER = """
+DO $$
+DECLARE bad int;
+BEGIN
+    IF EXISTS (SELECT 1 FROM pg_constraint WHERE conname = 'fk_project_access_member') THEN
+        SELECT count(*) INTO bad FROM project_access pa
+        WHERE pa.member_id IS NOT NULL
+          AND NOT EXISTS (SELECT 1 FROM members m WHERE m.id = pa.member_id);
+        IF bad = 0 THEN
+            ALTER TABLE project_access VALIDATE CONSTRAINT fk_project_access_member;
+            RAISE NOTICE 'fk_project_access_member validated (bad=0)';
+        ELSE
+            RAISE NOTICE 'fk_project_access_member NOT VALID 유지: members 부재 referent % 건 — 점검 후 재VALIDATE 필요', bad;
+        END IF;
+    END IF;
+END $$;
+"""
+
+
+@pytest.mark.anyio
+async def test_0089_guard_validate_project_access_fk_bad_gt0():
+    """⚠️ AC3-5 ① 트랩#4b(실DB-only): 0089 가드 VALIDATE의 bad>0(RAISE NOTICE) 분기가 syntax-valid·
+    크래시 없이 NOT VALID 유지하는지. 위반행을 FK 추가 전 INSERT(NOT VALID도 신규검증) → 가드 DO 실행.
+    CI fresh-DB는 bad=0(VALIDATE)라 RAISE 분기 미발현 — % placeholder 회귀 가드(0080 교훈 동형)."""
+    from sqlalchemy import text
+    from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
+
+    engine = create_async_engine(_ASYNC_URL)
+    Session = async_sessionmaker(engine, expire_on_commit=False)
+    bad_pa = uuid.UUID("c0000000-0000-0000-0000-0000000000fa")
+    absent_member = uuid.UUID("c9000000-0000-0000-0000-0000000000fa")
+    try:
+        async with Session() as s:
+            await _seed(s)
+            await s.execute(text("DELETE FROM project_access WHERE id=:i"), {"i": str(bad_pa)})
+            # FK 잠시 DROP → 위반행(member_id가 members에 없음) INSERT → NOT VALID로 재추가(기존행 검증 보류)
+            await s.execute(text("ALTER TABLE project_access DROP CONSTRAINT IF EXISTS fk_project_access_member"))
+            await s.execute(text(
+                "INSERT INTO project_access (id,project_id,org_member_id,member_id,permission,access_source) "
+                "VALUES (:id,:p,NULL,:m,'granted','direct')"
+            ), {"id": str(bad_pa), "p": str(P1), "m": str(absent_member)})
+            await s.execute(text(
+                "ALTER TABLE project_access ADD CONSTRAINT fk_project_access_member "
+                "FOREIGN KEY (member_id) REFERENCES members(id) ON DELETE CASCADE NOT VALID"
+            ))
+            await s.commit()
+        # 가드 DO 실행 — bad>0 → RAISE NOTICE 분기(크래시·% 회귀 없이)
+        async with Session() as s:
+            await s.execute(text(_GUARD_DO_0089_MEMBER))
+            await s.commit()
+        async with Session() as s:
+            convalidated = (await s.execute(text(
+                "SELECT convalidated FROM pg_constraint WHERE conname='fk_project_access_member'"
+            ))).scalar_one()
+        assert convalidated is False, "bad>0인데 FK가 VALIDATE됨(가드 오작동)"
+    finally:
+        async with Session() as s:
+            await s.execute(text("DELETE FROM project_access WHERE id=:i"), {"i": str(bad_pa)})
+            await s.commit()
+        await engine.dispose()
