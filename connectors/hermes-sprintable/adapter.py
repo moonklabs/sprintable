@@ -32,6 +32,15 @@ except ImportError:
     HTTPX_AVAILABLE = False
     httpx = None  # type: ignore[assignment]
 
+# E-EVENT-INJECT S2: 주입 allow-list는 SDK(connectors/sdk/sprintable_sse.py)가 단일 출처.
+# hermes 런타임 path에 sdk가 없으면 sibling 디렉터리를 추가해 import (분기 중복 금지).
+try:
+    from sprintable_sse import INJECTABLE_EVENT_TYPES
+except ImportError:
+    import sys
+    sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "sdk"))
+    from sprintable_sse import INJECTABLE_EVENT_TYPES
+
 from gateway.config import Platform, PlatformConfig
 from gateway.platforms.base import (
     BasePlatformAdapter,
@@ -186,6 +195,10 @@ class SprintableAdapter(BasePlatformAdapter):
         # event shape: content/conversation_id/sender/recipient_seq are top-level
         # in conversation.message_created; SSE id: = event_id UUID (not the seq).
         payload = data.get("payload") or {}
+        # E-EVENT-INJECT S2: recommended ONLY allow-list (content 체크 전). FYI 등은 드롭.
+        event_type = data.get("event_type") or payload.get("event_type")
+        if event_type not in INJECTABLE_EVENT_TYPES:
+            return  # not a recommended inject type (e.g. status_changed FYI)
         content = (data.get("content") or payload.get("content") or "").strip()
         if not content:
             return  # nothing to inject (e.g. dispatched/system event without text)
