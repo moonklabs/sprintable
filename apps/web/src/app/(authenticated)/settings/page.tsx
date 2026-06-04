@@ -112,7 +112,7 @@ function isWebhookUrlAllowed(url: string): boolean {
 
 // E-SETTINGS-IA: deprecate(숨김)된 settings 탭. 컴포넌트/route는 보존(reversible) —
 // 탭 트리거·콘텐츠·딥링크(?tab=)만 차단한다. 재노출 시 이 set에서 제거만 하면 IA 위치 복원.
-const HIDDEN_SETTINGS_TABS = new Set<string>(['ai']);
+const HIDDEN_SETTINGS_TABS = new Set<string>(['ai', 'workflow']);
 const DEFAULT_SETTINGS_TAB = 'profile';
 
 // ?tab= 딥링크가 숨김 탭을 가리키면 기본 탭으로 폴백 (빈 화면 방지).
@@ -789,7 +789,7 @@ export default function SettingsPage() {
                 {t('tabMembers')}
               </TabsTrigger>
             ) : null}
-            {adminChecked && isAdmin ? (
+            {adminChecked && isAdmin && !HIDDEN_SETTINGS_TABS.has('workflow') ? (
               <TabsTrigger value="workflow">
                 <GitBranch className="h-4 w-4" />
                 {t('tabWorkflow')}
@@ -1455,7 +1455,8 @@ export default function SettingsPage() {
             </TabsContent>
             ) : null}
 
-            {adminChecked && isAdmin ? (
+            {/* E-SETTINGS-IA S2: deprecate 숨김. set 확장으로 trigger·content·딥링크(resolveSettingsTab) 일괄 차단. 컴포넌트 보존. */}
+            {adminChecked && isAdmin && !HIDDEN_SETTINGS_TABS.has('workflow') ? (
             <TabsContent value="workflow">
               <div className="space-y-6">
                 <WorkflowTriggerTypesSection />
