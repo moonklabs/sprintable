@@ -129,12 +129,17 @@ async def dispatch_entity(
     except Exception:
         pass
 
+    # E-EVENT-INJECT S1: connector(adapter.py)가 content 없는 이벤트를 드롭(if not content: return)하므로
+    # dispatched에 top-level content를 부여 → 에이전트 work-turn으로 실제 주입.
+    _detail = (body.message or description or "").strip()
+    content = f"[{body.entity_type}] {title}" + (f" — {_detail}" if _detail else "")
     payload = {
         "entity_type": body.entity_type,
         "entity_id": str(body.entity_id),
         "title": title,
         "description": (description or "")[:500],
         "message": body.message,
+        "content": content,
         "timestamp": datetime.now(timezone.utc).isoformat(),
     }
 

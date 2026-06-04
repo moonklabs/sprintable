@@ -96,6 +96,8 @@ async def _fetch_events(
 
 def _row_to_payload(row: object) -> dict:
     """_fetch_events row â SSE payload dict."""
+    _payload = (json.loads(row.payload)  # type: ignore[attr-defined]
+               if isinstance(row.payload, str) else row.payload)
     return {
         "event_id": row.event_id,  # type: ignore[attr-defined]
         "event_type": row.event_type,  # type: ignore[attr-defined]
@@ -105,8 +107,9 @@ def _row_to_payload(row: object) -> dict:
             "id": row.source_entity_id,  # type: ignore[attr-defined]
         },
         "sender_id": row.sender_id,  # type: ignore[attr-defined]
-        "payload": (json.loads(row.payload)  # type: ignore[attr-defined]
-                   if isinstance(row.payload, str) else row.payload),
+        "payload": _payload,
+        # E-EVENT-INJECT S1: content를 SSE top-level로 노출 → connector 드롭 방지.
+        "content": (_payload or {}).get("content"),
         "created_at": row.created_at.isoformat(),  # type: ignore[attr-defined]
     }
 
