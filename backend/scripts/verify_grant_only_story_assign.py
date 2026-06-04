@@ -68,13 +68,12 @@ async def main() -> int:
             om = OrgMember(org_id=org_id, user_id=u.id, role="member")  # owner/admin 아님 = 순수 grant 의존
             s.add(om)
             await s.flush()
+            # 실 grant 플로우(create_project_access)와 동형: org_member_id만 세팅, member_id는 NULL.
+            # member_id=om.id로 채우면 fk_project_access_member(members 미존재) 위반 — 실 grant은 member_id 안 씀.
             pa = ProjectAccess(
                 project_id=project_id,
                 org_member_id=om.id,
                 permission="granted",
-                member_id=om.id,
-                role="member",
-                access_source="direct",
             )
             s.add(pa)
             story = Story(org_id=org_id, project_id=project_id, title=f"grant-only assign verify {suffix}")
