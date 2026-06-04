@@ -443,6 +443,11 @@ export function KanbanBoard({ projectId }: KanbanBoardProps) {
     return true;
   });
 
+  // counter fix: 필터 활성 시 column counter는 filtered(로드된) 개수, 비활성 시 백엔드 total(페이지네이션 "20+" 유지).
+  const filterActive = Boolean(
+    selectedEpicId || selectedAssigneeId || assigneeTypeFilter || selectedLabelIds.length > 0 || searchQuery,
+  );
+
   // position 기준으로 정렬
   const storiesByColumn = (columnId: string): KanbanStory[] => {
     const col = filteredStories.filter((s) => s.status === columnId);
@@ -1134,7 +1139,7 @@ export function KanbanBoard({ projectId }: KanbanBoardProps) {
                     blockedByMap={blockedByMap}
                     storyLabelsMap={storyLabelsMap}
                     storyGatesMap={storyGatesMap}
-                    totalCount={columnTotals[col.id]}
+                    totalCount={filterActive ? colStories.length : columnTotals[col.id]}
                     hasMore={!!columnCursors[col.id]}
                     loadingMore={loadingMoreColumns[col.id] ?? false}
                     onLoadMore={() => handleLoadMore(col.id)}
