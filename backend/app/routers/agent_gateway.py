@@ -31,6 +31,14 @@ router = APIRouter(prefix="/api/v2/agent", tags=["agent-gateway"])
 _SSE_HEARTBEAT: float = float(os.getenv("SSE_HEARTBEAT_TIMEOUT", "30"))
 _BACKFILL_LIMIT: int = int(os.getenv("AGENT_GATEWAY_BACKFILL_LIMIT", "100"))
 
+# E-INFRA S4: /agent/stream 전역 연결 cap (legacy /events/stream S20 미러).
+# 무제한 agent stream 연결이 인스턴스 메모리/큐(=connection당 Queue maxsize=200)를 고갈시키는 것 방지.
+# ⚠️ legacy /events/stream(_MAX_SSE_CONNECTIONS)과 **별도 카운터** — 두 엔드포인트는 클라이언트
+#   특성(agent API key·장수명 dial-out vs 휴먼 브라우저 SSE)과 수명이 달라 독립 튜닝이 적절하고,
+#   legacy /events/stream은 폐기 수순이라 카운터 통합 시 잘못된 상호 제약이 생긴다. → 분리 유지.
+_MAX_AGENT_SSE_CONNECTIONS: int = int(os.getenv("MAX_AGENT_SSE_CONNECTIONS", "100"))
+_agent_sse_connection_count: int = 0
+
 # âââ wake_agent: commit í í ìë¦¼ ââââââââââââââââââââââââââââââââââââââââââââ
 
 def wake_agent(agent_id: str, seq: int, _from_listener: bool = False) -> None:
@@ -183,6 +191,13 @@ async def agent_stream(
     start_seq = max(acked_seq, header_seq)
     agent_id_str = str(agent_id)
 
+    # E-INFRA S4: 전역 agent stream 연결 cap — 초과 시 503 (legacy events.py:234-237 미러).
+    # 증가 직후 진입하는 generate()의 finally에서 반드시 decrement (disconnect/GeneratorExit 누수 방지).
+    global _agent_sse_connection_count
+    if _agent_sse_connection_count >= _MAX_AGENT_SSE_CONNECTIONS:
+        raise HTTPException(status_code=503, detail="Agent stream connection limit reached")
+    _agent_sse_connection_count += 1
+
     queue: asyncio.Queue[dict] = asyncio.Queue(maxsize=200)
     _agent_connections[agent_id_str].add(queue)
 
@@ -246,6 +261,9 @@ async def agent_stream(
         except (asyncio.CancelledError, GeneratorExit):
             pass
         finally:
+            # E-INFRA S4: 연결 cap decrement (legacy events.py:380-381 미러) — 항상 실행.
+            global _agent_sse_connection_count
+            _agent_sse_connection_count -= 1
             _agent_connections[agent_id_str].discard(queue)
             if not _agent_connections[agent_id_str]:
                 _agent_connections.pop(agent_id_str, None)
