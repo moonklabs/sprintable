@@ -26,3 +26,4 @@ class OrgMemberResponse(BaseModel):
     created_at: datetime
     deleted_at: datetime | None = None
     email: str | None = None
+    name: str | None = None  # E-ONBOARDING S2: 실명(canonical Member.name → display_name → email)

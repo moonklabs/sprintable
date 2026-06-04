@@ -67,7 +67,8 @@ async def get_me(
             if org_member:
                 user_result = await session.execute(select(User).where(User.id == uid))
                 user = user_result.scalar_one_or_none()
-                name = user.email if user else str(uid)
+                # E-ONBOARDING S2: display_name 우선, 없을 때만 email (기존 무조건 email → 실명 반영)
+                name = (user.display_name or user.email) if user else str(uid)
                 try:
                     proj_id = uuid.UUID(project_id_str) if project_id_str else org_member.org_id
                 except (ValueError, AttributeError):
@@ -78,6 +79,7 @@ async def get_me(
                     project_id=proj_id,
                     user_id=uid,
                     name=name,
+                    email=user.email if user else None,
                     type="human",
                     role=org_member.role,
                     is_active=True,
@@ -96,6 +98,7 @@ async def get_me(
         user = user_result.scalar_one_or_none()
         if user:
             data.has_password = bool(user.hashed_password)
+            data.email = user.email  # E-ONBOARDING S2: User.email 노출
 
     # S-MBR-03: org owner/admin → effective role 상속. /me role이 JWT role과 일치하도록.
     if not is_api_key and member.user_id:
