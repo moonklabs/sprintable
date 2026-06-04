@@ -1,12 +1,14 @@
 import uuid
 
 from fastapi import APIRouter, Depends, HTTPException, Query
-from sqlalchemy import or_, select, text
+from sqlalchemy import func, or_, select, text
+from sqlalchemy import update as sa_update
 from sqlalchemy.orm import joinedload
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.dependencies.auth import AuthContext, get_current_user
 from app.dependencies.database import get_db
+from app.models.member import Member
 from app.models.project import OrgMember
 from app.models.team import TeamMember
 from app.models.user import User
@@ -182,13 +184,19 @@ async def update_me(
     session: AsyncSession = Depends(get_db),
     _auth: AuthContext = Depends(get_current_user),
 ) -> MeResponse:
+    # AC3-5 ②: team_members가 뷰(0088) — multi-row 안전(휴먼 multi-project) .limit(1).first().
     result = await session.execute(
-        select(TeamMember).where(TeamMember.id == member_id)
+        select(TeamMember).where(TeamMember.id == member_id).limit(1)
     )
-    member = result.scalar_one_or_none()
+    member = result.scalars().first()
     if member is None:
         raise HTTPException(status_code=404, detail="Member not found")
-    member.name = body.name
-    await session.flush()
-    await session.refresh(member)
-    return MeResponse.model_validate(member)
+    # AC3-5 ②: 뷰는 write 불가 — ORM mutation+flush 대신 name을 members 앵커에 UPDATE. expire 후 뷰 재조회.
+    await session.execute(
+        sa_update(Member).where(Member.id == member_id).values(name=body.name, updated_at=func.now())
+    )
+    session.expire(member)
+    refreshed = (await session.execute(
+        select(TeamMember).where(TeamMember.id == member_id).limit(1)
+    )).scalars().first()
+    return MeResponse.model_validate(refreshed or member)
