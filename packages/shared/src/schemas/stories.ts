@@ -49,6 +49,12 @@ export const updateStorySchema = z.object({
   story_points: storySpSchema.optional().nullable(),
   description: z.string().optional().nullable(),
   acceptance_criteria: z.string().optional().nullable(),
+  attachments: z.array(z.object({
+    url: z.string(),
+    name: z.string(),
+    content_type: z.string(),
+    size: z.number(),
+  })).max(10).optional().nullable(),
   epic_id: z.string().optional().nullable(),
   sprint_id: z.string().optional().nullable(),
   assignee_id: z.string().optional().nullable(),
