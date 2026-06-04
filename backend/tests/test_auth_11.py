@@ -91,6 +91,7 @@ def _make_member(role: str = "member") -> MagicMock:
     m.created_at = datetime(2026, 5, 1, tzinfo=timezone.utc)
     m.deleted_at = None
     m.email = None
+    m.name = "Test Member"  # E-ONBOARDING S2: OrgMemberResponse.name
     return m
 
 
