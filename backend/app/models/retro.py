@@ -23,7 +23,7 @@ class RetroSession(Base, OrgScopedMixin, TimestampMixin):
         UUID(as_uuid=True), ForeignKey("sprints.id", ondelete="SET NULL"), nullable=True
     )
     created_by: Mapped[uuid.UUID | None] = mapped_column(
-        UUID(as_uuid=True), ForeignKey("team_members.id", ondelete="SET NULL"), nullable=True
+        UUID(as_uuid=True), nullable=True
     )
     title: Mapped[str] = mapped_column(Text, nullable=False)
     phase: Mapped[str] = mapped_column(Text, nullable=False, default="collect")
@@ -40,7 +40,7 @@ class RetroItem(Base):
         UUID(as_uuid=True), ForeignKey("retro_sessions.id", ondelete="CASCADE"), nullable=False, index=True
     )
     author_id: Mapped[uuid.UUID | None] = mapped_column(
-        UUID(as_uuid=True), ForeignKey("team_members.id", ondelete="SET NULL"), nullable=True
+        UUID(as_uuid=True), nullable=True
     )
     category: Mapped[str] = mapped_column(Text, nullable=False)
     text: Mapped[str] = mapped_column(Text, nullable=False)
@@ -61,7 +61,7 @@ class RetroVote(Base):
         UUID(as_uuid=True), ForeignKey("retro_items.id", ondelete="CASCADE"), nullable=False, index=True
     )
     voter_id: Mapped[uuid.UUID] = mapped_column(
-        UUID(as_uuid=True), ForeignKey("team_members.id", ondelete="CASCADE"), nullable=False
+        UUID(as_uuid=True), nullable=False
     )
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now(), nullable=False
@@ -78,7 +78,7 @@ class RetroAction(Base):
         UUID(as_uuid=True), ForeignKey("retro_sessions.id", ondelete="CASCADE"), nullable=False, index=True
     )
     assignee_id: Mapped[uuid.UUID | None] = mapped_column(
-        UUID(as_uuid=True), ForeignKey("team_members.id", ondelete="SET NULL"), nullable=True
+        UUID(as_uuid=True), nullable=True
     )
     title: Mapped[str] = mapped_column(Text, nullable=False)
     status: Mapped[str] = mapped_column(Text, nullable=False, default="open")
