@@ -1907,6 +1907,7 @@
     "workflowVersionAddedRules": "+{count}",
     "workflowVersionRemovedRules": "-{count}",
     "workflowVersionChangedRules": "~{count}",
+    "title": "Agents",
     "tabDeployments": "Deployments",
     "tabPerformance": "Performance",
     "autoBadge": "Auto",
