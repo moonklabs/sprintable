@@ -43,12 +43,16 @@ async def grant_reward(
     body: GrantReward,
     repo: RewardRepository = Depends(_get_repo),
 ) -> RewardLedgerResponse:
+    # AC3-2d(2): member_id(수령자)·granted_by(지급자) canonical 정규화. (A) write. agent id는 no-op.
+    from app.services.member_resolver import canonicalize_member_id
+    member_id = await canonicalize_member_id(body.member_id, repo.session)
+    granted_by = (await canonicalize_member_id(body.granted_by, repo.session)) if body.granted_by else None
     entry = await repo.grant(
         project_id=body.project_id,
-        member_id=body.member_id,
+        member_id=member_id,
         amount=body.amount,
         reason=body.reason,
-        granted_by=body.granted_by,
+        granted_by=granted_by,
         reference_type=body.reference_type,
         reference_id=body.reference_id,
     )

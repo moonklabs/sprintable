@@ -43,27 +43,53 @@ async def _resolve_api_key(raw_key: str, db: AsyncSession) -> AuthContext:
     if not api_key:
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid API key")
 
-    member_result = await db.execute(
-        select(TeamMember)
-        .where(TeamMember.id == api_key.team_member_id)
-        .where(TeamMember.is_active.is_(True))
-    )
-    member = member_result.scalar_one_or_none()
-    if not member:
-        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="API key member not found")
-
     # fire-and-forget last_used_at 업데이트
     api_key.last_used_at = now
-
     scope: list[str] = api_key.scope or ["read", "write"]
-    org_id = str(member.org_id)
-    project_id = str(member.project_id)
+
+    # AC3-1: 신원 해소를 플래그로 cut. ⚠️ 생명선 — 0075 1:1(member.id=team_member.id)로
+    # user_id 동일 = 무중단. 기본 off(레거시), 실 에이전트 무중단 실증 후 단계 on.
+    from app.core.config import settings as _settings
+    if _settings.member_ssot_apikey_cut:
+        # anchor cut: members.id 기반. project_id는 agent_project_profiles 경유(ORDER BY 결정성).
+        from app.models.member import AgentProjectProfile, Member
+        m = (await db.execute(
+            select(Member).where(
+                Member.id == api_key.member_id,
+                Member.type == "agent",
+                Member.is_active.is_(True),
+                Member.deleted_at.is_(None),
+            )
+        )).scalar_one_or_none()
+        if not m:
+            raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="API key member not found")
+        proj = (await db.execute(
+            select(AgentProjectProfile.project_id)
+            .where(AgentProjectProfile.member_id == m.id)
+            .order_by(AgentProjectProfile.created_at.asc())
+            .limit(1)
+        )).scalar_one_or_none()
+        member_id = m.id
+        org_id = str(m.org_id)
+        project_id = str(proj) if proj else None
+    else:
+        # 레거시: team_members 경로
+        member = (await db.execute(
+            select(TeamMember)
+            .where(TeamMember.id == api_key.team_member_id)
+            .where(TeamMember.is_active.is_(True))
+        )).scalar_one_or_none()
+        if not member:
+            raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="API key member not found")
+        member_id = member.id
+        org_id = str(member.org_id)
+        project_id = str(member.project_id)
 
     return AuthContext(
-        user_id=str(member.id),
+        user_id=str(member_id),
         email=None,
         claims={
-            "sub": str(member.id),
+            "sub": str(member_id),
             "app_metadata": {
                 "org_id": org_id,
                 "project_id": project_id,

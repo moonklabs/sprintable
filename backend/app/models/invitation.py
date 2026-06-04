@@ -18,7 +18,7 @@ class Invitation(Base):
         UUID(as_uuid=True), ForeignKey("projects.id", ondelete="CASCADE"), nullable=True, index=True
     )
     invited_by: Mapped[uuid.UUID] = mapped_column(
-        UUID(as_uuid=True), ForeignKey("team_members.id", ondelete="CASCADE"), nullable=False
+        UUID(as_uuid=True), nullable=False
     )
     email: Mapped[str] = mapped_column(Text, nullable=False)
     role: Mapped[str] = mapped_column(Text, nullable=False, default="member")

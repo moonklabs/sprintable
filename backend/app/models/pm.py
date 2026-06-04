@@ -49,8 +49,11 @@ class Epic(Base, OrgScopedMixin, TimestampMixin):
     project_id: Mapped[uuid.UUID] = mapped_column(
         UUID(as_uuid=True), ForeignKey("projects.id", ondelete="CASCADE"), nullable=False, index=True
     )
+    # E-MEMBER-SSOT AC3-2: team_members FK 완화 — grant-only 휴먼(org_member.id) 할당 500 해소
+    # (0078). canonical은 legacy 컬럼이 canonicalize_member_id로 보유((A) resolver-cutover);
+    # 백필-only vestigial assignee_id_v2는 0090서 DROP. 컬럼·nullable 유지.
     assignee_id: Mapped[uuid.UUID | None] = mapped_column(
-        UUID(as_uuid=True), ForeignKey("team_members.id", ondelete="SET NULL"), nullable=True
+        UUID(as_uuid=True), nullable=True
     )
     title: Mapped[str] = mapped_column(Text, nullable=False)
     status: Mapped[str] = mapped_column(String(20), nullable=False, default="active")
@@ -85,8 +88,11 @@ class Story(Base, OrgScopedMixin, TimestampMixin, SoftDeleteMixin):
     sprint_id: Mapped[uuid.UUID | None] = mapped_column(
         UUID(as_uuid=True), ForeignKey("sprints.id", ondelete="SET NULL"), nullable=True
     )
+    # E-MEMBER-SSOT AC3-2: team_members FK 완화 — grant-only 휴먼(org_member.id) 할당 500 해소
+    # (0078). canonical은 legacy 컬럼이 canonicalize_member_id로 보유((A) resolver-cutover);
+    # 백필-only vestigial assignee_id_v2는 0090서 DROP. 컬럼·nullable 유지.
     assignee_id: Mapped[uuid.UUID | None] = mapped_column(
-        UUID(as_uuid=True), ForeignKey("team_members.id", ondelete="SET NULL"), nullable=True
+        UUID(as_uuid=True), nullable=True
     )
     meeting_id: Mapped[uuid.UUID | None] = mapped_column(
         UUID(as_uuid=True), ForeignKey("meetings.id", ondelete="SET NULL"), nullable=True
@@ -120,8 +126,11 @@ class Task(Base, OrgScopedMixin, TimestampMixin, SoftDeleteMixin):
     story_id: Mapped[uuid.UUID] = mapped_column(
         UUID(as_uuid=True), ForeignKey("stories.id", ondelete="CASCADE"), nullable=False, index=True
     )
+    # E-MEMBER-SSOT AC3-2: team_members FK 완화 — grant-only 휴먼(org_member.id) 할당 500 해소
+    # (0078). canonical은 legacy 컬럼이 canonicalize_member_id로 보유((A) resolver-cutover);
+    # 백필-only vestigial assignee_id_v2는 0090서 DROP. 컬럼·nullable 유지.
     assignee_id: Mapped[uuid.UUID | None] = mapped_column(
-        UUID(as_uuid=True), ForeignKey("team_members.id", ondelete="SET NULL"), nullable=True
+        UUID(as_uuid=True), nullable=True
     )
     title: Mapped[str] = mapped_column(Text, nullable=False)
     status: Mapped[str] = mapped_column(String(20), nullable=False, default="todo")
@@ -142,7 +151,7 @@ class StoryComment(Base, OrgScopedMixin):
     )
     content: Mapped[str] = mapped_column(Text, nullable=False)
     created_by: Mapped[uuid.UUID] = mapped_column(
-        UUID(as_uuid=True), ForeignKey("team_members.id", ondelete="CASCADE"), nullable=False
+        UUID(as_uuid=True), nullable=False
     )
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now(), nullable=False
@@ -163,7 +172,7 @@ class StoryActivity(Base, OrgScopedMixin):
     old_value: Mapped[str | None] = mapped_column(Text, nullable=True)
     new_value: Mapped[str | None] = mapped_column(Text, nullable=True)
     created_by: Mapped[uuid.UUID] = mapped_column(
-        UUID(as_uuid=True), ForeignKey("team_members.id", ondelete="CASCADE"), nullable=False
+        UUID(as_uuid=True), nullable=False
     )
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now(), nullable=False

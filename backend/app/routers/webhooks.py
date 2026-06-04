@@ -48,8 +48,11 @@ async def upsert_webhook_config(
     body: UpsertWebhookConfig,
     repo: WebhookConfigRepository = Depends(_get_repo),
 ) -> WebhookConfigResponse:
+    # AC3-2d(2): member_id canonical 정규화(레거시 휴먼 tm.id→members.id). (A) write. agent id는 no-op.
+    from app.services.member_resolver import canonicalize_member_id
+    member_id = await canonicalize_member_id(body.member_id, repo.session)
     config = await repo.upsert(
-        member_id=body.member_id,
+        member_id=member_id,
         url=body.url,
         project_id=body.project_id,
         events=body.events,

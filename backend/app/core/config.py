@@ -48,6 +48,11 @@ class Settings(BaseSettings):
     # 라이브 cutover는 AC3-1 — 여기선 shadow(parity 검증용), 기본 off라 실 read 경로 무변경.
     member_ssot_resolver_shadow: bool = False
 
+    # E-MEMBER-SSOT AC3-1: API key 인증을 canonical members.id로 cut하는 플래그.
+    # off(기본)=team_members 경로(레거시), on=members 경로. ⚠️ 전 에이전트 통신 생명선이라
+    # 머지 후에도 off 기본 — 실 에이전트 무중단 실증 후 단계적 on.
+    member_ssot_apikey_cut: bool = False
+
     # Polar Billing SDK
     polar_access_token: str = ""
     polar_sandbox: bool = True  # dev=True(sandbox), prod=False

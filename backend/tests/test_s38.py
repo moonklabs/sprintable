@@ -126,6 +126,7 @@ async def test_account_delete_updates_org_and_team_members():
         async with client as c:
             await c.post("/api/v2/account/delete")
 
+        # AC3-4 2-2 anchor-only: org_members + **members**(anchor) UPDATE = 2 (레거시 team_members UPDATE 제거)
         assert session.execute.call_count == 2
     finally:
         app.dependency_overrides.clear()

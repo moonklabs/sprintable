@@ -256,7 +256,7 @@ async def test_update_standup_self_save_no_author_id_200():
         entry = _mock_entry()
         entry.author_id = derived_member_id
 
-        with patch("app.routers.standups.resolve_auth_member", new=AsyncMock(return_value=member)), \
+        with patch("app.routers.standups.resolve_member", new=AsyncMock(return_value=member)), \
              patch("app.repositories.standup.StandupEntryRepository.upsert", new_callable=AsyncMock) as mock_upsert:
             mock_upsert.return_value = entry
             async with client as c:
@@ -288,7 +288,7 @@ async def test_update_standup_ignores_client_author_id():
         entry = _mock_entry()
         entry.author_id = derived
 
-        with patch("app.routers.standups.resolve_auth_member", new=AsyncMock(return_value=member)), \
+        with patch("app.routers.standups.resolve_member", new=AsyncMock(return_value=member)), \
              patch("app.repositories.standup.StandupEntryRepository.upsert", new_callable=AsyncMock) as mock_upsert:
             mock_upsert.return_value = entry
             async with client as c:

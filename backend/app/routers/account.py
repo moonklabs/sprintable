@@ -25,9 +25,10 @@ async def delete_account(
         text("UPDATE org_members SET deleted_at = :now WHERE user_id = :uid::uuid"),
         {"now": now, "uid": str(uid)},
     )
+    # AC3-4 2-2: team_members 뷰 전환 — anchor-only. members가 is_active/deleted_at 유일 소스.
     await session.execute(
         text(
-            "UPDATE team_members SET deleted_at = :now, is_active = false, updated_at = :now"
+            "UPDATE members SET deleted_at = :now, is_active = false, updated_at = :now"
             " WHERE user_id = :uid::uuid"
         ),
         {"now": now, "uid": str(uid)},

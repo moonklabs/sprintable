@@ -13,6 +13,7 @@ from app.models.team import TeamMember
 from app.repositories.story import StoryRepository
 from app.routers.events import publish_event
 from app.schemas.story import StoryCreate, StoryResponse, StoryStatusUpdate, StoryUpdate
+from app.services.member_resolver import canonicalize_member_id
 from app.services.notification_dispatch import dispatch_notification
 from app.services.webhook_dispatch import fire_webhooks
 from app.services.workflow_pipeline import process_event
@@ -261,7 +262,7 @@ async def update_story(
                     activity_type="assignee_changed",
                     old_value=str(old_assignee_id) if old_assignee_id else None,
                     new_value=str(story.assignee_id) if story.assignee_id else None,
-                    created_by=actor_id,
+                    created_by=(await canonicalize_member_id(actor_id, db)),  # AC3-2d(1b) canonical
                 ))
                 await db.flush()
             except Exception:
@@ -433,7 +434,7 @@ async def update_story_status(
                     activity_type="status_changed",
                     old_value=old_status,
                     new_value=story.status,
-                    created_by=actor_id,
+                    created_by=(await canonicalize_member_id(actor_id, db)),  # AC3-2d(1b) canonical
                 ))
                 await db.flush()
             except Exception:
@@ -539,6 +540,7 @@ async def add_comment(
     if not story:
         raise HTTPException(status_code=404, detail="Story not found")
     created_by = await _resolve_team_member_id(auth, repo.org_id, db)
+    created_by = await canonicalize_member_id(created_by, db)  # AC3-2d(1b): canonical 정규화
     comment = StoryComment(
         story_id=id,
         org_id=repo.org_id,

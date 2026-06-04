@@ -63,20 +63,24 @@ def test_invitations_keeps_org_member_creation():
     assert "OrgMember" in source or "org_members" in source
 
 
-# ─── AC3: story assignee FK 정상 동작 ────────────────────────────────────────
+# ─── AC3: story/task assignee — E-MEMBER-SSOT AC3-2(0078)에서 계약 변경 ──────────
+# S5 당시: assignee_id team_members FK 유지(agent 배정).
+# AC3-2(1154dd9e, migration 0078): 그 FK가 grant-only 휴먼(org_member.id) 배정 시 실DB FK
+#   violation 500을 유발 → FK 제거. canonical 식별자는 assignee_id_v2. agent 배정은 id 값으로
+#   계속 동작(FK 강제만 해제). 따라서 team_members FK가 **없어야** 정상. [[feedback_one_sided_transition]]
 
-def test_story_assignee_fk_still_defined():
-    """Story.assignee_id FK는 team_members.id로 유지됨 (agent 배정 정상 동작)."""
+def test_story_assignee_has_no_team_members_fk():
+    """AC3-2: Story.assignee_id team_members FK 제거 — grant-only 배정 500 해소."""
     from app.models.pm import Story
-    fk_targets = [str(fk.target_fullname) for fk in Story.__table__.foreign_keys]
-    assert any("team_members" in t for t in fk_targets)
+    referred = {fk.column.table.name for fk in Story.__table__.c.assignee_id.foreign_keys}
+    assert "team_members" not in referred
 
 
-def test_task_assignee_fk_still_defined():
-    """Task.assignee_id FK는 team_members.id로 유지됨."""
+def test_task_assignee_has_no_team_members_fk():
+    """AC3-2: Task.assignee_id team_members FK 제거 — grant-only 배정 500 해소."""
     from app.models.pm import Task
-    fk_targets = [str(fk.target_fullname) for fk in Task.__table__.foreign_keys]
-    assert any("team_members" in t for t in fk_targets)
+    referred = {fk.column.table.name for fk in Task.__table__.c.assignee_id.foreign_keys}
+    assert "team_members" not in referred
 
 
 # ─── AC4: agent 영향 없음 ────────────────────────────────────────────────────

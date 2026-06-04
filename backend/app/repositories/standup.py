@@ -2,12 +2,46 @@ import uuid
 from datetime import date
 from typing import Any
 
-from sqlalchemy import select
+from sqlalchemy import select, text
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models.standup import StandupEntry, StandupFeedback
-from app.models.team import TeamMember
 from app.repositories.base import BaseRepository
+
+# AC3-3: missing 산정 — "effective 휴먼 project access"를 canonical members.id로 열거(team_members
+# 열거 대체). has_project_access 3-branch(owner/admin org-wide ∪ project_access grant ∪ 레거시 휴먼
+# team_member→alias)와 정합. submitted는 alias 정규화로 마이그 전/후 모두 canonical 대조.
+_MISSING_SQL = text(
+    """
+    WITH roster AS (
+        -- 1) owner/admin org-wide 휴먼 (canonical = org_member.id)
+        SELECT om.id AS cid
+        FROM org_members om
+        WHERE om.org_id = :org AND om.deleted_at IS NULL AND om.role IN ('owner','admin')
+        UNION
+        -- 2) project_access grant (휴먼: canonical = org_member.id). ⚠️ 실 grant 플로우
+        --    (create_project_access)는 org_member_id만 세팅하고 member_id는 NULL로 둔다(0075 백필분만
+        --    member_id 채워짐) → member_id 키는 신규 grant-only 휴먼을 누락. org_member_id로 집계.
+        --    (에이전트 direct placement는 org_member_id NULL이라 자연 제외 — 휴먼 grant만.)
+        SELECT pa.org_member_id AS cid
+        FROM project_access pa
+        JOIN org_members om2 ON om2.id = pa.org_member_id AND om2.deleted_at IS NULL
+        WHERE pa.project_id = :proj AND pa.permission = 'granted' AND pa.org_member_id IS NOT NULL
+        UNION
+        -- 3) 레거시 휴먼 team_member → canonical(alias)
+        SELECT a.member_id AS cid
+        FROM team_members tm
+        JOIN member_identity_aliases a ON a.alias_id = tm.id
+        WHERE tm.project_id = :proj AND tm.type = 'human' AND tm.is_active = true
+    ), submitted AS (
+        SELECT DISTINCT COALESCE(a.member_id, se.author_id) AS cid
+        FROM standup_entries se
+        LEFT JOIN member_identity_aliases a ON a.alias_id = se.author_id
+        WHERE se.org_id = :org AND se.project_id = :proj AND se.date = :date
+    )
+    SELECT r.cid FROM roster r WHERE r.cid NOT IN (SELECT cid FROM submitted)
+    """
+)
 
 
 class StandupEntryRepository(BaseRepository[StandupEntry]):
@@ -33,25 +67,16 @@ class StandupEntryRepository(BaseRepository[StandupEntry]):
         return await self.create(**data)
 
     async def get_missing(self, project_id: uuid.UUID, target_date: date) -> list[uuid.UUID]:
-        """해당 날짜에 스탠드업을 제출하지 않은 활성 팀 멤버 ID 목록."""
-        submitted = await self.session.execute(
-            select(StandupEntry.author_id).where(
-                self._org_filter(),
-                StandupEntry.project_id == project_id,
-                StandupEntry.date == target_date,
-            )
-        )
-        submitted_ids = {row[0] for row in submitted.all()}
+        """해당 날짜 standup 미제출 휴먼의 **canonical members.id** 목록 (AC3-3).
 
-        all_members = await self.session.execute(
-            select(TeamMember.id).where(
-                TeamMember.project_id == project_id,
-                TeamMember.is_active.is_(True),
-                TeamMember.type == "human",
-            )
+        effective 휴먼 project access(owner/admin ∪ grant ∪ 레거시 휴먼 team_member) − 제출분.
+        멀티프로젝트 휴먼이 단일 canonical 신원으로 집계돼 N-project 중복이 사라진다(48e653e9).
+        """
+        rows = await self.session.execute(
+            _MISSING_SQL,
+            {"org": self.org_id, "proj": project_id, "date": target_date},
         )
-        all_ids = {row[0] for row in all_members.all()}
-        return list(all_ids - submitted_ids)
+        return [row[0] for row in rows.all()]
 
 
 class StandupFeedbackRepository(BaseRepository[StandupFeedback]):

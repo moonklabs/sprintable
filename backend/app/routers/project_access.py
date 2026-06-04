@@ -86,10 +86,16 @@ async def create_project_access(
     )
     if existing.scalar_one_or_none() is not None:
         raise HTTPException(status_code=409, detail="Access record already exists")
+    # AC3-2c grant write-sync: canonical member_id(=org_member.id) 세팅 — AC3-4 projection의 member_id
+    # 읽기 토대 + (A) resolver-cutover 통일. 휴먼 members 행을 선행 보장(fk_project_access_member NOT VALID이나
+    # 신규 INSERT 검증). members 보장 실패(org_member 부재) 시 member_id 미세팅(레거시 호환).
+    from app.services.agent_anchor_sync import ensure_human_member
+    member_ok = await ensure_human_member(session, body.org_member_id)
     record = ProjectAccess(
         project_id=project_id,
         org_member_id=body.org_member_id,
         permission=body.permission,
+        member_id=body.org_member_id if member_ok else None,
     )
     session.add(record)
     await session.commit()

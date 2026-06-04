@@ -5,6 +5,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.dependencies.auth import AuthContext, get_current_user, get_verified_org_id
 from app.dependencies.database import get_db
+from app.services.member_resolver import canonicalize_member_id
 from app.repositories.retro import (
     RetroActionRepository,
     RetroItemRepository,
@@ -61,7 +62,8 @@ async def create_session(
         project_id=body.project_id,
         title=body.title,
         sprint_id=body.sprint_id,
-        created_by=body.created_by,
+        # AC3-2d(1b): 작성자 식별자 canonical 정규화(레거시 휴먼 tm.id→members.id). (A) write.
+        created_by=(await canonicalize_member_id(body.created_by, db)) if body.created_by else None,
     )
     return SessionListResponse.model_validate(session)
 
@@ -120,8 +122,9 @@ async def add_item(
     if session is None:
         raise HTTPException(status_code=404, detail="Retro session not found")
     item_repo = RetroItemRepository(db)
+    author_id = (await canonicalize_member_id(body.author_id, db)) if body.author_id else None
     item = await item_repo.create(
-        session_id=id, category=body.category, text=body.text, author_id=body.author_id
+        session_id=id, category=body.category, text=body.text, author_id=author_id
     )
     return ItemResponse.model_validate(item)
 
@@ -154,6 +157,7 @@ async def vote_item(
     session = await repo.get(id)
     if session is None:
         raise HTTPException(status_code=404, detail="Retro session not found")
+    voter_id = await canonicalize_member_id(voter_id, db)  # AC3-2d(1b): canonical 정규화
     vote_repo = RetroVoteRepository(db)
     try:
         vote = await vote_repo.vote(item_id, voter_id)
@@ -189,8 +193,9 @@ async def create_action(
     if session is None:
         raise HTTPException(status_code=404, detail="Retro session not found")
     action_repo = RetroActionRepository(db)
+    assignee_id = (await canonicalize_member_id(body.assignee_id, db)) if body.assignee_id else None
     action = await action_repo.create(
-        session_id=id, title=body.title, assignee_id=body.assignee_id
+        session_id=id, title=body.title, assignee_id=assignee_id
     )
     return ActionResponse.model_validate(action)
 

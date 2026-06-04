@@ -59,10 +59,13 @@ async def create_invitation(
     _: None = Depends(require_admin),
     session: AsyncSession = Depends(get_db),
 ) -> InvitationResponse:
+    # AC3-2d(1b): invited_by canonical 정규화(레거시 휴먼 tm.id→members.id). (A) write.
+    from app.services.member_resolver import canonicalize_member_id
+    invited_by = (await canonicalize_member_id(body.invited_by, session)) if body.invited_by else body.invited_by
     inv = await repo.create(
         email=body.email,
         role=body.role,
-        invited_by=body.invited_by,
+        invited_by=invited_by,
         project_id=body.project_id,
     )
     await session.commit()

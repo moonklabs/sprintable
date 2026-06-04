@@ -172,14 +172,11 @@ async def delete_org_member(
     if existing.role == "owner":
         raise HTTPException(status_code=403, detail="조직 owner는 삭제할 수 없습니다")
     await _revoke_user_refresh_tokens(repo.session, existing.user_id)
-    # cascade — team_members is_active = False
+    # AC3-4 2-2: team_members 뷰 전환 — anchor-only. members가 is_active 유일 소스(레거시 cascade 제거).
     await session.execute(
         text(
-            """
-            UPDATE team_members
-            SET is_active = false
-            WHERE org_id = :org_id AND user_id = :user_id AND is_active = true
-            """
+            "UPDATE members SET is_active = false"
+            " WHERE org_id = :org_id AND user_id = :user_id AND is_active = true"
         ),
         {"org_id": str(org_id), "user_id": str(existing.user_id)},
     )
