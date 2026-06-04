@@ -48,10 +48,16 @@ def upgrade() -> None:
             RAISE NOTICE 'AC3-5 telemetry: orphan-org members=% org_members=% / orphan project_access(org_member 부재)=% / dead revoked api_keys=%', m, om, pa, ak;
 
             -- ④ dead-org tombstone(soft·가역, 하드삭제 0): orphan-org members/org_members
-            UPDATE members SET deleted_at = now()
-             WHERE org_id NOT IN (SELECT id FROM organizations) AND deleted_at IS NULL;
-            UPDATE org_members SET deleted_at = now()
-             WHERE org_id NOT IN (SELECT id FROM organizations) AND deleted_at IS NULL;
+            -- ⚠️ 방어 가드: organizations 빈 테이블이면 `NOT IN (빈집합)=TRUE`로 전원 tombstone되는
+            --    파국 회피(현실 불가능하나 마이그 안전). organizations 비어있으면 스킵.
+            IF EXISTS (SELECT 1 FROM organizations) THEN
+                UPDATE members SET deleted_at = now()
+                 WHERE org_id NOT IN (SELECT id FROM organizations) AND deleted_at IS NULL;
+                UPDATE org_members SET deleted_at = now()
+                 WHERE org_id NOT IN (SELECT id FROM organizations) AND deleted_at IS NULL;
+            ELSE
+                RAISE NOTICE 'AC3-5 tombstone 스킵: organizations 비어있음(파국 방지 가드)';
+            END IF;
             RAISE NOTICE 'AC3-5 tombstone: orphan-org members/org_members deleted_at 설정(하드삭제 0·복구=deleted_at NULL). project_access orphan grant=% 건은 telemetry만(하드 purge 보류)', pa;
         END $$;
         """
