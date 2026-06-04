@@ -26,8 +26,14 @@ class TeamMemberRepository(BaseRepository[TeamMember]):
     async def get(self, id: uuid.UUID) -> TeamMember | None:  # type: ignore[override]
         # AC3-4 2-2: team_members가 뷰 — 휴먼은 members.id=org_member.id가 project_access 다행이라 동일
         # id로 여러 행 가능(프로젝트별). scalar_one_or_none RAISE 회피 위해 first()(에이전트는 1:1 단일행).
+        # ⚠️ order_by(project_id)로 **결정적** row 선택(휴먼 multi-project 시 비결정성 제거 — QA 소크 안정).
+        # 휴먼의 project-specific(role/color)은 team-members 단일조회/PATCH 비-플로우(=project_access 그랜트
+        # 경로로 관리); 본 first()는 is_active/name(members 공통) 안전망 + RAISE 회피가 목적.
         result = await self.session.execute(
-            select(TeamMember).where(self._org_filter(), TeamMember.id == id).limit(1)
+            select(TeamMember)
+            .where(self._org_filter(), TeamMember.id == id)
+            .order_by(TeamMember.project_id)
+            .limit(1)
         )
         return result.scalars().first()
 
