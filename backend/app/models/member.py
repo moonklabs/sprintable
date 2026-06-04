@@ -44,6 +44,11 @@ class Member(Base):
     name: Mapped[str] = mapped_column(Text, nullable=False)
     avatar_url: Mapped[str | None] = mapped_column(Text, nullable=True)
     org_role: Mapped[str | None] = mapped_column(Text, nullable=True)
+    # E-MSG-POLICY S1: agent DM 인가 모드(creator_only default|org_wide|list). 에이전트 단위 정책 —
+    # canonical 위치(team_members 뷰가 m.message_policy_mode로 투영). 휴먼은 무의미(default 유지).
+    message_policy_mode: Mapped[str] = mapped_column(
+        Text, nullable=False, server_default="creator_only", default="creator_only"
+    )
     is_active: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True, server_default="true")
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now(), nullable=False
