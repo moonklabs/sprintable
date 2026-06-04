@@ -732,6 +732,7 @@ export function EpicsClient({ projectId, orgId }: EpicsClientProps) {
   const [epicsHasMore, setEpicsHasMore] = useState(false);
   const [epicsNextCursor, setEpicsNextCursor] = useState<string | null>(null);
   const [epicsLoadingMore, setEpicsLoadingMore] = useState(false);
+  const [epicsLoadMoreError, setEpicsLoadMoreError] = useState(false);
   const [statusFilter, setStatusFilter] = useState<EpicStatus | 'all'>('all');
   const [deleteConfirmId, setDeleteConfirmId] = useState<string | null>(null);
   const [deleting, setDeleting] = useState(false);
@@ -741,17 +742,24 @@ export function EpicsClient({ projectId, orgId }: EpicsClientProps) {
       const params = new URLSearchParams({ project_id: projectId, limit: '20' });
       if (cursor) params.set('cursor', cursor);
       const res = await fetch(`/api/epics?${params.toString()}`);
-      if (!res.ok) throw new Error('Failed to fetch epics');
+      if (!res.ok) throw new Error(`Failed to fetch epics: ${res.status}`);
       const { data, meta } = await res.json() as { data: Epic[]; meta?: { hasMore?: boolean; nextCursor?: string | null } };
       if (cursor) {
-        setEpics((prev) => [...prev, ...(data ?? [])]);
+        // append 시 id 기준 중복 방어 (cursor 전진 버그 재발 대비 안전망)
+        setEpics((prev) => {
+          const seen = new Set(prev.map((e) => e.id));
+          return [...prev, ...(data ?? []).filter((e) => !seen.has(e.id))];
+        });
       } else {
         setEpics(data ?? []);
       }
       setEpicsHasMore(meta?.hasMore ?? false);
       setEpicsNextCursor(meta?.nextCursor ?? null);
-    } catch {
-      // noop — show empty state
+      setEpicsLoadMoreError(false);
+    } catch (err) {
+      // AC3: silent-swallow 금지 — 최소 로깅 + (더보기 실패 시) 인라인 표시
+      console.error('[epics] 목록을 불러오지 못했습니다', err);
+      if (cursor) setEpicsLoadMoreError(true);
     } finally {
       setLoading(false);
       setEpicsLoadingMore(false);
@@ -761,6 +769,7 @@ export function EpicsClient({ projectId, orgId }: EpicsClientProps) {
   const loadMoreEpics = useCallback(async () => {
     if (!epicsHasMore || !epicsNextCursor || epicsLoadingMore) return;
     setEpicsLoadingMore(true);
+    setEpicsLoadMoreError(false);
     await fetchEpics(epicsNextCursor);
   }, [epicsHasMore, epicsNextCursor, epicsLoadingMore, fetchEpics]);
 
@@ -874,11 +883,18 @@ export function EpicsClient({ projectId, orgId }: EpicsClientProps) {
                 onDeleteRequest={(id) => setDeleteConfirmId(id)}
               />
             ))}
-            {epicsHasMore && (
+            {epicsLoadMoreError ? (
+              <div className="flex flex-col items-center gap-1 py-2">
+                <p className="text-xs text-destructive">에픽을 더 불러오지 못했습니다.</p>
+                <Button variant="ghost" size="sm" onClick={() => void loadMoreEpics()} disabled={epicsLoadingMore}>
+                  {epicsLoadingMore ? '로딩 중...' : '다시 시도'}
+                </Button>
+              </div>
+            ) : epicsHasMore ? (
               <Button variant="ghost" size="sm" className="w-full text-muted-foreground" onClick={() => void loadMoreEpics()} disabled={epicsLoadingMore}>
                 {epicsLoadingMore ? '로딩 중...' : '더 보기'}
               </Button>
-            )}
+            ) : null}
           </div>
         )}
       </div>
