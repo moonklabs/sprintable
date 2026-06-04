@@ -52,6 +52,7 @@ from app.dependencies.auth import AuthContext, get_current_user
 from app.services.project_auth import has_project_access, first_accessible_project_id
 from app.dependencies.database import get_db
 from app.models.invitation import Invitation
+from app.models.member import Member
 from app.models.org_invite import OrgInvite
 from app.models.project import OrgMember
 from app.models.team import TeamMember
@@ -286,7 +287,9 @@ async def _build_app_metadata(user: User, session: AsyncSession) -> dict:
         member = result.scalar_one_or_none()
 
     if member and member.user_id is None:
-        member.user_id = user.id
+        # AC3-5 ②: team_members가 뷰(0088) — ORM mutation+flush(UPDATE view 실패) 대신 members 앵커 UPDATE.
+        # member.user_id is None은 사실상 미발현(뷰 휴먼 브랜치 user_id 채워짐); 레거시 미링크분만 보정.
+        await session.execute(update(Member).where(Member.id == member.id).values(user_id=user.id))
 
     if not member:
         # 2. 이메일로 pending 초대 조회 → 자동 수락 + org_member 생성

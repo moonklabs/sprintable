@@ -102,10 +102,11 @@ async def lock_files(
     _auth=Depends(get_current_user),
 ) -> dict:
     """AC1/3: 파일 lock 등록 + 충돌 시 warning 반환."""
+    # AC3-5 ②: team_members가 뷰(0088) — multi-row 안전(휴먼 multi-project) .limit(1).first().
     member_result = await session.execute(
-        select(TeamMember).where(TeamMember.id == member_id)
+        select(TeamMember).where(TeamMember.id == member_id).limit(1)
     )
-    member = member_result.scalar_one_or_none()
+    member = member_result.scalars().first()
     if member is None:
         raise HTTPException(status_code=404, detail="Team member not found")
 
