@@ -91,19 +91,26 @@ create_dev() {
 
 # ─── Prod 인스턴스 생성 ───────────────────────────────────────────────────────
 create_prod() {
-    log "Creating prod instance '${INSTANCE_PROD}' (db-custom-2-7680)..."
+    # E-INFRA S1 비용 다운사이즈: db-custom-2-7680(과스펙) → db-g1-small(1.7GB).
+    # 천장 제거의 본질은 tier가 아니라 dev/prod 분리. 초기 prod엔 small로 충분하고,
+    # 실부하 증가 시 tier만 상향하면 된다.
+    #   max_connections=100 고정 — g1-small(1.7GB) 메모리 한도. ~10MB/conn 기준
+    #     150+ 는 OOM 위험(150≈1.5GB)이라 100으로 OOM-safe 고정.
+    #     (prod 백엔드 풀 right-size는 S2에서 처리)
+    #   PITR 제외 — 초기 prod 비용 절감. 일 백업(03:00)+7일 보존으로 안전판 유지.
+    #   storage 20GB — 신규 빈 인스턴스, auto-increase 켜둠(dev=10GB 대비 소폭 상향).
+    log "Creating prod instance '${INSTANCE_PROD}' (db-g1-small)..."
     gcloud sql instances create "${INSTANCE_PROD}" \
         --database-version=POSTGRES_15 \
-        --tier=db-custom-2-7680 \
+        --tier=db-g1-small \
         --region="${GCP_REGION}" \
         --network="${VPC_NETWORK}" \
         --no-assign-ip \
         --enable-google-private-path \
         --backup-start-time=03:00 \
         --retained-backups-count=7 \
-        --enable-point-in-time-recovery \
-        --retained-transaction-log-days=7 \
-        --storage-size=50 \
+        --database-flags=max_connections=100 \
+        --storage-size=20 \
         --storage-type=SSD \
         --storage-auto-increase \
         --project="${GCP_PROJECT}"
