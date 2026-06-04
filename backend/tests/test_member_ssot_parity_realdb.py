@@ -591,3 +591,55 @@ async def test_0083_revoke_orphan_org_apikey_and_validate():
             ))
             await s.commit()
         await engine.dispose()
+
+
+@pytest.mark.anyio
+async def test_ensure_human_member_creates_anchor_idempotent():
+    """AC3-2c: ensure_human_member가 members 없는 휴먼 org_member에 members 행(id=om.id·type=human·
+    name=email)을 멱등 생성 — create_project_access가 member_id=org_member.id 세팅 전 호출(FK 충족)."""
+    from sqlalchemy import text
+    from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
+    from app.services.agent_anchor_sync import ensure_human_member
+
+    engine = create_async_engine(_ASYNC_URL)
+    Session = async_sessionmaker(engine, expire_on_commit=False)
+    new_user = uuid.UUID("b2000000-0000-0000-0000-0000000000e1")
+    new_om = uuid.UUID("b3000000-0000-0000-0000-0000000000e1")
+    try:
+        async with Session() as s:
+            await _seed(s)
+            # members 없는 신규 휴먼 org_member(0075 이후 생성 모사)
+            await s.execute(text("DELETE FROM members WHERE id=:i"), {"i": str(new_om)})
+            await s.execute(text("DELETE FROM org_members WHERE id=:i"), {"i": str(new_om)})
+            await s.execute(text("DELETE FROM users WHERE id=:i"), {"i": str(new_user)})
+            await s.execute(text(
+                "INSERT INTO users (id,email,hashed_password,display_name,is_active,email_verified,login_fail_count,totp_enabled,totp_fail_count) "
+                "VALUES (:u,'newhuman@pg.test','x','NewHuman',true,true,0,false,0)"), {"u": str(new_user)})
+            await s.execute(text(
+                "INSERT INTO org_members (id,org_id,user_id,role) VALUES (:om,:o,:u,'member')"),
+                {"om": str(new_om), "o": str(ORG), "u": str(new_user)})
+            await s.commit()
+        async with Session() as s:
+            ok = await ensure_human_member(s, new_om)
+            await s.commit()
+            assert ok is True
+            m = (await s.execute(text(
+                "SELECT type, name, user_id FROM members WHERE id=:i"), {"i": str(new_om)})).first()
+        assert m is not None and m.type == "human", "휴먼 members 미생성"
+        assert m.name == "NewHuman" and str(m.user_id) == str(new_user)
+        # 멱등: 재호출 무에러·중복 0
+        async with Session() as s:
+            await ensure_human_member(s, new_om)
+            await s.commit()
+            cnt = (await s.execute(text("SELECT count(*) FROM members WHERE id=:i"), {"i": str(new_om)})).scalar_one()
+            assert cnt == 1
+        # org_member 부재 → False(미세팅)
+        async with Session() as s:
+            assert await ensure_human_member(s, uuid.UUID("b3000000-0000-0000-0000-0000000000ee")) is False
+    finally:
+        async with Session() as s:
+            await s.execute(text("DELETE FROM members WHERE id=:i"), {"i": str(new_om)})
+            await s.execute(text("DELETE FROM org_members WHERE id=:i"), {"i": str(new_om)})
+            await s.execute(text("DELETE FROM users WHERE id=:i"), {"i": str(new_user)})
+            await s.commit()
+        await engine.dispose()

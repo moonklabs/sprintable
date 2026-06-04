@@ -19,8 +19,11 @@ from sqlalchemy import select
 from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from sqlalchemy import select
+
 from app.models.member import AgentProjectProfile, Member
 from app.models.project import OrgMember
+from app.models.user import User
 
 
 async def sync_agent_anchor_on_create(
@@ -91,3 +94,43 @@ async def sync_agent_anchor_on_create(
 
     # api_key 자동생성(create_team_member)이 같은 트랜잭션에서 members FK를 즉시 보도록 flush
     await session.flush()
+
+
+async def ensure_human_member(session: AsyncSession, org_member_id: uuid.UUID) -> bool:
+    """휴먼 org_member의 앵커 members 행을 멱등 보장(AC3-2c grant write-sync).
+
+    members.id = org_member.id (0075 휴먼 불변식). 0075 백필 동형(name=users.email/display_name).
+    project_access.member_id=org_member.id를 세팅하기 전 호출 — fk_project_access_member(NOT VALID이나
+    신규 INSERT 검증)가 members 행을 요구하므로. 신규 휴먼(0075 이후)은 members 행이 없을 수 있다.
+
+    반환: members 행이 (이미 있거나) 보장되면 True, org_member 부재/삭제면 False(호출부 미세팅).
+    """
+    om = (
+        await session.execute(
+            select(OrgMember).where(OrgMember.id == org_member_id, OrgMember.deleted_at.is_(None))
+        )
+    ).scalar_one_or_none()
+    if om is None:
+        return False
+
+    user = (
+        await session.execute(select(User).where(User.id == om.user_id))
+    ).scalar_one_or_none()
+    name = (getattr(user, "display_name", None) or getattr(user, "email", None) or str(om.user_id)) if user else str(om.user_id)
+
+    await session.execute(
+        pg_insert(Member.__table__)
+        .values(
+            id=om.id,  # 0075 불변식: 휴먼 members.id = org_member.id
+            org_id=om.org_id,
+            type="human",
+            user_id=om.user_id,
+            owner_member_id=None,
+            name=name,
+            org_role=om.role,
+            is_active=True,
+        )
+        .on_conflict_do_nothing(index_elements=["id"])
+    )
+    await session.flush()
+    return True
