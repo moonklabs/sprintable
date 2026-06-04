@@ -511,3 +511,83 @@ async def test_0082_guard_validate_raise_branch_bad_gt0():
             ))
             await s.commit()
         await engine.dispose()
+
+
+# ── 0083: orphan-org dead agent api_key revoke + member_id NULL + FK VALIDATE ──────────────────────
+_DO_0083 = f"""
+DO $$
+DECLARE revoked int; bad int;
+BEGIN
+    UPDATE agent_api_keys SET revoked_at = now(), member_id = NULL
+    WHERE revoked_at IS NULL AND member_id IS NOT NULL
+      AND NOT EXISTS (SELECT 1 FROM members m WHERE m.id = agent_api_keys.member_id);
+    GET DIAGNOSTICS revoked = ROW_COUNT;
+    RAISE NOTICE 'orphan-org dead agent api_key revoke + member_id NULL: % 건', revoked;
+    IF EXISTS (SELECT 1 FROM pg_constraint WHERE conname = '{_FK_0080}' AND NOT convalidated) THEN
+        SELECT count(*) INTO bad FROM agent_api_keys ak
+        WHERE ak.member_id IS NOT NULL AND NOT EXISTS (SELECT 1 FROM members m WHERE m.id = ak.member_id);
+        IF bad = 0 THEN
+            ALTER TABLE agent_api_keys VALIDATE CONSTRAINT {_FK_0080};
+        ELSE
+            RAISE NOTICE 'FK NOT VALID 유지 (bad=% 잔여)', bad;
+        END IF;
+    END IF;
+END $$;
+"""
+
+
+@pytest.mark.anyio
+async def test_0083_revoke_orphan_org_apikey_and_validate():
+    """⚠️ AC2 마무리: 0083이 orphan-org dead agent 키(members 부재 member_id)를 revoke+member_id NULL로
+    정리하고 FK를 VALIDATE하되, **legit 키(member_id 존재)는 안 건드린다**. revoke만으론 FK 위반이 남으므로
+    member_id=NULL이 핵심(VALIDATE는 revoked 무관 전 행 검사)."""
+    from sqlalchemy import text
+    from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
+
+    engine = create_async_engine(_ASYNC_URL)
+    Session = async_sessionmaker(engine, expire_on_commit=False)
+    legit_key = uuid.UUID("b7000000-0000-0000-0000-0000000000d1")   # member_id=AG1(존재) — 무영향
+    orphan_key = uuid.UUID("b7000000-0000-0000-0000-0000000000d2")  # member_id=orphan — revoke 대상
+    orphan_member = uuid.UUID("b9000000-0000-0000-0000-0000000000d2")
+    try:
+        async with Session() as s:
+            await _seed(s)
+            for k in (legit_key, orphan_key):
+                await s.execute(text("DELETE FROM agent_api_keys WHERE id=:i"), {"i": str(k)})
+            for fk in (_FK_0080, "agent_api_keys_member_id_fkey"):
+                await s.execute(text(f"ALTER TABLE agent_api_keys DROP CONSTRAINT IF EXISTS {fk}"))
+            await s.execute(text(
+                "INSERT INTO agent_api_keys (id,team_member_id,member_id,key_prefix,key_hash,scope) VALUES "
+                "(:lk,:tm,:lm,'sk_live_d1','hd1',ARRAY['read','write']),"
+                "(:ok,:tm,:om,'sk_live_d2','hd2',ARRAY['read','write'])"
+            ), {"lk": str(legit_key), "ok": str(orphan_key), "tm": str(AG1), "lm": str(AG1), "om": str(orphan_member)})
+            await s.execute(text(
+                f"ALTER TABLE agent_api_keys ADD CONSTRAINT {_FK_0080} "
+                f"FOREIGN KEY (member_id) REFERENCES members(id) ON DELETE SET NULL NOT VALID"
+            ))
+            await s.commit()
+        async with Session() as s:
+            await s.execute(text(_DO_0083))
+            await s.commit()
+        async with Session() as s:
+            legit = (await s.execute(text(
+                "SELECT member_id, revoked_at IS NULL FROM agent_api_keys WHERE id=:i"), {"i": str(legit_key)})).first()
+            orphan = (await s.execute(text(
+                "SELECT member_id, revoked_at IS NULL FROM agent_api_keys WHERE id=:i"), {"i": str(orphan_key)})).first()
+            conval = (await s.execute(text(
+                "SELECT convalidated FROM pg_constraint WHERE conname=:n"), {"n": _FK_0080})).scalar_one()
+        assert str(legit[0]) == str(AG1) and legit[1] is True, f"legit 키 영향받음: {legit}"
+        assert orphan[0] is None and orphan[1] is False, f"orphan 키 revoke+NULL 안 됨: {orphan}"
+        assert conval is True, "orphan 정리 후에도 FK 미validate"
+    finally:
+        async with Session() as s:
+            for k in (legit_key, orphan_key):
+                await s.execute(text("DELETE FROM agent_api_keys WHERE id=:i"), {"i": str(k)})
+            await s.execute(text(f"ALTER TABLE agent_api_keys DROP CONSTRAINT IF EXISTS {_FK_0080}"))
+            await s.execute(text("ALTER TABLE agent_api_keys DROP CONSTRAINT IF EXISTS agent_api_keys_member_id_fkey"))
+            await s.execute(text(
+                "ALTER TABLE agent_api_keys ADD CONSTRAINT agent_api_keys_member_id_fkey "
+                "FOREIGN KEY (member_id) REFERENCES members(id) ON DELETE SET NULL NOT VALID"
+            ))
+            await s.commit()
+        await engine.dispose()
