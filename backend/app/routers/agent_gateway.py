@@ -23,6 +23,7 @@ from app.core.database import async_session_factory
 from app.dependencies.database import get_db
 from app.models.agent_gateway import AgentEventCursor, AgentGatewaySession
 from app.models.event import Event
+from app.models.organization import Organization
 from app.models.team import TeamMember
 from app.routers.events import _agent_connections, _event_to_payload
 
@@ -38,6 +39,19 @@ _BACKFILL_LIMIT: int = int(os.getenv("AGENT_GATEWAY_BACKFILL_LIMIT", "100"))
 #   legacy /events/stream은 폐기 수순이라 카운터 통합 시 잘못된 상호 제약이 생긴다. → 분리 유지.
 _MAX_AGENT_SSE_CONNECTIONS: int = int(os.getenv("MAX_AGENT_SSE_CONNECTIONS", "100"))
 _agent_sse_connection_count: int = 0
+
+# E-INFRA S5: per-API-key(=agent) 동시 스트림 제한 (tier-aware, abuse/fair-use).
+# 한 키가 무제한 스트림을 열어 메모리/큐를 독점하는 것 방지. per-key 카운트 = _agent_connections[agent_id] size.
+# ⚠️ tier 출처: agent 키는 sk_live_(ApiKey 모델)라 dependencies/rate_limit._resolve_tier
+#   (pk_live_/ProjectApiKey 전용)에 안 맞는다. agent의 올바른 tier 출처는 **org.plan**(free/team/pro)
+#   이므로 그것으로 tier 해소(TIER_LIMITS 패턴·429+Retry-After 응답 shape 재사용).
+_AGENT_STREAM_TIER_LIMITS: dict[str, int] = {
+    "free": int(os.getenv("AGENT_STREAM_LIMIT_FREE", "3")),
+    "team": int(os.getenv("AGENT_STREAM_LIMIT_TEAM", "15")),
+    "pro": int(os.getenv("AGENT_STREAM_LIMIT_PRO", "30")),
+}
+_AGENT_STREAM_DEFAULT_LIMIT: int = int(os.getenv("AGENT_STREAM_LIMIT_DEFAULT", "3"))
+_AGENT_STREAM_RETRY_AFTER: int = int(os.getenv("AGENT_STREAM_RETRY_AFTER", "5"))
 
 # âââ wake_agent: commit í í ìë¦¼ ââââââââââââââââââââââââââââââââââââââââââââ
 
@@ -163,6 +177,11 @@ async def agent_stream(
         if tm is None:
             raise HTTPException(status_code=404, detail="Agent not found")
 
+        # E-INFRA S5: tier(=org.plan) 해소 — per-key 동시 스트림 cap 산정용 (free<paid)
+        org_plan = (await db.execute(
+            select(Organization.plan).where(Organization.id == tm.org_id)
+        )).scalar_one_or_none() or "free"
+
         # acked_seq DB ì¡°í
         cursor = (await db.execute(
             select(AgentEventCursor).where(AgentEventCursor.agent_id == agent_id)
@@ -190,6 +209,21 @@ async def agent_stream(
 
     start_seq = max(acked_seq, header_seq)
     agent_id_str = str(agent_id)
+
+    # E-INFRA S5: per-key(agent) 동시 스트림 제한 (tier-aware) — 초과 시 429 + Retry-After.
+    # per-key 카운트 = _agent_connections[agent_id] (현재 동시 스트림 수). 새 연결은 아직 미등록 상태이므로
+    # >= limit 이면 이번 연결이 (limit+1)번째 → 거부. global cap(503)보다 먼저 검사(키 단위 quota가 우선 신호).
+    _per_key_limit = _AGENT_STREAM_TIER_LIMITS.get(org_plan, _AGENT_STREAM_DEFAULT_LIMIT)
+    if len(_agent_connections[agent_id_str]) >= _per_key_limit:
+        raise HTTPException(
+            status_code=429,
+            detail={
+                "code": "AGENT_STREAM_LIMITED",
+                "message": f"Concurrent agent stream limit ({_per_key_limit}) reached for this key",
+                "retry_after": _AGENT_STREAM_RETRY_AFTER,
+            },
+            headers={"Retry-After": str(_AGENT_STREAM_RETRY_AFTER)},
+        )
 
     # E-INFRA S4: 전역 agent stream 연결 cap — 초과 시 503 (legacy events.py:234-237 미러).
     # 증가 직후 진입하는 generate()의 finally에서 반드시 decrement (disconnect/GeneratorExit 누수 방지).
