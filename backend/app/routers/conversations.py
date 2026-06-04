@@ -8,7 +8,7 @@ from collections import defaultdict
 from datetime import datetime, timezone
 
 from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Query
-from pydantic import BaseModel
+from pydantic import BaseModel, field_validator
 from sqlalchemy import and_, func, select, update
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -132,6 +132,8 @@ def _msg_payload(msg: ConversationMessage, sender: "ResolvedMember | TeamMember 
         "last_reply_at": msg.last_reply_at.isoformat() if msg.last_reply_at else None,
         "content": msg.content,
         "mentioned_ids": [str(m) for m in (msg.mentioned_ids or [])],
+        # E-FILE S1: 첨부 직렬화 (SSE + GET messages 공통). list 아니면 [](레거시/None/mock 안전).
+        "attachments": msg.attachments if isinstance(msg.attachments, list) else [],
         "sender": {
             "id": str(sender.id),
             "name": sender.name,
@@ -324,10 +326,55 @@ class CreateConversationRequest(BaseModel):
     project_id: uuid.UUID
 
 
+# E-FILE S1: 채팅 첨부. GCS 기록은 FE-proxy(uploadToGcs)가 처리하고 BE는 URL+메타만 저장.
+_MAX_ATTACHMENTS = 10
+_MAX_ATTACHMENT_SIZE = 100 * 1024 * 1024  # 100MB (메타 sanity 상한)
+
+
+class MessageAttachment(BaseModel):
+    url: str           # FE-proxy가 GCS에 업로드한 객체 URL (https)
+    name: str          # 원본 파일명
+    content_type: str  # MIME
+    size: int          # 바이트
+
+    @field_validator("url")
+    @classmethod
+    def _validate_url(cls, v: str) -> str:
+        v = v.strip()
+        if not v.startswith("https://"):
+            raise ValueError("attachment url must be an https:// URL")
+        return v
+
+    @field_validator("name", "content_type")
+    @classmethod
+    def _non_empty(cls, v: str) -> str:
+        v = v.strip()
+        if not v:
+            raise ValueError("must not be empty")
+        return v
+
+    @field_validator("size")
+    @classmethod
+    def _validate_size(cls, v: int) -> int:
+        if v < 0:
+            raise ValueError("size must be >= 0")
+        if v > _MAX_ATTACHMENT_SIZE:
+            raise ValueError(f"attachment too large (max {_MAX_ATTACHMENT_SIZE} bytes)")
+        return v
+
+
 class SendMessageRequest(BaseModel):
     content: str
     mentioned_ids: list[uuid.UUID] = []
     thread_id: uuid.UUID | None = None
+    attachments: list[MessageAttachment] = []
+
+    @field_validator("attachments")
+    @classmethod
+    def _limit_attachments(cls, v: list[MessageAttachment]) -> list[MessageAttachment]:
+        if len(v) > _MAX_ATTACHMENTS:
+            raise ValueError(f"too many attachments (max {_MAX_ATTACHMENTS})")
+        return v
 
 
 class UpdateStatusRequest(BaseModel):
@@ -746,6 +793,8 @@ async def send_message(
         content=body.content,
         mentioned_ids=valid_mentioned_ids,
         thread_id=body.thread_id,
+        # E-FILE S1: 첨부 메타(URL+name+content_type+size)를 0093 attachments JSONB에 저장
+        attachments=[a.model_dump() for a in body.attachments],
     )
     db.add(msg)
 
