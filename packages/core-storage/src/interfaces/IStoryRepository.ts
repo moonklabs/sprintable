@@ -51,6 +51,7 @@ export interface UpdateStoryInput {
   story_points?: number | null;
   description?: string | null;
   acceptance_criteria?: string | null;
+  attachments?: { url: string; name: string; content_type: string; size: number }[] | null;
   epic_id?: string | null;
   sprint_id?: string | null;
   assignee_id?: string | null;
