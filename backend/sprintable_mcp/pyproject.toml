@@ -1,0 +1,38 @@
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[project]
+name = "sprintable-mcp"
+version = "0.1.0"
+description = "Sprintable MCP server — BYO agent toolset over the Sprintable API (stdio). No repo clone required."
+readme = "README.md"
+requires-python = ">=3.11"
+license = { text = "Proprietary" }
+authors = [{ name = "Sprintable" }]
+keywords = ["mcp", "sprintable", "agent", "model-context-protocol"]
+dependencies = [
+    "mcp>=1.0.0",
+    "httpx>=0.27",
+    "pydantic>=2.0",
+    "pydantic-settings>=2.0",
+]
+
+# E-MCP S4: 외부(레포 없음) 한 줄 구동 — `uvx sprintable-mcp`.
+# 필수 env: SPRINTABLE_API_URL, AGENT_API_KEY (그 외 import 의존 0 — backend app/* 비의존).
+[project.scripts]
+sprintable-mcp = "sprintable_mcp.__main__:main"
+
+[project.urls]
+Homepage = "https://sprintable.ai"
+
+# in-place flat 레이아웃(backend/sprintable_mcp/*.py)을 sprintable_mcp 패키지로 빌드.
+# hatchling sources remap: 루트("")의 파일을 wheel에서 sprintable_mcp/ 아래로 배치.
+[tool.hatch.build.targets.wheel]
+include = ["*.py", "tools/*.py"]
+
+[tool.hatch.build.targets.wheel.sources]
+"" = "sprintable_mcp"
+
+[tool.hatch.build.targets.sdist]
+include = ["*.py", "tools/*.py", "README.md", "pyproject.toml"]

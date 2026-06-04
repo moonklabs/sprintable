@@ -19,8 +19,9 @@ from .config import settings
 from .response import ok
 from .schemas import SprintableInput
 
-# E-MCP S2: toolset enforcement은 백엔드 SSOT(app.services.mcp_toolset)의 순수 규칙을 공유.
-from app.services.mcp_toolset import is_tool_allowed
+# E-MCP S4: 독립 패키지 디탱글 — backend(app/*) import 제거. 규칙은 vendored .toolset 사용
+# (백엔드 app/services/mcp_toolset.py와 동일 규칙 유지·SSOT는 백엔드 매니페스트).
+from .toolset import is_tool_allowed
 from .tools.agent_runs import (
     EmitEventInput, PollEventsInput, UpdateRunStatusInput,
     emit_event, poll_events, update_run_status,
