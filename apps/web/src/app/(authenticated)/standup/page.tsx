@@ -1,7 +1,6 @@
 'use client';
 
 import { useEffect, useMemo, useState } from 'react';
-import Link from 'next/link';
 import { useTranslations } from 'next-intl';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
@@ -374,9 +373,6 @@ export default function StandupPage() {
             </Button>
             <Button variant="ghost" size="sm" onClick={() => setDate(formatSeoulDate())}>
               {t('today')}
-            </Button>
-            <Button variant="outline" size="sm" asChild>
-              <Link href={`/meetings/new?standup_date=${date}`}>{t('meetingNotes')}</Link>
             </Button>
           </div>
         }
