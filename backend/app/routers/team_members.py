@@ -142,7 +142,6 @@ async def create_team_member(
             detail="Human member creation via team-members is deprecated. Use org invites (/api/v2/organizations/{id}/invites) instead.",
         )
 
-    repo = TeamMemberRepository(session, org_id)
     created_by = uuid.UUID(auth.user_id) if body.type == "agent" else None
 
     # AC1/AC2: agent 생성 시 fakechat_port 자동 할당 (project 내 중복 방지)
@@ -162,8 +161,13 @@ async def create_team_member(
             port += 1
         fakechat_port = port
 
-    member = await repo.create(
+    # AC3-4 2-2: team_members가 projection 뷰로 강등됨 → INSERT 불가. transient TeamMember(미persist)로
+    # 신원/응답을 표현하고, 실제 영속은 앵커(members + agent_project_profiles + project_access)로만 한다.
+    now = datetime.now(timezone.utc)
+    member = TeamMember(
+        id=uuid.uuid4(),
         project_id=body.project_id,
+        org_id=org_id,
         type=body.type,
         name=body.name,
         role=body.role,
@@ -175,10 +179,18 @@ async def create_team_member(
         agent_role=body.agent_role,
         created_by=created_by,
         fakechat_port=fakechat_port,
-    )
+        is_active=True,
+        can_manage_members=False,
+        last_seen_at=None,
+        active_story_id=None,
+        agent_status=None,
+        created_at=now,
+        updated_at=now,
+    )  # NOT session.add — 앵커 write-sync가 유일 영속 경로(아래)
 
-    # E-MEMBER-SSOT AC3-1b: 신규 agent 앵커 write-sync(members + agent_project_profiles).
-    # ⚠️ api_key 자동생성(아래)보다 선행 — agent_api_keys.member_id→members FK(0080) 충족 + cut-on 무중단.
+    # E-MEMBER-SSOT AC3-1b/AC3-4 2-2: 신규 agent 앵커 write-sync(members + agent_project_profiles +
+    # project_access placement) = 유일 영속 경로. ⚠️ api_key 자동생성(아래)보다 선행 — agent_api_keys.
+    # member_id→members FK(0080) 충족 + cut-on 무중단.
     if body.type == "agent":
         from app.services.agent_anchor_sync import sync_agent_anchor_on_create
         await sync_agent_anchor_on_create(session, member, created_by)
@@ -282,8 +294,11 @@ async def update_team_member(
     if member.type == "agent":
         await assert_agent_owner(id, session, org_id, uuid.UUID(auth.user_id))
     data = body.model_dump(exclude_unset=True)
-    updated = await repo.update(id, **data)
-    return TeamMemberResponse.model_validate(updated)
+    # AC3-4 2-2: team_members 뷰 — 필드를 앵커 테이블로 라우팅(anchor-only). expire 후 뷰 재조회로 갱신값 반영.
+    await repo.apply_anchor_update(member, data)
+    session.expire(member)
+    updated = await repo.get(id)
+    return TeamMemberResponse.model_validate(updated or member)
 
 
 @router.patch("/{id}/heartbeat")
@@ -298,8 +313,7 @@ async def heartbeat(
     if member is None:
         raise HTTPException(status_code=404, detail="Team member not found")
     now = datetime.now(timezone.utc)
-    await repo.update(id, last_seen_at=now, agent_status="online")
-    # AC3-4 2-1 dual-write: 뷰가 presence를 agent_project_profiles서 읽으므로 동시 반영(cutover 전 동기).
+    # AC3-4 2-2: team_members 뷰 — presence는 agent_project_profiles가 유일 소스(anchor-only).
     from app.services.agent_anchor_sync import sync_agent_profile_presence
     await sync_agent_profile_presence(session, id, last_seen_at=now, agent_status="online")
     return {"ok": True, "last_seen_at": now.isoformat()}
@@ -327,8 +341,8 @@ async def claim_story(
         raise HTTPException(status_code=400, detail="Story not found in this project")
 
     now = datetime.now(timezone.utc)
-    await repo.update(id, active_story_id=body.story_id, agent_status="online", last_seen_at=now)
-    from app.services.agent_anchor_sync import sync_agent_profile_presence  # AC3-4 2-1 dual-write
+    # AC3-4 2-2: anchor-only — agent_project_profiles가 presence 유일 소스.
+    from app.services.agent_anchor_sync import sync_agent_profile_presence
     await sync_agent_profile_presence(session, id, active_story_id=body.story_id, agent_status="online", last_seen_at=now)
     return {"claimed": True, "story_id": str(body.story_id)}
 
@@ -344,8 +358,8 @@ async def unclaim_story(
     member = await repo.get(id)
     if member is None:
         raise HTTPException(status_code=404, detail="Team member not found")
-    await repo.update(id, active_story_id=None)
-    from app.services.agent_anchor_sync import sync_agent_profile_presence  # AC3-4 2-1 dual-write
+    # AC3-4 2-2: anchor-only — agent_project_profiles가 presence 유일 소스.
+    from app.services.agent_anchor_sync import sync_agent_profile_presence
     await sync_agent_profile_presence(session, id, active_story_id=None)
     # AC7: unclaim 시 해당 멤버의 모든 file lock 해제
     from app.routers.file_locks import release_all_file_locks

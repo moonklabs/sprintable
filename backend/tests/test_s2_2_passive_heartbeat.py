@@ -151,7 +151,7 @@ async def test_heartbeat_404_if_not_found():
     client, session, app = await _heartbeat_client()
     try:
         mock_result = MagicMock()
-        mock_result.scalar_one_or_none.return_value = None
+        mock_result.scalars.return_value.first.return_value = None  # AC3-4 2-2: get→scalars().first()
         session.execute = AsyncMock(return_value=mock_result)
 
         async with client as c:

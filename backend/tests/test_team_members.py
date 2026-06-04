@@ -142,7 +142,8 @@ async def test_get_team_member_200():
     client, session, app = await _client()
     try:
         mock_result = MagicMock()
-        mock_result.scalar_one_or_none.return_value = _mock_member()
+        # AC3-4 2-2: repo.get은 뷰 multi-row 방어로 scalars().first() 사용
+        mock_result.scalars.return_value.first.return_value = _mock_member()
         session.execute = AsyncMock(return_value=mock_result)
 
         async with client as c:
@@ -159,7 +160,7 @@ async def test_get_team_member_404():
     client, session, app = await _client()
     try:
         mock_result = MagicMock()
-        mock_result.scalar_one_or_none.return_value = None
+        mock_result.scalars.return_value.first.return_value = None  # AC3-4 2-2: get→scalars().first()
         session.execute = AsyncMock(return_value=mock_result)
 
         async with client as c:
@@ -177,8 +178,10 @@ async def test_update_team_member_200():
         updated = _mock_member()
         updated.color = "#ff0000"
         mock_result = MagicMock()
-        mock_result.scalar_one_or_none.return_value = updated
+        # AC3-4 2-2: PATCH = repo.get(scalars().first()) → apply_anchor_update → expire → repo.get
+        mock_result.scalars.return_value.first.return_value = updated
         session.execute = AsyncMock(return_value=mock_result)
+        session.expire = MagicMock()  # sync 메서드(AsyncMock 코루틴 경고 회피)
 
         async with client as c:
             resp = await c.patch(f"/api/v2/team-members/{MEMBER_ID}", json={"color": "#ff0000"})
@@ -227,7 +230,7 @@ async def test_deactivate_not_found_404():
     client, session, app = await _client()
     try:
         mock_result = MagicMock()
-        mock_result.scalar_one_or_none.return_value = None
+        mock_result.scalars.return_value.first.return_value = None  # AC3-4 2-2: deactivate→get→scalars().first()
         session.execute = AsyncMock(return_value=mock_result)
 
         async with client as c:
