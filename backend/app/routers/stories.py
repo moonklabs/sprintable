@@ -8,11 +8,14 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.dependencies.auth import AuthContext, enforce_body_context, get_current_user, get_project_scoped_org_id, get_verified_org_id
 from app.dependencies.database import get_db
+from app.models.event import Event
 from app.models.pm import Epic, Story, StoryActivity, StoryComment
 from app.models.team import TeamMember
 from app.repositories.story import StoryRepository
 from app.repositories.story_assignee import StoryAssigneeRepository
+from app.routers.agent_gateway import wake_agent
 from app.routers.events import publish_event
+from app.services.event_seq import assign_recipient_seq
 from app.schemas.story import StoryCreate, StoryResponse, StoryStatusUpdate, StoryUpdate
 from app.services.member_resolver import canonicalize_member_id
 from app.services.notification_dispatch import dispatch_notification
@@ -289,18 +292,54 @@ async def update_story(
             ))
         except Exception:
             pass
-        # E-EVENTBUS P3 S9: story_assigned → assignee에게 알림
+        # E-EVENTBUS P3 S9 / E-EVENT-INJECT S3: story_assigned 알림 + agent assignment-wake
         if story.assignee_id and story.assignee_id != old_assignee_id:
-            await dispatch_notification(
-                db,
-                org_id=org_id,
-                event_type="story_assigned",
-                target_member_ids=[story.assignee_id],
-                title=f"스토리 담당자로 지정됨: {story.title}",
-                body=None,
-                reference_type="story",
-                reference_id=story.id,
-            )
+            # assignee 멤버 타입 resolve (agent vs human)
+            assignee_type = (await db.execute(
+                select(TeamMember.type).where(TeamMember.id == story.assignee_id).limit(1)
+            )).scalar_one_or_none()
+
+            if assignee_type == "agent":
+                # E-EVENT-INJECT S3: agent에 배정만 해도 work-turn 시작.
+                # dispatch.py 미러 — content 실린 story_assigned Event + seq + commit BEFORE wake.
+                # (기존 dispatch_notification은 content 없는 dispatched라 connector가 드롭 → 깨우지 못함)
+                _detail = (story.description or "").strip()
+                _content = f"[story] {story.title}" + (f" — {_detail[:200]}" if _detail else "")
+                sa_event = Event(
+                    project_id=story.project_id,
+                    org_id=org_id,
+                    event_type="story_assigned",  # EventType enum 미존재 → literal (connector allow-list 포함)
+                    source_entity_type="story",
+                    source_entity_id=story.id,
+                    sender_id=actor_id,
+                    recipient_id=story.assignee_id,
+                    recipient_type="agent",
+                    payload={
+                        "story_id": str(story.id),
+                        "story_title": story.title,
+                        "content": _content,
+                        "event_type": "story_assigned",
+                    },
+                    status="pending",
+                )
+                db.add(sa_event)
+                await db.flush()
+                await assign_recipient_seq(db, sa_event)  # per-recipient dense seq
+                await db.commit()  # commit BEFORE wake — seq 확정, 이중전달 방지
+                if sa_event.recipient_seq is not None:
+                    wake_agent(str(story.assignee_id), sa_event.recipient_seq)
+            else:
+                # human: 기존 dispatch_notification 유지 (변경 0)
+                await dispatch_notification(
+                    db,
+                    org_id=org_id,
+                    event_type="story_assigned",
+                    target_member_ids=[story.assignee_id],
+                    title=f"스토리 담당자로 지정됨: {story.title}",
+                    body=None,
+                    reference_type="story",
+                    reference_id=story.id,
+                )
         if actor_id:
             try:
                 db.add(StoryActivity(
