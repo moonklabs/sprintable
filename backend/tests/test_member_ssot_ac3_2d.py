@@ -41,3 +41,31 @@ def test_ac3_2d_red_col_has_no_team_members_fk(model, col):
     FK violation 500 방지. canonical 정규화는 0085 백필 + batch1b write canonicalize."""
     referred = {fk.column.table.name for fk in model.__table__.c[col].foreign_keys}
     assert "team_members" not in referred, f"{model.__name__}.{col} still has team_members FK"
+
+
+# ── 배치1b: write 경로 canonicalize 소스 가드 ──────────────────────────────────────
+def test_batch1b_write_routers_canonicalize():
+    """1b: 휴먼-보유 컬럼 write 라우터가 canonicalize_member_id 적용(레거시 tm.id→canonical, (A) write).
+    agent-context(hitl/file_locks/agent_runs)·policy(no-create)는 0085 no-op이라 제외."""
+    import inspect
+
+    from app.routers import invitations, meetings, retros, stories
+
+    for mod, name in [(retros, "retros"), (invitations, "invitations"), (meetings, "meetings"), (stories, "stories")]:
+        src = inspect.getsource(mod)
+        assert "canonicalize_member_id" in src, f"{name} write canonicalize 누락"
+    # retro 4 식별 컬럼 전부 canonicalize(created_by/author_id/voter_id/assignee_id)
+    rsrc = inspect.getsource(retros)
+    assert rsrc.count("canonicalize_member_id(") >= 4, "retro 4컬럼 canonicalize 미흡"
+
+
+def test_batch1b_activity_log_uses_lookup_members():
+    """1b 노트#1: activity_log actor_type 해소가 raw TeamMember 조회 → lookup_members_by_ids(anchor)로
+    전환(0085 후 canonical 휴먼도 정확 해소; 'human' 기본 fallback 의존 제거)."""
+    import inspect
+
+    from app.services import activity_log
+
+    src = inspect.getsource(activity_log)
+    assert "lookup_members_by_ids" in src, "activity_log lookup_members 전환 누락"
+    assert "select(TeamMember)" not in src, "activity_log에 raw TeamMember 조회 잔존"
