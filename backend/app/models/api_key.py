@@ -12,6 +12,9 @@ class ApiKey(Base):
     __tablename__ = "agent_api_keys"
 
     id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    # E-MEMBER-SSOT AC3-5 ③: team_member_id DEPRECATED — canonical 식별자는 member_id(members.id 미러).
+    # dual 유지(레거시 호환). ⚠️ FK는 0088 rename로 team_members_legacy를 가리킴(team_members는 뷰);
+    # 모델 선언("team_members.id")은 stale-drift(런타임 무관, DB 제약이 권위).
     team_member_id: Mapped[uuid.UUID] = mapped_column(
         UUID(as_uuid=True), ForeignKey("team_members.id", ondelete="CASCADE"), nullable=False, index=True
     )
