@@ -245,9 +245,13 @@ async def test_agent_anchor_writesync_creates_members_and_profile():
                 "SELECT type, owner_member_id, name, is_active FROM members WHERE id=:i"), {"i": str(NEW_TM)})).first()
             prof = (await s.execute(text(
                 "SELECT project_id, agent_role, fakechat_port FROM agent_project_profiles WHERE member_id=:i"), {"i": str(NEW_TM)})).first()
+            # AC3-4 2-1: write-sync가 project_access placement도 생성(뷰 role/can_manage 소스)
+            pa = (await s.execute(text(
+                "SELECT project_id, role, access_source FROM project_access WHERE member_id=:i"), {"i": str(NEW_TM)})).first()
         assert m is not None and m.type == "agent" and m.is_active is True, "members(agent) 미생성"
         assert str(m.owner_member_id) == str(OM_OWNER), f"owner_member_id=생성 휴먼 member 아님: {m.owner_member_id}"
         assert prof is not None and str(prof.project_id) == str(P1) and prof.agent_role == "dev", "agent_project_profiles 미생성/미러 불일치"
+        assert pa is not None and str(pa.project_id) == str(P1) and pa.access_source == "direct", "project_access placement 미생성(AC3-4 2-1)"
 
         # 멱등: 재호출해도 중복/에러 없음
         async with Session() as s:

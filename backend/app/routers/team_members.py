@@ -299,6 +299,9 @@ async def heartbeat(
         raise HTTPException(status_code=404, detail="Team member not found")
     now = datetime.now(timezone.utc)
     await repo.update(id, last_seen_at=now, agent_status="online")
+    # AC3-4 2-1 dual-write: 뷰가 presence를 agent_project_profiles서 읽으므로 동시 반영(cutover 전 동기).
+    from app.services.agent_anchor_sync import sync_agent_profile_presence
+    await sync_agent_profile_presence(session, id, last_seen_at=now, agent_status="online")
     return {"ok": True, "last_seen_at": now.isoformat()}
 
 
@@ -325,6 +328,8 @@ async def claim_story(
 
     now = datetime.now(timezone.utc)
     await repo.update(id, active_story_id=body.story_id, agent_status="online", last_seen_at=now)
+    from app.services.agent_anchor_sync import sync_agent_profile_presence  # AC3-4 2-1 dual-write
+    await sync_agent_profile_presence(session, id, active_story_id=body.story_id, agent_status="online", last_seen_at=now)
     return {"claimed": True, "story_id": str(body.story_id)}
 
 
@@ -340,6 +345,8 @@ async def unclaim_story(
     if member is None:
         raise HTTPException(status_code=404, detail="Team member not found")
     await repo.update(id, active_story_id=None)
+    from app.services.agent_anchor_sync import sync_agent_profile_presence  # AC3-4 2-1 dual-write
+    await sync_agent_profile_presence(session, id, active_story_id=None)
     # AC7: unclaim 시 해당 멤버의 모든 file lock 해제
     from app.routers.file_locks import release_all_file_locks
     await release_all_file_locks(session, id)
