@@ -11,6 +11,7 @@ import { LabelChip, LABEL_PRESET_COLORS, type LabelData } from '@/components/ui/
 import { DependencyGraph } from './dependency-graph';
 import { OutcomeIntentFields, type OutcomeIntentValue } from '@/components/outcome/outcome-intent-fields';
 import { OutcomeResultCard, type OutcomeResult } from '@/components/outcome/outcome-result-card';
+import { EntityDispatchPanel } from '@/components/dispatch/entity-dispatch-panel';
 import { Button } from '@/components/ui/button';
 import { StatusBadge } from '@/components/ui/status-badge';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
@@ -609,6 +610,21 @@ export function StoryDetailPanel({ story, tasks, nextTasksCursor = null, loading
                 </p>
               )}
             </div>
+
+            {/* E-BOARD S1: Dispatch — assignee 인접(킥오프=assignee 선택 후 액션). EntityDispatchPanel 마운트만(신규 디자인 0). */}
+            {projectId && (
+              <div className="rounded-lg border border-border bg-muted/20 p-3">
+                <p className="mb-2 text-xs font-semibold uppercase tracking-wide text-muted-foreground">Dispatch</p>
+                <EntityDispatchPanel
+                  entityType="story"
+                  entityId={story.id}
+                  projectId={projectId}
+                  currentAssigneeId={story.assignee_id}
+                  onAssigneePatched={(aid) => onStoryUpdate?.({ ...story, assignee_id: aid })}
+                />
+              </div>
+            )}
+
             {story.story_points != null ? (
               <div>
                 <span className="text-[10px] font-mono uppercase tracking-wider text-muted-foreground">{t('storyPoints')}</span>
