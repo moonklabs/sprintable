@@ -7,7 +7,6 @@ import { useTranslations } from 'next-intl';
 import {
   BookOpen,
   Bot,
-  CalendarDays,
   CalendarRange,
   CircleHelp,
   ClipboardList,
@@ -261,16 +260,7 @@ export function AppSidebar({
                   <span>{t('docs')}</span>
                 </SidebarMenuButton>
               </SidebarMenuItem>
-              <SidebarMenuItem>
-                <SidebarMenuButton
-                  render={<Link href="/meetings" />}
-                  isActive={isActive('/meetings')}
-                  tooltip={t('meetings')}
-                >
-                  <CalendarDays />
-                  <span>{t('meetings')}</span>
-                </SidebarMenuButton>
-              </SidebarMenuItem>
+              {/* E-SETTINGS S5: Meetings 메뉴 숨김 — /meetings 진입 차단(route thin guard 404). */}
               <SidebarMenuItem>
                 <SidebarMenuButton
                   render={<Link href="/agents" />}
