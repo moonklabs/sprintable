@@ -11,6 +11,7 @@ from app.dependencies.database import get_db
 from app.models.doc import DocComment, DocRevision
 from app.models.team import TeamMember
 from app.repositories.doc import DocRepository
+from app.services.member_resolver import canonicalize_member_id
 from app.schemas.doc import DocCreate, DocResponse, DocSummaryResponse, DocUpdate
 
 router = APIRouter(prefix="/api/v2/docs", tags=["docs"])
@@ -77,6 +78,8 @@ async def create_doc(
         body_project_id=body.project_id,
         auth_project_id=auth.claims.get("app_metadata", {}).get("project_id"),
     )
+    # AC3-2d(2): created_by canonical 정규화(레거시 휴먼 tm.id→members.id). (A) write.
+    created_by = (await canonicalize_member_id(body.created_by, session)) if body.created_by else None
     repo = DocRepository(session, org_id)
     doc = await repo.create(
         project_id=body.project_id,
@@ -84,7 +87,7 @@ async def create_doc(
         slug=body.slug,
         content=body.content,
         parent_id=body.parent_id,
-        created_by=body.created_by,
+        created_by=created_by,
         icon=body.icon,
         sort_order=body.sort_order,
         doc_type=body.doc_type,
@@ -302,6 +305,7 @@ async def add_doc_comment(
     if not doc:
         raise HTTPException(status_code=404, detail="Doc not found")
     created_by = await _resolve_doc_member_id(auth, repo.org_id, db)
+    created_by = await canonicalize_member_id(created_by, db)  # AC3-2d(2): canonical 정규화
     comment = DocComment(
         doc_id=id,
         org_id=repo.org_id,

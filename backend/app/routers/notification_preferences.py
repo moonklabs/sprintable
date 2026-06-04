@@ -55,17 +55,9 @@ async def _get_member(
             raise HTTPException(status_code=400, detail="Team member not found")
         return member
 
-    # JWT 휴먼: team_member 우선 (기존 NotificationPreference.member_id 키 보존)
-    member = (await db.execute(
-        select(TeamMember).where(
-            TeamMember.user_id == uuid.UUID(auth.user_id),
-            TeamMember.org_id == org_id,
-        )
-    )).scalars().first()
-    if member is not None:
-        return member
-
-    # team_member 없음(grant-only 휴먼) → org_member 신원으로 fallback
+    # AC3-2d(2): JWT 휴먼 → canonical members.id(=org_member.id). 0086이 notification_preferences.member_id를
+    # canonical로 정규화하므로 read/write도 canonical이어야 split-brain(기존 휴먼 prefs 유실) 0.
+    # (이전엔 team_member 우선=tm.id 반환이었으나 (A) 통일로 canonical 단일화 — grant-only도 동일 경로.)
     return await resolve_member(auth, org_id, db)
 
 
