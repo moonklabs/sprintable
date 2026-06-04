@@ -69,3 +69,22 @@ def test_batch1b_activity_log_uses_lookup_members():
     src = inspect.getsource(activity_log)
     assert "lookup_members_by_ids" in src, "activity_log lookup_members 전환 누락"
     assert "select(TeamMember)" not in src, "activity_log에 raw TeamMember 조회 잔존"
+
+
+# ── 배치2(🟡+notif): write canonicalize + notif_prefs canonical 소스 가드 ──────────────────────────
+def test_batch2_yellow_write_canonicalize():
+    """배치2: 🟡 write 라우터(webhook/reward/docs) + notif_prefs가 canonical 통일(canonicalize_member_id /
+    notif _get_member=resolve_member). 휴먼-context body/resolved id의 (A) write."""
+    import inspect
+
+    from app.routers import docs, notification_preferences, rewards, webhooks
+
+    for mod, name in [(webhooks, "webhooks"), (rewards, "rewards"), (docs, "docs")]:
+        assert "canonicalize_member_id" in inspect.getsource(mod), f"{name} write canonicalize 누락"
+    # reward: member_id + granted_by 둘 다
+    assert inspect.getsource(rewards).count("canonicalize_member_id(") >= 2, "reward member_id+granted_by 미흡"
+    # notif_prefs _get_member: tm-first 제거 + resolve_member(canonical) 통일
+    nsrc = inspect.getsource(notification_preferences._get_member)
+    assert "resolve_member(" in nsrc, "notif _get_member canonical 전환 누락"
+    # JWT 휴먼 tm-first lookup(TeamMember.user_id 매칭) 제거됨 — api_key 분기의 TeamMember.id만 잔존
+    assert "TeamMember.user_id" not in nsrc, "notif _get_member에 JWT-휴먼 tm-first 잔존(split-brain 위험)"
