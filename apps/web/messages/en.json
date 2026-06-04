@@ -186,6 +186,8 @@
     "addDescription": "Add description",
     "acceptanceCriteria": "Acceptance Criteria",
     "addAcceptanceCriteria": "Add acceptance criteria",
+    "attachments": "Attachments",
+    "addAttachment": "Add attachment",
     "searchSprints": "Search sprints...",
     "searchEpics": "Search epics...",
     "searchAssignees": "Search assignees...",
