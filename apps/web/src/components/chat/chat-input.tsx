@@ -1,8 +1,12 @@
 'use client';
 
 import { useEffect, useRef, useState, type KeyboardEvent } from 'react';
-import { Paperclip, Send, X } from 'lucide-react';
+import { Loader2, Paperclip, Send, X } from 'lucide-react';
 import { Button } from '@/components/ui/button';
+import { getFileIcon } from '@/lib/file-icon';
+import type { SendAttachment } from '@/hooks/use-chat-sse';
+
+const MAX_ATTACHMENTS = 10; // BE _MAX_ATTACHMENTS 정합
 
 function getMentionQuery(value: string, cursorPos: number): string | null {
   const before = value.slice(0, cursorPos);
@@ -61,17 +65,18 @@ interface EntityResult {
 }
 
 interface ChatInputProps {
-  onSend: (content: string, mentionedIds?: string[]) => Promise<void>;
-  onUpload?: (file: File) => Promise<void>;
+  onSend: (content: string, mentionedIds?: string[], attachments?: SendAttachment[]) => Promise<void>;
+  onUploadFile?: (file: File) => Promise<SendAttachment>;
   disabled?: boolean;
   placeholder?: string;
   projectId?: string;
   onMentionIdsChange?: (ids: string[]) => void;
 }
 
-export function ChatInput({ onSend, onUpload, disabled, placeholder, projectId, onMentionIdsChange }: ChatInputProps) {
+export function ChatInput({ onSend, onUploadFile, disabled, placeholder, projectId, onMentionIdsChange }: ChatInputProps) {
   const [text, setText] = useState('');
-  const [pendingFile, setPendingFile] = useState<File | null>(null);
+  const [pendingFiles, setPendingFiles] = useState<File[]>([]);
+  const [uploadFailed, setUploadFailed] = useState(false);
   const [sending, setSending] = useState(false);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
@@ -180,21 +185,29 @@ export function ChatInput({ onSend, onUpload, disabled, placeholder, projectId, 
 
   const handleSend = async () => {
     const trimmed = text.trim();
-    if ((!trimmed && !pendingFile) || sending || disabled) return;
+    if ((!trimmed && pendingFiles.length === 0) || sending || disabled) return;
 
     setSending(true);
+    setUploadFailed(false);
     try {
-      if (pendingFile && onUpload) {
-        await onUpload(pendingFile);
-        setPendingFile(null);
+      // 첨부가 있으면 전부 GCS 업로드 후, 본문과 함께 한 메시지로 전송한다.
+      let attachments: SendAttachment[] | undefined;
+      if (pendingFiles.length > 0 && onUploadFile) {
+        attachments = await Promise.all(pendingFiles.map((f) => onUploadFile(f)));
       }
-      if (trimmed) {
-        await onSend(trimmed, mentionedIdsRef.current.length > 0 ? mentionedIdsRef.current : undefined);
-        setText('');
-        mentionedIdsRef.current = [];
-        onMentionIdsChange?.([]);
-        if (textareaRef.current) textareaRef.current.style.height = 'auto';
-      }
+      await onSend(
+        trimmed,
+        mentionedIdsRef.current.length > 0 ? mentionedIdsRef.current : undefined,
+        attachments && attachments.length > 0 ? attachments : undefined,
+      );
+      setText('');
+      setPendingFiles([]);
+      mentionedIdsRef.current = [];
+      onMentionIdsChange?.([]);
+      if (textareaRef.current) textareaRef.current.style.height = 'auto';
+    } catch {
+      // 업로드/전송 실패 — pending 파일 유지하고 칩에 실패 표시 (재시도 가능)
+      setUploadFailed(true);
     } finally {
       setSending(false);
     }
@@ -219,19 +232,29 @@ export function ChatInput({ onSend, onUpload, disabled, placeholder, projectId, 
     }
   };
 
+  const addFiles = (files: File[]) => {
+    if (files.length === 0) return;
+    setUploadFailed(false);
+    setPendingFiles((prev) => [...prev, ...files].slice(0, MAX_ATTACHMENTS));
+  };
+
   const handleFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
-    const file = e.target.files?.[0];
-    if (file) setPendingFile(file);
+    addFiles(Array.from(e.target.files ?? []));
     e.target.value = '';
   };
 
   const handleDrop = (e: React.DragEvent) => {
     e.preventDefault();
-    const file = e.dataTransfer.files[0];
-    if (file) setPendingFile(file);
+    addFiles(Array.from(e.dataTransfer.files));
   };
 
-  const canSend = (text.trim().length > 0 || pendingFile !== null) && !sending && !disabled;
+  const removePendingFile = (index: number) => {
+    setPendingFiles((prev) => prev.filter((_, i) => i !== index));
+    setUploadFailed(false);
+  };
+
+  const atMaxAttachments = pendingFiles.length >= MAX_ATTACHMENTS;
+  const canSend = (text.trim().length > 0 || pendingFiles.length > 0) && !sending && !disabled;
 
   return (
     <div
@@ -239,19 +262,41 @@ export function ChatInput({ onSend, onUpload, disabled, placeholder, projectId, 
       onDragOver={(e) => e.preventDefault()}
       onDrop={handleDrop}
     >
-      {/* Pending file preview */}
-      {pendingFile && (
-        <div className="mb-2 flex items-center gap-2 rounded-lg border border-border bg-muted/40 px-3 py-1.5">
-          <Paperclip className="h-3.5 w-3.5 flex-shrink-0 text-muted-foreground" />
-          <span className="flex-1 truncate text-xs text-foreground">{pendingFile.name}</span>
-          <button
-            type="button"
-            onClick={() => setPendingFile(null)}
-            className="text-muted-foreground hover:text-foreground"
-          >
-            <X className="h-3.5 w-3.5" />
-          </button>
+      {/* Pending file chips (전송 전) */}
+      {pendingFiles.length > 0 && (
+        <div className="mb-2 flex flex-wrap gap-2">
+          {pendingFiles.map((file, i) => {
+            const Icon = getFileIcon(file.type);
+            return (
+              <div
+                key={`${file.name}-${file.size}-${i}`}
+                className={`flex items-center gap-2 rounded-lg border bg-muted/40 px-3 py-1.5 ${uploadFailed ? 'border-destructive' : 'border-border'}`}
+              >
+                {sending ? (
+                  <Loader2 className="h-3.5 w-3.5 flex-shrink-0 animate-spin text-muted-foreground" />
+                ) : (
+                  <Icon className="h-3.5 w-3.5 flex-shrink-0 text-muted-foreground" />
+                )}
+                <span className="max-w-[160px] truncate text-xs text-foreground">{file.name}</span>
+                <button
+                  type="button"
+                  onClick={() => removePendingFile(i)}
+                  disabled={sending}
+                  className="text-muted-foreground hover:text-foreground disabled:opacity-40"
+                  aria-label="첨부 제거"
+                >
+                  <X className="h-3.5 w-3.5" />
+                </button>
+              </div>
+            );
+          })}
         </div>
+      )}
+      {uploadFailed && (
+        <p className="mb-1 text-xs text-destructive">첨부 업로드에 실패했습니다. 다시 시도해 주세요.</p>
+      )}
+      {atMaxAttachments && (
+        <p className="mb-1 text-xs text-muted-foreground">첨부는 최대 {MAX_ATTACHMENTS}개까지 가능합니다.</p>
       )}
 
       <div className="relative flex items-end gap-2">
@@ -298,14 +343,16 @@ export function ChatInput({ onSend, onUpload, disabled, placeholder, projectId, 
         <button
           type="button"
           onClick={() => fileInputRef.current?.click()}
-          disabled={disabled}
+          disabled={disabled || atMaxAttachments}
           className="flex-shrink-0 rounded-md p-1.5 text-muted-foreground hover:bg-muted/60 hover:text-foreground disabled:opacity-40"
+          aria-label="파일 첨부"
         >
           <Paperclip className="h-4 w-4" />
         </button>
         <input
           ref={fileInputRef}
           type="file"
+          multiple
           className="hidden"
           onChange={handleFileChange}
           accept="image/*,.pdf,.txt,.md,.csv"

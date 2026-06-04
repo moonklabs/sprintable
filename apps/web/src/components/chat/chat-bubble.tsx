@@ -6,6 +6,7 @@ import remarkGfm from 'remark-gfm';
 import { Bot, MessageSquare, User } from 'lucide-react';
 import type { ChatMessage } from '@/hooks/use-chat-sse';
 import { EntityChip, getEntityHref } from '@/components/chat/embed-card';
+import { getFileIcon } from '@/lib/file-icon';
 import { MessageContextMenu } from './message-context-menu';
 
 interface ChatBubbleProps {
@@ -192,27 +193,33 @@ export function ChatBubble({ message, isMine, isGrouped = false, onOpenThread, o
             <ChatMarkdown content={message.content} isMine={isMine} />
           </div>
 
-          {/* Attachments */}
+          {/* Attachments — 이미지는 인라인 프리뷰, 그 외는 파일 칩 */}
           {message.attachments && message.attachments.length > 0 && (
             <div className="flex flex-col gap-1.5">
               {message.attachments.map((att, i) => {
                 const href = att.url;
                 const label = att.name ?? att.filename ?? '첨부파일';
                 const isImage = att.content_type?.startsWith('image/');
+                if (isImage && href) {
+                  return (
+                    <a key={href ?? i} href={href} target="_blank" rel="noopener noreferrer" className="block">
+                      {/* eslint-disable-next-line @next/next/no-img-element */}
+                      <img src={href} alt={label} className="max-h-40 max-w-[240px] rounded object-contain" />
+                    </a>
+                  );
+                }
+                const Icon = getFileIcon(att.content_type);
                 return (
                   <a
                     key={href ?? i}
                     href={href}
                     target="_blank"
                     rel="noopener noreferrer"
+                    download
                     className="flex items-center gap-2 rounded-lg border border-border bg-background px-3 py-2 text-xs hover:bg-muted/50"
                   >
-                    {isImage && href ? (
-                      /* eslint-disable-next-line @next/next/no-img-element */
-                      <img src={href} alt={label} className="max-h-40 max-w-[240px] rounded object-contain" />
-                    ) : (
-                      <span className="truncate text-muted-foreground">{label}</span>
-                    )}
+                    <Icon className="h-4 w-4 flex-shrink-0 text-muted-foreground" />
+                    <span className="truncate text-foreground">{label}</span>
                   </a>
                 );
               })}

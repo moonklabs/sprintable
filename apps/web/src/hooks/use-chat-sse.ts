@@ -2,6 +2,14 @@
 
 import { useEffect, useLayoutEffect, useRef, useState } from 'react';
 
+// chat-attach: 메시지 전송 시 첨부 메타 (BE MessageAttachment 계약과 동일).
+export interface SendAttachment {
+  url: string;
+  name: string;
+  content_type: string;
+  size: number;
+}
+
 // Mirrors backend _to_chat_message: { id, thread_id, sender: { id, name, type }, ... }
 export interface ChatMessage {
   id: string;
