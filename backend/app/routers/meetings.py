@@ -53,6 +53,10 @@ async def create_meeting(
     )
     repo = MeetingRepository(session, body.project_id)
     data = body.model_dump(exclude={"project_id"}, exclude_none=False)
+    # AC3-2d(1b): created_by canonical 정규화(레거시 휴먼 tm.id→members.id). (A) write.
+    if data.get("created_by"):
+        from app.services.member_resolver import canonicalize_member_id
+        data["created_by"] = await canonicalize_member_id(data["created_by"], session)
     meeting = await repo.create(**{k: v for k, v in data.items() if v is not None or k in ("participants", "decisions", "action_items")})
     return MeetingResponse.model_validate(meeting)
 

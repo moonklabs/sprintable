@@ -5,7 +5,6 @@ import uuid
 import logging
 from typing import Literal
 
-from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models.activity_log import ActivityLog
@@ -28,17 +27,17 @@ async def record_activity_bg(
 ) -> None:
     """BackgroundTask용 activity log 기록. 실패해도 caller에 영향 없음 (AC6)."""
     from app.core.database import async_session_factory
-    from app.models.team import TeamMember
 
     try:
         async with async_session_factory() as db:
             resolved_type: ActorType = actor_type or "human"
             if actor_type is None and actor_id is not None:
-                tm = (await db.execute(
-                    select(TeamMember).where(TeamMember.id == actor_id).limit(1)
-                )).scalar_one_or_none()
-                if tm and tm.type in ("agent", "human"):
-                    resolved_type = tm.type  # type: ignore[assignment]
+                # AC3-2d(1b): canonical 정합 — TeamMember 직접 조회는 0085 후 canonical 휴먼(≠tm.id)을 못 찾아
+                # "human" 기본 fallback만. lookup_members_by_ids(anchor)는 canonical/legacy 모두 해소.
+                from app.services.member_resolver import lookup_members_by_ids
+                m = (await lookup_members_by_ids({actor_id}, db)).get(actor_id)
+                if m and m.type in ("agent", "human"):
+                    resolved_type = m.type  # type: ignore[assignment]
 
             await ActivityLogService(db).record(
                 org_id=org_id,
