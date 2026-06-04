@@ -94,7 +94,15 @@ async def test_patch_story_is_excluded_true():
     marked_story.epic_id = None
     marked_story.sprint_id = None
     marked_story.assignee_id = None
+    marked_story.assignee_ids = []
     marked_story.meeting_id = None
+    # E-BOARD S5: update_story가 _attach_assignee_ids로 story_assignees 조회 → 빈 결과 모킹
+    _empty = MagicMock()
+    _empty.all.return_value = []
+    _empty.scalars.return_value.all.return_value = []
+    _empty.scalar_one_or_none.return_value = None
+    _empty.scalar.return_value = None
+    mock_session.execute.return_value = _empty
     marked_story.title = "Story 1"
     marked_story.status = "backlog"
     marked_story.priority = "medium"
