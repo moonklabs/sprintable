@@ -89,6 +89,7 @@ def test_send_invite_email_includes_token():
 
     def _mock_send(to, subject, html_body):
         sent_bodies.append(html_body)
+        return True  # E-ONBOARDING S4: send_email True=실발송
 
     with patch("app.services.org_invite_email.send_email", side_effect=_mock_send):
         result = send_invite_email(to="x@y.com", org_name="Test", token="tok123", role="member")

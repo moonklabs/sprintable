@@ -77,11 +77,16 @@ def send_invite_email(
     )
 
     try:
-        send_email(
+        delivered = send_email(
             to=to,
             subject=f"[Sprintable] {org_name} 조직에 초대됐습니다",
             html_body=html_body,
         )
+        if not delivered:
+            # E-ONBOARDING S4: provider 미설정 → 콘솔 fallback은 실발송 아님.
+            # error로 surface해 email_sent_at=null + 경고가 UI에 노출되도록(무음 거짓 성공 차단).
+            logger.warning("Invite email NOT delivered (provider unconfigured) to %s", to)
+            return "email provider not configured — invite email was not delivered"
         return None
     except Exception as exc:  # noqa: BLE001
         logger.exception("Failed to send invite email to %s", to)

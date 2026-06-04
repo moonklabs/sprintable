@@ -51,6 +51,7 @@ def test_invite_html_inviter_fallback():
 
     def mock_send(*, to, subject, html_body):
         captured["html"] = html_body
+        return True  # E-ONBOARDING S4: send_email True=실발송
 
     with patch("app.services.org_invite_email.send_email", side_effect=lambda **kw: mock_send(**kw)):
         # inviter_name 미전달
@@ -294,7 +295,7 @@ def test_send_invite_email_success():
     """send_invite_email — 이메일 발송 성공 시 None 반환."""
     from app.services.org_invite_email import send_invite_email
     with patch("app.services.org_invite_email.send_email") as mock_send:
-        mock_send.return_value = None
+        mock_send.return_value = True  # E-ONBOARDING S4: True=실발송 → 성공(None)
         result = send_invite_email(
             to="test@example.com",
             org_name="TestOrg",
