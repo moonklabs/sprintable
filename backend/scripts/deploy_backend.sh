@@ -51,6 +51,7 @@ case "${ENV}" in
         CPU="1"
         FRONTEND_URL="${FRONTEND_ORIGIN:-https://sprintable-frontend-dev-placeholder.run.app}"
         RUNTIME_SA="cloudrun-runtime-dev@${GCP_PROJECT}.iam.gserviceaccount.com"
+        APP_URL="${APP_URL:-https://dev-app.sprintable.ai}"  # OAuth redirect/이메일 링크용 프론트 URL
         ;;
     prod)
         SERVICE_NAME="sprintable-backend-prod"
@@ -61,6 +62,7 @@ case "${ENV}" in
         CPU="2"
         FRONTEND_URL="${FRONTEND_ORIGIN:-https://app.sprintable.ai}"
         RUNTIME_SA="cloudrun-runtime-prod@${GCP_PROJECT}.iam.gserviceaccount.com"
+        APP_URL="${APP_URL:-https://app.sprintable.ai}"
         ;;
     *)
         echo "Usage: $0 [dev|prod]" >&2; exit 1 ;;
@@ -76,10 +78,40 @@ log() { echo "[$(date '+%Y-%m-%d %H:%M:%S')] [$ENV] $*" >&2; }
 
 CORS_ORIGINS="http://localhost:3000,http://localhost:3108,${FRONTEND_URL}"
 
+# 추가 런타임 env (config.py 참조). 필요 시 env로 override.
+EVENTBUS_ENABLED="${EVENTBUS_ENABLED:-true}"
+MEMBER_SSOT_RESOLVER_SHADOW="${MEMBER_SSOT_RESOLVER_SHADOW:-true}"
+MEMBER_SSOT_APIKEY_CUT="${MEMBER_SSOT_APIKEY_CUT:-true}"
+# ⚠️ GitHub OAuth는 현재 _DEV 앱만 존재(prod 앱 미생성) → dev/prod 모두 _DEV 시크릿 참조.
+#   prod GitHub 앱 생성 시 GITHUB_SECRET_SUFFIX=PROD로 override.
+GITHUB_SECRET_SUFFIX="${GITHUB_SECRET_SUFFIX:-DEV}"
+
+# ── 결함③ fix: full env. Secret Manager 시크릿 (값에 콤마 없어 콤마 구분 OK). ──
+SECRETS_SPEC="DATABASE_URL=${DB_SECRET_NAME}:latest"
+SECRETS_SPEC="${SECRETS_SPEC},JWT_SECRET=JWT_SECRET:latest"
+# ⚠️ SUPABASE 시크릿은 dead(backend/app 0 functional refs·JWT_SECRET 우선) → 미주입(S1 결정 유지).
+SECRETS_SPEC="${SECRETS_SPEC},GOOGLE_CLIENT_ID=GOOGLE_CLIENT_ID:latest"
+SECRETS_SPEC="${SECRETS_SPEC},GOOGLE_CLIENT_SECRET=GOOGLE_CLIENT_SECRET:latest"
+SECRETS_SPEC="${SECRETS_SPEC},GITHUB_CLIENT_ID=GITHUB_CLIENT_ID_${GITHUB_SECRET_SUFFIX}:latest"
+SECRETS_SPEC="${SECRETS_SPEC},GITHUB_CLIENT_SECRET=GITHUB_CLIENT_SECRET_${GITHUB_SECRET_SUFFIX}:latest"
+SECRETS_SPEC="${SECRETS_SPEC},RESEND_API_KEY=RESEND_API_KEY:latest"
+SECRETS_SPEC="${SECRETS_SPEC},EMAIL_FROM=EMAIL_FROM:latest"
+
+# ── 결함④ fix: 평문 env. CORS_ORIGINS 값에 콤마가 있어 기본(콤마) 구분자로는 env가 쪼개진다 →
+#   gcloud 커스텀 구분자 '^@^'로 '@' 구분. NEXT_PUBLIC_APP_URL도 세팅(verify-link 환경정합·#1236 finding). ──
+ENV_VARS_SPEC="^@^APP_ENV=${ENV}"
+ENV_VARS_SPEC="${ENV_VARS_SPEC}@CORS_ORIGINS=${CORS_ORIGINS}"
+ENV_VARS_SPEC="${ENV_VARS_SPEC}@APP_URL=${APP_URL}"
+ENV_VARS_SPEC="${ENV_VARS_SPEC}@NEXT_PUBLIC_APP_URL=${APP_URL}"
+ENV_VARS_SPEC="${ENV_VARS_SPEC}@EVENTBUS_ENABLED=${EVENTBUS_ENABLED}"
+ENV_VARS_SPEC="${ENV_VARS_SPEC}@MEMBER_SSOT_RESOLVER_SHADOW=${MEMBER_SSOT_RESOLVER_SHADOW}"
+ENV_VARS_SPEC="${ENV_VARS_SPEC}@MEMBER_SSOT_APIKEY_CUT=${MEMBER_SSOT_APIKEY_CUT}"
+
 log "Deploying ${SERVICE_NAME} ← ${IMAGE}"
 log "Cloud SQL: ${CLOUD_SQL_INSTANCE}"
 log "DB secret: ${DB_SECRET_NAME}"
 log "CORS origins: ${CORS_ORIGINS}"
+log "APP_URL: ${APP_URL}"
 
 # ─── DRY_RUN: gcloud 호출 없이 resolved config를 stdout으로 출력 (양 경로 검증용) ──
 if [ "${DRY_RUN}" = "1" ]; then
@@ -92,10 +124,15 @@ IMAGE=${IMAGE}
 RUNTIME_SA=${RUNTIME_SA}
 MIN_INSTANCES=${MIN_INSTANCES}
 MAX_INSTANCES=${MAX_INSTANCES}
+APP_URL=${APP_URL}
+SECRETS_SPEC=${SECRETS_SPEC}
+ENV_VARS_SPEC=${ENV_VARS_SPEC}
 EOF
     exit 0
 fi
 
+# 결함①: --startup-probe-path는 유효하지 않은 플래그 → 제거(Cloud Run 기본 TCP startup probe on --port).
+# 결함②: VPC 누락 → --network/--subnet/--vpc-egress 추가(Private-IP 경로·dev/prod 검증된 config 일치).
 gcloud run deploy "${SERVICE_NAME}" \
     --image="${IMAGE}" \
     --region="${GCP_REGION}" \
@@ -111,11 +148,11 @@ gcloud run deploy "${SERVICE_NAME}" \
     --concurrency=80 \
     --timeout=300 \
     --add-cloudsql-instances="${CLOUD_SQL_INSTANCE}" \
-    --set-env-vars="APP_ENV=${ENV},CORS_ORIGINS=${CORS_ORIGINS}" \
-    --set-secrets="\
-DATABASE_URL=${DB_SECRET_NAME}:latest,\
-JWT_SECRET=JWT_SECRET:latest" \
-    --startup-probe-path="/api/v2/health"
+    --network=default \
+    --subnet=default \
+    --vpc-egress=private-ranges-only \
+    --set-env-vars="${ENV_VARS_SPEC}" \
+    --set-secrets="${SECRETS_SPEC}"
 
 SERVICE_URL=$(gcloud run services describe "${SERVICE_NAME}" \
     --region="${GCP_REGION}" \
