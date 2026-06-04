@@ -643,3 +643,50 @@ async def test_ensure_human_member_creates_anchor_idempotent():
             await s.execute(text("DELETE FROM users WHERE id=:i"), {"i": str(new_user)})
             await s.commit()
         await engine.dispose()
+
+
+@pytest.mark.anyio
+async def test_ensure_human_member_orphan_safe():
+    """⚠️ E1(QA): ensure_human_member orphan-safe — orphan org면 False(members.org_id FK 500 회피),
+    orphan user면 user_id=NULL(members.user_id FK 회피). 0084 §1 동형(트랩#3 실DB orphan)."""
+    from sqlalchemy import text
+    from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
+    from app.services.agent_anchor_sync import ensure_human_member
+
+    engine = create_async_engine(_ASYNC_URL)
+    Session = async_sessionmaker(engine, expire_on_commit=False)
+    om_orphan_org = uuid.UUID("b3000000-0000-0000-0000-0000000000f1")   # org_id가 organizations에 없음
+    om_orphan_user = uuid.UUID("b3000000-0000-0000-0000-0000000000f2")  # user_id가 users에 없음
+    orphan_user = uuid.UUID("b2000000-0000-0000-0000-0000000000f2")
+    try:
+        async with Session() as s:
+            await _seed(s)
+            for i in (om_orphan_org, om_orphan_user):
+                await s.execute(text("DELETE FROM members WHERE id=:i"), {"i": str(i)})
+                await s.execute(text("DELETE FROM org_members WHERE id=:i"), {"i": str(i)})
+            # org_members.org_id/user_id는 FK 없음 → orphan 삽입 가능(실DB 정합 모사)
+            await s.execute(text(
+                "INSERT INTO org_members (id,org_id,user_id,role) VALUES "
+                "(:o1,'cccccccc-0000-0000-0000-0000000000cc',:u0,'member'),"  # orphan org
+                "(:o2,:org,:uo,'member')"                                      # orphan user
+            ), {"o1": str(om_orphan_org), "u0": str(U_MEM), "o2": str(om_orphan_user), "org": str(ORG), "uo": str(orphan_user)})
+            await s.commit()
+        # orphan org → False, members 미생성(500 없이)
+        async with Session() as s:
+            assert await ensure_human_member(s, om_orphan_org) is False, "orphan org인데 True"
+            await s.commit()
+            cnt = (await s.execute(text("SELECT count(*) FROM members WHERE id=:i"), {"i": str(om_orphan_org)})).scalar_one()
+            assert cnt == 0, "orphan org members 생성됨(FK 위험)"
+        # orphan user → True, members 생성·user_id NULL
+        async with Session() as s:
+            assert await ensure_human_member(s, om_orphan_user) is True
+            await s.commit()
+            row = (await s.execute(text("SELECT user_id FROM members WHERE id=:i"), {"i": str(om_orphan_user)})).first()
+            assert row is not None and row[0] is None, f"orphan user인데 user_id 비-NULL: {row}"
+    finally:
+        async with Session() as s:
+            for i in (om_orphan_org, om_orphan_user):
+                await s.execute(text("DELETE FROM members WHERE id=:i"), {"i": str(i)})
+                await s.execute(text("DELETE FROM org_members WHERE id=:i"), {"i": str(i)})
+            await s.commit()
+        await engine.dispose()

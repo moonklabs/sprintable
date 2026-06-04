@@ -103,8 +103,14 @@ async def ensure_human_member(session: AsyncSession, org_member_id: uuid.UUID) -
     project_access.member_id=org_member.id를 세팅하기 전 호출 — fk_project_access_member(NOT VALID이나
     신규 INSERT 검증)가 members 행을 요구하므로. 신규 휴먼(0075 이후)은 members 행이 없을 수 있다.
 
-    반환: members 행이 (이미 있거나) 보장되면 True, org_member 부재/삭제면 False(호출부 미세팅).
+    반환: members 행이 (이미 있거나) 보장되면 True, org_member 부재/삭제 **또는 orphan org**면
+    False(호출부 미세팅 — member_id NULL 레거시 호환).
+
+    ⚠️ orphan-safe(QA E1, 0084 §1 동형): members.org_id NOT NULL FK라 **org 부재 시 INSERT 불가**
+    → org 존재 확인 후만 INSERT(아니면 False). user_id는 users FK라 **orphan user면 NULL**(user.id|NULL).
     """
+    from app.models.organization import Organization
+
     om = (
         await session.execute(
             select(OrgMember).where(OrgMember.id == org_member_id, OrgMember.deleted_at.is_(None))
@@ -113,9 +119,18 @@ async def ensure_human_member(session: AsyncSession, org_member_id: uuid.UUID) -
     if om is None:
         return False
 
+    # org 존재 확인 — orphan org면 members.org_id FK 위반(500) 회피로 미보장(False)
+    org_exists = (
+        await session.execute(select(Organization.id).where(Organization.id == om.org_id))
+    ).scalar_one_or_none()
+    if org_exists is None:
+        return False
+
     user = (
         await session.execute(select(User).where(User.id == om.user_id))
     ).scalar_one_or_none()
+    # orphan user면 user_id=NULL(members.user_id FK 위반 회피, 0084 LEFT JOIN u.id 동형)
+    user_id_val = user.id if user is not None else None
     name = (getattr(user, "display_name", None) or getattr(user, "email", None) or str(om.user_id)) if user else str(om.user_id)
 
     await session.execute(
@@ -124,7 +139,7 @@ async def ensure_human_member(session: AsyncSession, org_member_id: uuid.UUID) -
             id=om.id,  # 0075 불변식: 휴먼 members.id = org_member.id
             org_id=om.org_id,
             type="human",
-            user_id=om.user_id,
+            user_id=user_id_val,
             owner_member_id=None,
             name=name,
             org_role=om.role,
