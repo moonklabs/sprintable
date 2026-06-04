@@ -1,7 +1,7 @@
 import uuid
 from datetime import datetime
 
-from sqlalchemy import DateTime, ForeignKey, Text, UniqueConstraint, func
+from sqlalchemy import DateTime, ForeignKey, Text, UniqueConstraint, func, text
 from sqlalchemy.dialects.postgresql import ARRAY, JSONB, UUID
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
@@ -83,5 +83,9 @@ class ConversationMessage(Base, TimestampMixin):
     )
     review_type: Mapped[str | None] = mapped_column(Text, nullable=True)
     msg_metadata: Mapped[dict | None] = mapped_column("metadata", JSONB, nullable=True)
+    # E-FILE S2: 첨부 목록. additive(nullable + server_default '[]') — 0093 마이그와 정합.
+    attachments: Mapped[list | None] = mapped_column(
+        JSONB, nullable=True, server_default=text("'[]'"), default=list
+    )
 
     conversation: Mapped[Conversation] = relationship("Conversation", back_populates="messages")
