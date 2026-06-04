@@ -118,7 +118,9 @@ export function OnboardingForm({ initialStep, initialOrgId }: OnboardingFormProp
 
     const res = await fetch('/api/projects', {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
+      // E-ONB S5: 신규 register JWT는 app_metadata 비어(org_id 없음) → BE get_verified_org_id 401.
+      // 방금 생성한 org.id를 X-Org-Id로 보내면 BE가 membership fallback 검증(proxyToFastapi가 x-org-id forward).
+      headers: { 'Content-Type': 'application/json', 'X-Org-Id': orgId },
       body: JSON.stringify({ org_id: orgId, name: projectName.trim(), description: projectDesc.trim() || null }),
     });
     const json = await res.json();
