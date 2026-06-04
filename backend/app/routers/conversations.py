@@ -18,7 +18,7 @@ from app.dependencies.database import get_db
 from app.models.conversation import Conversation, ConversationMessage, ConversationParticipant
 from app.models.event import Event
 from app.models.project import OrgMember
-from app.models.team import TeamMember
+from app.models.team import AgentMessageAllowlist, TeamMember
 from app.models.webhook_config import WebhookConfig
 from app.routers.events import _push_to_agent, publish_event
 from app.services.event_seq import assign_recipient_seq
@@ -64,33 +64,57 @@ async def _enforce_agent_creator_policy(
     agent_ids = {a.id for a in agent_tms}
     non_agent_ids = all_ids - agent_ids
     if not non_agent_ids:
-        return  # 에이전트↔에이전트 → creator 무관 허용
+        return  # ⭐ 에이전트↔에이전트 → 게이팅 skip (팀 comms 불변·핵심 안전조건, E-MSG-POLICY S1 불변)
 
-    # 참가자 집합의 user_id 수집 (sender + 나머지 non-agent participants)
-    human_user_ids: set[uuid.UUID] = set()
+    # 휴먼 참가자 (member_id, user_id) 수집 — mode별 인가에 둘 다 필요
+    humans: list[tuple[uuid.UUID, uuid.UUID | None]] = []
     sender_user_id = getattr(sender, "user_id", None)
-    if sender_user_id is not None and sender.id in non_agent_ids:
-        human_user_ids.add(sender_user_id)
+    if sender.id in non_agent_ids:
+        humans.append((sender.id, sender_user_id))
 
     remaining_ids = non_agent_ids - {sender.id}
     if remaining_ids:
-        # TeamMember에서 user_id 조회
+        # TeamMember 조회
         tm_humans = (await db.execute(
             select(TeamMember).where(TeamMember.id.in_(remaining_ids))
         )).scalars().all()
-        human_user_ids.update(tm.user_id for tm in tm_humans if tm.user_id)
+        humans.extend((tm.id, tm.user_id) for tm in tm_humans)
 
-        # OrgMember에서 user_id 조회 (grant-only 휴먼)
+        # OrgMember 조회 (grant-only 휴먼)
         tm_found_ids = {tm.id for tm in tm_humans}
         om_ids = remaining_ids - tm_found_ids
         if om_ids:
             oms = (await db.execute(
                 select(OrgMember).where(OrgMember.id.in_(om_ids))
             )).scalars().all()
-            human_user_ids.update(om.user_id for om in oms if om.user_id)
+            humans.extend((om.id, om.user_id) for om in oms)
 
-    # 각 에이전트의 created_by가 참가자 user_id 집합에 있는지 확인
+    human_user_ids: set[uuid.UUID] = {u for _, u in humans if u}
+
+    # E-MSG-POLICY S1: 각 에이전트의 message_policy_mode 별 인가
     for agent_tm in agent_tms:
+        mode = getattr(agent_tm, "message_policy_mode", None) or "creator_only"
+
+        if mode == "org_wide":
+            continue  # org 내 휴먼 전부 허용 (참가자는 이미 org-scoped) → 통과
+
+        if mode == "list":
+            allowed_ids = set((await db.execute(
+                select(AgentMessageAllowlist.allowed_id).where(
+                    AgentMessageAllowlist.agent_member_id == agent_tm.id
+                )
+            )).scalars().all())
+            for member_id, user_id in humans:
+                # creator는 모드 무관 항상 허용 (자기 에이전트 접근)
+                is_creator = user_id is not None and user_id == agent_tm.created_by
+                if member_id not in allowed_ids and not is_creator:
+                    raise HTTPException(
+                        status_code=403,
+                        detail="Member is not in this agent's message allowlist",
+                    )
+            continue
+
+        # creator_only (default·기존 동작): 에이전트 creator가 참가자여야
         if agent_tm.created_by is None:
             raise HTTPException(status_code=403, detail="Agent has no creator — conversation not allowed")
         if agent_tm.created_by not in human_user_ids:
@@ -651,6 +675,14 @@ async def add_participant(
     target = await resolve_member_identity(body.member_id, org_id, db)
     if target is None:
         raise HTTPException(status_code=404, detail="Member not found")
+
+    # E-MSG-POLICY S1: 참가자 추가도 동일 정책 게이트 (back-door 차단).
+    # 기존 참가자 ∪ 신규 대상으로 각 에이전트 정책 재검증 (list 모드 비허용 휴먼 추가 시 403 등).
+    _existing_ids = (await db.execute(
+        select(ConversationParticipant.member_id)
+        .where(ConversationParticipant.conversation_id == conversation_id)
+    )).scalars().all()
+    await _enforce_agent_creator_policy(sender, list(set(_existing_ids) | {body.member_id}), db)
 
     # DM → 기존 DM 유지, 기존 참여자 + 신규 참여자로 그룹 conversation fork
     if conv.type == "dm":
