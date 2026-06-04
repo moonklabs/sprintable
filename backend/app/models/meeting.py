@@ -17,7 +17,7 @@ class Meeting(Base, TimestampMixin, SoftDeleteMixin):
         UUID(as_uuid=True), ForeignKey("projects.id", ondelete="CASCADE"), nullable=False, index=True
     )
     created_by: Mapped[uuid.UUID | None] = mapped_column(
-        UUID(as_uuid=True), ForeignKey("team_members.id", ondelete="SET NULL"), nullable=True
+        UUID(as_uuid=True), nullable=True
     )
     title: Mapped[str] = mapped_column(Text, nullable=False)
     meeting_type: Mapped[str] = mapped_column(Text, nullable=False, default="general")
