@@ -180,6 +180,7 @@
     "assignees": "담당자",
     "assignee": "담당자",
     "unassigned": "담당자 없음",
+    "clearAssignees": "전체 해제",
     "save": "저장",
     "cancel": "취소",
     "edit": "편집",

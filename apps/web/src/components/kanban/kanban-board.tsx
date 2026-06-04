@@ -1151,6 +1151,7 @@ export function KanbanBoard({ projectId }: KanbanBoardProps) {
                     story={activeStory}
                     epicName={activeStory.epic_id ? epicMap[activeStory.epic_id] : undefined}
                     assignee={activeStory.assignee_id ? memberMap[activeStory.assignee_id] : undefined}
+                    assignees={(activeStory.assignee_ids ?? []).flatMap((id) => memberMap[id] ? [memberMap[id]] : [])}
                     onClick={() => {}}
                   />
                 </div>

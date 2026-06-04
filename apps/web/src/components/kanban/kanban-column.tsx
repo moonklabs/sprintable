@@ -299,6 +299,7 @@ export function KanbanColumn({
                   story={story}
                   epicName={story.epic_id ? epicMap[story.epic_id] : undefined}
                   assignee={story.assignee_id ? memberMap[story.assignee_id] : undefined}
+                  assignees={(story.assignee_ids ?? []).flatMap((id) => memberMap[id] ? [memberMap[id]] : [])}
                   onClick={() => onStoryClick(story)}
                   onEdit={onEditStory}
                   onChangeStatus={onChangeStatus}

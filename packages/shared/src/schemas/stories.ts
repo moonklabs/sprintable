@@ -58,6 +58,7 @@ export const updateStorySchema = z.object({
   epic_id: z.string().optional().nullable(),
   sprint_id: z.string().optional().nullable(),
   assignee_id: z.string().optional().nullable(),
+  assignee_ids: z.array(z.string()).optional().nullable(),
   position: z.number().int().optional().nullable(),
   success_hypothesis: z.string().optional().nullable(),
   metric_definition: metricDefinitionSchema.optional().nullable(),
