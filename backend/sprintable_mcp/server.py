@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import asyncio
 import inspect
+import json
 import logging
 from typing import get_type_hints
 
@@ -17,6 +18,9 @@ from .api_client import client
 from .config import settings
 from .response import ok
 from .schemas import SprintableInput
+
+# E-MCP S2: toolset enforcement은 백엔드 SSOT(app.services.mcp_toolset)의 순수 규칙을 공유.
+from app.services.mcp_toolset import is_tool_allowed
 from .tools.agent_runs import (
     EmitEventInput, PollEventsInput, UpdateRunStatusInput,
     emit_event, poll_events, update_run_status,
@@ -108,6 +112,35 @@ async def _heartbeat_fire_forget() -> None:
         logger.warning("heartbeat failed (ignored): %s", exc)
 
 
+# ── E-MCP S2: call-time toolset enforcement ──────────────────────────────────
+# 키의 허용 toolset(scope)을 /api/v2/mcp/manifest에서 1회 로드(캐시) 후, 매 도구 호출 시
+# is_tool_allowed로 차단(403-shape). 백엔드 ApiKey.scope가 진짜 SSOT, 여기선 defense-in-depth.
+_key_scope: list[str] | None = None
+_scope_loaded: bool = False
+
+
+async def _load_scope() -> None:
+    global _key_scope, _scope_loaded
+    if _scope_loaded:
+        return
+    _scope_loaded = True
+    try:
+        manifest = await client.get("/api/v2/mcp/manifest")
+        _key_scope = manifest.get("scope") or []
+    except Exception:
+        # 매니페스트 미가용 시 레거시 기본(비파괴 전체)로 fail-open — 백엔드가 최종 SSOT.
+        _key_scope = None
+        logger.warning("MCP toolset manifest load failed — falling back to legacy scope")
+
+
+def _denied(name: str) -> list[TextContent]:
+    return [TextContent(type="text", text=json.dumps(
+        {"error": "forbidden", "code": 403,
+         "message": f"tool '{name}' is not in this API key's allowed toolset"},
+        ensure_ascii=False,
+    ))]
+
+
 def _flat(name: str, doc: str, input_cls: type[BaseModel], fn):
     """BaseModel → flat inspect.Signature so FastMCP emits top-level params."""
     try:
@@ -133,6 +166,10 @@ def _flat(name: str, doc: str, input_cls: type[BaseModel], fn):
         )
 
     async def wrapper(**kwargs):
+        # E-MCP S2: call-time enforcement — 키 허용 밖 도구는 호출 차단(403-shape).
+        await _load_scope()
+        if not is_tool_allowed(name, _key_scope):
+            return _denied(name)
         result = await fn(input_cls(**kwargs))
         asyncio.create_task(_heartbeat_fire_forget())
         return result
