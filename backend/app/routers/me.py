@@ -182,24 +182,49 @@ async def get_my_memberships(
 
 @router.patch("", response_model=MeResponse)
 async def update_me(
-    member_id: uuid.UUID = Query(...),
-    body: UpdateMe = ...,
+    body: UpdateMe,
+    member_id: uuid.UUID | None = Query(default=None),
     session: AsyncSession = Depends(get_db),
-    _auth: AuthContext = Depends(get_current_user),
+    auth: AuthContext = Depends(get_current_user),
 ) -> MeResponse:
+    # E-ONBOARDING S1: 타겟 member를 auth에서 파생 — client Query 강제 제거(누락 시 422 해소).
+    #   member_id를 명시해도 **본인 소유 member만** 매칭(ownership 강제 — 남의 프로필 변경 차단).
+    uid = uuid.UUID(auth.user_id)
+    is_api_key = bool(auth.claims.get("app_metadata", {}).get("api_key_id"))
+
+    if member_id is not None:
+        # 명시 member_id는 호출자 본인 것일 때만 (api_key=TeamMember.id 본인, JWT=user_id 본인)
+        if is_api_key:
+            where_clause = (TeamMember.id == member_id) & (TeamMember.id == uid)
+        else:
+            where_clause = (TeamMember.id == member_id) & (TeamMember.user_id == uid)
+    elif is_api_key:
+        where_clause = TeamMember.id == uid
+    else:
+        project_id_str = auth.claims.get("app_metadata", {}).get("project_id")
+        if project_id_str:
+            try:
+                where_clause = (TeamMember.user_id == uid) & (TeamMember.project_id == uuid.UUID(project_id_str))
+            except (ValueError, AttributeError):
+                where_clause = TeamMember.user_id == uid
+        else:
+            where_clause = TeamMember.user_id == uid
+
     # AC3-5 ②: team_members가 뷰(0088) — multi-row 안전(휴먼 multi-project) .limit(1).first().
     result = await session.execute(
-        select(TeamMember).where(TeamMember.id == member_id).limit(1)
+        select(TeamMember).where(where_clause).limit(1)
     )
     member = result.scalars().first()
     if member is None:
+        # 본인 소유가 아니거나 미존재 — 존재 여부 누설 없이 404
         raise HTTPException(status_code=404, detail="Member not found")
+    target_id = member.id
     # AC3-5 ②: 뷰는 write 불가 — ORM mutation+flush 대신 name을 members 앵커에 UPDATE. expire 후 뷰 재조회.
     await session.execute(
-        sa_update(Member).where(Member.id == member_id).values(name=body.name, updated_at=func.now())
+        sa_update(Member).where(Member.id == target_id).values(name=body.name, updated_at=func.now())
     )
     session.expire(member)
     refreshed = (await session.execute(
-        select(TeamMember).where(TeamMember.id == member_id).limit(1)
+        select(TeamMember).where(TeamMember.id == target_id).limit(1)
     )).scalars().first()
     return MeResponse.model_validate(refreshed or member)
