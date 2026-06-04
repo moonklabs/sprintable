@@ -4,7 +4,7 @@ import { EpicService, type CreateEpicInput } from '@/services/epic';
 import { handleApiError } from '@/lib/api-error';
 import { apiSuccess, apiError, ApiErrors } from '@/lib/api-response';
 import { getAuthContext } from '@/lib/auth-helpers';
-import { buildCursorPageMeta, parseCursorPageInput } from '@/lib/pagination';
+import { paginateInMemory, parseCursorPageInput } from '@/lib/pagination';
 import { createEpicRepository } from '@/lib/storage/factory';
 import { getEpicActorRole, hasEpicRole } from '@/lib/epic-permissions';
 
@@ -21,12 +21,12 @@ export async function GET(request: Request) {
     }, { defaultLimit: 50, maxLimit: 100 });
     const repo = await createEpicRepository();
     const service = new EpicService(repo);
+    // 백엔드 GET /api/v2/epics 는 cursor/limit/order_by 미지원 — 프로젝트 전체 목록을 정렬 없이 반환한다.
+    // 따라서 cursor 페이징은 여기(라우트)에서 결정적 정렬 + cursor 적용으로 수행한다.
     const epics = await service.list({
       project_id: searchParams.get('project_id') ?? undefined,
-      limit: pageInput.limit,
-      cursor: pageInput.cursor,
     });
-    const { page, meta } = buildCursorPageMeta(epics, pageInput.limit, 'created_at');
+    const { page, meta } = paginateInMemory(epics, pageInput.limit, 'created_at', pageInput.cursor);
     return apiSuccess(page, meta);
   } catch (err: unknown) { return handleApiError(err); }
 }
