@@ -1140,7 +1140,7 @@ export function KanbanBoard({ projectId }: KanbanBoardProps) {
                     storyLabelsMap={storyLabelsMap}
                     storyGatesMap={storyGatesMap}
                     totalCount={filterActive ? colStories.length : columnTotals[col.id]}
-                    hasMore={!!columnCursors[col.id]}
+                    hasMore={filterActive ? false : !!columnCursors[col.id]}
                     loadingMore={loadingMoreColumns[col.id] ?? false}
                     onLoadMore={() => handleLoadMore(col.id)}
                     collapsed={col.id === 'done' ? doneCollapsed : undefined}
