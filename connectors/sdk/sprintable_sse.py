@@ -41,6 +41,24 @@ STREAM_READ_TIMEOUT = 90
 DEDUP_MAX_SIZE = 1000
 DEDUP_TTL_SECONDS = 300.0
 
+# ── E-EVENT-INJECT S2: 주입 허용 event_type (중앙 상수, recommended ONLY) ──────────
+# 이 목록 밖의 event_type은 content가 실려있어도 work-turn으로 주입하지 않고 드롭한다
+# (FYI poisoning 방지: status_changed/task_completed/agent_joined/sprint_closed/file_conflict 등).
+# 워크플로 트리거(kickoff/review_request/qa_request/deploy_request/handoff)는 현재 백엔드가
+# dispatched 이벤트로 전달하나, 향후 직접 event_type emit 대비해 명시 포함.
+# ⚠️ 단일 출처 — hermes adapter.py가 이 상수를 import해서 사용(분기 중복 금지).
+INJECTABLE_EVENT_TYPES = frozenset({
+    "dispatched",
+    "story_assigned",
+    "conversation.message_created",
+    "conversation:mention",
+    "kickoff",
+    "review_request",
+    "qa_request",
+    "deploy_request",
+    "handoff",
+})
+
 
 # ── Public types ─────────────────────────────────────────────────────────────
 
@@ -134,6 +152,10 @@ class SprintableSSEClient:
         payload = data.get("payload") or {}
         if isinstance(payload, str):
             payload = {}
+        # E-EVENT-INJECT S2: recommended ONLY allow-list (content 체크 전). FYI 등은 드롭.
+        event_type = data.get("event_type") or payload.get("event_type")
+        if event_type not in INJECTABLE_EVENT_TYPES:
+            return None
         content = (data.get("content") or payload.get("content") or "").strip()
         if not content:
             return None
