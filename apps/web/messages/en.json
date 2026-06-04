@@ -184,6 +184,8 @@
     "cancel": "Cancel",
     "edit": "Edit",
     "addDescription": "Add description",
+    "acceptanceCriteria": "Acceptance Criteria",
+    "addAcceptanceCriteria": "Add acceptance criteria",
     "searchSprints": "Search sprints...",
     "searchEpics": "Search epics...",
     "searchAssignees": "Search assignees...",

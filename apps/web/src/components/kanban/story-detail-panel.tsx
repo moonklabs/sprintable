@@ -116,6 +116,9 @@ export function StoryDetailPanel({ story, tasks, nextTasksCursor = null, loading
   const [editingDescription, setEditingDescription] = useState(false);
   const [descriptionDraft, setDescriptionDraft] = useState(story.description ?? '');
   const [savingDescription, setSavingDescription] = useState(false);
+  const [editingAC, setEditingAC] = useState(false);
+  const [acDraft, setAcDraft] = useState(story.acceptance_criteria ?? '');
+  const [savingAC, setSavingAC] = useState(false);
 
   const [intent, setIntent] = useState<OutcomeIntentValue>({
     success_hypothesis: story.success_hypothesis ?? '',
@@ -168,13 +171,14 @@ export function StoryDetailPanel({ story, tasks, nextTasksCursor = null, loading
   useEffect(() => {
     setTitleDraft(story.title);
     setDescriptionDraft(story.description ?? '');
+    setAcDraft(story.acceptance_criteria ?? '');
     setIntent({
       success_hypothesis: story.success_hypothesis ?? '',
       metric_definition: story.metric_definition ?? null,
       measure_after: story.measure_after ? story.measure_after.slice(0, 10) : '',
     });
     setIntentOpen(!!story.success_hypothesis || !!story.metric_definition);
-  }, [story.id, story.title, story.description, story.success_hypothesis, story.metric_definition, story.measure_after]);
+  }, [story.id, story.title, story.description, story.acceptance_criteria, story.success_hypothesis, story.metric_definition, story.measure_after]);
 
   useEffect(() => {
     if (editingTitle) {
@@ -357,6 +361,18 @@ export function StoryDetailPanel({ story, tasks, nextTasksCursor = null, loading
     if (updated) onStoryUpdate?.({ ...story, description: updated.description });
   };
 
+  const handleSaveAC = async () => {
+    if (acDraft === (story.acceptance_criteria ?? '')) {
+      setEditingAC(false);
+      return;
+    }
+    setSavingAC(true);
+    const updated = await patchStory({ acceptance_criteria: acDraft || null });
+    setSavingAC(false);
+    setEditingAC(false);
+    if (updated) onStoryUpdate?.({ ...story, acceptance_criteria: updated.acceptance_criteria });
+  };
+
   const handleSaveIntent = async () => {
     setSavingIntent(true);
     await patchStory({
@@ -413,12 +429,13 @@ export function StoryDetailPanel({ story, tasks, nextTasksCursor = null, loading
       if (e.key === 'Escape') {
         if (editingTitle) { setEditingTitle(false); setTitleDraft(story.title); return; }
         if (editingDescription) { setEditingDescription(false); setDescriptionDraft(story.description ?? ''); return; }
+        if (editingAC) { setEditingAC(false); setAcDraft(story.acceptance_criteria ?? ''); return; }
         onClose();
       }
     };
     window.addEventListener('keydown', handleEsc);
     return () => window.removeEventListener('keydown', handleEsc);
-  }, [onClose, editingTitle, editingDescription, story.title, story.description]);
+  }, [onClose, editingTitle, editingDescription, editingAC, story.title, story.description, story.acceptance_criteria]);
 
   const handleSubmitComment = async () => {
     if (!commentInput.trim() || submittingComment) return;
@@ -675,6 +692,53 @@ export function StoryDetailPanel({ story, tasks, nextTasksCursor = null, loading
                   className="mt-2 w-full rounded-md border border-dashed border-border py-3 text-sm text-muted-foreground transition hover:border-primary hover:text-primary"
                 >
                   + {t('addDescription')}
+                </button>
+              )}
+            </div>
+
+            {/* Acceptance Criteria — Description 블록 미러 (E-BOARD-UX S3) */}
+            <div>
+              <div className="flex items-center justify-between">
+                <span className="text-[10px] font-mono uppercase tracking-wider text-muted-foreground">{t('acceptanceCriteria')}</span>
+                {!editingAC && (
+                  <button
+                    type="button"
+                    onClick={() => setEditingAC(true)}
+                    className="text-xs text-muted-foreground transition hover:text-foreground"
+                  >
+                    ✎ {t('edit')}
+                  </button>
+                )}
+              </div>
+              {editingAC ? (
+                <div className="mt-2 space-y-2">
+                  <textarea
+                    value={acDraft}
+                    onChange={(e) => setAcDraft(e.target.value)}
+                    placeholder="Markdown 형식으로 작성하세요..."
+                    className="flex field-sizing-content min-h-[160px] w-full resize-y rounded-lg border border-input bg-transparent px-2.5 py-2 font-mono text-sm outline-none transition-colors placeholder:text-muted-foreground focus-visible:border-ring focus-visible:ring-3 focus-visible:ring-ring/50 disabled:cursor-not-allowed disabled:opacity-50"
+                    autoFocus
+                  />
+                  <div className="flex gap-2">
+                    <Button size="sm" onClick={handleSaveAC} disabled={savingAC}>
+                      {savingAC ? t('loading') : t('save')}
+                    </Button>
+                    <Button size="sm" variant="ghost" onClick={() => { setEditingAC(false); setAcDraft(story.acceptance_criteria ?? ''); }}>
+                      {t('cancel')}
+                    </Button>
+                  </div>
+                </div>
+              ) : story.acceptance_criteria ? (
+                <div className="mt-2 cursor-pointer" onClick={() => setEditingAC(true)}>
+                  <DescriptionViewer description={story.acceptance_criteria} />
+                </div>
+              ) : (
+                <button
+                  type="button"
+                  onClick={() => setEditingAC(true)}
+                  className="mt-2 w-full rounded-md border border-dashed border-border py-3 text-sm text-muted-foreground transition hover:border-primary hover:text-primary"
+                >
+                  + {t('addAcceptanceCriteria')}
                 </button>
               )}
             </div>

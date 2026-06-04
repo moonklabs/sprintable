@@ -184,6 +184,8 @@
     "cancel": "취소",
     "edit": "편집",
     "addDescription": "설명 추가",
+    "acceptanceCriteria": "완료 조건",
+    "addAcceptanceCriteria": "완료 조건 추가",
     "searchSprints": "스프린트 검색...",
     "searchEpics": "에픽 검색...",
     "searchAssignees": "담당자 검색...",
