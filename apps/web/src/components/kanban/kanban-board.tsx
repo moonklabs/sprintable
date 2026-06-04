@@ -1256,6 +1256,8 @@ export function KanbanBoard({ projectId }: KanbanBoardProps) {
             setSelectedStory(null);
           }}
           storyMap={Object.fromEntries(stories.map((s) => [s.id, { title: s.title, status: s.status }]))}
+          epicMap={epicMap}
+          sprintMap={Object.fromEntries(sprints.map((s) => [s.id, s.title]))}
           projectId={projectId}
           onNavigate={(storyId) => {
             const s = stories.find((x) => x.id === storyId);

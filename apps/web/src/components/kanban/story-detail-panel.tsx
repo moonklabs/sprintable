@@ -57,6 +57,8 @@ interface StoryDetailPanelProps {
   memberMap?: Record<string, KanbanMember>;
   members?: KanbanMember[];
   storyMap?: Record<string, { title: string; status: string }>;
+  epicMap?: Record<string, string>;
+  sprintMap?: Record<string, string>;
   onNavigate?: (storyId: string) => void;
   projectId?: string;
 }
@@ -97,7 +99,7 @@ function DescriptionViewer({ description }: { description: string }) {
   );
 }
 
-export function StoryDetailPanel({ story, tasks, nextTasksCursor = null, loadingMoreTasks = false, onLoadMoreTasks, onClose, onStoryUpdate, onDeleteSuccess, memberMap = {}, members = [], storyMap = {}, onNavigate, projectId }: StoryDetailPanelProps) {
+export function StoryDetailPanel({ story, tasks, nextTasksCursor = null, loadingMoreTasks = false, onLoadMoreTasks, onClose, onStoryUpdate, onDeleteSuccess, memberMap = {}, members = [], storyMap = {}, epicMap = {}, sprintMap = {}, onNavigate, projectId }: StoryDetailPanelProps) {
   const t = useTranslations('board');
   const { toasts, addToast, dismissToast } = useToast();
   const [showDeleteConfirm, setShowDeleteConfirm] = useState(false);
@@ -112,6 +114,7 @@ export function StoryDetailPanel({ story, tasks, nextTasksCursor = null, loading
   const [loadingMoreActivities, setLoadingMoreActivities] = useState(false);
   const [commentInput, setCommentInput] = useState('');
   const [submittingComment, setSubmittingComment] = useState(false);
+  const [expandedActivityId, setExpandedActivityId] = useState<string | null>(null);
 
   // Edit state
   const [editingTitle, setEditingTitle] = useState(false);
@@ -550,24 +553,40 @@ export function StoryDetailPanel({ story, tasks, nextTasksCursor = null, loading
     }
   };
 
-  const formatActivityMessage = (activity: Activity) => {
-    const { activity_type, old_value, new_value } = activity;
+  // E-BOARD S4: Activity 상세화 — old→new resolve(UUID 노출 0)·화살표. 긴 값은 expanded 시 전체 표시.
+  const truncate = (v: string, n = 40) => (v.length > n ? `${v.slice(0, n)}…` : v);
+  const renderChange = (oldLabel: string | null, newLabel: string, expand: boolean): React.ReactNode => (
+    <span className="inline-flex flex-wrap items-center gap-1 align-middle">
+      {oldLabel != null ? (
+        <>
+          <span className="rounded bg-muted px-1.5 py-0.5 text-xs text-muted-foreground line-through">{expand ? oldLabel : truncate(oldLabel)}</span>
+          <span className="text-muted-foreground">→</span>
+        </>
+      ) : null}
+      <span className="rounded bg-muted px-1.5 py-0.5 text-xs font-medium text-foreground">{expand ? newLabel : truncate(newLabel)}</span>
+    </span>
+  );
+  const memberName = (id: string | null) => (id ? (memberMap[id]?.name ?? '—') : '—');
+  const epicName = (id: string | null) => (id ? (epicMap[id] ?? '—') : '—');
+  const sprintName = (id: string | null) => (id ? (sprintMap[id] ?? '—') : '—');
 
+  const formatActivityMessage = (activity: Activity, expand: boolean): React.ReactNode => {
+    const { activity_type, old_value, new_value } = activity;
     switch (activity_type) {
       case 'created':
-        return `Created story: ${new_value}`;
+        return <span className="text-foreground">Created{new_value ? <>: <span className="font-medium">{expand ? new_value : truncate(new_value)}</span></> : null}</span>;
       case 'status_changed':
-        return `Changed status from ${old_value} to ${new_value}`;
+        return <span className="text-foreground">Status {renderChange(old_value, new_value ?? '—', expand)}</span>;
       case 'assignee_changed':
-        return old_value ? `Changed assignee` : `Assigned`;
+        return <span className="text-foreground">Assignee {renderChange(old_value ? memberName(old_value) : null, memberName(new_value), expand)}</span>;
       case 'title_changed':
-        return `Changed title`;
+        return <span className="text-foreground">Title {renderChange(old_value, new_value ?? '—', expand)}</span>;
       case 'epic_changed':
-        return old_value ? `Changed epic` : `Added to epic`;
+        return <span className="text-foreground">Epic {renderChange(old_value ? epicName(old_value) : null, epicName(new_value), expand)}</span>;
       case 'sprint_changed':
-        return old_value ? `Moved to different sprint` : `Added to sprint`;
+        return <span className="text-foreground">Sprint {renderChange(old_value ? sprintName(old_value) : null, sprintName(new_value), expand)}</span>;
       default:
-        return activity_type;
+        return <span className="text-foreground">{activity_type}</span>;
     }
   };
 
@@ -1266,14 +1285,30 @@ export function StoryDetailPanel({ story, tasks, nextTasksCursor = null, loading
                 ) : (
                   <>
                     <ul className="space-y-2">
-                      {activities.map((activity) => (
-                        <li key={activity.id} className="rounded-md border border-border bg-muted/30 p-3">
-                          <p className="text-sm text-foreground">{formatActivityMessage(activity)}</p>
-                          <p className="mt-1 text-[10px] font-mono text-muted-foreground">
-                            {new Date(activity.created_at).toLocaleString()}
-                          </p>
-                        </li>
-                      ))}
+                      {activities.map((activity) => {
+                        const actorName = memberMap[activity.created_by]?.name ?? '—';
+                        const isLong = (activity.old_value?.length ?? 0) > 40 || (activity.new_value?.length ?? 0) > 40;
+                        const expanded = expandedActivityId === activity.id;
+                        return (
+                          <li key={activity.id} className="rounded-md border border-border bg-muted/30 p-3">
+                            <div className="text-sm">{formatActivityMessage(activity, expanded)}</div>
+                            <div className="mt-1 flex items-center gap-2 text-[10px] font-mono text-muted-foreground">
+                              <span>{actorName}</span>
+                              <span>·</span>
+                              <span>{new Date(activity.created_at).toLocaleString()}</span>
+                              {isLong ? (
+                                <button
+                                  type="button"
+                                  onClick={() => setExpandedActivityId(expanded ? null : activity.id)}
+                                  className="ml-auto rounded px-1.5 py-0.5 text-muted-foreground transition hover:bg-muted hover:text-foreground"
+                                >
+                                  {expanded ? '접기' : '펼치기'}
+                                </button>
+                              ) : null}
+                            </div>
+                          </li>
+                        );
+                      })}
                     </ul>
                     {nextActivitiesCursor ? (
                       <div className="text-center">
