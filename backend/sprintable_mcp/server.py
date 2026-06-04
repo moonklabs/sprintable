@@ -486,3 +486,27 @@ _TOOL_DEFS: list[tuple] = [
 
 for _name, _doc, _cls, _fn in _TOOL_DEFS:
     mcp.tool()(_flat(_name, _doc, _cls, _fn))
+
+
+# ── E-MCP S3: 부팅 시 허용 toolset만 노출 (schema/list 컨텍스트 절감) ─────────────
+# S2의 call-time wrapper(호출 차단)는 그대로 유지 — S3는 list/schema에서 허용 밖 도구를 숨겨
+# 컨텍스트를 절감하는 UX 레이어(defense-in-depth). 규칙은 동일하게 is_tool_allowed(SSOT) 공유.
+def disallowed_tools(scope: list[str] | None) -> list[str]:
+    """주어진 scope에서 허용되지 않는 등록 도구명 목록 (순수 — mcp 미변경)."""
+    return [name for name, _doc, _cls, _fn in _TOOL_DEFS if not is_tool_allowed(name, scope)]
+
+
+def filter_tools_by_scope(scope: list[str] | None) -> int:
+    """허용 밖 도구를 MCP 레지스트리에서 제거(부팅 시 1회). 제거 수 반환.
+
+    scope=None(매니페스트 fetch 실패/미바인딩) → 레거시 비파괴셋(destructive만 숨김)로 graceful degrade.
+    _ALWAYS_ALLOWED(ping 등)는 is_tool_allowed가 항상 True라 보존.
+    """
+    removed = 0
+    for name in disallowed_tools(scope):
+        try:
+            mcp.remove_tool(name)
+            removed += 1
+        except Exception:
+            logger.debug("remove_tool skipped for %s (not registered)", name)
+    return removed
