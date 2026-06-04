@@ -96,7 +96,6 @@ export function AgentDeploymentVerificationStep({
         </ul>
         <div className="mt-4 flex flex-wrap gap-2">
           <Link href="/agents" className={buttonVariants({ variant: 'hero', size: 'lg' })}>{t('verificationOpenDashboardCta')}</Link>
-          <Link href="/agents/workflow" className={buttonVariants({ variant: 'glass', size: 'lg' })}>{t('verificationOpenWorkflowCta')}</Link>
           <Link href="/dashboard/settings" className={buttonVariants({ variant: 'glass', size: 'lg' })}>{t('verificationOpenSettingsCta')}</Link>
           {!verificationCompleted ? (
             <Button variant="glass" size="lg" disabled={verificationSubmitting} onClick={onCompleteVerification}>
