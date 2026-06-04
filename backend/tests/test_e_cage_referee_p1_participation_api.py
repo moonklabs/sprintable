@@ -25,6 +25,7 @@ def _mock_story_obj(assignee_id=None):
     s.epic_id = None
     s.sprint_id = None
     s.assignee_id = assignee_id
+    s.assignee_ids = [assignee_id] if assignee_id else []  # E-BOARD S5
     s.meeting_id = None
     s.title = "Story 1"
     s.status = "backlog"
@@ -136,6 +137,13 @@ async def test_create_story_without_assignee_no_participation():
 async def test_update_story_assignee_auto_creates_participation():
     """update_story assignee 변경 → _upsert_assignee_participation 호출 단언."""
     mock_session = AsyncMock()
+    # E-BOARD S5: update_story가 _attach_assignee_ids로 story_assignees 조회 → 빈 결과 모킹
+    _empty = MagicMock()
+    _empty.all.return_value = []
+    _empty.scalars.return_value.all.return_value = []
+    _empty.scalar_one_or_none.return_value = None
+    _empty.scalar.return_value = None
+    mock_session.execute.return_value = _empty
     story = _mock_story_obj(assignee_id=MEMBER_ID)
 
     client, app = await _make_client(mock_session)

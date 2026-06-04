@@ -54,6 +54,8 @@ class StoryCreate(BaseModel):
     epic_id: uuid.UUID | None = None
     sprint_id: uuid.UUID | None = None
     assignee_id: uuid.UUID | None = None
+    # E-BOARD S5: 복수 assignee. 미지정(None)이면 assignee_id 단독 동작(back-compat).
+    assignee_ids: list[uuid.UUID] | None = None
     meeting_id: uuid.UUID | None = None
     status: str = "backlog"
     priority: str = "medium"
@@ -77,6 +79,8 @@ class StoryUpdate(BaseModel):
     epic_id: uuid.UUID | None = None
     sprint_id: uuid.UUID | None = None
     assignee_id: uuid.UUID | None = None
+    # E-BOARD S5: 복수 assignee. 미지정(None)이면 join 미변경(back-compat).
+    assignee_ids: list[uuid.UUID] | None = None
     meeting_id: uuid.UUID | None = None
     priority: str | None = None
     story_points: int | None = None
@@ -110,6 +114,8 @@ class StoryResponse(BaseModel):
     epic_id: uuid.UUID | None = None
     sprint_id: uuid.UUID | None = None
     assignee_id: uuid.UUID | None = None
+    # E-BOARD S5: 복수 assignee. join 테이블 멤버. 레거시 행은 [assignee_id] 폴백.
+    assignee_ids: list[uuid.UUID] = []
     meeting_id: uuid.UUID | None = None
     title: str
     status: str

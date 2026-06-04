@@ -23,6 +23,7 @@ from app.models.notification import InboxItem, Notification, NotificationSetting
 from app.models.notification_preference import NotificationPreference
 from app.models.organization import Organization
 from app.models.pm import Epic, Sprint, Story, Task
+from app.models.story_assignee import StoryAssignee
 from app.models.project import OrgMember, Project
 from app.models.project_setting import ProjectSetting
 from app.models.retro import RetroAction, RetroItem, RetroSession, RetroVote
@@ -86,6 +87,7 @@ __all__ = [
     "StandupEntry",
     "StandupFeedback",
     "Story",
+    "StoryAssignee",
     "Task",
     "TeamMember",
     "LoginAuditLog",
