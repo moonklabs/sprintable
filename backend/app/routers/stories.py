@@ -177,6 +177,8 @@ async def create_story(
         success_hypothesis=body.success_hypothesis,
         metric_definition=body.metric_definition,
         measure_after=body.measure_after,
+        # E-FILE S4: 보드 스토리 첨부 (FE-proxy URL+메타) 저장
+        attachments=[a.model_dump() for a in body.attachments],
     )
     # E-BOARD S5: 복수 assignee join 기록 (단일 assignee_id와 공존)
     saved_ids = await StoryAssigneeRepository(session, org_id).set_for_story(story.id, effective_ids)
