@@ -51,6 +51,10 @@ create_secret "SUPABASE_SERVICE_ROLE_KEY"      "${SECRET_SERVICE_ROLE_KEY:-place
 # 형식: postgresql+asyncpg://sprintable:PASSWORD@/sprintable?host=/cloudsql/PROJECT:REGION:INSTANCE
 create_secret "DATABASE_URL_DEV"               "${SECRET_DATABASE_URL_DEV:-postgresql+asyncpg://placeholder@/sprintable?host=/cloudsql/sprintable-494803:asia-northeast3:sprintable-dev}"
 create_secret "DATABASE_URL_PROD"              "${SECRET_DATABASE_URL_PROD:-postgresql+asyncpg://placeholder@/sprintable?host=/cloudsql/sprintable-494803:asia-northeast3:sprintable-prod}"
+# Alembic 마이그 잡 전용 — Private-IP psycopg2 URL (provision_migrate_job.sh 참조)
+# 형식: postgresql+psycopg2://sprintable:PASSWORD@PRIVATE_IP:5432/sprintable
+create_secret "ALEMBIC_DATABASE_URL_DEV"       "${SECRET_ALEMBIC_DATABASE_URL_DEV:-postgresql+psycopg2://placeholder@10.0.0.1:5432/sprintable}"
+create_secret "ALEMBIC_DATABASE_URL_PROD"      "${SECRET_ALEMBIC_DATABASE_URL_PROD:-postgresql+psycopg2://placeholder@10.0.0.2:5432/sprintable}"
 
 # ─── Cloud Run SA에 Secret Accessor 권한 ──────────────────────────────────────
 PROJECT_NUMBER=$(gcloud projects describe "${GCP_PROJECT}" --format="value(projectNumber)")
