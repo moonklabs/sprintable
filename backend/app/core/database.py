@@ -5,17 +5,16 @@ from sqlalchemy.orm import DeclarativeBase
 
 from app.core.config import settings
 
-# S20: DB 풀 사이징 — SSE는 대기 구간에서 커넥션 미점유 (개별 세션 패턴)
-# pool_size = 동시 쓰기 워커 수 × 2 + 여유분
-#   → 에이전트 5명 × API 요청 동시성 2 = 10 (현재 pool_size)
-# max_overflow = 트래픽 피크 버퍼 (pool_size × 2)
-#   → 30개 총 커넥션 (pool_size 10 + max_overflow 20)
-# SSE 연결 100개 기준: 각 heartbeat/backfill마다 ~0.05초 커넥션 점유 → 평균 5개 동시
-# 공식: pool_size ≥ (avg_concurrent_writes) + (avg_sse_db_ops_concurrent)
+# S20/E-INFRA S2: DB 풀 right-size — SSE는 대기 구간에서 커넥션 미점유(개별 세션 패턴).
+# 인스턴스당 최대 커넥션 = pool_size + max_overflow. 클러스터 총합 = maxScale × (pool_size+overflow).
+# ⚠️ 산식: (maxScale × (pool_size+max_overflow)) + admin/migration headroom ≤ Cloud SQL max_connections.
+#   prod(db-g1-small max_connections=100, maxScale=10): 10×(5+3)=80 + ~20 headroom = 100 ✓
+#   (이전 10/20=30/instance × 10 = 300 > 100 → 고갈 위험이라 right-size)
+# env DB_POOL_SIZE / DB_MAX_OVERFLOW로 환경별 독립 조정(config.py 산식 주석 참조).
 engine = create_async_engine(
     settings.database_url,
-    pool_size=10,
-    max_overflow=20,
+    pool_size=settings.db_pool_size,
+    max_overflow=settings.db_max_overflow,
     pool_pre_ping=True,
     echo=settings.debug,
 )
