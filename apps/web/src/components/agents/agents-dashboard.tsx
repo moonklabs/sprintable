@@ -358,7 +358,6 @@ export function AgentsDashboard({ deployments: initialDeployments, hideTopBar = 
                   <p className="mt-2 text-sm text-muted-foreground">{t('emptyDeploymentsBody')}</p>
                   {canManageMembers && (
                     <div className="mt-6 flex flex-wrap justify-center gap-2">
-                      <Link href="/agents/workflow" className={buttonVariants({ variant: 'glass', size: 'lg' })}>{t('workflowEditorCta')}</Link>
                       <Link href="/agents/deploy" className={buttonVariants({ variant: 'hero', size: 'lg' })}>{t('openWizard')}</Link>
                     </div>
                   )}
