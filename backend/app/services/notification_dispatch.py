@@ -111,6 +111,19 @@ async def dispatch_notification(
                     SimpleNamespace(id=om.id, user_id=om.user_id, type="human", project_id=None)
                 )
 
+        # 졷버그 fix: team_members는 0088 이후 projection VIEW라 멤버당 **프로젝트별 1행**(동일 id)을
+        # 반환한다. dedup 없이 루프하면 멀티프로젝트 멤버에게 알림이 **프로젝트 수만큼 중복 생성**됨
+        # (Story Assign 시 Inbox 알림 3개 증상 = 담당자가 3개 프로젝트 소속). member id로 dedup해
+        # 멤버당 1 알림/이벤트만 생성. (view-cutover multi-row 트랩)
+        _seen_member_ids: set = set()
+        _deduped = []
+        for _m in members:
+            if _m.id in _seen_member_ids:
+                continue
+            _seen_member_ids.add(_m.id)
+            _deduped.append(_m)
+        members = _deduped
+
         inserted = False
         for member_row in members:
             if member_row.type == "agent":
