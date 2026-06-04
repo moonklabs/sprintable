@@ -5,8 +5,10 @@ import { useTranslations } from 'next-intl';
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
 import rehypeSanitize from 'rehype-sanitize';
-import { AlertTriangle, GitFork, Plus, Tag, Trash2, X } from 'lucide-react';
+import { AlertTriangle, GitFork, Loader2, Paperclip, Plus, Tag, Trash2, X } from 'lucide-react';
 import type { KanbanStory, KanbanMember, DependencyEdge } from './types';
+import type { SendAttachment } from '@/hooks/use-chat-sse';
+import { getFileIcon } from '@/lib/file-icon';
 import { LabelChip, LABEL_PRESET_COLORS, type LabelData } from '@/components/ui/label-chip';
 import { DependencyGraph } from './dependency-graph';
 import { OutcomeIntentFields, type OutcomeIntentValue } from '@/components/outcome/outcome-intent-fields';
@@ -65,6 +67,9 @@ function taskTone(status: string) {
   return 'bg-background/20';
 }
 
+// BE _MAX_STORY_ATTACHMENTS 정합 (schemas/story.py)
+const STORY_ATTACHMENT_LIMIT = 10;
+
 function DescriptionViewer({ description }: { description: string }) {
   return (
     <ReactMarkdown
@@ -119,6 +124,9 @@ export function StoryDetailPanel({ story, tasks, nextTasksCursor = null, loading
   const [editingAC, setEditingAC] = useState(false);
   const [acDraft, setAcDraft] = useState(story.acceptance_criteria ?? '');
   const [savingAC, setSavingAC] = useState(false);
+  const [uploadingAttachment, setUploadingAttachment] = useState(false);
+  const [attachError, setAttachError] = useState(false);
+  const attachInputRef = useRef<HTMLInputElement>(null);
 
   const [intent, setIntent] = useState<OutcomeIntentValue>({
     success_hypothesis: story.success_hypothesis ?? '',
@@ -371,6 +379,40 @@ export function StoryDetailPanel({ story, tasks, nextTasksCursor = null, loading
     setSavingAC(false);
     setEditingAC(false);
     if (updated) onStoryUpdate?.({ ...story, acceptance_criteria: updated.acceptance_criteria });
+  };
+
+  // E-FILE S4: 스토리 첨부 — GCS 업로드 후 PATCH {attachments} (전체 교체이므로 기존+신규 머지 필수).
+  const handleAttachFiles = async (files: File[]) => {
+    if (files.length === 0 || uploadingAttachment) return;
+    const current = story.attachments ?? [];
+    const room = STORY_ATTACHMENT_LIMIT - current.length;
+    if (room <= 0) return;
+    setUploadingAttachment(true);
+    setAttachError(false);
+    try {
+      const uploaded: SendAttachment[] = [];
+      for (const file of files.slice(0, room)) {
+        const fd = new FormData();
+        fd.append('file', file);
+        if (projectId) fd.append('project_id', projectId);
+        const res = await fetch(`/api/stories/${story.id}/attachments`, { method: 'POST', body: fd });
+        if (!res.ok) throw new Error('upload failed');
+        uploaded.push(await res.json() as SendAttachment);
+      }
+      const next = [...current, ...uploaded]; // 전체 교체: 기존 보존 + 신규 누적
+      const updated = await patchStory({ attachments: next });
+      onStoryUpdate?.({ ...story, attachments: updated?.attachments ?? next });
+    } catch {
+      setAttachError(true);
+    } finally {
+      setUploadingAttachment(false);
+    }
+  };
+
+  const handleRemoveAttachment = async (url: string) => {
+    const next = (story.attachments ?? []).filter((a) => a.url !== url); // filter → 전체 교체
+    const updated = await patchStory({ attachments: next });
+    onStoryUpdate?.({ ...story, attachments: updated?.attachments ?? next });
   };
 
   const handleSaveIntent = async () => {
@@ -740,6 +782,82 @@ export function StoryDetailPanel({ story, tasks, nextTasksCursor = null, loading
                 >
                   + {t('addAcceptanceCriteria')}
                 </button>
+              )}
+            </div>
+
+            {/* Attachments — chat-attach 자산 미러 (E-FILE S4) */}
+            <div>
+              <div className="flex items-center justify-between">
+                <span className="text-[10px] font-mono uppercase tracking-wider text-muted-foreground">{t('attachments')}</span>
+                <button
+                  type="button"
+                  onClick={() => attachInputRef.current?.click()}
+                  disabled={uploadingAttachment || (story.attachments?.length ?? 0) >= STORY_ATTACHMENT_LIMIT}
+                  className="flex items-center gap-1 text-xs text-muted-foreground transition hover:text-foreground disabled:opacity-40"
+                >
+                  <Paperclip className="size-3" /> + 추가
+                </button>
+              </div>
+              <input
+                ref={attachInputRef}
+                type="file"
+                multiple
+                className="hidden"
+                accept="image/*,.pdf,.txt,.md,.csv"
+                onChange={(e) => { void handleAttachFiles(Array.from(e.target.files ?? [])); e.target.value = ''; }}
+              />
+              {story.attachments && story.attachments.length > 0 ? (
+                <div className="mt-2 flex flex-col gap-1.5">
+                  {story.attachments.map((att, i) => {
+                    const isImage = att.content_type?.startsWith('image/');
+                    const Icon = getFileIcon(att.content_type);
+                    return (
+                      <div key={att.url ?? i} className="group relative">
+                        {isImage && att.url ? (
+                          <a href={att.url} target="_blank" rel="noopener noreferrer" className="block">
+                            {/* eslint-disable-next-line @next/next/no-img-element */}
+                            <img src={att.url} alt={att.name} className="max-h-40 max-w-[240px] rounded object-contain" />
+                          </a>
+                        ) : (
+                          <a
+                            href={att.url}
+                            target="_blank"
+                            rel="noopener noreferrer"
+                            download
+                            className="flex items-center gap-2 rounded-lg border border-border bg-background px-3 py-2 text-xs hover:bg-muted/50"
+                          >
+                            <Icon className="size-4 flex-shrink-0 text-muted-foreground" />
+                            <span className="truncate text-foreground">{att.name}</span>
+                          </a>
+                        )}
+                        <button
+                          type="button"
+                          onClick={() => void handleRemoveAttachment(att.url)}
+                          className="absolute right-1 top-1 hidden rounded bg-destructive/20 p-0.5 text-destructive transition group-hover:block hover:bg-destructive/30"
+                          aria-label="첨부 삭제"
+                        >
+                          <X className="size-3" />
+                        </button>
+                      </div>
+                    );
+                  })}
+                </div>
+              ) : !uploadingAttachment ? (
+                <button
+                  type="button"
+                  onClick={() => attachInputRef.current?.click()}
+                  className="mt-2 w-full rounded-md border border-dashed border-border py-3 text-sm text-muted-foreground transition hover:border-primary hover:text-primary"
+                >
+                  + {t('addAttachment')}
+                </button>
+              ) : null}
+              {uploadingAttachment && (
+                <div className="mt-2 flex items-center gap-2 text-xs text-muted-foreground">
+                  <Loader2 className="size-3.5 animate-spin" /> {t('loading')}
+                </div>
+              )}
+              {attachError && (
+                <p className="mt-1 text-xs text-destructive">첨부 업로드에 실패했습니다. 다시 시도해 주세요.</p>
               )}
             </div>
 
