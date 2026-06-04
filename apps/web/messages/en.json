@@ -180,6 +180,7 @@
     "assignees": "Assignees",
     "assignee": "Assignee",
     "unassigned": "Unassigned",
+    "clearAssignees": "Clear all",
     "save": "Save",
     "cancel": "Cancel",
     "edit": "Edit",

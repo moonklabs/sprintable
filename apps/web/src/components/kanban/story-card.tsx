@@ -36,6 +36,7 @@ interface StoryCardProps {
   story: KanbanStory;
   epicName?: string;
   assignee?: KanbanMember;
+  assignees?: KanbanMember[];
   onClick: () => void;
   onEdit?: (storyId: string) => void;
   onChangeStatus?: (storyId: string, newStatus: string) => void;
@@ -49,8 +50,11 @@ interface StoryCardProps {
   gates?: { id: string; gate_type: string; status: string }[];
 }
 
-export function StoryCard({ story, epicName, assignee, onClick, onEdit, onChangeStatus, onAssign, onDelete, projectId, onKickoff, lastExecution, blockedBy = [], labels = [], gates = [] }: StoryCardProps) {
+export function StoryCard({ story, epicName, assignee, assignees, onClick, onEdit, onChangeStatus, onAssign, onDelete, projectId, onKickoff, lastExecution, blockedBy = [], labels = [], gates = [] }: StoryCardProps) {
   const t = useTranslations('board');
+  // E-BOARD S6: 복수 assignee. assignees 우선, 없으면 단일 assignee 폴백. agent 한 명이라도 있으면 agent 취급(glow).
+  const assigneeList = (assignees && assignees.length > 0) ? assignees : (assignee ? [assignee] : []);
+  const hasAgent = assigneeList.some((m) => m.type === 'agent');
   const tCage = useTranslations('cage');
   const [contextMenuOpen, setContextMenuOpen] = useState(false);
   const [statusMenuOpen, setStatusMenuOpen] = useState(false);
@@ -175,12 +179,12 @@ export function StoryCard({ story, epicName, assignee, onClick, onEdit, onChange
       onClick={onClick}
       onContextMenu={handleContextMenu}
       className={`group relative cursor-pointer overflow-hidden rounded-lg p-3 transition ${
-        assignee?.type === 'agent'
+        hasAgent
           ? 'bg-gradient-to-br from-accent-claim/8 to-purple-500/4 ring-1 ring-accent-claim/30 hover:ring-accent-claim/60'
           : 'bg-background shadow-sm hover:shadow-md hover:bg-background'
       }`}
     >
-      {assignee?.type === 'agent' && (
+      {hasAgent && (
         <div className="absolute inset-0 pointer-events-none rounded-lg border border-transparent bg-gradient-to-r from-accent-claim/10 to-purple-500/10 opacity-50" />
       )}
       {epicName && story.epic_id ? (
@@ -211,18 +215,34 @@ export function StoryCard({ story, epicName, assignee, onClick, onEdit, onChange
       <p className="relative z-10 line-clamp-2 text-sm font-medium leading-5 text-foreground">{story.title}</p>
       <div className="relative z-10 mt-3 flex items-center justify-between gap-2">
         <div className="flex items-center gap-2">
-          {assignee ? (
-            <div className={`flex h-6 w-6 items-center justify-center rounded-full border text-[10px] font-medium ${
-              assignee.type === 'agent' 
-                ? 'border-accent-claim/30 bg-accent-claim/10 text-accent-claim'
-                : 'border-border bg-muted text-muted-foreground'
-            }`} title={assignee.name}>
-              {getInitials(assignee.name)}
+          {assigneeList.length > 0 ? (
+            <div className="flex -space-x-1.5">
+              {assigneeList.slice(0, 3).map((m) => (
+                <div
+                  key={m.id}
+                  className={`relative flex h-6 w-6 items-center justify-center rounded-full border text-[10px] font-medium ring-1 ring-background ${
+                    m.type === 'agent'
+                      ? 'border-accent-claim/30 bg-accent-claim/10 text-accent-claim'
+                      : 'border-border bg-muted text-muted-foreground'
+                  }`}
+                  title={m.name}
+                >
+                  {getInitials(m.name)}
+                  {m.type === 'agent' && (
+                    <span className="absolute -bottom-px -right-px h-[6px] w-[6px] rounded-full bg-brand-strong ring-1 ring-background" />
+                  )}
+                </div>
+              ))}
+              {assigneeList.length > 3 && (
+                <div className="flex h-6 w-6 items-center justify-center rounded-full border border-border bg-muted text-[10px] font-medium text-muted-foreground ring-1 ring-background">
+                  +{assigneeList.length - 3}
+                </div>
+              )}
             </div>
           ) : (
             <div />
           )}
-          {assignee?.type === 'agent' && (
+          {hasAgent && (
             <div className="flex items-center gap-1.5 text-[10px] font-mono text-accent-claim">
               <span className="relative flex h-1.5 w-1.5">
                 <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-accent-claim opacity-75"></span>

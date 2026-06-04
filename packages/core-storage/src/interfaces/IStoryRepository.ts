@@ -55,6 +55,7 @@ export interface UpdateStoryInput {
   epic_id?: string | null;
   sprint_id?: string | null;
   assignee_id?: string | null;
+  assignee_ids?: string[] | null;
   position?: number | null;
   success_hypothesis?: string | null;
   metric_definition?: MetricDefinition | null;

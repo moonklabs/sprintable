@@ -8,6 +8,7 @@ export interface KanbanStory {
   priority: string;
   story_points: number | null;
   assignee_id: string | null;
+  assignee_ids?: string[];
   epic_id: string | null;
   sprint_id: string | null;
   description: string | null;

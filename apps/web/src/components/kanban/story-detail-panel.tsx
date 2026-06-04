@@ -349,12 +349,28 @@ export function StoryDetailPanel({ story, tasks, nextTasksCursor = null, loading
     if (updated) onStoryUpdate?.({ ...story, title: updated.title });
   };
 
-  const handleSaveAssignee = async (assigneeId: string | null) => {
+  // E-BOARD S6: 복수 assignee. assignee_ids 우선, 없으면 단일 assignee_id로 폴백(하위호환).
+  const currentAssigneeIds = (story.assignee_ids && story.assignee_ids.length > 0)
+    ? story.assignee_ids
+    : (story.assignee_id ? [story.assignee_id] : []);
+
+  const handleToggleAssignee = async (memberId: string) => {
+    const set = new Set(currentAssigneeIds);
+    if (set.has(memberId)) set.delete(memberId); else set.add(memberId);
+    const next = Array.from(set);
+    setSavingAssignee(true);
+    const updated = await patchStory({ assignee_ids: next });
+    setSavingAssignee(false);
+    // BE가 assignee_id(주담당)를 assignee_ids[0]로 동기화 → 응답 우선, 없으면 로컬 계산.
+    if (updated) onStoryUpdate?.({ ...story, assignee_ids: updated.assignee_ids ?? next, assignee_id: updated.assignee_id ?? next[0] ?? null });
+  };
+
+  const handleClearAssignees = async () => {
     setSavingAssignee(true);
     setEditingAssignee(false);
-    const updated = await patchStory({ assignee_id: assigneeId });
+    const updated = await patchStory({ assignee_ids: [] });
     setSavingAssignee(false);
-    if (updated) onStoryUpdate?.({ ...story, assignee_id: assigneeId });
+    if (updated) onStoryUpdate?.({ ...story, assignee_ids: [], assignee_id: null });
   };
 
   const handleSaveDescription = async () => {
@@ -636,25 +652,28 @@ export function StoryDetailPanel({ story, tasks, nextTasksCursor = null, loading
                 <div className="mt-1 flex flex-col gap-1 rounded-md border border-border bg-muted/30 p-1">
                   <button
                     type="button"
-                    onClick={() => handleSaveAssignee(null)}
+                    onClick={() => void handleClearAssignees()}
                     className="w-full rounded px-2 py-1.5 text-left text-sm text-muted-foreground hover:bg-muted"
                   >
-                    — {t('unassigned')}
+                    — {t('clearAssignees')}
                   </button>
-                  {members.filter((m, i, arr) => arr.findIndex((x) => x.id === m.id) === i).map((m) => (
-                    <button
-                      key={m.id}
-                      type="button"
-                      onClick={() => handleSaveAssignee(m.id)}
-                      className={`flex w-full items-center gap-2 rounded px-2 py-1.5 text-left text-sm hover:bg-muted ${story.assignee_id === m.id ? 'font-medium text-foreground' : 'text-muted-foreground'}`}
-                    >
-                      <span className="flex h-5 w-5 shrink-0 items-center justify-center rounded-full bg-muted text-[10px] font-medium text-foreground">
-                        {m.name.slice(0, 2).toUpperCase()}
-                      </span>
-                      {m.name}
-                      {story.assignee_id === m.id && <span className="ml-auto text-primary">✓</span>}
-                    </button>
-                  ))}
+                  {members.filter((m, i, arr) => arr.findIndex((x) => x.id === m.id) === i).map((m) => {
+                    const selected = currentAssigneeIds.includes(m.id);
+                    return (
+                      <button
+                        key={m.id}
+                        type="button"
+                        onClick={() => void handleToggleAssignee(m.id)}
+                        className={`flex w-full items-center gap-2 rounded px-2 py-1.5 text-left text-sm hover:bg-muted ${selected ? 'font-medium text-foreground' : 'text-muted-foreground'}`}
+                      >
+                        <span className="flex h-5 w-5 shrink-0 items-center justify-center rounded-full bg-muted text-[10px] font-medium text-foreground">
+                          {m.name.slice(0, 2).toUpperCase()}
+                        </span>
+                        {m.name}
+                        {selected && <span className="ml-auto text-primary">✓</span>}
+                      </button>
+                    );
+                  })}
                   <button
                     type="button"
                     onClick={() => setEditingAssignee(false)}
@@ -665,7 +684,11 @@ export function StoryDetailPanel({ story, tasks, nextTasksCursor = null, loading
                 </div>
               ) : (
                 <p className="mt-1 text-sm text-foreground">
-                  {savingAssignee ? t('loading') : story.assignee_id ? (memberMap[story.assignee_id]?.name ?? '—') : '—'}
+                  {savingAssignee
+                    ? t('loading')
+                    : currentAssigneeIds.length > 0
+                      ? currentAssigneeIds.map((id) => memberMap[id]?.name ?? '—').join(', ')
+                      : '—'}
                 </p>
               )}
             </div>
@@ -678,7 +701,7 @@ export function StoryDetailPanel({ story, tasks, nextTasksCursor = null, loading
                   entityType="story"
                   entityId={story.id}
                   projectId={projectId}
-                  currentAssigneeId={story.assignee_id}
+                  currentAssigneeId={currentAssigneeIds.length > 1 ? undefined : story.assignee_id}
                   onAssigneePatched={(aid) => onStoryUpdate?.({ ...story, assignee_id: aid })}
                 />
               </div>
