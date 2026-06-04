@@ -19,11 +19,12 @@
 
 ### 1. 새 prod 인스턴스 생성 (PO)
 ```bash
-bash backend/scripts/provision_cloud_sql.sh prod   # sprintable-prod, db-custom-2-7680, PITR, 50GB
-gcloud sql connect sprintable-prod ... -c "SHOW max_connections;"   # AC: 실측 기록 (≥200 확인/조정)
+bash backend/scripts/provision_cloud_sql.sh prod   # sprintable-prod, db-g1-small(1.7GB), 20GB, max_connections=100
+gcloud sql connect sprintable-prod ... -c "SHOW max_connections;"   # AC: 실측 기록 (=100 확인)
 ```
-> db-custom-2-7680 기본 max_connections가 200 미만이면
-> `--database-flags=max_connections=200` 로 패치 후 재실측.
+> 비용 다운사이즈(선생님 결정): db-custom-2-7680 → db-g1-small.
+> max_connections=100 고정 (g1-small OOM-safe; 150+ 위험). PITR 제외, 일 백업+7일 보존 유지.
+> prod 백엔드 풀(현 10인스턴스×30=300)과 max_connections=100의 산수 정합은 **S2 풀 right-size**에서 처리.
 
 ### 2. prod 시크릿 실값 주입 (PO) — **평문/로컬파일 금지, Secret Manager 직접**
 - `DATABASE_URL_PROD` → `postgresql+asyncpg://sprintable:PASS@/sprintable?host=/cloudsql/sprintable-494803:asia-northeast3:sprintable-prod`
