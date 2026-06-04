@@ -237,12 +237,11 @@ async def test_soft_delete_200():
             result = MagicMock()
             # call 1: router get(id) for existing check
             # call 2: revoke refresh tokens (UPDATE)
-            # call 3: cascade UPDATE team_members is_active=false
-            # call 4: AC3-4 2-1 dual-write UPDATE members is_active=false (NEW)
-            # call 5: S-MBR-10 AC5 DELETE project_access
-            # call 6: soft_delete internal get(id)
-            # call 7: soft_delete UPDATE deleted_at
-            result.scalar_one_or_none.return_value = _mock_member() if call_count in (1, 6) else None
+            # call 3: AC3-4 2-2 anchor-only UPDATE members is_active=false (레거시 team_members UPDATE 제거)
+            # call 4: S-MBR-10 AC5 DELETE project_access
+            # call 5: soft_delete internal get(id)
+            # call 6: soft_delete UPDATE deleted_at
+            result.scalar_one_or_none.return_value = _mock_member() if call_count in (1, 5) else None
             result.scalars.return_value.all.return_value = []
             return result
 

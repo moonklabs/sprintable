@@ -60,6 +60,12 @@ def _tup(r):
 async def _seed(session):
     """legacy + anchor를 일관되게 시드(0075 백필 결과 모사 — members.id=org_member/team_member.id)."""
     from sqlalchemy import text
+    # AC3-4 2-2: cutover(0088) 후 team_members는 projection 뷰 → INSERT 불가. 물리 레거시 행은
+    # team_members_legacy에 시드. 미적용 DB(pre-0088)면 team_members가 물리테이블 — 동적 선택(양립).
+    physical_tm = (await session.execute(text(
+        "SELECT CASE WHEN to_regclass('public.team_members_legacy') IS NOT NULL "
+        "THEN 'team_members_legacy' ELSE 'team_members' END"
+    ))).scalar()
     stmts = [
         # 방어: fresh `alembic upgrade head`에선 0075 DROP NOT NULL이 미지속되는 관찰(별건 flag)이 있어,
         # 에이전트 placement(org_member_id NULL) 시드를 위해 idempotent하게 nullable 보장(테스트 신뢰성).
@@ -69,7 +75,7 @@ async def _seed(session):
         f"DELETE FROM member_identity_aliases WHERE org_id='{ORG}'",
         f"DELETE FROM members WHERE org_id='{ORG}'",
         f"DELETE FROM project_access WHERE project_id IN ('{P1}','{P2}')",
-        f"DELETE FROM team_members WHERE org_id='{ORG}'",
+        f"DELETE FROM {physical_tm} WHERE org_id='{ORG}'",
         f"DELETE FROM projects WHERE org_id='{ORG}'",
         f"DELETE FROM org_members WHERE org_id='{ORG}'",
         f"DELETE FROM users WHERE id IN ('{U_OWNER}','{U_MEM}')",
@@ -79,7 +85,7 @@ async def _seed(session):
         f"('{U_OWNER}','owner@pg.test','x','Owner',true,true,0,false,0),('{U_MEM}','mem@pg.test','x','Mem',true,true,0,false,0)",
         f"INSERT INTO org_members (id,org_id,user_id,role) VALUES ('{OM_OWNER}','{ORG}','{U_OWNER}','owner'),('{OM_MEM}','{ORG}','{U_MEM}','member')",
         f"INSERT INTO projects (id,org_id,name,violation_level) VALUES ('{P1}','{ORG}','P1',0),('{P2}','{ORG}','P2',0)",
-        f"INSERT INTO team_members (id,project_id,org_id,user_id,type,name,role,color,can_manage_members,is_active,created_by) VALUES "
+        f"INSERT INTO {physical_tm} (id,project_id,org_id,user_id,type,name,role,color,can_manage_members,is_active,created_by) VALUES "
         f"('{TM_OWNER}','{P1}','{ORG}','{U_OWNER}','human','Owner','owner','#3385f8',true,true,NULL),"
         f"('{AG1}','{P1}','{ORG}',NULL,'agent','Bot','member','#ff0000',false,true,'{U_OWNER}'),"
         f"('{AG2}','{P2}','{ORG}',NULL,'agent','Bot','reviewer','#00ff00',false,true,'{U_OWNER}')",
@@ -693,4 +699,55 @@ async def test_ensure_human_member_orphan_safe():
                 await s.execute(text("DELETE FROM members WHERE id=:i"), {"i": str(i)})
                 await s.execute(text("DELETE FROM org_members WHERE id=:i"), {"i": str(i)})
             await s.commit()
+        await engine.dispose()
+
+
+@pytest.mark.anyio
+async def test_ac3_4_team_members_projection_view():
+    """AC3-4 2-2: team_members가 projection 뷰(0088)로 강등됨을 검증(migrate 0088 적용 DB 전제).
+
+    ⚠️ migrate head<0088이면 team_members가 물리테이블 → relkind!='v'이라 skip(가드).
+    검증: ① relkind='v'(뷰) ② agent(AG1) 행 = anchor 소스(role=project_access, agent_role/presence=profile)
+    ③ 에이전트는 id로 단일행(1:1) ④ deleted members 제외 ⑤ team_members_legacy 물리 잔존(가역 자산).
+    """
+    from sqlalchemy import text
+    from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
+
+    engine = create_async_engine(_ASYNC_URL)
+    Session = async_sessionmaker(engine, expire_on_commit=False)
+    try:
+        async with Session() as s:
+            relkind = (await s.execute(text(
+                "SELECT relkind FROM pg_class WHERE relname='team_members'"
+            ))).scalar()
+        if relkind != "v":
+            pytest.skip(f"team_members relkind={relkind} — migrate 0088 미적용, AC3-4 cutover 전")
+
+        async with Session() as s:
+            await _seed(s)
+        async with Session() as s:
+            # ② AG1(agent) 행 = anchor 소스 재현: role(project_access P1=member), agent_role/port(profile=dev/9101)
+            row = (await s.execute(text(
+                "SELECT type, role, agent_role, fakechat_port FROM team_members WHERE id=:id"
+            ), {"id": str(AG1)})).first()
+            assert row is not None, "AG1 뷰 미출현"
+            assert row[0] == "agent" and row[1] == "member" and row[2] == "dev" and row[3] == 9101, f"AG1 매핑 불일치: {row}"
+            # ③ 에이전트 id 단일행(1:1)
+            cnt = (await s.execute(text(
+                "SELECT count(*) FROM team_members WHERE id=:id"), {"id": str(AG1)})).scalar_one()
+            assert cnt == 1, f"agent 다중행: {cnt}"
+            # ④ deleted members 제외 — 임시 soft-delete 후 뷰 미출현
+            await s.execute(text("UPDATE members SET deleted_at=now() WHERE id=:id"), {"id": str(AG1)})
+            await s.commit()
+            gone = (await s.execute(text(
+                "SELECT count(*) FROM team_members WHERE id=:id"), {"id": str(AG1)})).scalar_one()
+            assert gone == 0, "deleted member가 뷰에 잔존"
+            await s.execute(text("UPDATE members SET deleted_at=NULL WHERE id=:id"), {"id": str(AG1)})
+            await s.commit()
+            # ⑤ team_members_legacy 물리테이블 잔존(G5 가역 자산)
+            legacy_kind = (await s.execute(text(
+                "SELECT relkind FROM pg_class WHERE relname='team_members_legacy'"
+            ))).scalar()
+            assert legacy_kind == "r", f"team_members_legacy 물리테이블 부재: {legacy_kind}"
+    finally:
         await engine.dispose()
