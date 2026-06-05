@@ -7,6 +7,7 @@ import { useTranslations } from 'next-intl';
 import { ArrowLeft, Check, Copy, Pencil, Plus, X } from 'lucide-react';
 import { Switch } from '@/components/ui/switch';
 import { AgentApiKeyManager } from '@/components/agents/agent-api-key-manager';
+import { MessagingPolicySection } from '@/components/agents/messaging-policy-section';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { OperatorInput } from '@/components/ui/operator-control';
@@ -557,6 +558,9 @@ export default function AgentDetailPage() {
           </SectionCard>
         );
       })()}
+
+      {/* Messaging policy (E-MSG-POLICY S3) */}
+      {canEdit && <MessagingPolicySection agentId={id} creatorUserId={agent.created_by} />}
 
       {/* MCP Config */}
       <SectionCard>
