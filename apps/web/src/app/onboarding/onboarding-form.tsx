@@ -107,6 +107,10 @@ export function OnboardingForm({ initialStep, initialOrgId }: OnboardingFormProp
     }
 
     setOrgId(json.data.id);
+    // E-ONB S5 FINAL(까심 진단): org 생성 시 org_member가 최초 생성됨 → 즉시 토큰 refresh로
+    // 새 JWT에 org_id(BE auth Path4 org_member fallback) 반영. 이래야 다음 단계 project 생성의
+    // getAuthContext(/api/v2/me)가 통과한다(미refresh 시 fresh JWT엔 team_member 없어 me null → 401).
+    await fetch('/api/auth/refresh', { method: 'POST' }).catch(() => null);
     setStep('project');
     setLoading(false);
   };
@@ -124,11 +128,10 @@ export function OnboardingForm({ initialStep, initialOrgId }: OnboardingFormProp
     setLoading(true);
     setError('');
 
+    // E-ONB S5 FINAL: org 생성 직후 refresh(handleCreateOrg)로 JWT에 org_id 반영됨 → X-Org-Id 불요(제거).
     const res = await fetch('/api/projects', {
       method: 'POST',
-      // E-ONB S5: 신규 register JWT는 app_metadata 비어(org_id 없음) → BE get_verified_org_id 401.
-      // 방금 생성한 org.id를 X-Org-Id로 보내면 BE가 membership fallback 검증(proxyToFastapi가 x-org-id forward).
-      headers: { 'Content-Type': 'application/json', 'X-Org-Id': orgId },
+      headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ org_id: orgId, name: projectName.trim(), description: projectDesc.trim() || null }),
     });
     const json = await res.json();
