@@ -98,7 +98,7 @@ async def add_allowlist_member(
     auth: AuthContext = Depends(get_current_user),
     org_id: uuid.UUID = Depends(get_verified_org_id),
 ) -> MessagePolicyResponse:
-    await assert_agent_owner(agent_id, session, org_id, uuid.UUID(auth.user_id))
+    agent = await assert_agent_owner(agent_id, session, org_id, uuid.UUID(auth.user_id))
     # 대상이 같은 org의 멤버인지 검증(grant-only 휴먼 포함).
     target = await resolve_member_identity(body.member_id, org_id, session)
     if target is None:
@@ -111,7 +111,7 @@ async def add_allowlist_member(
     await session.commit()
     return MessagePolicyResponse(
         agent_id=agent_id,
-        mode="",  # GET으로 확인; add 응답은 allowlist 갱신 확인용
+        mode=getattr(agent, "message_policy_mode", None) or "creator_only",
         allowlist=await _allowlist_ids(session, agent_id),
     )
 
@@ -125,7 +125,7 @@ async def remove_allowlist_member(
     auth: AuthContext = Depends(get_current_user),
     org_id: uuid.UUID = Depends(get_verified_org_id),
 ) -> MessagePolicyResponse:
-    await assert_agent_owner(agent_id, session, org_id, uuid.UUID(auth.user_id))
+    agent = await assert_agent_owner(agent_id, session, org_id, uuid.UUID(auth.user_id))
     await session.execute(
         sa_delete(AgentMessageAllowlist).where(
             AgentMessageAllowlist.agent_member_id == agent_id,
@@ -134,5 +134,7 @@ async def remove_allowlist_member(
     )
     await session.commit()
     return MessagePolicyResponse(
-        agent_id=agent_id, mode="", allowlist=await _allowlist_ids(session, agent_id)
+        agent_id=agent_id,
+        mode=getattr(agent, "message_policy_mode", None) or "creator_only",
+        allowlist=await _allowlist_ids(session, agent_id),
     )
