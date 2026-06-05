@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import logging
 import os
 import secrets
 import uuid
@@ -60,6 +61,7 @@ from app.models.login_audit_log import LoginAuditLog
 from app.models.user import RefreshToken, User
 
 router = APIRouter(prefix="/api/v2/auth", tags=["auth"])
+logger = logging.getLogger(__name__)
 
 
 async def _write_audit(
@@ -471,13 +473,15 @@ async def register(
     _, refresh_exp = create_refresh_token(str(user.id), expires_delta=timedelta(days=REFRESH_TOKEN_EXPIRE_DAYS))
     await _store_refresh_token(session, user, tokens["refresh_token"], refresh_exp)
 
-    # 이메일 인증 발송 (비동기 — 실패해도 가입은 완료)
+    # 이메일 인증 발송 — 실패해도 가입은 완료하되 **반드시 가시화**(silent swallow 금지).
+    # send_email은 bool 반환(True=Resend/SMTP 실발송, False=콘솔 폴백=미발송). 둘 다 로깅해
+    # "201인데 인증메일 안 옴" 디버깅이 가능하게 한다(데모 signup 치명 경로).
     try:
         verification_token = create_email_verification_token(str(user.id))
         app_url = os.getenv("NEXT_PUBLIC_APP_URL", "https://app.sprintable.ai")
         verify_link = f"{app_url}/verify-email?token={verification_token}"
         from app.services.email import send_email
-        send_email(
+        delivered = send_email(
             to=user.email,
             subject="Sprintable 이메일 인증",
             html_body=(
@@ -485,8 +489,17 @@ async def register(
                 f"<p><a href='{verify_link}'>이메일 인증하기</a></p>"
             ),
         )
+        if not delivered:
+            logger.warning(
+                "register: 인증 이메일 미발송(콘솔 폴백) user_id=%s email=%s — "
+                "RESEND_API_KEY/EMAIL_FROM 미설정 또는 발송 실패 추정",
+                user.id, user.email,
+            )
     except Exception:
-        pass  # 이메일 발송 실패는 가입에 영향 없음
+        logger.exception(
+            "register: 인증 이메일 발송 예외 user_id=%s email=%s (가입 자체는 완료)",
+            user.id, user.email,
+        )
 
     return _ok(tokens, 201)
 
@@ -1045,7 +1058,7 @@ async def resend_verification(
     app_url = os.getenv("NEXT_PUBLIC_APP_URL", "https://app.sprintable.ai")
     verify_link = f"{app_url}/verify-email?token={verification_token}"
     from app.services.email import send_email
-    send_email(
+    delivered = send_email(
         to=user.email,
         subject="Sprintable 이메일 인증",
         html_body=(
@@ -1053,7 +1066,13 @@ async def resend_verification(
             f"<p><a href='{verify_link}'>이메일 인증하기</a></p>"
         ),
     )
-    return _ok({"message": "Verification email sent"})
+    if not delivered:
+        # 콘솔 폴백(미발송)을 "sent"로 거짓 보고하지 않는다(데모 디버깅 가시화).
+        logger.warning(
+            "resend-verification: 인증 이메일 미발송(콘솔 폴백) user_id=%s email=%s", user.id, user.email
+        )
+        return _ok({"message": "Verification email could not be delivered — check email configuration", "delivered": False})
+    return _ok({"message": "Verification email sent", "delivered": True})
 
 
 # ─── POST /api/v2/auth/switch-project ────────────────────────────────────────
