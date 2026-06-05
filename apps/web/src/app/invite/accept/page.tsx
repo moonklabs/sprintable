@@ -35,7 +35,7 @@ export default async function InviteAcceptPage({ searchParams }: Props) {
     );
   }
 
-  const invite = await inviteRes.json() as { data?: { org_name?: string; role?: string; email?: string } };
+  const invite = await inviteRes.json() as { data?: { org_name?: string; role?: string; email?: string; projects?: { id: string; name: string }[] } };
 
   return (
     <InviteAcceptClient
@@ -43,6 +43,7 @@ export default async function InviteAcceptPage({ searchParams }: Props) {
       orgName={invite.data?.org_name ?? ''}
       role={invite.data?.role ?? 'member'}
       email={invite.data?.email ?? ''}
+      projects={invite.data?.projects ?? []}
     />
   );
 }

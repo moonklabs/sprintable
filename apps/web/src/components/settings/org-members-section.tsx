@@ -1,7 +1,8 @@
 'use client';
 
 import { useEffect, useState } from 'react';
-import { Check, Copy } from 'lucide-react';
+import { useTranslations } from 'next-intl';
+import { Check, ChevronDown, Copy } from 'lucide-react';
 import { Alert, AlertDescription } from '@/components/ui/alert';
 import { Button } from '@/components/ui/button';
 import { MemberRow } from '@/components/ui/member-row';
@@ -39,10 +40,21 @@ export function OrgMembersSection({ orgId, currentRole }: OrgMembersSectionProps
   const [invites, setInvites] = useState<OrgInvite[]>([]);
   const [loading, setLoading] = useState(true);
 
+  const t = useTranslations('settings');
+
   const [inviteEmail, setInviteEmail] = useState('');
   const [inviteRole, setInviteRole] = useState<'admin' | 'member'>('member');
   const [inviting, setInviting] = useState(false);
   const [inviteResult, setInviteResult] = useState<{ type: 'success' | 'error'; text: string } | null>(null);
+
+  // 정책B(05fa365f): 초대 시 부여할 프로젝트 선택(멀티). 0개=미지정(조직만).
+  const [inviteProjectIds, setInviteProjectIds] = useState<string[]>([]);
+  const [orgProjects, setOrgProjects] = useState<{ id: string; name: string }[]>([]);
+  const [showProjectPicker, setShowProjectPicker] = useState(false);
+
+  const toggleInviteProject = (id: string) => {
+    setInviteProjectIds((prev) => prev.includes(id) ? prev.filter((x) => x !== id) : [...prev, id]);
+  };
 
   const [removeDialogMemberId, setRemoveDialogMemberId] = useState<string | null>(null);
   const [changingRoleId, setChangingRoleId] = useState<string | null>(null);
@@ -55,10 +67,15 @@ export function OrgMembersSection({ orgId, currentRole }: OrgMembersSectionProps
   const isOwner = currentRole === 'owner';
 
   const refreshData = async () => {
-    const [membersRes, invitesRes] = await Promise.all([
+    const [membersRes, invitesRes, projectsRes] = await Promise.all([
       fetch('/api/org-members').catch(() => null),
       fetch(`/api/organizations/${orgId}/invites`).catch(() => null),
+      fetch('/api/projects').catch(() => null),
     ]);
+    if (projectsRes?.ok) {
+      const json = await projectsRes.json() as { data?: Array<{ id: string; name: string }> };
+      setOrgProjects((json.data ?? []).map((p) => ({ id: p.id, name: p.name })));
+    }
     if (membersRes?.ok) {
       const raw = await membersRes.json() as { data?: Array<{ id: string; user_id: string; name?: string | null; email?: string | null; role: 'owner' | 'admin' | 'member'; created_at: string }> };
       setMembers((raw.data ?? []).map((m) => ({
@@ -89,7 +106,7 @@ export function OrgMembersSection({ orgId, currentRole }: OrgMembersSectionProps
     const res = await fetch(`/api/organizations/${orgId}/invites`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ email: inviteEmail.trim(), role: inviteRole }),
+      body: JSON.stringify({ email: inviteEmail.trim(), role: inviteRole, project_ids: inviteProjectIds }),
     });
     const json = await res.json() as { data?: { invite_url?: string }; error?: { message?: string } };
     if (!res.ok) {
@@ -97,6 +114,8 @@ export function OrgMembersSection({ orgId, currentRole }: OrgMembersSectionProps
     } else {
       setInviteResult({ type: 'success', text: `초대 발송 완료${json.data?.invite_url ? ` — ${json.data.invite_url}` : ''}` });
       setInviteEmail('');
+      setInviteProjectIds([]);
+      setShowProjectPicker(false);
       await refreshData();
     }
     setInviting(false);
@@ -198,6 +217,52 @@ export function OrgMembersSection({ orgId, currentRole }: OrgMembersSectionProps
                 {inviting ? '...' : '초대'}
               </Button>
             </div>
+
+            {/* 정책B(05fa365f): 프로젝트 멀티선택 — 0개=미지정(조직만) */}
+            <div className="space-y-2">
+              <p className="text-xs font-medium text-muted-foreground">{t('inviteProjectsLabel')}</p>
+              {orgProjects.length === 0 ? (
+                <p className="text-xs text-muted-foreground">{t('inviteProjectsEmpty')}</p>
+              ) : (
+                <>
+                  <button
+                    type="button"
+                    onClick={() => setShowProjectPicker((v) => !v)}
+                    className="flex w-full items-center justify-between rounded-md border border-input bg-background px-3 py-2 text-left text-sm text-foreground transition hover:bg-muted/50 md:max-w-sm"
+                  >
+                    <span className={inviteProjectIds.length === 0 ? 'text-muted-foreground' : ''}>
+                      {inviteProjectIds.length === 0
+                        ? t('inviteProjectsTrigger')
+                        : t('inviteProjectsCount', { count: inviteProjectIds.length })}
+                    </span>
+                    <ChevronDown className={`h-4 w-4 shrink-0 text-muted-foreground transition-transform ${showProjectPicker ? 'rotate-180' : ''}`} />
+                  </button>
+                  {showProjectPicker && (
+                    <ul className="max-h-56 space-y-1 overflow-y-auto rounded-md border border-border p-1 md:max-w-sm">
+                      {orgProjects.map((p) => {
+                        const selected = inviteProjectIds.includes(p.id);
+                        return (
+                          <li key={p.id}>
+                            <button
+                              type="button"
+                              onClick={() => toggleInviteProject(p.id)}
+                              className={`flex w-full items-center gap-3 rounded-md px-3 py-2 text-left text-sm transition ${
+                                selected ? 'bg-primary/10 text-primary' : 'text-foreground hover:bg-muted'
+                              }`}
+                            >
+                              <span className="flex-1 truncate">{p.name}</span>
+                              {selected && <Check className="h-3.5 w-3.5 shrink-0 text-primary" />}
+                            </button>
+                          </li>
+                        );
+                      })}
+                    </ul>
+                  )}
+                </>
+              )}
+              <p className="text-xs text-muted-foreground">{t('inviteProjectsHelper')}</p>
+            </div>
+
             {inviteResult && (
               <Alert variant={inviteResult.type === 'success' ? 'success' : 'destructive'}>
                 <AlertDescription className="break-all">{inviteResult.text}</AlertDescription>

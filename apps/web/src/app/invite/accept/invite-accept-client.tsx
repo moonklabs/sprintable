@@ -1,6 +1,7 @@
 'use client';
 
 import { useState } from 'react';
+import { useTranslations } from 'next-intl';
 import { Button } from '@/components/ui/button';
 
 interface InviteAcceptClientProps {
@@ -8,11 +9,20 @@ interface InviteAcceptClientProps {
   orgName: string;
   role: string;
   email: string;
+  projects: { id: string; name: string }[];
 }
 
-export function InviteAcceptClient({ token, orgName, role, email }: InviteAcceptClientProps) {
+export function InviteAcceptClient({ token, orgName, role, email, projects }: InviteAcceptClientProps) {
+  const t = useTranslations('settings');
   const [accepting, setAccepting] = useState(false);
   const [result, setResult] = useState<{ type: 'success' | 'error'; text: string } | null>(null);
+
+  // 정책B surface②: 부여될 프로젝트 — 3개 초과 시 앞 3개 + "외 N개"(박스 과밀 방지)
+  const projectText = projects.length === 0
+    ? null
+    : projects.length > 3
+      ? `${projects.slice(0, 3).map((p) => p.name).join(', ')} ${t('acceptProjectsMore', { count: projects.length - 3 })}`
+      : projects.map((p) => p.name).join(', ');
 
   const handleAccept = async () => {
     if (accepting) return;
@@ -50,6 +60,14 @@ export function InviteAcceptClient({ token, orgName, role, email }: InviteAccept
           <div className="mt-2 flex items-center justify-between text-sm">
             <span className="text-muted-foreground">역할</span>
             <span className="font-medium text-foreground/85 capitalize">{role}</span>
+          </div>
+          <div className="mt-2 flex items-center justify-between gap-4 text-sm">
+            <span className="shrink-0 text-muted-foreground">{t('acceptProjectsRow')}</span>
+            {projectText === null ? (
+              <span className="text-muted-foreground">{t('acceptProjectsNone')}</span>
+            ) : (
+              <span className="truncate text-right font-medium text-foreground/85" title={projectText}>{projectText}</span>
+            )}
           </div>
         </div>
 
