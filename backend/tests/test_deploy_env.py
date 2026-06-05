@@ -92,3 +92,36 @@ def test_migrate_job_dev_prod_separated():
     assert dev["CLOUD_SQL_INSTANCE"] != prod["CLOUD_SQL_INSTANCE"]
     assert dev["ALEMBIC_SECRET_NAME"] != prod["ALEMBIC_SECRET_NAME"]
     assert dev["JOB_NAME"] != prod["JOB_NAME"]
+
+
+# ── deploy_backend.sh 4결함 fix (cutover 첫 prod 실행서 노출) ────────────────────
+
+def test_deploy_full_env_secrets():
+    """결함③: full env — DATABASE_URL/JWT 외 GOOGLE/GITHUB/RESEND/EMAIL 시크릿 포함."""
+    s = _resolve(_DEPLOY, "dev")["SECRETS_SPEC"]
+    for name in ("DATABASE_URL=", "JWT_SECRET=", "GOOGLE_CLIENT_ID=", "GOOGLE_CLIENT_SECRET=",
+                 "GITHUB_CLIENT_ID=", "RESEND_API_KEY=", "EMAIL_FROM="):
+        assert name in s, f"{name} 누락 (결함③ full env 미충족)"
+
+
+def test_deploy_cors_custom_delimiter_preserves_commas():
+    """결함④: CORS_ORIGINS 값에 콤마가 있어 ^@^ 커스텀 구분자 필요(없으면 env 쪼개짐)."""
+    spec = _resolve(_DEPLOY, "dev")["ENV_VARS_SPEC"]
+    assert spec.startswith("^@^"), "커스텀 구분자(^@^) 누락 → CORS 콤마로 env 깨짐(결함④)"
+    assert "localhost:3000,http" in spec, "CORS 콤마 보존 실패"
+
+
+def test_deploy_app_url_env_specific():
+    assert _resolve(_DEPLOY, "dev")["APP_URL"] == "https://dev-app.sprintable.ai"
+    assert _resolve(_DEPLOY, "prod")["APP_URL"] == "https://app.sprintable.ai"
+
+
+def test_deploy_no_invalid_probe_flag_and_has_vpc():
+    """결함①: 무효 --startup-probe-path 제거. 결함②: VPC 플래그(Private-IP) 추가."""
+    with open(_DEPLOY) as f:
+        lines = f.readlines()
+    # 주석 멘션은 무시하고 **실제 플래그 사용**(공백 후 --로 시작)만 검사.
+    flag_usage = [ln for ln in lines if ln.strip().startswith("--startup-probe-path")]
+    assert not flag_usage, "무효 플래그 --startup-probe-path 실사용 잔존(결함①)"
+    src = "".join(lines)
+    assert "--vpc-egress" in src and "--network=default" in src, "VPC 플래그 누락(결함②)"
