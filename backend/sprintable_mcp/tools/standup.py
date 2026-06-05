@@ -79,8 +79,13 @@ async def get_standup(args: GetStandupInput) -> list[TextContent]:
 
 
 async def save_standup(args: SaveStandupInput) -> list[TextContent]:
-    """스탠드업 저장/업데이트."""
-    body: dict = {"author_id": args.author_id, "date": args.date, "project_id": client.project_id}
+    """스탠드업 저장/업데이트.
+
+    1c2be9db: org-level 기본 — client.project_id 를 강제 주입하지 않는다(이전엔 project-level
+    행을 강제). project_id 생략 → BE 가 org-level 엔트리 1건으로 upsert 하고 작성자 접근
+    프로젝트로 자동 링크(projection). (org_id/author_id 는 BE 가 canonical 처리.)
+    """
+    body: dict = {"author_id": args.author_id, "date": args.date}
     for field in ("done", "plan", "blockers"):
         val = getattr(args, field)
         if val is not None:

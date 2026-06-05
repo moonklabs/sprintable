@@ -85,6 +85,29 @@ class StandupEntryRepository(BaseRepository[StandupEntry]):
             )
         return entry
 
+    async def resync_project_links(self, entry_id: uuid.UUID, project_ids: list[uuid.UUID]) -> None:
+        """1c2be9db: org-level write — entry 의 projection 링크를 project_ids 로 **full overwrite**.
+
+        DELETE(entry_id) 후 INSERT — author 접근 프로젝트(accessible) 동기화 경로 전용
+        (CP2-B). target 에 없는 기존 링크는 삭제(접근 변동 반영·stale 0). project_ids 는
+        accessible_project_ids_in_org(canonical helper) 결과여야 한다(존재하는 project 만 — FK 안전).
+        legacy project_id 명시 write 는 이 메서드를 호출하지 않고 upsert 의 additive(ON CONFLICT
+        DO NOTHING·미삭제) 만 사용한다.
+        """
+        await self.session.execute(
+            text("DELETE FROM standup_entry_projects WHERE entry_id = :e"),
+            {"e": entry_id},
+        )
+        for pid in project_ids:
+            await self.session.execute(
+                text(
+                    "INSERT INTO standup_entry_projects (id, entry_id, project_id, org_id) "
+                    "VALUES (gen_random_uuid(), :e, :p, :o) "
+                    "ON CONFLICT (entry_id, project_id) DO NOTHING"
+                ),
+                {"e": entry_id, "p": pid, "o": self.org_id},
+            )
+
     async def get_missing(self, project_id: uuid.UUID, target_date: date) -> list[uuid.UUID]:
         """해당 날짜 standup 미제출 휴먼의 **canonical members.id** 목록 (AC3-3).
 
