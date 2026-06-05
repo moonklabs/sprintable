@@ -221,7 +221,8 @@ export function UnifiedSwitcher({
                 <span className="truncate text-[10px] font-medium text-muted-foreground leading-tight">
                   {displayOrg}
                 </span>
-                {displayProject && (
+                {/* 0746: 전환 중에는 옛 org의 프로젝트명을 숨겨 "새 org + 옛 프로젝트" 깜빡임(leak처럼 보임)을 차단 */}
+                {!pending && displayProject && (
                   <span className="truncate text-xs font-semibold text-foreground leading-tight">
                     {displayProject}
                   </span>

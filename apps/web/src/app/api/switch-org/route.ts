@@ -41,8 +41,14 @@ export async function POST(request: Request): Promise<Response> {
   const res = NextResponse.json({ data: { ok: true } });
   res.cookies.set(SP_AT_COOKIE, access_token, { ...cookieBase(), maxAge: 15 * 60 });
   res.cookies.set(SP_RT_COOKIE, refresh_token, { ...cookieBase(), maxAge: 30 * 24 * 60 * 60 });
+  // 0746: 전환 시 current-project 쿠키를 항상 갱신해야 stale 잔존이 없다.
+  // target org에 접근 가능 프로젝트가 있으면 그걸로 set, 없으면(미부여 멤버 등) 반드시 clear —
+  // 안 지우면 옛 org의 project_id가 남아 get_project_scoped_org_id가 옛 org로 cross-org 해소돼
+  // 다른 org 프로젝트가 노출되고 전환이 깨진다(멀티org leak).
   if (project_id) {
     res.cookies.set(CURRENT_PROJECT_COOKIE, project_id, { path: '/', sameSite: 'lax', maxAge: 60 * 60 * 24 * 365 });
+  } else {
+    res.cookies.set(CURRENT_PROJECT_COOKIE, '', { path: '/', sameSite: 'lax', maxAge: 0 });
   }
   return res;
 }
