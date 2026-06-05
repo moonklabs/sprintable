@@ -10,6 +10,7 @@ import subprocess
 
 _SCRIPTS = os.path.join(os.path.dirname(__file__), "..", "scripts")
 _DEPLOY = os.path.join(_SCRIPTS, "deploy_backend.sh")
+_DEPLOY_FE = os.path.join(_SCRIPTS, "deploy_frontend.sh")
 _MIGRATE_JOB = os.path.join(_SCRIPTS, "provision_migrate_job.sh")
 
 
@@ -125,3 +126,24 @@ def test_deploy_no_invalid_probe_flag_and_has_vpc():
     assert not flag_usage, "무효 플래그 --startup-probe-path 실사용 잔존(결함①)"
     src = "".join(lines)
     assert "--vpc-egress" in src and "--network=default" in src, "VPC 플래그 누락(결함②)"
+
+
+# ── deploy_frontend.sh 결함 fix (deploy_backend.sh와 동일 패턴) ──────────────────
+
+def test_deploy_frontend_no_invalid_flags():
+    """① --startup-cpu-boost(무효) → --cpu-boost. ② --startup-probe-path(무효) 제거."""
+    with open(_DEPLOY_FE) as f:
+        lines = f.readlines()
+    used = lambda flag: [ln for ln in lines if ln.strip().startswith(flag)]
+    assert not used("--startup-cpu-boost"), "무효 플래그 --startup-cpu-boost 잔존(결함①)"
+    assert not used("--startup-probe-path"), "무효 플래그 --startup-probe-path 잔존(결함②)"
+    assert used("--cpu-boost"), "--cpu-boost 누락(--startup-cpu-boost 대체)"
+
+
+def test_deploy_frontend_single_set_env_vars():
+    """--set-env-vars 단일화(gcloud 반복 시 덮어써 NODE_ENV/NEXT_TELEMETRY 유실 위험 방지)."""
+    with open(_DEPLOY_FE) as f:
+        src = f.read()
+    assert src.count("--set-env-vars=") == 1, "--set-env-vars 중복 → env 유실 위험"
+    for kv in ("NODE_ENV=production", "NEXT_TELEMETRY_DISABLED=1", "NEXT_PUBLIC_FASTAPI_URL="):
+        assert kv in src, f"{kv} 누락"
