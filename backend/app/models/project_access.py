@@ -25,10 +25,13 @@ class ProjectAccess(Base):
         nullable=False,
         index=True,
     )
-    org_member_id: Mapped[uuid.UUID] = mapped_column(
+    # nullable=True: migration 0075 dropped the NOT NULL constraint to admit agent
+    # direct placement (agents have no org_member). The model lagged behind that DDL,
+    # so create_all reproduced the old NOT NULL — the root of the prod onboarding 500.
+    org_member_id: Mapped[uuid.UUID | None] = mapped_column(
         UUID(as_uuid=True),
         ForeignKey("org_members.id", ondelete="CASCADE"),
-        nullable=False,
+        nullable=True,
         index=True,
     )
     permission: Mapped[str] = mapped_column(Text, nullable=False, default="granted", server_default="granted")
