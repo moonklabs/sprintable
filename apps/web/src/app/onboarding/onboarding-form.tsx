@@ -205,7 +205,7 @@ export function OnboardingForm({ initialStep, initialOrgId }: OnboardingFormProp
         role: agentRole,
       }),
     });
-    const memberJson = await memberRes.json() as { data?: { id: string }; error?: { message?: string } };
+    const memberJson = await memberRes.json() as { data?: { id: string; api_key?: string }; error?: { message?: string } };
     if (!memberRes.ok) {
       setError(memberJson?.error?.message ?? 'Failed to create agent');
       setLoading(false);
@@ -219,10 +219,10 @@ export function OnboardingForm({ initialStep, initialOrgId }: OnboardingFormProp
       return;
     }
 
-    const keyRes = await fetch(`/api/agents/${agentId}/api-key`, { method: 'POST' });
-    const keyJson = await keyRes.json() as { data?: { api_key: string } };
-    if (keyRes.ok && keyJson.data?.api_key) {
-      setNewApiKey(keyJson.data.api_key);
+    // 에이전트 생성 응답에 이미 plaintext api_key가 포함됨(BE team_members.py: type=agent 생성 시 항상 발급).
+    // 별도 발급 호출(POST /api/agents/{id}/api-key)은 BE가 body 필수라 빈 본문 시 422 → 응답 키를 그대로 사용.
+    if (memberJson.data?.api_key) {
+      setNewApiKey(memberJson.data.api_key);
     }
 
     setStep('connect');
