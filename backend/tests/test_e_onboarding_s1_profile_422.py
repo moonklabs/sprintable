@@ -45,6 +45,12 @@ def _tm_result(member):
     return r
 
 
+def _scalar_result(val):
+    r = MagicMock()
+    r.scalar_one_or_none.return_value = val
+    return r
+
+
 def _auth(uid: uuid.UUID, *, org_id=None, project_id=None):
     meta = {}
     if org_id:
@@ -97,3 +103,67 @@ async def test_patch_me_other_member_id_is_blocked():
     assert exc.value.status_code == 404
     # UPDATE까지 가지 않음 (select 1회만)
     assert session.execute.await_count == 1
+
+
+# ── a1580005: team_member 없는 org-member(휴먼) PATCH /me 폴백 ─────────────────
+
+@pytest.mark.anyio
+async def test_patch_me_org_member_without_team_member_falls_back_200():
+    """a1580005: team_member 행이 없는 org-member(휴먼)도 PATCH /me {name} → 200.
+
+    GET /me 는 org_members 폴백이 있어 200 인데 PATCH 는 폴백이 없어 404 나던 비대칭 해소.
+    users.display_name + canonical members.name 둘 다 갱신.
+    """
+    uid = uuid.uuid4()
+    org_id = uuid.uuid4()
+    om = MagicMock()
+    om.id = uuid.uuid4()
+    om.org_id = org_id
+    om.role = "member"
+    user = MagicMock()
+    user.email = "u@example.com"
+    user.hashed_password = "x"
+    session = AsyncMock()
+    session.expire = MagicMock()
+    # [TM select=None, OrgMember select=om, UPDATE users, UPDATE members, User select=user]
+    session.execute = AsyncMock(side_effect=[
+        _tm_result(None),
+        _scalar_result(om),
+        MagicMock(),
+        MagicMock(),
+        _scalar_result(user),
+    ])
+
+    res = await update_me(
+        body=UpdateMe(name="New Name"),
+        member_id=None,
+        session=session,
+        auth=_auth(uid, org_id=org_id),
+    )
+    assert res.name == "New Name"
+    assert res.id == om.id
+    assert res.user_id == uid
+    assert res.type == "human"
+    assert res.role == "member"
+    compiled = [str(c.args[0]) for c in session.execute.await_args_list]
+    assert any("UPDATE users" in c for c in compiled)   # GET 폴백 표시 소스
+    assert any("UPDATE members" in c for c in compiled)  # canonical 앵커
+
+
+@pytest.mark.anyio
+async def test_patch_me_no_team_member_no_org_member_404():
+    """team_member·org_member 둘 다 없으면(또는 org 컨텍스트 없음) 진짜 404."""
+    uid = uuid.uuid4()
+    org_id = uuid.uuid4()
+    session = AsyncMock()
+    session.execute = AsyncMock(side_effect=[_tm_result(None), _scalar_result(None)])
+
+    from fastapi import HTTPException
+    with pytest.raises(HTTPException) as exc:
+        await update_me(
+            body=UpdateMe(name="x"),
+            member_id=None,
+            session=session,
+            auth=_auth(uid, org_id=org_id),
+        )
+    assert exc.value.status_code == 404
