@@ -269,7 +269,7 @@ def test_accept_checks_email_mismatch_in_source():
     assert "email" in source
 
 
-# ─── 졷버그(선생님 발견): same-invitee 재수락 멱등 ──────────────────────────────
+# ─── 버그(선생님 발견): same-invitee 재수락 멱등 ──────────────────────────────
 
 def _accepted_invite(email: str = "invited@example.com") -> MagicMock:
     inv = MagicMock()

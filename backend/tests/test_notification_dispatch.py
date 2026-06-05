@@ -240,7 +240,7 @@ async def test_mixed_settings_only_enabled_gets_notification(mock_session, org_i
 
 @pytest.mark.anyio
 async def test_dispatch_dedups_multiproject_view_rows(mock_session, org_id):
-    """졷버그: team_members 뷰(0088 projection)는 멀티프로젝트 멤버를 N행(동일 id)으로 반환 →
+    """회귀 버그: team_members 뷰(0088 projection)는 멀티프로젝트 멤버를 N행(동일 id)으로 반환 →
     dedup 없으면 알림이 프로젝트 수만큼 중복 생성됨(Story Assign 시 Inbox 3개 증상).
     member id dedup으로 멤버당 1 알림만 생성되어야 한다."""
     from app.services.notification_dispatch import dispatch_notification
