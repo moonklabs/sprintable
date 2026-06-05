@@ -7,7 +7,9 @@ REVIEW_TYPES = ("comment", "approve", "request_changes")
 
 
 class StandupUpsert(BaseModel):
-    project_id: uuid.UUID
+    # 1c2be9db: org-level write — project_id 생략 가능. 생략 시 entry 링크 = author 접근
+    # 프로젝트 자동(accessible_project_ids_in_org). 명시 시 그 프로젝트 additive 링크(legacy).
+    project_id: uuid.UUID | None = None
     org_id: uuid.UUID | None = None
     author_id: uuid.UUID
     date: date
@@ -22,9 +24,9 @@ class StandupSelfUpdate(BaseModel):
     """self-save(PUT) 전용 — author_id는 서버가 인증 유저(resolve_member)에서 도출.
 
     클라 바디 author_id를 받지 않아 타인 스탠드업 위조를 차단(SID:6a1e8b1d).
-    project_id는 바디 수용. (extra 필드는 pydantic 기본 무시 — 클라 author_id 전송돼도 무시됨)
+    project_id는 바디 수용(생략 가능 — 1c2be9db org-level). (extra 필드는 pydantic 기본 무시)
     """
-    project_id: uuid.UUID
+    project_id: uuid.UUID | None = None
     date: date
     sprint_id: uuid.UUID | None = None
     done: str | None = None
@@ -37,7 +39,7 @@ class StandupEntryResponse(BaseModel):
     model_config = ConfigDict(from_attributes=True)
 
     id: uuid.UUID
-    project_id: uuid.UUID
+    project_id: uuid.UUID | None = None  # 1c2be9db: org-level 엔트리는 origin project_id 가 NULL 일 수 있음
     org_id: uuid.UUID
     sprint_id: uuid.UUID | None = None
     author_id: uuid.UUID
