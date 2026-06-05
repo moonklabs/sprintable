@@ -84,6 +84,66 @@ async def test_get_project_scoped_no_access_403():
     assert exc.value.status_code == 403
 
 
+# ── c6b82459: cross-org re-entry 차단 (0-project switch 직후 stale project_id) ──
+
+@pytest.mark.anyio
+async def test_get_project_scoped_cross_org_without_header_rejected():
+    """JWT org 스코프와 다른 org 의 project_id 가 X-Org-Id 헤더 없이 들어오면 403.
+
+    0-project org 로 switch 직후 옛 프로젝트 query(stale)가 옛 org 로 재진입(leak)하던
+    경로 차단. has_project_access=True 여도 cross-org 가드가 먼저 거부함을 증명.
+    """
+    from app.dependencies.auth import get_project_scoped_org_id
+
+    project_id = uuid.uuid4()
+    project_org = uuid.uuid4()      # project 가 속한 (옛) org
+    scoped_org = uuid.uuid4()       # 현재 JWT 스코프 org (switch 대상, project_org 와 다름)
+    ctx = MagicMock()
+    ctx.user_id = str(uuid.uuid4())
+    ctx.claims = {"app_metadata": {"org_id": str(scoped_org)}}
+
+    db = AsyncMock()
+    proj_result = MagicMock()
+    proj_result.scalar_one_or_none.return_value = project_org
+    db.execute = AsyncMock(return_value=proj_result)
+
+    has_access = AsyncMock(return_value=True)
+    with patch("app.dependencies.auth.get_verified_org_id", new=AsyncMock(return_value=scoped_org)), \
+         patch("app.services.project_auth.has_project_access", new=has_access):
+        with pytest.raises(HTTPException) as exc:
+            await get_project_scoped_org_id(
+                project_id=project_id, auth=ctx, x_org_id=None, db=db, request=None
+            )
+    assert exc.value.status_code == 403
+    has_access.assert_not_awaited()  # cross-org 가드가 access 체크보다 먼저 차단
+
+
+@pytest.mark.anyio
+async def test_get_project_scoped_cross_org_with_matching_header_allowed():
+    """X-Org-Id 헤더로 cross-org 가 명시 요청되면(=get_verified_org_id 가 그 org 로 해소)
+    project_org 와 일치하므로 허용 — unified-switcher cross-org 프리뷰 보존."""
+    from app.dependencies.auth import get_project_scoped_org_id
+
+    project_id = uuid.uuid4()
+    project_org = uuid.uuid4()
+    ctx = MagicMock()
+    ctx.user_id = str(uuid.uuid4())
+    ctx.claims = {"app_metadata": {"org_id": str(uuid.uuid4())}}  # JWT 는 다른 org
+
+    db = AsyncMock()
+    proj_result = MagicMock()
+    proj_result.scalar_one_or_none.return_value = project_org
+    db.execute = AsyncMock(return_value=proj_result)
+
+    # X-Org-Id=project_org 명시 → get_verified_org_id 가 membership 검증 후 project_org 반환
+    with patch("app.dependencies.auth.get_verified_org_id", new=AsyncMock(return_value=project_org)), \
+         patch("app.services.project_auth.has_project_access", new=AsyncMock(return_value=True)):
+        result = await get_project_scoped_org_id(
+            project_id=project_id, auth=ctx, x_org_id=str(project_org), db=db, request=None
+        )
+    assert result == project_org
+
+
 # ── dispatch_entity: assignee resolve_member_identity (7f8066a3) ──────────────
 
 async def _dispatch_client(mock_session, org_id):
