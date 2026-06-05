@@ -5,10 +5,22 @@
 """
 from fastapi import APIRouter, Depends, HTTPException
 
-from app.dependencies.auth import AuthContext, get_current_user
-from app.services.mcp_toolset import is_tool_allowed, resolve_policy
+from app.dependencies.auth import AuthContext, get_current_user, require_admin
+from app.services.mcp_toolset import build_toolset_catalog, is_tool_allowed, resolve_policy
 
 router = APIRouter(prefix="/api/v2/mcp", tags=["mcp"])
+
+
+@router.get("/toolset-catalog")
+async def get_toolset_catalog(_: AuthContext = Depends(require_admin)) -> dict:
+    """E-MCP-RIGHT S1 (2da32fbf): 툴 권한 picker 선택지 SSOT.
+
+    전체 toolset 그룹 + 그룹별 멤버 툴 + core/destructive 플래그 + order. 관리자 전용
+    (API 키 권한 picker). manifest(키별 허용 정책)와 별개 — 이건 **선택지 카탈로그**.
+    응답 = bare {groups:[...]}; FE route 가 v2 엔벨로프(apiSuccess→{data:{groups}}) 래핑하므로
+    BE 는 래핑하지 않는다(이중 래핑 방지). 계약 SSOT = FE `lib/toolset-catalog.ts`.
+    """
+    return build_toolset_catalog()
 
 
 @router.get("/manifest")
