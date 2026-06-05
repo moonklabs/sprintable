@@ -40,13 +40,19 @@ jobs:
         with:
           version: 'latest'
 
-      - name: alembic upgrade head (fresh DB)
+      - name: alembic upgrade head (fresh DB, OSS create_all shortcut)
         working-directory: backend
         env:
           ALEMBIC_DATABASE_URL: postgresql+psycopg2://sprintable:sprintable@localhost:5432/sprintable_test
           DATABASE_URL: postgresql+asyncpg://sprintable:sprintable@localhost:5432/sprintable_test
           JWT_SECRET: ci-test-secret-at-least-32-chars-long
           SECRET_KEY: ci-test-secret-at-least-32-chars-long
+          # This job validates the OSS single-tenant fresh-install path, which uses the
+          # create_all + stamp-head shortcut. SaaS/Cloud SQL never sets this flag (it runs
+          # the incremental chain). NOTE: the incremental chain is NOT yet fresh-runnable
+          # base->head (migration 0004 references team_members before it exists) — tracked
+          # as a separate chain-repair effort. See alembic/env.py.
+          SPRINTABLE_OSS_FRESH_INSTALL: "1"
         run: uv run alembic upgrade head
 
       - name: Verify tables created

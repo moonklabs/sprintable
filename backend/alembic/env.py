@@ -55,13 +55,24 @@ def run_migrations_online() -> None:
     connectable = engine_from_config(cfg, prefix="sqlalchemy.", poolclass=pool.NullPool)
     with connectable.connect() as connection:
         insp = inspect(connection)
-        # Fresh OSS DB: no application tables and no prior alembic stamp.
-        # Skip the incremental migration chain — create all tables at once and
-        # stamp to head so subsequent `alembic upgrade head` calls are no-ops.
-        # Existing SaaS/Cloud SQL DBs already have tables and an alembic_version
-        # row, so they follow the normal incremental path below.
+        # Fresh OSS DB shortcut (OPT-IN ONLY via SPRINTABLE_OSS_FRESH_INSTALL):
+        # create all tables from the models at once and stamp to head, skipping
+        # the incremental migration chain.
+        #
+        # ⚠️ This is UNSAFE for SaaS/Cloud SQL: the SQLAlchemy models have drifted
+        # from the migration end-state (e.g. team_members is a VIEW created by
+        # migration 0088, project_access.org_member_id NOT NULL was dropped by 0075),
+        # so create_all produces a schema that diverges from the migrated one. A
+        # blank SaaS DB MUST run the full incremental chain. Therefore the shortcut
+        # is gated behind an explicit opt-in flag that ONLY the OSS entrypoint sets;
+        # without it, every DB (including a freshly wiped one) follows the normal
+        # incremental path below. See bootstrap.py / docker-compose.yml.
+        _allow_fresh = os.environ.get("SPRINTABLE_OSS_FRESH_INSTALL", "").strip().lower() in (
+            "1", "true", "yes", "on",
+        )
         is_fresh = (
-            not insp.has_table("alembic_version")
+            _allow_fresh
+            and not insp.has_table("alembic_version")
             and not insp.has_table("organizations")
         )
         if is_fresh:

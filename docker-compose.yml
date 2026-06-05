@@ -33,6 +33,10 @@ services:
       JWT_SECRET: ${JWT_SECRET:-change-me-in-production-min-32-chars}
       SECRET_KEY: ${SECRET_KEY:-change-me-in-production-min-32-chars}
       DEBUG: "True"
+      # OSS single-tenant fresh install: opt in to the create_all + stamp-head shortcut
+      # so a brand-new local DB skips the incremental migration chain. NEVER set this on
+      # SaaS/Cloud SQL — the models drift from the migrated schema (see bootstrap.py).
+      SPRINTABLE_OSS_FRESH_INSTALL: "1"
       # Agent chat file uploads (POST /api/v2/channel/upload)
       CHANNEL_FILES_DIR: /app/data/channel_files
     volumes:

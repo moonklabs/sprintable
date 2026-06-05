@@ -1,5 +1,12 @@
-"""OSS bootstrap: fresh install uses create_all + stamp head, existing DB runs alembic upgrade head."""
+"""OSS bootstrap: fresh install uses create_all + stamp head, existing DB runs alembic upgrade head.
+
+The create_all shortcut is OPT-IN ONLY (SPRINTABLE_OSS_FRESH_INSTALL): the models have
+drifted from the migration end-state (team_members VIEW @0088, project_access.org_member_id
+NOT NULL dropped @0075), so create_all produces a schema that diverges from the migrated one.
+Without the flag, a fresh DB runs the full incremental chain (safe for SaaS/Cloud SQL).
+"""
 import asyncio
+import os
 import subprocess
 import sys
 from sqlalchemy import text
@@ -21,8 +28,12 @@ async def main() -> None:
     finally:
         await engine.dispose()
 
-    if not has_alembic:
-        print("[bootstrap] Fresh install detected — running create_all + alembic stamp head")
+    allow_fresh = os.environ.get("SPRINTABLE_OSS_FRESH_INSTALL", "").strip().lower() in (
+        "1", "true", "yes", "on",
+    )
+
+    if not has_alembic and allow_fresh:
+        print("[bootstrap] Fresh install (OSS opt-in) — running create_all + alembic stamp head")
         sync_url = settings.database_url.replace("postgresql+asyncpg://", "postgresql://")
         from sqlalchemy import create_engine as create_sync_engine
         sync_engine = create_sync_engine(sync_url)
@@ -30,7 +41,9 @@ async def main() -> None:
         sync_engine.dispose()
         subprocess.run(["alembic", "stamp", "head"], check=True)
     else:
-        print("[bootstrap] Existing DB detected — running alembic upgrade head")
+        # SaaS / Cloud SQL (and any DB without the opt-in flag) always runs the full
+        # incremental chain — create_all would diverge from the migrated schema.
+        print("[bootstrap] Running alembic upgrade head (incremental chain)")
         subprocess.run(["alembic", "upgrade", "head"], check=True)
 
 
