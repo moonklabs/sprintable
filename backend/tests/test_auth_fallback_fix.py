@@ -19,6 +19,7 @@ def _make_user(last_project_id=None) -> MagicMock:
     u.email = "user@example.com"
     u.is_active = True
     u.last_project_id = last_project_id
+    u.last_org_id = None  # 0746 후속: 신규 필드 — None이어야 org_id-None(cross-org fallback) 경로 유지
     return u
 
 

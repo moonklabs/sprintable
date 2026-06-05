@@ -56,6 +56,7 @@ async def test_build_app_metadata_auto_accepts_org_invite():
     mock_user.id = user_id
     mock_user.email = "isaacshin@moonklabs.com"
     mock_user.last_project_id = None
+    mock_user.last_org_id = None  # 0746 후속: 신규 필드 — None이어야 org_id-None(invite/Path4) 경로 유지
 
     # mock OrgInvite
     mock_org_inv = MagicMock()
@@ -111,6 +112,7 @@ async def test_build_app_metadata_skips_org_invite_when_invitation_found():
     mock_user.id = user_id
     mock_user.email = "user@example.com"
     mock_user.last_project_id = None
+    mock_user.last_org_id = None  # 0746 후속: 신규 필드 — None이어야 org_id-None(invite/Path4) 경로 유지
 
     mock_inv = MagicMock()
     mock_inv.org_id = org_id
