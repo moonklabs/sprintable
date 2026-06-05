@@ -485,15 +485,6 @@ CREATE TABLE public.agent_sessions (
 
 
 --
--- Name: alembic_version; Type: TABLE; Schema: public; Owner: -
---
-
-CREATE TABLE public.alembic_version (
-    version_num character varying(32) NOT NULL
-);
-
-
---
 -- Name: analytics_events; Type: TABLE; Schema: public; Owner: -
 --
 
@@ -2496,14 +2487,6 @@ ALTER TABLE ONLY public.agent_message_allowlist
 
 ALTER TABLE ONLY public.agent_project_profiles
     ADD CONSTRAINT agent_project_profiles_pkey PRIMARY KEY (id);
-
-
---
--- Name: alembic_version alembic_version_pkc; Type: CONSTRAINT; Schema: public; Owner: -
---
-
-ALTER TABLE ONLY public.alembic_version
-    ADD CONSTRAINT alembic_version_pkc PRIMARY KEY (version_num);
 
 
 --
