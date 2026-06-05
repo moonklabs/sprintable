@@ -69,7 +69,10 @@ jobs:
           test "$(P "SELECT count(*) FROM plan_features")" -ge 1
           # post-baseline incremental migration applied on a fresh DB (forward-compat): 0097 column
           test "$(P "SELECT count(*) FROM information_schema.columns WHERE table_name='org_invites' AND column_name='project_ids'")" = "1"
-          echo "baseline parity OK: team_members=VIEW, org_member_id nullable, seed present, 0097 applied"
+          # baseline REVISION invariant — the snapshot was captured at 0096; changing this without
+          # regenerating baseline/schema.sql would mis-stamp fresh DBs. Lock it.
+          test "$(cat backend/alembic/baseline/REVISION)" = "0096"
+          echo "baseline parity OK: team_members=VIEW, org_member_id nullable, seed present, 0097 applied, REVISION=0096"
 
       - name: Verify fresh DB reached head (baseline + incremental)
         working-directory: backend
