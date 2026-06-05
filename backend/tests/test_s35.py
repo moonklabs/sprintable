@@ -66,6 +66,7 @@ async def test_create_api_key_201():
     client, session, app = await _client()
     try:
         with patch("app.routers.api_keys.assert_agent_owner", new_callable=AsyncMock), \
+             patch("app.services.agent_message_policy.ensure_creator_allowlisted", new_callable=AsyncMock), \
              patch("app.repositories.api_key.ApiKeyRepository.create", new_callable=AsyncMock) as mock_create:
             mock_create.return_value = (_mock_key(), PLAINTEXT)
 
@@ -122,7 +123,8 @@ async def test_rotate_key_201():
         new_key.id = uuid.uuid4()
         new_plaintext = _PREFIX_MARKER + "n" * 64
 
-        with patch("app.repositories.api_key.ApiKeyRepository.rotate", new_callable=AsyncMock) as mock_rotate:
+        with patch("app.services.agent_message_policy.ensure_creator_allowlisted", new_callable=AsyncMock), \
+             patch("app.repositories.api_key.ApiKeyRepository.rotate", new_callable=AsyncMock) as mock_rotate:
             mock_rotate.return_value = (new_key, new_plaintext)
 
             async with client as c:

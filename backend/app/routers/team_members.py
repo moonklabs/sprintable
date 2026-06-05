@@ -245,6 +245,9 @@ async def create_team_member(
         from app.repositories.api_key import ApiKeyRepository
         api_key_repo = ApiKeyRepository(session)
         _api_key_obj, api_key_plaintext = await api_key_repo.create(team_member_id=member.id)
+        # E-MSG-POLICY S2: creator를 agent allow_list에 자동 등록(같은 트랜잭션·멱등).
+        from app.services.agent_message_policy import ensure_creator_allowlisted
+        await ensure_creator_allowlisted(session, member.id)
 
     # AC3: agent 응답에 fakechat_port + mcp_config 포함
     response = TeamMemberResponse.model_validate(member).model_dump()
