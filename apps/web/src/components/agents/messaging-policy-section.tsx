@@ -1,6 +1,6 @@
 'use client';
 
-import { useCallback, useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState, type KeyboardEvent } from 'react';
 import { Check, Plus, TriangleAlert, X } from 'lucide-react';
 import { useTranslations } from 'next-intl';
 import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert';
@@ -38,6 +38,7 @@ export function MessagingPolicySection({ agentId, creatorUserId }: MessagingPoli
   const [orgHumans, setOrgHumans] = useState<OrgHuman[]>([]);
   const [pendingId, setPendingId] = useState<string | null>(null);
   const [showPicker, setShowPicker] = useState(false);
+  const radioRefs = useRef<Array<HTMLButtonElement | null>>([]);
 
   const load = useCallback(async () => {
     const [policyRes, membersRes] = await Promise.all([
@@ -134,6 +135,17 @@ export function MessagingPolicySection({ agentId, creatorUserId }: MessagingPoli
     }
   };
 
+  // 방향키 roving — radiogroup 표준 키보드 내비게이션
+  const handleRadioKeyDown = (e: KeyboardEvent<HTMLButtonElement>, index: number) => {
+    let next: number | null = null;
+    if (e.key === 'ArrowRight' || e.key === 'ArrowDown') next = (index + 1) % MODES.length;
+    else if (e.key === 'ArrowLeft' || e.key === 'ArrowUp') next = (index - 1 + MODES.length) % MODES.length;
+    if (next === null) return;
+    e.preventDefault();
+    setStagedMode(MODES[next]);
+    radioRefs.current[next]?.focus();
+  };
+
   if (loading) return null;
 
   const modeLabel: Record<MessagingMode, { label: string; hint: string }> = {
@@ -153,15 +165,18 @@ export function MessagingPolicySection({ agentId, creatorUserId }: MessagingPoli
       <SectionCardBody className="space-y-4">
         {/* 모드 선택 (radio-card) */}
         <div role="radiogroup" aria-label={t('messagingPolicyTitle')} className="grid gap-2 sm:grid-cols-3">
-          {MODES.map((m) => {
+          {MODES.map((m, i) => {
             const selected = stagedMode === m;
             return (
               <button
                 key={m}
+                ref={(el) => { radioRefs.current[i] = el; }}
                 type="button"
                 role="radio"
                 aria-checked={selected}
+                tabIndex={selected ? 0 : -1}
                 onClick={() => setStagedMode(m)}
+                onKeyDown={(e) => handleRadioKeyDown(e, i)}
                 className={`flex flex-col items-start gap-0.5 rounded-lg border p-3 text-left transition focus:outline-none focus-visible:ring-2 focus-visible:ring-ring ${
                   selected ? 'border-brand bg-brand/5' : 'border-border hover:bg-muted/50'
                 }`}
