@@ -2,7 +2,7 @@
 
 import { useEffect, useState } from 'react';
 import { useTranslations } from 'next-intl';
-import { Check, Copy } from 'lucide-react';
+import { Check, ChevronDown, Copy } from 'lucide-react';
 import { Alert, AlertDescription } from '@/components/ui/alert';
 import { Button } from '@/components/ui/button';
 import { MemberRow } from '@/components/ui/member-row';
@@ -235,7 +235,7 @@ export function OrgMembersSection({ orgId, currentRole }: OrgMembersSectionProps
                         ? t('inviteProjectsTrigger')
                         : t('inviteProjectsCount', { count: inviteProjectIds.length })}
                     </span>
-                    <Check className={`h-3.5 w-3.5 shrink-0 ${inviteProjectIds.length > 0 ? 'text-primary' : 'text-transparent'}`} />
+                    <ChevronDown className={`h-4 w-4 shrink-0 text-muted-foreground transition-transform ${showProjectPicker ? 'rotate-180' : ''}`} />
                   </button>
                   {showProjectPicker && (
                     <ul className="max-h-56 space-y-1 overflow-y-auto rounded-md border border-border p-1 md:max-w-sm">
