@@ -429,42 +429,46 @@ export default function SettingsPage() {
         setAdminChecked(true);
       }
 
-      // Get current project
-      const projectRes = await fetch('/api/current-project');
-      if (projectRes.ok) {
-        const projectJson = await projectRes.json();
-        const projectId = projectJson?.data?.project_id ?? null;
-        const orgId = projectJson?.data?.org_id ?? null;
-        setCurrentProjectId(projectId);
-        setOrgId(orgId);
+      // Get current project — current-project 실패/예외와 무관하게 loading은 finally에서 해소(무한 스켈레톤 방지).
+      // (fresh signup 직후 org_id 없는 JWT → /current-project 실패 시 setLoading(false) 미호출되던 결함)
+      try {
+        const projectRes = await fetch('/api/current-project');
+        if (projectRes.ok) {
+          const projectJson = await projectRes.json();
+          const projectId = projectJson?.data?.project_id ?? null;
+          const orgId = projectJson?.data?.org_id ?? null;
+          setCurrentProjectId(projectId);
+          setOrgId(orgId);
 
-        // org 상세 정보 로드 — list API에서 orgId로 필터 (단건 API 미구현)
-        if (orgId) {
-          const orgListRes = await fetch('/api/organizations').catch(() => null);
-          if (orgListRes?.ok) {
-            const orgListJson = await orgListRes.json() as { data?: Array<{ id: string; name: string; slug: string; plan?: string; role?: string }> };
-            const found = (orgListJson.data ?? []).find((o) => o.id === orgId);
-            if (found) {
-              setOrgInfo(found);
-              setEditOrgName(found.name);
+          // org 상세 정보 로드 — list API에서 orgId로 필터 (단건 API 미구현)
+          if (orgId) {
+            const orgListRes = await fetch('/api/organizations').catch(() => null);
+            if (orgListRes?.ok) {
+              const orgListJson = await orgListRes.json() as { data?: Array<{ id: string; name: string; slug: string; plan?: string; role?: string }> };
+              const found = (orgListJson.data ?? []).find((o) => o.id === orgId);
+              if (found) {
+                setOrgInfo(found);
+                setEditOrgName(found.name);
+              }
             }
           }
-        }
 
-        // Get notification settings
-        const settingsRes = await fetch('/api/notification-settings');
-        if (settingsRes.ok) {
-          const settingsJson = await settingsRes.json();
-          setSettings(settingsJson.data ?? []);
+          // Get notification settings
+          const settingsRes = await fetch('/api/notification-settings');
+          if (settingsRes.ok) {
+            const settingsJson = await settingsRes.json();
+            setSettings(settingsJson.data ?? []);
+          }
+
+          // Get webhook configs
+          const webhookRes = await fetch('/api/webhooks/config');
+          if (webhookRes.ok) {
+            const webhookJson = await webhookRes.json();
+            setWebhooks(webhookJson.data ?? []);
+          }
         }
+      } finally {
         setLoading(false);
-
-        // Get webhook configs
-        const webhookRes = await fetch('/api/webhooks/config');
-        if (webhookRes.ok) {
-          const webhookJson = await webhookRes.json();
-          setWebhooks(webhookJson.data ?? []);
-        }
       }
     }
 
