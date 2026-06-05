@@ -258,35 +258,88 @@ async def _get_user_by_id(session: AsyncSession, user_id: uuid.UUID) -> User | N
     return result.scalar_one_or_none()
 
 
-async def _build_app_metadata(user: User, session: AsyncSession) -> dict:
+_ROLE_RANK: dict[str, int] = {"owner": 4, "admin": 3, "manager": 2, "member": 1}
+
+
+async def _user_projects_claim(user: User, session: AsyncSession) -> list[dict]:
+    """JWT projects 클레임(전환 UI/알림용) — 사용자의 active team_member project 전량(org 무관).
+    org owner/admin은 project role을 org role로 상속(effective)."""
     from app.models.team import TeamMember
 
-    # 1. last_project_id 우선 → 해당 project의 active team_member
+    org_roles = await session.execute(
+        select(OrgMember.org_id, OrgMember.role).where(
+            OrgMember.user_id == user.id, OrgMember.deleted_at.is_(None),
+        )
+    )
+    org_role_map = {str(r[0]): r[1] for r in org_roles.all()}
+
+    def _eff(project_role: str, org_id_str: str) -> str:
+        org_r = org_role_map.get(org_id_str, "")
+        return org_r if _ROLE_RANK.get(org_r, 0) > _ROLE_RANK.get(project_role, 0) else project_role
+
+    rows = await session.execute(
+        select(TeamMember).where(
+            or_(TeamMember.user_id == user.id, TeamMember.id == user.id),
+            TeamMember.is_active.is_(True),
+        )
+    )
+    return [
+        {"id": str(m.project_id), "org_id": str(m.org_id), "role": _eff(m.role, str(m.org_id))}
+        for m in rows.scalars().all()
+    ]
+
+
+async def _build_app_metadata(
+    user: User, session: AsyncSession, org_id: uuid.UUID | None = None
+) -> dict:
+    """JWT app_metadata 구성. org_id 지정 시(switch-org 등) 프로젝트 해소를 **그 org로 스코프**해
+    cross-org 옛 프로젝트 주입을 차단한다(0746 leak fix). org_id None이면 기존 login 동작."""
+    from app.models.team import TeamMember
+
+    # 1. last_project_id 우선 → 해당 project의 active team_member (org_id 지정 시 그 org일 때만)
     member = None
     if getattr(user, "last_project_id", None):
-        result = await session.execute(
-            select(TeamMember)
-            .where(
-                TeamMember.project_id == user.last_project_id,
-                or_(TeamMember.user_id == user.id, TeamMember.id == user.id),
-                TeamMember.is_active.is_(True),
-            )
-            .limit(1)
+        q = select(TeamMember).where(
+            TeamMember.project_id == user.last_project_id,
+            or_(TeamMember.user_id == user.id, TeamMember.id == user.id),
+            TeamMember.is_active.is_(True),
         )
-        member = result.scalar_one_or_none()
+        if org_id is not None:
+            q = q.where(TeamMember.org_id == org_id)
+        member = (await session.execute(q.limit(1))).scalar_one_or_none()
 
     if not member:
-        # fallback: 가장 오래된 team_member (ASC) — 최초 가입 project 우선
-        result = await session.execute(
-            select(TeamMember)
-            .where(
-                or_(TeamMember.user_id == user.id, TeamMember.id == user.id),
-                TeamMember.is_active.is_(True),
-            )
-            .order_by(TeamMember.created_at.asc())
-            .limit(1)
+        # fallback: 가장 오래된 team_member (ASC) — 최초 가입 project 우선.
+        # ⚠️0746: org_id 지정 시 그 org로 스코프(미지정이면 org 무관 → cross-org 옛 프로젝트 누수).
+        q = select(TeamMember).where(
+            or_(TeamMember.user_id == user.id, TeamMember.id == user.id),
+            TeamMember.is_active.is_(True),
         )
-        member = result.scalar_one_or_none()
+        if org_id is not None:
+            q = q.where(TeamMember.org_id == org_id)
+        member = (await session.execute(q.order_by(TeamMember.created_at.asc()).limit(1))).scalar_one_or_none()
+
+    # 0746: org_id 지정 + 그 org에 team_member 없음(grant-only/0-project/owner-admin) →
+    # cross-org invite/Path4 폴백 금지. 그 org의 first_accessible(없으면 null)로 스코프 해소.
+    if org_id is not None and member is None:
+        pid = await first_accessible_project_id(session, user.id, org_id)
+        if getattr(user, "last_project_id", None) != pid:
+            user.last_project_id = pid  # in-org project or None — cross-org 절대 금지
+        om_role = (
+            await session.execute(
+                select(OrgMember.role).where(
+                    OrgMember.org_id == org_id,
+                    OrgMember.user_id == user.id,
+                    OrgMember.deleted_at.is_(None),
+                ).limit(1)
+            )
+        ).scalar_one_or_none()
+        return {
+            "org_id": str(org_id),
+            "project_id": str(pid) if pid else "",
+            "role": om_role or "member",
+            "projects": await _user_projects_claim(user, session),
+        }
 
     if member and member.user_id is None:
         # AC3-5 ②: team_members가 뷰(0088) — ORM mutation+flush(UPDATE view 실패) 대신 members 앵커 UPDATE.
@@ -1165,14 +1218,18 @@ async def switch_organization(
     # (내부에서 user.last_project_id를 이전 org TM으로 덮어쓰므로 먼저 캡처)
     target_project_id = user.last_project_id
 
-    # 새 토큰 발급 — switch-org 목적 자체가 org 전환이므로 target org_id + project_id 모두 덮어씀
-    app_metadata = await _build_app_metadata(user, session)
+    # 새 토큰 발급 — org_id 스코프로 _build_app_metadata 호출 → cross-org 옛 프로젝트 주입 차단(0746).
+    # (내부가 target org로 스코프해 project_id/last_project_id를 그 org의 것 또는 null로 해소.)
+    app_metadata = await _build_app_metadata(user, session, org_id=body.org_id)
     app_metadata["org_id"] = str(body.org_id)
-    # 캡처해둔 target project_id로 덮어쓰기 — _build_app_metadata 내부 fallback 값 무효화
+    # belt-and-suspenders: 캡처한 target project_id로 재확정(스코프 결과와 일치)
     if target_project_id:
         app_metadata["project_id"] = str(target_project_id)
     else:
         app_metadata.pop("project_id", None)
+    # ⚠️0746: _build_app_metadata(org_id 스코프)가 last_project_id를 in-org/null로 설정하므로 추가
+    # 재설정 불필요하나, 캡처값과 동기 보장(refresh가 cross-org로 재누수하지 않도록).
+    user.last_project_id = target_project_id
 
     tokens = create_tokens(str(user.id), email=user.email, app_metadata=app_metadata)
     _, refresh_exp = create_refresh_token(str(user.id), expires_delta=timedelta(days=REFRESH_TOKEN_EXPIRE_DAYS))
