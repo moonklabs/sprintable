@@ -8,7 +8,12 @@ _P = "app.routers.agent_message_policy"
 
 
 def _owner(monkeypatch, agent=None):
-    monkeypatch.setattr(f"{_P}.assert_agent_owner", AsyncMock(return_value=agent or MagicMock()))
+    # default mock agent carries a valid message_policy_mode — POST/DELETE allowlist responses
+    # now echo it (B1 fix), and a bare MagicMock attr would not be a valid mode literal.
+    monkeypatch.setattr(
+        f"{_P}.assert_agent_owner",
+        AsyncMock(return_value=agent or MagicMock(message_policy_mode="creator_only")),
+    )
 
 
 def _allowlist_result(ids):
