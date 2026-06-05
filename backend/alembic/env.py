@@ -77,6 +77,9 @@ def run_migrations_online() -> None:
                     _sql = _fh.read()
                 if _sql.strip():
                     connection.exec_driver_sql(_sql)
+            # pg_dump preambles can leave search_path empty; restore it so stamp() can create
+            # the alembic_version table without an explicit schema qualifier.
+            connection.exec_driver_sql('SET search_path TO "$user", public')
             migration_ctx = _MigCtx.configure(connection)
             migration_ctx.stamp(script_dir, "head")
             connection.commit()
