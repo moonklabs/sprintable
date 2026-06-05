@@ -168,6 +168,27 @@ class OrgInviteRepository:
         if invite is None:
             return {"ok": False, "reason": "not_found"}
         if invite.status == "accepted":
+            # Idempotent: the same invitee re-accepting (double-click / re-visit / back button)
+            # is already a member → treat as success rather than a 409 error. Only a *different*
+            # user hitting an already-consumed invite gets already_accepted.
+            if invite.email.lower() == user_email.lower():
+                # ensure membership exists (prior accept may predate a backfill) — idempotent
+                await self.session.execute(
+                    pg_insert(OrgMember)
+                    .values(
+                        org_id=invite.organization_id,
+                        user_id=user_id,
+                        role=invite.role,
+                    )
+                    .on_conflict_do_nothing(constraint="uq_org_members_org_user")
+                )
+                await self.session.flush()
+                return {
+                    "ok": True,
+                    "org_id": str(invite.organization_id),
+                    "role": invite.role,
+                    "already_member": True,
+                }
             return {"ok": False, "reason": "already_accepted"}
         if invite.status != "pending":
             return {"ok": False, "reason": "invalid_status"}
