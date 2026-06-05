@@ -17,12 +17,13 @@ export function InviteAcceptClient({ token, orgName, role, email, projects }: In
   const [accepting, setAccepting] = useState(false);
   const [result, setResult] = useState<{ type: 'success' | 'error'; text: string } | null>(null);
 
-  // 정책B surface②: 부여될 프로젝트 — 3개 초과 시 앞 3개 + "외 N개"(박스 과밀 방지)
-  const projectText = projects.length === 0
+  // 정책B surface②: 부여될 프로젝트 — 3개 초과 시 앞 3개 이름 + "외 N개" 배지.
+  // 이름만 truncate하고 카운트 배지는 shrink-0로 분리해 max-w-sm 박스에서도 "외 N개"가 잘리지 않게 한다.
+  const projectNames = projects.length === 0
     ? null
-    : projects.length > 3
-      ? `${projects.slice(0, 3).map((p) => p.name).join(', ')} ${t('acceptProjectsMore', { count: projects.length - 3 })}`
-      : projects.map((p) => p.name).join(', ');
+    : projects.slice(0, 3).map((p) => p.name).join(', ');
+  const moreCount = projects.length > 3 ? projects.length - 3 : 0;
+  const projectTitle = projects.map((p) => p.name).join(', ');
 
   const handleAccept = async () => {
     if (accepting) return;
@@ -63,10 +64,15 @@ export function InviteAcceptClient({ token, orgName, role, email, projects }: In
           </div>
           <div className="mt-2 flex items-center justify-between gap-4 text-sm">
             <span className="shrink-0 text-muted-foreground">{t('acceptProjectsRow')}</span>
-            {projectText === null ? (
+            {projectNames === null ? (
               <span className="text-muted-foreground">{t('acceptProjectsNone')}</span>
             ) : (
-              <span className="truncate text-right font-medium text-foreground/85" title={projectText}>{projectText}</span>
+              <span className="flex min-w-0 items-center justify-end gap-1 text-right font-medium text-foreground/85" title={projectTitle}>
+                <span className="truncate">{projectNames}</span>
+                {moreCount > 0 && (
+                  <span className="shrink-0 text-muted-foreground">{t('acceptProjectsMore', { count: moreCount })}</span>
+                )}
+              </span>
             )}
           </div>
         </div>
