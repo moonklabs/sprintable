@@ -215,6 +215,56 @@ async def update_me(
         select(TeamMember).where(where_clause).limit(1)
     )
     member = result.scalars().first()
+
+    if member is None and not is_api_key and member_id is None:
+        # a1580005: team_member 행이 없는 org-member(휴먼)도 프로필 이름을 갱신할 수 있게
+        # GET /me 와 동일한 org_members 폴백을 적용. 기존엔 GET 만 폴백이 있고 PATCH 는 없어
+        # "프로필 Name 변경 시 /api/me 404" 비대칭 버그가 있었다. canonical members.name 과
+        # GET 폴백 표시 소스(users.display_name)를 함께 갱신해 모든 표면 정합.
+        org_id_str = auth.claims.get("app_metadata", {}).get("org_id")
+        project_id_str = auth.claims.get("app_metadata", {}).get("project_id")
+        if org_id_str:
+            org_member = (await session.execute(
+                select(OrgMember).where(
+                    OrgMember.org_id == uuid.UUID(org_id_str),
+                    OrgMember.user_id == uid,
+                    OrgMember.deleted_at.is_(None),
+                )
+            )).scalar_one_or_none()
+            if org_member is not None:
+                # GET 폴백이 읽는 표시 소스
+                await session.execute(
+                    sa_update(User).where(User.id == uid).values(display_name=body.name)
+                )
+                # canonical members 앵커(있으면) — chat/list_members 등 정합 (best-effort, 0 rows ok)
+                await session.execute(
+                    sa_update(Member).where(
+                        Member.user_id == uid,
+                        Member.org_id == uuid.UUID(org_id_str),
+                        Member.type == "human",
+                        Member.deleted_at.is_(None),
+                    ).values(name=body.name, updated_at=func.now())
+                )
+                user = (await session.execute(
+                    select(User).where(User.id == uid)
+                )).scalar_one_or_none()
+                try:
+                    proj_id = uuid.UUID(project_id_str) if project_id_str else org_member.org_id
+                except (ValueError, AttributeError):
+                    proj_id = org_member.org_id
+                return MeResponse(
+                    id=org_member.id,
+                    org_id=org_member.org_id,
+                    project_id=proj_id,
+                    user_id=uid,
+                    name=body.name,
+                    email=user.email if user else None,
+                    type="human",
+                    role=org_member.role,
+                    is_active=True,
+                    has_password=bool(user.hashed_password) if user else None,
+                )
+
     if member is None:
         # 본인 소유가 아니거나 미존재 — 존재 여부 누설 없이 404
         raise HTTPException(status_code=404, detail="Member not found")
