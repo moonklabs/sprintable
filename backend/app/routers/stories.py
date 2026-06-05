@@ -613,9 +613,13 @@ async def _resolve_team_member_id(auth: AuthContext, org_id: uuid.UUID, db: Asyn
         .limit(1)
     )
     member = result.scalar_one_or_none()
-    if not member:
-        raise HTTPException(status_code=403, detail="Team member not found for current user")
-    return member.id
+    if member:
+        return member.id
+    # 0d68ad20: grant-only/admin 휴먼(team_member 행 없음)도 org 멤버면 403 금지 — SSOT canonical
+    # member id(org_member.id)로 폴백(conversations/notification_preferences와 동일 패턴). 비-멤버는
+    # resolve_member가 400.
+    from app.services.member_resolver import resolve_member
+    return (await resolve_member(auth, org_id, db)).id
 
 
 @router.post("/{id}/comments", response_model=CommentResponse, status_code=201)
