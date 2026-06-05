@@ -85,10 +85,11 @@ async def _seed(session):
         f"('{U_OWNER}','owner@pg.test','x','Owner',true,true,0,false,0),('{U_MEM}','mem@pg.test','x','Mem',true,true,0,false,0)",
         f"INSERT INTO org_members (id,org_id,user_id,role) VALUES ('{OM_OWNER}','{ORG}','{U_OWNER}','owner'),('{OM_MEM}','{ORG}','{U_MEM}','member')",
         f"INSERT INTO projects (id,org_id,name,violation_level) VALUES ('{P1}','{ORG}','P1',0),('{P2}','{ORG}','P2',0)",
-        f"INSERT INTO {physical_tm} (id,project_id,org_id,user_id,type,name,role,color,can_manage_members,is_active,created_by) VALUES "
-        f"('{TM_OWNER}','{P1}','{ORG}','{U_OWNER}','human','Owner','owner','#3385f8',true,true,NULL),"
-        f"('{AG1}','{P1}','{ORG}',NULL,'agent','Bot','member','#ff0000',false,true,'{U_OWNER}'),"
-        f"('{AG2}','{P2}','{ORG}',NULL,'agent','Bot','reviewer','#00ff00',false,true,'{U_OWNER}')",
+        # agent_config required for agents by chk_agent_has_config (type<>'agent' OR agent_config IS NOT NULL)
+        f"INSERT INTO {physical_tm} (id,project_id,org_id,user_id,type,name,role,color,can_manage_members,is_active,created_by,agent_config) VALUES "
+        f"('{TM_OWNER}','{P1}','{ORG}','{U_OWNER}','human','Owner','owner','#3385f8',true,true,NULL,NULL),"
+        f"('{AG1}','{P1}','{ORG}',NULL,'agent','Bot','member','#ff0000',false,true,'{U_OWNER}','{{}}'::jsonb),"
+        f"('{AG2}','{P2}','{ORG}',NULL,'agent','Bot','reviewer','#00ff00',false,true,'{U_OWNER}','{{}}'::jsonb)",
         f"INSERT INTO project_access (id,project_id,org_member_id,member_id,permission,role,access_source) VALUES "
         f"(gen_random_uuid(),'{P1}','{OM_MEM}','{OM_MEM}','granted','member','direct'),"
         f"(gen_random_uuid(),'{P1}',NULL,'{AG1}','granted','member','direct'),"
