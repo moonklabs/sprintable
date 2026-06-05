@@ -3,7 +3,7 @@ from __future__ import annotations
 import uuid
 from datetime import datetime, timedelta, timezone
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 
 from sqlalchemy import select
 from sqlalchemy.dialects.postgresql import insert as pg_insert
@@ -12,7 +12,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models.org_invite import OrgInvite
 from app.models.organization import Organization
-from app.models.project import OrgMember
+from app.models.project import OrgMember, Project
 
 
 @dataclass
@@ -22,6 +22,8 @@ class InvitePreview:
     status: str
     expires_at: datetime
     email: str
+    # 정책B surface②: 수락 시 부여될 프로젝트 [{id, name}] — invitee는 org 접근 전이라 FE가 못 받음.
+    projects: list[dict] = field(default_factory=list)
 
 _INVITE_EXPIRE_DAYS = 7
 
@@ -156,12 +158,32 @@ class OrgInviteRepository:
         effective_status = (
             "expired" if invite.status == "pending" and invite.expires_at < now else invite.status
         )
+        # surface②: invite.project_ids → 프로젝트 이름 해소(invite org 소속만·cross-org 방지)
+        projects: list[dict] = []
+        pids_raw = invite.project_ids or []
+        if pids_raw:
+            wanted = []
+            for p in pids_raw:
+                try:
+                    wanted.append(uuid.UUID(str(p)))
+                except (ValueError, TypeError):
+                    continue
+            if wanted:
+                rows = await self.session.execute(
+                    select(Project.id, Project.name).where(
+                        Project.id.in_(wanted),
+                        Project.org_id == invite.organization_id,
+                        Project.deleted_at.is_(None),
+                    )
+                )
+                projects = [{"id": str(pid), "name": name} for pid, name in rows.all()]
         return InvitePreview(
             org_name=org_name,
             role=invite.role,
             status=effective_status,
             expires_at=invite.expires_at,
             email=invite.email,
+            projects=projects,
         )
 
     async def accept(self, token: str, user_id: uuid.UUID, user_email: str) -> dict:
