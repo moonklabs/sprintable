@@ -37,7 +37,13 @@ export default async function AuthenticatedLayout({
   // 401(인증 만료)만 /login 리다이렉트, 다른 에러(500 등)는 children 렌더링 유지
   if (!meRes || meRes.status === 401) redirect('/login');
 
+  // 🔴 org 없는 유저(신규 OAuth 가입자 등 — team_member 미생성 시 /me 404) → 온보딩으로.
+  // auth/callback이 is_new_user 무관 /inbox 리다이렉트하는 결함을 layout에서 OAuth+email/pw 공통 커버
+  // (org-less가 깨진 페이지 도달 자체 차단). /onboarding은 (authenticated) 밖이라 루프 없음.
+  if (meRes.status === 404) redirect('/onboarding');
+
   const me = meRes.ok ? (await meRes.json() as MemberContext | null) : null;
+  if (meRes.ok && !me?.org_id) redirect('/onboarding');
   const memberships: { projectId: string; projectName: string }[] =
     membershipsRes?.ok ? ((await membershipsRes.json()) as { projectId: string; projectName: string }[]) : [];
   const projectMemberships = memberships.length > 0
