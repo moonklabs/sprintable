@@ -50,6 +50,15 @@ def _run_sql_file(filename: str) -> None:
 
 
 def upgrade() -> None:
+    # Ensure the version table exists before the schema batch. On a brand-new DB driven through
+    # the from-base incremental path, the alembic_version row is inserted right after this
+    # migration's upgrade() returns; guarantee the table is present (idempotent — a no-op if
+    # Alembic already created it). The schema dump excludes alembic_version (Alembic owns it).
+    op.execute(
+        "CREATE TABLE IF NOT EXISTS alembic_version ("
+        "version_num VARCHAR(32) NOT NULL, "
+        "CONSTRAINT alembic_version_pkc PRIMARY KEY (version_num))"
+    )
     _run_sql_file("schema.sql")
     _run_sql_file("seed.sql")
 
