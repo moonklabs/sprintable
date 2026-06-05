@@ -255,9 +255,15 @@ async def get_project_scoped_org_id(
     db: AsyncSession = Depends(get_db),
     request: Request = None,
 ) -> uuid.UUID:
-    """project_id query param 또는 X-Project-Id 헤더가 있을 때, 해당 project의 org_id로
-    cross-org 접근을 허용. has_project_access(team_member ∪ grant ∪ owner/admin) 기반 검증.
-    미인가 → 403. project_id가 없으면 get_verified_org_id 동작과 동일."""
+    """project_id query param 으로 project 스코프 org_id를 해소.
+
+    cross-org 접근(project 가 현재 스코프 org 와 다른 org 소속)은 **명시적으로 요청된 경우에만**
+    허용한다: X-Org-Id 헤더가 그 org 를 지정하면 get_verified_org_id 가 base_org_id 를 해당
+    org 로 멤버십 검증해 해소하므로 project_org_id 와 일치한다. 헤더 없이 들어온 cross-org
+    project_id(JWT 스코프와 불일치)는 거부한다(403).
+
+    has_project_access(team_member ∪ grant ∪ owner/admin) 로 project 멤버십 검증.
+    project_id 가 없으면 get_verified_org_id 동작과 동일."""
     base_org_id = await get_verified_org_id(
         auth=auth, x_org_id=x_org_id, x_project_id=None, db=db, request=request
     )
@@ -271,6 +277,17 @@ async def get_project_scoped_org_id(
     project_org_id = result.scalar_one_or_none()
     if not project_org_id:
         return base_org_id
+
+    # c6b82459: cross-org re-entry 차단. project 가 현재 스코프 org(base_org_id)와 다른 org
+    # 소속이면, 그 cross-org 가 X-Org-Id 헤더로 명시 요청된 경우에만 허용한다(헤더 지정 시
+    # base_org_id 가 그 org 로 해소되어 일치). 헤더 없이 들어온 stale project_id(예: 0-project
+    # org 로 switch 직후 옛 프로젝트 쿼리)는 거부하여, FE 가 옛 org 보드로 재진입하지 않고
+    # EmptyState 를 렌더하도록 한다. (#1260 refresh 경로가 못 덮은 switch 직후 즉시경로 edge.)
+    if project_org_id != base_org_id:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="요청한 org 스코프와 다른 org 의 프로젝트에 접근할 수 없습니다",
+        )
 
     # E-MEMBER-SSOT AC2-2: "TeamMember 존재 = 인가" 대신 has_project_access SSOT로 전환.
     # team_member(active) ∪ project_access(granted) ∪ owner/admin org-wide 3-branch이므로
