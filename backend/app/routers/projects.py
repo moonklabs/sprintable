@@ -1,14 +1,16 @@
 import uuid
 
 from fastapi import APIRouter, Depends, HTTPException
-from sqlalchemy import text
+from sqlalchemy import select, text
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.config import settings
 from app.dependencies.auth import AuthContext, get_current_user, get_verified_org_id
 from app.dependencies.database import get_db
+from app.models.project import Project
 from app.repositories.project import ProjectRepository
 from app.schemas.project import ProjectCreate, ProjectResponse, ProjectUpdate
+from app.services.project_auth import accessible_project_ids_in_org
 
 router = APIRouter(prefix="/api/v2/projects", tags=["projects"])
 
@@ -22,10 +24,21 @@ def _get_repo(
 
 @router.get("", response_model=list[ProjectResponse])
 async def list_projects(
-    repo: ProjectRepository = Depends(_get_repo),
+    auth: AuthContext = Depends(get_current_user),
+    org_id: uuid.UUID = Depends(get_verified_org_id),
+    session: AsyncSession = Depends(get_db),
 ) -> list[ProjectResponse]:
-    projects = await repo.list()
-    return [ProjectResponse.model_validate(p) for p in projects]
+    """정책B: 접근 가능한 프로젝트만 반환 — team_member ∪ project_access(granted) ∪ owner/admin org-wide.
+    접근권 없는 멤버는 빈 목록(이전엔 org 전체 노출). owner/admin은 org 전체."""
+    ids = await accessible_project_ids_in_org(session, uuid.UUID(auth.user_id), org_id)
+    if not ids:
+        return []
+    rows = await session.execute(
+        select(Project)
+        .where(Project.id.in_(ids), Project.deleted_at.is_(None))
+        .order_by(Project.created_at.asc())
+    )
+    return [ProjectResponse.model_validate(p) for p in rows.scalars().all()]
 
 
 @router.post("", response_model=ProjectResponse, status_code=201)

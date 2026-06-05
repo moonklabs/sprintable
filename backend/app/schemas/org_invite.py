@@ -9,6 +9,8 @@ from pydantic import BaseModel, ConfigDict
 class CreateOrgInvite(BaseModel):
     email: str
     role: str = "member"
+    # 정책B: 초대 시 부여할 프로젝트 ids(선택). 빈 리스트 = org-only 초대.
+    project_ids: list[uuid.UUID] = []
 
 
 class OrgInviteResponse(BaseModel):
@@ -25,4 +27,5 @@ class OrgInviteResponse(BaseModel):
     created_at: datetime
     email_sent_at: datetime | None = None
     email_error: str | None = None
+    project_ids: list[uuid.UUID] = []
     invite_url: str | None = None

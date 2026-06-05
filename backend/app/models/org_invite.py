@@ -3,7 +3,7 @@ import uuid
 from datetime import datetime
 
 from sqlalchemy import DateTime, ForeignKey, Text, func
-from sqlalchemy.dialects.postgresql import UUID
+from sqlalchemy.dialects.postgresql import JSONB, UUID
 from sqlalchemy.orm import Mapped, mapped_column
 
 from app.core.database import Base
@@ -30,3 +30,6 @@ class OrgInvite(Base):
     )
     email_sent_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     email_error: Mapped[str | None] = mapped_column(Text, nullable=True)
+    # 정책B: 초대 시 선택한 프로젝트 ids(문자열 uuid 배열). accept 시 각 프로젝트에 project_access 부여.
+    # 빈 배열 = org-only 초대(프로젝트 미부여).
+    project_ids: Mapped[list | None] = mapped_column(JSONB, nullable=True, server_default="[]", default=list)

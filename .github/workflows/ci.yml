@@ -67,16 +67,26 @@ jobs:
           test "$(P "SELECT is_nullable FROM information_schema.columns WHERE table_name='project_access' AND column_name='org_member_id'")" = "YES"
           test "$(P "SELECT count(*) FROM workflow_templates")" -ge 1
           test "$(P "SELECT count(*) FROM plan_features")" -ge 1
-          echo "baseline parity OK: team_members=VIEW, org_member_id nullable, seed present"
+          # post-baseline incremental migration applied on a fresh DB (forward-compat): 0097 column
+          test "$(P "SELECT count(*) FROM information_schema.columns WHERE table_name='org_invites' AND column_name='project_ids'")" = "1"
+          # baseline REVISION invariant — the snapshot was captured at 0096; changing this without
+          # regenerating baseline/schema.sql would mis-stamp fresh DBs. Lock it.
+          test "$(cat backend/alembic/baseline/REVISION)" = "0096"
+          echo "baseline parity OK: team_members=VIEW, org_member_id nullable, seed present, 0097 applied, REVISION=0096"
 
-      - name: Verify head revision is 0096
+      - name: Verify fresh DB reached head (baseline + incremental)
         working-directory: backend
         env:
           ALEMBIC_DATABASE_URL: postgresql+psycopg2://sprintable:sprintable@localhost:5432/sprintable_test
-        run: uv run alembic current | grep -E "0096"
+        run: |
+          set -e
+          cur=$(uv run alembic current 2>/dev/null | grep -oE '^[0-9a-z_]+' | head -1)
+          head=$(uv run alembic heads 2>/dev/null | grep -oE '^[0-9a-z_]+' | head -1)
+          echo "current=$cur head=$head"
+          test -n "$cur" && test "$cur" = "$head"  # fresh DB is AT head, not stuck at baseline
 
-      # existing-DB path: a DB already at head (0096) must be a pure no-op — no migration re-runs.
-      # This is exactly the dev case (dev is stamped 0096; the baseline reuses revision 0096).
+      # existing-DB path: a DB already at head must be a pure no-op — no migration re-runs.
+      # (The fresh-DB run above already advanced this DB to head via baseline + incremental.)
       - name: Existing-DB no-op (re-run upgrade head)
         working-directory: backend
         env:
