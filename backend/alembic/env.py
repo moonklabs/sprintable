@@ -55,31 +55,28 @@ def run_migrations_online() -> None:
     connectable = engine_from_config(cfg, prefix="sqlalchemy.", poolclass=pool.NullPool)
     with connectable.connect() as connection:
         insp = inspect(connection)
-        # Fresh OSS DB shortcut (OPT-IN ONLY via SPRINTABLE_OSS_FRESH_INSTALL):
-        # create all tables from the models at once and stamp to head, skipping
-        # the incremental migration chain.
-        #
-        # ⚠️ This is UNSAFE for SaaS/Cloud SQL: the SQLAlchemy models have drifted
-        # from the migration end-state (e.g. team_members is a VIEW created by
-        # migration 0088, project_access.org_member_id NOT NULL was dropped by 0075),
-        # so create_all produces a schema that diverges from the migrated one. A
-        # blank SaaS DB MUST run the full incremental chain. Therefore the shortcut
-        # is gated behind an explicit opt-in flag that ONLY the OSS entrypoint sets;
-        # without it, every DB (including a freshly wiped one) follows the normal
-        # incremental path below. See bootstrap.py / docker-compose.yml.
-        _allow_fresh = os.environ.get("SPRINTABLE_OSS_FRESH_INSTALL", "").strip().lower() in (
-            "1", "true", "yes", "on",
-        )
-        is_fresh = (
-            _allow_fresh
-            and not insp.has_table("alembic_version")
+        # Fresh-install path: an EMPTY database (no alembic_version, no application tables) is
+        # provisioned from the squashed baseline SNAPSHOT (dev's exact 0096 end-state — schema
+        # + global system seed) and then stamped to head. This is the SaaS/Cloud-SQL-correct
+        # provisioning: the snapshot includes the team_members VIEW and the dropped NOT NULL
+        # constraints, which the old create_all-from-models shortcut got wrong (model drift →
+        # the prod onboarding 500). An existing DB (alembic_version present) follows the normal
+        # incremental path below — including dev, which is already at 0096 and thus a no-op.
+        is_empty = (
+            not insp.has_table("alembic_version")
             and not insp.has_table("organizations")
         )
-        if is_fresh:
+        if is_empty:
             from alembic.runtime.migration import MigrationContext as _MigCtx
             from alembic.script import ScriptDirectory
-            Base.metadata.create_all(bind=connection)
+
             script_dir = ScriptDirectory.from_config(config)
+            baseline_dir = os.path.join(script_dir.dir, "baseline")
+            for _fname in ("schema.sql", "seed.sql"):
+                with open(os.path.join(baseline_dir, _fname), "r", encoding="utf-8") as _fh:
+                    _sql = _fh.read()
+                if _sql.strip():
+                    connection.exec_driver_sql(_sql)
             migration_ctx = _MigCtx.configure(connection)
             migration_ctx.stamp(script_dir, "head")
             connection.commit()

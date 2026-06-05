@@ -42,9 +42,8 @@ jobs:
         with:
           version: 'latest'
 
-      # NO SPRINTABLE_OSS_FRESH_INSTALL here on purpose: this exercises the real SaaS/Cloud SQL
-      # path (incremental chain) on an empty DB. After the baseline squash the chain IS
-      # fresh-runnable (the single baseline revision 0096 builds the full schema + global seed).
+      # Empty DB → alembic/env.py provisions from the baseline snapshot (schema + global seed)
+      # and stamps revision 0096. This is the exact path a freshly-wiped prod takes.
       - name: alembic upgrade head (fresh DB → baseline)
         working-directory: backend
         env:
