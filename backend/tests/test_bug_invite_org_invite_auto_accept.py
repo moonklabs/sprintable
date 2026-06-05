@@ -33,12 +33,13 @@ def test_build_app_metadata_handles_org_invite():
 
 
 def test_build_app_metadata_org_invite_auto_accept_returns_org_id():
-    """OrgInvite 자동수락 경로가 org_id를 반환함."""
+    """OrgInvite 자동수락 경로가 org_id 반환 + canonical accept(SSOT)로 위임."""
     from app.routers.auth import _build_app_metadata
     source = inspect.getsource(_build_app_metadata)
     # org_inv.organization_id → 반환 dict의 org_id
     assert "org_inv.organization_id" in source
-    assert "org_inv.status" in source
+    # 05fa365f SSOT: org_member+grant+status를 canonical accept(token)로 위임(인라인 status set 제거)
+    assert "OrgInviteRepository(session).accept(org_inv.token" in source
 
 
 # ─── 동작 검증 ────────────────────────────────────────────────────────────────
@@ -63,39 +64,29 @@ async def test_build_app_metadata_auto_accepts_org_invite():
     mock_org_inv.organization_id = org_id
     mock_org_inv.role = "member"
     mock_org_inv.status = "pending"
+    mock_org_inv.token = "org-inv-token"
     mock_org_inv.expires_at = now + timedelta(days=3)
     mock_org_inv.accepted_at = None
 
     session = AsyncMock()
 
-    # execute call 순서 (last_project_id=None → 첫 번째 경로 skip):
-    # 1. team_member fallback 조회 → None
-    # 2. Invitation lookup → None
-    # 3. OrgInvite lookup → mock_org_inv
-    # 4. pg_insert(OrgMember)
-    no_member = MagicMock()
-    no_member.scalar_one_or_none.return_value = None
-    no_inv = MagicMock()
-    no_inv.scalar_one_or_none.return_value = None
-    org_inv_result = MagicMock()
-    org_inv_result.scalar_one_or_none.return_value = mock_org_inv
-    insert_result = MagicMock()
-
-    session.execute = AsyncMock(side_effect=[
-        no_member,       # 1. team_member fallback
-        no_inv,          # 2. Invitation lookup
-        org_inv_result,  # 3. OrgInvite lookup
-        insert_result,   # 4. pg_insert(OrgMember)
-    ])
+    # execute 순서: 1.team_member fallback→None  2.Invitation lookup→None  3.OrgInvite lookup→mock_org_inv
+    # (이후 org_member+grant+status는 canonical accept로 위임 → patch)
+    no_member = MagicMock(); no_member.scalar_one_or_none.return_value = None
+    no_inv = MagicMock(); no_inv.scalar_one_or_none.return_value = None
+    org_inv_result = MagicMock(); org_inv_result.scalar_one_or_none.return_value = mock_org_inv
+    session.execute = AsyncMock(side_effect=[no_member, no_inv, org_inv_result])
     session.flush = AsyncMock()
 
-    result = await _build_app_metadata(mock_user, session)
+    # 05fa365f SSOT: 자동수락이 canonical accept(token)로 위임됨 — accept이 org_member+project_access
+    # grant+status 처리(자체 테스트 별도). 여기선 위임 호출 + 반환 dict 검증.
+    accept_mock = AsyncMock(return_value={"ok": True, "org_id": str(org_id), "role": "member"})
+    with patch("app.repositories.org_invite.OrgInviteRepository.accept", new=accept_mock):
+        result = await _build_app_metadata(mock_user, session)
 
     assert result.get("org_id") == str(org_id)
     assert result.get("role") == "member"
-    assert mock_org_inv.status == "accepted"
-    assert mock_org_inv.accepted_at is not None
-    session.flush.assert_awaited()
+    accept_mock.assert_awaited_once_with("org-inv-token", user_id, mock_user.email)
 
 
 @pytest.mark.anyio
@@ -143,3 +134,21 @@ async def test_build_app_metadata_skips_org_invite_when_invitation_found():
     assert mock_inv.status == "accepted"
     # OrgInvite 조회는 호출되지 않아야 함 (execute 3회: team_member, invitation, insert)
     assert session.execute.call_count == 3
+
+
+# ─── 05fa365f: signup invite_token 경로도 OrgInvite 위임(grant) ──────────────
+
+@pytest.mark.anyio
+async def test_auto_accept_invitation_delegates_orginvite_token():
+    """signup _auto_accept_invitation: 토큰이 구 Invitation 아니면 OrgInvite canonical accept로 위임
+    (org_member + project_access grant). 이전엔 Invitation 미존재 시 즉시 return → grant 0행."""
+    from app.routers.auth import _auto_accept_invitation
+
+    user = MagicMock(); user.id = uuid.uuid4(); user.email = "invitee@example.com"
+    # Invitation lookup → None (OrgInvite 토큰)
+    no_inv = MagicMock(); no_inv.scalar_one_or_none.return_value = None
+    session = AsyncMock(); session.execute = AsyncMock(return_value=no_inv)
+    accept_mock = AsyncMock(return_value={"ok": True})
+    with patch("app.repositories.org_invite.OrgInviteRepository.accept", new=accept_mock):
+        await _auto_accept_invitation(session, user, "org-inv-token")
+    accept_mock.assert_awaited_once_with("org-inv-token", user.id, user.email)
