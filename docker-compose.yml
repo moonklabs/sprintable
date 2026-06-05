@@ -33,10 +33,11 @@ services:
       JWT_SECRET: ${JWT_SECRET:-change-me-in-production-min-32-chars}
       SECRET_KEY: ${SECRET_KEY:-change-me-in-production-min-32-chars}
       DEBUG: "True"
-      # OSS single-tenant fresh install: opt in to the create_all + stamp-head shortcut
-      # so a brand-new local DB skips the incremental migration chain. NEVER set this on
-      # SaaS/Cloud SQL — the models drift from the migrated schema (see bootstrap.py).
-      SPRINTABLE_OSS_FRESH_INSTALL: "1"
+      # NOTE: a fresh OSS DB now provisions via the squashed baseline migration (revision 0096),
+      # which builds the exact, view-aware schema + global system seed. We deliberately do NOT set
+      # SPRINTABLE_OSS_FRESH_INSTALL anymore — the create_all shortcut builds from the (drifted)
+      # models and would miss the team_members VIEW etc. `bootstrap.py` → `alembic upgrade head`
+      # runs the baseline. The flag remains an explicit opt-in escape hatch only.
       # Agent chat file uploads (POST /api/v2/channel/upload)
       CHANNEL_FILES_DIR: /app/data/channel_files
     volumes:

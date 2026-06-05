@@ -18,7 +18,9 @@ jobs:
 
     services:
       postgres:
-        image: postgres:16
+        # pgvector image: the baseline schema declares `CREATE EXTENSION vector` (embeddings),
+        # which the stock postgres:16 image lacks. Cloud SQL (dev/prod) has pgvector available.
+        image: pgvector/pgvector:pg16
         env:
           POSTGRES_USER: sprintable
           POSTGRES_PASSWORD: sprintable
@@ -40,19 +42,16 @@ jobs:
         with:
           version: 'latest'
 
-      - name: alembic upgrade head (fresh DB, OSS create_all shortcut)
+      # NO SPRINTABLE_OSS_FRESH_INSTALL here on purpose: this exercises the real SaaS/Cloud SQL
+      # path (incremental chain) on an empty DB. After the baseline squash the chain IS
+      # fresh-runnable (the single baseline revision 0096 builds the full schema + global seed).
+      - name: alembic upgrade head (fresh DB → baseline)
         working-directory: backend
         env:
           ALEMBIC_DATABASE_URL: postgresql+psycopg2://sprintable:sprintable@localhost:5432/sprintable_test
           DATABASE_URL: postgresql+asyncpg://sprintable:sprintable@localhost:5432/sprintable_test
           JWT_SECRET: ci-test-secret-at-least-32-chars-long
           SECRET_KEY: ci-test-secret-at-least-32-chars-long
-          # This job validates the OSS single-tenant fresh-install path, which uses the
-          # create_all + stamp-head shortcut. SaaS/Cloud SQL never sets this flag (it runs
-          # the incremental chain). NOTE: the incremental chain is NOT yet fresh-runnable
-          # base->head (migration 0004 references team_members before it exists) — tracked
-          # as a separate chain-repair effort. See alembic/env.py.
-          SPRINTABLE_OSS_FRESH_INSTALL: "1"
         run: uv run alembic upgrade head
 
       - name: Verify tables created
@@ -60,6 +59,39 @@ jobs:
           PGPASSWORD=sprintable psql -h localhost -U sprintable -d sprintable_test -c \
             "SELECT count(*) FROM information_schema.tables WHERE table_schema='public' AND table_type='BASE TABLE';" \
             | grep -E "^\s+[0-9]+"
+
+      - name: Verify baseline parity (view + nullable + seed)
+        run: |
+          set -e
+          P() { PGPASSWORD=sprintable psql -h localhost -U sprintable -d sprintable_test -tA -c "$1"; }
+          test "$(P "SELECT table_type FROM information_schema.tables WHERE table_name='team_members'")" = "VIEW"
+          test "$(P "SELECT is_nullable FROM information_schema.columns WHERE table_name='project_access' AND column_name='org_member_id'")" = "YES"
+          test "$(P "SELECT count(*) FROM workflow_templates")" -ge 1
+          test "$(P "SELECT count(*) FROM plan_features")" -ge 1
+          echo "baseline parity OK: team_members=VIEW, org_member_id nullable, seed present"
+
+      - name: Verify head revision is 0096
+        working-directory: backend
+        env:
+          ALEMBIC_DATABASE_URL: postgresql+psycopg2://sprintable:sprintable@localhost:5432/sprintable_test
+        run: uv run alembic current | grep -E "0096"
+
+      # existing-DB path: a DB already at head (0096) must be a pure no-op — no migration re-runs.
+      # This is exactly the dev case (dev is stamped 0096; the baseline reuses revision 0096).
+      - name: Existing-DB no-op (re-run upgrade head)
+        working-directory: backend
+        env:
+          ALEMBIC_DATABASE_URL: postgresql+psycopg2://sprintable:sprintable@localhost:5432/sprintable_test
+          DATABASE_URL: postgresql+asyncpg://sprintable:sprintable@localhost:5432/sprintable_test
+          JWT_SECRET: ci-test-secret-at-least-32-chars-long
+          SECRET_KEY: ci-test-secret-at-least-32-chars-long
+        run: |
+          set -e
+          out=$(uv run alembic upgrade head 2>&1); echo "$out"
+          if echo "$out" | grep -q "Running upgrade"; then
+            echo "FAIL: migrations re-ran on a DB already at head (existing-DB path not a no-op)"; exit 1
+          fi
+          echo "OK: existing-DB upgrade head is a no-op"
 
       - name: member-ssot resolver parity (real-DB legacy vs anchor 0-diff)
         working-directory: backend
