@@ -72,11 +72,13 @@ async def create_doc(
     auth: AuthContext = Depends(get_current_user),
     org_id: uuid.UUID = Depends(get_verified_org_id),
 ) -> DocResponse:
-    enforce_body_context(
+    await enforce_body_context(
         auth_org_id=org_id,
         body_org_id=body.org_id,
         body_project_id=body.project_id,
         auth_project_id=auth.claims.get("app_metadata", {}).get("project_id"),
+        db=session,
+        user_id=uuid.UUID(auth.user_id),
     )
     # AC3-2d(2): created_by canonical 정규화(레거시 휴먼 tm.id→members.id). (A) write.
     created_by = (await canonicalize_member_id(body.created_by, session)) if body.created_by else None
