@@ -80,10 +80,16 @@ def run_migrations_online() -> None:
             # pg_dump preambles can leave search_path empty; restore it so stamp() can create
             # the alembic_version table without an explicit schema qualifier.
             connection.exec_driver_sql('SET search_path TO "$user", public')
+            # Stamp the BASELINE revision (the snapshot's captured version, baseline/REVISION),
+            # NOT "head" — so any migrations added AFTER the snapshot (0097+) still run
+            # incrementally below. Stamping head would mark them applied while the snapshot
+            # predates them (missing columns). Then fall through to run_migrations.
+            with open(os.path.join(baseline_dir, "REVISION"), "r", encoding="utf-8") as _rf:
+                _baseline_rev = _rf.read().strip()
             migration_ctx = _MigCtx.configure(connection)
-            migration_ctx.stamp(script_dir, "head")
+            migration_ctx.stamp(script_dir, _baseline_rev)
             connection.commit()
-            return
+            # NOTE: no return — continue to the incremental path to apply post-baseline migrations.
 
         context.configure(connection=connection, target_metadata=target_metadata)
         with context.begin_transaction():

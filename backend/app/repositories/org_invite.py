@@ -62,8 +62,12 @@ class OrgInviteRepository:
         email: str,
         role: str,
         created_by: uuid.UUID,
+        project_ids: list[uuid.UUID] | None = None,
     ) -> OrgInvite | None:
-        """초대 생성. pending 중복(org+email) 시 None 반환 (revoke 후 재초대 허용)."""
+        """초대 생성. pending 중복(org+email) 시 None 반환 (revoke 후 재초대 허용).
+
+        project_ids: 정책B — accept 시 부여할 프로젝트(선택). JSONB에 str uuid 배열로 저장.
+        """
         if await self.has_pending_invite(org_id=org_id, email=email):
             return None
         now = datetime.now(timezone.utc)
@@ -73,6 +77,7 @@ class OrgInviteRepository:
             role=role,
             expires_at=now + timedelta(days=_INVITE_EXPIRE_DAYS),
             created_by=created_by,
+            project_ids=[str(p) for p in (project_ids or [])],
         )
         self.session.add(invite)
         try:
@@ -183,6 +188,8 @@ class OrgInviteRepository:
                     .on_conflict_do_nothing(constraint="uq_org_members_org_user")
                 )
                 await self.session.flush()
+                # 정책B: 선택 프로젝트 project_access도 멱등 보장(재수락 시 누락 복구)
+                await self._grant_invite_project_access(invite, user_id)
                 return {
                     "ok": True,
                     "org_id": str(invite.organization_id),
@@ -207,12 +214,71 @@ class OrgInviteRepository:
             )
             .on_conflict_do_nothing(constraint="uq_org_members_org_user")
         )
+        await self.session.flush()
+
+        # 정책B: 초대 시 선택한 프로젝트에 project_access(granted) 부여
+        await self._grant_invite_project_access(invite, user_id)
 
         invite.status = "accepted"
         invite.accepted_at = datetime.now(timezone.utc)
         await self.session.flush()
 
         return {"ok": True, "org_id": str(invite.organization_id), "role": invite.role}
+
+    async def _grant_invite_project_access(self, invite: OrgInvite, user_id: uuid.UUID) -> None:
+        """초대 시 선택한 프로젝트(invite.project_ids)에 수락 멤버의 project_access(granted) 부여.
+
+        cross-org grant 방지: invite.organization_id 소속 프로젝트만 대상(검증). 멱등(on_conflict).
+        """
+        pids_raw = invite.project_ids or []
+        if not pids_raw:
+            return
+        from app.models.project import Project
+        from app.models.project_access import ProjectAccess
+
+        # 수락 멤버의 org_member.id 해소
+        om_id = (
+            await self.session.execute(
+                select(OrgMember.id).where(
+                    OrgMember.org_id == invite.organization_id,
+                    OrgMember.user_id == user_id,
+                    OrgMember.deleted_at.is_(None),
+                ).limit(1)
+            )
+        ).scalar_one_or_none()
+        if om_id is None:
+            return
+
+        # 문자열 uuid 파싱 + invite org 소속 프로젝트만 (cross-org 방지)
+        wanted: list[uuid.UUID] = []
+        for p in pids_raw:
+            try:
+                wanted.append(uuid.UUID(str(p)))
+            except (ValueError, TypeError):
+                continue
+        if not wanted:
+            return
+        valid_rows = await self.session.execute(
+            select(Project.id).where(
+                Project.id.in_(wanted),
+                Project.org_id == invite.organization_id,
+                Project.deleted_at.is_(None),
+            )
+        )
+        for (pid,) in valid_rows.all():
+            await self.session.execute(
+                pg_insert(ProjectAccess.__table__)
+                .values(
+                    id=uuid.uuid4(),
+                    project_id=pid,
+                    org_member_id=om_id,
+                    permission="granted",
+                    role=invite.role,
+                    access_source="direct",
+                )
+                .on_conflict_do_nothing(constraint="uq_project_access_project_member")
+            )
+        await self.session.flush()
 
     async def revoke(self, invite_id: uuid.UUID, org_id: uuid.UUID) -> OrgInvite | None:
         result = await self.session.execute(

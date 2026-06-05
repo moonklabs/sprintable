@@ -59,11 +59,33 @@ async def test_list_projects_200():
         mock_result.scalars.return_value.all.return_value = [_mock_project()]
         session.execute = AsyncMock(return_value=mock_result)
 
-        async with client as c:
-            resp = await c.get("/api/v2/projects")
+        # 정책B: list_projects가 accessible_project_ids_in_org로 필터 → 접근 가능 id 주입
+        with patch(
+            "app.routers.projects.accessible_project_ids_in_org",
+            new=AsyncMock(return_value=[PROJECT_ID]),
+        ):
+            async with client as c:
+                resp = await c.get("/api/v2/projects")
 
         assert resp.status_code == 200
         assert len(resp.json()) == 1
+    finally:
+        app.dependency_overrides.clear()
+
+
+@pytest.mark.anyio
+async def test_list_projects_empty_when_no_access():
+    """정책B: 접근 가능 프로젝트 0개면 빈 목록(과노출 차단)."""
+    client, session, app = await _client()
+    try:
+        with patch(
+            "app.routers.projects.accessible_project_ids_in_org",
+            new=AsyncMock(return_value=[]),
+        ):
+            async with client as c:
+                resp = await c.get("/api/v2/projects")
+        assert resp.status_code == 200
+        assert resp.json() == []
     finally:
         app.dependency_overrides.clear()
 
