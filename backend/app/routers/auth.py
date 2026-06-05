@@ -293,8 +293,16 @@ async def _build_app_metadata(
     user: User, session: AsyncSession, org_id: uuid.UUID | None = None
 ) -> dict:
     """JWT app_metadata 구성. org_id 지정 시(switch-org 등) 프로젝트 해소를 **그 org로 스코프**해
-    cross-org 옛 프로젝트 주입을 차단한다(0746 leak fix). org_id None이면 기존 login 동작."""
+    cross-org 옛 프로젝트 주입을 차단한다(0746 leak fix).
+
+    org_id 미지정(refresh/login)이면 **user.last_org_id**(현재 org source-of-truth)로 스코프 —
+    refresh가 org 컨텍스트가 없어 0-project org 전환 후 cross-org 옛 프로젝트를 재주입하던 leak 차단.
+    last_org_id도 없으면(최초 로그인) 기존 cross-org fallback으로 home org 결정."""
     from app.models.team import TeamMember
+
+    # org_id 미지정 시 현재 org(last_org_id)로 스코프 — refresh/login이 현재 org 유지(0746 후속)
+    if org_id is None:
+        org_id = getattr(user, "last_org_id", None)
 
     # 1. last_project_id 우선 → 해당 project의 active team_member (org_id 지정 시 그 org일 때만)
     member = None
@@ -325,6 +333,8 @@ async def _build_app_metadata(
         pid = await first_accessible_project_id(session, user.id, org_id)
         if getattr(user, "last_project_id", None) != pid:
             user.last_project_id = pid  # in-org project or None — cross-org 절대 금지
+        if getattr(user, "last_org_id", None) != org_id:
+            user.last_org_id = org_id  # 현재 org 추적 — 다음 refresh가 이 org 유지
         om_role = (
             await session.execute(
                 select(OrgMember.role).where(
@@ -426,6 +436,9 @@ async def _build_app_metadata(
     # login 시 last_project_id 자동 갱신 — 다음 로그인부터 last_project_id 우선 경로 사용
     if getattr(user, "last_project_id", None) != member.project_id:
         user.last_project_id = member.project_id
+    # 현재 org 추적(0746 후속) — 다음 refresh가 org_id 없이도 이 org로 스코프
+    if getattr(user, "last_org_id", None) != member.org_id:
+        user.last_org_id = member.org_id
 
     # S-MBR-03: org owner/admin → project role 상속 (AC1/AC2)
     # org_members.role이 team_members.role보다 높으면 org role을 effective role로 사용.
@@ -1206,6 +1219,9 @@ async def switch_organization(
 
     # 대상 org의 접근 가능한 첫 project 해소 — team_member > grant > org 첫 project (grant 유저 포함)
     user.last_project_id = await first_accessible_project_id(session, user.id, body.org_id)
+    # 0746 후속: 현재 org 영속 → 이후 refresh(org 컨텍스트 없음)가 이 org로 스코프해 0-project org서도
+    # cross-org 옛 프로젝트 재주입 0 (last_project_id=None이어도 org는 유지).
+    user.last_org_id = body.org_id
 
     # 기존 refresh token 무효화
     await session.execute(
