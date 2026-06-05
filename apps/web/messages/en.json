@@ -88,6 +88,9 @@
   },
   "dashboard": {
     "title": "Dashboard",
+    "noProjectTitle": "No projects in this organization yet",
+    "noProjectDescription": "Create a project to start using boards and sprints.",
+    "noProjectAction": "Create a project",
     "projects": "Projects",
     "activeSprints": "Active Sprints",
     "viewAll": "View all →",

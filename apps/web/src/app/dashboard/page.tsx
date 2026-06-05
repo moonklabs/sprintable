@@ -33,6 +33,27 @@ export default async function DashboardPage() {
   const projectId = me.project_id;
   const teamMemberId = me.id;
 
+  // 0746: 전환한 org에 접근 가능한 프로젝트가 없으면(0-프로젝트 org) 옛 org 데이터 잔존/무한로딩 대신
+  // 빈상태를 일급으로 보여준다. (switch-org가 stale current-project 쿠키를 clear → projectId 없음)
+  if (!projectId) {
+    return (
+      <div className="min-h-full p-4 lg:p-6">
+        <div className="mx-auto max-w-7xl space-y-5">
+          <TopBarSlot title={<h1 className="text-sm font-medium">{t('title')}</h1>} />
+          <EmptyState
+            title={t('noProjectTitle')}
+            description={t('noProjectDescription')}
+            action={
+              <Button asChild size="sm">
+                <Link href={`/onboarding?step=project&orgId=${me.org_id}`}>{t('noProjectAction')}</Link>
+              </Button>
+            }
+          />
+        </div>
+      </div>
+    );
+  }
+
   const agentsData = await fastapiCall<Array<{ id: string; name: string | null; is_active: boolean; type: string }>>(
     'GET', '/api/v2/members', session.access_token,
     { query: { project_id: projectId, member_type: 'agent' } },

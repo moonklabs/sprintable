@@ -88,6 +88,9 @@
   },
   "dashboard": {
     "title": "대시보드",
+    "noProjectTitle": "이 조직에는 아직 프로젝트가 없어요",
+    "noProjectDescription": "새 프로젝트를 만들면 보드와 스프린트를 시작할 수 있어요.",
+    "noProjectAction": "새 프로젝트 만들기",
     "projects": "프로젝트",
     "activeSprints": "활성 스프린트",
     "viewAll": "전체 보기 →",
