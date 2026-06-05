@@ -46,10 +46,12 @@ async def create_task(
     auth: AuthContext = Depends(get_current_user),
     org_id: uuid.UUID = Depends(get_verified_org_id),
 ) -> TaskResponse:
-    enforce_body_context(
+    await enforce_body_context(
         auth_org_id=org_id,
         body_org_id=body.org_id,
         auth_project_id=auth.claims.get("app_metadata", {}).get("project_id"),
+        db=session,
+        user_id=uuid.UUID(auth.user_id),
     )
     repo = TaskRepository(session, org_id)
     task = await repo.create(

@@ -346,16 +346,36 @@ def require_project_access(
     return project_id
 
 
-def enforce_body_context(
+async def enforce_body_context(
     auth_org_id: uuid.UUID,
     body_org_id: uuid.UUID | None = None,
     body_project_id: uuid.UUID | None = None,
     auth_project_id: str | None = None,
+    *,
+    db: AsyncSession | None = None,
+    user_id: uuid.UUID | None = None,
 ) -> None:
-    """AC6/AC7: body의 org_id/project_id가 auth context와 불일치 시 403."""
+    """AC6/AC7: body의 org_id/project_id가 auth context와 일치하는지 검증.
+
+    org_id: auth org와 불일치 시 403.
+    project_id:
+      - db+user_id 전달 시(create 라우터): **has_project_access SSOT 게이트** — JWT project_id 핀과
+        무관하게 접근권(team_member ∪ grant ∪ owner/admin org-wide)만 있으면 통과. 740e3b7e:
+        grant/admin이 JWT에 안 핀된(그러나 접근 가능한) 프로젝트서 epic/task/meeting/story/doc 생성 시
+        나던 403 제거. 접근권 없으면 403 유지.
+      - db 미전달 시(레거시/단위테스트): 기존 JWT project_id 정확일치 검증으로 폴백.
+    """
     if body_org_id is not None and body_org_id != auth_org_id:
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="body.org_id가 auth context와 불일치인")
-    if auth_project_id and body_project_id is not None and str(body_project_id) != str(auth_project_id):
+    if body_project_id is None:
+        return
+    if db is not None and user_id is not None:
+        from app.services.project_auth import has_project_access
+        if not await has_project_access(db, user_id, body_project_id, auth_org_id):
+            raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="해당 프로젝트 접근권이 없는")
+        return
+    # 레거시 폴백(db 미전달): JWT project_id 핀 정확일치
+    if auth_project_id and str(body_project_id) != str(auth_project_id):
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="body.project_id가 auth context와 불일치인")
 
 
