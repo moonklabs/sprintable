@@ -147,6 +147,27 @@ async def _resolve_member(
     return await resolve_member(auth, org_id, db, project_id=project_id)
 
 
+async def _effective_org_role(
+    auth: AuthContext, org_id: uuid.UUID, db: AsyncSession, sender: "ResolvedMember | TeamMember"
+) -> str:
+    """sender.role에 org owner/admin 상속(S-MBR-03). team_members 뷰는 **project role만** 주므로
+    org owner/admin이 project-member로 나오는 갭(#1223 agent-view 게이트 ↔ 멤버-SSOT 뷰)을 보정 —
+    /me effective-role과 일관(버그: org owner/admin이 agent-view 403). 에이전트(API키)는 org role
+    무관이라 sender.role 그대로."""
+    if sender.role in ("owner", "admin"):
+        return sender.role
+    if bool(auth.claims.get("app_metadata", {}).get("api_key_id")):
+        return sender.role
+    om_role = (await db.execute(
+        select(OrgMember.role).where(
+            OrgMember.org_id == org_id,
+            OrgMember.user_id == uuid.UUID(auth.user_id),
+            OrgMember.deleted_at.is_(None),
+        ).limit(1)
+    )).scalar_one_or_none()
+    return om_role if om_role in ("owner", "admin") else sender.role
+
+
 def _msg_payload(msg: ConversationMessage, sender: "ResolvedMember | TeamMember | None") -> dict:
     return {
         "id": str(msg.id),
@@ -480,8 +501,9 @@ async def list_conversations(
     """GET /api/v2/conversations — 최근 메시지 미리보기 + 참여 대화 목록."""
     sender = await _resolve_member(auth, org_id, db, project_id=project_id)
 
-    # AC5: include_agent_conversations는 owner/admin만 허용
-    if include_agent_conversations and sender.role not in ("owner", "admin"):
+    # AC5: include_agent_conversations는 owner/admin만 허용 (org-effective role — project team_member
+    # role이 낮아도 org owner/admin이면 상속·#1223↔SSOT뷰 갭 보정)
+    if include_agent_conversations and await _effective_org_role(auth, org_id, db, sender) not in ("owner", "admin"):
         raise HTTPException(status_code=403, detail="Only owner/admin can view agent conversations.")
 
     conv_ids_result = await db.execute(
@@ -600,7 +622,8 @@ async def list_messages(
     # owner/admin: org-level 조회 (project 소속 무관 접근), member: project-level 유지
     sender = await _resolve_member(auth, org_id, db, project_id=None)
 
-    if sender.role not in ("owner", "admin"):
+    # org-effective role(S-MBR-03·#1223↔SSOT뷰 갭 보정) — project role 낮아도 org owner/admin 상속
+    if await _effective_org_role(auth, org_id, db, sender) not in ("owner", "admin"):
         # project isolation 보존 — project 소속 member 재확인
         sender = await _resolve_member(auth, org_id, db, project_id=conv_project_id)
         participant = (await db.execute(
