@@ -54,6 +54,12 @@ const nextConfig: NextConfig = {
     return [
       { source: '/memos', destination: '/inbox', permanent: true },
       { source: '/memos/:path*', destination: '/inbox', permanent: true },
+      // 단일 도메인 위생(45a5a006): 호스티드 app.sprintable.ai의 공개 LLM 문서는 랜딩(canonical)으로 301.
+      // host 스코프로 한정해 self-hosted/dev 인스턴스는 영향받지 않고 자체 public 파일을 계속 서빙한다
+      // (onboarding-form 등이 getAppOrigin()/llms.txt를 참조하므로 파일 자체는 유지). onboarding-guide.txt는
+      // app(한)↔랜딩(영) 내용 상이로 별도 콘텐츠 스토리에서 처리한다.
+      { source: '/llms.txt', destination: 'https://sprintable.ai/llms.txt', statusCode: 301, has: [{ type: 'host', value: 'app.sprintable.ai' }] },
+      { source: '/llms-full.txt', destination: 'https://sprintable.ai/llms-full.txt', statusCode: 301, has: [{ type: 'host', value: 'app.sprintable.ai' }] },
     ];
   },
   async rewrites() {
