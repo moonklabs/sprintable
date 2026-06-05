@@ -42,8 +42,15 @@ export default async function AuthenticatedLayout({
   // (org-less가 깨진 페이지 도달 자체 차단). /onboarding은 (authenticated) 밖이라 루프 없음.
   if (meRes.status === 404) redirect('/onboarding');
 
-  const me = meRes.ok ? (await meRes.json() as MemberContext | null) : null;
-  if (meRes.ok && !me?.org_id) redirect('/onboarding');
+  // 0746aab9: /me가 403(org 전환 후 project 접근/인가 실패) 등 비-2xx면, 조용히 null 컨텍스트로
+  // 렌더하지 않고 에러 경계(error.tsx)로 넘긴다. 기존 `me = meRes.ok ? ... : null`이 403/500을
+  // 삼켜 DashboardShell이 org/project 컨텍스트 없이 깨진 화면을 무에러로 렌더하던 footgun 제거.
+  if (!meRes.ok) {
+    throw new Error(`Failed to load account context (HTTP ${meRes.status})`);
+  }
+
+  const me = (await meRes.json()) as MemberContext | null;
+  if (!me?.org_id) redirect('/onboarding');
   const memberships: { projectId: string; projectName: string }[] =
     membershipsRes?.ok ? ((await membershipsRes.json()) as { projectId: string; projectName: string }[]) : [];
   const projectMemberships = memberships.length > 0
