@@ -124,10 +124,13 @@ export function UnifiedSwitcher({
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ org_id: nextOrgId }),
       });
-      if (res.ok) {
+      // 0746aab9: 200이어도 실제 전환 성공(data.ok) 여부를 확인하고 refresh — 단순 res.ok만 보면
+      // 200-but-실패 케이스가 성공으로 오인돼 전환 깨진 화면이 무에러로 뜬다.
+      const json = await res.json().catch(() => null) as { data?: { ok?: boolean } } | null;
+      if (res.ok && json?.data?.ok) {
         router.refresh();
       } else {
-        setLocalOrgId(prevOrgId); // API 실패 시 롤백
+        setLocalOrgId(prevOrgId); // 실패(비-2xx 또는 data.ok 아님) 시 롤백
       }
     } finally {
       setPending(false);
