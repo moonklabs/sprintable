@@ -773,17 +773,8 @@ export function EpicsClient({ projectId, orgId }: EpicsClientProps) {
     await fetchEpics(epicsNextCursor);
   }, [epicsHasMore, epicsNextCursor, epicsLoadingMore, fetchEpics]);
 
-  const _fetchEpicDetail = useCallback(async (id: string) => {
-    try {
-      const res = await fetch(`/api/epics/${id}`);
-      if (!res.ok) throw new Error('Failed to fetch epic');
-      const { data } = await res.json() as { data: Epic };
-      setSelectedEpic(data);
-      setEpics((prev) => prev.map((e) => (e.id === id ? { ...e, stories: data.stories } : e)));
-    } catch {
-      // noop
-    }
-  }, []);
+  // (silent-catch sweep) `_fetchEpicDetail`(dead·호출처 0·handleSelectEpic이 /epics/[id]
+  // 딥링크로 대체)는 제거했다 — 실행되지 않던 silent catch였으므로 toast가 아니라 dead code 삭제.
 
   const handleSelectEpic = useCallback((epic: Epic) => {
     // AC5: 모든 디바이스에서 /epics/[id] 딥링크로 이동

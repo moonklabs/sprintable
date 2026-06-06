@@ -492,6 +492,7 @@
     "notification_channel_email": "Email",
     "notification_coming_soon": "Coming soon",
     "notificationSaveError": "Failed to save notification settings.",
+    "billingPortalError": "Couldn't open the billing portal. Please try again shortly.",
     "dangerZone": "Danger Zone",
     "deleteAccount": "Delete Account",
     "deleteAccountDesc": "After deleting your account, all personal data will be anonymized after a 30-day grace period. Your content will be preserved.",

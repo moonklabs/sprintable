@@ -472,21 +472,21 @@ export default function SettingsPage() {
       }
     }
 
-    void loadContext().catch(() => {});
+    void loadContext().catch((err) => { console.error('설정 컨텍스트 로드 실패', err); });
 
-    void refreshProjects().catch(() => {});
+    void refreshProjects().catch((err) => { console.error('프로젝트 목록 로드 실패', err); });
 
-    void refreshInvitations().catch(() => {});
+    void refreshInvitations().catch((err) => { console.error('초대 목록 로드 실패', err); });
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [currentProjectId, orgId]);
 
   useEffect(() => {
     if (!memberProjectId) return;
-    void refreshMemberData(memberProjectId).catch(() => {});
+    void refreshMemberData(memberProjectId).catch((err) => { console.error('멤버 데이터 로드 실패', err); });
   }, [memberProjectId]);
 
   useEffect(() => {
-    void refreshOrgAgents().catch(() => {});
+    void refreshOrgAgents().catch((err) => { console.error('조직 에이전트 로드 실패', err); });
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
@@ -648,7 +648,7 @@ export default function SettingsPage() {
     setNewProjectDescription('');
     setProjectActionMessage({ type: 'success', text: t('projectCreated', { name: project.name }) });
 
-    await refreshProjects().catch(() => {});
+    await refreshProjects().catch((err) => { console.error('프로젝트 생성 후 목록 갱신 실패', err); });
     router.refresh();
     setCreatingProject(false);
   };
@@ -1494,9 +1494,13 @@ export default function SettingsPage() {
                         if (res.ok) {
                           const json = await res.json() as { data: { portalUrl: string } };
                           window.open(json.data.portalUrl, '_blank');
+                        } else {
+                          addToast({ type: 'error', title: t('billingPortalError') });
                         }
-                      } catch {
-                        // noop
+                      } catch (err) {
+                        // 사용자 액션(결제 포털)인데 조용히 실패하면 버튼이 무반응처럼 보인다 — 안내.
+                        console.error('결제 포털 열기 실패', err);
+                        addToast({ type: 'error', title: t('billingPortalError') });
                       }
                     }}
                   >
