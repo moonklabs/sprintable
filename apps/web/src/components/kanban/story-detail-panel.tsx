@@ -9,6 +9,8 @@ import { AlertTriangle, GitFork, Loader2, Paperclip, Plus, Tag, Trash2, X } from
 import type { KanbanStory, KanbanMember, DependencyEdge } from './types';
 import type { SendAttachment } from '@/hooks/use-chat-sse';
 import { getFileIcon } from '@/lib/file-icon';
+import { AttachmentImage } from '@/components/chat/attachment-image';
+import { AttachmentFile } from '@/components/chat/attachment-file';
 import { LabelChip, LABEL_PRESET_COLORS, type LabelData } from '@/components/ui/label-chip';
 import { DependencyGraph } from './dependency-graph';
 import { OutcomeIntentFields, type OutcomeIntentValue } from '@/components/outcome/outcome-intent-fields';
@@ -853,25 +855,17 @@ export function StoryDetailPanel({ story, tasks, nextTasksCursor = null, loading
                   {story.attachments.map((att, i) => {
                     const isImage = att.content_type?.startsWith('image/');
                     const Icon = getFileIcon(att.content_type);
+                    const label = att.name ?? '첨부파일';
                     return (
                       <div key={att.url ?? i} className="group relative">
-                        {isImage && att.url ? (
-                          <a href={att.url} target="_blank" rel="noopener noreferrer" className="block">
-                            {/* eslint-disable-next-line @next/next/no-img-element */}
-                            <img src={att.url} alt={att.name} className="max-h-40 max-w-[240px] rounded object-contain" />
-                          </a>
-                        ) : (
-                          <a
-                            href={att.url}
-                            target="_blank"
-                            rel="noopener noreferrer"
-                            download
-                            className="flex items-center gap-2 rounded-lg border border-border bg-background px-3 py-2 text-xs hover:bg-muted/50"
-                          >
-                            <Icon className="size-4 flex-shrink-0 text-muted-foreground" />
-                            <span className="truncate text-foreground">{att.name}</span>
-                          </a>
-                        )}
+                        {/* a54ddc16 B1: 보드 첨부도 auth-gated 서명 라우트 경유(chat과 동일 컴포넌트·3상태). */}
+                        {att.url ? (
+                          isImage ? (
+                            <AttachmentImage storedUrl={att.url} storyId={story.id} alt={label} />
+                          ) : (
+                            <AttachmentFile storedUrl={att.url} storyId={story.id} label={label} Icon={Icon} />
+                          )
+                        ) : null}
                         <button
                           type="button"
                           onClick={() => void handleRemoveAttachment(att.url)}
