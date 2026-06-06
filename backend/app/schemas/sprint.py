@@ -2,8 +2,24 @@ import uuid
 from datetime import date, datetime
 from typing import Any
 
-from pydantic import BaseModel, ConfigDict, field_validator
+from pydantic import BaseModel, ConfigDict, field_validator, model_validator
 from app.schemas.story import _validate_metric_definition
+
+
+def compute_sprint_duration(
+    start_date: date | None,
+    end_date: date | None,
+    fallback: int | None = None,
+) -> int | None:
+    """8a2bbda2: 스프린트 기간(일)은 start_date/end_date 가 단일진실.
+
+    `(end_date - start_date).days + 1`(inclusive — 6/1~6/5 = 5d·기본 14d = 6/1~6/14 와 정합).
+    양 날짜가 모두 있고 end >= start 일 때만 산출, 아니면 fallback(stored duration). stored
+    `duration` 컬럼은 날짜와 무관(default 14)하게 오염될 수 있어 display/analytics 는 이 계산을 쓴다.
+    """
+    if start_date is not None and end_date is not None and end_date >= start_date:
+        return (end_date - start_date).days + 1
+    return fallback
 
 
 class SprintBase(BaseModel):
@@ -69,6 +85,17 @@ class SprintResponse(SprintBase):
     outcome_result: dict[str, Any] | None = None
     created_at: datetime
     updated_at: datetime
+
+    @model_validator(mode="after")
+    def _derive_duration_from_dates(self) -> "SprintResponse":
+        """8a2bbda2: 날짜가 있으면 duration 을 날짜에서 파생(stored 14 오염 무시).
+
+        기존 스프린트(stored=14)도 API 응답이 날짜 기준 정합값을 반환 → 백필 불요.
+        """
+        derived = compute_sprint_duration(self.start_date, self.end_date, self.duration)
+        if derived is not None:
+            self.duration = derived
+        return self
 
 
 class KickoffBody(BaseModel):

@@ -283,7 +283,9 @@ class AnalyticsRepository:
         done_pts = sum((r[0] or 0) for r in stories if r[1] == "done")
         remaining = total_pts - done_pts
 
-        duration = sprint.duration or 14
+        # 8a2bbda2: stored duration(default 14·날짜 무관) 대신 날짜에서 산출(dates 단일진실)
+        from app.schemas.sprint import compute_sprint_duration
+        duration = compute_sprint_duration(sprint.start_date, sprint.end_date, sprint.duration) or 14
         start_date = sprint.start_date
 
         ideal_line = []
@@ -306,7 +308,8 @@ class AnalyticsRepository:
             "sprint": {
                 "id": sprint.id, "title": sprint.title, "status": sprint.status,
                 "start_date": sprint.start_date, "end_date": sprint.end_date,
-                "duration": sprint.duration, "velocity": sprint.velocity,
+                "duration": compute_sprint_duration(sprint.start_date, sprint.end_date, sprint.duration),
+                "velocity": sprint.velocity,
             },
             "total_points": total_pts,
             "done_points": done_pts,
