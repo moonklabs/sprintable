@@ -156,7 +156,7 @@ export function DocsShellClient({ projectId }: DocsShellClientProps) {
         .then((data: { data?: Array<{ id: string; title: string; slug: string; snippet?: string }> } | null) => {
           setSearchResults(data?.data ?? []);
         })
-        .catch(() => { setSearchResults([]); })
+        .catch((err) => { console.error('문서 검색 실패', err); setSearchResults([]); })
         .finally(() => { setSearchLoading(false); });
     }, 300);
 

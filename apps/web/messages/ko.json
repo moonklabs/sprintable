@@ -492,6 +492,7 @@
     "notification_channel_email": "이메일",
     "notification_coming_soon": "준비 중",
     "notificationSaveError": "알림 설정 저장에 실패했습니다.",
+    "billingPortalError": "결제 포털을 열지 못했습니다. 잠시 후 다시 시도해 주세요.",
     "dangerZone": "위험 구역",
     "deleteAccount": "계정 삭제",
     "deleteAccountDesc": "계정을 삭제하면 30일 유예 기간 후 모든 개인정보가 익명화됩니다. 작성한 콘텐츠는 유지됩니다.",

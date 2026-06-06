@@ -107,7 +107,7 @@ export function ActivityLogView({ projectId }: ActivityLogViewProps) {
       .then((data: { data?: TeamMember[] } | null) => {
         if (data?.data) setMembers(data.data);
       })
-      .catch(() => {});
+      .catch((err) => { console.error('활동 로그용 팀원 목록 로드 실패', err); });
   }, [projectId]);
 
   const buildParams = useCallback(
