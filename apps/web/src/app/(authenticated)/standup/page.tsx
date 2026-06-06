@@ -2,6 +2,7 @@
 
 import { useEffect, useMemo, useState } from 'react';
 import { useTranslations } from 'next-intl';
+import { Alert, AlertDescription } from '@/components/ui/alert';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { EmptyState } from '@/components/ui/empty-state';
@@ -102,6 +103,8 @@ export default function StandupPage() {
   const [entries, setEntries] = useState<StandupEntryRow[]>([]);
   const [members, setMembers] = useState<StandupMemberRow[]>([]);
   const [feedback, setFeedback] = useState<StandupFeedbackRow[]>([]);
+  // S3(51447ca0): Missing = org 기준(get_missing projection) — 조직 1회 미작성 멤버
+  const [missingMembers, setMissingMembers] = useState<{ id: string; name: string }[]>([]);
   const [activeSprint, setActiveSprint] = useState<StandupSprintSummary | null>(null);
   const [stories, setStories] = useState<StandupStorySummary[]>([]);
   const [done, setDone] = useState('');
@@ -179,6 +182,7 @@ export default function StandupPage() {
           setEntries([]);
           setMembers([]);
           setFeedback([]);
+          setMissingMembers([]);
           setActiveSprint(null);
           setStories([]);
           setLoadError(null);
@@ -195,11 +199,12 @@ export default function StandupPage() {
       }
 
       try {
-        const [entriesRes, membersRes, sprintsRes, feedbackRes] = await Promise.all([
+        const [entriesRes, membersRes, sprintsRes, feedbackRes, missingRes] = await Promise.all([
           fetch(`/api/standup?project_id=${projectId}&date=${date}`),
           fetch(`/api/team-members?project_id=${projectId}`),
           fetch(`/api/sprints?project_id=${projectId}&status=active`),
           fetch(`/api/standup/feedback?project_id=${projectId}&date=${date}`),
+          fetch(`/api/standup/missing?project_id=${projectId}&date=${date}`),
         ]);
 
         const [entriesData, membersData, sprintsData, feedbackData] = await Promise.all([
@@ -208,6 +213,10 @@ export default function StandupPage() {
           readJsonDataOrThrow<StandupSprintSummary[]>(sprintsRes, 'sprints'),
           readJsonDataOrThrow<StandupFeedbackRow[]>(feedbackRes, 'standup feedback'),
         ]);
+
+        // S3: Missing = org 기준(projection get_missing). 실패해도 본 화면은 막지 않음.
+        const missingJson = await missingRes.json().catch(() => null) as { data?: { missing?: { id: string; name: string }[] } } | null;
+        const missingList = missingRes.ok ? (missingJson?.data?.missing ?? []) : [];
 
         const sprint = sprintsData.find((item) => item.status === 'active') ?? sprintsData[0] ?? null;
         let storySummaries: StandupStorySummary[] = [];
@@ -246,6 +255,7 @@ export default function StandupPage() {
         setEntries(entriesData);
         setMembers(membersData);
         setFeedback(feedbackData);
+        setMissingMembers(missingList);
         setActiveSprint(sprint);
         setStories(storySummaries);
         setStoriesNextCursor(nextStoriesCursor);
@@ -285,15 +295,15 @@ export default function StandupPage() {
       : summaryBadges;
 
   async function handleSave() {
-    if (!projectId) return;
     setSaving(true);
     setSaveError(null);
     try {
+      // S2(1c2be9db): org-level write — project_id 생략 시 BE가 author 접근 프로젝트로 auto-link.
+      // 하루 한 번 작성하면 접근한 모든 프로젝트 뷰에 projection 된다(재타이핑 제거).
       const response = await fetch('/api/standup', {
         method: 'PUT',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
-          project_id: projectId,
           date,
           done,
           plan,
@@ -500,6 +510,13 @@ export default function StandupPage() {
                 ) : null}
               </div>
 
+              {/* S3(51447ca0): 프로젝트 뷰 = 접근-기반 projection(read-only). 작성은 org-level. */}
+              {!loading ? (
+                <Alert variant="default">
+                  <AlertDescription className="text-xs">{t('projectionBanner')}</AlertDescription>
+                </Alert>
+              ) : null}
+
               {/* 사람 섹션 */}
               {loading ? (
                 <section className="space-y-3">
@@ -528,9 +545,19 @@ export default function StandupPage() {
                         return (
                           <div key={member.id} className="col-span-full rounded-xl border border-brand/40 bg-card p-4 shadow-sm space-y-4">
                             <div className="flex flex-wrap items-center justify-between gap-2">
-                              <h3 className="text-sm font-semibold text-foreground">{t('selfEditTitle')}</h3>
-                              <Button variant="ghost" size="sm" onClick={() => setEditingSelf(false)}>{t('cancel')}</Button>
+                              <div className="space-y-0.5">
+                                <h3 className="text-sm font-semibold text-foreground">{t('orgLevelTitle')}</h3>
+                                <p className="text-xs text-muted-foreground">{t('orgLevelDesc')}</p>
+                              </div>
+                              <div className="flex items-center gap-2">
+                                <Badge variant="outline">{t('oncePerDay')}</Badge>
+                                <Button variant="ghost" size="sm" onClick={() => setEditingSelf(false)}>{t('cancel')}</Button>
+                              </div>
                             </div>
+                            {/* S2(1c2be9db): org-level write 안내 — 프로젝트 선택 불요·접근 프로젝트 자동 표시 */}
+                            <Alert variant="info">
+                              <AlertDescription className="text-xs">{t('orgWriteBanner')}</AlertDescription>
+                            </Alert>
 
                             <div className="grid gap-4 md:grid-cols-3">
                               <div>
@@ -564,9 +591,11 @@ export default function StandupPage() {
 
                             <div className="space-y-3 rounded-xl border border-border/70 bg-muted/10 p-3">
                               <div className="flex flex-wrap items-center justify-between gap-2">
-                                <p className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">{t('linkedStories')}</p>
+                                <p className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">{t('planStoriesOptional')}</p>
                                 <Badge variant="outline">{t('linkedStoryCount', { count: planStoryIds.length })}</Badge>
                               </div>
+                              {/* projection은 접근권 기준 자동 — plan_story_ids와 무관(디커플 명시) */}
+                              <p className="text-xs text-muted-foreground">{t('planStoriesProjectionHint')}</p>
                               {storyPickerStories.length > 0 ? (
                                 <div className="max-h-40 space-y-1.5 overflow-y-auto">
                                   {storyPickerStories.map((story) => {
@@ -655,6 +684,24 @@ export default function StandupPage() {
                         />
                       );
                     })}
+                  </div>
+                </section>
+              ) : null}
+
+              {/* S3(51447ca0): Missing — org 1회 작성 기준 미작성 멤버(프로젝트별 아님) */}
+              {!loading && missingMembers.length > 0 ? (
+                <section className="space-y-3">
+                  <div className="flex flex-wrap items-center justify-between gap-2">
+                    <h2 className="text-sm font-semibold text-foreground">{t('missingOrgStandup')}</h2>
+                    <Badge variant="outline">{t('memberCount', { count: missingMembers.length })}</Badge>
+                  </div>
+                  <div className="rounded-xl border border-dashed border-border bg-muted/40 p-4">
+                    <div className="flex flex-wrap gap-1.5">
+                      {missingMembers.map((m) => (
+                        <Badge key={m.id} variant="outline">{m.name}</Badge>
+                      ))}
+                    </div>
+                    <p className="mt-2 text-xs text-muted-foreground">{t('missingOrgHint')}</p>
                   </div>
                 </section>
               ) : null}

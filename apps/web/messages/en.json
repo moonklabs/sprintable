@@ -987,6 +987,18 @@
     "primaryCta": "Open board"
   },
   "standup": {
+    "orgLevelTitle": "Today's standup",
+    "orgLevelDesc": "Write once a day and it's shared across every project you can access.",
+    "orgWriteBanner": "Organization-level entry — write once and it automatically appears in every project you have access to. No project selection needed.",
+    "oncePerDay": "1 person · 1 day · 1 entry",
+    "planStoriesOptional": "Today's planned stories (optional)",
+    "planStoriesProjectionHint": "Which projects this appears in is decided automatically by your access, independent of this selection.",
+    "projectionViewDesc": "Shows organization standups from members with access to this project.",
+    "projectionBanner": "This view collects organization-level standups projected onto this project. You don't write here — write in ‘Today's standup’ (once per organization).",
+    "sourceOrgLevel": "Org-level entry · submitted",
+    "relatedPlan": "Related plan",
+    "missingOrgStandup": "No organization standup yet",
+    "missingOrgHint": "Based on a single organization-level entry. Once written, it shows as submitted across every project you can access.",
     "title": "Daily Standup",
     "cancel": "Cancel",
     "surfaceDescription": "Update your standup and review the team state on one operator surface.",
