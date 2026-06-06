@@ -2276,6 +2276,8 @@
     "hypothesisSection": "효과 가설"
   },
   "chats": {
+    "attachmentDenied": "접근 권한이 없습니다",
+    "attachmentReload": "첨부를 다시 불러오기",
     "title": "채팅",
     "dmSection": "DM",
     "groupSection": "그룹 채팅",

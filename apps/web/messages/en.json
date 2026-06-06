@@ -2276,6 +2276,8 @@
     "hypothesisSection": "Outcome Hypothesis"
   },
   "chats": {
+    "attachmentDenied": "You don't have access",
+    "attachmentReload": "Reload attachment",
     "title": "Chats",
     "dmSection": "Direct Messages",
     "groupSection": "Group Chats",
