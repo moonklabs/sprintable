@@ -81,12 +81,20 @@ export function EntityDispatchPanel({
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ entity_type: entityType, entity_id: entityId, project_id: projectId }),
       });
-      if (!dispatchRes.ok) throw new Error('dispatch failed');
-      const dispatchData = await dispatchRes.json() as { dispatched?: boolean };
-      if (!dispatchData.dispatched) throw new Error('dispatch not executed — assignee missing');
-      addToast({ type: 'success', title: 'Dispatch 완료' });
+      // 7f8066a3: 실패 사유 구분(reason 매트릭스) — 서버 오류 vs 담당자 미지정을 분리 안내한다.
+      if (!dispatchRes.ok) {
+        addToast({ type: 'error', title: '전달에 실패했습니다', body: '전달 중 문제가 발생했습니다. 잠시 후 다시 시도해 주세요.' });
+        return;
+      }
+      const dispatchData = await dispatchRes.json().catch(() => ({})) as { dispatched?: boolean };
+      if (!dispatchData.dispatched) {
+        // 담당자가 지정되지 않아 전달 대상이 없는 경우 — 오류가 아니라 안내로 처리한다.
+        addToast({ type: 'error', title: '담당자가 지정되지 않았습니다', body: '담당자를 지정한 뒤 다시 전달해 주세요.' });
+        return;
+      }
+      addToast({ type: 'success', title: '전달했습니다' });
     } catch {
-      addToast({ type: 'error', title: 'Dispatch 실패. 다시 시도하겠는.' });
+      addToast({ type: 'error', title: '전달에 실패했습니다', body: '일시적인 문제로 전달하지 못했습니다. 잠시 후 다시 시도해 주세요.' });
     } finally {
       setDispatching(false);
     }
