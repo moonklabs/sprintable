@@ -12,7 +12,8 @@ function getAppOrigin() {
 }
 
 const MCP_SERVER_URL = () => `${getAppOrigin()}/api/v2/mcp`;
-const LLMS_PROMPT = () => `Read this document and complete onboarding: ${getAppOrigin()}/llms.txt`;
+// f44e2644: 온보딩 문서는 랜딩 canonical(sprintable.ai/llms.txt) 직지정(app.sprintable.ai CF 301 prod 미발동).
+const LLMS_PROMPT = () => `Read this document and complete onboarding: https://sprintable.ai/llms.txt`;
 
 interface AgentMember {
   id: string;

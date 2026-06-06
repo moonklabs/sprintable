@@ -44,7 +44,8 @@ export function AgentApiKeyManager({ agentId, agentName, onNewKey }: AgentApiKey
   const [revokeConfirmDialog, setRevokeConfirmDialog] = useState(false);
   const { addToast } = useToast();
 
-  const LLMS_URL = 'https://app.sprintable.ai/llms.txt';
+  // f44e2644: 랜딩 canonical 직지정(app.sprintable.ai CF 301 prod 미발동·앱 사본 onboarding-guide 깨짐).
+  const LLMS_URL = 'https://sprintable.ai/llms.txt';
 
   const buildOnboardingMessage = (apiKey: string) =>
     `아래의 정보를 읽고 온보딩하기 바람.\nsprintable agent name : ${agentName}\nsprintable agent api key : ${apiKey}\n${LLMS_URL}`;

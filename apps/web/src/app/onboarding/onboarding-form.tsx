@@ -12,7 +12,9 @@ function getAppOrigin() {
   return process.env.NEXT_PUBLIC_APP_URL ?? 'https://app.sprintable.ai';
 }
 const MCP_SERVER_URL = () => `${getAppOrigin()}/api/v2/mcp`;
-const LLMS_PROMPT = () => `Read this document and complete onboarding: ${getAppOrigin()}/llms.txt`;
+// f44e2644: 온보딩 문서는 랜딩 canonical(sprintable.ai/llms.txt) 직지정. app.sprintable.ai/llms.txt는
+// host-스코프 CF 301이 prod에서 미발동(앱 자체 사본 서빙·onboarding-guide 링크 깨짐)이라 직지정이 안전.
+const LLMS_PROMPT = () => `Read this document and complete onboarding: https://sprintable.ai/llms.txt`;
 const AGENT_ROLES = ['developer', 'designer', 'pm', 'qa', 'devops'];
 
 function buildMcpConfig(apiKey: string) {
