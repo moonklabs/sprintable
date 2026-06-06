@@ -12,12 +12,14 @@ import { useToast } from '@/components/ui/toast';
  */
 interface AttachmentFileProps {
   storedUrl: string;
-  conversationId: string;
+  // 첨부가 속한 리소스 — conversation(채팅) 또는 story(보드). 정확히 하나.
+  conversationId?: string;
+  storyId?: string;
   label: string;
   Icon: LucideIcon;
 }
 
-export function AttachmentFile({ storedUrl, conversationId, label, Icon }: AttachmentFileProps) {
+export function AttachmentFile({ storedUrl, conversationId, storyId, label, Icon }: AttachmentFileProps) {
   const t = useTranslations('chats');
   const { addToast } = useToast();
   const [loading, setLoading] = useState(false);
@@ -26,7 +28,9 @@ export function AttachmentFile({ storedUrl, conversationId, label, Icon }: Attac
     if (loading) return;
     setLoading(true);
     try {
-      const params = new URLSearchParams({ path: storedUrl, conversation_id: conversationId });
+      const params = new URLSearchParams({ path: storedUrl });
+      if (conversationId) params.set('conversation_id', conversationId);
+      else if (storyId) params.set('story_id', storyId);
       const res = await fetch(`/api/attachments/sign?${params.toString()}`);
       if (res.status === 403) {
         addToast({ type: 'info', title: t('attachmentDenied') });
@@ -44,7 +48,7 @@ export function AttachmentFile({ storedUrl, conversationId, label, Icon }: Attac
     } finally {
       setLoading(false);
     }
-  }, [storedUrl, conversationId, loading, addToast, t]);
+  }, [storedUrl, conversationId, storyId, loading, addToast, t]);
 
   return (
     <button

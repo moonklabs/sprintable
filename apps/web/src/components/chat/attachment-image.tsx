@@ -17,11 +17,13 @@ type State = 'fetching' | 'ok' | 'expired' | 'denied';
 
 interface AttachmentImageProps {
   storedUrl: string;
-  conversationId: string;
+  // 첨부가 속한 리소스 — conversation(채팅) 또는 story(보드). 정확히 하나.
+  conversationId?: string;
+  storyId?: string;
   alt: string;
 }
 
-export function AttachmentImage({ storedUrl, conversationId, alt }: AttachmentImageProps) {
+export function AttachmentImage({ storedUrl, conversationId, storyId, alt }: AttachmentImageProps) {
   const t = useTranslations('chats');
   const [state, setState] = useState<State>('fetching');
   const [signedUrl, setSignedUrl] = useState<string | null>(null);
@@ -30,7 +32,9 @@ export function AttachmentImage({ storedUrl, conversationId, alt }: AttachmentIm
   // 'fetching'은 mount 기본값 / reload 핸들러에서 설정한다(effect 내 동기 setState 회피).
   const fetchSignedUrl = useCallback(async () => {
     try {
-      const params = new URLSearchParams({ path: storedUrl, conversation_id: conversationId });
+      const params = new URLSearchParams({ path: storedUrl });
+      if (conversationId) params.set('conversation_id', conversationId);
+      else if (storyId) params.set('story_id', storyId);
       const res = await fetch(`/api/attachments/sign?${params.toString()}`);
       if (res.status === 403) {
         setState('denied');
@@ -51,7 +55,7 @@ export function AttachmentImage({ storedUrl, conversationId, alt }: AttachmentIm
     } catch {
       setState('expired');
     }
-  }, [storedUrl, conversationId]);
+  }, [storedUrl, conversationId, storyId]);
 
   useEffect(() => {
     retriedRef.current = false;
