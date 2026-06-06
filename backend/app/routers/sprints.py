@@ -10,7 +10,7 @@ from app.dependencies.database import get_db
 from app.models.pm import Story
 from app.models.team import TeamMember
 from app.repositories.sprint import SprintRepository
-from app.schemas.sprint import KickoffBody, SprintCreate, SprintResponse, SprintUpdate
+from app.schemas.sprint import KickoffBody, SprintCreate, SprintResponse, SprintUpdate, compute_sprint_duration
 from app.services.notification_dispatch import dispatch_notification
 
 router = APIRouter(prefix="/api/v2/sprints", tags=["sprints"])
@@ -46,6 +46,8 @@ async def create_sprint(
     org_id: uuid.UUID = Depends(get_verified_org_id),
 ) -> SprintResponse:
     repo = SprintRepository(session, org_id)
+    # 8a2bbda2: 날짜에서 duration 산출 저장(dates 단일진실·신규 정합). 날짜 없으면 model default(14).
+    _dur = compute_sprint_duration(body.start_date, body.end_date)
     sprint = await repo.create(
         project_id=body.project_id,
         title=body.title,
@@ -57,6 +59,7 @@ async def create_sprint(
         success_hypothesis=body.success_hypothesis,
         metric_definition=body.metric_definition,
         measure_after=body.measure_after,
+        **({"duration": _dur} if _dur is not None else {}),
     )
     return SprintResponse.model_validate(sprint)
 
@@ -79,6 +82,15 @@ async def update_sprint(
     repo: SprintRepository = Depends(_get_repo),
 ) -> SprintResponse:
     data = body.model_dump(exclude_unset=True)
+    # 8a2bbda2: 날짜가 갱신되면 duration 을 (병합된) 날짜에서 재산출 저장(dates 단일진실).
+    if "start_date" in data or "end_date" in data:
+        existing = await repo.get(id)
+        if existing is not None:
+            eff_start = data.get("start_date", existing.start_date)
+            eff_end = data.get("end_date", existing.end_date)
+            _dur = compute_sprint_duration(eff_start, eff_end)
+            if _dur is not None:
+                data["duration"] = _dur
     sprint = await repo.update(id, **data)
     if sprint is None:
         raise HTTPException(status_code=404, detail="Sprint not found")
