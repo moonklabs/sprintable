@@ -88,8 +88,8 @@ export function EntityDispatchPanel({
       }
       const dispatchData = await dispatchRes.json().catch(() => ({})) as { dispatched?: boolean };
       if (!dispatchData.dispatched) {
-        // 담당자가 지정되지 않아 전달 대상이 없는 경우 — 오류가 아니라 안내로 처리한다.
-        addToast({ type: 'error', title: '담당자가 지정되지 않았습니다', body: '담당자를 지정한 뒤 다시 전달해 주세요.' });
+        // 담당자가 지정되지 않아 전달 대상이 없는 경우 — 오류가 아니라 안내(info)로 처리한다.
+        addToast({ type: 'info', title: '담당자가 지정되지 않았습니다', body: '담당자를 지정한 뒤 다시 전달해 주세요.' });
         return;
       }
       addToast({ type: 'success', title: '전달했습니다' });
