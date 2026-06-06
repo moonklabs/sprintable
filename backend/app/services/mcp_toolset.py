@@ -129,6 +129,69 @@ def resolve_policy(scope: list[str] | None) -> dict:
     }
 
 
+# ── 7b63c226: BE 서버사이드 path→group scope 강제 ────────────────────────────
+# MCP 서버(client)의 is_tool_allowed/tool_group 와 **동일 그룹 소스**(ALL_GROUPS·resolve_policy)를
+# 재사용해 드리프트를 막는다. BYO 에이전트가 MCP 클라를 우회해 BE 엔드포인트를 직접 호출해도
+# 키 scope 외 그룹은 403 — 진짜 boundary.
+
+# always-allowed(core/비파괴 read) 엔드포인트 — scope 막론 허용(CP③ bypass).
+# check_notifications·poll_events·list_team_members·my_dashboard·manifest·세션/자기 self-ops.
+_ALWAYS_ALLOWED_PATH_PREFIXES: tuple[str, ...] = (
+    "/api/v2/notifications",
+    "/api/v2/events",
+    "/api/v2/team-members",
+    "/api/v2/dashboard",
+    "/api/v2/mcp",
+    "/api/v2/me",
+    "/api/v2/auth",
+    "/api/v2/current-project",
+    "/api/v2/agent",
+)
+
+# path-prefix → toolset group(라우터 리소스 정렬). 모든 group 은 ALL_GROUPS 소속이어야 함.
+_PATH_GROUP_PREFIXES: tuple[tuple[str, str], ...] = (
+    ("/api/v2/standups", "standup"),
+    ("/api/v2/rewards", "rewards"),
+    ("/api/v2/wallet", "rewards"),
+    ("/api/v2/leaderboard", "rewards"),
+    ("/api/v2/audit-logs", "audit"),
+    ("/api/v2/webhooks", "webhooks"),
+    ("/api/v2/conversations", "chat"),
+    ("/api/v2/meetings", "meetings"),
+    ("/api/v2/retros", "retro"),
+    ("/api/v2/stories", "stories"),
+    ("/api/v2/tasks", "tasks"),
+    ("/api/v2/sprints", "sprints"),
+    ("/api/v2/epics", "epics"),
+    ("/api/v2/docs", "docs"),
+    ("/api/v2/agent-runs", "agent_runs"),
+    ("/api/v2/analytics", "analytics"),
+)
+
+
+def path_to_tool_group(path: str) -> str | None:
+    """요청 path → toolset group. always-allowed/미매핑(core 취급)이면 None(강제 면제)."""
+    for prefix in _ALWAYS_ALLOWED_PATH_PREFIXES:
+        if path == prefix or path.startswith(prefix + "/"):
+            return None
+    for prefix, group in _PATH_GROUP_PREFIXES:
+        if path == prefix or path.startswith(prefix + "/"):
+            return group
+    return None  # 미매핑 → core 취급(허용)
+
+
+def path_allowed_for_scope(path: str, scope: list[str] | None) -> bool:
+    """7b63c226: API-key 요청 path 가 scope 의 허용 그룹에 속하는지(서버사이드 boundary).
+
+    always-allowed/미매핑 → True. 매핑된 group 은 resolve_policy 의 allowed_groups 에 있어야 True.
+    레거시(read/write)·full scope → allowed_groups=전체 → 모든 그룹 True(일반키 무회귀).
+    """
+    group = path_to_tool_group(path)
+    if group is None or group not in ALL_GROUPS:
+        return True  # 면제 or 미지(ALL_GROUPS 드리프트 방어) → over-block 방지
+    return group in resolve_policy(scope)["allowed_groups"]
+
+
 def resolve_manifest(scope: list[str] | None, all_tool_names: list[str]) -> dict:
     """key scope + 전체 tool 목록 → 매니페스트(allowed/denied/groups/destructive)."""
     allowed = [t for t in all_tool_names if is_tool_allowed(t, scope)]
