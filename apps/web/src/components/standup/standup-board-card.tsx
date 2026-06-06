@@ -1,5 +1,6 @@
 'use client';
 
+import { Clock } from 'lucide-react';
 import { useTranslations } from 'next-intl';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
@@ -78,6 +79,11 @@ export function StandupBoardCard({
                 </p>
               </div>
             ) : null}
+            {/* S3(51447ca0): org-level 작성을 프로젝트 뷰에 projection — 출처 표시 */}
+            <p className="flex items-center gap-1 text-xs text-muted-foreground">
+              <Clock className="h-3 w-3" aria-hidden />
+              {t('sourceOrgLevel')}
+            </p>
           </>
         ) : (
           <p className="text-sm text-muted-foreground">{t('notWrittenYet')}</p>
