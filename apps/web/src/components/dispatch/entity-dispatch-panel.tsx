@@ -1,6 +1,7 @@
 'use client';
 
 import { useCallback, useEffect, useRef, useState } from 'react';
+import { useTranslations } from 'next-intl';
 import { MoreHorizontal, Zap } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { ToastContainer, useToast } from '@/components/ui/toast';
@@ -35,6 +36,9 @@ export function EntityDispatchPanel({
   const [moreOpen, setMoreOpen] = useState(false);
   const moreRef = useRef<HTMLDivElement>(null);
   const { toasts, addToast, dismissToast } = useToast();
+  const t = useTranslations('board');
+  // f5ae74e4: Dispatch(이벤트 전달)를 Kickoff(킥오프·워크플로우 규칙)와 라벨·툴팁으로 명확히 구분.
+  const dispatchTitle = !assigneeId ? t('dispatchNeedsAssignee') : t('dispatchTooltip');
 
   useEffect(() => {
     if (!moreOpen) return;
@@ -118,6 +122,7 @@ export function EntityDispatchPanel({
         type="button"
         disabled={!assigneeId || dispatching}
         onClick={() => void handleDispatch()}
+        title={dispatchTitle}
         className={cn(
           'shrink-0 items-center gap-1.5 rounded-md px-3 py-1.5 text-sm font-medium transition',
           mobileMode === 'assignee-only' ? 'hidden md:flex' : 'flex',
@@ -127,7 +132,7 @@ export function EntityDispatchPanel({
         )}
       >
         <Zap className="size-3.5" />
-        {dispatching ? 'Dispatching…' : 'Dispatch'}
+        {dispatching ? t('dispatching') : t('dispatch')}
       </button>
       {mobileMode === 'assignee-only' && (
         <div ref={moreRef} className="relative md:hidden">
@@ -145,6 +150,7 @@ export function EntityDispatchPanel({
                 type="button"
                 disabled={!assigneeId || dispatching}
                 onClick={() => { void handleDispatch(); setMoreOpen(false); }}
+                title={dispatchTitle}
                 className={cn(
                   'flex w-full items-center gap-1.5 px-3 py-2 text-sm transition',
                   assigneeId && !dispatching
@@ -153,7 +159,7 @@ export function EntityDispatchPanel({
                 )}
               >
                 <Zap className="size-3.5" />
-                {dispatching ? 'Dispatching…' : 'Dispatch'}
+                {dispatching ? t('dispatching') : t('dispatch')}
               </button>
             </div>
           )}
