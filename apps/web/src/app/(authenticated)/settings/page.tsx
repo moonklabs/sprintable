@@ -5,7 +5,7 @@ import { useDashboardContext } from '@/app/dashboard/dashboard-shell';
 import Link from 'next/link';
 import { useRouter, useSearchParams } from 'next/navigation';
 import { useTranslations } from 'next-intl';
-import { BarChart2, Bell, Bot, Check, CreditCard, FolderKanban, GitBranch, Menu, Palette, Trash2, User, Users, X, Zap } from 'lucide-react';
+import { BarChart2, Bell, Bot, Check, CreditCard, FolderKanban, GitBranch, Menu, Palette, Trash2, User, Users, Webhook, X } from 'lucide-react';
 import { UsageDashboard } from '@/components/settings/usage-dashboard';
 import { OrgMembersSection } from '@/components/settings/org-members-section';
 import { ProjectAccessSection } from '@/components/settings/project-access-section';
@@ -52,7 +52,9 @@ interface NotificationSetting {
 
 interface WebhookConfig {
   id: string;
+  member_id: string;
   url: string;
+  is_active: boolean;
   project_id: string | null;
   projects?: { name: string };
 }
@@ -160,8 +162,6 @@ export default function SettingsPage() {
   const [webhooks, setWebhooks] = useState<WebhookConfig[]>([]);
   const [projects, setProjects] = useState<ProjectOption[]>([]);
   const [createdProjectMembership, setCreatedProjectMembership] = useState<{ projectId: string; projectName: string } | null>(null);
-  const [newWebhookUrl, setNewWebhookUrl] = useState('');
-  const [newWebhookProjectId, setNewWebhookProjectId] = useState('');
   const [newProjectName, setNewProjectName] = useState('');
   const [newProjectDescription, setNewProjectDescription] = useState('');
   const [creatingProject, setCreatingProject] = useState(false);
@@ -643,7 +643,6 @@ export default function SettingsPage() {
     });
     setInviteProjectId(project.id);
     setMemberProjectId(project.id);
-    setNewWebhookProjectId(project.id);
     setNewProjectName('');
     setNewProjectDescription('');
     setProjectActionMessage({ type: 'success', text: t('projectCreated', { name: project.name }) });
@@ -815,12 +814,7 @@ export default function SettingsPage() {
                   <FolderKanban className="h-4 w-4" />
                   {t('tabProjects')}
                 </TabsTrigger>
-                {isAdmin ? (
-                  <TabsTrigger value="webhooks">
-                    <Zap className="h-4 w-4" />
-                    {t('tabWebhooks')}
-                  </TabsTrigger>
-                ) : null}
+                {/* 7519c3ea: flat webhooks 탭 폐기 — webhook은 멤버/에이전트 관리(members)에 inline 통합. */}
               </>
             ) : null}
 
@@ -1324,6 +1318,11 @@ export default function SettingsPage() {
                         <div className="space-y-2">
                           {orgAgents.map((agent) => {
                             const projectName = projects.find((p) => p.id === agent.project_id)?.name ?? agent.project_id;
+                            // 7519c3ea: webhook discoverability — 행에 status 한눈에(편집은 detail editor 링크=이름).
+                            const agentWebhook = webhooks.find((w) => w.member_id === agent.id);
+                            const webhookStatus: 'active' | 'inactive' | 'empty' = !agentWebhook?.url
+                              ? 'empty'
+                              : !agentWebhook.is_active ? 'inactive' : 'active';
                             return (
                               <div key={agent.id} className="flex items-center justify-between gap-3 rounded-md border border-border bg-muted/30 px-3 py-3 text-sm">
                                 <div className="min-w-0">
@@ -1332,6 +1331,10 @@ export default function SettingsPage() {
                                     <Badge variant="secondary">{t('agentMember')}</Badge>
                                     <Badge variant="outline">{agent.role}</Badge>
                                     <Badge variant="info">SSE</Badge>
+                                    <Badge variant={webhookStatus === 'active' ? 'success' : webhookStatus === 'inactive' ? 'secondary' : 'outline'} className="gap-1">
+                                      <Webhook className="size-3" aria-hidden />
+                                      {webhookStatus === 'active' ? t('webhookStatusActive') : webhookStatus === 'inactive' ? t('webhookStatusInactive') : t('webhookStatusEmpty')}
+                                    </Badge>
                                     {agent.fakechat_port ? <span className="font-mono text-[11px] text-muted-foreground">:{agent.fakechat_port}</span> : null}
                                     <span className="text-xs text-muted-foreground">{projectName}</span>
                                     {currentUserId && agent.created_by === currentUserId ? <Badge variant="outline" className="border-primary/40 text-primary text-[10px]">{t('agentOwner')}</Badge> : null}
@@ -1388,10 +1391,57 @@ export default function SettingsPage() {
               ) : (
               <div>
                 {currentProjectId ? (
-                  <ProjectAccessSection
-                    projectId={currentProjectId}
-                    currentRole={currentOrgRole}
-                  />
+                  <div className="space-y-6">
+                    <ProjectAccessSection
+                      projectId={currentProjectId}
+                      currentRole={currentOrgRole}
+                    />
+                    {/* 7519c3ea: 팀원 webhook inline — flat 탭 폐기분을 멤버별 surface(handleSaveWebhookUrl 재사용·status 한눈에). */}
+                    <SectionCard>
+                      <SectionCardHeader>
+                        <div className="space-y-1">
+                          <h2 className="text-base font-semibold text-foreground">{t('webhooks')}</h2>
+                          <p className="text-sm text-muted-foreground">{t('webhookDescription')}</p>
+                        </div>
+                      </SectionCardHeader>
+                      <SectionCardBody className="space-y-2">
+                        {projectMembers.filter((m) => m.type === 'human').map((member) => {
+                          const draft = webhookEditing[member.id] ?? member.webhook_url ?? '';
+                          const hasUrl = Boolean(member.webhook_url);
+                          const err = webhookErrors[member.id];
+                          return (
+                            <div key={member.id} className="rounded-md border border-border bg-muted/30 px-3 py-3">
+                              <div className="flex flex-wrap items-center gap-2">
+                                <span className="min-w-0 flex-1 truncate text-sm font-medium text-foreground">{member.name}</span>
+                                <Badge variant={hasUrl ? 'success' : 'outline'} className="gap-1">
+                                  <Webhook className="size-3" aria-hidden />
+                                  {hasUrl ? t('webhookStatusActive') : t('webhookStatusEmpty')}
+                                </Badge>
+                              </div>
+                              <div className="mt-2 flex flex-wrap items-center gap-2">
+                                <OperatorInput
+                                  type="url"
+                                  value={draft}
+                                  onChange={(e) => setWebhookEditing((prev) => ({ ...prev, [member.id]: e.target.value }))}
+                                  placeholder={t('webhookUrlPlaceholder')}
+                                  className="min-w-0 flex-1 font-mono text-xs"
+                                />
+                                <Button
+                                  variant="hero"
+                                  size="sm"
+                                  onClick={() => void handleSaveWebhookUrl(member.id)}
+                                  disabled={webhookSaving === member.id}
+                                >
+                                  {webhookSaving === member.id ? '...' : tc('save')}
+                                </Button>
+                              </div>
+                              {err ? <p className="mt-1 text-xs text-destructive">{err}</p> : null}
+                            </div>
+                          );
+                        })}
+                      </SectionCardBody>
+                    </SectionCard>
+                  </div>
                 ) : (
                   <p className="text-sm text-muted-foreground">프로젝트를 선택해주세요.</p>
                 )}
@@ -1399,65 +1449,6 @@ export default function SettingsPage() {
               )}
             </TabsContent>
 
-            {adminChecked && isAdmin ? (
-            <TabsContent value="webhooks">
-              <SectionCard>
-                <SectionCardHeader>
-                  <div className="space-y-1">
-                    <h2 className="text-base font-semibold text-foreground">{t('webhooks')}</h2>
-                    <p className="text-sm text-muted-foreground">{t('webhookDescription')}</p>
-                  </div>
-                </SectionCardHeader>
-                <SectionCardBody className="space-y-4">
-                  <div className="space-y-2">
-                    {webhooks.map((webhook) => (
-                      <div key={webhook.id} className="flex items-center justify-between gap-3 rounded-md border border-border bg-muted/30 px-3 py-3 text-xs">
-                        <span className="truncate text-foreground">{webhook.url}</span>
-                        <span className="shrink-0 text-muted-foreground">{webhook.projects?.name ?? t('defaultWebhook')}</span>
-                      </div>
-                    ))}
-                  </div>
-                  <div className="grid gap-3 md:grid-cols-[minmax(0,1fr)_220px_auto]">
-                    <OperatorInput
-                      type="url"
-                      value={newWebhookUrl}
-                      onChange={(e) => setNewWebhookUrl(e.target.value)}
-                      placeholder={t('webhookUrlPlaceholder')}
-                    />
-                    <OperatorDropdownSelect
-                      value={newWebhookProjectId}
-                      onValueChange={(v) => setNewWebhookProjectId(v)}
-                      options={[
-                        { value: '', label: t('defaultWebhook') },
-                        ...projects.map((project) => ({ value: project.id, label: project.name })),
-                      ]}
-                    />
-                    <Button
-                      variant="hero"
-                      size="lg"
-                      onClick={async () => {
-                        if (!newWebhookUrl.trim()) return;
-                        await fetch('/api/webhooks/config', {
-                          method: 'PUT',
-                          headers: { 'Content-Type': 'application/json' },
-                          body: JSON.stringify({ url: newWebhookUrl.trim(), project_id: newWebhookProjectId || null }),
-                        });
-                        setNewWebhookUrl('');
-                        setNewWebhookProjectId('');
-                        const res = await fetch('/api/webhooks/config');
-                        if (res.ok) {
-                          const j = await res.json();
-                          setWebhooks(j.data ?? []);
-                        }
-                      }}
-                    >
-                      {tc('save')}
-                    </Button>
-                  </div>
-                </SectionCardBody>
-              </SectionCard>
-            </TabsContent>
-            ) : null}
 
             {/* E-SETTINGS-IA S2: deprecate 숨김. set 확장으로 trigger·content·딥링크(resolveSettingsTab) 일괄 차단. 컴포넌트 보존. */}
             {adminChecked && isAdmin && !HIDDEN_SETTINGS_TABS.has('workflow') ? (
