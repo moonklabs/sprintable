@@ -7,8 +7,10 @@
 from __future__ import annotations
 
 import asyncio
+import asyncio
 import os
 import uuid
+from unittest.mock import MagicMock
 
 import pytest
 
@@ -89,6 +91,76 @@ _DEDUP_SQL = [
          FROM conversations WHERE type='dm' AND dm_pair_key IS NOT NULL)
        DELETE FROM conversations c USING ranked r WHERE c.id=r.id AND r.rn>1""",
 ]
+
+
+@pytest.mark.anyio
+@pytest.mark.skipif(not _ASYNC, reason="real-DB URL 미설정 — skip")
+async def test_concurrent_api_create_same_pair_single_dm_realdb(monkeypatch):
+    """CP2: 핸들러 API 레벨 동시 POST(같은 pair) 2건 → 둘 다 동일 DM id·DB 단일 DM.
+
+    (dedup-check OR IntegrityError-catch 어느 경로든 중복 0 불변식. SQL 직접이 아닌 실 핸들러.)
+    """
+    from httpx import ASGITransport, AsyncClient
+    from sqlalchemy import text
+    from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
+    from app.main import app
+    from app.dependencies.auth import get_current_user, get_verified_org_id
+    from app.dependencies.database import get_db
+
+    org, proj = uuid.uuid4(), uuid.uuid4()
+    suser, om = uuid.uuid4(), uuid.uuid4()   # sender user + org_member/member id(0075 1:1)
+    other = uuid.uuid4()
+    eng = create_async_engine(_ASYNC)
+    sm = async_sessionmaker(eng, expire_on_commit=False)
+    # 에이전트 인가 불변식 skip(이 테스트 범위 외)
+    async def _noop(*a, **k):
+        return None
+    monkeypatch.setattr("app.routers.conversations._enforce_agent_creator_policy", _noop)
+    try:
+        async with sm() as s:
+            await s.execute(text("INSERT INTO projects (id,org_id,name,created_at) VALUES (:i,:o,'P',now())"), {"i": proj, "o": org})
+            await s.execute(text("INSERT INTO org_members (id,org_id,user_id,role,created_at) VALUES (:i,:o,:u,'owner',now())"), {"i": om, "o": org, "u": suser})
+            await s.execute(text("INSERT INTO members (id,org_id,type,user_id,name,org_role,is_active,created_at,updated_at) VALUES (:i,:o,'human',:u,'S','owner',true,now(),now())"), {"i": om, "o": org, "u": suser})
+            await s.commit()
+
+        ctx = MagicMock()
+        ctx.user_id = str(suser)
+        ctx.claims = {"app_metadata": {"org_id": str(org)}}
+
+        async def _db():
+            async with sm() as ses:
+                yield ses
+        async def _auth():
+            return ctx
+        async def _org():
+            return org
+        app.dependency_overrides[get_db] = _db
+        app.dependency_overrides[get_current_user] = _auth
+        app.dependency_overrides[get_verified_org_id] = _org
+
+        body = {"type": "dm", "participant_ids": [str(other)], "project_id": str(proj)}
+        async with AsyncClient(transport=ASGITransport(app=app), base_url="http://t") as c:
+            r1, r2 = await asyncio.gather(
+                c.post("/api/v2/conversations", json=body),
+                c.post("/api/v2/conversations", json=body),
+            )
+        assert r1.status_code == 201 and r2.status_code == 201, (r1.text, r2.text)
+        id1, id2 = r1.json()["id"], r2.json()["id"]
+        assert id1 == id2, f"동시 생성이 다른 DM 반환(중복!): {id1} vs {id2}"
+        async with sm() as s:
+            cnt = (await s.execute(text(
+                "SELECT count(*) FROM conversations WHERE org_id=:o AND type='dm'"), {"o": org})).scalar_one()
+            assert cnt == 1, f"단일 DM 불변식 위반: {cnt}"
+    finally:
+        app.dependency_overrides.clear()
+        async with sm() as s:
+            await s.execute(text("DELETE FROM conversation_participants WHERE conversation_id IN (SELECT id FROM conversations WHERE org_id=:o)"), {"o": org})
+            await s.execute(text("DELETE FROM conversations WHERE org_id=:o"), {"o": org})
+            await s.execute(text("DELETE FROM members WHERE org_id=:o"), {"o": org})
+            await s.execute(text("DELETE FROM org_members WHERE org_id=:o"), {"o": org})
+            await s.execute(text("DELETE FROM projects WHERE org_id=:o"), {"o": org})
+            await s.commit()
+        await eng.dispose()
 
 
 @pytest.mark.anyio
