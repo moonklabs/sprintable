@@ -164,6 +164,40 @@ async def test_mark_all_read_200():
 
 
 @pytest.mark.anyio
+async def test_mark_read_single_200():
+    """48de882a: PATCH /notifications/{id}/read — 단일 읽음 처리 200 + is_read=True."""
+    client, session, app = await _client()
+    try:
+        with patch("app.repositories.notification.NotificationRepository.mark_read", new_callable=AsyncMock) as mock_mark:
+            mock_mark.return_value = _mock_notification(is_read=True)
+
+            async with client as c:
+                resp = await c.patch(f"/api/v2/notifications/{NOTIF_ID}/read")
+
+        assert resp.status_code == 200
+        assert resp.json()["is_read"] is True
+        assert resp.json()["id"] == str(NOTIF_ID)
+    finally:
+        app.dependency_overrides.clear()
+
+
+@pytest.mark.anyio
+async def test_mark_read_single_404_when_not_owned():
+    """48de882a: 본인 것 아니거나 없는 알림 → 404."""
+    client, session, app = await _client()
+    try:
+        with patch("app.repositories.notification.NotificationRepository.mark_read", new_callable=AsyncMock) as mock_mark:
+            mock_mark.return_value = None
+
+            async with client as c:
+                resp = await c.patch(f"/api/v2/notifications/{NOTIF_ID}/read")
+
+        assert resp.status_code == 404
+    finally:
+        app.dependency_overrides.clear()
+
+
+@pytest.mark.anyio
 async def test_get_notification_settings_200():
     client, session, app = await _client()
     try:
