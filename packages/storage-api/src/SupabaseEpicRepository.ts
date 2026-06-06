@@ -9,7 +9,16 @@ export class SupabaseEpicRepository implements IEpicRepository {
   }
 
   async list(filters: EpicListFilters): Promise<Epic[]> {
-    return fastapiCall<Epic[]>('GET', '/api/v2/epics', this.accessToken, { query: { project_id: filters.project_id } });
+    // 569f5316: limit/cursor/order_by를 BE에 위임해 1000+ silent-truncation을 근절.
+    // (이전엔 project_id만 전달 → BE 1000 cap에서 조용히 잘림.) over-fetch(+1)는 라우트가 책임.
+    return fastapiCall<Epic[]>('GET', '/api/v2/epics', this.accessToken, {
+      query: {
+        project_id: filters.project_id,
+        cursor: filters.cursor,
+        limit: filters.limit,
+        order_by: filters.order_by,
+      },
+    });
   }
 
   async getById(id: string, _scope?: RepositoryScopeContext): Promise<Epic> {

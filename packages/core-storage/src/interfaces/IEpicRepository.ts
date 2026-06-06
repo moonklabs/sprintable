@@ -48,6 +48,8 @@ export interface UpdateEpicInput {
 
 export interface EpicListFilters extends PaginationOptions {
   project_id?: string;
+  /** 단조 정렬 컬럼(created_at/updated_at). BE에 위임해 true cursor 페이지네이션에 사용. */
+  order_by?: string;
 }
 
 export interface IEpicRepository {

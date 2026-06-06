@@ -68,19 +68,83 @@ async def _client():
 
 # ── GET list ──────────────────────────────────────────────────────────────────
 
+def _paginated_execute(total: int, rows: list):
+    """list_paginated: 1번째 execute=count(scalar_one), 2번째=list(scalars().all())."""
+    state = {"n": 0}
+
+    async def _exec(stmt, *args, **kwargs):
+        state["n"] += 1
+        r = MagicMock()
+        if state["n"] == 1:
+            r.scalar_one.return_value = total
+        else:
+            r.scalars.return_value.all.return_value = rows
+        return r
+
+    return _exec
+
+
 @pytest.mark.anyio
 async def test_list_epics_200():
     client, session, app = await _client()
     try:
-        mock_result = MagicMock()
-        mock_result.scalars.return_value.all.return_value = [_mock_epic()]
-        session.execute = AsyncMock(return_value=mock_result)
+        session.execute = _paginated_execute(1, [_mock_epic()])
 
         async with client as c:
             resp = await c.get("/api/v2/epics")
 
         assert resp.status_code == 200
         assert isinstance(resp.json(), list)
+        # 569f5316: 전체 카운트는 항상 헤더로 노출 → silent-truncation 불가
+        assert resp.headers["X-Total-Count"] == "1"
+    finally:
+        app.dependency_overrides.clear()
+
+
+@pytest.mark.anyio
+async def test_list_epics_limit_cursor_delegated():
+    """limit/cursor 위임 + X-Total-Count/X-Next-Cursor 헤더."""
+    client, session, app = await _client()
+    try:
+        session.execute = _paginated_execute(42, [_mock_epic()])
+
+        async with client as c:
+            resp = await c.get("/api/v2/epics?limit=50&cursor=2026-05-01T00:00:00%2B00:00")
+
+        assert resp.status_code == 200
+        assert resp.headers["X-Total-Count"] == "42"
+        assert "X-Next-Cursor" in resp.headers
+    finally:
+        app.dependency_overrides.clear()
+
+
+@pytest.mark.anyio
+async def test_list_epics_1000plus_not_silent():
+    """1000+ 시뮬: 반환 페이지보다 total이 커도 헤더로 전체 카운트 노출(silent 잘림 아님)."""
+    client, session, app = await _client()
+    try:
+        # 페이지엔 1건만, 전체는 1500건 → X-Total-Count로 호출자가 잘림을 인지
+        session.execute = _paginated_execute(1500, [_mock_epic()])
+
+        async with client as c:
+            resp = await c.get("/api/v2/epics?limit=1")
+
+        assert resp.status_code == 200
+        assert resp.headers["X-Total-Count"] == "1500"
+        assert len(resp.json()) == 1
+    finally:
+        app.dependency_overrides.clear()
+
+
+@pytest.mark.anyio
+async def test_list_epics_invalid_cursor_400():
+    """잘못된 cursor는 silent 무시 대신 400으로 명확히 거절."""
+    client, session, app = await _client()
+    try:
+        async with client as c:
+            resp = await c.get("/api/v2/epics?cursor=not-a-datetime")
+
+        assert resp.status_code == 400
     finally:
         app.dependency_overrides.clear()
 

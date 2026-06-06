@@ -1,6 +1,7 @@
 import uuid
+from datetime import datetime
 
-from fastapi import APIRouter, Depends, HTTPException, Query
+from fastapi import APIRouter, Depends, HTTPException, Query, Response
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.dependencies.auth import AuthContext, enforce_body_context, get_current_user, get_verified_org_id
@@ -20,16 +21,43 @@ def _get_repo(
 
 @router.get("", response_model=list[EpicResponse])
 async def list_epics(
+    response: Response,
     project_id: uuid.UUID | None = Query(default=None),
     status_filter: str | None = Query(default=None, alias="status"),
+    limit: int | None = Query(default=None, ge=1, le=2000),
+    cursor: str | None = Query(default=None, description="Cursor: ISO 8601 created_at, fetch before this time"),
+    order_by: str = Query(default="created_at"),
     repo: EpicRepository = Depends(_get_repo),
 ) -> list[EpicResponse]:
+    """에픽 목록 — true cursor 페이지네이션 + 전체 카운트(X-Total-Count 헤더).
+
+    1000+ 에픽이 조용히 잘리던 문제(#1200/569f5316)를 근절: limit/cursor로 위임
+    페이지네이션하고, 페이지와 무관한 전체 개수를 X-Total-Count로 노출한다.
+    limit 미지정 시 기존 동작(최대 1000)과 호환되며, 1000+ 인 경우에도 헤더로
+    잘림 여부를 호출자가 인지할 수 있어 silent-truncation이 아니다.
+    """
     filters: dict = {}
     if project_id:
         filters["project_id"] = project_id
     if status_filter:
         filters["status"] = status_filter
-    epics = await repo.list(**filters)
+
+    cursor_dt: datetime | None = None
+    if cursor:
+        try:
+            cursor_dt = datetime.fromisoformat(cursor)
+        except (ValueError, TypeError) as exc:
+            # 잘못된 cursor는 silent 무시 대신 400으로 명확히 거절한다.
+            raise HTTPException(
+                status_code=400, detail="invalid cursor: expected ISO 8601 datetime"
+            ) from exc
+
+    epics, total = await repo.list_paginated(
+        limit=limit, cursor=cursor_dt, order_by=order_by, **filters
+    )
+    response.headers["X-Total-Count"] = str(total)
+    if epics:
+        response.headers["X-Next-Cursor"] = epics[-1].created_at.isoformat()
     return [EpicResponse.model_validate(e) for e in epics]
 
 
