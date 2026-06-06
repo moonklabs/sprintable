@@ -18,6 +18,9 @@ class Conversation(Base, OrgScopedMixin, TimestampMixin):
     )
     type: Mapped[str] = mapped_column(Text, nullable=False, default="group")  # dm | group
     title: Mapped[str | None] = mapped_column(Text, nullable=True)
+    # 179db213: DM 1-pair=1-DM — 정렬된 member-pair `min|max`(type='dm'만). partial unique index
+    # uq_conversations_dm_pair(org,project,dm_pair_key WHERE type='dm')로 레이스/중복 차단.
+    dm_pair_key: Mapped[str | None] = mapped_column(Text, nullable=True)
     created_by: Mapped[uuid.UUID | None] = mapped_column(
         UUID(as_uuid=True), ForeignKey("team_members.id", ondelete="SET NULL"), nullable=True
     )
