@@ -11,6 +11,15 @@ import { OutcomeIntentFields, type OutcomeIntentValue, type MetricDefinition } f
 import { OutcomeResultCard, type OutcomeResult } from '@/components/outcome/outcome-result-card';
 import type { OutcomeStatus } from '@/components/outcome/outcome-status-badge';
 
+// 8a2bbda2: 기간 표시는 start_date~end_date(진실)에서 계산한다. BE `duration` 필드(예 14)가
+// 날짜 범위와 불일치하는 케이스가 있어 신뢰하지 않고, inclusive 일수(end−start+1)를 직접 산출한다.
+function sprintDurationDays(startDate: string, endDate: string): number {
+  const start = Date.parse(startDate);
+  const end = Date.parse(endDate);
+  if (Number.isNaN(start) || Number.isNaN(end)) return 0;
+  return Math.max(0, Math.round((end - start) / 86_400_000) + 1);
+}
+
 // ─── Types ────────────────────────────────────────────────────────────────────
 
 interface Sprint {
@@ -452,7 +461,7 @@ export function SprintsClient({ projectId }: SprintsClientProps) {
                   </div>
                 </div>
               <p className="mt-1 text-xs text-muted-foreground">
-                {sprint.start_date} ~ {sprint.end_date} · {sprint.duration}{t('days')}
+                {sprint.start_date} ~ {sprint.end_date} · {sprintDurationDays(sprint.start_date, sprint.end_date)}{t('days')}
               </p>
               {sprint.report_doc_id ? (
                 <a
@@ -508,7 +517,7 @@ export function SprintsClient({ projectId }: SprintsClientProps) {
           ) : null}
           <span className="flex items-center gap-1 rounded-md border border-border bg-muted/30 px-2.5 py-1 text-xs font-medium tabular-nums text-foreground">
             <span className="text-muted-foreground">📅</span>
-            {selected.duration}{t('days')}
+            {sprintDurationDays(selected.start_date, selected.end_date)}{t('days')}
           </span>
         </div>
       ) : null}
