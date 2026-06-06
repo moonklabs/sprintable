@@ -148,10 +148,11 @@ async def test_create_group_conversation():
         session.refresh.side_effect = _refresh
 
         async with client as c:
+            # 179db213: 2-member 는 DM 강제이므로 group 은 ≥3 member(참가자 2명+sender)
             resp = await c.post("/api/v2/conversations", json={
                 "type": "group",
                 "title": "테스트",
-                "participant_ids": [str(uuid.uuid4())],
+                "participant_ids": [str(uuid.uuid4()), str(uuid.uuid4())],
                 "project_id": str(PROJECT_ID),
             })
 
@@ -177,13 +178,12 @@ async def test_create_dm_deduplication():
         member_result = MagicMock()
         member_result.scalars.return_value.first.return_value = mock_member
 
+        # 179db213: 새 dedup — _find_existing_dm() = scalar_one_or_none(dm_pair_key 조회)
         existing_dm_result = MagicMock()
-        existing_dm_result.scalars.return_value.all.return_value = [CONV_ID]
+        existing_dm_result.scalar_one_or_none.return_value = CONV_ID
 
-        other_check_result = MagicMock()
-        other_check_result.scalar_one_or_none.return_value = uuid.uuid4()  # 있음
-
-        session.execute = AsyncMock(side_effect=[member_result, existing_dm_result, other_check_result])
+        # execute 순서: member resolve → _find_existing_dm(scalar_one_or_none)
+        session.execute = AsyncMock(side_effect=[member_result, existing_dm_result])
 
         async with client as c:
             resp = await c.post("/api/v2/conversations", json={
