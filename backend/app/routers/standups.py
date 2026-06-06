@@ -2,12 +2,12 @@ import uuid
 from datetime import date
 
 from fastapi import APIRouter, Depends, HTTPException, Query
-from sqlalchemy import select
+from sqlalchemy import exists, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.dependencies.auth import AuthContext, get_current_user, get_verified_org_id
 from app.dependencies.database import get_db
-from app.models.standup import StandupEntry, StandupFeedback
+from app.models.standup import StandupEntry, StandupEntryProject, StandupFeedback
 from app.repositories.standup import StandupEntryRepository, StandupFeedbackRepository
 from app.schemas.standup import (
     FeedbackCreate,
@@ -161,9 +161,14 @@ async def list_feedback(
         select(StandupFeedback)
         .join(StandupEntry, StandupFeedback.standup_entry_id == StandupEntry.id)
         .where(
-            StandupFeedback.project_id == project_id,
             StandupFeedback.org_id == org_id,
             StandupEntry.date == date_filter,
+            # 51447ca0: feedback projection — 피드백 단 엔트리가 해당 프로젝트에 링크됐는지로 판정
+            # (org-level 엔트리 피드백도 링크된 프로젝트 뷰에 surface). legacy는 0099 백필 링크로 커버.
+            exists().where(
+                StandupEntryProject.entry_id == StandupEntry.id,
+                StandupEntryProject.project_id == project_id,
+            ),
         )
     )
     result = await db.execute(q)
