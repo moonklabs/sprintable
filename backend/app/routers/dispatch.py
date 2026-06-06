@@ -36,6 +36,9 @@ class DispatchResponse(BaseModel):
     event_id: uuid.UUID | None = None
     assignee_id: uuid.UUID | None = None
     assignee_type: str | None = None
+    # 7f8066a3: dispatched=False 사유 구분 → FE 가 no_assignee(담당자 미지정·info 안내)와
+    # unresolved_assignee(신원 해소 실패·error)를 다르게 표시. additive·null default 하위호환.
+    reason: str | None = None
 
 
 async def _fetch_entity(
@@ -89,7 +92,8 @@ async def dispatch_entity(
     if title is None:
         raise HTTPException(status_code=404, detail="Entity not found")
     if not assignee_id:
-        return DispatchResponse(dispatched=False)
+        # 7f8066a3 (a): 담당자 미지정 — 실패 아님. FE 가 "담당자 지정 필요" 안내(info).
+        return DispatchResponse(dispatched=False, reason="no_assignee")
     # entity의 실제 project_id 사용 (body.project_id 불일치 방지)
     project_id = entity_project_id or body.project_id
 
@@ -98,7 +102,8 @@ async def dispatch_entity(
     #   grant-only 휴먼/polymorphic assignee도 수용해 dispatched:False 오탐 방지 (7f8066a3).
     assignee_member = await resolve_member_identity(assignee_id, org_id, db)
     if assignee_member is None:
-        return DispatchResponse(dispatched=False, assignee_id=assignee_id)
+        # 7f8066a3 (a): 담당자 신원 해소 실패(드뭄) — 진짜 오류. FE error 토스트.
+        return DispatchResponse(dispatched=False, assignee_id=assignee_id, reason="unresolved_assignee")
 
     member_type = assignee_member.type
 
@@ -186,4 +191,5 @@ async def dispatch_entity(
         event_id=event.id,
         assignee_id=assignee_id,
         assignee_type=member_type,
+        reason="ok",
     )
