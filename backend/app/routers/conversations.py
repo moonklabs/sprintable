@@ -445,45 +445,49 @@ async def create_conversation(
     # ⭐ 인가 불변식: 휴먼↔에이전트 대화 — 에이전트 creator 동석 필수
     await _enforce_agent_creator_policy(sender, body.participant_ids, db)
 
-    # DM 중복 방지: 동일 participant pair의 dm이 이미 있으면 반환
-    if body.type == "dm" and len(body.participant_ids) == 1:
-        other_id = body.participant_ids[0]
-        existing = (await db.execute(
-            select(Conversation.id)
-            .join(ConversationParticipant, ConversationParticipant.conversation_id == Conversation.id)
-            .where(
+    # 179db213: 1-pair=1-DM enforce — resolved member set 이 정확히 2명이면 DM 으로 dedup
+    # (body.type label 무관). dm_pair_key(정렬쌍)로 기존 DM 조회→반환. ≥3명/단독은 group.
+    all_members = sorted({sender.id, *body.participant_ids})
+    is_dm = len(all_members) == 2
+    dm_pair_key = "|".join(str(m) for m in all_members) if is_dm else None
+
+    async def _find_existing_dm() -> uuid.UUID | None:
+        return (await db.execute(
+            select(Conversation.id).where(
                 Conversation.type == "dm",
                 Conversation.org_id == org_id,
                 Conversation.project_id == body.project_id,
-                ConversationParticipant.member_id == sender.id,
+                Conversation.dm_pair_key == dm_pair_key,
             )
-        )).scalars().all()
+        )).scalar_one_or_none()
 
-        for conv_id in existing:
-            other_check = (await db.execute(
-                select(ConversationParticipant.id).where(
-                    ConversationParticipant.conversation_id == conv_id,
-                    ConversationParticipant.member_id == other_id,
-                )
-            )).scalar_one_or_none()
-            if other_check:
-                return {"id": str(conv_id), "type": "dm", "existing": True}
+    if is_dm:
+        existing = await _find_existing_dm()
+        if existing is not None:
+            return {"id": str(existing), "type": "dm", "existing": True}
 
     conv = Conversation(
         project_id=body.project_id,
         org_id=org_id,
-        type=body.type,
+        type=("dm" if is_dm else body.type),
         title=body.title,
         created_by=sender.id,
+        dm_pair_key=dm_pair_key,
     )
     db.add(conv)
-    await db.flush()
-
-    all_members = list({sender.id} | set(body.participant_ids))
-    for mid in all_members:
-        db.add(ConversationParticipant(conversation_id=conv.id, member_id=mid))
-
-    await db.commit()
+    try:
+        await db.flush()
+        for mid in all_members:
+            db.add(ConversationParticipant(conversation_id=conv.id, member_id=mid))
+        await db.commit()
+    except IntegrityError:
+        # CP2: 동시 동일 pair 생성 레이스 → uq_conversations_dm_pair 위반 → 기존 DM 반환.
+        await db.rollback()
+        if is_dm:
+            existing = await _find_existing_dm()
+            if existing is not None:
+                return {"id": str(existing), "type": "dm", "existing": True}
+        raise
     await db.refresh(conv)
     return {"id": str(conv.id), "type": conv.type, "title": conv.title, "existing": False}
 
