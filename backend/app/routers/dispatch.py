@@ -1,4 +1,5 @@
 """E-EVENTBUS P3 S12: Dispatch API — entity_type + entity_id → dispatched 이벤트."""
+import logging
 import uuid
 from datetime import datetime, timezone
 
@@ -20,6 +21,8 @@ from app.services.member_resolver import resolve_member_identity
 from app.services.notification_dispatch import dispatch_notification
 
 router = APIRouter(prefix="/api/v2/dispatch", tags=["dispatch"])
+
+logger = logging.getLogger(__name__)
 
 _ENTITY_TYPES = {"epic", "story", "doc"}
 
@@ -112,6 +115,11 @@ async def dispatch_entity(
     sender_id: uuid.UUID | None = None
     try:
         uid = uuid.UUID(auth.user_id)
+    except (ValueError, TypeError):
+        # auth.user_id가 UUID 형식이 아님 (드뭄) — sender 미해소로 진행하되 무음 금지.
+        # DB 조회 예외는 아래에서 잡지 않고 전파시켜 silent-swallow를 제거한다.
+        logger.warning("dispatch: sender_id 미해소 — auth.user_id가 UUID 아님 user_id=%r", auth.user_id)
+    else:
         sender_result = await db.execute(
             select(TeamMember.id).where(
                 (TeamMember.user_id == uid) | (TeamMember.id == uid),
@@ -131,8 +139,6 @@ async def dispatch_entity(
                 ).limit(1)
             )
             sender_id = om_result.scalar_one_or_none()
-    except Exception:
-        pass
 
     # E-EVENT-INJECT S1: connector(adapter.py)가 content 없는 이벤트를 드롭(if not content: return)하므로
     # dispatched에 top-level content를 부여 → 에이전트 work-turn으로 실제 주입.
