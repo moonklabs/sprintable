@@ -1000,6 +1000,7 @@
     "planStoriesProjectionHint": "Which projects this appears in is decided automatically by your access, independent of this selection.",
     "projectionViewDesc": "Shows organization standups from members with access to this project.",
     "projectionBanner": "This view collects organization-level standups projected onto this project. You don't write here — write in ‘Today's standup’ (once per organization).",
+    "projectScopedHint": "Select a project to see sprint context.",
     "sourceOrgLevel": "Org-level entry · submitted",
     "relatedPlan": "Related plan",
     "missingOrgStandup": "No organization standup yet",
