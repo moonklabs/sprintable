@@ -999,6 +999,7 @@
     "planStoriesProjectionHint": "표시 대상 프로젝트는 접근 권한으로 자동 결정되며, 이 선택과는 무관합니다.",
     "projectionViewDesc": "접근 권한이 있는 멤버들의 조직 스탠드업을 표시합니다.",
     "projectionBanner": "조직 레벨 작성을 이 프로젝트 기준으로 모아 보는 화면입니다. 여기서는 작성하지 않으며, 작성은 ‘오늘의 스탠드업’(조직 1회)에서 합니다.",
+    "projectScopedHint": "프로젝트를 선택하면 스프린트 컨텍스트가 표시됩니다.",
     "sourceOrgLevel": "조직 레벨 작성 · 제출됨",
     "relatedPlan": "관련 계획",
     "missingOrgStandup": "조직 스탠드업 미작성",

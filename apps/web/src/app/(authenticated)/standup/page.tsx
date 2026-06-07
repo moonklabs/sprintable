@@ -96,7 +96,6 @@ function shiftDate(dateStr: string, days: number): string {
 
 export default function StandupPage() {
   const t = useTranslations('standup');
-  const shellT = useTranslations('shell');
   const { currentTeamMemberId, projectId } = useDashboardContext();
 
   const [date, setDate] = useState(() => formatSeoulDate());
@@ -177,21 +176,6 @@ export default function StandupPage() {
     let cancelled = false;
 
     async function load() {
-      if (!projectId) {
-        if (!cancelled) {
-          setEntries([]);
-          setMembers([]);
-          setFeedback([]);
-          setMissingMembers([]);
-          setActiveSprint(null);
-          setStories([]);
-          setLoadError(null);
-          setSaveError(null);
-          setLoading(false);
-        }
-        return;
-      }
-
       if (!cancelled) {
         setLoading(true);
         setLoadError(null);
@@ -199,30 +183,46 @@ export default function StandupPage() {
       }
 
       try {
-        const [entriesRes, membersRes, sprintsRes, feedbackRes, missingRes] = await Promise.all([
-          fetch(`/api/standup?project_id=${projectId}&date=${date}`),
-          fetch(`/api/team-members?project_id=${projectId}`),
-          fetch(`/api/sprints?project_id=${projectId}&status=active`),
-          fetch(`/api/standup/feedback?project_id=${projectId}&date=${date}`),
-          fetch(`/api/standup/missing?project_id=${projectId}&date=${date}`),
+        // d9847ef0: org-level(항상) — standup entries(project_id 생략→org_id scoped 전체)·members(org-level).
+        // standalone org write 진입(프로젝트 미선택)에서도 작성/조회 가능.
+        const [entriesRes, membersRes] = await Promise.all([
+          fetch(`/api/standup?date=${date}`),
+          fetch(`/api/team-members`),
         ]);
 
-        const [entriesData, membersData, sprintsData, feedbackData] = await Promise.all([
+        const [entriesData, membersData] = await Promise.all([
           readJsonDataOrThrow<StandupEntryRow[]>(entriesRes, 'standup entries'),
           readJsonDataOrThrow<StandupMemberRow[]>(membersRes, 'team members'),
-          readJsonDataOrThrow<StandupSprintSummary[]>(sprintsRes, 'sprints'),
-          readJsonDataOrThrow<StandupFeedbackRow[]>(feedbackRes, 'standup feedback'),
         ]);
 
-        // S3: Missing = org 기준(projection get_missing). 실패해도 본 화면은 막지 않음.
-        const missingJson = await missingRes.json().catch(() => null) as { data?: { missing?: { id: string; name: string }[] } } | null;
-        const missingList = missingRes.ok ? (missingJson?.data?.missing ?? []) : [];
-
-        const sprint = sprintsData.find((item) => item.status === 'active') ?? sprintsData[0] ?? null;
+        // d9847ef0: project-scoped(projectId 있을 때만) — sprints·feedback·missing·sprint stories.
+        // missing은 get_missing_standups가 project_id REQUIRED라 project context 필수(BE 무변경).
+        let feedbackData: StandupFeedbackRow[] = [];
+        let missingList: { id: string; name: string }[] = [];
+        let sprint: StandupSprintSummary | null = null;
         let storySummaries: StandupStorySummary[] = [];
         let nextStoriesCursor: string | null = null;
 
-        if (sprint) {
+        if (projectId) {
+          const [sprintsRes, feedbackRes, missingRes] = await Promise.all([
+            fetch(`/api/sprints?project_id=${projectId}&status=active`),
+            fetch(`/api/standup/feedback?project_id=${projectId}&date=${date}`),
+            fetch(`/api/standup/missing?project_id=${projectId}&date=${date}`),
+          ]);
+
+          const [sprintsData, fbData] = await Promise.all([
+            readJsonDataOrThrow<StandupSprintSummary[]>(sprintsRes, 'sprints'),
+            readJsonDataOrThrow<StandupFeedbackRow[]>(feedbackRes, 'standup feedback'),
+          ]);
+          feedbackData = fbData;
+
+          // S3: Missing = org 기준(projection get_missing). 실패해도 본 화면은 막지 않음.
+          const missingJson = await missingRes.json().catch(() => null) as { data?: { missing?: { id: string; name: string }[] } } | null;
+          missingList = missingRes.ok ? (missingJson?.data?.missing ?? []) : [];
+
+          sprint = sprintsData.find((item) => item.status === 'active') ?? sprintsData[0] ?? null;
+
+          if (sprint) {
           const storiesRes = await fetch(`/api/stories?project_id=${projectId}&sprint_id=${sprint.id}&limit=40`);
           if (!storiesRes.ok) throw new Error('Failed to load sprint stories');
           const storiesJson = await storiesRes.json().catch(() => null);
@@ -248,6 +248,7 @@ export default function StandupPage() {
             return acc;
           }, {});
           storySummaries = storyRows.map((story) => buildStorySummary(story, taskProgressByStoryId[story.id] ?? { taskCount: 0, doneTaskCount: 0 }, memberLookup));
+          }
         }
 
         if (cancelled) return;
@@ -352,16 +353,8 @@ export default function StandupPage() {
     setRefreshToken((value) => value + 1);
   }
 
-  if (!projectId) {
-    return (
-      <>
-        <TopBarSlot title={<h1 className="text-sm font-medium">{t('title')}</h1>} />
-        <div className="flex h-64 items-center justify-center p-6">
-          <EmptyState title={shellT('projectSelectPrompt')} description={shellT('projectSelectDescription')} />
-        </div>
-      </>
-    );
-  }
+  // d9847ef0: projectId 전체 차단 제거 — org-level standup은 프로젝트 미선택에도 진입/작성/조회 가능.
+  // project-scoped 섹션만 {projectId && ...}로 조건부 렌더(아래).
 
   return (
     <>
@@ -410,7 +403,8 @@ export default function StandupPage() {
 
           {!loadError ? (
             <>
-              {/* 스프린트 섹션 — 접을 수 있는 컴팩트 카드 */}
+              {/* 스프린트 섹션 — 접을 수 있는 컴팩트 카드 (d9847ef0: project-scoped — projectId 있을 때만) */}
+              {projectId ? (
               <div className="rounded-xl border border-border bg-background">
                 <button
                   type="button"
@@ -509,9 +503,14 @@ export default function StandupPage() {
                   </div>
                 ) : null}
               </div>
+              ) : (
+                <div className="rounded-xl border border-dashed border-border bg-background p-6">
+                  <EmptyState title={t('projectScopedHint')} />
+                </div>
+              )}
 
               {/* S3(51447ca0): 프로젝트 뷰 = 접근-기반 projection(read-only). 작성은 org-level. */}
-              {!loading ? (
+              {!loading && projectId ? (
                 <Alert variant="default">
                   <AlertDescription className="text-xs">{t('projectionBanner')}</AlertDescription>
                 </Alert>
