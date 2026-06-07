@@ -711,7 +711,6 @@
     "tabMembers": "Access",
     "tabOrganization": "Organization",
     "tabOrgMembers": "People",
-    "tabWebhooks": "Webhooks",
     "tabBilling": "Billing",
     "webhookUrlInvalid": "Only HTTPS URLs or local HTTP URLs are allowed",
     "notificationChannel": "Notification Channel",
