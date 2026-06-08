@@ -320,6 +320,54 @@ async def test_list_messages_response_shape():
         app.dependency_overrides.clear()
 
 
+# ─── 03fe1663: GET /conversations/{id} — 단독 메타(project_id server-side 도출용) ──
+
+@pytest.mark.anyio
+async def test_get_conversation_200_returns_project_id():
+    """GET /conversations/{id} → 단독 메타(project_id 포함). owner org-level 접근."""
+    client, session, app = await _make_client()
+    try:
+        mock_member = _make_member()
+        mock_member.role = "owner"  # _effective_org_role owner → participant 체크 skip
+        mock_conv = _make_conv()
+        mock_conv.status = "open"
+        mock_conv.created_at = datetime(2026, 5, 14, tzinfo=timezone.utc)
+
+        conv_result = MagicMock()
+        conv_result.scalar_one_or_none.return_value = mock_conv
+        member_result = MagicMock()
+        member_result.scalars.return_value.first.return_value = mock_member
+
+        session.execute = AsyncMock(side_effect=[conv_result, member_result])
+
+        async with client as c:
+            resp = await c.get(f"/api/v2/conversations/{CONV_ID}")
+
+        assert resp.status_code == 200
+        body = resp.json()
+        assert body["id"] == str(CONV_ID)
+        assert body["project_id"] == str(PROJECT_ID)  # 업로드 path server-side 도출의 근거
+    finally:
+        app.dependency_overrides.clear()
+
+
+@pytest.mark.anyio
+async def test_get_conversation_404():
+    """존재하지 않는 conversation → 404."""
+    client, session, app = await _make_client()
+    try:
+        conv_result = MagicMock()
+        conv_result.scalar_one_or_none.return_value = None
+        session.execute = AsyncMock(side_effect=[conv_result])
+
+        async with client as c:
+            resp = await c.get(f"/api/v2/conversations/{uuid.uuid4()}")
+
+        assert resp.status_code == 404
+    finally:
+        app.dependency_overrides.clear()
+
+
 # ─── AC7: POST /conversations/{id}/messages — 전송 ──────────────────────────
 
 @pytest.mark.anyio
