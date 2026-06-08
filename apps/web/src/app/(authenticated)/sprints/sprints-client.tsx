@@ -404,12 +404,15 @@ export function SprintsClient({ projectId }: SprintsClientProps) {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ sprint_id: selected?.id ?? null }),
       });
-      if (!res.ok) return;
+      if (!res.ok) { console.error('스토리 스프린트 배정 실패', res.status); return; }
       if (selected) {
         setSprintStories((prev) => [...prev, { ...story, sprint_id: selected.id }]);
         setBacklogStories((prev) => prev.filter((s) => s.id !== story.id));
       }
-    } catch { /* noop */ }
+    } catch (err) {
+      // 71798d24: 에러를 조용히 무시하지 않는다(background 액션 — console.error).
+      console.error('스토리 스프린트 배정 실패', err);
+    }
   };
 
   const handleUnassignStory = async (story: Story) => {
@@ -419,10 +422,13 @@ export function SprintsClient({ projectId }: SprintsClientProps) {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ sprint_id: null }),
       });
-      if (!res.ok) return;
+      if (!res.ok) { console.error('스토리 스프린트 해제 실패', res.status); return; }
       setSprintStories((prev) => prev.filter((s) => s.id !== story.id));
       setBacklogStories((prev) => [...prev, { ...story, sprint_id: null }]);
-    } catch { /* noop */ }
+    } catch (err) {
+      // 71798d24: 에러를 조용히 무시하지 않는다(background 액션 — console.error).
+      console.error('스토리 스프린트 해제 실패', err);
+    }
   };
 
   if (loading) {
