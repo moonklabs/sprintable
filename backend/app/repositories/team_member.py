@@ -41,6 +41,12 @@ class TeamMemberRepository(BaseRepository[TeamMember]):
         q = select(TeamMember).where(self._org_filter())
         for attr, val in filters.items():
             q = q.where(getattr(TeamMember, attr) == val)
+        # standup-dup 근본 fix: team_members 는 0088 projection 뷰(members ⋈ project_access /
+        # ⋈ agent_project_profiles)라 멀티프로젝트 멤버가 per-project N행이 된다. org-level
+        # (project_id 미필터) 조회는 멤버 중복 → member(id) 기준 DISTINCT ON 으로 1행만 반환
+        # (org-level 계약 = unique 멤버). project_id 필터 시엔 project당 1행이라 dedup 불요(무회귀).
+        if "project_id" not in filters:
+            q = q.distinct(TeamMember.id).order_by(TeamMember.id)
         result = await self.session.execute(q.limit(limit))
         return list(result.scalars().all())
 
