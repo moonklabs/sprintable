@@ -25,7 +25,12 @@ class ProjectAccessResponse(BaseModel):
 
     id: uuid.UUID
     project_id: uuid.UUID
-    org_member_id: uuid.UUID
+    # nullable: migration 0075 가 NOT NULL 을 해제해 에이전트 direct placement(agents have no
+    # org_member)를 수용한다. 스키마가 모델(Mapped[uuid.UUID | None])을 뒤따르지 못해 에이전트
+    # 행 model_validate 시 ValidationError → GET /access 500 이던 것을 정합화한다.
+    org_member_id: uuid.UUID | None = None
+    # E-MEMBER-SSOT AC2-1 canonical 앵커 — 에이전트 행은 org_member_id 대신 member_id 로 식별.
+    member_id: uuid.UUID | None = None
     permission: str
     created_at: datetime
 
