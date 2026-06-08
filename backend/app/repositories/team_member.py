@@ -53,6 +53,12 @@ class TeamMemberRepository(BaseRepository[TeamMember]):
         m_set = {k: v for k, v in data.items() if k in _MEMBERS_FIELDS}
         a_set = {k: v for k, v in data.items() if k in _ACCESS_FIELDS}
         p_set = {k: v for k, v in data.items() if k in _PROFILE_FIELDS}
+        # webhook-save fix: 휴먼 webhook_url은 canonical webhook_configs(PUT /api/webhooks/config)로
+        # 일원화한다. agent_project_profiles 는 에이전트 전용 미러라, 휴먼 webhook_url 이 여기로
+        # 오라우팅되면 0-row UPDATE(no-op) = 200인데 persist 안 되는 silent 실패였다 → 휴먼은
+        # 이 path 에서 제외(dead-path 제거). 휴먼 webhook 저장/발송은 webhook_configs 가 유일 경로.
+        if member.type != "agent":
+            p_set.pop("webhook_url", None)
         if m_set:
             await self.session.execute(
                 sa_update(Member)
