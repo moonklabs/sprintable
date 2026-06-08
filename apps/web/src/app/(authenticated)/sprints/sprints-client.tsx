@@ -101,8 +101,9 @@ function CreateDialog({ projectId, onCreated, onClose }: CreateDialogProps) {
     try {
       const payload = {
         goal: goal.trim() || null,
-        capacity: capacity ? Number(capacity) : null,
-        team_size: teamSize ? Number(teamSize) : null,
+        // 미입력 시 null 대신 필드 omit — BFF createSprintSchema가 number().optional()이라 null은 거부하고 undefined(omit)는 통과한다.
+        ...(capacity ? { capacity: Number(capacity) } : {}),
+        ...(teamSize ? { team_size: Number(teamSize) } : {}),
         success_hypothesis: intent.success_hypothesis.trim() || null,
         metric_definition: intent.metric_definition,
         measure_after: intent.measure_after ? `${intent.measure_after}T00:00:00Z` : null,
