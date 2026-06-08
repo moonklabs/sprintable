@@ -254,7 +254,11 @@ export default function StandupPage() {
         if (cancelled) return;
 
         setEntries(entriesData);
-        setMembers(membersData);
+        // team_members 뷰는 휴먼=members⋈project_access(per-project 행)이라 org-level fetch(project_id 생략·
+        // d9847ef0)는 멀티프로젝트 멤버를 같은 id로 N행 반환한다. standup은 org-level이므로 id 기준 dedup
+        // (멤버 1회만) — 중복 카드 + React key 중복 방지. (선생님 standup 중복 렌더 버그.)
+        const uniqueMembers = Array.from(new Map(membersData.map((m) => [m.id, m])).values());
+        setMembers(uniqueMembers);
         setFeedback(feedbackData);
         setMissingMembers(missingList);
         setActiveSprint(sprint);
