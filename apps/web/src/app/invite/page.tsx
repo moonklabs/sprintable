@@ -7,14 +7,16 @@ import { Loader2 } from 'lucide-react';
 import { SprintableLogo } from '@/components/brand/sprintable-logo';
 import { cn } from '@/lib/utils';
 
+// d3619e80: invite_accept canonical InvitePreviewResponse 정합(org_name·role·status·expires_at·email).
+// inviter_name/email은 canonical 미제공(optional·미제공 시 generic 안내로 graceful degrade).
 interface InvitePreview {
-  org_id: string;
   org_name: string;
   inviter_name?: string;
   inviter_email?: string;
   role: 'admin' | 'member';
+  status?: string;
   expires_at: string;
-  invited_email: string;
+  email: string;
 }
 
 type AuthMode = 'signup' | 'login';
@@ -43,7 +45,8 @@ export default function InvitePage() {
       setErrorMsg(t('invalidToken'));
       return;
     }
-    fetch(`/api/invitations/preview?token=${encodeURIComponent(token)}`)
+    // d3619e80: invite_accept canonical(GET /api/v2/invites/{token}·InvitePreviewResponse).
+    fetch(`/api/invites/${encodeURIComponent(token)}`)
       .then(async (res) => {
         if (!res.ok) {
           const json = await res.json().catch(() => null) as { error?: { message?: string } } | null;
@@ -51,7 +54,7 @@ export default function InvitePage() {
         }
         const json = await res.json() as { data: InvitePreview };
         setPreview(json.data);
-        if (json.data.invited_email) setEmail(json.data.invited_email);
+        if (json.data.email) setEmail(json.data.email);
         const meRes = await fetch('/api/me');
         if (meRes.ok) {
           void acceptInvite(token);
@@ -68,10 +71,9 @@ export default function InvitePage() {
 
   const acceptInvite = async (inviteToken: string) => {
     setPageState('accepting');
-    const res = await fetch('/api/invitations/accept', {
+    // d3619e80: invite_accept canonical(POST /api/invites/{token}/accept).
+    const res = await fetch(`/api/invites/${encodeURIComponent(inviteToken)}/accept`, {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ token: inviteToken }),
     });
     if (res.ok) {
       setPageState('success');
