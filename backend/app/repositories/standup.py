@@ -49,22 +49,64 @@ class StandupEntryRepository(BaseRepository[StandupEntry]):
         super().__init__(StandupEntry, session, org_id)
 
     async def upsert(self, **data: Any) -> StandupEntry:
-        """UNIQUE(project_id, author_id, date) 기반 upsert."""
+        """E-STANDUP 3b6b567c: org-level upsert — 키 **(org_id, author_id, date)**.
+
+        프로젝트별 별도 행이 아니라 author+date 당 org 1엔트리. 프로젝트 surface 는
+        standup_entry_projects link 로 projection(51447ca0). project_id(origin)는 컬럼 유지
+        하되 더 이상 identity 키가 아니다. org_id 는 self.org_id(=get_verified_org_id 검증값,
+        CP3) — 클라 바디 미수용.
+        """
         existing = await self.session.execute(
             select(StandupEntry).where(
                 self._org_filter(),
-                StandupEntry.project_id == data["project_id"],
                 StandupEntry.author_id == data["author_id"],
                 StandupEntry.date == data["date"],
             )
         )
         entry = existing.scalar_one_or_none()
         if entry is not None:
-            update_data = {k: v for k, v in data.items() if k not in ("project_id", "author_id", "date")}
+            update_data = {k: v for k, v in data.items() if k not in ("author_id", "date")}
             updated = await self.update(entry.id, **update_data)
             assert updated is not None
-            return updated
-        return await self.create(**data)
+            entry = updated
+        else:
+            entry = await self.create(**data)
+        # projection link 유지 (project_id 제공 시 멱등 보장). 빈 링크/프로젝트 미선택 등
+        # full write 링크 정책은 1c2be9db(write API) 스코프.
+        project_id = data.get("project_id")
+        if project_id is not None:
+            await self.session.execute(
+                text(
+                    "INSERT INTO standup_entry_projects (id, entry_id, project_id, org_id) "
+                    "VALUES (gen_random_uuid(), :e, :p, :o) "
+                    "ON CONFLICT (entry_id, project_id) DO NOTHING"
+                ),
+                {"e": entry.id, "p": project_id, "o": self.org_id},
+            )
+        return entry
+
+    async def resync_project_links(self, entry_id: uuid.UUID, project_ids: list[uuid.UUID]) -> None:
+        """1c2be9db: org-level write — entry 의 projection 링크를 project_ids 로 **full overwrite**.
+
+        DELETE(entry_id) 후 INSERT — author 접근 프로젝트(accessible) 동기화 경로 전용
+        (CP2-B). target 에 없는 기존 링크는 삭제(접근 변동 반영·stale 0). project_ids 는
+        accessible_project_ids_in_org(canonical helper) 결과여야 한다(존재하는 project 만 — FK 안전).
+        legacy project_id 명시 write 는 이 메서드를 호출하지 않고 upsert 의 additive(ON CONFLICT
+        DO NOTHING·미삭제) 만 사용한다.
+        """
+        await self.session.execute(
+            text("DELETE FROM standup_entry_projects WHERE entry_id = :e"),
+            {"e": entry_id},
+        )
+        for pid in project_ids:
+            await self.session.execute(
+                text(
+                    "INSERT INTO standup_entry_projects (id, entry_id, project_id, org_id) "
+                    "VALUES (gen_random_uuid(), :e, :p, :o) "
+                    "ON CONFLICT (entry_id, project_id) DO NOTHING"
+                ),
+                {"e": entry_id, "p": pid, "o": self.org_id},
+            )
 
     async def get_missing(self, project_id: uuid.UUID, target_date: date) -> list[uuid.UUID]:
         """해당 날짜 standup 미제출 휴먼의 **canonical members.id** 목록 (AC3-3).

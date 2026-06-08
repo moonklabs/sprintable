@@ -10,16 +10,13 @@ from app.dependencies.database import get_db
 from app.models.project import Project
 from app.repositories.project import ProjectRepository
 from app.schemas.project import ProjectCreate, ProjectResponse, ProjectUpdate
-from app.services.project_auth import accessible_project_ids_in_org
+from app.services.project_auth import (
+    accessible_project_ids_in_org,
+    has_project_access,
+    is_org_owner_or_admin,
+)
 
 router = APIRouter(prefix="/api/v2/projects", tags=["projects"])
-
-
-def _get_repo(
-    session: AsyncSession = Depends(get_db),
-    org_id: uuid.UUID = Depends(get_verified_org_id),
-) -> ProjectRepository:
-    return ProjectRepository(session, org_id)
 
 
 @router.get("", response_model=list[ProjectResponse])
@@ -77,10 +74,14 @@ async def create_project(
 @router.get("/{id}", response_model=ProjectResponse)
 async def get_project(
     id: uuid.UUID,
-    repo: ProjectRepository = Depends(_get_repo),
+    auth: AuthContext = Depends(get_current_user),
+    org_id: uuid.UUID = Depends(get_verified_org_id),
+    session: AsyncSession = Depends(get_db),
 ) -> ProjectResponse:
-    project = await repo.get(id)
-    if project is None:
+    # 정책B 정합: 미부여 일반 org-member 는 프로젝트 존재/메타 비노출(list_projects 가시성과 일치).
+    # grant ∪ owner/admin 만 열람 허용. 미접근은 404 로 존재 자체를 숨겨 정보노출 제거.
+    project = await ProjectRepository(session, org_id).get(id)
+    if project is None or not await has_project_access(session, uuid.UUID(auth.user_id), id, org_id):
         raise HTTPException(status_code=404, detail="Project not found")
     return ProjectResponse.model_validate(project)
 
@@ -89,8 +90,16 @@ async def get_project(
 async def update_project(
     id: uuid.UUID,
     body: ProjectUpdate,
-    repo: ProjectRepository = Depends(_get_repo),
+    auth: AuthContext = Depends(get_current_user),
+    org_id: uuid.UUID = Depends(get_verified_org_id),
+    session: AsyncSession = Depends(get_db),
 ) -> ProjectResponse:
+    repo = ProjectRepository(session, org_id)
+    # 편집은 부여 멤버 ∪ owner/admin 만. 미접근은 404(비노출).
+    if await repo.get(id) is None or not await has_project_access(
+        session, uuid.UUID(auth.user_id), id, org_id
+    ):
+        raise HTTPException(status_code=404, detail="Project not found")
     data = body.model_dump(exclude_unset=True)
     project = await repo.update(id, **data)
     if project is None:
@@ -101,8 +110,22 @@ async def update_project(
 @router.delete("/{id}", status_code=200)
 async def delete_project(
     id: uuid.UUID,
-    repo: ProjectRepository = Depends(_get_repo),
+    auth: AuthContext = Depends(get_current_user),
+    org_id: uuid.UUID = Depends(get_verified_org_id),
+    session: AsyncSession = Depends(get_db),
 ) -> dict:
+    repo = ProjectRepository(session, org_id)
+    # 미접근 멤버에겐 존재 비노출(404).
+    if await repo.get(id) is None or not await has_project_access(
+        session, uuid.UUID(auth.user_id), id, org_id
+    ):
+        raise HTTPException(status_code=404, detail="Project not found")
+    # 삭제는 파괴적(stories/tasks cascade) — 접근권만으론 불가, org owner/admin 전용.
+    if not await is_org_owner_or_admin(session, uuid.UUID(auth.user_id), org_id):
+        raise HTTPException(
+            status_code=403,
+            detail="프로젝트 삭제는 조직 owner/admin 권한이 필요합니다",
+        )
     ok = await repo.delete(id)
     if not ok:
         raise HTTPException(status_code=404, detail="Project not found")

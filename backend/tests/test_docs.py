@@ -69,6 +69,9 @@ async def test_list_docs_200():
     try:
         mock_result = MagicMock()
         mock_result.scalars.return_value.all.return_value = [_mock_doc()]
+        # project_id query → get_project_scoped_org_id 의 project→org 조회. 실제 불변식
+        # (project 는 스코프 org 소속)을 반영: 같은 org 여야 cross-org 가드(c6b82459) 통과.
+        mock_result.scalar_one_or_none.return_value = ORG_ID
         session.execute = AsyncMock(return_value=mock_result)
 
         async with client as c:
@@ -182,6 +185,8 @@ async def test_list_docs_with_parent_id_200():
         child_doc.parent_id = DOC_ID
         mock_result = MagicMock()
         mock_result.scalars.return_value.all.return_value = [child_doc]
+        # project→org 조회가 스코프 org 와 일치하도록(c6b82459 cross-org 가드)
+        mock_result.scalar_one_or_none.return_value = ORG_ID
         session.execute = AsyncMock(return_value=mock_result)
 
         async with client as c:

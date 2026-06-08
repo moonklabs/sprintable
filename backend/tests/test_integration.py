@@ -52,10 +52,13 @@ async def test_tasks_list_via_conftest(test_client, mock_session):
 
 
 @pytest.mark.anyio
-async def test_docs_list_via_conftest(test_client, mock_session, project_id):
+async def test_docs_list_via_conftest(test_client, mock_session, project_id, org_id):
     """conftest fixture로 docs list 200."""
     mock_result = MagicMock()
     mock_result.scalars.return_value.all.return_value = []
+    # project_id query → get_project_scoped_org_id 의 project→org 조회. project 가 스코프
+    # org(conftest org_id) 소속이어야 cross-org 가드(c6b82459) 통과.
+    mock_result.scalar_one_or_none.return_value = org_id
     mock_session.execute = AsyncMock(return_value=mock_result)
 
     resp = await test_client.get(f"/api/v2/docs?project_id={project_id}")

@@ -233,7 +233,14 @@ async def _auto_accept_invitation(session: AsyncSession, user: User, invite_toke
         select(Invitation).where(Invitation.token == invite_token)
     )
     inv = result.scalar_one_or_none()
-    if inv is None or inv.status != "pending" or inv.expires_at < datetime.now(timezone.utc):
+    if inv is None:
+        # 05fa365f: 토큰이 구 Invitation이 아니면 OrgInvite(org_invites·project_ids 보유)일 수 있음.
+        # canonical accept로 위임 → org_member 생성 + 선택 프로젝트 project_access(granted) 부여.
+        # (signup invite_token 경로가 OrgInvite를 전혀 수락 안 하던 갭 — grant 0행 근본.)
+        from app.repositories.org_invite import OrgInviteRepository
+        await OrgInviteRepository(session).accept(invite_token, user.id, user.email)
+        return
+    if inv.status != "pending" or inv.expires_at < datetime.now(timezone.utc):
         return
     if inv.email.lower() != user.email.lower():
         return
@@ -396,15 +403,12 @@ async def _build_app_metadata(
         )
         org_inv = org_inv_result.scalar_one_or_none()
         if org_inv:
-            from sqlalchemy.dialects.postgresql import insert as pg_insert
-            await session.execute(
-                pg_insert(OrgMember)
-                .values(org_id=org_inv.organization_id, user_id=user.id, role=org_inv.role)
-                .on_conflict_do_nothing(constraint="uq_org_members_org_user")
-            )
-            org_inv.status = "accepted"
-            org_inv.accepted_at = now
-            await session.flush()
+            # 05fa365f SSOT: 자동수락(login fallback)도 **canonical accept**로 위임 — org_member 생성 +
+            # 선택 프로젝트 project_access(granted) 부여 + status=accepted를 한 경로로(명시 accept·signup과
+            # 동일). 인라인 복제 제거 → 3경로(명시·signup·login-fallback) divergence 방지. (이전엔 org_member
+            # +status만 하고 grant 스킵 → invitee grant 0행 → /api/projects=[].)
+            from app.repositories.org_invite import OrgInviteRepository
+            await OrgInviteRepository(session).accept(org_inv.token, user.id, user.email)
             return {
                 "org_id": str(org_inv.organization_id),
                 "project_id": "",

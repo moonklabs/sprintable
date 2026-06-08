@@ -62,6 +62,32 @@ async def has_project_access(
     return row.scalar_one_or_none() is not None
 
 
+async def is_org_owner_or_admin(
+    session: AsyncSession,
+    user_id: uuid.UUID,
+    org_id: uuid.UUID,
+) -> bool:
+    """user 가 해당 org 의 owner/admin 인지. 파괴적 작업(프로젝트 삭제 등) 게이트용.
+
+    grant(project_access)만으론 불가 — org-level 역할만 통과. has_project_access 의
+    owner/admin 분기와 동일 기준(team_member 봐주기 없음).
+    """
+    row = await session.execute(
+        text(
+            """
+            SELECT 1 FROM org_members
+            WHERE user_id = :user_id
+              AND org_id = :org_id
+              AND deleted_at IS NULL
+              AND role IN ('owner', 'admin')
+            LIMIT 1
+            """
+        ),
+        {"user_id": user_id, "org_id": org_id},
+    )
+    return row.scalar_one_or_none() is not None
+
+
 async def first_accessible_project_id(
     session: AsyncSession,
     user_id: uuid.UUID,
