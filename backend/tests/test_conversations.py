@@ -305,7 +305,17 @@ async def test_list_messages_response_shape():
         sender_result = MagicMock()
         sender_result.scalars.return_value.all.return_value = [mock_member]
 
-        session.execute = AsyncMock(side_effect=[conv_project_result, member_result, msgs_result, sender_result])
+        # #1262: admin-bypass=agent-only 한정 — 휴먼 판별 헬퍼가 참가자/agent 조회.
+        # agent-only 대화로 두어 owner org-level messages 접근(우회 허용)을 검증.
+        agent_id = uuid.uuid4()
+        pids_result = MagicMock()
+        pids_result.scalars.return_value.all.return_value = [agent_id]
+        agents_result = MagicMock()
+        agents_result.scalars.return_value.all.return_value = [agent_id]
+
+        session.execute = AsyncMock(side_effect=[
+            conv_project_result, member_result, pids_result, agents_result, msgs_result, sender_result,
+        ])
 
         async with client as c:
             resp = await c.get(f"/api/v2/conversations/{CONV_ID}/messages")
@@ -338,7 +348,15 @@ async def test_get_conversation_200_returns_project_id():
         member_result = MagicMock()
         member_result.scalars.return_value.first.return_value = mock_member
 
-        session.execute = AsyncMock(side_effect=[conv_result, member_result])
+        # #1262: admin-bypass=agent-only 한정 — 휴먼 판별 헬퍼가 참가자/agent 조회.
+        # 본 테스트는 agent-only 대화로 두어 owner org-level 접근(우회 허용)을 검증.
+        agent_id = uuid.uuid4()
+        pids_result = MagicMock()
+        pids_result.scalars.return_value.all.return_value = [agent_id]
+        agents_result = MagicMock()
+        agents_result.scalars.return_value.all.return_value = [agent_id]  # 전원 agent 확정
+
+        session.execute = AsyncMock(side_effect=[conv_result, member_result, pids_result, agents_result])
 
         async with client as c:
             resp = await c.get(f"/api/v2/conversations/{CONV_ID}")

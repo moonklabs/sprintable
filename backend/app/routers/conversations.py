@@ -180,6 +180,40 @@ async def _effective_org_role(
     return om_role if om_role in ("owner", "admin") else sender.role
 
 
+async def _conversation_has_human_participant(conversation_id: uuid.UUID, db: AsyncSession) -> bool:
+    """대화에 휴먼 참가자가 있으면 True(=private·admin 우회 금지).
+    보수적: agent team_member로 확정 안 된 참가자는 human 간주(grant-only/미앵커 휴먼 포함)."""
+    pids = (await db.execute(
+        select(ConversationParticipant.member_id).where(ConversationParticipant.conversation_id == conversation_id)
+    )).scalars().all()
+    if not pids:
+        return False
+    agent_ids = set((await db.execute(
+        select(TeamMember.id).where(TeamMember.id.in_(pids), TeamMember.type == "agent")
+    )).scalars().all())
+    return any(p not in agent_ids for p in pids)  # agent 확정 외 = human 보수적
+
+
+async def _conversations_with_human_participant(conv_ids: list[uuid.UUID], db: AsyncSession) -> set[uuid.UUID]:
+    """conv_ids 중 휴먼 참가자가 있는 conversation_id 집합(보수적·agent 확정 외 human)."""
+    if not conv_ids:
+        return set()
+    rows = (await db.execute(
+        select(ConversationParticipant.conversation_id, ConversationParticipant.member_id)
+        .where(ConversationParticipant.conversation_id.in_(conv_ids))
+    )).all()
+    # member_id 중 agent 확정 집합
+    all_mids = {m for _, m in rows}
+    agent_ids = set((await db.execute(
+        select(TeamMember.id).where(TeamMember.id.in_(all_mids), TeamMember.type == "agent")
+    )).scalars().all()) if all_mids else set()
+    result: set[uuid.UUID] = set()
+    for cid, mid in rows:
+        if mid not in agent_ids:  # human 참가자 발견
+            result.add(cid)
+    return result
+
+
 def _msg_payload(msg: ConversationMessage, sender: "ResolvedMember | TeamMember | None") -> dict:
     return {
         "id": str(msg.id),
@@ -546,7 +580,10 @@ async def list_conversations(
     )
     conv_ids = set(r[0] for r in conv_ids_result.all())
 
-    # AC1/2: project 내 agent type member가 participant인 conversation 포함
+    # AC1/2 + #1262: admin-bypass는 **agent-only 대화로 한정**(사적 DM 프라이버시).
+    # project 내 agent type member가 participant인 conversation 후보를 모으되,
+    # 휴먼 참가 대화(=private)는 보수적 판별로 제외 — admin에게 추가 노출 금지.
+    # (본인 참여 대화는 base conv_ids로 이미 포함되니 무관.)
     if include_agent_conversations:
         agent_ids_result = await db.execute(
             select(TeamMember.id).where(
@@ -563,7 +600,9 @@ async def list_conversations(
                     ConversationParticipant.member_id.in_(agent_ids)
                 )
             )
-            conv_ids.update(r[0] for r in agent_conv_result.all())
+            candidate_conv_ids = {r[0] for r in agent_conv_result.all()}
+            human_convs = await _conversations_with_human_participant(list(candidate_conv_ids), db)
+            conv_ids.update(candidate_conv_ids - human_convs)  # agent-only만 admin에게 추가
 
     if not conv_ids:
         return {"data": [], "total": 0, "limit": limit, "offset": offset}
@@ -642,7 +681,8 @@ async def get_conversation(
 
     03fe1663: 첨부 업로드 라우트가 attachment path의 projectId를 클라이언트 쿠키
     대신 conversation.project_id로 server-side 도출하도록 메타를 제공한다.
-    인가는 messages 조회와 동일 — owner/admin은 org-level, 그 외는 participant만.
+    인가(#1262 갱신): admin-bypass=agent-only 대화 한정 — 휴먼 참가 대화(=private)는
+    owner/admin도 participant only(사적 DM 프라이버시). 본인 참여 대화는 항상 정상.
     """
     conv = (await db.execute(
         select(Conversation).where(Conversation.id == conversation_id, Conversation.org_id == org_id)
@@ -651,7 +691,9 @@ async def get_conversation(
         raise HTTPException(status_code=404, detail="Conversation not found")
 
     sender = await _resolve_member(auth, org_id, db, project_id=None)
-    if await _effective_org_role(auth, org_id, db, sender) not in ("owner", "admin"):
+    is_admin = await _effective_org_role(auth, org_id, db, sender) in ("owner", "admin")
+    # admin이어도 휴먼 참가(private) 대화면 participant 체크 폴백
+    if (not is_admin) or await _conversation_has_human_participant(conversation_id, db):
         sender = await _resolve_member(auth, org_id, db, project_id=conv.project_id)
         participant = (await db.execute(
             select(ConversationParticipant.id).where(
@@ -686,11 +728,14 @@ async def list_messages(
     if conv_project_id is None:
         raise HTTPException(status_code=404, detail="Conversation not found")
 
-    # owner/admin: org-level 조회 (project 소속 무관 접근), member: project-level 유지
+    # #1262: admin-bypass=agent-only 대화 한정 — 휴먼 참가 대화(=private)는 participant only.
+    # owner/admin: org-level 조회(project 소속 무관 접근), member: project-level 유지
     sender = await _resolve_member(auth, org_id, db, project_id=None)
 
     # org-effective role(S-MBR-03·#1223↔SSOT뷰 갭 보정) — project role 낮아도 org owner/admin 상속
-    if await _effective_org_role(auth, org_id, db, sender) not in ("owner", "admin"):
+    is_admin = await _effective_org_role(auth, org_id, db, sender) in ("owner", "admin")
+    # admin이어도 휴먼 참가(private) 대화면 participant 체크 폴백(사적 DM 프라이버시)
+    if (not is_admin) or await _conversation_has_human_participant(conversation_id, db):
         # project isolation 보존 — project 소속 member 재확인
         sender = await _resolve_member(auth, org_id, db, project_id=conv_project_id)
         participant = (await db.execute(
