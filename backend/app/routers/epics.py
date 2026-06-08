@@ -140,10 +140,30 @@ async def delete_epic(
     id: uuid.UUID,
     repo: EpicRepository = Depends(_get_repo),
     session: AsyncSession = Depends(get_db),
+    auth: AuthContext = Depends(get_current_user),
     org_id: uuid.UUID = Depends(get_verified_org_id),
 ) -> dict:
+    """에픽 삭제 — admin/owner 전용 게이트.
+
+    파괴적 작업이므로 org-level owner/admin 만 허용한다. FE 의 requireRole 게이트는
+    Supabase 레거시(db=undefined) 의존으로 깨져 있었고 그게 유일한 admin/owner 가드였다.
+    삭제하면 권한 누수(org member/viewer 가 에픽 삭제)이므로 authz 를 BE SSOT 로 옮긴다.
+    admin/owner 는 org-wide 접근권이라 project 접근권을 자동 충족한다(별도 project 게이트 불요).
+    """
     from app.repositories.dependency import DependencyRepository
     from app.repositories.label import ItemLabelRepository
+    from app.services.project_auth import is_org_owner_or_admin
+
+    # 존재 검증 먼저(없으면 404) — authz 결과로 존재 여부가 새지 않도록 404 우선.
+    epic = await repo.get(id)
+    if epic is None:
+        raise HTTPException(status_code=404, detail="Epic not found")
+
+    if not await is_org_owner_or_admin(session, uuid.UUID(auth.user_id), org_id):
+        raise HTTPException(
+            status_code=403, detail="Epic deletion requires admin or owner role"
+        )
+
     ok = await repo.delete(id)
     if not ok:
         raise HTTPException(status_code=404, detail="Epic not found")

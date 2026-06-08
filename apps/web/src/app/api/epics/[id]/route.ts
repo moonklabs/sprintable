@@ -5,7 +5,6 @@ import { handleApiError } from '@/lib/api-error';
 import { apiSuccess, apiError, ApiErrors } from '@/lib/api-response';
 import { getAuthContext } from '@/lib/auth-helpers';
 import { createEpicRepository } from '@/lib/storage/factory';
-import { requireRole, ADMIN_ROLES } from '@/lib/role-guard';
 
 type RouteParams = { params: Promise<{ id: string }> };
 
@@ -53,11 +52,9 @@ export async function DELETE(request: Request, { params }: RouteParams) {
     if (!me) return ApiErrors.unauthorized();
     if (me.rateLimitExceeded) return ApiErrors.tooManyRequests(me.rateLimitRemaining, me.rateLimitResetAt);
 
-    if (me.type !== 'agent') {
-      const denied = await requireRole(undefined, me.org_id, ADMIN_ROLES, 'Epic deletion requires admin or owner role');
-      if (denied) return denied;
-    }
-
+    // authz(admin/owner) 는 BE delete_epic 가 SSOT. FE 의 requireRole 게이트는 Supabase
+    // 레거시(db=undefined) 의존으로 깨져 있었고, 제거 시 BE 게이트 부재면 권한 누수였으므로
+    // BE 에 authz 를 신설한 뒤 thin proxy 로 전환한다.
     const repo = await createEpicRepository();
     const service = new EpicService(repo);
     await service.delete(id, me.org_id);
