@@ -108,6 +108,10 @@ async def _enforce_agent_creator_policy(
                 # creator는 모드 무관 항상 허용 (자기 에이전트 접근)
                 is_creator = user_id is not None and user_id == agent_tm.created_by
                 if member_id not in allowed_ids and not is_creator:
+                    logger.warning(
+                        "agent creator policy 403: agent_id=%s sender_id=%s reason=allowlist_miss member_id=%s",
+                        agent_tm.id, sender.id, member_id,
+                    )
                     raise HTTPException(
                         status_code=403,
                         detail="Member is not in this agent's message allowlist",
@@ -116,8 +120,16 @@ async def _enforce_agent_creator_policy(
 
         # creator_only (default·기존 동작): 에이전트 creator가 참가자여야
         if agent_tm.created_by is None:
+            logger.warning(
+                "agent creator policy 403: agent_id=%s sender_id=%s reason=created_by_none",
+                agent_tm.id, sender.id,
+            )
             raise HTTPException(status_code=403, detail="Agent has no creator — conversation not allowed")
         if agent_tm.created_by not in human_user_ids:
+            logger.warning(
+                "agent creator policy 403: agent_id=%s sender_id=%s reason=creator_not_participant created_by=%s",
+                agent_tm.id, sender.id, agent_tm.created_by,
+            )
             raise HTTPException(status_code=403, detail="Agent's creator must be a participant in this conversation")
 
 

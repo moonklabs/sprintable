@@ -54,7 +54,11 @@ async def sync_agent_anchor_on_create(
                 await session.execute(select(Member.id).where(Member.id == owner_member_id))
             ).scalar_one_or_none()
             if member_exists is None:
-                owner_member_id = None
+                # 생성자(members 앵커 없는 휴먼·member-SSOT 갭) 휴먼 앵커를 멱등 보장 →
+                # owner_member_id 유지(NULL 떨굼 방지) → 뷰 created_by 충족 → DM 403 근본 해소.
+                # orphan-safe: ensure_human_member가 org/om 부재 시 False → 기존대로 NULL 유지.
+                if not await ensure_human_member(session, owner_member_id):
+                    owner_member_id = None
 
     # 1. members (id=team_member.id, type='agent') — 0075 에이전트 백필 동형
     await session.execute(
