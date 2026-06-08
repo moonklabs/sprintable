@@ -189,8 +189,9 @@ async def test_path4_org_member_only_no_insert_uses_first_accessible(monkeypatch
     om_res.scalar_one_or_none.return_value = org_member
 
     session = AsyncMock()
-    # fallback team_member(None) → Invitation(None) → OrgInvite(None) → org_member(found)
-    session.execute.side_effect = [none_res, none_res, none_res, om_res]
+    # fallback team_member(None) → OrgInvite(None) → org_member(found)
+    # (구 Invitation lookup은 d3619e80 cutover로 제거 — execute 1회 감소)
+    session.execute.side_effect = [none_res, none_res, om_res]
 
     monkeypatch.setattr(auth_mod, "first_accessible_project_id", AsyncMock(return_value=proj_id))
 
@@ -222,9 +223,10 @@ async def test_path4_grant_less_member_no_accessible_project_empty():
     om_res.scalar_one_or_none.return_value = org_member
 
     session = AsyncMock()
-    # Path4: fallback_tm(None)·invitation(None)·orginvite(None)·org_member(found)
+    # Path4: fallback_tm(None)·orginvite(None)·org_member(found)
+    # (구 Invitation lookup은 d3619e80 cutover로 제거 — execute 1회 감소)
     # + first_accessible: tm(None)·grant(None)·owner/admin-org-project(None — member라 EXISTS 실패)
-    session.execute.side_effect = [none_res, none_res, none_res, om_res, none_res, none_res, none_res]
+    session.execute.side_effect = [none_res, none_res, om_res, none_res, none_res, none_res]
 
     result = await _build_app_metadata(user, session)
     assert result == {"org_id": str(org_id), "project_id": "", "role": "member"}

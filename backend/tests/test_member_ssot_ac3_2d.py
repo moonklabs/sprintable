@@ -13,7 +13,6 @@ def _red_cols():
     from app.models.agent_run import AgentRun
     from app.models.file_lock import FileLock
     from app.models.hitl_config import MemberGateOverride
-    from app.models.invitation import Invitation
     from app.models.meeting import Meeting
     from app.models.policy_document import PolicyDocument
     from app.models.pm import StoryActivity, StoryComment
@@ -26,7 +25,6 @@ def _red_cols():
         (RetroAction, "assignee_id"),
         (FileLock, "member_id"),
         (MemberGateOverride, "member_id"),
-        (Invitation, "invited_by"),
         (Meeting, "created_by"),
         (PolicyDocument, "created_by"),
         (StoryComment, "created_by"),
@@ -49,9 +47,9 @@ def test_batch1b_write_routers_canonicalize():
     agent-context(hitl/file_locks/agent_runs)·policy(no-create)는 0085 no-op이라 제외."""
     import inspect
 
-    from app.routers import invitations, meetings, retros, stories
+    from app.routers import meetings, retros, stories
 
-    for mod, name in [(retros, "retros"), (invitations, "invitations"), (meetings, "meetings"), (stories, "stories")]:
+    for mod, name in [(retros, "retros"), (meetings, "meetings"), (stories, "stories")]:
         src = inspect.getsource(mod)
         assert "canonicalize_member_id" in src, f"{name} write canonicalize 누락"
     # retro 4 식별 컬럼 전부 canonicalize(created_by/author_id/voter_id/assignee_id)

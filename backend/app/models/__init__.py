@@ -15,7 +15,6 @@ from app.models.policy_document import PolicyDocument
 from app.models.audit import AuditLog
 from app.models.webhook_config import WebhookConfig
 from app.models.doc import Doc
-from app.models.invitation import Invitation
 from app.models.meeting import Meeting
 from app.models.conversation import Conversation, ConversationMessage, ConversationParticipant
 from app.models.conversation_webhook_delivery import ConversationWebhookDelivery
@@ -63,7 +62,6 @@ __all__ = [
     "Doc",
     "Epic",
     "InboxItem",
-    "Invitation",
     "Meeting",
     "Notification",
     "Conversation",

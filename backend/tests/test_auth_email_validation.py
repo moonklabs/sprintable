@@ -3,8 +3,6 @@ import pytest
 from pydantic import ValidationError
 
 from app.routers.auth import LoginRequest, RegisterRequest
-from app.schemas.invitation import CreateInvitation
-import uuid
 
 
 # ─── RegisterRequest ──────────────────────────────────────────────────────────
@@ -40,21 +38,6 @@ def test_login_email_lowercased():
 def test_login_invalid_email():
     with pytest.raises(ValidationError):
         LoginRequest(email="bad-email", password="pass")
-
-
-# ─── CreateInvitation ─────────────────────────────────────────────────────────
-
-def test_invitation_email_normalized():
-    inv = CreateInvitation(
-        email="Invited@Company.ORG",
-        invited_by=uuid.uuid4(),
-    )
-    assert inv.email == "invited@company.org"
-
-
-def test_invitation_invalid_email():
-    with pytest.raises(ValidationError):
-        CreateInvitation(email="not-an-email", invited_by=uuid.uuid4())
 
 
 # ─── 중복 차단 (대소문자) ────────────────────────────────────────────────────────

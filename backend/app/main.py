@@ -30,7 +30,7 @@ async def lifespan(app: FastAPI):
             pass
 
 
-from app.routers import account, activity_logs, agent_deployments, agent_gateway, agent_inbox, agent_message_policy, agent_personas, agent_routing_rules, agent_runs, agent_sessions, analytics, api_keys, attachments, audit_logs, auth, bridge, channel, conversations, cron, current_project, dashboard, dependencies, dispatch, docs, entities, epics, event_notifications, events, exclusion, file_locks, gates, health, hitl, hitl_config, integrations, invite_accept, invitations, labels, mcp, me, meetings, members, mockups, notification_preferences, notifications, open_api_keys, org_invites, org_members, organizations, oss, participation, plan_features, policy_documents, presence, project_access, project_settings, projects, retros, rewards, sprints, standups, stories, subscription, tasks, team_members, trust_scores, verdict_capture, verdicts, webhooks, workflow_executions, workflow_recipes, workflow_report, workflow_templates, workflow_trigger, workflow_trigger_types, workflow_versions, ws_chat
+from app.routers import account, activity_logs, agent_deployments, agent_gateway, agent_inbox, agent_message_policy, agent_personas, agent_routing_rules, agent_runs, agent_sessions, analytics, api_keys, attachments, audit_logs, auth, bridge, channel, conversations, cron, current_project, dashboard, dependencies, dispatch, docs, entities, epics, event_notifications, events, exclusion, file_locks, gates, health, hitl, hitl_config, integrations, invite_accept, labels, mcp, me, meetings, members, mockups, notification_preferences, notifications, open_api_keys, org_invites, org_members, organizations, oss, participation, plan_features, policy_documents, presence, project_access, project_settings, projects, retros, rewards, sprints, standups, stories, subscription, tasks, team_members, trust_scores, verdict_capture, verdicts, webhooks, workflow_executions, workflow_recipes, workflow_report, workflow_templates, workflow_trigger, workflow_trigger_types, workflow_versions, ws_chat
 
 app = FastAPI(
     title="Sprintable API v2",
@@ -137,7 +137,6 @@ app.include_router(notifications.router)
 app.include_router(attachments.router)
 app.include_router(notification_preferences.router)
 app.include_router(analytics.router)
-app.include_router(invitations.router)
 app.include_router(rewards.router)
 app.include_router(audit_logs.router)
 app.include_router(dashboard.router)

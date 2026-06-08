@@ -196,18 +196,6 @@ async def test_analytics_overview_via_conftest(test_client, mock_session, projec
 
 
 @pytest.mark.anyio
-async def test_invitations_list_via_conftest(test_client, mock_session):
-    """GET /api/v2/invitations 200."""
-    mock_result = MagicMock()
-    mock_result.scalars.return_value.all.return_value = []
-    mock_session.execute = AsyncMock(return_value=mock_result)
-
-    resp = await test_client.get("/api/v2/invitations")
-    assert resp.status_code == 200
-    assert resp.json() == []
-
-
-@pytest.mark.anyio
 async def test_rewards_list_via_conftest(test_client, mock_session, project_id):
     """GET /api/v2/rewards 200."""
     mock_result = MagicMock()
