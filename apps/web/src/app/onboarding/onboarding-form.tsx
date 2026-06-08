@@ -159,23 +159,8 @@ export function OnboardingForm({ initialStep, initialOrgId }: OnboardingFormProp
 
     setProjectId(project.id);
 
-    // team_member 자동 생성 (type=human)
-    const meRes = await fetch('/api/me');
-    if (meRes.ok) {
-      const meJson = await meRes.json() as { data?: { name?: string } };
-      const memberName = meJson.data?.name ?? t('unknownUser');
-      await fetch('/api/team-members', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          org_id: orgId,
-          project_id: project.id,
-          type: 'human',
-          name: memberName,
-          role: 'admin',
-        }),
-      }).catch(() => null);
-    }
+    // 휴먼 members 앵커는 BE가 org/project 생성 시 ensure_human_member로 보장한다(#1317 휴먼판).
+    // 과거 여기서 호출하던 /api/team-members(type=human) POST는 410 Gone(데드 경로)이라 제거.
 
     await fetch('/api/current-project', {
       method: 'POST',

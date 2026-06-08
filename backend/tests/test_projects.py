@@ -94,7 +94,8 @@ async def test_list_projects_empty_when_no_access():
 async def test_create_project_201():
     client, session, app = await _client()
     try:
-        with patch("app.repositories.base.BaseRepository.create", new_callable=AsyncMock) as mock_create:
+        with patch("app.repositories.base.BaseRepository.create", new_callable=AsyncMock) as mock_create, \
+                patch("app.routers.projects.ensure_human_member", new_callable=AsyncMock):
             mock_create.return_value = _mock_project()
 
             async with client as c:
