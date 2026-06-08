@@ -713,23 +713,33 @@ export default function SettingsPage() {
     }
     setWebhookErrors((prev) => ({ ...prev, [memberId]: '' }));
     setWebhookSaving(memberId);
-    const prevMembers = projectMembers;
-    setProjectMembers((prev) => prev.map((m) => m.id === memberId ? { ...m, webhook_url: url || null } : m));
     try {
-      const res = await fetch(`/api/team-members/${memberId}`, {
-        method: 'PATCH',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ webhook_url: url || null }),
-      });
-      if (!res.ok) {
-        setProjectMembers(prevMembers);
-        const json = await res.json().catch(() => ({})) as { error?: { message?: string } };
-        setWebhookErrors((prev) => ({ ...prev, [memberId]: json.error?.message ?? 'Webhook URL 저장 실패' }));
+      // 1bc9fbae/선생님 webhook-save fix: 휴먼 webhook도 canonical webhook_configs(member_id)에 write.
+      // 기존 team_member.webhook_url PATCH는 apply_anchor_update가 agent profile로 오라우팅→휴먼 drop +
+      // dispatch가 webhook_configs만 read라 미발송. 에이전트와 동일 store로 통일(persist AND 발송).
+      if (!url) {
+        // 비우기 = 기존 config DELETE(by id).
+        const existing = webhooks.find((w) => w.member_id === memberId);
+        if (existing) {
+          await fetch(`/api/webhooks/config?id=${encodeURIComponent(existing.id)}`, { method: 'DELETE' });
+        }
       } else {
-        setWebhookEditing((prev) => { const next = { ...prev }; delete next[memberId]; return next; });
+        const res = await fetch('/api/webhooks/config', {
+          method: 'PUT',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ member_id: memberId, url, project_id: currentProjectId, is_active: true }),
+        });
+        if (!res.ok) {
+          const json = await res.json().catch(() => ({})) as { error?: { message?: string } };
+          setWebhookErrors((prev) => ({ ...prev, [memberId]: json.error?.message ?? 'Webhook URL 저장 실패' }));
+          return;
+        }
       }
+      setWebhookEditing((prev) => { const next = { ...prev }; delete next[memberId]; return next; });
+      // webhook_configs 갱신 — status 배지(is_active) 정합.
+      const refresh = await fetch('/api/webhooks/config');
+      if (refresh.ok) { const j = await refresh.json() as { data?: WebhookConfig[] }; setWebhooks(j.data ?? []); }
     } catch {
-      setProjectMembers(prevMembers);
       setWebhookErrors((prev) => ({ ...prev, [memberId]: '네트워크 오류 — 다시 시도하세요.' }));
     } finally {
       setWebhookSaving(null);
@@ -1415,16 +1425,20 @@ export default function SettingsPage() {
                       </SectionCardHeader>
                       <SectionCardBody className="space-y-2">
                         {projectMembers.filter((m) => m.type === 'human').map((member) => {
-                          const draft = webhookEditing[member.id] ?? member.webhook_url ?? '';
-                          const hasUrl = Boolean(member.webhook_url);
+                          // 휴먼 webhook도 canonical webhook_configs(member_id) 기준 — 에이전트와 통일.
+                          const config = webhooks.find((w) => w.member_id === member.id);
+                          const draft = webhookEditing[member.id] ?? config?.url ?? '';
+                          const webhookStatus: 'active' | 'inactive' | 'empty' = !config?.url
+                            ? 'empty'
+                            : config.is_active ? 'active' : 'inactive';
                           const err = webhookErrors[member.id];
                           return (
                             <div key={member.id} className="rounded-md border border-border bg-muted/30 px-3 py-3">
                               <div className="flex flex-wrap items-center gap-2">
                                 <span className="min-w-0 flex-1 truncate text-sm font-medium text-foreground">{member.name}</span>
-                                <Badge variant={hasUrl ? 'success' : 'outline'} className="gap-1">
+                                <Badge variant={webhookStatus === 'active' ? 'success' : webhookStatus === 'inactive' ? 'secondary' : 'outline'} className="gap-1">
                                   <Webhook className="size-3" aria-hidden />
-                                  {hasUrl ? t('webhookStatusActive') : t('webhookStatusEmpty')}
+                                  {webhookStatus === 'active' ? t('webhookStatusActive') : webhookStatus === 'inactive' ? t('webhookStatusInactive') : t('webhookStatusEmpty')}
                                 </Badge>
                               </div>
                               <div className="mt-2 flex flex-wrap items-center gap-2">
