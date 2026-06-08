@@ -231,13 +231,39 @@ async def test_update_epic_200():
 
 # ── DELETE ────────────────────────────────────────────────────────────────────
 
+def _delete_execute(*, epic, is_admin: bool):
+    """delete_epic execute 시퀀스 모킹.
+
+    1) repo.get → 존재 검증(scalar_one_or_none=에픽)
+    2) is_org_owner_or_admin → owner/admin 행 유무(scalar_one_or_none)
+    3) repo.delete 내부 self.get → 다시 에픽(없으면 False→404)
+    이후 cascade(dependency/label delete)는 영향 없음.
+    """
+    state = {"n": 0}
+
+    async def _exec(stmt, *args, **kwargs):
+        state["n"] += 1
+        r = MagicMock()
+        if state["n"] == 1:
+            r.scalar_one_or_none.return_value = epic
+        elif state["n"] == 2:
+            r.scalar_one_or_none.return_value = 1 if is_admin else None
+        elif state["n"] == 3:
+            r.scalar_one_or_none.return_value = epic
+        else:
+            r.scalar_one_or_none.return_value = None
+            r.rowcount = 0
+        return r
+
+    return _exec
+
+
 @pytest.mark.anyio
-async def test_delete_epic_200():
+async def test_delete_epic_owner_admin_200():
+    """owner/admin 은 삭제 200."""
     client, session, app = await _client()
     try:
-        mock_result = MagicMock()
-        mock_result.scalar_one_or_none.return_value = _mock_epic()
-        session.execute = AsyncMock(return_value=mock_result)
+        session.execute = _delete_execute(epic=_mock_epic(), is_admin=True)
         session.delete = AsyncMock()
         session.flush = AsyncMock()
 
@@ -246,6 +272,41 @@ async def test_delete_epic_200():
 
         assert resp.status_code == 200
         assert resp.json()["ok"] is True
+    finally:
+        app.dependency_overrides.clear()
+
+
+@pytest.mark.anyio
+async def test_delete_epic_non_admin_403():
+    """비-admin(member/viewer) 은 삭제 403 — 권한 누수 차단."""
+    client, session, app = await _client()
+    try:
+        session.execute = _delete_execute(epic=_mock_epic(), is_admin=False)
+        session.delete = AsyncMock()
+        session.flush = AsyncMock()
+
+        async with client as c:
+            resp = await c.delete(f"/api/v2/epics/{EPIC_ID}")
+
+        assert resp.status_code == 403
+        assert "admin or owner" in resp.json()["error"]["message"]
+    finally:
+        app.dependency_overrides.clear()
+
+
+@pytest.mark.anyio
+async def test_delete_epic_404_missing():
+    """존재하지 않는 에픽은 authz 이전에 404."""
+    client, session, app = await _client()
+    try:
+        session.execute = _delete_execute(epic=None, is_admin=True)
+        session.delete = AsyncMock()
+        session.flush = AsyncMock()
+
+        async with client as c:
+            resp = await c.delete(f"/api/v2/epics/{uuid.uuid4()}")
+
+        assert resp.status_code == 404
     finally:
         app.dependency_overrides.clear()
 
