@@ -210,6 +210,8 @@ class OrgInviteRepository:
                     .on_conflict_do_nothing(constraint="uq_org_members_org_user")
                 )
                 await self.session.flush()
+                # 수락자 휴먼 members 앵커 보장(#1317 휴먼판): 재수락 경로도 누락 복구
+                await self._ensure_member_anchor(invite.organization_id, user_id)
                 # 정책B: 선택 프로젝트 project_access도 멱등 보장(재수락 시 누락 복구)
                 await self._grant_invite_project_access(invite, user_id)
                 return {
@@ -238,6 +240,9 @@ class OrgInviteRepository:
         )
         await self.session.flush()
 
+        # 수락자 휴먼 members 앵커 보장(#1317 휴먼판): created_by NULL·DM 403 공통 뿌리 해소
+        await self._ensure_member_anchor(invite.organization_id, user_id)
+
         # 정책B: 초대 시 선택한 프로젝트에 project_access(granted) 부여
         await self._grant_invite_project_access(invite, user_id)
 
@@ -246,6 +251,26 @@ class OrgInviteRepository:
         await self.session.flush()
 
         return {"ok": True, "org_id": str(invite.organization_id), "role": invite.role}
+
+    async def _ensure_member_anchor(self, org_id: uuid.UUID, user_id: uuid.UUID) -> None:
+        """수락자(휴먼)의 canonical members 앵커(type='human', id=org_member.id)를 멱등 보장.
+
+        org_member upsert 직후 그 org_member.id를 재조회해 ensure_human_member 호출.
+        앵커 부재 시 created_by NULL·assignee 누락·DM 403의 공통 뿌리가 된다(#1317 휴먼판).
+        """
+        from app.services.agent_anchor_sync import ensure_human_member
+
+        om_id = (
+            await self.session.execute(
+                select(OrgMember.id).where(
+                    OrgMember.org_id == org_id,
+                    OrgMember.user_id == user_id,
+                    OrgMember.deleted_at.is_(None),
+                ).limit(1)
+            )
+        ).scalar_one_or_none()
+        if om_id is not None:
+            await ensure_human_member(self.session, om_id)
 
     async def _grant_invite_project_access(self, invite: OrgInvite, user_id: uuid.UUID) -> None:
         """초대 시 선택한 프로젝트(invite.project_ids)에 수락 멤버의 project_access(granted) 부여.
