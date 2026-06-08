@@ -8,7 +8,7 @@ from collections import defaultdict
 from datetime import datetime, timezone
 
 from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Query
-from pydantic import BaseModel, field_validator
+from pydantic import BaseModel, ConfigDict, field_validator
 from sqlalchemy import and_, func, select, update
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -371,6 +371,23 @@ class CreateConversationRequest(BaseModel):
     project_id: uuid.UUID
 
 
+class ConversationResponse(BaseModel):
+    """단독 conversation 메타. 03fe1663: 첨부 업로드 라우트가 path projectId를
+    클라이언트 쿠키 대신 conversation.project_id로 server-side 도출하는 데 사용."""
+
+    model_config = ConfigDict(from_attributes=True)
+
+    id: uuid.UUID
+    project_id: uuid.UUID
+    org_id: uuid.UUID
+    type: str
+    title: str | None = None
+    status: str
+    created_by: uuid.UUID | None = None
+    created_at: datetime
+    updated_at: datetime
+
+
 # E-FILE S1: 채팅 첨부. GCS 기록은 FE-proxy(uploadToGcs)가 처리하고 BE는 URL+메타만 저장.
 _MAX_ATTACHMENTS = 10
 _MAX_ATTACHMENT_SIZE = 100 * 1024 * 1024  # 100MB (메타 sanity 상한)
@@ -600,6 +617,40 @@ async def list_conversations(
         })
 
     return {"data": result, "total": total, "limit": limit, "offset": offset}
+
+
+@router.get("/{conversation_id}", response_model=ConversationResponse)
+async def get_conversation(
+    conversation_id: uuid.UUID,
+    db: AsyncSession = Depends(get_db),
+    auth: AuthContext = Depends(get_current_user),
+    org_id: uuid.UUID = Depends(get_verified_org_id),
+) -> ConversationResponse:
+    """GET /api/v2/conversations/{id} — 단독 메타 조회(project_id 포함).
+
+    03fe1663: 첨부 업로드 라우트가 attachment path의 projectId를 클라이언트 쿠키
+    대신 conversation.project_id로 server-side 도출하도록 메타를 제공한다.
+    인가는 messages 조회와 동일 — owner/admin은 org-level, 그 외는 participant만.
+    """
+    conv = (await db.execute(
+        select(Conversation).where(Conversation.id == conversation_id, Conversation.org_id == org_id)
+    )).scalar_one_or_none()
+    if conv is None:
+        raise HTTPException(status_code=404, detail="Conversation not found")
+
+    sender = await _resolve_member(auth, org_id, db, project_id=None)
+    if await _effective_org_role(auth, org_id, db, sender) not in ("owner", "admin"):
+        sender = await _resolve_member(auth, org_id, db, project_id=conv.project_id)
+        participant = (await db.execute(
+            select(ConversationParticipant.id).where(
+                ConversationParticipant.conversation_id == conversation_id,
+                ConversationParticipant.member_id == sender.id,
+            )
+        )).scalar_one_or_none()
+        if participant is None:
+            raise HTTPException(status_code=403, detail="Not a participant")
+
+    return ConversationResponse.model_validate(conv)
 
 
 @router.get("/{conversation_id}/messages")
