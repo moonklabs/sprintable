@@ -11,7 +11,11 @@ substitutions:
   _DEPLOY_ENV: dev
   _FASTAPI_URL: https://sprintable-backend-dev-787818285179.asia-northeast3.run.app
   _BACKEND_MIN_INSTANCES: '1'
-  _BACKEND_MAX_INSTANCES: '3'
+  # ⚠️ maxScale 10 = 안전 상한. 산식: maxScale × (db_pool_size 5 + db_max_overflow 3) + headroom
+  #    ≤ DB max_connections(dev/prod 둘 다 100) → 10×8=80 + 20 headroom. 11+ 금지(88+ → 고갈 근접).
+  #    durable scale↑ 전제는 2c4dcae7 PgBouncer(연결 풀링으로 80 제약 해소). 그 前까지 10 캡.
+  #    (이전 '3'이 매 배포 maxScale 리셋 → 수동 fix 덮던 근본. dev/prod 공통 default.)
+  _BACKEND_MAX_INSTANCES: '10'
   _GA4_MEASUREMENT_ID: ""  # dev 기본값 빈 문자열 — prod 트리거에서 G-RYHFE7XM3X 주입
 
 steps:
