@@ -93,7 +93,7 @@ export function ChatInput({ onSend, onUploadFile, disabled, placeholder, project
   useEffect(() => {
     if (mentionQuery === null) { setMentionMembers([]); return; }
     let cancelled = false;
-    fetch(`/api/team-members?is_active=true${projectId ? `&project_id=${projectId}` : ''}`)
+    fetch(`/api/members?is_active=true${projectId ? `&project_id=${projectId}` : ''}`)
       .then((r) => r.json())
       .then((json) => {
         if (cancelled) return;

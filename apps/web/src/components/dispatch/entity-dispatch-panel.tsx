@@ -56,7 +56,7 @@ export function EntityDispatchPanel({
   }, [moreOpen]);
 
   useEffect(() => {
-    fetch(`/api/team-members?project_id=${projectId}`)
+    fetch(`/api/members?project_id=${projectId}`)
       .then((r) => r.ok ? r.json() : Promise.reject())
       .then((json) => {
         const data = (json?.data ?? json) as TeamMember[];
