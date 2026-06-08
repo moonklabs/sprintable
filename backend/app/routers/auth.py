@@ -500,8 +500,10 @@ async def register(
     await _store_refresh_token(session, user, tokens["refresh_token"], refresh_exp)
 
     # 이메일 인증 발송 — 실패해도 가입은 완료하되 **반드시 가시화**(silent swallow 금지).
-    # send_email은 bool 반환(True=Resend/SMTP 실발송, False=콘솔 폴백=미발송). 둘 다 로깅해
-    # "201인데 인증메일 안 옴" 디버깅이 가능하게 한다(데모 signup 치명 경로).
+    # send_email은 bool 반환(True=Resend/SMTP 실발송, False=콘솔 폴백=미발송). delivered를 응답
+    # email_delivered로 노출(silent swallow 금지) — FE가 "201인데 인증메일 안 옴"을 감지·안내 가능
+    # (bacefe2c: console-fallback 환경서 verify메일 안 와 stuck 되는 데모 signup 치명 경로 방어).
+    delivered = False
     try:
         verification_token = create_email_verification_token(str(user.id))
         app_url = os.getenv("NEXT_PUBLIC_APP_URL", "https://app.sprintable.ai")
@@ -527,7 +529,7 @@ async def register(
             user.id, user.email,
         )
 
-    return _ok(tokens, 201)
+    return _ok({**tokens, "email_delivered": delivered}, 201)
 
 
 # ─── POST /api/v2/auth/token ──────────────────────────────────────────────────
