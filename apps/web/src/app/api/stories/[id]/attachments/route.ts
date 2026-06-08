@@ -6,6 +6,7 @@ import { GCS_MEMO_ATTACHMENTS_BUCKET, uploadToGcs } from '@/lib/gcs';
 
 // BE _MAX_ATTACHMENT_SIZE 정합 (schemas/story.py)
 const MAX_ATTACHMENT_SIZE = 100 * 1024 * 1024; // 100MB
+const FASTAPI_URL = () => process.env['NEXT_PUBLIC_FASTAPI_URL'] ?? 'http://localhost:8000';
 
 // E-FILE S4: 스토리 첨부 파일을 서버사이드에서 GCS로 업로드하고 메타({url,name,content_type,size})를 반환.
 // chat-attach 의 conversations/attachments 와 동형. 반환 메타를 호출부에서 모아
@@ -27,7 +28,20 @@ export async function POST(
     return NextResponse.json({ error: { message: 'attachment too large (max 100MB)' } }, { status: 413 });
   }
 
-  const projectId = (formData.get('project_id') as string | null) ?? 'unknown';
+  // 03fe1663: project_id를 story에서 server-side 도출(클라이언트/쿠키 의존·'unknown' 폴백 제거).
+  // GET /api/v2/stories/{id} → story.project_id. 인가도 BE가 강제(403/404).
+  const storyRes = await fetch(new URL(`/api/v2/stories/${id}`, FASTAPI_URL()).toString(), {
+    headers: { Authorization: `Bearer ${session.access_token}` },
+    cache: 'no-store',
+  });
+  if (!storyRes.ok) {
+    return NextResponse.json({ error: { message: 'story not found or no access' } }, { status: storyRes.status === 403 ? 403 : 404 });
+  }
+  const story = (await storyRes.json().catch(() => null)) as { project_id?: string | null } | null;
+  const projectId = story?.project_id;
+  if (!projectId) {
+    return NextResponse.json({ error: { message: 'story project could not be resolved' } }, { status: 422 });
+  }
   const safeName = (file.name || 'file').replace(/[^\w.\-]+/g, '_').slice(-128) || 'file';
   const objectPath = `story/${projectId}/${id}/${randomUUID()}-${safeName}`;
 
