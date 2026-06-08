@@ -182,19 +182,25 @@ _WRITE_METHODS = frozenset({"POST", "PUT", "PATCH", "DELETE"})
 def _check_api_key_scope(auth: AuthContext, method: str, path: str | None = None) -> None:
     """API Key 경로일 때만 scope 체크 — JWT 사용자(웹 UI)는 미적용.
 
-    1) coarse read/write 게이팅(기존).
-    2) 7b63c226: path→toolset group 서버사이드 강제 — 키 scope 외 그룹 엔드포인트 직접 호출 차단
-       (MCP 클라 우회 방어·진짜 boundary). always-allowed/미매핑 면제·일반키(read/write) 무회귀.
+    1) Stage 1=레거시 scope(read/write) 한정 coarse read/write 게이팅. 툴그룹 scope 키
+       (예 ['stories'])는 'write' 토큰이 없어 coarse 게이팅이 모든 write 를 잘못 403하므로
+       (1d109a96 BYOA), 레거시 scope 를 보유한 키에만 적용한다. 툴그룹 키의 write 경계는
+       Stage 2(path) 가 강제한다.
+    2) 7b63c226: Stage 2=path→toolset group 서버사이드 강제 — 키 scope 외 그룹 엔드포인트 직접
+       호출 차단(MCP 클라 우회 방어·진짜 boundary). always-allowed/미매핑 면제·일반키 무회귀.
     """
     if not auth.claims.get("app_metadata", {}).get("api_key_id"):
         return  # JWT 경로 → 스킵
     scope: list[str] = auth.claims.get("app_metadata", {}).get("scope", ["read", "write"])
-    required = "write" if method.upper() in _WRITE_METHODS else "read"
-    if required not in scope:
-        raise HTTPException(
-            status_code=status.HTTP_403_FORBIDDEN,
-            detail=f"API Key scope '{required}' required",
-        )
+    from app.services.mcp_toolset import _LEGACY_SCOPES
+    # Stage 1: 레거시(read/write) scope 키에만 coarse 게이팅. 툴그룹 scope 키는 Stage 2(path)가 강제.
+    if set(scope) & _LEGACY_SCOPES:
+        required = "write" if method.upper() in _WRITE_METHODS else "read"
+        if required not in scope:
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail=f"API Key scope '{required}' required",
+            )
     if path is not None:
         from app.services.mcp_toolset import path_allowed_for_scope, path_to_tool_group
         if not path_allowed_for_scope(path, scope):
