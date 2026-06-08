@@ -1,6 +1,6 @@
 'use client';
 
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import { useTranslations } from 'next-intl';
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from '@/components/ui/dialog';
 import { OperatorInput } from '@/components/ui/operator-control';
@@ -39,10 +39,20 @@ export function AddMemberModal({ open, onClose, orgId, projects, defaultType = '
   const [agentProjectId, setAgentProjectId] = useState('');
 
   const reset = () => {
+    setType(defaultType);
     setEmail(''); setRole('member'); setProjectIds([]);
     setAgentName(''); setAgentProjectId(''); setError(null);
   };
   const close = () => { reset(); onClose(); };
+
+  // CP4(까심): 모달은 열릴 때마다 fresh state로 — type을 현 defaultType(활성 subtab)에 동기화 +
+  // 폼/error 초기화. close→reopen 시 직전 선택(예: 에이전트) persist 방지.
+  useEffect(() => {
+    if (!open) return;
+    setType(defaultType);
+    setEmail(''); setRole('member'); setProjectIds([]);
+    setAgentName(''); setAgentProjectId(''); setError(null);
+  }, [open, defaultType]);
   const toggleProject = (id: string) =>
     setProjectIds((prev) => (prev.includes(id) ? prev.filter((x) => x !== id) : [...prev, id]));
 
