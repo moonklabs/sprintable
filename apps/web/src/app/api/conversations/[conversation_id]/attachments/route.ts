@@ -6,6 +6,7 @@ import { GCS_MEMO_ATTACHMENTS_BUCKET, uploadToGcs } from '@/lib/gcs';
 
 // BE _MAX_ATTACHMENT_SIZE 정합 (conversations.py)
 const MAX_ATTACHMENT_SIZE = 100 * 1024 * 1024; // 100MB
+const FASTAPI_URL = () => process.env['NEXT_PUBLIC_FASTAPI_URL'] ?? 'http://localhost:8000';
 
 // chat-attach: 파일을 서버사이드에서 GCS로 업로드하고 메시지 첨부 메타({url,name,content_type,size})를 돌려준다.
 // 업로드된 GCS object URL은 리로드/다른 인스턴스에서도 유효(multi-instance safe) — BE 계약대로
@@ -27,7 +28,20 @@ export async function POST(
     return NextResponse.json({ error: { message: 'attachment too large (max 100MB)' } }, { status: 413 });
   }
 
-  const projectId = (formData.get('project_id') as string | null) ?? 'unknown';
+  // 03fe1663: project_id를 conversation에서 server-side 도출(클라이언트/쿠키 의존·'unknown' 폴백 제거).
+  // #1299 GET /api/v2/conversations/{id} → conversation.project_id. 인가도 BE가 강제(403/404).
+  const convRes = await fetch(new URL(`/api/v2/conversations/${conversation_id}`, FASTAPI_URL()).toString(), {
+    headers: { Authorization: `Bearer ${session.access_token}` },
+    cache: 'no-store',
+  });
+  if (!convRes.ok) {
+    return NextResponse.json({ error: { message: 'conversation not found or no access' } }, { status: convRes.status === 403 ? 403 : 404 });
+  }
+  const conv = (await convRes.json().catch(() => null)) as { project_id?: string | null } | null;
+  const projectId = conv?.project_id;
+  if (!projectId) {
+    return NextResponse.json({ error: { message: 'conversation project could not be resolved' } }, { status: 422 });
+  }
   const safeName = (file.name || 'file').replace(/[^\w.\-]+/g, '_').slice(-128) || 'file';
   const objectPath = `chat/${projectId}/${conversation_id}/${randomUUID()}-${safeName}`;
 

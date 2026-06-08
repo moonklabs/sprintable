@@ -415,7 +415,7 @@ export function StoryDetailPanel({ story, tasks, nextTasksCursor = null, loading
       for (const file of files.slice(0, room)) {
         const fd = new FormData();
         fd.append('file', file);
-        if (projectId) fd.append('project_id', projectId);
+        // 03fe1663: project_id는 업로드 라우트가 story에서 server-side 도출(클라이언트 전달 불요).
         const res = await fetch(`/api/stories/${story.id}/attachments`, { method: 'POST', body: fd });
         if (!res.ok) throw new Error('upload failed');
         uploaded.push(await res.json() as SendAttachment);
