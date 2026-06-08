@@ -24,12 +24,8 @@ def test_projects_no_human_team_member_creation():
     )
 
 
-def test_invitations_no_human_team_member_creation():
-    """invitations accept 소스에 type='human' team_member 생성 로직 없음."""
-    from app.routers import invitations
-    source = inspect.getsource(invitations)
-    # human team_member 생성 코드 블록 제거됨
-    assert "type=\"human\"" not in source or "TeamMember(" not in source
+# 구 invitations 라우터(Invitation)는 d3619e80 cutover로 제거 — canonical=org_invites/invite_accept.
+# 자동수락 휴먼 team_member 미생성 회귀는 auth/org_invite 경로(아래 test_auth_no_human_team_member_on_invite)로 유지.
 
 
 def test_auth_no_human_team_member_on_invite():
@@ -54,13 +50,6 @@ def test_projects_ensures_org_member():
     source = inspect.getsource(projects.create_project)
     assert "org_members" in source
     assert "ON CONFLICT" in source
-
-
-def test_invitations_keeps_org_member_creation():
-    """invitations accept 소스에 org_member 생성 유지됨."""
-    from app.routers import invitations
-    source = inspect.getsource(invitations)
-    assert "OrgMember" in source or "org_members" in source
 
 
 # ─── AC3: story/task assignee — E-MEMBER-SSOT AC3-2(0078)에서 계약 변경 ──────────

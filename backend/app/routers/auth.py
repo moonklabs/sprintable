@@ -52,7 +52,6 @@ from app.core.rate_limit import limiter
 from app.dependencies.auth import AuthContext, get_current_user
 from app.services.project_auth import has_project_access, first_accessible_project_id
 from app.dependencies.database import get_db
-from app.models.invitation import Invitation
 from app.models.member import Member
 from app.models.org_invite import OrgInvite
 from app.models.project import OrgMember
@@ -227,32 +226,14 @@ class SetPasswordRequest(BaseModel):
 # ─── Helpers ──────────────────────────────────────────────────────────────────
 
 async def _auto_accept_invitation(session: AsyncSession, user: User, invite_token: str) -> None:
-    """가입 시 invite_token이 있으면 해당 초대 자동 수락 + org_member 생성."""
-    from app.models.invitation import Invitation
-    result = await session.execute(
-        select(Invitation).where(Invitation.token == invite_token)
-    )
-    inv = result.scalar_one_or_none()
-    if inv is None:
-        # 05fa365f: 토큰이 구 Invitation이 아니면 OrgInvite(org_invites·project_ids 보유)일 수 있음.
-        # canonical accept로 위임 → org_member 생성 + 선택 프로젝트 project_access(granted) 부여.
-        # (signup invite_token 경로가 OrgInvite를 전혀 수락 안 하던 갭 — grant 0행 근본.)
-        from app.repositories.org_invite import OrgInviteRepository
-        await OrgInviteRepository(session).accept(invite_token, user.id, user.email)
-        return
-    if inv.status != "pending" or inv.expires_at < datetime.now(timezone.utc):
-        return
-    if inv.email.lower() != user.email.lower():
-        return
-    inv.status = "accepted"
-    inv.accepted_at = datetime.now(timezone.utc)
-    from sqlalchemy.dialects.postgresql import insert as pg_insert
-    await session.execute(
-        pg_insert(OrgMember)
-        .values(org_id=inv.org_id, user_id=user.id, role=inv.role)
-        .on_conflict_do_nothing(constraint="uq_org_members_org_user")
-    )
-    await session.flush()
+    """가입 시 invite_token이 있으면 해당 초대 자동 수락 + org_member 생성.
+
+    canonical=OrgInvite(org_invites) 단일 경로. accept로 위임 → org_member 생성 +
+    선택 프로젝트 project_access(granted) 부여 + status=accepted를 한 경로로 처리한다.
+    (구 Invitation 테이블은 d3619e80 cutover로 제거 — #1307에서 pending 토큰 org_invites 이전 完.)
+    """
+    from app.repositories.org_invite import OrgInviteRepository
+    await OrgInviteRepository(session).accept(invite_token, user.id, user.email)
 
 
 async def _get_user_by_email(session: AsyncSession, email: str) -> User | None:
@@ -365,35 +346,10 @@ async def _build_app_metadata(
 
     if not member:
         # 2. 이메일로 pending 초대 조회 → 자동 수락 + org_member 생성
-        # 2a. Invitation (invitations 테이블 — /api/v2/invitations 경로)
-        now = datetime.now(timezone.utc)
-        inv_result = await session.execute(
-            select(Invitation).where(
-                Invitation.email == user.email,
-                Invitation.status == "pending",
-                Invitation.expires_at > now,
-            ).order_by(Invitation.created_at.asc()).limit(1)
-        )
-        inv = inv_result.scalar_one_or_none()
-        if inv:
-            inv.status = "accepted"
-            inv.accepted_at = now
-            from sqlalchemy.dialects.postgresql import insert as pg_insert
-            await session.execute(
-                pg_insert(OrgMember)
-                .values(org_id=inv.org_id, user_id=user.id, role=inv.role)
-                .on_conflict_do_nothing(constraint="uq_org_members_org_user")
-            )
-            # human team_member 생성 제거 — org_members 기반 opt-out 모델로 이전 (E-ENTITY-CLEANUP S5).
-            await session.flush()
-            return {
-                "org_id": str(inv.org_id),
-                "project_id": str(inv.project_id) if inv.project_id else "",
-                "role": inv.role,
-            }
-
-        # 2b. OrgInvite (org_invites 테이블 — /api/v2/invites 경로)
+        # OrgInvite (org_invites 테이블 — canonical /api/v2/invites 경로).
+        # 구 Invitation(invitations) 경로는 d3619e80 cutover로 제거 — org_invites가 단일 SSOT.
         # invite link 가입 후 explicit accept 없이 로그인 시 자동 수락 fallback.
+        now = datetime.now(timezone.utc)
         org_inv_result = await session.execute(
             select(OrgInvite).where(
                 OrgInvite.email == user.email.lower(),
