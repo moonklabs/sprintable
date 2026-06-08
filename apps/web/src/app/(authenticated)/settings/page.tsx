@@ -286,7 +286,8 @@ export default function SettingsPage() {
   };
 
   const refreshInvitations = async () => {
-    const res = await fetch('/api/invitations');
+    if (!orgId) return; // d3619e80: org_invites canonical(레거시 /api/invitations 폐기).
+    const res = await fetch(`/api/organizations/${orgId}/invites`);
     if (res.ok) {
       const json = await res.json();
       setInvitations(json.data ?? []);
@@ -299,9 +300,10 @@ export default function SettingsPage() {
   };
 
   const handleRevokeInvite = async (inviteId: string) => {
+    if (!orgId) return;
     setRevokingInviteId(inviteId);
     try {
-      const res = await fetch(`/api/invitations/${inviteId}`, { method: 'DELETE' });
+      const res = await fetch(`/api/organizations/${orgId}/invites/${inviteId}`, { method: 'DELETE' });
       if (res.ok) await refreshInvitations();
     } finally {
       setRevokingInviteId(null);
@@ -309,10 +311,11 @@ export default function SettingsPage() {
   };
 
   const handleResendInvite = async (inviteId: string) => {
+    if (!orgId) return;
     setResendingInviteId(inviteId);
     setResendResult(null);
     try {
-      const res = await fetch(`/api/invitations/${inviteId}/resend`, { method: 'POST' });
+      const res = await fetch(`/api/organizations/${orgId}/invites/${inviteId}/resend`, { method: 'POST' });
       if (res.ok) {
         const json = await res.json();
         setResendResult({ id: inviteId, url: json.data?.invite_url ?? '' });
