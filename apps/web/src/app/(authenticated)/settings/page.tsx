@@ -5,9 +5,10 @@ import { useDashboardContext } from '@/app/dashboard/dashboard-shell';
 import Link from 'next/link';
 import { useRouter, useSearchParams } from 'next/navigation';
 import { useTranslations } from 'next-intl';
-import { BarChart2, Bell, Bot, Check, CreditCard, FolderKanban, GitBranch, Menu, Palette, Trash2, User, Users, Webhook, X } from 'lucide-react';
+import { BarChart2, Bell, Bot, Check, CreditCard, FolderKanban, GitBranch, Menu, Palette, Plus, Trash2, User, Users, Webhook, X } from 'lucide-react';
 import { UsageDashboard } from '@/components/settings/usage-dashboard';
 import { OrgMembersSection } from '@/components/settings/org-members-section';
+import { AddMemberModal } from '@/components/settings/add-member-modal';
 import { ProjectAccessSection } from '@/components/settings/project-access-section';
 
 import { AiSettingsSection } from '@/components/settings/ai-settings';
@@ -194,6 +195,7 @@ export default function SettingsPage() {
   const [resendResult, setResendResult] = useState<{ id: string; url: string } | null>(null);
   const [graceUntil, setGraceUntil] = useState<string | null>(null);
   const [membersSubTab, setMembersSubTab] = useState<'people' | 'agents'>('people');
+  const [addMemberOpen, setAddMemberOpen] = useState(false); // 7363ec8a: 통합 "+멤버 추가" 모달
   const [orgAgents, setOrgAgents] = useState<ProjectMember[]>([]);
   const [newAgentName, setNewAgentName] = useState('');
   const [newAgentProjectId, setNewAgentProjectId] = useState('');
@@ -1239,22 +1241,29 @@ export default function SettingsPage() {
             </TabsContent>
 
             <TabsContent value="members">
-              {/* People / Agents 서브탭 */}
-              <div className="mb-6 flex gap-1 rounded-lg border border-border bg-muted/30 p-1">
-                <button
-                  type="button"
-                  onClick={() => setMembersSubTab('people')}
-                  className={`flex-1 rounded-md px-3 py-1.5 text-sm font-medium transition-colors ${membersSubTab === 'people' ? 'bg-background text-foreground shadow-sm' : 'text-muted-foreground hover:text-foreground'}`}
-                >
-                  {t('membersTabPeople')}
-                </button>
-                <button
-                  type="button"
-                  onClick={() => setMembersSubTab('agents')}
-                  className={`flex-1 rounded-md px-3 py-1.5 text-sm font-medium transition-colors ${membersSubTab === 'agents' ? 'bg-background text-foreground shadow-sm' : 'text-muted-foreground hover:text-foreground'}`}
-                >
-                  {t('membersTabAgents')}
-                </button>
+              {/* 7363ec8a: People/Agents 공통 헤더 — 서브탭 토글 + "+멤버 추가" 단일 진입(분산 해소). */}
+              <div className="mb-6 flex items-center gap-3">
+                <div className="flex flex-1 gap-1 rounded-lg border border-border bg-muted/30 p-1">
+                  <button
+                    type="button"
+                    onClick={() => setMembersSubTab('people')}
+                    className={`flex-1 rounded-md px-3 py-1.5 text-sm font-medium transition-colors ${membersSubTab === 'people' ? 'bg-background text-foreground shadow-sm' : 'text-muted-foreground hover:text-foreground'}`}
+                  >
+                    {t('membersTabPeople')}
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setMembersSubTab('agents')}
+                    className={`flex-1 rounded-md px-3 py-1.5 text-sm font-medium transition-colors ${membersSubTab === 'agents' ? 'bg-background text-foreground shadow-sm' : 'text-muted-foreground hover:text-foreground'}`}
+                  >
+                    {t('membersTabAgents')}
+                  </button>
+                </div>
+                {isAdmin ? (
+                  <Button variant="hero" size="sm" className="shrink-0 gap-1.5" onClick={() => setAddMemberOpen(true)}>
+                    <Plus className="size-3.5" /> {t('addMember')}
+                  </Button>
+                ) : null}
               </div>
 
               {membersSubTab === 'agents' ? (
@@ -1655,6 +1664,19 @@ export default function SettingsPage() {
             </div>
           </div>
         </div>
+      ) : null}
+      {orgId ? (
+        <AddMemberModal
+          open={addMemberOpen}
+          onClose={() => setAddMemberOpen(false)}
+          orgId={orgId}
+          projects={projects.map((p) => ({ id: p.id, name: p.name }))}
+          defaultType={membersSubTab === 'agents' ? 'agent' : 'human'}
+          onAdded={(type, message) => {
+            addToast({ type: 'success', title: message });
+            if (type === 'agent') void refreshOrgAgents();
+          }}
+        />
       ) : null}
       <ToastContainer toasts={toasts} onDismiss={dismissToast} />
     </>
