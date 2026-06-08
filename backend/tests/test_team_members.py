@@ -272,3 +272,36 @@ async def test_apply_anchor_update_agent_webhook_url_kept():
 
     # 에이전트 → p_set 유지 → AgentProjectProfile UPDATE execute 1회
     assert session.execute.await_count == 1
+
+
+# ─── standup-dup fix: org-level team_members DISTINCT ON(id) dedup ──────────────
+
+@pytest.mark.anyio
+async def test_list_org_level_distinct_on_id():
+    """team_members 뷰(0088 projection·members⋈project_access)는 멀티프로젝트 멤버가
+    per-project N행 → org-level(project_id 미필터)은 DISTINCT ON(id)로 멤버 1행만(unique)."""
+    from sqlalchemy.dialects import postgresql
+
+    from app.repositories.team_member import TeamMemberRepository
+
+    captured = []
+
+    async def cap(q, *args, **kwargs):
+        captured.append(q)
+        r = MagicMock()
+        r.scalars.return_value.all.return_value = []
+        return r
+
+    session = AsyncMock()
+    session.execute = cap
+    repo = TeamMemberRepository(session, ORG_ID)
+
+    # org-level: project_id 미필터 → DISTINCT ON 적용(멤버 dedup)
+    await repo.list()
+    org_sql = str(captured[-1].compile(dialect=postgresql.dialect()))
+    assert "DISTINCT ON" in org_sql
+
+    # project-scoped: project당 1행이라 dedup 불요(무회귀)
+    await repo.list(project_id=PROJECT_ID)
+    proj_sql = str(captured[-1].compile(dialect=postgresql.dialect()))
+    assert "DISTINCT ON" not in proj_sql
