@@ -132,6 +132,9 @@ async def test_create_team_member_201():
 
         assert resp.status_code == 201
         assert resp.json()["name"] == "TestBot"
+        # 8d02d5e8: 온보딩 에이전트 키 scope = list(ALL_GROUPS) 명시(레거시 None 아님·툴그룹 모델 일관)
+        from app.services.mcp_toolset import ALL_GROUPS
+        assert mock_api_key.call_args.kwargs.get("scope") == list(ALL_GROUPS)
     finally:
         app.dependency_overrides.clear()
 
