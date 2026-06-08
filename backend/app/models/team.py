@@ -22,7 +22,6 @@ class TeamMember(Base, OrgScopedMixin, TimestampMixin):
     role: Mapped[str] = mapped_column(String(50), nullable=False, default="member")
     avatar_url: Mapped[str | None] = mapped_column(Text, nullable=True)
     agent_config: Mapped[dict | None] = mapped_column(JSONB, nullable=True)
-    webhook_url: Mapped[str | None] = mapped_column(Text, nullable=True)
     is_active: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True)
     color: Mapped[str] = mapped_column(Text, nullable=False, default="#3385f8")
     agent_role: Mapped[str | None] = mapped_column(Text, nullable=True)

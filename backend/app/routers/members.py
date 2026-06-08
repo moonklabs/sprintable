@@ -20,7 +20,6 @@ class MemberResponse(BaseModel):
     type: str
     role: str
     is_active: bool
-    webhook_url: str | None = None
 
 
 @router.get("", response_model=list[MemberResponse])

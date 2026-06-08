@@ -13,10 +13,10 @@ from app.repositories.base import BaseRepository
 # AC3-4 2-2: team_members가 projection 뷰로 강등됨 → write를 앵커 테이블로 라우팅(anchor-only).
 # PATCH 필드 → 앵커 매핑(0088 뷰 정의와 정합):
 #   name/avatar_url/is_active → members,  role/color/can_manage_members → project_access(per-project),
-#   agent_config/webhook_url/agent_role → agent_project_profiles.
+#   agent_config/agent_role → agent_project_profiles.
 _MEMBERS_FIELDS = {"name", "avatar_url", "is_active"}
 _ACCESS_FIELDS = {"role", "color", "can_manage_members"}
-_PROFILE_FIELDS = {"agent_config", "webhook_url", "agent_role"}
+_PROFILE_FIELDS = {"agent_config", "agent_role"}
 
 
 class TeamMemberRepository(BaseRepository[TeamMember]):
@@ -59,12 +59,6 @@ class TeamMemberRepository(BaseRepository[TeamMember]):
         m_set = {k: v for k, v in data.items() if k in _MEMBERS_FIELDS}
         a_set = {k: v for k, v in data.items() if k in _ACCESS_FIELDS}
         p_set = {k: v for k, v in data.items() if k in _PROFILE_FIELDS}
-        # webhook-save fix: 휴먼 webhook_url은 canonical webhook_configs(PUT /api/webhooks/config)로
-        # 일원화한다. agent_project_profiles 는 에이전트 전용 미러라, 휴먼 webhook_url 이 여기로
-        # 오라우팅되면 0-row UPDATE(no-op) = 200인데 persist 안 되는 silent 실패였다 → 휴먼은
-        # 이 path 에서 제외(dead-path 제거). 휴먼 webhook 저장/발송은 webhook_configs 가 유일 경로.
-        if member.type != "agent":
-            p_set.pop("webhook_url", None)
         if m_set:
             await self.session.execute(
                 sa_update(Member)
