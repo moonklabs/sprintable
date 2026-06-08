@@ -137,3 +137,47 @@ def test_migration_has_downgrade():
         content = f.read()
     assert "def downgrade" in content
     assert "drop_table" in content
+
+
+# ─── access 500 fix: ProjectAccessResponse org_member_id Optional (0075 에이전트 placement) ──
+
+def test_response_accepts_null_org_member_id():
+    """에이전트 direct placement 행(org_member_id NULL·0075 NOT NULL 해제)을
+    ProjectAccessResponse 가 수용. org_member_id required 였을 때 GET /access 가 500이었다."""
+    import uuid
+    from datetime import datetime, timezone
+    from unittest.mock import MagicMock
+
+    from app.routers.project_access import ProjectAccessResponse
+
+    r = MagicMock()
+    r.id = uuid.uuid4()
+    r.project_id = uuid.uuid4()
+    r.org_member_id = None  # 에이전트는 org_member 없음
+    r.member_id = uuid.uuid4()  # canonical 앵커로 식별
+    r.permission = "granted"
+    r.created_at = datetime.now(timezone.utc)
+
+    v = ProjectAccessResponse.model_validate(r)
+    assert v.org_member_id is None
+    assert v.member_id is not None
+
+
+def test_response_accepts_human_org_member_id():
+    """휴먼 행(org_member_id set) 무회귀."""
+    import uuid
+    from datetime import datetime, timezone
+    from unittest.mock import MagicMock
+
+    from app.routers.project_access import ProjectAccessResponse
+
+    r = MagicMock()
+    r.id = uuid.uuid4()
+    r.project_id = uuid.uuid4()
+    r.org_member_id = uuid.uuid4()
+    r.member_id = None
+    r.permission = "granted"
+    r.created_at = datetime.now(timezone.utc)
+
+    v = ProjectAccessResponse.model_validate(r)
+    assert v.org_member_id is not None
