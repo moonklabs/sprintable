@@ -242,8 +242,14 @@ async def create_team_member(
     api_key_plaintext: str | None = None
     if body.type == "agent":
         from app.repositories.api_key import ApiKeyRepository
+        from app.services.mcp_toolset import ALL_GROUPS
         api_key_repo = ApiKeyRepository(session)
-        _api_key_obj, api_key_plaintext = await api_key_repo.create(team_member_id=member.id)
+        # 8d02d5e8: 온보딩 에이전트 키도 명시적 툴그룹 scope(전 비파괴 그룹) 부여 — 고급 Tool-permissions
+        # UI와 동일 모델로 통일. scope=None(레거시 read/write fallback) 대신 list(ALL_GROUPS) 명시.
+        # 동작 동일(resolve_policy None=전체)이나 모델 일관·레거시 표기 제거.
+        _api_key_obj, api_key_plaintext = await api_key_repo.create(
+            team_member_id=member.id, scope=list(ALL_GROUPS)
+        )
         # E-MSG-POLICY S2: creator를 agent allow_list에 자동 등록(같은 트랜잭션·멱등).
         from app.services.agent_message_policy import ensure_creator_allowlisted
         await ensure_creator_allowlisted(session, member.id)
