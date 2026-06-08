@@ -1,6 +1,7 @@
 'use client';
 
 import { useEffect, useMemo, useState } from 'react';
+import Link from 'next/link';
 import { useTranslations } from 'next-intl';
 import { Alert, AlertDescription } from '@/components/ui/alert';
 import { Badge } from '@/components/ui/badge';
@@ -630,6 +631,15 @@ export default function StandupPage() {
                                       </label>
                                     );
                                   })}
+                                </div>
+                              ) : !projectId ? (
+                                // org write(프로젝트 미선택): 스프린트 컨텍스트 없음 — 프로젝트 선택 안내.
+                                <p className="text-sm text-muted-foreground">{t('storyPickerEmptyNoProject')}</p>
+                              ) : !activeSprint ? (
+                                // 프로젝트 있으나 활성 스프린트 0: 빈 selector가 "없음"으로 오인되던 것 — 안내 + 활성화 CTA.
+                                <div className="space-y-1.5">
+                                  <p className="text-sm text-muted-foreground">{t('storyPickerEmptyNoSprint')}</p>
+                                  <Link href="/sprints" className="inline-block text-xs font-medium text-primary hover:underline">{t('storyPickerManageSprints')}</Link>
                                 </div>
                               ) : (
                                 <p className="text-sm text-muted-foreground">{t('noSprintStories')}</p>
