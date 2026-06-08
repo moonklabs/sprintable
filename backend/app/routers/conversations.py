@@ -41,6 +41,8 @@ async def _enforce_agent_creator_policy(
     sender: "ResolvedMember | TeamMember",
     participant_ids: list[uuid.UUID],
     db: AsyncSession,
+    auth: AuthContext,
+    org_id: uuid.UUID,
 ) -> None:
     """⭐ 불변식: 휴먼↔에이전트 대화 — 각 에이전트의 creator가 참가자(sender ∪ participant_ids)에 있어야.
 
@@ -91,12 +93,21 @@ async def _enforce_agent_creator_policy(
 
     human_user_ids: set[uuid.UUID] = {u for _, u in humans if u}
 
+    # P0 fix(Ohol DM 403): created_by=None 레거시 에이전트(seed/이관 전 row 등)는 creator-동석
+    # 불변식을 적용할 수 없다. sender가 org owner/admin이면 자기 org 에이전트와의 DM 을 허용한다
+    # (관리자 권한·creator 부재 시 면제). 비-admin 또는 created_by 보유 케이스는 무회귀.
+    sender_is_org_admin = await _effective_org_role(auth, org_id, db, sender) in ("owner", "admin")
+
     # E-MSG-POLICY S1: 각 에이전트의 message_policy_mode 별 인가
     for agent_tm in agent_tms:
         mode = getattr(agent_tm, "message_policy_mode", None) or "creator_only"
 
         if mode == "org_wide":
             continue  # org 내 휴먼 전부 허용 (참가자는 이미 org-scoped) → 통과
+
+        # created_by=None 에이전트 + org owner/admin sender → 게이트 면제(creator_only·list 무관·관리자 권한)
+        if agent_tm.created_by is None and sender_is_org_admin:
+            continue
 
         if mode == "list":
             allowed_ids = set((await db.execute(
@@ -460,7 +471,7 @@ async def create_conversation(
     sender = await _resolve_member(auth, org_id, db, project_id=body.project_id)
 
     # ⭐ 인가 불변식: 휴먼↔에이전트 대화 — 에이전트 creator 동석 필수
-    await _enforce_agent_creator_policy(sender, body.participant_ids, db)
+    await _enforce_agent_creator_policy(sender, body.participant_ids, db, auth, org_id)
 
     # 179db213: 1-pair=1-DM enforce — resolved member set 이 정확히 2명이면 DM 으로 dedup
     # (body.type label 무관). dm_pair_key(정렬쌍)로 기존 DM 조회→반환. ≥3명/단독은 group.
@@ -760,7 +771,7 @@ async def add_participant(
         select(ConversationParticipant.member_id)
         .where(ConversationParticipant.conversation_id == conversation_id)
     )).scalars().all()
-    await _enforce_agent_creator_policy(sender, list(set(_existing_ids) | {body.member_id}), db)
+    await _enforce_agent_creator_policy(sender, list(set(_existing_ids) | {body.member_id}), db, auth, org_id)
 
     # DM → 기존 DM 유지, 기존 참여자 + 신규 참여자로 그룹 conversation fork
     if conv.type == "dm":
