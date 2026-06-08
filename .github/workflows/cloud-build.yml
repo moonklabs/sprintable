@@ -46,16 +46,17 @@ jobs:
             echo "target=prod" >> "$GITHUB_OUTPUT"
             echo "fastapi_url=https://sprintable-backend-prod-787818285179.asia-northeast3.run.app" >> "$GITHUB_OUTPUT"
             echo "backend_min_instances=1" >> "$GITHUB_OUTPUT"
-            echo "backend_max_instances=10" >> "$GITHUB_OUTPUT"
+            # maxScale 6: 연결고갈 인시던트(2026-06-08) 後 안전캡. 6×8=48 ≤ DB 100(churn 흡수). 7+ 금지.
+            echo "backend_max_instances=6" >> "$GITHUB_OUTPUT"
             echo "ga4_measurement_id=G-RYHFE7XM3X" >> "$GITHUB_OUTPUT"
           else
             echo "target=dev" >> "$GITHUB_OUTPUT"
             echo "fastapi_url=https://sprintable-backend-dev-787818285179.asia-northeast3.run.app" >> "$GITHUB_OUTPUT"
             echo "backend_min_instances=1" >> "$GITHUB_OUTPUT"
-            # maxScale 10(안전 상한·11+ 금지). 산식 10×(pool5+overflow3)=80+20 headroom ≤ DB 100.
-            # prod(L49)·cloudbuild.yaml default와 합치. durable scale↑ 전제는 2c4dcae7 PgBouncer.
-            # (이전 '3'이 substitution override로 cloudbuild.yaml default를 덮어 dev maxScale 리셋한 진짜 근본.)
-            echo "backend_max_instances=10" >> "$GITHUB_OUTPUT"
+            # maxScale 6: 연결고갈 인시던트(2026-06-08) 後 안전캡. 6×8=48 ≤ DB 100(배포 churn 흡수·7+ 금지).
+            # 10은 80+20 tight → churn이 100 초과해 prod 고갈. prod(L49)·cloudbuild.yaml default와 합치.
+            # durable fix는 2c4dcae7 PgBouncer. (이전 '3' override가 default 덮던 근본.)
+            echo "backend_max_instances=6" >> "$GITHUB_OUTPUT"
             echo "ga4_measurement_id=" >> "$GITHUB_OUTPUT"
           fi
 
