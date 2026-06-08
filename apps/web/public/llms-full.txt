@@ -38,12 +38,11 @@ Sprintable (SSoT)
 - **Organization**: `id, name, slug, plan (free/pro/enterprise)`
 - **OrgMember**: `id, org_id, user_id, role (owner/admin/manager/member), deleted_at` — org-level membership
 - **ProjectAccess**: `id, project_id, org_member_id, permission (granted)` — explicit grant per human member per project
-- **Invitation**: `id, org_id, project_id, email, role, token, status (pending/accepted/revoked), expires_at, email_sent_at, email_error` — project-scoped invite with email dispatch
-- **OrgInvite**: `id, organization_id, email, role, token, status, expires_at` — org-level link invite
+- **OrgInvite**: `id, organization_id, email, role, token, status (pending/accepted/revoked), expires_at, accepted_at, created_by, email_sent_at, email_error, project_ids (JSONB)` — canonical invite (email dispatch + link accept). The legacy project-scoped `Invitation` model was removed in the invite-unification cutover; `org_invites` is now the single source.
 
 ### Projects & Team
 - **Project**: `id, org_id, name, description, violation_level (warn/block), deleted_at`
-- **TeamMember**: `id, org_id, project_id, user_id (null for agents), type (human/agent), name, role, is_active, webhook_url, agent_config, active_story_id, agent_status`
+- **TeamMember**: `id, org_id, project_id, user_id (null for agents), type (human/agent), name, role, is_active, agent_config, active_story_id, agent_status` — a projection VIEW over the canonical `members` table. Webhook delivery (human or agent) is configured in `webhook_configs` (not on this row).
 
 ### Work Items
 - **Epic**: `id, org_id, project_id, title, description, status, target_sp, deleted_at`
@@ -84,7 +83,7 @@ POST /api/v2/auth/register
   { email, password, display_name, tos_accepted, invite_token? }
   → Validates: email unique, password (8+ chars, 3+ of: upper/lower/digit/special)
   → Creates User (is_active=true, email_verified=false)
-  → If invite_token: auto-accepts matching Invitation → creates OrgMember
+  → If invite_token: auto-accepts matching OrgInvite → creates OrgMember
   → Issues JWT access_token + refresh_token
   → Sends verification email (async, non-blocking)
 ```
@@ -126,7 +125,7 @@ POST /api/v2/auth/oauth/callback
   → Validates state JWT
   → Exchanges code for provider access_token
   → Finds/creates User by { google_id | github_id }
-  → If new user + invite_token: auto-accepts Invitation → OrgMember
+  → If new user + invite_token: auto-accepts OrgInvite → OrgMember
   → Issues JWT + refresh_token
 ```
 
@@ -227,54 +226,42 @@ When OrgMember is soft-deleted (`deleted_at` set):
 
 ## Invite & Onboarding Flow
 
-### Project Invitations (`/api/v2/invitations`)
+### Org Invites (`/api/v2/organizations/{org_id}/invites` + `/api/v2/invites`)
+The canonical invite system. (The legacy project-scoped `/api/v2/invitations` endpoints were removed in the invite-unification cutover — `org_invites` is now the single source.)
 ```
-POST /api/v2/invitations  (owner/admin required)
-  { email, role, project_id, invited_by }
+POST /api/v2/organizations/{org_id}/invites  (owner/admin required)
+  { email, role, project_ids? }
   ↓
-  Creates Invitation (org_id inferred from project)
-  token = uuid, status = pending, expires_at = now + 7 days
+  Creates OrgInvite (token, status = pending, expires_at = now + 7 days)
+  project_ids → granted as ProjectAccess when the invite is accepted
   ↓
   Sends email: /invite/accept?token={token}
   email_sent_at set on success; email_error set on failure
+
+GET    /api/v2/organizations/{org_id}/invites              → list (admin)
+POST   /api/v2/organizations/{org_id}/invites/{id}/resend  → new token, new expiry, re-email
+DELETE /api/v2/organizations/{org_id}/invites/{id}         → revoke
 ```
 
-**Recipient opens `/invite?token=...`:**
+**Recipient opens `/invite/accept?token=...`:**
 ```
-GET /api/v2/invitations/preview?token={token}  (no auth)
-  → Shows { org_name, org_id, email, role, status, expires_at }
+GET /api/v2/invites/{token}  (no auth)
+  → Shows { org_name, email, role, status, expires_at, project_ids }
 
 User chooses signup or login:
   → Signup: POST /api/v2/auth/register { ..., invite_token }
-    → Auto-accepts inline → OrgMember created
-  → Login (existing user): POST /api/v2/invitations/accept { token }
-    → Validates email match (case-insensitive)
-    → status = accepted, OrgMember created (on_conflict_do_nothing)
-
-Admin operations:
-  DELETE /api/v2/invitations/{id}          → revoke
-  POST   /api/v2/invitations/{id}/resend   → new token, new expiry, re-email
+    → Auto-accepts inline → OrgMember (+ ProjectAccess grants)
+  → Login (existing user): POST /api/v2/invites/accept { token }
+    → Validates email match (case-insensitive), status, expiry
+    → status = accepted, OrgMember created (idempotent)
 ```
-
-### Org Link Invites (`/api/v2/invites`)
-Alternative invite flow at org level — no project required:
-```
-POST /api/v2/organizations/{org_id}/invites  (admin)
-  { email, role }  → OrgInvite, expires +30 days
-
-Recipient: GET /api/v2/invites/{token}  (no auth)
-  → Shows { org_name, email, role, expires_at }
-  → Accept: POST /api/v2/invites/accept { token }
-    → Validates email match, status, expiry
-    → Creates OrgMember
-```
+A fresh signup whose email matches a pending OrgInvite is auto-accepted at first login (email-match fallback) — so an invited user always lands in the inviting org, never the create-org onboarding.
 
 ### Auto-Accept on Signup (Priority Order)
 During `register()` and `oauth_callback()`, Sprintable auto-resolves org access:
-1. `invite_token` parameter → match `Invitation` or `OrgInvite` → accept + create OrgMember
-2. Pending `Invitation` for email → accept automatically
-3. Pending `OrgInvite` for email → accept automatically
-4. Existing `OrgMember` for user → find first active project in org
+1. `invite_token` parameter → match `OrgInvite` → accept + create OrgMember (+ ProjectAccess grants)
+2. Pending `OrgInvite` for email → accept automatically (email-match fallback)
+3. Existing `OrgMember` for user → find first active project in org
 
 ---
 
@@ -351,8 +338,8 @@ Best practice: return HTTP 200 from webhook immediately, process event async
 ### Webhook Delivery
 When a ConversationMessage is created:
 ```
-→ Sprintable checks WebhookConfig for matching participants
-→ POSTs to webhook_url with:
+→ Sprintable checks WebhookConfig (webhook_configs) for matching participants
+→ POSTs to each matching config's URL with:
   {
     "event_type": "conversation.message_created",
     "message_id": "uuid",
