@@ -223,7 +223,7 @@ export function KanbanBoard({ projectId }: KanbanBoardProps) {
         Promise.all(statuses.map((s) => fetchStoriesByStatus(s))),
         fetch(`/api/sprints${sprintParams}`),
         fetch(`/api/epics?${epicParams.toString()}`),
-        fetch(`/api/team-members${memberParams}`),
+        fetch(`/api/members${memberParams}`),
       ]);
 
       const allStories: KanbanStory[] = [];

@@ -102,7 +102,7 @@ export function ActivityLogView({ projectId }: ActivityLogViewProps) {
 
   // fetch team members for actor dropdown
   useEffect(() => {
-    fetch(`/api/team-members?project_id=${projectId}`)
+    fetch(`/api/members?project_id=${projectId}`)
       .then((r) => (r.ok ? r.json() : null))
       .then((data: { data?: TeamMember[] } | null) => {
         if (data?.data) setMembers(data.data);

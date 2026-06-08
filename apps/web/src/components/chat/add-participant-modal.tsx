@@ -37,7 +37,7 @@ export function AddParticipantModal({
   const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
-    fetch(`/api/team-members?is_active=true&project_id=${projectId}`)
+    fetch(`/api/members?is_active=true&project_id=${projectId}`)
       .then((r) => r.json())
       .then((json) => setMembers((json.data ?? []) as Member[]))
       .catch(() => {})

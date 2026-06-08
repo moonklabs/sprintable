@@ -1,23 +1,17 @@
 import { handleApiError } from '@/lib/api-error';
-import { apiSuccess, ApiErrors } from '@/lib/api-response';
-import { getAuthContext } from '@/lib/auth-helpers';
-import { createTeamMemberRepository } from '@/lib/storage/factory';
+import { apiSuccess } from '@/lib/api-response';
+import { proxyToFastapi } from '@/lib/fastapi-proxy';
 
 // GET /api/members?project_id=X
+// Canonical SSOT 멤버 소스 — FastAPI /api/v2/members 로 프록시한다.
+// (휴먼: org_members + project_access grant 모델 / 에이전트: team_members type=agent)
+// team_members 뷰 기반 /api/v2/team-members 와 달리 grant 휴먼·owner/admin 누락이 없다.
 export async function GET(request: Request) {
   try {
-    const me = await getAuthContext(request);
-    if (!me) return ApiErrors.unauthorized();
-    if (me.rateLimitExceeded) return ApiErrors.tooManyRequests(me.rateLimitRemaining, me.rateLimitResetAt);
-
-    const { searchParams } = new URL(request.url);
-    const projectId = searchParams.get('project_id');
-    if (!projectId) return ApiErrors.badRequest('project_id required');
-
-    const repo = await createTeamMemberRepository();
-    const members = await repo.list({ org_id: me.org_id, project_id: projectId });
-    const active = members.filter((m) => m.is_active);
-    return apiSuccess(active);
+    const res = await proxyToFastapi(request, '/api/v2/members');
+    if (!res.ok) return res;
+    const data: unknown = await res.json();
+    return apiSuccess(data);
   } catch (err: unknown) {
     return handleApiError(err);
   }
