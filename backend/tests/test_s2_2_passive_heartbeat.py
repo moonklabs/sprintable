@@ -33,7 +33,6 @@ def _mock_member_for_heartbeat():
     m.role = "member"
     m.avatar_url = None
     m.agent_config = None
-    m.webhook_url = None
     m.is_active = True
     m.color = "#3385f8"
     m.agent_role = None

@@ -2,14 +2,12 @@
 
 import { useEffect, useState } from 'react';
 import { AgentApiKeyManager } from '@/components/agents/agent-api-key-manager';
-import { AgentWebhookManager } from '@/components/agents/agent-webhook-manager';
 
 interface Agent {
   id: string;
   name: string;
   type: string;
   is_active: boolean;
-  webhook_url: string | null;
 }
 
 export default function ApiKeysPage() {
@@ -35,7 +33,7 @@ export default function ApiKeysPage() {
       <div>
         <h1 className="text-3xl font-bold">Agent API Keys</h1>
         <p className="text-muted-foreground mt-2">
-          Manage API keys and webhook URLs for agent authentication
+          Manage API keys for agent authentication
         </p>
       </div>
 
@@ -54,11 +52,6 @@ export default function ApiKeysPage() {
           {agents.map((agent) => (
             <div key={agent.id} className="space-y-4">
               <AgentApiKeyManager agentId={agent.id} agentName={agent.name} />
-              <AgentWebhookManager
-                agentId={agent.id}
-                agentName={agent.name}
-                currentWebhookUrl={agent.webhook_url}
-              />
             </div>
           ))}
         </div>

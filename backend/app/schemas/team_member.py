@@ -23,7 +23,6 @@ class TeamMemberCreate(BaseModel):
     user_id: uuid.UUID | None = None
     avatar_url: str | None = None
     agent_config: dict[str, Any] | None = None
-    webhook_url: str | None = None
     color: str = "#3385f8"
     agent_role: str | None = None
 
@@ -33,7 +32,6 @@ class TeamMemberUpdate(BaseModel):
     role: str | None = None
     avatar_url: str | None = None
     agent_config: dict[str, Any] | None = None
-    webhook_url: str | None = None
     color: str | None = None
     agent_role: str | None = None
     is_active: bool | None = None
@@ -52,7 +50,6 @@ class TeamMemberResponse(BaseModel):
     role: str
     avatar_url: str | None = None
     agent_config: dict[str, Any] | None = None
-    webhook_url: str | None = None
     is_active: bool
     color: str
     agent_role: str | None = None

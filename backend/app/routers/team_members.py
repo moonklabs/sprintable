@@ -174,7 +174,6 @@ async def create_team_member(
         user_id=body.user_id,
         avatar_url=body.avatar_url,
         agent_config=body.agent_config,
-        webhook_url=body.webhook_url,
         color=body.color,
         agent_role=body.agent_role,
         created_by=created_by,

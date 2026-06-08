@@ -81,7 +81,6 @@ async def sync_agent_anchor_on_create(
             member_id=team_member.id,
             project_id=team_member.project_id,
             agent_config=team_member.agent_config,
-            webhook_url=team_member.webhook_url,
             agent_role=team_member.agent_role,
             fakechat_port=team_member.fakechat_port,
             last_seen_at=team_member.last_seen_at,

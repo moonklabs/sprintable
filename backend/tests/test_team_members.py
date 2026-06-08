@@ -22,7 +22,6 @@ def _mock_member(is_active: bool = True, type_: str = "human") -> MagicMock:
     m.role = "member"
     m.avatar_url = None
     m.agent_config = None
-    m.webhook_url = None
     m.is_active = is_active
     m.color = "#3385f8"
     m.agent_role = None
@@ -241,37 +240,22 @@ async def test_deactivate_not_found_404():
         app.dependency_overrides.clear()
 
 
-# ─── webhook-save fix: apply_anchor_update 휴먼 webhook_url dead-path 제거 ──────
+# ─── 1bc9fbae ⑤: webhook_url DROP — apply_anchor_update 무시 검증 ───────────────
 
 @pytest.mark.anyio
-async def test_apply_anchor_update_human_webhook_url_dead_path_removed():
-    """휴먼 webhook_url 은 agent_project_profiles(에이전트 전용)로 오라우팅돼 0-row no-op
-    (200인데 persist X)였다 → 휴먼은 이 path 제외. webhook 저장은 webhook_configs 단일 경로."""
+async def test_apply_anchor_update_webhook_url_dropped():
+    """1bc9fbae ⑤ cutover: webhook_url 은 _PROFILE_FIELDS 에서 제거됨(canonical=webhook_configs).
+    PATCH 에 webhook_url 만 있으면 m_set/a_set/p_set 전부 비어 UPDATE execute 0회(에이전트 포함)."""
     from app.repositories.team_member import TeamMemberRepository
 
-    session = AsyncMock()
-    repo = TeamMemberRepository(session, ORG_ID)
-    member = _mock_member(type_="human")
+    for type_ in ("human", "agent"):
+        session = AsyncMock()
+        repo = TeamMemberRepository(session, ORG_ID)
+        member = _mock_member(type_=type_)
 
-    await repo.apply_anchor_update(member, {"webhook_url": "https://example.com/wh"})
+        await repo.apply_anchor_update(member, {"webhook_url": "https://example.com/wh"})
 
-    # 휴먼 webhook_url 만 있는 PATCH → m_set/a_set/p_set 전부 비어 UPDATE execute 0회(dead-path 제거)
-    assert session.execute.await_count == 0
-
-
-@pytest.mark.anyio
-async def test_apply_anchor_update_agent_webhook_url_kept():
-    """에이전트 webhook_url 은 agent_project_profiles 미러 유지(런타임·1bc9fbae ⑤ DROP 게이트)."""
-    from app.repositories.team_member import TeamMemberRepository
-
-    session = AsyncMock()
-    repo = TeamMemberRepository(session, ORG_ID)
-    member = _mock_member(type_="agent")
-
-    await repo.apply_anchor_update(member, {"webhook_url": "https://example.com/wh"})
-
-    # 에이전트 → p_set 유지 → AgentProjectProfile UPDATE execute 1회
-    assert session.execute.await_count == 1
+        assert session.execute.await_count == 0
 
 
 # ─── standup-dup fix: org-level team_members DISTINCT ON(id) dedup ──────────────

@@ -90,7 +90,6 @@ class AgentProjectProfile(Base):
         UUID(as_uuid=True), ForeignKey("projects.id", ondelete="CASCADE"), nullable=False, index=True
     )
     agent_config: Mapped[dict | None] = mapped_column(JSONB, nullable=True)
-    webhook_url: Mapped[str | None] = mapped_column(Text, nullable=True)
     agent_role: Mapped[str | None] = mapped_column(Text, nullable=True)
     fakechat_port: Mapped[int | None] = mapped_column(Integer, nullable=True)
     last_seen_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)

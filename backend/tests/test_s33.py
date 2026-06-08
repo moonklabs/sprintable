@@ -165,7 +165,6 @@ async def test_members_list_200():
         member_mock.type = "human"
         member_mock.role = "admin"
         member_mock.is_active = True
-        member_mock.webhook_url = None
 
         mock_result = MagicMock()
         mock_result.scalars.return_value.all.return_value = [member_mock]
