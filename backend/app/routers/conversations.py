@@ -22,6 +22,7 @@ from app.models.team import AgentMessageAllowlist, TeamMember
 from app.models.agent_deployment import AgentAuditLog
 from app.models.webhook_config import WebhookConfig
 from app.routers.events import _push_to_agent, publish_event
+from app.services import chat_presence
 from app.services.agent_runtime import supports_deterministic_command
 from app.services.command_classifier import classify_command
 from app.services.event_seq import assign_recipient_seq
@@ -287,6 +288,10 @@ async def _dispatch_conversation_event(
         )
         db.add(event)
         events_to_push.append((str(pid), event))
+        # 1aeecdde P2: agent recipient 에게 메시지가 dispatch = 답장 생성 시작 → working emit.
+        # 그 agent 가 reply 를 보내면 send_message 에서 clear, 안 보내면 TTL 자동 소멸(ephemeral).
+        if m_type == "agent":
+            chat_presence.set_working(str(conversation.id), str(pid))
 
     # flush로 event.id 확보
     await db.flush()
@@ -860,6 +865,45 @@ async def list_messages(
     return {"data": data, "meta": {"next_cursor": next_cursor, "has_more": has_more}}
 
 
+@router.get("/{conversation_id}/working")
+async def list_working_members(
+    conversation_id: uuid.UUID,
+    db: AsyncSession = Depends(get_db),
+    auth: AuthContext = Depends(get_current_user),
+    org_id: uuid.UUID = Depends(get_verified_org_id),
+) -> dict:
+    """1aeecdde P2: GET /api/v2/conversations/{id}/working — 지금 답장 생성 중인 member 목록.
+
+    presence(online) 와 **별도 축**(working/typing). FE 는 이 결과로 "...is typing"/working dot 을
+    online dot 과 분리 표시(AC2). ephemeral·TTL 기반(미reply 시 자동 소멸). participant 만 조회 가능.
+    응답: {"data": [{"member_id", "state", "updated_at"}]}.
+    """
+    conv_project_id = (await db.execute(
+        select(Conversation.project_id).where(
+            Conversation.id == conversation_id, Conversation.org_id == org_id
+        )
+    )).scalar_one_or_none()
+    if conv_project_id is None:
+        raise HTTPException(status_code=404, detail="Conversation not found")
+
+    sender = await _resolve_member(auth, org_id, db, project_id=conv_project_id)
+    participant = (await db.execute(
+        select(ConversationParticipant.id).where(
+            ConversationParticipant.conversation_id == conversation_id,
+            ConversationParticipant.member_id == sender.id,
+        )
+    )).scalar_one_or_none()
+    if participant is None:
+        raise HTTPException(status_code=403, detail="Not a participant")
+
+    # 본인은 제외 — 내가 typing 중인 건 내 UI에 안 띄움(memo presence.py 동형).
+    items = [
+        e for e in chat_presence.list_working(str(conversation_id))
+        if e["member_id"] != str(sender.id)
+    ]
+    return {"data": items}
+
+
 @router.post("/{conversation_id}/participants", status_code=201)
 async def add_participant(
     conversation_id: uuid.UUID,
@@ -975,6 +1019,11 @@ async def send_message(
     )).scalar_one_or_none()
     if participant is None:
         raise HTTPException(status_code=403, detail="Not a participant")
+
+    # 1aeecdde P2: sender 가 이 conversation 에 메시지를 보냄 = 답장 생성 종료 → working clear.
+    # fork 분기(아래) 전 **원본 conversation_id** 기준 — working 은 그 conversation 에 set 됐다.
+    # 휴먼 sender 면 set 된 적 없어 no-op(무해). agent reply 면 즉시 "...typing" 해제.
+    chat_presence.clear_working(str(conversation_id), str(sender.id))
 
     # cross-org 차단: mentioned_ids를 현재 org 소속 member로 일괄 필터링 (QA B1).
     # E-MEMBER-SSOT Phase 0: 저장·DM포크·group 멘션 발송 모든 경로에 org 필터를 한 번 적용.

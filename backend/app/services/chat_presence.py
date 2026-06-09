@@ -1,0 +1,76 @@
+"""1aeecdde P2: 채팅 working/typing 인디케이터 — 답장 생성구간 ephemeral 신호.
+
+memo `presence.py`(viewing/typing) 동형 — in-memory·TTL 기반 ephemeral 저장소. presence P1
+(online/offline = 연결 축)과 **별도 축**(working = 작업 축). 같은 dot에 합치지 말 것(AC2):
+- online: SSE 연결 여부(team_members.presence_status·DB 도출)
+- working: 지금 답장을 생성 중인지(이 모듈·in-memory ephemeral)
+
+emit 훅(BE):
+- set_working: 메시지가 agent participant 에게 dispatch 될 때(=이벤트 수신점). 답장 생성 시작.
+- clear_working: 그 agent 가 conversation 에 메시지를 보낼 때(=reply POST). 생성 종료.
+- 둘 다 안 와도 _TTL_SEC 후 자동 소멸(에이전트가 답장 안 하기로 한 경우 등 — ephemeral 안전망).
+
+⚠️ 멀티인스턴스 한계: presence.py 와 동일하게 인스턴스-로컬 in-memory. 같은 인스턴스가 emit·GET
+을 처리해야 보인다. 크로스-인스턴스 실시간(Cloud Run 다인스턴스)은 pubsub/SSE 브로드캐스트가
+필요하며 FE 전송 설계(유나/미르코)와 함께 후속(P3)으로 다룬다. 본 P2 는 spec 의 'presence.py
+동형 in-memory poll' 계약을 따른다.
+"""
+from __future__ import annotations
+
+import time
+from dataclasses import asdict, dataclass, field
+
+# 답장 생성 구간 ephemeral TTL(초). presence.py(45s) 동형. 생성이 더 길면 인디케이터가 일찍
+# 사라질 수 있고(refresh 없음), 답장을 안 하면 최대 이 시간만큼 잔존한다 — ephemeral 안전망.
+_TTL_SEC = 45
+
+VALID_STATES = ("working", "typing")
+
+
+@dataclass
+class WorkingEntry:
+    member_id: str
+    state: str  # "working" | "typing"
+    updated_at: float = field(default_factory=time.time)
+
+
+# conversation_id(str) → {member_id(str): WorkingEntry}
+_working_store: dict[str, dict[str, WorkingEntry]] = {}
+
+
+def _evict_expired(conversation_id: str) -> None:
+    now = time.time()
+    store = _working_store.get(conversation_id, {})
+    expired = [mid for mid, e in store.items() if now - e.updated_at > _TTL_SEC]
+    for mid in expired:
+        store.pop(mid, None)
+    if not store:
+        _working_store.pop(conversation_id, None)
+
+
+def set_working(conversation_id: str, member_id: str, state: str = "working") -> None:
+    """답장 생성 시작 — member 를 conversation 의 working 집합에 등록(TTL 갱신)."""
+    if state not in VALID_STATES:
+        state = "working"
+    _working_store.setdefault(conversation_id, {})[member_id] = WorkingEntry(
+        member_id=member_id, state=state
+    )
+
+
+def clear_working(conversation_id: str, member_id: str) -> None:
+    """답장 생성 종료(reply POST) — member 의 working 신호 제거. 없으면 무해(no-op)."""
+    store = _working_store.get(conversation_id)
+    if store is None:
+        return
+    store.pop(member_id, None)
+    if not store:
+        _working_store.pop(conversation_id, None)
+
+
+def list_working(conversation_id: str) -> list[dict]:
+    """conversation 에서 현재 working/typing 중인 member 목록(만료분 제외)."""
+    _evict_expired(conversation_id)
+    return [
+        {**asdict(e)}
+        for e in _working_store.get(conversation_id, {}).values()
+    ]
