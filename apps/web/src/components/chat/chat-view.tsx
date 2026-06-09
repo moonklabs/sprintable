@@ -1,9 +1,10 @@
 'use client';
 
-import { useCallback, useEffect, useRef, useState } from 'react';
+import { Fragment, useCallback, useEffect, useRef, useState } from 'react';
 import { ChevronLeft, RefreshCw } from 'lucide-react';
 import { usePathname, useRouter } from 'next/navigation';
 import { ChatBubble } from './chat-bubble';
+import { CommandHintNotice, type BlockedHint } from './command-hint-notice';
 import { ChatInput } from './chat-input';
 import { ThreadPanel } from './thread-panel';
 import type { ChatMessage, SendAttachment } from '@/hooks/use-chat-sse';
@@ -44,6 +45,9 @@ export function ChatView({ threadId, currentTeamMemberId, threadTitle, projectId
   const [hasMore, setHasMore] = useState(false);
   const [cursor, setCursor] = useState<string | null>(null);
   const [showNewIndicator, setShowNewIndicator] = useState(false);
+  // S5: 미지원 런타임 커맨드 차단 hint — 트리거 메시지 id에 keyed된 ephemeral state.
+  // POST 응답 command_gate.blocked에서만 적재(persist 안 함·reload 시 소멸).
+  const [commandHints, setCommandHints] = useState<Record<string, BlockedHint[]>>({});
   // CB-S9: 스레드 패널 상태
   const [activeThread, setActiveThread] = useState<ChatMessage | null>(null);
   const [threadIncoming, setThreadIncoming] = useState<ChatMessage | null>(null);
@@ -255,7 +259,14 @@ export function ChatView({ threadId, currentTeamMemberId, threadTitle, projectId
       return;
     }
     const payload = (raw.data ?? raw) as Record<string, unknown>;
-    addMessage(normalizeToMessage(payload));
+    const sent = normalizeToMessage(payload);
+    addMessage(sent);
+    // S5: 미지원 런타임 차단 hint를 트리거 메시지에 keyed로 적재(차단 발생 시에만 키 존재).
+    const gate = raw.command_gate as { blocked?: BlockedHint[] } | undefined;
+    const blocked = gate?.blocked;
+    if (blocked?.length) {
+      setCommandHints((prev) => ({ ...prev, [sent.id]: blocked }));
+    }
   }, [threadId, addMessage, apiPrefix, pathname, router]);
 
   // chat-attach: 파일을 GCS에 업로드(서버사이드)하고 첨부 메타를 반환 — 유령경로(/api/chats/.../upload) 폐기.
@@ -419,14 +430,19 @@ export function ChatView({ threadId, currentTeamMemberId, threadTitle, projectId
                       const prev = group.messages[idx - 1];
                       const isGrouped = Boolean(prev && prev.created_by === msg.created_by);
                       return (
-                        <ChatBubble
-                          key={msg.id}
-                          message={msg}
-                          isMine={msg.created_by === currentTeamMemberId}
-                          isGrouped={isGrouped}
-                          onOpenThread={openThread}
-                          onDelete={handleDeleteMessage}
-                        />
+                        <Fragment key={msg.id}>
+                          <ChatBubble
+                            message={msg}
+                            isMine={msg.created_by === currentTeamMemberId}
+                            isGrouped={isGrouped}
+                            onOpenThread={openThread}
+                            onDelete={handleDeleteMessage}
+                          />
+                          {/* S5: 트리거 메시지 직후 차단 hint notice(차단 에이전트별 1건) */}
+                          {commandHints[msg.id]?.map((h) => (
+                            <CommandHintNotice key={h.agent_id} hint={h} />
+                          ))}
+                        </Fragment>
                       );
                     })}
                   </div>

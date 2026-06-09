@@ -2306,6 +2306,9 @@
     "hypothesisSection": "Outcome Hypothesis"
   },
   "chats": {
+    "commandBlockedLead": "{agentName} doesn't run chat slash-commands directly.",
+    "commandBlockedAlt": "Try natural language instead — e.g. \"use the {command} skill to …\"",
+    "commandBlockedSettings": "View runtime settings",
     "attachmentDenied": "You don't have access",
     "attachmentReload": "Reload attachment",
     "title": "Chats",

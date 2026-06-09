@@ -2306,6 +2306,9 @@
     "hypothesisSection": "효과 가설"
   },
   "chats": {
+    "commandBlockedLead": "{agentName} 에이전트는 채팅 슬래시 커맨드를 직접 실행하지 않습니다.",
+    "commandBlockedAlt": "대신 자연어로 요청해 보세요 — 예: \"{command} 스킬로 …\"",
+    "commandBlockedSettings": "런타임 설정 보기",
     "attachmentDenied": "접근 권한이 없습니다",
     "attachmentReload": "첨부를 다시 불러오기",
     "title": "채팅",
