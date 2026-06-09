@@ -1,7 +1,9 @@
+from __future__ import annotations
+
 import uuid
 from typing import Any
 
-from sqlalchemy import func, select
+from sqlalchemy import func, select, text
 from sqlalchemy import update as sa_update
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -49,6 +51,40 @@ class TeamMemberRepository(BaseRepository[TeamMember]):
             q = q.distinct(TeamMember.id).order_by(TeamMember.id)
         result = await self.session.execute(q.limit(limit))
         return list(result.scalars().all())
+
+    async def list_org_human_members(
+        self, user_id: uuid.UUID | None = None
+    ) -> list[dict[str, Any]]:
+        """org-level 휴먼 로스터 = **org_members SSOT 직접 해소** (S:166051f0).
+
+        team_members 뷰(0088 = members ⋈ project_access)는 휴먼을 project_access.member_id 로
+        join 하는데, 실 grant 플로우(create_project_access)는 member_id 를 NULL 로 두므로
+        grant-only/owner 휴먼이 뷰에서 탈락한다 → org-level 스탠드업 로스터서 휴먼 0(상용 버그).
+        여기서는 **project_access/team_members 를 일절 경유하지 않고** org_members 를 권위 소스로
+        직접 열거한다. 곱연산(휴먼×프로젝트=N행) 없음 — org_member 1행/휴먼. member_id 백필 불요.
+
+        id = org_member.id = canonical 휴먼 신원(/api/me·standup author_id·_MISSING_SQL 과 동일
+        기준 → 자기 카드 편집/제출 매칭 정합). name/avatar 는 canonical members 우선, users 폴백
+        (백필 갭 안전망). 반환은 TeamMemberResponse 와 호환되는 dict.
+        """
+        sql = (
+            "SELECT om.id AS id, om.user_id AS user_id, om.role AS role, om.created_at AS created_at, "
+            "       COALESCE(m.name, u.display_name, u.email, '') AS name, m.avatar_url AS avatar_url "
+            "FROM org_members om "
+            "JOIN users u ON u.id = om.user_id "
+            "LEFT JOIN members m ON m.org_id = om.org_id AND m.user_id = om.user_id "
+            "                   AND m.type = 'human' AND m.deleted_at IS NULL "
+            "WHERE om.org_id = :org AND om.deleted_at IS NULL"
+        )
+        params: dict[str, Any] = {"org": self.org_id}
+        # asyncpg 함정 회피: ':uid IS NULL' 분기 대신 Python 조건부로 필터를 붙인다
+        # (feedback_asyncpg_text_traps — IS NULL 바인딩 AmbiguousParameterError).
+        if user_id is not None:
+            sql += " AND om.user_id = :uid"
+            params["uid"] = user_id
+        sql += " ORDER BY name"
+        rows = await self.session.execute(text(sql), params)
+        return [dict(row._mapping) for row in rows]
 
     async def apply_anchor_update(self, member: TeamMember, data: dict[str, Any]) -> None:
         """AC3-4 2-2: PATCH 필드를 앵커 테이블로 라우팅(anchor-only write, 레거시 team_members UPDATE 없음).
