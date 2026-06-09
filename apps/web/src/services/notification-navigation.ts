@@ -77,6 +77,11 @@ export async function attachNotificationHrefs<T extends NotificationReference>(
       return { ...notification, href: '/sprints' };
     }
 
+    // f2ec5395: story 미처리 갭 — status_changed 등 story 참조 알림 클릭 내비(getEntityHref 동형).
+    if (notification.reference_type === 'story') {
+      return { ...notification, href: `/board?story=${referenceId}` };
+    }
+
     if (notification.reference_type === 'doc') {
       const slug = docSlugMap.get(referenceId);
       return { ...notification, href: slug ? buildDocHref(slug) : '/docs' };
