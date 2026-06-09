@@ -25,6 +25,7 @@ def _mock_member(is_active: bool = True, type_: str = "human") -> MagicMock:
     m.is_active = is_active
     m.color = "#3385f8"
     m.agent_role = None
+    m.runtime_type = None  # E-CHAT-CMD S1b: 신규 필드 — mock 명시(from_attributes ValidationError 방지)
     m.created_by = None
     m.created_at = datetime(2026, 5, 1, tzinfo=timezone.utc)
     m.updated_at = datetime(2026, 5, 1, tzinfo=timezone.utc)
