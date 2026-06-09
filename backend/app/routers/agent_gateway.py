@@ -8,14 +8,15 @@ from __future__ import annotations
 
 import asyncio
 import json
+import logging
 import os
 import uuid
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Request
 from fastapi.responses import StreamingResponse
 from pydantic import BaseModel
-from sqlalchemy import select, text, update
+from sqlalchemy import delete, select, text, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.dependencies.auth import AuthContext, get_current_user, get_current_user_streaming
@@ -27,10 +28,87 @@ from app.models.organization import Organization
 from app.models.team import TeamMember
 from app.routers.events import _agent_connections, _event_to_payload
 
+logger = logging.getLogger(__name__)
+
 router = APIRouter(prefix="/api/v2/agent", tags=["agent-gateway"])
 
 _SSE_HEARTBEAT: float = float(os.getenv("SSE_HEARTBEAT_TIMEOUT", "30"))
 _BACKFILL_LIMIT: int = int(os.getenv("AGENT_GATEWAY_BACKFILL_LIMIT", "100"))
+
+# 49fed0a1 P1: presence를 실제 SSE 연결에 배선 — online/offline 진실화.
+# SSE dial-out 에이전트(Hermes 등)는 MCP heartbeat를 호출하지 않으므로 연결 lifecycle에서
+# presence(last_seen_at/agent_status)를 직접 갱신해야 "연결 중 online·끊으면 offline"이 진실해진다.
+# - 연결 유지 중 최소 갱신 주기(초). wake 빈발로 timeout heartbeat가 안 떠도 last_seen이 stale되지 않게
+#   매 loop iteration에서 경과 체크 후 throttle write(에이전트당 최대 1회/주기).
+_PRESENCE_TICK_INTERVAL: float = _SSE_HEARTBEAT
+# - AgentGatewaySession이 "활성"으로 간주되는 last_seen 무갱신 허용 시간(초). 주기 갱신(_PRESENCE_TICK_INTERVAL)
+#   대비 여유(3×)를 둬 정상 연결이 잠깐 느려도 stale 오판하지 않게. 인스턴스 크래시로 finally 미실행된
+#   좀비 세션은 이 TTL 밖이 되어 disconnect cleanup의 "잔여 활성 세션" 판정에서 제외된다(멀티인스턴스 정합).
+_SESSION_FRESH_TTL: float = _SSE_HEARTBEAT * 3
+
+
+async def _mark_agent_online(agent_id: uuid.UUID, session_id: uuid.UUID) -> None:
+    """49fed0a1 AC1/AC2: SSE 연결 중 presence online 갱신.
+
+    AgentGatewaySession.last_seen_at(연결 추적·멀티인스턴스 queryable) + 프로필 presence
+    (last_seen_at/agent_status — team_members 뷰가 agent_project_profiles서 읽음)를 함께 NOW로 갱신.
+    long-lived 스트림은 get_db 커넥션을 idle-hold 하면 안 되므로 독립 세션 사용. best-effort
+    (presence 갱신 실패가 스트림을 끊지 않도록 예외 삼킴·로깅).
+    """
+    now = datetime.now(timezone.utc)
+    try:
+        async with async_session_factory() as db:
+            await db.execute(
+                update(AgentGatewaySession)
+                .where(AgentGatewaySession.id == session_id)
+                .values(last_seen_at=now)
+            )
+            from app.services.agent_anchor_sync import sync_agent_profile_presence
+            await sync_agent_profile_presence(
+                db, agent_id, last_seen_at=now, agent_status="online"
+            )
+            await db.commit()
+    except Exception:
+        logger.warning("presence online tick failed agent=%s", agent_id, exc_info=True)
+
+
+async def _mark_agent_disconnected(agent_id: uuid.UUID, session_id: uuid.UUID) -> None:
+    """49fed0a1 AC2/AC3: SSE 연결 종료 cleanup — 연결-도출 offline 강등.
+
+    이 세션 행 삭제 후, 같은 에이전트의 **다른 활성(last_seen TTL 이내) 세션**이 없으면 presence를
+    offline로 강등. 같은 API Key의 멀티세션(멀티인스턴스 Cloud Run)은 한 presence 그룹이므로
+    **마지막 연결이 끊길 때만** offline (AC2). last_seen_at=None → presence_status 즉시 offline
+    (schema 단락). MCP heartbeat·재연결 시 online 복귀(self-heal). finally 호출이라 예외 비전파.
+    """
+    now = datetime.now(timezone.utc)
+    fresh_cutoff = now - timedelta(seconds=_SESSION_FRESH_TTL)
+    try:
+        async with async_session_factory() as db:
+            # 이 세션 + 같은 에이전트의 좀비 세션(크래시로 finally 미실행 → last_seen stale) 정리.
+            # 멀티인스턴스서 테이블 무한증식 방지 + 아래 "잔여 활성" 판정을 신뢰 가능하게.
+            await db.execute(
+                delete(AgentGatewaySession).where(
+                    (AgentGatewaySession.id == session_id)
+                    | (
+                        (AgentGatewaySession.agent_id == agent_id)
+                        & (AgentGatewaySession.last_seen_at < fresh_cutoff)
+                    )
+                )
+            )
+            remaining = (await db.execute(
+                select(AgentGatewaySession.id).where(
+                    AgentGatewaySession.agent_id == agent_id,
+                    AgentGatewaySession.last_seen_at >= fresh_cutoff,
+                ).limit(1)
+            )).scalar_one_or_none()
+            if remaining is None:
+                from app.services.agent_anchor_sync import sync_agent_profile_presence
+                await sync_agent_profile_presence(
+                    db, agent_id, last_seen_at=None, agent_status="offline"
+                )
+            await db.commit()
+    except Exception:
+        logger.warning("presence disconnect cleanup failed agent=%s", agent_id, exc_info=True)
 
 # E-INFRA S4: /agent/stream 전역 연결 cap (legacy /events/stream S20 미러).
 # 무제한 agent stream 연결이 인스턴스 메모리/큐(=connection당 Queue maxsize=200)를 고갈시키는 것 방지.
@@ -189,14 +267,8 @@ async def agent_stream(
         acked_seq: int = cursor.acked_seq if cursor else 0
 
         # ì¸ì ë±ë¡
-        session_rec = AgentGatewaySession(
-            id=uuid.uuid4(),
-            agent_id=agent_id,
-            connected_at=datetime.now(timezone.utc),
-            last_seen_at=datetime.now(timezone.utc),
-        )
-        db.add(session_rec)
-        await db.commit()
+        # 49fed0a1: 세션 등록 + presence online은 cap 체크 통과 후 generate() 내부에서 수행
+        # (거부된 429/503 연결이 세션 행/presence를 남기지 않도록 — setup/teardown을 스트림 lifecycle에 대칭).
 
     # Last-Event-ID í¤ë íì± (gateway_seq)
     last_event_id_hdr = request.headers.get("Last-Event-ID") or request.headers.get("last-event-id")
@@ -244,7 +316,26 @@ async def agent_stream(
         - acked_seqë í´ë¼ì´ì¸í¸ POST /ack ë¡ë§ ì ì§ â ìë²ê° ìë ì ì§ ì í¨.
         - í´ë¼ì´ì¸í¸ë seq ê¸°ë° dedup(ê°ì seq ë ë² ë°ìë í ë² ì²ë¦¬) íì.
         """
+        session_id = uuid.uuid4()
+        _presence_wired = False
         try:
+            # 49fed0a1 AC1: cap 통과 후 세션 등록 + presence online. SSE dial-out 에이전트는 MCP
+            # heartbeat를 호출하지 않아 이 배선이 없으면 붙어 일해도 offline(거짓)이었다. 독립 세션 사용
+            # (long-lived 스트림이 get_db 커넥션을 idle-hold 하지 않도록).
+            async with async_session_factory() as _pdb:
+                _pdb.add(AgentGatewaySession(
+                    id=session_id,
+                    agent_id=agent_id,
+                    connected_at=datetime.now(timezone.utc),
+                    last_seen_at=datetime.now(timezone.utc),
+                ))
+                from app.services.agent_anchor_sync import sync_agent_profile_presence
+                await sync_agent_profile_presence(
+                    _pdb, agent_id, last_seen_at=datetime.now(timezone.utc), agent_status="online"
+                )
+                await _pdb.commit()
+            _presence_wired = True
+
             yield "event: heartbeat\ndata: {}\n\n"
 
             # ì´ê¸° ë°±í â acked_seq(=start_seq)ë¶í° ì¬ì¤ìº
@@ -261,7 +352,15 @@ async def agent_stream(
                     backfill_floor = gseq
 
             # ì¤ìê° â wake ì í¸ â acked_seqë¶í° DB ì¬ì¤ìº
+            # 49fed0a1 AC1: 연결 유지 중 presence를 주기적으로 online 갱신. wake가 잦으면 timeout
+            # heartbeat가 안 떠도(매번 wait_for가 일찍 반환) last_seen이 stale → 거짓 offline 되므로,
+            # 매 iteration 경과를 체크해 _PRESENCE_TICK_INTERVAL마다 throttle write(busy/idle 무관 갱신 보장).
+            last_presence_tick = datetime.now(timezone.utc)
             while not await request.is_disconnected():
+                _now = datetime.now(timezone.utc)
+                if (_now - last_presence_tick).total_seconds() >= _PRESENCE_TICK_INTERVAL:
+                    await _mark_agent_online(agent_id, session_id)
+                    last_presence_tick = _now
                 try:
                     signal = await asyncio.wait_for(queue.get(), timeout=_SSE_HEARTBEAT)
                     if signal.get("__wake__"):
@@ -301,6 +400,10 @@ async def agent_stream(
             _agent_connections[agent_id_str].discard(queue)
             if not _agent_connections[agent_id_str]:
                 _agent_connections.pop(agent_id_str, None)
+            # 49fed0a1 AC2/AC3: 연결 종료 → 세션 행 삭제 + 마지막 세션이면 presence offline 강등.
+            # (presence 배선 성공한 연결만 — 세션 미생성 시 타 세션 presence 오염 방지.)
+            if _presence_wired:
+                await _mark_agent_disconnected(agent_id, session_id)
 
     return StreamingResponse(
         generate(),
