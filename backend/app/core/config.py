@@ -25,6 +25,14 @@ class Settings(BaseSettings):
     db_pool_size: int = 5
     db_max_overflow: int = 3
 
+    # PgBouncer ④: 사이드카(localhost:6432·pool_mode=transaction) 경유 여부(env DB_PGBOUNCER).
+    # off(기본): 직접 Cloud SQL — 현 동작 100% 유지(사이드카 없어도 다운 X).
+    # on: statement_cache 비활성(pooled conn 간 prepared statement reuse 깨짐 방지) +
+    #     app-side pool 최소화(PgBouncer default_pool_size가 실 풀 역할).
+    db_pgbouncer: bool = False
+    db_pgbouncer_pool_size: int = 2  # flag on 時 app-side pool(PgBouncer가 실 풀)
+    db_pgbouncer_max_overflow: int = 1
+
     # JWT
     jwt_secret: str = ""
 
