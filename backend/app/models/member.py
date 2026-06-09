@@ -49,6 +49,10 @@ class Member(Base):
     message_policy_mode: Mapped[str] = mapped_column(
         Text, nullable=False, server_default="creator_only", default="creator_only"
     )
+    # E-CHAT-CMD S1: 에이전트 런타임 종류(RuntimeType 9종). 에이전트 단위 식별 — capability
+    # registry(app.services.agent_runtime) lookup 키. 휴먼/미설정은 NULL(= 커맨드 미지원).
+    # 9 enum 은 앱 레이어에서 강제(네이티브 PG enum 미사용 — 신규 런타임 확장 용이).
+    runtime_type: Mapped[str | None] = mapped_column(Text, nullable=True)
     is_active: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True, server_default="true")
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now(), nullable=False
