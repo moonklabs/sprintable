@@ -11,12 +11,12 @@ substitutions:
   _DEPLOY_ENV: dev
   _FASTAPI_URL: https://sprintable-backend-dev-787818285179.asia-northeast3.run.app
   _BACKEND_MIN_INSTANCES: '1'
-  # ⚠️ maxScale 6 = 연결고갈 인시던트(2026-06-08) 後 안전캡. 산식: maxScale × (db_pool_size 5 +
-  #    db_max_overflow 3) ≤ DB max_connections(dev/prod 100) → 6×8=48 + 52 headroom(배포 churn 흡수).
-  #    10은 80+20 tight → 배포 churn(구/신 리비전 동시 연결)이 100 초과해 prod 고갈 발생 → 6 하향.
-  #    durable fix는 2c4dcae7 PgBouncer(연결 decouple)·그게 maxScale↑ 전제. 그 前까지 6 캡(7+ 금지).
-  #    (이전 '3'이 매 배포 maxScale 리셋 → 수동 fix 덮던 근본. dev/prod 공통 default.)
-  _BACKEND_MAX_INSTANCES: '6'
+  # ⚠️ maxScale 10 = 429 포화 인시던트(2026-06-09) 後. 6(#1325)은 부하에 인스턴스 포화→429 유발.
+  #    #1330 statement_cache revert로 쿼리 가속→연결 빠른 회전→10×8=80 < DB 100 viable(peak 여유).
+  #    수렴 history: 3(#1319前·sat)→10(#1319·churn)→6(#1325·429 sat)→10(#1330 가속·viable).
+  #    durable fix는 2c4dcae7 PgBouncer(연결 decouple·maxScale 30+)·랜딩 後 상향. 그 前까지 10.
+  #    (GHA develop→dev·main→prod 자동배포가 이 default 주입 → 6이면 머지마다 429 재발 latent → 10.)
+  _BACKEND_MAX_INSTANCES: '10'
   _GA4_MEASUREMENT_ID: ""  # dev 기본값 빈 문자열 — prod 트리거에서 G-RYHFE7XM3X 주입
 
 steps:
