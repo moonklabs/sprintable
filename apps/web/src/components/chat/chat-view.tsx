@@ -3,11 +3,13 @@
 import { Fragment, useCallback, useEffect, useRef, useState } from 'react';
 import { ChevronLeft, RefreshCw } from 'lucide-react';
 import { usePathname, useRouter } from 'next/navigation';
+import { useTranslations } from 'next-intl';
 import { ChatBubble } from './chat-bubble';
+import type { PresenceStatus } from './presence-dot';
 import { CommandHintNotice, type BlockedHint } from './command-hint-notice';
 import { ChatInput, type CommandTarget } from './chat-input';
 import { ThreadPanel } from './thread-panel';
-import type { ChatMessage, SendAttachment } from '@/hooks/use-chat-sse';
+import type { ChatMessage, SendAttachment, AgentWorkingPayload } from '@/hooks/use-chat-sse';
 import { normalizeToMessage, useChatSse } from '@/hooks/use-chat-sse';
 import { EmptyState } from '@/components/ui/empty-state';
 
@@ -20,6 +22,8 @@ interface ChatViewProps {
   backRoute?: string | null;
   // S8 #2: pre-send capability 경고 대상(에이전트 participant runtime). 빈 배열이면 경고 미표시(graceful).
   commandTargets?: CommandTarget[];
+  // 1aeecdde P2: 에이전트 member_id → presence_status(연결축 dot). 없으면 dot 미표시(graceful).
+  presenceById?: Record<string, PresenceStatus>;
 }
 
 interface MessageGroup {
@@ -38,9 +42,10 @@ function groupByDate(messages: ChatMessage[]): MessageGroup[] {
   return Object.entries(groups).map(([date, msgs]) => ({ date, messages: msgs }));
 }
 
-export function ChatView({ threadId, currentTeamMemberId, threadTitle, projectId, apiPrefix = '/api/chats', backRoute = '/memos', commandTargets }: ChatViewProps) {
+export function ChatView({ threadId, currentTeamMemberId, threadTitle, projectId, apiPrefix = '/api/chats', backRoute = '/memos', commandTargets, presenceById }: ChatViewProps) {
   const router = useRouter();
   const pathname = usePathname();
+  const t = useTranslations('chats');
   const [messages, setMessages] = useState<ChatMessage[]>([]);
   const [loading, setLoading] = useState(true);
   const [loadingMore, setLoadingMore] = useState(false);
@@ -50,6 +55,9 @@ export function ChatView({ threadId, currentTeamMemberId, threadTitle, projectId
   // S5: 미지원 런타임 커맨드 차단 hint — 트리거 메시지 id에 keyed된 ephemeral state.
   // POST 응답 command_gate.blocked에서만 적재(persist 안 함·reload 시 소멸).
   const [commandHints, setCommandHints] = useState<Record<string, BlockedHint[]>>({});
+  // 1aeecdde P2: 답장 생성 중 에이전트 typing — agent_id keyed ephemeral(TTL 12s·메시지 도착 시 clear).
+  const [typingAgents, setTypingAgents] = useState<{ id: string; name: string }[]>([]);
+  const typingTimersRef = useRef<Record<string, ReturnType<typeof setTimeout>>>({});
   // CB-S9: 스레드 패널 상태
   const [activeThread, setActiveThread] = useState<ChatMessage | null>(null);
   const [threadIncoming, setThreadIncoming] = useState<ChatMessage | null>(null);
@@ -127,7 +135,15 @@ export function ChatView({ threadId, currentTeamMemberId, threadTitle, projectId
     }
   }, [loading, scrollToBottom]);
 
+  // 1aeecdde P2: 에이전트 typing 해제(메시지 도착·TTL 만료).
+  const clearTyping = useCallback((agentId: string) => {
+    setTypingAgents((prev) => (prev.some((a) => a.id === agentId) ? prev.filter((a) => a.id !== agentId) : prev));
+    const timer = typingTimersRef.current[agentId];
+    if (timer) { clearTimeout(timer); delete typingTimersRef.current[agentId]; }
+  }, []);
+
   const addMessage = useCallback((msg: ChatMessage) => {
+    clearTyping(msg.created_by); // 답장 도착 → 해당 에이전트 typing 즉시 해제(AC1)
     const nearBottom = isNearBottom();
     setMessages((prev) => {
       if (prev.some((m) => m.id === msg.id)) return prev;
@@ -139,7 +155,7 @@ export function ChatView({ threadId, currentTeamMemberId, threadTitle, projectId
     } else {
       setShowNewIndicator(true);
     }
-  }, [isNearBottom]);
+  }, [isNearBottom, clearTyping]);
 
   const handleNewMessage = useCallback((msg: ChatMessage) => {
     if (msg.memo_id !== threadId) return;
@@ -178,11 +194,29 @@ export function ChatView({ threadId, currentTeamMemberId, threadTitle, projectId
     fetchMessages();
   }, [fetchMessages]);
 
+  // 1aeecdde P2: agent:working/typing SSE 수신 → 현 대화 에이전트 typing 추가(이름=commandTargets에서·TTL 12s).
+  const handleAgentWorking = useCallback((p: AgentWorkingPayload) => {
+    if (p.conversation_id !== threadId) return;
+    const name = (commandTargets ?? []).find((tg) => tg.agentId === p.agent_id)?.agentName;
+    if (!name) return; // 이름 못 찾으면 미표시(graceful)
+    setTypingAgents((prev) => (prev.some((a) => a.id === p.agent_id) ? prev : [...prev, { id: p.agent_id, name }]));
+    const existing = typingTimersRef.current[p.agent_id];
+    if (existing) clearTimeout(existing);
+    typingTimersRef.current[p.agent_id] = setTimeout(() => clearTyping(p.agent_id), 12000);
+  }, [threadId, commandTargets, clearTyping]);
+
+  // 타이머 누수 방지 — 언마운트 시 전체 정리.
+  useEffect(() => {
+    const timers = typingTimersRef.current;
+    return () => { Object.values(timers).forEach(clearTimeout); };
+  }, []);
+
   useChatSse({
     currentTeamMemberId,
     onNewMessage: handleNewMessage,
     onReplyCreated: handleReplyCreated,
     onConversationMessage: handleConversationMessage,
+    onAgentWorking: handleAgentWorking,
     onReconnect: handleReconnect,
   });
 
@@ -439,6 +473,8 @@ export function ChatView({ threadId, currentTeamMemberId, threadTitle, projectId
                             isGrouped={isGrouped}
                             onOpenThread={openThread}
                             onDelete={handleDeleteMessage}
+                            presenceStatus={presenceById?.[msg.created_by]}
+                            isWorking={typingAgents.some((a) => a.id === msg.created_by)}
                           />
                           {/* S5: 트리거 메시지 직후 차단 hint notice(차단 에이전트별 1건) */}
                           {commandHints[msg.id]?.map((h) => (
@@ -465,6 +501,22 @@ export function ChatView({ threadId, currentTeamMemberId, threadTitle, projectId
               >
                 ↓ 새 메시지
               </button>
+            </div>
+          )}
+
+          {/* 1aeecdde P2: "...is typing" — 메시지 리스트 아래·composer 위·답장 생성 중·완료 시 사라짐(aria-live) */}
+          {typingAgents.length > 0 && (
+            <div className="flex flex-shrink-0 items-center gap-2 px-4 py-1.5 text-xs text-muted-foreground" aria-live="polite">
+              <span className="flex items-center gap-0.5" aria-hidden>
+                <span className="size-1.5 rounded-full bg-brand motion-safe:animate-bounce" />
+                <span className="size-1.5 rounded-full bg-brand motion-safe:animate-bounce [animation-delay:150ms]" />
+                <span className="size-1.5 rounded-full bg-brand motion-safe:animate-bounce [animation-delay:300ms]" />
+              </span>
+              <span>
+                {typingAgents.length === 1
+                  ? t('isTyping', { name: typingAgents[0]?.name ?? '' })
+                  : t('othersTyping', { name: typingAgents[0]?.name ?? '', count: typingAgents.length - 1 })}
+              </span>
             </div>
           )}
 

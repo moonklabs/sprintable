@@ -2309,6 +2309,12 @@
     "hypothesisSection": "Outcome Hypothesis"
   },
   "chats": {
+    "isTyping": "{name} is typing",
+    "othersTyping": "{name} and {count} others are typing",
+    "presenceOnline": "Online",
+    "presenceIdle": "Idle",
+    "presenceOffline": "Offline",
+    "presenceWorking": "Working",
     "commandBlockedLead": "{agentName} ({runtime}) doesn't run chat slash-commands directly.",
     "runtimeUnsetLabel": "No runtime set",
     "commandBlockedAlt": "Try natural language instead — e.g. \"use the {command} skill to …\"",

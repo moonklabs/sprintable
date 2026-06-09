@@ -5,6 +5,7 @@ import { useParams, useRouter } from 'next/navigation';
 import { ChevronLeft, UserPlus } from 'lucide-react';
 import { TopBarSlot } from '@/components/nav/top-bar-slot';
 import { ChatView } from '@/components/chat/chat-view';
+import type { PresenceStatus } from '@/components/chat/presence-dot';
 import { AddParticipantModal } from '@/components/chat/add-participant-modal';
 import { useDashboardContext } from '../../../dashboard/dashboard-shell';
 
@@ -52,6 +53,31 @@ export default function ConversationPage() {
       if (conv) setMeta({ title: conv.title, type: conv.type, participants: conv.participants ?? [] });
     } catch { /* non-critical */ }
   }, [conversation_id, projectId]);
+
+  // 1aeecdde P2: 에이전트 presence_status(연결축 dot) 폴링 — P1 진실값. 15s 갱신(시간 기반 상태).
+  const [presenceById, setPresenceById] = useState<Record<string, PresenceStatus>>({});
+  const fetchPresence = useCallback(async () => {
+    try {
+      const res = await fetch('/api/team-members?type=agent');
+      if (!res.ok) return;
+      const json = await res.json() as { data?: Array<{ id: string; presence_status?: string | null }> };
+      const map: Record<string, PresenceStatus> = {};
+      for (const m of json.data ?? []) {
+        if (m.presence_status === 'online' || m.presence_status === 'idle' || m.presence_status === 'offline') {
+          map[m.id] = m.presence_status;
+        }
+      }
+      setPresenceById(map);
+    } catch { /* non-critical */ }
+  }, []);
+
+  // 마운트 1회 fetch(단일행·기존 fetchMeta 패턴 동형) + 15s 폴링(시간 기반 presence 갱신).
+  // eslint-disable-next-line react-hooks/set-state-in-effect
+  useEffect(() => { void fetchPresence(); }, [fetchPresence]);
+  useEffect(() => {
+    const interval = setInterval(() => { void fetchPresence(); }, 15000);
+    return () => clearInterval(interval);
+  }, [fetchPresence]);
 
   // eslint-disable-next-line react-hooks/set-state-in-effect
   useEffect(() => { void fetchMeta(); }, [fetchMeta]);
@@ -126,6 +152,7 @@ export default function ConversationPage() {
           apiPrefix="/api/conversations"
           backRoute="/chats"
           commandTargets={commandTargets}
+          presenceById={presenceById}
         />
       </div>
 
