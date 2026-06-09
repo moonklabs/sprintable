@@ -2306,7 +2306,8 @@
     "hypothesisSection": "Outcome Hypothesis"
   },
   "chats": {
-    "commandBlockedLead": "{agentName} doesn't run chat slash-commands directly.",
+    "commandBlockedLead": "{agentName} ({runtime}) doesn't run chat slash-commands directly.",
+    "runtimeUnsetLabel": "No runtime set",
     "commandBlockedAlt": "Try natural language instead — e.g. \"use the {command} skill to …\"",
     "commandBlockedSettings": "View runtime settings",
     "commandPreviewSendAsCommand": "Will send as a command",

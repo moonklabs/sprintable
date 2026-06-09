@@ -83,3 +83,13 @@ export function resolveRuntimeStatus(runtimeType: string | null | undefined): Ru
   if (!def) return 'unknown';
   return commandSupportFor(def.capability);
 }
+
+/**
+ * runtime_type 키 → 사람이 읽는 표시명 (E-CHAT-CMD S8 #1 — hint·경고 카피의 {runtime} 바인딩용).
+ * 등록키 → label(claude-code→"Claude Code") · 미등록값 → 원값 보존(S2 ⑤ 패턴) ·
+ * null/빈값 → null(호출부가 i18n "런타임 미설정"으로 치환 — 순수 util은 번역 컨텍스트 없음).
+ */
+export function runtimeLabel(key: string | null | undefined): string | null {
+  if (!key) return null;
+  return getRuntimeDef(key)?.label ?? key;
+}
