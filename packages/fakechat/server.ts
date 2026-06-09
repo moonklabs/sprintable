@@ -16,6 +16,7 @@ import {
   ListToolsRequestSchema,
   CallToolRequestSchema,
 } from '@modelcontextprotocol/sdk/types.js'
+import { isInjectableEventType } from './inject-allowlist'
 
 const API_URL = (
   process.env.SPRINTABLE_API_URL ?? 'https://sprintable-backend-dev-57iommnikq-du.a.run.app'
@@ -203,6 +204,11 @@ async function _onEvent(evType: string, evId: string, dataStr: string): Promise<
     (typeof data.payload === 'object' && data.payload !== null
       ? data.payload
       : {}) as Record<string, unknown>
+
+  // E-CHAT-CMD S9: allowlist 밖 event_type 은 content 체크 전에 드롭(sprintable_sse.py:157 동형).
+  // fakechat 가 유일하게 이 게이트가 없어 FYI 이벤트(status_changed/file_conflict 등)가 content 만
+  // 있으면 세션에 주입되던 보안 갭을 닫는다.
+  if (!isInjectableEventType(data, payload)) return
 
   const content = ((data.content ?? payload.content ?? '') as string).trim()
   if (!content) return
