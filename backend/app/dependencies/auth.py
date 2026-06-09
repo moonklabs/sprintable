@@ -179,17 +179,35 @@ async def _verify_org_membership(
 _WRITE_METHODS = frozenset({"POST", "PUT", "PATCH", "DELETE"})
 
 
-def _check_api_key_scope(auth: AuthContext, method: str) -> None:
-    """API Key 경로일 때만 scope 체크 — JWT 사용자(웹 UI)는 미적용."""
+def _check_api_key_scope(auth: AuthContext, method: str, path: str | None = None) -> None:
+    """API Key 경로일 때만 scope 체크 — JWT 사용자(웹 UI)는 미적용.
+
+    1) Stage 1=레거시 scope(read/write) 한정 coarse read/write 게이팅. 툴그룹 scope 키
+       (예 ['stories'])는 'write' 토큰이 없어 coarse 게이팅이 모든 write 를 잘못 403하므로
+       (1d109a96 BYOA), 레거시 scope 를 보유한 키에만 적용한다. 툴그룹 키의 write 경계는
+       Stage 2(path) 가 강제한다.
+    2) 7b63c226: Stage 2=path→toolset group 서버사이드 강제 — 키 scope 외 그룹 엔드포인트 직접
+       호출 차단(MCP 클라 우회 방어·진짜 boundary). always-allowed/미매핑 면제·일반키 무회귀.
+    """
     if not auth.claims.get("app_metadata", {}).get("api_key_id"):
         return  # JWT 경로 → 스킵
     scope: list[str] = auth.claims.get("app_metadata", {}).get("scope", ["read", "write"])
-    required = "write" if method.upper() in _WRITE_METHODS else "read"
-    if required not in scope:
-        raise HTTPException(
-            status_code=status.HTTP_403_FORBIDDEN,
-            detail=f"API Key scope '{required}' required",
-        )
+    from app.services.mcp_toolset import _LEGACY_SCOPES
+    # Stage 1: 레거시(read/write) scope 키에만 coarse 게이팅. 툴그룹 scope 키는 Stage 2(path)가 강제.
+    if set(scope) & _LEGACY_SCOPES:
+        required = "write" if method.upper() in _WRITE_METHODS else "read"
+        if required not in scope:
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail=f"API Key scope '{required}' required",
+            )
+    if path is not None:
+        from app.services.mcp_toolset import path_allowed_for_scope, path_to_tool_group
+        if not path_allowed_for_scope(path, scope):
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail=f"API Key scope does not permit '{path_to_tool_group(path)}' tools",
+            )
 
 
 def require_api_scope(required_scope: str):
@@ -217,7 +235,7 @@ async def get_verified_org_id(
     API Key 경로는 HTTP method 기반 scope 자동 체크."""
     # API Key scope 체크 (request 있을 때만 — 직접 단위 테스트 호출 시 스킵)
     if request is not None:
-        _check_api_key_scope(auth, request.method)
+        _check_api_key_scope(auth, request.method, request.url.path)
 
     jwt_org_id = auth.claims.get("app_metadata", {}).get("org_id")
     # X-Org-Id 헤더 우선 — org 전환 프리뷰(unified-switcher) 지원. 항상 membership 검증.
@@ -255,9 +273,15 @@ async def get_project_scoped_org_id(
     db: AsyncSession = Depends(get_db),
     request: Request = None,
 ) -> uuid.UUID:
-    """project_id query param 또는 X-Project-Id 헤더가 있을 때, 해당 project의 org_id로
-    cross-org 접근을 허용. has_project_access(team_member ∪ grant ∪ owner/admin) 기반 검증.
-    미인가 → 403. project_id가 없으면 get_verified_org_id 동작과 동일."""
+    """project_id query param 으로 project 스코프 org_id를 해소.
+
+    cross-org 접근(project 가 현재 스코프 org 와 다른 org 소속)은 **명시적으로 요청된 경우에만**
+    허용한다: X-Org-Id 헤더가 그 org 를 지정하면 get_verified_org_id 가 base_org_id 를 해당
+    org 로 멤버십 검증해 해소하므로 project_org_id 와 일치한다. 헤더 없이 들어온 cross-org
+    project_id(JWT 스코프와 불일치)는 거부한다(403).
+
+    has_project_access(team_member ∪ grant ∪ owner/admin) 로 project 멤버십 검증.
+    project_id 가 없으면 get_verified_org_id 동작과 동일."""
     base_org_id = await get_verified_org_id(
         auth=auth, x_org_id=x_org_id, x_project_id=None, db=db, request=request
     )
@@ -271,6 +295,17 @@ async def get_project_scoped_org_id(
     project_org_id = result.scalar_one_or_none()
     if not project_org_id:
         return base_org_id
+
+    # c6b82459: cross-org re-entry 차단. project 가 현재 스코프 org(base_org_id)와 다른 org
+    # 소속이면, 그 cross-org 가 X-Org-Id 헤더로 명시 요청된 경우에만 허용한다(헤더 지정 시
+    # base_org_id 가 그 org 로 해소되어 일치). 헤더 없이 들어온 stale project_id(예: 0-project
+    # org 로 switch 직후 옛 프로젝트 쿼리)는 거부하여, FE 가 옛 org 보드로 재진입하지 않고
+    # EmptyState 를 렌더하도록 한다. (#1260 refresh 경로가 못 덮은 switch 직후 즉시경로 edge.)
+    if project_org_id != base_org_id:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="요청한 org 스코프와 다른 org 의 프로젝트에 접근할 수 없습니다",
+        )
 
     # E-MEMBER-SSOT AC2-2: "TeamMember 존재 = 인가" 대신 has_project_access SSOT로 전환.
     # team_member(active) ∪ project_access(granted) ∪ owner/admin org-wide 3-branch이므로
@@ -346,16 +381,36 @@ def require_project_access(
     return project_id
 
 
-def enforce_body_context(
+async def enforce_body_context(
     auth_org_id: uuid.UUID,
     body_org_id: uuid.UUID | None = None,
     body_project_id: uuid.UUID | None = None,
     auth_project_id: str | None = None,
+    *,
+    db: AsyncSession | None = None,
+    user_id: uuid.UUID | None = None,
 ) -> None:
-    """AC6/AC7: body의 org_id/project_id가 auth context와 불일치 시 403."""
+    """AC6/AC7: body의 org_id/project_id가 auth context와 일치하는지 검증.
+
+    org_id: auth org와 불일치 시 403.
+    project_id:
+      - db+user_id 전달 시(create 라우터): **has_project_access SSOT 게이트** — JWT project_id 핀과
+        무관하게 접근권(team_member ∪ grant ∪ owner/admin org-wide)만 있으면 통과. 740e3b7e:
+        grant/admin이 JWT에 안 핀된(그러나 접근 가능한) 프로젝트서 epic/task/meeting/story/doc 생성 시
+        나던 403 제거. 접근권 없으면 403 유지.
+      - db 미전달 시(레거시/단위테스트): 기존 JWT project_id 정확일치 검증으로 폴백.
+    """
     if body_org_id is not None and body_org_id != auth_org_id:
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="body.org_id가 auth context와 불일치인")
-    if auth_project_id and body_project_id is not None and str(body_project_id) != str(auth_project_id):
+    if body_project_id is None:
+        return
+    if db is not None and user_id is not None:
+        from app.services.project_auth import has_project_access
+        if not await has_project_access(db, user_id, body_project_id, auth_org_id):
+            raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="해당 프로젝트 접근권이 없는")
+        return
+    # 레거시 폴백(db 미전달): JWT project_id 핀 정확일치
+    if auth_project_id and str(body_project_id) != str(auth_project_id):
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="body.project_id가 auth context와 불일치인")
 
 
@@ -468,7 +523,7 @@ async def get_verified_org_id_streaming(
     API key + claims org_id(헤더 없음) 경로는 DB 쿼리조차 없음.
     """
     if request is not None:
-        _check_api_key_scope(auth, request.method)
+        _check_api_key_scope(auth, request.method, request.url.path)
 
     jwt_org_id = auth.claims.get("app_metadata", {}).get("org_id")
     raw = x_org_id or jwt_org_id

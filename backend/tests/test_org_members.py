@@ -21,6 +21,7 @@ def _mock_member(role: str = "member", user_id: uuid.UUID | None = None) -> Magi
     m.created_at = datetime(2026, 5, 1, tzinfo=timezone.utc)
     m.deleted_at = None
     m.email = None  # OrgMemberResponse.email: str | None
+    m.name = "Test Member"  # E-ONBOARDING S2: OrgMemberResponse.name
     return m
 
 
@@ -67,6 +68,7 @@ async def test_list_org_members_200():
         mock_row.created_at = datetime(2026, 5, 1, tzinfo=timezone.utc)
         mock_row.deleted_at = None
         mock_row.email = "test@example.com"
+        mock_row.name = "Test Member"  # E-ONBOARDING S2: COALESCE(member.name, display_name, email)
 
         mock_result = MagicMock()
         mock_result.__iter__ = MagicMock(return_value=iter([mock_row]))

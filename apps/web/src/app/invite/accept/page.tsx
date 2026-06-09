@@ -35,14 +35,19 @@ export default async function InviteAcceptPage({ searchParams }: Props) {
     );
   }
 
-  const invite = await inviteRes.json() as { data?: { org_name?: string; role?: string; email?: string } };
+  // BE-direct(/api/v2/invites/{token})는 InvitePreviewResponse를 top-level로 반환(envelope 없음).
+  // 프록시(/api/invites/{token})만 apiSuccess로 {data} 래핑하므로 양쪽 shape 모두 대응한다.
+  type InvitePreviewData = { org_name?: string; role?: string; email?: string; projects?: { id: string; name: string }[] };
+  const raw = await inviteRes.json() as InvitePreviewData & { data?: InvitePreviewData };
+  const invite = raw.data ?? raw;
 
   return (
     <InviteAcceptClient
       token={token}
-      orgName={invite.data?.org_name ?? ''}
-      role={invite.data?.role ?? 'member'}
-      email={invite.data?.email ?? ''}
+      orgName={invite.org_name ?? ''}
+      role={invite.role ?? 'member'}
+      email={invite.email ?? ''}
+      projects={invite.projects ?? []}
     />
   );
 }

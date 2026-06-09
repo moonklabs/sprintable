@@ -148,10 +148,11 @@ async def test_create_group_conversation():
         session.refresh.side_effect = _refresh
 
         async with client as c:
+            # 179db213: 2-member 는 DM 강제이므로 group 은 ≥3 member(참가자 2명+sender)
             resp = await c.post("/api/v2/conversations", json={
                 "type": "group",
                 "title": "테스트",
-                "participant_ids": [str(uuid.uuid4())],
+                "participant_ids": [str(uuid.uuid4()), str(uuid.uuid4())],
                 "project_id": str(PROJECT_ID),
             })
 
@@ -159,6 +160,41 @@ async def test_create_group_conversation():
         body = resp.json()
         assert "id" in body
         assert body["type"] == "group"
+        assert body["existing"] is False
+    finally:
+        app.dependency_overrides.clear()
+
+
+# ─── 179db213: 1-pair=1-DM enforce ──────────────────────────────────────────
+
+@pytest.mark.anyio
+async def test_group_request_2members_coerced_to_dm():
+    """CP1: type=group 으로 2-member(참가자 1+sender) 요청해도 DM 으로 강제(1-pair=1-DM)."""
+    client, session, app = await _make_client()
+    try:
+        mock_member = _make_member()
+        member_result = MagicMock()
+        member_result.scalars.return_value.first.return_value = mock_member
+        none_result = MagicMock()
+        none_result.scalar_one_or_none.return_value = None  # 기존 DM 없음
+        # execute: member resolve → _find_existing_dm(None) → 신규 DM 생성
+        session.execute = AsyncMock(side_effect=[member_result, none_result])
+
+        async def _refresh(obj):
+            obj.id = CONV_ID
+            obj.type = "dm"   # 핸들러가 is_dm 으로 type='dm' 세팅
+            obj.title = None
+        session.refresh.side_effect = _refresh
+
+        async with client as c:
+            resp = await c.post("/api/v2/conversations", json={
+                "type": "group",   # label 은 group 이지만 2-member → DM 강제
+                "participant_ids": [str(uuid.uuid4())],
+                "project_id": str(PROJECT_ID),
+            })
+        assert resp.status_code == 201
+        body = resp.json()
+        assert body["type"] == "dm", f"2-member group → DM 강제 실패: {body}"
         assert body["existing"] is False
     finally:
         app.dependency_overrides.clear()
@@ -177,13 +213,12 @@ async def test_create_dm_deduplication():
         member_result = MagicMock()
         member_result.scalars.return_value.first.return_value = mock_member
 
+        # 179db213: 새 dedup — _find_existing_dm() = scalar_one_or_none(dm_pair_key 조회)
         existing_dm_result = MagicMock()
-        existing_dm_result.scalars.return_value.all.return_value = [CONV_ID]
+        existing_dm_result.scalar_one_or_none.return_value = CONV_ID
 
-        other_check_result = MagicMock()
-        other_check_result.scalar_one_or_none.return_value = uuid.uuid4()  # 있음
-
-        session.execute = AsyncMock(side_effect=[member_result, existing_dm_result, other_check_result])
+        # execute 순서: member resolve → _find_existing_dm(scalar_one_or_none)
+        session.execute = AsyncMock(side_effect=[member_result, existing_dm_result])
 
         async with client as c:
             resp = await c.post("/api/v2/conversations", json={
@@ -270,7 +305,17 @@ async def test_list_messages_response_shape():
         sender_result = MagicMock()
         sender_result.scalars.return_value.all.return_value = [mock_member]
 
-        session.execute = AsyncMock(side_effect=[conv_project_result, member_result, msgs_result, sender_result])
+        # #1262: admin-bypass=agent-only 한정 — 휴먼 판별 헬퍼가 참가자/agent 조회.
+        # agent-only 대화로 두어 owner org-level messages 접근(우회 허용)을 검증.
+        agent_id = uuid.uuid4()
+        pids_result = MagicMock()
+        pids_result.scalars.return_value.all.return_value = [agent_id]
+        agents_result = MagicMock()
+        agents_result.scalars.return_value.all.return_value = [agent_id]
+
+        session.execute = AsyncMock(side_effect=[
+            conv_project_result, member_result, pids_result, agents_result, msgs_result, sender_result,
+        ])
 
         async with client as c:
             resp = await c.get(f"/api/v2/conversations/{CONV_ID}/messages")
@@ -281,6 +326,62 @@ async def test_list_messages_response_shape():
         assert "meta" in body
         assert "next_cursor" in body["meta"]
         assert "has_more" in body["meta"]
+    finally:
+        app.dependency_overrides.clear()
+
+
+# ─── 03fe1663: GET /conversations/{id} — 단독 메타(project_id server-side 도출용) ──
+
+@pytest.mark.anyio
+async def test_get_conversation_200_returns_project_id():
+    """GET /conversations/{id} → 단독 메타(project_id 포함). owner org-level 접근."""
+    client, session, app = await _make_client()
+    try:
+        mock_member = _make_member()
+        mock_member.role = "owner"  # _effective_org_role owner → participant 체크 skip
+        mock_conv = _make_conv()
+        mock_conv.status = "open"
+        mock_conv.created_at = datetime(2026, 5, 14, tzinfo=timezone.utc)
+
+        conv_result = MagicMock()
+        conv_result.scalar_one_or_none.return_value = mock_conv
+        member_result = MagicMock()
+        member_result.scalars.return_value.first.return_value = mock_member
+
+        # #1262: admin-bypass=agent-only 한정 — 휴먼 판별 헬퍼가 참가자/agent 조회.
+        # 본 테스트는 agent-only 대화로 두어 owner org-level 접근(우회 허용)을 검증.
+        agent_id = uuid.uuid4()
+        pids_result = MagicMock()
+        pids_result.scalars.return_value.all.return_value = [agent_id]
+        agents_result = MagicMock()
+        agents_result.scalars.return_value.all.return_value = [agent_id]  # 전원 agent 확정
+
+        session.execute = AsyncMock(side_effect=[conv_result, member_result, pids_result, agents_result])
+
+        async with client as c:
+            resp = await c.get(f"/api/v2/conversations/{CONV_ID}")
+
+        assert resp.status_code == 200
+        body = resp.json()
+        assert body["id"] == str(CONV_ID)
+        assert body["project_id"] == str(PROJECT_ID)  # 업로드 path server-side 도출의 근거
+    finally:
+        app.dependency_overrides.clear()
+
+
+@pytest.mark.anyio
+async def test_get_conversation_404():
+    """존재하지 않는 conversation → 404."""
+    client, session, app = await _make_client()
+    try:
+        conv_result = MagicMock()
+        conv_result.scalar_one_or_none.return_value = None
+        session.execute = AsyncMock(side_effect=[conv_result])
+
+        async with client as c:
+            resp = await c.get(f"/api/v2/conversations/{uuid.uuid4()}")
+
+        assert resp.status_code == 404
     finally:
         app.dependency_overrides.clear()
 

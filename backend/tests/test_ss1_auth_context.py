@@ -1,6 +1,6 @@
 """SS-1: auth context 강제 — AC6/AC7 mismatch 403 테스트."""
 import uuid
-from unittest.mock import AsyncMock, MagicMock
+from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 from httpx import ASGITransport, AsyncClient
@@ -121,17 +121,19 @@ async def test_create_memo_org_id_mismatch_403():
 
 @pytest.mark.anyio
 async def test_create_doc_project_id_mismatch_403():
-    """AC7: docs POST — body.project_id ≠ auth.project_id → 403."""
+    """AC7(740e3b7e 후 SSOT): docs POST — 접근권 없는 프로젝트면 403.
+    (이전엔 JWT project_id 핀 불일치로 403 → 이제 has_project_access FALSE로 403. 보안 동등.)"""
     ctx = _mk_ctx(project_id=PROJECT_ID)
     client, app = await _client(ctx)
     try:
-        async with client as c:
-            resp = await c.post("/api/v2/docs", json={
-                "project_id": str(OTHER_PROJECT_ID),
-                "org_id": str(ORG_ID),
-                "title": "교차 프로젝트 doc",
-                "slug": "cross-project-doc",
-            })
+        with patch("app.services.project_auth.has_project_access", new=AsyncMock(return_value=False)):
+            async with client as c:
+                resp = await c.post("/api/v2/docs", json={
+                    "project_id": str(OTHER_PROJECT_ID),
+                    "org_id": str(ORG_ID),
+                    "title": "교차 프로젝트 doc",
+                    "slug": "cross-project-doc",
+                })
         assert resp.status_code == 403
     finally:
         app.dependency_overrides.clear()
@@ -139,16 +141,17 @@ async def test_create_doc_project_id_mismatch_403():
 
 @pytest.mark.anyio
 async def test_create_meeting_project_id_mismatch_403():
-    """AC7: meetings POST — body.project_id ≠ auth.project_id → 403."""
+    """AC7(740e3b7e 후 SSOT): meetings POST — 접근권 없는 프로젝트면 403."""
     ctx = _mk_ctx(project_id=PROJECT_ID)
     client, app = await _client(ctx)
     try:
-        async with client as c:
-            resp = await c.post("/api/v2/meetings", json={
-                "project_id": str(OTHER_PROJECT_ID),
-                "title": "교차 프로젝트 미팅",
-                "meeting_type": "general",
-            })
+        with patch("app.services.project_auth.has_project_access", new=AsyncMock(return_value=False)):
+            async with client as c:
+                resp = await c.post("/api/v2/meetings", json={
+                    "project_id": str(OTHER_PROJECT_ID),
+                    "title": "교차 프로젝트 미팅",
+                    "meeting_type": "general",
+                })
         assert resp.status_code == 403
     finally:
         app.dependency_overrides.clear()

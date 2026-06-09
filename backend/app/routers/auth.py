@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import logging
 import os
 import secrets
 import uuid
@@ -51,7 +52,6 @@ from app.core.rate_limit import limiter
 from app.dependencies.auth import AuthContext, get_current_user
 from app.services.project_auth import has_project_access, first_accessible_project_id
 from app.dependencies.database import get_db
-from app.models.invitation import Invitation
 from app.models.member import Member
 from app.models.org_invite import OrgInvite
 from app.models.project import OrgMember
@@ -60,6 +60,7 @@ from app.models.login_audit_log import LoginAuditLog
 from app.models.user import RefreshToken, User
 
 router = APIRouter(prefix="/api/v2/auth", tags=["auth"])
+logger = logging.getLogger(__name__)
 
 
 async def _write_audit(
@@ -225,25 +226,14 @@ class SetPasswordRequest(BaseModel):
 # ─── Helpers ──────────────────────────────────────────────────────────────────
 
 async def _auto_accept_invitation(session: AsyncSession, user: User, invite_token: str) -> None:
-    """가입 시 invite_token이 있으면 해당 초대 자동 수락 + org_member 생성."""
-    from app.models.invitation import Invitation
-    result = await session.execute(
-        select(Invitation).where(Invitation.token == invite_token)
-    )
-    inv = result.scalar_one_or_none()
-    if inv is None or inv.status != "pending" or inv.expires_at < datetime.now(timezone.utc):
-        return
-    if inv.email.lower() != user.email.lower():
-        return
-    inv.status = "accepted"
-    inv.accepted_at = datetime.now(timezone.utc)
-    from sqlalchemy.dialects.postgresql import insert as pg_insert
-    await session.execute(
-        pg_insert(OrgMember)
-        .values(org_id=inv.org_id, user_id=user.id, role=inv.role)
-        .on_conflict_do_nothing(constraint="uq_org_members_org_user")
-    )
-    await session.flush()
+    """가입 시 invite_token이 있으면 해당 초대 자동 수락 + org_member 생성.
+
+    canonical=OrgInvite(org_invites) 단일 경로. accept로 위임 → org_member 생성 +
+    선택 프로젝트 project_access(granted) 부여 + status=accepted를 한 경로로 처리한다.
+    (구 Invitation 테이블은 d3619e80 cutover로 제거 — #1307에서 pending 토큰 org_invites 이전 完.)
+    """
+    from app.repositories.org_invite import OrgInviteRepository
+    await OrgInviteRepository(session).accept(invite_token, user.id, user.email)
 
 
 async def _get_user_by_email(session: AsyncSession, email: str) -> User | None:
@@ -256,35 +246,98 @@ async def _get_user_by_id(session: AsyncSession, user_id: uuid.UUID) -> User | N
     return result.scalar_one_or_none()
 
 
-async def _build_app_metadata(user: User, session: AsyncSession) -> dict:
+_ROLE_RANK: dict[str, int] = {"owner": 4, "admin": 3, "manager": 2, "member": 1}
+
+
+async def _user_projects_claim(user: User, session: AsyncSession) -> list[dict]:
+    """JWT projects 클레임(전환 UI/알림용) — 사용자의 active team_member project 전량(org 무관).
+    org owner/admin은 project role을 org role로 상속(effective)."""
     from app.models.team import TeamMember
 
-    # 1. last_project_id 우선 → 해당 project의 active team_member
+    org_roles = await session.execute(
+        select(OrgMember.org_id, OrgMember.role).where(
+            OrgMember.user_id == user.id, OrgMember.deleted_at.is_(None),
+        )
+    )
+    org_role_map = {str(r[0]): r[1] for r in org_roles.all()}
+
+    def _eff(project_role: str, org_id_str: str) -> str:
+        org_r = org_role_map.get(org_id_str, "")
+        return org_r if _ROLE_RANK.get(org_r, 0) > _ROLE_RANK.get(project_role, 0) else project_role
+
+    rows = await session.execute(
+        select(TeamMember).where(
+            or_(TeamMember.user_id == user.id, TeamMember.id == user.id),
+            TeamMember.is_active.is_(True),
+        )
+    )
+    return [
+        {"id": str(m.project_id), "org_id": str(m.org_id), "role": _eff(m.role, str(m.org_id))}
+        for m in rows.scalars().all()
+    ]
+
+
+async def _build_app_metadata(
+    user: User, session: AsyncSession, org_id: uuid.UUID | None = None
+) -> dict:
+    """JWT app_metadata 구성. org_id 지정 시(switch-org 등) 프로젝트 해소를 **그 org로 스코프**해
+    cross-org 옛 프로젝트 주입을 차단한다(0746 leak fix).
+
+    org_id 미지정(refresh/login)이면 **user.last_org_id**(현재 org source-of-truth)로 스코프 —
+    refresh가 org 컨텍스트가 없어 0-project org 전환 후 cross-org 옛 프로젝트를 재주입하던 leak 차단.
+    last_org_id도 없으면(최초 로그인) 기존 cross-org fallback으로 home org 결정."""
+    from app.models.team import TeamMember
+
+    # org_id 미지정 시 현재 org(last_org_id)로 스코프 — refresh/login이 현재 org 유지(0746 후속)
+    if org_id is None:
+        org_id = getattr(user, "last_org_id", None)
+
+    # 1. last_project_id 우선 → 해당 project의 active team_member (org_id 지정 시 그 org일 때만)
     member = None
     if getattr(user, "last_project_id", None):
-        result = await session.execute(
-            select(TeamMember)
-            .where(
-                TeamMember.project_id == user.last_project_id,
-                or_(TeamMember.user_id == user.id, TeamMember.id == user.id),
-                TeamMember.is_active.is_(True),
-            )
-            .limit(1)
+        q = select(TeamMember).where(
+            TeamMember.project_id == user.last_project_id,
+            or_(TeamMember.user_id == user.id, TeamMember.id == user.id),
+            TeamMember.is_active.is_(True),
         )
-        member = result.scalar_one_or_none()
+        if org_id is not None:
+            q = q.where(TeamMember.org_id == org_id)
+        member = (await session.execute(q.limit(1))).scalar_one_or_none()
 
     if not member:
-        # fallback: 가장 오래된 team_member (ASC) — 최초 가입 project 우선
-        result = await session.execute(
-            select(TeamMember)
-            .where(
-                or_(TeamMember.user_id == user.id, TeamMember.id == user.id),
-                TeamMember.is_active.is_(True),
-            )
-            .order_by(TeamMember.created_at.asc())
-            .limit(1)
+        # fallback: 가장 오래된 team_member (ASC) — 최초 가입 project 우선.
+        # ⚠️0746: org_id 지정 시 그 org로 스코프(미지정이면 org 무관 → cross-org 옛 프로젝트 누수).
+        q = select(TeamMember).where(
+            or_(TeamMember.user_id == user.id, TeamMember.id == user.id),
+            TeamMember.is_active.is_(True),
         )
-        member = result.scalar_one_or_none()
+        if org_id is not None:
+            q = q.where(TeamMember.org_id == org_id)
+        member = (await session.execute(q.order_by(TeamMember.created_at.asc()).limit(1))).scalar_one_or_none()
+
+    # 0746: org_id 지정 + 그 org에 team_member 없음(grant-only/0-project/owner-admin) →
+    # cross-org invite/Path4 폴백 금지. 그 org의 first_accessible(없으면 null)로 스코프 해소.
+    if org_id is not None and member is None:
+        pid = await first_accessible_project_id(session, user.id, org_id)
+        if getattr(user, "last_project_id", None) != pid:
+            user.last_project_id = pid  # in-org project or None — cross-org 절대 금지
+        if getattr(user, "last_org_id", None) != org_id:
+            user.last_org_id = org_id  # 현재 org 추적 — 다음 refresh가 이 org 유지
+        om_role = (
+            await session.execute(
+                select(OrgMember.role).where(
+                    OrgMember.org_id == org_id,
+                    OrgMember.user_id == user.id,
+                    OrgMember.deleted_at.is_(None),
+                ).limit(1)
+            )
+        ).scalar_one_or_none()
+        return {
+            "org_id": str(org_id),
+            "project_id": str(pid) if pid else "",
+            "role": om_role or "member",
+            "projects": await _user_projects_claim(user, session),
+        }
 
     if member and member.user_id is None:
         # AC3-5 ②: team_members가 뷰(0088) — ORM mutation+flush(UPDATE view 실패) 대신 members 앵커 UPDATE.
@@ -293,35 +346,10 @@ async def _build_app_metadata(user: User, session: AsyncSession) -> dict:
 
     if not member:
         # 2. 이메일로 pending 초대 조회 → 자동 수락 + org_member 생성
-        # 2a. Invitation (invitations 테이블 — /api/v2/invitations 경로)
-        now = datetime.now(timezone.utc)
-        inv_result = await session.execute(
-            select(Invitation).where(
-                Invitation.email == user.email,
-                Invitation.status == "pending",
-                Invitation.expires_at > now,
-            ).order_by(Invitation.created_at.asc()).limit(1)
-        )
-        inv = inv_result.scalar_one_or_none()
-        if inv:
-            inv.status = "accepted"
-            inv.accepted_at = now
-            from sqlalchemy.dialects.postgresql import insert as pg_insert
-            await session.execute(
-                pg_insert(OrgMember)
-                .values(org_id=inv.org_id, user_id=user.id, role=inv.role)
-                .on_conflict_do_nothing(constraint="uq_org_members_org_user")
-            )
-            # human team_member 생성 제거 — org_members 기반 opt-out 모델로 이전 (E-ENTITY-CLEANUP S5).
-            await session.flush()
-            return {
-                "org_id": str(inv.org_id),
-                "project_id": str(inv.project_id) if inv.project_id else "",
-                "role": inv.role,
-            }
-
-        # 2b. OrgInvite (org_invites 테이블 — /api/v2/invites 경로)
+        # OrgInvite (org_invites 테이블 — canonical /api/v2/invites 경로).
+        # 구 Invitation(invitations) 경로는 d3619e80 cutover로 제거 — org_invites가 단일 SSOT.
         # invite link 가입 후 explicit accept 없이 로그인 시 자동 수락 fallback.
+        now = datetime.now(timezone.utc)
         org_inv_result = await session.execute(
             select(OrgInvite).where(
                 OrgInvite.email == user.email.lower(),
@@ -331,15 +359,12 @@ async def _build_app_metadata(user: User, session: AsyncSession) -> dict:
         )
         org_inv = org_inv_result.scalar_one_or_none()
         if org_inv:
-            from sqlalchemy.dialects.postgresql import insert as pg_insert
-            await session.execute(
-                pg_insert(OrgMember)
-                .values(org_id=org_inv.organization_id, user_id=user.id, role=org_inv.role)
-                .on_conflict_do_nothing(constraint="uq_org_members_org_user")
-            )
-            org_inv.status = "accepted"
-            org_inv.accepted_at = now
-            await session.flush()
+            # 05fa365f SSOT: 자동수락(login fallback)도 **canonical accept**로 위임 — org_member 생성 +
+            # 선택 프로젝트 project_access(granted) 부여 + status=accepted를 한 경로로(명시 accept·signup과
+            # 동일). 인라인 복제 제거 → 3경로(명시·signup·login-fallback) divergence 방지. (이전엔 org_member
+            # +status만 하고 grant 스킵 → invitee grant 0행 → /api/projects=[].)
+            from app.repositories.org_invite import OrgInviteRepository
+            await OrgInviteRepository(session).accept(org_inv.token, user.id, user.email)
             return {
                 "org_id": str(org_inv.organization_id),
                 "project_id": "",
@@ -371,6 +396,9 @@ async def _build_app_metadata(user: User, session: AsyncSession) -> dict:
     # login 시 last_project_id 자동 갱신 — 다음 로그인부터 last_project_id 우선 경로 사용
     if getattr(user, "last_project_id", None) != member.project_id:
         user.last_project_id = member.project_id
+    # 현재 org 추적(0746 후속) — 다음 refresh가 org_id 없이도 이 org로 스코프
+    if getattr(user, "last_org_id", None) != member.org_id:
+        user.last_org_id = member.org_id
 
     # S-MBR-03: org owner/admin → project role 상속 (AC1/AC2)
     # org_members.role이 team_members.role보다 높으면 org role을 effective role로 사용.
@@ -471,13 +499,17 @@ async def register(
     _, refresh_exp = create_refresh_token(str(user.id), expires_delta=timedelta(days=REFRESH_TOKEN_EXPIRE_DAYS))
     await _store_refresh_token(session, user, tokens["refresh_token"], refresh_exp)
 
-    # 이메일 인증 발송 (비동기 — 실패해도 가입은 완료)
+    # 이메일 인증 발송 — 실패해도 가입은 완료하되 **반드시 가시화**(silent swallow 금지).
+    # send_email은 bool 반환(True=Resend/SMTP 실발송, False=콘솔 폴백=미발송). delivered를 응답
+    # email_delivered로 노출(silent swallow 금지) — FE가 "201인데 인증메일 안 옴"을 감지·안내 가능
+    # (bacefe2c: console-fallback 환경서 verify메일 안 와 stuck 되는 데모 signup 치명 경로 방어).
+    delivered = False
     try:
         verification_token = create_email_verification_token(str(user.id))
         app_url = os.getenv("NEXT_PUBLIC_APP_URL", "https://app.sprintable.ai")
         verify_link = f"{app_url}/verify-email?token={verification_token}"
         from app.services.email import send_email
-        send_email(
+        delivered = send_email(
             to=user.email,
             subject="Sprintable 이메일 인증",
             html_body=(
@@ -485,10 +517,19 @@ async def register(
                 f"<p><a href='{verify_link}'>이메일 인증하기</a></p>"
             ),
         )
+        if not delivered:
+            logger.warning(
+                "register: 인증 이메일 미발송(콘솔 폴백) user_id=%s email=%s — "
+                "RESEND_API_KEY/EMAIL_FROM 미설정 또는 발송 실패 추정",
+                user.id, user.email,
+            )
     except Exception:
-        pass  # 이메일 발송 실패는 가입에 영향 없음
+        logger.exception(
+            "register: 인증 이메일 발송 예외 user_id=%s email=%s (가입 자체는 완료)",
+            user.id, user.email,
+        )
 
-    return _ok(tokens, 201)
+    return _ok({**tokens, "email_delivered": delivered}, 201)
 
 
 # ─── POST /api/v2/auth/token ──────────────────────────────────────────────────
@@ -1045,7 +1086,7 @@ async def resend_verification(
     app_url = os.getenv("NEXT_PUBLIC_APP_URL", "https://app.sprintable.ai")
     verify_link = f"{app_url}/verify-email?token={verification_token}"
     from app.services.email import send_email
-    send_email(
+    delivered = send_email(
         to=user.email,
         subject="Sprintable 이메일 인증",
         html_body=(
@@ -1053,7 +1094,13 @@ async def resend_verification(
             f"<p><a href='{verify_link}'>이메일 인증하기</a></p>"
         ),
     )
-    return _ok({"message": "Verification email sent"})
+    if not delivered:
+        # 콘솔 폴백(미발송)을 "sent"로 거짓 보고하지 않는다(데모 디버깅 가시화).
+        logger.warning(
+            "resend-verification: 인증 이메일 미발송(콘솔 폴백) user_id=%s email=%s", user.id, user.email
+        )
+        return _ok({"message": "Verification email could not be delivered — check email configuration", "delivered": False})
+    return _ok({"message": "Verification email sent", "delivered": True})
 
 
 # ─── POST /api/v2/auth/switch-project ────────────────────────────────────────
@@ -1134,6 +1181,9 @@ async def switch_organization(
 
     # 대상 org의 접근 가능한 첫 project 해소 — team_member > grant > org 첫 project (grant 유저 포함)
     user.last_project_id = await first_accessible_project_id(session, user.id, body.org_id)
+    # 0746 후속: 현재 org 영속 → 이후 refresh(org 컨텍스트 없음)가 이 org로 스코프해 0-project org서도
+    # cross-org 옛 프로젝트 재주입 0 (last_project_id=None이어도 org는 유지).
+    user.last_org_id = body.org_id
 
     # 기존 refresh token 무효화
     await session.execute(
@@ -1146,14 +1196,18 @@ async def switch_organization(
     # (내부에서 user.last_project_id를 이전 org TM으로 덮어쓰므로 먼저 캡처)
     target_project_id = user.last_project_id
 
-    # 새 토큰 발급 — switch-org 목적 자체가 org 전환이므로 target org_id + project_id 모두 덮어씀
-    app_metadata = await _build_app_metadata(user, session)
+    # 새 토큰 발급 — org_id 스코프로 _build_app_metadata 호출 → cross-org 옛 프로젝트 주입 차단(0746).
+    # (내부가 target org로 스코프해 project_id/last_project_id를 그 org의 것 또는 null로 해소.)
+    app_metadata = await _build_app_metadata(user, session, org_id=body.org_id)
     app_metadata["org_id"] = str(body.org_id)
-    # 캡처해둔 target project_id로 덮어쓰기 — _build_app_metadata 내부 fallback 값 무효화
+    # belt-and-suspenders: 캡처한 target project_id로 재확정(스코프 결과와 일치)
     if target_project_id:
         app_metadata["project_id"] = str(target_project_id)
     else:
         app_metadata.pop("project_id", None)
+    # ⚠️0746: _build_app_metadata(org_id 스코프)가 last_project_id를 in-org/null로 설정하므로 추가
+    # 재설정 불필요하나, 캡처값과 동기 보장(refresh가 cross-org로 재누수하지 않도록).
+    user.last_project_id = target_project_id
 
     tokens = create_tokens(str(user.id), email=user.email, app_metadata=app_metadata)
     _, refresh_exp = create_refresh_token(str(user.id), expires_delta=timedelta(days=REFRESH_TOKEN_EXPIRE_DAYS))

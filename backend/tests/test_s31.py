@@ -44,6 +44,7 @@ def _mock_member() -> MagicMock:
     m.project_name = None
     m.project = None
     m.name = "Alice"
+    m.email = "alice@example.com"  # E-ONBOARDING S2: MeResponse.email
     m.type = "human"
     m.role = "admin"
     m.is_active = True
@@ -224,6 +225,8 @@ def _mock_result(member):
     """scalars().first() 패턴 mock 생성."""
     r = MagicMock()
     r.scalars.return_value.first.return_value = member
+    # E-ONBOARDING S2: get_me의 User 조회(scalar_one_or_none)도 member 모킹 → email/has_password 일관
+    r.scalar_one_or_none.return_value = member
     return r
 
 

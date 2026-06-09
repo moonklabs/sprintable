@@ -47,6 +47,26 @@ class NotificationRepository(BaseRepository[Notification]):
             .values(is_read=True)
         )
 
+    async def mark_read(self, notification_id: uuid.UUID, user_id: uuid.UUID) -> Notification | None:
+        """단일 알림 읽음 처리 — 소유자 본인(user_id) 것만. 없으면 None(404 용)."""
+        await self.session.execute(
+            update(Notification)
+            .where(
+                Notification.org_id == self.org_id,
+                Notification.id == notification_id,
+                Notification.user_id == user_id,
+            )
+            .values(is_read=True)
+        )
+        result = await self.session.execute(
+            select(Notification).where(
+                Notification.org_id == self.org_id,
+                Notification.id == notification_id,
+                Notification.user_id == user_id,
+            )
+        )
+        return result.scalar_one_or_none()
+
 
 class NotificationSettingRepository:
     def __init__(self, session: AsyncSession) -> None:

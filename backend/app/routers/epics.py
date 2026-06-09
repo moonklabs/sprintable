@@ -1,6 +1,7 @@
 import uuid
+from datetime import datetime
 
-from fastapi import APIRouter, Depends, HTTPException, Query
+from fastapi import APIRouter, Depends, HTTPException, Query, Response
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.dependencies.auth import AuthContext, enforce_body_context, get_current_user, get_verified_org_id
@@ -20,16 +21,43 @@ def _get_repo(
 
 @router.get("", response_model=list[EpicResponse])
 async def list_epics(
+    response: Response,
     project_id: uuid.UUID | None = Query(default=None),
     status_filter: str | None = Query(default=None, alias="status"),
+    limit: int | None = Query(default=None, ge=1, le=2000),
+    cursor: str | None = Query(default=None, description="Cursor: ISO 8601 created_at, fetch before this time"),
+    order_by: str = Query(default="created_at"),
     repo: EpicRepository = Depends(_get_repo),
 ) -> list[EpicResponse]:
+    """에픽 목록 — true cursor 페이지네이션 + 전체 카운트(X-Total-Count 헤더).
+
+    1000+ 에픽이 조용히 잘리던 문제(#1200/569f5316)를 근절: limit/cursor로 위임
+    페이지네이션하고, 페이지와 무관한 전체 개수를 X-Total-Count로 노출한다.
+    limit 미지정 시 기존 동작(최대 1000)과 호환되며, 1000+ 인 경우에도 헤더로
+    잘림 여부를 호출자가 인지할 수 있어 silent-truncation이 아니다.
+    """
     filters: dict = {}
     if project_id:
         filters["project_id"] = project_id
     if status_filter:
         filters["status"] = status_filter
-    epics = await repo.list(**filters)
+
+    cursor_dt: datetime | None = None
+    if cursor:
+        try:
+            cursor_dt = datetime.fromisoformat(cursor)
+        except (ValueError, TypeError) as exc:
+            # 잘못된 cursor는 silent 무시 대신 400으로 명확히 거절한다.
+            raise HTTPException(
+                status_code=400, detail="invalid cursor: expected ISO 8601 datetime"
+            ) from exc
+
+    epics, total = await repo.list_paginated(
+        limit=limit, cursor=cursor_dt, order_by=order_by, **filters
+    )
+    response.headers["X-Total-Count"] = str(total)
+    if epics:
+        response.headers["X-Next-Cursor"] = epics[-1].created_at.isoformat()
     return [EpicResponse.model_validate(e) for e in epics]
 
 
@@ -47,11 +75,13 @@ async def create_epic(
     auth: AuthContext = Depends(get_current_user),
     org_id: uuid.UUID = Depends(get_verified_org_id),
 ) -> EpicResponse:
-    enforce_body_context(
+    await enforce_body_context(
         auth_org_id=org_id,
         body_org_id=body.org_id,
         body_project_id=body.project_id,
         auth_project_id=auth.claims.get("app_metadata", {}).get("project_id"),
+        db=session,
+        user_id=uuid.UUID(auth.user_id),
     )
     repo = EpicRepository(session, org_id)
     epic = await repo.create(
@@ -110,10 +140,30 @@ async def delete_epic(
     id: uuid.UUID,
     repo: EpicRepository = Depends(_get_repo),
     session: AsyncSession = Depends(get_db),
+    auth: AuthContext = Depends(get_current_user),
     org_id: uuid.UUID = Depends(get_verified_org_id),
 ) -> dict:
+    """에픽 삭제 — admin/owner 전용 게이트.
+
+    파괴적 작업이므로 org-level owner/admin 만 허용한다. FE 의 requireRole 게이트는
+    Supabase 레거시(db=undefined) 의존으로 깨져 있었고 그게 유일한 admin/owner 가드였다.
+    삭제하면 권한 누수(org member/viewer 가 에픽 삭제)이므로 authz 를 BE SSOT 로 옮긴다.
+    admin/owner 는 org-wide 접근권이라 project 접근권을 자동 충족한다(별도 project 게이트 불요).
+    """
     from app.repositories.dependency import DependencyRepository
     from app.repositories.label import ItemLabelRepository
+    from app.services.project_auth import is_org_owner_or_admin
+
+    # 존재 검증 먼저(없으면 404) — authz 결과로 존재 여부가 새지 않도록 404 우선.
+    epic = await repo.get(id)
+    if epic is None:
+        raise HTTPException(status_code=404, detail="Epic not found")
+
+    if not await is_org_owner_or_admin(session, uuid.UUID(auth.user_id), org_id):
+        raise HTTPException(
+            status_code=403, detail="Epic deletion requires admin or owner role"
+        )
+
     ok = await repo.delete(id)
     if not ok:
         raise HTTPException(status_code=404, detail="Epic not found")

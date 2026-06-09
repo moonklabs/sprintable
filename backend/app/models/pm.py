@@ -1,7 +1,7 @@
 import uuid
 from datetime import date, datetime
 
-from sqlalchemy import BigInteger, Boolean, Date, DateTime, ForeignKey, Integer, String, Text, func
+from sqlalchemy import BigInteger, Boolean, Date, DateTime, ForeignKey, Integer, String, Text, func, text
 from sqlalchemy.dialects.postgresql import JSONB, UUID
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
@@ -113,6 +113,10 @@ class Story(Base, OrgScopedMixin, TimestampMixin, SoftDeleteMixin):
     # E-OUTCOME-LOOP: 채점 필드 (outcome, 채점잡 전용)
     outcome_status: Mapped[str] = mapped_column(String(20), nullable=False, server_default="n_a")
     outcome_result: Mapped[dict | None] = mapped_column(JSONB, nullable=True)
+    # E-FILE S4: 보드 스토리 첨부 (chat과 동형 {url,name,content_type,size} list). additive.
+    attachments: Mapped[list | None] = mapped_column(
+        JSONB, nullable=True, server_default=text("'[]'"), default=list
+    )
 
     epic: Mapped[Epic | None] = relationship("Epic", back_populates="stories")
     sprint: Mapped[Sprint | None] = relationship("Sprint", back_populates="stories")

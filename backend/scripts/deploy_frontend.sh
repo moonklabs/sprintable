@@ -77,15 +77,13 @@ gcloud run deploy "${SERVICE_NAME}" \
     --max-instances="${MAX_INSTANCES}" \
     --concurrency=80 \
     --timeout=60 \
-    --set-env-vars="NODE_ENV=production,NEXT_TELEMETRY_DISABLED=1" \
-    --set-env-vars="NEXT_PUBLIC_FASTAPI_URL=${FASTAPI_URL}" \
+    --set-env-vars="NODE_ENV=production,NEXT_TELEMETRY_DISABLED=1,NEXT_PUBLIC_FASTAPI_URL=${FASTAPI_URL}" \
     --set-secrets="\
 NEXT_PUBLIC_SUPABASE_URL=NEXT_PUBLIC_SUPABASE_URL:latest,\
 NEXT_PUBLIC_SUPABASE_ANON_KEY=NEXT_PUBLIC_SUPABASE_ANON_KEY:latest,\
 NEXT_PUBLIC_COOKIE_DOMAIN=NEXT_PUBLIC_COOKIE_DOMAIN:latest,\
 JWT_SECRET=JWT_SECRET:latest" \
-    --startup-cpu-boost \
-    --startup-probe-path="/api/health"
+    --cpu-boost
 
 SERVICE_URL=$(gcloud run services describe "${SERVICE_NAME}" \
     --region="${GCP_REGION}" \

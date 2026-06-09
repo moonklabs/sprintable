@@ -62,6 +62,32 @@ async def has_project_access(
     return row.scalar_one_or_none() is not None
 
 
+async def is_org_owner_or_admin(
+    session: AsyncSession,
+    user_id: uuid.UUID,
+    org_id: uuid.UUID,
+) -> bool:
+    """user 가 해당 org 의 owner/admin 인지. 파괴적 작업(프로젝트 삭제 등) 게이트용.
+
+    grant(project_access)만으론 불가 — org-level 역할만 통과. has_project_access 의
+    owner/admin 분기와 동일 기준(team_member 봐주기 없음).
+    """
+    row = await session.execute(
+        text(
+            """
+            SELECT 1 FROM org_members
+            WHERE user_id = :user_id
+              AND org_id = :org_id
+              AND deleted_at IS NULL
+              AND role IN ('owner', 'admin')
+            LIMIT 1
+            """
+        ),
+        {"user_id": user_id, "org_id": org_id},
+    )
+    return row.scalar_one_or_none() is not None
+
+
 async def first_accessible_project_id(
     session: AsyncSession,
     user_id: uuid.UUID,
@@ -140,3 +166,52 @@ async def first_accessible_project_id(
         return uuid.UUID(str(val))
 
     return None
+
+
+async def accessible_project_ids_in_org(
+    session: AsyncSession,
+    user_id: uuid.UUID,
+    org_id: uuid.UUID,
+) -> list[uuid.UUID]:
+    """org 내에서 user가 접근 가능한 project id 전량 (has_project_access 3-branch bulk).
+
+    team_member(active) ∪ project_access(granted) ∪ owner/admin org-wide. 정책B: list_projects가
+    이걸로 필터해 접근권 없는 멤버=0 프로젝트, owner/admin=org 전체. has_project_access와 정합.
+    """
+    rows = await session.execute(
+        text(
+            """
+            SELECT p.id
+            FROM projects p
+            WHERE p.org_id = :org_id
+              AND p.deleted_at IS NULL
+              AND (
+                EXISTS (
+                    SELECT 1 FROM team_members tm
+                    WHERE tm.project_id = p.id
+                      AND (tm.id = :user_id OR tm.user_id = :user_id)
+                      AND tm.is_active = true
+                )
+                OR EXISTS (
+                    SELECT 1 FROM project_access pa
+                    JOIN org_members om ON pa.org_member_id = om.id
+                    WHERE pa.project_id = p.id
+                      AND om.user_id = :user_id
+                      AND om.deleted_at IS NULL
+                      AND pa.permission = 'granted'
+                      AND om.org_id = :org_id
+                )
+                OR EXISTS (
+                    SELECT 1 FROM org_members om
+                    WHERE om.user_id = :user_id
+                      AND om.deleted_at IS NULL
+                      AND om.role IN ('owner', 'admin')
+                      AND om.org_id = :org_id
+                )
+              )
+            ORDER BY p.created_at ASC
+            """
+        ),
+        {"user_id": user_id, "org_id": org_id},
+    )
+    return [uuid.UUID(str(r[0])) for r in rows.all()]

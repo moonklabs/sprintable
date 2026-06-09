@@ -1,12 +1,14 @@
 'use client';
 
 import { useEffect, useState } from 'react';
+import { useTranslations } from 'next-intl';
 import { QRCodeSVG } from 'qrcode.react';
 import { SectionCard, SectionCardBody, SectionCardHeader } from '@/components/ui/section-card';
 
 type TwoFaState = 'loading' | 'disabled' | 'enrolling' | 'enabled';
 
 export function TwoFactorSection() {
+  const t = useTranslations('settings');
   const [state, setState] = useState<TwoFaState>('loading');
   const [provUri, setProvUri] = useState<string | null>(null);
   const [secret, setSecret] = useState<string | null>(null);
@@ -37,7 +39,7 @@ export function TwoFactorSection() {
     try {
       const res = await fetch('/api/auth/2fa/setup', { method: 'POST' });
       const json = await res.json() as { data?: { secret: string; uri: string }; error?: { code: string; message: string } };
-      if (!res.ok) { setMessage({ type: 'error', text: json.error?.message ?? 'Setup failed' }); return; }
+      if (!res.ok) { setMessage({ type: 'error', text: json.error?.message ?? t('twoFactorSetupFailed') }); return; }
       setProvUri(json.data?.uri ?? null);
       setSecret(json.data?.secret ?? null);
       setState('enrolling');
@@ -57,12 +59,12 @@ export function TwoFactorSection() {
         body: JSON.stringify({ code: otpCode }),
       });
       const json = await res.json() as { data?: { ok: boolean }; error?: { message: string } };
-      if (!res.ok) { setMessage({ type: 'error', text: json.error?.message ?? 'Invalid code' }); return; }
+      if (!res.ok) { setMessage({ type: 'error', text: json.error?.message ?? t('twoFactorInvalidCode') }); return; }
       setState('enabled');
       setProvUri(null);
       setSecret(null);
       setOtpCode('');
-      setMessage({ type: 'success', text: '2FA enabled successfully.' });
+      setMessage({ type: 'success', text: t('twoFactorEnabledMsg') });
     } finally {
       setBusy(false);
     }
@@ -79,10 +81,10 @@ export function TwoFactorSection() {
         body: JSON.stringify({ code: otpCode }),
       });
       const json = await res.json() as { error?: { message: string } };
-      if (!res.ok) { setMessage({ type: 'error', text: json.error?.message ?? 'Invalid code' }); return; }
+      if (!res.ok) { setMessage({ type: 'error', text: json.error?.message ?? t('twoFactorInvalidCode') }); return; }
       setState('disabled');
       setOtpCode('');
-      setMessage({ type: 'success', text: '2FA disabled.' });
+      setMessage({ type: 'success', text: t('twoFactorDisabledMsg') });
     } finally {
       setBusy(false);
     }
@@ -94,9 +96,9 @@ export function TwoFactorSection() {
     <SectionCard>
       <SectionCardHeader>
         <div className="space-y-1">
-          <h2 className="text-base font-semibold text-foreground">🔐 Two-Factor Authentication</h2>
+          <h2 className="text-base font-semibold text-foreground">🔐 {t('twoFactorTitle')}</h2>
           <p className="text-sm text-muted-foreground">
-            {state === 'enabled' ? 'Two-factor authentication is active.' : 'Add an extra layer of security using a TOTP authenticator app.'}
+            {state === 'enabled' ? t('twoFactorActive') : t('twoFactorDescription')}
           </p>
         </div>
       </SectionCardHeader>
@@ -111,13 +113,13 @@ export function TwoFactorSection() {
             disabled={busy}
             className="rounded-lg bg-primary px-4 py-2 text-sm font-medium text-primary-foreground hover:bg-primary/90 disabled:opacity-50"
           >
-            {busy ? '...' : 'Enable 2FA'}
+            {busy ? '...' : t('twoFactorEnable')}
           </button>
         )}
 
         {state === 'enrolling' && provUri && (
           <div className="space-y-4">
-            <p className="text-sm text-muted-foreground">Scan the QR code or enter the key manually, then enter the 6-digit code below.</p>
+            <p className="text-sm text-muted-foreground">{t('twoFactorEnrollHint')}</p>
             <div className="flex justify-center">
               <div className="rounded-lg bg-white p-3">
                 <QRCodeSVG value={provUri} size={220} bgColor="#ffffff" fgColor="#000000" level="M" />
@@ -125,7 +127,7 @@ export function TwoFactorSection() {
             </div>
             {secret && (
               <p className="text-center text-xs text-muted-foreground">
-                Manual key: <span className="font-mono text-foreground">{secret}</span>
+                {t('twoFactorManualKey')} <span className="font-mono text-foreground">{secret}</span>
               </p>
             )}
             <input
@@ -142,14 +144,14 @@ export function TwoFactorSection() {
               disabled={busy || otpCode.length !== 6}
               className="w-full rounded-lg bg-primary px-4 py-2 text-sm font-medium text-primary-foreground hover:bg-primary/90 disabled:opacity-50"
             >
-              {busy ? '...' : 'Activate 2FA'}
+              {busy ? '...' : t('twoFactorActivate')}
             </button>
           </div>
         )}
 
         {state === 'enabled' && (
           <div className="space-y-3">
-            <p className="text-sm text-muted-foreground">Enter your current authenticator code to disable 2FA.</p>
+            <p className="text-sm text-muted-foreground">{t('twoFactorDisableHint')}</p>
             <input
               type="text"
               inputMode="numeric"
@@ -164,7 +166,7 @@ export function TwoFactorSection() {
               disabled={busy || otpCode.length !== 6}
               className="rounded-lg border border-rose-500/40 px-4 py-2 text-sm font-medium text-rose-400 hover:border-rose-400 hover:text-rose-300 disabled:opacity-50"
             >
-              {busy ? '...' : 'Disable 2FA'}
+              {busy ? '...' : t('twoFactorDisable')}
             </button>
           </div>
         )}

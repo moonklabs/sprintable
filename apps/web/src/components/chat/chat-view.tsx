@@ -1,12 +1,13 @@
 'use client';
 
-import { useCallback, useEffect, useRef, useState } from 'react';
+import { Fragment, useCallback, useEffect, useRef, useState } from 'react';
 import { ChevronLeft, RefreshCw } from 'lucide-react';
 import { usePathname, useRouter } from 'next/navigation';
 import { ChatBubble } from './chat-bubble';
-import { ChatInput } from './chat-input';
+import { CommandHintNotice, type BlockedHint } from './command-hint-notice';
+import { ChatInput, type CommandTarget } from './chat-input';
 import { ThreadPanel } from './thread-panel';
-import type { ChatMessage } from '@/hooks/use-chat-sse';
+import type { ChatMessage, SendAttachment } from '@/hooks/use-chat-sse';
 import { normalizeToMessage, useChatSse } from '@/hooks/use-chat-sse';
 import { EmptyState } from '@/components/ui/empty-state';
 
@@ -17,6 +18,8 @@ interface ChatViewProps {
   projectId?: string;
   apiPrefix?: string;
   backRoute?: string | null;
+  // S8 #2: pre-send capability 경고 대상(에이전트 participant runtime). 빈 배열이면 경고 미표시(graceful).
+  commandTargets?: CommandTarget[];
 }
 
 interface MessageGroup {
@@ -35,7 +38,7 @@ function groupByDate(messages: ChatMessage[]): MessageGroup[] {
   return Object.entries(groups).map(([date, msgs]) => ({ date, messages: msgs }));
 }
 
-export function ChatView({ threadId, currentTeamMemberId, threadTitle, projectId, apiPrefix = '/api/chats', backRoute = '/memos' }: ChatViewProps) {
+export function ChatView({ threadId, currentTeamMemberId, threadTitle, projectId, apiPrefix = '/api/chats', backRoute = '/memos', commandTargets }: ChatViewProps) {
   const router = useRouter();
   const pathname = usePathname();
   const [messages, setMessages] = useState<ChatMessage[]>([]);
@@ -44,6 +47,9 @@ export function ChatView({ threadId, currentTeamMemberId, threadTitle, projectId
   const [hasMore, setHasMore] = useState(false);
   const [cursor, setCursor] = useState<string | null>(null);
   const [showNewIndicator, setShowNewIndicator] = useState(false);
+  // S5: 미지원 런타임 커맨드 차단 hint — 트리거 메시지 id에 keyed된 ephemeral state.
+  // POST 응답 command_gate.blocked에서만 적재(persist 안 함·reload 시 소멸).
+  const [commandHints, setCommandHints] = useState<Record<string, BlockedHint[]>>({});
   // CB-S9: 스레드 패널 상태
   const [activeThread, setActiveThread] = useState<ChatMessage | null>(null);
   const [threadIncoming, setThreadIncoming] = useState<ChatMessage | null>(null);
@@ -236,9 +242,10 @@ export function ChatView({ threadId, currentTeamMemberId, threadTitle, projectId
     );
   }, []);
 
-  const handleSend = useCallback(async (content: string, mentionedIds?: string[]) => {
+  const handleSend = useCallback(async (content: string, mentionedIds?: string[], attachments?: SendAttachment[]) => {
     const body: Record<string, unknown> = { content };
     if (mentionedIds && mentionedIds.length > 0) body.mentioned_ids = mentionedIds;
+    if (attachments && attachments.length > 0) body.attachments = attachments;
     const res = await fetch(`${apiPrefix}/${threadId}/messages`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
@@ -254,21 +261,29 @@ export function ChatView({ threadId, currentTeamMemberId, threadTitle, projectId
       return;
     }
     const payload = (raw.data ?? raw) as Record<string, unknown>;
-    addMessage(normalizeToMessage(payload));
+    const sent = normalizeToMessage(payload);
+    addMessage(sent);
+    // S5: 미지원 런타임 차단 hint를 트리거 메시지에 keyed로 적재(차단 발생 시에만 키 존재).
+    const gate = raw.command_gate as { blocked?: BlockedHint[] } | undefined;
+    const blocked = gate?.blocked;
+    if (blocked?.length) {
+      setCommandHints((prev) => ({ ...prev, [sent.id]: blocked }));
+    }
   }, [threadId, addMessage, apiPrefix, pathname, router]);
 
-  const handleUpload = useCallback(async (file: File) => {
+  // chat-attach: 파일을 GCS에 업로드(서버사이드)하고 첨부 메타를 반환 — 유령경로(/api/chats/.../upload) 폐기.
+  // 반환된 메타는 chat-input이 모아 handleSend의 attachments로 한 메시지에 함께 전송한다.
+  const handleUploadFile = useCallback(async (file: File): Promise<SendAttachment> => {
     const formData = new FormData();
     formData.append('file', file);
-    const res = await fetch(`/api/chats/${threadId}/messages/upload`, {
+    if (projectId) formData.append('project_id', projectId);
+    const res = await fetch(`${apiPrefix}/${threadId}/attachments`, {
       method: 'POST',
       body: formData,
     });
-    if (!res.ok) throw new Error('Failed to upload file');
-    const raw = await res.json() as Record<string, unknown>;
-    const payload = (raw.data ?? raw) as Record<string, unknown>;
-    addMessage(normalizeToMessage(payload));
-  }, [threadId, addMessage]);
+    if (!res.ok) throw new Error('Failed to upload attachment');
+    return await res.json() as SendAttachment;
+  }, [apiPrefix, threadId, projectId]);
 
   const handleLoadMore = useCallback(async () => {
     if (!hasMore || !cursor || loadingMore) return;
@@ -417,14 +432,19 @@ export function ChatView({ threadId, currentTeamMemberId, threadTitle, projectId
                       const prev = group.messages[idx - 1];
                       const isGrouped = Boolean(prev && prev.created_by === msg.created_by);
                       return (
-                        <ChatBubble
-                          key={msg.id}
-                          message={msg}
-                          isMine={msg.created_by === currentTeamMemberId}
-                          isGrouped={isGrouped}
-                          onOpenThread={openThread}
-                          onDelete={handleDeleteMessage}
-                        />
+                        <Fragment key={msg.id}>
+                          <ChatBubble
+                            message={msg}
+                            isMine={msg.created_by === currentTeamMemberId}
+                            isGrouped={isGrouped}
+                            onOpenThread={openThread}
+                            onDelete={handleDeleteMessage}
+                          />
+                          {/* S5: 트리거 메시지 직후 차단 hint notice(차단 에이전트별 1건) */}
+                          {commandHints[msg.id]?.map((h) => (
+                            <CommandHintNotice key={h.agent_id} hint={h} />
+                          ))}
+                        </Fragment>
                       );
                     })}
                   </div>
@@ -451,8 +471,9 @@ export function ChatView({ threadId, currentTeamMemberId, threadTitle, projectId
           {/* Input */}
           <ChatInput
             onSend={handleSend}
-            onUpload={handleUpload}
+            onUploadFile={handleUploadFile}
             projectId={projectId}
+            commandTargets={commandTargets}
             placeholder="메시지를 입력하세요… (Enter 전송 / Shift+Enter 줄바꿈 / @ 멘션 / # 엔티티)"
           />
         </div>

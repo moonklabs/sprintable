@@ -22,10 +22,10 @@ def _mock_member(is_active: bool = True, type_: str = "human") -> MagicMock:
     m.role = "member"
     m.avatar_url = None
     m.agent_config = None
-    m.webhook_url = None
     m.is_active = is_active
     m.color = "#3385f8"
     m.agent_role = None
+    m.runtime_type = None  # E-CHAT-CMD S1b: 신규 필드 — mock 명시(from_attributes ValidationError 방지)
     m.created_by = None
     m.created_at = datetime(2026, 5, 1, tzinfo=timezone.utc)
     m.updated_at = datetime(2026, 5, 1, tzinfo=timezone.utc)
@@ -133,6 +133,9 @@ async def test_create_team_member_201():
 
         assert resp.status_code == 201
         assert resp.json()["name"] == "TestBot"
+        # 8d02d5e8: 온보딩 에이전트 키 scope = list(ALL_GROUPS) 명시(레거시 None 아님·툴그룹 모델 일관)
+        from app.services.mcp_toolset import ALL_GROUPS
+        assert mock_api_key.call_args.kwargs.get("scope") == list(ALL_GROUPS)
     finally:
         app.dependency_overrides.clear()
 
@@ -239,3 +242,54 @@ async def test_deactivate_not_found_404():
         assert resp.status_code == 404
     finally:
         app.dependency_overrides.clear()
+
+
+# ─── 1bc9fbae ⑤: webhook_url DROP — apply_anchor_update 무시 검증 ───────────────
+
+@pytest.mark.anyio
+async def test_apply_anchor_update_webhook_url_dropped():
+    """1bc9fbae ⑤ cutover: webhook_url 은 _PROFILE_FIELDS 에서 제거됨(canonical=webhook_configs).
+    PATCH 에 webhook_url 만 있으면 m_set/a_set/p_set 전부 비어 UPDATE execute 0회(에이전트 포함)."""
+    from app.repositories.team_member import TeamMemberRepository
+
+    for type_ in ("human", "agent"):
+        session = AsyncMock()
+        repo = TeamMemberRepository(session, ORG_ID)
+        member = _mock_member(type_=type_)
+
+        await repo.apply_anchor_update(member, {"webhook_url": "https://example.com/wh"})
+
+        assert session.execute.await_count == 0
+
+
+# ─── standup-dup fix: org-level team_members DISTINCT ON(id) dedup ──────────────
+
+@pytest.mark.anyio
+async def test_list_org_level_distinct_on_id():
+    """team_members 뷰(0088 projection·members⋈project_access)는 멀티프로젝트 멤버가
+    per-project N행 → org-level(project_id 미필터)은 DISTINCT ON(id)로 멤버 1행만(unique)."""
+    from sqlalchemy.dialects import postgresql
+
+    from app.repositories.team_member import TeamMemberRepository
+
+    captured = []
+
+    async def cap(q, *args, **kwargs):
+        captured.append(q)
+        r = MagicMock()
+        r.scalars.return_value.all.return_value = []
+        return r
+
+    session = AsyncMock()
+    session.execute = cap
+    repo = TeamMemberRepository(session, ORG_ID)
+
+    # org-level: project_id 미필터 → DISTINCT ON 적용(멤버 dedup)
+    await repo.list()
+    org_sql = str(captured[-1].compile(dialect=postgresql.dialect()))
+    assert "DISTINCT ON" in org_sql
+
+    # project-scoped: project당 1행이라 dedup 불요(무회귀)
+    await repo.list(project_id=PROJECT_ID)
+    proj_sql = str(captured[-1].compile(dialect=postgresql.dialect()))
+    assert "DISTINCT ON" not in proj_sql

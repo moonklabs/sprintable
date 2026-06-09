@@ -68,19 +68,83 @@ async def _client():
 
 # ── GET list ──────────────────────────────────────────────────────────────────
 
+def _paginated_execute(total: int, rows: list):
+    """list_paginated: 1번째 execute=count(scalar_one), 2번째=list(scalars().all())."""
+    state = {"n": 0}
+
+    async def _exec(stmt, *args, **kwargs):
+        state["n"] += 1
+        r = MagicMock()
+        if state["n"] == 1:
+            r.scalar_one.return_value = total
+        else:
+            r.scalars.return_value.all.return_value = rows
+        return r
+
+    return _exec
+
+
 @pytest.mark.anyio
 async def test_list_epics_200():
     client, session, app = await _client()
     try:
-        mock_result = MagicMock()
-        mock_result.scalars.return_value.all.return_value = [_mock_epic()]
-        session.execute = AsyncMock(return_value=mock_result)
+        session.execute = _paginated_execute(1, [_mock_epic()])
 
         async with client as c:
             resp = await c.get("/api/v2/epics")
 
         assert resp.status_code == 200
         assert isinstance(resp.json(), list)
+        # 569f5316: 전체 카운트는 항상 헤더로 노출 → silent-truncation 불가
+        assert resp.headers["X-Total-Count"] == "1"
+    finally:
+        app.dependency_overrides.clear()
+
+
+@pytest.mark.anyio
+async def test_list_epics_limit_cursor_delegated():
+    """limit/cursor 위임 + X-Total-Count/X-Next-Cursor 헤더."""
+    client, session, app = await _client()
+    try:
+        session.execute = _paginated_execute(42, [_mock_epic()])
+
+        async with client as c:
+            resp = await c.get("/api/v2/epics?limit=50&cursor=2026-05-01T00:00:00%2B00:00")
+
+        assert resp.status_code == 200
+        assert resp.headers["X-Total-Count"] == "42"
+        assert "X-Next-Cursor" in resp.headers
+    finally:
+        app.dependency_overrides.clear()
+
+
+@pytest.mark.anyio
+async def test_list_epics_1000plus_not_silent():
+    """1000+ 시뮬: 반환 페이지보다 total이 커도 헤더로 전체 카운트 노출(silent 잘림 아님)."""
+    client, session, app = await _client()
+    try:
+        # 페이지엔 1건만, 전체는 1500건 → X-Total-Count로 호출자가 잘림을 인지
+        session.execute = _paginated_execute(1500, [_mock_epic()])
+
+        async with client as c:
+            resp = await c.get("/api/v2/epics?limit=1")
+
+        assert resp.status_code == 200
+        assert resp.headers["X-Total-Count"] == "1500"
+        assert len(resp.json()) == 1
+    finally:
+        app.dependency_overrides.clear()
+
+
+@pytest.mark.anyio
+async def test_list_epics_invalid_cursor_400():
+    """잘못된 cursor는 silent 무시 대신 400으로 명확히 거절."""
+    client, session, app = await _client()
+    try:
+        async with client as c:
+            resp = await c.get("/api/v2/epics?cursor=not-a-datetime")
+
+        assert resp.status_code == 400
     finally:
         app.dependency_overrides.clear()
 
@@ -167,13 +231,39 @@ async def test_update_epic_200():
 
 # ── DELETE ────────────────────────────────────────────────────────────────────
 
+def _delete_execute(*, epic, is_admin: bool):
+    """delete_epic execute 시퀀스 모킹.
+
+    1) repo.get → 존재 검증(scalar_one_or_none=에픽)
+    2) is_org_owner_or_admin → owner/admin 행 유무(scalar_one_or_none)
+    3) repo.delete 내부 self.get → 다시 에픽(없으면 False→404)
+    이후 cascade(dependency/label delete)는 영향 없음.
+    """
+    state = {"n": 0}
+
+    async def _exec(stmt, *args, **kwargs):
+        state["n"] += 1
+        r = MagicMock()
+        if state["n"] == 1:
+            r.scalar_one_or_none.return_value = epic
+        elif state["n"] == 2:
+            r.scalar_one_or_none.return_value = 1 if is_admin else None
+        elif state["n"] == 3:
+            r.scalar_one_or_none.return_value = epic
+        else:
+            r.scalar_one_or_none.return_value = None
+            r.rowcount = 0
+        return r
+
+    return _exec
+
+
 @pytest.mark.anyio
-async def test_delete_epic_200():
+async def test_delete_epic_owner_admin_200():
+    """owner/admin 은 삭제 200."""
     client, session, app = await _client()
     try:
-        mock_result = MagicMock()
-        mock_result.scalar_one_or_none.return_value = _mock_epic()
-        session.execute = AsyncMock(return_value=mock_result)
+        session.execute = _delete_execute(epic=_mock_epic(), is_admin=True)
         session.delete = AsyncMock()
         session.flush = AsyncMock()
 
@@ -182,6 +272,41 @@ async def test_delete_epic_200():
 
         assert resp.status_code == 200
         assert resp.json()["ok"] is True
+    finally:
+        app.dependency_overrides.clear()
+
+
+@pytest.mark.anyio
+async def test_delete_epic_non_admin_403():
+    """비-admin(member/viewer) 은 삭제 403 — 권한 누수 차단."""
+    client, session, app = await _client()
+    try:
+        session.execute = _delete_execute(epic=_mock_epic(), is_admin=False)
+        session.delete = AsyncMock()
+        session.flush = AsyncMock()
+
+        async with client as c:
+            resp = await c.delete(f"/api/v2/epics/{EPIC_ID}")
+
+        assert resp.status_code == 403
+        assert "admin or owner" in resp.json()["error"]["message"]
+    finally:
+        app.dependency_overrides.clear()
+
+
+@pytest.mark.anyio
+async def test_delete_epic_404_missing():
+    """존재하지 않는 에픽은 authz 이전에 404."""
+    client, session, app = await _client()
+    try:
+        session.execute = _delete_execute(epic=None, is_admin=True)
+        session.delete = AsyncMock()
+        session.flush = AsyncMock()
+
+        async with client as c:
+            resp = await c.delete(f"/api/v2/epics/{uuid.uuid4()}")
+
+        assert resp.status_code == 404
     finally:
         app.dependency_overrides.clear()
 

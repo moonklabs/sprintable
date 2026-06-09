@@ -90,12 +90,19 @@ async def test_anchor_resolve_member_human(monkeypatch):
 
 @pytest.mark.anyio
 async def test_anchor_resolve_member_human_not_found_400(monkeypatch):
+    """P0 핫픽스 후: members **및** org_members 둘 다 없을 때만 400.
+
+    (members-less 라도 org_members 있으면 폴백으로 200 — test_resolve_member_org_members_fallback)
+    """
     import app.services.member_resolver as mr
     from fastapi import HTTPException
 
     monkeypatch.setattr(mr.settings, "member_ssot_resolver_shadow", True)
     session = AsyncMock()
-    session.execute = AsyncMock(side_effect=[_result(scalar=None)])  # member 없음
+    # Member None → User None → OrgMember None(폴백도 실패) → 400
+    session.execute = AsyncMock(side_effect=[
+        _result(scalar=None), _result(scalar=None), _result(scalar=None),
+    ])
     with pytest.raises(HTTPException) as exc:
         await mr.resolve_member(_auth(uuid.uuid4()), uuid.uuid4(), session, project_id=None)
     assert exc.value.status_code == 400

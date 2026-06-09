@@ -12,7 +12,9 @@ function getAppOrigin() {
   return process.env.NEXT_PUBLIC_APP_URL ?? 'https://app.sprintable.ai';
 }
 const MCP_SERVER_URL = () => `${getAppOrigin()}/api/v2/mcp`;
-const LLMS_PROMPT = () => `Read this document and complete onboarding: ${getAppOrigin()}/llms.txt`;
+// f44e2644: 온보딩 문서는 랜딩 canonical(sprintable.ai/llms.txt) 직지정. app.sprintable.ai/llms.txt는
+// host-스코프 CF 301이 prod에서 미발동(앱 자체 사본 서빙·onboarding-guide 링크 깨짐)이라 직지정이 안전.
+const LLMS_PROMPT = () => `Read this document and complete onboarding: https://sprintable.ai/llms.txt`;
 const AGENT_ROLES = ['developer', 'designer', 'pm', 'qa', 'devops'];
 
 function buildMcpConfig(apiKey: string) {
@@ -107,8 +109,20 @@ export function OnboardingForm({ initialStep, initialOrgId }: OnboardingFormProp
     }
 
     setOrgId(json.data.id);
+    // E-ONB S5 FINAL(까심 진단): org 생성 시 org_member가 최초 생성됨 → 즉시 토큰 refresh로
+    // 새 JWT에 org_id(BE auth Path4 org_member fallback) 반영. 이래야 다음 단계 project 생성의
+    // getAuthContext(/api/v2/me)가 통과한다(미refresh 시 fresh JWT엔 team_member 없어 me null → 401).
+    await fetch('/api/auth/refresh', { method: 'POST' }).catch(() => null);
     setStep('project');
     setLoading(false);
+  };
+
+  // E-ONB S5: 온보딩 완료 후 /dashboard 이동 전 토큰 refresh.
+  // register JWT는 app_metadata 비어(org_id 없음) — TeamMember는 project 생성 시 최초 생기므로,
+  // 그 후 refresh로 새 JWT(sp_at)에 org_id 반영해야 보드/스토리 등 앱 전반 API가 차단되지 않는다.
+  const finishToDashboard = async () => {
+    await fetch('/api/auth/refresh', { method: 'POST' }).catch(() => null);
+    window.location.href = '/dashboard';
   };
 
   const handleCreateProject = async () => {
@@ -116,6 +130,7 @@ export function OnboardingForm({ initialStep, initialOrgId }: OnboardingFormProp
     setLoading(true);
     setError('');
 
+    // E-ONB S5 FINAL: org 생성 직후 refresh(handleCreateOrg)로 JWT에 org_id 반영됨 → X-Org-Id 불요(제거).
     const res = await fetch('/api/projects', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
@@ -144,23 +159,8 @@ export function OnboardingForm({ initialStep, initialOrgId }: OnboardingFormProp
 
     setProjectId(project.id);
 
-    // team_member 자동 생성 (type=human)
-    const meRes = await fetch('/api/me');
-    if (meRes.ok) {
-      const meJson = await meRes.json() as { data?: { name?: string } };
-      const memberName = meJson.data?.name ?? t('unknownUser');
-      await fetch('/api/team-members', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          org_id: orgId,
-          project_id: project.id,
-          type: 'human',
-          name: memberName,
-          role: 'admin',
-        }),
-      }).catch(() => null);
-    }
+    // 휴먼 members 앵커는 BE가 org/project 생성 시 ensure_human_member로 보장한다(#1317 휴먼판).
+    // 과거 여기서 호출하던 /api/team-members(type=human) POST는 410 Gone(데드 경로)이라 제거.
 
     await fetch('/api/current-project', {
       method: 'POST',
@@ -169,7 +169,7 @@ export function OnboardingForm({ initialStep, initialOrgId }: OnboardingFormProp
     }).catch(() => null);
 
     if (initialStep === 'project') {
-      window.location.href = '/dashboard';
+      await finishToDashboard();
       return;
     }
     setStep('agent');
@@ -192,7 +192,7 @@ export function OnboardingForm({ initialStep, initialOrgId }: OnboardingFormProp
         role: agentRole,
       }),
     });
-    const memberJson = await memberRes.json() as { data?: { id: string }; error?: { message?: string } };
+    const memberJson = await memberRes.json() as { data?: { id: string; api_key?: string }; error?: { message?: string } };
     if (!memberRes.ok) {
       setError(memberJson?.error?.message ?? 'Failed to create agent');
       setLoading(false);
@@ -206,10 +206,10 @@ export function OnboardingForm({ initialStep, initialOrgId }: OnboardingFormProp
       return;
     }
 
-    const keyRes = await fetch(`/api/agents/${agentId}/api-key`, { method: 'POST' });
-    const keyJson = await keyRes.json() as { data?: { api_key: string } };
-    if (keyRes.ok && keyJson.data?.api_key) {
-      setNewApiKey(keyJson.data.api_key);
+    // 에이전트 생성 응답에 이미 plaintext api_key가 포함됨(BE team_members.py: type=agent 생성 시 항상 발급).
+    // 별도 발급 호출(POST /api/agents/{id}/api-key)은 BE가 body 필수라 빈 본문 시 422 → 응답 키를 그대로 사용.
+    if (memberJson.data?.api_key) {
+      setNewApiKey(memberJson.data.api_key);
     }
 
     setStep('connect');
@@ -217,7 +217,7 @@ export function OnboardingForm({ initialStep, initialOrgId }: OnboardingFormProp
   };
 
   const handleFinish = () => {
-    window.location.href = '/dashboard';
+    void finishToDashboard();
   };
 
   return (

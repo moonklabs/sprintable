@@ -157,12 +157,14 @@ async def test_get_me_has_password_true():
         member.type = "human"
         member.role = "member"
         member.is_active = True
+        member.email = "user@example.com"  # E-ONBOARDING S2: MeResponse.email
         member.project_name = None
         member.has_password = None
         member.project = project
 
         user_mock = MagicMock()
         user_mock.id = uid
+        user_mock.email = "user@example.com"  # E-ONBOARDING S2: data.email = user.email
         user_mock.hashed_password = hash_password("Pass1!")
 
         async def override_auth():
@@ -214,12 +216,14 @@ async def test_get_me_has_password_false():
         member.type = "human"
         member.role = "member"
         member.is_active = True
+        member.email = "user@example.com"  # E-ONBOARDING S2: MeResponse.email
         member.project_name = None
         member.has_password = None
         member.project = project
 
         user_mock = MagicMock()
         user_mock.id = uid
+        user_mock.email = "user@example.com"  # E-ONBOARDING S2: data.email = user.email
         user_mock.hashed_password = ""
 
         async def override_auth():

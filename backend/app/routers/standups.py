@@ -2,12 +2,12 @@ import uuid
 from datetime import date
 
 from fastapi import APIRouter, Depends, HTTPException, Query
-from sqlalchemy import select
+from sqlalchemy import exists, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.dependencies.auth import AuthContext, get_current_user, get_verified_org_id
 from app.dependencies.database import get_db
-from app.models.standup import StandupEntry, StandupFeedback
+from app.models.standup import StandupEntry, StandupEntryProject, StandupFeedback
 from app.repositories.standup import StandupEntryRepository, StandupFeedbackRepository
 from app.schemas.standup import (
     FeedbackCreate,
@@ -17,8 +17,27 @@ from app.schemas.standup import (
     StandupUpsert,
 )
 from app.services.member_resolver import canonicalize_member_id, resolve_member
+from app.services.project_auth import accessible_project_ids_in_org
 
 router = APIRouter(prefix="/api/v2/standups", tags=["standups"])
+
+
+async def _sync_org_level_links(
+    repo: StandupEntryRepository,
+    session: AsyncSession,
+    entry: StandupEntry,
+    project_id: uuid.UUID | None,
+    user_id: str,
+    org_id: uuid.UUID,
+) -> None:
+    """1c2be9db: org-level write(project_id 없음) → entry 링크 = author 접근 프로젝트로 full
+    overwrite. canonical `accessible_project_ids_in_org`(has_project_access/정책B 동일 SSOT)
+    재사용 — team_member 쿼리 자작 금지(CP2-A). legacy(project_id 명시)는 upsert 의 additive
+    링크만 사용하고 여기 호출 안 함(DELETE 없음·CP2-B)."""
+    if project_id is not None:
+        return
+    accessible = await accessible_project_ids_in_org(session, uuid.UUID(user_id), org_id)
+    await repo.resync_project_links(entry.id, accessible)
 
 
 def _get_repo(
@@ -55,7 +74,7 @@ async def list_standups(
 async def upsert_standup(
     body: StandupUpsert,
     session: AsyncSession = Depends(get_db),
-    _auth: AuthContext = Depends(get_current_user),
+    auth: AuthContext = Depends(get_current_user),
     org_id: uuid.UUID = Depends(get_verified_org_id),
 ) -> StandupEntryResponse:
     # AC3-3: 작성자 신원을 canonical members.id로 정규화(레거시 휴먼 team_member.id → alias 치환).
@@ -72,6 +91,8 @@ async def upsert_standup(
         blockers=body.blockers,
         plan_story_ids=body.plan_story_ids,
     )
+    # 1c2be9db: org-level write(project_id 없음) → author 접근 프로젝트로 링크 full overwrite.
+    await _sync_org_level_links(repo, session, entry, body.project_id, auth.user_id, org_id)
     return StandupEntryResponse.model_validate(entry)
 
 
@@ -104,6 +125,8 @@ async def update_standup(
         blockers=body.blockers,
         plan_story_ids=body.plan_story_ids,
     )
+    # 1c2be9db: org-level self-save(project_id 없음) → author 접근 프로젝트로 링크 full overwrite.
+    await _sync_org_level_links(repo, session, entry, body.project_id, auth.user_id, org_id)
     return StandupEntryResponse.model_validate(entry)
 
 
@@ -138,9 +161,14 @@ async def list_feedback(
         select(StandupFeedback)
         .join(StandupEntry, StandupFeedback.standup_entry_id == StandupEntry.id)
         .where(
-            StandupFeedback.project_id == project_id,
             StandupFeedback.org_id == org_id,
             StandupEntry.date == date_filter,
+            # 51447ca0: feedback projection — 피드백 단 엔트리가 해당 프로젝트에 링크됐는지로 판정
+            # (org-level 엔트리 피드백도 링크된 프로젝트 뷰에 surface). legacy는 0099 백필 링크로 커버.
+            exists().where(
+                StandupEntryProject.entry_id == StandupEntry.id,
+                StandupEntryProject.project_id == project_id,
+            ),
         )
     )
     result = await db.execute(q)

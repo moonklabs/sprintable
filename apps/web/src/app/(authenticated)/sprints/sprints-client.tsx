@@ -11,6 +11,15 @@ import { OutcomeIntentFields, type OutcomeIntentValue, type MetricDefinition } f
 import { OutcomeResultCard, type OutcomeResult } from '@/components/outcome/outcome-result-card';
 import type { OutcomeStatus } from '@/components/outcome/outcome-status-badge';
 
+// 8a2bbda2: 기간 표시는 start_date~end_date(진실)에서 계산한다. BE `duration` 필드(예 14)가
+// 날짜 범위와 불일치하는 케이스가 있어 신뢰하지 않고, inclusive 일수(end−start+1)를 직접 산출한다.
+function sprintDurationDays(startDate: string, endDate: string): number {
+  const start = Date.parse(startDate);
+  const end = Date.parse(endDate);
+  if (Number.isNaN(start) || Number.isNaN(end)) return 0;
+  return Math.max(0, Math.round((end - start) / 86_400_000) + 1);
+}
+
 // ─── Types ────────────────────────────────────────────────────────────────────
 
 interface Sprint {
@@ -92,8 +101,9 @@ function CreateDialog({ projectId, onCreated, onClose }: CreateDialogProps) {
     try {
       const payload = {
         goal: goal.trim() || null,
-        capacity: capacity ? Number(capacity) : null,
-        team_size: teamSize ? Number(teamSize) : null,
+        // 미입력 시 null 대신 필드 omit — BFF createSprintSchema가 number().optional()이라 null은 거부하고 undefined(omit)는 통과한다.
+        ...(capacity ? { capacity: Number(capacity) } : {}),
+        ...(teamSize ? { team_size: Number(teamSize) } : {}),
         success_hypothesis: intent.success_hypothesis.trim() || null,
         metric_definition: intent.metric_definition,
         measure_after: intent.measure_after ? `${intent.measure_after}T00:00:00Z` : null,
@@ -395,12 +405,15 @@ export function SprintsClient({ projectId }: SprintsClientProps) {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ sprint_id: selected?.id ?? null }),
       });
-      if (!res.ok) return;
+      if (!res.ok) { console.error('스토리 스프린트 배정 실패', res.status); return; }
       if (selected) {
         setSprintStories((prev) => [...prev, { ...story, sprint_id: selected.id }]);
         setBacklogStories((prev) => prev.filter((s) => s.id !== story.id));
       }
-    } catch { /* noop */ }
+    } catch (err) {
+      // 71798d24: 에러를 조용히 무시하지 않는다(background 액션 — console.error).
+      console.error('스토리 스프린트 배정 실패', err);
+    }
   };
 
   const handleUnassignStory = async (story: Story) => {
@@ -410,10 +423,13 @@ export function SprintsClient({ projectId }: SprintsClientProps) {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ sprint_id: null }),
       });
-      if (!res.ok) return;
+      if (!res.ok) { console.error('스토리 스프린트 해제 실패', res.status); return; }
       setSprintStories((prev) => prev.filter((s) => s.id !== story.id));
       setBacklogStories((prev) => [...prev, { ...story, sprint_id: null }]);
-    } catch { /* noop */ }
+    } catch (err) {
+      // 71798d24: 에러를 조용히 무시하지 않는다(background 액션 — console.error).
+      console.error('스토리 스프린트 해제 실패', err);
+    }
   };
 
   if (loading) {
@@ -452,7 +468,7 @@ export function SprintsClient({ projectId }: SprintsClientProps) {
                   </div>
                 </div>
               <p className="mt-1 text-xs text-muted-foreground">
-                {sprint.start_date} ~ {sprint.end_date} · {sprint.duration}{t('days')}
+                {sprint.start_date} ~ {sprint.end_date} · {sprintDurationDays(sprint.start_date, sprint.end_date)}{t('days')}
               </p>
               {sprint.report_doc_id ? (
                 <a
@@ -508,7 +524,7 @@ export function SprintsClient({ projectId }: SprintsClientProps) {
           ) : null}
           <span className="flex items-center gap-1 rounded-md border border-border bg-muted/30 px-2.5 py-1 text-xs font-medium tabular-nums text-foreground">
             <span className="text-muted-foreground">📅</span>
-            {selected.duration}{t('days')}
+            {sprintDurationDays(selected.start_date, selected.end_date)}{t('days')}
           </span>
         </div>
       ) : null}

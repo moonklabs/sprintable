@@ -72,11 +72,13 @@ async def create_doc(
     auth: AuthContext = Depends(get_current_user),
     org_id: uuid.UUID = Depends(get_verified_org_id),
 ) -> DocResponse:
-    enforce_body_context(
+    await enforce_body_context(
         auth_org_id=org_id,
         body_org_id=body.org_id,
         body_project_id=body.project_id,
         auth_project_id=auth.claims.get("app_metadata", {}).get("project_id"),
+        db=session,
+        user_id=uuid.UUID(auth.user_id),
     )
     # AC3-2d(2): created_by canonical 정규화(레거시 휴먼 tm.id→members.id). (A) write.
     created_by = (await canonicalize_member_id(body.created_by, session)) if body.created_by else None
@@ -270,9 +272,12 @@ async def _resolve_doc_member_id(auth: AuthContext, org_id: uuid.UUID, db: Async
         .limit(1)
     )
     member = result.scalar_one_or_none()
-    if not member:
-        raise HTTPException(status_code=403, detail="Team member not found for current user")
-    return member.id
+    if member:
+        return member.id
+    # 0d68ad20: grant-only/admin 휴먼(team_member 행 없음)도 org 멤버면 403 금지 — SSOT canonical
+    # member id(org_member.id)로 폴백. 비-멤버는 resolve_member가 400.
+    from app.services.member_resolver import resolve_member
+    return (await resolve_member(auth, org_id, db)).id
 
 
 # ─── Comments ─────────────────────────────────────────────────────────────────

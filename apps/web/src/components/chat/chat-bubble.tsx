@@ -3,9 +3,15 @@
 import { useCallback, useRef, useState } from 'react';
 import ReactMarkdown, { defaultUrlTransform } from 'react-markdown';
 import remarkGfm from 'remark-gfm';
-import { Bot, MessageSquare, User } from 'lucide-react';
+import remarkBreaks from 'remark-breaks';
+import { Bot, MessageSquare, Terminal, User } from 'lucide-react';
+import { useTranslations } from 'next-intl';
 import type { ChatMessage } from '@/hooks/use-chat-sse';
+import { commandName, dequoteLiteral, isCommand } from '@/lib/command-classifier';
 import { EntityChip, getEntityHref } from '@/components/chat/embed-card';
+import { getFileIcon } from '@/lib/file-icon';
+import { AttachmentImage } from './attachment-image';
+import { AttachmentFile } from './attachment-file';
 import { MessageContextMenu } from './message-context-menu';
 
 interface ChatBubbleProps {
@@ -48,7 +54,7 @@ function ChatMarkdown({ content, isMine }: { content: string; isMine: boolean })
 
   return (
     <ReactMarkdown
-      remarkPlugins={[remarkGfm]}
+      remarkPlugins={[remarkGfm, remarkBreaks]}
       urlTransform={(url) =>
         url.startsWith('entity:') || url.startsWith('mention:') ? url : defaultUrlTransform(url)
       }
@@ -86,7 +92,13 @@ function ChatMarkdown({ content, isMine }: { content: string; isMine: boolean })
 const LONG_PRESS_MS = 500;
 
 export function ChatBubble({ message, isMine, isGrouped = false, onOpenThread, onDelete }: ChatBubbleProps) {
+  const t = useTranslations('chats');
   const isAgent = message.sender_type === 'agent';
+  // S8: 슬래시 커맨드는 전용 버블(brand·mono·⌘). 리터럴(`//`)은 dequote된 일반 텍스트.
+  const isCmd = isCommand(message.content);
+  const isLiteral = !isCmd && message.content.startsWith('//');
+  const displayContent = isLiteral ? dequoteLiteral(message.content) : message.content;
+  const cmdName = isCmd ? commandName(message.content) : null;
   const displayName = isMine ? '나' : (message.sender_name || '팀');
   const time = new Intl.DateTimeFormat('ko-KR', { hour: '2-digit', minute: '2-digit' }).format(new Date(message.created_at));
   const replyCount = message.reply_count ?? 0;
@@ -183,37 +195,48 @@ export function ChatBubble({ message, isMine, isGrouped = false, onOpenThread, o
             </div>
           )}
 
-          {/* Content */}
-          <div className={`rounded-2xl px-3.5 py-2 text-sm leading-relaxed break-words ${
-            isMine
-              ? 'rounded-tr-sm bg-primary text-primary-foreground'
-              : 'rounded-tl-sm bg-muted text-foreground'
-          }`}>
-            <ChatMarkdown content={message.content} isMine={isMine} />
-          </div>
+          {/* Content — S8: command 전용 버블(brand·mono·⌘ 태그) vs 일반(리터럴은 dequote 표시) */}
+          {isCmd ? (
+            <div className={`rounded-2xl border border-brand/30 bg-brand/10 px-3.5 py-2 ${isMine ? 'rounded-tr-sm' : 'rounded-tl-sm'}`}>
+              <div className="mb-1 flex items-center gap-1 text-[10px] font-semibold uppercase tracking-wide text-brand">
+                <Terminal className="h-3 w-3" aria-hidden />
+                {t('commandTag')}
+              </div>
+              <code className="block break-words whitespace-pre-wrap font-mono text-sm">
+                <span className="text-brand">/{cmdName}</span>
+                <span className="text-muted-foreground">{message.content.slice(1 + (cmdName?.length ?? 0))}</span>
+              </code>
+            </div>
+          ) : (
+            <div className={`rounded-2xl px-3.5 py-2 text-sm leading-relaxed break-words ${
+              isMine
+                ? 'rounded-tr-sm bg-primary text-primary-foreground'
+                : 'rounded-tl-sm bg-muted text-foreground'
+            }`}>
+              <ChatMarkdown content={displayContent} isMine={isMine} />
+            </div>
+          )}
 
-          {/* Attachments */}
+          {/* Attachments — a54ddc16: auth-gated 서명 라우트 경유(public 직링크 미사용).
+              이미지=AttachmentImage(3상태 render)·그 외=AttachmentFile(클릭 시 서명 다운로드). */}
           {message.attachments && message.attachments.length > 0 && (
             <div className="flex flex-col gap-1.5">
               {message.attachments.map((att, i) => {
                 const href = att.url;
+                if (!href) return null;
                 const label = att.name ?? att.filename ?? '첨부파일';
                 const isImage = att.content_type?.startsWith('image/');
+                if (isImage) {
+                  return <AttachmentImage key={href ?? i} storedUrl={href} conversationId={message.memo_id} alt={label} />;
+                }
                 return (
-                  <a
+                  <AttachmentFile
                     key={href ?? i}
-                    href={href}
-                    target="_blank"
-                    rel="noopener noreferrer"
-                    className="flex items-center gap-2 rounded-lg border border-border bg-background px-3 py-2 text-xs hover:bg-muted/50"
-                  >
-                    {isImage && href ? (
-                      /* eslint-disable-next-line @next/next/no-img-element */
-                      <img src={href} alt={label} className="max-h-40 max-w-[240px] rounded object-contain" />
-                    ) : (
-                      <span className="truncate text-muted-foreground">{label}</span>
-                    )}
-                  </a>
+                    storedUrl={href}
+                    conversationId={message.memo_id}
+                    label={label}
+                    Icon={getFileIcon(att.content_type)}
+                  />
                 );
               })}
             </div>

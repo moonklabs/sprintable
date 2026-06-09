@@ -223,7 +223,7 @@ export function KanbanBoard({ projectId }: KanbanBoardProps) {
         Promise.all(statuses.map((s) => fetchStoriesByStatus(s))),
         fetch(`/api/sprints${sprintParams}`),
         fetch(`/api/epics?${epicParams.toString()}`),
-        fetch(`/api/team-members${memberParams}`),
+        fetch(`/api/members${memberParams}`),
       ]);
 
       const allStories: KanbanStory[] = [];
@@ -442,6 +442,11 @@ export function KanbanBoard({ projectId }: KanbanBoardProps) {
     }
     return true;
   });
+
+  // counter fix: 필터 활성 시 column counter는 filtered(로드된) 개수, 비활성 시 백엔드 total(페이지네이션 "20+" 유지).
+  const filterActive = Boolean(
+    selectedEpicId || selectedAssigneeId || assigneeTypeFilter || selectedLabelIds.length > 0 || searchQuery,
+  );
 
   // position 기준으로 정렬
   const storiesByColumn = (columnId: string): KanbanStory[] => {
@@ -1134,8 +1139,8 @@ export function KanbanBoard({ projectId }: KanbanBoardProps) {
                     blockedByMap={blockedByMap}
                     storyLabelsMap={storyLabelsMap}
                     storyGatesMap={storyGatesMap}
-                    totalCount={columnTotals[col.id]}
-                    hasMore={!!columnCursors[col.id]}
+                    totalCount={filterActive ? colStories.length : columnTotals[col.id]}
+                    hasMore={filterActive ? false : !!columnCursors[col.id]}
                     loadingMore={loadingMoreColumns[col.id] ?? false}
                     onLoadMore={() => handleLoadMore(col.id)}
                     collapsed={col.id === 'done' ? doneCollapsed : undefined}
@@ -1151,6 +1156,7 @@ export function KanbanBoard({ projectId }: KanbanBoardProps) {
                     story={activeStory}
                     epicName={activeStory.epic_id ? epicMap[activeStory.epic_id] : undefined}
                     assignee={activeStory.assignee_id ? memberMap[activeStory.assignee_id] : undefined}
+                    assignees={(activeStory.assignee_ids ?? []).flatMap((id) => memberMap[id] ? [memberMap[id]] : [])}
                     onClick={() => {}}
                   />
                 </div>
@@ -1250,6 +1256,8 @@ export function KanbanBoard({ projectId }: KanbanBoardProps) {
             setSelectedStory(null);
           }}
           storyMap={Object.fromEntries(stories.map((s) => [s.id, { title: s.title, status: s.status }]))}
+          epicMap={epicMap}
+          sprintMap={Object.fromEntries(sprints.map((s) => [s.id, s.title]))}
           projectId={projectId}
           onNavigate={(storyId) => {
             const s = stories.find((x) => x.id === storyId);

@@ -1,39 +1,20 @@
-"""OSS bootstrap: fresh install uses create_all + stamp head, existing DB runs alembic upgrade head."""
-import asyncio
+"""DB bootstrap entrypoint: always `alembic upgrade head`.
+
+On an EMPTY database, alembic/env.py provisions from the squashed baseline snapshot (dev's
+0096 end-state schema + global system seed) and stamps revision 0096. On an existing database
+it runs the normal incremental chain (a no-op for a DB already at head). There is no longer a
+create_all shortcut — it built from the drifted models and produced a schema that diverged from
+the migrated one (the prod onboarding 500). See alembic/baseline/ and alembic/env.py.
+"""
 import subprocess
 import sys
-from sqlalchemy import text
-from sqlalchemy.ext.asyncio import create_async_engine
-
-from app.core.config import settings
-from app.core.database import Base
-import app.models  # noqa: F401 — registers all models
 
 
-async def main() -> None:
-    engine = create_async_engine(settings.database_url)
-    try:
-        async with engine.connect() as conn:
-            result = await conn.execute(
-                text("SELECT EXISTS (SELECT FROM information_schema.tables WHERE table_name = 'alembic_version')")
-            )
-            has_alembic: bool = bool(result.scalar())
-    finally:
-        await engine.dispose()
-
-    if not has_alembic:
-        print("[bootstrap] Fresh install detected — running create_all + alembic stamp head")
-        sync_url = settings.database_url.replace("postgresql+asyncpg://", "postgresql://")
-        from sqlalchemy import create_engine as create_sync_engine
-        sync_engine = create_sync_engine(sync_url)
-        Base.metadata.create_all(sync_engine)
-        sync_engine.dispose()
-        subprocess.run(["alembic", "stamp", "head"], check=True)
-    else:
-        print("[bootstrap] Existing DB detected — running alembic upgrade head")
-        subprocess.run(["alembic", "upgrade", "head"], check=True)
+def main() -> None:
+    print("[bootstrap] Running alembic upgrade head")
+    subprocess.run(["alembic", "upgrade", "head"], check=True)
 
 
 if __name__ == "__main__":
-    asyncio.run(main())
+    main()
     sys.exit(0)

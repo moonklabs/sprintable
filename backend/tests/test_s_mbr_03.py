@@ -138,6 +138,7 @@ async def test_get_me_org_admin_role_override():
     mock_member.user_id = user_id
     mock_member.type = "human"
     mock_member.name = "test"
+    mock_member.email = "test@example.com"  # E-ONBOARDING S2: MeResponse.email
     mock_member.role = "member"  # project level: member
     mock_member.is_active = True
     mock_member.project_name = None  # MeResponse 직렬화 필수
@@ -188,6 +189,7 @@ async def test_get_me_project_role_higher_preserved():
     mock_member.user_id = user_id
     mock_member.type = "human"
     mock_member.name = "test"
+    mock_member.email = "test@example.com"  # E-ONBOARDING S2: MeResponse.email
     mock_member.role = "admin"  # project level: admin (높음)
     mock_member.is_active = True
     mock_member.project_name = None

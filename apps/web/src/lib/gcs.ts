@@ -32,6 +32,26 @@ export async function uploadToGcs(
   return `https://storage.googleapis.com/${bucketName}/${filePath}`;
 }
 
+/**
+ * a54ddc16: 단기 만료 V4 read 서명 URL 생성. public 버킷 → auth-gated 서빙 전환의 일부로,
+ * authorize 통과 후에만 호출한다(서명 라우트 `/api/attachments/sign`). path 는 bare object path.
+ */
+export async function getSignedReadUrl(
+  bucketName: string,
+  objectPath: string,
+  expiresInMs = 5 * 60 * 1000,
+): Promise<string> {
+  const [url] = await getStorage()
+    .bucket(bucketName)
+    .file(objectPath)
+    .getSignedUrl({
+      version: 'v4',
+      action: 'read',
+      expires: Date.now() + expiresInMs,
+    });
+  return url;
+}
+
 export const GCS_MEMO_ATTACHMENTS_BUCKET =
   process.env['GCS_MEMO_ATTACHMENTS_BUCKET'] ?? 'sprintable-memo-attachments';
 

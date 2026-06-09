@@ -30,6 +30,11 @@ class User(Base):
     last_project_id: Mapped[uuid.UUID | None] = mapped_column(
         UUID(as_uuid=True), ForeignKey("projects.id", ondelete="SET NULL"), nullable=True
     )
+    # 0746 후속: 현재 org source-of-truth. refresh가 org 컨텍스트 없을 때 _build_app_metadata가
+    # 이 값으로 스코프해 cross-org 옛 프로젝트 재주입(0-project org leak)을 차단한다.
+    last_org_id: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("organizations.id", ondelete="SET NULL"), nullable=True
+    )
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now(), nullable=False
     )

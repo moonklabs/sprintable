@@ -1,6 +1,6 @@
 import uuid
 
-from fastapi import APIRouter, Depends, HTTPException, Query, status
+from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy import select, text
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -9,6 +9,7 @@ from app.dependencies.auth import AuthContext, get_current_user
 from app.dependencies.database import get_db
 from app.models.user import User
 from app.repositories.organization import OrganizationRepository
+from app.services.agent_anchor_sync import ensure_human_member
 from app.schemas.organization import (
     CreateOrganization,
     DeleteOrganization,
@@ -70,6 +71,20 @@ async def create_organization(
             ),
             {"org_id": str(org.id), "user_id": auth.user_id},
         )
+        # 휴먼 members 앵커 보장(#1317 휴먼판): org_member.id를 (신규/기존 무관) 재조회 후
+        # ensure_human_member 호출. ON CONFLICT DO NOTHING이라 RETURNING 불가 → SELECT로 캡처.
+        om_id = (
+            await session.execute(
+                text(
+                    "SELECT id FROM org_members"
+                    " WHERE org_id = :org_id AND user_id = :user_id"
+                    " AND deleted_at IS NULL LIMIT 1"
+                ),
+                {"org_id": str(org.id), "user_id": auth.user_id},
+            )
+        ).scalar_one_or_none()
+        if om_id is not None:
+            await ensure_human_member(session, om_id)
         await session.commit()
 
     return OrganizationResponse.model_validate(org)

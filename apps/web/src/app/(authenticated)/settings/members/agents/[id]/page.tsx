@@ -4,15 +4,39 @@ import { useCallback, useEffect, useMemo, useState } from 'react';
 import { useParams, useRouter } from 'next/navigation';
 import Link from 'next/link';
 import { useTranslations } from 'next-intl';
-import { ArrowLeft, Check, Copy, Pencil, Plus, X } from 'lucide-react';
+import { AlertTriangle, ArrowLeft, Check, Copy, MinusCircle, Pencil, Plus, X, XCircle } from 'lucide-react';
 import { Switch } from '@/components/ui/switch';
 import { AgentApiKeyManager } from '@/components/agents/agent-api-key-manager';
+import { MessagingPolicySection } from '@/components/agents/messaging-policy-section';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { OperatorInput } from '@/components/ui/operator-control';
 import { OperatorDropdownSelect } from '@/components/ui/operator-dropdown-select';
 import { SectionCard, SectionCardBody, SectionCardHeader } from '@/components/ui/section-card';
 import { useToast } from '@/components/ui/toast';
+import {
+  RUNTIME_REGISTRY,
+  getRuntimeDef,
+  resolveRuntimeStatus,
+  type RuntimeStatus,
+} from '@/lib/runtime-capabilities';
+
+/** 런타임 상태(6종 중 ①~⑤) → 배지·헬퍼 표현. ⑥(드롭다운 dot)은 AC 범위 외(§11). */
+const RUNTIME_STATUS_UI: Record<
+  RuntimeStatus,
+  {
+    variant: 'success' | 'warning' | 'destructive' | 'chip';
+    labelKey: string;
+    helpKey: string;
+    Icon: typeof Check | null;
+  }
+> = {
+  supported: { variant: 'success', labelKey: 'runtimeSupported', helpKey: 'runtimeSupportedHelp', Icon: Check },
+  partial: { variant: 'warning', labelKey: 'runtimePartial', helpKey: 'runtimePartialHelp', Icon: AlertTriangle },
+  unsupported: { variant: 'destructive', labelKey: 'runtimeUnsupported', helpKey: 'runtimeUnsupportedHelp', Icon: XCircle },
+  unset: { variant: 'chip', labelKey: 'runtimeUnset', helpKey: 'runtimeUnsetHelp', Icon: MinusCircle },
+  unknown: { variant: 'destructive', labelKey: 'runtimeUnknown', helpKey: 'runtimeUnknownHelp', Icon: XCircle },
+};
 
 function getAppOrigin() {
   if (typeof window !== 'undefined') return window.location.origin;
@@ -30,6 +54,7 @@ interface AgentMember {
   webhook_url: string | null;
   created_by: string | null;
   fakechat_port: number | null;
+  runtime_type: string | null;
 }
 
 interface WebhookConfig {
@@ -105,6 +130,9 @@ export default function AgentDetailPage() {
   const [editName, setEditName] = useState('');
   const [editRole, setEditRole] = useState('');
   const [savingEdit, setSavingEdit] = useState(false);
+
+  const [selectedRuntime, setSelectedRuntime] = useState<string>('');
+  const [savingRuntime, setSavingRuntime] = useState(false);
 
   const [webhookConfigs, setWebhookConfigs] = useState<WebhookConfig[]>([]);
   const [webhookUrl, setWebhookUrl] = useState('');
@@ -191,6 +219,11 @@ export default function AgentDetailPage() {
   useEffect(() => {
     setWebhookActive(webhookConfigs[0]?.is_active ?? false);
   }, [webhookConfigs]);
+
+  // S2: 저장된 runtime_type → staged 셀렉터 동기화(로드·저장 후 재파생).
+  useEffect(() => {
+    setSelectedRuntime(agent?.runtime_type ?? '');
+  }, [agent?.runtime_type]);
 
   const assignedProjectIds = useMemo(() => {
     const ids = new Set(sameNameAgents.map((a) => a.project_id));
@@ -395,6 +428,32 @@ export default function AgentDetailPage() {
     orgRole === 'admin' ||
     orgRole === 'owner';
 
+  const handleSaveRuntime = async () => {
+    setSavingRuntime(true);
+    try {
+      const res = await fetch(`/api/team-members/${id}`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ runtime_type: selectedRuntime || null }),
+      });
+      if (res.ok) {
+        const json = await res.json() as { data: AgentMember };
+        setAgent(json.data);
+        addToast({ type: 'success', title: t('runtimeTypeSaved') });
+      } else {
+        const status = res.status;
+        const json = await res.json().catch(() => null) as { error?: { message?: string } } | null;
+        if (status === 403) {
+          addToast({ type: 'error', title: t('ownershipDenied') });
+        } else {
+          addToast({ type: 'error', title: json?.error?.message ?? tc('error') });
+        }
+      }
+    } finally {
+      setSavingRuntime(false);
+    }
+  };
+
   const handleToggleActive = async () => {
     const next = !agent.is_active;
     const res = await fetch(`/api/team-members/${id}`, {
@@ -489,6 +548,72 @@ export default function AgentDetailPage() {
         )}
       </SectionCard>
 
+      {/* 런타임 타입 (E-CHAT-CMD S2) */}
+      {(() => {
+        const savedRuntime = agent.runtime_type ?? '';
+        const runtimeStatus = resolveRuntimeStatus(selectedRuntime || null);
+        const ui = RUNTIME_STATUS_UI[runtimeStatus];
+        const stagedDef = getRuntimeDef(selectedRuntime);
+        const stagedKnown = !!stagedDef;
+        // ⑤ 미인식: 원값을 드롭다운 트리거에 그대로 노출(데이터 은닉 금지) + 미인식 표시.
+        const runtimeOptions = [
+          ...(selectedRuntime && !stagedKnown
+            ? [{ value: selectedRuntime, label: `${selectedRuntime} (${t('runtimeUnknown')})`, disabled: true }]
+            : []),
+          ...RUNTIME_REGISTRY.map((r) => ({ value: r.key, label: r.label })),
+        ];
+        // 변경 + registry 등록값일 때만 저장 가능(④ 미선택·⑤ 미인식 재저장 방지).
+        const canSaveRuntime = stagedKnown && selectedRuntime !== savedRuntime;
+        const StatusIcon = ui.Icon;
+        return (
+          <SectionCard>
+            <SectionCardHeader>
+              <div className="space-y-1">
+                <div className="flex items-center gap-2 flex-wrap">
+                  <h2 className="text-base font-semibold text-foreground">{t('runtimeTypeTitle')}</h2>
+                  <Badge variant={ui.variant}>
+                    {StatusIcon ? <StatusIcon className="h-3 w-3" /> : null}
+                    {t(ui.labelKey)}
+                  </Badge>
+                </div>
+                <p className="text-sm text-muted-foreground">{t('runtimeTypeDescription')}</p>
+              </div>
+            </SectionCardHeader>
+            <SectionCardBody className="space-y-3">
+              {canEdit ? (
+                <>
+                  <div className="flex gap-2">
+                    <OperatorDropdownSelect
+                      value={selectedRuntime}
+                      onValueChange={setSelectedRuntime}
+                      options={runtimeOptions}
+                      placeholder={t('runtimeTypePlaceholder')}
+                      className="flex-1"
+                    />
+                    <Button
+                      variant="hero"
+                      size="sm"
+                      onClick={() => void handleSaveRuntime()}
+                      disabled={savingRuntime || !canSaveRuntime}
+                    >
+                      {savingRuntime ? '...' : tc('save')}
+                    </Button>
+                  </div>
+                  <p className="text-xs text-muted-foreground">{t(ui.helpKey)}</p>
+                </>
+              ) : (
+                <div className="space-y-1">
+                  <p className="text-sm text-foreground">
+                    {stagedDef?.label ?? (selectedRuntime || t('runtimeUnset'))}
+                  </p>
+                  <p className="text-xs text-muted-foreground">{t(ui.helpKey)}</p>
+                </div>
+              )}
+            </SectionCardBody>
+          </SectionCard>
+        );
+      })()}
+
       {/* API Keys */}
       {canEdit && (
         <AgentApiKeyManager
@@ -557,6 +682,9 @@ export default function AgentDetailPage() {
           </SectionCard>
         );
       })()}
+
+      {/* Messaging policy (E-MSG-POLICY S3) */}
+      {canEdit && <MessagingPolicySection agentId={id} creatorUserId={agent.created_by} />}
 
       {/* MCP Config */}
       <SectionCard>

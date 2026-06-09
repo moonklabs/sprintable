@@ -8,23 +8,27 @@ from email.mime.text import MIMEText
 logger = logging.getLogger(__name__)
 
 
-def send_email(to: str, subject: str, html_body: str) -> None:
+def send_email(to: str, subject: str, html_body: str) -> bool:
     """이메일 발송.
 
     우선순위: RESEND_API_KEY → EMAIL_SMTP_HOST → 콘솔 출력 fallback.
-    실패 시 예외를 re-raise — 호출자가 오류 처리 책임.
+    반환: **True = Resend/SMTP로 실제 발송됨. False = provider 미설정 → 콘솔 fallback(실발송 아님)**.
+    provider 발송 실패 시 예외를 re-raise — 호출자가 오류 처리 책임.
+    (E-ONBOARDING S4: False/예외를 호출자가 '미발송'으로 surface해 무음 성공을 차단.)
     """
     resend_key = os.getenv("RESEND_API_KEY", "")
     if resend_key:
         _send_via_resend(to=to, subject=subject, html_body=html_body, api_key=resend_key)
-        return
+        return True
 
     smtp_host = os.getenv("EMAIL_SMTP_HOST", "")
     if smtp_host:
         _send_via_smtp(to=to, subject=subject, html_body=html_body, smtp_host=smtp_host)
-        return
+        return True
 
-    logger.info("[EMAIL FALLBACK] To: %s | Subject: %s\n%s", to, subject, html_body)
+    # provider 미설정 — 콘솔 fallback은 실제 발송이 아니다. 호출자가 '미발송'으로 처리해야 함.
+    logger.warning("[EMAIL FALLBACK] provider 미설정 — 실발송 아님. To: %s | Subject: %s", to, subject)
+    return False
 
 
 def _send_via_resend(*, to: str, subject: str, html_body: str, api_key: str) -> None:

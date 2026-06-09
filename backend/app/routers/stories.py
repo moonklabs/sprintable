@@ -8,10 +8,14 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.dependencies.auth import AuthContext, enforce_body_context, get_current_user, get_project_scoped_org_id, get_verified_org_id
 from app.dependencies.database import get_db
+from app.models.event import Event
 from app.models.pm import Epic, Story, StoryActivity, StoryComment
 from app.models.team import TeamMember
 from app.repositories.story import StoryRepository
+from app.repositories.story_assignee import StoryAssigneeRepository
+from app.routers.agent_gateway import wake_agent
 from app.routers.events import publish_event
+from app.services.event_seq import assign_recipient_seq
 from app.schemas.story import StoryCreate, StoryResponse, StoryStatusUpdate, StoryUpdate
 from app.services.member_resolver import canonicalize_member_id
 from app.services.notification_dispatch import dispatch_notification
@@ -70,6 +74,7 @@ async def list_stories(
 
     if no_sprint and project_id:
         stories = await repo.list_backlog(project_id, limit=limit)
+        await _attach_assignee_ids(repo.session, repo.org_id, stories)
         return [StoryResponse.model_validate(s) for s in stories]
 
     # CB-S4: status + project_id 조합 시 board 쿼리 (order_by + cursor + done 7일 제한)
@@ -87,6 +92,7 @@ async def list_stories(
             response.headers["X-Total-Count"] = str(total)
             if stories:
                 response.headers["X-Next-Cursor"] = stories[-1].created_at.isoformat()
+        await _attach_assignee_ids(repo.session, repo.org_id, stories)
         return [StoryResponse.model_validate(s) for s in stories]
 
     filters: dict = {}
@@ -101,7 +107,24 @@ async def list_stories(
     if status_filter:
         filters["status"] = status_filter
     stories = await repo.list(limit=limit, **filters)
+    await _attach_assignee_ids(repo.session, repo.org_id, stories)
     return [StoryResponse.model_validate(s) for s in stories]
+
+
+async def _attach_assignee_ids(
+    session: AsyncSession, org_id: uuid.UUID, stories: list[Story]
+) -> None:
+    """E-BOARD S5: 각 Story에 assignee_ids(transient attr)를 채워 StoryResponse.from_attributes가
+    읽도록 한다. join 비어있으면 단일 assignee_id로 폴백(레거시 행 back-compat). N+1 회피 위해 배치."""
+    if not stories:
+        return
+    sa_repo = StoryAssigneeRepository(session, org_id)
+    id_map = await sa_repo.map_member_ids([s.id for s in stories])
+    for s in stories:
+        ids = id_map.get(s.id)
+        if not ids:
+            ids = [s.assignee_id] if s.assignee_id else []
+        s.assignee_ids = ids  # 매핑되지 않은 transient 속성 — from_attributes 전용
 
 
 async def _upsert_assignee_participation(
@@ -125,19 +148,30 @@ async def create_story(
     auth: AuthContext = Depends(get_current_user),
     org_id: uuid.UUID = Depends(get_verified_org_id),
 ) -> StoryResponse:
-    enforce_body_context(
+    await enforce_body_context(
         auth_org_id=org_id,
         body_org_id=body.org_id,
         body_project_id=body.project_id,
         auth_project_id=auth.claims.get("app_metadata", {}).get("project_id"),
+        db=session,
+        user_id=uuid.UUID(auth.user_id),
     )
     repo = StoryRepository(session, org_id)
+    # E-BOARD S5: assignee_ids 제공 시 단일 assignee_id(주담당)는 첫 요소로 동기화(미지정 시).
+    effective_ids = (
+        body.assignee_ids if body.assignee_ids is not None
+        else ([body.assignee_id] if body.assignee_id else [])
+    )
+    primary_assignee = (
+        body.assignee_id if body.assignee_id is not None
+        else (effective_ids[0] if effective_ids else None)
+    )
     story = await repo.create(
         project_id=body.project_id,
         title=body.title,
         epic_id=body.epic_id,
         sprint_id=body.sprint_id,
-        assignee_id=body.assignee_id,
+        assignee_id=primary_assignee,
         meeting_id=body.meeting_id,
         status=body.status,
         priority=body.priority,
@@ -148,10 +182,15 @@ async def create_story(
         success_hypothesis=body.success_hypothesis,
         metric_definition=body.metric_definition,
         measure_after=body.measure_after,
+        # E-FILE S4: 보드 스토리 첨부 (FE-proxy URL+메타) 저장
+        attachments=[a.model_dump() for a in body.attachments],
     )
+    # E-BOARD S5: 복수 assignee join 기록 (단일 assignee_id와 공존)
+    saved_ids = await StoryAssigneeRepository(session, org_id).set_for_story(story.id, effective_ids)
     # E-CAGE-REFEREE: assignee 설정 시 implementation 역할 participation 자동 생성
-    if body.assignee_id:
-        await _upsert_assignee_participation(session, org_id, story.id, body.assignee_id)
+    if primary_assignee:
+        await _upsert_assignee_participation(session, org_id, story.id, primary_assignee)
+    story.assignee_ids = saved_ids or ([story.assignee_id] if story.assignee_id else [])
     return StoryResponse.model_validate(story)
 
 
@@ -163,6 +202,7 @@ async def get_story(
     story = await repo.get(id)
     if story is None:
         raise HTTPException(status_code=404, detail="Story not found")
+    await _attach_assignee_ids(repo.session, repo.org_id, [story])
     return StoryResponse.model_validate(story)
 
 
@@ -176,6 +216,11 @@ async def update_story(
     auth: AuthContext = Depends(get_current_user),
 ) -> StoryResponse:
     data = body.model_dump(exclude_unset=True)
+    # E-BOARD S5: assignee_ids는 stories 컬럼이 아니므로 repo.update 전에 분리.
+    assignee_ids_in = data.pop("assignee_ids", None)
+    # assignee_ids만 제공되면 단일 assignee_id(주담당)를 첫 요소로 동기화 → 기존 event/notify 로직 재사용.
+    if assignee_ids_in is not None and "assignee_id" not in data:
+        data["assignee_id"] = assignee_ids_in[0] if assignee_ids_in else None
     old_assignee_id: uuid.UUID | None = None
     if "assignee_id" in data:
         story_before = await repo.get(id)
@@ -184,6 +229,14 @@ async def update_story(
     story = await repo.update(id, **data)
     if story is None:
         raise HTTPException(status_code=404, detail="Story not found")
+
+    # E-BOARD S5: 복수 assignee join 동기화 (단일 assignee_id와 정합 유지)
+    if assignee_ids_in is not None:
+        await StoryAssigneeRepository(db, repo.org_id).set_for_story(story.id, assignee_ids_in)
+    elif "assignee_id" in data:
+        # 구 단일 클라이언트 경로 → join을 단일값으로 미러(공존 정합)
+        single = [story.assignee_id] if story.assignee_id else []
+        await StoryAssigneeRepository(db, repo.org_id).set_for_story(story.id, single)
 
     # E-CAGE-REFEREE: assignee 변경(신규 세팅) 시 implementation 역할 participation 자동 upsert
     if "assignee_id" in data and story.assignee_id:
@@ -241,18 +294,54 @@ async def update_story(
             ))
         except Exception:
             pass
-        # E-EVENTBUS P3 S9: story_assigned → assignee에게 알림
+        # E-EVENTBUS P3 S9 / E-EVENT-INJECT S3: story_assigned 알림 + agent assignment-wake
         if story.assignee_id and story.assignee_id != old_assignee_id:
-            await dispatch_notification(
-                db,
-                org_id=org_id,
-                event_type="story_assigned",
-                target_member_ids=[story.assignee_id],
-                title=f"스토리 담당자로 지정됨: {story.title}",
-                body=None,
-                reference_type="story",
-                reference_id=story.id,
-            )
+            # assignee 멤버 타입 resolve (agent vs human)
+            assignee_type = (await db.execute(
+                select(TeamMember.type).where(TeamMember.id == story.assignee_id).limit(1)
+            )).scalar_one_or_none()
+
+            if assignee_type == "agent":
+                # E-EVENT-INJECT S3: agent에 배정만 해도 work-turn 시작.
+                # dispatch.py 미러 — content 실린 story_assigned Event + seq + commit BEFORE wake.
+                # (기존 dispatch_notification은 content 없는 dispatched라 connector가 드롭 → 깨우지 못함)
+                _detail = (story.description or "").strip()
+                _content = f"[story] {story.title}" + (f" — {_detail[:200]}" if _detail else "")
+                sa_event = Event(
+                    project_id=story.project_id,
+                    org_id=org_id,
+                    event_type="story_assigned",  # EventType enum 미존재 → literal (connector allow-list 포함)
+                    source_entity_type="story",
+                    source_entity_id=story.id,
+                    sender_id=actor_id,
+                    recipient_id=story.assignee_id,
+                    recipient_type="agent",
+                    payload={
+                        "story_id": str(story.id),
+                        "story_title": story.title,
+                        "content": _content,
+                        "event_type": "story_assigned",
+                    },
+                    status="pending",
+                )
+                db.add(sa_event)
+                await db.flush()
+                await assign_recipient_seq(db, sa_event)  # per-recipient dense seq
+                await db.commit()  # commit BEFORE wake — seq 확정, 이중전달 방지
+                if sa_event.recipient_seq is not None:
+                    wake_agent(str(story.assignee_id), sa_event.recipient_seq)
+            else:
+                # human: 기존 dispatch_notification 유지 (변경 0)
+                await dispatch_notification(
+                    db,
+                    org_id=org_id,
+                    event_type="story_assigned",
+                    target_member_ids=[story.assignee_id],
+                    title=f"스토리 담당자로 지정됨: {story.title}",
+                    body=None,
+                    reference_type="story",
+                    reference_id=story.id,
+                )
         if actor_id:
             try:
                 db.add(StoryActivity(
@@ -282,6 +371,7 @@ async def update_story(
             context={"fields": list(data.keys()), "story_title": story.title},
         )
 
+    await _attach_assignee_ids(db, repo.org_id, [story])
     return StoryResponse.model_validate(story)
 
 
@@ -301,6 +391,7 @@ async def delete_story(
     await DependencyRepository(session, org_id).delete_by_item(id, "story")
     await ItemLabelRepository(session, org_id).delete_by_item(id, "story")
     await ParticipationRepository(session, org_id).delete_by_story(id)
+    await StoryAssigneeRepository(session, org_id).delete_by_story(id)
     return {"ok": True}
 
 
@@ -454,6 +545,7 @@ async def update_story_status(
             context={"old_status": old_status, "new_status": story.status, "story_title": story.title},
         )
 
+    await _attach_assignee_ids(db, repo.org_id, [story])
     return StoryResponse.model_validate(story)
 
 
@@ -523,9 +615,13 @@ async def _resolve_team_member_id(auth: AuthContext, org_id: uuid.UUID, db: Asyn
         .limit(1)
     )
     member = result.scalar_one_or_none()
-    if not member:
-        raise HTTPException(status_code=403, detail="Team member not found for current user")
-    return member.id
+    if member:
+        return member.id
+    # 0d68ad20: grant-only/admin 휴먼(team_member 행 없음)도 org 멤버면 403 금지 — SSOT canonical
+    # member id(org_member.id)로 폴백(conversations/notification_preferences와 동일 패턴). 비-멤버는
+    # resolve_member가 400.
+    from app.services.member_resolver import resolve_member
+    return (await resolve_member(auth, org_id, db)).id
 
 
 @router.post("/{id}/comments", response_model=CommentResponse, status_code=201)
@@ -578,7 +674,7 @@ async def bulk_update_stories(
     db: AsyncSession = Depends(get_db),
     repo: StoryRepository = Depends(_get_repo),
 ) -> list[StoryResponse]:
-    results: list[StoryResponse] = []
+    updated: list[Story] = []
     for item in items:
         q = await db.execute(select(Story).where(Story.id == item.id))
         story = q.scalar_one_or_none()
@@ -587,6 +683,12 @@ async def bulk_update_stories(
         update_data = item.model_dump(exclude={"id"}, exclude_none=True)
         for k, v in update_data.items():
             setattr(story, k, v)
-        results.append(StoryResponse.model_validate(story))
+        # E-BOARD S5: 단일 assignee_id 변경 시 join 미러(단일↔복수 공존 정합)
+        if "assignee_id" in update_data:
+            single = [story.assignee_id] if story.assignee_id else []
+            await StoryAssigneeRepository(db, repo.org_id).set_for_story(story.id, single)
+        updated.append(story)
+    await _attach_assignee_ids(db, repo.org_id, updated)
+    results = [StoryResponse.model_validate(s) for s in updated]
     await db.commit()
     return results

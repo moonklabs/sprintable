@@ -55,24 +55,41 @@ def run_migrations_online() -> None:
     connectable = engine_from_config(cfg, prefix="sqlalchemy.", poolclass=pool.NullPool)
     with connectable.connect() as connection:
         insp = inspect(connection)
-        # Fresh OSS DB: no application tables and no prior alembic stamp.
-        # Skip the incremental migration chain — create all tables at once and
-        # stamp to head so subsequent `alembic upgrade head` calls are no-ops.
-        # Existing SaaS/Cloud SQL DBs already have tables and an alembic_version
-        # row, so they follow the normal incremental path below.
-        is_fresh = (
+        # Fresh-install path: an EMPTY database (no alembic_version, no application tables) is
+        # provisioned from the squashed baseline SNAPSHOT (dev's exact 0096 end-state — schema
+        # + global system seed) and then stamped to head. This is the SaaS/Cloud-SQL-correct
+        # provisioning: the snapshot includes the team_members VIEW and the dropped NOT NULL
+        # constraints, which the old create_all-from-models shortcut got wrong (model drift →
+        # the prod onboarding 500). An existing DB (alembic_version present) follows the normal
+        # incremental path below — including dev, which is already at 0096 and thus a no-op.
+        is_empty = (
             not insp.has_table("alembic_version")
             and not insp.has_table("organizations")
         )
-        if is_fresh:
+        if is_empty:
             from alembic.runtime.migration import MigrationContext as _MigCtx
             from alembic.script import ScriptDirectory
-            Base.metadata.create_all(bind=connection)
+
             script_dir = ScriptDirectory.from_config(config)
+            baseline_dir = os.path.join(script_dir.dir, "baseline")
+            for _fname in ("schema.sql", "seed.sql"):
+                with open(os.path.join(baseline_dir, _fname), "r", encoding="utf-8") as _fh:
+                    _sql = _fh.read()
+                if _sql.strip():
+                    connection.exec_driver_sql(_sql)
+            # pg_dump preambles can leave search_path empty; restore it so stamp() can create
+            # the alembic_version table without an explicit schema qualifier.
+            connection.exec_driver_sql('SET search_path TO "$user", public')
+            # Stamp the BASELINE revision (the snapshot's captured version, baseline/REVISION),
+            # NOT "head" — so any migrations added AFTER the snapshot (0097+) still run
+            # incrementally below. Stamping head would mark them applied while the snapshot
+            # predates them (missing columns). Then fall through to run_migrations.
+            with open(os.path.join(baseline_dir, "REVISION"), "r", encoding="utf-8") as _rf:
+                _baseline_rev = _rf.read().strip()
             migration_ctx = _MigCtx.configure(connection)
-            migration_ctx.stamp(script_dir, "head")
+            migration_ctx.stamp(script_dir, _baseline_rev)
             connection.commit()
-            return
+            # NOTE: no return — continue to the incremental path to apply post-baseline migrations.
 
         context.configure(connection=connection, target_metadata=target_metadata)
         with context.begin_transaction():

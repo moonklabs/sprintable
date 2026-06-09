@@ -51,8 +51,10 @@ export default function RewardsPage() {
         if (lbRes.ok && !cancelled) { const j = await lbRes.json(); setLeaderboard(j.data ?? []); }
         if (ledgerRes.ok && !cancelled) { const j = await ledgerRes.json(); setLedger(j.data ?? []); }
         if (membersRes.ok && !cancelled) { const j = await membersRes.json(); setMembers(j.data ?? []); }
-      } catch { /* silent */ }
-      if (!cancelled) setLoading(false);
+      } catch { /* silent */ } finally {
+        // 실패/예외 무관 loading 해소 (#1242 settings 패턴) — 무한 스켈레톤 방지.
+        if (!cancelled) setLoading(false);
+      }
     }
     void load();
     return () => { cancelled = true; };

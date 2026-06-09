@@ -3,6 +3,7 @@
 import { useEffect, useMemo, useState } from 'react';
 import Link from 'next/link';
 import { useTranslations } from 'next-intl';
+import { Alert, AlertDescription } from '@/components/ui/alert';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { EmptyState } from '@/components/ui/empty-state';
@@ -96,13 +97,14 @@ function shiftDate(dateStr: string, days: number): string {
 
 export default function StandupPage() {
   const t = useTranslations('standup');
-  const shellT = useTranslations('shell');
   const { currentTeamMemberId, projectId } = useDashboardContext();
 
   const [date, setDate] = useState(() => formatSeoulDate());
   const [entries, setEntries] = useState<StandupEntryRow[]>([]);
   const [members, setMembers] = useState<StandupMemberRow[]>([]);
   const [feedback, setFeedback] = useState<StandupFeedbackRow[]>([]);
+  // S3(51447ca0): Missing = org 기준(get_missing projection) — 조직 1회 미작성 멤버
+  const [missingMembers, setMissingMembers] = useState<{ id: string; name: string }[]>([]);
   const [activeSprint, setActiveSprint] = useState<StandupSprintSummary | null>(null);
   const [stories, setStories] = useState<StandupStorySummary[]>([]);
   const [done, setDone] = useState('');
@@ -175,20 +177,6 @@ export default function StandupPage() {
     let cancelled = false;
 
     async function load() {
-      if (!projectId) {
-        if (!cancelled) {
-          setEntries([]);
-          setMembers([]);
-          setFeedback([]);
-          setActiveSprint(null);
-          setStories([]);
-          setLoadError(null);
-          setSaveError(null);
-          setLoading(false);
-        }
-        return;
-      }
-
       if (!cancelled) {
         setLoading(true);
         setLoadError(null);
@@ -196,25 +184,46 @@ export default function StandupPage() {
       }
 
       try {
-        const [entriesRes, membersRes, sprintsRes, feedbackRes] = await Promise.all([
-          fetch(`/api/standup?project_id=${projectId}&date=${date}`),
-          fetch(`/api/team-members?project_id=${projectId}`),
-          fetch(`/api/sprints?project_id=${projectId}&status=active`),
-          fetch(`/api/standup/feedback?project_id=${projectId}&date=${date}`),
+        // d9847ef0: org-level(항상) — standup entries(project_id 생략→org_id scoped 전체)·members(org-level).
+        // standalone org write 진입(프로젝트 미선택)에서도 작성/조회 가능.
+        const [entriesRes, membersRes] = await Promise.all([
+          fetch(`/api/standup?date=${date}`),
+          fetch(`/api/team-members`),
         ]);
 
-        const [entriesData, membersData, sprintsData, feedbackData] = await Promise.all([
+        const [entriesData, membersData] = await Promise.all([
           readJsonDataOrThrow<StandupEntryRow[]>(entriesRes, 'standup entries'),
           readJsonDataOrThrow<StandupMemberRow[]>(membersRes, 'team members'),
-          readJsonDataOrThrow<StandupSprintSummary[]>(sprintsRes, 'sprints'),
-          readJsonDataOrThrow<StandupFeedbackRow[]>(feedbackRes, 'standup feedback'),
         ]);
 
-        const sprint = sprintsData.find((item) => item.status === 'active') ?? sprintsData[0] ?? null;
+        // d9847ef0: project-scoped(projectId 있을 때만) — sprints·feedback·missing·sprint stories.
+        // missing은 get_missing_standups가 project_id REQUIRED라 project context 필수(BE 무변경).
+        let feedbackData: StandupFeedbackRow[] = [];
+        let missingList: { id: string; name: string }[] = [];
+        let sprint: StandupSprintSummary | null = null;
         let storySummaries: StandupStorySummary[] = [];
         let nextStoriesCursor: string | null = null;
 
-        if (sprint) {
+        if (projectId) {
+          const [sprintsRes, feedbackRes, missingRes] = await Promise.all([
+            fetch(`/api/sprints?project_id=${projectId}&status=active`),
+            fetch(`/api/standup/feedback?project_id=${projectId}&date=${date}`),
+            fetch(`/api/standup/missing?project_id=${projectId}&date=${date}`),
+          ]);
+
+          const [sprintsData, fbData] = await Promise.all([
+            readJsonDataOrThrow<StandupSprintSummary[]>(sprintsRes, 'sprints'),
+            readJsonDataOrThrow<StandupFeedbackRow[]>(feedbackRes, 'standup feedback'),
+          ]);
+          feedbackData = fbData;
+
+          // S3: Missing = org 기준(projection get_missing). 실패해도 본 화면은 막지 않음.
+          const missingJson = await missingRes.json().catch(() => null) as { data?: { missing?: { id: string; name: string }[] } } | null;
+          missingList = missingRes.ok ? (missingJson?.data?.missing ?? []) : [];
+
+          sprint = sprintsData.find((item) => item.status === 'active') ?? sprintsData[0] ?? null;
+
+          if (sprint) {
           const storiesRes = await fetch(`/api/stories?project_id=${projectId}&sprint_id=${sprint.id}&limit=40`);
           if (!storiesRes.ok) throw new Error('Failed to load sprint stories');
           const storiesJson = await storiesRes.json().catch(() => null);
@@ -240,13 +249,19 @@ export default function StandupPage() {
             return acc;
           }, {});
           storySummaries = storyRows.map((story) => buildStorySummary(story, taskProgressByStoryId[story.id] ?? { taskCount: 0, doneTaskCount: 0 }, memberLookup));
+          }
         }
 
         if (cancelled) return;
 
         setEntries(entriesData);
-        setMembers(membersData);
+        // team_members 뷰는 휴먼=members⋈project_access(per-project 행)이라 org-level fetch(project_id 생략·
+        // d9847ef0)는 멀티프로젝트 멤버를 같은 id로 N행 반환한다. standup은 org-level이므로 id 기준 dedup
+        // (멤버 1회만) — 중복 카드 + React key 중복 방지. (선생님 standup 중복 렌더 버그.)
+        const uniqueMembers = Array.from(new Map(membersData.map((m) => [m.id, m])).values());
+        setMembers(uniqueMembers);
         setFeedback(feedbackData);
+        setMissingMembers(missingList);
         setActiveSprint(sprint);
         setStories(storySummaries);
         setStoriesNextCursor(nextStoriesCursor);
@@ -286,15 +301,15 @@ export default function StandupPage() {
       : summaryBadges;
 
   async function handleSave() {
-    if (!projectId) return;
     setSaving(true);
     setSaveError(null);
     try {
+      // S2(1c2be9db): org-level write — project_id 생략 시 BE가 author 접근 프로젝트로 auto-link.
+      // 하루 한 번 작성하면 접근한 모든 프로젝트 뷰에 projection 된다(재타이핑 제거).
       const response = await fetch('/api/standup', {
         method: 'PUT',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
-          project_id: projectId,
           date,
           done,
           plan,
@@ -343,16 +358,8 @@ export default function StandupPage() {
     setRefreshToken((value) => value + 1);
   }
 
-  if (!projectId) {
-    return (
-      <>
-        <TopBarSlot title={<h1 className="text-sm font-medium">{t('title')}</h1>} />
-        <div className="flex h-64 items-center justify-center p-6">
-          <EmptyState title={shellT('projectSelectPrompt')} description={shellT('projectSelectDescription')} />
-        </div>
-      </>
-    );
-  }
+  // d9847ef0: projectId 전체 차단 제거 — org-level standup은 프로젝트 미선택에도 진입/작성/조회 가능.
+  // project-scoped 섹션만 {projectId && ...}로 조건부 렌더(아래).
 
   return (
     <>
@@ -374,9 +381,6 @@ export default function StandupPage() {
             </Button>
             <Button variant="ghost" size="sm" onClick={() => setDate(formatSeoulDate())}>
               {t('today')}
-            </Button>
-            <Button variant="outline" size="sm" asChild>
-              <Link href={`/meetings/new?standup_date=${date}`}>{t('meetingNotes')}</Link>
             </Button>
           </div>
         }
@@ -404,7 +408,8 @@ export default function StandupPage() {
 
           {!loadError ? (
             <>
-              {/* 스프린트 섹션 — 접을 수 있는 컴팩트 카드 */}
+              {/* 스프린트 섹션 — 접을 수 있는 컴팩트 카드 (d9847ef0: project-scoped — projectId 있을 때만) */}
+              {projectId ? (
               <div className="rounded-xl border border-border bg-background">
                 <button
                   type="button"
@@ -503,6 +508,18 @@ export default function StandupPage() {
                   </div>
                 ) : null}
               </div>
+              ) : (
+                <div className="rounded-xl border border-dashed border-border bg-background p-6">
+                  <EmptyState title={t('projectScopedHint')} />
+                </div>
+              )}
+
+              {/* S3(51447ca0): 프로젝트 뷰 = 접근-기반 projection(read-only). 작성은 org-level. */}
+              {!loading && projectId ? (
+                <Alert variant="default">
+                  <AlertDescription className="text-xs">{t('projectionBanner')}</AlertDescription>
+                </Alert>
+              ) : null}
 
               {/* 사람 섹션 */}
               {loading ? (
@@ -532,9 +549,19 @@ export default function StandupPage() {
                         return (
                           <div key={member.id} className="col-span-full rounded-xl border border-brand/40 bg-card p-4 shadow-sm space-y-4">
                             <div className="flex flex-wrap items-center justify-between gap-2">
-                              <h3 className="text-sm font-semibold text-foreground">{t('selfEditTitle')}</h3>
-                              <Button variant="ghost" size="sm" onClick={() => setEditingSelf(false)}>{t('cancel')}</Button>
+                              <div className="space-y-0.5">
+                                <h3 className="text-sm font-semibold text-foreground">{t('orgLevelTitle')}</h3>
+                                <p className="text-xs text-muted-foreground">{t('orgLevelDesc')}</p>
+                              </div>
+                              <div className="flex items-center gap-2">
+                                <Badge variant="outline">{t('oncePerDay')}</Badge>
+                                <Button variant="ghost" size="sm" onClick={() => setEditingSelf(false)}>{t('cancel')}</Button>
+                              </div>
                             </div>
+                            {/* S2(1c2be9db): org-level write 안내 — 프로젝트 선택 불요·접근 프로젝트 자동 표시 */}
+                            <Alert variant="info">
+                              <AlertDescription className="text-xs">{t('orgWriteBanner')}</AlertDescription>
+                            </Alert>
 
                             <div className="grid gap-4 md:grid-cols-3">
                               <div>
@@ -568,9 +595,11 @@ export default function StandupPage() {
 
                             <div className="space-y-3 rounded-xl border border-border/70 bg-muted/10 p-3">
                               <div className="flex flex-wrap items-center justify-between gap-2">
-                                <p className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">{t('linkedStories')}</p>
+                                <p className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">{t('planStoriesOptional')}</p>
                                 <Badge variant="outline">{t('linkedStoryCount', { count: planStoryIds.length })}</Badge>
                               </div>
+                              {/* projection은 접근권 기준 자동 — plan_story_ids와 무관(디커플 명시) */}
+                              <p className="text-xs text-muted-foreground">{t('planStoriesProjectionHint')}</p>
                               {storyPickerStories.length > 0 ? (
                                 <div className="max-h-40 space-y-1.5 overflow-y-auto">
                                   {storyPickerStories.map((story) => {
@@ -602,6 +631,15 @@ export default function StandupPage() {
                                       </label>
                                     );
                                   })}
+                                </div>
+                              ) : !projectId ? (
+                                // org write(프로젝트 미선택): 스프린트 컨텍스트 없음 — 프로젝트 선택 안내.
+                                <p className="text-sm text-muted-foreground">{t('storyPickerEmptyNoProject')}</p>
+                              ) : !activeSprint ? (
+                                // 프로젝트 있으나 활성 스프린트 0: 빈 selector가 "없음"으로 오인되던 것 — 안내 + 활성화 CTA.
+                                <div className="space-y-1.5">
+                                  <p className="text-sm text-muted-foreground">{t('storyPickerEmptyNoSprint')}</p>
+                                  <Link href="/sprints" className="inline-block text-xs font-medium text-primary hover:underline">{t('storyPickerManageSprints')}</Link>
                                 </div>
                               ) : (
                                 <p className="text-sm text-muted-foreground">{t('noSprintStories')}</p>
@@ -659,6 +697,24 @@ export default function StandupPage() {
                         />
                       );
                     })}
+                  </div>
+                </section>
+              ) : null}
+
+              {/* S3(51447ca0): Missing — org 1회 작성 기준 미작성 멤버(프로젝트별 아님) */}
+              {!loading && missingMembers.length > 0 ? (
+                <section className="space-y-3">
+                  <div className="flex flex-wrap items-center justify-between gap-2">
+                    <h2 className="text-sm font-semibold text-foreground">{t('missingOrgStandup')}</h2>
+                    <Badge variant="outline">{t('memberCount', { count: missingMembers.length })}</Badge>
+                  </div>
+                  <div className="rounded-xl border border-dashed border-border bg-muted/40 p-4">
+                    <div className="flex flex-wrap gap-1.5">
+                      {missingMembers.map((m) => (
+                        <Badge key={m.id} variant="outline">{m.name}</Badge>
+                      ))}
+                    </div>
+                    <p className="mt-2 text-xs text-muted-foreground">{t('missingOrgHint')}</p>
                   </div>
                 </section>
               ) : null}

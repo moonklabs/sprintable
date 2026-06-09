@@ -5,12 +5,17 @@ import { useTranslations } from 'next-intl';
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
 import rehypeSanitize from 'rehype-sanitize';
-import { AlertTriangle, GitFork, Plus, Tag, Trash2, X } from 'lucide-react';
+import { AlertTriangle, GitFork, Loader2, Paperclip, Plus, Tag, Trash2, X } from 'lucide-react';
 import type { KanbanStory, KanbanMember, DependencyEdge } from './types';
+import type { SendAttachment } from '@/hooks/use-chat-sse';
+import { getFileIcon } from '@/lib/file-icon';
+import { AttachmentImage } from '@/components/chat/attachment-image';
+import { AttachmentFile } from '@/components/chat/attachment-file';
 import { LabelChip, LABEL_PRESET_COLORS, type LabelData } from '@/components/ui/label-chip';
 import { DependencyGraph } from './dependency-graph';
 import { OutcomeIntentFields, type OutcomeIntentValue } from '@/components/outcome/outcome-intent-fields';
 import { OutcomeResultCard, type OutcomeResult } from '@/components/outcome/outcome-result-card';
+import { EntityDispatchPanel } from '@/components/dispatch/entity-dispatch-panel';
 import { Button } from '@/components/ui/button';
 import { StatusBadge } from '@/components/ui/status-badge';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
@@ -54,6 +59,8 @@ interface StoryDetailPanelProps {
   memberMap?: Record<string, KanbanMember>;
   members?: KanbanMember[];
   storyMap?: Record<string, { title: string; status: string }>;
+  epicMap?: Record<string, string>;
+  sprintMap?: Record<string, string>;
   onNavigate?: (storyId: string) => void;
   projectId?: string;
 }
@@ -63,6 +70,9 @@ function taskTone(status: string) {
   if (status === 'in-progress') return 'bg-brand';
   return 'bg-background/20';
 }
+
+// BE _MAX_STORY_ATTACHMENTS 정합 (schemas/story.py)
+const STORY_ATTACHMENT_LIMIT = 10;
 
 function DescriptionViewer({ description }: { description: string }) {
   return (
@@ -91,7 +101,7 @@ function DescriptionViewer({ description }: { description: string }) {
   );
 }
 
-export function StoryDetailPanel({ story, tasks, nextTasksCursor = null, loadingMoreTasks = false, onLoadMoreTasks, onClose, onStoryUpdate, onDeleteSuccess, memberMap = {}, members = [], storyMap = {}, onNavigate, projectId }: StoryDetailPanelProps) {
+export function StoryDetailPanel({ story, tasks, nextTasksCursor = null, loadingMoreTasks = false, onLoadMoreTasks, onClose, onStoryUpdate, onDeleteSuccess, memberMap = {}, members = [], storyMap = {}, epicMap = {}, sprintMap = {}, onNavigate, projectId }: StoryDetailPanelProps) {
   const t = useTranslations('board');
   const { toasts, addToast, dismissToast } = useToast();
   const [showDeleteConfirm, setShowDeleteConfirm] = useState(false);
@@ -106,6 +116,7 @@ export function StoryDetailPanel({ story, tasks, nextTasksCursor = null, loading
   const [loadingMoreActivities, setLoadingMoreActivities] = useState(false);
   const [commentInput, setCommentInput] = useState('');
   const [submittingComment, setSubmittingComment] = useState(false);
+  const [expandedActivityId, setExpandedActivityId] = useState<string | null>(null);
 
   // Edit state
   const [editingTitle, setEditingTitle] = useState(false);
@@ -115,6 +126,12 @@ export function StoryDetailPanel({ story, tasks, nextTasksCursor = null, loading
   const [editingDescription, setEditingDescription] = useState(false);
   const [descriptionDraft, setDescriptionDraft] = useState(story.description ?? '');
   const [savingDescription, setSavingDescription] = useState(false);
+  const [editingAC, setEditingAC] = useState(false);
+  const [acDraft, setAcDraft] = useState(story.acceptance_criteria ?? '');
+  const [savingAC, setSavingAC] = useState(false);
+  const [uploadingAttachment, setUploadingAttachment] = useState(false);
+  const [attachError, setAttachError] = useState(false);
+  const attachInputRef = useRef<HTMLInputElement>(null);
 
   const [intent, setIntent] = useState<OutcomeIntentValue>({
     success_hypothesis: story.success_hypothesis ?? '',
@@ -167,13 +184,14 @@ export function StoryDetailPanel({ story, tasks, nextTasksCursor = null, loading
   useEffect(() => {
     setTitleDraft(story.title);
     setDescriptionDraft(story.description ?? '');
+    setAcDraft(story.acceptance_criteria ?? '');
     setIntent({
       success_hypothesis: story.success_hypothesis ?? '',
       metric_definition: story.metric_definition ?? null,
       measure_after: story.measure_after ? story.measure_after.slice(0, 10) : '',
     });
     setIntentOpen(!!story.success_hypothesis || !!story.metric_definition);
-  }, [story.id, story.title, story.description, story.success_hypothesis, story.metric_definition, story.measure_after]);
+  }, [story.id, story.title, story.description, story.acceptance_criteria, story.success_hypothesis, story.metric_definition, story.measure_after]);
 
   useEffect(() => {
     if (editingTitle) {
@@ -336,12 +354,28 @@ export function StoryDetailPanel({ story, tasks, nextTasksCursor = null, loading
     if (updated) onStoryUpdate?.({ ...story, title: updated.title });
   };
 
-  const handleSaveAssignee = async (assigneeId: string | null) => {
+  // E-BOARD S6: 복수 assignee. assignee_ids 우선, 없으면 단일 assignee_id로 폴백(하위호환).
+  const currentAssigneeIds = (story.assignee_ids && story.assignee_ids.length > 0)
+    ? story.assignee_ids
+    : (story.assignee_id ? [story.assignee_id] : []);
+
+  const handleToggleAssignee = async (memberId: string) => {
+    const set = new Set(currentAssigneeIds);
+    if (set.has(memberId)) set.delete(memberId); else set.add(memberId);
+    const next = Array.from(set);
+    setSavingAssignee(true);
+    const updated = await patchStory({ assignee_ids: next });
+    setSavingAssignee(false);
+    // BE가 assignee_id(주담당)를 assignee_ids[0]로 동기화 → 응답 우선, 없으면 로컬 계산.
+    if (updated) onStoryUpdate?.({ ...story, assignee_ids: updated.assignee_ids ?? next, assignee_id: updated.assignee_id ?? next[0] ?? null });
+  };
+
+  const handleClearAssignees = async () => {
     setSavingAssignee(true);
     setEditingAssignee(false);
-    const updated = await patchStory({ assignee_id: assigneeId });
+    const updated = await patchStory({ assignee_ids: [] });
     setSavingAssignee(false);
-    if (updated) onStoryUpdate?.({ ...story, assignee_id: assigneeId });
+    if (updated) onStoryUpdate?.({ ...story, assignee_ids: [], assignee_id: null });
   };
 
   const handleSaveDescription = async () => {
@@ -354,6 +388,52 @@ export function StoryDetailPanel({ story, tasks, nextTasksCursor = null, loading
     setSavingDescription(false);
     setEditingDescription(false);
     if (updated) onStoryUpdate?.({ ...story, description: updated.description });
+  };
+
+  const handleSaveAC = async () => {
+    if (acDraft === (story.acceptance_criteria ?? '')) {
+      setEditingAC(false);
+      return;
+    }
+    setSavingAC(true);
+    const updated = await patchStory({ acceptance_criteria: acDraft || null });
+    setSavingAC(false);
+    setEditingAC(false);
+    if (updated) onStoryUpdate?.({ ...story, acceptance_criteria: updated.acceptance_criteria });
+  };
+
+  // E-FILE S4: 스토리 첨부 — GCS 업로드 후 PATCH {attachments} (전체 교체이므로 기존+신규 머지 필수).
+  const handleAttachFiles = async (files: File[]) => {
+    if (files.length === 0 || uploadingAttachment) return;
+    const current = story.attachments ?? [];
+    const room = STORY_ATTACHMENT_LIMIT - current.length;
+    if (room <= 0) return;
+    setUploadingAttachment(true);
+    setAttachError(false);
+    try {
+      const uploaded: SendAttachment[] = [];
+      for (const file of files.slice(0, room)) {
+        const fd = new FormData();
+        fd.append('file', file);
+        // 03fe1663: project_id는 업로드 라우트가 story에서 server-side 도출(클라이언트 전달 불요).
+        const res = await fetch(`/api/stories/${story.id}/attachments`, { method: 'POST', body: fd });
+        if (!res.ok) throw new Error('upload failed');
+        uploaded.push(await res.json() as SendAttachment);
+      }
+      const next = [...current, ...uploaded]; // 전체 교체: 기존 보존 + 신규 누적
+      const updated = await patchStory({ attachments: next });
+      onStoryUpdate?.({ ...story, attachments: updated?.attachments ?? next });
+    } catch {
+      setAttachError(true);
+    } finally {
+      setUploadingAttachment(false);
+    }
+  };
+
+  const handleRemoveAttachment = async (url: string) => {
+    const next = (story.attachments ?? []).filter((a) => a.url !== url); // filter → 전체 교체
+    const updated = await patchStory({ attachments: next });
+    onStoryUpdate?.({ ...story, attachments: updated?.attachments ?? next });
   };
 
   const handleSaveIntent = async () => {
@@ -412,12 +492,13 @@ export function StoryDetailPanel({ story, tasks, nextTasksCursor = null, loading
       if (e.key === 'Escape') {
         if (editingTitle) { setEditingTitle(false); setTitleDraft(story.title); return; }
         if (editingDescription) { setEditingDescription(false); setDescriptionDraft(story.description ?? ''); return; }
+        if (editingAC) { setEditingAC(false); setAcDraft(story.acceptance_criteria ?? ''); return; }
         onClose();
       }
     };
     window.addEventListener('keydown', handleEsc);
     return () => window.removeEventListener('keydown', handleEsc);
-  }, [onClose, editingTitle, editingDescription, story.title, story.description]);
+  }, [onClose, editingTitle, editingDescription, editingAC, story.title, story.description, story.acceptance_criteria]);
 
   const handleSubmitComment = async () => {
     if (!commentInput.trim() || submittingComment) return;
@@ -474,24 +555,40 @@ export function StoryDetailPanel({ story, tasks, nextTasksCursor = null, loading
     }
   };
 
-  const formatActivityMessage = (activity: Activity) => {
-    const { activity_type, old_value, new_value } = activity;
+  // E-BOARD S4: Activity 상세화 — old→new resolve(UUID 노출 0)·화살표. 긴 값은 expanded 시 전체 표시.
+  const truncate = (v: string, n = 40) => (v.length > n ? `${v.slice(0, n)}…` : v);
+  const renderChange = (oldLabel: string | null, newLabel: string, expand: boolean): React.ReactNode => (
+    <span className="inline-flex flex-wrap items-center gap-1 align-middle">
+      {oldLabel != null ? (
+        <>
+          <span className="rounded bg-muted px-1.5 py-0.5 text-xs text-muted-foreground line-through">{expand ? oldLabel : truncate(oldLabel)}</span>
+          <span className="text-muted-foreground">→</span>
+        </>
+      ) : null}
+      <span className="rounded bg-muted px-1.5 py-0.5 text-xs font-medium text-foreground">{expand ? newLabel : truncate(newLabel)}</span>
+    </span>
+  );
+  const memberName = (id: string | null) => (id ? (memberMap[id]?.name ?? '—') : '—');
+  const epicName = (id: string | null) => (id ? (epicMap[id] ?? '—') : '—');
+  const sprintName = (id: string | null) => (id ? (sprintMap[id] ?? '—') : '—');
 
+  const formatActivityMessage = (activity: Activity, expand: boolean): React.ReactNode => {
+    const { activity_type, old_value, new_value } = activity;
     switch (activity_type) {
       case 'created':
-        return `Created story: ${new_value}`;
+        return <span className="text-foreground">Created{new_value ? <>: <span className="font-medium">{expand ? new_value : truncate(new_value)}</span></> : null}</span>;
       case 'status_changed':
-        return `Changed status from ${old_value} to ${new_value}`;
+        return <span className="text-foreground">Status {renderChange(old_value, new_value ?? '—', expand)}</span>;
       case 'assignee_changed':
-        return old_value ? `Changed assignee` : `Assigned`;
+        return <span className="text-foreground">Assignee {renderChange(old_value ? memberName(old_value) : null, memberName(new_value), expand)}</span>;
       case 'title_changed':
-        return `Changed title`;
+        return <span className="text-foreground">Title {renderChange(old_value, new_value ?? '—', expand)}</span>;
       case 'epic_changed':
-        return old_value ? `Changed epic` : `Added to epic`;
+        return <span className="text-foreground">Epic {renderChange(old_value ? epicName(old_value) : null, epicName(new_value), expand)}</span>;
       case 'sprint_changed':
-        return old_value ? `Moved to different sprint` : `Added to sprint`;
+        return <span className="text-foreground">Sprint {renderChange(old_value ? sprintName(old_value) : null, sprintName(new_value), expand)}</span>;
       default:
-        return activity_type;
+        return <span className="text-foreground">{activity_type}</span>;
     }
   };
 
@@ -576,25 +673,28 @@ export function StoryDetailPanel({ story, tasks, nextTasksCursor = null, loading
                 <div className="mt-1 flex flex-col gap-1 rounded-md border border-border bg-muted/30 p-1">
                   <button
                     type="button"
-                    onClick={() => handleSaveAssignee(null)}
+                    onClick={() => void handleClearAssignees()}
                     className="w-full rounded px-2 py-1.5 text-left text-sm text-muted-foreground hover:bg-muted"
                   >
-                    — {t('unassigned')}
+                    — {t('clearAssignees')}
                   </button>
-                  {members.filter((m, i, arr) => arr.findIndex((x) => x.id === m.id) === i).map((m) => (
-                    <button
-                      key={m.id}
-                      type="button"
-                      onClick={() => handleSaveAssignee(m.id)}
-                      className={`flex w-full items-center gap-2 rounded px-2 py-1.5 text-left text-sm hover:bg-muted ${story.assignee_id === m.id ? 'font-medium text-foreground' : 'text-muted-foreground'}`}
-                    >
-                      <span className="flex h-5 w-5 shrink-0 items-center justify-center rounded-full bg-muted text-[10px] font-medium text-foreground">
-                        {m.name.slice(0, 2).toUpperCase()}
-                      </span>
-                      {m.name}
-                      {story.assignee_id === m.id && <span className="ml-auto text-primary">✓</span>}
-                    </button>
-                  ))}
+                  {members.filter((m, i, arr) => arr.findIndex((x) => x.id === m.id) === i).map((m) => {
+                    const selected = currentAssigneeIds.includes(m.id);
+                    return (
+                      <button
+                        key={m.id}
+                        type="button"
+                        onClick={() => void handleToggleAssignee(m.id)}
+                        className={`flex w-full items-center gap-2 rounded px-2 py-1.5 text-left text-sm hover:bg-muted ${selected ? 'font-medium text-foreground' : 'text-muted-foreground'}`}
+                      >
+                        <span className="flex h-5 w-5 shrink-0 items-center justify-center rounded-full bg-muted text-[10px] font-medium text-foreground">
+                          {m.name.slice(0, 2).toUpperCase()}
+                        </span>
+                        {m.name}
+                        {selected && <span className="ml-auto text-primary">✓</span>}
+                      </button>
+                    );
+                  })}
                   <button
                     type="button"
                     onClick={() => setEditingAssignee(false)}
@@ -605,10 +705,29 @@ export function StoryDetailPanel({ story, tasks, nextTasksCursor = null, loading
                 </div>
               ) : (
                 <p className="mt-1 text-sm text-foreground">
-                  {savingAssignee ? t('loading') : story.assignee_id ? (memberMap[story.assignee_id]?.name ?? '—') : '—'}
+                  {savingAssignee
+                    ? t('loading')
+                    : currentAssigneeIds.length > 0
+                      ? currentAssigneeIds.map((id) => memberMap[id]?.name ?? '—').join(', ')
+                      : '—'}
                 </p>
               )}
             </div>
+
+            {/* E-BOARD S1: Dispatch — assignee 인접(킥오프=assignee 선택 후 액션). EntityDispatchPanel 마운트만(신규 디자인 0). */}
+            {projectId && (
+              <div className="rounded-lg border border-border bg-muted/20 p-3">
+                <p className="mb-2 text-xs font-semibold uppercase tracking-wide text-muted-foreground">Dispatch</p>
+                <EntityDispatchPanel
+                  entityType="story"
+                  entityId={story.id}
+                  projectId={projectId}
+                  currentAssigneeId={currentAssigneeIds.length > 1 ? undefined : story.assignee_id}
+                  onAssigneePatched={(aid) => onStoryUpdate?.({ ...story, assignee_id: aid })}
+                />
+              </div>
+            )}
+
             {story.story_points != null ? (
               <div>
                 <span className="text-[10px] font-mono uppercase tracking-wider text-muted-foreground">{t('storyPoints')}</span>
@@ -660,6 +779,121 @@ export function StoryDetailPanel({ story, tasks, nextTasksCursor = null, loading
                 >
                   + {t('addDescription')}
                 </button>
+              )}
+            </div>
+
+            {/* Acceptance Criteria — Description 블록 미러 (E-BOARD-UX S3) */}
+            <div>
+              <div className="flex items-center justify-between">
+                <span className="text-[10px] font-mono uppercase tracking-wider text-muted-foreground">{t('acceptanceCriteria')}</span>
+                {!editingAC && (
+                  <button
+                    type="button"
+                    onClick={() => setEditingAC(true)}
+                    className="text-xs text-muted-foreground transition hover:text-foreground"
+                  >
+                    ✎ {t('edit')}
+                  </button>
+                )}
+              </div>
+              {editingAC ? (
+                <div className="mt-2 space-y-2">
+                  <textarea
+                    value={acDraft}
+                    onChange={(e) => setAcDraft(e.target.value)}
+                    placeholder="Markdown 형식으로 작성하세요..."
+                    className="flex field-sizing-content min-h-[160px] w-full resize-y rounded-lg border border-input bg-transparent px-2.5 py-2 font-mono text-sm outline-none transition-colors placeholder:text-muted-foreground focus-visible:border-ring focus-visible:ring-3 focus-visible:ring-ring/50 disabled:cursor-not-allowed disabled:opacity-50"
+                    autoFocus
+                  />
+                  <div className="flex gap-2">
+                    <Button size="sm" onClick={handleSaveAC} disabled={savingAC}>
+                      {savingAC ? t('loading') : t('save')}
+                    </Button>
+                    <Button size="sm" variant="ghost" onClick={() => { setEditingAC(false); setAcDraft(story.acceptance_criteria ?? ''); }}>
+                      {t('cancel')}
+                    </Button>
+                  </div>
+                </div>
+              ) : story.acceptance_criteria ? (
+                <div className="mt-2 cursor-pointer" onClick={() => setEditingAC(true)}>
+                  <DescriptionViewer description={story.acceptance_criteria} />
+                </div>
+              ) : (
+                <button
+                  type="button"
+                  onClick={() => setEditingAC(true)}
+                  className="mt-2 w-full rounded-md border border-dashed border-border py-3 text-sm text-muted-foreground transition hover:border-primary hover:text-primary"
+                >
+                  + {t('addAcceptanceCriteria')}
+                </button>
+              )}
+            </div>
+
+            {/* Attachments — chat-attach 자산 미러 (E-FILE S4) */}
+            <div>
+              <div className="flex items-center justify-between">
+                <span className="text-[10px] font-mono uppercase tracking-wider text-muted-foreground">{t('attachments')}</span>
+                <button
+                  type="button"
+                  onClick={() => attachInputRef.current?.click()}
+                  disabled={uploadingAttachment || (story.attachments?.length ?? 0) >= STORY_ATTACHMENT_LIMIT}
+                  className="flex items-center gap-1 text-xs text-muted-foreground transition hover:text-foreground disabled:opacity-40"
+                >
+                  <Paperclip className="size-3" /> + 추가
+                </button>
+              </div>
+              <input
+                ref={attachInputRef}
+                type="file"
+                multiple
+                className="hidden"
+                accept="image/*,.pdf,.txt,.md,.csv"
+                onChange={(e) => { void handleAttachFiles(Array.from(e.target.files ?? [])); e.target.value = ''; }}
+              />
+              {story.attachments && story.attachments.length > 0 ? (
+                <div className="mt-2 flex flex-col gap-1.5">
+                  {story.attachments.map((att, i) => {
+                    const isImage = att.content_type?.startsWith('image/');
+                    const Icon = getFileIcon(att.content_type);
+                    const label = att.name ?? '첨부파일';
+                    return (
+                      <div key={att.url ?? i} className="group relative">
+                        {/* a54ddc16 B1: 보드 첨부도 auth-gated 서명 라우트 경유(chat과 동일 컴포넌트·3상태). */}
+                        {att.url ? (
+                          isImage ? (
+                            <AttachmentImage storedUrl={att.url} storyId={story.id} alt={label} />
+                          ) : (
+                            <AttachmentFile storedUrl={att.url} storyId={story.id} label={label} Icon={Icon} />
+                          )
+                        ) : null}
+                        <button
+                          type="button"
+                          onClick={() => void handleRemoveAttachment(att.url)}
+                          className="absolute right-1 top-1 hidden rounded bg-destructive/20 p-0.5 text-destructive transition group-hover:block hover:bg-destructive/30"
+                          aria-label="첨부 삭제"
+                        >
+                          <X className="size-3" />
+                        </button>
+                      </div>
+                    );
+                  })}
+                </div>
+              ) : !uploadingAttachment ? (
+                <button
+                  type="button"
+                  onClick={() => attachInputRef.current?.click()}
+                  className="mt-2 w-full rounded-md border border-dashed border-border py-3 text-sm text-muted-foreground transition hover:border-primary hover:text-primary"
+                >
+                  + {t('addAttachment')}
+                </button>
+              ) : null}
+              {uploadingAttachment && (
+                <div className="mt-2 flex items-center gap-2 text-xs text-muted-foreground">
+                  <Loader2 className="size-3.5 animate-spin" /> {t('loading')}
+                </div>
+              )}
+              {attachError && (
+                <p className="mt-1 text-xs text-destructive">첨부 업로드에 실패했습니다. 다시 시도해 주세요.</p>
               )}
             </div>
 
@@ -1045,14 +1279,30 @@ export function StoryDetailPanel({ story, tasks, nextTasksCursor = null, loading
                 ) : (
                   <>
                     <ul className="space-y-2">
-                      {activities.map((activity) => (
-                        <li key={activity.id} className="rounded-md border border-border bg-muted/30 p-3">
-                          <p className="text-sm text-foreground">{formatActivityMessage(activity)}</p>
-                          <p className="mt-1 text-[10px] font-mono text-muted-foreground">
-                            {new Date(activity.created_at).toLocaleString()}
-                          </p>
-                        </li>
-                      ))}
+                      {activities.map((activity) => {
+                        const actorName = memberMap[activity.created_by]?.name ?? '—';
+                        const isLong = (activity.old_value?.length ?? 0) > 40 || (activity.new_value?.length ?? 0) > 40;
+                        const expanded = expandedActivityId === activity.id;
+                        return (
+                          <li key={activity.id} className="rounded-md border border-border bg-muted/30 p-3">
+                            <div className="text-sm">{formatActivityMessage(activity, expanded)}</div>
+                            <div className="mt-1 flex items-center gap-2 text-[10px] font-mono text-muted-foreground">
+                              <span>{actorName}</span>
+                              <span>·</span>
+                              <span>{new Date(activity.created_at).toLocaleString()}</span>
+                              {isLong ? (
+                                <button
+                                  type="button"
+                                  onClick={() => setExpandedActivityId(expanded ? null : activity.id)}
+                                  className="ml-auto rounded px-1.5 py-0.5 text-muted-foreground transition hover:bg-muted hover:text-foreground"
+                                >
+                                  {expanded ? '접기' : '펼치기'}
+                                </button>
+                              ) : null}
+                            </div>
+                          </li>
+                        );
+                      })}
                     </ul>
                     {nextActivitiesCursor ? (
                       <div className="text-center">

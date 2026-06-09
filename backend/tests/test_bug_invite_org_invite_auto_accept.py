@@ -3,7 +3,8 @@
 _build_app_metadata가 OrgInvite(org_invites 테이블)를 누락하여
 invite link 가입 후 explicit accept 없이 로그인 시 org context가 없던 문제.
 
-AC: _build_app_metadata가 Invitation 미존재 시 OrgInvite도 조회하여 자동수락.
+AC: _build_app_metadata가 OrgInvite를 조회하여 자동수락(canonical accept 위임).
+구 Invitation(invitations) 경로는 d3619e80 cutover로 제거 — org_invites가 단일 SSOT.
 """
 from __future__ import annotations
 
@@ -33,12 +34,13 @@ def test_build_app_metadata_handles_org_invite():
 
 
 def test_build_app_metadata_org_invite_auto_accept_returns_org_id():
-    """OrgInvite 자동수락 경로가 org_id를 반환함."""
+    """OrgInvite 자동수락 경로가 org_id 반환 + canonical accept(SSOT)로 위임."""
     from app.routers.auth import _build_app_metadata
     source = inspect.getsource(_build_app_metadata)
     # org_inv.organization_id → 반환 dict의 org_id
     assert "org_inv.organization_id" in source
-    assert "org_inv.status" in source
+    # 05fa365f SSOT: org_member+grant+status를 canonical accept(token)로 위임(인라인 status set 제거)
+    assert "OrgInviteRepository(session).accept(org_inv.token" in source
 
 
 # ─── 동작 검증 ────────────────────────────────────────────────────────────────
@@ -56,88 +58,50 @@ async def test_build_app_metadata_auto_accepts_org_invite():
     mock_user.id = user_id
     mock_user.email = "isaacshin@moonklabs.com"
     mock_user.last_project_id = None
+    mock_user.last_org_id = None  # 0746 후속: 신규 필드 — None이어야 org_id-None(invite/Path4) 경로 유지
 
     # mock OrgInvite
     mock_org_inv = MagicMock()
     mock_org_inv.organization_id = org_id
     mock_org_inv.role = "member"
     mock_org_inv.status = "pending"
+    mock_org_inv.token = "org-inv-token"
     mock_org_inv.expires_at = now + timedelta(days=3)
     mock_org_inv.accepted_at = None
 
     session = AsyncMock()
 
-    # execute call 순서 (last_project_id=None → 첫 번째 경로 skip):
-    # 1. team_member fallback 조회 → None
-    # 2. Invitation lookup → None
-    # 3. OrgInvite lookup → mock_org_inv
-    # 4. pg_insert(OrgMember)
-    no_member = MagicMock()
-    no_member.scalar_one_or_none.return_value = None
-    no_inv = MagicMock()
-    no_inv.scalar_one_or_none.return_value = None
-    org_inv_result = MagicMock()
-    org_inv_result.scalar_one_or_none.return_value = mock_org_inv
-    insert_result = MagicMock()
-
-    session.execute = AsyncMock(side_effect=[
-        no_member,       # 1. team_member fallback
-        no_inv,          # 2. Invitation lookup
-        org_inv_result,  # 3. OrgInvite lookup
-        insert_result,   # 4. pg_insert(OrgMember)
-    ])
+    # execute 순서: 1.team_member fallback→None  2.OrgInvite lookup→mock_org_inv
+    # (구 Invitation lookup은 d3619e80 cutover로 제거. 이후 org_member+grant+status는 canonical
+    #  accept로 위임 → patch)
+    no_member = MagicMock(); no_member.scalar_one_or_none.return_value = None
+    org_inv_result = MagicMock(); org_inv_result.scalar_one_or_none.return_value = mock_org_inv
+    session.execute = AsyncMock(side_effect=[no_member, org_inv_result])
     session.flush = AsyncMock()
 
-    result = await _build_app_metadata(mock_user, session)
+    # 05fa365f SSOT: 자동수락이 canonical accept(token)로 위임됨 — accept이 org_member+project_access
+    # grant+status 처리(자체 테스트 별도). 여기선 위임 호출 + 반환 dict 검증.
+    accept_mock = AsyncMock(return_value={"ok": True, "org_id": str(org_id), "role": "member"})
+    with patch("app.repositories.org_invite.OrgInviteRepository.accept", new=accept_mock):
+        result = await _build_app_metadata(mock_user, session)
 
     assert result.get("org_id") == str(org_id)
     assert result.get("role") == "member"
-    assert mock_org_inv.status == "accepted"
-    assert mock_org_inv.accepted_at is not None
-    session.flush.assert_awaited()
+    accept_mock.assert_awaited_once_with("org-inv-token", user_id, mock_user.email)
 
+
+# ─── 05fa365f: signup invite_token 경로도 OrgInvite 위임(grant) ──────────────
 
 @pytest.mark.anyio
-async def test_build_app_metadata_skips_org_invite_when_invitation_found():
-    """Invitation 발견 시 OrgInvite 조회 스킵 (2a 경로 우선)."""
-    from app.routers.auth import _build_app_metadata
+async def test_auto_accept_invitation_delegates_orginvite_token():
+    """signup _auto_accept_invitation: OrgInvite canonical accept로 위임
+    (org_member + project_access grant). 구 Invitation 분기는 d3619e80 cutover로 제거 —
+    org_invites 토큰 단일 경로."""
+    from app.routers.auth import _auto_accept_invitation
 
-    org_id = uuid.uuid4()
-    project_id = uuid.uuid4()
-    user_id = uuid.uuid4()
-    now = datetime.now(timezone.utc)
-
-    mock_user = MagicMock()
-    mock_user.id = user_id
-    mock_user.email = "user@example.com"
-    mock_user.last_project_id = None
-
-    mock_inv = MagicMock()
-    mock_inv.org_id = org_id
-    mock_inv.project_id = project_id
-    mock_inv.role = "admin"
-    mock_inv.status = "pending"
-    mock_inv.accepted_at = None
-
-    session = AsyncMock()
-
-    no_member = MagicMock()
-    no_member.scalar_one_or_none.return_value = None
-    inv_result = MagicMock()
-    inv_result.scalar_one_or_none.return_value = mock_inv
-    insert_result = MagicMock()
-
-    session.execute = AsyncMock(side_effect=[
-        no_member,   # team_member fallback
-        inv_result,  # Invitation lookup → found
-        insert_result,  # pg_insert(OrgMember)
-    ])
-    session.flush = AsyncMock()
-
-    result = await _build_app_metadata(mock_user, session)
-
-    assert result.get("org_id") == str(org_id)
-    assert result.get("role") == "admin"
-    assert mock_inv.status == "accepted"
-    # OrgInvite 조회는 호출되지 않아야 함 (execute 3회: team_member, invitation, insert)
-    assert session.execute.call_count == 3
+    user = MagicMock(); user.id = uuid.uuid4(); user.email = "invitee@example.com"
+    session = AsyncMock(); session.execute = AsyncMock()
+    accept_mock = AsyncMock(return_value={"ok": True})
+    with patch("app.repositories.org_invite.OrgInviteRepository.accept", new=accept_mock):
+        await _auto_accept_invitation(session, user, "org-inv-token")
+    accept_mock.assert_awaited_once_with("org-inv-token", user.id, user.email)

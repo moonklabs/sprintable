@@ -32,6 +32,7 @@ async def get_invite_preview(
         status=preview.status,
         expires_at=preview.expires_at,
         email=preview.email,
+        projects=preview.projects,
     )
 
 

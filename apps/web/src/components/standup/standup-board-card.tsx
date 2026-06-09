@@ -1,5 +1,6 @@
 'use client';
 
+import { Clock } from 'lucide-react';
 import { useTranslations } from 'next-intl';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
@@ -59,25 +60,30 @@ export function StandupBoardCard({
         {entry ? (
           <>
             <div className="space-y-1">
-              <div className="text-xs font-semibold uppercase tracking-wider text-emerald-400">{t('doneLabel')}</div>
-              <p className={cn('whitespace-pre-wrap text-sm line-clamp-3', entry.done ? 'text-foreground/90' : 'text-muted-foreground')}>
+              <div className="text-xs font-semibold uppercase tracking-wider text-success">{t('doneLabel')}</div>
+              <p className={cn('whitespace-pre-wrap text-sm', entry.done ? 'text-foreground/90' : 'text-muted-foreground')}>
                 {entry.done || t('emptySection')}
               </p>
             </div>
             <div className="space-y-1">
-              <div className="text-xs font-semibold uppercase tracking-wider text-[color:var(--brand-soft)]">{t('planLabel')}</div>
-              <p className={cn('whitespace-pre-wrap text-sm line-clamp-3', entry.plan ? 'text-foreground/90' : 'text-muted-foreground')}>
+              <div className="text-xs font-semibold uppercase tracking-wider text-brand">{t('planLabel')}</div>
+              <p className={cn('whitespace-pre-wrap text-sm', entry.plan ? 'text-foreground/90' : 'text-muted-foreground')}>
                 {entry.plan || t('emptySection')}
               </p>
             </div>
             {entry.blockers ? (
               <div className="space-y-1">
-                <div className="text-xs font-semibold uppercase tracking-wider text-rose-300">{t('blockersLabel')}</div>
-                <p className="whitespace-pre-wrap text-sm text-foreground/90 line-clamp-3">
+                <div className="text-xs font-semibold uppercase tracking-wider text-destructive">{t('blockersLabel')}</div>
+                <p className="whitespace-pre-wrap text-sm text-foreground/90">
                   {entry.blockers}
                 </p>
               </div>
             ) : null}
+            {/* S3(51447ca0): org-level 작성을 프로젝트 뷰에 projection — 출처 표시 */}
+            <p className="flex items-center gap-1 text-xs text-muted-foreground">
+              <Clock className="h-3 w-3" aria-hidden />
+              {t('sourceOrgLevel')}
+            </p>
           </>
         ) : (
           <p className="text-sm text-muted-foreground">{t('notWrittenYet')}</p>

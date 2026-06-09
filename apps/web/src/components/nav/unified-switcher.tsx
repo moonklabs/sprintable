@@ -124,10 +124,13 @@ export function UnifiedSwitcher({
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ org_id: nextOrgId }),
       });
-      if (res.ok) {
+      // 0746aab9: 200이어도 실제 전환 성공(data.ok) 여부를 확인하고 refresh — 단순 res.ok만 보면
+      // 200-but-실패 케이스가 성공으로 오인돼 전환 깨진 화면이 무에러로 뜬다.
+      const json = await res.json().catch(() => null) as { data?: { ok?: boolean } } | null;
+      if (res.ok && json?.data?.ok) {
         router.refresh();
       } else {
-        setLocalOrgId(prevOrgId); // API 실패 시 롤백
+        setLocalOrgId(prevOrgId); // 실패(비-2xx 또는 data.ok 아님) 시 롤백
       }
     } finally {
       setPending(false);
@@ -221,7 +224,8 @@ export function UnifiedSwitcher({
                 <span className="truncate text-[10px] font-medium text-muted-foreground leading-tight">
                   {displayOrg}
                 </span>
-                {displayProject && (
+                {/* 0746: 전환 중에는 옛 org의 프로젝트명을 숨겨 "새 org + 옛 프로젝트" 깜빡임(leak처럼 보임)을 차단 */}
+                {!pending && displayProject && (
                   <span className="truncate text-xs font-semibold text-foreground leading-tight">
                     {displayProject}
                   </span>

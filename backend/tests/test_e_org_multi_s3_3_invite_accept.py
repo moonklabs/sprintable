@@ -267,3 +267,52 @@ def test_accept_checks_email_mismatch_in_source():
     source = inspect.getsource(OrgInviteRepository.accept)
     assert "email_mismatch" in source
     assert "email" in source
+
+
+# ─── 버그(선생님 발견): same-invitee 재수락 멱등 ──────────────────────────────
+
+def _accepted_invite(email: str = "invited@example.com") -> MagicMock:
+    inv = MagicMock()
+    inv.status = "accepted"
+    inv.email = email
+    inv.organization_id = ORG_ID
+    inv.role = "member"
+    return inv
+
+
+@pytest.mark.anyio
+async def test_accept_same_invitee_already_accepted_is_idempotent_success():
+    """같은 초대받은이가 재수락(더블클릭/재방문/back) 시 409가 아니라 멱등 성공(이미 멤버)
+    → FE가 /dashboard로 보낼 수 있다. (선생님 발견 'Invite already accepted' 버그 근본 fix)"""
+    from app.repositories.org_invite import OrgInviteRepository
+
+    sel = MagicMock()
+    sel.scalar_one_or_none.return_value = _accepted_invite("invited@example.com")
+    session = AsyncMock()
+    session.execute = AsyncMock(return_value=sel)
+    session.flush = AsyncMock()
+
+    repo = OrgInviteRepository(session)
+    out = await repo.accept(token=TOKEN, user_id=USER_ID, user_email="Invited@Example.com")  # 대소문자 무관
+
+    assert out["ok"] is True
+    assert out.get("already_member") is True
+    assert out["org_id"] == str(ORG_ID)
+    assert out["role"] == "member"
+
+
+@pytest.mark.anyio
+async def test_accept_different_user_already_accepted_still_rejected():
+    """다른 유저가 이미 소비된 초대를 수락 시도 → already_accepted 유지(멱등 성공 아님)."""
+    from app.repositories.org_invite import OrgInviteRepository
+
+    sel = MagicMock()
+    sel.scalar_one_or_none.return_value = _accepted_invite("invited@example.com")
+    session = AsyncMock()
+    session.execute = AsyncMock(return_value=sel)
+
+    repo = OrgInviteRepository(session)
+    out = await repo.accept(token=TOKEN, user_id=uuid.uuid4(), user_email="someone-else@example.com")
+
+    assert out["ok"] is False
+    assert out["reason"] == "already_accepted"

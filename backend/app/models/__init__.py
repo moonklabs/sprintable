@@ -15,7 +15,6 @@ from app.models.policy_document import PolicyDocument
 from app.models.audit import AuditLog
 from app.models.webhook_config import WebhookConfig
 from app.models.doc import Doc
-from app.models.invitation import Invitation
 from app.models.meeting import Meeting
 from app.models.conversation import Conversation, ConversationMessage, ConversationParticipant
 from app.models.conversation_webhook_delivery import ConversationWebhookDelivery
@@ -23,6 +22,7 @@ from app.models.notification import InboxItem, Notification, NotificationSetting
 from app.models.notification_preference import NotificationPreference
 from app.models.organization import Organization
 from app.models.pm import Epic, Sprint, Story, Task
+from app.models.story_assignee import StoryAssignee
 from app.models.project import OrgMember, Project
 from app.models.project_setting import ProjectSetting
 from app.models.retro import RetroAction, RetroItem, RetroSession, RetroVote
@@ -62,7 +62,6 @@ __all__ = [
     "Doc",
     "Epic",
     "InboxItem",
-    "Invitation",
     "Meeting",
     "Notification",
     "Conversation",
@@ -86,6 +85,7 @@ __all__ = [
     "StandupEntry",
     "StandupFeedback",
     "Story",
+    "StoryAssignee",
     "Task",
     "TeamMember",
     "LoginAuditLog",

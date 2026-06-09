@@ -95,6 +95,26 @@ async def mark_all_read(
     return {"ok": True}
 
 
+@router.patch("/notifications/{id}/read", response_model=NotificationResponse, status_code=200)
+async def mark_read(
+    id: uuid.UUID,
+    db: AsyncSession = Depends(get_db),
+    auth: AuthContext = Depends(get_current_user),
+    repo: NotificationRepository = Depends(_notif_repo),
+) -> NotificationResponse:
+    """PATCH /api/v2/notifications/{id}/read — 단일 알림 읽음 처리(본인 것만).
+
+    48de882a: Inbox 클릭 시 FE(ApiNotificationRepository.markRead)가 이 경로를 호출하는데
+    BE 에 단일 read 엔드포인트가 없어(mark-all-read 만 존재) 실패하던 것을 보강. mark-all-read
+    와 동일 시스템(NotificationRepository)·user_id 소유자 스코프.
+    """
+    user_id = await _resolve_notification_user_id(auth, db)
+    notif = await repo.mark_read(id, user_id)
+    if notif is None:
+        raise HTTPException(status_code=404, detail="Notification not found")
+    return NotificationResponse.model_validate(notif)
+
+
 @router.get("/notification-settings", response_model=list[NotificationSettingResponse])
 async def get_notification_settings(
     member_id: uuid.UUID = Query(...),

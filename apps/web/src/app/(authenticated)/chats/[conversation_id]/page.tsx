@@ -12,6 +12,9 @@ interface Participant {
   member_id: string;
   name: string | null;
   avatar_url?: string | null;
+  type?: string;
+  // S8b: list participants 직렬화에 runtime_type 노출(미머지 시 필드 부재=undefined → #2 경고 미표시 graceful).
+  runtime_type?: string | null;
 }
 
 interface ConversationMeta {
@@ -75,6 +78,12 @@ export default function ConversationPage() {
     ? formatHeaderTitle(meta, currentTeamMemberId)
     : (meta === null ? '채팅' : '로딩 중…');
 
+  // S8 #2: pre-send capability 경고 대상 = 에이전트 participant(본인 제외)·runtime_type 필드 존재시만.
+  // (S8b 미머지 → runtime_type undefined → commandTargets 빈 배열 → 경고 미표시 graceful.)
+  const commandTargets = (meta?.participants ?? [])
+    .filter((p) => p.type === 'agent' && p.member_id !== currentTeamMemberId && p.runtime_type !== undefined)
+    .map((p) => ({ agentId: p.member_id, agentName: p.name ?? '?', runtimeType: p.runtime_type ?? null }));
+
   return (
     <>
       <TopBarSlot
@@ -116,6 +125,7 @@ export default function ConversationPage() {
           projectId={projectId}
           apiPrefix="/api/conversations"
           backRoute="/chats"
+          commandTargets={commandTargets}
         />
       </div>
 

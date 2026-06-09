@@ -21,6 +21,77 @@ from app.models.webhook_config import WebhookConfig
 logger = logging.getLogger(__name__)
 
 
+async def _deliver_personal_webhooks(
+    db: AsyncSession,
+    org_id: uuid.UUID,
+    member_ids: list[uuid.UUID],
+    *,
+    title: str,
+    body: str | None,
+    event_type: str,
+) -> None:
+    """96af343e: 활성 개인(member-scoped) WebhookConfig 보유 휴먼에게 알림 webhook POST.
+
+    in-app Notification 과 동일 flush 타이밍(best-effort·옵션 C). global mute 멤버는 skip
+    (채널 막론 mute 우선). SSRF 검증·HMAC 서명·Discord URL 포맷·retry 는
+    dispatch_router._post_with_retry / app.core.ssrf 재사용. agent SSE 경로
+    (route_dispatch_event)는 미변경(무회귀). 개별 POST 실패는 swallow → in-app 무영향.
+    """
+    if not member_ids:
+        return
+    from app.core.ssrf import validate_webhook_url_async
+    from app.models.notification_preference import NotificationPreference
+    from app.services.dispatch_router import _post_with_retry
+
+    wh_rows = await db.execute(
+        select(WebhookConfig).where(
+            WebhookConfig.org_id == org_id,
+            WebhookConfig.member_id.in_(member_ids),
+            WebhookConfig.is_active.is_(True),
+            WebhookConfig.member_id.isnot(None),
+        )
+    )
+    configs = list(wh_rows.scalars().all())
+    if not configs:
+        return
+
+    # global mute 멤버 skip (CP②: 채널 막론 mute 우선)
+    muted_rows = await db.execute(
+        select(NotificationPreference.member_id).where(
+            NotificationPreference.member_id.in_([c.member_id for c in configs]),
+            NotificationPreference.scope_type == "global",
+            NotificationPreference.scope_id.is_(None),
+            NotificationPreference.level == "mute",
+        )
+    )
+    muted = {m for m in muted_rows.scalars().all()}
+
+    for cfg in configs:
+        if cfg.member_id in muted:
+            continue
+        # SSRF 재검증 (저장 후 DNS rebinding 방지)
+        try:
+            await validate_webhook_url_async(cfg.url)
+        except Exception:
+            logger.warning("personal webhook SSRF reject member=%s", cfg.member_id)
+            continue
+        is_discord = (
+            "discord.com/api/webhooks" in cfg.url
+            or "discordapp.com/api/webhooks" in cfg.url
+        )
+        if is_discord:
+            text = f"[{event_type}] {title}" + (f"\n{body}" if body else "")
+            payload = {"content": text}
+            secret = None  # Discord 자체 인증 방식
+        else:
+            payload = {"event": event_type, "title": title, "body": body}
+            secret = cfg.secret
+        try:
+            await _post_with_retry(cfg.url, payload, secret, str(cfg.member_id))
+        except Exception:
+            logger.warning("personal webhook POST failed (swallowed) member=%s", cfg.member_id)
+
+
 async def dispatch_notification(
     db: AsyncSession,
     *,
@@ -111,6 +182,19 @@ async def dispatch_notification(
                     SimpleNamespace(id=om.id, user_id=om.user_id, type="human", project_id=None)
                 )
 
+        # 회귀 버그 fix: team_members는 0088 이후 projection VIEW라 멤버당 **프로젝트별 1행**(동일 id)을
+        # 반환한다. dedup 없이 루프하면 멀티프로젝트 멤버에게 알림이 **프로젝트 수만큼 중복 생성**됨
+        # (Story Assign 시 Inbox 알림 3개 증상 = 담당자가 3개 프로젝트 소속). member id로 dedup해
+        # 멤버당 1 알림/이벤트만 생성. (view-cutover multi-row 트랩)
+        _seen_member_ids: set = set()
+        _deduped = []
+        for _m in members:
+            if _m.id in _seen_member_ids:
+                continue
+            _seen_member_ids.add(_m.id)
+            _deduped.append(_m)
+        members = _deduped
+
         inserted = False
         for member_row in members:
             if member_row.type == "agent":
@@ -176,6 +260,16 @@ async def dispatch_notification(
 
         if inserted:
             await db.flush()
+
+        # 96af343e (옵션 C): 휴먼 개인 webhook 발송 — in-app Notification 과 동일 flush 타이밍
+        # best-effort. 활성 member-scoped WebhookConfig 보유 휴먼만(agent SSE 경로 무관).
+        human_member_ids = [
+            m.id for m in members
+            if m.type != "agent" and getattr(m, "user_id", None)
+        ]
+        await _deliver_personal_webhooks(
+            db, org_id, human_member_ids, title=title, body=body, event_type=event_type
+        )
 
     except Exception:
         # BUG-1 수정: 에러 삼킴 제거 → 스택 트레이스 로깅

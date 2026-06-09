@@ -1,4 +1,5 @@
 import type { MetricDefinition, OutcomeResult } from '@sprintable/core-storage';
+import type { SendAttachment } from '@/hooks/use-chat-sse';
 
 export interface KanbanStory {
   id: string;
@@ -7,9 +8,12 @@ export interface KanbanStory {
   priority: string;
   story_points: number | null;
   assignee_id: string | null;
+  assignee_ids?: string[];
   epic_id: string | null;
   sprint_id: string | null;
   description: string | null;
+  acceptance_criteria: string | null;
+  attachments: SendAttachment[] | null;
   position: number | null;
   success_hypothesis: string | null;
   metric_definition: MetricDefinition | null;

@@ -5,9 +5,10 @@ import { useDashboardContext } from '@/app/dashboard/dashboard-shell';
 import Link from 'next/link';
 import { useRouter, useSearchParams } from 'next/navigation';
 import { useTranslations } from 'next-intl';
-import { BarChart2, Bell, Bot, Check, CreditCard, FolderKanban, GitBranch, Menu, Palette, Trash2, User, Users, X, Zap } from 'lucide-react';
+import { BarChart2, Bell, Bot, Check, CreditCard, FolderKanban, GitBranch, Menu, Palette, Plus, Trash2, User, Users, Webhook, X } from 'lucide-react';
 import { UsageDashboard } from '@/components/settings/usage-dashboard';
 import { OrgMembersSection } from '@/components/settings/org-members-section';
+import { AddMemberModal } from '@/components/settings/add-member-modal';
 import { ProjectAccessSection } from '@/components/settings/project-access-section';
 
 import { AiSettingsSection } from '@/components/settings/ai-settings';
@@ -52,7 +53,9 @@ interface NotificationSetting {
 
 interface WebhookConfig {
   id: string;
+  member_id: string;
   url: string;
+  is_active: boolean;
   project_id: string | null;
   projects?: { name: string };
 }
@@ -110,13 +113,24 @@ function isWebhookUrlAllowed(url: string): boolean {
   return /^http:\/\/(localhost|127\.\d+\.\d+\.\d+|192\.168\.\d+\.\d+|10\.\d+\.\d+\.\d+|172\.(1[6-9]|2\d|3[01])\.\d+\.\d+)/i.test(url);
 }
 
+// E-SETTINGS-IA: deprecate(숨김)된 settings 탭. 컴포넌트/route는 보존(reversible) —
+// 탭 트리거·콘텐츠·딥링크(?tab=)만 차단한다. 재노출 시 이 set에서 제거만 하면 IA 위치 복원.
+const HIDDEN_SETTINGS_TABS = new Set<string>(['ai', 'workflow']);
+const DEFAULT_SETTINGS_TAB = 'profile';
+
+// ?tab= 딥링크가 숨김 탭을 가리키면 기본 탭으로 폴백 (빈 화면 방지).
+function resolveSettingsTab(tab: string | null): string {
+  if (!tab || HIDDEN_SETTINGS_TABS.has(tab)) return DEFAULT_SETTINGS_TAB;
+  return tab;
+}
+
 export default function SettingsPage() {
   const t = useTranslations('settings');
   const tc = useTranslations('common');
   const router = useRouter();
   const searchParamsHook = useSearchParams();
   const { orgId: ctxOrgId, orgMemberships } = useDashboardContext();
-  const [activeTab, setActiveTab] = useState(() => searchParamsHook.get('tab') ?? 'profile');
+  const [activeTab, setActiveTab] = useState(() => resolveSettingsTab(searchParamsHook.get('tab')));
   const [lnbOpen, setLnbOpen] = useState(false);
   const { toasts, addToast, dismissToast } = useToast();
 
@@ -127,7 +141,7 @@ export default function SettingsPage() {
 
   useEffect(() => {
     const tab = searchParamsHook.get('tab');
-    if (tab) setActiveTab(tab);
+    if (tab) setActiveTab(resolveSettingsTab(tab));
   }, [searchParamsHook]);
 
   const [orgId, setOrgId] = useState<string | null>(null);
@@ -149,8 +163,6 @@ export default function SettingsPage() {
   const [webhooks, setWebhooks] = useState<WebhookConfig[]>([]);
   const [projects, setProjects] = useState<ProjectOption[]>([]);
   const [createdProjectMembership, setCreatedProjectMembership] = useState<{ projectId: string; projectName: string } | null>(null);
-  const [newWebhookUrl, setNewWebhookUrl] = useState('');
-  const [newWebhookProjectId, setNewWebhookProjectId] = useState('');
   const [newProjectName, setNewProjectName] = useState('');
   const [newProjectDescription, setNewProjectDescription] = useState('');
   const [creatingProject, setCreatingProject] = useState(false);
@@ -183,6 +195,7 @@ export default function SettingsPage() {
   const [resendResult, setResendResult] = useState<{ id: string; url: string } | null>(null);
   const [graceUntil, setGraceUntil] = useState<string | null>(null);
   const [membersSubTab, setMembersSubTab] = useState<'people' | 'agents'>('people');
+  const [addMemberOpen, setAddMemberOpen] = useState(false); // 7363ec8a: 통합 "+멤버 추가" 모달
   const [orgAgents, setOrgAgents] = useState<ProjectMember[]>([]);
   const [newAgentName, setNewAgentName] = useState('');
   const [newAgentProjectId, setNewAgentProjectId] = useState('');
@@ -273,7 +286,8 @@ export default function SettingsPage() {
   };
 
   const refreshInvitations = async () => {
-    const res = await fetch('/api/invitations');
+    if (!orgId) return; // d3619e80: org_invites canonical(레거시 /api/invitations 폐기).
+    const res = await fetch(`/api/organizations/${orgId}/invites`);
     if (res.ok) {
       const json = await res.json();
       setInvitations(json.data ?? []);
@@ -286,9 +300,10 @@ export default function SettingsPage() {
   };
 
   const handleRevokeInvite = async (inviteId: string) => {
+    if (!orgId) return;
     setRevokingInviteId(inviteId);
     try {
-      const res = await fetch(`/api/invitations/${inviteId}`, { method: 'DELETE' });
+      const res = await fetch(`/api/organizations/${orgId}/invites/${inviteId}`, { method: 'DELETE' });
       if (res.ok) await refreshInvitations();
     } finally {
       setRevokingInviteId(null);
@@ -296,10 +311,11 @@ export default function SettingsPage() {
   };
 
   const handleResendInvite = async (inviteId: string) => {
+    if (!orgId) return;
     setResendingInviteId(inviteId);
     setResendResult(null);
     try {
-      const res = await fetch(`/api/invitations/${inviteId}/resend`, { method: 'POST' });
+      const res = await fetch(`/api/organizations/${orgId}/invites/${inviteId}/resend`, { method: 'POST' });
       if (res.ok) {
         const json = await res.json();
         setResendResult({ id: inviteId, url: json.data?.invite_url ?? '' });
@@ -418,60 +434,64 @@ export default function SettingsPage() {
         setAdminChecked(true);
       }
 
-      // Get current project
-      const projectRes = await fetch('/api/current-project');
-      if (projectRes.ok) {
-        const projectJson = await projectRes.json();
-        const projectId = projectJson?.data?.project_id ?? null;
-        const orgId = projectJson?.data?.org_id ?? null;
-        setCurrentProjectId(projectId);
-        setOrgId(orgId);
+      // Get current project — current-project 실패/예외와 무관하게 loading은 finally에서 해소(무한 스켈레톤 방지).
+      // (fresh signup 직후 org_id 없는 JWT → /current-project 실패 시 setLoading(false) 미호출되던 결함)
+      try {
+        const projectRes = await fetch('/api/current-project');
+        if (projectRes.ok) {
+          const projectJson = await projectRes.json();
+          const projectId = projectJson?.data?.project_id ?? null;
+          const orgId = projectJson?.data?.org_id ?? null;
+          setCurrentProjectId(projectId);
+          setOrgId(orgId);
 
-        // org 상세 정보 로드 — list API에서 orgId로 필터 (단건 API 미구현)
-        if (orgId) {
-          const orgListRes = await fetch('/api/organizations').catch(() => null);
-          if (orgListRes?.ok) {
-            const orgListJson = await orgListRes.json() as { data?: Array<{ id: string; name: string; slug: string; plan?: string; role?: string }> };
-            const found = (orgListJson.data ?? []).find((o) => o.id === orgId);
-            if (found) {
-              setOrgInfo(found);
-              setEditOrgName(found.name);
+          // org 상세 정보 로드 — list API에서 orgId로 필터 (단건 API 미구현)
+          if (orgId) {
+            const orgListRes = await fetch('/api/organizations').catch(() => null);
+            if (orgListRes?.ok) {
+              const orgListJson = await orgListRes.json() as { data?: Array<{ id: string; name: string; slug: string; plan?: string; role?: string }> };
+              const found = (orgListJson.data ?? []).find((o) => o.id === orgId);
+              if (found) {
+                setOrgInfo(found);
+                setEditOrgName(found.name);
+              }
             }
           }
-        }
 
-        // Get notification settings
-        const settingsRes = await fetch('/api/notification-settings');
-        if (settingsRes.ok) {
-          const settingsJson = await settingsRes.json();
-          setSettings(settingsJson.data ?? []);
+          // Get notification settings
+          const settingsRes = await fetch('/api/notification-settings');
+          if (settingsRes.ok) {
+            const settingsJson = await settingsRes.json();
+            setSettings(settingsJson.data ?? []);
+          }
+
+          // Get webhook configs
+          const webhookRes = await fetch('/api/webhooks/config');
+          if (webhookRes.ok) {
+            const webhookJson = await webhookRes.json();
+            setWebhooks(webhookJson.data ?? []);
+          }
         }
+      } finally {
         setLoading(false);
-
-        // Get webhook configs
-        const webhookRes = await fetch('/api/webhooks/config');
-        if (webhookRes.ok) {
-          const webhookJson = await webhookRes.json();
-          setWebhooks(webhookJson.data ?? []);
-        }
       }
     }
 
-    void loadContext().catch(() => {});
+    void loadContext().catch((err) => { console.error('설정 컨텍스트 로드 실패', err); });
 
-    void refreshProjects().catch(() => {});
+    void refreshProjects().catch((err) => { console.error('프로젝트 목록 로드 실패', err); });
 
-    void refreshInvitations().catch(() => {});
+    void refreshInvitations().catch((err) => { console.error('초대 목록 로드 실패', err); });
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [currentProjectId, orgId]);
 
   useEffect(() => {
     if (!memberProjectId) return;
-    void refreshMemberData(memberProjectId).catch(() => {});
+    void refreshMemberData(memberProjectId).catch((err) => { console.error('멤버 데이터 로드 실패', err); });
   }, [memberProjectId]);
 
   useEffect(() => {
-    void refreshOrgAgents().catch(() => {});
+    void refreshOrgAgents().catch((err) => { console.error('조직 에이전트 로드 실패', err); });
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
@@ -628,12 +648,11 @@ export default function SettingsPage() {
     });
     setInviteProjectId(project.id);
     setMemberProjectId(project.id);
-    setNewWebhookProjectId(project.id);
     setNewProjectName('');
     setNewProjectDescription('');
     setProjectActionMessage({ type: 'success', text: t('projectCreated', { name: project.name }) });
 
-    await refreshProjects().catch(() => {});
+    await refreshProjects().catch((err) => { console.error('프로젝트 생성 후 목록 갱신 실패', err); });
     router.refresh();
     setCreatingProject(false);
   };
@@ -697,23 +716,33 @@ export default function SettingsPage() {
     }
     setWebhookErrors((prev) => ({ ...prev, [memberId]: '' }));
     setWebhookSaving(memberId);
-    const prevMembers = projectMembers;
-    setProjectMembers((prev) => prev.map((m) => m.id === memberId ? { ...m, webhook_url: url || null } : m));
     try {
-      const res = await fetch(`/api/team-members/${memberId}`, {
-        method: 'PATCH',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ webhook_url: url || null }),
-      });
-      if (!res.ok) {
-        setProjectMembers(prevMembers);
-        const json = await res.json().catch(() => ({})) as { error?: { message?: string } };
-        setWebhookErrors((prev) => ({ ...prev, [memberId]: json.error?.message ?? 'Webhook URL 저장 실패' }));
+      // 1bc9fbae/선생님 webhook-save fix: 휴먼 webhook도 canonical webhook_configs(member_id)에 write.
+      // 기존 team_member.webhook_url PATCH는 apply_anchor_update가 agent profile로 오라우팅→휴먼 drop +
+      // dispatch가 webhook_configs만 read라 미발송. 에이전트와 동일 store로 통일(persist AND 발송).
+      if (!url) {
+        // 비우기 = 기존 config DELETE(by id).
+        const existing = webhooks.find((w) => w.member_id === memberId);
+        if (existing) {
+          await fetch(`/api/webhooks/config?id=${encodeURIComponent(existing.id)}`, { method: 'DELETE' });
+        }
       } else {
-        setWebhookEditing((prev) => { const next = { ...prev }; delete next[memberId]; return next; });
+        const res = await fetch('/api/webhooks/config', {
+          method: 'PUT',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ member_id: memberId, url, project_id: currentProjectId, is_active: true }),
+        });
+        if (!res.ok) {
+          const json = await res.json().catch(() => ({})) as { error?: { message?: string } };
+          setWebhookErrors((prev) => ({ ...prev, [memberId]: json.error?.message ?? 'Webhook URL 저장 실패' }));
+          return;
+        }
       }
+      setWebhookEditing((prev) => { const next = { ...prev }; delete next[memberId]; return next; });
+      // webhook_configs 갱신 — status 배지(is_active) 정합.
+      const refresh = await fetch('/api/webhooks/config');
+      if (refresh.ok) { const j = await refresh.json() as { data?: WebhookConfig[] }; setWebhooks(j.data ?? []); }
     } catch {
-      setProjectMembers(prevMembers);
       setWebhookErrors((prev) => ({ ...prev, [memberId]: '네트워크 오류 — 다시 시도하세요.' }));
     } finally {
       setWebhookSaving(null);
@@ -766,7 +795,7 @@ export default function SettingsPage() {
             </TabsTrigger>
 
             <span className="px-2 pb-1 pt-4 text-[10px] font-medium uppercase tracking-wider text-muted-foreground/70">{t('projectSettings')}</span>
-            {currentProjectId ? (
+            {currentProjectId && !HIDDEN_SETTINGS_TABS.has('ai') ? (
               <TabsTrigger value="ai">
                 <Bot className="h-4 w-4" />
                 {t('tabAiAgents')}
@@ -778,7 +807,7 @@ export default function SettingsPage() {
                 {t('tabMembers')}
               </TabsTrigger>
             ) : null}
-            {adminChecked && isAdmin ? (
+            {adminChecked && isAdmin && !HIDDEN_SETTINGS_TABS.has('workflow') ? (
               <TabsTrigger value="workflow">
                 <GitBranch className="h-4 w-4" />
                 {t('tabWorkflow')}
@@ -800,12 +829,7 @@ export default function SettingsPage() {
                   <FolderKanban className="h-4 w-4" />
                   {t('tabProjects')}
                 </TabsTrigger>
-                {isAdmin ? (
-                  <TabsTrigger value="webhooks">
-                    <Zap className="h-4 w-4" />
-                    {t('tabWebhooks')}
-                  </TabsTrigger>
-                ) : null}
+                {/* 7519c3ea: flat webhooks 탭 폐기 — webhook은 멤버/에이전트 관리(members)에 inline 통합. */}
               </>
             ) : null}
 
@@ -1007,17 +1031,21 @@ export default function SettingsPage() {
               </div>
             </TabsContent>
 
-            <TabsContent value="ai">
-              <div className="space-y-6">
-                {currentProjectId ? (
-                  <>
-                    <AiSettingsSection projectId={currentProjectId} />
-                    <McpConnectionSettings projectId={currentProjectId} />
-                    <ByomKeyManagement projectId={currentProjectId} />
-                  </>
-                ) : null}
-              </div>
-            </TabsContent>
+            {/* E-SETTINGS-IA: deprecate 숨김. activeTab은 resolveSettingsTab로 'ai' 도달 불가지만,
+                content도 gate off하여 딥링크/forceMount 어떤 경로로도 렌더 안 되게 한다. 컴포넌트는 보존. */}
+            {!HIDDEN_SETTINGS_TABS.has('ai') ? (
+              <TabsContent value="ai">
+                <div className="space-y-6">
+                  {currentProjectId ? (
+                    <>
+                      <AiSettingsSection projectId={currentProjectId} />
+                      <McpConnectionSettings projectId={currentProjectId} />
+                      <ByomKeyManagement projectId={currentProjectId} />
+                    </>
+                  ) : null}
+                </div>
+              </TabsContent>
+            ) : null}
 
             <TabsContent value="organization">
               <SectionCard>
@@ -1226,22 +1254,29 @@ export default function SettingsPage() {
             </TabsContent>
 
             <TabsContent value="members">
-              {/* People / Agents 서브탭 */}
-              <div className="mb-6 flex gap-1 rounded-lg border border-border bg-muted/30 p-1">
-                <button
-                  type="button"
-                  onClick={() => setMembersSubTab('people')}
-                  className={`flex-1 rounded-md px-3 py-1.5 text-sm font-medium transition-colors ${membersSubTab === 'people' ? 'bg-background text-foreground shadow-sm' : 'text-muted-foreground hover:text-foreground'}`}
-                >
-                  {t('membersTabPeople')}
-                </button>
-                <button
-                  type="button"
-                  onClick={() => setMembersSubTab('agents')}
-                  className={`flex-1 rounded-md px-3 py-1.5 text-sm font-medium transition-colors ${membersSubTab === 'agents' ? 'bg-background text-foreground shadow-sm' : 'text-muted-foreground hover:text-foreground'}`}
-                >
-                  {t('membersTabAgents')}
-                </button>
+              {/* 7363ec8a: People/Agents 공통 헤더 — 서브탭 토글 + "+멤버 추가" 단일 진입(분산 해소). */}
+              <div className="mb-6 flex items-center gap-3">
+                <div className="flex flex-1 gap-1 rounded-lg border border-border bg-muted/30 p-1">
+                  <button
+                    type="button"
+                    onClick={() => setMembersSubTab('people')}
+                    className={`flex-1 rounded-md px-3 py-1.5 text-sm font-medium transition-colors ${membersSubTab === 'people' ? 'bg-background text-foreground shadow-sm' : 'text-muted-foreground hover:text-foreground'}`}
+                  >
+                    {t('membersTabPeople')}
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setMembersSubTab('agents')}
+                    className={`flex-1 rounded-md px-3 py-1.5 text-sm font-medium transition-colors ${membersSubTab === 'agents' ? 'bg-background text-foreground shadow-sm' : 'text-muted-foreground hover:text-foreground'}`}
+                  >
+                    {t('membersTabAgents')}
+                  </button>
+                </div>
+                {isAdmin ? (
+                  <Button variant="hero" size="sm" className="shrink-0 gap-1.5" onClick={() => setAddMemberOpen(true)}>
+                    <Plus className="size-3.5" /> {t('addMember')}
+                  </Button>
+                ) : null}
               </div>
 
               {membersSubTab === 'agents' ? (
@@ -1305,6 +1340,11 @@ export default function SettingsPage() {
                         <div className="space-y-2">
                           {orgAgents.map((agent) => {
                             const projectName = projects.find((p) => p.id === agent.project_id)?.name ?? agent.project_id;
+                            // 7519c3ea: webhook discoverability — 행에 status 한눈에(편집은 detail editor 링크=이름).
+                            const agentWebhook = webhooks.find((w) => w.member_id === agent.id);
+                            const webhookStatus: 'active' | 'inactive' | 'empty' = !agentWebhook?.url
+                              ? 'empty'
+                              : !agentWebhook.is_active ? 'inactive' : 'active';
                             return (
                               <div key={agent.id} className="flex items-center justify-between gap-3 rounded-md border border-border bg-muted/30 px-3 py-3 text-sm">
                                 <div className="min-w-0">
@@ -1313,6 +1353,10 @@ export default function SettingsPage() {
                                     <Badge variant="secondary">{t('agentMember')}</Badge>
                                     <Badge variant="outline">{agent.role}</Badge>
                                     <Badge variant="info">SSE</Badge>
+                                    <Badge variant={webhookStatus === 'active' ? 'success' : webhookStatus === 'inactive' ? 'secondary' : 'outline'} className="gap-1">
+                                      <Webhook className="size-3" aria-hidden />
+                                      {webhookStatus === 'active' ? t('webhookStatusActive') : webhookStatus === 'inactive' ? t('webhookStatusInactive') : t('webhookStatusEmpty')}
+                                    </Badge>
                                     {agent.fakechat_port ? <span className="font-mono text-[11px] text-muted-foreground">:{agent.fakechat_port}</span> : null}
                                     <span className="text-xs text-muted-foreground">{projectName}</span>
                                     {currentUserId && agent.created_by === currentUserId ? <Badge variant="outline" className="border-primary/40 text-primary text-[10px]">{t('agentOwner')}</Badge> : null}
@@ -1369,10 +1413,61 @@ export default function SettingsPage() {
               ) : (
               <div>
                 {currentProjectId ? (
-                  <ProjectAccessSection
-                    projectId={currentProjectId}
-                    currentRole={currentOrgRole}
-                  />
+                  <div className="space-y-6">
+                    <ProjectAccessSection
+                      projectId={currentProjectId}
+                      currentRole={currentOrgRole}
+                    />
+                    {/* 7519c3ea: 팀원 webhook inline — flat 탭 폐기분을 멤버별 surface(handleSaveWebhookUrl 재사용·status 한눈에). */}
+                    <SectionCard>
+                      <SectionCardHeader>
+                        <div className="space-y-1">
+                          <h2 className="text-base font-semibold text-foreground">{t('webhooks')}</h2>
+                          <p className="text-sm text-muted-foreground">{t('webhookDescription')}</p>
+                        </div>
+                      </SectionCardHeader>
+                      <SectionCardBody className="space-y-2">
+                        {projectMembers.filter((m) => m.type === 'human').map((member) => {
+                          // 휴먼 webhook도 canonical webhook_configs(member_id) 기준 — 에이전트와 통일.
+                          const config = webhooks.find((w) => w.member_id === member.id);
+                          const draft = webhookEditing[member.id] ?? config?.url ?? '';
+                          const webhookStatus: 'active' | 'inactive' | 'empty' = !config?.url
+                            ? 'empty'
+                            : config.is_active ? 'active' : 'inactive';
+                          const err = webhookErrors[member.id];
+                          return (
+                            <div key={member.id} className="rounded-md border border-border bg-muted/30 px-3 py-3">
+                              <div className="flex flex-wrap items-center gap-2">
+                                <span className="min-w-0 flex-1 truncate text-sm font-medium text-foreground">{member.name}</span>
+                                <Badge variant={webhookStatus === 'active' ? 'success' : webhookStatus === 'inactive' ? 'secondary' : 'outline'} className="gap-1">
+                                  <Webhook className="size-3" aria-hidden />
+                                  {webhookStatus === 'active' ? t('webhookStatusActive') : webhookStatus === 'inactive' ? t('webhookStatusInactive') : t('webhookStatusEmpty')}
+                                </Badge>
+                              </div>
+                              <div className="mt-2 flex flex-wrap items-center gap-2">
+                                <OperatorInput
+                                  type="url"
+                                  value={draft}
+                                  onChange={(e) => setWebhookEditing((prev) => ({ ...prev, [member.id]: e.target.value }))}
+                                  placeholder={t('webhookUrlPlaceholder')}
+                                  className="min-w-0 flex-1 font-mono text-xs"
+                                />
+                                <Button
+                                  variant="hero"
+                                  size="sm"
+                                  onClick={() => void handleSaveWebhookUrl(member.id)}
+                                  disabled={webhookSaving === member.id}
+                                >
+                                  {webhookSaving === member.id ? '...' : tc('save')}
+                                </Button>
+                              </div>
+                              {err ? <p className="mt-1 text-xs text-destructive">{err}</p> : null}
+                            </div>
+                          );
+                        })}
+                      </SectionCardBody>
+                    </SectionCard>
+                  </div>
                 ) : (
                   <p className="text-sm text-muted-foreground">프로젝트를 선택해주세요.</p>
                 )}
@@ -1380,67 +1475,9 @@ export default function SettingsPage() {
               )}
             </TabsContent>
 
-            {adminChecked && isAdmin ? (
-            <TabsContent value="webhooks">
-              <SectionCard>
-                <SectionCardHeader>
-                  <div className="space-y-1">
-                    <h2 className="text-base font-semibold text-foreground">{t('webhooks')}</h2>
-                    <p className="text-sm text-muted-foreground">{t('webhookDescription')}</p>
-                  </div>
-                </SectionCardHeader>
-                <SectionCardBody className="space-y-4">
-                  <div className="space-y-2">
-                    {webhooks.map((webhook) => (
-                      <div key={webhook.id} className="flex items-center justify-between gap-3 rounded-md border border-border bg-muted/30 px-3 py-3 text-xs">
-                        <span className="truncate text-foreground">{webhook.url}</span>
-                        <span className="shrink-0 text-muted-foreground">{webhook.projects?.name ?? t('defaultWebhook')}</span>
-                      </div>
-                    ))}
-                  </div>
-                  <div className="grid gap-3 md:grid-cols-[minmax(0,1fr)_220px_auto]">
-                    <OperatorInput
-                      type="url"
-                      value={newWebhookUrl}
-                      onChange={(e) => setNewWebhookUrl(e.target.value)}
-                      placeholder={t('webhookUrlPlaceholder')}
-                    />
-                    <OperatorDropdownSelect
-                      value={newWebhookProjectId}
-                      onValueChange={(v) => setNewWebhookProjectId(v)}
-                      options={[
-                        { value: '', label: t('defaultWebhook') },
-                        ...projects.map((project) => ({ value: project.id, label: project.name })),
-                      ]}
-                    />
-                    <Button
-                      variant="hero"
-                      size="lg"
-                      onClick={async () => {
-                        if (!newWebhookUrl.trim()) return;
-                        await fetch('/api/webhooks/config', {
-                          method: 'PUT',
-                          headers: { 'Content-Type': 'application/json' },
-                          body: JSON.stringify({ url: newWebhookUrl.trim(), project_id: newWebhookProjectId || null }),
-                        });
-                        setNewWebhookUrl('');
-                        setNewWebhookProjectId('');
-                        const res = await fetch('/api/webhooks/config');
-                        if (res.ok) {
-                          const j = await res.json();
-                          setWebhooks(j.data ?? []);
-                        }
-                      }}
-                    >
-                      {tc('save')}
-                    </Button>
-                  </div>
-                </SectionCardBody>
-              </SectionCard>
-            </TabsContent>
-            ) : null}
 
-            {adminChecked && isAdmin ? (
+            {/* E-SETTINGS-IA S2: deprecate 숨김. set 확장으로 trigger·content·딥링크(resolveSettingsTab) 일괄 차단. 컴포넌트 보존. */}
+            {adminChecked && isAdmin && !HIDDEN_SETTINGS_TABS.has('workflow') ? (
             <TabsContent value="workflow">
               <div className="space-y-6">
                 <WorkflowTriggerTypesSection />
@@ -1474,9 +1511,13 @@ export default function SettingsPage() {
                         if (res.ok) {
                           const json = await res.json() as { data: { portalUrl: string } };
                           window.open(json.data.portalUrl, '_blank');
+                        } else {
+                          addToast({ type: 'error', title: t('billingPortalError') });
                         }
-                      } catch {
-                        // noop
+                      } catch (err) {
+                        // 사용자 액션(결제 포털)인데 조용히 실패하면 버튼이 무반응처럼 보인다 — 안내.
+                        console.error('결제 포털 열기 실패', err);
+                        addToast({ type: 'error', title: t('billingPortalError') });
                       }
                     }}
                   >
@@ -1640,6 +1681,19 @@ export default function SettingsPage() {
             </div>
           </div>
         </div>
+      ) : null}
+      {orgId ? (
+        <AddMemberModal
+          open={addMemberOpen}
+          onClose={() => setAddMemberOpen(false)}
+          orgId={orgId}
+          projects={projects.map((p) => ({ id: p.id, name: p.name }))}
+          defaultType={membersSubTab === 'agents' ? 'agent' : 'human'}
+          onAdded={(type, message) => {
+            addToast({ type: 'success', title: message });
+            if (type === 'agent') void refreshOrgAgents();
+          }}
+        />
       ) : null}
       <ToastContainer toasts={toasts} onDismiss={dismissToast} />
     </>

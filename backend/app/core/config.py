@@ -15,6 +15,24 @@ class Settings(BaseSettings):
     cloud_sql_instance_dev: str = "sprintable-494803:asia-northeast3:sprintable-dev"
     cloud_sql_instance_prod: str = "sprintable-494803:asia-northeast3:sprintable-prod"
 
+    # E-INFRA S2: DB 커넥션 풀 right-size (env DB_POOL_SIZE / DB_MAX_OVERFLOW로 override).
+    # 산식: (maxScale × (pool_size + max_overflow)) + admin/migration headroom ≤ max_connections.
+    #   prod(sprintable-prod db-g1-small, max_connections=100, maxScale=10):
+    #     10 × (5 + 3) = 80  + ~20 headroom(superuser_reserved 3 + migrate-prod 잡 + 수동 admin) = 100 ✓
+    #   dev(maxScale=3): 3 × (5+3)=24 로 여유 큼 — 필요 시 env로 상향(예 10/20) 독립 right-size.
+    # ⚠️ --concurrency=80(인스턴스당 동시 HTTP 요청)과 별개: 풀은 **DB op 점유 구간만** 커넥션을 잡고
+    #    즉시 반납하므로 80 동시요청 ≠ 80 커넥션. pool+overflow 초과분은 pool_timeout 대기(실패 아님).
+    db_pool_size: int = 5
+    db_max_overflow: int = 3
+
+    # PgBouncer ④: 사이드카(localhost:6432·pool_mode=transaction) 경유 여부(env DB_PGBOUNCER).
+    # off(기본): 직접 Cloud SQL — 현 동작 100% 유지(사이드카 없어도 다운 X).
+    # on: statement_cache 비활성(pooled conn 간 prepared statement reuse 깨짐 방지) +
+    #     app-side pool 최소화(PgBouncer default_pool_size가 실 풀 역할).
+    db_pgbouncer: bool = False
+    db_pgbouncer_pool_size: int = 2  # flag on 時 app-side pool(PgBouncer가 실 풀)
+    db_pgbouncer_max_overflow: int = 1
+
     # JWT
     jwt_secret: str = ""
 

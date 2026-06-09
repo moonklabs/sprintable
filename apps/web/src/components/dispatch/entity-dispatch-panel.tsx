@@ -1,6 +1,7 @@
 'use client';
 
 import { useCallback, useEffect, useRef, useState } from 'react';
+import { useTranslations } from 'next-intl';
 import { MoreHorizontal, Zap } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { ToastContainer, useToast } from '@/components/ui/toast';
@@ -35,6 +36,9 @@ export function EntityDispatchPanel({
   const [moreOpen, setMoreOpen] = useState(false);
   const moreRef = useRef<HTMLDivElement>(null);
   const { toasts, addToast, dismissToast } = useToast();
+  const t = useTranslations('board');
+  // f5ae74e4: Dispatch(이벤트 전달)를 Kickoff(킥오프·워크플로우 규칙)와 라벨·툴팁으로 명확히 구분.
+  const dispatchTitle = !assigneeId ? t('dispatchNeedsAssignee') : t('dispatchTooltip');
 
   useEffect(() => {
     if (!moreOpen) return;
@@ -52,7 +56,7 @@ export function EntityDispatchPanel({
   }, [moreOpen]);
 
   useEffect(() => {
-    fetch(`/api/team-members?project_id=${projectId}`)
+    fetch(`/api/members?project_id=${projectId}`)
       .then((r) => r.ok ? r.json() : Promise.reject())
       .then((json) => {
         const data = (json?.data ?? json) as TeamMember[];
@@ -81,12 +85,20 @@ export function EntityDispatchPanel({
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ entity_type: entityType, entity_id: entityId, project_id: projectId }),
       });
-      if (!dispatchRes.ok) throw new Error('dispatch failed');
-      const dispatchData = await dispatchRes.json() as { dispatched?: boolean };
-      if (!dispatchData.dispatched) throw new Error('dispatch not executed — assignee missing');
-      addToast({ type: 'success', title: 'Dispatch 완료' });
+      // 7f8066a3: 실패 사유 구분(reason 매트릭스) — 서버 오류 vs 담당자 미지정을 분리 안내한다.
+      if (!dispatchRes.ok) {
+        addToast({ type: 'error', title: '전달에 실패했습니다', body: '전달 중 문제가 발생했습니다. 잠시 후 다시 시도해 주세요.' });
+        return;
+      }
+      const dispatchData = await dispatchRes.json().catch(() => ({})) as { dispatched?: boolean };
+      if (!dispatchData.dispatched) {
+        // 담당자가 지정되지 않아 전달 대상이 없는 경우 — 오류가 아니라 안내(info)로 처리한다.
+        addToast({ type: 'info', title: '담당자가 지정되지 않았습니다', body: '담당자를 지정한 뒤 다시 전달해 주세요.' });
+        return;
+      }
+      addToast({ type: 'success', title: '전달했습니다' });
     } catch {
-      addToast({ type: 'error', title: 'Dispatch 실패. 다시 시도하겠는.' });
+      addToast({ type: 'error', title: '전달에 실패했습니다', body: '일시적인 문제로 전달하지 못했습니다. 잠시 후 다시 시도해 주세요.' });
     } finally {
       setDispatching(false);
     }
@@ -110,6 +122,7 @@ export function EntityDispatchPanel({
         type="button"
         disabled={!assigneeId || dispatching}
         onClick={() => void handleDispatch()}
+        title={dispatchTitle}
         className={cn(
           'shrink-0 items-center gap-1.5 rounded-md px-3 py-1.5 text-sm font-medium transition',
           mobileMode === 'assignee-only' ? 'hidden md:flex' : 'flex',
@@ -119,7 +132,7 @@ export function EntityDispatchPanel({
         )}
       >
         <Zap className="size-3.5" />
-        {dispatching ? 'Dispatching…' : 'Dispatch'}
+        {dispatching ? t('dispatching') : t('dispatch')}
       </button>
       {mobileMode === 'assignee-only' && (
         <div ref={moreRef} className="relative md:hidden">
@@ -137,6 +150,7 @@ export function EntityDispatchPanel({
                 type="button"
                 disabled={!assigneeId || dispatching}
                 onClick={() => { void handleDispatch(); setMoreOpen(false); }}
+                title={dispatchTitle}
                 className={cn(
                   'flex w-full items-center gap-1.5 px-3 py-2 text-sm transition',
                   assigneeId && !dispatching
@@ -145,7 +159,7 @@ export function EntityDispatchPanel({
                 )}
               >
                 <Zap className="size-3.5" />
-                {dispatching ? 'Dispatching…' : 'Dispatch'}
+                {dispatching ? t('dispatching') : t('dispatch')}
               </button>
             </div>
           )}

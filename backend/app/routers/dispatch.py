@@ -1,4 +1,5 @@
 """E-EVENTBUS P3 S12: Dispatch API — entity_type + entity_id → dispatched 이벤트."""
+import logging
 import uuid
 from datetime import datetime, timezone
 
@@ -21,6 +22,8 @@ from app.services.notification_dispatch import dispatch_notification
 
 router = APIRouter(prefix="/api/v2/dispatch", tags=["dispatch"])
 
+logger = logging.getLogger(__name__)
+
 _ENTITY_TYPES = {"epic", "story", "doc"}
 
 
@@ -36,6 +39,9 @@ class DispatchResponse(BaseModel):
     event_id: uuid.UUID | None = None
     assignee_id: uuid.UUID | None = None
     assignee_type: str | None = None
+    # 7f8066a3: dispatched=False 사유 구분 → FE 가 no_assignee(담당자 미지정·info 안내)와
+    # unresolved_assignee(신원 해소 실패·error)를 다르게 표시. additive·null default 하위호환.
+    reason: str | None = None
 
 
 async def _fetch_entity(
@@ -89,7 +95,8 @@ async def dispatch_entity(
     if title is None:
         raise HTTPException(status_code=404, detail="Entity not found")
     if not assignee_id:
-        return DispatchResponse(dispatched=False)
+        # 7f8066a3 (a): 담당자 미지정 — 실패 아님. FE 가 "담당자 지정 필요" 안내(info).
+        return DispatchResponse(dispatched=False, reason="no_assignee")
     # entity의 실제 project_id 사용 (body.project_id 불일치 방지)
     project_id = entity_project_id or body.project_id
 
@@ -98,7 +105,8 @@ async def dispatch_entity(
     #   grant-only 휴먼/polymorphic assignee도 수용해 dispatched:False 오탐 방지 (7f8066a3).
     assignee_member = await resolve_member_identity(assignee_id, org_id, db)
     if assignee_member is None:
-        return DispatchResponse(dispatched=False, assignee_id=assignee_id)
+        # 7f8066a3 (a): 담당자 신원 해소 실패(드뭄) — 진짜 오류. FE error 토스트.
+        return DispatchResponse(dispatched=False, assignee_id=assignee_id, reason="unresolved_assignee")
 
     member_type = assignee_member.type
 
@@ -107,6 +115,11 @@ async def dispatch_entity(
     sender_id: uuid.UUID | None = None
     try:
         uid = uuid.UUID(auth.user_id)
+    except (ValueError, TypeError):
+        # auth.user_id가 UUID 형식이 아님 (드뭄) — sender 미해소로 진행하되 무음 금지.
+        # DB 조회 예외는 아래에서 잡지 않고 전파시켜 silent-swallow를 제거한다.
+        logger.warning("dispatch: sender_id 미해소 — auth.user_id가 UUID 아님 user_id=%r", auth.user_id)
+    else:
         sender_result = await db.execute(
             select(TeamMember.id).where(
                 (TeamMember.user_id == uid) | (TeamMember.id == uid),
@@ -126,15 +139,18 @@ async def dispatch_entity(
                 ).limit(1)
             )
             sender_id = om_result.scalar_one_or_none()
-    except Exception:
-        pass
 
+    # E-EVENT-INJECT S1: connector(adapter.py)가 content 없는 이벤트를 드롭(if not content: return)하므로
+    # dispatched에 top-level content를 부여 → 에이전트 work-turn으로 실제 주입.
+    _detail = (body.message or description or "").strip()
+    content = f"[{body.entity_type}] {title}" + (f" — {_detail}" if _detail else "")
     payload = {
         "entity_type": body.entity_type,
         "entity_id": str(body.entity_id),
         "title": title,
         "description": (description or "")[:500],
         "message": body.message,
+        "content": content,
         "timestamp": datetime.now(timezone.utc).isoformat(),
     }
 
@@ -181,4 +197,5 @@ async def dispatch_entity(
         event_id=event.id,
         assignee_id=assignee_id,
         assignee_type=member_type,
+        reason="ok",
     )

@@ -1,7 +1,7 @@
 import uuid
 from datetime import datetime
 
-from sqlalchemy import DateTime, ForeignKey, Text, UniqueConstraint, func
+from sqlalchemy import DateTime, ForeignKey, Text, UniqueConstraint, func, text
 from sqlalchemy.dialects.postgresql import ARRAY, JSONB, UUID
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
@@ -18,6 +18,9 @@ class Conversation(Base, OrgScopedMixin, TimestampMixin):
     )
     type: Mapped[str] = mapped_column(Text, nullable=False, default="group")  # dm | group
     title: Mapped[str | None] = mapped_column(Text, nullable=True)
+    # 179db213: DM 1-pair=1-DM — 정렬된 member-pair `min|max`(type='dm'만). partial unique index
+    # uq_conversations_dm_pair(org,project,dm_pair_key WHERE type='dm')로 레이스/중복 차단.
+    dm_pair_key: Mapped[str | None] = mapped_column(Text, nullable=True)
     created_by: Mapped[uuid.UUID | None] = mapped_column(
         UUID(as_uuid=True), ForeignKey("team_members.id", ondelete="SET NULL"), nullable=True
     )
@@ -83,5 +86,9 @@ class ConversationMessage(Base, TimestampMixin):
     )
     review_type: Mapped[str | None] = mapped_column(Text, nullable=True)
     msg_metadata: Mapped[dict | None] = mapped_column("metadata", JSONB, nullable=True)
+    # E-FILE S2: 첨부 목록. additive(nullable + server_default '[]') — 0093 마이그와 정합.
+    attachments: Mapped[list | None] = mapped_column(
+        JSONB, nullable=True, server_default=text("'[]'"), default=list
+    )
 
     conversation: Mapped[Conversation] = relationship("Conversation", back_populates="messages")

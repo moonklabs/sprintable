@@ -25,10 +25,11 @@ async def _resolve_member_id(
     db: AsyncSession,
     project_id: uuid.UUID | None = None,
 ) -> uuid.UUID:
-    """JWT auth → team_member_id 반환. project_id 있으면 해당 project member 정확히 지정.
+    """JWT auth → canonical member_id 반환. project_id 있으면 해당 project member 정확히 지정.
 
-    multi-project 사용자에서 project_id 없으면 임의 member 반환 위험 있음.
-    list/unread-count는 project_id query param으로 필터링 권장.
+    0d68ad20: team_member 행만 요구하면 grant-only/admin 휴먼(team_member 없음)이 `/api/projects`엔
+    보이는 프로젝트에서 403 — has_project_access SSOT와 인가 불일치. team_member 곱연산 의존을 버리고
+    SSOT 리졸버(resolve_member)로 canonical id 해소. 미인가는 resolve_member가 403/400.
     """
     user_id = uuid.UUID(str(auth.user_id))
     filters = [
@@ -41,9 +42,13 @@ async def _resolve_member_id(
         select(TeamMember.id).where(*filters).limit(1)
     )
     member_id = result.scalar_one_or_none()
-    if member_id is None:
-        raise HTTPException(status_code=403, detail="Team member not found")
-    return member_id
+    if member_id is not None:
+        return member_id
+    # team_member 행 없음 — SSOT 리졸버로 해소(team_member 곱연산 의존 제거). 휴먼=has_project_access
+    # 후 canonical org_member.id, 에이전트=team_member.id. 미인가면 resolve_member가 403/400.
+    # events는 recipient(canonical id)-addressed라 grant-only 휴먼은 자연히 0건(빈 결과).
+    from app.services.member_resolver import resolve_member
+    return (await resolve_member(auth, org_id, db, project_id=project_id)).id
 
 
 # ─── Pydantic schemas ─────────────────────────────────────────────────────────

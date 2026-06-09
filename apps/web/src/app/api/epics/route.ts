@@ -6,7 +6,6 @@ import { apiSuccess, apiError, ApiErrors } from '@/lib/api-response';
 import { getAuthContext } from '@/lib/auth-helpers';
 import { buildCursorPageMeta, parseCursorPageInput } from '@/lib/pagination';
 import { createEpicRepository } from '@/lib/storage/factory';
-import { getEpicActorRole, hasEpicRole } from '@/lib/epic-permissions';
 
 export async function GET(request: Request) {
   try {
@@ -21,9 +20,11 @@ export async function GET(request: Request) {
     }, { defaultLimit: 50, maxLimit: 100 });
     const repo = await createEpicRepository();
     const service = new EpicService(repo);
+    // 569f5316: 백엔드 GET /api/v2/epics 가 cursor/limit/order_by + total(X-Total-Count)을 지원하므로
+    // in-memory 페이징(1000+ silent-truncation 유발) 대신 BE에 위임한다. over-fetch(+1)로 hasMore 판단.
     const epics = await service.list({
       project_id: searchParams.get('project_id') ?? undefined,
-      limit: pageInput.limit,
+      limit: pageInput.limit + 1,
       cursor: pageInput.cursor,
     });
     const { page, meta } = buildCursorPageMeta(epics, pageInput.limit, 'created_at');
@@ -36,14 +37,10 @@ export async function POST(request: Request) {
     const me = await getAuthContext(request);
     if (!me) return ApiErrors.unauthorized();
     if (me.rateLimitExceeded) return ApiErrors.tooManyRequests(me.rateLimitRemaining, me.rateLimitResetAt);
-    const dbClient = undefined;
-    // 권한 체크: agent 또는 admin/owner만 에픽 생성 가능
-    if (me.type !== 'agent') {
-      const role = await getEpicActorRole(dbClient, me.id);
-      if (!role || !hasEpicRole(role, 'admin')) {
-        return apiError('FORBIDDEN', 'Epic creation requires admin or owner role', 403);
-      }
-    }
+    // 권한(에픽 생성 = agent 또는 admin/owner)은 BE 단일 소스에서 강제한다 — create_epic →
+    // enforce_body_context → has_project_access(team_member ∪ grant ∪ owner/admin org-wide·canonical).
+    // (이전 FE role 체크는 dbClient=undefined 하드코딩이라 getEpicActorRole이 항상 null → owner도 무조건
+    //  403나던 데모-브레이커. BE authz가 SSOT이므로 FE 중복 게이트 제거가 정답·thin proxy.)
 
     let rawBody: unknown;
     try {

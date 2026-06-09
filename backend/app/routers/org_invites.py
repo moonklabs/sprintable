@@ -82,6 +82,7 @@ async def create_org_invite(
         email=body.email,
         role=body.role,
         created_by=uuid.UUID(auth.user_id),
+        project_ids=body.project_ids,
     )
     if invite is None:
         raise HTTPException(status_code=409, detail="Invite already exists for this email")

@@ -26,11 +26,15 @@ async def rotate_api_key(
     body: RotateApiKeyRequest,
     _auth: AuthContext = Depends(get_current_user),
     repo: ApiKeyRepository = Depends(_get_repo),
+    session: AsyncSession = Depends(get_db),
 ) -> ApiKeyCreatedResponse:
     result = await repo.rotate(body.api_key_id)
     if result is None:
         raise HTTPException(status_code=404, detail="API key not found")
     new_key, plaintext = result
+    # E-MSG-POLICY S2: rotate 시에도 creator allow_list entry 보장(멱등 — 기존 entry 보존, 중복 없음).
+    from app.services.agent_message_policy import ensure_creator_allowlisted
+    await ensure_creator_allowlisted(session, new_key.team_member_id)
     data = ApiKeyResponse.model_validate(new_key)
     return ApiKeyCreatedResponse(**data.model_dump(), api_key=plaintext)
 
@@ -63,6 +67,9 @@ async def create_agent_api_key(
         scope=body.scope,
         expires_at=body.expires_at,
     )
+    # E-MSG-POLICY S2: creator를 agent allow_list에 자동 등록(멱등).
+    from app.services.agent_message_policy import ensure_creator_allowlisted
+    await ensure_creator_allowlisted(session, agent_id)
     data = ApiKeyResponse.model_validate(key)
     return ApiKeyCreatedResponse(**data.model_dump(), api_key=plaintext)
 

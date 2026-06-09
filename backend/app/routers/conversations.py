@@ -8,7 +8,7 @@ from collections import defaultdict
 from datetime import datetime, timezone
 
 from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Query
-from pydantic import BaseModel
+from pydantic import BaseModel, ConfigDict, field_validator
 from sqlalchemy import and_, func, select, update
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -18,9 +18,12 @@ from app.dependencies.database import get_db
 from app.models.conversation import Conversation, ConversationMessage, ConversationParticipant
 from app.models.event import Event
 from app.models.project import OrgMember
-from app.models.team import TeamMember
+from app.models.team import AgentMessageAllowlist, TeamMember
+from app.models.agent_deployment import AgentAuditLog
 from app.models.webhook_config import WebhookConfig
 from app.routers.events import _push_to_agent, publish_event
+from app.services.agent_runtime import supports_deterministic_command
+from app.services.command_classifier import classify_command
 from app.services.event_seq import assign_recipient_seq
 from app.services.member_resolver import (
     ResolvedMember,
@@ -64,36 +67,72 @@ async def _enforce_agent_creator_policy(
     agent_ids = {a.id for a in agent_tms}
     non_agent_ids = all_ids - agent_ids
     if not non_agent_ids:
-        return  # 에이전트↔에이전트 → creator 무관 허용
+        return  # ⭐ 에이전트↔에이전트 → 게이팅 skip (팀 comms 불변·핵심 안전조건, E-MSG-POLICY S1 불변)
 
-    # 참가자 집합의 user_id 수집 (sender + 나머지 non-agent participants)
-    human_user_ids: set[uuid.UUID] = set()
+    # 휴먼 참가자 (member_id, user_id) 수집 — mode별 인가에 둘 다 필요
+    humans: list[tuple[uuid.UUID, uuid.UUID | None]] = []
     sender_user_id = getattr(sender, "user_id", None)
-    if sender_user_id is not None and sender.id in non_agent_ids:
-        human_user_ids.add(sender_user_id)
+    if sender.id in non_agent_ids:
+        humans.append((sender.id, sender_user_id))
 
     remaining_ids = non_agent_ids - {sender.id}
     if remaining_ids:
-        # TeamMember에서 user_id 조회
+        # TeamMember 조회
         tm_humans = (await db.execute(
             select(TeamMember).where(TeamMember.id.in_(remaining_ids))
         )).scalars().all()
-        human_user_ids.update(tm.user_id for tm in tm_humans if tm.user_id)
+        humans.extend((tm.id, tm.user_id) for tm in tm_humans)
 
-        # OrgMember에서 user_id 조회 (grant-only 휴먼)
+        # OrgMember 조회 (grant-only 휴먼)
         tm_found_ids = {tm.id for tm in tm_humans}
         om_ids = remaining_ids - tm_found_ids
         if om_ids:
             oms = (await db.execute(
                 select(OrgMember).where(OrgMember.id.in_(om_ids))
             )).scalars().all()
-            human_user_ids.update(om.user_id for om in oms if om.user_id)
+            humans.extend((om.id, om.user_id) for om in oms)
 
-    # 각 에이전트의 created_by가 참가자 user_id 집합에 있는지 확인
+    human_user_ids: set[uuid.UUID] = {u for _, u in humans if u}
+
+    # E-MSG-POLICY S1: 각 에이전트의 message_policy_mode 별 인가
     for agent_tm in agent_tms:
+        mode = getattr(agent_tm, "message_policy_mode", None) or "creator_only"
+
+        if mode == "org_wide":
+            continue  # org 내 휴먼 전부 허용 (참가자는 이미 org-scoped) → 통과
+
+        if mode == "list":
+            allowed_ids = set((await db.execute(
+                select(AgentMessageAllowlist.allowed_id).where(
+                    AgentMessageAllowlist.agent_member_id == agent_tm.id
+                )
+            )).scalars().all())
+            for member_id, user_id in humans:
+                # creator는 모드 무관 항상 허용 (자기 에이전트 접근)
+                is_creator = user_id is not None and user_id == agent_tm.created_by
+                if member_id not in allowed_ids and not is_creator:
+                    logger.warning(
+                        "agent creator policy 403: agent_id=%s sender_id=%s reason=allowlist_miss member_id=%s",
+                        agent_tm.id, sender.id, member_id,
+                    )
+                    raise HTTPException(
+                        status_code=403,
+                        detail="Member is not in this agent's message allowlist",
+                    )
+            continue
+
+        # creator_only (default·기존 동작): 에이전트 creator가 참가자여야
         if agent_tm.created_by is None:
+            logger.warning(
+                "agent creator policy 403: agent_id=%s sender_id=%s reason=created_by_none",
+                agent_tm.id, sender.id,
+            )
             raise HTTPException(status_code=403, detail="Agent has no creator — conversation not allowed")
         if agent_tm.created_by not in human_user_ids:
+            logger.warning(
+                "agent creator policy 403: agent_id=%s sender_id=%s reason=creator_not_participant created_by=%s",
+                agent_tm.id, sender.id, agent_tm.created_by,
+            )
             raise HTTPException(status_code=403, detail="Agent's creator must be a participant in this conversation")
 
 
@@ -123,6 +162,61 @@ async def _resolve_member(
     return await resolve_member(auth, org_id, db, project_id=project_id)
 
 
+async def _effective_org_role(
+    auth: AuthContext, org_id: uuid.UUID, db: AsyncSession, sender: "ResolvedMember | TeamMember"
+) -> str:
+    """sender.role에 org owner/admin 상속(S-MBR-03). team_members 뷰는 **project role만** 주므로
+    org owner/admin이 project-member로 나오는 갭(#1223 agent-view 게이트 ↔ 멤버-SSOT 뷰)을 보정 —
+    /me effective-role과 일관(버그: org owner/admin이 agent-view 403). 에이전트(API키)는 org role
+    무관이라 sender.role 그대로."""
+    if sender.role in ("owner", "admin"):
+        return sender.role
+    if bool(auth.claims.get("app_metadata", {}).get("api_key_id")):
+        return sender.role
+    om_role = (await db.execute(
+        select(OrgMember.role).where(
+            OrgMember.org_id == org_id,
+            OrgMember.user_id == uuid.UUID(auth.user_id),
+            OrgMember.deleted_at.is_(None),
+        ).limit(1)
+    )).scalar_one_or_none()
+    return om_role if om_role in ("owner", "admin") else sender.role
+
+
+async def _conversation_has_human_participant(conversation_id: uuid.UUID, db: AsyncSession) -> bool:
+    """대화에 휴먼 참가자가 있으면 True(=private·admin 우회 금지).
+    보수적: agent team_member로 확정 안 된 참가자는 human 간주(grant-only/미앵커 휴먼 포함)."""
+    pids = (await db.execute(
+        select(ConversationParticipant.member_id).where(ConversationParticipant.conversation_id == conversation_id)
+    )).scalars().all()
+    if not pids:
+        return False
+    agent_ids = set((await db.execute(
+        select(TeamMember.id).where(TeamMember.id.in_(pids), TeamMember.type == "agent")
+    )).scalars().all())
+    return any(p not in agent_ids for p in pids)  # agent 확정 외 = human 보수적
+
+
+async def _conversations_with_human_participant(conv_ids: list[uuid.UUID], db: AsyncSession) -> set[uuid.UUID]:
+    """conv_ids 중 휴먼 참가자가 있는 conversation_id 집합(보수적·agent 확정 외 human)."""
+    if not conv_ids:
+        return set()
+    rows = (await db.execute(
+        select(ConversationParticipant.conversation_id, ConversationParticipant.member_id)
+        .where(ConversationParticipant.conversation_id.in_(conv_ids))
+    )).all()
+    # member_id 중 agent 확정 집합
+    all_mids = {m for _, m in rows}
+    agent_ids = set((await db.execute(
+        select(TeamMember.id).where(TeamMember.id.in_(all_mids), TeamMember.type == "agent")
+    )).scalars().all()) if all_mids else set()
+    result: set[uuid.UUID] = set()
+    for cid, mid in rows:
+        if mid not in agent_ids:  # human 참가자 발견
+            result.add(cid)
+    return result
+
+
 def _msg_payload(msg: ConversationMessage, sender: "ResolvedMember | TeamMember | None") -> dict:
     return {
         "id": str(msg.id),
@@ -132,6 +226,8 @@ def _msg_payload(msg: ConversationMessage, sender: "ResolvedMember | TeamMember 
         "last_reply_at": msg.last_reply_at.isoformat() if msg.last_reply_at else None,
         "content": msg.content,
         "mentioned_ids": [str(m) for m in (msg.mentioned_ids or [])],
+        # E-FILE S1: 첨부 직렬화 (SSE + GET messages 공통). list 아니면 [](레거시/None/mock 안전).
+        "attachments": msg.attachments if isinstance(msg.attachments, list) else [],
         "sender": {
             "id": str(sender.id),
             "name": sender.name,
@@ -251,6 +347,75 @@ async def _dispatch_mention_events(
             for pid_str, event in events_to_push]
 
 
+async def _command_capability_gate(
+    db: AsyncSession,
+    conv: Conversation,
+    msg: ConversationMessage,
+    sender: "ResolvedMember | TeamMember",
+    org_id: uuid.UUID,
+) -> tuple[set[uuid.UUID], list[dict]]:
+    """E-CHAT-CMD S4: capability gate — 슬래시 커맨드를 미지원 런타임 에이전트에 주입하지 않는다.
+
+    메시지가 command candidate(S3 classifier)면, conversation 의 에이전트 수신자 각각의
+    runtime_type 을 capability registry(S1)로 조회한다. 결정적 커맨드 미지원(또는 runtime_type
+    없음/unknown) 에이전트는 **주입 차단**(반환된 id 를 dispatch exclude 로 사용) + audit log
+    `command_blocked_unsupported_runtime` 기록 + hint 생성. 지원 에이전트는 그대로 pass-through.
+
+    비-command 메시지는 빈 결과 → 기존 경로 무영향(AC4 회귀). project_id 없는 conversation 은
+    애초에 에이전트 dispatch 가 없어 게이트 무의미 → 빈 결과.
+
+    반환: (blocked_agent_ids, hints) — hints 는 발신자에게 돌려줄 구조화 안내.
+    """
+    candidate = classify_command(msg.content)
+    if candidate is None or not conv.project_id:
+        return set(), []
+
+    rows = (await db.execute(
+        select(TeamMember.id, TeamMember.name, TeamMember.runtime_type)
+        .join(ConversationParticipant, ConversationParticipant.member_id == TeamMember.id)
+        .where(
+            ConversationParticipant.conversation_id == conv.id,
+            TeamMember.type == "agent",
+            TeamMember.id != sender.id,
+        )
+    )).all()
+
+    blocked: set[uuid.UUID] = set()
+    hints: list[dict] = []
+    for agent_id, agent_name, runtime_type in rows:
+        if supports_deterministic_command(runtime_type):
+            continue  # AC2: 지원 런타임 → pass-through(기존 dispatch)
+        # AC3/AC4: 미지원(또는 runtime_type 없음/unknown) → 차단 + audit + hint
+        blocked.add(agent_id)
+        db.add(AgentAuditLog(
+            org_id=org_id,
+            project_id=conv.project_id,
+            agent_id=agent_id,
+            event_type="command_blocked_unsupported_runtime",
+            severity="info",
+            summary=f"'/{candidate.name}' blocked — runtime '{runtime_type or 'unset'}' lacks deterministic command support",
+            payload={
+                "command": candidate.name,
+                "raw": candidate.raw,
+                "runtime_type": runtime_type,
+                "conversation_id": str(conv.id),
+                "message_id": str(msg.id),
+                "sender_id": str(sender.id),
+            },
+        ))
+        hints.append({
+            "agent_id": str(agent_id),
+            "agent_name": agent_name,
+            "runtime_type": runtime_type,
+            "command": candidate.name,
+            "reason": "unsupported_runtime",
+        })
+
+    if blocked:
+        await db.flush()
+    return blocked, hints
+
+
 async def _dispatch_discord_outbound(
     message_id: uuid.UUID,
     org_id: uuid.UUID,
@@ -324,10 +489,72 @@ class CreateConversationRequest(BaseModel):
     project_id: uuid.UUID
 
 
+class ConversationResponse(BaseModel):
+    """단독 conversation 메타. 03fe1663: 첨부 업로드 라우트가 path projectId를
+    클라이언트 쿠키 대신 conversation.project_id로 server-side 도출하는 데 사용."""
+
+    model_config = ConfigDict(from_attributes=True)
+
+    id: uuid.UUID
+    project_id: uuid.UUID
+    org_id: uuid.UUID
+    type: str
+    title: str | None = None
+    status: str
+    created_by: uuid.UUID | None = None
+    created_at: datetime
+    updated_at: datetime
+
+
+# E-FILE S1: 채팅 첨부. GCS 기록은 FE-proxy(uploadToGcs)가 처리하고 BE는 URL+메타만 저장.
+_MAX_ATTACHMENTS = 10
+_MAX_ATTACHMENT_SIZE = 100 * 1024 * 1024  # 100MB (메타 sanity 상한)
+
+
+class MessageAttachment(BaseModel):
+    url: str           # FE-proxy가 GCS에 업로드한 객체 URL (https)
+    name: str          # 원본 파일명
+    content_type: str  # MIME
+    size: int          # 바이트
+
+    @field_validator("url")
+    @classmethod
+    def _validate_url(cls, v: str) -> str:
+        v = v.strip()
+        if not v.startswith("https://"):
+            raise ValueError("attachment url must be an https:// URL")
+        return v
+
+    @field_validator("name", "content_type")
+    @classmethod
+    def _non_empty(cls, v: str) -> str:
+        v = v.strip()
+        if not v:
+            raise ValueError("must not be empty")
+        return v
+
+    @field_validator("size")
+    @classmethod
+    def _validate_size(cls, v: int) -> int:
+        if v < 0:
+            raise ValueError("size must be >= 0")
+        if v > _MAX_ATTACHMENT_SIZE:
+            raise ValueError(f"attachment too large (max {_MAX_ATTACHMENT_SIZE} bytes)")
+        return v
+
+
 class SendMessageRequest(BaseModel):
     content: str
     mentioned_ids: list[uuid.UUID] = []
     thread_id: uuid.UUID | None = None
+    attachments: list[MessageAttachment] = []
+
+    @field_validator("attachments")
+    @classmethod
+    def _limit_attachments(cls, v: list[MessageAttachment]) -> list[MessageAttachment]:
+        if len(v) > _MAX_ATTACHMENTS:
+            raise ValueError(f"too many attachments (max {_MAX_ATTACHMENTS})")
+        return v
 
 
 class UpdateStatusRequest(BaseModel):
@@ -353,45 +580,49 @@ async def create_conversation(
     # ⭐ 인가 불변식: 휴먼↔에이전트 대화 — 에이전트 creator 동석 필수
     await _enforce_agent_creator_policy(sender, body.participant_ids, db)
 
-    # DM 중복 방지: 동일 participant pair의 dm이 이미 있으면 반환
-    if body.type == "dm" and len(body.participant_ids) == 1:
-        other_id = body.participant_ids[0]
-        existing = (await db.execute(
-            select(Conversation.id)
-            .join(ConversationParticipant, ConversationParticipant.conversation_id == Conversation.id)
-            .where(
+    # 179db213: 1-pair=1-DM enforce — resolved member set 이 정확히 2명이면 DM 으로 dedup
+    # (body.type label 무관). dm_pair_key(정렬쌍)로 기존 DM 조회→반환. ≥3명/단독은 group.
+    all_members = sorted({sender.id, *body.participant_ids})
+    is_dm = len(all_members) == 2
+    dm_pair_key = "|".join(str(m) for m in all_members) if is_dm else None
+
+    async def _find_existing_dm() -> uuid.UUID | None:
+        return (await db.execute(
+            select(Conversation.id).where(
                 Conversation.type == "dm",
                 Conversation.org_id == org_id,
                 Conversation.project_id == body.project_id,
-                ConversationParticipant.member_id == sender.id,
+                Conversation.dm_pair_key == dm_pair_key,
             )
-        )).scalars().all()
+        )).scalar_one_or_none()
 
-        for conv_id in existing:
-            other_check = (await db.execute(
-                select(ConversationParticipant.id).where(
-                    ConversationParticipant.conversation_id == conv_id,
-                    ConversationParticipant.member_id == other_id,
-                )
-            )).scalar_one_or_none()
-            if other_check:
-                return {"id": str(conv_id), "type": "dm", "existing": True}
+    if is_dm:
+        existing = await _find_existing_dm()
+        if existing is not None:
+            return {"id": str(existing), "type": "dm", "existing": True}
 
     conv = Conversation(
         project_id=body.project_id,
         org_id=org_id,
-        type=body.type,
+        type=("dm" if is_dm else body.type),
         title=body.title,
         created_by=sender.id,
+        dm_pair_key=dm_pair_key,
     )
     db.add(conv)
-    await db.flush()
-
-    all_members = list({sender.id} | set(body.participant_ids))
-    for mid in all_members:
-        db.add(ConversationParticipant(conversation_id=conv.id, member_id=mid))
-
-    await db.commit()
+    try:
+        await db.flush()
+        for mid in all_members:
+            db.add(ConversationParticipant(conversation_id=conv.id, member_id=mid))
+        await db.commit()
+    except IntegrityError:
+        # CP2: 동시 동일 pair 생성 레이스 → uq_conversations_dm_pair 위반 → 기존 DM 반환.
+        await db.rollback()
+        if is_dm:
+            existing = await _find_existing_dm()
+            if existing is not None:
+                return {"id": str(existing), "type": "dm", "existing": True}
+        raise
     await db.refresh(conv)
     return {"id": str(conv.id), "type": conv.type, "title": conv.title, "existing": False}
 
@@ -409,8 +640,9 @@ async def list_conversations(
     """GET /api/v2/conversations — 최근 메시지 미리보기 + 참여 대화 목록."""
     sender = await _resolve_member(auth, org_id, db, project_id=project_id)
 
-    # AC5: include_agent_conversations는 owner/admin만 허용
-    if include_agent_conversations and sender.role not in ("owner", "admin"):
+    # AC5: include_agent_conversations는 owner/admin만 허용 (org-effective role — project team_member
+    # role이 낮아도 org owner/admin이면 상속·#1223↔SSOT뷰 갭 보정)
+    if include_agent_conversations and await _effective_org_role(auth, org_id, db, sender) not in ("owner", "admin"):
         raise HTTPException(status_code=403, detail="Only owner/admin can view agent conversations.")
 
     conv_ids_result = await db.execute(
@@ -420,7 +652,10 @@ async def list_conversations(
     )
     conv_ids = set(r[0] for r in conv_ids_result.all())
 
-    # AC1/2: project 내 agent type member가 participant인 conversation 포함
+    # AC1/2 + #1262: admin-bypass는 **agent-only 대화로 한정**(사적 DM 프라이버시).
+    # project 내 agent type member가 participant인 conversation 후보를 모으되,
+    # 휴먼 참가 대화(=private)는 보수적 판별로 제외 — admin에게 추가 노출 금지.
+    # (본인 참여 대화는 base conv_ids로 이미 포함되니 무관.)
     if include_agent_conversations:
         agent_ids_result = await db.execute(
             select(TeamMember.id).where(
@@ -437,7 +672,9 @@ async def list_conversations(
                     ConversationParticipant.member_id.in_(agent_ids)
                 )
             )
-            conv_ids.update(r[0] for r in agent_conv_result.all())
+            candidate_conv_ids = {r[0] for r in agent_conv_result.all()}
+            human_convs = await _conversations_with_human_participant(list(candidate_conv_ids), db)
+            conv_ids.update(candidate_conv_ids - human_convs)  # agent-only만 admin에게 추가
 
     if not conv_ids:
         return {"data": [], "total": 0, "limit": limit, "offset": offset}
@@ -468,6 +705,15 @@ async def list_conversations(
     all_member_ids = {r.member_id for r in p_rows}
     resolved_map = await lookup_members_by_ids(all_member_ids, db) if all_member_ids else {}
 
+    # E-CHAT-CMD S8b: participant 의 runtime_type 노출(team_members 뷰서 read — 에이전트만 값, 휴먼 NULL).
+    # S8 composer 가 미지원 런타임 에이전트 pre-send 경고를 그리려면 participant 응답에 runtime_type 필요.
+    runtime_type_map: dict[uuid.UUID, str | None] = {}
+    if all_member_ids:
+        rt_rows = (await db.execute(
+            select(TeamMember.id, TeamMember.runtime_type).where(TeamMember.id.in_(all_member_ids))
+        )).all()
+        runtime_type_map = {r.id: r.runtime_type for r in rt_rows}
+
     conv_participants: dict[uuid.UUID, list[dict]] = defaultdict(list)
     for r in p_rows:
         resolved = resolved_map.get(r.member_id)
@@ -476,6 +722,7 @@ async def list_conversations(
             "name": resolved.name if resolved else str(r.member_id)[:8],
             "avatar_url": getattr(resolved, "avatar_url", None) if resolved else None,
             "type": resolved.type if resolved else "human",
+            "runtime_type": runtime_type_map.get(r.member_id),
         })
 
     result = []
@@ -505,6 +752,43 @@ async def list_conversations(
     return {"data": result, "total": total, "limit": limit, "offset": offset}
 
 
+@router.get("/{conversation_id}", response_model=ConversationResponse)
+async def get_conversation(
+    conversation_id: uuid.UUID,
+    db: AsyncSession = Depends(get_db),
+    auth: AuthContext = Depends(get_current_user),
+    org_id: uuid.UUID = Depends(get_verified_org_id),
+) -> ConversationResponse:
+    """GET /api/v2/conversations/{id} — 단독 메타 조회(project_id 포함).
+
+    03fe1663: 첨부 업로드 라우트가 attachment path의 projectId를 클라이언트 쿠키
+    대신 conversation.project_id로 server-side 도출하도록 메타를 제공한다.
+    인가(#1262 갱신): admin-bypass=agent-only 대화 한정 — 휴먼 참가 대화(=private)는
+    owner/admin도 participant only(사적 DM 프라이버시). 본인 참여 대화는 항상 정상.
+    """
+    conv = (await db.execute(
+        select(Conversation).where(Conversation.id == conversation_id, Conversation.org_id == org_id)
+    )).scalar_one_or_none()
+    if conv is None:
+        raise HTTPException(status_code=404, detail="Conversation not found")
+
+    sender = await _resolve_member(auth, org_id, db, project_id=None)
+    is_admin = await _effective_org_role(auth, org_id, db, sender) in ("owner", "admin")
+    # admin이어도 휴먼 참가(private) 대화면 participant 체크 폴백
+    if (not is_admin) or await _conversation_has_human_participant(conversation_id, db):
+        sender = await _resolve_member(auth, org_id, db, project_id=conv.project_id)
+        participant = (await db.execute(
+            select(ConversationParticipant.id).where(
+                ConversationParticipant.conversation_id == conversation_id,
+                ConversationParticipant.member_id == sender.id,
+            )
+        )).scalar_one_or_none()
+        if participant is None:
+            raise HTTPException(status_code=403, detail="Not a participant")
+
+    return ConversationResponse.model_validate(conv)
+
+
 @router.get("/{conversation_id}/messages")
 async def list_messages(
     conversation_id: uuid.UUID,
@@ -526,10 +810,14 @@ async def list_messages(
     if conv_project_id is None:
         raise HTTPException(status_code=404, detail="Conversation not found")
 
-    # owner/admin: org-level 조회 (project 소속 무관 접근), member: project-level 유지
+    # #1262: admin-bypass=agent-only 대화 한정 — 휴먼 참가 대화(=private)는 participant only.
+    # owner/admin: org-level 조회(project 소속 무관 접근), member: project-level 유지
     sender = await _resolve_member(auth, org_id, db, project_id=None)
 
-    if sender.role not in ("owner", "admin"):
+    # org-effective role(S-MBR-03·#1223↔SSOT뷰 갭 보정) — project role 낮아도 org owner/admin 상속
+    is_admin = await _effective_org_role(auth, org_id, db, sender) in ("owner", "admin")
+    # admin이어도 휴먼 참가(private) 대화면 participant 체크 폴백(사적 DM 프라이버시)
+    if (not is_admin) or await _conversation_has_human_participant(conversation_id, db):
         # project isolation 보존 — project 소속 member 재확인
         sender = await _resolve_member(auth, org_id, db, project_id=conv_project_id)
         participant = (await db.execute(
@@ -604,6 +892,14 @@ async def add_participant(
     target = await resolve_member_identity(body.member_id, org_id, db)
     if target is None:
         raise HTTPException(status_code=404, detail="Member not found")
+
+    # E-MSG-POLICY S1: 참가자 추가도 동일 정책 게이트 (back-door 차단).
+    # 기존 참가자 ∪ 신규 대상으로 각 에이전트 정책 재검증 (list 모드 비허용 휴먼 추가 시 403 등).
+    _existing_ids = (await db.execute(
+        select(ConversationParticipant.member_id)
+        .where(ConversationParticipant.conversation_id == conversation_id)
+    )).scalars().all()
+    await _enforce_agent_creator_policy(sender, list(set(_existing_ids) | {body.member_id}), db)
 
     # DM → 기존 DM 유지, 기존 참여자 + 신규 참여자로 그룹 conversation fork
     if conv.type == "dm":
@@ -746,6 +1042,8 @@ async def send_message(
         content=body.content,
         mentioned_ids=valid_mentioned_ids,
         thread_id=body.thread_id,
+        # E-FILE S1: 첨부 메타(URL+name+content_type+size)를 0093 attachments JSONB에 저장
+        attachments=[a.model_dump() for a in body.attachments],
     )
     db.add(msg)
 
@@ -771,10 +1069,14 @@ async def send_message(
     except Exception:
         logger.warning("ChannelRouter pre-check failed message_id=%s — no SSE exclusion", msg.id)
 
+    # E-CHAT-CMD S4: capability gate — 슬래시 커맨드를 미지원 런타임 에이전트에 주입 차단(+audit+hint).
+    # 비-command 면 빈 결과 → 무영향. 차단 대상은 dispatch exclude 로 합쳐 주입 0.
+    blocked_agent_ids, command_hints = await _command_capability_gate(db, conv, msg, sender, org_id)
+
     pending_sse_pushes: list[tuple[str, dict]] = []
     try:
         async with db.begin_nested():
-            pending_sse_pushes += await _dispatch_conversation_event(db, conv, msg, org_id, sender, exclude_ids=discord_exclude_ids)
+            pending_sse_pushes += await _dispatch_conversation_event(db, conv, msg, org_id, sender, exclude_ids=discord_exclude_ids | blocked_agent_ids)
     except Exception as _dispatch_err:
         # dispatch 실패를 삼키지 않고 surface — 게이트웨이 이벤트 미생성 무음 방지
         logger.error("conversation event dispatch failed conversation_id=%s", conversation_id, exc_info=True)
@@ -782,7 +1084,7 @@ async def send_message(
 
     # AC1: 멘션 대상에게 conversation:mention SSE 발송 (participant 여부 무관)
     if msg.mentioned_ids:
-        mention_targets = set(msg.mentioned_ids) - {sender.id} - discord_exclude_ids
+        mention_targets = set(msg.mentioned_ids) - {sender.id} - discord_exclude_ids - blocked_agent_ids
         if mention_targets:
             try:
                 async with db.begin_nested():
@@ -908,6 +1210,9 @@ async def send_message(
     if fork_info:
         response["forked"] = True
         response["forked_conversation_id"] = fork_info["forked_conversation_id"]
+    # E-CHAT-CMD S4: 미지원 런타임으로 차단된 커맨드의 hint 를 발신자에게 반환(AC3 hint response).
+    if command_hints:
+        response["command_gate"] = {"blocked": command_hints}
     return response
 
 

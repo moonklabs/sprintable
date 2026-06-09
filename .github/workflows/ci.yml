@@ -18,7 +18,9 @@ jobs:
 
     services:
       postgres:
-        image: postgres:16
+        # pgvector image: the baseline schema declares `CREATE EXTENSION vector` (embeddings),
+        # which the stock postgres:16 image lacks. Cloud SQL (dev/prod) has pgvector available.
+        image: pgvector/pgvector:pg16
         env:
           POSTGRES_USER: sprintable
           POSTGRES_PASSWORD: sprintable
@@ -40,7 +42,9 @@ jobs:
         with:
           version: 'latest'
 
-      - name: alembic upgrade head (fresh DB)
+      # Empty DB → alembic/env.py provisions from the baseline snapshot (schema + global seed)
+      # and stamps revision 0096. This is the exact path a freshly-wiped prod takes.
+      - name: alembic upgrade head (fresh DB → baseline)
         working-directory: backend
         env:
           ALEMBIC_DATABASE_URL: postgresql+psycopg2://sprintable:sprintable@localhost:5432/sprintable_test
@@ -55,12 +59,57 @@ jobs:
             "SELECT count(*) FROM information_schema.tables WHERE table_schema='public' AND table_type='BASE TABLE';" \
             | grep -E "^\s+[0-9]+"
 
-      - name: member-ssot resolver parity (real-DB legacy vs anchor 0-diff)
+      - name: Verify baseline parity (view + nullable + seed)
+        run: |
+          set -e
+          P() { PGPASSWORD=sprintable psql -h localhost -U sprintable -d sprintable_test -tA -c "$1"; }
+          test "$(P "SELECT table_type FROM information_schema.tables WHERE table_name='team_members'")" = "VIEW"
+          test "$(P "SELECT is_nullable FROM information_schema.columns WHERE table_name='project_access' AND column_name='org_member_id'")" = "YES"
+          test "$(P "SELECT count(*) FROM workflow_templates")" -ge 1
+          test "$(P "SELECT count(*) FROM plan_features")" -ge 1
+          # post-baseline incremental migration applied on a fresh DB (forward-compat): 0097 column
+          test "$(P "SELECT count(*) FROM information_schema.columns WHERE table_name='org_invites' AND column_name='project_ids'")" = "1"
+          # baseline REVISION invariant — the snapshot was captured at 0096; changing this without
+          # regenerating baseline/schema.sql would mis-stamp fresh DBs. Lock it.
+          test "$(cat backend/alembic/baseline/REVISION)" = "0096"
+          echo "baseline parity OK: team_members=VIEW, org_member_id nullable, seed present, 0097 applied, REVISION=0096"
+
+      - name: Verify fresh DB reached head (baseline + incremental)
         working-directory: backend
         env:
           ALEMBIC_DATABASE_URL: postgresql+psycopg2://sprintable:sprintable@localhost:5432/sprintable_test
+        run: |
+          set -e
+          cur=$(uv run alembic current 2>/dev/null | grep -oE '^[0-9a-z_]+' | head -1)
+          head=$(uv run alembic heads 2>/dev/null | grep -oE '^[0-9a-z_]+' | head -1)
+          echo "current=$cur head=$head"
+          test -n "$cur" && test "$cur" = "$head"  # fresh DB is AT head, not stuck at baseline
+
+      # existing-DB path: a DB already at head must be a pure no-op — no migration re-runs.
+      # (The fresh-DB run above already advanced this DB to head via baseline + incremental.)
+      - name: Existing-DB no-op (re-run upgrade head)
+        working-directory: backend
+        env:
+          ALEMBIC_DATABASE_URL: postgresql+psycopg2://sprintable:sprintable@localhost:5432/sprintable_test
+          DATABASE_URL: postgresql+asyncpg://sprintable:sprintable@localhost:5432/sprintable_test
           JWT_SECRET: ci-test-secret-at-least-32-chars-long
-        run: uv run pytest tests/test_member_ssot_parity_realdb.py -q
+          SECRET_KEY: ci-test-secret-at-least-32-chars-long
+        run: |
+          set -e
+          out=$(uv run alembic upgrade head 2>&1); echo "$out"
+          if echo "$out" | grep -q "Running upgrade"; then
+            echo "FAIL: migrations re-ran on a DB already at head (existing-DB path not a no-op)"; exit 1
+          fi
+          echo "OK: existing-DB upgrade head is a no-op"
+
+      # NOTE: the member-ssot real-DB parity test (tests/test_member_ssot_parity_realdb.py) was
+      # removed from this gate. It validated the legacy→anchor *dual-write transition* and only
+      # ever ran against the create_all schema (team_members as a writable table). The baseline
+      # captures the COMPLETED cutover, where team_members is a read-only VIEW projecting the
+      # anchor tables (members + project_access + agent_project_profiles) with no INSTEAD OF
+      # triggers — so its fixtures (INSERT INTO team_members, agents without agent_config) are
+      # structurally incompatible. The view definition now guarantees the parity invariant by
+      # construction. Rewriting this test for the post-cutover schema is tracked as follow-up.
 
   backend-test:
     name: Backend pytest

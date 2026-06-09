@@ -1,11 +1,13 @@
+from __future__ import annotations
+
 import uuid
 from datetime import date
 from typing import Any
 
-from sqlalchemy import select, text
+from sqlalchemy import exists, select, text
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.models.standup import StandupEntry, StandupFeedback
+from app.models.standup import StandupEntry, StandupEntryProject, StandupFeedback
 from app.repositories.base import BaseRepository
 
 # AC3-3: missing 산정 — "effective 휴먼 project access"를 canonical members.id로 열거(team_members
@@ -34,10 +36,14 @@ _MISSING_SQL = text(
         JOIN member_identity_aliases a ON a.alias_id = tm.id
         WHERE tm.project_id = :proj AND tm.type = 'human' AND tm.is_active = true
     ), submitted AS (
+        -- 51447ca0: projection — 제출 여부는 entry.project_id 가 아니라 standup_entry_projects
+        -- link 로 판정(org-level 엔트리가 링크된 프로젝트서 submitted). "org 1번 제출=linked
+        -- 프로젝트 전부 not-missing". legacy 엔트리는 0099 백필 링크로 동일 커버.
         SELECT DISTINCT COALESCE(a.member_id, se.author_id) AS cid
         FROM standup_entries se
+        JOIN standup_entry_projects sep ON sep.entry_id = se.id
         LEFT JOIN member_identity_aliases a ON a.alias_id = se.author_id
-        WHERE se.org_id = :org AND se.project_id = :proj AND se.date = :date
+        WHERE se.org_id = :org AND sep.project_id = :proj AND se.date = :date
     )
     SELECT r.cid FROM roster r WHERE r.cid NOT IN (SELECT cid FROM submitted)
     """
@@ -48,23 +54,86 @@ class StandupEntryRepository(BaseRepository[StandupEntry]):
     def __init__(self, session: AsyncSession, org_id: uuid.UUID) -> None:
         super().__init__(StandupEntry, session, org_id)
 
+    async def list(self, limit: int = 1000, **filters: Any) -> list[StandupEntry]:
+        """51447ca0: project_id 필터를 standup_entry_projects link join(projection)으로 해소.
+
+        org-level 엔트리(project_id NULL·링크로 surface)도 링크된 프로젝트 뷰에 나타난다.
+        EXISTS 라 double-count 없음. legacy 엔트리는 0099 백필 링크로 동일 커버(연속성).
+        project_id 외 필터(author_id·sprint_id·date)는 기존대로 컬럼 일치.
+        """
+        project_id = filters.pop("project_id", None)
+        q = select(StandupEntry).where(self._org_filter())
+        for attr, val in filters.items():
+            q = q.where(getattr(StandupEntry, attr) == val)
+        if project_id is not None:
+            q = q.where(
+                exists().where(
+                    StandupEntryProject.entry_id == StandupEntry.id,
+                    StandupEntryProject.project_id == project_id,
+                )
+            )
+        result = await self.session.execute(q.limit(limit))
+        return list(result.scalars().all())
+
     async def upsert(self, **data: Any) -> StandupEntry:
-        """UNIQUE(project_id, author_id, date) 기반 upsert."""
+        """E-STANDUP 3b6b567c: org-level upsert — 키 **(org_id, author_id, date)**.
+
+        프로젝트별 별도 행이 아니라 author+date 당 org 1엔트리. 프로젝트 surface 는
+        standup_entry_projects link 로 projection(51447ca0). project_id(origin)는 컬럼 유지
+        하되 더 이상 identity 키가 아니다. org_id 는 self.org_id(=get_verified_org_id 검증값,
+        CP3) — 클라 바디 미수용.
+        """
         existing = await self.session.execute(
             select(StandupEntry).where(
                 self._org_filter(),
-                StandupEntry.project_id == data["project_id"],
                 StandupEntry.author_id == data["author_id"],
                 StandupEntry.date == data["date"],
             )
         )
         entry = existing.scalar_one_or_none()
         if entry is not None:
-            update_data = {k: v for k, v in data.items() if k not in ("project_id", "author_id", "date")}
+            update_data = {k: v for k, v in data.items() if k not in ("author_id", "date")}
             updated = await self.update(entry.id, **update_data)
             assert updated is not None
-            return updated
-        return await self.create(**data)
+            entry = updated
+        else:
+            entry = await self.create(**data)
+        # projection link 유지 (project_id 제공 시 멱등 보장). 빈 링크/프로젝트 미선택 등
+        # full write 링크 정책은 1c2be9db(write API) 스코프.
+        project_id = data.get("project_id")
+        if project_id is not None:
+            await self.session.execute(
+                text(
+                    "INSERT INTO standup_entry_projects (id, entry_id, project_id, org_id) "
+                    "VALUES (gen_random_uuid(), :e, :p, :o) "
+                    "ON CONFLICT (entry_id, project_id) DO NOTHING"
+                ),
+                {"e": entry.id, "p": project_id, "o": self.org_id},
+            )
+        return entry
+
+    async def resync_project_links(self, entry_id: uuid.UUID, project_ids: list[uuid.UUID]) -> None:
+        """1c2be9db: org-level write — entry 의 projection 링크를 project_ids 로 **full overwrite**.
+
+        DELETE(entry_id) 후 INSERT — author 접근 프로젝트(accessible) 동기화 경로 전용
+        (CP2-B). target 에 없는 기존 링크는 삭제(접근 변동 반영·stale 0). project_ids 는
+        accessible_project_ids_in_org(canonical helper) 결과여야 한다(존재하는 project 만 — FK 안전).
+        legacy project_id 명시 write 는 이 메서드를 호출하지 않고 upsert 의 additive(ON CONFLICT
+        DO NOTHING·미삭제) 만 사용한다.
+        """
+        await self.session.execute(
+            text("DELETE FROM standup_entry_projects WHERE entry_id = :e"),
+            {"e": entry_id},
+        )
+        for pid in project_ids:
+            await self.session.execute(
+                text(
+                    "INSERT INTO standup_entry_projects (id, entry_id, project_id, org_id) "
+                    "VALUES (gen_random_uuid(), :e, :p, :o) "
+                    "ON CONFLICT (entry_id, project_id) DO NOTHING"
+                ),
+                {"e": entry_id, "p": pid, "o": self.org_id},
+            )
 
     async def get_missing(self, project_id: uuid.UUID, target_date: date) -> list[uuid.UUID]:
         """해당 날짜 standup 미제출 휴먼의 **canonical members.id** 목록 (AC3-3).

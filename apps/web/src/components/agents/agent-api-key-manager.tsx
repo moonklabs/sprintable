@@ -14,9 +14,7 @@ import {
 } from '@/components/ui/dialog';
 import { Input } from '@/components/ui/input';
 import { useToast } from '@/components/ui/toast';
-
-const SCOPES = ['read', 'write', 'admin'] as const;
-type Scope = typeof SCOPES[number];
+import { ToolPermissionPicker } from '@/components/agents/tool-permission-picker';
 
 interface ApiKey {
   id: string;
@@ -39,13 +37,15 @@ export function AgentApiKeyManager({ agentId, agentName, onNewKey }: AgentApiKey
   const [loading, setLoading] = useState(false);
   const [newKeyDialog, setNewKeyDialog] = useState(false);
   const [generatedKey, setGeneratedKey] = useState<string | null>(null);
-  const [selectedScopes, setSelectedScopes] = useState<Scope[]>(['read', 'write']);
+  // 툴 권한 = 그룹키 배열(=api-key.scope). picker가 카탈로그 로드 후 전체 비파괴로 기본 초기화.
+  const [selectedScopes, setSelectedScopes] = useState<string[]>([]);
   const [copiedOnboarding, setCopiedOnboarding] = useState(false);
   const [copiedKey, setCopiedKey] = useState(false);
   const [revokeConfirmDialog, setRevokeConfirmDialog] = useState(false);
   const { addToast } = useToast();
 
-  const LLMS_URL = 'https://app.sprintable.ai/llms.txt';
+  // f44e2644: 랜딩 canonical 직지정(app.sprintable.ai CF 301 prod 미발동·앱 사본 onboarding-guide 깨짐).
+  const LLMS_URL = 'https://sprintable.ai/llms.txt';
 
   const buildOnboardingMessage = (apiKey: string) =>
     `아래의 정보를 읽고 온보딩하기 바람.\nsprintable agent name : ${agentName}\nsprintable agent api key : ${apiKey}\n${LLMS_URL}`;
@@ -228,27 +228,16 @@ export function AgentApiKeyManager({ agentId, agentName, onNewKey }: AgentApiKey
               Generate API Key
             </Button>
           </div>
-          <div className="flex gap-4">
-            <p className="text-xs text-muted-foreground self-center">Scope:</p>
-            {SCOPES.map((scope) => (
-              <label key={scope} className="flex items-center gap-1.5 text-xs cursor-pointer">
-                <input
-                  type="checkbox"
-                  checked={selectedScopes.includes(scope)}
-                  onChange={(e) => {
-                    if (e.target.checked) {
-                      setSelectedScopes((prev) => [...prev, scope]);
-                    } else {
-                      setSelectedScopes((prev) => prev.filter((s) => s !== scope));
-                    }
-                  }}
-                  className="h-3 w-3"
-                />
-                <span className={scope === 'admin' ? 'text-orange-500 font-medium' : ''}>{scope}</span>
-              </label>
-            ))}
-          </div>
         </div>
+      </div>
+
+      {/* 툴 권한 picker (2da32fbf) — 선택 그룹키가 신규 키의 scope로 바인딩된다. */}
+      <div className="mb-4">
+        <ToolPermissionPicker
+          value={selectedScopes}
+          onChange={setSelectedScopes}
+          disabled={loading}
+        />
       </div>
 
       {apiKeys.length === 0 ? (
@@ -355,6 +344,12 @@ export function AgentApiKeyManager({ agentId, agentName, onNewKey }: AgentApiKey
                   Authorization: Bearer {generatedKey}
                 </code>
               </p>
+              <div className="rounded-md bg-muted p-2">
+                <p className="text-xs font-medium text-foreground">이 키의 툴 권한 (scope)</p>
+                <p className="mt-1 font-mono text-xs text-muted-foreground break-all">
+                  {['core', ...selectedScopes].join(' · ')}
+                </p>
+              </div>
               <div className="pt-2 border-t border-border">
                 <p className="text-xs text-muted-foreground mb-2">에이전트에게 아래 온보딩 메시지를 전달하세요:</p>
                 <pre className="text-xs bg-muted rounded p-2 whitespace-pre-wrap break-all">{buildOnboardingMessage(generatedKey)}</pre>

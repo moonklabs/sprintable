@@ -135,6 +135,9 @@ def _event_to_payload(event: "Event") -> dict:
         "source": {"type": event.source_entity_type, "id": str(event.source_entity_id) if event.source_entity_id else None},
         "sender_id": str(event.sender_id) if event.sender_id else None,
         "payload": event.payload,
+        # E-EVENT-INJECT S1: content를 SSE top-level로 노출(conversation.message_created 미러).
+        # connector가 top-level content를 읽어 드롭 안 걸리게.
+        "content": (event.payload or {}).get("content"),
         "created_at": event.created_at.isoformat(),
     }
 

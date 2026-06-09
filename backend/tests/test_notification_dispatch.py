@@ -238,3 +238,32 @@ async def test_mixed_settings_only_enabled_gets_notification(mock_session, org_i
     assert added.user_id == user_on
 
 
+@pytest.mark.anyio
+async def test_dispatch_dedups_multiproject_view_rows(mock_session, org_id):
+    """회귀 버그: team_members 뷰(0088 projection)는 멀티프로젝트 멤버를 N행(동일 id)으로 반환 →
+    dedup 없으면 알림이 프로젝트 수만큼 중복 생성됨(Story Assign 시 Inbox 3개 증상).
+    member id dedup으로 멤버당 1 알림만 생성되어야 한다."""
+    from app.services.notification_dispatch import dispatch_notification
+
+    member_id = uuid.uuid4()
+    user_id = uuid.uuid4()
+    settings = _settings_result([])
+    wh_result = MagicMock()
+    wh_result.scalars.return_value.all.return_value = []
+    # 멀티프로젝트 멤버 = 같은 (id, user_id) 3행 (3개 프로젝트 소속 재현)
+    members = _members_result([(member_id, user_id), (member_id, user_id), (member_id, user_id)])
+    mock_session.execute.side_effect = [settings, wh_result, members]
+
+    await dispatch_notification(
+        mock_session,
+        org_id=org_id,
+        event_type="story_assigned",
+        target_member_ids=[member_id],
+        title="스토리 담당자로 지정됨",
+    )
+
+    notifs = [c.args[0] for c in mock_session.add.call_args_list if isinstance(c.args[0], Notification)]
+    assert len(notifs) == 1, f"멀티프로젝트 멤버에게 알림 {len(notifs)}개 생성됨 (dedup으로 1개여야)"
+    assert notifs[0].user_id == user_id
+
+

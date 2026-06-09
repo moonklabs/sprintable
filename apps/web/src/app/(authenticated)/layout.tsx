@@ -37,7 +37,20 @@ export default async function AuthenticatedLayout({
   // 401(인증 만료)만 /login 리다이렉트, 다른 에러(500 등)는 children 렌더링 유지
   if (!meRes || meRes.status === 401) redirect('/login');
 
-  const me = meRes.ok ? (await meRes.json() as MemberContext | null) : null;
+  // 🔴 org 없는 유저(신규 OAuth 가입자 등 — team_member 미생성 시 /me 404) → 온보딩으로.
+  // auth/callback이 is_new_user 무관 /inbox 리다이렉트하는 결함을 layout에서 OAuth+email/pw 공통 커버
+  // (org-less가 깨진 페이지 도달 자체 차단). /onboarding은 (authenticated) 밖이라 루프 없음.
+  if (meRes.status === 404) redirect('/onboarding');
+
+  // 0746aab9: /me가 403(org 전환 후 project 접근/인가 실패) 등 비-2xx면, 조용히 null 컨텍스트로
+  // 렌더하지 않고 에러 경계(error.tsx)로 넘긴다. 기존 `me = meRes.ok ? ... : null`이 403/500을
+  // 삼켜 DashboardShell이 org/project 컨텍스트 없이 깨진 화면을 무에러로 렌더하던 footgun 제거.
+  if (!meRes.ok) {
+    throw new Error(`Failed to load account context (HTTP ${meRes.status})`);
+  }
+
+  const me = (await meRes.json()) as MemberContext | null;
+  if (!me?.org_id) redirect('/onboarding');
   const memberships: { projectId: string; projectName: string }[] =
     membershipsRes?.ok ? ((await membershipsRes.json()) as { projectId: string; projectName: string }[]) : [];
   const projectMemberships = memberships.length > 0

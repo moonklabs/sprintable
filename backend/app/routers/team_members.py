@@ -56,6 +56,34 @@ def _get_repo(
     return TeamMemberRepository(session, org_id)
 
 
+# org-level 휴먼은 특정 프로젝트에 귀속되지 않는다(org_members SSOT 직접 해소). TeamMemberResponse.
+# project_id 가 required 라 nil sentinel 을 둔다 — FE 스탠드업 로스터는 id/name/type 만 읽고
+# 휴먼은 project 컬럼을 사용하지 않는다(S:166051f0). 응답 스키마(계약) 변경 0.
+_ORG_LEVEL_HUMAN_PROJECT_ID = uuid.UUID(int=0)
+
+
+def _build_org_human_response(row: dict, org_id: uuid.UUID) -> TeamMemberResponse:
+    """org_members 직접 해소 휴먼 행 → TeamMemberResponse (S:166051f0).
+
+    id = org_member.id(canonical 휴먼 신원). presence/active_story/색상 등은 휴먼 무의미 → 기본값.
+    """
+    now = row.get("created_at") or datetime.now(timezone.utc)
+    return TeamMemberResponse(
+        id=row["id"],
+        project_id=_ORG_LEVEL_HUMAN_PROJECT_ID,
+        org_id=org_id,
+        user_id=row.get("user_id"),
+        type="human",
+        name=row["name"],
+        role=row["role"],
+        avatar_url=row.get("avatar_url"),
+        is_active=True,
+        color="#3385f8",
+        created_at=now,
+        updated_at=now,
+    )
+
+
 @router.get("", response_model=list[TeamMemberResponse])
 async def list_team_members(
     project_id: uuid.UUID | None = Query(default=None),
@@ -64,10 +92,28 @@ async def list_team_members(
     user_id: uuid.UUID | None = Query(default=None),
     repo: TeamMemberRepository = Depends(_get_repo),
     session: AsyncSession = Depends(get_db),
+    org_id: uuid.UUID = Depends(get_verified_org_id),
 ) -> list[TeamMemberResponse]:
-    filters: dict = {}
-    if project_id:
-        filters["project_id"] = project_id
+    # S:166051f0 — org-level(project_id 없음): 휴먼 = org_members SSOT **직접** 해소
+    # (team_members 뷰=members⋈project_access 비의존 → project_access.member_id NULL 인
+    # grant-only/owner 휴먼도 포함, 곱연산 0). 에이전트는 기존 뷰(type=agent) 그대로.
+    # project-scoped(project_id 지정)는 기존 뷰 경로 무변경 → 다른 consumer 무회귀(AC3).
+    if project_id is None:
+        result: list[TeamMemberResponse] = []
+        if type_filter in (None, "human"):
+            human_rows = await repo.list_org_human_members(user_id=user_id)
+            result.extend(_build_org_human_response(r, org_id) for r in human_rows)
+        if type_filter in (None, "agent"):
+            agent_filters: dict = {"type": "agent"}
+            if is_active is not None:
+                agent_filters["is_active"] = is_active
+            if user_id:
+                agent_filters["user_id"] = user_id
+            agents = await repo.list(**agent_filters)
+            result.extend(await _inject_active_stories(agents, session))
+        return result
+
+    filters: dict = {"project_id": project_id}
     if type_filter:
         filters["type"] = type_filter
     if is_active is not None:
@@ -174,7 +220,6 @@ async def create_team_member(
         user_id=body.user_id,
         avatar_url=body.avatar_url,
         agent_config=body.agent_config,
-        webhook_url=body.webhook_url,
         color=body.color,
         agent_role=body.agent_role,
         created_by=created_by,
@@ -243,8 +288,17 @@ async def create_team_member(
     api_key_plaintext: str | None = None
     if body.type == "agent":
         from app.repositories.api_key import ApiKeyRepository
+        from app.services.mcp_toolset import ALL_GROUPS
         api_key_repo = ApiKeyRepository(session)
-        _api_key_obj, api_key_plaintext = await api_key_repo.create(team_member_id=member.id)
+        # 8d02d5e8: 온보딩 에이전트 키도 명시적 툴그룹 scope(전 비파괴 그룹) 부여 — 고급 Tool-permissions
+        # UI와 동일 모델로 통일. scope=None(레거시 read/write fallback) 대신 list(ALL_GROUPS) 명시.
+        # 동작 동일(resolve_policy None=전체)이나 모델 일관·레거시 표기 제거.
+        _api_key_obj, api_key_plaintext = await api_key_repo.create(
+            team_member_id=member.id, scope=list(ALL_GROUPS)
+        )
+        # E-MSG-POLICY S2: creator를 agent allow_list에 자동 등록(같은 트랜잭션·멱등).
+        from app.services.agent_message_policy import ensure_creator_allowlisted
+        await ensure_creator_allowlisted(session, member.id)
 
     # AC3: agent 응답에 fakechat_port + mcp_config 포함
     response = TeamMemberResponse.model_validate(member).model_dump()

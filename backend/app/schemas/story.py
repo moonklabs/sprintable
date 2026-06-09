@@ -47,6 +47,49 @@ STATUS_TRANSITIONS: dict[str, str] = {
 }
 
 
+# E-FILE S4: 보드 스토리 첨부. GCS 기록은 FE-proxy(uploadToGcs), BE는 URL+메타만 저장(chat 동형).
+_MAX_STORY_ATTACHMENTS = 10
+_MAX_ATTACHMENT_SIZE = 100 * 1024 * 1024  # 100MB
+
+
+class StoryAttachment(BaseModel):
+    url: str           # FE-proxy가 GCS에 업로드한 객체 URL (https)
+    name: str          # 원본 파일명
+    content_type: str  # MIME
+    size: int          # 바이트
+
+    @field_validator("url")
+    @classmethod
+    def _validate_url(cls, v: str) -> str:
+        v = v.strip()
+        if not v.startswith("https://"):
+            raise ValueError("attachment url must be an https:// URL")
+        return v
+
+    @field_validator("name", "content_type")
+    @classmethod
+    def _non_empty(cls, v: str) -> str:
+        v = v.strip()
+        if not v:
+            raise ValueError("must not be empty")
+        return v
+
+    @field_validator("size")
+    @classmethod
+    def _validate_size(cls, v: int) -> int:
+        if v < 0:
+            raise ValueError("size must be >= 0")
+        if v > _MAX_ATTACHMENT_SIZE:
+            raise ValueError(f"attachment too large (max {_MAX_ATTACHMENT_SIZE} bytes)")
+        return v
+
+
+def _limit_story_attachments(v: list) -> list:
+    if v is not None and len(v) > _MAX_STORY_ATTACHMENTS:
+        raise ValueError(f"too many attachments (max {_MAX_STORY_ATTACHMENTS})")
+    return v
+
+
 class StoryCreate(BaseModel):
     project_id: uuid.UUID
     org_id: uuid.UUID
@@ -54,6 +97,10 @@ class StoryCreate(BaseModel):
     epic_id: uuid.UUID | None = None
     sprint_id: uuid.UUID | None = None
     assignee_id: uuid.UUID | None = None
+    # E-BOARD S5: 복수 assignee. 미지정(None)이면 assignee_id 단독 동작(back-compat).
+    assignee_ids: list[uuid.UUID] | None = None
+    # E-FILE S4: 보드 스토리 첨부 (기본 [], 최대 10).
+    attachments: list[StoryAttachment] = []
     meeting_id: uuid.UUID | None = None
     status: str = "backlog"
     priority: str = "medium"
@@ -71,12 +118,21 @@ class StoryCreate(BaseModel):
     def validate_metric_definition(cls, v: dict | None) -> dict | None:
         return _validate_metric_definition(v)
 
+    @field_validator("attachments")
+    @classmethod
+    def _check_attachments(cls, v):
+        return _limit_story_attachments(v)
+
 
 class StoryUpdate(BaseModel):
     title: str | None = None
     epic_id: uuid.UUID | None = None
     sprint_id: uuid.UUID | None = None
     assignee_id: uuid.UUID | None = None
+    # E-BOARD S5: 복수 assignee. 미지정(None)이면 join 미변경(back-compat).
+    assignee_ids: list[uuid.UUID] | None = None
+    # E-FILE S4: 보드 스토리 첨부. 미지정(None)이면 변경 안 함(back-compat).
+    attachments: list[StoryAttachment] | None = None
     meeting_id: uuid.UUID | None = None
     priority: str | None = None
     story_points: int | None = None
@@ -96,6 +152,11 @@ class StoryUpdate(BaseModel):
     def validate_metric_definition(cls, v: dict | None) -> dict | None:
         return _validate_metric_definition(v)
 
+    @field_validator("attachments")
+    @classmethod
+    def _check_attachments(cls, v):
+        return _limit_story_attachments(v)
+
 
 class StoryStatusUpdate(BaseModel):
     status: str
@@ -110,8 +171,17 @@ class StoryResponse(BaseModel):
     epic_id: uuid.UUID | None = None
     sprint_id: uuid.UUID | None = None
     assignee_id: uuid.UUID | None = None
+    # E-BOARD S5: 복수 assignee. join 테이블 멤버. 레거시 행은 [assignee_id] 폴백.
+    assignee_ids: list[uuid.UUID] = []
+    # E-FILE S4: 보드 스토리 첨부 (column 값). list 아니면 [](레거시 None/mock 안전).
+    attachments: list[dict] = []
     meeting_id: uuid.UUID | None = None
     title: str
+
+    @field_validator("attachments", mode="before")
+    @classmethod
+    def _coerce_attachments(cls, v):
+        return v if isinstance(v, list) else []
     status: str
     priority: str
     story_points: int | None = None

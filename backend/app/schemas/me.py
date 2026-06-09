@@ -14,6 +14,7 @@ class MeResponse(BaseModel):
     project_id: uuid.UUID
     user_id: uuid.UUID | None = None
     name: str
+    email: str | None = None  # E-ONBOARDING S2: User.email 노출
     type: str
     role: str
     is_active: bool

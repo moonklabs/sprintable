@@ -42,14 +42,20 @@ async def list_org_members(
     org_id: uuid.UUID = Depends(get_verified_org_id),
 ) -> list[OrgMemberResponse]:
     """org_members + users JOIN — email 포함 응답."""
+    # E-ONBOARDING S2: 실명 노출 — canonical Member.name → User.display_name → email 순.
+    # members는 (org_id, user_id) 활성 휴먼으로 LEFT JOIN (없으면 display_name/email 폴백).
     result = await session.execute(
         text(
             """
             SELECT om.id, om.org_id, om.user_id, om.role,
                    om.created_at, om.deleted_at,
-                   u.email
+                   u.email,
+                   COALESCE(m.name, u.display_name, u.email) AS name
             FROM org_members om
             LEFT JOIN users u ON u.id = om.user_id
+            LEFT JOIN members m
+                   ON m.org_id = om.org_id AND m.user_id = om.user_id
+                  AND m.type = 'human' AND m.deleted_at IS NULL
             WHERE om.org_id = :org_id AND om.deleted_at IS NULL
             ORDER BY om.created_at
             """
@@ -65,6 +71,7 @@ async def list_org_members(
             created_at=row.created_at,
             deleted_at=row.deleted_at,
             email=row.email,
+            name=row.name,
         )
         for row in result
     ]

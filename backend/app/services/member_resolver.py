@@ -169,13 +169,37 @@ async def _resolve_member_anchor(
             Member.deleted_at.is_(None),
         )
     )).scalar_one_or_none()
-    if m is None:
-        raise HTTPException(status_code=400, detail="Organization member not found")
 
     user = (await session.execute(
         select(User).where(User.id == user_id)
     )).scalar_one_or_none()
     name = user.email if user else str(user_id)
+
+    if m is None:
+        # P0 핫픽스(members-sync 갭): members 앵커 행이 없는 org-member 폴백.
+        # org-create(organizations.py)·invite-accept 는 org_members 만 INSERT·members 미생성 →
+        # 0075 백필 이후 신규 org-creator/invitee 는 members 행이 없어 여기서 400 났다.
+        # **org_members 폴백**(canonical org_member.id) — 0075 ID 보존(member.id = org_member.id)
+        # 이라 anchor 가 반환할 동일 신원을 org_members 서 소싱(parity). team_member 봐주기 아님
+        # (team_member 조회 0·org_members 만). GET /me 의 org_members 폴백과 동형.
+        om = (await session.execute(
+            select(OrgMember).where(
+                OrgMember.org_id == org_id,
+                OrgMember.user_id == user_id,
+                OrgMember.deleted_at.is_(None),
+            )
+        )).scalar_one_or_none()
+        if om is None:
+            raise HTTPException(status_code=400, detail="Organization member not found")
+        return ResolvedMember(
+            id=om.id,
+            user_id=user_id,
+            name=name,
+            type="human",
+            role=om.role,
+            org_id=om.org_id,
+            project_id=project_id,
+        )
 
     return ResolvedMember(
         id=m.id,

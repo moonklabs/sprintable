@@ -46,13 +46,16 @@ jobs:
             echo "target=prod" >> "$GITHUB_OUTPUT"
             echo "fastapi_url=https://sprintable-backend-prod-787818285179.asia-northeast3.run.app" >> "$GITHUB_OUTPUT"
             echo "backend_min_instances=1" >> "$GITHUB_OUTPUT"
+            # maxScale 10: 429 포화(2026-06-09)·6은 sat 유발. #1330 가속→연결 회전→10×8=80<DB 100 viable. PgBouncer 後 30+.
             echo "backend_max_instances=10" >> "$GITHUB_OUTPUT"
             echo "ga4_measurement_id=G-RYHFE7XM3X" >> "$GITHUB_OUTPUT"
           else
             echo "target=dev" >> "$GITHUB_OUTPUT"
             echo "fastapi_url=https://sprintable-backend-dev-787818285179.asia-northeast3.run.app" >> "$GITHUB_OUTPUT"
             echo "backend_min_instances=1" >> "$GITHUB_OUTPUT"
-            echo "backend_max_instances=3" >> "$GITHUB_OUTPUT"
+            # maxScale 10: 429 포화(2026-06-09)·6은 sat 유발. #1330 statement_cache 가속→연결 회전→
+            # 10×8=80<DB 100 viable. prod(L49)·cloudbuild.yaml default와 합치. PgBouncer 랜딩 後 30+.
+            echo "backend_max_instances=10" >> "$GITHUB_OUTPUT"
             echo "ga4_measurement_id=" >> "$GITHUB_OUTPUT"
           fi
 
