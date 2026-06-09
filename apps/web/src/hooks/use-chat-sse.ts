@@ -57,25 +57,17 @@ interface SseChatPayload {
   created_at: string;
 }
 
-// 1aeecdde P2: 에이전트 답장 생성구간 working/typing 이벤트(BE emit=디디 P2 lane·메모 presence.py ephemeral TTL 동형).
-export interface AgentWorkingPayload {
-  agent_id: string;
-  conversation_id: string;
-  state?: 'working' | 'typing';
-}
-
 interface UseChatSseOptions {
   currentTeamMemberId?: string;
   onNewMessage?: (message: ChatMessage) => void;
   onReplyCreated?: (memoId: string) => void;
   onConversationMessage?: (payload: Record<string, unknown>) => void;
-  onAgentWorking?: (payload: AgentWorkingPayload) => void;
   onReconnect?: () => void;
 }
 
 const RECONNECT_DELAYS_MS = [5_000, 30_000, 60_000, 300_000];
 
-export function useChatSse({ currentTeamMemberId, onNewMessage, onReplyCreated, onConversationMessage, onAgentWorking, onReconnect }: UseChatSseOptions) {
+export function useChatSse({ currentTeamMemberId, onNewMessage, onReplyCreated, onConversationMessage, onReconnect }: UseChatSseOptions) {
   const [connected, setConnected] = useState(false);
   const sourceRef = useRef<EventSource | null>(null);
   const reconnectTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -84,7 +76,6 @@ export function useChatSse({ currentTeamMemberId, onNewMessage, onReplyCreated, 
   const onNewMessageRef = useRef(onNewMessage);
   const onReplyCreatedRef = useRef(onReplyCreated);
   const onConversationMessageRef = useRef(onConversationMessage);
-  const onAgentWorkingRef = useRef(onAgentWorking);
   const onReconnectRef = useRef(onReconnect);
   const memberIdRef = useRef(currentTeamMemberId);
 
@@ -93,7 +84,6 @@ export function useChatSse({ currentTeamMemberId, onNewMessage, onReplyCreated, 
   useLayoutEffect(() => { onNewMessageRef.current = onNewMessage; }, [onNewMessage]);
   useLayoutEffect(() => { onReplyCreatedRef.current = onReplyCreated; }, [onReplyCreated]);
   useLayoutEffect(() => { onConversationMessageRef.current = onConversationMessage; }, [onConversationMessage]);
-  useLayoutEffect(() => { onAgentWorkingRef.current = onAgentWorking; }, [onAgentWorking]);
   useLayoutEffect(() => { onReconnectRef.current = onReconnect; }, [onReconnect]);
   useLayoutEffect(() => { memberIdRef.current = currentTeamMemberId; }, [currentTeamMemberId]);
 
@@ -162,17 +152,6 @@ export function useChatSse({ currentTeamMemberId, onNewMessage, onReplyCreated, 
         } catch { /* ignore parse errors */ }
       });
 
-      // 1aeecdde P2: agent:working/typing — 에이전트 답장 생성구간 ephemeral 시그널(BE emit=디디 P2 lane).
-      // 미머지 시 이벤트 미수신 → typing 미표시(graceful). 두 이름 모두 구독(계약 정합).
-      const onWorking = (e: MessageEvent) => {
-        if (e.lastEventId) lastEventIdRef.current = e.lastEventId;
-        try {
-          const payload = JSON.parse(e.data as string) as AgentWorkingPayload;
-          if (payload.agent_id && payload.conversation_id) onAgentWorkingRef.current?.(payload);
-        } catch { /* ignore parse errors */ }
-      };
-      source.addEventListener('agent:working', onWorking);
-      source.addEventListener('agent:typing', onWorking);
     }
 
     connect();

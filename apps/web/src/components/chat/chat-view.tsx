@@ -9,7 +9,7 @@ import type { PresenceStatus } from './presence-dot';
 import { CommandHintNotice, type BlockedHint } from './command-hint-notice';
 import { ChatInput, type CommandTarget } from './chat-input';
 import { ThreadPanel } from './thread-panel';
-import type { ChatMessage, SendAttachment, AgentWorkingPayload } from '@/hooks/use-chat-sse';
+import type { ChatMessage, SendAttachment } from '@/hooks/use-chat-sse';
 import { normalizeToMessage, useChatSse } from '@/hooks/use-chat-sse';
 import { EmptyState } from '@/components/ui/empty-state';
 
@@ -55,9 +55,8 @@ export function ChatView({ threadId, currentTeamMemberId, threadTitle, projectId
   // S5: 미지원 런타임 커맨드 차단 hint — 트리거 메시지 id에 keyed된 ephemeral state.
   // POST 응답 command_gate.blocked에서만 적재(persist 안 함·reload 시 소멸).
   const [commandHints, setCommandHints] = useState<Record<string, BlockedHint[]>>({});
-  // 1aeecdde P2: 답장 생성 중 에이전트 typing — agent_id keyed ephemeral(TTL 12s·메시지 도착 시 clear).
+  // 1aeecdde P2: 답장 생성 중 에이전트 typing — 디디 #1353 GET /working 폴링(BE 45s TTL) 결과.
   const [typingAgents, setTypingAgents] = useState<{ id: string; name: string }[]>([]);
-  const typingTimersRef = useRef<Record<string, ReturnType<typeof setTimeout>>>({});
   // CB-S9: 스레드 패널 상태
   const [activeThread, setActiveThread] = useState<ChatMessage | null>(null);
   const [threadIncoming, setThreadIncoming] = useState<ChatMessage | null>(null);
@@ -135,11 +134,9 @@ export function ChatView({ threadId, currentTeamMemberId, threadTitle, projectId
     }
   }, [loading, scrollToBottom]);
 
-  // 1aeecdde P2: 에이전트 typing 해제(메시지 도착·TTL 만료).
+  // 1aeecdde P2: 에이전트 typing 즉시 해제(답장 메시지 도착 시·다음 폴링 전 갭 제거).
   const clearTyping = useCallback((agentId: string) => {
     setTypingAgents((prev) => (prev.some((a) => a.id === agentId) ? prev.filter((a) => a.id !== agentId) : prev));
-    const timer = typingTimersRef.current[agentId];
-    if (timer) { clearTimeout(timer); delete typingTimersRef.current[agentId]; }
   }, []);
 
   const addMessage = useCallback((msg: ChatMessage) => {
@@ -194,29 +191,32 @@ export function ChatView({ threadId, currentTeamMemberId, threadTitle, projectId
     fetchMessages();
   }, [fetchMessages]);
 
-  // 1aeecdde P2: agent:working/typing SSE 수신 → 현 대화 에이전트 typing 추가(이름=commandTargets에서·TTL 12s).
-  const handleAgentWorking = useCallback((p: AgentWorkingPayload) => {
-    if (p.conversation_id !== threadId) return;
-    const name = (commandTargets ?? []).find((tg) => tg.agentId === p.agent_id)?.agentName;
-    if (!name) return; // 이름 못 찾으면 미표시(graceful)
-    setTypingAgents((prev) => (prev.some((a) => a.id === p.agent_id) ? prev : [...prev, { id: p.agent_id, name }]));
-    const existing = typingTimersRef.current[p.agent_id];
-    if (existing) clearTimeout(existing);
-    typingTimersRef.current[p.agent_id] = setTimeout(() => clearTyping(p.agent_id), 12000);
-  }, [threadId, commandTargets, clearTyping]);
+  // 1aeecdde P2: working 폴링(디디 #1353 GET /working·in-memory 45s TTL) → typingAgents.
+  // 이름=commandTargets(없으면 미표시 graceful). poll이 BE working 셋 그대로 반영(클라 TTL 불요).
+  const fetchWorking = useCallback(async () => {
+    try {
+      const res = await fetch(`/api/conversations/${threadId}/working`);
+      if (!res.ok) return;
+      const json = await res.json() as { data?: Array<{ member_id: string }> };
+      const next = (json.data ?? [])
+        .map((w) => ({ id: w.member_id, name: (commandTargets ?? []).find((tg) => tg.agentId === w.member_id)?.agentName }))
+        .filter((a): a is { id: string; name: string } => !!a.name);
+      setTypingAgents(next);
+    } catch { /* non-critical */ }
+  }, [threadId, commandTargets]);
 
-  // 타이머 누수 방지 — 언마운트 시 전체 정리.
+  // 마운트 1회 + 5s 폴링(생성구간 typing 갱신·PO: 연결 dot 15s보다 민감하게).
+  useEffect(() => { void fetchWorking(); }, [fetchWorking]);
   useEffect(() => {
-    const timers = typingTimersRef.current;
-    return () => { Object.values(timers).forEach(clearTimeout); };
-  }, []);
+    const interval = setInterval(() => { void fetchWorking(); }, 5000);
+    return () => clearInterval(interval);
+  }, [fetchWorking]);
 
   useChatSse({
     currentTeamMemberId,
     onNewMessage: handleNewMessage,
     onReplyCreated: handleReplyCreated,
     onConversationMessage: handleConversationMessage,
-    onAgentWorking: handleAgentWorking,
     onReconnect: handleReconnect,
   });
 
