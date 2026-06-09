@@ -18,6 +18,7 @@ _logger = logging.getLogger(__name__)
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
+    from app.core.database import engine
     from app.services.pg_pubsub import listen_loop
     task = asyncio.create_task(listen_loop())
     try:
@@ -28,6 +29,13 @@ async def lifespan(app: FastAPI):
             await task
         except asyncio.CancelledError:
             pass
+        finally:
+            # 좀비 연결 박멸(S:33e0c681): SIGTERM(Cloud Run 인스턴스 교체·스케일다운·리비전 삭제)
+            # 시 SQLAlchemy 풀의 전 DB 연결을 정상 종료. dispose 누락 시 구 인스턴스가 연결을 안
+            # 놓아 좀비 누적 → prod 100 cap 초과 → TooManyConnections(전 엔드포인트 500). lifespan
+            # shutdown 은 in-flight 요청 drain 이후 실행되므로 dispose 순서 안전(AC3). pg_pubsub
+            # raw 커넥션은 task.cancel→listen_loop finally 에서 이미 close.
+            await engine.dispose()
 
 
 from app.routers import account, activity_logs, agent_deployments, agent_gateway, agent_inbox, agent_message_policy, agent_personas, agent_routing_rules, agent_runs, agent_sessions, analytics, api_keys, attachments, audit_logs, auth, bridge, channel, conversations, cron, current_project, dashboard, dependencies, dispatch, docs, entities, epics, event_notifications, events, exclusion, file_locks, gates, health, hitl, hitl_config, integrations, invite_accept, labels, mcp, me, meetings, members, mockups, notification_preferences, notifications, open_api_keys, org_invites, org_members, organizations, oss, participation, plan_features, policy_documents, presence, project_access, project_settings, projects, retros, rewards, sprints, standups, stories, subscription, tasks, team_members, trust_scores, verdict_capture, verdicts, webhooks, workflow_executions, workflow_recipes, workflow_report, workflow_templates, workflow_trigger, workflow_trigger_types, workflow_versions, ws_chat
