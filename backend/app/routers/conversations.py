@@ -705,6 +705,15 @@ async def list_conversations(
     all_member_ids = {r.member_id for r in p_rows}
     resolved_map = await lookup_members_by_ids(all_member_ids, db) if all_member_ids else {}
 
+    # E-CHAT-CMD S8b: participant 의 runtime_type 노출(team_members 뷰서 read — 에이전트만 값, 휴먼 NULL).
+    # S8 composer 가 미지원 런타임 에이전트 pre-send 경고를 그리려면 participant 응답에 runtime_type 필요.
+    runtime_type_map: dict[uuid.UUID, str | None] = {}
+    if all_member_ids:
+        rt_rows = (await db.execute(
+            select(TeamMember.id, TeamMember.runtime_type).where(TeamMember.id.in_(all_member_ids))
+        )).all()
+        runtime_type_map = {r.id: r.runtime_type for r in rt_rows}
+
     conv_participants: dict[uuid.UUID, list[dict]] = defaultdict(list)
     for r in p_rows:
         resolved = resolved_map.get(r.member_id)
@@ -713,6 +722,7 @@ async def list_conversations(
             "name": resolved.name if resolved else str(r.member_id)[:8],
             "avatar_url": getattr(resolved, "avatar_url", None) if resolved else None,
             "type": resolved.type if resolved else "human",
+            "runtime_type": runtime_type_map.get(r.member_id),
         })
 
     result = []
