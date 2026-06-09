@@ -3,7 +3,7 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { useRouter, useSearchParams } from 'next/navigation';
 import { useTranslations } from 'next-intl';
-import { Inbox as InboxIcon, Zap, ZapOff } from 'lucide-react';
+import { ChevronDown, ChevronRight, Inbox as InboxIcon, Zap, ZapOff } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { TopBarSlot } from '@/components/nav/top-bar-slot';
 import { Badge } from '@/components/ui/badge';
@@ -37,6 +37,19 @@ interface Notification {
   href?: string | null;
   created_at: string;
 }
+
+// f2ec5395: 인박스 렌더 단위 — 개별 알림(single) 또는 같은 스토리 status_changed 그룹(group).
+type InboxItem =
+  | { kind: 'single'; notification: Notification; sortTime: number }
+  | {
+      kind: 'group';
+      key: string;
+      notifications: Notification[];
+      latest: Notification;
+      count: number;
+      hasUnread: boolean;
+      sortTime: number;
+    };
 
 function AgentJoinedDetailPanel({
   notification,
@@ -272,6 +285,50 @@ export default function InboxPage() {
     [notifications, selectedId],
   );
 
+  // f2ec5395: 같은 스토리 status_changed 알림을 reference_id로 그룹(2건+). 타 type·단건은 개별 유지.
+  const inboxItems = useMemo<InboxItem[]>(() => {
+    const groups = new Map<string, Notification[]>();
+    const items: InboxItem[] = [];
+    for (const n of notifications) {
+      if (n.type === 'story_status_changed' && n.reference_id) {
+        const arr = groups.get(n.reference_id) ?? [];
+        arr.push(n);
+        groups.set(n.reference_id, arr);
+      } else {
+        items.push({ kind: 'single', notification: n, sortTime: new Date(n.created_at).getTime() });
+      }
+    }
+    for (const [key, arr] of groups) {
+      const sorted = [...arr].sort((a, b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime());
+      const latest = sorted[0]!;
+      const sortTime = new Date(latest.created_at).getTime();
+      if (sorted.length === 1) {
+        // 단건이면 noise 아님 → 개별 엔트리(그룹 chevron/카운트 없음).
+        items.push({ kind: 'single', notification: latest, sortTime });
+      } else {
+        items.push({
+          kind: 'group', key, notifications: sorted, latest, count: sorted.length,
+          hasUnread: sorted.some((n) => !n.is_read), sortTime,
+        });
+      }
+    }
+    return items.sort((a, b) => b.sortTime - a.sortTime);
+  }, [notifications]);
+
+  const [expandedGroups, setExpandedGroups] = useState<Set<string>>(new Set());
+  const toggleGroup = (key: string) => setExpandedGroups((prev) => {
+    const next = new Set(prev);
+    if (next.has(key)) next.delete(key); else next.add(key);
+    return next;
+  });
+
+  // 그룹 헤더 클릭 → 그룹 전체 읽음 + 스토리 이동(AC2).
+  const openGroup = async (group: Extract<InboxItem, { kind: 'group' }>) => {
+    const unread = group.notifications.filter((n) => !n.is_read);
+    await Promise.all(unread.map((n) => setNotificationReadState(n.id, n.is_read, true)));
+    if (group.latest.href) router.push(group.latest.href);
+  };
+
   return (
     <>
       <TopBarSlot
@@ -363,7 +420,68 @@ export default function InboxPage() {
               </div>
             ) : (
               <div className="space-y-1.5">
-                {notifications.map((notification) => {
+                {inboxItems.map((item) => {
+                  // f2ec5395: status_changed 그룹 엔트리(접힘 default·chevron 토글·헤더클릭=내비+일괄읽음).
+                  if (item.kind === 'group') {
+                    const expanded = expandedGroups.has(item.key);
+                    return (
+                      <div
+                        key={`group-${item.key}`}
+                        className={`rounded-xl border ${item.hasUnread ? 'border-brand/18 bg-brand/8' : 'border-white/8 bg-muted/55'}`}
+                      >
+                        <div className="flex items-stretch">
+                          <button
+                            type="button"
+                            onClick={() => toggleGroup(item.key)}
+                            aria-expanded={expanded}
+                            aria-label={expanded ? t('collapseHistory') : t('expandHistory')}
+                            className="flex shrink-0 items-center px-2 text-muted-foreground transition hover:text-foreground"
+                          >
+                            {expanded ? <ChevronDown className="size-4" /> : <ChevronRight className="size-4" />}
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => void openGroup(item)}
+                            className="flex min-w-0 flex-1 items-start gap-3 py-3 pr-3 text-left"
+                          >
+                            <div className="flex size-8 shrink-0 items-center justify-center rounded-lg bg-white/6 text-base">
+                              {NOTIFICATION_TYPE_ICONS[item.latest.type] ?? '📌'}
+                            </div>
+                            <div className="min-w-0 flex-1 space-y-1">
+                              <div className="flex items-start justify-between gap-2">
+                                {/* f2ec5395 fix: 카운트 칩을 truncate <p> 밖 shrink-0 형제로 — 긴 title 잘려도 칩 항상 표시(AC1 핵심) */}
+                                <div className="flex min-w-0 flex-1 items-center gap-1.5">
+                                  <p className={`min-w-0 truncate text-sm ${item.hasUnread ? 'font-semibold text-foreground' : 'text-muted-foreground'}`}>
+                                    {item.latest.title}
+                                  </p>
+                                  <span className="shrink-0 rounded-full border border-brand/30 bg-brand/10 px-1.5 py-0.5 text-[10px] font-medium text-brand">
+                                    {t('statusChangeCount', { count: item.count })}
+                                  </span>
+                                </div>
+                                <span className="shrink-0 text-[11px] text-muted-foreground">{formatTime(item.latest.created_at)}</span>
+                              </div>
+                              {item.hasUnread ? (
+                                <span className="inline-block h-1.5 w-1.5 rounded-full bg-brand" />
+                              ) : null}
+                            </div>
+                          </button>
+                        </div>
+                        {expanded ? (
+                          <div className="space-y-1.5 border-t border-white/8 py-2 pl-9 pr-3">
+                            {item.notifications.map((n, idx) => (
+                              <div key={n.id} className="flex items-center gap-2 text-xs">
+                                <span className={`size-1.5 shrink-0 rounded-full ${idx === 0 ? 'bg-success' : 'bg-muted-foreground/40'}`} />
+                                <span className="min-w-0 flex-1 truncate text-foreground">{n.title}</span>
+                                <span className="shrink-0 text-[10px] text-muted-foreground">{formatTime(n.created_at)}</span>
+                              </div>
+                            ))}
+                          </div>
+                        ) : null}
+                      </div>
+                    );
+                  }
+
+                  const notification = item.notification;
                   const isSelected = notification.id === selectedId;
                   return (
                     <button
