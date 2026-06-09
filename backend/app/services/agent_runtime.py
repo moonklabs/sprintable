@@ -59,7 +59,14 @@ _CAPABILITY_REGISTRY: dict[RuntimeType, RuntimeCapability] = {
     RuntimeType.GEMINI: RuntimeCapability(deterministic_command=True, command_endpoint_available=True),
     RuntimeType.GROK: RuntimeCapability(deterministic_command=True, command_endpoint_available=True),
     RuntimeType.PI: RuntimeCapability(deterministic_command=True, command_endpoint_available=True),
-    # 엔드포인트는 있으나 결정적 실행 아님
+    # E-CHAT-CMD S7 — OpenCode wiring 결정(블루프린트 §Task 7):
+    #   **MVP = unsupported hint**(deterministic_command=False). opencode 는 전용 커맨드
+    #   엔드포인트(`POST /session/:id/command`)가 존재하나(command_endpoint_available=True),
+    #   MVP 단순성을 위해 dedicated adapter 를 배선하지 않고 다른 비-결정적 런타임과 동일하게
+    #   capability gate(S4)가 차단+hint 처리한다. → 사용자에게 "이 런타임은 결정적 커맨드 미지원,
+    #   일반 메시지로 요청" 안내. ⚠️ **Phase2 후보**: command_endpoint_available=True 가 표식 —
+    #   향후 dedicated command endpoint adapter 를 배선하면 opencode 만 deterministic_command=True
+    #   로 승격 가능(다른 endpoint-없는 런타임과 구분되는 유일 케이스). 그때까지 기본값 유지.
     RuntimeType.OPENCODE: RuntimeCapability(deterministic_command=False, command_endpoint_available=True),
     # 커맨드 엔드포인트 자체 없음 — 스킬은 model-mediated 만
     RuntimeType.CLAUDE_CODE: RuntimeCapability(deterministic_command=False, command_endpoint_available=False),

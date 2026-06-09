@@ -82,3 +82,25 @@ def test_capability_is_immutable():
     cap = get_runtime_capability("hermes")
     with pytest.raises(dataclasses.FrozenInstanceError):
         cap.deterministic_command = False  # type: ignore[misc]
+
+
+def test_s7_opencode_mvp_unsupported_hint_decision():
+    """E-CHAT-CMD S7 — OpenCode wiring 결정 계약 잠금(블루프린트 §Task 7).
+
+    MVP: opencode = unsupported hint(deterministic_command=False) → capability gate(S4) 차단.
+    Phase2 후보 표식: command_endpoint_available=True(전용 command endpoint 존재).
+    opencode 는 'endpoint 있으나 비-결정적'인 **유일** 런타임(Phase2 승격 단일 후보).
+    """
+    cap = get_runtime_capability("opencode")
+    # MVP: 결정적 커맨드 미지원 → S4 게이트가 차단+hint
+    assert cap.deterministic_command is False
+    assert supports_deterministic_command("opencode") is False
+    # Phase2 표식: 전용 command endpoint 존재
+    assert cap.command_endpoint_available is True
+    # opencode = 'endpoint 있음 + 비-결정적' 유일 런타임(Phase2 승격 단일 후보)
+    phase2_candidates = [
+        r.value for r in RuntimeType
+        if not get_runtime_capability(r).deterministic_command
+        and get_runtime_capability(r).command_endpoint_available
+    ]
+    assert phase2_candidates == ["opencode"], f"Phase2 후보 단일성 깨짐: {phase2_candidates}"
