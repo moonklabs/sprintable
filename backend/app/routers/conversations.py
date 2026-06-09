@@ -19,8 +19,11 @@ from app.models.conversation import Conversation, ConversationMessage, Conversat
 from app.models.event import Event
 from app.models.project import OrgMember
 from app.models.team import AgentMessageAllowlist, TeamMember
+from app.models.agent_deployment import AgentAuditLog
 from app.models.webhook_config import WebhookConfig
 from app.routers.events import _push_to_agent, publish_event
+from app.services.agent_runtime import supports_deterministic_command
+from app.services.command_classifier import classify_command
 from app.services.event_seq import assign_recipient_seq
 from app.services.member_resolver import (
     ResolvedMember,
@@ -342,6 +345,75 @@ async def _dispatch_mention_events(
             await assign_recipient_seq(db, event)
     return [(pid_str, {"event_id": str(event.id), "event_type": "conversation:mention", **payload})
             for pid_str, event in events_to_push]
+
+
+async def _command_capability_gate(
+    db: AsyncSession,
+    conv: Conversation,
+    msg: ConversationMessage,
+    sender: "ResolvedMember | TeamMember",
+    org_id: uuid.UUID,
+) -> tuple[set[uuid.UUID], list[dict]]:
+    """E-CHAT-CMD S4: capability gate — 슬래시 커맨드를 미지원 런타임 에이전트에 주입하지 않는다.
+
+    메시지가 command candidate(S3 classifier)면, conversation 의 에이전트 수신자 각각의
+    runtime_type 을 capability registry(S1)로 조회한다. 결정적 커맨드 미지원(또는 runtime_type
+    없음/unknown) 에이전트는 **주입 차단**(반환된 id 를 dispatch exclude 로 사용) + audit log
+    `command_blocked_unsupported_runtime` 기록 + hint 생성. 지원 에이전트는 그대로 pass-through.
+
+    비-command 메시지는 빈 결과 → 기존 경로 무영향(AC4 회귀). project_id 없는 conversation 은
+    애초에 에이전트 dispatch 가 없어 게이트 무의미 → 빈 결과.
+
+    반환: (blocked_agent_ids, hints) — hints 는 발신자에게 돌려줄 구조화 안내.
+    """
+    candidate = classify_command(msg.content)
+    if candidate is None or not conv.project_id:
+        return set(), []
+
+    rows = (await db.execute(
+        select(TeamMember.id, TeamMember.name, TeamMember.runtime_type)
+        .join(ConversationParticipant, ConversationParticipant.member_id == TeamMember.id)
+        .where(
+            ConversationParticipant.conversation_id == conv.id,
+            TeamMember.type == "agent",
+            TeamMember.id != sender.id,
+        )
+    )).all()
+
+    blocked: set[uuid.UUID] = set()
+    hints: list[dict] = []
+    for agent_id, agent_name, runtime_type in rows:
+        if supports_deterministic_command(runtime_type):
+            continue  # AC2: 지원 런타임 → pass-through(기존 dispatch)
+        # AC3/AC4: 미지원(또는 runtime_type 없음/unknown) → 차단 + audit + hint
+        blocked.add(agent_id)
+        db.add(AgentAuditLog(
+            org_id=org_id,
+            project_id=conv.project_id,
+            agent_id=agent_id,
+            event_type="command_blocked_unsupported_runtime",
+            severity="info",
+            summary=f"'/{candidate.name}' blocked — runtime '{runtime_type or 'unset'}' lacks deterministic command support",
+            payload={
+                "command": candidate.name,
+                "raw": candidate.raw,
+                "runtime_type": runtime_type,
+                "conversation_id": str(conv.id),
+                "message_id": str(msg.id),
+                "sender_id": str(sender.id),
+            },
+        ))
+        hints.append({
+            "agent_id": str(agent_id),
+            "agent_name": agent_name,
+            "runtime_type": runtime_type,
+            "command": candidate.name,
+            "reason": "unsupported_runtime",
+        })
+
+    if blocked:
+        await db.flush()
+    return blocked, hints
 
 
 async def _dispatch_discord_outbound(
@@ -987,10 +1059,14 @@ async def send_message(
     except Exception:
         logger.warning("ChannelRouter pre-check failed message_id=%s — no SSE exclusion", msg.id)
 
+    # E-CHAT-CMD S4: capability gate — 슬래시 커맨드를 미지원 런타임 에이전트에 주입 차단(+audit+hint).
+    # 비-command 면 빈 결과 → 무영향. 차단 대상은 dispatch exclude 로 합쳐 주입 0.
+    blocked_agent_ids, command_hints = await _command_capability_gate(db, conv, msg, sender, org_id)
+
     pending_sse_pushes: list[tuple[str, dict]] = []
     try:
         async with db.begin_nested():
-            pending_sse_pushes += await _dispatch_conversation_event(db, conv, msg, org_id, sender, exclude_ids=discord_exclude_ids)
+            pending_sse_pushes += await _dispatch_conversation_event(db, conv, msg, org_id, sender, exclude_ids=discord_exclude_ids | blocked_agent_ids)
     except Exception as _dispatch_err:
         # dispatch 실패를 삼키지 않고 surface — 게이트웨이 이벤트 미생성 무음 방지
         logger.error("conversation event dispatch failed conversation_id=%s", conversation_id, exc_info=True)
@@ -998,7 +1074,7 @@ async def send_message(
 
     # AC1: 멘션 대상에게 conversation:mention SSE 발송 (participant 여부 무관)
     if msg.mentioned_ids:
-        mention_targets = set(msg.mentioned_ids) - {sender.id} - discord_exclude_ids
+        mention_targets = set(msg.mentioned_ids) - {sender.id} - discord_exclude_ids - blocked_agent_ids
         if mention_targets:
             try:
                 async with db.begin_nested():
@@ -1124,6 +1200,9 @@ async def send_message(
     if fork_info:
         response["forked"] = True
         response["forked_conversation_id"] = fork_info["forked_conversation_id"]
+    # E-CHAT-CMD S4: 미지원 런타임으로 차단된 커맨드의 hint 를 발신자에게 반환(AC3 hint response).
+    if command_hints:
+        response["command_gate"] = {"blocked": command_hints}
     return response
 
 
