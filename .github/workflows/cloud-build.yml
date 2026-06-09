@@ -49,6 +49,10 @@ jobs:
             # maxScale 10: 429 포화(2026-06-09)·6은 sat 유발. #1330 가속→연결 회전→10×8=80<DB 100 viable. PgBouncer 後 30+.
             echo "backend_max_instances=10" >> "$GITHUB_OUTPUT"
             echo "ga4_measurement_id=G-RYHFE7XM3X" >> "$GITHUB_OUTPUT"
+            # PgBouncer ③ — prod 인스턴스/시크릿(ground truth). cloudbuild.yaml dev default override 필수.
+            echo "instance_connection_name=sprintable-494803:asia-northeast3:sprintable-prod" >> "$GITHUB_OUTPUT"
+            echo "db_secret=DATABASE_URL_PROD_PGB" >> "$GITHUB_OUTPUT"
+            echo "pgb_upstream_secret=PGB_UPSTREAM_PROD" >> "$GITHUB_OUTPUT"
           else
             echo "target=dev" >> "$GITHUB_OUTPUT"
             echo "fastapi_url=https://sprintable-backend-dev-787818285179.asia-northeast3.run.app" >> "$GITHUB_OUTPUT"
@@ -57,6 +61,10 @@ jobs:
             # 10×8=80<DB 100 viable. prod(L49)·cloudbuild.yaml default와 합치. PgBouncer 랜딩 後 30+.
             echo "backend_max_instances=10" >> "$GITHUB_OUTPUT"
             echo "ga4_measurement_id=" >> "$GITHUB_OUTPUT"
+            # PgBouncer ③ — dev 인스턴스/시크릿. cloudbuild.yaml default와 합치(명시 주입).
+            echo "instance_connection_name=sprintable-494803:asia-northeast3:sprintable-dev" >> "$GITHUB_OUTPUT"
+            echo "db_secret=DATABASE_URL_DEV_PGB" >> "$GITHUB_OUTPUT"
+            echo "pgb_upstream_secret=PGB_UPSTREAM_DEV" >> "$GITHUB_OUTPUT"
           fi
 
       - name: Submit Cloud Build
@@ -64,6 +72,6 @@ jobs:
           gcloud builds submit \
             --config=cloudbuild.yaml \
             --project="${{ secrets.GCP_PROJECT_ID }}" \
-            --substitutions=COMMIT_SHA="${{ github.sha }}",_DEPLOY_ENV="${{ steps.env.outputs.target }}",_FASTAPI_URL="${{ steps.env.outputs.fastapi_url }}",_BACKEND_MIN_INSTANCES="${{ steps.env.outputs.backend_min_instances }}",_BACKEND_MAX_INSTANCES="${{ steps.env.outputs.backend_max_instances }}",_GA4_MEASUREMENT_ID="${{ steps.env.outputs.ga4_measurement_id }}" \
+            --substitutions=COMMIT_SHA="${{ github.sha }}",_DEPLOY_ENV="${{ steps.env.outputs.target }}",_FASTAPI_URL="${{ steps.env.outputs.fastapi_url }}",_BACKEND_MIN_INSTANCES="${{ steps.env.outputs.backend_min_instances }}",_BACKEND_MAX_INSTANCES="${{ steps.env.outputs.backend_max_instances }}",_GA4_MEASUREMENT_ID="${{ steps.env.outputs.ga4_measurement_id }}",_INSTANCE_CONNECTION_NAME="${{ steps.env.outputs.instance_connection_name }}",_DB_SECRET="${{ steps.env.outputs.db_secret }}",_PGB_UPSTREAM_SECRET="${{ steps.env.outputs.pgb_upstream_secret }}" \
             --suppress-logs \
             .
