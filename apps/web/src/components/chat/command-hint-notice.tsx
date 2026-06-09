@@ -3,6 +3,7 @@
 import Link from 'next/link';
 import { ArrowRight, Info } from 'lucide-react';
 import { useTranslations } from 'next-intl';
+import { runtimeLabel } from '@/lib/runtime-capabilities';
 
 /**
  * S4 capability gate가 발신자 응답(`command_gate.blocked[]`)으로 돌려주는 차단 hint 1건.
@@ -22,12 +23,14 @@ export interface BlockedHint {
  */
 export function CommandHintNotice({ hint }: { hint: BlockedHint }) {
   const t = useTranslations('chats');
+  // S8 #1: 런타임 표기 — claude-code→"Claude Code"·미등록→원값·null→"런타임 미설정"(i18n).
+  const runtime = runtimeLabel(hint.runtime_type) ?? t('runtimeUnsetLabel');
   return (
     <div className="mx-2 flex items-start gap-2.5 rounded-xl border border-info-border bg-info-tint px-3.5 py-2.5">
       <Info className="mt-0.5 h-[18px] w-[18px] shrink-0 text-info" aria-hidden />
       <div className="min-w-0 space-y-1">
         <p className="text-sm text-foreground">
-          {t('commandBlockedLead', { agentName: hint.agent_name })}
+          {t('commandBlockedLead', { agentName: hint.agent_name, runtime })}
         </p>
         <p className="text-sm text-muted-foreground">
           {t('commandBlockedAlt', { command: hint.command })}

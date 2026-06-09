@@ -2306,9 +2306,16 @@
     "hypothesisSection": "Outcome Hypothesis"
   },
   "chats": {
-    "commandBlockedLead": "{agentName} doesn't run chat slash-commands directly.",
+    "commandBlockedLead": "{agentName} ({runtime}) doesn't run chat slash-commands directly.",
+    "runtimeUnsetLabel": "No runtime set",
     "commandBlockedAlt": "Try natural language instead — e.g. \"use the {command} skill to …\"",
     "commandBlockedSettings": "View runtime settings",
+    "commandPreviewSendAsCommand": "Will send as a command",
+    "commandPreviewSendAsLiteral": "Will send as literal text",
+    "commandTag": "Command",
+    "commandUnsupportedWarn": "{agentName} ({runtime}) doesn't run slash-commands directly — use natural language",
+    "commandViewSettings": "Runtime settings",
+    "sendFailed": "Failed to send message. Please try again.",
     "attachmentDenied": "You don't have access",
     "attachmentReload": "Reload attachment",
     "title": "Chats",

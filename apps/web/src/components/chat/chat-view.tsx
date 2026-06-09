@@ -5,7 +5,7 @@ import { ChevronLeft, RefreshCw } from 'lucide-react';
 import { usePathname, useRouter } from 'next/navigation';
 import { ChatBubble } from './chat-bubble';
 import { CommandHintNotice, type BlockedHint } from './command-hint-notice';
-import { ChatInput } from './chat-input';
+import { ChatInput, type CommandTarget } from './chat-input';
 import { ThreadPanel } from './thread-panel';
 import type { ChatMessage, SendAttachment } from '@/hooks/use-chat-sse';
 import { normalizeToMessage, useChatSse } from '@/hooks/use-chat-sse';
@@ -18,6 +18,8 @@ interface ChatViewProps {
   projectId?: string;
   apiPrefix?: string;
   backRoute?: string | null;
+  // S8 #2: pre-send capability 경고 대상(에이전트 participant runtime). 빈 배열이면 경고 미표시(graceful).
+  commandTargets?: CommandTarget[];
 }
 
 interface MessageGroup {
@@ -36,7 +38,7 @@ function groupByDate(messages: ChatMessage[]): MessageGroup[] {
   return Object.entries(groups).map(([date, msgs]) => ({ date, messages: msgs }));
 }
 
-export function ChatView({ threadId, currentTeamMemberId, threadTitle, projectId, apiPrefix = '/api/chats', backRoute = '/memos' }: ChatViewProps) {
+export function ChatView({ threadId, currentTeamMemberId, threadTitle, projectId, apiPrefix = '/api/chats', backRoute = '/memos', commandTargets }: ChatViewProps) {
   const router = useRouter();
   const pathname = usePathname();
   const [messages, setMessages] = useState<ChatMessage[]>([]);
@@ -471,6 +473,7 @@ export function ChatView({ threadId, currentTeamMemberId, threadTitle, projectId
             onSend={handleSend}
             onUploadFile={handleUploadFile}
             projectId={projectId}
+            commandTargets={commandTargets}
             placeholder="메시지를 입력하세요… (Enter 전송 / Shift+Enter 줄바꿈 / @ 멘션 / # 엔티티)"
           />
         </div>
