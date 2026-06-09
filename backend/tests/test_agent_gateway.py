@@ -330,3 +330,106 @@ def test_dispatch_mention_events_uses_sorted_mention_targets():
     assert 'sorted(mention_targets)' in src, (
         'deadlock fix reverted: sorted(mention_targets) missing in _dispatch_mention_events'
     )
+
+
+# ── 49fed0a1: presence를 실제 SSE 연결에 배선 ──────────────────────────────────
+
+import contextlib
+from datetime import datetime, timedelta, timezone
+
+from app.routers.agent_gateway import (
+    _mark_agent_online,
+    _mark_agent_disconnected,
+    _SESSION_FRESH_TTL,
+)
+
+
+def _patch_session_factory(execute_results=None):
+    """async_session_factory() 를 mock async context manager 로 대체.
+
+    execute_results: db.execute 가 호출 순서대로 반환할 result mock 리스트.
+    반환: (patch context manager target 용 callable, db mock).
+    """
+    db = MagicMock()
+    results = list(execute_results or [])
+
+    async def _execute(*a, **k):
+        return results.pop(0) if results else MagicMock()
+
+    db.execute = AsyncMock(side_effect=_execute)
+    db.commit = AsyncMock()
+
+    def _factory():
+        @contextlib.asynccontextmanager
+        async def _cm():
+            yield db
+        return _cm()
+
+    return _factory, db
+
+
+@pytest.mark.anyio
+async def test_mark_agent_online_touches_session_and_presence():
+    """연결 중 tick: AgentGatewaySession.last_seen + presence(online) 갱신 후 commit."""
+    factory, db = _patch_session_factory()
+    sid = uuid.uuid4()
+    with patch("app.routers.agent_gateway.async_session_factory", factory), \
+         patch("app.services.agent_anchor_sync.sync_agent_profile_presence", new=AsyncMock()) as mock_sync:
+        await _mark_agent_online(AGENT_ID, sid)
+    # AgentGatewaySession UPDATE 1회 실행
+    assert db.execute.await_count == 1
+    # presence online 갱신
+    mock_sync.assert_awaited_once()
+    _, kwargs = mock_sync.await_args
+    assert kwargs["agent_status"] == "online"
+    assert kwargs["last_seen_at"] is not None
+    db.commit.assert_awaited_once()
+
+
+@pytest.mark.anyio
+async def test_mark_agent_online_swallows_errors():
+    """presence 갱신 실패가 스트림을 끊지 않도록 예외 삼킴(best-effort)."""
+    def _boom():
+        raise RuntimeError("db down")
+    with patch("app.routers.agent_gateway.async_session_factory", side_effect=_boom):
+        # 예외 전파되면 테스트 실패
+        await _mark_agent_online(AGENT_ID, uuid.uuid4())
+
+
+@pytest.mark.anyio
+async def test_mark_agent_disconnected_demotes_offline_when_no_remaining():
+    """마지막 세션 종료: 세션 삭제 후 잔여 활성 세션 없으면 presence offline 강등."""
+    no_remaining = MagicMock()
+    no_remaining.scalar_one_or_none.return_value = None  # 잔여 fresh 세션 없음
+    # execute 순서: [DELETE 결과(미사용), SELECT remaining 결과]
+    factory, db = _patch_session_factory([MagicMock(), no_remaining])
+    with patch("app.routers.agent_gateway.async_session_factory", factory), \
+         patch("app.services.agent_anchor_sync.sync_agent_profile_presence", new=AsyncMock()) as mock_sync:
+        await _mark_agent_disconnected(AGENT_ID, uuid.uuid4())
+    mock_sync.assert_awaited_once()
+    _, kwargs = mock_sync.await_args
+    assert kwargs["agent_status"] == "offline"
+    assert kwargs["last_seen_at"] is None  # last_seen=None → presence_status 즉시 offline
+    db.commit.assert_awaited_once()
+
+
+@pytest.mark.anyio
+async def test_mark_agent_disconnected_keeps_online_when_other_session_active():
+    """같은 API Key 멀티세션(AC2): 다른 활성 세션 잔존 시 offline 강등 안 함."""
+    remaining = MagicMock()
+    remaining.scalar_one_or_none.return_value = uuid.uuid4()  # 다른 fresh 세션 존재
+    factory, db = _patch_session_factory([MagicMock(), remaining])
+    with patch("app.routers.agent_gateway.async_session_factory", factory), \
+         patch("app.services.agent_anchor_sync.sync_agent_profile_presence", new=AsyncMock()) as mock_sync:
+        await _mark_agent_disconnected(AGENT_ID, uuid.uuid4())
+    mock_sync.assert_not_awaited()  # 강등 없음
+    db.commit.assert_awaited_once()
+
+
+def test_presence_tick_interval_below_online_threshold():
+    """tick 주기 < online 임계(5분) — 연결 유지 중 last_seen이 online 윈도우 안에 머무름 보장."""
+    from app.schemas.team_member import _ONLINE_THRESHOLD
+    from app.routers.agent_gateway import _PRESENCE_TICK_INTERVAL
+    assert _PRESENCE_TICK_INTERVAL < _ONLINE_THRESHOLD.total_seconds()
+    # 세션 fresh TTL 도 online 임계 미만이어야 disconnect 판정이 stale 세션을 활성으로 오판 안 함
+    assert _SESSION_FRESH_TTL < _ONLINE_THRESHOLD.total_seconds()
