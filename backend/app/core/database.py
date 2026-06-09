@@ -17,10 +17,10 @@ engine = create_async_engine(
     max_overflow=settings.db_max_overflow,
     pool_pre_ping=True,
     echo=settings.debug,
-    # 2c4dcae7 ②: asyncpg prepared statement 캐시 비활성. PgBouncer transaction-mode 의
-    # 필수 전제(pooled conn 간 prepared stmt reuse 깨짐 방지). PgBouncer 도입 前에도 안전한
-    # additive 설정(asyncpg 자체 동작·성능 영향 미미). ③④ 인프라(PgBouncer 실배포)의 prereq.
-    connect_args={"statement_cache_size": 0},
+    # ⚠️ statement_cache_size=0(#1314·2c4dcae7 ②)는 PgBouncer transaction-mode 전제였으나
+    # PgBouncer ③④ 미배포 상태(직접 Cloud SQL + SQLAlchemy pool=커넥션 재사용)에서는 prepared
+    # statement 캐시 비활성이 매 쿼리 re-prepare 오버헤드 = net-negative(429 포화 기여) → revert로
+    # 캐시 재활성. PgBouncer 랜딩(2c4dcae7 ③④) 시 transaction-mode 호환 위해 재적용 필요(랜딩 PR에서).
 )
 
 async_session_factory = async_sessionmaker(
