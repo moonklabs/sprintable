@@ -449,12 +449,15 @@ export default function InboxPage() {
                             </div>
                             <div className="min-w-0 flex-1 space-y-1">
                               <div className="flex items-start justify-between gap-2">
-                                <p className={`min-w-0 flex-1 truncate text-sm ${item.hasUnread ? 'font-semibold text-foreground' : 'text-muted-foreground'}`}>
-                                  {item.latest.title}
-                                  <span className="ml-1.5 inline-block rounded-full border border-brand/30 bg-brand/10 px-1.5 py-0.5 align-middle text-[10px] font-medium text-brand">
+                                {/* f2ec5395 fix: 카운트 칩을 truncate <p> 밖 shrink-0 형제로 — 긴 title 잘려도 칩 항상 표시(AC1 핵심) */}
+                                <div className="flex min-w-0 flex-1 items-center gap-1.5">
+                                  <p className={`min-w-0 truncate text-sm ${item.hasUnread ? 'font-semibold text-foreground' : 'text-muted-foreground'}`}>
+                                    {item.latest.title}
+                                  </p>
+                                  <span className="shrink-0 rounded-full border border-brand/30 bg-brand/10 px-1.5 py-0.5 text-[10px] font-medium text-brand">
                                     {t('statusChangeCount', { count: item.count })}
                                   </span>
-                                </p>
+                                </div>
                                 <span className="shrink-0 text-[11px] text-muted-foreground">{formatTime(item.latest.created_at)}</span>
                               </div>
                               {item.hasUnread ? (
