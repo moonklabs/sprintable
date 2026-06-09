@@ -797,7 +797,21 @@
     "ownershipDenied": "권한이 없습니다. 에이전트 소유자 또는 관리자만 수정할 수 있습니다.",
     "agentOwner": "내 에이전트",
     "webhookHelperEmptyHuman": "현재 프로젝트의 내 멘션·이벤트를 외부 URL로 받으려면 Webhook URL을 설정하고 토글을 켜세요. 다른 프로젝트는 해당 프로젝트에서 별도 설정이 필요합니다.",
-    "webhookHelperActiveHuman": "현재 프로젝트의 내 멘션·이벤트 알림이 설정된 URL로 전송됩니다. 다른 프로젝트의 멘션은 별도 설정이 필요합니다."
+    "webhookHelperActiveHuman": "현재 프로젝트의 내 멘션·이벤트 알림이 설정된 URL로 전송됩니다. 다른 프로젝트의 멘션은 별도 설정이 필요합니다.",
+    "runtimeTypeTitle": "런타임 타입",
+    "runtimeTypeDescription": "이 에이전트가 실행되는 런타임. 채팅 슬래시 커맨드 지원 여부는 런타임에 따라 달라진다.",
+    "runtimeTypePlaceholder": "런타임 선택",
+    "runtimeSupported": "커맨드 지원",
+    "runtimePartial": "부분 지원",
+    "runtimeUnsupported": "커맨드 미지원",
+    "runtimeUnset": "미설정",
+    "runtimeUnknown": "미인식 런타임",
+    "runtimeSupportedHelp": "슬래시 커맨드를 결정적(deterministic)으로 실행한다.",
+    "runtimePartialHelp": "커맨드 엔드포인트는 있으나 모델이 해석해 실행한다(model-mediated).",
+    "runtimeUnsupportedHelp": "이 런타임은 슬래시 커맨드를 실행하지 않는다.",
+    "runtimeUnsetHelp": "런타임이 설정되지 않았다. 커맨드 미지원으로 처리된다.",
+    "runtimeUnknownHelp": "저장된 값이 현재 registry에 없다. 데이터 보존을 위해 원값을 표시하되 커맨드 미지원으로 처리된다.",
+    "runtimeTypeSaved": "런타임 타입 저장됨"
   },
   "landing": {
     "navProduct": "개요",

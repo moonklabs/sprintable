@@ -797,7 +797,21 @@
     "ownershipDenied": "Permission denied. Only the agent owner or admin can edit.",
     "agentOwner": "my agent",
     "webhookHelperEmptyHuman": "Set a webhook URL and enable the toggle to receive your mentions and events for this project at an external endpoint. Other projects require separate configuration.",
-    "webhookHelperActiveHuman": "Your mentions and event notifications for this project are forwarded to the configured URL. Other projects require separate configuration."
+    "webhookHelperActiveHuman": "Your mentions and event notifications for this project are forwarded to the configured URL. Other projects require separate configuration.",
+    "runtimeTypeTitle": "Runtime type",
+    "runtimeTypeDescription": "The runtime this agent runs on. Chat slash-command support depends on the runtime.",
+    "runtimeTypePlaceholder": "Select runtime",
+    "runtimeSupported": "Command supported",
+    "runtimePartial": "Partial support",
+    "runtimeUnsupported": "Command not supported",
+    "runtimeUnset": "Not set",
+    "runtimeUnknown": "Unknown runtime",
+    "runtimeSupportedHelp": "Runs slash commands deterministically.",
+    "runtimePartialHelp": "Command endpoint exists; execution is model-mediated (non-deterministic).",
+    "runtimeUnsupportedHelp": "This runtime does not execute slash commands.",
+    "runtimeUnsetHelp": "No runtime set. Treated as command-unsupported.",
+    "runtimeUnknownHelp": "The saved value is not in the current registry. Shown for data preservation; treated as command-unsupported.",
+    "runtimeTypeSaved": "Runtime type saved"
   },
   "landing": {
     "navProduct": "Overview",
