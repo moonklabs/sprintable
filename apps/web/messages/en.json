@@ -2313,6 +2313,8 @@
     "commandPreviewSendAsCommand": "Will send as a command",
     "commandPreviewSendAsLiteral": "Will send as literal text",
     "commandTag": "Command",
+    "commandUnsupportedWarn": "{agentName} ({runtime}) doesn't run slash-commands directly — use natural language",
+    "commandViewSettings": "Runtime settings",
     "sendFailed": "Failed to send message. Please try again.",
     "attachmentDenied": "You don't have access",
     "attachmentReload": "Reload attachment",

@@ -1,12 +1,21 @@
 'use client';
 
 import { useEffect, useRef, useState, type KeyboardEvent } from 'react';
-import { Loader2, Paperclip, Send, Terminal, Type, X } from 'lucide-react';
+import Link from 'next/link';
+import { AlertTriangle, Loader2, Paperclip, Send, Terminal, Type, X } from 'lucide-react';
 import { useTranslations } from 'next-intl';
 import { Button } from '@/components/ui/button';
 import { getFileIcon } from '@/lib/file-icon';
 import { commandName, dequoteLiteral, isCommand } from '@/lib/command-classifier';
+import { resolveRuntimeStatus, runtimeLabel } from '@/lib/runtime-capabilities';
 import type { SendAttachment } from '@/hooks/use-chat-sse';
+
+/** S8 #2: pre-send capability 경고 대상 — 대화의 에이전트 participant(본인 제외) runtime. */
+export interface CommandTarget {
+  agentId: string;
+  agentName: string;
+  runtimeType: string | null;
+}
 
 const MAX_ATTACHMENTS = 10; // BE _MAX_ATTACHMENTS 정합
 
@@ -73,9 +82,10 @@ interface ChatInputProps {
   placeholder?: string;
   projectId?: string;
   onMentionIdsChange?: (ids: string[]) => void;
+  commandTargets?: CommandTarget[];
 }
 
-export function ChatInput({ onSend, onUploadFile, disabled, placeholder, projectId, onMentionIdsChange }: ChatInputProps) {
+export function ChatInput({ onSend, onUploadFile, disabled, placeholder, projectId, onMentionIdsChange, commandTargets }: ChatInputProps) {
   const t = useTranslations('chats');
   const [text, setText] = useState('');
   const [pendingFiles, setPendingFiles] = useState<File[]>([]);
@@ -320,6 +330,37 @@ export function ChatInput({ onSend, onUploadFile, disabled, placeholder, project
         const cmd = isCommand(text);
         const literal = !cmd && text.startsWith('//');
         if (!cmd && !literal) return null;
+        // #2: command 입력 시 미지원 런타임 대상 감지(graceful — commandTargets 없으면 빈 배열 → 경고 미표시).
+        const unsupported = cmd
+          ? (commandTargets ?? []).filter((tg) => resolveRuntimeStatus(tg.runtimeType) !== 'supported')
+          : [];
+        if (cmd && unsupported.length > 0) {
+          // warning 톤(amber) — 보내기 전 미지원 안내 + 런타임 설정 링크(대상 에이전트별 1행).
+          return (
+            <div className="mb-2 space-y-1">
+              {unsupported.map((tg) => (
+                <div
+                  key={tg.agentId}
+                  className="flex items-center gap-2 rounded-lg border border-warning-border bg-warning-tint px-2.5 py-1.5 text-xs text-warning"
+                >
+                  <AlertTriangle className="h-3.5 w-3.5 shrink-0" aria-hidden />
+                  <span className="min-w-0 flex-1 text-foreground">
+                    {t('commandUnsupportedWarn', {
+                      agentName: tg.agentName,
+                      runtime: runtimeLabel(tg.runtimeType) ?? t('runtimeUnsetLabel'),
+                    })}
+                  </span>
+                  <Link
+                    href={`/settings/members/agents/${tg.agentId}`}
+                    className="shrink-0 rounded font-medium text-warning underline-offset-2 hover:underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+                  >
+                    {t('commandViewSettings')}
+                  </Link>
+                </div>
+              ))}
+            </div>
+          );
+        }
         const chip = cmd ? `/${commandName(text)}` : (dequoteLiteral(text).trimStart().split(/\s+/)[0] ?? '');
         return (
           <div className={`mb-2 flex items-center gap-2 rounded-lg border px-2.5 py-1.5 text-xs ${cmd ? 'border-brand/30 bg-brand/10 text-brand' : 'border-border bg-muted/50 text-muted-foreground'}`}>

@@ -2313,6 +2313,8 @@
     "commandPreviewSendAsCommand": "커맨드로 전송됩니다",
     "commandPreviewSendAsLiteral": "리터럴 텍스트로 전송됩니다",
     "commandTag": "커맨드",
+    "commandUnsupportedWarn": "{agentName} ({runtime})는 슬래시 커맨드를 직접 실행하지 않습니다 — 자연어로 요청하세요",
+    "commandViewSettings": "런타임 설정",
     "sendFailed": "메시지 전송에 실패했습니다. 다시 시도해 주세요.",
     "attachmentDenied": "접근 권한이 없습니다",
     "attachmentReload": "첨부를 다시 불러오기",
