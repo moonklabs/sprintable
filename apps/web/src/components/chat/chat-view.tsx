@@ -205,10 +205,10 @@ export function ChatView({ threadId, currentTeamMemberId, threadTitle, projectId
     } catch { /* non-critical */ }
   }, [threadId, commandTargets]);
 
-  // 마운트 1회 + 5s 폴링(생성구간 typing 갱신·PO: 연결 dot 15s보다 민감하게).
+  // 마운트 1회 + 1.5s 폴링(typing snappiness·선생님 피드백 "빠릿빠릿"·연결 dot 15s보다 훨씬 민감).
   useEffect(() => { void fetchWorking(); }, [fetchWorking]);
   useEffect(() => {
-    const interval = setInterval(() => { void fetchWorking(); }, 5000);
+    const interval = setInterval(() => { void fetchWorking(); }, 1500);
     return () => clearInterval(interval);
   }, [fetchWorking]);
 
