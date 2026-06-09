@@ -3,6 +3,7 @@
 import { useCallback, useRef, useState } from 'react';
 import ReactMarkdown, { defaultUrlTransform } from 'react-markdown';
 import remarkGfm from 'remark-gfm';
+import remarkBreaks from 'remark-breaks';
 import { Bot, MessageSquare, Terminal, User } from 'lucide-react';
 import { useTranslations } from 'next-intl';
 import type { ChatMessage } from '@/hooks/use-chat-sse';
@@ -53,7 +54,7 @@ function ChatMarkdown({ content, isMine }: { content: string; isMine: boolean })
 
   return (
     <ReactMarkdown
-      remarkPlugins={[remarkGfm]}
+      remarkPlugins={[remarkGfm, remarkBreaks]}
       urlTransform={(url) =>
         url.startsWith('entity:') || url.startsWith('mention:') ? url : defaultUrlTransform(url)
       }
