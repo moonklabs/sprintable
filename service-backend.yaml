@@ -132,6 +132,9 @@ spec:
                 secretKeyRef:
                   name: ${_PGB_UPSTREAM_SECRET}
                   key: latest
+            # PG15 SCRAM 인증 필수 — 없으면 pgbouncer가 Cloud SQL(PG15) 인증 실패 → 컨테이너 기동/배포 실패.
+            - name: AUTH_TYPE
+              value: scram-sha-256
             - name: POOL_MODE
               value: transaction
             - name: DEFAULT_POOL_SIZE
