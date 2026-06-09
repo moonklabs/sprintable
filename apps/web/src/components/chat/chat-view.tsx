@@ -3,7 +3,9 @@
 import { Fragment, useCallback, useEffect, useRef, useState } from 'react';
 import { ChevronLeft, RefreshCw } from 'lucide-react';
 import { usePathname, useRouter } from 'next/navigation';
+import { useTranslations } from 'next-intl';
 import { ChatBubble } from './chat-bubble';
+import type { PresenceStatus } from './presence-dot';
 import { CommandHintNotice, type BlockedHint } from './command-hint-notice';
 import { ChatInput, type CommandTarget } from './chat-input';
 import { ThreadPanel } from './thread-panel';
@@ -20,6 +22,8 @@ interface ChatViewProps {
   backRoute?: string | null;
   // S8 #2: pre-send capability 경고 대상(에이전트 participant runtime). 빈 배열이면 경고 미표시(graceful).
   commandTargets?: CommandTarget[];
+  // 1aeecdde P2: 에이전트 member_id → presence_status(연결축 dot). 없으면 dot 미표시(graceful).
+  presenceById?: Record<string, PresenceStatus>;
 }
 
 interface MessageGroup {
@@ -38,9 +42,10 @@ function groupByDate(messages: ChatMessage[]): MessageGroup[] {
   return Object.entries(groups).map(([date, msgs]) => ({ date, messages: msgs }));
 }
 
-export function ChatView({ threadId, currentTeamMemberId, threadTitle, projectId, apiPrefix = '/api/chats', backRoute = '/memos', commandTargets }: ChatViewProps) {
+export function ChatView({ threadId, currentTeamMemberId, threadTitle, projectId, apiPrefix = '/api/chats', backRoute = '/memos', commandTargets, presenceById }: ChatViewProps) {
   const router = useRouter();
   const pathname = usePathname();
+  const t = useTranslations('chats');
   const [messages, setMessages] = useState<ChatMessage[]>([]);
   const [loading, setLoading] = useState(true);
   const [loadingMore, setLoadingMore] = useState(false);
@@ -50,6 +55,8 @@ export function ChatView({ threadId, currentTeamMemberId, threadTitle, projectId
   // S5: 미지원 런타임 커맨드 차단 hint — 트리거 메시지 id에 keyed된 ephemeral state.
   // POST 응답 command_gate.blocked에서만 적재(persist 안 함·reload 시 소멸).
   const [commandHints, setCommandHints] = useState<Record<string, BlockedHint[]>>({});
+  // 1aeecdde P2: 답장 생성 중 에이전트 typing — 디디 #1353 GET /working 폴링(BE 45s TTL) 결과.
+  const [typingAgents, setTypingAgents] = useState<{ id: string; name: string }[]>([]);
   // CB-S9: 스레드 패널 상태
   const [activeThread, setActiveThread] = useState<ChatMessage | null>(null);
   const [threadIncoming, setThreadIncoming] = useState<ChatMessage | null>(null);
@@ -127,7 +134,13 @@ export function ChatView({ threadId, currentTeamMemberId, threadTitle, projectId
     }
   }, [loading, scrollToBottom]);
 
+  // 1aeecdde P2: 에이전트 typing 즉시 해제(답장 메시지 도착 시·다음 폴링 전 갭 제거).
+  const clearTyping = useCallback((agentId: string) => {
+    setTypingAgents((prev) => (prev.some((a) => a.id === agentId) ? prev.filter((a) => a.id !== agentId) : prev));
+  }, []);
+
   const addMessage = useCallback((msg: ChatMessage) => {
+    clearTyping(msg.created_by); // 답장 도착 → 해당 에이전트 typing 즉시 해제(AC1)
     const nearBottom = isNearBottom();
     setMessages((prev) => {
       if (prev.some((m) => m.id === msg.id)) return prev;
@@ -139,7 +152,7 @@ export function ChatView({ threadId, currentTeamMemberId, threadTitle, projectId
     } else {
       setShowNewIndicator(true);
     }
-  }, [isNearBottom]);
+  }, [isNearBottom, clearTyping]);
 
   const handleNewMessage = useCallback((msg: ChatMessage) => {
     if (msg.memo_id !== threadId) return;
@@ -177,6 +190,27 @@ export function ChatView({ threadId, currentTeamMemberId, threadTitle, projectId
   const handleReconnect = useCallback(() => {
     fetchMessages();
   }, [fetchMessages]);
+
+  // 1aeecdde P2: working 폴링(디디 #1353 GET /working·in-memory 45s TTL) → typingAgents.
+  // 이름=commandTargets(없으면 미표시 graceful). poll이 BE working 셋 그대로 반영(클라 TTL 불요).
+  const fetchWorking = useCallback(async () => {
+    try {
+      const res = await fetch(`/api/conversations/${threadId}/working`);
+      if (!res.ok) return;
+      const json = await res.json() as { data?: Array<{ member_id: string }> };
+      const next = (json.data ?? [])
+        .map((w) => ({ id: w.member_id, name: (commandTargets ?? []).find((tg) => tg.agentId === w.member_id)?.agentName }))
+        .filter((a): a is { id: string; name: string } => !!a.name);
+      setTypingAgents(next);
+    } catch { /* non-critical */ }
+  }, [threadId, commandTargets]);
+
+  // 마운트 1회 + 5s 폴링(생성구간 typing 갱신·PO: 연결 dot 15s보다 민감하게).
+  useEffect(() => { void fetchWorking(); }, [fetchWorking]);
+  useEffect(() => {
+    const interval = setInterval(() => { void fetchWorking(); }, 5000);
+    return () => clearInterval(interval);
+  }, [fetchWorking]);
 
   useChatSse({
     currentTeamMemberId,
@@ -439,6 +473,8 @@ export function ChatView({ threadId, currentTeamMemberId, threadTitle, projectId
                             isGrouped={isGrouped}
                             onOpenThread={openThread}
                             onDelete={handleDeleteMessage}
+                            presenceStatus={presenceById?.[msg.created_by]}
+                            isWorking={typingAgents.some((a) => a.id === msg.created_by)}
                           />
                           {/* S5: 트리거 메시지 직후 차단 hint notice(차단 에이전트별 1건) */}
                           {commandHints[msg.id]?.map((h) => (
@@ -465,6 +501,22 @@ export function ChatView({ threadId, currentTeamMemberId, threadTitle, projectId
               >
                 ↓ 새 메시지
               </button>
+            </div>
+          )}
+
+          {/* 1aeecdde P2: "...is typing" — 메시지 리스트 아래·composer 위·답장 생성 중·완료 시 사라짐(aria-live) */}
+          {typingAgents.length > 0 && (
+            <div className="flex flex-shrink-0 items-center gap-2 px-4 py-1.5 text-xs text-muted-foreground" aria-live="polite">
+              <span className="flex items-center gap-0.5" aria-hidden>
+                <span className="size-1.5 rounded-full bg-brand motion-safe:animate-bounce" />
+                <span className="size-1.5 rounded-full bg-brand motion-safe:animate-bounce [animation-delay:150ms]" />
+                <span className="size-1.5 rounded-full bg-brand motion-safe:animate-bounce [animation-delay:300ms]" />
+              </span>
+              <span>
+                {typingAgents.length === 1
+                  ? t('isTyping', { name: typingAgents[0]?.name ?? '' })
+                  : t('othersTyping', { name: typingAgents[0]?.name ?? '', count: typingAgents.length - 1 })}
+              </span>
             </div>
           )}
 

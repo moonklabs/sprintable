@@ -151,6 +151,7 @@ export function useChatSse({ currentTeamMemberId, onNewMessage, onReplyCreated, 
           onConversationMessageRef.current?.(payload);
         } catch { /* ignore parse errors */ }
       });
+
     }
 
     connect();

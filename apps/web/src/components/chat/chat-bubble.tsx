@@ -13,6 +13,7 @@ import { getFileIcon } from '@/lib/file-icon';
 import { AttachmentImage } from './attachment-image';
 import { AttachmentFile } from './attachment-file';
 import { MessageContextMenu } from './message-context-menu';
+import { PresenceDot, WORKING_RING_CLASS, type PresenceStatus } from './presence-dot';
 
 interface ChatBubbleProps {
   message: ChatMessage;
@@ -20,6 +21,9 @@ interface ChatBubbleProps {
   isGrouped?: boolean;
   onOpenThread?: (message: ChatMessage) => void;
   onDelete?: (messageId: string) => void;
+  // 1aeecdde P2: 2축 presence — 연결(dot) + 활동(working ring). 에이전트 sender만 적용.
+  presenceStatus?: PresenceStatus | null;
+  isWorking?: boolean;
 }
 
 interface ContextMenuState {
@@ -91,7 +95,7 @@ function ChatMarkdown({ content, isMine }: { content: string; isMine: boolean })
 
 const LONG_PRESS_MS = 500;
 
-export function ChatBubble({ message, isMine, isGrouped = false, onOpenThread, onDelete }: ChatBubbleProps) {
+export function ChatBubble({ message, isMine, isGrouped = false, onOpenThread, onDelete, presenceStatus, isWorking = false }: ChatBubbleProps) {
   const t = useTranslations('chats');
   const isAgent = message.sender_type === 'agent';
   // S8: 슬래시 커맨드는 전용 버블(brand·mono·⌘). 리터럴(`//`)은 dequote된 일반 텍스트.
@@ -166,18 +170,23 @@ export function ChatBubble({ message, isMine, isGrouped = false, onOpenThread, o
         onTouchEnd={handleTouchEnd}
         onTouchMove={handleTouchMove}
       >
-        {/* Avatar — hidden when grouped */}
+        {/* Avatar — hidden when grouped. 1aeecdde P2: agent에 연결 dot + working ring(2축). */}
         {isGrouped ? (
           <div className="w-7 flex-shrink-0" />
         ) : (
-          <div className={`flex h-7 w-7 flex-shrink-0 items-center justify-center rounded-full text-xs font-medium ${
-            isAgent
-              ? 'bg-violet-100 text-violet-700 dark:bg-violet-900/40 dark:text-violet-300'
-              : isMine
-                ? 'bg-primary/20 text-primary'
-                : 'bg-muted text-muted-foreground'
-          }`}>
-            {isAgent ? <Bot className="h-3.5 w-3.5" /> : <User className="h-3.5 w-3.5" />}
+          <div className="relative h-7 w-7 flex-shrink-0">
+            <div className={`flex h-full w-full items-center justify-center rounded-full text-xs font-medium ${
+              isAgent
+                ? 'bg-violet-100 text-violet-700 dark:bg-violet-900/40 dark:text-violet-300'
+                : isMine
+                  ? 'bg-primary/20 text-primary'
+                  : 'bg-muted text-muted-foreground'
+            } ${isAgent && isWorking ? WORKING_RING_CLASS : ''}`}>
+              {isAgent ? <Bot className="h-3.5 w-3.5" /> : <User className="h-3.5 w-3.5" />}
+            </div>
+            {isAgent && presenceStatus ? (
+              <PresenceDot status={presenceStatus} className="absolute -bottom-0.5 -right-0.5" />
+            ) : null}
           </div>
         )}
 
