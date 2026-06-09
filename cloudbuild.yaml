@@ -18,6 +18,18 @@ substitutions:
   #    (GHA develop→dev·main→prod 자동배포가 이 default 주입 → 6이면 머지마다 429 재발 latent → 10.)
   _BACKEND_MAX_INSTANCES: '10'
   _GA4_MEASUREMENT_ID: ""  # dev 기본값 빈 문자열 — prod 트리거에서 G-RYHFE7XM3X 주입
+  # ─── PgBouncer ③ 멀티컨테이너 사이드카 substitution (dev 기본값) ──────────────
+  # ⚠️ 아래는 오르테가 dev 격리(sprintable-backend-dev-pgbtest) 검증값. prod는 GHA
+  #    cloud-build.yml에서 _DEV → prod 시크릿/인스턴스로 override 필요(PO export 대조 後).
+  _INSTANCE_CONNECTION_NAME: sprintable-494803:asia-northeast3:sprintable-dev
+  _DB_SECRET: DATABASE_URL_DEV_PGB            # backend DATABASE_URL → localhost:6432
+  _PGB_UPSTREAM_SECRET: PGB_UPSTREAM_DEV       # pgbouncer upstream → localhost:5432
+  _GITHUB_CLIENT_ID_SECRET: GITHUB_CLIENT_ID_DEV
+  _GITHUB_CLIENT_SECRET_SECRET: GITHUB_CLIENT_SECRET_DEV
+  _APP_URL: https://dev-app.sprintable.ai
+  # 사이드카 이미지(필요 시 AR 미러로 교체 가능)
+  _PGBOUNCER_IMAGE: edoburu/pgbouncer:latest
+  _CLOUD_SQL_PROXY_IMAGE: gcr.io/cloud-sql-connectors/cloud-sql-proxy:2.14.1
 
 steps:
   # ─── Frontend (Next.js standalone) ────────────────────────────────────────
@@ -91,18 +103,32 @@ steps:
       - --quiet
     waitFor: [push-frontend]
 
+  # PgBouncer ③: 멀티컨테이너(backend+pgbouncer+cloud-sql-proxy) — knative Service YAML
+  #   replace 방식. 단일 `gcloud run deploy --image`로는 3컨테이너 per-container 시크릿/
+  #   container-dependencies 기동순서를 표현하기 난해해 services replace YAML을 채택.
+  #   placeholder는 cloudbuild substitution + envsubst로 주입.
   - id: deploy-backend
     name: gcr.io/google.com/cloudsdktool/cloud-sdk
-    entrypoint: gcloud
+    entrypoint: bash
     args:
-      - run
-      - deploy
-      - sprintable-backend-${_DEPLOY_ENV}
-      - --image=${_AR_REGION}-docker.pkg.dev/${PROJECT_ID}/${_AR_REPO}/backend:${COMMIT_SHA}
-      - --region=${_AR_REGION}
-      - --min-instances=${_BACKEND_MIN_INSTANCES}
-      - --max-instances=${_BACKEND_MAX_INSTANCES}
-      - --quiet
+      - -c
+      - |
+        set -euo pipefail
+        # envsubst(gettext-base)는 cloud-sdk 이미지에 보통 포함되나, 변종 대비 가드.
+        command -v envsubst >/dev/null 2>&1 || (apt-get update -qq && apt-get install -y -qq gettext-base) >&2
+        export PROJECT_ID="${PROJECT_ID}" COMMIT_SHA="${COMMIT_SHA}"
+        export _AR_REGION="${_AR_REGION}" _AR_REPO="${_AR_REPO}" _DEPLOY_ENV="${_DEPLOY_ENV}"
+        export _BACKEND_MIN_INSTANCES="${_BACKEND_MIN_INSTANCES}" _BACKEND_MAX_INSTANCES="${_BACKEND_MAX_INSTANCES}"
+        export _INSTANCE_CONNECTION_NAME="${_INSTANCE_CONNECTION_NAME}"
+        export _DB_SECRET="${_DB_SECRET}" _PGB_UPSTREAM_SECRET="${_PGB_UPSTREAM_SECRET}"
+        export _GITHUB_CLIENT_ID_SECRET="${_GITHUB_CLIENT_ID_SECRET}" _GITHUB_CLIENT_SECRET_SECRET="${_GITHUB_CLIENT_SECRET_SECRET}"
+        export _APP_URL="${_APP_URL}"
+        export _PGBOUNCER_IMAGE="${_PGBOUNCER_IMAGE}" _CLOUD_SQL_PROXY_IMAGE="${_CLOUD_SQL_PROXY_IMAGE}"
+        envsubst < service-backend.yaml > /workspace/service-backend.rendered.yaml
+        echo "─── rendered service-backend.yaml ───" >&2
+        cat /workspace/service-backend.rendered.yaml >&2
+        gcloud run services replace /workspace/service-backend.rendered.yaml \
+          --region="${_AR_REGION}" --quiet
     waitFor: [push-backend]
 
 options:
