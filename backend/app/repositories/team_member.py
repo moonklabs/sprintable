@@ -14,9 +14,10 @@ from app.repositories.base import BaseRepository
 
 # AC3-4 2-2: team_members가 projection 뷰로 강등됨 → write를 앵커 테이블로 라우팅(anchor-only).
 # PATCH 필드 → 앵커 매핑(0088 뷰 정의와 정합):
-#   name/avatar_url/is_active → members,  role/color/can_manage_members → project_access(per-project),
+#   name/avatar_url/is_active/runtime_type → members,  role/color/can_manage_members → project_access(per-project),
 #   agent_config/agent_role → agent_project_profiles.
-_MEMBERS_FIELDS = {"name", "avatar_url", "is_active"}
+# E-CHAT-CMD S1b: runtime_type 은 에이전트 단위 식별 → canonical members 에 기록(0106 뷰가 투영).
+_MEMBERS_FIELDS = {"name", "avatar_url", "is_active", "runtime_type"}
 _ACCESS_FIELDS = {"role", "color", "can_manage_members"}
 _PROFILE_FIELDS = {"agent_config", "agent_role"}
 

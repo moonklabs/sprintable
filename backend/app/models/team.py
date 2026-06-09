@@ -30,6 +30,8 @@ class TeamMember(Base, OrgScopedMixin, TimestampMixin):
     message_policy_mode: Mapped[str] = mapped_column(
         Text, nullable=False, server_default="creator_only", default="creator_only"
     )
+    # E-CHAT-CMD S1b: 에이전트 런타임 종류 — canonical members.runtime_type 투영(0106 뷰). 휴먼 NULL.
+    runtime_type: Mapped[str | None] = mapped_column(Text, nullable=True)
     fakechat_port: Mapped[int | None] = mapped_column(nullable=True)
     created_by: Mapped[uuid.UUID | None] = mapped_column(
         UUID(as_uuid=True), ForeignKey("users.id", ondelete="SET NULL"), nullable=True
