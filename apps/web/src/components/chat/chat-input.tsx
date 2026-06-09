@@ -1,9 +1,11 @@
 'use client';
 
 import { useEffect, useRef, useState, type KeyboardEvent } from 'react';
-import { Loader2, Paperclip, Send, X } from 'lucide-react';
+import { Loader2, Paperclip, Send, Terminal, Type, X } from 'lucide-react';
+import { useTranslations } from 'next-intl';
 import { Button } from '@/components/ui/button';
 import { getFileIcon } from '@/lib/file-icon';
+import { commandName, dequoteLiteral, isCommand } from '@/lib/command-classifier';
 import type { SendAttachment } from '@/hooks/use-chat-sse';
 
 const MAX_ATTACHMENTS = 10; // BE _MAX_ATTACHMENTS 정합
@@ -74,9 +76,11 @@ interface ChatInputProps {
 }
 
 export function ChatInput({ onSend, onUploadFile, disabled, placeholder, projectId, onMentionIdsChange }: ChatInputProps) {
+  const t = useTranslations('chats');
   const [text, setText] = useState('');
   const [pendingFiles, setPendingFiles] = useState<File[]>([]);
   const [uploadFailed, setUploadFailed] = useState(false);
+  const [sendFailed, setSendFailed] = useState(false);
   const [sending, setSending] = useState(false);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
@@ -189,25 +193,34 @@ export function ChatInput({ onSend, onUploadFile, disabled, placeholder, project
 
     setSending(true);
     setUploadFailed(false);
+    setSendFailed(false);
     try {
-      // 첨부가 있으면 전부 GCS 업로드 후, 본문과 함께 한 메시지로 전송한다.
+      // 1) 첨부 업로드 단계 — 실패는 "첨부 업로드 실패"로 표시(pending 유지·재시도 가능).
       let attachments: SendAttachment[] | undefined;
       if (pendingFiles.length > 0 && onUploadFile) {
-        attachments = await Promise.all(pendingFiles.map((f) => onUploadFile(f)));
+        try {
+          attachments = await Promise.all(pendingFiles.map((f) => onUploadFile(f)));
+        } catch {
+          setUploadFailed(true);
+          return; // finally에서 setSending(false)
+        }
       }
-      await onSend(
-        trimmed,
-        mentionedIdsRef.current.length > 0 ? mentionedIdsRef.current : undefined,
-        attachments && attachments.length > 0 ? attachments : undefined,
-      );
+      // 2) 메시지 전송 단계 — 실패(403·네트워크 등)는 첨부 실패로 오표시하지 않고 전송 실패로 분기.
+      try {
+        await onSend(
+          trimmed,
+          mentionedIdsRef.current.length > 0 ? mentionedIdsRef.current : undefined,
+          attachments && attachments.length > 0 ? attachments : undefined,
+        );
+      } catch {
+        setSendFailed(true);
+        return;
+      }
       setText('');
       setPendingFiles([]);
       mentionedIdsRef.current = [];
       onMentionIdsChange?.([]);
       if (textareaRef.current) textareaRef.current.style.height = 'auto';
-    } catch {
-      // 업로드/전송 실패 — pending 파일 유지하고 칩에 실패 표시 (재시도 가능)
-      setUploadFailed(true);
     } finally {
       setSending(false);
     }
@@ -295,9 +308,27 @@ export function ChatInput({ onSend, onUploadFile, disabled, placeholder, project
       {uploadFailed && (
         <p className="mb-1 text-xs text-destructive">첨부 업로드에 실패했습니다. 다시 시도해 주세요.</p>
       )}
+      {sendFailed && (
+        <p className="mb-1 text-xs text-destructive">{t('sendFailed')}</p>
+      )}
       {atMaxAttachments && (
         <p className="mb-1 text-xs text-muted-foreground">첨부는 최대 {MAX_ATTACHMENTS}개까지 가능합니다.</p>
       )}
+
+      {/* S8: command-candidate / 리터럴 escape 입력 affordance (시각 보조 — 전송 차단 아님) */}
+      {(() => {
+        const cmd = isCommand(text);
+        const literal = !cmd && text.startsWith('//');
+        if (!cmd && !literal) return null;
+        const chip = cmd ? `/${commandName(text)}` : (dequoteLiteral(text).trimStart().split(/\s+/)[0] ?? '');
+        return (
+          <div className={`mb-2 flex items-center gap-2 rounded-lg border px-2.5 py-1.5 text-xs ${cmd ? 'border-brand/30 bg-brand/10 text-brand' : 'border-border bg-muted/50 text-muted-foreground'}`}>
+            {cmd ? <Terminal className="h-3.5 w-3.5 shrink-0" aria-hidden /> : <Type className="h-3.5 w-3.5 shrink-0" aria-hidden />}
+            <code className="rounded bg-background/60 px-1.5 py-0.5 font-mono text-foreground">{chip}</code>
+            <span>{cmd ? t('commandPreviewSendAsCommand') : t('commandPreviewSendAsLiteral')}</span>
+          </div>
+        );
+      })()}
 
       <div className="relative flex items-end gap-2">
         {/* Mention dropdown */}
