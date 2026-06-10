@@ -60,7 +60,10 @@ function ScrollShell({ showTopBar, children }: { showTopBar: boolean; children: 
         <ContextualPanelLayout
           renderPanel={({ mode, closePanel }) => (
             <div className={mode === 'inline' ? '2xl:sticky 2xl:top-0 2xl:h-svh 2xl:p-2' : 'h-full'}>
-              <TeamPresencePanel items={items} mode={mode} onClose={closePanel} />
+              <TeamPresencePanel
+                items={items}
+                onClose={mode === 'inline' ? () => panel.setInlinePanelOpen(false) : closePanel}
+              />
             </div>
           )}
           inlinePanelOpen={panel.inlinePanelOpen}
@@ -78,11 +81,13 @@ function ScrollShell({ showTopBar, children }: { showTopBar: boolean; children: 
         </ContextualPanelLayout>
       </div>
 
-      {/* 2505d27d: presence FAB(선생님 안·우하단·상시·명확) — 전 width 가시·클릭→패널 토글.
-          working-count 배지=접힌 상태서도 "N 작업 중" at-a-glance. 모바일은 하단 GNB(lg:hidden) 안 가리게 bottom↑. */}
+      {/* 2505d27d: presence FAB(선생님 안·우하단) — **패널 닫힘일 때만 렌더**(열림 시 redundant/겹침=선생님 캐치).
+          패널은 자체 X로 닫음 → FAB 재등장. working-count 배지=닫힘서도 "N 작업 중". 모바일 GNB(lg:hidden) 회피 bottom↑.
+          ⚠️ 폴(useTeamPresence)은 렌더와 무관하게 유지 — 배지 count 최신성 보존(폴≠렌더). */}
+      {!panel.inlinePanelOpen && !panel.drawerOpen ? (
       <button
         type="button"
-        onClick={panel.togglePanel}
+        onClick={panel.openPanel}
         aria-label={workingCount > 0 ? t('fabLabelWorking', { count: workingCount }) : t('panelTitle')}
         title={t('panelTitle')}
         className={cn(
@@ -100,6 +105,7 @@ function ScrollShell({ showTopBar, children }: { showTopBar: boolean; children: 
           </span>
         ) : null}
       </button>
+      ) : null}
     </SidebarInset>
   );
 }
