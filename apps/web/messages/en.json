@@ -1171,6 +1171,17 @@
     "addActionFailed": "Failed to add action.",
     "linkedSprintOutcome": "Linked sprint outcome"
   },
+  "share": {
+    "share": "Share",
+    "shareToWeb": "Publish to web",
+    "shareToWebDesc": "Anyone with the link can view this document.",
+    "copyLink": "Copy link",
+    "linkCopied": "Link copied",
+    "stopSharing": "Stop sharing",
+    "regenerateLink": "Regenerate link",
+    "shareSingleDocNote": "Only this document is shared.",
+    "publicLinkInvalid": "This link is not valid."
+  },
   "docs": {
     "title": "Documentation",
     "searchPlaceholder": "Search docs...",

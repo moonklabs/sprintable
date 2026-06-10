@@ -1171,6 +1171,17 @@
     "addActionFailed": "액션 추가에 실패했습니다.",
     "linkedSprintOutcome": "연결된 스프린트 성과"
   },
+  "share": {
+    "share": "공유",
+    "shareToWeb": "웹에 공개",
+    "shareToWebDesc": "링크가 있는 누구나 이 문서를 볼 수 있습니다.",
+    "copyLink": "링크 복사",
+    "linkCopied": "링크 복사됨",
+    "stopSharing": "공개 중단",
+    "regenerateLink": "링크 재발급",
+    "shareSingleDocNote": "이 문서 한 개만 공개됩니다.",
+    "publicLinkInvalid": "유효하지 않은 링크입니다."
+  },
   "docs": {
     "title": "문서",
     "searchPlaceholder": "문서 검색...",

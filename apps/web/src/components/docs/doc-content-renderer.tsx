@@ -22,6 +22,8 @@ interface DocContentRendererProps {
   contentRef?: RefObject<HTMLDivElement | null>;
   codeCopyLabel?: string;
   codeCopiedLabel?: string;
+  /** Public share viewer — render internal doc links as plain text (no navigation/traversal). */
+  publicMode?: boolean;
 }
 
 export function DocContentRenderer({
@@ -31,6 +33,7 @@ export function DocContentRenderer({
   contentRef,
   codeCopyLabel = 'Copy',
   codeCopiedLabel = 'Copied',
+  publicMode = false,
 }: DocContentRendererProps) {
   const internalRef = useRef<HTMLDivElement | null>(null);
   const headings = useMemo(() => extractDocHeadings(content, contentFormat), [content, contentFormat]);
@@ -109,6 +112,13 @@ export function DocContentRenderer({
     const wikiCleanup = wikiLinks.map((span) => {
       const slug = span.getAttribute('data-slug') ?? '';
       const title = span.getAttribute('data-title') ?? span.textContent ?? '';
+      // Public share viewer: internal doc links are inert plain text — no navigation,
+      // no cross-doc traversal (meta-leak guard).
+      if (publicMode) {
+        span.className = 'text-[0.9em] text-muted-foreground';
+        span.removeAttribute('data-slug');
+        return () => { /* no handler attached */ };
+      }
       span.className = 'inline-flex cursor-pointer items-center gap-0.5 rounded px-1 py-0.5 text-[0.9em] bg-brand/10 text-[color:var(--brand-soft)] hover:bg-brand/20 transition-colors';
       span.title = title;
       const handleClick = () => { if (slug) window.location.href = `/docs/${slug}`; };
@@ -235,7 +245,7 @@ export function DocContentRenderer({
       fileCleanup.forEach((dispose) => dispose());
       toggleCleanup.forEach((dispose) => dispose());
     };
-  }, [codeCopiedLabel, codeCopyLabel, content, contentFormat]);
+  }, [codeCopiedLabel, codeCopyLabel, content, contentFormat, publicMode]);
 
   const decoratedHtml = useMemo(() => {
     const sanitized = sanitizeDocHtml(content);
