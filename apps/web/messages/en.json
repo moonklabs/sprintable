@@ -1180,7 +1180,9 @@
     "stopSharing": "Stop sharing",
     "regenerateLink": "Regenerate link",
     "shareSingleDocNote": "Only this document is shared.",
-    "publicLinkInvalid": "This link is not valid."
+    "publicLinkInvalid": "This link is not valid.",
+    "attachmentUnavailable": "Attachment unavailable in public view",
+    "imageUnavailable": "Image unavailable in public view"
   },
   "docs": {
     "title": "Documentation",

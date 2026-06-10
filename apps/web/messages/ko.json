@@ -1180,7 +1180,9 @@
     "stopSharing": "공개 중단",
     "regenerateLink": "링크 재발급",
     "shareSingleDocNote": "이 문서 한 개만 공개됩니다.",
-    "publicLinkInvalid": "유효하지 않은 링크입니다."
+    "publicLinkInvalid": "유효하지 않은 링크입니다.",
+    "attachmentUnavailable": "공개 보기에서 첨부를 표시할 수 없습니다",
+    "imageUnavailable": "공개 보기에서 이미지를 표시할 수 없습니다"
   },
   "docs": {
     "title": "문서",

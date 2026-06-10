@@ -77,6 +77,8 @@ export default function SharedDocPage() {
           codeCopyLabel={t('codeCopy')}
           codeCopiedLabel={t('codeCopied')}
           publicMode
+          publicAttachmentLabel={ts('attachmentUnavailable')}
+          publicImageLabel={ts('imageUnavailable')}
         />
       </div>
     </div>
