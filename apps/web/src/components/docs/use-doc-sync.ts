@@ -148,6 +148,14 @@ export function useDocSync<TDoc = { updated_at: string }>({
       if (res.status === 409) {
         conflictRef.current = true;
         remoteChangedRef.current = false;
+        // BE conflict body: { error: { code: 'DOC_CONFLICT', current_updated_at } }. Adopt the
+        // server's current updated_at as the new baseline so an acknowledged retry reconciles
+        // against the live version instead of conflicting again (151e05f1 CP2).
+        try {
+          const conflictBody = await res.json() as { error?: { current_updated_at?: string } };
+          const current = conflictBody.error?.current_updated_at;
+          if (current) setBaselineUpdatedAt(current);
+        } catch { /* malformed conflict body — still surface the conflict */ }
         setStatus('conflict');
         savingRef.current = false;
         return false;
