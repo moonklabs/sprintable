@@ -77,6 +77,16 @@ async def test_matching_expected_updated_at_proceeds():
 
 
 @pytest.mark.anyio
+async def test_microsecond_diff_same_ms_no_false_409():
+    """FE JS Date(ms) round-trip 시뮬: doc μs=.123456 vs expected μs=.123000(같은 ms·sub-ms만 차이)
+    → ms 절삭 후 일치 → 통과(μs-exact였다면 매 저장 false-409 footgun)."""
+    doc_ts = T1.replace(microsecond=123456)
+    expected_ts = T1.replace(microsecond=123000)  # JS Date 가 ms 로 절삭한 echo
+    resp, d = await _call({"title": "ok", "expected_updated_at": expected_ts}, doc_updated_at=doc_ts)
+    assert d.title == "ok"  # 409 안 남(ms 동일)
+
+
+@pytest.mark.anyio
 async def test_force_overwrite_bypasses_check():
     """force_overwrite=True → stale여도 우회(last-write-wins 의도적)."""
     resp, d = await _call(
