@@ -15,7 +15,10 @@ const PUBLIC_PREFIX = [
   '/api/auth/',
   '/api/oss/',
   '/api/webhook/',
+  // Public doc share (b1574f5a) — unauthenticated token-based viewer + its data proxy
+  '/api/public/',
   // UI public routes
+  '/share/',
   '/login',
   '/signup',
   '/register',

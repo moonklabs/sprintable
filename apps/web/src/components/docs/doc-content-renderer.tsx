@@ -22,6 +22,12 @@ interface DocContentRendererProps {
   contentRef?: RefObject<HTMLDivElement | null>;
   codeCopyLabel?: string;
   codeCopiedLabel?: string;
+  /** Public share viewer — render internal doc links as plain text (no navigation/traversal). */
+  publicMode?: boolean;
+  /** publicMode placeholder text for auth-gated attachments that can't render publicly. */
+  publicAttachmentLabel?: string;
+  /** publicMode placeholder text for auth-gated images that can't render publicly. */
+  publicImageLabel?: string;
 }
 
 export function DocContentRenderer({
@@ -31,6 +37,9 @@ export function DocContentRenderer({
   contentRef,
   codeCopyLabel = 'Copy',
   codeCopiedLabel = 'Copied',
+  publicMode = false,
+  publicAttachmentLabel = 'Attachment unavailable in public view',
+  publicImageLabel = 'Image unavailable in public view',
 }: DocContentRendererProps) {
   const internalRef = useRef<HTMLDivElement | null>(null);
   const headings = useMemo(() => extractDocHeadings(content, contentFormat), [content, contentFormat]);
@@ -109,6 +118,13 @@ export function DocContentRenderer({
     const wikiCleanup = wikiLinks.map((span) => {
       const slug = span.getAttribute('data-slug') ?? '';
       const title = span.getAttribute('data-title') ?? span.textContent ?? '';
+      // Public share viewer: internal doc links are inert plain text — no navigation,
+      // no cross-doc traversal (meta-leak guard).
+      if (publicMode) {
+        span.className = 'text-[0.9em] text-muted-foreground';
+        span.removeAttribute('data-slug');
+        return () => { /* no handler attached */ };
+      }
       span.className = 'inline-flex cursor-pointer items-center gap-0.5 rounded px-1 py-0.5 text-[0.9em] bg-brand/10 text-[color:var(--brand-soft)] hover:bg-brand/20 transition-colors';
       span.title = title;
       const handleClick = () => { if (slug) window.location.href = `/docs/${slug}`; };
@@ -193,6 +209,20 @@ export function DocContentRenderer({
         ? `${(size / 1024).toFixed(1)} KB`
         : `${(size / (1024 * 1024)).toFixed(1)} MB`;
 
+      // Public share viewer: attachments are auth-gated (private bucket + signed URL),
+      // so they'd 401 here — render an inert placeholder (no leak, no broken render).
+      if (publicMode) {
+        block.innerHTML = `
+          <div class="flex items-center gap-3 rounded-xl border border-[hsl(var(--border))] bg-[hsl(var(--muted))]/20 px-4 py-3 opacity-70">
+            <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="flex-shrink-0 text-muted-foreground"><path d="M14.5 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V7.5L14.5 2z"/><polyline points="14 2 14 8 20 8"/></svg>
+            <div class="min-w-0 flex-1">
+              <p class="truncate text-sm font-medium">${escapeHtmlText(filename)}</p>
+              <p class="text-xs opacity-60">${escapeHtmlText(publicAttachmentLabel)}</p>
+            </div>
+          </div>`;
+        return () => {};
+      }
+
       block.innerHTML = `
         <div class="flex items-center gap-3 rounded-xl border border-[hsl(var(--border))] bg-[hsl(var(--muted))]/20 px-4 py-3 cursor-pointer hover:bg-[hsl(var(--muted))]/40 transition-colors">
           <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="flex-shrink-0 text-muted-foreground"><path d="M14.5 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V7.5L14.5 2z"/><polyline points="14 2 14 8 20 8"/></svg>
@@ -216,6 +246,18 @@ export function DocContentRenderer({
       return () => block.removeEventListener('click', handleClick);
     });
 
+    // Public share viewer: images may point to auth-gated resources (401) — replace
+    // each with an inert placeholder (real public images are post-MVP).
+    if (publicMode) {
+      Array.from(root.querySelectorAll<HTMLImageElement>('img')).forEach((img) => {
+        const alt = img.getAttribute('alt')?.trim();
+        const placeholder = document.createElement('div');
+        placeholder.className = 'flex items-center gap-2 rounded-xl border border-border bg-muted/20 px-4 py-3 text-xs text-muted-foreground';
+        placeholder.innerHTML = `<svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="flex-shrink-0"><path d="m2 2 20 20"/><path d="M10.41 10.41a2 2 0 1 1-2.83-2.83"/><line x1="13.5" y1="13.5" x2="6" y2="21"/><line x1="18" y1="12" x2="21" y2="15"/><path d="M3.59 3.59A1.99 1.99 0 0 0 3 5v14a2 2 0 0 0 2 2h14c.55 0 1.05-.22 1.41-.59"/><path d="M21 15V5a2 2 0 0 0-2-2H9"/></svg><span class="truncate">${escapeHtmlText(alt || publicImageLabel)}</span>`;
+        img.replaceWith(placeholder);
+      });
+    }
+
     // Toggle block click handlers (viewer)
     const toggleSummaries = Array.from(root.querySelectorAll<HTMLElement>('[data-type="toggleSummary"]'));
     const toggleCleanup = toggleSummaries.map((summary) => {
@@ -235,7 +277,7 @@ export function DocContentRenderer({
       fileCleanup.forEach((dispose) => dispose());
       toggleCleanup.forEach((dispose) => dispose());
     };
-  }, [codeCopiedLabel, codeCopyLabel, content, contentFormat]);
+  }, [codeCopiedLabel, codeCopyLabel, content, contentFormat, publicMode, publicAttachmentLabel, publicImageLabel]);
 
   const decoratedHtml = useMemo(() => {
     const sanitized = sanitizeDocHtml(content);

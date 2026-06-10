@@ -10,7 +10,8 @@ import { slugifyDocTitle, isUntitledSlug } from '@/components/docs/lib/doc-slug'
 import { useDocSync, type SaveStatus } from '@/components/docs/use-doc-sync';
 import { htmlToMarkdown } from '@/components/docs/lib/content-converter';
 import Link from 'next/link';
-import { AlertTriangle, Check, Copy, Eye, Link2, Loader2, MoreHorizontal, RotateCw, Trash2, XCircle } from 'lucide-react';
+import { AlertTriangle, Check, Copy, Eye, Link2, Loader2, MoreHorizontal, RotateCw, Share2, Trash2, XCircle } from 'lucide-react';
+import { DocShareDialog } from '@/components/docs/doc-share-dialog';
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -130,6 +131,7 @@ export default function DocSlugPage() {
   const router = useRouter();
   const t = useTranslations('docs');
   const tc = useTranslations('common');
+  const ts = useTranslations('share');
   // 신규 문서 자동 포커스: URL ?new=1 파라미터를 ref로 처리 (useSearchParams Suspense 이슈 방지)
   const isNewRef = useRef(typeof window !== 'undefined' && new URLSearchParams(window.location.search).get('new') === '1');
   const isNew = isNewRef.current;
@@ -145,6 +147,7 @@ export default function DocSlugPage() {
   const [mdCopied, setMdCopied] = useState(false);
   const [slugLocked, setSlugLocked] = useState(false);
   const [urlDialogOpen, setUrlDialogOpen] = useState(false);
+  const [shareDialogOpen, setShareDialogOpen] = useState(false);
 
   const handleDocSaved = useCallback((doc: DocDetail) => {
     setSelectedDoc(doc);
@@ -321,6 +324,15 @@ export default function DocSlugPage() {
       >
         {mdCopied ? <Check className="h-4 w-4 text-success" /> : <Copy className="h-4 w-4" />}
       </button>
+      <button
+        type="button"
+        onClick={() => setShareDialogOpen(true)}
+        title={ts('share')}
+        aria-label={ts('share')}
+        className="inline-flex h-8 w-8 items-center justify-center rounded-md text-muted-foreground transition-colors hover:bg-accent hover:text-accent-foreground"
+      >
+        <Share2 className="h-4 w-4" />
+      </button>
       <DropdownMenu>
         <DropdownMenuTrigger className="inline-flex h-8 w-8 items-center justify-center rounded-md text-muted-foreground transition-colors hover:bg-accent hover:text-accent-foreground">
           <MoreHorizontal className="h-4 w-4" />
@@ -438,6 +450,22 @@ export default function DocSlugPage() {
           slugInvalid: t('slugInvalid'),
           save: t('save'),
           cancel: tc('cancel'),
+        }}
+      />
+
+      <DocShareDialog
+        open={shareDialogOpen}
+        onClose={() => setShareDialogOpen(false)}
+        docId={selectedDoc.id}
+        labels={{
+          share: ts('share'),
+          shareToWeb: ts('shareToWeb'),
+          shareToWebDesc: ts('shareToWebDesc'),
+          copyLink: ts('copyLink'),
+          linkCopied: ts('linkCopied'),
+          stopSharing: ts('stopSharing'),
+          regenerateLink: ts('regenerateLink'),
+          shareSingleDocNote: ts('shareSingleDocNote'),
         }}
       />
     </div>

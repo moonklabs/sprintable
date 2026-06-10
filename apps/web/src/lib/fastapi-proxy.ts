@@ -4,7 +4,7 @@
  */
 
 import { getServerSession } from '@/lib/db/server';
-import { ApiErrors } from '@/lib/api-response';
+import { apiSuccess, ApiErrors } from '@/lib/api-response';
 
 import { NotFoundError, ForbiddenError } from '@sprintable/core-storage';
 
@@ -121,6 +121,23 @@ export async function proxyToFastapi(
     status: res.status,
     headers: { 'Content-Type': res.headers.get('Content-Type') ?? 'application/json' },
   });
+}
+
+/**
+ * proxyToFastapi + success-body re-wrap. The BE returns raw JSON on success; share/
+ * public consumers read `json.data`, so wrap success in the `{ data }` envelope.
+ * Errors (already enveloped by the BE global handler) and 204 pass through verbatim.
+ * Bypasses the storage-api repo entirely — immune to the stale-dist bundling class.
+ */
+export async function proxyToFastapiWrapped(
+  request: Request,
+  fastapiPath: string,
+  options: ProxyOptions = {},
+): Promise<Response> {
+  const res = await proxyToFastapi(request, fastapiPath, options);
+  if (!res.ok || res.status === 204) return res;
+  const raw = await res.json();
+  return apiSuccess(raw);
 }
 
 /**
