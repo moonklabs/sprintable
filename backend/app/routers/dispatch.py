@@ -1,8 +1,10 @@
 """E-EVENTBUS P3 S12: Dispatch API — entity_type + entity_id → dispatched 이벤트."""
+import asyncio
 import logging
 import uuid
 from datetime import datetime, timezone
 
+import httpx
 from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel
 from sqlalchemy import select
@@ -12,8 +14,10 @@ from app.dependencies.auth import AuthContext, get_current_user, get_verified_or
 from app.dependencies.database import get_db
 from app.models.doc import Doc
 from app.models.event import Event, EventType
+from app.models.notification_preference import NotificationPreference
 from app.models.pm import Epic, Story
 from app.models.team import TeamMember
+from app.models.webhook_config import WebhookConfig
 from app.routers.agent_gateway import wake_agent
 from app.routers.events import _event_to_payload, _push_to_agent
 from app.services.event_seq import assign_recipient_seq
@@ -25,6 +29,66 @@ router = APIRouter(prefix="/api/v2/dispatch", tags=["dispatch"])
 logger = logging.getLogger(__name__)
 
 _ENTITY_TYPES = {"epic", "story", "doc"}
+
+
+async def _relay_dispatched_to_discord(
+    event_id: uuid.UUID,
+    agent_id: uuid.UUID,
+    content: str,
+) -> None:
+    """1f01c1ad: dispatched 이벤트를 discord 채널 에이전트에게 webhook relay.
+
+    SSE wake_agent는 MCP SSE 브릿지(on_event=None)를 통해 CC 세션에 도달하지 못한다.
+    discord 채널 preference + 활성 Discord webhook이 있으면 conversation 메시지와 동일하게
+    HTTP POST로 relay → CC agent가 Discord plugin으로 수신.
+    """
+    from app.core.database import async_session_factory
+
+    try:
+        async with async_session_factory() as db:
+            pref = (await db.execute(
+                select(NotificationPreference).where(
+                    NotificationPreference.member_id == agent_id,
+                    NotificationPreference.scope_type == "global",
+                    NotificationPreference.scope_id.is_(None),
+                )
+            )).scalars().first()
+
+            channel = pref.channel if pref else "sse"
+            if channel != "discord":
+                return
+
+            wh = (await db.execute(
+                select(WebhookConfig).where(
+                    WebhookConfig.member_id == agent_id,
+                    WebhookConfig.channel == "discord",
+                    WebhookConfig.is_active.is_(True),
+                )
+            )).scalars().first()
+
+        if wh is None:
+            return
+
+        is_discord_url = (
+            "discord.com/api/webhooks" in wh.url
+            or "discordapp.com/api/webhooks" in wh.url
+        )
+        relay_payload: dict = (
+            {"content": content}
+            if is_discord_url
+            else {"event_type": "dispatched", "event_id": str(event_id), "content": content}
+        )
+        async with httpx.AsyncClient(timeout=10.0) as http:
+            resp = await http.post(wh.url, json=relay_payload)
+            if resp.status_code >= 500:
+                logger.warning(
+                    "dispatch discord relay HTTP %d agent=%s event=%s",
+                    resp.status_code, agent_id, event_id,
+                )
+    except Exception:
+        logger.warning(
+            "dispatch discord relay failed agent=%s event=%s", agent_id, event_id, exc_info=True
+        )
 
 
 class DispatchRequest(BaseModel):
@@ -192,6 +256,11 @@ async def dispatch_entity(
             wake_agent(str(assignee_id), event.recipient_seq)
         else:
             _push_to_agent(str(assignee_id), _event_to_payload(event))
+        # 1f01c1ad: discord 채널 에이전트(CC 등)는 SSE wake만으로 세션 주입이 안 됨
+        # (MCP SSE 브릿지 on_event=None). conversation 메시지와 동일하게 Discord webhook relay.
+        asyncio.ensure_future(
+            _relay_dispatched_to_discord(event.id, assignee_id, content)
+        )
     return DispatchResponse(
         dispatched=True,
         event_id=event.id,
