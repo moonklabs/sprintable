@@ -244,6 +244,13 @@ async def bulk_update_stories(
             single = [story.assignee_id] if story.assignee_id else []
             await StoryAssigneeRepository(db, repo.org_id).set_for_story(story.id, single)
         updated.append(story)
+    # P0/MissingGreenlet: setattr 후 server-onupdate `updated_at` 등은 flush 시 expire 되어,
+    # model_validate(sync)가 lazy-reload 를 async greenlet 밖에서 시도 → MissingGreenlet 500.
+    # 단건 repo.update(flush+refresh) 패턴과 일치시켜 expired 컬럼을 async 컨텍스트서 선-reload.
+    await db.flush()
+    for s in updated:
+        await db.refresh(s)
+    # refresh 後 transient assignee_ids 세팅(refresh 는 매핑 컬럼만 reload·transient 보존).
     await _attach_assignee_ids(db, repo.org_id, updated)
     results = [StoryResponse.model_validate(s) for s in updated]
     await db.commit()
