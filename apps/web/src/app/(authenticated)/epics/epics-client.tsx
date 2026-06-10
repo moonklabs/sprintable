@@ -691,8 +691,8 @@ function CreateModal({ projectId, orgId, onCreated, onClose }: CreateModalProps)
         onClick={onClose}
         aria-label={t('cancel')}
       />
-      <div className="relative z-10 w-full max-w-md rounded-2xl border border-border bg-card p-6 shadow-xl">
-        <div className="mb-4 flex items-center justify-between">
+      <div className="relative z-10 flex max-h-[calc(100vh-2rem)] w-full max-w-md flex-col rounded-2xl border border-border bg-card shadow-xl">
+        <div className="flex flex-shrink-0 items-center justify-between px-6 pb-4 pt-6">
           <h2 className="text-base font-bold text-foreground">{t('createEpic')}</h2>
           <button
             type="button"
@@ -702,12 +702,16 @@ function CreateModal({ projectId, orgId, onCreated, onClose }: CreateModalProps)
             <X className="size-4" />
           </button>
         </div>
-        <EpicCreateForm
-          projectId={projectId}
-          orgId={orgId}
-          onCreated={(epic) => { onCreated(epic); onClose(); }}
-          onCancel={onClose}
-        />
+        {/* Scrollable body — long forms (outcome 추가 등) overflow the viewport otherwise;
+            internal scroll keeps every field + the submit button reachable (S5). */}
+        <div className="min-h-0 flex-1 overflow-y-auto px-6 pb-6">
+          <EpicCreateForm
+            projectId={projectId}
+            orgId={orgId}
+            onCreated={(epic) => { onCreated(epic); onClose(); }}
+            onCancel={onClose}
+          />
+        </div>
       </div>
     </div>
   );
