@@ -125,6 +125,7 @@ export function StoryDetailPanel({ story, tasks, nextTasksCursor = null, loading
   const [titleDraft, setTitleDraft] = useState(story.title);
   const [savingTitle, setSavingTitle] = useState(false);
   const [savingStatus, setSavingStatus] = useState(false);
+  const [localStatus, setLocalStatus] = useState(story.status);
 
   const [editingDescription, setEditingDescription] = useState(false);
   const [descriptionDraft, setDescriptionDraft] = useState(story.description ?? '');
@@ -324,6 +325,11 @@ export function StoryDetailPanel({ story, tasks, nextTasksCursor = null, loading
       .finally(() => setLoadingDeps(false));
   }, [story.id]);
 
+  // Keep the locally-displayed status synced when a different story is selected or the
+  // board pushes an external update. Optimistic in-panel changes set it directly (handler),
+  // so the badge reflects immediately without waiting for the prop round-trip (S6 AC2 ④).
+  useEffect(() => { setLocalStatus(story.status); }, [story.status]);
+
   const statusKeyMap: Record<string, 'backlog' | 'readyForDev' | 'inProgress' | 'inReview' | 'done'> = {
     backlog: 'backlog',
     'ready-for-dev': 'readyForDev',
@@ -331,8 +337,8 @@ export function StoryDetailPanel({ story, tasks, nextTasksCursor = null, loading
     'in-review': 'inReview',
     done: 'done',
   };
-  const statusKey = statusKeyMap[story.status];
-  const statusLabel = statusKey ? t(statusKey) : story.status;
+  const statusKey = statusKeyMap[localStatus];
+  const statusLabel = statusKey ? t(statusKey) : localStatus;
 
   const patchStory = async (body: Record<string, unknown>): Promise<KanbanStory | null> => {
     const res = await fetch(`/api/stories/${story.id}`, {
@@ -346,14 +352,18 @@ export function StoryDetailPanel({ story, tasks, nextTasksCursor = null, loading
   };
 
   const handleChangeStatus = async (newStatus: string) => {
-    if (newStatus === story.status || savingStatus) return;
-    const prev = story.status;
+    if (newStatus === localStatus || savingStatus) return;
+    const prev = localStatus;
     setSavingStatus(true);
-    onStoryUpdate?.({ ...story, status: newStatus }); // optimistic
+    setLocalStatus(newStatus); // optimistic — badge reflects immediately (local, no prop round-trip)
     const updated = await patchStory({ status: newStatus });
     setSavingStatus(false);
-    // BE enforces the state machine — roll back if it rejects (e.g. invalid transition).
-    onStoryUpdate?.({ ...story, status: updated ? updated.status : prev });
+    if (updated) {
+      setLocalStatus(updated.status);
+      onStoryUpdate?.({ ...story, status: updated.status }); // sync the board
+    } else {
+      setLocalStatus(prev); // BE rejected (e.g. invalid transition) — roll back
+    }
   };
 
   const handleSaveTitle = async () => {
@@ -654,14 +664,14 @@ export function StoryDetailPanel({ story, tasks, nextTasksCursor = null, loading
               <DropdownMenuTrigger
                 render={
                   <button type="button" disabled={savingStatus} aria-label={t('status')}>
-                    <StatusBadge status={story.status} label={statusLabel} interactive />
+                    <StatusBadge status={localStatus} label={statusLabel} interactive />
                   </button>
                 }
               />
               <DropdownMenuContent align="start">
                 {COLUMNS.map((col) => {
-                  const isCurrent = col.id === story.status;
-                  const allowed = isCurrent || (VALID_TRANSITIONS[story.status] ?? []).includes(col.id);
+                  const isCurrent = col.id === localStatus;
+                  const allowed = isCurrent || (VALID_TRANSITIONS[localStatus] ?? []).includes(col.id);
                   return (
                     <DropdownMenuItem
                       key={col.id}
