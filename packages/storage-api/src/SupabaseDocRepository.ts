@@ -1,4 +1,4 @@
-import type { IDocRepository, Doc, DocSummary, CreateDocInput, UpdateDocInput, DocListFilters, RepositoryScopeContext } from '@sprintable/core-storage';
+import type { IDocRepository, Doc, DocSummary, CreateDocInput, UpdateDocInput, DocListFilters, RepositoryScopeContext, PublicDoc, DocShareState } from '@sprintable/core-storage';
 import { fastapiCall } from './utils';
 
 export class SupabaseDocRepository implements IDocRepository {
@@ -43,5 +43,26 @@ export class SupabaseDocRepository implements IDocRepository {
 
   async delete(id: string, _orgId: string): Promise<void> {
     await fastapiCall<void>('DELETE', `/api/v2/docs/${id}`, this.accessToken);
+  }
+
+  // Public share viewer — unauthenticated; the token is the only credential.
+  async getPublicByToken(token: string): Promise<PublicDoc> {
+    return fastapiCall<PublicDoc>('GET', `/api/v2/public/docs/${token}`, '');
+  }
+
+  async getShareState(id: string): Promise<DocShareState> {
+    return fastapiCall<DocShareState>('GET', `/api/v2/docs/${id}/share`, this.accessToken);
+  }
+
+  async enableShare(id: string): Promise<DocShareState> {
+    return fastapiCall<DocShareState>('POST', `/api/v2/docs/${id}/share`, this.accessToken);
+  }
+
+  async disableShare(id: string): Promise<void> {
+    await fastapiCall<void>('DELETE', `/api/v2/docs/${id}/share`, this.accessToken);
+  }
+
+  async regenerateShare(id: string): Promise<DocShareState> {
+    return fastapiCall<DocShareState>('POST', `/api/v2/docs/${id}/share/regenerate`, this.accessToken);
   }
 }

@@ -36,6 +36,8 @@ export type {
   CreateDocInput,
   UpdateDocInput,
   DocListFilters,
+  PublicDoc,
+  DocShareState,
 } from './interfaces/IDocRepository';
 
 export type {

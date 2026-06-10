@@ -64,6 +64,20 @@ export interface DocListFilters extends PaginationOptions {
   q?: string;
 }
 
+/** Minimal public-share payload — no metadata (project/org/author) is exposed. */
+export interface PublicDoc {
+  title: string;
+  content: string;
+  content_format: 'markdown' | 'html';
+}
+
+/** Public-share state for a doc. `token`/`share_url` are null while sharing is off. */
+export interface DocShareState {
+  enabled: boolean;
+  token: string | null;
+  share_url: string | null;
+}
+
 export interface IDocRepository {
   list(filters: DocListFilters): Promise<DocSummary[]>;
   getTree(projectId: string): Promise<DocSummary[]>;
@@ -72,4 +86,10 @@ export interface IDocRepository {
   create(input: CreateDocInput): Promise<Doc>;
   update(id: string, input: UpdateDocInput): Promise<Doc>;
   delete(id: string, orgId: string): Promise<void>;
+  /** Public share viewer — resolve a doc by opaque token (unauthenticated). */
+  getPublicByToken(token: string): Promise<PublicDoc>;
+  getShareState(id: string): Promise<DocShareState>;
+  enableShare(id: string): Promise<DocShareState>;
+  disableShare(id: string): Promise<void>;
+  regenerateShare(id: string): Promise<DocShareState>;
 }
