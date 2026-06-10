@@ -231,10 +231,27 @@ async def update_doc(
     # 4dd399c6: slug/slug_locked 는 유일성·alias 처리가 필요해 일반 필드와 분리.
     slug_in = data.pop("slug", None)
     slug_locked_in = data.pop("slug_locked", None)
+    # 151e05f1: 동시성 제어 필드 — Doc 컬럼이 아니므로 분리(setattr 루프서 제외).
+    expected_updated_at = data.pop("expected_updated_at", None)
+    force_overwrite = data.pop("force_overwrite", None)
 
     doc = await repo.get(id)
     if doc is None:
         raise HTTPException(status_code=404, detail="Doc not found")
+
+    # 151e05f1: 낙관적 동시성 — expected_updated_at 제공 & 현재 updated_at 불일치 & not force
+    # → 409 DOC_CONFLICT(동시편집 clobber 방지). mutation 前 검사·미제공=무체크(하위호환).
+    # detail dict → #1372 핸들러 패스스루 → FE 가 error.code/error.current_updated_at 언랩.
+    if expected_updated_at is not None and not force_overwrite:
+        if doc.updated_at != expected_updated_at:
+            raise HTTPException(
+                status_code=409,
+                detail={
+                    "code": "DOC_CONFLICT",
+                    "message": "문서가 다른 곳에서 수정됨 — 최신본을 다시 불러오세요",
+                    "current_updated_at": doc.updated_at.isoformat() if doc.updated_at else None,
+                },
+            )
 
     # 일반 필드 적용 (slug 제외)
     for attr, val in data.items():
