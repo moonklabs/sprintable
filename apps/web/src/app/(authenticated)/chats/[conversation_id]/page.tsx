@@ -40,6 +40,8 @@ export default function ConversationPage() {
   const { currentTeamMemberId, projectId } = useDashboardContext();
   const [meta, setMeta] = useState<ConversationMeta | null>(null);
   const [showAddParticipant, setShowAddParticipant] = useState(false);
+  const [editingTitle, setEditingTitle] = useState(false);
+  const [titleDraft, setTitleDraft] = useState('');
 
   const fetchMeta = useCallback(async () => {
     if (!projectId) return;
@@ -53,6 +55,21 @@ export default function ConversationPage() {
       if (conv) setMeta({ title: conv.title, type: conv.type, participants: conv.participants ?? [] });
     } catch { /* non-critical */ }
   }, [conversation_id, projectId]);
+
+  // EF-S2: rename a group room. Optimistic; the BE PATCH persists the title.
+  const handleSaveTitle = useCallback(async () => {
+    const next = titleDraft.trim();
+    setEditingTitle(false);
+    if (!next || next === (meta?.title ?? '')) return;
+    setMeta((m) => (m ? { ...m, title: next } : m));
+    try {
+      await fetch(`/api/conversations/${conversation_id}`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ title: next }),
+      });
+    } catch { /* optimistic; a later refetch reconciles */ }
+  }, [titleDraft, meta, conversation_id]);
 
   // 1aeecdde P2: 에이전트 presence_status(연결축 dot) 폴링 — P1 진실값. 15s 갱신(시간 기반 상태).
   const [presenceById, setPresenceById] = useState<Record<string, PresenceStatus>>({});
@@ -123,9 +140,32 @@ export default function ConversationPage() {
               <ChevronLeft className="h-4 w-4" />
               <span className="lg:hidden">채팅</span>
             </button>
-            <span className="min-w-0 truncate text-sm font-medium text-foreground">
-              {headerTitle}
-            </span>
+            {editingTitle && meta?.type === 'group' ? (
+              <input
+                autoFocus
+                value={titleDraft}
+                onChange={(e) => setTitleDraft(e.target.value)}
+                onKeyDown={(e) => {
+                  if (e.key === 'Enter') void handleSaveTitle();
+                  else if (e.key === 'Escape') setEditingTitle(false);
+                }}
+                onBlur={() => void handleSaveTitle()}
+                aria-label="방 이름 편집"
+                className="min-w-0 rounded border border-border bg-background px-1.5 py-0.5 text-sm font-medium text-foreground focus:outline-none focus:ring-2 focus:ring-primary/40"
+              />
+            ) : meta?.type === 'group' ? (
+              <button
+                type="button"
+                onClick={() => { setTitleDraft(meta.title ?? ''); setEditingTitle(true); }}
+                className="group/title flex min-w-0 items-center gap-1"
+                aria-label="방 이름 편집"
+              >
+                <span className="min-w-0 truncate text-sm font-medium text-foreground">{headerTitle}</span>
+                <span className="flex-shrink-0 text-xs text-muted-foreground opacity-0 transition-opacity group-hover/title:opacity-100">✎</span>
+              </button>
+            ) : (
+              <span className="min-w-0 truncate text-sm font-medium text-foreground">{headerTitle}</span>
+            )}
           </div>
         }
         actions={
