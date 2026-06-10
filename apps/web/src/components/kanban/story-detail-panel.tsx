@@ -356,11 +356,21 @@ export function StoryDetailPanel({ story, tasks, nextTasksCursor = null, loading
     const prev = localStatus;
     setSavingStatus(true);
     setLocalStatus(newStatus); // optimistic — badge reflects immediately (local, no prop round-trip)
-    const updated = await patchStory({ status: newStatus });
+    // The dedicated status endpoint runs the state-machine validation + events; the general
+    // /stories/{id} PATCH (patchStory) intentionally omits `status`, so it would 200 without
+    // persisting — the root of the badge reverting after a "successful" change.
+    let ok = false;
+    try {
+      const res = await fetch(`/api/stories/${story.id}/status`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ status: newStatus }),
+      });
+      ok = res.ok;
+    } catch { /* network error — treat as failure, roll back below */ }
     setSavingStatus(false);
-    if (updated) {
-      setLocalStatus(updated.status);
-      onStoryUpdate?.({ ...story, status: updated.status }); // sync the board
+    if (ok) {
+      onStoryUpdate?.({ ...story, status: newStatus }); // persisted → sync the board
     } else {
       setLocalStatus(prev); // BE rejected (e.g. invalid transition) — roll back
     }
