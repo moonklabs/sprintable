@@ -75,3 +75,17 @@ class DocResponse(BaseModel):
     tags: list[str]
     created_at: datetime
     updated_at: datetime
+
+
+class ShareStatusResponse(BaseModel):
+    """b1574f5a: 문서 공유 상태(관리 API). enabled=active 토큰 유무."""
+    enabled: bool
+    token: str | None = None
+    share_url: str | None = None
+
+
+class PublicDocResponse(BaseModel):
+    """b1574f5a: 공개 read 응답 — 메타 누출 0(project/org/author/tree/comment 미반환)."""
+    title: str
+    content: str
+    content_format: str
