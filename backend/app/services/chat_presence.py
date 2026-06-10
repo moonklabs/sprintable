@@ -74,3 +74,19 @@ def list_working(conversation_id: str) -> list[dict]:
         {**asdict(e)}
         for e in _working_store.get(conversation_id, {}).values()
     ]
+
+
+def working_member_ids() -> set[str]:
+    """eb1a8f95: 전 conversation 횡단 — 현재 working 중인 member_id 집합(만료 제외).
+
+    팀 presence 집계용. 어느 conversation 이든 working 이면 포함(B 결정="여부만"·for-whom 미포함).
+    read-only(만료분은 결과에서 제외만, store 변형 없음). 멀티인스턴스 per-instance best-effort
+    (이 인스턴스가 emit 받은 working 만 — list_working 과 동일 한계).
+    """
+    now = time.time()
+    out: set[str] = set()
+    for store in list(_working_store.values()):
+        for mid, e in store.items():
+            if now - e.updated_at <= _TTL_SEC:
+                out.add(mid)
+    return out
