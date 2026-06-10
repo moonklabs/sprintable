@@ -3,6 +3,7 @@
 import { SidebarTrigger } from '@/components/ui/sidebar';
 import { cn } from '@/lib/utils';
 import { NotificationBell } from './notification-bell';
+import { PresenceToggleButton } from '@/components/presence/team-presence-toggle';
 import { useTopBar } from './top-bar-context';
 
 interface TopBarProps {
@@ -28,6 +29,8 @@ export function TopBar({ className }: TopBarProps) {
       </div>
       <div className="flex shrink-0 items-center gap-1">
         {actions}
+        {/* 2505d27d: presence 패널 토글(선생님 결정·FAB 대체) — Bell 옆·working-count 배지 */}
+        <PresenceToggleButton />
         <NotificationBell />
       </div>
     </div>

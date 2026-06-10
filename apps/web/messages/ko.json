@@ -2308,6 +2308,16 @@
     "teamSizeLabel": "인원",
     "hypothesisSection": "효과 가설"
   },
+  "presence": {
+    "panelTitle": "팀 presence",
+    "fabLabelWorking": "팀 presence · {count}명 작업 중",
+    "groupWorking": "작업 중",
+    "groupOnline": "온라인",
+    "groupOffline": "오프라인",
+    "working": "답 생성 중",
+    "assignedStory": "\"{title}\" 담당",
+    "empty": "표시할 에이전트가 없습니다"
+  },
   "chats": {
     "isTyping": "{name} 님이 입력 중",
     "othersTyping": "{name} 외 {count}명 입력 중",
