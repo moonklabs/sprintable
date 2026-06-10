@@ -16,7 +16,9 @@ router = APIRouter(prefix="/api/v2/projects", tags=["project-access"])
 
 
 class ProjectAccessCreate(BaseModel):
-    org_member_id: uuid.UUID
+    # 18073a52: 휴먼 grant = org_member_id / 에이전트 grant = member_id(=agent members.id). 정확히 1개 필수.
+    org_member_id: uuid.UUID | None = None
+    member_id: uuid.UUID | None = None
     permission: str = "granted"
 
 
@@ -83,25 +85,61 @@ async def create_project_access(
     await _require_owner_or_admin(project_id, auth, session)
     if body.permission != "granted":
         raise HTTPException(status_code=400, detail="permission must be 'granted'")
-    existing = await session.execute(
-        select(ProjectAccess).where(
-            ProjectAccess.project_id == project_id,
-            ProjectAccess.org_member_id == body.org_member_id,
+    if (body.member_id is None) == (body.org_member_id is None):
+        raise HTTPException(
+            status_code=422, detail="exactly one of org_member_id (human) or member_id (agent) required"
         )
-    )
-    if existing.scalar_one_or_none() is not None:
-        raise HTTPException(status_code=409, detail="Access record already exists")
-    # AC3-2c grant write-sync: canonical member_id(=org_member.id) 세팅 — AC3-4 projection의 member_id
-    # 읽기 토대 + (A) resolver-cutover 통일. 휴먼 members 행을 선행 보장(fk_project_access_member NOT VALID이나
-    # 신규 INSERT 검증). members 보장 실패(org_member 부재) 시 member_id 미세팅(레거시 호환).
-    from app.services.agent_anchor_sync import ensure_human_member
-    member_ok = await ensure_human_member(session, body.org_member_id)
-    record = ProjectAccess(
-        project_id=project_id,
-        org_member_id=body.org_member_id,
-        permission=body.permission,
-        member_id=body.org_member_id if member_ok else None,
-    )
+
+    if body.member_id is not None:
+        # 18073a52: 에이전트 grant — member_id(=agent members.id) 앵커, org_member_id 없음.
+        # 대상이 프로젝트 org 의 활성 에이전트인지 검증(ensure_human_member skip).
+        from sqlalchemy import text
+        agent_ok = (await session.execute(
+            text(
+                "SELECT 1 FROM members m JOIN projects p ON p.id = :pid "
+                "WHERE m.id = :mid AND m.type = 'agent' AND m.deleted_at IS NULL "
+                "AND m.org_id = p.org_id LIMIT 1"
+            ),
+            {"pid": str(project_id), "mid": str(body.member_id)},
+        )).scalar_one_or_none()
+        if agent_ok is None:
+            raise HTTPException(
+                status_code=400, detail="member_id must be an active agent in the project's org"
+            )
+        existing = await session.execute(
+            select(ProjectAccess).where(
+                ProjectAccess.project_id == project_id,
+                ProjectAccess.member_id == body.member_id,
+            )
+        )
+        if existing.scalar_one_or_none() is not None:
+            raise HTTPException(status_code=409, detail="Access record already exists")
+        record = ProjectAccess(
+            project_id=project_id,
+            org_member_id=None,
+            member_id=body.member_id,
+            permission=body.permission,
+        )
+    else:
+        existing = await session.execute(
+            select(ProjectAccess).where(
+                ProjectAccess.project_id == project_id,
+                ProjectAccess.org_member_id == body.org_member_id,
+            )
+        )
+        if existing.scalar_one_or_none() is not None:
+            raise HTTPException(status_code=409, detail="Access record already exists")
+        # AC3-2c grant write-sync: canonical member_id(=org_member.id) 세팅 — AC3-4 projection의 member_id
+        # 읽기 토대 + (A) resolver-cutover 통일. 휴먼 members 행을 선행 보장(fk_project_access_member NOT VALID이나
+        # 신규 INSERT 검증). members 보장 실패(org_member 부재) 시 member_id 미세팅(레거시 호환).
+        from app.services.agent_anchor_sync import ensure_human_member
+        member_ok = await ensure_human_member(session, body.org_member_id)
+        record = ProjectAccess(
+            project_id=project_id,
+            org_member_id=body.org_member_id,
+            permission=body.permission,
+            member_id=body.org_member_id if member_ok else None,
+        )
     session.add(record)
     await session.commit()
     await session.refresh(record)
