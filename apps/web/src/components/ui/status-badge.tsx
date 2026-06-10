@@ -1,3 +1,4 @@
+import { ChevronDown } from 'lucide-react';
 import { Badge } from '@/components/ui/badge';
 
 const VARIANT_MAP: Record<string, 'default' | 'secondary' | 'outline' | 'destructive' | 'success' | 'info'> = {
@@ -20,7 +21,14 @@ const VARIANT_MAP: Record<string, 'default' | 'secondary' | 'outline' | 'destruc
   done: 'success',
 };
 
-export function StatusBadge({ status, label }: { status: string; label?: string }) {
+export function StatusBadge({ status, label, interactive }: { status: string; label?: string; interactive?: boolean }) {
   const variant = VARIANT_MAP[status] ?? 'outline';
-  return <Badge variant={variant}>{label ?? status}</Badge>;
+  // `interactive` turns the badge into a control affordance (cursor + chevron) — the
+  // caller wraps it in a trigger. Default off, so existing read-only usages are unchanged.
+  return (
+    <Badge variant={variant} className={interactive ? 'cursor-pointer transition hover:brightness-95' : undefined}>
+      {label ?? status}
+      {interactive ? <ChevronDown aria-hidden /> : null}
+    </Badge>
+  );
 }

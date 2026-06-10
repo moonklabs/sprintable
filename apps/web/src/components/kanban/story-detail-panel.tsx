@@ -5,7 +5,7 @@ import { useTranslations } from 'next-intl';
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
 import rehypeSanitize from 'rehype-sanitize';
-import { AlertTriangle, GitFork, Loader2, Paperclip, Plus, Tag, Trash2, X } from 'lucide-react';
+import { AlertTriangle, Check, GitFork, Loader2, Paperclip, Plus, Tag, Trash2, X } from 'lucide-react';
 import type { KanbanStory, KanbanMember, DependencyEdge } from './types';
 import type { SendAttachment } from '@/hooks/use-chat-sse';
 import { getFileIcon } from '@/lib/file-icon';
@@ -18,6 +18,8 @@ import { OutcomeResultCard, type OutcomeResult } from '@/components/outcome/outc
 import { EntityDispatchPanel } from '@/components/dispatch/entity-dispatch-panel';
 import { Button } from '@/components/ui/button';
 import { StatusBadge } from '@/components/ui/status-badge';
+import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from '@/components/ui/dropdown-menu';
+import { VALID_TRANSITIONS, COLUMNS } from './types';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import {
   Dialog, DialogContent, DialogDescription,
@@ -122,6 +124,7 @@ export function StoryDetailPanel({ story, tasks, nextTasksCursor = null, loading
   const [editingTitle, setEditingTitle] = useState(false);
   const [titleDraft, setTitleDraft] = useState(story.title);
   const [savingTitle, setSavingTitle] = useState(false);
+  const [savingStatus, setSavingStatus] = useState(false);
 
   const [editingDescription, setEditingDescription] = useState(false);
   const [descriptionDraft, setDescriptionDraft] = useState(story.description ?? '');
@@ -340,6 +343,17 @@ export function StoryDetailPanel({ story, tasks, nextTasksCursor = null, loading
     if (!res.ok) return null;
     const json = await res.json();
     return json.data as KanbanStory;
+  };
+
+  const handleChangeStatus = async (newStatus: string) => {
+    if (newStatus === story.status || savingStatus) return;
+    const prev = story.status;
+    setSavingStatus(true);
+    onStoryUpdate?.({ ...story, status: newStatus }); // optimistic
+    const updated = await patchStory({ status: newStatus });
+    setSavingStatus(false);
+    // BE enforces the state machine — roll back if it rejects (e.g. invalid transition).
+    onStoryUpdate?.({ ...story, status: updated ? updated.status : prev });
   };
 
   const handleSaveTitle = async () => {
@@ -636,7 +650,31 @@ export function StoryDetailPanel({ story, tasks, nextTasksCursor = null, loading
                 <span className="mt-1 shrink-0 text-xs text-muted-foreground opacity-0 transition-opacity group-hover:opacity-100">✎</span>
               </button>
             )}
-            <StatusBadge status={story.status} label={statusLabel} />
+            <DropdownMenu>
+              <DropdownMenuTrigger
+                render={
+                  <button type="button" disabled={savingStatus} aria-label={t('status')}>
+                    <StatusBadge status={story.status} label={statusLabel} interactive />
+                  </button>
+                }
+              />
+              <DropdownMenuContent align="start">
+                {COLUMNS.map((col) => {
+                  const isCurrent = col.id === story.status;
+                  const allowed = isCurrent || (VALID_TRANSITIONS[story.status] ?? []).includes(col.id);
+                  return (
+                    <DropdownMenuItem
+                      key={col.id}
+                      disabled={!allowed}
+                      onClick={() => { if (!isCurrent) void handleChangeStatus(col.id); }}
+                    >
+                      <Check className={`size-4 ${isCurrent ? '' : 'opacity-0'}`} />
+                      {t(statusKeyMap[col.id] ?? col.i18nKey)}
+                    </DropdownMenuItem>
+                  );
+                })}
+              </DropdownMenuContent>
+            </DropdownMenu>
           </div>
           <div className="flex shrink-0 items-center gap-2">
             <button
@@ -652,10 +690,6 @@ export function StoryDetailPanel({ story, tasks, nextTasksCursor = null, loading
         </div>
         <div className="flex-1 overflow-y-auto p-5">
           <div className="space-y-5">
-            <div>
-              <span className="text-[10px] font-mono uppercase tracking-wider text-muted-foreground">{t('status')}</span>
-              <p className="mt-1 text-sm text-foreground">{statusLabel}</p>
-            </div>
             <div>
               <div className="flex items-center justify-between">
                 <span className="text-[10px] font-mono uppercase tracking-wider text-muted-foreground">{t('assignee')}</span>
