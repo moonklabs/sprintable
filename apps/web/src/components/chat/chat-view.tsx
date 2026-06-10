@@ -16,10 +16,8 @@ import { EmptyState } from '@/components/ui/empty-state';
 interface ChatViewProps {
   threadId: string;
   currentTeamMemberId: string;
-  threadTitle?: string | null;
   projectId?: string;
   apiPrefix?: string;
-  backRoute?: string | null;
   // S8 #2: pre-send capability 경고 대상(에이전트 participant runtime). 빈 배열이면 경고 미표시(graceful).
   commandTargets?: CommandTarget[];
   // 1aeecdde P2: 에이전트 member_id → presence_status(연결축 dot). 없으면 dot 미표시(graceful).
@@ -42,7 +40,7 @@ function groupByDate(messages: ChatMessage[]): MessageGroup[] {
   return Object.entries(groups).map(([date, msgs]) => ({ date, messages: msgs }));
 }
 
-export function ChatView({ threadId, currentTeamMemberId, threadTitle, projectId, apiPrefix = '/api/chats', backRoute = '/memos', commandTargets, presenceById }: ChatViewProps) {
+export function ChatView({ threadId, currentTeamMemberId, projectId, apiPrefix = '/api/chats', commandTargets, presenceById }: ChatViewProps) {
   const router = useRouter();
   const pathname = usePathname();
   const t = useTranslations('chats');
@@ -373,30 +371,19 @@ export function ChatView({ threadId, currentTeamMemberId, threadTitle, projectId
 
   return (
     <div className="flex h-full flex-col overflow-hidden">
-      {/* Mobile back nav — 스레드 뷰 중이면 스레드 뒤로가기 표시 (AC8) */}
-      {(backRoute || isMobileThreadView) && (
+      {/* Mobile thread back — only while a thread panel is open (closes it). The page
+          TopBar owns the conversation header, so this no longer duplicates it (S2). */}
+      {isMobileThreadView && (
         <div className="flex flex-shrink-0 items-center gap-2 border-b border-border/80 px-3 py-2 lg:hidden">
           <button
             type="button"
-            onClick={() => {
-              if (isMobileThreadView) { closeThread(); }
-              else if (backRoute) { router.push(backRoute); }
-            }}
+            onClick={closeThread}
             className="flex min-h-[44px] items-center gap-1 px-1 text-sm text-muted-foreground hover:text-foreground"
           >
             <ChevronLeft className="h-4 w-4" />
-            {isMobileThreadView ? '대화' : '메모'}
+            대화
           </button>
-          <span className="truncate text-sm font-medium text-foreground">
-            {isMobileThreadView ? '스레드' : (threadTitle ?? '')}
-          </span>
-        </div>
-      )}
-
-      {/* Desktop thread title (lg+) — 스레드 패널 없을 때만 표시 */}
-      {threadTitle && !activeThread && (
-        <div className="hidden flex-shrink-0 border-b border-border/80 px-4 py-2.5 lg:flex">
-          <h2 className="truncate text-sm font-medium text-foreground">{threadTitle}</h2>
+          <span className="truncate text-sm font-medium text-foreground">스레드</span>
         </div>
       )}
 

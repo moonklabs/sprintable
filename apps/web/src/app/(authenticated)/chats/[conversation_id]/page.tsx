@@ -147,10 +147,8 @@ export default function ConversationPage() {
           key={conversation_id}
           threadId={conversation_id}
           currentTeamMemberId={currentTeamMemberId}
-          threadTitle={headerTitle}
           projectId={projectId}
           apiPrefix="/api/conversations"
-          backRoute="/chats"
           commandTargets={commandTargets}
           presenceById={presenceById}
         />
