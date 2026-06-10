@@ -5,11 +5,12 @@ import { useParams, useRouter } from 'next/navigation';
 import { useTranslations } from 'next-intl';
 import { DocEditor } from '@/components/docs/doc-editor';
 import { DocUrlChip } from '@/components/docs/doc-url-chip';
+import { DocUrlDialog, type SlugSubmitResult } from '@/components/docs/doc-url-dialog';
 import { slugifyDocTitle, isUntitledSlug } from '@/components/docs/lib/doc-slug';
 import { useDocSync, type SaveStatus } from '@/components/docs/use-doc-sync';
 import { htmlToMarkdown } from '@/components/docs/lib/content-converter';
 import Link from 'next/link';
-import { AlertTriangle, Check, Copy, Eye, Loader2, MoreHorizontal, RotateCw, Trash2, XCircle } from 'lucide-react';
+import { AlertTriangle, Check, Copy, Eye, Link2, Loader2, MoreHorizontal, RotateCw, Trash2, XCircle } from 'lucide-react';
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -128,6 +129,7 @@ export default function DocSlugPage() {
   const slug = typeof params.slug === 'string' ? params.slug : '';
   const router = useRouter();
   const t = useTranslations('docs');
+  const tc = useTranslations('common');
   // 신규 문서 자동 포커스: URL ?new=1 파라미터를 ref로 처리 (useSearchParams Suspense 이슈 방지)
   const isNewRef = useRef(typeof window !== 'undefined' && new URLSearchParams(window.location.search).get('new') === '1');
   const isNew = isNewRef.current;
@@ -142,6 +144,7 @@ export default function DocSlugPage() {
   const [autosave, setAutosave] = useState(true);
   const [mdCopied, setMdCopied] = useState(false);
   const [slugLocked, setSlugLocked] = useState(false);
+  const [urlDialogOpen, setUrlDialogOpen] = useState(false);
 
   const handleDocSaved = useCallback((doc: DocDetail) => {
     setSelectedDoc(doc);
@@ -241,6 +244,30 @@ export default function DocSlugPage() {
     } catch { /* delete failed */ }
   }, [selectedDoc, projectId, router, setTree, t]);
 
+  // AC2: explicit slug edit. Locks the slug (slug_locked: true) so auto-derivation
+  // stops, and surfaces BE conflicts (409 → suggested -N) / format errors (422).
+  const handleSubmitSlug = useCallback(async (newSlug: string): Promise<SlugSubmitResult> => {
+    if (!selectedDoc) return { ok: false, code: 'invalid' };
+    try {
+      const res = await fetch(`/api/docs/${selectedDoc.id}`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ slug: newSlug, slug_locked: true }),
+      });
+      if (res.status === 409) {
+        const body = await res.json().catch(() => null) as { error?: { suggestion?: string } } | null;
+        return { ok: false, code: 'taken', suggestion: body?.error?.suggestion };
+      }
+      if (res.status === 422) return { ok: false, code: 'invalid' };
+      if (!res.ok) return { ok: false, code: 'invalid' };
+      const { data } = await res.json() as { data: DocDetail };
+      handleDocSaved(data);
+      return { ok: true };
+    } catch {
+      return { ok: false, code: 'invalid' };
+    }
+  }, [selectedDoc, handleDocSaved]);
+
   const handleNavigate = useCallback((targetSlug: string) => {
     router.push(`/docs/${targetSlug}`);
   }, [router]);
@@ -284,6 +311,10 @@ export default function DocSlugPage() {
           </DropdownMenuItem>
           {selectedDoc.doc_type !== 'sprint_report' && (
             <>
+              <DropdownMenuItem onClick={() => setUrlDialogOpen(true)}>
+                <Link2 className="mr-2 h-4 w-4" />
+                {t('editUrl')}
+              </DropdownMenuItem>
               <DropdownMenuSeparator />
               <DropdownMenuItem onClick={handleDelete} className="text-destructive focus:text-destructive">
                 <Trash2 className="mr-2 h-4 w-4" />
@@ -333,6 +364,7 @@ export default function DocSlugPage() {
           urlSlot={
             <DocUrlChip
               slug={selectedDoc.slug}
+              onEdit={selectedDoc.doc_type !== 'sprint_report' ? () => setUrlDialogOpen(true) : undefined}
               labels={{ editUrl: t('editUrl'), slugNudge: t('slugNudge') }}
             />
           }
@@ -368,6 +400,24 @@ export default function DocSlugPage() {
           }}
         />
       </div>
+
+      <DocUrlDialog
+        open={urlDialogOpen}
+        onClose={() => setUrlDialogOpen(false)}
+        currentSlug={selectedDoc.slug}
+        title={title}
+        onSubmit={handleSubmitSlug}
+        labels={{
+          editUrl: t('editUrl'),
+          urlDialogDesc: t('urlDialogDesc'),
+          deriveFromTitle: t('deriveFromTitle'),
+          aliasNote: t('aliasNote'),
+          slugTaken: t('slugTaken'),
+          slugInvalid: t('slugInvalid'),
+          save: t('save'),
+          cancel: tc('cancel'),
+        }}
+      />
     </div>
   );
 }
