@@ -2310,6 +2310,7 @@
   },
   "presence": {
     "panelTitle": "Team presence",
+    "fabLabelWorking": "Team presence · {count} working",
     "groupWorking": "Working",
     "groupOnline": "Online",
     "groupOffline": "Offline",
