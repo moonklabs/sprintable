@@ -10,6 +10,7 @@ import { CommandHintNotice, type BlockedHint } from './command-hint-notice';
 import { ChatInput, type CommandTarget } from './chat-input';
 import { ThreadPanel } from './thread-panel';
 import type { ChatMessage, SendAttachment } from '@/hooks/use-chat-sse';
+import { useIsMobile } from '@/hooks/use-mobile';
 import { normalizeToMessage, useChatSse } from '@/hooks/use-chat-sse';
 import { EmptyState } from '@/components/ui/empty-state';
 
@@ -44,6 +45,7 @@ export function ChatView({ threadId, currentTeamMemberId, projectId, apiPrefix =
   const router = useRouter();
   const pathname = usePathname();
   const t = useTranslations('chats');
+  const isMobile = useIsMobile();
   const [messages, setMessages] = useState<ChatMessage[]>([]);
   const [loading, setLoading] = useState(true);
   const [loadingMore, setLoadingMore] = useState(false);
@@ -513,7 +515,9 @@ export function ChatView({ threadId, currentTeamMemberId, projectId, apiPrefix =
             onUploadFile={handleUploadFile}
             projectId={projectId}
             commandTargets={commandTargets}
-            placeholder="메시지를 입력하세요… (Enter 전송 / Shift+Enter 줄바꿈 / @ 멘션 / # 엔티티)"
+            placeholder={isMobile
+              ? '메시지를 입력하세요… (@ 멘션)'
+              : '메시지를 입력하세요… (Enter 전송 / Shift+Enter 줄바꿈 / @ 멘션 / # 엔티티)'}
           />
         </div>
 
