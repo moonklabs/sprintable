@@ -330,6 +330,18 @@ async def update_story(
                 await db.commit()  # commit BEFORE wake — seq 확정, 이중전달 방지
                 if sa_event.recipient_seq is not None:
                     wake_agent(str(story.assignee_id), sa_event.recipient_seq)
+                # 1f01c1ad: wake_agent(SSE)는 CC 세션 미도달 → member webhook(CC 릴레이)으로도 주입.
+                # dispatch.py 동형 — INJECTABLE 이벤트의 단일 CC 주입 경로(member webhook)로 일관 전달.
+                from app.services.conversation_webhook import deliver_injected_event_webhook
+                background_tasks.add_task(
+                    deliver_injected_event_webhook,
+                    org_id=org_id,
+                    recipient_id=story.assignee_id,
+                    content=_content,
+                    event_type="story_assigned",
+                    source_entity_type="story",
+                    source_entity_id=story.id,
+                )
             else:
                 # human: 기존 dispatch_notification 유지 (변경 0)
                 await dispatch_notification(

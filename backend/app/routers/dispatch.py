@@ -3,7 +3,7 @@ import logging
 import uuid
 from datetime import datetime, timezone
 
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException
 from pydantic import BaseModel
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -83,6 +83,7 @@ async def _fetch_entity(
 @router.post("", response_model=DispatchResponse)
 async def dispatch_entity(
     body: DispatchRequest,
+    background_tasks: BackgroundTasks,
     db: AsyncSession = Depends(get_db),
     auth: AuthContext = Depends(get_current_user),
     org_id: uuid.UUID = Depends(get_verified_org_id),
@@ -192,6 +193,20 @@ async def dispatch_entity(
             wake_agent(str(assignee_id), event.recipient_seq)
         else:
             _push_to_agent(str(assignee_id), _event_to_payload(event))
+
+    # 1f01c1ad: wake_agent(SSE)는 CC 세션에 도달하지 않으므로 member webhook(=CC 릴레이 경로)으로도
+    # 주입한다. conversation.message_created가 deliver_conversation_message_webhook로 주입되는 것과 동형.
+    # webhook 없는 수신자는 no-op. (human도 webhook 보유 시 동일 경로 — 없으면 위 dispatch_notification만)
+    from app.services.conversation_webhook import deliver_injected_event_webhook
+    background_tasks.add_task(
+        deliver_injected_event_webhook,
+        org_id=org_id,
+        recipient_id=assignee_id,
+        content=content,
+        event_type="dispatched",
+        source_entity_type=body.entity_type,
+        source_entity_id=body.entity_id,
+    )
     return DispatchResponse(
         dispatched=True,
         event_id=event.id,
