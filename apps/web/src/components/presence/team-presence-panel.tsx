@@ -1,26 +1,11 @@
 'use client';
 
-import { useCallback, useEffect, useState } from 'react';
 import { useTranslations } from 'next-intl';
 import { Bot, X } from 'lucide-react';
 import { PresenceDot, WORKING_RING_CLASS, type PresenceStatus } from '@/components/chat/presence-dot';
 import { GlassPanel } from '@/components/ui/glass-panel';
 import { cn } from '@/lib/utils';
-
-// 2505d27d: 디디 #1356 `GET /api/v2/team-presence` 응답 계약(검증 완료·mismatch 0).
-interface TeamPresenceItem {
-  member_id: string;
-  name: string;
-  avatar_url?: string | null;
-  agent_role?: string | null;
-  runtime_type?: string | null;
-  presence_status?: PresenceStatus | null;
-  working: boolean;
-  active_story?: { id: string; title: string; status: string } | null;
-}
-
-// ~2s 통합 폴 — working snappy(선생님 빠릿빠릿)·presence 충분. 패널 비가시 시 중단(낭비0).
-const POLL_MS = 2000;
+import type { TeamPresenceItem } from './use-team-presence';
 
 type GroupKey = 'working' | 'online' | 'offline';
 const GROUP_DOT: Record<GroupKey, string> = {
@@ -91,42 +76,20 @@ function PresenceRow({ item }: { item: TeamPresenceItem }) {
 }
 
 /**
- * 2505d27d 팀 presence 패널 본체 — 상태별 그룹(🔵working↑→🟢online→⚫offline↓)·~2s 폴(active 시만).
+ * 2505d27d 팀 presence 패널 본체 — 상태별 그룹(🔵working↑→🟢online→⚫offline↓).
+ * 폴은 ScrollShell의 `useTeamPresence`에서 상향(단일 폴·FAB 배지와 공유)·items로 주입받는다.
  * contextual-panel-layout의 renderPanel로 inline(right-rail)/drawer 양쪽에서 렌더.
  */
 export function TeamPresencePanel({
-  active,
+  items,
   mode = 'inline',
   onClose,
 }: {
-  active: boolean;
+  items: TeamPresenceItem[];
   mode?: 'inline' | 'drawer';
   onClose?: () => void;
 }) {
   const t = useTranslations('presence');
-  const [items, setItems] = useState<TeamPresenceItem[]>([]);
-
-  const fetchPresence = useCallback(async () => {
-    if (typeof document !== 'undefined' && document.hidden) return;
-    try {
-      const res = await fetch('/api/team-presence');
-      if (!res.ok) return;
-      const json = (await res.json()) as TeamPresenceItem[] | { data?: TeamPresenceItem[] };
-      setItems(Array.isArray(json) ? json : (json.data ?? []));
-    } catch {
-      /* non-critical */
-    }
-  }, []);
-
-  // 패널이 active(open·가시)일 때만 폴 — 닫힘/비가시 시 중단(낭비0).
-  useEffect(() => {
-    if (!active) return;
-    // eslint-disable-next-line react-hooks/set-state-in-effect
-    void fetchPresence();
-    const interval = setInterval(() => { void fetchPresence(); }, POLL_MS);
-    return () => clearInterval(interval);
-  }, [active, fetchPresence]);
-
   const groups = groupItems(items);
 
   return (

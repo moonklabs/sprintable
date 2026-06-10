@@ -11,6 +11,7 @@ import { TopBarProvider, useTopBar } from '@/components/nav/top-bar-context';
 import { SidebarProvider, SidebarInset } from '@/components/ui/sidebar';
 import { ContextualPanelLayout, useContextualPanelState } from '@/components/ui/contextual-panel-layout';
 import { TeamPresencePanel } from '@/components/presence/team-presence-panel';
+import { useTeamPresence } from '@/components/presence/use-team-presence';
 import { RefreshProvider } from '@/contexts/refresh-context';
 import { cn } from '@/lib/utils';
 import type { OrgSwitcherItem } from '@/components/nav/unified-switcher';
@@ -48,7 +49,9 @@ function ScrollShell({ showTopBar, children }: { showTopBar: boolean; children: 
   const t = useTranslations('presence');
   // 2505d27d: 상시 팀 presence 패널 — 2xl=inline right-rail / <2xl=drawer. storageKey로 open 영속.
   const panel = useContextualPanelState({ storageKey: 'team-presence', defaultOpen: true });
-  const panelActive = panel.inlinePanelOpen || panel.drawerOpen;
+  // 폴 상향(단일 폴) — FAB working-count 배지가 패널 닫힘 상태서도 갱신돼야 하므로 상시 폴(document.hidden 가드는 hook 내).
+  const items = useTeamPresence(true);
+  const workingCount = items.filter((i) => i.working).length;
 
   return (
     <SidebarInset className="relative flex flex-col overflow-hidden">
@@ -57,7 +60,7 @@ function ScrollShell({ showTopBar, children }: { showTopBar: boolean; children: 
         <ContextualPanelLayout
           renderPanel={({ mode, closePanel }) => (
             <div className={mode === 'inline' ? '2xl:sticky 2xl:top-0 2xl:h-svh 2xl:p-2' : 'h-full'}>
-              <TeamPresencePanel active={panelActive} mode={mode} onClose={closePanel} />
+              <TeamPresencePanel items={items} mode={mode} onClose={closePanel} />
             </div>
           )}
           inlinePanelOpen={panel.inlinePanelOpen}
@@ -75,17 +78,27 @@ function ScrollShell({ showTopBar, children }: { showTopBar: boolean; children: 
         </ContextualPanelLayout>
       </div>
 
-      {/* 토글 — 우측 가장자리 탭(상시 패널 열기/닫기). inline open 시 숨김(rail 자체 가시). */}
+      {/* 2505d27d: presence FAB(선생님 안·우하단·상시·명확) — 전 width 가시·클릭→패널 토글.
+          working-count 배지=접힌 상태서도 "N 작업 중" at-a-glance. 모바일은 하단 GNB(lg:hidden) 안 가리게 bottom↑. */}
       <button
         type="button"
         onClick={panel.togglePanel}
-        aria-label={t('panelTitle')}
+        aria-label={workingCount > 0 ? t('fabLabelWorking', { count: workingCount }) : t('panelTitle')}
+        title={t('panelTitle')}
         className={cn(
-          'fixed right-0 top-1/2 z-40 -translate-y-1/2 rounded-l-md border border-r-0 border-border bg-card px-1.5 py-3 text-muted-foreground shadow-sm transition-colors hover:text-foreground',
-          panel.inlinePanelOpen && '2xl:hidden',
+          'fixed bottom-20 right-4 z-50 flex size-14 items-center justify-center rounded-full bg-brand text-brand-foreground shadow-lg transition-transform hover:scale-105 lg:bottom-6 lg:right-6',
+          'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand focus-visible:ring-offset-2 focus-visible:ring-offset-background',
         )}
       >
-        <Users className="size-4" />
+        <Users className="size-[22px]" />
+        {workingCount > 0 ? (
+          <span
+            className="absolute -right-1 -top-1 flex h-5 min-w-5 items-center justify-center rounded-full bg-brand-foreground px-1 text-xs font-bold tabular-nums text-brand shadow ring-2 ring-brand"
+            aria-hidden
+          >
+            {workingCount}
+          </span>
+        ) : null}
       </button>
     </SidebarInset>
   );

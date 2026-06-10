@@ -2310,6 +2310,7 @@
   },
   "presence": {
     "panelTitle": "팀 presence",
+    "fabLabelWorking": "팀 presence · {count}명 작업 중",
     "groupWorking": "작업 중",
     "groupOnline": "온라인",
     "groupOffline": "오프라인",
