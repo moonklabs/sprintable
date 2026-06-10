@@ -1,3 +1,4 @@
+import os
 import uuid
 from datetime import datetime
 
@@ -12,7 +13,7 @@ from app.models.doc import DocComment, DocRevision
 from app.models.team import TeamMember
 from app.repositories.doc import DocRepository
 from app.services.member_resolver import canonicalize_member_id
-from app.schemas.doc import DocCreate, DocResponse, DocSummaryResponse, DocUpdate
+from app.schemas.doc import DocCreate, DocResponse, DocSummaryResponse, DocUpdate, ShareStatusResponse
 
 router = APIRouter(prefix="/api/v2/docs", tags=["docs"])
 
@@ -45,6 +46,9 @@ async def list_docs(
 
     if slug and project_id:
         doc = await repo.get_by_slug(project_id, slug)
+        if doc is None:
+            # 4dd399c6 AC3: live 미스 → alias fallback. 응답 canonical_slug≠요청 slug면 FE가 router.replace.
+            doc = await repo.get_by_alias(project_id, slug)
         return [DocSummaryResponse.model_validate(doc)] if doc else []
 
     if tags and project_id:
@@ -224,9 +228,103 @@ async def update_doc(
     session: AsyncSession = Depends(get_db),
 ) -> DocResponse:
     data = body.model_dump(exclude_unset=True)
-    doc = await repo.update(id, **data)
+    # 4dd399c6: slug/slug_locked 는 유일성·alias 처리가 필요해 일반 필드와 분리.
+    slug_in = data.pop("slug", None)
+    slug_locked_in = data.pop("slug_locked", None)
+    # 151e05f1: 동시성 제어 필드 — Doc 컬럼이 아니므로 분리(setattr 루프서 제외).
+    expected_updated_at = data.pop("expected_updated_at", None)
+    force_overwrite = data.pop("force_overwrite", None)
+
+    doc = await repo.get(id)
     if doc is None:
         raise HTTPException(status_code=404, detail="Doc not found")
+
+    # 151e05f1: 낙관적 동시성 — expected_updated_at 제공 & 현재 updated_at 불일치 & not force
+    # → 409 DOC_CONFLICT(동시편집 clobber 방지). mutation 前 검사·미제공=무체크(하위호환).
+    # detail dict → #1372 핸들러 패스스루 → FE 가 error.code/error.current_updated_at 언랩.
+    # ⚠️ **ms 절삭 비교**(PO 콜): FE가 JS Date(ms 정밀도)로 round-trip하면 μs 손실 → μs-exact면
+    # 매 저장 false-409(상시 차단·원본보다 악화 footgun). 양쪽 ms 절삭 후 ==로 FE 직렬화 무관 robust
+    # (동시편집 <1ms 간격은 비현실이라 보호 granularity 손실 무의미·defense in depth).
+    if expected_updated_at is not None and not force_overwrite and doc.updated_at is not None:
+        cur_ms = doc.updated_at.replace(microsecond=(doc.updated_at.microsecond // 1000) * 1000)
+        exp_ms = expected_updated_at.replace(microsecond=(expected_updated_at.microsecond // 1000) * 1000)
+        if cur_ms != exp_ms:
+            raise HTTPException(
+                status_code=409,
+                detail={
+                    "code": "DOC_CONFLICT",
+                    "message": "문서가 다른 곳에서 수정됨 — 최신본을 다시 불러오세요",
+                    "current_updated_at": doc.updated_at.isoformat(),
+                },
+            )
+
+    # 일반 필드 적용 (slug 제외)
+    for attr, val in data.items():
+        setattr(doc, attr, val)
+
+    # slug 변경 처리 (4dd399c6)
+    if slug_in is not None:
+        from app.services.doc_slug import resolve_unique_slug, slugify, is_slug_taken
+        from app.models.doc import DocSlugAlias
+        from sqlalchemy import delete as sa_delete
+
+        explicit = slug_locked_in is True  # discriminator: 명시 편집 vs 자동파생
+        new_slug = slugify(slug_in)
+        if not new_slug:
+            # 정규화 후 빈값: 명시 편집은 422, 자동파생은 기존 slug 유지(타이핑 보호)
+            if explicit:
+                raise HTTPException(
+                    status_code=422,
+                    detail={"code": "SLUG_INVALID", "message": "유효하지 않은 슬러그"},
+                )
+        elif new_slug != doc.slug:
+            if await is_slug_taken(session, repo.org_id, doc.project_id, new_slug, exclude_doc_id=doc.id):
+                if explicit:
+                    suggestion = await resolve_unique_slug(
+                        session, repo.org_id, doc.project_id, new_slug, exclude_doc_id=doc.id
+                    )
+                    raise HTTPException(
+                        status_code=409,
+                        detail={
+                            "code": "SLUG_TAKEN",
+                            "message": "이미 사용 중인 슬러그",
+                            "suggestion": suggestion,
+                        },
+                    )
+                # 자동파생 충돌 → 무음 -N suffix
+                new_slug = await resolve_unique_slug(
+                    session, repo.org_id, doc.project_id, new_slug, exclude_doc_id=doc.id
+                )
+            old_slug = doc.slug
+            doc.slug = new_slug
+            # AC3: 구 slug → alias 보존 (이미 있으면 skip). 신 slug 가 과거 alias였다면 정리(live 우선).
+            await session.execute(
+                sa_delete(DocSlugAlias).where(
+                    DocSlugAlias.project_id == doc.project_id,
+                    DocSlugAlias.old_slug == new_slug,
+                )
+            )
+            existing_alias = (await session.execute(
+                select(DocSlugAlias).where(
+                    DocSlugAlias.project_id == doc.project_id,
+                    DocSlugAlias.old_slug == old_slug,
+                ).limit(1)
+            )).scalar_one_or_none()
+            if existing_alias is None:
+                session.add(DocSlugAlias(
+                    org_id=repo.org_id,
+                    project_id=doc.project_id,
+                    old_slug=old_slug,
+                    doc_id=doc.id,
+                ))
+            else:
+                existing_alias.doc_id = doc.id
+
+    if slug_locked_in is not None:
+        doc.slug_locked = slug_locked_in
+
+    await session.flush()
+    await session.refresh(doc)
 
     if "content" in data:
         cutoff_sq = (
@@ -278,6 +376,82 @@ async def _resolve_doc_member_id(auth: AuthContext, org_id: uuid.UUID, db: Async
     # member id(org_member.id)로 폴백. 비-멤버는 resolve_member가 400.
     from app.services.member_resolver import resolve_member
     return (await resolve_member(auth, org_id, db)).id
+
+
+# ─── Share (Part B b1574f5a) ──────────────────────────────────────────────────
+
+def _share_resp(tok) -> ShareStatusResponse:
+    if tok is None:
+        return ShareStatusResponse(enabled=False)
+    app_url = os.environ.get("NEXT_PUBLIC_APP_URL", "").rstrip("/")
+    share_url = f"{app_url}/share/{tok.token}" if app_url else None
+    return ShareStatusResponse(enabled=True, token=tok.token, share_url=share_url)
+
+
+@router.get("/{id}/share", response_model=ShareStatusResponse)
+async def get_doc_share(
+    id: uuid.UUID,
+    repo: DocRepository = Depends(_get_repo),
+    db: AsyncSession = Depends(get_db),
+    auth: AuthContext = Depends(get_current_user),
+) -> ShareStatusResponse:
+    doc = await repo.get(id)
+    if doc is None:
+        raise HTTPException(status_code=404, detail="Doc not found")
+    await _resolve_doc_member_id(auth, repo.org_id, db)  # 멤버십 게이트(비멤버 차단)
+    from app.services import doc_share
+    return _share_resp(await doc_share.get_status(db, repo.org_id, id))
+
+
+@router.post("/{id}/share", response_model=ShareStatusResponse)
+async def enable_doc_share(
+    id: uuid.UUID,
+    repo: DocRepository = Depends(_get_repo),
+    db: AsyncSession = Depends(get_db),
+    auth: AuthContext = Depends(get_current_user),
+) -> ShareStatusResponse:
+    """opt-in 공개 활성 — active 토큰 발급(멱등)."""
+    doc = await repo.get(id)
+    if doc is None:
+        raise HTTPException(status_code=404, detail="Doc not found")
+    actor_id = await _resolve_doc_member_id(auth, repo.org_id, db)
+    from app.services import doc_share
+    tok = await doc_share.enable(db, repo.org_id, doc.project_id, id, actor_id)
+    return _share_resp(tok)
+
+
+@router.post("/{id}/share/regenerate", response_model=ShareStatusResponse)
+async def regenerate_doc_share(
+    id: uuid.UUID,
+    repo: DocRepository = Depends(_get_repo),
+    db: AsyncSession = Depends(get_db),
+    auth: AuthContext = Depends(get_current_user),
+) -> ShareStatusResponse:
+    """구 토큰 즉시 폐기 + 신규 발급(유출 방어)."""
+    doc = await repo.get(id)
+    if doc is None:
+        raise HTTPException(status_code=404, detail="Doc not found")
+    actor_id = await _resolve_doc_member_id(auth, repo.org_id, db)
+    from app.services import doc_share
+    tok = await doc_share.regenerate(db, repo.org_id, doc.project_id, id, actor_id)
+    return _share_resp(tok)
+
+
+@router.delete("/{id}/share", response_model=ShareStatusResponse)
+async def disable_doc_share(
+    id: uuid.UUID,
+    repo: DocRepository = Depends(_get_repo),
+    db: AsyncSession = Depends(get_db),
+    auth: AuthContext = Depends(get_current_user),
+) -> ShareStatusResponse:
+    """공개 중단 — active 토큰 revoke(이후 공개 read 410)."""
+    doc = await repo.get(id)
+    if doc is None:
+        raise HTTPException(status_code=404, detail="Doc not found")
+    actor_id = await _resolve_doc_member_id(auth, repo.org_id, db)
+    from app.services import doc_share
+    await doc_share.revoke(db, repo.org_id, id, actor_id)
+    return ShareStatusResponse(enabled=False)
 
 
 # ─── Comments ─────────────────────────────────────────────────────────────────

@@ -1171,6 +1171,19 @@
     "addActionFailed": "Failed to add action.",
     "linkedSprintOutcome": "Linked sprint outcome"
   },
+  "share": {
+    "share": "Share",
+    "shareToWeb": "Publish to web",
+    "shareToWebDesc": "Anyone with the link can view this document.",
+    "copyLink": "Copy link",
+    "linkCopied": "Link copied",
+    "stopSharing": "Stop sharing",
+    "regenerateLink": "Regenerate link",
+    "shareSingleDocNote": "Only this document is shared.",
+    "publicLinkInvalid": "This link is not valid.",
+    "attachmentUnavailable": "Attachment unavailable in public view",
+    "imageUnavailable": "Image unavailable in public view"
+  },
   "docs": {
     "title": "Documentation",
     "searchPlaceholder": "Search docs...",
@@ -1185,6 +1198,13 @@
     "titleLabel": "Title",
     "slugPlaceholder": "slug",
     "slugLabel": "Slug",
+    "editUrl": "Edit URL",
+    "deriveFromTitle": "Generate from title",
+    "slugNudge": "Generate URL from title",
+    "urlDialogDesc": "Set this document's address.",
+    "aliasNote": "Existing links keep working.",
+    "slugTaken": "Already in use",
+    "slugInvalid": "Enter a valid URL.",
     "contentLabel": "Content",
     "confirmDelete": "Are you sure you want to delete this document?",
     "saving": "...",

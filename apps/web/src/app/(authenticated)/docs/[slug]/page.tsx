@@ -4,10 +4,14 @@ import { useCallback, useEffect, useRef, useState } from 'react';
 import { useParams, useRouter } from 'next/navigation';
 import { useTranslations } from 'next-intl';
 import { DocEditor } from '@/components/docs/doc-editor';
+import { DocUrlChip } from '@/components/docs/doc-url-chip';
+import { DocUrlDialog, type SlugSubmitResult } from '@/components/docs/doc-url-dialog';
+import { slugifyDocTitle, isUntitledSlug } from '@/components/docs/lib/doc-slug';
 import { useDocSync, type SaveStatus } from '@/components/docs/use-doc-sync';
 import { htmlToMarkdown } from '@/components/docs/lib/content-converter';
 import Link from 'next/link';
-import { AlertTriangle, Check, Copy, Eye, Loader2, MoreHorizontal, RotateCw, Trash2, XCircle } from 'lucide-react';
+import { AlertTriangle, Check, Copy, Eye, Link2, Loader2, MoreHorizontal, RotateCw, Share2, Trash2, XCircle } from 'lucide-react';
+import { DocShareDialog } from '@/components/docs/doc-share-dialog';
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -32,6 +36,8 @@ interface DocDetail {
   doc_type?: string;
   org_id?: string;
   assignee_id?: string | null;
+  slug_locked?: boolean;
+  canonical_slug?: string;
 }
 
 function InlineSaveIndicator({
@@ -124,6 +130,8 @@ export default function DocSlugPage() {
   const slug = typeof params.slug === 'string' ? params.slug : '';
   const router = useRouter();
   const t = useTranslations('docs');
+  const tc = useTranslations('common');
+  const ts = useTranslations('share');
   // 신규 문서 자동 포커스: URL ?new=1 파라미터를 ref로 처리 (useSearchParams Suspense 이슈 방지)
   const isNewRef = useRef(typeof window !== 'undefined' && new URLSearchParams(window.location.search).get('new') === '1');
   const isNew = isNewRef.current;
@@ -137,11 +145,19 @@ export default function DocSlugPage() {
   const [contentFormat, setContentFormat] = useState<'markdown' | 'html'>('markdown');
   const [autosave, setAutosave] = useState(true);
   const [mdCopied, setMdCopied] = useState(false);
+  const [slugLocked, setSlugLocked] = useState(false);
+  const [urlDialogOpen, setUrlDialogOpen] = useState(false);
+  const [shareDialogOpen, setShareDialogOpen] = useState(false);
 
   const handleDocSaved = useCallback((doc: DocDetail) => {
     setSelectedDoc(doc);
-    setTree((prev) => prev.map((d) => (d.id === doc.id ? { ...d, title: doc.title } : d)));
-  }, [setTree]);
+    setTree((prev) => prev.map((d) => (d.id === doc.id ? { ...d, title: doc.title, slug: doc.slug } : d)));
+    if (typeof doc.slug_locked === 'boolean') setSlugLocked(doc.slug_locked);
+    // Slug auto-derived / canonicalized server-side → move the URL to the canonical slug.
+    if (doc.slug && doc.slug !== slug) {
+      router.replace(`/docs/${doc.slug}`);
+    }
+  }, [setTree, slug, router]);
 
   const handleTitleChange = useCallback((value: string) => {
     setTitle(value);
@@ -149,9 +165,19 @@ export default function DocSlugPage() {
     setTree((prev) => prev.map((d) => (d.id === selectedDoc?.id ? { ...d, title: value } : d)));
   }, [selectedDoc?.id, setTree]);
 
+  // AC1: while a new doc still carries its `untitled-<ts>` slug and the user has not
+  // manually locked it, derive the slug from the title and send it in the same save as
+  // the title. The BE silently de-duplicates with a `-N` suffix (auto path never 422s)
+  // and returns the canonical slug, which handleDocSaved moves the URL to. An empty
+  // derivation (emoji/symbols only) skips the slug entirely so the doc keeps untitled.
+  const shouldAutoDeriveSlug = selectedDoc !== null && !slugLocked && isUntitledSlug(selectedDoc.slug);
+  const derivedSlug = shouldAutoDeriveSlug ? slugifyDocTitle(title) : '';
+
   const { status: saveStatus, isDirty, save } = useDocSync<DocDetail>({
     docId: selectedDoc?.id ?? null,
-    savePayload: { title, content, content_format: contentFormat },
+    savePayload: derivedSlug
+      ? { title, content, content_format: contentFormat, slug: derivedSlug, slug_locked: false }
+      : { title, content, content_format: contentFormat },
     serverUpdatedAt: selectedDoc?.updated_at ?? null,
     editing: selectedDoc !== null,
     autosave,
@@ -177,12 +203,17 @@ export default function DocSlugPage() {
       setTitle(data.title ?? '');
       setContent(data.content ?? '');
       setContentFormat(data.content_format ?? 'markdown');
+      setSlugLocked(data.slug_locked ?? false);
+      // AC3: the request resolved via an old/alias slug → canonicalize the URL so
+      // bookmarks and internal links settle on the live address (BE sends canonical_slug).
+      const canonical = data.canonical_slug ?? data.slug;
+      if (canonical && canonical !== slug) router.replace(`/docs/${canonical}`);
     } catch {
       setSelectedDoc(null);
     } finally {
       setDocLoading(false);
     }
-  }, [projectId, slug]);
+  }, [projectId, slug, router]);
 
   useEffect(() => { void fetchDoc(); }, [fetchDoc]);
 
@@ -216,6 +247,51 @@ export default function DocSlugPage() {
     } catch { /* delete failed */ }
   }, [selectedDoc, projectId, router, setTree, t]);
 
+  // AC2: explicit slug edit. Locks the slug (slug_locked: true) so auto-derivation
+  // stops, and surfaces BE conflicts (409 → suggested -N) / format errors (422).
+  const handleSubmitSlug = useCallback(async (newSlug: string): Promise<SlugSubmitResult> => {
+    if (!selectedDoc) return { ok: false, code: 'invalid' };
+    try {
+      const res = await fetch(`/api/docs/${selectedDoc.id}`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ slug: newSlug, slug_locked: true }),
+      });
+      if (res.status === 409) {
+        const body = await res.json().catch(() => null) as { error?: { suggestion?: string } } | null;
+        return { ok: false, code: 'taken', suggestion: body?.error?.suggestion };
+      }
+      if (res.status === 422) return { ok: false, code: 'invalid' };
+      if (!res.ok) return { ok: false, code: 'invalid' };
+      const { data } = await res.json() as { data: DocDetail };
+      handleDocSaved(data);
+      return { ok: true };
+    } catch {
+      return { ok: false, code: 'invalid' };
+    }
+  }, [selectedDoc, handleDocSaved]);
+
+  // 권고1 (가디언): one-click derive for docs that have a title but still carry a
+  // stale untitled-* slug (created before this feature). Auto-derive (AC1) only
+  // fires on a title edit, so this nudge is the affordance that targets the
+  // "untitled 잔존" report directly. Auto path (slug_locked:false) → BE silently de-dupes.
+  const handleDeriveFromTitle = useCallback(async () => {
+    if (!selectedDoc) return;
+    const derived = slugifyDocTitle(title);
+    if (!derived) return;
+    try {
+      const res = await fetch(`/api/docs/${selectedDoc.id}`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ slug: derived, slug_locked: false }),
+      });
+      if (res.ok) {
+        const { data } = await res.json() as { data: DocDetail };
+        handleDocSaved(data);
+      }
+    } catch { /* derive failed — doc keeps its untitled slug */ }
+  }, [selectedDoc, title, handleDocSaved]);
+
   const handleNavigate = useCallback((targetSlug: string) => {
     router.push(`/docs/${targetSlug}`);
   }, [router]);
@@ -248,6 +324,15 @@ export default function DocSlugPage() {
       >
         {mdCopied ? <Check className="h-4 w-4 text-success" /> : <Copy className="h-4 w-4" />}
       </button>
+      <button
+        type="button"
+        onClick={() => setShareDialogOpen(true)}
+        title={ts('share')}
+        aria-label={ts('share')}
+        className="inline-flex h-8 w-8 items-center justify-center rounded-md text-muted-foreground transition-colors hover:bg-accent hover:text-accent-foreground"
+      >
+        <Share2 className="h-4 w-4" />
+      </button>
       <DropdownMenu>
         <DropdownMenuTrigger className="inline-flex h-8 w-8 items-center justify-center rounded-md text-muted-foreground transition-colors hover:bg-accent hover:text-accent-foreground">
           <MoreHorizontal className="h-4 w-4" />
@@ -259,6 +344,10 @@ export default function DocSlugPage() {
           </DropdownMenuItem>
           {selectedDoc.doc_type !== 'sprint_report' && (
             <>
+              <DropdownMenuItem onClick={() => setUrlDialogOpen(true)}>
+                <Link2 className="mr-2 h-4 w-4" />
+                {t('editUrl')}
+              </DropdownMenuItem>
               <DropdownMenuSeparator />
               <DropdownMenuItem onClick={handleDelete} className="text-destructive focus:text-destructive">
                 <Trash2 className="mr-2 h-4 w-4" />
@@ -305,6 +394,14 @@ export default function DocSlugPage() {
           onTitleChange={handleTitleChange}
           titlePlaceholder={t('titlePlaceholder')}
           titleAutoFocus={isNew || !title}
+          urlSlot={
+            <DocUrlChip
+              slug={selectedDoc.slug}
+              onEdit={selectedDoc.doc_type !== 'sprint_report' ? () => setUrlDialogOpen(true) : undefined}
+              onDeriveFromTitle={selectedDoc.doc_type !== 'sprint_report' && slugifyDocTitle(title) ? handleDeriveFromTitle : undefined}
+              labels={{ editUrl: t('editUrl'), slugNudge: t('slugNudge') }}
+            />
+          }
           breadcrumb={
             tree.length > 0 && selectedDoc ? (
               <DocBreadcrumb
@@ -337,6 +434,40 @@ export default function DocSlugPage() {
           }}
         />
       </div>
+
+      <DocUrlDialog
+        open={urlDialogOpen}
+        onClose={() => setUrlDialogOpen(false)}
+        currentSlug={selectedDoc.slug}
+        title={title}
+        onSubmit={handleSubmitSlug}
+        labels={{
+          editUrl: t('editUrl'),
+          urlDialogDesc: t('urlDialogDesc'),
+          deriveFromTitle: t('deriveFromTitle'),
+          aliasNote: t('aliasNote'),
+          slugTaken: t('slugTaken'),
+          slugInvalid: t('slugInvalid'),
+          save: t('save'),
+          cancel: tc('cancel'),
+        }}
+      />
+
+      <DocShareDialog
+        open={shareDialogOpen}
+        onClose={() => setShareDialogOpen(false)}
+        docId={selectedDoc.id}
+        labels={{
+          share: ts('share'),
+          shareToWeb: ts('shareToWeb'),
+          shareToWebDesc: ts('shareToWebDesc'),
+          copyLink: ts('copyLink'),
+          linkCopied: ts('linkCopied'),
+          stopSharing: ts('stopSharing'),
+          regenerateLink: ts('regenerateLink'),
+          shareSingleDocNote: ts('shareSingleDocNote'),
+        }}
+      />
     </div>
   );
 }

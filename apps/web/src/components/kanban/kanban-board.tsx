@@ -5,7 +5,7 @@ import { useState, useEffect, useCallback, useRef } from 'react';
 import { useRouter, useSearchParams } from 'next/navigation';
 import { useTranslations } from 'next-intl';
 import { Check, ChevronDown, LayoutGrid, LayoutList, Search } from 'lucide-react';
-import { DndContext, DragEndEvent, PointerSensor, useSensor, useSensors, DragOverlay } from '@dnd-kit/core';
+import { DndContext, DragEndEvent, PointerSensor, TouchSensor, useSensor, useSensors, DragOverlay } from '@dnd-kit/core';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import {
@@ -179,7 +179,13 @@ export function KanbanBoard({ projectId }: KanbanBoardProps) {
   const [storyTasks, setStoryTasks] = useState<Task[]>([]);
   const [activeId, setActiveId] = useState<string | null>(null);
 
-  const sensors = useSensors(useSensor(PointerSensor, { activationConstraint: { distance: 8 } }));
+  // Desktop: mouse drag begins after an 8px move. Touch: a 250ms press-and-hold is
+  // required before a drag starts, so vertical scrolling on mobile web isn't hijacked
+  // by the drag sensor — the root cause of "보드 dnd 안 됨" on touch (S6 AC1).
+  const sensors = useSensors(
+    useSensor(PointerSensor, { activationConstraint: { distance: 8 } }),
+    useSensor(TouchSensor, { activationConstraint: { delay: 250, tolerance: 5 } }),
+  );
 
   const epicMap: Record<string, string> = {};
   for (const e of epics) epicMap[e.id] = e.title;

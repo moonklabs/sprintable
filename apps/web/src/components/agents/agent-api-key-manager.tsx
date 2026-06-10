@@ -37,6 +37,9 @@ export function AgentApiKeyManager({ agentId, agentName, onNewKey }: AgentApiKey
   const [loading, setLoading] = useState(false);
   const [newKeyDialog, setNewKeyDialog] = useState(false);
   const [generatedKey, setGeneratedKey] = useState<string | null>(null);
+  // EF-S3: mcp_config is captured-at-creation (returned once with the plaintext key) so the
+  // onboarding copy can bundle the agent's MCP server config alongside the key.
+  const [generatedMcpConfig, setGeneratedMcpConfig] = useState<string | null>(null);
   // 툴 권한 = 그룹키 배열(=api-key.scope). picker가 카탈로그 로드 후 전체 비파괴로 기본 초기화.
   const [selectedScopes, setSelectedScopes] = useState<string[]>([]);
   const [copiedOnboarding, setCopiedOnboarding] = useState(false);
@@ -47,8 +50,9 @@ export function AgentApiKeyManager({ agentId, agentName, onNewKey }: AgentApiKey
   // f44e2644: 랜딩 canonical 직지정(app.sprintable.ai CF 301 prod 미발동·앱 사본 onboarding-guide 깨짐).
   const LLMS_URL = 'https://sprintable.ai/llms.txt';
 
-  const buildOnboardingMessage = (apiKey: string) =>
-    `아래의 정보를 읽고 온보딩하기 바람.\nsprintable agent name : ${agentName}\nsprintable agent api key : ${apiKey}\n${LLMS_URL}`;
+  const buildOnboardingMessage = (apiKey: string, mcpConfig?: string | null) =>
+    `아래의 정보를 읽고 온보딩하기 바람.\nsprintable agent name : ${agentName}\nsprintable agent api key : ${apiKey}\n${LLMS_URL}` +
+    (mcpConfig ? `\n\nMCP 서버 설정(.mcp.json에 병합):\n${mcpConfig}` : '');
 
   const loadApiKeys = useCallback(async () => {
     if (!agentId) return;
@@ -84,9 +88,13 @@ export function AgentApiKeyManager({ agentId, agentName, onNewKey }: AgentApiKey
         body: JSON.stringify({ scope: selectedScopes }),
       });
       if (!response.ok) throw new Error('Failed to generate API key');
-      const result = await response.json() as { data?: { api_key?: string } };
+      const result = await response.json() as { data?: { api_key?: string; mcp_config?: unknown } };
       const rawKey = (result.data?.api_key ?? '') as string;
+      const rawMcp = result.data?.mcp_config;
       setGeneratedKey(rawKey);
+      setGeneratedMcpConfig(
+        rawMcp == null ? null : typeof rawMcp === 'string' ? rawMcp : JSON.stringify(rawMcp, null, 2),
+      );
       onNewKey?.(rawKey);
       await loadApiKeys();
     } catch (error) {
@@ -177,9 +185,9 @@ export function AgentApiKeyManager({ agentId, agentName, onNewKey }: AgentApiKey
     }
   };
 
-  const copyOnboardingMessage = async (apiKey: string) => {
+  const copyOnboardingMessage = async (apiKey: string, mcpConfig?: string | null) => {
     try {
-      await writeToClipboard(buildOnboardingMessage(apiKey));
+      await writeToClipboard(buildOnboardingMessage(apiKey, mcpConfig));
       setCopiedOnboarding(true);
       addToast({ type: 'success', title: '온보딩 메시지 복사됨' });
       window.setTimeout(() => setCopiedOnboarding(false), 1500);
@@ -208,7 +216,7 @@ export function AgentApiKeyManager({ agentId, agentName, onNewKey }: AgentApiKey
             <Button
               variant="outline"
               disabled={!hasActiveKey || copiedOnboarding}
-              onClick={() => void copyOnboardingMessage(generatedKey ?? (activeKeys[0] ? `${activeKeys[0].key_prefix}...` : ''))}
+              onClick={() => void copyOnboardingMessage(generatedKey ?? (activeKeys[0] ? `${activeKeys[0].key_prefix}...` : ''), generatedMcpConfig)}
               className="gap-1.5"
             >
               {copiedOnboarding ? <Check className="h-3.5 w-3.5 text-success" /> : <Copy className="h-3.5 w-3.5" />}
@@ -352,12 +360,12 @@ export function AgentApiKeyManager({ agentId, agentName, onNewKey }: AgentApiKey
               </div>
               <div className="pt-2 border-t border-border">
                 <p className="text-xs text-muted-foreground mb-2">에이전트에게 아래 온보딩 메시지를 전달하세요:</p>
-                <pre className="text-xs bg-muted rounded p-2 whitespace-pre-wrap break-all">{buildOnboardingMessage(generatedKey)}</pre>
+                <pre className="text-xs bg-muted rounded p-2 whitespace-pre-wrap break-all">{buildOnboardingMessage(generatedKey, generatedMcpConfig)}</pre>
                 <Button
                   variant="outline"
                   size="sm"
                   className="mt-2 gap-1.5"
-                  onClick={() => void copyOnboardingMessage(generatedKey)}
+                  onClick={() => void copyOnboardingMessage(generatedKey, generatedMcpConfig)}
                 >
                   {copiedOnboarding ? <Check className="h-3.5 w-3.5 text-success" /> : <Copy className="h-3.5 w-3.5" />}
                   온보딩 메시지 복사

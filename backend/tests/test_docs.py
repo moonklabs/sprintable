@@ -21,6 +21,8 @@ def _mock_doc() -> MagicMock:
     d.assignee_id = None
     d.title = "Getting Started"
     d.slug = "getting-started"
+    d.canonical_slug = "getting-started"  # 4dd399c6: property on real Doc; mock 명시 필수
+    d.slug_locked = False
     d.content = "# Hello"
     d.icon = None
     d.sort_order = 0

@@ -361,30 +361,42 @@ export default function StandupPage() {
   // d9847ef0: projectId 전체 차단 제거 — org-level standup은 프로젝트 미선택에도 진입/작성/조회 가능.
   // project-scoped 섹션만 {projectId && ...}로 조건부 렌더(아래).
 
+  // S4: shared date-nav — desktop renders it in the header; mobile renders it as a
+  // full-width row below the header so the wide date input never crushes the fixed-height
+  // (h-12) TopBar title (the title and the shrink-0 controls competed for one row).
+  const dateNavControls = (
+    <>
+      <Button variant="ghost" size="icon" className="shrink-0" onClick={() => setDate((d) => shiftDate(d, -1))} title={t('previousDay')}>
+        ←
+      </Button>
+      <OperatorInput
+        type="date"
+        value={date}
+        onChange={(event) => setDate(event.target.value)}
+        className="w-auto shrink-0"
+      />
+      <Button variant="ghost" size="icon" className="shrink-0" onClick={() => setDate((d) => shiftDate(d, 1))} title={t('nextDay')}>
+        →
+      </Button>
+      <Button variant="ghost" size="sm" className="shrink-0" onClick={() => setDate(formatSeoulDate())}>
+        {t('today')}
+      </Button>
+    </>
+  );
+
   return (
     <>
       <TopBarSlot
         title={<h1 className="text-sm font-medium">{t('title')}</h1>}
         actions={
-          <div className="flex flex-wrap items-center gap-1.5">
-            <Button variant="ghost" size="icon" onClick={() => setDate((d) => shiftDate(d, -1))} title={t('previousDay')}>
-              ←
-            </Button>
-            <OperatorInput
-              type="date"
-              value={date}
-              onChange={(event) => setDate(event.target.value)}
-              className="w-auto"
-            />
-            <Button variant="ghost" size="icon" onClick={() => setDate((d) => shiftDate(d, 1))} title={t('nextDay')}>
-              →
-            </Button>
-            <Button variant="ghost" size="sm" onClick={() => setDate(formatSeoulDate())}>
-              {t('today')}
-            </Button>
-          </div>
+          <div className="hidden flex-wrap items-center gap-1.5 lg:flex">{dateNavControls}</div>
         }
       />
+
+      {/* S4: mobile date nav as its own full-width row (keeps the header title readable). */}
+      <div className="flex flex-wrap items-center gap-1.5 border-b border-border/80 px-4 py-2 lg:hidden">
+        {dateNavControls}
+      </div>
 
       <div className="flex min-h-0 flex-1 flex-col overflow-y-auto">
         {headerBadges.length > 0 ? (

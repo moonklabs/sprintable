@@ -203,8 +203,11 @@ async def test_group_request_2members_coerced_to_dm():
 # ─── AC4: POST /conversations — DM 중복 방지 ────────────────────────────────
 
 @pytest.mark.anyio
-async def test_create_dm_deduplication():
-    """dm 중복 시 기존 conversation 반환 + existing=True."""
+async def test_create_dm_no_dedup_creates_new_session():
+    """db75ecd0(EF-S2) AC1: 같은 pair여도 dedup 없이 매 호출 신규 conversation(existing False).
+
+    179db213 의 1-DM-per-pair dedup 회귀 — _find_existing_dm 제거로 항상 신규 세션 생성.
+    """
     client, session, app = await _make_client()
     try:
         mock_member = _make_member()
@@ -212,13 +215,14 @@ async def test_create_dm_deduplication():
 
         member_result = MagicMock()
         member_result.scalars.return_value.first.return_value = mock_member
+        # _find_existing_dm 제거 → member resolve 만(2번째는 안전 여분)
+        session.execute = AsyncMock(side_effect=[member_result, MagicMock()])
 
-        # 179db213: 새 dedup — _find_existing_dm() = scalar_one_or_none(dm_pair_key 조회)
-        existing_dm_result = MagicMock()
-        existing_dm_result.scalar_one_or_none.return_value = CONV_ID
-
-        # execute 순서: member resolve → _find_existing_dm(scalar_one_or_none)
-        session.execute = AsyncMock(side_effect=[member_result, existing_dm_result])
+        async def _refresh(obj):
+            obj.id = CONV_ID
+            obj.type = "dm"
+            obj.title = None
+        session.refresh.side_effect = _refresh
 
         async with client as c:
             resp = await c.post("/api/v2/conversations", json={
@@ -229,8 +233,8 @@ async def test_create_dm_deduplication():
 
         assert resp.status_code == 201
         body = resp.json()
-        assert body["existing"] is True
-        assert body["id"] == str(CONV_ID)
+        assert body["existing"] is False  # dedup 제거 — 기존방 다이렉트 없이 항상 신규
+        assert body["type"] == "dm"
     finally:
         app.dependency_overrides.clear()
 

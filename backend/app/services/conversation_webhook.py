@@ -74,6 +74,84 @@ async def _attempt_delivery(url: str, secret: str | None, payload: dict) -> None
         resp.raise_for_status()
 
 
+async def deliver_injected_event_webhook(
+    *,
+    org_id: uuid.UUID,
+    recipient_id: uuid.UUID,
+    content: str,
+    event_type: str,
+    source_entity_type: str | None = None,
+    source_entity_id: uuid.UUID | None = None,
+) -> None:
+    """1f01c1ad: INJECTABLE 이벤트(dispatched/story_assigned 등)를 수신자 member webhook으로 전달.
+
+    배경(선생님 제보 2026-06-09): ``conversation.message_created``는
+    :func:`deliver_conversation_message_webhook`로 수신자 member webhook(=CC 릴레이가 소비하는
+    Discord/fakechat 경로)에 주입되지만, ``/api/v2/dispatch``·story 배정이 만드는
+    ``dispatched``/``story_assigned`` 이벤트는 ``wake_agent`` (SSE)로만 통지됐다. CC 세션은 SSE
+    dial-out이 아니라 member webhook으로 구동되므로, 이 이벤트들은 CC 세션에 영영 도달하지 못했다
+    (문서 dispatch → CC 주입 0). 이 함수가 그 갭을 메워 INJECTABLE 이벤트도 conversation message와
+    **동일한 webhook 경로**로 CC 세션에 주입한다.
+
+    dup 0: webhook은 이 호출에서 수신자 webhook당 정확히 1회 발송된다. 기존 ``wake_agent`` (SSE)는
+    별개 채널이고, conversation message가 이미 SSE+webhook 양쪽으로 전달되는 것과 동형이다
+    (채널별 1회 — acked_seq seq-dedup은 SSE 채널 내부 전용이라 본 webhook 채널과 무관). conversation
+    message가 아니므로 ``ConversationWebhookDelivery`` 추적 행은 만들지 않는다(그 ``message_id``는
+    ``conversation_messages``를 가리키는 FK라 dispatched 이벤트에 부적합).
+    """
+    if not content or not content.strip():
+        return
+
+    from app.core.database import async_session_factory
+    from sqlalchemy import select
+
+    async with async_session_factory() as db:
+        try:
+            wh_rows = (await db.execute(
+                select(WebhookConfig).where(
+                    WebhookConfig.org_id == org_id,
+                    WebhookConfig.member_id == recipient_id,
+                    WebhookConfig.is_active.is_(True),
+                )
+            )).scalars().all()
+        except Exception:
+            logger.exception(
+                "injected-event webhook lookup failed recipient=%s event=%s",
+                recipient_id, event_type,
+            )
+            return
+
+    # events가 NULL/빈 배열이면 전체 이벤트 구독으로 간주 (deliver_conversation_message_webhook 동형)
+    targets = [wh for wh in wh_rows if not wh.events or event_type in wh.events]
+    if not targets:
+        return
+
+    payload = {
+        "event_type": event_type,
+        "content": content,
+        "source_entity_type": source_entity_type,
+        "source_entity_id": str(source_entity_id) if source_entity_id else None,
+    }
+
+    seen_urls: set[str] = set()
+    for wh in targets:
+        if wh.url in seen_urls:  # 같은 endpoint 중복 발송 방지 (dup 0)
+            continue
+        seen_urls.add(wh.url)
+        for attempt in range(1, _MAX_RETRIES + 1):
+            try:
+                await _attempt_delivery(wh.url, wh.secret, payload)
+                break
+            except Exception as exc:
+                if attempt < _MAX_RETRIES:
+                    await asyncio.sleep(_BACKOFF_BASE * (2 ** (attempt - 1)))
+                else:
+                    logger.warning(
+                        "injected-event webhook delivery failed recipient=%s event=%s url=%s: %s",
+                        recipient_id, event_type, wh.url, str(exc)[:200],
+                    )
+
+
 async def deliver_conversation_message_webhook(
     message_id: uuid.UUID,
     conversation_id: uuid.UUID,

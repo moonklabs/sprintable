@@ -1,14 +1,15 @@
 'use client';
 
-import { useCallback, useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useRef, useState, type ClipboardEvent } from 'react';
 import { useTranslations } from 'next-intl';
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
 import rehypeSanitize from 'rehype-sanitize';
-import { AlertTriangle, GitFork, Loader2, Paperclip, Plus, Tag, Trash2, X } from 'lucide-react';
+import { AlertTriangle, Check, GitFork, Loader2, Paperclip, Plus, Tag, Trash2, X } from 'lucide-react';
 import type { KanbanStory, KanbanMember, DependencyEdge } from './types';
 import type { SendAttachment } from '@/hooks/use-chat-sse';
 import { getFileIcon } from '@/lib/file-icon';
+import { imageFilesFromClipboard } from '@/lib/clipboard-image';
 import { AttachmentImage } from '@/components/chat/attachment-image';
 import { AttachmentFile } from '@/components/chat/attachment-file';
 import { LabelChip, LABEL_PRESET_COLORS, type LabelData } from '@/components/ui/label-chip';
@@ -18,6 +19,8 @@ import { OutcomeResultCard, type OutcomeResult } from '@/components/outcome/outc
 import { EntityDispatchPanel } from '@/components/dispatch/entity-dispatch-panel';
 import { Button } from '@/components/ui/button';
 import { StatusBadge } from '@/components/ui/status-badge';
+import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from '@/components/ui/dropdown-menu';
+import { VALID_TRANSITIONS, COLUMNS } from './types';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import {
   Dialog, DialogContent, DialogDescription,
@@ -122,6 +125,8 @@ export function StoryDetailPanel({ story, tasks, nextTasksCursor = null, loading
   const [editingTitle, setEditingTitle] = useState(false);
   const [titleDraft, setTitleDraft] = useState(story.title);
   const [savingTitle, setSavingTitle] = useState(false);
+  const [savingStatus, setSavingStatus] = useState(false);
+  const [localStatus, setLocalStatus] = useState(story.status);
 
   const [editingDescription, setEditingDescription] = useState(false);
   const [descriptionDraft, setDescriptionDraft] = useState(story.description ?? '');
@@ -321,6 +326,11 @@ export function StoryDetailPanel({ story, tasks, nextTasksCursor = null, loading
       .finally(() => setLoadingDeps(false));
   }, [story.id]);
 
+  // Keep the locally-displayed status synced when a different story is selected or the
+  // board pushes an external update. Optimistic in-panel changes set it directly (handler),
+  // so the badge reflects immediately without waiting for the prop round-trip (S6 AC2 ④).
+  useEffect(() => { setLocalStatus(story.status); }, [story.status]);
+
   const statusKeyMap: Record<string, 'backlog' | 'readyForDev' | 'inProgress' | 'inReview' | 'done'> = {
     backlog: 'backlog',
     'ready-for-dev': 'readyForDev',
@@ -328,8 +338,8 @@ export function StoryDetailPanel({ story, tasks, nextTasksCursor = null, loading
     'in-review': 'inReview',
     done: 'done',
   };
-  const statusKey = statusKeyMap[story.status];
-  const statusLabel = statusKey ? t(statusKey) : story.status;
+  const statusKey = statusKeyMap[localStatus];
+  const statusLabel = statusKey ? t(statusKey) : localStatus;
 
   const patchStory = async (body: Record<string, unknown>): Promise<KanbanStory | null> => {
     const res = await fetch(`/api/stories/${story.id}`, {
@@ -340,6 +350,31 @@ export function StoryDetailPanel({ story, tasks, nextTasksCursor = null, loading
     if (!res.ok) return null;
     const json = await res.json();
     return json.data as KanbanStory;
+  };
+
+  const handleChangeStatus = async (newStatus: string) => {
+    if (newStatus === localStatus || savingStatus) return;
+    const prev = localStatus;
+    setSavingStatus(true);
+    setLocalStatus(newStatus); // optimistic — badge reflects immediately (local, no prop round-trip)
+    // The dedicated status endpoint runs the state-machine validation + events; the general
+    // /stories/{id} PATCH (patchStory) intentionally omits `status`, so it would 200 without
+    // persisting — the root of the badge reverting after a "successful" change.
+    let ok = false;
+    try {
+      const res = await fetch(`/api/stories/${story.id}/status`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ status: newStatus }),
+      });
+      ok = res.ok;
+    } catch { /* network error — treat as failure, roll back below */ }
+    setSavingStatus(false);
+    if (ok) {
+      onStoryUpdate?.({ ...story, status: newStatus }); // persisted → sync the board
+    } else {
+      setLocalStatus(prev); // BE rejected (e.g. invalid transition) — roll back
+    }
   };
 
   const handleSaveTitle = async () => {
@@ -427,6 +462,16 @@ export function StoryDetailPanel({ story, tasks, nextTasksCursor = null, loading
       setAttachError(true);
     } finally {
       setUploadingAttachment(false);
+    }
+  };
+
+  // S3: paste an image while editing a story → upload as an attachment (same path as the
+  // file picker). Non-image pastes fall through to normal textarea paste.
+  const handlePasteAttach = (e: ClipboardEvent) => {
+    const images = imageFilesFromClipboard(e);
+    if (images.length > 0) {
+      e.preventDefault();
+      void handleAttachFiles(images);
     }
   };
 
@@ -636,7 +681,31 @@ export function StoryDetailPanel({ story, tasks, nextTasksCursor = null, loading
                 <span className="mt-1 shrink-0 text-xs text-muted-foreground opacity-0 transition-opacity group-hover:opacity-100">✎</span>
               </button>
             )}
-            <StatusBadge status={story.status} label={statusLabel} />
+            <DropdownMenu>
+              <DropdownMenuTrigger
+                render={
+                  <button type="button" disabled={savingStatus} aria-label={t('status')}>
+                    <StatusBadge status={localStatus} label={statusLabel} interactive />
+                  </button>
+                }
+              />
+              <DropdownMenuContent align="start">
+                {COLUMNS.map((col) => {
+                  const isCurrent = col.id === localStatus;
+                  const allowed = isCurrent || (VALID_TRANSITIONS[localStatus] ?? []).includes(col.id);
+                  return (
+                    <DropdownMenuItem
+                      key={col.id}
+                      disabled={!allowed}
+                      onClick={() => { if (!isCurrent) void handleChangeStatus(col.id); }}
+                    >
+                      <Check className={`size-4 ${isCurrent ? '' : 'opacity-0'}`} />
+                      {t(statusKeyMap[col.id] ?? col.i18nKey)}
+                    </DropdownMenuItem>
+                  );
+                })}
+              </DropdownMenuContent>
+            </DropdownMenu>
           </div>
           <div className="flex shrink-0 items-center gap-2">
             <button
@@ -652,10 +721,6 @@ export function StoryDetailPanel({ story, tasks, nextTasksCursor = null, loading
         </div>
         <div className="flex-1 overflow-y-auto p-5">
           <div className="space-y-5">
-            <div>
-              <span className="text-[10px] font-mono uppercase tracking-wider text-muted-foreground">{t('status')}</span>
-              <p className="mt-1 text-sm text-foreground">{statusLabel}</p>
-            </div>
             <div>
               <div className="flex items-center justify-between">
                 <span className="text-[10px] font-mono uppercase tracking-wider text-muted-foreground">{t('assignee')}</span>
@@ -754,6 +819,7 @@ export function StoryDetailPanel({ story, tasks, nextTasksCursor = null, loading
                   <textarea
                     value={descriptionDraft}
                     onChange={(e) => setDescriptionDraft(e.target.value)}
+                    onPaste={handlePasteAttach}
                     placeholder="Markdown 형식으로 작성하세요..."
                     className="flex field-sizing-content min-h-[160px] w-full resize-y rounded-lg border border-input bg-transparent px-2.5 py-2 font-mono text-sm outline-none transition-colors placeholder:text-muted-foreground focus-visible:border-ring focus-visible:ring-3 focus-visible:ring-ring/50 disabled:cursor-not-allowed disabled:opacity-50"
                     autoFocus

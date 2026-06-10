@@ -566,6 +566,11 @@ class UpdateStatusRequest(BaseModel):
     status: str  # open | resolved
 
 
+class UpdateConversationRequest(BaseModel):
+    # EF-S2 (db75ecd0) AC3: 방 title 사용자 편집. title 제공 시만 갱신(기본 생성 title 보존).
+    title: str | None = None
+
+
 class AddParticipantRequest(BaseModel):
     member_id: uuid.UUID
 
@@ -585,26 +590,14 @@ async def create_conversation(
     # ⭐ 인가 불변식: 휴먼↔에이전트 대화 — 에이전트 creator 동석 필수
     await _enforce_agent_creator_policy(sender, body.participant_ids, db)
 
-    # 179db213: 1-pair=1-DM enforce — resolved member set 이 정확히 2명이면 DM 으로 dedup
-    # (body.type label 무관). dm_pair_key(정렬쌍)로 기존 DM 조회→반환. ≥3명/단독은 group.
+    # EF-S2 (db75ecd0): "기존방 다이렉트" 제거 — 동일 2인 pair여도 매 호출 신규 conversation 생성
+    # (여러 conversation 공존·각 1주제·hermes 세션별 1방=1주제). 179db213 의 1-DM-per-pair
+    # dedup + uq_conversations_dm_pair 정책 회귀(마이그 0111 에서 unique index drop).
+    # 불변 보존: creator 동석/allow_list(_enforce_agent_creator_policy 위), 메시지 dedup(send_message·별개),
+    # thread=스토리. dm_pair_key 컬럼은 2인 룸 태깅용으로 유지(non-unique·dedup 아님).
     all_members = sorted({sender.id, *body.participant_ids})
     is_dm = len(all_members) == 2
     dm_pair_key = "|".join(str(m) for m in all_members) if is_dm else None
-
-    async def _find_existing_dm() -> uuid.UUID | None:
-        return (await db.execute(
-            select(Conversation.id).where(
-                Conversation.type == "dm",
-                Conversation.org_id == org_id,
-                Conversation.project_id == body.project_id,
-                Conversation.dm_pair_key == dm_pair_key,
-            )
-        )).scalar_one_or_none()
-
-    if is_dm:
-        existing = await _find_existing_dm()
-        if existing is not None:
-            return {"id": str(existing), "type": "dm", "existing": True}
 
     conv = Conversation(
         project_id=body.project_id,
@@ -621,12 +614,8 @@ async def create_conversation(
             db.add(ConversationParticipant(conversation_id=conv.id, member_id=mid))
         await db.commit()
     except IntegrityError:
-        # CP2: 동시 동일 pair 생성 레이스 → uq_conversations_dm_pair 위반 → 기존 DM 반환.
+        # dedup unique 제거 후엔 DM pair 레이스 충돌 없음 — 잔여 무결성 오류는 reuse 없이 전파.
         await db.rollback()
-        if is_dm:
-            existing = await _find_existing_dm()
-            if existing is not None:
-                return {"id": str(existing), "type": "dm", "existing": True}
         raise
     await db.refresh(conv)
     return {"id": str(conv.id), "type": conv.type, "title": conv.title, "existing": False}
@@ -1315,3 +1304,40 @@ async def update_conversation_status(
         "resolved_by": str(conv.resolved_by) if conv.resolved_by else None,
         "resolved_at": conv.resolved_at.isoformat() if conv.resolved_at else None,
     }
+
+
+@router.patch("/{conversation_id}", status_code=200)
+async def update_conversation(
+    conversation_id: uuid.UUID,
+    body: UpdateConversationRequest,
+    db: AsyncSession = Depends(get_db),
+    auth: AuthContext = Depends(get_current_user),
+    org_id: uuid.UUID = Depends(get_verified_org_id),
+) -> dict:
+    """PATCH /api/v2/conversations/{id} — 방 title 사용자 편집 (EF-S2 AC3·참여자 권한).
+
+    title 제공 시만 갱신(기본 생성 title 보존). status PATCH 와 동일 참여자 게이트.
+    """
+    conv = (await db.execute(
+        select(Conversation).where(Conversation.id == conversation_id, Conversation.org_id == org_id)
+    )).scalar_one_or_none()
+    if conv is None:
+        raise HTTPException(status_code=404, detail="Conversation not found")
+
+    requester = await _resolve_member(auth, org_id, db, project_id=conv.project_id)
+    participant = (await db.execute(
+        select(ConversationParticipant.id).where(
+            ConversationParticipant.conversation_id == conversation_id,
+            ConversationParticipant.member_id == requester.id,
+        )
+    )).scalar_one_or_none()
+    if participant is None:
+        raise HTTPException(status_code=403, detail="Not a participant")
+
+    if body.title is not None:
+        conv.title = body.title
+        conv.updated_at = datetime.now(timezone.utc)
+        await db.commit()
+        await db.refresh(conv)
+
+    return {"id": str(conv.id), "title": conv.title}
