@@ -1,6 +1,6 @@
 'use client';
 
-import { useCallback, useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useRef, useState, type ClipboardEvent } from 'react';
 import { useTranslations } from 'next-intl';
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
@@ -9,6 +9,7 @@ import { AlertTriangle, Check, GitFork, Loader2, Paperclip, Plus, Tag, Trash2, X
 import type { KanbanStory, KanbanMember, DependencyEdge } from './types';
 import type { SendAttachment } from '@/hooks/use-chat-sse';
 import { getFileIcon } from '@/lib/file-icon';
+import { imageFilesFromClipboard } from '@/lib/clipboard-image';
 import { AttachmentImage } from '@/components/chat/attachment-image';
 import { AttachmentFile } from '@/components/chat/attachment-file';
 import { LabelChip, LABEL_PRESET_COLORS, type LabelData } from '@/components/ui/label-chip';
@@ -464,6 +465,16 @@ export function StoryDetailPanel({ story, tasks, nextTasksCursor = null, loading
     }
   };
 
+  // S3: paste an image while editing a story → upload as an attachment (same path as the
+  // file picker). Non-image pastes fall through to normal textarea paste.
+  const handlePasteAttach = (e: ClipboardEvent) => {
+    const images = imageFilesFromClipboard(e);
+    if (images.length > 0) {
+      e.preventDefault();
+      void handleAttachFiles(images);
+    }
+  };
+
   const handleRemoveAttachment = async (url: string) => {
     const next = (story.attachments ?? []).filter((a) => a.url !== url); // filter → 전체 교체
     const updated = await patchStory({ attachments: next });
@@ -808,6 +819,7 @@ export function StoryDetailPanel({ story, tasks, nextTasksCursor = null, loading
                   <textarea
                     value={descriptionDraft}
                     onChange={(e) => setDescriptionDraft(e.target.value)}
+                    onPaste={handlePasteAttach}
                     placeholder="Markdown 형식으로 작성하세요..."
                     className="flex field-sizing-content min-h-[160px] w-full resize-y rounded-lg border border-input bg-transparent px-2.5 py-2 font-mono text-sm outline-none transition-colors placeholder:text-muted-foreground focus-visible:border-ring focus-visible:ring-3 focus-visible:ring-ring/50 disabled:cursor-not-allowed disabled:opacity-50"
                     autoFocus

@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useRef, useState, type KeyboardEvent } from 'react';
+import { useEffect, useRef, useState, type ClipboardEvent, type KeyboardEvent } from 'react';
 import Link from 'next/link';
 import { AlertTriangle, Loader2, Paperclip, Send, Terminal, Type, X } from 'lucide-react';
 import { useTranslations } from 'next-intl';
@@ -9,6 +9,7 @@ import { getFileIcon } from '@/lib/file-icon';
 import { commandName, dequoteLiteral, isCommand } from '@/lib/command-classifier';
 import { resolveRuntimeStatus, runtimeLabel } from '@/lib/runtime-capabilities';
 import type { SendAttachment } from '@/hooks/use-chat-sse';
+import { imageFilesFromClipboard } from '@/lib/clipboard-image';
 
 /** S8 #2: pre-send capability 경고 대상 — 대화의 에이전트 participant(본인 제외) runtime. */
 export interface CommandTarget {
@@ -261,6 +262,16 @@ export function ChatInput({ onSend, onUploadFile, disabled, placeholder, project
     setPendingFiles((prev) => [...prev, ...files].slice(0, MAX_ATTACHMENTS));
   };
 
+  // S3: paste an image from the clipboard → queue it as an attachment (same path as
+  // file-select/drop). Non-image pastes fall through to the normal textarea paste.
+  const handlePaste = (e: ClipboardEvent) => {
+    const images = imageFilesFromClipboard(e);
+    if (images.length > 0) {
+      e.preventDefault();
+      addFiles(images);
+    }
+  };
+
   const handleFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     addFiles(Array.from(e.target.files ?? []));
     e.target.value = '';
@@ -437,6 +448,7 @@ export function ChatInput({ onSend, onUploadFile, disabled, placeholder, project
           value={text}
           onChange={(e) => handleTextChange(e.target.value, e.target.selectionStart ?? e.target.value.length)}
           onKeyDown={handleKeyDown}
+          onPaste={handlePaste}
           onBlur={() => {
             window.setTimeout(() => {
               setMentionQuery(null);
