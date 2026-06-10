@@ -106,6 +106,10 @@ async def _mark_agent_disconnected(agent_id: uuid.UUID, session_id: uuid.UUID) -
                 await sync_agent_profile_presence(
                     db, agent_id, last_seen_at=None, agent_status="offline"
                 )
+                # d5de8e08 안전망: 연결 완전 종료 → 이 에이전트의 chat working 신호도 즉시 정리
+                # (offline 인데 "...typing" 잔존 방지·TTL backstop 기다리지 않음).
+                from app.services import chat_presence
+                chat_presence.clear_member(str(agent_id))
             await db.commit()
     except Exception:
         logger.warning("presence disconnect cleanup failed agent=%s", agent_id, exc_info=True)
