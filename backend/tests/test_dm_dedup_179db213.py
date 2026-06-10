@@ -41,6 +41,7 @@ def _key(*ids):
 
 
 @pytest.mark.anyio
+@pytest.mark.skip(reason="db75ecd0(EF-S2): 1-DM-per-pair dedup 정책 회귀(uq_conversations_dm_pair drop)로 폐기 — 신규세션 정책은 test_chat_session_policy_db75ecd0")
 @pytest.mark.skipif(not _ASYNC, reason="real-DB URL 미설정 — skip")
 async def test_unique_index_and_concurrent_race_realdb():
     """CP1/CP2: 같은 (org,project,dm_pair_key) DM 2개 insert → unique 위반(동시성 포함 단일 보장)."""
@@ -94,6 +95,7 @@ _DEDUP_SQL = [
 
 
 @pytest.mark.anyio
+@pytest.mark.skip(reason="db75ecd0(EF-S2): 기존방 다이렉트(DM dedup) 제거로 폐기 — 동일 pair도 신규세션. test_chat_session_policy_db75ecd0 참조")
 @pytest.mark.skipif(not _ASYNC, reason="real-DB URL 미설정 — skip")
 async def test_concurrent_api_create_same_pair_single_dm_realdb(monkeypatch):
     """CP2: 핸들러 API 레벨 동시 POST(같은 pair) 2건 → 둘 다 동일 DM id·DB 단일 DM.
