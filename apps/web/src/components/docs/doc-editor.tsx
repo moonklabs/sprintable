@@ -53,6 +53,7 @@ export function DocEditor({
   titlePlaceholder,
   titleAutoFocus,
   breadcrumb,
+  urlSlot,
   actions,
   labels,
 }: {
@@ -74,6 +75,8 @@ export function DocEditor({
   titlePlaceholder?: string;
   titleAutoFocus?: boolean;
   breadcrumb?: React.ReactNode;
+  /** Inline URL chip slot, rendered under the title (above the tab bar). */
+  urlSlot?: React.ReactNode;
   actions?: React.ReactNode;
   labels: {
     contentFormat: string;
@@ -303,6 +306,13 @@ export function DocEditor({
               {actions}
             </div>
           )}
+        </div>
+      )}
+
+      {/* Inline URL chip (under title) */}
+      {urlSlot && (
+        <div className="flex-shrink-0 px-6 pb-2">
+          {urlSlot}
         </div>
       )}
 
