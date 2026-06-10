@@ -3,7 +3,6 @@
 import { createContext, useContext, useCallback } from 'react';
 import { usePathname } from 'next/navigation';
 import { useTranslations } from 'next-intl';
-import { Users } from 'lucide-react';
 import { RealtimeProvider } from '@/components/realtime-provider';
 import { AppSidebar } from '@/components/nav/app-sidebar';
 import { TopBar } from '@/components/nav/top-bar';
@@ -13,7 +12,7 @@ import { ContextualPanelLayout, useContextualPanelState } from '@/components/ui/
 import { TeamPresencePanel } from '@/components/presence/team-presence-panel';
 import { useTeamPresence } from '@/components/presence/use-team-presence';
 import { RefreshProvider } from '@/contexts/refresh-context';
-import { cn } from '@/lib/utils';
+import { TeamPresenceToggleProvider } from '@/components/presence/team-presence-toggle';
 import type { OrgSwitcherItem } from '@/components/nav/unified-switcher';
 
 export interface DashboardProjectOption {
@@ -49,11 +48,12 @@ function ScrollShell({ showTopBar, children }: { showTopBar: boolean; children: 
   const t = useTranslations('presence');
   // 2505d27d: 상시 팀 presence 패널 — 2xl=inline right-rail / <2xl=drawer. storageKey로 open 영속.
   const panel = useContextualPanelState({ storageKey: 'team-presence', defaultOpen: true });
-  // 폴 상향(단일 폴) — FAB working-count 배지가 패널 닫힘 상태서도 갱신돼야 하므로 상시 폴(document.hidden 가드는 hook 내).
+  // 폴 상향(단일 폴) — 헤더 토글 working-count 배지가 패널 닫힘 상태서도 갱신돼야 하므로 상시 폴(document.hidden 가드는 hook 내).
   const items = useTeamPresence(true);
   const workingCount = items.filter((i) => i.working).length;
 
   return (
+    <TeamPresenceToggleProvider value={{ toggle: panel.togglePanel, workingCount, open: panel.inlinePanelOpen || panel.drawerOpen }}>
     <SidebarInset className="relative flex flex-col overflow-hidden">
       <div ref={setRef} className="flex flex-1 min-h-0 flex-col overflow-y-auto">
         {showTopBar && <TopBar />}
@@ -80,33 +80,8 @@ function ScrollShell({ showTopBar, children }: { showTopBar: boolean; children: 
           {children}
         </ContextualPanelLayout>
       </div>
-
-      {/* 2505d27d: presence FAB(선생님 안·우하단) — **패널 닫힘일 때만 렌더**(열림 시 redundant/겹침=선생님 캐치).
-          패널은 자체 X로 닫음 → FAB 재등장. working-count 배지=닫힘서도 "N 작업 중". 모바일 GNB(lg:hidden) 회피 bottom↑.
-          ⚠️ 폴(useTeamPresence)은 렌더와 무관하게 유지 — 배지 count 최신성 보존(폴≠렌더). */}
-      {!panel.inlinePanelOpen && !panel.drawerOpen ? (
-      <button
-        type="button"
-        onClick={panel.openPanel}
-        aria-label={workingCount > 0 ? t('fabLabelWorking', { count: workingCount }) : t('panelTitle')}
-        title={t('panelTitle')}
-        className={cn(
-          'fixed bottom-20 right-4 z-50 flex size-14 items-center justify-center rounded-full bg-brand text-brand-foreground shadow-lg transition-transform hover:scale-105 lg:bottom-6 lg:right-6',
-          'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand focus-visible:ring-offset-2 focus-visible:ring-offset-background',
-        )}
-      >
-        <Users className="size-[22px]" />
-        {workingCount > 0 ? (
-          <span
-            className="absolute -right-1 -top-1 flex h-5 min-w-5 items-center justify-center rounded-full bg-brand-foreground px-1 text-xs font-bold tabular-nums text-brand shadow ring-2 ring-brand"
-            aria-hidden
-          >
-            {workingCount}
-          </span>
-        ) : null}
-      </button>
-      ) : null}
     </SidebarInset>
+    </TeamPresenceToggleProvider>
   );
 }
 
