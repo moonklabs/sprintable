@@ -80,6 +80,28 @@ class DocSlugAlias(Base, OrgScopedMixin):
     )
 
 
+class DocShareToken(Base, OrgScopedMixin):
+    """b1574f5a: 문서 공유 공개 URL 토큰. opaque(슬러그 무관)·문서당 1 active.
+
+    공개 `GET /api/v2/public/docs/{token}` 가 active 토큰을 해소해 비인증 read 제공.
+    enable=발급 / disable=revoke / regenerate=구 토큰 즉사+신규. doc_id FK 는 0107 docs_pkey 위.
+    """
+    __tablename__ = "doc_share_tokens"
+
+    id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    doc_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("docs.id", ondelete="CASCADE"), nullable=False, index=True
+    )
+    project_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), nullable=False, index=True)
+    token: Mapped[str] = mapped_column(Text, nullable=False, unique=True, index=True)
+    status: Mapped[str] = mapped_column(Text, nullable=False, default="active")  # active | revoked
+    created_by: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True), nullable=True)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now(), nullable=False
+    )
+    revoked_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+
+
 class DocComment(Base, OrgScopedMixin):
     __tablename__ = "doc_comments"
 

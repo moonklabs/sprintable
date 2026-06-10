@@ -1,3 +1,4 @@
+import os
 import uuid
 from datetime import datetime
 
@@ -12,7 +13,7 @@ from app.models.doc import DocComment, DocRevision
 from app.models.team import TeamMember
 from app.repositories.doc import DocRepository
 from app.services.member_resolver import canonicalize_member_id
-from app.schemas.doc import DocCreate, DocResponse, DocSummaryResponse, DocUpdate
+from app.schemas.doc import DocCreate, DocResponse, DocSummaryResponse, DocUpdate, ShareStatusResponse
 
 router = APIRouter(prefix="/api/v2/docs", tags=["docs"])
 
@@ -346,6 +347,82 @@ async def _resolve_doc_member_id(auth: AuthContext, org_id: uuid.UUID, db: Async
     # member id(org_member.id)로 폴백. 비-멤버는 resolve_member가 400.
     from app.services.member_resolver import resolve_member
     return (await resolve_member(auth, org_id, db)).id
+
+
+# ─── Share (Part B b1574f5a) ──────────────────────────────────────────────────
+
+def _share_resp(tok) -> ShareStatusResponse:
+    if tok is None:
+        return ShareStatusResponse(enabled=False)
+    app_url = os.environ.get("NEXT_PUBLIC_APP_URL", "").rstrip("/")
+    share_url = f"{app_url}/share/{tok.token}" if app_url else None
+    return ShareStatusResponse(enabled=True, token=tok.token, share_url=share_url)
+
+
+@router.get("/{id}/share", response_model=ShareStatusResponse)
+async def get_doc_share(
+    id: uuid.UUID,
+    repo: DocRepository = Depends(_get_repo),
+    db: AsyncSession = Depends(get_db),
+    auth: AuthContext = Depends(get_current_user),
+) -> ShareStatusResponse:
+    doc = await repo.get(id)
+    if doc is None:
+        raise HTTPException(status_code=404, detail="Doc not found")
+    await _resolve_doc_member_id(auth, repo.org_id, db)  # 멤버십 게이트(비멤버 차단)
+    from app.services import doc_share
+    return _share_resp(await doc_share.get_status(db, repo.org_id, id))
+
+
+@router.post("/{id}/share", response_model=ShareStatusResponse)
+async def enable_doc_share(
+    id: uuid.UUID,
+    repo: DocRepository = Depends(_get_repo),
+    db: AsyncSession = Depends(get_db),
+    auth: AuthContext = Depends(get_current_user),
+) -> ShareStatusResponse:
+    """opt-in 공개 활성 — active 토큰 발급(멱등)."""
+    doc = await repo.get(id)
+    if doc is None:
+        raise HTTPException(status_code=404, detail="Doc not found")
+    actor_id = await _resolve_doc_member_id(auth, repo.org_id, db)
+    from app.services import doc_share
+    tok = await doc_share.enable(db, repo.org_id, doc.project_id, id, actor_id)
+    return _share_resp(tok)
+
+
+@router.post("/{id}/share/regenerate", response_model=ShareStatusResponse)
+async def regenerate_doc_share(
+    id: uuid.UUID,
+    repo: DocRepository = Depends(_get_repo),
+    db: AsyncSession = Depends(get_db),
+    auth: AuthContext = Depends(get_current_user),
+) -> ShareStatusResponse:
+    """구 토큰 즉시 폐기 + 신규 발급(유출 방어)."""
+    doc = await repo.get(id)
+    if doc is None:
+        raise HTTPException(status_code=404, detail="Doc not found")
+    actor_id = await _resolve_doc_member_id(auth, repo.org_id, db)
+    from app.services import doc_share
+    tok = await doc_share.regenerate(db, repo.org_id, doc.project_id, id, actor_id)
+    return _share_resp(tok)
+
+
+@router.delete("/{id}/share", response_model=ShareStatusResponse)
+async def disable_doc_share(
+    id: uuid.UUID,
+    repo: DocRepository = Depends(_get_repo),
+    db: AsyncSession = Depends(get_db),
+    auth: AuthContext = Depends(get_current_user),
+) -> ShareStatusResponse:
+    """공개 중단 — active 토큰 revoke(이후 공개 read 410)."""
+    doc = await repo.get(id)
+    if doc is None:
+        raise HTTPException(status_code=404, detail="Doc not found")
+    actor_id = await _resolve_doc_member_id(auth, repo.org_id, db)
+    from app.services import doc_share
+    await doc_share.revoke(db, repo.org_id, id, actor_id)
+    return ShareStatusResponse(enabled=False)
 
 
 # ─── Comments ─────────────────────────────────────────────────────────────────
