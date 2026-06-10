@@ -13,6 +13,8 @@ export const createDocSchema = z.object({
 
 export const updateDocSchema = z.object({
   title: z.string().min(1).optional(),
+  slug: z.string().min(1).optional(),
+  slug_locked: z.boolean().optional(),
   content: z.string().optional(),
   content_format: z.enum(['markdown', 'html']).optional(),
   icon: z.string().optional().nullable(),
