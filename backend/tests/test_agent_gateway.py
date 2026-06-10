@@ -433,3 +433,31 @@ def test_presence_tick_interval_below_online_threshold():
     assert _PRESENCE_TICK_INTERVAL < _ONLINE_THRESHOLD.total_seconds()
     # 세션 fresh TTL 도 online 임계 미만이어야 disconnect 판정이 stale 세션을 활성으로 오판 안 함
     assert _SESSION_FRESH_TTL < _ONLINE_THRESHOLD.total_seconds()
+
+
+# ── d5de8e08: disconnect → chat working 안전망 clear ───────────────────────────
+
+@pytest.mark.anyio
+async def test_disconnect_clears_chat_working_when_no_remaining():
+    """마지막 세션 종료(offline) → 그 에이전트 chat working 신호도 즉시 정리(안전망)."""
+    no_remaining = MagicMock()
+    no_remaining.scalar_one_or_none.return_value = None
+    factory, db = _patch_session_factory([MagicMock(), no_remaining])
+    with patch("app.routers.agent_gateway.async_session_factory", factory), \
+         patch("app.services.agent_anchor_sync.sync_agent_profile_presence", new=AsyncMock()), \
+         patch("app.services.chat_presence.clear_member") as mock_clear:
+        await _mark_agent_disconnected(AGENT_ID, uuid.uuid4())
+    mock_clear.assert_called_once_with(str(AGENT_ID))
+
+
+@pytest.mark.anyio
+async def test_disconnect_keeps_chat_working_when_other_session_active():
+    """다른 활성 세션 잔존 → 아직 연결 중이므로 chat working 정리 안 함."""
+    remaining = MagicMock()
+    remaining.scalar_one_or_none.return_value = uuid.uuid4()
+    factory, db = _patch_session_factory([MagicMock(), remaining])
+    with patch("app.routers.agent_gateway.async_session_factory", factory), \
+         patch("app.services.agent_anchor_sync.sync_agent_profile_presence", new=AsyncMock()), \
+         patch("app.services.chat_presence.clear_member") as mock_clear:
+        await _mark_agent_disconnected(AGENT_ID, uuid.uuid4())
+    mock_clear.assert_not_called()

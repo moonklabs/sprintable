@@ -121,3 +121,29 @@ def test_working_member_ids_excludes_expired():
 
 def test_working_member_ids_empty():
     assert chat_presence.working_member_ids() == set()
+
+
+# ── d5de8e08: working longevity — TTL 상향 + disconnect 안전망 clear_member ──────
+
+def test_ttl_bumped_for_long_replies():
+    """긴 in-product 응답(>45s)이 턴 도중 떨어지지 않도록 TTL 상향(>=120s)."""
+    assert chat_presence._TTL_SEC >= 120
+
+
+def test_clear_member_removes_across_all_conversations():
+    c1, c2, c3 = (str(uuid.uuid4()) for _ in range(3))
+    a, b = str(uuid.uuid4()), str(uuid.uuid4())
+    chat_presence.set_working(c1, a)
+    chat_presence.set_working(c2, a)
+    chat_presence.set_working(c2, b)   # 다른 멤버 — 보존돼야
+    chat_presence.set_working(c3, a)
+    chat_presence.clear_member(a)
+    assert chat_presence.working_member_ids() == {b}      # a 전부 제거, b 유지
+    c2_ids = {e["member_id"] for e in chat_presence.list_working(c2)}
+    assert c2_ids == {b}                                  # c2 의 b 는 보존
+    assert c1 not in chat_presence._working_store          # 빈 conversation 정리
+    assert c3 not in chat_presence._working_store
+
+
+def test_clear_member_missing_is_noop():
+    chat_presence.clear_member(str(uuid.uuid4()))  # 예외 없어야 함
