@@ -33,6 +33,23 @@ class DocRepository(BaseRepository[Doc]):
         )
         return result.scalar_one_or_none()
 
+    async def get_by_alias(self, project_id: uuid.UUID, old_slug: str) -> Doc | None:
+        """4dd399c6 AC3: 구 slug(alias) → canonical doc 해소. live(get_by_slug) 미스 시 fallback."""
+        from app.models.doc import DocSlugAlias
+
+        result = await self.session.execute(
+            select(Doc)
+            .join(DocSlugAlias, DocSlugAlias.doc_id == Doc.id)
+            .where(
+                self._org_filter(),
+                DocSlugAlias.project_id == project_id,
+                DocSlugAlias.old_slug == old_slug,
+                Doc.deleted_at.is_(None),
+            )
+            .limit(1)
+        )
+        return result.scalar_one_or_none()
+
     async def list_tree(self, project_id: uuid.UUID, parent_id: uuid.UUID | None = None, limit: int = 500) -> list[Doc]:
         """project 내 특정 parent 하위 docs 조회 (트리 1레벨)."""
         q = select(Doc).where(

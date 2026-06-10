@@ -45,6 +45,9 @@ async def list_docs(
 
     if slug and project_id:
         doc = await repo.get_by_slug(project_id, slug)
+        if doc is None:
+            # 4dd399c6 AC3: live 미스 → alias fallback. 응답 canonical_slug≠요청 slug면 FE가 router.replace.
+            doc = await repo.get_by_alias(project_id, slug)
         return [DocSummaryResponse.model_validate(doc)] if doc else []
 
     if tags and project_id:
@@ -224,9 +227,74 @@ async def update_doc(
     session: AsyncSession = Depends(get_db),
 ) -> DocResponse:
     data = body.model_dump(exclude_unset=True)
-    doc = await repo.update(id, **data)
+    # 4dd399c6: slug/slug_locked 는 유일성·alias 처리가 필요해 일반 필드와 분리.
+    slug_in = data.pop("slug", None)
+    slug_locked_in = data.pop("slug_locked", None)
+
+    doc = await repo.get(id)
     if doc is None:
         raise HTTPException(status_code=404, detail="Doc not found")
+
+    # 일반 필드 적용 (slug 제외)
+    for attr, val in data.items():
+        setattr(doc, attr, val)
+
+    # slug 변경 처리 (4dd399c6)
+    if slug_in is not None:
+        from app.services.doc_slug import resolve_unique_slug, slugify, is_slug_taken
+        from app.models.doc import DocSlugAlias
+        from sqlalchemy import delete as sa_delete
+
+        explicit = slug_locked_in is True  # discriminator: 명시 편집 vs 자동파생
+        new_slug = slugify(slug_in)
+        if not new_slug:
+            # 정규화 후 빈값: 명시 편집은 422, 자동파생은 기존 slug 유지(타이핑 보호)
+            if explicit:
+                raise HTTPException(status_code=422, detail={"code": "SLUG_INVALID"})
+        elif new_slug != doc.slug:
+            if await is_slug_taken(session, repo.org_id, doc.project_id, new_slug, exclude_doc_id=doc.id):
+                if explicit:
+                    suggestion = await resolve_unique_slug(
+                        session, repo.org_id, doc.project_id, new_slug, exclude_doc_id=doc.id
+                    )
+                    raise HTTPException(
+                        status_code=409,
+                        detail={"error": {"code": "SLUG_TAKEN", "suggestion": suggestion}},
+                    )
+                # 자동파생 충돌 → 무음 -N suffix
+                new_slug = await resolve_unique_slug(
+                    session, repo.org_id, doc.project_id, new_slug, exclude_doc_id=doc.id
+                )
+            old_slug = doc.slug
+            doc.slug = new_slug
+            # AC3: 구 slug → alias 보존 (이미 있으면 skip). 신 slug 가 과거 alias였다면 정리(live 우선).
+            await session.execute(
+                sa_delete(DocSlugAlias).where(
+                    DocSlugAlias.project_id == doc.project_id,
+                    DocSlugAlias.old_slug == new_slug,
+                )
+            )
+            existing_alias = (await session.execute(
+                select(DocSlugAlias).where(
+                    DocSlugAlias.project_id == doc.project_id,
+                    DocSlugAlias.old_slug == old_slug,
+                ).limit(1)
+            )).scalar_one_or_none()
+            if existing_alias is None:
+                session.add(DocSlugAlias(
+                    org_id=repo.org_id,
+                    project_id=doc.project_id,
+                    old_slug=old_slug,
+                    doc_id=doc.id,
+                ))
+            else:
+                existing_alias.doc_id = doc.id
+
+    if slug_locked_in is not None:
+        doc.slug_locked = slug_locked_in
+
+    await session.flush()
+    await session.refresh(doc)
 
     if "content" in data:
         cutoff_sq = (

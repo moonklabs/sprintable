@@ -22,6 +22,8 @@ class DocCreate(BaseModel):
 class DocUpdate(BaseModel):
     title: str | None = None
     slug: str | None = None
+    # 4dd399c6: True=사용자 명시 고정(URL 다이얼로그). 명시 충돌→409, 자동파생(false/미설정)→무음 -N suffix.
+    slug_locked: bool | None = None
     content: str | None = None
     parent_id: uuid.UUID | None = None
     icon: str | None = None
@@ -41,6 +43,8 @@ class DocSummaryResponse(BaseModel):
     parent_id: uuid.UUID | None = None
     title: str
     slug: str
+    canonical_slug: str
+    slug_locked: bool = False
     icon: str | None = None
     sort_order: int
     doc_type: str
@@ -61,6 +65,8 @@ class DocResponse(BaseModel):
     assignee_id: uuid.UUID | None = None
     title: str
     slug: str
+    canonical_slug: str
+    slug_locked: bool = False
     content: str
     icon: str | None = None
     sort_order: int
