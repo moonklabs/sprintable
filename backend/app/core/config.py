@@ -36,10 +36,6 @@ class Settings(BaseSettings):
     # JWT
     jwt_secret: str = ""
 
-    # Supabase (Phase C 과도기 — DB 쿼리 라우트 125개 전환 완료 전까지 유지)
-    supabase_jwt_secret: str = ""
-    supabase_url: str = ""
-
     # CORS (쉼표 구분 origins, Cloud Run 환경변수 CORS_ORIGINS로 주입)
     cors_origins: str = "http://localhost:3000,http://localhost:3108,https://app.sprintable.ai"
 
@@ -86,10 +82,6 @@ class Settings(BaseSettings):
     @property
     def is_ee_enabled(self) -> bool:
         return self.license_consent.lower() == "agreed"
-
-    @property
-    def effective_jwt_secret(self) -> str:
-        return self.jwt_secret or self.supabase_jwt_secret
 
 
 settings = Settings()

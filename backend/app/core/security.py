@@ -42,7 +42,9 @@ def verify_password(plain: str, hashed: str) -> bool:
 # ─── JWT ──────────────────────────────────────────────────────────────────────
 
 def _get_secret() -> str:
-    secret = getattr(settings, "jwt_secret", None) or settings.supabase_jwt_secret or os.environ.get("JWT_SECRET", "")
+    # fc7bce47: Supabase 잔재 제거 — supabase_jwt_secret 폴백 삭제(jwt_secret 단일).
+    # dev/prod 둘 다 JWT_SECRET 세팅 확인됨(PO gcloud 실측) → 기존 토큰 동일 secret 검증·로그아웃 0.
+    secret = getattr(settings, "jwt_secret", None) or os.environ.get("JWT_SECRET", "")
     if not secret:
         raise JWTError("JWT_SECRET not configured")
     return secret
