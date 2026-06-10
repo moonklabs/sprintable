@@ -89,3 +89,35 @@ def test_clear_emit_hook_wired_in_send_message():
     from app.routers.conversations import send_message
     src = inspect.getsource(send_message)
     assert "chat_presence.clear_working" in src
+
+
+# ── eb1a8f95: 전 conversation 횡단 working 집계 ────────────────────────────────
+
+def test_working_member_ids_aggregates_across_conversations():
+    c1, c2 = str(uuid.uuid4()), str(uuid.uuid4())
+    a, b, c = str(uuid.uuid4()), str(uuid.uuid4()), str(uuid.uuid4())
+    chat_presence.set_working(c1, a)
+    chat_presence.set_working(c1, b)
+    chat_presence.set_working(c2, c)
+    ids = chat_presence.working_member_ids()
+    assert ids == {a, b, c}
+
+
+def test_working_member_ids_same_member_multiple_convs_once():
+    c1, c2 = str(uuid.uuid4()), str(uuid.uuid4())
+    a = str(uuid.uuid4())
+    chat_presence.set_working(c1, a)
+    chat_presence.set_working(c2, a)  # 같은 멤버 두 conversation에서 working
+    assert chat_presence.working_member_ids() == {a}
+
+
+def test_working_member_ids_excludes_expired():
+    c1 = str(uuid.uuid4())
+    a = str(uuid.uuid4())
+    chat_presence.set_working(c1, a)
+    chat_presence._working_store[c1][a].updated_at = time.time() - chat_presence._TTL_SEC - 1
+    assert chat_presence.working_member_ids() == set()
+
+
+def test_working_member_ids_empty():
+    assert chat_presence.working_member_ids() == set()
