@@ -35,6 +35,13 @@ const nextConfig: NextConfig = {
   // Set NEXT_DEV_ALLOWED_ORIGINS=host1,host2 in .env.local to enable
   allowedDevOrigins: process.env['NEXT_DEV_ALLOWED_ORIGINS']?.split(',').map((s) => s.trim()).filter(Boolean) ?? [],
   output: 'standalone',
+  // Bundle workspace packages from source (resolved via tsconfig paths) rather than
+  // externalizing their built dist. The Cloud Build context uploads the host's
+  // packages/*/dist (no .gcloudignore) and `next build --webpack` never rebuilds it,
+  // so without this the server bundle consumed a STALE dist — e.g. an old
+  // updateDocSchema that silently stripped slug/slug_locked (broke #4dd399c6 live).
+  // Forcing src-transpile makes src the single source of truth for every consumer.
+  transpilePackages: ['@sprintable/shared', '@sprintable/core-storage', '@sprintable/storage-api'],
   outputFileTracingRoot: path.resolve(__dirname, '../..'),
   outputFileTracingIncludes: {
     '/docs/design-tokens': ['./src/app/globals.css'],
