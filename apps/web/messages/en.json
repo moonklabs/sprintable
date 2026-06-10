@@ -2308,6 +2308,15 @@
     "teamSizeLabel": "Team Size",
     "hypothesisSection": "Outcome Hypothesis"
   },
+  "presence": {
+    "panelTitle": "Team presence",
+    "groupWorking": "Working",
+    "groupOnline": "Online",
+    "groupOffline": "Offline",
+    "working": "Generating reply",
+    "assignedStory": "On \"{title}\"",
+    "empty": "No agents to show"
+  },
   "chats": {
     "isTyping": "{name} is typing",
     "othersTyping": "{name} and {count} others are typing",

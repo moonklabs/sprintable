@@ -29,12 +29,17 @@ const STATUS_LABEL_KEY: Record<PresenceStatus, string> = {
  */
 export const WORKING_RING_CLASS = 'ring-2 ring-brand ring-offset-1 ring-offset-card motion-safe:animate-pulse';
 
-/** 연결 축 dot(avatar 우하단). status null/undefined(휴먼·미상)면 미표시. */
+// 2505d27d: 패널은 큰 영역이라 prominent하게(size-3·12px) — 채팅 dot(size-2.5·10px)보다 가시성↑(모바일 교훈).
+const SIZE_CLASS = { sm: 'size-2.5', md: 'size-3' } as const;
+
+/** 연결 축 dot(avatar 우하단). status null/undefined(휴먼·미상)면 미표시. size: sm(채팅)·md(패널). */
 export function PresenceDot({
   status,
+  size = 'sm',
   className = '',
 }: {
   status: PresenceStatus | null | undefined;
+  size?: 'sm' | 'md';
   className?: string;
 }) {
   const t = useTranslations('chats');
@@ -43,7 +48,7 @@ export function PresenceDot({
     <span
       role="img"
       aria-label={t(STATUS_LABEL_KEY[status])}
-      className={`inline-block size-2.5 rounded-full border-2 border-card ${DOT_CLASS[status]} ${className}`}
+      className={`inline-block ${SIZE_CLASS[size]} rounded-full border-2 border-card ${DOT_CLASS[status]} ${className}`}
     />
   );
 }
