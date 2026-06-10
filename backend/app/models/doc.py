@@ -68,10 +68,9 @@ class DocSlugAlias(Base, OrgScopedMixin):
         UniqueConstraint("project_id", "old_slug", name="uq_doc_slug_alias_project_old"),
     )
 
+    # doc_id FK → docs.id (0107 step0 가 docs PK 드리프트를 교정해 성립). project_id 는 plain UUID.
     id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
-    project_id: Mapped[uuid.UUID] = mapped_column(
-        UUID(as_uuid=True), ForeignKey("projects.id", ondelete="CASCADE"), nullable=False, index=True
-    )
+    project_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), nullable=False, index=True)
     old_slug: Mapped[str] = mapped_column(Text, nullable=False)
     doc_id: Mapped[uuid.UUID] = mapped_column(
         UUID(as_uuid=True), ForeignKey("docs.id", ondelete="CASCADE"), nullable=False, index=True

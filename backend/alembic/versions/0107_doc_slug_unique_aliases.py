@@ -1,11 +1,14 @@
-"""docs slug 유일성 + slug_locked + doc_slug_aliases (Part A 4dd399c6).
+"""docs PK 드리프트 교정 + slug_locked + doc_slug_aliases (Part A 4dd399c6).
 
-- docs.slug_locked: 자동/수동 파생 구분 컬럼. 기존 non-`untitled-%` slug → locked=true 백필
-  (의미있는 주소가 제목 재저장 시 자동교정되지 않게).
-- (project_id, slug) 비삭제 **중복 dedupe-first**(가장 오래된 1건 유지·나머지 suffix) 후
-  partial unique index — 기존 데이터에 중복이 있으면 인덱스 생성이 실패하므로 선행 필수
-  (standup_entries 스키마 갭 전례). soft-deleted 는 충돌 허용(partial WHERE deleted_at IS NULL).
+- step0: **docs.id PRIMARY KEY 부재 교정**(baseline/실 DB 스냅샷에 docs_pkey 가 소실 — 다른 43개
+  테이블엔 PK 있는데 docs 만 부재. ORM 은 PK 가정하고 동작해 온 실 스키마 드리프트). PK 부재 시만
+  추가(idempotent — OSS create_all 모델 경로엔 이미 PK 존재). 이게 있어야 alias FK 가 성립.
+- docs.slug_locked: 자동/수동 파생 구분 컬럼. 기존 non-`untitled-%` slug → locked=true 백필.
 - doc_slug_aliases: 재슬러그 시 구 slug→doc_id 보존(외부 북마크/Recents/본문 내부링크 유지).
+
+⚠️ (project_id, slug) 유일성은 baseline 의 `docs_project_slug_active`
+   (UNIQUE (project_id, slug) WHERE deleted_at IS NULL) 가 **이미 enforce** → 별도 인덱스/
+   dedupe 불요. app 레벨(is_slug_taken/resolve_unique_slug)이 409/suffix 로 사전 회피.
 
 Revision ID: 0107
 Revises: 0106
@@ -22,54 +25,31 @@ depends_on = None
 
 
 def upgrade() -> None:
-    # 1) slug_locked 컬럼 (server_default false 로 기존 행 채운 뒤 default 제거 → 앱 레벨 default 유지)
+    # step0: docs.id PK 드리프트 교정 — PK 가 없을 때만 추가(idempotent). id 는 NOT NULL +
+    # gen_random_uuid default 라 유일성 보장 → PK 추가 안전. alias FK 의 전제.
+    op.execute(
+        """
+        DO $$
+        BEGIN
+            IF NOT EXISTS (
+                SELECT 1 FROM pg_constraint
+                WHERE conrelid = 'public.docs'::regclass AND contype = 'p'
+            ) THEN
+                ALTER TABLE public.docs ADD CONSTRAINT docs_pkey PRIMARY KEY (id);
+            END IF;
+        END$$;
+        """
+    )
+
+    # slug_locked (server_default 로 기존 행 채운 뒤 default 제거 → 앱 레벨 default=False)
     op.add_column(
         "docs",
         sa.Column("slug_locked", sa.Boolean(), nullable=False, server_default=sa.false()),
     )
     op.execute("UPDATE docs SET slug_locked = true WHERE slug NOT LIKE 'untitled-%'")
+    op.alter_column("docs", "slug_locked", server_default=None)
 
-    # 2) dedupe-first: 같은 (project_id, slug) 비삭제 중복 → 오래된 1건 유지, 나머지 `-N` suffix
-    op.execute(
-        """
-        WITH dups AS (
-            SELECT id,
-                   row_number() OVER (PARTITION BY project_id, slug ORDER BY created_at, id) AS rn
-            FROM docs
-            WHERE deleted_at IS NULL
-        )
-        UPDATE docs d
-        SET slug = left(d.slug, 190) || '-' || dups.rn::text
-        FROM dups
-        WHERE d.id = dups.id AND dups.rn > 1
-        """
-    )
-    # 2b) suffix 후 잔여 충돌(예: 기존에 base-2 가 실재) → id 단편으로 유일 보장(드묾)
-    op.execute(
-        """
-        WITH dups AS (
-            SELECT id,
-                   row_number() OVER (PARTITION BY project_id, slug ORDER BY created_at, id) AS rn
-            FROM docs
-            WHERE deleted_at IS NULL
-        )
-        UPDATE docs d
-        SET slug = left(d.slug, 180) || '-' || substr(replace(d.id::text, '-', ''), 1, 8)
-        FROM dups
-        WHERE d.id = dups.id AND dups.rn > 1
-        """
-    )
-
-    # 3) partial unique index (비삭제 행만 — soft-deleted 중복 허용)
-    op.create_index(
-        "uq_docs_project_slug",
-        "docs",
-        ["project_id", "slug"],
-        unique=True,
-        postgresql_where=sa.text("deleted_at IS NULL"),
-    )
-
-    # 4) doc_slug_aliases
+    # doc_slug_aliases — doc_id FK 는 step0 PK 가 성립시킨다. project_id 는 plain UUID.
     op.create_table(
         "doc_slug_aliases",
         sa.Column("id", postgresql.UUID(as_uuid=True), primary_key=True),
@@ -88,11 +68,8 @@ def upgrade() -> None:
     op.create_index("ix_doc_slug_aliases_doc_id", "doc_slug_aliases", ["doc_id"])
     op.create_index("ix_doc_slug_aliases_project_id", "doc_slug_aliases", ["project_id"])
 
-    # server_default 제거 — 이후 INSERT 는 앱(default=False)이 책임
-    op.alter_column("docs", "slug_locked", server_default=None)
-
 
 def downgrade() -> None:
     op.drop_table("doc_slug_aliases")
-    op.drop_index("uq_docs_project_slug", table_name="docs")
     op.drop_column("docs", "slug_locked")
+    # step0 PK 는 드리프트 교정이므로 downgrade 에서 되돌리지 않음(되돌리면 결함 재현).
