@@ -367,19 +367,19 @@ export default function StandupPage() {
         title={<h1 className="text-sm font-medium">{t('title')}</h1>}
         actions={
           <div className="flex flex-wrap items-center gap-1.5">
-            <Button variant="ghost" size="icon" onClick={() => setDate((d) => shiftDate(d, -1))} title={t('previousDay')}>
+            <Button variant="ghost" size="icon" className="shrink-0" onClick={() => setDate((d) => shiftDate(d, -1))} title={t('previousDay')}>
               ←
             </Button>
             <OperatorInput
               type="date"
               value={date}
               onChange={(event) => setDate(event.target.value)}
-              className="w-auto"
+              className="w-auto shrink-0"
             />
-            <Button variant="ghost" size="icon" onClick={() => setDate((d) => shiftDate(d, 1))} title={t('nextDay')}>
+            <Button variant="ghost" size="icon" className="shrink-0" onClick={() => setDate((d) => shiftDate(d, 1))} title={t('nextDay')}>
               →
             </Button>
-            <Button variant="ghost" size="sm" onClick={() => setDate(formatSeoulDate())}>
+            <Button variant="ghost" size="sm" className="shrink-0" onClick={() => setDate(formatSeoulDate())}>
               {t('today')}
             </Button>
           </div>
