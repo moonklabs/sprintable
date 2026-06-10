@@ -206,6 +206,44 @@ async def get_story(
     return StoryResponse.model_validate(story)
 
 
+class BulkUpdateItem(BaseModel):
+    id: uuid.UUID
+    status: str | None = None
+    sprint_id: uuid.UUID | None = None
+    assignee_id: uuid.UUID | None = None
+    priority: str | None = None
+    position: int | None = None
+
+
+# ⚠️ /bulk 은 /{id} 보다 **먼저** 선언해야 한다(FastAPI 라우트 매칭=선언 순서·specific-before-
+# parameterized). 아니면 PATCH /api/v2/stories/bulk 가 /{id} 에 매칭돼 id="bulk" UUID 파싱
+# 422 → /bulk 핸들러 영영 shadow(dnd 보드 상태저장이 처음부터 깨져있던 근본). 선생님 dnd 실테스트 적출.
+@router.patch("/bulk", response_model=list[StoryResponse])
+async def bulk_update_stories(
+    items: list[BulkUpdateItem],
+    db: AsyncSession = Depends(get_db),
+    repo: StoryRepository = Depends(_get_repo),
+) -> list[StoryResponse]:
+    updated: list[Story] = []
+    for item in items:
+        q = await db.execute(select(Story).where(Story.id == item.id))
+        story = q.scalar_one_or_none()
+        if not story:
+            continue
+        update_data = item.model_dump(exclude={"id"}, exclude_none=True)
+        for k, v in update_data.items():
+            setattr(story, k, v)
+        # E-BOARD S5: 단일 assignee_id 변경 시 join 미러(단일↔복수 공존 정합)
+        if "assignee_id" in update_data:
+            single = [story.assignee_id] if story.assignee_id else []
+            await StoryAssigneeRepository(db, repo.org_id).set_for_story(story.id, single)
+        updated.append(story)
+    await _attach_assignee_ids(db, repo.org_id, updated)
+    results = [StoryResponse.model_validate(s) for s in updated]
+    await db.commit()
+    return results
+
+
 @router.patch("/{id}", response_model=StoryResponse)
 async def update_story(
     id: uuid.UUID,
@@ -589,15 +627,6 @@ class ActivityResponse(BaseModel):
     model_config = {"from_attributes": True}
 
 
-class BulkUpdateItem(BaseModel):
-    id: uuid.UUID
-    status: str | None = None
-    sprint_id: uuid.UUID | None = None
-    assignee_id: uuid.UUID | None = None
-    priority: str | None = None
-    position: int | None = None
-
-
 # ─── Comments ─────────────────────────────────────────────────────────────────
 
 @router.get("/{id}/comments", response_model=list[CommentResponse])
@@ -676,31 +705,3 @@ async def list_activities(
     ).order_by(StoryActivity.created_at.desc()).limit(limit)
     result = await db.execute(q)
     return [ActivityResponse.model_validate(r) for r in result.scalars()]
-
-
-# ─── Bulk update ──────────────────────────────────────────────────────────────
-
-@router.patch("/bulk", response_model=list[StoryResponse])
-async def bulk_update_stories(
-    items: list[BulkUpdateItem],
-    db: AsyncSession = Depends(get_db),
-    repo: StoryRepository = Depends(_get_repo),
-) -> list[StoryResponse]:
-    updated: list[Story] = []
-    for item in items:
-        q = await db.execute(select(Story).where(Story.id == item.id))
-        story = q.scalar_one_or_none()
-        if not story:
-            continue
-        update_data = item.model_dump(exclude={"id"}, exclude_none=True)
-        for k, v in update_data.items():
-            setattr(story, k, v)
-        # E-BOARD S5: 단일 assignee_id 변경 시 join 미러(단일↔복수 공존 정합)
-        if "assignee_id" in update_data:
-            single = [story.assignee_id] if story.assignee_id else []
-            await StoryAssigneeRepository(db, repo.org_id).set_for_story(story.id, single)
-        updated.append(story)
-    await _attach_assignee_ids(db, repo.org_id, updated)
-    results = [StoryResponse.model_validate(s) for s in updated]
-    await db.commit()
-    return results
