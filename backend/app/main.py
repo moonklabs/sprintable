@@ -62,10 +62,22 @@ _HTTP_CODE_MAP: dict[int, str] = {
 
 @app.exception_handler(HTTPException)
 async def http_exception_handler(request: Request, exc: HTTPException) -> JSONResponse:
-    code = _HTTP_CODE_MAP.get(exc.status_code, f"HTTP_{exc.status_code}")
+    mapped = _HTTP_CODE_MAP.get(exc.status_code, f"HTTP_{exc.status_code}")
+    detail = exc.detail
+    # dict detail 은 구조화 에러 의도(code/message/suggestion·retry_after 등) → error 객체로 패스스루.
+    # 기존 str(detail) 은 dict 를 Python repr 로 직렬화해 FE JSON.parse 불가 + 의도한 code 유실
+    # (SLUG_TAKEN/SLUG_INVALID/USER_NOT_IN_ORG/RATE_LIMITED 4곳 동일 교정). 문자열 detail(대다수)은
+    # 기존 shape 그대로 — 회귀 0.
+    if isinstance(detail, dict):
+        error = {"code": detail.get("code", mapped), "message": detail.get("message", "")}
+        for k, v in detail.items():
+            if k not in ("code", "message"):
+                error[k] = v
+    else:
+        error = {"code": mapped, "message": str(detail)}
     return JSONResponse(
         status_code=exc.status_code,
-        content={"data": None, "error": {"code": code, "message": str(exc.detail)}, "meta": None},
+        content={"data": None, "error": error, "meta": None},
         headers=exc.headers,
     )
 

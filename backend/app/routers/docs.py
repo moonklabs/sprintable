@@ -251,7 +251,10 @@ async def update_doc(
         if not new_slug:
             # 정규화 후 빈값: 명시 편집은 422, 자동파생은 기존 slug 유지(타이핑 보호)
             if explicit:
-                raise HTTPException(status_code=422, detail={"code": "SLUG_INVALID"})
+                raise HTTPException(
+                    status_code=422,
+                    detail={"code": "SLUG_INVALID", "message": "유효하지 않은 슬러그"},
+                )
         elif new_slug != doc.slug:
             if await is_slug_taken(session, repo.org_id, doc.project_id, new_slug, exclude_doc_id=doc.id):
                 if explicit:
@@ -260,7 +263,11 @@ async def update_doc(
                     )
                     raise HTTPException(
                         status_code=409,
-                        detail={"error": {"code": "SLUG_TAKEN", "suggestion": suggestion}},
+                        detail={
+                            "code": "SLUG_TAKEN",
+                            "message": "이미 사용 중인 슬러그",
+                            "suggestion": suggestion,
+                        },
                     )
                 # 자동파생 충돌 → 무음 -N suffix
                 new_slug = await resolve_unique_slug(
