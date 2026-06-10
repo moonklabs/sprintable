@@ -46,6 +46,19 @@ async def has_project_access(
                       AND (CAST(:org_id AS uuid) IS NULL OR om.org_id = :org_id)
                 )
                 OR EXISTS (
+                    -- 18073a52: 에이전트 grant 분기. 에이전트는 org_member/user_id가 없고
+                    -- auth.user_id=members.id 이므로 project_access를 member_id(=에이전트 member id)로
+                    -- 직접 매칭. 단일 에이전트(단일 API key)가 grant로 복수 프로젝트 접근(키 증식 0).
+                    SELECT 1 FROM project_access pa
+                    JOIN members m ON pa.member_id = m.id
+                    WHERE pa.project_id = p.id
+                      AND m.id = :user_id
+                      AND m.type = 'agent'
+                      AND m.deleted_at IS NULL
+                      AND pa.permission = 'granted'
+                      AND (CAST(:org_id AS uuid) IS NULL OR m.org_id = :org_id)
+                )
+                OR EXISTS (
                     SELECT 1 FROM org_members om
                     WHERE om.user_id = :user_id
                       AND om.deleted_at IS NULL
@@ -200,6 +213,17 @@ async def accessible_project_ids_in_org(
                       AND om.deleted_at IS NULL
                       AND pa.permission = 'granted'
                       AND om.org_id = :org_id
+                )
+                OR EXISTS (
+                    -- 18073a52: 에이전트 grant 분기 (has_project_access와 lockstep).
+                    SELECT 1 FROM project_access pa
+                    JOIN members m ON pa.member_id = m.id
+                    WHERE pa.project_id = p.id
+                      AND m.id = :user_id
+                      AND m.type = 'agent'
+                      AND m.deleted_at IS NULL
+                      AND pa.permission = 'granted'
+                      AND m.org_id = :org_id
                 )
                 OR EXISTS (
                     SELECT 1 FROM org_members om
