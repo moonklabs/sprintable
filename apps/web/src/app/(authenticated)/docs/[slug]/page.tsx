@@ -4,6 +4,7 @@ import { useCallback, useEffect, useRef, useState } from 'react';
 import { useParams, useRouter } from 'next/navigation';
 import { useTranslations } from 'next-intl';
 import { DocEditor } from '@/components/docs/doc-editor';
+import { DocUrlChip } from '@/components/docs/doc-url-chip';
 import { useDocSync, type SaveStatus } from '@/components/docs/use-doc-sync';
 import { htmlToMarkdown } from '@/components/docs/lib/content-converter';
 import Link from 'next/link';
@@ -305,6 +306,12 @@ export default function DocSlugPage() {
           onTitleChange={handleTitleChange}
           titlePlaceholder={t('titlePlaceholder')}
           titleAutoFocus={isNew || !title}
+          urlSlot={
+            <DocUrlChip
+              slug={selectedDoc.slug}
+              labels={{ editUrl: t('editUrl'), slugNudge: t('slugNudge') }}
+            />
+          }
           breadcrumb={
             tree.length > 0 && selectedDoc ? (
               <DocBreadcrumb
