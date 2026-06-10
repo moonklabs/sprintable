@@ -215,17 +215,23 @@ class BulkUpdateItem(BaseModel):
     position: int | None = None
 
 
+class BulkUpdateRequest(BaseModel):
+    # FE(kanban-board.tsx)는 `{ items: [...] }` 래퍼로 전송한다. BE 도 동일 계약을 수용해야
+    # "Input should be a valid list" 422 안 난다(맨 배열 아님). /bulk 유일 소비자=FE dnd.
+    items: list[BulkUpdateItem]
+
+
 # ⚠️ /bulk 은 /{id} 보다 **먼저** 선언해야 한다(FastAPI 라우트 매칭=선언 순서·specific-before-
 # parameterized). 아니면 PATCH /api/v2/stories/bulk 가 /{id} 에 매칭돼 id="bulk" UUID 파싱
 # 422 → /bulk 핸들러 영영 shadow(dnd 보드 상태저장이 처음부터 깨져있던 근본). 선생님 dnd 실테스트 적출.
 @router.patch("/bulk", response_model=list[StoryResponse])
 async def bulk_update_stories(
-    items: list[BulkUpdateItem],
+    payload: BulkUpdateRequest,
     db: AsyncSession = Depends(get_db),
     repo: StoryRepository = Depends(_get_repo),
 ) -> list[StoryResponse]:
     updated: list[Story] = []
-    for item in items:
+    for item in payload.items:
         q = await db.execute(select(Story).where(Story.id == item.id))
         story = q.scalar_one_or_none()
         if not story:
