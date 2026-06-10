@@ -1,37 +1,26 @@
-import { parseBody, updateDocSchema } from '@sprintable/shared';
 import { DocsService } from '@/services/docs';
 import { handleApiError } from '@/lib/api-error';
 import { getAuthContext } from '@/lib/auth-helpers';
-import { apiSuccess, apiError, ApiErrors } from '@/lib/api-response';
+import { apiSuccess, ApiErrors } from '@/lib/api-response';
 import { createDocRepository } from '@/lib/storage/factory';
+import { proxyToFastapi } from '@/lib/fastapi-proxy';
 
 type RouteParams = { params: Promise<{ id: string }> };
 
 export async function PATCH(request: Request, { params }: RouteParams) {
-  try {
-    const { id } = await params;
-    const me = await getAuthContext(request);
-    if (!me) return ApiErrors.unauthorized();
-    if (me.rateLimitExceeded) return ApiErrors.tooManyRequests(me.rateLimitRemaining, me.rateLimitResetAt);
-    const dbClient = undefined;
-    const parsed = await parseBody(request, updateDocSchema); if (!parsed.success) return parsed.response; const body = parsed.data;
-    const repo = await createDocRepository();
-    const service = new DocsService(repo, dbClient);
-
-    const doc = await service.updateDoc(id, {
-      ...body,
-      created_by: me.id,
-      expected_updated_at: body.expected_updated_at,
-      force_overwrite: body.force_overwrite,
-    });
-    return apiSuccess(doc);
-  } catch (err: unknown) {
-    const e = err as Error & { code?: string };
-    if (e.code === 'CONFLICT') return apiError('CONFLICT', e.message, 409);
-    if (e.code === 'NOT_FOUND') return apiError('NOT_FOUND', e.message, 404);
-    if (e.code === 'BAD_REQUEST') return apiError('BAD_REQUEST', e.message, 400);
-    return handleApiError(err);
-  }
+  const { id } = await params;
+  const me = await getAuthContext(request);
+  if (!me) return ApiErrors.unauthorized();
+  if (me.rateLimitExceeded) return ApiErrors.tooManyRequests(me.rateLimitRemaining, me.rateLimitResetAt);
+  // Thin proxy to the FastAPI BE, which owns the authoritative slug logic
+  // (slug_locked explicit/auto branching, 409 SLUG_TAKEN + suggestion, alias) — that
+  // logic does NOT live in DocsService. Forwarding the raw body bypasses
+  // parseBody(updateDocSchema): a stale-bundled schema was silently stripping
+  // slug/slug_locked (standalone-tracing build non-determinism), so explicit edits
+  // got the auto path (silent -N, lock never stuck). proxyToFastapi passes the BE
+  // response through verbatim (incl. the 409 error envelope + suggestion) and
+  // forwards auth as sp_at cookie → Bearer.
+  return proxyToFastapi(request, `/api/v2/docs/${id}`);
 }
 
 /** Lightweight timestamp check for remote-change polling */
