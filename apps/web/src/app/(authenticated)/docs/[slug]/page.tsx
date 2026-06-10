@@ -5,6 +5,7 @@ import { useParams, useRouter } from 'next/navigation';
 import { useTranslations } from 'next-intl';
 import { DocEditor } from '@/components/docs/doc-editor';
 import { DocUrlChip } from '@/components/docs/doc-url-chip';
+import { slugifyDocTitle, isUntitledSlug } from '@/components/docs/lib/doc-slug';
 import { useDocSync, type SaveStatus } from '@/components/docs/use-doc-sync';
 import { htmlToMarkdown } from '@/components/docs/lib/content-converter';
 import Link from 'next/link';
@@ -33,6 +34,8 @@ interface DocDetail {
   doc_type?: string;
   org_id?: string;
   assignee_id?: string | null;
+  slug_locked?: boolean;
+  canonical_slug?: string;
 }
 
 function InlineSaveIndicator({
@@ -138,11 +141,17 @@ export default function DocSlugPage() {
   const [contentFormat, setContentFormat] = useState<'markdown' | 'html'>('markdown');
   const [autosave, setAutosave] = useState(true);
   const [mdCopied, setMdCopied] = useState(false);
+  const [slugLocked, setSlugLocked] = useState(false);
 
   const handleDocSaved = useCallback((doc: DocDetail) => {
     setSelectedDoc(doc);
-    setTree((prev) => prev.map((d) => (d.id === doc.id ? { ...d, title: doc.title } : d)));
-  }, [setTree]);
+    setTree((prev) => prev.map((d) => (d.id === doc.id ? { ...d, title: doc.title, slug: doc.slug } : d)));
+    if (typeof doc.slug_locked === 'boolean') setSlugLocked(doc.slug_locked);
+    // Slug auto-derived / canonicalized server-side → move the URL to the canonical slug.
+    if (doc.slug && doc.slug !== slug) {
+      router.replace(`/docs/${doc.slug}`);
+    }
+  }, [setTree, slug, router]);
 
   const handleTitleChange = useCallback((value: string) => {
     setTitle(value);
@@ -150,9 +159,19 @@ export default function DocSlugPage() {
     setTree((prev) => prev.map((d) => (d.id === selectedDoc?.id ? { ...d, title: value } : d)));
   }, [selectedDoc?.id, setTree]);
 
+  // AC1: while a new doc still carries its `untitled-<ts>` slug and the user has not
+  // manually locked it, derive the slug from the title and send it in the same save as
+  // the title. The BE silently de-duplicates with a `-N` suffix (auto path never 422s)
+  // and returns the canonical slug, which handleDocSaved moves the URL to. An empty
+  // derivation (emoji/symbols only) skips the slug entirely so the doc keeps untitled.
+  const shouldAutoDeriveSlug = selectedDoc !== null && !slugLocked && isUntitledSlug(selectedDoc.slug);
+  const derivedSlug = shouldAutoDeriveSlug ? slugifyDocTitle(title) : '';
+
   const { status: saveStatus, isDirty, save } = useDocSync<DocDetail>({
     docId: selectedDoc?.id ?? null,
-    savePayload: { title, content, content_format: contentFormat },
+    savePayload: derivedSlug
+      ? { title, content, content_format: contentFormat, slug: derivedSlug, slug_locked: false }
+      : { title, content, content_format: contentFormat },
     serverUpdatedAt: selectedDoc?.updated_at ?? null,
     editing: selectedDoc !== null,
     autosave,
@@ -178,12 +197,17 @@ export default function DocSlugPage() {
       setTitle(data.title ?? '');
       setContent(data.content ?? '');
       setContentFormat(data.content_format ?? 'markdown');
+      setSlugLocked(data.slug_locked ?? false);
+      // AC3: the request resolved via an old/alias slug → canonicalize the URL so
+      // bookmarks and internal links settle on the live address (BE sends canonical_slug).
+      const canonical = data.canonical_slug ?? data.slug;
+      if (canonical && canonical !== slug) router.replace(`/docs/${canonical}`);
     } catch {
       setSelectedDoc(null);
     } finally {
       setDocLoading(false);
     }
-  }, [projectId, slug]);
+  }, [projectId, slug, router]);
 
   useEffect(() => { void fetchDoc(); }, [fetchDoc]);
 
