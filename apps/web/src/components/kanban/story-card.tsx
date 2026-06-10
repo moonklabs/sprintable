@@ -95,6 +95,11 @@ export function StoryCard({ story, epicName, assignee, assignees, onClick, onEdi
     transform: CSS.Transform.toString(transform),
     transition,
     opacity: isDragging ? 0.5 : 1,
+    // Touch dnd: pan-y keeps vertical column scroll working (a quick swipe scrolls,
+    // aborting the TouchSensor's 250ms delay) while a press-and-hold still starts a drag
+    // (dnd-kit preventDefaults once active). `none` would have killed scroll-on-card;
+    // pan-y is the scroll-preserving fix for the overflow-y-auto columns (S6 root cause).
+    touchAction: 'pan-y' as const,
   };
 
   // Close menu on click outside
