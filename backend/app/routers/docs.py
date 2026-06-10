@@ -231,10 +231,32 @@ async def update_doc(
     # 4dd399c6: slug/slug_locked 는 유일성·alias 처리가 필요해 일반 필드와 분리.
     slug_in = data.pop("slug", None)
     slug_locked_in = data.pop("slug_locked", None)
+    # 151e05f1: 동시성 제어 필드 — Doc 컬럼이 아니므로 분리(setattr 루프서 제외).
+    expected_updated_at = data.pop("expected_updated_at", None)
+    force_overwrite = data.pop("force_overwrite", None)
 
     doc = await repo.get(id)
     if doc is None:
         raise HTTPException(status_code=404, detail="Doc not found")
+
+    # 151e05f1: 낙관적 동시성 — expected_updated_at 제공 & 현재 updated_at 불일치 & not force
+    # → 409 DOC_CONFLICT(동시편집 clobber 방지). mutation 前 검사·미제공=무체크(하위호환).
+    # detail dict → #1372 핸들러 패스스루 → FE 가 error.code/error.current_updated_at 언랩.
+    # ⚠️ **ms 절삭 비교**(PO 콜): FE가 JS Date(ms 정밀도)로 round-trip하면 μs 손실 → μs-exact면
+    # 매 저장 false-409(상시 차단·원본보다 악화 footgun). 양쪽 ms 절삭 후 ==로 FE 직렬화 무관 robust
+    # (동시편집 <1ms 간격은 비현실이라 보호 granularity 손실 무의미·defense in depth).
+    if expected_updated_at is not None and not force_overwrite and doc.updated_at is not None:
+        cur_ms = doc.updated_at.replace(microsecond=(doc.updated_at.microsecond // 1000) * 1000)
+        exp_ms = expected_updated_at.replace(microsecond=(expected_updated_at.microsecond // 1000) * 1000)
+        if cur_ms != exp_ms:
+            raise HTTPException(
+                status_code=409,
+                detail={
+                    "code": "DOC_CONFLICT",
+                    "message": "문서가 다른 곳에서 수정됨 — 최신본을 다시 불러오세요",
+                    "current_updated_at": doc.updated_at.isoformat(),
+                },
+            )
 
     # 일반 필드 적용 (slug 제외)
     for attr, val in data.items():
