@@ -2309,6 +2309,12 @@
     "hypothesisSection": "효과 가설"
   },
   "chats": {
+    "isTyping": "{name} 님이 입력 중",
+    "othersTyping": "{name} 외 {count}명 입력 중",
+    "presenceOnline": "온라인",
+    "presenceIdle": "자리비움",
+    "presenceOffline": "오프라인",
+    "presenceWorking": "작업 중",
     "commandBlockedLead": "{agentName} ({runtime}) 에이전트는 채팅 슬래시 커맨드를 직접 실행하지 않습니다.",
     "runtimeUnsetLabel": "런타임 미설정",
     "commandBlockedAlt": "대신 자연어로 요청해 보세요 — 예: \"{command} 스킬로 …\"",
