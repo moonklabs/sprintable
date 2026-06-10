@@ -156,3 +156,15 @@ def test_share_resp_disabled():
     from app.routers.docs import _share_resp
     resp = _share_resp(None)
     assert resp.enabled is False and resp.token is None
+
+
+def test_doc_share_does_not_write_permission_audit_logs():
+    """회귀 가드: doc_share 는 permission_audit_logs(AuditLog) 에 쓰지 않는다.
+
+    그 테이블 action CHECK(member_added|member_removed|role_changed)가 doc.share.* INSERT 를
+    거부 → commit 롤백 → 토큰 미persist(P0). audit 는 logger.info 트레일. AuditLog import/INSERT
+    가 재유입되면 이 테스트가 실패한다.
+    """
+    import app.services.doc_share as m
+
+    assert not hasattr(m, "AuditLog"), "doc_share 는 AuditLog(permission_audit_logs) 쓰기 금지"

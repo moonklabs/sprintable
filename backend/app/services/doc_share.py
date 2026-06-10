@@ -2,10 +2,15 @@
 
 opaque token(슬러그 무관)·문서당 1 active. enable=발급 / disable=revoke /
 regenerate=구 토큰 즉사+신규. 공개 resolve 는 404(unknown/malformed) / 410(revoked·doc 삭제).
-audit 는 기존 `permission_audit_logs`(AuditLog) 재사용(action=doc.share.*).
+
+⚠️ audit 는 **app 로그**(logger.info)로 남긴다. `permission_audit_logs`(AuditLog)는 action 에
+   CHECK 제약(member_added|member_removed|role_changed 만 허용)이 있어 doc.share.* 를 INSERT 하면
+   commit 시 전체 트랜잭션이 롤백돼 토큰이 persist 되지 않는다(P0 — verify-first 적발). 구조화 DB
+   audit 은 적합 테이블/CHECK 확장으로 후속.
 """
 from __future__ import annotations
 
+import logging
 import secrets
 import uuid
 from datetime import datetime, timezone
@@ -13,8 +18,9 @@ from datetime import datetime, timezone
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.models.audit import AuditLog
 from app.models.doc import Doc, DocShareToken
+
+logger = logging.getLogger(__name__)
 
 _TOKEN_BYTES = 32  # secrets.token_urlsafe(32) → ~43 chars opaque
 
@@ -42,12 +48,13 @@ async def _active_token(db: AsyncSession, org_id: uuid.UUID, doc_id: uuid.UUID) 
     )).scalar_one_or_none()
 
 
-def _audit(db: AsyncSession, org_id: uuid.UUID, actor_id: uuid.UUID, action: str,
+def _audit(org_id: uuid.UUID, actor_id: uuid.UUID, action: str,
            doc_id: uuid.UUID, token_id: uuid.UUID | None = None) -> None:
-    meta: dict = {"doc_id": str(doc_id)}
-    if token_id is not None:
-        meta["token_id"] = str(token_id)
-    db.add(AuditLog(org_id=org_id, actor_id=actor_id, action=action, audit_metadata=meta))
+    """app 로그 audit 트레일(non-fatal·트랜잭션 무관). DB audit 은 후속(적합 테이블 필요)."""
+    logger.info(
+        "%s org=%s actor=%s doc=%s token=%s",
+        action, org_id, actor_id, doc_id, token_id,
+    )
 
 
 async def get_status(db: AsyncSession, org_id: uuid.UUID, doc_id: uuid.UUID) -> DocShareToken | None:
@@ -66,7 +73,7 @@ async def enable(db: AsyncSession, org_id: uuid.UUID, project_id: uuid.UUID,
     )
     db.add(tok)
     await db.flush()
-    _audit(db, org_id, actor_id, "doc.share.enabled", doc_id, tok.id)
+    _audit(org_id, actor_id, "doc.share.enabled", doc_id, tok.id)
     return tok
 
 
@@ -84,7 +91,7 @@ async def regenerate(db: AsyncSession, org_id: uuid.UUID, project_id: uuid.UUID,
     )
     db.add(tok)
     await db.flush()
-    _audit(db, org_id, actor_id, "doc.share.regenerated", doc_id, tok.id)
+    _audit(org_id, actor_id, "doc.share.regenerated", doc_id, tok.id)
     return tok
 
 
@@ -96,7 +103,7 @@ async def revoke(db: AsyncSession, org_id: uuid.UUID, doc_id: uuid.UUID, actor_i
     existing.status = "revoked"
     existing.revoked_at = datetime.now(timezone.utc)
     await db.flush()
-    _audit(db, org_id, actor_id, "doc.share.disabled", doc_id, existing.id)
+    _audit(org_id, actor_id, "doc.share.disabled", doc_id, existing.id)
     return True
 
 
