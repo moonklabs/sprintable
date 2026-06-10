@@ -29,7 +29,7 @@ export function DocUrlChip({ slug, onEdit, onDeriveFromTitle, labels }: DocUrlCh
         onClick={onDeriveFromTitle}
         className="inline-flex items-center gap-1.5 text-xs text-warning transition-colors hover:text-warning/80 focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-warning/40 rounded"
       >
-        <span className="font-mono">/docs/{slug}</span>
+        <span className="max-w-[60vw] truncate font-mono md:max-w-md">/docs/{slug}</span>
         <span className="inline-flex items-center gap-1">
           <AlertTriangle className="size-3" />
           {labels.slugNudge}
@@ -40,7 +40,7 @@ export function DocUrlChip({ slug, onEdit, onDeriveFromTitle, labels }: DocUrlCh
 
   return (
     <div className="group inline-flex items-center gap-1.5 text-xs text-muted-foreground">
-      <span className="font-mono">/docs/{slug}</span>
+      <span className="max-w-[60vw] truncate font-mono md:max-w-md">/docs/{slug}</span>
       {onEdit && (
         <button
           type="button"

@@ -268,6 +268,27 @@ export default function DocSlugPage() {
     }
   }, [selectedDoc, handleDocSaved]);
 
+  // 권고1 (가디언): one-click derive for docs that have a title but still carry a
+  // stale untitled-* slug (created before this feature). Auto-derive (AC1) only
+  // fires on a title edit, so this nudge is the affordance that targets the
+  // "untitled 잔존" report directly. Auto path (slug_locked:false) → BE silently de-dupes.
+  const handleDeriveFromTitle = useCallback(async () => {
+    if (!selectedDoc) return;
+    const derived = slugifyDocTitle(title);
+    if (!derived) return;
+    try {
+      const res = await fetch(`/api/docs/${selectedDoc.id}`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ slug: derived, slug_locked: false }),
+      });
+      if (res.ok) {
+        const { data } = await res.json() as { data: DocDetail };
+        handleDocSaved(data);
+      }
+    } catch { /* derive failed — doc keeps its untitled slug */ }
+  }, [selectedDoc, title, handleDocSaved]);
+
   const handleNavigate = useCallback((targetSlug: string) => {
     router.push(`/docs/${targetSlug}`);
   }, [router]);
@@ -365,6 +386,7 @@ export default function DocSlugPage() {
             <DocUrlChip
               slug={selectedDoc.slug}
               onEdit={selectedDoc.doc_type !== 'sprint_report' ? () => setUrlDialogOpen(true) : undefined}
+              onDeriveFromTitle={selectedDoc.doc_type !== 'sprint_report' && slugifyDocTitle(title) ? handleDeriveFromTitle : undefined}
               labels={{ editUrl: t('editUrl'), slugNudge: t('slugNudge') }}
             />
           }

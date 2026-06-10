@@ -81,6 +81,9 @@ function DocUrlDialogForm({
   const [submitting, setSubmitting] = useState(false);
 
   const showDerive = isUntitledSlug(currentSlug) || value.trim() === '';
+  // Only docs that already have a real (non-untitled) slug can have inbound links
+  // worth preserving — skip the alias note for brand-new docs (nit 3).
+  const hasExistingSlug = !isUntitledSlug(currentSlug);
 
   const handleSubmit = async () => {
     const slug = slugifyDocTitle(value);
@@ -110,6 +113,7 @@ function DocUrlDialogForm({
             onBlur={() => setValue((v) => slugifyDocTitle(v))}
             onKeyDown={(e) => { if (e.key === 'Enter') { e.preventDefault(); void handleSubmit(); } }}
             autoFocus
+            aria-label={labels.editUrl}
             className="font-mono"
           />
         </div>
@@ -137,12 +141,12 @@ function DocUrlDialogForm({
           </p>
         ) : invalid ? (
           <p className="text-xs text-destructive">{labels.slugInvalid}</p>
-        ) : (
+        ) : hasExistingSlug ? (
           <p className="flex items-center gap-1 text-xs text-muted-foreground">
             <Info className="size-3 shrink-0" />
             {labels.aliasNote}
           </p>
-        )}
+        ) : null}
       </div>
 
       <DialogFooter>
