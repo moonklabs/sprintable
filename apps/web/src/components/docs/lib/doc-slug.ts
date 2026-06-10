@@ -11,23 +11,44 @@
 /** Matches the default slug assigned to a freshly-created, still-untitled doc. */
 const UNTITLED_SLUG_RE = /^untitled-\d+$/;
 
+/** Max slug length, in characters — must match the BE rule. */
+export const DOC_SLUG_MAX_LENGTH = 200;
+
 /**
  * Derive a URL-safe slug from a doc title.
- * - lowercase, trim, collapse whitespace to single hyphens
- * - preserve Korean syllables/jamo (ㄱ-힝) and word chars; drop the rest
- * - collapse repeated hyphens and strip leading/trailing hyphens
  *
- * Returns '' when the title has no slug-able characters (caller keeps the
- * existing `untitled-<ts>` slug in that case).
+ * Locked spec (FE/BE parity — confirmed PO/Design 2026-06-10):
+ * - NFC-normalize FIRST — composed vs decomposed 한글 (가 vs ㄱ+ㅏ) are
+ *   distinct code points that both match `\p{L}`; without normalization the
+ *   same title yields different slugs across input sources/FE/BE (parity break),
+ *   produces false-duplicate collisions, and miscounts the length cap.
+ * - preserve any Unicode letter or number: `\p{L} ∪ \p{N}` (keeps 한글/CJK/
+ *   accented Latin, not just ASCII — the team's docs are Korean-dominant, so an
+ *   ASCII-only rule would no-op the feature on the very titles it targets)
+ * - whitespace → single hyphen
+ * - drop everything else, INCLUDING `_` (not a letter/number)
+ * - lowercase (affects Latin only; Korean/CJK have no case)
+ * - collapse repeated hyphens, trim leading/trailing, cap at {@link DOC_SLUG_MAX_LENGTH}
+ *
+ * Returns '' when nothing slug-able remains (emoji/symbols only) — the caller
+ * keeps the existing `untitled-<ts>` slug in that case.
+ *
+ * The BE mirrors this rule (incl. NFC normalization); both sides assert the
+ * shared fixtures in `doc-slug.test.ts` to guard against drift. Note `\p{L}` is
+ * Unicode-category based, NOT `\w` — JS `\w` is ASCII-only and Python `\w`
+ * includes `_`, so both would diverge from this spec.
  */
 export function slugifyDocTitle(title: string): string {
   return title
-    .toLowerCase()
+    .normalize('NFC')
     .trim()
+    .toLowerCase()
     .replace(/\s+/g, '-')
-    .replace(/[^\wㄱ-힝-]/g, '')
+    .replace(/[^\p{L}\p{N}-]/gu, '')
     .replace(/-+/g, '-')
-    .replace(/^-|-$/g, '');
+    .replace(/^-+|-+$/g, '')
+    .slice(0, DOC_SLUG_MAX_LENGTH)
+    .replace(/-+$/g, '');
 }
 
 /** True for the auto-generated `untitled-<timestamp>` placeholder slug. */
