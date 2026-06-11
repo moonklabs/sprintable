@@ -190,8 +190,11 @@ export function ChatBubble({ message, isMine, isGrouped = false, onOpenThread, o
           </div>
         )}
 
-        {/* Bubble + meta */}
-        <div className={`flex max-w-[72%] flex-col gap-0.5 ${isMine ? 'items-end' : 'items-start'}`}>
+        {/* Bubble + meta. min-w-0 breaks the flex min-width:auto trap (d67e5478): without it
+            a long unbreakable code line/URL's min-content overrides max-w-[72%] and overflows
+            the row → page. With it, the column respects max-w and the inner content contains
+            itself — whitespace-pre-wrap code wraps, <pre> scrolls (overflow-x-auto), URLs break. */}
+        <div className={`flex min-w-0 max-w-[72%] flex-col gap-0.5 ${isMine ? 'items-end' : 'items-start'}`}>
           {/* Sender name — hidden when grouped */}
           {!isGrouped && (
             <div className="flex items-center gap-1.5">
