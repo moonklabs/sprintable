@@ -33,8 +33,6 @@ export default defineConfig({
       'apps/web/src/app/api/cron/agent-session-recovery/route.test.ts',
       'apps/web/src/app/api/cron/hitl-timeouts/route.test.ts',
       'apps/web/src/app/api/cron/inbox-outbox/route.test.ts',
-      'apps/web/src/app/api/current-project/route.test.ts',
-      'apps/web/src/app/api/docs/[id]/route.test.ts',
       'apps/web/src/app/api/integrations/mcp/github/callback/route.test.ts',
       'apps/web/src/app/api/projects/[id]/ai-settings/route.test.ts',
       'apps/web/src/app/api/projects/[id]/ai-settings/validate/route.test.ts',

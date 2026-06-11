@@ -1,144 +1,66 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
-const { createDbServerClient, createAdminClient, getAuthContext, parseBody } = vi.hoisted(() => ({
-  createDbServerClient: vi.fn(),
-  createAdminClient: vi.fn(),
-  getAuthContext: vi.fn(),
-  parseBody: vi.fn(),
+// 837a36c4(Group B b10): 혼합 핸들러 — PATCH=proxyToFastapi(verbatim) / GET·DELETE=DocsService 직접.
+const h = vi.hoisted(() => ({
+  getAuthContext: vi.fn(), createDocRepository: vi.fn(), proxyToFastapi: vi.fn(),
+  getDocTimestamp: vi.fn(), deleteDoc: vi.fn(),
 }));
-const updateDoc = vi.fn();
-const getDocTimestamp = vi.fn();
-
-vi.mock('@sprintable/shared', () => ({
-  parseBody,
-  updateDocSchema: {},
-  VALID_STORY_TRANSITIONS: {
-    backlog: ['ready-for-dev'],
-    'ready-for-dev': ['in-progress', 'backlog'],
-    'in-progress': ['in-review', 'ready-for-dev'],
-    'in-review': ['done', 'in-progress'],
-    done: ['in-review'],
-  },
+vi.mock('@/lib/auth-helpers', () => ({ getAuthContext: h.getAuthContext }));
+vi.mock('@/lib/storage/factory', () => ({ createDocRepository: h.createDocRepository }));
+vi.mock('@/lib/fastapi-proxy', () => ({ proxyToFastapi: h.proxyToFastapi }));
+vi.mock('@/services/docs', async (importActual) => ({
+  ...(await importActual<typeof import('@/services/docs')>()),
+  DocsService: class { getDocTimestamp = h.getDocTimestamp; deleteDoc = h.deleteDoc; },
 }));
-vi.mock('@/lib/db/server', () => ({ createDbServerClient }));
-vi.mock('@/lib/db/admin', () => ({ createAdminClient }));
-vi.mock('@/lib/auth-helpers', () => ({ getAuthContext }));
-vi.mock('@/lib/storage/factory', () => ({
-  createDocRepository: vi.fn().mockResolvedValue({
-    getById: vi.fn().mockResolvedValue({ id: 'doc-1', org_id: 'org-1', doc_type: 'page' }),
-    update: vi.fn().mockResolvedValue({ id: 'doc-1', updated_at: '2026-04-09T15:21:00.000Z' }),
-    delete: vi.fn().mockResolvedValue(undefined),
-  }),
-}));
-vi.mock('@/services/docs', () => {
-  class DocsServiceMock {
-    updateDoc = updateDoc;
-    getDocTimestamp = getDocTimestamp;
-  }
 
-  return { DocsService: DocsServiceMock };
-});
+import { GET, PATCH, DELETE } from './route';
 
-import { GET, PATCH } from './route';
+const ID = 'doc-1';
+const ctx = () => ({ params: Promise.resolve({ id: ID }) });
+const agent = () => ({ id: 'a', type: 'agent', rateLimitExceeded: false, rateLimitRemaining: 299, rateLimitResetAt: 0 });
+const okRes = (b: unknown = { ok: 1 }) =>
+  new Response(JSON.stringify(b), { status: 200, headers: { 'content-type': 'application/json' } });
+const req = (m = 'GET') => new Request(`http://localhost/x/${ID}`, { method: m });
 
-const mockAuth = {
-  id: 'team-member-1',
-  org_id: 'org-1',
-  project_id: 'project-1',
-  project_name: 'Test',
-  type: 'human' as const,
-  rateLimitExceeded: false,
-};
-
-describe('/api/docs/[id] route', () => {
+describe('/api/docs/[id] (혼합: proxy + DocsService)', () => {
   beforeEach(() => {
-    vi.clearAllMocks();
-    createDbServerClient.mockResolvedValue({});
-    createAdminClient.mockReturnValue({});
-    getAuthContext.mockResolvedValue(mockAuth);
-    parseBody.mockResolvedValue({
-      success: true,
-      data: {
-        content: 'updated content',
-        content_format: 'markdown',
-        icon: '📘',
-        tags: ['docs', 'mobile'],
-        expected_updated_at: '2026-04-09T15:20:00.000Z',
-        force_overwrite: false,
-      },
-    });
-    updateDoc.mockResolvedValue({
-      id: 'doc-1',
-      content: 'updated content',
-      content_format: 'markdown',
-      updated_at: '2026-04-09T15:21:00.000Z',
-    });
-    getDocTimestamp.mockResolvedValue({ updated_at: '2026-04-09T15:21:00.000Z' });
+    Object.values(h).forEach((m) => m.mockReset());
+    h.getAuthContext.mockResolvedValue(agent());
+    h.createDocRepository.mockResolvedValue({});
   });
 
-  it('passes optimistic concurrency fields through PATCH', async () => {
-    const response = await PATCH(new Request('http://localhost/api/docs/doc-1', {
-      method: 'PATCH',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ content: 'updated content' }),
-    }), {
-      params: Promise.resolve({ id: 'doc-1' }),
-    });
-
-    expect(response.status).toBe(200);
-    expect(updateDoc).toHaveBeenCalledWith('doc-1', {
-      content: 'updated content',
-      content_format: 'markdown',
-      icon: '📘',
-      tags: ['docs', 'mobile'],
-      expected_updated_at: '2026-04-09T15:20:00.000Z',
-      force_overwrite: false,
-      created_by: 'team-member-1',
-    });
+  it('PATCH: 401 when unauthenticated', async () => {
+    h.getAuthContext.mockResolvedValue(null);
+    expect((await PATCH(req('PATCH'), ctx())).status).toBe(401);
+  });
+  it('PATCH: proxies to /api/v2/docs/{id} verbatim (200)', async () => {
+    h.proxyToFastapi.mockResolvedValue(okRes());
+    const res = await PATCH(req('PATCH'), ctx());
+    expect(res.status).toBe(200);
+    expect(h.proxyToFastapi).toHaveBeenCalledWith(expect.anything(), `/api/v2/docs/${ID}`);
+  });
+  it('PATCH: passes through proxy 409 (slug taken) verbatim', async () => {
+    h.proxyToFastapi.mockResolvedValue(new Response('conflict', { status: 409 }));
+    expect((await PATCH(req('PATCH'), ctx())).status).toBe(409);
   });
 
-  it('returns 409 when the docs service raises a conflict', async () => {
-    const error = Object.assign(new Error('Document was modified by another user'), { code: 'CONFLICT' });
-    updateDoc.mockRejectedValue(error);
-
-    const response = await PATCH(new Request('http://localhost/api/docs/doc-1', {
-      method: 'PATCH',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ content: 'updated content' }),
-    }), {
-      params: Promise.resolve({ id: 'doc-1' }),
-    });
-
-    const json = await response.json();
-    expect(response.status).toBe(409);
-    expect(json.error).toEqual({ code: 'CONFLICT', message: 'Document was modified by another user' });
+  it('GET: 401 when unauthenticated', async () => {
+    h.getAuthContext.mockResolvedValue(null);
+    expect((await GET(req(), ctx())).status).toBe(401);
+  });
+  it('GET: returns timestamp via DocsService.getDocTimestamp(id)', async () => {
+    h.getDocTimestamp.mockResolvedValue({ updated_at: '2026-06-11' });
+    const res = await GET(req(), ctx());
+    expect(res.status).toBe(200);
+    expect(h.getDocTimestamp).toHaveBeenCalledWith(ID);
+    expect((await res.json()).data).toMatchObject({ updated_at: '2026-06-11' });
   });
 
-  it('exposes a lightweight timestamp GET for remote-change polling', async () => {
-    const response = await GET(new Request('http://localhost/api/docs/doc-1'), {
-      params: Promise.resolve({ id: 'doc-1' }),
-    });
-
-    const json = await response.json();
-    expect(response.status).toBe(200);
-    expect(getDocTimestamp).toHaveBeenCalledWith('doc-1');
-    expect(json.data).toEqual({ updated_at: '2026-04-09T15:21:00.000Z' });
-  });
-
-  it('returns 401 when not authenticated', async () => {
-    getAuthContext.mockResolvedValue(null);
-    const response = await PATCH(new Request('http://localhost/api/docs/doc-1', {
-      method: 'PATCH',
-      body: JSON.stringify({}),
-    }), { params: Promise.resolve({ id: 'doc-1' }) });
-    expect(response.status).toBe(401);
-  });
-
-  it('returns 429 when rate limit exceeded', async () => {
-    getAuthContext.mockResolvedValue({ ...mockAuth, rateLimitExceeded: true, rateLimitRemaining: 0, rateLimitResetAt: 9999 });
-    const response = await GET(new Request('http://localhost/api/docs/doc-1'), {
-      params: Promise.resolve({ id: 'doc-1' }),
-    });
-    expect(response.status).toBe(429);
+  it('DELETE: deletes via DocsService.deleteDoc(id) → {ok:true}', async () => {
+    h.deleteDoc.mockResolvedValue(undefined);
+    const res = await DELETE(req('DELETE'), ctx());
+    expect(res.status).toBe(200);
+    expect(h.deleteDoc).toHaveBeenCalledWith(ID);
+    expect((await res.json()).data).toMatchObject({ ok: true });
   });
 });
