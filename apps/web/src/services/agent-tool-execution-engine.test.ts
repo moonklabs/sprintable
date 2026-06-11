@@ -486,7 +486,8 @@ describe('AgentToolExecutionEngine', () => {
     const registry = await engine.loadRegistry('project-1', allowlistedToolNames('linear.search_issues'));
     const result = await engine.execute('linear.search_issues', { query: 'S426' }, createContext(), registry);
 
-    expect(resolveProjectMcpVaultTokenMock).toHaveBeenCalledWith({ tag: 'admin' }, 'project-1', 'vault:mcp_connection:linear');
+    // 837a36c4(b19): 구현이 resolveProjectMcpVaultToken(undefined, projectId, ref)로 호출(구 {tag:'admin'} 컨텍스트 폐기).
+    expect(resolveProjectMcpVaultTokenMock).toHaveBeenCalledWith(undefined, 'project-1', 'vault:mcp_connection:linear');
     expect(fetchFn).toHaveBeenCalledWith('https://linear-mcp.example.com/rpc', expect.objectContaining({
       headers: expect.objectContaining({ Authorization: 'Bearer linear-secret' }),
     }));
