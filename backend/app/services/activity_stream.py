@@ -8,14 +8,17 @@ from __future__ import annotations
 
 import hashlib
 import json
+import logging
 import uuid
 
-from sqlalchemy import select, text
+from sqlalchemy import select, text, tuple_
 from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models.activity_event import ActivityEvent
 from app.models.event import Event
+
+logger = logging.getLogger(__name__)
 
 # AC③: 수신자/배달 전용 필드는 fingerprint·dedup 식별에서 제외한다(fan-out은 같은 활동).
 _DELIVERY_ONLY_KEYS = frozenset(
@@ -123,3 +126,67 @@ async def upsert_activity_from_events(db: AsyncSession, event_ids: list[uuid.UUI
         activity_ids.append(result.scalar_one())
 
     return activity_ids
+
+
+async def backfill_activity_events(db: AsyncSession, *, batch_size: int = 1000) -> dict[str, int]:
+    """L1 BE-4: 기존 events를 (created_at ASC, id ASC) cursor scan하며 activity_events로 흡수.
+
+    별도 idempotent job(테이블은 0116 마이그가 생성). delivered event cleanup 전 과거 row를
+    수렴한다. 재실행해도 (org_id, dedup_key) unique + array_agg DISTINCT로 row count·source
+    누적이 안정(AC②). 이미 삭제된 event는 scan에 없으므로 복원하지 않는다(AC③). 배치별로
+    빠른 일괄 upsert를 시도하고, 실패 시에만 event 단위로 격리해 문제 row를 skip·집계한다.
+
+    반환: {events_processed, events_skipped, batches}. 배치별 처리량·upsert·collapse는 로그.
+    """
+    processed = 0
+    skipped = 0
+    batches = 0
+    cursor: tuple | None = None  # (created_at, id)
+
+    while True:
+        query = (
+            select(Event.id, Event.created_at)
+            .order_by(Event.created_at.asc(), Event.id.asc())
+            .limit(batch_size)
+        )
+        if cursor is not None:
+            query = query.where(tuple_(Event.created_at, Event.id) > tuple_(cursor[0], cursor[1]))
+
+        rows = (await db.execute(query)).all()
+        if not rows:
+            break
+
+        batch_ids = [row[0] for row in rows]
+        batch_skipped = 0
+        try:
+            activity_ids = await upsert_activity_from_events(db, batch_ids)
+            await db.commit()
+        except Exception:
+            # 배치 일괄이 실패하면 event 단위 savepoint로 격리 — 문제 row만 skip한다.
+            await db.rollback()
+            activity_ids = []
+            for eid in batch_ids:
+                try:
+                    async with db.begin_nested():
+                        activity_ids.extend(await upsert_activity_from_events(db, [eid]))
+                except Exception:
+                    batch_skipped += 1
+                    logger.warning("backfill skip event=%s", eid, exc_info=True)
+            await db.commit()
+
+        processed += len(batch_ids)
+        skipped += batch_skipped
+        batches += 1
+        cursor = (rows[-1][1], rows[-1][0])
+        logger.info(
+            "backfill batch %d: processed=%d upserts=%d collapsed=%d skipped=%d",
+            batches,
+            len(batch_ids),
+            len(batch_ids) - batch_skipped,
+            len(set(activity_ids)),
+            batch_skipped,
+        )
+
+    result = {"events_processed": processed, "events_skipped": skipped, "batches": batches}
+    logger.info("backfill complete: %s", result)
+    return result
