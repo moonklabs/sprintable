@@ -1,77 +1,39 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
-const { createDbServerClient, getAuthContext, createAdminClient } = vi.hoisted(() => ({
-  createDbServerClient: vi.fn(),
-  getAuthContext: vi.fn(),
-  createAdminClient: vi.fn(),
-}));
+// 837a36c4(Group B b2): proxy 위임 리팩토링 후 stale 테스트 재작성. dynamic [id] → params 동봉,
+// /api/v2/standups/feedback/{id}로 위임(auth 게이트 없음).
+const { proxyToFastapi } = vi.hoisted(() => ({ proxyToFastapi: vi.fn() }));
+vi.mock('@/lib/fastapi-proxy', () => ({ proxyToFastapi }));
 
-vi.mock('@/lib/db/server', () => ({ createDbServerClient }));
-vi.mock('@/lib/db/admin', () => ({ createAdminClient }));
-vi.mock('@/lib/auth-helpers', () => ({ getAuthContext }));
+import { GET, PATCH, DELETE } from './route';
 
-import { GET } from './route';
+const ID = 'entry-123';
+const ctx = () => ({ params: Promise.resolve({ id: ID }) });
+const okRes = (b: unknown = { ok: 1 }) =>
+  new Response(JSON.stringify(b), { status: 200, headers: { 'content-type': 'application/json' } });
+const req = (method = 'GET') => new Request(`http://localhost/api/standup/feedback/${ID}`, { method });
 
-function createFeedbackQueryStub(rows: Record<string, unknown>[]) {
-  const q: Record<string, unknown> = {};
-  const chain = () => q;
-  q.select = vi.fn(chain);
-  q.eq = vi.fn(chain);
-  q.order = vi.fn(chain);
-  q.then = Promise.resolve({ data: rows, error: null }).then.bind(Promise.resolve({ data: rows, error: null }));
-  return q;
-}
+describe('/api/standup/feedback/[id] (proxy 위임)', () => {
+  beforeEach(() => proxyToFastapi.mockReset());
 
-describe('GET /api/standup/feedback/[id]', () => {
-  beforeEach(() => {
-    createDbServerClient.mockReset();
-    getAuthContext.mockReset();
-    createAdminClient.mockReset();
-    getAuthContext.mockResolvedValue({ id: 'member-1', type: 'human', rateLimitExceeded: false, rateLimitRemaining: 299, rateLimitResetAt: 0 });
-  });
+  for (const [name, fn] of [['GET', GET], ['PATCH', PATCH], ['DELETE', DELETE]] as const) {
+    it(`${name}: delegates to /api/v2/standups/feedback/${ID} and wraps`, async () => {
+      proxyToFastapi.mockResolvedValue(okRes());
+      const res = await fn(req(name), ctx());
+      expect(res.status).toBe(200);
+      expect(proxyToFastapi).toHaveBeenCalledWith(expect.anything(), `/api/v2/standups/feedback/${ID}`);
+    });
 
-  it('returns feedback list for a standup entry', async () => {
-    const rows = [
-      { id: 'fb-1', standup_entry_id: 'entry-1', feedback_text: 'LGTM', review_type: 'approve' },
-    ];
-    const db = { from: vi.fn(() => createFeedbackQueryStub(rows)) };
-    createDbServerClient.mockResolvedValue(db);
+    it(`${name}: passes through proxy errors`, async () => {
+      proxyToFastapi.mockResolvedValue(new Response('e', { status: 404 }));
+      expect((await fn(req(name), ctx())).status).toBe(404);
+    });
+  }
 
-    const response = await GET(
-      new Request('http://localhost/api/standup/feedback/entry-1'),
-      { params: Promise.resolve({ id: 'entry-1' }) },
-    );
-
-    expect(response.status).toBe(200);
-    const body = await response.json();
-    expect(body.data).toEqual([expect.objectContaining({ id: 'fb-1', standup_entry_id: 'entry-1' })]);
-  });
-
-  it('returns 401 when not authenticated', async () => {
-    createDbServerClient.mockResolvedValue({});
-    getAuthContext.mockResolvedValue(null);
-
-    const response = await GET(
-      new Request('http://localhost/api/standup/feedback/entry-1'),
-      { params: Promise.resolve({ id: 'entry-1' }) },
-    );
-
-    expect(response.status).toBe(401);
-  });
-
-  it('uses admin client for agent auth', async () => {
-    getAuthContext.mockResolvedValue({ id: 'agent-1', type: 'agent', rateLimitExceeded: false, rateLimitRemaining: 299, rateLimitResetAt: 0 });
-    const rows = [{ id: 'fb-1', standup_entry_id: 'entry-1' }];
-    const adminDb = { from: vi.fn(() => createFeedbackQueryStub(rows)) };
-    createAdminClient.mockReturnValue(adminDb);
-    createDbServerClient.mockResolvedValue({});
-
-    const response = await GET(
-      new Request('http://localhost/api/standup/feedback/entry-1'),
-      { params: Promise.resolve({ id: 'entry-1' }) },
-    );
-
-    expect(response.status).toBe(200);
-    expect(createAdminClient).toHaveBeenCalled();
+  it('GET: 204 → {ok:true}', async () => {
+    proxyToFastapi.mockResolvedValue(new Response(null, { status: 204 }));
+    const res = await GET(req(), ctx());
+    expect(res.status).toBe(200);
+    expect((await res.json()).data).toMatchObject({ ok: true });
   });
 });
