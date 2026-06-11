@@ -30,12 +30,6 @@ export default defineConfig({
       // Group B — api routes + services (backend-of-FE) · owner: 디디 · cleanup story: 837a36c4
       'apps/web/src/app/api/agent-runs/[id]/route.test.ts',
       'apps/web/src/app/api/agent-runs/route.test.ts',
-      'apps/web/src/app/api/analytics/activity/route.test.ts',
-      'apps/web/src/app/api/analytics/epic-progress/route.test.ts',
-      'apps/web/src/app/api/analytics/health/route.test.ts',
-      'apps/web/src/app/api/analytics/overview/route.test.ts',
-      'apps/web/src/app/api/analytics/velocity-history/route.test.ts',
-      'apps/web/src/app/api/analytics/workload/route.test.ts',
       'apps/web/src/app/api/cron/agent-session-recovery/route.test.ts',
       'apps/web/src/app/api/cron/hitl-timeouts/route.test.ts',
       'apps/web/src/app/api/cron/inbox-outbox/route.test.ts',
