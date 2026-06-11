@@ -1,134 +1,67 @@
-import { beforeEach, describe, expect, it, vi } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 
-const {
-  createDbServerClientMock,
-  createAdminClientMock,
-  getMyTeamMemberMock,
-  requireOrgAdminMock,
-  upsertProjectMcpConnectionMock,
-  deleteProjectMcpConnectionMock,
-  transitionDeploymentMock,
-} = vi.hoisted(() => ({
-  createDbServerClientMock: vi.fn(),
-  createAdminClientMock: vi.fn(() => ({ tag: 'admin' })),
-  getMyTeamMemberMock: vi.fn(),
-  requireOrgAdminMock: vi.fn(),
-  upsertProjectMcpConnectionMock: vi.fn(),
-  deleteProjectMcpConnectionMock: vi.fn(),
-  transitionDeploymentMock: vi.fn(),
-}));
+const { proxyToFastapi } = vi.hoisted(() => ({ proxyToFastapi: vi.fn() }));
 
-vi.mock('@/lib/db/server', () => ({
-  createDbServerClient: createDbServerClientMock,
-}));
-
-vi.mock('@/lib/db/admin', () => ({
-  createAdminClient: createAdminClientMock,
-}));
-
-vi.mock('@/lib/auth-helpers', () => ({
-  getMyTeamMember: getMyTeamMemberMock,
-}));
-
-vi.mock('@/lib/admin-check', () => ({
-  requireOrgAdmin: requireOrgAdminMock,
-}));
-
-vi.mock('@/services/project-mcp', () => ({
-  upsertProjectMcpConnection: upsertProjectMcpConnectionMock,
-  deleteProjectMcpConnection: deleteProjectMcpConnectionMock,
-}));
-
-vi.mock('@/services/agent-deployment-lifecycle', () => ({
-  AgentDeploymentLifecycleService: class {
-    transitionDeployment = transitionDeploymentMock;
-  },
-}));
+vi.mock('@/lib/fastapi-proxy', () => ({ proxyToFastapi }));
 
 import { DELETE, PUT } from './route';
 
-function createDbStub() {
-  return {
-    auth: {
-      getUser: vi.fn(async () => ({ data: { user: { id: 'user-1' } } })),
-    },
-    from(table: string) {
-      if (table !== 'agent_deployments') {
-        throw new Error(`Unexpected table: ${table}`);
-      }
-      return {
-        select() { return this; },
-        eq() { return this; },
-        in: async () => ({
-          data: [{ id: 'deployment-1', status: 'ACTIVE' }],
-          error: null,
-        }),
-      };
-    },
-  };
+function fastapiOk(body: unknown, status = 200) {
+  return new Response(JSON.stringify(body), {
+    status,
+    headers: { 'Content-Type': 'application/json' },
+  });
 }
 
-describe('project mcp connection detail route', () => {
-  beforeEach(() => {
-    createDbServerClientMock.mockReset();
-    createAdminClientMock.mockClear();
-    getMyTeamMemberMock.mockReset();
-    requireOrgAdminMock.mockReset();
-    upsertProjectMcpConnectionMock.mockReset();
-    deleteProjectMcpConnectionMock.mockReset();
-    transitionDeploymentMock.mockReset();
+function fastapiErr(status: number, body: unknown = { detail: 'upstream error' }) {
+  return new Response(JSON.stringify(body), {
+    status,
+    headers: { 'Content-Type': 'application/json' },
+  });
+}
 
-    createDbServerClientMock.mockResolvedValue(createDbStub());
-    getMyTeamMemberMock.mockResolvedValue({ id: 'member-1', org_id: 'org-1', project_id: 'project-1' });
-    requireOrgAdminMock.mockResolvedValue(undefined);
+const ctx = () => ({ params: Promise.resolve({ id: 'proj-1', serverKey: 'github' }) });
+
+describe('/api/projects/[id]/mcp-connections/[serverKey]', () => {
+  it('PUT — FastAPI로 위임하고 성공 body를 { data } 봉투로 래핑', async () => {
+    proxyToFastapi.mockResolvedValue(fastapiOk({ server_key: 'github', is_active: true }));
+    const request = new Request('http://test', { method: 'PUT', body: JSON.stringify({ is_active: true }) });
+
+    const resp = await PUT(request, ctx());
+
+    expect(proxyToFastapi).toHaveBeenCalledWith(request, '/api/v2/projects/mcp-connections');
+    expect(resp.status).toBe(200);
+    await expect(resp.json()).resolves.toEqual({
+      data: { server_key: 'github', is_active: true },
+      error: null,
+      meta: null,
+    });
   });
 
-  it('connects a manual MCP credential', async () => {
-    upsertProjectMcpConnectionMock.mockResolvedValue({ serverKey: 'linear', displayName: 'Linear' });
+  it('PUT — !ok 응답은 그대로 pass-through', async () => {
+    proxyToFastapi.mockResolvedValue(fastapiErr(404, { detail: 'not found' }));
 
-    const response = await PUT(new Request('https://sprintable.app/api/projects/project-1/mcp-connections/linear', {
-      method: 'PUT',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ secret: 'lin_api_key', label: 'Moonklabs Linear' }),
-    }), {
-      params: Promise.resolve({ id: 'project-1', serverKey: 'linear' }),
-    });
-    expect(response).toBeDefined();
-    const body = await response!.json();
+    const resp = await PUT(new Request('http://test', { method: 'PUT' }), ctx());
 
-    expect(response!.status).toBe(200);
-    expect(upsertProjectMcpConnectionMock).toHaveBeenCalledWith({ tag: 'admin' }, {
-      orgId: 'org-1',
-      projectId: 'project-1',
-      actorId: 'member-1',
-      serverKey: 'linear',
-      secret: 'lin_api_key',
-      label: 'Moonklabs Linear',
-    });
-    expect(body.data.displayName).toBe('Linear');
+    expect(resp.status).toBe(404);
   });
 
-  it('deletes a connection and suspends live deployments', async () => {
-    const response = await DELETE(new Request('https://sprintable.app/api/projects/project-1/mcp-connections/github', {
-      method: 'DELETE',
-    }), {
-      params: Promise.resolve({ id: 'project-1', serverKey: 'github' }),
-    });
-    expect(response).toBeDefined();
-    const body = await response!.json();
+  it('DELETE — FastAPI로 위임하고 204는 { ok: true }로 변환', async () => {
+    proxyToFastapi.mockResolvedValue(new Response(null, { status: 204 }));
+    const request = new Request('http://test', { method: 'DELETE' });
 
-    expect(response!.status).toBe(200);
-    expect(deleteProjectMcpConnectionMock).toHaveBeenCalledWith({ tag: 'admin' }, {
-      projectId: 'project-1',
-      serverKey: 'github',
-    });
-    expect(transitionDeploymentMock).toHaveBeenCalledWith({
-      orgId: 'org-1',
-      projectId: 'project-1',
-      actorId: 'member-1',
-      deploymentId: 'deployment-1',
-      status: 'SUSPENDED',
-    });
-    expect(body.data.suspended_deployments).toBe(1);
+    const resp = await DELETE(request, ctx());
+
+    expect(proxyToFastapi).toHaveBeenCalledWith(request, '/api/v2/projects/mcp-connections');
+    expect(resp.status).toBe(200);
+    await expect(resp.json()).resolves.toMatchObject({ data: { ok: true } });
+  });
+
+  it('DELETE — !ok 응답은 그대로 pass-through', async () => {
+    proxyToFastapi.mockResolvedValue(fastapiErr(403, { detail: 'forbidden' }));
+
+    const resp = await DELETE(new Request('http://test', { method: 'DELETE' }), ctx());
+
+    expect(resp.status).toBe(403);
   });
 });
