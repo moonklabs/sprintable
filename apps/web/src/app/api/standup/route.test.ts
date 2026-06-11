@@ -1,163 +1,53 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
-const { createDbServerClient, getAuthContext, createAdminClient } = vi.hoisted(() => ({
-  createDbServerClient: vi.fn(),
+// 837a36c4(Group B b2): proxy 위임 리팩토링 후 stale 테스트 재작성 — auth → proxyToFastapi → 래핑.
+const { getAuthContext, proxyToFastapi } = vi.hoisted(() => ({
   getAuthContext: vi.fn(),
-  createAdminClient: vi.fn(),
+  proxyToFastapi: vi.fn(),
 }));
-
-vi.mock('@/lib/db/server', () => ({ createDbServerClient }));
-vi.mock('@/lib/db/admin', () => ({ createAdminClient }));
 vi.mock('@/lib/auth-helpers', () => ({ getAuthContext }));
+vi.mock('@/lib/fastapi-proxy', () => ({ proxyToFastapi }));
 
-import { GET, POST } from './route';
+import { GET, POST, PUT } from './route';
 
-function makeStandupEntry(overrides: Record<string, unknown> = {}) {
-  return { id: 'entry-1', project_id: 'project-alpha', author_id: 'member-1', date: '2026-04-15', done: 'done', plan: 'plan', blockers: null, ...overrides };
-}
+const PATH = '/api/v2/standups';
+const agent = () => ({ id: 'a', type: 'agent', rateLimitExceeded: false, rateLimitRemaining: 299, rateLimitResetAt: 0 });
+const okRes = (b: unknown = { ok: 1 }) =>
+  new Response(JSON.stringify(b), { status: 200, headers: { 'content-type': 'application/json' } });
+const req = (method = 'GET') => new Request('http://localhost/api/standup?project_id=p', { method });
 
-function createQueryStub(rows: Record<string, unknown>[]) {
-  const q: Record<string, unknown> = {};
-  const chain = () => q;
-  q.select = vi.fn(chain);
-  q.eq = vi.fn(chain);
-  q.order = vi.fn(chain);
-  q.upsert = vi.fn(chain);
-  q.insert = vi.fn(chain);
-  q.single = vi.fn(() => Promise.resolve({ data: rows[0] ?? null, error: rows[0] ? null : { code: 'PGRST116', message: 'not found' } }));
-  q.then = Promise.resolve({ data: rows, error: null }).then.bind(Promise.resolve({ data: rows, error: null }));
-  return q;
-}
-
-describe('GET /api/standup', () => {
+describe('/api/standup (proxy 위임)', () => {
   beforeEach(() => {
-    createDbServerClient.mockReset();
     getAuthContext.mockReset();
-    createAdminClient.mockReset();
-    getAuthContext.mockResolvedValue({ id: 'member-1', type: 'human', rateLimitExceeded: false, rateLimitRemaining: 299, rateLimitResetAt: 0 });
+    proxyToFastapi.mockReset();
+    getAuthContext.mockResolvedValue(agent());
   });
 
-  it('returns entries list when no member_id provided', async () => {
-    const entries = [makeStandupEntry()];
-    const db = { from: vi.fn(() => createQueryStub(entries)) };
-    createDbServerClient.mockResolvedValue(db);
+  for (const [name, fn] of [['GET', GET], ['POST', POST], ['PUT', PUT]] as const) {
+    it(`${name}: 401 when unauthenticated`, async () => {
+      getAuthContext.mockResolvedValue(null);
+      expect((await fn(req(name))).status).toBe(401);
+      expect(proxyToFastapi).not.toHaveBeenCalled();
+    });
 
-    const response = await GET(new Request('http://localhost/api/standup?project_id=project-alpha&date=2026-04-15'));
+    it(`${name}: delegates to ${PATH} and wraps success`, async () => {
+      proxyToFastapi.mockResolvedValue(okRes());
+      const res = await fn(req(name));
+      expect(res.status).toBe(200);
+      expect(proxyToFastapi).toHaveBeenCalledWith(expect.anything(), PATH);
+      expect((await res.json()).data).toMatchObject({ ok: 1 });
+    });
 
-    expect(response.status).toBe(200);
-    const body = await response.json();
-    expect(body.data).toEqual(expect.arrayContaining([expect.objectContaining({ id: 'entry-1' })]));
-  });
+    it(`${name}: passes through proxy errors`, async () => {
+      proxyToFastapi.mockResolvedValue(new Response('e', { status: 500 }));
+      expect((await fn(req(name))).status).toBe(500);
+    });
+  }
 
-  it('returns single entry when member_id provided', async () => {
-    const entry = makeStandupEntry();
-    const db = { from: vi.fn(() => createQueryStub([entry])) };
-    createDbServerClient.mockResolvedValue(db);
-
-    const response = await GET(new Request('http://localhost/api/standup?project_id=project-alpha&member_id=member-1&date=2026-04-15'));
-
-    expect(response.status).toBe(200);
-    const body = await response.json();
-    expect(body.data).toMatchObject({ id: 'entry-1', author_id: 'member-1' });
-  });
-
-  it('returns 400 when project_id or date missing', async () => {
-    const db = {};
-    createDbServerClient.mockResolvedValue(db);
-
-    const response = await GET(new Request('http://localhost/api/standup?project_id=project-alpha'));
-
-    expect(response.status).toBe(400);
-  });
-
-  it('returns 401 when not authenticated', async () => {
-    const db = {};
-    createDbServerClient.mockResolvedValue(db);
-    getAuthContext.mockResolvedValue(null);
-
-    const response = await GET(new Request('http://localhost/api/standup?project_id=p&date=2026-04-15'));
-
-    expect(response.status).toBe(401);
-  });
-
-  it('uses admin client for agent auth', async () => {
-    getAuthContext.mockResolvedValue({ id: 'agent-1', type: 'agent', rateLimitExceeded: false, rateLimitRemaining: 299, rateLimitResetAt: 0 });
-    const entries = [makeStandupEntry()];
-    const adminQuery = createQueryStub(entries);
-    const adminDb = { from: vi.fn(() => adminQuery) };
-    createAdminClient.mockReturnValue(adminDb);
-    createDbServerClient.mockResolvedValue({});
-
-    const response = await GET(new Request('http://localhost/api/standup?project_id=project-alpha&date=2026-04-15'));
-
-    expect(response.status).toBe(200);
-    expect(createAdminClient).toHaveBeenCalled();
-  });
-});
-
-describe('POST /api/standup', () => {
-  beforeEach(() => {
-    createDbServerClient.mockReset();
-    getAuthContext.mockReset();
-    createAdminClient.mockReset();
-    getAuthContext.mockResolvedValue({ id: 'member-1', type: 'human', rateLimitExceeded: false, rateLimitRemaining: 299, rateLimitResetAt: 0 });
-  });
-
-  it('saves standup entry for human user', async () => {
-    const memberData = { project_id: 'project-alpha', org_id: 'org-1' };
-    const entryData = makeStandupEntry();
-    const db = {
-      from: vi.fn((table: string) => {
-        if (table === 'team_members') return createQueryStub([memberData]);
-        return createQueryStub([entryData]);
-      }),
-    };
-    createDbServerClient.mockResolvedValue(db);
-
-    const response = await POST(new Request('http://localhost/api/standup', {
-      method: 'POST',
-      body: JSON.stringify({ date: '2026-04-15', done: 'Finished S7', plan: 'Start S8' }),
-      headers: { 'Content-Type': 'application/json' },
-    }));
-
-    expect(response.status).toBe(200);
-    const body = await response.json();
-    expect(body.data).toMatchObject({ id: 'entry-1' });
-  });
-
-  it('uses author_id from body for agent auth', async () => {
-    getAuthContext.mockResolvedValue({ id: 'agent-1', type: 'agent', rateLimitExceeded: false, rateLimitRemaining: 299, rateLimitResetAt: 0 });
-    const memberData = { project_id: 'project-alpha', org_id: 'org-1' };
-    const entryData = makeStandupEntry({ author_id: 'member-1' });
-    const adminDb = {
-      from: vi.fn((table: string) => {
-        if (table === 'team_members') return createQueryStub([memberData]);
-        return createQueryStub([entryData]);
-      }),
-    };
-    createAdminClient.mockReturnValue(adminDb);
-    createDbServerClient.mockResolvedValue({});
-
-    const response = await POST(new Request('http://localhost/api/standup', {
-      method: 'POST',
-      body: JSON.stringify({ author_id: 'member-1', date: '2026-04-15', done: 'Finished S7', plan: 'Start S8' }),
-      headers: { 'Content-Type': 'application/json' },
-    }));
-
-    expect(response.status).toBe(200);
-    expect(createAdminClient).toHaveBeenCalled();
-  });
-
-  it('returns 400 for invalid body', async () => {
-    const db = {};
-    createDbServerClient.mockResolvedValue(db);
-
-    const response = await POST(new Request('http://localhost/api/standup', {
-      method: 'POST',
-      body: JSON.stringify({ done: 'no date provided' }),
-      headers: { 'Content-Type': 'application/json' },
-    }));
-
-    expect(response.status).toBe(400);
+  it('GET: 204 → {ok:true}', async () => {
+    proxyToFastapi.mockResolvedValue(new Response(null, { status: 204 }));
+    const res = await GET(req());
+    expect(res.status).toBe(200);
+    expect((await res.json()).data).toMatchObject({ ok: true });
   });
 });
