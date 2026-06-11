@@ -188,7 +188,9 @@ export default function DocSlugPage() {
     if (!projectId || !slug) return;
     setDocLoading(true);
     try {
-      const res = await fetch(`/api/docs?project_id=${projectId}&slug=${slug}`);
+      // AC3 (fc4d4264): never serve the doc body from HTTP/bf cache — a stale load
+      // re-seeds the editor with an outdated baseline and can re-trigger an overwrite.
+      const res = await fetch(`/api/docs?project_id=${projectId}&slug=${slug}`, { cache: 'no-store' });
       if (!res.ok) {
         setSelectedDoc(null);
         return;

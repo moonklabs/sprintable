@@ -3,6 +3,24 @@ import { useState, useEffect, useRef, useCallback, useMemo } from 'react';
 export type SaveStatus = 'idle' | 'unsaved' | 'saving' | 'saved' | 'conflict' | 'remote-changed' | 'error';
 
 /**
+ * Read the saved doc + its `updated_at` out of a PATCH response, tolerating both
+ * shapes the docs endpoint can return. The PATCH route is a raw `proxyToFastapi`
+ * passthrough (`/api/docs/[id]/route.ts`), so the live shape is the bare
+ * `DocResponse` (`{ updated_at, ... }`) — NOT the legacy enveloped `{ data: {...} }`.
+ * Reading `json.data.updated_at` against the raw body threw (`json.data` undefined),
+ * which left `save()` un-settled → permanent dirty → infinite autosave + missing
+ * baseline → BE 409 protection disarmed → silent overwrite of external edits
+ * (fc4d4264 envelope-boundary regression). The `??` keeps this robust if the route
+ * is ever re-wrapped with `proxyToFastapiWrapped`.
+ */
+export function unwrapDocResponse<TDoc>(json: unknown): { doc: TDoc; updatedAt: string | undefined } {
+  const root = (json ?? {}) as { data?: { updated_at?: string }; updated_at?: string };
+  const doc = (root.data ?? root) as TDoc;
+  const updatedAt = root.data?.updated_at ?? root.updated_at;
+  return { doc, updatedAt };
+}
+
+/**
  * Pure debounce scheduler — exported for unit tests.
  * Each `schedule(fn)` cancels the previous pending call so rapid invocations
  * coalesce into a single execution after `delay` ms.
@@ -131,6 +149,15 @@ export function useDocSync<TDoc = { updated_at: string }>({
       return true;
     }
 
+    // FIX-2 (fc4d4264): never fire a non-force PATCH without a baseline. A missing
+    // `expected_updated_at` disables the BE 409 optimistic-concurrency check, so the
+    // save would blindly last-write-wins over a concurrent external/agent edit.
+    // Refuse rather than clobber — surface 'error' so the state is visible, not silent.
+    if (!isForce && !baselineUpdatedAt) {
+      setStatus('error');
+      return false;
+    }
+
     savingRef.current = true;
     setStatus('saving');
 
@@ -168,14 +195,22 @@ export function useDocSync<TDoc = { updated_at: string }>({
       }
 
       const json = await res.json();
-      const nextUpdatedAt = json.data.updated_at as string;
+      const { doc: savedDoc, updatedAt: nextUpdatedAt } = unwrapDocResponse<TDoc>(json);
+      // A response with no `updated_at` cannot establish a baseline — treating it as
+      // success would re-arm the exact unguarded-overwrite loop this story fixes, so
+      // fail loudly instead of advancing into an undefined baseline.
+      if (!nextUpdatedAt) {
+        setStatus('error');
+        savingRef.current = false;
+        return false;
+      }
       previousServerUpdatedAtRef.current = nextUpdatedAt;
       conflictRef.current = false;
       remoteChangedRef.current = false;
       setLastSavedSnapshot(nextSnapshot);
       setBaselineUpdatedAt(nextUpdatedAt);
       setStatus('saved');
-      onSaved?.(json.data as TDoc);
+      onSaved?.(savedDoc);
       savingRef.current = false;
       return true;
     } catch {
