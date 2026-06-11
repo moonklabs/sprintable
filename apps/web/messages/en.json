@@ -1346,6 +1346,7 @@
     "revoke_failed": "Failed to revoke access.",
     "cancel": "Cancel",
     "noNotifications": "No notifications",
+    "backToList": "Inbox",
     "statusChangeCount": "{count} status changes",
     "expandHistory": "Expand history",
     "collapseHistory": "Collapse history",

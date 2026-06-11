@@ -3,7 +3,7 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { useRouter, useSearchParams } from 'next/navigation';
 import { useTranslations } from 'next-intl';
-import { ChevronDown, ChevronRight, Inbox as InboxIcon, Zap, ZapOff } from 'lucide-react';
+import { ArrowLeft, ChevronDown, ChevronRight, Inbox as InboxIcon, Zap, ZapOff } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { TopBarSlot } from '@/components/nav/top-bar-slot';
 import { Badge } from '@/components/ui/badge';
@@ -405,8 +405,9 @@ export default function InboxPage() {
         )}
 
         <div className="flex min-h-0 flex-1 overflow-hidden">
-        {/* Left: notification list */}
-        <div className="flex w-full max-w-[420px] min-w-[320px] flex-col border-r border-border/80">
+        {/* Left: notification list. max-md master-detail (efcb3840 ⓑ): full-width list,
+            hidden once a detail is open so the detail can take the screen (md+ unchanged). */}
+        <div className={`flex w-full min-w-[320px] flex-col border-r border-border/80 md:max-w-[420px] max-md:min-w-0 ${selectedId ? 'max-md:hidden' : ''}`}>
           <div className="flex-1 overflow-y-auto px-3 py-3">
             {loading ? (
               <div className="space-y-2">
@@ -523,8 +524,19 @@ export default function InboxPage() {
           </div>
         </div>
 
-        {/* Right: detail panel */}
-        <div className="flex min-w-0 flex-1 flex-col overflow-y-auto">
+        {/* Right: detail panel. max-md: hidden when nothing selected (the list owns the
+            screen); full-screen with a back button when an item is tapped (efcb3840 ⓑ). */}
+        <div className={`flex min-w-0 flex-1 flex-col overflow-y-auto ${!selectedId ? 'max-md:hidden' : ''}`}>
+          {selectedNotification ? (
+            <button
+              type="button"
+              onClick={() => setSelectedId(null)}
+              className="flex shrink-0 items-center gap-1.5 border-b border-border/80 px-4 py-2.5 text-sm font-medium text-muted-foreground transition hover:text-foreground md:hidden"
+            >
+              <ArrowLeft className="size-4" />
+              {t('backToList')}
+            </button>
+          ) : null}
           {selectedNotification ? (
             selectedNotification.type === 'agent_joined' ? (
               <AgentJoinedDetailPanel
