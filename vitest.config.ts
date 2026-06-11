@@ -41,7 +41,6 @@ export default defineConfig({
       'apps/web/src/services/agent-tool-execution-engine.test.ts',
       'apps/web/src/services/background-runtime.test.ts',
       'apps/web/src/services/memo-assignment-dispatch.test.ts',
-      'apps/web/src/services/memo.test.ts',
     ],
   },
 });
