@@ -93,3 +93,12 @@ describe('content-converter table cell inline preservation (AC③)', () => {
     expect(out).toContain('`y`');
   });
 });
+
+describe('content-converter fenced-code robustness (FIX-3b guardian note)', () => {
+  it('reads the language even with a whitespace node between <pre> and <code>', () => {
+    // The fence rule must find <code> via element children, not firstChild, so a stray
+    // text node between <pre> and <code> does not drop it to Turndown's default.
+    const html = '<pre data-language="ts">\n  <code class="language-ts">const x = 1;</code>\n</pre>';
+    expect(htmlToMarkdown(html)).toBe('```ts\nconst x = 1;\n```');
+  });
+});

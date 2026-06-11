@@ -265,21 +265,25 @@ turndown.addRule('blockquote', {
 // (not <code>), so ```ts dropped to ``` on load → dirty → unsaveable code-block docs.
 // Order: <code> class (markdownToHtml output) → <pre> data-language / class (tiptap
 // getHTML + legacy). Belt-and-suspenders with the renderHTML fix in code-block-copy.tsx.
+// Find the <code> via element children rather than firstChild so a whitespace text node
+// between <pre> and <code> doesn't drop the rule to Turndown's default (디디 review note;
+// `children` is used instead of `:scope > code` which domino does not reliably support).
+const fenceCodeChild = (pre: HTMLElement): HTMLElement | null =>
+  (Array.from(pre.children).find((c) => c.nodeName === 'CODE') as HTMLElement | undefined) ?? null;
 turndown.addRule('fencedCodeBlock', {
   filter: (node) =>
     node.nodeName === 'PRE' &&
-    !!node.firstChild &&
-    node.firstChild.nodeName === 'CODE',
+    !!fenceCodeChild(node as HTMLElement),
   replacement: (_content, node) => {
     const pre = node as HTMLElement;
-    const code = pre.firstChild as HTMLElement;
+    const code = fenceCodeChild(pre);
     const langFromClass = (el: HTMLElement | null) => el?.className.match(/language-(\S+)/)?.[1] ?? null;
     const lang =
       langFromClass(code) ??
       pre.getAttribute('data-language') ??
       langFromClass(pre) ??
       '';
-    const text = (code.textContent ?? '').replace(/\n$/, '');
+    const text = (code?.textContent ?? '').replace(/\n$/, '');
     return `\n\n\`\`\`${lang}\n${text}\n\`\`\`\n\n`;
   },
 });
