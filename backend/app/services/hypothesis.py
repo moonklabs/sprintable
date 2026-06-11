@@ -311,6 +311,11 @@ async def draft_hypothesis(
     measure_after = datetime.now(timezone.utc) + timedelta(days=_DEFAULT_MEASURE_DAYS)
     snapshot = _build_source_snapshot(payload.context)
 
+    # source_type='epic'/'story'면 source_id로 실 링크를 만든다. source 필드만 저장하면
+    # epic 상세의 가설 리스트(hypothesis_epic_links 조인)에 안 떠 초안→확인이 무의미해진다.
+    epic_ids = [payload.source_id] if payload.source_type == "epic" else []
+    story_ids = [payload.source_id] if payload.source_type == "story" else []
+
     hyp_resp: HypothesisResponse | None = None
     if payload.persist:
         hyp_resp = await create_hypothesis(
@@ -321,6 +326,8 @@ async def draft_hypothesis(
                 metric_definition=metric_definition,
                 measure_after=measure_after,
                 status="proposed",
+                epic_ids=epic_ids,
+                story_ids=story_ids,
                 source_type=payload.source_type,
                 source_id=payload.source_id,
                 draft_metadata={"template": True, "source_snapshot": snapshot},
