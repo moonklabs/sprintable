@@ -27,6 +27,10 @@ export interface Hypothesis {
   gate_contract: Record<string, unknown>;
   epic_ids: string[];
   story_ids: string[];
+  // AI 초안 메타(§4.2 draft pin·§12.2 confirmed 플래그). BE 모델엔 있으나 현재
+  // HypothesisResponse가 미노출 — optional로 두어 노출 전까지 graceful degrade.
+  draft_metadata?: Record<string, unknown> | null;
+  drafted_by_member_id?: string | null;
   created_at: string;
   updated_at: string;
 }
