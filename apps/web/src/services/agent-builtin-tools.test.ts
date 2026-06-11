@@ -256,11 +256,115 @@ function createContext() {
   };
 }
 
+// AgentBuiltinToolService의 단위 경계는 dispatch/scope-guard/audit/presentation이다.
+// MemoService/StoryService/EpicService는 OSS에서 stub repo(MemoService 무repo) 또는
+// FastAPI HTTP(Story/Epic의 SupabaseXRepository.fastapiCall) 위임이라 in-memory db
+// stub만으로는 동작하지 않는다. 따라서 의존 서비스를 db-stub 백드 fake로 주입해 실
+// persistence가 아닌 서비스 계약(메서드 시그니처·반환 shape)만 재현한다.
+function makeService(db: any, options: Record<string, unknown> = {}) {
+  const memoService = {
+    async create(input: any) {
+      const { data } = await db
+        .from('memos')
+        .insert({
+          org_id: input.org_id,
+          project_id: input.project_id,
+          title: input.title ?? null,
+          content: input.content,
+          memo_type: input.memo_type ?? 'memo',
+          status: 'open',
+          assigned_to: input.assigned_to ?? null,
+          created_by: input.created_by,
+          metadata: input.metadata ?? {},
+        })
+        .select('*')
+        .single();
+      return data;
+    },
+    async addReply(memoId: string, content: string, createdBy: string, reviewType = 'comment') {
+      const { data } = await db
+        .from('memo_replies')
+        .insert({ memo_id: memoId, content, created_by: createdBy, review_type: reviewType })
+        .select('*')
+        .single();
+      return data;
+    },
+    async resolve(id: string, resolvedBy: string) {
+      const { data } = await db
+        .from('memos')
+        .update({ status: 'resolved', resolved_by: resolvedBy })
+        .eq('id', id)
+        .select('*')
+        .single();
+      return data;
+    },
+  };
+
+  const storyService = {
+    async create(input: any) {
+      const { data } = await db
+        .from('stories')
+        .insert({
+          org_id: input.org_id,
+          project_id: input.project_id,
+          title: input.title,
+          description: input.description ?? null,
+          epic_id: input.epic_id ?? null,
+          sprint_id: input.sprint_id ?? null,
+          assignee_id: input.assignee_id ?? null,
+          priority: input.priority ?? 'medium',
+          status: input.status ?? 'backlog',
+          story_points: input.story_points ?? null,
+        })
+        .select('*')
+        .single();
+      return data;
+    },
+    async update(id: string, patch: Record<string, unknown>) {
+      const { data } = await db.from('stories').update(patch).eq('id', id).select('*').single();
+      return data;
+    },
+    async list(filters: any) {
+      let q = db.from('stories').select('*').eq('project_id', filters.project_id);
+      if (filters.status) q = q.eq('status', filters.status);
+      if (filters.assignee_id) q = q.eq('assignee_id', filters.assignee_id);
+      if (filters.epic_id) q = q.eq('epic_id', filters.epic_id);
+      if (filters.sprint_id) q = q.eq('sprint_id', filters.sprint_id);
+      const { data } = await q;
+      return data ?? [];
+    },
+  };
+
+  const epicService = {
+    async create(input: any) {
+      const { data } = await db
+        .from('epics')
+        .insert({
+          org_id: input.org_id,
+          project_id: input.project_id,
+          title: input.title,
+          description: input.description ?? null,
+          priority: input.priority ?? 'medium',
+          status: input.status ?? 'open',
+        })
+        .select('*')
+        .single();
+      return data;
+    },
+    async list(filters: any) {
+      const { data } = await db.from('epics').select('*').eq('project_id', filters.project_id);
+      return data ?? [];
+    },
+  };
+
+  return new AgentBuiltinToolService(db, { memoService, storyService, epicService, ...options } as never);
+}
+
 describe('AgentBuiltinToolService', () => {
   it('creates a memo and records execution audit metadata', async () => {
     const { db, tables } = createDbStub();
     const auditLogger = vi.fn(async () => undefined);
-    const service = new AgentBuiltinToolService(db as never, { auditLogger });
+    const service = makeService(db as never, { auditLogger });
 
     const result = await service.execute('create_memo', {
       title: 'New memo',
@@ -291,7 +395,7 @@ describe('AgentBuiltinToolService', () => {
     const { db } = createDbStub();
     const auditLogger = vi.fn(async () => undefined);
     const fetchFn = vi.fn(async () => new Response(JSON.stringify({ ok: true, channel: 'C12345678', ts: '1710000000.000100' }), { status: 200 }));
-    const service = new AgentBuiltinToolService(db as never, { auditLogger, fetchFn: fetchFn as never });
+    const service = makeService(db as never, { auditLogger, fetchFn: fetchFn as never });
 
     const result = await service.execute('notify_slack', {
       channel_id: 'C12345678',
@@ -330,7 +434,7 @@ describe('AgentBuiltinToolService', () => {
     process.env.SLACK_OAUTH_TOKEN_ORG_1 = 'xoxb-org-token';
     const { db } = createDbStub({ messaging_bridge_channels: [] });
     const fetchFn = vi.fn();
-    const service = new AgentBuiltinToolService(db as never, { fetchFn: fetchFn as never });
+    const service = makeService(db as never, { fetchFn: fetchFn as never });
 
     const result = await service.execute('notify_slack', {
       channel_id: 'C404',
@@ -344,7 +448,7 @@ describe('AgentBuiltinToolService', () => {
 
   it('returns slack_auth_required when org slack auth is missing or expired', async () => {
     const { db: missingAuthDb } = createDbStub({ messaging_bridge_org_auths: [] });
-    const missingAuthService = new AgentBuiltinToolService(missingAuthDb as never, { fetchFn: vi.fn() as never });
+    const missingAuthService = makeService(missingAuthDb as never, { fetchFn: vi.fn() as never });
 
     await expect(missingAuthService.execute('notify_slack', {
       channel_id: 'C12345678',
@@ -364,7 +468,7 @@ describe('AgentBuiltinToolService', () => {
         updated_at: '2026-04-06T12:00:00.000Z',
       }],
     });
-    const expiredAuthService = new AgentBuiltinToolService(expiredAuthDb as never, { fetchFn: vi.fn() as never });
+    const expiredAuthService = makeService(expiredAuthDb as never, { fetchFn: vi.fn() as never });
 
     await expect(expiredAuthService.execute('notify_slack', {
       channel_id: 'C12345678',
@@ -377,7 +481,7 @@ describe('AgentBuiltinToolService', () => {
     process.env.SLACK_OAUTH_TOKEN_ORG_1 = 'xoxb-org-token';
     const { db } = createDbStub();
     const fetchFn = vi.fn(async () => new Response(JSON.stringify({ ok: false, error: 'not_in_channel' }), { status: 200 }));
-    const service = new AgentBuiltinToolService(db as never, { fetchFn: fetchFn as never });
+    const service = makeService(db as never, { fetchFn: fetchFn as never });
 
     const result = await service.execute('notify_slack', {
       channel_id: 'C12345678',
@@ -390,7 +494,7 @@ describe('AgentBuiltinToolService', () => {
 
   it('lists memos with truncated content previews', async () => {
     const { db } = createDbStub();
-    const service = new AgentBuiltinToolService(db as never);
+    const service = makeService(db as never);
 
     const result = await service.execute('list_memos', { limit: 2 }, createContext());
 
@@ -445,7 +549,7 @@ describe('AgentBuiltinToolService', () => {
         },
       ],
     });
-    const service = new AgentBuiltinToolService(db as never);
+    const service = makeService(db as never);
 
     const result = await service.execute('list_memos', { limit: 2, status: 'resolved' }, createContext());
 
@@ -457,7 +561,7 @@ describe('AgentBuiltinToolService', () => {
   it('blocks cross-project references and logs a security audit event', async () => {
     const { db } = createDbStub();
     const auditLogger = vi.fn(async () => undefined);
-    const service = new AgentBuiltinToolService(db as never, { auditLogger });
+    const service = makeService(db as never, { auditLogger });
 
     const result = await service.execute('create_story', {
       title: 'Cross project attempt',
@@ -480,7 +584,7 @@ describe('AgentBuiltinToolService', () => {
 
   it('creates and assigns a story within the current project scope', async () => {
     const { db, tables } = createDbStub();
-    const service = new AgentBuiltinToolService(db as never);
+    const service = makeService(db as never);
 
     const created = await service.execute('create_story', {
       title: 'Implement MCP tool',
@@ -515,7 +619,7 @@ describe('AgentBuiltinToolService', () => {
       ],
     });
     const auditLogger = vi.fn(async () => undefined);
-    const service = new AgentBuiltinToolService(db as never, { auditLogger });
+    const service = makeService(db as never, { auditLogger });
 
     const result = await service.execute('forward_memo', {
       target_agent_display_name: 'Kiki',
@@ -538,7 +642,7 @@ describe('AgentBuiltinToolService', () => {
 
   it('returns self_forward_not_allowed when forwarding to self', async () => {
     const { db } = createDbStub();
-    const service = new AgentBuiltinToolService(db as never);
+    const service = makeService(db as never);
 
     const result = await service.execute('forward_memo', {
       target_agent_display_name: 'Didi',
@@ -556,7 +660,7 @@ describe('AgentBuiltinToolService', () => {
         { id: '22222222-2222-4222-8222-222222222222', org_id: 'org-1', project_id: 'project-1', type: 'human', name: 'Ortega', role: 'owner', is_active: true },
       ],
     });
-    const service = new AgentBuiltinToolService(db as never);
+    const service = makeService(db as never);
 
     const result = await service.execute('forward_memo', {
       target_agent_display_name: 'Didi',
@@ -582,7 +686,7 @@ describe('AgentBuiltinToolService', () => {
         { id: 'bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb', org_id: 'org-1', project_id: 'project-1', type: 'agent', name: 'Kiki', role: 'member', is_active: true },
       ],
     });
-    const service = new AgentBuiltinToolService(db as never);
+    const service = makeService(db as never);
 
     const result = await service.execute('forward_memo', {
       target_agent_display_name: 'Kiki',
@@ -595,7 +699,7 @@ describe('AgentBuiltinToolService', () => {
 
   it('returns target_agent_not_found when no matching agent exists', async () => {
     const { db } = createDbStub();
-    const service = new AgentBuiltinToolService(db as never);
+    const service = makeService(db as never);
 
     const result = await service.execute('forward_memo', {
       target_agent_display_name: 'NonexistentAgent',
@@ -647,7 +751,7 @@ describe('AgentBuiltinToolService', () => {
       ],
     });
     const auditLogger = vi.fn(async () => undefined);
-    const service = new AgentBuiltinToolService(db as never, { auditLogger });
+    const service = makeService(db as never, { auditLogger });
 
     const result = await service.execute('forward_memo', {
       target_agent_display_name: 'Kiki',
@@ -668,17 +772,33 @@ describe('AgentBuiltinToolService', () => {
 
   it('updates memo content and lists epics in scope', async () => {
     const { db, tables } = createDbStub();
-    const service = new AgentBuiltinToolService(db as never);
+    const service = makeService(db as never);
 
+    // update_memo status는 비-종결 전이만 허용한다(story 6f237832 하드닝): 'resolved'는
+    // resolve 게이트 전용이라 제외되고 'archived'/'open'만 패치 가능하다.
     const updated = await service.execute('update_memo', {
       memo_id: '44444444-4444-4444-8444-444444444444',
       content: 'Updated memo body for the current project.',
-      status: 'resolved',
+      status: 'archived',
     }, createContext());
     const epics = await service.execute('list_epics', { limit: 5 }, createContext());
 
-    expect(updated.memo).toEqual(expect.objectContaining({ status: 'resolved', content: 'Updated memo body for the current project.' }));
-    expect(tables.memos.find((memo) => memo.id === '44444444-4444-4444-8444-444444444444')?.status).toBe('resolved');
+    expect(updated.memo).toEqual(expect.objectContaining({ status: 'archived', content: 'Updated memo body for the current project.' }));
+    expect(tables.memos.find((memo) => memo.id === '44444444-4444-4444-8444-444444444444')?.status).toBe('archived');
     expect(epics.epics).toEqual([expect.objectContaining({ id: '77777777-7777-4777-8777-777777777777', title: 'Alpha epic' })]);
+  });
+
+  it('rejects update_memo status outside the non-terminal set (resolved is gated)', async () => {
+    const { db } = createDbStub();
+    const service = makeService(db as never);
+
+    const result = await service.execute('update_memo', {
+      memo_id: '44444444-4444-4444-8444-444444444444',
+      status: 'resolved',
+    }, createContext());
+
+    // zod enum 거부 → execute가 처리된 에러로 흡수(하드크래시 없음).
+    expect(result.memo).toBeUndefined();
+    expect(typeof result.error).toBe('string');
   });
 });

@@ -22,21 +22,10 @@ export default defineConfig({
       'ee/apps/web/src/services/billing-limit-enforcer.test.ts',
       'ee/apps/web/src/app/api/billing/**/*.test.ts',
       'ee/apps/web/src/app/api/v1/billing/**/*.test.ts',
-      // ── QUARANTINE manifest (story 2d5c8662) ──────────────────────────────────
-      // Pre-existing unit-test failures that the CI exit-code bug (`| tail` w/o
-      // pipefail) masked until now. Excluded so the gate is REAL for the healthy
-      // suite; each file is debt to burn down — re-include as it is fixed.
-      // ⚠️ DO NOT add here to silence a NEW failure — fix the test.
-      // Group B — api routes + services (backend-of-FE) · owner: 디디 · cleanup story: 837a36c4
-      // agent-builtin-tools.test.ts: the 4 registry-declared memo tools
-      // (create_memo/reply_memo/update_memo/list_memos) are now implemented (story
-      // 6f237832), but this file's create_story/forward_memo/create_memo/list_epics
-      // cases drive StoryService/EpicService/MemoService through their post-OSS-split
-      // persistence layer (FastAPI `fastapiCall` repos; MemoService has no repo at all),
-      // so they fail under the in-memory db stub the test was authored against. Re-include
-      // requires reworking the suite to inject db-stub-backed fake services — tracked as a
-      // follow-up; un-isolating now would turn the suite red on pre-existing debt.
-      'apps/web/src/services/agent-builtin-tools.test.ts',
+      // QUARANTINE manifest (story 2d5c8662) — fully burned down (Group B, owner 디디).
+      // The last quarantined file (agent-builtin-tools.test.ts) was re-included once its
+      // service deps were reworked to db-stub-backed fakes (story 7a57e7b1). Keep this
+      // list to genuine infra exclusions only; fix failing tests instead of quarantining.
     ],
   },
 });
