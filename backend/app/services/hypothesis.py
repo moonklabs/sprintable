@@ -11,7 +11,7 @@
 from __future__ import annotations
 
 import uuid
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -19,6 +19,8 @@ from app.models.hypothesis import HYPOTHESIS_STATUSES, is_valid_transition
 from app.repositories.hypothesis import HypothesisRepository
 from app.schemas.hypothesis import (
     HypothesisCreate,
+    HypothesisDraftRequest,
+    HypothesisDraftResponse,
     HypothesisLinkRequest,
     HypothesisResponse,
     HypothesisTransition,
@@ -259,4 +261,71 @@ async def archive_hypothesis(
         raise HypothesisServiceError("HYPOTHESIS_NOT_FOUND", "가설을 찾을 수 없습니다.")
     await repo.update(
         hypothesis_id, status="archived", archived_at=datetime.now(timezone.utc)
+    )
+
+
+# §2.2.4 statement 최대 길이(템플릿 truncate). §2.2.8 source_snapshot은 입력 일부만.
+_SNAPSHOT_VALUE_MAX = 500
+_DEFAULT_MEASURE_DAYS = 14
+
+
+def _build_source_snapshot(context: dict | None) -> dict:
+    """§2.2.8 — 원본 전체 복제 금지. context에서 title/description 일부만 truncate해 보관."""
+    if not context:
+        return {}
+    snap: dict = {}
+    for key in ("title", "description", "summary"):
+        val = context.get(key)
+        if isinstance(val, str) and val:
+            snap[key] = val[:_SNAPSHOT_VALUE_MAX]
+    return snap
+
+
+def _template_statement(context: dict | None) -> str:
+    """deterministic 템플릿 초안(§3.9.5). LLM draft service는 미확인이라 후속 story로 미룬다."""
+    title = (context or {}).get("title")
+    if isinstance(title, str) and title.strip():
+        return f"{title.strip()[:120]} — 이 실행 묶음이 목표 지표를 개선한다"
+    return "이 실행 묶음이 목표 지표를 개선한다"
+
+
+async def draft_hypothesis(
+    session: AsyncSession,
+    org_id: uuid.UUID,
+    caller: ResolvedMember,
+    payload: HypothesisDraftRequest,
+) -> HypothesisDraftResponse:
+    """§3.9 — 흐름 부산물에서 AI 초안 생성. DB에 active를 만들지 않는다.
+
+    persist=true이면 status='proposed' row만 생성(create 경로 재사용 — owner/agent 규칙 동일).
+    초기에는 deterministic 템플릿(LLM 미연결). 사람이 statement/metric을 다듬고 확정한다.
+    """
+    statement = _template_statement(payload.context)
+    metric_definition = {"metric": "outcome", "source": "manual", "target": 1, "direction": "up"}
+    measure_after = datetime.now(timezone.utc) + timedelta(days=_DEFAULT_MEASURE_DAYS)
+    snapshot = _build_source_snapshot(payload.context)
+
+    hyp_resp: HypothesisResponse | None = None
+    if payload.persist:
+        hyp_resp = await create_hypothesis(
+            session, org_id, caller,
+            HypothesisCreate(
+                project_id=payload.project_id,
+                statement=statement,
+                metric_definition=metric_definition,
+                measure_after=measure_after,
+                status="proposed",
+                source_type=payload.source_type,
+                source_id=payload.source_id,
+                draft_metadata={"template": True, "source_snapshot": snapshot},
+            ),
+        )
+    return HypothesisDraftResponse(
+        statement=statement,
+        metric_definition=metric_definition,
+        measure_after=measure_after,
+        source_snapshot=snapshot,
+        confidence=None,
+        requires_confirmation=True,
+        hypothesis=hyp_resp,
     )
