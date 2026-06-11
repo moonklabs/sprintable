@@ -73,7 +73,11 @@ describe('markdownToHtml', () => {
 
   it('converts code blocks', () => {
     const result = markdownToHtml('```js\nconst x = 1;\n```');
-    expect(result).toContain('<pre><code>');
+    // Fenced blocks carry their language as data-language + language-* class
+    // (syntax highlighting); assert that real shape, not the legacy plain <pre><code>.
+    expect(result).toContain('<pre');
+    expect(result).toContain('data-language="js"');
+    expect(result).toContain('<code');
     expect(result).toContain('const x = 1;');
   });
 

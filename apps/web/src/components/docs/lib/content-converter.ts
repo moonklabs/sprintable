@@ -30,8 +30,13 @@ turndown.addRule('taskListItem', {
 // TipTap wrapped the content in <p> tags (which it always does via schema normalization).
 // Without this, Turndown outputs "loose" lists with blank lines between items:
 //   -   item\n    \n-   next  →  fixed to:  - item\n- next
+// Excludes taskItem LIs explicitly: Turndown 7.x resolves rules most-recently-added-first,
+// so this generic rule would otherwise shadow taskListItem above and drop the `- [ ]` marker
+// (round-trip non-idempotency → dirty-on-load, story 2a72ebf4).
 turndown.addRule('compactListItem', {
-  filter: 'li',
+  filter: (node) =>
+    node.nodeName === 'LI' &&
+    (node as HTMLElement).getAttribute('data-type') !== 'taskItem',
   replacement: (content, node) => {
     const clean = content
       .replace(/^\n+/, '')       // strip leading newlines from <p>
@@ -210,13 +215,47 @@ turndown.addRule('table', {
     const table = node as HTMLTableElement;
     const rows: string[] = [];
     Array.from(table.querySelectorAll('tr')).forEach((tr, i) => {
-      const cells = Array.from(tr.querySelectorAll('th, td')).map((cell) => cell.textContent?.trim() ?? '');
+      const cells = Array.from(tr.querySelectorAll('th, td')).map((cell) => serializeTableCell(cell));
       rows.push(`| ${cells.join(' | ')} |`);
       if (i === 0) {
         rows.push(`| ${cells.map(() => '---').join(' | ')} |`);
       }
     });
     return `\n${rows.join('\n')}\n`;
+  },
+});
+
+// Serialize a table cell's inline content to markdown — NOT textContent, which
+// strips bold/italic/code/link formatting (round-trip data loss, story 2a72ebf4 AC③).
+// Re-run Turndown on the cell's inner HTML, then flatten to a single inline cell:
+// collapse any newlines to spaces and escape literal pipes so they don't split columns.
+function serializeTableCell(cell: Element): string {
+  const inner = (cell as HTMLElement).innerHTML;
+  return turndown
+    .turndown(inner)
+    .replace(/\r?\n+/g, ' ')
+    .replace(/\|/g, '\\|')
+    .trim();
+}
+
+// Horizontal rule — Turndown's default emits `* * *`, but markdownToHtml only
+// recognizes `---` (and that is what users type), so the default broke round-trip
+// idempotency (`---` → `<hr>` → `* * *`) → dirty-on-load (story 2a72ebf4).
+turndown.addRule('horizontalRule', {
+  filter: 'hr',
+  replacement: () => '\n---\n',
+});
+
+// Blockquote — Turndown's default puts a blank quoted line (`>`) between paragraphs,
+// so a multi-line quote serialized to `> a\n>\n> b` instead of the tight `> a\n> b`
+// that markdownToHtml round-trips from. Collapse internal blank lines so the round
+// trip is idempotent (story 2a72ebf4). The callout rule (data-callout) handles 💡
+// blocks separately and is unaffected.
+turndown.addRule('blockquote', {
+  filter: 'blockquote',
+  replacement: (content) => {
+    const inner = content.replace(/^\n+|\n+$/g, '').replace(/\n\s*\n/g, '\n');
+    return `\n\n${inner.replace(/^/gm, '> ')}\n\n`;
   },
 });
 
@@ -329,7 +368,18 @@ export function markdownToHtml(rawMd: string): string {
 
   // Blockquotes (including callout pattern)
   html = html.replace(/^> 💡 (.+)$/gm, '<div data-callout class="callout">$1</div>');
-  html = html.replace(/^> (.+)$/gm, '<blockquote><p>$1</p></blockquote>');
+  // Merge consecutive '>' lines into ONE blockquote (one <p> per line). Emitting a
+  // separate <blockquote> per line round-tripped back with a blank line between them,
+  // mutating multi-line quotes on load (story 2a72ebf4). Paired with the blockquote
+  // Turndown rule below, which re-joins the paragraphs into tight `> a\n> b`.
+  html = html.replace(/(?:^> .+$\n?)+/gm, (block) => {
+    const paras = block
+      .replace(/\n+$/, '')
+      .split('\n')
+      .map((line) => `<p>${line.replace(/^> /, '')}</p>`)
+      .join('');
+    return `<blockquote>${paras}</blockquote>`;
+  });
 
   // Bold and italic
   html = html.replace(/\*\*(.+?)\*\*/g, '<strong>$1</strong>');
