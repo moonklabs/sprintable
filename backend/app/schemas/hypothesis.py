@@ -91,6 +91,10 @@ class HypothesisResponse(BaseModel):
     confidence: float | None = None
     source_type: str | None = None
     source_id: uuid.UUID | None = None
+    # FE가 "AI 초안 vs 사람 생성 proposed"를 구분(isDraft)해 [활성화] 버튼 게이팅하도록 노출(48dbada0 선행).
+    # drafted_by_member_id 존재 = agent 초안. additive·null default — 구 소비자 호환.
+    drafted_by_member_id: uuid.UUID | None = None
+    draft_metadata: dict[str, Any] | None = None
     human_accounting: dict[str, Any]
     gate_contract: dict[str, Any]
     epic_ids: list[uuid.UUID] = []
