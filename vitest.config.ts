@@ -34,8 +34,15 @@ export default defineConfig({
       'apps/web/src/app/api/projects/[id]/ai-settings/validate/route.test.ts',
       'apps/web/src/app/api/projects/[id]/mcp-connections/[serverKey]/route.test.ts',
       'apps/web/src/app/api/projects/[id]/mcp-connections/route.test.ts',
+      // agent-builtin-tools.test.ts: the 4 registry-declared memo tools
+      // (create_memo/reply_memo/update_memo/list_memos) are now implemented (story
+      // 6f237832), but this file's create_story/forward_memo/create_memo/list_epics
+      // cases drive StoryService/EpicService/MemoService through their post-OSS-split
+      // persistence layer (FastAPI `fastapiCall` repos; MemoService has no repo at all),
+      // so they fail under the in-memory db stub the test was authored against. Re-include
+      // requires reworking the suite to inject db-stub-backed fake services — tracked as a
+      // follow-up; un-isolating now would turn the suite red on pre-existing debt.
       'apps/web/src/services/agent-builtin-tools.test.ts',
-      'apps/web/src/services/agent-execution-loop.test.ts',
       'apps/web/src/services/background-runtime.test.ts',
     ],
   },
