@@ -181,6 +181,10 @@ async def dispatch_entity(
     if member_type == "agent":
         await assign_recipient_seq(db, event)
 
+    # L1 BE-3: direct dispatch event → activity_events 1행(best-effort·delivery 무영향).
+    from app.services.activity_stream import extract_activities_best_effort
+    await extract_activities_best_effort(db, [event.id])
+
     if member_type != "agent":
         await dispatch_notification(
             db,
