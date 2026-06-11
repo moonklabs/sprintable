@@ -82,6 +82,7 @@ async def deliver_injected_event_webhook(
     event_type: str,
     source_entity_type: str | None = None,
     source_entity_id: uuid.UUID | None = None,
+    hypothesis_anchor: dict | None = None,
 ) -> None:
     """1f01c1ad: INJECTABLE 이벤트(dispatched/story_assigned 등)를 수신자 member webhook으로 전달.
 
@@ -131,6 +132,8 @@ async def deliver_injected_event_webhook(
         "content": content,
         "source_entity_type": source_entity_type,
         "source_entity_id": str(source_entity_id) if source_entity_id else None,
+        # E1-S6 L4: 대표 가설 anchor(additive·null default — 구 소비자 호환).
+        "hypothesis_anchor": hypothesis_anchor,
     }
 
     seen_urls: set[str] = set()
