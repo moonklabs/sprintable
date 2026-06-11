@@ -175,6 +175,39 @@ const MAX_FORWARD_CHAIN_DEPTH = 10;
 
 const legacyResolveMemoSchema = z.object({});
 
+// Canonical memo tools. reply_memo and list_memos are the named successors of the
+// legacy add_memo_reply / list_recent_project_memos isomorphs and share their
+// internals; create_memo and update_memo close the registry-declared gap so the
+// default-exposed builtin set no longer crashes on the unimplemented cases.
+const createMemoSchema = z.object({
+  title: z.string().trim().min(1).max(200).nullable().optional(),
+  content: z.string().trim().min(1).max(20_000),
+  memo_type: z.string().trim().min(1).max(64).optional(),
+  assigned_to: z.string().uuid().nullable().optional(),
+});
+
+const replyMemoSchema = z.object({
+  memo_id: z.string().uuid().optional(),
+  content: z.string().trim().min(1).max(20_000),
+  review_type: z.string().trim().min(1).max(64).optional(),
+});
+
+const updateMemoSchema = z.object({
+  memo_id: z.string().uuid().optional(),
+  title: z.string().trim().min(1).max(200).nullable().optional(),
+  content: z.string().trim().min(1).max(20_000).optional(),
+  memo_type: z.string().trim().min(1).max(64).optional(),
+  status: z.string().trim().min(1).max(64).optional(),
+  assigned_to: z.string().uuid().nullable().optional(),
+});
+
+const listMemosSchema = z.object({
+  limit: z.coerce.number().int().min(1).max(MAX_LIST_ITEMS).optional(),
+  status: z.string().trim().min(1).max(64).optional(),
+  memo_type: z.string().trim().min(1).max(64).optional(),
+  assigned_to: z.string().uuid().optional(),
+});
+
 function truncateText(text: string, maxChars = MAX_FIELD_CHARS): string {
   const normalized = text.replace(/\s+/g, ' ').trim();
   if (normalized.length <= maxChars) return normalized;
@@ -314,6 +347,35 @@ export class AgentBuiltinToolService {
         const resolved = await this.memoService.resolve(ctx.memo.id, ctx.agent.id);
         return { memo_id: resolved.id, status: resolved.status };
       }
+      case 'create_memo': {
+        const args = createMemoSchema.parse(rawArgs);
+        if (args.assigned_to) await this.ensureMemberInScope(args.assigned_to, ctx);
+        const memo = await this.memoService.create({
+          project_id: ctx.memo.project_id,
+          org_id: ctx.memo.org_id,
+          title: args.title ?? null,
+          content: args.content,
+          memo_type: args.memo_type,
+          assigned_to: args.assigned_to ?? null,
+          created_by: ctx.agent.id,
+        });
+        return { memo: this.presentMemo(memo as MemoScope) };
+      }
+      case 'reply_memo': {
+        // Canonical alias of add_memo_reply: targets an explicit memo_id (defaults to
+        // the active memo) and carries a review_type, routed through MemoService.addReply.
+        const args = replyMemoSchema.parse(rawArgs);
+        return this.replyMemoInternal({ memo_id: args.memo_id, content: args.content, review_type: args.review_type }, ctx);
+      }
+      case 'update_memo': {
+        const args = updateMemoSchema.parse(rawArgs);
+        return this.updateMemoInternal(args, ctx);
+      }
+      case 'list_memos': {
+        // Canonical superset of list_recent_project_memos with status/type/assignee filters.
+        const args = listMemosSchema.parse(rawArgs);
+        return this.listMemosInternal({ limit: args.limit, status: args.status, memo_type: args.memo_type, assigned_to: args.assigned_to }, ctx);
+      }
       case 'create_story': {
         const args = createStorySchema.parse(rawArgs);
         if (args.assignee_id) await this.ensureMemberInScope(args.assignee_id, ctx);
@@ -434,6 +496,33 @@ export class AgentBuiltinToolService {
     const memo = await this.getMemoInScope(args.memo_id ?? ctx.memo.id, ctx);
     const data = await this.memoService.addReply(memo.id, args.content, ctx.agent.id, args.review_type ?? 'comment');
     return { reply: this.presentReply(data as { id: string; memo_id: string; content: string; created_by: string; created_at: string }) };
+  }
+
+  private async updateMemoInternal(args: z.infer<typeof updateMemoSchema>, ctx: ToolExecutionContext) {
+    // Scope guard first (emits the cross-scope security audit) before any mutation.
+    const memo = await this.getMemoInScope(args.memo_id ?? ctx.memo.id, ctx);
+    if (args.assigned_to) await this.ensureMemberInScope(args.assigned_to, ctx);
+
+    const patch: Record<string, unknown> = {};
+    if (args.title !== undefined) patch.title = args.title;
+    if (args.content !== undefined) patch.content = args.content;
+    if (args.memo_type !== undefined) patch.memo_type = args.memo_type;
+    if (args.status !== undefined) patch.status = args.status;
+    if (args.assigned_to !== undefined) patch.assigned_to = args.assigned_to;
+
+    if (Object.keys(patch).length > 0) {
+      // No-returning update keeps this adapter-agnostic (matches MemoService.create's
+      // own supersedes update); the in-scope row is merged locally for the response.
+      const { error } = await this.db
+        .from('memos')
+        .update(patch)
+        .eq('id', memo.id)
+        .eq('org_id', ctx.memo.org_id)
+        .eq('project_id', ctx.memo.project_id);
+      if (error) throw error;
+    }
+
+    return { memo: this.presentMemo({ ...memo, ...patch } as MemoScope) };
   }
 
   private async getMemoInScope(memoId: string, ctx: ToolExecutionContext): Promise<MemoScope> {
