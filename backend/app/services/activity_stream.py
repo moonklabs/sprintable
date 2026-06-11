@@ -207,3 +207,47 @@ async def extract_activities_best_effort(db: AsyncSession, event_ids: list[uuid.
             await upsert_activity_from_events(db, event_ids)
     except Exception:
         logger.warning("activity extractor skipped (best-effort) for events=%s", event_ids, exc_info=True)
+
+
+async def query_activity_stream(
+    db: AsyncSession,
+    org_id: uuid.UUID,
+    *,
+    project_id: uuid.UUID | None = None,
+    actor_id: uuid.UUID | None = None,
+    verb: str | None = None,
+    object_type: str | None = None,
+    object_id: uuid.UUID | None = None,
+    since=None,
+    until=None,
+    after_seq: int | None = None,
+    limit: int = 50,
+) -> tuple[list[ActivityEvent], int | None]:
+    """L1 BE-5: activity_events를 org-scope + 필터로 조회(activity_seq ASC cursor).
+
+    반환: (rows, next_after_seq). next_after_seq는 페이지가 가득 찼을 때만 마지막 seq —
+    None이면 더 없음. org_id는 항상 강제(AC①). after_seq는 strict(> after_seq) cursor라
+    중복 없이 다음 페이지를 잇는다.
+    """
+    query = select(ActivityEvent).where(ActivityEvent.org_id == org_id)
+    if project_id is not None:
+        query = query.where(ActivityEvent.project_id == project_id)
+    if actor_id is not None:
+        query = query.where(ActivityEvent.actor_id == actor_id)
+    if verb is not None:
+        query = query.where(ActivityEvent.verb == verb)
+    if object_type is not None:
+        query = query.where(ActivityEvent.object_type == object_type)
+    if object_id is not None:
+        query = query.where(ActivityEvent.object_id == object_id)
+    if since is not None:
+        query = query.where(ActivityEvent.occurred_at >= since)
+    if until is not None:
+        query = query.where(ActivityEvent.occurred_at <= until)
+    if after_seq is not None:
+        query = query.where(ActivityEvent.activity_seq > after_seq)
+
+    query = query.order_by(ActivityEvent.activity_seq.asc()).limit(limit)
+    rows = list((await db.execute(query)).scalars().all())
+    next_after_seq = rows[-1].activity_seq if len(rows) == limit else None
+    return rows, next_after_seq
