@@ -251,3 +251,50 @@ async def query_activity_stream(
     rows = list((await db.execute(query)).scalars().all())
     next_after_seq = rows[-1].activity_seq if len(rows) == limit else None
     return rows, next_after_seq
+
+
+async def poll_activities_after_seq(
+    db: AsyncSession,
+    after_seq: int,
+    *,
+    limit: int = 100,
+    org_id: uuid.UUID | None = None,
+) -> tuple[list[ActivityEvent], int | None]:
+    """L1 BE-6 (L2 trigger 소비 helper): activity_seq cursor로 신규 활동을 안정 poll한다.
+
+    activity_seq는 단조 증가(BIGINT Identity)라 after_seq 초과분을 ASC로 반환하면 누락·중복
+    없이 이어 읽는다. org_id 생략 시 전 org(시스템 트리거 워커)·지정 시 해당 org만. 동일 fan-out은
+    canonical 1행이라 같은 활동이 두 번 trigger되지 않는다(AC③). 반환: (rows, next_after_seq) —
+    full page일 때만 next_after_seq, 아니면 None.
+    """
+    query = select(ActivityEvent).where(ActivityEvent.activity_seq > after_seq)
+    if org_id is not None:
+        query = query.where(ActivityEvent.org_id == org_id)
+    query = query.order_by(ActivityEvent.activity_seq.asc()).limit(limit)
+    rows = list((await db.execute(query)).scalars().all())
+    next_after_seq = rows[-1].activity_seq if len(rows) == limit else None
+    return rows, next_after_seq
+
+
+async def latest_activity_for_object(
+    db: AsyncSession,
+    org_id: uuid.UUID,
+    object_type: str,
+    object_id: uuid.UUID,
+) -> ActivityEvent | None:
+    """L1 BE-6 (L4 anchoring 소비 helper): object 기준 가장 최근 canonical 활동 1행을 조회한다.
+
+    가설/회고 등 L4 anchoring이 '이 object의 최신 활동'을 anchor로 잡을 때 쓴다. activity_seq
+    DESC로 최신 1행(동일 fan-out은 canonical 1행이라 중복 없음). 매칭 없으면 None.
+    """
+    query = (
+        select(ActivityEvent)
+        .where(
+            ActivityEvent.org_id == org_id,
+            ActivityEvent.object_type == object_type,
+            ActivityEvent.object_id == object_id,
+        )
+        .order_by(ActivityEvent.activity_seq.desc())
+        .limit(1)
+    )
+    return (await db.execute(query)).scalars().first()
