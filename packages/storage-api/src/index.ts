@@ -9,6 +9,9 @@ export { SupabaseNotificationRepository } from './SupabaseNotificationRepository
 export { SupabaseTeamMemberRepository } from './SupabaseTeamMemberRepository';
 export { SupabaseInboxItemRepository } from './SupabaseInboxItemRepository';
 
+// Api* 명명 신규(Supabase* 레거시 alias 없음): hypotheses FastAPI 직타 레포지토리 (E1-S7).
+export { ApiHypothesisRepository } from './ApiHypothesisRepository';
+
 // Alias: supabase 없는 이름으로 re-export
 export { SupabaseEpicRepository as ApiEpicRepository } from './SupabaseEpicRepository';
 export { SupabaseStoryRepository as ApiStoryRepository } from './SupabaseStoryRepository';
