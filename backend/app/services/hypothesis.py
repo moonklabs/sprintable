@@ -108,7 +108,10 @@ async def create_hypothesis(
         owner_member_id=owner_id,
         created_by_member_id=caller.id,
         confirmed_by_member_id=caller.id if status == "active" else None,
-        drafted_by_member_id=caller.id if caller.type == "agent" else None,
+        # 비-휴먼(에이전트/API-key) caller = 초안 작성자. proposed 강제(위 `!= "human"`)와 동일
+        # 술어로 정합 — API-key resolve의 type이 정확히 "agent"가 아닌 케이스(가설 1호 drafted_by
+        # null 회귀)도 포착. 휴먼 직생성만 drafted_by None.
+        drafted_by_member_id=caller.id if caller.type != "human" else None,
         statement=payload.statement,
         metric_definition=payload.metric_definition,
         measure_after=payload.measure_after,
