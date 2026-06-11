@@ -135,8 +135,9 @@ async def test_draft_template_no_persist():
 
 async def test_draft_persist_creates_proposed_row():
     from app.services import hypothesis as service
+    story_id = uuid.uuid4()
     payload = HypothesisDraftRequest(
-        project_id=PROJECT_ID, source_type="story", source_id=uuid.uuid4(), persist=True,
+        project_id=PROJECT_ID, source_type="story", source_id=story_id, persist=True,
     )
     created = _hyp_response()  # create_hypothesis는 실제로 HypothesisResponse를 반환
     with patch.object(service, "create_hypothesis", AsyncMock(return_value=created)) as mock_create:
@@ -144,7 +145,44 @@ async def test_draft_persist_creates_proposed_row():
     mock_create.assert_awaited_once()
     created_payload = mock_create.call_args.args[3]
     assert created_payload.status == "proposed"
+    # S10 reopen ⓐ: source_type='story' → story_id로 실 링크(빈 list 회귀 방지).
+    assert created_payload.story_ids == [story_id]
+    assert created_payload.epic_ids == []
     assert out.hypothesis is not None and out.hypothesis.status == "proposed"
+
+
+async def test_draft_persist_links_epic_source():
+    """S10 reopen ⓐ: source_type='epic'이면 epic_ids=[source_id]로 넘겨 실 링크 생성.
+
+    이전엔 source_type/source_id 필드만 저장하고 epic_ids=[]라 add_epic_links([])→
+    에픽 상세 가설 리스트(hypothesis_epic_links 조인)에 안 떴다.
+    """
+    from app.services import hypothesis as service
+    epic_id = uuid.uuid4()
+    payload = HypothesisDraftRequest(
+        project_id=PROJECT_ID, source_type="epic", source_id=epic_id,
+        context={"title": "온보딩 개선"}, persist=True,
+    )
+    created = _hyp_response()
+    with patch.object(service, "create_hypothesis", AsyncMock(return_value=created)) as mock_create:
+        await service.draft_hypothesis(MagicMock(), ORG_ID, _member(OWNER_ID), payload)
+    created_payload = mock_create.call_args.args[3]
+    assert created_payload.epic_ids == [epic_id]
+    assert created_payload.story_ids == []
+
+
+async def test_draft_persist_non_linkable_source_no_links():
+    """source_type='conversation'/'dispatch'는 링크 테이블이 없어 epic_ids/story_ids 비움."""
+    from app.services import hypothesis as service
+    payload = HypothesisDraftRequest(
+        project_id=PROJECT_ID, source_type="conversation", source_id=uuid.uuid4(), persist=True,
+    )
+    created = _hyp_response()
+    with patch.object(service, "create_hypothesis", AsyncMock(return_value=created)) as mock_create:
+        await service.draft_hypothesis(MagicMock(), ORG_ID, _member(OWNER_ID), payload)
+    created_payload = mock_create.call_args.args[3]
+    assert created_payload.epic_ids == []
+    assert created_payload.story_ids == []
 
 
 # ── ⓒ 엔드포인트 와이어링 + dict-detail 계약 ──────────────────────────────────
