@@ -509,6 +509,8 @@ class ConversationResponse(BaseModel):
     created_by: uuid.UUID | None = None
     created_at: datetime
     updated_at: datetime
+    # 270c87e6: caller의 알림 mute 상태(participant muted_at 기반) — FE mute 토글 초기 상태용(#1426).
+    muted: bool = False
 
 
 # E-FILE S1: 채팅 첨부. GCS 기록은 FE-proxy(uploadToGcs)가 처리하고 BE는 URL+메타만 저장.
@@ -644,11 +646,15 @@ async def list_conversations(
         raise HTTPException(status_code=403, detail="Only owner/admin can view agent conversations.")
 
     conv_ids_result = await db.execute(
-        select(ConversationParticipant.conversation_id).where(
+        select(ConversationParticipant.conversation_id, ConversationParticipant.muted_at).where(
             ConversationParticipant.member_id == sender.id
         )
     )
-    conv_ids = set(r[0] for r in conv_ids_result.all())
+    _caller_rows = conv_ids_result.all()
+    conv_ids = set(r.conversation_id for r in _caller_rows)
+    # 270c87e6: caller의 대화별 mute 상태(FE 토글 초기 상태·#1426). admin-bypass로 추가되는
+    # agent-only 대화는 caller가 참여자 아니라 자연히 False.
+    caller_muted = {r.conversation_id: r.muted_at is not None for r in _caller_rows}
 
     # AC1/2 + #1262: admin-bypass는 **agent-only 대화로 한정**(사적 DM 프라이버시).
     # project 내 agent type member가 participant인 conversation 후보를 모으되,
@@ -740,6 +746,7 @@ async def list_conversations(
             "resolved_by": str(conv.resolved_by) if conv.resolved_by else None,
             "resolved_at": conv.resolved_at.isoformat() if conv.resolved_at else None,
             "participants": conv_participants.get(conv.id, []),
+            "muted": caller_muted.get(conv.id, False),  # 270c87e6: FE mute 토글 초기 상태
             "latest_message": {
                 "content": latest_msg.content,
                 "created_at": latest_msg.created_at.isoformat(),
@@ -784,7 +791,16 @@ async def get_conversation(
         if participant is None:
             raise HTTPException(status_code=403, detail="Not a participant")
 
-    return ConversationResponse.model_validate(conv)
+    # 270c87e6: caller의 mute 상태 노출(FE 토글 초기 상태·#1426). 비참여자(admin-bypass agent-only)는 False.
+    caller_muted_at = (await db.execute(
+        select(ConversationParticipant.muted_at).where(
+            ConversationParticipant.conversation_id == conversation_id,
+            ConversationParticipant.member_id == sender.id,
+        )
+    )).scalar_one_or_none()
+    resp = ConversationResponse.model_validate(conv)
+    resp.muted = caller_muted_at is not None
+    return resp
 
 
 @router.get("/{conversation_id}/messages")
