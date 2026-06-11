@@ -10,8 +10,9 @@ import { slugifyDocTitle, isUntitledSlug } from '@/components/docs/lib/doc-slug'
 import { useDocSync, unwrapDocResponse, type SaveStatus } from '@/components/docs/use-doc-sync';
 import { htmlToMarkdown } from '@/components/docs/lib/content-converter';
 import Link from 'next/link';
-import { AlertTriangle, Check, Copy, Eye, Link2, Loader2, MoreHorizontal, RotateCw, Share2, Trash2, XCircle } from 'lucide-react';
+import { Check, Copy, Eye, Link2, Loader2, MoreHorizontal, Share2, Trash2, XCircle } from 'lucide-react';
 import { DocShareDialog } from '@/components/docs/doc-share-dialog';
+import { DocSyncBanner } from '@/components/docs/doc-sync-banner';
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -100,28 +101,9 @@ function InlineSaveIndicator({
       </button>
     );
   }
-  if (status === 'conflict') {
-    return (
-      <button type="button" onClick={onAction}
-        aria-label={t('statusConflict')} title={t('statusConflict')}
-        className="flex max-w-[120px] items-center gap-1 truncate text-xs text-destructive hover:text-destructive/80 md:max-w-none"
-      >
-        <AlertTriangle className="size-3.5 shrink-0" />
-        <span className="truncate">{t('statusConflict')}</span>
-      </button>
-    );
-  }
-  if (status === 'remote-changed') {
-    return (
-      <button type="button" onClick={onAction}
-        aria-label={t('statusRemoteChanged')} title={t('statusRemoteChanged')}
-        className="flex max-w-[120px] items-center gap-1 truncate text-xs text-warning hover:text-warning/80 md:max-w-none"
-      >
-        <RotateCw className="size-3.5 shrink-0" />
-        <span className="truncate">{t('statusRemoteChanged')}</span>
-      </button>
-    );
-  }
+  // conflict / remote-changed are surfaced by DocSyncBanner (the off-ramp), not this
+  // status chip — keeping a chip here too would double-surface and re-expose the
+  // dead-end onAction. (fc4d4264 FIX-4)
   return null;
 }
 
@@ -173,7 +155,7 @@ export default function DocSlugPage() {
   const shouldAutoDeriveSlug = selectedDoc !== null && !slugLocked && isUntitledSlug(selectedDoc.slug);
   const derivedSlug = shouldAutoDeriveSlug ? slugifyDocTitle(title) : '';
 
-  const { status: saveStatus, isDirty, save } = useDocSync<DocDetail>({
+  const { status: saveStatus, isDirty, save, clearSyncAlerts } = useDocSync<DocDetail>({
     docId: selectedDoc?.id ?? null,
     savePayload: derivedSlug
       ? { title, content, content_format: contentFormat, slug: derivedSlug, slug_locked: false }
@@ -218,6 +200,21 @@ export default function DocSlugPage() {
   }, [projectId, slug, router]);
 
   useEffect(() => { void fetchDoc(); }, [fetchDoc]);
+
+  // FIX-4 off-ramp (fc4d4264): resolve a conflict / remote-changed dead-end.
+  // Pull re-fetches the live doc (fetchDoc is no-store, AC-F4-7) → the serverUpdatedAt
+  // effect in useDocSync realigns the baseline + clears the latch; clearSyncAlerts is
+  // the explicit belt-and-suspenders so the banner dismisses immediately.
+  const handlePull = useCallback(async () => {
+    await fetchDoc();
+    clearSyncAlerts('saved');
+  }, [fetchDoc, clearSyncAlerts]);
+
+  // Overwrite is the only force path — the banner confirms before calling this, and
+  // autosave/retry never force (FIX-2 invariant).
+  const handleOverwrite = useCallback(() => {
+    void save({ force: true });
+  }, [save]);
 
   // layout handleRename PATCH 성공 후 updated_at 동기화 — useDocSync 기준선 desync 방지
   useEffect(() => {
@@ -420,6 +417,25 @@ export default function DocSlugPage() {
             ) : null
           }
           actions={docActions}
+          syncBanner={
+            saveStatus === 'conflict' || saveStatus === 'remote-changed' ? (
+              <DocSyncBanner
+                status={saveStatus}
+                isDirty={isDirty}
+                onPull={handlePull}
+                onOverwrite={handleOverwrite}
+                onDismiss={() => clearSyncAlerts(isDirty ? 'unsaved' : 'idle')}
+                labels={{
+                  title: saveStatus === 'conflict' ? t('statusConflict') : t('statusRemoteChanged'),
+                  pull: t('conflictReload'),
+                  overwrite: t('conflictOverwrite'),
+                  keepEditing: t('syncKeepEditing'),
+                  discardWarning: t('syncDiscardWarning'),
+                  overwriteConfirm: t('syncOverwriteConfirm'),
+                }}
+              />
+            ) : null
+          }
           labels={{
             contentFormat: t('contentFormat'),
             markdown: t('formatMarkdown'),
