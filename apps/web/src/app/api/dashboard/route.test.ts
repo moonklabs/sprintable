@@ -1,101 +1,34 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
-const { createDbServerClient, getAuthContext, createAdminClient } = vi.hoisted(() => ({
-  createDbServerClient: vi.fn(),
-  getAuthContext: vi.fn(),
-  createAdminClient: vi.fn(),
-}));
-
-vi.mock('@/lib/db/server', () => ({ createDbServerClient }));
-vi.mock('@/lib/db/admin', () => ({ createAdminClient }));
+// 837a36c4(Group B b5): proxy 위임 리팩토링 후 stale 재작성 — auth 게이트 → proxyToFastapi → 래핑.
+const { getAuthContext, proxyToFastapi } = vi.hoisted(() => ({ getAuthContext: vi.fn(), proxyToFastapi: vi.fn() }));
 vi.mock('@/lib/auth-helpers', () => ({ getAuthContext }));
+vi.mock('@/lib/fastapi-proxy', () => ({ proxyToFastapi }));
 
 import { GET } from './route';
 
-function makeAgent() {
-  return { id: 'agent-1', type: 'agent', rateLimitExceeded: false, rateLimitRemaining: 299, rateLimitResetAt: 0 };
-}
+const PATH = '/api/v2/dashboard';
+const agent = () => ({ id: 'a', type: 'agent', rateLimitExceeded: false, rateLimitRemaining: 299, rateLimitResetAt: 0 });
+const okRes = (b: unknown = { ok: 1 }) =>
+  new Response(JSON.stringify(b), { status: 200, headers: { 'content-type': 'application/json' } });
+const req = () => new Request('http://localhost/api/dashboard?member_id=a');
 
-describe('GET /api/dashboard', () => {
-  beforeEach(() => {
-    createDbServerClient.mockReset();
-    getAuthContext.mockReset();
-    createAdminClient.mockReset();
-    getAuthContext.mockResolvedValue(makeAgent());
-  });
-
-  it('returns 401 when not authenticated', async () => {
-    const db = {};
-    createDbServerClient.mockResolvedValue(db);
+describe('GET /api/dashboard (proxy 위임)', () => {
+  beforeEach(() => { getAuthContext.mockReset(); proxyToFastapi.mockReset(); getAuthContext.mockResolvedValue(agent()); });
+  it('401 when unauthenticated', async () => {
     getAuthContext.mockResolvedValue(null);
-
-    const response = await GET(new Request('http://localhost/api/dashboard?member_id=member-1'));
-
-    expect(response.status).toBe(401);
+    expect((await GET(req())).status).toBe(401);
+    expect(proxyToFastapi).not.toHaveBeenCalled();
   });
-
-  it('returns 400 when member_id is missing', async () => {
-    const db = {};
-    createDbServerClient.mockResolvedValue(db);
-    createAdminClient.mockReturnValue(db);
-
-    const response = await GET(new Request('http://localhost/api/dashboard'));
-
-    expect(response.status).toBe(400);
+  it('delegates and wraps', async () => {
+    proxyToFastapi.mockResolvedValue(okRes());
+    const res = await GET(req());
+    expect(res.status).toBe(200);
+    expect(proxyToFastapi).toHaveBeenCalledWith(expect.anything(), PATH);
+    expect((await res.json()).data).toMatchObject({ ok: 1 });
   });
-
-  it('returns 404 when member not found (no project_id)', async () => {
-    const chain = () => q;
-    const q: Record<string, unknown> = {};
-    q.select = vi.fn(chain);
-    q.eq = vi.fn(chain);
-    q.single = vi.fn(async () => ({ data: null, error: { message: 'not found' } }));
-    const db = { from: vi.fn(() => q) };
-    createDbServerClient.mockResolvedValue(db);
-    createAdminClient.mockReturnValue(db);
-
-    const response = await GET(new Request('http://localhost/api/dashboard?member_id=nonexistent'));
-
-    expect(response.status).toBe(404);
-  });
-
-  it('returns 200 with dashboard data when project_id provided', async () => {
-    const stories = [{ id: 'story-1', title: 'S1', status: 'backlog', story_points: 5 }];
-    const tasks = [{ id: 'task-1', title: 'T1', status: 'todo' }];
-    const memos = [{ id: 'memo-1', title: 'M1', status: 'open' }];
-
-    let callIndex = 0;
-    const makeQuery = (rows: Record<string, unknown>[]) => {
-      const q: Record<string, unknown> = {};
-      const chain = () => q;
-      q.select = vi.fn(chain);
-      q.eq = vi.fn(chain);
-      q.neq = vi.fn(chain);
-      q.then = Promise.resolve({ data: rows, error: null }).then.bind(Promise.resolve({ data: rows, error: null }));
-      return q;
-    };
-    const db = {
-      from: vi.fn(() => {
-        const idx = callIndex++;
-        if (idx === 0) return makeQuery(stories);
-        if (idx === 1) return makeQuery(tasks);
-        return makeQuery(memos);
-      }),
-    };
-    createDbServerClient.mockResolvedValue(db);
-    createAdminClient.mockReturnValue(db);
-
-    const response = await GET(
-      new Request('http://localhost/api/dashboard?member_id=member-1&project_id=project-1'),
-    );
-
-    expect(response.status).toBe(200);
-    const body = await response.json();
-    expect(body.data).toMatchObject({
-      my_stories: stories,
-      assigned_stories: stories,
-      my_tasks: tasks,
-      open_memos: memos,
-    });
+  it('passes through proxy errors', async () => {
+    proxyToFastapi.mockResolvedValue(new Response('e', { status: 500 }));
+    expect((await GET(req())).status).toBe(500);
   });
 });
