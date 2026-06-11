@@ -199,6 +199,23 @@ afterEach(() => {
   vi.restoreAllMocks();
 });
 
+
+// 837a36c4(b16): recordFailure가 MemoService.fromDb(db).addReply로 실패코멘트 기록 — OSS ApiMemoRepository
+// stub(this.repo.getById 미보유)으로 인한 크래시 격리. dispatcher 테스트는 auth_failed 처리(알림/상태)를
+// 검증하지 대상이지 memo 코멘트 write가 아니라, addReply를 no-op로 모킹(코멘트 내용 단언 없음).
+vi.mock('@/services/memo', async (importActual) => ({
+  ...(await importActual<typeof import('@/services/memo')>()),
+  // OSS ApiMemoRepository는 빈 stub(SaaS overlay가 실구현) — 실 MemoService.addReply는 repo→db로
+  // memo_replies insert. dispatcher 테스트는 그 실패코멘트 write를 state.insertedReplies로 검증하므로,
+  // fromDb가 받은 db에 동일 insert를 수행하는 thin mock으로 실동작을 재현(코멘트 write 보존).
+  MemoService: {
+    fromDb: (db: any) => ({
+      addReply: async (memoId: string, content: string, createdBy: string) =>
+        db.from('memo_replies').insert({ memo_id: memoId, content, created_by: createdBy, review_type: 'comment' }),
+    }),
+  },
+}));
+
 describe('discord outbound helpers', () => {
   it('identifies Discord source memos', () => {
     expect(isDiscordSourceMemo({ source: 'discord', channel_id: 'channel-1' })).toBe(true);

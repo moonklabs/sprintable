@@ -40,11 +40,8 @@ export default defineConfig({
       'apps/web/src/services/agent-execution-loop.test.ts',
       'apps/web/src/services/agent-tool-execution-engine.test.ts',
       'apps/web/src/services/background-runtime.test.ts',
-      'apps/web/src/services/discord-outbound-dispatcher.test.ts',
       'apps/web/src/services/memo-assignment-dispatch.test.ts',
       'apps/web/src/services/memo.test.ts',
-      'apps/web/src/services/slack-outbound-dispatcher.test.ts',
-      'apps/web/src/services/teams-outbound-dispatcher.test.ts',
     ],
   },
 });
