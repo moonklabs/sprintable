@@ -2311,7 +2311,8 @@
     "pickerEmpty": "No hypotheses to link",
     "crossEpic": "Other epic",
     "crossEpicHint": "This hypothesis belongs to a different epic",
-    "createElsewhereHint": "Hypotheses are created from the epic detail"
+    "createElsewhereHint": "Hypotheses are created from the epic detail",
+    "summaryTitle": "{count} linked hypotheses"
   },
   "epics": {
     "title": "Epics",

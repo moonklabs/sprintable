@@ -14,6 +14,7 @@ import {
 } from '@/components/ui/dialog';
 import { ToastContainer, useToast } from '@/components/ui/toast';
 import { OutcomeStatusBadge } from '@/components/outcome/outcome-status-badge';
+import { HypothesesSummary } from '@/components/hypotheses/hypotheses-summary';
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -42,6 +43,9 @@ interface Epic {
   measure_after?: string | null;
   outcome_status?: 'n_a' | 'pending' | 'hit' | 'miss' | null;
   outcome_result?: Record<string, unknown> | null;
+  // E1 S8b: BE EpicResponse가 list 응답에 부착하는 연결 가설 집계(미부착 경로는 기본값).
+  hypothesis_count?: number;
+  risky_status?: string | null;
 }
 
 // ─── Helpers ─────────────────────────────────────────────────────────────────
@@ -464,6 +468,7 @@ function EpicRow({ epic, isSelected, onClick, onDeleteRequest }: EpicRowProps) {
             <span>{t('targetDate')}: {formatDate(epic.target_date)}</span>
           ) : null}
           <span>{done}/{total} {t('stories')}</span>
+          <HypothesesSummary count={epic.hypothesis_count ?? 0} riskyStatus={epic.risky_status ?? null} />
           {spExceeded ? (
             <span className="rounded-full bg-destructive/10 px-1.5 py-0.5 text-[10px] font-semibold text-destructive">
               {t('spExceeded')}
