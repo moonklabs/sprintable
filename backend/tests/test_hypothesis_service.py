@@ -18,6 +18,7 @@ from app.models.hypothesis import is_valid_transition
 from app.schemas.hypothesis import (
     HypothesisCreate,
     HypothesisLinkRequest,
+    HypothesisResponse,
     HypothesisTransition,
     HypothesisUpdate,
 )
@@ -54,6 +55,7 @@ def _hyp_stub(**overrides) -> SimpleNamespace:
         statement="s", metric_definition=VALID_METRIC,
         measure_after=datetime(2026, 7, 1, tzinfo=timezone.utc), status="proposed",
         outcome_result=None, confidence=None, source_type=None, source_id=None,
+        drafted_by_member_id=None, draft_metadata=None,
         human_accounting={}, gate_contract={},
         created_at=datetime(2026, 6, 1, tzinfo=timezone.utc),
         updated_at=datetime(2026, 6, 1, tzinfo=timezone.utc),
@@ -327,3 +329,17 @@ async def test_link_adds_epic_and_story():
         )
     repo.add_epic_links.assert_awaited_once_with(HYP_ID, [eid], "primary")
     repo.add_story_links.assert_awaited_once_with(HYP_ID, [sid], "supports")
+
+
+def test_response_exposes_draft_fields():
+    """48dbada0 선행: Response가 drafted_by_member_id·draft_metadata 노출 — FE isDraft 게이팅.
+
+    agent 초안(drafted_by 채워짐) vs 사람 생성 proposed(None) 구분이 [활성화] 버튼 게이트.
+    """
+    drafted = HypothesisResponse.from_model(
+        _hyp_stub(drafted_by_member_id=CALLER_AGENT_ID, draft_metadata={"template": True}), [], []
+    )
+    assert drafted.drafted_by_member_id == CALLER_AGENT_ID
+    assert drafted.draft_metadata == {"template": True}
+    human_made = HypothesisResponse.from_model(_hyp_stub(), [], [])
+    assert human_made.drafted_by_member_id is None and human_made.draft_metadata is None
