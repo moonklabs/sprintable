@@ -301,3 +301,29 @@ async def score_ga4_outcomes(
     except Exception as exc:
         logger.exception("cron error: %s", exc)
         return _err("INTERNAL_ERROR", "Internal server error", 500)
+
+
+# ─── POST /api/v2/internal/cron/score-hypotheses ──────────────────────────────
+
+@router.post("/score-hypotheses")
+async def score_hypotheses_cron(
+    request: Request,
+    session: AsyncSession = Depends(get_db),
+) -> JSONResponse:
+    """E1-S4: Hypothesis 지연 채점 잡(블루프린트 §8.3).
+
+    measure_after <= now 인 active/measuring 가설을 채점 — active→measuring 전이 후
+    ga4/internal_ops 지표로 verified|falsified 판정(실패·미지원은 measuring 유지). legacy
+    /score-ga4-outcomes와 분리(hypotheses 테이블만). 스케줄 배선은 별도 운영 story.
+    """
+    verify_cron(request)
+
+    from app.services.hypothesis_scorer import score_hypotheses
+
+    try:
+        summary = await score_hypotheses(session)
+        await session.commit()
+        return _ok(summary)
+    except Exception as exc:
+        logger.exception("score-hypotheses cron error: %s", exc)
+        return _err("INTERNAL_ERROR", "Internal server error", 500)
