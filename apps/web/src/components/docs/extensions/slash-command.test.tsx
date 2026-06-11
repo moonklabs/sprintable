@@ -116,7 +116,8 @@ describe('defaultSlashItems', () => {
   it('each item has a non-empty title, icon, and command function', () => {
     for (const item of defaultSlashItems) {
       expect(item.title.length).toBeGreaterThan(0);
-      expect(item.icon.length).toBeGreaterThan(0);
+      // icon is an FC<{ className?: string }> (lucide component), not a string — assert it exists
+      expect(item.icon).toBeTruthy();
       expect(typeof item.command).toBe('function');
     }
   });
