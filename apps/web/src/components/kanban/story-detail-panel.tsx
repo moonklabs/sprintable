@@ -14,8 +14,8 @@ import { AttachmentImage } from '@/components/chat/attachment-image';
 import { AttachmentFile } from '@/components/chat/attachment-file';
 import { LabelChip, LABEL_PRESET_COLORS, type LabelData } from '@/components/ui/label-chip';
 import { DependencyGraph } from './dependency-graph';
-import { OutcomeIntentFields, type OutcomeIntentValue } from '@/components/outcome/outcome-intent-fields';
 import { OutcomeResultCard, type OutcomeResult } from '@/components/outcome/outcome-result-card';
+import { StoryHypothesesSection } from '@/components/hypotheses/story-hypotheses-section';
 import { EntityDispatchPanel } from '@/components/dispatch/entity-dispatch-panel';
 import { Button } from '@/components/ui/button';
 import { StatusBadge } from '@/components/ui/status-badge';
@@ -138,14 +138,6 @@ export function StoryDetailPanel({ story, tasks, nextTasksCursor = null, loading
   const [attachError, setAttachError] = useState(false);
   const attachInputRef = useRef<HTMLInputElement>(null);
 
-  const [intent, setIntent] = useState<OutcomeIntentValue>({
-    success_hypothesis: story.success_hypothesis ?? '',
-    metric_definition: story.metric_definition ?? null,
-    measure_after: story.measure_after ? story.measure_after.slice(0, 10) : '',
-  });
-  const [intentOpen, setIntentOpen] = useState(!!story.success_hypothesis || !!story.metric_definition);
-  const [savingIntent, setSavingIntent] = useState(false);
-
   const [editingAssignee, setEditingAssignee] = useState(false);
   const [savingAssignee, setSavingAssignee] = useState(false);
 
@@ -190,13 +182,7 @@ export function StoryDetailPanel({ story, tasks, nextTasksCursor = null, loading
     setTitleDraft(story.title);
     setDescriptionDraft(story.description ?? '');
     setAcDraft(story.acceptance_criteria ?? '');
-    setIntent({
-      success_hypothesis: story.success_hypothesis ?? '',
-      metric_definition: story.metric_definition ?? null,
-      measure_after: story.measure_after ? story.measure_after.slice(0, 10) : '',
-    });
-    setIntentOpen(!!story.success_hypothesis || !!story.metric_definition);
-  }, [story.id, story.title, story.description, story.acceptance_criteria, story.success_hypothesis, story.metric_definition, story.measure_after]);
+  }, [story.id, story.title, story.description, story.acceptance_criteria]);
 
   useEffect(() => {
     if (editingTitle) {
@@ -479,16 +465,6 @@ export function StoryDetailPanel({ story, tasks, nextTasksCursor = null, loading
     const next = (story.attachments ?? []).filter((a) => a.url !== url); // filter → 전체 교체
     const updated = await patchStory({ attachments: next });
     onStoryUpdate?.({ ...story, attachments: updated?.attachments ?? next });
-  };
-
-  const handleSaveIntent = async () => {
-    setSavingIntent(true);
-    await patchStory({
-      success_hypothesis: intent.success_hypothesis.trim() || null,
-      metric_definition: intent.metric_definition,
-      measure_after: intent.measure_after ? `${intent.measure_after}T00:00:00Z` : null,
-    });
-    setSavingIntent(false);
   };
 
   // Fetch comments
@@ -1226,7 +1202,9 @@ export function StoryDetailPanel({ story, tasks, nextTasksCursor = null, loading
               )}
             </div>
 
-            {/* Outcome intent + result */}
+            {/* Outcome result (read-only) + 연결 가설 chip/picker — 인라인 intent 입력은
+                S8c서 연결 가설 affordance로 대체(스토리서 가설 생성 금지·AC①). 결과 카드는
+                legacy outcome 백필(1519fc60) 전까지 보존. */}
             <div className="space-y-3">
               {story.outcome_status && story.outcome_status !== 'n_a' ? (
                 <OutcomeResultCard
@@ -1236,19 +1214,12 @@ export function StoryDetailPanel({ story, tasks, nextTasksCursor = null, loading
                   pendingMetricLabel={story.metric_definition?.metric}
                 />
               ) : null}
-              <OutcomeIntentFields
-                value={intent}
-                onChange={setIntent}
-                open={intentOpen}
-                onOpenChange={setIntentOpen}
-                context="story"
-              />
-              {intentOpen ? (
-                <div className="flex justify-end gap-2">
-                  <Button size="sm" onClick={() => { void handleSaveIntent(); }} disabled={savingIntent}>
-                    {savingIntent ? t('loading') : t('save')}
-                  </Button>
-                </div>
+              {projectId ? (
+                <StoryHypothesesSection
+                  storyId={story.id}
+                  epicId={story.epic_id}
+                  projectId={projectId}
+                />
               ) : null}
             </div>
 

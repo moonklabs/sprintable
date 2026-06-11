@@ -2281,7 +2281,17 @@
     "dirDown": "≤",
     "measureAfterField": "측정일",
     "cancel": "취소",
-    "saving": "저장 중…"
+    "saving": "저장 중…",
+    "linkedTitle": "연결 가설",
+    "linkHypothesis": "가설 연결",
+    "noLinked": "연결된 가설이 없습니다",
+    "unlink": "연결 해제",
+    "pickerTitle": "연결할 가설 선택",
+    "pickerSearch": "가설 검색…",
+    "pickerEmpty": "연결할 가설이 없습니다",
+    "crossEpic": "다른 에픽",
+    "crossEpicHint": "이 가설은 다른 에픽 소속입니다",
+    "createElsewhereHint": "가설은 에픽 상세에서 생성합니다"
   },
   "epics": {
     "title": "에픽",
