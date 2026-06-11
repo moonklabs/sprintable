@@ -1,126 +1,67 @@
-import { beforeEach, describe, expect, it, vi } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 
-const {
-  createDbServerClientMock,
-  createAdminClientMock,
-  getMyTeamMemberMock,
-  requireOrgAdminMock,
-  listProjectMcpConnectionSummariesMock,
-  createMcpConnectionReviewRequestMock,
-} = vi.hoisted(() => ({
-  createDbServerClientMock: vi.fn(),
-  createAdminClientMock: vi.fn(() => ({ tag: 'admin' })),
-  getMyTeamMemberMock: vi.fn(),
-  requireOrgAdminMock: vi.fn(),
-  listProjectMcpConnectionSummariesMock: vi.fn(),
-  createMcpConnectionReviewRequestMock: vi.fn(),
-}));
+const { proxyToFastapi } = vi.hoisted(() => ({ proxyToFastapi: vi.fn() }));
 
-vi.mock('@/lib/db/server', () => ({
-  createDbServerClient: createDbServerClientMock,
-}));
-
-vi.mock('@/lib/db/admin', () => ({
-  createAdminClient: createAdminClientMock,
-}));
-
-vi.mock('@/lib/auth-helpers', () => ({
-  getMyTeamMember: getMyTeamMemberMock,
-}));
-
-vi.mock('@/lib/admin-check', () => ({
-  requireOrgAdmin: requireOrgAdminMock,
-}));
-
-vi.mock('@/services/project-mcp', () => ({
-  listProjectMcpConnectionSummaries: listProjectMcpConnectionSummariesMock,
-  createMcpConnectionReviewRequest: createMcpConnectionReviewRequestMock,
-}));
+vi.mock('@/lib/fastapi-proxy', () => ({ proxyToFastapi }));
 
 import { GET, POST } from './route';
 
-function createDbStub() {
-  return {
-    auth: {
-      getUser: vi.fn(async () => ({ data: { user: { id: 'user-1' } } })),
-    },
-  };
+function fastapiOk(body: unknown, status = 200) {
+  return new Response(JSON.stringify(body), {
+    status,
+    headers: { 'Content-Type': 'application/json' },
+  });
 }
 
-describe('project mcp connections route', () => {
-  beforeEach(() => {
-    createDbServerClientMock.mockReset();
-    createAdminClientMock.mockClear();
-    getMyTeamMemberMock.mockReset();
-    requireOrgAdminMock.mockReset();
-    listProjectMcpConnectionSummariesMock.mockReset();
-    createMcpConnectionReviewRequestMock.mockReset();
+function fastapiErr(status: number, body: unknown = { detail: 'upstream error' }) {
+  return new Response(JSON.stringify(body), {
+    status,
+    headers: { 'Content-Type': 'application/json' },
+  });
+}
 
-    createDbServerClientMock.mockResolvedValue(createDbStub());
-    getMyTeamMemberMock.mockResolvedValue({ id: 'member-1', org_id: 'org-1', project_id: 'project-1' });
-    requireOrgAdminMock.mockResolvedValue(undefined);
+const ctx = (id = 'proj-1') => ({ params: Promise.resolve({ id }) });
+
+describe('/api/projects/[id]/mcp-connections', () => {
+  it('GET — OSS 모드: proxy 없이 빈 connections 정적 응답', async () => {
+    const resp = await GET(new Request('http://test'), ctx('proj-1'));
+
+    expect(proxyToFastapi).not.toHaveBeenCalled();
+    expect(resp.status).toBe(200);
+    await expect(resp.json()).resolves.toMatchObject({
+      data: { project_id: 'proj-1', connections: [] },
+    });
   });
 
-  it('returns approved connection summaries for the current project', async () => {
-    listProjectMcpConnectionSummariesMock.mockResolvedValue([
-      {
-        serverKey: 'github',
-        displayName: 'GitHub',
-        provider: 'github',
-        authStrategy: 'oauth',
-        connected: true,
-        connectUrl: 'https://github.com/login/oauth/authorize?...',
-        maskedSecret: '****1234',
-        label: 'octocat',
-        status: 'active',
-        toolNames: ['github.list_issues'],
-        validatedAt: '2026-04-09T00:00:00.000Z',
-        lastError: null,
-      },
-    ]);
+  it('POST — FastAPI로 위임하고 성공 body를 { data } 봉투로 래핑', async () => {
+    proxyToFastapi.mockResolvedValue(fastapiOk({ server_key: 'github', is_active: true }));
+    const request = new Request('http://test', { method: 'POST', body: JSON.stringify({ server_key: 'github' }) });
 
-    const response = await GET(new Request('https://sprintable.app/api/projects/project-1/mcp-connections'), {
-      params: Promise.resolve({ id: 'project-1' }),
-    });
-    expect(response).toBeDefined();
-    const body = await response!.json();
+    const resp = await POST(request, ctx());
 
-    expect(response!.status).toBe(200);
-    expect(listProjectMcpConnectionSummariesMock).toHaveBeenCalledWith({ tag: 'admin' }, {
-      orgId: 'org-1',
-      projectId: 'project-1',
-      origin: 'https://sprintable.app',
-      actorId: 'member-1',
+    expect(proxyToFastapi).toHaveBeenCalledWith(request, '/api/v2/projects/mcp-connections');
+    expect(resp.status).toBe(200);
+    await expect(resp.json()).resolves.toEqual({
+      data: { server_key: 'github', is_active: true },
+      error: null,
+      meta: null,
     });
-    expect(body.data.connections).toHaveLength(1);
   });
 
-  it('creates a custom review request', async () => {
-    createMcpConnectionReviewRequestMock.mockResolvedValue({ id: 'request-1', status: 'pending' });
+  it('POST — !ok 응답은 그대로 pass-through', async () => {
+    proxyToFastapi.mockResolvedValue(fastapiErr(403, { detail: 'forbidden' }));
 
-    const response = await POST(new Request('https://sprintable.app/api/projects/project-1/mcp-connections', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        server_name: 'Custom Internal MCP',
-        server_url: 'https://mcp.example.com/rpc',
-        notes: 'Need manual review',
-      }),
-    }), {
-      params: Promise.resolve({ id: 'project-1' }),
-    });
-    expect(response).toBeDefined();
-    const body = await response!.json();
+    const resp = await POST(new Request('http://test', { method: 'POST' }), ctx());
 
-    expect(response!.status).toBe(201);
-    expect(createMcpConnectionReviewRequestMock).toHaveBeenCalledWith({ tag: 'admin' }, {
-      orgId: 'org-1',
-      projectId: 'project-1',
-      actorId: 'member-1',
-      serverName: 'Custom Internal MCP',
-      serverUrl: 'https://mcp.example.com/rpc',
-      notes: 'Need manual review',
-    });
-    expect(body.data.id).toBe('request-1');
+    expect(resp.status).toBe(403);
+  });
+
+  it('POST — 204 응답은 { ok: true }로 변환', async () => {
+    proxyToFastapi.mockResolvedValue(new Response(null, { status: 204 }));
+
+    const resp = await POST(new Request('http://test', { method: 'POST' }), ctx());
+
+    expect(resp.status).toBe(200);
+    await expect(resp.json()).resolves.toMatchObject({ data: { ok: true } });
   });
 });
