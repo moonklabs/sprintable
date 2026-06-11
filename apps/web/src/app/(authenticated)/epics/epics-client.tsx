@@ -14,7 +14,6 @@ import {
 } from '@/components/ui/dialog';
 import { ToastContainer, useToast } from '@/components/ui/toast';
 import { OutcomeStatusBadge } from '@/components/outcome/outcome-status-badge';
-import { OutcomeIntentFields, type OutcomeIntentValue } from '@/components/outcome/outcome-intent-fields';
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -137,7 +136,6 @@ function EpicCreateForm({ projectId, orgId, onCreated, onCancel }: EpicCreateFor
   const [priority, setPriority] = useState<EpicPriority>('medium');
   const [targetDate, setTargetDate] = useState('');
   const [targetSp, setTargetSp] = useState('');
-  const [intent, setIntent] = useState<OutcomeIntentValue>({ success_hypothesis: '', metric_definition: null, measure_after: '' });
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
@@ -158,9 +156,6 @@ function EpicCreateForm({ projectId, orgId, onCreated, onCancel }: EpicCreateFor
       };
       if (targetDate) body.target_date = targetDate;
       if (targetSp) body.target_sp = Number(targetSp);
-      if (intent.success_hypothesis.trim()) body.success_hypothesis = intent.success_hypothesis.trim();
-      if (intent.metric_definition) body.metric_definition = intent.metric_definition;
-      if (intent.measure_after) body.measure_after = intent.measure_after;
 
       const res = await fetch('/api/epics', {
         method: 'POST',
@@ -177,7 +172,7 @@ function EpicCreateForm({ projectId, orgId, onCreated, onCancel }: EpicCreateFor
     } finally {
       setSubmitting(false);
     }
-  }, [title, description, priority, targetDate, targetSp, intent, projectId, orgId, onCreated]);
+  }, [title, description, priority, targetDate, targetSp, projectId, orgId, onCreated]);
 
   return (
     <form onSubmit={(e) => { void handleSubmit(e); }} className="space-y-4">
@@ -242,8 +237,6 @@ function EpicCreateForm({ projectId, orgId, onCreated, onCancel }: EpicCreateFor
         />
       </div>
 
-      <OutcomeIntentFields value={intent} onChange={setIntent} context="epic" />
-
       {error ? <p className="text-xs text-destructive">{error}</p> : null}
 
       <div className="flex justify-end gap-2 pt-2">
@@ -274,11 +267,6 @@ function EpicEditForm({ epic, onSaved, onCancel }: EpicEditFormProps) {
   const [status, setStatus] = useState<EpicStatus>(epic.status);
   const [targetDate, setTargetDate] = useState(epic.target_date?.slice(0, 10) ?? '');
   const [targetSp, setTargetSp] = useState(epic.target_sp !== undefined ? String(epic.target_sp) : '');
-  const [intent, setIntent] = useState<OutcomeIntentValue>({
-    success_hypothesis: epic.success_hypothesis ?? '',
-    metric_definition: (epic.metric_definition as import('@sprintable/core-storage').MetricDefinition | null) ?? null,
-    measure_after: epic.measure_after?.slice(0, 10) ?? '',
-  });
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
@@ -295,9 +283,6 @@ function EpicEditForm({ epic, onSaved, onCancel }: EpicEditFormProps) {
         description: description.trim() || undefined,
         priority,
         status,
-        success_hypothesis: intent.success_hypothesis.trim() || null,
-        metric_definition: intent.metric_definition ?? null,
-        measure_after: intent.measure_after || null,
       };
       if (targetDate) body.target_date = targetDate;
       if (targetSp) body.target_sp = Number(targetSp);
@@ -317,7 +302,7 @@ function EpicEditForm({ epic, onSaved, onCancel }: EpicEditFormProps) {
     } finally {
       setSubmitting(false);
     }
-  }, [title, description, priority, status, targetDate, targetSp, intent, epic.id, epic.stories, onSaved]);
+  }, [title, description, priority, status, targetDate, targetSp, epic.id, epic.stories, onSaved]);
 
   return (
     <form onSubmit={(e) => { void handleSubmit(e); }} className="space-y-4">
@@ -395,8 +380,6 @@ function EpicEditForm({ epic, onSaved, onCancel }: EpicEditFormProps) {
           />
         </div>
       </div>
-
-      <OutcomeIntentFields value={intent} onChange={setIntent} context="epic" />
 
       {error ? <p className="text-xs text-destructive">{error}</p> : null}
 

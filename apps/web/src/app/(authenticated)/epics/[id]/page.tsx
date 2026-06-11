@@ -16,7 +16,6 @@ import { TopBarSlot } from '@/components/nav/top-bar-slot';
 import { EntityDispatchPanel } from '@/components/dispatch/entity-dispatch-panel';
 import { ToastContainer, useToast } from '@/components/ui/toast';
 import { OutcomeStatusBadge } from '@/components/outcome/outcome-status-badge';
-import { OutcomeIntentFields, type OutcomeIntentValue } from '@/components/outcome/outcome-intent-fields';
 import { HypothesesSection } from '@/components/hypotheses/hypotheses-section';
 
 type EpicStatus = 'draft' | 'active' | 'done' | 'archived';
@@ -151,11 +150,6 @@ function EpicEditInline({ epic, onSaved, onCancel }: { epic: Epic; onSaved: (e: 
   const [priority, setPriority] = useState<EpicPriority>(epic.priority);
   const [targetDate, setTargetDate] = useState(epic.target_date?.slice(0, 10) ?? '');
   const [targetSp, setTargetSp] = useState(epic.target_sp !== undefined && epic.target_sp !== null ? String(epic.target_sp) : '');
-  const [intent, setIntent] = useState<OutcomeIntentValue>({
-    success_hypothesis: epic.success_hypothesis ?? '',
-    metric_definition: (epic.metric_definition as import('@sprintable/core-storage').MetricDefinition | null) ?? null,
-    measure_after: epic.measure_after?.slice(0, 10) ?? '',
-  });
   const [saving, setSaving] = useState(false);
 
   const handleSave = useCallback(async () => {
@@ -172,9 +166,6 @@ function EpicEditInline({ epic, onSaved, onCancel }: { epic: Epic; onSaved: (e: 
           success_criteria: successCriteria.trim() || undefined,
           status,
           priority,
-          success_hypothesis: intent.success_hypothesis.trim() || null,
-          metric_definition: intent.metric_definition ?? null,
-          measure_after: intent.measure_after || null,
           ...(targetDate ? { target_date: targetDate } : {}),
           ...(targetSp ? { target_sp: Number(targetSp) } : {}),
         }),
@@ -185,7 +176,7 @@ function EpicEditInline({ epic, onSaved, onCancel }: { epic: Epic; onSaved: (e: 
     } finally {
       setSaving(false);
     }
-  }, [title, description, objective, successCriteria, status, priority, targetDate, targetSp, intent, epic, onSaved]);
+  }, [title, description, objective, successCriteria, status, priority, targetDate, targetSp, epic, onSaved]);
 
   const inputCls = 'w-full rounded-lg border border-border bg-background px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-primary/40';
 
@@ -211,7 +202,6 @@ function EpicEditInline({ epic, onSaved, onCancel }: { epic: Epic; onSaved: (e: 
         <input type="date" value={targetDate} onChange={(e) => setTargetDate(e.target.value)} className={inputCls} />
         <input type="number" min="0" value={targetSp} onChange={(e) => setTargetSp(e.target.value)} className={inputCls} placeholder="목표 SP" />
       </div>
-      <OutcomeIntentFields value={intent} onChange={setIntent} context="epic" />
       <div className="flex justify-end gap-2">
         <Button variant="ghost" size="sm" onClick={onCancel}>취소</Button>
         <Button size="sm" disabled={saving || !title.trim()} onClick={() => void handleSave()}>
