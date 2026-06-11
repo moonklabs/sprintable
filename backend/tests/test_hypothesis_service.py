@@ -165,6 +165,25 @@ async def test_create_agent_forces_proposed():
     assert kwargs["confirmed_by_member_id"] is None
 
 
+async def test_create_nonhuman_caller_sets_drafted_by():
+    """non-human caller(type이 정확히 'agent'가 아니어도)는 drafted_by 채움 — proposed 강제와 동일
+    술어(`!= human`)로 정합. 가설 1호(API-key resolve type≠'agent')에서 drafted_by null 회귀 방지."""
+    repo = _repo_mock(_hyp_stub())
+    p_repo, p_lookup = _patch(repo, "human")  # owner는 human
+    odd_caller = ResolvedMember(
+        id=CALLER_AGENT_ID, user_id=None, name="k", type="api_key", role="member", org_id=ORG_ID,
+    )
+    payload = HypothesisCreate(
+        project_id=PROJECT_ID, statement="s", metric_definition=VALID_METRIC,
+        measure_after=datetime(2026, 7, 1, tzinfo=timezone.utc), owner_member_id=OWNER_ID,
+    )
+    with p_repo, p_lookup:
+        await svc.create_hypothesis(MagicMock(), ORG_ID, odd_caller, payload)
+    kwargs = repo.create.call_args.kwargs
+    assert kwargs["drafted_by_member_id"] == CALLER_AGENT_ID  # non-human → drafted
+    assert kwargs["status"] == "proposed"                     # non-human → proposed
+
+
 async def test_create_human_defaults_owner_to_self():
     repo = _repo_mock(_hyp_stub())
     # owner=None → caller.id 사용. lookup은 caller.id를 human으로 응답해야 함.
