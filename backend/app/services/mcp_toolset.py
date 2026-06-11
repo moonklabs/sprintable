@@ -247,11 +247,14 @@ ALL_TOOL_NAMES: tuple[str, ...] = (
     "sprintable_update_sprint", "sprintable_update_story", "sprintable_update_story_status",
     "sprintable_update_task", "sprintable_update_task_status", "sprintable_upsert_webhook_config",
     "sprintable_vote_retro_item",
+    # hypotheses (E1-S5)
+    "sprintable_list_hypotheses", "sprintable_get_hypothesis", "sprintable_create_hypothesis",
+    "sprintable_update_hypothesis", "sprintable_link_hypothesis", "sprintable_confirm_hypothesis",
 )
 
 # picker 표시 순서(비파괴 먼저). order 필드 힌트 + 배열 순서 둘 다 이 순서.
 _CATALOG_DISPLAY_ORDER: tuple[str, ...] = (
-    "stories", "tasks", "sprints", "epics", "chat", "docs", "analytics", "retro",
+    "stories", "tasks", "sprints", "epics", "hypotheses", "chat", "docs", "analytics", "retro",
     "standup", "meetings", "notifications", "webhooks", "rewards", "audit", "agent_runs",
 )
 
