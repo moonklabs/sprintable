@@ -43,7 +43,6 @@ export default defineConfig({
       // requires reworking the suite to inject db-stub-backed fake services — tracked as a
       // follow-up; un-isolating now would turn the suite red on pre-existing debt.
       'apps/web/src/services/agent-builtin-tools.test.ts',
-      'apps/web/src/services/background-runtime.test.ts',
     ],
   },
 });
