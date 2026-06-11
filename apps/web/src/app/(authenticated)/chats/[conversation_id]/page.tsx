@@ -2,7 +2,7 @@
 
 import { useCallback, useEffect, useState } from 'react';
 import { useParams, useRouter } from 'next/navigation';
-import { ChevronLeft, UserPlus } from 'lucide-react';
+import { Bell, BellOff, ChevronLeft, UserPlus } from 'lucide-react';
 import { TopBarSlot } from '@/components/nav/top-bar-slot';
 import { ChatView } from '@/components/chat/chat-view';
 import type { PresenceStatus } from '@/components/chat/presence-dot';
@@ -22,6 +22,9 @@ interface ConversationMeta {
   title: string | null;
   type: 'dm' | 'group';
   participants: Participant[];
+  // per-대화 알림 mute (270c87e6). conversation list/detail 응답의 caller `muted`
+  // (#1427에서 노출)로 벨 초기 상태를 그린다. 부재 시 false로 graceful(하위호환).
+  muted: boolean;
 }
 
 function formatHeaderTitle(meta: ConversationMeta, currentMemberId: string): string {
@@ -49,12 +52,30 @@ export default function ConversationPage() {
       const res = await fetch(`/api/conversations?project_id=${projectId}`);
       if (!res.ok) return;
       const json = await res.json() as {
-        data: Array<{ id: string; title: string | null; type: 'dm' | 'group'; participants?: Participant[] }>;
+        data: Array<{ id: string; title: string | null; type: 'dm' | 'group'; participants?: Participant[]; muted?: boolean }>;
       };
       const conv = json.data.find((c) => c.id === conversation_id);
-      if (conv) setMeta({ title: conv.title, type: conv.type, participants: conv.participants ?? [] });
+      if (conv) setMeta({ title: conv.title, type: conv.type, participants: conv.participants ?? [], muted: conv.muted ?? false });
     } catch { /* non-critical */ }
   }, [conversation_id, projectId]);
+
+  // per-대화 알림 mute 토글 (270c87e6 AC③⑤). 낙관 갱신 → PATCH /mute → 실패 시 롤백.
+  // mute는 알림 생성/노출만 억제(참여자 지위·메시지 수신 불변, BE).
+  const handleToggleMute = useCallback(async () => {
+    if (!meta) return;
+    const next = !meta.muted;
+    setMeta((m) => (m ? { ...m, muted: next } : m));
+    try {
+      const res = await fetch(`/api/conversations/${conversation_id}/mute`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ muted: next }),
+      });
+      if (!res.ok) setMeta((m) => (m ? { ...m, muted: !next } : m));
+    } catch {
+      setMeta((m) => (m ? { ...m, muted: !next } : m));
+    }
+  }, [meta, conversation_id]);
 
   // EF-S2: rename a group room. Optimistic; the BE PATCH persists the title.
   const handleSaveTitle = useCallback(async () => {
@@ -170,15 +191,29 @@ export default function ConversationPage() {
         }
         actions={
           meta && (
-            <button
-              type="button"
-              onClick={() => setShowAddParticipant(true)}
-              className="flex items-center gap-1.5 rounded-md px-2 py-1 text-xs text-muted-foreground transition hover:bg-muted hover:text-foreground"
-              title="참여자 추가"
-            >
-              <UserPlus className="h-3.5 w-3.5" />
-              <span className="hidden sm:inline">참여자 추가</span>
-            </button>
+            <div className="flex items-center gap-1">
+              {/* per-대화 알림 mute 토글 (270c87e6). mute=BellOff + "알림 꺼짐" 시각 표시. */}
+              <button
+                type="button"
+                onClick={() => void handleToggleMute()}
+                className="flex items-center gap-1.5 rounded-md px-2 py-1 text-xs text-muted-foreground transition hover:bg-muted hover:text-foreground"
+                title={meta.muted ? '알림 켜기' : '알림 끄기'}
+                aria-label={meta.muted ? '알림 켜기' : '알림 끄기'}
+                aria-pressed={meta.muted}
+              >
+                {meta.muted ? <BellOff className="h-3.5 w-3.5" /> : <Bell className="h-3.5 w-3.5" />}
+                {meta.muted ? <span className="hidden sm:inline">알림 꺼짐</span> : null}
+              </button>
+              <button
+                type="button"
+                onClick={() => setShowAddParticipant(true)}
+                className="flex items-center gap-1.5 rounded-md px-2 py-1 text-xs text-muted-foreground transition hover:bg-muted hover:text-foreground"
+                title="참여자 추가"
+              >
+                <UserPlus className="h-3.5 w-3.5" />
+                <span className="hidden sm:inline">참여자 추가</span>
+              </button>
+            </div>
           )
         }
       />
