@@ -1,83 +1,48 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
-const { createDbServerClient, getAuthContext, createAdminClient } = vi.hoisted(() => ({
-  createDbServerClient: vi.fn(),
+// 837a36c4(Group B b7): 직접 서비스 핸들러 — auth 게이트 → SprintService(repo).kickoff(id, message) → 래핑.
+const h = vi.hoisted(() => ({
   getAuthContext: vi.fn(),
-  createAdminClient: vi.fn(),
+  createSprintRepository: vi.fn(),
+  kickoff: vi.fn(),
+}));
+vi.mock('@/lib/auth-helpers', () => ({ getAuthContext: h.getAuthContext }));
+vi.mock('@/lib/storage/factory', () => ({ createSprintRepository: h.createSprintRepository }));
+vi.mock('@/services/sprint', async (importActual) => ({
+  // 에러클래스(NotFoundError·ForbiddenError 등)는 실제 유지(handleApiError가 instanceof로 참조)·SprintService만 오버라이드.
+  ...(await importActual<typeof import('@/services/sprint')>()),
+  SprintService: class { kickoff = h.kickoff; },
 }));
 
-vi.mock('@/lib/db/server', () => ({ createDbServerClient }));
-vi.mock('@/lib/db/admin', () => ({ createAdminClient }));
-vi.mock('@/lib/auth-helpers', () => ({ getAuthContext }));
-
 import { POST } from './route';
+import { NotFoundError } from '@/services/sprint';
 
-function makeAgent() {
-  return { id: 'agent-1', type: 'agent', rateLimitExceeded: false, rateLimitRemaining: 299, rateLimitResetAt: 0 };
-}
+const ID = 'sprint-1';
+const ctx = () => ({ params: Promise.resolve({ id: ID }) });
+const agent = () => ({ id: 'a', type: 'agent', rateLimitExceeded: false, rateLimitRemaining: 299, rateLimitResetAt: 0 });
+const req = (body: object = { message: 'go' }) =>
+  new Request(`http://localhost/api/sprints/${ID}/kickoff`, { method: 'POST', body: JSON.stringify(body) });
 
-function createQueryStub(rows: Record<string, unknown>[] = [], opts: { singleNotFound?: boolean; insertOk?: boolean } = {}) {
-  const q: Record<string, unknown> = {};
-  const chain = () => q;
-  q.select = vi.fn(chain);
-  q.eq = vi.fn(chain);
-  q.is = vi.fn(chain);
-  q.order = vi.fn(chain);
-  q.limit = vi.fn(chain);
-  q.lt = vi.fn(chain);
-  q.insert = vi.fn(() => (opts.insertOk !== false ? Promise.resolve({ error: null }) : Promise.resolve({ error: { message: 'insert failed' } })));
-  q.single = vi.fn(() =>
-    opts.singleNotFound
-      ? Promise.resolve({ data: null, error: { code: 'PGRST116', message: 'not found' } })
-      : Promise.resolve({ data: rows[0] ?? null, error: null }),
-  );
-  q.then = Promise.resolve({ data: rows, error: null }).then.bind(Promise.resolve({ data: rows, error: null }));
-  return q;
-}
-
-describe('POST /api/sprints/[id]/kickoff', () => {
+describe('POST /api/sprints/[id]/kickoff (직접 서비스)', () => {
   beforeEach(() => {
-    createDbServerClient.mockReset();
-    getAuthContext.mockReset();
-    createAdminClient.mockReset();
-    getAuthContext.mockResolvedValue(makeAgent());
+    h.getAuthContext.mockReset(); h.createSprintRepository.mockReset(); h.kickoff.mockReset();
+    h.getAuthContext.mockResolvedValue(agent());
+    h.createSprintRepository.mockResolvedValue({});
   });
-
-  it('returns 401 when not authenticated', async () => {
-    const db = {};
-    createDbServerClient.mockResolvedValue(db);
-    getAuthContext.mockResolvedValue(null);
-
-    const response = await POST(
-      new Request('http://localhost/api/sprints/sprint-1/kickoff', { method: 'POST', body: '{}' }),
-      { params: Promise.resolve({ id: 'sprint-1' }) },
-    );
-
-    expect(response.status).toBe(401);
+  it('401 when unauthenticated', async () => {
+    h.getAuthContext.mockResolvedValue(null);
+    expect((await POST(req(), ctx())).status).toBe(401);
+    expect(h.kickoff).not.toHaveBeenCalled();
   });
-
-  it('returns 200 with notified count', async () => {
-    const sprint = { id: 'sprint-1', project_id: 'project-alpha', title: 'Sprint 1', org_id: 'org-1' };
-    const project = { org_id: 'org-1' };
-    const members = [{ id: 'member-1' }, { id: 'member-2' }];
-    const db = {
-      from: vi.fn((table: string) => {
-        if (table === 'sprints') return createQueryStub([sprint]);
-        if (table === 'projects') return createQueryStub([project]);
-        if (table === 'team_members') return createQueryStub(members);
-        return createQueryStub([], { insertOk: true });
-      }),
-    };
-    createDbServerClient.mockResolvedValue(db);
-    createAdminClient.mockReturnValue(db);
-
-    const response = await POST(
-      new Request('http://localhost/api/sprints/sprint-1/kickoff', { method: 'POST', body: '{}' }),
-      { params: Promise.resolve({ id: 'sprint-1' }) },
-    );
-
-    expect(response.status).toBe(200);
-    const body = await response.json();
-    expect(body.data).toMatchObject({ notified: expect.any(Number) });
+  it('kicks off via SprintService(id, message) wrapped', async () => {
+    h.kickoff.mockResolvedValue({ started: true });
+    const res = await POST(req({ message: 'go team' }), ctx());
+    expect(res.status).toBe(200);
+    expect(h.kickoff).toHaveBeenCalledWith(ID, 'go team');
+    expect((await res.json()).data).toMatchObject({ started: true });
+  });
+  it('NotFoundError → 404', async () => {
+    h.kickoff.mockRejectedValue(new NotFoundError('sprint not found'));
+    expect((await POST(req(), ctx())).status).toBe(404);
   });
 });
