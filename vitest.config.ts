@@ -44,8 +44,6 @@ export default defineConfig({
       'apps/web/src/services/docs.test.ts',
       'apps/web/src/services/memo-assignment-dispatch.test.ts',
       'apps/web/src/services/memo.test.ts',
-      'apps/web/src/services/notification-display.test.ts',
-      'apps/web/src/services/persona-composer.test.ts',
       'apps/web/src/services/slack-outbound-dispatcher.test.ts',
       'apps/web/src/services/teams-outbound-dispatcher.test.ts',
     ],
