@@ -6,15 +6,44 @@ from datetime import datetime, timezone
 
 from fastapi import APIRouter, Depends, HTTPException, Query
 from pydantic import BaseModel, ConfigDict
-from sqlalchemy import func, or_, select, update
+from sqlalchemy import and_, exists, func, or_, select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.dependencies.auth import AuthContext, get_current_user, get_verified_org_id
 from app.dependencies.database import get_db
+from app.models.conversation import Conversation, ConversationMessage
 from app.models.event import Event
 from app.models.team import TeamMember
 
 router = APIRouter(prefix="/api/v2/event-notifications", tags=["event-notifications"])
+
+
+def _is_spectator_message_event():
+    """관전 동석 알림 판별 (story 48dbada0 · 선생님 제보).
+
+    휴먼 알림 도배의 근원: conversation fan-out이 participant **전원**에게
+    `conversation.message_created` Event를 적재 → 인가 불변식/킥오프로 동석한 휴먼이
+    그룹 대화의 모든 발화를 알림으로 받는다. "직접 필요한 알림만" 정책에 따라
+    **그룹 대화의 message_created는 휴먼 알림에서 제외**한다.
+
+    유지(직접 필요): ①DM 메시지(`type='dm'`) ②@mention(`conversation:mention`은 별도
+    event_type이라 본 필터 비대상) ③dispatched/story_assigned 등 비-대화 이벤트.
+
+    ⚠️ Event/SSE/에이전트 주입 경로는 불변 — 본 필터는 **휴먼 알림 읽기 단**에만 적용한다
+    (Event는 그대로 적재되어 에이전트 SSE/poll·DB 추적은 무영향).
+    """
+    return and_(
+        Event.event_type == "conversation.message_created",
+        exists(
+            select(1)
+            .select_from(ConversationMessage)
+            .join(Conversation, Conversation.id == ConversationMessage.conversation_id)
+            .where(
+                ConversationMessage.id == Event.source_entity_id,
+                Conversation.type != "dm",
+            )
+        ),
+    )
 
 
 # ─── Helper ───────────────────────────────────────────────────────────────────
@@ -90,7 +119,11 @@ async def list_notifications(
     member_id = await _resolve_member_id(auth, org_id, db, project_id=project_id)
     result = await db.execute(
         select(Event)
-        .where(Event.org_id == org_id, Event.recipient_id == member_id)
+        .where(
+            Event.org_id == org_id,
+            Event.recipient_id == member_id,
+            ~_is_spectator_message_event(),  # 48dbada0: 그룹 대화 관전 알림 제외
+        )
         .order_by(Event.created_at.desc())
         .limit(limit)
         .offset(offset)
@@ -116,6 +149,7 @@ async def get_unread_count(
             Event.org_id == org_id,
             Event.recipient_id == member_id,
             Event.read_at.is_(None),
+            ~_is_spectator_message_event(),  # 48dbada0: 그룹 대화 관전 알림 제외
         )
     )
     count = result.scalar_one()
