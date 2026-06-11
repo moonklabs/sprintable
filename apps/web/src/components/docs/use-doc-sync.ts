@@ -81,6 +81,16 @@ export function useDocSync<TDoc = { updated_at: string }>({
   const conflictRef = useRef(false);
   const remoteChangedRef = useRef(false);
 
+  // Mirror currentSnapshot into a ref so the baseline-reset effects below can read the
+  // latest snapshot WITHOUT listing currentSnapshot in their deps. With it in the deps,
+  // content churn (e.g. a non-idempotent load round-trip) re-ran the effect, its cleanup
+  // cancelled the pending setTimeout, and the docId/serverUpdatedAt guard then blocked
+  // rescheduling → baselineUpdatedAt stuck null → every save refused by FIX-2. The
+  // markdown trigger is gone (FIX-3/3b), but the baseline-set must not be cancellable by
+  // content at all (story 2a72ebf4 baseline race).
+  const currentSnapshotRef = useRef(currentSnapshot);
+  useEffect(() => { currentSnapshotRef.current = currentSnapshot; }, [currentSnapshot]);
+
   const clearSyncAlerts = useCallback((nextStatus: SaveStatus = 'saved') => {
     conflictRef.current = false;
     remoteChangedRef.current = false;
@@ -96,13 +106,13 @@ export function useDocSync<TDoc = { updated_at: string }>({
     remoteChangedRef.current = false;
 
     const timer = window.setTimeout(() => {
-      setLastSavedSnapshot(currentSnapshot);
+      setLastSavedSnapshot(currentSnapshotRef.current);
       setBaselineUpdatedAt(serverUpdatedAt);
       setStatus('idle');
     }, 0);
 
     return () => window.clearTimeout(timer);
-  }, [currentSnapshot, docId, serverUpdatedAt]);
+  }, [docId, serverUpdatedAt]);
 
   useEffect(() => {
     if (!serverUpdatedAt || serverUpdatedAt === previousServerUpdatedAtRef.current) return;
@@ -112,13 +122,13 @@ export function useDocSync<TDoc = { updated_at: string }>({
     remoteChangedRef.current = false;
 
     const timer = window.setTimeout(() => {
-      setLastSavedSnapshot(currentSnapshot);
+      setLastSavedSnapshot(currentSnapshotRef.current);
       setBaselineUpdatedAt(serverUpdatedAt);
       setStatus(editing ? 'saved' : 'idle');
     }, 0);
 
     return () => window.clearTimeout(timer);
-  }, [currentSnapshot, editing, serverUpdatedAt]);
+  }, [editing, serverUpdatedAt]);
 
   const isDirty = editing && currentSnapshot !== lastSavedSnapshot;
 
