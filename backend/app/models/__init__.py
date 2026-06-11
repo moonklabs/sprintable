@@ -22,6 +22,7 @@ from app.models.notification import InboxItem, Notification, NotificationSetting
 from app.models.notification_preference import NotificationPreference
 from app.models.organization import Organization
 from app.models.pm import Epic, Sprint, Story, Task
+from app.models.hypothesis import Hypothesis, HypothesisEpicLink, HypothesisStoryLink
 from app.models.story_assignee import StoryAssignee
 from app.models.project import OrgMember, Project
 from app.models.project_setting import ProjectSetting
@@ -61,6 +62,9 @@ __all__ = [
     "WebhookConfig",
     "Doc",
     "Epic",
+    "Hypothesis",
+    "HypothesisEpicLink",
+    "HypothesisStoryLink",
     "InboxItem",
     "Meeting",
     "Notification",
