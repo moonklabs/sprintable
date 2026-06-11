@@ -1,6 +1,45 @@
 
 import type { ITeamMemberRepository, IProjectRepository } from '@sprintable/core-storage';
-const ApiMemoRepository = class { constructor(_db: any) {} } as any;
+
+// OSS self-host guard (story 7a57e7b1). The real memo repository is provided only by the
+// SaaS overlay, which shadows this module in the SaaS build — a pure OSS build has no memo
+// repository wired. Previously this was an empty `as any` class, so every unconditional
+// `this.repo.<method>()` (create/addReply/resolve/list/getById/getReplies) crashed with a
+// cryptic `this.repo.X is not a function` across agent-execution-loop, the slack/discord/
+// teams dispatchers, agent-builtin-tools, and bridge-inbound. This explicit stub keeps the
+// same fail-fast behaviour but surfaces an actionable error and a one-time startup warning.
+// Durable fix = a real OSS memo repository (db- or FastAPI-backed, like Story/Epic). See
+// docs/oss-memo-repository.md.
+let _ossMemoRepoWarned = false;
+
+class OssMemoRepositoryStub {
+  constructor(_db: unknown) {
+    if (!_ossMemoRepoWarned && process.env.NODE_ENV !== 'test') {
+      _ossMemoRepoWarned = true;
+      console.warn(
+        '[oss] No memo repository is configured — memo create/reply/resolve/list will fail. '
+        + 'This OSS build needs the SaaS overlay or a memo repository implementation. '
+        + 'See docs/oss-memo-repository.md.',
+      );
+    }
+  }
+
+  private unavailable(method: string): never {
+    throw new Error(
+      `MemoService memo persistence is unavailable: no memo repository is configured in this build (called \`${method}\`). `
+      + 'A pure OSS build needs the SaaS overlay or a memo repository implementation; see docs/oss-memo-repository.md.',
+    );
+  }
+
+  getById(): never { return this.unavailable('getById'); }
+  getReplies(): never { return this.unavailable('getReplies'); }
+  list(): never { return this.unavailable('list'); }
+  create(): never { return this.unavailable('create'); }
+  addReply(): never { return this.unavailable('addReply'); }
+  resolve(): never { return this.unavailable('resolve'); }
+}
+
+const ApiMemoRepository = OssMemoRepositoryStub as any;
 
 type IMemoRepository = any;
 type Memo = any;
