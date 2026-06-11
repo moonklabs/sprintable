@@ -49,6 +49,12 @@ from .tools.epics import (
     AddEpicInput, DeleteEpicInput, ListEpicsInput, UpdateEpicInput,
     add_epic, delete_epic, list_epics, update_epic,
 )
+from .tools.hypotheses import (
+    ConfirmHypothesisInput, CreateHypothesisInput, GetHypothesisInput,
+    LinkHypothesisInput, ListHypothesesInput, UpdateHypothesisInput,
+    confirm_hypothesis, create_hypothesis, get_hypothesis,
+    link_hypothesis, list_hypotheses, update_hypothesis,
+)
 from .tools.meetings import (
     CreateMeetingInput, ListMeetingsInput, MeetingIdInput, UpdateMeetingInput,
     create_meeting, delete_meeting, get_meeting, list_meetings,
@@ -263,6 +269,25 @@ _TOOL_DEFS: list[tuple] = [
     ("sprintable_delete_epic",
      "에픽 삭제.",
      DeleteEpicInput, delete_epic),
+    # Hypotheses (6)
+    ("sprintable_list_hypotheses",
+     "가설 목록 조회 (compact). epic_id/story_id/status/owner_member_id 필터.",
+     ListHypothesesInput, list_hypotheses),
+    ("sprintable_get_hypothesis",
+     "가설 단건 조회 (full).",
+     GetHypothesisInput, get_hypothesis),
+    ("sprintable_create_hypothesis",
+     "가설 생성. agent 호출은 proposed로 강제.",
+     CreateHypothesisInput, create_hypothesis),
+    ("sprintable_update_hypothesis",
+     "가설 수정 (문장/지표/측정일/owner). 상태 전이는 confirm으로.",
+     UpdateHypothesisInput, update_hypothesis),
+    ("sprintable_link_hypothesis",
+     "가설을 epic/story에 연결/재연결.",
+     LinkHypothesisInput, link_hypothesis),
+    ("sprintable_confirm_hypothesis",
+     "가설 확정(active) 또는 폐기(killed). active 확정은 휴먼 경로만.",
+     ConfirmHypothesisInput, confirm_hypothesis),
     # Sprints (8)
     ("sprintable_list_sprints",
      "스프린트 목록 조회.",

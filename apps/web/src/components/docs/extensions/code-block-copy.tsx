@@ -255,8 +255,13 @@ export const CodeBlockWithCopy = Node.create({
     return [{ tag: 'pre', preserveWhitespace: 'full' }];
   },
 
-  renderHTML({ HTMLAttributes }) {
-    return ['pre', mergeAttributes(HTMLAttributes), ['code', {}, 0]];
+  renderHTML({ node, HTMLAttributes }) {
+    // Mirror the language onto the <code> class as well as the <pre> — htmlToMarkdown
+    // (Turndown) reads the fence language from the <code> class, so emitting it only on
+    // <pre> dropped ```ts → ``` on the editor round-trip (story 2a72ebf4 FIX-3b).
+    const language = (node.attrs as { language?: string }).language;
+    const codeAttrs = language ? { class: `language-${language}` } : {};
+    return ['pre', mergeAttributes(HTMLAttributes), ['code', codeAttrs, 0]];
   },
 
   addKeyboardShortcuts() {

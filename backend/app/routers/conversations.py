@@ -218,7 +218,26 @@ async def _conversations_with_human_participant(conv_ids: list[uuid.UUID], db: A
     return result
 
 
+_SUMMARY_PREVIEW_MAX = 80
+
+
+def _build_message_summary(content: str | None, sender_name: str | None, has_attachment: bool) -> str:
+    """알림 카피용 사람-친화 summary (e2608901). 형식: "{발신자}: {내용 미리보기 80자}".
+
+    notification-bell이 `payload.summary ?? event_type`로 렌더하므로, summary 미생성 시 raw
+    이벤트명(`conversation.message_created`)이 노출됐다. 발신자+미리보기로 "무슨 일인지" 1초 노출.
+    """
+    name = sender_name or "Someone"
+    preview = " ".join((content or "").split())  # 개행/연속공백 정규화
+    if len(preview) > _SUMMARY_PREVIEW_MAX:
+        preview = preview[:_SUMMARY_PREVIEW_MAX].rstrip() + "…"
+    if not preview:
+        preview = "📎" if has_attachment else ""
+    return f"{name}: {preview}" if preview else name
+
+
 def _msg_payload(msg: ConversationMessage, sender: "ResolvedMember | TeamMember | None") -> dict:
+    attachments = msg.attachments if isinstance(msg.attachments, list) else []
     return {
         "id": str(msg.id),
         "conversation_id": str(msg.conversation_id),
@@ -228,12 +247,14 @@ def _msg_payload(msg: ConversationMessage, sender: "ResolvedMember | TeamMember 
         "content": msg.content,
         "mentioned_ids": [str(m) for m in (msg.mentioned_ids or [])],
         # E-FILE S1: 첨부 직렬화 (SSE + GET messages 공통). list 아니면 [](레거시/None/mock 안전).
-        "attachments": msg.attachments if isinstance(msg.attachments, list) else [],
+        "attachments": attachments,
         "sender": {
             "id": str(sender.id),
             "name": sender.name,
             "type": sender.type,
         } if sender else None,
+        # e2608901: 알림 카피 — raw event_type 대신 사람-친화 summary를 payload에 동봉.
+        "summary": _build_message_summary(msg.content, sender.name if sender else None, bool(attachments)),
         "created_at": msg.created_at.isoformat(),
     }
 
@@ -509,6 +530,8 @@ class ConversationResponse(BaseModel):
     created_by: uuid.UUID | None = None
     created_at: datetime
     updated_at: datetime
+    # 270c87e6: caller의 알림 mute 상태(participant muted_at 기반) — FE mute 토글 초기 상태용(#1426).
+    muted: bool = False
 
 
 # E-FILE S1: 채팅 첨부. GCS 기록은 FE-proxy(uploadToGcs)가 처리하고 BE는 URL+메타만 저장.
@@ -573,6 +596,10 @@ class UpdateConversationRequest(BaseModel):
 
 class AddParticipantRequest(BaseModel):
     member_id: uuid.UUID
+
+
+class MuteRequest(BaseModel):
+    muted: bool
 
 
 # ─── Endpoints ────────────────────────────────────────────────────────────────
@@ -640,11 +667,15 @@ async def list_conversations(
         raise HTTPException(status_code=403, detail="Only owner/admin can view agent conversations.")
 
     conv_ids_result = await db.execute(
-        select(ConversationParticipant.conversation_id).where(
+        select(ConversationParticipant.conversation_id, ConversationParticipant.muted_at).where(
             ConversationParticipant.member_id == sender.id
         )
     )
-    conv_ids = set(r[0] for r in conv_ids_result.all())
+    _caller_rows = conv_ids_result.all()
+    conv_ids = set(r.conversation_id for r in _caller_rows)
+    # 270c87e6: caller의 대화별 mute 상태(FE 토글 초기 상태·#1426). admin-bypass로 추가되는
+    # agent-only 대화는 caller가 참여자 아니라 자연히 False.
+    caller_muted = {r.conversation_id: r.muted_at is not None for r in _caller_rows}
 
     # AC1/2 + #1262: admin-bypass는 **agent-only 대화로 한정**(사적 DM 프라이버시).
     # project 내 agent type member가 participant인 conversation 후보를 모으되,
@@ -736,6 +767,7 @@ async def list_conversations(
             "resolved_by": str(conv.resolved_by) if conv.resolved_by else None,
             "resolved_at": conv.resolved_at.isoformat() if conv.resolved_at else None,
             "participants": conv_participants.get(conv.id, []),
+            "muted": caller_muted.get(conv.id, False),  # 270c87e6: FE mute 토글 초기 상태
             "latest_message": {
                 "content": latest_msg.content,
                 "created_at": latest_msg.created_at.isoformat(),
@@ -780,7 +812,16 @@ async def get_conversation(
         if participant is None:
             raise HTTPException(status_code=403, detail="Not a participant")
 
-    return ConversationResponse.model_validate(conv)
+    # 270c87e6: caller의 mute 상태 노출(FE 토글 초기 상태·#1426). 비참여자(admin-bypass agent-only)는 False.
+    caller_muted_at = (await db.execute(
+        select(ConversationParticipant.muted_at).where(
+            ConversationParticipant.conversation_id == conversation_id,
+            ConversationParticipant.member_id == sender.id,
+        )
+    )).scalar_one_or_none()
+    resp = ConversationResponse.model_validate(conv)
+    resp.muted = caller_muted_at is not None
+    return resp
 
 
 @router.get("/{conversation_id}/messages")
@@ -891,6 +932,40 @@ async def list_working_members(
         if e["member_id"] != str(sender.id)
     ]
     return {"data": items}
+
+
+@router.patch("/{conversation_id}/mute")
+async def set_conversation_mute(
+    conversation_id: uuid.UUID,
+    body: MuteRequest,
+    db: AsyncSession = Depends(get_db),
+    auth: AuthContext = Depends(get_current_user),
+    org_id: uuid.UUID = Depends(get_verified_org_id),
+) -> dict:
+    """PATCH /api/v2/conversations/{id}/mute — per-대화 알림 mute/unmute (270c87e6).
+
+    caller의 participant 행에 muted_at set(mute)/null(unmute). 참여자 지위·가시성·메시지 수신은
+    불변 — 알림 노출만 억제(mute가 발화 carve-out보다 우선). 비참여자는 403.
+    """
+    conv = (await db.execute(
+        select(Conversation).where(Conversation.id == conversation_id, Conversation.org_id == org_id)
+    )).scalar_one_or_none()
+    if conv is None:
+        raise HTTPException(status_code=404, detail="Conversation not found")
+
+    sender = await _resolve_member(auth, org_id, db, project_id=conv.project_id)
+    participant = (await db.execute(
+        select(ConversationParticipant).where(
+            ConversationParticipant.conversation_id == conversation_id,
+            ConversationParticipant.member_id == sender.id,
+        )
+    )).scalar_one_or_none()
+    if participant is None:
+        raise HTTPException(status_code=403, detail="Not a participant")
+
+    participant.muted_at = datetime.now(timezone.utc) if body.muted else None
+    await db.commit()
+    return {"conversation_id": str(conversation_id), "muted": body.muted}
 
 
 @router.post("/{conversation_id}/participants", status_code=201)
@@ -1007,7 +1082,14 @@ async def send_message(
         )
     )).scalar_one_or_none()
     if participant is None:
-        raise HTTPException(status_code=403, detail="Not a participant")
+        # 발화 403 해소(270c87e6): 프로젝트 접근권 휴먼이 그룹/스레드 대화에 발화하면 auto-join.
+        # _resolve_member가 이미 project 접근을 검증했으므로 접근권은 성립. 단 타인 간 1:1 DM은
+        # 예외(비공개 보호·여전히 403)이고, 에이전트 인가(allowlist·creator 동석)는 불변(403 유지).
+        if sender.type == "human" and conv.type != "dm":
+            db.add(ConversationParticipant(conversation_id=conversation_id, member_id=sender.id))
+            await db.flush()
+        else:
+            raise HTTPException(status_code=403, detail="Not a participant")
 
     # 1aeecdde P2: sender 가 이 conversation 에 메시지를 보냄 = 답장 생성 종료 → working clear.
     # fork 분기(아래) 전 **원본 conversation_id** 기준 — working 은 그 conversation 에 set 됐다.

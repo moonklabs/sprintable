@@ -1,4 +1,4 @@
-"""S3-6: 시스템 콜 계약 검증 — 89개 도구 등록 + 스키마 무결성 (Phase 3 완료)."""
+"""S3-6: 시스템 콜 계약 검증 — 95개 도구 등록 + 스키마 무결성 (Phase 3 완료)."""
 from __future__ import annotations
 
 import os
@@ -25,6 +25,9 @@ EXPECTED_TOOLS = {
     # epics (4)
     "sprintable_list_epics", "sprintable_add_epic", "sprintable_update_epic",
     "sprintable_delete_epic",
+    # hypotheses (6) — E1-S5
+    "sprintable_list_hypotheses", "sprintable_get_hypothesis", "sprintable_create_hypothesis",
+    "sprintable_update_hypothesis", "sprintable_link_hypothesis", "sprintable_confirm_hypothesis",
     # sprints (8)
     "sprintable_list_sprints", "sprintable_sprint_summary", "sprintable_activate_sprint",
     "sprintable_close_sprint", "sprintable_get_velocity", "sprintable_create_sprint",
@@ -78,7 +81,7 @@ EXPECTED_TOOLS = {
 
 
 def test_total_tool_count():
-    assert len(_TOOLS) == 89
+    assert len(_TOOLS) == 95
 
 
 def test_all_expected_tools_registered():

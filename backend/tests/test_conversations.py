@@ -99,6 +99,35 @@ async def _make_client(session=None):
     return AsyncClient(transport=ASGITransport(app=app), base_url="http://test"), session, app
 
 
+# ─── e2608901: 알림 카피 summary 생성 ────────────────────────────────────────
+
+def test_build_message_summary_formats():
+    from app.routers.conversations import _build_message_summary as f
+    # 정상: "{발신자}: {내용}"
+    assert f("Hello team", "디디", False) == "디디: Hello team"
+    # 80자 초과 → 절삭 + … (이름+": " 접두 제외 본문만 80)
+    long = f("x" * 100, "A", False)
+    assert long.startswith("A: ") and long.endswith("…") and len(long.split(": ", 1)[1]) == 81
+    # 개행/연속공백 정규화
+    assert f("line1\n\nline2   x", "D", False) == "D: line1 line2 x"
+    # 내용 없음 + 첨부 → 📎 마커
+    assert f("", "B", True) == "B: 📎"
+    # 내용 없음 + 첨부 없음 → 발신자명만 (raw event_type 노출 방지)
+    assert f("", "C", False) == "C"
+    # 발신자 미상 폴백
+    assert f("hi", None, False) == "Someone: hi"
+
+
+def test_msg_payload_includes_summary():
+    """_msg_payload(message_created·mention 공통)에 summary 동봉 — notification-bell raw 노출 차단."""
+    from app.routers.conversations import _msg_payload
+    msg = _make_msg()
+    sender = _make_member()
+    payload = _msg_payload(msg, sender)
+    assert "summary" in payload
+    assert payload["summary"].startswith(f"{sender.name}: ")
+
+
 # ─── AC1: Alembic migration 파일 + 테이블 확인 ───────────────────────────────
 
 def test_migration_file_exists():
@@ -254,7 +283,8 @@ async def test_list_conversations():
         member_result.scalars.return_value.first.return_value = mock_member
 
         conv_ids_result = MagicMock()
-        conv_ids_result.all.return_value = [(CONV_ID,)]
+        # 270c87e6: conv_ids 쿼리가 (conversation_id, muted_at) 2컬럼 반환 — Row 속성 접근 정합.
+        conv_ids_result.all.return_value = [MagicMock(conversation_id=CONV_ID, muted_at=None)]
 
         total_result = MagicMock()
         total_result.scalar_one.return_value = 1
@@ -360,7 +390,11 @@ async def test_get_conversation_200_returns_project_id():
         agents_result = MagicMock()
         agents_result.scalars.return_value.all.return_value = [agent_id]  # 전원 agent 확정
 
-        session.execute = AsyncMock(side_effect=[conv_result, member_result, pids_result, agents_result])
+        # 270c87e6: detail이 caller muted_at 조회 1건 추가 — 비참여(agent-only)면 None=미mute.
+        muted_result = MagicMock()
+        muted_result.scalar_one_or_none.return_value = None
+
+        session.execute = AsyncMock(side_effect=[conv_result, member_result, pids_result, agents_result, muted_result])
 
         async with client as c:
             resp = await c.get(f"/api/v2/conversations/{CONV_ID}")

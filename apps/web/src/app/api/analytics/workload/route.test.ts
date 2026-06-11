@@ -1,81 +1,51 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
-const { createDbServerClient, getAuthContext, createAdminClient } = vi.hoisted(() => ({
-  createDbServerClient: vi.fn(),
+// 837a36c4(Group B): 라우트가 FastAPI proxy 위임으로 리팩토링됨 — 테스트를 현 계약
+// (auth → proxyToFastapi → apiSuccess 래핑)에 맞춰 재작성. 구 createDbServerClient 직쿼리
+// mock은 폐기(라우트가 더는 DB를 직접 안 쓰며, 비즈니스 로직은 FastAPI backend pytest가 검증).
+const { getAuthContext, proxyToFastapi } = vi.hoisted(() => ({
   getAuthContext: vi.fn(),
-  createAdminClient: vi.fn(),
+  proxyToFastapi: vi.fn(),
 }));
-
-vi.mock('@/lib/db/server', () => ({ createDbServerClient }));
-vi.mock('@/lib/db/admin', () => ({ createAdminClient }));
 vi.mock('@/lib/auth-helpers', () => ({ getAuthContext }));
+vi.mock('@/lib/fastapi-proxy', () => ({ proxyToFastapi }));
 
 import { GET } from './route';
 
-function makeAgent() {
-  return { id: 'agent-1', type: 'agent', rateLimitExceeded: false, rateLimitRemaining: 299, rateLimitResetAt: 0 };
-}
-
-function createQueryStub(rows: Record<string, unknown>[] = []) {
-  const q: Record<string, unknown> = {};
-  const chain = () => q;
-  q.select = vi.fn(chain);
-  q.eq = vi.fn(chain);
-  q.then = Promise.resolve({ data: rows, error: null }).then.bind(Promise.resolve({ data: rows, error: null }));
-  return q;
-}
+const PROXY_PATH = '/api/v2/analytics/workload';
+const URL = 'http://localhost/api/analytics/workload?project_id=p';
+const agent = () => ({ id: 'a', type: 'agent', rateLimitExceeded: false, rateLimitRemaining: 299, rateLimitResetAt: 0 });
 
 describe('GET /api/analytics/workload', () => {
   beforeEach(() => {
-    createDbServerClient.mockReset();
     getAuthContext.mockReset();
-    createAdminClient.mockReset();
-    getAuthContext.mockResolvedValue(makeAgent());
+    proxyToFastapi.mockReset();
+    getAuthContext.mockResolvedValue(agent());
   });
 
-  it('returns 400 when project_id missing', async () => {
-    const db = { from: vi.fn(() => createQueryStub()) };
-    createDbServerClient.mockResolvedValue(db);
-    createAdminClient.mockReturnValue(db);
-
-    const response = await GET(new Request('http://localhost/api/analytics/workload?member_id=member-1'));
-
-    expect(response.status).toBe(400);
-    const body = await response.json();
-    expect(body.error?.message).toMatch(/project_id/);
-  });
-
-  it('returns 400 when member_id missing', async () => {
-    const db = { from: vi.fn(() => createQueryStub()) };
-    createDbServerClient.mockResolvedValue(db);
-    createAdminClient.mockReturnValue(db);
-
-    const response = await GET(new Request('http://localhost/api/analytics/workload?project_id=p'));
-
-    expect(response.status).toBe(400);
-    const body = await response.json();
-    expect(body.error?.message).toMatch(/member_id/);
-  });
-
-  it('returns 401 when not authenticated', async () => {
-    const db = {};
-    createDbServerClient.mockResolvedValue(db);
+  it('returns 401 when unauthenticated', async () => {
     getAuthContext.mockResolvedValue(null);
-
-    const response = await GET(new Request('http://localhost/api/analytics/workload?project_id=p&member_id=m'));
-
-    expect(response.status).toBe(401);
+    expect((await GET(new Request(URL))).status).toBe(401);
+    expect(proxyToFastapi).not.toHaveBeenCalled();
   });
 
-  it('returns 200 with workload data', async () => {
-    const db = { from: vi.fn(() => createQueryStub([])) };
-    createDbServerClient.mockResolvedValue(db);
-    createAdminClient.mockReturnValue(db);
+  it('returns 429 when rate limited', async () => {
+    getAuthContext.mockResolvedValue({ ...agent(), rateLimitExceeded: true });
+    expect((await GET(new Request(URL))).status).toBe(429);
+  });
 
-    const response = await GET(new Request('http://localhost/api/analytics/workload?project_id=project-alpha&member_id=member-1'));
+  it('delegates to FastAPI proxy and wraps success in {data}', async () => {
+    proxyToFastapi.mockResolvedValue(
+      new Response(JSON.stringify({ ok: 1 }), { status: 200, headers: { 'content-type': 'application/json' } }),
+    );
+    const res = await GET(new Request(URL));
+    expect(res.status).toBe(200);
+    expect(proxyToFastapi).toHaveBeenCalledWith(expect.anything(), PROXY_PATH);
+    expect((await res.json()).data).toMatchObject({ ok: 1 });
+  });
 
-    expect(response.status).toBe(200);
-    const body = await response.json();
-    expect(body.data).toMatchObject({ stories: expect.objectContaining({ total: 0 }), tasks: expect.objectContaining({ total: 0 }) });
+  it('passes through proxy error responses unchanged', async () => {
+    proxyToFastapi.mockResolvedValue(new Response('err', { status: 502 }));
+    expect((await GET(new Request(URL))).status).toBe(502);
   });
 });

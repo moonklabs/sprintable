@@ -1,175 +1,27 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
-const {
-  createDbServerClient,
-  getMyTeamMember,
-  requireOrgAdmin,
-  requireAgentOrchestration,
-  executeRetry,
-} = vi.hoisted(() => ({
-  createDbServerClient: vi.fn(),
-  getMyTeamMember: vi.fn(),
-  requireOrgAdmin: vi.fn(),
-  requireAgentOrchestration: vi.fn(),
-  executeRetry: vi.fn(),
-}));
-
-vi.mock('@/lib/db/server', () => ({ createDbServerClient }));
-vi.mock('@/lib/auth-helpers', async () => {
-  const actual = await vi.importActual<typeof import('@/lib/auth-helpers')>('@/lib/auth-helpers');
-  return { ...actual, getMyTeamMember };
-});
-vi.mock('@/lib/admin-check', () => ({ requireOrgAdmin }));
-vi.mock('@/lib/require-agent-orchestration', () => ({ requireAgentOrchestration }));
-vi.mock('@/services/agent-retry', async () => {
-  const actual = await vi.importActual<typeof import('@/services/agent-retry')>('@/services/agent-retry');
-  return {
-    ...actual,
-    AgentRetryService: class {
-      executeRetry = executeRetry;
-    },
-  };
-});
+// 837a36c4(Group B b3): proxy 위임 리팩토링 후 stale 재작성 — dynamic [id] params·pure proxy.
+const { proxyToFastapi } = vi.hoisted(() => ({ proxyToFastapi: vi.fn() }));
+vi.mock('@/lib/fastapi-proxy', () => ({ proxyToFastapi }));
 
 import { POST } from './route';
 
-function createRunLookupStub(run: Record<string, unknown> | null) {
-  const filters: Record<string, unknown> = {};
-  const query = {
-    select: vi.fn(() => query),
-    eq: vi.fn((column: string, value: unknown) => {
-      filters[column] = value;
-      return query;
-    }),
-    single: vi.fn(async () => {
-      if (!run) return { data: null, error: { code: 'PGRST116' } };
-      const matches = Object.entries(filters).every(([key, value]) => run[key] === value);
-      return matches ? { data: run, error: null } : { data: null, error: { code: 'PGRST116' } };
-    }),
-  };
-  return query;
-}
+const ID = 'run-1';
+const ctx = () => ({ params: Promise.resolve({ id: ID }) });
+const okRes = (b: unknown = { ok: 1 }) =>
+  new Response(JSON.stringify(b), { status: 200, headers: { 'content-type': 'application/json' } });
+const req = () => new Request(`http://localhost/x/${ID}/retry`, { method: 'POST' });
 
-describe('POST /api/v1/agent-runs/[id]/retry', () => {
-  beforeEach(() => {
-    createDbServerClient.mockReset();
-    getMyTeamMember.mockReset();
-    requireOrgAdmin.mockReset();
-    requireAgentOrchestration.mockReset();
-    executeRetry.mockReset();
-
-    getMyTeamMember.mockResolvedValue({ id: 'member-1', org_id: 'org-1', project_id: 'project-1' });
-    requireOrgAdmin.mockResolvedValue(undefined);
-    requireAgentOrchestration.mockResolvedValue(null);
+describe('/api/v1/agent-runs/[id]/retry (proxy 위임)', () => {
+  beforeEach(() => proxyToFastapi.mockReset());
+  it('POST: delegates to /api/v2/agent-runs/{id}/retry and wraps', async () => {
+    proxyToFastapi.mockResolvedValue(okRes());
+    const res = await POST(req(), ctx());
+    expect(res.status).toBe(200);
+    expect(proxyToFastapi).toHaveBeenCalledWith(expect.anything(), `/api/v2/agent-runs/${ID}/retry`);
   });
-
-  it('blocks retry bypass when upgrade is required', async () => {
-    createDbServerClient.mockResolvedValue({
-      auth: { getUser: vi.fn().mockResolvedValue({ data: { user: { id: 'user-1' } } }) },
-      from: vi.fn(),
-    });
-    requireAgentOrchestration.mockResolvedValue(new Response(JSON.stringify({
-      code: 'UPGRADE_REQUIRED',
-      error: { code: 'UPGRADE_REQUIRED', message: 'Upgrade required' },
-    }), { status: 403, headers: { 'Content-Type': 'application/json' } }));
-
-    const response = await POST(new Request('http://localhost/api/v1/agent-runs/run-1/retry', {
-      method: 'POST',
-    }), { params: Promise.resolve({ id: 'run-1' }) });
-
-    expect(response.status).toBe(403);
-    expect(executeRetry).not.toHaveBeenCalled();
-  });
-
-  it('blocks duplicate manual retry when a retry is already scheduled or launched', async () => {
-    createDbServerClient.mockResolvedValue({
-      auth: { getUser: vi.fn().mockResolvedValue({ data: { user: { id: 'user-1' } } }) },
-      from: vi.fn((table: string) => {
-        if (table === 'agent_runs') {
-          return createRunLookupStub({
-            id: 'run-1',
-            status: 'failed',
-            org_id: 'org-1',
-            project_id: 'project-1',
-            failure_disposition: 'retry_launched',
-            retry_count: 1,
-            max_retries: 3,
-            next_retry_at: null,
-            last_error_code: 'external_mcp_timeout',
-            error_message: 'request timeout',
-          });
-        }
-        throw new Error(`Unexpected table: ${table}`);
-      }),
-    });
-
-    const response = await POST(new Request('http://localhost/api/v1/agent-runs/run-1/retry', {
-      method: 'POST',
-    }), { params: Promise.resolve({ id: 'run-1' }) });
-
-    expect(response.status).toBe(400);
-    expect(executeRetry).not.toHaveBeenCalled();
-  });
-
-  it('blocks manual retry for non-retryable failures', async () => {
-    createDbServerClient.mockResolvedValue({
-      auth: { getUser: vi.fn().mockResolvedValue({ data: { user: { id: 'user-1' } } }) },
-      from: vi.fn((table: string) => {
-        if (table === 'agent_runs') {
-          return createRunLookupStub({
-            id: 'run-1',
-            status: 'failed',
-            org_id: 'org-1',
-            project_id: 'project-1',
-            failure_disposition: 'non_retryable',
-            retry_count: 0,
-            max_retries: 3,
-            next_retry_at: null,
-            last_error_code: 'billing_daily_cap_exceeded',
-            error_message: 'daily cap exceeded',
-          });
-        }
-        throw new Error(`Unexpected table: ${table}`);
-      }),
-    });
-
-    const response = await POST(new Request('http://localhost/api/v1/agent-runs/run-1/retry', {
-      method: 'POST',
-    }), { params: Promise.resolve({ id: 'run-1' }) });
-
-    expect(response.status).toBe(400);
-    expect(executeRetry).not.toHaveBeenCalled();
-  });
-
-  it('retries a failed run within the current org/project scope', async () => {
-    createDbServerClient.mockResolvedValue({
-      auth: { getUser: vi.fn().mockResolvedValue({ data: { user: { id: 'user-1' } } }) },
-      from: vi.fn((table: string) => {
-        if (table === 'agent_runs') {
-          return createRunLookupStub({
-            id: 'run-1',
-            status: 'failed',
-            org_id: 'org-1',
-            project_id: 'project-1',
-            failure_disposition: 'retry_exhausted',
-            retry_count: 3,
-            max_retries: 3,
-            next_retry_at: null,
-            last_error_code: 'external_mcp_timeout',
-            error_message: 'request timeout',
-          });
-        }
-        throw new Error(`Unexpected table: ${table}`);
-      }),
-    });
-    executeRetry.mockResolvedValue({ run: { id: 'run-2', status: 'queued' } });
-
-    const response = await POST(new Request('http://localhost/api/v1/agent-runs/run-1/retry', {
-      method: 'POST',
-    }), { params: Promise.resolve({ id: 'run-1' }) });
-
-    expect(response.status).toBe(202);
-    expect(requireAgentOrchestration).toHaveBeenCalledWith(expect.anything(), 'org-1');
-    expect(executeRetry).toHaveBeenCalledWith('run-1');
+  it('POST: passes through proxy errors', async () => {
+    proxyToFastapi.mockResolvedValue(new Response('e', { status: 409 }));
+    expect((await POST(req(), ctx())).status).toBe(409);
   });
 });

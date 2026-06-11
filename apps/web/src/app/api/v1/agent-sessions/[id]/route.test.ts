@@ -1,142 +1,27 @@
-import { describe, expect, it, vi, beforeEach } from 'vitest';
+import { beforeEach, describe, expect, it, vi } from 'vitest';
 
-const {
-  createDbServerClientMock,
-  createAdminClientMock,
-  getMyTeamMemberMock,
-  requireOrgAdminMock,
-  requireAgentOrchestrationMock,
-  transitionSessionMock,
-  resumeSessionCandidatesMock,
-} = vi.hoisted(() => ({
-  createDbServerClientMock: vi.fn(),
-  createAdminClientMock: vi.fn(),
-  getMyTeamMemberMock: vi.fn(),
-  requireOrgAdminMock: vi.fn(),
-  requireAgentOrchestrationMock: vi.fn(),
-  transitionSessionMock: vi.fn(),
-  resumeSessionCandidatesMock: vi.fn(),
-}));
-
-vi.mock('@/lib/db/server', () => ({
-  createDbServerClient: createDbServerClientMock,
-}));
-
-vi.mock('@/lib/db/admin', () => ({
-  createAdminClient: createAdminClientMock,
-}));
-
-vi.mock('@/lib/auth-helpers', () => ({
-  getMyTeamMember: getMyTeamMemberMock,
-}));
-
-vi.mock('@/lib/admin-check', () => ({
-  requireOrgAdmin: requireOrgAdminMock,
-}));
-
-vi.mock('@/lib/require-agent-orchestration', () => ({
-  requireAgentOrchestration: requireAgentOrchestrationMock,
-}));
-
-vi.mock('@/services/agent-session-lifecycle', () => ({
-  AgentSessionLifecycleError: class extends Error {
-    constructor(public readonly code: string, public readonly status: number, message: string) {
-      super(message);
-    }
-  },
-  AgentSessionLifecycleService: class {
-    transitionSession = transitionSessionMock;
-  },
-}));
-
-vi.mock('@/services/agent-session-resume', () => ({
-  resumeSessionCandidates: resumeSessionCandidatesMock,
-}));
+// 837a36c4(Group B b3): proxy 위임 리팩토링 후 stale 재작성 — dynamic [id] params·pure proxy.
+const { proxyToFastapi } = vi.hoisted(() => ({ proxyToFastapi: vi.fn() }));
+vi.mock('@/lib/fastapi-proxy', () => ({ proxyToFastapi }));
 
 import { PATCH } from './route';
 
-describe('PATCH /api/v1/agent-sessions/[id]', () => {
-  beforeEach(() => {
-    createDbServerClientMock.mockReset();
-    createAdminClientMock.mockReset();
-    getMyTeamMemberMock.mockReset();
-    requireOrgAdminMock.mockReset();
-    requireAgentOrchestrationMock.mockReset();
-    transitionSessionMock.mockReset();
-    resumeSessionCandidatesMock.mockReset();
+const ID = 'session-1';
+const ctx = () => ({ params: Promise.resolve({ id: ID }) });
+const okRes = (b: unknown = { ok: 1 }) =>
+  new Response(JSON.stringify(b), { status: 200, headers: { 'content-type': 'application/json' } });
+const req = () => new Request(`http://localhost/x/${ID}`, { method: 'PATCH' });
 
-    createDbServerClientMock.mockResolvedValue({
-      auth: { getUser: vi.fn(async () => ({ data: { user: { id: 'user-1' } } })) },
-    });
-    createAdminClientMock.mockReturnValue({ tag: 'admin-db' });
-    getMyTeamMemberMock.mockResolvedValue({ id: 'member-1', org_id: 'org-1', project_id: 'project-1' });
-    requireOrgAdminMock.mockResolvedValue(undefined);
-    requireAgentOrchestrationMock.mockResolvedValue(null);
-    transitionSessionMock.mockResolvedValue({
-      session: { id: 'session-1', status: 'suspended' },
-      resumptions: [],
-    });
+describe('/api/v1/agent-sessions/[id] (proxy 위임)', () => {
+  beforeEach(() => proxyToFastapi.mockReset());
+  it('PATCH: delegates to /api/v2/agent-sessions/{id} and wraps', async () => {
+    proxyToFastapi.mockResolvedValue(okRes());
+    const res = await PATCH(req(), ctx());
+    expect(res.status).toBe(200);
+    expect(proxyToFastapi).toHaveBeenCalledWith(expect.anything(), `/api/v2/agent-sessions/${ID}`);
   });
-
-  it('blocks session transition bypass when upgrade is required', async () => {
-    requireAgentOrchestrationMock.mockResolvedValue(new Response(JSON.stringify({
-      code: 'UPGRADE_REQUIRED',
-      error: { code: 'UPGRADE_REQUIRED', message: 'Upgrade required' },
-    }), { status: 403, headers: { 'Content-Type': 'application/json' } }));
-
-    const response = await PATCH(
-      new Request('http://localhost:3108/api/v1/agent-sessions/session-1', {
-        method: 'PATCH',
-        body: JSON.stringify({ status: 'suspended', reason: 'manual_pause' }),
-      }),
-      { params: Promise.resolve({ id: 'session-1' }) },
-    );
-
-    expect(response.status).toBe(403);
-    expect(transitionSessionMock).not.toHaveBeenCalled();
-  });
-
-  it('transitions a session for project admins', async () => {
-    const response = await PATCH(
-      new Request('http://localhost:3108/api/v1/agent-sessions/session-1', {
-        method: 'PATCH',
-        body: JSON.stringify({ status: 'suspended', reason: 'manual_pause' }),
-      }),
-      { params: Promise.resolve({ id: 'session-1' }) },
-    );
-    const payload = await response.json();
-
-    expect(response.status).toBe(200);
-    expect(requireAgentOrchestrationMock).toHaveBeenCalledWith(expect.anything(), 'org-1');
-    expect(transitionSessionMock).toHaveBeenCalledWith({
-      sessionId: 'session-1',
-      orgId: 'org-1',
-      projectId: 'project-1',
-      actorId: 'member-1',
-      status: 'suspended',
-      reason: 'manual_pause',
-    });
-    expect(payload.data.session).toEqual({ id: 'session-1', status: 'suspended' });
-    expect(resumeSessionCandidatesMock).not.toHaveBeenCalled();
-  });
-
-  it('resumes held runs when a suspended session is manually reactivated', async () => {
-    transitionSessionMock.mockResolvedValue({
-      session: { id: 'session-1', status: 'active' },
-      resumptions: [{ runId: 'run-1', memoId: 'memo-1', orgId: 'org-1', projectId: 'project-1', agentId: 'agent-1' }],
-    });
-
-    const response = await PATCH(
-      new Request('http://localhost:3108/api/v1/agent-sessions/session-1', {
-        method: 'PATCH',
-        body: JSON.stringify({ status: 'active', reason: 'resume' }),
-      }),
-      { params: Promise.resolve({ id: 'session-1' }) },
-    );
-
-    expect(response.status).toBe(200);
-    expect(resumeSessionCandidatesMock).toHaveBeenCalledWith({ tag: 'admin-db' }, [
-      { runId: 'run-1', memoId: 'memo-1', orgId: 'org-1', projectId: 'project-1', agentId: 'agent-1' },
-    ]);
+  it('PATCH: passes through proxy errors', async () => {
+    proxyToFastapi.mockResolvedValue(new Response('e', { status: 404 }));
+    expect((await PATCH(req(), ctx())).status).toBe(404);
   });
 });

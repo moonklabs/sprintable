@@ -141,10 +141,17 @@ async def dispatch_entity(
             )
             sender_id = om_result.scalar_one_or_none()
 
+    # E1-S6 L4: 대표 가설 anchor 주입 — epic/story dispatch면 primary hypothesis를 해소해
+    # payload(hypothesis_anchor)와 content 한 줄로 동봉(additive — 구 webhook 소비자 호환).
+    from app.services.hypothesis import format_anchor_line, resolve_dispatch_anchor
+    hypothesis_anchor = await resolve_dispatch_anchor(db, org_id, body.entity_type, body.entity_id)
+
     # E-EVENT-INJECT S1: connector(adapter.py)가 content 없는 이벤트를 드롭(if not content: return)하므로
     # dispatched에 top-level content를 부여 → 에이전트 work-turn으로 실제 주입.
     _detail = (body.message or description or "").strip()
     content = f"[{body.entity_type}] {title}" + (f" — {_detail}" if _detail else "")
+    if hypothesis_anchor is not None:
+        content += "\n" + format_anchor_line(hypothesis_anchor)
     payload = {
         "entity_type": body.entity_type,
         "entity_id": str(body.entity_id),
@@ -152,6 +159,7 @@ async def dispatch_entity(
         "description": (description or "")[:500],
         "message": body.message,
         "content": content,
+        "hypothesis_anchor": hypothesis_anchor,
         "timestamp": datetime.now(timezone.utc).isoformat(),
     }
 
@@ -206,6 +214,7 @@ async def dispatch_entity(
         event_type="dispatched",
         source_entity_type=body.entity_type,
         source_entity_id=body.entity_id,
+        hypothesis_anchor=hypothesis_anchor,
     )
     return DispatchResponse(
         dispatched=True,

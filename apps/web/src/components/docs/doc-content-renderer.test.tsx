@@ -32,7 +32,10 @@ describe('DocContentRenderer', () => {
 
     expect(markup).toContain('<h1 id="overview">Overview</h1>');
     expect(markup).toContain('<h2 id="html-heading-in-markdown">HTML Heading In Markdown</h2>');
-    expect(markup).toContain('data-doc-copy-button="true"');
+    // Markdown code blocks render via the self-contained React CodeBlock (own onClick +
+    // state), so the copy action is the data-doc-code-actions shell + label, not the
+    // HTML-path data-doc-copy-button marker (that marker is asserted in the html test below).
+    expect(markup).toContain('data-doc-code-actions="true"');
     expect(markup).toContain('Copy code');
     expect(markup).toContain('<table>');
   });

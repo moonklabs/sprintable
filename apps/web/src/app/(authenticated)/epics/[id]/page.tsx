@@ -16,8 +16,8 @@ import { TopBarSlot } from '@/components/nav/top-bar-slot';
 import { EntityDispatchPanel } from '@/components/dispatch/entity-dispatch-panel';
 import { ToastContainer, useToast } from '@/components/ui/toast';
 import { OutcomeStatusBadge } from '@/components/outcome/outcome-status-badge';
-import { OutcomeResultCard, type OutcomeResult } from '@/components/outcome/outcome-result-card';
 import { OutcomeIntentFields, type OutcomeIntentValue } from '@/components/outcome/outcome-intent-fields';
+import { HypothesesSection } from '@/components/hypotheses/hypotheses-section';
 
 type EpicStatus = 'draft' | 'active' | 'done' | 'archived';
 type EpicPriority = 'critical' | 'high' | 'medium' | 'low';
@@ -353,15 +353,9 @@ export default function EpicDetailPage() {
 
         {!isEditing && (
           <>
-            {/* Outcome result */}
-            {epic.outcome_status && epic.outcome_status !== 'n_a' ? (
-              <OutcomeResultCard
-                status={epic.outcome_status}
-                hypothesis={epic.success_hypothesis ?? null}
-                result={(epic.outcome_result as OutcomeResult | null) ?? null}
-                pendingMetricLabel={(epic.metric_definition as { metric?: string } | null)?.metric ?? undefined}
-              />
-            ) : null}
+            {/* Hypotheses — 1st-class entity section (E1-S8). Replaces the legacy
+                OutcomeResultCard/inline outcome intent (AC5 · §12.3 공존 금지). */}
+            {epic.project_id ? <HypothesesSection epicId={epic.id} projectId={epic.project_id} /> : null}
 
             {/* Description */}
             <section className="space-y-2">

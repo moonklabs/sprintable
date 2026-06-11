@@ -55,6 +55,7 @@ export function DocEditor({
   breadcrumb,
   urlSlot,
   actions,
+  syncBanner,
   labels,
 }: {
   value: string;
@@ -78,6 +79,8 @@ export function DocEditor({
   /** Inline URL chip slot, rendered under the title (above the tab bar). */
   urlSlot?: React.ReactNode;
   actions?: React.ReactNode;
+  /** Sync-state off-ramp banner (conflict / remote-changed), rendered below the toolbar. */
+  syncBanner?: React.ReactNode;
   labels: {
     contentFormat: string;
     markdown: string;
@@ -415,6 +418,9 @@ export function DocEditor({
         {/* TOC — always in toolbar when ≥3 headings */}
         <DocToc headings={tocHeadings} onHeadingClick={scrollToHeading} />
       </div>
+
+      {/* Sync off-ramp banner (conflict / remote-changed) — below the toolbar, above content */}
+      {syncBanner ? <div className="px-3 pt-2">{syncBanner}</div> : null}
 
       {/* Floating bubble toolbar — visible on text selection in preview mode */}
       {editor && editable && viewMode === 'preview' && (

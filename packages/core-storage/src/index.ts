@@ -22,6 +22,21 @@ export type {
 } from './interfaces/IStoryRepository';
 
 export type {
+  IHypothesisRepository,
+  Hypothesis,
+  HypothesisStatus,
+  CreateHypothesisInput,
+  UpdateHypothesisInput,
+  HypothesisTransitionInput,
+  HypothesisLinkInput,
+  HypothesisUnlinkInput,
+  HypothesisDraftInput,
+  HypothesisDraft,
+  HypothesisListFilters,
+} from './interfaces/IHypothesisRepository';
+export { HYPOTHESIS_STATUSES } from './interfaces/IHypothesisRepository';
+
+export type {
   ITaskRepository,
   Task,
   CreateTaskInput,

@@ -1,5 +1,33 @@
 import { describe, expect, it, vi, beforeEach, afterEach } from 'vitest';
-import { createAutosaveScheduler } from './use-doc-sync';
+import { createAutosaveScheduler, unwrapDocResponse } from './use-doc-sync';
+
+// ---------------------------------------------------------------------------
+// unwrapDocResponse — envelope-boundary regression guard (fc4d4264)
+// The docs PATCH route is a raw proxyToFastapi passthrough, so the live response
+// is the bare DocResponse. Reading json.data.updated_at against it threw and broke
+// save() settlement → infinite autosave + silent overwrite. Lock both shapes.
+// ---------------------------------------------------------------------------
+
+describe('unwrapDocResponse', () => {
+  it('reads updated_at + doc from the raw FastAPI passthrough shape', () => {
+    const raw = { id: 'doc-1', title: 'T', updated_at: '2026-06-11T00:00:00Z' };
+    const { doc, updatedAt } = unwrapDocResponse<typeof raw>(raw);
+    expect(updatedAt).toBe('2026-06-11T00:00:00Z');
+    expect(doc).toBe(raw);
+  });
+
+  it('still reads the legacy enveloped { data } shape (route re-wrap safety)', () => {
+    const enveloped = { data: { id: 'doc-1', updated_at: '2026-06-11T00:00:00Z' } };
+    const { doc, updatedAt } = unwrapDocResponse<{ id: string; updated_at: string }>(enveloped);
+    expect(updatedAt).toBe('2026-06-11T00:00:00Z');
+    expect(doc).toBe(enveloped.data);
+  });
+
+  it('returns undefined updatedAt when the response carries no timestamp', () => {
+    expect(unwrapDocResponse({ id: 'doc-1' }).updatedAt).toBeUndefined();
+    expect(unwrapDocResponse(null).updatedAt).toBeUndefined();
+  });
+});
 
 // ---------------------------------------------------------------------------
 // createAutosaveScheduler — pure debounce factory (no React / no DOM needed)
