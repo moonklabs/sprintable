@@ -56,6 +56,8 @@ class ConversationParticipant(Base):
     joined_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now(), nullable=False
     )
+    # 270c87e6: per-대화 알림 mute. set=무음·null=알림 ON. 참여자 지위·가시성·수신은 불변(알림만).
+    muted_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
 
     conversation: Mapped[Conversation] = relationship("Conversation", back_populates="participants")
 

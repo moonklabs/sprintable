@@ -8,41 +8,61 @@ from fastapi import APIRouter, Depends, HTTPException, Query
 from pydantic import BaseModel, ConfigDict
 from sqlalchemy import and_, exists, func, or_, select, update
 from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy.orm import aliased
 
 from app.dependencies.auth import AuthContext, get_current_user, get_verified_org_id
 from app.dependencies.database import get_db
-from app.models.conversation import Conversation, ConversationMessage
+from app.models.conversation import Conversation, ConversationMessage, ConversationParticipant
 from app.models.event import Event
 from app.models.team import TeamMember
 
 router = APIRouter(prefix="/api/v2/event-notifications", tags=["event-notifications"])
 
+# 대화 이벤트 종류(휴먼 알림 정책 분기 대상). 비-대화 이벤트(dispatched 등)는 항상 노출.
+_CONVERSATION_EVENT_TYPES = ("conversation.message_created", "conversation:mention")
 
-def _is_spectator_message_event():
-    """관전 동석 알림 판별 (story 48dbada0 · 선생님 제보).
 
-    휴먼 알림 도배의 근원: conversation fan-out이 participant **전원**에게
-    `conversation.message_created` Event를 적재 → 인가 불변식/킥오프로 동석한 휴먼이
-    그룹 대화의 모든 발화를 알림으로 받는다. "직접 필요한 알림만" 정책에 따라
-    **그룹 대화의 message_created는 휴먼 알림에서 제외**한다.
+def _is_hidden_notification(member_id: uuid.UUID):
+    """휴먼 알림에서 숨길 대화 이벤트 판별 (48dbada0 + 270c87e6 · 선생님 정책).
 
-    유지(직접 필요): ①DM 메시지(`type='dm'`) ②@mention(`conversation:mention`은 별도
-    event_type이라 본 필터 비대상) ③dispatched/story_assigned 등 비-대화 이벤트.
+    숨김(둘 중 하나):
+    1. **mute**(270c87e6 ③): member가 그 대화를 mute → 그 대화의 모든 conversation 이벤트
+       (message_created·mention) 숨김. carve-out·DM보다 우선. 참여/가시성/수신은 불변(알림만).
+    2. **spectator**(48dbada0): 그룹 대화의 message_created인데 member가 그 대화에서 **발화한 적
+       없음** → 관전 동석 알림이라 숨김. ⇄ **carve-out**(270c87e6 ②): 발화한 적 있으면 노출.
 
-    ⚠️ Event/SSE/에이전트 주입 경로는 불변 — 본 필터는 **휴먼 알림 읽기 단**에만 적용한다
-    (Event는 그대로 적재되어 에이전트 SSE/poll·DB 추적은 무영향).
+    노출(직접 필요): DM 메시지·@mention(별도 type)·발화한 그룹 대화·dispatched 등 비-대화 이벤트.
+    ⚠️ Event/SSE/에이전트 주입 경로 불변 — 휴먼 알림 읽기 단에만 적용.
     """
-    return and_(
-        Event.event_type == "conversation.message_created",
-        exists(
-            select(1)
-            .select_from(ConversationMessage)
-            .join(Conversation, Conversation.id == ConversationMessage.conversation_id)
-            .where(
-                ConversationMessage.id == Event.source_entity_id,
-                Conversation.type != "dm",
-            )
-        ),
+    # 이 Event의 소스 메시지(EvtMsg). EXISTS가 EvtMsg.id == Event.source_entity_id로 outer Event에
+    # correlate된다(scalar 서브쿼리 오-correlate 회피). 비-대화 이벤트면 EvtMsg 매칭 0 → 전부 false.
+    evt_msg = aliased(ConversationMessage)
+    my_msg = aliased(ConversationMessage)
+    muted = exists(
+        select(1)
+        .select_from(evt_msg)
+        .join(ConversationParticipant, ConversationParticipant.conversation_id == evt_msg.conversation_id)
+        .where(
+            evt_msg.id == Event.source_entity_id,
+            ConversationParticipant.member_id == member_id,
+            ConversationParticipant.muted_at.isnot(None),
+        )
+    )
+    is_group = exists(
+        select(1)
+        .select_from(evt_msg)
+        .join(Conversation, Conversation.id == evt_msg.conversation_id)
+        .where(evt_msg.id == Event.source_entity_id, Conversation.type != "dm")
+    )
+    spoke = exists(
+        select(1)
+        .select_from(evt_msg)
+        .join(my_msg, my_msg.conversation_id == evt_msg.conversation_id)
+        .where(evt_msg.id == Event.source_entity_id, my_msg.sender_id == member_id)
+    )
+    return or_(
+        and_(Event.event_type.in_(_CONVERSATION_EVENT_TYPES), muted),         # mute: 대화 전체 무음
+        and_(Event.event_type == "conversation.message_created", is_group, ~spoke),  # 미발화 그룹 관전
     )
 
 
@@ -122,7 +142,7 @@ async def list_notifications(
         .where(
             Event.org_id == org_id,
             Event.recipient_id == member_id,
-            ~_is_spectator_message_event(),  # 48dbada0: 그룹 대화 관전 알림 제외
+            ~_is_hidden_notification(member_id),  # 48dbada0+270c87e6: mute·미발화 그룹 관전 제외
         )
         .order_by(Event.created_at.desc())
         .limit(limit)
@@ -149,7 +169,7 @@ async def get_unread_count(
             Event.org_id == org_id,
             Event.recipient_id == member_id,
             Event.read_at.is_(None),
-            ~_is_spectator_message_event(),  # 48dbada0: 그룹 대화 관전 알림 제외
+            ~_is_hidden_notification(member_id),  # 48dbada0+270c87e6: mute·미발화 그룹 관전 제외
         )
     )
     count = result.scalar_one()
