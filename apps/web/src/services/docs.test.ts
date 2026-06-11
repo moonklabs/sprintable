@@ -58,7 +58,7 @@ describe('DocsService.updateDoc', () => {
 
     expect(updateBuilder.eq).toHaveBeenCalledWith('id', 'doc-1');
     expect(updateBuilder.eq).toHaveBeenCalledWith('updated_at', '2026-04-09T15:19:00.000Z');
-    expect(db.rpc).toHaveBeenCalledWith('trim_doc_revisions', { _doc_id: 'doc-1', _keep: 50 });
+    // 837a36c4: updateDoc는 더 이상 trim_doc_revisions RPC를 호출하지 않음(리비전 트리밍 분리) — stale 단언 제거.
     expect(result).toEqual(expect.objectContaining({ id: 'doc-1', content: 'updated' }));
   });
 
@@ -95,6 +95,6 @@ describe('DocsService.updateDoc', () => {
 
     expect(updateBuilder.eq).toHaveBeenCalledWith('id', 'doc-1');
     expect(updateBuilder.eq).not.toHaveBeenCalledWith('updated_at', '2026-04-09T15:19:00.000Z');
-    expect(db.rpc).toHaveBeenCalledWith('trim_doc_revisions', { _doc_id: 'doc-1', _keep: 50 });
+    // 837a36c4: trim_doc_revisions RPC 미호출(리비전 트리밍 분리) — stale 단언 제거.
   });
 });
