@@ -10,9 +10,11 @@ import {
   X,
   Zap,
 } from 'lucide-react';
+import { useTranslations } from 'next-intl';
 import { cn } from '@/lib/utils';
 import { useDashboardContext } from '@/app/dashboard/dashboard-shell';
 import { useSseNotifications, type SseEventNotification } from '@/hooks/use-sse-notifications';
+import { getEventTypeCopy } from '@/services/notification-display';
 
 type FilterTab = 'all' | 'story' | 'system';
 
@@ -133,6 +135,7 @@ function NotificationPanel({
   onNavigate,
   onClose,
 }: NotificationPanelProps) {
+  const t = useTranslations('inbox');
   const [filterTab, setFilterTab] = useState<FilterTab>('all');
   const [showUnreadOnly, setShowUnreadOnly] = useState(false);
 
@@ -250,7 +253,7 @@ function NotificationPanel({
                         !n.read_at && 'font-medium',
                       )}
                     >
-                      {n.payload?.summary ?? n.event_type}
+                      {n.payload?.summary ?? getEventTypeCopy(t, n.event_type)}
                     </p>
                     {n.payload?.sender_name ? (
                       <p className="truncate text-xs text-muted-foreground">
@@ -276,6 +279,7 @@ function NotificationPanel({
 
 export function NotificationBell() {
   const router = useRouter();
+  const t = useTranslations('inbox');
   const { currentTeamMemberId, projectId } = useDashboardContext();
   const [open, setOpen] = useState(false);
   const [unreadCount, setUnreadCount] = useState(0);
@@ -304,12 +308,12 @@ export function NotificationBell() {
     });
     // 탭 비활성 상태에서 브라우저 알림 표시
     if (document.hidden && 'Notification' in window && Notification.permission === 'granted') {
-      void new Notification(incoming.payload?.summary ?? incoming.event_type, {
+      void new Notification(incoming.payload?.summary ?? getEventTypeCopy(t, incoming.event_type), {
         body: incoming.payload?.sender_name ?? undefined,
         icon: '/favicon.ico',
       });
     }
-  }, []);
+  }, [t]);
 
   useSseNotifications({ onNotification: handleSseNotification, memberId: currentTeamMemberId });
 
