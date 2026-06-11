@@ -7,7 +7,6 @@ import {
 
 const translations: Record<string, string> = {
   filter_story: '스토리',
-  filter_memo: '메모',
   filter_task: '태스크',
   filter_reward: '리워드',
   filter_info: '안내',
@@ -16,12 +15,14 @@ const translations: Record<string, string> = {
 };
 
 describe('notification-display', () => {
-  it('localizes info and warning notification labels', () => {
+  it('localizes known notification labels and passes unknown types through raw', () => {
     const t = (key: string) => translations[key] ?? key;
 
     expect(getInboxNotificationLabel(t, 'info')).toBe('안내');
     expect(getInboxNotificationLabel(t, 'warning')).toBe('경고');
-    expect(getInboxNotificationLabel(t, 'memo')).toBe('메모');
+    // 837a36c4: 'memo'는 NOTIFICATION_TYPES 비포함 → switch default가 raw 타입 반환(localize 안 함).
+    // 구 테스트는 존재하지 않는 filter_memo 키로 '메모'를 기대했으나, 현 계약은 unknown=raw passthrough.
+    expect(getInboxNotificationLabel(t, 'memo')).toBe('memo');
   });
 
   it('keeps info and warning filter types available for the inbox surface', () => {
