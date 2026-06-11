@@ -197,7 +197,12 @@ const updateMemoSchema = z.object({
   title: z.string().trim().min(1).max(200).nullable().optional(),
   content: z.string().trim().min(1).max(20_000).optional(),
   memo_type: z.string().trim().min(1).max(64).optional(),
-  status: z.string().trim().min(1).max(64).optional(),
+  // Constrained to non-terminal transitions only. 'resolved' is intentionally
+  // excluded: resolution is a gated lifecycle action (MemoService.resolve records
+  // resolved_by/resolved_at and rejects double-resolve), so update_memo must not be
+  // a backdoor that fabricates a resolved state outside that state machine. An open
+  // string would also let agents write arbitrary, invalid statuses.
+  status: z.enum(['open', 'archived']).optional(),
   assigned_to: z.string().uuid().nullable().optional(),
 });
 
