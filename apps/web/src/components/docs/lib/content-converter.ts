@@ -259,6 +259,31 @@ turndown.addRule('blockquote', {
   },
 });
 
+// Fenced code block — read the language from whichever element carries it so the
+// fence survives the LIVE editor round-trip (story 2a72ebf4 FIX-3b). Turndown's
+// default reads only the <code> class; tiptap's getHTML put `language-*` on <pre>
+// (not <code>), so ```ts dropped to ``` on load → dirty → unsaveable code-block docs.
+// Order: <code> class (markdownToHtml output) → <pre> data-language / class (tiptap
+// getHTML + legacy). Belt-and-suspenders with the renderHTML fix in code-block-copy.tsx.
+turndown.addRule('fencedCodeBlock', {
+  filter: (node) =>
+    node.nodeName === 'PRE' &&
+    !!node.firstChild &&
+    node.firstChild.nodeName === 'CODE',
+  replacement: (_content, node) => {
+    const pre = node as HTMLElement;
+    const code = pre.firstChild as HTMLElement;
+    const langFromClass = (el: HTMLElement | null) => el?.className.match(/language-(\S+)/)?.[1] ?? null;
+    const lang =
+      langFromClass(code) ??
+      pre.getAttribute('data-language') ??
+      langFromClass(pre) ??
+      '';
+    const text = (code.textContent ?? '').replace(/\n$/, '');
+    return `\n\n\`\`\`${lang}\n${text}\n\`\`\`\n\n`;
+  },
+});
+
 /**
  * Convert HTML to markdown. Used when saving markdown-format docs
  * that were edited in the rich editor.
