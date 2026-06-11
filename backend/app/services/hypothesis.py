@@ -329,3 +329,54 @@ async def draft_hypothesis(
         requires_confirmation=True,
         hypothesis=hyp_resp,
     )
+
+
+# ── L4: dispatch hypothesis anchor (§5) ──────────────────────────────────────
+_ANCHOR_STATEMENT_MAX = 160
+
+
+def build_anchor_dict(hyp) -> dict:
+    """§5.1.1 payload anchor — metric/target/direction은 metric_definition에서 평탄화."""
+    md = hyp.metric_definition or {}
+    return {
+        "id": str(hyp.id),
+        "statement": hyp.statement,
+        "status": hyp.status,
+        "metric": md.get("metric"),
+        "target": md.get("target"),
+        "direction": md.get("direction"),
+        "measure_after": hyp.measure_after.isoformat() if hyp.measure_after else None,
+    }
+
+
+def format_anchor_line(anchor: dict) -> str:
+    """§5.3 content 한 줄: `[hypothesis] {statement} — {metric} {direction} {target} by {date}`.
+
+    statement는 160자 truncate. metric/target/measure_after가 없으면 해당 절을 생략한다.
+    """
+    stmt = (anchor.get("statement") or "")[:_ANCHOR_STATEMENT_MAX]
+    metric = anchor.get("metric") or ""
+    direction = anchor.get("direction") or ""
+    target = anchor.get("target")
+    measure_after = anchor.get("measure_after")
+    line = f"[hypothesis] {stmt}"
+    metric_part = " ".join(str(p) for p in (metric, direction, target) if p not in (None, "")).strip()
+    if metric_part:
+        line += f" — {metric_part}"
+    if isinstance(measure_after, str) and measure_after:
+        line += f" by {measure_after[:10]}"
+    return line
+
+
+async def resolve_dispatch_anchor(
+    session: AsyncSession,
+    org_id: uuid.UUID,
+    entity_type: str,
+    entity_id: uuid.UUID,
+) -> dict | None:
+    """dispatch 대상의 대표 가설 anchor dict(§5.2). 없으면 None(에픽/스토리 외엔 항상 None)."""
+    repo = HypothesisRepository(session, org_id)
+    hyp = await repo.resolve_primary_anchor(entity_type, entity_id)
+    if hyp is None:
+        return None
+    return build_anchor_dict(hyp)

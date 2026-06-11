@@ -8,10 +8,11 @@ from __future__ import annotations
 
 import uuid
 
-from sqlalchemy import select
+from sqlalchemy import desc, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models.hypothesis import Hypothesis, HypothesisEpicLink, HypothesisStoryLink
+from app.models.pm import Story
 from app.repositories.base import BaseRepository
 
 
@@ -161,3 +162,57 @@ class HypothesisRepository(BaseRepository[Hypothesis]):
         for link in links:
             await self.session.delete(link)
         await self.session.flush()
+
+    # ── dispatch anchor 해소 (S6 §5.2) ──────────────────────────────────────────
+    async def _primary_via_epic(self, epic_id: uuid.UUID) -> Hypothesis | None:
+        """epic의 link_type='primary' 가설. 여럿이면 active 우선·최신 created_at 순."""
+        row = await self.session.execute(
+            select(Hypothesis)
+            .join(HypothesisEpicLink, HypothesisEpicLink.hypothesis_id == Hypothesis.id)
+            .where(
+                Hypothesis.org_id == self.org_id,
+                HypothesisEpicLink.epic_id == epic_id,
+                HypothesisEpicLink.link_type == "primary",
+            )
+            .order_by(desc(Hypothesis.status == "active"), Hypothesis.created_at.desc())
+            .limit(1)
+        )
+        return row.scalar_one_or_none()
+
+    async def _primary_via_story(self, story_id: uuid.UUID) -> Hypothesis | None:
+        row = await self.session.execute(
+            select(Hypothesis)
+            .join(HypothesisStoryLink, HypothesisStoryLink.hypothesis_id == Hypothesis.id)
+            .where(
+                Hypothesis.org_id == self.org_id,
+                HypothesisStoryLink.story_id == story_id,
+                HypothesisStoryLink.link_type == "primary",
+            )
+            .order_by(desc(Hypothesis.status == "active"), Hypothesis.created_at.desc())
+            .limit(1)
+        )
+        return row.scalar_one_or_none()
+
+    async def resolve_primary_anchor(
+        self, entity_type: str, entity_id: uuid.UUID
+    ) -> Hypothesis | None:
+        """dispatch 대상의 대표 가설(§5.2).
+
+        story: story link primary 우선 → 없으면 story의 epic primary로 fallback.
+        epic: epic link primary. doc 등 그 외: None.
+        """
+        if entity_type == "story":
+            hyp = await self._primary_via_story(entity_id)
+            if hyp is not None:
+                return hyp
+            epic_id = await self.session.scalar(
+                select(Story.epic_id).where(
+                    Story.id == entity_id, Story.org_id == self.org_id
+                )
+            )
+            if epic_id is not None:
+                return await self._primary_via_epic(epic_id)
+            return None
+        if entity_type == "epic":
+            return await self._primary_via_epic(entity_id)
+        return None
