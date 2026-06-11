@@ -2311,7 +2311,8 @@
     "pickerEmpty": "연결할 가설이 없습니다",
     "crossEpic": "다른 에픽",
     "crossEpicHint": "이 가설은 다른 에픽 소속입니다",
-    "createElsewhereHint": "가설은 에픽 상세에서 생성합니다"
+    "createElsewhereHint": "가설은 에픽 상세에서 생성합니다",
+    "summaryTitle": "연결 가설 {count}개"
   },
   "epics": {
     "title": "에픽",

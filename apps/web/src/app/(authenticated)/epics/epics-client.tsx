@@ -14,6 +14,7 @@ import {
 } from '@/components/ui/dialog';
 import { ToastContainer, useToast } from '@/components/ui/toast';
 import { OutcomeStatusBadge } from '@/components/outcome/outcome-status-badge';
+import { HypothesesSummary } from '@/components/hypotheses/hypotheses-summary';
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -42,6 +43,9 @@ interface Epic {
   measure_after?: string | null;
   outcome_status?: 'n_a' | 'pending' | 'hit' | 'miss' | null;
   outcome_result?: Record<string, unknown> | null;
+  // E1 S8b: BE EpicResponse가 list 응답에 부착하는 연결 가설 집계(미부착 경로는 기본값).
+  hypothesis_count?: number;
+  risky_status?: string | null;
 }
 
 // ─── Helpers ─────────────────────────────────────────────────────────────────
@@ -459,11 +463,14 @@ function EpicRow({ epic, isSelected, onClick, onDeleteRequest }: EpicRowProps) {
           <p className="text-xs text-muted-foreground line-clamp-1">{epic.description.split('\n')[0]?.replace(/^#+\s*/, '')}</p>
         ) : null}
 
-        <div className="flex items-center gap-3 text-xs text-muted-foreground">
+        {/* 가설요약 추가로 메타 항목이 늘어 고밀도 카드(마감일+SP초과 동반)가 narrow 폭서
+            가로 오버플로 잠재 → flex-wrap 헤지(가디언 라이브게이트 선제·기존 행 robustness↑). */}
+        <div className="flex flex-wrap items-center gap-x-3 gap-y-1 text-xs text-muted-foreground">
           {epic.target_date ? (
             <span>{t('targetDate')}: {formatDate(epic.target_date)}</span>
           ) : null}
           <span>{done}/{total} {t('stories')}</span>
+          <HypothesesSummary count={epic.hypothesis_count ?? 0} riskyStatus={epic.risky_status ?? null} />
           {spExceeded ? (
             <span className="rounded-full bg-destructive/10 px-1.5 py-0.5 text-[10px] font-semibold text-destructive">
               {t('spExceeded')}
