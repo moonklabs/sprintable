@@ -254,7 +254,8 @@ async def test_list_conversations():
         member_result.scalars.return_value.first.return_value = mock_member
 
         conv_ids_result = MagicMock()
-        conv_ids_result.all.return_value = [(CONV_ID,)]
+        # 270c87e6: conv_ids 쿼리가 (conversation_id, muted_at) 2컬럼 반환 — Row 속성 접근 정합.
+        conv_ids_result.all.return_value = [MagicMock(conversation_id=CONV_ID, muted_at=None)]
 
         total_result = MagicMock()
         total_result.scalar_one.return_value = 1
@@ -360,7 +361,11 @@ async def test_get_conversation_200_returns_project_id():
         agents_result = MagicMock()
         agents_result.scalars.return_value.all.return_value = [agent_id]  # 전원 agent 확정
 
-        session.execute = AsyncMock(side_effect=[conv_result, member_result, pids_result, agents_result])
+        # 270c87e6: detail이 caller muted_at 조회 1건 추가 — 비참여(agent-only)면 None=미mute.
+        muted_result = MagicMock()
+        muted_result.scalar_one_or_none.return_value = None
+
+        session.execute = AsyncMock(side_effect=[conv_result, member_result, pids_result, agents_result, muted_result])
 
         async with client as c:
             resp = await c.get(f"/api/v2/conversations/{CONV_ID}")
