@@ -106,10 +106,14 @@ async def test_dispatch_success_reason_ok():
     try:
         with patch("app.routers.dispatch._fetch_entity", new_callable=AsyncMock) as mfetch, \
              patch("app.routers.dispatch.resolve_member_identity", new_callable=AsyncMock) as mresolve, \
-             patch("app.routers.dispatch.dispatch_notification", new_callable=AsyncMock) as mnotif:
+             patch("app.routers.dispatch.dispatch_notification", new_callable=AsyncMock) as mnotif, \
+             patch("app.services.hypothesis.resolve_dispatch_anchor", new_callable=AsyncMock) as manchor:
             mfetch.return_value = (aid, "Story T", "desc", PROJECT_ID)
             mresolve.return_value = member
             mnotif.return_value = None
+            # E1-S6: dispatch가 anchor 해소 쿼리를 추가하므로, reason 검증 전용인 이 테스트는
+            # anchor를 None으로 격리한다(이 테스트의 광역 execute mock은 sender용 UUID만 의도).
+            manchor.return_value = None
             async with client as c:
                 resp = await c.post("/api/v2/dispatch", json=_body())
         assert resp.status_code == 200, resp.text
