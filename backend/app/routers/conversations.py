@@ -575,6 +575,10 @@ class AddParticipantRequest(BaseModel):
     member_id: uuid.UUID
 
 
+class MuteRequest(BaseModel):
+    muted: bool
+
+
 # ─── Endpoints ────────────────────────────────────────────────────────────────
 
 @router.post("", status_code=201)
@@ -893,6 +897,40 @@ async def list_working_members(
     return {"data": items}
 
 
+@router.patch("/{conversation_id}/mute")
+async def set_conversation_mute(
+    conversation_id: uuid.UUID,
+    body: MuteRequest,
+    db: AsyncSession = Depends(get_db),
+    auth: AuthContext = Depends(get_current_user),
+    org_id: uuid.UUID = Depends(get_verified_org_id),
+) -> dict:
+    """PATCH /api/v2/conversations/{id}/mute — per-대화 알림 mute/unmute (270c87e6).
+
+    caller의 participant 행에 muted_at set(mute)/null(unmute). 참여자 지위·가시성·메시지 수신은
+    불변 — 알림 노출만 억제(mute가 발화 carve-out보다 우선). 비참여자는 403.
+    """
+    conv = (await db.execute(
+        select(Conversation).where(Conversation.id == conversation_id, Conversation.org_id == org_id)
+    )).scalar_one_or_none()
+    if conv is None:
+        raise HTTPException(status_code=404, detail="Conversation not found")
+
+    sender = await _resolve_member(auth, org_id, db, project_id=conv.project_id)
+    participant = (await db.execute(
+        select(ConversationParticipant).where(
+            ConversationParticipant.conversation_id == conversation_id,
+            ConversationParticipant.member_id == sender.id,
+        )
+    )).scalar_one_or_none()
+    if participant is None:
+        raise HTTPException(status_code=403, detail="Not a participant")
+
+    participant.muted_at = datetime.now(timezone.utc) if body.muted else None
+    await db.commit()
+    return {"conversation_id": str(conversation_id), "muted": body.muted}
+
+
 @router.post("/{conversation_id}/participants", status_code=201)
 async def add_participant(
     conversation_id: uuid.UUID,
@@ -1007,7 +1045,14 @@ async def send_message(
         )
     )).scalar_one_or_none()
     if participant is None:
-        raise HTTPException(status_code=403, detail="Not a participant")
+        # 발화 403 해소(270c87e6): 프로젝트 접근권 휴먼이 그룹/스레드 대화에 발화하면 auto-join.
+        # _resolve_member가 이미 project 접근을 검증했으므로 접근권은 성립. 단 타인 간 1:1 DM은
+        # 예외(비공개 보호·여전히 403)이고, 에이전트 인가(allowlist·creator 동석)는 불변(403 유지).
+        if sender.type == "human" and conv.type != "dm":
+            db.add(ConversationParticipant(conversation_id=conversation_id, member_id=sender.id))
+            await db.flush()
+        else:
+            raise HTTPException(status_code=403, detail="Not a participant")
 
     # 1aeecdde P2: sender 가 이 conversation 에 메시지를 보냄 = 답장 생성 종료 → working clear.
     # fork 분기(아래) 전 **원본 conversation_id** 기준 — working 은 그 conversation 에 set 됐다.
