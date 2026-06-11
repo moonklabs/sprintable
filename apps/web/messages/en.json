@@ -2281,7 +2281,17 @@
     "dirDown": "≤",
     "measureAfterField": "Measure on",
     "cancel": "Cancel",
-    "saving": "Saving…"
+    "saving": "Saving…",
+    "linkedTitle": "Linked hypotheses",
+    "linkHypothesis": "Link hypothesis",
+    "noLinked": "No linked hypotheses",
+    "unlink": "Unlink",
+    "pickerTitle": "Select a hypothesis to link",
+    "pickerSearch": "Search hypotheses…",
+    "pickerEmpty": "No hypotheses to link",
+    "crossEpic": "Other epic",
+    "crossEpicHint": "This hypothesis belongs to a different epic",
+    "createElsewhereHint": "Hypotheses are created from the epic detail"
   },
   "epics": {
     "title": "Epics",
