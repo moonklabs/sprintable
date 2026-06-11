@@ -50,6 +50,22 @@ class SprintStatus(str, Enum):
     closed = "closed"
 
 
+class HypothesisStatus(str, Enum):
+    proposed = "proposed"
+    active = "active"
+    measuring = "measuring"
+    verified = "verified"
+    falsified = "falsified"
+    killed = "killed"
+    archived = "archived"
+
+
+class HypothesisConfirmStatus(str, Enum):
+    """confirm 도구 전용 — 휴먼 확정(active) 또는 폐기(killed)."""
+    active = "active"
+    killed = "killed"
+
+
 class SprintableInput(BaseModel):
     """모든 Sprintable 도구 입력 공통 베이스.
 
