@@ -38,7 +38,7 @@ async def lifespan(app: FastAPI):
             await engine.dispose()
 
 
-from app.routers import account, activity_logs, agent_deployments, agent_gateway, agent_inbox, agent_message_policy, agent_personas, agent_routing_rules, agent_runs, agent_sessions, analytics, api_keys, attachments, audit_logs, auth, bridge, channel, conversations, cron, current_project, dashboard, dependencies, dispatch, docs, entities, epics, event_notifications, events, exclusion, file_locks, gates, health, hitl, hitl_config, integrations, invite_accept, labels, mcp, me, meetings, members, mockups, notification_preferences, notifications, open_api_keys, org_invites, org_members, organizations, oss, participation, plan_features, policy_documents, presence, project_access, project_settings, projects, public_docs, retros, rewards, sprints, standups, stories, subscription, tasks, team_members, team_presence, trust_scores, verdict_capture, verdicts, webhooks, workflow_executions, workflow_recipes, workflow_report, workflow_templates, workflow_trigger, workflow_trigger_types, workflow_versions, ws_chat
+from app.routers import account, activity_logs, agent_deployments, agent_gateway, agent_inbox, agent_message_policy, agent_personas, agent_routing_rules, agent_runs, agent_sessions, analytics, api_keys, attachments, audit_logs, auth, bridge, channel, conversations, cron, current_project, dashboard, dependencies, dispatch, docs, entities, epics, event_notifications, events, exclusion, file_locks, gates, health, hitl, hitl_config, hypotheses, integrations, invite_accept, labels, mcp, me, meetings, members, mockups, notification_preferences, notifications, open_api_keys, org_invites, org_members, organizations, oss, participation, plan_features, policy_documents, presence, project_access, project_settings, projects, public_docs, retros, rewards, sprints, standups, stories, subscription, tasks, team_members, team_presence, trust_scores, verdict_capture, verdicts, webhooks, workflow_executions, workflow_recipes, workflow_report, workflow_templates, workflow_trigger, workflow_trigger_types, workflow_versions, ws_chat
 
 app = FastAPI(
     title="Sprintable API v2",
@@ -131,6 +131,7 @@ app.include_router(conversations.router)
 app.include_router(presence.router)
 app.include_router(sprints.router)
 app.include_router(epics.router)
+app.include_router(hypotheses.router)
 app.include_router(dependencies.router)
 app.include_router(labels.router)
 app.include_router(labels.item_label_router)

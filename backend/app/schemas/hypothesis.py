@@ -110,3 +110,23 @@ class HypothesisResponse(BaseModel):
         resp.epic_ids = epic_ids or []
         resp.story_ids = story_ids or []
         return resp
+
+
+class HypothesisDraftRequest(BaseModel):
+    """§3.9 — 흐름 부산물에서 AI 초안 생성. persist=true이면 status='proposed' row만 생성."""
+    project_id: uuid.UUID
+    source_type: str  # "epic" | "story" | "conversation" | "dispatch"
+    source_id: uuid.UUID
+    context: dict[str, Any] | None = None
+    persist: bool = False
+
+
+class HypothesisDraftResponse(BaseModel):
+    statement: str
+    metric_definition: dict[str, Any]
+    measure_after: datetime
+    source_snapshot: dict[str, Any]
+    confidence: float | None = None
+    requires_confirmation: bool = True
+    # persist=true일 때만 — 생성된 proposed row.
+    hypothesis: HypothesisResponse | None = None
