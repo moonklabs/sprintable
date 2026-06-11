@@ -190,3 +190,20 @@ async def backfill_activity_events(db: AsyncSession, *, batch_size: int = 1000) 
     result = {"events_processed": processed, "events_skipped": skipped, "batches": batches}
     logger.info("backfill complete: %s", result)
     return result
+
+
+async def extract_activities_best_effort(db: AsyncSession, event_ids: list[uuid.UUID]) -> None:
+    """delivery 트랜잭션 안에서 extractor를 best-effort 호출(L1 BE-3).
+
+    활동 그래프는 delivery에서 파생되는 부산물이라 추출 실패가 delivery를 롤백하면 안 된다.
+    SAVEPOINT(begin_nested)로 격리해 extractor 예외 시 그 savepoint만 롤백하고 delivery
+    row·assign_recipient_seq·commit 순서는 그대로 둔다. activity_events 미적용(0116 migrate
+    전) 같은 경우에도 dispatch가 깨지지 않게 하는 안전장치다. lightweight upsert만 수행한다.
+    """
+    if not event_ids:
+        return
+    try:
+        async with db.begin_nested():
+            await upsert_activity_from_events(db, event_ids)
+    except Exception:
+        logger.warning("activity extractor skipped (best-effort) for events=%s", event_ids, exc_info=True)

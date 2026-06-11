@@ -196,6 +196,7 @@ async def dispatch_notification(
         members = _deduped
 
         inserted = False
+        created_events: list[Event] = []  # L1 BE-3: fan-out 수렴용 event 수집
         for member_row in members:
             if member_row.type == "agent":
                 # 활성 웹훅 있는 에이전트 → 외부 채널로 전달되므로 내장 Event 스킵
@@ -219,6 +220,7 @@ async def dispatch_notification(
                         status="pending",
                     )
                     db.add(event)
+                    created_events.append(event)
                     inserted = True
             elif member_row.user_id:
                 # human: Notification + Event 각각 독립 savepoint — 하나 실패해도 다른 쪽 롤백 방지
@@ -254,12 +256,17 @@ async def dispatch_notification(
                                 status="delivered",
                             )
                             db.add(event)
+                        created_events.append(event)
                         inserted = True
                     except Exception:
                         logger.warning("Event INSERT failed member_id=%s event_type=%s", member_row.id, event_type)
 
         if inserted:
             await db.flush()
+            # L1 BE-3: multi-recipient dispatch fan-out N행 → activity_events 1행 수렴
+            # (best-effort·savepoint 격리라 추출 실패해도 delivery·Notification 무영향).
+            from app.services.activity_stream import extract_activities_best_effort
+            await extract_activities_best_effort(db, [e.id for e in created_events])
 
         # 96af343e (옵션 C): 휴먼 개인 webhook 발송 — in-app Notification 과 동일 flush 타이밍
         # best-effort. 활성 member-scoped WebhookConfig 보유 휴먼만(agent SSE 경로 무관).

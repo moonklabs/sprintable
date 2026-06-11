@@ -378,6 +378,9 @@ async def update_story(
                 db.add(sa_event)
                 await db.flush()
                 await assign_recipient_seq(db, sa_event)  # per-recipient dense seq
+                # L1 BE-3: story assignment → activity_events 1행(best-effort·commit 前·순서 불변).
+                from app.services.activity_stream import extract_activities_best_effort
+                await extract_activities_best_effort(db, [sa_event.id])
                 await db.commit()  # commit BEFORE wake — seq 확정, 이중전달 방지
                 if sa_event.recipient_seq is not None:
                     wake_agent(str(story.assignee_id), sa_event.recipient_seq)

@@ -95,6 +95,38 @@ def test_dedup_key_differs_for_distinct_dispatch_time():
     assert build_dedup_key(e1) != build_dedup_key(e2)
 
 
+# ── best-effort 안전장치 (BE-3 — 추출 실패가 delivery를 깨지 않음) ──────────────────
+
+@pytest.mark.anyio
+async def test_extract_best_effort_swallows_extractor_failure():
+    """extractor가 던져도(예: 0116 미적용 table 부재) 예외가 전파되지 않는다."""
+    import contextlib
+    from unittest.mock import AsyncMock
+
+    from app.services.activity_stream import extract_activities_best_effort
+
+    @contextlib.asynccontextmanager
+    async def _savepoint():
+        yield  # 예외는 그대로 전파(실제 begin_nested savepoint rollback 의미)
+
+    db = AsyncMock()
+    db.begin_nested = lambda: _savepoint()
+    db.execute = AsyncMock(side_effect=RuntimeError("relation activity_events does not exist"))
+
+    await extract_activities_best_effort(db, [uuid.uuid4()])  # 예외 전파 없이 흡수
+
+
+@pytest.mark.anyio
+async def test_extract_best_effort_noop_on_empty():
+    from unittest.mock import AsyncMock
+
+    from app.services.activity_stream import extract_activities_best_effort
+
+    db = AsyncMock()
+    await extract_activities_best_effort(db, [])
+    db.begin_nested.assert_not_called()
+
+
 # ── upsert (AC①④⑤) — real-DB ─────────────────────────────────────────────────────
 
 _RAW = os.environ.get("PARITY_TEST_DATABASE_URL") or os.environ.get("ALEMBIC_DATABASE_URL") or ""

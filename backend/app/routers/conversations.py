@@ -320,6 +320,9 @@ async def _dispatch_conversation_event(
     for pid_str, event in events_to_push:
         if member_type_map.get(event.recipient_id, "human") == "agent":
             await assign_recipient_seq(db, event)
+    # L1 BE-3: message fan-out N행 → activity_events 1행 수렴(best-effort·delivery 무영향).
+    from app.services.activity_stream import extract_activities_best_effort
+    await extract_activities_best_effort(db, [event.id for _, event in events_to_push])
     return [(pid_str, {"event_id": str(event.id), "event_type": "conversation.message_created", **payload,
                        "recipient_seq": event.recipient_seq})
             for pid_str, event in events_to_push]
@@ -369,6 +372,9 @@ async def _dispatch_mention_events(
     for _, event in events_to_push:
         if member_type_map.get(event.recipient_id, "human") == "agent":
             await assign_recipient_seq(db, event)
+    # L1 BE-3: mention fan-out N행 → activity_events 1행 수렴(best-effort·delivery 무영향).
+    from app.services.activity_stream import extract_activities_best_effort
+    await extract_activities_best_effort(db, [event.id for _, event in events_to_push])
     return [(pid_str, {"event_id": str(event.id), "event_type": "conversation:mention", **payload})
             for pid_str, event in events_to_push]
 
