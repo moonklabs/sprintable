@@ -53,3 +53,25 @@ export function getInboxNotificationLabel(
       return type;
   }
 }
+
+/**
+ * 도달 사유(왜 이 건이 내 인박스에 왔나) i18n 키 추론 — interim FE (efcb3840 ⓐ).
+ *
+ * BE가 `Notification`에 actor/reason을 노출하기 전(자매 스토리 `e2608901` fold)까지의
+ * FE 추론. **확실히 추론 가능한 type만** 사유 키를 반환하고 나머지는 null(사유 칩 생략·
+ * graceful degrade — 틀린 사유를 만들지 않는다). raw event_type은 절대 노출하지 않는다.
+ */
+export function getNotificationReasonKey(type: string): string | null {
+  switch (type) {
+    case 'story_assigned':
+    case 'task_assigned':
+      return 'reasonAssigned';
+    case 'invitation':
+      return 'reasonInvited';
+    case 'mention':
+    case 'mentioned':
+      return 'reasonMentioned';
+    default:
+      return null;
+  }
+}

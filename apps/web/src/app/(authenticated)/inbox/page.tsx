@@ -13,6 +13,7 @@ import { useDashboardContext } from '../../dashboard/dashboard-shell';
 import { useToast, ToastContainer } from '@/components/ui/toast';
 import {
   getInboxNotificationLabel,
+  getNotificationReasonKey,
   NOTIFICATION_TYPE_ICONS,
 } from '@/services/notification-display';
 
@@ -484,6 +485,8 @@ export default function InboxPage() {
 
                   const notification = item.notification;
                   const isSelected = notification.id === selectedId;
+                  // ⓐ 도달 사유 칩(왜 내게) — 추론 가능할 때만, 없으면 생략(graceful degrade).
+                  const reasonKey = getNotificationReasonKey(notification.type);
                   return (
                     <button
                       key={notification.id}
@@ -510,6 +513,9 @@ export default function InboxPage() {
                           </div>
                           {notification.body ? (
                             <p className="line-clamp-1 text-xs text-muted-foreground">{notification.body}</p>
+                          ) : null}
+                          {reasonKey ? (
+                            <Badge variant="info" className="text-[10px]">🔑 {t(reasonKey)}</Badge>
                           ) : null}
                           {!notification.is_read ? (
                             <span className="inline-block h-1.5 w-1.5 rounded-full bg-brand" />
@@ -554,6 +560,9 @@ export default function InboxPage() {
                 <div className="min-w-0 flex-1 space-y-2">
                   <div className="flex flex-wrap items-center gap-2">
                     <Badge variant="outline">{getInboxNotificationLabel(t, selectedNotification.type)}</Badge>
+                    {getNotificationReasonKey(selectedNotification.type) ? (
+                      <Badge variant="info">🔑 {t(getNotificationReasonKey(selectedNotification.type) as string)}</Badge>
+                    ) : null}
                     <span className="text-xs text-muted-foreground">
                       {t('receivedAt')} · {new Date(selectedNotification.created_at).toLocaleString()}
                     </span>
