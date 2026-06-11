@@ -12,6 +12,7 @@ import type {
   IAgentRunRepository,
   IAgentApiKeyRepository,
   IInboxItemRepository,
+  IHypothesisRepository,
 } from '@sprintable/core-storage';
 
 async function getSpAt(): Promise<string> {
@@ -39,6 +40,11 @@ export async function createEpicRepository(): Promise<IEpicRepository> {
 export async function createStoryRepository(): Promise<IStoryRepository> {
   const { ApiStoryRepository } = await import('@sprintable/storage-api');
   return new ApiStoryRepository(await getSpAt());
+}
+
+export async function createHypothesisRepository(): Promise<IHypothesisRepository> {
+  const { ApiHypothesisRepository } = await import('@sprintable/storage-api');
+  return new ApiHypothesisRepository(await getSpAt());
 }
 
 export async function createTaskRepository(): Promise<ITaskRepository> {

@@ -132,6 +132,17 @@ export const updateSprintSchema = z.object({
 
 // ─── Story ───────────────────────────────────
 export { createStorySchema, updateStorySchema, bulkUpdateStoriesSchema as bulkUpdateStorySchema, VALID_STORY_TRANSITIONS, STORY_STATUSES, STORY_PRIORITIES, STORY_SP_VALUES } from './stories';
+export {
+  createHypothesisSchema,
+  updateHypothesisSchema,
+  transitionHypothesisSchema,
+  linkHypothesisSchema,
+  unlinkHypothesisSchema,
+  draftHypothesisSchema,
+  HYPOTHESIS_STATUSES,
+  HYPOTHESIS_TRANSITION_TARGETS,
+  HYPOTHESIS_LINK_TYPES,
+} from './hypotheses';
 
 // ─── Task ────────────────────────────────────
 export const TASK_STATUSES = ['todo', 'in-progress', 'done'] as const;

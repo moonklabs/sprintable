@@ -1,0 +1,67 @@
+import { z } from 'zod/v4';
+import { metricDefinitionSchema } from './outcome';
+
+// §2.5 상태 7종 (BE HYPOTHESIS_STATUSES와 동기).
+export const HYPOTHESIS_STATUSES = [
+  'proposed', 'active', 'measuring', 'verified', 'falsified', 'killed', 'archived',
+] as const;
+// transition endpoint가 허용하는 목표 상태(생성 시 proposed는 별도).
+export const HYPOTHESIS_TRANSITION_TARGETS = [
+  'active', 'measuring', 'verified', 'falsified', 'killed', 'archived',
+] as const;
+export const HYPOTHESIS_LINK_TYPES = ['primary', 'supports'] as const;
+
+const hypothesisStatusEnum = z.enum(HYPOTHESIS_STATUSES);
+
+export const createHypothesisSchema = z.object({
+  project_id: z.string().min(1),
+  statement: z.string().min(1),
+  metric_definition: metricDefinitionSchema,
+  measure_after: z.string().datetime(),
+  owner_member_id: z.string().optional().nullable(),
+  status: hypothesisStatusEnum.optional(),
+  epic_ids: z.array(z.string()).optional(),
+  story_ids: z.array(z.string()).optional(),
+  source_type: z.string().optional().nullable(),
+  source_id: z.string().optional().nullable(),
+  draft_metadata: z.record(z.string(), z.unknown()).optional().nullable(),
+});
+
+/**
+ * §3.5 update allowlist — `status`/`outcome_result`는 transition endpoint 전용이라 제외.
+ * 이 스키마 키는 `HypothesisService.update`의 ALLOWED_FIELDS·core `UpdateHypothesisInput`과
+ * 1:1 동기화되어야 한다 (E1-S7 AC① — silent strip 함정 방지).
+ */
+export const updateHypothesisSchema = z.object({
+  statement: z.string().min(1).optional(),
+  metric_definition: metricDefinitionSchema.optional(),
+  measure_after: z.string().datetime().optional(),
+  owner_member_id: z.string().optional().nullable(),
+  confidence: z.number().optional().nullable(),
+  draft_metadata: z.record(z.string(), z.unknown()).optional().nullable(),
+  human_accounting: z.record(z.string(), z.unknown()).optional().nullable(),
+});
+
+export const transitionHypothesisSchema = z.object({
+  status: z.enum(HYPOTHESIS_TRANSITION_TARGETS),
+  note: z.string().optional().nullable(),
+  outcome_result: z.record(z.string(), z.unknown()).optional().nullable(),
+});
+
+export const linkHypothesisSchema = z.object({
+  epic_ids: z.array(z.string()).optional(),
+  story_ids: z.array(z.string()).optional(),
+  link_type: z.enum(HYPOTHESIS_LINK_TYPES).optional().nullable(),
+});
+
+export const unlinkHypothesisSchema = z.object({
+  epic_ids: z.array(z.string()).optional(),
+  story_ids: z.array(z.string()).optional(),
+});
+
+export const draftHypothesisSchema = z.object({
+  project_id: z.string().min(1),
+  source_type: z.string().min(1),
+  source_id: z.string().min(1),
+  context: z.record(z.string(), z.unknown()).optional().nullable(),
+});
