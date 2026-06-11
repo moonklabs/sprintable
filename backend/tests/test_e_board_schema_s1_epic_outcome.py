@@ -112,6 +112,9 @@ def _base_epic_mock(outcome_status: str = "n_a") -> MagicMock:
     e.measure_after = datetime(2026, 6, 1, tzinfo=timezone.utc)
     e.outcome_status = outcome_status
     e.outcome_result = None
+    # E1 S8b: EpicResponse 신규 집계 필드 — MagicMock auto-attr ValidationError 방지.
+    e.hypothesis_count = 0
+    e.risky_status = None
     e.created_at = datetime(2026, 5, 1, tzinfo=timezone.utc)
     e.updated_at = datetime(2026, 5, 1, tzinfo=timezone.utc)
     return e
