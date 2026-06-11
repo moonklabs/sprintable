@@ -30,8 +30,8 @@ def test_catalog_structure_and_contract_fields():
     cat = build_toolset_catalog()
     assert set(cat.keys()) == {"groups"}
     groups = cat["groups"]
-    # core + 15 비파괴 + admin = 17
-    assert len(groups) == 17
+    # core + 16 비파괴 + admin = 18 (E1-S5 hypotheses 그룹 추가)
+    assert len(groups) == 18
     for g in groups:
         assert set(g.keys()) == _CONTRACT_FIELDS, f"{g['key']} 필드 계약 불일치"
         assert isinstance(g["key"], str) and g["key"]
@@ -39,8 +39,8 @@ def test_catalog_structure_and_contract_fields():
         assert isinstance(g["is_core"], bool) and isinstance(g["is_destructive"], bool)
         assert isinstance(g["order"], int)
         assert g["tools"], f"{g['key']} 빈 그룹 — 모든 그룹은 멤버 보유"
-    # order = 배열 순서와 일치(0..16 단조)
-    assert [g["order"] for g in groups] == list(range(17))
+    # order = 배열 순서와 일치(0..17 단조)
+    assert [g["order"] for g in groups] == list(range(18))
 
 
 def test_core_first_admin_last_flags():
@@ -57,7 +57,7 @@ def test_group_keys_match_mcp_toolset_ssot():
     # core + admin + ALL_GROUPS 비-core = 전체
     assert "core" in keys and "admin" in keys
     non_core_admin = {k for k in keys if k not in ("core", "admin")}
-    assert non_core_admin == {g for g in ALL_GROUPS if g != "core"}  # 15 비파괴 그룹
+    assert non_core_admin == {g for g in ALL_GROUPS if g != "core"}  # 16 비파괴 그룹
 
 
 def test_every_tool_covered_exactly_once():
