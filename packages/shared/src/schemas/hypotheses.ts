@@ -64,4 +64,7 @@ export const draftHypothesisSchema = z.object({
   source_type: z.string().min(1),
   source_id: z.string().min(1),
   context: z.record(z.string(), z.unknown()).optional().nullable(),
+  // persist=true이면 status='proposed' row 생성(drafted_by_member_id 기록·E1-S10 AC④).
+  // 기본 false=미리보기. BE HypothesisDraftRequest.persist와 동기.
+  persist: z.boolean().optional(),
 });

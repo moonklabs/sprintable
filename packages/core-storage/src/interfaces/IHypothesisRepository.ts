@@ -86,6 +86,9 @@ export interface HypothesisDraftInput {
   source_type: string;
   source_id: string;
   context?: Record<string, unknown> | null;
+  // persist=false(기본)=미리보기(active row 0)·true=status='proposed' row 생성
+  // (drafted_by_member_id 기록·E1-S10 AC④). BE HypothesisDraftRequest와 동기.
+  persist?: boolean;
 }
 
 export interface HypothesisDraft {
