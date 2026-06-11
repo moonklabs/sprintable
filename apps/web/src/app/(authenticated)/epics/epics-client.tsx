@@ -463,7 +463,9 @@ function EpicRow({ epic, isSelected, onClick, onDeleteRequest }: EpicRowProps) {
           <p className="text-xs text-muted-foreground line-clamp-1">{epic.description.split('\n')[0]?.replace(/^#+\s*/, '')}</p>
         ) : null}
 
-        <div className="flex items-center gap-3 text-xs text-muted-foreground">
+        {/* 가설요약 추가로 메타 항목이 늘어 고밀도 카드(마감일+SP초과 동반)가 narrow 폭서
+            가로 오버플로 잠재 → flex-wrap 헤지(가디언 라이브게이트 선제·기존 행 robustness↑). */}
+        <div className="flex flex-wrap items-center gap-x-3 gap-y-1 text-xs text-muted-foreground">
           {epic.target_date ? (
             <span>{t('targetDate')}: {formatDate(epic.target_date)}</span>
           ) : null}
