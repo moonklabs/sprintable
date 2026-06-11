@@ -1,103 +1,39 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
-const { createDbServerClient, createAdminClient, getMyTeamMember, getAuthContext } = vi.hoisted(() => ({
-  createDbServerClient: vi.fn(),
-  createAdminClient: vi.fn(),
-  getMyTeamMember: vi.fn(),
-  getAuthContext: vi.fn(),
+// 837a36c4(Group B b6): proxy 위임 리팩토링 후 stale 재작성 — proxyToFastapiWithParams(경로 템플릿+{id})·auth 게이트.
+const { getAuthContext, proxyToFastapiWithParams } = vi.hoisted(() => ({
+  getAuthContext: vi.fn(), proxyToFastapiWithParams: vi.fn(),
 }));
+vi.mock('@/lib/auth-helpers', () => ({ getAuthContext }));
+vi.mock('@/lib/fastapi-proxy', () => ({ proxyToFastapiWithParams }));
 
-vi.mock('@/lib/db/server', () => ({
-  createDbServerClient,
-}));
-vi.mock('@/lib/db/admin', () => ({ createAdminClient }));
+import { GET, PATCH, DELETE } from './route';
 
-vi.mock('@/lib/auth-helpers', async () => {
-  const actual = await vi.importActual<typeof import('@/lib/auth-helpers')>('@/lib/auth-helpers');
-  return {
-    ...actual,
-    getMyTeamMember,
-    getAuthContext,
-  };
-});
+const ID = 'tm-1';
+const TPL = '/api/v2/team-members/[id]';
+const ctx = () => ({ params: Promise.resolve({ id: ID }) });
+const agent = () => ({ id: 'a', type: 'agent', rateLimitExceeded: false, rateLimitRemaining: 299, rateLimitResetAt: 0 });
+const okRes = (b: unknown = { ok: 1 }) =>
+  new Response(JSON.stringify(b), { status: 200, headers: { 'content-type': 'application/json' } });
+const req = (m = 'GET') => new Request(`http://localhost/x/${ID}`, { method: m });
 
-import { DELETE } from './route';
-
-function createDeleteDbStub(activeMembershipCount: number) {
-  let teamMembersCall = 0;
-
-  return {
-    auth: {
-      getUser: vi.fn().mockResolvedValue({ data: { user: { id: 'admin-user' } } }),
-    },
-    from: vi.fn((table: string) => {
-      if (table !== 'team_members') throw new Error(`Unexpected table: ${table}`);
-      teamMembersCall += 1;
-
-      if (teamMembersCall === 1) {
-        const query = {
-          select: vi.fn(() => query),
-          eq: vi.fn(() => query),
-          maybeSingle: vi.fn().mockResolvedValue({
-            data: { id: 'member-1', org_id: 'org-1', user_id: 'user-2', type: 'human', is_active: true },
-            error: null,
-          }),
-        };
-        return query;
-      }
-
-      if (teamMembersCall === 2) {
-        const query = {
-          select: vi.fn(() => query),
-          eq: vi.fn(() => query),
-          then: (resolve: (value: { count: number; error: null }) => void) => Promise.resolve({ count: activeMembershipCount, error: null }).then(resolve),
-        };
-        return query;
-      }
-
-      const query = {
-        update: vi.fn(() => query),
-        eq: vi.fn(() => query),
-        then: (resolve: (value: { error: null }) => void) => Promise.resolve({ error: null }).then(resolve),
-      };
-      return query;
-    }),
-  };
-}
-
-describe('DELETE /api/team-members/[id]', () => {
-  beforeEach(() => {
-    createDbServerClient.mockReset();
-    createAdminClient.mockReset();
-    getMyTeamMember.mockReset();
-    getAuthContext.mockReset();
-    createAdminClient.mockReturnValue({ from: () => ({ insert: () => ({ then: (r: (v: unknown) => void) => Promise.resolve({ error: null }).then(r) }) }) });
-    getMyTeamMember.mockResolvedValue({ id: 'admin-team-member', org_id: 'org-1', project_id: 'project-1' });
-    getAuthContext.mockResolvedValue({ id: 'admin-team-member', org_id: 'org-1', project_id: 'project-1', type: 'human' as const });
-  });
-
-  it('blocks removing the last active project membership for a human member', async () => {
-    createDbServerClient.mockResolvedValue(createDeleteDbStub(1));
-
-    const response = await DELETE(new Request('http://localhost/api/team-members/member-1', { method: 'DELETE' }), {
-      params: Promise.resolve({ id: 'member-1' }),
+describe('/api/team-members/[id] (proxyWithParams 위임)', () => {
+  beforeEach(() => { getAuthContext.mockReset(); proxyToFastapiWithParams.mockReset(); getAuthContext.mockResolvedValue(agent()); });
+  for (const [name, fn] of [['GET', GET], ['PATCH', PATCH], ['DELETE', DELETE]] as const) {
+    it(`${name}: 401 when unauthenticated`, async () => {
+      getAuthContext.mockResolvedValue(null);
+      expect((await fn(req(name), ctx())).status).toBe(401);
+      expect(proxyToFastapiWithParams).not.toHaveBeenCalled();
     });
-
-    expect(response.status).toBe(400);
-    const body = await response.json();
-    expect(body.error.code).toBe('LAST_PROJECT_MEMBERSHIP');
-  });
-
-  it('allows deactivation when another active project membership exists', async () => {
-    createDbServerClient.mockResolvedValue(createDeleteDbStub(2));
-
-    const response = await DELETE(new Request('http://localhost/api/team-members/member-1', { method: 'DELETE' }), {
-      params: Promise.resolve({ id: 'member-1' }),
+    it(`${name}: delegates with path template + {id}`, async () => {
+      proxyToFastapiWithParams.mockResolvedValue(okRes());
+      const res = await fn(req(name), ctx());
+      expect(res.status).toBe(200);
+      expect(proxyToFastapiWithParams).toHaveBeenCalledWith(expect.anything(), TPL, { id: ID });
     });
-
-    expect(response.status).toBe(200);
-    const body = await response.json();
-    expect(body.data.ok).toBe(true);
-    expect(body.data.id).toBe('member-1');
-  });
+    it(`${name}: passes through proxy errors`, async () => {
+      proxyToFastapiWithParams.mockResolvedValue(new Response('e', { status: 404 }));
+      expect((await fn(req(name), ctx())).status).toBe(404);
+    });
+  }
 });
