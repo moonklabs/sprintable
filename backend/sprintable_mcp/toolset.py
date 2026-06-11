@@ -24,6 +24,7 @@ _GROUP_KEYWORDS: list[tuple[str, tuple[str, ...]]] = [
     ("docs", ("doc", "search_docs")),
     ("chat", ("chat", "message", "conversation")),
     ("sprints", ("sprint",)),
+    ("hypotheses", ("hypothes",)),
     ("epics", ("epic",)),
     ("tasks", ("task",)),
     ("stories", ("story", "stories", "backlog", "claim", "checkin")),
