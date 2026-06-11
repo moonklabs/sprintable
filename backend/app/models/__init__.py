@@ -35,8 +35,10 @@ from app.models.file_lock import FileLock
 from app.models.org_invite import OrgInvite
 from app.models.project_access import ProjectAccess
 from app.models.member import AgentProjectProfile, Member, MemberIdentityAlias
+from app.models.activity_event import ActivityEvent
 
 __all__ = [
+    "ActivityEvent",
     "AgentProjectProfile",
     "Member",
     "MemberIdentityAlias",
