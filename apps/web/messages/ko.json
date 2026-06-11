@@ -2312,7 +2312,12 @@
     "crossEpic": "다른 에픽",
     "crossEpicHint": "이 가설은 다른 에픽 소속입니다",
     "createElsewhereHint": "가설은 에픽 상세에서 생성합니다",
-    "summaryTitle": "연결 가설 {count}개"
+    "summaryTitle": "연결 가설 {count}개",
+    "draftCta": "초안 검토",
+    "drafting": "초안 생성 중…",
+    "draftReviewTitle": "AI 초안",
+    "draftNote": "AI가 흐름에서 제안한 초안입니다. 확인 후 추가하세요.",
+    "draftAccept": "확인하고 추가"
   },
   "epics": {
     "title": "에픽",
