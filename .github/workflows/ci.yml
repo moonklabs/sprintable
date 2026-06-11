@@ -157,7 +157,12 @@ jobs:
         run: pnpm type-check
 
       - name: Test
-        run: pnpm vitest run 2>&1 | tail -80
+        # set -o pipefail so vitest's non-zero exit propagates through `| tail` instead
+        # of being masked by tail's 0 — without it the unit-test gate was a no-op
+        # (story 2d5c8662). GitHub's default bash runner does not enable pipefail.
+        run: |
+          set -o pipefail
+          pnpm vitest run 2>&1 | tail -80
 
       - name: Build
         run: pnpm build
