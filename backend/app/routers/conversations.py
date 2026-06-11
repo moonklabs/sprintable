@@ -218,7 +218,26 @@ async def _conversations_with_human_participant(conv_ids: list[uuid.UUID], db: A
     return result
 
 
+_SUMMARY_PREVIEW_MAX = 80
+
+
+def _build_message_summary(content: str | None, sender_name: str | None, has_attachment: bool) -> str:
+    """알림 카피용 사람-친화 summary (e2608901). 형식: "{발신자}: {내용 미리보기 80자}".
+
+    notification-bell이 `payload.summary ?? event_type`로 렌더하므로, summary 미생성 시 raw
+    이벤트명(`conversation.message_created`)이 노출됐다. 발신자+미리보기로 "무슨 일인지" 1초 노출.
+    """
+    name = sender_name or "Someone"
+    preview = " ".join((content or "").split())  # 개행/연속공백 정규화
+    if len(preview) > _SUMMARY_PREVIEW_MAX:
+        preview = preview[:_SUMMARY_PREVIEW_MAX].rstrip() + "…"
+    if not preview:
+        preview = "📎" if has_attachment else ""
+    return f"{name}: {preview}" if preview else name
+
+
 def _msg_payload(msg: ConversationMessage, sender: "ResolvedMember | TeamMember | None") -> dict:
+    attachments = msg.attachments if isinstance(msg.attachments, list) else []
     return {
         "id": str(msg.id),
         "conversation_id": str(msg.conversation_id),
@@ -228,12 +247,14 @@ def _msg_payload(msg: ConversationMessage, sender: "ResolvedMember | TeamMember 
         "content": msg.content,
         "mentioned_ids": [str(m) for m in (msg.mentioned_ids or [])],
         # E-FILE S1: 첨부 직렬화 (SSE + GET messages 공통). list 아니면 [](레거시/None/mock 안전).
-        "attachments": msg.attachments if isinstance(msg.attachments, list) else [],
+        "attachments": attachments,
         "sender": {
             "id": str(sender.id),
             "name": sender.name,
             "type": sender.type,
         } if sender else None,
+        # e2608901: 알림 카피 — raw event_type 대신 사람-친화 summary를 payload에 동봉.
+        "summary": _build_message_summary(msg.content, sender.name if sender else None, bool(attachments)),
         "created_at": msg.created_at.isoformat(),
     }
 
