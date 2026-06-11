@@ -7,7 +7,7 @@ import { DocEditor } from '@/components/docs/doc-editor';
 import { DocUrlChip } from '@/components/docs/doc-url-chip';
 import { DocUrlDialog, type SlugSubmitResult } from '@/components/docs/doc-url-dialog';
 import { slugifyDocTitle, isUntitledSlug } from '@/components/docs/lib/doc-slug';
-import { useDocSync, type SaveStatus } from '@/components/docs/use-doc-sync';
+import { useDocSync, unwrapDocResponse, type SaveStatus } from '@/components/docs/use-doc-sync';
 import { htmlToMarkdown } from '@/components/docs/lib/content-converter';
 import Link from 'next/link';
 import { AlertTriangle, Check, Copy, Eye, Link2, Loader2, MoreHorizontal, RotateCw, Share2, Trash2, XCircle } from 'lucide-react';
@@ -265,7 +265,11 @@ export default function DocSlugPage() {
       }
       if (res.status === 422) return { ok: false, code: 'invalid' };
       if (!res.ok) return { ok: false, code: 'invalid' };
-      const { data } = await res.json() as { data: DocDetail };
+      // Same raw-proxy envelope class as the autosave path: docs PATCH is a raw
+      // proxyToFastapi passthrough, so the body is the bare DocResponse — reading
+      // `json.data` yielded undefined → BE-success slug edits surfaced as 'invalid'
+      // and the derive nudge no-op'd (live since #1374). Reuse unwrapDocResponse.
+      const { doc: data } = unwrapDocResponse<DocDetail>(await res.json());
       handleDocSaved(data);
       return { ok: true };
     } catch {
@@ -288,7 +292,8 @@ export default function DocSlugPage() {
         body: JSON.stringify({ slug: derived, slug_locked: false }),
       });
       if (res.ok) {
-        const { data } = await res.json() as { data: DocDetail };
+        // Raw-proxy envelope class (see handleSubmitSlug) — un-envelope the bare DocResponse.
+        const { doc: data } = unwrapDocResponse<DocDetail>(await res.json());
         handleDocSaved(data);
       }
     } catch { /* derive failed — doc keeps its untitled slug */ }
