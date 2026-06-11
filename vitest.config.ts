@@ -27,9 +27,6 @@ export default defineConfig({
       // pipefail) masked until now. Excluded so the gate is REAL for the healthy
       // suite; each file is debt to burn down — re-include as it is fixed.
       // ⚠️ DO NOT add here to silence a NEW failure — fix the test.
-      // Group A — docs UI components · owner: 미르코 · cleanup story: 0956d838
-      'apps/web/src/components/docs/doc-content-renderer.test.tsx',
-      'apps/web/src/components/docs/extensions/slash-command.test.tsx',
       // Group B — api routes + services (backend-of-FE) · owner: 디디 · cleanup story: 837a36c4
       'apps/web/src/app/api/agent-runs/[id]/route.test.ts',
       'apps/web/src/app/api/agent-runs/route.test.ts',
