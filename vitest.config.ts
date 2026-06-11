@@ -41,8 +41,6 @@ export default defineConfig({
       'apps/web/src/app/api/projects/[id]/ai-settings/validate/route.test.ts',
       'apps/web/src/app/api/projects/[id]/mcp-connections/[serverKey]/route.test.ts',
       'apps/web/src/app/api/projects/[id]/mcp-connections/route.test.ts',
-      'apps/web/src/app/api/sprints/[id]/burndown/route.test.ts',
-      'apps/web/src/app/api/sprints/[id]/kickoff/route.test.ts',
       'apps/web/src/app/api/stories/[id]/route.test.ts',
       'apps/web/src/app/api/tasks/route.test.ts',
       'apps/web/src/app/api/v1/bridge/slack/events/route.test.ts',
