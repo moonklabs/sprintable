@@ -1,183 +1,29 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
-const {
-  createDbServerClient,
-  getMyTeamMember,
-  requireOrgAdmin,
-  requireAgentOrchestration,
-  getProjectPolicy,
-  saveProjectPolicy,
-} = vi.hoisted(() => ({
-  createDbServerClient: vi.fn(),
-  getMyTeamMember: vi.fn(),
-  requireOrgAdmin: vi.fn(),
-  requireAgentOrchestration: vi.fn(),
-  getProjectPolicy: vi.fn(),
-  saveProjectPolicy: vi.fn(),
-}));
-
-vi.mock('@/lib/db/server', () => ({ createDbServerClient }));
-vi.mock('@/lib/auth-helpers', () => ({ getMyTeamMember }));
-vi.mock('@/lib/admin-check', () => ({ requireOrgAdmin }));
-vi.mock('@/lib/require-agent-orchestration', () => ({ requireAgentOrchestration }));
-vi.mock('@/services/agent-hitl-policy', () => ({
-  HITL_APPROVAL_RULE_KEYS: ['manual_hitl_request', 'billing_cap_exceeded'],
-  HITL_REQUEST_TYPES: ['approval'],
-  HITL_TIMEOUT_CLASS_KEYS: ['fast', 'standard', 'extended'],
-  HITL_ESCALATION_MODES: ['timeout_memo', 'timeout_memo_and_escalate'],
-  AgentHitlPolicyService: class AgentHitlPolicyService {
-    getProjectPolicy = getProjectPolicy;
-    saveProjectPolicy = saveProjectPolicy;
-  },
-}));
+// 837a36c4(Group B b4): proxy 위임 리팩토링 후 stale 재작성 — pure proxy.
+const { proxyToFastapi } = vi.hoisted(() => ({ proxyToFastapi: vi.fn() }));
+vi.mock('@/lib/fastapi-proxy', () => ({ proxyToFastapi }));
 
 import { GET, PATCH } from './route';
 
-function createDbStub(userId: string | null = 'user-1') {
-  return {
-    auth: {
-      getUser: vi.fn(async () => ({ data: { user: userId ? { id: userId } : null } })),
-    },
-  };
-}
+const PATH = '/api/v2/hitl/policy';
+const okRes = (b: unknown = { ok: 1 }) =>
+  new Response(JSON.stringify(b), { status: 200, headers: { 'content-type': 'application/json' } });
+const req = (m = 'GET') => new Request('http://localhost/x/hitl-policy', { method: m });
 
-describe('GET/PATCH /api/v1/hitl-policy', () => {
-  beforeEach(() => {
-    createDbServerClient.mockReset();
-    getMyTeamMember.mockReset();
-    requireOrgAdmin.mockReset();
-    requireAgentOrchestration.mockReset();
-    getProjectPolicy.mockReset();
-    saveProjectPolicy.mockReset();
-
-    createDbServerClient.mockResolvedValue(createDbStub());
-    getMyTeamMember.mockResolvedValue({ id: 'tm-1', org_id: 'org-1', project_id: 'project-1' });
-    requireOrgAdmin.mockResolvedValue(undefined);
-    requireAgentOrchestration.mockResolvedValue(null);
-  });
-
-  it('returns the current project HITL policy for admins', async () => {
-    getProjectPolicy.mockResolvedValue({ schema_version: 1, approval_rules: [], timeout_classes: [], high_risk_actions: [], prompt_summary: 'summary' });
-
-    const response = await GET(new Request('http://test'));
-
-    expect(response.status).toBe(200);
-    await expect(response.json()).resolves.toMatchObject({
-      data: expect.objectContaining({ prompt_summary: 'summary' }),
+describe('/api/v1/hitl-policy (proxy 위임)', () => {
+  beforeEach(() => proxyToFastapi.mockReset());
+  for (const [name, fn] of [['GET', GET], ['PATCH', PATCH]] as const) {
+    it(`${name}: delegates to ${PATH} and wraps`, async () => {
+      proxyToFastapi.mockResolvedValue(okRes());
+      const res = await fn(req(name));
+      expect(res.status).toBe(200);
+      expect(proxyToFastapi).toHaveBeenCalledWith(expect.anything(), PATH);
+      expect((await res.json()).data).toMatchObject({ ok: 1 });
     });
-    expect(getProjectPolicy).toHaveBeenCalledWith({ orgId: 'org-1', projectId: 'project-1' });
-  });
-
-  it('rejects invalid timeout policies before saving', async () => {
-    const response = await PATCH(new Request('http://localhost/api/v1/hitl-policy', {
-      method: 'PATCH',
-      headers: { 'content-type': 'application/json' },
-      body: JSON.stringify({
-        approval_rules: [
-          {
-            key: 'manual_hitl_request',
-            request_type: 'approval',
-            timeout_class: 'standard',
-            approval_required: true,
-          },
-        ],
-        timeout_classes: [
-          {
-            key: 'standard',
-            duration_minutes: 60,
-            reminder_minutes_before: 60,
-            escalation_mode: 'timeout_memo',
-          },
-        ],
-      }),
-    }));
-
-    expect(response.status).toBe(400);
-    await expect(response.json()).resolves.toMatchObject({
-      error: expect.objectContaining({ code: 'BAD_REQUEST' }),
+    it(`${name}: passes through proxy errors`, async () => {
+      proxyToFastapi.mockResolvedValue(new Response('e', { status: 500 }));
+      expect((await fn(req(name))).status).toBe(500);
     });
-    expect(saveProjectPolicy).not.toHaveBeenCalled();
-  });
-
-  it('rejects unsupported non-approval request types', async () => {
-    const response = await PATCH(new Request('http://localhost/api/v1/hitl-policy', {
-      method: 'PATCH',
-      headers: { 'content-type': 'application/json' },
-      body: JSON.stringify({
-        approval_rules: [
-          {
-            key: 'manual_hitl_request',
-            request_type: 'confirmation',
-            timeout_class: 'extended',
-            approval_required: true,
-          },
-        ],
-        timeout_classes: [
-          {
-            key: 'extended',
-            duration_minutes: 2880,
-            reminder_minutes_before: 240,
-            escalation_mode: 'timeout_memo_and_escalate',
-          },
-        ],
-      }),
-    }));
-
-    expect(response.status).toBe(400);
-    expect(saveProjectPolicy).not.toHaveBeenCalled();
-  });
-
-  it('persists a valid policy update', async () => {
-    saveProjectPolicy.mockResolvedValue({ schema_version: 1, approval_rules: [], timeout_classes: [], high_risk_actions: [], prompt_summary: 'saved-summary' });
-
-    const response = await PATCH(new Request('http://localhost/api/v1/hitl-policy', {
-      method: 'PATCH',
-      headers: { 'content-type': 'application/json' },
-      body: JSON.stringify({
-        approval_rules: [
-          {
-            key: 'manual_hitl_request',
-            request_type: 'approval',
-            timeout_class: 'extended',
-            approval_required: true,
-          },
-          {
-            key: 'billing_cap_exceeded',
-            request_type: 'approval',
-            timeout_class: 'fast',
-            approval_required: true,
-          },
-        ],
-        timeout_classes: [
-          {
-            key: 'fast',
-            duration_minutes: 120,
-            reminder_minutes_before: 30,
-            escalation_mode: 'timeout_memo_and_escalate',
-          },
-          {
-            key: 'standard',
-            duration_minutes: 1440,
-            reminder_minutes_before: 60,
-            escalation_mode: 'timeout_memo',
-          },
-          {
-            key: 'extended',
-            duration_minutes: 2880,
-            reminder_minutes_before: 240,
-            escalation_mode: 'timeout_memo_and_escalate',
-          },
-        ],
-      }),
-    }));
-
-    expect(response.status).toBe(200);
-    expect(saveProjectPolicy).toHaveBeenCalledWith({ orgId: 'org-1', projectId: 'project-1', actorId: 'tm-1' }, expect.objectContaining({
-      approval_rules: expect.any(Array),
-      timeout_classes: expect.any(Array),
-    }));
-    await expect(response.json()).resolves.toMatchObject({
-      data: expect.objectContaining({ prompt_summary: 'saved-summary' }),
-    });
-  });
+  }
 });
