@@ -20,6 +20,22 @@ import {
   type SlackMessageEvent,
 } from '../slack-inbound';
 
+// 837a36c4(Group B b20): BridgeInboundService가 MemoService.fromDb(db).create로 메모 생성 — OSS
+// ApiMemoRepository 빈 stub(this.repo.create 미보유) 크래시. fromDb가 받은 db에 memos insert를 재현하는
+// thin mock(실 ApiMemoRepository.create의 db write 재현·error throw로 중복-eventid 제약 핸들링 보존).
+vi.mock('@/services/memo', async (importActual) => ({
+  ...(await importActual<typeof import('../memo')>()),
+  MemoService: {
+    fromDb: (db: any) => ({
+      create: async (input: any) => {
+        const { data, error } = await db.from('memos').insert(input).select().single();
+        if (error) throw Object.assign(new Error(error.message ?? 'insert failed'), { code: error.code });
+        return data;
+      },
+    }),
+  },
+}));
+
 const SIGNING_SECRET = 'test-signing-secret';
 
 const CHANNEL_MAPPING: BridgeChannelMapping = {
