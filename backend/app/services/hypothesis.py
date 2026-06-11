@@ -10,12 +10,15 @@
 """
 from __future__ import annotations
 
+import logging
 import uuid
 from datetime import datetime, timedelta, timezone
 
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.models.hypothesis import HYPOTHESIS_STATUSES, is_valid_transition
+from app.models.hypothesis import HYPOTHESIS_STATUSES, Hypothesis, is_valid_transition
+
+logger = logging.getLogger(__name__)
 from app.repositories.hypothesis import HypothesisRepository
 from app.schemas.hypothesis import (
     HypothesisCreate,
@@ -380,6 +383,14 @@ async def resolve_dispatch_anchor(
     """dispatch 대상의 대표 가설 anchor dict(§5.2). 없으면 None(에픽/스토리 외엔 항상 None)."""
     repo = HypothesisRepository(session, org_id)
     hyp = await repo.resolve_primary_anchor(entity_type, entity_id)
-    if hyp is None:
+    # type 가드: anchor는 dispatch의 optional 보강이므로, resolve가 Hypothesis가 아닌 값을
+    # 내면 dispatch(critical path)를 crash시키지 말고 graceful하게 anchor 없이 진행한다.
+    # (실 DB는 Hypothesis|None만 반환 — 비-모델은 비정상 신호라 warning.)
+    if not isinstance(hyp, Hypothesis):
+        if hyp is not None:
+            logger.warning(
+                "resolve_dispatch_anchor: non-Hypothesis result %r for %s %s — anchor skipped",
+                type(hyp).__name__, entity_type, entity_id,
+            )
         return None
     return build_anchor_dict(hyp)

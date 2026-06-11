@@ -6,11 +6,11 @@ resolve_primary_anchor의 link 해소(story primary→epic fallback·active 우�
 """
 import uuid
 from datetime import datetime, timezone
-from types import SimpleNamespace
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
+from app.models.hypothesis import Hypothesis
 from app.services import hypothesis as svc
 
 HID = uuid.uuid4()
@@ -22,13 +22,14 @@ def anyio_backend():
 
 
 def _hyp(**ov):
+    # 실 Hypothesis 인스턴스(인메모리·DB 불요) — resolve_dispatch_anchor의 isinstance 가드와 정합.
     base = dict(
         id=HID, statement="가입 전환율을 높인다", status="active",
         metric_definition={"metric": "signups", "source": "manual", "target": 100, "direction": "up"},
         measure_after=datetime(2026, 7, 1, 12, 0, tzinfo=timezone.utc),
     )
     base.update(ov)
-    return SimpleNamespace(**base)
+    return Hypothesis(**base)
 
 
 def test_build_anchor_dict_flattens_metric():
@@ -80,4 +81,17 @@ async def test_resolve_dispatch_anchor_none_when_no_primary():
     repo.resolve_primary_anchor = AsyncMock(return_value=None)
     with patch.object(svc, "HypothesisRepository", return_value=repo):
         a = await svc.resolve_dispatch_anchor(MagicMock(), uuid.uuid4(), "epic", uuid.uuid4())
+    assert a is None
+
+
+async def test_resolve_dispatch_anchor_guards_non_hypothesis():
+    """type 가드: resolve가 비-Hypothesis(예: UUID)를 내도 dispatch를 crash시키지 않고 None.
+
+    실 DB는 Hypothesis|None만 반환하나, mock 오염 등 비정상 신호가 critical dispatch path를
+    터뜨리지 않도록 graceful degrade(anchor 없이 진행)를 보장한다.
+    """
+    repo = MagicMock()
+    repo.resolve_primary_anchor = AsyncMock(return_value=uuid.uuid4())  # 비-Hypothesis
+    with patch.object(svc, "HypothesisRepository", return_value=repo):
+        a = await svc.resolve_dispatch_anchor(MagicMock(), uuid.uuid4(), "story", uuid.uuid4())
     assert a is None
