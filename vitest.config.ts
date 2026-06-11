@@ -28,8 +28,6 @@ export default defineConfig({
       // suite; each file is debt to burn down — re-include as it is fixed.
       // ⚠️ DO NOT add here to silence a NEW failure — fix the test.
       // Group B — api routes + services (backend-of-FE) · owner: 디디 · cleanup story: 837a36c4
-      'apps/web/src/app/api/projects/[id]/ai-settings/route.test.ts',
-      'apps/web/src/app/api/projects/[id]/ai-settings/validate/route.test.ts',
       // agent-builtin-tools.test.ts: the 4 registry-declared memo tools
       // (create_memo/reply_memo/update_memo/list_memos) are now implemented (story
       // 6f237832), but this file's create_story/forward_memo/create_memo/list_epics
