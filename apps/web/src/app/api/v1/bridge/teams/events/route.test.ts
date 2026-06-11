@@ -1,110 +1,30 @@
-import { beforeEach, describe, expect, it, vi } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
-const { createClientMock, findChannelMapping, processInboundMessage, verifyTeamsRequestMock } = vi.hoisted(() => ({
-  createClientMock: vi.fn(),
-  findChannelMapping: vi.fn(),
-  processInboundMessage: vi.fn(),
-  verifyTeamsRequestMock: vi.fn(),
-}));
-
-vi.mock('@/services/bridge-inbound', () => ({
-  BridgeInboundService: class BridgeInboundService {
-    findChannelMapping = findChannelMapping;
-    processInboundMessage = processInboundMessage;
-  },
-}));
-vi.mock('@/services/teams-inbound', async () => {
-  const actual = await vi.importActual<typeof import('@/services/teams-inbound')>('@/services/teams-inbound');
-  return {
-    ...actual,
-    verifyTeamsRequest: verifyTeamsRequestMock,
-  };
-});
-
+// 837a36c4(Group B b11): bridge = raw fetch 패스스루. teams는 authorization 헤더 포워딩.
 import { POST } from './route';
 
-describe('POST /api/v1/bridge/teams/events', () => {
-  beforeEach(() => {
-    createClientMock.mockReset();
-    findChannelMapping.mockReset();
-    processInboundMessage.mockReset();
-    verifyTeamsRequestMock.mockReset();
-    process.env.DATABASE_URL = 'https://example.db.co';
-    process.env.DATABASE_SERVICE_KEY = 'service-role-key';
+const fetchMock = vi.fn();
+beforeEach(() => { fetchMock.mockReset(); vi.stubGlobal('fetch', fetchMock); });
+afterEach(() => vi.unstubAllGlobals());
+
+const req = (body = '{"type":"message"}') => new Request('http://localhost/api/v1/bridge/teams/events', {
+  method: 'POST', body,
+  headers: { 'content-type': 'application/json', authorization: 'Bearer aad-token' },
+});
+
+describe('POST /api/v1/bridge/teams/events (fetch 패스스루)', () => {
+  it('forwards raw body + authorization to FastAPI bridge', async () => {
+    fetchMock.mockResolvedValue(new Response(JSON.stringify({ ok: true }), { status: 200 }));
+    const res = await POST(req('RAW'));
+    expect(res.status).toBe(200);
+    const [url, init] = fetchMock.mock.calls[0];
+    expect(String(url)).toContain('/api/v2/bridge/teams/events');
+    expect(init.method).toBe('POST');
+    expect(init.body).toBe('RAW');
+    expect(init.headers['authorization']).toBe('Bearer aad-token');
   });
-
-  it('skips unmapped teams channels without failing the webhook', async () => {
-    createClientMock.mockReturnValue({});
-    findChannelMapping.mockResolvedValue(null);
-
-    const response = await POST(new Request('http://localhost/api/v1/bridge/teams/events', {
-      method: 'POST',
-      body: JSON.stringify({
-        type: 'message',
-        id: 'activity-1',
-        serviceUrl: 'https://smba.trafficmanager.net/amer/',
-        from: { id: 'user-1' },
-        recipient: { id: 'bot-1' },
-        conversation: { id: 'conversation-1' },
-        channelData: { channel: { id: 'channel-1' } },
-      }),
-    }));
-
-    expect(response.status).toBe(200);
-    await expect(response.json()).resolves.toMatchObject({ skipped: 'channel_not_mapped' });
-  });
-
-  it('returns 401 when the Teams JWT is invalid', async () => {
-    createClientMock.mockReturnValue({});
-    findChannelMapping.mockResolvedValue({ id: 'mapping-1', config: { bot_app_id: 'teams-app-id' } });
-    verifyTeamsRequestMock.mockResolvedValue(false);
-
-    const response = await POST(new Request('http://localhost/api/v1/bridge/teams/events', {
-      method: 'POST',
-      headers: { authorization: 'Bearer invalid' },
-      body: JSON.stringify({
-        type: 'message',
-        id: 'activity-1',
-        serviceUrl: 'https://smba.trafficmanager.net/amer/',
-        from: { id: 'user-1' },
-        recipient: { id: 'bot-1' },
-        conversation: { id: 'conversation-1' },
-        channelData: { channel: { id: 'channel-1' } },
-      }),
-    }));
-
-    expect(response.status).toBe(401);
-  });
-
-  it('processes verified Teams message activities through BridgeInboundService', async () => {
-    createClientMock.mockReturnValue({});
-    findChannelMapping.mockResolvedValue({ id: 'mapping-1', config: { bot_app_id: 'teams-app-id' } });
-    verifyTeamsRequestMock.mockResolvedValue(true);
-    processInboundMessage.mockResolvedValue({ action: 'processed' });
-
-    const response = await POST(new Request('http://localhost/api/v1/bridge/teams/events', {
-      method: 'POST',
-      headers: { authorization: 'Bearer valid' },
-      body: JSON.stringify({
-        type: 'message',
-        id: 'activity-1',
-        text: '<p>Hello</p>',
-        serviceUrl: 'https://smba.trafficmanager.net/amer/',
-        from: { id: 'user-1', name: 'Alice' },
-        recipient: { id: 'bot-1' },
-        conversation: { id: 'conversation-1', tenantId: 'tenant-1' },
-        channelData: { channel: { id: 'channel-1' }, team: { id: 'team-1' }, tenant: { id: 'tenant-1' } },
-      }),
-    }));
-
-    expect(response.status).toBe(200);
-    expect(processInboundMessage).toHaveBeenCalledWith(expect.objectContaining({
-      platform: 'teams',
-      event: expect.objectContaining({
-        channelId: 'channel-1',
-        threadTs: 'conversation-1',
-        messageText: 'Hello',
-      }),
-    }));
+  it('passes upstream status through (e.g., 401)', async () => {
+    fetchMock.mockResolvedValue(new Response('{}', { status: 401 }));
+    expect((await POST(req())).status).toBe(401);
   });
 });
