@@ -37,6 +37,10 @@ describe('content-converter round-trip idempotency (2a72ebf4)', () => {
     'code fence no lang': '```\nplain code\n```',
     'gfm table plain': '| name | role |\n| --- | --- |\n| didi | dev |',
     'gfm table inline cells': '| field | value |\n| --- | --- |\n| **bold** | `code` |\n| [link](https://x.com) | _em_ |',
+    // Pipe-in-cell edge (guardian review): serializeTableCell escapes `|`→`\|`,
+    // parseTableCells un-escapes it on the markdownToHtml side — must round-trip.
+    'gfm table escaped pipe in cell': '| expr | note |\n| --- | --- |\n| a \\| b | ok |',
+    'gfm table pipe + inline in cell': '| expr | note |\n| --- | --- |\n| **a \\| b** | `x` |',
   };
 
   for (const [name, md] of Object.entries(fixtures)) {
