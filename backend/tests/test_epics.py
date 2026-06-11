@@ -31,6 +31,10 @@ def _mock_epic(status: str = "active") -> MagicMock:
     e.measure_after = None
     e.outcome_status = "n_a"
     e.outcome_result = None
+    # E1 S8b: 연결 가설 집계. MagicMock auto-attr이면 from_attributes ValidationError이라
+    # 신규 필드를 명시 세팅(기본값 동형). _attach_hypothesis_aggregates가 덮어쓸 수 있음.
+    e.hypothesis_count = 0
+    e.risky_status = None
     e.created_at = datetime(2026, 5, 1, tzinfo=timezone.utc)
     e.updated_at = datetime(2026, 5, 1, tzinfo=timezone.utc)
     return e
@@ -68,8 +72,20 @@ async def _client():
 
 # ── GET list ──────────────────────────────────────────────────────────────────
 
-def _paginated_execute(total: int, rows: list):
-    """list_paginated: 1번째 execute=count(scalar_one), 2번째=list(scalars().all())."""
+def _agg_row(epic_id, cnt: int, risk_rank: int | None):
+    """EpicRepository._attach_hypothesis_aggregates 집계 한 행(epic_id·cnt·risk_rank)."""
+    row = MagicMock()
+    row.epic_id = epic_id
+    row.cnt = cnt
+    row.risk_rank = risk_rank
+    return row
+
+
+def _paginated_execute(total: int, rows: list, agg_rows: list | None = None):
+    """EpicRepository.list_paginated의 execute 순서를 모킹.
+
+    1=count(scalar_one), 2=list(scalars().all()), 3=가설 집계(_attach.. → result.all()).
+    """
     state = {"n": 0}
 
     async def _exec(stmt, *args, **kwargs):
@@ -77,8 +93,10 @@ def _paginated_execute(total: int, rows: list):
         r = MagicMock()
         if state["n"] == 1:
             r.scalar_one.return_value = total
-        else:
+        elif state["n"] == 2:
             r.scalars.return_value.all.return_value = rows
+        else:
+            r.all.return_value = agg_rows or []
         return r
 
     return _exec
@@ -97,6 +115,41 @@ async def test_list_epics_200():
         assert isinstance(resp.json(), list)
         # 569f5316: 전체 카운트는 항상 헤더로 노출 → silent-truncation 불가
         assert resp.headers["X-Total-Count"] == "1"
+    finally:
+        app.dependency_overrides.clear()
+
+
+@pytest.mark.anyio
+async def test_list_epics_includes_hypothesis_aggregates():
+    """E1 S8b: list 응답에 hypothesis_count + risky_status(최위험 환원)가 실린다."""
+    client, session, app = await _client()
+    try:
+        # risk_rank 0 = falsified(최위험), 연결 가설 3
+        session.execute = _paginated_execute(
+            1, [_mock_epic()], agg_rows=[_agg_row(EPIC_ID, 3, 0)]
+        )
+        async with client as c:
+            resp = await c.get("/api/v2/epics")
+        assert resp.status_code == 200
+        body = resp.json()
+        assert body[0]["hypothesis_count"] == 3
+        assert body[0]["risky_status"] == "falsified"
+    finally:
+        app.dependency_overrides.clear()
+
+
+@pytest.mark.anyio
+async def test_list_epics_zero_hypotheses_defaults_count0_risky_null():
+    """E1 S8b additive: 연결 가설 0건이면 count 0 / risky None."""
+    client, session, app = await _client()
+    try:
+        session.execute = _paginated_execute(1, [_mock_epic()], agg_rows=[])
+        async with client as c:
+            resp = await c.get("/api/v2/epics")
+        assert resp.status_code == 200
+        body = resp.json()
+        assert body[0]["hypothesis_count"] == 0
+        assert body[0]["risky_status"] is None
     finally:
         app.dependency_overrides.clear()
 
