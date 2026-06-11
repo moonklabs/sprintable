@@ -28,7 +28,6 @@ export default defineConfig({
       // suite; each file is debt to burn down — re-include as it is fixed.
       // ⚠️ DO NOT add here to silence a NEW failure — fix the test.
       // Group B — api routes + services (backend-of-FE) · owner: 디디 · cleanup story: 837a36c4
-      'apps/web/src/services/__tests__/slack-inbound.test.ts',
       'apps/web/src/app/api/agent-runs/[id]/route.test.ts',
       'apps/web/src/app/api/agent-runs/route.test.ts',
       'apps/web/src/app/api/projects/[id]/ai-settings/route.test.ts',
@@ -38,7 +37,6 @@ export default defineConfig({
       'apps/web/src/services/agent-builtin-tools.test.ts',
       'apps/web/src/services/agent-execution-loop.test.ts',
       'apps/web/src/services/background-runtime.test.ts',
-      'apps/web/src/services/memo-assignment-dispatch.test.ts',
     ],
   },
 });

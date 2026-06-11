@@ -1,14 +1,15 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
-const { createAdminClient } = vi.hoisted(() => ({
-  createAdminClient: vi.fn(),
-}));
-
-vi.mock('@/lib/db/admin', () => ({ createAdminClient }));
-
-vi.mock('@/lib/storage/factory', () => ({
+// 837a36c4(Group B b20): 구현이 d64c4aaa("remove createAdminClient from memo-assignment-dispatch")로
+// 대폭 단순화됨 — createTeamMemberRepository().getById(assigned_to) → member.webhook_url → fetch.
+// webhook_configs 선호/createAdminClient/webhook_deliveries 경로는 제거(memo-event-dispatcher·
+// webhook-notify로 이전·거기서 테스트). 구 테스트(webhook_configs 선호·console.error·db)는 stale →
+// 현 계약(team-member webhook 직발송)으로 재작성. 회귀 아님(git 이력 확인).
+const { createTeamMemberRepository } = vi.hoisted(() => ({
   createTeamMemberRepository: vi.fn(),
 }));
+
+vi.mock('@/lib/storage/factory', () => ({ createTeamMemberRepository }));
 
 import { dispatchMemoAssignmentImmediately } from './memo-assignment-dispatch';
 
@@ -27,33 +28,6 @@ const baseMemo = {
   created_at: '2026-04-22T00:00:00.000Z',
 };
 
-function makeDb(results: Record<string, unknown>) {
-  return {
-    from: vi.fn((table: string) => {
-      if (table === 'webhook_deliveries') {
-        return {
-          insert: vi.fn().mockReturnValue({
-            select: vi.fn().mockReturnValue({
-              single: vi.fn().mockResolvedValue({ data: { id: 'delivery-1' }, error: null }),
-            }),
-          }),
-          update: vi.fn().mockReturnValue({
-            eq: vi.fn().mockResolvedValue({ data: [], error: null }),
-          }),
-        };
-      }
-      const payload = results[table] ?? { data: null, error: null };
-      return {
-        select: vi.fn().mockReturnThis(),
-        eq: vi.fn().mockReturnThis(),
-        is: vi.fn().mockReturnThis(),
-        limit: vi.fn().mockReturnThis(),
-        maybeSingle: vi.fn().mockResolvedValue(payload),
-      };
-    }),
-  };
-}
-
 describe('dispatchMemoAssignmentImmediately', () => {
   const mockFetch = vi.fn();
 
@@ -63,24 +37,22 @@ describe('dispatchMemoAssignmentImmediately', () => {
     mockFetch.mockResolvedValue({ ok: true, status: 200 });
   });
 
-  it('skips unassigned memos without calling db', async () => {
+  it('skips unassigned memos without resolving the repo', async () => {
     await dispatchMemoAssignmentImmediately({ ...baseMemo, assigned_to: null });
-    expect(createAdminClient).not.toHaveBeenCalled();
+    expect(createTeamMemberRepository).not.toHaveBeenCalled();
     expect(mockFetch).not.toHaveBeenCalled();
   });
 
-  it('skips non-open memos without calling db', async () => {
+  it('skips non-open memos without resolving the repo', async () => {
     await dispatchMemoAssignmentImmediately({ ...baseMemo, status: 'resolved' });
-    expect(createAdminClient).not.toHaveBeenCalled();
+    expect(createTeamMemberRepository).not.toHaveBeenCalled();
     expect(mockFetch).not.toHaveBeenCalled();
   });
 
-  it('sends webhook via team_members.webhook_url when webhook_configs is empty', async () => {
-    const db = makeDb({
-      webhook_configs: { data: null, error: null },
-      team_members: { data: { webhook_url: 'https://discord.com/api/webhooks/1/token' }, error: null },
+  it('sends a webhook to the assigned team member webhook_url', async () => {
+    createTeamMemberRepository.mockResolvedValue({
+      getById: async () => ({ webhook_url: 'https://discord.com/api/webhooks/1/token' }),
     });
-    createAdminClient.mockReturnValue(db);
 
     await dispatchMemoAssignmentImmediately(baseMemo);
 
@@ -90,36 +62,21 @@ describe('dispatchMemoAssignmentImmediately', () => {
     );
   });
 
-  it('prefers webhook_configs url over team_members.webhook_url', async () => {
-    const db = makeDb({
-      webhook_configs: { data: { id: 'config-1', url: 'https://discord.com/api/webhooks/2/config', secret: null, channel: 'discord' }, error: null },
-      team_members: { data: { webhook_url: 'https://discord.com/api/webhooks/1/fallback' }, error: null },
-    });
-    createAdminClient.mockReturnValue(db);
-
+  it('skips fetch when the assigned member has no webhook_url', async () => {
+    createTeamMemberRepository.mockResolvedValue({ getById: async () => ({ webhook_url: null }) });
     await dispatchMemoAssignmentImmediately(baseMemo);
-
-    expect(mockFetch).toHaveBeenCalledWith(
-      'https://discord.com/api/webhooks/2/config',
-      expect.objectContaining({ method: 'POST' }),
-    );
+    expect(mockFetch).not.toHaveBeenCalled();
   });
 
-  it('logs console.error and skips fetch when no webhook url found', async () => {
-    const errorSpy = vi.spyOn(console, 'error').mockImplementation(() => {});
-    const db = makeDb({
-      webhook_configs: { data: null, error: null },
-      team_members: { data: null, error: null },
-    });
-    createAdminClient.mockReturnValue(db);
-
+  it('skips fetch when the assigned member is not found', async () => {
+    createTeamMemberRepository.mockResolvedValue({ getById: async () => null });
     await dispatchMemoAssignmentImmediately(baseMemo);
-
     expect(mockFetch).not.toHaveBeenCalled();
-    expect(errorSpy).toHaveBeenCalledWith(
-      expect.stringContaining('[MemoDispatch]'),
-      expect.anything(),
-    );
-    errorSpy.mockRestore();
+  });
+
+  it('swallows repo/fetch errors (fire-and-forget) without throwing', async () => {
+    createTeamMemberRepository.mockResolvedValue({ getById: async () => { throw new Error('repo down'); } });
+    await expect(dispatchMemoAssignmentImmediately(baseMemo)).resolves.toBeUndefined();
+    expect(mockFetch).not.toHaveBeenCalled();
   });
 });
