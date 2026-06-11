@@ -48,7 +48,7 @@ function ChatMarkdown({ content, isMine }: { content: string; isMine: boolean })
 
   if (!hasMarkdown && !hasMention) {
     return (
-      <span className={`whitespace-pre-wrap break-words text-sm leading-relaxed ${text}`}>
+      <span className={`whitespace-pre-wrap [overflow-wrap:anywhere] text-sm leading-relaxed ${text}`}>
         {content}
       </span>
     );
@@ -63,10 +63,10 @@ function ChatMarkdown({ content, isMine }: { content: string; isMine: boolean })
         url.startsWith('entity:') || url.startsWith('mention:') ? url : defaultUrlTransform(url)
       }
       components={{
-        p: ({ children }) => <p className={`mb-1.5 break-words text-sm leading-relaxed last:mb-0 ${text}`}>{children}</p>,
+        p: ({ children }) => <p className={`mb-1.5 [overflow-wrap:anywhere] text-sm leading-relaxed last:mb-0 ${text}`}>{children}</p>,
         strong: ({ children }) => <strong className={`font-semibold ${text}`}>{children}</strong>,
         em: ({ children }) => <em className={`italic ${text}`}>{children}</em>,
-        code: ({ children }) => <code className={`rounded px-1 py-0.5 font-mono text-xs ${codeBg}`}>{children}</code>,
+        code: ({ children }) => <code className={`rounded px-1 py-0.5 font-mono text-xs [overflow-wrap:anywhere] ${codeBg}`}>{children}</code>,
         pre: ({ children }) => <pre className={`mb-1.5 overflow-x-auto rounded-lg p-2.5 text-xs ${codeBg}`}>{children}</pre>,
         ul: ({ children }) => <ul className={`mb-1.5 ml-4 list-disc space-y-0.5 text-sm ${text}`}>{children}</ul>,
         ol: ({ children }) => <ol className={`mb-1.5 ml-4 list-decimal space-y-0.5 text-sm ${text}`}>{children}</ol>,
@@ -214,13 +214,13 @@ export function ChatBubble({ message, isMine, isGrouped = false, onOpenThread, o
                 <Terminal className="h-3 w-3" aria-hidden />
                 {t('commandTag')}
               </div>
-              <code className="block break-words whitespace-pre-wrap font-mono text-sm">
+              <code className="block whitespace-pre-wrap [overflow-wrap:anywhere] font-mono text-sm">
                 <span className="text-brand">/{cmdName}</span>
                 <span className="text-muted-foreground">{message.content.slice(1 + (cmdName?.length ?? 0))}</span>
               </code>
             </div>
           ) : (
-            <div className={`rounded-2xl px-3.5 py-2 text-sm leading-relaxed break-words ${
+            <div className={`rounded-2xl px-3.5 py-2 text-sm leading-relaxed [overflow-wrap:anywhere] ${
               isMine
                 ? 'rounded-tr-sm bg-primary text-primary-foreground'
                 : 'rounded-tl-sm bg-muted text-foreground'

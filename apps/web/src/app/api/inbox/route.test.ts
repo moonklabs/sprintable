@@ -1,123 +1,36 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
-const {
-  createDbServerClient,
-  createAdminClient,
-  getAuthContext,
-  createInboxItemRepository,
-  cookies,
-} = vi.hoisted(() => ({
-  createDbServerClient: vi.fn(),
-  createAdminClient: vi.fn(),
-  getAuthContext: vi.fn(),
-  createInboxItemRepository: vi.fn(),
-  cookies: vi.fn(),
-}));
-
-vi.mock('@/lib/db/server', () => ({ createDbServerClient }));
-vi.mock('@/lib/db/admin', () => ({ createAdminClient }));
-vi.mock('@/lib/auth-helpers', async () => {
-  const actual = await vi.importActual<typeof import('@/lib/auth-helpers')>('@/lib/auth-helpers');
-  return { ...actual, getAuthContext };
-});
-vi.mock('@/lib/storage/factory', () => ({ createInboxItemRepository }));
-vi.mock('next/headers', () => ({ cookies }));
+// 837a36c4(Group B b5): proxy 위임 리팩토링 후 stale 재작성. inbox는 assignee_member_id 자동주입 후 위임.
+const { getAuthContext, proxyToFastapi } = vi.hoisted(() => ({ getAuthContext: vi.fn(), proxyToFastapi: vi.fn() }));
+vi.mock('@/lib/auth-helpers', () => ({ getAuthContext }));
+vi.mock('@/lib/fastapi-proxy', () => ({ proxyToFastapi }));
 
 import { GET } from './route';
 
-const ME = {
-  id: 'tm-1',
-  org_id: 'org-1',
-  project_id: 'proj-1',
-  project_name: 'Proj',
-  type: 'human' as const,
-  rateLimitExceeded: false,
-  rateLimitRemaining: 299,
-  rateLimitResetAt: 0,
-};
+const agent = () => ({ id: 'mem-1', type: 'agent', rateLimitExceeded: false, rateLimitRemaining: 299, rateLimitResetAt: 0 });
+const okRes = (b: unknown = { ok: 1 }) =>
+  new Response(JSON.stringify(b), { status: 200, headers: { 'content-type': 'application/json' } });
+const req = () => new Request('http://localhost/api/inbox');
 
-describe('GET /api/inbox', () => {
-  beforeEach(() => {
-    vi.clearAllMocks();
-    createDbServerClient.mockResolvedValue({});
-    cookies.mockResolvedValue({ get: vi.fn(() => undefined) });
-    getAuthContext.mockResolvedValue(ME);
+describe('GET /api/inbox (proxy 위임)', () => {
+  beforeEach(() => { getAuthContext.mockReset(); proxyToFastapi.mockReset(); getAuthContext.mockResolvedValue(agent()); });
+  it('401 when unauthenticated', async () => {
+    getAuthContext.mockResolvedValue(null);
+    expect((await GET(req())).status).toBe(401);
+    expect(proxyToFastapi).not.toHaveBeenCalled();
   });
-
-  it('returns 401 when unauthenticated', async () => {
-    getAuthContext.mockResolvedValueOnce(null);
-    const res = await GET(new Request('http://localhost/api/inbox'));
-    expect(res.status).toBe(401);
-  });
-
-  it('lists pending inbox items for the current assignee + project + org', async () => {
-    const repo = {
-      list: vi.fn().mockResolvedValue([
-        { id: 'i1', org_id: 'org-1', kind: 'approval', state: 'pending', created_at: '2026-04-26T00:00:00Z' },
-      ]),
-      count: vi.fn().mockResolvedValue({
-        total: 1,
-        byKind: { approval: 1, decision: 0, blocker: 0, mention: 0 },
-      }),
-    };
-    createInboxItemRepository.mockResolvedValue(repo);
-
-    const res = await GET(new Request('http://localhost/api/inbox'));
+  it('delegates to /api/v2/inbox (assignee 자동주입) and wraps', async () => {
+    proxyToFastapi.mockResolvedValue(okRes());
+    const res = await GET(req());
     expect(res.status).toBe(200);
-    const body = await res.json();
-    expect(body.data).toHaveLength(1);
-    expect(body.meta.pendingCount).toBe(1);
-    expect(body.meta.countsByKind.approval).toBe(1);
-    expect(repo.list).toHaveBeenCalledWith(expect.objectContaining({
-      org_id: 'org-1',
-      project_id: 'proj-1',
-      assignee_member_id: 'tm-1',
-      state: 'pending',
-    }));
+    expect(proxyToFastapi).toHaveBeenCalledWith(expect.anything(), '/api/v2/inbox');
+    // assignee_member_id가 caller id로 주입된 Request로 위임
+    const fwd = proxyToFastapi.mock.calls[0][0] as Request;
+    expect(new URL(fwd.url).searchParams.get('assignee_member_id')).toBe('mem-1');
+    expect((await res.json()).data).toMatchObject({ ok: 1 });
   });
-
-  it('rejects invalid kind', async () => {
-    const repo = { list: vi.fn(), count: vi.fn() };
-    createInboxItemRepository.mockResolvedValue(repo);
-
-    const res = await GET(new Request('http://localhost/api/inbox?kind=invalid'));
-    expect(res.status).toBe(400);
-    const body = await res.json();
-    expect(body.error.code).toBe('BAD_REQUEST');
+  it('passes through proxy errors', async () => {
+    proxyToFastapi.mockResolvedValue(new Response('e', { status: 502 }));
+    expect((await GET(req())).status).toBe(502);
   });
-
-  it('rejects invalid state', async () => {
-    const repo = { list: vi.fn(), count: vi.fn() };
-    createInboxItemRepository.mockResolvedValue(repo);
-
-    const res = await GET(new Request('http://localhost/api/inbox?state=closed'));
-    expect(res.status).toBe(400);
-  });
-
-  it('forwards kind filter to repo when valid', async () => {
-    const repo = {
-      list: vi.fn().mockResolvedValue([]),
-      count: vi.fn().mockResolvedValue({ total: 0, byKind: { approval: 0, decision: 0, blocker: 0, mention: 0 } }),
-    };
-    createInboxItemRepository.mockResolvedValue(repo);
-
-    await GET(new Request('http://localhost/api/inbox?kind=blocker'));
-    expect(repo.list).toHaveBeenCalledWith(expect.objectContaining({ kind: 'blocker' }));
-  });
-
-  it('uses cookie project_id when present', async () => {
-    cookies.mockResolvedValue({
-      get: vi.fn((name: string) => (name === 'sprintable_current_project_id' ? { value: 'cookie-proj' } : undefined)),
-    });
-    const repo = {
-      list: vi.fn().mockResolvedValue([]),
-      count: vi.fn().mockResolvedValue({ total: 0, byKind: { approval: 0, decision: 0, blocker: 0, mention: 0 } }),
-    };
-    createInboxItemRepository.mockResolvedValue(repo);
-
-    await GET(new Request('http://localhost/api/inbox'));
-    expect(repo.list).toHaveBeenCalledWith(expect.objectContaining({ project_id: 'cookie-proj' }));
-  });
-
 });
-

@@ -1,126 +1,27 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
-const { createDbServerClient, getMyTeamMember, requireOrgAdmin, requireAgentOrchestration, respond } = vi.hoisted(() => ({
-  createDbServerClient: vi.fn(),
-  getMyTeamMember: vi.fn(),
-  requireOrgAdmin: vi.fn(),
-  requireAgentOrchestration: vi.fn(),
-  respond: vi.fn(),
-}));
-
-vi.mock('@/lib/db/server', () => ({ createDbServerClient }));
-vi.mock('@/lib/auth-helpers', () => ({ getMyTeamMember }));
-vi.mock('@/lib/admin-check', () => ({ requireOrgAdmin }));
-vi.mock('@/lib/require-agent-orchestration', () => ({ requireAgentOrchestration }));
-vi.mock('@/services/agent-hitl', async () => {
-  class HitlConflictError extends Error {
-    constructor(message: string) {
-      super(message);
-      this.name = 'HitlConflictError';
-    }
-  }
-
-  class AgentHitlService {
-    respond = respond;
-  }
-
-  return {
-    HitlConflictError,
-    AgentHitlService,
-  };
-});
+// 837a36c4(Group B b4): proxy 위임 리팩토링 후 stale 재작성 — dynamic [id] params·pure proxy.
+const { proxyToFastapi } = vi.hoisted(() => ({ proxyToFastapi: vi.fn() }));
+vi.mock('@/lib/fastapi-proxy', () => ({ proxyToFastapi }));
 
 import { PATCH } from './route';
 
-describe('PATCH /api/v1/hitl-requests/[id]', () => {
-  beforeEach(() => {
-    createDbServerClient.mockReset();
-    getMyTeamMember.mockReset();
-    requireOrgAdmin.mockReset();
-    requireAgentOrchestration.mockReset();
-    respond.mockReset();
-    requireAgentOrchestration.mockResolvedValue(null);
+const ID = 'hitl-1';
+const ctx = () => ({ params: Promise.resolve({ id: ID }) });
+const okRes = (b: unknown = { ok: 1 }) =>
+  new Response(JSON.stringify(b), { status: 200, headers: { 'content-type': 'application/json' } });
+const req = () => new Request(`http://localhost/x/${ID}`, { method: 'PATCH' });
+
+describe('/api/v1/hitl-requests/[id] (proxy 위임)', () => {
+  beforeEach(() => proxyToFastapi.mockReset());
+  it('PATCH: delegates to /api/v2/hitl/requests/{id} and wraps', async () => {
+    proxyToFastapi.mockResolvedValue(okRes());
+    const res = await PATCH(req(), ctx());
+    expect(res.status).toBe(200);
+    expect(proxyToFastapi).toHaveBeenCalledWith(expect.anything(), `/api/v2/hitl/requests/${ID}`);
   });
-
-  it('returns unauthorized when no auth user exists', async () => {
-    createDbServerClient.mockResolvedValue({
-      auth: { getUser: vi.fn().mockResolvedValue({ data: { user: null } }) },
-    });
-
-    const response = await PATCH(new Request('http://localhost', {
-      method: 'PATCH',
-      body: JSON.stringify({ action: 'approve' }),
-    }), { params: Promise.resolve({ id: 'hitl-1' }) });
-
-    expect(response.status).toBe(401);
-  });
-
-  it('blocks approve/reject bypass when upgrade is required', async () => {
-    createDbServerClient.mockResolvedValue({
-      auth: { getUser: vi.fn().mockResolvedValue({ data: { user: { id: 'user-1' } } }) },
-    });
-    getMyTeamMember.mockResolvedValue({ id: 'admin-1', org_id: 'org-1', project_id: 'project-1' });
-    requireOrgAdmin.mockResolvedValue(undefined);
-    requireAgentOrchestration.mockResolvedValue(new Response(JSON.stringify({
-      code: 'UPGRADE_REQUIRED',
-      error: { code: 'UPGRADE_REQUIRED', message: 'Upgrade required' },
-    }), { status: 403, headers: { 'Content-Type': 'application/json' } }));
-
-    const response = await PATCH(new Request('http://localhost', {
-      method: 'PATCH',
-      body: JSON.stringify({ action: 'approve' }),
-    }), { params: Promise.resolve({ id: 'hitl-1' }) });
-
-    expect(response.status).toBe(403);
-    expect(respond).not.toHaveBeenCalled();
-  });
-
-  it('maps service conflicts to 409', async () => {
-    createDbServerClient.mockResolvedValue({
-      auth: { getUser: vi.fn().mockResolvedValue({ data: { user: { id: 'user-1' } } }) },
-    });
-    getMyTeamMember.mockResolvedValue({ id: 'admin-1', org_id: 'org-1', project_id: 'project-1' });
-    requireOrgAdmin.mockResolvedValue(undefined);
-
-    const { HitlConflictError } = await import('@/services/agent-hitl');
-    respond.mockRejectedValue(new HitlConflictError('already processed'));
-
-    const response = await PATCH(new Request('http://localhost', {
-      method: 'PATCH',
-      body: JSON.stringify({ action: 'approve' }),
-    }), { params: Promise.resolve({ id: 'hitl-1' }) });
-
-    expect(response.status).toBe(409);
-    await expect(response.json()).resolves.toMatchObject({
-      error: { code: 'CONFLICT', message: 'already processed' },
-    });
-  });
-
-  it('returns approved payload on success', async () => {
-    createDbServerClient.mockResolvedValue({
-      auth: { getUser: vi.fn().mockResolvedValue({ data: { user: { id: 'user-1' } } }) },
-    });
-    getMyTeamMember.mockResolvedValue({ id: 'admin-1', org_id: 'org-1', project_id: 'project-1' });
-    requireOrgAdmin.mockResolvedValue(undefined);
-    respond.mockResolvedValue({ id: 'hitl-1', status: 'approved', resumed_run_id: 'run-2' });
-
-    const response = await PATCH(new Request('http://localhost', {
-      method: 'PATCH',
-      body: JSON.stringify({ action: 'approve', comment: 'go' }),
-    }), { params: Promise.resolve({ id: 'hitl-1' }) });
-
-    expect(response.status).toBe(200);
-    expect(requireAgentOrchestration).toHaveBeenCalledWith(expect.anything(), 'org-1');
-    await expect(response.json()).resolves.toMatchObject({
-      data: { id: 'hitl-1', status: 'approved', resumed_run_id: 'run-2' },
-    });
-    expect(respond).toHaveBeenCalledWith({
-      requestId: 'hitl-1',
-      actorId: 'admin-1',
-      orgId: 'org-1',
-      projectId: 'project-1',
-      action: 'approve',
-      comment: 'go',
-    });
+  it('PATCH: passes through proxy errors', async () => {
+    proxyToFastapi.mockResolvedValue(new Response('e', { status: 409 }));
+    expect((await PATCH(req(), ctx())).status).toBe(409);
   });
 });

@@ -1,110 +1,65 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
-const { createDbServerClient, getAuthContext, createAdminClient, attachNotificationHrefs } = vi.hoisted(() => ({
-  createDbServerClient: vi.fn(),
-  getAuthContext: vi.fn(),
-  createAdminClient: vi.fn(),
-  attachNotificationHrefs: vi.fn(),
+// 837a36c4(Group B b9): 직접 repo 핸들러(NotificationRepository) — auth게이트 → repo.list/markRead/markAllRead.
+const h = vi.hoisted(() => ({
+  getAuthContext: vi.fn(), createNotificationRepository: vi.fn(),
+  list: vi.fn(), markRead: vi.fn(), markAllRead: vi.fn(),
+  attachHrefs: vi.fn(), parseBody: vi.fn(),
 }));
-
-vi.mock('@/lib/db/server', () => ({ createDbServerClient }));
-vi.mock('@/lib/db/admin', () => ({ createAdminClient }));
-vi.mock('@/lib/auth-helpers', () => ({ getAuthContext }));
-vi.mock('@/services/notification-navigation', () => ({ attachNotificationHrefs }));
+vi.mock('@/lib/auth-helpers', () => ({ getAuthContext: h.getAuthContext }));
+vi.mock('@/lib/storage/factory', () => ({ createNotificationRepository: h.createNotificationRepository }));
+vi.mock('@/services/notification-navigation', () => ({ attachNotificationHrefs: h.attachHrefs }));
+vi.mock('@sprintable/shared', async (importActual) => ({
+  ...(await importActual<typeof import('@sprintable/shared')>()),
+  parseBody: h.parseBody,
+}));
 
 import { GET, PATCH } from './route';
 
-function createNotificationsQueryStub(rows: Record<string, unknown>[]) {
-  const query: {
-    select: ReturnType<typeof vi.fn>;
-    eq: ReturnType<typeof vi.fn>;
-    order: ReturnType<typeof vi.fn>;
-    limit: ReturnType<typeof vi.fn>;
-    then: Promise<{ data: Record<string, unknown>[]; error: null }>['then'];
-  } = {
-    select: vi.fn(() => query),
-    eq: vi.fn(() => query),
-    order: vi.fn(() => query),
-    limit: vi.fn(() => query),
-    then: Promise.resolve({ data: rows, error: null }).then.bind(Promise.resolve({ data: rows, error: null })),
-  };
+const agent = () => ({ id: 'mem-1', type: 'agent', rateLimitExceeded: false, rateLimitRemaining: 299, rateLimitResetAt: 0 });
 
-  return query;
-}
-
-function createCountQueryStub(count: number) {
-  const query: {
-    select: ReturnType<typeof vi.fn>;
-    eq: ReturnType<typeof vi.fn>;
-    then: Promise<{ count: number; error: null }>['then'];
-  } = {
-    select: vi.fn(() => query),
-    eq: vi.fn(() => query),
-    then: Promise.resolve({ count, error: null }).then.bind(Promise.resolve({ count, error: null })),
-  };
-
-  return query;
-}
-
-describe('GET /api/notifications', () => {
+describe('/api/notifications (직접 repo)', () => {
   beforeEach(() => {
-    createDbServerClient.mockReset();
-    getAuthContext.mockReset();
-    createAdminClient.mockReset();
-    attachNotificationHrefs.mockReset();
-    getAuthContext.mockResolvedValue({ id: 'team-member-1', type: 'human', rateLimitExceeded: false, rateLimitRemaining: 299, rateLimitResetAt: 0 });
+    Object.values(h).forEach((m) => m.mockReset());
+    h.getAuthContext.mockResolvedValue(agent());
+    h.createNotificationRepository.mockResolvedValue({ list: h.list, markRead: h.markRead, markAllRead: h.markAllRead });
+    h.attachHrefs.mockImplementation(async (_c: unknown, items: unknown[]) => items);
   });
 
-  it('attaches deep-link hrefs to notification payloads', async () => {
-    const rows = [
-      { id: 'notification-1', reference_type: 'memo', reference_id: 'memo-1', is_read: false, type: 'memo', title: '메모', body: null, created_at: '2026-04-08T18:00:00Z' },
-    ];
-    const notificationsQuery = createNotificationsQueryStub(rows);
-    const countQuery = createCountQueryStub(1);
-    const db = {
-      from: vi.fn((table: string) => {
-        if (table !== 'notifications') throw new Error(`unexpected table: ${table}`);
-        return db.from.mock.calls.length === 1 ? notificationsQuery : countQuery;
-      }),
-    };
-
-    createDbServerClient.mockResolvedValue(db);
-    attachNotificationHrefs.mockResolvedValue([
-      { ...rows[0], href: '/memos?id=memo-1' },
-    ]);
-
-    const response = await GET(new Request('http://localhost/api/notifications'));
-
-    expect(response.status).toBe(200);
-    const body = await response.json();
-    expect(attachNotificationHrefs).toHaveBeenCalledWith(db, rows);
-    expect(body.data).toEqual([
-      expect.objectContaining({ id: 'notification-1', href: '/memos?id=memo-1' }),
-    ]);
+  it('GET: 401 when unauthenticated', async () => {
+    h.getAuthContext.mockResolvedValue(null);
+    expect((await GET(new Request('http://localhost/api/notifications'))).status).toBe(401);
+  });
+  it('GET: lists via repo + attachHrefs + unreadCount meta', async () => {
+    h.list.mockResolvedValue([{ id: 'n1', is_read: false, type: 'x' }, { id: 'n2', is_read: true, type: 'x' }]);
+    const res = await GET(new Request('http://localhost/api/notifications'));
+    expect(res.status).toBe(200);
+    expect(h.list).toHaveBeenCalledWith(expect.objectContaining({ user_id: 'mem-1' }));
+    const body = await res.json();
+    expect(body.data).toHaveLength(2);
     expect(body.meta.unreadCount).toBe(1);
   });
-});
 
-describe('PATCH /api/notifications', () => {
-  beforeEach(() => {
-    createDbServerClient.mockReset();
-    getAuthContext.mockReset();
-    createAdminClient.mockReset();
-    attachNotificationHrefs.mockReset();
-    getAuthContext.mockResolvedValue({ id: 'team-member-1', type: 'human', rateLimitExceeded: false, rateLimitRemaining: 299, rateLimitResetAt: 0 });
+  it('PATCH: invalid body → parseBody 400', async () => {
+    h.parseBody.mockResolvedValue({ success: false, response: new Response('bad', { status: 400 }) });
+    expect((await PATCH(new Request('http://localhost/api/notifications', { method: 'PATCH', body: '{}' }))).status).toBe(400);
   });
-
-  it('returns validation errors for malformed payloads', async () => {
-    createDbServerClient.mockResolvedValue({});
-
-    const response = await PATCH(new Request('http://localhost/api/notifications', {
-      method: 'PATCH',
-      body: JSON.stringify({ type: 'memo' }),
-      headers: { 'Content-Type': 'application/json' },
-    }));
-
-    expect(response.status).toBe(400);
-    const body = await response.json();
-    expect(body.error.code).toBe('VALIDATION_FAILED');
+  it('PATCH: markAllRead → {ok:true}', async () => {
+    h.parseBody.mockResolvedValue({ success: true, data: { markAllRead: true } });
+    h.markAllRead.mockResolvedValue(undefined);
+    const res = await PATCH(new Request('http://localhost/api/notifications', { method: 'PATCH', body: '{}' }));
+    expect(res.status).toBe(200);
+    expect(h.markAllRead).toHaveBeenCalledWith('mem-1');
+  });
+  it('PATCH: markRead(id) → {ok:true}', async () => {
+    h.parseBody.mockResolvedValue({ success: true, data: { id: 'n1' } });
+    h.markRead.mockResolvedValue(undefined);
+    const res = await PATCH(new Request('http://localhost/api/notifications', { method: 'PATCH', body: '{}' }));
+    expect(res.status).toBe(200);
+    expect(h.markRead).toHaveBeenCalledWith('n1', 'mem-1');
+  });
+  it('PATCH: neither id nor markAllRead → 400', async () => {
+    h.parseBody.mockResolvedValue({ success: true, data: {} });
+    expect((await PATCH(new Request('http://localhost/api/notifications', { method: 'PATCH', body: '{}' }))).status).toBe(400);
   });
 });

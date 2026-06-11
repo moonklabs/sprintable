@@ -1,135 +1,35 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
-const { createDbServerClient, getAuthContext, createAdminClient } = vi.hoisted(() => ({
-  createDbServerClient: vi.fn(),
-  getAuthContext: vi.fn(),
-  createAdminClient: vi.fn(),
-}));
-
-vi.mock('@/lib/db/server', () => ({ createDbServerClient }));
-vi.mock('@/lib/db/admin', () => ({ createAdminClient }));
+// 837a36c4(Group B b5): proxy 위임 리팩토링 후 stale 재작성 — auth 게이트 → proxyToFastapi → 래핑.
+const { getAuthContext, proxyToFastapi } = vi.hoisted(() => ({ getAuthContext: vi.fn(), proxyToFastapi: vi.fn() }));
 vi.mock('@/lib/auth-helpers', () => ({ getAuthContext }));
+vi.mock('@/lib/fastapi-proxy', () => ({ proxyToFastapi }));
 
 import { GET, POST } from './route';
 
-function makeAgent() {
-  return { id: 'agent-1', type: 'agent', rateLimitExceeded: false, rateLimitRemaining: 299, rateLimitResetAt: 0 };
-}
+const PATH = '/api/v2/retros';
+const agent = () => ({ id: 'a', type: 'agent', rateLimitExceeded: false, rateLimitRemaining: 299, rateLimitResetAt: 0 });
+const okRes = (b: unknown = { ok: 1 }) =>
+  new Response(JSON.stringify(b), { status: 200, headers: { 'content-type': 'application/json' } });
+const req = (m = 'GET') => new Request('http://localhost/api/retro-sessions?project_id=p', { method: m });
 
-function createQueryStub(rows: Record<string, unknown>[] = []) {
-  const q: Record<string, unknown> = {};
-  const chain = () => q;
-  q.select = vi.fn(chain);
-  q.eq = vi.fn(chain);
-  q.order = vi.fn(chain);
-  q.insert = vi.fn(chain);
-  q.single = vi.fn(() => Promise.resolve({ data: rows[0] ?? null, error: rows[0] ? null : { message: 'not found' } }));
-  q.then = Promise.resolve({ data: rows, error: null }).then.bind(Promise.resolve({ data: rows, error: null }));
-  return q;
-}
-
-describe('GET /api/retro-sessions', () => {
-  beforeEach(() => {
-    createDbServerClient.mockReset();
-    getAuthContext.mockReset();
-    createAdminClient.mockReset();
-    getAuthContext.mockResolvedValue(makeAgent());
-  });
-
-  it('returns 401 when not authenticated', async () => {
-    const db = {};
-    createDbServerClient.mockResolvedValue(db);
-    getAuthContext.mockResolvedValue(null);
-
-    const response = await GET(
-      new Request('http://localhost/api/retro-sessions?project_id=project-1'),
-    );
-
-    expect(response.status).toBe(401);
-  });
-
-  it('returns 400 when project_id is missing', async () => {
-    const db = {};
-    createDbServerClient.mockResolvedValue(db);
-    createAdminClient.mockReturnValue(db);
-
-    const response = await GET(
-      new Request('http://localhost/api/retro-sessions'),
-    );
-
-    expect(response.status).toBe(400);
-  });
-
-  it('returns 200 with sessions list', async () => {
-    const sessions = [{ id: 'session-1', project_id: 'project-1', phase: 'collect' }];
-    const db = {
-      from: vi.fn(() => createQueryStub(sessions)),
-    };
-    createDbServerClient.mockResolvedValue(db);
-    createAdminClient.mockReturnValue(db);
-
-    const response = await GET(
-      new Request('http://localhost/api/retro-sessions?project_id=project-1'),
-    );
-
-    expect(response.status).toBe(200);
-    const body = await response.json();
-    expect(body.data).toEqual(sessions);
-  });
-});
-
-describe('POST /api/retro-sessions', () => {
-  beforeEach(() => {
-    createDbServerClient.mockReset();
-    getAuthContext.mockReset();
-    createAdminClient.mockReset();
-    getAuthContext.mockResolvedValue(makeAgent());
-  });
-
-  it('returns 401 when not authenticated', async () => {
-    const db = {};
-    createDbServerClient.mockResolvedValue(db);
-    getAuthContext.mockResolvedValue(null);
-
-    const response = await POST(
-      new Request('http://localhost/api/retro-sessions', { method: 'POST', body: '{}' }),
-    );
-
-    expect(response.status).toBe(401);
-  });
-
-  it('returns 400 when required fields are missing', async () => {
-    const db = {};
-    createDbServerClient.mockResolvedValue(db);
-    createAdminClient.mockReturnValue(db);
-
-    const response = await POST(
-      new Request('http://localhost/api/retro-sessions', {
-        method: 'POST',
-        body: JSON.stringify({ title: 'Sprint Retro' }),
-      }),
-    );
-
-    expect(response.status).toBe(400);
-  });
-
-  it('returns 200 with created session', async () => {
-    const session = { id: 'session-new', project_id: 'project-1', title: 'Sprint Retro', phase: 'collect' };
-    const db = {
-      from: vi.fn(() => createQueryStub([session])),
-    };
-    createDbServerClient.mockResolvedValue(db);
-    createAdminClient.mockReturnValue(db);
-
-    const response = await POST(
-      new Request('http://localhost/api/retro-sessions', {
-        method: 'POST',
-        body: JSON.stringify({ project_id: 'project-1', org_id: 'org-1', title: 'Sprint Retro', created_by: 'member-1' }),
-      }),
-    );
-
-    expect(response.status).toBe(200);
-    const body = await response.json();
-    expect(body.data).toMatchObject({ id: 'session-new' });
-  });
+describe('/api/retro-sessions (proxy 위임)', () => {
+  beforeEach(() => { getAuthContext.mockReset(); proxyToFastapi.mockReset(); getAuthContext.mockResolvedValue(agent()); });
+  for (const [name, fn] of [['GET', GET], ['POST', POST]] as const) {
+    it(`${name}: 401 when unauthenticated`, async () => {
+      getAuthContext.mockResolvedValue(null);
+      expect((await fn(req(name))).status).toBe(401);
+    });
+    it(`${name}: delegates to ${PATH} and wraps`, async () => {
+      proxyToFastapi.mockResolvedValue(okRes());
+      const res = await fn(req(name));
+      expect(res.status).toBe(200);
+      expect(proxyToFastapi).toHaveBeenCalledWith(expect.anything(), PATH);
+      expect((await res.json()).data).toMatchObject({ ok: 1 });
+    });
+    it(`${name}: passes through proxy errors`, async () => {
+      proxyToFastapi.mockResolvedValue(new Response('e', { status: 500 }));
+      expect((await fn(req(name))).status).toBe(500);
+    });
+  }
 });
