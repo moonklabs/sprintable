@@ -52,6 +52,23 @@ def _utcnow() -> datetime:
     return datetime.now(timezone.utc)
 
 
+def _csv_set(raw: str) -> frozenset[str]:
+    return frozenset(x.strip() for x in (raw or "").split(",") if x.strip())
+
+
+def _uuid_set(raw: str) -> frozenset[uuid.UUID]:
+    out: set[uuid.UUID] = set()
+    for x in (raw or "").split(","):
+        x = x.strip()
+        if not x:
+            continue
+        try:
+            out.add(uuid.UUID(x))
+        except ValueError:
+            logger.warning("L2 org allowlist 무효 org_id 무시: %r", x)
+    return frozenset(out)
+
+
 class L2TriggerWorker:
     """L2 휴리스틱 트리거 워커. lifespan startup에서 `asyncio.create_task(worker.run())`."""
 
@@ -72,6 +89,9 @@ class L2TriggerWorker:
         backoff_max: float = 30.0,
         thresholds: HeuristicThresholds | None = None,
         use_advisory_lock: bool | None = None,
+        disabled_types: set[str] | None = None,
+        org_allowlist: set[uuid.UUID] | None = None,
+        max_wakes_per_hour: int | None = None,
     ) -> None:
         self.poll_interval_s = poll_interval_s
         self.deadline_scan_interval_s = deadline_scan_interval_s
@@ -83,6 +103,25 @@ class L2TriggerWorker:
         self.use_advisory_lock = (
             settings.l2_trigger_advisory_lock if use_advisory_lock is None else use_advisory_lock
         )
+        # S8 운영 config(env override 가능).
+        self._disabled_types = (
+            _csv_set(settings.l2_trigger_disabled_types) if disabled_types is None else frozenset(disabled_types)
+        )
+        self._org_allowlist = (
+            _uuid_set(settings.l2_trigger_org_allowlist) if org_allowlist is None else frozenset(org_allowlist)
+        )
+        self._max_wakes_per_hour = (
+            settings.l2_trigger_max_wakes_per_org_per_hour if max_wakes_per_hour is None else max_wakes_per_hour
+        )
+        # S8 관측성 카운터(in-process). run() 루프가 주기적으로 요약 로깅.
+        self.metrics: dict[str, int] = {
+            "fired": 0,
+            "skipped_duplicate": 0,
+            "skipped_disabled": 0,
+            "skipped_allowlist": 0,
+            "skipped_rate_limited": 0,
+            "non_dispatchable": 0,
+        }
         self._lock_conn = None  # 전용 AsyncConnection — advisory lock 보유 동안 유지.
         self._holds_lock = False
 
@@ -112,6 +151,7 @@ class L2TriggerWorker:
                         if now_mono - last_deadline_scan >= self.deadline_scan_interval_s:
                             await self._scan_deadlines(db)
                             last_deadline_scan = now_mono
+                            self._log_metrics()  # AC③: 주기 관측 요약(deadline-scan 케이던스).
 
                     delay = self.backoff_min  # 성공 → backoff 리셋(AC backoff).
                     await asyncio.sleep(self.poll_interval_s)
@@ -174,11 +214,20 @@ class L2TriggerWorker:
         )
         if not signals:
             return []
+        eval_started = time.monotonic()  # AC③: eval latency.
         firings = await self._evaluate_signals(db, signals)
+        logger.debug(
+            "L2 eval batch signals=%d decisions=%d eval_latency=%.3fs",
+            len(signals), len(firings), time.monotonic() - eval_started,
+        )
         await self._dispatch_decisions(db, firings)
         # 처리 중 예외가 났다면 여기 도달 못 함 → cursor 미전진 → 다음 iter 재처리(AC②).
         await self._write_cursor(db, signals[-1].activity_seq)
         return firings
+
+    def _log_metrics(self) -> None:
+        """AC③: in-process 카운터 요약(firing/skip 분해)을 1줄로 관측 로깅."""
+        logger.info("L2 metrics: %s", " ".join(f"{k}={v}" for k, v in self.metrics.items()))
 
     async def _read_cursor(self, db) -> int:
         row = (
@@ -346,18 +395,41 @@ class L2TriggerWorker:
                 )
 
     async def _fire_one(self, db, decision: TriggerDecision, org_id: uuid.UUID) -> None:
+        # AC①: trigger type 비활성화.
+        if decision.trigger_type in self._disabled_types:
+            self.metrics["skipped_disabled"] += 1
+            logger.debug("L2 skip — type disabled: %s", decision.trigger_type)
+            return
+        # AC②: org allowlist(비면 전 org).
+        if self._org_allowlist and org_id not in self._org_allowlist:
+            self.metrics["skipped_allowlist"] += 1
+            logger.debug("L2 skip — org not in allowlist: %s", org_id)
+            return
+        # AC⑤: org 시간당 wake rate limit.
+        if self._max_wakes_per_hour > 0:
+            recent = await self._org_hourly_wake_count(db, org_id)
+            if recent >= self._max_wakes_per_hour:
+                self.metrics["skipped_rate_limited"] += 1
+                logger.warning(
+                    "L2 rate-limit org=%s recent=%d max=%d/h — skip wake",
+                    org_id, recent, self._max_wakes_per_hour,
+                )
+                return
+
         dedup_key = self._dedup_key(decision)
-        # AC①④: dedup insert. 동일 dedup_key를 두 워커가 동시에 넣어도 unique로 1행만 — 패자는
+        # AC①④(S6): dedup insert. 동일 dedup_key를 두 워커가 동시에 넣어도 unique로 1행만 — 패자는
         # ON CONFLICT DO NOTHING으로 0행(RETURNING 없음)이라 dispatch를 호출하지 않는다.
         won = await self._claim_firing(db, decision, org_id, dedup_key)
         if not won:
             await db.rollback()
+            self.metrics["skipped_duplicate"] += 1
             logger.debug("L2 firing dedup conflict — wake skip: %s", dedup_key)
             return
 
         if decision.anchor_type not in _DISPATCHABLE_ANCHORS:
             # firing은 기록(같은 트랜잭션 commit)하되 wake는 미지원 타입이라 skip.
             await db.commit()
+            self.metrics["non_dispatchable"] += 1
             logger.info(
                 "L2 firing recorded (anchor=%s non-dispatchable, wake skip): %s",
                 decision.anchor_type,
@@ -365,10 +437,11 @@ class L2TriggerWorker:
             )
             return
 
-        # AC②③: 승자만 dispatch service 호출 → Event(event_type=dispatched·기존 allow-list 재사용,
-        # 신규 type 0) 생성 + commit + wake. firing은 같은 세션이라 event와 원자 commit.
+        # AC②③(S6): 승자만 dispatch service 호출 → Event(event_type=dispatched·기존 allow-list
+        # 재사용, 신규 type 0) 생성 + commit + wake. firing은 같은 세션이라 event와 원자 commit.
         from app.services.agent_dispatch import dispatch_entity_to_assignee
 
+        wake_started = time.monotonic()
         resp, delivery = await dispatch_entity_to_assignee(
             db,
             org_id,
@@ -388,15 +461,51 @@ class L2TriggerWorker:
         else:
             await db.commit()
 
-        if resp.dispatched and delivery is not None:
-            # CC 릴레이(member webhook) — 라우터의 background_tasks 대신 워커는 직접 await.
-            from app.services.conversation_webhook import deliver_injected_event_webhook
+        if resp.dispatched:
+            self.metrics["fired"] += 1
+            # AC③: wake latency + firing 관측 로그.
+            logger.info(
+                "L2 wake fired type=%s anchor=%s/%s org=%s wake_latency=%.3fs",
+                decision.trigger_type, decision.anchor_type, decision.anchor_id, org_id,
+                time.monotonic() - wake_started,
+            )
+            if delivery is not None:
+                # CC 릴레이(member webhook) — 라우터의 background_tasks 대신 워커는 직접 await.
+                from app.services.conversation_webhook import deliver_injected_event_webhook
 
-            await deliver_injected_event_webhook(**delivery)
+                await deliver_injected_event_webhook(**delivery)
+
+    async def _org_hourly_wake_count(self, db, org_id: uuid.UUID) -> int:
+        """직전 1시간 org firing 수(AC⑤ rate limit 판정). 0117 firings 사용·DB변경 0."""
+        row = (
+            await db.execute(
+                text(
+                    "SELECT count(*) FROM l2_trigger_firings "
+                    "WHERE org_id = :org AND fired_at >= now() - interval '1 hour'"
+                ),
+                {"org": org_id},
+            )
+        ).scalar()
+        return int(row or 0)
 
     async def _claim_firing(
         self, db, decision: TriggerDecision, org_id: uuid.UUID, dedup_key: str
     ) -> bool:
+        # AC④: false-wake 조사용 reason + features 스냅샷을 firing payload에 박제.
+        payload = json.dumps(
+            {
+                "reason": decision.reason,
+                "source": "l2_heuristic",
+                "features": {
+                    "trigger_type": decision.trigger_type,
+                    "anchor_type": decision.anchor_type,
+                    "anchor_id": str(decision.anchor_id),
+                    "target_agent_id": str(decision.target_agent_id),
+                    "source_activity_seq": decision.source_activity_seq,
+                    "evaluated_at": _utcnow().isoformat(),
+                },
+            }
+        )
         res = await db.execute(
             text(
                 "INSERT INTO l2_trigger_firings "
@@ -413,7 +522,7 @@ class L2TriggerWorker:
                 "aid": decision.anchor_id,
                 "dk": dedup_key,
                 "seq": decision.source_activity_seq,
-                "payload": json.dumps({"reason": decision.reason, "source": "l2_heuristic"}),
+                "payload": payload,
             },
         )
         return res.first() is not None

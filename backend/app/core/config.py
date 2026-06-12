@@ -61,6 +61,10 @@ class Settings(BaseSettings):
     # advisory_lock=on이면 멀티인스턴스 중 pg_try_advisory_lock holder 1개만 poll/evaluate.
     l2_trigger_enabled: bool = False
     l2_trigger_advisory_lock: bool = False
+    # S8 운영 config(안전 rollout). 모두 기본값=무제약/무필터.
+    l2_trigger_disabled_types: str = ""  # CSV — 비활성화할 trigger_type(예 "velocity_spike,scope_creep")
+    l2_trigger_org_allowlist: str = ""  # CSV org_id — 비면 전 org, 지정 시 해당 org만 발사
+    l2_trigger_max_wakes_per_org_per_hour: int = 0  # >0이면 org 시간당 wake 상한(초과 skip), 0=무제한
 
     # E-MEMBER-SSOT AC2-3: 신원 해소를 anchor(members+member_identity_aliases) 기반으로 전환하는
     # shadow 플래그. off(기본)=레거시 resolver(org_members/team_members). on=anchor resolver.
