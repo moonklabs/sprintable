@@ -272,3 +272,52 @@ async def test_new_contributor_no_self_bootstrap_real_db():
         async with engine.begin() as conn:
             await conn.run_sync(Base.metadata.drop_all)
         await engine.dispose()
+
+
+# ── H1-FIX-1: evaluate가 decision 메타를 gate row에 영속화 ────────────────────────
+
+@pytest.mark.anyio
+async def test_evaluate_persists_decision_metadata_on_gate():
+    """dogfood 버그 회귀: ask_human 게이트의 S3 evidence 메타가 gate row에 write-back돼야
+    (이전엔 리턴엔 있으나 영속화 0 → FE가 null 읽어 GateInbox 액션 미노출)."""
+    gate = SimpleNamespace(
+        id=uuid.uuid4(), status="pending",
+        requires_human=False, evidence_status=None, decision_basis=None, auto_decision_reason=None,
+    )
+    part = SimpleNamespace(member_id=uuid.uuid4(), role_id=uuid.uuid4())
+    with patch("app.services.merge_verdict_gate.resolve_implementation_participation",
+               AsyncMock(return_value=part)), \
+         patch("app.services.merge_verdict_gate._role_key", AsyncMock(return_value="implementation")), \
+         patch("app.services.merge_verdict_gate.capture_pr_ci_verdict",
+               AsyncMock(return_value={"recorded": [], "skipped_reason": "x"})), \
+         patch("app.services.merge_verdict_gate.compute_member_trust_scores",
+               AsyncMock(return_value={"scores": []})), \
+         patch("app.services.merge_verdict_gate.create_gate", AsyncMock(return_value=gate)):
+        res = await evaluate_merge_gate(
+            AsyncMock(), uuid.uuid4(), uuid.uuid4(),
+            pr_number=1, repo="o/r", ci_result="pass", pr_result="pass",
+        )
+    assert res.decision == ASK_HUMAN  # trust None(pending) → ask_human.
+    # 메타가 decision과 일치하게 gate row에 영속화(write-back).
+    assert gate.requires_human is True
+    assert gate.evidence_status == "insufficient"
+    assert gate.decision_basis == res.reason
+    assert gate.auto_decision_reason == ASK_HUMAN
+
+
+@pytest.mark.anyio
+async def test_evaluate_auto_merge_metadata_sufficient():
+    gate = SimpleNamespace(id=uuid.uuid4(), status="auto_passed",
+                           requires_human=True, evidence_status=None, decision_basis=None, auto_decision_reason=None)
+    part = SimpleNamespace(member_id=uuid.uuid4(), role_id=uuid.uuid4())
+    with patch("app.services.merge_verdict_gate.resolve_implementation_participation", AsyncMock(return_value=part)), \
+         patch("app.services.merge_verdict_gate._role_key", AsyncMock(return_value="implementation")), \
+         patch("app.services.merge_verdict_gate.capture_pr_ci_verdict", AsyncMock(return_value={"recorded": ["pr"], "skipped_reason": None})), \
+         patch("app.services.merge_verdict_gate.compute_member_trust_scores",
+               AsyncMock(return_value={"scores": [{"role_key": "implementation", "clean_pass_rate": 0.95}]})), \
+         patch("app.services.merge_verdict_gate.create_gate", AsyncMock(return_value=gate)):
+        res = await evaluate_merge_gate(AsyncMock(), uuid.uuid4(), uuid.uuid4(),
+                                        pr_number=1, repo="o/r", ci_result="pass", pr_result="pass")
+    assert res.decision == AUTO_MERGE
+    assert gate.requires_human is False and gate.evidence_status == "sufficient"
+    assert gate.auto_decision_reason == AUTO_MERGE

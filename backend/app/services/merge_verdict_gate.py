@@ -41,6 +41,15 @@ BLOCK = "block"
 _STATUS_TO_DISPOSITION = {"auto_passed": "allow_auto", "pending": "ask", "rejected": "deny"}
 
 
+def _evidence_status(decision: str) -> str:
+    """decision → gate.evidence_status(S3 evidence 메타)."""
+    if decision == AUTO_MERGE:
+        return "sufficient"
+    if decision == BLOCK:
+        return "blocked"
+    return "insufficient"
+
+
 def _gate_org_allowlist() -> frozenset[uuid.UUID]:
     out: set[uuid.UUID] = set()
     for x in (settings.h1_merge_gate_org_allowlist or "").split(","):
@@ -212,6 +221,15 @@ async def evaluate_merge_gate(
         threshold=trust_threshold,
         self_report_only=self_report_only,
     )
+    # H1-FIX-1: decision 메타(S3 evidence 컬럼)를 gate row에 write-back — 모든 호출자(S4 report-done·
+    # S5 board preflight)가 영속화한다. 재평가 시 동일 키로 멱등 갱신. (이전엔 MergeGateDecision 리턴엔
+    # 있으나 gate row 영속화 0 → FE S8이 null을 읽어 GateInbox 액션 미노출 = dogfood 적발 버그.)
+    gate.requires_human = decision != AUTO_MERGE
+    gate.evidence_status = _evidence_status(decision)
+    gate.decision_basis = reason
+    gate.auto_decision_reason = decision
+    await session.flush()
+
     logger.info(
         "merge gate story=%s decision=%s (%s) gate_status=%s trust=%s",
         story_id, decision, reason, gate.status, trust,

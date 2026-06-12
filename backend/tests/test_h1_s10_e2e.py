@@ -111,6 +111,15 @@ async def test_h1_end_to_end_ready_to_done():
             )).scalar()
             assert merge_gates == 1, f"merge gate 정확히 1개여야(멱등), got {merge_gates}"
 
+            # H1-FIX-1: gate row의 S3 evidence 메타가 decision으로 채워져야(영속화·FE S8이 읽음).
+            meta = (await s.execute(
+                _text("SELECT requires_human, evidence_status, decision_basis, auto_decision_reason "
+                      "FROM gate WHERE work_item_id=:sid AND gate_type='merge'"), {"sid": story_id}
+            )).one()
+            assert meta.requires_human is True, "ask_human 게이트는 requires_human=true여야(액션 노출)"
+            assert meta.evidence_status == "insufficient"
+            assert meta.decision_basis is not None and meta.auto_decision_reason == "ask_human"
+
             done_status = (await s.execute(
                 _text("SELECT status FROM stories WHERE id=:id"), {"id": story_id}
             )).scalar()
