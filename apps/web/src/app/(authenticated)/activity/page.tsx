@@ -45,7 +45,7 @@ export default function ActivityPage() {
           >
             {t(labelKey)}
             {tab === value ? (
-              <span className="absolute inset-x-2 -bottom-px h-0.5 rounded-full bg-primary" />
+              <span className="absolute inset-x-2 -bottom-px h-0.5 rounded-full bg-foreground" />
             ) : null}
           </button>
         ))}
