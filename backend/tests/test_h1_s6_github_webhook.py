@@ -167,3 +167,36 @@ async def test_duplicate_webhook_calls_capture_each_time():
         await _post(payload, event="pull_request")
         await _post(payload, event="pull_request")
     assert cap.await_count == 2  # 두 번 호출되나 record_verdict가 upsert로 1 verdict 유지.
+
+
+# ── SID 브랜치 링킹 견고성(CI 이벤트 — PR title 없는 경우) ──────────────────────
+
+def test_parse_story_id_branch_safe_formats():
+    from app.services.verdict_capture import parse_story_id
+
+    sid = uuid.uuid4()
+    assert parse_story_id(f"feat [SID:{sid}]") == sid       # PR 제목(콜론).
+    assert parse_story_id(f"feat/h1-sid-{sid}") == sid      # 브랜치 sid-uuid.
+    assert parse_story_id(f"sid/{sid}") == sid              # 브랜치 sid/uuid.
+    assert parse_story_id(f"feat/h1-sid_{sid}") == sid      # sid_uuid.
+    assert parse_story_id("feat/h1-fix-3") is None          # 태그 없으면 None.
+
+
+def test_candidate_texts_status_branches():
+    sid = uuid.uuid4()
+    texts = _candidate_texts({"state": "success", "branches": [{"name": f"feat/h1-sid-{sid}"}]})
+    assert f"feat/h1-sid-{sid}" in texts  # status는 branches[].name로 브랜치 노출.
+
+
+@pytest.mark.anyio
+async def test_workflow_run_branch_sid_links_capture():
+    """CI 이벤트(workflow_run)는 PR title 없이 head_branch의 sid-<uuid>로 verdict 연결."""
+    sid = STORY_ID
+    payload = {"repository": {"full_name": "o/r"},
+               "workflow_run": {"conclusion": "failure", "head_branch": f"feat/h1-sid-{sid}", "pull_requests": []}}
+    with patch.object(mod, "capture_pr_ci_verdict",
+                      new=AsyncMock(return_value={"recorded": ["ci"], "skipped_reason": None})) as cap:
+        resp = await _post(payload, event="workflow_run")
+    assert resp.status_code == 200
+    kw = cap.await_args.kwargs
+    assert kw["story_id"] == sid and kw["ci_result"] == "failure"  # 브랜치 SID로 링킹 성공.

@@ -179,7 +179,10 @@ def _candidate_texts(payload: dict) -> list[str]:
         texts.append(node.get("head_branch") or "")
         for p in node.get("pull_requests") or []:
             texts.append((p.get("head") or {}).get("ref") or "")
-    texts.append(payload.get("ref") or "")  # status/push
+    texts.append(payload.get("ref") or "")  # push
+    # status 이벤트는 ref 대신 branches[].name으로 브랜치를 싣는다.
+    for b in payload.get("branches") or []:
+        texts.append(b.get("name") or "")
     return [t for t in texts if t]
 
 
