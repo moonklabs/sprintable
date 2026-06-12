@@ -3,8 +3,8 @@
 import { useEffect, useState } from 'react';
 import { useTranslations } from 'next-intl';
 import { CheckCircle, XCircle } from 'lucide-react';
-import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
+import { GateEvidence, gateNeedsAction, gateDecision } from '@/components/cage/gate-evidence';
 import type { GateItem } from '@/components/kanban/types';
 
 interface GateInboxProps {
@@ -82,38 +82,45 @@ export function GateInbox({ memberId }: GateInboxProps) {
         </div>
       ) : (
         gates.map((gate) => (
-          <div key={gate.id} className="flex items-center justify-between gap-3 rounded-xl border border-border bg-card px-4 py-3">
-            <div className="min-w-0 space-y-1">
+          <div key={gate.id} className="flex items-start justify-between gap-3 rounded-xl border border-border bg-card px-4 py-3">
+            <div className="min-w-0 flex-1 space-y-1">
               <div className="flex items-center gap-2">
-                <Badge variant="info" className="shrink-0">
-                  <span className="mr-1">⏸</span>{gate.gate_type}
-                </Badge>
+                <span className="shrink-0 text-xs font-medium text-foreground">{gate.gate_type}</span>
                 <span className="truncate text-xs text-muted-foreground">#{gate.work_item_id.slice(0, 6)}</span>
+                <span className="shrink-0 text-[10px] text-muted-foreground/70">{new Date(gate.created_at).toLocaleDateString()}</span>
               </div>
-              <p className="text-[10px] text-muted-foreground">{new Date(gate.created_at).toLocaleDateString()}</p>
+              {/* H1-S8: decision 배지 + CI/신뢰도 facts + 사유(read-only evidence) */}
+              <GateEvidence gate={gate} className="mt-1" />
             </div>
-            <div className="flex shrink-0 items-center gap-1.5">
-              <Button
-                size="sm"
-                variant="ghost"
-                className="h-7 gap-1 text-success hover:bg-success-tint hover:text-success"
-                disabled={resolving === gate.id}
-                onClick={() => void handleApprove(gate.id)}
-              >
-                <CheckCircle className="size-3.5" />
-                {t('gateApprove')}
-              </Button>
-              <Button
-                size="sm"
-                variant="ghost"
-                className="h-7 gap-1 text-muted-foreground hover:bg-destructive/10 hover:text-destructive"
-                disabled={resolving === gate.id}
-                onClick={() => setRejectModal({ gateId: gate.id, note: '' })}
-              >
-                <XCircle className="size-3.5" />
-                {t('gateReject')}
-              </Button>
-            </div>
+            {/* 액션 = requires_human 기준(block 제외·읽기전용·AC⑤). 미충족 게이트는 표시만. */}
+            {gateNeedsAction(gate) ? (
+              <div className="flex shrink-0 items-center gap-1.5">
+                <Button
+                  size="sm"
+                  variant="ghost"
+                  className="h-7 gap-1 text-success hover:bg-success-tint hover:text-success"
+                  disabled={resolving === gate.id}
+                  onClick={() => void handleApprove(gate.id)}
+                >
+                  <CheckCircle className="size-3.5" />
+                  {t('gateApprove')}
+                </Button>
+                <Button
+                  size="sm"
+                  variant="ghost"
+                  className="h-7 gap-1 text-muted-foreground hover:bg-destructive/10 hover:text-destructive"
+                  disabled={resolving === gate.id}
+                  onClick={() => setRejectModal({ gateId: gate.id, note: '' })}
+                >
+                  <XCircle className="size-3.5" />
+                  {t('gateReject')}
+                </Button>
+              </div>
+            ) : (
+              <span className="shrink-0 self-center text-[11px] text-muted-foreground">
+                {gateDecision(gate) === 'block' ? t('gateReadonlyBlock') : t('gateReadonlyAuto')}
+              </span>
+            )}
           </div>
         ))
       )}

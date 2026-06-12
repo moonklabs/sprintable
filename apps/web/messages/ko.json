@@ -2587,6 +2587,20 @@
     "corrections": "정정",
     "correctionRounds": "정정 {count}회",
     "byRole": "역할별",
-    "gateTabLabel": "게이트"
+    "gateTabLabel": "게이트",
+    "decisionAutoMerge": "자동 통과",
+    "decisionAskHuman": "확인 필요",
+    "decisionBlock": "차단됨",
+    "ciLabel": "CI",
+    "ciPass": "통과",
+    "ciFail": "실패",
+    "ciUnknown": "알 수 없음",
+    "trustLabel": "신뢰도",
+    "trustScorePercent": "{score}%",
+    "selfReportTag": "자기보고",
+    "reasonLabel": "사유",
+    "gateReadonlyBlock": "자동 차단 · 읽기 전용",
+    "gateReadonlyAuto": "자동 통과 · 액션 불필요",
+    "mergeGateTitle": "머지 게이트"
   }
 }
