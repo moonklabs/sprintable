@@ -114,9 +114,30 @@ async def transition_gate(
     # H1-S7: 사람 게이트 해소(approve/reject)를 verdict로 기록 — trust로 환류.
     await _record_gate_review_verdict(session, org_id, gate, new_status, resolver_id)
 
+    # H1-FIX-2: merge 게이트 approve → work item 스토리를 done으로 진행(_preflight 재평가 우회).
+    # S7은 verdict만 기록하고 →done 진행을 안 박아, 사람이 approve해도 일이 done에 도달 못 하고
+    # done 재시도 시 재평가→ask_human 재발로 막히던 dogfood 갭을 닫는다.
+    await _advance_story_on_merge_approve(session, gate, new_status)
+
     await session.flush()
     await session.refresh(gate)
     return gate
+
+
+async def _advance_story_on_merge_approve(session: AsyncSession, gate: Gate, new_status: str) -> None:
+    """merge 게이트 approve 시 work_item 스토리를 done으로 진행(H1-FIX-2).
+
+    사람이 이미 approve했으므로 done PATCH의 _preflight 재평가를 우회해 직접 전이한다. reject나
+    비-merge 게이트는 진행하지 않는다(reject→in-review 유지). 이미 done이면 no-op(멱등).
+    """
+    if gate.gate_type != "merge" or gate.work_item_type != "story" or new_status != "approved":
+        return
+    from app.models.pm import Story  # 순환 회피 lazy import.
+
+    story = await session.get(Story, gate.work_item_id)
+    if story is not None and story.status != "done":
+        story.status = "done"
+        await session.flush()
 
 
 # gate_type → verdict source (qa→qa·merge→merge·deploy→design·pr_review→pr).
