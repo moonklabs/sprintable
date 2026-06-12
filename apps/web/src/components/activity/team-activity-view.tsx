@@ -398,11 +398,11 @@ export function TeamActivityView({ projectId }: { projectId: string }) {
                 );
               })}
               {hasMore ? (
-                <div className="pt-3 text-center">
+                <li className="pt-3 text-center">
                   <Button variant="glass" size="sm" onClick={() => void loadMore()} disabled={loadingMore}>
                     {loadingMore ? tc('loading') : t('loadMore')}
                   </Button>
-                </div>
+                </li>
               ) : null}
             </ul>
           )}

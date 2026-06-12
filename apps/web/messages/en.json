@@ -2505,7 +2505,8 @@
     "emptyDesc": "Adjust the filters, or it accumulates here as the team acts.",
     "forbiddenTitle": "Access restricted",
     "forbiddenDescription": "You do not have permission to view team activity.",
-    "reload": "Reload"
+    "reload": "Reload",
+    "noProject": "No project selected."
   },
   "activityTimeline": {
     "title": "Recent Activity",

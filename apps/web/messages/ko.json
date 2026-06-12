@@ -2505,7 +2505,8 @@
     "emptyDesc": "필터를 바꾸거나, 팀이 행동하면 여기에 정규화되어 쌓입니다.",
     "forbiddenTitle": "접근 제한",
     "forbiddenDescription": "팀 활동을 조회할 권한이 없습니다.",
-    "reload": "다시 시도"
+    "reload": "다시 시도",
+    "noProject": "프로젝트를 선택해 주세요."
   },
   "activityTimeline": {
     "title": "최근 활동",
