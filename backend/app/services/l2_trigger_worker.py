@@ -44,6 +44,9 @@ logger = logging.getLogger(__name__)
 # wake는 skip한다(해당 타입 dispatch 경로는 후속 확장).
 _DISPATCHABLE_ANCHORS = frozenset({"epic", "story", "doc"})
 
+# Phase 1 활동-구동 트리거 대상 verb(status_changed→담당자 wake). 확장 시 여기에 추가.
+_ACTIVITY_TRIGGER_VERBS = frozenset({"status_changed"})
+
 
 def _utcnow() -> datetime:
     return datetime.now(timezone.utc)
@@ -209,12 +212,41 @@ class L2TriggerWorker:
         await db.commit()
 
     async def _evaluate_signals(self, db, signals) -> list[tuple[TriggerDecision, uuid.UUID]]:
-        """활동-구동 평가 seam → (decision, org_id) 페어 리스트.
+        """활동-구동 평가 → (decision, org_id) 페어 리스트.
 
-        활동별 엔티티 상태 fetch + drought/velocity 평가는 후속(S7 E2E·확장)에서 채운다 — S6는
-        주기 deadline 스캔으로 실 발사 경로를 확정하고, cursor 머신러리는 빈 배치로도 검증된다."""
-        _ = (db, signals)
-        return []
+        Phase 1 활동 트리거: dispatchable 엔티티(epic/story/doc)의 `status_changed` 활동은 해당
+        엔티티 assignee를 wake한다(dispatch service가 동일 assignee를 재해소). dedup_key가
+        source_activity_seq를 포함하므로 같은 활동 재처리는 추가 wake 0(S6 dedup).
+        """
+        out: list[tuple[TriggerDecision, uuid.UUID]] = []
+        for s in signals:
+            if s.verb not in _ACTIVITY_TRIGGER_VERBS:
+                continue
+            if s.object_type not in _DISPATCHABLE_ANCHORS or s.object_id is None:
+                continue
+            from app.services.agent_dispatch import _fetch_entity
+
+            assignee_id, _title, _desc, _proj = await _fetch_entity(
+                db, s.object_type, s.object_id, s.org_id
+            )
+            if not assignee_id:
+                continue  # 담당자 없으면 wake 대상 없음.
+            new_status = (s.payload or {}).get("to") or (s.payload or {}).get("status")
+            reason = f"{s.object_type} 상태 변경" + (f" → {new_status}" if new_status else "")
+            out.append(
+                (
+                    TriggerDecision(
+                        trigger_type="status_changed",
+                        target_agent_id=assignee_id,
+                        anchor_type=s.object_type,
+                        anchor_id=s.object_id,
+                        reason=reason,
+                        source_activity_seq=s.activity_seq,
+                    ),
+                    s.org_id,
+                )
+            )
+        return out
 
     # ── 주기 데드라인 스캔 (시간-구동·활동 무관) ──────────────────────────────────
     async def _scan_deadlines(self, db) -> list:
