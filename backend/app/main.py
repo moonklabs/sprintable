@@ -21,20 +21,35 @@ async def lifespan(app: FastAPI):
     from app.core.database import engine
     from app.services.pg_pubsub import listen_loop
     task = asyncio.create_task(listen_loop())
+    # E-L2 S5: 휴리스틱 트리거 워커는 default-off — 명시 활성화 시에만 task 생성(AC①).
+    l2_task = None
+    if settings.l2_trigger_enabled:
+        from app.services.l2_trigger_worker import L2TriggerWorker
+
+        l2_task = asyncio.create_task(L2TriggerWorker().run())
     try:
         yield
     finally:
         task.cancel()
+        if l2_task is not None:
+            l2_task.cancel()
         try:
-            await task
-        except asyncio.CancelledError:
-            pass
+            try:
+                await task
+            except asyncio.CancelledError:
+                pass
+            if l2_task is not None:
+                try:
+                    await l2_task
+                except asyncio.CancelledError:
+                    pass
         finally:
             # 좀비 연결 박멸(S:33e0c681): SIGTERM(Cloud Run 인스턴스 교체·스케일다운·리비전 삭제)
             # 시 SQLAlchemy 풀의 전 DB 연결을 정상 종료. dispose 누락 시 구 인스턴스가 연결을 안
             # 놓아 좀비 누적 → prod 100 cap 초과 → TooManyConnections(전 엔드포인트 500). lifespan
             # shutdown 은 in-flight 요청 drain 이후 실행되므로 dispose 순서 안전(AC3). pg_pubsub
-            # raw 커넥션은 task.cancel→listen_loop finally 에서 이미 close.
+            # raw 커넥션은 task.cancel→listen_loop finally 에서 이미 close. L2 워커는
+            # l2_task.cancel→run finally 에서 advisory lock 해제·전용 커넥션 close.
             await engine.dispose()
 
 
