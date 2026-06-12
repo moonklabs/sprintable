@@ -196,11 +196,11 @@ async def test_dispatch_grant_only_human_assignee_dispatched():
             id=assignee_id, user_id=uuid.uuid4(), name="grant휴먼",
             type="human", role="member", org_id=org_id,
         )
-        with patch("app.routers.dispatch._fetch_entity",
+        with patch("app.services.agent_dispatch._fetch_entity",
                    new=AsyncMock(return_value=(assignee_id, "에픽 제목", "설명", project_id))), \
-             patch("app.routers.dispatch.resolve_member_identity",
+             patch("app.services.agent_dispatch.resolve_member_identity",
                    new=AsyncMock(return_value=assignee_member)), \
-             patch("app.routers.dispatch.dispatch_notification", new=AsyncMock()):
+             patch("app.services.agent_dispatch.dispatch_notification", new=AsyncMock()):
             async with client as c:
                 resp = await c.post("/api/v2/dispatch", json={
                     "entity_type": "epic",
@@ -228,9 +228,9 @@ async def test_dispatch_assignee_not_in_org_not_dispatched():
 
     client, app = await _dispatch_client(session, org_id)
     try:
-        with patch("app.routers.dispatch._fetch_entity",
+        with patch("app.services.agent_dispatch._fetch_entity",
                    new=AsyncMock(return_value=(assignee_id, "제목", "설명", project_id))), \
-             patch("app.routers.dispatch.resolve_member_identity",
+             patch("app.services.agent_dispatch.resolve_member_identity",
                    new=AsyncMock(return_value=None)):
             async with client as c:
                 resp = await c.post("/api/v2/dispatch", json={

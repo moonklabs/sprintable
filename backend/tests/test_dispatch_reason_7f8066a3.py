@@ -54,7 +54,7 @@ async def test_dispatch_no_assignee_reason():
     session = AsyncMock()
     client, app = await _client(session)
     try:
-        with patch("app.routers.dispatch._fetch_entity", new_callable=AsyncMock) as mfetch:
+        with patch("app.services.agent_dispatch._fetch_entity", new_callable=AsyncMock) as mfetch:
             mfetch.return_value = (None, "Story T", "desc", PROJECT_ID)  # assignee_id=None
             async with client as c:
                 resp = await c.post("/api/v2/dispatch", json=_body())
@@ -73,8 +73,8 @@ async def test_dispatch_unresolved_assignee_reason():
     client, app = await _client(session)
     aid = uuid.uuid4()
     try:
-        with patch("app.routers.dispatch._fetch_entity", new_callable=AsyncMock) as mfetch, \
-             patch("app.routers.dispatch.resolve_member_identity", new_callable=AsyncMock) as mresolve:
+        with patch("app.services.agent_dispatch._fetch_entity", new_callable=AsyncMock) as mfetch, \
+             patch("app.services.agent_dispatch.resolve_member_identity", new_callable=AsyncMock) as mresolve:
             mfetch.return_value = (aid, "Story T", "desc", PROJECT_ID)
             mresolve.return_value = None  # 해소 실패
             async with client as c:
@@ -104,9 +104,9 @@ async def test_dispatch_success_reason_ok():
     member = MagicMock()
     member.type = "human"
     try:
-        with patch("app.routers.dispatch._fetch_entity", new_callable=AsyncMock) as mfetch, \
-             patch("app.routers.dispatch.resolve_member_identity", new_callable=AsyncMock) as mresolve, \
-             patch("app.routers.dispatch.dispatch_notification", new_callable=AsyncMock) as mnotif, \
+        with patch("app.services.agent_dispatch._fetch_entity", new_callable=AsyncMock) as mfetch, \
+             patch("app.services.agent_dispatch.resolve_member_identity", new_callable=AsyncMock) as mresolve, \
+             patch("app.services.agent_dispatch.dispatch_notification", new_callable=AsyncMock) as mnotif, \
              patch("app.services.hypothesis.resolve_dispatch_anchor", new_callable=AsyncMock) as manchor:
             mfetch.return_value = (aid, "Story T", "desc", PROJECT_ID)
             mresolve.return_value = member
