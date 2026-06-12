@@ -155,7 +155,9 @@ async def test_dev_to_review():
 
 @pytest.mark.anyio
 async def test_merge_to_done():
-    """merge 완료 → 스토리 done 전환, 메모 없음."""
+    """H1-S4: merge 완료 + 게이트 auto_merge → 스토리 done 전환(게이트 통과 시에만)."""
+    from app.services.merge_verdict_gate import AUTO_MERGE, MergeGateDecision
+
     client, session, app = await _client()
     try:
         story = _mock_story(status="in-review")
@@ -163,22 +165,26 @@ async def test_merge_to_done():
         mock_result.scalar_one_or_none.return_value = story
         session.execute = AsyncMock(return_value=mock_result)
 
-        with patch("app.repositories.story.StoryRepository.update", new_callable=AsyncMock) as mock_update:
+        auto = MergeGateDecision(
+            decision=AUTO_MERGE, reason="ok", gate_id=uuid.uuid4(),
+            gate_status="auto_passed", disposition="allow_auto", trust=0.9, ci_result="pass",
+        )
+        with patch("app.repositories.story.StoryRepository.update", new_callable=AsyncMock) as mock_update, \
+             patch("app.routers.workflow_report.evaluate_merge_gate", new=AsyncMock(return_value=auto)), \
+             patch("app.routers.workflow_report._record_gate_evidence", new=AsyncMock()):
             mock_update.return_value = story
-
             async with client as c:
                 resp = await c.post("/api/v2/workflow/report-done", json={
                     "story_id": str(STORY_ID),
                     "stage": "merge",
                     "agent_id": str(AGENT_ID),
+                    "context": {"pr_number": 12, "repo": "o/r", "ci_result": "pass", "pr_result": "pass"},
                 })
 
         assert resp.status_code == 200
         data = resp.json()
-        assert data["completed_stage"] == "merge"
-        assert data["next_stage"] == "done"
-        assert data["story_status"] == "done"
-        assert data["memo_id"] is None
+        assert data["completed_stage"] == "merge" and data["next_stage"] == "done"
+        assert data["story_status"] == "done" and data["gate_decision"] == "auto_merge"
         mock_update.assert_called_once()
     finally:
         app.dependency_overrides.clear()
@@ -210,9 +216,14 @@ async def test_context_field_accepted():
 
 @pytest.mark.anyio
 async def test_all_valid_stages():
-    """모든 유효 stage가 400 없이 처리된다."""
+    """모든 유효 stage가 400 없이 처리된다(merge는 게이트 auto_merge로 200)."""
     from app.routers.workflow_report import _VALID_STAGES
+    from app.services.merge_verdict_gate import AUTO_MERGE, MergeGateDecision
 
+    auto = MergeGateDecision(
+        decision=AUTO_MERGE, reason="ok", gate_id=None,
+        gate_status="auto_passed", disposition="allow_auto", trust=0.9, ci_result="pass",
+    )
     for stage in _VALID_STAGES:
         client, session, app = await _client()
         try:
@@ -221,7 +232,8 @@ async def test_all_valid_stages():
             mock_result.scalar_one_or_none.return_value = story
             session.execute = AsyncMock(return_value=mock_result)
 
-            with patch("app.repositories.story.StoryRepository.update", new_callable=AsyncMock, return_value=story):
+            with patch("app.repositories.story.StoryRepository.update", new_callable=AsyncMock, return_value=story), \
+                 patch("app.routers.workflow_report.evaluate_merge_gate", new=AsyncMock(return_value=auto)):
                 async with client as c:
                     resp = await c.post("/api/v2/workflow/report-done", json={
                         "story_id": str(STORY_ID),
