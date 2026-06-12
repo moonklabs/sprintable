@@ -35,6 +35,11 @@ export interface GateItem {
   resolved_at: string | null;
   resolution_note: string | null;
   neutral_facts: Record<string, unknown> | null;
+  // H1-S3 머지 verdict 게이트 evidence(GateResponse·additive·하위호환 default). null≠0(AC③).
+  requires_human?: boolean;
+  evidence_status?: string | null; // sufficient | blocked | insufficient
+  decision_basis?: string | null; // 사람 reason
+  auto_decision_reason?: string | null; // auto_merge | ask_human | block (raw decision)
   created_at: string;
   updated_at: string;
 }

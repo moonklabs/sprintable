@@ -2587,6 +2587,20 @@
     "corrections": "Rounds",
     "correctionRounds": "{count} correction(s)",
     "byRole": "By Role",
-    "gateTabLabel": "Gates"
+    "gateTabLabel": "Gates",
+    "decisionAutoMerge": "Auto-passed",
+    "decisionAskHuman": "Review needed",
+    "decisionBlock": "Blocked",
+    "ciLabel": "CI",
+    "ciPass": "Passed",
+    "ciFail": "Failed",
+    "ciUnknown": "Unknown",
+    "trustLabel": "Trust",
+    "trustScorePercent": "{score}%",
+    "selfReportTag": "Self-reported",
+    "reasonLabel": "Reason",
+    "gateReadonlyBlock": "Auto-blocked · read-only",
+    "gateReadonlyAuto": "Auto-passed · no action needed",
+    "mergeGateTitle": "Merge gate"
   }
 }

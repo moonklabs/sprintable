@@ -16,6 +16,7 @@ import { LabelChip, LABEL_PRESET_COLORS, type LabelData } from '@/components/ui/
 import { DependencyGraph } from './dependency-graph';
 import { OutcomeResultCard, type OutcomeResult } from '@/components/outcome/outcome-result-card';
 import { StoryHypothesesSection } from '@/components/hypotheses/story-hypotheses-section';
+import { StoryMergeGate } from '@/components/cage/story-merge-gate';
 import { EntityDispatchPanel } from '@/components/dispatch/entity-dispatch-panel';
 import { Button } from '@/components/ui/button';
 import { StatusBadge } from '@/components/ui/status-badge';
@@ -1221,6 +1222,8 @@ export function StoryDetailPanel({ story, tasks, nextTasksCursor = null, loading
                   projectId={projectId}
                 />
               ) : null}
+              {/* H1-S8 surface②: 머지 게이트 evidence(read-only·gate 있을 때만 노출) */}
+              <StoryMergeGate storyId={story.id} />
             </div>
 
             {/* Tabs for Tasks, Comments, Activity */}
