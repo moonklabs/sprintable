@@ -57,6 +57,11 @@ class Settings(BaseSettings):
     # E-EVENTBUS: dev=true, prod=false (기존 웹훅 병행 운영)
     eventbus_enabled: bool = False
 
+    # E-L2 휴리스틱 트리거 워커. default-off — 명시 활성화 전엔 lifespan task 미생성(무동작).
+    # advisory_lock=on이면 멀티인스턴스 중 pg_try_advisory_lock holder 1개만 poll/evaluate.
+    l2_trigger_enabled: bool = False
+    l2_trigger_advisory_lock: bool = False
+
     # E-MEMBER-SSOT AC2-3: 신원 해소를 anchor(members+member_identity_aliases) 기반으로 전환하는
     # shadow 플래그. off(기본)=레거시 resolver(org_members/team_members). on=anchor resolver.
     # 라이브 cutover는 AC3-1 — 여기선 shadow(parity 검증용), 기본 off라 실 read 경로 무변경.
