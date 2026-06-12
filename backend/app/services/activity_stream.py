@@ -10,6 +10,7 @@ import hashlib
 import json
 import logging
 import uuid
+from datetime import datetime
 
 from sqlalchemy import select, text, tuple_
 from sqlalchemy.dialects.postgresql import insert as pg_insert
@@ -298,3 +299,112 @@ async def latest_activity_for_object(
         .limit(1)
     )
     return (await db.execute(query)).scalars().first()
+
+
+# ── H1-S1: L1 evidence read helper (verdict gate 소비·블루프린트 H1 §S1) ──────────
+#
+# 소스=activity_events(L1 canonical evidence·"evidence=L1 활동그래프" SSOT). activity_logs
+# (레거시 audit)는 evidence 레이어가 아니다. object_type/object_id로 스코프해 verdict gate가
+# "이 object에서 무슨 작업 활동이 있었나"를 증거로 읽는다. DB 신설 0(activity_events 재사용).
+# L2의 poll_activities_after_seq/latest_activity_for_object(전 org seq cursor)와는 다른 용도라
+# 별도 이름으로 신설한다(동명 재정의 시 L2 파손).
+
+
+async def _resolve_actor_types(
+    db: AsyncSession, actor_ids: set[uuid.UUID | None]
+) -> dict[uuid.UUID, str]:
+    """actor_id → actor_type(human|agent) 맵을 배치 1쿼리로 해소(N+1 회피).
+
+    activity_events엔 actor_type 컬럼이 없어(actor_id만) 멤버 해소로 보강한다. 해소 실패한
+    actor_id는 맵에서 빠진다(→ evidence dict의 actor_type=None).
+    """
+    ids = {a for a in actor_ids if a is not None}
+    if not ids:
+        return {}
+    from app.services.member_resolver import lookup_members_by_ids
+
+    members = await lookup_members_by_ids(ids, db)
+    return {aid: m.type for aid, m in members.items()}
+
+
+def _evidence_dict(row: ActivityEvent, actor_type: str | None) -> dict:
+    """ActivityEvent 1행 → 정규화 evidence dict(AC① 반환 계약)."""
+    return {
+        "activity_id": row.activity_id,
+        "activity_seq": row.activity_seq,
+        "actor_id": row.actor_id,
+        "actor_type": actor_type,
+        "verb": row.verb,
+        "object_type": row.object_type,
+        "object_id": row.object_id,
+        "timestamp": row.occurred_at,
+        "context": row.payload or {},
+    }
+
+
+async def poll_object_evidence(
+    db: AsyncSession,
+    org_id: uuid.UUID,
+    object_type: str,
+    object_id: uuid.UUID,
+    *,
+    after_seq: int | None = None,
+    after_time: datetime | None = None,
+    verbs: list[str] | None = None,
+    limit: int = 200,
+) -> list[dict]:
+    """object의 L1 활동 증거를 시간순(ASC)으로 반환한다(verdict gate 소비·AC①).
+
+    스코프=org_id+object_type+object_id. 증분=after_seq(activity_seq) 또는 after_time(occurred_at).
+    verbs 지정 시 해당 활동종류만. 정렬=occurred_at ASC(동시각은 activity_seq ASC tiebreak). 각 행은
+    {activity_id, activity_seq, actor_id, actor_type, verb, object_type, object_id, timestamp(=occurred_at),
+    context(=payload)}. actor_type은 배치 멤버해소.
+
+    **증거 없으면 빈 리스트 — 빈=빈이며 'pass'로 해석 금지(AC③). 게이트는 빈을 증거부재로 다뤄야 한다.**
+    """
+    query = select(ActivityEvent).where(
+        ActivityEvent.org_id == org_id,
+        ActivityEvent.object_type == object_type,
+        ActivityEvent.object_id == object_id,
+    )
+    if after_seq is not None:
+        query = query.where(ActivityEvent.activity_seq > after_seq)
+    if after_time is not None:
+        query = query.where(ActivityEvent.occurred_at > after_time)
+    if verbs:
+        query = query.where(ActivityEvent.verb.in_(verbs))
+    query = query.order_by(
+        ActivityEvent.occurred_at.asc(), ActivityEvent.activity_seq.asc()
+    ).limit(limit)
+    rows = list((await db.execute(query)).scalars().all())
+    if not rows:
+        return []
+    actor_types = await _resolve_actor_types(db, {r.actor_id for r in rows})
+    return [_evidence_dict(r, actor_types.get(r.actor_id)) for r in rows]
+
+
+async def latest_object_evidence(
+    db: AsyncSession,
+    org_id: uuid.UUID,
+    object_type: str,
+    object_id: uuid.UUID,
+    *,
+    verbs: list[str] | None = None,
+) -> dict | None:
+    """object의 가장 최근 L1 활동 증거 1건을 반환한다(activity_seq DESC). 없으면 None(AC③).
+
+    verbs 지정 시 해당 활동종류 중 최신. 반환 shape는 poll_object_evidence 항목과 동일.
+    """
+    query = select(ActivityEvent).where(
+        ActivityEvent.org_id == org_id,
+        ActivityEvent.object_type == object_type,
+        ActivityEvent.object_id == object_id,
+    )
+    if verbs:
+        query = query.where(ActivityEvent.verb.in_(verbs))
+    query = query.order_by(ActivityEvent.activity_seq.desc()).limit(1)
+    row = (await db.execute(query)).scalars().first()
+    if row is None:
+        return None
+    actor_types = await _resolve_actor_types(db, {row.actor_id})
+    return _evidence_dict(row, actor_types.get(row.actor_id))
