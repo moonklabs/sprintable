@@ -142,15 +142,20 @@ async def evaluate_merge_gate(
     role_id = participation.role_id
     role_key = await _role_key(session, role_id)
 
-    # 1. 독립 verdict 포착(Cage) — pr/ci verdict 기록. self-report만이면 기록 0.
+    # 1. trust(Cage) — implementation 역할 clean_pass_rate. **capture보다 먼저** 계산한다.
+    #    ⚠️ capture_pr_ci_verdict는 현재 PR/CI verdict를 session에 add한다. SQLAlchemy autoflush=True
+    #    기본이라 그 뒤에 trust 쿼리(select)를 돌리면 방금 add한 *현재* verdict가 flush돼 딸려들어가,
+    #    신규 contributor가 현재 PR 하나로 trust=1.0(1/1)을 자기-부트스트랩 → allow_auto org서 첫
+    #    평가가 auto_merge가 돼 "초기 전원 ask·auto_merge 0" 보장이 깨진다. trust는 **이전 이력만**
+    #    봐야 하므로 현재 verdict 기록 前에 계산한다.
+    trust_result = await compute_member_trust_scores(session, org_id, member_id, role_key=role_key)
+    trust = _impl_trust(trust_result, role_key)
+
+    # 2. 독립 verdict 포착(Cage) — 현재 pr/ci verdict를 *이후 평가용*으로 기록. self-report만이면 기록 0.
     capture = await capture_pr_ci_verdict(
         session, org_id, story_id, pr_number, repo, merged=(pr == "pass"), ci_result=ci_result
     )
     self_report_only = bool(capture.get("skipped_reason")) or not capture.get("recorded")
-
-    # 2. trust(Cage) — implementation 역할 clean_pass_rate.
-    trust_result = await compute_member_trust_scores(session, org_id, member_id, role_key=role_key)
-    trust = _impl_trust(trust_result, role_key)
 
     # 3. 정책 disposition 아티팩트 gate row(Cage·AC⑥). create_gate가 disposition→status 설정·멱등.
     gate = await create_gate(
