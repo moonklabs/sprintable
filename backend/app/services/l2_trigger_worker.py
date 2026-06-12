@@ -1,8 +1,12 @@
-"""L2-S5: L2 트리거 워커 루프 (lifespan task · default-off · advisory lock).
+"""L2-S5/S6: L2 트리거 워커 루프 (lifespan · default-off · advisory lock · dedup 발사).
 
-블루프린트 §3·§5 S5. L1 활동 스트림 cursor poll(`L1ActivitySource`·S3) + 주기 데드라인 스캔으로
+블루프린트 §3·§5/§6. L1 활동 스트림 cursor poll(`L1ActivitySource`·S3) + 주기 데드라인 스캔으로
 휴리스틱 evaluator(S4)를 구동하는 백그라운드 워커. `pg_pubsub.listen_loop`의 lifespan task 패턴을
 재사용한다.
+
+S6: 각 트리거 결정을 `l2_trigger_firings`에 dedup insert(ON CONFLICT (dedup_key) DO NOTHING
+RETURNING)하고, **insert 승자만** dispatch service(S1·`dispatch_entity_to_assignee`)를 호출해
+Event(dispatched)+wake한다 — 멀티인스턴스/재처리에도 정확히 1 wake.
 
 설계 원칙:
   · **default-off (AC①)** — `settings.l2_trigger_enabled`가 true일 때만 lifespan이 task를 만든다.
@@ -13,16 +17,15 @@
     `pg_try_advisory_lock` holder인 인스턴스만 poll/evaluate. 멀티인스턴스 중복 구동 방지.
   · **backoff** — iteration 실패 시 1s→30s 지수 백오프, 성공 시 리셋.
   · **graceful shutdown** — CancelledError 수신 시 advisory lock 해제·커넥션 정리 후 종료.
-
-실 wake/dispatch(=`l2_trigger_firings` dedup + 발사 + 에이전트 wake)는 **S6**에서 `_dispatch_decisions`
-seam을 채운다. S5는 결정(`TriggerDecision`)만 산출·로깅한다.
 """
 from __future__ import annotations
 
 import asyncio
+import json
 import logging
 import time
-from datetime import datetime, timedelta, timezone
+import uuid
+from datetime import datetime, time as dt_time, timedelta, timezone
 
 from sqlalchemy import bindparam, text
 
@@ -37,6 +40,10 @@ from app.services.l2_heuristics import (
 
 logger = logging.getLogger(__name__)
 
+# dispatch service(S1)가 처리 가능한 anchor entity. 이 외(sprint/hypothesis 등)는 firing만 기록하고
+# wake는 skip한다(해당 타입 dispatch 경로는 후속 확장).
+_DISPATCHABLE_ANCHORS = frozenset({"epic", "story", "doc"})
+
 
 def _utcnow() -> datetime:
     return datetime.now(timezone.utc)
@@ -48,8 +55,9 @@ class L2TriggerWorker:
     WORKER_NAME = "l2_trigger"
     # 멀티인스턴스 단일 holder 보장용 advisory lock 키("L2TR" ASCII). 다른 advisory 사용처와 비충돌.
     _ADVISORY_LOCK_KEY = 0x4C325452
-    # 데드라인 nudge 불필요한 hypothesis 종결 상태.
+    # 데드라인 nudge 불필요한 종결 상태(타입별).
     _HYPOTHESIS_TERMINAL = ("verified", "falsified", "killed", "archived")
+    _EPIC_TERMINAL = ("completed", "done", "closed", "archived", "cancelled", "canceled")
 
     def __init__(
         self,
@@ -155,19 +163,19 @@ class L2TriggerWorker:
             self._holds_lock = False
 
     # ── cursor poll (AC②) ────────────────────────────────────────────────────────
-    async def _poll_once(self, db) -> list[TriggerDecision]:
-        """cursor 이후 활동을 poll·평가하고, **성공 시에만** cursor를 전진(AC②)."""
+    async def _poll_once(self, db) -> list:
+        """cursor 이후 활동을 poll·평가·발사하고, **성공 시에만** cursor를 전진(AC②)."""
         cursor = await self._read_cursor(db)
         signals, _next = await self.source.poll_after_seq(
             db, cursor, limit=self.batch_limit, org_id=None
         )
         if not signals:
             return []
-        decisions = await self._evaluate_signals(db, signals)
-        self._dispatch_decisions(decisions)
+        firings = await self._evaluate_signals(db, signals)
+        await self._dispatch_decisions(db, firings)
         # 처리 중 예외가 났다면 여기 도달 못 함 → cursor 미전진 → 다음 iter 재처리(AC②).
         await self._write_cursor(db, signals[-1].activity_seq)
-        return decisions
+        return firings
 
     async def _read_cursor(self, db) -> int:
         row = (
@@ -200,60 +208,187 @@ class L2TriggerWorker:
             )
         await db.commit()
 
-    async def _evaluate_signals(self, db, signals) -> list[TriggerDecision]:
-        """활동-구동 평가 seam. 활동별 엔티티 상태 fetch + drought/velocity 평가는 **S6**가 채운다
-        (실 발사와 동일 트랜잭션이라 firing과 함께 구현). S5는 빈 결정으로 cursor 머신러리만 검증."""
+    async def _evaluate_signals(self, db, signals) -> list[tuple[TriggerDecision, uuid.UUID]]:
+        """활동-구동 평가 seam → (decision, org_id) 페어 리스트.
+
+        활동별 엔티티 상태 fetch + drought/velocity 평가는 후속(S7 E2E·확장)에서 채운다 — S6는
+        주기 deadline 스캔으로 실 발사 경로를 확정하고, cursor 머신러리는 빈 배치로도 검증된다."""
         _ = (db, signals)
         return []
 
     # ── 주기 데드라인 스캔 (시간-구동·활동 무관) ──────────────────────────────────
-    async def _scan_deadlines(self, db) -> list[TriggerDecision]:
-        """measure_after가 임박한 비종결 hypothesis를 스캔해 deadline 휴리스틱을 평가.
+    async def _scan_deadlines(self, db) -> list:
+        """마감 임박 엔티티를 스캔해 deadline 휴리스틱을 평가·발사. → (decision, org_id) 페어.
 
         deadline은 활동이 발생하지 않으므로 cursor poll로는 못 잡는다 — 별도 주기 스캔.
-        target은 agent-가능한 drafted_by/created_by(휴먼 owner는 wake 대상 아님). 둘 다 없으면 skip.
-        Sprint.end_date·Epic.target_date 스캔은 해당 엔티티 fetch·target 해소와 함께 S6에서 확장.
+        · Epic.target_date — assignee_id를 target으로 dispatch service가 wake(dispatchable).
+        · Hypothesis.measure_after — drafted_by/created_by(agent-가능)를 target으로 firing 기록
+          (현 dispatch 서비스는 hypothesis 미지원이라 wake는 skip·후속 확장).
+        Sprint.end_date 스캔은 sprint dispatch 경로 확정과 함께 후속 확장.
         """
         now = _utcnow()
+        firings = await self._collect_epic_deadlines(db, now)
+        firings += await self._collect_hypothesis_deadlines(db, now)
+        await self._dispatch_decisions(db, firings)
+        return firings
+
+    async def _collect_epic_deadlines(self, db, now) -> list[tuple[TriggerDecision, uuid.UUID]]:
+        horizon_date = (now + timedelta(hours=self.evaluator.t.deadline_epic_target_h)).date()
+        rows = (
+            await db.execute(
+                text(
+                    "SELECT id, org_id, target_date, status, assignee_id FROM epics "
+                    "WHERE assignee_id IS NOT NULL AND target_date IS NOT NULL "
+                    "AND status NOT IN :terminal AND target_date <= :horizon"
+                ).bindparams(bindparam("terminal", expanding=True)),
+                {"terminal": list(self._EPIC_TERMINAL), "horizon": horizon_date},
+            )
+        ).mappings().all()
+        out: list[tuple[TriggerDecision, uuid.UUID]] = []
+        for r in rows:
+            # target_date는 DATE — 마감일 23:59:59Z를 deadline으로(당일 내 임박 판정).
+            deadline = datetime.combine(r["target_date"], dt_time(23, 59, 59), tzinfo=timezone.utc)
+            for d in self.evaluator.evaluate_deadline(
+                DeadlineTarget(
+                    entity_type="epic",
+                    entity_id=r["id"],
+                    deadline=deadline,
+                    status=r["status"],
+                    target_agent_id=r["assignee_id"],
+                ),
+                now,
+            ):
+                out.append((d, r["org_id"]))
+        return out
+
+    async def _collect_hypothesis_deadlines(self, db, now) -> list[tuple[TriggerDecision, uuid.UUID]]:
         horizon = now + timedelta(hours=self.evaluator.t.deadline_measure_after_h)
         rows = (
             await db.execute(
                 text(
-                    "SELECT id, measure_after, status, drafted_by_member_id, created_by_member_id "
-                    "FROM hypotheses "
+                    "SELECT id, org_id, measure_after, status, drafted_by_member_id, "
+                    "created_by_member_id FROM hypotheses "
                     "WHERE status NOT IN :terminal AND measure_after <= :horizon"
                 ).bindparams(bindparam("terminal", expanding=True)),
                 {"terminal": list(self._HYPOTHESIS_TERMINAL), "horizon": horizon},
             )
         ).mappings().all()
-
-        decisions: list[TriggerDecision] = []
+        out: list[tuple[TriggerDecision, uuid.UUID]] = []
         for r in rows:
             target = r["drafted_by_member_id"] or r["created_by_member_id"]
-            decisions.extend(
-                self.evaluator.evaluate_deadline(
-                    DeadlineTarget(
-                        entity_type="hypothesis",
-                        entity_id=r["id"],
-                        deadline=r["measure_after"],
-                        status=r["status"],
-                        target_agent_id=target,
-                    ),
-                    now,
-                )
-            )
-        self._dispatch_decisions(decisions)
-        return decisions
+            for d in self.evaluator.evaluate_deadline(
+                DeadlineTarget(
+                    entity_type="hypothesis",
+                    entity_id=r["id"],
+                    deadline=r["measure_after"],
+                    status=r["status"],
+                    target_agent_id=target,
+                ),
+                now,
+            ):
+                out.append((d, r["org_id"]))
+        return out
 
-    # ── 발사 seam (S6에서 dedup + firing + wake 구현) ─────────────────────────────
-    def _dispatch_decisions(self, decisions: list[TriggerDecision]) -> None:
-        """S6 seam: `l2_trigger_firings` dedup(dedup_key) + firing insert + 에이전트 wake/dispatch.
+    # ── dedup 발사 (S6: 정확히 1 wake·멀티인스턴스 안전) ──────────────────────────
+    @staticmethod
+    def _dedup_key(d: TriggerDecision) -> str:
+        """발사 dedup 키. 활동-구동은 활동당 1회, 시간-구동(deadline 등)은 UTC 일자당 1회."""
+        if d.source_activity_seq is not None:
+            bucket = f"a{d.source_activity_seq}"
+        else:
+            bucket = _utcnow().strftime("%Y%m%d")
+        return f"{d.trigger_type}:{d.anchor_type}:{d.anchor_id}:{d.target_agent_id}:{bucket}"
 
-        S5는 실 발사를 하지 않고 산출된 결정만 로깅한다.
+    async def _dispatch_decisions(self, db, firings: list) -> None:
+        """각 (decision, org_id)에 대해 dedup insert 승자만 실 dispatch(AC①②④).
+
+        한 결정의 실패가 배치 전체를 막지 않도록 결정 단위 격리(실패 시 rollback 후 계속).
         """
-        if decisions:
+        for decision, org_id in firings:
+            try:
+                await self._fire_one(db, decision, org_id)
+            except Exception as exc:
+                await db.rollback()
+                logger.warning(
+                    "L2 fire failed (%s anchor=%s): %s", decision.trigger_type, decision.anchor_id, exc
+                )
+
+    async def _fire_one(self, db, decision: TriggerDecision, org_id: uuid.UUID) -> None:
+        dedup_key = self._dedup_key(decision)
+        # AC①④: dedup insert. 동일 dedup_key를 두 워커가 동시에 넣어도 unique로 1행만 — 패자는
+        # ON CONFLICT DO NOTHING으로 0행(RETURNING 없음)이라 dispatch를 호출하지 않는다.
+        won = await self._claim_firing(db, decision, org_id, dedup_key)
+        if not won:
+            await db.rollback()
+            logger.debug("L2 firing dedup conflict — wake skip: %s", dedup_key)
+            return
+
+        if decision.anchor_type not in _DISPATCHABLE_ANCHORS:
+            # firing은 기록(같은 트랜잭션 commit)하되 wake는 미지원 타입이라 skip.
+            await db.commit()
             logger.info(
-                "L2 worker produced %d trigger decision(s) [firing deferred to S6]: %s",
-                len(decisions),
-                [d.trigger_type for d in decisions],
+                "L2 firing recorded (anchor=%s non-dispatchable, wake skip): %s",
+                decision.anchor_type,
+                dedup_key,
             )
+            return
+
+        # AC②③: 승자만 dispatch service 호출 → Event(event_type=dispatched·기존 allow-list 재사용,
+        # 신규 type 0) 생성 + commit + wake. firing은 같은 세션이라 event와 원자 commit.
+        from app.services.agent_dispatch import dispatch_entity_to_assignee
+
+        resp, delivery = await dispatch_entity_to_assignee(
+            db,
+            org_id,
+            decision.anchor_type,
+            decision.anchor_id,
+            message=decision.reason,
+            trigger_metadata={
+                "source": "l2_heuristic",
+                "trigger_type": decision.trigger_type,
+                "reason": decision.reason,
+                "source_activity_seq": decision.source_activity_seq,
+            },
+        )
+        # firing.event_id 링크(best-effort). dispatched=False(unresolved 등)면 firing만 commit.
+        if resp.dispatched and resp.event_id is not None:
+            await self._link_event(db, dedup_key, resp.event_id)
+        else:
+            await db.commit()
+
+        if resp.dispatched and delivery is not None:
+            # CC 릴레이(member webhook) — 라우터의 background_tasks 대신 워커는 직접 await.
+            from app.services.conversation_webhook import deliver_injected_event_webhook
+
+            await deliver_injected_event_webhook(**delivery)
+
+    async def _claim_firing(
+        self, db, decision: TriggerDecision, org_id: uuid.UUID, dedup_key: str
+    ) -> bool:
+        res = await db.execute(
+            text(
+                "INSERT INTO l2_trigger_firings "
+                "(id, org_id, trigger_type, target_agent_id, anchor_type, anchor_id, dedup_key, "
+                "source_activity_seq, payload) "
+                "VALUES (gen_random_uuid(), :org, :tt, :tgt, :at, :aid, :dk, :seq, CAST(:payload AS jsonb)) "
+                "ON CONFLICT (dedup_key) DO NOTHING RETURNING id"
+            ),
+            {
+                "org": org_id,
+                "tt": decision.trigger_type,
+                "tgt": decision.target_agent_id,
+                "at": decision.anchor_type,
+                "aid": decision.anchor_id,
+                "dk": dedup_key,
+                "seq": decision.source_activity_seq,
+                "payload": json.dumps({"reason": decision.reason, "source": "l2_heuristic"}),
+            },
+        )
+        return res.first() is not None
+
+    async def _link_event(self, db, dedup_key: str, event_id: uuid.UUID) -> None:
+        await db.execute(
+            text("UPDATE l2_trigger_firings SET event_id = :eid WHERE dedup_key = :dk"),
+            {"eid": event_id, "dk": dedup_key},
+        )
+        await db.commit()

@@ -6,6 +6,8 @@ AC① default-off·AC② cursor 성공 후만 전진(실패 시 미전진)·AC�
 from __future__ import annotations
 
 import asyncio
+import os
+import threading
 import uuid
 from datetime import datetime, timedelta, timezone
 from unittest.mock import AsyncMock, MagicMock, patch
@@ -14,7 +16,11 @@ import pytest
 
 from app.core.config import settings
 from app.services.l1_activity_source import ActivitySignal
+from app.services.l2_heuristics import TriggerDecision
 from app.services.l2_trigger_worker import L2TriggerWorker
+
+# 실 Postgres가 있을 때만 도는 동시성 테스트(CI alembic-fresh-db가 0117 적용). 로컬은 temp PG로 실증.
+_REAL_DB_URL = os.getenv("PARITY_TEST_DATABASE_URL") or os.getenv("ALEMBIC_DATABASE_URL")
 
 
 @pytest.fixture
@@ -144,39 +150,144 @@ async def test_release_lock_unlocks_and_closes():
 
 # ── deadline scan: evaluator 통합 ─────────────────────────────────────────────
 
+def _rows_result(rows):
+    res = MagicMock()
+    res.mappings.return_value.all.return_value = rows
+    return res
+
+
 @pytest.mark.anyio
-async def test_scan_deadlines_fires_for_imminent_hypothesis():
+async def test_collect_hypothesis_deadlines_pairs_org():
     w = L2TriggerWorker(use_advisory_lock=False)
-    agent = uuid.uuid4()
-    hyp_id = uuid.uuid4()
+    agent, org, hyp_id = uuid.uuid4(), uuid.uuid4(), uuid.uuid4()
     now = datetime.now(timezone.utc)
     rows = [
-        {  # 임박(5h 후) + drafted_by 있음 → 발사.
-            "id": hyp_id,
-            "measure_after": now + timedelta(hours=5),
-            "status": "measuring",
-            "drafted_by_member_id": agent,
-            "created_by_member_id": None,
+        {  # 임박 + drafted_by → 발사.
+            "id": hyp_id, "org_id": org, "measure_after": now + timedelta(hours=5),
+            "status": "measuring", "drafted_by_member_id": agent, "created_by_member_id": None,
         },
-        {  # target 없음(drafted/created 둘 다 None) → evaluator skip.
-            "id": uuid.uuid4(),
-            "measure_after": now + timedelta(hours=2),
-            "status": "active",
-            "drafted_by_member_id": None,
-            "created_by_member_id": None,
+        {  # target 없음 → evaluator skip.
+            "id": uuid.uuid4(), "org_id": org, "measure_after": now + timedelta(hours=2),
+            "status": "active", "drafted_by_member_id": None, "created_by_member_id": None,
         },
     ]
-    result = MagicMock()
-    result.mappings.return_value.all.return_value = rows
     db = AsyncMock()
-    db.execute = AsyncMock(return_value=result)
-    with patch.object(w, "_dispatch_decisions") as disp:
-        decisions = await w._scan_deadlines(db)
-    assert len(decisions) == 1
-    d = decisions[0]
-    assert d.trigger_type == "deadline_approaching"
+    db.execute = AsyncMock(return_value=_rows_result(rows))
+    pairs = await w._collect_hypothesis_deadlines(db, now)
+    assert len(pairs) == 1
+    d, pair_org = pairs[0]
     assert d.anchor_type == "hypothesis" and d.anchor_id == hyp_id and d.target_agent_id == agent
-    disp.assert_called_once()
+    assert pair_org == org
+
+
+@pytest.mark.anyio
+async def test_collect_epic_deadlines_dispatchable_anchor():
+    w = L2TriggerWorker(use_advisory_lock=False)
+    assignee, org, epic_id = uuid.uuid4(), uuid.uuid4(), uuid.uuid4()
+    now = datetime.now(timezone.utc)
+    rows = [{
+        "id": epic_id, "org_id": org,
+        "target_date": (now + timedelta(hours=10)).date(),  # 임박(epic 3d 윈도우 내).
+        "status": "active", "assignee_id": assignee,
+    }]
+    db = AsyncMock()
+    db.execute = AsyncMock(return_value=_rows_result(rows))
+    pairs = await w._collect_epic_deadlines(db, now)
+    assert len(pairs) == 1
+    d, pair_org = pairs[0]
+    assert d.anchor_type == "epic" and d.anchor_id == epic_id and d.target_agent_id == assignee
+    assert pair_org == org and d.anchor_type in ("epic", "story", "doc")  # dispatchable.
+
+
+# ── S6: dedup 발사 ─────────────────────────────────────────────────────────────
+
+def _decision(anchor_type="epic", seq=None):
+    return TriggerDecision(
+        trigger_type="deadline_approaching",
+        target_agent_id=uuid.uuid4(),
+        anchor_type=anchor_type,
+        anchor_id=uuid.uuid4(),
+        reason="마감 임박",
+        source_activity_seq=seq,
+    )
+
+
+def test_dedup_key_time_vs_activity_bucket():
+    d_time = _decision(seq=None)
+    d_act = _decision(seq=77)
+    k_time = L2TriggerWorker._dedup_key(d_time)
+    k_act = L2TriggerWorker._dedup_key(d_act)
+    assert L2TriggerWorker._dedup_key(d_time) == k_time  # 결정적(같은 결정·같은 날).
+    assert k_act.endswith(":a77") and d_act.trigger_type in k_act
+    assert k_time != k_act
+
+
+@pytest.mark.anyio
+async def test_fire_one_winner_dispatches_and_links_event():
+    w = L2TriggerWorker(use_advisory_lock=False)
+    d = _decision("epic")
+    org = uuid.uuid4()
+    db = AsyncMock()
+    event_id = uuid.uuid4()
+    resp = MagicMock(dispatched=True, event_id=event_id)
+    delivery = {"org_id": org, "recipient_id": d.target_agent_id, "content": "x", "event_type": "dispatched"}
+    with patch.object(w, "_claim_firing", AsyncMock(return_value=True)), \
+         patch.object(w, "_link_event", AsyncMock()) as link, \
+         patch("app.services.agent_dispatch.dispatch_entity_to_assignee",
+               AsyncMock(return_value=(resp, delivery))) as disp, \
+         patch("app.services.conversation_webhook.deliver_injected_event_webhook",
+               AsyncMock()) as web:
+        await w._fire_one(db, d, org)
+    disp.assert_awaited_once()
+    # dispatch는 anchor(entity_type, entity_id)로 호출·trigger_metadata 동봉.
+    args, kwargs = disp.await_args
+    assert args[2] == "epic" and args[3] == d.anchor_id
+    assert kwargs["trigger_metadata"]["source"] == "l2_heuristic"
+    link.assert_awaited_once()  # event_id 링크.
+    web.assert_awaited_once()   # CC 릴레이.
+
+
+@pytest.mark.anyio
+async def test_fire_one_conflict_loser_skips_dispatch():
+    w = L2TriggerWorker(use_advisory_lock=False)
+    d = _decision("epic")
+    db = AsyncMock()
+    with patch.object(w, "_claim_firing", AsyncMock(return_value=False)), \
+         patch("app.services.agent_dispatch.dispatch_entity_to_assignee", AsyncMock()) as disp:
+        await w._fire_one(db, d, uuid.uuid4())
+    disp.assert_not_awaited()  # AC②④: 패자는 dispatch 0.
+    db.rollback.assert_awaited_once()
+
+
+@pytest.mark.anyio
+async def test_fire_one_non_dispatchable_records_firing_no_wake():
+    w = L2TriggerWorker(use_advisory_lock=False)
+    d = _decision("hypothesis")  # 비-dispatchable anchor.
+    db = AsyncMock()
+    with patch.object(w, "_claim_firing", AsyncMock(return_value=True)), \
+         patch("app.services.agent_dispatch.dispatch_entity_to_assignee", AsyncMock()) as disp:
+        await w._fire_one(db, d, uuid.uuid4())
+    disp.assert_not_awaited()  # firing은 기록되나 wake skip.
+    db.commit.assert_awaited_once()
+
+
+@pytest.mark.anyio
+async def test_dispatch_decisions_isolates_per_decision_failure():
+    w = L2TriggerWorker(use_advisory_lock=False)
+    good, bad = _decision("epic"), _decision("epic")
+    org = uuid.uuid4()
+    db = AsyncMock()
+    calls = []
+
+    async def fire(_db, decision, _org):
+        calls.append(decision)
+        if decision is bad:
+            raise RuntimeError("boom")
+
+    with patch.object(w, "_fire_one", side_effect=fire):
+        await w._dispatch_decisions(db, [(bad, org), (good, org)])
+    assert bad in calls and good in calls  # 한 결정 실패가 배치를 막지 않음.
+    db.rollback.assert_awaited()  # 실패 결정은 rollback 후 계속.
 
 
 # ── graceful shutdown ─────────────────────────────────────────────────────────
@@ -196,3 +307,64 @@ async def test_run_cancels_gracefully_and_releases_lock():
         task.cancel()
         await task  # CancelledError를 run이 흡수 → 정상 종료.
     rel.assert_awaited_once()  # shutdown 시 lock 해제 보장.
+
+
+# ── AC①: 멀티인스턴스 동시성 — 동일 dedup_key 2 워커 동시 INSERT → firing 1개만 ──────
+
+@pytest.mark.skipif(not _REAL_DB_URL, reason="real Postgres 필요(PARITY/ALEMBIC_DATABASE_URL)")
+def test_concurrent_dedup_exactly_one_winner():
+    """동일 dedup_key를 두 커넥션이 동시에 INSERT ON CONFLICT DO NOTHING RETURNING.
+
+    두 워커가 같은 트리거 후보를 동시에 발사해도 unique(dedup_key)가 정확히 1행만 허용 —
+    패자는 RETURNING 0행이라 dispatch를 호출하지 않는다(정확히 1 wake).
+    """
+    import psycopg2
+
+    sync_url = _REAL_DB_URL.replace("postgresql+psycopg2://", "postgresql://").replace(
+        "postgresql+asyncpg://", "postgresql://"
+    )
+    dedup_key = f"concurrency-test-{uuid.uuid4()}"
+    org = str(uuid.uuid4())
+    insert = (
+        "INSERT INTO l2_trigger_firings "
+        "(id, org_id, trigger_type, target_agent_id, anchor_type, anchor_id, dedup_key) "
+        "VALUES (gen_random_uuid(), %(org)s, 'deadline_approaching', gen_random_uuid(), "
+        "'epic', gen_random_uuid(), %(dk)s) ON CONFLICT (dedup_key) DO NOTHING RETURNING id"
+    )
+    barrier = threading.Barrier(2)
+    won: list[bool] = []
+    lock = threading.Lock()
+
+    def race():
+        conn = psycopg2.connect(sync_url)
+        try:
+            cur = conn.cursor()
+            barrier.wait(timeout=10)  # 두 스레드 동시 시작.
+            cur.execute(insert, {"org": org, "dk": dedup_key})
+            row = cur.fetchone()
+            conn.commit()
+            with lock:
+                won.append(row is not None)
+        finally:
+            conn.close()
+
+    threads = [threading.Thread(target=race) for _ in range(2)]
+    for t in threads:
+        t.start()
+    for t in threads:
+        t.join(timeout=15)
+
+    try:
+        assert sum(won) == 1, f"정확히 1 승자여야 함(got {sum(won)})"
+        # 실제로도 firing 1행만 존재.
+        conn = psycopg2.connect(sync_url)
+        cur = conn.cursor()
+        cur.execute("SELECT count(*) FROM l2_trigger_firings WHERE dedup_key = %s", (dedup_key,))
+        assert cur.fetchone()[0] == 1
+        conn.close()
+    finally:
+        conn = psycopg2.connect(sync_url)
+        cur = conn.cursor()
+        cur.execute("DELETE FROM l2_trigger_firings WHERE dedup_key = %s", (dedup_key,))
+        conn.commit()
+        conn.close()
