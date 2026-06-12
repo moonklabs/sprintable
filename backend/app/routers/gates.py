@@ -60,6 +60,11 @@ class GateResponse(BaseModel):
     resolved_at: datetime | None = None
     resolution_note: str | None = None
     neutral_facts: dict[str, Any] | None = None
+    # H1-S3: merge verdict gate evidence metadata (0118)·additive·하위호환 default.
+    requires_human: bool = False
+    evidence_status: str | None = None
+    decision_basis: str | None = None
+    auto_decision_reason: str | None = None
     created_at: datetime
     updated_at: datetime
 
