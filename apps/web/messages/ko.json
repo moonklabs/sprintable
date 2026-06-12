@@ -2486,6 +2486,24 @@
     "forbiddenDescription": "활동 로그를 조회할 권한이 없습니다.",
     "noProject": "선택된 프로젝트가 없습니다."
   },
+  "teamActivity": {
+    "title": "활동",
+    "tabAudit": "감사 로그",
+    "tabTeamActivity": "팀 활동",
+    "normalizedPill": "정규화됨",
+    "caption": "정규화된 팀 행동 — 한 줄 = 한 행동, 중복은 합쳐짐. 누가·무엇을·어디에, 그리고 전달 대상 수만 표시.",
+    "filterAll": "전체",
+    "filterActor": "행위자",
+    "filterVerb": "동작",
+    "deliveredCount": "{count}명에게 전달",
+    "system": "시스템",
+    "loadMore": "더 보기",
+    "emptyTitle": "아직 활동이 없습니다",
+    "emptyDesc": "필터를 바꾸거나, 팀이 행동하면 여기에 정규화되어 쌓입니다.",
+    "forbiddenTitle": "접근 제한",
+    "forbiddenDescription": "팀 활동을 조회할 권한이 없습니다.",
+    "reload": "다시 시도"
+  },
   "activityTimeline": {
     "title": "최근 활동",
     "description": "팀의 최근 10건 활동 실시간 피드입니다.",
