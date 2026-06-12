@@ -18,6 +18,7 @@ from typing import Any
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.core.config import settings
 from app.models.participation import ParticipationRole
 from app.services.gate_service import create_gate
 from app.services.trust_score import compute_member_trust_scores
@@ -38,6 +39,31 @@ BLOCK = "block"
 
 # gate status(정책 disposition 아티팩트) → 원 disposition 역추론(관측용).
 _STATUS_TO_DISPOSITION = {"auto_passed": "allow_auto", "pending": "ask", "rejected": "deny"}
+
+
+def _gate_org_allowlist() -> frozenset[uuid.UUID]:
+    out: set[uuid.UUID] = set()
+    for x in (settings.h1_merge_gate_org_allowlist or "").split(","):
+        x = x.strip()
+        if not x:
+            continue
+        try:
+            out.add(uuid.UUID(x))
+        except ValueError:
+            logger.warning("H1 merge gate allowlist 무효 org_id 무시: %r", x)
+    return frozenset(out)
+
+
+def merge_gate_active(org_id: uuid.UUID) -> bool:
+    """H1 머지 게이트 활성 여부 — report-done·board 전 게이트의 단일 스위치(롤아웃 안전).
+
+    default-off(`H1_MERGE_GATE_ENABLED`). enabled여도 allowlist 지정 시 해당 org만(비면 전 org).
+    off면 게이트 미호출 → 기존 PATCH/머지 동작 무변경(team stall 방지).
+    """
+    if not settings.h1_merge_gate_enabled:
+        return False
+    allow = _gate_org_allowlist()
+    return (not allow) or (org_id in allow)
 
 
 @dataclass(frozen=True)

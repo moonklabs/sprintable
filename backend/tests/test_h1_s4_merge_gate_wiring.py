@@ -84,6 +84,7 @@ async def test_auto_merge_sets_done():
         with patch("app.routers.workflow_report.evaluate_merge_gate",
                    new=AsyncMock(return_value=_decision(AUTO_MERGE))) as gate, \
              patch("app.routers.workflow_report._record_gate_evidence", new=AsyncMock()), \
+             patch("app.routers.workflow_report.merge_gate_active", return_value=True), \
              patch("app.repositories.story.StoryRepository.update", new_callable=AsyncMock) as upd:
             async with client as c:
                 resp = await c.post("/api/v2/workflow/report-done",
@@ -107,6 +108,7 @@ async def test_ask_human_keeps_status_202():
         with patch("app.routers.workflow_report.evaluate_merge_gate",
                    new=AsyncMock(return_value=_decision(ASK_HUMAN, gate_status="pending", disposition="ask", trust=None))), \
              patch("app.routers.workflow_report._record_gate_evidence", new=AsyncMock()), \
+             patch("app.routers.workflow_report.merge_gate_active", return_value=True), \
              patch("app.repositories.story.StoryRepository.update", new_callable=AsyncMock) as upd:
             async with client as c:
                 resp = await c.post("/api/v2/workflow/report-done", json=_body(ctx={"ci_result": "pass"}))
@@ -128,6 +130,7 @@ async def test_block_returns_409_keeps_status():
         with patch("app.routers.workflow_report.evaluate_merge_gate",
                    new=AsyncMock(return_value=_decision(BLOCK, reason="CI fail", ci_result="fail"))), \
              patch("app.routers.workflow_report._record_gate_evidence", new=AsyncMock()), \
+             patch("app.routers.workflow_report.merge_gate_active", return_value=True), \
              patch("app.repositories.story.StoryRepository.update", new_callable=AsyncMock) as upd:
             async with client as c:
                 resp = await c.post("/api/v2/workflow/report-done", json=_body(ctx={"ci_result": "fail"}))
