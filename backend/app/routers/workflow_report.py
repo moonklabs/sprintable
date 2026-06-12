@@ -6,16 +6,23 @@ import uuid
 from typing import Any
 
 import httpx
-from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, status
+from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Response, status
 from pydantic import BaseModel
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.dependencies.auth import AuthContext, get_current_user
 from app.dependencies.database import get_db
+from app.models.gate import Gate
 from app.models.pm import Story
 from app.models.team import TeamMember
 from app.repositories.story import StoryRepository
+from app.services.merge_verdict_gate import (
+    AUTO_MERGE,
+    BLOCK,
+    MergeGateDecision,
+    evaluate_merge_gate,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -91,6 +98,33 @@ class ReportDoneResponse(BaseModel):
     next_stage: str
     memo_id: uuid.UUID | None = None
     story_status: str | None = None
+    # H1-S4: merge stage 게이트 결정(merge 단계에서만 채워짐).
+    gate_decision: str | None = None  # auto_merge | ask_human | block
+    gate_id: uuid.UUID | None = None
+    requires_human: bool | None = None
+    decision_basis: str | None = None
+
+
+def _evidence_status(decision: str) -> str:
+    if decision == AUTO_MERGE:
+        return "sufficient"
+    if decision == BLOCK:
+        return "blocked"
+    return "insufficient"
+
+
+async def _record_gate_evidence(session: AsyncSession, decision: MergeGateDecision) -> None:
+    """S3 gate evidence metadata 컬럼에 머지 게이트 결정을 기록(gate row 있을 때만)."""
+    if decision.gate_id is None:
+        return
+    gate = await session.get(Gate, decision.gate_id)
+    if gate is None:
+        return
+    gate.requires_human = decision.decision != AUTO_MERGE
+    gate.evidence_status = _evidence_status(decision.decision)
+    gate.decision_basis = decision.reason
+    gate.auto_decision_reason = decision.decision
+    await session.flush()
 
 # ─── Endpoint ─────────────────────────────────────────────────────────────────
 
@@ -98,6 +132,7 @@ class ReportDoneResponse(BaseModel):
 async def report_done(
     body: ReportDoneRequest,
     background_tasks: BackgroundTasks,
+    response: Response,
     session: AsyncSession = Depends(get_db),
     auth: AuthContext = Depends(get_current_user),
 ) -> ReportDoneResponse:
@@ -117,7 +152,40 @@ async def report_done(
     next_stage: str = transition["next_stage"]
     story_status: str | None = transition["story_status"]
 
-    # 스토리 상태 업데이트
+    # H1-S4: merge 단계는 status=done 전이 전에 merge verdict gate(S2)를 통과해야 한다.
+    # auto_merge만 done·ask_human은 status 유지+202·block은 status 유지+409. gate evidence(S3) 기록.
+    gate_info: MergeGateDecision | None = None
+    if body.stage == "merge":
+        ctx = body.context or {}
+        pr_number = ctx.get("pr_number")
+        gate_info = await evaluate_merge_gate(
+            session,
+            story.org_id,
+            story.id,
+            pr_number=int(pr_number) if pr_number else 0,
+            repo=str(ctx.get("repo") or ""),
+            ci_result=ctx.get("ci_result"),
+            pr_result=ctx.get("pr_result"),
+        )
+        await _record_gate_evidence(session, gate_info)
+        if gate_info.decision != AUTO_MERGE:
+            story_status = None  # done 전이 차단 — 현재 status 유지(AC①③).
+            if gate_info.decision == BLOCK:
+                # gate audit를 보존하고 차단(get_db는 예외 시 rollback이라 명시 commit).
+                await session.commit()
+                raise HTTPException(
+                    status_code=status.HTTP_409_CONFLICT,
+                    detail={
+                        "code": "MERGE_BLOCKED",
+                        "message": f"merge gate blocked: {gate_info.reason}",
+                        "decision": gate_info.decision,
+                        "gate_id": str(gate_info.gate_id) if gate_info.gate_id else None,
+                        "requires_human": True,
+                    },
+                )
+            response.status_code = status.HTTP_202_ACCEPTED  # ask_human — 사람 보류.
+
+    # 스토리 상태 업데이트 (merge에서 auto_merge가 아니면 story_status=None이라 skip)
     if story_status:
         story_repo = StoryRepository(session, story.org_id)
         await story_repo.update(story.id, status=story_status)
@@ -128,4 +196,8 @@ async def report_done(
         next_stage=next_stage,
         memo_id=None,
         story_status=story_status,
+        gate_decision=gate_info.decision if gate_info else None,
+        gate_id=gate_info.gate_id if gate_info else None,
+        requires_human=(gate_info.decision != AUTO_MERGE) if gate_info else None,
+        decision_basis=gate_info.reason if gate_info else None,
     )
