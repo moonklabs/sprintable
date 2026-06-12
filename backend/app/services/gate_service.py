@@ -110,9 +110,67 @@ async def transition_gate(
     gate.resolved_at = datetime.now(timezone.utc)
     if new_status == "rejected" and note:
         gate.resolution_note = note
+
+    # H1-S7: 사람 게이트 해소(approve/reject)를 verdict로 기록 — trust로 환류.
+    await _record_gate_review_verdict(session, org_id, gate, new_status, resolver_id)
+
     await session.flush()
     await session.refresh(gate)
     return gate
+
+
+# gate_type → verdict source (qa→qa·merge→merge·deploy→design·pr_review→pr).
+_GATE_TYPE_TO_VERDICT_SOURCE: dict[str, str] = {
+    "qa": "qa",
+    "deploy": "design",
+    "merge": "merge",
+    "pr_review": "pr",
+}
+# 이 시간(초) 이하 approve는 rubber stamp(고무도장) 후보로 관측 표시.
+_RUBBER_STAMP_SECONDS = 30
+
+
+async def _record_gate_review_verdict(
+    session: AsyncSession,
+    org_id: uuid.UUID,
+    gate: Gate,
+    new_status: str,
+    resolver_id: uuid.UUID | None,
+) -> None:
+    """사람 게이트 해소를 verdict로 환류(H1-S7).
+
+    approve→result=pass / reject→result=fail. resolver_id 없으면 skip(AC③·시스템 auto-transition은
+    resolver 없으니 자동 제외 = 루프 가드 겸용). verdict는 work item의 implementation participation에
+    gate_type-매핑 source로 기록(uq(participation,source) upsert 멱등). 30초 이하 approve는
+    neutral_facts.rubber_stamp_candidate=true로 관측(AC⑤).
+    """
+    if new_status not in ("approved", "rejected") or resolver_id is None:
+        return
+    source = _GATE_TYPE_TO_VERDICT_SOURCE.get(gate.gate_type)
+    if source is None or gate.work_item_type != "story":
+        return
+
+    # lazy import — verdict_capture/recorder가 gate_service를 import하므로 순환 회피.
+    from app.services.verdict_capture import resolve_implementation_participation
+    from app.services.verdict_recorder import record_verdict
+
+    participation = await resolve_implementation_participation(session, org_id, gate.work_item_id)
+    if participation is None:
+        return  # participation 없으면 거짓기록 금지(skip).
+
+    result = "pass" if new_status == "approved" else "fail"  # AC①②
+    await record_verdict(session, org_id, participation.id, source, result)
+
+    # AC⑤: 30초 이하 approve = rubber stamp 후보 관측(neutral_facts 추가·판정 아님).
+    if (
+        new_status == "approved"
+        and gate.created_at is not None
+        and gate.resolved_at is not None
+        and (gate.resolved_at - gate.created_at).total_seconds() <= _RUBBER_STAMP_SECONDS
+    ):
+        facts = dict(gate.neutral_facts or {})
+        facts["rubber_stamp_candidate"] = True
+        gate.neutral_facts = facts
 
 
 async def resolve_gate_from_verdict(
