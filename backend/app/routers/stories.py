@@ -18,6 +18,7 @@ from app.routers.events import publish_event
 from app.services.event_seq import assign_recipient_seq
 from app.schemas.story import StoryCreate, StoryResponse, StoryStatusUpdate, StoryUpdate
 from app.services.member_resolver import canonicalize_member_id
+from app.services.merge_verdict_gate import AUTO_MERGE, evaluate_merge_gate, merge_gate_active
 from app.services.notification_dispatch import dispatch_notification
 from app.services.webhook_dispatch import fire_webhooks
 from app.services.workflow_pipeline import process_event
@@ -139,6 +140,36 @@ async def _upsert_assignee_participation(
     p_repo = ParticipationRepository(session, org_id)
     if not await p_repo.exists(story_id, assignee_id, default_role.id):
         await p_repo.create(story_id=story_id, member_id=assignee_id, role_id=default_role.id)
+
+
+async def _preflight_merge_gate(
+    db: AsyncSession, org_id: uuid.UUID, story, new_status: str | None
+) -> None:
+    """H1-S5: board 직접 PATCH로 in-review→done 전이 시 merge verdict gate preflight.
+
+    게이트 active(`merge_gate_active`·flag+allowlist)이고 in-review→done일 때만 동작 — auto_merge가
+    아니면 409로 전이 차단(status 유지). 플래그 off면 즉시 반환해 기존 PATCH 동작 무변경(AC①).
+    board PATCH엔 PR/CI 컨텍스트가 없으므로(ci_result=None) 증거 없이 done 시도는 보류된다.
+    """
+    if new_status != "done" or story is None or getattr(story, "status", None) != "in-review":
+        return
+    if not merge_gate_active(org_id):
+        return
+    decision = await evaluate_merge_gate(
+        db, org_id, story.id, pr_number=0, repo="", ci_result=None, pr_result=None
+    )
+    if decision.decision != AUTO_MERGE:
+        await db.commit()  # gate audit 보존(get_db는 예외 시 rollback).
+        raise HTTPException(
+            status_code=409,
+            detail={
+                "code": "MERGE_GATE_PENDING",
+                "message": f"in-review→done은 merge 게이트 통과 필요: {decision.reason}",
+                "decision": decision.decision,
+                "gate_id": str(decision.gate_id) if decision.gate_id else None,
+                "requires_human": True,
+            },
+        )
 
 
 @router.post("", response_model=StoryResponse, status_code=201)
@@ -273,10 +304,15 @@ async def update_story(
     if assignee_ids_in is not None and "assignee_id" not in data:
         data["assignee_id"] = assignee_ids_in[0] if assignee_ids_in else None
     old_assignee_id: uuid.UUID | None = None
+    story_before = None
     if "assignee_id" in data:
         story_before = await repo.get(id)
         if story_before:
             old_assignee_id = story_before.assignee_id
+    # H1-S5: PATCH /{id} 로 status=done 전이 시도도 board 경로와 동일하게 preflight 게이트(AC②).
+    if data.get("status") == "done":
+        gate_story = story_before or await repo.get(id)
+        await _preflight_merge_gate(db, repo.org_id, gate_story, "done")
     story = await repo.update(id, **data)
     if story is None:
         raise HTTPException(status_code=404, detail="Story not found")
@@ -484,6 +520,10 @@ async def update_story_status(
     _violation = check_transition(old_status, body.status, _violation_level)
     if _violation.violated and _violation_level == "block":
         raise HTTPException(status_code=400, detail=_violation.reason or "워크플로우 위반으로 상태 전이가 거부되었습니다.")
+
+    # H1-S5: in-review→done 직접 PATCH는 merge verdict gate preflight(플래그 active 시·AC②).
+    # transition rule(check_transition)과 직교 — 전이 유효성 통과 후 증거 게이트를 얹는다(AC④).
+    await _preflight_merge_gate(db, repo.org_id, story_before, body.status)
 
     try:
         # AC2: violation_level 전달 → warn 모드이면 set_status hard block 우회

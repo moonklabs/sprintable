@@ -66,6 +66,12 @@ class Settings(BaseSettings):
     l2_trigger_org_allowlist: str = ""  # CSV org_id — 비면 전 org, 지정 시 해당 org만 발사
     l2_trigger_max_wakes_per_org_per_hour: int = 0  # >0이면 org 시간당 wake 상한(초과 skip), 0=무제한
 
+    # E-H1 머지 verdict 게이트(report-done merge·board in-review→done 직접 PATCH). default-off —
+    # 팀 워크플로 경로라 켜면 trust None일 때 done이 전부 보류돼 team stall. 실 enable은 S10 E2E+
+    # 접는조건 後 의도적으로. allowlist 지정 시 해당 org만 게이트(점진 rollout).
+    h1_merge_gate_enabled: bool = False
+    h1_merge_gate_org_allowlist: str = ""  # CSV org_id — 비면 enabled 시 전 org, 지정 시 해당 org만
+
     # E-MEMBER-SSOT AC2-3: 신원 해소를 anchor(members+member_identity_aliases) 기반으로 전환하는
     # shadow 플래그. off(기본)=레거시 resolver(org_members/team_members). on=anchor resolver.
     # 라이브 cutover는 AC3-1 — 여기선 shadow(parity 검증용), 기본 off라 실 read 경로 무변경.

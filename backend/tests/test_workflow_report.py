@@ -171,7 +171,8 @@ async def test_merge_to_done():
         )
         with patch("app.repositories.story.StoryRepository.update", new_callable=AsyncMock) as mock_update, \
              patch("app.routers.workflow_report.evaluate_merge_gate", new=AsyncMock(return_value=auto)), \
-             patch("app.routers.workflow_report._record_gate_evidence", new=AsyncMock()):
+             patch("app.routers.workflow_report._record_gate_evidence", new=AsyncMock()), \
+             patch("app.routers.workflow_report.merge_gate_active", return_value=True):
             mock_update.return_value = story
             async with client as c:
                 resp = await c.post("/api/v2/workflow/report-done", json={

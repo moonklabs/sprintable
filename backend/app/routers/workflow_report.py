@@ -22,6 +22,7 @@ from app.services.merge_verdict_gate import (
     BLOCK,
     MergeGateDecision,
     evaluate_merge_gate,
+    merge_gate_active,
 )
 
 logger = logging.getLogger(__name__)
@@ -154,8 +155,9 @@ async def report_done(
 
     # H1-S4: merge 단계는 status=done 전이 전에 merge verdict gate(S2)를 통과해야 한다.
     # auto_merge만 done·ask_human은 status 유지+202·block은 status 유지+409. gate evidence(S3) 기록.
+    # H1-S5: 전 게이트 단일 스위치 — 플래그 off(또는 allowlist 밖)면 게이트 미호출(기존 merge→done 동작).
     gate_info: MergeGateDecision | None = None
-    if body.stage == "merge":
+    if body.stage == "merge" and merge_gate_active(story.org_id):
         ctx = body.context or {}
         pr_number = ctx.get("pr_number")
         gate_info = await evaluate_merge_gate(
