@@ -87,6 +87,9 @@ class Settings(BaseSettings):
     polar_sandbox: bool = True  # dev=True(sandbox), prod=False
     polar_webhook_secret: str = ""  # HMAC signature 검증용
 
+    # E-H1-S6: GitHub webhook(PR/CI verdict 캡처) HMAC 검증 시크릿. 미설정이면 webhook 거부(inert).
+    github_webhook_secret: str = ""
+
     # S-COMM-07: 에이전트 inbox webhook HMAC 검증 시크릿
     agent_inbox_webhook_secret: str = ""
 
