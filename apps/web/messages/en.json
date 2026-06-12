@@ -2486,6 +2486,28 @@
     "forbiddenDescription": "You do not have permission to view the activity log.",
     "noProject": "No project selected."
   },
+  "teamActivity": {
+    "title": "Activity",
+    "tabAudit": "Audit log",
+    "tabTeamActivity": "Team Activity",
+    "normalizedPill": "Normalized",
+    "caption": "Normalized team behavior — one row = one action, duplicates merged. Who · what · where, plus delivery reach only.",
+    "filterAll": "All",
+    "filterActor": "Actor",
+    "filterObject": "Object",
+    "filterVerb": "Action",
+    "fromDate": "From",
+    "toDate": "To",
+    "deliveredCount": "Delivered to {count}",
+    "system": "System",
+    "loadMore": "Load more",
+    "emptyTitle": "No activity yet",
+    "emptyDesc": "Adjust the filters, or it accumulates here as the team acts.",
+    "forbiddenTitle": "Access restricted",
+    "forbiddenDescription": "You do not have permission to view team activity.",
+    "reload": "Reload",
+    "noProject": "No project selected."
+  },
   "activityTimeline": {
     "title": "Recent Activity",
     "description": "Live feed of the last 10 team actions.",

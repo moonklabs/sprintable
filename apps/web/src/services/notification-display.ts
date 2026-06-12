@@ -114,6 +114,23 @@ export function getEventTypeCopy(
 }
 
 /**
+ * 팀 활동(L1-FE-1) verb 동작필터용 큐레이트 verb 목록. `getEventTypeCopy` 키 기반(PO 결정②)으로
+ * ①generic `eventFallback` 매핑은 제외(비식별) ②동일 카피키는 1개로 dedup(대표 raw verb·먼저
+ * 나온 것). label=getEventTypeCopy(t, verb)·전송값=raw verb. 동적 distinct 안 함(고정 enum).
+ */
+export const KNOWN_EVENT_TYPE_VERBS: string[] = (() => {
+  const seenCopyKey = new Set<string>();
+  const verbs: string[] = [];
+  for (const [verb, copyKey] of Object.entries(EVENT_TYPE_COPY_KEYS)) {
+    if (copyKey === 'eventFallback') continue;
+    if (seenCopyKey.has(copyKey)) continue;
+    seenCopyKey.add(copyKey);
+    verbs.push(verb);
+  }
+  return verbs;
+})();
+
+/**
  * 도달 사유(왜 이 건이 내 인박스에 왔나) i18n 키 추론 — interim FE (efcb3840 ⓐ).
  *
  * BE가 `Notification`에 actor/reason을 노출하기 전(자매 스토리 `e2608901` fold)까지의
