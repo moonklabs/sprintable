@@ -277,7 +277,13 @@ _TOOL_DEFS: list[tuple] = [
      "가설 단건 조회 (full).",
      GetHypothesisInput, get_hypothesis),
     ("sprintable_create_hypothesis",
-     "가설 생성. agent 호출은 proposed로 강제.",
+     "가설 생성. agent 호출은 status='proposed'로 강제된다.\n"
+     "metric_definition(dict) 필수 키: metric(str), source(enum: ga4|internal_ops|manual), "
+     "target(number), direction(enum: up|down). "
+     "source='ga4'이면 추가 필수: property_id, ga4_metric(enum: activeUsers|newUsers|sessions|"
+     "conversions|eventCount|screenPageViews), date_range_days(양의 정수).\n"
+     "owner_member_id: agent 호출은 휴먼 멤버 owner_member_id를 반드시 명시해야 한다"
+     "(미지정 시 백엔드가 400 HUMAN_OWNER_REQUIRED 반환). list_team_members로 휴먼 멤버 id 조회.",
      CreateHypothesisInput, create_hypothesis),
     ("sprintable_update_hypothesis",
      "가설 수정 (문장/지표/측정일/owner). 상태 전이는 confirm으로.",
