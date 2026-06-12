@@ -11,7 +11,7 @@ import uuid
 from datetime import datetime
 from typing import Any
 
-from sqlalchemy import DateTime, String, Text, func
+from sqlalchemy import Boolean, DateTime, String, Text, func, text
 from sqlalchemy.dialects.postgresql import JSONB, UUID
 from sqlalchemy.orm import Mapped, mapped_column
 
@@ -43,6 +43,11 @@ class Gate(Base):
     resolved_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     resolution_note: Mapped[str | None] = mapped_column(Text, nullable=True)
     neutral_facts: Mapped[dict | None] = mapped_column(JSONB, nullable=True)
+    # H1-S3: merge verdict gate evidence metadata (0118).
+    requires_human: Mapped[bool] = mapped_column(Boolean, nullable=False, server_default=text("false"))
+    evidence_status: Mapped[str | None] = mapped_column(Text, nullable=True)
+    decision_basis: Mapped[str | None] = mapped_column(Text, nullable=True)
+    auto_decision_reason: Mapped[str | None] = mapped_column(Text, nullable=True)
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now(), nullable=False
     )
