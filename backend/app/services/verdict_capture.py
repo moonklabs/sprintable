@@ -21,18 +21,24 @@ from app.services.verdict_recorder import record_verdict
 
 logger = logging.getLogger(__name__)
 
-_SID_RE = re.compile(r"\[SID:([0-9a-f\-]{36})\]", re.IGNORECASE)
+# [SID:uuid](PR 제목/본문·콜론) 또는 sid-uuid/sid_uuid/sid/uuid(브랜치-안전·콜론 불가). CI 이벤트
+# (workflow_run/check_suite/status)는 PR title/body가 없고 head_branch만 와서, 콜론을 못 쓰는
+# git 브랜치명에 SID를 실으려면 sid-<uuid> 마커가 필요하다(H1-S6 링킹 견고성).
+_SID_RE = re.compile(r"\[SID:([0-9a-f\-]{36})\]|sid[-_/]([0-9a-f\-]{36})", re.IGNORECASE)
 GITHUB_TOKEN = os.environ.get("GITHUB_TOKEN", "")
 
 
 def parse_story_id(text: str) -> uuid.UUID | None:
-    """PR/커밋 제목에서 [SID:uuid] 태그 파싱. 없으면 None(skip 신호)."""
+    """텍스트(PR 제목/본문 또는 브랜치명)에서 SID 태그 파싱.
+
+    `[SID:uuid]`(PR 제목/본문) 또는 `sid-<uuid>`/`sid/<uuid>`(브랜치) 모두 인식. 없으면 None(skip).
+    """
     m = _SID_RE.search(text)
     if not m:
         return None
     try:
-        return uuid.UUID(m.group(1))
-    except ValueError:
+        return uuid.UUID(m.group(1) or m.group(2))
+    except (ValueError, TypeError):
         return None
 
 
