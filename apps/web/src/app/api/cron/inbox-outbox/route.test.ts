@@ -6,7 +6,7 @@ vi.mock('@/lib/fastapi-proxy', () => ({ proxyToFastapi }));
 
 import { GET } from './route';
 
-const PATH = '/api/v2/cron/inbox-outbox';
+const PATH = '/api/v2/internal/cron/inbox-outbox';
 const okRes = (b: unknown = { ok: 1 }) =>
   new Response(JSON.stringify(b), { status: 200, headers: { 'content-type': 'application/json' } });
 const req = () => new Request('http://localhost/api/cron/inbox-outbox');
