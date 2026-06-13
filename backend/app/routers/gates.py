@@ -12,6 +12,10 @@ from app.dependencies.auth import get_current_user, get_verified_org_id
 from app.dependencies.database import get_db
 from app.models.gate import Gate, is_valid_transition
 from app.services.gate_service import create_gate, transition_gate
+from app.services.member_resolver import resolve_member
+
+# 사람 검증 행위(approve/reject) — "human-validated" 웨지 integrity상 휴먼 member만 허용.
+_HUMAN_REVIEW_STATUSES = frozenset({"approved", "rejected"})
 
 router = APIRouter(prefix="/api/v2/gates", tags=["gates"])
 
@@ -116,8 +120,18 @@ async def transition_gate_endpoint(
     body: GateTransitionRequest,
     session: AsyncSession = Depends(get_db),
     org_id: uuid.UUID = Depends(get_verified_org_id),
-    _auth=Depends(get_current_user),
+    auth=Depends(get_current_user),
 ) -> GateResponse:
+    # authz(93fc7aeb): 게이트 approve/reject는 **휴먼 member만**. 에이전트(API key)가 사람 검증
+    # 게이트를 승인하면 "agent-assisted·human-validated" 웨지 전제가 무너지므로 차단(403).
+    # 시스템 auto-resolution(resolve_gate_from_verdict)은 transition_gate 서비스 직호출이라 무영향.
+    if body.status in _HUMAN_REVIEW_STATUSES:
+        resolved = await resolve_member(auth, org_id, session)
+        if resolved.type != "human":
+            raise HTTPException(
+                status_code=403,
+                detail="게이트 승인/거부는 휴먼 멤버만 가능합니다 (에이전트 승인 불가).",
+            )
     try:
         gate = await transition_gate(session, org_id, id, body.status, body.resolver_id, body.note)
         await session.commit()
