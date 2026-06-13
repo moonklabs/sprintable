@@ -132,3 +132,45 @@ async def test_preflight_blocks_409_when_not_auto_merge():
     assert ei.value.status_code == 409  # AC②: active+증거부족 → 전이 차단.
     assert ei.value.detail["code"] == "MERGE_GATE_PENDING"
     db.commit.assert_awaited_once()  # gate audit 보존.
+
+
+# ── [gate] advisory(B) 모드: eval/record는 하되 차단(409) 면제 ─────────────────────
+
+@pytest.mark.anyio
+async def test_merge_gate_advisory_flag():
+    from app.services.merge_verdict_gate import merge_gate_advisory
+    with patch("app.services.merge_verdict_gate.settings") as s:
+        s.h1_merge_gate_advisory = True
+        assert merge_gate_advisory() is True
+        s.h1_merge_gate_advisory = False
+        assert merge_gate_advisory() is False
+
+
+@pytest.mark.anyio
+async def test_preflight_advisory_passes_without_block():
+    # AC①④: advisory=true면 decision≠AUTO_MERGE여도 차단 0(done 통과)·단 eval/gate audit은 수행.
+    from app.routers.stories import _preflight_merge_gate
+    db = AsyncMock()
+    ev = AsyncMock(return_value=_decision(ASK_HUMAN))
+    with patch("app.routers.stories.merge_gate_active", return_value=True), \
+         patch("app.routers.stories.resolve_implementation_participation", new=AsyncMock(return_value=_PART)), \
+         patch("app.routers.stories.evaluate_merge_gate", new=ev), \
+         patch("app.routers.stories.merge_gate_advisory", return_value=True):
+        await _preflight_merge_gate(db, uuid.uuid4(), _story("ready-for-dev"), "done")  # 예외 없음.
+    ev.assert_awaited_once()        # eval은 그대로 수행(decision/gate row/metrics 기록·AC③).
+    db.commit.assert_awaited_once()  # gate audit 보존.
+
+
+@pytest.mark.anyio
+async def test_preflight_enforcing_still_blocks_when_advisory_off():
+    # AC②: advisory=false면 현 enforcing 보존(409 차단).
+    from fastapi import HTTPException
+
+    from app.routers.stories import _preflight_merge_gate
+    with patch("app.routers.stories.merge_gate_active", return_value=True), \
+         patch("app.routers.stories.resolve_implementation_participation", new=AsyncMock(return_value=_PART)), \
+         patch("app.routers.stories.evaluate_merge_gate", new=AsyncMock(return_value=_decision(ASK_HUMAN))), \
+         patch("app.routers.stories.merge_gate_advisory", return_value=False):
+        with pytest.raises(HTTPException) as ei:
+            await _preflight_merge_gate(AsyncMock(), uuid.uuid4(), _story("in-review"), "done")
+    assert ei.value.status_code == 409

@@ -81,6 +81,12 @@ def merge_gate_active(org_id: uuid.UUID) -> bool:
     return (not allow) or (org_id in allow)
 
 
+def merge_gate_advisory() -> bool:
+    """advisory(B) 모드 여부. True면 게이트가 eval/decision/gate row/metrics는 그대로 기록하되
+    →done 차단(409/202)을 면제한다(관측만·done 통과). 미설정=enforcing(A) 보존."""
+    return bool(settings.h1_merge_gate_advisory)
+
+
 @dataclass(frozen=True)
 class MergeGateDecision:
     """머지 게이트 평가 결과. decision을 S3 merge hook가 소비한다."""

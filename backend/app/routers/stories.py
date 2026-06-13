@@ -18,7 +18,12 @@ from app.routers.events import publish_event
 from app.services.event_seq import assign_recipient_seq
 from app.schemas.story import StoryCreate, StoryResponse, StoryStatusUpdate, StoryUpdate
 from app.services.member_resolver import canonicalize_member_id
-from app.services.merge_verdict_gate import AUTO_MERGE, evaluate_merge_gate, merge_gate_active
+from app.services.merge_verdict_gate import (
+    AUTO_MERGE,
+    evaluate_merge_gate,
+    merge_gate_active,
+    merge_gate_advisory,
+)
 from app.services.verdict_capture import resolve_implementation_participation
 from app.services.notification_dispatch import dispatch_notification
 from app.services.story_status_events import emit_story_status_changed
@@ -170,6 +175,9 @@ async def _preflight_merge_gate(
     )
     if decision.decision != AUTO_MERGE:
         await db.commit()  # gate audit 보존(get_db는 예외 시 rollback).
+        # advisory(B): eval/gate row/metrics는 이미 기록됨 — 차단만 면제하고 done 통과(관측만).
+        if merge_gate_advisory():
+            return
         raise HTTPException(
             status_code=409,
             detail={
