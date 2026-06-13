@@ -38,9 +38,11 @@ async def test_dry_run_counts_without_mutating_and_matches_real_filter():
     )
     engine = create_async_engine(url)
     org, project, agent = uuid.uuid4(), uuid.uuid4(), uuid.uuid4()
-    now = datetime(2026, 6, 13, 12, 0, tzinfo=timezone.utc)
+    # 핸들러는 실 wall clock(datetime.now())로 eligible를 판정한다. 시드 시각도 실 now 기준으로
+    # 잡아야(까심 CP④ time-bomb 회피) future run이 wall clock 경과로 eligible 전환되지 않는다.
+    now = datetime.now(timezone.utc)
     past = now - timedelta(hours=1)
-    future = now + timedelta(hours=1)
+    future = now + timedelta(days=1)
 
     def _run(status, nra, rc, mx):
         return AgentRun(id=uuid.uuid4(), org_id=org, project_id=project, agent_id=agent,
