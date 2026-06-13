@@ -16,12 +16,16 @@ from app.services.merge_verdict_gate import (
     ASK_HUMAN,
     AUTO_MERGE,
     BLOCK,
+    MIN_OUTCOME_SAMPLE,
+    TRUST_BASIS,
     MergeGateDecision,
     _decide,
-    _impl_trust,
     _normalize_result,
+    _outcome_stats,
+    _wilson_lower_bound,
     evaluate_merge_gate,
 )
+from app.services import merge_verdict_gate as _mvg
 
 _REAL_DB_URL = os.getenv("PARITY_TEST_DATABASE_URL") or os.getenv("ALEMBIC_DATABASE_URL")
 
@@ -31,21 +35,35 @@ def anyio_backend():
     return "asyncio"
 
 
-# ── _decide 매트릭스 (AC①~⑦) ──────────────────────────────────────────────────
+# ── _decide 매트릭스 (HO-S6: outcome trust 기반·AC①~⑦) ──────────────────────────
+
+def _oc(hit, resolved, pending=0):
+    """outcome 신뢰 근거 stub(실 Wilson 하한으로 구성)."""
+    hr = round(hit / resolved, 4) if resolved else None
+    regret = round((resolved - hit) / resolved, 4) if resolved else None
+    return _mvg._OutcomeStats(
+        hit=hit, resolved=resolved, pending=pending, hit_rate=hr,
+        lower_bound=_wilson_lower_bound(hit, resolved), regret=regret,
+    )
+
+
+# 기본: 90/100 적중 → Wilson 하한 ≈0.83 ≥0.8(충분 표본·높은 하한) → auto 후보.
+_OC_STRONG = _oc(90, 100)
+
 
 def _d(**over):
-    base = dict(ci="pass", pr="pass", gate_status="auto_passed", trust=0.9, threshold=0.8, self_report_only=False)
+    base = dict(ci="pass", pr="pass", gate_status="auto_passed", outcome=_OC_STRONG,
+                threshold=0.8, min_sample=MIN_OUTCOME_SAMPLE, self_report_only=False)
     base.update(over)
     return _decide(**base)
 
 
 def test_decide_ci_fail_blocks():
-    assert _d(ci="fail")[0] == BLOCK  # AC①
+    assert _d(ci="fail")[0] == BLOCK  # AC②: CI fail은 trust 무관 차단.
 
 
 def test_decide_ci_unknown_asks():
-    assert _d(ci=None)[0] == ASK_HUMAN  # AC②
-    # AC⑦: self-report만 → 사유에 명시.
+    assert _d(ci=None)[0] == ASK_HUMAN  # AC③
     dec, reason = _d(ci=None, self_report_only=True)
     assert dec == ASK_HUMAN and "self-report" in reason
 
@@ -54,20 +72,31 @@ def test_decide_deny_blocks():
     assert _d(gate_status="rejected")[0] == BLOCK
 
 
-def test_decide_trust_none_asks():
-    assert _d(trust=None)[0] == ASK_HUMAN  # AC③
+def test_decide_outcome_sample_insufficient_asks():
+    # AC④: outcome 표본 부족(resolved<min) → 사람. 적중률 100%여도 표본 적으면 보류.
+    dec, reason = _d(outcome=_oc(2, 2))
+    assert dec == ASK_HUMAN and "sample insufficient" in reason and TRUST_BASIS in reason
 
 
-def test_decide_all_conditions_auto_merge():
-    assert _d(gate_status="auto_passed", ci="pass", pr="pass", trust=0.85)[0] == AUTO_MERGE  # AC④
+def test_decide_strong_outcome_auto_merge():
+    # AC⑤⑦: 충분 표본 + 높은 Wilson 하한 → auto. 사유에 trust_basis 명시.
+    dec, reason = _d(outcome=_OC_STRONG)
+    assert dec == AUTO_MERGE and TRUST_BASIS in reason and "lower_bound" in reason
 
 
 def test_decide_ask_posture_asks():
-    assert _d(gate_status="pending")[0] == ASK_HUMAN  # AC⑤
+    assert _d(gate_status="pending")[0] == ASK_HUMAN
 
 
-def test_decide_trust_below_threshold_asks():
-    assert _d(trust=0.5)[0] == ASK_HUMAN  # 전조건 미충족 → safe
+def test_decide_lower_bound_below_threshold_asks():
+    # 표본 충분(10)이나 하한<임계(8/10→LB≈0.49) → 자동 불가, 사람.
+    dec, reason = _d(outcome=_oc(8, 10))
+    assert dec == ASK_HUMAN and TRUST_BASIS in reason
+
+
+def test_decide_ci_pass_alone_not_auto():
+    # AC⑦: CI pass만(outcome 표본 0) → 절대 auto 아님.
+    assert _d(outcome=_oc(0, 0))[0] == ASK_HUMAN
 
 
 def test_decide_pr_fail_not_auto():
@@ -81,11 +110,24 @@ def test_normalize_result():
     assert _normalize_result("failure") == "fail" and _normalize_result(None) is None
 
 
-def test_impl_trust_extracts_role_rate():
-    res = {"scores": [{"role_key": "implementation", "clean_pass_rate": 0.92},
-                      {"role_key": "qa", "clean_pass_rate": 0.5}]}
-    assert _impl_trust(res, "implementation") == 0.92
-    assert _impl_trust({"scores": []}, "implementation") is None  # verdict 없음 → None.
+def test_outcome_stats_extracts_role_outcome():
+    # HO-S6: trust 결과(HO-S5)에서 지정 역할의 outcome 근거 추출.
+    res = {"scores": [
+        {"role_key": "implementation", "hit": 7, "resolved": 10, "pending": 2, "hit_rate": 0.7},
+        {"role_key": "qa", "hit": 1, "resolved": 2, "pending": 0, "hit_rate": 0.5},
+    ]}
+    oc = _outcome_stats(res, "implementation")
+    assert oc.hit == 7 and oc.resolved == 10 and oc.pending == 2 and oc.hit_rate == 0.7
+    assert 0 < oc.lower_bound < 0.7 and oc.regret == 0.3  # 하한<점추정·regret=miss rate.
+    empty = _outcome_stats({"scores": []}, "implementation")
+    assert empty.resolved == 0 and empty.hit_rate is None and empty.lower_bound == 0.0
+
+
+def test_wilson_lower_bound_sample_aware():
+    # 표본 작으면 하한이 점추정보다 크게 낮아진다(보수적). n=0→0.
+    assert _wilson_lower_bound(0, 0) == 0.0
+    assert _wilson_lower_bound(1, 1) < 0.5          # 1/1=100%지만 하한은 낮음.
+    assert _wilson_lower_bound(90, 100) > _wilson_lower_bound(9, 10)  # 표본 클수록 하한↑.
 
 
 # ── evaluate_merge_gate 오케스트레이션 (Cage 합성·AC⑥) ──────────────────────────
@@ -99,7 +141,9 @@ def _patch_cage(*, gate_status="auto_passed", trust_scores=None, capture=None, p
         patch.object(mod, "capture_pr_ci_verdict",
                      AsyncMock(return_value=capture or {"recorded": ["pr"], "skipped_reason": None})),
         patch.object(mod, "compute_member_trust_scores",
-                     AsyncMock(return_value=trust_scores or {"scores": [{"role_key": "implementation", "clean_pass_rate": 0.9}]})),
+                     AsyncMock(return_value=trust_scores or {"scores": [{
+                         "role_key": "implementation", "clean_pass_rate": 0.9,
+                         "hit": 90, "resolved": 100, "pending": 0, "hit_rate": 0.9}]})),
         patch.object(mod, "create_gate", AsyncMock(return_value=gate)),
     ]
     return ctx, gate
@@ -126,7 +170,10 @@ async def _run(**cage):
 async def test_evaluate_auto_merge_path():
     res, create_spy = await _run(gate_status="auto_passed")
     assert res.decision == AUTO_MERGE and res.disposition == "allow_auto"
+    # HO-S6: trust=outcome hit_rate(점추정)·근거 명시·하한 노출.
     assert res.trust == 0.9 and res.gate_id is not None
+    assert res.trust_basis == TRUST_BASIS and res.outcome_resolved == 100
+    assert res.outcome_lower_bound >= 0.8 and res.outcome_regret == 0.1
     create_spy.assert_awaited_once()  # AC⑥: gate row.
 
 
@@ -314,10 +361,84 @@ async def test_evaluate_auto_merge_metadata_sufficient():
          patch("app.services.merge_verdict_gate._role_key", AsyncMock(return_value="implementation")), \
          patch("app.services.merge_verdict_gate.capture_pr_ci_verdict", AsyncMock(return_value={"recorded": ["pr"], "skipped_reason": None})), \
          patch("app.services.merge_verdict_gate.compute_member_trust_scores",
-               AsyncMock(return_value={"scores": [{"role_key": "implementation", "clean_pass_rate": 0.95}]})), \
+               AsyncMock(return_value={"scores": [{"role_key": "implementation", "clean_pass_rate": 0.95,
+                   "hit": 95, "resolved": 100, "pending": 0, "hit_rate": 0.95}]})), \
          patch("app.services.merge_verdict_gate.create_gate", AsyncMock(return_value=gate)):
         res = await evaluate_merge_gate(AsyncMock(), uuid.uuid4(), uuid.uuid4(),
                                         pr_number=1, repo="o/r", ci_result="pass", pr_result="pass")
     assert res.decision == AUTO_MERGE
     assert gate.requires_human is False and gate.evidence_status == "sufficient"
     assert gate.auto_decision_reason == AUTO_MERGE
+
+
+# ── HO-S6 키스톤 실DB: 가설 적중 이력만으로 auto_merge ──────────────────────────
+
+@pytest.mark.skipif(not _REAL_DB_URL, reason="real Postgres 필요(PARITY/ALEMBIC_DATABASE_URL)")
+@pytest.mark.anyio
+async def test_strong_outcome_track_record_auto_merges_real_db():
+    """실 compute(mock 아님): implementation 멤버가 과거 hypothesis_outcome_execution verdict를
+    충분히(25건 pass) 쌓으면 Wilson 하한≥0.8 → allow_auto org서 auto_merge. 신뢰 근거가 CI가 아닌
+    가설 적중 이력(trust_basis=hypothesis_outcome)임을 실DB로 입증(AC①⑤⑥)."""
+    from datetime import datetime, timezone
+
+    from sqlalchemy import text as _text
+    from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
+
+    from app.core.database import Base
+    import app.models  # noqa: F401
+    from app.models.hitl_config import OrgGatePolicy
+    from app.models.participation import Participation, ParticipationRole
+    from app.models.pm import Story
+    from app.models.verdict import Verdict
+    from app.services.hypothesis_outcome_verdict import EXECUTION_SOURCE
+
+    url = _REAL_DB_URL.replace("postgresql+psycopg2://", "postgresql+asyncpg://").replace(
+        "postgresql://", "postgresql+asyncpg://"
+    )
+    engine = create_async_engine(url)
+    org, project, role_id, member = (uuid.uuid4() for _ in range(4))
+    cur_story = uuid.uuid4()
+    now = datetime.now(timezone.utc)
+
+    async with engine.begin() as conn:
+        await conn.run_sync(Base.metadata.create_all)
+    Session = async_sessionmaker(engine, expire_on_commit=False)
+    try:
+        async with Session() as s:
+            await s.execute(_text("SET session_replication_role = replica"))
+            s.add_all([
+                ParticipationRole(id=role_id, org_id=org, key="implementation", label="구현", is_default=True),
+                OrgGatePolicy(org_id=org, posture="permissive"),  # → allow_auto.
+                Story(id=cur_story, org_id=org, project_id=project, title="현재 PR", story_points=5),
+                Participation(id=uuid.uuid4(), org_id=org, story_id=cur_story, member_id=member, role_id=role_id),
+            ])
+            # 과거 25건: 각 스토리에 implementation participation + execution verdict(result=pass).
+            for _ in range(25):
+                sid = uuid.uuid4()
+                pid = uuid.uuid4()
+                s.add_all([
+                    Story(id=sid, org_id=org, project_id=project, title="과거", status="done", story_points=3),
+                    Participation(id=pid, org_id=org, story_id=sid, member_id=member, role_id=role_id),
+                    Verdict(id=uuid.uuid4(), org_id=org, participation_id=pid,
+                            source=EXECUTION_SOURCE, result="pass", rounds=0, recorded_at=now),
+                ])
+            await s.commit()
+
+        with patch("app.services.verdict_capture.fetch_pr_review_rounds", AsyncMock(return_value=0)):
+            async with Session() as s:
+                await s.execute(_text("SET session_replication_role = replica"))
+                res = await evaluate_merge_gate(
+                    s, org, cur_story, pr_number=9, repo="o/r", ci_result="pass", pr_result="pass"
+                )
+                await s.commit()
+
+        # 가설 적중 이력(25/25)만으로 Wilson 하한≥0.8 → auto_merge. 근거=hypothesis_outcome.
+        assert res.decision == AUTO_MERGE, res.reason
+        assert res.trust_basis == TRUST_BASIS
+        assert res.outcome_resolved == 25 and res.outcome_hit_rate == 1.0
+        assert res.outcome_lower_bound >= 0.8 and res.outcome_regret == 0.0
+        assert TRUST_BASIS in res.reason
+    finally:
+        async with engine.begin() as conn:
+            await conn.run_sync(Base.metadata.drop_all)
+        await engine.dispose()
