@@ -9,11 +9,11 @@ import os
 import uuid
 from datetime import datetime, timedelta, timezone
 
-from fastapi import APIRouter, Depends, Header, HTTPException, Request
+from fastapi import APIRouter, Depends, Header, HTTPException, Query, Request
 
 logger = logging.getLogger(__name__)
 from fastapi.responses import JSONResponse
-from sqlalchemy import select, update
+from sqlalchemy import func, select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.dependencies.database import get_db
@@ -147,21 +147,33 @@ async def inbox_outbox(
 @router.get("/retry-agent-runs")
 async def retry_agent_runs(
     request: Request,
+    dry_run: bool = Query(default=False),
     session: AsyncSession = Depends(get_db),
 ) -> JSONResponse:
     verify_cron(request)
     try:
         now = datetime.now(timezone.utc)
 
-        # next_retry_at이 도래한 failed run 조회
-        result = await session.execute(
-            select(AgentRun).where(
-                AgentRun.status == "failed",
-                AgentRun.next_retry_at.is_not(None),
-                AgentRun.next_retry_at <= now,
-                AgentRun.retry_count < AgentRun.max_retries,
-            )
+        # next_retry_at이 도래한 failed run의 retry-eligible 필터. dry_run/실행이 **동일 필터**를
+        # 써야 preview 수 == 실제 처리 건수가 보장된다(스케줄 가동 전 surge 규모 정확).
+        eligible_filter = (
+            AgentRun.status == "failed",
+            AgentRun.next_retry_at.is_not(None),
+            AgentRun.next_retry_at <= now,
+            AgentRun.retry_count < AgentRun.max_retries,
         )
+
+        # dry_run: read-only preview — eligible count만 반환·mutate/commit 0(가동 전 안전 점검).
+        if dry_run:
+            count = (
+                await session.execute(
+                    select(func.count()).select_from(AgentRun).where(*eligible_filter)
+                )
+            ).scalar_one()
+            return _ok({"dry_run": True, "eligible_count": int(count)})
+
+        # next_retry_at이 도래한 failed run 조회
+        result = await session.execute(select(AgentRun).where(*eligible_filter))
         pending = list(result.scalars().all())
 
         retried: list[dict] = []
