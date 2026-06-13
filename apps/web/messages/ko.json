@@ -2601,6 +2601,16 @@
     "reasonLabel": "사유",
     "gateReadonlyBlock": "자동 차단 · 읽기 전용",
     "gateReadonlyAuto": "자동 통과 · 액션 불필요",
-    "mergeGateTitle": "머지 게이트"
+    "mergeGateTitle": "머지 게이트",
+    "outcomeTrustLabel": "가설 적중",
+    "outcomeSummary": "적중 {hit} · 판정 {resolved} · 최근 {days}일",
+    "pendingSummary": "측정 대기 {pending}건 · 판정 완료 {resolved}건",
+    "deliverySignalLabel": "납품 신호",
+    "deliveryColLabel": "CI · 납품",
+    "outcomeColLabel": "Outcome · 판단",
+    "coldStartProvisional": "임시 예측",
+    "seedKeep": "유지 예측",
+    "seedKill": "중단 예측",
+    "outcomeAccumulating": "판정 데이터 누적 중"
   }
 }

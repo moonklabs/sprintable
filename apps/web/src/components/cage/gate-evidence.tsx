@@ -57,6 +57,10 @@ export function GateEvidence({ gate, className }: { gate: GateItem; className?: 
   const trust = trustScore(gate);
   const selfReportOnly = gate.neutral_facts?.['self_report_only'] === true;
   const reason = gate.decision_basis ?? gate.auto_decision_reason ?? null;
+  // HO-S8 cold-start: 미확정 outcome은 "임시 예측"(keep/kill)으로만 — 판정/% 환원 절대 X.
+  const coldStartSeed = gate.neutral_facts?.['cold_start_seed'] === true;
+  const seedPrediction = gate.neutral_facts?.['seed_prediction'];
+  const seedKey = seedPrediction === 'keep' ? 'seedKeep' : seedPrediction === 'kill' ? 'seedKill' : null;
 
   return (
     <div className={className}>
@@ -67,36 +71,57 @@ export function GateEvidence({ gate, className }: { gate: GateItem; className?: 
         </Badge>
       ) : null}
 
-      {/* facts: CI · 신뢰도 (배지 아래·muted·· 구분). 리뷰는 gate 미노출이라 v1 제외. */}
-      <div className="mt-1.5 flex flex-wrap items-center gap-x-2 gap-y-0.5 text-[11.5px] text-muted-foreground">
-        <span>
-          {t('ciLabel')}:{' '}
-          {ci === 'pass' ? (
-            <span className="text-success">✓ {t('ciPass')}</span>
-          ) : ci === 'fail' ? (
-            <span className="text-destructive">✗ {t('ciFail')}</span>
-          ) : (
-            <span>? {t('ciUnknown')}</span>
-          )}
-        </span>
-        <span aria-hidden>·</span>
-        <span className="inline-flex items-center gap-1">
-          {t('trustLabel')}:{' '}
-          {trust === null ? (
-            <span className="italic text-muted-foreground">{t('trustScoreNoData')}</span>
-          ) : (
-            <span className="text-foreground">{t('trustScorePercent', { score: Math.round(trust * 100) })}</span>
-          )}
-          {/* 증거가 자기보고뿐(독립 CI verdict 부재) — 신뢰 맥락 보조 신호(보너스). */}
-          {selfReportOnly ? (
-            <span className="rounded bg-muted px-1 py-px text-[10px] text-muted-foreground">{t('selfReportTag')}</span>
-          ) : null}
-        </span>
+      {/* HO-S8 AC①: CI(납품·"통과했다") ↔ Outcome(판단·"옳았다") 2열 분리 — "통과≠옳음" 명시. */}
+      <div className="mt-1.5 grid grid-cols-1 gap-2 text-[11.5px] sm:grid-cols-2 sm:gap-3">
+        {/* 좌: CI · 납품(delivery 신호 — 기계 검증). 신뢰도=clean_pass(delivery)·리뷰는 gate 미노출이라 제외. */}
+        <div className="space-y-0.5">
+          <p className="text-[10px] font-medium uppercase tracking-wide text-muted-foreground/70">{t('deliveryColLabel')}</p>
+          <div className="flex flex-wrap items-center gap-x-2 gap-y-0.5 text-muted-foreground">
+            <span>
+              {t('ciLabel')}:{' '}
+              {ci === 'pass' ? (
+                <span className="text-success">✓ {t('ciPass')}</span>
+              ) : ci === 'fail' ? (
+                <span className="text-destructive">✗ {t('ciFail')}</span>
+              ) : (
+                <span>? {t('ciUnknown')}</span>
+              )}
+            </span>
+            <span aria-hidden>·</span>
+            <span className="inline-flex items-center gap-1">
+              {t('trustLabel')}:{' '}
+              {trust === null ? (
+                <span className="italic text-muted-foreground">{t('trustScoreNoData')}</span>
+              ) : (
+                <span className="text-foreground">{t('trustScorePercent', { score: Math.round(trust * 100) })}</span>
+              )}
+              {selfReportOnly ? (
+                <span className="rounded bg-muted px-1 py-px text-[10px] text-muted-foreground">{t('selfReportTag')}</span>
+              ) : null}
+            </span>
+          </div>
+        </div>
+        {/* 우: Outcome · 판단("옳았다 판정"). gate엔 정밀 hit_rate 없음 → 임시 예측 / 누적 중만(억지 % X·hit_rate %는 TrustScoreCard). */}
+        <div className="space-y-0.5">
+          <p className="text-[10px] font-medium uppercase tracking-wide text-muted-foreground/70">{t('outcomeColLabel')}</p>
+          <div className="text-muted-foreground">
+            {coldStartSeed ? (
+              <span className="inline-flex items-center gap-1.5">
+                <span className="italic">{t('coldStartProvisional')}</span>
+                {seedKey ? (
+                  <Badge variant="chip" className="shrink-0">{t(seedKey)}</Badge>
+                ) : null}
+              </span>
+            ) : (
+              <span className="italic text-muted-foreground/80">{t('outcomeAccumulating')}</span>
+            )}
+          </div>
+        </div>
       </div>
 
       {/* 사유 1줄(decision_basis·AC①②) */}
       {reason ? (
-        <p className="mt-1 text-[11.5px] text-muted-foreground">
+        <p className="mt-1.5 text-[11.5px] text-muted-foreground">
           {t('reasonLabel')} · {reason}
         </p>
       ) : null}
