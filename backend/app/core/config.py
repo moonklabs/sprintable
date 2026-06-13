@@ -71,6 +71,10 @@ class Settings(BaseSettings):
     # 접는조건 後 의도적으로. allowlist 지정 시 해당 org만 게이트(점진 rollout).
     h1_merge_gate_enabled: bool = False
     h1_merge_gate_org_allowlist: str = ""  # CSV org_id — 비면 enabled 시 전 org, 지정 시 해당 org만
+    # advisory(B): set 시 게이트 eval + decision/gate row/metrics는 기록하되 →done 차단(409/202)을
+    # 면제(done 통과·관측만). cold-start 동안 coverage/우회율/seed 데이터 계속 쌓되 고마찰 차단은 면제.
+    # 정책은 A(human-only enforcing)·advisory는 개발/관측용 임시 모드(미설정=enforcing 보존).
+    h1_merge_gate_advisory: bool = False
 
     # E-MEMBER-SSOT AC2-3: 신원 해소를 anchor(members+member_identity_aliases) 기반으로 전환하는
     # shadow 플래그. off(기본)=레거시 resolver(org_members/team_members). on=anchor resolver.

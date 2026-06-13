@@ -23,6 +23,7 @@ from app.services.merge_verdict_gate import (
     MergeGateDecision,
     evaluate_merge_gate,
     merge_gate_active,
+    merge_gate_advisory,
 )
 
 logger = logging.getLogger(__name__)
@@ -170,7 +171,9 @@ async def report_done(
             pr_result=ctx.get("pr_result"),
         )
         await _record_gate_evidence(session, gate_info)
-        if gate_info.decision != AUTO_MERGE:
+        # advisory(B): eval/gate evidence/metrics는 기록(위)하되 차단(409/202·done 보류)은 면제 →
+        # decision 무관 done 통과(관측만). enforcing(미설정)은 아래 분기 그대로.
+        if gate_info.decision != AUTO_MERGE and not merge_gate_advisory():
             story_status = None  # done 전이 차단 — 현재 status 유지(AC①③).
             if gate_info.decision == BLOCK:
                 # gate audit를 보존하고 차단(get_db는 예외 시 rollback이라 명시 commit).
