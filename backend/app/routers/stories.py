@@ -21,6 +21,7 @@ from app.services.member_resolver import canonicalize_member_id
 from app.services.merge_verdict_gate import AUTO_MERGE, evaluate_merge_gate, merge_gate_active
 from app.services.verdict_capture import resolve_implementation_participation
 from app.services.notification_dispatch import dispatch_notification
+from app.services.story_status_events import emit_story_status_changed
 from app.services.webhook_dispatch import fire_webhooks
 from app.services.workflow_pipeline import process_event
 from app.services.rule_evaluator import EventContext
@@ -578,73 +579,12 @@ async def update_story_status(
             except Exception:
                 pass
         epic_title: str | None = None
-        try:
-            epic_title = await _resolve_epic_title(db, story.epic_id)
-        except Exception:
-            pass
-        event_data = {
-            "story_id": str(id),
-            "story_title": story.title,
-            "story_priority": story.priority,
-            "epic_id": str(story.epic_id) if story.epic_id else None,
-            "epic_title": epic_title,
-            "status": story.status,
-            "new_status": story.status,
-            "old_status": old_status,
-            "project_id": str(story.project_id),
-            "org_id": str(org_id),
-            "actor_id": str(actor_id) if actor_id else None,
-            "actor_name": actor_name,
-            "actor_role": actor_role,
-            "source_agent_id": str(actor_id) if (actor_id and actor_type == "agent") else None,
-            "assignees": [str(story.assignee_id)] if story.assignee_id else [],
-            "timestamp": datetime.now(timezone.utc).isoformat(),
-        }
-        publish_event(str(org_id), "story.status_changed", event_data)
-        try:
-            await fire_webhooks(db, org_id, "story.status_changed", event_data)
-        except Exception:
-            pass
-        try:
-            await process_event(db, org_id, story.project_id, EventContext(
-                event_type="story.status_changed",
-                trigger_type_slug="status_changed",
-                actor_id=str(actor_id) if actor_id else None,
-                metadata=event_data,
-            ))
-        except Exception:
-            pass
-        # E-EVENTBUS P3 S9: story_status_changed → assignee + actor에게 알림
-        notify_ids: set[uuid.UUID] = set()
-        if story.assignee_id:
-            notify_ids.add(story.assignee_id)
-        if actor_id and actor_id != story.assignee_id:
-            notify_ids.add(actor_id)
-        if notify_ids:
-            await dispatch_notification(
-                db,
-                org_id=org_id,
-                event_type="story_status_changed",
-                target_member_ids=list(notify_ids),
-                title=f"스토리 상태 변경: {story.title} → {story.status}",
-                body=None,
-                reference_type="story",
-                reference_id=story.id,
-            )
-        if actor_id:
-            try:
-                db.add(StoryActivity(
-                    story_id=id,
-                    org_id=org_id,
-                    project_id=story.project_id,
-                    activity_type="status_changed",
-                    old_value=old_status,
-                    new_value=story.status,
-                    created_by=(await canonicalize_member_id(actor_id, db)),  # AC3-2d(1b) canonical
-                ))
-                await db.flush()
-            except Exception:
-                pass
+        # 41a6e294: status_changed side-effects(events→L1·webhook·L2·notif·activity)는 공유 helper로
+        # 발화 — gate-driven done(gate_service)과 동일 경로(parity·드리프트 0).
+        await emit_story_status_changed(
+            db, org_id, story, old_status,
+            actor_id=actor_id, actor_name=actor_name, actor_role=actor_role, actor_type=actor_type,
+        )
 
     # S-C2: story_updated — actor가 agent인 경우 기록 (AC2, AC6)
     if actor_id:

@@ -142,8 +142,19 @@ async def _advance_story_on_merge_approve(session: AsyncSession, gate: Gate, new
 
     story = await session.get(Story, gate.work_item_id)
     if story is not None and story.status != "done":
+        old_status = story.status
         story.status = "done"
         await session.flush()
+        # 41a6e294: gate-driven done도 정상 status-change side-effects를 발화 — events(→L1
+        # activity_events 캡처=verdict 증거원)·webhook·L2 trigger·notification·activity. status만
+        # 직접 set하면 활동그래프 누락(게이트가 만든 done이 게이트 증거에 안 잡히는 자기모순).
+        # actor=resolver(승인 휴먼·#1504로 휴먼 보장). 정상 board 경로와 공유 helper(parity).
+        from app.services.story_status_events import emit_story_status_changed
+
+        await emit_story_status_changed(
+            session, gate.org_id, story, old_status,
+            actor_id=gate.resolver_id, actor_type="human",
+        )
 
 
 # gate_type → verdict source (qa→qa·merge→merge·deploy→design·pr_review→pr).

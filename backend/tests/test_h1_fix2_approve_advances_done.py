@@ -22,8 +22,21 @@ def anyio_backend():
     return "asyncio"
 
 
+@pytest.fixture(autouse=True)
+def _mock_status_side_effects():
+    """41a6e294: _advance_story_on_merge_approve가 done 진행 후 status_changed side-effects를
+    발화하므로, status 진행 로직만 검증하는 단위 테스트에서는 emit을 격리(실제 발화는 별도 실DB로 검증)."""
+    with patch(
+        "app.services.story_status_events.emit_story_status_changed", new=AsyncMock()
+    ):
+        yield
+
+
 def _gate(gate_type="merge", work_item_type="story"):
-    return SimpleNamespace(gate_type=gate_type, work_item_type=work_item_type, work_item_id=uuid.uuid4())
+    return SimpleNamespace(
+        gate_type=gate_type, work_item_type=work_item_type,
+        work_item_id=uuid.uuid4(), org_id=uuid.uuid4(), resolver_id=uuid.uuid4(),
+    )
 
 
 # ── 단위 ───────────────────────────────────────────────────────────────────────
