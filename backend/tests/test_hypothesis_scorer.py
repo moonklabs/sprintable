@@ -18,6 +18,17 @@ def anyio_backend():
     return "asyncio"
 
 
+@pytest.fixture(autouse=True)
+def _mock_outcome_verdicts():
+    """HO-S4: scorer가 해소 직후 record_outcome_verdicts를 호출하므로, 전이 로직만 검증하는 기존
+    테스트(mock session)에서는 배선 호출을 격리한다(scorer 불변식 어서션 유지·AC③)."""
+    with patch(
+        "app.services.hypothesis_outcome_verdict.record_outcome_verdicts",
+        new=AsyncMock(return_value={"skipped_reason": "no_linked_story", "bet": [], "execution": []}),
+    ):
+        yield
+
+
 def _hyp(status="active", source="ga4", **ov):
     md = {"metric": "signups", "source": source, "target": 100, "direction": "up"}
     base = dict(

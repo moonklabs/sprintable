@@ -64,6 +64,10 @@ async def score_hypotheses(session: AsyncSession) -> dict[str, Any]:
     falsified: list[str] = []
     pending: list[str] = []
     failed: list[dict] = []
+    # HO-S4: 해소(verified/falsified) 직후 outcome verdict 배선 결과(가설 적중 이력→trust).
+    verdicts_recorded: list[dict] = []
+    verdicts_skipped: list[dict] = []
+    from app.services.hypothesis_outcome_verdict import record_outcome_verdicts
 
     hyps = (await session.execute(
         select(Hypothesis).where(
@@ -100,6 +104,17 @@ async def score_hypotheses(session: AsyncSession) -> dict[str, Any]:
             hyp.status = new_status
             hyp.outcome_result = scoring["outcome_result"]
             (verified if new_status == "verified" else falsified).append(str(hyp.id))
+            # HO-S4(AC①): 해소 직후 outcome→verdict 배선(체인: scorer→verdict→trust 닫힘).
+            # manual/pending은 여기 도달 안 함(new_status None)이라 verdict 0(AC④).
+            vres = await record_outcome_verdicts(session, hyp)
+            if vres.get("skipped_reason"):
+                verdicts_skipped.append({"hypothesis_id": str(hyp.id), "reason": vres["skipped_reason"]})
+            else:
+                verdicts_recorded.append({
+                    "hypothesis_id": str(hyp.id),
+                    "bet": vres.get("bet", []),
+                    "execution": vres.get("execution", []),
+                })
         else:
             pending.append(str(hyp.id))  # measuring 유지
 
@@ -110,4 +125,7 @@ async def score_hypotheses(session: AsyncSession) -> dict[str, Any]:
         "pending": pending,
         "failed": failed,
         "total": len(hyps),
+        # HO-S4(AC②): outcome verdict 배선 결과를 cron response에 노출.
+        "verdicts_recorded": verdicts_recorded,
+        "verdicts_skipped": verdicts_skipped,
     }
