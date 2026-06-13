@@ -114,6 +114,12 @@ async def transition_gate(
     # H1-S7: 사람 게이트 해소(approve/reject)를 verdict로 기록 — trust로 환류.
     await _record_gate_review_verdict(session, org_id, gate, new_status, resolver_id)
 
+    # HO-S7: cold-start(outcome 표본 부족)에서 사람의 keep/kill 결정을 seed로 기록(trust 본점수
+    # 미포함·outcome 해소 후 calibration). merge·cold-start가 아니면 no-op.
+    from app.services.cold_start_seed import record_cold_start_seed  # 순환 회피 lazy import.
+
+    await record_cold_start_seed(session, org_id, gate, new_status, resolver_id)
+
     # H1-FIX-2: merge 게이트 approve → work item 스토리를 done으로 진행(_preflight 재평가 우회).
     # S7은 verdict만 기록하고 →done 진행을 안 박아, 사람이 approve해도 일이 done에 도달 못 하고
     # done 재시도 시 재평가→ask_human 재발로 막히던 dogfood 갭을 닫는다.
