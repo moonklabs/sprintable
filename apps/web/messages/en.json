@@ -2601,6 +2601,16 @@
     "reasonLabel": "Reason",
     "gateReadonlyBlock": "Auto-blocked · read-only",
     "gateReadonlyAuto": "Auto-passed · no action needed",
-    "mergeGateTitle": "Merge gate"
+    "mergeGateTitle": "Merge gate",
+    "outcomeTrustLabel": "Outcome trust",
+    "outcomeSummary": "{hit} hit · {resolved} resolved · last {days}d",
+    "pendingSummary": "{pending} pending · {resolved} resolved",
+    "deliverySignalLabel": "Delivery signal",
+    "deliveryColLabel": "CI · delivery",
+    "outcomeColLabel": "Outcome · verdict",
+    "coldStartProvisional": "Provisional",
+    "seedKeep": "Keep",
+    "seedKill": "Kill",
+    "outcomeAccumulating": "Awaiting verdict data"
   }
 }
