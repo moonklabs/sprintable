@@ -73,12 +73,30 @@ async def test_preflight_noop_when_not_done():
     ev.assert_not_awaited()  # done 아니면 게이트 0.
 
 
+_PART = SimpleNamespace(id=uuid.uuid4(), member_id=uuid.uuid4(), role_id=uuid.uuid4())
+
+
 @pytest.mark.anyio
-async def test_preflight_noop_when_not_in_review():
+async def test_preflight_noop_when_no_participation():
+    # fc06fa8d(④·AC②): impl participation 없는 trivial todo→done은 skip(마찰 0).
     from app.routers.stories import _preflight_merge_gate
-    with patch("app.routers.stories.evaluate_merge_gate", new=AsyncMock()) as ev:
+    with patch("app.routers.stories.merge_gate_active", return_value=True), \
+         patch("app.routers.stories.resolve_implementation_participation", new=AsyncMock(return_value=None)), \
+         patch("app.routers.stories.evaluate_merge_gate", new=AsyncMock()) as ev:
         await _preflight_merge_gate(AsyncMock(), uuid.uuid4(), _story("todo"), "done")
-    ev.assert_not_awaited()  # in-review→done만 대상.
+    ev.assert_not_awaited()
+
+
+@pytest.mark.anyio
+async def test_preflight_gates_non_in_review_with_participation():
+    # fc06fa8d(④·AC①③): 출발 status 무관(rfd/todo→done)도 participation 보유면 게이트 발화(우회 박멸).
+    from app.routers.stories import _preflight_merge_gate
+    with patch("app.routers.stories.merge_gate_active", return_value=True), \
+         patch("app.routers.stories.resolve_implementation_participation", new=AsyncMock(return_value=_PART)), \
+         patch("app.routers.stories.evaluate_merge_gate",
+               new=AsyncMock(return_value=_decision(AUTO_MERGE))) as ev:
+        await _preflight_merge_gate(AsyncMock(), uuid.uuid4(), _story("ready-for-dev"), "done")
+    ev.assert_awaited_once()  # in-review 아닌 경로도 게이트 통과 강제.
 
 
 @pytest.mark.anyio
@@ -87,13 +105,14 @@ async def test_preflight_noop_when_flag_off():
     with patch("app.routers.stories.merge_gate_active", return_value=False), \
          patch("app.routers.stories.evaluate_merge_gate", new=AsyncMock()) as ev:
         await _preflight_merge_gate(AsyncMock(), uuid.uuid4(), _story("in-review"), "done")
-    ev.assert_not_awaited()  # AC①: 플래그 off면 in-review→done이어도 게이트 0(기존 PATCH 무변경).
+    ev.assert_not_awaited()  # AC①: 플래그 off면 게이트 0(기존 PATCH 무변경).
 
 
 @pytest.mark.anyio
 async def test_preflight_passes_when_auto_merge():
     from app.routers.stories import _preflight_merge_gate
     with patch("app.routers.stories.merge_gate_active", return_value=True), \
+         patch("app.routers.stories.resolve_implementation_participation", new=AsyncMock(return_value=_PART)), \
          patch("app.routers.stories.evaluate_merge_gate", new=AsyncMock(return_value=_decision(AUTO_MERGE))):
         await _preflight_merge_gate(AsyncMock(), uuid.uuid4(), _story("in-review"), "done")
     # 예외 없음 = 전이 허용.
@@ -106,6 +125,7 @@ async def test_preflight_blocks_409_when_not_auto_merge():
     from app.routers.stories import _preflight_merge_gate
     db = AsyncMock()
     with patch("app.routers.stories.merge_gate_active", return_value=True), \
+         patch("app.routers.stories.resolve_implementation_participation", new=AsyncMock(return_value=_PART)), \
          patch("app.routers.stories.evaluate_merge_gate", new=AsyncMock(return_value=_decision(ASK_HUMAN))):
         with pytest.raises(HTTPException) as ei:
             await _preflight_merge_gate(db, uuid.uuid4(), _story("in-review"), "done")

@@ -19,6 +19,7 @@ from app.services.event_seq import assign_recipient_seq
 from app.schemas.story import StoryCreate, StoryResponse, StoryStatusUpdate, StoryUpdate
 from app.services.member_resolver import canonicalize_member_id
 from app.services.merge_verdict_gate import AUTO_MERGE, evaluate_merge_gate, merge_gate_active
+from app.services.verdict_capture import resolve_implementation_participation
 from app.services.notification_dispatch import dispatch_notification
 from app.services.webhook_dispatch import fire_webhooks
 from app.services.workflow_pipeline import process_event
@@ -145,15 +146,23 @@ async def _upsert_assignee_participation(
 async def _preflight_merge_gate(
     db: AsyncSession, org_id: uuid.UUID, story, new_status: str | None
 ) -> None:
-    """H1-S5: board 직접 PATCH로 in-review→done 전이 시 merge verdict gate preflight.
+    """H1-S5 + fc06fa8d(④): board PATCH로 →done 전이 시 merge verdict gate preflight.
 
-    게이트 active(`merge_gate_active`·flag+allowlist)이고 in-review→done일 때만 동작 — auto_merge가
-    아니면 409로 전이 차단(status 유지). 플래그 off면 즉시 반환해 기존 PATCH 동작 무변경(AC①).
-    board PATCH엔 PR/CI 컨텍스트가 없으므로(ci_result=None) 증거 없이 done 시도는 보류된다.
+    게이트 active(`merge_gate_active`·flag+allowlist)이고 **impl participation(=실작업) 보유**
+    스토리의 →done 전이일 때 동작 — auto_merge가 아니면 409로 차단(status 유지).
+
+    fc06fa8d: in-review→done뿐 아니라 **출발 status 무관 모든 →done**을 게이트(rfd/in-progress→done
+    우회 박멸·라이브 coverage 0.0 실측). 단 participation 없는 trivial todo→done은 skip(마찰 0).
+    게이트 목적(머지=코드작업 검증)과 정렬. 플래그 off면 즉시 반환(기존 PATCH 무변경). board PATCH엔
+    PR/CI 컨텍스트 없으므로(ci_result=None) 증거 없는 done은 보류된다.
     """
-    if new_status != "done" or story is None or getattr(story, "status", None) != "in-review":
+    if new_status != "done" or story is None or getattr(story, "status", None) == "done":
         return
     if not merge_gate_active(org_id):
+        return
+    # ④: impl participation(실작업) 보유 스토리만 게이트. 없으면 trivial → skip(마찰 0).
+    participation = await resolve_implementation_participation(db, org_id, story.id)
+    if participation is None:
         return
     decision = await evaluate_merge_gate(
         db, org_id, story.id, pr_number=0, repo="", ci_result=None, pr_result=None
@@ -164,7 +173,7 @@ async def _preflight_merge_gate(
             status_code=409,
             detail={
                 "code": "MERGE_GATE_PENDING",
-                "message": f"in-review→done은 merge 게이트 통과 필요: {decision.reason}",
+                "message": f"done 전이는 merge 게이트 통과 필요: {decision.reason}",
                 "decision": decision.decision,
                 "gate_id": str(decision.gate_id) if decision.gate_id else None,
                 "requires_human": True,
