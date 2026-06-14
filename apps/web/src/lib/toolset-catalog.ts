@@ -2,7 +2,7 @@
  * E-MCP-RIGHT S1 (2da32fbf) — toolset 카탈로그 계약 (picker 데이터 SSOT).
  *
  * picker는 선택지(전체 그룹 + 그룹별 멤버 툴 + core/destructive 플래그)를 이 계약으로 받는다.
- * SSOT = BE `GET /api/v2/mcp/toolset-catalog` (디디 BE / S2 연장). FE 하드코딩 금지.
+ * SSOT = BE `GET /api/v2/mcp/toolset-catalog` (BE / S2 연장). FE 하드코딩 금지.
  *
  * BE 엔드포인트 준비 전까지는 골격 렌더용 임시 상수(TEMP_TOOLSET_CATALOG)로 폴백한다.
  * 그룹키·core/destructive 플래그는 `backend/app/services/mcp_toolset.py`(SSOT)와 정합하며,

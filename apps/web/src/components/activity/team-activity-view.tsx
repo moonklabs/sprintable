@@ -12,7 +12,7 @@ import { getEventTypeCopy, KNOWN_EVENT_TYPE_VERBS } from '@/services/notificatio
 import { getEntityHref } from '@/components/chat/embed-card';
 import { cn } from '@/lib/utils';
 
-// ─── Types (BE ActivityStreamItem flat 실측 — 유나 doc §10 정정 정합) ──────────────
+// ─── Types (BE ActivityStreamItem flat 실측 — doc §10 정정 정합) ──────────────
 interface ActivityStreamItem {
   activity_id: string;
   project_id: string;
