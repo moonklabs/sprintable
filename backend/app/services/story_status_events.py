@@ -103,16 +103,21 @@ async def emit_story_status_changed(
     if actor_id and actor_id != story.assignee_id:
         notify_ids.add(actor_id)
     if notify_ids:
-        await dispatch_notification(
-            db,
-            org_id=org_id,
-            event_type="story_status_changed",
-            target_member_ids=list(notify_ids),
-            title=f"스토리 상태 변경: {story.title} → {story.status}",
-            body=None,
-            reference_type="story",
-            reference_id=story.id,
-        )
+        # notif도 best-effort 격리 — gate 경로는 flush後 commit前 emit이라 notif 실패가 story done을
+        # 롤백할 수 있다. 나머지 4 side-effect와 동일하게 isolation.
+        try:
+            await dispatch_notification(
+                db,
+                org_id=org_id,
+                event_type="story_status_changed",
+                target_member_ids=list(notify_ids),
+                title=f"스토리 상태 변경: {story.title} → {story.status}",
+                body=None,
+                reference_type="story",
+                reference_id=story.id,
+            )
+        except Exception:
+            pass
 
     if actor_id:
         try:
