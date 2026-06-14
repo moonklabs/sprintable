@@ -8,7 +8,7 @@
 ⚠️ working 집계는 멀티인스턴스 per-instance best-effort(`chat_presence` in-memory 한계 동일).
 마이그 불요(읽기 집계).
 
-응답 계약(FE 미르코 정합):
+응답 계약(FE 정합):
   GET /api/v2/team-presence → [
     {member_id, name, avatar_url, agent_role, runtime_type,
      presence_status: "online"|"idle"|"offline", working: bool,
