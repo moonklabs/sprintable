@@ -45,7 +45,7 @@ export function AddMemberModal({ open, onClose, orgId, projects, defaultType = '
   };
   const close = () => { reset(); onClose(); };
 
-  // CP4(까심): 모달은 열릴 때마다 fresh state로 — type을 현 defaultType(활성 subtab)에 동기화 +
+  // CP4: 모달은 열릴 때마다 fresh state로 — type을 현 defaultType(활성 subtab)에 동기화 +
   // 폼/error 초기화. close→reopen 시 직전 선택(예: 에이전트) persist 방지.
   useEffect(() => {
     if (!open) return;

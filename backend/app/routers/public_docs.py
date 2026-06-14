@@ -3,7 +3,7 @@
 ⚠️ 인증 Depends 를 의도적으로 생략한다(글로벌 auth 미들웨어 부재·per-route Depends 구조라
    생략=공개). opaque share token 만으로 단일 문서 read. 메타 누출 0·내부링크 비resolve 는
    FE 공개 뷰어가 담당. FE 프록시(`/api/public/docs/[token]`) + proxy.ts `PUBLIC_PREFIX` 등록은
-   미르코군 FE 레인.
+   FE 레인.
 """
 import uuid
 

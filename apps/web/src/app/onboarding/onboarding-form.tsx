@@ -109,7 +109,7 @@ export function OnboardingForm({ initialStep, initialOrgId }: OnboardingFormProp
     }
 
     setOrgId(json.data.id);
-    // E-ONB S5 FINAL(까심 진단): org 생성 시 org_member가 최초 생성됨 → 즉시 토큰 refresh로
+    // E-ONB S5 FINAL: org 생성 시 org_member가 최초 생성됨 → 즉시 토큰 refresh로
     // 새 JWT에 org_id(BE auth Path4 org_member fallback) 반영. 이래야 다음 단계 project 생성의
     // getAuthContext(/api/v2/me)가 통과한다(미refresh 시 fresh JWT엔 team_member 없어 me null → 401).
     await fetch('/api/auth/refresh', { method: 'POST' }).catch(() => null);
