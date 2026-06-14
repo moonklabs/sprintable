@@ -138,15 +138,13 @@ async def _attach_assignee_ids(
 async def _upsert_assignee_participation(
     session: AsyncSession, org_id: uuid.UUID, story_id: uuid.UUID, assignee_id: uuid.UUID
 ) -> None:
-    """assignee 설정 시 implementation(default) 역할 participation 자동 upsert (멱등)."""
-    from app.repositories.participation import ParticipationRepository, ParticipationRoleRepository
-    role_repo = ParticipationRoleRepository(session, org_id)
-    default_role = await role_repo.get_default()
-    if default_role is None:
-        return
-    p_repo = ParticipationRepository(session, org_id)
-    if not await p_repo.exists(story_id, assignee_id, default_role.id):
-        await p_repo.create(story_id=story_id, member_id=assignee_id, role_id=default_role.id)
+    """assignee 설정 시 implementation(default) 역할 participation 자동 upsert (멱등).
+
+    3414b6d7: 로직은 공유 helper로 추출 — claim 경로(team_members)와 동일 attribution 진입점.
+    """
+    from app.services.participation_helpers import ensure_implementation_participation
+
+    await ensure_implementation_participation(session, org_id, story_id, assignee_id)
 
 
 async def _preflight_merge_gate(

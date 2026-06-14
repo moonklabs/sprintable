@@ -398,6 +398,10 @@ async def claim_story(
     # AC3-4 2-2: anchor-only — agent_project_profiles가 presence 유일 소스.
     from app.services.agent_anchor_sync import sync_agent_profile_presence
     await sync_agent_profile_presence(session, id, active_story_id=body.story_id, agent_status="online", last_seen_at=now)
+    # 3414b6d7: claim=일 시작=실작업자 → implementation participation 멱등 생성(게이트/verdict
+    # attribution). assignee(board)는 안 건드림 — participation만(claim만 하고 done해도 평가 가능).
+    from app.services.participation_helpers import ensure_implementation_participation
+    await ensure_implementation_participation(session, org_id, body.story_id, id)
     return {"claimed": True, "story_id": str(body.story_id)}
 
 
