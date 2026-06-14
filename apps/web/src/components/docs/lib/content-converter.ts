@@ -266,7 +266,7 @@ turndown.addRule('blockquote', {
 // Order: <code> class (markdownToHtml output) → <pre> data-language / class (tiptap
 // getHTML + legacy). Belt-and-suspenders with the renderHTML fix in code-block-copy.tsx.
 // Find the <code> via element children rather than firstChild so a whitespace text node
-// between <pre> and <code> doesn't drop the rule to Turndown's default (디디 review note;
+// between <pre> and <code> doesn't drop the rule to Turndown's default (review note;
 // `children` is used instead of `:scope > code` which domino does not reliably support).
 const fenceCodeChild = (pre: HTMLElement): HTMLElement | null =>
   (Array.from(pre.children).find((c) => c.nodeName === 'CODE') as HTMLElement | undefined) ?? null;

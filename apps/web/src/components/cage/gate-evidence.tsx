@@ -13,8 +13,8 @@ import type { GateItem } from '@/components/kanban/types';
  * 플랫폼은 위험도 판단을 하지 않는다(neutral_facts = 관찰 사실).
  *
  * decision 배지 3종(BE decision = auto_merge|ask_human|block). gate status=pending(미transition)은
- * ask_human "확인 필요"로 통합(유나 정합 노트 — 별도 "대기" 배지 불필요). 리뷰 증거는 gate 응답에
- * 미노출이라 v1 제외(억지 "없음"=오정보·디디 follow-up). evidence_status는 배지 X·맥락 보조만.
+ * ask_human "확인 필요"로 통합(정합 노트 — 별도 "대기" 배지 불필요). 리뷰 증거는 gate 응답에
+ * 미노출이라 v1 제외(억지 "없음"=오정보·follow-up). evidence_status는 배지 X·맥락 보조만.
  */
 
 type Decision = 'auto_merge' | 'ask_human' | 'block';

@@ -13,7 +13,7 @@ const MERGE_GATE_TYPE = 'merge';
  * (빈 섹션 미표시). 액션(승인/반려)은 surface①(GateInbox)에만 — 여기는 표시만.
  *
  * 데이터: GET /api/gates?work_item_id=<story>&work_item_type=story (raw 배열 패스스루). story↔gate
- * 매핑 단순(BE list_gates work_item_id 필터)이라 v1 포함(유나 기준·추가 BE 0).
+ * 매핑 단순(BE list_gates work_item_id 필터)이라 v1 포함(기준·추가 BE 0).
  */
 export function StoryMergeGate({ storyId }: { storyId: string }) {
   const t = useTranslations('cage');

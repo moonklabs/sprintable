@@ -55,7 +55,7 @@ export function ChatView({ threadId, currentTeamMemberId, projectId, apiPrefix =
   // S5: 미지원 런타임 커맨드 차단 hint — 트리거 메시지 id에 keyed된 ephemeral state.
   // POST 응답 command_gate.blocked에서만 적재(persist 안 함·reload 시 소멸).
   const [commandHints, setCommandHints] = useState<Record<string, BlockedHint[]>>({});
-  // 1aeecdde P2: 답장 생성 중 에이전트 typing — 디디 #1353 GET /working 폴링(BE 45s TTL) 결과.
+  // 1aeecdde P2: 답장 생성 중 에이전트 typing — #1353 GET /working 폴링(BE 45s TTL) 결과.
   const [typingAgents, setTypingAgents] = useState<{ id: string; name: string }[]>([]);
   // CB-S9: 스레드 패널 상태
   const [activeThread, setActiveThread] = useState<ChatMessage | null>(null);
@@ -191,7 +191,7 @@ export function ChatView({ threadId, currentTeamMemberId, projectId, apiPrefix =
     fetchMessages();
   }, [fetchMessages]);
 
-  // 1aeecdde P2: working 폴링(디디 #1353 GET /working·in-memory 45s TTL) → typingAgents.
+  // 1aeecdde P2: working 폴링(#1353 GET /working·in-memory 45s TTL) → typingAgents.
   // 이름=commandTargets(없으면 미표시 graceful). poll이 BE working 셋 그대로 반영(클라 TTL 불요).
   const fetchWorking = useCallback(async () => {
     try {
