@@ -214,6 +214,13 @@ export function KanbanBoard({ projectId }: KanbanBoardProps) {
     return { stories, total, nextCursor };
   }, [projectId, selectedSprintId]);
 
+  // E-POLISH (story 23ea0e1d): columnTotals는 fetchData에서 단 1회 세팅되므로
+  // optimistic mutation이 setStories만 갱신하면 카운트 배지가 stale해진다.
+  // 컬럼 멤버십을 바꾸는 모든 경로에서 이 헬퍼로 per-status total을 lockstep 조정한다.
+  const adjustColumnTotal = useCallback((status: string, delta: number) => {
+    setColumnTotals((prev) => ({ ...prev, [status]: Math.max(0, (prev[status] ?? 0) + delta) }));
+  }, []);
+
   const fetchData = useCallback(async () => {
     setLoading(true);
     try {
@@ -545,6 +552,11 @@ export function KanbanBoard({ projectId }: KanbanBoardProps) {
     setStories((prev) =>
       prev.map((s) => (s.id === storyId ? { ...s, status: newStatus, position: newPosition } : s)),
     );
+    // cross-column 이동만 카운트 변동 (same-column 재정렬은 무변경)
+    if (!isSameColumn) {
+      adjustColumnTotal(story.status, -1);
+      adjustColumnTotal(newStatus, +1);
+    }
 
     if (isSameColumn) {
       // 같은 컬럼 내 재정렬 — position만 PATCH (fire-and-forget)
@@ -564,10 +576,12 @@ export function KanbanBoard({ projectId }: KanbanBoardProps) {
         body: JSON.stringify({ items: [{ id: storyId, status: newStatus }] }),
       });
       if (!res.ok) {
-        // 롤백
+        // 롤백 (카운트도 원복)
         setStories((prev) =>
           prev.map((s) => (s.id === storyId ? { ...s, status: story.status, position: story.position } : s)),
         );
+        adjustColumnTotal(newStatus, -1);
+        adjustColumnTotal(story.status, +1);
         const errJson = await res.json().catch(() => null);
         const code = errJson?.error?.code;
         if (code === 'INVALID_TRANSITION') {
@@ -586,10 +600,12 @@ export function KanbanBoard({ projectId }: KanbanBoardProps) {
         body: JSON.stringify({ position: newPosition }),
       });
     } catch {
-      // 롤백
+      // 롤백 (카운트도 원복)
       setStories((prev) =>
         prev.map((s) => (s.id === storyId ? { ...s, status: story.status, position: story.position } : s)),
       );
+      adjustColumnTotal(newStatus, -1);
+      adjustColumnTotal(story.status, +1);
     }
   };
 
@@ -608,6 +624,8 @@ export function KanbanBoard({ projectId }: KanbanBoardProps) {
     setStories((prev) =>
       prev.map((s) => (s.id === storyId ? { ...s, status: newStatus } : s)),
     );
+    adjustColumnTotal(story.status, -1);
+    adjustColumnTotal(newStatus, +1);
 
     // API call
     try {
@@ -617,10 +635,12 @@ export function KanbanBoard({ projectId }: KanbanBoardProps) {
         body: JSON.stringify({ items: [{ id: storyId, status: newStatus }] }),
       });
       if (!res.ok) {
-        // Rollback
+        // Rollback (카운트도 원복)
         setStories((prev) =>
           prev.map((s) => (s.id === storyId ? { ...s, status: story.status } : s)),
         );
+        adjustColumnTotal(newStatus, -1);
+        adjustColumnTotal(story.status, +1);
         const errJson = await res.json().catch(() => null);
         const code = errJson?.error?.code;
         if (code === 'INVALID_TRANSITION') {
@@ -632,12 +652,14 @@ export function KanbanBoard({ projectId }: KanbanBoardProps) {
         }
       }
     } catch {
-      // Rollback
+      // Rollback (카운트도 원복)
       setStories((prev) =>
         prev.map((s) => (s.id === storyId ? { ...s, status: story.status } : s)),
       );
+      adjustColumnTotal(newStatus, -1);
+      adjustColumnTotal(story.status, +1);
     }
-  }, [stories, t]);
+  }, [stories, t, adjustColumnTotal]);
 
   const handleAssignStory = useCallback(async (storyId: string) => {
     // TODO: Implement proper member selection UI
@@ -649,8 +671,10 @@ export function KanbanBoard({ projectId }: KanbanBoardProps) {
   }, [stories, handleStoryClick]);
 
   const handleDeleteStory = useCallback(async (storyId: string) => {
+    const story = stories.find((s) => s.id === storyId);
     // Optimistic update
     setStories((prev) => prev.filter((s) => s.id !== storyId));
+    if (story) adjustColumnTotal(story.status, -1);
 
     try {
       const res = await fetch(`/api/stories/${storyId}`, {
@@ -660,13 +684,13 @@ export function KanbanBoard({ projectId }: KanbanBoardProps) {
       if (!res.ok) {
         const json = await res.json().catch(() => null) as { error?: { message?: string } } | null;
         addToast({ type: 'error', title: json?.error?.message ?? '스토리 삭제에 실패했습니다.' });
-        await fetchData();
+        await fetchData(); // 카운트/스토리 전량 재동기화 (수동 롤백 불필요)
       }
     } catch {
       addToast({ type: 'error', title: '스토리 삭제에 실패했습니다.' });
       await fetchData();
     }
-  }, [fetchData, addToast]);
+  }, [stories, fetchData, addToast, adjustColumnTotal]);
 
   const handleKickoff = useCallback((_storyId: string, result: 'triggered' | 'no_match' | 'conflict' | 'error') => {
     const messages: Record<string, { title: string; type: 'success' | 'error' | 'info' | 'warning' }> = {
@@ -701,10 +725,11 @@ export function KanbanBoard({ projectId }: KanbanBoardProps) {
       const json = await res.json();
       const created = json.data as KanbanStory;
       setStories((prev) => [...prev, created]);
+      adjustColumnTotal(columnId, +1);
     } catch {
       setTransitionError(t('createStoryFailed'));
     }
-  }, [projectId, selectedSprintId, selectedEpicId, t]);
+  }, [projectId, selectedSprintId, selectedEpicId, t, adjustColumnTotal]);
 
   // AC1/AC5: WIP limit 핸들러
   const handleWipLimitEdit = useCallback((columnId: string) => {
@@ -1254,11 +1279,20 @@ export function KanbanBoard({ projectId }: KanbanBoardProps) {
           }}
           onClose={handleCloseStory}
           onStoryUpdate={(updated) => {
+            // StoryDetailPanel은 onChangeStatus를 받지 않으므로 드로어 내 status 전이는
+            // 이 콜백이 유일한 경로 — status가 실제로 바뀐 경우에만 카운트 lockstep 조정.
+            const prevStory = stories.find((s) => s.id === updated.id);
             setSelectedStory(updated);
             setStories((prev) => prev.map((s) => s.id === updated.id ? { ...s, ...updated } : s));
+            if (prevStory && prevStory.status !== updated.status) {
+              adjustColumnTotal(prevStory.status, -1);
+              adjustColumnTotal(updated.status, +1);
+            }
           }}
           onDeleteSuccess={(id) => {
+            const story = stories.find((s) => s.id === id);
             setStories((prev) => prev.filter((s) => s.id !== id));
+            if (story) adjustColumnTotal(story.status, -1);
             setSelectedStory(null);
           }}
           storyMap={Object.fromEntries(stories.map((s) => [s.id, { title: s.title, status: s.status }]))}
