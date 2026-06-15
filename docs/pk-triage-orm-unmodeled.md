@@ -23,15 +23,17 @@
 | 분류 | 의미 | 처분 | 수 |
 |------|------|------|----|
 | ⓐ | PK 필요(identity/CRUD·자연 unique·ORM 기대) | **후속 PK-add 마이그**(gcloud·e491d087 가족) | 18 |
-| ⓑ | 의도적 무-PK append-only 로그 | 무-PK 유지 + **명시 문서/주석** | 7 |
+| ⓑ | 의도적 무-PK append-only 로그(라이브 writer 존재) | 무-PK 유지 + **명시 문서/주석** | 6 |
 | ⓒ | 살아있는 소비처 0(전 레포·SaaS 포함) — drop 후보 | **선생님 승인 후** 별도 drop 마이그 | 6 |
-| (보류) | OSS 레포엔 소비처 0이나 **SaaS-only로 라이브** | SaaS 트랙(무-PK 정당성은 SaaS 측 판단) | 6 |
+| (보류) | OSS 레포엔 소비처 0이나 **SaaS-only로 라이브** | SaaS 트랙(무-PK 정당성은 SaaS 측 판단) | 7 |
+
+> 합계 37(= 18+6+6+7). 권위적 no-PK 감사 목록과 1:1.
 
 ## ⓐ — PK 필요 (후속 PK-add)
 
 | 테이블 | 근거 | 권장 PK |
 |--------|------|---------|
-| **plan_features** | ⚠️ **ORM 모델 존재**(`backend/app/models/plan_feature.py:15`)·unique `code`. 0114가 놓친 그룹① drift | `id` (0114 패턴) |
+| **plan_features** | ⚠️ **ORM 모델 존재**(`backend/app/models/plan_feature.py:15`)·unique `code`. 0114가 놓친 그룹① drift → **처분은 e491d087(PK 복원)에 fold** | `id` (0114 패턴) |
 | memo_replies | memo/HITL/dispatcher 풀 CRUD(insert/select/**delete** agent-hitl.ts:124,174,251)·`id` uuid | `id` |
 | memo_assignees | memo.ts:475 + webhook-dispatch:251 (assignment rows) | `(memo_id, member_id)` 또는 `id` |
 | memo_reads | memo.ts read 추적(memo_id×member 1행) | `(memo_id, member_id)` |
@@ -55,7 +57,6 @@
 |--------|------|
 | api_key_logs | auth-api-key.ts:100 `.insert()`만 — write-once 보안 감사 로그 |
 | workflow_change_events | workflow-change-notifier.ts:83 `.insert()`만 — 변경 감사 로그 |
-| analytics_events | telemetry append 로그(소비처 0이나 적재 전용 설계) |
 | inbox_outbox | outbox 패턴(append→process)·SaaS 마이그(20260426170200) |
 | l2_trigger_state | 0117 — `(worker_name, COALESCE(org_id,…))` **unique 인덱스가 사실상 식별자**(upsert 타겟). 무-PK이나 unique로 정합 보장. (PK 승격 시 그 unique를 PK로) |
 | workflow_events | SaaS workflow 실행 로그(append) |
@@ -70,7 +71,7 @@
 drop 마이그.
 
 - **agent_endpoints** — agent 라우팅 잔재(0 ref)
-- **analytics_events** — telemetry(적재 코드도 0 — ⓑ로 두되 적재처 없으면 dead. 선생님 확인)
+- **analytics_events** — telemetry 로그 설계이나 baseline 스키마 정의·인덱스(created_at·org/event·project/step)만 존재하고 **라이브 writer/reader 0**(OSS·SaaS 전수 grep). 적재처가 없어 ⓑ(라이브 로그) 아닌 drop 후보로 확정.
 - **epic_docs** — epic-doc 연결(story_docs와 쌍·0 ref, doc entity link는 memo_doc_links로 대체된 흔적)
 - **story_docs** — story-doc 연결(0 ref)
 - **workflow_rules** — workflow 룰 엔진 잔재(0 ref·SaaS도 0)
@@ -81,8 +82,9 @@ drop 마이그.
 OSS(이 레포) 소비처는 0이나 **SaaS overlay/엔진서 라이브**(supabase 직타). dead 아님 —
 무-PK 정당성/처분은 SaaS 트랙 판단. PK 필요 시 SaaS 마이그로.
 
-- plan_offerings(9) · plan_tiers(61) · subscription_checkout_sessions(35) · workflow_contracts(90) ·
-  workflow_executions(60) · workflow_instances(60)
+- llm_pricing_config(SaaS 11·OSS는 test mock만) · plan_offerings(9) · plan_tiers(61) ·
+  subscription_checkout_sessions(35) · workflow_contracts(90) · workflow_executions(60) ·
+  workflow_instances(60)
 
 ## 범위 밖(후속)
 
