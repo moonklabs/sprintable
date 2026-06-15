@@ -1,7 +1,7 @@
 'use client';
 
 import type { ComponentType } from 'react';
-import { useRef, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { useDroppable } from '@dnd-kit/core';
 import { SortableContext, verticalListSortingStrategy } from '@dnd-kit/sortable';
 import { useTranslations } from 'next-intl';
@@ -67,6 +67,8 @@ interface KanbanColumnProps {
   // BOARD-03: done column collapse
   collapsed?: boolean;
   onToggleCollapse?: () => void;
+  // f1910a31: ?view=new → 인라인 컴포저 auto-open. nonce가 바뀔 때마다(0→1, 1→2…) 재오픈.
+  autoComposeSignal?: number;
 }
 
 export function KanbanColumn({
@@ -77,6 +79,7 @@ export function KanbanColumn({
   onCreateStory, projectId, onKickoffStory, executionMap, blockedByMap, storyLabelsMap, storyGatesMap,
   totalCount, hasMore, loadingMore, onLoadMore,
   collapsed, onToggleCollapse,
+  autoComposeSignal,
 }: KanbanColumnProps) {
   const { setNodeRef, isOver } = useDroppable({ id });
   const t = useTranslations('board');
@@ -84,6 +87,11 @@ export function KanbanColumn({
   const [composing, setComposing] = useState(false);
   const [draftTitle, setDraftTitle] = useState('');
   const [submitting, setSubmitting] = useState(false);
+
+  // f1910a31: ?view=new 신호(nonce>0)면 인라인 컴포저 open. 컴포저 input의 autoFocus가 포커스 처리.
+  useEffect(() => {
+    if (autoComposeSignal && autoComposeSignal > 0) setComposing(true);
+  }, [autoComposeSignal]);
 
   const startCompose = () => {
     setDraftTitle('');
