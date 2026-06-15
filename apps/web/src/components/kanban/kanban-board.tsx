@@ -725,7 +725,8 @@ export function KanbanBoard({ projectId }: KanbanBoardProps) {
       const json = await res.json();
       const created = json.data as KanbanStory;
       setStories((prev) => [...prev, created]);
-      adjustColumnTotal(columnId, +1);
+      // 카드 렌더 컬럼(created.status)과 카운트를 동일 source로 정합 — BE가 status를 정규화해도 무어긋남
+      adjustColumnTotal(created.status, +1);
     } catch {
       setTransitionError(t('createStoryFailed'));
     }
