@@ -35,6 +35,10 @@ async def has_project_access(
                     WHERE tm.project_id = p.id
                       AND (tm.id = :user_id OR tm.user_id = :user_id)
                       AND tm.is_active = true
+                      -- 35a0691e: me/memberships(me.py)와 동일 기준 — team_member 분기는 휴먼만.
+                      -- 에이전트는 아래 project_access grant 분기(member_id)로 인가(SSOT 정합·드리프트
+                      -- 방지). 온보딩이 agent grant를 생성하므로 휴먼-필터가 에이전트 access 무영향. #1125 후속.
+                      AND tm.type = 'human'
                 )
                 OR EXISTS (
                     SELECT 1 FROM project_access pa
@@ -123,6 +127,8 @@ async def first_accessible_project_id(
             WHERE tm.org_id = :org_id
               AND (tm.id = :user_id OR tm.user_id = :user_id)
               AND tm.is_active = true
+              -- 35a0691e: has_project_access lockstep — team_member 분기 휴먼만(에이전트는 grant).
+              AND tm.type = 'human'
               AND p.deleted_at IS NULL
             ORDER BY tm.created_at ASC
             LIMIT 1
@@ -204,6 +210,8 @@ async def accessible_project_ids_in_org(
                     WHERE tm.project_id = p.id
                       AND (tm.id = :user_id OR tm.user_id = :user_id)
                       AND tm.is_active = true
+                      -- 35a0691e: has_project_access lockstep — team_member 분기 휴먼만(에이전트는 grant).
+                      AND tm.type = 'human'
                 )
                 OR EXISTS (
                     SELECT 1 FROM project_access pa
