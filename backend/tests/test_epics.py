@@ -35,6 +35,9 @@ def _mock_epic(status: str = "active") -> MagicMock:
     # 신규 필드를 명시 세팅(기본값 동형). _attach_hypothesis_aggregates가 덮어쓸 수 있음.
     e.hypothesis_count = 0
     e.risky_status = None
+    # 0d4c89e8: 연결 스토리 집계. 동일 사유(MagicMock auto-attr 방지)로 명시 세팅.
+    e.total_stories = 0
+    e.done_stories = 0
     e.created_at = datetime(2026, 5, 1, tzinfo=timezone.utc)
     e.updated_at = datetime(2026, 5, 1, tzinfo=timezone.utc)
     return e
@@ -81,10 +84,22 @@ def _agg_row(epic_id, cnt: int, risk_rank: int | None):
     return row
 
 
-def _paginated_execute(total: int, rows: list, agg_rows: list | None = None):
+def _story_agg_row(epic_id, total_stories: int, done_stories: int):
+    """EpicRepository._attach_story_aggregates 집계 한 행(epic_id·total_stories·done_stories)."""
+    row = MagicMock()
+    row.epic_id = epic_id
+    row.total_stories = total_stories
+    row.done_stories = done_stories
+    return row
+
+
+def _paginated_execute(
+    total: int, rows: list, agg_rows: list | None = None, story_rows: list | None = None
+):
     """EpicRepository.list_paginated의 execute 순서를 모킹.
 
-    1=count(scalar_one), 2=list(scalars().all()), 3=가설 집계(_attach.. → result.all()).
+    1=count(scalar_one), 2=list(scalars().all()), 3=가설 집계(_attach_hypothesis.. → result.all()),
+    4=스토리 집계(_attach_story.. → result.all()).
     """
     state = {"n": 0}
 
@@ -95,8 +110,10 @@ def _paginated_execute(total: int, rows: list, agg_rows: list | None = None):
             r.scalar_one.return_value = total
         elif state["n"] == 2:
             r.scalars.return_value.all.return_value = rows
-        else:
+        elif state["n"] == 3:
             r.all.return_value = agg_rows or []
+        else:
+            r.all.return_value = story_rows or []
         return r
 
     return _exec
@@ -150,6 +167,40 @@ async def test_list_epics_zero_hypotheses_defaults_count0_risky_null():
         body = resp.json()
         assert body[0]["hypothesis_count"] == 0
         assert body[0]["risky_status"] is None
+    finally:
+        app.dependency_overrides.clear()
+
+
+@pytest.mark.anyio
+async def test_list_epics_includes_story_aggregates():
+    """0d4c89e8: list 응답에 total_stories/done_stories(단일쿼리 집계)가 실린다(E-HO-TRUST 9/11형)."""
+    client, session, app = await _client()
+    try:
+        session.execute = _paginated_execute(
+            1, [_mock_epic()], story_rows=[_story_agg_row(EPIC_ID, 11, 9)]
+        )
+        async with client as c:
+            resp = await c.get("/api/v2/epics")
+        assert resp.status_code == 200
+        body = resp.json()
+        assert body[0]["total_stories"] == 11
+        assert body[0]["done_stories"] == 9
+    finally:
+        app.dependency_overrides.clear()
+
+
+@pytest.mark.anyio
+async def test_list_epics_zero_stories_defaults_0_0():
+    """0d4c89e8 additive: 연결 스토리 0건이면 total/done 0/0(회귀 0·payload bloat 없음)."""
+    client, session, app = await _client()
+    try:
+        session.execute = _paginated_execute(1, [_mock_epic()], story_rows=[])
+        async with client as c:
+            resp = await c.get("/api/v2/epics")
+        assert resp.status_code == 200
+        body = resp.json()
+        assert body[0]["total_stories"] == 0
+        assert body[0]["done_stories"] == 0
     finally:
         app.dependency_overrides.clear()
 
