@@ -1,7 +1,7 @@
 import uuid
 from datetime import date as date_type
 
-from fastapi import APIRouter, Depends, HTTPException, Query
+from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Query
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -41,8 +41,9 @@ async def list_sprints(
 @router.post("", response_model=SprintResponse, status_code=201)
 async def create_sprint(
     body: SprintCreate,
+    background_tasks: BackgroundTasks,
     session: AsyncSession = Depends(get_db),
-    _auth: AuthContext = Depends(get_current_user),
+    auth: AuthContext = Depends(get_current_user),
     org_id: uuid.UUID = Depends(get_verified_org_id),
 ) -> SprintResponse:
     repo = SprintRepository(session, org_id)
@@ -60,6 +61,13 @@ async def create_sprint(
         metric_definition=body.metric_definition,
         measure_after=body.measure_after,
         **({"duration": _dur} if _dur is not None else {}),
+    )
+    # 활동로그: sprint 생성 이벤트 기록 (생성류 미기록 갭 — 피드 정상화)
+    from app.services.activity_log import record_created_activity
+    await record_created_activity(
+        background_tasks, auth=auth, org_id=org_id, db=session,
+        entity_type="sprint", entity_id=sprint.id, project_id=sprint.project_id,
+        title=sprint.title,
     )
     return SprintResponse.model_validate(sprint)
 

@@ -3,11 +3,16 @@ from __future__ import annotations
 
 import uuid
 import logging
-from typing import Literal
+from typing import TYPE_CHECKING, Literal
 
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models.activity_log import ActivityLog
+
+if TYPE_CHECKING:
+    from fastapi import BackgroundTasks
+
+    from app.dependencies.auth import AuthContext
 
 logger = logging.getLogger(__name__)
 
@@ -52,6 +57,41 @@ async def record_activity_bg(
             await db.commit()
     except Exception:
         logger.warning("record_activity_bg failed action=%s actor_id=%s", action, actor_id, exc_info=True)
+
+
+async def record_created_activity(
+    background_tasks: BackgroundTasks,
+    *,
+    auth: AuthContext,
+    org_id: uuid.UUID,
+    db: AsyncSession,
+    entity_type: str,
+    entity_id: uuid.UUID,
+    project_id: uuid.UUID | None,
+    title: str | None = None,
+) -> None:
+    """create 엔드포인트용 헬퍼: actor(canonical member)를 해석해 ``{entity_type}_created``
+    activity log를 BackgroundTask로 큐잉한다. story/sprint/doc 생성이 피드에 0건 잡히던 갭을
+    메운다. caller에 예외 전파 없음(record_activity_bg와 동일 best-effort)."""
+    actor_id: uuid.UUID | None = None
+    try:
+        from app.services.member_resolver import resolve_member
+        actor_id = (await resolve_member(auth, org_id, db)).id
+    except Exception:
+        logger.warning(
+            "record_created_activity: actor resolve 실패 entity=%s id=%s", entity_type, entity_id,
+            exc_info=True,
+        )
+    background_tasks.add_task(
+        record_activity_bg,
+        org_id=org_id,
+        action=f"{entity_type}_created",
+        actor_id=actor_id,
+        project_id=project_id,
+        entity_type=entity_type,
+        entity_id=entity_id,
+        context={"title": title} if title else {},
+    )
 
 
 class ActivityLogService:
