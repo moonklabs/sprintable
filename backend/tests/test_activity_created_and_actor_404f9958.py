@@ -29,10 +29,10 @@ class _FakeBG:
         self.tasks.append((fn, kwargs))
 
 
-def _resolved(actor_id, org_id, name="x"):
+def _resolved(actor_id, org_id, name="x", mtype="human"):
     from app.services.member_resolver import ResolvedMember
     return ResolvedMember(
-        id=actor_id, user_id=None, name=name, type="human",
+        id=actor_id, user_id=None, name=name, type=mtype,
         role="member", org_id=org_id, project_id=None,
     )
 
@@ -93,14 +93,20 @@ async def test_record_created_activity_best_effort_on_resolve_failure(monkeypatc
 # ── Bug1: list_activity_logs actor_name 해소 ─────────────────────────────────
 
 @pytest.mark.anyio
-async def test_list_activity_logs_resolves_actor_name_via_member_resolver(monkeypatch):
+@pytest.mark.parametrize("actor_type,resolved_name", [
+    ("human", "alice@example.com"),   # 휴먼: user.email로 정합
+    ("agent", "디디 은와추쿠"),         # 에이전트: member name — canonical 경로가 둘 다 커버
+])
+async def test_list_activity_logs_resolves_actor_name_via_member_resolver(
+    monkeypatch, actor_type, resolved_name,
+):
     from app.models.activity_log import ActivityLog
     from app.routers import activity_logs as router
 
     org, actor, eid = uuid.uuid4(), uuid.uuid4(), uuid.uuid4()
     log = ActivityLog(
         id=uuid.uuid4(), org_id=org, project_id=uuid.uuid4(),
-        actor_id=actor, actor_type="human", action="story_created",
+        actor_id=actor, actor_type=actor_type, action="story_created",
         entity_type="story", entity_id=eid, context={},
         created_at=datetime.now(tz=timezone.utc),
     )
@@ -115,9 +121,10 @@ async def test_list_activity_logs_resolves_actor_name_via_member_resolver(monkey
     db = AsyncMock()
     db.execute = AsyncMock(side_effect=[count_res, items_res, entity_res])
 
-    # canonical 휴먼: actor_id가 team_members.id와 달라도 anchor resolver가 user.email로 해소
+    # canonical actor(휴먼/에이전트): actor_id가 team_members.id와 달라도 anchor resolver가
+    # 이름을 해소(휴먼=user.email, 에이전트=member name).
     async def _fake_lookup(ids, session):
-        return {actor: _resolved(actor, org, name="alice@example.com")}
+        return {actor: _resolved(actor, org, name=resolved_name, mtype=actor_type)}
 
     monkeypatch.setattr("app.services.member_resolver.lookup_members_by_ids", _fake_lookup)
 
@@ -129,5 +136,5 @@ async def test_list_activity_logs_resolves_actor_name_via_member_resolver(monkey
 
     assert resp.total == 1
     assert len(resp.items) == 1
-    assert resp.items[0].actor_name == "alice@example.com"   # '시스템'/null 아님
+    assert resp.items[0].actor_name == resolved_name   # '시스템'/null 아님 — 휴먼·에이전트 공통
     assert resp.items[0].entity_title == "My Story"
