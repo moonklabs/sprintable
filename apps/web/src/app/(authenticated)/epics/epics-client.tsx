@@ -46,6 +46,9 @@ interface Epic {
   // E1 S8b: BE EpicResponse가 list 응답에 부착하는 연결 가설 집계(미부착 경로는 기본값).
   hypothesis_count?: number;
   risky_status?: string | null;
+  // 0d4c89e8: BE list 응답 story count 집계(#1527). detail/미부착 경로는 stories 폴백.
+  total_stories?: number;
+  done_stories?: number;
 }
 
 // ─── Helpers ─────────────────────────────────────────────────────────────────
@@ -411,7 +414,11 @@ interface EpicRowProps {
 function EpicRow({ epic, isSelected, onClick, onDeleteRequest }: EpicRowProps) {
   const t = useTranslations('epics');
   const stories = epic.stories ?? [];
-  const { done, total } = calcStoryProgress(stories);
+  // 0d4c89e8: BE 집계(total_stories/done_stories·#1527) 우선·detail-shape(집계 미부착)는 stories 폴백.
+  // list 응답은 stories 미부착이라 폴백만으론 0/0 → BE 집계로 카드 카운트/진행바 정상화.
+  const fb = calcStoryProgress(stories);
+  const total = epic.total_stories ?? fb.total;
+  const done = epic.done_stories ?? fb.done;
   const pct = total > 0 ? Math.round((done / total) * 100) : 0;
   const spProgress = calcSpProgress(stories);
   const spExceeded = typeof epic.target_sp === 'number' && epic.target_sp > 0 && spProgress.total > epic.target_sp;
