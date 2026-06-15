@@ -29,3 +29,11 @@ optional_env:
     description: "Set to '1' or 'true' to allow all senders regardless of SPRINTABLE_ALLOWED_USERS."
     prompt: "Allow all users? (1=yes)"
     password: false
+  - name: SPRINTABLE_HOME_CHANNEL
+    description: "Default conversation_id for cron/notification delivery (deliver=sprintable). Usually set via /sethome."
+    prompt: "Home conversation_id (or empty)"
+    password: false
+  - name: SPRINTABLE_HOME_CHANNEL_THREAD_ID
+    description: "Thread id for the home channel (Sprintable conversations are thread-scoped)."
+    prompt: "Home channel thread_id (or empty)"
+    password: false
