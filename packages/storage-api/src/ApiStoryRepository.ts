@@ -2,7 +2,7 @@ import type { IStoryRepository, Story, CreateStoryInput, UpdateStoryInput, BulkU
 import type { PaginationOptions } from '@sprintable/core-storage';
 import { fastapiCall } from './utils';
 
-export class SupabaseStoryRepository implements IStoryRepository {
+export class ApiStoryRepository implements IStoryRepository {
   constructor(private readonly accessToken: string = '') {}
 
   async create(input: CreateStoryInput): Promise<Story> {

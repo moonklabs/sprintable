@@ -1,7 +1,7 @@
 import type { ITaskRepository, Task, CreateTaskInput, UpdateTaskInput, TaskListFilters, RepositoryScopeContext } from '@sprintable/core-storage';
 import { fastapiCall } from './utils';
 
-export class SupabaseTaskRepository implements ITaskRepository {
+export class ApiTaskRepository implements ITaskRepository {
   constructor(private readonly accessToken: string = '') {}
 
   async create(input: CreateTaskInput): Promise<Task> {
