@@ -64,6 +64,11 @@ class EpicResponse(BaseModel):
     # proposed>verified>killed>archived). 미부착 경로(get/create/update)는 기본값.
     hypothesis_count: int = 0
     risky_status: str | None = None
+    # 0d4c89e8: 연결 스토리 집계(list 응답서 N+1 없이 부착·hypothesis_count 동형). additive —
+    # 스토리 0건이면 0/0. FE 에픽 카드(total/done)가 이 필드 바인딩(stories 배열 미부착·payload
+    # bloat 방지). 미부착 경로(get/create/update)는 기본값. detail은 별도 /progress 유지.
+    total_stories: int = 0
+    done_stories: int = 0
     created_at: datetime
     updated_at: datetime
 
