@@ -54,7 +54,7 @@ from app.services.project_auth import has_project_access, first_accessible_proje
 from app.dependencies.database import get_db
 from app.models.member import Member
 from app.models.org_invite import OrgInvite
-from app.models.project import OrgMember
+from app.models.project import OrgMember, Project
 from app.models.team import TeamMember
 from app.models.login_audit_log import LoginAuditLog
 from app.models.user import RefreshToken, User
@@ -277,20 +277,85 @@ async def _user_projects_claim(user: User, session: AsyncSession) -> list[dict]:
     ]
 
 
+async def _resolve_explicit_app_metadata(
+    user: User, session: AsyncSession, project_id: uuid.UUID, org_id: uuid.UUID | None
+) -> dict:
+    """908075db 단계1: 명시 의도(접근 가능 확인된 project)로 app_metadata 해소 — 추측 없음.
+
+    role = team_member(휴먼, 있으면 owner/admin org role 상속) > org_member role > 'member'.
+    org_id는 project.org_id를 진실로(미지정/불일치 보정). side-effect(last_project_id 갱신) 없음 —
+    호출부 책임(단계2 정합). has_project_access(35a0691e grant-aware)로 접근 확인된 뒤에만 호출."""
+    from app.models.team import TeamMember
+
+    proj_org = (
+        await session.execute(select(Project.org_id).where(Project.id == project_id).limit(1))
+    ).scalar_one_or_none()
+    resolved_org = proj_org or org_id
+
+    tm = (
+        await session.execute(
+            select(TeamMember).where(
+                TeamMember.project_id == project_id,
+                or_(TeamMember.user_id == user.id, TeamMember.id == user.id),
+                TeamMember.is_active.is_(True),
+            ).limit(1)
+        )
+    ).scalar_one_or_none()
+    om_role = (
+        (
+            await session.execute(
+                select(OrgMember.role).where(
+                    OrgMember.user_id == user.id,
+                    OrgMember.org_id == resolved_org,
+                    OrgMember.deleted_at.is_(None),
+                ).limit(1)
+            )
+        ).scalar_one_or_none()
+        if resolved_org is not None
+        else None
+    )
+    if tm is not None:
+        # owner/admin org role 상속(effective) — _user_projects_claim _eff와 동일 기준.
+        role = om_role if _ROLE_RANK.get(om_role or "", 0) > _ROLE_RANK.get(tm.role, 0) else tm.role
+    else:
+        role = om_role or "member"  # grant-only — org role(없으면 member)
+
+    return {
+        "org_id": str(resolved_org) if resolved_org else "",
+        "project_id": str(project_id),
+        "role": role,
+        "projects": await _user_projects_claim(user, session),
+    }
+
+
 async def _build_app_metadata(
-    user: User, session: AsyncSession, org_id: uuid.UUID | None = None
+    user: User, session: AsyncSession, org_id: uuid.UUID | None = None,
+    project_id: uuid.UUID | None = None,
 ) -> dict:
     """JWT app_metadata 구성. org_id 지정 시(switch-org 등) 프로젝트 해소를 **그 org로 스코프**해
     cross-org 옛 프로젝트 주입을 차단한다(0746 leak fix).
 
     org_id 미지정(refresh/login)이면 **user.last_org_id**(현재 org source-of-truth)로 스코프 —
     refresh가 org 컨텍스트가 없어 0-project org 전환 후 cross-org 옛 프로젝트를 재주입하던 leak 차단.
-    last_org_id도 없으면(최초 로그인) 기존 cross-org fallback으로 home org 결정."""
+    last_org_id도 없으면(최초 로그인) 기존 cross-org fallback으로 home org 결정.
+
+    project_id(switch target 등 명시 의도)는 908075db 단계1 명시존중 분기 입력 — flag on일 때만 사용."""
     from app.models.team import TeamMember
 
     # org_id 미지정 시 현재 org(last_org_id)로 스코프 — refresh/login이 현재 org 유지(0746 후속)
     if org_id is None:
         org_id = getattr(user, "last_org_id", None)
+
+    # 908075db 단계1(flag-gated): 명시 의도 존중. project_id(switch target) 또는 저장된 last_project_id에
+    # has_project_access(35a0691e grant-aware: team_member 휴먼 ∪ grant ∪ owner/admin) 있으면 추측 fallback
+    # 타지 않고 그 project로 해소. flag off(기본)면 통째 skip → 기존 거동 100% 유지(회귀 0). grant-only
+    # 명시 전환이 가장-오래된-team_member로 무효화되던 근본(2026-06-01 switch 인시던트)을 명시존중으로 해소.
+    if settings.build_app_metadata_defallback:
+        explicit_pid = project_id or getattr(user, "last_project_id", None)
+        if explicit_pid is not None and await has_project_access(
+            session, user.id, explicit_pid, org_id
+        ):
+            return await _resolve_explicit_app_metadata(user, session, explicit_pid, org_id)
 
     # 1. last_project_id 우선 → 해당 project의 active team_member (org_id 지정 시 그 org일 때만)
     member = None
@@ -1136,8 +1201,9 @@ async def switch_project(
         .values(revoked_at=datetime.now(timezone.utc))
     )
 
-    # 새 토큰 발급 — _build_app_metadata 후 project_id override (grant-only 유저 fallback 무효화)
-    app_metadata = await _build_app_metadata(user, session)
+    # 908075db 단계1: target을 명시 의도로 전달 — flag on이면 _build_app_metadata가 추측 없이 그대로 존중.
+    # flag off면 아래 override가 기존처럼 보정(밴드에이드는 단계3서 제거). 둘 다 결과 동일(target 고정).
+    app_metadata = await _build_app_metadata(user, session, project_id=target_project_id)
     app_metadata["project_id"] = str(target_project_id)
     user.last_project_id = target_project_id  # _build_app_metadata가 덮어쓴 경우 재설정
 

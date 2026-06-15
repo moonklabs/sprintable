@@ -86,6 +86,12 @@ class Settings(BaseSettings):
     # 머지 후에도 off 기본 — 실 에이전트 무중단 실증 후 단계적 on.
     member_ssot_apikey_cut: bool = False
 
+    # 908075db 단계1: _build_app_metadata de-fallback. off(기본)=기존 추측 fallback 거동 100% 유지.
+    # on=명시 의도(switch target / 저장된 last_project_id)에 has_project_access(35a0691e grant-aware) 있으면
+    # 그 project를 존중(가장-오래된-team_member 추측 skip). 단계1은 명시존중 분기만 추가 — 추측 fallback과
+    # side-effect(last_project_id 덮어쓰기)는 단계2서 제거. flag off=거동 무변경(회귀 0), gcloud 무관.
+    build_app_metadata_defallback: bool = False
+
     # Polar Billing SDK
     polar_access_token: str = ""
     polar_sandbox: bool = True  # dev=True(sandbox), prod=False
