@@ -258,7 +258,7 @@ function createContext() {
 
 // AgentBuiltinToolService의 단위 경계는 dispatch/scope-guard/audit/presentation이다.
 // MemoService/StoryService/EpicService는 OSS에서 stub repo(MemoService 무repo) 또는
-// FastAPI HTTP(Story/Epic의 SupabaseXRepository.fastapiCall) 위임이라 in-memory db
+// FastAPI HTTP(Story/Epic의 ApiXRepository.fastapiCall) 위임이라 in-memory db
 // stub만으로는 동작하지 않는다. 따라서 의존 서비스를 db-stub 백드 fake로 주입해 실
 // persistence가 아닌 서비스 계약(메서드 시그니처·반환 shape)만 재현한다.
 function makeService(db: any, options: Record<string, unknown> = {}) {

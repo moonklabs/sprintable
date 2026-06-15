@@ -1,7 +1,7 @@
 import type { IEpicRepository, Epic, CreateEpicInput, UpdateEpicInput, EpicListFilters, RepositoryScopeContext } from '@sprintable/core-storage';
 import { fastapiCall } from './utils';
 
-export class SupabaseEpicRepository implements IEpicRepository {
+export class ApiEpicRepository implements IEpicRepository {
   constructor(private readonly accessToken: string = '') {}
 
   async create(input: CreateEpicInput): Promise<Epic> {

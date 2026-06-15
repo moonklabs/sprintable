@@ -1,7 +1,7 @@
 import type { INotificationRepository, Notification, CreateNotificationInput, NotificationListFilters } from '@sprintable/core-storage';
 import { fastapiCall } from './utils';
 
-export class SupabaseNotificationRepository implements INotificationRepository {
+export class ApiNotificationRepository implements INotificationRepository {
   constructor(private readonly accessToken: string = '') {}
 
   async create(input: CreateNotificationInput): Promise<Notification> {
