@@ -13,6 +13,7 @@ import pytest
 
 from app.routers import hypotheses as r
 from app.schemas.hypothesis import HypothesisDraftRequest, HypothesisResponse
+from app.services import hypothesis as svc
 from app.services.hypothesis import HypothesisServiceError
 from app.services.member_resolver import ResolvedMember
 
@@ -92,29 +93,27 @@ def _session_returning(rows):
     return s
 
 
+# 54a8bd8a: cross-project 가드가 라우터 → service로 이동. 가드 단위 검증은 service 함수 대상.
 async def test_link_same_project_ok():
     eid = uuid.uuid4()
     s = _session_returning([(eid, PROJECT_ID)])
-    await r._assert_targets_same_project(s, PROJECT_ID, [eid], [])  # no raise
+    await svc._assert_targets_same_project(s, PROJECT_ID, [eid], [])  # no raise
 
 
 async def test_link_cross_project_forbidden():
-    from fastapi import HTTPException
     eid = uuid.uuid4()
     s = _session_returning([(eid, uuid.uuid4())])  # 다른 project
-    with pytest.raises(HTTPException) as ei:
-        await r._assert_targets_same_project(s, PROJECT_ID, [eid], [])
-    assert ei.value.status_code == 403
-    assert ei.value.detail["code"] == "CROSS_PROJECT_LINK_FORBIDDEN"
+    with pytest.raises(HypothesisServiceError) as ei:
+        await svc._assert_targets_same_project(s, PROJECT_ID, [eid], [])
+    assert ei.value.code == "CROSS_PROJECT_LINK_FORBIDDEN"
 
 
 async def test_link_missing_target_forbidden():
-    from fastapi import HTTPException
     eid = uuid.uuid4()
     s = _session_returning([])  # 대상 epic 없음(len mismatch)
-    with pytest.raises(HTTPException) as ei:
-        await r._assert_targets_same_project(s, PROJECT_ID, [eid], [])
-    assert ei.value.status_code == 403
+    with pytest.raises(HypothesisServiceError) as ei:
+        await svc._assert_targets_same_project(s, PROJECT_ID, [eid], [])
+    assert ei.value.code == "CROSS_PROJECT_LINK_FORBIDDEN"
 
 
 # ── ⓒ draft (§3.9) ────────────────────────────────────────────────────────────
