@@ -189,13 +189,16 @@ async def _fetch_events(
                 e.created_at,
                 e.project_id::text    AS project_id,
                 e.org_id::text        AS org_id,
-                c.title               AS conversation_title
+                c.title               AS conversation_title,
+                tm.name               AS sender_name
             FROM events e
             -- d0bca260: conversation_title 도출. payload.conversation_id가 uuid 형태일 때만 join
             -- (비-대화 이벤트는 NULL → 안전). 36자 uuid 패턴 가드로 ::uuid 캐스트 에러 0.
             LEFT JOIN conversations c
-                ON e.payload->>'conversation_id' ~ '^[0-9a-fA-F-]{36}$'
+                ON e.payload->>'conversation_id' ~ '^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$'
                AND c.id = (e.payload->>'conversation_id')::uuid
+            -- d0bca260 AC3: sender_name. events.sender_id는 team_members FK라 직접 join(canonical 무관).
+            LEFT JOIN team_members tm ON tm.id = e.sender_id
             WHERE e.recipient_id = CAST(:agent_id AS uuid)
               AND e.recipient_seq > :after_seq
             ORDER BY e.recipient_seq ASC
@@ -228,6 +231,7 @@ def _row_to_payload(row: object) -> dict:
         "project_id": getattr(row, "project_id", None),
         "org_id": getattr(row, "org_id", None),
         "conversation_title": getattr(row, "conversation_title", None),
+        "sender_name": getattr(row, "sender_name", None),
     }
 
 

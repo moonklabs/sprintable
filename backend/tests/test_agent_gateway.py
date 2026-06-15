@@ -476,12 +476,14 @@ def test_row_to_payload_includes_project_org_conversation_title():
         payload={"conversation_id": "c1", "content": "hi"},
         created_at=datetime(2026, 6, 15, tzinfo=timezone.utc),
         project_id=pid, org_id=oid, conversation_title="Sprintable QA",
+        sender_name="디디 은와추쿠",
     )
     out = _row_to_payload(row)
-    # 신규 top-level 3필드
+    # 신규 top-level 4필드
     assert out["project_id"] == pid
     assert out["org_id"] == oid
     assert out["conversation_title"] == "Sprintable QA"
+    assert out["sender_name"] == "디디 은와추쿠"
     # 기존 키 무파손(additive)
     assert out["event_id"] == "ev1"
     assert out["recipient_seq"] == 42
@@ -504,3 +506,4 @@ def test_row_to_payload_missing_new_attrs_safe():
     assert out["project_id"] is None
     assert out["org_id"] is None
     assert out["conversation_title"] is None
+    assert out["sender_name"] is None
