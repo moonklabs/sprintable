@@ -681,7 +681,7 @@ function CreateModal({ projectId, orgId, onCreated, onClose }: CreateModalProps)
         onClick={onClose}
         aria-label={t('cancel')}
       />
-      <div className="relative z-10 flex max-h-[calc(100vh-2rem)] w-full max-w-md flex-col rounded-2xl border border-border bg-card shadow-xl">
+      <div className="relative z-10 flex max-h-[calc(100dvh-2rem)] w-full max-w-md flex-col rounded-2xl border border-border bg-card shadow-xl">
         <div className="flex flex-shrink-0 items-center justify-between px-6 pb-4 pt-6">
           <h2 className="text-base font-bold text-foreground">{t('createEpic')}</h2>
           <button
