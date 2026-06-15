@@ -132,15 +132,16 @@ async def list_activity_logs(
     )
     items = items_result.scalars().all()
 
-    # batch resolve actor_name via team_members
+    # batch resolve actor_name. actor_id는 canonical member id로, 0085(member SSOT) 후
+    # team_members.id와 다를 수 있다(grant-only/canonical 휴먼). 직접 TeamMember.id 조회는
+    # 이들을 놓쳐 actor_name=null → 피드가 '시스템'/'—'으로 표시되던 근본. lookup_members_by_ids
+    # 는 anchor/legacy 모두 해소하고 휴먼 이름을 user.email로 정합(member→user/email).
     actor_ids = {item.actor_id for item in items if item.actor_id}
     actor_name_map: dict[uuid.UUID, str] = {}
     if actor_ids:
-        from app.models.team import TeamMember
-        tm_rows = (await db.execute(
-            select(TeamMember.id, TeamMember.name).where(TeamMember.id.in_(actor_ids))
-        )).all()
-        actor_name_map = {row.id: row.name for row in tm_rows}
+        from app.services.member_resolver import lookup_members_by_ids
+        resolved = await lookup_members_by_ids(actor_ids, db)
+        actor_name_map = {mid: rm.name for mid, rm in resolved.items() if rm and rm.name}
 
     # batch resolve entity_title per entity_type
     entity_ids_by_type: dict[str, set[uuid.UUID]] = defaultdict(set)

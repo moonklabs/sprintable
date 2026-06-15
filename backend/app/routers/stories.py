@@ -191,6 +191,7 @@ async def _preflight_merge_gate(
 @router.post("", response_model=StoryResponse, status_code=201)
 async def create_story(
     body: StoryCreate,
+    background_tasks: BackgroundTasks,
     session: AsyncSession = Depends(get_db),
     auth: AuthContext = Depends(get_current_user),
     org_id: uuid.UUID = Depends(get_verified_org_id),
@@ -238,6 +239,13 @@ async def create_story(
     if primary_assignee:
         await _upsert_assignee_participation(session, org_id, story.id, primary_assignee)
     story.assignee_ids = saved_ids or ([story.assignee_id] if story.assignee_id else [])
+    # 활동로그: story 생성 이벤트 기록 (생성류 미기록 갭 — 피드 정상화)
+    from app.services.activity_log import record_created_activity
+    await record_created_activity(
+        background_tasks, auth=auth, org_id=org_id, db=session,
+        entity_type="story", entity_id=story.id, project_id=story.project_id,
+        title=story.title,
+    )
     return StoryResponse.model_validate(story)
 
 

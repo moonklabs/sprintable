@@ -2,7 +2,7 @@ import os
 import uuid
 from datetime import datetime
 
-from fastapi import APIRouter, Body, Depends, HTTPException, Query
+from fastapi import APIRouter, BackgroundTasks, Body, Depends, HTTPException, Query
 from pydantic import BaseModel
 from sqlalchemy import delete, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -72,6 +72,7 @@ async def list_docs(
 @router.post("", response_model=DocResponse, status_code=201)
 async def create_doc(
     body: DocCreate,
+    background_tasks: BackgroundTasks,
     session: AsyncSession = Depends(get_db),
     auth: AuthContext = Depends(get_current_user),
     org_id: uuid.UUID = Depends(get_verified_org_id),
@@ -99,6 +100,13 @@ async def create_doc(
         doc_type=body.doc_type,
         content_format=body.content_format,
         tags=body.tags,
+    )
+    # 활동로그: doc 생성 이벤트 기록 (생성류 미기록 갭 — 피드 정상화)
+    from app.services.activity_log import record_created_activity
+    await record_created_activity(
+        background_tasks, auth=auth, org_id=org_id, db=session,
+        entity_type="doc", entity_id=doc.id, project_id=body.project_id,
+        title=doc.title,
     )
     return DocResponse.model_validate(doc)
 
