@@ -17,6 +17,7 @@ import pytest
 from app.models.hypothesis import is_valid_transition
 from app.schemas.hypothesis import (
     HypothesisCreate,
+    HypothesisDraftRequest,
     HypothesisLinkRequest,
     HypothesisResponse,
     HypothesisTransition,
@@ -341,13 +342,85 @@ async def test_link_adds_epic_and_story():
     repo = _repo_mock(_hyp_stub())
     p_repo, p_lookup = _patch(repo, "human")
     eid, sid = uuid.uuid4(), uuid.uuid4()
+    # 54a8bd8a: link_hypothesis가 cross-project 가드 쿼리(epic→story)를 탄다 — same-project 반환.
+    session = MagicMock()
+    epic_res, story_res = MagicMock(), MagicMock()
+    epic_res.all = MagicMock(return_value=[(eid, PROJECT_ID)])
+    story_res.all = MagicMock(return_value=[(sid, PROJECT_ID)])
+    session.execute = AsyncMock(side_effect=[epic_res, story_res])
     with p_repo, p_lookup:
         await svc.link_hypothesis(
-            MagicMock(), ORG_ID, HYP_ID,
+            session, ORG_ID, HYP_ID,
             HypothesisLinkRequest(epic_ids=[eid], story_ids=[sid]),
         )
     repo.add_epic_links.assert_awaited_once_with(HYP_ID, [eid], "primary")
     repo.add_story_links.assert_awaited_once_with(HYP_ID, [sid], "supports")
+
+
+# ── 54a8bd8a: cross-project 가드 service 레벨 — create/draft 경로 패리티 ─────────
+
+def _session_one_result(rows):
+    """session.execute → .all()=rows 인 mock 세션(가드 쿼리 1회용)."""
+    session = MagicMock()
+    res = MagicMock()
+    res.all = MagicMock(return_value=rows)
+    session.execute = AsyncMock(return_value=res)
+    return session
+
+
+async def test_create_cross_project_epic_forbidden():
+    """create 경로도 cross-project epic 링크 거부 — repo.create 전 차단(orphan 0)."""
+    repo = _repo_mock(_hyp_stub())
+    p_repo, p_lookup = _patch(repo, "human")
+    eid = uuid.uuid4()
+    session = _session_one_result([(eid, uuid.uuid4())])  # 다른 project epic
+    payload = HypothesisCreate(
+        project_id=PROJECT_ID, statement="s", metric_definition=VALID_METRIC,
+        measure_after=datetime(2026, 7, 1, tzinfo=timezone.utc),
+        owner_member_id=OWNER_ID, epic_ids=[eid],
+    )
+    with p_repo, p_lookup, pytest.raises(svc.HypothesisServiceError) as ei:
+        await svc.create_hypothesis(session, ORG_ID, _caller("human"), payload)
+    assert ei.value.code == "CROSS_PROJECT_LINK_FORBIDDEN"
+    repo.create.assert_not_awaited()  # 가드가 repo.create 전 → orphan 가설 미생성
+
+
+async def test_create_same_project_epic_ok():
+    """same-project epic 링크는 정상 — 가드 통과 후 링크 생성(회귀 무영향)."""
+    repo = _repo_mock(_hyp_stub())
+    p_repo, p_lookup = _patch(repo, "human")
+    eid = uuid.uuid4()
+    session = _session_one_result([(eid, PROJECT_ID)])  # 동일 project epic
+    payload = HypothesisCreate(
+        project_id=PROJECT_ID, statement="s", metric_definition=VALID_METRIC,
+        measure_after=datetime(2026, 7, 1, tzinfo=timezone.utc),
+        owner_member_id=OWNER_ID, epic_ids=[eid],
+    )
+    with p_repo, p_lookup:
+        await svc.create_hypothesis(session, ORG_ID, _caller("human"), payload)
+    repo.create.assert_awaited_once()
+    repo.add_epic_links.assert_awaited_once_with(HYP_ID, [eid], "primary")
+
+
+async def test_draft_persist_cross_project_source_forbidden():
+    """draft(persist) 도 source→story 링크가 cross-project면 거부(create 경유 가드)."""
+    repo = _repo_mock(_hyp_stub())
+    sid = uuid.uuid4()
+    session = _session_one_result([(sid, uuid.uuid4())])  # 다른 project story
+    members = {CALLER_HUMAN_ID: ResolvedMember(
+        id=CALLER_HUMAN_ID, user_id=uuid.uuid4(), name="o", type="human",
+        role="member", org_id=ORG_ID,
+    )}
+    payload = HypothesisDraftRequest(
+        project_id=PROJECT_ID, source_type="story", source_id=sid,
+        persist=True, context={"title": "x"},
+    )
+    with patch.object(svc, "HypothesisRepository", return_value=repo), \
+         patch.object(svc, "lookup_members_by_ids", AsyncMock(return_value=members)), \
+         pytest.raises(svc.HypothesisServiceError) as ei:
+        await svc.draft_hypothesis(session, ORG_ID, _caller("human"), payload)
+    assert ei.value.code == "CROSS_PROJECT_LINK_FORBIDDEN"
+    repo.create.assert_not_awaited()
 
 
 def test_response_exposes_draft_fields():
