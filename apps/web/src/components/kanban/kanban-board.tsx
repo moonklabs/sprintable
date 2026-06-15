@@ -382,6 +382,17 @@ export function KanbanBoard({ projectId }: KanbanBoardProps) {
     router.replace(params.toString() ? `?${params.toString()}` : window.location.pathname, { scroll: false });
   }, [searchParams, router]);
 
+  // f1910a31: ?view=new → 백로그 인라인 컴포저 auto-open(client nav·풀로드 둘 다). nonce로 신호 전달해
+  // 반복 진입도 재오픈되게 한다. one-shot으로 ?view=new를 즉시 제거(뒤로가기/재렌더 재오픈 방지·URL 정리).
+  const [autoComposeNonce, setAutoComposeNonce] = useState(0);
+  useEffect(() => {
+    if (searchParams.get('view') !== 'new') return;
+    setAutoComposeNonce((n) => n + 1);
+    const params = new URLSearchParams(searchParams.toString());
+    params.delete('view');
+    router.replace(`/board${params.size > 0 ? `?${params.toString()}` : ''}`, { scroll: false });
+  }, [searchParams, router]);
+
   // URL에서 스토리 ID 읽어서 자동으로 패널 열기
   useEffect(() => {
     const storyId = searchParams.get('story');
@@ -1186,6 +1197,7 @@ export function KanbanBoard({ projectId }: KanbanBoardProps) {
                     onLoadMore={() => handleLoadMore(col.id)}
                     collapsed={col.id === 'done' ? doneCollapsed : undefined}
                     onToggleCollapse={col.id === 'done' ? handleToggleDoneCollapse : undefined}
+                    autoComposeSignal={col.id === 'backlog' ? autoComposeNonce : 0}
                   />
                 );
               })}
