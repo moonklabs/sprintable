@@ -69,3 +69,29 @@ async def test_mention_and_message_created_injected():
     c = SprintableSSEClient(api_key="x")
     assert await c._parse_event("message", "5", _data("conversation:mention")) is not None
     assert await c._parse_event("message", "6", _data("conversation.message_created")) is not None
+
+
+# ── E-INJECT-ADAPTERS AC1: vendored-copy sync guard ──────────────────────────
+# The hermes adapters vendor INJECTABLE_EVENT_TYPES so a single-folder fresh
+# install loads without the SDK on the path.  This SDK module stays canonical;
+# guard that the vendored copies never silently drift from it.  Parsed via ast
+# (not import) because the adapter modules import the Hermes ``gateway`` package
+# which is not present in this connectors-only test environment.
+def _vendored_allowlist(adapter_path):
+    import ast
+    tree = ast.parse(open(adapter_path, encoding="utf-8").read())
+    for node in tree.body:
+        if isinstance(node, ast.Assign) and any(
+            isinstance(t, ast.Name) and t.id == "INJECTABLE_EVENT_TYPES" for t in node.targets
+        ):
+            call = node.value
+            assert isinstance(call, ast.Call), "expected frozenset({...}) literal"
+            return set(ast.literal_eval(call.args[0]))
+    raise AssertionError(f"INJECTABLE_EVENT_TYPES not found in {adapter_path}")
+
+
+@pytest.mark.parametrize("adapter", ["hermes-sprintable", "hermes-sprintable-prod"])
+def test_adapter_vendored_allowlist_matches_sdk(adapter):
+    here = os.path.dirname(os.path.abspath(__file__))
+    adapter_path = os.path.join(here, "..", adapter, "adapter.py")
+    assert _vendored_allowlist(adapter_path) == set(INJECTABLE_EVENT_TYPES)

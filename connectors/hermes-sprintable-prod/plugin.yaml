@@ -1,0 +1,38 @@
+name: sprintable-prod-platform
+label: Sprintable Prod
+kind: platform
+version: 1.0.0
+description: >
+  Prod Sprintable Agent Gateway dial-out adapter for Hermes Agent.
+  Self-contained clone of the dev `sprintable-platform` plugin, keyed entirely
+  on SPRINTABLE_PROD_* env vars so prod SSE/API credentials, home channel and
+  cron delivery stay isolated from the dev Sprintable plugin. Install this in
+  ADDITION to the dev plugin when an agent must run dev and prod side by side.
+  httpx only.
+author: ortega/santiago
+requires_env:
+  - name: SPRINTABLE_PROD_AGENT_API_KEY
+    description: "Sprintable prod agent API key (Bearer)"
+    prompt: "Sprintable prod agent API key"
+    password: true
+optional_env:
+  - name: SPRINTABLE_PROD_API_URL
+    description: "Sprintable prod backend base URL (default: prod backend)"
+    prompt: "Sprintable prod API URL (or empty for prod default)"
+    password: false
+  - name: SPRINTABLE_PROD_ALLOWED_USERS
+    description: "Comma-separated Sprintable team_member IDs allowed to trigger replies. Empty = allow all."
+    prompt: "Allowed Sprintable prod member IDs (comma-sep, or empty for all)"
+    password: false
+  - name: SPRINTABLE_PROD_ALLOW_ALL_USERS
+    description: "Set to '1' or 'true' to allow all senders regardless of SPRINTABLE_PROD_ALLOWED_USERS."
+    prompt: "Allow all users? (1=yes)"
+    password: false
+  - name: SPRINTABLE_PROD_HOME_CHANNEL
+    description: "Default conversation_id for cron/notification delivery (deliver=sprintable_prod). Usually set via /sethome."
+    prompt: "Prod home conversation_id (or empty)"
+    password: false
+  - name: SPRINTABLE_PROD_HOME_CHANNEL_THREAD_ID
+    description: "Thread id for the prod home channel (Sprintable conversations are thread-scoped)."
+    prompt: "Prod home channel thread_id (or empty)"
+    password: false
