@@ -182,7 +182,10 @@ hermes plugins enable sprintable-platform
 
 # 3. Env (required + optional).
 export AGENT_API_KEY=sk_live_...                # required
-export SPRINTABLE_API_URL=https://app.sprintable.ai
+# Leave SPRINTABLE_API_URL UNSET for the dev backend (the default). To pin it,
+# use the DEV backend base URL — not the app/prod domain — so a dev onboard
+# never dials out to prod. Prod is the separate hermes-sprintable-prod plugin.
+# export SPRINTABLE_API_URL=https://sprintable-backend-dev-57iommnikq-du.a.run.app
 # Multi-agent teams: leave the allowlist UNSET so the agent receives messages from ALL
 # members (recommended default). Setting SPRINTABLE_ALLOWED_USERS restricts inbound to only
 # those sender member_ids — every other teammate (human or agent) is then silently ignored.

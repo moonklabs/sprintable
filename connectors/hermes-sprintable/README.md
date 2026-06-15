@@ -74,7 +74,11 @@ hermes plugins enable sprintable-platform
 
 # 4. Configure env (see the env table below).
 export AGENT_API_KEY=sk_live_...                       # required
-export SPRINTABLE_API_URL=https://app.sprintable.ai    # dev backend if unset
+# Leave SPRINTABLE_API_URL UNSET for the dev backend (the default). Only pin it
+# to the DEV backend base URL — never the app/prod domain — or a dev onboard
+# would silently dial out to prod:
+# export SPRINTABLE_API_URL=https://sprintable-backend-dev-57iommnikq-du.a.run.app
+# (Prod is a separate plugin: connectors/hermes-sprintable-prod, SPRINTABLE_PROD_*.)
 
 # 5. Restart the gateway so the plugin loads and dials out.
 hermes gateway restart
