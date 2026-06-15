@@ -237,6 +237,11 @@ async def deliver_conversation_message_webhook(
                 return
 
             mentioned_id_strs = [str(m) for m in (mentioned_ids or [])]
+            # d0bca260: conversation_title 도출(additive 컨텍스트).
+            from app.models.conversation import Conversation
+            conv_title = (await db.execute(
+                select(Conversation.title).where(Conversation.id == conversation_id)
+            )).scalar_one_or_none()
             payload = {
                 "event_type": _EVENT_TYPE,
                 "message_id": str(message_id),
@@ -246,6 +251,10 @@ async def deliver_conversation_message_webhook(
                 "created_at": created_at.isoformat(),
                 "mentioned_ids": mentioned_id_strs,
                 "content": content,
+                # d0bca260: BYOA 어댑터 컨텍스트 — project_id·org_id·conversation_title top-level(additive).
+                "project_id": str(project_id),
+                "org_id": str(org_id),
+                "conversation_title": conv_title,
             }
 
             for wh in target_webhooks:

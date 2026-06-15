@@ -186,8 +186,16 @@ async def _fetch_events(
                 e.source_entity_id::text AS source_entity_id,
                 e.sender_id::text     AS sender_id,
                 e.payload,
-                e.created_at
+                e.created_at,
+                e.project_id::text    AS project_id,
+                e.org_id::text        AS org_id,
+                c.title               AS conversation_title
             FROM events e
+            -- d0bca260: conversation_title 도출. payload.conversation_id가 uuid 형태일 때만 join
+            -- (비-대화 이벤트는 NULL → 안전). 36자 uuid 패턴 가드로 ::uuid 캐스트 에러 0.
+            LEFT JOIN conversations c
+                ON e.payload->>'conversation_id' ~ '^[0-9a-fA-F-]{36}$'
+               AND c.id = (e.payload->>'conversation_id')::uuid
             WHERE e.recipient_id = CAST(:agent_id AS uuid)
               AND e.recipient_seq > :after_seq
             ORDER BY e.recipient_seq ASC
@@ -215,6 +223,11 @@ def _row_to_payload(row: object) -> dict:
         # E-EVENT-INJECT S1: content를 SSE top-level로 노출 → connector 드롭 방지.
         "content": (_payload or {}).get("content"),
         "created_at": row.created_at.isoformat(),  # type: ignore[attr-defined]
+        # d0bca260: BYOA 어댑터 컨텍스트 — project_id·org_id·conversation_title top-level(additive).
+        # Event는 project_id·org_id 보유(미직렬화였음)·title은 conversations join. BYOA 온보딩 매끄러움.
+        "project_id": getattr(row, "project_id", None),
+        "org_id": getattr(row, "org_id", None),
+        "conversation_title": getattr(row, "conversation_title", None),
     }
 
 

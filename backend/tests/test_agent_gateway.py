@@ -461,3 +461,46 @@ async def test_disconnect_keeps_chat_working_when_other_session_active():
          patch("app.services.chat_presence.clear_member") as mock_clear:
         await _mark_agent_disconnected(AGENT_ID, uuid.uuid4())
     mock_clear.assert_not_called()
+
+
+# d0bca260: SSE payload BYOA 컨텍스트 — project_id·org_id·conversation_title top-level
+def test_row_to_payload_includes_project_org_conversation_title():
+    from types import SimpleNamespace
+    from datetime import datetime, timezone
+    from app.routers.agent_gateway import _row_to_payload
+
+    pid, oid = str(uuid.uuid4()), str(uuid.uuid4())
+    row = SimpleNamespace(
+        event_id="ev1", event_type="conversation.message_created", recipient_seq=42,
+        source_entity_type="member", source_entity_id="m1", sender_id="s1",
+        payload={"conversation_id": "c1", "content": "hi"},
+        created_at=datetime(2026, 6, 15, tzinfo=timezone.utc),
+        project_id=pid, org_id=oid, conversation_title="Sprintable QA",
+    )
+    out = _row_to_payload(row)
+    # 신규 top-level 3필드
+    assert out["project_id"] == pid
+    assert out["org_id"] == oid
+    assert out["conversation_title"] == "Sprintable QA"
+    # 기존 키 무파손(additive)
+    assert out["event_id"] == "ev1"
+    assert out["recipient_seq"] == 42
+    assert out["content"] == "hi"
+    assert out["source"]["id"] == "m1"
+
+
+def test_row_to_payload_missing_new_attrs_safe():
+    """구 row(컬럼 미포함)에도 getattr 기본 None — AttributeError 0(하위호환)."""
+    from types import SimpleNamespace
+    from datetime import datetime, timezone
+    from app.routers.agent_gateway import _row_to_payload
+
+    row = SimpleNamespace(
+        event_id="ev2", event_type="dispatched", recipient_seq=1,
+        source_entity_type=None, source_entity_id=None, sender_id=None,
+        payload={}, created_at=datetime(2026, 6, 15, tzinfo=timezone.utc),
+    )
+    out = _row_to_payload(row)
+    assert out["project_id"] is None
+    assert out["org_id"] is None
+    assert out["conversation_title"] is None
