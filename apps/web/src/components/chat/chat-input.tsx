@@ -458,7 +458,7 @@ export function ChatInput({ onSend, onUploadFile, disabled, placeholder, project
             }, 150);
           }}
           disabled={disabled || sending}
-          placeholder={placeholder ?? '메시지를 입력하세요… (@ 멘션 / # 엔티티)'}
+          placeholder={placeholder ?? t('inputPlaceholderMobile')}
           className="flex-1 resize-none rounded-xl border border-border bg-muted/30 px-3 py-2 text-sm text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-1 focus:ring-primary disabled:opacity-40"
           style={{ minHeight: '36px', maxHeight: '160px' }}
         />

@@ -2301,6 +2301,8 @@
     "empty": "표시할 에이전트가 없습니다"
   },
   "chats": {
+    "inputPlaceholderMobile": "메시지를 입력하세요… (@ 멘션)",
+    "inputPlaceholderFull": "메시지를 입력하세요… (Enter 전송 / Shift+Enter 줄바꿈 / @ 멘션 / # 엔티티)",
     "isTyping": "{name} 님이 입력 중",
     "othersTyping": "{name} 외 {count}명 입력 중",
     "presenceOnline": "온라인",

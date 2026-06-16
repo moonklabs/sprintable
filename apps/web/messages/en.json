@@ -2301,6 +2301,8 @@
     "empty": "No agents to show"
   },
   "chats": {
+    "inputPlaceholderMobile": "Type a message… (@ mention)",
+    "inputPlaceholderFull": "Type a message… (Enter to send / Shift+Enter for new line / @ mention / # entity)",
     "isTyping": "{name} is typing",
     "othersTyping": "{name} and {count} others are typing",
     "presenceOnline": "Online",
