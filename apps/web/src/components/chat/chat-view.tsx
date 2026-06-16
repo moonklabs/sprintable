@@ -515,9 +515,7 @@ export function ChatView({ threadId, currentTeamMemberId, projectId, apiPrefix =
             onUploadFile={handleUploadFile}
             projectId={projectId}
             commandTargets={commandTargets}
-            placeholder={isMobile
-              ? '메시지를 입력하세요… (@ 멘션)'
-              : '메시지를 입력하세요… (Enter 전송 / Shift+Enter 줄바꿈 / @ 멘션 / # 엔티티)'}
+            placeholder={isMobile ? t('inputPlaceholderMobile') : t('inputPlaceholderFull')}
           />
         </div>
 
