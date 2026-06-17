@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useState } from 'react';
+import { useCallback, useEffect, useState } from 'react';
 import { Shield, ShieldOff, Loader2 } from 'lucide-react';
 import { Alert, AlertDescription } from '@/components/ui/alert';
 import { Button } from '@/components/ui/button';
@@ -40,41 +40,43 @@ export function AgentProjectAccessSection({ agentMemberId, projects, canEdit }: 
   const [grantMap, setGrantMap] = useState<Record<string, string>>({});
   // GET access 가 403 인 프로젝트(read 권한 없음) — "grant 없음(차단)"과 구분(RC③). 잘못된 '차단' 표시 방지.
   const [readDeniedIds, setReadDeniedIds] = useState<Set<string>>(new Set());
+  // 일시 오류(500/네트워크 등 non-403)로 상태 미확정인 프로젝트 — "grant 없음"으로 단정하지 않고 재시도 노출.
+  const [errorIds, setErrorIds] = useState<Set<string>>(new Set());
   const [loading, setLoading] = useState(true);
   const [togglingId, setTogglingId] = useState<string | null>(null);
   const [message, setMessage] = useState<{ type: 'success' | 'error'; text: string } | null>(null);
 
   const projectsKey = projects.map((p) => p.id).join(',');
 
-  useEffect(() => {
-    let cancelled = false;
-    async function loadGrants() {
-      setLoading(true);
-      // v1 fan-out: org 전체 프로젝트 access 조회 → member_id===agent 필터로 grant 맵 구성.
-      // 403(read 권한 없음)은 별도 추적해 "grant 없음(차단)"으로 오해석하지 않는다(RC③).
-      const results = await Promise.all(projects.map(async (p) => {
-        const res = await fetch(`/api/projects/${p.id}/access`).catch(() => null);
-        if (res?.status === 403) return { projectId: p.id, readDenied: true } as const;
-        if (!res?.ok) return { projectId: p.id } as const; // 일시 오류 — granted/denied 단정 안 함
-        const json = await res.json() as { data?: AccessRecord[] };
-        const rec = (json.data ?? []).find((r) => r.member_id === agentMemberId);
-        return { projectId: p.id, recordId: rec?.id } as const;
-      }));
-      if (cancelled) return;
-      const map: Record<string, string> = {};
-      const denied = new Set<string>();
-      for (const r of results) {
-        if ('readDenied' in r && r.readDenied) denied.add(r.projectId);
-        else if ('recordId' in r && r.recordId) map[r.projectId] = r.recordId;
-      }
-      setGrantMap(map);
-      setReadDeniedIds(denied);
-      setLoading(false);
+  const loadGrants = useCallback(async () => {
+    setLoading(true);
+    // v1 fan-out: org 전체 프로젝트 access 조회 → member_id===agent 필터로 grant 맵 구성.
+    // 403(read 권한 없음)·일시 오류(500/네트워크)는 각각 별도 추적 — "grant 없음(차단)"으로
+    // 오해석해 잘못된 토글/POST 를 유발하지 않는다(RC③·일시오류 fall-through RC).
+    const results = await Promise.all(projects.map(async (p) => {
+      const res = await fetch(`/api/projects/${p.id}/access`).catch(() => null);
+      if (res?.status === 403) return { projectId: p.id, readDenied: true } as const;
+      if (!res?.ok) return { projectId: p.id, error: true } as const; // transient — granted/denied 단정 안 함
+      const json = await res.json() as { data?: AccessRecord[] };
+      const rec = (json.data ?? []).find((r) => r.member_id === agentMemberId);
+      return { projectId: p.id, recordId: rec?.id } as const;
+    }));
+    const map: Record<string, string> = {};
+    const denied = new Set<string>();
+    const errored = new Set<string>();
+    for (const r of results) {
+      if ('readDenied' in r) denied.add(r.projectId);
+      else if ('error' in r) errored.add(r.projectId);
+      else if (r.recordId) map[r.projectId] = r.recordId;
     }
-    void loadGrants();
-    return () => { cancelled = true; };
+    setGrantMap(map);
+    setReadDeniedIds(denied);
+    setErrorIds(errored);
+    setLoading(false);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [agentMemberId, projectsKey]);
+
+  useEffect(() => { void loadGrants(); }, [loadGrants]);
 
   const handleToggle = async (projectId: string) => {
     if (!canEdit || togglingId) return;
@@ -163,13 +165,22 @@ export function AgentProjectAccessSection({ agentMemberId, projects, canEdit }: 
         ) : (
           <div className="max-h-72 divide-y divide-border overflow-y-auto overflow-x-hidden rounded-md border border-border">
             {projects.map((project) => {
+              const errored = errorIds.has(project.id);
               const readDenied = readDeniedIds.has(project.id);
               const granted = project.id in grantMap;
               const toggling = togglingId === project.id;
               return (
                 <div key={project.id} className="flex items-center justify-between gap-3 px-3 py-3 text-sm">
                   <span className="min-w-0 truncate font-medium text-foreground">{project.name}</span>
-                  {readDenied ? (
+                  {errored ? (
+                    <button
+                      type="button"
+                      onClick={() => void loadGrants()}
+                      className="inline-flex shrink-0 items-center gap-1 text-xs text-destructive hover:underline"
+                    >
+                      로드 실패 · 재시도
+                    </button>
+                  ) : readDenied ? (
                     <span
                       className="inline-flex shrink-0 items-center gap-1 text-xs text-muted-foreground"
                       title="이 프로젝트의 접근 상태를 조회할 권한이 없습니다."
