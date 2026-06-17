@@ -151,11 +151,16 @@ async def create_team_member(
     auth: AuthContext = Depends(get_current_user),
     org_id: uuid.UUID = Depends(get_verified_org_id),
 ) -> dict:
-    # AC1/AC2: agent actor의 can_manage_members 체크
+    # AC1/AC2: agent actor의 멤버 관리 권한 체크.
+    # E-MEMBER-POLICY S4: can_manage_members 플래그 직접 읽기 → effective 프로젝트 역할(has_project_role)
+    # 단일 경로로 전환(블루프린트 §6). can_manage_members 는 role 에서 derived(0122 백필 can_manage=
+    # true→role admin). owner/admin 이 멤버 관리. 기존 통과자(can_manage=true→admin) 무회귀 +
+    # owner/admin 추가 통과(additive).
     actor = await _resolve_actor(auth, session, org_id)
     if actor is not None and actor.type == "agent":
-        if not actor.can_manage_members:
-            raise HTTPException(status_code=403, detail="Agent does not have can_manage_members permission")
+        from app.services.project_auth import has_project_role
+        if not await has_project_role(session, actor.id, actor.project_id, min_role="admin"):
+            raise HTTPException(status_code=403, detail="project admin/owner role required to manage members")
         # AC3: target.role > actor.role → 403 (격상 차단)
         target_rank = _ROLE_RANK.get(body.role, 1)
         actor_rank = _ROLE_RANK.get(actor.role, 1)
