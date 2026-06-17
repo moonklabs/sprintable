@@ -131,7 +131,8 @@ async def build_attachment_context(
         """line 추가. 총량(헤더+블록+구분자+마커) 한도 초과면 한도 라인(자리 있으면) 후 중단(False)."""
         nonlocal total
         sep = 2 if blocks else 0  # "\n\n" join
-        if blocks and total + sep + len(line) > _TOTAL_CAP:
+        # QA RC LOW: blocks 가드 제거 — 첫 첨부(blocks 빈)도 overflow 체크(긴 파일명 첫 라인 24k 초과 방지).
+        if total + sep + len(line) > _TOTAL_CAP:
             marker = "[…첨부 컨텍스트 총량 한도 도달 — 이후 첨부 생략]"
             if total + sep + len(marker) <= _TOTAL_CAP:  # 마커도 한도 내일 때만(총량 엄수)
                 blocks.append(marker)

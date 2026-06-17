@@ -145,6 +145,18 @@ async def test_total_cap_includes_markers_and_stops(monkeypatch):
 
 
 @pytest.mark.anyio
+async def test_first_line_overflow_bounded(monkeypatch):
+    """QA RC LOW: 첫 첨부(blocks 빈) 라인이 24k 초과해도 총량 ≤ cap (blocks 가드 제거 검증).
+    긴 파일명 이미지 라인(미fetch)으로 첫 라인만으로 초과 유발."""
+    from app.services import attachment_context as ac
+
+    monkeypatch.setattr(ac, "_download_object", AsyncMock())
+    huge_name = "x" * (ac._TOTAL_CAP + 5000) + ".png"
+    out = await _build(ac, [_att(huge_name, "image/png")])
+    assert len(out) <= ac._TOTAL_CAP  # 첫 라인도 한도 엄수
+
+
+@pytest.mark.anyio
 async def test_fetch_failure_guidance(monkeypatch):
     from app.services import attachment_context as ac
 
