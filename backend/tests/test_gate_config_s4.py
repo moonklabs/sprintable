@@ -216,3 +216,74 @@ async def test_org_gate_config_non_admin_403():
                 oid, session=MagicMock(), verified_org_id=oid, auth=_auth()
             )
     assert ei.value.status_code == 403  # 비-admin 차단
+
+
+# ── org-PUT (org 기본값 설정·org-scoped) ───────────────────────────────────────
+
+
+def _org_body():
+    from app.routers import gate_config as gc
+
+    return gc.OrgGateLevelRequest(work_type="done", actor_type="agent", level="ask")
+
+
+@pytest.mark.anyio
+async def test_org_put_admin_sets_default():
+    from app.routers import gate_config as gc
+
+    oid = uuid.uuid4()
+    session = MagicMock()
+    session.commit = AsyncMock()
+    row = MagicMock(work_type="done", actor_type="agent", level="ask")
+    with patch("app.routers.gate_config.is_org_owner_or_admin", new=AsyncMock(return_value=True)), patch(
+        "app.routers.gate_config.set_gate_level", new=AsyncMock(return_value=row)
+    ):
+        out = await gc.put_org_gate_config(
+            oid, _org_body(), session=session, verified_org_id=oid, auth=_auth()
+        )
+    assert out.level == "ask"
+    assert out.source == "org_default"
+    session.commit.assert_awaited_once()
+
+
+@pytest.mark.anyio
+async def test_org_put_non_admin_403():
+    from fastapi import HTTPException
+
+    from app.routers import gate_config as gc
+
+    oid = uuid.uuid4()
+    with patch("app.routers.gate_config.is_org_owner_or_admin", new=AsyncMock(return_value=False)):
+        with pytest.raises(HTTPException) as ei:
+            await gc.put_org_gate_config(
+                oid, _org_body(), session=MagicMock(), verified_org_id=oid, auth=_auth()
+            )
+    assert ei.value.status_code == 403
+
+
+@pytest.mark.anyio
+async def test_org_put_mismatch_403():
+    from fastapi import HTTPException
+
+    from app.routers import gate_config as gc
+
+    with pytest.raises(HTTPException) as ei:
+        await gc.put_org_gate_config(
+            uuid.uuid4(), _org_body(), session=MagicMock(), verified_org_id=uuid.uuid4(), auth=_auth()
+        )
+    assert ei.value.status_code == 403  # 타 org 차단
+
+
+@pytest.mark.anyio
+async def test_org_put_invalid_level_400():
+    from fastapi import HTTPException
+
+    from app.routers import gate_config as gc
+
+    oid = uuid.uuid4()
+    body = gc.OrgGateLevelRequest(work_type="done", actor_type="agent", level="MAYBE")
+    with pytest.raises(HTTPException) as ei:
+        await gc.put_org_gate_config(
+            oid, body, session=MagicMock(), verified_org_id=oid, auth=_auth()
+        )
+    assert ei.value.status_code == 400
