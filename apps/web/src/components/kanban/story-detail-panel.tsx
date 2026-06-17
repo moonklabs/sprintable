@@ -140,7 +140,17 @@ export function StoryDetailPanel({ story, tasks, nextTasksCursor = null, loading
   const attachInputRef = useRef<HTMLInputElement>(null);
 
   const [editingAssignee, setEditingAssignee] = useState(false);
-  const [savingAssignee, setSavingAssignee] = useState(false);
+  // E-BOARD: assignee optimistic local state — mirrors localStatus (L130). Checkmark/collapsed
+  // render read this, so a click reflects immediately instead of waiting for the PATCH round-trip
+  // + parent `onStoryUpdate` prop push. Decoupling from the `story` prop is what fixes "됐다 안됐다".
+  const [localAssigneeIds, setLocalAssigneeIds] = useState<string[]>(() =>
+    story.assignee_ids && story.assignee_ids.length > 0
+      ? story.assignee_ids
+      : story.assignee_id ? [story.assignee_id] : []
+  );
+  // 연타 race 가드: 옵티미스틱 토글의 source-of-truth. 클릭마다 동기 갱신해 같은 틱 더블클릭에서도
+  // 직전 stale snapshot이 아닌 최신값 기준으로 next를 계산(함수형 업데이트와 동등한 보장).
+  const assigneeIdsRef = useRef<string[]>(localAssigneeIds);
 
   const [deps, setDeps] = useState<DependencyEdge[]>([]);
   const [loadingDeps, setLoadingDeps] = useState(false);
@@ -381,23 +391,50 @@ export function StoryDetailPanel({ story, tasks, nextTasksCursor = null, loading
     ? story.assignee_ids
     : (story.assignee_id ? [story.assignee_id] : []);
 
+  // prop이 바뀌면(네비게이션·외부 갱신·dispatch 패널 onAssigneePatched 경로) 로컬을 재동기화 — localStatus(L319) 미러.
+  // 배열 ref가 아닌 내용(join) 기준 → 부모 리렌더가 in-flight 옵티미스틱 값을 덮지 않음.
+  const assigneeSyncKey = currentAssigneeIds.join(',');
+  useEffect(() => {
+    assigneeIdsRef.current = currentAssigneeIds;
+    setLocalAssigneeIds(currentAssigneeIds);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [assigneeSyncKey]);
+
   const handleToggleAssignee = async (memberId: string) => {
-    const set = new Set(currentAssigneeIds);
-    if (set.has(memberId)) set.delete(memberId); else set.add(memberId);
-    const next = Array.from(set);
-    setSavingAssignee(true);
+    const prev = assigneeIdsRef.current;
+    const next = prev.includes(memberId)
+      ? prev.filter((id) => id !== memberId)
+      : [...prev, memberId];
+    assigneeIdsRef.current = next;   // 동기 갱신 → 연타 시 다음 클릭이 최신 기준으로 계산
+    setLocalAssigneeIds(next);       // 옵티미스틱 — 체크마크/표시 즉시 반영
+    // assignee_ids 전체 배열 교체(서버 last-write-wins) → 연타 시 마지막 로컬과 정합.
     const updated = await patchStory({ assignee_ids: next });
-    setSavingAssignee(false);
-    // BE가 assignee_id(주담당)를 assignee_ids[0]로 동기화 → 응답 우선, 없으면 로컬 계산.
-    if (updated) onStoryUpdate?.({ ...story, assignee_ids: updated.assignee_ids ?? next, assignee_id: updated.assignee_id ?? next[0] ?? null });
+    if (updated) {
+      // BE가 assignee_id(주담당)를 assignee_ids[0]로 동기화 → 응답 우선, 없으면 로컬 계산.
+      const resolved = updated.assignee_ids ?? next;
+      assigneeIdsRef.current = resolved;
+      setLocalAssigneeIds(resolved);
+      onStoryUpdate?.({ ...story, assignee_ids: resolved, assignee_id: updated.assignee_id ?? resolved[0] ?? null });
+    } else {
+      assigneeIdsRef.current = prev; // PATCH 실패 → 직전 값 롤백
+      setLocalAssigneeIds(prev);
+      addToast({ type: 'error', title: '담당자 변경에 실패했습니다.' });
+    }
   };
 
   const handleClearAssignees = async () => {
-    setSavingAssignee(true);
+    const prev = assigneeIdsRef.current;
+    assigneeIdsRef.current = [];
+    setLocalAssigneeIds([]);         // 옵티미스틱
     setEditingAssignee(false);
     const updated = await patchStory({ assignee_ids: [] });
-    setSavingAssignee(false);
-    if (updated) onStoryUpdate?.({ ...story, assignee_ids: [], assignee_id: null });
+    if (updated) {
+      onStoryUpdate?.({ ...story, assignee_ids: [], assignee_id: null });
+    } else {
+      assigneeIdsRef.current = prev; // 롤백
+      setLocalAssigneeIds(prev);
+      addToast({ type: 'error', title: '담당자 변경에 실패했습니다.' });
+    }
   };
 
   const handleSaveDescription = async () => {
@@ -721,7 +758,7 @@ export function StoryDetailPanel({ story, tasks, nextTasksCursor = null, loading
                     — {t('clearAssignees')}
                   </button>
                   {members.filter((m, i, arr) => arr.findIndex((x) => x.id === m.id) === i).map((m) => {
-                    const selected = currentAssigneeIds.includes(m.id);
+                    const selected = localAssigneeIds.includes(m.id);
                     return (
                       <button
                         key={m.id}
@@ -747,11 +784,9 @@ export function StoryDetailPanel({ story, tasks, nextTasksCursor = null, loading
                 </div>
               ) : (
                 <p className="mt-1 text-sm text-foreground">
-                  {savingAssignee
-                    ? t('loading')
-                    : currentAssigneeIds.length > 0
-                      ? currentAssigneeIds.map((id) => memberMap[id]?.name ?? '—').join(', ')
-                      : '—'}
+                  {localAssigneeIds.length > 0
+                    ? localAssigneeIds.map((id) => memberMap[id]?.name ?? '—').join(', ')
+                    : '—'}
                 </p>
               )}
             </div>
@@ -764,7 +799,7 @@ export function StoryDetailPanel({ story, tasks, nextTasksCursor = null, loading
                   entityType="story"
                   entityId={story.id}
                   projectId={projectId}
-                  currentAssigneeId={currentAssigneeIds.length > 1 ? undefined : story.assignee_id}
+                  currentAssigneeId={localAssigneeIds.length > 1 ? undefined : story.assignee_id}
                   onAssigneePatched={(aid) => onStoryUpdate?.({ ...story, assignee_id: aid })}
                 />
               </div>
