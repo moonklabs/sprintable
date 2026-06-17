@@ -52,3 +52,28 @@ class HitlRequest(Base):
         DateTime(timezone=True), server_default=func.now(), nullable=False
     )
     deleted_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+
+
+class HitlGateConfig(Base):
+    """E-HITL-GATING S-GATE-1: 게이트 레벨 config (정책 hitl-gating-policy-v1 §3).
+
+    org 기본값(project_id NULL) → project 오버라이드 계층. (work_type × actor_type) → level.
+    유니크: 부분 인덱스 2(org 기본값 / project 오버라이드) — migration 0123. 안전 하한·집행은
+    S-GATE-3/2. dev 전용 가치 실험(prod 미영향).
+    """
+    __tablename__ = "hitl_gate_config"
+
+    id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    org_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), nullable=False, index=True)
+    # NULL = org 기본값 · set = project 오버라이드
+    project_id: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True), nullable=True, index=True)
+    work_type: Mapped[str] = mapped_column(Text, nullable=False)   # 'done' | 'merge'
+    actor_type: Mapped[str] = mapped_column(Text, nullable=False)  # 'agent' | 'human'
+    level: Mapped[str] = mapped_column(Text, nullable=False)       # 'auto' | 'ask' | 'block'
+    created_by: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True), nullable=True)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now(), nullable=False
+    )
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now(), nullable=False
+    )
