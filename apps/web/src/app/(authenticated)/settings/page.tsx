@@ -446,9 +446,6 @@ export default function SettingsPage() {
         const meJson = meRes.ok ? await meRes.json() : null;
         const role = (meJson?.data?.role ?? 'member') as string;
         setIsAdmin(role === 'admin' || role === 'owner');
-        // S-GATE-4 RC: /api/me role = 현재 프로젝트(currentProjectId)의 effective role. gate-config 편집
-        // 권한이 org admin/owner 외에 **project owner**도 포함(BE gate_config 정합)이라 별도 보관.
-        setCurrentProjectRole(role);
         setCurrentUserId((meJson?.data?.user_id as string | null) ?? null);
       } catch {
         setIsAdmin(false);
@@ -506,6 +503,22 @@ export default function SettingsPage() {
     void refreshInvitations().catch((err) => { console.error('초대 목록 로드 실패', err); });
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [currentProjectId, orgId]);
+
+  // S-GATE-4 RC: 현재 프로젝트의 내 role 을 **그 프로젝트의 team-members**에서 도출(/api/me 는 JWT
+  // project_id 기준이라 탭≠JWT 면 부정확). team-members 는 project_id 쿼리 기준·user_id 로 매칭 가능·
+  // 멤버 read 가능. project owner 면 gate-config 편집 허용에 사용(canEdit).
+  useEffect(() => {
+    if (!currentProjectId || !currentUserId) { setCurrentProjectRole('member'); return; }
+    let cancelled = false;
+    void (async () => {
+      const res = await fetch(`/api/team-members?project_id=${currentProjectId}&type=human`).catch(() => null);
+      if (cancelled || !res?.ok) return;
+      const json = await res.json() as { data?: Array<{ user_id?: string | null; role?: string }> };
+      const mine = (json.data ?? []).find((m) => m.user_id === currentUserId);
+      setCurrentProjectRole(mine?.role ?? 'member');
+    })();
+    return () => { cancelled = true; };
+  }, [currentProjectId, currentUserId]);
 
   useEffect(() => {
     if (!memberProjectId) return;
