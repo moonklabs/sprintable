@@ -145,10 +145,11 @@ async def test_get_scope_context_returns_org_and_project():
     from app.dependencies.auth import get_scope_context
     org = uuid.uuid4()
     proj = uuid.uuid4()
-    auth = _make_auth(org_id=str(org))
+    uid = str(uuid.uuid4())
+    auth = _make_auth(org_id=str(org), user_id=uid)
 
     mock_result = MagicMock()
-    mock_result.scalar_one_or_none.return_value = proj  # project exists in org
+    mock_result.scalar_one_or_none.return_value = proj  # has_project_access → True(멤버)
     mock_db = AsyncMock()
     mock_db.execute = AsyncMock(return_value=mock_result)
     mock_request = MagicMock()
@@ -160,7 +161,7 @@ async def test_get_scope_context_returns_org_and_project():
     )
     assert ctx["org_id"] == org
     assert ctx["project_id"] == proj
-    assert ctx["user_id"] == "user-1"
+    assert ctx["user_id"] == uid
 
 
 @pytest.mark.anyio
@@ -245,13 +246,13 @@ async def test_get_verified_org_id_jwt_org_skips_db():
 
 @pytest.mark.anyio
 async def test_get_verified_org_id_403_on_foreign_project():
-    """X-Project-Id 헤더로 비소속 project 접근 시 403."""
+    """X-Project-Id 헤더로 비소속(has_project_access=False) project 접근 시 403."""
     from app.dependencies.auth import get_verified_org_id
     org = uuid.uuid4()
-    auth = _make_auth(org_id=str(org))  # JWT에 org_id 있음 (org 검증 skip)
+    auth = _make_auth(org_id=str(org), user_id=str(uuid.uuid4()))  # JWT에 org_id 있음 (org 검증 skip)
 
     mock_result = MagicMock()
-    mock_result.scalar_one_or_none.return_value = None  # project 비소속
+    mock_result.scalar_one_or_none.return_value = None  # has_project_access → False(멤버 아님)
     mock_db = AsyncMock()
     mock_db.execute = AsyncMock(return_value=mock_result)
     mock_request = MagicMock()
