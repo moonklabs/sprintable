@@ -19,10 +19,12 @@ from datetime import datetime
 from sqlalchemy import String, cast, func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.models.hitl import HitlRequest
+from app.models.hitl import HitlGateAudit, HitlRequest
 
 _GATE_REQUEST_TYPE = "gate_approval"
 _RUBBER_STAMP_SECONDS = 30  # gate_service._RUBBER_STAMP_SECONDS 와 동일 임계(동형)
+# S-GATE-5.1 audit outcome 집합(enforce_gate 가 기록하는 전 outcome).
+_OUTCOMES = ("auto", "blocked", "ask_queued", "resumed", "rejected_blocked", "self_blocked")
 
 
 def _ratio(num: int, denom: int) -> float | None:
@@ -50,7 +52,11 @@ class HitlGateMetrics:
     ask_resolution_minutes: float | None
     rubber_stamp_rate: float | None
     self_approval_caught: int
-    coverage: float | None  # v1: 항상 None — auto/block 미persist(소스 한계·audit 테이블 후속)
+    coverage: float | None  # true ratio(enforced/전체 전이)는 stories 분모 필요 — §3 2차/skip(None)
+    # S-GATE-5.1: hitl_gate_audit 기반(auto/block 포함 전 outcome).
+    enforced_total: int = 0  # 게이트 친 전이 수(flag active 시 enforce 호출 = audit 1행)
+    outcomes: dict | None = None  # outcome 분포(auto·blocked·ask_queued·resumed·rejected_blocked·self_blocked)
+    auto_rate: float | None = None  # auto / enforced_total(게이트가 그냥 통과시킨 비율)
 
 
 async def compute_hitl_gate_metrics(
@@ -109,6 +115,18 @@ async def compute_hitl_gate_metrics(
     )
     approved_resolved, rubber_count, self_approval = (await session.execute(rs_stmt)).one()
 
+    # S-GATE-5.1: hitl_gate_audit 기반 outcome 분포(auto/block 포함·created_at window).
+    audit_filters = [HitlGateAudit.org_id == org_id]
+    if project_id is not None:
+        audit_filters.append(HitlGateAudit.project_id == project_id)
+    audit_stmt = _window(
+        select(HitlGateAudit.outcome, func.count()).where(*audit_filters).group_by(HitlGateAudit.outcome),
+        HitlGateAudit.created_at, start, end,
+    )
+    audit_counts = {o: int(c) for o, c in (await session.execute(audit_stmt)).all()}
+    outcomes = {k: audit_counts.get(k, 0) for k in _OUTCOMES}
+    enforced_total = sum(outcomes.values())
+
     return HitlGateMetrics(
         ask_total=ask_total,
         pending=pending,
@@ -118,5 +136,8 @@ async def compute_hitl_gate_metrics(
         ask_resolution_minutes=float(avg_minutes) if avg_minutes is not None else None,
         rubber_stamp_rate=_ratio(int(rubber_count or 0), int(approved_resolved or 0)),
         self_approval_caught=int(self_approval or 0),
-        coverage=None,
+        coverage=None,  # true ratio(enforced/전체 전이)는 stories 분모 필요 — §3 deferred
+        enforced_total=enforced_total,
+        outcomes=outcomes,
+        auto_rate=_ratio(outcomes["auto"], enforced_total),
     )

@@ -95,6 +95,37 @@ def gate_config_enforce_active(org_id: uuid.UUID) -> bool:
     return (not allow) or (org_id in allow)
 
 
+async def _record_audit(
+    session: AsyncSession,
+    *,
+    org_id, project_id, work_type, actor_type, actor_id, work_item_id,
+    resolved_level: str,
+    outcome: str,
+    persist: bool,
+) -> None:
+    """S-GATE-5.1: enforce outcome 1행 audit(coverage/분포 측정).
+
+    ⚠️ §2: **persist=True(raise outcome=block/ask_queued/rejected/self)** 는 raise 전 **독립 commit** —
+    409→세션 rollback 에서 audit 가 유실되면 coverage 가 정작 핵심 가치 이벤트를 못 잡는 자기모순(HitlRequest
+    생존 패턴 미러). **persist=False(return outcome=auto/resumed)** 는 add 만(전이가 함께 commit). best-effort.
+    """
+    try:
+        from app.models.hitl import HitlGateAudit
+
+        session.add(HitlGateAudit(
+            org_id=org_id, project_id=project_id, work_type=work_type, actor_type=actor_type,
+            resolved_level=resolved_level, outcome=outcome,
+            work_item_id=work_item_id, actor_id=actor_id,
+        ))
+        if persist:
+            await session.commit()
+    except Exception:
+        logger.warning(
+            "gate audit record failed org=%s work=%s outcome=%s", org_id, work_type, outcome,
+            exc_info=True,
+        )
+
+
 async def enforce_gate(
     session: AsyncSession,
     *,
@@ -122,17 +153,27 @@ async def enforce_gate(
             "gate_enforced org=%s work=%s floor_clamp %s→%s", org_id, work_type, level, floored
         )
     level = floored
+
+    async def _audit(outcome: str, persist: bool) -> None:
+        await _record_audit(
+            session, org_id=org_id, project_id=project_id, work_type=work_type,
+            actor_type=actor_type, actor_id=actor_id, work_item_id=work_item_id,
+            resolved_level=level, outcome=outcome, persist=persist,
+        )
+
     if level == "auto":
         logger.info(
             "gate_enforced org=%s project=%s work=%s actor=%s level=auto outcome=auto",
             org_id, project_id, work_type, actor_type,
         )
+        await _audit("auto", persist=False)  # return outcome — 전이가 commit
         return
     if level == "block":
         logger.info(
             "gate_enforced org=%s project=%s work=%s actor=%s level=block outcome=blocked",
             org_id, project_id, work_type, actor_type,
         )
+        await _audit("blocked", persist=True)  # raise outcome — commit-before-raise(§2)
         raise HTTPException(
             status_code=409,
             detail={
@@ -179,6 +220,7 @@ async def enforce_gate(
                     "gate_enforced org=%s work=%s outcome=blocked_self_approval request=%s actor=%s",
                     org_id, work_type, req_id, orig_actor_id,
                 )
+                await _audit("self_blocked", persist=True)  # raise outcome — §2
                 raise HTTPException(
                     status_code=409,
                     detail={
@@ -194,12 +236,14 @@ async def enforce_gate(
                 "gate_enforced org=%s work=%s level=ask outcome=resumed approved_request=%s",
                 org_id, work_type, req_id,
             )
+            await _audit("resumed", persist=False)  # return outcome — 전이가 commit
             return
         if req_status == "rejected":
             logger.info(
                 "gate_enforced org=%s work=%s level=ask outcome=blocked_rejected request=%s",
                 org_id, work_type, req_id,
             )
+            await _audit("rejected_blocked", persist=True)  # raise outcome — §2
             raise HTTPException(
                 status_code=409,
                 detail={
@@ -216,6 +260,7 @@ async def enforce_gate(
             "gate_enforced org=%s work=%s level=ask outcome=ask_pending request_id=%s",
             org_id, work_type, req_id,
         )
+        await _audit("ask_queued", persist=True)  # raise outcome — §2
         raise HTTPException(
             status_code=409,
             detail={
@@ -247,6 +292,8 @@ async def enforce_gate(
         },
     )
     session.add(req)
+    # audit 도 같은 commit 으로 persist(409 rollback 생존·§2) — 신규 park 는 기존 commit 이 둘 다 보존.
+    await _audit("ask_queued", persist=False)
     await session.commit()  # raise 전 persist(_preflight_merge_gate 동형·get_db 예외 rollback 대비)
     await session.refresh(req)
     logger.info(

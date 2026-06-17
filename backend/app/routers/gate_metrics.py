@@ -30,7 +30,11 @@ class HitlGateMetricsResponse(BaseModel):
     ask_resolution_minutes: float | None = None
     rubber_stamp_rate: float | None = None
     self_approval_caught: int = 0
-    coverage: float | None = None  # v1 항상 null — auto/block 미persist(소스 한계)
+    coverage: float | None = None  # true ratio(enforced/전체)는 stories 분모 필요 — §3 deferred
+    # S-GATE-5.1: hitl_gate_audit 기반(auto/block 포함 전 outcome)
+    enforced_total: int = 0
+    outcomes: dict | None = None
+    auto_rate: float | None = None
     project_id: str | None = None
     window: dict
 
@@ -64,6 +68,9 @@ async def get_hitl_gate_metrics(
         rubber_stamp_rate=m.rubber_stamp_rate,
         self_approval_caught=m.self_approval_caught,
         coverage=m.coverage,
+        enforced_total=m.enforced_total,
+        outcomes=m.outcomes,
+        auto_rate=m.auto_rate,
         project_id=str(project_id) if project_id else None,
         window={
             "start": start.isoformat() if start else None,
