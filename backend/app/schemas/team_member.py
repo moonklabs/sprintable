@@ -27,6 +27,23 @@ class TeamMemberCreate(BaseModel):
     agent_role: str | None = None
 
 
+class OrgAgentCreate(BaseModel):
+    """org-level 에이전트 생성 요청. 단일 project 종속이 아니라 scope_mode 로 프로젝트 집합 지정.
+
+    scope_mode='org'   → org 의 현재 모든 프로젝트에 grant (v1; 미래 프로젝트 자동 grant 는 follow-up).
+    scope_mode='projects' → project_ids 에 명시한 프로젝트에만 grant (≥1 필수, 모두 org 소속).
+    role 은 grant 별 부여(기본 member) — project_access.role 로 per-project 적용.
+    """
+    name: str
+    role: str = "member"
+    agent_config: dict[str, Any] | None = None
+    agent_role: str | None = None
+    color: str = "#3385f8"
+    avatar_url: str | None = None
+    scope_mode: str = "projects"  # 'org' | 'projects'
+    project_ids: list[uuid.UUID] = []
+
+
 class TeamMemberUpdate(BaseModel):
     name: str | None = None
     role: str | None = None
