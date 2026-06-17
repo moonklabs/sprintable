@@ -94,6 +94,17 @@ async def test_no_x_project_id_keeps_jwt_project_id():
     db.execute.assert_not_called()
 
 
+def test_has_project_access_has_toplevel_org_scope():
+    """QA RC HIGH① 회귀 가드: has_project_access 최상위 WHERE 에 p.org_id 스코프 — team_members
+    분기 cross-org 누수 차단(X-Project-Id 로 cross-org 주입 방지). 실 PG 로 cross-org 0행 실증함."""
+    import inspect
+
+    from app.services import project_auth
+
+    src = inspect.getsource(project_auth.has_project_access)
+    assert "p.org_id = :org_id" in src
+
+
 @pytest.mark.anyio
 async def test_x_project_id_invalid_format_400():
     from fastapi import HTTPException

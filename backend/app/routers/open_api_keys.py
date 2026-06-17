@@ -33,8 +33,11 @@ def _get_project_id(auth: AuthContext = Depends(get_current_user)) -> uuid.UUID:
 async def create_project_api_key(
     body: CreateProjectApiKeyRequest,
     auth: AuthContext = Depends(require_admin),
-    project_id: uuid.UUID = Depends(_get_project_id),
+    # QA RC HIGH②(#1549): get_verified_org_id 가 X-Project-Id override 로 claims.project_id 를
+    # 갱신하므로, claims 를 읽는 _get_project_id 보다 **먼저** 선언해야(의존성 해소 순서=선언 순서)
+    # stale JWT project_id 대신 override 된 값을 캡처한다.
     _org_id: uuid.UUID = Depends(get_verified_org_id),
+    project_id: uuid.UUID = Depends(_get_project_id),
     repo: ProjectApiKeyRepository = Depends(_get_repo),
     session: AsyncSession = Depends(get_db),
 ) -> ProjectApiKeyCreatedResponse:
@@ -55,8 +58,11 @@ async def create_project_api_key(
 @router.get("/api-keys", response_model=list[ProjectApiKeyResponse])
 async def list_project_api_keys(
     _auth: AuthContext = Depends(require_admin),
-    project_id: uuid.UUID = Depends(_get_project_id),
+    # QA RC HIGH②(#1549): get_verified_org_id 가 X-Project-Id override 로 claims.project_id 를
+    # 갱신하므로, claims 를 읽는 _get_project_id 보다 **먼저** 선언해야(의존성 해소 순서=선언 순서)
+    # stale JWT project_id 대신 override 된 값을 캡처한다.
     _org_id: uuid.UUID = Depends(get_verified_org_id),
+    project_id: uuid.UUID = Depends(_get_project_id),
     repo: ProjectApiKeyRepository = Depends(_get_repo),
 ) -> list[ProjectApiKeyResponse]:
     keys = await repo.list_by_project(project_id)
@@ -67,8 +73,11 @@ async def list_project_api_keys(
 async def revoke_project_api_key(
     key_id: uuid.UUID,
     _auth: AuthContext = Depends(require_admin),
-    project_id: uuid.UUID = Depends(_get_project_id),
+    # QA RC HIGH②(#1549): get_verified_org_id 가 X-Project-Id override 로 claims.project_id 를
+    # 갱신하므로, claims 를 읽는 _get_project_id 보다 **먼저** 선언해야(의존성 해소 순서=선언 순서)
+    # stale JWT project_id 대신 override 된 값을 캡처한다.
     _org_id: uuid.UUID = Depends(get_verified_org_id),
+    project_id: uuid.UUID = Depends(_get_project_id),
     repo: ProjectApiKeyRepository = Depends(_get_repo),
     session: AsyncSession = Depends(get_db),
 ) -> None:
