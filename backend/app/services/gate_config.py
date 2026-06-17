@@ -8,7 +8,7 @@ from __future__ import annotations
 import logging
 import uuid
 
-from sqlalchemy import select
+from sqlalchemy import select, text
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models.hitl import HitlGateConfig
@@ -86,12 +86,39 @@ async def set_gate_level(
     if level not in LEVELS:
         raise ValueError(f"level must be one of {LEVELS}")
 
+    # QA RC(디디 캐치·PO 승인): SELECT-then-INSERT 는 TOCTOU race — 동일 축 동시 PUT 2건이 둘 다
+    # INSERT → 부분 유니크 위반 500. 부분 유니크 인덱스를 conflict target 으로 **원자 upsert**
+    # (on_conflict_do_update). updated_at 도 갱신(UPDATE 시 stale 방지). org 기본값/project 오버라이드는
+    # 각각 다른 부분 유니크라 index_where 로 분기.
+    from sqlalchemy import func
+    from sqlalchemy.dialects.postgresql import insert as pg_insert
+
+    vals = dict(
+        org_id=org_id, project_id=project_id, work_type=work_type,
+        actor_type=actor_type, level=level, created_by=created_by,
+    )
+    stmt = pg_insert(HitlGateConfig.__table__).values(**vals)
+    if project_id is None:
+        stmt = stmt.on_conflict_do_update(
+            index_elements=["org_id", "work_type", "actor_type"],
+            index_where=text("project_id IS NULL"),
+            set_={"level": level, "updated_at": func.now()},
+        )
+    else:
+        stmt = stmt.on_conflict_do_update(
+            index_elements=["org_id", "project_id", "work_type", "actor_type"],
+            index_where=text("project_id IS NOT NULL"),
+            set_={"level": level, "updated_at": func.now()},
+        )
+    await session.execute(stmt)
+    await session.flush()
+
     scope_filter = (
         HitlGateConfig.project_id.is_(None)
         if project_id is None
         else HitlGateConfig.project_id == project_id
     )
-    existing = (
+    row = (
         await session.execute(
             select(HitlGateConfig).where(
                 HitlGateConfig.org_id == org_id,
@@ -101,22 +128,4 @@ async def set_gate_level(
             )
         )
     ).scalars().first()
-
-    if existing is not None:
-        existing.level = level
-        await session.flush()
-        await session.refresh(existing)
-        return existing
-
-    row = HitlGateConfig(
-        org_id=org_id,
-        project_id=project_id,
-        work_type=work_type,
-        actor_type=actor_type,
-        level=level,
-        created_by=created_by,
-    )
-    session.add(row)
-    await session.flush()
-    await session.refresh(row)
     return row

@@ -60,7 +60,12 @@ async def get_gate_config(
     auth: AuthContext = Depends(get_current_user),
     session: AsyncSession = Depends(get_db),
 ) -> list[GateLevelEntry]:
-    """프로젝트의 effective 게이트 레벨(모든 work_type × actor) — 프로젝트 멤버 조회."""
+    """프로젝트의 effective 게이트 레벨(모든 work_type × actor) — **read = 프로젝트 멤버**.
+
+    권한 모델(QA RC·PO 콜): **read=member / write=admin·owner**. 게이트 레벨(자기 액션이 auto/ask/
+    block 인지)은 전 멤버가 알아야 유용(미리 차단 여부 인지)·비민감 정책 메타·enforcement 는 서버
+    사이드라 알아도 우회 불가 → 멤버 read 가 옳은 설계. 설정(PUT)만 org admin/project owner.
+    """
     org_id = await _project_org_id(session, project_id)
     if not await has_project_access(session, uuid.UUID(auth.user_id), project_id, org_id):
         raise HTTPException(status_code=403, detail="No access to this project")
