@@ -102,7 +102,10 @@ export async function proxyToFastapi(
   if (authHeader) headers['Authorization'] = authHeader;
 
   // 일부 헤더 forward
-  for (const h of ['x-forwarded-for', 'x-real-ip', 'x-api-key', 'x-org-id']) {
+  // x-project-id: 프로젝트 컨텍스트 mutation 안전(d802da27) — FE fetch 인터셉터가 탭의 effective
+  // project 를 X-Project-Id 로 주입하는데, 이 프록시가 FastAPI 로 안 넘기면 BE get_verified_org_id
+  // override 가 헤더를 못 받아 조용히 무력화(full-chain 단절). x-org-id 와 동형으로 forward 필수.
+  for (const h of ['x-forwarded-for', 'x-real-ip', 'x-api-key', 'x-org-id', 'x-project-id']) {
     const v = request.headers.get(h);
     if (v) headers[h] = v;
   }
