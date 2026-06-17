@@ -337,6 +337,21 @@ async def update_story(
     if data.get("status") == "done":
         gate_story = story_before or await repo.get(id)
         await _preflight_merge_gate(db, repo.org_id, gate_story, "done")
+        # S-GATE-2: config 게이트 집행(done) — flag-off면 no-op(무회귀). block→409·ask→HitlRequest park.
+        if gate_story is not None:
+            from app.services.gate_enforce import enforce_gate
+            _g_actor_id: uuid.UUID | None = None
+            _g_actor_type: str | None = None
+            try:
+                _g_actor_id = await _resolve_team_member_id(auth, repo.org_id, db)
+                _, _, _g_actor_type = await _resolve_actor_info(db, _g_actor_id)
+            except Exception:
+                pass
+            await enforce_gate(
+                db, org_id=repo.org_id, project_id=getattr(gate_story, "project_id", None),
+                work_type="done", actor_type=_g_actor_type, actor_id=_g_actor_id,
+                work_item_id=gate_story.id, work_item_title=getattr(gate_story, "title", None),
+            )
     story = await repo.update(id, **data)
     if story is None:
         raise HTTPException(status_code=404, detail="Story not found")
@@ -548,6 +563,21 @@ async def update_story_status(
     # H1-S5: in-review→done 직접 PATCH는 merge verdict gate preflight(플래그 active 시·AC②).
     # transition rule(check_transition)과 직교 — 전이 유효성 통과 후 증거 게이트를 얹는다(AC④).
     await _preflight_merge_gate(db, repo.org_id, story_before, body.status)
+    # S-GATE-2: config 게이트 집행(done) — flag-off면 no-op(무회귀). block→409·ask→HitlRequest park.
+    if body.status == "done" and story_before is not None:
+        from app.services.gate_enforce import enforce_gate
+        _g_actor_id: uuid.UUID | None = None
+        _g_actor_type: str | None = None
+        try:
+            _g_actor_id = await _resolve_team_member_id(auth, repo.org_id, db)
+            _, _, _g_actor_type = await _resolve_actor_info(db, _g_actor_id)
+        except Exception:
+            pass
+        await enforce_gate(
+            db, org_id=repo.org_id, project_id=getattr(story_before, "project_id", None),
+            work_type="done", actor_type=_g_actor_type, actor_id=_g_actor_id,
+            work_item_id=story_before.id, work_item_title=getattr(story_before, "title", None),
+        )
 
     try:
         # AC2: violation_level 전달 → warn 모드이면 set_status hard block 우회
