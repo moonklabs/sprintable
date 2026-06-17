@@ -8,6 +8,7 @@ import { EmptyState } from '@/components/ui/empty-state';
 import { Tabs, TabsList, TabsTrigger, TabsContent } from '@/components/ui/tabs';
 import { NewConversationModal } from './new-conversation-modal';
 import { useChatSse } from '@/hooks/use-chat-sse';
+import { useDashboardContext } from '@/app/dashboard/dashboard-shell';
 
 interface Participant {
   member_id: string;
@@ -212,9 +213,14 @@ const PAGE_LIMIT = 30;
 export function ChatListView({ projectId, currentTeamMemberId, open, onOpenChange }: ChatListViewProps) {
   const t = useTranslations('chats');
   const router = useRouter();
+  // perf(17960f86): role 은 DashboardContext(서버 /api/v2/me 투영)에서 — 채팅 진입마다 `/api/me`
+  // 재호출하던 round-trip 제거. /me checkRole 과 동일한 effective role 이라 게이트 의미 보존.
+  const { role } = useDashboardContext();
+  const isAdminOrOwner = role === 'admin' || role === 'owner';
   const [conversations, setConversations] = useState<ConversationItem[]>([]);
   const [allConversations, setAllConversations] = useState<ConversationItem[]>([]);
-  const [isAdminOrOwner, setIsAdminOrOwner] = useState(false);
+  // agent 탭(allConversations·include_agent_conversations) 첫 활성화 1회만 fetch 하기 위한 가드.
+  const agentLoadedRef = useRef(false);
   const [loading, setLoading] = useState(true);
   const [loadingMore, setLoadingMore] = useState(false);
   const [myOffset, setMyOffset] = useState(0);
@@ -227,17 +233,6 @@ export function ChatListView({ projectId, currentTeamMemberId, open, onOpenChang
 
   const convsRef = useRef(conversations);
   useEffect(() => { convsRef.current = conversations; }, [conversations]);
-
-  useEffect(() => {
-    async function checkRole() {
-      const res = await fetch('/api/me');
-      if (!res.ok) return;
-      const json = await res.json() as { data?: { role?: string } };
-      const role = json.data?.role ?? 'member';
-      setIsAdminOrOwner(role === 'admin' || role === 'owner');
-    }
-    void checkRole();
-  }, []);
 
   const fetchConversations = useCallback(async (nextOffset = 0, append = false) => {
     try {
@@ -270,13 +265,21 @@ export function ChatListView({ projectId, currentTeamMemberId, open, onOpenChang
 
   useEffect(() => { void fetchConversations(0, false); }, [fetchConversations]);
 
-  useEffect(() => {
-    if (isAdminOrOwner) void fetchAllConversations(0, false);
-  }, [isAdminOrOwner, fetchAllConversations]);
+  // perf(17960f86): agent 탭("전체/에이전트", include_agent_conversations=true)은 비기본 탭이라
+  // mount 시 eager fetch(측정 ~663ms 낭비) 하지 않고, 사용자가 탭을 처음 열 때 1회만 lazy 로드.
+  const loadAgentConversationsOnce = useCallback(() => {
+    if (agentLoadedRef.current) return;
+    agentLoadedRef.current = true;
+    void fetchAllConversations(0, false);
+  }, [fetchAllConversations]);
 
   const handleConversationMessage = useCallback((payload: { conversation_id?: string; content?: string; created_at?: string }) => {
     setConversations((prev) => applyConversationMessageUpdate(prev, payload, () => void fetchConversations(0, false)));
-    setAllConversations((prev) => applyConversationMessageUpdate(prev, payload, () => void fetchAllConversations(0, false)));
+    // agent 탭을 아직 안 연 상태에선 allConversations 를 reactive 로드하지 않는다(lazy 유지) —
+    // 탭 첫 활성화 시 loadAgentConversationsOnce 가 최신본을 받으므로 누락 없음.
+    if (agentLoadedRef.current) {
+      setAllConversations((prev) => applyConversationMessageUpdate(prev, payload, () => void fetchAllConversations(0, false)));
+    }
   }, [fetchConversations, fetchAllConversations]);
 
   useChatSse({
@@ -365,7 +368,7 @@ export function ChatListView({ projectId, currentTeamMemberId, open, onOpenChang
   return (
     <div className="flex h-full flex-col">
       {isAdminOrOwner ? (
-        <Tabs defaultValue="my" className="flex min-h-0 flex-1 flex-col">
+        <Tabs defaultValue="my" onValueChange={(v) => { if (v === 'agent') loadAgentConversationsOnce(); }} className="flex min-h-0 flex-1 flex-col">
           <TabsList className="mx-4 mt-2 w-auto self-start">
             <TabsTrigger value="my">{t('myChatsTab')}</TabsTrigger>
             <TabsTrigger value="agent">{t('agentChatsTab')}</TabsTrigger>
