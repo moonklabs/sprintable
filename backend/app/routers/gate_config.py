@@ -202,3 +202,48 @@ async def get_org_gate_config(
             )
             entries.append(GateLevelEntry(work_type=wt, actor_type=at, level=level, source=source))
     return entries
+
+
+class OrgGateLevelRequest(BaseModel):
+    work_type: str
+    actor_type: str
+    level: str
+
+
+@org_router.put("/{org_id}/gate-config", response_model=GateLevelEntry)
+async def put_org_gate_config(
+    org_id: uuid.UUID,
+    body: OrgGateLevelRequest,
+    session: AsyncSession = Depends(get_db),
+    verified_org_id: uuid.UUID = Depends(get_verified_org_id),
+    auth: AuthContext = Depends(get_current_user),
+) -> GateLevelEntry:
+    """S-GATE-4: org **기본값** 설정(project override 아님·project_id=None). 권한=org owner/admin.
+
+    org-scoped PUT — 기존 project 라우트 scope='org' 우회(미르코 #1567 워크어라운드·project 0개 org
+    편집 불가)를 대체. path org_id 는 caller org 와 일치해야(타org 차단).
+    """
+    if body.work_type not in WORK_TYPES:
+        raise HTTPException(status_code=400, detail=f"work_type must be one of {list(WORK_TYPES)}")
+    if body.actor_type not in ACTOR_TYPES:
+        raise HTTPException(status_code=400, detail=f"actor_type must be one of {list(ACTOR_TYPES)}")
+    if body.level not in LEVELS:
+        raise HTTPException(status_code=400, detail=f"level must be one of {list(LEVELS)}")
+    if org_id != verified_org_id:
+        raise HTTPException(status_code=403, detail="org_id mismatch")
+    if not await is_org_owner_or_admin(session, uuid.UUID(auth.user_id), org_id):
+        raise HTTPException(status_code=403, detail="org owner/admin required to set org default")
+
+    row = await set_gate_level(
+        session,
+        org_id=org_id,
+        project_id=None,  # org 기본값(project override 아님)
+        work_type=body.work_type,
+        actor_type=body.actor_type,
+        level=body.level,
+        created_by=uuid.UUID(auth.user_id),
+    )
+    await session.commit()
+    return GateLevelEntry(
+        work_type=row.work_type, actor_type=row.actor_type, level=row.level, source="org_default"
+    )
