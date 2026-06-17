@@ -138,7 +138,9 @@ async def write_agent_project_placement(
     # project_access direct placement (AC3-4 2-1, G3): 0075 §5 에이전트 placement 동형.
     #    AC3-4 뷰가 role/can_manage를 project_access서 읽으므로 grant 필요. member_id=canonical,
     #    org_member_id=NULL(에이전트). ON CONFLICT 멱등.
+    # E-MEMBER-POLICY S1: role 은 enum(owner/admin/member)으로 clamp — 0122 CHECK 위반 방지.
     from app.models.project_access import ProjectAccess
+    from app.services.project_auth import clamp_project_role
     await session.execute(
         pg_insert(ProjectAccess.__table__)
         .values(
@@ -147,7 +149,7 @@ async def write_agent_project_placement(
             org_member_id=None,
             member_id=member_id,
             permission="granted",
-            role=role,
+            role=clamp_project_role(role),
             color=color,
             can_manage_members=can_manage_members,
             access_source="direct",
