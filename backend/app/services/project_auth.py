@@ -10,6 +10,21 @@ import uuid
 from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncSession
 
+# E-MEMBER-POLICY S1: 프로젝트 역할 1급 enum(owner/admin/member). org 역할의 'manager'는 project
+# 레벨엔 없음(§9-2 결정). project_access.role 은 0122 CHECK 로 이 집합만 허용 → 모든 write 경로가
+# 이 집합으로 clamp 돼야 CHECK 위반(500)이 없다. 랭크: owner > admin > member.
+PROJECT_ROLES: tuple[str, ...] = ("owner", "admin", "member")
+PROJECT_ROLE_RANK: dict[str, int] = {"owner": 3, "admin": 2, "member": 1}
+
+
+def clamp_project_role(role: str | None) -> str:
+    """project_access.role 로 쓸 값을 enum 으로 정규화 — 비-enum(예: 레거시 'manager'·빈값)은 'member'.
+
+    0122 CHECK(role IN owner/admin/member) 위반 방지의 단일 정규화 지점. write 경로(앵커 placement·
+    PATCH anchor update)가 이걸 통과시켜 비-enum 값이 DB 에 들어가지 않게 한다.
+    """
+    return role if role in PROJECT_ROLES else "member"
+
 
 async def has_project_access(
     session: AsyncSession,
