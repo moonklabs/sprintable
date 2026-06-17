@@ -248,6 +248,36 @@ async def deliver_conversation_message_webhook(
                 sender_name = (await db.execute(
                     select(TeamMember.name).where(TeamMember.id == sender_id)
                 )).scalar_one_or_none()
+
+            # R2 S1(9d130c01): 첨부 내용을 에이전트-facing content 에 주입(균일·런타임 무변경).
+            # 기존 authorize 된 전달 경로(이 webhook=참가자 대상)에 올라타고, fetch 는 이 대화에
+            # 스코프된 객체만(IDOR 차단). best-effort — 조회/추출 실패는 전달에 무영향.
+            # MED(QA RC): 주입 없으면 원 content 그대로 보존(None→"" 변환 금지 — 기존 거동 무변경).
+            effective_content = content
+            try:
+                from app.models.conversation import ConversationMessage
+                _atts = (await db.execute(
+                    select(ConversationMessage.attachments).where(
+                        ConversationMessage.id == message_id
+                    )
+                )).scalar_one_or_none()
+                if _atts:
+                    from app.services.attachment_context import build_attachment_context
+                    _ctx = await build_attachment_context(
+                        _atts, project_id=project_id, conversation_id=conversation_id
+                    )
+                    if _ctx:
+                        _base = content or ""
+                        effective_content = (_base + _ctx) if _base else _ctx.lstrip()
+                        logger.info(
+                            "attachment_context injected message_id=%s attachment_count=%d",
+                            message_id, len(_atts),
+                        )
+            except Exception:
+                logger.warning(
+                    "attachment_context injection failed message_id=%s", message_id, exc_info=True
+                )
+
             payload = {
                 "event_type": _EVENT_TYPE,
                 "message_id": str(message_id),
@@ -256,7 +286,7 @@ async def deliver_conversation_message_webhook(
                 "thread_id": str(thread_id) if thread_id else None,
                 "created_at": created_at.isoformat(),
                 "mentioned_ids": mentioned_id_strs,
-                "content": content,
+                "content": effective_content,
                 # d0bca260: BYOA 어댑터 컨텍스트(additive top-level).
                 "project_id": str(project_id),
                 "org_id": str(org_id),
