@@ -111,12 +111,15 @@ async def _mark_agent_disconnected(
                 # d5de8e08 안전망: 연결 완전 종료 → 이 에이전트의 chat working 신호도 즉시 정리
                 # (offline 인데 "...typing" 잔존 방지·TTL backstop 기다리지 않음).
                 from app.services import chat_presence
-                chat_presence.clear_member(str(agent_id))
+                _cleared_convs = chat_presence.clear_member(str(agent_id))
             await db.commit()
-            # R2(da9d1781): 마지막 연결 종료=offline 강등 시 presence SSE 발행(FE 3s 폴링 대체·best-effort).
+            # R2(da9d1781): 마지막 연결 종료=offline 강등 시 presence + 영향받은 대화의 conversation.working
+            # SSE 발행(FE 폴링 대체·best-effort). working 비운 대화에 push 안 하면 "...typing" 영구 stale(QA HIGH).
             if remaining is None and org_id:
-                from app.services.presence_events import emit_presence
+                from app.services.presence_events import emit_conversation_working, emit_presence
                 emit_presence(org_id)
+                for _conv in _cleared_convs:
+                    emit_conversation_working(org_id, _conv)
     except Exception:
         logger.warning("presence disconnect cleanup failed agent=%s", agent_id, exc_info=True)
 

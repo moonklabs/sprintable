@@ -54,3 +54,21 @@ def test_emit_working_swallows_list_working_failure():
         "app.services.chat_presence.list_working", side_effect=RuntimeError("boom")
     ):
         presence_events.emit_conversation_working(uuid.uuid4(), uuid.uuid4())  # no raise
+
+
+def test_clear_member_returns_affected_conversations():
+    """QA HIGH(#1570): disconnect 시 working 비운 대화 목록 반환 → caller 가 conversation.working 발행."""
+    from app.services import chat_presence
+
+    conv_a, conv_b, conv_c = "conv-a", "conv-b", "conv-c"
+    mid = "agent-x"
+    other = "agent-y"
+    chat_presence.set_working(conv_a, mid)
+    chat_presence.set_working(conv_b, mid)
+    chat_presence.set_working(conv_b, other)  # conv_b 엔 다른 agent 도 working
+    chat_presence.set_working(conv_c, other)  # mid 와 무관
+
+    affected = chat_presence.clear_member(mid)
+    assert set(affected) == {conv_a, conv_b}  # mid 가 working 이던 대화만(conv_c 제외)
+    # conv_b 는 other 가 남아 비지 않음·conv_a 는 비워짐 — 둘 다 affected(working 변경됨)
+    chat_presence.clear_member(other)  # cleanup
