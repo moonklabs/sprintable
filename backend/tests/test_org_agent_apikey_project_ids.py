@@ -44,13 +44,13 @@ def _ak_result():
 
 
 def _tm_result(project_id):
-    """레거시 경로: select(TeamMember)...scalars().first()."""
+    """레거시 경로: select(TeamMember).limit(1)...scalar_one_or_none()."""
     tm = MagicMock()
     tm.id = MEMBER
     tm.org_id = ORG
     tm.project_id = project_id
     r = MagicMock()
-    r.scalars.return_value.first.return_value = tm
+    r.scalar_one_or_none.return_value = tm
     return r
 
 
@@ -136,6 +136,31 @@ async def test_single_project_backcompat_legacy():
         meta = ctx.claims["app_metadata"]
         assert meta["project_ids"] == [str(P1)]
         assert meta["project_id"] == str(P1)
+    finally:
+        _cfg.settings.member_ssot_apikey_cut = False
+
+
+@pytest.mark.anyio
+async def test_project_ids_computation_failure_is_non_fatal():
+    """⚠️ 생명선: project_ids 산출(accessible_project_ids_in_org)이 예외를 던져도 API key 인증은
+    깨지지 않고 기본 project_id 로 폴백해야 한다(additive 무중단). #1537 CI 회귀(auth/me 500) 가드."""
+    from app.core import config as _cfg
+    from app.dependencies.auth import _resolve_api_key
+
+    _cfg.settings.member_ssot_apikey_cut = False
+    try:
+        session = MagicMock()
+        session.execute = AsyncMock(side_effect=[_ak_result(), _tm_result(P1)])
+        with patch("app.dependencies.auth.hash_token", return_value="h"), patch(
+            "app.services.project_auth.accessible_project_ids_in_org",
+            new=AsyncMock(side_effect=ValueError("badly formed hexadecimal UUID string")),
+        ):
+            ctx = await _resolve_api_key("sk_live_x", session)
+        meta = ctx.claims["app_metadata"]
+        # 인증 성공 + 기본 project_id 폴백(project_ids=[project_id])
+        assert ctx.user_id == str(MEMBER)
+        assert meta["project_id"] == str(P1)
+        assert meta["project_ids"] == [str(P1)]
     finally:
         _cfg.settings.member_ssot_apikey_cut = False
 
