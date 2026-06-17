@@ -8,6 +8,7 @@ interface MemberContext {
   project_id: string;
   project_name: string;
   name: string;
+  role?: string;
 }
 
 interface OrgMembership {
@@ -72,6 +73,7 @@ export default async function AuthenticatedLayout({
       projectId={me?.project_id}
       projectName={me?.project_name ?? undefined}
       userName={me?.name}
+      role={me?.role}
       projectMemberships={projectMemberships}
       orgMemberships={orgMemberships}
     >
