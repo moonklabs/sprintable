@@ -32,6 +32,7 @@ interface DashboardContext {
   projectId?: string;
   projectName?: string;
   userName?: string;
+  role?: string;
   projectMemberships: DashboardProjectOption[];
   orgMemberships: OrgSwitcherItem[];
 }
@@ -133,6 +134,7 @@ export function DashboardShell({
   projectId,
   projectName,
   userName,
+  role,
   projectMemberships,
   orgMemberships,
   children,
@@ -145,7 +147,7 @@ export function DashboardShell({
   const effectiveProjectName = projectMemberships.find((m) => m.projectId === effectiveProjectId)?.projectName ?? projectName;
 
   return (
-    <DashboardCtx.Provider value={{ currentTeamMemberId, orgId, projectId: effectiveProjectId, projectName: effectiveProjectName, userName, projectMemberships, orgMemberships }}>
+    <DashboardCtx.Provider value={{ currentTeamMemberId, orgId, projectId: effectiveProjectId, projectName: effectiveProjectName, userName, role, projectMemberships, orgMemberships }}>
       <RefreshProvider>
       <RealtimeProvider currentTeamMemberId={currentTeamMemberId}>
         <TopBarProvider>
