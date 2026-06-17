@@ -11,7 +11,7 @@ from pydantic import BaseModel
 from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.dependencies.auth import AuthContext, get_current_user
+from app.dependencies.auth import AuthContext, get_current_user, get_verified_org_id
 from app.dependencies.database import get_db
 from app.services.gate_config import (
     ACTOR_TYPES,
@@ -29,6 +29,8 @@ from app.services.project_auth import (
 )
 
 router = APIRouter(prefix="/api/v2/projects", tags=["hitl-gate-config"])
+# S-GATE-4: org 기본값 단독 조회용 org-layer 라우터(project-effective GET과 별개·org 탭 surface).
+org_router = APIRouter(prefix="/api/v2/organizations", tags=["hitl-gate-config"])
 
 
 class GateLevelEntry(BaseModel):
@@ -170,3 +172,29 @@ async def delete_gate_config_override(
         session, org_id=org_id, project_id=project_id, work_type=work_type, actor_type=actor_type
     )
     return GateLevelEntry(work_type=work_type, actor_type=actor_type, level=level, source=source)
+
+
+@org_router.get("/{org_id}/gate-config", response_model=list[GateLevelEntry])
+async def get_org_gate_config(
+    org_id: uuid.UUID,
+    session: AsyncSession = Depends(get_db),
+    verified_org_id: uuid.UUID = Depends(get_verified_org_id),
+    _auth: AuthContext = Depends(get_current_user),
+) -> list[GateLevelEntry]:
+    """S-GATE-4: org **기본값 단독** 조회(project-effective GET과 별개·org 설정 탭 surface).
+
+    project_id 무시하고 org 레벨(project_id IS NULL) 값만 — 미설정 셀은 시스템 기본 'ask'. read=org 멤버
+    (project GET과 동일 비민감 정책 메타). 설정(PUT scope='org')은 org admin. path org_id는 caller org와
+    일치해야(타org 조회 차단).
+    """
+    if org_id != verified_org_id:
+        raise HTTPException(status_code=403, detail="org_id mismatch")
+    entries: list[GateLevelEntry] = []
+    for wt in WORK_TYPES:
+        for at in ACTOR_TYPES:
+            # project_id=None → org 행 또는 시스템 기본(상속). org 레이어엔 override 개념 없음 → source=org_default.
+            level, source = await resolve_gate_level_with_source(
+                session, org_id=org_id, project_id=None, work_type=wt, actor_type=at
+            )
+            entries.append(GateLevelEntry(work_type=wt, actor_type=at, level=level, source=source))
+    return entries

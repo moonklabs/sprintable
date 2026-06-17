@@ -166,3 +166,35 @@ async def test_delete_endpoint_owner_reverts_to_inherited():
     assert out.level == "ask"
     assert out.source == "org_default"  # 삭제 후 상속값 반환
     session.commit.assert_awaited_once()
+
+
+# ── org-layer GET (org 기본값 단독) ────────────────────────────────────────────
+
+
+@pytest.mark.anyio
+async def test_org_gate_config_returns_org_defaults():
+    from app.routers import gate_config as gc
+
+    oid = uuid.uuid4()
+    with patch(
+        "app.routers.gate_config.resolve_gate_level_with_source",
+        new=AsyncMock(return_value=("ask", "org_default")),
+    ):
+        out = await gc.get_org_gate_config(
+            oid, session=MagicMock(), verified_org_id=oid, _auth=_auth()
+        )
+    assert len(out) == 4  # WORK_TYPES(2) × ACTOR_TYPES(2)
+    assert all(e.source == "org_default" for e in out)
+
+
+@pytest.mark.anyio
+async def test_org_gate_config_org_mismatch_403():
+    from fastapi import HTTPException
+
+    from app.routers import gate_config as gc
+
+    with pytest.raises(HTTPException) as ei:
+        await gc.get_org_gate_config(
+            uuid.uuid4(), session=MagicMock(), verified_org_id=uuid.uuid4(), _auth=_auth()
+        )
+    assert ei.value.status_code == 403  # 타 org 조회 차단
