@@ -253,3 +253,19 @@ async def test_list_members_owner_always_included():
     roles = {r.role for r in result}
     assert "owner" in roles
     assert "member" in roles
+
+
+def test_list_members_human_name_prefers_real_name_over_email():
+    """버그픽스(휴먼 assignee email→이름): list_members 휴먼 name 해소가 email-only 가 아니라
+    members.name → users.display_name → email 순으로 COALESCE 한다.
+
+    보드/Dispatch assignee 가 /api/v2/members 를 소비하는데, 기존 `COALESCE(u.email,'')` 는
+    실명(display_name)이 있어도 raw 이메일을 노출해 org 로스터(team_member.list_org_human_members)
+    와 어긋났다. 동일 해소로 정렬돼야 회귀하지 않음 — 구조 가드.
+    """
+    import app.routers.members as members_module
+    source = inspect.getsource(members_module.list_members)
+    assert "display_name" in source
+    assert "LEFT JOIN members" in source
+    # email 단독 폴백(도메인 포함 raw 노출)로의 회귀 금지
+    assert "COALESCE(u.email, '')" not in source
