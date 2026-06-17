@@ -248,6 +248,32 @@ async def deliver_conversation_message_webhook(
                 sender_name = (await db.execute(
                     select(TeamMember.name).where(TeamMember.id == sender_id)
                 )).scalar_one_or_none()
+
+            # R2 S1(9d130c01): 첨부 내용을 에이전트-facing content 에 주입(균일·런타임 무변경).
+            # 기존 authorize 된 전달 경로(이 webhook=참가자 대상)에 그대로 올라타므로 추가 검증 불요.
+            # best-effort — 조회/추출 실패는 전달에 무영향(원 content 유지).
+            effective_content = content or ""
+            try:
+                from app.models.conversation import ConversationMessage
+                _atts = (await db.execute(
+                    select(ConversationMessage.attachments).where(
+                        ConversationMessage.id == message_id
+                    )
+                )).scalar_one_or_none()
+                if _atts:
+                    from app.services.attachment_context import build_attachment_context
+                    _ctx = await build_attachment_context(_atts)
+                    if _ctx:
+                        effective_content = (effective_content + _ctx) if effective_content else _ctx.lstrip()
+                        logger.info(
+                            "attachment_context injected message_id=%s attachment_count=%d",
+                            message_id, len(_atts),
+                        )
+            except Exception:
+                logger.warning(
+                    "attachment_context injection failed message_id=%s", message_id, exc_info=True
+                )
+
             payload = {
                 "event_type": _EVENT_TYPE,
                 "message_id": str(message_id),
@@ -256,7 +282,7 @@ async def deliver_conversation_message_webhook(
                 "thread_id": str(thread_id) if thread_id else None,
                 "created_at": created_at.isoformat(),
                 "mentioned_ids": mentioned_id_strs,
-                "content": content,
+                "content": effective_content,
                 # d0bca260: BYOA 어댑터 컨텍스트(additive top-level).
                 "project_id": str(project_id),
                 "org_id": str(org_id),

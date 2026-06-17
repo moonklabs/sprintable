@@ -22,6 +22,10 @@ dependencies = [
     "mcp>=1.0.0",
     "resend>=2.0.0",
     "google-analytics-data>=0.18.0",
+    # R2 채팅 첨부 AI 컨텍스트(9d130c01): GCS 서비스계정 read + 문서 텍스트 추출
+    "google-cloud-storage>=2.18.0",
+    "pypdf>=5.0.0",
+    "python-docx>=1.1.0",
 ]
 
 [dependency-groups]
