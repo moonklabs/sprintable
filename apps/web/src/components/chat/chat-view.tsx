@@ -11,7 +11,7 @@ import { ChatInput, type CommandTarget } from './chat-input';
 import { ThreadPanel } from './thread-panel';
 import type { ChatMessage, SendAttachment } from '@/hooks/use-chat-sse';
 import { useIsMobile } from '@/hooks/use-mobile';
-import { normalizeToMessage, useChatSse } from '@/hooks/use-chat-sse';
+import { normalizeToMessage, useChatSse, type SseWorkingPayload } from '@/hooks/use-chat-sse';
 import { EmptyState } from '@/components/ui/empty-state';
 
 interface ChatViewProps {
@@ -205,18 +205,24 @@ export function ChatView({ threadId, currentTeamMemberId, projectId, apiPrefix =
     } catch { /* non-critical */ }
   }, [threadId, commandTargets]);
 
-  // 마운트 1회 + 1.5s 폴링(typing snappiness·선생님 피드백 "빠릿빠릿"·연결 dot 15s보다 훨씬 민감).
+  // R2(da9d1781): 1.5s working 폴 제거 → conversation.working SSE 이벤트로 typing 갱신(payload 가
+  // working 목록을 실음). 마운트 1회 fetch 로 초기 상태만(이벤트는 변경 시 push). 재연결 시도 catch-up.
+  const handleWorking = useCallback((payload: SseWorkingPayload) => {
+    if (payload.conversation_id !== threadId) return;
+    const next = (payload.working ?? [])
+      .map((w) => ({ id: w.member_id, name: (commandTargets ?? []).find((tg) => tg.agentId === w.member_id)?.agentName }))
+      .filter((a): a is { id: string; name: string } => !!a.name);
+    setTypingAgents(next);
+  }, [threadId, commandTargets]);
+
   useEffect(() => { void fetchWorking(); }, [fetchWorking]);
-  useEffect(() => {
-    const interval = setInterval(() => { void fetchWorking(); }, 1500);
-    return () => clearInterval(interval);
-  }, [fetchWorking]);
 
   useChatSse({
     currentTeamMemberId,
     onNewMessage: handleNewMessage,
     onReplyCreated: handleReplyCreated,
     onConversationMessage: handleConversationMessage,
+    onWorking: handleWorking,
     onReconnect: handleReconnect,
   });
 

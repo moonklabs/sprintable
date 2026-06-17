@@ -55,8 +55,9 @@ function ScrollShell({ showTopBar, children }: { showTopBar: boolean; children: 
   const t = useTranslations('presence');
   // 2505d27d: 상시 팀 presence 패널 — 2xl=inline right-rail / <2xl=drawer. storageKey로 open 영속.
   const panel = useContextualPanelState({ storageKey: 'team-presence', defaultOpen: true });
-  // 폴 상향(단일 폴) — 헤더 토글 working-count 배지가 패널 닫힘 상태서도 갱신돼야 하므로 상시 폴(document.hidden 가드는 hook 내).
-  const items = useTeamPresence(true);
+  // R2(da9d1781): presence SSE event-driven(3s 폴 제거). member_id 로 event-stream 구독.
+  const { currentTeamMemberId } = useDashboardContext();
+  const items = useTeamPresence(true, currentTeamMemberId);
   const workingCount = items.filter((i) => i.working).length;
 
   return (
