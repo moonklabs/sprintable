@@ -57,17 +57,25 @@ interface SseChatPayload {
   created_at: string;
 }
 
+/** R2(da9d1781): conversation.working SSE payload — `chat_presence.list_working` 목록. */
+export interface SseWorkingPayload {
+  conversation_id: string;
+  working: Array<{ member_id: string; state?: string }>;
+}
+
 interface UseChatSseOptions {
   currentTeamMemberId?: string;
   onNewMessage?: (message: ChatMessage) => void;
   onReplyCreated?: (memoId: string) => void;
   onConversationMessage?: (payload: Record<string, unknown>) => void;
+  // R2: 채팅 working/typing — 1.5s 폴(/conversations/{id}/working) 대체.
+  onWorking?: (payload: SseWorkingPayload) => void;
   onReconnect?: () => void;
 }
 
 const RECONNECT_DELAYS_MS = [5_000, 30_000, 60_000, 300_000];
 
-export function useChatSse({ currentTeamMemberId, onNewMessage, onReplyCreated, onConversationMessage, onReconnect }: UseChatSseOptions) {
+export function useChatSse({ currentTeamMemberId, onNewMessage, onReplyCreated, onConversationMessage, onWorking, onReconnect }: UseChatSseOptions) {
   const [connected, setConnected] = useState(false);
   const sourceRef = useRef<EventSource | null>(null);
   const reconnectTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -76,6 +84,7 @@ export function useChatSse({ currentTeamMemberId, onNewMessage, onReplyCreated, 
   const onNewMessageRef = useRef(onNewMessage);
   const onReplyCreatedRef = useRef(onReplyCreated);
   const onConversationMessageRef = useRef(onConversationMessage);
+  const onWorkingRef = useRef(onWorking);
   const onReconnectRef = useRef(onReconnect);
   const memberIdRef = useRef(currentTeamMemberId);
 
@@ -84,6 +93,7 @@ export function useChatSse({ currentTeamMemberId, onNewMessage, onReplyCreated, 
   useLayoutEffect(() => { onNewMessageRef.current = onNewMessage; }, [onNewMessage]);
   useLayoutEffect(() => { onReplyCreatedRef.current = onReplyCreated; }, [onReplyCreated]);
   useLayoutEffect(() => { onConversationMessageRef.current = onConversationMessage; }, [onConversationMessage]);
+  useLayoutEffect(() => { onWorkingRef.current = onWorking; }, [onWorking]);
   useLayoutEffect(() => { onReconnectRef.current = onReconnect; }, [onReconnect]);
   useLayoutEffect(() => { memberIdRef.current = currentTeamMemberId; }, [currentTeamMemberId]);
 
@@ -149,6 +159,16 @@ export function useChatSse({ currentTeamMemberId, onNewMessage, onReplyCreated, 
         try {
           const payload = JSON.parse(e.data as string) as Record<string, unknown>;
           onConversationMessageRef.current?.(payload);
+        } catch { /* ignore parse errors */ }
+      });
+
+      // R2(da9d1781): conversation.working — typing 인디케이터 1.5s 폴(/conversations/{id}/working) 대체.
+      // payload 가 working 목록을 실어 보내므로 refetch 없이 직접 갱신.
+      source.addEventListener('conversation.working', (e: MessageEvent) => {
+        if (e.lastEventId) lastEventIdRef.current = e.lastEventId;
+        try {
+          const payload = JSON.parse(e.data as string) as SseWorkingPayload;
+          if (payload.conversation_id) onWorkingRef.current?.(payload);
         } catch { /* ignore parse errors */ }
       });
 

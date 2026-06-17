@@ -15,15 +15,13 @@ export interface TeamPresenceItem {
   active_story?: { id: string; title: string; status: string } | null;
 }
 
-// ~3s 절충 폴(PO) — 전 유저 상시 폴이라 request 폭증 회피 + working 충분히 snappy. 단일 폴을 FAB 배지+패널 공유(중복0).
-const POLL_MS = 3000;
-
 /**
- * 2505d27d: 팀 presence 폴 — ScrollShell(전역)에서 1회 폴해 FAB working-count 배지 + 패널에 공급.
- * 배지가 패널 닫힘 상태서도 "N 작업 중"을 보여야 하므로(선생님) **패널 open 무관 상시 폴**(active 시).
- * 단 `document.hidden`(백그라운드 탭)이면 0폴(낭비 가드).
+ * 2505d27d: 팀 presence — ScrollShell(전역)에서 FAB working-count 배지 + 패널에 공급.
+ * R2(da9d1781): 3s 폴 제거 → `presence` SSE 이벤트로 refetch(폴→push·~20req/min→0). 초기 1회 +
+ * 이벤트 + 탭 visible 복귀 catch-up(hidden 중 누락 이벤트 보정). presence 이벤트 payload 는 trigger({})라
+ * 스냅샷은 refetch 로 확보(BE 계약). `document.hidden` 이면 fetch 0(낭비 가드 유지).
  */
-export function useTeamPresence(active: boolean): TeamPresenceItem[] {
+export function useTeamPresence(active: boolean, memberId?: string): TeamPresenceItem[] {
   const [items, setItems] = useState<TeamPresenceItem[]>([]);
 
   const fetchPresence = useCallback(async () => {
@@ -39,12 +37,17 @@ export function useTeamPresence(active: boolean): TeamPresenceItem[] {
   }, []);
 
   useEffect(() => {
-    if (!active) return;
+    if (!active || typeof window === 'undefined' || typeof EventSource === 'undefined') return;
     // eslint-disable-next-line react-hooks/set-state-in-effect
-    void fetchPresence();
-    const interval = setInterval(() => { void fetchPresence(); }, POLL_MS);
-    return () => clearInterval(interval);
-  }, [active, fetchPresence]);
+    void fetchPresence(); // 초기 스냅샷
+    const url = new URL('/api/event-stream', window.location.origin);
+    if (memberId) url.searchParams.set('member_id', memberId);
+    const es = new EventSource(url.toString(), { withCredentials: true });
+    es.addEventListener('presence', () => { void fetchPresence(); }); // 변경 시 push → refetch
+    const onVisible = () => { if (!document.hidden) void fetchPresence(); }; // hidden 중 누락 보정
+    document.addEventListener('visibilitychange', onVisible);
+    return () => { es.close(); document.removeEventListener('visibilitychange', onVisible); };
+  }, [active, fetchPresence, memberId]);
 
   return items;
 }
