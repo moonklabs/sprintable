@@ -2465,6 +2465,21 @@
     "metric_completion_pct": "완료율 %",
     "hypothesisPlaceholder_epic": "이 에픽을 완수하면 어떤 성과를 기대하는가?"
   },
+  "gateConfig": {
+    "title": "게이트 정책",
+    "description": "작업이 자동으로 진행될지, 사람 검토를 거칠지, 차단될지 설정합니다.",
+    "levelAuto": "자동",
+    "levelAsk": "확인",
+    "levelBlock": "차단",
+    "work_done": "완료",
+    "work_merge": "병합",
+    "actor_agent": "에이전트",
+    "actor_human": "사람",
+    "mergeFloorNote": "안전 하한: 병합은 최소 '확인' · 자기 승인 차단",
+    "floorDisabledHint": "안전 하한으로 비활성화됨",
+    "saved": "저장됨",
+    "saveFailed": "저장에 실패했습니다."
+  },
   "cage": {
     "gatePending": "게이트 대기",
     "gateApprove": "승인",

@@ -22,6 +22,7 @@ import { WorkflowTemplateGallerySection } from '@/components/settings/workflow-t
 import { ThemeSettings } from '@/components/settings/theme-settings';
 import { RefreshSettings } from '@/components/settings/refresh-settings';
 import { StandupDeadlineSection } from '@/components/settings/standup-deadline-section';
+import { GateLevelMatrix } from '@/components/settings/gate-level-matrix';
 import { TwoFactorSection } from '@/components/settings/two-factor-section';
 import { SetPasswordSection } from '@/components/settings/set-password-section';
 import { Alert, AlertDescription } from '@/components/ui/alert';
@@ -1031,6 +1032,17 @@ export default function SettingsPage() {
               {currentProjectId ? (
                 <div className="mt-6">
                   <StandupDeadlineSection projectId={currentProjectId} />
+                </div>
+              ) : null}
+              {/* S-GATE-4: 프로젝트 게이트 정책(승인 레벨) 매트릭스. scope=project override. canEdit 은
+                  안전 subset(org admin/owner) — BE 는 project owner 도 허용하나 FE 는 보수적 게이트(과권한 0). */}
+              {currentProjectId ? (
+                <div className="mt-6">
+                  <GateLevelMatrix
+                    projectId={currentProjectId}
+                    scope="project"
+                    canEdit={currentOrgRole === 'owner' || currentOrgRole === 'admin'}
+                  />
                 </div>
               ) : null}
               <div className="mt-6">
