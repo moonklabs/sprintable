@@ -9,13 +9,14 @@ from __future__ import annotations
 import uuid
 from datetime import datetime
 
-from fastapi import APIRouter, Depends, Query
+from fastapi import APIRouter, Depends, HTTPException, Query
 from pydantic import BaseModel
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.dependencies.auth import AuthContext, get_current_user, get_verified_org_id
 from app.dependencies.database import get_db
 from app.services.gate_metrics import compute_hitl_gate_metrics
+from app.services.project_auth import is_org_owner_or_admin
 
 router = APIRouter(prefix="/api/v2/gate", tags=["hitl-gate-metrics"])
 
@@ -41,9 +42,15 @@ async def get_hitl_gate_metrics(
     end: datetime | None = Query(default=None, description="window 끝(이하)"),
     session: AsyncSession = Depends(get_db),
     org_id: uuid.UUID = Depends(get_verified_org_id),
-    _auth: AuthContext = Depends(get_current_user),
+    auth: AuthContext = Depends(get_current_user),
 ) -> HitlGateMetricsResponse:
-    """HITL 게이트 측정 지표 on-the-fly 집계(ask 경로). denom 0이면 ratio=null, 데이터 있고 0이면 0."""
+    """HITL 게이트 측정 지표 on-the-fly 집계(ask 경로). denom 0이면 ratio=null, 데이터 있고 0이면 0.
+
+    QA HIGH①: 메트릭은 **거버넌스 데이터**(self-approval·rubber-stamp 적발 등)라 **org owner/admin only**.
+    config 레벨 GET(멤버 read)과 달리 집계 오버사이트는 관리자 스코프.
+    """
+    if not await is_org_owner_or_admin(session, uuid.UUID(auth.user_id), org_id):
+        raise HTTPException(status_code=403, detail="org owner/admin required for gate metrics")
     m = await compute_hitl_gate_metrics(
         session, org_id=org_id, project_id=project_id, start=start, end=end
     )

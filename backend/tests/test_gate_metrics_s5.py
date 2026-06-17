@@ -86,6 +86,12 @@ async def test_compute_empty():
 # ── 엔드포인트 shape ───────────────────────────────────────────────────────────
 
 
+def _auth():
+    a = MagicMock()
+    a.user_id = str(uuid.uuid4())
+    return a
+
+
 @pytest.mark.anyio
 async def test_endpoint_shape():
     from app.routers import gate_metrics as gm
@@ -93,6 +99,8 @@ async def test_endpoint_shape():
 
     pid = uuid.uuid4()
     with patch(
+        "app.routers.gate_metrics.is_org_owner_or_admin", new=AsyncMock(return_value=True)
+    ), patch(
         "app.routers.gate_metrics.compute_hitl_gate_metrics",
         new=AsyncMock(return_value=HitlGateMetrics(
             ask_total=4, pending=1, approved=2, rejected=1, prevented_bad_pass=1,
@@ -101,10 +109,26 @@ async def test_endpoint_shape():
     ):
         out = await gm.get_hitl_gate_metrics(
             project_id=pid, start=None, end=None,
-            session=MagicMock(), org_id=uuid.uuid4(), _auth=MagicMock(),
+            session=MagicMock(), org_id=uuid.uuid4(), auth=_auth(),
         )
     assert out.ask_total == 4
     assert out.prevented_bad_pass == 1
     assert out.rubber_stamp_rate == 0.5
     assert out.project_id == str(pid)
     assert out.window == {"start": None, "end": None}
+
+
+@pytest.mark.anyio
+async def test_endpoint_non_admin_403():
+    """QA HIGH①: 메트릭=거버넌스 데이터 → org owner/admin only. 비관리자 403."""
+    from fastapi import HTTPException
+
+    from app.routers import gate_metrics as gm
+
+    with patch("app.routers.gate_metrics.is_org_owner_or_admin", new=AsyncMock(return_value=False)):
+        with pytest.raises(HTTPException) as ei:
+            await gm.get_hitl_gate_metrics(
+                project_id=None, start=None, end=None,
+                session=MagicMock(), org_id=uuid.uuid4(), auth=_auth(),
+            )
+    assert ei.value.status_code == 403

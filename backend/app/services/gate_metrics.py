@@ -84,14 +84,16 @@ async def compute_hitl_gate_metrics(
     rejected = int(counts.get("rejected", 0))
     ask_total = pending + approved + rejected
 
-    # 해소시간(분) — responded 된 것만(responded_at window)
+    # QA HIGH②: **단일 window 기준=created_at**(볼륨과 동일 cohort) — "이 기간에 생성된 ask" 코호트의
+    # 해소/rubber/self 통계. responded_at 기준이면 볼륨(created_at)과 cohort 불일치(외부생성·내부응답이
+    # 끼고, 내부생성·외부응답이 누락)라 지표 간 정합 깨짐. 해소시간은 그 코호트 중 responded 된 것만 평균.
     dur_stmt = _window(
         _base(select(func.avg(_dur / 60.0))).where(HitlRequest.responded_at.isnot(None)),
-        HitlRequest.responded_at, start, end,
+        HitlRequest.created_at, start, end,
     )
     avg_minutes = (await session.execute(dur_stmt)).scalar_one_or_none()
 
-    # rubber_stamp + approved-resolved 분모(responded_at window·approved만)
+    # rubber_stamp + approved-resolved 분모(created_at window·approved만)
     rs_stmt = _window(
         _base(
             select(
@@ -103,7 +105,7 @@ async def compute_hitl_gate_metrics(
                 ),
             ).where(HitlRequest.status == "approved", HitlRequest.responded_at.isnot(None))
         ),
-        HitlRequest.responded_at, start, end,
+        HitlRequest.created_at, start, end,
     )
     approved_resolved, rubber_count, self_approval = (await session.execute(rs_stmt)).one()
 
