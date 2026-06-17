@@ -49,6 +49,25 @@ def _ext(name: str) -> str:
     return name.rsplit(".", 1)[-1].lower() if "." in name else ""
 
 
+def _is_scoped_to_conversation(object_path: str, project_id, conversation_id) -> bool:
+    """canonical object path 가 **이 대화**에 스코프됐는지(`chat/<project_id>/<conversation_id>/<file>`).
+
+    ⚠️ 보안(QA RC HIGH·object-scope IDOR): 저장 URL 을 그대로 믿고 fetch 하면, 참가자가 *타 대화*
+    객체 URL 을 첨부에 심어 백엔드 SA(objectAdmin) 권한으로 임의 객체를 읽어 그 내용을 에이전트
+    컨텍스트로 누출시킬 수 있다(attachments.py 스코프 게이트 우회). 업로드 경로가 resource 에
+    스코프되므로(`chat/<proj>/<conv>/<file>`), path segment 가 정확히 이 conversation 을 가리킬
+    때만 fetch 한다(substring 금지·정확 segment 매치). 다른 conversation/story/외부 = 거부.
+    """
+    parts = object_path.split("/")
+    return (
+        len(parts) >= 4
+        and parts[0] == "chat"
+        and parts[1] == str(project_id)
+        and parts[2] == str(conversation_id)
+        and parts[3] != ""
+    )
+
+
 async def _download_object(object_path: str) -> bytes:
     """GCS 객체 bytes 다운로드 — 서비스계정(ADC) 직접 read. blocking client 는 thread 로 격리."""
 
@@ -79,23 +98,49 @@ def _extract_text(ext: str, data: bytes) -> str:
 
 
 def _cap(text: str, limit: int) -> str:
+    """text 를 limit 자 이내로 — 잘릴 때 마커 포함 길이도 limit 이내(QA RC LOW: 마커 미카운트로
+    총량 초과 방지)."""
     if limit <= 0:
         return ""
     if len(text) <= limit:
         return text
-    return text[:limit] + _TRUNC_MARK
+    keep = max(0, limit - len(_TRUNC_MARK))
+    return text[:keep] + _TRUNC_MARK
 
 
-async def build_attachment_context(attachments: list[dict] | None) -> str:
+async def build_attachment_context(
+    attachments: list[dict] | None,
+    *,
+    project_id,
+    conversation_id,
+) -> str:
     """메시지 attachments(list of {url,name,content_type,size}) → 에이전트 주입용 텍스트 블록.
 
-    문서=GCS fetch+추출, 이미지=메타 안내(v1), 미지원/실패=안내 라인. 총량 cap 도달 시 중단.
-    빈 결과면 "" (주입 무영향). best-effort — 개별 첨부 실패는 안내 라인으로 흡수.
+    문서=GCS fetch+추출, 이미지=메타 안내(v1), 미지원/실패=안내 라인. 총량 cap(헤더·마커·안내 라인
+    포함)·도달 시 중단. 빈 결과면 "" (주입 무영향). best-effort — 개별 첨부 실패는 안내 라인으로 흡수.
+
+    ⚠️ 보안: 문서 fetch 는 object path 가 **이 (project, conversation)에 스코프된 chat 첨부**일
+    때만 수행(_is_scoped_to_conversation). 타 대화/외부 객체 URL 은 거부(IDOR 차단·QA RC HIGH).
     """
     if not attachments:
         return ""
     blocks: list[str] = []
-    total = 0
+    total = len(_HEADER)  # 헤더도 총량에 카운트(LOW)
+
+    def _append(line: str) -> bool:
+        """line 추가. 총량(헤더+블록+구분자+마커) 한도 초과면 한도 라인(자리 있으면) 후 중단(False)."""
+        nonlocal total
+        sep = 2 if blocks else 0  # "\n\n" join
+        if blocks and total + sep + len(line) > _TOTAL_CAP:
+            marker = "[…첨부 컨텍스트 총량 한도 도달 — 이후 첨부 생략]"
+            if total + sep + len(marker) <= _TOTAL_CAP:  # 마커도 한도 내일 때만(총량 엄수)
+                blocks.append(marker)
+                total += sep + len(marker)
+            return False
+        blocks.append(line)
+        total += sep + len(line)
+        return True
+
     for a in attachments:
         if not isinstance(a, dict):
             continue
@@ -105,17 +150,21 @@ async def build_attachment_context(attachments: list[dict] | None) -> str:
 
         # 이미지 — v1 은 메타 안내(본격 분석=S2 백엔드 Vision 캡션)
         if ctype.startswith("image/") or ext in _IMAGE_EXTS:
-            blocks.append(f"[이미지 첨부: {name} ({ctype or 'image'}) — 이미지 분석은 준비 중]")
+            if not _append(f"[이미지 첨부: {name} ({ctype or 'image'}) — 이미지 분석은 준비 중]"):
+                break
             continue
 
         # 미지원 형식 안내
         if ext not in _DOC_EXTS:
-            blocks.append(f"[첨부(미지원 형식): {name} ({ctype or ext or 'unknown'})]")
+            if not _append(f"[첨부(미지원 형식): {name} ({ctype or ext or 'unknown'})]"):
+                break
             continue
 
         obj = _canonical_object_path(a.get("url") or "")
-        if obj is None:
-            blocks.append(f"[첨부(읽기 불가 경로): {name}]")
+        # ⚠️ 보안: 우리 버킷 객체 + 이 대화에 스코프된 path 만 fetch(타 대화/story/외부 거부)
+        if obj is None or not _is_scoped_to_conversation(obj, project_id, conversation_id):
+            if not _append(f"[첨부(접근 범위 밖): {name}]"):
+                break
             continue
 
         try:
@@ -123,19 +172,24 @@ async def build_attachment_context(attachments: list[dict] | None) -> str:
             text = _extract_text(ext, data).strip()
         except Exception:
             logger.warning("attachment_context: 추출 실패 name=%s", name, exc_info=True)
-            blocks.append(f"[첨부(추출 실패): {name}]")
+            if not _append(f"[첨부(추출 실패): {name}]"):
+                break
             continue
 
         if not text:
-            blocks.append(f"[첨부: {name} — 추출 텍스트 없음]")
+            if not _append(f"[첨부: {name} — 추출 텍스트 없음]"):
+                break
             continue
 
-        remaining = _TOTAL_CAP - total
+        # per-attachment cap + 남은 총량 내로(마커 포함 길이 _cap 이 보장)
+        prefix = f"[첨부: {name}]\n"
+        remaining = _TOTAL_CAP - total - (2 if blocks else 0) - len(prefix)
         capped = _cap(text, min(_PER_ATTACHMENT_CAP, remaining))
-        total += len(capped)
-        blocks.append(f"[첨부: {name}]\n{capped}")
-        if total >= _TOTAL_CAP:
-            blocks.append("[…첨부 컨텍스트 총량 한도 도달 — 이후 첨부 생략]")
+        if not capped:
+            if not _append(f"[첨부: {name} — 총량 한도로 생략]"):
+                break
+            continue
+        if not _append(prefix + capped):
             break
 
     if not blocks:
