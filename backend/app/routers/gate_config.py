@@ -179,16 +179,20 @@ async def get_org_gate_config(
     org_id: uuid.UUID,
     session: AsyncSession = Depends(get_db),
     verified_org_id: uuid.UUID = Depends(get_verified_org_id),
-    _auth: AuthContext = Depends(get_current_user),
+    auth: AuthContext = Depends(get_current_user),
 ) -> list[GateLevelEntry]:
     """S-GATE-4: org **기본값 단독** 조회(project-effective GET과 별개·org 설정 탭 surface).
 
-    project_id 무시하고 org 레벨(project_id IS NULL) 값만 — 미설정 셀은 시스템 기본 'ask'. read=org 멤버
-    (project GET과 동일 비민감 정책 메타). 설정(PUT scope='org')은 org admin. path org_id는 caller org와
-    일치해야(타org 조회 차단).
+    project_id 무시하고 org 레벨(project_id IS NULL) 값만 — 미설정 셀은 시스템 기본 'ask'. path org_id는
+    caller org와 일치해야(타org 차단). 설정(PUT scope='org')은 org admin.
+
+    QA RC: 권한 = **org owner/admin only**. project GET(멤버 read·자기 프로젝트 effective)과 달리 이건
+    **org 전체 기본값 관리 surface**라 관리자 스코프 — 멤버는 project GET으로 자기 config 읽으니 무손실.
     """
     if org_id != verified_org_id:
         raise HTTPException(status_code=403, detail="org_id mismatch")
+    if not await is_org_owner_or_admin(session, uuid.UUID(auth.user_id), org_id):
+        raise HTTPException(status_code=403, detail="org owner/admin required for org-level gate config")
     entries: list[GateLevelEntry] = []
     for wt in WORK_TYPES:
         for at in ACTOR_TYPES:

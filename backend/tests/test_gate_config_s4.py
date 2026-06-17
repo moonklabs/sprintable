@@ -172,16 +172,18 @@ async def test_delete_endpoint_owner_reverts_to_inherited():
 
 
 @pytest.mark.anyio
-async def test_org_gate_config_returns_org_defaults():
+async def test_org_gate_config_admin_returns_org_defaults():
     from app.routers import gate_config as gc
 
     oid = uuid.uuid4()
     with patch(
+        "app.routers.gate_config.is_org_owner_or_admin", new=AsyncMock(return_value=True)
+    ), patch(
         "app.routers.gate_config.resolve_gate_level_with_source",
         new=AsyncMock(return_value=("ask", "org_default")),
     ):
         out = await gc.get_org_gate_config(
-            oid, session=MagicMock(), verified_org_id=oid, _auth=_auth()
+            oid, session=MagicMock(), verified_org_id=oid, auth=_auth()
         )
     assert len(out) == 4  # WORK_TYPES(2) × ACTOR_TYPES(2)
     assert all(e.source == "org_default" for e in out)
@@ -195,6 +197,22 @@ async def test_org_gate_config_org_mismatch_403():
 
     with pytest.raises(HTTPException) as ei:
         await gc.get_org_gate_config(
-            uuid.uuid4(), session=MagicMock(), verified_org_id=uuid.uuid4(), _auth=_auth()
+            uuid.uuid4(), session=MagicMock(), verified_org_id=uuid.uuid4(), auth=_auth()
         )
     assert ei.value.status_code == 403  # 타 org 조회 차단
+
+
+@pytest.mark.anyio
+async def test_org_gate_config_non_admin_403():
+    """QA RC: org-GET=org 전체 기본값 관리 surface라 org owner/admin only(project GET 멤버-read와 분리)."""
+    from fastapi import HTTPException
+
+    from app.routers import gate_config as gc
+
+    oid = uuid.uuid4()
+    with patch("app.routers.gate_config.is_org_owner_or_admin", new=AsyncMock(return_value=False)):
+        with pytest.raises(HTTPException) as ei:
+            await gc.get_org_gate_config(
+                oid, session=MagicMock(), verified_org_id=oid, auth=_auth()
+            )
+    assert ei.value.status_code == 403  # 비-admin 차단
