@@ -159,24 +159,53 @@ and backoff are handled by the shared SDK; you only supply the runtime's injecti
 
 ### Example: Hermes
 
+> **The gateway adapter is not the MCP server.** A successful `sprintable` MCP
+> `ping` only proves the PM API tools are reachable — it does NOT mean the agent
+> is *receiving* conversation messages. Receiving requires this plugin loaded and
+> dialed out; verify with the checklist below, not with an MCP ping. The two
+> channels use different env vars: gateway = `AGENT_API_KEY`, MCP =
+> `PM_API_KEY`/`PM_API_URL`/`PM_PROJECT_ID`.
+
+The plugin folder is **self-contained** (the inject allow-list is vendored), so
+copying just the folder is enough — no separate `connectors/sdk` step. Requires
+**Hermes ≥ v0.13.0**.
+
 ```bash
-git pull origin main
+git pull origin develop
 
-# Deploy the plugin (symlink recommended)
-ln -sf "$(pwd)/connectors/hermes-sprintable" ~/.hermes/plugins/sprintable
+# 1. Deploy the plugin folder (copy is safest on a fresh box).
+cp -r connectors/hermes-sprintable ~/.hermes/plugins/sprintable
+#    or, from a full checkout: ln -sf "$(pwd)/connectors/hermes-sprintable" ~/.hermes/plugins/sprintable
 
+# 2. Enable by the plugin.yaml `name:` (sprintable-platform), NOT the folder name.
 hermes plugins enable sprintable-platform
 
+# 3. Env (required + optional).
 export AGENT_API_KEY=sk_live_...                # required
-export SPRINTABLE_API_URL=https://app.sprintable.ai
+# Leave SPRINTABLE_API_URL UNSET for the dev backend (the default). To pin it,
+# use the DEV backend base URL — not the app/prod domain — so a dev onboard
+# never dials out to prod. Prod is the separate hermes-sprintable-prod plugin.
+# export SPRINTABLE_API_URL=https://sprintable-backend-dev-57iommnikq-du.a.run.app
 # Multi-agent teams: leave the allowlist UNSET so the agent receives messages from ALL
 # members (recommended default). Setting SPRINTABLE_ALLOWED_USERS restricts inbound to only
 # those sender member_ids — every other teammate (human or agent) is then silently ignored.
 # export SPRINTABLE_ALLOWED_USERS=0caee743,...  # OPTIONAL — restrict to specific sender member_ids
 # export SPRINTABLE_ALLOW_ALL_USERS=1           # explicit allow-all (same effect as leaving it unset)
 
+# 4. Restart, then confirm the gateway side is live.
 hermes gateway restart
 ```
+
+**Verify (the real "connected" test)** — tail `~/.hermes/gateway.log` and expect,
+in order: `dial-out …/api/v2/agent/stream` → `stream open` → (send a test message)
+`inbound seq=N` → one reply posted back → `ack seq=N`. After a restart there must
+be **no re-injection** of already-acked messages.
+
+**Dev + prod side by side:** install `connectors/hermes-sprintable-prod` as a
+second plugin (enable `sprintable-prod-platform`). It uses `SPRINTABLE_PROD_*`
+env vars so prod credentials/home channel never cross with dev.
+
+Full detail, env-group reference and troubleshooting: `connectors/hermes-sprintable/README.md`.
 
 ### Direct integration — shared SDK
 

@@ -5,14 +5,14 @@ main.py 핸들러가 {data:null,error:{code,message,...},meta:null}로 감싼다
 
 라우트 선언 순서: `/draft`를 `/{id}` 계열보다 먼저 선언한다(§3.9.7 — /bulk shadow #1386 재발 방지).
 
-라우터 레벨 가드(S2에서 인계·AC⑥):
-- §3.7.2 cross-project 링크 금지 — 대상 epic/story의 project가 hypothesis와 같아야 한다.
-- §3.1.7 'active' 전이는 owner 휴먼 또는 org owner/admin만.
+가드 위치:
+- §3.7.2 cross-project 링크 금지 — service(hypothesis._assert_targets_same_project)가
+  create/draft/link 공통 처리(54a8bd8a: 라우터-only 갭으로 create/draft 우회되던 것 차단).
+- §3.1.7 'active' 전이는 owner 휴먼 또는 org owner/admin만 — 라우터에서 보강.
 """
 import uuid
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Response
-from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.dependencies.auth import (
@@ -22,7 +22,6 @@ from app.dependencies.auth import (
     get_verified_org_id,
 )
 from app.dependencies.database import get_db
-from app.models.pm import Epic, Story
 from app.repositories.hypothesis import HypothesisRepository
 from app.schemas.hypothesis import (
     HypothesisCreate,
@@ -59,35 +58,6 @@ def _raise(err: svc.HypothesisServiceError) -> None:
         status_code=_ERROR_STATUS.get(err.code, 400),
         detail={"code": err.code, "message": err.message},
     )
-
-
-async def _assert_targets_same_project(
-    session: AsyncSession,
-    project_id: uuid.UUID,
-    epic_ids: list[uuid.UUID],
-    story_ids: list[uuid.UUID],
-) -> None:
-    """§3.7.2 — 링크 대상 epic/story가 hypothesis와 다른 project면 403."""
-    if epic_ids:
-        rows = (await session.execute(
-            select(Epic.id, Epic.project_id).where(Epic.id.in_(epic_ids))
-        )).all()
-        if any(pid != project_id for _id, pid in rows) or len(rows) != len(set(epic_ids)):
-            raise HTTPException(
-                status_code=403,
-                detail={"code": "CROSS_PROJECT_LINK_FORBIDDEN",
-                        "message": "다른 프로젝트의 에픽에는 연결할 수 없습니다."},
-            )
-    if story_ids:
-        rows = (await session.execute(
-            select(Story.id, Story.project_id).where(Story.id.in_(story_ids))
-        )).all()
-        if any(pid != project_id for _id, pid in rows) or len(rows) != len(set(story_ids)):
-            raise HTTPException(
-                status_code=403,
-                detail={"code": "CROSS_PROJECT_LINK_FORBIDDEN",
-                        "message": "다른 프로젝트의 스토리에는 연결할 수 없습니다."},
-            )
 
 
 def _assert_active_authorized(caller: ResolvedMember, owner_member_id: uuid.UUID) -> None:
@@ -216,15 +186,7 @@ async def link_hypothesis(
     session: AsyncSession = Depends(get_db),
     org_id: uuid.UUID = Depends(get_verified_org_id),
 ) -> HypothesisResponse:
-    # §3.7.2 cross-project 링크 금지는 라우터에서 — 대상 epic/story project 대조.
-    repo = HypothesisRepository(session, org_id)
-    hyp = await repo.get(hypothesis_id)
-    if hyp is None:
-        raise HTTPException(
-            status_code=404,
-            detail={"code": "HYPOTHESIS_NOT_FOUND", "message": "가설을 찾을 수 없습니다."},
-        )
-    await _assert_targets_same_project(session, hyp.project_id, body.epic_ids, body.story_ids)
+    # §3.7.2 cross-project 링크 금지 + 존재 검증은 service(link_hypothesis)가 단일 처리.
     try:
         return await svc.link_hypothesis(session, org_id, hypothesis_id, body)
     except svc.HypothesisServiceError as err:

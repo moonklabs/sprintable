@@ -1,7 +1,7 @@
 import type { IDocRepository, Doc, DocSummary, CreateDocInput, UpdateDocInput, DocListFilters, RepositoryScopeContext } from '@sprintable/core-storage';
 import { fastapiCall } from './utils';
 
-export class SupabaseDocRepository implements IDocRepository {
+export class ApiDocRepository implements IDocRepository {
   constructor(private readonly accessToken: string = '') {}
 
   async list(filters: DocListFilters): Promise<DocSummary[]> {

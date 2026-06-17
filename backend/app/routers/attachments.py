@@ -4,7 +4,7 @@
 **전에** 이 엔드포인트로 요청자 권한을 확인한다. message 첨부 → conversation 참가자, story 첨부
 → has_project_access. team_member 봐주기 없음(resolve_member·has_project_access SSOT 재사용).
 
-보안(까심 P1): path 소속 검증은 **substring 금지·정확 매치**.
+보안(P1): path 소속 검증은 **substring 금지·정확 매치**.
 - ① 구조적 스코프: 업로드 경로가 `chat/<proj>/<conv_id>/<file>` / `story/<proj>/<story_id>/<file>`
   로 resource 에 스코프되므로, 요청 path 의 segment 에 해당 resource id 가 있어야 한다
   (metadata 에 임의 URL 을 심어도 victim path 는 victim 의 id 를 가지므로 차단).

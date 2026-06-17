@@ -105,7 +105,7 @@ function buildPreview(content: string, maxLength = 50) {
   return `${normalized.slice(0, maxLength)}…`;
 }
 
-// Korean honorific suffixes that may follow a first-name mention (e.g. "@까심군" for "까심 아르야")
+// Korean honorific suffixes that may follow a first-name mention (e.g. "@민준군" for a member "민준 김")
 const KOREAN_HONORIFIC_RE = /^(군|신|쿤|님|씨)/u;
 
 function hasMentionWithHonorific(content: string, namePart: string): boolean {

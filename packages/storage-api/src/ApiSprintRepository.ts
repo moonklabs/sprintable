@@ -1,7 +1,7 @@
 import type { ISprintRepository, Sprint, CreateSprintInput, UpdateSprintInput, SprintListFilters, RepositoryScopeContext } from '@sprintable/core-storage';
 import { fastapiCall } from './utils';
 
-export class SupabaseSprintRepository implements ISprintRepository {
+export class ApiSprintRepository implements ISprintRepository {
   constructor(private readonly accessToken: string = '') {}
 
   async create(input: CreateSprintInput): Promise<Sprint> {

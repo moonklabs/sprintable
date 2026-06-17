@@ -1,57 +1,27 @@
-import { describe, expect, it, vi, beforeEach } from 'vitest';
+import { beforeEach, describe, expect, it, vi } from 'vitest';
 
-const {
-  createAdminClientMock,
-  exchangeGitHubOAuthCodeMock,
-} = vi.hoisted(() => ({
-  createAdminClientMock: vi.fn(() => ({ tag: 'admin' })),
-  exchangeGitHubOAuthCodeMock: vi.fn(),
-}));
+// 837a36c4(Group B b12): integrations/mcp/github/callback는 pure proxy(public:true OAuth 콜백).
+const { proxyToFastapi } = vi.hoisted(() => ({ proxyToFastapi: vi.fn() }));
+vi.mock('@/lib/fastapi-proxy', () => ({ proxyToFastapi }));
 
-vi.mock('@/lib/db/admin', () => ({
-  createAdminClient: createAdminClientMock,
-}));
-
-vi.mock('@/services/project-mcp', () => ({
-  exchangeGitHubOAuthCode: exchangeGitHubOAuthCodeMock,
-}));
-
-import { encodeMcpOAuthState } from '@/lib/mcp-oauth-state';
 import { GET } from './route';
 
-describe('GitHub MCP callback route', () => {
-  beforeEach(() => {
-    process.env.MCP_CONNECTION_STATE_SECRET = 'test-secret';
-    createAdminClientMock.mockClear();
-    exchangeGitHubOAuthCodeMock.mockReset();
+const PATH = '/api/v2/integrations/mcp/github/callback';
+const okRes = (b: unknown = { ok: 1 }) =>
+  new Response(JSON.stringify(b), { status: 200, headers: { 'content-type': 'application/json' } });
+const req = () => new Request('http://localhost/api/integrations/mcp/github/callback?code=x&state=y');
+
+describe('GET /api/integrations/mcp/github/callback (proxy 위임·public)', () => {
+  beforeEach(() => proxyToFastapi.mockReset());
+  it('delegates with { public: true } and wraps', async () => {
+    proxyToFastapi.mockResolvedValue(okRes());
+    const res = await GET(req());
+    expect(res.status).toBe(200);
+    expect(proxyToFastapi).toHaveBeenCalledWith(expect.anything(), PATH, { public: true });
+    expect((await res.json()).data).toMatchObject({ ok: 1 });
   });
-
-  it('stores the GitHub OAuth token and redirects back to settings', async () => {
-    const state = encodeMcpOAuthState({
-      orgId: 'org-1',
-      projectId: 'project-1',
-      actorId: 'member-1',
-      serverKey: 'github',
-      issuedAt: Math.floor(Date.now() / 1000),
-    });
-
-    const response = await GET(new Request(`https://sprintable.app/api/integrations/mcp/github/callback?code=oauth-code&state=${state}`));
-
-    expect(exchangeGitHubOAuthCodeMock).toHaveBeenCalledWith({ tag: 'admin' }, {
-      code: 'oauth-code',
-      origin: 'https://sprintable.app',
-      orgId: 'org-1',
-      projectId: 'project-1',
-      actorId: 'member-1',
-    });
-    expect(response.status).toBe(307);
-    expect(response.headers.get('location')).toBe('https://sprintable.app/dashboard/settings?mcp_connection=github_connected');
-  });
-
-  it('redirects to an error state when OAuth state verification fails', async () => {
-    const response = await GET(new Request('https://sprintable.app/api/integrations/mcp/github/callback?code=oauth-code&state=invalid'));
-
-    expect(exchangeGitHubOAuthCodeMock).not.toHaveBeenCalled();
-    expect(response.headers.get('location')).toBe('https://sprintable.app/dashboard/settings?mcp_connection=github_error');
+  it('passes through proxy errors', async () => {
+    proxyToFastapi.mockResolvedValue(new Response('e', { status: 400 }));
+    expect((await GET(req())).status).toBe(400);
   });
 });

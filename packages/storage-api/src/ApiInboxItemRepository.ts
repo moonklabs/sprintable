@@ -2,7 +2,7 @@ import type { IInboxItemRepository, InboxItem, CreateInboxItemInput, InboxListFi
 import { NotFoundError } from '@sprintable/core-storage';
 import { fastapiCall } from './utils';
 
-export class SupabaseInboxItemRepository implements IInboxItemRepository {
+export class ApiInboxItemRepository implements IInboxItemRepository {
   constructor(private readonly accessToken: string = '') {}
 
   async create(input: CreateInboxItemInput): Promise<InboxItem> {

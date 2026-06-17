@@ -8,12 +8,101 @@ import httpx
 
 logger = logging.getLogger(__name__)
 
+# 백엔드 에러 본문을 MCP 에러 문자열에 노출할 때, 비정상적으로 큰 body가
+# 에이전트 컨텍스트를 잠식하지 않도록 자르는 상한.
+_ERROR_BODY_MAX = 1500
+
 
 class SprintableApiError(Exception):
     def __init__(self, status: int, message: str, body: Any = None) -> None:
         super().__init__(message)
         self.status = status
         self.body = body
+
+
+def _format_validation_errors(detail: list) -> str | None:
+    """FastAPI 422 RequestValidationError 배열 → 'field: msg' 요약.
+
+    detail 항목 shape: {"loc": ["body", "metric_definition", "source"], "msg": "...", "type": "..."}.
+    loc의 선행 "body"/"query"/"path" 토큰은 노이즈라 제거하고 남은 경로를 '.'로 잇는다.
+    """
+    parts: list[str] = []
+    for item in detail:
+        if not isinstance(item, dict):
+            parts.append(str(item))
+            continue
+        loc = item.get("loc") or []
+        trimmed = [str(p) for p in loc if p not in ("body", "query", "path")]
+        field = ".".join(trimmed) if trimmed else "(request)"
+        msg = item.get("msg") or item.get("type") or "invalid"
+        parts.append(f"{field}: {msg}")
+    return "; ".join(parts) if parts else None
+
+
+def _extract_error_message(status: int, body: Any) -> str:
+    """백엔드 4xx/5xx 응답 본문에서 사람이 읽을 수 있는 사유를 추출한다.
+
+    지원 shape (우선순위 순):
+      1. {"error": {"code", "message", ...}}  — 앱 표준 엔벨로프(main.py http_exception_handler)
+      2. {"detail": {"code", "message"}}      — dict detail HTTPException(엔벨로프 전 raw, 방어적)
+      3. {"detail": [ {loc, msg, type}, ... ]} — FastAPI 422 pydantic 검증 배열
+      4. {"detail": "...문자열..."}            — 평문 detail
+      5. JSON이 아니거나 미지의 shape         — 본문 텍스트를 잘라서 그대로 노출
+
+    이전 구현은 1만 보고 2~5를 버려(특히 422 검증 배열) 'Sprintable API 422'로 삼켜버렸다.
+    """
+    # 5: JSON 파싱 실패 → 원문 텍스트(잘림)로 폴백.
+    if isinstance(body, str):
+        text = body.strip()
+        if not text:
+            return f"Sprintable API {status}"
+        if len(text) > _ERROR_BODY_MAX:
+            text = text[:_ERROR_BODY_MAX] + "…(truncated)"
+        return f"Sprintable API {status}: {text}"
+
+    if isinstance(body, dict):
+        # 1: 표준 {error: {code, message}} 엔벨로프.
+        env = body.get("error")
+        if isinstance(env, dict):
+            code = env.get("code")
+            message = env.get("message") or ""
+            if code and message:
+                return f"{code}: {message}"
+            if message:
+                return str(message)
+            if code:
+                return str(code)
+        elif isinstance(env, str) and env:
+            return env
+
+        detail = body.get("detail")
+        # 2: dict detail({code, message}) — 엔벨로프 미적용 raw HTTPException 방어.
+        if isinstance(detail, dict):
+            code = detail.get("code")
+            message = detail.get("message") or ""
+            if code and message:
+                return f"{code}: {message}"
+            if message:
+                return str(message)
+        # 3: 422 검증 배열.
+        if isinstance(detail, list):
+            summary = _format_validation_errors(detail)
+            if summary:
+                return f"Sprintable API {status} validation: {summary}"
+        # 4: 평문 detail.
+        if isinstance(detail, str) and detail.strip():
+            return f"Sprintable API {status}: {detail.strip()}"
+
+    # 미지의 shape — 직렬화해서 잘라 노출(완전 삼킴 방지).
+    try:
+        import json as _json
+
+        text = _json.dumps(body, ensure_ascii=False)
+        if len(text) > _ERROR_BODY_MAX:
+            text = text[:_ERROR_BODY_MAX] + "…(truncated)"
+        return f"Sprintable API {status}: {text}"
+    except Exception:
+        return f"Sprintable API {status}"
 
 
 class SprintableClient:
@@ -100,14 +189,13 @@ class SprintableClient:
             try:
                 body = resp.json()
             except Exception:
-                pass
-            error = body or {}
-            message = (
-                (error.get("error") or {}).get("message")
-                if isinstance(error.get("error"), dict)
-                else error.get("error")
-            ) or f"Sprintable API {resp.status_code}"
-            raise SprintableApiError(resp.status_code, str(message), body)
+                # 비-JSON 본문(HTML 502, 평문 등)도 삼키지 않고 노출.
+                try:
+                    body = resp.text
+                except Exception:
+                    body = None
+            message = _extract_error_message(resp.status_code, body)
+            raise SprintableApiError(resp.status_code, message, body)
 
         data = resp.json()
         # {data: T} 래핑이면 언래핑, 그 외(배열 등)는 직접 반환

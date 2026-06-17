@@ -432,6 +432,11 @@ async def create_event(
         status="pending",
     )
     db.add(event)
+    await db.flush()  # event.id 확보
+    # L1 BE-3: 같은 tx에서 활동 수렴(best-effort·SAVEPOINT) → event와 단일 commit(다른 fan-out
+    # 사이트와 일관·commit 1회 유지). 추출 실패해도 SAVEPOINT만 롤백, delivery는 정상 commit.
+    from app.services.activity_stream import extract_activities_best_effort
+    await extract_activities_best_effort(db, [event.id])
     await db.commit()
     await db.refresh(event)
 

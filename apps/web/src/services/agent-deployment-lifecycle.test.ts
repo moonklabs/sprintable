@@ -728,7 +728,8 @@ describe('AgentDeploymentLifecycleService', () => {
       },
     });
 
-    expect(validateProjectMcpConnectionsMock).toHaveBeenCalledWith({ tag: 'admin' }, { projectId: 'project-1' });
+    // 837a36c4(b19): 구현이 validateProjectMcpConnections(undefined, {projectId})로 호출(OSS storage가 db-context 내부 해소·구 {tag:'admin'} 폐기).
+    expect(validateProjectMcpConnectionsMock).toHaveBeenCalledWith(undefined, { projectId: 'project-1' });
     expect(state.createdDeployments).toHaveLength(0);
   });
 

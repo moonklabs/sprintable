@@ -77,45 +77,145 @@ async def sync_agent_anchor_on_create(
         .on_conflict_do_nothing(index_elements=["id"])
     )
 
-    # 2. agent_project_profiles (member_id=team_member.id) — 런타임/설정 미러
+    # 2·3. per-project 앵커(agent_project_profiles + project_access placement) — 공유 헬퍼.
+    await write_agent_project_placement(
+        session,
+        member_id=team_member.id,
+        project_id=team_member.project_id,
+        agent_config=team_member.agent_config,
+        agent_role=team_member.agent_role,
+        fakechat_port=team_member.fakechat_port,
+        role=team_member.role,
+        color=team_member.color,
+        can_manage_members=team_member.can_manage_members,
+        last_seen_at=team_member.last_seen_at,
+        active_story_id=team_member.active_story_id,
+        agent_status=team_member.agent_status,
+    )
+
+    # api_key 자동생성(create_team_member)이 같은 트랜잭션에서 members FK를 즉시 보도록 flush
+    await session.flush()
+
+
+async def write_agent_project_placement(
+    session: AsyncSession,
+    *,
+    member_id: uuid.UUID,
+    project_id: uuid.UUID,
+    agent_config: dict | None = None,
+    agent_role: str | None = None,
+    fakechat_port: int | None = None,
+    role: str = "member",
+    color: str = "#3385f8",
+    can_manage_members: bool = False,
+    last_seen_at=None,
+    active_story_id: uuid.UUID | None = None,
+    agent_status: str | None = None,
+) -> None:
+    """에이전트의 per-project 앵커(agent_project_profiles 런타임 + project_access grant)를 멱등 write.
+
+    members 행은 호출부(sync_agent_anchor_on_create / org-level create)에서 보장한다. org-level
+    멀티프로젝트 에이전트가 추가 프로젝트로 접근을 확장할 때 이 헬퍼를 프로젝트마다 재호출한다.
+    둘 다 ON CONFLICT DO NOTHING — 재호출/백필 중복 안전.
+    """
+    # agent_project_profiles (member_id) — 런타임/설정 미러
     await session.execute(
         pg_insert(AgentProjectProfile.__table__)
         .values(
             id=uuid.uuid4(),
-            member_id=team_member.id,
-            project_id=team_member.project_id,
-            agent_config=team_member.agent_config,
-            agent_role=team_member.agent_role,
-            fakechat_port=team_member.fakechat_port,
-            last_seen_at=team_member.last_seen_at,
-            active_story_id=team_member.active_story_id,
-            agent_status=team_member.agent_status,
+            member_id=member_id,
+            project_id=project_id,
+            agent_config=agent_config,
+            agent_role=agent_role,
+            fakechat_port=fakechat_port,
+            last_seen_at=last_seen_at,
+            active_story_id=active_story_id,
+            agent_status=agent_status,
         )
         .on_conflict_do_nothing()  # (project_id, member_id) UNIQUE + (project_id, fakechat_port) 부분 UNIQUE 모두 흡수
     )
 
-    # 3. project_access direct placement (AC3-4 2-1, G3): 0075 §5 에이전트 placement 동형.
-    #    AC3-4 뷰가 role/can_manage를 project_access서 읽으므로 신규 agent도 placement 필요(누락 시 뷰서
-    #    role 기본값). member_id=tm.id(canonical), org_member_id=NULL(에이전트). ON CONFLICT 멱등.
+    # project_access direct placement (AC3-4 2-1, G3): 0075 §5 에이전트 placement 동형.
+    #    AC3-4 뷰가 role/can_manage를 project_access서 읽으므로 grant 필요. member_id=canonical,
+    #    org_member_id=NULL(에이전트). ON CONFLICT 멱등.
+    # E-MEMBER-POLICY S1: role 은 enum(owner/admin/member)으로 clamp — 0122 CHECK 위반 방지.
     from app.models.project_access import ProjectAccess
+    from app.services.project_auth import clamp_project_role
     await session.execute(
         pg_insert(ProjectAccess.__table__)
         .values(
             id=uuid.uuid4(),
-            project_id=team_member.project_id,
+            project_id=project_id,
             org_member_id=None,
-            member_id=team_member.id,
+            member_id=member_id,
             permission="granted",
-            role=team_member.role,
-            color=team_member.color,
-            can_manage_members=team_member.can_manage_members,
+            role=clamp_project_role(role),
+            color=color,
+            can_manage_members=can_manage_members,
             access_source="direct",
         )
         .on_conflict_do_nothing()  # (project_id, member_id) 부분 UNIQUE 흡수(멱등)
     )
 
-    # api_key 자동생성(create_team_member)이 같은 트랜잭션에서 members FK를 즉시 보도록 flush
-    await session.flush()
+
+_FAKECHAT_BASE_PORT = 8787
+
+
+async def allocate_fakechat_port(session: AsyncSession, project_id: uuid.UUID) -> int:
+    """프로젝트 내 미사용 fakechat 포트 — create_team_member 와 동일 규칙(프로젝트별 유일)."""
+    from app.models.team import TeamMember
+
+    existing = {
+        r[0]
+        for r in (
+            await session.execute(
+                select(TeamMember.fakechat_port).where(
+                    TeamMember.project_id == project_id,
+                    TeamMember.type == "agent",
+                    TeamMember.fakechat_port.isnot(None),
+                )
+            )
+        ).all()
+    }
+    port = _FAKECHAT_BASE_PORT
+    while port in existing:
+        port += 1
+    return port
+
+
+async def ensure_agent_project_profile(
+    session: AsyncSession,
+    *,
+    member_id: uuid.UUID,
+    project_id: uuid.UUID,
+    agent_config: dict | None = None,
+    agent_role: str | None = None,
+    fakechat_port: int | None = None,
+) -> None:
+    """에이전트의 per-project agent_project_profiles 행만 멱등 보장(grant 는 호출부가 관리).
+
+    S4: grant-only 에이전트(team_members 뷰 branch3 = 런타임 컬럼 NULL)에 per-project profile 을
+    부여해 presence/런타임 write(sync_agent_profile_presence 의 UPDATE)가 실제 행에 반영되게 한다.
+    profile 부재 시 presence UPDATE 가 0행(무음 누락)이 되는 문제 해소. fakechat_port 미지정 시
+    프로젝트 내 미사용 포트를 자동 할당(create 경로와 동일 규칙). ON CONFLICT 멱등.
+    """
+    if fakechat_port is None:
+        fakechat_port = await allocate_fakechat_port(session, project_id)
+    await session.execute(
+        pg_insert(AgentProjectProfile.__table__)
+        .values(
+            id=uuid.uuid4(),
+            member_id=member_id,
+            project_id=project_id,
+            agent_config=agent_config,
+            agent_role=agent_role,
+            fakechat_port=fakechat_port,
+            last_seen_at=None,
+            active_story_id=None,
+            agent_status=None,
+        )
+        .on_conflict_do_nothing()  # (project_id, member_id) UNIQUE + (project_id, fakechat_port) 부분 UNIQUE 흡수
+    )
 
 
 async def ensure_human_member(session: AsyncSession, org_member_id: uuid.UUID) -> bool:

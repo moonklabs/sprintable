@@ -79,19 +79,19 @@ async def _run_dispatch(member_type: str):
     app.dependency_overrides[get_current_user] = override_auth
     try:
         with patch(
-            "app.routers.dispatch._fetch_entity",
+            "app.services.agent_dispatch._fetch_entity",
             new_callable=AsyncMock,
             return_value=(ASSIGNEE_ID, "Build login", "OAuth + password", PROJECT_ID),
         ), patch(
-            "app.routers.dispatch.resolve_member_identity",
+            "app.services.agent_dispatch.resolve_member_identity",
             new_callable=AsyncMock,
             return_value=assignee_member,
         ), patch(
-            "app.routers.dispatch.assign_recipient_seq", side_effect=_seq
+            "app.services.agent_dispatch.assign_recipient_seq", side_effect=_seq
         ), patch(
-            "app.routers.dispatch.wake_agent"
+            "app.services.agent_dispatch.wake_agent"
         ) as mock_wake, patch(
-            "app.routers.dispatch.dispatch_notification", new_callable=AsyncMock
+            "app.services.agent_dispatch.dispatch_notification", new_callable=AsyncMock
         ) as mock_dispatch:
             transport = ASGITransport(app=app)
             async with AsyncClient(transport=transport, base_url="http://test") as c:

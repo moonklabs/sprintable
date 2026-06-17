@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import logging
 import uuid
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
@@ -13,6 +14,8 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.core.database import async_session_factory
 from app.core.security import JWTError, decode_jwt, hash_token
 from app.dependencies.database import get_db
+
+logger = logging.getLogger(__name__)
 
 bearer_scheme = HTTPBearer(auto_error=False)
 
@@ -73,17 +76,47 @@ async def _resolve_api_key(raw_key: str, db: AsyncSession) -> AuthContext:
         org_id = str(m.org_id)
         project_id = str(proj) if proj else None
     else:
-        # 레거시: team_members 경로
+        # 레거시: team_members 경로.
+        # team_members 는 0088 이후 projection VIEW라 멀티프로젝트 에이전트(org-level grant)는
+        # 같은 id 로 프로젝트 수만큼 행을 낸다 → 무필터 scalar_one_or_none 은 MultipleResultsFound
+        # 로 크래시. .limit(1)(order_by project_id 로 결정성)로 한 행만 취해 scalar_one_or_none 이
+        # 절대 raise 하지 않게 한다(identity 해소). 단일 프로젝트 에이전트는 1행이라 거동 동일.
+        # 실제 접근 가능 프로젝트 집합은 아래 accessible 로 별도 산출한다.
         member = (await db.execute(
             select(TeamMember)
             .where(TeamMember.id == api_key.team_member_id)
             .where(TeamMember.is_active.is_(True))
+            .order_by(TeamMember.project_id)
+            .limit(1)
         )).scalar_one_or_none()
         if not member:
             raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="API key member not found")
         member_id = member.id
         org_id = str(member.org_id)
         project_id = str(member.project_id)
+
+    # S1 (org-level 멀티프로젝트 에이전트): 키를 단일 project 에 핀하지 않는다. grant SSOT
+    # (project_access)에서 접근 가능한 전 프로젝트 집합을 project_ids claim 으로 싣어, 키 1개가
+    # org 내 허용 프로젝트 어디서든 인가받게 한다(has_project_access 와 lockstep SSOT). project_id
+    # (단수)는 MCP 자동주입·레거시 호환을 위한 **기본 프로젝트**로만 유지(없으면 첫 accessible 폴백).
+    # require_project_access 는 이 project_ids 를 읽어 정확히 게이트한다(현재 사용처 0 → 순수 additive).
+    #
+    # ⚠️ 생명선 보호: project_ids 산출은 **순수 additive** 이므로 어떤 이유로든(org_id 비-UUID·
+    # 쿼리 실패 등) 예외가 나도 API key 인증 자체를 깨면 안 된다. try/except 로 격리하고 실패 시
+    # 기본 project_id 만으로 폴백. 단일 project_id 핀(레거시)과 동치 → 무중단.
+    project_ids: list[str] = []
+    try:
+        from app.services.project_auth import accessible_project_ids_in_org
+        accessible = await accessible_project_ids_in_org(db, member_id, uuid.UUID(org_id))
+        project_ids = [str(pid) for pid in accessible]
+    except Exception:
+        logger.warning("_resolve_api_key: project_ids 산출 실패 — 기본 project_id 폴백", exc_info=True)
+    if project_id is None and project_ids:
+        project_id = project_ids[0]
+    # 방어(백필 갭·산출 실패): 기본 project_id 가 집합에 없더라도 자기 기본 프로젝트는 항상 포함 —
+    # project_ids=[] 인데 project_id 가 set 인 모순(require_project_access 자기차단)을 차단.
+    if project_id and project_id not in project_ids:
+        project_ids.append(project_id)
 
     return AuthContext(
         user_id=str(member_id),
@@ -93,6 +126,7 @@ async def _resolve_api_key(raw_key: str, db: AsyncSession) -> AuthContext:
             "app_metadata": {
                 "org_id": org_id,
                 "project_id": project_id,
+                "project_ids": project_ids,
                 "scope": scope,
                 "api_key_id": str(api_key.id),
             },

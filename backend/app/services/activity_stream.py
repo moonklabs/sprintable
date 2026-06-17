@@ -1,0 +1,410 @@
+"""L1 BE-2: canonical 활동 mapper/extractor (블루프린트 §3.2·§5).
+
+events 행을 canonical 활동(activity_events)으로 정규화한다. 수신자 fan-out(1 dispatch →
+N recipient event)은 같은 dedup_key로 1 활동에 병합되고 source_event_ids/recipient_ids에
+누적된다(array union). 추출은 idempotent하다.
+"""
+from __future__ import annotations
+
+import hashlib
+import json
+import logging
+import uuid
+from datetime import datetime
+
+from sqlalchemy import select, text, tuple_
+from sqlalchemy.dialects.postgresql import insert as pg_insert
+from sqlalchemy.ext.asyncio import AsyncSession
+
+from app.models.activity_event import ActivityEvent
+from app.models.event import Event
+
+logger = logging.getLogger(__name__)
+
+# AC③: 수신자/배달 전용 필드는 fingerprint·dedup 식별에서 제외한다(fan-out은 같은 활동).
+_DELIVERY_ONLY_KEYS = frozenset(
+    {"recipient", "recipient_id", "recipient_type", "is_backfill", "event_id", "recipient_seq"}
+)
+
+
+def canonical_verb(event: Event) -> str:
+    """AC②: 'dispatched' wrapper면 payload.event_type(내부 알림 verb)로 unwrap, 아니면 event_type."""
+    if event.event_type == "dispatched":
+        inner = (event.payload or {}).get("event_type")
+        if isinstance(inner, str) and inner:
+            return inner
+    return event.event_type
+
+
+def canonical_payload_fingerprint(payload: dict | None) -> str:
+    """AC③: delivery-only 필드를 뺀 의미 payload의 결정적 해시(정렬 JSON → sha256)."""
+    core = {k: v for k, v in (payload or {}).items() if k not in _DELIVERY_ONLY_KEYS}
+    serialized = json.dumps(core, sort_keys=True, separators=(",", ":"), default=str)
+    return hashlib.sha256(serialized.encode("utf-8")).hexdigest()
+
+
+def build_dedup_key(event: Event) -> str:
+    """canonical 활동 식별자 — 수신자 fan-out은 같은 dedup_key로 1행 병합(AC④).
+
+    구성 = (verb, object_type, object_id, actor, occurred_at, payload_fingerprint).
+    fan-out 이벤트는 단일 dispatch flush라 created_at(occurred_at)을 공유하므로 시간을
+    포함해도 같은 활동은 병합되고 별개 dispatch는 분리된다. recipient 등 delivery-only는
+    fingerprint에서 이미 제외(AC③)되어 수신자별로 키가 갈리지 않는다.
+    """
+    parts = [
+        canonical_verb(event),
+        event.source_entity_type or "",
+        str(event.source_entity_id or ""),
+        str(event.sender_id or ""),
+        event.created_at.isoformat() if event.created_at else "",
+        canonical_payload_fingerprint(event.payload),
+    ]
+    return hashlib.sha256("\x1f".join(parts).encode("utf-8")).hexdigest()
+
+
+def _canonical_payload(payload: dict | None) -> dict:
+    return {k: v for k, v in (payload or {}).items() if k not in _DELIVERY_ONLY_KEYS}
+
+
+# 같은 dedup_key 충돌 시 배열을 중복 없이 합집합(순서 무의미·set 의미). DO UPDATE라 양쪽 모두
+# 비어있지 않지만 coalesce로 방어.
+def _array_union_sql(column: str, cast: str) -> text:
+    return text(
+        f"(SELECT coalesce(array_agg(DISTINCT x), '{{}}'::{cast}) "
+        f"FROM unnest(activity_events.{column} || excluded.{column}) AS x)"
+    )
+
+
+async def upsert_activity_from_events(db: AsyncSession, event_ids: list[uuid.UUID]) -> list[uuid.UUID]:
+    """events → activity_events 추출/upsert. 같은 dedup_key는 source/recipient를 array union으로
+    누적(AC④)하며, 재실행해도 결과가 동일하다(AC⑤ idempotent — array_agg DISTINCT).
+
+    반환: 영향 활동의 activity_id 목록(입력 event 순서, created_at·id 정렬).
+    """
+    if not event_ids:
+        return []
+
+    rows = (
+        await db.execute(
+            select(Event).where(Event.id.in_(event_ids)).order_by(Event.created_at, Event.id)
+        )
+    ).scalars().all()
+
+    activity_ids: list[uuid.UUID] = []
+    for ev in rows:
+        recipient_ids = [ev.recipient_id] if ev.recipient_id is not None else []
+        recipient_types = [ev.recipient_type] if ev.recipient_type else []
+        stmt = (
+            pg_insert(ActivityEvent.__table__)
+            .values(
+                activity_id=uuid.uuid4(),
+                org_id=ev.org_id,
+                project_id=ev.project_id,
+                actor_id=ev.sender_id,
+                verb=canonical_verb(ev),
+                object_type=ev.source_entity_type,
+                object_id=ev.source_entity_id,
+                occurred_at=ev.created_at,
+                representative_event_id=ev.id,
+                source_event_ids=[ev.id],
+                recipient_ids=recipient_ids,
+                recipient_types=recipient_types,
+                payload=_canonical_payload(ev.payload),
+                dedup_key=build_dedup_key(ev),
+                # activity_seq 생략(Identity·DB 생성)·created_at 생략(default now()).
+            )
+            .on_conflict_do_update(
+                index_elements=["org_id", "dedup_key"],
+                set_={
+                    "source_event_ids": _array_union_sql("source_event_ids", "uuid[]"),
+                    "recipient_ids": _array_union_sql("recipient_ids", "uuid[]"),
+                    "recipient_types": _array_union_sql("recipient_types", "text[]"),
+                },
+            )
+            .returning(ActivityEvent.__table__.c.activity_id)
+        )
+        result = await db.execute(stmt)
+        activity_ids.append(result.scalar_one())
+
+    return activity_ids
+
+
+async def backfill_activity_events(db: AsyncSession, *, batch_size: int = 1000) -> dict[str, int]:
+    """L1 BE-4: 기존 events를 (created_at ASC, id ASC) cursor scan하며 activity_events로 흡수.
+
+    별도 idempotent job(테이블은 0116 마이그가 생성). delivered event cleanup 전 과거 row를
+    수렴한다. 재실행해도 (org_id, dedup_key) unique + array_agg DISTINCT로 row count·source
+    누적이 안정(AC②). 이미 삭제된 event는 scan에 없으므로 복원하지 않는다(AC③). 배치별로
+    빠른 일괄 upsert를 시도하고, 실패 시에만 event 단위로 격리해 문제 row를 skip·집계한다.
+
+    반환: {events_processed, events_skipped, batches}. 배치별 처리량·upsert·collapse는 로그.
+    """
+    processed = 0
+    skipped = 0
+    batches = 0
+    cursor: tuple | None = None  # (created_at, id)
+
+    while True:
+        query = (
+            select(Event.id, Event.created_at)
+            .order_by(Event.created_at.asc(), Event.id.asc())
+            .limit(batch_size)
+        )
+        if cursor is not None:
+            query = query.where(tuple_(Event.created_at, Event.id) > tuple_(cursor[0], cursor[1]))
+
+        rows = (await db.execute(query)).all()
+        if not rows:
+            break
+
+        batch_ids = [row[0] for row in rows]
+        batch_skipped = 0
+        try:
+            activity_ids = await upsert_activity_from_events(db, batch_ids)
+            await db.commit()
+        except Exception:
+            # 배치 일괄이 실패하면 event 단위 savepoint로 격리 — 문제 row만 skip한다.
+            await db.rollback()
+            activity_ids = []
+            for eid in batch_ids:
+                try:
+                    async with db.begin_nested():
+                        activity_ids.extend(await upsert_activity_from_events(db, [eid]))
+                except Exception:
+                    batch_skipped += 1
+                    logger.warning("backfill skip event=%s", eid, exc_info=True)
+            await db.commit()
+
+        processed += len(batch_ids)
+        skipped += batch_skipped
+        batches += 1
+        cursor = (rows[-1][1], rows[-1][0])
+        logger.info(
+            "backfill batch %d: processed=%d upserts=%d collapsed=%d skipped=%d",
+            batches,
+            len(batch_ids),
+            len(batch_ids) - batch_skipped,
+            len(set(activity_ids)),
+            batch_skipped,
+        )
+
+    result = {"events_processed": processed, "events_skipped": skipped, "batches": batches}
+    logger.info("backfill complete: %s", result)
+    return result
+
+
+async def extract_activities_best_effort(db: AsyncSession, event_ids: list[uuid.UUID]) -> None:
+    """delivery 트랜잭션 안에서 extractor를 best-effort 호출(L1 BE-3).
+
+    활동 그래프는 delivery에서 파생되는 부산물이라 추출 실패가 delivery를 롤백하면 안 된다.
+    SAVEPOINT(begin_nested)로 격리해 extractor 예외 시 그 savepoint만 롤백하고 delivery
+    row·assign_recipient_seq·commit 순서는 그대로 둔다. activity_events 미적용(0116 migrate
+    전) 같은 경우에도 dispatch가 깨지지 않게 하는 안전장치다. lightweight upsert만 수행한다.
+    """
+    if not event_ids:
+        return
+    try:
+        async with db.begin_nested():
+            await upsert_activity_from_events(db, event_ids)
+    except Exception:
+        logger.warning("activity extractor skipped (best-effort) for events=%s", event_ids, exc_info=True)
+
+
+async def query_activity_stream(
+    db: AsyncSession,
+    org_id: uuid.UUID,
+    *,
+    project_id: uuid.UUID | None = None,
+    actor_id: uuid.UUID | None = None,
+    verb: str | None = None,
+    object_type: str | None = None,
+    object_id: uuid.UUID | None = None,
+    since=None,
+    until=None,
+    after_seq: int | None = None,
+    limit: int = 50,
+) -> tuple[list[ActivityEvent], int | None]:
+    """L1 BE-5: activity_events를 org-scope + 필터로 조회(activity_seq ASC cursor).
+
+    반환: (rows, next_after_seq). next_after_seq는 페이지가 가득 찼을 때만 마지막 seq —
+    None이면 더 없음. org_id는 항상 강제(AC①). after_seq는 strict(> after_seq) cursor라
+    중복 없이 다음 페이지를 잇는다.
+    """
+    query = select(ActivityEvent).where(ActivityEvent.org_id == org_id)
+    if project_id is not None:
+        query = query.where(ActivityEvent.project_id == project_id)
+    if actor_id is not None:
+        query = query.where(ActivityEvent.actor_id == actor_id)
+    if verb is not None:
+        query = query.where(ActivityEvent.verb == verb)
+    if object_type is not None:
+        query = query.where(ActivityEvent.object_type == object_type)
+    if object_id is not None:
+        query = query.where(ActivityEvent.object_id == object_id)
+    if since is not None:
+        query = query.where(ActivityEvent.occurred_at >= since)
+    if until is not None:
+        query = query.where(ActivityEvent.occurred_at <= until)
+    if after_seq is not None:
+        query = query.where(ActivityEvent.activity_seq > after_seq)
+
+    query = query.order_by(ActivityEvent.activity_seq.asc()).limit(limit)
+    rows = list((await db.execute(query)).scalars().all())
+    next_after_seq = rows[-1].activity_seq if len(rows) == limit else None
+    return rows, next_after_seq
+
+
+async def poll_activities_after_seq(
+    db: AsyncSession,
+    after_seq: int,
+    *,
+    limit: int = 100,
+    org_id: uuid.UUID | None = None,
+) -> tuple[list[ActivityEvent], int | None]:
+    """L1 BE-6 (L2 trigger 소비 helper): activity_seq cursor로 신규 활동을 안정 poll한다.
+
+    activity_seq는 단조 증가(BIGINT Identity)라 after_seq 초과분을 ASC로 반환하면 누락·중복
+    없이 이어 읽는다. org_id 생략 시 전 org(시스템 트리거 워커)·지정 시 해당 org만. 동일 fan-out은
+    canonical 1행이라 같은 활동이 두 번 trigger되지 않는다(AC③). 반환: (rows, next_after_seq) —
+    full page일 때만 next_after_seq, 아니면 None.
+    """
+    query = select(ActivityEvent).where(ActivityEvent.activity_seq > after_seq)
+    if org_id is not None:
+        query = query.where(ActivityEvent.org_id == org_id)
+    query = query.order_by(ActivityEvent.activity_seq.asc()).limit(limit)
+    rows = list((await db.execute(query)).scalars().all())
+    next_after_seq = rows[-1].activity_seq if len(rows) == limit else None
+    return rows, next_after_seq
+
+
+async def latest_activity_for_object(
+    db: AsyncSession,
+    org_id: uuid.UUID,
+    object_type: str,
+    object_id: uuid.UUID,
+) -> ActivityEvent | None:
+    """L1 BE-6 (L4 anchoring 소비 helper): object 기준 가장 최근 canonical 활동 1행을 조회한다.
+
+    가설/회고 등 L4 anchoring이 '이 object의 최신 활동'을 anchor로 잡을 때 쓴다. activity_seq
+    DESC로 최신 1행(동일 fan-out은 canonical 1행이라 중복 없음). 매칭 없으면 None.
+    """
+    query = (
+        select(ActivityEvent)
+        .where(
+            ActivityEvent.org_id == org_id,
+            ActivityEvent.object_type == object_type,
+            ActivityEvent.object_id == object_id,
+        )
+        .order_by(ActivityEvent.activity_seq.desc())
+        .limit(1)
+    )
+    return (await db.execute(query)).scalars().first()
+
+
+# ── H1-S1: L1 evidence read helper (verdict gate 소비·블루프린트 H1 §S1) ──────────
+#
+# 소스=activity_events(L1 canonical evidence·"evidence=L1 활동그래프" SSOT). activity_logs
+# (레거시 audit)는 evidence 레이어가 아니다. object_type/object_id로 스코프해 verdict gate가
+# "이 object에서 무슨 작업 활동이 있었나"를 증거로 읽는다. DB 신설 0(activity_events 재사용).
+# L2의 poll_activities_after_seq/latest_activity_for_object(전 org seq cursor)와는 다른 용도라
+# 별도 이름으로 신설한다(동명 재정의 시 L2 파손).
+
+
+async def _resolve_actor_types(
+    db: AsyncSession, actor_ids: set[uuid.UUID | None]
+) -> dict[uuid.UUID, str]:
+    """actor_id → actor_type(human|agent) 맵을 배치 1쿼리로 해소(N+1 회피).
+
+    activity_events엔 actor_type 컬럼이 없어(actor_id만) 멤버 해소로 보강한다. 해소 실패한
+    actor_id는 맵에서 빠진다(→ evidence dict의 actor_type=None).
+    """
+    ids = {a for a in actor_ids if a is not None}
+    if not ids:
+        return {}
+    from app.services.member_resolver import lookup_members_by_ids
+
+    members = await lookup_members_by_ids(ids, db)
+    return {aid: m.type for aid, m in members.items()}
+
+
+def _evidence_dict(row: ActivityEvent, actor_type: str | None) -> dict:
+    """ActivityEvent 1행 → 정규화 evidence dict(AC① 반환 계약)."""
+    return {
+        "activity_id": row.activity_id,
+        "activity_seq": row.activity_seq,
+        "actor_id": row.actor_id,
+        "actor_type": actor_type,
+        "verb": row.verb,
+        "object_type": row.object_type,
+        "object_id": row.object_id,
+        "timestamp": row.occurred_at,
+        "context": row.payload or {},
+    }
+
+
+async def poll_object_evidence(
+    db: AsyncSession,
+    org_id: uuid.UUID,
+    object_type: str,
+    object_id: uuid.UUID,
+    *,
+    after_seq: int | None = None,
+    after_time: datetime | None = None,
+    verbs: list[str] | None = None,
+    limit: int = 200,
+) -> list[dict]:
+    """object의 L1 활동 증거를 시간순(ASC)으로 반환한다(verdict gate 소비·AC①).
+
+    스코프=org_id+object_type+object_id. 증분=after_seq(activity_seq) 또는 after_time(occurred_at).
+    verbs 지정 시 해당 활동종류만. 정렬=occurred_at ASC(동시각은 activity_seq ASC tiebreak). 각 행은
+    {activity_id, activity_seq, actor_id, actor_type, verb, object_type, object_id, timestamp(=occurred_at),
+    context(=payload)}. actor_type은 배치 멤버해소.
+
+    **증거 없으면 빈 리스트 — 빈=빈이며 'pass'로 해석 금지(AC③). 게이트는 빈을 증거부재로 다뤄야 한다.**
+    """
+    query = select(ActivityEvent).where(
+        ActivityEvent.org_id == org_id,
+        ActivityEvent.object_type == object_type,
+        ActivityEvent.object_id == object_id,
+    )
+    if after_seq is not None:
+        query = query.where(ActivityEvent.activity_seq > after_seq)
+    if after_time is not None:
+        query = query.where(ActivityEvent.occurred_at > after_time)
+    if verbs:
+        query = query.where(ActivityEvent.verb.in_(verbs))
+    query = query.order_by(
+        ActivityEvent.occurred_at.asc(), ActivityEvent.activity_seq.asc()
+    ).limit(limit)
+    rows = list((await db.execute(query)).scalars().all())
+    if not rows:
+        return []
+    actor_types = await _resolve_actor_types(db, {r.actor_id for r in rows})
+    return [_evidence_dict(r, actor_types.get(r.actor_id)) for r in rows]
+
+
+async def latest_object_evidence(
+    db: AsyncSession,
+    org_id: uuid.UUID,
+    object_type: str,
+    object_id: uuid.UUID,
+    *,
+    verbs: list[str] | None = None,
+) -> dict | None:
+    """object의 가장 최근 L1 활동 증거 1건을 반환한다(activity_seq DESC). 없으면 None(AC③).
+
+    verbs 지정 시 해당 활동종류 중 최신. 반환 shape는 poll_object_evidence 항목과 동일.
+    """
+    query = select(ActivityEvent).where(
+        ActivityEvent.org_id == org_id,
+        ActivityEvent.object_type == object_type,
+        ActivityEvent.object_id == object_id,
+    )
+    if verbs:
+        query = query.where(ActivityEvent.verb.in_(verbs))
+    query = query.order_by(ActivityEvent.activity_seq.desc()).limit(1)
+    row = (await db.execute(query)).scalars().first()
+    if row is None:
+        return None
+    actor_types = await _resolve_actor_types(db, {row.actor_id})
+    return _evidence_dict(row, actor_types.get(row.actor_id))

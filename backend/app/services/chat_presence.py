@@ -18,7 +18,7 @@ online")가 있어 ~180s 로 상향(env `CHAT_WORKING_TTL_SEC`). reply→즉시 
 
 ⚠️ 멀티인스턴스 한계: presence.py 와 동일하게 인스턴스-로컬 in-memory. 같은 인스턴스가 emit·GET
 을 처리해야 보인다. 크로스-인스턴스 실시간(Cloud Run 다인스턴스)은 pubsub/SSE 브로드캐스트가
-필요하며 FE 전송 설계(유나/미르코)와 함께 후속(P3)으로 다룬다.
+필요하며 FE 전송 설계와 함께 후속(P3)으로 다룬다.
 """
 from __future__ import annotations
 

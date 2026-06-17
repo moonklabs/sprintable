@@ -69,11 +69,14 @@ def _mock_role(key="implementation", label="구현"):
     return r
 
 
-def _mock_verdict(p_id, result="pass", rounds=0):
+def _mock_verdict(p_id, result="pass", rounds=0, source="hypothesis_outcome_execution"):
+    # HO-S5: 기본 신뢰 집계 source는 가설 outcome(hypothesis_outcome_*). clean_pass×SP 수학은
+    # source 무관이므로 기본을 outcome source로 둬 새 기본 경로에서 동일 검증.
     v = MagicMock()
     v.participation_id = p_id
     v.result = result
     v.rounds = rounds
+    v.source = source
     v.recorded_at = datetime.now(timezone.utc)
     return v
 
@@ -318,3 +321,94 @@ async def test_get_trust_scores_endpoint_200():
         assert "window_days" in body
     finally:
         app.dependency_overrides.clear()
+
+
+# ── HO-S5: trust source 전환(가설 outcome primary) ─────────────────────────────
+
+def _session_with(rows, verdicts):
+    """1차 호출=participation 조인 rows, 2차=verdict scalars."""
+    session = AsyncMock()
+    state = {"n": 0}
+
+    async def mock_execute(stmt, *args, **kwargs):
+        state["n"] += 1
+        result = MagicMock()
+        if state["n"] == 1:
+            result.all.return_value = rows
+        else:
+            result.scalars.return_value.all.return_value = verdicts
+        return result
+
+    session.execute = mock_execute
+    return session
+
+
+@pytest.mark.anyio
+async def test_ho_s5_ci_only_yields_no_trust():
+    """AC①④: source=ci만(outcome 0) → trust None=cold-start. breakdown엔 ci 관측."""
+    p, s, r = _mock_participation(), _mock_story(sp=5), _mock_role()
+    verdicts = [_mock_verdict(p.id, result="pass", rounds=0, source="ci") for _ in range(10)]
+    session = _session_with([(p, s, r)], verdicts)
+
+    res = await compute_member_trust_scores(session, ORG_ID, MEMBER_ID)
+
+    score = res["scores"][0]
+    assert score["total_verdicts"] == 0          # ci는 신뢰 미환산.
+    assert score["clean_pass_rate"] is None       # cold-start(표본부족).
+    assert score["hit_rate"] is None and score["resolved"] == 0
+    assert res["hypothesis_hit_rate"] is None and res["resolved"] == 0
+    assert res["primary_source"] == "hypothesis_outcome"
+    assert res["source_breakdown"] == {"ci": 10}   # 제외돼도 관측(AC④ 진단).
+
+
+@pytest.mark.anyio
+async def test_ho_s5_outcome_pass_fail_hit_rate():
+    """AC②: outcome pass/fail만 hit_rate(2 hit / 3 resolved)."""
+    p, s, r = _mock_participation(), _mock_story(sp=4), _mock_role(key="hypothesis_owner", label="가설책임")
+    r.key = "hypothesis_owner"
+    verdicts = [
+        _mock_verdict(p.id, result="pass", source="hypothesis_outcome_bet"),
+        _mock_verdict(p.id, result="pass", source="hypothesis_outcome_bet"),
+        _mock_verdict(p.id, result="fail", source="hypothesis_outcome_bet"),
+        _mock_verdict(p.id, result=None, source="hypothesis_outcome_bet"),  # pending(보류).
+    ]
+    session = _session_with([(p, s, r)], verdicts)
+
+    res = await compute_member_trust_scores(session, ORG_ID, MEMBER_ID)
+
+    assert res["hit"] == 2 and res["resolved"] == 3 and res["pending"] == 1
+    assert res["hypothesis_hit_rate"] == round(2 / 3, 4)
+    score = res["scores"][0]
+    assert score["hit_rate"] == round(2 / 3, 4) and score["pending"] == 1
+
+
+@pytest.mark.anyio
+async def test_ho_s5_include_legacy_restores_ci():
+    """legacy opt-in: include_legacy=True면 ci도 신뢰 합산(구 동작 보존)."""
+    p, s, r = _mock_participation(), _mock_story(sp=5), _mock_role()
+    verdicts = [_mock_verdict(p.id, result="pass", rounds=0, source="ci") for _ in range(4)]
+    session = _session_with([(p, s, r)], verdicts)
+
+    res = await compute_member_trust_scores(session, ORG_ID, MEMBER_ID, include_legacy=True)
+
+    score = res["scores"][0]
+    assert score["total_verdicts"] == 4 and score["clean_pass_rate"] == 1.0
+    assert res["primary_source"] == "legacy_all"
+
+
+@pytest.mark.anyio
+async def test_ho_s5_mixed_only_outcome_counts():
+    """혼합(ci+outcome): 신뢰는 outcome만·breakdown은 둘 다."""
+    p, s, r = _mock_participation(), _mock_story(sp=3), _mock_role()
+    verdicts = [
+        _mock_verdict(p.id, result="pass", source="hypothesis_outcome_execution"),
+        _mock_verdict(p.id, result="fail", source="ci"),
+        _mock_verdict(p.id, result="pass", source="qa"),
+    ]
+    session = _session_with([(p, s, r)], verdicts)
+
+    res = await compute_member_trust_scores(session, ORG_ID, MEMBER_ID)
+
+    assert res["scores"][0]["total_verdicts"] == 1   # outcome 1건만.
+    assert res["hit"] == 1 and res["resolved"] == 1
+    assert res["source_breakdown"] == {"hypothesis_outcome_execution": 1, "ci": 1, "qa": 1}

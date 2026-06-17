@@ -3,6 +3,10 @@ import { redirect } from 'next/navigation';
 import { FileText } from 'lucide-react';
 import { getServerSession } from '@/lib/db/server';
 import { fastapiCall } from '@sprintable/storage-api';
+import { DocsService } from '@/services/docs';
+import { SprintService } from '@/services/sprint';
+import { createDocRepository, createSprintRepository } from '@/lib/storage/factory';
+import { buildCursorPageMeta } from '@/lib/pagination';
 import { getLocale, getTranslations } from 'next-intl/server';
 import { SectionCard, SectionCardBody, SectionCardHeader } from '@/components/ui/section-card';
 import { EmptyState } from '@/components/ui/empty-state';
@@ -71,8 +75,39 @@ export default async function DashboardPage() {
     { query: { member_id: teamMemberId, project_id: projectId } },
   ).catch(() => null);
 
-  const activeSprints: Array<{ id: string; title: string; status: string; start_date: string; end_date: string }> = [];
-  const docs: Array<{ id: string; title: string; slug: string }> = [];
+  // 활성 스프린트: /api/sprints route와 동일 데이터 경로(SprintService.list, status='active') 미러.
+  const activeSprints: Array<{ id: string; title: string; status: string; start_date: string; end_date: string }> = await (async () => {
+    try {
+      const repo = await createSprintRepository();
+      const service = new SprintService(repo, undefined);
+      const rows = await service.list({ project_id: projectId, status: 'active' });
+      return (rows ?? []).map((s) => ({
+        id: s.id,
+        title: s.title,
+        status: s.status,
+        start_date: s.start_date,
+        end_date: s.end_date,
+      }));
+    } catch {
+      return [];
+    }
+  })();
+  // '최근 문서' 위젯: /api/docs route와 동일 데이터 경로(DocsService.list→updated_at 최근순) 미러, limit 5.
+  const docs: Array<{ id: string; title: string; slug: string }> = await (async () => {
+    try {
+      const repo = await createDocRepository();
+      const service = new DocsService(repo, undefined);
+      const rows = await service.list(projectId, { limit: 5 });
+      const { page } = buildCursorPageMeta(
+        rows as Array<{ id: string; title: string; slug: string; updated_at: string }>,
+        5,
+        'updated_at',
+      );
+      return page.map((d) => ({ id: d.id, title: d.title, slug: d.slug }));
+    } catch {
+      return [];
+    }
+  })();
   const assignedStories = dashboardData?.my_stories ?? [];
 
   const activeSprint = activeSprints[0] ?? null;

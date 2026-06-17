@@ -110,9 +110,105 @@ async def transition_gate(
     gate.resolved_at = datetime.now(timezone.utc)
     if new_status == "rejected" and note:
         gate.resolution_note = note
+
+    # H1-S7: 사람 게이트 해소(approve/reject)를 verdict로 기록 — trust로 환류.
+    await _record_gate_review_verdict(session, org_id, gate, new_status, resolver_id)
+
+    # HO-S7: cold-start(outcome 표본 부족)에서 사람의 keep/kill 결정을 seed로 기록(trust 본점수
+    # 미포함·outcome 해소 후 calibration). merge·cold-start가 아니면 no-op.
+    from app.services.cold_start_seed import record_cold_start_seed  # 순환 회피 lazy import.
+
+    await record_cold_start_seed(session, org_id, gate, new_status, resolver_id)
+
+    # H1-FIX-2: merge 게이트 approve → work item 스토리를 done으로 진행(_preflight 재평가 우회).
+    # S7은 verdict만 기록하고 →done 진행을 안 박아, 사람이 approve해도 일이 done에 도달 못 하고
+    # done 재시도 시 재평가→ask_human 재발로 막히던 dogfood 갭을 닫는다.
+    await _advance_story_on_merge_approve(session, gate, new_status)
+
     await session.flush()
     await session.refresh(gate)
     return gate
+
+
+async def _advance_story_on_merge_approve(session: AsyncSession, gate: Gate, new_status: str) -> None:
+    """merge 게이트 approve 시 work_item 스토리를 done으로 진행(H1-FIX-2).
+
+    사람이 이미 approve했으므로 done PATCH의 _preflight 재평가를 우회해 직접 전이한다. reject나
+    비-merge 게이트는 진행하지 않는다(reject→in-review 유지). 이미 done이면 no-op(멱등).
+    """
+    if gate.gate_type != "merge" or gate.work_item_type != "story" or new_status != "approved":
+        return
+    from app.models.pm import Story  # 순환 회피 lazy import.
+
+    story = await session.get(Story, gate.work_item_id)
+    if story is not None and story.status != "done":
+        old_status = story.status
+        story.status = "done"
+        await session.flush()
+        # 41a6e294: gate-driven done도 정상 status-change side-effects를 발화 — events(→L1
+        # activity_events 캡처=verdict 증거원)·webhook·L2 trigger·notification·activity. status만
+        # 직접 set하면 활동그래프 누락(게이트가 만든 done이 게이트 증거에 안 잡히는 자기모순).
+        # actor=resolver(승인 휴먼·#1504로 휴먼 보장). 정상 board 경로와 공유 helper(parity).
+        from app.services.story_status_events import emit_story_status_changed
+
+        await emit_story_status_changed(
+            session, gate.org_id, story, old_status,
+            actor_id=gate.resolver_id, actor_type="human",
+        )
+
+
+# gate_type → verdict source (qa→qa·merge→merge·deploy→design·pr_review→pr).
+_GATE_TYPE_TO_VERDICT_SOURCE: dict[str, str] = {
+    "qa": "qa",
+    "deploy": "design",
+    "merge": "merge",
+    "pr_review": "pr",
+}
+# 이 시간(초) 이하 approve는 rubber stamp(고무도장) 후보로 관측 표시.
+_RUBBER_STAMP_SECONDS = 30
+
+
+async def _record_gate_review_verdict(
+    session: AsyncSession,
+    org_id: uuid.UUID,
+    gate: Gate,
+    new_status: str,
+    resolver_id: uuid.UUID | None,
+) -> None:
+    """사람 게이트 해소를 verdict로 환류(H1-S7).
+
+    approve→result=pass / reject→result=fail. resolver_id 없으면 skip(AC③·시스템 auto-transition은
+    resolver 없으니 자동 제외 = 루프 가드 겸용). verdict는 work item의 implementation participation에
+    gate_type-매핑 source로 기록(uq(participation,source) upsert 멱등). 30초 이하 approve는
+    neutral_facts.rubber_stamp_candidate=true로 관측(AC⑤).
+    """
+    if new_status not in ("approved", "rejected") or resolver_id is None:
+        return
+    source = _GATE_TYPE_TO_VERDICT_SOURCE.get(gate.gate_type)
+    if source is None or gate.work_item_type != "story":
+        return
+
+    # lazy import — verdict_capture/recorder가 gate_service를 import하므로 순환 회피.
+    from app.services.verdict_capture import resolve_implementation_participation
+    from app.services.verdict_recorder import record_verdict
+
+    participation = await resolve_implementation_participation(session, org_id, gate.work_item_id)
+    if participation is None:
+        return  # participation 없으면 거짓기록 금지(skip).
+
+    result = "pass" if new_status == "approved" else "fail"  # AC①②
+    await record_verdict(session, org_id, participation.id, source, result)
+
+    # AC⑤: 30초 이하 approve = rubber stamp 후보 관측(neutral_facts 추가·판정 아님).
+    if (
+        new_status == "approved"
+        and gate.created_at is not None
+        and gate.resolved_at is not None
+        and (gate.resolved_at - gate.created_at).total_seconds() <= _RUBBER_STAMP_SECONDS
+    ):
+        facts = dict(gate.neutral_facts or {})
+        facts["rubber_stamp_candidate"] = True
+        gate.neutral_facts = facts
 
 
 async def resolve_gate_from_verdict(

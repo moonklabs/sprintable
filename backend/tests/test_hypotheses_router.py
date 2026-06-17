@@ -13,6 +13,7 @@ import pytest
 
 from app.routers import hypotheses as r
 from app.schemas.hypothesis import HypothesisDraftRequest, HypothesisResponse
+from app.services import hypothesis as svc
 from app.services.hypothesis import HypothesisServiceError
 from app.services.member_resolver import ResolvedMember
 
@@ -92,29 +93,27 @@ def _session_returning(rows):
     return s
 
 
+# 54a8bd8a: cross-project 가드가 라우터 → service로 이동. 가드 단위 검증은 service 함수 대상.
 async def test_link_same_project_ok():
     eid = uuid.uuid4()
     s = _session_returning([(eid, PROJECT_ID)])
-    await r._assert_targets_same_project(s, PROJECT_ID, [eid], [])  # no raise
+    await svc._assert_targets_same_project(s, PROJECT_ID, [eid], [])  # no raise
 
 
 async def test_link_cross_project_forbidden():
-    from fastapi import HTTPException
     eid = uuid.uuid4()
     s = _session_returning([(eid, uuid.uuid4())])  # 다른 project
-    with pytest.raises(HTTPException) as ei:
-        await r._assert_targets_same_project(s, PROJECT_ID, [eid], [])
-    assert ei.value.status_code == 403
-    assert ei.value.detail["code"] == "CROSS_PROJECT_LINK_FORBIDDEN"
+    with pytest.raises(HypothesisServiceError) as ei:
+        await svc._assert_targets_same_project(s, PROJECT_ID, [eid], [])
+    assert ei.value.code == "CROSS_PROJECT_LINK_FORBIDDEN"
 
 
 async def test_link_missing_target_forbidden():
-    from fastapi import HTTPException
     eid = uuid.uuid4()
     s = _session_returning([])  # 대상 epic 없음(len mismatch)
-    with pytest.raises(HTTPException) as ei:
-        await r._assert_targets_same_project(s, PROJECT_ID, [eid], [])
-    assert ei.value.status_code == 403
+    with pytest.raises(HypothesisServiceError) as ei:
+        await svc._assert_targets_same_project(s, PROJECT_ID, [eid], [])
+    assert ei.value.code == "CROSS_PROJECT_LINK_FORBIDDEN"
 
 
 # ── ⓒ draft (§3.9) ────────────────────────────────────────────────────────────
@@ -135,8 +134,9 @@ async def test_draft_template_no_persist():
 
 async def test_draft_persist_creates_proposed_row():
     from app.services import hypothesis as service
+    story_id = uuid.uuid4()
     payload = HypothesisDraftRequest(
-        project_id=PROJECT_ID, source_type="story", source_id=uuid.uuid4(), persist=True,
+        project_id=PROJECT_ID, source_type="story", source_id=story_id, persist=True,
     )
     created = _hyp_response()  # create_hypothesis는 실제로 HypothesisResponse를 반환
     with patch.object(service, "create_hypothesis", AsyncMock(return_value=created)) as mock_create:
@@ -144,7 +144,44 @@ async def test_draft_persist_creates_proposed_row():
     mock_create.assert_awaited_once()
     created_payload = mock_create.call_args.args[3]
     assert created_payload.status == "proposed"
+    # S10 reopen ⓐ: source_type='story' → story_id로 실 링크(빈 list 회귀 방지).
+    assert created_payload.story_ids == [story_id]
+    assert created_payload.epic_ids == []
     assert out.hypothesis is not None and out.hypothesis.status == "proposed"
+
+
+async def test_draft_persist_links_epic_source():
+    """S10 reopen ⓐ: source_type='epic'이면 epic_ids=[source_id]로 넘겨 실 링크 생성.
+
+    이전엔 source_type/source_id 필드만 저장하고 epic_ids=[]라 add_epic_links([])→
+    에픽 상세 가설 리스트(hypothesis_epic_links 조인)에 안 떴다.
+    """
+    from app.services import hypothesis as service
+    epic_id = uuid.uuid4()
+    payload = HypothesisDraftRequest(
+        project_id=PROJECT_ID, source_type="epic", source_id=epic_id,
+        context={"title": "온보딩 개선"}, persist=True,
+    )
+    created = _hyp_response()
+    with patch.object(service, "create_hypothesis", AsyncMock(return_value=created)) as mock_create:
+        await service.draft_hypothesis(MagicMock(), ORG_ID, _member(OWNER_ID), payload)
+    created_payload = mock_create.call_args.args[3]
+    assert created_payload.epic_ids == [epic_id]
+    assert created_payload.story_ids == []
+
+
+async def test_draft_persist_non_linkable_source_no_links():
+    """source_type='conversation'/'dispatch'는 링크 테이블이 없어 epic_ids/story_ids 비움."""
+    from app.services import hypothesis as service
+    payload = HypothesisDraftRequest(
+        project_id=PROJECT_ID, source_type="conversation", source_id=uuid.uuid4(), persist=True,
+    )
+    created = _hyp_response()
+    with patch.object(service, "create_hypothesis", AsyncMock(return_value=created)) as mock_create:
+        await service.draft_hypothesis(MagicMock(), ORG_ID, _member(OWNER_ID), payload)
+    created_payload = mock_create.call_args.args[3]
+    assert created_payload.epic_ids == []
+    assert created_payload.story_ids == []
 
 
 # ── ⓒ 엔드포인트 와이어링 + dict-detail 계약 ──────────────────────────────────

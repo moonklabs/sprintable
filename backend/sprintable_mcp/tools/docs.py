@@ -64,9 +64,21 @@ async def list_docs(args: ListDocsInput) -> list[TextContent]:
 
 
 async def get_doc(args: GetDocInput) -> list[TextContent]:
-    """slug로 문서 단건 조회."""
+    """slug로 문서 단건 조회 — 본문(content) 포함.
+
+    8a8e881a: list 엔드포인트(/api/v2/docs?slug=)는 DocSummary(메타·snippet만·content 미포함)를
+    반환해 에이전트가 서로의 doc 본문을 못 읽었다. slug→id 해소 후 GET /{id}(DocResponse·content
+    보유)를 surface한다. 메타데이터(id·title·slug·tags·updated_at)는 DocResponse에 그대로 있어
+    기존 소비자 무영향(content 필드만 추가).
+    """
     try:
-        return ok(await client.get("/api/v2/docs", params={"project_id": client.project_id, "slug": args.slug}))
+        summaries = await client.get(
+            "/api/v2/docs", params={"project_id": client.project_id, "slug": args.slug}
+        )
+        if not summaries:
+            return err(f"Doc not found: {args.slug}")
+        doc_id = summaries[0]["id"]
+        return ok(await client.get(f"/api/v2/docs/{doc_id}"))
     except Exception as exc:
         return err(str(exc))
 

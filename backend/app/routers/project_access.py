@@ -120,6 +120,12 @@ async def create_project_access(
             member_id=body.member_id,
             permission=body.permission,
         )
+        # S4 (org-level 멀티프로젝트): grant 확장 시 per-project 런타임(agent_project_profiles)도
+        # 멱등 생성 — 안 하면 뷰 branch3(런타임 NULL)로만 떠 presence/런타임 write 가 0행 무음 누락.
+        from app.services.agent_anchor_sync import ensure_agent_project_profile
+        await ensure_agent_project_profile(
+            session, member_id=body.member_id, project_id=project_id
+        )
     else:
         existing = await session.execute(
             select(ProjectAccess).where(
@@ -164,6 +170,22 @@ async def delete_project_access(
     record = result.scalar_one_or_none()
     if record is None:
         raise HTTPException(status_code=404, detail="Access record not found")
+
+    # S4: 에이전트 grant 회수 시 per-project 런타임 행(agent_project_profiles)도 제거 — 안 하면
+    # team_members 뷰 branch2(profile join)가 회수된 에이전트를 계속 노출(grant↔뷰 불일치·한쪽만
+    # 전환 트랩). 에이전트 grant = org_member_id NULL + member_id set. 휴먼이면 매칭 profile 0행이라
+    # 무해하지만 guard 로 의도 명시.
+    if record.org_member_id is None and record.member_id is not None:
+        from sqlalchemy import delete as sa_delete
+
+        from app.models.member import AgentProjectProfile
+        await session.execute(
+            sa_delete(AgentProjectProfile.__table__).where(
+                AgentProjectProfile.__table__.c.member_id == record.member_id,
+                AgentProjectProfile.__table__.c.project_id == project_id,
+            )
+        )
+
     await session.delete(record)
     await session.commit()
     return {"ok": True}

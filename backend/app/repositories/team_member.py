@@ -96,6 +96,11 @@ class TeamMemberRepository(BaseRepository[TeamMember]):
         m_set = {k: v for k, v in data.items() if k in _MEMBERS_FIELDS}
         a_set = {k: v for k, v in data.items() if k in _ACCESS_FIELDS}
         p_set = {k: v for k, v in data.items() if k in _PROFILE_FIELDS}
+        # E-MEMBER-POLICY S1: project_access.role 은 enum(owner/admin/member)만 — PATCH 로 비-enum
+        # (예: 레거시 'manager')이 들어오면 0122 CHECK 위반(500) → clamp 로 정규화.
+        if "role" in a_set:
+            from app.services.project_auth import clamp_project_role
+            a_set["role"] = clamp_project_role(a_set["role"])
         if m_set:
             await self.session.execute(
                 sa_update(Member)

@@ -18,7 +18,15 @@ from app.routers.events import publish_event
 from app.services.event_seq import assign_recipient_seq
 from app.schemas.story import StoryCreate, StoryResponse, StoryStatusUpdate, StoryUpdate
 from app.services.member_resolver import canonicalize_member_id
+from app.services.merge_verdict_gate import (
+    AUTO_MERGE,
+    evaluate_merge_gate,
+    merge_gate_active,
+    merge_gate_advisory,
+)
+from app.services.verdict_capture import resolve_implementation_participation
 from app.services.notification_dispatch import dispatch_notification
+from app.services.story_status_events import emit_story_status_changed
 from app.services.webhook_dispatch import fire_webhooks
 from app.services.workflow_pipeline import process_event
 from app.services.rule_evaluator import EventContext
@@ -130,20 +138,60 @@ async def _attach_assignee_ids(
 async def _upsert_assignee_participation(
     session: AsyncSession, org_id: uuid.UUID, story_id: uuid.UUID, assignee_id: uuid.UUID
 ) -> None:
-    """assignee 설정 시 implementation(default) 역할 participation 자동 upsert (멱등)."""
-    from app.repositories.participation import ParticipationRepository, ParticipationRoleRepository
-    role_repo = ParticipationRoleRepository(session, org_id)
-    default_role = await role_repo.get_default()
-    if default_role is None:
+    """assignee 설정 시 implementation(default) 역할 participation 자동 upsert (멱등).
+
+    3414b6d7: 로직은 공유 helper로 추출 — claim 경로(team_members)와 동일 attribution 진입점.
+    """
+    from app.services.participation_helpers import ensure_implementation_participation
+
+    await ensure_implementation_participation(session, org_id, story_id, assignee_id)
+
+
+async def _preflight_merge_gate(
+    db: AsyncSession, org_id: uuid.UUID, story, new_status: str | None
+) -> None:
+    """H1-S5 + fc06fa8d(④): board PATCH로 →done 전이 시 merge verdict gate preflight.
+
+    게이트 active(`merge_gate_active`·flag+allowlist)이고 **impl participation(=실작업) 보유**
+    스토리의 →done 전이일 때 동작 — auto_merge가 아니면 409로 차단(status 유지).
+
+    fc06fa8d: in-review→done뿐 아니라 **출발 status 무관 모든 →done**을 게이트(rfd/in-progress→done
+    우회 박멸·라이브 coverage 0.0 실측). 단 participation 없는 trivial todo→done은 skip(마찰 0).
+    게이트 목적(머지=코드작업 검증)과 정렬. 플래그 off면 즉시 반환(기존 PATCH 무변경). board PATCH엔
+    PR/CI 컨텍스트 없으므로(ci_result=None) 증거 없는 done은 보류된다.
+    """
+    if new_status != "done" or story is None or getattr(story, "status", None) == "done":
         return
-    p_repo = ParticipationRepository(session, org_id)
-    if not await p_repo.exists(story_id, assignee_id, default_role.id):
-        await p_repo.create(story_id=story_id, member_id=assignee_id, role_id=default_role.id)
+    if not merge_gate_active(org_id):
+        return
+    # ④: impl participation(실작업) 보유 스토리만 게이트. 없으면 trivial → skip(마찰 0).
+    participation = await resolve_implementation_participation(db, org_id, story.id)
+    if participation is None:
+        return
+    decision = await evaluate_merge_gate(
+        db, org_id, story.id, pr_number=0, repo="", ci_result=None, pr_result=None
+    )
+    if decision.decision != AUTO_MERGE:
+        await db.commit()  # gate audit 보존(get_db는 예외 시 rollback).
+        # advisory(B): eval/gate row/metrics는 이미 기록됨 — 차단만 면제하고 done 통과(관측만).
+        if merge_gate_advisory():
+            return
+        raise HTTPException(
+            status_code=409,
+            detail={
+                "code": "MERGE_GATE_PENDING",
+                "message": f"done 전이는 merge 게이트 통과 필요: {decision.reason}",
+                "decision": decision.decision,
+                "gate_id": str(decision.gate_id) if decision.gate_id else None,
+                "requires_human": True,
+            },
+        )
 
 
 @router.post("", response_model=StoryResponse, status_code=201)
 async def create_story(
     body: StoryCreate,
+    background_tasks: BackgroundTasks,
     session: AsyncSession = Depends(get_db),
     auth: AuthContext = Depends(get_current_user),
     org_id: uuid.UUID = Depends(get_verified_org_id),
@@ -191,6 +239,13 @@ async def create_story(
     if primary_assignee:
         await _upsert_assignee_participation(session, org_id, story.id, primary_assignee)
     story.assignee_ids = saved_ids or ([story.assignee_id] if story.assignee_id else [])
+    # 활동로그: story 생성 이벤트 기록 (생성류 미기록 갭 — 피드 정상화)
+    from app.services.activity_log import record_created_activity
+    await record_created_activity(
+        background_tasks, auth=auth, org_id=org_id, db=session,
+        entity_type="story", entity_id=story.id, project_id=story.project_id,
+        title=story.title,
+    )
     return StoryResponse.model_validate(story)
 
 
@@ -273,10 +328,15 @@ async def update_story(
     if assignee_ids_in is not None and "assignee_id" not in data:
         data["assignee_id"] = assignee_ids_in[0] if assignee_ids_in else None
     old_assignee_id: uuid.UUID | None = None
+    story_before = None
     if "assignee_id" in data:
         story_before = await repo.get(id)
         if story_before:
             old_assignee_id = story_before.assignee_id
+    # H1-S5: PATCH /{id} 로 status=done 전이 시도도 board 경로와 동일하게 preflight 게이트(AC②).
+    if data.get("status") == "done":
+        gate_story = story_before or await repo.get(id)
+        await _preflight_merge_gate(db, repo.org_id, gate_story, "done")
     story = await repo.update(id, **data)
     if story is None:
         raise HTTPException(status_code=404, detail="Story not found")
@@ -378,6 +438,9 @@ async def update_story(
                 db.add(sa_event)
                 await db.flush()
                 await assign_recipient_seq(db, sa_event)  # per-recipient dense seq
+                # L1 BE-3: story assignment → activity_events 1행(best-effort·commit 前·순서 불변).
+                from app.services.activity_stream import extract_activities_best_effort
+                await extract_activities_best_effort(db, [sa_event.id])
                 await db.commit()  # commit BEFORE wake — seq 확정, 이중전달 방지
                 if sa_event.recipient_seq is not None:
                     wake_agent(str(story.assignee_id), sa_event.recipient_seq)
@@ -482,6 +545,10 @@ async def update_story_status(
     if _violation.violated and _violation_level == "block":
         raise HTTPException(status_code=400, detail=_violation.reason or "워크플로우 위반으로 상태 전이가 거부되었습니다.")
 
+    # H1-S5: in-review→done 직접 PATCH는 merge verdict gate preflight(플래그 active 시·AC②).
+    # transition rule(check_transition)과 직교 — 전이 유효성 통과 후 증거 게이트를 얹는다(AC④).
+    await _preflight_merge_gate(db, repo.org_id, story_before, body.status)
+
     try:
         # AC2: violation_level 전달 → warn 모드이면 set_status hard block 우회
         story = await repo.set_status(id, body.status, violation_level=_violation_level)
@@ -526,73 +593,12 @@ async def update_story_status(
             except Exception:
                 pass
         epic_title: str | None = None
-        try:
-            epic_title = await _resolve_epic_title(db, story.epic_id)
-        except Exception:
-            pass
-        event_data = {
-            "story_id": str(id),
-            "story_title": story.title,
-            "story_priority": story.priority,
-            "epic_id": str(story.epic_id) if story.epic_id else None,
-            "epic_title": epic_title,
-            "status": story.status,
-            "new_status": story.status,
-            "old_status": old_status,
-            "project_id": str(story.project_id),
-            "org_id": str(org_id),
-            "actor_id": str(actor_id) if actor_id else None,
-            "actor_name": actor_name,
-            "actor_role": actor_role,
-            "source_agent_id": str(actor_id) if (actor_id and actor_type == "agent") else None,
-            "assignees": [str(story.assignee_id)] if story.assignee_id else [],
-            "timestamp": datetime.now(timezone.utc).isoformat(),
-        }
-        publish_event(str(org_id), "story.status_changed", event_data)
-        try:
-            await fire_webhooks(db, org_id, "story.status_changed", event_data)
-        except Exception:
-            pass
-        try:
-            await process_event(db, org_id, story.project_id, EventContext(
-                event_type="story.status_changed",
-                trigger_type_slug="status_changed",
-                actor_id=str(actor_id) if actor_id else None,
-                metadata=event_data,
-            ))
-        except Exception:
-            pass
-        # E-EVENTBUS P3 S9: story_status_changed → assignee + actor에게 알림
-        notify_ids: set[uuid.UUID] = set()
-        if story.assignee_id:
-            notify_ids.add(story.assignee_id)
-        if actor_id and actor_id != story.assignee_id:
-            notify_ids.add(actor_id)
-        if notify_ids:
-            await dispatch_notification(
-                db,
-                org_id=org_id,
-                event_type="story_status_changed",
-                target_member_ids=list(notify_ids),
-                title=f"스토리 상태 변경: {story.title} → {story.status}",
-                body=None,
-                reference_type="story",
-                reference_id=story.id,
-            )
-        if actor_id:
-            try:
-                db.add(StoryActivity(
-                    story_id=id,
-                    org_id=org_id,
-                    project_id=story.project_id,
-                    activity_type="status_changed",
-                    old_value=old_status,
-                    new_value=story.status,
-                    created_by=(await canonicalize_member_id(actor_id, db)),  # AC3-2d(1b) canonical
-                ))
-                await db.flush()
-            except Exception:
-                pass
+        # 41a6e294: status_changed side-effects(events→L1·webhook·L2·notif·activity)는 공유 helper로
+        # 발화 — gate-driven done(gate_service)과 동일 경로(parity·드리프트 0).
+        await emit_story_status_changed(
+            db, org_id, story, old_status,
+            actor_id=actor_id, actor_name=actor_name, actor_role=actor_role, actor_type=actor_type,
+        )
 
     # S-C2: story_updated — actor가 agent인 경우 기록 (AC2, AC6)
     if actor_id:

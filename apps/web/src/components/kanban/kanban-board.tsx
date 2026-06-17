@@ -5,7 +5,7 @@ import { useState, useEffect, useCallback, useRef } from 'react';
 import { useRouter, useSearchParams } from 'next/navigation';
 import { useTranslations } from 'next-intl';
 import { Check, ChevronDown, LayoutGrid, LayoutList, Search } from 'lucide-react';
-import { DndContext, DragEndEvent, PointerSensor, TouchSensor, useSensor, useSensors, DragOverlay } from '@dnd-kit/core';
+import { DndContext, DragEndEvent, PointerSensor, TouchSensor, useSensor, useSensors, DragOverlay, closestCenter } from '@dnd-kit/core';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import {
@@ -214,6 +214,13 @@ export function KanbanBoard({ projectId }: KanbanBoardProps) {
     return { stories, total, nextCursor };
   }, [projectId, selectedSprintId]);
 
+  // E-POLISH (story 23ea0e1d): columnTotals는 fetchData에서 단 1회 세팅되므로
+  // optimistic mutation이 setStories만 갱신하면 카운트 배지가 stale해진다.
+  // 컬럼 멤버십을 바꾸는 모든 경로에서 이 헬퍼로 per-status total을 lockstep 조정한다.
+  const adjustColumnTotal = useCallback((status: string, delta: number) => {
+    setColumnTotals((prev) => ({ ...prev, [status]: Math.max(0, (prev[status] ?? 0) + delta) }));
+  }, []);
+
   const fetchData = useCallback(async () => {
     setLoading(true);
     try {
@@ -373,6 +380,17 @@ export function KanbanBoard({ projectId }: KanbanBoardProps) {
     const params = new URLSearchParams(searchParams);
     params.delete('story');
     router.replace(params.toString() ? `?${params.toString()}` : window.location.pathname, { scroll: false });
+  }, [searchParams, router]);
+
+  // f1910a31: ?view=new → 백로그 인라인 컴포저 auto-open(client nav·풀로드 둘 다). nonce로 신호 전달해
+  // 반복 진입도 재오픈되게 한다. one-shot으로 ?view=new를 즉시 제거(뒤로가기/재렌더 재오픈 방지·URL 정리).
+  const [autoComposeNonce, setAutoComposeNonce] = useState(0);
+  useEffect(() => {
+    if (searchParams.get('view') !== 'new') return;
+    setAutoComposeNonce((n) => n + 1);
+    const params = new URLSearchParams(searchParams.toString());
+    params.delete('view');
+    router.replace(`/board${params.size > 0 ? `?${params.toString()}` : ''}`, { scroll: false });
   }, [searchParams, router]);
 
   // URL에서 스토리 ID 읽어서 자동으로 패널 열기
@@ -545,6 +563,11 @@ export function KanbanBoard({ projectId }: KanbanBoardProps) {
     setStories((prev) =>
       prev.map((s) => (s.id === storyId ? { ...s, status: newStatus, position: newPosition } : s)),
     );
+    // cross-column 이동만 카운트 변동 (same-column 재정렬은 무변경)
+    if (!isSameColumn) {
+      adjustColumnTotal(story.status, -1);
+      adjustColumnTotal(newStatus, +1);
+    }
 
     if (isSameColumn) {
       // 같은 컬럼 내 재정렬 — position만 PATCH (fire-and-forget)
@@ -564,10 +587,12 @@ export function KanbanBoard({ projectId }: KanbanBoardProps) {
         body: JSON.stringify({ items: [{ id: storyId, status: newStatus }] }),
       });
       if (!res.ok) {
-        // 롤백
+        // 롤백 (카운트도 원복)
         setStories((prev) =>
           prev.map((s) => (s.id === storyId ? { ...s, status: story.status, position: story.position } : s)),
         );
+        adjustColumnTotal(newStatus, -1);
+        adjustColumnTotal(story.status, +1);
         const errJson = await res.json().catch(() => null);
         const code = errJson?.error?.code;
         if (code === 'INVALID_TRANSITION') {
@@ -586,10 +611,12 @@ export function KanbanBoard({ projectId }: KanbanBoardProps) {
         body: JSON.stringify({ position: newPosition }),
       });
     } catch {
-      // 롤백
+      // 롤백 (카운트도 원복)
       setStories((prev) =>
         prev.map((s) => (s.id === storyId ? { ...s, status: story.status, position: story.position } : s)),
       );
+      adjustColumnTotal(newStatus, -1);
+      adjustColumnTotal(story.status, +1);
     }
   };
 
@@ -608,6 +635,8 @@ export function KanbanBoard({ projectId }: KanbanBoardProps) {
     setStories((prev) =>
       prev.map((s) => (s.id === storyId ? { ...s, status: newStatus } : s)),
     );
+    adjustColumnTotal(story.status, -1);
+    adjustColumnTotal(newStatus, +1);
 
     // API call
     try {
@@ -617,10 +646,12 @@ export function KanbanBoard({ projectId }: KanbanBoardProps) {
         body: JSON.stringify({ items: [{ id: storyId, status: newStatus }] }),
       });
       if (!res.ok) {
-        // Rollback
+        // Rollback (카운트도 원복)
         setStories((prev) =>
           prev.map((s) => (s.id === storyId ? { ...s, status: story.status } : s)),
         );
+        adjustColumnTotal(newStatus, -1);
+        adjustColumnTotal(story.status, +1);
         const errJson = await res.json().catch(() => null);
         const code = errJson?.error?.code;
         if (code === 'INVALID_TRANSITION') {
@@ -632,12 +663,14 @@ export function KanbanBoard({ projectId }: KanbanBoardProps) {
         }
       }
     } catch {
-      // Rollback
+      // Rollback (카운트도 원복)
       setStories((prev) =>
         prev.map((s) => (s.id === storyId ? { ...s, status: story.status } : s)),
       );
+      adjustColumnTotal(newStatus, -1);
+      adjustColumnTotal(story.status, +1);
     }
-  }, [stories, t]);
+  }, [stories, t, adjustColumnTotal]);
 
   const handleAssignStory = useCallback(async (storyId: string) => {
     // TODO: Implement proper member selection UI
@@ -649,8 +682,10 @@ export function KanbanBoard({ projectId }: KanbanBoardProps) {
   }, [stories, handleStoryClick]);
 
   const handleDeleteStory = useCallback(async (storyId: string) => {
+    const story = stories.find((s) => s.id === storyId);
     // Optimistic update
     setStories((prev) => prev.filter((s) => s.id !== storyId));
+    if (story) adjustColumnTotal(story.status, -1);
 
     try {
       const res = await fetch(`/api/stories/${storyId}`, {
@@ -660,13 +695,13 @@ export function KanbanBoard({ projectId }: KanbanBoardProps) {
       if (!res.ok) {
         const json = await res.json().catch(() => null) as { error?: { message?: string } } | null;
         addToast({ type: 'error', title: json?.error?.message ?? '스토리 삭제에 실패했습니다.' });
-        await fetchData();
+        await fetchData(); // 카운트/스토리 전량 재동기화 (수동 롤백 불필요)
       }
     } catch {
       addToast({ type: 'error', title: '스토리 삭제에 실패했습니다.' });
       await fetchData();
     }
-  }, [fetchData, addToast]);
+  }, [stories, fetchData, addToast, adjustColumnTotal]);
 
   const handleKickoff = useCallback((_storyId: string, result: 'triggered' | 'no_match' | 'conflict' | 'error') => {
     const messages: Record<string, { title: string; type: 'success' | 'error' | 'info' | 'warning' }> = {
@@ -701,10 +736,12 @@ export function KanbanBoard({ projectId }: KanbanBoardProps) {
       const json = await res.json();
       const created = json.data as KanbanStory;
       setStories((prev) => [...prev, created]);
+      // 카드 렌더 컬럼(created.status)과 카운트를 동일 source로 정합 — BE가 status를 정규화해도 무어긋남
+      adjustColumnTotal(created.status, +1);
     } catch {
       setTransitionError(t('createStoryFailed'));
     }
-  }, [projectId, selectedSprintId, selectedEpicId, t]);
+  }, [projectId, selectedSprintId, selectedEpicId, t, adjustColumnTotal]);
 
   // AC1/AC5: WIP limit 핸들러
   const handleWipLimitEdit = useCallback((columnId: string) => {
@@ -1110,7 +1147,16 @@ export function KanbanBoard({ projectId }: KanbanBoardProps) {
             />
           </div>
         ) : (
-          <DndContext sensors={sensors} onDragStart={handleDragStart} onDragEnd={handleDragEnd}>
+          <DndContext
+            sensors={sensors}
+            // closestCenter: 기본 rectIntersection은 모바일 narrow 가로스크롤 레이아웃에서 dragged rect가
+            // 다중 컬럼에 걸쳐 over를 source로 오해소 → cross-column 이동 실패(story 1f81bc74 repro 확정).
+            // center 기반은 멀티컨테이너 over 정확 해소·데스크탑 무회귀. 앱 내 DnD 충돌해소 primitive를
+            // doc-tree.tsx와 closestCenter로 통일(디자인시스템 일관성).
+            collisionDetection={closestCenter}
+            onDragStart={handleDragStart}
+            onDragEnd={handleDragEnd}
+          >
             <div className="flex h-full gap-3 overflow-x-auto px-3 py-3">
               {COLUMNS.map((col) => {
                 const colStories = storiesByColumn(col.id);
@@ -1151,6 +1197,7 @@ export function KanbanBoard({ projectId }: KanbanBoardProps) {
                     onLoadMore={() => handleLoadMore(col.id)}
                     collapsed={col.id === 'done' ? doneCollapsed : undefined}
                     onToggleCollapse={col.id === 'done' ? handleToggleDoneCollapse : undefined}
+                    autoComposeSignal={col.id === 'backlog' ? autoComposeNonce : 0}
                   />
                 );
               })}
@@ -1254,11 +1301,20 @@ export function KanbanBoard({ projectId }: KanbanBoardProps) {
           }}
           onClose={handleCloseStory}
           onStoryUpdate={(updated) => {
+            // StoryDetailPanel은 onChangeStatus를 받지 않으므로 드로어 내 status 전이는
+            // 이 콜백이 유일한 경로 — status가 실제로 바뀐 경우에만 카운트 lockstep 조정.
+            const prevStory = stories.find((s) => s.id === updated.id);
             setSelectedStory(updated);
             setStories((prev) => prev.map((s) => s.id === updated.id ? { ...s, ...updated } : s));
+            if (prevStory && prevStory.status !== updated.status) {
+              adjustColumnTotal(prevStory.status, -1);
+              adjustColumnTotal(updated.status, +1);
+            }
           }}
           onDeleteSuccess={(id) => {
+            const story = stories.find((s) => s.id === id);
             setStories((prev) => prev.filter((s) => s.id !== id));
+            if (story) adjustColumnTotal(story.status, -1);
             setSelectedStory(null);
           }}
           storyMap={Object.fromEntries(stories.map((s) => [s.id, { title: s.title, status: s.status }]))}

@@ -2,7 +2,7 @@
 
 0110(18073a52)이 `uq_project_access_project_member_id`(project_id, member_id WHERE member_id NOT NULL)
 를 신설했으나, baseline(0075)에 동일 정의 `uq_project_access_project_member_v2`가 이미 존재해 100%
-중복이었다(까심 CP2·기능 영향 0). 유일성은 v2 가 계속 enforce 하므로 0110 신설본만 drop.
+중복이었다(CP2·기능 영향 0). 유일성은 v2 가 계속 enforce 하므로 0110 신설본만 drop.
 
 backward-safe: 데이터 변화 0·v2 가 (project_id, member_id) 유일성 유지·구/신 코드 무영향.
 

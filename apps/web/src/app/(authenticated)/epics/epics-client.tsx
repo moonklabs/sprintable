@@ -14,7 +14,7 @@ import {
 } from '@/components/ui/dialog';
 import { ToastContainer, useToast } from '@/components/ui/toast';
 import { OutcomeStatusBadge } from '@/components/outcome/outcome-status-badge';
-import { OutcomeIntentFields, type OutcomeIntentValue } from '@/components/outcome/outcome-intent-fields';
+import { HypothesesSummary } from '@/components/hypotheses/hypotheses-summary';
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -43,6 +43,12 @@ interface Epic {
   measure_after?: string | null;
   outcome_status?: 'n_a' | 'pending' | 'hit' | 'miss' | null;
   outcome_result?: Record<string, unknown> | null;
+  // E1 S8b: BE EpicResponse가 list 응답에 부착하는 연결 가설 집계(미부착 경로는 기본값).
+  hypothesis_count?: number;
+  risky_status?: string | null;
+  // 0d4c89e8: BE list 응답 story count 집계(#1527). detail/미부착 경로는 stories 폴백.
+  total_stories?: number;
+  done_stories?: number;
 }
 
 // ─── Helpers ─────────────────────────────────────────────────────────────────
@@ -137,7 +143,6 @@ function EpicCreateForm({ projectId, orgId, onCreated, onCancel }: EpicCreateFor
   const [priority, setPriority] = useState<EpicPriority>('medium');
   const [targetDate, setTargetDate] = useState('');
   const [targetSp, setTargetSp] = useState('');
-  const [intent, setIntent] = useState<OutcomeIntentValue>({ success_hypothesis: '', metric_definition: null, measure_after: '' });
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
@@ -158,9 +163,6 @@ function EpicCreateForm({ projectId, orgId, onCreated, onCancel }: EpicCreateFor
       };
       if (targetDate) body.target_date = targetDate;
       if (targetSp) body.target_sp = Number(targetSp);
-      if (intent.success_hypothesis.trim()) body.success_hypothesis = intent.success_hypothesis.trim();
-      if (intent.metric_definition) body.metric_definition = intent.metric_definition;
-      if (intent.measure_after) body.measure_after = intent.measure_after;
 
       const res = await fetch('/api/epics', {
         method: 'POST',
@@ -177,7 +179,7 @@ function EpicCreateForm({ projectId, orgId, onCreated, onCancel }: EpicCreateFor
     } finally {
       setSubmitting(false);
     }
-  }, [title, description, priority, targetDate, targetSp, intent, projectId, orgId, onCreated]);
+  }, [title, description, priority, targetDate, targetSp, projectId, orgId, onCreated]);
 
   return (
     <form onSubmit={(e) => { void handleSubmit(e); }} className="space-y-4">
@@ -242,8 +244,6 @@ function EpicCreateForm({ projectId, orgId, onCreated, onCancel }: EpicCreateFor
         />
       </div>
 
-      <OutcomeIntentFields value={intent} onChange={setIntent} context="epic" />
-
       {error ? <p className="text-xs text-destructive">{error}</p> : null}
 
       <div className="flex justify-end gap-2 pt-2">
@@ -274,11 +274,6 @@ function EpicEditForm({ epic, onSaved, onCancel }: EpicEditFormProps) {
   const [status, setStatus] = useState<EpicStatus>(epic.status);
   const [targetDate, setTargetDate] = useState(epic.target_date?.slice(0, 10) ?? '');
   const [targetSp, setTargetSp] = useState(epic.target_sp !== undefined ? String(epic.target_sp) : '');
-  const [intent, setIntent] = useState<OutcomeIntentValue>({
-    success_hypothesis: epic.success_hypothesis ?? '',
-    metric_definition: (epic.metric_definition as import('@sprintable/core-storage').MetricDefinition | null) ?? null,
-    measure_after: epic.measure_after?.slice(0, 10) ?? '',
-  });
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
@@ -295,9 +290,6 @@ function EpicEditForm({ epic, onSaved, onCancel }: EpicEditFormProps) {
         description: description.trim() || undefined,
         priority,
         status,
-        success_hypothesis: intent.success_hypothesis.trim() || null,
-        metric_definition: intent.metric_definition ?? null,
-        measure_after: intent.measure_after || null,
       };
       if (targetDate) body.target_date = targetDate;
       if (targetSp) body.target_sp = Number(targetSp);
@@ -317,7 +309,7 @@ function EpicEditForm({ epic, onSaved, onCancel }: EpicEditFormProps) {
     } finally {
       setSubmitting(false);
     }
-  }, [title, description, priority, status, targetDate, targetSp, intent, epic.id, epic.stories, onSaved]);
+  }, [title, description, priority, status, targetDate, targetSp, epic.id, epic.stories, onSaved]);
 
   return (
     <form onSubmit={(e) => { void handleSubmit(e); }} className="space-y-4">
@@ -396,8 +388,6 @@ function EpicEditForm({ epic, onSaved, onCancel }: EpicEditFormProps) {
         </div>
       </div>
 
-      <OutcomeIntentFields value={intent} onChange={setIntent} context="epic" />
-
       {error ? <p className="text-xs text-destructive">{error}</p> : null}
 
       <div className="flex justify-end gap-2 pt-2">
@@ -424,7 +414,11 @@ interface EpicRowProps {
 function EpicRow({ epic, isSelected, onClick, onDeleteRequest }: EpicRowProps) {
   const t = useTranslations('epics');
   const stories = epic.stories ?? [];
-  const { done, total } = calcStoryProgress(stories);
+  // 0d4c89e8: BE 집계(total_stories/done_stories·#1527) 우선·detail-shape(집계 미부착)는 stories 폴백.
+  // list 응답은 stories 미부착이라 폴백만으론 0/0 → BE 집계로 카드 카운트/진행바 정상화.
+  const fb = calcStoryProgress(stories);
+  const total = epic.total_stories ?? fb.total;
+  const done = epic.done_stories ?? fb.done;
   const pct = total > 0 ? Math.round((done / total) * 100) : 0;
   const spProgress = calcSpProgress(stories);
   const spExceeded = typeof epic.target_sp === 'number' && epic.target_sp > 0 && spProgress.total > epic.target_sp;
@@ -476,11 +470,14 @@ function EpicRow({ epic, isSelected, onClick, onDeleteRequest }: EpicRowProps) {
           <p className="text-xs text-muted-foreground line-clamp-1">{epic.description.split('\n')[0]?.replace(/^#+\s*/, '')}</p>
         ) : null}
 
-        <div className="flex items-center gap-3 text-xs text-muted-foreground">
+        {/* 가설요약 추가로 메타 항목이 늘어 고밀도 카드(마감일+SP초과 동반)가 narrow 폭서
+            가로 오버플로 잠재 → flex-wrap 헤지(가디언 라이브게이트 선제·기존 행 robustness↑). */}
+        <div className="flex flex-wrap items-center gap-x-3 gap-y-1 text-xs text-muted-foreground">
           {epic.target_date ? (
             <span>{t('targetDate')}: {formatDate(epic.target_date)}</span>
           ) : null}
           <span>{done}/{total} {t('stories')}</span>
+          <HypothesesSummary count={epic.hypothesis_count ?? 0} riskyStatus={epic.risky_status ?? null} />
           {spExceeded ? (
             <span className="rounded-full bg-destructive/10 px-1.5 py-0.5 text-[10px] font-semibold text-destructive">
               {t('spExceeded')}
@@ -691,7 +688,7 @@ function CreateModal({ projectId, orgId, onCreated, onClose }: CreateModalProps)
         onClick={onClose}
         aria-label={t('cancel')}
       />
-      <div className="relative z-10 flex max-h-[calc(100vh-2rem)] w-full max-w-md flex-col rounded-2xl border border-border bg-card shadow-xl">
+      <div className="relative z-10 flex max-h-[calc(100dvh-2rem)] w-full max-w-md flex-col rounded-2xl border border-border bg-card shadow-xl">
         <div className="flex flex-shrink-0 items-center justify-between px-6 pb-4 pt-6">
           <h2 className="text-base font-bold text-foreground">{t('createEpic')}</h2>
           <button

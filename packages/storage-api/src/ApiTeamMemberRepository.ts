@@ -1,7 +1,7 @@
 import type { ITeamMemberRepository, TeamMember, CreateTeamMemberInput, UpdateTeamMemberInput, TeamMemberListFilters } from '@sprintable/core-storage';
 import { fastapiCall } from './utils';
 
-export class SupabaseTeamMemberRepository implements ITeamMemberRepository {
+export class ApiTeamMemberRepository implements ITeamMemberRepository {
   constructor(private readonly accessToken: string = '') {}
 
   async list(filters: TeamMemberListFilters): Promise<TeamMember[]> {

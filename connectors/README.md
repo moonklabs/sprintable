@@ -8,12 +8,22 @@ connectors/
     sprintable_sse.py       # Python SDK
     sprintable-sse.ts       # TypeScript/Bun SDK
     README.md
-  hermes-sprintable/        # 카테고리 A: Hermes Agent 어댑터
+  hermes-sprintable/        # 카테고리 A: Hermes Agent 어댑터 (dev backend)
     plugin.yaml
+    __init__.py
+    adapter.py              # self-contained — inject allow-list vendored
+    README.md
+  hermes-sprintable-prod/   # 카테고리 A: Hermes Agent 어댑터 (prod backend)
+    plugin.yaml             # SPRINTABLE_PROD_* 전용 self-contained 클론
     __init__.py
     adapter.py
     README.md
 ```
+
+> 각 어댑터 폴더는 **자기완결**이다. fresh 온보딩은 폴더 하나만 복사하므로 sibling
+> `sdk`를 import하면 ImportError로 미로딩된다(과거 P0). 주입 allow-list는 SDK가
+> canonical 출처이되 어댑터에 vendor하며, `sdk/test_inject_allowlist.py`가 양측
+> 동기를 가드한다.
 
 ---
 
@@ -79,7 +89,8 @@ POST /api/v2/agent/events/ack
 
 | 카테고리 | 런타임 | 주입 방식 | 디렉토리 |
 |----------|--------|-----------|----------|
-| **A** | Hermes Agent (Python) | `handle_message()` → 세션 주입 | `connectors/hermes-sprintable/` |
+| **A** | Hermes Agent — dev (Python) | `handle_message()` → 세션 주입 | `connectors/hermes-sprintable/` |
+| **A** | Hermes Agent — prod (Python) | `handle_message()` → 세션 주입 (`SPRINTABLE_PROD_*`) | `connectors/hermes-sprintable-prod/` |
 | **B** | Claude Code (MCP) | `notifications/claude/channel` emit | `packages/fakechat/server.ts` |
 | **C** | 기타 (Codex, Gemini, Cursor, OpenClaw 등) | 런타임별 주입 API | `connectors/{runtime}-sprintable/` |
 

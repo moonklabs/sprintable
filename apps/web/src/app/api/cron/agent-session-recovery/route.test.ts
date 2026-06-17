@@ -1,63 +1,33 @@
-import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { beforeEach, describe, expect, it, vi } from 'vitest';
 
-const {
-  createClientMock,
-  recoverStaleRunsMock,
-  resumeSessionCandidatesMock,
-} = vi.hoisted(() => ({
-  createClientMock: vi.fn(),
-  recoverStaleRunsMock: vi.fn(),
-  resumeSessionCandidatesMock: vi.fn(),
-}));
-
-vi.mock('@/services/agent-session-lifecycle', () => ({
-  AgentSessionLifecycleService: class {
-    recoverStaleRuns = recoverStaleRunsMock;
-  },
-}));
-
-vi.mock('@/services/agent-session-resume', () => ({
-  resumeSessionCandidates: resumeSessionCandidatesMock,
-}));
+// 837a36c4(Group B b12): cron route는 pure proxy(자체 로직 아님) — proxyToFastapi 위임·{data} 래핑·204→{ok}.
+const { proxyToFastapi } = vi.hoisted(() => ({ proxyToFastapi: vi.fn() }));
+vi.mock('@/lib/fastapi-proxy', () => ({ proxyToFastapi }));
 
 import { GET } from './route';
 
-describe('GET /api/cron/agent-session-recovery', () => {
-  const originalEnv = { ...process.env };
+const PATH = '/api/v2/internal/cron/agent-session-recovery';
+const okRes = (b: unknown = { ok: 1 }) =>
+  new Response(JSON.stringify(b), { status: 200, headers: { 'content-type': 'application/json' } });
+const req = () => new Request('http://localhost/api/cron/agent-session-recovery');
 
-  beforeEach(() => {
-    process.env.CRON_SECRET = 'cron-secret';
-    process.env.DATABASE_URL = 'https://db.example.com';
-    process.env.DATABASE_SERVICE_KEY = 'service-role-key';
-    createClientMock.mockReset();
-    recoverStaleRunsMock.mockReset();
-    resumeSessionCandidatesMock.mockReset();
-    createClientMock.mockReturnValue({ tag: 'db' });
-    recoverStaleRunsMock.mockResolvedValue({
-      recoveredCount: 1,
-      retryScheduledCount: 1,
-      terminatedCount: 0,
-      resumedCount: 1,
-      resumeCandidates: [{ runId: 'run-1', memoId: 'memo-1', orgId: 'org-1', projectId: 'project-1', agentId: 'agent-1' }],
-    });
+describe('GET /api/cron/agent-session-recovery (proxy 위임)', () => {
+  beforeEach(() => proxyToFastapi.mockReset());
+  it('delegates and wraps', async () => {
+    proxyToFastapi.mockResolvedValue(okRes());
+    const res = await GET(req());
+    expect(res.status).toBe(200);
+    expect(proxyToFastapi).toHaveBeenCalledWith(expect.anything(), PATH);
+    expect((await res.json()).data).toMatchObject({ ok: 1 });
   });
-
-  afterEach(() => {
-    process.env = { ...originalEnv };
+  it('204 → {ok:true}', async () => {
+    proxyToFastapi.mockResolvedValue(new Response(null, { status: 204 }));
+    const res = await GET(req());
+    expect(res.status).toBe(200);
+    expect((await res.json()).data).toMatchObject({ ok: true });
   });
-
-  it('runs session recovery when the cron secret matches', async () => {
-    const response = await GET(new Request('http://localhost:3108/api/cron/agent-session-recovery', {
-      headers: { authorization: 'Bearer cron-secret' },
-    }));
-    const payload = await response.json();
-
-    expect(response.status).toBe(200);
-    expect(createClientMock).toHaveBeenCalledWith('https://db.example.com', 'service-role-key');
-    expect(recoverStaleRunsMock).toHaveBeenCalledTimes(1);
-    expect(resumeSessionCandidatesMock).toHaveBeenCalledWith({ tag: 'db' }, [
-      { runId: 'run-1', memoId: 'memo-1', orgId: 'org-1', projectId: 'project-1', agentId: 'agent-1' },
-    ]);
-    expect(payload.data).toEqual({ recoveredCount: 1, retryScheduledCount: 1, terminatedCount: 0, resumedCount: 1 });
+  it('passes through proxy errors', async () => {
+    proxyToFastapi.mockResolvedValue(new Response('e', { status: 500 }));
+    expect((await GET(req())).status).toBe(500);
   });
 });

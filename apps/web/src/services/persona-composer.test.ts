@@ -77,7 +77,9 @@ describe('persona-composer helpers', () => {
 
     const options = await listProjectPersonaToolOptions(db as never, 'project-1');
 
-    expect(listProjectApprovedMcpToolOptionsMock).toHaveBeenCalledWith({ tag: 'admin' }, 'project-1');
+    // 837a36c4: 구현이 listProjectApprovedMcpToolOptions(undefined as never, projectId)로 호출
+    // (OSS storage 계층이 db-context를 내부 해소 — 구 {tag:'admin'} 컨텍스트 인자 폐기). projectId 전달 검증.
+    expect(listProjectApprovedMcpToolOptionsMock).toHaveBeenCalledWith(undefined, 'project-1');
     expect(options.find((option) => option.name === 'linear.search_issues')).toMatchObject({
       source: 'mcp',
       groupKind: 'mcp',

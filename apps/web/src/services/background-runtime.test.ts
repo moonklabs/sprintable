@@ -1,7 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 const {
-  createClientMock,
   slackCtorMock,
   slackStartMock,
   slackStopMock,
@@ -18,7 +17,6 @@ const {
   memoStartMock,
   memoStopMock,
 } = vi.hoisted(() => ({
-  createClientMock: vi.fn(),
   slackCtorMock: vi.fn(),
   slackStartMock: vi.fn(),
   slackStopMock: vi.fn().mockResolvedValue(undefined),
@@ -199,7 +197,6 @@ describe('background-runtime settings', () => {
 
 describe('BackgroundRuntimeWorker', () => {
   beforeEach(() => {
-    createClientMock.mockReset();
     slackCtorMock.mockReset();
     slackStartMock.mockReset();
     slackStopMock.mockClear();
@@ -274,74 +271,70 @@ describe('BackgroundRuntimeWorker', () => {
     expect(memoStopMock).toHaveBeenCalledTimes(1);
   });
 
-  it('creates a worker from env using the shared service-role client', () => {
-    createClientMock.mockReturnValue({ tag: 'db-client' });
-
+  // C-S11(e17719fc)에서 Supabase admin client(createAdminClient/lib/db/admin.ts)가
+  // 전량 제거됐다. createBackgroundRuntimeWorkerFromEnv는 더 이상 db 클라이언트를
+  // 만들지 않고 db: undefined로 dispatcher를 구성한다(영속은 FastAPI 경유). 아래는
+  // 그 현 계약을 검증한다 — 옛 service-role 팩토리/널-가드는 폐기됐다.
+  it('creates a worker from env with db-less dispatchers (post-Supabase)', () => {
     const worker = createBackgroundRuntimeWorkerFromEnv({
       NODE_ENV: 'production',
-      DATABASE_URL: 'https://db.example.com',
-      DATABASE_SERVICE_KEY: 'service-role-key',
       NEXT_PUBLIC_APP_URL: 'https://app.example.com',
       SPRINTABLE_RUNTIME_ROLE: 'worker',
       SPRINTABLE_BACKGROUND_POLL_INTERVAL_MS: '45000',
     } as NodeJS.ProcessEnv);
 
-    expect(createClientMock).toHaveBeenCalledWith('https://db.example.com', 'service-role-key');
     expect(worker).toBeInstanceOf(BackgroundRuntimeWorker);
     expect(slackCtorMock).toHaveBeenCalledWith({
-      db: { tag: 'db-client' },
+      db: undefined,
       appUrl: 'https://app.example.com',
     });
     expect(discordCtorMock).toHaveBeenCalledWith({
-      db: { tag: 'db-client' },
+      db: undefined,
       appUrl: 'https://app.example.com',
       pollingIntervalMs: 45000,
     });
     expect(teamsCtorMock).toHaveBeenCalledWith({
-      db: { tag: 'db-client' },
+      db: undefined,
       appUrl: 'https://app.example.com',
       pollingIntervalMs: 45000,
     });
     expect(memoCtorMock).toHaveBeenCalledWith({
-      db: { tag: 'db-client' },
+      db: undefined,
       pollingIntervalMs: 45000,
     });
   });
 
-  it('falls back to the Vercel URL when APP_BASE_URL is missing', () => {
-    createClientMock.mockReturnValue({ tag: 'db-client' });
-
+  it('falls back to the Vercel URL when NEXT_PUBLIC_APP_URL is missing', () => {
     createBackgroundRuntimeWorkerFromEnv({
       NODE_ENV: 'production',
-      DATABASE_URL: 'https://db.example.com',
-      DATABASE_SERVICE_KEY: 'service-role-key',
       VERCEL_PROJECT_PRODUCTION_URL: 'myapp.vercel.app',
       SPRINTABLE_RUNTIME_ROLE: 'worker',
     } as NodeJS.ProcessEnv);
 
     expect(slackCtorMock).toHaveBeenCalledWith({
-      db: { tag: 'db-client' },
+      db: undefined,
       appUrl: 'https://myapp.vercel.app',
     });
     expect(discordCtorMock).toHaveBeenCalledWith({
-      db: { tag: 'db-client' },
+      db: undefined,
       appUrl: 'https://myapp.vercel.app',
       pollingIntervalMs: DEFAULT_PRODUCTION_BACKGROUND_POLLING_INTERVAL_MS,
     });
     expect(teamsCtorMock).toHaveBeenCalledWith({
-      db: { tag: 'db-client' },
+      db: undefined,
       appUrl: 'https://myapp.vercel.app',
       pollingIntervalMs: DEFAULT_PRODUCTION_BACKGROUND_POLLING_INTERVAL_MS,
     });
   });
 
-  it('returns null when service-role env is incomplete', () => {
+  it('still creates a worker without service-role db env (no admin client gate)', () => {
     const worker = createBackgroundRuntimeWorkerFromEnv({
       NODE_ENV: 'production',
-      DATABASE_URL: 'https://db.example.com',
+      NEXT_PUBLIC_APP_URL: 'https://app.example.com',
+      SPRINTABLE_RUNTIME_ROLE: 'worker',
     } as NodeJS.ProcessEnv);
 
-    expect(worker).toBeNull();
-    expect(createClientMock).not.toHaveBeenCalled();
+    // 옛 동작: service-role env 불완전 시 null. 현재: admin client가 없어 게이트도 없다.
+    expect(worker).toBeInstanceOf(BackgroundRuntimeWorker);
   });
 });

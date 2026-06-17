@@ -1,7 +1,7 @@
 import type { IProjectRepository, Project, CreateProjectInput, UpdateProjectInput, ProjectListFilters, RepositoryScopeContext } from '@sprintable/core-storage';
 import { fastapiCall } from './utils';
 
-export class SupabaseProjectRepository implements IProjectRepository {
+export class ApiProjectRepository implements IProjectRepository {
   constructor(private readonly accessToken: string = '') {}
 
   async list(_filters: ProjectListFilters): Promise<Project[]> {

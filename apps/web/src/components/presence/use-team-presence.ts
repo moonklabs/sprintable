@@ -3,7 +3,7 @@
 import { useCallback, useEffect, useState } from 'react';
 import type { PresenceStatus } from '@/components/chat/presence-dot';
 
-// 2505d27d: 디디 #1356 `GET /api/v2/team-presence` 응답 계약(검증 완료·mismatch 0).
+// 2505d27d: #1356 `GET /api/v2/team-presence` 응답 계약(검증 완료·mismatch 0).
 export interface TeamPresenceItem {
   member_id: string;
   name: string;

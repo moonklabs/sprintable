@@ -14,9 +14,11 @@ import logging
 import uuid
 from datetime import datetime, timedelta, timezone
 
+from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models.hypothesis import HYPOTHESIS_STATUSES, Hypothesis, is_valid_transition
+from app.models.pm import Epic, Story
 
 logger = logging.getLogger(__name__)
 from app.repositories.hypothesis import HypothesisRepository
@@ -80,6 +82,36 @@ async def _to_response(
     return HypothesisResponse.from_model(hyp, epic_ids, story_ids)
 
 
+async def _assert_targets_same_project(
+    session: AsyncSession,
+    project_id: uuid.UUID,
+    epic_ids: list[uuid.UUID],
+    story_ids: list[uuid.UUID],
+) -> None:
+    """§3.7.2 — 링크 대상 epic/story가 hypothesis와 다른 project면 거부.
+
+    create/draft/link 공통 service 가드. 이전엔 라우터(link 라우트)에만 있어 create·draft
+    경로의 add_epic_links/add_story_links가 same-org cross-project blind INSERT로 우회됐다.
+    존재하지 않는 대상도 same-project 검증 불가라 거부한다(rowcount 대조).
+    """
+    if epic_ids:
+        rows = (await session.execute(
+            select(Epic.id, Epic.project_id).where(Epic.id.in_(epic_ids))
+        )).all()
+        if len(rows) != len(set(epic_ids)) or any(pid != project_id for _id, pid in rows):
+            raise HypothesisServiceError(
+                "CROSS_PROJECT_LINK_FORBIDDEN", "다른 프로젝트의 에픽에는 연결할 수 없습니다."
+            )
+    if story_ids:
+        rows = (await session.execute(
+            select(Story.id, Story.project_id).where(Story.id.in_(story_ids))
+        )).all()
+        if len(rows) != len(set(story_ids)) or any(pid != project_id for _id, pid in rows):
+            raise HypothesisServiceError(
+                "CROSS_PROJECT_LINK_FORBIDDEN", "다른 프로젝트의 스토리에는 연결할 수 없습니다."
+            )
+
+
 async def create_hypothesis(
     session: AsyncSession,
     org_id: uuid.UUID,
@@ -104,6 +136,9 @@ async def create_hypothesis(
         raise HypothesisServiceError(
             "INVALID_CREATE_STATUS", "생성 시 status는 proposed|active만 허용됩니다."
         )
+
+    # cross-project epic/story 링크 차단(§3.7.2) — repo.create 전이라 거부 시 orphan 가설 0.
+    await _assert_targets_same_project(session, payload.project_id, payload.epic_ids, payload.story_ids)
 
     repo = HypothesisRepository(session, org_id)
     hyp = await repo.create(
@@ -236,7 +271,8 @@ async def link_hypothesis(
     hyp = await repo.get(hypothesis_id)
     if hyp is None:
         raise HypothesisServiceError("HYPOTHESIS_NOT_FOUND", "가설을 찾을 수 없습니다.")
-    # cross-project 링크 금지(§3.7.2)는 대상 epic/story 조회가 필요 — 라우터(S3)에서 보강.
+    # cross-project epic/story 링크 차단(§3.7.2) — service 공통 가드(라우터 위임 제거).
+    await _assert_targets_same_project(session, hyp.project_id, payload.epic_ids, payload.story_ids)
     await repo.add_epic_links(hypothesis_id, payload.epic_ids, payload.link_type or "primary")
     await repo.add_story_links(hypothesis_id, payload.story_ids, payload.link_type or "supports")
     return await _to_response(repo, hyp)
@@ -311,6 +347,11 @@ async def draft_hypothesis(
     measure_after = datetime.now(timezone.utc) + timedelta(days=_DEFAULT_MEASURE_DAYS)
     snapshot = _build_source_snapshot(payload.context)
 
+    # source_type='epic'/'story'면 source_id로 실 링크를 만든다. source 필드만 저장하면
+    # epic 상세의 가설 리스트(hypothesis_epic_links 조인)에 안 떠 초안→확인이 무의미해진다.
+    epic_ids = [payload.source_id] if payload.source_type == "epic" else []
+    story_ids = [payload.source_id] if payload.source_type == "story" else []
+
     hyp_resp: HypothesisResponse | None = None
     if payload.persist:
         hyp_resp = await create_hypothesis(
@@ -321,6 +362,8 @@ async def draft_hypothesis(
                 metric_definition=metric_definition,
                 measure_after=measure_after,
                 status="proposed",
+                epic_ids=epic_ids,
+                story_ids=story_ids,
                 source_type=payload.source_type,
                 source_id=payload.source_id,
                 draft_metadata={"template": True, "source_snapshot": snapshot},

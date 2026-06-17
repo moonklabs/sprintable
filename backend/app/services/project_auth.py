@@ -10,6 +10,21 @@ import uuid
 from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncSession
 
+# E-MEMBER-POLICY S1: 프로젝트 역할 1급 enum(owner/admin/member). org 역할의 'manager'는 project
+# 레벨엔 없음(§9-2 결정). project_access.role 은 0122 CHECK 로 이 집합만 허용 → 모든 write 경로가
+# 이 집합으로 clamp 돼야 CHECK 위반(500)이 없다. 랭크: owner > admin > member.
+PROJECT_ROLES: tuple[str, ...] = ("owner", "admin", "member")
+PROJECT_ROLE_RANK: dict[str, int] = {"owner": 3, "admin": 2, "member": 1}
+
+
+def clamp_project_role(role: str | None) -> str:
+    """project_access.role 로 쓸 값을 enum 으로 정규화 — 비-enum(예: 레거시 'manager'·빈값)은 'member'.
+
+    0122 CHECK(role IN owner/admin/member) 위반 방지의 단일 정규화 지점. write 경로(앵커 placement·
+    PATCH anchor update)가 이걸 통과시켜 비-enum 값이 DB 에 들어가지 않게 한다.
+    """
+    return role if role in PROJECT_ROLES else "member"
+
 
 async def has_project_access(
     session: AsyncSession,
@@ -35,6 +50,10 @@ async def has_project_access(
                     WHERE tm.project_id = p.id
                       AND (tm.id = :user_id OR tm.user_id = :user_id)
                       AND tm.is_active = true
+                      -- 35a0691e: me/memberships(me.py)와 동일 기준 — team_member 분기는 휴먼만.
+                      -- 에이전트는 아래 project_access grant 분기(member_id)로 인가(SSOT 정합·드리프트
+                      -- 방지). 온보딩이 agent grant를 생성하므로 휴먼-필터가 에이전트 access 무영향. #1125 후속.
+                      AND tm.type = 'human'
                 )
                 OR EXISTS (
                     SELECT 1 FROM project_access pa
@@ -123,6 +142,8 @@ async def first_accessible_project_id(
             WHERE tm.org_id = :org_id
               AND (tm.id = :user_id OR tm.user_id = :user_id)
               AND tm.is_active = true
+              -- 35a0691e: has_project_access lockstep — team_member 분기 휴먼만(에이전트는 grant).
+              AND tm.type = 'human'
               AND p.deleted_at IS NULL
             ORDER BY tm.created_at ASC
             LIMIT 1
@@ -204,6 +225,8 @@ async def accessible_project_ids_in_org(
                     WHERE tm.project_id = p.id
                       AND (tm.id = :user_id OR tm.user_id = :user_id)
                       AND tm.is_active = true
+                      -- 35a0691e: has_project_access lockstep — team_member 분기 휴먼만(에이전트는 grant).
+                      AND tm.type = 'human'
                 )
                 OR EXISTS (
                     SELECT 1 FROM project_access pa

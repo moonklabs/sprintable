@@ -1,67 +1,33 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
-const { createClient, scan } = vi.hoisted(() => {
-  process.env.CRON_SECRET = 'cron-secret';
-  process.env.DATABASE_URL = 'https://example.db.co';
-  process.env.DATABASE_SERVICE_KEY = 'service-role-key';
-
-  return {
-    createClient: vi.fn(),
-    scan: vi.fn(),
-  };
-});
-
-vi.mock('@/services/inbox-outbox.service', () => ({
-  InboxOutboxService: class InboxOutboxService {
-    scan = scan;
-  },
-}));
+// 837a36c4(Group B b12): cron route는 pure proxy(자체 로직 아님) — proxyToFastapi 위임·{data} 래핑·204→{ok}.
+const { proxyToFastapi } = vi.hoisted(() => ({ proxyToFastapi: vi.fn() }));
+vi.mock('@/lib/fastapi-proxy', () => ({ proxyToFastapi }));
 
 import { GET } from './route';
 
-describe('GET /api/cron/inbox-outbox', () => {
-  beforeEach(() => {
-    createClient.mockReset();
-    scan.mockReset();
+const PATH = '/api/v2/internal/cron/inbox-outbox';
+const okRes = (b: unknown = { ok: 1 }) =>
+  new Response(JSON.stringify(b), { status: 200, headers: { 'content-type': 'application/json' } });
+const req = () => new Request('http://localhost/api/cron/inbox-outbox');
+
+describe('GET /api/cron/inbox-outbox (proxy 위임)', () => {
+  beforeEach(() => proxyToFastapi.mockReset());
+  it('delegates and wraps', async () => {
+    proxyToFastapi.mockResolvedValue(okRes());
+    const res = await GET(req());
+    expect(res.status).toBe(200);
+    expect(proxyToFastapi).toHaveBeenCalledWith(expect.anything(), PATH);
+    expect((await res.json()).data).toMatchObject({ ok: 1 });
   });
-
-  it('rejects unauthorized cron calls', async () => {
-    const response = await GET(new Request('http://localhost/api/cron/inbox-outbox'));
-    expect(response.status).toBe(401);
+  it('204 → {ok:true}', async () => {
+    proxyToFastapi.mockResolvedValue(new Response(null, { status: 204 }));
+    const res = await GET(req());
+    expect(res.status).toBe(200);
+    expect((await res.json()).data).toMatchObject({ ok: true });
   });
-
-  it('returns scanner results for authorized cron calls', async () => {
-    createClient.mockReturnValue({});
-    scan.mockResolvedValue({
-      scanned: 3,
-      delivered: 2,
-      retried: 1,
-      dead: 0,
-      skipped: 0,
-    });
-
-    const response = await GET(
-      new Request('http://localhost/api/cron/inbox-outbox', {
-        headers: { authorization: 'Bearer cron-secret' },
-      }),
-    );
-
-    expect(response.status).toBe(200);
-    await expect(response.json()).resolves.toMatchObject({
-      data: { scanned: 3, delivered: 2, retried: 1, dead: 0, skipped: 0 },
-    });
-  });
-
-  it('returns 500 when service throws', async () => {
-    createClient.mockReturnValue({});
-    scan.mockRejectedValue(new Error('rpc_failed'));
-
-    const response = await GET(
-      new Request('http://localhost/api/cron/inbox-outbox', {
-        headers: { authorization: 'Bearer cron-secret' },
-      }),
-    );
-
-    expect(response.status).toBe(500);
+  it('passes through proxy errors', async () => {
+    proxyToFastapi.mockResolvedValue(new Response('e', { status: 500 }));
+    expect((await GET(req())).status).toBe(500);
   });
 });

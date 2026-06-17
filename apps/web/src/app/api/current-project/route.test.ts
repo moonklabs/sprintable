@@ -1,87 +1,58 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
-const { cookieSet, createDbServerClient } = vi.hoisted(() => ({
-  cookieSet: vi.fn(),
-  createDbServerClient: vi.fn(),
+// 837a36c4(Group B b10): cookies + dynamic import(fastapiCall·getServerSession) 핸들러.
+// GET=게이트+프로젝트명 조회(실패 fallback) / POST=게이트 없음·parseBody→쿠키 set→프로젝트명.
+const h = vi.hoisted(() => ({
+  getAuthContext: vi.fn(), fastapiCall: vi.fn(), getServerSession: vi.fn(),
+  cookieSet: vi.fn(), parseBody: vi.fn(),
+}));
+vi.mock('@/lib/auth-helpers', () => ({ getAuthContext: h.getAuthContext, CURRENT_PROJECT_COOKIE: 'sp_cur_proj' }));
+vi.mock('@sprintable/storage-api', () => ({ fastapiCall: h.fastapiCall }));
+vi.mock('@/lib/db/server', () => ({ getServerSession: h.getServerSession }));
+vi.mock('next/headers', () => ({ cookies: vi.fn(async () => ({ set: h.cookieSet })) }));
+vi.mock('@sprintable/shared', async (importActual) => ({
+  ...(await importActual<typeof import('@sprintable/shared')>()),
+  parseBody: h.parseBody,
 }));
 
-vi.mock('next/headers', () => ({
-  cookies: vi.fn(async () => ({ set: cookieSet })),
-}));
+import { GET, POST } from './route';
 
-vi.mock('@/lib/db/server', () => ({
-  createDbServerClient,
-}));
+const me = () => ({ id: 'a', type: 'human', org_id: 'org-1', project_id: 'p1', rateLimitExceeded: false, rateLimitRemaining: 299, rateLimitResetAt: 0 });
 
-import { POST } from './route';
-import { CURRENT_PROJECT_COOKIE } from '@/lib/auth-helpers';
-
-function createMembershipDbStub(membership: { project_id: string; projects: { name: string } | null } | null) {
-  const query = {
-    select: vi.fn(() => query),
-    eq: vi.fn(() => query),
-    maybeSingle: vi.fn().mockResolvedValue({ data: membership, error: null }),
-  };
-
-  return {
-    auth: {
-      getUser: vi.fn().mockResolvedValue({ data: { user: { id: 'user-1' } } }),
-    },
-    from: vi.fn(() => query),
-  };
-}
-
-describe('POST /api/current-project', () => {
+describe('/api/current-project (cookies + dynamic import)', () => {
   beforeEach(() => {
-    cookieSet.mockReset();
-    createDbServerClient.mockReset();
+    Object.values(h).forEach((m) => m.mockReset());
+    h.getAuthContext.mockResolvedValue(me());
+    h.getServerSession.mockResolvedValue({ access_token: 'tok' });
+    h.fastapiCall.mockResolvedValue({ name: 'Alpha', id: 'p1' });
   });
 
-  it('persists current project cookie when the requested project belongs to the user', async () => {
-    createDbServerClient.mockResolvedValue(createMembershipDbStub({
-      project_id: 'project-1',
-      projects: { name: 'Alpha' },
-    }));
-
-    const response = await POST(new Request('http://localhost/api/current-project', {
-      method: 'POST',
-      body: JSON.stringify({ project_id: 'project-1' }),
-      headers: { 'Content-Type': 'application/json' },
-    }));
-
-    expect(response.status).toBe(200);
-    const body = await response.json();
-    expect(body.data.project_name).toBe('Alpha');
-    expect(cookieSet).toHaveBeenCalledWith(CURRENT_PROJECT_COOKIE, 'project-1', expect.objectContaining({ path: '/' }));
+  it('GET: 401 when unauthenticated', async () => {
+    h.getAuthContext.mockResolvedValue(null);
+    expect((await GET(new Request('http://localhost/api/current-project'))).status).toBe(401);
+  });
+  it('GET: returns project_id/org_id + name from fastapiCall', async () => {
+    const res = await GET(new Request('http://localhost/api/current-project'));
+    expect(res.status).toBe(200);
+    expect((await res.json()).data).toMatchObject({ project_id: 'p1', org_id: 'org-1', project_name: 'Alpha' });
+  });
+  it('GET: fastapiCall 실패해도 200 + 기본 이름(fallback)', async () => {
+    h.fastapiCall.mockRejectedValue(new Error('be down'));
+    const res = await GET(new Request('http://localhost/api/current-project'));
+    expect(res.status).toBe(200);
+    expect((await res.json()).data).toMatchObject({ project_id: 'p1', project_name: 'My Project' });
   });
 
-  it('returns validation errors for malformed payloads', async () => {
-    createDbServerClient.mockResolvedValue(createMembershipDbStub(null));
-
-    const response = await POST(new Request('http://localhost/api/current-project', {
-      method: 'POST',
-      body: JSON.stringify({}),
-      headers: { 'Content-Type': 'application/json' },
-    }));
-
-    expect(response.status).toBe(400);
-    const body = await response.json();
-    expect(body.error.code).toBe('VALIDATION_FAILED');
-    expect(cookieSet).not.toHaveBeenCalled();
+  it('POST: invalid body → parseBody 400', async () => {
+    h.parseBody.mockResolvedValue({ success: false, response: new Response('bad', { status: 400 }) });
+    expect((await POST(new Request('http://localhost/api/current-project', { method: 'POST', body: '{}' }))).status).toBe(400);
+    expect(h.cookieSet).not.toHaveBeenCalled();
   });
-
-  it('rejects switching to a project without membership', async () => {
-    createDbServerClient.mockResolvedValue(createMembershipDbStub(null));
-
-    const response = await POST(new Request('http://localhost/api/current-project', {
-      method: 'POST',
-      body: JSON.stringify({ project_id: 'project-2' }),
-      headers: { 'Content-Type': 'application/json' },
-    }));
-
-    expect(response.status).toBe(403);
-    const body = await response.json();
-    expect(body.error.code).toBe('FORBIDDEN');
-    expect(cookieSet).not.toHaveBeenCalled();
+  it('POST: valid → 쿠키 set + 200 + project_id', async () => {
+    h.parseBody.mockResolvedValue({ success: true, data: { project_id: 'p2' } });
+    const res = await POST(new Request('http://localhost/api/current-project', { method: 'POST', body: '{}' }));
+    expect(res.status).toBe(200);
+    expect(h.cookieSet).toHaveBeenCalledWith('sp_cur_proj', 'p2', expect.objectContaining({ path: '/' }));
+    expect((await res.json()).data).toMatchObject({ project_id: 'p2' });
   });
 });

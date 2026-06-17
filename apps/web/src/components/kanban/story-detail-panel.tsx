@@ -14,8 +14,9 @@ import { AttachmentImage } from '@/components/chat/attachment-image';
 import { AttachmentFile } from '@/components/chat/attachment-file';
 import { LabelChip, LABEL_PRESET_COLORS, type LabelData } from '@/components/ui/label-chip';
 import { DependencyGraph } from './dependency-graph';
-import { OutcomeIntentFields, type OutcomeIntentValue } from '@/components/outcome/outcome-intent-fields';
 import { OutcomeResultCard, type OutcomeResult } from '@/components/outcome/outcome-result-card';
+import { StoryHypothesesSection } from '@/components/hypotheses/story-hypotheses-section';
+import { StoryMergeGate } from '@/components/cage/story-merge-gate';
 import { EntityDispatchPanel } from '@/components/dispatch/entity-dispatch-panel';
 import { Button } from '@/components/ui/button';
 import { StatusBadge } from '@/components/ui/status-badge';
@@ -138,16 +139,18 @@ export function StoryDetailPanel({ story, tasks, nextTasksCursor = null, loading
   const [attachError, setAttachError] = useState(false);
   const attachInputRef = useRef<HTMLInputElement>(null);
 
-  const [intent, setIntent] = useState<OutcomeIntentValue>({
-    success_hypothesis: story.success_hypothesis ?? '',
-    metric_definition: story.metric_definition ?? null,
-    measure_after: story.measure_after ? story.measure_after.slice(0, 10) : '',
-  });
-  const [intentOpen, setIntentOpen] = useState(!!story.success_hypothesis || !!story.metric_definition);
-  const [savingIntent, setSavingIntent] = useState(false);
-
   const [editingAssignee, setEditingAssignee] = useState(false);
-  const [savingAssignee, setSavingAssignee] = useState(false);
+  // E-BOARD: assignee optimistic local state — mirrors localStatus (L130). Checkmark/collapsed
+  // render read this, so a click reflects immediately instead of waiting for the PATCH round-trip
+  // + parent `onStoryUpdate` prop push. Decoupling from the `story` prop is what fixes "됐다 안됐다".
+  const [localAssigneeIds, setLocalAssigneeIds] = useState<string[]>(() =>
+    story.assignee_ids && story.assignee_ids.length > 0
+      ? story.assignee_ids
+      : story.assignee_id ? [story.assignee_id] : []
+  );
+  // 연타 race 가드: 옵티미스틱 토글의 source-of-truth. 클릭마다 동기 갱신해 같은 틱 더블클릭에서도
+  // 직전 stale snapshot이 아닌 최신값 기준으로 next를 계산(함수형 업데이트와 동등한 보장).
+  const assigneeIdsRef = useRef<string[]>(localAssigneeIds);
 
   const [deps, setDeps] = useState<DependencyEdge[]>([]);
   const [loadingDeps, setLoadingDeps] = useState(false);
@@ -190,13 +193,7 @@ export function StoryDetailPanel({ story, tasks, nextTasksCursor = null, loading
     setTitleDraft(story.title);
     setDescriptionDraft(story.description ?? '');
     setAcDraft(story.acceptance_criteria ?? '');
-    setIntent({
-      success_hypothesis: story.success_hypothesis ?? '',
-      metric_definition: story.metric_definition ?? null,
-      measure_after: story.measure_after ? story.measure_after.slice(0, 10) : '',
-    });
-    setIntentOpen(!!story.success_hypothesis || !!story.metric_definition);
-  }, [story.id, story.title, story.description, story.acceptance_criteria, story.success_hypothesis, story.metric_definition, story.measure_after]);
+  }, [story.id, story.title, story.description, story.acceptance_criteria]);
 
   useEffect(() => {
     if (editingTitle) {
@@ -394,23 +391,50 @@ export function StoryDetailPanel({ story, tasks, nextTasksCursor = null, loading
     ? story.assignee_ids
     : (story.assignee_id ? [story.assignee_id] : []);
 
+  // prop이 바뀌면(네비게이션·외부 갱신·dispatch 패널 onAssigneePatched 경로) 로컬을 재동기화 — localStatus(L319) 미러.
+  // 배열 ref가 아닌 내용(join) 기준 → 부모 리렌더가 in-flight 옵티미스틱 값을 덮지 않음.
+  const assigneeSyncKey = currentAssigneeIds.join(',');
+  useEffect(() => {
+    assigneeIdsRef.current = currentAssigneeIds;
+    setLocalAssigneeIds(currentAssigneeIds);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [assigneeSyncKey]);
+
   const handleToggleAssignee = async (memberId: string) => {
-    const set = new Set(currentAssigneeIds);
-    if (set.has(memberId)) set.delete(memberId); else set.add(memberId);
-    const next = Array.from(set);
-    setSavingAssignee(true);
+    const prev = assigneeIdsRef.current;
+    const next = prev.includes(memberId)
+      ? prev.filter((id) => id !== memberId)
+      : [...prev, memberId];
+    assigneeIdsRef.current = next;   // 동기 갱신 → 연타 시 다음 클릭이 최신 기준으로 계산
+    setLocalAssigneeIds(next);       // 옵티미스틱 — 체크마크/표시 즉시 반영
+    // assignee_ids 전체 배열 교체(서버 last-write-wins) → 연타 시 마지막 로컬과 정합.
     const updated = await patchStory({ assignee_ids: next });
-    setSavingAssignee(false);
-    // BE가 assignee_id(주담당)를 assignee_ids[0]로 동기화 → 응답 우선, 없으면 로컬 계산.
-    if (updated) onStoryUpdate?.({ ...story, assignee_ids: updated.assignee_ids ?? next, assignee_id: updated.assignee_id ?? next[0] ?? null });
+    if (updated) {
+      // BE가 assignee_id(주담당)를 assignee_ids[0]로 동기화 → 응답 우선, 없으면 로컬 계산.
+      const resolved = updated.assignee_ids ?? next;
+      assigneeIdsRef.current = resolved;
+      setLocalAssigneeIds(resolved);
+      onStoryUpdate?.({ ...story, assignee_ids: resolved, assignee_id: updated.assignee_id ?? resolved[0] ?? null });
+    } else {
+      assigneeIdsRef.current = prev; // PATCH 실패 → 직전 값 롤백
+      setLocalAssigneeIds(prev);
+      addToast({ type: 'error', title: '담당자 변경에 실패했습니다.' });
+    }
   };
 
   const handleClearAssignees = async () => {
-    setSavingAssignee(true);
+    const prev = assigneeIdsRef.current;
+    assigneeIdsRef.current = [];
+    setLocalAssigneeIds([]);         // 옵티미스틱
     setEditingAssignee(false);
     const updated = await patchStory({ assignee_ids: [] });
-    setSavingAssignee(false);
-    if (updated) onStoryUpdate?.({ ...story, assignee_ids: [], assignee_id: null });
+    if (updated) {
+      onStoryUpdate?.({ ...story, assignee_ids: [], assignee_id: null });
+    } else {
+      assigneeIdsRef.current = prev; // 롤백
+      setLocalAssigneeIds(prev);
+      addToast({ type: 'error', title: '담당자 변경에 실패했습니다.' });
+    }
   };
 
   const handleSaveDescription = async () => {
@@ -479,16 +503,6 @@ export function StoryDetailPanel({ story, tasks, nextTasksCursor = null, loading
     const next = (story.attachments ?? []).filter((a) => a.url !== url); // filter → 전체 교체
     const updated = await patchStory({ attachments: next });
     onStoryUpdate?.({ ...story, attachments: updated?.attachments ?? next });
-  };
-
-  const handleSaveIntent = async () => {
-    setSavingIntent(true);
-    await patchStory({
-      success_hypothesis: intent.success_hypothesis.trim() || null,
-      metric_definition: intent.metric_definition,
-      measure_after: intent.measure_after ? `${intent.measure_after}T00:00:00Z` : null,
-    });
-    setSavingIntent(false);
   };
 
   // Fetch comments
@@ -744,7 +758,7 @@ export function StoryDetailPanel({ story, tasks, nextTasksCursor = null, loading
                     — {t('clearAssignees')}
                   </button>
                   {members.filter((m, i, arr) => arr.findIndex((x) => x.id === m.id) === i).map((m) => {
-                    const selected = currentAssigneeIds.includes(m.id);
+                    const selected = localAssigneeIds.includes(m.id);
                     return (
                       <button
                         key={m.id}
@@ -770,11 +784,9 @@ export function StoryDetailPanel({ story, tasks, nextTasksCursor = null, loading
                 </div>
               ) : (
                 <p className="mt-1 text-sm text-foreground">
-                  {savingAssignee
-                    ? t('loading')
-                    : currentAssigneeIds.length > 0
-                      ? currentAssigneeIds.map((id) => memberMap[id]?.name ?? '—').join(', ')
-                      : '—'}
+                  {localAssigneeIds.length > 0
+                    ? localAssigneeIds.map((id) => memberMap[id]?.name ?? '—').join(', ')
+                    : '—'}
                 </p>
               )}
             </div>
@@ -787,7 +799,7 @@ export function StoryDetailPanel({ story, tasks, nextTasksCursor = null, loading
                   entityType="story"
                   entityId={story.id}
                   projectId={projectId}
-                  currentAssigneeId={currentAssigneeIds.length > 1 ? undefined : story.assignee_id}
+                  currentAssigneeId={localAssigneeIds.length > 1 ? undefined : story.assignee_id}
                   onAssigneePatched={(aid) => onStoryUpdate?.({ ...story, assignee_id: aid })}
                 />
               </div>
@@ -1226,7 +1238,9 @@ export function StoryDetailPanel({ story, tasks, nextTasksCursor = null, loading
               )}
             </div>
 
-            {/* Outcome intent + result */}
+            {/* Outcome result (read-only) + 연결 가설 chip/picker — 인라인 intent 입력은
+                S8c서 연결 가설 affordance로 대체(스토리서 가설 생성 금지·AC①). 결과 카드는
+                legacy outcome 백필(1519fc60) 전까지 보존. */}
             <div className="space-y-3">
               {story.outcome_status && story.outcome_status !== 'n_a' ? (
                 <OutcomeResultCard
@@ -1236,20 +1250,15 @@ export function StoryDetailPanel({ story, tasks, nextTasksCursor = null, loading
                   pendingMetricLabel={story.metric_definition?.metric}
                 />
               ) : null}
-              <OutcomeIntentFields
-                value={intent}
-                onChange={setIntent}
-                open={intentOpen}
-                onOpenChange={setIntentOpen}
-                context="story"
-              />
-              {intentOpen ? (
-                <div className="flex justify-end gap-2">
-                  <Button size="sm" onClick={() => { void handleSaveIntent(); }} disabled={savingIntent}>
-                    {savingIntent ? t('loading') : t('save')}
-                  </Button>
-                </div>
+              {projectId ? (
+                <StoryHypothesesSection
+                  storyId={story.id}
+                  epicId={story.epic_id}
+                  projectId={projectId}
+                />
               ) : null}
+              {/* H1-S8 surface②: 머지 게이트 evidence(read-only·gate 있을 때만 노출) */}
+              <StoryMergeGate storyId={story.id} />
             </div>
 
             {/* Tabs for Tasks, Comments, Activity */}
@@ -1320,9 +1329,11 @@ export function StoryDetailPanel({ story, tasks, nextTasksCursor = null, loading
                       {comments.map((comment) => (
                         <li key={comment.id} className="rounded-md border border-border bg-muted/30 p-3">
                           <p className="whitespace-pre-wrap text-sm text-foreground">{comment.content}</p>
-                          <p className="mt-2 text-[10px] font-mono text-muted-foreground">
-                            {new Date(comment.created_at).toLocaleString()}
-                          </p>
+                          <div className="mt-2 flex items-center gap-2 text-[10px] font-mono text-muted-foreground">
+                            <span>{memberMap[comment.created_by]?.name ?? '—'}</span>
+                            <span>·</span>
+                            <span>{new Date(comment.created_at).toLocaleString()}</span>
+                          </div>
                         </li>
                       ))}
                     </ul>

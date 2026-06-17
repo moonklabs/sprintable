@@ -133,3 +133,113 @@ def test_err_returns_call_tool_result_with_is_error():
     assert len(result) == 1
     assert result[0].type == "text"
     assert result[0].text == "Error: something went wrong"
+
+
+# ─── fix/mcp-error-surfacing: 4xx 본문 표면화 ───────────────────────────────
+#
+# 이전 구현은 {error:{message}} 엔벨로프만 보고 FastAPI 422 검증 배열·dict detail·
+# 평문 본문을 버려 'Sprintable API 422'로 삼켰다. 아래 테스트는 공유 헬퍼(request)가
+# 백엔드 사유를 SprintableApiError.message(= 도구 err() 문자열)에 노출함을 보장한다.
+
+
+async def _make_error_client(status: int, json_body=None, *, raise_on_json=False, text_body=""):
+    """status/본문을 가진 4xx 응답을 mock해 request 호출 → SprintableApiError 반환."""
+    c = SprintableClient()
+    c.configure("https://api.sprintable.ai", "sk_live_test")
+
+    mock_resp = MagicMock()
+    mock_resp.is_success = False
+    mock_resp.status_code = status
+    if raise_on_json:
+        mock_resp.json.side_effect = ValueError("not json")
+        mock_resp.text = text_body
+    else:
+        mock_resp.json.return_value = json_body
+
+    with patch("httpx.AsyncClient.request", new_callable=AsyncMock, return_value=mock_resp):
+        with pytest.raises(SprintableApiError) as exc_info:
+            await c.post("/api/v2/hypotheses", json={"statement": "x"})
+    return exc_info.value
+
+
+@pytest.mark.anyio
+async def test_error_surfaces_422_validation_array():
+    """FastAPI 422 pydantic 배열 → 'field: msg' 요약이 메시지에 포함."""
+    err_obj = await _make_error_client(
+        422,
+        {
+            "detail": [
+                {
+                    "loc": ["body", "metric_definition", "source"],
+                    "msg": "value is not a valid enumeration member",
+                    "type": "value_error",
+                },
+                {
+                    "loc": ["body", "metric_definition", "target"],
+                    "msg": "value is not a valid float",
+                    "type": "type_error.float",
+                },
+            ]
+        },
+    )
+    assert err_obj.status == 422
+    msg = str(err_obj)
+    assert "metric_definition.source" in msg
+    assert "value is not a valid enumeration member" in msg
+    assert "metric_definition.target" in msg
+    # 회귀 가드: 더 이상 본문을 삼킨 bare 문자열이 아니다.
+    assert msg != "Sprintable API 422"
+
+
+@pytest.mark.anyio
+async def test_error_surfaces_human_owner_required_envelope():
+    """{error:{code,message}} 엔벨로프(400 HUMAN_OWNER_REQUIRED) → 'CODE: message'."""
+    err_obj = await _make_error_client(
+        400,
+        {
+            "data": None,
+            "error": {
+                "code": "HUMAN_OWNER_REQUIRED",
+                "message": "agent caller는 휴먼 owner_member_id를 명시해야 합니다.",
+            },
+            "meta": None,
+        },
+    )
+    assert err_obj.status == 400
+    msg = str(err_obj)
+    assert msg.startswith("HUMAN_OWNER_REQUIRED:")
+    assert "owner_member_id" in msg
+
+
+@pytest.mark.anyio
+async def test_error_surfaces_dict_detail_code():
+    """엔벨로프 미적용 raw dict detail({code,message})도 표면화."""
+    err_obj = await _make_error_client(
+        400,
+        {"detail": {"code": "NO_VALID_FIELDS", "message": "no updatable fields"}},
+    )
+    msg = str(err_obj)
+    assert "NO_VALID_FIELDS" in msg
+    assert "no updatable fields" in msg
+
+
+@pytest.mark.anyio
+async def test_error_surfaces_non_json_body():
+    """JSON 파싱 실패(HTML/평문 502 등) → 원문 텍스트 노출(삼키지 않음)."""
+    err_obj = await _make_error_client(
+        502, raise_on_json=True, text_body="<html>Bad Gateway</html>"
+    )
+    msg = str(err_obj)
+    assert err_obj.status == 502
+    assert "Bad Gateway" in msg
+
+
+@pytest.mark.anyio
+async def test_error_truncates_large_body():
+    """비정상적으로 큰 본문은 잘려 에이전트 컨텍스트를 잠식하지 않는다."""
+    err_obj = await _make_error_client(
+        500, raise_on_json=True, text_body="x" * 5000
+    )
+    msg = str(err_obj)
+    assert "truncated" in msg
+    assert len(msg) < 2000

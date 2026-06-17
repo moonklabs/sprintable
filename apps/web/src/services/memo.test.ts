@@ -1,6 +1,22 @@
 import { describe, it, expect } from 'vitest';
 import { MemoService } from './memo';
 
+// 837a36c4(b17): OSS ApiMemoRepository는 빈 stub(SaaS overlay가 실구현)이라 MemoService.fromDb로는
+// this.repo.getById/getReplies/list 크래시. MemoService 자체를 테스트하므로 모킹 불가 → 기존 db 픽스로
+// 위임하는 repo를 주입(new MemoService(repoFromDb(db), db)). 실 ApiMemoRepository가 db로 해소하는 것을 재현.
+function repoFromDb(db: any): any {
+  return {
+    getById: async (id: string) => (await db.from('memos').select().eq('id', id).single()).data,
+    getReplies: async (memoId: string) =>
+      (await db.from('memo_replies').select().eq('memo_id', memoId).order('created_at', { ascending: true })).data ?? [],
+    list: async (filters: any) =>
+      (await db.from('memos').select().eq('project_id', filters?.project_id).order('created_at', { ascending: false })).data ?? [],
+    create: async (payload: any) => (await db.from('memos').insert(payload).select().single()).data,
+    addReply: async (payload: any) => (await db.from('memo_replies').insert(payload).select().single()).data,
+    resolve: async () => ({}),
+  };
+}
+
 describe('MemoService.getByIdWithDetails', () => {
   it('enriches memo details with replies, reply summary, project name, timeline, and linked docs', async () => {
     const db = {
@@ -116,7 +132,7 @@ describe('MemoService.getByIdWithDetails', () => {
       },
     } as any;
 
-    const service = MemoService.fromDb(db);
+    const service = new MemoService(repoFromDb(db), db);
     const memo = await service.getByIdWithDetails('memo-1');
 
     expect(memo.reply_count).toBe(2);
@@ -175,7 +191,7 @@ describe('MemoService.create', () => {
       },
     } as any;
 
-    const service = MemoService.fromDb(db);
+    const service = new MemoService(repoFromDb(db), db);
 
     await expect(service.create({
       project_id: 'project-1',
@@ -256,7 +272,7 @@ describe('MemoService.linkDoc and markRead', () => {
       },
     } as any;
 
-    const service = MemoService.fromDb(db);
+    const service = new MemoService(repoFromDb(db), db);
 
     await expect(service.linkDoc('memo-1', 'doc-1', 'author-1')).resolves.toMatchObject({ doc_id: 'doc-1', memo_id: 'memo-1' });
     await expect(service.markRead('memo-1', 'author-1')).resolves.toMatchObject({ memo_id: 'memo-1', team_member_id: 'author-1' });
@@ -314,7 +330,7 @@ describe('MemoService.linkDoc and markRead', () => {
       },
     } as any;
 
-    const service = MemoService.fromDb(db);
+    const service = new MemoService(repoFromDb(db), db);
     await expect(service.markRead('memo-1', 'author-1')).resolves.toMatchObject({
       memo_id: 'memo-1',
       team_member_id: 'author-1',
@@ -391,7 +407,7 @@ describe('MemoService.list', () => {
       },
     } as any;
 
-    const service = MemoService.fromDb(db);
+    const service = new MemoService(repoFromDb(db), db);
     const memos = await service.list({ project_id: 'project-1' });
 
     expect(memos).toEqual([
@@ -489,7 +505,7 @@ describe('MemoService.list', () => {
       },
     } as any;
 
-    const service = MemoService.fromDb(db);
+    const service = new MemoService(repoFromDb(db), db);
     const memos = await service.list({ project_id: 'project-1' });
 
     expect(memos).toEqual([

@@ -33,7 +33,7 @@ export function HypothesisRow({
   const t = useTranslations('hypotheses');
   const md = hypothesis.metric_definition;
   // 초안 = AI 템플릿 초안(draft_metadata.template===true)·아직 미확인. 핸드오프 §5 ⓐ 기준
-  // (PO 콜: FE 인터임 hack 금지. 디디 BE가 HypothesisResponse에 draft_metadata/drafted_by를
+  // (PO 콜: FE 인터임 hack 금지. BE가 HypothesisResponse에 draft_metadata/drafted_by를
   // additive 노출). 필드 노출 전엔 template이 undefined라 모든 proposed가 비-draft로 떨어져
   // [활성화] flow가 정상 동작하고, 노출되면 AI 초안만 핀/확인이 자연히 살아난다(revert 불필요).
   const draftMeta = hypothesis.draft_metadata as { template?: boolean; confirmed?: boolean } | null;

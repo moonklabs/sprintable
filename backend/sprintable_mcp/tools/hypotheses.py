@@ -112,7 +112,18 @@ async def get_hypothesis(args: GetHypothesisInput) -> list[TextContent]:
 
 
 async def create_hypothesis(args: CreateHypothesisInput) -> list[TextContent]:
-    """가설 생성. agent/API key 호출은 서버가 status='proposed'로 강제한다(§4.1.3)."""
+    """가설 생성. agent/API key 호출은 서버가 status='proposed'로 강제한다(§4.1.3).
+
+    metric_definition(dict) 계약(backend _validate_metric_definition·검증 SSOT):
+      필수: metric(str), source(ga4|internal_ops|manual), target(number), direction(up|down).
+      source='ga4'이면 추가 필수: property_id, ga4_metric, date_range_days(양의 정수).
+
+    owner_member_id(휴먼 멤버) — agent 호출은 명시 필수다. 백엔드(services/hypothesis.create_hypothesis)는
+    휴먼 caller만 self를 owner로 기본 적용하고, agent caller가 생략하면 400 HUMAN_OWNER_REQUIRED를 낸다.
+    MCP auth context의 member_id는 *에이전트* 멤버라 휴먼 default로 쓸 수 없고(다시 같은 400),
+    임의 휴먼을 추측-주입하는 것은 owner 의미를 왜곡한다. 따라서 여기서는 default를 만들지 않고,
+    개선된 에러 표면화(api_client._extract_error_message)로 사유를 명확히 전달하는 쪽을 택한다.
+    """
     body: dict = {
         "project_id": client.project_id,
         "statement": args.statement,

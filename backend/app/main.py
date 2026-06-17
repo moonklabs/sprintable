@@ -21,24 +21,39 @@ async def lifespan(app: FastAPI):
     from app.core.database import engine
     from app.services.pg_pubsub import listen_loop
     task = asyncio.create_task(listen_loop())
+    # E-L2 S5: 휴리스틱 트리거 워커는 default-off — 명시 활성화 시에만 task 생성(AC①).
+    l2_task = None
+    if settings.l2_trigger_enabled:
+        from app.services.l2_trigger_worker import L2TriggerWorker
+
+        l2_task = asyncio.create_task(L2TriggerWorker().run())
     try:
         yield
     finally:
         task.cancel()
+        if l2_task is not None:
+            l2_task.cancel()
         try:
-            await task
-        except asyncio.CancelledError:
-            pass
+            try:
+                await task
+            except asyncio.CancelledError:
+                pass
+            if l2_task is not None:
+                try:
+                    await l2_task
+                except asyncio.CancelledError:
+                    pass
         finally:
             # 좀비 연결 박멸(S:33e0c681): SIGTERM(Cloud Run 인스턴스 교체·스케일다운·리비전 삭제)
             # 시 SQLAlchemy 풀의 전 DB 연결을 정상 종료. dispose 누락 시 구 인스턴스가 연결을 안
             # 놓아 좀비 누적 → prod 100 cap 초과 → TooManyConnections(전 엔드포인트 500). lifespan
             # shutdown 은 in-flight 요청 drain 이후 실행되므로 dispose 순서 안전(AC3). pg_pubsub
-            # raw 커넥션은 task.cancel→listen_loop finally 에서 이미 close.
+            # raw 커넥션은 task.cancel→listen_loop finally 에서 이미 close. L2 워커는
+            # l2_task.cancel→run finally 에서 advisory lock 해제·전용 커넥션 close.
             await engine.dispose()
 
 
-from app.routers import account, activity_logs, agent_deployments, agent_gateway, agent_inbox, agent_message_policy, agent_personas, agent_routing_rules, agent_runs, agent_sessions, analytics, api_keys, attachments, audit_logs, auth, bridge, channel, conversations, cron, current_project, dashboard, dependencies, dispatch, docs, entities, epics, event_notifications, events, exclusion, file_locks, gates, health, hitl, hitl_config, hypotheses, integrations, invite_accept, labels, mcp, me, meetings, members, mockups, notification_preferences, notifications, open_api_keys, org_invites, org_members, organizations, oss, participation, plan_features, policy_documents, presence, project_access, project_settings, projects, public_docs, retros, rewards, sprints, standups, stories, subscription, tasks, team_members, team_presence, trust_scores, verdict_capture, verdicts, webhooks, workflow_executions, workflow_recipes, workflow_report, workflow_templates, workflow_trigger, workflow_trigger_types, workflow_versions, ws_chat
+from app.routers import account, activity_logs, activity_stream, agent_deployments, agent_gateway, agent_inbox, agent_message_policy, agent_personas, agent_routing_rules, agent_runs, agent_sessions, agents, analytics, api_keys, attachments, audit_logs, auth, bridge, channel, conversations, cron, current_project, dashboard, dependencies, dispatch, docs, entities, epics, event_notifications, events, exclusion, file_locks, gates, health, hitl, hitl_config, hypotheses, integrations, invite_accept, labels, mcp, me, meetings, members, merge_gate, mockups, notification_preferences, notifications, open_api_keys, org_invites, org_members, organizations, oss, participation, plan_features, policy_documents, presence, project_access, project_settings, projects, public_docs, retros, rewards, sprints, standups, stories, subscription, tasks, team_members, team_presence, trust_scores, verdict_capture, verdicts, webhooks, workflow_executions, workflow_recipes, workflow_report, workflow_templates, workflow_trigger, workflow_trigger_types, workflow_versions, ws_chat
 
 app = FastAPI(
     title="Sprintable API v2",
@@ -124,6 +139,7 @@ app.add_middleware(
 app.include_router(auth.router)
 app.include_router(health.router)
 app.include_router(activity_logs.router)
+app.include_router(activity_stream.router)
 app.include_router(events.router)
 app.include_router(agent_gateway.router)
 app.include_router(dispatch.router)
@@ -150,6 +166,7 @@ app.include_router(stories.router)
 app.include_router(projects.router)
 app.include_router(project_access.router)
 app.include_router(team_members.router)
+app.include_router(agents.router)
 app.include_router(team_presence.router)
 app.include_router(org_members.router)
 app.include_router(standups.router)
@@ -165,6 +182,7 @@ app.include_router(audit_logs.router)
 app.include_router(dashboard.router)
 app.include_router(current_project.router)
 app.include_router(members.router)
+app.include_router(merge_gate.router)
 app.include_router(organizations.router)
 app.include_router(org_invites.router)
 app.include_router(invite_accept.router)
