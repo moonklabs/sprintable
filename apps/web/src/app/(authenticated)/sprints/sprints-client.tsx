@@ -3,7 +3,7 @@
 import { useCallback, useEffect, useState } from 'react';
 import { useSearchParams } from 'next/navigation';
 import { useTranslations } from 'next-intl';
-import { Plus, X, Play, StopCircle, ChevronRight } from 'lucide-react';
+import { Plus, X, Play, StopCircle, ChevronRight, Trash2, AlertTriangle } from 'lucide-react';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { TopBarSlot } from '@/components/nav/top-bar-slot';
@@ -235,6 +235,45 @@ function CreateDialog({ projectId, onCreated, onClose }: CreateDialogProps) {
   );
 }
 
+// ─── Delete Confirm Dialog ──────────────────────────────────────────────────────
+
+interface DeleteConfirmDialogProps {
+  sprintTitle: string;
+  deleting: boolean;
+  error: string | null;
+  onConfirm: () => void;
+  onClose: () => void;
+}
+
+function DeleteConfirmDialog({ sprintTitle, deleting, error, onConfirm, onClose }: DeleteConfirmDialogProps) {
+  const t = useTranslations('sprints');
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
+      <button type="button" className="absolute inset-0 bg-black/50 backdrop-blur-[2px]" onClick={onClose} aria-label={t('cancel')} />
+      <div role="alertdialog" aria-modal="true" className="relative z-10 w-full max-w-sm rounded-2xl border border-border bg-background p-6 shadow-xl">
+        <div className="mb-3 flex items-start gap-3">
+          <span className="flex size-9 shrink-0 items-center justify-center rounded-full bg-destructive/10 text-destructive">
+            <AlertTriangle className="size-5" />
+          </span>
+          <div className="min-w-0">
+            <h2 className="text-base font-bold text-foreground">{t('deleteConfirmTitle')}</h2>
+            <p className="mt-0.5 truncate text-sm font-medium text-muted-foreground">{sprintTitle}</p>
+          </div>
+        </div>
+        <p className="mb-4 text-sm text-muted-foreground">{t('deleteConfirmBody')}</p>
+        {error ? <p className="mb-3 text-xs text-destructive">{error}</p> : null}
+        <div className="flex justify-end gap-2">
+          <Button type="button" variant="ghost" size="sm" onClick={onClose} disabled={deleting}>{t('cancel')}</Button>
+          <Button type="button" variant="destructive" size="sm" onClick={onConfirm} disabled={deleting}>
+            <Trash2 className="size-4" />
+            {deleting ? '...' : t('deleteConfirm')}
+          </Button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
 // ─── Main Client ──────────────────────────────────────────────────────────────
 
 export function SprintsClient({ projectId }: SprintsClientProps) {
@@ -259,6 +298,9 @@ export function SprintsClient({ projectId }: SprintsClientProps) {
   const [showCreate, setShowCreate] = useState(false);
   const [activating, setActivating] = useState(false);
   const [closing, setClosing] = useState(false);
+  const [showDeleteConfirm, setShowDeleteConfirm] = useState(false);
+  const [deleting, setDeleting] = useState(false);
+  const [deleteError, setDeleteError] = useState<string | null>(null);
   const [actionError, setActionError] = useState<string | null>(null);
 
   const loadSprints = useCallback(async () => {
@@ -398,6 +440,29 @@ export function SprintsClient({ projectId }: SprintsClientProps) {
     }
   };
 
+  const handleDelete = async () => {
+    if (!selected || deleting) return;
+    setDeleting(true);
+    setDeleteError(null);
+    try {
+      const res = await fetch(`/api/sprints/${selected.id}`, { method: 'DELETE' });
+      if (!res.ok) {
+        const json = await res.json().catch(() => ({})) as { error?: { message?: string } };
+        setDeleteError(json.error?.message ?? t('deleteError'));
+        return;
+      }
+      // 삭제 성공 — 목록에서 제거하고 상세 패널·다이얼로그를 닫는다.
+      const deletedId = selected.id;
+      setSprints((prev) => prev.filter((s) => s.id !== deletedId));
+      setShowDeleteConfirm(false);
+      setSelected(null);
+    } catch {
+      setDeleteError(t('deleteError'));
+    } finally {
+      setDeleting(false);
+    }
+  };
+
   const handleAssignStory = async (story: Story) => {
     try {
       const res = await fetch(`/api/stories/${story.id}`, {
@@ -494,9 +559,21 @@ export function SprintsClient({ projectId }: SprintsClientProps) {
           <h2 className="text-lg font-semibold text-foreground">{selected.title}</h2>
           <Badge variant={statusVariant(selected.status)} className="mt-1">{selected.status}</Badge>
         </div>
-        <Button variant="ghost" size="sm" onClick={() => setSelected(null)}>
-          <X className="size-4" />
-        </Button>
+        <div className="flex shrink-0 items-center gap-1">
+          <Button
+            variant="ghost"
+            size="sm"
+            onClick={() => { setDeleteError(null); setShowDeleteConfirm(true); }}
+            aria-label={t('delete')}
+            title={t('delete')}
+            className="text-muted-foreground hover:text-destructive"
+          >
+            <Trash2 className="size-4" />
+          </Button>
+          <Button variant="ghost" size="sm" onClick={() => setSelected(null)} aria-label={t('cancel')}>
+            <X className="size-4" />
+          </Button>
+        </div>
       </div>
 
       {/* Goal */}
@@ -683,6 +760,16 @@ export function SprintsClient({ projectId }: SprintsClientProps) {
             setShowCreate(false);
           }}
           onClose={() => setShowCreate(false)}
+        />
+      ) : null}
+
+      {showDeleteConfirm && selected ? (
+        <DeleteConfirmDialog
+          sprintTitle={selected.title}
+          deleting={deleting}
+          error={deleteError}
+          onConfirm={() => void handleDelete()}
+          onClose={() => { if (!deleting) setShowDeleteConfirm(false); }}
         />
       ) : null}
     </>
