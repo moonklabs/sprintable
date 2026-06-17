@@ -234,6 +234,11 @@ export function ChatListView({ projectId, currentTeamMemberId, open, onOpenChang
   const convsRef = useRef(conversations);
   useEffect(() => { convsRef.current = conversations; }, [conversations]);
 
+  // 전환 in-flight 경합 가드(RC): fetch 응답 적용 시점에 여전히 같은 프로젝트인지 검증해 stale 응답을
+  // drop 한다. render 단계 동기라 async resolve 시 항상 최신 projectId 를 가리킨다(assignee last-write-wins 동류).
+  const projectIdRef = useRef(projectId);
+  projectIdRef.current = projectId;
+
   const fetchConversations = useCallback(async (nextOffset = 0, append = false) => {
     try {
       const res = await fetch(
@@ -241,6 +246,7 @@ export function ChatListView({ projectId, currentTeamMemberId, open, onOpenChang
       );
       if (!res.ok) return;
       const json = await res.json() as { data: ConversationItem[]; total: number };
+      if (projectId !== projectIdRef.current) return; // 전환됨 — stale 응답 drop(현 화면 안 덮음)
       const items = json.data ?? [];
       setConversations((prev) => append ? [...prev, ...items] : items);
       setMyOffset(nextOffset + items.length);
@@ -257,6 +263,7 @@ export function ChatListView({ projectId, currentTeamMemberId, open, onOpenChang
     );
     if (!res.ok) return;
     const json = await res.json() as { data: ConversationItem[]; total: number };
+    if (projectId !== projectIdRef.current) return; // 전환됨 — stale 응답 drop(B 화면 안 덮음)
     const items = json.data ?? [];
     setAllConversations((prev) => append ? [...prev, ...items] : items);
     setAgentOffset(nextOffset + items.length);
