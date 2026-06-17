@@ -104,6 +104,10 @@ async def has_project_access(
             FROM projects p
             WHERE p.id = :project_id
               AND p.deleted_at IS NULL
+              -- QA RC HIGH①(#1549): team_members 분기엔 org 가드가 없어(grant/agent/owner-admin엔 있음)
+              -- 양-org 멤버 유저가 JWT=org_B로 org_A 프로젝트를 X-Project-Id로 주입하면 cross-org 통과.
+              -- 최상위 p.org_id 스코프로 전 분기 일괄 봉합(org_id=None이면 cross-org 허용=기존 의미 보존).
+              AND (CAST(:org_id AS uuid) IS NULL OR p.org_id = :org_id)
               AND (
                 EXISTS (
                     SELECT 1 FROM team_members tm
