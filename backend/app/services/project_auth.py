@@ -26,6 +26,66 @@ def clamp_project_role(role: str | None) -> str:
     return role if role in PROJECT_ROLES else "member"
 
 
+async def get_project_role(
+    session: AsyncSession,
+    user_id: uuid.UUID,
+    project_id: uuid.UUID,
+) -> str | None:
+    """프로젝트에서 user(휴먼 JWT user_id | 에이전트 member_id)의 **effective** 프로젝트 역할.
+
+    effective = max_rank(project_access.role, org owner/admin floor). 즉 명시 project 역할과
+    org owner/admin 의 org-wide 권한 중 높은 것. `_effective_role`(auth.py)의 max(org,project)와 정합.
+    역할/접근이 전혀 없으면 None. org member/manager 는 project authority 를 *부여하지 않음*(floor 아님).
+
+    휴먼: project_access 는 org_member_id→users.id 로, 에이전트: member_id 로 매칭(둘 다 OR). asyncpg
+    text 함정 회피 위해 uuid.UUID 를 직접 바인딩(:param IS NULL/::uuid syntax 회피).
+    """
+    row = (
+        await session.execute(
+            text(
+                """
+                SELECT
+                  (SELECT om.role FROM org_members om
+                     JOIN projects p ON p.org_id = om.org_id
+                    WHERE p.id = :pid AND om.user_id = :uid AND om.deleted_at IS NULL
+                    LIMIT 1) AS org_role,
+                  (SELECT pa.role FROM project_access pa
+                     LEFT JOIN org_members om2 ON pa.org_member_id = om2.id
+                    WHERE pa.project_id = :pid AND pa.permission = 'granted'
+                      AND (om2.user_id = :uid OR pa.member_id = :uid)
+                    LIMIT 1) AS proj_role
+                """
+            ),
+            {"pid": project_id, "uid": user_id},
+        )
+    ).one_or_none()
+    if row is None:
+        return None
+    org_role, proj_role = row[0], row[1]
+    candidates: list[str] = []
+    if proj_role is not None:
+        candidates.append(clamp_project_role(proj_role))
+    if org_role in ("owner", "admin"):  # org owner/admin 만 project authority floor(org-wide)
+        candidates.append(org_role)
+    if not candidates:
+        return None
+    return max(candidates, key=lambda r: PROJECT_ROLE_RANK[r])
+
+
+async def has_project_role(
+    session: AsyncSession,
+    user_id: uuid.UUID,
+    project_id: uuid.UUID,
+    *,
+    min_role: str,
+) -> bool:
+    """effective 프로젝트 역할이 min_role 랭크 이상인지(owner>admin>member). 역할 없으면 False."""
+    role = await get_project_role(session, user_id, project_id)
+    if role is None:
+        return False
+    return PROJECT_ROLE_RANK.get(role, 0) >= PROJECT_ROLE_RANK.get(min_role, 99)
+
+
 async def has_project_access(
     session: AsyncSession,
     user_id: uuid.UUID,
