@@ -187,6 +187,7 @@ export default function SettingsPage() {
   const [removingMemberId, setRemovingMemberId] = useState<string | null>(null);
   const [isAdmin, setIsAdmin] = useState(false);
   const [adminChecked, setAdminChecked] = useState(false);
+  const [currentProjectRole, setCurrentProjectRole] = useState<string>('member'); // S-GATE-4: 현재 프로젝트 effective role
   const [currentUserId, setCurrentUserId] = useState<string | null>(null);
   const [deletingProjectId, setDeletingProjectId] = useState<string | null>(null);
   const [deleteProjectConfirmId, setDeleteProjectConfirmId] = useState<string | null>(null);
@@ -502,6 +503,22 @@ export default function SettingsPage() {
     void refreshInvitations().catch((err) => { console.error('초대 목록 로드 실패', err); });
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [currentProjectId, orgId]);
+
+  // S-GATE-4 RC: 현재 프로젝트의 내 role 을 **그 프로젝트의 team-members**에서 도출(/api/me 는 JWT
+  // project_id 기준이라 탭≠JWT 면 부정확). team-members 는 project_id 쿼리 기준·user_id 로 매칭 가능·
+  // 멤버 read 가능. project owner 면 gate-config 편집 허용에 사용(canEdit).
+  useEffect(() => {
+    if (!currentProjectId || !currentUserId) { setCurrentProjectRole('member'); return; }
+    let cancelled = false;
+    void (async () => {
+      const res = await fetch(`/api/team-members?project_id=${currentProjectId}&type=human`).catch(() => null);
+      if (cancelled || !res?.ok) return;
+      const json = await res.json() as { data?: Array<{ user_id?: string | null; role?: string }> };
+      const mine = (json.data ?? []).find((m) => m.user_id === currentUserId);
+      setCurrentProjectRole(mine?.role ?? 'member');
+    })();
+    return () => { cancelled = true; };
+  }, [currentProjectId, currentUserId]);
 
   useEffect(() => {
     if (!memberProjectId) return;
@@ -1034,14 +1051,16 @@ export default function SettingsPage() {
                   <StandupDeadlineSection projectId={currentProjectId} />
                 </div>
               ) : null}
-              {/* S-GATE-4: 프로젝트 게이트 정책(승인 레벨) 매트릭스. scope=project override. canEdit 은
-                  안전 subset(org admin/owner) — BE 는 project owner 도 허용하나 FE 는 보수적 게이트(과권한 0). */}
+              {/* S-GATE-4: 프로젝트 게이트 정책 매트릭스. canEdit = org admin/owner OR **이 프로젝트의 owner**
+                  — BE gate_config(PUT/DELETE scope='project')가 project owner 도 허용하므로 정합(RC①). project
+                  admin 은 BE 비허용이라 제외(meRole==='owner'만 — over-permission 0). cross-project 인 #1562
+                  grant 와 달리 자기 프로젝트 편집이라 보수적 org-admin-only 가 오히려 under-permissive 였음. */}
               {currentProjectId ? (
                 <div className="mt-6">
                   <GateLevelMatrix
+                    surface="project"
                     projectId={currentProjectId}
-                    scope="project"
-                    canEdit={currentOrgRole === 'owner' || currentOrgRole === 'admin'}
+                    canEdit={currentOrgRole === 'owner' || currentOrgRole === 'admin' || currentProjectRole === 'owner'}
                   />
                 </div>
               ) : null}
@@ -1143,6 +1162,18 @@ export default function SettingsPage() {
                   )}
                 </SectionCardBody>
               </SectionCard>
+              {/* S-GATE-4 2계층: 조직 게이트 정책(기본값) surface. scope='org'. PUT 은 대표 project 경유
+                  (org_router 는 GET 만)·canEdit=org admin/owner. project 0개면 컴포넌트가 편집 불가 안내. */}
+              {orgInfo ? (
+                <div className="mt-6">
+                  <GateLevelMatrix
+                    surface="org"
+                    orgId={orgInfo.id}
+                    projectId={currentProjectId ?? projects[0]?.id}
+                    canEdit={currentOrgRole === 'owner' || currentOrgRole === 'admin'}
+                  />
+                </div>
+              ) : null}
               {currentOrgRole === 'owner' && (
                 <SectionCard className="border-destructive/20 bg-destructive/10 mt-6">
                   <SectionCardHeader className="border-b border-destructive/20">
