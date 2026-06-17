@@ -1,9 +1,14 @@
-"""908075db 단계1: _build_app_metadata de-fallback (flag-gated 명시존중).
+"""908075db 단계1+2: _build_app_metadata de-fallback (flag-gated).
 
-flag on이면 명시 의도(switch target project_id 또는 저장된 last_project_id)에 has_project_access
-(35a0691e grant-aware)가 있을 때 가장-오래된-team_member 추측을 타지 않고 그 project를 존중한다.
-side-effect(last_project_id 덮어쓰기)는 단계2서 제거 — 단계1 명시존중 분기 자체는 부수효과 없음.
-flag off(기본)면 분기 통째 skip → 기존 거동 100% 유지(회귀 0).
+단계1: flag on이면 명시 의도(switch target project_id ∥ 저장 last_project_id)에 has_project_access
+(35a0691e grant-aware) 있으면 가장-오래된-team_member 추측 안 타고 그 project 존중.
+
+단계2(flag on): ① 추측 fallback(가장 오래된 team_member) 제거 → deterministic first_accessible로
+해소. ② _build_app_metadata in-function last_project_id/last_org_id mutation 제거(순수) → login
+호출부가 _persist_resolved_context로 해소 결과 영속(책임 이관).
+
+flag off(기본)면 단계1·2 모두 skip → 기존 거동 100% 유지(회귀 0). 실험중이라 dev 잔류·flag-on
+관측 통과 후 머지.
 """
 from __future__ import annotations
 
@@ -108,27 +113,46 @@ async def test_flag_on_switch_target_param_wins_over_last_project():
 
 
 @pytest.mark.anyio
-async def test_flag_on_inaccessible_explicit_falls_through_to_legacy():
-    """flag on + 명시 pid가 has_project_access 없음 → 명시존중 skip, 기존 추측 경로로 폴스루."""
+async def test_flag_on_inaccessible_explicit_deterministic_no_guess():
+    """908075db 단계2: flag on + 명시 pid 접근불가 → **추측 안 타고** deterministic first_accessible로
+    해소. in-function user mutation 없음(불변·호출부 책임)."""
     from app.routers.auth import _build_app_metadata
 
-    user = _user(last_project_id=PID_EXPLICIT, last_org_id=ORG_A)
-    # 폴스루 후 기존 경로: q1(last_project team_member, org scope)=None, q2(fallback ASC)=None,
-    # 그 뒤 org_id+member None 분기 → om_role. first_accessible/_user_projects_claim은 patch.
-    q1 = MagicMock(); q1.scalar_one_or_none.return_value = None
-    q2 = MagicMock(); q2.scalar_one_or_none.return_value = None
-    om_role = MagicMock(); om_role.scalar_one_or_none.return_value = "member"
+    PID_DET = uuid.uuid4()
+    user = _user(last_project_id=PID_OLD, last_org_id=ORG_A)
+    # 단계2: 추측(가장 오래된 team_member) execute 없음 → q_360(last_project team_member None) + om_role 2회만.
+    q_360 = MagicMock(); q_360.scalar_one_or_none.return_value = None
+    q_om = MagicMock(); q_om.scalar_one_or_none.return_value = "member"
     session = AsyncMock()
-    session.execute = AsyncMock(side_effect=[q1, q2, om_role])
+    session.execute = AsyncMock(side_effect=[q_360, q_om])
 
     with patch("app.routers.auth.settings.build_app_metadata_defallback", True), \
          patch("app.routers.auth.has_project_access", new=AsyncMock(return_value=False)), \
-         patch("app.routers.auth.first_accessible_project_id", new=AsyncMock(return_value=None)), \
+         patch("app.routers.auth.first_accessible_project_id", new=AsyncMock(return_value=PID_DET)), \
          patch("app.routers.auth._user_projects_claim", new=AsyncMock(return_value=[])):
         md = await _build_app_metadata(user, session, org_id=ORG_A)
 
-    # 명시존중 안 함 → 기존 org-scope 해소(접근 프로젝트 0 → project_id="")
-    assert md["project_id"] == ""
+    assert md["project_id"] == str(PID_DET)         # 추측 아닌 first_accessible(deterministic)
+    assert md["role"] == "member"
+    assert session.execute.await_count == 2         # 추측 쿼리 미발생(360 + om_role만)
+    assert user.last_project_id == PID_OLD          # 단계2: 함수가 mutate 안 함(호출부 책임)
+
+
+def test_persist_resolved_context_helper():
+    """908075db 단계2: 호출부가 md로 last_project_id/last_org_id 영속. project_id 비면 None(stale 제거),
+    org_id 비면 last_org_id 유지."""
+    from app.routers.auth import _persist_resolved_context
+
+    PID = uuid.uuid4(); OID = uuid.uuid4()
+    u = _user(last_project_id=PID_OLD, last_org_id=ORG_A)
+    _persist_resolved_context(u, {"project_id": str(PID), "org_id": str(OID)})
+    assert u.last_project_id == PID
+    assert u.last_org_id == OID
+
+    u2 = _user(last_project_id=PID_OLD, last_org_id=ORG_A)
+    _persist_resolved_context(u2, {"project_id": "", "org_id": ""})
+    assert u2.last_project_id is None               # 접근 project 0 → stale 제거
+    assert u2.last_org_id == ORG_A                  # 빈 org_id → 유지
 
 
 @pytest.mark.anyio

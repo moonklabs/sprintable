@@ -328,6 +328,19 @@ async def _resolve_explicit_app_metadata(
     }
 
 
+def _persist_resolved_context(user: User, md: dict) -> None:
+    """908075db 단계2: flag-on 시 _build_app_metadata가 user를 mutate하지 않고 순수 해소만 하므로,
+    login/refresh 호출부가 해소 결과(md)를 user.last_project_id/last_org_id에 명시 영속한다(책임 이관).
+
+    project_id 비면(접근 가능 project 없음) last_project_id=None으로 stale 제거. org_id는 있으면만
+    갱신(빈 dict {} 해소 시 last_org_id 유지). 추측 없이 deterministic 해소 결과만 영속."""
+    pid = md.get("project_id") or None
+    user.last_project_id = uuid.UUID(pid) if pid else None
+    oid = md.get("org_id") or None
+    if oid:
+        user.last_org_id = uuid.UUID(oid)
+
+
 async def _build_app_metadata(
     user: User, session: AsyncSession, org_id: uuid.UUID | None = None,
     project_id: uuid.UUID | None = None,
@@ -369,9 +382,11 @@ async def _build_app_metadata(
             q = q.where(TeamMember.org_id == org_id)
         member = (await session.execute(q.limit(1))).scalar_one_or_none()
 
-    if not member:
+    if not member and not settings.build_app_metadata_defallback:
         # fallback: 가장 오래된 team_member (ASC) — 최초 가입 project 우선.
         # ⚠️0746: org_id 지정 시 그 org로 스코프(미지정이면 org 무관 → cross-org 옛 프로젝트 누수).
+        # 908075db 단계2(flag-on): 이 **추측** 제거 — flag on이면 member None 유지 → 아래 deterministic
+        # 경로(first_accessible/invite/Path4)로 해소. flag off면 기존 추측 그대로(거동 무변경).
         q = select(TeamMember).where(
             or_(TeamMember.user_id == user.id, TeamMember.id == user.id),
             TeamMember.is_active.is_(True),
@@ -384,10 +399,13 @@ async def _build_app_metadata(
     # cross-org invite/Path4 폴백 금지. 그 org의 first_accessible(없으면 null)로 스코프 해소.
     if org_id is not None and member is None:
         pid = await first_accessible_project_id(session, user.id, org_id)
-        if getattr(user, "last_project_id", None) != pid:
-            user.last_project_id = pid  # in-org project or None — cross-org 절대 금지
-        if getattr(user, "last_org_id", None) != org_id:
-            user.last_org_id = org_id  # 현재 org 추적 — 다음 refresh가 이 org 유지
+        # 908075db 단계2(flag-on): in-function last_project_id/org_id mutation 제거 → 호출부 책임
+        # (_persist_resolved_context). flag off면 기존대로 영속(거동 무변경).
+        if not settings.build_app_metadata_defallback:
+            if getattr(user, "last_project_id", None) != pid:
+                user.last_project_id = pid  # in-org project or None — cross-org 절대 금지
+            if getattr(user, "last_org_id", None) != org_id:
+                user.last_org_id = org_id  # 현재 org 추적 — 다음 refresh가 이 org 유지
         om_role = (
             await session.execute(
                 select(OrgMember.role).where(
@@ -458,12 +476,16 @@ async def _build_app_metadata(
             }
         return {}
 
-    # login 시 last_project_id 자동 갱신 — 다음 로그인부터 last_project_id 우선 경로 사용
-    if getattr(user, "last_project_id", None) != member.project_id:
-        user.last_project_id = member.project_id
-    # 현재 org 추적(0746 후속) — 다음 refresh가 org_id 없이도 이 org로 스코프
-    if getattr(user, "last_org_id", None) != member.org_id:
-        user.last_org_id = member.org_id
+    # login 시 last_project_id 자동 갱신 — 다음 로그인부터 last_project_id 우선 경로 사용.
+    # 908075db 단계2(flag-on): 이 side-effect 제거 → 호출부 책임(_persist_resolved_context). flag off
+    # 면 기존대로 영속(거동 무변경). flag on에선 member가 명시 last_project_id 룩업(360-370)서만 와
+    # member.project_id == last_project_id라 영속 결과는 동일(호출부가 md.project_id로 재확정).
+    if not settings.build_app_metadata_defallback:
+        if getattr(user, "last_project_id", None) != member.project_id:
+            user.last_project_id = member.project_id
+        # 현재 org 추적(0746 후속) — 다음 refresh가 org_id 없이도 이 org로 스코프
+        if getattr(user, "last_org_id", None) != member.org_id:
+            user.last_org_id = member.org_id
 
     # S-MBR-03: org owner/admin → project role 상속 (AC1/AC2)
     # org_members.role이 team_members.role보다 높으면 org role을 effective role로 사용.
@@ -560,7 +582,10 @@ async def register(
     if body.invite_token:
         await _auto_accept_invitation(session, user, body.invite_token)
 
-    tokens = create_tokens(str(user.id), email=user.email, app_metadata=await _build_app_metadata(user, session))
+    _md = await _build_app_metadata(user, session)
+    if settings.build_app_metadata_defallback:
+        _persist_resolved_context(user, _md)  # 908075db 단계2: side-effect 호출부 이관
+    tokens = create_tokens(str(user.id), email=user.email, app_metadata=_md)
     _, refresh_exp = create_refresh_token(str(user.id), expires_delta=timedelta(days=REFRESH_TOKEN_EXPIRE_DAYS))
     await _store_refresh_token(session, user, tokens["refresh_token"], refresh_exp)
 
@@ -688,7 +713,10 @@ async def login(
             update(User).where(User.id == user.id).values(login_fail_count=0, login_locked_until=None)
         )
 
-    tokens = create_tokens(str(user.id), email=user.email, app_metadata=await _build_app_metadata(user, session))
+    _md = await _build_app_metadata(user, session)
+    if settings.build_app_metadata_defallback:
+        _persist_resolved_context(user, _md)  # 908075db 단계2: side-effect 호출부 이관
+    tokens = create_tokens(str(user.id), email=user.email, app_metadata=_md)
     _, refresh_exp = create_refresh_token(str(user.id), expires_delta=timedelta(days=REFRESH_TOKEN_EXPIRE_DAYS))
     await _store_refresh_token(session, user, tokens["refresh_token"], refresh_exp)
 
@@ -747,7 +775,10 @@ async def refresh_token(
         .values(revoked_at=datetime.now(timezone.utc))
     )
 
-    tokens = create_tokens(str(user.id), email=user.email, app_metadata=await _build_app_metadata(user, session))
+    _md = await _build_app_metadata(user, session)
+    if settings.build_app_metadata_defallback:
+        _persist_resolved_context(user, _md)  # 908075db 단계2: side-effect 호출부 이관
+    tokens = create_tokens(str(user.id), email=user.email, app_metadata=_md)
     _, refresh_exp = create_refresh_token(str(user.id), expires_delta=timedelta(days=REFRESH_TOKEN_EXPIRE_DAYS))
     await _store_refresh_token(session, user, tokens["refresh_token"], refresh_exp)
 
@@ -998,7 +1029,10 @@ async def oauth_callback(
     from datetime import timedelta
     from app.core.security import ACCESS_TOKEN_EXPIRE_MINUTES, REFRESH_TOKEN_EXPIRE_DAYS
 
-    tokens = create_tokens(str(user.id), user.email, await _build_app_metadata(user, session))
+    _md = await _build_app_metadata(user, session)
+    if settings.build_app_metadata_defallback:
+        _persist_resolved_context(user, _md)  # 908075db 단계2: side-effect 호출부 이관
+    tokens = create_tokens(str(user.id), user.email, _md)
     raw_refresh = tokens["refresh_token"]
     expires_at = datetime.now(timezone.utc) + timedelta(days=REFRESH_TOKEN_EXPIRE_DAYS)
     await _store_refresh_token(session, user, raw_refresh, expires_at)
