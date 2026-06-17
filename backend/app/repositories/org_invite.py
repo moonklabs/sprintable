@@ -312,6 +312,11 @@ class OrgInviteRepository:
                 Project.deleted_at.is_(None),
             )
         )
+        # E-MEMBER-POLICY S1 fix: project_access.role 은 enum(owner/admin/member)만 — 초대 수락 시
+        # 신규 INSERT 라 0122 백필(기존 행만)이 못 잡는다. invite.role(라우터 미validation·org enum
+        # 'manager' 가능)을 clamp 해 0122 CHECK 위반(수락 500) 차단. project_access.role write 의
+        # 단일 관문(clamp_project_role)으로 수렴 — 전 경로(placement·PATCH·invite) clamp 일치.
+        from app.services.project_auth import clamp_project_role
         for (pid,) in valid_rows.all():
             await self.session.execute(
                 pg_insert(ProjectAccess.__table__)
@@ -320,7 +325,7 @@ class OrgInviteRepository:
                     project_id=pid,
                     org_member_id=om_id,
                     permission="granted",
-                    role=invite.role,
+                    role=clamp_project_role(invite.role),
                     access_source="direct",
                 )
                 .on_conflict_do_nothing(constraint="uq_project_access_project_member")
