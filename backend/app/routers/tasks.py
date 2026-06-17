@@ -91,7 +91,7 @@ async def update_task(
     # E-EVENTBUS P3 S9: task_completed → story assignee에게 알림
     if old_status != "done" and task.status == "done" and task.story_id:
         story_result = await db.execute(
-            select(Story.assignee_id, Story.title, Story.org_id).where(Story.id == task.story_id)
+            select(Story.assignee_id, Story.title, Story.org_id, Story.project_id).where(Story.id == task.story_id)
         )
         story_row = story_result.one_or_none()
         if story_row and story_row.assignee_id:
@@ -104,6 +104,8 @@ async def update_task(
                 body=f"스토리: {story_row.title}" if story_row.title else None,
                 reference_type="task",
                 reference_id=task.id,
+                # S2: 멀티프로젝트 에이전트 assignee를 스토리 프로젝트로 정확 라우팅
+                source_project_id=story_row.project_id,
             )
     return TaskResponse.model_validate(task)
 

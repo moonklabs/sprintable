@@ -115,6 +115,8 @@ async def emit_story_status_changed(
                 body=None,
                 reference_type="story",
                 reference_id=story.id,
+                # S2: 멀티프로젝트 에이전트 assignee를 스토리 프로젝트로 정확 라우팅
+                source_project_id=story.project_id,
             )
         except Exception:
             pass

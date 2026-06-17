@@ -267,3 +267,90 @@ async def test_dispatch_dedups_multiproject_view_rows(mock_session, org_id):
     assert notifs[0].user_id == user_id
 
 
+def _agent_members_result(member_id, project_ids: list) -> MagicMock:
+    """멀티프로젝트 에이전트 = 같은 id, 프로젝트별 1행(뷰 N행)."""
+    result = MagicMock()
+    rows = []
+    for pid in project_ids:
+        row = MagicMock()
+        row.id = member_id
+        row.user_id = None
+        row.type = "agent"
+        row.project_id = pid
+        rows.append(row)
+    result.all.return_value = rows
+    return result
+
+
+@pytest.mark.anyio
+async def test_dispatch_agent_routed_to_source_project(mock_session, org_id, monkeypatch):
+    """S2: 멀티프로젝트 에이전트(뷰 N행)는 source_project_id 행으로 라우팅 — 임의 first-project가
+    아니라 트리거 프로젝트로 Event 1건 생성."""
+    from app.models.event import Event
+    from app.services import notification_dispatch as nd
+
+    # extract_activities_best_effort 는 별도 db 작업 → 격리(patch)
+    monkeypatch.setattr(
+        "app.services.activity_stream.extract_activities_best_effort",
+        AsyncMock(return_value=None),
+    )
+
+    member_id = uuid.uuid4()
+    p1, p2, p3 = uuid.uuid4(), uuid.uuid4(), uuid.uuid4()
+    settings = _settings_result([])
+    wh_result = MagicMock()
+    wh_result.scalars.return_value.all.return_value = []
+    members = _agent_members_result(member_id, [p1, p2, p3])
+    mock_session.execute.side_effect = [settings, wh_result, members]
+
+    await nd.dispatch_notification(
+        mock_session,
+        org_id=org_id,
+        event_type="dispatched",
+        target_member_ids=[member_id],
+        title="작업 전달",
+        reference_type="story",
+        reference_id=uuid.uuid4(),
+        source_project_id=p2,  # 트리거 프로젝트
+    )
+
+    events = [c.args[0] for c in mock_session.add.call_args_list if isinstance(c.args[0], Event)]
+    assert len(events) == 1, f"에이전트 Event {len(events)}개 (멤버당 1건이어야)"
+    assert events[0].project_id == p2, "Event가 트리거 프로젝트(p2)로 라우팅돼야"
+    assert events[0].recipient_id == member_id
+
+
+@pytest.mark.anyio
+async def test_dispatch_agent_no_source_falls_back_first_row(mock_session, org_id, monkeypatch):
+    """source_project_id 미지정 시 기존 거동(첫 행) — 하위호환."""
+    from app.models.event import Event
+    from app.services import notification_dispatch as nd
+
+    monkeypatch.setattr(
+        "app.services.activity_stream.extract_activities_best_effort",
+        AsyncMock(return_value=None),
+    )
+
+    member_id = uuid.uuid4()
+    p1, p2 = uuid.uuid4(), uuid.uuid4()
+    settings = _settings_result([])
+    wh_result = MagicMock()
+    wh_result.scalars.return_value.all.return_value = []
+    members = _agent_members_result(member_id, [p1, p2])
+    mock_session.execute.side_effect = [settings, wh_result, members]
+
+    await nd.dispatch_notification(
+        mock_session,
+        org_id=org_id,
+        event_type="dispatched",
+        target_member_ids=[member_id],
+        title="작업 전달",
+        reference_type="story",
+        reference_id=uuid.uuid4(),
+    )
+
+    events = [c.args[0] for c in mock_session.add.call_args_list if isinstance(c.args[0], Event)]
+    assert len(events) == 1
+    assert events[0].project_id == p1  # 첫 행
+
+
