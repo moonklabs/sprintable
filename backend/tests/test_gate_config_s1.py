@@ -112,12 +112,14 @@ async def test_get_member_returns_effective_config():
     session = MagicMock()
     session.execute = AsyncMock(return_value=_org_row())  # _project_org_id
     with patch("app.routers.gate_config.has_project_access", new=AsyncMock(return_value=True)), patch(
-        "app.routers.gate_config.resolve_gate_level", new=AsyncMock(return_value="ask")
+        "app.routers.gate_config.resolve_gate_level_with_source",
+        new=AsyncMock(return_value=("ask", "org_default")),
     ):
         out = await gc.get_gate_config(uuid.uuid4(), auth=_auth(), session=session)
     # WORK_TYPES(2) × ACTOR_TYPES(2) = 4 entries
     assert len(out) == 4
     assert all(e.level == "ask" for e in out)
+    assert all(e.source == "org_default" for e in out)
 
 
 @pytest.mark.anyio

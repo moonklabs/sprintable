@@ -6,7 +6,7 @@ PUT  /api/v2/projects/{project_id}/gate-config  — 레벨 설정. 권한(정책
 """
 import uuid
 
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, Query
 from pydantic import BaseModel
 from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -17,7 +17,9 @@ from app.services.gate_config import (
     ACTOR_TYPES,
     LEVELS,
     WORK_TYPES,
+    delete_gate_override,
     resolve_gate_level,
+    resolve_gate_level_with_source,
     set_gate_level,
 )
 from app.services.project_auth import (
@@ -33,6 +35,7 @@ class GateLevelEntry(BaseModel):
     work_type: str
     actor_type: str
     level: str
+    source: str = "org_default"  # S-GATE-4: 'override'(project 재정의) | 'org_default'(상속)
 
 
 class SetGateLevelRequest(BaseModel):
@@ -73,10 +76,10 @@ async def get_gate_config(
     entries: list[GateLevelEntry] = []
     for wt in WORK_TYPES:
         for at in ACTOR_TYPES:
-            level = await resolve_gate_level(
+            level, source = await resolve_gate_level_with_source(
                 session, org_id=org_id, project_id=project_id, work_type=wt, actor_type=at
             )
-            entries.append(GateLevelEntry(work_type=wt, actor_type=at, level=level))
+            entries.append(GateLevelEntry(work_type=wt, actor_type=at, level=level, source=source))
     return entries
 
 
@@ -126,4 +129,44 @@ async def put_gate_config(
         created_by=actor,
     )
     await session.commit()
-    return GateLevelEntry(work_type=row.work_type, actor_type=row.actor_type, level=row.level)
+    # source = project scope면 override, org scope면 org_default(방금 설정한 계층 반영).
+    src = "override" if target_project_id is not None else "org_default"
+    return GateLevelEntry(work_type=row.work_type, actor_type=row.actor_type, level=row.level, source=src)
+
+
+@router.delete("/{project_id}/gate-config", response_model=GateLevelEntry)
+async def delete_gate_config_override(
+    project_id: uuid.UUID,
+    work_type: str = Query(...),
+    actor_type: str = Query(...),
+    auth: AuthContext = Depends(get_current_user),
+    session: AsyncSession = Depends(get_db),
+) -> GateLevelEntry:
+    """S-GATE-4: project override 해제(↺ 기본값 복귀) → org 기본값 상속. 삭제 후 effective 레벨+source 반환.
+
+    권한 = project owner 또는 org owner/admin(PUT scope='project'와 동일). org 기본값은 여기서 못 지움.
+    """
+    if work_type not in WORK_TYPES:
+        raise HTTPException(status_code=400, detail=f"work_type must be one of {list(WORK_TYPES)}")
+    if actor_type not in ACTOR_TYPES:
+        raise HTTPException(status_code=400, detail=f"actor_type must be one of {list(ACTOR_TYPES)}")
+
+    org_id = await _project_org_id(session, project_id)
+    actor = uuid.UUID(auth.user_id)
+    if not (
+        (await get_project_role(session, actor, project_id)) == "owner"
+        or await is_org_owner_or_admin(session, actor, org_id)
+    ):
+        raise HTTPException(
+            status_code=403, detail="project owner or org owner/admin required to remove override"
+        )
+
+    await delete_gate_override(
+        session, org_id=org_id, project_id=project_id, work_type=work_type, actor_type=actor_type
+    )
+    await session.commit()
+    # 삭제 후 effective(상속) 레벨 반환 — FE 즉시 갱신("↺ 기본값"). 미존재 override 삭제는 멱등(상속값 반환).
+    level, source = await resolve_gate_level_with_source(
+        session, org_id=org_id, project_id=project_id, work_type=work_type, actor_type=actor_type
+    )
+    return GateLevelEntry(work_type=work_type, actor_type=actor_type, level=level, source=source)

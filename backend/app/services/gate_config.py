@@ -8,7 +8,7 @@ from __future__ import annotations
 import logging
 import uuid
 
-from sqlalchemy import select, text
+from sqlalchemy import delete, select, text
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models.hitl import HitlGateConfig
@@ -21,15 +21,18 @@ LEVELS: tuple[str, ...] = ("auto", "ask", "block")
 DEFAULT_LEVEL = "ask"  # §3e 보수적 기본
 
 
-async def resolve_gate_level(
+async def resolve_gate_level_with_source(
     session: AsyncSession,
     *,
     org_id: uuid.UUID,
     project_id: uuid.UUID | None,
     work_type: str,
     actor_type: str,
-) -> str:
-    """(work_type × actor)의 effective 게이트 레벨. project 오버라이드 → org 기본값 → 'ask'."""
+) -> tuple[str, str]:
+    """effective 레벨 + 출처. S-GATE-4 2계층 UX용:
+      source='override'  — project 행 존재(재정의)
+      source='org_default' — org 행/시스템 기본 상속(미재정의).
+    """
     if project_id is not None:
         lvl = (
             await session.execute(
@@ -43,7 +46,7 @@ async def resolve_gate_level(
         ).scalar_one_or_none()
         if lvl is not None:
             _log_resolved(org_id, project_id, work_type, actor_type, lvl, "project")
-            return lvl
+            return lvl, "override"
 
     lvl = (
         await session.execute(
@@ -57,7 +60,22 @@ async def resolve_gate_level(
     ).scalar_one_or_none()
     result = lvl if lvl is not None else DEFAULT_LEVEL
     _log_resolved(org_id, project_id, work_type, actor_type, result, "org" if lvl is not None else "default")
-    return result
+    return result, "org_default"
+
+
+async def resolve_gate_level(
+    session: AsyncSession,
+    *,
+    org_id: uuid.UUID,
+    project_id: uuid.UUID | None,
+    work_type: str,
+    actor_type: str,
+) -> str:
+    """(work_type × actor)의 effective 게이트 레벨. project 오버라이드 → org 기본값 → 'ask'."""
+    level, _ = await resolve_gate_level_with_source(
+        session, org_id=org_id, project_id=project_id, work_type=work_type, actor_type=actor_type
+    )
+    return level
 
 
 def _log_resolved(org_id, project_id, work_type, actor_type, level, source) -> None:
@@ -129,3 +147,32 @@ async def set_gate_level(
         )
     ).scalars().first()
     return row
+
+
+async def delete_gate_override(
+    session: AsyncSession,
+    *,
+    org_id: uuid.UUID,
+    project_id: uuid.UUID,
+    work_type: str,
+    actor_type: str,
+) -> bool:
+    """S-GATE-4: project override 1행 삭제 → org 기본값 상속 복귀("↺ 기본값"). 삭제 행 있으면 True.
+
+    project override(project_id NOT NULL)만 대상 — org 기본값은 PUT(scope='org')로만 변경(여기서 못 지움).
+    """
+    if work_type not in WORK_TYPES:
+        raise ValueError(f"work_type must be one of {WORK_TYPES}")
+    if actor_type not in ACTOR_TYPES:
+        raise ValueError(f"actor_type must be one of {ACTOR_TYPES}")
+
+    result = await session.execute(
+        delete(HitlGateConfig).where(
+            HitlGateConfig.org_id == org_id,
+            HitlGateConfig.project_id == project_id,
+            HitlGateConfig.work_type == work_type,
+            HitlGateConfig.actor_type == actor_type,
+        )
+    )
+    await session.flush()
+    return (result.rowcount or 0) > 0
