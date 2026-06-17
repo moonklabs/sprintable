@@ -2288,7 +2288,12 @@
     "goalPlaceholder": "What will the team complete this sprint?",
     "capacityLabel": "Capacity",
     "teamSizeLabel": "Team Size",
-    "hypothesisSection": "Outcome Hypothesis"
+    "hypothesisSection": "Outcome Hypothesis",
+    "delete": "Delete Sprint",
+    "deleteConfirmTitle": "Delete this sprint?",
+    "deleteConfirmBody": "This action cannot be undone. Linked stories move to the backlog, and retro and standup links are cleared.",
+    "deleteConfirm": "Delete",
+    "deleteError": "Failed to delete sprint."
   },
   "presence": {
     "panelTitle": "Team presence",

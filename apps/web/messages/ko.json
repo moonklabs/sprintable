@@ -2288,7 +2288,12 @@
     "goalPlaceholder": "이번 스프린트에서 무엇을 완수하는가?",
     "capacityLabel": "공수",
     "teamSizeLabel": "인원",
-    "hypothesisSection": "효과 가설"
+    "hypothesisSection": "효과 가설",
+    "delete": "스프린트 삭제",
+    "deleteConfirmTitle": "스프린트를 삭제할까요?",
+    "deleteConfirmBody": "이 작업은 되돌릴 수 없습니다. 연결된 스토리는 백로그로 이동되고 회고·스탠드업 연결이 해제됩니다.",
+    "deleteConfirm": "삭제",
+    "deleteError": "스프린트 삭제에 실패했습니다."
   },
   "presence": {
     "panelTitle": "팀 presence",
