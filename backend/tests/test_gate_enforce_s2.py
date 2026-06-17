@@ -29,6 +29,13 @@ def _session(execute_side_effect=None):
     return s
 
 
+def _hitl_reqs_added(session):
+    """S-GATE-5.1 후 session.add 는 HitlGateAudit 도 받으므로 — HitlRequest park 만 카운트."""
+    from app.models.hitl import HitlRequest
+
+    return sum(1 for c in session.add.call_args_list if isinstance(c.args[0], HitlRequest))
+
+
 async def _enforce(ge, session, actor_type="agent", work_type="done"):
     return await ge.enforce_gate(
         session, org_id=uuid.uuid4(), project_id=uuid.uuid4(),
@@ -58,7 +65,7 @@ async def test_auto_passes():
         ge, "resolve_gate_level", new=AsyncMock(return_value="auto")
     ):
         await _enforce(ge, session)  # 예외 없음
-    session.add.assert_not_called()
+    assert _hitl_reqs_added(session) == 0
 
 
 @pytest.mark.anyio
@@ -93,7 +100,7 @@ async def test_ask_creates_request_and_409():
     assert ei.value.status_code == 409
     assert ei.value.detail["code"] == "GATE_ASK"
     assert ei.value.detail["requires_human"] is True
-    session.add.assert_called_once()  # HitlRequest 생성
+    assert _hitl_reqs_added(session) == 1  # HitlRequest 생성
     session.commit.assert_awaited()   # raise 전 persist
 
 
@@ -110,7 +117,7 @@ async def test_ask_resumes_on_approved():
         ge, "resolve_gate_level", new=AsyncMock(return_value="ask")
     ):
         await _enforce(ge, session)  # 예외 없음
-    session.add.assert_not_called()  # 승인 있으면 신규 생성 안 함
+    assert _hitl_reqs_added(session) == 0  # 승인 있으면 신규 생성 안 함
 
 
 @pytest.mark.anyio
@@ -128,7 +135,7 @@ async def test_ask_rejected_remains_blocked():
             await _enforce(ge, session)
     assert ei.value.status_code == 409
     assert ei.value.detail["code"] == "GATE_REJECTED"
-    session.add.assert_not_called()  # reject → 재-ask 안 함(차단 유지)
+    assert _hitl_reqs_added(session) == 0  # reject → 재-ask 안 함(차단 유지)
 
 
 @pytest.mark.anyio
@@ -146,7 +153,7 @@ async def test_ask_existing_pending_no_dup_409():
             await _enforce(ge, session)
     assert ei.value.status_code == 409
     assert ei.value.detail["code"] == "GATE_ASK"
-    session.add.assert_not_called()  # 기존 pending 재사용
+    assert _hitl_reqs_added(session) == 0  # 기존 pending 재사용
 
 
 # ── HIGH②: fail-closed (actor_type 불명) ──────────────────────────────────────
@@ -203,7 +210,7 @@ async def test_floor_clamp_merge_auto_becomes_ask():
             await _enforce(ge, session, work_type="merge")
     assert ei.value.status_code == 409
     assert ei.value.detail["code"] == "GATE_ASK"  # auto 였지만 floor가 ask로 끌어올림
-    session.add.assert_called_once()
+    assert _hitl_reqs_added(session) == 1
 
 
 def test_clamp_to_floor_unit():
@@ -233,7 +240,7 @@ async def test_self_approval_blocked():
             await _enforce(ge, session)
     assert ei.value.status_code == 409
     assert ei.value.detail["code"] == "GATE_SELF_APPROVAL"
-    session.add.assert_not_called()  # self-approval → 통과 안 함·재park도 안 함
+    assert _hitl_reqs_added(session) == 0  # self-approval → 통과 안 함·재park도 안 함
 
 
 # ── gate_config_enforce_active flag ──────────────────────────────────────────
