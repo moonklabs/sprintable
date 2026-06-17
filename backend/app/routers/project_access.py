@@ -44,7 +44,12 @@ def _get_org_repo(session: AsyncSession = Depends(get_db)) -> OrganizationReposi
 async def _require_owner_or_admin(
     project_id: uuid.UUID, auth: AuthContext, session: AsyncSession
 ) -> None:
-    """project_id → org_id 역추적 후 owner/admin 확인."""
+    """프로젝트 관리 권한(owner/admin) 확인.
+
+    E-MEMBER-POLICY S2: org_members.role 만 보던 것을 **effective 프로젝트 역할**로 전환(소비 시작).
+    has_project_role(min_role='admin') = project_access.role(owner/admin) OR org owner/admin floor →
+    기존(org owner/admin 통과)은 floor 로 보존(무회귀), project owner/admin 추가 통과(additive).
+    """
     from sqlalchemy import text
     result = await session.execute(
         text("SELECT org_id FROM projects WHERE id = :pid AND deleted_at IS NULL"),
@@ -53,10 +58,10 @@ async def _require_owner_or_admin(
     row = result.first()
     if row is None:
         raise HTTPException(status_code=404, detail="Project not found")
-    org_id = row[0]
-    repo = OrganizationRepository(session)
-    role = await repo.get_member_role(org_id=org_id, user_id=uuid.UUID(auth.user_id))
-    if role not in ("owner", "admin"):
+    from app.services.project_auth import has_project_role
+    if not await has_project_role(
+        session, uuid.UUID(auth.user_id), project_id, min_role="admin"
+    ):
         raise HTTPException(status_code=403, detail="owner or admin role required")
 
 
