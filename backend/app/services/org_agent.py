@@ -12,36 +12,14 @@ from __future__ import annotations
 import uuid
 from datetime import datetime, timezone
 
-from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models.team import TeamMember
 from app.services.agent_anchor_sync import (
+    allocate_fakechat_port,
     sync_agent_anchor_on_create,
     write_agent_project_placement,
 )
-
-_FAKECHAT_BASE_PORT = 8787
-
-
-async def _allocate_fakechat_port(session: AsyncSession, project_id: uuid.UUID) -> int:
-    """프로젝트 내 미사용 fakechat 포트 — create_team_member 와 동일 규칙(프로젝트별 유일)."""
-    existing = {
-        r[0]
-        for r in (
-            await session.execute(
-                select(TeamMember.fakechat_port).where(
-                    TeamMember.project_id == project_id,
-                    TeamMember.type == "agent",
-                    TeamMember.fakechat_port.isnot(None),
-                )
-            )
-        ).all()
-    }
-    port = _FAKECHAT_BASE_PORT
-    while port in existing:
-        port += 1
-    return port
 
 
 async def create_org_level_agent(
@@ -81,7 +59,7 @@ async def create_org_level_agent(
         color=color,
         agent_role=agent_role,
         created_by=created_by,
-        fakechat_port=await _allocate_fakechat_port(session, anchor_project),
+        fakechat_port=await allocate_fakechat_port(session, anchor_project),
         is_active=True,
         can_manage_members=False,
         last_seen_at=None,
@@ -102,7 +80,7 @@ async def create_org_level_agent(
             project_id=pid,
             agent_config=agent_config,
             agent_role=agent_role,
-            fakechat_port=await _allocate_fakechat_port(session, pid),
+            fakechat_port=await allocate_fakechat_port(session, pid),
             role=role,
             color=color,
             can_manage_members=False,

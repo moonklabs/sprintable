@@ -156,6 +156,66 @@ async def write_agent_project_placement(
     )
 
 
+_FAKECHAT_BASE_PORT = 8787
+
+
+async def allocate_fakechat_port(session: AsyncSession, project_id: uuid.UUID) -> int:
+    """프로젝트 내 미사용 fakechat 포트 — create_team_member 와 동일 규칙(프로젝트별 유일)."""
+    from app.models.team import TeamMember
+
+    existing = {
+        r[0]
+        for r in (
+            await session.execute(
+                select(TeamMember.fakechat_port).where(
+                    TeamMember.project_id == project_id,
+                    TeamMember.type == "agent",
+                    TeamMember.fakechat_port.isnot(None),
+                )
+            )
+        ).all()
+    }
+    port = _FAKECHAT_BASE_PORT
+    while port in existing:
+        port += 1
+    return port
+
+
+async def ensure_agent_project_profile(
+    session: AsyncSession,
+    *,
+    member_id: uuid.UUID,
+    project_id: uuid.UUID,
+    agent_config: dict | None = None,
+    agent_role: str | None = None,
+    fakechat_port: int | None = None,
+) -> None:
+    """에이전트의 per-project agent_project_profiles 행만 멱등 보장(grant 는 호출부가 관리).
+
+    S4: grant-only 에이전트(team_members 뷰 branch3 = 런타임 컬럼 NULL)에 per-project profile 을
+    부여해 presence/런타임 write(sync_agent_profile_presence 의 UPDATE)가 실제 행에 반영되게 한다.
+    profile 부재 시 presence UPDATE 가 0행(무음 누락)이 되는 문제 해소. fakechat_port 미지정 시
+    프로젝트 내 미사용 포트를 자동 할당(create 경로와 동일 규칙). ON CONFLICT 멱등.
+    """
+    if fakechat_port is None:
+        fakechat_port = await allocate_fakechat_port(session, project_id)
+    await session.execute(
+        pg_insert(AgentProjectProfile.__table__)
+        .values(
+            id=uuid.uuid4(),
+            member_id=member_id,
+            project_id=project_id,
+            agent_config=agent_config,
+            agent_role=agent_role,
+            fakechat_port=fakechat_port,
+            last_seen_at=None,
+            active_story_id=None,
+            agent_status=None,
+        )
+        .on_conflict_do_nothing()  # (project_id, member_id) UNIQUE + (project_id, fakechat_port) 부분 UNIQUE 흡수
+    )
+
+
 async def ensure_human_member(session: AsyncSession, org_member_id: uuid.UUID) -> bool:
     """휴먼 org_member의 앵커 members 행을 멱등 보장(AC3-2c grant write-sync).
 
