@@ -106,10 +106,12 @@ function useProjectSsot(serverProjectId: string | undefined, memberships: Dashbo
   const accessibleIds = useMemo(() => new Set(memberships.map((m) => m.projectId)), [memberships]);
   const effectiveProjectId = resolveEffectiveProjectId(urlProjectId, serverProjectId, accessibleIds);
 
-  // 인터셉터가 읽는 ref 를 렌더 단계에서 동기화 — 자식 effect/핸들러의 fetch 가 항상 최신 project 를
-  // 싣도록(effect 동기화는 자식 effect 가 먼저 실행돼 첫 fetch 가 stale 일 수 있어 render 단계에서 set).
+  // ref 동기화 + 인터셉터 설치를 **렌더 단계**에서 — effect(자식→부모 순)에 두면 부모(DashboardShell)
+  // 설치 effect 가 자식(app-sidebar·use-team-presence·kanban-board) 초기 fetch *후* 실행돼 첫 로드
+  // fetch 가 X-Project-Id 없이 나간다(첫 페이지 무력화 RC). 부모 render 는 자식 render·effect 보다
+  // 먼저 실행되므로 여기서 설치하면 첫 자식 fetch 전에 패치 완료. 멱등 guard + SSR 가드라 render 호출 안전.
   setEffectiveProjectId(effectiveProjectId);
-  useEffect(() => { installProjectHeaderInterceptor(); }, []);
+  installProjectHeaderInterceptor();
 
   // 탭별 backstop 영속 + URL 정규화(`?p=` 누락/불일치 시 effective 로 replace → 링크 드롭에도 stale 방지).
   useEffect(() => {
