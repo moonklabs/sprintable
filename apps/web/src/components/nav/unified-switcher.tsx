@@ -1,7 +1,8 @@
 'use client';
 
 import { useEffect, useState } from 'react';
-import { useRouter } from 'next/navigation';
+import { usePathname, useRouter, useSearchParams } from 'next/navigation';
+import { TAB_PROJECT_STORAGE_KEY } from '@/lib/project-context-client';
 import { Check, ChevronDown, Loader2, Plus, Settings } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import {
@@ -61,6 +62,8 @@ export function UnifiedSwitcher({
   className,
 }: UnifiedSwitcherProps) {
   const router = useRouter();
+  const pathname = usePathname();
+  const searchParams = useSearchParams();
   const [pending, setPending] = useState(false);
   const [open, setOpen] = useState(false);
   const [createOrgOpen, setCreateOrgOpen] = useState(false);
@@ -158,6 +161,11 @@ export function UnifiedSwitcher({
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ project_id: projectId }),
       }).catch(() => null);
+      // R2: 랜딩 탭의 per-tab SSOT(sessionStorage + `?p=`)도 새 프로젝트로 동기.
+      if (typeof window !== 'undefined') window.sessionStorage.setItem(TAB_PROJECT_STORAGE_KEY, projectId);
+      const sp = new URLSearchParams(Array.from(searchParams.entries()));
+      sp.set('p', projectId);
+      router.push(`${pathname}?${sp.toString()}`);
       router.refresh();
     } finally {
       setPending(false);
@@ -168,14 +176,20 @@ export function UnifiedSwitcher({
     if (!nextProjectId || nextProjectId === currentProjectId || pending) return;
     setPending(true);
     try {
-      const res = await fetch('/api/switch-project', {
+      // R2 per-tab SSOT: 전역 reload 대신 이 탭의 sessionStorage backstop + URL `?p=` 갱신.
+      // → 탭별 독립(85614dd9) + 화면/컨텍스트 동기(d802da27). 다른 탭은 자기 `?p=`로 안 흔들림.
+      if (typeof window !== 'undefined') window.sessionStorage.setItem(TAB_PROJECT_STORAGE_KEY, nextProjectId);
+      const sp = new URLSearchParams(Array.from(searchParams.entries()));
+      sp.set('p', nextProjectId);
+      router.push(`${pathname}?${sp.toString()}`);
+      // 쿠키/JWT 동기화(이 탭 RSC·첫 렌더용). 공유 쿠키가 덮여도 per-tab 정합은 `?p=`+sessionStorage+
+      // fetch X-Project-Id 헤더가 보장하므로 무해.
+      await fetch('/api/switch-project', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ project_id: nextProjectId }),
-      });
-      if (res.ok) {
-        window.location.reload();
-      }
+      }).catch(() => null);
+      router.refresh();
     } finally {
       setPending(false);
     }
