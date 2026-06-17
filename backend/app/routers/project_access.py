@@ -34,6 +34,8 @@ class ProjectAccessResponse(BaseModel):
     # E-MEMBER-SSOT AC2-1 canonical 앵커 — 에이전트 행은 org_member_id 대신 member_id 로 식별.
     member_id: uuid.UUID | None = None
     permission: str
+    # E-MEMBER-POLICY S3: per-project 역할(owner/admin/member) 노출 — FE 가 owner 지정 UI 에 사용.
+    role: str = "member"
     created_at: datetime
 
 
@@ -194,3 +196,83 @@ async def delete_project_access(
     await session.delete(record)
     await session.commit()
     return {"ok": True}
+
+
+class SetProjectRoleRequest(BaseModel):
+    role: str  # 'owner' | 'admin' | 'member'
+
+
+@router.put("/{project_id}/access/{member_id}/role", response_model=ProjectAccessResponse)
+async def set_project_role(
+    project_id: uuid.UUID,
+    member_id: uuid.UUID,
+    body: SetProjectRoleRequest,
+    auth: AuthContext = Depends(get_current_user),
+    session: AsyncSession = Depends(get_db),
+) -> ProjectAccessResponse:
+    """멤버의 per-project 역할(owner/admin/member) 지정 — E-MEMBER-POLICY S3 / AC#1(owner 지정).
+
+    권한(§9-3): **project owner** 또는 **org owner/admin**(project admin 은 역할 지정 불가).
+    대상은 해당 프로젝트에 project_access 행이 있는 멤버(휴먼=member_id 또는 org_member_id 매칭,
+    에이전트=member_id). 행 없으면 404. role 은 enum 검증(비-enum 400) — 0122 CHECK 정합.
+    """
+    from sqlalchemy import text
+    from sqlalchemy import update as sa_update
+
+    from app.services.project_auth import (
+        PROJECT_ROLES,
+        get_project_role,
+        is_org_owner_or_admin,
+    )
+
+    if body.role not in PROJECT_ROLES:
+        raise HTTPException(
+            status_code=400, detail=f"role must be one of {list(PROJECT_ROLES)}"
+        )
+
+    # 프로젝트 → org 역추적(존재 404)
+    org_row = (
+        await session.execute(
+            text("SELECT org_id FROM projects WHERE id = :pid AND deleted_at IS NULL"),
+            {"pid": str(project_id)},
+        )
+    ).first()
+    if org_row is None:
+        raise HTTPException(status_code=404, detail="Project not found")
+    org_id = org_row[0]
+
+    # 권한(§9-3): project owner OR org owner/admin. project admin 은 불가(get_project_role!=owner
+    # AND not org owner/admin). org owner 는 effective owner(floor)라 첫 조건으로 통과.
+    actor = uuid.UUID(auth.user_id)
+    is_proj_owner = (await get_project_role(session, actor, project_id)) == "owner"
+    if not (is_proj_owner or await is_org_owner_or_admin(session, actor, org_id)):
+        raise HTTPException(
+            status_code=403, detail="project owner or org owner/admin required"
+        )
+
+    # 대상 project_access 행 role 갱신 — 휴먼(member_id|org_member_id)·에이전트(member_id) 모두 매칭.
+    result = await session.execute(
+        sa_update(ProjectAccess)
+        .where(
+            ProjectAccess.project_id == project_id,
+            (ProjectAccess.member_id == member_id)
+            | (ProjectAccess.org_member_id == member_id),
+        )
+        .values(role=body.role)
+    )
+    if result.rowcount == 0:
+        raise HTTPException(
+            status_code=404, detail="Member has no access record in this project"
+        )
+    await session.commit()
+
+    record = (
+        await session.execute(
+            select(ProjectAccess).where(
+                ProjectAccess.project_id == project_id,
+                (ProjectAccess.member_id == member_id)
+                | (ProjectAccess.org_member_id == member_id),
+            )
+        )
+    ).scalars().first()
+    return ProjectAccessResponse.model_validate(record)
