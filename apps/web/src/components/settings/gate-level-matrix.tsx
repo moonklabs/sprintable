@@ -129,17 +129,22 @@ export function GateLevelMatrix({ surface, projectId, orgId, canEdit }: GateLeve
   const handleRevert = async (wt: WorkType, at: ActorType) => {
     if (!canWrite || !projectId || busyCell) return;
     const key = cellKey(wt, at);
+    const prev = cells[key]; // override 스냅샷
     setBusyCell(key);
     setMessage(null);
+    // 낙관적(PUT 미러): source 를 즉시 org_default 로(재정의 배지·↺ 즉시 사라짐). 상속 레벨은 응답이 확정.
+    setCells((m) => (prev ? { ...m, [key]: { ...prev, source: 'org_default' } } : m));
     try {
       const res = await fetch(`/api/projects/${projectId}/gate-config?work_type=${wt}&actor_type=${at}`, { method: 'DELETE' });
       if (res.ok) {
         applyEntry(key, (await res.json().catch(() => null) as { data?: GateLevelEntry } | null)?.data);
         setMessage({ type: 'success', text: t('reverted') });
       } else {
+        rollback(key, prev); // 실패 → override 복원
         setMessage({ type: 'error', text: t('saveFailed') });
       }
     } catch {
+      rollback(key, prev);
       setMessage({ type: 'error', text: t('saveFailed') });
     } finally {
       setBusyCell(null);

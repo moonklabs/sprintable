@@ -187,6 +187,7 @@ export default function SettingsPage() {
   const [removingMemberId, setRemovingMemberId] = useState<string | null>(null);
   const [isAdmin, setIsAdmin] = useState(false);
   const [adminChecked, setAdminChecked] = useState(false);
+  const [currentProjectRole, setCurrentProjectRole] = useState<string>('member'); // S-GATE-4: 현재 프로젝트 effective role
   const [currentUserId, setCurrentUserId] = useState<string | null>(null);
   const [deletingProjectId, setDeletingProjectId] = useState<string | null>(null);
   const [deleteProjectConfirmId, setDeleteProjectConfirmId] = useState<string | null>(null);
@@ -445,6 +446,9 @@ export default function SettingsPage() {
         const meJson = meRes.ok ? await meRes.json() : null;
         const role = (meJson?.data?.role ?? 'member') as string;
         setIsAdmin(role === 'admin' || role === 'owner');
+        // S-GATE-4 RC: /api/me role = 현재 프로젝트(currentProjectId)의 effective role. gate-config 편집
+        // 권한이 org admin/owner 외에 **project owner**도 포함(BE gate_config 정합)이라 별도 보관.
+        setCurrentProjectRole(role);
         setCurrentUserId((meJson?.data?.user_id as string | null) ?? null);
       } catch {
         setIsAdmin(false);
@@ -1034,14 +1038,16 @@ export default function SettingsPage() {
                   <StandupDeadlineSection projectId={currentProjectId} />
                 </div>
               ) : null}
-              {/* S-GATE-4: 프로젝트 게이트 정책(승인 레벨) 매트릭스. scope=project override. canEdit 은
-                  안전 subset(org admin/owner) — BE 는 project owner 도 허용하나 FE 는 보수적 게이트(과권한 0). */}
+              {/* S-GATE-4: 프로젝트 게이트 정책 매트릭스. canEdit = org admin/owner OR **이 프로젝트의 owner**
+                  — BE gate_config(PUT/DELETE scope='project')가 project owner 도 허용하므로 정합(RC①). project
+                  admin 은 BE 비허용이라 제외(meRole==='owner'만 — over-permission 0). cross-project 인 #1562
+                  grant 와 달리 자기 프로젝트 편집이라 보수적 org-admin-only 가 오히려 under-permissive 였음. */}
               {currentProjectId ? (
                 <div className="mt-6">
                   <GateLevelMatrix
                     surface="project"
                     projectId={currentProjectId}
-                    canEdit={currentOrgRole === 'owner' || currentOrgRole === 'admin'}
+                    canEdit={currentOrgRole === 'owner' || currentOrgRole === 'admin' || currentProjectRole === 'owner'}
                   />
                 </div>
               ) : null}
