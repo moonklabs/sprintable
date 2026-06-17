@@ -74,18 +74,25 @@ def clear_working(conversation_id: str, member_id: str) -> None:
         _working_store.pop(conversation_id, None)
 
 
-def clear_member(member_id: str) -> None:
+def clear_member(member_id: str) -> list[str]:
     """d5de8e08 안전망: member 의 **전 conversation** working 신호 제거.
 
     SSE 연결이 끊길 때(disconnect/크래시→offline·agent_gateway) 호출 — 연결이 사라지면 그 에이전트는
     더 이상 생성 중일 수 없으므로 즉시 정리(TTL backstop 기다리지 않음). 없으면 무해(no-op).
+
+    R2: working 이 실제로 제거된 conversation_id 목록을 반환 — 호출부(agent_gateway)가 각 conversation 에
+    conversation.working SSE 를 발행해 "...typing" 잔존을 막는다(기존 caller 는 반환 무시·무영향).
     """
+    affected = []
     empty_convs = []
     for conv, store in _working_store.items():
-        if store.pop(member_id, None) is not None and not store:
-            empty_convs.append(conv)
+        if store.pop(member_id, None) is not None:
+            affected.append(conv)
+            if not store:
+                empty_convs.append(conv)
     for conv in empty_convs:
         _working_store.pop(conv, None)
+    return affected
 
 
 def list_working(conversation_id: str) -> list[dict]:

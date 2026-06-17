@@ -293,6 +293,7 @@ async def _dispatch_conversation_event(
     member_type_map = {r[0]: r[1] for r in member_rows}
 
     events_to_push: list[tuple[str, Event]] = []
+    _set_working_any = False
     for pid in sorted(participant_ids):  # deadlock 방지: 일관 락 순서
         m_type = member_type_map.get(pid, "human")
         event = Event(
@@ -313,9 +314,15 @@ async def _dispatch_conversation_event(
         # 그 agent 가 reply 를 보내면 send_message 에서 clear, 안 보내면 TTL 자동 소멸(ephemeral).
         if m_type == "agent":
             chat_presence.set_working(str(conversation.id), str(pid))
+            _set_working_any = True
 
     # flush로 event.id 확보
     await db.flush()
+    # R2(da9d1781): working 변경 → conversation.working + presence SSE 발행(폴링 대체·best-effort).
+    if _set_working_any:
+        from app.services.presence_events import emit_conversation_working, emit_presence
+        emit_conversation_working(org_id, conversation.id)
+        emit_presence(org_id)
     # per-recipient dense seq 발급 (agent recipient만)
     for pid_str, event in events_to_push:
         if member_type_map.get(event.recipient_id, "human") == "agent":
@@ -1101,6 +1108,10 @@ async def send_message(
     # fork 분기(아래) 전 **원본 conversation_id** 기준 — working 은 그 conversation 에 set 됐다.
     # 휴먼 sender 면 set 된 적 없어 no-op(무해). agent reply 면 즉시 "...typing" 해제.
     chat_presence.clear_working(str(conversation_id), str(sender.id))
+    # R2(da9d1781): working clear → conversation.working + presence SSE 발행(폴링 대체·best-effort).
+    from app.services.presence_events import emit_conversation_working, emit_presence
+    emit_conversation_working(org_id, conversation_id)
+    emit_presence(org_id)
 
     # cross-org 차단: mentioned_ids를 현재 org 소속 member로 일괄 필터링 (QA B1).
     # E-MEMBER-SSOT Phase 0: 저장·DM포크·group 멘션 발송 모든 경로에 org 필터를 한 번 적용.
