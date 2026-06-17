@@ -102,6 +102,7 @@ async def dispatch_notification(
     body: str | None = None,
     reference_type: str | None = None,
     reference_id: uuid.UUID | None = None,
+    source_project_id: uuid.UUID | None = None,
 ) -> None:
     """notification_settings 필터 후 enabled member에게 알림 발송.
 
@@ -111,6 +112,11 @@ async def dispatch_notification(
 
     설정이 없는 member는 기본 enabled (opt-out).
     channel 기준: 'in_app'.
+
+    source_project_id: 알림을 촉발한 프로젝트(org-level 멀티프로젝트 에이전트 대응). team_members
+    뷰가 멀티프로젝트 멤버를 N행(동일 id)으로 내는데, 주어지면 dedup에서 그 프로젝트 행을 우선
+    선택하고 에이전트 Event를 그 프로젝트로 스코프한다 — 임의 first-project로 떨구는 오라우팅 방지.
+    미지정 시 기존 거동(첫 행) 유지 → 휴먼 1-알림 dedup 무회귀(additive·하위호환).
     """
     if not target_member_ids:
         return
@@ -186,14 +192,16 @@ async def dispatch_notification(
         # 반환한다. dedup 없이 루프하면 멀티프로젝트 멤버에게 알림이 **프로젝트 수만큼 중복 생성**됨
         # (Story Assign 시 Inbox 알림 3개 증상 = 담당자가 3개 프로젝트 소속). member id로 dedup해
         # 멤버당 1 알림/이벤트만 생성. (view-cutover multi-row 트랩)
-        _seen_member_ids: set = set()
-        _deduped = []
+        # source_project_id 주어지면 그 프로젝트 행을 우선(멀티프로젝트 에이전트 = 트리거 프로젝트로
+        # 정확 라우팅). 미지정 시 첫 행(기존 거동). 어느 경우든 member당 정확히 1행 → 휴먼 N-알림 무회귀.
+        _picked: dict[uuid.UUID, object] = {}
         for _m in members:
-            if _m.id in _seen_member_ids:
-                continue
-            _seen_member_ids.add(_m.id)
-            _deduped.append(_m)
-        members = _deduped
+            cur = _picked.get(_m.id)
+            if cur is None:
+                _picked[_m.id] = _m
+            elif source_project_id is not None and getattr(_m, "project_id", None) == source_project_id:
+                _picked[_m.id] = _m  # 트리거 프로젝트 행으로 교체
+        members = list(_picked.values())
 
         inserted = False
         created_events: list[Event] = []  # L1 BE-3: fan-out 수렴용 event 수집
@@ -205,10 +213,13 @@ async def dispatch_notification(
                         "dispatch_notification: skip agent %s — has active webhook", member_row.id
                     )
                     continue
-                # BUG-3 수정: agent → Notification 대신 events 테이블 INSERT
-                if member_row.project_id:
+                # BUG-3 수정: agent → Notification 대신 events 테이블 INSERT.
+                # 트리거 프로젝트(source_project_id) 우선 — 멀티프로젝트 에이전트가 임의 프로젝트로
+                # 이벤트 받는 오라우팅 방지. 미지정 시 뷰 행의 project_id(기존 거동).
+                _agent_proj = source_project_id or member_row.project_id
+                if _agent_proj:
                     event = Event(
-                        project_id=member_row.project_id,
+                        project_id=_agent_proj,
                         org_id=org_id,
                         event_type="dispatched",
                         source_entity_type=reference_type,
