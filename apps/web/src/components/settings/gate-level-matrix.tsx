@@ -33,7 +33,7 @@ const LEVELS: Level[] = ['auto', 'ask', 'block'];
 const LEVEL_META: Record<Level, { selected: string; badge: 'success' | 'warning' | 'destructive'; mark: string; labelKey: string }> = {
   auto: { selected: 'border-success-border bg-success-tint text-success', badge: 'success', mark: '✓', labelKey: 'levelAuto' },
   ask: { selected: 'border-warning-border bg-warning-tint text-warning', badge: 'warning', mark: '⏸', labelKey: 'levelAsk' },
-  block: { selected: 'border-destructive/40 bg-destructive/10 text-destructive', badge: 'destructive', mark: '⛔', labelKey: 'levelBlock' },
+  block: { selected: 'border-destructive-border bg-destructive-tint text-destructive', badge: 'destructive', mark: '⛔', labelKey: 'levelBlock' },
 };
 
 // 안전 하한(S-GATE-3 BE 강제): merge 는 최소 'ask' — 'auto' 비활성(UI 표현만, BE 가 우회 차단).
