@@ -76,6 +76,11 @@ class Settings(BaseSettings):
     # 정책은 A(human-only enforcing)·advisory는 개발/관측용 임시 모드(미설정=enforcing 보존).
     h1_merge_gate_advisory: bool = False
 
+    # E-HITL-GATING S-GATE-2: config 게이트 집행 활성(default-off·dev allowlist 점진 rollout·무회귀).
+    # off면 enforce_gate 미동작(기존 done/merge 무변경). allowlist 비면 enabled 시 전 org, 지정 시 해당 org만.
+    gate_config_enforce_enabled: bool = False
+    gate_config_enforce_org_allowlist: str = ""  # CSV org_id
+
     # E-MEMBER-SSOT AC2-3: 신원 해소를 anchor(members+member_identity_aliases) 기반으로 전환하는
     # shadow 플래그. off(기본)=레거시 resolver(org_members/team_members). on=anchor resolver.
     # 라이브 cutover는 AC3-1 — 여기선 shadow(parity 검증용), 기본 off라 실 read 경로 무변경.
