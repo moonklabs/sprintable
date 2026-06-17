@@ -664,7 +664,14 @@ export default function AgentDetailPage() {
       </SectionCard>
 
       {/* 프로젝트 접근 (org-agent 멀티프로젝트 단일키 grant) — 088987d8 */}
-      <AgentProjectAccessSection agentMemberId={id} projects={projects} canEdit={canEdit} />
+      {/* 프로젝트 grant 게이트는 page canEdit(creator 포함)보다 엄격 — creator라도 비-admin이면 과권한
+          (RC①). org admin/owner 만 page-wide 허용(org admin 은 org 전 프로젝트 grant 가능 = BE
+          _require_owner_or_admin 정합·403 surprise 0; 단일 project owner-non-admin 은 안전하게 미노출). */}
+      <AgentProjectAccessSection
+        agentMemberId={id}
+        projects={projects}
+        canEdit={orgRole === 'admin' || orgRole === 'owner'}
+      />
     </div>
   );
 }
