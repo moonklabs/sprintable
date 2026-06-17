@@ -273,6 +273,18 @@ export function ChatListView({ projectId, currentTeamMemberId, open, onOpenChang
     void fetchAllConversations(0, false);
   }, [fetchAllConversations]);
 
+  // 프로젝트 전환 시 agent 탭 stale 방지(RC): ref-guard 가 re-render 에 안 리셋되므로 projectId 변경마다
+  // 명시 리셋 + agent 리스트 클리어. 이미 열려있던 탭이면 새 프로젝트로 재로드(기존 자동 refetch 동작 보존),
+  // 한 번도 안 연 탭이면 lazy 유지. 마운트(첫 projectId)엔 wasLoaded=false 라 무fetch.
+  useEffect(() => {
+    const wasLoaded = agentLoadedRef.current;
+    agentLoadedRef.current = false;
+    setAllConversations([]);
+    setAgentOffset(0);
+    setAgentTotal(0);
+    if (wasLoaded) loadAgentConversationsOnce();
+  }, [projectId, loadAgentConversationsOnce]);
+
   const handleConversationMessage = useCallback((payload: { conversation_id?: string; content?: string; created_at?: string }) => {
     setConversations((prev) => applyConversationMessageUpdate(prev, payload, () => void fetchConversations(0, false)));
     // agent 탭을 아직 안 연 상태에선 allConversations 를 reactive 로드하지 않는다(lazy 유지) —
