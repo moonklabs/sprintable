@@ -2478,7 +2478,14 @@
     "mergeFloorNote": "Safety floor: merge requires at least Ask · self-approval blocked",
     "floorDisabledHint": "Disabled by safety floor",
     "saved": "Saved",
-    "saveFailed": "Failed to save."
+    "saveFailed": "Failed to save.",
+    "titleOrg": "Organization Gate Policy (Defaults)",
+    "descriptionOrg": "Organization-wide defaults. Each project can override these.",
+    "sourceInherited": "Inherited",
+    "sourceOverride": "Overridden",
+    "revertToDefault": "Revert to org default",
+    "reverted": "Reverted to org default.",
+    "noProjectForOrgEdit": "At least one project is required to set organization defaults."
   },
   "cage": {
     "gatePending": "gate pending",

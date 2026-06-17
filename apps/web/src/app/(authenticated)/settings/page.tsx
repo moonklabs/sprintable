@@ -1039,8 +1039,8 @@ export default function SettingsPage() {
               {currentProjectId ? (
                 <div className="mt-6">
                   <GateLevelMatrix
+                    surface="project"
                     projectId={currentProjectId}
-                    scope="project"
                     canEdit={currentOrgRole === 'owner' || currentOrgRole === 'admin'}
                   />
                 </div>
@@ -1143,6 +1143,18 @@ export default function SettingsPage() {
                   )}
                 </SectionCardBody>
               </SectionCard>
+              {/* S-GATE-4 2계층: 조직 게이트 정책(기본값) surface. scope='org'. PUT 은 대표 project 경유
+                  (org_router 는 GET 만)·canEdit=org admin/owner. project 0개면 컴포넌트가 편집 불가 안내. */}
+              {orgInfo ? (
+                <div className="mt-6">
+                  <GateLevelMatrix
+                    surface="org"
+                    orgId={orgInfo.id}
+                    projectId={currentProjectId ?? projects[0]?.id}
+                    canEdit={currentOrgRole === 'owner' || currentOrgRole === 'admin'}
+                  />
+                </div>
+              ) : null}
               {currentOrgRole === 'owner' && (
                 <SectionCard className="border-destructive/20 bg-destructive/10 mt-6">
                   <SectionCardHeader className="border-b border-destructive/20">
