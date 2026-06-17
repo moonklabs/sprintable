@@ -101,8 +101,9 @@ export async function proxyToFastapi(
   };
   if (authHeader) headers['Authorization'] = authHeader;
 
-  // 일부 헤더 forward
-  for (const h of ['x-forwarded-for', 'x-real-ip', 'x-api-key', 'x-org-id']) {
+  // 일부 헤더 forward — x-project-id(R2): 브라우저 fetch 인터셉터가 주입한 탭 effective project를
+  // FastAPI get_verified_org_id override까지 도달시킨다. 빠지면 이 중간 hop이 헤더를 드롭해 무력화.
+  for (const h of ['x-forwarded-for', 'x-real-ip', 'x-api-key', 'x-org-id', 'x-project-id']) {
     const v = request.headers.get(h);
     if (v) headers[h] = v;
   }
