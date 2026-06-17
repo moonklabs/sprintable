@@ -340,11 +340,14 @@ async def update_story(
         # S-GATE-2: config 게이트 집행(done) — flag-off면 no-op(무회귀). block→409·ask→HitlRequest park.
         if gate_story is not None:
             from app.services.gate_enforce import enforce_gate
+            # HIGH②: actor_type 은 인증 컨텍스트에서 신뢰 도출 — API 키(app_metadata.api_key_id)=agent,
+            # 아니면 human(JWT). 보안 결정 신호라 fragile DB resolve-then-swallow(None→human) 지양.
+            _g_actor_type = (
+                "agent" if auth.claims.get("app_metadata", {}).get("api_key_id") else "human"
+            )
             _g_actor_id: uuid.UUID | None = None
-            _g_actor_type: str | None = None
-            try:
+            try:  # actor_id 는 HitlRequest 귀속용(비보안)·best-effort.
                 _g_actor_id = await _resolve_team_member_id(auth, repo.org_id, db)
-                _, _, _g_actor_type = await _resolve_actor_info(db, _g_actor_id)
             except Exception:
                 pass
             await enforce_gate(
@@ -566,11 +569,13 @@ async def update_story_status(
     # S-GATE-2: config 게이트 집행(done) — flag-off면 no-op(무회귀). block→409·ask→HitlRequest park.
     if body.status == "done" and story_before is not None:
         from app.services.gate_enforce import enforce_gate
+        # HIGH②: actor_type 은 인증 컨텍스트에서 신뢰 도출(API 키=agent / JWT=human)·None→human 묵시 금지.
+        _g_actor_type = (
+            "agent" if auth.claims.get("app_metadata", {}).get("api_key_id") else "human"
+        )
         _g_actor_id: uuid.UUID | None = None
-        _g_actor_type: str | None = None
-        try:
+        try:  # actor_id 는 HitlRequest 귀속용(비보안)·best-effort.
             _g_actor_id = await _resolve_team_member_id(auth, repo.org_id, db)
-            _, _, _g_actor_type = await _resolve_actor_info(db, _g_actor_id)
         except Exception:
             pass
         await enforce_gate(

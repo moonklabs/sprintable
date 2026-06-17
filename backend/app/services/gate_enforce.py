@@ -15,11 +15,46 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.config import settings
 from app.models.hitl import HitlRequest
-from app.services.gate_config import resolve_gate_level
+from app.services.gate_config import ACTOR_TYPES, resolve_gate_level
 
 logger = logging.getLogger(__name__)
 
 _GATE_REQUEST_TYPE = "gate_approval"
+# restrictiveness 순위(fail-closed 시 더 엄격한 레벨 선택): block > ask > auto.
+_RESTRICT_RANK = {"auto": 0, "ask": 1, "block": 2}
+
+
+async def _resolve_level_failclosed(
+    session: AsyncSession,
+    *,
+    org_id: uuid.UUID,
+    project_id: uuid.UUID | None,
+    work_type: str,
+    actor_type: str | None,
+) -> str:
+    """actor_type 신뢰 해소 + **fail-closed**. 알려진 actor(agent/human)면 그 레벨.
+
+    actor_type 불명(None/미지원)이면 **None→"human" 절대 금지**(보안 결함) — 두 actor config 중
+    **더 restrictive** 레벨 적용(에이전트 block 우회 차단·QA HIGH②). 호출부가 신뢰 actor_type 전달이
+    1차 방어이고, 이는 방어심층(defense-in-depth) 백스톱.
+    """
+    if actor_type in ACTOR_TYPES:
+        return await resolve_gate_level(
+            session, org_id=org_id, project_id=project_id,
+            work_type=work_type, actor_type=actor_type,
+        )
+    levels = [
+        await resolve_gate_level(
+            session, org_id=org_id, project_id=project_id, work_type=work_type, actor_type=at
+        )
+        for at in ACTOR_TYPES
+    ]
+    chosen = max(levels, key=lambda lv: _RESTRICT_RANK.get(lv, 1))
+    logger.warning(
+        "gate_enforced actor_type=%r unresolved → fail-closed most_restrictive level=%s",
+        actor_type, chosen,
+    )
+    return chosen
 
 
 def _enforce_allowlist() -> set[uuid.UUID]:
@@ -61,9 +96,10 @@ async def enforce_gate(
     HitlRequest(pending) park + 409(차단). raise 전 commit 으로 ask 요청 persist(_preflight 동형)."""
     if not gate_config_enforce_active(org_id):
         return
-    level = await resolve_gate_level(
+    # HIGH②: actor_type None→"human" 묵시 강등 금지 — fail-closed 해소(불명이면 더 restrictive).
+    level = await _resolve_level_failclosed(
         session, org_id=org_id, project_id=project_id,
-        work_type=work_type, actor_type=actor_type or "human",
+        work_type=work_type, actor_type=actor_type,
     )
     if level == "auto":
         logger.info(
@@ -88,66 +124,86 @@ async def enforce_gate(
 
     # level == "ask"
     wi = str(work_item_id)
-    # §6-2(A): 동일 work_item 의 승인된 gate_approval 있으면 통과(승인 후 재시도 통과).
-    approved = (
+    # 동일 work_item 의 **최신** gate_approval 결정이 거버넌스(최신 결정 우선):
+    #   approved → 통과(§6-2 A 재시도 통과) · rejected → 409 차단(재-ask 금지·QA② reject 차단 유지)
+    #   pending  → 기존 request 재사용(dup park 방지) · 없음 → 신규 pending park.
+    row = (
         await session.execute(
-            select(HitlRequest.id).where(
+            select(HitlRequest.id, HitlRequest.status).where(
                 HitlRequest.org_id == org_id,
                 HitlRequest.request_type == _GATE_REQUEST_TYPE,
-                HitlRequest.status == "approved",
                 HitlRequest.deleted_at.is_(None),
                 HitlRequest.hitl_metadata["work_item_id"].astext == wi,
                 HitlRequest.hitl_metadata["work_type"].astext == work_type,
-            ).limit(1)
+            ).order_by(HitlRequest.created_at.desc()).limit(1)
         )
-    ).scalar_one_or_none()
-    if approved is not None:
+    ).first()
+
+    if row is not None:
+        req_id, req_status = row[0], row[1]
+        if req_status == "approved":
+            logger.info(
+                "gate_enforced org=%s work=%s level=ask outcome=resumed approved_request=%s",
+                org_id, work_type, req_id,
+            )
+            return
+        if req_status == "rejected":
+            logger.info(
+                "gate_enforced org=%s work=%s level=ask outcome=blocked_rejected request=%s",
+                org_id, work_type, req_id,
+            )
+            raise HTTPException(
+                status_code=409,
+                detail={
+                    "code": "GATE_REJECTED",
+                    "work_type": work_type,
+                    "level": "ask",
+                    "request_id": str(req_id),
+                    "requires_human": True,
+                    "message": f"{work_type} 전이가 거부됨(rejected) — 차단 유지.",
+                },
+            )
+        # pending — 기존 request 재사용(중복 park 방지).
         logger.info(
-            "gate_enforced org=%s work=%s level=ask outcome=resumed approved_request=%s",
-            org_id, work_type, approved,
+            "gate_enforced org=%s work=%s level=ask outcome=ask_pending request_id=%s",
+            org_id, work_type, req_id,
         )
-        return
-
-    # pending 중복 방지 — 이미 있으면 그 id, 없으면 생성.
-    pending = (
-        await session.execute(
-            select(HitlRequest.id).where(
-                HitlRequest.org_id == org_id,
-                HitlRequest.request_type == _GATE_REQUEST_TYPE,
-                HitlRequest.status == "pending",
-                HitlRequest.deleted_at.is_(None),
-                HitlRequest.hitl_metadata["work_item_id"].astext == wi,
-                HitlRequest.hitl_metadata["work_type"].astext == work_type,
-            ).limit(1)
-        )
-    ).scalar_one_or_none()
-
-    if pending is None:
-        # agent_id·requested_for 는 NOT NULL — v1 은 actor 멤버 id 사용(self-approval 정교화는 S-GATE-3).
-        req = HitlRequest(
-            org_id=org_id,
-            project_id=project_id or org_id,  # project_id NOT NULL — 오버라이드 없으면 org 단위 표기
-            agent_id=actor_id or org_id,
-            request_type=_GATE_REQUEST_TYPE,
-            title=f"승인 필요: {work_item_title or wi} → {work_type}",
-            prompt=f"{work_type} 전이에 사람 승인이 필요합니다(게이트 레벨 ask).",
-            requested_for=actor_id or org_id,
-            status="pending",
-            hitl_metadata={
-                "work_item_id": wi,
+        raise HTTPException(
+            status_code=409,
+            detail={
+                "code": "GATE_ASK",
                 "work_type": work_type,
-                "actor_id": str(actor_id) if actor_id else None,
-                "actor_type": actor_type,
+                "level": "ask",
+                "request_id": str(req_id),
+                "requires_human": True,
+                "message": f"{work_type} 전이는 사람 승인 대기(HITL).",
             },
         )
-        session.add(req)
-        await session.commit()  # raise 전 persist(_preflight_merge_gate 동형·get_db 예외 rollback 대비)
-        await session.refresh(req)
-        pending = req.id
 
+    # 결정 이력 없음 → 신규 pending park. agent_id·requested_for 는 NOT NULL — v1 은 actor 멤버 id
+    # 사용(self-approval 정교화는 S-GATE-3·§6-5).
+    req = HitlRequest(
+        org_id=org_id,
+        project_id=project_id or org_id,  # project_id NOT NULL — 오버라이드 없으면 org 단위 표기
+        agent_id=actor_id or org_id,
+        request_type=_GATE_REQUEST_TYPE,
+        title=f"승인 필요: {work_item_title or wi} → {work_type}",
+        prompt=f"{work_type} 전이에 사람 승인이 필요합니다(게이트 레벨 ask).",
+        requested_for=actor_id or org_id,
+        status="pending",
+        hitl_metadata={
+            "work_item_id": wi,
+            "work_type": work_type,
+            "actor_id": str(actor_id) if actor_id else None,
+            "actor_type": actor_type,
+        },
+    )
+    session.add(req)
+    await session.commit()  # raise 전 persist(_preflight_merge_gate 동형·get_db 예외 rollback 대비)
+    await session.refresh(req)
     logger.info(
         "gate_enforced org=%s work=%s level=ask outcome=ask_queued request_id=%s",
-        org_id, work_type, pending,
+        org_id, work_type, req.id,
     )
     raise HTTPException(
         status_code=409,
@@ -155,7 +211,7 @@ async def enforce_gate(
             "code": "GATE_ASK",
             "work_type": work_type,
             "level": "ask",
-            "request_id": str(pending),
+            "request_id": str(req.id),
             "requires_human": True,
             "message": f"{work_type} 전이는 사람 승인 대기(HITL).",
         },
