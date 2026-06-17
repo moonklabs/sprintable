@@ -1294,9 +1294,11 @@ export function StoryDetailPanel({ story, tasks, nextTasksCursor = null, loading
                       {comments.map((comment) => (
                         <li key={comment.id} className="rounded-md border border-border bg-muted/30 p-3">
                           <p className="whitespace-pre-wrap text-sm text-foreground">{comment.content}</p>
-                          <p className="mt-2 text-[10px] font-mono text-muted-foreground">
-                            {new Date(comment.created_at).toLocaleString()}
-                          </p>
+                          <div className="mt-2 flex items-center gap-2 text-[10px] font-mono text-muted-foreground">
+                            <span>{memberMap[comment.created_by]?.name ?? '—'}</span>
+                            <span>·</span>
+                            <span>{new Date(comment.created_at).toLocaleString()}</span>
+                          </div>
                         </li>
                       ))}
                     </ul>
