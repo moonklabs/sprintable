@@ -288,14 +288,28 @@ async def get_verified_org_id(
         # 헤더 사용 시 항상 membership 검증 (JWT org_id와 다를 수 있음)
         await _verify_org_membership(auth.user_id, org_id, db, request)
 
-    jwt_project_id = auth.claims.get("app_metadata", {}).get("project_id")
-    if not jwt_project_id and x_project_id:
-        # X-Project-Id 헤더 fallback 사용 시 해당 project가 org에 속하는지 검증
+    # X-Project-Id 헤더 = per-request 프로젝트 스코프 **override**(d802da27/85614dd9).
+    # JWT project_id 는 탭 공유라, 같은 유저가 여러 프로젝트 탭을 열어도 mutation 이 JWT 의 단일
+    # project 로 잘못 바인딩된다(48 mutation 라우트가 app_metadata.project_id 를 직접 읽음). FE 가
+    # 탭별로 보내는 X-Project-Id 를 JWT project_id 보다 **우선** 적용해 effective project 를
+    # 교체한다 — 헤더 프로젝트를 app_metadata.project_id 에 써 downstream 전 라우트에 1점 반영.
+    #
+    # ⚠️ 보안 critical: 헤더 프로젝트는 **반드시 has_project_access 멤버십 검증**(team_member ∪
+    # grant ∪ owner/admin). 미검증 시 헤더로 org 내 임의 프로젝트를 mutation 하는 권한상승 취약점.
+    # (기존 코드는 JWT project_id 부재 시에만·_verify_project_in_org=project∈org 만 봐서 멤버 아닌
+    # 프로젝트도 통과하던 갭.) 멤버십 미달이면 403.
+    if x_project_id:
         try:
-            project_id = uuid.UUID(x_project_id)
+            header_project_id = uuid.UUID(x_project_id)
         except ValueError:
             raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Invalid X-Project-Id format")
-        await _verify_project_in_org(project_id, org_id, db, request)
+        from app.services.project_auth import has_project_access
+        if not await has_project_access(db, uuid.UUID(auth.user_id), header_project_id, org_id):
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail="No access to the specified project",
+            )
+        auth.claims.setdefault("app_metadata", {})["project_id"] = str(header_project_id)
 
     return org_id
 
