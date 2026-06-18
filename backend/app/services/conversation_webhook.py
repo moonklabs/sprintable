@@ -245,8 +245,11 @@ async def deliver_conversation_message_webhook(
             sender_name = None
             if sender_id is not None:
                 from app.models.team import TeamMember
+                # team_members 는 projection VIEW — multi-project sender(owner 등·N projection 행)면
+                # 무필터 scalar_one_or_none 이 MultipleResultsFound → deliver_conversation_message_webhook
+                # 전체 크래시 → 전 수신자 미수신. name 은 전 행 동형이라 .limit(1) 로 안전(아무 행 OK).
                 sender_name = (await db.execute(
-                    select(TeamMember.name).where(TeamMember.id == sender_id)
+                    select(TeamMember.name).where(TeamMember.id == sender_id).limit(1)
                 )).scalar_one_or_none()
 
             # R2 S1(9d130c01): 첨부 내용을 에이전트-facing content 에 주입(균일·런타임 무변경).

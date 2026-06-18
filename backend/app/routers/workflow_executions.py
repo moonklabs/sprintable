@@ -225,8 +225,9 @@ async def get_execution(
 
     agent_name: str | None = None
     if log.target_agent_id:
+        # team_members projection VIEW — multi-project agent N 행. name 동형이라 .limit(1)(아무 행 OK).
         ar = await db.execute(
-            select(TeamMember.name).where(TeamMember.id == log.target_agent_id)
+            select(TeamMember.name).where(TeamMember.id == log.target_agent_id).limit(1)
         )
         agent_name = ar.scalar_one_or_none()
 
