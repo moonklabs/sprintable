@@ -76,9 +76,15 @@ async def _get_or_create_conversation(
     agent_id: uuid.UUID,
     caller_id: uuid.UUID,
     org_id: uuid.UUID,
-    project_id: uuid.UUID,
+    default_project_id: uuid.UUID,
 ) -> uuid.UUID:
-    """에이전트↔사용자 쌍의 DM conversation 조회 또는 생성. conversation.id 반환."""
+    """에이전트↔사용자 쌍의 DM conversation 조회 또는 생성. conversation.id 반환.
+
+    2c457a06 true-routing: 기존 (agent, caller) DM 이 있으면 **그 conversation 의 project 를 그대로**
+    쓴다(대화가 자기 project 스코프를 소유·임의 grant row 아님·[[Member-SSOT No team_member Coercion]]).
+    신규 생성 시에만 default_project_id(멀티프로젝트 agent 의 deterministic default) 사용. 다중 DM
+    (멀티룸 정책) 공존 시 최古(created_at)=canonical 결정적 선택.
+    """
     async with async_session_factory() as db:
         # 에이전트가 참가한 conversation_id 서브쿼리
         agent_conv_ids = (
@@ -86,7 +92,7 @@ async def _get_or_create_conversation(
             .where(ConversationParticipant.member_id == agent_id)
             .scalar_subquery()
         )
-        # 두 멤버가 모두 참가한 DM conversation 조회
+        # 두 멤버가 모두 참가한 DM conversation 조회 — project 필터 없이(기존 DM 의 project 가 곧 스코프).
         conv = (await db.execute(
             select(Conversation)
             .join(ConversationParticipant, and_(
@@ -97,16 +103,16 @@ async def _get_or_create_conversation(
                 Conversation.id.in_(agent_conv_ids),
                 Conversation.type == "dm",
                 Conversation.org_id == org_id,
-                Conversation.project_id == project_id,
                 Conversation.status != "deleted",
             )
+            .order_by(Conversation.created_at)  # 다중 DM 공존 시 최古=canonical(결정적)
             .limit(1)
         )).scalar_one_or_none()
 
         if conv is None:
             conv = Conversation(
                 org_id=org_id,
-                project_id=project_id,
+                project_id=default_project_id,  # 신규 DM 만 default project 로 스코프
                 type="dm",
                 title=None,
                 created_by=agent_id,
