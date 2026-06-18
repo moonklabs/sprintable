@@ -42,7 +42,7 @@ async def get_hitl_policy(
     if not org_id:
         return _err("FORBIDDEN", "org_id required", 403)
     snapshot = await repo.get_policy(org_id, project_id)
-    return _ok(snapshot.model_dump())
+    return _ok(snapshot.model_dump(mode="json"))
 
 
 @router.patch("/policy")
@@ -61,7 +61,7 @@ async def update_hitl_policy(
         approval_rules=body.approval_rules,
         timeout_classes=body.timeout_classes,
     )
-    return _ok(snapshot.model_dump())
+    return _ok(snapshot.model_dump(mode="json"))
 
 
 @router.get("/requests")
@@ -74,7 +74,9 @@ async def list_hitl_requests(
     if not org_id:
         return _err("FORBIDDEN", "org_id required", 403)
     requests = await repo.list_requests(org_id=org_id, project_id=project_id, status=status)
-    return _ok([r.model_dump() for r in requests])
+    # _ok 는 raw JSONResponse(json.dumps) — model_dump() 는 UUID/datetime 객체를 그대로 둬 직렬화
+    # 불가(500). mode="json" 으로 UUID→str·datetime→ISO 직렬화(resolve 엔드포인트의 str() 우회와 정합).
+    return _ok([r.model_dump(mode="json") for r in requests])
 
 
 @router.patch("/requests/{request_id}")
