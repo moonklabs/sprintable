@@ -74,25 +74,33 @@ async function tryRefreshViaFastapi(request: NextRequest): Promise<{ accessToken
 
 // AC1(551bbbee): single-flight refresh. refresh 는 single-use rotation(첫 건이 RT revoke)이라, 대시보드
 // 동시요청이 같은 RT 로 각자 refresh 하면 첫 건만 통과·나머지 401 → 강제 로그아웃("세션 너무 짧음")이던
-// 레이스를 제거. RT 기준 in-flight 1개로 dedupe(나머지는 그 결과 await/재사용) — 실제 refresh 호출은 1회라
-// single-use 보안 유지. grace(시작 기준 5s) 동안 결과 캐시 — cookie 갱신 전 도착한 burst 꼬리 요청도 옛 RT
-// 로 새 refresh 하지 않고 재사용. setTimeout 미사용(edge 런타임서 post-response 실행 불확실) — timestamp
-// lazy 만료 + size-cap prune(무한증가 방지).
+// 레이스를 제거. RT 기준 in-flight 1개로 dedupe(나머지는 그 promise 를 await/재사용) — 실제 refresh 호출은
+// 1회라 single-use 보안 유지.
+//   - **pending 동안은 시간 무관하게 그 promise 재사용**(refresh 가 10s 걸려도 1개만 — 시작-기준 grace 면
+//     느린 refresh 가 grace 넘겨 pending 중 신규 refresh 시작=레이스 재발, RC HIGH 봉합).
+//   - 해소(settled) 후엔 **해소 시각 기준 grace** 동안만 결과 재사용 — cookie 갱신 전 도착한 burst 꼬리
+//     요청도 옛 RT 로 새 refresh 안 함.
+// setTimeout 미사용(edge 런타임 post-response 실행 불확실)·size-cap lazy prune(무한증가 방지).
 const REFRESH_GRACE_MS = 5_000;
-const inflightRefresh = new Map<string, { p: Promise<{ accessToken: string; refreshToken: string } | null>; expiresAt: number }>();
+type RefreshEntry = { p: Promise<{ accessToken: string; refreshToken: string } | null>; settledAt: number | null };
+const inflightRefresh = new Map<string, RefreshEntry>();
 
 function singleFlightRefresh(request: NextRequest): Promise<{ accessToken: string; refreshToken: string } | null> {
   const rt = request.cookies.get(SP_RT_COOKIE)?.value;
   if (!rt) return Promise.resolve(null);
   const now = Date.now();
   const existing = inflightRefresh.get(rt);
-  if (existing && existing.expiresAt > now) return existing.p; // 진행 중 or 최근 결과 재사용
-  const p = tryRefreshViaFastapi(request);
-  inflightRefresh.set(rt, { p, expiresAt: now + REFRESH_GRACE_MS });
-  if (inflightRefresh.size > 64) { // 만료 항목 lazy prune(무한증가 방지)
-    for (const [k, v] of inflightRefresh) if (v.expiresAt <= now) inflightRefresh.delete(k);
+  // pending(settledAt===null) → 시간 무관 재사용 / settled → 해소 시각 + grace 내에서만 재사용.
+  if (existing && (existing.settledAt === null || existing.settledAt + REFRESH_GRACE_MS > now)) {
+    return existing.p;
   }
-  return p;
+  const entry: RefreshEntry = { p: tryRefreshViaFastapi(request), settledAt: null };
+  inflightRefresh.set(rt, entry);
+  void entry.p.finally(() => { entry.settledAt = Date.now(); }); // 해소 시각 기록 → grace 시작점
+  if (inflightRefresh.size > 64) { // settled + grace 지난 항목 lazy prune(pending 은 유지)
+    for (const [k, v] of inflightRefresh) if (v.settledAt !== null && v.settledAt + REFRESH_GRACE_MS <= now) inflightRefresh.delete(k);
+  }
+  return entry.p;
 }
 
 function applyTokenCookies(
