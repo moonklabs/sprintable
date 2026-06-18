@@ -99,12 +99,16 @@ def test_all_expected_tools_registered():
     "sprintable_list_meetings",
     "sprintable_list_retro_sessions",
 ])
-def test_project_id_not_in_schema(tool_name: str):
-    """project_id/org_id는 context 자동 주입 — 스키마에 노출 금지."""
+def test_org_id_not_in_schema_project_id_optional(tool_name: str):
+    """org_id는 context 자동 주입 — 스키마 비노출. project_id는 85429ee0 후 **선택적 per-call override**
+    로 스키마에 노출(org-agent 멀티프로젝트 grant 타겟팅·미지정 시 키 default·무회귀)."""
     schema = _TOOLS[tool_name].parameters
     schema_str = str(schema)
-    assert "project_id" not in schema_str
-    assert "org_id" not in schema_str
+    assert "org_id" not in schema_str           # org 는 여전히 context 주입
+    assert "project_id" in schema_str           # 85429ee0: per-call override 로 노출
+    # required 아님(optional·미지정 시 default project)
+    required = schema.get("required", []) if isinstance(schema, dict) else []
+    assert "project_id" not in required
 
 
 @pytest.mark.parametrize("tool_name,optional_field", [

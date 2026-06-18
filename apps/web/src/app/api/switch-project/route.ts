@@ -1,7 +1,7 @@
 import { NextResponse } from 'next/server';
 import { SP_AT_COOKIE, SP_RT_COOKIE, getServerSession } from '@/lib/db/server';
 import { CURRENT_PROJECT_COOKIE } from '@/lib/auth-helpers';
-import { cookieBase } from '@/lib/auth/cookies';
+import { cookieBase, SP_AT_MAX_AGE_SECONDS } from '@/lib/auth/cookies';
 
 const FASTAPI_URL = () => process.env['NEXT_PUBLIC_FASTAPI_URL'] ?? 'http://localhost:8000';
 
@@ -39,7 +39,7 @@ export async function POST(request: Request): Promise<Response> {
 
   const { access_token, refresh_token } = json.data;
   const res = NextResponse.json({ data: { ok: true } });
-  res.cookies.set(SP_AT_COOKIE, access_token, { ...cookieBase(), maxAge: 15 * 60 });
+  res.cookies.set(SP_AT_COOKIE, access_token, { ...cookieBase(), maxAge: SP_AT_MAX_AGE_SECONDS });
   res.cookies.set(SP_RT_COOKIE, refresh_token, { ...cookieBase(), maxAge: 30 * 24 * 60 * 60 });
   res.cookies.set(CURRENT_PROJECT_COOKIE, body.project_id, { path: '/', sameSite: 'lax', maxAge: 60 * 60 * 24 * 365 });
   return res;
