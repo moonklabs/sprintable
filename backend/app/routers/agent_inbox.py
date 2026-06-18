@@ -46,12 +46,19 @@ async def receive_inbox_webhook(
     if not _verify_signature(raw_body, x_sprintable_signature):
         raise HTTPException(status_code=401, detail="Invalid webhook signature")
 
+    # team_members 는 projection VIEW — org-agent 멀티프로젝트 grant 면 같은 agent_id 가 N 행이라
+    # 무필터 one_or_none 은 MultipleResultsFound 로 깨진다. 이 inbox webhook 은 단일 글로벌 secret
+    # (per-webhook-config 없음)이고 members anchor 엔 home project 가 없어 "올바른" project 를 도출할
+    # 컨텍스트가 없다. → deterministic grant-pick(order_by(project_id) limit 1)으로 크래시를 막고
+    # 안정적 default project 로 Event 를 적재한다.
+    # ⚠️ known-limitation: 멀티프로젝트 agent inbox 의 project 라우팅은 default(최저 project_id) 고정.
+    #   진짜 라우팅(payload 가 타겟 project 명시)은 follow-up story(멀티프로젝트 inbox routing).
     result = await db.execute(
         select(TeamMember.org_id, TeamMember.project_id).where(
             TeamMember.id == agent_id,
             TeamMember.type == "agent",
             TeamMember.is_active.is_(True),
-        )
+        ).order_by(TeamMember.project_id).limit(1)
     )
     row = result.one_or_none()
     if row is None:
