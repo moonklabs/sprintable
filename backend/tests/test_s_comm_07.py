@@ -86,7 +86,7 @@ async def test_receive_inbox_webhook_404_when_agent_not_found():
 
     mock_db = AsyncMock()
     mock_result = MagicMock()
-    mock_result.one_or_none.return_value = None
+    mock_result.all.return_value = []  # 2c457a06: grant 전수 조회(.all) — 없으면 404
     mock_db.execute = AsyncMock(return_value=mock_result)
 
     with patch("app.routers.agent_inbox.settings") as mock_settings:
@@ -141,11 +141,9 @@ async def test_receive_inbox_webhook_creates_event():
 
     mock_db = AsyncMock()
 
-    # execute: agent lookup 반환
-    agent_row = MagicMock()
-    agent_row.__iter__ = MagicMock(return_value=iter([org_id, project_id]))
+    # execute: agent grant 전수 조회(.all) — 단일 grant
     lookup_result = MagicMock()
-    lookup_result.one_or_none.return_value = (org_id, project_id)
+    lookup_result.all.return_value = [(org_id, project_id)]
     mock_db.execute = AsyncMock(return_value=lookup_result)
 
     mock_event = MagicMock()
@@ -223,7 +221,7 @@ async def test_receive_inbox_webhook_calls_push_to_agent():
 
     mock_db = AsyncMock()
     lookup_result = MagicMock()
-    lookup_result.one_or_none.return_value = (org_id, project_id)
+    lookup_result.all.return_value = [(org_id, project_id)]
     mock_db.execute = AsyncMock(return_value=lookup_result)
 
     mock_event = MagicMock()
@@ -255,3 +253,73 @@ def test_agent_inbox_webhook_secret_in_config():
     s = Settings()
     assert hasattr(s, "agent_inbox_webhook_secret")
     assert s.agent_inbox_webhook_secret == ""
+
+
+# ─── 2c457a06 true-routing: payload project_id 우선(grant 검증)·없으면 default ──────
+async def _run_inbox_with_grants(payload: dict, grants: list[tuple]):
+    """주어진 grant 목록 + payload 로 receive_inbox_webhook 실행 → 생성 Event 의 project_id 반환."""
+    from app.routers.agent_inbox import receive_inbox_webhook
+
+    agent_id = uuid.uuid4()
+    body = json.dumps(payload).encode()
+    mock_request = MagicMock()
+    mock_request.body = AsyncMock(return_value=body)
+
+    mock_db = AsyncMock()
+    lookup_result = MagicMock()
+    lookup_result.all.return_value = grants  # (org_id, project_id) 행들
+    mock_db.execute = AsyncMock(return_value=lookup_result)
+    mock_db.add = MagicMock(side_effect=lambda obj: setattr(obj, "id", uuid.uuid4()))
+    mock_db.commit = AsyncMock()
+    mock_db.refresh = AsyncMock()
+
+    secret = "testsecret"
+    sig = "sha256=" + hmac.new(secret.encode(), body, hashlib.sha256).hexdigest()
+
+    captured: dict = {}
+    with patch("app.routers.agent_inbox.settings") as mock_settings:
+        mock_settings.agent_inbox_webhook_secret = secret
+        with patch("app.routers.agent_inbox.Event") as MockEvent:
+            def _capture(**kwargs):
+                captured.update(kwargs)
+                m = MagicMock()
+                m.id = uuid.uuid4()
+                return m
+            MockEvent.side_effect = _capture
+            with patch("app.routers.events._push_to_agent"):
+                await receive_inbox_webhook(
+                    agent_id=agent_id, request=mock_request, db=mock_db, x_sprintable_signature=sig,
+                )
+    return captured.get("project_id")
+
+
+@pytest.mark.anyio
+async def test_inbox_explicit_granted_project_id_routes():
+    """payload 가 명시한 project_id 가 grant 에 속하면 그 project 로 Event 라우팅."""
+    org = uuid.uuid4()
+    p1, p2 = uuid.uuid4(), uuid.uuid4()
+    grants = sorted([(org, p1), (org, p2)], key=lambda r: str(r[1]))  # order_by(project_id)
+    target = p2
+    result_pid = await _run_inbox_with_grants({"event_type": "x", "project_id": str(target)}, grants)
+    assert result_pid == target
+
+
+@pytest.mark.anyio
+async def test_inbox_ungranted_project_id_falls_back_to_default():
+    """payload project_id 가 grant 밖이면 deterministic default(첫 행) 로 fallback(IDOR 차단·전달 무중단)."""
+    org = uuid.uuid4()
+    p1, p2 = uuid.uuid4(), uuid.uuid4()
+    grants = sorted([(org, p1), (org, p2)], key=lambda r: str(r[1]))
+    outsider = uuid.uuid4()  # grant 밖
+    result_pid = await _run_inbox_with_grants({"event_type": "x", "project_id": str(outsider)}, grants)
+    assert result_pid == grants[0][1]  # default = 첫(정렬) grant
+
+
+@pytest.mark.anyio
+async def test_inbox_no_project_id_uses_default():
+    """payload 에 project_id 없으면 default(첫 grant)."""
+    org = uuid.uuid4()
+    p1, p2 = uuid.uuid4(), uuid.uuid4()
+    grants = sorted([(org, p1), (org, p2)], key=lambda r: str(r[1]))
+    result_pid = await _run_inbox_with_grants({"event_type": "x"}, grants)
+    assert result_pid == grants[0][1]

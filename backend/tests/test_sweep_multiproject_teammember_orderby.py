@@ -24,8 +24,10 @@ def _get_func():
     }
 
 
+# ws_chat_hub 의 agent_member 조회는 default project(room init)용 deterministic grant-pick 유지.
+# agent_inbox 는 2c457a06 에서 true-routing(payload project_id 우선·grant 검증·없으면 default)으로
+# 졸업 → order_by 는 default 결정성에 유지하되 .limit(1)→.all() 이라 이 가드서 제외(test_s_comm_07 가 커버).
 @pytest.mark.parametrize("name", [
-    "agent_inbox.receive_inbox_webhook",
     "ws_chat.ws_chat_hub",
 ])
 def test_project_id_site_uses_deterministic_grant_pick(name: str):
