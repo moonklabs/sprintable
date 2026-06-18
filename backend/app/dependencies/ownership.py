@@ -28,11 +28,13 @@ async def assert_agent_owner(
 ) -> TeamMember:
     """agent 존재 확인 + ownership guard. TeamMember를 반환."""
     result = await session.execute(
+        # team_members projection VIEW — multi-project agent N 행. 아래선 .created_by(동형) ownership
+        # guard + org_id 필터만 쓰므로 .limit(1) 로 MultipleResultsFound 회피(아무 projection 행 OK).
         select(TeamMember).where(
             TeamMember.id == agent_id,
             TeamMember.type == "agent",
             TeamMember.org_id == org_id,
-        )
+        ).limit(1)
     )
     agent = result.scalar_one_or_none()
     if agent is None:

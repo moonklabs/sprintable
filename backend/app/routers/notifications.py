@@ -29,8 +29,9 @@ async def _resolve_notification_user_id(auth: AuthContext, db: AsyncSession) -> 
     """
     is_api_key = bool(auth.claims.get("app_metadata", {}).get("api_key_id"))
     if is_api_key:
+        # team_members projection VIEW — multi-project member N 행. id/user_id 동형이라 .limit(1)(아무 행 OK).
         result = await db.execute(
-            select(TeamMember.id, TeamMember.user_id).where(TeamMember.id == uuid.UUID(auth.user_id))
+            select(TeamMember.id, TeamMember.user_id).where(TeamMember.id == uuid.UUID(auth.user_id)).limit(1)
         )
         row = result.one_or_none()
         if row is None:
