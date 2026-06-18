@@ -63,8 +63,9 @@ export function GateLevelMatrix({ surface, projectId, orgId, canEdit }: GateLeve
   const [busyCell, setBusyCell] = useState<string | null>(null);
   const [message, setMessage] = useState<{ type: 'success' | 'error'; text: string } | null>(null);
 
-  // org 기본값 설정도 project 라우트(scope='org')를 경유하므로 대표 projectId 가 있어야 쓰기 가능.
-  const canWrite = canEdit && !!projectId;
+  // org surface = org-scoped PUT(/organizations/{id})·project surface = /projects/{id}. #1571 clean
+  // org-PUT 로 #1567 워크어라운드(project 라우트 scope='org'+대표 project) 제거 — org 는 orgId 만 필요.
+  const canWrite = canEdit && (surface === 'org' ? !!orgId : !!projectId);
   const getUrl = surface === 'org'
     ? (orgId ? `/api/organizations/${orgId}/gate-config` : null)
     : (projectId ? `/api/projects/${projectId}/gate-config` : null);
@@ -97,7 +98,7 @@ export function GateLevelMatrix({ surface, projectId, orgId, canEdit }: GateLeve
     setCells((m) => (prev ? { ...m, [key]: prev } : (() => { const n = { ...m }; delete n[key]; return n; })()));
 
   const handleSet = async (wt: WorkType, at: ActorType, level: Level) => {
-    if (!canWrite || !projectId || isLevelDisabled(wt, level) || busyCell) return;
+    if (!canWrite || isLevelDisabled(wt, level) || busyCell) return;
     const key = cellKey(wt, at);
     // org surface: 같은 레벨 noop. project surface: 같은 레벨이라도 상속이면 override 생성 의미 있음.
     if (cells[key]?.level === level && (surface === 'org' || cells[key]?.source === 'override')) return;
@@ -106,11 +107,18 @@ export function GateLevelMatrix({ surface, projectId, orgId, canEdit }: GateLeve
     setMessage(null);
     setCells((m) => ({ ...m, [key]: { level, source: surface === 'org' ? 'org_default' : 'override' } })); // 낙관적(#1539)
     try {
-      const res = await fetch(`/api/projects/${projectId}/gate-config`, {
-        method: 'PUT',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ scope: surface === 'org' ? 'org' : 'project', work_type: wt, actor_type: at, level }),
-      });
+      // org = org-scoped PUT(#1571·scope 없음) / project = override PUT(scope='project').
+      const res = surface === 'org'
+        ? await fetch(`/api/organizations/${orgId}/gate-config`, {
+            method: 'PUT',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ work_type: wt, actor_type: at, level }),
+          })
+        : await fetch(`/api/projects/${projectId}/gate-config`, {
+            method: 'PUT',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ scope: 'project', work_type: wt, actor_type: at, level }),
+          });
       if (res.ok) {
         applyEntry(key, (await res.json().catch(() => null) as { data?: GateLevelEntry } | null)?.data);
         setMessage({ type: 'success', text: t('saved') });
@@ -165,11 +173,6 @@ export function GateLevelMatrix({ surface, projectId, orgId, canEdit }: GateLeve
             <AlertDescription>{message.text}</AlertDescription>
           </Alert>
         )}
-        {canEdit && !projectId ? (
-          <Alert variant="default">
-            <AlertDescription>{t('noProjectForOrgEdit')}</AlertDescription>
-          </Alert>
-        ) : null}
 
         <div className="flex flex-wrap items-center gap-3 text-xs text-muted-foreground">
           {LEVELS.map((lv) => (

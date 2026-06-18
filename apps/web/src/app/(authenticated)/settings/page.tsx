@@ -1162,14 +1162,13 @@ export default function SettingsPage() {
                   )}
                 </SectionCardBody>
               </SectionCard>
-              {/* S-GATE-4 2계층: 조직 게이트 정책(기본값) surface. scope='org'. PUT 은 대표 project 경유
-                  (org_router 는 GET 만)·canEdit=org admin/owner. project 0개면 컴포넌트가 편집 불가 안내. */}
+              {/* S-GATE-4: 조직 게이트 정책(기본값) surface. #1571 clean org-PUT(/organizations/{id})로
+                  org-scoped 설정 — 대표 project 경유 워크어라운드·project-0 엣지 제거. canEdit=org admin/owner. */}
               {orgInfo ? (
                 <div className="mt-6">
                   <GateLevelMatrix
                     surface="org"
                     orgId={orgInfo.id}
-                    projectId={currentProjectId ?? projects[0]?.id}
                     canEdit={currentOrgRole === 'owner' || currentOrgRole === 'admin'}
                   />
                 </div>
