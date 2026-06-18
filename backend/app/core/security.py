@@ -23,7 +23,10 @@ __all__ = [
     "ACCESS_TOKEN_EXPIRE_MINUTES", "REFRESH_TOKEN_EXPIRE_DAYS",
 ]
 
-ACCESS_TOKEN_EXPIRE_MINUTES = 15
+# af8d3641 AC2: 15→60분 완화. 15분은 동시요청 refresh 빈도를 높여 rotation 레이스(→강제 로그아웃)를
+# 잦게 함(체감 "세션 너무 짧음"). 60분은 보안 통상 범위(access 15~60분 표준)·refresh 30일이 longevity 담당
+# (만료 시 silent refresh). 근본 동시성 fix는 FE single-flight(AC1·별 작업). dev/prod 공유 상수.
+ACCESS_TOKEN_EXPIRE_MINUTES = 60
 REFRESH_TOKEN_EXPIRE_DAYS = 30
 
 _pwd_context = CryptContext(schemes=["argon2", "bcrypt"], deprecated="auto")
