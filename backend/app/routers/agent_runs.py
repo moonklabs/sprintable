@@ -41,7 +41,8 @@ async def create_agent_run(
     # projection 행에서 동형이라 .limit(1) 로 MultipleResultsFound 회피(아무 행 OK).
     member_r = await session.execute(
         select(TeamMember.org_id).where(
-            TeamMember.id == body.agent_id, TeamMember.type == "agent"
+            TeamMember.id == body.agent_id, TeamMember.type == "agent",
+            TeamMember.is_active.is_(True),  # deactivated agent 는 run 생성 비도달(정합)
         ).limit(1)
     )
     org_id = member_r.scalar_one_or_none()
