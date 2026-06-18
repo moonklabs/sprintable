@@ -16,6 +16,7 @@ import asyncio
 import io
 import logging
 import os
+from datetime import timedelta
 
 logger = logging.getLogger(__name__)
 
@@ -25,6 +26,10 @@ _PUBLIC_PREFIX = f"https://storage.googleapis.com/{_BUCKET}/"
 _PER_ATTACHMENT_CAP = 8000   # §7-3 첨부당 자수 cap
 _TOTAL_CAP = 24000           # §7-3 총합 cap
 _TRUNC_MARK = "…(잘림)"
+
+# f3ccb40c 이미지-멀티모달: 이미지는 텍스트 추출 대신 단기 V4 read 서명 URL 을 payload 에 실어
+# 에이전트 런타임이 fetch→멀티모달 모델이 직접 view(백엔드 vision 안 함). 30분 = 에이전트 async 처리 윈도.
+_SIGNED_URL_TTL = timedelta(minutes=30)
 
 _DOC_EXTS = frozenset({"pdf", "docx", "txt", "csv", "md"})
 _IMAGE_EXTS = frozenset({"jpg", "jpeg", "png", "gif", "webp"})
@@ -80,6 +85,37 @@ async def _download_object(object_path: str) -> bytes:
     return await asyncio.to_thread(_blocking)
 
 
+async def _signed_read_url(object_path: str) -> str | None:
+    """scoped GCS 객체에 대한 단기 V4 read 서명 URL. 실패 시 None(best-effort).
+
+    Cloud Run ADC(키파일 없음)에서는 runtime SA 가 자신에 대해 signBlob(roles/iam.serviceAccountTokenCreator)
+    권한을 가지면 IAM SignBlob 으로 V4 서명이 가능하다(creds.refresh→service_account_email+access_token 전달).
+    blocking 호출은 thread 로 격리. 호출 전 _is_scoped_to_conversation 으로 IDOR 게이트를 통과한 path 만 받는다.
+    """
+
+    def _blocking() -> str:
+        import google.auth
+        from google.auth.transport.requests import Request as _AuthRequest
+        from google.cloud import storage
+
+        creds, _ = google.auth.default()
+        creds.refresh(_AuthRequest())  # access_token 확보(IAM SignBlob 용)
+        blob = storage.Client().bucket(_BUCKET).blob(object_path)
+        return blob.generate_signed_url(
+            version="v4",
+            expiration=_SIGNED_URL_TTL,
+            method="GET",
+            service_account_email=getattr(creds, "service_account_email", None),
+            access_token=creds.token,
+        )
+
+    try:
+        return await asyncio.to_thread(_blocking)
+    except Exception:
+        logger.warning("attachment_context: signed url 생성 실패 path=%s", object_path, exc_info=True)
+        return None
+
+
 def _extract_text(ext: str, data: bytes) -> str:
     """확장자별 텍스트 추출. 미지원/실패 시 빈 문자열."""
     if ext in ("txt", "csv", "md"):
@@ -113,18 +149,24 @@ async def build_attachment_context(
     *,
     project_id,
     conversation_id,
-) -> str:
-    """메시지 attachments(list of {url,name,content_type,size}) → 에이전트 주입용 텍스트 블록.
+) -> tuple[str, list[dict]]:
+    """메시지 attachments(list of {url,name,content_type,size}) → (에이전트 주입용 텍스트 블록, 이미지 목록).
 
-    문서=GCS fetch+추출, 이미지=메타 안내(v1), 미지원/실패=안내 라인. 총량 cap(헤더·마커·안내 라인
-    포함)·도달 시 중단. 빈 결과면 "" (주입 무영향). best-effort — 개별 첨부 실패는 안내 라인으로 흡수.
+    문서=GCS fetch+추출, 이미지=단기 V4 서명 URL(f3ccb40c·백엔드 vision 안 함), 미지원/실패=안내 라인.
+    총량 cap(헤더·마커·안내 라인 포함)·도달 시 중단. best-effort — 개별 첨부 실패는 안내 라인으로 흡수.
 
-    ⚠️ 보안: 문서 fetch 는 object path 가 **이 (project, conversation)에 스코프된 chat 첨부**일
-    때만 수행(_is_scoped_to_conversation). 타 대화/외부 객체 URL 은 거부(IDOR 차단·QA RC HIGH).
+    반환:
+      - text: content 에 주입할 텍스트 블록(이미지는 `![name](signed-url)` 마크다운 — 멀티모달 에이전트 fetch+view).
+        빈 결과면 "".
+      - images: 구조화 이미지 목록 `[{url, name, mime}]`(payload `images` 필드용·Hermes 등 런타임 clean 계약).
+
+    ⚠️ 보안: 문서 fetch·이미지 서명 모두 object path 가 **이 (project, conversation)에 스코프된 chat
+    첨부**일 때만 수행(_is_scoped_to_conversation). 타 대화/외부 객체 URL 은 거부(IDOR 차단·QA RC HIGH).
     """
     if not attachments:
-        return ""
+        return "", []
     blocks: list[str] = []
+    images: list[dict] = []
     total = len(_HEADER)  # 헤더도 총량에 카운트(LOW)
 
     def _append(line: str) -> bool:
@@ -149,10 +191,22 @@ async def build_attachment_context(
         ctype = (a.get("content_type") or "").strip()
         ext = _ext(name)
 
-        # 이미지 — v1 은 메타 안내(본격 분석=S2 백엔드 Vision 캡션)
+        # 이미지(f3ccb40c) — 백엔드 vision 안 함. scope 통과 객체에 단기 V4 서명 URL 발급 →
+        # content 엔 `![name](url)` 마크다운(멀티모달 에이전트 fetch+view) + images 목록(구조화 계약).
         if ctype.startswith("image/") or ext in _IMAGE_EXTS:
-            if not _append(f"[이미지 첨부: {name} ({ctype or 'image'}) — 이미지 분석은 준비 중]"):
+            obj = _canonical_object_path(a.get("url") or "")
+            if obj is None or not _is_scoped_to_conversation(obj, project_id, conversation_id):
+                if not _append(f"[이미지 첨부(접근 범위 밖): {name}]"):
+                    break
+                continue
+            signed = await _signed_read_url(obj)
+            if not signed:
+                if not _append(f"[이미지 첨부: {name} — URL 생성 실패]"):
+                    break
+                continue
+            if not _append(f"![{name}]({signed})"):
                 break
+            images.append({"url": signed, "name": name, "mime": ctype or f"image/{ext or 'png'}"})
             continue
 
         # 미지원 형식 안내
@@ -194,5 +248,5 @@ async def build_attachment_context(
             break
 
     if not blocks:
-        return ""
-    return _HEADER + "\n\n".join(blocks)
+        return "", images
+    return _HEADER + "\n\n".join(blocks), images
