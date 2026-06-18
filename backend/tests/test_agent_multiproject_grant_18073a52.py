@@ -74,10 +74,14 @@ async def _call_create(body_dict, execute_results):
     session.add = MagicMock()
     session.commit = AsyncMock()
 
-    async def _refresh(rec):  # DB가 채울 id/created_at을 model_validate 통과하도록 채움
+    async def _refresh(rec):  # DB가 채울 id/created_at/role을 model_validate 통과하도록 채움
         if getattr(rec, "id", None) is None:
             rec.id = uuid.uuid4()
         rec.created_at = datetime.now(timezone.utc)
+        # S3: ProjectAccessResponse.role 노출 추가 — transient 행은 role 미설정(DB default 'member'는
+        # flush 시 적용·refresh 가 로드). mock refresh 가 실 DB 처럼 default 'member' 미러.
+        if not isinstance(getattr(rec, "role", None), str):
+            rec.role = "member"
     session.refresh = AsyncMock(side_effect=_refresh)
 
     auth = MagicMock()

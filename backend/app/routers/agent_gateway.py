@@ -72,7 +72,9 @@ async def _mark_agent_online(agent_id: uuid.UUID, session_id: uuid.UUID) -> None
         logger.warning("presence online tick failed agent=%s", agent_id, exc_info=True)
 
 
-async def _mark_agent_disconnected(agent_id: uuid.UUID, session_id: uuid.UUID) -> None:
+async def _mark_agent_disconnected(
+    agent_id: uuid.UUID, session_id: uuid.UUID, org_id: str | None = None
+) -> None:
     """49fed0a1 AC2/AC3: SSE 연결 종료 cleanup — 연결-도출 offline 강등.
 
     이 세션 행 삭제 후, 같은 에이전트의 **다른 활성(last_seen TTL 이내) 세션**이 없으면 presence를
@@ -109,8 +111,15 @@ async def _mark_agent_disconnected(agent_id: uuid.UUID, session_id: uuid.UUID) -
                 # d5de8e08 안전망: 연결 완전 종료 → 이 에이전트의 chat working 신호도 즉시 정리
                 # (offline 인데 "...typing" 잔존 방지·TTL backstop 기다리지 않음).
                 from app.services import chat_presence
-                chat_presence.clear_member(str(agent_id))
+                _cleared_convs = chat_presence.clear_member(str(agent_id))
             await db.commit()
+            # R2(da9d1781): 마지막 연결 종료=offline 강등 시 presence + 영향받은 대화의 conversation.working
+            # SSE 발행(FE 폴링 대체·best-effort). working 비운 대화에 push 안 하면 "...typing" 영구 stale(QA HIGH).
+            if remaining is None and org_id:
+                from app.services.presence_events import emit_conversation_working, emit_presence
+                emit_presence(org_id)
+                for _conv in _cleared_convs:
+                    emit_conversation_working(org_id, _conv)
     except Exception:
         logger.warning("presence disconnect cleanup failed agent=%s", agent_id, exc_info=True)
 
@@ -280,6 +289,7 @@ async def agent_stream(
         org_plan = (await db.execute(
             select(Organization.plan).where(Organization.id == tm.org_id)
         )).scalar_one_or_none() or "free"
+        org_id_str = str(tm.org_id)  # R2: presence SSE 발행용(generate 클로저 캡처).
 
         # acked_seq DB ì¡°í
         cursor = (await db.execute(
@@ -356,6 +366,9 @@ async def agent_stream(
                 )
                 await _pdb.commit()
             _presence_wired = True
+            # R2(da9d1781): 연결 online 진입 → presence SSE 발행(FE 3s 폴링 대체·best-effort).
+            from app.services.presence_events import emit_presence
+            emit_presence(org_id_str)
 
             yield "event: heartbeat\ndata: {}\n\n"
 
@@ -424,7 +437,7 @@ async def agent_stream(
             # 49fed0a1 AC2/AC3: 연결 종료 → 세션 행 삭제 + 마지막 세션이면 presence offline 강등.
             # (presence 배선 성공한 연결만 — 세션 미생성 시 타 세션 presence 오염 방지.)
             if _presence_wired:
-                await _mark_agent_disconnected(agent_id, session_id)
+                await _mark_agent_disconnected(agent_id, session_id, org_id_str)
 
     return StreamingResponse(
         generate(),

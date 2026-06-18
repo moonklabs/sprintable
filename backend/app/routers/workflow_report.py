@@ -154,6 +154,16 @@ async def report_done(
     next_stage: str = transition["next_stage"]
     story_status: str | None = transition["story_status"]
 
+    # S-GATE-2: config 게이트 집행(merge) — flag-off면 no-op(무회귀). config 1차(H1 trust 게이트와 공존):
+    # block→409·ask→HitlRequest park+409·auto→통과 후 아래 H1 trust 게이트로(점진 접목은 S-GATE-3+).
+    if body.stage == "merge":
+        from app.services.gate_enforce import enforce_gate
+        await enforce_gate(
+            session, org_id=story.org_id, project_id=getattr(story, "project_id", None),
+            work_type="merge", actor_type="agent", actor_id=getattr(body, "agent_id", None),
+            work_item_id=story.id, work_item_title=getattr(story, "title", None),
+        )
+
     # H1-S4: merge 단계는 status=done 전이 전에 merge verdict gate(S2)를 통과해야 한다.
     # auto_merge만 done·ask_human은 status 유지+202·block은 status 유지+409. gate evidence(S3) 기록.
     # H1-S5: 전 게이트 단일 스위치 — 플래그 off(또는 allowlist 밖)면 게이트 미호출(기존 merge→done 동작).

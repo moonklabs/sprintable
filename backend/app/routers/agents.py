@@ -75,8 +75,10 @@ async def create_org_agent(
 
     actor = await _resolve_actor(auth, session, org_id)
     if actor is not None and actor.type == "agent":
-        if not actor.can_manage_members:
-            raise HTTPException(status_code=403, detail="Agent does not have can_manage_members permission")
+        # S4: can_manage_members → has_project_role(min='admin') 단일 경로(role 에서 derived).
+        from app.services.project_auth import has_project_role
+        if not await has_project_role(session, actor.id, actor.project_id, min_role="admin"):
+            raise HTTPException(status_code=403, detail="project admin/owner role required to manage members")
         if _ROLE_RANK.get(body.role, 1) > _ROLE_RANK.get(actor.role, 1):
             raise HTTPException(status_code=403, detail="Cannot assign role higher than your own")
         if body.name == actor.name:

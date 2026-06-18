@@ -156,6 +156,7 @@ def test_response_accepts_null_org_member_id():
     r.org_member_id = None  # 에이전트는 org_member 없음
     r.member_id = uuid.uuid4()  # canonical 앵커로 식별
     r.permission = "granted"
+    r.role = "member"  # S3: ProjectAccessResponse.role 노출 추가 — mock 에 명시(str)
     r.created_at = datetime.now(timezone.utc)
 
     v = ProjectAccessResponse.model_validate(r)
@@ -177,6 +178,7 @@ def test_response_accepts_human_org_member_id():
     r.org_member_id = uuid.uuid4()
     r.member_id = None
     r.permission = "granted"
+    r.role = "member"  # S3: ProjectAccessResponse.role 노출 추가 — mock 에 명시(str)
     r.created_at = datetime.now(timezone.utc)
 
     v = ProjectAccessResponse.model_validate(r)

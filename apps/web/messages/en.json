@@ -2465,6 +2465,28 @@
     "metric_completion_pct": "Completion %",
     "hypothesisPlaceholder_epic": "What outcome do we expect by completing this epic?"
   },
+  "gateConfig": {
+    "title": "Gate Policy",
+    "description": "Set whether work proceeds automatically, requires human review, or is blocked.",
+    "levelAuto": "Auto",
+    "levelAsk": "Ask",
+    "levelBlock": "Block",
+    "work_done": "Done",
+    "work_merge": "Merge",
+    "actor_agent": "Agent",
+    "actor_human": "Human",
+    "mergeFloorNote": "Safety floor: merge requires at least Ask · self-approval blocked",
+    "floorDisabledHint": "Disabled by safety floor",
+    "saved": "Saved",
+    "saveFailed": "Failed to save.",
+    "titleOrg": "Organization Gate Policy (Defaults)",
+    "descriptionOrg": "Organization-wide defaults. Each project can override these.",
+    "sourceInherited": "Inherited",
+    "sourceOverride": "Overridden",
+    "revertToDefault": "Revert to org default",
+    "reverted": "Reverted to org default.",
+    "noProjectForOrgEdit": "At least one project is required to set organization defaults."
+  },
   "cage": {
     "gatePending": "gate pending",
     "gateApprove": "Approve",
