@@ -47,10 +47,14 @@ async def route_message(
             raise ChannelRouterError(f"Message {message_id} not found")
 
         # 2. 발신자 type 확인
+        # ⚠️ team_members 는 0088 이후 projection VIEW — org-agent 멀티프로젝트 grant(project_access)면
+        # 같은 member.id 가 프로젝트 수만큼 행을 낸다. 무필터 scalar_one_or_none 은 MultipleResultsFound
+        # 로 route_message 전체를 깨 chat→agent dispatch 가 멈춘다. type 은 전 행 동형이라 .limit(1) 로
+        # 한 행만 취해 안전(_resolve_api_key 동일 패턴). 단일프로젝트 agent·휴먼은 1행이라 거동 무변경.
         sender_type: str | None = None
         if msg.sender_id:
             sender_type = (await db.execute(
-                select(TeamMember.type).where(TeamMember.id == msg.sender_id)
+                select(TeamMember.type).where(TeamMember.id == msg.sender_id).limit(1)
             )).scalar_one_or_none()
 
         # 3. conversation participants (발신자 제외)
