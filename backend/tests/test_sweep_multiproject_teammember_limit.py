@@ -36,8 +36,10 @@ def _get_func():
     }
 
 
+# identity/type/org_id 만 소비하는 진짜 Ⓐ 3곳 → .limit(1)(아무 행 OK).
+# channel._resolve_agent 는 .project_id 도 소비(_persist_and_broadcast → DM room)라 Ⓑ 로 재분류 →
+# 아래 deterministic 가드로 별도 검증.
 @pytest.mark.parametrize("name", [
-    "channel._resolve_agent",
     "agent_gateway.agent_stream",
     "agent_runs.create_agent_run",
     "ws_chat._authenticate",
@@ -48,6 +50,17 @@ def test_teammember_query_has_limit_guard(name: str):
     src = inspect.getsource(fn)
     assert "TeamMember" in src, f"{name}: TeamMember 쿼리 사라짐(테스트 갱신 필요)"
     assert ".limit(1)" in src, f"{name}: .limit(1) 가드 누락 — 멀티프로젝트 agent 크래시 회귀"
+
+
+def test_channel_resolve_agent_is_deterministic_grant_pick():
+    """channel._resolve_agent 는 .project_id 소비(Ⓑ) → order_by(project_id)+limit(1)+known-limitation."""
+    from app.routers import channel
+
+    src = inspect.getsource(channel._resolve_agent)
+    assert "order_by(TeamMember.project_id)" in src, \
+        "channel._resolve_agent: order_by(project_id) 누락 — project_id 비결정적(틀린 프로젝트)"
+    assert ".limit(1)" in src, "channel._resolve_agent: .limit(1) 누락 — MultipleResultsFound 회귀"
+    assert "known-limitation" in src, "channel._resolve_agent: known-limitation 주석 누락"
 
 
 # ── 행동 테스트: 멀티프로젝트 agent(뷰 N행)도 _resolve_agent 가 크래시 없이 해소 ──────
