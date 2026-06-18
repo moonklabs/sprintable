@@ -257,6 +257,7 @@ async def deliver_conversation_message_webhook(
             # 스코프된 객체만(IDOR 차단). best-effort — 조회/추출 실패는 전달에 무영향.
             # MED(QA RC): 주입 없으면 원 content 그대로 보존(None→"" 변환 금지 — 기존 거동 무변경).
             effective_content = content
+            attachment_images: list[dict] = []  # f3ccb40c: payload images 필드(구조화·서명 URL)
             try:
                 from app.models.conversation import ConversationMessage
                 _atts = (await db.execute(
@@ -266,15 +267,16 @@ async def deliver_conversation_message_webhook(
                 )).scalar_one_or_none()
                 if _atts:
                     from app.services.attachment_context import build_attachment_context
-                    _ctx = await build_attachment_context(
+                    _ctx, attachment_images = await build_attachment_context(
                         _atts, project_id=project_id, conversation_id=conversation_id
                     )
                     if _ctx:
                         _base = content or ""
                         effective_content = (_base + _ctx) if _base else _ctx.lstrip()
+                    if _ctx or attachment_images:
                         logger.info(
-                            "attachment_context injected message_id=%s attachment_count=%d",
-                            message_id, len(_atts),
+                            "attachment_context injected message_id=%s attachment_count=%d images=%d",
+                            message_id, len(_atts), len(attachment_images),
                         )
             except Exception:
                 logger.warning(
@@ -295,6 +297,8 @@ async def deliver_conversation_message_webhook(
                 "org_id": str(org_id),
                 "conversation_title": conv_title,
                 "sender_name": sender_name,
+                # f3ccb40c: 이미지 첨부 구조화 목록([{url,name,mime}]·서명 URL·런타임 멀티모달 계약·additive).
+                "images": attachment_images,
             }
 
             for wh in target_webhooks:

@@ -1,5 +1,7 @@
 import { redirect } from 'next/navigation';
+import { headers } from 'next/headers';
 import { getServerSession } from '@/lib/db/server';
+import { buildLoginRedirect } from '@/lib/auth/session-redirect';
 import { DashboardShell } from '../dashboard/dashboard-shell';
 
 interface MemberContext {
@@ -23,8 +25,11 @@ export default async function AuthenticatedLayout({
 }: {
   children: React.ReactNode;
 }) {
+  // AC3: proxy 가 주입한 x-pathname 으로 next 보존(server component 는 현재 경로 직접 못 읽음).
+  const currentPath = (await headers()).get('x-pathname') ?? '';
+
   const session = await getServerSession();
-  if (!session) redirect('/login');
+  if (!session) redirect(buildLoginRedirect(currentPath));
 
   const fastapiUrl = process.env['NEXT_PUBLIC_FASTAPI_URL'] ?? 'http://localhost:8000';
   const authHeader = { Authorization: `Bearer ${session.access_token}` };
@@ -36,7 +41,7 @@ export default async function AuthenticatedLayout({
   ]);
 
   // 401(인증 만료)만 /login 리다이렉트, 다른 에러(500 등)는 children 렌더링 유지
-  if (!meRes || meRes.status === 401) redirect('/login');
+  if (!meRes || meRes.status === 401) redirect(buildLoginRedirect(currentPath));
 
   // 🔴 org 없는 유저(신규 OAuth 가입자 등 — team_member 미생성 시 /me 404) → 온보딩으로.
   // auth/callback이 is_new_user 무관 /inbox 리다이렉트하는 결함을 layout에서 OAuth+email/pw 공통 커버

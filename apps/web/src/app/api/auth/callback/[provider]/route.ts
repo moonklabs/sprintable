@@ -1,6 +1,8 @@
 import { NextResponse } from 'next/server';
 import { cookies } from 'next/headers';
 import { SP_AT_COOKIE, SP_RT_COOKIE } from '@/lib/db/server';
+import { SP_AT_MAX_AGE_SECONDS } from '@/lib/auth/cookies';
+import { safeNextPath } from '@/lib/auth/session-redirect';
 import { resolveAppUrl } from '@/services/app-url';
 
 const FASTAPI_URL = () => process.env['NEXT_PUBLIC_FASTAPI_URL'] ?? 'http://localhost:8000';
@@ -32,9 +34,11 @@ export async function GET(request: Request, { params }: RouteParams) {
   const storedState = cookieStore.get(`oauth_state_${provider}`)?.value;
   const tosAccepted = cookieStore.get(`oauth_tos_${provider}`)?.value === 'true';
   const inviteToken = cookieStore.get(`oauth_invite_token_${provider}`)?.value ?? null;
+  const nextCookie = cookieStore.get(`oauth_next_${provider}`)?.value ?? null; // AC3 세션 만료 복귀
   cookieStore.delete(`oauth_state_${provider}`);
   cookieStore.delete(`oauth_tos_${provider}`);
   cookieStore.delete(`oauth_invite_token_${provider}`);
+  cookieStore.delete(`oauth_next_${provider}`);
 
   if (!storedState || storedState !== state) {
     return NextResponse.redirect(`${origin}/login?error=csrf_mismatch`);
@@ -60,9 +64,10 @@ export async function GET(request: Request, { params }: RouteParams) {
     return NextResponse.redirect(`${origin}/login?error=oauth_no_token`);
   }
 
-  const destination = inviteToken ? `${origin}/dashboard` : `${origin}/inbox`;
+  // AC3: 세션 만료로 OAuth 재로그인한 경우 작업 경로 복귀(safeNextPath 가드)·없으면 기존 /inbox.
+  const destination = inviteToken ? `${origin}/dashboard` : `${origin}${safeNextPath(nextCookie)}`;
   const res = NextResponse.redirect(destination);
-  res.cookies.set(SP_AT_COOKIE, access_token, { ...cookieBase(), maxAge: 15 * 60 });
+  res.cookies.set(SP_AT_COOKIE, access_token, { ...cookieBase(), maxAge: SP_AT_MAX_AGE_SECONDS });
   res.cookies.set(SP_RT_COOKIE, refresh_token, { ...cookieBase(), maxAge: 30 * 24 * 60 * 60 });
   return res;
 }

@@ -49,6 +49,7 @@ async def _resolve_agent(agent_id: uuid.UUID, caller: TeamMember) -> TeamMember:
             select(TeamMember).where(
                 TeamMember.id == agent_id,
                 TeamMember.type == "agent",
+                TeamMember.is_active.is_(True),  # deactivated agent 는 비도달(정합)
             ).order_by(TeamMember.project_id).limit(1)
         )).scalar_one_or_none()
     if agent is None:
@@ -65,7 +66,10 @@ async def _persist_and_broadcast(
     content: str,
     file_url: str | None = None,
 ) -> None:
-    conv_id = await _get_or_create_conversation(agent_id, agent.org_id, agent.project_id)
+    # ws_chat._get_or_create_conversation 시그니처 = (agent_id, caller_id, org_id, project_id) 4인자.
+    # 과거 caller_id 추가 전환 시 이 호출부 미갱신(한쪽만 전환)으로 3인자 → caller_id 누락 + 인자
+    # 미스얼라인(org_id↔caller_id·project_id↔org_id) → /deliver·/upload 호출 시 TypeError. caller.id 보강.
+    conv_id = await _get_or_create_conversation(agent_id, caller.id, agent.org_id, agent.project_id)
 
     msg_content = content
     if file_url:
