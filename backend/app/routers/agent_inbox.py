@@ -9,6 +9,7 @@ from __future__ import annotations
 import hashlib
 import hmac
 import json
+import logging
 import uuid
 
 from fastapi import APIRouter, Depends, Header, HTTPException, Request
@@ -20,6 +21,7 @@ from app.dependencies.database import get_db
 from app.models.event import Event
 from app.models.team import TeamMember
 
+logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/api/v2/agent-inbox", tags=["agent-inbox"])
 
 
@@ -46,30 +48,43 @@ async def receive_inbox_webhook(
     if not _verify_signature(raw_body, x_sprintable_signature):
         raise HTTPException(status_code=401, detail="Invalid webhook signature")
 
-    # team_members 는 projection VIEW — org-agent 멀티프로젝트 grant 면 같은 agent_id 가 N 행이라
-    # 무필터 one_or_none 은 MultipleResultsFound 로 깨진다. 이 inbox webhook 은 단일 글로벌 secret
-    # (per-webhook-config 없음)이고 members anchor 엔 home project 가 없어 "올바른" project 를 도출할
-    # 컨텍스트가 없다. → deterministic grant-pick(order_by(project_id) limit 1)으로 크래시를 막고
-    # 안정적 default project 로 Event 를 적재한다.
-    # ⚠️ known-limitation: 멀티프로젝트 agent inbox 의 project 라우팅은 default(최저 project_id) 고정.
-    #   진짜 라우팅(payload 가 타겟 project 명시)은 follow-up story(멀티프로젝트 inbox routing).
-    result = await db.execute(
+    # 2c457a06 true-routing: 에이전트의 전 grant 조회(team_members projection VIEW — 멀티프로젝트면
+    # org_id 동형·project_id 다양). payload 가 타겟 project_id 를 **명시**하고 그게 grant 에 속하면 그
+    # project 로 Event 라우팅, 아니면 deterministic default(최저 project_id). org_id 는 전 행 동형.
+    rows = (await db.execute(
         select(TeamMember.org_id, TeamMember.project_id).where(
             TeamMember.id == agent_id,
             TeamMember.type == "agent",
             TeamMember.is_active.is_(True),
-        ).order_by(TeamMember.project_id).limit(1)
-    )
-    row = result.one_or_none()
-    if row is None:
+        ).order_by(TeamMember.project_id)
+    )).all()
+    if not rows:
         raise HTTPException(status_code=404, detail="Agent not found")
-
-    org_id, project_id = row
+    org_id = rows[0][0]
+    granted_project_ids = [r[1] for r in rows]
 
     try:
         payload: dict = json.loads(raw_body) if raw_body else {}
     except (ValueError, UnicodeDecodeError):
         payload = {"raw": raw_body.decode("utf-8", errors="replace")}
+
+    # 명시 project_id 우선 — 단 ⚠️ grant 에 속한 project 만 허용(외부 발신자가 임의 project 로 Event 를
+    # 심는 IDOR 차단). 미명시/미grant/파싱불가 = deterministic default(전달은 무중단·default 도 agent
+    # 가 속한 project 라 안전). 결정: 미grant 명시값은 reject 아닌 default fallback(best-effort 전달 우선).
+    project_id = granted_project_ids[0]
+    _raw_pid = payload.get("project_id")
+    if _raw_pid:
+        try:
+            _req_pid = uuid.UUID(str(_raw_pid))
+            if _req_pid in granted_project_ids:
+                project_id = _req_pid
+            else:
+                logger.warning(
+                    "agent_inbox: payload project_id=%s 가 agent=%s grant 밖 — default 라우팅",
+                    _req_pid, agent_id,
+                )
+        except (ValueError, TypeError):
+            logger.warning("agent_inbox: payload project_id 파싱 실패(%r) — default 라우팅", _raw_pid)
 
     event_type = str(payload.get("event_type", "inbox_webhook"))
     source_entity_type: str | None = payload.get("source_entity_type")
