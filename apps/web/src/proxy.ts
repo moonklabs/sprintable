@@ -72,6 +72,29 @@ async function tryRefreshViaFastapi(request: NextRequest): Promise<{ accessToken
   }
 }
 
+// AC1(551bbbee): single-flight refresh. refresh 는 single-use rotation(첫 건이 RT revoke)이라, 대시보드
+// 동시요청이 같은 RT 로 각자 refresh 하면 첫 건만 통과·나머지 401 → 강제 로그아웃("세션 너무 짧음")이던
+// 레이스를 제거. RT 기준 in-flight 1개로 dedupe(나머지는 그 결과 await/재사용) — 실제 refresh 호출은 1회라
+// single-use 보안 유지. grace(시작 기준 5s) 동안 결과 캐시 — cookie 갱신 전 도착한 burst 꼬리 요청도 옛 RT
+// 로 새 refresh 하지 않고 재사용. setTimeout 미사용(edge 런타임서 post-response 실행 불확실) — timestamp
+// lazy 만료 + size-cap prune(무한증가 방지).
+const REFRESH_GRACE_MS = 5_000;
+const inflightRefresh = new Map<string, { p: Promise<{ accessToken: string; refreshToken: string } | null>; expiresAt: number }>();
+
+function singleFlightRefresh(request: NextRequest): Promise<{ accessToken: string; refreshToken: string } | null> {
+  const rt = request.cookies.get(SP_RT_COOKIE)?.value;
+  if (!rt) return Promise.resolve(null);
+  const now = Date.now();
+  const existing = inflightRefresh.get(rt);
+  if (existing && existing.expiresAt > now) return existing.p; // 진행 중 or 최근 결과 재사용
+  const p = tryRefreshViaFastapi(request);
+  inflightRefresh.set(rt, { p, expiresAt: now + REFRESH_GRACE_MS });
+  if (inflightRefresh.size > 64) { // 만료 항목 lazy prune(무한증가 방지)
+    for (const [k, v] of inflightRefresh) if (v.expiresAt <= now) inflightRefresh.delete(k);
+  }
+  return p;
+}
+
 function applyTokenCookies(
   response: NextResponse,
   accessToken: string,
@@ -123,7 +146,7 @@ export async function proxy(request: NextRequest) {
   const accessToken = request.cookies.get(SP_AT_COOKIE)?.value;
 
   if (!accessToken) {
-    const tokens = await tryRefreshViaFastapi(request);
+    const tokens = await singleFlightRefresh(request);
     if (!tokens) {
       if (isApiPath) return NextResponse.next({ request }); // let handler return 401
       const url = request.nextUrl.clone();
@@ -140,7 +163,7 @@ export async function proxy(request: NextRequest) {
 
   if (!claims) {
     // access token invalid/expired — try refresh
-    const tokens = await tryRefreshViaFastapi(request);
+    const tokens = await singleFlightRefresh(request);
     if (!tokens) {
       if (isApiPath) return NextResponse.next({ request }); // let handler return 401
       const url = request.nextUrl.clone();
@@ -157,7 +180,7 @@ export async function proxy(request: NextRequest) {
   const now = Math.floor(Date.now() / 1000);
   const response = NextResponse.next({ request });
   if (claims.exp !== undefined && claims.exp - now < 300) {
-    const tokens = await tryRefreshViaFastapi(request);
+    const tokens = await singleFlightRefresh(request);
     if (tokens) {
       applyTokenCookies(response, tokens.accessToken, tokens.refreshToken);
     }
