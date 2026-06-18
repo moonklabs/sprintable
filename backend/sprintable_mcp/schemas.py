@@ -69,8 +69,11 @@ class HypothesisConfirmStatus(str, Enum):
 class SprintableInput(BaseModel):
     """모든 Sprintable 도구 입력 공통 베이스.
 
-    project_id/org_id는 SprintableClient context에서 자동 주입하므로 스키마에서 제외.
+    org_id는 SprintableClient context에서 자동 주입. project_id는 **선택적 per-call override** —
+    org-agent 멀티프로젝트 grant(ProjectAccess) 시 특정 프로젝트를 타겟(미지정=키 default project·무회귀).
+    설정 시 client.project_id(쿼리/바디) + X-Project-Id 헤더에 반영(85429ee0).
     Optional 필드는 기본값 None → MCP schema required에서 제외.
     """
 
     model_config = ConfigDict(extra="ignore")
+    project_id: str | None = None

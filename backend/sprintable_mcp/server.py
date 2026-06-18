@@ -14,7 +14,7 @@ from mcp.types import TextContent
 from pydantic import BaseModel
 from pydantic.fields import PydanticUndefined
 
-from .api_client import client
+from .api_client import client, reset_project_override, set_project_override
 from .config import settings
 from .response import ok
 from .schemas import SprintableInput
@@ -172,12 +172,23 @@ def _flat(name: str, doc: str, input_cls: type[BaseModel], fn):
             )
         )
 
+    # 85429ee0: base SprintableInput.project_id(기본값 有)가 subclass 필수필드보다 앞서면
+    # inspect.Signature 가 "non-default argument follows default argument"로 깨진다 → 기본값 없는
+    # 파라미터를 앞으로 안정 정렬(MCP 는 keyword 호출이라 순서 변경 무해).
+    params.sort(key=lambda p: p.default is not inspect.Parameter.empty)
+
     async def wrapper(**kwargs):
         # E-MCP S2: call-time enforcement — 키 허용 밖 도구는 호출 차단(403-shape).
         await _load_scope()
         if not is_tool_allowed(name, _key_scope):
             return _denied(name)
-        result = await fn(input_cls(**kwargs))
+        # 85429ee0: per-call project_id override → contextvar(tool 호출 스코프). client.project_id +
+        # X-Project-Id 헤더에 반영(org-agent 멀티프로젝트 grant). 미지정이면 키 default(무회귀).
+        _tok = set_project_override(kwargs.get("project_id"))
+        try:
+            result = await fn(input_cls(**kwargs))
+        finally:
+            reset_project_override(_tok)
         asyncio.create_task(_heartbeat_fire_forget())
         return result
 
