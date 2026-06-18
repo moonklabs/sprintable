@@ -38,11 +38,13 @@ async def _require_caller(api_key: str | None, token: str | None) -> TeamMember:
 
 async def _resolve_agent(agent_id: uuid.UUID, caller: TeamMember) -> TeamMember:
     async with async_session_factory() as db:
+        # team_members 는 projection VIEW — org-agent 멀티프로젝트 grant 면 같은 id 가 N 행.
+        # 여기선 .org_id(동형)만 소비하므로 .limit(1) 로 MultipleResultsFound 회피(아무 행 OK).
         agent = (await db.execute(
             select(TeamMember).where(
                 TeamMember.id == agent_id,
                 TeamMember.type == "agent",
-            )
+            ).limit(1)
         )).scalar_one_or_none()
     if agent is None:
         raise HTTPException(status_code=404, detail="Agent not found")
