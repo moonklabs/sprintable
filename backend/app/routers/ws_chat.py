@@ -42,10 +42,13 @@ async def _authenticate(api_key: str | None, token: str | None) -> TeamMember | 
             )).scalar_one_or_none()
             if not ak:
                 return None
+            # team_members 는 projection VIEW — 멀티프로젝트 grant 면 같은 id 가 N 행. 여기선 auth
+            # identity(.id/.org_id·동형) 해소라 .limit(1) 로 MultipleResultsFound 회피(아무 행 OK).
             return (await db.execute(
                 select(TeamMember)
                 .where(TeamMember.id == ak.team_member_id)
                 .where(TeamMember.is_active.is_(True))
+                .limit(1)
             )).scalar_one_or_none()
 
         if token:
