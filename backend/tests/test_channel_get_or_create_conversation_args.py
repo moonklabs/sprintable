@@ -55,3 +55,25 @@ def test_call_arity_matches_callee():
     params = list(inspect.signature(_get_or_create_conversation).parameters.values())
     positional = [p for p in params if p.default is inspect.Parameter.empty]
     assert len(positional) == 4, "callee 시그니처 변경 — channel 호출부도 동반 갱신 필요"
+
+
+# ── is_active 정합: agent 해소 lookup 은 deactivated agent 비도달(crash 아닌 soft correctness 갭) ──
+@pytest.mark.parametrize("name", [
+    "ws_chat.ws_chat_hub",
+    "channel._resolve_agent",
+    "agent_runs.create_agent_run",
+    "agent_gateway.agent_stream",
+])
+def test_agent_lookup_filters_is_active(name: str):
+    """agent 해소 쿼리는 is_active.is_(True) 로 deactivated agent 를 배제(정합·ws_chat:46/agent_inbox 동형)."""
+    from app.routers import agent_gateway, agent_runs, channel, ws_chat
+
+    fns = {
+        "ws_chat.ws_chat_hub": ws_chat.ws_chat_hub,
+        "channel._resolve_agent": channel._resolve_agent,
+        "agent_runs.create_agent_run": agent_runs.create_agent_run,
+        "agent_gateway.agent_stream": agent_gateway.agent_stream,
+    }
+    src = inspect.getsource(fns[name])
+    assert "is_active.is_(True)" in src, \
+        f"{name}: is_active 필터 누락 — deactivated agent 도달 가능(정합 회귀)"

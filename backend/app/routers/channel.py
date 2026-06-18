@@ -49,6 +49,7 @@ async def _resolve_agent(agent_id: uuid.UUID, caller: TeamMember) -> TeamMember:
             select(TeamMember).where(
                 TeamMember.id == agent_id,
                 TeamMember.type == "agent",
+                TeamMember.is_active.is_(True),  # deactivated agent 는 비도달(정합)
             ).order_by(TeamMember.project_id).limit(1)
         )).scalar_one_or_none()
     if agent is None:
