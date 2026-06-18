@@ -226,9 +226,15 @@
       "incompletePreds": "미완료 선행 {count}건 — 시작 전 확인 권장"
     }
   },
+  "session": {
+    "expiredTitle": "세션이 만료되었습니다",
+    "expiredBody": "보안을 위해 세션이 만료되었습니다. 다시 로그인하면 보던 화면으로 돌아갑니다.",
+    "reloginCta": "다시 로그인"
+  },
   "login": {
     "title": "Sprintable",
     "subtitle": "AI 기반 스프린트 관리 도구",
+    "sessionExpired": "세션이 만료되어 로그아웃되었습니다. 다시 로그인해 주세요.",
     "google": "Google로 계속",
     "github": "GitHub로 계속",
     "email": "이메일",

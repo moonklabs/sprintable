@@ -1,5 +1,7 @@
 'use client';
 
+import { signalSessionExpired } from '@/lib/auth/session-expired-signal';
+
 // ─── FastAPI Auth Utilities ───────────────────────────────────────────────────
 
 export interface AuthTokens {
@@ -65,13 +67,14 @@ export async function fetchWithAuth(input: RequestInfo | URL, init?: RequestInit
   try {
     await _refreshing;
   } catch {
-    if (typeof window !== 'undefined') window.location.href = '/login';
+    // AC3: refresh 최종 실패 → bare redirect 대신 세션-만료 신호(SessionExpiredDialog·다중 401 dedupe).
+    if (typeof window !== 'undefined') signalSessionExpired();
     return res;
   }
 
   const retried = await fetch(input, init);
   if (retried.status === 401 && typeof window !== 'undefined') {
-    window.location.href = '/login';
+    signalSessionExpired();
   }
   return retried;
 }

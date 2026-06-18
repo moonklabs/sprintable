@@ -67,13 +67,21 @@ describe('proxy', () => {
     mockFetch.mockResolvedValue({ ok: false, json: async () => ({ error: { code: 'TOKEN_REVOKED' } }) });
     const response = await middleware(makeRequest('/dashboard'));
     expect(response.status).toBe(307);
-    expect(response.headers.get('location')).toBe('https://app.example.com/login');
+    // AC3(551bbbee): hard /login 대신 next 보존 + reason 배너 계약. graceful 세션 만료 UX.
+    const loc = response.headers.get('location') ?? '';
+    expect(loc).toContain('https://app.example.com/login?');
+    expect(loc).toContain(`next=${encodeURIComponent('/dashboard')}`);
+    expect(loc).toContain('reason=session_expired');
   });
 
   it('redirects to login when no sp_at and no sp_rt cookie', async () => {
     const response = await middleware(makeRequest('/dashboard'));
     expect(response.status).toBe(307);
-    expect(response.headers.get('location')).toBe('https://app.example.com/login');
+    // AC3(551bbbee): hard /login 대신 next 보존 + reason 배너 계약. graceful 세션 만료 UX.
+    const loc = response.headers.get('location') ?? '';
+    expect(loc).toContain('https://app.example.com/login?');
+    expect(loc).toContain(`next=${encodeURIComponent('/dashboard')}`);
+    expect(loc).toContain('reason=session_expired');
   });
 
   it('allows access with valid sp_at cookie', async () => {
@@ -85,7 +93,11 @@ describe('proxy', () => {
   it('redirects to login with invalid sp_at and no refresh token', async () => {
     const response = await middleware(makeRequest('/dashboard', { sp_at: 'not.a.valid.jwt' }));
     expect(response.status).toBe(307);
-    expect(response.headers.get('location')).toBe('https://app.example.com/login');
+    // AC3(551bbbee): hard /login 대신 next 보존 + reason 배너 계약. graceful 세션 만료 UX.
+    const loc = response.headers.get('location') ?? '';
+    expect(loc).toContain('https://app.example.com/login?');
+    expect(loc).toContain(`next=${encodeURIComponent('/dashboard')}`);
+    expect(loc).toContain('reason=session_expired');
   });
 
   it('refreshes token when sp_at is expiring soon', async () => {
