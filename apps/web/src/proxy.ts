@@ -1,6 +1,6 @@
 import { jwtVerify } from 'jose';
 import { NextResponse, type NextRequest } from 'next/server';
-import { cookieBase } from '@/lib/auth/cookies';
+import { cookieBase, SP_AT_MAX_AGE_SECONDS } from '@/lib/auth/cookies';
 
 const PUBLIC_EXACT = [
   '/',
@@ -72,13 +72,44 @@ async function tryRefreshViaFastapi(request: NextRequest): Promise<{ accessToken
   }
 }
 
+// AC1(551bbbee): single-flight refresh. refresh 는 single-use rotation(첫 건이 RT revoke)이라, 대시보드
+// 동시요청이 같은 RT 로 각자 refresh 하면 첫 건만 통과·나머지 401 → 강제 로그아웃("세션 너무 짧음")이던
+// 레이스를 제거. RT 기준 in-flight 1개로 dedupe(나머지는 그 promise 를 await/재사용) — 실제 refresh 호출은
+// 1회라 single-use 보안 유지.
+//   - **pending 동안은 시간 무관하게 그 promise 재사용**(refresh 가 10s 걸려도 1개만 — 시작-기준 grace 면
+//     느린 refresh 가 grace 넘겨 pending 중 신규 refresh 시작=레이스 재발, RC HIGH 봉합).
+//   - 해소(settled) 후엔 **해소 시각 기준 grace** 동안만 결과 재사용 — cookie 갱신 전 도착한 burst 꼬리
+//     요청도 옛 RT 로 새 refresh 안 함.
+// setTimeout 미사용(edge 런타임 post-response 실행 불확실)·size-cap lazy prune(무한증가 방지).
+const REFRESH_GRACE_MS = 5_000;
+type RefreshEntry = { p: Promise<{ accessToken: string; refreshToken: string } | null>; settledAt: number | null };
+const inflightRefresh = new Map<string, RefreshEntry>();
+
+function singleFlightRefresh(request: NextRequest): Promise<{ accessToken: string; refreshToken: string } | null> {
+  const rt = request.cookies.get(SP_RT_COOKIE)?.value;
+  if (!rt) return Promise.resolve(null);
+  const now = Date.now();
+  const existing = inflightRefresh.get(rt);
+  // pending(settledAt===null) → 시간 무관 재사용 / settled → 해소 시각 + grace 내에서만 재사용.
+  if (existing && (existing.settledAt === null || existing.settledAt + REFRESH_GRACE_MS > now)) {
+    return existing.p;
+  }
+  const entry: RefreshEntry = { p: tryRefreshViaFastapi(request), settledAt: null };
+  inflightRefresh.set(rt, entry);
+  void entry.p.finally(() => { entry.settledAt = Date.now(); }); // 해소 시각 기록 → grace 시작점
+  if (inflightRefresh.size > 64) { // settled + grace 지난 항목 lazy prune(pending 은 유지)
+    for (const [k, v] of inflightRefresh) if (v.settledAt !== null && v.settledAt + REFRESH_GRACE_MS <= now) inflightRefresh.delete(k);
+  }
+  return entry.p;
+}
+
 function applyTokenCookies(
   response: NextResponse,
   accessToken: string,
   refreshToken: string,
 ): void {
   const base = cookieBase();
-  response.cookies.set(SP_AT_COOKIE, accessToken, { ...base, maxAge: 15 * 60 });
+  response.cookies.set(SP_AT_COOKIE, accessToken, { ...base, maxAge: SP_AT_MAX_AGE_SECONDS });
   response.cookies.set(SP_RT_COOKIE, refreshToken, { ...base, maxAge: 30 * 24 * 60 * 60 });
 }
 
@@ -123,7 +154,7 @@ export async function proxy(request: NextRequest) {
   const accessToken = request.cookies.get(SP_AT_COOKIE)?.value;
 
   if (!accessToken) {
-    const tokens = await tryRefreshViaFastapi(request);
+    const tokens = await singleFlightRefresh(request);
     if (!tokens) {
       if (isApiPath) return NextResponse.next({ request }); // let handler return 401
       const url = request.nextUrl.clone();
@@ -140,7 +171,7 @@ export async function proxy(request: NextRequest) {
 
   if (!claims) {
     // access token invalid/expired — try refresh
-    const tokens = await tryRefreshViaFastapi(request);
+    const tokens = await singleFlightRefresh(request);
     if (!tokens) {
       if (isApiPath) return NextResponse.next({ request }); // let handler return 401
       const url = request.nextUrl.clone();
@@ -157,7 +188,7 @@ export async function proxy(request: NextRequest) {
   const now = Math.floor(Date.now() / 1000);
   const response = NextResponse.next({ request });
   if (claims.exp !== undefined && claims.exp - now < 300) {
-    const tokens = await tryRefreshViaFastapi(request);
+    const tokens = await singleFlightRefresh(request);
     if (tokens) {
       applyTokenCookies(response, tokens.accessToken, tokens.refreshToken);
     }
