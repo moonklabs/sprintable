@@ -10,6 +10,7 @@ import {
 } from '@/lib/project-context-client';
 import { useTranslations } from 'next-intl';
 import { RealtimeProvider } from '@/components/realtime-provider';
+import { SessionExpiredDialog } from '@/components/auth/session-expired-dialog';
 import { AppSidebar } from '@/components/nav/app-sidebar';
 import { TopBar } from '@/components/nav/top-bar';
 import { TopBarProvider, useTopBar } from '@/components/nav/top-bar-context';
@@ -166,6 +167,7 @@ export function DashboardShell({
             </ScrollShell>
           </SidebarProvider>
         </TopBarProvider>
+        <SessionExpiredDialog />
       </RealtimeProvider>
       </RefreshProvider>
     </DashboardCtx.Provider>

@@ -1,6 +1,7 @@
 import { jwtVerify } from 'jose';
 import { NextResponse, type NextRequest } from 'next/server';
 import { cookieBase, SP_AT_MAX_AGE_SECONDS } from '@/lib/auth/cookies';
+import { SESSION_EXPIRED_REASON } from '@/lib/auth/session-redirect';
 
 const PUBLIC_EXACT = [
   '/',
@@ -128,6 +129,17 @@ function buildRefreshedHeaders(
   return headers;
 }
 
+/** AC3: 인증 실패 → /login?next=<현재경로>&reason=session_expired (login 배너 + 작업 보존 복귀). */
+function loginRedirect(request: NextRequest): NextResponse {
+  const url = request.nextUrl.clone();
+  const nextTarget = request.nextUrl.pathname + request.nextUrl.search;
+  url.pathname = '/login';
+  url.search = '';
+  url.searchParams.set('next', nextTarget); // searchParams.set 이 encode
+  url.searchParams.set('reason', SESSION_EXPIRED_REASON);
+  return NextResponse.redirect(url);
+}
+
 export async function proxy(request: NextRequest) {
   const pathname = request.nextUrl.pathname;
 
@@ -157,9 +169,7 @@ export async function proxy(request: NextRequest) {
     const tokens = await singleFlightRefresh(request);
     if (!tokens) {
       if (isApiPath) return NextResponse.next({ request }); // let handler return 401
-      const url = request.nextUrl.clone();
-      url.pathname = '/login';
-      return NextResponse.redirect(url);
+      return loginRedirect(request);
     }
     const headers = buildRefreshedHeaders(request, tokens);
     const response = NextResponse.next({ request: { headers } });
@@ -174,9 +184,7 @@ export async function proxy(request: NextRequest) {
     const tokens = await singleFlightRefresh(request);
     if (!tokens) {
       if (isApiPath) return NextResponse.next({ request }); // let handler return 401
-      const url = request.nextUrl.clone();
-      url.pathname = '/login';
-      return NextResponse.redirect(url);
+      return loginRedirect(request);
     }
     const headers = buildRefreshedHeaders(request, tokens);
     const response = NextResponse.next({ request: { headers } });
@@ -184,9 +192,13 @@ export async function proxy(request: NextRequest) {
     return response;
   }
 
-  // Proactive refresh if expiring within 5 minutes
+  // Proactive refresh if expiring within 5 minutes.
+  // AC3: x-pathname 주입 — (authenticated)/layout 이 /me 401 시 next 보존 redirect 에 사용(server component
+  // 는 현재 경로를 직접 못 읽음).
   const now = Math.floor(Date.now() / 1000);
-  const response = NextResponse.next({ request });
+  const fwdHeaders = new Headers(request.headers);
+  fwdHeaders.set('x-pathname', pathname + request.nextUrl.search);
+  const response = NextResponse.next({ request: { headers: fwdHeaders } });
   if (claims.exp !== undefined && claims.exp - now < 300) {
     const tokens = await singleFlightRefresh(request);
     if (tokens) {

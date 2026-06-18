@@ -226,9 +226,15 @@
       "incompletePreds": "{count} incomplete predecessor(s) — check before starting"
     }
   },
+  "session": {
+    "expiredTitle": "Your session expired",
+    "expiredBody": "For your security, your session expired. Sign in again to return to where you left off.",
+    "reloginCta": "Sign in again"
+  },
   "login": {
     "title": "Sprintable",
     "subtitle": "AI-powered sprint management",
+    "sessionExpired": "Your session expired and you were signed out. Please sign in again.",
     "google": "Continue with Google",
     "github": "Continue with GitHub",
     "email": "Email",
