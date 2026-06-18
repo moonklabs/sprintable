@@ -37,10 +37,12 @@ async def create_agent_run(
     _auth: AuthContext = Depends(get_current_user),
     repo: AgentRunRepository = Depends(_get_repo),
 ) -> AgentRunResponse:
+    # team_members 는 projection VIEW — 멀티프로젝트 grant 면 같은 agent_id 가 N 행. org_id 는 전
+    # projection 행에서 동형이라 .limit(1) 로 MultipleResultsFound 회피(아무 행 OK).
     member_r = await session.execute(
         select(TeamMember.org_id).where(
             TeamMember.id == body.agent_id, TeamMember.type == "agent"
-        )
+        ).limit(1)
     )
     org_id = member_r.scalar_one_or_none()
     if org_id is None:
