@@ -1,12 +1,28 @@
 """SprintableClient — httpx 기반 PM API HTTP 클라이언트."""
 from __future__ import annotations
 
+import contextvars
 import logging
 from typing import Any
 
 import httpx
 
 logger = logging.getLogger(__name__)
+
+# 85429ee0: per-call 프로젝트 override(org-agent 멀티프로젝트 grant). server._flat 가 tool-call 스코프로
+# set/reset. 설정 시 client.project_id(쿼리/바디) + X-Project-Id 헤더에 반영. 미설정 시 키 default(무회귀).
+_project_override: contextvars.ContextVar[str | None] = contextvars.ContextVar(
+    "mcp_project_override", default=None
+)
+
+
+def set_project_override(project_id: str | None):
+    """per-call 프로젝트 override 설정 — 반환 token 으로 reset(server _flat wrapper 가 tool 호출 스코프로 사용)."""
+    return _project_override.set(project_id or None)
+
+
+def reset_project_override(token) -> None:
+    _project_override.reset(token)
 
 # 백엔드 에러 본문을 MCP 에러 문자열에 노출할 때, 비정상적으로 큰 body가
 # 에이전트 컨텍스트를 잠식하지 않도록 자르는 상한.
@@ -155,7 +171,8 @@ class SprintableClient:
 
     @property
     def project_id(self) -> str:
-        return self._project_id
+        # per-call override(85429ee0) 우선 — 없으면 키 default(무회귀).
+        return _project_override.get() or self._project_id
 
     async def request(
         self,
@@ -171,11 +188,17 @@ class SprintableClient:
             "x-agent-api-key": self._api_key,
             "Content-Type": "application/json",
         }
+        # 85429ee0: per-call override 시 X-Project-Id 헤더 전송 — 백엔드 get_verified_org_id 가
+        # has_project_access 로 멤버십 검증 후 그 프로젝트로 컨텍스트 전환(mutation 라우트). 미설정 시
+        # 헤더 미전송(키 default·무회귀).
+        _override = _project_override.get()
+        if _override:
+            headers["X-Project-Id"] = _override
 
-        # POST/PUT/PATCH body에 context 필드 자동 주입
+        # POST/PUT/PATCH body에 context 필드 자동 주입(project_id 는 override 반영된 effective).
         if method.upper() in ("POST", "PUT", "PATCH") and json is not None:
-            if not json.get("project_id") and self._project_id:
-                json = {**json, "project_id": self._project_id}
+            if not json.get("project_id") and self.project_id:
+                json = {**json, "project_id": self.project_id}
             if not json.get("org_id") and self._org_id:
                 json = {**json, "org_id": self._org_id}
             if not json.get("created_by") and self._member_id:
