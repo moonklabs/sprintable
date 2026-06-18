@@ -1,6 +1,7 @@
 import { NextResponse } from 'next/server';
 import { cookies } from 'next/headers';
 import { SP_AT_COOKIE, SP_RT_COOKIE } from '@/lib/db/server';
+import { SP_AT_MAX_AGE_SECONDS } from '@/lib/auth/cookies';
 import { resolveAppUrl } from '@/services/app-url';
 
 const FASTAPI_URL = () => process.env['NEXT_PUBLIC_FASTAPI_URL'] ?? 'http://localhost:8000';
@@ -62,7 +63,7 @@ export async function GET(request: Request, { params }: RouteParams) {
 
   const destination = inviteToken ? `${origin}/dashboard` : `${origin}/inbox`;
   const res = NextResponse.redirect(destination);
-  res.cookies.set(SP_AT_COOKIE, access_token, { ...cookieBase(), maxAge: 15 * 60 });
+  res.cookies.set(SP_AT_COOKIE, access_token, { ...cookieBase(), maxAge: SP_AT_MAX_AGE_SECONDS });
   res.cookies.set(SP_RT_COOKIE, refresh_token, { ...cookieBase(), maxAge: 30 * 24 * 60 * 60 });
   return res;
 }
