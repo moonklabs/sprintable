@@ -38,11 +38,18 @@ async def _require_caller(api_key: str | None, token: str | None) -> TeamMember:
 
 async def _resolve_agent(agent_id: uuid.UUID, caller: TeamMember) -> TeamMember:
     async with async_session_factory() as db:
+        # team_members 는 projection VIEW — org-agent 멀티프로젝트 grant 면 같은 id 가 N 행이라 무필터
+        # scalar_one_or_none 은 MultipleResultsFound. 이 결과의 .org_id(동형)뿐 아니라 .project_id 도
+        # _persist_and_broadcast → _get_or_create_conversation 에서 DM room 스코프에 소비되므로 임의
+        # .limit(1)(틀린 프로젝트 위험) 대신 deterministic grant-pick(order_by(project_id).limit(1))으로
+        # 크래시를 막고 안정적 default project 로 라우팅한다(ws_chat/agent_inbox Ⓑ stopgap 동형).
+        # ⚠️ known-limitation: 멀티프로젝트 agent 의 DM room 은 default(최저 project_id) project 로 스코프.
+        #   진짜 라우팅(기존 (agent,caller) DM 우선조회→그 conversation 의 project)은 follow-up story.
         agent = (await db.execute(
             select(TeamMember).where(
                 TeamMember.id == agent_id,
                 TeamMember.type == "agent",
-            )
+            ).order_by(TeamMember.project_id).limit(1)
         )).scalar_one_or_none()
     if agent is None:
         raise HTTPException(status_code=404, detail="Agent not found")

@@ -279,8 +279,11 @@ async def agent_stream(
 
     # agent_id ê²ì¦
     async with async_session_factory() as db:
+        # team_members 는 projection VIEW — 멀티프로젝트 grant 면 같은 agent_id 가 N 행이라
+        # 무필터 scalar_one_or_none 은 멀티프로젝트 agent 접속 시 MultipleResultsFound 로 stream 연결을
+        # 막는다. 아래선 .org_id(동형)만 쓰므로 .limit(1) 로 안전(아무 projection 행 OK).
         tm = (await db.execute(
-            select(TeamMember).where(TeamMember.id == agent_id, TeamMember.type == "agent")
+            select(TeamMember).where(TeamMember.id == agent_id, TeamMember.type == "agent").limit(1)
         )).scalar_one_or_none()
         if tm is None:
             raise HTTPException(status_code=404, detail="Agent not found")

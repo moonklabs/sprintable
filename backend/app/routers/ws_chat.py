@@ -42,10 +42,13 @@ async def _authenticate(api_key: str | None, token: str | None) -> TeamMember | 
             )).scalar_one_or_none()
             if not ak:
                 return None
+            # team_members 는 projection VIEW — 멀티프로젝트 grant 면 같은 id 가 N 행. 여기선 auth
+            # identity(.id/.org_id·동형) 해소라 .limit(1) 로 MultipleResultsFound 회피(아무 행 OK).
             return (await db.execute(
                 select(TeamMember)
                 .where(TeamMember.id == ak.team_member_id)
                 .where(TeamMember.is_active.is_(True))
+                .limit(1)
             )).scalar_one_or_none()
 
         if token:
@@ -155,12 +158,19 @@ async def ws_chat_hub(
     logger.info("ws_chat: connected agent_id=%s caller=%s", agent_id, caller.id)
 
     # agent의 org_id/project_id 조회 (room 초기화용) — type='agent' 한정
+    # team_members 는 projection VIEW — 멀티프로젝트 grant 면 같은 agent_id 가 N 행이라 무필터
+    # scalar_one_or_none 은 MultipleResultsFound 로 깨진다. DM room 은 여기서 _get_or_create_conversation
+    # 으로 생성(project_id 가 입력)되므로 신규 DM 엔 도출할 pre-existing conversation project 가 없다.
+    # → deterministic grant-pick(order_by(project_id) limit 1)으로 크래시를 막고 안정적 default project
+    # 로 room 을 스코프한다. org_id 는 전 projection 행 동형이라 정확.
+    # ⚠️ known-limitation: 멀티프로젝트 agent 의 DM room 은 default(최저 project_id) project 로 스코프.
+    #   진짜 라우팅(기존 (agent,caller) DM 우선조회→그 conversation 의 project)은 follow-up story.
     async with async_session_factory() as db:
         agent_member = (await db.execute(
             select(TeamMember).where(
                 TeamMember.id == agent_id,
                 TeamMember.type == "agent",
-            )
+            ).order_by(TeamMember.project_id).limit(1)
         )).scalar_one_or_none()
 
     if agent_member is None:
