@@ -95,11 +95,14 @@ export function StoryCard({ story, epicName, assignee, assignees, onClick, onEdi
     transform: CSS.Transform.toString(transform),
     transition,
     opacity: isDragging ? 0.5 : 1,
-    // Touch dnd: pan-y keeps vertical column scroll working (a quick swipe scrolls,
-    // aborting the TouchSensor's 250ms delay) while a press-and-hold still starts a drag
-    // (dnd-kit preventDefaults once active). `none` would have killed scroll-on-card;
-    // pan-y is the scroll-preserving fix for the overflow-y-auto columns (S6 root cause).
-    touchAction: 'pan-y' as const,
+    // Touch dnd: pan-x pan-y lets a quick swipe scroll natively in BOTH axes (aborting the
+    // TouchSensor's 250ms delay) while a press-and-hold still starts a drag (dnd-kit
+    // preventDefaults once active). `none` would kill scroll-on-card.
+    // 0a36762d: pan-y alone (S6) preserved vertical column scroll but BLOCKED horizontal board
+    // scroll — columns sit in an `overflow-x-auto` row (scrollW>clientW), so a horizontal swipe
+    // starting on a card had no native scroll and got captured. pan-x pan-y restores horizontal
+    // board scroll (superset of pan-y → no regression to vertical scroll or desktop drag).
+    touchAction: 'pan-x pan-y' as const,
   };
 
   // Close menu on click outside
