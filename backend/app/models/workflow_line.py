@@ -205,3 +205,36 @@ class WorkflowLineStepRunEvent(Base):
     payload: Mapped[dict] = mapped_column(JSONB, nullable=False, server_default="{}")
     correlation_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), nullable=False)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), nullable=False)
+
+
+# S14 deputy/availability/SoD resolver 의 candidate source.
+AVAILABILITY_STATUSES = frozenset({"available", "ooo", "unavailable", "busy"})
+
+
+class WorkflowRoleAssignment(Base):
+    """role_key → member 후보(0126 미러). S14 resolver 가 active/effective/availability 필터 + deputy
+    대체 + SoD 로 candidate 를 해소한다. ``metadata`` 컬럼은 SQLAlchemy 예약어라 attr 명을 우회한다.
+    """
+
+    __tablename__ = "workflow_role_assignments"
+
+    id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    org_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), nullable=False)
+    project_id: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True), nullable=True)
+    role_key: Mapped[str] = mapped_column(Text, nullable=False)
+    member_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), nullable=False)
+    member_type: Mapped[str] = mapped_column(Text, nullable=False)
+    priority: Mapped[int] = mapped_column(Integer, nullable=False, server_default="100")
+    is_active: Mapped[bool] = mapped_column(Boolean, nullable=False, server_default="true")
+    deputy_member_id: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True), nullable=True)
+    deputy_member_type: Mapped[str | None] = mapped_column(Text, nullable=True)
+    availability_status: Mapped[str] = mapped_column(Text, nullable=False, server_default="available")
+    effective_from: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    effective_to: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    delegation_policy: Mapped[dict] = mapped_column(JSONB, nullable=False, server_default="{}")
+    # ``metadata`` 는 Declarative 예약어 → attr 명 분리·DB 컬럼명은 그대로 "metadata".
+    assignment_metadata: Mapped[dict] = mapped_column("metadata", JSONB, nullable=False, server_default="{}")
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), nullable=False)
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now(), onupdate=func.now(), nullable=False
+    )

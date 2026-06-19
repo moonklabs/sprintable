@@ -121,7 +121,8 @@ async def process_sla(session: AsyncSession, now: datetime | None = None) -> dic
         ).order_by(WorkflowLineStepRun.started_at.asc()).with_for_update(skip_locked=True)
     )).scalars().all()
 
-    counts = {"reminded": 0, "escalated": 0, "auto_approved": 0, "kept_pending": 0, "skipped": 0}
+    counts = {"reminded": 0, "escalated": 0, "auto_approved": 0, "kept_pending": 0,
+              "unresolved": 0, "skipped": 0}
     for sr in rows:
         policy = await _resolve_sla_policy(session, sr)
         timeout_h = policy.get("timeout_hours")
@@ -139,7 +140,7 @@ async def process_sla(session: AsyncSession, now: datetime | None = None) -> dic
             # keep_pending(기본) 또는 auto_approve 금지 → 보수적: escalate 1회 후 pending 유지.
             escalate_to = policy.get("escalate_to")
             if escalate_to and sr.escalated_to_member_id is None:
-                target = _resolve_escalation_target(escalate_to)
+                target = await _resolve_escalation(session, sr, escalate_to, now)
                 if target is not None:
                     sr.escalated_to_member_id = target
                     sr.status = "escalated"
@@ -148,6 +149,13 @@ async def process_sla(session: AsyncSession, now: datetime | None = None) -> dic
                     await _notify(session, sr, target, "gate_escalated", "Gate escalated — SLA timeout")
                     counts["escalated"] += 1
                     continue
+                # ⭐S14 fold-in: escalate_to(role/deputy)가 해소 안 되면 silent keep_pending 금지 →
+                # unresolved_assignee 로 가시화(board badge·silent prison 아님·S14 AC⑥).
+                sr.delivery_status = "unresolved_assignee"
+                _record_event(session, sr, "escalated",
+                              payload={"reason": "sla_timeout", "unresolved": True})
+                counts["unresolved"] += 1
+                continue
             counts["kept_pending"] += 1  # ⭐방치 아님·gate 유지(이미 escalate or escalate_to 없음)
             continue
 
@@ -170,13 +178,27 @@ async def process_sla(session: AsyncSession, now: datetime | None = None) -> dic
     return counts
 
 
-def _resolve_escalation_target(escalate_to: Any) -> uuid.UUID | None:
-    """escalate_to 를 member_id 로 해소. MVP: member uuid 직접 지정. role_key 해소는 후속 defer."""
+async def _resolve_escalation(
+    session: AsyncSession, sr: WorkflowLineStepRun, escalate_to: Any, now: datetime,
+) -> uuid.UUID | None:
+    """escalate_to 를 member_id 로 해소.
+
+    UUID(직지정)는 그대로, 비-UUID 는 role_key 로 보고 S14 ``resolve_role_candidate`` 로 deputy/
+    availability/SoD 해소(prefer_human·현 assignee 는 SoD 제외). 미해소면 None → 호출부가
+    unresolved_assignee 로 가시화(silent keep_pending 금지).
+    """
     if isinstance(escalate_to, uuid.UUID):
         return escalate_to
     if isinstance(escalate_to, str):
         try:
-            return uuid.UUID(escalate_to)
+            return uuid.UUID(escalate_to)  # UUID 직지정
         except ValueError:
-            return None  # role_key 등 비-uuid → 후속 Phase(deputy/role resolver)
+            pass  # role_key → resolver
+        from app.services.workflow_role_resolver import resolve_role_candidate
+        sod = {sr.resolved_member_id} if sr.resolved_member_id else set()
+        cand = await resolve_role_candidate(
+            session, sr.org_id, escalate_to, project_id=sr.project_id,
+            prefer_human=True, sod_exclude=sod, now=now,
+        )
+        return cand.member_id if cand is not None else None
     return None
