@@ -148,6 +148,43 @@ async def test_missing_event_and_recipient_seq_defensive():
 
 @pytest.mark.skipif(not _REAL_DB_URL, reason="real Postgres 필요")
 @pytest.mark.anyio
+async def test_concurrent_invocations_skip_locked_notify_once():
+    """⭐SME blocking 회귀: cron 겹침 시 두 invocation 이 같은 stuck row 를 동시 처리하면
+    재notify 0/idempotent 가 깨진다. FOR UPDATE SKIP LOCKED 로 잠긴 row 는 건너뛰고 1회만 처리·notify."""
+    from app.services.workflow_handoff_watchdog import reconcile_handoffs
+    from app.models.workflow_line import WorkflowLineStepRun
+    from sqlalchemy import select
+    engine, Session = await _session()
+    async with Session() as seed:
+        org = uuid.uuid4()
+        sr, rid = await _seed_run(seed, org, recipient_seq=5)
+        await _seed_cursor(seed, rid, acked_seq=3)  # 미ACK → stuck 후보
+        await seed.commit()
+
+    # 다른 cron invocation 모사: s_lock 이 같은 row 를 SKIP LOCKED 로 잠그고 트랜잭션 보류.
+    async with Session() as s_lock, Session() as s_work:
+        held = (await s_lock.execute(
+            select(WorkflowLineStepRun).where(WorkflowLineStepRun.id == sr.id).with_for_update(skip_locked=True)
+        )).scalar_one_or_none()
+        assert held is not None  # s_lock 이 row 잠금 보유
+        with patch("app.services.notification_dispatch.dispatch_notification", new=AsyncMock()) as notify:
+            counts = await reconcile_handoffs(s_work, now=_NOW)
+        assert counts["scanned"] == 0  # ⭐잠긴 row 는 건너뜀(중복 처리 0)
+        assert notify.await_count == 0
+        await s_lock.rollback()  # 잠금 해제
+
+    # 잠금 해제 후 재실행 → 정확히 1회 처리·notify 1회.
+    async with Session() as s2:
+        with patch("app.services.notification_dispatch.dispatch_notification", new=AsyncMock()) as notify2:
+            counts2 = await reconcile_handoffs(s2, now=_NOW)
+        assert counts2["stuck"] == 1 and notify2.await_count == 1
+        row = (await s2.execute(select(WorkflowLineStepRun).where(WorkflowLineStepRun.id == sr.id))).scalar_one()
+        assert row.delivery_status == "timed_out"
+    await engine.dispose()
+
+
+@pytest.mark.skipif(not _REAL_DB_URL, reason="real Postgres 필요")
+@pytest.mark.anyio
 async def test_idempotent_and_not_yet_stuck_excluded():
     from app.services.workflow_handoff_watchdog import reconcile_handoffs
     from app.models.workflow_line import WorkflowLineStepRun

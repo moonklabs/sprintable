@@ -53,11 +53,15 @@ async def reconcile_handoffs(
     """미해소 handoff step_run 을 ACK 대사·stuck 판정한다. 반환: 카운트."""
     now = now or datetime.now(timezone.utc)
     cutoff = now - timedelta(minutes=stuck_after_minutes)
+    # ⭐동시성(SME blocking): cron invocation 이 겹치면 두 watchdog 이 같은 stale row 를 동시에 읽고
+    # 둘 다 timed_out + dispatch_notification 하여 재notify 0/idempotent 가 깨진다. FOR UPDATE
+    # SKIP LOCKED 로 각 invocation 이 disjoint row 집합만 claim → 한 쪽이 잠근 row 는 다른 쪽이 건너뛰고,
+    # 잠긴 row 는 이 트랜잭션 commit(terminal 전환) 까지 보호되어 정확히 1회만 처리·notify 된다.
     rows = (await session.execute(
         select(WorkflowLineStepRun).where(
             WorkflowLineStepRun.delivery_status.in_(_OPEN_DELIVERY),
             WorkflowLineStepRun.created_at < cutoff,
-        )
+        ).with_for_update(skip_locked=True)
     )).scalars().all()
 
     acked = stuck = missing = 0
