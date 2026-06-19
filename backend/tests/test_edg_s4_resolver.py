@@ -176,3 +176,42 @@ async def test_engine_shadow_records_routing_context_and_trust():
         assert sr.trust_snapshot.get("cold_start") is True
         assert sr.trust_snapshot.get("captured_before_verdict") is True
     await engine.dispose()
+
+
+@pytest.mark.skipif(not _REAL_DB_URL, reason="real Postgres 필요")
+@pytest.mark.anyio
+async def test_actor_propagates_to_step_run_snapshot():
+    """⭐SME blocking 회귀: 엔진에 actor_id/actor_type 을 넘기면 resolver→step_run.routing_context.actor
+    까지 전파돼야 한다(라우터가 actor 미전달 시 항상 no_member 로 고정되던 통합 갭). actor.member_id 가
+    실제 actor 로 채워져야 trust 가 그 actor 이력 기반(non-cold-start 가능)이 된다."""
+    from sqlalchemy import select
+    from app.services.workflow_line_engine import evaluate_line_for_transition
+    from app.models.workflow_line import (
+        WorkflowLineDefinition, WorkflowLineDefinitionVersion, WorkflowLineStepRun,
+    )
+    from app.models.pm import Story
+    from app.models.project import Project
+    engine, Session = await _session()
+    async with Session() as s:
+        org, proj, actor = uuid.uuid4(), uuid.uuid4(), uuid.uuid4()
+        s.add(Project(id=proj, org_id=org, name="p")); await s.flush()
+        defn = WorkflowLineDefinition(org_id=org, project_id=None, entity_type="story",
+                                      name="L", is_active=True, version=1)
+        s.add(defn); await s.flush()
+        s.add(WorkflowLineDefinitionVersion(
+            line_definition_id=defn.id, org_id=org, project_id=None, entity_type="story",
+            version=1, status="published", config_hash="h", created_by_member_id=uuid.uuid4(),
+            config={"rollout_mode": "shadow",
+                    "steps": [{"from_status": "in-review", "to_status": "done", "step_type": "merge-gate"}]}))
+        story = Story(org_id=org, project_id=proj, title="t", status="in-review", priority="high")
+        s.add(story); await s.flush()
+        await evaluate_line_for_transition(
+            s, org_id=org, project_id=proj, entity_type="story", entity_id=story.id,
+            from_status="in-review", to_status="done", actor_id=actor, actor_type="human")
+        sr = (await s.execute(select(WorkflowLineStepRun).where(
+            WorkflowLineStepRun.entity_id == story.id))).scalar_one()
+        # ⭐actor 가 no_member 로 고정되지 않고 실제 actor 로 전파됨
+        assert sr.routing_context["actor"]["member_id"] == str(actor)
+        assert sr.routing_context["actor"]["type"] == "human"
+        assert sr.trust_snapshot.get("reason") != "no_member"  # 실 actor 기반(이력 있으면 non-cold-start)
+    await engine.dispose()

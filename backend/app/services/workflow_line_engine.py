@@ -111,6 +111,7 @@ async def evaluate_line_for_transition(
     from_status: str | None,
     to_status: str,
     actor_id: uuid.UUID | None = None,
+    actor_type: str | None = None,
     transition_id: str | None = None,
 ) -> LineDecision:
     """전이 직전 라인 평가. ⭐절대 예외를 raise하지 않는다(P0-1 fail-open)."""
@@ -134,7 +135,8 @@ async def evaluate_line_for_transition(
         # (trust-before-capture — autoflush 가 pending step_run 을 trust 쿼리에 끌어들이는 것 방지).
         # resolver 예외도 바깥 try/except 가 잡아 engine_failed→plain 으로 degrade(fail-open 유지).
         routing_context = await resolve_routing_context(
-            session, org_id, entity_type=entity_type, entity_id=entity_id, actor_member_id=actor_id,
+            session, org_id, entity_type=entity_type, entity_id=entity_id,
+            actor_member_id=actor_id, actor_type=actor_type,
         )
         trust_snapshot = routing_context.get("trust") if isinstance(routing_context, dict) else None
 
