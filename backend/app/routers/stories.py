@@ -28,7 +28,12 @@ from app.services.verdict_capture import resolve_implementation_participation
 from app.services.notification_dispatch import dispatch_notification
 from app.services.story_status_events import emit_story_status_changed
 from app.services.webhook_dispatch import fire_webhooks
-from app.services.workflow_line_status import WorkflowLineStatusResponse, build_workflow_line_status
+from app.services.workflow_line_status import (
+    LineStatusSummary,
+    WorkflowLineStatusResponse,
+    build_workflow_line_status,
+    build_workflow_line_status_batch,
+)
 from app.services.workflow_pipeline import process_event
 from app.services.rule_evaluator import EventContext
 from app.services.workflow_violation import build_violation_event, check_transition
@@ -248,6 +253,25 @@ async def create_story(
         title=story.title,
     )
     return StoryResponse.model_validate(story)
+
+
+# E-DG S11 FE unblock: 보드 카드 badge 용 배치 read — per-story fetch N+1 회피(gates 배치 패턴
+# 미러·1 fetch+map). ⚠️ /{id} 보다 **먼저** 선언(specific-before-parameterized). active-only 요약
+# (mode/status + engine_degraded/grandfathered/handoff_stuck + delivery_status)·org-scoped·N+1 0.
+@router.get("/workflow-line/status", response_model=list[LineStatusSummary])
+async def get_workflow_line_status_batch(
+    ids: str = Query(..., description="comma-separated story ids"),
+    repo: StoryRepository = Depends(_get_repo),
+) -> list[LineStatusSummary]:
+    try:
+        story_ids = [uuid.UUID(x) for x in ids.split(",") if x.strip()]
+    except ValueError:
+        raise HTTPException(status_code=422, detail="invalid story id in ids")
+    if not story_ids:
+        return []
+    if len(story_ids) > 200:  # 보드 페이지 단위 방어(과대 IN 금지)
+        raise HTTPException(status_code=422, detail="too many ids (max 200)")
+    return await build_workflow_line_status_batch(repo.session, repo.org_id, story_ids)
 
 
 @router.get("/{id}", response_model=StoryResponse)
