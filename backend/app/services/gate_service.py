@@ -120,10 +120,20 @@ async def transition_gate(
 
     await record_cold_start_seed(session, org_id, gate, new_status, resolver_id)
 
-    # H1-FIX-2: merge 게이트 approve → work item 스토리를 done으로 진행(_preflight 재평가 우회).
-    # S7은 verdict만 기록하고 →done 진행을 안 박아, 사람이 approve해도 일이 done에 도달 못 하고
-    # done 재시도 시 재평가→ask_human 재발로 막히던 dogfood 갭을 닫는다.
-    await _advance_story_on_merge_approve(session, gate, new_status)
+    # E-DG S6: gate 전이를 범용 line resolution 에 배선. gate 에 묶인 active line step_run 이 있으면
+    # apply_workflow_line_resolution(H1/line approve 동일 status side-effect 경로)·없으면 legacy
+    # _advance_story_on_merge_approve 유지(무회귀). 신규 승인경로 0.
+    from app.services.workflow_line_resolution import (
+        apply_workflow_line_resolution,
+        find_active_step_run_for_gate,
+    )
+
+    _line_step_run_id = await find_active_step_run_for_gate(session, org_id, gate.id)
+    if _line_step_run_id is not None:
+        await apply_workflow_line_resolution(session, _line_step_run_id, new_status, resolver_id=resolver_id)
+    else:
+        # H1-FIX-2: merge 게이트 approve → work item 스토리를 done으로 진행(_preflight 재평가 우회).
+        await _advance_story_on_merge_approve(session, gate, new_status)
 
     await session.flush()
     await session.refresh(gate)
