@@ -4,9 +4,9 @@ import { useState, useEffect, useRef, useCallback } from 'react';
 import { useSortable } from '@dnd-kit/sortable';
 import { CSS } from '@dnd-kit/utilities';
 import { useTranslations } from 'next-intl';
-import type { KanbanStory, KanbanMember } from './types';
+import type { KanbanStory, KanbanMember, LineStatusSummary } from './types';
 import { Badge } from '@/components/ui/badge';
-import { AlertTriangle, ChevronRight, Rocket, Zap, ZapOff } from 'lucide-react';
+import { AlertTriangle, ChevronRight, EyeOff, History, Pause, Rocket, Zap, ZapOff, type LucideIcon } from 'lucide-react';
 import { LabelChip } from '@/components/ui/label-chip';
 
 const EPIC_COLORS = [
@@ -25,6 +25,38 @@ function getEpicColor(epicId: string): 'info' | 'success' | 'secondary' | 'outli
 function getInitials(name: string): string {
   return name.slice(0, 2).toUpperCase();
 }
+
+// E-DG S11 ①: workflow-line badge 5상태(LineStatusSummary + 기존 pending gate 두 소스 merge).
+type LineBadgeState = 'handoff_stuck' | 'waiting_human' | 'pending_gate' | 'engine_degraded' | 'grandfathered';
+
+// human gate 대기 step run status(BE _blocking_reason gate-대기 분기와 정합).
+const WAITING_HUMAN_STATUSES = new Set(['gate_pending', 'waiting_gate', 'waiting_parallel']);
+
+// boy-scout 절제: 카드엔 우선순위 1배지만(행동필요 > 정보성).
+// handoff_stuck > waiting_human > pending gate > engine_degraded > grandfathered.
+function deriveLineBadge(line: LineStatusSummary | undefined, hasPendingGate: boolean): LineBadgeState | null {
+  if (line?.has_active) {
+    if (line.handoff_stuck) return 'handoff_stuck';
+    if (line.status && WAITING_HUMAN_STATUSES.has(line.status)) return 'waiting_human';
+  }
+  if (hasPendingGate) return 'pending_gate';
+  if (line?.has_active) {
+    if (line.engine_degraded) return 'engine_degraded';
+    if (line.grandfathered) return 'grandfathered';
+  }
+  return null;
+}
+
+// pending_gate 는 gate_type 동반이라 렌더서 특수처리 → meta 는 신규 4상태만.
+const LINE_BADGE_META: Record<
+  Exclude<LineBadgeState, 'pending_gate'>,
+  { variant: 'destructive' | 'warning' | 'outline'; Icon: LucideIcon; labelKey: string }
+> = {
+  handoff_stuck: { variant: 'destructive', Icon: AlertTriangle, labelKey: 'lineHandoffStuck' },
+  waiting_human: { variant: 'warning', Icon: Pause, labelKey: 'lineWaitingHuman' },
+  engine_degraded: { variant: 'outline', Icon: EyeOff, labelKey: 'lineEngineDegraded' },
+  grandfathered: { variant: 'outline', Icon: History, labelKey: 'lineGrandfathered' },
+};
 
 interface WorkflowExecStatus {
   status: string;
@@ -48,14 +80,20 @@ interface StoryCardProps {
   blockedBy?: string[];
   labels?: { id: string; name: string; color: string | null }[];
   gates?: { id: string; gate_type: string; status: string }[];
+  lineStatus?: LineStatusSummary;
 }
 
-export function StoryCard({ story, epicName, assignee, assignees, onClick, onEdit, onChangeStatus, onAssign, onDelete, projectId, onKickoff, lastExecution, blockedBy = [], labels = [], gates = [] }: StoryCardProps) {
+export function StoryCard({ story, epicName, assignee, assignees, onClick, onEdit, onChangeStatus, onAssign, onDelete, projectId, onKickoff, lastExecution, blockedBy = [], labels = [], gates = [], lineStatus }: StoryCardProps) {
   const t = useTranslations('board');
   // E-BOARD S6: 복수 assignee. assignees 우선, 없으면 단일 assignee 폴백. agent 한 명이라도 있으면 agent 취급(glow).
   const assigneeList = (assignees && assignees.length > 0) ? assignees : (assignee ? [assignee] : []);
   const hasAgent = assigneeList.some((m) => m.type === 'agent');
   const tCage = useTranslations('cage');
+  // S11 ①: line badge — 신규 4상태(LineStatusSummary) + 기존 pending gate merge, boy-scout 1배지.
+  const hasPendingGate = gates.some((g) => g.status === 'pending');
+  const lineBadge = deriveLineBadge(lineStatus, hasPendingGate);
+  const lineBadgeMeta = lineBadge && lineBadge !== 'pending_gate' ? LINE_BADGE_META[lineBadge] : null;
+  const pendingGateType = lineBadge === 'pending_gate' ? gates.find((g) => g.status === 'pending')?.gate_type : undefined;
   const [contextMenuOpen, setContextMenuOpen] = useState(false);
   const [statusMenuOpen, setStatusMenuOpen] = useState(false);
   const [triggering, setTriggering] = useState(false);
@@ -200,8 +238,8 @@ export function StoryCard({ story, epicName, assignee, assignees, onClick, onEdi
           <span className="min-w-0 truncate leading-none">{epicName}</span>
         </Badge>
       ) : null}
-      {/* Zone A meta row — dep 뱃지 + label 칩 + gate 뱃지 */}
-      {(blockedBy.length > 0 && story.status !== 'done') || labels.length > 0 || gates.filter((g) => g.status === 'pending').length > 0 ? (
+      {/* Zone A meta row — dep 뱃지 + label 칩 + workflow-line badge(boy-scout 1배지) */}
+      {(blockedBy.length > 0 && story.status !== 'done') || labels.length > 0 || lineBadge ? (
         <div className="mb-2 flex flex-wrap gap-1">
           {blockedBy.length > 0 && story.status !== 'done' ? (
             <Badge variant="warning" className="gap-1">
@@ -212,12 +250,17 @@ export function StoryCard({ story, epicName, assignee, assignees, onClick, onEdi
           {labels.map((label) => (
             <LabelChip key={label.id} label={label} />
           ))}
-          {gates.filter((g) => g.status === 'pending').map((gate) => (
-            <Badge key={gate.id} variant="info" className="gap-1">
-              <span>⏸</span>
-              <span>{gate.gate_type} {tCage('gatePending')}</span>
+          {lineBadge === 'pending_gate' ? (
+            <Badge variant="info" className="gap-1">
+              <Pause className="size-3 shrink-0" />
+              <span>{pendingGateType ? `${pendingGateType} ${tCage('gatePending')}` : tCage('gatePending')}</span>
             </Badge>
-          ))}
+          ) : lineBadgeMeta ? (
+            <Badge variant={lineBadgeMeta.variant} className="gap-1">
+              <lineBadgeMeta.Icon className="size-3 shrink-0" />
+              <span>{tCage(lineBadgeMeta.labelKey)}</span>
+            </Badge>
+          ) : null}
         </div>
       ) : null}
       <p className="relative z-10 line-clamp-2 text-sm font-medium leading-5 text-foreground">{story.title}</p>
