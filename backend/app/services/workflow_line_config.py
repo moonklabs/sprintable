@@ -259,9 +259,10 @@ async def request_publish(
     )
     version.review_gate_id = gate.id
     await session.flush()
-    # allow_auto → gate.status == approved 로 생성됨 → 즉시 확정(요청자=approver 아님: 자동승인은
-    # org 정책 override 결과라 self-approval 가드 비대상).
-    if gate.status == "approved":
+    # allow_auto disposition → create_gate 가 status='auto_passed' 로 생성(approved 아님·gate.py
+    # _DISPOSITION_TO_STATUS) → 즉시 publish 확정. 자동승인은 org 정책 override 결과라 self-approval
+    # 가드 비대상(_auto=True). ask → 'pending' 유지(org owner/admin 승인 대기).
+    if gate.status in ("approved", "auto_passed"):
         await complete_publish(session, version, gate, resolver_id=None, _auto=True)
     await session.refresh(version)
     return version, gate
@@ -275,15 +276,15 @@ async def complete_publish(
 
     transition_gate() 직후 콜백으로 호출(내부 특수분기 금지). self-approval 은 승인 시점에 재검증.
     """
-    if gate.status != "approved":
+    # allow_auto disposition → 'auto_passed'(immutable), 휴먼 승인 → 'approved'. 둘 다 publish 확정.
+    if gate.status not in ("approved", "auto_passed"):
         raise ValueError(f"gate {gate.id} not approved (status={gate.status})")
     if gate.gate_type != WORKFLOW_CONFIG_PUBLISH_GATE_TYPE:
         raise ValueError("gate is not a workflow_config_publish gate")
-    # self-approval 재검증(휴먼 승인 경로). 자동승인(_auto)은 org 정책 결과라 제외.
-    if not _auto and resolver_id is not None:
-        requested_by = (gate.neutral_facts or {}).get("requested_by_member_id")
-        if requested_by and str(resolver_id) == str(requested_by):
-            raise SelfApprovalError(version.id)
+    # self-approval 재검증(휴먼 승인 경로·defense-in-depth — endpoint 가 transition_gate 전 선검증도
+    # 하지만 서비스 직접 호출 대비 한 번 더). 자동승인(_auto)은 org 정책 결과라 제외.
+    if not _auto:
+        assert_not_self_approval(gate, resolver_id, version.id)
     if version.status == "published":
         return version  # 멱등
 
@@ -321,6 +322,16 @@ async def complete_publish(
     await session.flush()
     await session.refresh(version)
     return version
+
+
+def assert_not_self_approval(gate: Gate, resolver_id: uuid.UUID | None, version_id: uuid.UUID) -> None:
+    """요청자 == 승인자면 SelfApprovalError. transition_gate 호출 前 선검증(approve side-effect 차단)
+    과 complete_publish 재검증이 공용으로 쓴다."""
+    if resolver_id is None:
+        return
+    requested_by = (gate.neutral_facts or {}).get("requested_by_member_id")
+    if requested_by and str(resolver_id) == str(requested_by):
+        raise SelfApprovalError(version_id)
 
 
 class PublishLintError(Exception):

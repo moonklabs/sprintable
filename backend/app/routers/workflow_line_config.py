@@ -14,12 +14,14 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.dependencies.auth import AuthContext, get_current_user, get_verified_org_id
 from app.dependencies.database import get_db
+from app.models.gate import Gate
 from app.models.workflow_line import ENTITY_TYPES, WorkflowLineDefinitionVersion
 from app.services.gate_service import transition_gate
 from app.services.project_auth import get_project_role, is_org_owner_or_admin
 from app.services.workflow_line_config import (
     PublishLintError,
     SelfApprovalError,
+    assert_not_self_approval,
     complete_publish,
     create_draft,
     lint_config,
@@ -172,6 +174,17 @@ async def approve_publish(
     version = await _load_version(session, org_id, version_id)
     if version.review_gate_id is None:
         raise HTTPException(status_code=409, detail="version has no publish gate (request-publish first)")
+    # self-approval 선검증 — transition_gate side-effect(verdict 기록 등) 타기 전에 차단(SME 권장).
+    gate_r = await session.execute(
+        select(Gate).where(Gate.id == version.review_gate_id, Gate.org_id == org_id)
+    )
+    gate = gate_r.scalar_one_or_none()
+    if gate is None:
+        raise HTTPException(status_code=409, detail="publish gate not found")
+    try:
+        assert_not_self_approval(gate, actor, version.id)
+    except SelfApprovalError:
+        raise HTTPException(status_code=403, detail="self-approval forbidden: requester cannot approve own publish")
     try:
         # transition_gate 레일 재사용 → 직후 complete_publish 콜백(내부 특수분기 금지).
         gate = await transition_gate(session, org_id, version.review_gate_id, "approved", resolver_id=actor)

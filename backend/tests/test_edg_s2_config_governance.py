@@ -237,3 +237,34 @@ async def test_publish_flow_gate_and_active_flip():
         )).scalars().all()
         assert len(active) == 1 and active[0].version == v2.version
     await engine.dispose()
+
+
+@pytest.mark.skipif(not _REAL_DB_URL, reason="real Postgres 필요(PARITY/ALEMBIC_DATABASE_URL)")
+@pytest.mark.anyio
+async def test_allow_auto_disposition_publishes_immediately():
+    """org posture=permissive → disposition allow_auto → gate 'auto_passed' → 즉시 published.
+
+    SME blocking: create_gate 는 allow_auto 를 'auto_passed'(approved 아님)로 만든다 — request_publish
+    가 이 경로도 즉시 publish 확정해야 pending_review drift 가 없다.
+    """
+    from app.models.hitl_config import OrgGatePolicy
+    from app.services.workflow_line_config import create_draft, request_publish
+    from sqlalchemy import select
+    from app.models.workflow_line import WorkflowLineDefinition
+
+    engine, Session = await _make_engine_session()
+    org_id, member = uuid.uuid4(), uuid.uuid4()
+    async with Session() as session:
+        await _seed_default_role(session, org_id)
+        session.add(OrgGatePolicy(id=uuid.uuid4(), org_id=org_id, posture="permissive"))
+        await session.flush()
+        version = await create_draft(session, org_id, None, "story", _clean_config(), member)
+        version, gate = await request_publish(session, org_id, version, member)
+        assert gate.status == "auto_passed", f"expected auto_passed, got {gate.status}"
+        assert version.status == "published", f"allow_auto should publish immediately, got {version.status}"
+        active = (await session.execute(
+            select(WorkflowLineDefinition).where(
+                WorkflowLineDefinition.org_id == org_id, WorkflowLineDefinition.is_active.is_(True))
+        )).scalars().all()
+        assert len(active) == 1 and active[0].config_hash == version.config_hash
+    await engine.dispose()
