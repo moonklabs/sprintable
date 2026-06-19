@@ -19,16 +19,19 @@ Decision Gate(org-configurable 결재/핸드오프 라인)의 기반 스키마. 
   만들 때이며, 그때는 CONCURRENTLY(트랜잭션 밖) 로 친다 — 본 파일은 fresh-DB 경로라 일반
   CREATE INDEX 로 둔다.
 
-리뷰 확인 요청(AC가 명시하지 않아 코히어런스로 결정한 지점):
-- ``entity_type`` 을 모든 테이블에서 NOT NULL 로 둔다(AC는 definitions 에만 NN 명시). steps/
-  step_runs/versions 의 unique 제약에 entity_type 이 포함되는데, nullable 이면 NULL-distinct 로
-  unique 의도가 깨지므로 NN 으로 통일했다.
-- definitions / step_runs 의 partial unique 는 project_id·from_status 가 nullable 이라 Postgres
-  의 NULL-distinct 규칙상 "org-default(project_id NULL)" 또는 "from_status NULL" 행은 중복이
-  허용된다. AC 문구 그대로 구현했고, org-default 단일성을 강제하려면 COALESCE 표현식 인덱스가
-  필요하다 — 의도 확인 필요(S2 config 거버넌스에서 정리 가능).
+코히어런스 결정 + 산티아고 SME 리뷰(PR #1595) 반영:
+- ``entity_type`` 전 테이블 NOT NULL(SME 동의). unique 제약 포함 컬럼이라 nullable 이면
+  NULL-distinct 로 의도가 깨진다.
+- [SME #3] definitions active unique 는 단일 partial 로는 org-default(project_id NULL) 중복을
+  못 막는다(NULL-distinct) → ``IS NULL`` / ``IS NOT NULL`` split partial unique 두 개로 보강.
+  step_runs 의 from_status NULL 케이스는 Phase1(story-only) 범위라 현 partial unique 유지(추후
+  doc/virtual transition 도입 시 COALESCE/split 재검토 — SME 합의).
+- [SME #1] step_runs.mode 는 NOT NULL(S3 엔진 분기 SSOT·insert-contract).
+- [SME #2] spec 상 객체/배열인 JSONB 는 NOT NULL + server_default 로 통일(null-vs-empty 분기
+  제거): steps.metadata · step_runs.routing_context/trust_snapshot/risk_snapshot/quorum_policy ·
+  step_run_events.payload · role_assignments.delegation_policy/metadata.
 - table 8 ``workflow_delivery_outbox`` 는 AC done ①의 "(+8 optional)" 에 따라 additive 로 함께
-  생성한다(빈 테이블·무해·S7 핸드오프 relay 재마이그 회피). 실제 사용은 S7 에서
+  생성(빈 테이블·무해·S7 재마이그 회피·SME 동의). 실제 사용은 S7 에서
   dispatch_entity_to_assignee(commit=False) 가능 여부로 결정.
 
 Revision ID: 0126
@@ -99,9 +102,18 @@ def upgrade() -> None:
             sa.Column("config_hash", sa.Text(), nullable=True),
             *_timestamps(),
         )
+    # active 라인 single-source 보장. project_id 가 nullable 이라 단일 partial unique 로는
+    # Postgres NULL-distinct 규칙상 org-default(project_id NULL) 중복이 안 막힌다(SME #3).
+    # → IS NULL / IS NOT NULL 로 split:
+    #   org-default: (org_id, entity_type) 당 active 1개
     _create_index(
-        bind, "uq_wf_line_def_active", "workflow_line_definitions",
-        ["org_id", "project_id", "entity_type"], unique=True, where="is_active",
+        bind, "uq_wf_line_def_active_org", "workflow_line_definitions",
+        ["org_id", "entity_type"], unique=True, where="is_active AND project_id IS NULL",
+    )
+    #   project-override: (org_id, project_id, entity_type) 당 active 1개
+    _create_index(
+        bind, "uq_wf_line_def_active_proj", "workflow_line_definitions",
+        ["org_id", "project_id", "entity_type"], unique=True, where="is_active AND project_id IS NOT NULL",
     )
     _create_index(
         bind, "ix_wf_line_def_org_entity_active", "workflow_line_definitions",
@@ -158,7 +170,7 @@ def upgrade() -> None:
             sa.Column("sla_policy", JSONB(), server_default=sa.text("'{}'::jsonb"), nullable=False),
             sa.Column("approval_policy", JSONB(), server_default=sa.text("'{}'::jsonb"), nullable=False),
             sa.Column("recall_policy", JSONB(), server_default=sa.text("'{}'::jsonb"), nullable=False),
-            sa.Column("metadata", JSONB(), nullable=True),
+            sa.Column("metadata", JSONB(), server_default=sa.text("'{}'::jsonb"), nullable=False),
             *_timestamps(),
         )
     _create_index(
@@ -181,14 +193,16 @@ def upgrade() -> None:
             sa.Column("from_status", sa.Text(), nullable=True),
             sa.Column("to_status", sa.Text(), nullable=False),
             sa.Column("status", sa.Text(), server_default=sa.text("'pending'"), nullable=False),
-            sa.Column("mode", sa.Text(), nullable=True),
+            # mode = S3 엔진 분기 SSOT. NN(엔진이 insert 시점에 항상 분류해 제공 — correlation_id/
+            # transition_id 와 동일한 insert-contract). server_default 없음(enum에 'unset' 값 없음).
+            sa.Column("mode", sa.Text(), nullable=False),
             sa.Column("effective_step_type", sa.Text(), nullable=True),
             sa.Column("effective_gate_type", sa.Text(), nullable=True),
             sa.Column("routing_decision", sa.Text(), nullable=True),
             sa.Column("routing_reason", sa.Text(), nullable=True),
-            sa.Column("routing_context", JSONB(), nullable=True),
-            sa.Column("trust_snapshot", JSONB(), nullable=True),
-            sa.Column("risk_snapshot", JSONB(), nullable=True),
+            sa.Column("routing_context", JSONB(), server_default=sa.text("'{}'::jsonb"), nullable=False),
+            sa.Column("trust_snapshot", JSONB(), server_default=sa.text("'{}'::jsonb"), nullable=False),
+            sa.Column("risk_snapshot", JSONB(), server_default=sa.text("'{}'::jsonb"), nullable=False),
             sa.Column("resolved_member_id", UUID(as_uuid=True), nullable=True),
             sa.Column("resolved_member_type", sa.Text(), nullable=True),
             sa.Column("gate_id", UUID(as_uuid=True), nullable=True),
@@ -198,7 +212,7 @@ def upgrade() -> None:
             sa.Column("delivery_status", sa.Text(), server_default=sa.text("'not_required'"), nullable=False),
             sa.Column("delivery_error", sa.Text(), nullable=True),
             sa.Column("approval_group_id", UUID(as_uuid=True), nullable=True),
-            sa.Column("quorum_policy", JSONB(), nullable=True),
+            sa.Column("quorum_policy", JSONB(), server_default=sa.text("'{}'::jsonb"), nullable=False),
             sa.Column("sla_due_at", sa.DateTime(timezone=True), nullable=True),
             sa.Column("next_reminder_at", sa.DateTime(timezone=True), nullable=True),
             sa.Column("reminder_count", sa.Integer(), server_default=sa.text("0"), nullable=False),
@@ -292,7 +306,7 @@ def upgrade() -> None:
             sa.Column("event_type", sa.Text(), nullable=False),
             sa.Column("actor_member_id", UUID(as_uuid=True), nullable=True),
             sa.Column("target_member_id", UUID(as_uuid=True), nullable=True),
-            sa.Column("payload", JSONB(), nullable=True),
+            sa.Column("payload", JSONB(), server_default=sa.text("'{}'::jsonb"), nullable=False),
             sa.Column("correlation_id", UUID(as_uuid=True), nullable=False),
             sa.Column("created_at", sa.DateTime(timezone=True), server_default=sa.text("now()"), nullable=False),
         )
@@ -320,8 +334,8 @@ def upgrade() -> None:
             sa.Column("availability_status", sa.Text(), server_default=sa.text("'available'"), nullable=False),
             sa.Column("effective_from", sa.DateTime(timezone=True), nullable=True),
             sa.Column("effective_to", sa.DateTime(timezone=True), nullable=True),
-            sa.Column("delegation_policy", JSONB(), nullable=True),
-            sa.Column("metadata", JSONB(), nullable=True),
+            sa.Column("delegation_policy", JSONB(), server_default=sa.text("'{}'::jsonb"), nullable=False),
+            sa.Column("metadata", JSONB(), server_default=sa.text("'{}'::jsonb"), nullable=False),
             *_timestamps(),
         )
     _create_index(
