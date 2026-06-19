@@ -36,6 +36,8 @@ class DispatchResponse(BaseModel):
     # 7f8066a3: dispatched=False 사유 구분 → FE 가 no_assignee(담당자 미지정·info 안내)와
     # unresolved_assignee(신원 해소 실패·error)를 다르게 표시. additive·null default 하위호환.
     reason: str | None = None
+    # E-DG S7: commit=False 호출자가 commit 후 wake 하려면 recipient_seq 필요(agent). additive.
+    recipient_seq: int | None = None
 
 
 async def _fetch_entity(
@@ -82,6 +84,7 @@ async def dispatch_entity_to_assignee(
     message: str | None = None,
     trigger_metadata: dict[str, Any] | None = None,
     sender_id: uuid.UUID | None = None,
+    commit: bool = True,
 ) -> tuple[DispatchResponse, dict[str, Any] | None]:
     """entity의 assignee에게 dispatched 이벤트 생성 + 알림 전달 + (agent) wake.
 
@@ -166,20 +169,24 @@ async def dispatch_entity_to_assignee(
             reference_id=entity_id,
         )
 
-    await db.commit()  # commit 후 seq 확정
-
-    # agent: commit 후 wake (gateway_seq 확정 보장, 이중전달 방지)
-    if member_type == "agent":
-        if event.recipient_seq is not None:
-            wake_agent(str(assignee_id), event.recipient_seq)
-        else:
-            _push_to_agent(str(assignee_id), _event_to_payload(event))
+    # E-DG S7: commit=False면 호출자 트랜잭션에 합류 — 여기서 commit/wake 하지 않는다(P1-2
+    # partial-failure 방지). 호출자가 status/step_run/event 를 한 트랜잭션으로 commit 한 뒤 wake 한다
+    # (recipient_seq 확정 commit 후 wake 불변식). event.id/recipient_seq 는 위 flush 로 이미 확정.
+    if commit:
+        await db.commit()  # commit 후 seq 확정
+        # agent: commit 후 wake (gateway_seq 확정 보장, 이중전달 방지)
+        if member_type == "agent":
+            if event.recipient_seq is not None:
+                wake_agent(str(assignee_id), event.recipient_seq)
+            else:
+                _push_to_agent(str(assignee_id), _event_to_payload(event))
 
     response = DispatchResponse(
         dispatched=True,
         event_id=event.id,
         assignee_id=assignee_id,
         assignee_type=member_type,
+        recipient_seq=event.recipient_seq,
         reason="ok",
     )
     # 1f01c1ad: CC 릴레이(member webhook) 주입 파라미터 — 호출자가 스케줄(라우터=background_tasks).

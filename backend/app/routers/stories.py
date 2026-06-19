@@ -643,9 +643,39 @@ async def update_story_status(
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
 
+    # E-DG S7: agent-handoff relay — status 적용 후 같은 트랜잭션에서 dispatch(commit=False)·step_run
+    # delivery 기록(원자). wake/CC delivery 는 commit(아래) 후 recipient_seq 확정 후 발화(P1-2 불변식).
+    # relay 실패도 전이 비차단(fail-open).
+    _relay_wake = None
+    _relay_sr_id = (
+        _line_decision.relay_step_run_id
+        if (story_before is not None and _line_decision is not None) else None
+    )
+    if _relay_sr_id is not None:
+        from app.services.workflow_line_resolution import relay_agent_handoff
+        try:
+            _relay_wake = await relay_agent_handoff(db, _relay_sr_id, sender_id=_line_actor_id)
+        except Exception:  # noqa: BLE001 — relay 실패도 전이 비차단(fail-open).
+            _relay_wake = None
+
     # status 변경을 side effects 실행 전에 먼저 commit — process_event/webhook
     # 내부 DB 에러가 트랜잭션을 aborted 상태로 만들어 status 변경까지 rollback하는 버그 방지
     await db.commit()
+
+    # E-DG S7: relay wake — commit(recipient_seq 확정) 후 agent wake + CC delivery 발화(이중전달 방지).
+    if _relay_wake is not None:
+        _aw = _relay_wake.get("agent_wake")
+        if _aw:
+            wake_agent(_aw["recipient_id"], _aw["recipient_seq"])
+        _dl = _relay_wake.get("delivery")
+        if _dl:
+            from app.services.conversation_webhook import deliver_injected_event_webhook
+            background_tasks.add_task(
+                deliver_injected_event_webhook,
+                org_id=_dl["org_id"], recipient_id=_dl["recipient_id"], content=_dl["content"],
+                event_type=_dl["event_type"], source_entity_type=_dl["source_entity_type"],
+                source_entity_id=_dl["source_entity_id"],
+            )
 
     # S-C2: 모든 스토리 업데이트에서 actor resolve — status 변경 여부와 무관하게 공통 적용
     actor_id: uuid.UUID | None = None
