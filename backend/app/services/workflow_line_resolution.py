@@ -164,12 +164,19 @@ async def relay_agent_handoff(
         "to_status": sr.to_status,
         "correlation_id": str(sr.correlation_id),
     }
+    # ⭐P0-3 fail-open: dispatch 호출을 SAVEPOINT(begin_nested)로 격리. dispatch 내부 DB 예외
+    # (event flush·assign_recipient_seq·notification·L1)가 outer 트랜잭션을 aborted 로 poison하면,
+    # 예외를 catch 해도 이후 dead_letter 기록·라우터 db.commit() 가 PendingRollbackError 로 깨져
+    # status 전이까지 막힌다(S3 [[feedback_savepoint_failopen_session_poison]] 동류·SME 적출). savepoint
+    # 면 dispatch 실패가 nested tx 로만 롤백되고 outer 는 살아있어 dead_letter 기록·전이가 진행된다.
     try:
-        resp, delivery = await dispatch_entity_to_assignee(
-            session, sr.org_id, sr.entity_type, sr.entity_id,
-            trigger_metadata=trigger_metadata, sender_id=sender_id, commit=False,
-        )
+        async with session.begin_nested():
+            resp, delivery = await dispatch_entity_to_assignee(
+                session, sr.org_id, sr.entity_type, sr.entity_id,
+                trigger_metadata=trigger_metadata, sender_id=sender_id, commit=False,
+            )
     except Exception as exc:  # noqa: BLE001 — ⭐relay 실패도 전이 비차단(fail-open)·가시화.
+        # savepoint rollback 으로 outer 트랜잭션 보존됨 → dead_letter 기록이 성공한다.
         sr.delivery_status = "dead_letter"
         sr.delivery_error = f"dispatch_create: {str(exc)[:400]}"
         sr.failure_class = "dispatch_exception"

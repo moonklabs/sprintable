@@ -135,6 +135,34 @@ async def test_relay_exception_failopen_dead_letter():
     await engine.dispose()
 
 
+@pytest.mark.skipif(not _REAL_DB_URL, reason="real Postgres 필요")
+@pytest.mark.anyio
+async def test_relay_db_poison_isolated_by_savepoint():
+    """⭐SME blocking 회귀(S3 동류): dispatch 중 DB 예외가 outer 트랜잭션을 poison하면 안 된다.
+    SAVEPOINT 격리로 outer tx 보존 → dead_letter 기록 + 후속 commit 성공(전이 비차단)."""
+    import sqlalchemy as sa
+    from app.services.workflow_line_resolution import relay_agent_handoff
+    from app.models.workflow_line import WorkflowLineStepRun
+    from sqlalchemy import select
+    engine, Session = await _session()
+    async with Session() as s:
+        org = uuid.uuid4()
+        sr = await _seed_step_run(s, org)
+
+        async def _poison(*a, **k):
+            await s.execute(sa.text("SELECT 1/0"))  # DB 에러 → 서브트랜잭션 abort
+
+        with patch("app.services.agent_dispatch.dispatch_entity_to_assignee", side_effect=_poison):
+            wake = await relay_agent_handoff(s, sr.id)  # ⭐예외도 raise 안 함
+        assert wake is None
+        row = (await s.execute(select(WorkflowLineStepRun).where(WorkflowLineStepRun.id == sr.id))).scalar_one()
+        assert row.delivery_status == "dead_letter"
+        # ⭐outer tx 살아있음: 후속 read/write/commit 성공(poison이면 PendingRollbackError)
+        assert (await s.execute(sa.text("SELECT 1"))).scalar() == 1
+        await s.commit()
+    await engine.dispose()
+
+
 # ── 엔진 relay 플래그 (enforcing agent-handoff만) ────────────────────────────
 @pytest.mark.skipif(not _REAL_DB_URL, reason="real Postgres 필요")
 @pytest.mark.anyio
