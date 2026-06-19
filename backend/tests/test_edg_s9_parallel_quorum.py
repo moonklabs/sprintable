@@ -46,7 +46,8 @@ async def _seed_step_run(s, org):
         org_id=org, project_id=proj, entity_type="story", entity_id=uuid.uuid4(),
         from_status="in-review", to_status="done", status="gate_pending", mode="gate_pending",
         correlation_id=uuid.uuid4(), transition_id=uuid.uuid4().hex)
-    s.add(sr); await s.flush()
+    s.add(sr)
+    await s.flush()
     return sr
 
 
@@ -160,6 +161,37 @@ async def test_quorum_count_threshold():
     await engine.dispose()
 
 
+# ── terminal 멱등: late decision skip(row 불변) ─────────────────────────────
+@pytest.mark.skipif(not _REAL_DB_URL, reason="real Postgres 필요")
+@pytest.mark.anyio
+async def test_late_decision_after_terminal_skipped_row_unchanged():
+    from app.services.workflow_parallel_approval import create_parallel_gate, record_parallel_decision
+    from app.models.gate import Gate
+    from sqlalchemy import select
+    from app.models.workflow_line import WorkflowLineStepApproval
+    engine, Session = await _session()
+    async with Session() as s:
+        org = uuid.uuid4()
+        sr = await _seed_step_run(s, org)
+        a1, a2 = _approver(), _approver()
+        gate, group = await create_parallel_gate(
+            s, sr, approvers=[a1, a2], quorum={"type": "any"},
+            member_id=uuid.uuid4(), role_id=uuid.uuid4())
+        ids = {r.approver_member_id: r.id for r in (await s.execute(select(WorkflowLineStepApproval).where(
+            WorkflowLineStepApproval.approval_group_id == group))).scalars().all()}
+        # a1 approve → quorum any 충족 → gate approved
+        assert (await record_parallel_decision(s, ids[a1["member_id"]], "approved", a1["member_id"]))["outcome"] == "approved"
+        # ⭐a2 의 late reject → gate terminal 이라 skip·row 불변(rejected 로 안 바뀜)·gate 유지
+        late = await record_parallel_decision(s, ids[a2["member_id"]], "rejected", a2["member_id"])
+        assert late["skipped"] is True and late["outcome"] == "approved"
+        a2_row = (await s.execute(select(WorkflowLineStepApproval).where(
+            WorkflowLineStepApproval.id == ids[a2["member_id"]]))).scalar_one()
+        assert a2_row.status == "pending" and a2_row.resolved_at is None  # mutate 안 됨
+        g = (await s.execute(select(Gate).where(Gate.id == gate.id))).scalar_one()
+        assert g.status == "approved"  # 그대로
+    await engine.dispose()
+
+
 # ── any_reject_blocks ───────────────────────────────────────────────────────
 @pytest.mark.skipif(not _REAL_DB_URL, reason="real Postgres 필요")
 @pytest.mark.anyio
@@ -250,7 +282,8 @@ async def test_sod_guard_at_resolution_and_foreign_resolver():
             org_id=org, project_id=sr.project_id, step_run_id=sr.id, gate_id=uuid.uuid4(),
             approval_group_id=uuid.uuid4(), approver_member_id=requester, approver_member_type="human",
             requested_by_member_id=requester, kind="approver", blocking=True, status="pending")
-        s.add(appr); await s.flush()
+        s.add(appr)
+        await s.flush()
         # ⭐해소 시 SoD: resolver(=approver=requester) == requested_by → 거부
         with pytest.raises(SelfApprovalError):
             await record_parallel_decision(s, appr.id, "approved", requester)
@@ -259,7 +292,8 @@ async def test_sod_guard_at_resolution_and_foreign_resolver():
             org_id=org, project_id=sr.project_id, step_run_id=sr.id, gate_id=uuid.uuid4(),
             approval_group_id=uuid.uuid4(), approver_member_id=uuid.uuid4(), approver_member_type="human",
             kind="approver", blocking=True, status="pending")
-        s.add(appr2); await s.flush()
+        s.add(appr2)
+        await s.flush()
         with pytest.raises(SelfApprovalError):
             await record_parallel_decision(s, appr2.id, "approved", uuid.uuid4())
     await engine.dispose()
