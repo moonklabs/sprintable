@@ -172,6 +172,12 @@ async def evaluate_line_for_transition(
         if mode == "off":
             return _plain()
 
+        # S19(P0-5): grandfather — enable 전 in-flight story 의 첫 transition 은 새 gate 에 안 갇히게
+        # 비차단 통과(marker 소비·다음 transition 부터 거버닝). board freeze 0(AC①④).
+        from app.services.workflow_grandfather import consume_grandfather
+        if await consume_grandfather(session, org_id, entity_type, entity_id, from_status, to_status):
+            return _plain()
+
         step = _match_step(config, from_status, to_status)
         if step is None:
             return _plain()  # 이 전이를 거버닝하는 step 없음 → plain

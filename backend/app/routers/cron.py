@@ -168,6 +168,35 @@ async def workflow_sla(
         return _err("INTERNAL_ERROR", "Internal server error", 500)
 
 
+# ─── GET /api/v2/internal/cron/workflow-grandfather-backfill ──────────────────
+# E-DG S19(P0-5): line enable 시점 in-flight story grandfather backfill(read-only·Gate 0·
+# idempotent). allowlist(=명시 enable) org 만 대상. board freeze 0.
+
+@router.get("/workflow-grandfather-backfill")
+async def workflow_grandfather_backfill(
+    request: Request,
+    session: AsyncSession = Depends(get_db),
+) -> JSONResponse:
+    verify_cron(request)
+    try:
+        from app.core.config import settings
+        from app.services.workflow_grandfather import backfill_grandfather
+        orgs: list[uuid.UUID] = []
+        for x in (settings.decision_gate_line_org_allowlist or "").split(","):
+            x = x.strip()
+            if not x:
+                continue
+            try:
+                orgs.append(uuid.UUID(x))
+            except ValueError:
+                continue
+        results = {str(oid): await backfill_grandfather(session, oid) for oid in orgs}
+        return _ok({"orgs": len(orgs), "results": results})
+    except Exception as exc:
+        logger.exception("cron error: %s", exc)
+        return _err("INTERNAL_ERROR", "Internal server error", 500)
+
+
 # ─── GET /api/v2/internal/cron/inbox-outbox ────────────────────────────────────
 
 @router.get("/inbox-outbox")
