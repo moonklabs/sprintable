@@ -166,3 +166,39 @@ async def test_engine_grandfathered_first_transition_not_blocked(monkeypatch):
             from_status="in-progress", to_status="in-review")
         assert d2.mode == "advisory_only" and d2.step_run_id is not None  # 거버닝됨
     await engine.dispose()
+
+
+@pytest.mark.skipif(not _REAL_DB_URL, reason="real Postgres 필요")
+@pytest.mark.anyio
+async def test_duplicate_markers_consume_closes_all_plain_exactly_once(monkeypatch):
+    """⭐SME 회귀: 동시 backfill 로 duplicate open marker 2개여도 첫 transition 이 전부 close →
+    plain 정확히 1회(이후 transition 은 거버닝). consume all-open close 검증."""
+    from app.services.workflow_line_engine import evaluate_line_for_transition
+    from app.models.workflow_line import WorkflowLineStepRun
+    engine, Session = await _session()
+    async with Session() as s:
+        org = uuid.uuid4()
+        _set(monkeypatch, enabled=True, allowlist=str(org), mode="enforcing")
+        await _seed_line(s, org, "enforcing", from_status="in-progress", to_status="in-review",
+                         step_type="agent-handoff")
+        sid = await _story(s, org, "in-progress")
+        # 동시 cron 모사: duplicate open marker 2개 직접 삽입
+        for _ in range(2):
+            s.add(WorkflowLineStepRun(
+                org_id=org, project_id=uuid.uuid4(), entity_type="story", entity_id=sid,
+                from_status="in-progress", to_status="in-progress", status="grandfathered",
+                mode="advisory_only", correlation_id=uuid.uuid4(), transition_id=uuid.uuid4().hex))
+        await s.commit()
+
+        d1 = await evaluate_line_for_transition(
+            s, org_id=org, project_id=None, entity_type="story", entity_id=sid,
+            from_status="in-progress", to_status="in-review")
+        assert d1.mode == "plain_transition"  # 첫 transition grandfather(비차단)
+        assert len(await _markers(s, org, sid, "grandfathered")) == 0  # ⭐둘 다 closed
+        assert len(await _markers(s, org, sid, "grandfathered_applied")) == 2
+        # 2nd transition: open marker 0 → grandfather plain 아님·정상 거버닝
+        d2 = await evaluate_line_for_transition(
+            s, org_id=org, project_id=None, entity_type="story", entity_id=sid,
+            from_status="in-progress", to_status="in-review")
+        assert d2.mode == "advisory_only" and d2.step_run_id is not None
+    await engine.dispose()

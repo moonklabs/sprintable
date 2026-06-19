@@ -12,7 +12,8 @@ freeze 나지 않게:
 import uuid
 from datetime import datetime, timezone
 
-from sqlalchemy import select
+import sqlalchemy as sa
+from sqlalchemy import select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models.pm import Story
@@ -52,6 +53,13 @@ async def backfill_grandfather(
     if await resolve_runtime_mode(session, org_id, now) == "off":
         return {"grandfathered": 0, "gate_created": 0, "scanned": 0, "skipped_disabled": 1}
 
+    # ⭐동시 cron 직렬화(SME): org 단위 tx-scoped advisory lock 으로 check-then-insert TOCTOU 차단
+    # → duplicate open marker 0(commit 시 자동 해제·S8 동시성 동류). 두 번째 cron 은 대기 후 idempotent skip.
+    await session.execute(
+        sa.text("SELECT pg_advisory_xact_lock(hashtext(:k))"),
+        {"k": f"wf_grandfather:{org_id}"},
+    )
+
     stories = (await session.execute(
         select(Story).where(
             Story.org_id == org_id,
@@ -87,19 +95,18 @@ async def consume_grandfather(
     """
     if entity_type != "story":
         return False
-    marker = (await session.execute(
-        select(WorkflowLineStepRun).where(
+    # ⭐open marker 를 limit(1) 아니라 **전부** atomic 하게 close(SME): backfill 중복이 있어도 첫
+    # transition 에서 모두 applied 로 닫혀 plain 은 정확히 1회만(이후 transition 은 open 0→정상 거버닝).
+    res = await session.execute(
+        update(WorkflowLineStepRun)
+        .where(
             WorkflowLineStepRun.org_id == org_id,
             WorkflowLineStepRun.entity_type == "story",
             WorkflowLineStepRun.entity_id == entity_id,
             WorkflowLineStepRun.status == _GRANDFATHER_MARKER,
-        ).order_by(WorkflowLineStepRun.started_at.desc()).limit(1).with_for_update()
-    )).scalar_one_or_none()
-    if marker is None:
-        return False
-    marker.status = _GRANDFATHER_APPLIED
-    marker.from_status = from_status
-    marker.to_status = to_status
-    marker.resolved_at = _now()
+        )
+        .values(status=_GRANDFATHER_APPLIED, from_status=from_status, to_status=to_status,
+                resolved_at=_now())
+    )
     await session.flush()
-    return True
+    return (res.rowcount or 0) > 0
