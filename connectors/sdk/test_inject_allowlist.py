@@ -12,7 +12,12 @@ import sys
 import pytest
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
-from sprintable_sse import INJECTABLE_EVENT_TYPES, SprintableSSEClient  # noqa: E402
+from sprintable_sse import (  # noqa: E402
+    INJECTABLE_EVENT_TYPES,
+    MessageImage,
+    SprintableSSEClient,
+    _normalize_images,
+)
 
 
 @pytest.fixture
@@ -95,3 +100,115 @@ def test_adapter_vendored_allowlist_matches_sdk(adapter):
     here = os.path.dirname(os.path.abspath(__file__))
     adapter_path = os.path.join(here, "..", adapter, "adapter.py")
     assert _vendored_allowlist(adapter_path) == set(INJECTABLE_EVENT_TYPES)
+
+
+# ── 39e0a69e: webhook payload images[] consume ───────────────────────────────
+# BE(#1588) emits images:[{url(signed V4),name,mime}] alongside content.  The
+# SDK surfaces them as MessageContext.images so SDK-based connectors can fetch
+# and route them to a multimodal model instead of dropping them on the floor.
+def test_normalize_images_happy_path():
+    imgs = _normalize_images([
+        {"url": "https://x/a.jpg", "name": "a.jpg", "mime": "image/jpeg"},
+        {"url": "https://x/b.png", "name": "b.png", "mime": "image/png"},
+    ])
+    assert imgs == [
+        MessageImage(url="https://x/a.jpg", name="a.jpg", mime="image/jpeg"),
+        MessageImage(url="https://x/b.png", name="b.png", mime="image/png"),
+    ]
+
+
+def test_normalize_images_non_list_returns_empty():
+    for bad in (None, "https://x/a.jpg", {"url": "x"}, 42):
+        assert _normalize_images(bad) == []
+
+
+def test_normalize_images_skips_garbage_items():
+    imgs = _normalize_images([
+        "not-a-dict",
+        {"name": "no-url"},          # missing url → skip
+        {"url": "   "},              # blank url → skip
+        {"url": "https://x/ok.gif", "mime": "image/gif"},
+    ])
+    assert imgs == [MessageImage(url="https://x/ok.gif", name="", mime="image/gif")]
+
+
+def test_normalize_images_filters_non_image_mime():
+    imgs = _normalize_images([
+        {"url": "https://x/doc.pdf", "mime": "application/pdf"},
+        {"url": "https://x/p.png", "mime": "image/png"},
+    ])
+    assert imgs == [MessageImage(url="https://x/p.png", name="", mime="image/png")]
+
+
+def test_normalize_images_accepts_mime_type_alias():
+    imgs = _normalize_images([{"url": "https://x/a.webp", "mime_type": "image/webp"}])
+    assert imgs == [MessageImage(url="https://x/a.webp", name="", mime="image/webp")]
+
+
+@pytest.mark.anyio
+async def test_image_only_message_is_injected():
+    # content 없어도 image 첨부가 있으면 work-turn으로 주입돼야 함 (AC: image-only inject)
+    c = SprintableSSEClient(api_key="x")
+    data = json.dumps({
+        "event_type": "conversation.message_created",
+        "content": "",
+        "event_id": "evt-img-only",
+        "images": [{"url": "https://x/a.jpg", "name": "a.jpg", "mime": "image/jpeg"}],
+    })
+    ctx = await c._parse_event("message", "10", data)
+    assert ctx is not None
+    assert ctx.content == ""
+    assert ctx.images == [MessageImage(url="https://x/a.jpg", name="a.jpg", mime="image/jpeg")]
+
+
+@pytest.mark.anyio
+async def test_text_plus_images_surfaces_both():
+    c = SprintableSSEClient(api_key="x")
+    data = json.dumps({
+        "event_type": "dispatched",
+        "content": "look at this",
+        "event_id": "evt-txt-img",
+        "images": [{"url": "https://x/a.png", "mime": "image/png"}],
+    })
+    ctx = await c._parse_event("message", "11", data)
+    assert ctx is not None
+    assert ctx.content == "look at this"
+    assert len(ctx.images) == 1 and ctx.images[0].url == "https://x/a.png"
+
+
+@pytest.mark.anyio
+async def test_text_only_has_empty_images_no_regression():
+    # AC5 무회귀: 이미지 없는 텍스트 메시지는 images == [] 로 정상 주입
+    c = SprintableSSEClient(api_key="x")
+    ctx = await c._parse_event("message", "12", _data("dispatched"))
+    assert ctx is not None
+    assert ctx.images == []
+
+
+@pytest.mark.anyio
+async def test_images_nested_in_payload_surfaced():
+    c = SprintableSSEClient(api_key="x")
+    data = json.dumps({
+        "event_type": "dispatched",
+        "event_id": "evt-payload-img",
+        "payload": {
+            "content": "",
+            "images": [{"url": "https://x/n.jpg", "mime": "image/jpeg"}],
+        },
+    })
+    ctx = await c._parse_event("message", "13", data)
+    assert ctx is not None
+    assert len(ctx.images) == 1 and ctx.images[0].url == "https://x/n.jpg"
+
+
+@pytest.mark.anyio
+async def test_non_image_attachment_only_is_dropped():
+    # 이미지가 아닌 mime만 있고 content도 없으면 normalize 후 images==[] → 드롭
+    c = SprintableSSEClient(api_key="x")
+    data = json.dumps({
+        "event_type": "dispatched",
+        "content": "",
+        "event_id": "evt-nonimg",
+        "images": [{"url": "https://x/doc.pdf", "mime": "application/pdf"}],
+    })
+    assert await c._parse_event("message", "14", data) is None
