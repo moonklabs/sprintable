@@ -182,3 +182,26 @@ class WorkflowLineStepApproval(Base):
     updated_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now(), onupdate=func.now(), nullable=False
     )
+
+
+# S13 SLA processor 가 기록하는 append-only audit event type.
+STEP_RUN_EVENT_TYPES = frozenset({
+    "status_apply", "dispatch_create", "wake", "reminded", "escalated", "sla_timeout", "auto_approved",
+})
+
+
+class WorkflowLineStepRunEvent(Base):
+    """step_run 의 append-only audit event(0126 미러). S13 reminder/escalation/timeout 기록."""
+
+    __tablename__ = "workflow_step_run_events"
+
+    id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    org_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), nullable=False)
+    project_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), nullable=False)
+    step_run_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), nullable=False)
+    event_type: Mapped[str] = mapped_column(Text, nullable=False)
+    actor_member_id: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True), nullable=True)
+    target_member_id: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True), nullable=True)
+    payload: Mapped[dict] = mapped_column(JSONB, nullable=False, server_default="{}")
+    correlation_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), nullable=False)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), nullable=False)
