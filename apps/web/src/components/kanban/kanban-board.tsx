@@ -23,7 +23,7 @@ import { KanbanListView } from './kanban-list-view';
 import { KanbanSkeleton } from './kanban-skeleton';
 import { StoryDetailPanel } from './story-detail-panel';
 import { StoryCard } from './story-card';
-import { COLUMNS, VALID_TRANSITIONS, type KanbanStory, type KanbanSprint, type KanbanEpic, type KanbanMember, type ColumnId, type DependencyEdge, type GateItem } from './types';
+import { COLUMNS, VALID_TRANSITIONS, type KanbanStory, type KanbanSprint, type KanbanEpic, type KanbanMember, type ColumnId, type DependencyEdge, type GateItem, type LineStatusSummary } from './types';
 import type { LabelData } from '@/components/ui/label-chip';
 
 type DragOverlayCompatProps = {
@@ -172,6 +172,7 @@ export function KanbanBoard({ projectId }: KanbanBoardProps) {
   const [selectedLabelIds, setSelectedLabelIds] = useState<string[]>([]);
   const [labelSearch, setLabelSearch] = useState('');
   const [storyGatesMap, setStoryGatesMap] = useState<Record<string, { id: string; gate_type: string; status: string }[]>>({});
+  const [storyLineMap, setStoryLineMap] = useState<Record<string, LineStatusSummary>>({});
 
   const [selectedStory, setSelectedStory] = useState<KanbanStory | null>(null);
   const selectedStoryRef = useRef<KanbanStory | null>(null);
@@ -267,6 +268,24 @@ export function KanbanBoard({ projectId }: KanbanBoardProps) {
           }
         } catch {
           // non-critical — skip silently
+        }
+      }
+
+      // S11 ①: workflow-line 상태 배치(보드 카드 badge)·N+1 0(1 fetch/200건·chunk·silent 캡 없음). storyIds 기준.
+      if (storyIds.length > 0) {
+        try {
+          const chunks: string[][] = [];
+          for (let i = 0; i < storyIds.length; i += 200) chunks.push(storyIds.slice(i, i + 200));
+          const results = await Promise.all(chunks.map((chunk) =>
+            fetch(`/api/stories/workflow-line/status?ids=${chunk.join(',')}`)
+              .then((r) => (r.ok ? (r.json() as Promise<LineStatusSummary[]>) : []))
+              .catch(() => []),
+          ));
+          const lmap: Record<string, LineStatusSummary> = {};
+          for (const arr of results) for (const s of arr) lmap[s.story_id] = s;
+          setStoryLineMap(lmap);
+        } catch {
+          // non-critical — line badge 없으면 카드는 기존대로 렌더.
         }
       }
 
@@ -1191,6 +1210,7 @@ export function KanbanBoard({ projectId }: KanbanBoardProps) {
                     blockedByMap={blockedByMap}
                     storyLabelsMap={storyLabelsMap}
                     storyGatesMap={storyGatesMap}
+                    storyLineMap={storyLineMap}
                     totalCount={filterActive ? colStories.length : columnTotals[col.id]}
                     hasMore={filterActive ? false : !!columnCursors[col.id]}
                     loadingMore={loadingMoreColumns[col.id] ?? false}
@@ -1211,6 +1231,7 @@ export function KanbanBoard({ projectId }: KanbanBoardProps) {
                     assignee={activeStory.assignee_id ? memberMap[activeStory.assignee_id] : undefined}
                     assignees={(activeStory.assignee_ids ?? []).flatMap((id) => memberMap[id] ? [memberMap[id]] : [])}
                     onClick={() => {}}
+                    lineStatus={storyLineMap[activeStory.id]}
                   />
                 </div>
               )}

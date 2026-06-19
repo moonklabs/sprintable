@@ -1,7 +1,7 @@
 'use client';
 
 import { useTranslations } from 'next-intl';
-import { ArrowRight, CheckCircle, Circle, Clock, XCircle } from 'lucide-react';
+import { ArrowRight, CheckCircle, Circle, Clock, EyeOff, XCircle } from 'lucide-react';
 import type { WorkflowLineStepRun } from '@/components/kanban/types';
 
 /**
@@ -102,6 +102,14 @@ export function GateLineContext({ step, resolveName, className }: GateLineContex
             />
           ))}
         </div>
+      ) : null}
+
+      {/* ⑤ engine_degraded/grandfathered: BE observability_note 렌더(하드코딩X)·null/빈값=중립 폴백 */}
+      {step.engine_degraded || step.grandfathered ? (
+        <p className="flex items-start gap-1 pt-0.5 text-[10px] text-muted-foreground/80">
+          <EyeOff className="mt-0.5 size-3 shrink-0" />
+          <span>{step.observability_note?.trim() || t('lineObservabilityFallback')}</span>
+        </p>
       ) : null}
     </div>
   );

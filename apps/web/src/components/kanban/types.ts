@@ -116,6 +116,19 @@ export interface WorkflowLineStatus {
   history: WorkflowLineHistoryItem[];
 }
 
+// E-DG S11 ① — 보드 카드 badge용 경량 요약(BE LineStatusSummary·배치 `?ids=` 1쿼리·N+1 0).
+// StepRunView 아님(observability_note·approvers 등 미포함 — 카드 badge는 flag+status만 필요).
+export interface LineStatusSummary {
+  story_id: string;
+  has_active: boolean;
+  mode: string | null;
+  status: string | null;
+  engine_degraded: boolean;
+  grandfathered: boolean;
+  handoff_stuck: boolean; // = delivery_status === 'timed_out'(S8 watchdog)
+  delivery_status: string | null;
+}
+
 export interface DependencyEdge {
   id: string;
   from_id: string;
