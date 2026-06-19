@@ -85,6 +85,18 @@ class WorkflowLineStatusResponse(BaseModel):
     history: list[HistoryItem] = []
 
 
+class LineStatusSummary(BaseModel):
+    """보드 카드 badge 용 경량 요약(배치). full StepRunView/history 없이 flag 만."""
+    story_id: uuid.UUID
+    has_active: bool
+    mode: str | None = None
+    status: str | None = None
+    engine_degraded: bool = False
+    grandfathered: bool = False
+    handoff_stuck: bool = False
+    delivery_status: str | None = None
+
+
 def _degraded_flags(run: WorkflowLineStepRun) -> tuple[bool, bool, str | None]:
     """(engine_degraded, grandfathered, note) 도출."""
     engine_degraded = bool(run.degraded_to_plain) or (run.failure_class in _DEGRADED_FAILURE_CLASSES)
@@ -196,3 +208,42 @@ async def build_workflow_line_status(
         h1_evidence=h1_evidence, approvers=approvers, last_event=last_event,
     )
     return WorkflowLineStatusResponse(story_id=story_id, has_active=True, active=view)
+
+
+async def build_workflow_line_status_batch(
+    session: AsyncSession, org_id: uuid.UUID, story_ids: list[uuid.UUID],
+) -> list[LineStatusSummary]:
+    """여러 story 의 line-status 경량 요약(보드 badge 용). 단일 쿼리·N+1 0.
+
+    ⭐active-only(open status) + entity_id IN (ids) 1쿼리(unbounded .all() 금지·ids 가 bound·S10 교훈).
+    story 당 가장 최근 active run 1건으로 요약하고, run 없는 story 는 has_active=False 로 반환한다.
+    handoff_stuck = delivery_status=='timed_out'(S8 watchdog 가 stuck 을 timed_out 으로 기록).
+    """
+    if not story_ids:
+        return []
+    rows = (await session.execute(
+        select(WorkflowLineStepRun).where(
+            WorkflowLineStepRun.org_id == org_id,
+            WorkflowLineStepRun.entity_type == "story",
+            WorkflowLineStepRun.entity_id.in_(story_ids),
+            WorkflowLineStepRun.status.in_(_OPEN_STEP_RUN_STATUSES),
+        ).order_by(WorkflowLineStepRun.started_at.desc())
+    )).scalars().all()
+
+    latest: dict[uuid.UUID, WorkflowLineStepRun] = {}
+    for r in rows:  # started_at desc → story 당 첫 등장이 최신
+        latest.setdefault(r.entity_id, r)
+
+    out: list[LineStatusSummary] = []
+    for sid in story_ids:
+        r = latest.get(sid)
+        if r is None:
+            out.append(LineStatusSummary(story_id=sid, has_active=False))
+            continue
+        engine_degraded, grandfathered, _ = _degraded_flags(r)
+        out.append(LineStatusSummary(
+            story_id=sid, has_active=True, mode=r.mode, status=r.status,
+            engine_degraded=engine_degraded, grandfathered=grandfathered,
+            handoff_stuck=(r.delivery_status == "timed_out"), delivery_status=r.delivery_status,
+        ))
+    return out
