@@ -96,6 +96,9 @@ export interface WorkflowLineStepRun {
   h1_evidence: WorkflowLineH1Evidence | null;
   approvers: WorkflowLineApprover[];
   last_event: WorkflowLineLastEvent | null;
+  // E-DG S12 갭1: 막힌 recipient agent(id/name). 디디 BE status 노출 시 채워짐(additive·forward-compat).
+  // ⚠️ 정확 필드명은 디디 BE 계약 확정 후 정합 필요(provisional). 미노출 시 FE "에이전트" 폴백.
+  recipient_agent?: { id: string; name: string } | null;
 }
 
 export interface WorkflowLineHistoryItem {
