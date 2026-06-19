@@ -28,6 +28,7 @@ from app.models.workflow_line import (
     WorkflowLineDefinitionVersion,
     WorkflowLineStepRun,
 )
+from app.services.workflow_line_resolver import resolve_routing_context
 
 _TERMINAL_PROCEED_MODES = frozenset({"plain_transition", "advisory_only", "engine_failed"})
 
@@ -129,6 +130,14 @@ async def evaluate_line_for_transition(
         if step is None:
             return _plain()  # 이 전이를 거버닝하는 step 없음 → plain
 
+        # S4: routing_context + trust snapshot 구성. ⭐step_run insert *전에* 계산한다
+        # (trust-before-capture — autoflush 가 pending step_run 을 trust 쿼리에 끌어들이는 것 방지).
+        # resolver 예외도 바깥 try/except 가 잡아 engine_failed→plain 으로 degrade(fail-open 유지).
+        routing_context = await resolve_routing_context(
+            session, org_id, entity_type=entity_type, entity_id=entity_id, actor_member_id=actor_id,
+        )
+        trust_snapshot = routing_context.get("trust") if isinstance(routing_context, dict) else None
+
         # enforcing + 정적 policy block → blocked_by_policy(전이 차단·예외 아님·⑤).
         if mode == "enforcing" and step.get("enforcement") == "block":
             step_run = await _record_step_run(
@@ -136,6 +145,7 @@ async def evaluate_line_for_transition(
                 entity_type=entity_type, entity_id=entity_id, from_status=from_status,
                 to_status=to_status, status="blocked_by_policy", run_mode="blocked_by_policy",
                 routing_decision="block", routing_reason="static policy block",
+                routing_context=routing_context, trust_snapshot=trust_snapshot,
                 transition_id=transition_id, correlation_id=correlation_id,
             )
             return LineDecision(
@@ -151,6 +161,7 @@ async def evaluate_line_for_transition(
             to_status=to_status, status="routing_resolved", run_mode="advisory_only",
             routing_decision="would_" + str(step.get("step_type") or "advisory"),
             routing_reason=f"shadow/advisory record (mode={mode})",
+            routing_context=routing_context, trust_snapshot=trust_snapshot,
             transition_id=transition_id, correlation_id=correlation_id,
         )
         return LineDecision(
@@ -181,7 +192,7 @@ async def _record_step_run(
     session: AsyncSession, *, org_id, project_id, definition, step, entity_type, entity_id,
     from_status, to_status, status, run_mode, transition_id, correlation_id,
     routing_decision=None, routing_reason=None, failure_class=None, failure_message=None,
-    degraded_to_plain=False,
+    degraded_to_plain=False, routing_context=None, trust_snapshot=None,
 ) -> WorkflowLineStepRun | None:
     """step_run 기록. 호출자가 best-effort 로 감싼다(기록 실패도 전이 비차단)."""
     sr = WorkflowLineStepRun(
@@ -189,6 +200,8 @@ async def _record_step_run(
         line_definition_id=definition.id if definition is not None else None,
         entity_type=entity_type, entity_id=entity_id, from_status=from_status, to_status=to_status,
         status=status, mode=run_mode, routing_decision=routing_decision, routing_reason=routing_reason,
+        routing_context=routing_context if routing_context is not None else {},  # S4: trust-routing 입력
+        trust_snapshot=trust_snapshot if trust_snapshot is not None else {},     # S4: outcome-trust(이력만)
         effective_step_type=(step or {}).get("step_type") if step else None,
         failure_class=failure_class, failure_message=failure_message, degraded_to_plain=degraded_to_plain,
         correlation_id=correlation_id, transition_id=transition_id,
