@@ -584,6 +584,28 @@ async def update_story_status(
             work_item_id=story_before.id, work_item_title=getattr(story_before, "title", None),
         )
 
+    # E-DG S3: 워크플로우 라인 엔진(P0-1 fail-open). check_transition 후 / set_status 전. 활성 라인이
+    # 없으면 plain(현 default-off=무영향). 엔진은 내부에서 모든 예외를 삼키지만, 호출부도 방어적으로
+    # 한 번 더 감싼다(belt-and-suspenders — 엔진에 버그가 있어도 board 전이를 절대 막지 않음).
+    if story_before is not None:
+        from app.services.workflow_line_engine import evaluate_line_for_transition
+
+        _line_decision = None
+        try:
+            _line_decision = await evaluate_line_for_transition(
+                db, org_id=repo.org_id, project_id=getattr(story_before, "project_id", None),
+                entity_type="story", entity_id=story_before.id,
+                from_status=old_status, to_status=body.status,
+            )
+        except Exception:  # noqa: BLE001 — ⭐P0-1 절대보장: 엔진 실패가 전이를 freeze하지 않음.
+            _line_decision = None
+        # blocked_by_policy/gate_pending = 정상 차단 decision(예외 아님). engine_failed/advisory/plain은 진행.
+        if _line_decision is not None and not _line_decision.proceeds:
+            raise HTTPException(
+                status_code=_line_decision.http_status or 409,
+                detail=_line_decision.blocking_reason or "워크플로우 라인 정책으로 상태 전이가 차단되었습니다.",
+            )
+
     try:
         # AC2: violation_level 전달 → warn 모드이면 set_status hard block 우회
         story = await repo.set_status(id, body.status, violation_level=_violation_level)
