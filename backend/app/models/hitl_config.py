@@ -18,7 +18,7 @@ from app.core.database import Base
 
 POSTURES = frozenset({"conservative", "balanced", "permissive"})
 DISPOSITIONS = frozenset({"allow_auto", "ask", "deny"})
-GATE_TYPES = frozenset({"pr_review", "qa", "merge", "deploy"})
+GATE_TYPES = frozenset({"pr_review", "qa", "merge", "deploy", "workflow_config_publish"})
 
 _POSTURE_DEFAULT: dict[str, str] = {
     "conservative": "ask",
