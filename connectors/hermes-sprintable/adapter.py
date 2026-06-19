@@ -74,6 +74,7 @@ from gateway.platforms.base import (
     MessageEvent,
     MessageType,
     SendResult,
+    cache_media_bytes,
 )
 
 logger = logging.getLogger(__name__)
@@ -212,6 +213,54 @@ class SprintableAdapter(BasePlatformAdapter):
                 elif line.startswith("data:"):
                     data_lines.append(line[5:].lstrip())
 
+    async def _fetch_image_attachments(
+        self,
+        images: Any,
+    ) -> tuple[list[str], list[str], list[str]]:
+        """Fetch Sprintable signed image URLs into Hermes' local media cache.
+
+        Hermes gateway image routing expects ``MessageEvent.media_urls`` to be
+        agent-visible local cache paths. Passing the short-lived signed URL as a
+        "path" breaks native multimodal routing because the final
+        ``build_native_content_parts`` step opens local files before encoding
+        pixels. Fetch at consume time while the V4 URL is fresh.
+        """
+        if not isinstance(images, list) or not self._http_client:
+            return [], [], []
+
+        media_urls: list[str] = []
+        media_types: list[str] = []
+        notes: list[str] = []
+        for idx, item in enumerate(images, start=1):
+            if not isinstance(item, dict):
+                continue
+            url = str(item.get("url") or "").strip()
+            name = str(item.get("name") or f"sprintable-image-{idx}").strip()
+            mime = str(item.get("mime") or item.get("mime_type") or "").strip()
+            if not url:
+                continue
+            if mime and not mime.startswith("image/"):
+                continue
+            try:
+                resp = await self._http_client.get(url, timeout=20.0)
+                resp.raise_for_status()
+                cached = cache_media_bytes(
+                    resp.content,
+                    filename=name,
+                    mime_type=mime,
+                    default_kind="image",
+                )
+                if cached and cached.kind == "image":
+                    media_urls.append(cached.path)
+                    media_types.append(cached.media_type)
+                else:
+                    notes.append(f"[Sprintable image '{name}' could not be cached as a supported image]")
+            except Exception as exc:
+                logger.warning("[%s] image fetch failed name=%s url=%s: %s", self.name, name, url[:120], exc)
+                notes.append(f"[Sprintable image '{name}' could not be fetched before its signed URL expired]")
+
+        return media_urls, media_types, notes
+
     async def _on_event(self, ev_type: str, ev_id: str, data_str: str) -> None:
         if ev_type == "heartbeat":
             return
@@ -227,8 +276,9 @@ class SprintableAdapter(BasePlatformAdapter):
         if event_type not in INJECTABLE_EVENT_TYPES:
             return  # not a recommended inject type (e.g. status_changed FYI)
         content = (data.get("content") or payload.get("content") or "").strip()
-        if not content:
-            return  # nothing to inject (e.g. dispatched/system event without text)
+        images = data.get("images") or payload.get("images") or []
+        if not content and not images:
+            return  # nothing to inject (e.g. dispatched/system event without text/media)
 
         event_id = data.get("event_id") or payload.get("id") or ev_id or uuid.uuid4().hex
         if self._is_duplicate(event_id):
@@ -269,12 +319,18 @@ class SprintableAdapter(BasePlatformAdapter):
             user_id=sender_id,
             user_name=sender_name,
         )
+        media_urls, media_types, attachment_notes = await self._fetch_image_attachments(images)
+        if attachment_notes:
+            content = "\n".join(attachment_notes + ([content] if content else []))
+
         message_event = MessageEvent(
             text=content,
-            message_type=MessageType.TEXT,
+            message_type=MessageType.PHOTO if media_urls else MessageType.TEXT,
             source=source,
             message_id=event_id,
             raw_message=data,
+            media_urls=media_urls,
+            media_types=media_types,
             timestamp=datetime.now(tz=timezone.utc),
         )
         logger.info("[%s] inbound seq=%s conv=%s: %s", self.name, seq, conversation_id, content[:80])
