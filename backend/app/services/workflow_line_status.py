@@ -44,6 +44,13 @@ class LastEventView(BaseModel):
     created_at: Any = None
 
 
+class RecipientAgentView(BaseModel):
+    """S12 Gap1: stuck handoff 의 막힌 recipient(dispatch event recipient 기반·assignee 파생 아님)."""
+    id: uuid.UUID
+    name: str | None = None
+    type: str | None = None
+
+
 class StepRunView(BaseModel):
     id: uuid.UUID
     status: str
@@ -65,6 +72,7 @@ class StepRunView(BaseModel):
     h1_evidence: dict[str, Any] | None = None
     approvers: list[ApproverView] = []
     last_event: LastEventView | None = None
+    recipient_agent: RecipientAgentView | None = None  # S12 Gap1: 막힌 agent(event recipient)
 
 
 class HistoryItem(BaseModel):
@@ -95,6 +103,7 @@ class LineStatusSummary(BaseModel):
     grandfathered: bool = False
     handoff_stuck: bool = False
     delivery_status: str | None = None
+    recipient_agent: RecipientAgentView | None = None  # S12 Gap1: 막힌 agent(event recipient)
 
 
 def _degraded_flags(run: WorkflowLineStepRun) -> tuple[bool, bool, str | None]:
@@ -187,6 +196,7 @@ async def build_workflow_line_status(
         ]
 
     last_event = None
+    recipient_agent = None
     if active.event_id is not None:
         ev = (await session.execute(
             select(Event).where(Event.id == active.event_id)
@@ -196,6 +206,8 @@ async def build_workflow_line_status(
                 id=ev.id, event_type=ev.event_type, recipient_seq=ev.recipient_seq,
                 status=ev.status, created_at=ev.created_at,
             )
+            # S12 Gap1: 막힌 recipient agent(event recipient 기반·assignee 파생 X).
+            recipient_agent = await _resolve_recipient_agent(session, ev.recipient_id)
 
     engine_degraded, grandfathered, note = _degraded_flags(active)
     view = StepRunView(
@@ -205,9 +217,22 @@ async def build_workflow_line_status(
         delivery_status=active.delivery_status, delivery_error=active.delivery_error,
         correlation_id=active.correlation_id, sla_due_at=active.sla_due_at, started_at=active.started_at,
         engine_degraded=engine_degraded, grandfathered=grandfathered, observability_note=note,
-        h1_evidence=h1_evidence, approvers=approvers, last_event=last_event,
+        h1_evidence=h1_evidence, approvers=approvers, last_event=last_event, recipient_agent=recipient_agent,
     )
     return WorkflowLineStatusResponse(story_id=story_id, has_active=True, active=view)
+
+
+async def _resolve_recipient_agent(
+    session: AsyncSession, recipient_id: uuid.UUID | None,
+) -> RecipientAgentView | None:
+    """event recipient_id → TeamMember(id/name/type). 없으면 id만(FE 폴백 '에이전트')."""
+    if recipient_id is None:
+        return None
+    from app.models.team import TeamMember
+    m = await session.get(TeamMember, recipient_id)
+    if m is None:
+        return RecipientAgentView(id=recipient_id)
+    return RecipientAgentView(id=recipient_id, name=m.name, type=m.type)
 
 
 async def build_workflow_line_status_batch(
@@ -234,6 +259,30 @@ async def build_workflow_line_status_batch(
     for r in rows:  # started_at desc → story 당 첫 등장이 최신
         latest.setdefault(r.entity_id, r)
 
+    # S12 Gap1: recipient_agent 배치 해소(N+1 0) — event_ids→Event.recipient_id, recipient_ids→
+    # TeamMember 를 각 1쿼리(IN). per-run 추가 fetch 없음.
+    agent_by_run: dict[uuid.UUID, RecipientAgentView] = {}
+    event_ids = [r.event_id for r in latest.values() if r.event_id is not None]
+    if event_ids:
+        from app.models.team import TeamMember
+        evs = (await session.execute(
+            select(Event.id, Event.recipient_id).where(Event.id.in_(event_ids))
+        )).all()
+        ev_recipient = {eid: rid for eid, rid in evs}
+        rids = [rid for rid in ev_recipient.values() if rid is not None]
+        members = {}
+        if rids:
+            members = {m.id: m for m in (await session.execute(
+                select(TeamMember).where(TeamMember.id.in_(rids))
+            )).scalars().all()}
+        for r in latest.values():
+            rid = ev_recipient.get(r.event_id) if r.event_id is not None else None
+            if rid is None:
+                continue
+            m = members.get(rid)
+            agent_by_run[r.id] = (RecipientAgentView(id=rid, name=m.name, type=m.type)
+                                  if m is not None else RecipientAgentView(id=rid))
+
     out: list[LineStatusSummary] = []
     for sid in story_ids:
         r = latest.get(sid)
@@ -245,5 +294,6 @@ async def build_workflow_line_status_batch(
             story_id=sid, has_active=True, mode=r.mode, status=r.status,
             engine_degraded=engine_degraded, grandfathered=grandfathered,
             handoff_stuck=(r.delivery_status == "timed_out"), delivery_status=r.delivery_status,
+            recipient_agent=agent_by_run.get(r.id),
         ))
     return out
