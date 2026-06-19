@@ -5,7 +5,8 @@ import { useTranslations } from 'next-intl';
 import { CheckCircle, XCircle } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { GateEvidence, gateNeedsAction, gateDecision } from '@/components/cage/gate-evidence';
-import type { GateItem } from '@/components/kanban/types';
+import { GateLineContext } from '@/components/cage/gate-line-context';
+import type { GateItem, WorkflowLineStatus, WorkflowLineStepRun } from '@/components/kanban/types';
 
 interface GateInboxProps {
   memberId: string;
@@ -23,21 +24,54 @@ export function GateInbox({ memberId }: GateInboxProps) {
   const [loading, setLoading] = useState(true);
   const [resolving, setResolving] = useState<string | null>(null);
   const [rejectModal, setRejectModal] = useState<RejectModalState | null>(null);
+  // S11 ②: 라인 컨텍스트(active step_run by story_id) + approver 이름맵.
+  const [lineMap, setLineMap] = useState<Record<string, WorkflowLineStepRun>>({});
+  const [memberNames, setMemberNames] = useState<Record<string, string>>({});
 
-  const fetchGates = () => {
-    Promise.all([
-      fetch('/api/gates?status=pending').then((r) => r.ok ? r.json() : []),
-      fetch('/api/gates?status=rejected').then((r) => r.ok ? r.json() : []),
-    ])
-      .then(([pending, rejected]) => {
-        setGates(pending as GateItem[]);
-        setRejectedGates((rejected as GateItem[]).filter((g) => g.resolution_note));
-      })
-      .catch(() => {})
-      .finally(() => setLoading(false));
+  const fetchGates = async () => {
+    try {
+      const [pending, rejected] = await Promise.all([
+        fetch('/api/gates?status=pending').then((r) => r.ok ? r.json() : []),
+        fetch('/api/gates?status=rejected').then((r) => r.ok ? r.json() : []),
+      ]);
+      const pendingGates = pending as GateItem[];
+      setGates(pendingGates);
+      setRejectedGates((rejected as GateItem[]).filter((g) => g.resolution_note));
+
+      // S11 ②: pending story 게이트별 workflow-line/status(bounded N=대기 게이트 수·N+1 아님) + 멤버 이름맵.
+      const storyGates = pendingGates.filter((g) => g.work_item_type === 'story');
+      if (storyGates.length > 0) {
+        const [lineResults, membersJson] = await Promise.all([
+          Promise.all(
+            storyGates.map((g) =>
+              fetch(`/api/stories/${g.work_item_id}/workflow-line/status`)
+                .then((r) => (r.ok ? (r.json() as Promise<WorkflowLineStatus>) : null))
+                .catch(() => null),
+            ),
+          ),
+          fetch('/api/team-members')
+            .then((r) => (r.ok ? r.json() : { data: [] }))
+            .catch(() => ({ data: [] })),
+        ]);
+        const lmap: Record<string, WorkflowLineStepRun> = {};
+        for (const ls of lineResults) {
+          if (ls?.has_active && ls.active) lmap[ls.story_id] = ls.active;
+        }
+        setLineMap(lmap);
+        const names: Record<string, string> = {};
+        for (const m of (membersJson as { data?: { id: string; name: string }[] }).data ?? []) {
+          names[m.id] = m.name;
+        }
+        setMemberNames(names);
+      }
+    } catch {
+      // non-critical — 라인 컨텍스트 없으면 게이트 행은 기존대로 렌더.
+    } finally {
+      setLoading(false);
+    }
   };
 
-  useEffect(() => { fetchGates(); }, []);
+  useEffect(() => { void fetchGates(); }, []);
 
   const handleApprove = async (gateId: string) => {
     setResolving(gateId);
@@ -89,6 +123,22 @@ export function GateInbox({ memberId }: GateInboxProps) {
                 <span className="truncate text-xs text-muted-foreground">#{gate.work_item_id.slice(0, 6)}</span>
                 <span className="shrink-0 text-[10px] text-muted-foreground/70">{new Date(gate.created_at).toLocaleDateString()}</span>
               </div>
+              {/* S11 ②: 라인 컨텍스트("어디·누가·언제") + ④ 구분선 → H1 GateEvidence("왜")와 분리 */}
+              {lineMap[gate.work_item_id] ? (
+                <>
+                  <GateLineContext
+                    step={lineMap[gate.work_item_id]!}
+                    resolveName={(id) => memberNames[id] ?? id.slice(0, 6)}
+                    className="mt-1"
+                  />
+                  <div className="flex items-center gap-2 pt-1.5">
+                    <span className="shrink-0 text-[9px] font-medium uppercase tracking-wide text-muted-foreground/70">
+                      {t('lineEvidenceDivider')}
+                    </span>
+                    <span className="h-px flex-1 bg-border" />
+                  </div>
+                </>
+              ) : null}
               {/* H1-S8: decision 배지 + CI/신뢰도 facts + 사유(read-only evidence) */}
               <GateEvidence gate={gate} className="mt-1" />
             </div>

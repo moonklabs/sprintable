@@ -2495,6 +2495,13 @@
   },
   "cage": {
     "gatePending": "gate pending",
+    "lineApproverApproved": "Approved",
+    "lineApproverRejected": "Rejected",
+    "lineApproverPending": "Pending",
+    "lineApproverBlocking": "Required",
+    "lineSlaDue": "Due in {time}",
+    "lineSlaOverdue": "{time} overdue",
+    "lineEvidenceDivider": "Evidence · Why",
     "gateApprove": "Approve",
     "gateReject": "Reject",
     "gateRejectTitle": "Reject gate",

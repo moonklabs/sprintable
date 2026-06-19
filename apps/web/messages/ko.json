@@ -2495,6 +2495,13 @@
   },
   "cage": {
     "gatePending": "게이트 대기",
+    "lineApproverApproved": "승인",
+    "lineApproverRejected": "반려",
+    "lineApproverPending": "대기",
+    "lineApproverBlocking": "필수",
+    "lineSlaDue": "마감 {time}",
+    "lineSlaOverdue": "{time} 초과",
+    "lineEvidenceDivider": "근거 · 왜",
     "gateApprove": "승인",
     "gateReject": "반려",
     "gateRejectTitle": "게이트 반려",

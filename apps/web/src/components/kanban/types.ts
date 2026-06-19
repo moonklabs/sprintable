@@ -44,6 +44,78 @@ export interface GateItem {
   updated_at: string;
 }
 
+// E-DG S11: workflow-line status read model — BE services/workflow_line_status.py 미러(read-only).
+// 데이터소스 GET /api/v2/stories/{id}/workflow-line/status. 필드명·optionality는 BE StepRunView/ApproverView/LastEventView와 1:1.
+// datetime은 BE에서 ISO 문자열로 직렬화 → string | null.
+export interface WorkflowLineH1Evidence {
+  requires_human: boolean;
+  evidence_status: string | null; // sufficient | blocked | insufficient
+  decision_basis: string | null; // 사람 reason
+  auto_decision_reason: string | null; // auto_merge | ask_human | block
+  gate_status: string;
+}
+
+export interface WorkflowLineApprover {
+  member_id: string;
+  member_type: string;
+  kind: string; // approver | consult | ... (blocking 만 quorum 계산에 듦)
+  blocking: boolean;
+  status: string; // approved | pending | rejected ...
+  role_key: string | null;
+  resolved_at: string | null;
+}
+
+export interface WorkflowLineLastEvent {
+  id: string;
+  event_type: string;
+  recipient_seq: number | null;
+  status: string;
+  created_at: string | null;
+}
+
+// 활성 step_run(StepRunView). engine_degraded/grandfathered 는 boolean flag로 배지 분기,
+// 사용자 문구는 BE 제공 observability_note 사용(하드코딩 금지·null/빈값 시 FE 중립 폴백). [S11 갭1]
+export interface WorkflowLineStepRun {
+  id: string;
+  status: string;
+  from_status: string | null;
+  to_status: string;
+  mode: string;
+  routing_decision: string | null;
+  routing_reason: string | null;
+  blocking_reason: string | null;
+  gate_id: string | null;
+  delivery_status: string;
+  delivery_error: string | null;
+  correlation_id: string;
+  sla_due_at: string | null;
+  started_at: string | null;
+  engine_degraded: boolean;
+  grandfathered: boolean;
+  observability_note: string | null;
+  h1_evidence: WorkflowLineH1Evidence | null;
+  approvers: WorkflowLineApprover[];
+  last_event: WorkflowLineLastEvent | null;
+}
+
+export interface WorkflowLineHistoryItem {
+  id: string;
+  status: string;
+  from_status: string | null;
+  to_status: string;
+  mode: string;
+  routing_decision: string | null;
+  resolved_at: string | null;
+  correlation_id: string;
+}
+
+export interface WorkflowLineStatus {
+  story_id: string;
+  has_active: boolean;
+  active: WorkflowLineStepRun | null;
+  history: WorkflowLineHistoryItem[];
+}
+
 export interface DependencyEdge {
   id: string;
   from_id: string;
