@@ -178,3 +178,32 @@ async def test_fault_injection_engine_failure_degrades_to_plain():
             select(WorkflowLineStepRun).where(WorkflowLineStepRun.entity_id == eid))).scalar_one()
         assert sr.status == "engine_failed" and sr.failure_class == "RuntimeError"
     await engine.dispose()
+
+
+@pytest.mark.skipif(not _REAL_DB_URL, reason="real Postgres 필요(PARITY/ALEMBIC_DATABASE_URL)")
+@pytest.mark.anyio
+async def test_step_run_flush_failure_savepoint_does_not_poison_session():
+    """⭐P0-1(레드팀 적출): step_run insert flush 실패(active partial unique 충돌=double-fire)가
+    outer 트랜잭션을 poison하면 안 된다. SAVEPOINT 격리로 outer tx 보존 → 후속 set_status/commit 정상.
+    """
+    import sqlalchemy as sa
+    from app.services.workflow_line_engine import evaluate_line_for_transition
+    engine, Session = await _engine_session()
+    async with Session() as session:
+        org, eid, eid2 = uuid.uuid4(), uuid.uuid4(), uuid.uuid4()
+        await _seed_active_line(session, org, "story", {
+            "rollout_mode": "shadow",
+            "steps": [{"from_status": "in-review", "to_status": "done", "step_type": "merge-gate"}]})
+        kw = dict(org_id=org, project_id=None, entity_type="story",
+                  from_status="in-review", to_status="done")
+        d1 = await evaluate_line_for_transition(session, entity_id=eid, **kw)
+        assert d1.mode == "advisory_only" and d1.step_run_id is not None
+        # 동일 전이 재평가 → 2번째 step_run insert가 active partial unique 충돌(non-terminal 'routing_resolved').
+        d2 = await evaluate_line_for_transition(session, entity_id=eid, **kw)
+        assert d2.proceeds is True  # ⭐충돌해도 전이는 진행(비차단)
+        # ⭐session 비-poison 증명: 후속 read/write/commit 모두 성공(poison이면 PendingRollbackError).
+        assert (await session.execute(sa.text("SELECT 1"))).scalar() == 1
+        d3 = await evaluate_line_for_transition(session, entity_id=eid2, **kw)  # 다른 entity write 정상
+        assert d3.mode == "advisory_only" and d3.step_run_id is not None
+        await session.commit()  # commit 성공 = outer tx 살아있음
+    await engine.dispose()

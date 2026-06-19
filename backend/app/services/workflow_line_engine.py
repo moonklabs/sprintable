@@ -193,6 +193,18 @@ async def _record_step_run(
         failure_class=failure_class, failure_message=failure_message, degraded_to_plain=degraded_to_plain,
         correlation_id=correlation_id, transition_id=transition_id,
     )
-    session.add(sr)
-    await session.flush()
+    # ⭐P0-1: step_run insert 를 SAVEPOINT 로 격리. flush 실패(active partial unique 충돌=double-fire·
+    # 제약 위반 등)가 outer 트랜잭션을 aborted 로 poison하면, 엔진이 engine_failed 를 반환해도 이후
+    # repo.set_status() 가 PendingRollbackError 로 깨져 board 전이가 freeze된다(레드팀 적출). savepoint 면
+    # 실패가 nested tx 로만 롤백되고 outer 는 보존돼 set_status 가 정상 진행한다.
+    try:
+        async with session.begin_nested():
+            session.add(sr)
+            await session.flush()
+    except Exception:  # noqa: BLE001 — 기록 실패는 격리·비차단. 재flush 방지 위해 expunge.
+        try:
+            session.expunge(sr)
+        except Exception:  # noqa: BLE001
+            pass
+        return None
     return sr
