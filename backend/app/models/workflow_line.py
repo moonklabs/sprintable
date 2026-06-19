@@ -142,3 +142,43 @@ class WorkflowLineStepRun(Base):
     updated_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now(), onupdate=func.now(), nullable=False
     )
+
+
+# ── S9 parallel/quorum approval (0126 SSOT·text+app validator) ────────────────
+APPROVAL_KINDS = frozenset({"approver", "consult", "deputy"})
+APPROVAL_STATUSES = frozenset({"pending", "approved", "rejected", "abstained", "withdrawn"})
+QUORUM_TYPES = frozenset({"all", "any", "count"})  # percent = Phase3 defer
+
+
+class WorkflowLineStepApproval(Base):
+    """S9 multi-approver gate: 대표 Gate 1개에 묶인 approver row N개(0126 미러).
+
+    blocking approver-kind row 들만 quorum 계산에 든다(consult/non-blocking 은 audit/notification
+    엔 남지만 제외·AC④). approval_group_id 로 한 그룹을 묶고 gate_id 는 대표 Gate(orphan 0·AC⑦).
+    """
+
+    __tablename__ = "workflow_step_approvals"
+
+    id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    org_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), nullable=False)
+    project_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), nullable=False)
+    step_run_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), nullable=False)
+    gate_id: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True), nullable=True)
+    approval_group_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), nullable=False)
+    approver_member_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), nullable=False)
+    approver_member_type: Mapped[str] = mapped_column(Text, nullable=False)
+    original_approver_member_id: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True), nullable=True)
+    requested_by_member_id: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True), nullable=True)
+    implementation_member_id: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True), nullable=True)
+    role_key: Mapped[str | None] = mapped_column(Text, nullable=True)
+    kind: Mapped[str] = mapped_column(Text, nullable=False, server_default="approver")
+    blocking: Mapped[bool] = mapped_column(Boolean, nullable=False, server_default="true")
+    status: Mapped[str] = mapped_column(Text, nullable=False, server_default="pending")
+    decision_note: Mapped[str | None] = mapped_column(Text, nullable=True)
+    resolved_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    held_until: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    reassigned_from_member_id: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True), nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), nullable=False)
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now(), onupdate=func.now(), nullable=False
+    )
