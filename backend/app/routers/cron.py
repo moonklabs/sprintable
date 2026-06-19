@@ -130,6 +130,25 @@ async def hitl_timeouts(
         return _err("INTERNAL_ERROR", "Internal server error", 500)
 
 
+# ─── GET /api/v2/internal/cron/workflow-handoff-watchdog ──────────────────────
+# E-DG S8: handoff watchdog + ACK reconciliation(P0-3). silent handoff stall 을 observable
+# incident 로 전환 — ACK 대사 → acked / 10분 미ACK → timed_out(board badge) + fallback notification.
+
+@router.get("/workflow-handoff-watchdog")
+async def workflow_handoff_watchdog(
+    request: Request,
+    session: AsyncSession = Depends(get_db),
+) -> JSONResponse:
+    verify_cron(request)
+    try:
+        from app.services.workflow_handoff_watchdog import reconcile_handoffs
+        counts = await reconcile_handoffs(session)
+        return _ok(counts)
+    except Exception as exc:
+        logger.exception("cron error: %s", exc)
+        return _err("INTERNAL_ERROR", "Internal server error", 500)
+
+
 # ─── GET /api/v2/internal/cron/inbox-outbox ────────────────────────────────────
 
 @router.get("/inbox-outbox")
