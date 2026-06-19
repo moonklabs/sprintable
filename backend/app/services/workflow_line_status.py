@@ -1,0 +1,188 @@
+"""E-DECISION-GATE S10: workflow-line status read model (P1-4 observability).
+
+story 의 workflow-line 실행 상태를 한 번에 조립한다 — active step_run(route decision·
+blocking_reason·gate·H1 evidence·approvers·SLA·delivery·last_event·correlation) 또는 active 가
+없으면 terminal run 5개 history. PO/FE 가 "왜 막혔나·어디로 relay 됐나"를 채팅 없이 board/API 에서
+안다(FE S11 의 데이터 소스).
+
+⭐engine_degraded/grandfathered 를 명시해 "전이는 진행됨·관측만 실패/라인 도입 전 전이" 임을
+사용자가 알고 불필요한 재시도를 안 하게 한다(AC④). no-N+1: active 1건의 gate/approvers/event 만
+상수 쿼리로 조회하고 history 는 요약(per-run 확장 안 함).
+"""
+import uuid
+from typing import Any
+
+from pydantic import BaseModel
+from sqlalchemy import select
+from sqlalchemy.ext.asyncio import AsyncSession
+
+from app.models.gate import Gate
+from app.models.event import Event
+from app.models.workflow_line import WorkflowLineStepApproval, WorkflowLineStepRun
+from app.services.workflow_line_resolution import _OPEN_STEP_RUN_STATUSES
+
+# engine 관측 실패(전이는 진행)·라인 도입 전 grandfather 를 가리키는 신호.
+_DEGRADED_FAILURE_CLASSES = frozenset({"engine_failed", "engine_exception"})
+_HISTORY_LIMIT = 5
+
+
+class ApproverView(BaseModel):
+    member_id: uuid.UUID
+    member_type: str
+    kind: str
+    blocking: bool
+    status: str
+    role_key: str | None = None
+    resolved_at: Any = None
+
+
+class LastEventView(BaseModel):
+    id: uuid.UUID
+    event_type: str
+    recipient_seq: int | None = None
+    status: str
+    created_at: Any = None
+
+
+class StepRunView(BaseModel):
+    id: uuid.UUID
+    status: str
+    from_status: str | None = None
+    to_status: str
+    mode: str
+    routing_decision: str | None = None
+    routing_reason: str | None = None
+    blocking_reason: str | None = None
+    gate_id: uuid.UUID | None = None
+    delivery_status: str
+    delivery_error: str | None = None
+    correlation_id: uuid.UUID
+    sla_due_at: Any = None
+    started_at: Any = None
+    engine_degraded: bool = False
+    grandfathered: bool = False
+    observability_note: str | None = None
+    h1_evidence: dict[str, Any] | None = None
+    approvers: list[ApproverView] = []
+    last_event: LastEventView | None = None
+
+
+class HistoryItem(BaseModel):
+    id: uuid.UUID
+    status: str
+    from_status: str | None = None
+    to_status: str
+    mode: str
+    routing_decision: str | None = None
+    resolved_at: Any = None
+    correlation_id: uuid.UUID
+
+
+class WorkflowLineStatusResponse(BaseModel):
+    story_id: uuid.UUID
+    has_active: bool
+    active: StepRunView | None = None
+    history: list[HistoryItem] = []
+
+
+def _degraded_flags(run: WorkflowLineStepRun) -> tuple[bool, bool, str | None]:
+    """(engine_degraded, grandfathered, note) 도출."""
+    engine_degraded = bool(run.degraded_to_plain) or (run.failure_class in _DEGRADED_FAILURE_CLASSES)
+    grandfathered = run.mode == "plain_transition"
+    note = None
+    if engine_degraded:
+        note = "전이는 진행됨 · 라인 관측만 실패(재시도 불필요)"
+    elif grandfathered:
+        note = "라인 도입 전/off 전이(grandfathered) · 게이트 미적용"
+    return engine_degraded, grandfathered, note
+
+
+def _blocking_reason(run: WorkflowLineStepRun) -> str | None:
+    """막힌 이유 1줄 — failure_message > routing_reason 우선(blocked/gate 대기 시)."""
+    if run.failure_message:
+        return run.failure_message
+    if run.status in ("gate_pending", "waiting_gate", "waiting_parallel"):
+        return run.routing_reason or "awaiting_gate_decision"
+    if run.status in ("blocked", "blocked_by_policy"):
+        return run.routing_reason or "blocked_by_policy"
+    return run.routing_reason
+
+
+async def build_workflow_line_status(
+    session: AsyncSession, org_id: uuid.UUID, story_id: uuid.UUID,
+) -> WorkflowLineStatusResponse:
+    """story 의 workflow-line 상태 read model 을 조립한다(active 또는 terminal history)."""
+    runs = (await session.execute(
+        select(WorkflowLineStepRun).where(
+            WorkflowLineStepRun.org_id == org_id,
+            WorkflowLineStepRun.entity_type == "story",
+            WorkflowLineStepRun.entity_id == story_id,
+        ).order_by(WorkflowLineStepRun.started_at.desc())
+    )).scalars().all()
+
+    active = next((r for r in runs if r.status in _OPEN_STEP_RUN_STATUSES), None)
+    if active is None:
+        # active 없음 → terminal run 5개 history(AC③).
+        history = [
+            HistoryItem(
+                id=r.id, status=r.status, from_status=r.from_status, to_status=r.to_status,
+                mode=r.mode, routing_decision=r.routing_decision, resolved_at=r.resolved_at,
+                correlation_id=r.correlation_id,
+            )
+            for r in runs[:_HISTORY_LIMIT]
+        ]
+        return WorkflowLineStatusResponse(story_id=story_id, has_active=False, history=history)
+
+    # active 1건의 gate / approvers / event 만 상수 쿼리(no-N+1·AC⑥).
+    gate = None
+    if active.gate_id is not None:
+        gate = (await session.execute(
+            select(Gate).where(Gate.id == active.gate_id, Gate.org_id == org_id)
+        )).scalar_one_or_none()
+    h1_evidence = None
+    if gate is not None:
+        h1_evidence = {
+            "requires_human": gate.requires_human,
+            "evidence_status": gate.evidence_status,
+            "decision_basis": gate.decision_basis,
+            "auto_decision_reason": gate.auto_decision_reason,
+            "gate_status": gate.status,
+        }
+
+    approvers: list[ApproverView] = []
+    if active.approval_group_id is not None:
+        appr_rows = (await session.execute(
+            select(WorkflowLineStepApproval).where(
+                WorkflowLineStepApproval.approval_group_id == active.approval_group_id,
+            ).order_by(WorkflowLineStepApproval.created_at.asc())
+        )).scalars().all()
+        approvers = [
+            ApproverView(
+                member_id=a.approver_member_id, member_type=a.approver_member_type, kind=a.kind,
+                blocking=a.blocking, status=a.status, role_key=a.role_key, resolved_at=a.resolved_at,
+            )
+            for a in appr_rows
+        ]
+
+    last_event = None
+    if active.event_id is not None:
+        ev = (await session.execute(
+            select(Event).where(Event.id == active.event_id)
+        )).scalar_one_or_none()
+        if ev is not None:
+            last_event = LastEventView(
+                id=ev.id, event_type=ev.event_type, recipient_seq=ev.recipient_seq,
+                status=ev.status, created_at=ev.created_at,
+            )
+
+    engine_degraded, grandfathered, note = _degraded_flags(active)
+    view = StepRunView(
+        id=active.id, status=active.status, from_status=active.from_status, to_status=active.to_status,
+        mode=active.mode, routing_decision=active.routing_decision, routing_reason=active.routing_reason,
+        blocking_reason=_blocking_reason(active), gate_id=active.gate_id,
+        delivery_status=active.delivery_status, delivery_error=active.delivery_error,
+        correlation_id=active.correlation_id, sla_due_at=active.sla_due_at, started_at=active.started_at,
+        engine_degraded=engine_degraded, grandfathered=grandfathered, observability_note=note,
+        h1_evidence=h1_evidence, approvers=approvers, last_event=last_event,
+    )
+    return WorkflowLineStatusResponse(story_id=story_id, has_active=True, active=view)

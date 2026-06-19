@@ -28,6 +28,7 @@ from app.services.verdict_capture import resolve_implementation_participation
 from app.services.notification_dispatch import dispatch_notification
 from app.services.story_status_events import emit_story_status_changed
 from app.services.webhook_dispatch import fire_webhooks
+from app.services.workflow_line_status import WorkflowLineStatusResponse, build_workflow_line_status
 from app.services.workflow_pipeline import process_event
 from app.services.rule_evaluator import EventContext
 from app.services.workflow_violation import build_violation_event, check_transition
@@ -259,6 +260,20 @@ async def get_story(
         raise HTTPException(status_code=404, detail="Story not found")
     await _attach_assignee_ids(repo.session, repo.org_id, [story])
     return StoryResponse.model_validate(story)
+
+
+# E-DG S10(P1-4 observability): workflow-line 상태 read API — "왜 막혔나·어디로 relay 됐나"를
+# 채팅 없이 board/API 서 안다(FE S11 데이터 소스). 기존 story read auth(_get_repo·org-scoped)
+# 재사용·없는 story 404·active 없으면 terminal 5개 history·engine_degraded/grandfathered 명시.
+@router.get("/{id}/workflow-line/status", response_model=WorkflowLineStatusResponse)
+async def get_workflow_line_status(
+    id: uuid.UUID,
+    repo: StoryRepository = Depends(_get_repo),
+) -> WorkflowLineStatusResponse:
+    story = await repo.get(id)  # org/project-scoped read auth(AC⑤)·scope 밖/없으면 None→404
+    if story is None:
+        raise HTTPException(status_code=404, detail="Story not found")
+    return await build_workflow_line_status(repo.session, repo.org_id, id)
 
 
 class BulkUpdateItem(BaseModel):
