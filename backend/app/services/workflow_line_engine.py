@@ -44,6 +44,8 @@ class LineDecision:
     blocking_reason: str | None = None
     http_status: int | None = None
     degraded_to_plain: bool = False
+    # S7: enforcing agent-handoff step 의 step_run id — 라우터가 status 적용 후 relay 한다(set 시에만).
+    relay_step_run_id: uuid.UUID | None = None
 
     @property
     def proceeds(self) -> bool:
@@ -199,9 +201,16 @@ async def evaluate_line_for_transition(
             routing_context=routing_context, trust_snapshot=trust_snapshot,
             transition_id=transition_id, correlation_id=correlation_id,
         )
+        # S7: enforcing agent-handoff step 은 status 적용 후 라우터가 relay(다음 actor dispatch).
+        # shadow/advisory 모드는 관측만(relay 안 함). step_run 기록 실패(None)면 relay 대상 없음.
+        _relay_id = (
+            step_run.id if (step_run is not None and mode == "enforcing"
+                            and step.get("step_type") == "agent-handoff") else None
+        )
         return LineDecision(
             mode="advisory_only", status_to_apply=to_status,
             step_run_id=step_run.id if step_run else None,
+            relay_step_run_id=_relay_id,
         )
     except Exception as exc:  # noqa: BLE001 — ⭐P0-1: 어떤 예외도 전이를 막지 않는다.
         # engine_failed step_run 기록은 best-effort(기록 실패도 전이 비차단·SME 체크포인트).

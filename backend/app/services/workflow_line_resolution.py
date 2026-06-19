@@ -134,3 +134,64 @@ async def apply_workflow_line_resolution(
 def _now():
     from datetime import datetime, timezone
     return datetime.now(tz=timezone.utc)
+
+
+async def relay_agent_handoff(
+    session: AsyncSession, step_run_id: uuid.UUID, sender_id: uuid.UUID | None = None,
+) -> dict[str, Any] | None:
+    """S7(P0-3): agent-handoff — 다음 actor 에게 dispatched relay + delivery status 가시화.
+
+    ``dispatch_entity_to_assignee(commit=False)`` 로 호출자 트랜잭션에 합류(P1-2 partial-failure
+    방지·status/step_run/event 한 트랜잭션). step_run 에 event_id/recipient_seq/delivery_status/
+    delivery_error 기록. no_assignee/unresolved_assignee 는 silent pass 가 아니라 delivery_status 로
+    가시화. relay 예외·미배정도 전이는 비차단(fail-open) — 호출자가 commit 후 wake 한다.
+
+    반환: after-commit wake/delivery payload({agent_wake, delivery}) 또는 None(미배정/실패).
+    """
+    from app.services.agent_dispatch import dispatch_entity_to_assignee
+
+    sr = (await session.execute(
+        select(WorkflowLineStepRun).where(WorkflowLineStepRun.id == step_run_id).with_for_update()
+    )).scalar_one_or_none()
+    if sr is None or sr.entity_type != "story":  # Phase1 = story-only
+        return None
+
+    trigger_metadata = {
+        "source": "workflow_line",
+        "line_step_id": str(sr.line_step_id) if sr.line_step_id else None,
+        "step_run_id": str(sr.id),
+        "from_status": sr.from_status,
+        "to_status": sr.to_status,
+        "correlation_id": str(sr.correlation_id),
+    }
+    try:
+        resp, delivery = await dispatch_entity_to_assignee(
+            session, sr.org_id, sr.entity_type, sr.entity_id,
+            trigger_metadata=trigger_metadata, sender_id=sender_id, commit=False,
+        )
+    except Exception as exc:  # noqa: BLE001 — ⭐relay 실패도 전이 비차단(fail-open)·가시화.
+        sr.delivery_status = "dead_letter"
+        sr.delivery_error = f"dispatch_create: {str(exc)[:400]}"
+        sr.failure_class = "dispatch_exception"
+        await session.flush()
+        return None
+
+    if not resp.dispatched:
+        # ⭐no_assignee/unresolved_assignee = silent pass 아님·delivery_status 로 가시화(AC⑤).
+        sr.delivery_status = resp.reason or "no_assignee"
+        await session.flush()
+        return None
+
+    sr.event_id = resp.event_id
+    sr.recipient_seq = resp.recipient_seq
+    sr.delivery_status = "queued"  # event 생성·commit 후 wake 로 전달(ACK 확정은 S8 watchdog).
+    sr.status = "dispatched"
+    await session.flush()
+
+    return {
+        "agent_wake": (
+            {"recipient_id": str(resp.assignee_id), "recipient_seq": resp.recipient_seq}
+            if resp.assignee_type == "agent" and resp.recipient_seq is not None else None
+        ),
+        "delivery": delivery,
+    }
