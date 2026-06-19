@@ -101,6 +101,22 @@ async def create_parallel_gate(
     return gate, group_id
 
 
+async def _tally_blocking(session: AsyncSession, group_id: uuid.UUID) -> dict[str, int]:
+    """그룹의 blocking approver-kind row 집계(consult/non-blocking 제외·AC④)."""
+    rows = (await session.execute(
+        select(WorkflowLineStepApproval).where(
+            WorkflowLineStepApproval.approval_group_id == group_id,
+            WorkflowLineStepApproval.kind == "approver",
+            WorkflowLineStepApproval.blocking.is_(True),
+        )
+    )).scalars().all()
+    return {
+        "approved": sum(1 for r in rows if r.status == "approved"),
+        "rejected": sum(1 for r in rows if r.status == "rejected"),
+        "total_blocking": len(rows),
+    }
+
+
 def _quorum_met(approved: int, total_blocking: int, qtype: str, qcount: int | None) -> bool:
     if total_blocking == 0:
         return False
@@ -142,18 +158,24 @@ async def record_parallel_decision(
     ):
         raise SelfApprovalError(resolver_id)
 
+    # ⭐terminal 멱등 skip: gate 가 이미 해소(approved/rejected)됐으면 late decision 은 approval row
+    # 를 mutate 하지 않고 그대로 skip 한다(quorum 충족/any-reject 로 게이트가 닫힌 뒤 도착한 결정이
+    # row state·audit 를 오염시키지 않게·SME 적출). row mutate 보다 먼저 검사한다.
+    gate = None
+    if appr.gate_id is not None:
+        gate = (await session.execute(
+            select(Gate).where(Gate.id == appr.gate_id, Gate.org_id == appr.org_id)
+        )).scalar_one_or_none()
+        if gate is not None and gate.status in _TERMINAL_GATE:
+            tally = await _tally_blocking(session, appr.approval_group_id)
+            return {"outcome": gate.status, "skipped": True, **tally}
+
     appr.status = decision
     appr.resolved_at = _now()
     await session.flush()
 
     # 그룹의 blocking approver-kind row 로 quorum 재계산(consult/non-blocking 제외·AC④).
-    rows = (await session.execute(
-        select(WorkflowLineStepApproval).where(
-            WorkflowLineStepApproval.approval_group_id == appr.approval_group_id,
-            WorkflowLineStepApproval.kind == "approver",
-            WorkflowLineStepApproval.blocking.is_(True),
-        )
-    )).scalars().all()
+    tally = await _tally_blocking(session, appr.approval_group_id)
     sr = (await session.execute(
         select(WorkflowLineStepRun).where(WorkflowLineStepRun.id == appr.step_run_id)
     )).scalar_one_or_none()
@@ -162,27 +184,17 @@ async def record_parallel_decision(
     qcount = policy.get("count")
     reject_policy = policy.get("reject_policy", "any_reject_blocks")
 
-    approved = sum(1 for r in rows if r.status == "approved")
-    rejected = sum(1 for r in rows if r.status == "rejected")
-    total = len(rows)
-
     outcome = "pending"
     target: str | None = None
-    if reject_policy == "any_reject_blocks" and rejected >= 1:
+    if reject_policy == "any_reject_blocks" and tally["rejected"] >= 1:
         target = "rejected"
-    elif _quorum_met(approved, total, qtype, qcount):
+    elif _quorum_met(tally["approved"], tally["total_blocking"], qtype, qcount):
         target = "approved"
 
-    if target is not None and appr.gate_id is not None:
-        # gate 가 이미 terminal 이면 멱등 skip(중복/경합 해소 무시·불법 전이 회피).
-        gate = (await session.execute(
-            select(Gate).where(Gate.id == appr.gate_id, Gate.org_id == appr.org_id)
-        )).scalar_one_or_none()
-        if gate is not None and gate.status not in _TERMINAL_GATE:
-            from app.services.gate_service import transition_gate
-            await transition_gate(session, appr.org_id, appr.gate_id, target, resolver_id=resolver_id)
-            outcome = target
-        elif gate is not None:
-            outcome = gate.status  # 이미 해소됨
+    # target 도달 시 transition_gate 단일 rail 로 해소(gate 는 위에서 non-terminal 확인됨).
+    if target is not None and gate is not None:
+        from app.services.gate_service import transition_gate
+        await transition_gate(session, appr.org_id, appr.gate_id, target, resolver_id=resolver_id)
+        outcome = target
 
-    return {"outcome": outcome, "approved": approved, "rejected": rejected, "total_blocking": total}
+    return {"outcome": outcome, "skipped": False, **tally}
