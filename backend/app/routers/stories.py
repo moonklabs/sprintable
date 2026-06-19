@@ -628,6 +628,10 @@ async def update_story_status(
             _line_decision = None
         # blocked_by_policy/gate_pending = 정상 차단 decision(예외 아님). engine_failed/advisory/plain은 진행.
         if _line_decision is not None and not _line_decision.proceeds:
+            # ⭐S5: raise 前 commit — engine 이 만든 H1 Gate·evidence write-back·step_run(h1_gate_id)
+            # audit 를 보존한다. get_db 는 예외 시 rollback 하므로, commit 없이 raise 하면 flush 된
+            # gate/step_run 이 사라진다(_preflight_merge_gate 가 raise 前 commit 하는 것과 동형·SME 적출).
+            await db.commit()
             raise HTTPException(
                 status_code=_line_decision.http_status or 409,
                 detail=_line_decision.blocking_reason or "워크플로우 라인 정책으로 상태 전이가 차단되었습니다.",

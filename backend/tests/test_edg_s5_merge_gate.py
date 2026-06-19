@@ -151,3 +151,32 @@ async def test_merge_gate_wrapper_failopen():
                 from_status="in-review", to_status="done")
         assert d.mode == "engine_failed" and d.degraded_to_plain and d.proceeds
     await engine.dispose()
+
+
+@pytest.mark.skipif(not _REAL_DB_URL, reason="real Postgres 필요")
+@pytest.mark.anyio
+async def test_merge_gate_audit_persists_after_raise_commit():
+    """⭐SME blocking 회귀: gate_pending(라우터가 raise 前 db.commit) 후 engine 이 만든 step_run audit
+    이 살아남아야 한다. commit 없이 raise 하면 get_db rollback 으로 사라지던 갭."""
+    from sqlalchemy import select
+    from app.services import workflow_line_engine as eng
+    from app.services.merge_verdict_gate import ASK_HUMAN
+    from app.models.workflow_line import WorkflowLineStepRun
+    engine, Session = await _session()
+    org, eid, gid = uuid.uuid4(), uuid.uuid4(), uuid.uuid4()
+    async with Session() as s:
+        await _seed_line(s, org, "enforcing")
+        await s.commit()
+    async with Session() as s:  # 라우터 트랜잭션 모사
+        with patch("app.services.merge_verdict_gate.evaluate_merge_gate",
+                   return_value=_decision(ASK_HUMAN, gid)):
+            d = await eng.evaluate_line_for_transition(
+                s, org_id=org, project_id=None, entity_type="story", entity_id=eid,
+                from_status="in-review", to_status="done")
+        assert not d.proceeds  # gate_pending → 라우터가 raise
+        await s.commit()  # ⭐라우터의 raise-前 commit 모사
+    async with Session() as s2:  # 새 세션 — audit 영속 확認(rollback 됐으면 None)
+        sr = (await s2.execute(select(WorkflowLineStepRun).where(
+            WorkflowLineStepRun.entity_id == eid))).scalar_one_or_none()
+        assert sr is not None and sr.h1_gate_id == gid and sr.mode == "gate_pending"
+    await engine.dispose()
