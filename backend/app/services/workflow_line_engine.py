@@ -101,6 +101,30 @@ def _match_step(config: dict[str, Any], from_status: str | None, to_status: str)
     return None
 
 
+def _is_merge_gate_step(step: dict) -> bool:
+    return step.get("step_type") == "merge-gate" or step.get("gate_type") == "merge"
+
+
+async def line_merge_gate_active(
+    session: AsyncSession, *, org_id: uuid.UUID, project_id: uuid.UUID | None,
+    entity_type: str, from_status: str | None, to_status: str,
+) -> bool:
+    """이 전이가 **enforcing 라인의 merge-gate step**에 거버닝되는지(라우터가 _preflight_merge_gate/
+    enforce_gate skip 여부 결정·이중 evaluate_merge_gate 방지·S5 AC⑦). 예외/비활성/non-enforcing 은
+    False(현행 게이트 유지·fail-safe)."""
+    try:
+        definition = await _active_definition(session, org_id, project_id, entity_type)
+        if definition is None:
+            return False
+        config = await _published_config(session, definition)
+        if str(config.get("rollout_mode") or "shadow").strip() != "enforcing":
+            return False
+        step = _match_step(config, from_status, to_status)
+        return bool(step and _is_merge_gate_step(step))
+    except Exception:  # noqa: BLE001 — 불명 시 현행 게이트 유지(라우터 skip 안 함).
+        return False
+
+
 async def evaluate_line_for_transition(
     session: AsyncSession,
     *,
@@ -156,6 +180,15 @@ async def evaluate_line_for_transition(
                 blocking_reason="workflow line policy blocks this transition", http_status=409,
             )
 
+        # S5(P0-2): enforcing + merge-gate step → H1 merge gate 단일 통합(이중게이트 방지).
+        if mode == "enforcing" and _is_merge_gate_step(step):
+            return await _merge_gate_wrapper(
+                session, org_id=org_id, project_id=project_id, definition=definition, step=step,
+                entity_type=entity_type, entity_id=entity_id, from_status=from_status,
+                to_status=to_status, routing_context=routing_context, trust_snapshot=trust_snapshot,
+                transition_id=transition_id, correlation_id=correlation_id,
+            )
+
         # shadow/advisory(+ S3 dormant enforcing) → step_run 기록 후 비차단.
         step_run = await _record_step_run(
             session, org_id=org_id, project_id=project_id, definition=definition, step=step,
@@ -195,6 +228,7 @@ async def _record_step_run(
     from_status, to_status, status, run_mode, transition_id, correlation_id,
     routing_decision=None, routing_reason=None, failure_class=None, failure_message=None,
     degraded_to_plain=False, routing_context=None, trust_snapshot=None,
+    gate_id=None, h1_gate_id=None, effective_gate_type=None,
 ) -> WorkflowLineStepRun | None:
     """step_run 기록. 호출자가 best-effort 로 감싼다(기록 실패도 전이 비차단)."""
     sr = WorkflowLineStepRun(
@@ -205,6 +239,8 @@ async def _record_step_run(
         routing_context=routing_context if routing_context is not None else {},  # S4: trust-routing 입력
         trust_snapshot=trust_snapshot if trust_snapshot is not None else {},     # S4: outcome-trust(이력만)
         effective_step_type=(step or {}).get("step_type") if step else None,
+        effective_gate_type=effective_gate_type,                                  # S5: merge-gate 통합
+        gate_id=gate_id, h1_gate_id=h1_gate_id,                                   # S5: H1 대표 gate
         failure_class=failure_class, failure_message=failure_message, degraded_to_plain=degraded_to_plain,
         correlation_id=correlation_id, transition_id=transition_id,
     )
@@ -223,3 +259,48 @@ async def _record_step_run(
             pass
         return None
     return sr
+
+
+async def _merge_gate_wrapper(
+    session: AsyncSession, *, org_id, project_id, definition, step, entity_type, entity_id,
+    from_status, to_status, routing_context, trust_snapshot, transition_id, correlation_id,
+) -> LineDecision:
+    """S5(P0-2): in-review→done merge-gate step = H1 merge gate 단일 통합.
+
+    ``evaluate_merge_gate()`` 를 정확히 1회 호출(라우터는 line_merge_gate_active 시 _preflight/enforce
+    skip)하고 H1 decision 을 line decision 으로 매핑한다. ASK_HUMAN 은 **H1 gate id 를 대표 gate_id**
+    로 재사용해 별도 line human-gate Gate 를 만들지 않는다(이중 pending 방지). H1 evidence metadata 는
+    evaluate_merge_gate 가 gate row 에 write-back(유지). 예외는 바깥 try/except 가 engine_failed→plain.
+    """
+    from app.services.merge_verdict_gate import AUTO_MERGE, BLOCK, evaluate_merge_gate
+
+    decision = await evaluate_merge_gate(
+        session, org_id, entity_id, pr_number=0, repo="", ci_result=None, pr_result=None
+    )
+    gate_id = decision.gate_id
+
+    def _common(status: str, run_mode: str, routing_decision: str):
+        return _record_step_run(
+            session, org_id=org_id, project_id=project_id, definition=definition, step=step,
+            entity_type=entity_type, entity_id=entity_id, from_status=from_status, to_status=to_status,
+            status=status, run_mode=run_mode, routing_decision=routing_decision,
+            routing_reason=f"merge-gate wrapper: {decision.decision}",
+            routing_context=routing_context, trust_snapshot=trust_snapshot,
+            gate_id=gate_id, h1_gate_id=gate_id, effective_gate_type="merge",
+            transition_id=transition_id, correlation_id=correlation_id,
+        )
+
+    if decision.decision == AUTO_MERGE:
+        sr = await _common("applied", "advisory_only", "auto_route")
+        return LineDecision(mode="advisory_only", status_to_apply=to_status,
+                            step_run_id=sr.id if sr else None, gate_id=gate_id)
+    if decision.decision == BLOCK:
+        sr = await _common("blocked_by_policy", "blocked_by_policy", "block")
+        return LineDecision(mode="blocked_by_policy", status_to_apply=None,
+                            step_run_id=sr.id if sr else None, gate_id=gate_id,
+                            blocking_reason="merge gate blocks this transition", http_status=409)
+    # ASK_HUMAN → gate_pending(대표 gate_id = H1 gate·별도 Gate 미생성).
+    sr = await _common("waiting_gate", "gate_pending", "ask_human")
+    return LineDecision(mode="gate_pending", status_to_apply=None,
+                        step_run_id=sr.id if sr else None, gate_id=gate_id,
+                        blocking_reason="merge gate requires human approval", http_status=409)
