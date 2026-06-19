@@ -65,7 +65,7 @@ export function StuckHandoffSection({ storyId, memberMap = {} }: StuckHandoffSec
   };
 
   const btn = {
-    idle: { cls: 'bg-destructive text-white hover:bg-destructive/90', Icon: AlertTriangle, label: t('fallbackNotifyOwner'), disabled: false },
+    idle: { cls: 'bg-destructive text-destructive-foreground hover:bg-destructive/90', Icon: AlertTriangle, label: t('fallbackNotifyOwner'), disabled: false },
     notifying: { cls: 'bg-destructive/10 text-destructive', Icon: Loader2, label: t('fallbackNotifying'), disabled: true },
     notified: { cls: 'bg-muted text-muted-foreground', Icon: Check, label: t('fallbackNotified'), disabled: true },
     failed: { cls: 'border border-destructive text-destructive hover:bg-destructive/10', Icon: RotateCcw, label: t('fallbackRetry'), disabled: false },
