@@ -725,7 +725,6 @@ async def update_story_status(
                 await fire_webhooks(db, org_id, "workflow_violation", _v_event)
             except Exception:
                 pass
-        epic_title: str | None = None
         # 41a6e294: status_changed side-effects(events→L1·webhook·L2·notif·activity)는 공유 helper로
         # 발화 — gate-driven done(gate_service)과 동일 경로(parity·드리프트 0).
         await emit_story_status_changed(

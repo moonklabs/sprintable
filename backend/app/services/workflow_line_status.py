@@ -111,25 +111,35 @@ def _blocking_reason(run: WorkflowLineStepRun) -> str | None:
 async def build_workflow_line_status(
     session: AsyncSession, org_id: uuid.UUID, story_id: uuid.UUID,
 ) -> WorkflowLineStatusResponse:
-    """story 의 workflow-line 상태 read model 을 조립한다(active 또는 terminal history)."""
-    runs = (await session.execute(
-        select(WorkflowLineStepRun).where(
-            WorkflowLineStepRun.org_id == org_id,
-            WorkflowLineStepRun.entity_type == "story",
-            WorkflowLineStepRun.entity_id == story_id,
-        ).order_by(WorkflowLineStepRun.started_at.desc())
-    )).scalars().all()
+    """story 의 workflow-line 상태 read model 을 조립한다(active 또는 terminal history).
 
-    active = next((r for r in runs if r.status in _OPEN_STEP_RUN_STATUSES), None)
+    ⭐bounded query(SME): runs 전체를 .all() 로 읽지 않고 active 는 LIMIT 1, history 는 LIMIT 5
+    로 DB-level 제한한다(스토리당 run 누적이 커도 상수 비용).
+    """
+    _story_runs = select(WorkflowLineStepRun).where(
+        WorkflowLineStepRun.org_id == org_id,
+        WorkflowLineStepRun.entity_type == "story",
+        WorkflowLineStepRun.entity_id == story_id,
+    )
+    # active = 미해소(open) run 중 가장 최근 1건(LIMIT 1).
+    active = (await session.execute(
+        _story_runs.where(WorkflowLineStepRun.status.in_(_OPEN_STEP_RUN_STATUSES))
+        .order_by(WorkflowLineStepRun.started_at.desc()).limit(1)
+    )).scalar_one_or_none()
+
     if active is None:
-        # active 없음 → terminal run 5개 history(AC③).
+        # active 없음 → terminal run 5개 history(LIMIT 5·AC③). open 이 없으니 최근 run 들은 terminal.
+        rows = (await session.execute(
+            _story_runs.where(WorkflowLineStepRun.status.not_in(_OPEN_STEP_RUN_STATUSES))
+            .order_by(WorkflowLineStepRun.started_at.desc()).limit(_HISTORY_LIMIT)
+        )).scalars().all()
         history = [
             HistoryItem(
                 id=r.id, status=r.status, from_status=r.from_status, to_status=r.to_status,
                 mode=r.mode, routing_decision=r.routing_decision, resolved_at=r.resolved_at,
                 correlation_id=r.correlation_id,
             )
-            for r in runs[:_HISTORY_LIMIT]
+            for r in rows
         ]
         return WorkflowLineStatusResponse(story_id=story_id, has_active=False, history=history)
 
