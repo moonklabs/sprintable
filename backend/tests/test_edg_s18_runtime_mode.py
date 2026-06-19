@@ -199,3 +199,54 @@ async def test_engine_enabled_shadow_enters_and_records(monkeypatch):
         # runtime shadow 가 config enforcing 을 cap → advisory_only(관측·비차단·relay 안 함)
         assert d.mode == "advisory_only" and d.proceeds and d.relay_step_run_id is None
     await engine.dispose()
+
+
+# ── ⭐SME 회귀: line_merge_gate_active 가 runtime mode 반영(default-off 무영향 계약) ──────
+@pytest.mark.skipif(not _REAL_DB_URL, reason="real Postgres 필요")
+@pytest.mark.anyio
+async def test_line_merge_gate_active_respects_runtime_mode(monkeypatch):
+    from app.services.workflow_line_engine import line_merge_gate_active
+    engine, Session = await _session()
+    async with Session() as s:
+        org = uuid.uuid4()
+        await _seed_line(s, org, "enforcing", step_type="merge-gate")  # config enforcing merge-gate
+
+        async def _active(**kw):
+            return await line_merge_gate_active(
+                s, org_id=org, project_id=None, entity_type="story",
+                from_status="in-review", to_status="done")
+
+        # ⭐default-off → False(라우터가 legacy H1 done gate 유지·우회 0·무영향 계약)
+        _set(monkeypatch, enabled=False)
+        assert await _active() is False
+        # runtime shadow(config enforcing 을 cap) → effective shadow → False
+        _set(monkeypatch, enabled=True, mode="shadow")
+        assert await _active() is False
+        # 미allowlist org → off → False
+        _set(monkeypatch, enabled=True, allowlist=str(uuid.uuid4()), mode="enforcing")
+        assert await _active() is False
+        # enabled + enforcing + allowlist 포함 → effective enforcing → True(라인이 done gate 소유)
+        _set(monkeypatch, enabled=True, allowlist=str(org), mode="enforcing")
+        assert await _active() is True
+    await engine.dispose()
+
+
+@pytest.mark.skipif(not _REAL_DB_URL, reason="real Postgres 필요")
+@pytest.mark.anyio
+async def test_line_merge_gate_active_false_when_circuit_degraded(monkeypatch):
+    """circuit breaker advisory 강등 시 effective != enforcing → 라인 미소유(legacy H1 유지)."""
+    from app.services.workflow_line_engine import line_merge_gate_active
+    engine, Session = await _session()
+    async with Session() as s:
+        org = uuid.uuid4()
+        await _seed_line(s, org, "enforcing", step_type="merge-gate")
+        # line_merge_gate_active 는 now 파라미터가 없어 실시간 기준 → failures 도 실시간으로 시드.
+        real_now = datetime.now(timezone.utc)
+        for i in range(5):  # 실 5분창 5회 → circuit trip → advisory 강등
+            await _engine_failure(s, org, real_now - timedelta(seconds=i * 10))
+        _set(monkeypatch, enabled=True, mode="enforcing")
+        # runtime=enforcing 이지만 circuit 강등으로 advisory → min(advisory,enforcing)=advisory → False
+        assert await line_merge_gate_active(
+            s, org_id=org, project_id=None, entity_type="story",
+            from_status="in-review", to_status="done", ) is False
+    await engine.dispose()

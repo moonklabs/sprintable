@@ -115,11 +115,20 @@ async def line_merge_gate_active(
     enforce_gate skip 여부 결정·이중 evaluate_merge_gate 방지·S5 AC⑦). 예외/비활성/non-enforcing 은
     False(현행 게이트 유지·fail-safe)."""
     try:
+        # ⭐S18(SME): 라인이 done gate 를 소유(라우터가 legacy H1 skip)하려면 effective mode 가
+        # enforcing 이어야 한다. config enforcing 만으로 판단하면 default-off/미allowlist/circuit-
+        # advisory 에서도 H1 legacy gate 가 우회돼 default-off 무영향 계약 위반. runtime ∧ config 의
+        # min 이 enforcing 일 때만 True(아니면 라우터가 기존 H1 게이트 유지·fail-safe).
+        from app.services.workflow_runtime_mode import min_mode, resolve_runtime_mode
+        runtime_mode = await resolve_runtime_mode(session, org_id)
+        if runtime_mode == "off":
+            return False
         definition = await _active_definition(session, org_id, project_id, entity_type)
         if definition is None:
             return False
         config = await _published_config(session, definition)
-        if str(config.get("rollout_mode") or "shadow").strip() != "enforcing":
+        config_mode = str(config.get("rollout_mode") or "shadow").strip()
+        if min_mode(runtime_mode, config_mode) != "enforcing":
             return False
         step = _match_step(config, from_status, to_status)
         return bool(step and _is_merge_gate_step(step))
