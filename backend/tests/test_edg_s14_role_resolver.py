@@ -256,4 +256,13 @@ async def test_s13_escalation_unresolved_role_visible_not_silent():
         assert c["unresolved"] == 1 and c["escalated"] == 0 and c["kept_pending"] == 0
         row = (await s.execute(select(WorkflowLineStepRun).where(WorkflowLineStepRun.id == sr.id))).scalar_one()
         assert row.delivery_status == "unresolved_assignee"  # silent prison 아님
+
+        # ⭐멱등(산티아고 SME): cron 재실행해도 escalated(unresolved) event 중복 기록 안 함.
+        from app.models.workflow_line import WorkflowLineStepRunEvent
+        c2 = await process_sla(s, now=_NOW)
+        assert c2["unresolved"] == 0 and c2["kept_pending"] == 1  # 재기록 skip
+        evs = (await s.execute(select(WorkflowLineStepRunEvent).where(
+            WorkflowLineStepRunEvent.step_run_id == sr.id,
+            WorkflowLineStepRunEvent.event_type == "escalated"))).scalars().all()
+        assert len(evs) == 1  # append-only event 1개만(중복 0)
     await engine.dispose()

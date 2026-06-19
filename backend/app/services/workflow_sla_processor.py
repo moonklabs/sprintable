@@ -151,10 +151,15 @@ async def process_sla(session: AsyncSession, now: datetime | None = None) -> dic
                     continue
                 # ⭐S14 fold-in: escalate_to(role/deputy)가 해소 안 되면 silent keep_pending 금지 →
                 # unresolved_assignee 로 가시화(board badge·silent prison 아님·S14 AC⑥).
-                sr.delivery_status = "unresolved_assignee"
-                _record_event(session, sr, "escalated",
-                              payload={"reason": "sla_timeout", "unresolved": True})
-                counts["unresolved"] += 1
+                # ⭐멱등(산티아고 SME·S8 동류): cron 재실행마다 append-only escalated(unresolved) event
+                # 중복 기록 방지 — 이미 unresolved 표시됐으면 재기록/재카운트 skip.
+                if sr.delivery_status != "unresolved_assignee":
+                    sr.delivery_status = "unresolved_assignee"
+                    _record_event(session, sr, "escalated",
+                                  payload={"reason": "sla_timeout", "unresolved": True})
+                    counts["unresolved"] += 1
+                else:
+                    counts["kept_pending"] += 1  # 이미 가시화됨·중복 event 0
                 continue
             counts["kept_pending"] += 1  # ⭐방치 아님·gate 유지(이미 escalate or escalate_to 없음)
             continue
