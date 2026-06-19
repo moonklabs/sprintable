@@ -30,9 +30,19 @@ async def _session():
         if url.startswith(prefix):
             url = "postgresql+asyncpg://" + url[len(prefix):]
             break
+    import sqlalchemy as sa
     engine = create_async_engine(url)
     async with engine.begin() as conn:
         await conn.run_sync(Base.metadata.create_all)
+        # ⭐create_all 은 alembic partial index 를 안 만든다 → B2(active 충돌)를 실재현하려면 0127 의
+        # uq_wf_step_run_active 를 수동 생성(grandfathered_applied 제외 포함). 이게 있어야 2nd
+        # transition 충돌/비충돌이 실제로 검증된다(create_all-only=tautological·까심 지적).
+        await conn.execute(sa.text("DROP INDEX IF EXISTS uq_wf_step_run_active"))
+        await conn.execute(sa.text(
+            "CREATE UNIQUE INDEX uq_wf_step_run_active ON workflow_line_step_runs "
+            "(org_id, entity_type, entity_id, from_status, to_status, attempt) "
+            "WHERE status NOT IN ('applied','rejected','failed','engine_failed','withdrawn',"
+            "'timed_out','cancelled','grandfathered','grandfathered_applied')"))
     return engine, async_sessionmaker(engine, expire_on_commit=False)
 
 
@@ -103,6 +113,31 @@ async def test_backfill_idempotent(monkeypatch):
         c2 = await backfill_grandfather(s, org, now=_NOW)  # 재실행
         assert c1["grandfathered"] == 1 and c2["grandfathered"] == 0  # idempotent
         assert len(await _markers(s, org, sid, "grandfathered")) == 1  # 중복 0
+    await engine.dispose()
+
+
+@pytest.mark.skipif(not _REAL_DB_URL, reason="real Postgres 필요")
+@pytest.mark.anyio
+async def test_resolve_backfill_orgs_global_enable_covers_inflight(monkeypatch):
+    """⭐B1(까심): allowlist 빈 + enabled(global-enable) 시 in-flight story 보유 org 전체 커버."""
+    from app.services.workflow_grandfather import resolve_backfill_orgs
+    engine, Session = await _session()
+    async with Session() as s:
+        org_a, org_b = uuid.uuid4(), uuid.uuid4()
+        await _story(s, org_a, "in-review")
+        await _story(s, org_b, "in-progress")
+        await _story(s, uuid.uuid4(), "done")  # in-flight 아님 → 미열거
+        await s.commit()
+        # allowlist 빈 + enabled → 전 org 활성 → in-flight org 전부 backfill 대상
+        _set(monkeypatch, enabled=True, allowlist="", mode="enforcing")
+        orgs = set(await resolve_backfill_orgs(s))
+        assert org_a in orgs and org_b in orgs
+        # allowlist 지정 → 그 org만
+        _set(monkeypatch, enabled=True, allowlist=str(org_a), mode="enforcing")
+        assert await resolve_backfill_orgs(s) == [org_a]
+        # disabled → []
+        _set(monkeypatch, enabled=False)
+        assert await resolve_backfill_orgs(s) == []
     await engine.dispose()
 
 

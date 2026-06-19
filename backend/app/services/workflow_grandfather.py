@@ -84,6 +84,30 @@ async def backfill_grandfather(
     return {"grandfathered": created, "gate_created": 0, "scanned": len(stories), "skipped_disabled": 0}
 
 
+async def resolve_backfill_orgs(session: AsyncSession) -> list[uuid.UUID]:
+    """backfill 대상 org 목록(B1·까심 QA): allowlist 지정 시 그 org, **allowlist 빈 + enabled(=전 org
+    활성) 시 in-flight story 보유 org 전체** 열거(global-enable 미커버 갭 방지). disabled → []."""
+    from app.core.config import settings
+    if not settings.decision_gate_line_enabled:
+        return []
+    allow: list[uuid.UUID] = []
+    for x in (settings.decision_gate_line_org_allowlist or "").split(","):
+        x = x.strip()
+        if not x:
+            continue
+        try:
+            allow.append(uuid.UUID(x))
+        except ValueError:
+            continue
+    if allow:
+        return allow
+    # global-enable(allowlist 빈): in-flight story 보유 org 전체(freeze 대상만·과대 스캔 회피).
+    rows = (await session.execute(
+        select(Story.org_id).where(Story.status.in_(_GRANDFATHER_STATUSES)).distinct()
+    )).scalars().all()
+    return list(rows)
+
+
 async def consume_grandfather(
     session: AsyncSession, org_id: uuid.UUID, entity_type: str, entity_id: uuid.UUID,
     from_status: str | None, to_status: str,

@@ -179,17 +179,9 @@ async def workflow_grandfather_backfill(
 ) -> JSONResponse:
     verify_cron(request)
     try:
-        from app.core.config import settings
-        from app.services.workflow_grandfather import backfill_grandfather
-        orgs: list[uuid.UUID] = []
-        for x in (settings.decision_gate_line_org_allowlist or "").split(","):
-            x = x.strip()
-            if not x:
-                continue
-            try:
-                orgs.append(uuid.UUID(x))
-            except ValueError:
-                continue
+        from app.services.workflow_grandfather import backfill_grandfather, resolve_backfill_orgs
+        # B1: allowlist org + global-enable(allowlist 빈+enabled) 시 in-flight org 전체 커버.
+        orgs = await resolve_backfill_orgs(session)
         results = {str(oid): await backfill_grandfather(session, oid) for oid in orgs}
         return _ok({"orgs": len(orgs), "results": results})
     except Exception as exc:
