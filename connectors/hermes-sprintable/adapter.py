@@ -79,6 +79,29 @@ from gateway.platforms.base import (
 
 logger = logging.getLogger(__name__)
 
+
+def _normalize_image_items(images: Any) -> list[dict[str, str]]:
+    """Normalize Sprintable payload ``images[]`` to fetchable image metadata."""
+    if not isinstance(images, list):
+        return []
+    normalized: list[dict[str, str]] = []
+    for idx, item in enumerate(images, start=1):
+        if not isinstance(item, dict):
+            continue
+        url = str(item.get("url") or "").strip()
+        if not url:
+            continue
+        mime = str(item.get("mime") or item.get("mime_type") or "").strip()
+        if mime and not mime.startswith("image/"):
+            continue
+        normalized.append({
+            "url": url,
+            "name": str(item.get("name") or f"sprintable-image-{idx}").strip(),
+            "mime": mime,
+        })
+    return normalized
+
+
 DEFAULT_API_URL = "https://sprintable-backend-dev-57iommnikq-du.a.run.app"
 RECONNECT_BACKOFF = [2, 5, 10, 30, 60]
 STREAM_READ_TIMEOUT = 90  # gateway heartbeats keep the stream alive
@@ -225,22 +248,17 @@ class SprintableAdapter(BasePlatformAdapter):
         ``build_native_content_parts`` step opens local files before encoding
         pixels. Fetch at consume time while the V4 URL is fresh.
         """
-        if not isinstance(images, list) or not self._http_client:
+        normalized_images = _normalize_image_items(images)
+        if not normalized_images or not self._http_client:
             return [], [], []
 
         media_urls: list[str] = []
         media_types: list[str] = []
         notes: list[str] = []
-        for idx, item in enumerate(images, start=1):
-            if not isinstance(item, dict):
-                continue
-            url = str(item.get("url") or "").strip()
-            name = str(item.get("name") or f"sprintable-image-{idx}").strip()
-            mime = str(item.get("mime") or item.get("mime_type") or "").strip()
-            if not url:
-                continue
-            if mime and not mime.startswith("image/"):
-                continue
+        for item in normalized_images:
+            url = item["url"]
+            name = item["name"]
+            mime = item["mime"]
             try:
                 resp = await self._http_client.get(url, timeout=20.0)
                 resp.raise_for_status()
@@ -276,7 +294,7 @@ class SprintableAdapter(BasePlatformAdapter):
         if event_type not in INJECTABLE_EVENT_TYPES:
             return  # not a recommended inject type (e.g. status_changed FYI)
         content = (data.get("content") or payload.get("content") or "").strip()
-        images = data.get("images") or payload.get("images") or []
+        images = _normalize_image_items(data.get("images") or payload.get("images"))
         if not content and not images:
             return  # nothing to inject (e.g. dispatched/system event without text/media)
 
