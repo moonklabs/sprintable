@@ -563,26 +563,41 @@ async def update_story_status(
     if _violation.violated and _violation_level == "block":
         raise HTTPException(status_code=400, detail=_violation.reason or "워크플로우 위반으로 상태 전이가 거부되었습니다.")
 
-    # H1-S5: in-review→done 직접 PATCH는 merge verdict gate preflight(플래그 active 시·AC②).
-    # transition rule(check_transition)과 직교 — 전이 유효성 통과 후 증거 게이트를 얹는다(AC④).
-    await _preflight_merge_gate(db, repo.org_id, story_before, body.status)
-    # S-GATE-2: config 게이트 집행(done) — flag-off면 no-op(무회귀). block→409·ask→HitlRequest park.
-    if body.status == "done" and story_before is not None:
-        from app.services.gate_enforce import enforce_gate
-        # HIGH②: actor_type 은 인증 컨텍스트에서 신뢰 도출(API 키=agent / JWT=human)·None→human 묵시 금지.
-        _g_actor_type = (
-            "agent" if auth.claims.get("app_metadata", {}).get("api_key_id") else "human"
-        )
-        _g_actor_id: uuid.UUID | None = None
-        try:  # actor_id 는 HitlRequest 귀속용(비보안)·best-effort.
-            _g_actor_id = await _resolve_team_member_id(auth, repo.org_id, db)
-        except Exception:
-            pass
-        await enforce_gate(
-            db, org_id=repo.org_id, project_id=getattr(story_before, "project_id", None),
-            work_type="done", actor_type=_g_actor_type, actor_id=_g_actor_id,
-            work_item_id=story_before.id, work_item_title=getattr(story_before, "title", None),
-        )
+    # E-DG S5(P0-2): enforcing 라인의 merge-gate step이 이 전이를 거버닝하면, 아래 라인 엔진이
+    # evaluate_merge_gate를 단일 평가한다 → 여기 _preflight_merge_gate/enforce_gate(done)는 skip해
+    # 이중 evaluate/이중 pending gate를 방지(AC⑦). 비-enforcing/비활성/예외는 False=현행 게이트 유지.
+    _line_owns_done_gate = False
+    if story_before is not None:
+        try:
+            from app.services.workflow_line_engine import line_merge_gate_active
+            _line_owns_done_gate = await line_merge_gate_active(
+                db, org_id=repo.org_id, project_id=getattr(story_before, "project_id", None),
+                entity_type="story", from_status=old_status, to_status=body.status,
+            )
+        except Exception:  # noqa: BLE001 — 불명 시 현행 게이트 유지(skip 안 함).
+            _line_owns_done_gate = False
+
+    if not _line_owns_done_gate:
+        # H1-S5: in-review→done 직접 PATCH는 merge verdict gate preflight(플래그 active 시·AC②).
+        # transition rule(check_transition)과 직교 — 전이 유효성 통과 후 증거 게이트를 얹는다(AC④).
+        await _preflight_merge_gate(db, repo.org_id, story_before, body.status)
+        # S-GATE-2: config 게이트 집행(done) — flag-off면 no-op(무회귀). block→409·ask→HitlRequest park.
+        if body.status == "done" and story_before is not None:
+            from app.services.gate_enforce import enforce_gate
+            # HIGH②: actor_type 은 인증 컨텍스트에서 신뢰 도출(API 키=agent / JWT=human)·None→human 묵시 금지.
+            _g_actor_type = (
+                "agent" if auth.claims.get("app_metadata", {}).get("api_key_id") else "human"
+            )
+            _g_actor_id: uuid.UUID | None = None
+            try:  # actor_id 는 HitlRequest 귀속용(비보안)·best-effort.
+                _g_actor_id = await _resolve_team_member_id(auth, repo.org_id, db)
+            except Exception:
+                pass
+            await enforce_gate(
+                db, org_id=repo.org_id, project_id=getattr(story_before, "project_id", None),
+                work_type="done", actor_type=_g_actor_type, actor_id=_g_actor_id,
+                work_item_id=story_before.id, work_item_title=getattr(story_before, "title", None),
+            )
 
     # E-DG S3: 워크플로우 라인 엔진(P0-1 fail-open). check_transition 후 / set_status 전. 활성 라인이
     # 없으면 plain(현 default-off=무영향). 엔진은 내부에서 모든 예외를 삼키지만, 호출부도 방어적으로
