@@ -149,6 +149,25 @@ async def workflow_handoff_watchdog(
         return _err("INTERNAL_ERROR", "Internal server error", 500)
 
 
+# ─── GET /api/v2/internal/cron/workflow-sla ───────────────────────────────────
+# E-DG S13(P1-3): human-gate SLA processor — pending gate 가 방치되지 않게 reminder→escalation→
+# timeout(keep_pending 기본·auto_approve 금지조건) 으로 제품이 독촉. hitl-timeouts 와 별도 endpoint.
+
+@router.get("/workflow-sla")
+async def workflow_sla(
+    request: Request,
+    session: AsyncSession = Depends(get_db),
+) -> JSONResponse:
+    verify_cron(request)
+    try:
+        from app.services.workflow_sla_processor import process_sla
+        counts = await process_sla(session)
+        return _ok(counts)
+    except Exception as exc:
+        logger.exception("cron error: %s", exc)
+        return _err("INTERNAL_ERROR", "Internal server error", 500)
+
+
 # ─── GET /api/v2/internal/cron/inbox-outbox ────────────────────────────────────
 
 @router.get("/inbox-outbox")
