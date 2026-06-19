@@ -590,12 +590,24 @@ async def update_story_status(
     if story_before is not None:
         from app.services.workflow_line_engine import evaluate_line_for_transition
 
+        # S4: actor 전파 — 라우터가 actor_id/type 을 안 넘기면 resolver 가 항상 no_member→cold_start 로
+        # 고정돼 실 actor trust 가 snapshot 에 안 담긴다(SME 적출). 인증 컨텍스트에서 신뢰 도출.
+        _line_actor_type = (
+            "agent" if auth.claims.get("app_metadata", {}).get("api_key_id") else "human"
+        )
+        _line_actor_id: uuid.UUID | None = None
+        try:
+            _line_actor_id = await _resolve_team_member_id(auth, repo.org_id, db)
+        except Exception:  # noqa: BLE001 — actor 해소 실패도 전이 비차단(엔진은 None→cold_start 처리).
+            _line_actor_id = None
+
         _line_decision = None
         try:
             _line_decision = await evaluate_line_for_transition(
                 db, org_id=repo.org_id, project_id=getattr(story_before, "project_id", None),
                 entity_type="story", entity_id=story_before.id,
                 from_status=old_status, to_status=body.status,
+                actor_id=_line_actor_id, actor_type=_line_actor_type,
             )
         except Exception:  # noqa: BLE001 — ⭐P0-1 절대보장: 엔진 실패가 전이를 freeze하지 않음.
             _line_decision = None
