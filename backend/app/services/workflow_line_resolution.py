@@ -232,6 +232,51 @@ async def _apply_epic_transition(
     await session.flush()
 
 
+async def _apply_sprint_transition(
+    session: AsyncSession, sr: WorkflowLineStepRun, resolver_id: uuid.UUID | None
+) -> None:
+    """S26: sprint 시작/마감 gate 승인 적용. native ``transition_sprint``(via_gate) 재사용(parallel 0·
+    repo.activate/close 로직 보존). ③SoD 없음(sprint=project 운영·member 필드 없음). dispatch 없음
+    (dispatch_capable=False·agent-handoff S27까지 금지). 1-active 제약 등 repo ValueError 면 skipped."""
+    from app.models.pm import Sprint
+    from app.services.member_resolver import ResolvedMember
+    from app.services.sprint import SprintTransitionError, transition_sprint
+
+    sprint = (await session.execute(
+        select(Sprint).where(Sprint.id == sr.entity_id).with_for_update()
+    )).scalar_one_or_none()
+    if sprint is None:
+        sr.status = "approved"
+        sr.resolved_at = _now()
+        await session.flush()
+        return
+    if sprint.status == sr.to_status:  # 멱등
+        sr.status = "applied"
+        sr.resolved_at = _now()
+        await session.flush()
+        return
+    if sr.from_status is not None and sprint.status != sr.from_status:  # stale
+        sr.status = "skipped"
+        sr.resolved_at = _now()
+        await session.flush()
+        return
+    approver = ResolvedMember(
+        id=resolver_id, user_id=None, name="gate_approver", type="human", role="member",
+        org_id=sr.org_id,
+    )
+    try:
+        await transition_sprint(session, sr.org_id, approver, sprint.id, sr.to_status, via_gate=True)
+    except (SprintTransitionError, ValueError) as exc:  # 1-active 제약 등 → 적용 불가·skip
+        sr.status = "skipped"
+        sr.resolved_at = _now()
+        await session.flush()
+        logger.warning("sprint_transition_apply_skip sr=%s to=%s err=%s", sr.id, sr.to_status, exc)
+        return
+    sr.status = "applied"
+    sr.resolved_at = _now()
+    await session.flush()
+
+
 async def apply_workflow_line_resolution(
     session: AsyncSession, step_run_id: uuid.UUID, new_status: str,
     resolver_id: uuid.UUID | None = None,
@@ -280,6 +325,9 @@ async def apply_workflow_line_resolution(
         return
     if sr.entity_type == "epic":
         await _apply_epic_transition(session, sr, resolver_id)
+        return
+    if sr.entity_type == "sprint":
+        await _apply_sprint_transition(session, sr, resolver_id)
         return
 
     from app.models.pm import Story  # 순환 회피 lazy import.

@@ -2,6 +2,7 @@ import uuid
 from datetime import date as date_type
 
 from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Query
+from pydantic import BaseModel
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -88,8 +89,26 @@ async def update_sprint(
     id: uuid.UUID,
     body: SprintUpdate,
     repo: SprintRepository = Depends(_get_repo),
+    session: AsyncSession = Depends(get_db),
+    org_id: uuid.UUID = Depends(get_verified_org_id),
+    auth: AuthContext = Depends(get_current_user),
 ) -> SprintResponse:
     data = body.model_dump(exclude_unset=True)
+    # ⭐E-DG S26: status 변경은 transition_sprint 단일경로(FSM/overlay/human-gate) 경유 — PATCH 옆문
+    # 봉인(S25 epic PATCH-bypass 교훈). 나머지 필드만 repo.update.
+    _status_change = data.pop("status", None)
+    if _status_change is not None:
+        from app.services.sprint import SprintTransitionError, transition_sprint
+        from app.services.member_resolver import resolve_member
+        current = await repo.get(id)
+        if current is not None and _status_change != current.status:
+            caller = await resolve_member(auth, org_id, session)
+            try:
+                await transition_sprint(session, org_id, caller, id, _status_change)
+            except (SprintTransitionError, ValueError) as exc:
+                raise HTTPException(
+                    status_code=400, detail=getattr(exc, "message", str(exc))
+                ) from exc
     # 8a2bbda2: 날짜가 갱신되면 duration 을 (병합된) 날짜에서 재산출 저장(dates 단일진실).
     if "start_date" in data or "end_date" in data:
         existing = await repo.get(id)
@@ -99,7 +118,8 @@ async def update_sprint(
             _dur = compute_sprint_duration(eff_start, eff_end)
             if _dur is not None:
                 data["duration"] = _dur
-    sprint = await repo.update(id, **data)
+    # status 만 전송돼 data 가 비면(transition_sprint 가 이미 적용) re-fetch 반환(빈 update 회피).
+    sprint = await repo.update(id, **data) if data else await repo.get(id)
     if sprint is None:
         raise HTTPException(status_code=404, detail="Sprint not found")
     return SprintResponse.model_validate(sprint)
@@ -125,27 +145,42 @@ async def delete_sprint(
 @router.post("/{id}/activate", response_model=SprintResponse)
 async def activate_sprint(
     id: uuid.UUID,
-    repo: SprintRepository = Depends(_get_repo),
+    session: AsyncSession = Depends(get_db),
+    org_id: uuid.UUID = Depends(get_verified_org_id),
+    auth: AuthContext = Depends(get_current_user),
 ) -> SprintResponse:
+    # E-DG S26: transition_sprint 단일경로 경유(line overlay 커버·옆문 봉인). repo.activate(1-active
+    # 제약) 로직은 transition_sprint 가 위임 보존. default-off 면 즉시 활성(거동 동일).
+    from app.services.sprint import SprintTransitionError, transition_sprint
+    from app.services.member_resolver import resolve_member
+    caller = await resolve_member(auth, org_id, session)
     try:
-        sprint = await repo.activate(id)
-    except ValueError as exc:
-        raise HTTPException(status_code=400, detail=str(exc)) from exc
+        sprint = await transition_sprint(session, org_id, caller, id, "active")
+        await session.commit()
+    except (SprintTransitionError, ValueError) as exc:
+        raise HTTPException(status_code=400, detail=getattr(exc, "message", str(exc))) from exc
     return SprintResponse.model_validate(sprint)
 
 
 @router.post("/{id}/close", response_model=SprintResponse)
 async def close_sprint(
     id: uuid.UUID,
-    repo: SprintRepository = Depends(_get_repo),
     db: AsyncSession = Depends(get_db),
+    org_id: uuid.UUID = Depends(get_verified_org_id),
+    auth: AuthContext = Depends(get_current_user),
 ) -> SprintResponse:
+    # E-DG S26: transition_sprint 단일경로 경유(line overlay 커버·옆문 봉인). repo.close(velocity·
+    # active|review 수용) 로직 위임 보존. default-off/advisory 면 즉시 마감(거동 동일).
+    from app.services.sprint import SprintTransitionError, transition_sprint
+    from app.services.member_resolver import resolve_member
+    caller = await resolve_member(auth, org_id, db)
     try:
-        sprint = await repo.close(id)
-    except ValueError as exc:
-        raise HTTPException(status_code=400, detail=str(exc)) from exc
-    # E-EVENTBUS P3 S9: sprint_closed → 프로젝트 전체 active 멤버에게 알림
-    if sprint.project_id:
+        sprint = await transition_sprint(db, org_id, caller, id, "closed")
+    except (SprintTransitionError, ValueError) as exc:
+        raise HTTPException(status_code=400, detail=getattr(exc, "message", str(exc))) from exc
+    # E-EVENTBUS P3 S9: sprint_closed → 프로젝트 전체 active 멤버에게 알림. ⚠️실제 마감(status==closed)일
+    # 때만(미래 enforcing gate-pending 시 status 유지 → 오알림 방지).
+    if sprint.project_id and sprint.status == "closed":
         members_result = await db.execute(
             select(TeamMember.id).where(
                 TeamMember.project_id == sprint.project_id,
@@ -157,7 +192,7 @@ async def close_sprint(
         if member_ids:
             await dispatch_notification(
                 db,
-                org_id=repo.org_id,
+                org_id=org_id,
                 event_type="sprint_closed",
                 target_member_ids=member_ids,
                 title=f"스프린트 종료: {sprint.title}",
@@ -275,3 +310,32 @@ async def checkin_sprint(
         "completion_pct": completion_pct,
         "missing_standups": missing_standups,
     }
+
+
+class SprintTransitionRequest(BaseModel):
+    status: str
+
+
+@router.post("/{id}/transition", response_model=SprintResponse)
+async def transition_sprint_endpoint(
+    id: uuid.UUID,
+    body: SprintTransitionRequest,
+    session: AsyncSession = Depends(get_db),
+    org_id: uuid.UUID = Depends(get_verified_org_id),
+    auth: AuthContext = Depends(get_current_user),
+) -> SprintResponse:
+    """E-DG S26: sprint status 전이 캐노니컬 경로(activate/close 외 review/archived 포함). FSM/overlay/
+    human-gate(enforcing) 단일 SSOT. caller 인증 컨텍스트 도출(RC① 패턴)."""
+    from app.services.sprint import SprintTransitionError, transition_sprint
+    from app.services.member_resolver import resolve_member
+    caller = await resolve_member(auth, org_id, session)
+    try:
+        sprint = await transition_sprint(session, org_id, caller, id, body.status)
+        await session.commit()
+        return SprintResponse.model_validate(sprint)
+    except SprintTransitionError as e:
+        _codes = {"SPRINT_NOT_FOUND": 404, "HUMAN_CONFIRM_REQUIRED": 403,
+                  "INVALID_STATUS": 422, "INVALID_SPRINT_TRANSITION": 422}
+        raise HTTPException(status_code=_codes.get(e.code, 400), detail={"code": e.code, "message": e.message})
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc

@@ -36,7 +36,8 @@ class SprintRepository(BaseRepository[Sprint]):
         sprint = await self.get(id)
         if sprint is None:
             raise ValueError(f"Sprint {id} not found")
-        if sprint.status != "active":
+        # E-DG S26: review 선택 단계 도입 → active 또는 review 에서 마감 가능(review→done).
+        if sprint.status not in ("active", "review"):
             raise ValueError(f"Cannot close sprint with status: {sprint.status}")
 
         all_result = await self.session.execute(
