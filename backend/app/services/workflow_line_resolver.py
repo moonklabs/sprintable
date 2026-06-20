@@ -21,6 +21,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models.pm import Story
 from app.services.trust_score import compute_member_trust_scores
+from app.services.workflow_readiness_matrix import get_readiness, record_unsupported_entity_attempt
 
 # story_points 가 이 이상이면 high-effort 신호(휴리스틱·S5 에서 정교화).
 _HIGH_EFFORT_POINTS = 8
@@ -85,12 +86,17 @@ async def resolve_routing_context(
 ) -> dict[str, Any]:
     """라우팅 컨텍스트 = entity · story predicate · actor · risk_flags · trust.
 
-    비-story entity 는 Phase1 범위 밖 → unsupported context 로 안전하게 내려보낸다(무리 확장 X).
+    S21: gating_eligible 엔티티(현 story)만 full context 생산. 비-eligible(doc/hyp/epic/sprint)은
+    readiness matrix 의 blocking_reason 으로 unsupported context 를 내려보내고 시도를 로그로 남긴다
+    (no-op 이 silent 아닐 것·fail-open). story 경로는 거동 불변.
     """
-    if entity_type != "story":
+    desc = get_readiness(entity_type)
+    if desc is None or not desc.gating_eligible:
+        record_unsupported_entity_attempt(entity_type, entity_id=entity_id)
         return {
             "entity_type": entity_type, "entity_id": str(entity_id),
-            "supported": False, "reason": "unsupported_entity_type",
+            "supported": False,
+            "reason": desc.blocking_reason if desc else "unknown_entity_type",
             "risk_flags": {"prod_touch": None, "uncertain": True},
             "trust": {"cold_start": True, "captured_before_verdict": True},
             "suggested_default": "ask_human",

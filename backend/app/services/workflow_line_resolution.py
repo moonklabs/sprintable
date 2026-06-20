@@ -15,10 +15,10 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models.workflow_line import (
-    WorkflowLineDefinition,
     WorkflowLineDefinitionVersion,
     WorkflowLineStepRun,
 )
+from app.services.workflow_readiness_matrix import get_readiness, record_unsupported_entity_attempt
 
 # 이 gate 에 묶인 step_run 이 아직 미해소(승인/반려 대기) 상태로 볼 수 있는 집합.
 _OPEN_STEP_RUN_STATUSES = frozenset({
@@ -73,7 +73,12 @@ async def apply_workflow_line_resolution(
     sr = (await session.execute(
         select(WorkflowLineStepRun).where(WorkflowLineStepRun.id == step_run_id).with_for_update()
     )).scalar_one_or_none()
-    if sr is None or sr.entity_type != "story":  # Phase1 = story-only
+    if sr is None:
+        return
+    # S21: story 외 엔티티는 readiness matrix gating_eligible 로 판정(현 story 만)·미지원은 로그+no-op.
+    _desc = get_readiness(sr.entity_type)
+    if _desc is None or not _desc.gating_eligible:
+        record_unsupported_entity_attempt(sr.entity_type, sr.from_status, sr.to_status, sr.entity_id)
         return
     step = await _step_config(session, sr)
 
@@ -153,7 +158,12 @@ async def relay_agent_handoff(
     sr = (await session.execute(
         select(WorkflowLineStepRun).where(WorkflowLineStepRun.id == step_run_id).with_for_update()
     )).scalar_one_or_none()
-    if sr is None or sr.entity_type != "story":  # Phase1 = story-only
+    if sr is None:
+        return None
+    # S21: gating_eligible 엔티티(현 story)만 handoff relay·미지원은 로그+no-op(fail-open).
+    _desc = get_readiness(sr.entity_type)
+    if _desc is None or not _desc.gating_eligible:
+        record_unsupported_entity_attempt(sr.entity_type, sr.from_status, sr.to_status, sr.entity_id)
         return None
 
     trigger_metadata = {

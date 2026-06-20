@@ -24,8 +24,12 @@ from app.services.activity_stream import extract_activities_best_effort
 from app.services.event_seq import assign_recipient_seq
 from app.services.member_resolver import resolve_member_identity
 from app.services.notification_dispatch import dispatch_notification
+from app.services.workflow_readiness_matrix import READINESS_MATRIX
 
-_ENTITY_TYPES = {"epic", "story", "doc"}
+# S21: dispatch 가능 엔티티는 readiness matrix 의 dispatch_capable SSOT 에서 도출(현 epic/story/doc).
+# hypothesis/sprint fetch 추가(S23/S26) 시 matrix descriptor 만 바꾸면 자동 확장. _fetch_entity 분기는
+# 그때 함께 확장(현 byte-동일).
+_ENTITY_TYPES = {e for e, d in READINESS_MATRIX.items() if d.dispatch_capable}
 
 
 class DispatchResponse(BaseModel):
