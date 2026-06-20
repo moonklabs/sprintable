@@ -124,6 +124,30 @@ async def test_kickoff_to_dev():
 
 
 @pytest.mark.anyio
+async def test_s20_line_active_blocks_non_merge_transition():
+    """⭐S20: line engine 이 비-merge 전이를 enforcing 차단하면 report-done 도 409(LINE_BLOCKED).
+    default-off 면 line 이 plain→proceeds 라 기존 동작 유지(무회귀)는 기존 stage 테스트가 입증."""
+    from app.services.workflow_line_engine import LineDecision
+    client, session, app = await _client()
+    try:
+        story = _mock_story(status="ready-for-dev")
+        mock_result = MagicMock()
+        mock_result.scalar_one_or_none.return_value = story
+        session.execute = AsyncMock(return_value=mock_result)
+        blocked = LineDecision(mode="blocked_by_policy", status_to_apply=None,
+                               blocking_reason="workflow line blocks", http_status=409)
+        with patch("app.services.workflow_line_engine.evaluate_line_for_transition",
+                   new=AsyncMock(return_value=blocked)):
+            async with client as c:
+                resp = await c.post("/api/v2/workflow/report-done", json={
+                    "story_id": str(STORY_ID), "stage": "kickoff", "agent_id": str(AGENT_ID)})
+        # ⭐비-merge 전이가 line enforcing 으로 차단됨(409). 에러 envelope 변형 대비 텍스트로 검증.
+        assert resp.status_code == 409 and "LINE_BLOCKED" in resp.text
+    finally:
+        app.dependency_overrides.clear()
+
+
+@pytest.mark.anyio
 async def test_dev_to_review():
     """dev 완료 → 스토리 in-review 전환, memo_id=None."""
     client, session, app = await _client()
@@ -249,12 +273,12 @@ async def test_all_valid_stages():
 
 @pytest.mark.anyio
 async def test_next_assignee_mapping():
-    """각 stage별 next_role이 올바른 member_id에 매핑된다."""
-    from app.routers.workflow_report import _ROLE_TO_MEMBER, _TRANSITIONS
+    """S20: 하드코딩 _ROLE_TO_MEMBER 제거(role 해소=line role_assignments resolver·SSOT)·
+    _TRANSITIONS 의 stage→next_role bootstrap 매핑만 잔존(AC①④)."""
+    import app.routers.workflow_report as wr
+    from app.routers.workflow_report import _TRANSITIONS
 
-    assert _ROLE_TO_MEMBER["po"] == uuid.UUID("05f52181-ea2a-42be-b9a8-9a418b72feb1")
-    assert _ROLE_TO_MEMBER["dev"] == uuid.UUID("9cac9d96-5474-45f7-941e-787407597b52")
-    assert _ROLE_TO_MEMBER["qa"] == uuid.UUID("685f3f72-c85c-4a32-898f-3d3320ba39ad")
+    assert not hasattr(wr, "_ROLE_TO_MEMBER")  # ⭐하드코딩 role→member UUID 제거됨
     assert _TRANSITIONS["kickoff"]["next_role"] == "dev"
     assert _TRANSITIONS["dev"]["next_role"] == "po"
     assert _TRANSITIONS["review"]["next_role"] == "qa"
@@ -265,7 +289,7 @@ async def test_next_assignee_mapping():
 @pytest.mark.anyio
 async def test_pipeline_sequence():
     """kickoff→dev→review→qa→merge→done 순서가 올바르다."""
-    from app.routers.workflow_report import _TRANSITIONS, _VALID_STAGES
+    from app.routers.workflow_report import _TRANSITIONS
 
     stage = "kickoff"
     visited = [stage]
