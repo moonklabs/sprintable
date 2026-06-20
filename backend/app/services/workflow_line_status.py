@@ -130,16 +130,17 @@ def _blocking_reason(run: WorkflowLineStepRun) -> str | None:
 
 
 async def build_workflow_line_status(
-    session: AsyncSession, org_id: uuid.UUID, story_id: uuid.UUID,
+    session: AsyncSession, org_id: uuid.UUID, story_id: uuid.UUID, entity_type: str = "story",
 ) -> WorkflowLineStatusResponse:
-    """story 의 workflow-line 상태 read model 을 조립한다(active 또는 terminal history).
+    """엔티티의 workflow-line 상태 read model 을 조립한다(active 또는 terminal history).
 
     ⭐bounded query(SME): runs 전체를 .all() 로 읽지 않고 active 는 LIMIT 1, history 는 LIMIT 5
-    로 DB-level 제한한다(스토리당 run 누적이 커도 상수 비용).
+    로 DB-level 제한한다(엔티티당 run 누적이 커도 상수 비용).
+    S21: entity_type 파라미터화(기본 "story"=back-compat). story_id 인자명은 호환 위해 유지.
     """
     _story_runs = select(WorkflowLineStepRun).where(
         WorkflowLineStepRun.org_id == org_id,
-        WorkflowLineStepRun.entity_type == "story",
+        WorkflowLineStepRun.entity_type == entity_type,
         WorkflowLineStepRun.entity_id == story_id,
     )
     # active = 미해소(open) run 중 가장 최근 1건(LIMIT 1).
@@ -236,7 +237,7 @@ async def _resolve_recipient_agent(
 
 
 async def build_workflow_line_status_batch(
-    session: AsyncSession, org_id: uuid.UUID, story_ids: list[uuid.UUID],
+    session: AsyncSession, org_id: uuid.UUID, story_ids: list[uuid.UUID], entity_type: str = "story",
 ) -> list[LineStatusSummary]:
     """여러 story 의 line-status 경량 요약(보드 badge 용). 단일 쿼리·N+1 0.
 
@@ -249,7 +250,7 @@ async def build_workflow_line_status_batch(
     rows = (await session.execute(
         select(WorkflowLineStepRun).where(
             WorkflowLineStepRun.org_id == org_id,
-            WorkflowLineStepRun.entity_type == "story",
+            WorkflowLineStepRun.entity_type == entity_type,  # S21: 파라미터화(기본 story=back-compat)
             WorkflowLineStepRun.entity_id.in_(story_ids),
             WorkflowLineStepRun.status.in_(_OPEN_STEP_RUN_STATUSES),
         ).order_by(WorkflowLineStepRun.started_at.desc())

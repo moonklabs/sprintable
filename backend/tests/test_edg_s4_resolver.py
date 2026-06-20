@@ -133,7 +133,10 @@ async def test_routing_context_non_story_unsupported():
     async with Session() as s:
         ctx = await resolve_routing_context(
             s, uuid.uuid4(), entity_type="epic", entity_id=uuid.uuid4())
-        assert ctx["supported"] is False and ctx["reason"] == "unsupported_entity_type"
+        # S21: 미지원 사유가 generic "unsupported_entity_type" → readiness matrix descriptor 의
+        # entity-specific blocking_reason 으로 정밀화(observability). epic = 전이규칙 미정의(S25).
+        assert ctx["supported"] is False
+        assert ctx["reason"] == "transition_rules_undefined_pending_s25"
         assert ctx["suggested_default"] == "ask_human"  # 불명=safe default
     await engine.dispose()
 
