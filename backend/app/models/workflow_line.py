@@ -187,6 +187,7 @@ class WorkflowLineStepApproval(Base):
 # S13 SLA processor 가 기록하는 append-only audit event type.
 STEP_RUN_EVENT_TYPES = frozenset({
     "status_apply", "dispatch_create", "wake", "reminded", "escalated", "sla_timeout", "auto_approved",
+    "fallback_notified",  # S12 Gap2: stuck handoff fallback human notification(idempotent marker)
 })
 
 

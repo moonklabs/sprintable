@@ -300,6 +300,28 @@ async def get_workflow_line_status(
     return await build_workflow_line_status(repo.session, repo.org_id, id)
 
 
+class FallbackNotifyRequest(BaseModel):
+    step_run_id: uuid.UUID
+
+
+# E-DG S12 Gap2: stuck handoff fallback human notification. 기존 _get_repo org-scoped auth·없는
+# story 404·dispatch_notification 재사용·idempotent(run당 1회·already_notified)·status rollback 0.
+@router.post("/{id}/workflow-line/fallback-notify")
+async def workflow_line_fallback_notify(
+    id: uuid.UUID,
+    body: FallbackNotifyRequest,
+    repo: StoryRepository = Depends(_get_repo),
+) -> dict:
+    story = await repo.get(id)
+    if story is None:
+        raise HTTPException(status_code=404, detail="Story not found")
+    from app.services.workflow_fallback_notify import fallback_notify
+    result = await fallback_notify(repo.session, repo.org_id, id, body.step_run_id)
+    if result.get("status") == "not_found":
+        raise HTTPException(status_code=404, detail="step_run not found for this story")
+    return result
+
+
 class BulkUpdateItem(BaseModel):
     id: uuid.UUID
     status: str | None = None
