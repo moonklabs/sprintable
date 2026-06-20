@@ -30,6 +30,7 @@ def _story(assignee_id):
     s.sprint_id = None
     s.assignee_id = assignee_id
     s.assignee_ids = [assignee_id] if assignee_id else []
+    s.reporter_id = None  # 9f25e74a: created_by(alias) 검증 위해 명시
     s.meeting_id = None
     s.title = "Build login"
     s.description = "OAuth + password"
