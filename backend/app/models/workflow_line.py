@@ -188,6 +188,7 @@ class WorkflowLineStepApproval(Base):
 STEP_RUN_EVENT_TYPES = frozenset({
     "status_apply", "dispatch_create", "wake", "reminded", "escalated", "sla_timeout", "auto_approved",
     "fallback_notified",  # S12 Gap2: stuck handoff fallback human notification(idempotent marker)
+    "withdrawn",          # S17: author recall/withdraw pending gate run
 })
 
 

@@ -332,6 +332,37 @@ async def workflow_line_fallback_notify(
     return result
 
 
+class WithdrawRequest(BaseModel):
+    step_run_id: uuid.UUID
+    reason: str | None = None
+
+
+# E-DG S17: author/owner pending gate run 철회(withdraw). requester/owner/admin 만·idempotent·
+# Gate enum 미확장(run/approval status 로만)·entity 미전이.
+@router.post("/{id}/workflow-line/withdraw")
+async def workflow_line_withdraw(
+    id: uuid.UUID,
+    body: WithdrawRequest,
+    repo: StoryRepository = Depends(_get_repo),
+    db: AsyncSession = Depends(get_db),
+    auth: AuthContext = Depends(get_current_user),
+) -> dict:
+    story = await repo.get(id)
+    if story is None:
+        raise HTTPException(status_code=404, detail="Story not found")
+    actor_id = await _resolve_team_member_id(auth, repo.org_id, db)
+    from app.services.workflow_recall import withdraw_pending_run
+    result = await withdraw_pending_run(repo.session, repo.org_id, id, body.step_run_id, actor_id, body.reason)
+    status = result.get("status")
+    if status == "not_found":
+        raise HTTPException(status_code=404, detail="step_run not found for this story")
+    if status == "forbidden":
+        raise HTTPException(status_code=403, detail="only requester/owner/admin can withdraw")
+    if status == "not_active":
+        raise HTTPException(status_code=409, detail=f"run not in active pending state ({result.get('run_status')})")
+    return result
+
+
 class BulkUpdateItem(BaseModel):
     id: uuid.UUID
     status: str | None = None
