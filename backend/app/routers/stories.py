@@ -274,6 +274,16 @@ async def get_workflow_line_status_batch(
     return await build_workflow_line_status_batch(repo.session, repo.org_id, story_ids)
 
 
+# E-DG S15(P1-6): line metric 집계(org-scoped·read-only·default-off org=no-op). ⚠️ /{id} 보다 먼저.
+@router.get("/workflow-line/metrics")
+async def get_workflow_line_metrics(
+    window_days: int = Query(default=14, ge=1, le=90),
+    repo: StoryRepository = Depends(_get_repo),
+) -> dict:
+    from app.services.workflow_line_metrics import compute_line_metrics
+    return await compute_line_metrics(repo.session, repo.org_id, window_days=window_days)
+
+
 @router.get("/{id}", response_model=StoryResponse)
 async def get_story(
     id: uuid.UUID,
