@@ -189,6 +189,26 @@ async def workflow_grandfather_backfill(
         return _err("INTERNAL_ERROR", "Internal server error", 500)
 
 
+# ─── GET /api/v2/internal/cron/seed-default-story-line ────────────────────────
+# E-DG S16: 뭉클랩(기본) org 의 default story line 을 published(shadow)로 시드(idempotent). PO 트리거.
+# ?org_id= 로 다른 org 시드. default-off·shadow 라 라이브 무영향.
+
+@router.get("/seed-default-story-line")
+async def seed_default_story_line_cron(
+    request: Request,
+    session: AsyncSession = Depends(get_db),
+    org_id: uuid.UUID | None = Query(default=None),
+) -> JSONResponse:
+    verify_cron(request)
+    try:
+        from app.services.workflow_line_seed import seed_default_story_line
+        result = await seed_default_story_line(session, org_id)
+        return _ok(result)
+    except Exception as exc:
+        logger.exception("cron error: %s", exc)
+        return _err("INTERNAL_ERROR", "Internal server error", 500)
+
+
 # ─── GET /api/v2/internal/cron/inbox-outbox ────────────────────────────────────
 
 @router.get("/inbox-outbox")
