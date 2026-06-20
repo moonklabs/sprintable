@@ -35,12 +35,14 @@ function deriveGateState(hypothesis: Hypothesis, gate: GateItem | undefined): Ga
 interface HypothesisGateBadgeProps {
   hypothesis: Hypothesis;
   gate: GateItem | undefined;
-  resolveName: (memberId: string) => string;
-  resolverId: string;
-  onResolved: () => void;
+  resolveName?: (memberId: string) => string;
+  resolverId?: string;
+  onResolved?: () => void;
+  // S24 follow-up: story-칩 연결 surface용 compact 모드 — 작은 Shield indicator(pending/rejected만·title 툴팁·라벨/evidence/action 생략).
+  compact?: boolean;
 }
 
-export function HypothesisGateBadge({ hypothesis, gate, resolveName, resolverId, onResolved }: HypothesisGateBadgeProps) {
+export function HypothesisGateBadge({ hypothesis, gate, resolveName = (id) => id, resolverId = '', onResolved = () => {}, compact = false }: HypothesisGateBadgeProps) {
   const t = useTranslations('hypotheses');
   const [resolving, setResolving] = useState(false);
   const [rejectNote, setRejectNote] = useState<string | null>(null); // null=닫힘·string=반려 입력 中
@@ -50,6 +52,17 @@ export function HypothesisGateBadge({ hypothesis, gate, resolveName, resolverId,
 
   const meta = META[state];
   const MetaIcon = meta.Icon;
+
+  // compact(story-칩 연결 surface): 작은 Shield indicator — pending/rejected만(주의 필요·confirmed 생략 boy-scout)·title 툴팁·라벨/evidence/action 생략.
+  if (compact) {
+    if (state === 'confirmed') return null;
+    return (
+      <span title={t(meta.labelKey)} aria-label={t(meta.labelKey)} className="inline-flex shrink-0 items-center">
+        <MetaIcon className={`size-3.5 ${state === 'rejected' ? 'text-destructive' : 'text-warning'}`} />
+      </span>
+    );
+  }
+
   const canAct = state === 'pending' && gate != null && gateNeedsAction(gate);
 
   const transition = async (status: 'approved' | 'rejected', note?: string) => {
@@ -68,9 +81,9 @@ export function HypothesisGateBadge({ hypothesis, gate, resolveName, resolverId,
     }
   };
 
-  // 결재자/초안자 evidence 미니(띠 우측).
+  // 결재자/초안자 evidence 미니(띠 우측). 확인=confirmed_by / 반려=gate.resolver_id(반려 경로엔 confirmed_by 미설정·QA LOW① fix·doc §3 "반려 시 {사람명}").
   const draftedBy = hypothesis.drafted_by_member_id;
-  const confirmedBy = hypothesis.confirmed_by_member_id;
+  const actorId = state === 'rejected' ? (gate?.resolver_id ?? null) : hypothesis.confirmed_by_member_id;
 
   return (
     <div className="space-y-1.5 rounded-xl border border-border bg-muted/20 px-3 py-2">
@@ -86,10 +99,10 @@ export function HypothesisGateBadge({ hypothesis, gate, resolveName, resolverId,
             {t('gateDraftedBy', { name: resolveName(draftedBy) })}
           </span>
         ) : null}
-        {confirmedBy && (state === 'confirmed' || state === 'rejected') ? (
+        {actorId && (state === 'confirmed' || state === 'rejected') ? (
           <span className="inline-flex items-center gap-1 text-[11px] text-muted-foreground">
             <User className="size-3 shrink-0" />
-            {t(state === 'rejected' ? 'gateRejectedBy' : 'gateConfirmedBy', { name: resolveName(confirmedBy) })}
+            {t(state === 'rejected' ? 'gateRejectedBy' : 'gateConfirmedBy', { name: resolveName(actorId) })}
           </span>
         ) : null}
         {/* approve/reject = GateInbox action 재사용(requires_human·pending 시만) */}

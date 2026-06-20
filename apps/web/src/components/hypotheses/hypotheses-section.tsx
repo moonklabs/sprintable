@@ -105,21 +105,17 @@ export function HypothesesSection({ epicId, projectId }: { epicId: string; proje
       const json = await res.json();
       const arr = (json?.data ?? []) as Hypothesis[];
       setItems(arr);
-      // S24: hyp별 gate(bounded N·storyGatesMap 미러) + team-members 이름맵.
-      const [gateResults, membersJson] = await Promise.all([
-        Promise.all(arr.map((h) =>
-          fetch(`/api/gates?work_item_id=${h.id}&work_item_type=hypothesis`)
-            .then((r) => (r.ok ? (r.json() as Promise<GateItem[]>) : []))
-            .catch(() => []),
-        )),
+      // S24 QA LOW② fix: per-hyp N fetch → status-batch(GateInbox식·pending+rejected status-only 2 fetch→클라 work_item_type='hypothesis' 필터·map). confirmed는 hyp payload(confirmed_by) 파생이라 gate 조회 불요.
+      const [pendingGates, rejectedGates, membersJson] = await Promise.all([
+        fetch('/api/gates?status=pending').then((r) => (r.ok ? (r.json() as Promise<GateItem[]>) : [])).catch(() => []),
+        fetch('/api/gates?status=rejected').then((r) => (r.ok ? (r.json() as Promise<GateItem[]>) : [])).catch(() => []),
         fetch('/api/team-members').then((r) => (r.ok ? r.json() : { data: [] })).catch(() => ({ data: [] })),
       ]);
       const gmap: Record<string, GateItem> = {};
-      arr.forEach((h, i) => {
-        const gs = gateResults[i] ?? [];
-        const g = gs.find((x) => x.status === 'pending' || x.status === 'rejected') ?? gs[0];
-        if (g) gmap[h.id] = g;
-      });
+      // pending 우선·rejected는 pending 없을 때만(한 hyp에 둘 다면 진행중 pending이 우세).
+      for (const g of [...rejectedGates, ...pendingGates]) {
+        if (g.work_item_type === 'hypothesis') gmap[g.work_item_id] = g;
+      }
       setHypGatesMap(gmap);
       const names: Record<string, string> = {};
       for (const m of (membersJson as { data?: { id: string; name: string }[] }).data ?? []) names[m.id] = m.name;
