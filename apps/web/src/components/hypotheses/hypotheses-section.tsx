@@ -7,6 +7,9 @@ import type { Hypothesis, HypothesisDraft } from '@sprintable/core-storage';
 import { HypothesisRow, type HypothesisRowActions } from './hypothesis-row';
 import { HypothesisVerdictCard } from './hypothesis-verdict-card';
 import { HypothesisForm, type HypothesisFormValue } from './hypothesis-form';
+import { HypothesisGateBadge } from './hypothesis-gate-badge';
+import type { GateItem } from '@/components/kanban/types';
+import { useDashboardContext } from '@/app/dashboard/dashboard-shell';
 
 /**
  * Epic-detail Hypotheses section (E1-S8 §4.1). The first human-facing surface that
@@ -90,13 +93,37 @@ export function HypothesesSection({ epicId, projectId }: { epicId: string; proje
   const [draft, setDraft] = useState<HypothesisDraft | null>(null);
   const [drafting, setDrafting] = useState(false);
   const [confirming, setConfirming] = useState(false);
+  // S24: gate approval 축 — hypGatesMap(per-hyp gate·work_item_type=hypothesis) + 멤버 이름맵.
+  const [hypGatesMap, setHypGatesMap] = useState<Record<string, GateItem>>({});
+  const [memberNames, setMemberNames] = useState<Record<string, string>>({});
+  const { currentTeamMemberId } = useDashboardContext();
 
   const load = useCallback(async () => {
     try {
       const res = await fetch(`/api/hypotheses?project_id=${projectId}&epic_id=${epicId}`, { cache: 'no-store' });
       if (!res.ok) { setItems([]); return; }
       const json = await res.json();
-      setItems((json?.data ?? []) as Hypothesis[]);
+      const arr = (json?.data ?? []) as Hypothesis[];
+      setItems(arr);
+      // S24: hyp별 gate(bounded N·storyGatesMap 미러) + team-members 이름맵.
+      const [gateResults, membersJson] = await Promise.all([
+        Promise.all(arr.map((h) =>
+          fetch(`/api/gates?work_item_id=${h.id}&work_item_type=hypothesis`)
+            .then((r) => (r.ok ? (r.json() as Promise<GateItem[]>) : []))
+            .catch(() => []),
+        )),
+        fetch('/api/team-members').then((r) => (r.ok ? r.json() : { data: [] })).catch(() => ({ data: [] })),
+      ]);
+      const gmap: Record<string, GateItem> = {};
+      arr.forEach((h, i) => {
+        const gs = gateResults[i] ?? [];
+        const g = gs.find((x) => x.status === 'pending' || x.status === 'rejected') ?? gs[0];
+        if (g) gmap[h.id] = g;
+      });
+      setHypGatesMap(gmap);
+      const names: Record<string, string> = {};
+      for (const m of (membersJson as { data?: { id: string; name: string }[] }).data ?? []) names[m.id] = m.name;
+      setMemberNames(names);
     } catch {
       setItems([]);
     }
@@ -248,13 +275,23 @@ export function HypothesesSection({ epicId, projectId }: { epicId: string; proje
         ) : sorted.length === 0 ? (
           !formOpen ? <p className="py-4 text-center text-sm text-muted-foreground">{t('empty')}</p> : null
         ) : (
-          sorted.map((h) =>
-            isVerdict(h) ? (
-              <HypothesisVerdictCard key={h.id} hypothesis={h} />
-            ) : (
-              <HypothesisRow key={h.id} hypothesis={h} actions={actions} />
-            ),
-          )
+          sorted.map((h) => (
+            <div key={h.id} className="space-y-2">
+              {/* S24 ⓑ gate approval 축(상단 띠) — outcome 축(아래 row/verdict)과 2축 분리 */}
+              <HypothesisGateBadge
+                hypothesis={h}
+                gate={hypGatesMap[h.id]}
+                resolveName={(id) => memberNames[id] ?? id.slice(0, 6)}
+                resolverId={currentTeamMemberId ?? ''}
+                onResolved={() => void load()}
+              />
+              {isVerdict(h) ? (
+                <HypothesisVerdictCard hypothesis={h} />
+              ) : (
+                <HypothesisRow hypothesis={h} actions={actions} />
+              )}
+            </div>
+          ))
         )}
       </div>
     </section>
