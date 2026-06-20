@@ -1,6 +1,6 @@
 """E-CAGE-REFEREE P3: HITL Gate CRUD + 전이 엔드포인트."""
 import uuid
-from datetime import datetime, timezone
+from datetime import datetime
 from typing import Any
 
 from fastapi import APIRouter, Depends, HTTPException, Query
@@ -10,7 +10,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.dependencies.auth import get_current_user, get_verified_org_id
 from app.dependencies.database import get_db
-from app.models.gate import Gate, is_valid_transition
+from app.models.gate import Gate
 from app.services.gate_service import create_gate, transition_gate
 from app.services.member_resolver import resolve_member
 
@@ -125,6 +125,7 @@ async def transition_gate_endpoint(
     # authz(93fc7aeb): 게이트 approve/reject는 **휴먼 member만**. 에이전트(API key)가 사람 검증
     # 게이트를 승인하면 "agent-assisted·human-validated" 웨지 전제가 무너지므로 차단(403).
     # 시스템 auto-resolution(resolve_gate_from_verdict)은 transition_gate 서비스 직호출이라 무영향.
+    _resolver_id = body.resolver_id
     if body.status in _HUMAN_REVIEW_STATUSES:
         resolved = await resolve_member(auth, org_id, session)
         if resolved.type != "human":
@@ -132,8 +133,11 @@ async def transition_gate_endpoint(
                 status_code=403,
                 detail="게이트 승인/거부는 휴먼 멤버만 가능합니다 (에이전트 승인 불가).",
             )
+        # ⭐S23 RC①(SoD 위조 봉): resolver_id 를 인증 caller 로 강제 — body 조작(타인 UUID)으로
+        # SoD(approver≠owner) 우회·confirmed_by_member_id 위조하는 경로 차단(전 gate 타입 공통).
+        _resolver_id = resolved.id
     try:
-        gate = await transition_gate(session, org_id, id, body.status, body.resolver_id, body.note)
+        gate = await transition_gate(session, org_id, id, body.status, _resolver_id, body.note)
         await session.commit()
         return GateResponse.model_validate(gate)
     except ValueError as e:

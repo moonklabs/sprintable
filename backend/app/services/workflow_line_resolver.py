@@ -101,13 +101,15 @@ async def resolve_routing_context(
             "trust": {"cold_start": True, "captured_before_verdict": True},
             "suggested_default": "ask_human",
         }
-    story = await session.get(Story, entity_id)
+    # S23 LOW fix: story predicate 는 story 전용. 비-story eligible(hypothesis)은 Story 조회 안 함
+    # (entity_id 로 Story get → None → entity_type 오기록 방지·observability 정합).
+    story = await session.get(Story, entity_id) if entity_type == "story" else None
     risk_flags = _risk_flags(story)
     trust = await resolve_trust_snapshot(session, org_id, actor_member_id, role_key)
     # safe default: 위험 불확실 또는 cold-start → ask_human 제안(S4 는 표기만·비차단).
     suggested = "ask_human" if (risk_flags.get("uncertain") or trust.get("cold_start")) else None
     return {
-        "entity_type": "story", "entity_id": str(entity_id), "supported": True,
+        "entity_type": entity_type, "entity_id": str(entity_id), "supported": True,
         "story": _story_predicate(story),
         "actor": {
             "member_id": str(actor_member_id) if actor_member_id else None,

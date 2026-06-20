@@ -228,7 +228,10 @@ async def transition_hypothesis(
     caller: ResolvedMember,
     hypothesis_id: uuid.UUID,
     payload: HypothesisTransition,
+    via_gate: bool = False,
 ) -> HypothesisResponse:
+    """hypothesis status 전이. ``via_gate=True`` = Decision Gate 승인이 적용하는 경로로, S23 overlay
+    재진입(re-gate 루프)을 막고 inline native 전이로 직행한다(caller=gate approver·human)."""
     repo = HypothesisRepository(session, org_id)
     hyp = await repo.get(hypothesis_id)
     if hyp is None:
@@ -241,6 +244,26 @@ async def transition_hypothesis(
         raise HypothesisServiceError(
             "INVALID_HYPOTHESIS_TRANSITION", f"불법 전이: {hyp.status} → {target}"
         )
+    # ⭐E-DG S23: proposed→active line overlay. enforcing 라인이면 human-gate 생성·proposed 유지
+    # (agent-drafted hyp 의 confirm 대기가 가시 gate 가 되고 승인 시 자동 재개). default-off/plain/
+    # 엔진실패 → 아래 inline human-only 로 폴백(byte-동일·agent 차단 유지·⚠️fail-open=active 통과 아님).
+    if target == "active" and hyp.status == "proposed" and not via_gate:
+        _decision = None
+        try:
+            from app.services.workflow_line_engine import evaluate_line_for_transition
+            _decision = await evaluate_line_for_transition(
+                session, org_id=org_id, project_id=hyp.project_id,
+                entity_type="hypothesis", entity_id=hyp.id,
+                from_status="proposed", to_status="active",
+                actor_id=caller.id, actor_type=caller.type,
+            )
+        except Exception:  # noqa: BLE001 — fail-open: 엔진 실패는 inline human-only 폴백(agent 차단 유지).
+            _decision = None
+        if _decision is not None and not _decision.proceeds:
+            # enforcing: human-gate pending. hyp proposed 유지·gate 가 confirm 대기 가시화(에러 아님).
+            await session.commit()  # gate/step_run 보존(stories.py:736 패턴·예외 시 rollback 방지).
+            return await _to_response(repo, hyp)
+
     # 'active' 확정은 휴먼만(§2.5.2). org admin/owner 검증은 라우터(S3)에서 보강.
     if target == "active" and caller.type != "human":
         raise HypothesisServiceError(

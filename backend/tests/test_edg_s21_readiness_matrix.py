@@ -28,15 +28,17 @@ def anyio_backend():
 # ── matrix descriptor 정확성(② 검증된 enum·gradient) ──────────────────────────
 def test_matrix_covers_five_entities_with_verified_contracts():
     assert set(READINESS_MATRIX) == {"story", "hypothesis", "epic", "sprint", "doc"}
-    # gradient: story 만 gating_eligible(S21).
+    # gradient: story + hypothesis(S23) gating_eligible. epic/sprint/doc 아직 미가동.
     assert get_readiness("story").gating_eligible is True
-    for e in ("hypothesis", "epic", "sprint", "doc"):
+    assert get_readiness("hypothesis").gating_eligible is True  # S23 flip
+    for e in ("epic", "sprint", "doc"):
         assert get_readiness(e).gating_eligible is False
         assert get_readiness(e).blocking_reason  # 사유 명시(silent 금지)
     # 검증된 enum(SSOT import) — hypothesis/epic.
     hyp = get_readiness("hypothesis")
     assert hyp.status_enum is not None and "measuring" in hyp.status_enum
-    assert ("proposed", "active") in hyp.valid_transitions  # native FSM
+    # S23: valid_transitions = overlay-gated subset(proposed→active 만)·full FSM 은 hypothesis.py SSOT.
+    assert hyp.valid_transitions == frozenset({("proposed", "active")})
     assert get_readiness("epic").status_enum == frozenset({"draft", "active", "done", "archived"})
     # doc=native status 없음·sprint=enum 없음(free-string).
     assert get_readiness("doc").has_native_status is False
@@ -47,8 +49,10 @@ def test_matrix_covers_five_entities_with_verified_contracts():
 
 def test_is_transition_supported_only_eligible():
     assert is_transition_supported("story", "backlog", "ready-for-dev") is True
-    # 비-eligible 은 valid transition 이라도 False(S21 미가동).
-    assert is_transition_supported("hypothesis", "proposed", "active") is False
+    # S23: hypothesis proposed→active 는 overlay-gated(True)·그 외 hyp 전이는 scope 밖(False·native 직행).
+    assert is_transition_supported("hypothesis", "proposed", "active") is True
+    assert is_transition_supported("hypothesis", "active", "measuring") is False
+    # 비-eligible(doc) + 미등록은 False.
     assert is_transition_supported("doc", "a", "b") is False
     assert is_transition_supported("unknown", "a", "b") is False  # 미등록=no-op
 
@@ -79,8 +83,8 @@ def test_unsupported_attempt_unknown_entity_logs_reason(caplog):
 async def test_routing_context_non_eligible_returns_descriptor_reason():
     from app.services.workflow_line_resolver import resolve_routing_context
     session = AsyncMock()  # 비-eligible 은 session.get 전에 반환 → DB 불필요
+    # S23: hypothesis 는 eligible 승격(session.get 경로) → 여기선 비-eligible 만 검사.
     for entity, reason in [
-        ("hypothesis", "dispatch_fetch_and_gate_wiring_pending_s23"),
         ("epic", "transition_rules_undefined_pending_s25"),
         ("sprint", "status_enum_undefined_pending_s26"),
         ("doc", "docs_status_undefined_pending_s22"),

@@ -17,6 +17,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models.doc import Doc
 from app.models.event import Event, EventType
+from app.models.hypothesis import Hypothesis
 from app.models.pm import Epic, Story
 from app.routers.agent_gateway import wake_agent
 from app.routers.events import _event_to_payload, _push_to_agent
@@ -72,6 +73,15 @@ async def _fetch_entity(
             )
         )
         r = row.one_or_none()
+    elif entity_type == "hypothesis":
+        # S23: assignee=owner_member_id(책임 human)·title=statement·description 컬럼 없음(None).
+        row = await db.execute(
+            select(Hypothesis.owner_member_id, Hypothesis.statement, Hypothesis.project_id).where(
+                Hypothesis.id == entity_id, Hypothesis.org_id == org_id
+            )
+        )
+        r0 = row.one_or_none()
+        r = (r0[0], r0[1], None, r0[2]) if r0 is not None else None
     else:
         return None, None, None, None
 

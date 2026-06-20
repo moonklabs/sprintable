@@ -21,7 +21,7 @@ import logging
 import uuid
 from dataclasses import dataclass
 
-from app.models.hypothesis import HYPOTHESIS_STATUSES, _VALID_TRANSITIONS as _HYP_TRANSITIONS
+from app.models.hypothesis import HYPOTHESIS_STATUSES
 from app.schemas.epic import EPIC_STATUSES
 
 logger = logging.getLogger(__name__)
@@ -62,10 +62,12 @@ READINESS_MATRIX: dict[str, EntityReadiness] = {
         entity_type="hypothesis",
         has_native_status=True,                  # hypothesis.py:81 String(24)
         status_enum=frozenset(HYPOTHESIS_STATUSES),       # hypothesis.py:39
-        valid_transitions=frozenset(_HYP_TRANSITIONS),    # hypothesis.py:44 (native FSM·계약 最강)
-        gating_eligible=False,
-        dispatch_capable=False,                  # _fetch_entity 미지원 → S23서 추가
-        blocking_reason="dispatch_fetch_and_gate_wiring_pending_s23",
+        # ⭐S23: overlay-gated subset = proposed→active 만(full native FSM 은 hypothesis.py:44 SSOT).
+        # measuring/verified 등 나머지 전이는 line overlay 안 검·native 직행(scope 명확).
+        valid_transitions=frozenset({("proposed", "active")}),
+        gating_eligible=True,                    # S23: proposed→active overlay 가동
+        dispatch_capable=True,                   # S23: _fetch_entity hypothesis 분기 추가
+        blocking_reason=None,
     ),
     "epic": EntityReadiness(
         entity_type="epic",
