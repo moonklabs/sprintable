@@ -68,6 +68,8 @@ class DocResponse(BaseModel):
     parent_id: uuid.UUID | None = None
     created_by: uuid.UUID | None = None
     assignee_id: uuid.UUID | None = None
+    # E-DG S22: doc decision status(doc-specific lifecycle·work status 아님). 기본 draft.
+    status: str = "draft"
     title: str
     slug: str
     canonical_slug: str

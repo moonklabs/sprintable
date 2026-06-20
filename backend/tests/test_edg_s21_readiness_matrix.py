@@ -28,10 +28,11 @@ def anyio_backend():
 # ── matrix descriptor 정확성(② 검증된 enum·gradient) ──────────────────────────
 def test_matrix_covers_five_entities_with_verified_contracts():
     assert set(READINESS_MATRIX) == {"story", "hypothesis", "epic", "sprint", "doc"}
-    # gradient: story + hypothesis(S23) gating_eligible. epic/sprint/doc 아직 미가동.
+    # gradient: story + hypothesis(S23) + doc(S22) gating_eligible. epic/sprint 아직 미가동.
     assert get_readiness("story").gating_eligible is True
     assert get_readiness("hypothesis").gating_eligible is True  # S23 flip
-    for e in ("epic", "sprint", "doc"):
+    assert get_readiness("doc").gating_eligible is True         # S22 flip
+    for e in ("epic", "sprint"):
         assert get_readiness(e).gating_eligible is False
         assert get_readiness(e).blocking_reason  # 사유 명시(silent 금지)
     # 검증된 enum(SSOT import) — hypothesis/epic.
@@ -40,8 +41,9 @@ def test_matrix_covers_five_entities_with_verified_contracts():
     # S23: valid_transitions = overlay-gated subset(proposed→active 만)·full FSM 은 hypothesis.py SSOT.
     assert hyp.valid_transitions == frozenset({("proposed", "active")})
     assert get_readiness("epic").status_enum == frozenset({"draft", "active", "done", "archived"})
-    # doc=native status 없음·sprint=enum 없음(free-string).
-    assert get_readiness("doc").has_native_status is False
+    # S22: doc=native status 컬럼(0128)·draft→confirmed overlay·sprint=enum 없음(free-string).
+    assert get_readiness("doc").has_native_status is True
+    assert get_readiness("doc").valid_transitions == frozenset({("draft", "confirmed")})
     assert get_readiness("sprint").status_enum is None and get_readiness("sprint").has_native_status is True
     # story=config-driven(모델 enum 상수 없음).
     assert get_readiness("story").status_enum is None and get_readiness("story").valid_transitions is None
@@ -52,8 +54,11 @@ def test_is_transition_supported_only_eligible():
     # S23: hypothesis proposed→active 는 overlay-gated(True)·그 외 hyp 전이는 scope 밖(False·native 직행).
     assert is_transition_supported("hypothesis", "proposed", "active") is True
     assert is_transition_supported("hypothesis", "active", "measuring") is False
-    # 비-eligible(doc) + 미등록은 False.
-    assert is_transition_supported("doc", "a", "b") is False
+    # S22: doc draft→confirmed overlay-gated(True)·그 외 doc 전이는 scope 밖.
+    assert is_transition_supported("doc", "draft", "confirmed") is True
+    assert is_transition_supported("doc", "confirmed", "superseded") is False
+    # 비-eligible(epic) + 미등록은 False.
+    assert is_transition_supported("epic", "draft", "active") is False
     assert is_transition_supported("unknown", "a", "b") is False  # 미등록=no-op
 
 
@@ -64,11 +69,11 @@ def test_get_readiness_unknown_returns_none():
 # ── 미지원 no-op 이 silent 아닐 것(④ observability) ──────────────────────────
 def test_unsupported_attempt_emits_structured_log(caplog):
     with caplog.at_level(logging.INFO, logger="app.services.workflow_readiness_matrix"):
-        record_unsupported_entity_attempt("doc", "draft", "published", uuid.uuid4())
+        record_unsupported_entity_attempt("sprint", "planning", "active", uuid.uuid4())
     rec = [r for r in caplog.records if "unsupported_entity_gate_attempt" in r.getMessage()]
     assert rec, "미지원 시도가 로그로 남아야 한다(silent 금지)"
     assert getattr(rec[0], "metric", None) == "unsupported_entity_gate_attempt_count"
-    assert getattr(rec[0], "blocking_reason", None) == "docs_status_undefined_pending_s22"
+    assert getattr(rec[0], "blocking_reason", None) == "status_enum_undefined_pending_s26"
 
 
 def test_unsupported_attempt_unknown_entity_logs_reason(caplog):
@@ -83,11 +88,10 @@ def test_unsupported_attempt_unknown_entity_logs_reason(caplog):
 async def test_routing_context_non_eligible_returns_descriptor_reason():
     from app.services.workflow_line_resolver import resolve_routing_context
     session = AsyncMock()  # 비-eligible 은 session.get 전에 반환 → DB 불필요
-    # S23: hypothesis 는 eligible 승격(session.get 경로) → 여기선 비-eligible 만 검사.
+    # S23 hypothesis·S22 doc 는 eligible 승격(session.get 경로) → 여기선 비-eligible(epic/sprint)만 검사.
     for entity, reason in [
         ("epic", "transition_rules_undefined_pending_s25"),
         ("sprint", "status_enum_undefined_pending_s26"),
-        ("doc", "docs_status_undefined_pending_s22"),
     ]:
         ctx = await resolve_routing_context(session, uuid.uuid4(), entity_type=entity, entity_id=uuid.uuid4())
         assert ctx["supported"] is False and ctx["reason"] == reason

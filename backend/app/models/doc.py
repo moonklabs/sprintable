@@ -9,6 +9,21 @@ from sqlalchemy.orm import Mapped, mapped_column, relationship
 from app.core.database import Base
 from app.models.base import OrgScopedMixin, SoftDeleteMixin, TimestampMixin
 
+# E-DG S22: doc decision lifecycle(doc-specific·work status 아님). hypothesis _VALID_TRANSITIONS 패턴 미러.
+DOC_STATUSES = frozenset({"draft", "confirmed", "denied", "superseded", "deprecated"})
+# 합법 (from, to) 전이. confirmed/denied→draft 외 역전이 금지. ⭐draft→confirmed 만 line overlay-gated.
+_DOC_VALID_TRANSITIONS: set[tuple[str, str]] = {
+    ("draft", "confirmed"),       # 승인(human-gate overlay 대상)
+    ("draft", "denied"),          # 반려
+    ("denied", "draft"),          # 재작성(revise·S28 토대)
+    ("confirmed", "superseded"),  # 신버전 대체
+    ("confirmed", "deprecated"),  # 폐기
+}
+
+
+def is_valid_doc_transition(from_status: str, to_status: str) -> bool:
+    return (from_status, to_status) in _DOC_VALID_TRANSITIONS
+
 
 class Doc(Base, OrgScopedMixin, TimestampMixin, SoftDeleteMixin):
     __tablename__ = "docs"
@@ -26,6 +41,9 @@ class Doc(Base, OrgScopedMixin, TimestampMixin, SoftDeleteMixin):
     assignee_id: Mapped[uuid.UUID | None] = mapped_column(
         UUID(as_uuid=True), nullable=True
     )
+    # E-DG S22: doc decision lifecycle(doc-specific 값·work status 아님). draft→confirmed 만 line
+    # overlay-gated(나머지 native 직행). 0128 마이그·default draft.
+    status: Mapped[str] = mapped_column(Text, nullable=False, server_default="draft")
     title: Mapped[str] = mapped_column(Text, nullable=False)
     slug: Mapped[str] = mapped_column(Text, nullable=False)
     # 4dd399c6: False=자동관리(제목 파생·untitled-* 교정 대상), True=사용자 고정(자동 교정 금지).

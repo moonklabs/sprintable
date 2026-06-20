@@ -214,3 +214,69 @@ async def dispatch_entity_to_assignee(
         "hypothesis_anchor": hypothesis_anchor,
     }
     return response, delivery
+
+
+async def dispatch_payload_to_member(
+    db: AsyncSession,
+    org_id: uuid.UUID,
+    member_id: uuid.UUID,
+    *,
+    title: str,
+    content: str,
+    source_entity_type: str,
+    source_entity_id: uuid.UUID,
+    project_id: uuid.UUID | None = None,
+    message: str | None = None,
+    trigger_metadata: dict[str, Any] | None = None,
+    sender_id: uuid.UUID | None = None,
+    commit: bool = True,
+) -> DispatchResponse:
+    """S22: entity assignee 와 무관하게 **특정 member**(예: doc author=created_by)에게 dispatched
+    이벤트 생성 + (agent) wake. ``dispatch_entity_to_assignee`` 의 member-dispatch core 를 author-wake
+    용으로 분리한 lower-level helper(assignee 고정 우회). 순서/불변식 동일(flush→seq→commit 후 wake).
+    ⚠️ commit=False 면 호출자 트랜잭션 합류(여기서 commit/wake 안 함·P1-2)."""
+    member = await resolve_member_identity(member_id, org_id, db)
+    if member is None:
+        return DispatchResponse(dispatched=False, assignee_id=member_id, reason="unresolved_member")
+    member_type = member.type
+
+    payload: dict[str, Any] = {
+        "entity_type": source_entity_type,
+        "entity_id": str(source_entity_id),
+        "title": title,
+        "message": message,
+        "content": content,
+        "timestamp": datetime.now(timezone.utc).isoformat(),
+    }
+    if trigger_metadata is not None:
+        payload["trigger_metadata"] = trigger_metadata  # 새 event type 금지·trigger_metadata additive
+
+    event = Event(
+        project_id=project_id,
+        org_id=org_id,
+        event_type=EventType.dispatched.value,
+        source_entity_type=source_entity_type,
+        source_entity_id=source_entity_id,
+        sender_id=sender_id,
+        recipient_id=member_id,
+        recipient_type=member_type,
+        payload=payload,
+        status="pending",
+    )
+    db.add(event)
+    await db.flush()
+    if member_type == "agent":
+        await assign_recipient_seq(db, event)
+    await extract_activities_best_effort(db, [event.id])
+
+    if commit:
+        await db.commit()
+        if member_type == "agent":
+            if event.recipient_seq is not None:
+                wake_agent(str(member_id), event.recipient_seq)
+            else:
+                _push_to_agent(str(member_id), _event_to_payload(event))
+    return DispatchResponse(
+        dispatched=True, event_id=event.id, assignee_id=member_id,
+        assignee_type=member_type, recipient_seq=event.recipient_seq, reason="ok",
+    )
