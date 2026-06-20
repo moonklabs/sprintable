@@ -19,10 +19,38 @@ def anyio_backend():
     return "asyncio"
 
 
+@pytest.mark.anyio
+async def test_gate_transition_forces_resolver_id_to_caller(monkeypatch):
+    """⭐RC①(SoD 위조 봉·CI-runnable): gate approve 시 body.resolver_id 조작 → 인증 caller.id 로 강제.
+    이게 없으면 owner 가 resolver_id=<타인 UUID> 제출해 SoD(approver≠owner)·confirmed_by 위조 가능."""
+    from unittest.mock import AsyncMock, MagicMock
+    from app.routers import gates as gm
+    from app.services.member_resolver import ResolvedMember
+    caller_id, spoofed = uuid.uuid4(), uuid.uuid4()
+    captured = {}
+
+    async def _fake_transition(session, org_id, gid, status, resolver_id, note):
+        captured["resolver_id"] = resolver_id
+        return MagicMock()
+
+    caller = ResolvedMember(
+        id=caller_id, user_id=None, name="h", type="human", role="member", org_id=uuid.uuid4())
+    monkeypatch.setattr(gm, "resolve_member", AsyncMock(return_value=caller))
+    monkeypatch.setattr(gm, "transition_gate", _fake_transition)
+    monkeypatch.setattr(gm.GateResponse, "model_validate", staticmethod(lambda g: g))
+    body = gm.GateTransitionRequest(status="approved", resolver_id=spoofed)
+    await gm.transition_gate_endpoint(
+        uuid.uuid4(), body, session=AsyncMock(), org_id=uuid.uuid4(), auth=MagicMock())
+    assert captured["resolver_id"] == caller_id  # ⭐조작된 spoofed 가 아니라 인증 caller
+    assert captured["resolver_id"] != spoofed
+
+
 async def _session():
     from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
     from app.core.database import Base
     import app.models  # noqa: F401
+    import app.models.participation  # noqa: F401 — org_gate_override FK 타깃(metadata 완전성·import 순서 무관)
+    import app.models.workflow_line  # noqa: F401
     url = _REAL_DB_URL
     for prefix in ("postgresql+psycopg2://", "postgresql+asyncpg://", "postgresql://"):
         if url.startswith(prefix):
