@@ -1830,7 +1830,7 @@ CREATE TABLE public.sprints (
     goal text,
     capacity integer,
     CONSTRAINT sprints_date_check CHECK ((start_date < end_date)),
-    CONSTRAINT sprints_status_check CHECK ((status = ANY (ARRAY['planning'::text, 'active'::text, 'closed'::text])))
+    CONSTRAINT sprints_status_check CHECK ((status = ANY (ARRAY['planning'::text, 'active'::text, 'review'::text, 'closed'::text, 'archived'::text])))
 );
 
 

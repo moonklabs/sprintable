@@ -132,11 +132,11 @@ async def test_routing_context_non_story_unsupported():
     engine, Session = await _session()
     async with Session() as s:
         ctx = await resolve_routing_context(
-            s, uuid.uuid4(), entity_type="sprint", entity_id=uuid.uuid4())
-        # 미지원 사유 = readiness matrix descriptor 의 entity-specific blocking_reason. ⚠️epic 은 S25서
-        # eligible 승격됐으므로 still-non-eligible 인 sprint 로 검사(sprint=enum 미정의·S26 대기).
+            s, uuid.uuid4(), entity_type="widget", entity_id=uuid.uuid4())
+        # ⚠️S26 후 5 등록 엔티티(story/hyp/doc/epic/sprint) 전부 eligible → 미지원 검사는 미등록 entity
+        # (widget)로. resolve_routing_context 가 unknown_entity_type 으로 unsupported 반환(fail-open).
         assert ctx["supported"] is False
-        assert ctx["reason"] == "status_enum_undefined_pending_s26"
+        assert ctx["reason"] == "unknown_entity_type"
         assert ctx["suggested_default"] == "ask_human"  # 불명=safe default
     await engine.dispose()
 

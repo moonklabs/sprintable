@@ -5,6 +5,21 @@ from typing import Any
 from pydantic import BaseModel, ConfigDict, field_validator, model_validator
 from app.schemas.story import _validate_metric_definition
 
+# E-DG S26: sprint status contract. de-facto(planning|active|done)에 review(선택)·archived(terminal) 신설.
+# ⭐review 선택(active→done 직행 허용·active→review→done도 OK). hypothesis/epic _VALID_TRANSITIONS 패턴.
+SPRINT_STATUSES = ("planning", "active", "review", "closed", "archived")
+_SPRINT_VALID_TRANSITIONS: set[tuple[str, str]] = {
+    ("planning", "active"),     # 시작(activate·1-active 제약·overlay-gated)
+    ("active", "review"),        # review 단계(선택)
+    ("active", "closed"),        # 마감 직행(review 생략·overlay-gated). close-state=closed(de-facto·decision① B)
+    ("review", "closed"),        # 마감(review 경유·overlay-gated)
+    ("closed", "archived"),      # 보관(native)
+}
+
+
+def is_valid_sprint_transition(from_status: str, to_status: str) -> bool:
+    return (from_status, to_status) in _SPRINT_VALID_TRANSITIONS
+
 
 def compute_sprint_duration(
     start_date: date | None,

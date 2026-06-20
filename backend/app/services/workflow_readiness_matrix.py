@@ -24,6 +24,7 @@ from dataclasses import dataclass
 from app.models.doc import DOC_STATUSES
 from app.models.hypothesis import HYPOTHESIS_STATUSES
 from app.schemas.epic import EPIC_STATUSES
+from app.schemas.sprint import SPRINT_STATUSES
 
 logger = logging.getLogger(__name__)
 
@@ -83,11 +84,13 @@ READINESS_MATRIX: dict[str, EntityReadiness] = {
     "sprint": EntityReadiness(
         entity_type="sprint",
         has_native_status=True,                  # pm.py:23 String(20) default planning
-        status_enum=None,                        # free-string(enum 계약 弱)
-        valid_transitions=None,
-        gating_eligible=False,
-        dispatch_capable=False,
-        blocking_reason="status_enum_undefined_pending_s26",
+        status_enum=frozenset(SPRINT_STATUSES),   # S26: schemas/sprint.py SPRINT_STATUSES
+        # ⭐S26: overlay-gated = 시작(planning→active)·마감(active→closed·review→closed). full FSM 은
+        # sprint.py _SPRINT_VALID_TRANSITIONS SSOT. archive(closed→archived)는 native 직행.
+        valid_transitions=frozenset({("planning", "active"), ("active", "closed"), ("review", "closed")}),
+        gating_eligible=True,                    # S26: sprint contract gate(advisory·dispatch는 S27)
+        dispatch_capable=False,                  # ⚠️agent-handoff S27까지 금지(AC)·sprint dispatch 미지원
+        blocking_reason=None,
     ),
     "doc": EntityReadiness(
         entity_type="doc",
