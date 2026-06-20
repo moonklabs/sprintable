@@ -491,6 +491,11 @@ export function KanbanBoard({ projectId }: KanbanBoardProps) {
   const filterActive = Boolean(
     selectedEpicId || selectedAssigneeId || assigneeTypeFilter || selectedLabelIds.length > 0 || searchQuery,
   );
+  // 9f25e74a AC1/AC2: assignee/sprint은 서버필터(cursor 페이지네이션)라 '더보기' 억제 대상서 제외 —
+  // 클라필터(epic/type/labels/search)만 hasMore 억제. assignee 필터 done이 10+ 여도 필터집합 cursor로 페이지네이션(누락 0).
+  const clientFilterActive = Boolean(
+    selectedEpicId || assigneeTypeFilter || selectedLabelIds.length > 0 || searchQuery,
+  );
 
   // position 기준으로 정렬
   const storiesByColumn = (columnId: string): KanbanStory[] => {
@@ -1213,7 +1218,7 @@ export function KanbanBoard({ projectId }: KanbanBoardProps) {
                     storyGatesMap={storyGatesMap}
                     storyLineMap={storyLineMap}
                     totalCount={filterActive ? colStories.length : columnTotals[col.id]}
-                    hasMore={filterActive ? false : !!columnCursors[col.id]}
+                    hasMore={clientFilterActive ? false : !!columnCursors[col.id]}
                     loadingMore={loadingMoreColumns[col.id] ?? false}
                     onLoadMore={() => handleLoadMore(col.id)}
                     collapsed={col.id === 'done' ? doneCollapsed : undefined}
