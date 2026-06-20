@@ -8,6 +8,7 @@ legacy ``_advance_story_on_merge_approve`` 로 폴백한다(무회귀).
 P1-1 idempotency: story/run 을 row lock(SELECT FOR UPDATE)하고, stale ``from_status``(story 가 이미
 다른 status 로 이동)면 적용하지 않는다. 이미 목표 status 면 no-op.
 """
+import logging
 import uuid
 from typing import Any
 
@@ -19,6 +20,8 @@ from app.models.workflow_line import (
     WorkflowLineStepRun,
 )
 from app.services.workflow_readiness_matrix import get_readiness, record_unsupported_entity_attempt
+
+logger = logging.getLogger(__name__)
 
 # 이 gate 에 묶인 step_run 이 아직 미해소(승인/반려 대기) 상태로 볼 수 있는 집합.
 _OPEN_STEP_RUN_STATUSES = frozenset({
@@ -60,6 +63,57 @@ async def _step_config(session: AsyncSession, step_run: WorkflowLineStepRun) -> 
     return {}
 
 
+async def _apply_hypothesis_active(
+    session: AsyncSession, sr: WorkflowLineStepRun, resolver_id: uuid.UUID | None
+) -> None:
+    """S23: hypothesis proposed→active gate 승인 적용. native ``transition_hypothesis`` 재사용
+    (parallel FSM 0·AC3 동일결과+confirmed_by). ⭐SoD(AC5·trust-gaming): approver ≠ owner_member_id."""
+    from app.models.hypothesis import Hypothesis
+    from app.schemas.hypothesis import HypothesisTransition
+    from app.services.hypothesis import transition_hypothesis
+    from app.services.member_resolver import ResolvedMember
+
+    hyp = (await session.execute(
+        select(Hypothesis).where(Hypothesis.id == sr.entity_id).with_for_update()
+    )).scalar_one_or_none()
+    if hyp is None:
+        sr.status = "approved"
+        sr.resolved_at = _now()
+        await session.flush()
+        return
+    if hyp.status == "active":  # 멱등: 다른 경로로 이미 active → no-op.
+        sr.status = "applied"
+        sr.resolved_at = _now()
+        await session.flush()
+        return
+    if hyp.status != "proposed":  # stale: proposed 아니면 미적용(killed/archived 등).
+        sr.status = "skipped"
+        sr.resolved_at = _now()
+        await session.flush()
+        return
+    # ⭐SoD: approver 미상이거나 owner 자신이면 차단(자기 hyp 자기 confirm = trust-gaming).
+    if resolver_id is None or resolver_id == hyp.owner_member_id:
+        sr.status = "skipped"
+        sr.resolved_at = _now()
+        await session.flush()
+        logger.warning(
+            "hypothesis_activation_sod_block sr=%s approver=%s owner=%s",
+            sr.id, resolver_id, hyp.owner_member_id,
+        )
+        return
+    # 적용: native 전이 재사용(via_gate=True → overlay re-gate 루프 차단). confirmed_by=approver.
+    approver = ResolvedMember(
+        id=resolver_id, user_id=None, name="gate_approver", type="human", role="member",
+        org_id=sr.org_id,
+    )
+    await transition_hypothesis(
+        session, sr.org_id, approver, hyp.id, HypothesisTransition(status="active"), via_gate=True,
+    )
+    sr.status = "applied"
+    sr.resolved_at = _now()
+    await session.flush()
+
+
 async def apply_workflow_line_resolution(
     session: AsyncSession, step_run_id: uuid.UUID, new_status: str,
     resolver_id: uuid.UUID | None = None,
@@ -97,6 +151,11 @@ async def apply_workflow_line_resolution(
         sr.status = "approved"
         sr.resolved_at = _now()
         await session.flush()
+        return
+
+    # S23: hypothesis 는 native FSM 재사용(transition_hypothesis·parallel 0). story 는 기존 inline.
+    if sr.entity_type == "hypothesis":
+        await _apply_hypothesis_active(session, sr, resolver_id)
         return
 
     from app.models.pm import Story  # 순환 회피 lazy import.
