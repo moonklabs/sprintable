@@ -202,6 +202,7 @@ export function KanbanBoard({ projectId }: KanbanBoardProps) {
     const params = new URLSearchParams();
     if (projectId) params.set('project_id', projectId);
     if (selectedSprintId) params.set('sprint_id', selectedSprintId);
+    if (selectedAssigneeId) params.set('assignee_id', selectedAssigneeId);
     params.set('status', status);
     params.set('limit', status === 'done' ? '10' : '20');
     if (cursor) params.set('cursor', cursor);
@@ -213,7 +214,7 @@ export function KanbanBoard({ projectId }: KanbanBoardProps) {
     const nextCursor = json.meta?.nextCursor ?? null;
     const total = json.meta?.total ?? stories.length;
     return { stories, total, nextCursor };
-  }, [projectId, selectedSprintId]);
+  }, [projectId, selectedSprintId, selectedAssigneeId]);
 
   // E-POLISH (story 23ea0e1d): columnTotals는 fetchData에서 단 1회 세팅되므로
   // optimistic mutation이 setStories만 갱신하면 카운트 배지가 stale해진다.
@@ -465,7 +466,7 @@ export function KanbanBoard({ projectId }: KanbanBoardProps) {
 
   const filteredStories = stories.filter((s) => {
     if (selectedEpicId && s.epic_id !== selectedEpicId) return false;
-    if (selectedAssigneeId && s.assignee_id !== selectedAssigneeId) return false;
+    // 9f25e74a AC1: assignee 필터는 서버사이드(fetchStoriesByStatus ?assignee_id=)로 이관 — 클라 이중필터 제거(done 페이지네이션 경계 AC2 동시 해소).
     if (assigneeTypeFilter) {
       const assignee = s.assignee_id ? memberMap[s.assignee_id] : null;
       if (assigneeTypeFilter === 'agent' && assignee?.type !== 'agent') return false;
