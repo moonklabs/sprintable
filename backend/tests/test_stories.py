@@ -19,6 +19,8 @@ def _mock_story(status: str = "backlog") -> MagicMock:
     s.epic_id = None
     s.sprint_id = None
     s.assignee_id = None
+    # 9f25e74a: reporter_id 신규 컬럼 — 미지정 시 MagicMock이 created_by(alias) 검증 실패하므로 명시
+    s.reporter_id = None
     s.meeting_id = None
     s.title = "Story 1"
     s.status = status

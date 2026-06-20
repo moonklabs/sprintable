@@ -77,6 +77,7 @@ async def list_stories(
     epic_id: uuid.UUID | None = Query(default=None),
     sprint_id: uuid.UUID | None = Query(default=None),
     assignee_id: uuid.UUID | None = Query(default=None),
+    reporter_id: uuid.UUID | None = Query(default=None, description="reporter(=creator) 서버필터·'내가 등록한'"),
     status_filter: str | None = Query(default=None, alias="status"),
     no_sprint: bool = Query(default=False, description="sprint 미배정 스토리만 반환"),
     limit: int = Query(default=1000, ge=1, le=2000),
@@ -101,6 +102,7 @@ async def list_stories(
             cursor=cursor_dt,
             sprint_id=sprint_id,
             assignee_id=assignee_id,
+            reporter_id=reporter_id,
         )
         if response is not None:
             response.headers["X-Total-Count"] = str(total)
@@ -118,6 +120,8 @@ async def list_stories(
         filters["sprint_id"] = sprint_id
     if assignee_id:
         filters["assignee_id"] = assignee_id
+    if reporter_id:
+        filters["reporter_id"] = reporter_id
     if status_filter:
         filters["status"] = status_filter
     stories = await repo.list(limit=limit, **filters)
@@ -211,6 +215,13 @@ async def create_story(
         user_id=uuid.UUID(auth.user_id),
     )
     repo = StoryRepository(session, org_id)
+    # 9f25e74a: reporter(=creator) — canonical member 로 해소(best-effort·실패 시 None·no-guess).
+    reporter_id: uuid.UUID | None = None
+    try:
+        from app.services.member_resolver import resolve_member
+        reporter_id = (await resolve_member(auth, org_id, session)).id
+    except Exception:  # noqa: BLE001 — reporter 해소 실패가 story 생성 막지 않음.
+        reporter_id = None
     # E-BOARD S5: assignee_ids 제공 시 단일 assignee_id(주담당)는 첫 요소로 동기화(미지정 시).
     effective_ids = (
         body.assignee_ids if body.assignee_ids is not None
@@ -226,6 +237,7 @@ async def create_story(
         epic_id=body.epic_id,
         sprint_id=body.sprint_id,
         assignee_id=primary_assignee,
+        reporter_id=reporter_id,
         meeting_id=body.meeting_id,
         status=body.status,
         priority=body.priority,

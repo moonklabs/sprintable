@@ -2,7 +2,7 @@ import uuid
 from datetime import datetime
 from typing import Any
 
-from pydantic import BaseModel, ConfigDict, field_validator
+from pydantic import BaseModel, ConfigDict, Field, field_validator
 
 _METRIC_SOURCES = frozenset({"internal_ops", "ga4", "manual"})
 _METRIC_DIRECTIONS = frozenset({"up", "down"})
@@ -171,6 +171,9 @@ class StoryResponse(BaseModel):
     epic_id: uuid.UUID | None = None
     sprint_id: uuid.UUID | None = None
     assignee_id: uuid.UUID | None = None
+    # 9f25e74a: reporter(=creator) 노출 — 응답 키 'created_by'·모델 attr reporter_id 에서 읽음
+    # (validation_alias). FE '내가 등록한' 토글이 소비. historical NULL 가능(0128 백필 미스).
+    created_by: uuid.UUID | None = Field(default=None, validation_alias="reporter_id")
     # E-BOARD S5: 복수 assignee. join 테이블 멤버. 레거시 행은 [assignee_id] 폴백.
     assignee_ids: list[uuid.UUID] = []
     # E-FILE S4: 보드 스토리 첨부 (column 값). list 아니면 [](레거시 None/mock 안전).
