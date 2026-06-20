@@ -92,6 +92,30 @@ async def test_requester_withdraws_and_closes_approvals():
 
 @pytest.mark.skipif(not _REAL_DB_URL, reason="real Postgres 필요")
 @pytest.mark.anyio
+async def test_withdraw_closes_linked_gate_blocks_bypass():
+    """⭐B1(까심): withdraw 가 linked Gate 를 'rejected'로 닫아 legacy merge approve 우회 차단."""
+    from app.services.workflow_recall import withdraw_pending_run
+    from app.models.gate import Gate
+    from sqlalchemy import select
+    engine, Session = await _session()
+    async with Session() as s:
+        org = uuid.uuid4()
+        admin = await _member(s, org, role="admin")
+        sr = await _run(s, org)
+        gate = Gate(id=uuid.uuid4(), org_id=org, work_item_id=sr.entity_id, work_item_type="story",
+                    gate_type="merge", status="pending")
+        s.add(gate)
+        sr.gate_id = gate.id
+        await s.commit()
+        r = await withdraw_pending_run(s, org, sr.entity_id, sr.id, admin)
+        assert r["status"] == "withdrawn"
+        g = (await s.execute(select(Gate).where(Gate.id == gate.id))).scalar_one()
+        assert g.status == "rejected" and g.resolver_id == admin  # Gate 닫힘(우회 봉합·enum 미확장)
+    await engine.dispose()
+
+
+@pytest.mark.skipif(not _REAL_DB_URL, reason="real Postgres 필요")
+@pytest.mark.anyio
 async def test_admin_can_withdraw_and_stranger_forbidden():
     from app.services.workflow_recall import withdraw_pending_run
     engine, Session = await _session()

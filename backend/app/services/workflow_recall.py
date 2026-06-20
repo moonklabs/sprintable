@@ -13,6 +13,7 @@ from datetime import datetime, timezone
 from sqlalchemy import select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.models.gate import Gate
 from app.models.team import TeamMember
 from app.models.workflow_line import (
     WorkflowLineStepApproval,
@@ -82,6 +83,17 @@ async def withdraw_pending_run(
                 WorkflowLineStepApproval.approval_group_id == sr.approval_group_id,
                 WorkflowLineStepApproval.status == "pending",
             ).values(status="withdrawn", resolved_at=_now())
+        )
+    # ⭐B1(까심): Gate instance 도 닫는다. 안 닫으면 다른 approver 가 POST /gates/{id}/transition→approved
+    # 시 find_active_step_run_for_gate 가 withdrawn run 을 못 찾아 legacy _advance_story_on_merge_approve
+    # 로 story=done 우회. Gate enum 미확장 유지 — 기존 'rejected'(withdraw 시맨틱)로 pending gate 닫음.
+    gate_ids = [g for g in (sr.gate_id, sr.h1_gate_id) if g is not None]
+    if gate_ids:
+        await session.execute(
+            update(Gate).where(
+                Gate.id.in_(gate_ids), Gate.org_id == org_id, Gate.status == "pending",
+            ).values(status="rejected", resolver_id=actor_id, resolved_at=_now(),
+                     resolution_note="withdrawn by author")
         )
     # ⑥ withdrawn event.
     session.add(WorkflowLineStepRunEvent(
