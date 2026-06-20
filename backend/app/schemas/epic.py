@@ -7,6 +7,20 @@ from pydantic import BaseModel, ConfigDict
 EPIC_STATUSES = ("draft", "active", "done", "archived")
 EPIC_PRIORITIES = ("critical", "high", "medium", "low")
 
+# E-DG S25: epic decision lifecycle 전이규칙. ⭐draft→active·active→done 만 line overlay-gated
+# (나머지 archive 류는 native 직행). hypothesis _VALID_TRANSITIONS 패턴 미러.
+_EPIC_VALID_TRANSITIONS: set[tuple[str, str]] = {
+    ("draft", "active"),       # activation(human-gate overlay)
+    ("active", "done"),        # completion(aggregate-gate overlay)
+    ("active", "archived"),    # native
+    ("done", "archived"),      # native
+    ("draft", "archived"),     # native
+}
+
+
+def is_valid_epic_transition(from_status: str, to_status: str) -> bool:
+    return (from_status, to_status) in _EPIC_VALID_TRANSITIONS
+
 
 class EpicCreate(BaseModel):
     project_id: uuid.UUID

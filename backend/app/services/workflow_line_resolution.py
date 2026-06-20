@@ -172,6 +172,66 @@ async def _apply_doc_confirmed(
     await session.flush()
 
 
+async def _apply_epic_transition(
+    session: AsyncSession, sr: WorkflowLineStepRun, resolver_id: uuid.UUID | None
+) -> None:
+    """S25: epic draft→active / active→done gate 승인 적용. native ``transition_epic``(via_gate) 재사용
+    (parallel 0). ⭐SoD(draft→active activation 만): approver ≠ epic.assignee_id(owner proxy·fail-closed).
+    ⚠️epic assignee 흔히 null→enforcing 시 과차단 — enforcing 전 SoD 대상 project owner 로 정교화 필요
+    (enable-prep·default-off 무해). active→done(completion)은 SoD 무관."""
+    from app.models.pm import Epic
+    from app.services.epic import transition_epic
+    from app.services.member_resolver import ResolvedMember
+
+    epic = (await session.execute(
+        select(Epic).where(Epic.id == sr.entity_id).with_for_update()
+    )).scalar_one_or_none()
+    if epic is None:
+        sr.status = "approved"
+        sr.resolved_at = _now()
+        await session.flush()
+        return
+    if epic.status == sr.to_status:  # 멱등
+        sr.status = "applied"
+        sr.resolved_at = _now()
+        await session.flush()
+        return
+    if sr.from_status is not None and epic.status != sr.from_status:  # stale
+        sr.status = "skipped"
+        sr.resolved_at = _now()
+        await session.flush()
+        return
+    # ⭐SoD: activation(draft→active)만·approver 미상 ∨ assignee 불명 ∨ ==assignee → 차단(fail-closed).
+    if sr.to_status == "active" and (
+        resolver_id is None or epic.assignee_id is None or resolver_id == epic.assignee_id
+    ):
+        sr.status = "skipped"
+        sr.resolved_at = _now()
+        await session.flush()
+        logger.warning(
+            "epic_activation_sod_block sr=%s approver=%s assignee=%s",
+            sr.id, resolver_id, epic.assignee_id,
+        )
+        return
+    approver = ResolvedMember(
+        id=resolver_id, user_id=None, name="gate_approver", type="human", role="member",
+        org_id=sr.org_id,
+    )
+    await transition_epic(session, sr.org_id, approver, epic.id, sr.to_status, via_gate=True)
+    # assignee 자동재개: epic assignee 에게 dispatched(commit=False·gate 트랜잭션 합류·§6 tx commit 0).
+    if epic.assignee_id is not None:
+        from app.services.agent_dispatch import dispatch_payload_to_member
+        await dispatch_payload_to_member(
+            session, sr.org_id, epic.assignee_id,
+            title=epic.title or "epic", content=f"[epic {sr.to_status}] {epic.title or ''}".strip(),
+            source_entity_type="epic", source_entity_id=epic.id, project_id=epic.project_id,
+            trigger_metadata={"source": "workflow_line", "reason": f"epic_{sr.to_status}"}, commit=False,
+        )
+    sr.status = "applied"
+    sr.resolved_at = _now()
+    await session.flush()
+
+
 async def apply_workflow_line_resolution(
     session: AsyncSession, step_run_id: uuid.UUID, new_status: str,
     resolver_id: uuid.UUID | None = None,
@@ -217,6 +277,9 @@ async def apply_workflow_line_resolution(
         return
     if sr.entity_type == "doc":
         await _apply_doc_confirmed(session, sr, resolver_id)
+        return
+    if sr.entity_type == "epic":
+        await _apply_epic_transition(session, sr, resolver_id)
         return
 
     from app.models.pm import Story  # 순환 회피 lazy import.

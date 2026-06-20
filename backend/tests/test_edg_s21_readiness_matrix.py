@@ -32,7 +32,8 @@ def test_matrix_covers_five_entities_with_verified_contracts():
     assert get_readiness("story").gating_eligible is True
     assert get_readiness("hypothesis").gating_eligible is True  # S23 flip
     assert get_readiness("doc").gating_eligible is True         # S22 flip
-    for e in ("epic", "sprint"):
+    assert get_readiness("epic").gating_eligible is True        # S25 flip
+    for e in ("sprint",):
         assert get_readiness(e).gating_eligible is False
         assert get_readiness(e).blocking_reason  # 사유 명시(silent 금지)
     # 검증된 enum(SSOT import) — hypothesis/epic.
@@ -57,8 +58,11 @@ def test_is_transition_supported_only_eligible():
     # S22: doc draft→confirmed overlay-gated(True)·그 외 doc 전이는 scope 밖.
     assert is_transition_supported("doc", "draft", "confirmed") is True
     assert is_transition_supported("doc", "confirmed", "superseded") is False
-    # 비-eligible(epic) + 미등록은 False.
-    assert is_transition_supported("epic", "draft", "active") is False
+    # S25: epic draft→active·active→done overlay-gated(True)·done→archived scope 밖.
+    assert is_transition_supported("epic", "draft", "active") is True
+    assert is_transition_supported("epic", "done", "archived") is False
+    # 비-eligible(sprint) + 미등록은 False.
+    assert is_transition_supported("sprint", "planning", "active") is False
     assert is_transition_supported("unknown", "a", "b") is False  # 미등록=no-op
 
 
@@ -90,7 +94,6 @@ async def test_routing_context_non_eligible_returns_descriptor_reason():
     session = AsyncMock()  # 비-eligible 은 session.get 전에 반환 → DB 불필요
     # S23 hypothesis·S22 doc 는 eligible 승격(session.get 경로) → 여기선 비-eligible(epic/sprint)만 검사.
     for entity, reason in [
-        ("epic", "transition_rules_undefined_pending_s25"),
         ("sprint", "status_enum_undefined_pending_s26"),
     ]:
         ctx = await resolve_routing_context(session, uuid.uuid4(), entity_type=entity, entity_id=uuid.uuid4())

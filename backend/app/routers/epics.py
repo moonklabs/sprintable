@@ -2,6 +2,7 @@ import uuid
 from datetime import datetime
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Response
+from pydantic import BaseModel
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.dependencies.auth import AuthContext, enforce_body_context, get_current_user, get_verified_org_id
@@ -181,3 +182,35 @@ async def get_epic_progress(
     if epic is None:
         raise HTTPException(status_code=404, detail="Epic not found")
     return await repo.get_progress(id)
+
+
+class EpicTransitionRequest(BaseModel):
+    status: str
+
+
+@router.post("/{id}/transition", response_model=EpicResponse)
+async def transition_epic_endpoint(
+    id: uuid.UUID,
+    body: EpicTransitionRequest,
+    session: AsyncSession = Depends(get_db),
+    org_id: uuid.UUID = Depends(get_verified_org_id),
+    auth: AuthContext = Depends(get_current_user),
+) -> EpicResponse:
+    """E-DG S25: epic decision lifecycle 전이(create/update 분리). draft→active(human-only)·active→done
+    line overlay. caller 는 인증 컨텍스트에서 도출(RC① 패턴·body 신뢰 X)."""
+    from app.services.epic import EpicTransitionError, transition_epic
+    from app.services.member_resolver import resolve_member
+
+    caller = await resolve_member(auth, org_id, session)
+    try:
+        epic = await transition_epic(session, org_id, caller, id, body.status)
+        await session.commit()
+        return EpicResponse.model_validate(epic)
+    except EpicTransitionError as e:
+        _codes = {
+            "EPIC_NOT_FOUND": 404, "HUMAN_CONFIRM_REQUIRED": 403,
+            "INVALID_STATUS": 422, "INVALID_EPIC_TRANSITION": 422,
+        }
+        raise HTTPException(
+            status_code=_codes.get(e.code, 400), detail={"code": e.code, "message": e.message}
+        )
