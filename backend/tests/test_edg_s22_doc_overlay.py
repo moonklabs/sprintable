@@ -38,6 +38,23 @@ def test_matrix_doc_eligible_draft_to_confirmed_only():
     assert is_transition_supported("doc", "confirmed", "superseded") is False  # scope 밖
 
 
+@pytest.mark.anyio
+async def test_apply_sod_blocks_author_null_doc():
+    """⭐RC②(SoD fail-closed·CI-runnable·skipif 없음): created_by=None(저자 불명) doc → confirm 차단.
+    없으면 created_by=null 생성 후 self-confirm 으로 SoD 우회(UUID==None=False 빈틈)."""
+    from unittest.mock import AsyncMock, MagicMock
+    from app.services.workflow_line_resolution import _apply_doc_confirmed
+    doc = MagicMock(status="draft", created_by=None, id=uuid.uuid4(),
+                    title="x", project_id=uuid.uuid4())
+    result = MagicMock()
+    result.scalar_one_or_none.return_value = doc
+    session = AsyncMock()
+    session.execute = AsyncMock(return_value=result)
+    sr = MagicMock(entity_type="doc", entity_id=doc.id, org_id=uuid.uuid4())
+    await _apply_doc_confirmed(session, sr, resolver_id=uuid.uuid4())  # 임의 approver
+    assert sr.status == "skipped"  # author 불명 → fail-closed 차단(transition_doc 미도달)
+
+
 async def _session():
     from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
     from app.core.database import Base

@@ -142,8 +142,9 @@ async def _apply_doc_confirmed(
         sr.resolved_at = _now()
         await session.flush()
         return
-    # ⭐SoD: approver 미상이거나 author(created_by) 자신이면 차단(자기 doc 자기 confirm).
-    if resolver_id is None or resolver_id == doc.created_by:
+    # ⭐SoD(RC②): approver 미상 OR author 불명(created_by None) OR author 자신이면 차단. ⚠️created_by
+    # None 을 fail-closed 로 막지 않으면 created_by=null doc 생성 후 self-confirm 으로 SoD 우회([[feedback_actor_type_failclosed]]).
+    if resolver_id is None or doc.created_by is None or resolver_id == doc.created_by:
         sr.status = "skipped"
         sr.resolved_at = _now()
         await session.flush()
