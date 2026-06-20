@@ -114,6 +114,64 @@ async def _apply_hypothesis_active(
     await session.flush()
 
 
+async def _apply_doc_confirmed(
+    session: AsyncSession, sr: WorkflowLineStepRun, resolver_id: uuid.UUID | None
+) -> None:
+    """S22: doc draft→confirmed gate 승인 적용. native ``transition_doc`` 재사용(parallel 0). ⭐SoD:
+    approver ≠ doc.created_by(author·자기 doc 자기 confirm 차단). 승인 후 author(created_by) 자동재개
+    wake(commit=False·gate 트랜잭션 합류·§6 dispatch tx commit 0)."""
+    from app.models.doc import Doc
+    from app.services.doc import transition_doc
+    from app.services.member_resolver import ResolvedMember
+
+    doc = (await session.execute(
+        select(Doc).where(Doc.id == sr.entity_id).with_for_update()
+    )).scalar_one_or_none()
+    if doc is None:
+        sr.status = "approved"
+        sr.resolved_at = _now()
+        await session.flush()
+        return
+    if doc.status == "confirmed":  # 멱등: 이미 confirmed → no-op.
+        sr.status = "applied"
+        sr.resolved_at = _now()
+        await session.flush()
+        return
+    if doc.status != "draft":  # stale: draft 아니면 미적용.
+        sr.status = "skipped"
+        sr.resolved_at = _now()
+        await session.flush()
+        return
+    # ⭐SoD(RC②): approver 미상 OR author 불명(created_by None) OR author 자신이면 차단. ⚠️created_by
+    # None 을 fail-closed 로 막지 않으면 created_by=null doc 생성 후 self-confirm 으로 SoD 우회([[feedback_actor_type_failclosed]]).
+    if resolver_id is None or doc.created_by is None or resolver_id == doc.created_by:
+        sr.status = "skipped"
+        sr.resolved_at = _now()
+        await session.flush()
+        logger.warning(
+            "doc_confirm_sod_block sr=%s approver=%s author=%s", sr.id, resolver_id, doc.created_by,
+        )
+        return
+    approver = ResolvedMember(
+        id=resolver_id, user_id=None, name="gate_approver", type="human", role="member",
+        org_id=sr.org_id,
+    )
+    await transition_doc(session, sr.org_id, approver, doc.id, "confirmed", via_gate=True)
+    # author 자동재개(success_hypothesis): created_by 에게 dispatched 이벤트(commit=False → gate
+    # 트랜잭션 합류·gates.py:137 commit 후 agent 가 consume·새 event type 0·trigger_metadata만).
+    if doc.created_by is not None:
+        from app.services.agent_dispatch import dispatch_payload_to_member
+        await dispatch_payload_to_member(
+            session, sr.org_id, doc.created_by,
+            title=doc.title or "doc", content=f"[doc confirmed] {doc.title or ''}".strip(),
+            source_entity_type="doc", source_entity_id=doc.id, project_id=doc.project_id,
+            trigger_metadata={"source": "workflow_line", "reason": "doc_confirmed"}, commit=False,
+        )
+    sr.status = "applied"
+    sr.resolved_at = _now()
+    await session.flush()
+
+
 async def apply_workflow_line_resolution(
     session: AsyncSession, step_run_id: uuid.UUID, new_status: str,
     resolver_id: uuid.UUID | None = None,
@@ -153,9 +211,12 @@ async def apply_workflow_line_resolution(
         await session.flush()
         return
 
-    # S23: hypothesis 는 native FSM 재사용(transition_hypothesis·parallel 0). story 는 기존 inline.
+    # S23/S22: hypothesis/doc 는 native FSM 재사용(transition_*·parallel 0). story 는 기존 inline.
     if sr.entity_type == "hypothesis":
         await _apply_hypothesis_active(session, sr, resolver_id)
+        return
+    if sr.entity_type == "doc":
+        await _apply_doc_confirmed(session, sr, resolver_id)
         return
 
     from app.models.pm import Story  # 순환 회피 lazy import.

@@ -520,3 +520,35 @@ async def list_doc_revisions(
     ).order_by(DocRevision.created_at.desc()).limit(limit)
     result = await db.execute(q)
     return [DocRevisionResponse.model_validate(r) for r in result.scalars()]
+
+
+class DocTransitionRequest(BaseModel):
+    status: str
+
+
+@router.post("/{id}/transition", response_model=DocResponse)
+async def transition_doc_endpoint(
+    id: uuid.UUID,
+    body: DocTransitionRequest,
+    session: AsyncSession = Depends(get_db),
+    org_id: uuid.UUID = Depends(get_verified_org_id),
+    auth: AuthContext = Depends(get_current_user),
+) -> DocResponse:
+    """E-DG S22: doc decision lifecycle 전이(create/update 와 분리). draft→confirmed 는 human-only
+    (+enforcing 시 line human-gate overlay). caller 는 인증 컨텍스트에서 도출(RC① 패턴·body 신뢰 X)."""
+    from app.services.doc import DocTransitionError, transition_doc
+    from app.services.member_resolver import resolve_member
+
+    caller = await resolve_member(auth, org_id, session)
+    try:
+        doc = await transition_doc(session, org_id, caller, id, body.status)
+        await session.commit()
+        return DocResponse.model_validate(doc)
+    except DocTransitionError as e:
+        _codes = {
+            "DOC_NOT_FOUND": 404, "HUMAN_CONFIRM_REQUIRED": 403,
+            "INVALID_STATUS": 422, "INVALID_DOC_TRANSITION": 422,
+        }
+        raise HTTPException(
+            status_code=_codes.get(e.code, 400), detail={"code": e.code, "message": e.message}
+        )

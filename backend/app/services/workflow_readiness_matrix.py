@@ -21,6 +21,7 @@ import logging
 import uuid
 from dataclasses import dataclass
 
+from app.models.doc import DOC_STATUSES
 from app.models.hypothesis import HYPOTHESIS_STATUSES
 from app.schemas.epic import EPIC_STATUSES
 
@@ -89,14 +90,13 @@ READINESS_MATRIX: dict[str, EntityReadiness] = {
     ),
     "doc": EntityReadiness(
         entity_type="doc",
-        has_native_status=False,                 # doc.py: status 컬럼 부재
-        status_enum=None,
-        valid_transitions=None,
-        gating_eligible=False,
+        has_native_status=True,                  # S22(A): docs.status native 컬럼(0128·doc-specific 값)
+        status_enum=frozenset(DOC_STATUSES),      # doc.py DOC_STATUSES(draft|confirmed|denied|superseded|deprecated)
+        # ⭐S22: overlay-gated subset = draft→confirmed 만(full FSM 은 doc.py _DOC_VALID_TRANSITIONS SSOT).
+        valid_transitions=frozenset({("draft", "confirmed")}),
+        gating_eligible=True,                     # S22: draft→confirmed overlay 가동
         dispatch_capable=True,
-        # 잠정권고(S21 lock 금지·S22 design 이연): docs.status native 컬럼 vs virtual overlay.
-        # doc lifecycle(콘텐츠 승인)이 work status 와 의미가 달라 동형성만으로 결정 안 함.
-        blocking_reason="docs_status_undefined_pending_s22",
+        blocking_reason=None,
     ),
 }
 
