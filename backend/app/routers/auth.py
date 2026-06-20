@@ -1236,10 +1236,13 @@ async def switch_project(
     )
 
     # 908075db 단계1: target을 명시 의도로 전달 — flag on이면 _build_app_metadata가 추측 없이 그대로 존중.
-    # flag off면 아래 override가 기존처럼 보정(밴드에이드는 단계3서 제거). 둘 다 결과 동일(target 고정).
     app_metadata = await _build_app_metadata(user, session, project_id=target_project_id)
-    app_metadata["project_id"] = str(target_project_id)
-    user.last_project_id = target_project_id  # _build_app_metadata가 덮어쓴 경우 재설정
+    # 908075db 단계3: flag-on이면 de-fallback이 명시 target 을 존중(_resolve_explicit→project_id=target)·
+    # last_project_id 는 위 1229 kept + 단계2 무mutation 으로 target 유지 → 아래 override 밴드에이드가
+    # redundant. flag-off(prod)만 보정(전면 삭제는 prod flag-on 後 단계4·dev 한정).
+    if not settings.build_app_metadata_defallback:
+        app_metadata["project_id"] = str(target_project_id)
+        user.last_project_id = target_project_id  # _build_app_metadata가 덮어쓴 경우 재설정
 
     tokens = create_tokens(str(user.id), email=user.email, app_metadata=app_metadata)
     _, refresh_exp = create_refresh_token(str(user.id), expires_delta=timedelta(days=REFRESH_TOKEN_EXPIRE_DAYS))
@@ -1300,14 +1303,17 @@ async def switch_organization(
     # (내부가 target org로 스코프해 project_id/last_project_id를 그 org의 것 또는 null로 해소.)
     app_metadata = await _build_app_metadata(user, session, org_id=body.org_id)
     app_metadata["org_id"] = str(body.org_id)
-    # belt-and-suspenders: 캡처한 target project_id로 재확정(스코프 결과와 일치)
-    if target_project_id:
-        app_metadata["project_id"] = str(target_project_id)
-    else:
-        app_metadata.pop("project_id", None)
-    # ⚠️0746: _build_app_metadata(org_id 스코프)가 last_project_id를 in-org/null로 설정하므로 추가
-    # 재설정 불필요하나, 캡처값과 동기 보장(refresh가 cross-org로 재누수하지 않도록).
-    user.last_project_id = target_project_id
+    # 908075db 단계3: flag-on이면 org-scope de-fallback이 explicit_pid(=1283서 set한 last_project_id=
+    # first_accessible)를 has_project_access로 검증해 in-org project 또는 null 로 해소(1297 capture==
+    # last_project_id) → 아래 belt-and-suspenders 가 redundant. flag-off(prod)만 캡처값으로 재확정
+    # (전면 삭제는 prod flag-on 後 단계4·dev 한정).
+    if not settings.build_app_metadata_defallback:
+        if target_project_id:
+            app_metadata["project_id"] = str(target_project_id)
+        else:
+            app_metadata.pop("project_id", None)
+        # ⚠️0746: 캡처값과 동기 보장(refresh가 cross-org로 재누수하지 않도록).
+        user.last_project_id = target_project_id
 
     tokens = create_tokens(str(user.id), email=user.email, app_metadata=app_metadata)
     _, refresh_exp = create_refresh_token(str(user.id), expires_delta=timedelta(days=REFRESH_TOKEN_EXPIRE_DAYS))
