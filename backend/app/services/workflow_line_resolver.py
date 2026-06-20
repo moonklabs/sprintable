@@ -19,7 +19,7 @@ from typing import Any
 
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.models.pm import Story
+from app.models.pm import Epic, Story
 from app.services.trust_score import compute_member_trust_scores
 from app.services.workflow_readiness_matrix import get_readiness, record_unsupported_entity_attempt
 
@@ -108,7 +108,7 @@ async def resolve_routing_context(
     trust = await resolve_trust_snapshot(session, org_id, actor_member_id, role_key)
     # safe default: 위험 불확실 또는 cold-start → ask_human 제안(S4 는 표기만·비차단).
     suggested = "ask_human" if (risk_flags.get("uncertain") or trust.get("cold_start")) else None
-    return {
+    result = {
         "entity_type": entity_type, "entity_id": str(entity_id), "supported": True,
         "story": _story_predicate(story),
         "actor": {
@@ -119,3 +119,22 @@ async def resolve_routing_context(
         "trust": trust,
         "suggested_default": suggested,
     }
+    # ⭐S25: epic 은 산하 story aggregate(completion/open)를 routing material 로 포함(advisory·active→done
+    # 분기 근거·gate 정책 강제 아님·S4 shadow 정합). get_epic_progress 재사용(N+1 0).
+    if entity_type == "epic":
+        result["epic_aggregate"] = await _epic_aggregate(session, org_id, entity_id)
+    return result
+
+
+async def _epic_aggregate(
+    session: AsyncSession, org_id: uuid.UUID, epic_id: uuid.UUID
+) -> dict[str, Any]:
+    """epic 산하 story 완료/리스크 집계(active→done routing material·advisory). get_epic_progress 재사용."""
+    epic = await session.get(Epic, epic_id)
+    if epic is None:
+        return {"total_stories": 0, "done_stories": 0, "completion_pct": 0, "open_stories": 0}
+    from app.repositories.analytics import AnalyticsRepository
+    prog = await AnalyticsRepository(session, org_id).get_epic_progress(epic.project_id, epic_id)
+    total = int(prog.get("total_stories") or 0)
+    done = int(prog.get("done_stories") or 0)
+    return {**prog, "open_stories": total - done}  # open_stories = 미완(risk material)

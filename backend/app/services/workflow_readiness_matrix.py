@@ -74,10 +74,11 @@ READINESS_MATRIX: dict[str, EntityReadiness] = {
         entity_type="epic",
         has_native_status=True,                  # pm.py:59 String(20)
         status_enum=frozenset(EPIC_STATUSES),    # schemas/epic.py:7 (draft|active|done|archived)
-        valid_transitions=None,                  # 전이규칙 미정의
-        gating_eligible=False,
+        # ⭐S25: overlay-gated subset = draft→active·active→done(full FSM 은 epic.py _EPIC_VALID_TRANSITIONS).
+        valid_transitions=frozenset({("draft", "active"), ("active", "done")}),
+        gating_eligible=True,                    # S25: epic activation/completion overlay 가동
         dispatch_capable=True,
-        blocking_reason="transition_rules_undefined_pending_s25",
+        blocking_reason=None,
     ),
     "sprint": EntityReadiness(
         entity_type="sprint",
