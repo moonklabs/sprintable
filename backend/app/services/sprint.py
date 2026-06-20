@@ -1,7 +1,7 @@
 """E-DG S26: sprint status contract 전이 서비스 (단일 경로 SSOT).
 
 sprint enum/전이를 hypothesis/epic 동형 패턴으로 정형화. ⭐overlay-gated = 시작(planning→active)·
-마감(active→done·review→done). ③SoD 없음(sprint=project 운영·member 필드 없음)·단 **human-gate**
+마감(active→closed·review→closed). ③SoD 없음(sprint=project 운영·member 필드 없음)·단 **human-gate**
 (agent 가 sprint 시작/마감 self 금지). gate advisory(dispatch는 S27까지 금지·AC). 기존 activate/close
 repo 로직(1-active 제약·velocity)에 위임해 보존. ``via_gate=True`` = gate 승인 적용(overlay 재진입 차단).
 """
