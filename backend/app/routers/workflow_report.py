@@ -1,7 +1,5 @@
 """POST /api/v2/workflow/report-done — 에이전트 작업 완료 보고 + 다음 단계 자동 트리거."""
-import json
 import logging
-import os
 import uuid
 from typing import Any
 
@@ -15,7 +13,6 @@ from app.dependencies.auth import AuthContext, get_current_user
 from app.dependencies.database import get_db
 from app.models.gate import Gate
 from app.models.pm import Story
-from app.models.team import TeamMember
 from app.repositories.story import StoryRepository
 from app.services.merge_verdict_gate import (
     AUTO_MERGE,
@@ -78,12 +75,8 @@ _TRANSITIONS: dict[str, dict[str, Any]] = {
     },
 }
 
-# role → member_id (하드코딩)
-_ROLE_TO_MEMBER: dict[str, uuid.UUID] = {
-    "po": uuid.UUID("05f52181-ea2a-42be-b9a8-9a418b72feb1"),
-    "dev": uuid.UUID("9cac9d96-5474-45f7-941e-787407597b52"),
-    "qa": uuid.UUID("685f3f72-c85c-4a32-898f-3d3320ba39ad"),
-}
+# S20: 하드코딩 role→member UUID(_ROLE_TO_MEMBER)는 제거됐다(AC④·미사용 dead). role→member 해소는
+# line 의 role_assignments resolver(S14)가 SSOT. _TRANSITIONS 는 stage→status bootstrap 으로만 잔존(AC①).
 
 # ─── Schema ──────────────────────────────────────────────────────────────────
 
@@ -199,6 +192,34 @@ async def report_done(
                     },
                 )
             response.status_code = status.HTTP_202_ACCEPTED  # ask_human — 사람 보류.
+
+    # S20: line engine compatibility adapter — 비-merge 전이를 line engine 에 위임(관측/거버닝·라인이
+    # SSOT). merge 는 위 merge_gate_active(S5 line merge-gate)가 이미 처리하므로 중복 게이트 0. ⭐
+    # default-off org 는 line engine 이 plain 반환 → 기존 동작 100% 동일(무회귀·AC②③⑤). 라인 평가
+    # 예외도 fail-open(report-done 비차단). enforcing line 이 막으면 merge 차단과 동형으로 status 보류.
+    if story_status and body.stage != "merge":
+        line_decision = None
+        try:
+            from app.services.workflow_line_engine import evaluate_line_for_transition
+            line_decision = await evaluate_line_for_transition(
+                session, org_id=story.org_id, project_id=getattr(story, "project_id", None),
+                entity_type="story", entity_id=story.id,
+                from_status=story.status, to_status=story_status,
+                actor_id=body.agent_id, actor_type="agent",
+            )
+        except Exception:  # noqa: BLE001 — 라인 평가 실패가 report-done 막지 않음(무회귀).
+            line_decision = None
+        if line_decision is not None and not line_decision.proceeds:
+            await session.commit()  # line step_run/gate evidence 보존
+            raise HTTPException(
+                status_code=line_decision.http_status or status.HTTP_409_CONFLICT,
+                detail={
+                    "code": "LINE_BLOCKED",
+                    "message": line_decision.blocking_reason or "blocked by workflow line",
+                    "gate_id": str(line_decision.gate_id) if line_decision.gate_id else None,
+                    "requires_human": True,
+                },
+            )
 
     # 스토리 상태 업데이트 (merge에서 auto_merge가 아니면 story_status=None이라 skip)
     if story_status:
