@@ -30,6 +30,8 @@ export function GateInbox({ memberId }: GateInboxProps) {
   // S30: admin gate 무효화(void) — voided 히스토리 + 확인 모달. isAdmin은 dashboard role(BE도 admin 강제).
   const [voidedGates, setVoidedGates] = useState<GateItem[]>([]);
   const [voidModal, setVoidModal] = useState<{ gateId: string; reason: string } | null>(null);
+  // S31 fix: held(status='held') gate는 pending 목록서 빠지므로 별도 fetch — 보류중 행+[재개] 렌더용.
+  const [heldGates, setHeldGates] = useState<GateItem[]>([]);
   const { role } = useDashboardContext();
   const isAdmin = role === 'admin' || role === 'owner';
   // S31: 보류(hold) — 모달(사유 선택·무기한/시한부 held_until). held=Pause(재개가능·pending 유지)↔void=Ban(종료).
@@ -42,15 +44,19 @@ export function GateInbox({ memberId }: GateInboxProps) {
 
   const fetchGates = async () => {
     try {
-      const [pending, rejected, voided] = await Promise.all([
+      // S31 fix: held(status='held')는 pending fetch서 빠지므로 별도 fetch — 안 하면 보류 gate가
+      // GateInbox서 사라져 [재개] unreachable(라이브 픽셀 적출). status-batch 패턴에 held 추가.
+      const [pending, rejected, voided, held] = await Promise.all([
         fetch('/api/gates?status=pending').then((r) => r.ok ? r.json() : []),
         fetch('/api/gates?status=rejected').then((r) => r.ok ? r.json() : []),
         fetch('/api/gates?status=voided').then((r) => r.ok ? r.json() : []),
+        fetch('/api/gates?status=held').then((r) => r.ok ? r.json() : []),
       ]);
       const pendingGates = pending as GateItem[];
       setGates(pendingGates);
       setRejectedGates((rejected as GateItem[]).filter((g) => g.resolution_note));
       setVoidedGates(voided as GateItem[]);
+      setHeldGates(held as GateItem[]);
 
       // S11 ②: pending story 게이트별 workflow-line/status(bounded N=대기 게이트 수·N+1 아님) + 멤버 이름맵.
       const storyGates = pendingGates.filter((g) => g.work_item_type === 'story');
@@ -167,15 +173,18 @@ export function GateInbox({ memberId }: GateInboxProps) {
 
   if (loading) return <p className="text-xs text-muted-foreground">{t('gateInboxLoading')}</p>;
 
+  // S31 fix: pending + held 합쳐 렌더 — held(status='held') 행이 ⏸"보류중"+[재개]로 남아야 unhold 도달가능(disjoint status·라이브 픽셀 적출 수정).
+  const activeGates = [...gates, ...heldGates];
+
   return (
     <div className="space-y-2">
-      {gates.length === 0 ? (
+      {activeGates.length === 0 ? (
         <div className="rounded-xl border border-dashed border-border bg-muted/20 px-4 py-5 text-center">
           <p className="text-sm text-muted-foreground">{t('gateInboxEmpty')}</p>
           <p className="mt-1 text-xs text-muted-foreground/60">{t('gateInboxEmptyHint')}</p>
         </div>
       ) : (
-        gates.map((gate) => (
+        activeGates.map((gate) => (
           <div key={gate.id} className="flex items-start justify-between gap-3 rounded-xl border border-border bg-card px-4 py-3">
             <div className="min-w-0 flex-1 space-y-1">
               <div className="flex items-center gap-2">
