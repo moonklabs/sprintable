@@ -245,6 +245,33 @@ class GateApproverResponse(BaseModel):
     blocking: bool
     reassigned_from_member_id: uuid.UUID | None = None
     original_approver_member_id: uuid.UUID | None = None
+    # ⭐S32: "재지정됨 · {admin} · {시각}" 출처(마이그0·신규 컬럼 아님). reassign 이벤트
+    # (WorkflowLineStepRunEvent approver_reassigned)서 최신 actor/time enrich. 재지정 안 됐으면 None.
+    reassigned_by_member_id: uuid.UUID | None = None
+    reassigned_at: datetime | None = None
+
+
+async def _enrich_approvers(session, org_id, rows) -> list[GateApproverResponse]:
+    """approver row → response. 재지정된 row 는 최신 approver_reassigned 이벤트서 reassigned_by/at enrich
+    (FE "재지정됨 · admin · 시각" 렌더용·마이그0·이벤트가 메타 SSOT)."""
+    from app.models.workflow_line import WorkflowLineStepRunEvent
+    out = []
+    for r in rows:
+        resp = GateApproverResponse.model_validate(r)
+        if r.reassigned_from_member_id is not None:
+            ev = (await session.execute(
+                select(WorkflowLineStepRunEvent).where(
+                    WorkflowLineStepRunEvent.org_id == org_id,
+                    WorkflowLineStepRunEvent.step_run_id == r.step_run_id,
+                    WorkflowLineStepRunEvent.event_type == "approver_reassigned",
+                    WorkflowLineStepRunEvent.target_member_id == r.approver_member_id,
+                ).order_by(WorkflowLineStepRunEvent.created_at.desc()).limit(1)
+            )).scalar_one_or_none()
+            if ev is not None:
+                resp.reassigned_by_member_id = ev.actor_member_id
+                resp.reassigned_at = ev.created_at
+        out.append(resp)
+    return out
 
 
 @router.get("/{id}/approvers", response_model=list[GateApproverResponse])
@@ -255,11 +282,11 @@ async def list_gate_approvers_endpoint(
     auth=Depends(get_current_user),
 ) -> list[GateApproverResponse]:
     """⭐S32 FE conditional-display: gate approver row 목록(있으면 parallel gate→reassign 노출·없으면
-    단일/merge gate→reassign 미노출로 422 원천차단). admin-only."""
+    단일/merge gate→reassign 미노출로 422 원천차단). admin-only. 재지정 메타(누가/언제) enrich."""
     await _require_gate_admin(session, auth, org_id)
     from app.services.workflow_parallel_approval import list_gate_approvers
     rows = await list_gate_approvers(session, org_id, id)
-    return [GateApproverResponse.model_validate(r) for r in rows]
+    return await _enrich_approvers(session, org_id, rows)
 
 
 @router.post("/{id}/reassign", response_model=list[GateApproverResponse])
@@ -280,7 +307,8 @@ async def reassign_gate_approver_endpoint(
             old_approver_id=body.old_approver_id, reason=body.reason,
         )
         rows = await list_gate_approvers(session, org_id, id)  # 갱신된 approver 목록 반환
+        result = await _enrich_approvers(session, org_id, rows)  # reassigned_by/at enrich(이벤트서)
         await session.commit()
-        return [GateApproverResponse.model_validate(r) for r in rows]
+        return result
     except ValueError as e:
         raise HTTPException(status_code=422, detail=str(e))

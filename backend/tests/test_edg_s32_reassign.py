@@ -189,3 +189,27 @@ async def test_reassign_endpoint_non_admin_403():
                 session=AsyncMock(), org_id=uuid.uuid4(),
                 auth=SimpleNamespace(user_id=str(uuid.uuid4())))
     assert ei.value.status_code == 403
+
+
+@pytest.mark.skipif(not _REAL_DB_URL, reason="real Postgres 필요")
+@pytest.mark.anyio
+async def test_enrich_approvers_exposes_reassign_meta():
+    """⭐FE 데이터소스: reassign 후 GET /approvers enrich 가 reassigned_by/reassigned_at(이벤트서) 노출."""
+    from app.services.workflow_parallel_approval import list_gate_approvers, reassign_approver
+    from app.routers.gates import _enrich_approvers
+    engine, Session = await _session()
+    async with Session() as s:
+        org = uuid.uuid4()
+        gate, proj, approvers = await _seed_parallel_gate(s, org)
+        new_id = await _member_with_access(s, org, proj)
+        reassigner = uuid.uuid4()
+        await s.commit()
+        await reassign_approver(s, org, gate.id, new_id, reassigner)
+        await s.commit()
+        rows = await list_gate_approvers(s, org, gate.id)
+        enriched = await _enrich_approvers(s, org, rows)
+        r = enriched[0]
+        assert r.reassigned_by_member_id == reassigner   # {admin}
+        assert r.reassigned_at is not None                # {시각}
+        assert r.reassigned_from_member_id == approvers[0][0]  # 이전 결재자
+    await engine.dispose()
