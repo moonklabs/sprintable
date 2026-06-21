@@ -189,6 +189,28 @@ async def test_orphan_pa_owner_falls_through_to_org_floor():
 
 
 @pytest.mark.anyio
+async def test_crossorg_pa_owner_falls_through_to_org_floor():
+    """⚠️S27 QA(산티아고): cross-org project_access owner(다른 org 멤버)는 this-org resolve 실패 →
+    skip → org owner floor 승계. resolve_member_identity 가 org_id 스코프라 cross-org id 는 None."""
+    from app.models.project import OrgMember
+    from app.models.project_access import ProjectAccess
+    engine, Session = await _session()
+    base = datetime(2026, 1, 1, tzinfo=timezone.utc)
+    async with Session() as s:
+        org, other_org = uuid.uuid4(), uuid.uuid4()
+        pid = await _seed_project(s, org)
+        cross = uuid.uuid4()    # 다른 org 의 멤버 — this-org 에선 resolve 불가
+        org_owner = uuid.uuid4()
+        s.add(OrgMember(id=cross, org_id=other_org, user_id=uuid.uuid4(), role="owner", created_at=base))
+        s.add(OrgMember(id=org_owner, org_id=org, user_id=uuid.uuid4(), role="owner", created_at=base))
+        s.add(ProjectAccess(id=uuid.uuid4(), project_id=pid, permission="granted", role="owner",
+                            member_id=cross, created_at=base))
+        await s.commit()
+        assert await resolve_project_relay_owner(s, pid, org) == org_owner  # cross ① skip → ② floor
+    await engine.dispose()
+
+
+@pytest.mark.anyio
 async def test_org_scoped_other_org_ignored():
     """다른 org 의 owner 는 무시(org 가드)."""
     from app.models.project import OrgMember
