@@ -262,8 +262,13 @@ async def reassign_approver(
     member = await resolve_member_identity(new_approver_id, org_id, session)
     if member is None:
         raise ValueError("새 결재자가 이 org 의 멤버가 아닙니다.")
+    # ⚠️member-SSOT(까심 RC C4): has_project_access 2번째 인자는 human=user_id / agent=member_id 다
+    # (om.user_id==uid OR pa.member_id==uid). new_approver_id 는 member-id 공간이므로 그대로 넘기면
+    # member_id≠user_id 인 grant-only 휴먼이 false-reject(합법 재지정→422). resolved 의 user_id(휴먼)로
+    # 넘기고 agent(user_id 없음)는 member-id 유지. [[member_ssot_no_teammember_coercion]].
     from app.services.project_auth import has_project_access
-    if not await has_project_access(session, new_approver_id, target.project_id, org_id):
+    access_uid = member.user_id or new_approver_id
+    if not await has_project_access(session, access_uid, target.project_id, org_id):
         raise ValueError("새 결재자가 해당 프로젝트 접근권이 없습니다.")
     # ⭐SoD(AC⑥ 동형): 새 결재자가 요청자/구현자/최초결재자와 동일하면 거부(reassign 으로 자기승인 우회
     # 금지). record_parallel_decision 의 해소-시 SoD 와 동일 가드를 지정-시에도 선제 적용.

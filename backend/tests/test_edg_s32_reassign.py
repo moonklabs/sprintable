@@ -213,3 +213,29 @@ async def test_enrich_approvers_exposes_reassign_meta():
         assert r.reassigned_at is not None                # {시각}
         assert r.reassigned_from_member_id == approvers[0][0]  # 이전 결재자
     await engine.dispose()
+
+
+@pytest.mark.skipif(not _REAL_DB_URL, reason="real Postgres 필요")
+@pytest.mark.anyio
+async def test_reassign_grant_only_human_new_approver_ok():
+    """⭐까심 RC C4 회귀: member_id≠user_id 인 grant-only 휴먼(OrgMember+project_access grant)을 새
+    approver 로 재지정 — has_project_access 에 user_id 전달 안 하면 false-reject(422)됐던 버그."""
+    from app.services.workflow_parallel_approval import reassign_approver
+    from app.models.project import OrgMember
+    from app.models.project_access import ProjectAccess
+    engine, Session = await _session()
+    async with Session() as s:
+        org = uuid.uuid4()
+        gate, proj, _ = await _seed_parallel_gate(s, org)
+        # grant-only 휴먼: OrgMember(id≠user_id) + project_access granted(org_member_id 경유).
+        om_id = uuid.uuid4()
+        s.add(OrgMember(id=om_id, org_id=org, user_id=uuid.uuid4(), role="member"))
+        await s.flush()
+        s.add(ProjectAccess(id=uuid.uuid4(), project_id=proj, permission="granted", role="member",
+                            org_member_id=om_id))
+        await s.commit()
+        # new_approver_id = canonical member-id(om_id). fix 없으면 has_project_access(om_id) false→422.
+        target = await reassign_approver(s, org, gate.id, om_id, uuid.uuid4())
+        await s.commit()
+        assert target.approver_member_id == om_id   # grant-only 휴먼 재지정 성공
+    await engine.dispose()
