@@ -130,3 +130,50 @@ async def test_list_endpoint_invalid_entity_type_422():
             session=AsyncMock(), org_id=uuid.uuid4(),
             auth=SimpleNamespace(user_id=str(uuid.uuid4())))
     assert ei.value.status_code == 422
+
+
+@pytest.mark.anyio
+async def test_patch_endpoint_published_immutable_422():
+    """⭐nit①(까심): 엔드포인트-레벨 immutability — published/approved version PATCH → 422
+    (service ValueError 가 라우터서 422 로 전파·draft-only 가드 끝단 PIN)."""
+    from types import SimpleNamespace
+    from unittest.mock import AsyncMock, patch
+    from fastapi import HTTPException
+    from app.routers import workflow_line_config as mod
+    from app.routers.workflow_line_config import PatchDraftRequest, update_draft_version
+
+    async def _noop(*a, **k):
+        return None
+
+    pub = SimpleNamespace(project_id=None, status="published")
+    with patch.object(mod, "_load_version", AsyncMock(return_value=pub)), \
+         patch.object(mod, "_require_draft_author", _noop), \
+         patch.object(mod, "update_draft_config",
+                      AsyncMock(side_effect=ValueError("draft 만 수정 가능합니다 (published 는 immutable)"))):
+        with pytest.raises(HTTPException) as ei:
+            await update_draft_version(
+                version_id=uuid.uuid4(), body=PatchDraftRequest(config={"steps": []}),
+                session=AsyncMock(), org_id=uuid.uuid4(),
+                auth=SimpleNamespace(user_id=str(uuid.uuid4())))
+    assert ei.value.status_code == 422
+
+
+@pytest.mark.skipif(not _REAL_DB_URL, reason="real Postgres 필요")
+@pytest.mark.anyio
+async def test_load_version_cross_org_404():
+    """⭐nit②(까심): cross-org IDOR — 다른 org 의 version_id 로드 → 404(_load_version org_id 스코프)."""
+    from app.services.workflow_line_config import create_draft
+    from app.routers.workflow_line_config import _load_version
+    from fastapi import HTTPException
+    engine, Session = await _session()
+    async with Session() as s:
+        org_a, org_b = uuid.uuid4(), uuid.uuid4()
+        v = await create_draft(s, org_a, None, "story", _CFG, uuid.uuid4())
+        await s.commit()
+        # 같은 org 는 로드 성공
+        assert (await _load_version(s, org_a, v.id)).id == v.id
+        # 다른 org 는 404(IDOR 차단)
+        with pytest.raises(HTTPException) as ei:
+            await _load_version(s, org_b, v.id)
+        assert ei.value.status_code == 404
+    await engine.dispose()
