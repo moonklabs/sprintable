@@ -139,3 +139,51 @@ async def test_void_no_step_run_ok():
         await s.commit()
         assert result.status == "voided"
     await engine.dispose()
+
+
+# ── 엔드포인트 auth 회귀(CI-runnable·파괴적 admin 액션 가드·S28 IDOR 교훈·까심 nit) ──────────
+def _resolved_human():
+    from app.services.member_resolver import ResolvedMember
+    return ResolvedMember(id=uuid.uuid4(), user_id=uuid.uuid4(), name="a", type="human",
+                          role="admin", org_id=uuid.uuid4())
+
+
+@pytest.mark.anyio
+async def test_void_endpoint_non_admin_403():
+    """비-admin → 403(void_gate 호출 前 차단·상태 변경 0)."""
+    from types import SimpleNamespace
+    from unittest.mock import AsyncMock, patch
+    from fastapi import HTTPException
+    from app.routers import gates as gates_mod
+    from app.routers.gates import GateVoidRequest, void_gate_endpoint
+    voidfn = AsyncMock()
+    with patch.object(gates_mod, "resolve_member", AsyncMock(return_value=_resolved_human())), \
+         patch.object(gates_mod, "is_org_owner_or_admin", AsyncMock(return_value=False)), \
+         patch.object(gates_mod, "void_gate", voidfn):
+        with pytest.raises(HTTPException) as ei:
+            await void_gate_endpoint(
+                id=uuid.uuid4(), body=GateVoidRequest(reason="x"), session=AsyncMock(),
+                org_id=uuid.uuid4(), auth=SimpleNamespace(user_id=str(uuid.uuid4())))
+    assert ei.value.status_code == 403
+    voidfn.assert_not_awaited()
+
+
+@pytest.mark.anyio
+async def test_void_endpoint_forces_voider_from_auth():
+    """⭐voider=인증 caller(resolve_member.id) 강제 — body엔 voider 필드 부재라 spoof 벡터 0(S23 RC①)."""
+    from types import SimpleNamespace
+    from unittest.mock import AsyncMock, patch
+    from app.routers import gates as gates_mod
+    from app.routers.gates import GateVoidRequest, void_gate_endpoint
+    caller = _resolved_human()
+    voidfn = AsyncMock(return_value=SimpleNamespace())
+    with patch.object(gates_mod, "resolve_member", AsyncMock(return_value=caller)), \
+         patch.object(gates_mod, "is_org_owner_or_admin", AsyncMock(return_value=True)), \
+         patch.object(gates_mod, "void_gate", voidfn), \
+         patch.object(gates_mod.GateResponse, "model_validate", lambda g: "OK"):
+        await void_gate_endpoint(
+            id=uuid.uuid4(), body=GateVoidRequest(reason="오발행"), session=AsyncMock(),
+            org_id=uuid.uuid4(), auth=SimpleNamespace(user_id=str(uuid.uuid4())))
+    # void_gate(session, org_id, gate_id, voider_id, reason) — 위치인자 voider=caller.id·reason 전달.
+    assert voidfn.call_args.args[3] == caller.id
+    assert voidfn.call_args.args[4] == "오발행"
