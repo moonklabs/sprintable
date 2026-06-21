@@ -1,9 +1,10 @@
 """E-DG RC#1: body-trust actor 필드 전수 봉인(S23 RC①·S22 RC② systemic).
 
-actor-identity(누가 했나)는 인증 caller 로 서버 강제·body/path spoof 차단:
+actor-identity(누가 했나)는 인증 caller 로 서버 강제·body spoof 차단:
 - VULN#1 generic transition = {approved,rejected} 제한 + resolver 전-status 강제(voided/held 우회 봉인).
 - VULN#2 create_doc created_by = 인증 caller 강제(attribution forge 차단).
-- VULN#3 file-lock caller==member_id 강제(forge·squat 차단).
+(VULN#3 file-lock 은 caller-member 관계가 단순 동치가 아니라[기존 flow caller≠path member] 별도 authz
+ 설계 follow-up 으로 분리.)
 """
 from __future__ import annotations
 
@@ -82,25 +83,6 @@ async def test_transition_agent_rejected_403():
                 session=AsyncMock(), org_id=uuid.uuid4(),
                 auth=SimpleNamespace(user_id=str(uuid.uuid4())))
     assert ei.value.status_code == 403
-
-
-# ── VULN#3: file-lock forge ───────────────────────────────────────────────────
-@pytest.mark.anyio
-async def test_file_lock_forge_rejected_403():
-    """caller resolved member ≠ path member_id → 403(forge 차단)."""
-    from app.routers import file_locks as mod
-    from app.routers.file_locks import _assert_caller_owns_member
-    from fastapi import HTTPException
-    caller = _human()
-    other = uuid.uuid4()  # 타인 member_id
-    with patch.object(mod, "resolve_member", AsyncMock(return_value=caller)):
-        with pytest.raises(HTTPException) as ei:
-            await _assert_caller_owns_member(SimpleNamespace(user_id=str(uuid.uuid4())),
-                                             uuid.uuid4(), other, AsyncMock())
-        assert ei.value.status_code == 403
-        # 자기 자신은 통과
-        await _assert_caller_owns_member(SimpleNamespace(user_id=str(uuid.uuid4())),
-                                         uuid.uuid4(), caller.id, AsyncMock())
 
 
 # ── VULN#2: doc created_by forced ─────────────────────────────────────────────
