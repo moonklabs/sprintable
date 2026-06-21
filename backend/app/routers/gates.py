@@ -227,3 +227,60 @@ async def unhold_gate_endpoint(
         return GateResponse.model_validate(gate)
     except ValueError as e:
         raise HTTPException(status_code=422, detail=str(e))
+
+
+class GateReassignRequest(BaseModel):
+    new_approver_id: uuid.UUID
+    old_approver_id: uuid.UUID | None = None  # approver row 여러 개면 지정(1개면 생략)
+    reason: str | None = None
+
+
+class GateApproverResponse(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+    id: uuid.UUID
+    approver_member_id: uuid.UUID
+    approver_member_type: str
+    status: str
+    kind: str
+    blocking: bool
+    reassigned_from_member_id: uuid.UUID | None = None
+    original_approver_member_id: uuid.UUID | None = None
+
+
+@router.get("/{id}/approvers", response_model=list[GateApproverResponse])
+async def list_gate_approvers_endpoint(
+    id: uuid.UUID,
+    session: AsyncSession = Depends(get_db),
+    org_id: uuid.UUID = Depends(get_verified_org_id),
+    auth=Depends(get_current_user),
+) -> list[GateApproverResponse]:
+    """⭐S32 FE conditional-display: gate approver row 목록(있으면 parallel gate→reassign 노출·없으면
+    단일/merge gate→reassign 미노출로 422 원천차단). admin-only."""
+    await _require_gate_admin(session, auth, org_id)
+    from app.services.workflow_parallel_approval import list_gate_approvers
+    rows = await list_gate_approvers(session, org_id, id)
+    return [GateApproverResponse.model_validate(r) for r in rows]
+
+
+@router.post("/{id}/reassign", response_model=list[GateApproverResponse])
+async def reassign_gate_approver_endpoint(
+    id: uuid.UUID,
+    body: GateReassignRequest,
+    session: AsyncSession = Depends(get_db),
+    org_id: uuid.UUID = Depends(get_verified_org_id),
+    auth=Depends(get_current_user),
+) -> list[GateApproverResponse]:
+    """⭐S32 admin reassign: parallel gate 의 pending 결재자 교체. admin-only·reassigner=인증 caller 강제
+    (body 신뢰 0·S23 RC①). gate.status 불변(pending 유지·재결정 대상). 단일 gate=422(parallel 전용)."""
+    resolved = await _require_gate_admin(session, auth, org_id)
+    from app.services.workflow_parallel_approval import list_gate_approvers, reassign_approver
+    try:
+        await reassign_approver(
+            session, org_id, id, body.new_approver_id, resolved.id,
+            old_approver_id=body.old_approver_id, reason=body.reason,
+        )
+        rows = await list_gate_approvers(session, org_id, id)  # 갱신된 approver 목록 반환
+        await session.commit()
+        return [GateApproverResponse.model_validate(r) for r in rows]
+    except ValueError as e:
+        raise HTTPException(status_code=422, detail=str(e))
