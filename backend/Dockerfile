@@ -12,6 +12,10 @@ RUN uv sync --no-dev
 # 소스 복사
 COPY app/ app/
 COPY ee/ ee/
+# E-MCP-HTTP S2: sprintable_mcp 패키지 동봉 — 동일 backend 이미지를 command override(`python -m
+# sprintable_mcp`·TRANSPORT=http)로 sprintable-mcp-dev Cloud Run 서비스로도 구동(별 빌드 0). backend
+# pyproject 가 mcp+uvicorn 보유라 deps 충족.
+COPY sprintable_mcp/ sprintable_mcp/
 COPY alembic.ini .
 COPY alembic/ alembic/
 COPY bootstrap.py .

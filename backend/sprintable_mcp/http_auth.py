@@ -32,6 +32,17 @@ async def _send_401(send) -> None:
     await send({"type": "http.response.body", "body": _UNAUTHORIZED_BODY})
 
 
+async def _send_health(send) -> None:
+    # E-MCP-HTTP S2: Cloud Run HTTP liveness/readiness — streamable_http_app 엔 /health 라우트가 없어
+    # 404 나므로 미들웨어가 직접 200(인증 불요). 의존성(백엔드) 미체크 = liveness 용(서버 살아있음).
+    await send({
+        "type": "http.response.start",
+        "status": 200,
+        "headers": [(b"content-type", b"application/json")],
+    })
+    await send({"type": "http.response.body", "body": b'{"status":"ok"}'})
+
+
 def bearer_auth_asgi(app):
     """app(streamable_http_app) 을 per-request bearer auth 로 감싸는 순수 ASGI 미들웨어."""
 
@@ -40,7 +51,11 @@ def bearer_auth_asgi(app):
             await app(scope, receive, send)
             return
         path = scope.get("path", "")
-        # 비-MCP 경로(health 등)는 인증 없이 통과 — S2 Cloud Run liveness/readiness 호환.
+        # S2: Cloud Run HTTP health(/health·/healthz) → 200 직응답(streamable_http_app 404 방지·인증 불요).
+        if path in ("/health", "/healthz"):
+            await _send_health(send)
+            return
+        # 비-MCP 경로는 인증 없이 app 으로 통과(향후 다른 라우트 호환).
         if not path.startswith("/mcp"):
             await app(scope, receive, send)
             return
