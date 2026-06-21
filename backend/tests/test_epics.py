@@ -319,16 +319,29 @@ async def test_get_epic_404():
 async def test_update_epic_200():
     client, session, app = await _client()
     try:
-        updated = _mock_epic("done")
+        # RC#2: status 는 generic PATCH 금지(전용 /transition) → 메타 필드(priority)로 200 검증.
+        updated = _mock_epic("active")
         mock_result = MagicMock()
         mock_result.scalar_one_or_none.return_value = updated
         session.execute = AsyncMock(return_value=mock_result)
 
         async with client as c:
-            resp = await c.patch(f"/api/v2/epics/{EPIC_ID}", json={"status": "done"})
+            resp = await c.patch(f"/api/v2/epics/{EPIC_ID}", json={"priority": "high"})
 
         assert resp.status_code == 200
-        assert resp.json()["status"] == "done"
+    finally:
+        app.dependency_overrides.clear()
+
+
+@pytest.mark.anyio
+async def test_update_epic_status_via_patch_rejected_422():
+    """⭐RC#2: generic PATCH 로 status 변경 시 422(전용 transition 엔드포인트 강제·FSM/SoD/gate 우회 차단)."""
+    client, session, app = await _client()
+    try:
+        async with client as c:
+            resp = await c.patch(f"/api/v2/epics/{EPIC_ID}", json={"status": "done"})
+        assert resp.status_code == 422
+        assert "transition" in resp.text.lower()
     finally:
         app.dependency_overrides.clear()
 

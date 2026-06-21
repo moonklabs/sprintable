@@ -201,18 +201,21 @@ async def _apply_epic_transition(
         sr.resolved_at = _now()
         await session.flush()
         return
-    # ⭐SoD: activation(draft→active)만·approver 미상 ∨ assignee 불명 ∨ ==assignee → 차단(fail-closed).
-    if sr.to_status == "active" and (
-        resolver_id is None or epic.assignee_id is None or resolver_id == epic.assignee_id
-    ):
-        sr.status = "skipped"
-        sr.resolved_at = _now()
-        await session.flush()
-        logger.warning(
-            "epic_activation_sod_block sr=%s approver=%s assignee=%s",
-            sr.id, resolver_id, epic.assignee_id,
-        )
-        return
+    # ⭐SoD(RC#2): activation(draft→active)만·approver ≠ **project owner** 강제(self-activation 차단·
+    # fail-closed). epic.assignee_id(흔히 null→과차단·line 180 주석) 대신 project_auth SSOT relay-owner
+    # 사용(null-의존 제거·robust). [[feedback_relay_owner_project_auth_ssot]].
+    if sr.to_status == "active":
+        from app.services.project_auth import resolve_project_relay_owner
+        _sod_owner = await resolve_project_relay_owner(session, epic.project_id, sr.org_id)
+        if resolver_id is None or _sod_owner is None or resolver_id == _sod_owner:
+            sr.status = "skipped"
+            sr.resolved_at = _now()
+            await session.flush()
+            logger.warning(
+                "epic_activation_sod_block sr=%s approver=%s owner=%s",
+                sr.id, resolver_id, _sod_owner,
+            )
+            return
     approver = ResolvedMember(
         id=resolver_id, user_id=None, name="gate_approver", type="human", role="member",
         org_id=sr.org_id,
