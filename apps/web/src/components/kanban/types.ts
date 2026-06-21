@@ -34,6 +34,7 @@ export interface GateItem {
   resolver_id: string | null;
   resolved_at: string | null;
   resolution_note: string | null;
+  held_until?: string | null; // E-DG S31: 보류(hold) 만료(무기한=null·시한부=ISO). 디디 BE 병렬·additive.
   neutral_facts: Record<string, unknown> | null;
   // H1-S3 머지 verdict 게이트 evidence(GateResponse·additive·하위호환 default). null≠0(AC③).
   requires_human?: boolean;

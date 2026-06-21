@@ -2,7 +2,7 @@
 
 import { useEffect, useState } from 'react';
 import { useTranslations } from 'next-intl';
-import { CheckCircle, XCircle, Ban, MoreHorizontal, AlertTriangle } from 'lucide-react';
+import { CheckCircle, XCircle, Ban, MoreHorizontal, AlertTriangle, Pause, PlayCircle } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from '@/components/ui/dropdown-menu';
@@ -32,6 +32,10 @@ export function GateInbox({ memberId }: GateInboxProps) {
   const [voidModal, setVoidModal] = useState<{ gateId: string; reason: string } | null>(null);
   const { role } = useDashboardContext();
   const isAdmin = role === 'admin' || role === 'owner';
+  // S31: 보류(hold) — 모달(사유 선택·무기한/시한부 held_until). held=Pause(재개가능·pending 유지)↔void=Ban(종료).
+  // held 판정은 status==='held' OR held_until(디디 BE 표현 미확정·둘 다 커버·머지 후 정합).
+  const [holdModal, setHoldModal] = useState<{ gateId: string; reason: string; indefinite: boolean; heldUntil: string } | null>(null);
+  const isHeld = (g: GateItem) => g.status === 'held' || !!g.held_until;
   // S11 ②: 라인 컨텍스트(active step_run by story_id) + approver 이름맵.
   const [lineMap, setLineMap] = useState<Record<string, WorkflowLineStepRun>>({});
   const [memberNames, setMemberNames] = useState<Record<string, string>>({});
@@ -130,6 +134,37 @@ export function GateInbox({ memberId }: GateInboxProps) {
     }
   };
 
+  const handleHold = async () => {
+    if (!holdModal || resolving) return;
+    if (!holdModal.indefinite && !holdModal.heldUntil) return; // 시한부면 날짜 필수
+    setResolving(holdModal.gateId);
+    try {
+      const body: { reason?: string; held_until: string | null } = {
+        held_until: holdModal.indefinite ? null : holdModal.heldUntil,
+      };
+      if (holdModal.reason.trim()) body.reason = holdModal.reason.trim();
+      const res = await fetch(`/api/gates/${holdModal.gateId}/hold`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(body),
+      });
+      if (res.ok) { setHoldModal(null); await fetchGates(); }
+    } finally {
+      setResolving(null);
+    }
+  };
+
+  const handleUnhold = async (gateId: string) => {
+    if (resolving) return;
+    setResolving(gateId);
+    try {
+      const res = await fetch(`/api/gates/${gateId}/unhold`, { method: 'POST' });
+      if (res.ok) await fetchGates();
+    } finally {
+      setResolving(null);
+    }
+  };
+
   if (loading) return <p className="text-xs text-muted-foreground">{t('gateInboxLoading')}</p>;
 
   return (
@@ -169,7 +204,28 @@ export function GateInbox({ memberId }: GateInboxProps) {
             </div>
             {/* 액션 = requires_human 기준(block 제외·읽기전용·AC⑤). + S30 admin ⋯ 무효화(전 pending gate·admin only). */}
             <div className="flex shrink-0 items-center gap-1.5">
-              {gateNeedsAction(gate) ? (
+              {isHeld(gate) ? (
+                <>
+                  {/* S31 보류중: ⏸ Pause(중립 secondary·재개가능)·SLA 일시정지 */}
+                  <Badge variant="secondary" className="gap-1" title={t('slaPaused')}>
+                    <Pause className="size-3 shrink-0" />
+                    {t('heldBadge')}
+                  </Badge>
+                  {gate.held_until ? (
+                    <span className="text-[10px] text-muted-foreground">{t('heldUntilLabel', { date: new Date(gate.held_until).toLocaleDateString() })}</span>
+                  ) : null}
+                  <Button
+                    size="sm"
+                    variant="ghost"
+                    className="h-7 gap-1 text-primary hover:bg-primary/10 hover:text-primary"
+                    disabled={resolving === gate.id}
+                    onClick={() => void handleUnhold(gate.id)}
+                  >
+                    <PlayCircle className="size-3.5" />
+                    {t('resumeAction')}
+                  </Button>
+                </>
+              ) : gateNeedsAction(gate) ? (
                 <>
                   <Button
                     size="sm"
@@ -200,12 +256,18 @@ export function GateInbox({ memberId }: GateInboxProps) {
               {isAdmin ? (
                 <DropdownMenu>
                   <DropdownMenuTrigger
-                    aria-label={t('voidAction')}
+                    aria-label={t('gateMoreActions')}
                     className="inline-flex size-7 items-center justify-center rounded-md text-muted-foreground transition-colors hover:bg-accent hover:text-foreground"
                   >
                     <MoreHorizontal className="size-4" />
                   </DropdownMenuTrigger>
                   <DropdownMenuContent align="end">
+                    {!isHeld(gate) ? (
+                      <DropdownMenuItem onClick={() => setHoldModal({ gateId: gate.id, reason: '', indefinite: true, heldUntil: '' })}>
+                        <Pause className="mr-2 size-3.5" />
+                        {t('holdAction')}
+                      </DropdownMenuItem>
+                    ) : null}
                     <DropdownMenuItem
                       className="text-destructive focus:text-destructive"
                       onClick={() => setVoidModal({ gateId: gate.id, reason: '' })}
@@ -323,6 +385,63 @@ export function GateInbox({ memberId }: GateInboxProps) {
               >
                 <Ban className="size-3.5" />
                 {resolving ? '...' : t('voidConfirm')}
+              </Button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* S31: 보류 모달 — 사유 선택 + 무기한/시한부 토글(held_until). 사유 필수 아님(void와 구분). */}
+      {holdModal && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
+          <button
+            type="button"
+            className="absolute inset-0 bg-black/50 backdrop-blur-[2px]"
+            onClick={() => setHoldModal(null)}
+            aria-label={t('cancel')}
+          />
+          <div className="relative z-10 w-full max-w-sm rounded-2xl border border-border bg-background p-5 shadow-xl">
+            <div className="mb-2 flex items-center gap-2">
+              <Pause className="size-4 shrink-0 text-muted-foreground" />
+              <h3 className="text-sm font-semibold">{t('holdConfirmTitle')}</h3>
+            </div>
+            <p className="mb-3 text-xs text-muted-foreground">{t('holdImpact')}</p>
+            <textarea
+              rows={2}
+              value={holdModal.reason}
+              onChange={(e) => setHoldModal((prev) => prev ? { ...prev, reason: e.target.value } : null)}
+              placeholder={t('holdReasonPlaceholder')}
+              className="w-full resize-none rounded-xl border border-border bg-background px-3 py-2 text-sm text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-2 focus:ring-primary/40"
+            />
+            <div className="mt-3 flex items-center gap-4 text-xs text-foreground">
+              <label className="flex items-center gap-1.5">
+                <input type="radio" name="holdMode" checked={holdModal.indefinite} onChange={() => setHoldModal((p) => p ? { ...p, indefinite: true } : null)} />
+                {t('holdIndefinite')}
+              </label>
+              <label className="flex items-center gap-1.5">
+                <input type="radio" name="holdMode" checked={!holdModal.indefinite} onChange={() => setHoldModal((p) => p ? { ...p, indefinite: false } : null)} />
+                {t('holdTimed')}
+              </label>
+            </div>
+            {!holdModal.indefinite ? (
+              <input
+                type="date"
+                value={holdModal.heldUntil}
+                onChange={(e) => setHoldModal((prev) => prev ? { ...prev, heldUntil: e.target.value } : null)}
+                className="mt-2 h-9 w-full rounded-xl border border-border bg-background px-3 text-sm text-foreground focus:outline-none focus:ring-2 focus:ring-primary/40"
+              />
+            ) : null}
+            <div className="mt-3 flex justify-end gap-2">
+              <Button variant="ghost" size="sm" onClick={() => setHoldModal(null)}>{t('cancel')}</Button>
+              <Button
+                variant="ghost"
+                size="sm"
+                className="gap-1 text-primary hover:bg-primary/10 hover:text-primary"
+                disabled={(!holdModal.indefinite && !holdModal.heldUntil) || !!resolving}
+                onClick={() => void handleHold()}
+              >
+                <Pause className="size-3.5" />
+                {resolving ? '...' : t('holdConfirm')}
               </Button>
             </div>
           </div>
