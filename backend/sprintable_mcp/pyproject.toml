@@ -12,10 +12,13 @@ license = { text = "Proprietary" }
 authors = [{ name = "Sprintable" }]
 keywords = ["mcp", "sprintable", "agent", "model-context-protocol"]
 dependencies = [
-    "mcp>=1.0.0",
+    # E-MCP-HTTP S1: streamable-http floor(mcp 1.8+·run_streamable_http_async/transport='streamable-http')
+    # — fresh 빌드가 구버전 받아 http 미지원되는 footgun 방지(S2 Cloud Run 빌드 보증). 설치본 1.27.1 검증완.
+    "mcp>=1.8.0",
     "httpx>=0.27",
     "pydantic>=2.0",
     "pydantic-settings>=2.0",
+    "uvicorn>=0.30",   # http 모드 ASGI 서버(streamable_http_app + bearer auth 미들웨어 구동). stdio 무관.
 ]
 
 # E-MCP S4: 외부(레포 없음) 한 줄 구동 — `uvx sprintable-mcp`.

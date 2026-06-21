@@ -24,6 +24,23 @@ def set_project_override(project_id: str | None):
 def reset_project_override(token) -> None:
     _project_override.reset(token)
 
+
+# E-MCP-HTTP S1: per-request API 키 override(http 모드 멀티테넌트). http 미들웨어가 요청경계서
+# Authorization: Bearer <key> 를 set → request() 가 그 키로 백엔드 호출. 미설정(stdio)이면 env
+# 단일키(self._api_key) 사용(무회귀). contextvar 라 async 동시요청별 격리.
+_api_key_override: contextvars.ContextVar[str | None] = contextvars.ContextVar(
+    "mcp_api_key_override", default=None
+)
+
+
+def set_api_key_override(api_key: str | None):
+    """per-request API 키 override 설정 — 반환 token 으로 reset(http 미들웨어가 요청 스코프로 사용)."""
+    return _api_key_override.set(api_key or None)
+
+
+def reset_api_key_override(token) -> None:
+    _api_key_override.reset(token)
+
 # 백엔드 에러 본문을 MCP 에러 문자열에 노출할 때, 비정상적으로 큰 body가
 # 에이전트 컨텍스트를 잠식하지 않도록 자르는 상한.
 _ERROR_BODY_MAX = 1500
@@ -137,11 +154,12 @@ class SprintableClient:
         self._org_id: str = ""
         self._project_id: str = ""
 
-    def configure(self, api_url: str, api_key: str) -> None:
+    def configure(self, api_url: str, api_key: str = "") -> None:
         if not api_url:
             raise ValueError("api_url is required")
-        if not api_key:
-            raise ValueError("api_key is required")
+        # E-MCP-HTTP S1: http 모드는 per-request bearer override 가 키를 공급하므로 env fallback 키가
+        # 비어도 허용(stdio 모드는 main() 이 사전에 agent_api_key 필수 검사). 빈 키 + override 없으면
+        # 백엔드가 401 로 거른다(fail-safe).
         self._base_url = api_url.rstrip("/")
         self._api_key = api_key
 
@@ -183,9 +201,11 @@ class SprintableClient:
         params: dict | None = None,
     ) -> Any:
         url = f"{self._base_url}{path}"
+        # E-MCP-HTTP S1: effective 키 = per-request override(http 멀티테넌트) ∨ env 단일키(stdio·무회귀).
+        _key = _api_key_override.get() or self._api_key
         headers = {
-            "Authorization": f"Bearer {self._api_key}",
-            "x-agent-api-key": self._api_key,
+            "Authorization": f"Bearer {_key}",
+            "x-agent-api-key": _key,
             "Content-Type": "application/json",
         }
         # 85429ee0: per-call override 시 X-Project-Id 헤더 전송 — 백엔드 get_verified_org_id 가
