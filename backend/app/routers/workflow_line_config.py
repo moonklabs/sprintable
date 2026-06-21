@@ -7,7 +7,7 @@ RBAC: draft 관리 = project admin+(또는 org owner/admin) / publish(요청·�
 import uuid
 from typing import Any
 
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, Query
 from pydantic import BaseModel, ConfigDict, field_validator
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -351,3 +351,39 @@ async def resolve_preview(
     # ⭐dry-run write-0 보장(QA 집중 항목): 평가 경로는 write 0 이지만 잔여 0 을 명시적으로 rollback.
     await session.rollback()
     return _project_preview(decision, body.from_status, body.to_status, routing_context)
+
+
+class ActiveLineResponse(BaseModel):
+    entity_type: str
+    project_id: uuid.UUID | None = None
+    has_active: bool                       # 활성 published 라인 존재(default-off/미발행→false)
+    definition_id: uuid.UUID | None = None
+    config: dict[str, Any] = {}            # 현 published config(steps/gates 시퀀스). 없으면 {}
+
+
+@router.get("/active", response_model=ActiveLineResponse)
+async def get_active_line(
+    entity_type: str = Query(...),
+    project_id: uuid.UUID | None = Query(default=None),
+    session: AsyncSession = Depends(get_db),
+    org_id: uuid.UUID = Depends(get_verified_org_id),
+    auth: AuthContext = Depends(get_current_user),
+) -> ActiveLineResponse:
+    """⭐S29 좌-pane 데이터소스: (entity_type, project)의 현 active published 라인 config(steps/gates).
+
+    admin-only(project_auth canonical·S29 패턴 재사용)·read-only·마이그0. SSOT=WorkflowLineDefinition
+    (is_active=True·project override>org-default) + 최신 published version config. 엔진 헬퍼 재사용
+    (preview≠real 드리프트 회피). 활성 라인 없으면 has_active=false·config={}(default-off 정상)."""
+    if entity_type not in ENTITY_TYPES:
+        raise HTTPException(status_code=422, detail=f"entity_type must be one of {sorted(ENTITY_TYPES)}")
+    actor = uuid.UUID(auth.user_id)
+    await _require_draft_author(session, actor, org_id, project_id)  # admin 게이팅(이름≠동작·admin 강제)
+    from app.services.workflow_line_engine import _active_definition, _published_config
+    definition = await _active_definition(session, org_id, project_id, entity_type)
+    if definition is None:
+        return ActiveLineResponse(entity_type=entity_type, project_id=project_id, has_active=False)
+    config = await _published_config(session, definition)
+    return ActiveLineResponse(
+        entity_type=entity_type, project_id=project_id, has_active=True,
+        definition_id=definition.id, config=config,
+    )
