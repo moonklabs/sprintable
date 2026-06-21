@@ -4,6 +4,7 @@ import { useCallback, useEffect, useRef, useState } from 'react';
 import { useParams, useRouter } from 'next/navigation';
 import { useTranslations } from 'next-intl';
 import { DocEditor } from '@/components/docs/doc-editor';
+import { DocGateSection } from '@/components/docs/doc-gate-section';
 import { DocUrlChip } from '@/components/docs/doc-url-chip';
 import { DocUrlDialog, type SlugSubmitResult } from '@/components/docs/doc-url-dialog';
 import { slugifyDocTitle, isUntitledSlug } from '@/components/docs/lib/doc-slug';
@@ -382,6 +383,13 @@ export default function DocSlugPage() {
           />
         </div>
       )}
+
+      {/* S28: doc decision gate(검토 상태·반려 사유·재상신 CTA·revision 이력). 비-gated/이력없음은 self-hide. */}
+      {selectedDoc.doc_type !== 'sprint_report' ? (
+        <div className="flex-shrink-0 px-4 pt-3 lg:px-6">
+          <DocGateSection docId={selectedDoc.id} status={selectedDoc.status} onTransitioned={fetchDoc} />
+        </div>
+      ) : null}
 
       {/* Editor */}
       <div className="flex min-h-0 flex-1 flex-col overflow-hidden px-4 py-4 lg:px-6 lg:py-6">
