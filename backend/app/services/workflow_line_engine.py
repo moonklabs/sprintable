@@ -46,6 +46,9 @@ class LineDecision:
     degraded_to_plain: bool = False
     # S7: enforcing agent-handoff step 의 step_run id — 라우터가 status 적용 후 relay 한다(set 시에만).
     relay_step_run_id: uuid.UUID | None = None
+    # S29: dry-run preview 가 gate 종류(merge|human|policy)를 FE 에 정확 라벨하기 위한 힌트. real 경로는
+    # step_run 에만 기록하므로 None(decision 미사용)·dry-run merge-gate preview 만 "merge" 로 set.
+    effective_gate_type: str | None = None
 
     @property
     def proceeds(self) -> bool:
@@ -337,6 +340,7 @@ async def _merge_gate_wrapper(
             mode="gate_pending", status_to_apply=None,
             blocking_reason="merge-gate (dry-run preview · 정확 verdict 미계산: CI/PR 동적 상태 의존)",
             http_status=202,
+            effective_gate_type="merge",  # ⭐FE 가 merge_verdict 배지로 정확 렌더(human 오라벨 방지·QA Nit2)
         )
 
     from app.services.merge_verdict_gate import AUTO_MERGE, BLOCK, evaluate_merge_gate

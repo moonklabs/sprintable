@@ -302,8 +302,10 @@ def _project_preview(decision, from_status, to_status, routing_context) -> "Reso
     )
     gates = []
     if decision.mode in _MODE_TO_GATE_TYPE:
+        # ⭐QA Nit2: merge-gate dry-run 은 mode=gate_pending 이지만 effective_gate_type="merge" 로
+        # 정확 라벨(human 오라벨 방지·FE 가 merge_verdict 배지 렌더). effective_gate_type 우선.
         gates.append(PreviewGate(
-            gate_type=_MODE_TO_GATE_TYPE[decision.mode],
+            gate_type=decision.effective_gate_type or _MODE_TO_GATE_TYPE[decision.mode],
             target=decision.blocking_reason, gate_id=decision.gate_id,
         ))
     return ResolvePreviewResponse(
@@ -330,7 +332,9 @@ async def resolve_preview(
     결정 로직(preview≠real 드리프트 회피)·resolve_routing_context(side-effect-free)로 표시용 routing/
     trust. candidate-config diff/what-if 는 S29-followup(PO Q1 published-only)."""
     actor = uuid.UUID(auth.user_id)
-    # Q4: canonical project_auth admin gate(ad-hoc role 쿼리 금지·S27 교훈) — 라인 config 편집권과 동일.
+    # Q4: admin-only 게이트. ⚠️네이밍 주의(QA Nit1)=`_require_draft_author` 는 이름과 달리 **admin 강제**
+    # (project owner/admin ∪ org owner/admin·project_auth canonical·ad-hoc role 금지·S27 교훈). 공유
+    # 헬퍼라 rename 안 하고 호출부 노트로 의도 명시 — 라인 config 편집권과 동일 레벨이 policy 미리보기 권한.
     await _require_draft_author(session, actor, org_id, body.project_id)
 
     decision = await evaluate_line_for_transition(

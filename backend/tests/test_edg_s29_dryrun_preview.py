@@ -182,3 +182,13 @@ async def test_dry_run_peek_does_not_consume_grandfather(monkeypatch):
         )).scalar()
         assert st == "grandfathered"
     await engine.dispose()
+
+
+def test_project_merge_gate_type():
+    """⭐QA Nit2: merge-gate dry-run(mode=gate_pending·effective_gate_type='merge') → gate_type='merge'
+    (human 오라벨 방지·FE merge_verdict 배지). effective_gate_type 우선."""
+    d = LineDecision(mode="gate_pending", status_to_apply=None,
+                     blocking_reason="merge-gate (dry-run preview)", effective_gate_type="merge")
+    r = _project_preview(d, "in-review", "done", {"trust": {"hypothesis_hit_rate": None, "cold_start": True}})
+    assert r.gates[0].gate_type == "merge"  # human 아님
+    assert r.trust_branch.decision == "ask_human"  # gate_pending → ask_human 분기는 유지
