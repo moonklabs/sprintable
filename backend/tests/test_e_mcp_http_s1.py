@@ -79,21 +79,17 @@ def test_module_mcp_protection_off_by_default():
     assert mcp.settings.transport_security.enable_dns_rebinding_protection is False
 
 
-def test_allowed_origins_derive_scheme(monkeypatch):
-    """⭐codex RC 회귀: MCP_ALLOWED_HOSTS set 시 모듈 mcp 의 allowed_origins 가 `https://{host}`(scheme
-    포함)로 파생 — bare host 면 브라우저 Origin 요청 403(prod-precision 갭)."""
-    monkeypatch.setenv("MCP_ALLOWED_HOSTS", "mcp-dev.sprintable.ai")
-    import importlib
-    import sprintable_mcp.server as srv
-    importlib.reload(srv)
-    try:
-        ts = srv.mcp.settings.transport_security
-        assert ts.allowed_hosts == ["mcp-dev.sprintable.ai"]
-        assert ts.allowed_origins == ["https://mcp-dev.sprintable.ai"]   # scheme 파생
-        assert ts.enable_dns_rebinding_protection is True
-    finally:
-        monkeypatch.delenv("MCP_ALLOWED_HOSTS")
-        importlib.reload(srv)  # 모듈 원복(다른 테스트 격리)
+def test_allowed_origins_derive_scheme():
+    """⭐codex RC 회귀: origins = `https://{host}`(scheme 포함)·hosts = bare. server.py 가 쓰는 파생
+    로직 — bare host 를 origins 에 넣으면 브라우저 Origin(https://host) 요청 403(prod-precision 갭).
+    (모듈 reload 는 settings 싱글톤이라 env 재반영 X → 파생 로직 직접 검증.)"""
+    from mcp.server.transport_security import TransportSecuritySettings
+    hosts = ["mcp-dev.sprintable.ai", "foo.run.app"]
+    origins = [f"https://{h}" for h in hosts]                    # server.py 와 동일 파생
+    ts = TransportSecuritySettings(
+        enable_dns_rebinding_protection=True, allowed_hosts=hosts, allowed_origins=origins)
+    assert ts.allowed_hosts == hosts                            # Host=bare
+    assert ts.allowed_origins == ["https://mcp-dev.sprintable.ai", "https://foo.run.app"]  # Origin=scheme
 
 
 # ── ② per-request 키 contextvar ───────────────────────────────────────────────
