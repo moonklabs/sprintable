@@ -154,12 +154,11 @@ class SprintableClient:
         self._org_id: str = ""
         self._project_id: str = ""
 
-    def configure(self, api_url: str, api_key: str = "") -> None:
+    def configure(self, api_url: str, api_key: str) -> None:
         if not api_url:
             raise ValueError("api_url is required")
-        # E-MCP-HTTP S1: http 모드는 per-request bearer override 가 키를 공급하므로 env fallback 키가
-        # 비어도 허용(stdio 모드는 main() 이 사전에 agent_api_key 필수 검사). 빈 키 + override 없으면
-        # 백엔드가 401 로 거른다(fail-safe).
+        if not api_key:
+            raise ValueError("api_key is required")
         self._base_url = api_url.rstrip("/")
         self._api_key = api_key
 

@@ -86,8 +86,13 @@ def _run_http() -> None:
 
     from .http_auth import bearer_auth_asgi
 
-    # env fallback 키(미설정 허용·실제 키는 per-request override). stateless_http=True 는 mcp 구성에서.
-    client.configure(settings.sprintable_api_url, settings.agent_api_key or "")
+    # env fallback 키. ⭐http 모드 실제 인증은 per-request bearer override(미들웨어)라 이 fallback 은
+    # never-hit(미들웨어가 bearer 없으면 401). agent_api_key 미설정 시 placeholder(configure 계약 유지·
+    # 백엔드는 override 키로 호출되며 placeholder 가 새면 401 로 거름·fail-safe). stateless_http=True 는 mcp 구성.
+    client.configure(
+        settings.sprintable_api_url,
+        settings.agent_api_key or "_http_per_request_bearer_only_",
+    )
     app = bearer_auth_asgi(mcp.streamable_http_app())
     print(
         f"Sprintable MCP — Streamable HTTP on {settings.mcp_http_host}:{settings.mcp_http_port}/mcp "
