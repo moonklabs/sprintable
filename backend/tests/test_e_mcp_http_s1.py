@@ -63,15 +63,37 @@ def test_allowed_hosts_env_read_and_protection(monkeypatch):
     s1 = McpSettings()
     assert s1.mcp_allowed_hosts == "mcp-dev.sprintable.ai,foo.run.app"   # env-name read
     hosts1 = [h.strip() for h in s1.mcp_allowed_hosts.split(",") if h.strip()]
-    ts1 = TransportSecuritySettings(enable_dns_rebinding_protection=bool(hosts1), allowed_hosts=hosts1)
+    # ⭐codex RC: allowed_origins 는 scheme 포함(`https://host`)이어야 브라우저 Origin exact-match(bare
+    # host 면 Origin 요청 403). allowed_hosts(bare)와 다른 파생.
+    origins1 = [f"https://{h}" for h in hosts1]
+    ts1 = TransportSecuritySettings(
+        enable_dns_rebinding_protection=bool(hosts1), allowed_hosts=hosts1, allowed_origins=origins1)
     assert ts1.enable_dns_rebinding_protection is True
-    assert "mcp-dev.sprintable.ai" in ts1.allowed_hosts
+    assert "mcp-dev.sprintable.ai" in ts1.allowed_hosts          # Host=bare
+    assert "https://mcp-dev.sprintable.ai" in ts1.allowed_origins  # Origin=scheme 포함
 
 
 def test_module_mcp_protection_off_by_default():
     """현 모듈 mcp(빈 hosts 임포트)는 DNS-rebinding 보호 OFF — Cloud Run 호스팅 421 회피."""
     from sprintable_mcp.server import mcp
     assert mcp.settings.transport_security.enable_dns_rebinding_protection is False
+
+
+def test_allowed_origins_derive_scheme(monkeypatch):
+    """⭐codex RC 회귀: MCP_ALLOWED_HOSTS set 시 모듈 mcp 의 allowed_origins 가 `https://{host}`(scheme
+    포함)로 파생 — bare host 면 브라우저 Origin 요청 403(prod-precision 갭)."""
+    monkeypatch.setenv("MCP_ALLOWED_HOSTS", "mcp-dev.sprintable.ai")
+    import importlib
+    import sprintable_mcp.server as srv
+    importlib.reload(srv)
+    try:
+        ts = srv.mcp.settings.transport_security
+        assert ts.allowed_hosts == ["mcp-dev.sprintable.ai"]
+        assert ts.allowed_origins == ["https://mcp-dev.sprintable.ai"]   # scheme 파생
+        assert ts.enable_dns_rebinding_protection is True
+    finally:
+        monkeypatch.delenv("MCP_ALLOWED_HOSTS")
+        importlib.reload(srv)  # 모듈 원복(다른 테스트 격리)
 
 
 # ── ② per-request 키 contextvar ───────────────────────────────────────────────

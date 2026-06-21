@@ -245,10 +245,15 @@ def _flat(name: str, doc: str, input_cls: type[BaseModel], fn):
 # 보호(localhost allowed_hosts)를 켜 Cloud Run host(*.run.app)를 421 거부한다. MCP_ALLOWED_HOSTS 지정 시
 # 그 호스트만 화이트리스트(보호 ON)·비우면 보호 OFF(공개 bearer-gated 호스팅·Cloud Run TLS+bearer 가 실보안).
 _allowed_hosts = [h.strip() for h in (settings.mcp_allowed_hosts or "").split(",") if h.strip()]
+# ⭐codex RC: allowed_hosts 는 Host 헤더(bare host) exact-match 이지만 allowed_origins 는 Origin 헤더
+# (브라우저=scheme 포함·`https://host`) exact-match 다(SDK _validate_origin). bare host 를 origins 에
+# 넣으면 브라우저 Origin 요청이 403(prod·whitelist 시). → origins 는 `https://{host}` 로 파생(Cloud Run/
+# 커스텀도메인 TLS=https). Poke 등 server-to-server 는 Origin 부재라 항상 통과(SDK: origin 없으면 True).
+_allowed_origins = [f"https://{h}" for h in _allowed_hosts]
 _transport_security = TransportSecuritySettings(
     enable_dns_rebinding_protection=bool(_allowed_hosts),
     allowed_hosts=_allowed_hosts,
-    allowed_origins=_allowed_hosts,
+    allowed_origins=_allowed_origins,
 )
 
 mcp = FastMCP(
