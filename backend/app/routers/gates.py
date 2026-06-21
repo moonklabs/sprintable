@@ -11,8 +11,9 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.dependencies.auth import get_current_user, get_verified_org_id
 from app.dependencies.database import get_db
 from app.models.gate import Gate
-from app.services.gate_service import create_gate, transition_gate
+from app.services.gate_service import create_gate, transition_gate, void_gate
 from app.services.member_resolver import resolve_member
+from app.services.project_auth import is_org_owner_or_admin
 
 # 사람 검증 행위(approve/reject) — "human-validated" 웨지 integrity상 휴먼 member만 허용.
 _HUMAN_REVIEW_STATUSES = frozenset({"approved", "rejected"})
@@ -138,6 +139,34 @@ async def transition_gate_endpoint(
         _resolver_id = resolved.id
     try:
         gate = await transition_gate(session, org_id, id, body.status, _resolver_id, body.note)
+        await session.commit()
+        return GateResponse.model_validate(gate)
+    except ValueError as e:
+        raise HTTPException(status_code=422, detail=str(e))
+
+
+class GateVoidRequest(BaseModel):
+    reason: str  # 사유 필수(audit·파괴적 액션). 빈 사유는 서비스서 422.
+
+
+@router.post("/{id}/void", response_model=GateResponse)
+async def void_gate_endpoint(
+    id: uuid.UUID,
+    body: GateVoidRequest,
+    session: AsyncSession = Depends(get_db),
+    org_id: uuid.UUID = Depends(get_verified_org_id),
+    auth=Depends(get_current_user),
+) -> GateResponse:
+    """⭐S30 admin recovery: 잘못 생성된 pending gate 무효화(void). admin-only(project_auth canonical).
+
+    voider 는 **인증 caller 강제**(body 신뢰 0·S23 RC① 패턴). void≠approval — 묶인 step_run 해소로
+    엔티티 unblock(re-route 가능)되되 전이 미적용. transition 단일경로(void 는 void_gate SSOT)."""
+    resolved = await resolve_member(auth, org_id, session)
+    # Q4: canonical project_auth admin 게이팅(ad-hoc role 금지·S27/S29 교훈). org owner/admin 만.
+    if not await is_org_owner_or_admin(session, uuid.UUID(auth.user_id), org_id):
+        raise HTTPException(status_code=403, detail="게이트 무효화는 org owner/admin 만 가능합니다.")
+    try:
+        gate = await void_gate(session, org_id, id, resolved.id, body.reason)
         await session.commit()
         return GateResponse.model_validate(gate)
     except ValueError as e:

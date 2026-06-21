@@ -9,7 +9,6 @@ neutral_facts: 관찰 사실만 (touches_migration, diff_size 등).
 """
 import uuid
 from datetime import datetime
-from typing import Any
 
 from sqlalchemy import Boolean, DateTime, String, Text, func, text
 from sqlalchemy.dialects.postgresql import JSONB, UUID
@@ -17,12 +16,14 @@ from sqlalchemy.orm import Mapped, mapped_column
 
 from app.core.database import Base
 
-GATE_STATUSES = frozenset({"pending", "approved", "rejected", "auto_passed"})
+GATE_STATUSES = frozenset({"pending", "approved", "rejected", "auto_passed", "voided"})
 
-# 합법 전이: (from, to)
+# 합법 전이: (from, to). ⭐S30: pending→voided(admin recovery·오발행/막힌 gate 무효화). voided≠approval —
+# 묶인 step_run 은 skipped 로 해소돼 엔티티가 unblock(re-route 가능)되되 "승인됨"으로 전진하지 않는다.
 _VALID_TRANSITIONS: set[tuple[str, str]] = {
     ("pending", "approved"),
     ("pending", "rejected"),
+    ("pending", "voided"),
 }
 
 
