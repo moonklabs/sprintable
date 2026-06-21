@@ -19,8 +19,7 @@ import { McpConnectionSettings } from '@/components/settings/mcp-connection-sett
 import { WorkflowTriggerTypesSection } from '@/components/settings/workflow-trigger-types-section';
 import { WorkflowExecutionHistorySection } from '@/components/settings/workflow-execution-history-section';
 import { WorkflowTemplateGallerySection } from '@/components/settings/workflow-template-gallery-section';
-import { WorkflowPolicySimulatorSection } from '@/components/settings/workflow-policy-simulator-section';
-import { WorkflowActiveLineView } from '@/components/settings/workflow-active-line-view';
+import { WorkflowLineEditorSection } from '@/components/settings/workflow-line-editor-section';
 import { ThemeSettings } from '@/components/settings/theme-settings';
 import { RefreshSettings } from '@/components/settings/refresh-settings';
 import { StandupDeadlineSection } from '@/components/settings/standup-deadline-section';
@@ -1627,12 +1626,8 @@ export default function SettingsPage() {
                   </div>
                 </SectionCardHeader>
                 <SectionCardBody>
-                  <div className="grid gap-4 lg:grid-cols-2">
-                    {/* 좌 pane: 현 active published 라인 정의 보기(#1637 GET 와이어) */}
-                    <WorkflowActiveLineView projectId={currentProjectId} />
-                    {/* 우 pane: dry-run preview(계약 ready·끝단 와이어) */}
-                    <WorkflowPolicySimulatorSection />
-                  </div>
+                  {/* S34: 4모드(View[S29 active+simulator]/Edit/History/Diff) 라인 에디터 — View 내부에 기존 2-pane 포함 */}
+                  <WorkflowLineEditorSection projectId={currentProjectId} />
                 </SectionCardBody>
               </SectionCard>
             </TabsContent>
