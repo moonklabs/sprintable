@@ -124,6 +124,18 @@ async def update_epic(
     if current is None:
         raise HTTPException(status_code=404, detail="Epic not found")
     data = body.model_dump(exclude_unset=True)
+    # ⭐RC#2(D1' 봉인): epic status(lifecycle) **변경**은 generic PATCH 금지 — 전용 transition 엔드포인트
+    # (POST /epics/{id}/transition)가 FSM(_EPIC_VALID_TRANSITIONS)+SoD+overlay-gate 보유. generic 으로
+    # 변경 보내면 그 3중 가드 우회. ⭐미변경 동봉(status==current)은 무시(FE always-send 호환·no-op·
+    # RC#1 resolver_id "잔류하되 무시" 동형). outcome_status(아래)는 별개 필드라 무관.
+    if "status" in data:
+        if data["status"] != current.status:
+            raise HTTPException(
+                status_code=422,
+                detail="epic status 변경은 POST /epics/{id}/transition 전용 엔드포인트를 사용하세요 "
+                       "(FSM·SoD·gate 우회 방지).",
+            )
+        data.pop("status", None)
     # intent가 이번 업데이트로 완성되면 n_a→pending 전이
     effective_md = data.get("metric_definition", current.metric_definition)
     effective_ma = data.get("measure_after", current.measure_after)

@@ -2,7 +2,7 @@ import uuid
 from datetime import date, datetime
 from typing import Any
 
-from pydantic import BaseModel, ConfigDict, field_validator
+from pydantic import BaseModel, ConfigDict
 
 EPIC_STATUSES = ("draft", "active", "done", "archived")
 EPIC_PRIORITIES = ("critical", "high", "medium", "low")
@@ -51,20 +51,8 @@ class EpicUpdate(BaseModel):
     success_hypothesis: str | None = None
     metric_definition: dict[str, Any] | None = None
     measure_after: datetime | None = None
-
-    @field_validator("status")
-    @classmethod
-    def _status_via_transition_only(cls, v: str | None) -> str | None:
-        # ⭐RC#2(봉인): epic status(lifecycle) 변경은 generic PATCH 금지 — 전용 transition 엔드포인트
-        # (POST /epics/{id}/transition)가 FSM(_EPIC_VALID_TRANSITIONS)+SoD+overlay-gate 를 보유한다.
-        # generic PATCH 로 보내면 그 3중 가드를 우회(임의 status 점프)하므로 차단(RC#1 gate transition 동형).
-        # outcome_status(n_a→pending) 는 별개 필드로 update_epic 이 계속 관리한다.
-        if v is not None:
-            raise ValueError(
-                "epic status 변경은 POST /epics/{id}/transition 전용 엔드포인트를 사용하세요 "
-                "(FSM·SoD·gate 우회 방지)."
-            )
-        return v
+    # ⚠️RC#2(D1'): status 는 잔류하되 update_epic 엔드포인트가 **미변경이면 무시·변경 시 422**(전용
+    # /transition 강제). FE always-send(미변경 동봉) 호환·실제 status 변경만 차단(RC#1 resolver_id 동형).
 
 
 class EpicResponse(BaseModel):
