@@ -63,6 +63,8 @@ async def test_priority1_project_access_owner_wins():
         pid = await _seed_project(s, org)
         pa_member = uuid.uuid4()
         org_owner = uuid.uuid4()
+        # pa_member 가 org 에서 resolve 가능해야 ①가 유효(resolve_member_identity oracle).
+        s.add(OrgMember(id=pa_member, org_id=org, user_id=uuid.uuid4(), role="member", created_at=base))
         s.add(OrgMember(id=org_owner, org_id=org, user_id=uuid.uuid4(), role="owner", created_at=base))
         s.add(ProjectAccess(id=uuid.uuid4(), project_id=pid, permission="granted", role="owner",
                             member_id=pa_member, created_at=base))
@@ -144,6 +146,7 @@ async def test_none_when_no_owner_or_admin():
 @pytest.mark.anyio
 async def test_tiebreak_earliest_created_at():
     """동순위(pa owner 2명) → created_at ASC 결정적 단일 픽."""
+    from app.models.project import OrgMember
     from app.models.project_access import ProjectAccess
     engine, Session = await _session()
     base = datetime(2026, 1, 1, tzinfo=timezone.utc)
@@ -151,12 +154,37 @@ async def test_tiebreak_earliest_created_at():
         org = uuid.uuid4()
         pid = await _seed_project(s, org)
         early, late = uuid.uuid4(), uuid.uuid4()
+        # 둘 다 resolve 가능해야 tie-break 가 의미(아니면 unresolvable skip).
+        s.add(OrgMember(id=early, org_id=org, user_id=uuid.uuid4(), role="member", created_at=base))
+        s.add(OrgMember(id=late, org_id=org, user_id=uuid.uuid4(), role="member", created_at=base))
         s.add(ProjectAccess(id=uuid.uuid4(), project_id=pid, permission="granted", role="owner",
                             member_id=late, created_at=_t(base, 10)))
         s.add(ProjectAccess(id=uuid.uuid4(), project_id=pid, permission="granted", role="owner",
                             member_id=early, created_at=base))
         await s.commit()
         assert await resolve_project_relay_owner(s, pid, org) == early
+    await engine.dispose()
+
+
+@pytest.mark.anyio
+async def test_orphan_pa_owner_falls_through_to_org_floor():
+    """⚠️S27 QA 블로커: stale/orphan project_access owner(org resolve 불가)는 skip 하고 org owner
+    floor 로 fallthrough — 데이터 드리프트가 floor 가드를 무력화 못 함."""
+    from app.models.project import OrgMember
+    from app.models.project_access import ProjectAccess
+    engine, Session = await _session()
+    base = datetime(2026, 1, 1, tzinfo=timezone.utc)
+    async with Session() as s:
+        org = uuid.uuid4()
+        pid = await _seed_project(s, org)
+        orphan = uuid.uuid4()   # project_access owner 지만 org 에 member 행 없음(stale/cross-org)
+        org_owner = uuid.uuid4()
+        s.add(OrgMember(id=org_owner, org_id=org, user_id=uuid.uuid4(), role="owner", created_at=base))
+        s.add(ProjectAccess(id=uuid.uuid4(), project_id=pid, permission="granted", role="owner",
+                            member_id=orphan, created_at=base))
+        await s.commit()
+        got = await resolve_project_relay_owner(s, pid, org)
+        assert got == org_owner  # orphan ① skip → ② org owner 로 fallthrough
     await engine.dispose()
 
 

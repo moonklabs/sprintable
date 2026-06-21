@@ -85,15 +85,23 @@ async def resolve_project_relay_owner(
     낸 그 함정 회피). 반환은 **canonical member id 1개**(team_members.id | org_members.id)라
     `resolve_member_identity()`의 human notification / agent wake 분기에 그대로 물린다.
 
-    우선순위(deterministic 단일 픽):
+    우선순위(deterministic):
       1. project_access(permission='granted', role='owner') — pa.member_id(team_member) ∪
          pa.org_member_id(grant-only 휴먼). human/agent 무관(agent-PO 도 relay 대상).
       2. org_members.role='owner' (org-wide floor).
       3. org_members.role='admin'.
-    동순위 tie-break = created_at ASC, id ASC. 없으면 None(no_assignee 가시화 — 가짜 fallback 금지).
-    asyncpg text 함정 회피: uuid 직접 바인딩·COALESCE 는 컬럼에만(파라미터 IS NULL/::uuid 미사용).
+    동순위 tie-break = created_at ASC, id ASC.
+
+    ⚠️S27 QA(산티아고 SME) 블로커 fix: 후보를 우선순위로 정렬해 **org 에서 실제 resolve 가능한 첫
+    후보**를 반환한다. stale/cross-org/orphan project_access(role='owner') row 가 있어도 그 id 가
+    org 에서 resolve 안 되면 skip 하고 다음 우선순위(org owner/admin floor)로 fallthrough — 데이터
+    드리프트가 floor 가드를 무력화하지 못하게. resolve 가능성 판정은 `resolve_member_identity`(SSOT
+    oracle)에 위임 — SQL 로 멤버 존재 술어를 재구현하면 그게 또 드리프트 소스가 되므로 금지.
+    없으면 None(no_assignee 가시화 — 가짜 fallback 금지). asyncpg text 함정 회피: uuid 직접 바인딩.
     """
-    row = (
+    from app.services.member_resolver import resolve_member_identity  # lazy(순환 import 회피)
+
+    rows = (
         await session.execute(
             text(
                 """
@@ -119,13 +127,20 @@ async def resolve_project_relay_owner(
                        AND om.role = 'admin' AND om.deleted_at IS NULL
                 ) cands
                 ORDER BY src_rank ASC, created_at ASC, cid ASC
-                LIMIT 1
                 """
             ),
             {"pid": project_id, "oid": org_id},
         )
-    ).one_or_none()
-    return row[0] if row is not None else None
+    ).all()
+    seen: set[uuid.UUID] = set()
+    for row in rows:
+        cid = row[0]
+        if cid in seen:  # 한 멤버가 여러 tier 에 걸릴 수 있음(이미 시도한 건 skip)
+            continue
+        seen.add(cid)
+        if await resolve_member_identity(cid, org_id, session) is not None:
+            return cid  # 우선순위 순 최초 resolve 가능 후보
+    return None
 
 
 async def has_project_role(
