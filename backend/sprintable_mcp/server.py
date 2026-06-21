@@ -12,6 +12,7 @@ from typing import get_type_hints
 logger = logging.getLogger(__name__)
 
 from mcp.server.fastmcp import FastMCP
+from mcp.server.transport_security import TransportSecuritySettings
 from mcp.types import TextContent
 from pydantic import BaseModel
 from pydantic.fields import PydanticUndefined
@@ -239,6 +240,16 @@ def _flat(name: str, doc: str, input_cls: type[BaseModel], fn):
     return wrapper
 
 
+# E-MCP-HTTP S2: DNS-rebinding 보호 설정. FastMCP 는 명시 transport_security 없으면 host 기반 자동
+# 보호(localhost allowed_hosts)를 켜 Cloud Run host(*.run.app)를 421 거부한다. MCP_ALLOWED_HOSTS 지정 시
+# 그 호스트만 화이트리스트(보호 ON)·비우면 보호 OFF(공개 bearer-gated 호스팅·Cloud Run TLS+bearer 가 실보안).
+_allowed_hosts = [h.strip() for h in (settings.mcp_allowed_hosts or "").split(",") if h.strip()]
+_transport_security = TransportSecuritySettings(
+    enable_dns_rebinding_protection=bool(_allowed_hosts),
+    allowed_hosts=_allowed_hosts,
+    allowed_origins=_allowed_hosts,
+)
+
 mcp = FastMCP(
     name="sprintable-mcp-python",
     instructions=(
@@ -248,6 +259,7 @@ mcp = FastMCP(
     # E-MCP-HTTP S1: stateless HTTP(요청간 세션 미보존)=무상태 툴서버(서버리스/멀티인스턴스 안전·Cloud
     # Run S2). stdio 모드는 이 설정 무시(영향 0).
     stateless_http=True,
+    transport_security=_transport_security,
 )
 
 

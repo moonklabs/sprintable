@@ -46,6 +46,34 @@ def test_deploy_relevant_env_names(monkeypatch):
     assert s.agent_api_key == "sk_dev"
 
 
+def test_allowed_hosts_env_read_and_protection(monkeypatch):
+    """⭐S2 421 fix: 기본 빈 MCP_ALLOWED_HOSTS → DNS-rebinding 보호 OFF(Cloud Run host 허용)·지정 시
+    화이트리스트 보호 ON. env-read(MCP_ALLOWED_HOSTS)+protection toggle 검증(monkeypatch.setenv)."""
+    from mcp.server.transport_security import TransportSecuritySettings
+    from sprintable_mcp.config import McpSettings
+
+    # 기본(미설정) → 빈 문자열 → 보호 OFF
+    s0 = McpSettings()
+    hosts0 = [h.strip() for h in (s0.mcp_allowed_hosts or "").split(",") if h.strip()]
+    ts0 = TransportSecuritySettings(enable_dns_rebinding_protection=bool(hosts0), allowed_hosts=hosts0)
+    assert ts0.enable_dns_rebinding_protection is False   # Cloud Run host 421 방지
+
+    # MCP_ALLOWED_HOSTS env → 화이트리스트·보호 ON
+    monkeypatch.setenv("MCP_ALLOWED_HOSTS", "mcp-dev.sprintable.ai,foo.run.app")
+    s1 = McpSettings()
+    assert s1.mcp_allowed_hosts == "mcp-dev.sprintable.ai,foo.run.app"   # env-name read
+    hosts1 = [h.strip() for h in s1.mcp_allowed_hosts.split(",") if h.strip()]
+    ts1 = TransportSecuritySettings(enable_dns_rebinding_protection=bool(hosts1), allowed_hosts=hosts1)
+    assert ts1.enable_dns_rebinding_protection is True
+    assert "mcp-dev.sprintable.ai" in ts1.allowed_hosts
+
+
+def test_module_mcp_protection_off_by_default():
+    """현 모듈 mcp(빈 hosts 임포트)는 DNS-rebinding 보호 OFF — Cloud Run 호스팅 421 회피."""
+    from sprintable_mcp.server import mcp
+    assert mcp.settings.transport_security.enable_dns_rebinding_protection is False
+
+
 # ── ② per-request 키 contextvar ───────────────────────────────────────────────
 def test_api_key_override_contextvar():
     from sprintable_mcp.api_client import (
