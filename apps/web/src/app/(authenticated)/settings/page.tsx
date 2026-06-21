@@ -5,7 +5,7 @@ import { useDashboardContext } from '@/app/dashboard/dashboard-shell';
 import Link from 'next/link';
 import { useRouter, useSearchParams } from 'next/navigation';
 import { useTranslations } from 'next-intl';
-import { BarChart2, Bell, Bot, Check, CheckCircle2, CreditCard, FolderKanban, GitBranch, Menu, Palette, Plus, Trash2, User, Users, Webhook, X } from 'lucide-react';
+import { BarChart2, Bell, Bot, Check, CheckCircle2, CreditCard, FolderKanban, GitBranch, Menu, Palette, Plus, ShieldCheck, Trash2, User, Users, Webhook, X } from 'lucide-react';
 import { UsageDashboard } from '@/components/settings/usage-dashboard';
 import { OrgMembersSection } from '@/components/settings/org-members-section';
 import { AddMemberModal } from '@/components/settings/add-member-modal';
@@ -19,6 +19,7 @@ import { McpConnectionSettings } from '@/components/settings/mcp-connection-sett
 import { WorkflowTriggerTypesSection } from '@/components/settings/workflow-trigger-types-section';
 import { WorkflowExecutionHistorySection } from '@/components/settings/workflow-execution-history-section';
 import { WorkflowTemplateGallerySection } from '@/components/settings/workflow-template-gallery-section';
+import { WorkflowPolicySimulatorSection } from '@/components/settings/workflow-policy-simulator-section';
 import { ThemeSettings } from '@/components/settings/theme-settings';
 import { RefreshSettings } from '@/components/settings/refresh-settings';
 import { StandupDeadlineSection } from '@/components/settings/standup-deadline-section';
@@ -848,6 +849,12 @@ export default function SettingsPage() {
                 {t('tabWorkflow')}
               </TabsTrigger>
             ) : null}
+            {adminChecked && isAdmin ? (
+              <TabsTrigger value="workflow-policies">
+                <ShieldCheck className="h-4 w-4" />
+                {t('tabWorkflowPolicies')}
+              </TabsTrigger>
+            ) : null}
 
             {adminChecked ? (
               <>
@@ -1606,6 +1613,30 @@ export default function SettingsPage() {
                 {currentProjectId ? <WorkflowTemplateGallerySection projectId={currentProjectId} orgId={orgId ?? undefined} /> : null}
                 {currentProjectId ? <WorkflowExecutionHistorySection projectId={currentProjectId} /> : null}
               </div>
+            </TabsContent>
+            ) : null}
+
+            {adminChecked && isAdmin ? (
+            <TabsContent value="workflow-policies">
+              <SectionCard>
+                <SectionCardHeader>
+                  <div className="space-y-1">
+                    <h2 className="text-base font-semibold text-foreground">{t('tabWorkflowPolicies')}</h2>
+                    <p className="text-sm text-muted-foreground">{t('workflowPoliciesDescription')}</p>
+                  </div>
+                </SectionCardHeader>
+                <SectionCardBody>
+                  <div className="grid gap-4 lg:grid-cols-2">
+                    {/* 좌 pane: 현 활성 라인 정의 — BE active-by-entity_type GET 대기(디디 추가 中)·shell */}
+                    <div className="rounded-xl border border-dashed border-border bg-muted/10 p-3">
+                      <p className="text-[11px] font-medium uppercase tracking-wide text-muted-foreground">{t('simActiveLine')}</p>
+                      <p className="mt-2 text-xs text-muted-foreground">{t('simActiveLinePending')}</p>
+                    </div>
+                    {/* 우 pane: dry-run preview(계약 ready·끝단 와이어) */}
+                    <WorkflowPolicySimulatorSection />
+                  </div>
+                </SectionCardBody>
+              </SectionCard>
             </TabsContent>
             ) : null}
 
