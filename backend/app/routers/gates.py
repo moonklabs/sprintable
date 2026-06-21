@@ -11,7 +11,13 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.dependencies.auth import get_current_user, get_verified_org_id
 from app.dependencies.database import get_db
 from app.models.gate import Gate
-from app.services.gate_service import create_gate, transition_gate, void_gate
+from app.services.gate_service import (
+    create_gate,
+    hold_gate,
+    transition_gate,
+    unhold_gate,
+    void_gate,
+)
 from app.services.member_resolver import resolve_member
 from app.services.project_auth import is_org_owner_or_admin
 
@@ -64,6 +70,7 @@ class GateResponse(BaseModel):
     resolver_id: uuid.UUID | None = None
     resolved_at: datetime | None = None
     resolution_note: str | None = None
+    held_until: datetime | None = None  # S31: status='held' 시 시한부 만료(무기한이면 None)·additive
     neutral_facts: dict[str, Any] | None = None
     # H1-S3: merge verdict gate evidence metadata (0118)·additive·하위호환 default.
     requires_human: bool = False
@@ -167,6 +174,55 @@ async def void_gate_endpoint(
         raise HTTPException(status_code=403, detail="게이트 무효화는 org owner/admin 만 가능합니다.")
     try:
         gate = await void_gate(session, org_id, id, resolved.id, body.reason)
+        await session.commit()
+        return GateResponse.model_validate(gate)
+    except ValueError as e:
+        raise HTTPException(status_code=422, detail=str(e))
+
+
+class GateHoldRequest(BaseModel):
+    reason: str | None = None       # S31: 보류 사유(선택·가역적 일시정지라 마찰↓)
+    held_until: datetime | None = None  # 시한부 만료(무기한이면 None)
+
+
+async def _require_gate_admin(session, auth, org_id):
+    """⭐S31/S30 공통: gate 파괴적/관리 액션 admin 게이팅(canonical project_auth·ad-hoc role 금지).
+    반환 resolved member(holder/voider=인증 caller 강제용·body 신뢰 0)."""
+    resolved = await resolve_member(auth, org_id, session)
+    if not await is_org_owner_or_admin(session, uuid.UUID(auth.user_id), org_id):
+        raise HTTPException(status_code=403, detail="이 액션은 org owner/admin 만 가능합니다.")
+    return resolved
+
+
+@router.post("/{id}/hold", response_model=GateResponse)
+async def hold_gate_endpoint(
+    id: uuid.UUID,
+    body: GateHoldRequest,
+    session: AsyncSession = Depends(get_db),
+    org_id: uuid.UUID = Depends(get_verified_org_id),
+    auth=Depends(get_current_user),
+) -> GateResponse:
+    """⭐S31 admin hold: pending gate 일시 보류(held·SLA pause). admin-only·holder=인증 caller 강제."""
+    resolved = await _require_gate_admin(session, auth, org_id)
+    try:
+        gate = await hold_gate(session, org_id, id, resolved.id, body.reason, body.held_until)
+        await session.commit()
+        return GateResponse.model_validate(gate)
+    except ValueError as e:
+        raise HTTPException(status_code=422, detail=str(e))
+
+
+@router.post("/{id}/unhold", response_model=GateResponse)
+async def unhold_gate_endpoint(
+    id: uuid.UUID,
+    session: AsyncSession = Depends(get_db),
+    org_id: uuid.UUID = Depends(get_verified_org_id),
+    auth=Depends(get_current_user),
+) -> GateResponse:
+    """⭐S31 admin unhold: held gate 재개(→pending·SLA resume). admin-only·actor=인증 caller."""
+    resolved = await _require_gate_admin(session, auth, org_id)
+    try:
+        gate = await unhold_gate(session, org_id, id, resolved.id)
         await session.commit()
         return GateResponse.model_validate(gate)
     except ValueError as e:

@@ -197,6 +197,99 @@ async def void_gate(
     return gate
 
 
+async def _set_linked_step_run(session, org_id, gate_id, *, status, held_until, reason):
+    """gate 에 묶인 미해소 step_run 의 status/held_until 갱신(없으면 no-op·legacy/비-라인 gate)."""
+    from app.services.workflow_line_resolution import find_active_step_run_for_gate
+    sr_id = await find_active_step_run_for_gate(session, org_id, gate_id)
+    if sr_id is None:
+        return None
+    sr = (await session.execute(
+        select(WorkflowLineStepRun).where(WorkflowLineStepRun.id == sr_id)
+    )).scalar_one_or_none()
+    if sr is not None:
+        sr.status = status
+        sr.held_until = held_until
+        if reason is not None:
+            sr.routing_reason = reason[:500]
+    return sr_id
+
+
+async def hold_gate(
+    session: AsyncSession,
+    org_id: uuid.UUID,
+    gate_id: uuid.UUID,
+    holder_id: uuid.UUID,
+    reason: str | None = None,
+    held_until: datetime | None = None,
+) -> Gate:
+    """⭐S31 admin hold: pending gate 를 일시 보류(held). void(종료)와 달리 **가역**(unhold 재개).
+
+    묶인 step_run.status='held'+held_until 세팅 → SLA processor 가 reminder/escalation 일시정지(pause).
+    holder=인증 caller(라우터 강제·body 신뢰 0·S23 RC①). audit=gate 행(status='held'·resolver_id=holder·
+    resolution_note=reason·held_until)이 현 상태(status='held' 가 disambiguate·unhold 시 clear)+app-log
+    `gate_held`(durable 이력·S30 void 패턴). 사유는 선택(가역적 일시정지라 마찰↓).
+    """
+    gate = (await session.execute(
+        select(Gate).where(Gate.id == gate_id, Gate.org_id == org_id)
+    )).scalar_one_or_none()
+    if gate is None:
+        raise ValueError(f"Gate {gate_id} not found")
+    if not is_valid_transition(gate.status, "held"):
+        raise ValueError(f"불법 전이: {gate.status} → held. pending 게이트만 보류 가능.")
+
+    gate.status = "held"
+    gate.resolver_id = holder_id          # status='held' 가 holder 로 해석(approve/reject 아님)
+    gate.resolution_note = reason          # 선택
+    gate.held_until = held_until           # 무기한이면 None
+    sr_id = await _set_linked_step_run(
+        session, org_id, gate_id, status="held", held_until=held_until,
+        reason=f"gate held by admin{(': ' + reason) if reason else ''}",
+    )
+    logger.info(
+        "gate_held org=%s gate=%s holder=%s work=%s/%s step_run=%s until=%s reason=%s",
+        org_id, gate_id, holder_id, gate.work_item_type, gate.work_item_id, sr_id, held_until, reason,
+    )
+    await session.flush()
+    await session.refresh(gate)
+    return gate
+
+
+async def unhold_gate(
+    session: AsyncSession,
+    org_id: uuid.UUID,
+    gate_id: uuid.UUID,
+    actor_id: uuid.UUID,
+) -> Gate:
+    """⭐S31 admin unhold: held gate 를 재개(→pending). SLA 재개(step_run→gate_pending·다음 스캔서 처리).
+
+    held 상태 audit 필드(resolver_id/resolution_note/held_until)를 **clear**(재개된 pending 깨끗)·이력은
+    app-log `gate_unheld`. holder/actor=인증 caller(라우터 강제).
+    """
+    gate = (await session.execute(
+        select(Gate).where(Gate.id == gate_id, Gate.org_id == org_id)
+    )).scalar_one_or_none()
+    if gate is None:
+        raise ValueError(f"Gate {gate_id} not found")
+    if not is_valid_transition(gate.status, "pending"):
+        raise ValueError(f"불법 전이: {gate.status} → pending. 보류(held) 게이트만 재개 가능.")
+
+    gate.status = "pending"
+    gate.resolver_id = None
+    gate.resolution_note = None
+    gate.held_until = None
+    sr_id = await _set_linked_step_run(
+        session, org_id, gate_id, status="gate_pending", held_until=None,
+        reason="gate unheld by admin (resumed)",
+    )
+    logger.info(
+        "gate_unheld org=%s gate=%s actor=%s work=%s/%s step_run=%s",
+        org_id, gate_id, actor_id, gate.work_item_type, gate.work_item_id, sr_id,
+    )
+    await session.flush()
+    await session.refresh(gate)
+    return gate
+
+
 async def _advance_story_on_merge_approve(session: AsyncSession, gate: Gate, new_status: str) -> None:
     """merge 게이트 approve 시 work_item 스토리를 done으로 진행(H1-FIX-2).
 
