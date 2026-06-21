@@ -162,13 +162,13 @@ async def test_collect_hypothesis_deadlines_pairs_org():
     agent, org, hyp_id = uuid.uuid4(), uuid.uuid4(), uuid.uuid4()
     now = datetime.now(timezone.utc)
     rows = [
-        {  # 임박 + drafted_by → 발사.
+        {  # S27: 임박 + owner_member_id → 발사(wake 타깃=owner·dispatchable 정합).
             "id": hyp_id, "org_id": org, "measure_after": now + timedelta(hours=5),
-            "status": "measuring", "drafted_by_member_id": agent, "created_by_member_id": None,
+            "status": "measuring", "owner_member_id": agent,
         },
-        {  # target 없음 → evaluator skip.
+        {  # target 없음 → evaluator skip(쿼리 WHERE owner IS NOT NULL 가 실DB선 제외).
             "id": uuid.uuid4(), "org_id": org, "measure_after": now + timedelta(hours=2),
-            "status": "active", "drafted_by_member_id": None, "created_by_member_id": None,
+            "status": "active", "owner_member_id": None,
         },
     ]
     db = AsyncMock()
@@ -262,7 +262,9 @@ async def test_fire_one_conflict_loser_skips_dispatch():
 @pytest.mark.anyio
 async def test_fire_one_non_dispatchable_records_firing_no_wake():
     w = L2TriggerWorker(use_advisory_lock=False)
-    d = _decision("hypothesis")  # 비-dispatchable anchor.
+    # S27: matrix 5종(story/hyp/doc/epic/sprint) 전부 dispatch_capable=True 가 됐으므로 비-dispatchable
+    # 검사는 matrix 미등록 타입으로(firing 기록되나 _DISPATCHABLE_ANCHORS 밖이라 wake skip).
+    d = _decision("task")  # 비-matrix anchor.
     db = AsyncMock()
     with patch.object(w, "_claim_firing", AsyncMock(return_value=True)), \
          patch("app.services.agent_dispatch.dispatch_entity_to_assignee", AsyncMock()) as disp:

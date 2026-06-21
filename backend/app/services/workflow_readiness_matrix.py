@@ -41,7 +41,7 @@ class EntityReadiness:
     valid_transitions: frozenset[tuple[str, str]] | None
     # S21 시점 routing/resolution 게이트 실가동 여부(현재 story 만 True).
     gating_eligible: bool
-    # agent_dispatch._fetch_entity 가 이 엔티티를 로드할 수 있는지(현 epic/story/doc).
+    # agent_dispatch._fetch_entity 가 이 엔티티를 로드할 수 있는지(현 epic/story/doc/hypothesis/sprint).
     dispatch_capable: bool
     # gating_eligible=False 인 이유(observability/후속 스토리 라우팅). eligible 이면 None.
     blocking_reason: str | None
@@ -88,8 +88,8 @@ READINESS_MATRIX: dict[str, EntityReadiness] = {
         # ⭐S26: overlay-gated = 시작(planning→active)·마감(active→closed·review→closed). full FSM 은
         # sprint.py _SPRINT_VALID_TRANSITIONS SSOT. archive(closed→archived)는 native 직행.
         valid_transitions=frozenset({("planning", "active"), ("active", "closed"), ("review", "closed")}),
-        gating_eligible=True,                    # S26: sprint contract gate(advisory·dispatch는 S27)
-        dispatch_capable=False,                  # ⚠️agent-handoff S27까지 금지(AC)·sprint dispatch 미지원
+        gating_eligible=True,                    # S26: sprint contract gate(advisory)
+        dispatch_capable=True,                   # S27: sprint dispatch anchor enabled(project owner/admin relay)
         blocking_reason=None,
     ),
     "doc": EntityReadiness(

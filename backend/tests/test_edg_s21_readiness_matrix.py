@@ -38,10 +38,10 @@ def test_matrix_covers_five_entities_with_verified_contracts():
     # S23: valid_transitions = overlay-gated subset(proposed→active 만)·full FSM 은 hypothesis.py SSOT.
     assert hyp.valid_transitions == frozenset({("proposed", "active")})
     assert get_readiness("epic").status_enum == frozenset({"draft", "active", "done", "archived"})
-    # S22 doc=native status 컬럼(0128)·draft→confirmed. S26 sprint=enum(planning..archived)·dispatch False.
+    # S22 doc=native status 컬럼(0128)·draft→confirmed. S27 sprint=enum(planning..archived)·dispatch True.
     assert get_readiness("doc").has_native_status is True
     assert get_readiness("doc").valid_transitions == frozenset({("draft", "confirmed")})
-    assert get_readiness("sprint").status_enum is not None and get_readiness("sprint").dispatch_capable is False
+    assert get_readiness("sprint").status_enum is not None and get_readiness("sprint").dispatch_capable is True
     # story=config-driven(모델 enum 상수 없음).
     assert get_readiness("story").status_enum is None and get_readiness("story").valid_transitions is None
 

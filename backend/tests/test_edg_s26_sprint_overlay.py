@@ -36,7 +36,7 @@ def test_matrix_sprint_eligible_dispatch_off():
     from app.services.workflow_readiness_matrix import get_readiness, is_transition_supported
     s = get_readiness("sprint")
     assert s.gating_eligible is True
-    assert s.dispatch_capable is False  # ⭐agent-handoff S27까지 금지
+    assert s.dispatch_capable is True  # S27: sprint dispatch anchor enabled
     assert s.valid_transitions == frozenset({("planning", "active"), ("active", "closed"), ("review", "closed")})
     assert is_transition_supported("sprint", "planning", "active") is True
     assert is_transition_supported("sprint", "review", "closed") is True
