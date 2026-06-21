@@ -39,6 +39,9 @@ interface DocDetail {
   assignee_id?: string | null;
   slug_locked?: boolean;
   canonical_slug?: string;
+  // E-DG S22/S28: doc decision lifecycle status(draft|pending|confirmed|denied·기본 draft) + cross-doc 대체 포인터(S28·additive).
+  status?: string;
+  superseded_by?: string | null;
 }
 
 function InlineSaveIndicator({
