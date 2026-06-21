@@ -37,12 +37,17 @@ from app.services.l2_heuristics import (
     HeuristicThresholds,
     TriggerDecision,
 )
+from app.services.workflow_readiness_matrix import READINESS_MATRIX
 
 logger = logging.getLogger(__name__)
 
-# dispatch service(S1)가 처리 가능한 anchor entity. 이 외(sprint/hypothesis 등)는 firing만 기록하고
-# wake는 skip한다(해당 타입 dispatch 경로는 후속 확장).
-_DISPATCHABLE_ANCHORS = frozenset({"epic", "story", "doc"})
+# S27: dispatch 가능한 anchor entity = readiness matrix dispatch_capable SSOT 파생(agent_dispatch
+# ._ENTITY_TYPES 와 동일 노선). 하드코딩 2-소스 드리프트 박멸 — matrix 가 단일 진실(엔티티 dispatch
+# 승격은 matrix dispatch_capable 한 곳만 토글하면 두 경로 동시 반영). hypothesis(owner_member_id)·
+# sprint(project owner relay) wake 타깃은 agent_dispatch._fetch_entity 가 해소.
+_DISPATCHABLE_ANCHORS = frozenset(
+    e for e, d in READINESS_MATRIX.items() if d.dispatch_capable
+)
 
 # Phase 1 활동-구동 트리거 대상 verb(status_changed→담당자 wake). 확장 시 여기에 추가.
 _ACTIVITY_TRIGGER_VERBS = frozenset({"status_changed"})
@@ -78,6 +83,7 @@ class L2TriggerWorker:
     # 데드라인 nudge 불필요한 종결 상태(타입별).
     _HYPOTHESIS_TERMINAL = ("verified", "falsified", "killed", "archived")
     _EPIC_TERMINAL = ("completed", "done", "closed", "archived", "cancelled", "canceled")
+    _SPRINT_TERMINAL = ("closed", "archived", "cancelled", "canceled")
 
     def __init__(
         self,
@@ -303,13 +309,13 @@ class L2TriggerWorker:
 
         deadline은 활동이 발생하지 않으므로 cursor poll로는 못 잡는다 — 별도 주기 스캔.
         · Epic.target_date — assignee_id를 target으로 dispatch service가 wake(dispatchable).
-        · Hypothesis.measure_after — drafted_by/created_by(agent-가능)를 target으로 firing 기록
-          (현 dispatch 서비스는 hypothesis 미지원이라 wake는 skip·후속 확장).
-        Sprint.end_date 스캔은 sprint dispatch 경로 확정과 함께 후속 확장.
+        · Hypothesis.measure_after — owner_member_id를 target으로 dispatch service가 wake(dispatchable).
+        · Sprint.end_date — project owner/admin lane을 target으로 dispatch service가 wake(dispatchable).
         """
         now = _utcnow()
         firings = await self._collect_epic_deadlines(db, now)
         firings += await self._collect_hypothesis_deadlines(db, now)
+        firings += await self._collect_sprint_deadlines(db, now)
         await self._dispatch_decisions(db, firings)
         return firings
 
@@ -347,21 +353,52 @@ class L2TriggerWorker:
         rows = (
             await db.execute(
                 text(
-                    "SELECT id, org_id, measure_after, status, drafted_by_member_id, "
-                    "created_by_member_id FROM hypotheses "
-                    "WHERE status NOT IN :terminal AND measure_after <= :horizon"
+                    "SELECT id, org_id, measure_after, status, owner_member_id FROM hypotheses "
+                    "WHERE owner_member_id IS NOT NULL AND status NOT IN :terminal "
+                    "AND measure_after <= :horizon"
                 ).bindparams(bindparam("terminal", expanding=True)),
                 {"terminal": list(self._HYPOTHESIS_TERMINAL), "horizon": horizon},
             )
         ).mappings().all()
         out: list[tuple[TriggerDecision, uuid.UUID]] = []
         for r in rows:
-            target = r["drafted_by_member_id"] or r["created_by_member_id"]
             for d in self.evaluator.evaluate_deadline(
                 DeadlineTarget(
                     entity_type="hypothesis",
                     entity_id=r["id"],
                     deadline=r["measure_after"],
+                    status=r["status"],
+                    target_agent_id=r["owner_member_id"],
+                ),
+                now,
+            ):
+                out.append((d, r["org_id"]))
+        return out
+
+    async def _collect_sprint_deadlines(self, db, now) -> list[tuple[TriggerDecision, uuid.UUID]]:
+        horizon_date = (now + timedelta(hours=self.evaluator.t.deadline_epic_target_h)).date()
+        rows = (
+            await db.execute(
+                text(
+                    "SELECT id, org_id, end_date, status FROM sprints "
+                    "WHERE end_date IS NOT NULL AND status NOT IN :terminal AND end_date <= :horizon"
+                ).bindparams(bindparam("terminal", expanding=True)),
+                {"terminal": list(self._SPRINT_TERMINAL), "horizon": horizon_date},
+            )
+        ).mappings().all()
+        from app.services.agent_dispatch import _fetch_entity
+
+        out: list[tuple[TriggerDecision, uuid.UUID]] = []
+        for r in rows:
+            target, _title, _desc, _proj = await _fetch_entity(db, "sprint", r["id"], r["org_id"])
+            if not target:
+                continue
+            deadline = datetime.combine(r["end_date"], dt_time(23, 59, 59), tzinfo=timezone.utc)
+            for d in self.evaluator.evaluate_deadline(
+                DeadlineTarget(
+                    entity_type="sprint",
+                    entity_id=r["id"],
+                    deadline=deadline,
                     status=r["status"],
                     target_agent_id=target,
                 ),

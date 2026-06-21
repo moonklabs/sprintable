@@ -18,7 +18,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.models.doc import Doc
 from app.models.event import Event, EventType
 from app.models.hypothesis import Hypothesis
-from app.models.pm import Epic, Story
+from app.models.pm import Epic, Sprint, Story
 from app.routers.agent_gateway import wake_agent
 from app.routers.events import _event_to_payload, _push_to_agent
 from app.services.activity_stream import extract_activities_best_effort
@@ -27,10 +27,24 @@ from app.services.member_resolver import resolve_member_identity
 from app.services.notification_dispatch import dispatch_notification
 from app.services.workflow_readiness_matrix import READINESS_MATRIX
 
-# S21: dispatch 가능 엔티티는 readiness matrix 의 dispatch_capable SSOT 에서 도출(현 epic/story/doc).
-# hypothesis/sprint fetch 추가(S23/S26) 시 matrix descriptor 만 바꾸면 자동 확장. _fetch_entity 분기는
-# 그때 함께 확장(현 byte-동일).
+# S21/S27: dispatch 가능 엔티티는 readiness matrix 의 dispatch_capable SSOT 에서 도출.
 _ENTITY_TYPES = {e for e, d in READINESS_MATRIX.items() if d.dispatch_capable}
+
+
+async def _resolve_sprint_dispatch_owner(
+    db: AsyncSession,
+    org_id: uuid.UUID,
+    project_id: uuid.UUID,
+) -> uuid.UUID | None:
+    """Sprint 은 assignee 컬럼이 없어 전이 wake 를 프로젝트 relay-owner 로 보낸다(S27).
+
+    owner 해소는 member-SSOT(project_auth.resolve_project_relay_owner) 단일 경로 — ad-hoc
+    TeamMember.role 리졸버 금지(grant/admin 403 드리프트 회피). 부재 시 None(no_assignee 가시화·
+    가짜 fallback 금지). 반환 canonical member id 는 resolve_member_identity 의 human/agent 분기에 위임.
+    """
+    from app.services.project_auth import resolve_project_relay_owner
+
+    return await resolve_project_relay_owner(db, project_id, org_id)
 
 
 class DispatchResponse(BaseModel):
@@ -82,6 +96,18 @@ async def _fetch_entity(
         )
         r0 = row.one_or_none()
         r = (r0[0], r0[1], None, r0[2]) if r0 is not None else None
+    elif entity_type == "sprint":
+        row = await db.execute(
+            select(Sprint.title, Sprint.status, Sprint.project_id).where(
+                Sprint.id == entity_id, Sprint.org_id == org_id
+            )
+        )
+        r0 = row.one_or_none()
+        if r0 is None:
+            r = None
+        else:
+            assignee_id = await _resolve_sprint_dispatch_owner(db, org_id, r0.project_id)
+            r = (assignee_id, r0.title, f"status={r0.status}", r0.project_id)
     else:
         return None, None, None, None
 

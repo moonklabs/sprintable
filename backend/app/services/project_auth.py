@@ -72,6 +72,77 @@ async def get_project_role(
     return max(candidates, key=lambda r: PROJECT_ROLE_RANK[r])
 
 
+async def resolve_project_relay_owner(
+    session: AsyncSession,
+    project_id: uuid.UUID,
+    org_id: uuid.UUID,
+) -> uuid.UUID | None:
+    """프로젝트의 단일 relay-owner canonical member id 해소(E-DG S27 sprint dispatch anchor).
+
+    sprint 은 assignee 컬럼이 없어, 전이 wake 대상을 프로젝트 책임자로 relay 한다. owner 해소는
+    member-SSOT(project_access granted ∪ org owner/admin floor)를 따르며 — ad-hoc TeamMember.role
+    리졸버 금지(event_notifications/docs 가 자체 team_member 리졸버를 굴려 grant/admin 403 드리프트를
+    낸 그 함정 회피). 반환은 **canonical member id 1개**(team_members.id | org_members.id)라
+    `resolve_member_identity()`의 human notification / agent wake 분기에 그대로 물린다.
+
+    우선순위(deterministic):
+      1. project_access(permission='granted', role='owner') — pa.member_id(team_member) ∪
+         pa.org_member_id(grant-only 휴먼). human/agent 무관(agent-PO 도 relay 대상).
+      2. org_members.role='owner' (org-wide floor).
+      3. org_members.role='admin'.
+    동순위 tie-break = created_at ASC, id ASC.
+
+    ⚠️S27 QA(산티아고 SME) 블로커 fix: 후보를 우선순위로 정렬해 **org 에서 실제 resolve 가능한 첫
+    후보**를 반환한다. stale/cross-org/orphan project_access(role='owner') row 가 있어도 그 id 가
+    org 에서 resolve 안 되면 skip 하고 다음 우선순위(org owner/admin floor)로 fallthrough — 데이터
+    드리프트가 floor 가드를 무력화하지 못하게. resolve 가능성 판정은 `resolve_member_identity`(SSOT
+    oracle)에 위임 — SQL 로 멤버 존재 술어를 재구현하면 그게 또 드리프트 소스가 되므로 금지.
+    없으면 None(no_assignee 가시화 — 가짜 fallback 금지). asyncpg text 함정 회피: uuid 직접 바인딩.
+    """
+    from app.services.member_resolver import resolve_member_identity  # lazy(순환 import 회피)
+
+    rows = (
+        await session.execute(
+            text(
+                """
+                SELECT cid FROM (
+                    SELECT COALESCE(pa.member_id, pa.org_member_id) AS cid,
+                           1 AS src_rank, pa.created_at AS created_at
+                      FROM project_access pa
+                      JOIN projects p ON p.id = pa.project_id
+                     WHERE pa.project_id = :pid AND p.org_id = :oid
+                       AND pa.permission = 'granted' AND pa.role = 'owner'
+                       AND COALESCE(pa.member_id, pa.org_member_id) IS NOT NULL
+                    UNION ALL
+                    SELECT om.id AS cid, 2 AS src_rank, om.created_at AS created_at
+                      FROM org_members om
+                      JOIN projects p ON p.org_id = om.org_id
+                     WHERE p.id = :pid AND om.org_id = :oid
+                       AND om.role = 'owner' AND om.deleted_at IS NULL
+                    UNION ALL
+                    SELECT om.id AS cid, 3 AS src_rank, om.created_at AS created_at
+                      FROM org_members om
+                      JOIN projects p ON p.org_id = om.org_id
+                     WHERE p.id = :pid AND om.org_id = :oid
+                       AND om.role = 'admin' AND om.deleted_at IS NULL
+                ) cands
+                ORDER BY src_rank ASC, created_at ASC, cid ASC
+                """
+            ),
+            {"pid": project_id, "oid": org_id},
+        )
+    ).all()
+    seen: set[uuid.UUID] = set()
+    for row in rows:
+        cid = row[0]
+        if cid in seen:  # 한 멤버가 여러 tier 에 걸릴 수 있음(이미 시도한 건 skip)
+            continue
+        seen.add(cid)
+        if await resolve_member_identity(cid, org_id, session) is not None:
+            return cid  # 우선순위 순 최초 resolve 가능 후보
+    return None
+
+
 async def has_project_role(
     session: AsyncSession,
     user_id: uuid.UUID,
