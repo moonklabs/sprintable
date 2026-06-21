@@ -24,7 +24,11 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models.gate import Gate, is_valid_transition
-from app.models.workflow_line import WorkflowLineStepRun
+from app.models.workflow_line import (
+    WorkflowLineStepApproval,
+    WorkflowLineStepRun,
+    WorkflowLineStepRunEvent,
+)
 from app.services.gate_resolver import resolve_disposition
 
 logger = logging.getLogger(__name__)
@@ -410,6 +414,117 @@ async def resolve_gate_from_verdict(
     gate.status = new_status
     gate.resolver_id = resolver_id
     gate.resolved_at = datetime.now(timezone.utc)
+    await session.flush()
+    await session.refresh(gate)
+    return gate
+
+
+async def override_gate(
+    session: AsyncSession,
+    org_id: uuid.UUID,
+    gate_id: uuid.UUID,
+    owner_id: uuid.UUID,
+    decision: str,
+    reason: str,
+) -> Gate:
+    """⭐E-DG S33 owner force-resolve: owner(최종권한자)가 막힌/긴급 gate 를 **강제 결정**한다.
+
+    ⚠️void(종료)/hold(정지)/reassign(교체)와 달리 **gate 결정 자체를 강제**(approved|rejected)·정상 결재
+    경로(quorum·SoD)를 **우회**한다 → 가장 강력·민감한 액션. 권한=owner-only(라우터 `is_org_owner`·admin
+    제외)·reason 필수·owner_id 는 인증 caller 강제(body 신뢰 0·S23 RC①).
+
+    메커니즘: ``transition_gate`` 재사용(FSM pending→approved|rejected·S6 hook 가 라인전이 자동 적용).
+    parallel gate 면 남은 pending approver row 를 ``status="overridden"`` 로 닫는다(approved 와 distinct·
+    강제 닫힘이지 승인 아님·dangling/SLA 방지). audit(최중) = ``WorkflowLineStepRunEvent(gate_overridden·
+    bypassed_sod=True·decision·reason)`` + ``logger.warning`` + 영향받은 requester·bypass된 approver 재-notify
+    (자기 gate 가 강제결정된 걸 알아야·안 하면 깜깜).
+    """
+    if decision not in ("approved", "rejected"):
+        raise ValueError("decision 은 approved|rejected 만 가능합니다.")
+    if not (reason and reason.strip()):
+        raise ValueError("override 는 reason(사유)이 필수입니다.")
+    gate = (await session.execute(
+        select(Gate).where(Gate.id == gate_id, Gate.org_id == org_id)
+    )).scalar_one_or_none()
+    if gate is None:
+        raise ValueError(f"Gate {gate_id} not found")
+    if gate.status != "pending":
+        raise ValueError(f"override 는 pending gate 만 가능합니다 (현재 {gate.status}).")
+
+    # 영향받은 pending approver row(parallel) — overridden 마킹 + notify 대상. 단일 gate 면 빈 리스트.
+    appr_rows = (await session.execute(
+        select(WorkflowLineStepApproval).where(
+            WorkflowLineStepApproval.gate_id == gate_id,
+            WorkflowLineStepApproval.org_id == org_id,
+            WorkflowLineStepApproval.status == "pending",
+        )
+    )).scalars().all()
+    bypassed = [a.approver_member_id for a in appr_rows]
+    requester_id = appr_rows[0].requested_by_member_id if appr_rows else None
+
+    # 라인 step_run(audit anchor·project_id) — transition_gate 가 _OPEN 밖으로 보내기 전에 캡처.
+    from app.services.workflow_line_resolution import find_active_step_run_for_gate
+    sr_id = await find_active_step_run_for_gate(session, org_id, gate_id)
+    sr = None
+    if sr_id is not None:
+        sr = (await session.execute(
+            select(WorkflowLineStepRun).where(WorkflowLineStepRun.id == sr_id)
+        )).scalar_one_or_none()
+
+    # ⭐force-resolve: quorum/SoD 우회·S6 hook 라인전이 자동 적용.
+    await transition_gate(session, org_id, gate_id, decision, resolver_id=owner_id, note=reason)
+
+    # parallel approver row 닫기(overridden·강제 닫힘이지 승인 아님·dangling/SLA 방지).
+    now = datetime.now(timezone.utc)
+    for a in appr_rows:
+        a.status = "overridden"
+        a.resolved_at = now
+
+    # ⭐gate 행에 override 마커(FE cheap 신호·event fetch 없이 "강제 결정됨" 배지). transition_gate 는
+    # resolution_note 를 rejected 에만 세팅하므로 approved override 사유가 누락 → neutral_facts 로 보존.
+    # 전체 audit/메타(owner·시각·bypassed_sod)는 gate_overridden 이벤트가 SSOT(S32 reassign 동형).
+    gate.neutral_facts = {
+        **(gate.neutral_facts or {}),
+        "overridden": True,
+        "override_decision": decision,
+        "override_reason": reason,
+        "overridden_by_member_id": str(owner_id),
+    }
+
+    # audit(최중): bypassed_sod 플래그가 감사 추적 핵심. 라인 step_run 있을 때만 이벤트(없으면 gate행+log).
+    if sr is not None:
+        session.add(WorkflowLineStepRunEvent(
+            org_id=org_id, project_id=sr.project_id, step_run_id=sr.id,
+            event_type="gate_overridden", actor_member_id=owner_id,
+            payload={
+                "decision": decision, "reason": reason, "bypassed_sod": True,
+                "bypassed_approver_ids": [str(x) for x in bypassed],
+            },
+            correlation_id=sr.correlation_id,
+        ))
+    logger.warning(
+        "gate_overridden org=%s gate=%s decision=%s owner=%s bypassed_approvers=%d reason=%s",
+        org_id, gate_id, decision, owner_id, len(bypassed), reason,
+    )
+
+    # notify requester + bypass된 approver들(Q4·자기 gate 강제결정 통보). best-effort·중복 제거.
+    targets: dict[str, uuid.UUID] = {}
+    for t in [requester_id, *bypassed]:
+        if t is not None:
+            targets[str(t)] = t
+    if targets:
+        try:
+            from app.services.notification_dispatch import dispatch_notification
+            await dispatch_notification(
+                session, org_id=org_id, event_type="gate_overridden",
+                target_member_ids=list(targets.values()),
+                title="게이트가 강제 결정되었습니다",
+                body=f"owner 가 게이트를 {decision} 로 강제 결정했습니다: {reason}",
+                reference_type="gate", reference_id=gate_id,
+            )
+        except Exception:  # noqa: BLE001 — notification 실패는 비중단(override 자체는 성공).
+            pass
+
     await session.flush()
     await session.refresh(gate)
     return gate

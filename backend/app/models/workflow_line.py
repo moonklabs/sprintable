@@ -146,7 +146,9 @@ class WorkflowLineStepRun(Base):
 
 # ── S9 parallel/quorum approval (0126 SSOT·text+app validator) ────────────────
 APPROVAL_KINDS = frozenset({"approver", "consult", "deputy"})
-APPROVAL_STATUSES = frozenset({"pending", "approved", "rejected", "abstained", "withdrawn"})
+APPROVAL_STATUSES = frozenset(
+    {"pending", "approved", "rejected", "abstained", "withdrawn", "overridden"}
+)  # "overridden"=S33 owner override 강제 닫힘(승인 아님). column 은 free-text(DB CHECK 무)·상수 완전성용.
 QUORUM_TYPES = frozenset({"all", "any", "count"})  # percent = Phase3 defer
 
 
