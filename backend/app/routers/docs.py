@@ -85,8 +85,10 @@ async def create_doc(
         db=session,
         user_id=uuid.UUID(auth.user_id),
     )
-    # AC3-2d(2): created_by canonical 정규화(레거시 휴먼 tm.id→members.id). (A) write.
-    created_by = (await canonicalize_member_id(body.created_by, session)) if body.created_by else None
+    # ⭐RC#1(body-trust 봉인): created_by 를 **인증 caller 로 강제**(body.created_by 무시·attribution
+    # 위조 차단). 다른 doc write 경로(_resolve_doc_member_id·line~501)와 대칭. AC3-2d(2) canonical 유지.
+    created_by = await _resolve_doc_member_id(auth, org_id, session)
+    created_by = await canonicalize_member_id(created_by, session)
     repo = DocRepository(session, org_id)
     doc = await repo.create(
         project_id=body.project_id,

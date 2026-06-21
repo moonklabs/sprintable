@@ -13,11 +13,24 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.dependencies.auth import get_current_user, get_verified_org_id
 from app.dependencies.database import get_db
 from app.models.file_lock import FileLock
+from app.services.member_resolver import resolve_member
 from app.models.team import TeamMember
 from app.routers.events import publish_event
 from app.services.webhook_dispatch import fire_webhooks
 
 router = APIRouter(tags=["file-locks"])
+
+
+async def _assert_caller_owns_member(auth, org_id: uuid.UUID, member_id: uuid.UUID,
+                                     session: AsyncSession) -> None:
+    """⭐RC#1(body-trust 봉인): file-lock path 의 member_id 를 **인증 caller 로 강제** — 타인 명의
+    lock 생성/해제(forge·squat) 차단. caller 의 resolved member ≠ path member_id 면 403.
+    soft-lock(협업 coordination)이라 escalation 은 아니나 path-trust 위생·일관성."""
+    resolved = await resolve_member(auth, org_id, session)
+    if resolved.id != member_id:
+        raise HTTPException(
+            status_code=403, detail="자신의 member_id 로만 파일 lock/unlock 이 가능합니다."
+        )
 
 
 class FileLockBody(BaseModel):
@@ -99,9 +112,10 @@ async def lock_files(
     body: FileLockBody,
     session: AsyncSession = Depends(get_db),
     org_id: uuid.UUID = Depends(get_verified_org_id),
-    _auth=Depends(get_current_user),
+    auth=Depends(get_current_user),
 ) -> dict:
     """AC1/3: 파일 lock 등록 + 충돌 시 warning 반환."""
+    await _assert_caller_owns_member(auth, org_id, member_id, session)  # ⭐RC#1: forge 차단
     # AC3-5 ②: team_members가 뷰(0088) — multi-row 안전(휴먼 multi-project) .limit(1).first().
     member_result = await session.execute(
         select(TeamMember).where(TeamMember.id == member_id).limit(1)
@@ -145,9 +159,10 @@ async def unlock_files(
     body: FileUnlockBody,
     session: AsyncSession = Depends(get_db),
     org_id: uuid.UUID = Depends(get_verified_org_id),
-    _auth=Depends(get_current_user),
+    auth=Depends(get_current_user),
 ) -> dict:
     """AC2: 파일 lock 해제."""
+    await _assert_caller_owns_member(auth, org_id, member_id, session)  # ⭐RC#1: forge 차단
     now = datetime.now(timezone.utc)
     await session.execute(
         update(FileLock)
@@ -180,13 +195,13 @@ async def list_file_locks(
     locks = result.scalars().all()
     return [
         {
-            "id": str(l.id),
-            "member_id": str(l.member_id),
-            "story_id": str(l.story_id) if l.story_id else None,
-            "file_path": l.file_path,
-            "locked_at": l.locked_at.isoformat(),
+            "id": str(lock.id),
+            "member_id": str(lock.member_id),
+            "story_id": str(lock.story_id) if lock.story_id else None,
+            "file_path": lock.file_path,
+            "locked_at": lock.locked_at.isoformat(),
         }
-        for l in locks
+        for lock in locks
     ]
 
 
