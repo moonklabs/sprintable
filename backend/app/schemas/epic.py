@@ -7,6 +7,20 @@ from pydantic import BaseModel, ConfigDict
 EPIC_STATUSES = ("draft", "active", "done", "archived")
 EPIC_PRIORITIES = ("critical", "high", "medium", "low")
 
+# E-DG S25: epic decision lifecycle 전이규칙. ⭐draft→active·active→done 만 line overlay-gated
+# (나머지 archive 류는 native 직행). hypothesis _VALID_TRANSITIONS 패턴 미러.
+_EPIC_VALID_TRANSITIONS: set[tuple[str, str]] = {
+    ("draft", "active"),       # activation(human-gate overlay)
+    ("active", "done"),        # completion(aggregate-gate overlay)
+    ("active", "archived"),    # native
+    ("done", "archived"),      # native
+    ("draft", "archived"),     # native
+}
+
+
+def is_valid_epic_transition(from_status: str, to_status: str) -> bool:
+    return (from_status, to_status) in _EPIC_VALID_TRANSITIONS
+
 
 class EpicCreate(BaseModel):
     project_id: uuid.UUID
@@ -37,6 +51,8 @@ class EpicUpdate(BaseModel):
     success_hypothesis: str | None = None
     metric_definition: dict[str, Any] | None = None
     measure_after: datetime | None = None
+    # ⚠️RC#2(D1'): status 는 잔류하되 update_epic 엔드포인트가 **미변경이면 무시·변경 시 422**(전용
+    # /transition 강제). FE always-send(미변경 동봉) 호환·실제 status 변경만 차단(RC#1 resolver_id 동형).
 
 
 class EpicResponse(BaseModel):

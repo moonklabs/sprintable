@@ -23,7 +23,7 @@ import { KanbanListView } from './kanban-list-view';
 import { KanbanSkeleton } from './kanban-skeleton';
 import { StoryDetailPanel } from './story-detail-panel';
 import { StoryCard } from './story-card';
-import { COLUMNS, VALID_TRANSITIONS, type KanbanStory, type KanbanSprint, type KanbanEpic, type KanbanMember, type ColumnId, type DependencyEdge, type GateItem } from './types';
+import { COLUMNS, VALID_TRANSITIONS, type KanbanStory, type KanbanSprint, type KanbanEpic, type KanbanMember, type ColumnId, type DependencyEdge, type GateItem, type LineStatusSummary } from './types';
 import type { LabelData } from '@/components/ui/label-chip';
 
 type DragOverlayCompatProps = {
@@ -172,6 +172,7 @@ export function KanbanBoard({ projectId }: KanbanBoardProps) {
   const [selectedLabelIds, setSelectedLabelIds] = useState<string[]>([]);
   const [labelSearch, setLabelSearch] = useState('');
   const [storyGatesMap, setStoryGatesMap] = useState<Record<string, { id: string; gate_type: string; status: string }[]>>({});
+  const [storyLineMap, setStoryLineMap] = useState<Record<string, LineStatusSummary>>({});
 
   const [selectedStory, setSelectedStory] = useState<KanbanStory | null>(null);
   const selectedStoryRef = useRef<KanbanStory | null>(null);
@@ -201,6 +202,7 @@ export function KanbanBoard({ projectId }: KanbanBoardProps) {
     const params = new URLSearchParams();
     if (projectId) params.set('project_id', projectId);
     if (selectedSprintId) params.set('sprint_id', selectedSprintId);
+    if (selectedAssigneeId) params.set('assignee_id', selectedAssigneeId);
     params.set('status', status);
     params.set('limit', status === 'done' ? '10' : '20');
     if (cursor) params.set('cursor', cursor);
@@ -212,7 +214,7 @@ export function KanbanBoard({ projectId }: KanbanBoardProps) {
     const nextCursor = json.meta?.nextCursor ?? null;
     const total = json.meta?.total ?? stories.length;
     return { stories, total, nextCursor };
-  }, [projectId, selectedSprintId]);
+  }, [projectId, selectedSprintId, selectedAssigneeId]);
 
   // E-POLISH (story 23ea0e1d): columnTotals는 fetchData에서 단 1회 세팅되므로
   // optimistic mutation이 setStories만 갱신하면 카운트 배지가 stale해진다.
@@ -267,6 +269,24 @@ export function KanbanBoard({ projectId }: KanbanBoardProps) {
           }
         } catch {
           // non-critical — skip silently
+        }
+      }
+
+      // S11 ①: workflow-line 상태 배치(보드 카드 badge)·N+1 0(1 fetch/200건·chunk·silent 캡 없음). storyIds 기준.
+      if (storyIds.length > 0) {
+        try {
+          const chunks: string[][] = [];
+          for (let i = 0; i < storyIds.length; i += 200) chunks.push(storyIds.slice(i, i + 200));
+          const results = await Promise.all(chunks.map((chunk) =>
+            fetch(`/api/stories/workflow-line/status?ids=${chunk.join(',')}`)
+              .then((r) => (r.ok ? (r.json() as Promise<LineStatusSummary[]>) : []))
+              .catch(() => []),
+          ));
+          const lmap: Record<string, LineStatusSummary> = {};
+          for (const arr of results) for (const s of arr) lmap[s.story_id] = s;
+          setStoryLineMap(lmap);
+        } catch {
+          // non-critical — line badge 없으면 카드는 기존대로 렌더.
         }
       }
 
@@ -446,7 +466,7 @@ export function KanbanBoard({ projectId }: KanbanBoardProps) {
 
   const filteredStories = stories.filter((s) => {
     if (selectedEpicId && s.epic_id !== selectedEpicId) return false;
-    if (selectedAssigneeId && s.assignee_id !== selectedAssigneeId) return false;
+    // 9f25e74a AC1: assignee 필터는 서버사이드(fetchStoriesByStatus ?assignee_id=)로 이관 — 클라 이중필터 제거(done 페이지네이션 경계 AC2 동시 해소).
     if (assigneeTypeFilter) {
       const assignee = s.assignee_id ? memberMap[s.assignee_id] : null;
       if (assigneeTypeFilter === 'agent' && assignee?.type !== 'agent') return false;
@@ -470,6 +490,11 @@ export function KanbanBoard({ projectId }: KanbanBoardProps) {
   // counter fix: 필터 활성 시 column counter는 filtered(로드된) 개수, 비활성 시 백엔드 total(페이지네이션 "20+" 유지).
   const filterActive = Boolean(
     selectedEpicId || selectedAssigneeId || assigneeTypeFilter || selectedLabelIds.length > 0 || searchQuery,
+  );
+  // 9f25e74a AC1/AC2: assignee/sprint은 서버필터(cursor 페이지네이션)라 '더보기' 억제 대상서 제외 —
+  // 클라필터(epic/type/labels/search)만 hasMore 억제. assignee 필터 done이 10+ 여도 필터집합 cursor로 페이지네이션(누락 0).
+  const clientFilterActive = Boolean(
+    selectedEpicId || assigneeTypeFilter || selectedLabelIds.length > 0 || searchQuery,
   );
 
   // position 기준으로 정렬
@@ -1191,8 +1216,9 @@ export function KanbanBoard({ projectId }: KanbanBoardProps) {
                     blockedByMap={blockedByMap}
                     storyLabelsMap={storyLabelsMap}
                     storyGatesMap={storyGatesMap}
+                    storyLineMap={storyLineMap}
                     totalCount={filterActive ? colStories.length : columnTotals[col.id]}
-                    hasMore={filterActive ? false : !!columnCursors[col.id]}
+                    hasMore={clientFilterActive ? false : !!columnCursors[col.id]}
                     loadingMore={loadingMoreColumns[col.id] ?? false}
                     onLoadMore={() => handleLoadMore(col.id)}
                     collapsed={col.id === 'done' ? doneCollapsed : undefined}
@@ -1211,6 +1237,7 @@ export function KanbanBoard({ projectId }: KanbanBoardProps) {
                     assignee={activeStory.assignee_id ? memberMap[activeStory.assignee_id] : undefined}
                     assignees={(activeStory.assignee_ids ?? []).flatMap((id) => memberMap[id] ? [memberMap[id]] : [])}
                     onClick={() => {}}
+                    lineStatus={storyLineMap[activeStory.id]}
                   />
                 </div>
               )}

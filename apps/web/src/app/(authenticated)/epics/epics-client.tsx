@@ -271,7 +271,6 @@ function EpicEditForm({ epic, onSaved, onCancel }: EpicEditFormProps) {
   const [title, setTitle] = useState(epic.title);
   const [description, setDescription] = useState(epic.description ?? '');
   const [priority, setPriority] = useState<EpicPriority>(epic.priority);
-  const [status, setStatus] = useState<EpicStatus>(epic.status);
   const [targetDate, setTargetDate] = useState(epic.target_date?.slice(0, 10) ?? '');
   const [targetSp, setTargetSp] = useState(epic.target_sp !== undefined ? String(epic.target_sp) : '');
   const [submitting, setSubmitting] = useState(false);
@@ -289,7 +288,7 @@ function EpicEditForm({ epic, onSaved, onCancel }: EpicEditFormProps) {
         title: title.trim(),
         description: description.trim() || undefined,
         priority,
-        status,
+        // RC#2: status 제외 — generic PATCH서 봉인(BE #1651 422)·전용 transition endpoint 전용.
       };
       if (targetDate) body.target_date = targetDate;
       if (targetSp) body.target_sp = Number(targetSp);
@@ -309,7 +308,7 @@ function EpicEditForm({ epic, onSaved, onCancel }: EpicEditFormProps) {
     } finally {
       setSubmitting(false);
     }
-  }, [title, description, priority, status, targetDate, targetSp, epic.id, epic.stories, onSaved]);
+  }, [title, description, priority, targetDate, targetSp, epic.id, epic.stories, onSaved]);
 
   return (
     <form onSubmit={(e) => { void handleSubmit(e); }} className="space-y-4">
@@ -334,34 +333,19 @@ function EpicEditForm({ epic, onSaved, onCancel }: EpicEditFormProps) {
         />
       </div>
 
-      <div className="grid grid-cols-2 gap-3">
-        <div className="space-y-1.5">
-          <label className="text-xs font-medium text-muted-foreground">{t('fieldStatus')}</label>
-          <select
-            value={status}
-            onChange={(e) => setStatus(e.target.value as EpicStatus)}
-            className="w-full rounded-xl border border-border bg-card px-3 py-2 text-sm text-foreground focus:outline-none focus:ring-2 focus:ring-primary/40"
-          >
-            <option value="draft">{t('statusDraft')}</option>
-            <option value="active">{t('statusActive')}</option>
-            <option value="done">{t('statusDone')}</option>
-            <option value="archived">{t('statusArchived')}</option>
-          </select>
-        </div>
-
-        <div className="space-y-1.5">
-          <label className="text-xs font-medium text-muted-foreground">{t('fieldPriority')}</label>
-          <select
-            value={priority}
-            onChange={(e) => setPriority(e.target.value as EpicPriority)}
-            className="w-full rounded-xl border border-border bg-card px-3 py-2 text-sm text-foreground focus:outline-none focus:ring-2 focus:ring-primary/40"
-          >
-            <option value="critical">{t('priorityCritical')}</option>
-            <option value="high">{t('priorityHigh')}</option>
-            <option value="medium">{t('priorityMedium')}</option>
-            <option value="low">{t('priorityLow')}</option>
-          </select>
-        </div>
+      {/* RC#2: status는 편집 폼서 제거 — 전용 POST /epics/{id}/transition(상세 헤더 transition 컨트롤·⓶)·일반 PATCH서 봉인(BE #1651·hypothesis/story 선례 동형). 편집=title/desc/priority/target만. */}
+      <div className="space-y-1.5">
+        <label className="text-xs font-medium text-muted-foreground">{t('fieldPriority')}</label>
+        <select
+          value={priority}
+          onChange={(e) => setPriority(e.target.value as EpicPriority)}
+          className="w-full rounded-xl border border-border bg-card px-3 py-2 text-sm text-foreground focus:outline-none focus:ring-2 focus:ring-primary/40"
+        >
+          <option value="critical">{t('priorityCritical')}</option>
+          <option value="high">{t('priorityHigh')}</option>
+          <option value="medium">{t('priorityMedium')}</option>
+          <option value="low">{t('priorityLow')}</option>
+        </select>
       </div>
 
       <div className="grid grid-cols-2 gap-3">

@@ -16,6 +16,7 @@ import { TopBarSlot } from '@/components/nav/top-bar-slot';
 import { EntityDispatchPanel } from '@/components/dispatch/entity-dispatch-panel';
 import { ToastContainer, useToast } from '@/components/ui/toast';
 import { OutcomeStatusBadge } from '@/components/outcome/outcome-status-badge';
+import { EpicStatusTransition } from '@/components/epics/epic-status-transition';
 import { HypothesesSection } from '@/components/hypotheses/hypotheses-section';
 
 type EpicStatus = 'draft' | 'active' | 'done' | 'archived';
@@ -74,12 +75,6 @@ function groupByStatus(stories: Story[]): { status: string; items: Story[] }[] {
 }
 
 // ─── Helpers ─────────────────────────────────────────────────────────────────
-
-function statusBadgeVariant(s: EpicStatus) {
-  if (s === 'active') return 'info' as const;
-  if (s === 'done') return 'success' as const;
-  return 'secondary' as const;
-}
 
 function storyStatusVariant(s: string): 'success' | 'info' | 'destructive' | 'secondary' {
   if (s === 'done') return 'success';
@@ -146,7 +141,6 @@ function EpicEditInline({ epic, onSaved, onCancel }: { epic: Epic; onSaved: (e: 
   const [description, setDescription] = useState(epic.description ?? '');
   const [objective, setObjective] = useState(epic.objective ?? '');
   const [successCriteria, setSuccessCriteria] = useState(epic.success_criteria ?? '');
-  const [status, setStatus] = useState<EpicStatus>(epic.status);
   const [priority, setPriority] = useState<EpicPriority>(epic.priority);
   const [targetDate, setTargetDate] = useState(epic.target_date?.slice(0, 10) ?? '');
   const [targetSp, setTargetSp] = useState(epic.target_sp !== undefined && epic.target_sp !== null ? String(epic.target_sp) : '');
@@ -164,7 +158,6 @@ function EpicEditInline({ epic, onSaved, onCancel }: { epic: Epic; onSaved: (e: 
           description: description.trim() || undefined,
           objective: objective.trim() || undefined,
           success_criteria: successCriteria.trim() || undefined,
-          status,
           priority,
           ...(targetDate ? { target_date: targetDate } : {}),
           ...(targetSp ? { target_sp: Number(targetSp) } : {}),
@@ -176,7 +169,7 @@ function EpicEditInline({ epic, onSaved, onCancel }: { epic: Epic; onSaved: (e: 
     } finally {
       setSaving(false);
     }
-  }, [title, description, objective, successCriteria, status, priority, targetDate, targetSp, epic, onSaved]);
+  }, [title, description, objective, successCriteria, priority, targetDate, targetSp, epic, onSaved]);
 
   const inputCls = 'w-full rounded-lg border border-border bg-background px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-primary/40';
 
@@ -186,13 +179,8 @@ function EpicEditInline({ epic, onSaved, onCancel }: { epic: Epic; onSaved: (e: 
       <textarea value={description} onChange={(e) => setDescription(e.target.value)} rows={4} className={`${inputCls} resize-none`} placeholder="설명 (마크다운)" />
       <textarea value={objective} onChange={(e) => setObjective(e.target.value)} rows={3} className={`${inputCls} resize-none`} placeholder="목표 (Objective)" />
       <textarea value={successCriteria} onChange={(e) => setSuccessCriteria(e.target.value)} rows={3} className={`${inputCls} resize-none`} placeholder="성공 기준 (Success Criteria)" />
+      {/* RC#2: status select 제거 — 전용 transition(상세 헤더 컨트롤·⓶)·일반 PATCH 봉인(BE #1651). 편집=title/desc/objective/criteria/priority/target만. */}
       <div className="grid grid-cols-2 gap-3">
-        <select value={status} onChange={(e) => setStatus(e.target.value as EpicStatus)} className={inputCls}>
-          <option value="draft">Draft</option>
-          <option value="active">Active</option>
-          <option value="done">Done</option>
-          <option value="archived">Archived</option>
-        </select>
         <select value={priority} onChange={(e) => setPriority(e.target.value as EpicPriority)} className={inputCls}>
           <option value="critical">Critical</option>
           <option value="high">High</option>
@@ -308,7 +296,12 @@ export default function EpicDetailPage() {
             </div>
           </div>
           <div className="flex flex-wrap items-center gap-2">
-            <Badge variant={statusBadgeVariant(epic.status)}>{epic.status}</Badge>
+            {/* RC#2 ⓶: status badge → transition 컨트롤(유효 next dropdown·draft→active gate-pending) */}
+            <EpicStatusTransition
+              epicId={epic.id}
+              status={epic.status}
+              onTransitioned={(s) => setEpic((prev) => (prev ? { ...prev, status: s as EpicStatus } : prev))}
+            />
             <Badge variant={priorityBadgeVariant(epic.priority)}>{epic.priority}</Badge>
             {epic.outcome_status && epic.outcome_status !== 'n_a' ? <OutcomeStatusBadge status={epic.outcome_status} /> : null}
             {epic.target_date && <span className="text-xs text-muted-foreground">마감: {formatDate(epic.target_date)}</span>}

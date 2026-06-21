@@ -1,6 +1,6 @@
 """E-CAGE-REFEREE P3: HITL Gate CRUD + 전이 엔드포인트."""
 import uuid
-from datetime import datetime, timezone
+from datetime import datetime
 from typing import Any
 
 from fastapi import APIRouter, Depends, HTTPException, Query
@@ -10,9 +10,16 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.dependencies.auth import get_current_user, get_verified_org_id
 from app.dependencies.database import get_db
-from app.models.gate import Gate, is_valid_transition
-from app.services.gate_service import create_gate, transition_gate
+from app.models.gate import Gate
+from app.services.gate_service import (
+    create_gate,
+    hold_gate,
+    transition_gate,
+    unhold_gate,
+    void_gate,
+)
 from app.services.member_resolver import resolve_member
+from app.services.project_auth import is_org_owner, is_org_owner_or_admin
 
 # 사람 검증 행위(approve/reject) — "human-validated" 웨지 integrity상 휴먼 member만 허용.
 _HUMAN_REVIEW_STATUSES = frozenset({"approved", "rejected"})
@@ -39,15 +46,21 @@ class GateCreateRequest(BaseModel):
 
 class GateTransitionRequest(BaseModel):
     status: str
-    resolver_id: uuid.UUID | None = None
+    resolver_id: uuid.UUID | None = None  # ⚠️RC#1: 무시됨(서버가 인증 caller 로 강제)·하위호환 잔류.
     note: str | None = None
 
     @field_validator("status")
     @classmethod
     def validate_status(cls, v: str) -> str:
-        from app.models.gate import GATE_STATUSES
-        if v not in GATE_STATUSES:
-            raise ValueError(f"status must be one of {sorted(GATE_STATUSES)}")
+        # ⭐RC#1(body-trust 봉인): generic transition 은 **사람 결재(approved/rejected)만** 허용.
+        # voided/held/pending(S30/S31)은 전용 엔드포인트(/void·/hold·/unhold)로만 — 그쪽이 admin
+        # 게이트(_require_gate_admin)+actor 강제+side-effect 를 보유. generic 으로 보내면 그 가드
+        # 3중 우회(비-admin voided/held·voider/holder body-trust·step_run 미해소)되므로 차단.
+        if v not in _HUMAN_REVIEW_STATUSES:
+            raise ValueError(
+                f"generic transition 은 {sorted(_HUMAN_REVIEW_STATUSES)} 만 허용합니다. "
+                "voided/held/unhold 는 전용 엔드포인트(/void·/hold·/unhold)를 사용하세요."
+            )
         return v
 
 
@@ -63,6 +76,7 @@ class GateResponse(BaseModel):
     resolver_id: uuid.UUID | None = None
     resolved_at: datetime | None = None
     resolution_note: str | None = None
+    held_until: datetime | None = None  # S31: status='held' 시 시한부 만료(무기한이면 None)·additive
     neutral_facts: dict[str, Any] | None = None
     # H1-S3: merge verdict gate evidence metadata (0118)·additive·하위호환 default.
     requires_human: bool = False
@@ -125,15 +139,214 @@ async def transition_gate_endpoint(
     # authz(93fc7aeb): 게이트 approve/reject는 **휴먼 member만**. 에이전트(API key)가 사람 검증
     # 게이트를 승인하면 "agent-assisted·human-validated" 웨지 전제가 무너지므로 차단(403).
     # 시스템 auto-resolution(resolve_gate_from_verdict)은 transition_gate 서비스 직호출이라 무영향.
-    if body.status in _HUMAN_REVIEW_STATUSES:
-        resolved = await resolve_member(auth, org_id, session)
-        if resolved.type != "human":
-            raise HTTPException(
-                status_code=403,
-                detail="게이트 승인/거부는 휴먼 멤버만 가능합니다 (에이전트 승인 불가).",
-            )
+    # ⭐RC#1: status 는 validator 가 approved/rejected 로 제한 → 도달하는 전이는 전부 사람 결재.
+    resolved = await resolve_member(auth, org_id, session)
+    if resolved.type != "human":
+        raise HTTPException(
+            status_code=403,
+            detail="게이트 승인/거부는 휴먼 멤버만 가능합니다 (에이전트 승인 불가).",
+        )
+    # ⭐S23 RC① + RC#1(방어심층): resolver_id 를 **전 status 무조건 인증 caller 로 강제**(body 무시).
+    # body 조작(타인 UUID)으로 SoD(approver≠owner) 우회·confirmed_by_member_id 위조 차단.
+    _resolver_id = resolved.id
     try:
-        gate = await transition_gate(session, org_id, id, body.status, body.resolver_id, body.note)
+        gate = await transition_gate(session, org_id, id, body.status, _resolver_id, body.note)
+        await session.commit()
+        return GateResponse.model_validate(gate)
+    except ValueError as e:
+        raise HTTPException(status_code=422, detail=str(e))
+
+
+class GateVoidRequest(BaseModel):
+    reason: str  # 사유 필수(audit·파괴적 액션). 빈 사유는 서비스서 422.
+
+
+@router.post("/{id}/void", response_model=GateResponse)
+async def void_gate_endpoint(
+    id: uuid.UUID,
+    body: GateVoidRequest,
+    session: AsyncSession = Depends(get_db),
+    org_id: uuid.UUID = Depends(get_verified_org_id),
+    auth=Depends(get_current_user),
+) -> GateResponse:
+    """⭐S30 admin recovery: 잘못 생성된 pending gate 무효화(void). admin-only(project_auth canonical).
+
+    voider 는 **인증 caller 강제**(body 신뢰 0·S23 RC① 패턴). void≠approval — 묶인 step_run 해소로
+    엔티티 unblock(re-route 가능)되되 전이 미적용. transition 단일경로(void 는 void_gate SSOT)."""
+    resolved = await resolve_member(auth, org_id, session)
+    # Q4: canonical project_auth admin 게이팅(ad-hoc role 금지·S27/S29 교훈). org owner/admin 만.
+    if not await is_org_owner_or_admin(session, uuid.UUID(auth.user_id), org_id):
+        raise HTTPException(status_code=403, detail="게이트 무효화는 org owner/admin 만 가능합니다.")
+    try:
+        gate = await void_gate(session, org_id, id, resolved.id, body.reason)
+        await session.commit()
+        return GateResponse.model_validate(gate)
+    except ValueError as e:
+        raise HTTPException(status_code=422, detail=str(e))
+
+
+class GateHoldRequest(BaseModel):
+    reason: str | None = None       # S31: 보류 사유(선택·가역적 일시정지라 마찰↓)
+    held_until: datetime | None = None  # 시한부 만료(무기한이면 None)
+
+
+async def _require_gate_admin(session, auth, org_id):
+    """⭐S31/S30 공통: gate 파괴적/관리 액션 admin 게이팅(canonical project_auth·ad-hoc role 금지).
+    반환 resolved member(holder/voider=인증 caller 강제용·body 신뢰 0)."""
+    resolved = await resolve_member(auth, org_id, session)
+    if not await is_org_owner_or_admin(session, uuid.UUID(auth.user_id), org_id):
+        raise HTTPException(status_code=403, detail="이 액션은 org owner/admin 만 가능합니다.")
+    return resolved
+
+
+@router.post("/{id}/hold", response_model=GateResponse)
+async def hold_gate_endpoint(
+    id: uuid.UUID,
+    body: GateHoldRequest,
+    session: AsyncSession = Depends(get_db),
+    org_id: uuid.UUID = Depends(get_verified_org_id),
+    auth=Depends(get_current_user),
+) -> GateResponse:
+    """⭐S31 admin hold: pending gate 일시 보류(held·SLA pause). admin-only·holder=인증 caller 강제."""
+    resolved = await _require_gate_admin(session, auth, org_id)
+    try:
+        gate = await hold_gate(session, org_id, id, resolved.id, body.reason, body.held_until)
+        await session.commit()
+        return GateResponse.model_validate(gate)
+    except ValueError as e:
+        raise HTTPException(status_code=422, detail=str(e))
+
+
+@router.post("/{id}/unhold", response_model=GateResponse)
+async def unhold_gate_endpoint(
+    id: uuid.UUID,
+    session: AsyncSession = Depends(get_db),
+    org_id: uuid.UUID = Depends(get_verified_org_id),
+    auth=Depends(get_current_user),
+) -> GateResponse:
+    """⭐S31 admin unhold: held gate 재개(→pending·SLA resume). admin-only·actor=인증 caller."""
+    resolved = await _require_gate_admin(session, auth, org_id)
+    try:
+        gate = await unhold_gate(session, org_id, id, resolved.id)
+        await session.commit()
+        return GateResponse.model_validate(gate)
+    except ValueError as e:
+        raise HTTPException(status_code=422, detail=str(e))
+
+
+class GateReassignRequest(BaseModel):
+    new_approver_id: uuid.UUID
+    old_approver_id: uuid.UUID | None = None  # approver row 여러 개면 지정(1개면 생략)
+    reason: str | None = None
+
+
+class GateApproverResponse(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+    id: uuid.UUID
+    approver_member_id: uuid.UUID
+    approver_member_type: str
+    status: str
+    kind: str
+    blocking: bool
+    reassigned_from_member_id: uuid.UUID | None = None
+    original_approver_member_id: uuid.UUID | None = None
+    # ⭐S32: "재지정됨 · {admin} · {시각}" 출처(마이그0·신규 컬럼 아님). reassign 이벤트
+    # (WorkflowLineStepRunEvent approver_reassigned)서 최신 actor/time enrich. 재지정 안 됐으면 None.
+    reassigned_by_member_id: uuid.UUID | None = None
+    reassigned_at: datetime | None = None
+
+
+async def _enrich_approvers(session, org_id, rows) -> list[GateApproverResponse]:
+    """approver row → response. 재지정된 row 는 최신 approver_reassigned 이벤트서 reassigned_by/at enrich
+    (FE "재지정됨 · admin · 시각" 렌더용·마이그0·이벤트가 메타 SSOT)."""
+    from app.models.workflow_line import WorkflowLineStepRunEvent
+    out = []
+    for r in rows:
+        resp = GateApproverResponse.model_validate(r)
+        if r.reassigned_from_member_id is not None:
+            ev = (await session.execute(
+                select(WorkflowLineStepRunEvent).where(
+                    WorkflowLineStepRunEvent.org_id == org_id,
+                    WorkflowLineStepRunEvent.step_run_id == r.step_run_id,
+                    WorkflowLineStepRunEvent.event_type == "approver_reassigned",
+                    WorkflowLineStepRunEvent.target_member_id == r.approver_member_id,
+                ).order_by(WorkflowLineStepRunEvent.created_at.desc()).limit(1)
+            )).scalar_one_or_none()
+            if ev is not None:
+                resp.reassigned_by_member_id = ev.actor_member_id
+                resp.reassigned_at = ev.created_at
+        out.append(resp)
+    return out
+
+
+@router.get("/{id}/approvers", response_model=list[GateApproverResponse])
+async def list_gate_approvers_endpoint(
+    id: uuid.UUID,
+    session: AsyncSession = Depends(get_db),
+    org_id: uuid.UUID = Depends(get_verified_org_id),
+    auth=Depends(get_current_user),
+) -> list[GateApproverResponse]:
+    """⭐S32 FE conditional-display: gate approver row 목록(있으면 parallel gate→reassign 노출·없으면
+    단일/merge gate→reassign 미노출로 422 원천차단). admin-only. 재지정 메타(누가/언제) enrich."""
+    await _require_gate_admin(session, auth, org_id)
+    from app.services.workflow_parallel_approval import list_gate_approvers
+    rows = await list_gate_approvers(session, org_id, id)
+    return await _enrich_approvers(session, org_id, rows)
+
+
+@router.post("/{id}/reassign", response_model=list[GateApproverResponse])
+async def reassign_gate_approver_endpoint(
+    id: uuid.UUID,
+    body: GateReassignRequest,
+    session: AsyncSession = Depends(get_db),
+    org_id: uuid.UUID = Depends(get_verified_org_id),
+    auth=Depends(get_current_user),
+) -> list[GateApproverResponse]:
+    """⭐S32 admin reassign: parallel gate 의 pending 결재자 교체. admin-only·reassigner=인증 caller 강제
+    (body 신뢰 0·S23 RC①). gate.status 불변(pending 유지·재결정 대상). 단일 gate=422(parallel 전용)."""
+    resolved = await _require_gate_admin(session, auth, org_id)
+    from app.services.workflow_parallel_approval import list_gate_approvers, reassign_approver
+    try:
+        await reassign_approver(
+            session, org_id, id, body.new_approver_id, resolved.id,
+            old_approver_id=body.old_approver_id, reason=body.reason,
+        )
+        rows = await list_gate_approvers(session, org_id, id)  # 갱신된 approver 목록 반환
+        result = await _enrich_approvers(session, org_id, rows)  # reassigned_by/at enrich(이벤트서)
+        await session.commit()
+        return result
+    except ValueError as e:
+        raise HTTPException(status_code=422, detail=str(e))
+
+
+class GateOverrideRequest(BaseModel):
+    decision: str  # "approved" | "rejected" (owner 강제 결정)
+    reason: str    # 필수 — 가장 민감한 액션이라 사유 의무
+
+
+async def _require_gate_owner(session, auth, org_id):
+    """⭐S33 owner-only 게이팅 — override 는 SoD 우회=가장 강력이라 admin(void/hold/reassign)보다 좁게
+    owner 만. is_org_owner(role='owner') canonical. 반환 resolved(owner_id=인증 caller 강제·body 신뢰 0)."""
+    resolved = await resolve_member(auth, org_id, session)
+    if not await is_org_owner(session, uuid.UUID(auth.user_id), org_id):
+        raise HTTPException(status_code=403, detail="이 액션은 org owner 만 가능합니다.")
+    return resolved
+
+
+@router.post("/{id}/override", response_model=GateResponse)
+async def override_gate_endpoint(
+    id: uuid.UUID,
+    body: GateOverrideRequest,
+    session: AsyncSession = Depends(get_db),
+    org_id: uuid.UUID = Depends(get_verified_org_id),
+    auth=Depends(get_current_user),
+) -> GateResponse:
+    """⭐S33 owner force-resolve: owner 가 막힌/긴급 gate 를 강제 결정(approved|rejected). owner-only·
+    reason 필수·owner_id=인증 caller 강제(S23 RC①)·정상 결재(quorum/SoD) 우회. 가장 민감한 액션."""
+    from app.services.gate_service import override_gate
+    resolved = await _require_gate_owner(session, auth, org_id)
+    try:
+        gate = await override_gate(session, org_id, id, resolved.id, body.decision, body.reason)
         await session.commit()
         return GateResponse.model_validate(gate)
     except ValueError as e:

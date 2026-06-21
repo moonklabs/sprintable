@@ -63,6 +63,13 @@ INJECTABLE_EVENT_TYPES = frozenset({
 # ── Public types ─────────────────────────────────────────────────────────────
 
 @dataclass
+class MessageImage:
+    url: str
+    name: str = ""
+    mime: str = ""
+
+
+@dataclass
 class MessageContext:
     """어댑터 `on_message` 콜백에 전달되는 메시지 컨텍스트."""
     content: str
@@ -72,6 +79,7 @@ class MessageContext:
     event_id: str
     seq: int
     is_backfill: bool
+    images: list[MessageImage]
     raw: dict[str, Any]
 
     # reply() 지원을 위해 내부 주입
@@ -93,6 +101,27 @@ class MessageContext:
 
 
 MessageHandler = Callable[[MessageContext], Awaitable[None]]
+
+
+def _normalize_images(value: Any) -> list[MessageImage]:
+    if not isinstance(value, list):
+        return []
+    images: list[MessageImage] = []
+    for item in value:
+        if not isinstance(item, dict):
+            continue
+        url = str(item.get("url") or "").strip()
+        if not url:
+            continue
+        mime = str(item.get("mime") or item.get("mime_type") or "").strip()
+        if mime and not mime.startswith("image/"):
+            continue
+        images.append(MessageImage(
+            url=url,
+            name=str(item.get("name") or ""),
+            mime=mime,
+        ))
+    return images
 
 
 # ── SDK client ────────────────────────────────────────────────────────────────
@@ -157,7 +186,8 @@ class SprintableSSEClient:
         if event_type not in INJECTABLE_EVENT_TYPES:
             return None
         content = (data.get("content") or payload.get("content") or "").strip()
-        if not content:
+        images = _normalize_images(data.get("images") or payload.get("images"))
+        if not content and not images:
             return None
 
         event_id = str(data.get("event_id") or payload.get("id") or ev_id or uuid.uuid4())
@@ -201,6 +231,7 @@ class SprintableSSEClient:
             event_id=event_id,
             seq=seq,
             is_backfill=is_backfill,
+            images=images,
             raw=data,
             _reply_url=reply_url,
             _api_key=self._api_key,

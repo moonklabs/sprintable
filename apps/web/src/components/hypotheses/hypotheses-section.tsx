@@ -7,6 +7,9 @@ import type { Hypothesis, HypothesisDraft } from '@sprintable/core-storage';
 import { HypothesisRow, type HypothesisRowActions } from './hypothesis-row';
 import { HypothesisVerdictCard } from './hypothesis-verdict-card';
 import { HypothesisForm, type HypothesisFormValue } from './hypothesis-form';
+import { HypothesisGateBadge } from './hypothesis-gate-badge';
+import type { GateItem } from '@/components/kanban/types';
+import { useDashboardContext } from '@/app/dashboard/dashboard-shell';
 
 /**
  * Epic-detail Hypotheses section (E1-S8 §4.1). The first human-facing surface that
@@ -90,13 +93,33 @@ export function HypothesesSection({ epicId, projectId }: { epicId: string; proje
   const [draft, setDraft] = useState<HypothesisDraft | null>(null);
   const [drafting, setDrafting] = useState(false);
   const [confirming, setConfirming] = useState(false);
+  // S24: gate approval 축 — hypGatesMap(per-hyp gate·work_item_type=hypothesis) + 멤버 이름맵.
+  const [hypGatesMap, setHypGatesMap] = useState<Record<string, GateItem>>({});
+  const [memberNames, setMemberNames] = useState<Record<string, string>>({});
+  const { currentTeamMemberId } = useDashboardContext();
 
   const load = useCallback(async () => {
     try {
       const res = await fetch(`/api/hypotheses?project_id=${projectId}&epic_id=${epicId}`, { cache: 'no-store' });
       if (!res.ok) { setItems([]); return; }
       const json = await res.json();
-      setItems((json?.data ?? []) as Hypothesis[]);
+      const arr = (json?.data ?? []) as Hypothesis[];
+      setItems(arr);
+      // S24 QA LOW② fix: per-hyp N fetch → status-batch(GateInbox식·pending+rejected status-only 2 fetch→클라 work_item_type='hypothesis' 필터·map). confirmed는 hyp payload(confirmed_by) 파생이라 gate 조회 불요.
+      const [pendingGates, rejectedGates, membersJson] = await Promise.all([
+        fetch('/api/gates?status=pending').then((r) => (r.ok ? (r.json() as Promise<GateItem[]>) : [])).catch(() => []),
+        fetch('/api/gates?status=rejected').then((r) => (r.ok ? (r.json() as Promise<GateItem[]>) : [])).catch(() => []),
+        fetch('/api/team-members').then((r) => (r.ok ? r.json() : { data: [] })).catch(() => ({ data: [] })),
+      ]);
+      const gmap: Record<string, GateItem> = {};
+      // pending 우선·rejected는 pending 없을 때만(한 hyp에 둘 다면 진행중 pending이 우세).
+      for (const g of [...rejectedGates, ...pendingGates]) {
+        if (g.work_item_type === 'hypothesis') gmap[g.work_item_id] = g;
+      }
+      setHypGatesMap(gmap);
+      const names: Record<string, string> = {};
+      for (const m of (membersJson as { data?: { id: string; name: string }[] }).data ?? []) names[m.id] = m.name;
+      setMemberNames(names);
     } catch {
       setItems([]);
     }
@@ -248,13 +271,23 @@ export function HypothesesSection({ epicId, projectId }: { epicId: string; proje
         ) : sorted.length === 0 ? (
           !formOpen ? <p className="py-4 text-center text-sm text-muted-foreground">{t('empty')}</p> : null
         ) : (
-          sorted.map((h) =>
-            isVerdict(h) ? (
-              <HypothesisVerdictCard key={h.id} hypothesis={h} />
-            ) : (
-              <HypothesisRow key={h.id} hypothesis={h} actions={actions} />
-            ),
-          )
+          sorted.map((h) => (
+            <div key={h.id} className="space-y-2">
+              {/* S24 ⓑ gate approval 축(상단 띠) — outcome 축(아래 row/verdict)과 2축 분리 */}
+              <HypothesisGateBadge
+                hypothesis={h}
+                gate={hypGatesMap[h.id]}
+                resolveName={(id) => memberNames[id] ?? id.slice(0, 6)}
+                resolverId={currentTeamMemberId ?? ''}
+                onResolved={() => void load()}
+              />
+              {isVerdict(h) ? (
+                <HypothesisVerdictCard hypothesis={h} />
+              ) : (
+                <HypothesisRow hypothesis={h} actions={actions} />
+              )}
+            </div>
+          ))
         )}
       </div>
     </section>

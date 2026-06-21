@@ -17,15 +17,34 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models.doc import Doc
 from app.models.event import Event, EventType
-from app.models.pm import Epic, Story
+from app.models.hypothesis import Hypothesis
+from app.models.pm import Epic, Sprint, Story
 from app.routers.agent_gateway import wake_agent
 from app.routers.events import _event_to_payload, _push_to_agent
 from app.services.activity_stream import extract_activities_best_effort
 from app.services.event_seq import assign_recipient_seq
 from app.services.member_resolver import resolve_member_identity
 from app.services.notification_dispatch import dispatch_notification
+from app.services.workflow_readiness_matrix import READINESS_MATRIX
 
-_ENTITY_TYPES = {"epic", "story", "doc"}
+# S21/S27: dispatch 가능 엔티티는 readiness matrix 의 dispatch_capable SSOT 에서 도출.
+_ENTITY_TYPES = {e for e, d in READINESS_MATRIX.items() if d.dispatch_capable}
+
+
+async def _resolve_sprint_dispatch_owner(
+    db: AsyncSession,
+    org_id: uuid.UUID,
+    project_id: uuid.UUID,
+) -> uuid.UUID | None:
+    """Sprint 은 assignee 컬럼이 없어 전이 wake 를 프로젝트 relay-owner 로 보낸다(S27).
+
+    owner 해소는 member-SSOT(project_auth.resolve_project_relay_owner) 단일 경로 — ad-hoc
+    TeamMember.role 리졸버 금지(grant/admin 403 드리프트 회피). 부재 시 None(no_assignee 가시화·
+    가짜 fallback 금지). 반환 canonical member id 는 resolve_member_identity 의 human/agent 분기에 위임.
+    """
+    from app.services.project_auth import resolve_project_relay_owner
+
+    return await resolve_project_relay_owner(db, project_id, org_id)
 
 
 class DispatchResponse(BaseModel):
@@ -36,6 +55,8 @@ class DispatchResponse(BaseModel):
     # 7f8066a3: dispatched=False 사유 구분 → FE 가 no_assignee(담당자 미지정·info 안내)와
     # unresolved_assignee(신원 해소 실패·error)를 다르게 표시. additive·null default 하위호환.
     reason: str | None = None
+    # E-DG S7: commit=False 호출자가 commit 후 wake 하려면 recipient_seq 필요(agent). additive.
+    recipient_seq: int | None = None
 
 
 async def _fetch_entity(
@@ -66,6 +87,27 @@ async def _fetch_entity(
             )
         )
         r = row.one_or_none()
+    elif entity_type == "hypothesis":
+        # S23: assignee=owner_member_id(책임 human)·title=statement·description 컬럼 없음(None).
+        row = await db.execute(
+            select(Hypothesis.owner_member_id, Hypothesis.statement, Hypothesis.project_id).where(
+                Hypothesis.id == entity_id, Hypothesis.org_id == org_id
+            )
+        )
+        r0 = row.one_or_none()
+        r = (r0[0], r0[1], None, r0[2]) if r0 is not None else None
+    elif entity_type == "sprint":
+        row = await db.execute(
+            select(Sprint.title, Sprint.status, Sprint.project_id).where(
+                Sprint.id == entity_id, Sprint.org_id == org_id
+            )
+        )
+        r0 = row.one_or_none()
+        if r0 is None:
+            r = None
+        else:
+            assignee_id = await _resolve_sprint_dispatch_owner(db, org_id, r0.project_id)
+            r = (assignee_id, r0.title, f"status={r0.status}", r0.project_id)
     else:
         return None, None, None, None
 
@@ -82,6 +124,7 @@ async def dispatch_entity_to_assignee(
     message: str | None = None,
     trigger_metadata: dict[str, Any] | None = None,
     sender_id: uuid.UUID | None = None,
+    commit: bool = True,
 ) -> tuple[DispatchResponse, dict[str, Any] | None]:
     """entity의 assignee에게 dispatched 이벤트 생성 + 알림 전달 + (agent) wake.
 
@@ -166,20 +209,24 @@ async def dispatch_entity_to_assignee(
             reference_id=entity_id,
         )
 
-    await db.commit()  # commit 후 seq 확정
-
-    # agent: commit 후 wake (gateway_seq 확정 보장, 이중전달 방지)
-    if member_type == "agent":
-        if event.recipient_seq is not None:
-            wake_agent(str(assignee_id), event.recipient_seq)
-        else:
-            _push_to_agent(str(assignee_id), _event_to_payload(event))
+    # E-DG S7: commit=False면 호출자 트랜잭션에 합류 — 여기서 commit/wake 하지 않는다(P1-2
+    # partial-failure 방지). 호출자가 status/step_run/event 를 한 트랜잭션으로 commit 한 뒤 wake 한다
+    # (recipient_seq 확정 commit 후 wake 불변식). event.id/recipient_seq 는 위 flush 로 이미 확정.
+    if commit:
+        await db.commit()  # commit 후 seq 확정
+        # agent: commit 후 wake (gateway_seq 확정 보장, 이중전달 방지)
+        if member_type == "agent":
+            if event.recipient_seq is not None:
+                wake_agent(str(assignee_id), event.recipient_seq)
+            else:
+                _push_to_agent(str(assignee_id), _event_to_payload(event))
 
     response = DispatchResponse(
         dispatched=True,
         event_id=event.id,
         assignee_id=assignee_id,
         assignee_type=member_type,
+        recipient_seq=event.recipient_seq,
         reason="ok",
     )
     # 1f01c1ad: CC 릴레이(member webhook) 주입 파라미터 — 호출자가 스케줄(라우터=background_tasks).
@@ -193,3 +240,69 @@ async def dispatch_entity_to_assignee(
         "hypothesis_anchor": hypothesis_anchor,
     }
     return response, delivery
+
+
+async def dispatch_payload_to_member(
+    db: AsyncSession,
+    org_id: uuid.UUID,
+    member_id: uuid.UUID,
+    *,
+    title: str,
+    content: str,
+    source_entity_type: str,
+    source_entity_id: uuid.UUID,
+    project_id: uuid.UUID | None = None,
+    message: str | None = None,
+    trigger_metadata: dict[str, Any] | None = None,
+    sender_id: uuid.UUID | None = None,
+    commit: bool = True,
+) -> DispatchResponse:
+    """S22: entity assignee 와 무관하게 **특정 member**(예: doc author=created_by)에게 dispatched
+    이벤트 생성 + (agent) wake. ``dispatch_entity_to_assignee`` 의 member-dispatch core 를 author-wake
+    용으로 분리한 lower-level helper(assignee 고정 우회). 순서/불변식 동일(flush→seq→commit 후 wake).
+    ⚠️ commit=False 면 호출자 트랜잭션 합류(여기서 commit/wake 안 함·P1-2)."""
+    member = await resolve_member_identity(member_id, org_id, db)
+    if member is None:
+        return DispatchResponse(dispatched=False, assignee_id=member_id, reason="unresolved_member")
+    member_type = member.type
+
+    payload: dict[str, Any] = {
+        "entity_type": source_entity_type,
+        "entity_id": str(source_entity_id),
+        "title": title,
+        "message": message,
+        "content": content,
+        "timestamp": datetime.now(timezone.utc).isoformat(),
+    }
+    if trigger_metadata is not None:
+        payload["trigger_metadata"] = trigger_metadata  # 새 event type 금지·trigger_metadata additive
+
+    event = Event(
+        project_id=project_id,
+        org_id=org_id,
+        event_type=EventType.dispatched.value,
+        source_entity_type=source_entity_type,
+        source_entity_id=source_entity_id,
+        sender_id=sender_id,
+        recipient_id=member_id,
+        recipient_type=member_type,
+        payload=payload,
+        status="pending",
+    )
+    db.add(event)
+    await db.flush()
+    if member_type == "agent":
+        await assign_recipient_seq(db, event)
+    await extract_activities_best_effort(db, [event.id])
+
+    if commit:
+        await db.commit()
+        if member_type == "agent":
+            if event.recipient_seq is not None:
+                wake_agent(str(member_id), event.recipient_seq)
+            else:
+                _push_to_agent(str(member_id), _event_to_payload(event))
+    return DispatchResponse(
+        dispatched=True, event_id=event.id, assignee_id=member_id,
+        assignee_type=member_type, recipient_seq=event.recipient_seq, reason="ok",
+    )

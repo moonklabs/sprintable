@@ -130,6 +130,85 @@ async def hitl_timeouts(
         return _err("INTERNAL_ERROR", "Internal server error", 500)
 
 
+# ─── GET /api/v2/internal/cron/workflow-handoff-watchdog ──────────────────────
+# E-DG S8: handoff watchdog + ACK reconciliation(P0-3). silent handoff stall 을 observable
+# incident 로 전환 — ACK 대사 → acked / 10분 미ACK → timed_out(board badge) + fallback notification.
+
+@router.get("/workflow-handoff-watchdog")
+async def workflow_handoff_watchdog(
+    request: Request,
+    session: AsyncSession = Depends(get_db),
+) -> JSONResponse:
+    verify_cron(request)
+    try:
+        from app.services.workflow_handoff_watchdog import reconcile_handoffs
+        counts = await reconcile_handoffs(session)
+        return _ok(counts)
+    except Exception as exc:
+        logger.exception("cron error: %s", exc)
+        return _err("INTERNAL_ERROR", "Internal server error", 500)
+
+
+# ─── GET /api/v2/internal/cron/workflow-sla ───────────────────────────────────
+# E-DG S13(P1-3): human-gate SLA processor — pending gate 가 방치되지 않게 reminder→escalation→
+# timeout(keep_pending 기본·auto_approve 금지조건) 으로 제품이 독촉. hitl-timeouts 와 별도 endpoint.
+
+@router.get("/workflow-sla")
+async def workflow_sla(
+    request: Request,
+    session: AsyncSession = Depends(get_db),
+) -> JSONResponse:
+    verify_cron(request)
+    try:
+        from app.services.workflow_sla_processor import process_sla
+        counts = await process_sla(session)
+        return _ok(counts)
+    except Exception as exc:
+        logger.exception("cron error: %s", exc)
+        return _err("INTERNAL_ERROR", "Internal server error", 500)
+
+
+# ─── GET /api/v2/internal/cron/workflow-grandfather-backfill ──────────────────
+# E-DG S19(P0-5): line enable 시점 in-flight story grandfather backfill(read-only·Gate 0·
+# idempotent). allowlist(=명시 enable) org 만 대상. board freeze 0.
+
+@router.get("/workflow-grandfather-backfill")
+async def workflow_grandfather_backfill(
+    request: Request,
+    session: AsyncSession = Depends(get_db),
+) -> JSONResponse:
+    verify_cron(request)
+    try:
+        from app.services.workflow_grandfather import backfill_grandfather, resolve_backfill_orgs
+        # B1: allowlist org + global-enable(allowlist 빈+enabled) 시 in-flight org 전체 커버.
+        orgs = await resolve_backfill_orgs(session)
+        results = {str(oid): await backfill_grandfather(session, oid) for oid in orgs}
+        return _ok({"orgs": len(orgs), "results": results})
+    except Exception as exc:
+        logger.exception("cron error: %s", exc)
+        return _err("INTERNAL_ERROR", "Internal server error", 500)
+
+
+# ─── GET /api/v2/internal/cron/seed-default-story-line ────────────────────────
+# E-DG S16: 뭉클랩(기본) org 의 default story line 을 published(shadow)로 시드(idempotent). PO 트리거.
+# ?org_id= 로 다른 org 시드. default-off·shadow 라 라이브 무영향.
+
+@router.get("/seed-default-story-line")
+async def seed_default_story_line_cron(
+    request: Request,
+    session: AsyncSession = Depends(get_db),
+    org_id: uuid.UUID | None = Query(default=None),
+) -> JSONResponse:
+    verify_cron(request)
+    try:
+        from app.services.workflow_line_seed import seed_default_story_line
+        result = await seed_default_story_line(session, org_id)
+        return _ok(result)
+    except Exception as exc:
+        logger.exception("cron error: %s", exc)
+        return _err("INTERNAL_ERROR", "Internal server error", 500)
+
+
 # ─── GET /api/v2/internal/cron/inbox-outbox ────────────────────────────────────
 
 @router.get("/inbox-outbox")

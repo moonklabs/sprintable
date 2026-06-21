@@ -28,6 +28,12 @@ from app.services.verdict_capture import resolve_implementation_participation
 from app.services.notification_dispatch import dispatch_notification
 from app.services.story_status_events import emit_story_status_changed
 from app.services.webhook_dispatch import fire_webhooks
+from app.services.workflow_line_status import (
+    LineStatusSummary,
+    WorkflowLineStatusResponse,
+    build_workflow_line_status,
+    build_workflow_line_status_batch,
+)
 from app.services.workflow_pipeline import process_event
 from app.services.rule_evaluator import EventContext
 from app.services.workflow_violation import build_violation_event, check_transition
@@ -249,6 +255,35 @@ async def create_story(
     return StoryResponse.model_validate(story)
 
 
+# E-DG S11 FE unblock: 보드 카드 badge 용 배치 read — per-story fetch N+1 회피(gates 배치 패턴
+# 미러·1 fetch+map). ⚠️ /{id} 보다 **먼저** 선언(specific-before-parameterized). active-only 요약
+# (mode/status + engine_degraded/grandfathered/handoff_stuck + delivery_status)·org-scoped·N+1 0.
+@router.get("/workflow-line/status", response_model=list[LineStatusSummary])
+async def get_workflow_line_status_batch(
+    ids: str = Query(..., description="comma-separated story ids"),
+    repo: StoryRepository = Depends(_get_repo),
+) -> list[LineStatusSummary]:
+    try:
+        story_ids = [uuid.UUID(x) for x in ids.split(",") if x.strip()]
+    except ValueError:
+        raise HTTPException(status_code=422, detail="invalid story id in ids")
+    if not story_ids:
+        return []
+    if len(story_ids) > 200:  # 보드 페이지 단위 방어(과대 IN 금지)
+        raise HTTPException(status_code=422, detail="too many ids (max 200)")
+    return await build_workflow_line_status_batch(repo.session, repo.org_id, story_ids)
+
+
+# E-DG S15(P1-6): line metric 집계(org-scoped·read-only·default-off org=no-op). ⚠️ /{id} 보다 먼저.
+@router.get("/workflow-line/metrics")
+async def get_workflow_line_metrics(
+    window_days: int = Query(default=14, ge=1, le=90),
+    repo: StoryRepository = Depends(_get_repo),
+) -> dict:
+    from app.services.workflow_line_metrics import compute_line_metrics
+    return await compute_line_metrics(repo.session, repo.org_id, window_days=window_days)
+
+
 @router.get("/{id}", response_model=StoryResponse)
 async def get_story(
     id: uuid.UUID,
@@ -259,6 +294,73 @@ async def get_story(
         raise HTTPException(status_code=404, detail="Story not found")
     await _attach_assignee_ids(repo.session, repo.org_id, [story])
     return StoryResponse.model_validate(story)
+
+
+# E-DG S10(P1-4 observability): workflow-line 상태 read API — "왜 막혔나·어디로 relay 됐나"를
+# 채팅 없이 board/API 서 안다(FE S11 데이터 소스). 기존 story read auth(_get_repo·org-scoped)
+# 재사용·없는 story 404·active 없으면 terminal 5개 history·engine_degraded/grandfathered 명시.
+@router.get("/{id}/workflow-line/status", response_model=WorkflowLineStatusResponse)
+async def get_workflow_line_status(
+    id: uuid.UUID,
+    repo: StoryRepository = Depends(_get_repo),
+) -> WorkflowLineStatusResponse:
+    story = await repo.get(id)  # org/project-scoped read auth(AC⑤)·scope 밖/없으면 None→404
+    if story is None:
+        raise HTTPException(status_code=404, detail="Story not found")
+    return await build_workflow_line_status(repo.session, repo.org_id, id)
+
+
+class FallbackNotifyRequest(BaseModel):
+    step_run_id: uuid.UUID
+
+
+# E-DG S12 Gap2: stuck handoff fallback human notification. 기존 _get_repo org-scoped auth·없는
+# story 404·dispatch_notification 재사용·idempotent(run당 1회·already_notified)·status rollback 0.
+@router.post("/{id}/workflow-line/fallback-notify")
+async def workflow_line_fallback_notify(
+    id: uuid.UUID,
+    body: FallbackNotifyRequest,
+    repo: StoryRepository = Depends(_get_repo),
+) -> dict:
+    story = await repo.get(id)
+    if story is None:
+        raise HTTPException(status_code=404, detail="Story not found")
+    from app.services.workflow_fallback_notify import fallback_notify
+    result = await fallback_notify(repo.session, repo.org_id, id, body.step_run_id)
+    if result.get("status") == "not_found":
+        raise HTTPException(status_code=404, detail="step_run not found for this story")
+    return result
+
+
+class WithdrawRequest(BaseModel):
+    step_run_id: uuid.UUID
+    reason: str | None = None
+
+
+# E-DG S17: author/owner pending gate run 철회(withdraw). requester/owner/admin 만·idempotent·
+# Gate enum 미확장(run/approval status 로만)·entity 미전이.
+@router.post("/{id}/workflow-line/withdraw")
+async def workflow_line_withdraw(
+    id: uuid.UUID,
+    body: WithdrawRequest,
+    repo: StoryRepository = Depends(_get_repo),
+    db: AsyncSession = Depends(get_db),
+    auth: AuthContext = Depends(get_current_user),
+) -> dict:
+    story = await repo.get(id)
+    if story is None:
+        raise HTTPException(status_code=404, detail="Story not found")
+    actor_id = await _resolve_team_member_id(auth, repo.org_id, db)
+    from app.services.workflow_recall import withdraw_pending_run
+    result = await withdraw_pending_run(repo.session, repo.org_id, id, body.step_run_id, actor_id, body.reason)
+    status = result.get("status")
+    if status == "not_found":
+        raise HTTPException(status_code=404, detail="step_run not found for this story")
+    if status == "forbidden":
+        raise HTTPException(status_code=403, detail="only requester/owner/admin can withdraw")
+    if status == "not_active":
+        raise HTTPException(status_code=409, detail=f"run not in active pending state ({result.get('run_status')})")
+    return result
 
 
 class BulkUpdateItem(BaseModel):
@@ -563,26 +665,79 @@ async def update_story_status(
     if _violation.violated and _violation_level == "block":
         raise HTTPException(status_code=400, detail=_violation.reason or "워크플로우 위반으로 상태 전이가 거부되었습니다.")
 
-    # H1-S5: in-review→done 직접 PATCH는 merge verdict gate preflight(플래그 active 시·AC②).
-    # transition rule(check_transition)과 직교 — 전이 유효성 통과 후 증거 게이트를 얹는다(AC④).
-    await _preflight_merge_gate(db, repo.org_id, story_before, body.status)
-    # S-GATE-2: config 게이트 집행(done) — flag-off면 no-op(무회귀). block→409·ask→HitlRequest park.
-    if body.status == "done" and story_before is not None:
-        from app.services.gate_enforce import enforce_gate
-        # HIGH②: actor_type 은 인증 컨텍스트에서 신뢰 도출(API 키=agent / JWT=human)·None→human 묵시 금지.
-        _g_actor_type = (
+    # E-DG S5(P0-2): enforcing 라인의 merge-gate step이 이 전이를 거버닝하면, 아래 라인 엔진이
+    # evaluate_merge_gate를 단일 평가한다 → 여기 _preflight_merge_gate/enforce_gate(done)는 skip해
+    # 이중 evaluate/이중 pending gate를 방지(AC⑦). 비-enforcing/비활성/예외는 False=현행 게이트 유지.
+    _line_owns_done_gate = False
+    if story_before is not None:
+        try:
+            from app.services.workflow_line_engine import line_merge_gate_active
+            _line_owns_done_gate = await line_merge_gate_active(
+                db, org_id=repo.org_id, project_id=getattr(story_before, "project_id", None),
+                entity_type="story", from_status=old_status, to_status=body.status,
+            )
+        except Exception:  # noqa: BLE001 — 불명 시 현행 게이트 유지(skip 안 함).
+            _line_owns_done_gate = False
+
+    if not _line_owns_done_gate:
+        # H1-S5: in-review→done 직접 PATCH는 merge verdict gate preflight(플래그 active 시·AC②).
+        # transition rule(check_transition)과 직교 — 전이 유효성 통과 후 증거 게이트를 얹는다(AC④).
+        await _preflight_merge_gate(db, repo.org_id, story_before, body.status)
+        # S-GATE-2: config 게이트 집행(done) — flag-off면 no-op(무회귀). block→409·ask→HitlRequest park.
+        if body.status == "done" and story_before is not None:
+            from app.services.gate_enforce import enforce_gate
+            # HIGH②: actor_type 은 인증 컨텍스트에서 신뢰 도출(API 키=agent / JWT=human)·None→human 묵시 금지.
+            _g_actor_type = (
+                "agent" if auth.claims.get("app_metadata", {}).get("api_key_id") else "human"
+            )
+            _g_actor_id: uuid.UUID | None = None
+            try:  # actor_id 는 HitlRequest 귀속용(비보안)·best-effort.
+                _g_actor_id = await _resolve_team_member_id(auth, repo.org_id, db)
+            except Exception:
+                pass
+            await enforce_gate(
+                db, org_id=repo.org_id, project_id=getattr(story_before, "project_id", None),
+                work_type="done", actor_type=_g_actor_type, actor_id=_g_actor_id,
+                work_item_id=story_before.id, work_item_title=getattr(story_before, "title", None),
+            )
+
+    # E-DG S3: 워크플로우 라인 엔진(P0-1 fail-open). check_transition 후 / set_status 전. 활성 라인이
+    # 없으면 plain(현 default-off=무영향). 엔진은 내부에서 모든 예외를 삼키지만, 호출부도 방어적으로
+    # 한 번 더 감싼다(belt-and-suspenders — 엔진에 버그가 있어도 board 전이를 절대 막지 않음).
+    if story_before is not None:
+        from app.services.workflow_line_engine import evaluate_line_for_transition
+
+        # S4: actor 전파 — 라우터가 actor_id/type 을 안 넘기면 resolver 가 항상 no_member→cold_start 로
+        # 고정돼 실 actor trust 가 snapshot 에 안 담긴다(SME 적출). 인증 컨텍스트에서 신뢰 도출.
+        _line_actor_type = (
             "agent" if auth.claims.get("app_metadata", {}).get("api_key_id") else "human"
         )
-        _g_actor_id: uuid.UUID | None = None
-        try:  # actor_id 는 HitlRequest 귀속용(비보안)·best-effort.
-            _g_actor_id = await _resolve_team_member_id(auth, repo.org_id, db)
-        except Exception:
-            pass
-        await enforce_gate(
-            db, org_id=repo.org_id, project_id=getattr(story_before, "project_id", None),
-            work_type="done", actor_type=_g_actor_type, actor_id=_g_actor_id,
-            work_item_id=story_before.id, work_item_title=getattr(story_before, "title", None),
-        )
+        _line_actor_id: uuid.UUID | None = None
+        try:
+            _line_actor_id = await _resolve_team_member_id(auth, repo.org_id, db)
+        except Exception:  # noqa: BLE001 — actor 해소 실패도 전이 비차단(엔진은 None→cold_start 처리).
+            _line_actor_id = None
+
+        _line_decision = None
+        try:
+            _line_decision = await evaluate_line_for_transition(
+                db, org_id=repo.org_id, project_id=getattr(story_before, "project_id", None),
+                entity_type="story", entity_id=story_before.id,
+                from_status=old_status, to_status=body.status,
+                actor_id=_line_actor_id, actor_type=_line_actor_type,
+            )
+        except Exception:  # noqa: BLE001 — ⭐P0-1 절대보장: 엔진 실패가 전이를 freeze하지 않음.
+            _line_decision = None
+        # blocked_by_policy/gate_pending = 정상 차단 decision(예외 아님). engine_failed/advisory/plain은 진행.
+        if _line_decision is not None and not _line_decision.proceeds:
+            # ⭐S5: raise 前 commit — engine 이 만든 H1 Gate·evidence write-back·step_run(h1_gate_id)
+            # audit 를 보존한다. get_db 는 예외 시 rollback 하므로, commit 없이 raise 하면 flush 된
+            # gate/step_run 이 사라진다(_preflight_merge_gate 가 raise 前 commit 하는 것과 동형·SME 적출).
+            await db.commit()
+            raise HTTPException(
+                status_code=_line_decision.http_status or 409,
+                detail=_line_decision.blocking_reason or "워크플로우 라인 정책으로 상태 전이가 차단되었습니다.",
+            )
 
     try:
         # AC2: violation_level 전달 → warn 모드이면 set_status hard block 우회
@@ -590,9 +745,39 @@ async def update_story_status(
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
 
+    # E-DG S7: agent-handoff relay — status 적용 후 같은 트랜잭션에서 dispatch(commit=False)·step_run
+    # delivery 기록(원자). wake/CC delivery 는 commit(아래) 후 recipient_seq 확정 후 발화(P1-2 불변식).
+    # relay 실패도 전이 비차단(fail-open).
+    _relay_wake = None
+    _relay_sr_id = (
+        _line_decision.relay_step_run_id
+        if (story_before is not None and _line_decision is not None) else None
+    )
+    if _relay_sr_id is not None:
+        from app.services.workflow_line_resolution import relay_agent_handoff
+        try:
+            _relay_wake = await relay_agent_handoff(db, _relay_sr_id, sender_id=_line_actor_id)
+        except Exception:  # noqa: BLE001 — relay 실패도 전이 비차단(fail-open).
+            _relay_wake = None
+
     # status 변경을 side effects 실행 전에 먼저 commit — process_event/webhook
     # 내부 DB 에러가 트랜잭션을 aborted 상태로 만들어 status 변경까지 rollback하는 버그 방지
     await db.commit()
+
+    # E-DG S7: relay wake — commit(recipient_seq 확정) 후 agent wake + CC delivery 발화(이중전달 방지).
+    if _relay_wake is not None:
+        _aw = _relay_wake.get("agent_wake")
+        if _aw:
+            wake_agent(_aw["recipient_id"], _aw["recipient_seq"])
+        _dl = _relay_wake.get("delivery")
+        if _dl:
+            from app.services.conversation_webhook import deliver_injected_event_webhook
+            background_tasks.add_task(
+                deliver_injected_event_webhook,
+                org_id=_dl["org_id"], recipient_id=_dl["recipient_id"], content=_dl["content"],
+                event_type=_dl["event_type"], source_entity_type=_dl["source_entity_type"],
+                source_entity_id=_dl["source_entity_id"],
+            )
 
     # S-C2: 모든 스토리 업데이트에서 actor resolve — status 변경 여부와 무관하게 공통 적용
     actor_id: uuid.UUID | None = None
@@ -627,7 +812,6 @@ async def update_story_status(
                 await fire_webhooks(db, org_id, "workflow_violation", _v_event)
             except Exception:
                 pass
-        epic_title: str | None = None
         # 41a6e294: status_changed side-effects(events→L1·webhook·L2·notif·activity)는 공유 helper로
         # 발화 — gate-driven done(gate_service)과 동일 경로(parity·드리프트 0).
         await emit_story_status_changed(

@@ -211,34 +211,18 @@ async def test_delete_sprint_200():
 
 @pytest.mark.anyio
 async def test_activate_sprint_200():
+    # E-DG S26: activate 가 transition_sprint(active) 단일경로 경유 → 200 검증. transition_sprint 내부
+    # (FSM·overlay·1-active 위임)는 test_edg_s26 가 커버. 엔드포인트 계약(routing+200)만 단정.
+    from app.services.member_resolver import ResolvedMember
     client, session, app = await _client()
     try:
-        planning_sprint = _mock_sprint("planning")
         active_sprint = _mock_sprint("active")
-
-        call_count = 0
-
-        async def mock_execute(stmt, *args, **kwargs):
-            nonlocal call_count
-            call_count += 1
-            result = MagicMock()
-            if call_count == 1:
-                # get sprint
-                result.scalar_one_or_none.return_value = planning_sprint
-            elif call_count == 2:
-                # check active sprint — none
-                result.scalar_one_or_none.return_value = None
-            else:
-                # update + re-get
-                result.scalar_one_or_none.return_value = active_sprint
-            result.scalars.return_value.all.return_value = []
-            return result
-
-        session.execute = mock_execute
-
-        async with client as c:
-            resp = await c.post(f"/api/v2/sprints/{SPRINT_ID}/activate")
-
+        caller = ResolvedMember(
+            id=uuid.uuid4(), user_id=None, name="h", type="human", role="member", org_id=ORG_ID)
+        with patch("app.services.sprint.transition_sprint", AsyncMock(return_value=active_sprint)), \
+             patch("app.services.member_resolver.resolve_member", AsyncMock(return_value=caller)):
+            async with client as c:
+                resp = await c.post(f"/api/v2/sprints/{SPRINT_ID}/activate")
         assert resp.status_code == 200
         assert resp.json()["status"] == "active"
     finally:
@@ -249,36 +233,23 @@ async def test_activate_sprint_200():
 
 @pytest.mark.anyio
 async def test_close_sprint_200():
+    # E-DG S26: close 가 transition_sprint(closed) 단일경로 경유 → 200 검증. velocity/notification 로직
+    # 보존. transition_sprint 내부(repo.close 위임·active|review 수용)는 test_edg_s26 커버.
+    from app.services.member_resolver import ResolvedMember
     client, session, app = await _client()
     try:
-        active_sprint = _mock_sprint("active")
         closed_sprint = _mock_sprint("closed")
         closed_sprint.velocity = 10
-
-        call_count = 0
-
-        async def mock_execute(stmt, *args, **kwargs):
-            nonlocal call_count
-            call_count += 1
-            result = MagicMock()
-            if call_count == 1:
-                result.scalar_one_or_none.return_value = active_sprint
-            elif call_count == 2:
-                # done stories
-                done_story = MagicMock()
-                done_story.story_points = 5
-                done_story2 = MagicMock()
-                done_story2.story_points = 5
-                result.scalars.return_value.all.return_value = [done_story, done_story2]
-            else:
-                result.scalar_one_or_none.return_value = closed_sprint
-            return result
-
-        session.execute = mock_execute
-
-        async with client as c:
-            resp = await c.post(f"/api/v2/sprints/{SPRINT_ID}/close")
-
+        caller = ResolvedMember(
+            id=uuid.uuid4(), user_id=None, name="h", type="human", role="member", org_id=ORG_ID)
+        # notification 분기: TeamMember 조회 빈 결과(멤버 0 → dispatch 없음·contract만 검증).
+        _empty = MagicMock()
+        _empty.all.return_value = []
+        session.execute = AsyncMock(return_value=_empty)
+        with patch("app.services.sprint.transition_sprint", AsyncMock(return_value=closed_sprint)), \
+             patch("app.services.member_resolver.resolve_member", AsyncMock(return_value=caller)):
+            async with client as c:
+                resp = await c.post(f"/api/v2/sprints/{SPRINT_ID}/close")
         assert resp.status_code == 200
         assert resp.json()["status"] == "closed"
     finally:

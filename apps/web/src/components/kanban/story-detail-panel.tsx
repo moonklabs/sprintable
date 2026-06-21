@@ -17,6 +17,7 @@ import { DependencyGraph } from './dependency-graph';
 import { OutcomeResultCard, type OutcomeResult } from '@/components/outcome/outcome-result-card';
 import { StoryHypothesesSection } from '@/components/hypotheses/story-hypotheses-section';
 import { StoryMergeGate } from '@/components/cage/story-merge-gate';
+import { StuckHandoffSection } from '@/components/cage/stuck-handoff-section';
 import { EntityDispatchPanel } from '@/components/dispatch/entity-dispatch-panel';
 import { Button } from '@/components/ui/button';
 import { StatusBadge } from '@/components/ui/status-badge';
@@ -804,6 +805,9 @@ export function StoryDetailPanel({ story, tasks, nextTasksCursor = null, loading
                 />
               </div>
             )}
+
+            {/* E-DG S12: handoff stuck UX — DISPATCH 직후·handoff_stuck일 때만 조건부 렌더(자체 게이트) */}
+            <StuckHandoffSection storyId={story.id} memberMap={memberMap} />
 
             {story.story_points != null ? (
               <div>

@@ -81,6 +81,14 @@ class Settings(BaseSettings):
     gate_config_enforce_enabled: bool = False
     gate_config_enforce_org_allowlist: str = ""  # CSV org_id
 
+    # E-DG S18(P0-5): Decision Gate line engine 안전 롤아웃 control. default-off — 미설정 org 는
+    # 라이브 100% 무영향(엔진 미진입). enabled+allowlist(비면 전 org) org 만 runtime mode 로 활성.
+    # mode = off|shadow|advisory|enforcing(per-line config rollout_mode 와 min 으로 결합=보수적 ceiling).
+    # circuit breaker(P0-1)가 engine failure 다발 시 org 를 advisory 로 자동 강등(보드 freeze 방지).
+    decision_gate_line_enabled: bool = False
+    decision_gate_line_org_allowlist: str = ""  # CSV org_id — 비면 enabled 시 전 org, 지정 시 해당 org만
+    decision_gate_line_mode: str = "off"  # off|shadow|advisory|enforcing(기본 off)
+
     # E-MEMBER-SSOT AC2-3: 신원 해소를 anchor(members+member_identity_aliases) 기반으로 전환하는
     # shadow 플래그. off(기본)=레거시 resolver(org_members/team_members). on=anchor resolver.
     # 라이브 cutover는 AC3-1 — 여기선 shadow(parity 검증용), 기본 off라 실 read 경로 무변경.

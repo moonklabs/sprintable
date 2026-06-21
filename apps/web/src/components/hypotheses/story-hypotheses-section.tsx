@@ -5,6 +5,8 @@ import { useTranslations } from 'next-intl';
 import { AlertTriangle, Link2, Plus, Search, X } from 'lucide-react';
 import type { Hypothesis } from '@sprintable/core-storage';
 import { HypothesisStatusBadge } from './hypothesis-status-badge';
+import { HypothesisGateBadge } from './hypothesis-gate-badge';
+import type { GateItem } from '@/components/kanban/types';
 
 /**
  * Story-detail panel "linked hypotheses" surface (E1-S8c / S9 fold · blueprint §6.5).
@@ -33,6 +35,8 @@ export function StoryHypothesesSection({
   const [candidates, setCandidates] = useState<Hypothesis[] | null>(null);
   const [query, setQuery] = useState('');
   const [busyId, setBusyId] = useState<string | null>(null);
+  // S24 follow-up: 연결 칩 compact gate indicator용 hypGatesMap(status-batch·pending/rejected).
+  const [hypGatesMap, setHypGatesMap] = useState<Record<string, GateItem>>({});
 
   // story.epic_id에 속하지 않은 가설 = 다른 에픽 소속(AC③ 경고 대상). epic 미지정 story는 판정 보류.
   const isCrossEpic = useCallback(
@@ -49,6 +53,14 @@ export function StoryHypothesesSection({
       if (!res.ok) { setLinked([]); return; }
       const json = await res.json();
       setLinked((json?.data ?? []) as Hypothesis[]);
+      // S24 follow-up: gate status-batch(pending+rejected→hypothesis 필터→map)·confirmed는 칩서 생략이라 불요.
+      const [pg, rg] = await Promise.all([
+        fetch('/api/gates?status=pending').then((r) => (r.ok ? (r.json() as Promise<GateItem[]>) : [])).catch(() => []),
+        fetch('/api/gates?status=rejected').then((r) => (r.ok ? (r.json() as Promise<GateItem[]>) : [])).catch(() => []),
+      ]);
+      const gmap: Record<string, GateItem> = {};
+      for (const g of [...rg, ...pg]) if (g.work_item_type === 'hypothesis') gmap[g.work_item_id] = g;
+      setHypGatesMap(gmap);
     } catch {
       setLinked([]);
     }
@@ -152,6 +164,8 @@ export function StoryHypothesesSection({
                   {t('crossEpic')}
                 </span>
               ) : null}
+              {/* S24 follow-up: gate approval compact indicator(pending/rejected만·title 툴팁) */}
+              <HypothesisGateBadge hypothesis={h} gate={hypGatesMap[h.id]} compact />
               <HypothesisStatusBadge status={h.status} className="shrink-0" />
               <button
                 type="button"

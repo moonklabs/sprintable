@@ -7,7 +7,7 @@ import { SortableContext, verticalListSortingStrategy } from '@dnd-kit/sortable'
 import { useTranslations } from 'next-intl';
 import { ChevronDown, ChevronUp, Plus } from 'lucide-react';
 import { StoryCard } from './story-card';
-import type { KanbanStory, KanbanMember } from './types';
+import type { KanbanStory, KanbanMember, LineStatusSummary } from './types';
 import { VALID_TRANSITIONS } from './types';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
@@ -59,6 +59,7 @@ interface KanbanColumnProps {
   blockedByMap?: Record<string, string[]>;
   storyLabelsMap?: Record<string, { id: string; name: string; color: string | null }[]>;
   storyGatesMap?: Record<string, { id: string; gate_type: string; status: string }[]>;
+  storyLineMap?: Record<string, LineStatusSummary>;
   // CB-S4: board query
   totalCount?: number;
   hasMore?: boolean;
@@ -76,7 +77,7 @@ export function KanbanColumn({
   onEditStory, onChangeStatus, onAssignStory, onDeleteStory,
   wipLimit, wipExceeded, wipEditing, wipDraft,
   onWipLimitEdit, onWipLimitSave, onWipLimitRemove, onWipDraftChange,
-  onCreateStory, projectId, onKickoffStory, executionMap, blockedByMap, storyLabelsMap, storyGatesMap,
+  onCreateStory, projectId, onKickoffStory, executionMap, blockedByMap, storyLabelsMap, storyGatesMap, storyLineMap,
   totalCount, hasMore, loadingMore, onLoadMore,
   collapsed, onToggleCollapse,
   autoComposeSignal,
@@ -319,6 +320,7 @@ export function KanbanColumn({
                   blockedBy={blockedByMap?.[story.id] ?? []}
                   labels={storyLabelsMap?.[story.id] ?? []}
                   gates={storyGatesMap?.[story.id] ?? []}
+                  lineStatus={storyLineMap?.[story.id]}
                 />
               ))}
             </div>

@@ -85,8 +85,10 @@ async def create_doc(
         db=session,
         user_id=uuid.UUID(auth.user_id),
     )
-    # AC3-2d(2): created_by canonical 정규화(레거시 휴먼 tm.id→members.id). (A) write.
-    created_by = (await canonicalize_member_id(body.created_by, session)) if body.created_by else None
+    # ⭐RC#1(body-trust 봉인): created_by 를 **인증 caller 로 강제**(body.created_by 무시·attribution
+    # 위조 차단). 다른 doc write 경로(_resolve_doc_member_id·line~501)와 대칭. AC3-2d(2) canonical 유지.
+    created_by = await _resolve_doc_member_id(auth, org_id, session)
+    created_by = await canonicalize_member_id(created_by, session)
     repo = DocRepository(session, org_id)
     doc = await repo.create(
         project_id=body.project_id,
@@ -469,10 +471,17 @@ async def list_doc_comments(
     id: uuid.UUID,
     limit: int = Query(default=20, le=100),
     db: AsyncSession = Depends(get_db),
-    _repo: DocRepository = Depends(_get_repo),
+    repo: DocRepository = Depends(_get_repo),
 ) -> list[DocCommentResponse]:
+    # ⚠️S28 보안(까심 RC twin·revisions 동형 IDOR): doc 이 caller org 소속인지 org-scoped repo 로 검증.
+    # ⭐comments 는 revisions(S28 전 잠복)와 달리 이미 populated 라 active cross-org 노출이었다(pre-
+    # existing·revisions 고치며 surface sweep 서 적출·같이 봉인). org_id 가드(방어 심층).
+    doc = await repo.get(id)
+    if doc is None:
+        raise HTTPException(status_code=404, detail="Doc not found")
     q = select(DocComment).where(
         DocComment.doc_id == id,
+        DocComment.org_id == repo.org_id,
     ).order_by(DocComment.created_at.asc()).limit(limit)
     result = await db.execute(q)
     return [DocCommentResponse.model_validate(r) for r in result.scalars()]
@@ -513,10 +522,49 @@ async def list_doc_revisions(
     id: uuid.UUID,
     limit: int = Query(default=50, le=100),
     db: AsyncSession = Depends(get_db),
-    _repo: DocRepository = Depends(_get_repo),
+    repo: DocRepository = Depends(_get_repo),
 ) -> list[DocRevisionResponse]:
+    # ⚠️S28 보안(까심 RC·cross-org IDOR): doc 이 caller org 소속인지 org-scoped repo 로 먼저 검증.
+    # 안 하면 다른 org 가 doc UUID 추측만으로 revision content 를 읽는다(S28 전엔 revision 미배선이라
+    # 빈 응답 잠복·재상신 스냅샷 배선으로 활성화). revision 쿼리에도 org_id 가드(방어 심층).
+    doc = await repo.get(id)
+    if doc is None:
+        raise HTTPException(status_code=404, detail="Doc not found")
     q = select(DocRevision).where(
         DocRevision.doc_id == id,
+        DocRevision.org_id == repo.org_id,
     ).order_by(DocRevision.created_at.desc()).limit(limit)
     result = await db.execute(q)
     return [DocRevisionResponse.model_validate(r) for r in result.scalars()]
+
+
+class DocTransitionRequest(BaseModel):
+    status: str
+
+
+@router.post("/{id}/transition", response_model=DocResponse)
+async def transition_doc_endpoint(
+    id: uuid.UUID,
+    body: DocTransitionRequest,
+    session: AsyncSession = Depends(get_db),
+    org_id: uuid.UUID = Depends(get_verified_org_id),
+    auth: AuthContext = Depends(get_current_user),
+) -> DocResponse:
+    """E-DG S22: doc decision lifecycle 전이(create/update 와 분리). draft→confirmed 는 human-only
+    (+enforcing 시 line human-gate overlay). caller 는 인증 컨텍스트에서 도출(RC① 패턴·body 신뢰 X)."""
+    from app.services.doc import DocTransitionError, transition_doc
+    from app.services.member_resolver import resolve_member
+
+    caller = await resolve_member(auth, org_id, session)
+    try:
+        doc = await transition_doc(session, org_id, caller, id, body.status)
+        await session.commit()
+        return DocResponse.model_validate(doc)
+    except DocTransitionError as e:
+        _codes = {
+            "DOC_NOT_FOUND": 404, "HUMAN_CONFIRM_REQUIRED": 403,
+            "INVALID_STATUS": 422, "INVALID_DOC_TRANSITION": 422,
+        }
+        raise HTTPException(
+            status_code=_codes.get(e.code, 400), detail={"code": e.code, "message": e.message}
+        )
