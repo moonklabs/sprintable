@@ -255,6 +255,30 @@ async def is_org_owner_or_admin(
     return row.scalar_one_or_none() is not None
 
 
+async def is_org_owner(
+    session: AsyncSession,
+    user_id: uuid.UUID,
+    org_id: uuid.UUID,
+) -> bool:
+    """user 가 해당 org 의 **owner** 인지(admin 제외). ⭐E-DG S33 gate override 전용 — override 는
+    SoD 우회=가장 강력한 액션이라 admin(void/hold/reassign)보다 좁게 owner-only 로 게이트한다.
+    is_org_owner_or_admin 과 동일 구조·role='owner' 만."""
+    row = await session.execute(
+        text(
+            """
+            SELECT 1 FROM org_members
+            WHERE user_id = :user_id
+              AND org_id = :org_id
+              AND deleted_at IS NULL
+              AND role = 'owner'
+            LIMIT 1
+            """
+        ),
+        {"user_id": user_id, "org_id": org_id},
+    )
+    return row.scalar_one_or_none() is not None
+
+
 async def first_accessible_project_id(
     session: AsyncSession,
     user_id: uuid.UUID,

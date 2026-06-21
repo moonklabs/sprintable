@@ -19,7 +19,7 @@ from app.services.gate_service import (
     void_gate,
 )
 from app.services.member_resolver import resolve_member
-from app.services.project_auth import is_org_owner_or_admin
+from app.services.project_auth import is_org_owner, is_org_owner_or_admin
 
 # 사람 검증 행위(approve/reject) — "human-validated" 웨지 integrity상 휴먼 member만 허용.
 _HUMAN_REVIEW_STATUSES = frozenset({"approved", "rejected"})
@@ -310,5 +310,39 @@ async def reassign_gate_approver_endpoint(
         result = await _enrich_approvers(session, org_id, rows)  # reassigned_by/at enrich(이벤트서)
         await session.commit()
         return result
+    except ValueError as e:
+        raise HTTPException(status_code=422, detail=str(e))
+
+
+class GateOverrideRequest(BaseModel):
+    decision: str  # "approved" | "rejected" (owner 강제 결정)
+    reason: str    # 필수 — 가장 민감한 액션이라 사유 의무
+
+
+async def _require_gate_owner(session, auth, org_id):
+    """⭐S33 owner-only 게이팅 — override 는 SoD 우회=가장 강력이라 admin(void/hold/reassign)보다 좁게
+    owner 만. is_org_owner(role='owner') canonical. 반환 resolved(owner_id=인증 caller 강제·body 신뢰 0)."""
+    resolved = await resolve_member(auth, org_id, session)
+    if not await is_org_owner(session, uuid.UUID(auth.user_id), org_id):
+        raise HTTPException(status_code=403, detail="이 액션은 org owner 만 가능합니다.")
+    return resolved
+
+
+@router.post("/{id}/override", response_model=GateResponse)
+async def override_gate_endpoint(
+    id: uuid.UUID,
+    body: GateOverrideRequest,
+    session: AsyncSession = Depends(get_db),
+    org_id: uuid.UUID = Depends(get_verified_org_id),
+    auth=Depends(get_current_user),
+) -> GateResponse:
+    """⭐S33 owner force-resolve: owner 가 막힌/긴급 gate 를 강제 결정(approved|rejected). owner-only·
+    reason 필수·owner_id=인증 caller 강제(S23 RC①)·정상 결재(quorum/SoD) 우회. 가장 민감한 액션."""
+    from app.services.gate_service import override_gate
+    resolved = await _require_gate_owner(session, auth, org_id)
+    try:
+        gate = await override_gate(session, org_id, id, resolved.id, body.decision, body.reason)
+        await session.commit()
+        return GateResponse.model_validate(gate)
     except ValueError as e:
         raise HTTPException(status_code=422, detail=str(e))
