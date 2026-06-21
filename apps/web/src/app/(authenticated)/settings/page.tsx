@@ -20,6 +20,7 @@ import { WorkflowTriggerTypesSection } from '@/components/settings/workflow-trig
 import { WorkflowExecutionHistorySection } from '@/components/settings/workflow-execution-history-section';
 import { WorkflowTemplateGallerySection } from '@/components/settings/workflow-template-gallery-section';
 import { WorkflowPolicySimulatorSection } from '@/components/settings/workflow-policy-simulator-section';
+import { WorkflowActiveLineView } from '@/components/settings/workflow-active-line-view';
 import { ThemeSettings } from '@/components/settings/theme-settings';
 import { RefreshSettings } from '@/components/settings/refresh-settings';
 import { StandupDeadlineSection } from '@/components/settings/standup-deadline-section';
@@ -1627,11 +1628,8 @@ export default function SettingsPage() {
                 </SectionCardHeader>
                 <SectionCardBody>
                   <div className="grid gap-4 lg:grid-cols-2">
-                    {/* 좌 pane: 현 활성 라인 정의 — BE active-by-entity_type GET 대기(디디 추가 中)·shell */}
-                    <div className="rounded-xl border border-dashed border-border bg-muted/10 p-3">
-                      <p className="text-[11px] font-medium uppercase tracking-wide text-muted-foreground">{t('simActiveLine')}</p>
-                      <p className="mt-2 text-xs text-muted-foreground">{t('simActiveLinePending')}</p>
-                    </div>
+                    {/* 좌 pane: 현 active published 라인 정의 보기(#1637 GET 와이어) */}
+                    <WorkflowActiveLineView projectId={currentProjectId} />
                     {/* 우 pane: dry-run preview(계약 ready·끝단 와이어) */}
                     <WorkflowPolicySimulatorSection />
                   </div>
