@@ -19,6 +19,11 @@ class McpSettings(BaseSettings):
     # per-key scope 캐시 bound(멀티테넌트 多키 무한증식 방지·SeenIdsCache 패턴).
     mcp_scope_cache_max_size: int = 1000
     mcp_scope_cache_ttl_seconds: int = 300
+    # E-MCP-HTTP S2: DNS-rebinding 보호 호스트 화이트리스트(comma·env MCP_ALLOWED_HOSTS). FastMCP 는
+    # host=localhost 류면 자동 보호 ON(allowed_hosts=localhost) → Cloud Run host(*.run.app) 거부 421.
+    # 비우면(기본) **보호 OFF**(공개 호스팅 MCP=per-request bearer + Cloud Run TLS 가 실보안·브라우저
+    # 로컬공격 모델 비해당). prod 승격 시 커스텀 도메인 정밀 화이트리스트(exact·서브도메인 와일드카드 X).
+    mcp_allowed_hosts: str = ""
 
 
 settings = McpSettings()

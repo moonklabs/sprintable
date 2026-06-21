@@ -25,7 +25,7 @@ gcloud run deploy sprintable-mcp-dev \
   --region="${REGION}" \
   --command="python" \
   --args="-m,sprintable_mcp" \
-  --set-env-vars="SPRINTABLE_MCP_TRANSPORT=http,SPRINTABLE_API_URL=${DEV_BACKEND_URL},AGENT_API_KEY=${ENV_KEY}" \
+  --set-env-vars="MCP_TRANSPORT=http,SPRINTABLE_API_URL=${DEV_BACKEND_URL},AGENT_API_KEY=${ENV_KEY}" \
   --allow-unauthenticated \
   --min-instances=0 \
   --max-instances=2 \
