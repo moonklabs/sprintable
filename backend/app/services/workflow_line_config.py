@@ -200,6 +200,41 @@ async def create_draft(
     return version
 
 
+async def list_versions(
+    session: AsyncSession, org_id: uuid.UUID, project_id: uuid.UUID | None, entity_type: str,
+) -> list[WorkflowLineDefinitionVersion]:
+    """⭐S34: scope(org/project)+entity_type 의 전 버전 history(version desc). editor version-history 모드용."""
+    r = await session.execute(
+        select(WorkflowLineDefinitionVersion).where(
+            WorkflowLineDefinitionVersion.org_id == org_id,
+            WorkflowLineDefinitionVersion.project_id.is_(None) if project_id is None
+            else WorkflowLineDefinitionVersion.project_id == project_id,
+            WorkflowLineDefinitionVersion.entity_type == entity_type,
+        ).order_by(WorkflowLineDefinitionVersion.version.desc())
+    )
+    return list(r.scalars().all())
+
+
+async def update_draft_config(
+    session: AsyncSession, version: WorkflowLineDefinitionVersion, config: dict[str, Any],
+) -> WorkflowLineDefinitionVersion:
+    """⭐S34: draft version 의 config in-place 갱신(editor "저장"). ⭐published 동결·draft 가변 semantics:
+    ``status=='draft'`` 만 수정 가능·published/approved/rejected/retired 는 **immutable(422)**(수정=새 draft).
+    config_hash + lint 재계산(create_draft 와 동일·draft 단계 lint 비차단)."""
+    if version.status != "draft":
+        raise ValueError(
+            f"draft 만 수정 가능합니다 (현재 {version.status}·published/approved 등은 immutable·수정은 새 draft)."
+        )
+    errors = lint_config(config)
+    version.config = config
+    version.config_hash = compute_config_hash(config)
+    version.lint_status = "failed" if errors else "passed"
+    version.lint_errors = errors
+    await session.flush()
+    await session.refresh(version)
+    return version
+
+
 async def transition_version(
     session: AsyncSession, version: WorkflowLineDefinitionVersion, new_status: str,
 ) -> WorkflowLineDefinitionVersion:
