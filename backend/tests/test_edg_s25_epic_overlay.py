@@ -45,35 +45,50 @@ def _mock_sr(to_status):
                      from_status="draft", to_status=to_status)
 
 
-async def _run_apply(epic_mock, sr, resolver_id):
-    from unittest.mock import AsyncMock, MagicMock
+async def _run_apply(epic_mock, sr, resolver_id, owner="__unset__"):
+    # RC#2: SoD 가 epic.assignee_id 대신 resolve_project_relay_owner(project owner)를 쓰므로 patch.
+    from unittest.mock import AsyncMock, MagicMock, patch
     from app.services.workflow_line_resolution import _apply_epic_transition
     result = MagicMock()
     result.scalar_one_or_none.return_value = epic_mock
     session = AsyncMock()
     session.execute = AsyncMock(return_value=result)
-    await _apply_epic_transition(session, sr, resolver_id=resolver_id)
+    _owner = epic_mock.assignee_id if owner == "__unset__" else owner
+    with patch("app.services.project_auth.resolve_project_relay_owner",
+               new=AsyncMock(return_value=_owner)):
+        await _apply_epic_transition(session, sr, resolver_id=resolver_id)
 
 
 @pytest.mark.anyio
-async def test_apply_sod_blocks_assignee_self_approve():
-    """⭐SoD(activation): approver == epic.assignee_id → 차단(skipped)."""
+async def test_apply_sod_blocks_owner_self_approve():
+    """⭐RC#2 SoD(activation): approver == project owner → 차단(skipped). assignee 아닌 owner 기준."""
     from unittest.mock import MagicMock
-    assignee = uuid.uuid4()
-    epic = MagicMock(status="draft", assignee_id=assignee, id=uuid.uuid4(), title="e", project_id=uuid.uuid4())
+    owner = uuid.uuid4()
+    epic = MagicMock(status="draft", assignee_id=None, id=uuid.uuid4(), title="e", project_id=uuid.uuid4())
     sr = _mock_sr("active")
-    await _run_apply(epic, sr, resolver_id=assignee)  # self
+    await _run_apply(epic, sr, resolver_id=owner, owner=owner)  # self == owner
     assert sr.status == "skipped"
 
 
 @pytest.mark.anyio
-async def test_apply_sod_assignee_null_fail_closed():
-    """⭐RC② 교훈 선제: assignee_id None(불명) → activation 차단(fail-closed)."""
+async def test_apply_sod_owner_null_fail_closed():
+    """⭐owner 해소 None → activation 차단(fail-closed). assignee null 의존 제거(과차단 근본 해소)."""
     from unittest.mock import MagicMock
     epic = MagicMock(status="draft", assignee_id=None, id=uuid.uuid4(), title="e", project_id=uuid.uuid4())
     sr = _mock_sr("active")
-    await _run_apply(epic, sr, resolver_id=uuid.uuid4())
-    assert sr.status == "skipped"  # assignee None → fail-closed
+    await _run_apply(epic, sr, resolver_id=uuid.uuid4(), owner=None)
+    assert sr.status == "skipped"  # owner None → fail-closed
+
+
+@pytest.mark.anyio
+async def test_apply_sod_allows_non_owner_approver():
+    """⭐approver ≠ project owner → SoD 통과(차단 아님). owner-기준 SoD 정상 동작 입증."""
+    from unittest.mock import MagicMock
+    owner = uuid.uuid4()
+    epic = MagicMock(status="draft", assignee_id=None, id=uuid.uuid4(), title="e", project_id=uuid.uuid4())
+    sr = _mock_sr("active")
+    await _run_apply(epic, sr, resolver_id=uuid.uuid4(), owner=owner)  # approver != owner
+    assert sr.status != "skipped"  # SoD 통과(transition_epic 진행)
 
 
 # ── active→done(SoD 무관)·default-off·aggregate (real-PG) ─────────────────────

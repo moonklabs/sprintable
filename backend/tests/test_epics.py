@@ -319,16 +319,51 @@ async def test_get_epic_404():
 async def test_update_epic_200():
     client, session, app = await _client()
     try:
-        updated = _mock_epic("done")
+        # RC#2 D1': FE always-send 패턴 — status==current(미변경) 동봉 + 메타편집 → 무시·200.
+        updated = _mock_epic("active")
         mock_result = MagicMock()
         mock_result.scalar_one_or_none.return_value = updated
         session.execute = AsyncMock(return_value=mock_result)
 
         async with client as c:
-            resp = await c.patch(f"/api/v2/epics/{EPIC_ID}", json={"status": "done"})
+            resp = await c.patch(f"/api/v2/epics/{EPIC_ID}",
+                                 json={"status": "active", "priority": "high"})  # status==current
 
         assert resp.status_code == 200
-        assert resp.json()["status"] == "done"
+    finally:
+        app.dependency_overrides.clear()
+
+
+@pytest.mark.anyio
+async def test_update_epic_status_change_via_patch_rejected_422():
+    """⭐RC#2 D1': generic PATCH 로 status **변경**(!=current) 시 422(전용 transition 강제)."""
+    client, session, app = await _client()
+    try:
+        current = _mock_epic("active")  # current.status='active'
+        mock_result = MagicMock()
+        mock_result.scalar_one_or_none.return_value = current
+        session.execute = AsyncMock(return_value=mock_result)
+        async with client as c:
+            resp = await c.patch(f"/api/v2/epics/{EPIC_ID}", json={"status": "done"})  # 변경
+        assert resp.status_code == 422
+        assert "transition" in resp.text.lower()
+    finally:
+        app.dependency_overrides.clear()
+
+
+@pytest.mark.anyio
+async def test_update_epic_status_null_rejected_422():
+    """⭐RC#2 D1'(codex Critical1): explicit {status:null}도 presence-기반이라 422(null≠current·status
+    null화 봉인). 구 validator(v is not None)는 null 통과 갭이었음."""
+    client, session, app = await _client()
+    try:
+        current = _mock_epic("active")
+        mock_result = MagicMock()
+        mock_result.scalar_one_or_none.return_value = current
+        session.execute = AsyncMock(return_value=mock_result)
+        async with client as c:
+            resp = await c.patch(f"/api/v2/epics/{EPIC_ID}", json={"status": None})
+        assert resp.status_code == 422
     finally:
         app.dependency_overrides.clear()
 

@@ -51,6 +51,8 @@ class EpicUpdate(BaseModel):
     success_hypothesis: str | None = None
     metric_definition: dict[str, Any] | None = None
     measure_after: datetime | None = None
+    # ⚠️RC#2(D1'): status 는 잔류하되 update_epic 엔드포인트가 **미변경이면 무시·변경 시 422**(전용
+    # /transition 강제). FE always-send(미변경 동봉) 호환·실제 status 변경만 차단(RC#1 resolver_id 동형).
 
 
 class EpicResponse(BaseModel):
