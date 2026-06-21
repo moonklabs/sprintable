@@ -124,6 +124,13 @@ async def process_sla(session: AsyncSession, now: datetime | None = None) -> dic
     counts = {"reminded": 0, "escalated": 0, "auto_approved": 0, "kept_pending": 0,
               "unresolved": 0, "skipped": 0}
     for sr in rows:
+        # ⭐S31 hold = SLA pause: held step_run 은 reminder/escalation/timeout 일시정지(skip). admin 이
+        # 수동 unhold(→gate_pending) 하면 다음 스캔서 정상 처리 재개. ⚠️held 가 이미 _SLA_GATE_STATUSES
+        # 라 스캔엔 들어오므로 여기서 per-step skip. (held_until 만료 자동 재개는 S13 통합 followup —
+        # 그때 여기서 now>=held_until 이면 gate_pending 복귀시켜 처리.)
+        if sr.status == "held":
+            counts["skipped"] += 1
+            continue
         policy = await _resolve_sla_policy(session, sr)
         timeout_h = policy.get("timeout_hours")
         if not timeout_h:

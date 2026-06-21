@@ -16,14 +16,17 @@ from sqlalchemy.orm import Mapped, mapped_column
 
 from app.core.database import Base
 
-GATE_STATUSES = frozenset({"pending", "approved", "rejected", "auto_passed", "voided"})
+GATE_STATUSES = frozenset({"pending", "approved", "rejected", "auto_passed", "voided", "held"})
 
-# 합법 전이: (from, to). ⭐S30: pending→voided(admin recovery·오발행/막힌 gate 무효화). voided≠approval —
-# 묶인 step_run 은 skipped 로 해소돼 엔티티가 unblock(re-route 가능)되되 "승인됨"으로 전진하지 않는다.
+# 합법 전이: (from, to). ⭐S30: pending→voided(admin recovery·voided≠approval·step_run skipped 해소).
+# ⭐S31: pending↔held(admin hold/unhold·일시정지/재개·가역). held→approved/rejected 직접 금지 —
+# 재개(held→pending) 후 정상 pending 서 결정(hold와 결정 혼동 방지·4종 모델 clean).
 _VALID_TRANSITIONS: set[tuple[str, str]] = {
     ("pending", "approved"),
     ("pending", "rejected"),
     ("pending", "voided"),
+    ("pending", "held"),       # S31 hold(일시정지·SLA pause)
+    ("held", "pending"),       # S31 unhold(재개·SLA resume)
 }
 
 
@@ -43,6 +46,9 @@ class Gate(Base):
     resolver_id: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True), nullable=True)
     resolved_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     resolution_note: Mapped[str | None] = mapped_column(Text, nullable=True)
+    # ⭐S31: hold 만료(시한부 보류). status='held' 일 때만 의미·무기한 hold 면 None. 0132 마이그(post-0096).
+    # FE 가 gate 직독으로 held_until 배지 렌더(step_run 경유 leaky 회피)·step_run.held_until 도 SLA 동기화.
+    held_until: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     neutral_facts: Mapped[dict | None] = mapped_column(JSONB, nullable=True)
     # H1-S3: merge verdict gate evidence metadata (0118).
     requires_human: Mapped[bool] = mapped_column(Boolean, nullable=False, server_default=text("false"))
