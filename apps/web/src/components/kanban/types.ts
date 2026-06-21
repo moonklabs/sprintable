@@ -45,6 +45,20 @@ export interface GateItem {
   updated_at: string;
 }
 
+// E-DG S32: gate approver row(GateApproverResponse 미러). reassign 재지정 메타 enrich(이벤트서·null=미재지정).
+export interface GateApproverItem {
+  id: string;
+  approver_member_id: string;
+  approver_member_type: string;
+  status: string;
+  kind: string;
+  blocking: boolean;
+  reassigned_from_member_id?: string | null;
+  original_approver_member_id?: string | null;
+  reassigned_by_member_id?: string | null;
+  reassigned_at?: string | null;
+}
+
 // E-DG S11: workflow-line status read model — BE services/workflow_line_status.py 미러(read-only).
 // 데이터소스 GET /api/v2/stories/{id}/workflow-line/status. 필드명·optionality는 BE StepRunView/ApproverView/LastEventView와 1:1.
 // datetime은 BE에서 ISO 문자열로 직렬화 → string | null.

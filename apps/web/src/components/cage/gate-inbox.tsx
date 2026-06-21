@@ -2,14 +2,15 @@
 
 import { useEffect, useState } from 'react';
 import { useTranslations } from 'next-intl';
-import { CheckCircle, XCircle, Ban, MoreHorizontal, AlertTriangle, Pause, PlayCircle } from 'lucide-react';
+import { CheckCircle, XCircle, Ban, MoreHorizontal, AlertTriangle, Pause, PlayCircle, UserCog, ArrowRightLeft } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from '@/components/ui/dropdown-menu';
 import { GateEvidence, gateNeedsAction, gateDecision } from '@/components/cage/gate-evidence';
 import { GateLineContext } from '@/components/cage/gate-line-context';
+import { GateReassignModal } from '@/components/cage/gate-reassign-modal';
 import { useDashboardContext } from '@/app/dashboard/dashboard-shell';
-import type { GateItem, WorkflowLineStatus, WorkflowLineStepRun } from '@/components/kanban/types';
+import type { GateItem, GateApproverItem, WorkflowLineStatus, WorkflowLineStepRun } from '@/components/kanban/types';
 
 interface GateInboxProps {
   memberId: string;
@@ -32,15 +33,19 @@ export function GateInbox({ memberId }: GateInboxProps) {
   const [voidModal, setVoidModal] = useState<{ gateId: string; reason: string } | null>(null);
   // S31 fix: held(status='held') gate는 pending 목록서 빠지므로 별도 fetch — 보류중 행+[재개] 렌더용.
   const [heldGates, setHeldGates] = useState<GateItem[]>([]);
-  const { role } = useDashboardContext();
+  const { role, projectId } = useDashboardContext();
   const isAdmin = role === 'admin' || role === 'owner';
   // S31: 보류(hold) — 모달(사유 선택·무기한/시한부 held_until). held=Pause(재개가능·pending 유지)↔void=Ban(종료).
   // held 판정은 status==='held' OR held_until(디디 BE 표현 미확정·둘 다 커버·머지 후 정합).
   const [holdModal, setHoldModal] = useState<{ gateId: string; reason: string; indefinite: boolean; heldUntil: string } | null>(null);
   const isHeld = (g: GateItem) => g.status === 'held' || !!g.held_until;
+  const resolveName = (id: string) => memberNames[id] ?? id.slice(0, 6);
   // S11 ②: 라인 컨텍스트(active step_run by story_id) + approver 이름맵.
   const [lineMap, setLineMap] = useState<Record<string, WorkflowLineStepRun>>({});
   const [memberNames, setMemberNames] = useState<Record<string, string>>({});
+  // S32: parallel gate 결재자 재지정 — gate별 approver 목록(conditional-display·reassign 메타 enrich) + 재지정 모달.
+  const [gateApproversMap, setGateApproversMap] = useState<Record<string, GateApproverItem[]>>({});
+  const [reassignGateId, setReassignGateId] = useState<string | null>(null);
 
   const fetchGates = async () => {
     try {
@@ -57,6 +62,18 @@ export function GateInbox({ memberId }: GateInboxProps) {
       setRejectedGates((rejected as GateItem[]).filter((g) => g.resolution_note));
       setVoidedGates(voided as GateItem[]);
       setHeldGates(held as GateItem[]);
+
+      // S32: pending gate별 approver 목록(parallel gate만 rows·bounded N·conditional-display + reassign 메타 enrich).
+      const approverResults = await Promise.all(
+        pendingGates.map((g) =>
+          fetch(`/api/gates/${g.id}/approvers`)
+            .then((r) => (r.ok ? (r.json() as Promise<GateApproverItem[]>) : []))
+            .catch(() => []),
+        ),
+      );
+      const amap: Record<string, GateApproverItem[]> = {};
+      pendingGates.forEach((g, i) => { const rows = approverResults[i]; if (rows && rows.length) amap[g.id] = rows; });
+      setGateApproversMap(amap);
 
       // S11 ②: pending story 게이트별 workflow-line/status(bounded N=대기 게이트 수·N+1 아님) + 멤버 이름맵.
       const storyGates = pendingGates.filter((g) => g.work_item_type === 'story');
@@ -210,6 +227,27 @@ export function GateInbox({ memberId }: GateInboxProps) {
               ) : null}
               {/* H1-S8: decision 배지 + CI/신뢰도 facts + 사유(read-only evidence) */}
               <GateEvidence gate={gate} className="mt-1" />
+              {/* S32: parallel gate approver rows — 재지정 메타(이전 취소선→ArrowRightLeft→새·재지정됨·{admin}·{시각}) */}
+              {(gateApproversMap[gate.id]?.length ?? 0) > 0 ? (
+                <ul className="mt-1.5 space-y-0.5">
+                  {gateApproversMap[gate.id]!.map((a) => (
+                    <li key={a.id} className="flex flex-wrap items-center gap-1.5 text-[11px] text-muted-foreground">
+                      {a.reassigned_from_member_id ? (
+                        <>
+                          <span className="line-through">{resolveName(a.reassigned_from_member_id)}</span>
+                          <ArrowRightLeft className="size-3 shrink-0" />
+                        </>
+                      ) : null}
+                      <span className="text-foreground">{resolveName(a.approver_member_id)}</span>
+                      {a.reassigned_by_member_id ? (
+                        <span className="text-[10px] text-muted-foreground/70">
+                          · {t('reassignedBy', { admin: resolveName(a.reassigned_by_member_id), at: a.reassigned_at ? new Date(a.reassigned_at).toLocaleDateString() : '' })}
+                        </span>
+                      ) : null}
+                    </li>
+                  ))}
+                </ul>
+              ) : null}
             </div>
             {/* 액션 = requires_human 기준(block 제외·읽기전용·AC⑤). + S30 admin ⋯ 무효화(전 pending gate·admin only). */}
             <div className="flex shrink-0 items-center gap-1.5">
@@ -271,6 +309,13 @@ export function GateInbox({ memberId }: GateInboxProps) {
                     <MoreHorizontal className="size-4" />
                   </DropdownMenuTrigger>
                   <DropdownMenuContent align="end">
+                    {/* S32: 결재자 변경 — approver rows 있는 parallel gate만(conditional·보이는=실행가능·422 차단) */}
+                    {!isHeld(gate) && (gateApproversMap[gate.id]?.length ?? 0) > 0 ? (
+                      <DropdownMenuItem onClick={() => setReassignGateId(gate.id)}>
+                        <UserCog className="mr-2 size-3.5" />
+                        {t('reassignAction')}
+                      </DropdownMenuItem>
+                    ) : null}
                     {!isHeld(gate) ? (
                       <DropdownMenuItem onClick={() => setHoldModal({ gateId: gate.id, reason: '', indefinite: true, heldUntil: '' })}>
                         <Pause className="mr-2 size-3.5" />
@@ -456,6 +501,18 @@ export function GateInbox({ memberId }: GateInboxProps) {
           </div>
         </div>
       )}
+
+      {/* S32: 결재자 재지정 모달(parallel gate·admin) */}
+      {reassignGateId && projectId ? (
+        <GateReassignModal
+          gateId={reassignGateId}
+          approvers={gateApproversMap[reassignGateId] ?? []}
+          projectId={projectId}
+          resolveName={resolveName}
+          onClose={() => setReassignGateId(null)}
+          onResolved={() => void fetchGates()}
+        />
+      ) : null}
     </div>
   );
 }
