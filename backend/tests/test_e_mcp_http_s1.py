@@ -154,11 +154,21 @@ async def test_bearer_middleware_sets_contextvar():
 
 
 @pytest.mark.anyio
-async def test_bearer_middleware_health_path_passes_without_auth():
-    """비-/mcp 경로(health 등)는 인증 없이 통과(S2 Cloud Run 헬스체크 호환)."""
+async def test_bearer_middleware_health_returns_200_without_auth():
+    """⭐S2: /health·/healthz → 200 직응답(인증 불요·Cloud Run HTTP liveness·streamable_http_app 404 방지)."""
     from sprintable_mcp.http_auth import bearer_auth_asgi
-    st = await _run_asgi(bearer_auth_asgi, "/health", {})        # bearer 없어도
-    assert st["app_called"] and st["status"] is None            # 401 아님·app 통과
+    for p in ("/health", "/healthz"):
+        st = await _run_asgi(bearer_auth_asgi, p, {})            # bearer 없어도
+        assert st["status"] == 200 and not st["app_called"]     # 200·app 미통과(미들웨어 직응답)
+        assert b"ok" in st["body"]
+
+
+@pytest.mark.anyio
+async def test_bearer_middleware_other_nonmcp_path_passes():
+    """비-/mcp·비-health 경로는 인증 없이 app 으로 통과(향후 라우트 호환)."""
+    from sprintable_mcp.http_auth import bearer_auth_asgi
+    st = await _run_asgi(bearer_auth_asgi, "/other", {})
+    assert st["app_called"] and st["status"] is None
 
 
 @pytest.mark.anyio

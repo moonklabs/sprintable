@@ -93,13 +93,17 @@ def _run_http() -> None:
         settings.sprintable_api_url,
         settings.agent_api_key or "_http_per_request_bearer_only_",
     )
+    # E-MCP-HTTP S2: Cloud Run 은 $PORT 를 주입(8080 우연일치 의존 X) → PORT 우선·없으면 config default.
+    import os
+
+    port = int(os.environ.get("PORT") or settings.mcp_http_port)
     app = bearer_auth_asgi(mcp.streamable_http_app())
     print(
-        f"Sprintable MCP — Streamable HTTP on {settings.mcp_http_host}:{settings.mcp_http_port}/mcp "
+        f"Sprintable MCP — Streamable HTTP on {settings.mcp_http_host}:{port}/mcp "
         "(per-request bearer auth·tools-only)",
         file=sys.stderr,
     )
-    uvicorn.run(app, host=settings.mcp_http_host, port=settings.mcp_http_port, log_level="info")
+    uvicorn.run(app, host=settings.mcp_http_host, port=port, log_level="info")
 
 
 if __name__ == "__main__":
