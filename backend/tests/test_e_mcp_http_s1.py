@@ -24,6 +24,28 @@ def test_transport_default_stdio():
     assert s.mcp_scope_cache_ttl_seconds > 0
 
 
+def test_transport_env_name_is_MCP_TRANSPORT(monkeypatch):
+    """⭐S2 배포 회귀 봉쇄: mcp_transport 는 **env `MCP_TRANSPORT`** 로 읽힌다(env_prefix 없음).
+    deploy 가 SPRINTABLE_MCP_TRANSPORT 로 set하면 무시→stdio→placeholder /auth/me 크래시(2026-06-21 사건).
+    env-name 매핑을 직접 검증(S1 테스트는 settings 직접 set이라 이 read 경로 미커버였음)."""
+    from sprintable_mcp.config import McpSettings
+    monkeypatch.setenv("MCP_TRANSPORT", "http")
+    monkeypatch.setenv("SPRINTABLE_MCP_TRANSPORT", "stdio")  # 잘못된 이름 → 무시돼야
+    assert McpSettings().mcp_transport == "http"             # MCP_TRANSPORT 가 정답
+    monkeypatch.delenv("MCP_TRANSPORT")
+    assert McpSettings().mcp_transport == "stdio"            # 미설정 → 기본 stdio
+
+
+def test_deploy_relevant_env_names(monkeypatch):
+    """⭐배포 env 이름 계약 고정: API_URL·KEY 는 필드명 일치(SPRINTABLE_API_URL·AGENT_API_KEY)."""
+    from sprintable_mcp.config import McpSettings
+    monkeypatch.setenv("SPRINTABLE_API_URL", "https://dev-be")
+    monkeypatch.setenv("AGENT_API_KEY", "sk_dev")
+    s = McpSettings()
+    assert s.sprintable_api_url == "https://dev-be"
+    assert s.agent_api_key == "sk_dev"
+
+
 # ── ② per-request 키 contextvar ───────────────────────────────────────────────
 def test_api_key_override_contextvar():
     from sprintable_mcp.api_client import (
