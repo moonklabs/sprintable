@@ -16,6 +16,7 @@ import { TopBarSlot } from '@/components/nav/top-bar-slot';
 import { EntityDispatchPanel } from '@/components/dispatch/entity-dispatch-panel';
 import { ToastContainer, useToast } from '@/components/ui/toast';
 import { OutcomeStatusBadge } from '@/components/outcome/outcome-status-badge';
+import { EpicStatusTransition } from '@/components/epics/epic-status-transition';
 import { HypothesesSection } from '@/components/hypotheses/hypotheses-section';
 
 type EpicStatus = 'draft' | 'active' | 'done' | 'archived';
@@ -74,12 +75,6 @@ function groupByStatus(stories: Story[]): { status: string; items: Story[] }[] {
 }
 
 // ─── Helpers ─────────────────────────────────────────────────────────────────
-
-function statusBadgeVariant(s: EpicStatus) {
-  if (s === 'active') return 'info' as const;
-  if (s === 'done') return 'success' as const;
-  return 'secondary' as const;
-}
 
 function storyStatusVariant(s: string): 'success' | 'info' | 'destructive' | 'secondary' {
   if (s === 'done') return 'success';
@@ -301,7 +296,12 @@ export default function EpicDetailPage() {
             </div>
           </div>
           <div className="flex flex-wrap items-center gap-2">
-            <Badge variant={statusBadgeVariant(epic.status)}>{epic.status}</Badge>
+            {/* RC#2 ⓶: status badge → transition 컨트롤(유효 next dropdown·draft→active gate-pending) */}
+            <EpicStatusTransition
+              epicId={epic.id}
+              status={epic.status}
+              onTransitioned={(s) => setEpic((prev) => (prev ? { ...prev, status: s as EpicStatus } : prev))}
+            />
             <Badge variant={priorityBadgeVariant(epic.priority)}>{epic.priority}</Badge>
             {epic.outcome_status && epic.outcome_status !== 'n_a' ? <OutcomeStatusBadge status={epic.outcome_status} /> : null}
             {epic.target_date && <span className="text-xs text-muted-foreground">마감: {formatDate(epic.target_date)}</span>}
