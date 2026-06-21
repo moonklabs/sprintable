@@ -2,13 +2,14 @@
 
 import { useEffect, useState } from 'react';
 import { useTranslations } from 'next-intl';
-import { CheckCircle, XCircle, Ban, MoreHorizontal, AlertTriangle, Pause, PlayCircle, UserCog, ArrowRightLeft } from 'lucide-react';
+import { CheckCircle, XCircle, Ban, MoreHorizontal, AlertTriangle, Pause, PlayCircle, UserCog, ArrowRightLeft, Gavel, Crown } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
-import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from '@/components/ui/dropdown-menu';
+import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuSeparator, DropdownMenuTrigger } from '@/components/ui/dropdown-menu';
 import { GateEvidence, gateNeedsAction, gateDecision } from '@/components/cage/gate-evidence';
 import { GateLineContext } from '@/components/cage/gate-line-context';
 import { GateReassignModal } from '@/components/cage/gate-reassign-modal';
+import { GateOverrideModal } from '@/components/cage/gate-override-modal';
 import { useDashboardContext } from '@/app/dashboard/dashboard-shell';
 import type { GateItem, GateApproverItem, WorkflowLineStatus, WorkflowLineStepRun } from '@/components/kanban/types';
 
@@ -35,6 +36,7 @@ export function GateInbox({ memberId }: GateInboxProps) {
   const [heldGates, setHeldGates] = useState<GateItem[]>([]);
   const { role, projectId } = useDashboardContext();
   const isAdmin = role === 'admin' || role === 'owner';
+  const isOwner = role === 'owner'; // S33: override는 owner-only(admin 미포함·BE is_org_owner 강제)
   // S31: 보류(hold) — 모달(사유 선택·무기한/시한부 held_until). held=Pause(재개가능·pending 유지)↔void=Ban(종료).
   // held 판정은 status==='held' OR held_until(디디 BE 표현 미확정·둘 다 커버·머지 후 정합).
   const [holdModal, setHoldModal] = useState<{ gateId: string; reason: string; indefinite: boolean; heldUntil: string } | null>(null);
@@ -46,6 +48,8 @@ export function GateInbox({ memberId }: GateInboxProps) {
   // S32: parallel gate 결재자 재지정 — gate별 approver 목록(conditional-display·reassign 메타 enrich) + 재지정 모달.
   const [gateApproversMap, setGateApproversMap] = useState<Record<string, GateApproverItem[]>>({});
   const [reassignGateId, setReassignGateId] = useState<string | null>(null);
+  // S33: owner 결재 강제(override) — 모달 대상 gate.
+  const [overrideGateId, setOverrideGateId] = useState<string | null>(null);
 
   const fetchGates = async () => {
     try {
@@ -329,6 +333,19 @@ export function GateInbox({ memberId }: GateInboxProps) {
                       <Ban className="mr-2 size-3.5" />
                       {t('voidAction')}
                     </DropdownMenuItem>
+                    {/* S33: owner-only 결재 강제(override) — admin 항목과 구분선·admin엔 미노출 */}
+                    {isOwner ? (
+                      <>
+                        <DropdownMenuSeparator />
+                        <DropdownMenuItem
+                          className="text-destructive focus:text-destructive"
+                          onClick={() => setOverrideGateId(gate.id)}
+                        >
+                          <Gavel className="mr-2 size-3.5" />
+                          {t('overrideAction')}
+                        </DropdownMenuItem>
+                      </>
+                    ) : null}
                   </DropdownMenuContent>
                 </DropdownMenu>
               ) : null}
@@ -343,9 +360,19 @@ export function GateInbox({ memberId }: GateInboxProps) {
           <p className="text-[11px] font-medium text-muted-foreground">{t('gateRejectedHistory')}</p>
           {rejectedGates.map((gate) => (
             <div key={gate.id} className="rounded-xl border border-destructive/20 bg-destructive/5 px-3 py-2">
-              <div className="flex items-center gap-2">
+              <div className="flex flex-wrap items-center gap-2">
                 <XCircle className="size-3 shrink-0 text-destructive/60" />
                 <span className="text-[10px] text-muted-foreground">{gate.gate_type} · #{gate.work_item_id.slice(0, 6)}</span>
+                {/* S33: owner override 표식(gate_overridden enrich·bypassed_sod)·design-first 머지 후 정합 */}
+                {gate.bypassed_sod || gate.overridden_by_member_id ? (
+                  <span className="inline-flex items-center gap-1 text-[10px] text-warning">
+                    <Crown className="size-3 shrink-0" />
+                    {t('overriddenTag')}
+                    {gate.overridden_by_member_id ? (
+                      <span className="text-muted-foreground/70">· {resolveName(gate.overridden_by_member_id)}{gate.overridden_at ? ` · ${new Date(gate.overridden_at).toLocaleDateString()}` : ''}</span>
+                    ) : null}
+                  </span>
+                ) : null}
               </div>
               <p className="mt-1 text-xs text-foreground/80">{gate.resolution_note}</p>
             </div>
@@ -510,6 +537,15 @@ export function GateInbox({ memberId }: GateInboxProps) {
           projectId={projectId}
           resolveName={resolveName}
           onClose={() => setReassignGateId(null)}
+          onResolved={() => void fetchGates()}
+        />
+      ) : null}
+
+      {/* S33: owner 결재 강제(override) 모달 */}
+      {overrideGateId ? (
+        <GateOverrideModal
+          gateId={overrideGateId}
+          onClose={() => setOverrideGateId(null)}
           onResolved={() => void fetchGates()}
         />
       ) : null}
