@@ -148,8 +148,13 @@ async def evaluate_line_for_transition(
     actor_id: uuid.UUID | None = None,
     actor_type: str | None = None,
     transition_id: str | None = None,
+    dry_run: bool = False,
 ) -> LineDecision:
-    """전이 직전 라인 평가. ⭐절대 예외를 raise하지 않는다(P0-1 fail-open)."""
+    """전이 직전 라인 평가. ⭐절대 예외를 raise하지 않는다(P0-1 fail-open).
+
+    ⭐S29 dry_run=True: resolve-preview 모드 — 동일 결정 로직을 돌되 **side-effect 0**(step_run insert·
+    grandfather consume·merge-gate write·commit 전부 스킵). preview≠real 드리프트 회피 위해 별 함수
+    복제 대신 같은 경로에 dry_run 을 스레딩한다. 반환 LineDecision 의 step_run_id 는 None(미persist)."""
     transition_id = transition_id or uuid.uuid4().hex
     correlation_id = uuid.uuid4()
     try:
@@ -174,8 +179,19 @@ async def evaluate_line_for_transition(
 
         # S19(P0-5): grandfather — enable 전 in-flight story 의 첫 transition 은 새 gate 에 안 갇히게
         # 비차단 통과(marker 소비·다음 transition 부터 거버닝). board freeze 0(AC①④).
-        from app.services.workflow_grandfather import consume_grandfather
-        if await consume_grandfather(session, org_id, entity_type, entity_id, from_status, to_status):
+        # ⭐S29 dry-run: peek(consume 금지·write 0) — preview 가 grandfather 적용여부를 거짓 없이
+        # 반영(PO Q3·preview 는 거짓말 안 함). real 경로는 consume(marker 소비).
+        from app.services.workflow_grandfather import _has_open_grandfather, consume_grandfather
+        if dry_run:
+            _grandfathered = (
+                await _has_open_grandfather(session, org_id, entity_id)
+                if entity_type == "story" else False
+            )
+        else:
+            _grandfathered = await consume_grandfather(
+                session, org_id, entity_type, entity_id, from_status, to_status
+            )
+        if _grandfathered:
             return _plain()
 
         step = _match_step(config, from_status, to_status)
@@ -199,7 +215,7 @@ async def evaluate_line_for_transition(
                 to_status=to_status, status="blocked_by_policy", run_mode="blocked_by_policy",
                 routing_decision="block", routing_reason="static policy block",
                 routing_context=routing_context, trust_snapshot=trust_snapshot,
-                transition_id=transition_id, correlation_id=correlation_id,
+                transition_id=transition_id, correlation_id=correlation_id, dry_run=dry_run,
             )
             return LineDecision(
                 mode="blocked_by_policy", status_to_apply=None,
@@ -213,7 +229,7 @@ async def evaluate_line_for_transition(
                 session, org_id=org_id, project_id=project_id, definition=definition, step=step,
                 entity_type=entity_type, entity_id=entity_id, from_status=from_status,
                 to_status=to_status, routing_context=routing_context, trust_snapshot=trust_snapshot,
-                transition_id=transition_id, correlation_id=correlation_id,
+                transition_id=transition_id, correlation_id=correlation_id, dry_run=dry_run,
             )
 
         # shadow/advisory(+ S3 dormant enforcing) → step_run 기록 후 비차단.
@@ -224,7 +240,7 @@ async def evaluate_line_for_transition(
             routing_decision="would_" + str(step.get("step_type") or "advisory"),
             routing_reason=f"shadow/advisory record (mode={mode})",
             routing_context=routing_context, trust_snapshot=trust_snapshot,
-            transition_id=transition_id, correlation_id=correlation_id,
+            transition_id=transition_id, correlation_id=correlation_id, dry_run=dry_run,
         )
         # S7: enforcing agent-handoff step 은 status 적용 후 라우터가 relay(다음 actor dispatch).
         # shadow/advisory 모드는 관측만(relay 안 함). step_run 기록 실패(None)면 relay 대상 없음.
@@ -247,6 +263,7 @@ async def evaluate_line_for_transition(
                 to_status=to_status, status="engine_failed", run_mode="engine_failed",
                 failure_class=type(exc).__name__, failure_message=str(exc)[:500],
                 degraded_to_plain=True, transition_id=transition_id, correlation_id=correlation_id,
+                dry_run=dry_run,
             )
             step_run_id = sr.id if sr else None
         except Exception:  # noqa: BLE001 — 기록 실패도 무시(전이 우선).
@@ -262,9 +279,14 @@ async def _record_step_run(
     from_status, to_status, status, run_mode, transition_id, correlation_id,
     routing_decision=None, routing_reason=None, failure_class=None, failure_message=None,
     degraded_to_plain=False, routing_context=None, trust_snapshot=None,
-    gate_id=None, h1_gate_id=None, effective_gate_type=None,
+    gate_id=None, h1_gate_id=None, effective_gate_type=None, dry_run=False,
 ) -> WorkflowLineStepRun | None:
-    """step_run 기록. 호출자가 best-effort 로 감싼다(기록 실패도 전이 비차단)."""
+    """step_run 기록. 호출자가 best-effort 로 감싼다(기록 실패도 전이 비차단).
+
+    ⭐S29 dry_run=True 면 insert 0(write 스킵)·None 반환 — 호출부는 이미 None 을 step_run_id=None 로
+    처리(decision 의 mode/routing 은 sr 와 무관하게 호출부서 계산되므로 preview 정확성 유지)."""
+    if dry_run:
+        return None
     sr = WorkflowLineStepRun(
         org_id=org_id, project_id=project_id or org_id,  # project_id NN — org-level 라인은 org_id로 대체 표기
         line_definition_id=definition.id if definition is not None else None,
@@ -298,6 +320,7 @@ async def _record_step_run(
 async def _merge_gate_wrapper(
     session: AsyncSession, *, org_id, project_id, definition, step, entity_type, entity_id,
     from_status, to_status, routing_context, trust_snapshot, transition_id, correlation_id,
+    dry_run=False,
 ) -> LineDecision:
     """S5(P0-2): in-review→done merge-gate step = H1 merge gate 단일 통합.
 
@@ -306,6 +329,16 @@ async def _merge_gate_wrapper(
     로 재사용해 별도 line human-gate Gate 를 만들지 않는다(이중 pending 방지). H1 evidence metadata 는
     evaluate_merge_gate 가 gate row 에 write-back(유지). 예외는 바깥 try/except 가 engine_failed→plain.
     """
+    # ⭐S29 dry-run: evaluate_merge_gate 는 gate row 에 evidence write-back(side-effect)이라 preview 서
+    # 호출 금지. Phase-1 은 "이 전이가 merge-gate 에 걸린다"(gate 대상)까지만 미리보고, 정확 verdict
+    # (auto/block/human)는 미계산(CI/PR 동적 상태 의존). preview 는 거짓말 안 하므로 verdict 미상 명시.
+    if dry_run:
+        return LineDecision(
+            mode="gate_pending", status_to_apply=None,
+            blocking_reason="merge-gate (dry-run preview · 정확 verdict 미계산: CI/PR 동적 상태 의존)",
+            http_status=202,
+        )
+
     from app.services.merge_verdict_gate import AUTO_MERGE, BLOCK, evaluate_merge_gate
 
     decision = await evaluate_merge_gate(

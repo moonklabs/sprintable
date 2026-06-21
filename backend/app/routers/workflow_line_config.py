@@ -28,6 +28,8 @@ from app.services.workflow_line_config import (
     request_publish,
     transition_version,
 )
+from app.services.workflow_line_engine import evaluate_line_for_transition
+from app.services.workflow_line_resolver import resolve_routing_context
 
 router = APIRouter(prefix="/api/v2/workflow-line-config", tags=["workflow-line-config"])
 
@@ -230,3 +232,118 @@ async def retire_version(
     version = await transition_version(session, version, "retired")
     await session.commit()
     return VersionResponse.model_validate(version)
+
+
+class ResolvePreviewRequest(BaseModel):
+    entity_type: str
+    entity_id: uuid.UUID
+    from_status: str | None = None
+    to_status: str
+    actor_id: uuid.UUID | None = None
+    actor_type: str | None = None
+    project_id: uuid.UUID | None = None
+
+    @field_validator("entity_type")
+    @classmethod
+    def _valid_entity(cls, v: str) -> str:
+        if v not in ENTITY_TYPES:
+            raise ValueError(f"entity_type must be one of {sorted(ENTITY_TYPES)}")
+        return v
+
+
+# ⭐FE(유나) 3축 계약(cross-layer 사전정합): routing_path·gates·trust_branch.
+class PreviewStep(BaseModel):
+    from_status: str | None = None
+    to_status: str
+    route: str | None = None  # 이 전이가 거치는 라우팅 결정 라벨
+
+
+class PreviewGate(BaseModel):
+    gate_type: str | None = None      # human | policy | merge
+    target: str | None = None         # 게이트 대상 설명(blocking_reason)
+    gate_id: uuid.UUID | None = None
+
+
+class PreviewTrustBranch(BaseModel):
+    # ⚠️ null="데이터 없음(cold-start)" ≠ 0(실값) — FE 가 다르게 렌더하므로 null 보존(hypothesis_hit_rate).
+    trust: float | None = None
+    decision: str | None = None       # auto_merge | ask_human | block
+    cold_start: bool = False          # trust=null 사유(FE null≠0 렌더 보조)
+
+
+class ResolvePreviewResponse(BaseModel):
+    mode: str
+    proceeds: bool
+    blocking_reason: str | None = None
+    http_status: int | None = None
+    matched: bool  # 이 전이를 거버닝하는 published 라인 step 존재(mode != plain_transition)
+    routing_path: list[PreviewStep] = []   # ① 거치는 step 시퀀스(Phase-1=단일 전이)
+    gates: list[PreviewGate] = []          # ② 걸리는 게이트
+    trust_branch: PreviewTrustBranch       # ③ trust + decision
+    routing_context: dict[str, Any] = {}   # raw(디버그·완전성·additive)
+
+
+_MODE_TO_DECISION = {
+    "plain_transition": "auto_merge", "advisory_only": "auto_merge",
+    "engine_failed": "auto_merge", "gate_pending": "ask_human", "blocked_by_policy": "block",
+}
+_MODE_TO_GATE_TYPE = {"gate_pending": "human", "blocked_by_policy": "policy"}
+
+
+def _project_preview(decision, from_status, to_status, routing_context) -> "ResolvePreviewResponse":
+    """LineDecision + routing_context 를 FE 3축으로 투영(documented mapping·PO 요청)."""
+    trust = routing_context.get("trust") if isinstance(routing_context, dict) else {}
+    trust = trust if isinstance(trust, dict) else {}
+    matched = decision.mode != "plain_transition"
+    decision_label = _MODE_TO_DECISION.get(decision.mode)
+    routing_path = (
+        [PreviewStep(from_status=from_status, to_status=to_status, route=decision_label)]
+        if matched else []
+    )
+    gates = []
+    if decision.mode in _MODE_TO_GATE_TYPE:
+        gates.append(PreviewGate(
+            gate_type=_MODE_TO_GATE_TYPE[decision.mode],
+            target=decision.blocking_reason, gate_id=decision.gate_id,
+        ))
+    return ResolvePreviewResponse(
+        mode=decision.mode, proceeds=decision.proceeds,
+        blocking_reason=decision.blocking_reason, http_status=decision.http_status,
+        matched=matched, routing_path=routing_path, gates=gates,
+        trust_branch=PreviewTrustBranch(
+            trust=trust.get("hypothesis_hit_rate"),   # ⭐None=cold-start 보존(0점 금지)
+            decision=decision_label, cold_start=bool(trust.get("cold_start", False)),
+        ),
+        routing_context=routing_context if isinstance(routing_context, dict) else {},
+    )
+
+
+@router.post("/resolve-preview", response_model=ResolvePreviewResponse)
+async def resolve_preview(
+    body: ResolvePreviewRequest,
+    session: AsyncSession = Depends(get_db),
+    org_id: uuid.UUID = Depends(get_verified_org_id),
+    auth: AuthContext = Depends(get_current_user),
+) -> ResolvePreviewResponse:
+    """⭐S29 Phase-1: dry-run resolve-preview — 현 published 라인이 이 전이를 어떻게 라우팅/게이팅하는지
+    **실제 전이/write 없이** 미리보기(admin-only). evaluate_line_for_transition(dry_run=True)로 동일
+    결정 로직(preview≠real 드리프트 회피)·resolve_routing_context(side-effect-free)로 표시용 routing/
+    trust. candidate-config diff/what-if 는 S29-followup(PO Q1 published-only)."""
+    actor = uuid.UUID(auth.user_id)
+    # Q4: canonical project_auth admin gate(ad-hoc role 쿼리 금지·S27 교훈) — 라인 config 편집권과 동일.
+    await _require_draft_author(session, actor, org_id, body.project_id)
+
+    decision = await evaluate_line_for_transition(
+        session, org_id=org_id, project_id=body.project_id,
+        entity_type=body.entity_type, entity_id=body.entity_id,
+        from_status=body.from_status, to_status=body.to_status,
+        actor_id=body.actor_id, actor_type=body.actor_type, dry_run=True,
+    )
+    # 표시용 routing/trust: 엔진이 쓰는 동일 함수(side-effect-free) 재사용 → preview 와 real 일치.
+    routing_context = await resolve_routing_context(
+        session, org_id, entity_type=body.entity_type, entity_id=body.entity_id,
+        actor_member_id=body.actor_id, actor_type=body.actor_type,
+    )
+    # ⭐dry-run write-0 보장(QA 집중 항목): 평가 경로는 write 0 이지만 잔여 0 을 명시적으로 rollback.
+    await session.rollback()
+    return _project_preview(decision, body.from_status, body.to_status, routing_context)
