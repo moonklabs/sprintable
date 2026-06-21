@@ -76,7 +76,7 @@ export function WorkflowLineEditorSection({ projectId }: { projectId?: string | 
   const [versions, setVersions] = useState<VersionItem[]>([]);
   const [draftId, setDraftId] = useState<string | null>(null);
   const [configText, setConfigText] = useState('');
-  const [lint, setLint] = useState<{ status: string; errors: { message?: string }[] } | null>(null);
+  const [lint, setLint] = useState<{ lint_status: string; errors: { message?: string }[] } | null>(null);
   const [activeSteps, setActiveSteps] = useState<Step[]>([]);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -151,7 +151,7 @@ export function WorkflowLineEditorSection({ projectId }: { projectId?: string | 
     setBusy(true);
     try {
       const r = await fetch(`/api/workflow-line-config/versions/${draftId}/lint`, { method: 'POST' });
-      setLint(r.ok ? ((await r.json()) as { status: string; errors: { message?: string }[] }) : null);
+      setLint(r.ok ? ((await r.json()) as { lint_status: string; errors: { message?: string }[] }) : null);
     } finally { setBusy(false); }
   };
 
@@ -232,8 +232,8 @@ export function WorkflowLineEditorSection({ projectId }: { projectId?: string | 
               />
               {lint ? (
                 <div className="space-y-1">
-                  <Badge variant={lint.status === 'passed' ? 'success' : 'destructive'}>
-                    {lint.status === 'passed' ? t('lineEditorLintPass') : t('lineEditorLintFail')}
+                  <Badge variant={lint.lint_status === 'passed' ? 'success' : 'destructive'}>
+                    {lint.lint_status === 'passed' ? t('lineEditorLintPass') : t('lineEditorLintFail')}
                   </Badge>
                   {lint.errors?.length ? (
                     <ul className="space-y-0.5">
