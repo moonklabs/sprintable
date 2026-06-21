@@ -239,3 +239,17 @@ async def test_list_doc_revisions_in_org_200():
         assert resp.json()[0]["content"] == "v1 body"
     finally:
         app.dependency_overrides.clear()
+
+
+@pytest.mark.anyio
+async def test_list_doc_comments_cross_org_404():
+    """⚠️S28 보안(까심 RC twin): 다른 org doc 의 comments 요청 → org-scoped repo.get None → 404.
+    revisions 와 동형 IDOR(comments 는 이미 populated 라 active 노출이었음·같이 봉인)."""
+    client, session, app = await _client()
+    try:
+        with patch("app.repositories.base.BaseRepository.get", AsyncMock(return_value=None)):
+            async with client as c:
+                resp = await c.get(f"/api/v2/docs/{DOC_ID}/comments")
+        assert resp.status_code == 404
+    finally:
+        app.dependency_overrides.clear()
