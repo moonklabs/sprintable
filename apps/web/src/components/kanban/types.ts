@@ -35,6 +35,10 @@ export interface GateItem {
   resolved_at: string | null;
   resolution_note: string | null;
   held_until?: string | null; // E-DG S31: 보류(hold) 만료(무기한=null·시한부=ISO). 디디 BE 병렬·additive.
+  // E-DG S33: owner 결재 강제(override) 메타(gate_overridden 이벤트 enrich·S32 reassign 패턴 동형). 디디 BE #1645 design-first·additive·머지 후 정합.
+  overridden_by_member_id?: string | null;
+  overridden_at?: string | null;
+  bypassed_sod?: boolean | null;
   neutral_facts: Record<string, unknown> | null;
   // H1-S3 머지 verdict 게이트 evidence(GateResponse·additive·하위호환 default). null≠0(AC③).
   requires_human?: boolean;
