@@ -180,13 +180,13 @@ async def list_file_locks(
     locks = result.scalars().all()
     return [
         {
-            "id": str(l.id),
-            "member_id": str(l.member_id),
-            "story_id": str(l.story_id) if l.story_id else None,
-            "file_path": l.file_path,
-            "locked_at": l.locked_at.isoformat(),
+            "id": str(lock.id),
+            "member_id": str(lock.member_id),
+            "story_id": str(lock.story_id) if lock.story_id else None,
+            "file_path": lock.file_path,
+            "locked_at": lock.locked_at.isoformat(),
         }
-        for l in locks
+        for lock in locks
     ]
 
 

@@ -46,15 +46,21 @@ class GateCreateRequest(BaseModel):
 
 class GateTransitionRequest(BaseModel):
     status: str
-    resolver_id: uuid.UUID | None = None
+    resolver_id: uuid.UUID | None = None  # ⚠️RC#1: 무시됨(서버가 인증 caller 로 강제)·하위호환 잔류.
     note: str | None = None
 
     @field_validator("status")
     @classmethod
     def validate_status(cls, v: str) -> str:
-        from app.models.gate import GATE_STATUSES
-        if v not in GATE_STATUSES:
-            raise ValueError(f"status must be one of {sorted(GATE_STATUSES)}")
+        # ⭐RC#1(body-trust 봉인): generic transition 은 **사람 결재(approved/rejected)만** 허용.
+        # voided/held/pending(S30/S31)은 전용 엔드포인트(/void·/hold·/unhold)로만 — 그쪽이 admin
+        # 게이트(_require_gate_admin)+actor 강제+side-effect 를 보유. generic 으로 보내면 그 가드
+        # 3중 우회(비-admin voided/held·voider/holder body-trust·step_run 미해소)되므로 차단.
+        if v not in _HUMAN_REVIEW_STATUSES:
+            raise ValueError(
+                f"generic transition 은 {sorted(_HUMAN_REVIEW_STATUSES)} 만 허용합니다. "
+                "voided/held/unhold 는 전용 엔드포인트(/void·/hold·/unhold)를 사용하세요."
+            )
         return v
 
 
@@ -133,17 +139,16 @@ async def transition_gate_endpoint(
     # authz(93fc7aeb): 게이트 approve/reject는 **휴먼 member만**. 에이전트(API key)가 사람 검증
     # 게이트를 승인하면 "agent-assisted·human-validated" 웨지 전제가 무너지므로 차단(403).
     # 시스템 auto-resolution(resolve_gate_from_verdict)은 transition_gate 서비스 직호출이라 무영향.
-    _resolver_id = body.resolver_id
-    if body.status in _HUMAN_REVIEW_STATUSES:
-        resolved = await resolve_member(auth, org_id, session)
-        if resolved.type != "human":
-            raise HTTPException(
-                status_code=403,
-                detail="게이트 승인/거부는 휴먼 멤버만 가능합니다 (에이전트 승인 불가).",
-            )
-        # ⭐S23 RC①(SoD 위조 봉): resolver_id 를 인증 caller 로 강제 — body 조작(타인 UUID)으로
-        # SoD(approver≠owner) 우회·confirmed_by_member_id 위조하는 경로 차단(전 gate 타입 공통).
-        _resolver_id = resolved.id
+    # ⭐RC#1: status 는 validator 가 approved/rejected 로 제한 → 도달하는 전이는 전부 사람 결재.
+    resolved = await resolve_member(auth, org_id, session)
+    if resolved.type != "human":
+        raise HTTPException(
+            status_code=403,
+            detail="게이트 승인/거부는 휴먼 멤버만 가능합니다 (에이전트 승인 불가).",
+        )
+    # ⭐S23 RC① + RC#1(방어심층): resolver_id 를 **전 status 무조건 인증 caller 로 강제**(body 무시).
+    # body 조작(타인 UUID)으로 SoD(approver≠owner) 우회·confirmed_by_member_id 위조 차단.
+    _resolver_id = resolved.id
     try:
         gate = await transition_gate(session, org_id, id, body.status, _resolver_id, body.note)
         await session.commit()

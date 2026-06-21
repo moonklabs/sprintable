@@ -92,8 +92,16 @@ async def test_create_doc_201():
     client, session, app = await _client()
     try:
         doc = _mock_doc()
-        with patch("app.repositories.base.BaseRepository.create", new_callable=AsyncMock) as mock_create:
+        # RC#1: create_doc 가 created_by 를 인증 caller(_resolve_doc_member_id)로 강제하므로 mock-session
+        # 테스트에선 멤버 해소를 patch(실 DB 쿼리 우회). body.created_by 위조 차단은 별도 단위테스트서 검증.
+        with patch("app.repositories.base.BaseRepository.create", new_callable=AsyncMock) as mock_create, \
+             patch("app.routers.docs._resolve_doc_member_id",
+                   new_callable=AsyncMock) as mock_resolve, \
+             patch("app.routers.docs.canonicalize_member_id",
+                   new_callable=AsyncMock) as mock_canon:
             mock_create.return_value = doc
+            mock_resolve.return_value = doc.created_by
+            mock_canon.return_value = doc.created_by
 
             async with client as c:
                 resp = await c.post("/api/v2/docs", json={
