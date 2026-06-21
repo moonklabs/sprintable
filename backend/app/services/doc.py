@@ -11,7 +11,7 @@ import uuid
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.models.doc import Doc, DOC_STATUSES, is_valid_doc_transition
+from app.models.doc import Doc, DOC_STATUSES, DocRevision, is_valid_doc_transition
 from app.services.member_resolver import ResolvedMember
 
 
@@ -70,6 +70,15 @@ async def transition_doc(
     # confirm 확정은 휴먼만(콘텐츠 승인=human-validated). agent 직접 confirm 차단.
     if to_status == "confirmed" and caller.type != "human":
         raise DocTransitionError("HUMAN_CONFIRM_REQUIRED", "confirmed 전이는 휴먼만 가능합니다.")
+
+    # ⭐E-DG S28: denied→draft(재상신 위한 revise) 시 직전(denied) 버전 content 를 DocRevision 에 스냅샷.
+    # 안A — doc.id/slug stable 유지하고 버전 이력은 DocRevision 타임라인(mockup v1→v2 데이터소스)으로.
+    # 저자가 이후 content 를 덮어쓰기 전에 반려본을 보존한다(재상신 사이클마다 1 revision).
+    if to_status == "draft" and doc.status == "denied":
+        session.add(DocRevision(
+            doc_id=doc.id, project_id=doc.project_id, org_id=org_id,
+            content=doc.content, created_by=caller.id,
+        ))
 
     doc.status = to_status
     await session.flush()

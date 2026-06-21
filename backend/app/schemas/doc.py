@@ -70,6 +70,9 @@ class DocResponse(BaseModel):
     assignee_id: uuid.UUID | None = None
     # E-DG S22: doc decision status(doc-specific lifecycle·work status 아님). 기본 draft.
     status: str = "draft"
+    # E-DG S28: cross-doc 대체 포인터(이 doc 을 대체한 후속 doc·없으면 None). additive read·재상신
+    # 체인엔 안 씀(버전 이력=DocRevision 타임라인). nullable 하위호환.
+    superseded_by: uuid.UUID | None = None
     title: str
     slug: str
     canonical_slug: str

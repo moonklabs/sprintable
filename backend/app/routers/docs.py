@@ -469,10 +469,17 @@ async def list_doc_comments(
     id: uuid.UUID,
     limit: int = Query(default=20, le=100),
     db: AsyncSession = Depends(get_db),
-    _repo: DocRepository = Depends(_get_repo),
+    repo: DocRepository = Depends(_get_repo),
 ) -> list[DocCommentResponse]:
+    # ⚠️S28 보안(까심 RC twin·revisions 동형 IDOR): doc 이 caller org 소속인지 org-scoped repo 로 검증.
+    # ⭐comments 는 revisions(S28 전 잠복)와 달리 이미 populated 라 active cross-org 노출이었다(pre-
+    # existing·revisions 고치며 surface sweep 서 적출·같이 봉인). org_id 가드(방어 심층).
+    doc = await repo.get(id)
+    if doc is None:
+        raise HTTPException(status_code=404, detail="Doc not found")
     q = select(DocComment).where(
         DocComment.doc_id == id,
+        DocComment.org_id == repo.org_id,
     ).order_by(DocComment.created_at.asc()).limit(limit)
     result = await db.execute(q)
     return [DocCommentResponse.model_validate(r) for r in result.scalars()]
@@ -513,10 +520,17 @@ async def list_doc_revisions(
     id: uuid.UUID,
     limit: int = Query(default=50, le=100),
     db: AsyncSession = Depends(get_db),
-    _repo: DocRepository = Depends(_get_repo),
+    repo: DocRepository = Depends(_get_repo),
 ) -> list[DocRevisionResponse]:
+    # ⚠️S28 보안(까심 RC·cross-org IDOR): doc 이 caller org 소속인지 org-scoped repo 로 먼저 검증.
+    # 안 하면 다른 org 가 doc UUID 추측만으로 revision content 를 읽는다(S28 전엔 revision 미배선이라
+    # 빈 응답 잠복·재상신 스냅샷 배선으로 활성화). revision 쿼리에도 org_id 가드(방어 심층).
+    doc = await repo.get(id)
+    if doc is None:
+        raise HTTPException(status_code=404, detail="Doc not found")
     q = select(DocRevision).where(
         DocRevision.doc_id == id,
+        DocRevision.org_id == repo.org_id,
     ).order_by(DocRevision.created_at.desc()).limit(limit)
     result = await db.execute(q)
     return [DocRevisionResponse.model_validate(r) for r in result.scalars()]

@@ -20,6 +20,7 @@ def _mock_doc() -> MagicMock:
     d.created_by = None
     d.assignee_id = None
     d.status = "draft"  # E-DG S22: 신규 status 필드(MagicMock→DocResponse 검증 실패 방지)
+    d.superseded_by = None  # E-DG S28: 신규 superseded_by(동일 패턴·MagicMock None 명시)
     d.title = "Getting Started"
     d.slug = "getting-started"
     d.canonical_slug = "getting-started"  # 4dd399c6: property on real Doc; mock 명시 필수
@@ -196,5 +197,59 @@ async def test_list_docs_with_parent_id_200():
             resp = await c.get(f"/api/v2/docs?project_id={PROJECT_ID}&parent_id={DOC_ID}")
 
         assert resp.status_code == 200
+    finally:
+        app.dependency_overrides.clear()
+
+
+@pytest.mark.anyio
+async def test_list_doc_revisions_cross_org_404():
+    """⚠️S28 보안(까심 RC·cross-org IDOR): 다른 org doc 의 revisions 요청 → org-scoped repo.get None →
+    404. revision content 무노출(S28 스냅샷 배선으로 활성화된 누출 봉인)."""
+    client, session, app = await _client()
+    try:
+        # org-scoped repo.get 이 None(이 org 소속 아님) → 404·revision 쿼리 미실행.
+        with patch("app.repositories.base.BaseRepository.get", AsyncMock(return_value=None)):
+            async with client as c:
+                resp = await c.get(f"/api/v2/docs/{DOC_ID}/revisions")
+        assert resp.status_code == 404
+    finally:
+        app.dependency_overrides.clear()
+
+
+@pytest.mark.anyio
+async def test_list_doc_revisions_in_org_200():
+    """org 소속 doc 은 revisions 정상 반환(org_id 가드 통과)."""
+    client, session, app = await _client()
+    try:
+        rev = MagicMock()
+        rev.id = uuid.uuid4()
+        rev.doc_id = DOC_ID
+        rev.org_id = ORG_ID
+        rev.project_id = PROJECT_ID
+        rev.content = "v1 body"
+        rev.created_by = None
+        rev.created_at = datetime(2026, 5, 1, tzinfo=timezone.utc)
+        rev_result = MagicMock()
+        rev_result.scalars.return_value = [rev]
+        session.execute = AsyncMock(return_value=rev_result)
+        with patch("app.repositories.base.BaseRepository.get", AsyncMock(return_value=_mock_doc())):
+            async with client as c:
+                resp = await c.get(f"/api/v2/docs/{DOC_ID}/revisions")
+        assert resp.status_code == 200
+        assert resp.json()[0]["content"] == "v1 body"
+    finally:
+        app.dependency_overrides.clear()
+
+
+@pytest.mark.anyio
+async def test_list_doc_comments_cross_org_404():
+    """⚠️S28 보안(까심 RC twin): 다른 org doc 의 comments 요청 → org-scoped repo.get None → 404.
+    revisions 와 동형 IDOR(comments 는 이미 populated 라 active 노출이었음·같이 봉인)."""
+    client, session, app = await _client()
+    try:
+        with patch("app.repositories.base.BaseRepository.get", AsyncMock(return_value=None)):
+            async with client as c:
+                resp = await c.get(f"/api/v2/docs/{DOC_ID}/comments")
+        assert resp.status_code == 404
     finally:
         app.dependency_overrides.clear()
