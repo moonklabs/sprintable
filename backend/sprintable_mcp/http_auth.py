@@ -7,12 +7,17 @@
 """
 from __future__ import annotations
 
+import logging
+
 from .api_client import (
+    client,
     reset_api_key_override,
     reset_project_override,
     set_api_key_override,
     set_project_override,
 )
+
+logger = logging.getLogger(__name__)
 
 _UNAUTHORIZED_BODY = (
     b'{"error":{"code":"unauthorized",'
@@ -72,6 +77,13 @@ def bearer_auth_asgi(app):
         ktok = set_api_key_override(key)
         ptok = set_project_override(project_id)
         try:
+            # ee2f4e58: 이 키의 default 컨텍스트(member/org/project)를 1회 해소·캐시 →
+            # 명시 project_id 없는 툴 호출도 키 default 로 해소(stdio parity·422 제거).
+            # additive·non-fatal: 해소 실패해도 인증 흐름은 진행(백엔드가 401/422 로 자연 처리).
+            try:
+                await client.ensure_auth_context(key)
+            except Exception as exc:  # noqa: BLE001
+                logger.warning("ensure_auth_context 실패(non-fatal): %s", exc)
             await app(scope, receive, send)
         finally:
             reset_api_key_override(ktok)
