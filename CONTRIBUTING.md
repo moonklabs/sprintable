@@ -33,6 +33,31 @@ pnpm build         # Production build
    - Screenshots for UI changes
 4. **Review**: At least one approval required before merge
 
+## Linking PRs to Stories (gate CI evidence)
+
+Sprintable's approval gates record **real** CI/merge outcomes (not self-report) by
+auto-linking each PR to its story. A GitHub webhook parses a **story id tag** from the
+PR and feeds the CI/merge verdict into that story's gate. **Without the tag the gate
+stays `unknown (self-report only)`** — the verdict is silently skipped.
+
+Tag every story-backed PR in **both** places:
+
+1. **Branch name** — include a `sid-<full-story-uuid>` segment, e.g.
+   `feat/sid-14744174-35d3-452c-9594-386fc2c3b0ef-gate-ci-linking`.
+   This is **required for CI evidence**: CI webhook events (`workflow_run`,
+   `check_suite`, `status`) carry only the branch name — not the PR title/body — so the
+   branch is the only reliable carrier for the *CI* verdict.
+2. **PR body** — include `[SID:<full-story-uuid>]` (the PR template has a placeholder).
+   This covers the *merge* verdict and makes the link visible to reviewers.
+
+Notes:
+- Use the **full 36-character story UUID**, not the short 8-char id (the parser requires
+  the full UUID). Resolve it from the story in Sprintable.
+- The tag is matched by `app/services/verdict_capture.py` (`_SID_RE`):
+  `[SID:<uuid>]` (title/body) or `sid-<uuid>` / `sid/<uuid>` (branch).
+- **Non-blocking**: a missing tag does not block merge — CI emits a warning and the
+  gate simply stays `unknown`. Untagged PRs are handled gracefully (skipped).
+
 ## Code Style
 
 - **TypeScript strict mode** — no `any` unless absolutely necessary
