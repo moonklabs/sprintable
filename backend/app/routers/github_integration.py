@@ -23,6 +23,7 @@ from app.dependencies.auth import AuthContext, get_current_user, get_verified_or
 from app.dependencies.database import get_db
 from app.models.github_installation import GithubInstallation, GithubInstallNonce
 from app.models.pm import Story
+from app.models.pull_request_story_link import PullRequestStoryLink
 from app.services.github_app import (
     fetch_installation_metadata,
     sign_install_state,
@@ -215,3 +216,72 @@ async def create_explicit_link(
             "confidence": "high",
         }
     )
+
+
+def _link_view(link: PullRequestStoryLink) -> dict:
+    return {
+        "id": str(link.id),
+        "repo_full_name": link.repo_full_name,
+        "pr_number": link.pr_number,
+        "link_source": link.link_source,
+        "confidence": link.confidence,
+        "evidence": link.evidence,
+        "created_at": link.created_at.isoformat() if link.created_at else None,
+    }
+
+
+@router.get("/links")
+async def list_links(
+    story_id: uuid.UUID = Query(...),
+    org_id: uuid.UUID = Depends(get_verified_org_id),
+    _auth: AuthContext = Depends(get_current_user),
+    session: AsyncSession = Depends(get_db),
+) -> JSONResponse:
+    """story 의 PR↔story 링크 목록(Bot-L.2 UI '연결 PR 표시'). org-scope·story 선검증(anti-IDOR).
+    타 org/부재 story = generic 404(존재 oracle 0). 링크는 org+story+미삭제만 반환."""
+    story = (
+        await session.execute(
+            select(Story).where(
+                Story.id == story_id, Story.org_id == org_id, Story.deleted_at.is_(None)
+            )
+        )
+    ).scalar_one_or_none()
+    if story is None:
+        return JSONResponse(status_code=404, content={"error": "story_not_found"})
+    links = (
+        await session.execute(
+            select(PullRequestStoryLink)
+            .where(
+                PullRequestStoryLink.org_id == org_id,
+                PullRequestStoryLink.story_id == story_id,
+                PullRequestStoryLink.deleted_at.is_(None),
+            )
+            .order_by(PullRequestStoryLink.created_at.desc())
+        )
+    ).scalars().all()
+    return JSONResponse(content={"links": [_link_view(link) for link in links]})
+
+
+@router.delete("/links/{link_id}")
+async def delete_link(
+    link_id: uuid.UUID,
+    org_id: uuid.UUID = Depends(get_verified_org_id),
+    _auth: AuthContext = Depends(get_current_user),
+    session: AsyncSession = Depends(get_db),
+) -> JSONResponse:
+    """PR↔story 링크 해제(Bot-L.2 UI '해제'·soft-delete). ⭐anti-IDOR: `link.id AND org_id` — 타 org/부재/
+    이미 삭제는 generic 404(존재 oracle 0). soft-delete(deleted_at) 라 close-on-merge resolver 에서 즉시 제외."""
+    link = (
+        await session.execute(
+            select(PullRequestStoryLink).where(
+                PullRequestStoryLink.id == link_id,
+                PullRequestStoryLink.org_id == org_id,
+                PullRequestStoryLink.deleted_at.is_(None),
+            )
+        )
+    ).scalar_one_or_none()
+    if link is None:
+        return JSONResponse(status_code=404, content={"error": "link_not_found"})
+    link.deleted_at = datetime.now(timezone.utc)
+    await session.commit()
+    return JSONResponse(content={"deleted": True, "id": str(link_id)})
