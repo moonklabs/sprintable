@@ -21,6 +21,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.config import settings
 from app.models.participation import ParticipationRole
+from app.services.gate_resolver import resolve_disposition
 from app.services.gate_service import create_gate
 from app.services.trust_score import compute_member_trust_scores
 from app.services.verdict_capture import (
@@ -250,6 +251,30 @@ async def evaluate_merge_gate(
     member_id = participation.member_id
     role_id = participation.role_id
     role_key = await _role_key(session, role_id)
+
+    # P0(E-DG-REAL 1ff89d23): evidence-driven materialization — 빈 'CI unknown' shell 양산 박멸.
+    # 게이트는 **실 신호(CI 결과 · 연결 PR · 명시 deny 정책)**가 있을 때만 만든다. CI/PR 증거가
+    # 둘 다 없을 때만 정책을 확인하고, deny가 아니면(ask=시스템 기본이라 그 자체론 신호 아님) 사람이
+    # 판단할 게 없는 빈 shell이 되므로 **게이트를 만들지 않는다**(no-gate·row 0·done 통과). 실 CI
+    # 증거는 GitHub 앱(S5)이 native 당김. 3 트리거(board preflight·report-done·line-engine) 모두
+    # 이 단일 chokepoint를 거쳐 일관 적용. (증거 있으면 resolve_disposition 호출조차 생략.)
+    if ci is None and pr_number <= 0:
+        disposition = await resolve_disposition(session, org_id, member_id, role_id, MERGE_GATE_TYPE)
+        if disposition != "deny":
+            logger.info(
+                "merge gate: no substance (ci=None pr_number=0 disposition=%s) story=%s "
+                "— gate not materialized (no-gate)",
+                disposition, story_id,
+            )
+            return MergeGateDecision(
+                decision=AUTO_MERGE,
+                reason="no-substance: no CI/PR evidence and policy is not deny — gate not materialized",
+                gate_id=None,
+                gate_status=None,
+                disposition=disposition,
+                trust=None,
+                ci_result=ci,
+            )
 
     # 1. trust(Cage) — implementation 역할 clean_pass_rate. **capture보다 먼저** 계산한다.
     #    ⚠️ capture_pr_ci_verdict는 현재 PR/CI verdict를 session에 add한다. SQLAlchemy autoflush=True

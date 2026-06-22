@@ -442,3 +442,73 @@ async def test_strong_outcome_track_record_auto_merges_real_db():
         async with engine.begin() as conn:
             await conn.run_sync(Base.metadata.drop_all)
         await engine.dispose()
+
+
+# ── P0 (E-DG-REAL 1ff89d23): evidence-driven materialization (빈 shell 박멸) ──────
+import contextlib  # noqa: E402
+
+
+async def _run_substance(*, ci_result, pr_number, disposition):
+    """substance 가드 경로 — participation 있음, disposition 주입, create_gate spy 반환."""
+    part = SimpleNamespace(member_id=uuid.uuid4(), role_id=uuid.uuid4())
+    gate = SimpleNamespace(id=uuid.uuid4(), status="pending")
+    with contextlib.ExitStack() as stack:
+        stack.enter_context(patch.object(mod, "resolve_implementation_participation",
+                                         AsyncMock(return_value=part)))
+        stack.enter_context(patch.object(mod, "_role_key", AsyncMock(return_value="implementation")))
+        stack.enter_context(patch.object(mod, "resolve_disposition",
+                                         AsyncMock(return_value=disposition)))
+        stack.enter_context(patch.object(mod, "capture_pr_ci_verdict",
+                                         AsyncMock(return_value={"recorded": [], "skipped_reason": "no_sid_tag"})))
+        stack.enter_context(patch.object(mod, "compute_member_trust_scores",
+                                         AsyncMock(return_value={"scores": []})))
+        create_spy = stack.enter_context(patch.object(mod, "create_gate", AsyncMock(return_value=gate)))
+        res = await evaluate_merge_gate(
+            AsyncMock(), uuid.uuid4(), uuid.uuid4(),
+            pr_number=pr_number, repo=("o/r" if pr_number else ""),
+            ci_result=ci_result, pr_result=None,
+        )
+    return res, create_spy
+
+
+@pytest.mark.anyio
+async def test_no_substance_no_gate_materialized():
+    """무증거(ci None·pr 0·정책 ask) → 게이트 미생성·no-gate(AUTO_MERGE)·row 0."""
+    res, create_spy = await _run_substance(ci_result=None, pr_number=0, disposition="ask")
+    assert res.decision == AUTO_MERGE
+    assert res.gate_id is None
+    assert "no-substance" in res.reason
+    create_spy.assert_not_awaited()  # 빈 shell 안 만든다.
+
+
+@pytest.mark.anyio
+async def test_no_substance_allow_auto_also_no_gate():
+    """무증거 + 정책 allow_auto → 동일하게 no-gate(done 통과·row 0)."""
+    res, create_spy = await _run_substance(ci_result=None, pr_number=0, disposition="allow_auto")
+    assert res.decision == AUTO_MERGE and res.gate_id is None
+    create_spy.assert_not_awaited()
+
+
+@pytest.mark.anyio
+async def test_ci_result_present_materializes_gate():
+    """CI 결과 있음(green/red) → substance → 게이트 생성(기존 동작 보존)."""
+    res, create_spy = await _run_substance(ci_result="fail", pr_number=0, disposition="ask")
+    assert res.gate_id is not None
+    assert res.decision == BLOCK  # red CI 하드블록(무회귀).
+    create_spy.assert_awaited_once()
+
+
+@pytest.mark.anyio
+async def test_connected_pr_materializes_gate():
+    """연결 PR(pr_number>0) → substance → 게이트 생성(증거 평가 대상)."""
+    res, create_spy = await _run_substance(ci_result=None, pr_number=7, disposition="ask")
+    assert res.gate_id is not None
+    create_spy.assert_awaited_once()
+
+
+@pytest.mark.anyio
+async def test_deny_policy_materializes_even_without_evidence():
+    """명시 deny 정책 → 증거 없어도 게이트 생성(하드블록 honor)."""
+    res, create_spy = await _run_substance(ci_result=None, pr_number=0, disposition="deny")
+    assert res.gate_id is not None
+    create_spy.assert_awaited_once()
