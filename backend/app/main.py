@@ -19,7 +19,10 @@ _logger = logging.getLogger(__name__)
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     from app.core.database import engine
+    from app.routers.verdict_capture import warn_if_webhook_secret_misconfigured
     from app.services.pg_pubsub import listen_loop
+
+    warn_if_webhook_secret_misconfigured()  # Bot-M.2 P3: 웹훅 secret misconfig 를 트래픽 前 경고.
     task = asyncio.create_task(listen_loop())
     # E-L2 S5: 휴리스틱 트리거 워커는 default-off — 명시 활성화 시에만 task 생성(AC①).
     l2_task = None

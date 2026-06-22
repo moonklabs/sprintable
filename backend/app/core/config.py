@@ -122,6 +122,9 @@ class Settings(BaseSettings):
     github_app_private_key: str = ""         # PEM. dev/local fallback only — prod 는 Secret Manager
     github_app_private_key_secret: str = ""  # Secret Manager resource name (prod 우선 소스)
     github_app_state_secret: str = ""        # 설치 callback state(CSRF+org+nonce+TTL) 서명 키
+    # Bot-M.2: App 웹훅 HMAC 시크릿(legacy github_webhook_secret 과 분리). 미설정=app-source inert.
+    # github_webhook_secret 과 동일값(misconfig)이면 app inert + startup warning(legacy 무회귀 보존).
+    github_app_webhook_secret: str = ""
 
     # S-COMM-07: 에이전트 inbox webhook HMAC 검증 시크릿
     agent_inbox_webhook_secret: str = ""
