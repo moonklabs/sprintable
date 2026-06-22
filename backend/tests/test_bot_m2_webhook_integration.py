@@ -2,8 +2,9 @@
 
 커버: HMAC-before-parse(invalid sig→parse/DB/capture 0) · dual-secret source(검증된 secret로만·payload
 금지) · app sig로 legacy spoof 불가 · equal-secret misconfig→app inert+legacy 보존 · no-delivery-id reject
-· dedup (source,delivery_id) 중복→2xx no-op + 세션 clean · 처리 실패→rollback(retry 보존) · app
-installation→org resolve 後 org-scope(anti-IDOR) · 미등록/suspended→graceful ignore · cross-org story 거부.
+· dedup (source,delivery_id) 중복→2xx no-op + 세션 clean · 처리 실패→rollback(retry 보존) · **app=
+installation→org resolve 先 → story org-scoped 조회**(anti-IDOR 순서·타 org SID 미매치·존재 oracle 0) ·
+미등록/suspended→graceful ignore.
 """
 from __future__ import annotations
 
@@ -41,18 +42,21 @@ def _sign(body: bytes, secret: str) -> str:
     return "sha256=" + hmac.new(secret.encode(), body, hashlib.sha256).hexdigest()
 
 
-def _mk_session(*, story=..., installation=..., flush_error=False):
-    """execute side_effect=[story, installation, ...]·add sync·flush(옵션 IntegrityError)."""
+def _result(val):
+    r = MagicMock()
+    r.scalar_one_or_none.return_value = val
+    return r
+
+
+def _mk_session(execute_results=(), *, flush_error=False):
+    """execute 는 호출 순서대로 execute_results 의 scalar 값 반환(여분은 None). add sync·flush 옵션 IntegrityError."""
     session = AsyncMock()
     session.add = MagicMock()
-    story_res = MagicMock()
-    story_res.scalar_one_or_none.return_value = (
-        MagicMock(org_id=ORG_A) if story is ... else story
+    seq = [_result(v) for v in execute_results] + [_result(None) for _ in range(4)]
+    session.execute = AsyncMock(side_effect=seq)
+    session.flush = AsyncMock(
+        side_effect=IntegrityError("dup", {}, Exception()) if flush_error else None
     )
-    inst_res = MagicMock()
-    inst_res.scalar_one_or_none.return_value = (None if installation is ... else installation)
-    session.execute = AsyncMock(side_effect=[story_res, inst_res, inst_res, inst_res])
-    session.flush = AsyncMock(side_effect=IntegrityError("dup", {}, Exception()) if flush_error else None)
     session.commit = AsyncMock()
     session.rollback = AsyncMock()
     return session
@@ -89,6 +93,7 @@ async def _post(payload, *, event="workflow_run", delivery="dlv-1", sign_secret=
 
 
 def _wf(sid=STORY_ID, installation_id=555):
+    """workflow_run failure(ci=failure → actionable·native CI 블록 skip → capture 직행)."""
     return {
         "installation": {"id": installation_id},
         "repository": {"full_name": "moonklabs/sprintable"},
@@ -97,10 +102,18 @@ def _wf(sid=STORY_ID, installation_id=555):
     }
 
 
+def _story(org_id=ORG_A):
+    return MagicMock(org_id=org_id)
+
+
+def _inst(org_id=ORG_A, installation_id=555):
+    return MagicMock(org_id=org_id, installation_id=installation_id, suspended_at=None)
+
+
 # ── HMAC-before-parse ───────────────────────────────────────────────────────────
 @pytest.mark.anyio
 async def test_invalid_sig_401_no_side_effect():
-    session = _mk_session()
+    session = _mk_session([_story()])
     resp, session, cap = await _post(_wf(), bad_sig=True, session=session)
     assert resp.status_code == 401
     session.add.assert_not_called()       # DB insert 0.
@@ -136,9 +149,8 @@ async def test_malformed_json_with_invalid_sig_401_not_parse_error():
 # ── dual-secret source 결정 ──────────────────────────────────────────────────────
 @pytest.mark.anyio
 async def test_app_source_routed_by_app_secret():
-    """app secret로 서명 → source=app → installation resolve(org_a) → capture(org_a)."""
-    inst = MagicMock(org_id=ORG_A, installation_id=555, suspended_at=None)
-    session = _mk_session(story=MagicMock(org_id=ORG_A), installation=inst)
+    """app secret 서명 → source=app → installation resolve(org_a) 先 → org-scoped story → capture(org_a)."""
+    session = _mk_session([_inst(ORG_A), _story(ORG_A)])  # execute: installation→story 순.
     resp, session, cap = await _post(_wf(), sign_secret=APP_SECRET, session=session)
     assert resp.status_code == 200
     cap.assert_awaited_once()
@@ -147,8 +159,8 @@ async def test_app_source_routed_by_app_secret():
 
 @pytest.mark.anyio
 async def test_legacy_source_routed_by_legacy_secret():
-    """legacy secret로 서명 → source=legacy → story.org_id로 capture(installation 불요)."""
-    session = _mk_session(story=MagicMock(org_id=ORG_A))
+    """legacy secret 서명 → source=legacy → story.org_id로 capture(installation 불요)."""
+    session = _mk_session([_story(ORG_A)])
     resp, session, cap = await _post(_wf(), sign_secret=LEGACY_SECRET, session=session)
     assert resp.status_code == 200
     cap.assert_awaited_once()
@@ -157,12 +169,13 @@ async def test_legacy_source_routed_by_legacy_secret():
 
 @pytest.mark.anyio
 async def test_app_sig_cannot_spoof_legacy():
-    """app secret 서명 payload는 legacy로 분류 안 됨(source=app) → installation 없으면 ignore(legacy SID capture 0)."""
+    """app secret 서명 payload는 source=app으로 분류 → installation.id 없으면 ignore(legacy SID capture 0)."""
     payload = _wf()
     payload.pop("installation")  # app source인데 installation.id 없음.
-    session = _mk_session(story=MagicMock(org_id=ORG_A))
+    session = _mk_session([_story(ORG_A)])
     resp, session, cap = await _post(payload, sign_secret=APP_SECRET, session=session)
     assert resp.status_code == 200
+    assert "no_installation_id" in resp.text
     cap.assert_not_awaited()  # legacy로 spoof되어 capture 되지 않음.
 
 
@@ -170,21 +183,19 @@ async def test_app_sig_cannot_spoof_legacy():
 async def test_equal_secret_app_inert_legacy_preserved():
     """app secret == legacy secret(misconfig) → app inert. 그 secret 서명은 source=legacy로 처리(보존)."""
     shared = "shared-secret"
-    inst = MagicMock(org_id=ORG_A, installation_id=555, suspended_at=None)
-    session = _mk_session(story=MagicMock(org_id=ORG_A), installation=inst)
+    session = _mk_session([_story(ORG_A)])  # legacy 경로 → story 1회.
     resp, session, cap = await _post(
         _wf(), sign_secret=shared, legacy=shared, app=shared, session=session
     )
     assert resp.status_code == 200
     cap.assert_awaited_once()
-    # legacy 경로(story.org_id) — installation resolve 안 탐(app inert).
-    assert cap.await_args.kwargs["org_id"] == ORG_A
+    assert cap.await_args.kwargs["org_id"] == ORG_A  # legacy 경로(story.org_id)·installation resolve 안 탐.
 
 
 # ── no-delivery-id ──────────────────────────────────────────────────────────────
 @pytest.mark.anyio
 async def test_missing_delivery_id_rejected_after_sig():
-    session = _mk_session()
+    session = _mk_session([_story(ORG_A)])
     resp, session, cap = await _post(_wf(), delivery=None, sign_secret=LEGACY_SECRET, session=session)
     assert resp.status_code == 400
     session.add.assert_not_called()  # DB insert 0(sig 검증은 통과·delivery 없음만 reject).
@@ -195,7 +206,7 @@ async def test_missing_delivery_id_rejected_after_sig():
 @pytest.mark.anyio
 async def test_duplicate_delivery_2xx_noop():
     """uq(source, delivery_id) 충돌(flush IntegrityError) → rollback + 2xx no-op + capture 0."""
-    session = _mk_session(story=MagicMock(org_id=ORG_A), flush_error=True)
+    session = _mk_session([_story(ORG_A)], flush_error=True)
     resp, session, cap = await _post(_wf(), sign_secret=LEGACY_SECRET, session=session)
     assert resp.status_code == 200
     assert "duplicate_delivery" in resp.text
@@ -207,7 +218,7 @@ async def test_duplicate_delivery_2xx_noop():
 @pytest.mark.anyio
 async def test_processing_failure_rolls_back_for_retry():
     """처리(capture) 실패 → rollback(delivery row 포함) → 500(GitHub retry 재처리·영구 no-op 금지)."""
-    session = _mk_session(story=MagicMock(org_id=ORG_A))
+    session = _mk_session([_story(ORG_A)])
     cap = AsyncMock(side_effect=RuntimeError("boom"))
     resp, session, cap = await _post(_wf(), sign_secret=LEGACY_SECRET, session=session, cap=cap)
     assert resp.status_code == 500
@@ -215,23 +226,24 @@ async def test_processing_failure_rolls_back_for_retry():
     session.commit.assert_not_awaited()
 
 
-# ── per-install routing / anti-IDOR ──────────────────────────────────────────────
+# ── per-install routing / anti-IDOR (P1: resolve 先 → org-scoped story) ───────────
 @pytest.mark.anyio
 async def test_app_unregistered_or_suspended_installation_ignored():
-    """app source·installation 미등록(or suspended_at 필터로 제외) → resolve None → 2xx graceful ignore·capture 0."""
-    session = _mk_session(story=MagicMock(org_id=ORG_A), installation=None)
+    """app source·installation 미등록(or suspended_at 필터 제외) → resolve None → story 조회 없이 2xx ignore·capture 0."""
+    session = _mk_session([None])  # 1st execute=installation resolve → None.
     resp, session, cap = await _post(_wf(), sign_secret=APP_SECRET, session=session)
     assert resp.status_code == 200
     assert "installation_not_registered_or_suspended" in resp.text
-    cap.assert_not_awaited()  # org side-effect 0.
+    cap.assert_not_awaited()                  # org side-effect 0.
+    assert session.execute.await_count == 1   # ⭐installation resolve 만 — story 전역 조회 안 함(oracle 0).
 
 
 @pytest.mark.anyio
-async def test_app_cross_org_story_mismatch_ignored():
-    """app installation=org_a로 resolve인데 SID story가 org_b 소속 → cross-org spoof 거부(capture 0)."""
-    inst = MagicMock(org_id=ORG_A, installation_id=555, suspended_at=None)
-    session = _mk_session(story=MagicMock(org_id=ORG_B), installation=inst)  # story=org_b ≠ installation org_a.
+async def test_app_cross_org_sid_not_found_via_scoped_query():
+    """app installation=org_a resolve인데 SID story가 타 org → org-scoped 조회서 미매치(not_found)·capture 0."""
+    # execute: installation(org_a) → story scoped query(org_a) 미매치 → None.
+    session = _mk_session([_inst(ORG_A), None])
     resp, session, cap = await _post(_wf(), sign_secret=APP_SECRET, session=session)
     assert resp.status_code == 200
-    assert "story_org_mismatch" in resp.text
+    assert "story_not_found" in resp.text  # 전역 lookup 아닌 org-scoped 미매치.
     cap.assert_not_awaited()

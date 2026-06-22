@@ -195,6 +195,19 @@ def _resolve_webhook_source(raw_body: bytes, signature_header: str | None) -> st
     return None
 
 
+def warn_if_webhook_secret_misconfigured() -> None:
+    """Startup config 검증(P3): app webhook secret 이 legacy 와 동일(misconfig)이면 **트래픽 前** 경고.
+    app inert 로 동작해 보안 위험은 없으나 운영자가 secret 을 분리하도록 알린다. ⚠️secret 정보 미노출.
+    """
+    legacy = settings.github_webhook_secret
+    app_s = settings.github_app_webhook_secret
+    if app_s and legacy and app_s == legacy:
+        logger.warning(
+            "[startup] github_app_webhook_secret 가 github_webhook_secret 와 동일(misconfig) → "
+            "App webhook inert(legacy 만 동작). 별도 App webhook secret 설정 필요."
+        )
+
+
 def _normalize_ci(conclusion: str | None) -> str | None:
     """CI provider 결론 → success|failure|cancelled. 미완료(in_progress/queued 등)면 None(skip)."""
     if not conclusion:
@@ -267,37 +280,44 @@ async def _process_webhook_event(
     if story_id is None:
         return {"skipped_reason": "no_sid_tag", "recorded": []}, "ignored"
 
-    # AC③: story 없으면 skip.
-    story = (
-        await session.execute(
-            select(Story).where(Story.id == story_id, Story.deleted_at.is_(None))
-        )
-    ).scalar_one_or_none()
-    if story is None:
-        return {"skipped_reason": "story_not_found", "recorded": []}, "ignored"
-
     installation: GithubInstallation | None = None
     if source == "app":
-        # app: org 는 **installation DB resolve 로만**(payload 추론 금지). suspended → side-effect 금지.
+        # ⭐app: **installation→org resolve 를 story 조회보다 먼저**(org context 확립 前 전역 story 조회 금지
+        # — 미등록 installation 으로 story 존재 oracle 차단). org 는 installation DB 로만(payload 추론 금지).
         if installation_id is None:
             return {"skipped_reason": "no_installation_id", "recorded": []}, "ignored"
         installation = (
             await session.execute(
                 select(GithubInstallation).where(
                     GithubInstallation.installation_id == installation_id,
-                    GithubInstallation.suspended_at.is_(None),
+                    GithubInstallation.suspended_at.is_(None),  # suspended → side-effect 금지.
                 )
             )
         ).scalar_one_or_none()
         if installation is None:
-            # 미등록/suspended installation → graceful ignore(business side-effect 0·delivery status만).
+            # 미등록/suspended installation → story 조회 없이 graceful ignore(side-effect 0·oracle 0).
             return {"skipped_reason": "installation_not_registered_or_suspended", "recorded": []}, "ignored"
         org_id = installation.org_id
         delivery.org_id = org_id
-        if story.org_id != org_id:
-            # SID story 가 resolved org 소속이 아님 → cross-org spoof 차단(anti-IDOR).
-            return {"skipped_reason": "story_org_mismatch", "recorded": []}, "ignored"
+        # story 를 **resolved org 로 스코프** 조회 — cross-org 차단 + 존재 oracle 차단(타 org story 는 not_found).
+        story = (
+            await session.execute(
+                select(Story).where(
+                    Story.id == story_id, Story.org_id == org_id, Story.deleted_at.is_(None)
+                )
+            )
+        ).scalar_one_or_none()
+        if story is None:
+            return {"skipped_reason": "story_not_found", "recorded": []}, "ignored"
     else:
+        # legacy: 기존 동작 — Story.id 전역 조회 → org = story.org_id.
+        story = (
+            await session.execute(
+                select(Story).where(Story.id == story_id, Story.deleted_at.is_(None))
+            )
+        ).scalar_one_or_none()
+        if story is None:
+            return {"skipped_reason": "story_not_found", "recorded": []}, "ignored"
         org_id = story.org_id
         delivery.org_id = org_id
 
