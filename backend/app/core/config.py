@@ -117,6 +117,7 @@ class Settings(BaseSettings):
     # 별개 credential. private key 는 Secret Manager only(env 는 dev/local fallback·로그 노출 0).
     github_app_id: str = ""                  # GitHub App numeric id (installation 토큰 API 경로용)
     github_app_client_id: str = ""           # App client ID — JWT `iss`(현 권장)
+    github_app_client_secret: str = ""        # App OAuth client secret — install callback user-token 교환(소속 검증)
     github_app_slug: str = ""                # 설치 URL: github.com/apps/<slug>/installations/new
     github_app_private_key: str = ""         # PEM. dev/local fallback only — prod 는 Secret Manager
     github_app_private_key_secret: str = ""  # Secret Manager resource name (prod 우선 소스)

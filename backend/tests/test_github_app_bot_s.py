@@ -105,7 +105,8 @@ def test_state_roundtrip_org_binding():
     org = uuid.uuid4()
     with patch.object(ga.settings, "github_app_state_secret", _SECRET):
         state = ga.sign_install_state(org)
-        assert ga.verify_install_state(state) == org      # org 바인딩 왕복.
+        result = ga.verify_install_state(state)
+        assert result is not None and result[0] == org and result[1]  # (org, jti) 왕복.
 
 
 def test_state_tampered_rejected():
@@ -152,4 +153,91 @@ def test_state_anti_idor_returns_bound_org_only():
     with patch.object(ga.settings, "github_app_state_secret", _SECRET):
         state_a = ga.sign_install_state(org_a)
         resolved = ga.verify_install_state(state_a)
-    assert resolved == org_a and resolved != org_b          # A의 state로 B 못 씀.
+    assert resolved is not None and resolved[0] == org_a and resolved[0] != org_b  # A의 state로 B 못 씀.
+
+
+# ── Santiago hold fixes: prod-env-refuse · no-jti · ownership · FK · replay ──────
+def test_prod_refuses_env_private_key():
+    """hold#2: prod(app_env=production)에선 env private key 무시(Secret Manager strict)."""
+    priv, _ = _rsa_keypair()
+    with patch.object(ga.settings, "app_env", "production"), \
+         patch.object(ga.settings, "github_app_private_key", priv), \
+         patch.object(ga.settings, "github_app_private_key_secret", ""):
+        assert ga._load_private_key() is None          # prod env fallback 차단.
+    # dev 는 env fallback 허용.
+    ga._private_key_cache = None
+    with patch.object(ga.settings, "app_env", "development"), \
+         patch.object(ga.settings, "github_app_private_key", priv), \
+         patch.object(ga.settings, "github_app_private_key_secret", ""):
+        assert ga._load_private_key() == priv
+
+
+def test_state_without_jti_rejected():
+    """hold#1: jti 없는 state 거부(서버측 consume 키 부재)."""
+    org = uuid.uuid4()
+    with patch.object(ga.settings, "github_app_state_secret", _SECRET):
+        no_jti = jwt.encode(
+            {"org_id": str(org), "aud": "github-app-install", "exp": int(time.time()) + 600},
+            _SECRET, algorithm="HS256",
+        )
+        assert ga.verify_install_state(no_jti) is None
+
+
+@pytest.mark.anyio
+async def test_installation_ownership_verify():
+    """hold#3: code→user token→/user/installations 에 installation_id 포함 시만 True(소속 검증)."""
+    class _Resp:
+        def __init__(self, status, payload):
+            self.status_code = status
+            self._p = payload
+        def json(self):
+            return self._p
+
+    async def _post_ok(url, **kw):
+        return _Resp(200, {"access_token": "user-tok"})
+
+    with patch.object(ga.settings, "github_app_client_id", "cid"), \
+         patch.object(ga.settings, "github_app_client_secret", "csec"):
+        # 포함 → True.
+        async def _get_match(url, **kw):
+            return _Resp(200, {"installations": [{"id": 555}, {"id": 999}]})
+        with patch("httpx.AsyncClient.post", new=AsyncMock(side_effect=_post_ok)), \
+             patch("httpx.AsyncClient.get", new=AsyncMock(side_effect=_get_match)):
+            assert await ga.verify_installation_owned("code", 555) is True
+        # 미포함 → False(IDOR 차단).
+        async def _get_nomatch(url, **kw):
+            return _Resp(200, {"installations": [{"id": 999}]})
+        with patch("httpx.AsyncClient.post", new=AsyncMock(side_effect=_post_ok)), \
+             patch("httpx.AsyncClient.get", new=AsyncMock(side_effect=_get_nomatch)):
+            assert await ga.verify_installation_owned("code", 555) is False
+    # code 없음 → False.
+    assert await ga.verify_installation_owned("", 555) is False
+
+
+def test_org_id_has_fk_to_organizations():
+    """hold#5: github_installation.org_id → organizations.id FK."""
+    from app.models.github_installation import GithubInstallation
+    targets = {str(fk.column) for fk in GithubInstallation.__table__.foreign_keys}
+    assert "organizations.id" in targets
+
+
+@pytest.mark.anyio
+async def test_callback_replay_rejected_when_nonce_already_consumed():
+    """hold#1(라우터): nonce 이미 소비(rowcount 0)면 callback 거부(replay_or_expired)."""
+    from unittest.mock import MagicMock
+    from app.routers.github_integration import install_callback
+
+    org = uuid.uuid4()
+    session = AsyncMock()
+    delete_result = MagicMock(); delete_result.rowcount = 0  # 이미 소비/만료.
+    session.execute = AsyncMock(return_value=delete_result)
+    session.commit = AsyncMock()
+
+    with patch.object(ga.settings, "github_app_state_secret", _SECRET), \
+         patch("app.services.github_app.settings.github_app_state_secret", _SECRET):
+        state = ga.sign_install_state(org)
+        # verify_installation_owned 는 호출 전에 거부돼야(consume 0).
+        with patch("app.routers.github_integration.verify_installation_owned", new=AsyncMock(return_value=True)) as owned:
+            resp = await install_callback(installation_id=1, state=state, code="x", setup_action="install", session=session)
+    assert resp.status_code == 302 and "replay_or_expired" in resp.headers["location"]
+    owned.assert_not_awaited()  # consume 실패 시 ownership 검증조차 안 감.

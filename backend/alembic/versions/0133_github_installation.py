@@ -39,10 +39,27 @@ def upgrade() -> None:
         "uq_github_installation_installation_id", "github_installation", ["installation_id"]
     )
     op.create_index("ix_github_installation_org_id", "github_installation", ["org_id"])
+    # RC fix: org_id → organizations FK(정합성·org 삭제 시 cascade).
+    op.create_foreign_key(
+        "fk_github_installation_org", "github_installation", "organizations",
+        ["org_id"], ["id"], ondelete="CASCADE",
+    )
+
+    # 설치 state nonce one-time consume store(replay 방어).
+    if "github_install_nonce" not in insp.get_table_names():
+        op.create_table(
+            "github_install_nonce",
+            sa.Column("jti", sa.String(length=64), primary_key=True),
+            sa.Column("org_id", UUID(as_uuid=True), nullable=False),
+            sa.Column("expires_at", sa.DateTime(timezone=True), nullable=False),
+            sa.Column("created_at", sa.DateTime(timezone=True), server_default=sa.text("now()"), nullable=False),
+        )
 
 
 def downgrade() -> None:
     bind = op.get_bind()
     insp = sa.inspect(bind)
+    if "github_install_nonce" in insp.get_table_names():
+        op.drop_table("github_install_nonce")
     if "github_installation" in insp.get_table_names():
         op.drop_table("github_installation")

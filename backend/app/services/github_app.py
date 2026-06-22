@@ -55,12 +55,15 @@ def _load_private_key() -> str | None:
             logger.error("Secret Manager private key fetch 실패: %s", exc)
             return None
 
-    if settings.github_app_private_key:
+    # env fallback 은 **dev/local 전용**. prod(app_env=production)는 Secret Manager strict — env 키 무시.
+    if settings.github_app_private_key and settings.app_env != "production":
         _private_key_cache = settings.github_app_private_key
         logger.info("github app private key loaded from env (dev/local fallback)")
         return _private_key_cache
+    if settings.github_app_private_key and settings.app_env == "production":
+        logger.error("prod 에서 env private key 무시 — Secret Manager(github_app_private_key_secret) 필요")
 
-    logger.warning("github app private key 미설정 — App 토큰 발급 불가(inert)")
+    logger.warning("github app private key 미설정/미해소 — App 토큰 발급 불가(inert)")
     return None
 
 
@@ -166,8 +169,11 @@ def sign_install_state(org_id: uuid.UUID) -> str:
     return jwt.encode(claims, settings.github_app_state_secret, algorithm="HS256")
 
 
-def verify_install_state(state: str) -> uuid.UUID | None:
-    """callback state 검증 → org_id. 서명불일치/만료/aud불일치/형식오류면 None(위조 거부)."""
+def verify_install_state(state: str) -> tuple[uuid.UUID, str] | None:
+    """callback state 검증 → (org_id, jti). 서명불일치/만료/aud불일치/jti없음/형식오류면 None(위조 거부).
+
+    jti(nonce)는 호출자가 서버측 one-time consume(재사용 거부)에 사용한다 — TTL(exp)은 여기서 거름.
+    """
     if not state or not settings.github_app_state_secret:
         return None
     try:
@@ -179,7 +185,46 @@ def verify_install_state(state: str) -> uuid.UUID | None:
         )
     except JWTError:
         return None
+    jti = claims.get("jti")
+    if not jti:
+        return None
     try:
-        return uuid.UUID(claims.get("org_id"))
+        return uuid.UUID(claims.get("org_id")), str(jti)
     except (ValueError, TypeError):
         return None
+
+
+async def verify_installation_owned(code: str, installation_id: int) -> bool:
+    """anti-IDOR 핵심: install callback OAuth `code`(user-authorization-during-install) → user token →
+    `GET /user/installations` 에 installation_id 포함 여부. = 콜백을 완료하는 user(org admin)가 그
+    installation 을 **정당히 통제**함을 증명. 임의 installation_id 주입(IDOR) 차단. 실패/불일치 → False.
+    """
+    if not code or not settings.github_app_client_id or not settings.github_app_client_secret:
+        return False
+    try:
+        async with httpx.AsyncClient(timeout=10.0) as client:
+            tok = await client.post(
+                "https://github.com/login/oauth/access_token",
+                headers={"Accept": "application/json"},
+                data={
+                    "client_id": settings.github_app_client_id,
+                    "client_secret": settings.github_app_client_secret,
+                    "code": code,
+                },
+            )
+            if tok.status_code != 200:
+                return False
+            user_token = tok.json().get("access_token")
+            if not user_token:
+                return False
+            insts = await client.get(
+                f"{_GITHUB_API}/user/installations",
+                headers={"Authorization": f"Bearer {user_token}", "Accept": "application/vnd.github+json"},
+            )
+            if insts.status_code != 200:
+                return False
+            ids = {i.get("id") for i in (insts.json().get("installations") or [])}
+            return installation_id in ids
+    except Exception as exc:  # noqa: BLE001
+        logger.warning("installation ownership 검증 실패(installation=%s): %s", installation_id, exc)
+        return False

@@ -9,7 +9,7 @@ per-org 격리: 모든 read 는 org_id 스코프(anti-IDOR). 한 org 당 한 ins
 import uuid
 from datetime import datetime
 
-from sqlalchemy import BigInteger, DateTime, String, func
+from sqlalchemy import BigInteger, DateTime, ForeignKey, String, func
 from sqlalchemy.dialects.postgresql import UUID
 from sqlalchemy.orm import Mapped, mapped_column
 
@@ -20,8 +20,14 @@ class GithubInstallation(Base):
     __tablename__ = "github_installation"
 
     id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
-    # 한 org 당 한 설치(uq) — 재설치 시 같은 행 갱신(upsert by org_id).
-    org_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), nullable=False, unique=True, index=True)
+    # 한 org 당 한 설치(uq) — 재설치 시 같은 행 갱신(upsert by org_id). FK→organizations(RC: 정합성).
+    org_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True),
+        ForeignKey("organizations.id", ondelete="CASCADE"),
+        nullable=False,
+        unique=True,
+        index=True,
+    )
     # GitHub 가 발급하는 installation 식별자(토큰 mint API 경로 키). 전역 unique.
     installation_id: Mapped[int] = mapped_column(BigInteger, nullable=False, unique=True)
     account_login: Mapped[str | None] = mapped_column(String(255), nullable=True)
@@ -33,4 +39,18 @@ class GithubInstallation(Base):
     )
     updated_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), nullable=False, server_default=func.now(), onupdate=func.now()
+    )
+
+
+class GithubInstallNonce(Base):
+    """설치 state nonce 서버측 store — **one-time consume**(replay 방어). install/start서 INSERT,
+    callback서 atomic DELETE(없으면 재사용/만료=거부). TTL 경과분은 주기/지연 정리(만료 체크로 거부됨).
+    """
+    __tablename__ = "github_install_nonce"
+
+    jti: Mapped[str] = mapped_column(String(64), primary_key=True)
+    org_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), nullable=False)
+    expires_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, server_default=func.now()
     )
