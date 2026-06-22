@@ -74,7 +74,7 @@ def _sign(body: bytes) -> str:
     return "sha256=" + hmac.new(_SECRET.encode(), body, hashlib.sha256).hexdigest()
 
 
-async def _post(payload: dict, *, event: str, story=..., sign=True):
+async def _post(payload: dict, *, event: str, story=..., sign=True, installation=...):
     from app.dependencies.database import get_db
     from app.main import app
 
@@ -83,7 +83,13 @@ async def _post(payload: dict, *, event: str, story=..., sign=True):
     result.scalar_one_or_none.return_value = (
         MagicMock(org_id=ORG_ID) if story is ... else story
     )
-    session.execute = AsyncMock(return_value=result)
+    if installation is ...:
+        session.execute = AsyncMock(return_value=result)  # 모든 query 동일(기존 동작).
+    else:
+        # 1st execute=story select, 2nd=installation select(native CI 블록), 이후 installation 반복.
+        inst_result = MagicMock()
+        inst_result.scalar_one_or_none.return_value = installation
+        session.execute = AsyncMock(side_effect=[result, inst_result, inst_result, inst_result])
 
     async def override_db():
         yield session
@@ -210,69 +216,112 @@ async def test_workflow_run_branch_sid_links_capture():
 from app.services import verdict_capture as _svc  # noqa: E402
 
 
+def _native_ci(resp):
+    """응답 envelope-tolerant native_ci 추출({state, reason} or None)."""
+    body = resp.json()
+    data = body.get("data", body) if isinstance(body, dict) else {}
+    return (data or {}).get("native_ci")
+
+
+_MERGE_PAYLOAD = {"action": "closed", "repository": {"full_name": "moonklabs/sprintable"},
+                  "pull_request": {"number": 12, "merged": True, "title": f"feat [SID:{STORY_ID}]",
+                                   "head": {"sha": "deadbeef"}}}
+
+
 @pytest.mark.anyio
 async def test_native_ci_fills_on_merge_when_no_conclusion():
-    """머지 이벤트(ci 결론 없음)+confident SID → statusCheckRollup pull로 ci_result 채움."""
-    payload = {"action": "closed", "repository": {"full_name": "moonklabs/sprintable"},
-               "pull_request": {"number": 12, "merged": True, "title": f"feat [SID:{STORY_ID}]",
-                                "head": {"sha": "deadbeef"}}}
+    """머지 이벤트(ci 결론 없음)+confident SID → installation 토큰 rollup으로 ci 채움·native_ci.state=success."""
     with patch.object(mod, "get_installation_token", new=AsyncMock(return_value="inst-tok")), \
          patch.object(mod, "fetch_status_check_rollup",
-                      new=AsyncMock(return_value="success")) as roll, \
+                      new=AsyncMock(return_value=("success", "resolved"))) as roll, \
          patch.object(mod, "capture_pr_ci_verdict",
                       new=AsyncMock(return_value={"recorded": ["pr", "ci"], "skipped_reason": None})) as cap:
-        resp = await _post(payload, event="pull_request")
+        resp = await _post(_MERGE_PAYLOAD, event="pull_request")
     assert resp.status_code == 200
-    # Bot-M.1: installation 토큰으로 호출(PAT 아님). _post 의 mock session 이 installation 행도 반환.
-    roll.assert_awaited_once_with("moonklabs/sprintable", "deadbeef", "inst-tok")
-    assert cap.await_args.kwargs["ci_result"] == "success"  # native CI가 채움.
+    roll.assert_awaited_once_with("moonklabs/sprintable", "deadbeef", "inst-tok")  # installation 토큰(PAT 아님).
+    assert cap.await_args.kwargs["ci_result"] == "success"
+    assert _native_ci(resp) == {"state": "success", "reason": None}
 
 
 @pytest.mark.anyio
-async def test_native_ci_graceful_when_no_installation_token():
-    """Bot-M.1: installation 토큰 없음(미설치/실패) → rollup 미호출·ci unknown 유지(graceful·PAT 승격 0)."""
-    payload = {"action": "closed", "repository": {"full_name": "moonklabs/sprintable"},
-               "pull_request": {"number": 12, "merged": True, "title": f"feat [SID:{STORY_ID}]",
-                                "head": {"sha": "deadbeef"}}}
-    with patch.object(mod, "get_installation_token", new=AsyncMock(return_value=None)), \
-         patch.object(mod, "fetch_status_check_rollup", new=AsyncMock(return_value="success")) as roll, \
+async def test_native_ci_unknown_reason_no_installation():
+    """unknown(reason): org 미연결(installation 행 없음) → native_ci.reason=no_installation·토큰 mint 안 함."""
+    with patch.object(mod, "get_installation_token", new=AsyncMock()) as tok, \
+         patch.object(mod, "fetch_status_check_rollup", new=AsyncMock()) as roll, \
          patch.object(mod, "capture_pr_ci_verdict",
                       new=AsyncMock(return_value={"recorded": ["pr"], "skipped_reason": None})) as cap:
-        resp = await _post(payload, event="pull_request")
+        resp = await _post(_MERGE_PAYLOAD, event="pull_request", installation=None)
     assert resp.status_code == 200
-    roll.assert_not_awaited()                          # 토큰 없으면 rollup 안 함.
-    assert cap.await_args.kwargs["ci_result"] is None  # ci unknown 유지(success 승격 금지).
+    tok.assert_not_called(); roll.assert_not_called()          # 미연결 → 토큰/rollup 안 함.
+    assert cap.await_args.kwargs["ci_result"] is None
+    assert _native_ci(resp) == {"state": "unknown", "reason": "no_installation"}
+
+
+@pytest.mark.anyio
+async def test_native_ci_unknown_reason_no_token():
+    """unknown(reason): installation 있으나 토큰 mint 실패 → reason=no_installation_token·rollup 안 함."""
+    with patch.object(mod, "get_installation_token", new=AsyncMock(return_value=None)), \
+         patch.object(mod, "fetch_status_check_rollup", new=AsyncMock()) as roll, \
+         patch.object(mod, "capture_pr_ci_verdict",
+                      new=AsyncMock(return_value={"recorded": ["pr"], "skipped_reason": None})) as cap:
+        resp = await _post(_MERGE_PAYLOAD, event="pull_request")
+    assert resp.status_code == 200
+    roll.assert_not_called()
+    assert cap.await_args.kwargs["ci_result"] is None
+    assert _native_ci(resp) == {"state": "unknown", "reason": "no_installation_token"}
+
+
+@pytest.mark.anyio
+async def test_native_ci_unknown_reason_pending():
+    """unknown(reason): rollup 미완료(pending) → reason=pending·ci unknown 유지(success 승격 0)."""
+    with patch.object(mod, "get_installation_token", new=AsyncMock(return_value="inst-tok")), \
+         patch.object(mod, "fetch_status_check_rollup", new=AsyncMock(return_value=(None, "pending"))), \
+         patch.object(mod, "capture_pr_ci_verdict",
+                      new=AsyncMock(return_value={"recorded": ["pr"], "skipped_reason": None})) as cap:
+        resp = await _post(_MERGE_PAYLOAD, event="pull_request")
+    assert resp.status_code == 200
+    assert cap.await_args.kwargs["ci_result"] is None
+    assert _native_ci(resp) == {"state": "unknown", "reason": "pending"}
 
 
 @pytest.mark.anyio
 async def test_native_ci_not_pulled_when_event_has_conclusion():
-    """이벤트가 이미 CI 결론을 실으면 native pull 안 함(그 결론 유지)."""
+    """이벤트가 이미 CI 결론을 실으면 native pull 안 함(그 결론 유지·native_ci 미노출)."""
     payload = {"repository": {"full_name": "o/r"},
                "workflow_run": {"conclusion": "failure", "head_sha": "sha1",
                                 "head_branch": f"feat-[SID:{STORY_ID}]", "pull_requests": [{"number": 7}]}}
-    with patch.object(mod, "fetch_status_check_rollup", new=AsyncMock(return_value="success")) as roll, \
+    with patch.object(mod, "fetch_status_check_rollup", new=AsyncMock(return_value=("success", "resolved"))) as roll, \
          patch.object(mod, "capture_pr_ci_verdict",
                       new=AsyncMock(return_value={"recorded": ["ci"], "skipped_reason": None})) as cap:
         resp = await _post(payload, event="workflow_run")
     assert resp.status_code == 200
     roll.assert_not_awaited()  # 이벤트 결론 있으면 native 미호출.
-    assert cap.await_args.kwargs["ci_result"] == "failure"  # 이벤트 결론 유지.
+    assert cap.await_args.kwargs["ci_result"] == "failure"
+    assert _native_ci(resp) is None  # native 시도 안 함 → 미노출.
 
 
 @pytest.mark.anyio
-async def test_fetch_status_check_rollup_normalizes():
-    """statusCheckRollup.state → success|failure|None 정규화. **token 인자**(PAT 아님)·token 없으면 None."""
-    # token 없음 → 즉시 None(콜 안 함·Bot-M.1 PAT fallback 제거).
-    assert await _svc.fetch_status_check_rollup("o/r", "sha", "") is None
+async def test_fetch_status_check_rollup_returns_ci_and_reason():
+    """statusCheckRollup → (ci, reason). token 없음=(None,no_token)·state별 매핑·PAT 인자 없음."""
+    assert await _svc.fetch_status_check_rollup("o/r", "sha", "") == (None, "no_token")
+    assert await _svc.fetch_status_check_rollup("badrepo", "sha", "tok") == (None, "bad_input")
 
-    def _resp(state):
+    def _resp(status, state):
         r = MagicMock()
-        r.status_code = 200
-        r.json.return_value = {"data": {"repository": {"object": {"statusCheckRollup": {"state": state}}}}}
+        r.status_code = status
+        r.json.return_value = {"data": {"repository": {"object": {"statusCheckRollup": ({"state": state} if state else None)}}}}
         return r
 
     import httpx
-    for state, expected in [("SUCCESS", "success"), ("FAILURE", "failure"),
-                            ("ERROR", "failure"), ("PENDING", None), ("EXPECTED", None)]:
-        with patch.object(httpx.AsyncClient, "post", new=AsyncMock(return_value=_resp(state))):
+    cases = [
+        (200, "SUCCESS", ("success", "resolved")),
+        (200, "FAILURE", ("failure", "resolved")),
+        (200, "ERROR", ("failure", "resolved")),
+        (200, "PENDING", (None, "pending")),
+        (200, "EXPECTED", (None, "pending")),
+        (200, None, (None, "not_found")),
+        (500, "SUCCESS", (None, "api_error")),
+    ]
+    for status, state, expected in cases:
+        with patch.object(httpx.AsyncClient, "post", new=AsyncMock(return_value=_resp(status, state))):
             assert await _svc.fetch_status_check_rollup("moonklabs/sprintable", "abc", "inst-tok") == expected

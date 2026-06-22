@@ -265,18 +265,29 @@ async def github_webhook(
     # story SID confident-resolve 後 이벤트에 CI 결론이 없으면(머지 이벤트), org→github_installation→
     # get_installation_token 해소(org-scope·토큰 mint는 org resolve 後만) → rollup으로 ci_result 주입.
     # App 미설치 org/토큰 없음/실패/미완료 → ci_conclusion None 유지(graceful unknown·success 승격 금지).
+    # native_ci unknown(reason) 계약(산티아고 lock): native CI 시도 시 응답에 {state, reason} 노출.
+    native_ci_state: str | None = None  # 'success'|'failure'|'unknown' (시도했을 때만 set)
+    native_ci_reason: str | None = None
     if ci_conclusion is None and head_sha and repo:
         inst = (
             await session.execute(
                 select(GithubInstallation).where(GithubInstallation.org_id == story.org_id)
             )
         ).scalar_one_or_none()
-        if inst is not None:
+        if inst is None:
+            native_ci_state, native_ci_reason = "unknown", "no_installation"        # org 미연결.
+        else:
             inst_token = await get_installation_token(inst.installation_id)
-            if inst_token:
-                native_ci = await fetch_status_check_rollup(repo, head_sha, inst_token)
-                if native_ci is not None:
-                    ci_conclusion = native_ci
+            if not inst_token:
+                native_ci_state, native_ci_reason = "unknown", "no_installation_token"  # 토큰 mint 실패.
+            else:
+                ci, reason = await fetch_status_check_rollup(repo, head_sha, inst_token)
+                if ci is not None:
+                    ci_conclusion = ci
+                    native_ci_state, native_ci_reason = ci, None                    # resolved.
+                else:
+                    native_ci_state, native_ci_reason = "unknown", reason           # pending/api_error/not_found.
+        logger.info("native CI story=%s state=%s reason=%s", story_id, native_ci_state, native_ci_reason)
 
     try:
         result = await capture_pr_ci_verdict(
@@ -289,6 +300,9 @@ async def github_webhook(
             ci_result=ci_conclusion,  # AC④: failure→capture가 fail로 채점.
         )
         await session.commit()
+        if native_ci_state is not None:
+            # native CI 결과/사유를 응답에 노출(라이브 진단·'unknown 0' 검증·관측). DB schema 무변경.
+            result = {**result, "native_ci": {"state": native_ci_state, "reason": native_ci_reason}}
         return _ok(result)
     except Exception as exc:
         logger.exception("github webhook verdict capture failed: %s", exc)
