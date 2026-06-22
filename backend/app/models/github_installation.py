@@ -9,7 +9,7 @@ per-org 격리: 모든 read 는 org_id 스코프(anti-IDOR). 한 org 당 한 ins
 import uuid
 from datetime import datetime
 
-from sqlalchemy import BigInteger, DateTime, ForeignKey, String, func
+from sqlalchemy import BigInteger, DateTime, ForeignKey, String, UniqueConstraint, func
 from sqlalchemy.dialects.postgresql import UUID
 from sqlalchemy.orm import Mapped, mapped_column
 
@@ -54,3 +54,29 @@ class GithubInstallNonce(Base):
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), nullable=False, server_default=func.now()
     )
+
+
+class GithubWebhookDelivery(Base):
+    """Bot-M.2: 웹훅 delivery 멱등 store — **uq(source, delivery_id)**. HMAC 검증 後 dedup insert +
+    business side-effect + status 갱신을 **동일 트랜잭션**으로 묶는다 — 실패=rollback→GitHub retry 보존
+    (delivery row 도 함께 rollback돼 retry 안 막음). 중복충돌=savepoint rollback + 2xx no-op.
+    status: received | processed | ignored | failed | duplicate. (retention/cleanup 은 후속 hygiene.)
+    """
+    __tablename__ = "github_webhook_delivery"
+    __table_args__ = (
+        UniqueConstraint("source", "delivery_id", name="uq_github_webhook_delivery_src_delivery"),
+    )
+
+    id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    source: Mapped[str] = mapped_column(String(16), nullable=False)        # legacy | app (검증된 secret서 결정)
+    delivery_id: Mapped[str] = mapped_column(String(128), nullable=False)  # X-GitHub-Delivery
+    event: Mapped[str | None] = mapped_column(String(64), nullable=True)
+    installation_id: Mapped[int | None] = mapped_column(BigInteger, nullable=True)
+    org_id: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True), nullable=True)
+    status: Mapped[str] = mapped_column(String(16), nullable=False, default="received")
+    error_code: Mapped[str | None] = mapped_column(String(64), nullable=True)
+    error_message: Mapped[str | None] = mapped_column(String(512), nullable=True)
+    received_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, server_default=func.now()
+    )
+    processed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)

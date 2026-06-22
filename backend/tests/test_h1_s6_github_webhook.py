@@ -15,7 +15,13 @@ import pytest
 from httpx import ASGITransport, AsyncClient
 
 from app.routers import verdict_capture as mod
-from app.routers.verdict_capture import _candidate_texts, _extract_pr_ci, _normalize_ci, _verify_github_signature
+from app.routers.verdict_capture import (
+    _candidate_texts,
+    _extract_pr_ci,
+    _hmac_match,
+    _normalize_ci,
+    _resolve_webhook_source,
+)
 
 _SECRET = "testsecret"
 STORY_ID = uuid.uuid4()
@@ -58,14 +64,24 @@ def test_extract_pr_ci_workflow_run_failure():
     assert head_sha == "def456"
 
 
-def test_verify_signature():
+def test_hmac_match_format_and_compare():
     body = b'{"a":1}'
     sig = "sha256=" + hmac.new(_SECRET.encode(), body, hashlib.sha256).hexdigest()
-    with patch.object(mod.settings, "github_webhook_secret", _SECRET):
-        assert _verify_github_signature(body, sig) is True
-        assert _verify_github_signature(body, "sha256=bad") is False
-    with patch.object(mod.settings, "github_webhook_secret", ""):
-        assert _verify_github_signature(body, sig) is False  # 시크릿 미설정 → 거부.
+    assert _hmac_match(body, sig, _SECRET) is True
+    assert _hmac_match(body, "sha256=bad", _SECRET) is False          # 형식오류(hex64 아님).
+    assert _hmac_match(body, sig.removeprefix("sha256="), _SECRET) is False  # bare hex(prefix 없음) 거부.
+    assert _hmac_match(body, sig, "") is False                        # secret 미설정 거부.
+    assert _hmac_match(body, None, _SECRET) is False                  # header 없음 거부.
+
+
+def test_resolve_webhook_source_legacy_only_by_default():
+    body = b'{"a":1}'
+    legacy_sig = "sha256=" + hmac.new(_SECRET.encode(), body, hashlib.sha256).hexdigest()
+    # app secret 미설정 → app inert·legacy 만.
+    with patch.object(mod.settings, "github_webhook_secret", _SECRET), \
+         patch.object(mod.settings, "github_app_webhook_secret", ""):
+        assert _resolve_webhook_source(body, legacy_sig) == "legacy"
+        assert _resolve_webhook_source(body, "sha256=" + "0" * 64) is None  # 둘다 실패.
 
 
 # ── 엔드포인트(실 runtime 경로) ────────────────────────────────────────────────
@@ -79,6 +95,7 @@ async def _post(payload: dict, *, event: str, story=..., sign=True, installation
     from app.main import app
 
     session = AsyncMock()
+    session.add = MagicMock()  # add 는 sync(AsyncMock 경고 방지).
     result = MagicMock()
     result.scalar_one_or_none.return_value = (
         MagicMock(org_id=ORG_ID) if story is ... else story
@@ -96,11 +113,13 @@ async def _post(payload: dict, *, event: str, story=..., sign=True, installation
 
     app.dependency_overrides[get_db] = override_db
     body = json.dumps(payload).encode()
-    headers = {"X-GitHub-Event": event}
+    headers = {"X-GitHub-Event": event, "X-GitHub-Delivery": "test-delivery-legacy"}  # Bot-M.2: delivery 필수.
     headers["X-Hub-Signature-256"] = _sign(body) if sign else "sha256=bad"
     try:
         async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as c:
-            with patch.object(mod.settings, "github_webhook_secret", _SECRET):
+            # legacy source(app secret 미설정 → app inert): 기존 무회귀 검증.
+            with patch.object(mod.settings, "github_webhook_secret", _SECRET), \
+                 patch.object(mod.settings, "github_app_webhook_secret", ""):
                 resp = await c.post("/api/v2/internal/verdict/github-webhook", content=body, headers=headers)
         return resp
     finally:
