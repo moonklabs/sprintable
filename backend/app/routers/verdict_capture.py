@@ -21,7 +21,12 @@ from app.core.config import settings
 from app.dependencies.database import get_db
 from app.models.pm import Story
 from app.routers.cron import CRON_SECRET, _err, _ok, verify_cron
-from app.services.verdict_capture import capture_pr_ci_verdict, capture_review_verdict, parse_story_id
+from app.services.verdict_capture import (
+    capture_pr_ci_verdict,
+    capture_review_verdict,
+    fetch_status_check_rollup,
+    parse_story_id,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -186,23 +191,30 @@ def _candidate_texts(payload: dict) -> list[str]:
     return [t for t in texts if t]
 
 
-def _extract_pr_ci(event: str, payload: dict) -> tuple[int, bool, str | None]:
-    """이벤트 형태에서 (pr_number, merged, ci_conclusion) 추출."""
+def _extract_pr_ci(event: str, payload: dict) -> tuple[int, bool, str | None, str | None]:
+    """이벤트 형태에서 (pr_number, merged, ci_conclusion, head_sha) 추출.
+
+    head_sha = native CI(statusCheckRollup) 조회용 PR head commit. 이벤트별 위치가 달라 함께 뽑는다.
+    """
     pr_number = 0
     merged = False
     ci_conclusion: str | None = None
+    head_sha: str | None = None
     if event == "pull_request":
         pr = payload.get("pull_request") or {}
         pr_number = int(pr.get("number") or 0)
         merged = bool(pr.get("merged")) and payload.get("action") == "closed"
+        head_sha = (pr.get("head") or {}).get("sha") or None
     elif event in ("workflow_run", "check_suite", "check_run"):
         node = payload.get("workflow_run") or payload.get("check_suite") or payload.get("check_run") or {}
         ci_conclusion = _normalize_ci(node.get("conclusion"))
         prs = node.get("pull_requests") or []
         pr_number = int((prs[0].get("number") if prs else 0) or 0)
+        head_sha = node.get("head_sha") or None
     elif event == "status":
         ci_conclusion = _normalize_ci(payload.get("state"))
-    return pr_number, merged, ci_conclusion
+        head_sha = payload.get("sha") or None
+    return pr_number, merged, ci_conclusion, head_sha
 
 
 @router.post("/github-webhook")
@@ -241,11 +253,20 @@ async def github_webhook(
         return _ok({"skipped_reason": "story_not_found", "recorded": []})
 
     repo = (payload.get("repository") or {}).get("full_name") or ""
-    pr_number, merged, ci_conclusion = _extract_pr_ci(x_github_event or "", payload)
+    pr_number, merged, ci_conclusion, head_sha = _extract_pr_ci(x_github_event or "", payload)
 
     # 행동 가능한 신호(머지 또는 CI 완료)가 없으면 skip(in_progress 등).
     if not merged and ci_conclusion is None:
         return _ok({"skipped_reason": "no_actionable_signal", "recorded": []})
+
+    # S5 Phase S: native CI 채움. story가 SID로 confident-resolve된(위 AC②/③ 통과) 상태에서, 이벤트에
+    # CI 결론이 없으면(대표적으로 머지 이벤트) PR head SHA의 statusCheckRollup을 1콜 pull해 게이트에 실 CI를
+    # 주입한다(CI unknown 박멸). 이벤트가 이미 CI 결론을 실었으면 그 값을 유지. 토큰 없음/미완료/실패는
+    # None=무영향(미링크 CI unknown 유지). confident-link(exact PK)에서만 동작(여긴 SID resolve 後라 충족).
+    if ci_conclusion is None and head_sha and repo:
+        native_ci = await fetch_status_check_rollup(repo, head_sha)
+        if native_ci is not None:
+            ci_conclusion = native_ci
 
     try:
         result = await capture_pr_ci_verdict(

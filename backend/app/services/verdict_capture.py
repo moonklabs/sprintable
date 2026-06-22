@@ -99,6 +99,47 @@ async def fetch_pr_review_rounds(repo: str, pr_number: int) -> int:
         return 0
 
 
+async def fetch_status_check_rollup(repo: str, head_sha: str) -> str | None:
+    """E-DG-REAL S5 Phase S: PR head commit의 집계 CI 상태를 GitHub GraphQL statusCheckRollup으로 조회.
+
+    반환 'success'|'failure'|None. GITHUB_TOKEN 없거나 실패/미완료(PENDING 등)면 None(무영향·CI unknown 유지).
+    capture_pr_ci_verdict가 success→pass·그 외→fail로 채점하므로 success/failure만 의미한다. 한 콜로 PR의
+    모든 체크 집계 상태를 얻어, CI 이벤트가 없는 머지 이벤트에서도 게이트에 실 CI를 채운다.
+    """
+    if not GITHUB_TOKEN or not repo or "/" not in repo or not head_sha:
+        return None
+    owner, name = repo.split("/", 1)
+    query = (
+        "query($owner:String!,$name:String!,$oid:GitObjectID!){"
+        "repository(owner:$owner,name:$name){object(oid:$oid){"
+        "... on Commit{statusCheckRollup{state}}}}}"
+    )
+    try:
+        import httpx
+        async with httpx.AsyncClient(timeout=10.0) as client:
+            resp = await client.post(
+                "https://api.github.com/graphql",
+                headers={
+                    "Authorization": f"Bearer {GITHUB_TOKEN}",
+                    "Accept": "application/vnd.github+json",
+                },
+                json={"query": query, "variables": {"owner": owner, "name": name, "oid": head_sha}},
+            )
+        if resp.status_code != 200:
+            return None
+        data = resp.json()
+        obj = (((data.get("data") or {}).get("repository") or {}).get("object")) or {}
+        state = (obj.get("statusCheckRollup") or {}).get("state") if isinstance(obj, dict) else None
+        if state == "SUCCESS":
+            return "success"
+        if state in ("FAILURE", "ERROR"):
+            return "failure"
+        return None  # PENDING/EXPECTED/None → 미완료, 채우지 않음(CI unknown 유지).
+    except Exception as exc:  # noqa: BLE001
+        logger.warning("statusCheckRollup fetch failed repo=%s sha=%s: %s", repo, head_sha, exc)
+        return None
+
+
 async def capture_pr_ci_verdict(
     session: AsyncSession,
     org_id: uuid.UUID,
