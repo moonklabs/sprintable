@@ -18,7 +18,7 @@
 
 실행:
   cd backend && DATABASE_URL=... JWT_SECRET=... BACKEND_URL=... ORG_ID=... PROJECT_ID=... \
-      python -m scripts.verify_grant_only_story_assign
+      python -m scripts.jobs.verify_grant_only_story_assign
 
 ⚠️ 0079 migrate-dev 적용 후 실행할 것. (0078만 적용 시 의도적으로 500이 나며 FAIL로 표시된다.)
 """

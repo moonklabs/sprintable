@@ -11,8 +11,8 @@ held 등은 건드리지 않는다. 재실행 멱등(이미 voided면 status가 
 
 env: DATABASE_URL (백엔드 동일·cloud-sql-proxy/in-VPC). 쓰기 작업.
 실행:
-  cd backend && DATABASE_URL=... python -m scripts.backfill_void_empty_merge_gates            # dry-run
-  cd backend && DATABASE_URL=... python -m scripts.backfill_void_empty_merge_gates --apply     # 실제 void
+  cd backend && DATABASE_URL=... python -m scripts.jobs.backfill_void_empty_merge_gates            # dry-run
+  cd backend && DATABASE_URL=... python -m scripts.jobs.backfill_void_empty_merge_gates --apply     # 실제 void
 옵션: --org <uuid> 로 특정 org만.
 """
 from __future__ import annotations
