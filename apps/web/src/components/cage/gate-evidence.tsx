@@ -1,7 +1,7 @@
 'use client';
 
 import { Fragment } from 'react';
-import { CheckCircle, XCircle } from 'lucide-react';
+import { CheckCircle, XCircle, GitPullRequest } from 'lucide-react';
 import { useTranslations } from 'next-intl';
 import { Badge } from '@/components/ui/badge';
 import type { GateItem } from '@/components/kanban/types';
@@ -26,6 +26,13 @@ import type { GateItem } from '@/components/kanban/types';
  */
 
 type Decision = 'auto_merge' | 'ask_human' | 'block';
+
+/** E-GHAPP Bot-L.2: gate 카드 read-only PR 칩(forward-compat — BE가 neutral_facts.pr_links 채우면 렌더). */
+interface PrLinkFact {
+  repo_full_name: string;
+  pr_number: number;
+  link_source?: string; // 'explicit' | 'auto' | 'sid'
+}
 
 const DECISION_META: Record<Decision, { variant: 'success' | 'warning' | 'destructive'; mark: string; labelKey: string }> = {
   auto_merge: { variant: 'success', mark: '✓', labelKey: 'decisionAutoMerge' },
@@ -101,6 +108,23 @@ function TrustValue({ trust, selfReportOnly }: { trust: number; selfReportOnly: 
   );
 }
 
+// read-only PR 칩(gate State C 납품 컬럼). 관리는 story 상세 PrLinkSection — 여기선 표시·새탭 링크만.
+function GatePrChip({ pr }: { pr: PrLinkFact }) {
+  return (
+    <a
+      href={`https://github.com/${pr.repo_full_name}/pull/${pr.pr_number}`}
+      target="_blank"
+      rel="noopener noreferrer"
+      title={pr.repo_full_name}
+      className="inline-flex max-w-full items-center"
+    >
+      <Badge variant={pr.link_source === 'explicit' ? 'default' : 'outline'} className="shrink-0 gap-1 hover:underline">
+        <GitPullRequest className="size-3 shrink-0" />#{pr.pr_number}
+      </Badge>
+    </a>
+  );
+}
+
 export function GateEvidence({ gate, className }: { gate: GateItem; className?: string }) {
   const t = useTranslations('cage');
   const decision = gateDecision(gate);
@@ -112,6 +136,10 @@ export function GateEvidence({ gate, className }: { gate: GateItem; className?: 
   const coldStartSeed = gate.neutral_facts?.['cold_start_seed'] === true;
   const seedPrediction = gate.neutral_facts?.['seed_prediction'];
   const seedKey = seedPrediction === 'keep' ? 'seedKeep' : seedPrediction === 'kill' ? 'seedKill' : null;
+  // E-GHAPP Bot-L.2: 연결 PR(read-only). BE가 neutral_facts.pr_links 채우면 렌더·없으면 omit(S3 원칙).
+  const prLinks = Array.isArray(gate.neutral_facts?.['pr_links'])
+    ? (gate.neutral_facts!['pr_links'] as PrLinkFact[]).filter((p) => p?.repo_full_name && typeof p?.pr_number === 'number')
+    : [];
 
   const decisionBadge = decision ? (
     <Badge variant={DECISION_META[decision].variant} className="shrink-0">
@@ -144,7 +172,8 @@ export function GateEvidence({ gate, className }: { gate: GateItem; className?: 
             <div className="flex flex-wrap items-center gap-x-2 gap-y-0.5 text-muted-foreground">
               {ci !== null ? <CiSignal ci={ci} /> : null}
               {trust !== null ? <TrustValue trust={trust} selfReportOnly={selfReportOnly} /> : null}
-              {/* S5: PR·AC·위험 → 여기에 추가(데이터 도착 시·지금은 미렌더) */}
+              {/* Bot-L.2: 연결 PR(read-only·관리는 story 상세). 없으면 omit. AC·위험 슬롯은 후속. */}
+              {prLinks.map((p, i) => <GatePrChip key={`${p.repo_full_name}#${p.pr_number}-${i}`} pr={p} />)}
             </div>
           </div>
           {/* 우: 판단("옳았다 판정"). gate엔 정밀 hit_rate 없음 → 임시 예측만(억지 % X). */}

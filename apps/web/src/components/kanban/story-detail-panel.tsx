@@ -19,6 +19,7 @@ import { StoryHypothesesSection } from '@/components/hypotheses/story-hypotheses
 import { StoryMergeGate } from '@/components/cage/story-merge-gate';
 import { StuckHandoffSection } from '@/components/cage/stuck-handoff-section';
 import { EntityDispatchPanel } from '@/components/dispatch/entity-dispatch-panel';
+import { PrLinkSection } from '@/components/integrations/pr-link-section';
 import { Button } from '@/components/ui/button';
 import { StatusBadge } from '@/components/ui/status-badge';
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from '@/components/ui/dropdown-menu';
@@ -1241,6 +1242,9 @@ export function StoryDetailPanel({ story, tasks, nextTasksCursor = null, loading
                 </div>
               )}
             </div>
+
+            {/* E-GHAPP Bot-L.2: PR↔story 명시연결 관리(2-tier·connect-prompt 자체 처리) */}
+            <PrLinkSection storyId={story.id} />
 
             {/* Outcome result (read-only) + 연결 가설 chip/picker — 인라인 intent 입력은
                 S8c서 연결 가설 affordance로 대체(스토리서 가설 생성 금지·AC①). 결과 카드는
