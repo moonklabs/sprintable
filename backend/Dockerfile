@@ -19,11 +19,11 @@ COPY sprintable_mcp/ sprintable_mcp/
 COPY alembic.ini .
 COPY alembic/ alembic/
 COPY bootstrap.py .
-COPY scripts/migrate.sh scripts/migrate.sh
-# E-MEMBER-SSOT 검증/감사 스크립트 — migrate-dev 잡 클론(command 오버라이드)으로 in-VPC 실행
-# (scripts는 namespace 패키지 — `python -m scripts.<name>`로 /app 기준 실행)
-COPY scripts/verify_grant_only_story_assign.py scripts/verify_grant_only_story_assign.py
-COPY scripts/audit_apikey_member_anchor.py scripts/audit_apikey_member_anchor.py
+# scripts/ 통째 동봉 — migrate-dev 잡 클론(command override)으로 in-VPC 실행하는 운영/백필 스크립트.
+# (scripts는 namespace/regular 패키지 — `python -m scripts.<name>`로 /app 기준 실행.) 개별 COPY는
+# 신규 스크립트가 이미지에서 누락되는 함정이 있어(E-DG-REAL P0 backfill 사건: 파일 존재≠이미지 포함)
+# 통째 COPY로 future-proof.
+COPY scripts/ scripts/
 
 # non-root 사용자 생성 + /app 소유권 변경 (uv .venv 포함)
 RUN useradd --create-home --shell /bin/bash appuser \
