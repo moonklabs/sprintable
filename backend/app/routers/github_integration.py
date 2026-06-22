@@ -14,6 +14,7 @@ from datetime import datetime, timezone
 from fastapi import APIRouter, Depends, Query
 from fastapi.responses import JSONResponse, RedirectResponse
 from jose import jwt
+from pydantic import BaseModel
 from sqlalchemy import delete, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -21,12 +22,14 @@ from app.core.config import settings
 from app.dependencies.auth import AuthContext, get_current_user, get_verified_org_id, require_admin
 from app.dependencies.database import get_db
 from app.models.github_installation import GithubInstallation, GithubInstallNonce
+from app.models.pm import Story
 from app.services.github_app import (
     fetch_installation_metadata,
     sign_install_state,
     verify_install_state,
     verify_installation_owned,
 )
+from app.services.pr_story_link import upsert_link
 
 router = APIRouter(prefix="/api/v2/integrations/github", tags=["github-integration"])
 
@@ -147,5 +150,68 @@ async def github_status(
             "account_type": inst.account_type,
             "repository_selection": inst.repository_selection,
             "suspended": inst.suspended_at is not None,
+        }
+    )
+
+
+class _ExplicitLinkBody(BaseModel):
+    story_id: uuid.UUID
+    repo_full_name: str
+    pr_number: int
+
+
+@router.post("/links")
+async def create_explicit_link(
+    body: _ExplicitLinkBody,
+    org_id: uuid.UUID = Depends(get_verified_org_id),
+    auth: AuthContext = Depends(get_current_user),
+    session: AsyncSession = Depends(get_db),
+) -> JSONResponse:
+    """PR↔story **명시연결**(explicit·confidence high·Bot-L.2 UI 의 BE). resolver 체인 최우선·close-on-merge
+    가능. ⭐anti-IDOR **2층**: ①story 가 caller org 소속 ②**repo 가 org 의 설치 context**(installation account)에
+    속함. 둘 다 미충족 = generic 404(타 org/repo 존재 oracle 0). per-org 격리·upsert·created_by=caller member.
+    """
+    if not body.repo_full_name.strip() or "/" not in body.repo_full_name or body.pr_number <= 0:
+        return JSONResponse(status_code=422, content={"error": "invalid_pr_identity"})
+    # ①story org-scope 검증(타 org story_id 차단·존재 여부 노출 금지).
+    story = (
+        await session.execute(
+            select(Story).where(
+                Story.id == body.story_id, Story.org_id == org_id, Story.deleted_at.is_(None)
+            )
+        )
+    ).scalar_one_or_none()
+    if story is None:
+        return JSONResponse(status_code=404, content={"error": "story_not_found"})
+    # ②repo 가 org 의 설치 context 에 속하는지(anti-IDOR·임의 repo high link 차단). org 의 active installation
+    # account_login 과 repo owner 일치 요구. 미설치/owner 불일치 = generic 404(repo 존재 oracle 0).
+    inst = (
+        await session.execute(
+            select(GithubInstallation).where(
+                GithubInstallation.org_id == org_id, GithubInstallation.suspended_at.is_(None)
+            )
+        )
+    ).scalar_one_or_none()
+    repo_owner = body.repo_full_name.strip().split("/", 1)[0].lower()
+    if inst is None or not inst.account_login or repo_owner != inst.account_login.lower():
+        return JSONResponse(status_code=404, content={"error": "repo_not_in_org_context"})
+    try:
+        created_by: uuid.UUID | None = uuid.UUID(auth.user_id)
+    except (ValueError, TypeError):
+        created_by = None
+    link = await upsert_link(
+        session, org_id, body.story_id, body.repo_full_name, body.pr_number,
+        link_source="explicit", confidence="high", created_by=created_by,
+        evidence={"by": "explicit_api"},
+    )
+    await session.commit()
+    return JSONResponse(
+        content={
+            "id": str(link.id),
+            "story_id": str(body.story_id),
+            "repo_full_name": link.repo_full_name,
+            "pr_number": link.pr_number,
+            "link_source": "explicit",
+            "confidence": "high",
         }
     )
