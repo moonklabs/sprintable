@@ -2,7 +2,7 @@
 
 import { useCallback, useEffect, useState } from 'react';
 import { useTranslations } from 'next-intl';
-import { Shield, ShieldCheck, ShieldX, RotateCcw, Pencil, History, User } from 'lucide-react';
+import { Shield, ShieldCheck, ShieldX, RotateCcw, Pencil, History, User, ChevronDown } from 'lucide-react';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import type { GateItem } from '@/components/kanban/types';
@@ -47,6 +47,7 @@ export function DocGateSection({
   const [revisions, setRevisions] = useState<DocRevision[]>([]);
   const [memberNames, setMemberNames] = useState<Record<string, string>>({});
   const [busy, setBusy] = useState(false);
+  const [revOpen, setRevOpen] = useState(false); // 기본 접힘(본문 우선·이력 secondary — 개수가 레이아웃 못 밀어냄)
 
   const load = useCallback(async () => {
     const [gates, revsJson, membersJson] = await Promise.all([
@@ -90,7 +91,7 @@ export function DocGateSection({
   if (!state && !hasHistory) return null;
 
   return (
-    <section aria-label={t('docGateLabel')} className="mb-4 space-y-2 rounded-xl border border-border bg-muted/20 p-3">
+    <section aria-label={t('docGateLabel')} className="mb-4 max-h-[40vh] space-y-2 overflow-y-auto rounded-xl border border-border bg-muted/20 p-3">
       <div className="flex flex-wrap items-center gap-2">
         {meta && MetaIcon ? (
           <Badge variant={meta.variant} className="shrink-0 gap-1">
@@ -135,22 +136,31 @@ export function DocGateSection({
         </div>
       ) : null}
 
-      {/* revision 타임라인(v1→vN·created_at 오름차) */}
+      {/* revision 타임라인(v1→vN·created_at 오름차). 접기-기본 + 바운드 scroll → 이력 개수가 본문 못 밀어냄. */}
       {revisions.length > 0 ? (
         <div className="space-y-1">
-          <p className="inline-flex items-center gap-1 text-[11px] font-medium text-muted-foreground">
-            <History className="size-3" />
+          <button
+            type="button"
+            onClick={() => setRevOpen((o) => !o)}
+            aria-expanded={revOpen}
+            className="inline-flex items-center gap-1 text-[11px] font-medium text-muted-foreground transition-colors hover:text-foreground"
+          >
+            <History className="size-3 shrink-0" />
             {t('docGateRevisions')}
-          </p>
-          <ul className="space-y-0.5">
-            {revisions.map((rev, i) => (
-              <li key={rev.id} className="flex items-center gap-2 text-[11px] text-muted-foreground">
-                <span className="shrink-0 font-mono text-foreground">v{i + 1}</span>
-                <span className="shrink-0">{resolveName(rev.created_by)}</span>
-                <span className="truncate">{fmtDate(rev.created_at)}</span>
-              </li>
-            ))}
-          </ul>
+            <span className="text-muted-foreground/70">({revisions.length})</span>
+            <ChevronDown className={`size-3 shrink-0 transition-transform ${revOpen ? 'rotate-180' : ''}`} />
+          </button>
+          {revOpen ? (
+            <ul className="max-h-32 space-y-0.5 overflow-y-auto pr-1">
+              {revisions.map((rev, i) => (
+                <li key={rev.id} className="flex items-center gap-2 text-[11px] text-muted-foreground">
+                  <span className="shrink-0 font-mono text-foreground">v{i + 1}</span>
+                  <span className="shrink-0">{resolveName(rev.created_by)}</span>
+                  <span className="min-w-0 truncate">{fmtDate(rev.created_at)}</span>
+                </li>
+              ))}
+            </ul>
+          ) : null}
         </div>
       ) : null}
     </section>
