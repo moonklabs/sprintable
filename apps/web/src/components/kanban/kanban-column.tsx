@@ -129,7 +129,7 @@ export function KanbanColumn({
         ? 'bg-success/5'
         : isInvalidTarget
           ? 'bg-muted/20 opacity-45'
-          : statusColor.tint;
+          : 'bg-transparent'; // E-MODERN A: status 색 tint 배경 전면 제거(색=신호만·헤더 dot이 유일 상태색)
 
   return (
     <div
@@ -137,7 +137,7 @@ export function KanbanColumn({
       className={`flex h-full flex-col rounded-xl p-3 transition ${collapsed ? 'w-[52px] min-w-[52px]' : 'w-[280px] min-w-[240px]'} ${colClass}`}
     >
       {isDragging && isValidTarget && (
-        <div className="mb-3 rounded-xl border border-success-border/30 bg-success-tint px-2 py-1 text-center text-[10px] font-medium uppercase tracking-widest text-success/70">
+        <div className="mb-3 rounded-md border border-success-border/30 bg-success-tint px-2 py-1 text-center text-[10px] font-medium text-success/70">
           {t('validDrop')}
         </div>
       )}
@@ -155,39 +155,33 @@ export function KanbanColumn({
               >
                 <ChevronDown className="h-3.5 w-3.5" />
               </button>
-              <Badge
-                variant="secondary"
-                className={`rounded-full px-2 font-mono text-[11px] shadow-sm ${wipExceeded ? 'bg-destructive/15 text-destructive' : ''}`}
-              >
+              <span className={`text-[11px] tabular-nums ${wipExceeded ? 'text-destructive' : 'text-muted-foreground'}`}>
                 {totalCount !== undefined ? (hasMore ? `${totalCount}+` : totalCount) : stories.length}
-              </Badge>
+              </span>
             </>
           ) : (
             <>
-              <h3 className="flex items-center gap-2 text-xs font-semibold uppercase tracking-wider text-muted-foreground">
-                <span className={`h-2 w-2 rounded-full ${statusColor.dot}`} aria-hidden="true" />
+              <h3 className="flex items-center gap-2 text-xs font-semibold text-foreground">
+                <span className={`size-1.5 shrink-0 rounded-full ${statusColor.dot}`} aria-hidden="true" />
                 {label}
               </h3>
               <div className="flex items-center gap-1.5">
                 {/* AC1: WIP 초과 배지 */}
                 {wipExceeded && (
-                  <Badge variant="destructive" className="rounded-full px-2 font-mono text-[10px]">
+                  <Badge variant="destructive" className="text-[10px]">
                     {t('wipLimitExceeded')}
                   </Badge>
                 )}
                 {/* AC1: WIP limit 배지 (설정된 경우) */}
                 {wipLimit !== null && wipLimit !== undefined && !wipExceeded && (
-                  <Badge variant="secondary" className="rounded-full px-2 font-mono text-[10px] text-muted-foreground">
+                  <Badge variant="outline" className="text-[10px] text-muted-foreground">
                     {t('wipLimitLabel')}: {wipLimit}
                   </Badge>
                 )}
-                {/* 카드 수 배지 */}
-                <Badge
-                  variant="secondary"
-                  className={`rounded-full px-2.5 font-mono text-[11px] shadow-sm ${wipExceeded ? 'bg-destructive/15 text-destructive' : ''}`}
-                >
+                {/* 카드 수 — pill/shadow/mono 제거·tabular(정렬 유지·결 정갈) */}
+                <span className={`text-xs tabular-nums ${wipExceeded ? 'text-destructive' : 'text-muted-foreground'}`}>
                   {totalCount !== undefined ? (hasMore ? `${totalCount}+` : totalCount) : stories.length}
-                </Badge>
+                </span>
                 {/* AC5: WIP limit 편집 버튼 */}
                 <button
                   type="button"
