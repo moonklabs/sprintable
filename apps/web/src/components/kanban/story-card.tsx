@@ -9,17 +9,13 @@ import { Badge } from '@/components/ui/badge';
 import { AlertTriangle, ChevronRight, EyeOff, History, Pause, Rocket, Zap, ZapOff, type LucideIcon } from 'lucide-react';
 import { LabelChip } from '@/components/ui/label-chip';
 
-const EPIC_COLORS = [
-  'info',
-  'success',
-  'secondary',
-  'outline',
-  'info',
-] as const;
+// E-MODERN A: 에픽 식별 dot — 기존 시맨틱 토큰만(신규 토큰/raw 팔레트 0). 신호색(warning=blocked·
+// accent-claim=agent·destructive) 회피해 의미 충돌 0. 랜덤 5색 채움 배지(loud)는 퇴출.
+const EPIC_DOT_CLASSES = ['bg-info', 'bg-success', 'bg-secondary', 'bg-muted-foreground'] as const;
 
-function getEpicColor(epicId: string): 'info' | 'success' | 'secondary' | 'outline' {
+function getEpicDotClass(epicId: string): string {
   const hash = epicId.split('').reduce((a, c) => a + c.charCodeAt(0), 0);
-  return EPIC_COLORS[hash % EPIC_COLORS.length]!;
+  return EPIC_DOT_CLASSES[hash % EPIC_DOT_CLASSES.length]!;
 }
 
 function getInitials(name: string): string {
@@ -224,47 +220,43 @@ export function StoryCard({ story, epicName, assignee, assignees, onClick, onEdi
       {...listeners}
       onClick={onClick}
       onContextMenu={handleContextMenu}
-      className={`group relative cursor-pointer overflow-hidden rounded-lg p-3 transition ${
-        hasAgent
-          ? 'bg-gradient-to-br from-accent-claim/8 to-purple-500/4 ring-1 ring-accent-claim/30 hover:ring-accent-claim/60'
-          : 'bg-background shadow-sm hover:shadow-md hover:bg-background'
-      }`}
+      title={`#${story.id.slice(0, 6)}`}
+      className="group relative cursor-pointer rounded-lg border border-border bg-card p-3 transition hover:border-muted-foreground/30"
     >
-      {hasAgent && (
-        <div className="absolute inset-0 pointer-events-none rounded-lg border border-transparent bg-gradient-to-r from-accent-claim/10 to-purple-500/10 opacity-50" />
-      )}
+      {/* E-MODERN A: 에픽 = 작은 색 dot + muted 라벨(일관 식별·랜덤 채움배지 퇴출) */}
       {epicName && story.epic_id ? (
-        <Badge variant={getEpicColor(story.epic_id)} className="mb-2 max-w-full">
-          <span className="min-w-0 truncate leading-none">{epicName}</span>
-        </Badge>
+        <div className="mb-1.5 flex items-center gap-1.5 text-[11px] text-muted-foreground">
+          <span className={`size-1.5 shrink-0 rounded-sm ${getEpicDotClass(story.epic_id)}`} aria-hidden="true" />
+          <span className="min-w-0 truncate">{epicName}</span>
+        </div>
       ) : null}
-      {/* Zone A meta row — dep 뱃지 + label 칩 + workflow-line badge(boy-scout 1배지) */}
+      {/* E-MODERN A meta row — blocked=신호(text-warning+dot)·label 칩·line/gate=boy-scout 1배지(muted) */}
       {(blockedBy.length > 0 && story.status !== 'done') || labels.length > 0 || lineBadge ? (
-        <div className="mb-2 flex flex-wrap gap-1">
+        <div className="mb-2 flex flex-wrap items-center gap-1.5">
           {blockedBy.length > 0 && story.status !== 'done' ? (
-            <Badge variant="warning" className="gap-1">
-              <AlertTriangle className="size-3 shrink-0" />
-              <span>{t('blockedBy', { count: blockedBy.length })}</span>
-            </Badge>
+            <span className="inline-flex items-center gap-1 text-[10px] text-warning">
+              <span className="size-1.5 shrink-0 rounded-full bg-warning" aria-hidden="true" />
+              {t('blockedBy', { count: blockedBy.length })}
+            </span>
           ) : null}
           {labels.map((label) => (
             <LabelChip key={label.id} label={label} />
           ))}
           {lineBadge === 'pending_gate' ? (
-            <Badge variant="info" className="gap-1">
+            <Badge variant="outline" className="gap-1">
               <Pause className="size-3 shrink-0" />
               <span>{pendingGateType ? `${pendingGateType} ${tCage('gatePending')}` : tCage('gatePending')}</span>
             </Badge>
           ) : lineBadgeMeta ? (
-            <Badge variant={lineBadgeMeta.variant} className="gap-1">
+            <Badge variant="outline" className="gap-1">
               <lineBadgeMeta.Icon className="size-3 shrink-0" />
               <span>{tCage(lineBadgeMeta.labelKey)}</span>
             </Badge>
           ) : null}
         </div>
       ) : null}
-      <p className="relative z-10 line-clamp-2 text-sm font-medium leading-5 text-foreground">{story.title}</p>
-      <div className="relative z-10 mt-3 flex items-center justify-between gap-2">
+      <p className="line-clamp-2 text-sm font-medium leading-snug text-foreground">{story.title}</p>
+      <div className="mt-2.5 flex items-center justify-between gap-2">
         <div className="flex items-center gap-2">
           {assigneeList.length > 0 ? (
             <div className="flex -space-x-1.5">
@@ -294,50 +286,49 @@ export function StoryCard({ story, epicName, assignee, assignees, onClick, onEdi
             <div />
           )}
           {hasAgent && (
-            <div className="flex items-center gap-1.5 text-[10px] font-mono text-accent-claim">
-              <span className="relative flex h-1.5 w-1.5">
-                <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-accent-claim opacity-75"></span>
-                <span className="relative inline-flex rounded-full h-1.5 w-1.5 bg-accent-claim"></span>
-              </span>
-              <span>&gt; Agent active</span>
-            </div>
+            <span className="inline-flex items-center gap-1 text-[10px] text-accent-claim">
+              <span className="size-1.5 shrink-0 rounded-full bg-accent-claim" aria-hidden="true" />
+              {t('filterAgents')}
+            </span>
           )}
         </div>
         <div className="flex items-center gap-2">
-          <span className="font-mono text-[10px] text-muted-foreground/50">#{story.id.slice(0, 6)}</span>
           {story.story_points != null ? (
-            <Badge variant="secondary" className="font-mono text-[10px] px-1.5 py-0">{story.story_points}</Badge>
+            <span className="text-[11px] tabular-nums text-muted-foreground">{t('storyPointsBadge', { count: story.story_points })}</span>
           ) : null}
-          {lastExecution ? (
-            <span
-              title={[
-                lastExecution.rule_name ?? '워크플로우 실행됨',
-                lastExecution.completed_at ? new Date(lastExecution.completed_at).toLocaleString() : '',
-                lastExecution.status === 'matched' ? '✅ 규칙 매칭' : '⊘ 규칙 없음',
-              ].filter(Boolean).join(' · ')}
-              className="flex h-5 w-5 items-center justify-center"
-            >
-              {lastExecution.status === 'matched' ? (
-                <Zap className="h-3 w-3 text-warning" />
-              ) : (
-                <ZapOff className="h-3 w-3 text-muted-foreground/40" />
-              )}
-            </span>
-          ) : null}
-          {projectId ? (
-            <button
-              onClick={(e) => void handleKickoff(e)}
-              disabled={triggering}
-              title={t('kickoff')}
-              className="flex h-5 w-5 items-center justify-center rounded text-muted-foreground/60 hover:text-primary hover:bg-primary/10 disabled:opacity-40 transition"
-            >
-              {triggering ? (
-                <span className="h-3 w-3 animate-spin rounded-full border border-current border-t-transparent" />
-              ) : (
-                <Rocket className="h-3 w-3" />
-              )}
-            </button>
-          ) : null}
+          {/* E-MODERN A: 액션 점진 공개 — 데스크탑 hover 노출·모바일(hover 없음)은 상시(kickoff 도달성=기능 동결 보존) */}
+          <span className="flex items-center gap-1.5 opacity-100 transition focus-within:opacity-100 sm:opacity-0 sm:group-hover:opacity-100">
+            {lastExecution ? (
+              <span
+                title={[
+                  lastExecution.rule_name ?? '워크플로우 실행됨',
+                  lastExecution.completed_at ? new Date(lastExecution.completed_at).toLocaleString() : '',
+                  lastExecution.status === 'matched' ? '✅ 규칙 매칭' : '⊘ 규칙 없음',
+                ].filter(Boolean).join(' · ')}
+                className="flex h-5 w-5 items-center justify-center"
+              >
+                {lastExecution.status === 'matched' ? (
+                  <Zap className="h-3 w-3 text-warning" />
+                ) : (
+                  <ZapOff className="h-3 w-3 text-muted-foreground/40" />
+                )}
+              </span>
+            ) : null}
+            {projectId ? (
+              <button
+                onClick={(e) => void handleKickoff(e)}
+                disabled={triggering}
+                title={t('kickoff')}
+                className="flex h-5 w-5 items-center justify-center rounded text-muted-foreground/60 hover:text-primary hover:bg-primary/10 disabled:opacity-40 transition"
+              >
+                {triggering ? (
+                  <span className="h-3 w-3 animate-spin rounded-full border border-current border-t-transparent" />
+                ) : (
+                  <Rocket className="h-3 w-3" />
+                )}
+              </button>
+            ) : null}
+          </span>
         </div>
       </div>
 

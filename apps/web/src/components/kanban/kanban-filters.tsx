@@ -31,19 +31,19 @@ export function KanbanFilters({
 
   return (
     <div className="flex flex-col gap-2 sm:flex-row sm:flex-wrap sm:items-center">
-      <OperatorSelect value={selectedSprintId} onChange={(e) => onSprintChange(e.target.value)} className="w-full rounded-xl bg-background sm:w-auto sm:min-w-[190px]">
+      <OperatorSelect value={selectedSprintId} onChange={(e) => onSprintChange(e.target.value)} className="w-full rounded-lg bg-background text-xs sm:w-auto sm:min-w-[190px]">
         <option value="">{t('allSprints')}</option>
         {sprints.map((sprint) => (
           <option key={sprint.id} value={sprint.id}>{sprint.title}</option>
         ))}
       </OperatorSelect>
-      <OperatorSelect value={selectedEpicId} onChange={(e) => onEpicChange(e.target.value)} className="w-full rounded-xl bg-background sm:w-auto sm:min-w-[190px]">
+      <OperatorSelect value={selectedEpicId} onChange={(e) => onEpicChange(e.target.value)} className="w-full rounded-lg bg-background text-xs sm:w-auto sm:min-w-[190px]">
         <option value="">{t('allEpics')}</option>
         {epics.map((epic) => (
           <option key={epic.id} value={epic.id}>{epic.title}</option>
         ))}
       </OperatorSelect>
-      <OperatorSelect value={selectedAssigneeId} onChange={(e) => onAssigneeChange(e.target.value)} className="w-full rounded-xl bg-background sm:w-auto sm:min-w-[190px]">
+      <OperatorSelect value={selectedAssigneeId} onChange={(e) => onAssigneeChange(e.target.value)} className="w-full rounded-lg bg-background text-xs sm:w-auto sm:min-w-[190px]">
         <option value="">{t('allAssignees')}</option>
         {members.map((member) => (
           <option key={member.id} value={member.id}>{member.name}</option>
