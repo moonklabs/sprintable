@@ -99,14 +99,15 @@ async def fetch_pr_review_rounds(repo: str, pr_number: int) -> int:
         return 0
 
 
-async def fetch_status_check_rollup(repo: str, head_sha: str) -> str | None:
-    """E-DG-REAL S5 Phase S: PR head commit의 집계 CI 상태를 GitHub GraphQL statusCheckRollup으로 조회.
+async def fetch_status_check_rollup(repo: str, head_sha: str, token: str) -> str | None:
+    """E-GHAPP Bot-M.1: PR head commit의 집계 CI 상태를 GitHub GraphQL statusCheckRollup으로 조회.
 
-    반환 'success'|'failure'|None. GITHUB_TOKEN 없거나 실패/미완료(PENDING 등)면 None(무영향·CI unknown 유지).
-    capture_pr_ci_verdict가 success→pass·그 외→fail로 채점하므로 success/failure만 의미한다. 한 콜로 PR의
-    모든 체크 집계 상태를 얻어, CI 이벤트가 없는 머지 이벤트에서도 게이트에 실 CI를 채운다.
+    반환 'success'|'failure'|None. **token(installation access token)**으로 호출 — token 없음/형식오류/
+    실패/미완료(PENDING 등)면 None(무영향·CI unknown 유지). ⚠️**PAT(GITHUB_TOKEN) fallback 없음**(Bot-M.1
+    게이트): 토큰은 호출자가 org→installation→get_installation_token 으로 해소해 전달한다(org-scope 보장).
+    capture_pr_ci_verdict가 success→pass·그 외→fail로 채점하므로 success/failure만 의미한다.
     """
-    if not GITHUB_TOKEN or not repo or "/" not in repo or not head_sha:
+    if not token or not repo or "/" not in repo or not head_sha:
         return None
     owner, name = repo.split("/", 1)
     query = (
@@ -120,7 +121,7 @@ async def fetch_status_check_rollup(repo: str, head_sha: str) -> str | None:
             resp = await client.post(
                 "https://api.github.com/graphql",
                 headers={
-                    "Authorization": f"Bearer {GITHUB_TOKEN}",
+                    "Authorization": f"Bearer {token}",
                     "Accept": "application/vnd.github+json",
                 },
                 json={"query": query, "variables": {"owner": owner, "name": name, "oid": head_sha}},
