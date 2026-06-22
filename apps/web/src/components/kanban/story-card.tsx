@@ -248,7 +248,9 @@ export function StoryCard({ story, epicName, assignee, assignees, onClick, onEdi
               <span>{pendingGateType ? `${pendingGateType} ${tCage('gatePending')}` : tCage('gatePending')}</span>
             </Badge>
           ) : lineBadgeMeta ? (
-            <Badge variant="outline" className="gap-1">
+            // 가디언 fold-in: 실 alert(handoff_stuck=destructive·waiting_human=warning)는 색=신호 유지,
+            // 정보성(engine_degraded·grandfathered)만 outline. LINE_BADGE_META가 이미 그 위계라 variant 원복.
+            <Badge variant={lineBadgeMeta.variant} className="gap-1">
               <lineBadgeMeta.Icon className="size-3 shrink-0" />
               <span>{tCage(lineBadgeMeta.labelKey)}</span>
             </Badge>
