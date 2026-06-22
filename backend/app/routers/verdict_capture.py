@@ -26,6 +26,8 @@ from app.models.github_installation import GithubInstallation, GithubWebhookDeli
 from app.models.pm import Story
 from app.routers.cron import CRON_SECRET, _err, _ok, verify_cron
 from app.services.github_app import get_installation_token
+from app.services.pr_story_link import resolve_story_for_pr
+from app.services.story_status_events import advance_story_to_done
 from app.services.verdict_capture import (
     capture_pr_ci_verdict,
     capture_review_verdict,
@@ -269,21 +271,21 @@ async def _process_webhook_event(
     session: AsyncSession, source: str, event: str, payload: dict, installation_id: int | None,
     delivery: GithubWebhookDelivery,
 ) -> tuple[dict, str]:
-    """검증·dedup 통과한 이벤트 처리(legacy/app 라우팅). (result, status) 반환. status∈processed|ignored.
+    """검증·dedup 통과한 이벤트 처리(legacy/app 라우팅·Bot-L.1 resolver 체인). (result, status) 반환.
 
-    org resolve: **legacy**=story.org_id(기존). **app**=installation.id→github_installation(suspended 제외)
-    →그 org_id만(anti-IDOR·payload/repo-owner 추론 금지)·story 가 그 org 소속 아니면 거부(cross-org spoof).
-    native CI(Bot-M.1)=installation 토큰. **caller 가 동일 트랜잭션으로 commit/rollback**(여기선 commit 안 함).
+    org resolve: **app**=installation.id→github_installation(suspended 제외)→그 org_id만(anti-IDOR·payload
+    추론 금지·resolve 先). **legacy**=resolver 가 SID 전역→story.org_id(무회귀). story 해소=resolver 체인
+    (explicit>auto high>SID>text). **close-on-merge**=should_auto_close(confident)+merge → advance_story_to_done
+    (단일 idempotent 헬퍼). native CI(Bot-M.1)=installation 토큰. caller 가 동일 트랜잭션으로 commit/rollback.
     """
-    # AC②: [SID:] 태그 없으면 skip(거짓기록 금지).
-    story_id = next((sid for t in _candidate_texts(payload) if (sid := parse_story_id(t))), None)
-    if story_id is None:
-        return {"skipped_reason": "no_sid_tag", "recorded": []}, "ignored"
+    texts = _candidate_texts(payload)
+    repo = (payload.get("repository") or {}).get("full_name") or ""
+    pr_number, merged, ci_conclusion, head_sha = _extract_pr_ci(event, payload)
 
     installation: GithubInstallation | None = None
+    org_id: uuid.UUID | None = None
     if source == "app":
-        # ⭐app: **installation→org resolve 를 story 조회보다 먼저**(org context 확립 前 전역 story 조회 금지
-        # — 미등록 installation 으로 story 존재 oracle 차단). org 는 installation DB 로만(payload 추론 금지).
+        # ⭐app: installation→org resolve 先(미등록 installation 으로 story 존재 oracle 차단·payload 추론 금지).
         if installation_id is None:
             return {"skipped_reason": "no_installation_id", "recorded": []}, "ignored"
         installation = (
@@ -295,38 +297,21 @@ async def _process_webhook_event(
             )
         ).scalar_one_or_none()
         if installation is None:
-            # 미등록/suspended installation → story 조회 없이 graceful ignore(side-effect 0·oracle 0).
             return {"skipped_reason": "installation_not_registered_or_suspended", "recorded": []}, "ignored"
         org_id = installation.org_id
         delivery.org_id = org_id
-        # story 를 **resolved org 로 스코프** 조회 — cross-org 차단 + 존재 oracle 차단(타 org story 는 not_found).
-        story = (
-            await session.execute(
-                select(Story).where(
-                    Story.id == story_id, Story.org_id == org_id, Story.deleted_at.is_(None)
-                )
-            )
-        ).scalar_one_or_none()
-        if story is None:
-            return {"skipped_reason": "story_not_found", "recorded": []}, "ignored"
-    else:
-        # legacy: 기존 동작 — Story.id 전역 조회 → org = story.org_id.
-        story = (
-            await session.execute(
-                select(Story).where(Story.id == story_id, Story.deleted_at.is_(None))
-            )
-        ).scalar_one_or_none()
-        if story is None:
-            return {"skipped_reason": "story_not_found", "recorded": []}, "ignored"
-        org_id = story.org_id
-        delivery.org_id = org_id
 
-    repo = (payload.get("repository") or {}).get("full_name") or ""
-    pr_number, merged, ci_conclusion, head_sha = _extract_pr_ci(event, payload)
-
-    # 행동 가능한 신호(머지 또는 CI 완료)가 없으면 skip(in_progress 등).
+    # 행동 가능한 신호(머지 또는 CI 완료)가 없으면 skip(in_progress 등) — resolve/side-effect 前.
     if not merged and ci_conclusion is None:
         return {"skipped_reason": "no_actionable_signal", "recorded": []}, "ignored"
+
+    # Bot-L.1 resolver 체인: explicit>auto high>SID>text. app=org-scoped(org 알려짐)·legacy=SID 전역→story.org_id.
+    rl = await resolve_story_for_pr(session, org_id, repo, pr_number, texts)
+    if rl.story_id is None:
+        return {"skipped_reason": rl.reason, "recorded": []}, "ignored"  # no_match/auto suggestion 등.
+    story_id = rl.story_id
+    org_id = rl.org_id  # app=입력 org·legacy=story.org_id(resolver 검증). 단일 진실원.
+    delivery.org_id = org_id
 
     # Bot-M.1: native CI 채움 — **installation 토큰**(org-scope)으로 statusCheckRollup pull(⚠️PAT fallback 없음).
     # app source 는 위서 resolve된 installation(suspended 제외) 직접 사용·legacy 는 org→installation resolve.
@@ -373,6 +358,19 @@ async def _process_webhook_event(
     )
     if native_ci_state is not None:
         result = {**result, "native_ci": {"state": native_ci_state, "reason": native_ci_reason}}
+
+    # Bot-L.1 close-on-merge: **confident link**(explicit·auto high·sid)+merge → story done(idempotent).
+    # med/low/text suggestion 은 should_auto_close=False → close 안 함(오매치 done 방지). gate-approve 와
+    # 동일 advance_story_to_done 헬퍼(단일 정책·중복 advance 0). actor=system(자동). already-done=no-op.
+    if merged and rl.should_auto_close:
+        story_obj = await session.get(Story, story_id)
+        closed = False
+        if story_obj is not None and story_obj.org_id == org_id:  # org-scope 재확인(anti-IDOR).
+            closed = await advance_story_to_done(session, org_id, story_obj, actor_type="system")
+        result = {
+            **result,
+            "auto_close": {"closed": closed, "source": rl.source, "confidence": rl.confidence},
+        }
     return result, "processed"
 
 

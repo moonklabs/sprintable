@@ -43,16 +43,26 @@ def _sign(body: bytes, secret: str) -> str:
 
 
 def _result(val):
+    """val 이 list 면 scalars().all()=val(스캔 쿼리)·아니면 scalar_one_or_none=val(단건 쿼리)."""
     r = MagicMock()
-    r.scalar_one_or_none.return_value = val
+    if isinstance(val, list):
+        r.scalar_one_or_none.return_value = None
+        r.scalars.return_value.all.return_value = val
+    else:
+        r.scalar_one_or_none.return_value = val
+        r.scalars.return_value.all.return_value = []
     return r
 
 
 def _mk_session(execute_results=(), *, flush_error=False):
-    """execute 는 호출 순서대로 execute_results 의 scalar 값 반환(여분은 None). add sync·flush 옵션 IntegrityError."""
+    """execute 는 호출 순서대로 execute_results 반환(여분 빈 결과). add sync·flush 옵션 IntegrityError.
+
+    Bot-L.1 resolver 쿼리 순서 — app: [installation, explicit_link, auto_stories(list), sid_story],
+    legacy: [sid_story(전역)]. native CI skip(ci=failure)·close-on-merge skip(merged=False) 가정.
+    """
     session = AsyncMock()
     session.add = MagicMock()
-    seq = [_result(v) for v in execute_results] + [_result(None) for _ in range(4)]
+    seq = [_result(v) for v in execute_results] + [_result(None) for _ in range(6)]
     session.execute = AsyncMock(side_effect=seq)
     session.flush = AsyncMock(
         side_effect=IntegrityError("dup", {}, Exception()) if flush_error else None
@@ -149,8 +159,9 @@ async def test_malformed_json_with_invalid_sig_401_not_parse_error():
 # ── dual-secret source 결정 ──────────────────────────────────────────────────────
 @pytest.mark.anyio
 async def test_app_source_routed_by_app_secret():
-    """app secret 서명 → source=app → installation resolve(org_a) 先 → org-scoped story → capture(org_a)."""
-    session = _mk_session([_inst(ORG_A), _story(ORG_A)])  # execute: installation→story 순.
+    """app secret 서명 → source=app → installation resolve(org_a) 先 → resolver(explicit∅·auto∅·SID) → capture(org_a)."""
+    # 쿼리 순서: installation → explicit_link(None) → auto_stories([]) → sid_story(org_a).
+    session = _mk_session([_inst(ORG_A), None, [], _story(ORG_A)])
     resp, session, cap = await _post(_wf(), sign_secret=APP_SECRET, session=session)
     assert resp.status_code == 200
     cap.assert_awaited_once()
@@ -241,8 +252,8 @@ async def test_app_unregistered_or_suspended_installation_ignored():
 @pytest.mark.anyio
 async def test_app_cross_org_sid_not_found_via_scoped_query():
     """app installation=org_a resolve인데 SID story가 타 org → org-scoped 조회서 미매치(not_found)·capture 0."""
-    # execute: installation(org_a) → story scoped query(org_a) 미매치 → None.
-    session = _mk_session([_inst(ORG_A), None])
+    # execute: installation(org_a) → explicit_link(None) → auto_stories([]) → sid scoped(org_a) 미매치(None).
+    session = _mk_session([_inst(ORG_A), None, [], None])
     resp, session, cap = await _post(_wf(), sign_secret=APP_SECRET, session=session)
     assert resp.status_code == 200
     assert "story_not_found" in resp.text  # 전역 lookup 아닌 org-scoped 미매치.

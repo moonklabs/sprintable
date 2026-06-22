@@ -14,6 +14,7 @@ from datetime import datetime, timezone
 from fastapi import APIRouter, Depends, Query
 from fastapi.responses import JSONResponse, RedirectResponse
 from jose import jwt
+from pydantic import BaseModel
 from sqlalchemy import delete, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -21,12 +22,14 @@ from app.core.config import settings
 from app.dependencies.auth import AuthContext, get_current_user, get_verified_org_id, require_admin
 from app.dependencies.database import get_db
 from app.models.github_installation import GithubInstallation, GithubInstallNonce
+from app.models.pm import Story
 from app.services.github_app import (
     fetch_installation_metadata,
     sign_install_state,
     verify_install_state,
     verify_installation_owned,
 )
+from app.services.pr_story_link import upsert_link
 
 router = APIRouter(prefix="/api/v2/integrations/github", tags=["github-integration"])
 
@@ -147,5 +150,56 @@ async def github_status(
             "account_type": inst.account_type,
             "repository_selection": inst.repository_selection,
             "suspended": inst.suspended_at is not None,
+        }
+    )
+
+
+class _ExplicitLinkBody(BaseModel):
+    story_id: uuid.UUID
+    repo_full_name: str
+    pr_number: int
+
+
+@router.post("/links")
+async def create_explicit_link(
+    body: _ExplicitLinkBody,
+    org_id: uuid.UUID = Depends(get_verified_org_id),
+    auth: AuthContext = Depends(get_current_user),
+    session: AsyncSession = Depends(get_db),
+) -> JSONResponse:
+    """PR↔story **명시연결**(explicit·confidence high·Bot-L.2 UI 의 BE). resolver 체인 최우선·close-on-merge
+    가능. ⭐anti-IDOR: story 가 **caller org 소속**이어야(미소속/부재 = generic 404·타 org 존재 oracle 0).
+    per-org 격리·upsert(uq org,repo,pr)·created_by=caller member.
+    """
+    if not body.repo_full_name.strip() or body.pr_number <= 0:
+        return JSONResponse(status_code=422, content={"error": "invalid_pr_identity"})
+    # story org-scope 검증(타 org story_id 차단·존재 여부 노출 금지).
+    story = (
+        await session.execute(
+            select(Story).where(
+                Story.id == body.story_id, Story.org_id == org_id, Story.deleted_at.is_(None)
+            )
+        )
+    ).scalar_one_or_none()
+    if story is None:
+        return JSONResponse(status_code=404, content={"error": "story_not_found"})
+    try:
+        created_by: uuid.UUID | None = uuid.UUID(auth.user_id)
+    except (ValueError, TypeError):
+        created_by = None
+    link = await upsert_link(
+        session, org_id, body.story_id, body.repo_full_name, body.pr_number,
+        link_source="explicit", confidence="high", created_by=created_by,
+        evidence={"by": "explicit_api"},
+    )
+    await session.commit()
+    return JSONResponse(
+        content={
+            "id": str(link.id),
+            "story_id": str(body.story_id),
+            "repo_full_name": link.repo_full_name,
+            "pr_number": link.pr_number,
+            "link_source": "explicit",
+            "confidence": "high",
         }
     )

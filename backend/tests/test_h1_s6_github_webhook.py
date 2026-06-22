@@ -97,9 +97,11 @@ async def _post(payload: dict, *, event: str, story=..., sign=True, installation
     session = AsyncMock()
     session.add = MagicMock()  # add 는 sync(AsyncMock 경고 방지).
     result = MagicMock()
-    result.scalar_one_or_none.return_value = (
-        MagicMock(org_id=ORG_ID) if story is ... else story
-    )
+    # resolver 가 story.id 를 반환 → SID-source capture story_id 검증 위해 mock story.id=STORY_ID.
+    # auto_match `.scalars().all()` 는 빈 리스트(legacy=org None 이라 애초 미실행이나 방어).
+    story_mock = MagicMock(id=STORY_ID, org_id=ORG_ID) if story is ... else story
+    result.scalar_one_or_none.return_value = story_mock
+    result.scalars.return_value.all.return_value = []
     if installation is ...:
         session.execute = AsyncMock(return_value=result)  # 모든 query 동일(기존 동작).
     else:

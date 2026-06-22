@@ -304,21 +304,16 @@ async def _advance_story_on_merge_approve(session: AsyncSession, gate: Gate, new
         return
     from app.models.pm import Story  # 순환 회피 lazy import.
 
-    story = await session.get(Story, gate.work_item_id)
-    if story is not None and story.status != "done":
-        old_status = story.status
-        story.status = "done"
-        await session.flush()
-        # 41a6e294: gate-driven done도 정상 status-change side-effects를 발화 — events(→L1
-        # activity_events 캡처=verdict 증거원)·webhook·L2 trigger·notification·activity. status만
-        # 직접 set하면 활동그래프 누락(게이트가 만든 done이 게이트 증거에 안 잡히는 자기모순).
-        # actor=resolver(승인 휴먼·#1504로 휴먼 보장). 정상 board 경로와 공유 helper(parity).
-        from app.services.story_status_events import emit_story_status_changed
+    # Bot-L.1: gate-approve 와 PR-merge close-on-merge 가 **단일 idempotent 헬퍼**(advance_story_to_done)를
+    # 공유한다 — 상태전이 정책을 1곳에 둬 중복 advance/drift 0. 헬퍼가 done side-effects(events→L1 verdict
+    # 증거·webhook·L2·notification·activity)를 발화(board parity). actor=resolver(승인 휴먼·#1504). 이미
+    # done/부재면 no-op(멱등).
+    from app.services.story_status_events import advance_story_to_done
 
-        await emit_story_status_changed(
-            session, gate.org_id, story, old_status,
-            actor_id=gate.resolver_id, actor_type="human",
-        )
+    story = await session.get(Story, gate.work_item_id)
+    await advance_story_to_done(
+        session, gate.org_id, story, actor_id=gate.resolver_id, actor_type="human",
+    )
 
 
 # gate_type → verdict source (qa→qa·merge→merge·deploy→design·pr_review→pr).
