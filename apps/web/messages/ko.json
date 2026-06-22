@@ -2672,6 +2672,7 @@
     "coldStartProvisional": "임시 예측",
     "seedKeep": "유지 예측",
     "seedKill": "중단 예측",
-    "outcomeAccumulating": "판정 데이터 누적 중"
+    "outcomeAccumulating": "판정 데이터 누적 중",
+    "evidenceNonePrompt": "근거 데이터 없음 — 내용으로 직접 판단"
   }
 }

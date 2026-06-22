@@ -2672,6 +2672,7 @@
     "coldStartProvisional": "Provisional",
     "seedKeep": "Keep",
     "seedKill": "Kill",
-    "outcomeAccumulating": "Awaiting verdict data"
+    "outcomeAccumulating": "Awaiting verdict data",
+    "evidenceNonePrompt": "No evidence yet — review by content"
   }
 }
