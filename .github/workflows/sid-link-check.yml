@@ -27,5 +27,5 @@ jobs:
              || printf '%s' "$PR_BODY" | grep -qiE "\[SID:$UUID\]"; then
             echo "Story SID tag found — the approval gate will link the CI/merge verdict."
           else
-            echo "::warning title=No story SID tag::This PR has no [SID:<full-uuid>] in its body or sid-<full-uuid> in its branch name. Its approval gate will stay 'unknown (self-report only)'. See CONTRIBUTING.md 'Linking PRs to Stories'. (advisory — does not block merge)"
+            echo "::warning title=No story SID tag::This PR has no [SID:<full-uuid>] in its body or sid-<full-uuid> in its branch name, so its approval gate keeps 'CI unknown (self-report only)'. Tagging is optional — see AGENTS.md 'Linking PRs to story gates'. (advisory — does not block merge)"
           fi
