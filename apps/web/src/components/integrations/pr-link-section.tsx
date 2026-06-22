@@ -49,8 +49,15 @@ export function PrLinkSection({ storyId }: { storyId: string }) {
     const res = await fetch(`/api/integrations/github/links?story_id=${storyId}`)
       .then((r) => (r.ok ? r.json() : { data: [] }))
       .catch(() => ({ data: [] }));
-    const rows = (res?.data ?? res) as PrLink[];
-    setLinks(Array.isArray(rows) ? rows : []);
+    // 방어적 언랩(가디언 ②·[[envelope-boundary]]): 프록시가 apiSuccess로 1회 감싸므로 res.data.
+    // BE GET이 bare array면 res.data=array, 이미 {data:[]} enveloped면 res.data.data=array — 둘 다 커버.
+    const payload = (res?.data ?? res) as unknown;
+    const rows = Array.isArray(payload)
+      ? (payload as PrLink[])
+      : Array.isArray((payload as { data?: unknown })?.data)
+        ? ((payload as { data: PrLink[] }).data)
+        : [];
+    setLinks(rows);
   }, [storyId]);
 
   const load = useCallback(async () => {
@@ -140,7 +147,8 @@ export function PrLinkSection({ storyId }: { storyId: string }) {
           <GitPullRequest className="size-3.5" />
           {t('sectionLabel')}
         </h3>
-        <div className="space-y-2 rounded-lg border border-warning/30 bg-warning/5 p-3">
+        {/* 중립 tint(가디언 ④): GitHub=옵셔널 통합·미연결은 "문제" 아님 → amber 금지(비-GitHub org 노이즈 차단). */}
+        <div className="space-y-2 rounded-lg border border-border bg-muted/30 p-3">
           <p className="text-xs font-medium text-foreground">{t('connectPromptTitle')}</p>
           <p className="text-[11px] text-muted-foreground">{t('connectPromptBody')}</p>
           <Button
