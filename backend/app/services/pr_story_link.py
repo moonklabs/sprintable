@@ -104,7 +104,9 @@ async def _auto_match(
     scored: list[tuple[int, Story]] = []
     for s in stories:
         title_slug = _slugify(s.title)
-        if title_slug and (title_slug in pr_slugs or any(title_slug in sl for sl in pr_slugs if sl)):
+        # ⭐high 는 **exact slug equality** 만(story title slug == PR 텍스트(title/branch) 전체 slug).
+        # substring/contains 는 high 아님 — partial token overlap(medium/low)로 내려 오매치 auto-close 차단.
+        if title_slug and title_slug in pr_slugs:
             exact.append(s)
             continue
         overlap = len(_tokens(s.title) & pr_tokens)

@@ -168,12 +168,12 @@ async def create_explicit_link(
     session: AsyncSession = Depends(get_db),
 ) -> JSONResponse:
     """PR↔story **명시연결**(explicit·confidence high·Bot-L.2 UI 의 BE). resolver 체인 최우선·close-on-merge
-    가능. ⭐anti-IDOR: story 가 **caller org 소속**이어야(미소속/부재 = generic 404·타 org 존재 oracle 0).
-    per-org 격리·upsert(uq org,repo,pr)·created_by=caller member.
+    가능. ⭐anti-IDOR **2층**: ①story 가 caller org 소속 ②**repo 가 org 의 설치 context**(installation account)에
+    속함. 둘 다 미충족 = generic 404(타 org/repo 존재 oracle 0). per-org 격리·upsert·created_by=caller member.
     """
-    if not body.repo_full_name.strip() or body.pr_number <= 0:
+    if not body.repo_full_name.strip() or "/" not in body.repo_full_name or body.pr_number <= 0:
         return JSONResponse(status_code=422, content={"error": "invalid_pr_identity"})
-    # story org-scope 검증(타 org story_id 차단·존재 여부 노출 금지).
+    # ①story org-scope 검증(타 org story_id 차단·존재 여부 노출 금지).
     story = (
         await session.execute(
             select(Story).where(
@@ -183,6 +183,18 @@ async def create_explicit_link(
     ).scalar_one_or_none()
     if story is None:
         return JSONResponse(status_code=404, content={"error": "story_not_found"})
+    # ②repo 가 org 의 설치 context 에 속하는지(anti-IDOR·임의 repo high link 차단). org 의 active installation
+    # account_login 과 repo owner 일치 요구. 미설치/owner 불일치 = generic 404(repo 존재 oracle 0).
+    inst = (
+        await session.execute(
+            select(GithubInstallation).where(
+                GithubInstallation.org_id == org_id, GithubInstallation.suspended_at.is_(None)
+            )
+        )
+    ).scalar_one_or_none()
+    repo_owner = body.repo_full_name.strip().split("/", 1)[0].lower()
+    if inst is None or not inst.account_login or repo_owner != inst.account_login.lower():
+        return JSONResponse(status_code=404, content={"error": "repo_not_in_org_context"})
     try:
         created_by: uuid.UUID | None = uuid.UUID(auth.user_id)
     except (ValueError, TypeError):

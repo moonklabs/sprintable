@@ -111,6 +111,21 @@ async def test_resolver_auto_high_single_exact():
 
 
 @pytest.mark.anyio
+async def test_resolver_auto_substring_not_high_no_close():
+    """⭐substring/contains 는 high 아님(오매치 방지): story 'Login' + PR 'fix login bug' → high/close 금지.
+
+    exact slug equality 만 high. 'login' 은 'fix-login-bug' 의 부분문자열이지만 != 전체 slug → token overlap
+    (medium/low) → canonical link/auto-close 안 됨(story_id None·should_auto_close False).
+    """
+    story = _story(id=uuid.uuid4(), title="Login")
+    # explicit(None) → auto_stories([story]) → SID(None). auto 가 high 면 안 됨.
+    session = _session([_scalar(None), _scalars([story]), _scalar(None)])
+    rl = await resolve_story_for_pr(session, ORG_A, "org/repo", 9, ["fix login bug"])
+    assert rl.confidence != "high"
+    assert rl.story_id is None and rl.should_auto_close is False  # auto-close 안 됨.
+
+
+@pytest.mark.anyio
 async def test_resolver_auto_ambiguous_multiple_exact_no_close():
     """동일 slug 후보 복수 → ambiguous low·link 없음·close 금지(오매치 방지)."""
     s1, s2 = _story(id=uuid.uuid4(), title="Add SSO login"), _story(id=uuid.uuid4(), title="Add SSO login")
@@ -146,7 +161,11 @@ def test_normalize_repo_lowercase():
 
 
 # ── explicit-link endpoint (anti-IDOR) ───────────────────────────────────────────
-async def _post_link(body, *, org_id=ORG_A, story_result, member_id=None):
+def _inst(account_login="org"):
+    return MagicMock(account_login=account_login, suspended_at=None)
+
+
+async def _post_link(body, *, org_id=ORG_A, story_result, installation_result=None, member_id=None):
     from app.dependencies.auth import get_current_user, get_verified_org_id
     from app.dependencies.database import get_db
     from app.main import app as fastapi_app
@@ -154,9 +173,12 @@ async def _post_link(body, *, org_id=ORG_A, story_result, member_id=None):
 
     session = AsyncMock()
     session.add = MagicMock()
-    res = MagicMock()
-    res.scalar_one_or_none.return_value = story_result
-    session.execute = AsyncMock(return_value=res)
+    story_res = MagicMock()
+    story_res.scalar_one_or_none.return_value = story_result
+    inst_res = MagicMock()
+    inst_res.scalar_one_or_none.return_value = installation_result
+    # 쿼리 순서: ①story org-scope ②installation(repo-context). story None 이면 installation 미도달.
+    session.execute = AsyncMock(side_effect=[story_res, inst_res, inst_res])
     session.commit = AsyncMock()
     session.flush = AsyncMock()
 
@@ -181,10 +203,11 @@ async def _post_link(body, *, org_id=ORG_A, story_result, member_id=None):
 
 @pytest.mark.anyio
 async def test_explicit_link_same_org_success():
+    """story org-scope 통과 + repo owner == installation account_login → upsert."""
     body = {"story_id": str(STORY_ID), "repo_full_name": "org/repo", "pr_number": 7}
-    resp, up = await _post_link(body, story_result=_story(org_id=ORG_A))
+    resp, up = await _post_link(body, story_result=_story(org_id=ORG_A), installation_result=_inst("org"))
     assert resp.status_code == 200
-    up.assert_awaited_once()  # org-scope story 통과 → upsert.
+    up.assert_awaited_once()
 
 
 @pytest.mark.anyio
@@ -197,9 +220,23 @@ async def test_explicit_link_cross_org_404_no_oracle():
 
 
 @pytest.mark.anyio
+async def test_explicit_link_repo_not_in_org_context_404():
+    """story 는 org 소속이나 repo owner != installation account(or 미설치) → generic 404·upsert 0(repo oracle 0)."""
+    body = {"story_id": str(STORY_ID), "repo_full_name": "evil/repo", "pr_number": 7}
+    # owner 'evil' != installation account 'org' → repo_not_in_org_context.
+    resp, up = await _post_link(body, story_result=_story(org_id=ORG_A), installation_result=_inst("org"))
+    assert resp.status_code == 404
+    up.assert_not_awaited()
+    # 미설치(installation None)도 동일 404.
+    resp2, up2 = await _post_link(body, story_result=_story(org_id=ORG_A), installation_result=None)
+    assert resp2.status_code == 404
+    up2.assert_not_awaited()
+
+
+@pytest.mark.anyio
 async def test_explicit_link_invalid_pr_identity_422():
     body = {"story_id": str(STORY_ID), "repo_full_name": "  ", "pr_number": 0}
-    resp, up = await _post_link(body, story_result=_story(org_id=ORG_A))
+    resp, up = await _post_link(body, story_result=_story(org_id=ORG_A), installation_result=_inst("org"))
     assert resp.status_code == 422
     up.assert_not_awaited()
 
