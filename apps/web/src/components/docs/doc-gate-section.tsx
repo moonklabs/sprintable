@@ -156,7 +156,7 @@ export function DocGateSection({
                 <li key={rev.id} className="flex items-center gap-2 text-[11px] text-muted-foreground">
                   <span className="shrink-0 font-mono text-foreground">v{i + 1}</span>
                   <span className="shrink-0">{resolveName(rev.created_by)}</span>
-                  <span className="truncate">{fmtDate(rev.created_at)}</span>
+                  <span className="min-w-0 truncate">{fmtDate(rev.created_at)}</span>
                 </li>
               ))}
             </ul>
