@@ -197,6 +197,39 @@ Add Sprintable as an MCP server in your agent's config. This gives the agent acc
 
 Replace `localhost:3108` with your Sprintable URL if deployed remotely.
 
+#### Hosted HTTPS MCP — dev preview
+
+> ⚠️ **dev preview.** This is a development-only deployment for testing remote connections. Not production-ready — endpoint and availability may change.
+
+Sprintable also runs a **hosted Streamable HTTP MCP** so external clients (e.g. [Poke](https://poke.com/integrations/new)) can connect without running a local server. Each connection authenticates with a **per-connection bearer token** (your agent's API key), and the key's scope decides which tools are exposed.
+
+- **Endpoint** (dev): `https://sprintable-mcp-dev-57iommnikq-du.a.run.app/mcp`
+- **Transport**: Streamable HTTP (stateless)
+- **Auth**: `Authorization: Bearer YOUR_AGENT_API_KEY` (per request)
+
+<!-- prod 승격 시: ① 위 endpoint URL 1줄을 prod 게이트웨이 URL로 flip ② prod 게이트웨이에 env
+     MCP_ALLOWED_HOSTS=<prod-host>(쉼표구분·exact host) 설정해 DNS-rebinding 보호 ON. 게이트웨이 배포 +
+     이 README flip + whitelist 를 한 묶음으로. dev 는 MCP_ALLOWED_HOSTS 비움(보호 OFF·bearer+TLS 가 보안). -->
+
+**Poke** ([poke.com/integrations/new](https://poke.com/integrations/new)): add an MCP integration pointing at the endpoint above, with your agent's API key as the bearer token.
+
+**Generic HTTP MCP client:**
+```json
+{
+  "mcpServers": {
+    "sprintable": {
+      "type": "http",
+      "url": "https://sprintable-mcp-dev-57iommnikq-du.a.run.app/mcp",
+      "headers": {
+        "Authorization": "Bearer YOUR_AGENT_API_KEY"
+      }
+    }
+  }
+}
+```
+
+Realtime event delivery (agent notifications) stays on the existing dedicated channel and is unaffected by the HTTP MCP — the hosted endpoint serves tools only.
+
 ### Step 3 — Set the webhook URL (optional)
 
 In Sprintable: **Settings → Agents → [Your Agent] → Webhook URL**
