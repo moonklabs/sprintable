@@ -260,6 +260,12 @@ async def evaluate_merge_gate(
     # 이 단일 chokepoint를 거쳐 일관 적용. (증거 있으면 resolve_disposition 호출조차 생략.)
     if ci is None and pr_number <= 0:
         disposition = await resolve_disposition(session, org_id, member_id, role_id, MERGE_GATE_TYPE)
+        # follow-up(enforcing 롤아웃·GitHub앱 S5 때 재고): substance로 인정하는 정책은 현재 'deny'만.
+        # 'ask'는 SYSTEM_DEFAULT(=ask)라 그 자체론 신호가 아니므로 증거 0이면 no-gate. 다만 resolve_disposition
+        # 은 disposition 문자열만 돌려주고 **출처(시스템 기본 vs 명시 override/posture)를 구분하지 않는다** →
+        # 어떤 org가 '증거 무관 전-머지 휴먼 사인오프' 의도로 ask를 명시 설정해도 지금은 bypass된다. 그 의도를
+        # 살리려면 resolve_disposition이 explicit-ask를 default-ask와 구분(출처 노출)해야 한다. P0(즉시 sloppy
+        # 탈출)에선 빈 shell 박멸이 우선이라 deny-only로 둔다.
         if disposition != "deny":
             logger.info(
                 "merge gate: no substance (ci=None pr_number=0 disposition=%s) story=%s "
