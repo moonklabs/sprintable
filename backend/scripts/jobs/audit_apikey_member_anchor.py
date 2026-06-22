@@ -10,7 +10,7 @@ dual-write 했고 0075는 type='agent' team_member만 members에 넣었으므로
 - 1건+ → 처리 필요: 정당 agent면 members 보정(또는 agent_anchor_sync 재실행), human/오용 key면 무효화.
 
 env: DATABASE_URL (백엔드 동일, cloud-sql-proxy/in-VPC 경유). 읽기 전용(조회만).
-실행: cd backend && DATABASE_URL=... python -m scripts.audit_apikey_member_anchor
+실행: cd backend && DATABASE_URL=... python -m scripts.jobs.audit_apikey_member_anchor
 """
 from __future__ import annotations
 
