@@ -43,15 +43,19 @@ def test_candidate_texts_collects_title_body_branch():
 
 
 def test_extract_pr_ci_pull_request_merged():
-    payload = {"action": "closed", "pull_request": {"number": 12, "merged": True}}
-    pr_number, merged, ci = _extract_pr_ci("pull_request", payload)
+    payload = {"action": "closed",
+               "pull_request": {"number": 12, "merged": True, "head": {"sha": "abc123"}}}
+    pr_number, merged, ci, head_sha = _extract_pr_ci("pull_request", payload)
     assert pr_number == 12 and merged is True and ci is None
+    assert head_sha == "abc123"  # S5: native CI 조회용 head SHA.
 
 
 def test_extract_pr_ci_workflow_run_failure():
-    payload = {"workflow_run": {"conclusion": "failure", "pull_requests": [{"number": 7}]}}
-    pr_number, merged, ci = _extract_pr_ci("workflow_run", payload)
+    payload = {"workflow_run": {"conclusion": "failure", "head_sha": "def456",
+                                "pull_requests": [{"number": 7}]}}
+    pr_number, merged, ci, head_sha = _extract_pr_ci("workflow_run", payload)
     assert pr_number == 7 and merged is False and ci == "failure"  # AC④.
+    assert head_sha == "def456"
 
 
 def test_verify_signature():
@@ -200,3 +204,59 @@ async def test_workflow_run_branch_sid_links_capture():
     assert resp.status_code == 200
     kw = cap.await_args.kwargs
     assert kw["story_id"] == sid and kw["ci_result"] == "failure"  # 브랜치 SID로 링킹 성공.
+
+
+# ── S5 Phase S: native CI (statusCheckRollup) ─────────────────────────────────
+from app.services import verdict_capture as _svc  # noqa: E402
+
+
+@pytest.mark.anyio
+async def test_native_ci_fills_on_merge_when_no_conclusion():
+    """머지 이벤트(ci 결론 없음)+confident SID → statusCheckRollup pull로 ci_result 채움."""
+    payload = {"action": "closed", "repository": {"full_name": "moonklabs/sprintable"},
+               "pull_request": {"number": 12, "merged": True, "title": f"feat [SID:{STORY_ID}]",
+                                "head": {"sha": "deadbeef"}}}
+    with patch.object(mod, "fetch_status_check_rollup",
+                      new=AsyncMock(return_value="success")) as roll, \
+         patch.object(mod, "capture_pr_ci_verdict",
+                      new=AsyncMock(return_value={"recorded": ["pr", "ci"], "skipped_reason": None})) as cap:
+        resp = await _post(payload, event="pull_request")
+    assert resp.status_code == 200
+    roll.assert_awaited_once_with("moonklabs/sprintable", "deadbeef")  # head SHA로 1콜.
+    assert cap.await_args.kwargs["ci_result"] == "success"  # native CI가 채움.
+
+
+@pytest.mark.anyio
+async def test_native_ci_not_pulled_when_event_has_conclusion():
+    """이벤트가 이미 CI 결론을 실으면 native pull 안 함(그 결론 유지)."""
+    payload = {"repository": {"full_name": "o/r"},
+               "workflow_run": {"conclusion": "failure", "head_sha": "sha1",
+                                "head_branch": f"feat-[SID:{STORY_ID}]", "pull_requests": [{"number": 7}]}}
+    with patch.object(mod, "fetch_status_check_rollup", new=AsyncMock(return_value="success")) as roll, \
+         patch.object(mod, "capture_pr_ci_verdict",
+                      new=AsyncMock(return_value={"recorded": ["ci"], "skipped_reason": None})) as cap:
+        resp = await _post(payload, event="workflow_run")
+    assert resp.status_code == 200
+    roll.assert_not_awaited()  # 이벤트 결론 있으면 native 미호출.
+    assert cap.await_args.kwargs["ci_result"] == "failure"  # 이벤트 결론 유지.
+
+
+@pytest.mark.anyio
+async def test_fetch_status_check_rollup_normalizes():
+    """statusCheckRollup.state → success|failure|None 정규화. 토큰 없으면 None(무영향)."""
+    # 토큰 없음 → 즉시 None(콜 안 함).
+    with patch.object(_svc, "GITHUB_TOKEN", ""):
+        assert await _svc.fetch_status_check_rollup("o/r", "sha") is None
+
+    def _resp(state):
+        r = MagicMock()
+        r.status_code = 200
+        r.json.return_value = {"data": {"repository": {"object": {"statusCheckRollup": {"state": state}}}}}
+        return r
+
+    import httpx
+    for state, expected in [("SUCCESS", "success"), ("FAILURE", "failure"),
+                            ("ERROR", "failure"), ("PENDING", None), ("EXPECTED", None)]:
+        with patch.object(_svc, "GITHUB_TOKEN", "tok"), \
+             patch.object(httpx.AsyncClient, "post", new=AsyncMock(return_value=_resp(state))):
+            assert await _svc.fetch_status_check_rollup("moonklabs/sprintable", "abc") == expected
