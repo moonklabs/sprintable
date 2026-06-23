@@ -288,13 +288,13 @@ export function DocEditor({
     <div className="flex h-full flex-col overflow-hidden rounded-xl border border-border bg-card max-md:h-[100dvh]">
       {/* Breadcrumb (위치: title 위) */}
       {breadcrumb && (
-        <div className="flex-shrink-0 px-6 pt-4">
+        <div className="flex-shrink-0 px-6 pt-3">
           {breadcrumb}
         </div>
       )}
       {/* Inline title (Notion style) */}
       {title !== undefined && (
-        <div className={`flex flex-shrink-0 items-center justify-between gap-2 px-6 pb-2 ${breadcrumb ? 'pt-2' : 'pt-3'}`}>
+        <div className="flex flex-shrink-0 items-center justify-between gap-2 px-6 pb-2 pt-2">
           {/* §3-2: 본문 hero 타이틀(36px) → 슬림 헤더 타이틀(18px·font-bold). 이중 헤더 해소·콘텐츠 공간 확보. */}
           <textarea
             ref={titleRef}
