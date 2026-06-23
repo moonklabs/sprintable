@@ -148,6 +148,8 @@ export default function StandupPage() {
   const totalTasks = useMemo(() => stories.reduce((sum, story) => sum + story.task_count, 0), [stories]);
   const doneTasks = useMemo(() => stories.reduce((sum, story) => sum + story.done_task_count, 0), [stories]);
   const currentEntry = currentTeamMemberId ? entryByAuthorId[currentTeamMemberId] : undefined;
+  // a9e67531(PO 트림): picker 후보는 scoped stories만 — cross-board plan story를 picker 후보로 늘리는 것은
+  // selection(write) 측이라 Track E v3 브릿지 모달 영역(PO AC 後 별건). #1689는 순수 read/render fix로 한정.
   const storyPickerStories = useMemo(() => stories.slice().sort((left, right) => {
     const leftPriority = left.assignee_id === currentTeamMemberId ? 0 : 1;
     const rightPriority = right.assignee_id === currentTeamMemberId ? 0 : 1;

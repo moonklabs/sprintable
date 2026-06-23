@@ -16,6 +16,16 @@ export interface StandupMemberSummary {
   type: 'human' | 'agent';
 }
 
+// a9e67531: BE org-scope resolve된 plan story 요약(StandupEntryResponse.plan_stories·cross-board 포함).
+export interface PlanStorySummary {
+  id: string;
+  title: string;
+  status: string;
+  priority?: string | null;
+  project_id?: string | null;
+  sprint_id?: string | null;
+}
+
 export interface StandupEntrySummary {
   id: string;
   author_id: string;
@@ -24,8 +34,13 @@ export interface StandupEntrySummary {
   plan: string | null;
   blockers: string | null;
   plan_story_ids: string[];
+  // a9e67531: plan_story_ids의 org-scope resolve(cross-board 미노출 버그 근본 fix). 우선 렌더·legacy 미존재 시 id fallback.
+  plan_stories?: PlanStorySummary[];
   updated_at?: string;
 }
+
+// 링크 스토리 표시 뷰: title/status 필수 + (scoped stories에 있으면) assignee/task 진척 enrich.
+export type LinkedStoryView = { id: string; title: string; status: string; assignee_id?: string | null; assignee_name?: string | null; task_count?: number; done_task_count?: number };
 
 export interface StandupStorySummary {
   id: string;
@@ -114,12 +129,22 @@ export function StandupReviewCard({
     }
   }, [editingFeedbackId, feedback]);
 
-  const linkedStories = useMemo(() => {
+  const linkedStories = useMemo<LinkedStoryView[]>(() => {
+    // a9e67531: plan_stories(org-scope·cross-board 포함) 우선 — scoped stories에 있으면 rich(assignee/task) enrich,
+    // 없으면(cross-board) title/status 요약만. 이러면 active-sprint 밖 backlog story도 노출(미노출 버그 fix).
+    const summaries = entry?.plan_stories ?? [];
+    if (summaries.length > 0) {
+      return summaries.map((s) => {
+        const rich = stories.find((story) => story.id === s.id);
+        return rich ?? { id: s.id, title: s.title, status: s.status };
+      });
+    }
+    // legacy(plan_stories 미존재 응답): planStoryIds → scoped stories fallback(id-only 미발견은 기존 동작 유지).
     const planStoryIds = entry?.plan_story_ids ?? [];
     return planStoryIds
       .map((storyId) => stories.find((story) => story.id === storyId))
       .filter((story): story is StandupStorySummary => Boolean(story));
-  }, [entry?.plan_story_ids, stories]);
+  }, [entry?.plan_stories, entry?.plan_story_ids, stories]);
 
   const feedbackSummary = useMemo(() => {
     const counts = { comment: 0, approve: 0, request_changes: 0 };
@@ -258,16 +283,21 @@ export function StandupReviewCard({
                         <p className="text-sm font-medium text-foreground">{story.title}</p>
                         <Badge variant="outline">{story.status}</Badge>
                       </div>
-                      <div className="mt-2 flex items-center gap-2 text-xs text-muted-foreground">
-                        <Badge variant="chip">{story.assignee_name ?? t('unknown')}</Badge>
-                        <span>{t('taskProgress', { done: story.done_task_count, total: story.task_count })}</span>
-                      </div>
-                      <div className="mt-2 h-2 overflow-hidden rounded-full bg-muted">
-                        <div
-                          className="h-full rounded-full bg-primary"
-                          style={{ width: `${story.task_count > 0 ? Math.round((story.done_task_count / story.task_count) * 100) : 0}%` }}
-                        />
-                      </div>
+                      {/* a9e67531: rich(scoped) 스토리만 assignee/task 진척 표시. cross-board 요약은 title/status만(데이터 부재). */}
+                      {story.task_count != null ? (
+                        <>
+                          <div className="mt-2 flex items-center gap-2 text-xs text-muted-foreground">
+                            <Badge variant="chip">{story.assignee_name ?? t('unknown')}</Badge>
+                            <span>{t('taskProgress', { done: story.done_task_count ?? 0, total: story.task_count })}</span>
+                          </div>
+                          <div className="mt-2 h-2 overflow-hidden rounded-full bg-muted">
+                            <div
+                              className="h-full rounded-full bg-primary"
+                              style={{ width: `${story.task_count > 0 ? Math.round(((story.done_task_count ?? 0) / story.task_count) * 100) : 0}%` }}
+                            />
+                          </div>
+                        </>
+                      ) : null}
                     </div>
                   ))}
                 </div>
