@@ -124,7 +124,7 @@ function MdBody({ content }: { content: string }) {
         ul: ({ children }) => <ul className="mb-2 ml-4 list-disc space-y-0.5">{children}</ul>,
         ol: ({ children }) => <ol className="mb-2 ml-4 list-decimal space-y-0.5">{children}</ol>,
         li: ({ children }) => <li className="text-sm leading-6">{children}</li>,
-        code: ({ children }) => <code className="rounded px-1 py-0.5 font-mono text-[13px] bg-muted">{children}</code>,
+        code: ({ children }) => <code className="rounded px-1 py-0.5 font-mono text-sm bg-muted">{children}</code>,
         strong: ({ children }) => <strong className="font-semibold">{children}</strong>,
         em: ({ children }) => <em className="italic">{children}</em>,
       }}
@@ -312,7 +312,7 @@ export default function EpicDetailPage() {
         {/* Dispatch */}
         {epic.project_id && (
           <div className="rounded-xl border border-border bg-muted/20 p-4">
-            <p className="mb-2 text-xs font-semibold uppercase tracking-wide text-muted-foreground">Dispatch</p>
+            <p className="mb-2 text-xs font-medium text-muted-foreground">Dispatch</p>
             <EntityDispatchPanel
               entityType="epic"
               entityId={epic.id}
@@ -342,7 +342,7 @@ export default function EpicDetailPage() {
 
             {/* Description */}
             <section className="space-y-2">
-              <h2 className="text-xs font-semibold uppercase tracking-widest text-muted-foreground">설명</h2>
+              <h2 className="text-xs font-medium text-muted-foreground">설명</h2>
               {epic.description?.trim() ? (
                 <MdBody content={epic.description} />
               ) : (
@@ -353,7 +353,7 @@ export default function EpicDetailPage() {
             {/* Objective */}
             {epic.objective?.trim() && (
               <section className="space-y-2">
-                <h2 className="text-xs font-semibold uppercase tracking-widest text-muted-foreground">목표 (Objective)</h2>
+                <h2 className="text-xs font-medium text-muted-foreground">목표 (Objective)</h2>
                 <MdBody content={epic.objective} />
               </section>
             )}
@@ -361,7 +361,7 @@ export default function EpicDetailPage() {
             {/* Success criteria */}
             {epic.success_criteria?.trim() && (
               <section className="space-y-2">
-                <h2 className="text-xs font-semibold uppercase tracking-widest text-muted-foreground">성공 기준</h2>
+                <h2 className="text-xs font-medium text-muted-foreground">성공 기준</h2>
                 <MdBody content={epic.success_criteria} />
               </section>
             )}
@@ -370,7 +370,7 @@ export default function EpicDetailPage() {
 
         {/* Progress */}
         <section className="space-y-4">
-          <h2 className="text-xs font-semibold uppercase tracking-widest text-muted-foreground">진행 상황</h2>
+          <h2 className="text-xs font-medium text-muted-foreground">진행 상황</h2>
           <div>
             <p className="mb-1 text-xs text-muted-foreground">스토리 완료</p>
             <ProgressBar done={done} total={stories.length} />
@@ -385,7 +385,7 @@ export default function EpicDetailPage() {
 
         {/* Stories — grouped by status */}
         <section className="space-y-4">
-          <h2 className="text-xs font-semibold uppercase tracking-widest text-muted-foreground">
+          <h2 className="text-xs font-medium text-muted-foreground">
             스토리 ({stories.length})
           </h2>
           {stories.length === 0 ? (

@@ -423,7 +423,7 @@ function EpicRow({ epic, isSelected, onClick, onDeleteRequest }: EpicRowProps) {
 
   return (
     <div
-      className={`group relative w-full rounded-2xl border px-4 py-3.5 text-left transition-all duration-150 cursor-pointer ${
+      className={`group relative w-full rounded-xl border px-4 py-3.5 text-left transition-all duration-150 cursor-pointer ${
         isSelected
           ? 'border-primary/40 bg-primary/5'
           : 'border-border bg-card hover:border-primary/30 hover:bg-primary/5'
@@ -463,7 +463,7 @@ function EpicRow({ epic, isSelected, onClick, onDeleteRequest }: EpicRowProps) {
           <span>{done}/{total} {t('stories')}</span>
           <HypothesesSummary count={epic.hypothesis_count ?? 0} riskyStatus={epic.risky_status ?? null} />
           {spExceeded ? (
-            <span className="rounded-full bg-destructive/10 px-1.5 py-0.5 text-[10px] font-semibold text-destructive">
+            <span className="rounded-full bg-destructive/10 px-1.5 py-0.5 text-xs font-semibold text-destructive">
               {t('spExceeded')}
             </span>
           ) : null}
@@ -576,15 +576,15 @@ function EpicDetailPanel({ epic, onUpdate, onClose }: EpicDetailPanelProps) {
             {/* Meta grid */}
             <div className="grid grid-cols-2 gap-3">
               <div className="rounded-xl bg-muted px-3 py-2.5">
-                <p className="text-[10px] font-semibold uppercase tracking-[0.18em] text-muted-foreground">{t('targetDate')}</p>
+                <p className="text-xs font-medium text-muted-foreground">{t('targetDate')}</p>
                 <p className="mt-1 text-sm font-medium text-foreground">{formatDate(epic.target_date)}</p>
               </div>
               <div className="rounded-xl bg-muted px-3 py-2.5">
-                <p className="text-[10px] font-semibold uppercase tracking-[0.18em] text-muted-foreground">{t('targetSp')}</p>
+                <p className="text-xs font-medium text-muted-foreground">{t('targetSp')}</p>
                 <div className="mt-1 flex items-center gap-1.5">
                   <p className="text-sm font-medium text-foreground">{epic.target_sp !== undefined ? epic.target_sp : '—'}</p>
                   {spExceeded ? (
-                    <span className="rounded-full bg-destructive/10 px-1.5 py-0.5 text-[10px] font-semibold text-destructive">{t('spExceeded')}</span>
+                    <span className="rounded-full bg-destructive/10 px-1.5 py-0.5 text-xs font-semibold text-destructive">{t('spExceeded')}</span>
                   ) : null}
                 </div>
               </div>
@@ -592,7 +592,7 @@ function EpicDetailPanel({ epic, onUpdate, onClose }: EpicDetailPanelProps) {
 
             {/* Description */}
             <div className="space-y-1.5">
-              <p className="text-[10px] font-semibold uppercase tracking-[0.18em] text-muted-foreground">{t('description')}</p>
+              <p className="text-xs font-medium text-muted-foreground">{t('description')}</p>
               <p className="text-sm leading-relaxed text-foreground">
                 {epic.description?.trim() ? epic.description : <span className="italic text-muted-foreground">{t('noDescription')}</span>}
               </p>
@@ -600,14 +600,14 @@ function EpicDetailPanel({ epic, onUpdate, onClose }: EpicDetailPanelProps) {
 
             {/* Progress */}
             <div className="space-y-3">
-              <p className="text-[10px] font-semibold uppercase tracking-[0.18em] text-muted-foreground">{t('storiesProgress')}</p>
+              <p className="text-xs font-medium text-muted-foreground">{t('storiesProgress')}</p>
               <ProgressBar done={storyProgress.done} total={storyProgress.total} label={`${t('doneStories')} / ${t('totalStories')}`} />
               {spProgress.total > 0 ? (
                 <>
                   <div className="flex items-center gap-2">
-                    <p className="text-[10px] font-semibold uppercase tracking-[0.18em] text-muted-foreground">{t('spProgress')}</p>
+                    <p className="text-xs font-medium text-muted-foreground">{t('spProgress')}</p>
                     {spExceeded ? (
-                      <span className="rounded-full bg-destructive/10 px-1.5 py-0.5 text-[10px] font-semibold text-destructive">
+                      <span className="rounded-full bg-destructive/10 px-1.5 py-0.5 text-xs font-semibold text-destructive">
                         {t('spExceededDetail', { total: spProgress.total, target: epic.target_sp ?? 0 })}
                       </span>
                     ) : null}
@@ -619,7 +619,7 @@ function EpicDetailPanel({ epic, onUpdate, onClose }: EpicDetailPanelProps) {
 
             {/* Story list */}
             <div className="space-y-2">
-              <p className="text-[10px] font-semibold uppercase tracking-[0.18em] text-muted-foreground">{t('stories')}</p>
+              <p className="text-xs font-medium text-muted-foreground">{t('stories')}</p>
               {stories.length > 0 ? (
                 <div className="space-y-1.5">
                   {stories.map((story) => (
