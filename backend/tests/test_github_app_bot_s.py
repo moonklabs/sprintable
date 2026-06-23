@@ -240,4 +240,7 @@ async def test_callback_replay_rejected_when_nonce_already_consumed():
         with patch("app.routers.github_integration.verify_installation_owned", new=AsyncMock(return_value=True)) as owned:
             resp = await install_callback(installation_id=1, state=state, code="x", setup_action="install", session=session)
     assert resp.status_code == 302 and "replay_or_expired" in resp.headers["location"]
+    # ⭐redirect 는 **프론트 절대주소**여야(상대경로면 GitHub 가 백엔드 host 로 해소→404 회귀). app_url 기준.
+    loc = resp.headers["location"]
+    assert loc.startswith(ga.settings.app_url.rstrip("/") + "/settings/integrations"), loc
     owned.assert_not_awaited()  # consume 실패 시 ownership 검증조차 안 감.
