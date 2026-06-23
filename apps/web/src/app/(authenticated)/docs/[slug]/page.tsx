@@ -403,13 +403,13 @@ export default function DocSlugPage() {
 
       {/* S28: doc decision gate(검토 상태·반려 사유·재상신 CTA·revision 이력). 비-gated/이력없음은 self-hide. */}
       {selectedDoc.doc_type !== 'sprint_report' ? (
-        <div className="flex-shrink-0 px-4 pt-3 lg:px-6">
+        <div className="flex-shrink-0 px-4 pt-2 lg:px-6">
           <DocGateSection docId={selectedDoc.id} status={selectedDoc.status} onTransitioned={fetchDoc} />
         </div>
       ) : null}
 
       {/* Editor */}
-      <div className="flex min-h-0 flex-1 flex-col overflow-hidden px-4 py-4 lg:px-6 lg:py-6">
+      <div className="flex min-h-0 flex-1 flex-col overflow-hidden px-4 pt-2 pb-4 lg:px-6 lg:pt-3 lg:pb-6">
         <DocEditor
           value={content}
           contentFormat={contentFormat}
