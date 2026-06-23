@@ -297,10 +297,10 @@ export function DocsClientLayout({ children }: { children: React.ReactNode }) {
             )}
           >
             {/* §4-1: ☰(Menu) 제거 → 칩(문서아이콘+현재 문서명+▾). GNB ☰와 시각 구분·breadcrumb 겸 트리거. */}
-            <button type="button" onClick={() => setTreeDrawerOpen(true)} className="flex min-h-[44px] items-center gap-2 rounded-lg border border-border px-3 text-sm text-foreground transition-colors hover:bg-accent" aria-label="문서 트리 열기">
-              <FileText className="size-4 text-muted-foreground" />
-              <span className="truncate font-medium">{currentDocTitle ?? t('title')}</span>
-              <ChevronDown className="size-3.5 text-muted-foreground" />
+            <button type="button" onClick={() => setTreeDrawerOpen(true)} className="flex min-h-[44px] min-w-0 max-w-full items-center gap-2 rounded-lg border border-border px-3 text-sm text-foreground transition-colors hover:bg-accent" aria-label="문서 트리 열기">
+              <FileText className="size-4 shrink-0 text-muted-foreground" />
+              <span className="min-w-0 truncate font-medium">{currentDocTitle ?? t('title')}</span>
+              <ChevronDown className="size-3.5 shrink-0 text-muted-foreground" />
             </button>
           </div>
           {/* Desktop collapsed sidebar open button */}
