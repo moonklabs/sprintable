@@ -27,6 +27,8 @@ interface DocsLayoutContextType {
   pendingDocUpdate: DocUpdate | null;
   clearPendingDocUpdate: () => void;
   expandFolder: (id: string) => void;
+  /** 박스1: 모바일 트리 드로어 열기(슬림 헤더 트리 아이콘이 consume·칩 띠 트리거 대체) */
+  openTreeDrawer?: () => void;
 }
 
 export const DocsLayoutContext = createContext<DocsLayoutContextType | null>(null);

@@ -1197,6 +1197,8 @@
     "docGateEdit": "Revise",
     "docGateRevisions": "Revision history",
     "docMetaRevisions": "{count} revisions",
+    "assignee": "Assignee",
+    "assigneeUnassigned": "Assign owner",
     "noProject": "No project selected",
     "selectDoc": "Select a document",
     "lastUpdated": "Last updated",

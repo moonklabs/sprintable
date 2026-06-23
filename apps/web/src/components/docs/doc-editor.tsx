@@ -16,7 +16,7 @@ import TableRow from '@tiptap/extension-table-row';
 import TableCell from '@tiptap/extension-table-cell';
 import TableHeader from '@tiptap/extension-table-header';
 import Placeholder from '@tiptap/extension-placeholder';
-import { Bold, Italic, Strikethrough, Code, Link2, Highlighter, Undo2, Redo2 } from 'lucide-react';
+import { Bold, Italic, Strikethrough, Code, Link2, Highlighter, Undo2, Redo2, PanelLeft } from 'lucide-react';
 import { CalloutNode } from './extensions/callout-node';
 import { SlashCommandExtension } from './extensions/slash-command';
 import { PageEmbedExtension } from './extensions/page-embed-node';
@@ -56,6 +56,8 @@ export function DocEditor({
   urlSlot,
   actions,
   metaSlot,
+  dispatchSlot,
+  onOpenTree,
   syncBanner,
   labels,
 }: {
@@ -82,6 +84,10 @@ export function DocEditor({
   actions?: React.ReactNode;
   /** §3-2 단일 슬림 헤더: 제목 아래 muted 메타 서브라인(수정 이력 N · 시각). 배지는 DocGateSection SSOT. */
   metaSlot?: React.ReactNode;
+  /** 박스1: 담당자 아바타+popover(헤더 액션 클러스터·glanceable owner). */
+  dispatchSlot?: React.ReactNode;
+  /** 박스1: 모바일 트리 드로어 열기(헤더 좌측 트리 아이콘·lg:hidden·칩 띠 대체). */
+  onOpenTree?: () => void;
   /** Sync-state off-ramp banner (conflict / remote-changed), rendered below the toolbar. */
   syncBanner?: React.ReactNode;
   labels: {
@@ -281,7 +287,18 @@ export function DocEditor({
           자동저장·저장). 영구 툴바·별도 저장바·중복 헤더 밴드 제거(기능 위치만 이동·제거 0). content dominant(~74%).
           포맷=BubbleMenu(선택)·slash(/)·단축키·모바일 하단 툴바로 도달. */}
       <header className="sticky top-0 z-10 flex flex-shrink-0 flex-wrap items-center gap-x-2 gap-y-1 border-b border-border bg-card px-3 py-1.5">
-        {breadcrumb ? <div className="flex shrink-0 items-center">{breadcrumb}</div> : null}
+        {/* 박스1: 모바일 트리 아이콘(칩 띠 대체·lg:hidden·드로어 트리거·데스크는 사이드바 트리) */}
+        {onOpenTree ? (
+          <button
+            type="button"
+            onClick={onOpenTree}
+            aria-label="문서 트리 열기"
+            className="flex size-7 shrink-0 items-center justify-center rounded-md border border-border text-muted-foreground transition-colors hover:bg-accent hover:text-foreground lg:hidden"
+          >
+            <PanelLeft className="size-4" />
+          </button>
+        ) : null}
+        {breadcrumb ? <div className="hidden shrink-0 items-center lg:flex">{breadcrumb}</div> : null}
         {title !== undefined ? (
           /* 인라인 제목 1줄(editable textarea·whitespace-nowrap·flex-1 min-w-0·편집 기능 보존) */
           <textarea
@@ -354,6 +371,8 @@ export function DocEditor({
               {labels.save}
             </button>
           ) : null}
+          {/* 박스1: 담당자 아바타+popover(glanceable owner·Dispatch 밴드 대체) */}
+          {dispatchSlot}
           {actions ? <div className="flex items-center gap-1">{actions}</div> : null}
         </div>
       </header>
