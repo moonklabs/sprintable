@@ -22,7 +22,7 @@ import {
   DropdownMenuTrigger,
 } from '@/components/ui/dropdown-menu';
 import { useDocsLayout } from '../docs-context';
-import { EntityDispatchPanel } from '@/components/dispatch/entity-dispatch-panel';
+import { DocAssigneeControl } from '@/components/docs/doc-assignee-control';
 import { DocBreadcrumb } from '@/components/docs/doc-breadcrumb';
 
 interface DocDetail {
@@ -122,7 +122,7 @@ export default function DocSlugPage() {
   const isNewRef = useRef(typeof window !== 'undefined' && new URLSearchParams(window.location.search).get('new') === '1');
   const isNew = isNewRef.current;
 
-  const { projectId, tree, setTree, pendingDocUpdate, clearPendingDocUpdate, expandFolder } = useDocsLayout();
+  const { projectId, tree, setTree, pendingDocUpdate, clearPendingDocUpdate, expandFolder, openTreeDrawer } = useDocsLayout();
 
   const [selectedDoc, setSelectedDoc] = useState<DocDetail | null>(null);
   const [docLoading, setDocLoading] = useState(true);
@@ -387,19 +387,7 @@ export default function DocSlugPage() {
 
   return (
     <div className="flex h-full flex-col overflow-hidden">
-      {/* Dispatch */}
-      {projectId && (
-        <div className="flex-shrink-0 border-b border-border px-4 py-2 lg:px-6">
-          <EntityDispatchPanel
-            entityType="doc"
-            entityId={selectedDoc.id}
-            projectId={projectId}
-            currentAssigneeId={selectedDoc.assignee_id}
-            onAssigneePatched={(aid) => setSelectedDoc((prev) => prev ? { ...prev, assignee_id: aid } : prev)}
-            mobileMode="assignee-only"
-          />
-        </div>
-      )}
+      {/* 박스1: Dispatch(담당자) 밴드 제거 → 슬림 헤더 담당자 아바타+popover로 이동(content-dominant·기능 보존). */}
 
       {/* S28: doc decision gate(검토 상태·반려 사유·재상신 CTA·revision 이력). 비-gated/이력없음은 self-hide. */}
       {selectedDoc.doc_type !== 'sprint_report' ? (
@@ -426,6 +414,15 @@ export default function DocSlugPage() {
           onTitleChange={handleTitleChange}
           titlePlaceholder={t('titlePlaceholder')}
           titleAutoFocus={isNew || !title}
+          onOpenTree={openTreeDrawer}
+          dispatchSlot={projectId ? (
+            <DocAssigneeControl
+              docId={selectedDoc.id}
+              projectId={projectId}
+              currentAssigneeId={selectedDoc.assignee_id ?? null}
+              onAssigneePatched={(aid) => setSelectedDoc((prev) => prev ? { ...prev, assignee_id: aid } : prev)}
+            />
+          ) : undefined}
           metaSlot={
             <>
               {revisionCount != null ? (
