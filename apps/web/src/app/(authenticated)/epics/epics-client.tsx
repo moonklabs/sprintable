@@ -463,7 +463,7 @@ function EpicRow({ epic, isSelected, onClick, onDeleteRequest }: EpicRowProps) {
           <span>{done}/{total} {t('stories')}</span>
           <HypothesesSummary count={epic.hypothesis_count ?? 0} riskyStatus={epic.risky_status ?? null} />
           {spExceeded ? (
-            <span className="rounded-full bg-destructive/10 px-1.5 py-0.5 text-[10px] font-semibold text-destructive">
+            <span className="rounded-full bg-destructive/10 px-1.5 py-0.5 text-xs font-semibold text-destructive">
               {t('spExceeded')}
             </span>
           ) : null}
@@ -584,7 +584,7 @@ function EpicDetailPanel({ epic, onUpdate, onClose }: EpicDetailPanelProps) {
                 <div className="mt-1 flex items-center gap-1.5">
                   <p className="text-sm font-medium text-foreground">{epic.target_sp !== undefined ? epic.target_sp : '—'}</p>
                   {spExceeded ? (
-                    <span className="rounded-full bg-destructive/10 px-1.5 py-0.5 text-[10px] font-semibold text-destructive">{t('spExceeded')}</span>
+                    <span className="rounded-full bg-destructive/10 px-1.5 py-0.5 text-xs font-semibold text-destructive">{t('spExceeded')}</span>
                   ) : null}
                 </div>
               </div>
@@ -607,7 +607,7 @@ function EpicDetailPanel({ epic, onUpdate, onClose }: EpicDetailPanelProps) {
                   <div className="flex items-center gap-2">
                     <p className="text-xs font-medium text-muted-foreground">{t('spProgress')}</p>
                     {spExceeded ? (
-                      <span className="rounded-full bg-destructive/10 px-1.5 py-0.5 text-[10px] font-semibold text-destructive">
+                      <span className="rounded-full bg-destructive/10 px-1.5 py-0.5 text-xs font-semibold text-destructive">
                         {t('spExceededDetail', { total: spProgress.total, target: epic.target_sp ?? 0 })}
                       </span>
                     ) : null}
