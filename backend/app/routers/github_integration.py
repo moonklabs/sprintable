@@ -71,8 +71,12 @@ async def install_callback(
 ) -> RedirectResponse:
     """GitHub 설치 후 리다이렉트. state(CSRF+org+nonce+TTL) 검증 → nonce one-time consume → installation
     소속 검증(anti-IDOR) → github_installation upsert. 위조/만료/replay/소속불일치 전부 거부.
+
+    ⚠️redirect 는 **프론트 절대주소**(`settings.app_url`)로 — 콜백이 백엔드 host 라 상대경로면 GitHub 가 백엔드
+    host 로 해소해 404(연결 저장은 성공·redirect 타겟만 버그였음). github=<value> 외 installation_id/state 등
+    민감 param 미포함(FE 가 value→neutral copy).
     """
-    settings_url = "/settings/integrations"
+    settings_url = f"{settings.app_url.rstrip('/')}/settings/integrations"
 
     verified = verify_install_state(state)
     if verified is None:
