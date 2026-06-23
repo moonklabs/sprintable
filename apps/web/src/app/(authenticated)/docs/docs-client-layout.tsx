@@ -17,7 +17,7 @@ import { Button } from '@/components/ui/button';
 import { EmptyState } from '@/components/ui/empty-state';
 import { ToastContainer, useToast } from '@/components/ui/toast';
 import { TopBarSlot } from '@/components/nav/top-bar-slot';
-import { ChevronDown, ChevronLeft, ChevronRight, Menu, Plus, X } from 'lucide-react';
+import { ChevronDown, ChevronLeft, ChevronRight, FileText, Plus, X } from 'lucide-react';
 import { useDashboardContext } from '../../dashboard/dashboard-shell';
 import { DocsLayoutContext, type Doc, type DocUpdate } from './docs-context';
 import { useSwipeDrawer } from '@/lib/use-swipe-drawer';
@@ -45,6 +45,8 @@ export function DocsClientLayout({ children }: { children: React.ReactNode }) {
   const [tree, setTree] = useState<Doc[]>([]);
   const [loading, setLoading] = useState(true);
   const [treeDrawerOpen, setTreeDrawerOpen] = useState(false);
+  // 모바일 트리거 칩 breadcrumb: 현재 문서명(flat tree에서 slug 조회·미선택 시 폴백).
+  const currentDocTitle = currentSlug ? (tree.find((d) => d.slug === currentSlug)?.title ?? null) : null;
   const [selectedTags, setSelectedTags] = useState<string[]>([]);
   const [docsHasMore, setDocsHasMore] = useState(false);
   const [docsNextCursor, setDocsNextCursor] = useState<string | null>(null);
@@ -271,12 +273,12 @@ export function DocsClientLayout({ children }: { children: React.ReactNode }) {
       <div className="flex min-h-0 flex-1 overflow-hidden">
         {/* Desktop sidebar — hidden on mobile */}
         {!sidebarCollapsed && (
-          <aside className="relative hidden w-[300px] flex-shrink-0 flex-col overflow-y-auto border-r border-border/80 bg-background lg:flex">
+          <aside className="relative hidden w-[236px] flex-shrink-0 flex-col overflow-y-auto border-r border-border/80 bg-background lg:flex">
             <button
               type="button"
               onClick={handleToggleSidebar}
               title={t('hideSidebar')}
-              className="absolute right-2 top-2 z-10 rounded p-1 text-muted-foreground transition-colors hover:bg-accent hover:text-foreground"
+              className="absolute right-2 top-2 z-10 rounded-md border border-border p-1 text-muted-foreground transition-colors hover:bg-accent hover:text-foreground"
             >
               <ChevronLeft className="size-4" />
             </button>
@@ -294,9 +296,11 @@ export function DocsClientLayout({ children }: { children: React.ReactNode }) {
               gnbHidden && '-translate-y-[calc(100%+var(--gnb-mobile-height))]',
             )}
           >
-            <button type="button" onClick={() => setTreeDrawerOpen(true)} className="flex min-h-[44px] items-center gap-2 text-sm text-muted-foreground hover:text-foreground" aria-label="문서 트리 열기">
-              <Menu className="size-4" />
-              <span>{t('title')}</span>
+            {/* §4-1: ☰(Menu) 제거 → 칩(문서아이콘+현재 문서명+▾). GNB ☰와 시각 구분·breadcrumb 겸 트리거. */}
+            <button type="button" onClick={() => setTreeDrawerOpen(true)} className="flex min-h-[44px] items-center gap-2 rounded-lg border border-border px-3 text-sm text-foreground transition-colors hover:bg-accent" aria-label="문서 트리 열기">
+              <FileText className="size-4 text-muted-foreground" />
+              <span className="truncate font-medium">{currentDocTitle ?? t('title')}</span>
+              <ChevronDown className="size-3.5 text-muted-foreground" />
             </button>
           </div>
           {/* Desktop collapsed sidebar open button */}
@@ -305,7 +309,7 @@ export function DocsClientLayout({ children }: { children: React.ReactNode }) {
               type="button"
               onClick={handleToggleSidebar}
               title={t('openSidebar')}
-              className="absolute left-2 top-2 z-10 hidden rounded p-1 text-muted-foreground transition-colors hover:bg-accent hover:text-foreground lg:block"
+              className="absolute left-2 top-2 z-10 hidden rounded-md border border-border p-1 text-muted-foreground transition-colors hover:bg-accent hover:text-foreground lg:block"
             >
               <ChevronRight className="size-4" />
             </button>
@@ -325,7 +329,7 @@ export function DocsClientLayout({ children }: { children: React.ReactNode }) {
         />
         {/* Mobile swipe drawer panel */}
         <div
-          className="fixed inset-y-0 left-0 z-50 flex w-[280px] flex-col overflow-hidden bg-background shadow-xl lg:hidden"
+          className="fixed inset-y-0 left-0 z-50 flex w-[280px] flex-col overflow-hidden border-r border-border bg-background shadow-lg lg:hidden"
           style={{
             transform: `translateX(${(drawerProgress - 1) * 100}%)`,
             transition: drawerDragging ? 'none' : 'transform 280ms cubic-bezier(0.4,0,0.2,1)',
