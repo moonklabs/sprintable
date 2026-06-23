@@ -46,10 +46,11 @@ def _r_one(tup):
     return r
 
 
-async def _get(path, *, execute_seq, member=MEMBER, org=ORG_A):
+async def _get(path, *, execute_seq, member=MEMBER, org=ORG_A, resolve_raises=None):
     from app.dependencies.auth import get_current_user, get_verified_org_id
     from app.dependencies.database import get_db
     from app.main import app as fastapi_app
+    from app.routers import command_center as mod
 
     session = AsyncMock()
     session.execute = AsyncMock(side_effect=list(execute_seq))
@@ -59,13 +60,18 @@ async def _get(path, *, execute_seq, member=MEMBER, org=ORG_A):
 
     fastapi_app.dependency_overrides[get_db] = override_db
     fastapi_app.dependency_overrides[get_verified_org_id] = lambda: org
-    fastapi_app.dependency_overrides[get_current_user] = lambda: MagicMock(
-        user_id=str(member) if member else "not-a-uuid"
-    )
+    # ⭐auth.user_id 를 일부러 member 와 다른 값(=users.id 모사)으로 둬, 엔드포인트가 raw user_id 가 아니라
+    # canonical resolve_member 로 member.id 를 쓰는지 증명(HIGH1). resolve_member 는 patch.
+    fastapi_app.dependency_overrides[get_current_user] = lambda: MagicMock(user_id=str(uuid.uuid4()))
+    if resolve_raises is not None:
+        resolver = AsyncMock(side_effect=resolve_raises)
+    else:
+        resolver = AsyncMock(return_value=MagicMock(id=member))
     try:
-        async with AsyncClient(transport=ASGITransport(app=fastapi_app), base_url="http://test") as c:
-            resp = await c.get(path)
-        return resp, session
+        with patch.object(mod, "resolve_member", new=resolver):
+            async with AsyncClient(transport=ASGITransport(app=fastapi_app), base_url="http://test") as c:
+                resp = await c.get(path)
+        return resp, session, resolver
     finally:
         fastapi_app.dependency_overrides.clear()
 
@@ -85,8 +91,9 @@ async def test_my_actions_scope_separation_and_items():
     stuck = MagicMock(entity_type="story", entity_id=uuid.uuid4(), effective_gate_type="merge",
                       started_at=datetime(2026, 6, 23, tzinfo=timezone.utc), failure_message="SECRET raw error")
     # 쿼리 순서: approvals → reviews → stuck.
-    resp, _ = await _get("/api/v2/command-center/my-actions",
-                         execute_seq=[_r_scalars([approval]), _r_scalars([review]), _r_scalars([stuck])])
+    resp, session, resolver = await _get(
+        "/api/v2/command-center/my-actions",
+        execute_seq=[_r_scalars([approval]), _r_scalars([review]), _r_scalars([stuck])])
     assert resp.status_code == 200
     d = _data(resp)
     assert d["action_queue"]["scope"] == "member"      # ⭐member-private.
@@ -100,18 +107,45 @@ async def test_my_actions_scope_separation_and_items():
 
 
 @pytest.mark.anyio
+async def test_my_actions_uses_canonical_member_resolver():
+    """HIGH1: auth.user_id(=users.id 모사·member 와 다름) 직사용 금지 → resolve_member 로 member.id 해소."""
+    resp, session, resolver = await _get(
+        "/api/v2/command-center/my-actions",
+        execute_seq=[_r_scalars([]), _r_scalars([]), _r_scalars([])])
+    assert resp.status_code == 200
+    resolver.assert_awaited_once()  # canonical resolver 사용(raw auth.user_id 아님).
+
+
+@pytest.mark.anyio
+async def test_my_actions_agent_stuck_filters_to_agent():
+    """HIGH2: agent_stuck 쿼리가 resolved_member_type=='agent' 로 필터(human run 미포함)."""
+    resp, session, resolver = await _get(
+        "/api/v2/command-center/my-actions",
+        execute_seq=[_r_scalars([]), _r_scalars([]), _r_scalars([])])
+    assert resp.status_code == 200
+    # 3번째 execute = agent_stuck 쿼리. 컴파일된 SQL 에 agent 필터(resolved_member_type)가 박혀야.
+    stuck_stmt = str(session.execute.await_args_list[2].args[0])
+    assert "resolved_member_type" in stuck_stmt
+
+
+@pytest.mark.anyio
 async def test_my_actions_clear_state():
-    resp, _ = await _get("/api/v2/command-center/my-actions",
-                         execute_seq=[_r_scalars([]), _r_scalars([]), _r_scalars([])])
+    resp, session, resolver = await _get(
+        "/api/v2/command-center/my-actions",
+        execute_seq=[_r_scalars([]), _r_scalars([]), _r_scalars([])])
     assert resp.status_code == 200
     assert _data(resp)["is_clear"] is True
 
 
 @pytest.mark.anyio
-async def test_my_actions_invalid_member_400():
-    resp, session = await _get("/api/v2/command-center/my-actions", execute_seq=[], member=None)
+async def test_my_actions_resolver_failure_propagates():
+    """member resolve 실패(미존재 등) → resolve_member 가 401/403/400 raise → 큐 쿼리 0."""
+    from fastapi import HTTPException
+    resp, session, resolver = await _get(
+        "/api/v2/command-center/my-actions", execute_seq=[],
+        resolve_raises=HTTPException(status_code=400, detail="member not found"))
     assert resp.status_code == 400
-    session.execute.assert_not_awaited()  # member resolve 실패 → 쿼리 0.
+    session.execute.assert_not_awaited()  # resolve 실패 → action_queue 쿼리 0.
 
 
 # ── /overview ─────────────────────────────────────────────────────────────────
@@ -120,7 +154,7 @@ async def test_overview_real_and_pending_data():
     epic_id = uuid.uuid4()
     epic = MagicMock(id=epic_id, title="Auth epic", status="active")
     # 순서: total_agents(scalar) → epic story group(all) → epics(scalars) → hypothesis(one) → events(scalars).
-    resp, _ = await _get(
+    resp, session, resolver = await _get(
         "/api/v2/command-center/overview",
         execute_seq=[
             _r_scalar(4),                       # total_agents

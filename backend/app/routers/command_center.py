@@ -25,6 +25,7 @@ from app.models.hypothesis import Hypothesis
 from app.models.member import Member
 from app.models.pm import Epic, Story
 from app.models.workflow_line import WorkflowLineStepApproval, WorkflowLineStepRun
+from app.services.member_resolver import resolve_member
 
 router = APIRouter(prefix="/api/v2/command-center", tags=["command-center"])
 
@@ -44,10 +45,10 @@ async def my_actions(
     session: AsyncSession = Depends(get_db),
 ) -> JSONResponse:
     """① 지금 내 할 일. `action_queue`=caller member-private·`attention`=org 자동 이상감지(scope 분리)."""
-    try:
-        member_id = uuid.UUID(auth.user_id)
-    except (ValueError, TypeError):
-        return JSONResponse(status_code=400, content={"error": "invalid_member"})
+    # ⭐caller member_id 는 **canonical resolver** 로 서버 resolve(API키=team_member·JWT human=org_member).
+    # auth.user_id 직사용 금지 — human JWT 는 users.id 라 approver_member_id/assignee_id(member계열)와 불일치.
+    member = await resolve_member(auth, org_id, session)
+    member_id = member.id
 
     queue: list[dict] = []
     # 게이트 승인 대기 = 내가 approver 인 pending blocking approval(member-private·서버 resolve member_id).
@@ -104,6 +105,9 @@ async def my_actions(
                 WorkflowLineStepRun.org_id == org_id,
                 WorkflowLineStepRun.status == "pending",
                 WorkflowLineStepRun.started_at < threshold,
+                # ⭐agent run 만(HIGH2): human approval/handoff 의 오래 pending 은 'agent_stuck' 아님 —
+                # 필터 없으면 타 멤버 대기가 org attention 으로 우회 노출(혼합-scope 경계 흐려짐).
+                WorkflowLineStepRun.resolved_member_type == "agent",
             )
             .order_by(WorkflowLineStepRun.started_at.asc())
             .limit(20)
