@@ -56,7 +56,7 @@ async def lifespan(app: FastAPI):
             await engine.dispose()
 
 
-from app.routers import account, activity_logs, activity_stream, agent_deployments, agent_gateway, agent_inbox, agent_message_policy, agent_personas, agent_routing_rules, agent_runs, agent_sessions, agents, analytics, api_keys, gate_config, gate_metrics, attachments, audit_logs, auth, bridge, channel, conversations, cron, current_project, dashboard, dependencies, dispatch, docs, entities, epics, event_notifications, events, exclusion, file_locks, gates, github_integration, health, hitl, hitl_config, hypotheses, integrations, invite_accept, labels, mcp, me, meetings, members, merge_gate, mockups, notification_preferences, notifications, open_api_keys, org_invites, org_members, organizations, oss, participation, plan_features, policy_documents, presence, project_access, project_settings, projects, public_docs, retros, rewards, sprints, standups, stories, subscription, tasks, team_members, team_presence, trust_scores, verdict_capture, verdicts, webhooks, workflow_executions, workflow_line_config, workflow_recipes, workflow_report, workflow_templates, workflow_trigger, workflow_trigger_types, workflow_versions, ws_chat
+from app.routers import account, activity_logs, activity_stream, agent_deployments, agent_gateway, agent_inbox, agent_message_policy, agent_personas, agent_routing_rules, agent_runs, agent_sessions, agents, analytics, api_keys, gate_config, gate_metrics, attachments, audit_logs, auth, bridge, channel, command_center, conversations, cron, current_project, dashboard, dependencies, dispatch, docs, entities, epics, event_notifications, events, exclusion, file_locks, gates, github_integration, health, hitl, hitl_config, hypotheses, integrations, invite_accept, labels, mcp, me, meetings, members, merge_gate, mockups, notification_preferences, notifications, open_api_keys, org_invites, org_members, organizations, oss, participation, plan_features, policy_documents, presence, project_access, project_settings, projects, public_docs, retros, rewards, sprints, standups, stories, subscription, tasks, team_members, team_presence, trust_scores, verdict_capture, verdicts, webhooks, workflow_executions, workflow_line_config, workflow_recipes, workflow_report, workflow_templates, workflow_trigger, workflow_trigger_types, workflow_versions, ws_chat
 
 app = FastAPI(
     title="Sprintable API v2",
@@ -185,6 +185,7 @@ app.include_router(notifications.router)
 app.include_router(attachments.router)
 app.include_router(notification_preferences.router)
 app.include_router(analytics.router)
+app.include_router(command_center.router)
 app.include_router(rewards.router)
 app.include_router(audit_logs.router)
 app.include_router(dashboard.router)
