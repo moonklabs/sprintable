@@ -118,6 +118,8 @@ async def my_actions(
                 ItemDependency.org_id == org_id,
                 ItemDependency.dep_type == "blocks",
                 ItemDependency.item_type == "story",
+                _Blocker.org_id == org_id,                # defense-in-depth: 조인 story 도 org-scope.
+                _Blocked.org_id == org_id,
                 _Blocker.assignee_id == member_id,        # 막은 쪽이 내 담당.
                 _Blocker.deleted_at.is_(None),
                 _Blocked.status.not_in(_OPEN_EXCLUDED_STATUSES),  # 막힌 쪽이 아직 open.
@@ -189,6 +191,7 @@ async def my_actions(
                 ItemDependency.dep_type == "blocks",
                 ItemDependency.item_type == "story",
                 ItemDependency.created_at < now - timedelta(days=_BLOCKER_UNANSWERED_DAYS),
+                _BlockedU.org_id == org_id,               # defense-in-depth: 조인 story 도 org-scope.
                 _BlockedU.status.not_in(_OPEN_EXCLUDED_STATUSES),
                 _BlockedU.deleted_at.is_(None),
             )
@@ -301,7 +304,8 @@ async def overview(
         await session.execute(
             select(Member.type, func.count(Story.id))
             .select_from(Story)
-            .join(Member, Member.id == Story.assignee_id, isouter=True)
+            # outer join + ON 에 org_id — 타 org member 매칭 차단(cross-org → unassigned 으로 떨어짐).
+            .join(Member, (Member.id == Story.assignee_id) & (Member.org_id == org_id), isouter=True)
             .where(
                 Story.org_id == org_id, Story.status == "done",
                 Story.deleted_at.is_(None), Story.is_excluded.is_(False),
@@ -375,6 +379,7 @@ async def overview(
                 ItemDependency.org_id == org_id,
                 ItemDependency.dep_type == "blocks",
                 ItemDependency.item_type == "story",
+                _BlockedR.org_id == org_id,               # defense-in-depth: 조인 story 도 org-scope.
                 _BlockedR.status.not_in(_OPEN_EXCLUDED_STATUSES),
                 _BlockedR.deleted_at.is_(None),
             )
