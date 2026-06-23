@@ -262,16 +262,7 @@ export function DocEditor({
     if (url) editor.chain().focus().setLink({ href: url }).run();
   }, [editor]);
 
-  const addImage = useCallback(() => {
-    if (!editor) return;
-    const url = window.prompt('Image URL:');
-    if (url) editor.chain().focus().setImage({ src: url }).run();
-  }, [editor]);
-
-  const insertTable = useCallback(() => {
-    if (!editor) return;
-    editor.chain().focus().insertTable({ rows: 3, cols: 3, withHeaderRow: true }).run();
-  }, [editor]);
+  // addImage/insertTable: 데스크 영구 툴바 제거로 dead code화 — 이미지/표는 slash command(/)으로 도달(기능 보존).
 
   const titleRef = useRef<HTMLTextAreaElement>(null);
 
@@ -286,16 +277,13 @@ export function DocEditor({
 
   return (
     <div className="flex h-full flex-col overflow-hidden rounded-xl border border-border bg-card max-md:h-[100dvh]">
-      {/* Breadcrumb (위치: title 위) */}
-      {breadcrumb && (
-        <div className="flex-shrink-0 px-6 pt-3">
-          {breadcrumb}
-        </div>
-      )}
-      {/* Inline title (Notion style) */}
-      {title !== undefined && (
-        <div className="flex flex-shrink-0 items-center justify-between gap-2 px-6 pb-2 pt-2">
-          {/* §3-2: 본문 hero 타이틀(36px) → 슬림 헤더 타이틀(18px·font-bold). 이중 헤더 해소·콘텐츠 공간 확보. */}
+      {/* 수직 밀도 재설계: 12+ 밴드 → 슬림 sticky 헤더 1줄 통합(breadcrumb·제목·메타·url·탭·TOC·액션·
+          자동저장·저장). 영구 툴바·별도 저장바·중복 헤더 밴드 제거(기능 위치만 이동·제거 0). content dominant(~74%).
+          포맷=BubbleMenu(선택)·slash(/)·단축키·모바일 하단 툴바로 도달. */}
+      <header className="sticky top-0 z-10 flex flex-shrink-0 flex-wrap items-center gap-x-2 gap-y-1 border-b border-border bg-card px-3 py-1.5">
+        {breadcrumb ? <div className="flex shrink-0 items-center">{breadcrumb}</div> : null}
+        {title !== undefined ? (
+          /* 인라인 제목 1줄(editable textarea·whitespace-nowrap·flex-1 min-w-0·편집 기능 보존) */
           <textarea
             ref={titleRef}
             value={title}
@@ -306,127 +294,69 @@ export function DocEditor({
             placeholder={titlePlaceholder ?? 'Untitled'}
             autoFocus={titleAutoFocus}
             rows={1}
-            className="w-full resize-none overflow-hidden bg-transparent text-lg font-bold leading-snug outline-none placeholder:text-muted-foreground/40"
+            className="min-w-[7rem] flex-1 resize-none overflow-hidden whitespace-nowrap bg-transparent text-lg font-bold leading-snug outline-none placeholder:text-muted-foreground/40"
           />
-          {actions && (
-            <div className="flex flex-shrink-0 items-center gap-1 pt-1">
-              {actions}
-            </div>
-          )}
-        </div>
-      )}
-
-      {/* §3-2: 슬림 메타 서브라인(수정 이력 N · 시각). 제거한 chrome 자리를 1줄로 대체·새 밴드 X·배지 X(DocGateSection SSOT). */}
-      {metaSlot && (
-        <div className="flex-shrink-0 px-6 pb-1 text-xs text-muted-foreground">{metaSlot}</div>
-      )}
-
-      {/* Inline URL chip (under title) */}
-      {urlSlot && (
-        <div className="flex-shrink-0 px-6 pb-2">
-          {urlSlot}
-        </div>
-      )}
-
-      {/* Tab bar + toolbar */}
-      <div className="flex flex-shrink-0 flex-wrap items-center justify-between gap-2 border-b border-border/60 px-3 py-2">
-        {/* View mode tabs */}
-        <div className="inline-flex rounded-lg border border-border bg-muted/30 p-0.5">
-          {(['preview', 'markdown'] as const).map((mode) => (
-            <button
-              key={mode}
-              type="button"
-              onClick={() => setViewMode(mode)}
-              className={`rounded-md px-3 py-1 text-xs font-medium transition-colors ${
-                viewMode === mode
-                  ? 'bg-card text-foreground'
-                  : 'text-muted-foreground hover:text-foreground'
-              }`}
-            >
-              {mode === 'preview' ? labels.preview : labels.markdown}
-            </button>
-          ))}
-        </div>
-
-        {/* Toolbar — only in preview mode, desktop only (mobile uses sticky bottom toolbar) */}
-        {viewMode === 'preview' && editor ? (
-          <div className="hidden md:flex flex-wrap items-center gap-1.5">
-            <ToolbarButton
-              active={false}
-              disabled={!editor.can().undo()}
-              ariaLabel={labels.undo}
-              onClick={() => editor.chain().focus().undo().run()}
-            >
-              <Undo2 className="size-3.5" />
-            </ToolbarButton>
-            <ToolbarButton
-              active={false}
-              disabled={!editor.can().redo()}
-              ariaLabel={labels.redo}
-              onClick={() => editor.chain().focus().redo().run()}
-            >
-              <Redo2 className="size-3.5" />
-            </ToolbarButton>
-            <Sep />
-            <ToolbarButton
-              active={editor.isActive('heading', { level: 1 })}
-              onClick={() => editor.chain().focus().toggleHeading({ level: 1 }).run()}
-            >
-              {labels.h1}
-            </ToolbarButton>
-            <ToolbarButton
-              active={editor.isActive('heading', { level: 2 })}
-              onClick={() => editor.chain().focus().toggleHeading({ level: 2 }).run()}
-            >
-              {labels.h2}
-            </ToolbarButton>
-            <Sep />
-            <ToolbarButton
-              active={editor.isActive('bold')}
-              onClick={() => editor.chain().focus().toggleBold().run()}
-            >
-              {labels.bold}
-            </ToolbarButton>
-            <ToolbarButton
-              active={editor.isActive('italic')}
-              onClick={() => editor.chain().focus().toggleItalic().run()}
-            >
-              {labels.italic}
-            </ToolbarButton>
-            <Sep />
-            <ToolbarButton
-              active={editor.isActive('bulletList')}
-              onClick={() => editor.chain().focus().toggleBulletList().run()}
-            >
-              {labels.bullet}
-            </ToolbarButton>
-            <ToolbarButton
-              active={editor.isActive('blockquote')}
-              onClick={() => editor.chain().focus().toggleBlockquote().run()}
-            >
-              {labels.quote}
-            </ToolbarButton>
-            <ToolbarButton
-              active={editor.isActive('codeBlock')}
-              onClick={() => editor.chain().focus().toggleCodeBlock().run()}
-            >
-              {labels.code}
-            </ToolbarButton>
-            <Sep />
-            <ToolbarButton active={false} onClick={addLink}>
-              {labels.link}
-            </ToolbarButton>
-            <ToolbarButton active={false} onClick={addImage}>
-              🖼
-            </ToolbarButton>
-            <ToolbarButton active={false} onClick={insertTable}>
-              ⊞
-            </ToolbarButton>
-          </div>
         ) : null}
-        {/* TOC — always in toolbar when ≥3 headings */}
-        <DocToc headings={tocHeadings} onHeadingClick={scrollToHeading} />
-      </div>
+        {metaSlot ? <span className="hidden shrink-0 text-xs text-muted-foreground sm:inline-flex">{metaSlot}</span> : null}
+        {urlSlot ? <div className="hidden shrink-0 lg:block">{urlSlot}</div> : null}
+        <div className="ml-auto flex shrink-0 items-center gap-1.5">
+          {/* compact 탭 세그먼트 */}
+          <div className="inline-flex rounded-lg border border-border bg-muted/30 p-0.5">
+            {(['preview', 'markdown'] as const).map((mode) => (
+              <button
+                key={mode}
+                type="button"
+                onClick={() => setViewMode(mode)}
+                className={`rounded-md px-2 py-0.5 text-xs font-medium transition-colors ${
+                  viewMode === mode
+                    ? 'bg-card text-foreground'
+                    : 'text-muted-foreground hover:text-foreground'
+                }`}
+              >
+                {mode === 'preview' ? labels.preview : labels.markdown}
+              </button>
+            ))}
+          </div>
+          {/* TOC — ≥3 headings */}
+          <DocToc headings={tocHeadings} onHeadingClick={scrollToHeading} />
+          {/* 자동저장 토글(별도 저장바서 헤더로 이동·라벨=title 속성·compact) */}
+          {onAutosaveToggle ? (
+            <button
+              type="button"
+              role="switch"
+              aria-checked={autosave}
+              onClick={() => onAutosaveToggle(!autosave)}
+              title={labels.autosave}
+              aria-label={labels.autosave}
+              className="flex shrink-0 items-center"
+            >
+              <span
+                className={`relative inline-flex h-[18px] w-[30px] flex-shrink-0 items-center rounded-full transition-colors ${
+                  autosave ? 'bg-success' : 'bg-muted-foreground/30'
+                }`}
+              >
+                <span
+                  className={`inline-block h-3 w-3 transform rounded-full bg-background shadow-sm transition-transform ${
+                    autosave ? 'translate-x-[14px]' : 'translate-x-[3px]'
+                  }`}
+                />
+              </span>
+            </button>
+          ) : null}
+          {/* 저장 버튼(별도 저장바서 헤더로 이동) */}
+          {onSave ? (
+            <button
+              type="button"
+              onClick={() => void onSave()}
+              disabled={!isDirty}
+              className="shrink-0 rounded-lg bg-primary px-3 py-1 text-xs font-semibold text-primary-foreground transition-colors hover:bg-primary/90 disabled:cursor-not-allowed disabled:opacity-40"
+            >
+              {labels.save}
+            </button>
+          ) : null}
+          {actions ? <div className="flex items-center gap-1">{actions}</div> : null}
+        </div>
+      </header>
 
       {/* Sync off-ramp banner (conflict / remote-changed) — below the toolbar, above content */}
       {syncBanner ? <div className="px-3 pt-2">{syncBanner}</div> : null}
@@ -509,42 +439,8 @@ export function DocEditor({
         </div>
       )}
 
-      {/* Save bar — always visible when onSave is provided */}
-      {onSave ? (
-        <div className="flex flex-shrink-0 items-center justify-between border-t border-border/60 bg-muted/20 px-4 py-2.5">
-          {/* Autosave switch */}
-          {onAutosaveToggle ? (
-            <button
-              type="button"
-              role="switch"
-              aria-checked={autosave}
-              onClick={() => onAutosaveToggle(!autosave)}
-              className="flex items-center gap-1.5 text-xs text-muted-foreground transition-colors hover:text-foreground"
-            >
-              <span>{labels.autosave}</span>
-              <span
-                className={`relative inline-flex h-[18px] w-[30px] flex-shrink-0 items-center rounded-full transition-colors ${
-                  autosave ? 'bg-success' : 'bg-muted-foreground/30'
-                }`}
-              >
-                <span
-                  className={`inline-block h-3 w-3 transform rounded-full bg-background shadow-sm transition-transform ${
-                    autosave ? 'translate-x-[14px]' : 'translate-x-[3px]'
-                  }`}
-                />
-              </span>
-            </button>
-          ) : <span />}
-          <button
-            type="button"
-            onClick={() => void onSave()}
-            disabled={!isDirty}
-            className="rounded-lg bg-primary px-3 py-1.5 text-xs font-semibold text-primary-foreground transition-colors hover:bg-primary/90 disabled:cursor-not-allowed disabled:opacity-40"
-          >
-            {labels.save}
-          </button>
-        </div>
-      ) : null}
+      {/* 수직 밀도 재설계: 별도 저장 바 제거 → 자동저장 토글·저장 버튼·저장 상태(InlineSaveIndicator)는
+          슬림 헤더로 이동(기능 보존·content height 회복). */}
 
       {/* Mobile sticky bottom toolbar — appears on editor focus in preview mode */}
       {editor && editable && viewMode === 'preview' && (
