@@ -7,17 +7,58 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.dependencies.auth import AuthContext, get_current_user, get_verified_org_id
 from app.dependencies.database import get_db
+from app.models.pm import Story
 from app.models.standup import StandupEntry, StandupEntryProject, StandupFeedback
 from app.repositories.standup import StandupEntryRepository, StandupFeedbackRepository
 from app.schemas.standup import (
     FeedbackCreate,
     FeedbackResponse,
+    PlanStorySummary,
     StandupEntryResponse,
     StandupSelfUpdate,
     StandupUpsert,
 )
 from app.services.member_resolver import canonicalize_member_id, resolve_member
 from app.services.project_auth import accessible_project_ids_in_org
+
+
+async def _entries_with_plan_stories(
+    entries: list[StandupEntry], session: AsyncSession, org_id: uuid.UUID
+) -> list[StandupEntryResponse]:
+    """a9e67531: 엔트리들의 plan_story_ids 를 **org-scope batch resolve**(N+1 회피) → plan_stories 주입.
+
+    엔트리=org-level planning artifact 라 plan_story 가 active-sprint/board 밖일 수 있어, FE 의 scoped
+    stories 배열로는 미해소(미노출 버그). 여기서 org-scope 로 id+title+status(+priority/project/sprint) 해소해
+    내려준다. ⭐org-scope 강제(`Story.org_id==org_id`)·삭제 제외·타org/미존재 id 는 **조용히 제외**(노출 0)·
+    plan_story_ids **입력 순서 보존**. plan_story_ids 는 하위호환 유지(FE id-only fallback).
+    """
+    all_ids = {sid for e in entries for sid in (e.plan_story_ids or [])}
+    summaries: dict[uuid.UUID, PlanStorySummary] = {}
+    if all_ids:
+        rows = (
+            await session.execute(
+                select(
+                    Story.id, Story.title, Story.status, Story.priority,
+                    Story.project_id, Story.sprint_id,
+                ).where(
+                    Story.id.in_(all_ids),
+                    Story.org_id == org_id,         # ⭐org-scope(anti-IDOR·타org 해소 0).
+                    Story.deleted_at.is_(None),
+                )
+            )
+        ).all()
+        for sid, title, status, priority, pid, spid in rows:
+            summaries[sid] = PlanStorySummary(
+                id=sid, title=title, status=status, priority=priority,
+                project_id=pid, sprint_id=spid,
+            )
+    out: list[StandupEntryResponse] = []
+    for e in entries:
+        resp = StandupEntryResponse.model_validate(e)
+        # 순서 보존 + 미발견(타org/삭제/미존재) 조용히 제외.
+        resp.plan_stories = [summaries[sid] for sid in (e.plan_story_ids or []) if sid in summaries]
+        out.append(resp)
+    return out
 
 router = APIRouter(prefix="/api/v2/standups", tags=["standups"])
 
@@ -67,7 +108,7 @@ async def list_standups(
     if date_filter:
         filters["date"] = date_filter
     entries = await repo.list(**filters)
-    return [StandupEntryResponse.model_validate(e) for e in entries]
+    return await _entries_with_plan_stories(entries, repo.session, repo.org_id)
 
 
 @router.post("", response_model=StandupEntryResponse, status_code=201)
@@ -93,7 +134,7 @@ async def upsert_standup(
     )
     # 1c2be9db: org-level write(project_id 없음) → author 접근 프로젝트로 링크 full overwrite.
     await _sync_org_level_links(repo, session, entry, body.project_id, auth.user_id, org_id)
-    return StandupEntryResponse.model_validate(entry)
+    return (await _entries_with_plan_stories([entry], session, org_id))[0]
 
 
 @router.put("", response_model=StandupEntryResponse)
@@ -127,7 +168,7 @@ async def update_standup(
     )
     # 1c2be9db: org-level self-save(project_id 없음) → author 접근 프로젝트로 링크 full overwrite.
     await _sync_org_level_links(repo, session, entry, body.project_id, auth.user_id, org_id)
-    return StandupEntryResponse.model_validate(entry)
+    return (await _entries_with_plan_stories([entry], session, org_id))[0]
 
 
 @router.get("/history", response_model=list[StandupEntryResponse])
