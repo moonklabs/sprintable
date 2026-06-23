@@ -19,11 +19,15 @@ COPY sprintable_mcp/ sprintable_mcp/
 COPY alembic.ini .
 COPY alembic/ alembic/
 COPY bootstrap.py .
-# 런타임 잡 스크립트만 동봉(scripts/jobs/) — migrate-dev 잡 클론(command override)으로 in-VPC 실행:
-# `python -m scripts.jobs.<name>`(/app 기준·namespace 패키지). 디렉토리 통째 COPY라 신규 잡 스크립트는
-# 자동 포함(개별 COPY 누락 함정 회피·E-DG-REAL P0 backfill 사건). deploy/setup/provision .sh·RUNBOOK 등
-# 비-런타임 스크립트는 scripts/ 루트에 남겨 런타임 이미지서 제외(recon-surface 최소화).
+# 런타임 잡 스크립트 동봉: scripts/jobs/(`python -m scripts.jobs.<name>`·namespace 패키지·신규 잡 자동 포함)
+# + scripts/migrate.sh(표준 sprintable-migrate{,-dev} 잡 command=`/app/scripts/migrate.sh`·env guard+CWD 보정+
+# `exec alembic upgrade head`). ⚠️migrate.sh 는 #1666서 `COPY scripts/`→`scripts/jobs/`로 좁히며 이미지서
+# 누락돼 마이그 잡 exec 실패했음(provision_migrate_job.sh 는 옛 경로 참조=계약 드리프트) — 명시 COPY 로 복원.
+# deploy/setup/provision .sh·RUNBOOK 등 비-런타임은 scripts/ 루트에 남겨 제외 유지(recon-surface 최소).
 COPY scripts/jobs/ scripts/jobs/
+COPY scripts/migrate.sh scripts/migrate.sh
+# git mode 100755 라 COPY 가 +x 보존하나, critical infra 라 명시(belt-and-suspenders·잡 직접 exec).
+RUN chmod +x scripts/migrate.sh
 
 # non-root 사용자 생성 + /app 소유권 변경 (uv .venv 포함)
 RUN useradd --create-home --shell /bin/bash appuser \
