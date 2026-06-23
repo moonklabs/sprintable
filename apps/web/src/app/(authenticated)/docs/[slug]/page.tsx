@@ -134,6 +134,23 @@ export default function DocSlugPage() {
   const [slugLocked, setSlugLocked] = useState(false);
   const [urlDialogOpen, setUrlDialogOpen] = useState(false);
   const [shareDialogOpen, setShareDialogOpen] = useState(false);
+  // §3-2 슬림 헤더 메타: 수정 이력 N(작성자는 created_by/memberMap 부재로 드롭·PO 보수안). DocGateSection도
+  // revision을 fetch하나 헤더 메타용으로 경량 count만 별도 조회(공유 리프트는 S28 refactor라 follow-up).
+  const [revisionCount, setRevisionCount] = useState<number | null>(null);
+  const docId = selectedDoc?.id ?? null;
+  useEffect(() => {
+    if (!docId) { setRevisionCount(null); return; }
+    let alive = true;
+    void fetch(`/api/docs/${docId}/revisions`)
+      .then((r) => (r.ok ? r.json() : null))
+      .catch(() => null)
+      .then((json) => {
+        if (!alive) return;
+        const rows = (json?.data ?? json) as unknown[];
+        setRevisionCount(Array.isArray(rows) ? rows.length : null);
+      });
+    return () => { alive = false; };
+  }, [docId]);
 
   const handleDocSaved = useCallback((doc: DocDetail) => {
     setSelectedDoc(doc);
@@ -409,6 +426,19 @@ export default function DocSlugPage() {
           onTitleChange={handleTitleChange}
           titlePlaceholder={t('titlePlaceholder')}
           titleAutoFocus={isNew || !title}
+          metaSlot={
+            <>
+              {revisionCount != null ? (
+                <>
+                  <span className="tabular-nums">{t('docMetaRevisions', { count: revisionCount })}</span>
+                  {selectedDoc.updated_at ? <span aria-hidden> · </span> : null}
+                </>
+              ) : null}
+              {selectedDoc.updated_at ? (
+                <span className="tabular-nums">{new Date(selectedDoc.updated_at).toLocaleString()}</span>
+              ) : null}
+            </>
+          }
           urlSlot={
             <DocUrlChip
               slug={selectedDoc.slug}

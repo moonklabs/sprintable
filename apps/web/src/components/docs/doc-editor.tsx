@@ -55,6 +55,7 @@ export function DocEditor({
   breadcrumb,
   urlSlot,
   actions,
+  metaSlot,
   syncBanner,
   labels,
 }: {
@@ -79,6 +80,8 @@ export function DocEditor({
   /** Inline URL chip slot, rendered under the title (above the tab bar). */
   urlSlot?: React.ReactNode;
   actions?: React.ReactNode;
+  /** §3-2 단일 슬림 헤더: 제목 아래 muted 메타 서브라인(수정 이력 N · 시각). 배지는 DocGateSection SSOT. */
+  metaSlot?: React.ReactNode;
   /** Sync-state off-ramp banner (conflict / remote-changed), rendered below the toolbar. */
   syncBanner?: React.ReactNode;
   labels: {
@@ -311,6 +314,11 @@ export function DocEditor({
             </div>
           )}
         </div>
+      )}
+
+      {/* §3-2: 슬림 메타 서브라인(수정 이력 N · 시각). 제거한 chrome 자리를 1줄로 대체·새 밴드 X·배지 X(DocGateSection SSOT). */}
+      {metaSlot && (
+        <div className="flex-shrink-0 px-6 pb-1 text-xs text-muted-foreground">{metaSlot}</div>
       )}
 
       {/* Inline URL chip (under title) */}
