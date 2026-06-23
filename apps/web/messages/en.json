@@ -1196,6 +1196,7 @@
     "docGateResubmit": "Request re-review",
     "docGateEdit": "Revise",
     "docGateRevisions": "Revision history",
+    "docMetaRevisions": "{count} revisions",
     "noProject": "No project selected",
     "selectDoc": "Select a document",
     "lastUpdated": "Last updated",

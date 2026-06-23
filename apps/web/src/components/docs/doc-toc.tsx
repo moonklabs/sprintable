@@ -42,8 +42,8 @@ export function DocToc({ headings, onHeadingClick, className }: DocTocProps) {
         onClick={() => setOpen((v) => !v)}
         className={`flex items-center gap-1.5 rounded-lg border px-2.5 py-1 text-xs font-medium transition ${
           open
-            ? 'border-brand/50 bg-brand/10 text-[color:var(--brand-soft)]'
-            : 'border-border/60 bg-card text-foreground hover:border-brand/50 hover:text-[color:var(--brand-soft)]'
+            ? 'border-border bg-muted text-foreground'
+            : 'border-border/60 bg-card text-foreground hover:border-muted-foreground/40 hover:text-foreground'
         }`}
         title="목차"
       >
@@ -52,7 +52,7 @@ export function DocToc({ headings, onHeadingClick, className }: DocTocProps) {
       </button>
 
       {open && (
-        <div className="absolute right-0 top-full z-50 mt-1.5 w-64 overflow-hidden rounded-xl border border-border bg-background shadow-lg">
+        <div className="absolute right-0 top-full z-50 mt-1.5 w-64 overflow-hidden rounded-xl border border-border bg-background">
           <div className="flex items-center justify-between border-b border-border/60 px-3 py-2">
             <span className="text-xs font-semibold text-foreground">목차</span>
             <button

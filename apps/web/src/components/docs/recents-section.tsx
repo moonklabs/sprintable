@@ -54,7 +54,7 @@ export function RecentsSection({ recentSlugs, docs, selectedSlug, onSelect, labe
                     type="button"
                     onClick={() => onSelect(doc.slug)}
                     className={cn(
-                      'flex w-full items-center gap-2 rounded-xl px-2.5 py-1.5 text-left text-[12px] transition-colors',
+                      'flex w-full items-center gap-2 rounded-lg px-2.5 py-1.5 text-left text-xs transition-colors',
                       selectedSlug === doc.slug
                         ? 'bg-primary/10 text-primary'
                         : 'text-foreground/80 hover:bg-muted hover:text-foreground'

@@ -55,6 +55,7 @@ export function DocEditor({
   breadcrumb,
   urlSlot,
   actions,
+  metaSlot,
   syncBanner,
   labels,
 }: {
@@ -79,6 +80,8 @@ export function DocEditor({
   /** Inline URL chip slot, rendered under the title (above the tab bar). */
   urlSlot?: React.ReactNode;
   actions?: React.ReactNode;
+  /** §3-2 단일 슬림 헤더: 제목 아래 muted 메타 서브라인(수정 이력 N · 시각). 배지는 DocGateSection SSOT. */
+  metaSlot?: React.ReactNode;
   /** Sync-state off-ramp banner (conflict / remote-changed), rendered below the toolbar. */
   syncBanner?: React.ReactNode;
   labels: {
@@ -282,7 +285,7 @@ export function DocEditor({
   }, [title, autoResizeTitle]);
 
   return (
-    <div className="flex h-full flex-col overflow-hidden rounded-2xl border border-border/60 bg-background max-md:h-[100dvh]">
+    <div className="flex h-full flex-col overflow-hidden rounded-xl border border-border bg-card max-md:h-[100dvh]">
       {/* Breadcrumb (위치: title 위) */}
       {breadcrumb && (
         <div className="flex-shrink-0 px-6 pt-4">
@@ -291,7 +294,8 @@ export function DocEditor({
       )}
       {/* Inline title (Notion style) */}
       {title !== undefined && (
-        <div className={`flex flex-shrink-0 items-start justify-between gap-2 px-6 pb-2 ${breadcrumb ? 'pt-4' : 'pt-8'}`}>
+        <div className={`flex flex-shrink-0 items-center justify-between gap-2 px-6 pb-2 ${breadcrumb ? 'pt-2' : 'pt-3'}`}>
+          {/* §3-2: 본문 hero 타이틀(36px) → 슬림 헤더 타이틀(18px·font-bold). 이중 헤더 해소·콘텐츠 공간 확보. */}
           <textarea
             ref={titleRef}
             value={title}
@@ -302,7 +306,7 @@ export function DocEditor({
             placeholder={titlePlaceholder ?? 'Untitled'}
             autoFocus={titleAutoFocus}
             rows={1}
-            className="w-full resize-none overflow-hidden bg-transparent text-4xl max-md:text-2xl font-bold leading-tight outline-none placeholder:text-muted-foreground/40"
+            className="w-full resize-none overflow-hidden bg-transparent text-lg font-bold leading-snug outline-none placeholder:text-muted-foreground/40"
           />
           {actions && (
             <div className="flex flex-shrink-0 items-center gap-1 pt-1">
@@ -310,6 +314,11 @@ export function DocEditor({
             </div>
           )}
         </div>
+      )}
+
+      {/* §3-2: 슬림 메타 서브라인(수정 이력 N · 시각). 제거한 chrome 자리를 1줄로 대체·새 밴드 X·배지 X(DocGateSection SSOT). */}
+      {metaSlot && (
+        <div className="flex-shrink-0 px-6 pb-1 text-xs text-muted-foreground">{metaSlot}</div>
       )}
 
       {/* Inline URL chip (under title) */}
@@ -330,7 +339,7 @@ export function DocEditor({
               onClick={() => setViewMode(mode)}
               className={`rounded-md px-3 py-1 text-xs font-medium transition-colors ${
                 viewMode === mode
-                  ? 'bg-background text-foreground shadow-sm'
+                  ? 'bg-card text-foreground'
                   : 'text-muted-foreground hover:text-foreground'
               }`}
             >
@@ -428,7 +437,7 @@ export function DocEditor({
         <BubbleMenu
           editor={editor}
           shouldShow={() => !isMobileDevice()}
-          className="flex items-center gap-0.5 rounded-lg border border-border/60 bg-background p-1 shadow-lg"
+          className="flex items-center gap-0.5 rounded-lg border border-border bg-background p-1"
         >
           <BubbleButton
             active={editor.isActive('bold')}

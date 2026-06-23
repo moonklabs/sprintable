@@ -48,14 +48,14 @@ function MathBlockView({ node, selected }: ReactNodeViewProps) {
       <div className="rounded-xl border border-border bg-muted/10">
         {/* Header */}
         <div className="flex items-center justify-between px-3 py-2" contentEditable={false}>
-          <span className="text-[11px] font-medium uppercase tracking-[0.12em] text-muted-foreground">math</span>
+          <span className="text-[11px] font-medium text-muted-foreground">math</span>
           {selected && (
             <span className="text-[11px] text-muted-foreground">LaTeX 편집 중</span>
           )}
         </div>
 
         {/* LaTeX editor — visible when selected */}
-        <pre className={`border-t border-border/50 p-4 text-[13px] leading-6 text-foreground font-mono ${showEdit ? '' : 'hidden'}`}>
+        <pre className={`border-t border-border/50 p-4 text-xs leading-6 text-foreground font-mono ${showEdit ? '' : 'hidden'}`}>
           <NodeViewContent />
         </pre>
 
@@ -116,7 +116,7 @@ function MathInlineView({ node }: ReactNodeViewProps) {
   }
 
   return (
-    <NodeViewWrapper as="span" className="rounded bg-muted/40 px-1 font-mono text-[0.9em]">
+    <NodeViewWrapper as="span" className="rounded bg-muted/40 px-1 font-mono text-sm">
       <NodeViewContent />
     </NodeViewWrapper>
   );
